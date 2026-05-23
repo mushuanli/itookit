@@ -49,28 +49,28 @@ import type { FSEventEmitter } from '../core/events';
  * 事务内的事件在 commit 后合并触发；任一操作失败则全部回滚。
  */
 export interface IFSDriverTransaction {
-    getNode(idOrPath: string): Promise<FSNode | null>;
-    readContent(idOrPath: string, options?: ReadOptions): Promise<FileContent>;
+    getNode(path: string): Promise<FSNode | null>;
+    readContent(path: string, options?: ReadOptions): Promise<FileContent>;
     createFile(options: CreateFileOptions): Promise<FSNode>;
     createDirectory(options: CreateDirectoryOptions): Promise<FSNode>;
     writeContent(
-        idOrPath: string,
+        path: string,
         content: FileContent,
         options?: WriteOptions,
     ): Promise<void>;
     rename(
-        idOrPath: string,
+        path: string,
         newName: string,
         options?: RenameOptions,
     ): Promise<void>;
     move(
-        idsOrPaths: string[],
-        targetParentIdOrPath: string | null,
+        paths: string[],
+        targetParentPath: string | null,
         options?: MoveOptions,
     ): Promise<void>;
-    delete(idsOrPaths: string[], options?: DeleteOptions): Promise<void>;
+    delete(paths: string[], options?: DeleteOptions): Promise<void>;
     updateMetadata(
-        idOrPath: string,
+        path: string,
         metadata: Record<string, unknown>,
     ): Promise<void>;
 }
@@ -90,40 +90,40 @@ export interface IFSDriver extends FSEventEmitter {
 
     /**
      * 获取节点详情
-     * @param idOrPath 以 '/' 开头视为路径，否则视为 ID
+     * @param path 节点路径
      */
-    getNode(idOrPath: string): Promise<FSNode | null>;
+    getNode(path: string): Promise<FSNode | null>;
 
     /** 获取直接子节点 */
     getChildren(
-        idOrPath: string,
+        path: string,
         options?: ListOptions & { fields?: 'full' },
     ): Promise<FSNode[]>;
     getChildren(
-        idOrPath: string,
+        path: string,
         options: ListOptions & { fields: 'entry' },
     ): Promise<DirEntry[]>;
     getChildren(
-        idOrPath: string,
+        path: string,
         options?: ListOptions,
     ): Promise<FSNode[] | DirEntry[]>;
 
     /** 读取文件内容 */
     readContent(
-        idOrPath: string,
+        path: string,
         options: ReadOptions & { encoding: 'utf-8' },
     ): Promise<string>;
     readContent(
-        idOrPath: string,
+        path: string,
         options: ReadOptions & { encoding: 'binary' },
     ): Promise<ArrayBuffer>;
-    readContent(idOrPath: string, options?: ReadOptions): Promise<FileContent>;
+    readContent(path: string, options?: ReadOptions): Promise<FileContent>;
 
-    /** 解析路径为节点 ID */
+    /** 解析路径，确认节点存在 @returns 存在返回 path，不存在返回 null */
     resolvePath(path: string): Promise<string | null>;
 
-    /** 检查路径/ID 是否存在 */
-    exists(idOrPath: string): Promise<boolean>;
+    /** 检查路径是否存在 */
+    exists(path: string): Promise<boolean>;
 
     /** 遍历节点树 */
     walkTree?(callback: TreeWalkCallback, options?: TreeWalkOptions): Promise<number>;
@@ -158,7 +158,7 @@ export interface IFSDriver extends FSEventEmitter {
      * @emits node:updated
      */
     writeContent(
-        idOrPath: string,
+        path: string,
         content: FileContent,
         options?: WriteOptions,
     ): Promise<void>;
@@ -167,14 +167,14 @@ export interface IFSDriver extends FSEventEmitter {
      * 追加内容
      * @emits node:updated
      */
-    appendContent(idOrPath: string, content: FileContent): Promise<void>;
+    appendContent(path: string, content: FileContent): Promise<void>;
 
     /**
      * 重命名（assetdir 默认跟随）
      * @emits node:renamed
      */
     rename(
-        idOrPath: string,
+        path: string,
         newName: string,
         options?: RenameOptions,
     ): Promise<void>;
@@ -184,8 +184,8 @@ export interface IFSDriver extends FSEventEmitter {
      * @emits node:moved
      */
     move(
-        idsOrPaths: string[],
-        targetParentIdOrPath: string | null,
+        paths: string[],
+        targetParentPath: string | null,
         options?: MoveOptions,
     ): Promise<void>;
 
@@ -193,14 +193,14 @@ export interface IFSDriver extends FSEventEmitter {
      * 删除节点（级联删除子节点和 assetdir）
      * @emits node:deleted
      */
-    delete(idsOrPaths: string[], options?: DeleteOptions): Promise<void>;
+    delete(paths: string[], options?: DeleteOptions): Promise<void>;
 
     /**
      * 更新元数据（合并模式）
      * @emits node:updated
      */
     updateMetadata(
-        idOrPath: string,
+        path: string,
         metadata: Record<string, unknown>,
     ): Promise<void>;
 
@@ -208,8 +208,8 @@ export interface IFSDriver extends FSEventEmitter {
 
     /** 深度复制节点（含子节点和 assetdir） */
     copy?(
-        sourceIdOrPath: string,
-        targetParentIdOrPath: string | null,
+        sourcePath: string,
+        targetParentPath: string | null,
         newName?: string,
         options?: CopyOptions,
     ): Promise<FSNode>;
@@ -220,7 +220,7 @@ export interface IFSDriver extends FSEventEmitter {
     symlink(linkPath: string, targetPath: string): Promise<FSNode>;
 
     /** 读取符号链接目标（不解析，返回原始路径） */
-    readlink(idOrPath: string): Promise<string>;
+    readlink(path: string): Promise<string>;
 
     /** 创建硬链接 */
     hardlink(linkPath: string, targetPath: string): Promise<FSNode>;
@@ -233,8 +233,8 @@ export interface IFSDriver extends FSEventEmitter {
      *
      * @example
      * await driver.transaction(async (tx) => {
-     *   const f = await tx.createFile({ name: 'a.md', parentIdOrPath: null });
-     *   await tx.writeContent(f.id, 'hello');
+     *   const f = await tx.createFile({ name: 'a.md', parentPath: null });
+     *   await tx.writeContent(f.path, 'hello');
      * });
      */
     transaction<T>(fn: (tx: IFSDriverTransaction) => Promise<T>): Promise<T>;

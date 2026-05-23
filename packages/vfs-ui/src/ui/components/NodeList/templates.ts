@@ -12,7 +12,7 @@ export const createItemInputHTML = (creating: {
   return `
     <div class="vfs-node-list__item-creator" data-type="${creating.type}">
       <span class="vfs-node-list__item-creator-icon">${isDir ? '📁' : '📄'}</span>
-      <input type="text" class="vfs-node-list__item-creator-input" placeholder="${isDir ? '新目录名称...' : '新文件名称...'}" data-action="create-input" />
+      <input type="text" class="vfs-node-list__item-creator-input" placeholder="${isDir ? '目录名 或 路径/目录名...' : '文件名 或 路径/文件名...'}" data-action="create-input" />
     </div>`;
 };
 

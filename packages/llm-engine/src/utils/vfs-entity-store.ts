@@ -58,7 +58,7 @@ export class VFSEntityStore<T extends Identifiable> {
         } else {
             await this.engine.driver.createFile({
                 name: filename,
-                parentIdOrPath: this.config.dir,
+                parentPath: this.config.dir,
                 content,
                 metadata,
             });

@@ -126,8 +126,8 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     for (const node of allFiles) {
       if (!this.isChatFile(node.name)) continue;
       try {
-        const manifest = await this.getManifest(node.id); // also populates cache
-        if (manifest.id === sessionId) return node.id;
+        const manifest = await this.getManifest(node.path); // also populates cache
+        if (manifest.id === sessionId) return node.path;
       } catch { continue; }
     }
     return null;
@@ -156,7 +156,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
         result.push(node);
       } else if (node.type === 'directory') {
         try {
-          const children = await this.engine.driver.getChildren(node.id) as FSNode[];
+          const children = await this.engine.driver.getChildren(node.path) as FSNode[];
           result.push(...await this.collectAllFileNodes(children));
         } catch { /* ignore */ }
       }
@@ -366,9 +366,9 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   }
 
   private async isSessionStructureIntact(chatFileId: string, manifest: ChatManifest): Promise<boolean> {
-    const assetDirId = await this.engine.meta.assets.getAssetDirId(chatFileId);
-    console.log(`[isSessionStructureIntact] chatFileId=${chatFileId} assetDirId=${assetDirId}`);
-    if (!assetDirId) return false;
+    const assetDirPath = await this.engine.meta.assets.getAssetDirPath(chatFileId);
+    console.log(`[isSessionStructureIntact] chatFileId=${chatFileId} assetDirPath=${assetDirPath}`);
+    if (!assetDirPath) return false;
 
     const assetDir = await this.getAssetDirPath(chatFileId);
     const rootPath = `${assetDir}/${manifest.root_id}.chat`;
@@ -689,13 +689,13 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   ): Promise<string> {
     const fileNode = await this.engine.driver.createFile({
       name: `${title}.chat`,
-      parentIdOrPath: null,
+      parentPath: null,
       content: '{}',
       metadata: { title, icon: '💬' },
     });
 
-    const { sessionId } = await this.createSessionStructure(fileNode.id, title, systemPrompt);
-    await this.engine.driver.updateMetadata(fileNode.id, { title, icon: '💬', sessionId });
+    const { sessionId } = await this.createSessionStructure(fileNode.path, title, systemPrompt);
+    await this.engine.driver.updateMetadata(fileNode.path, { title, icon: '💬', sessionId });
 
     this.notify();
     return sessionId;
@@ -706,7 +706,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     title: string,
     systemPrompt: string = 'You are a helpful assistant.'
   ): Promise<string> {
-    console.log(`[initializeExistingFile] nodeId=${nodeId} title="${title}"`);
+    console.log(`[initializeExistingFile] path=${nodeId} title="${title}"`);
     const manifest = await this.tryReadValidManifest(nodeId);
 
     if (!manifest) {
@@ -755,6 +755,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   }
 
   private async rebuildSessionStructure(
+
     nodeId: string,
     oldManifest: ChatManifest,
     systemPrompt: string
@@ -762,17 +763,16 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     // Safety guard: check whether the asset dir has any nodes before deleting.
     // An asset dir with nodes means user data exists — do NOT auto-delete.
     // Only wipe when the asset dir is genuinely empty (no node files at all).
-    const assetDirId = await this.engine.meta.assets.getAssetDirId(nodeId);
-    if (assetDirId) {
-      const assetDirId2 = await this.engine.meta.assets.getAssetDirId(nodeId);
-      const assets = assetDirId2 ? await this.engine.driver.getChildren(assetDirId2) as FSNode[] : [];
+    const assetDirPath = await this.engine.meta.assets.getAssetDirPath(nodeId);
+    if (assetDirPath) {
+      const assets = await this.engine.driver.getChildren(assetDirPath) as FSNode[];
       if (assets.length > 0) {
         console.warn(`[rebuildSessionStructure] nodeId=${nodeId} → asset dir has ${assets.length} nodes, refusing to delete user data`);
         throw new Error(`Session structure is broken but asset dir contains ${assets.length} node(s) — cannot auto-rebuild without data loss (nodeId=${nodeId}). Manual recovery required.`);
       }
       // Asset dir exists but is empty — safe to remove and recreate
       try {
-        await this.engine.driver.delete([assetDirId]);
+        await this.engine.driver.delete([assetDirPath]);
       } catch {
         // ignore
       }
@@ -1507,30 +1507,30 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   // IFSEngine file operations
   // ============================================================
 
-  async createDirectory(name: string, parentId: string | null): Promise<FSNode> {
-    return this.engine.driver.createDirectory({ name, parentIdOrPath: parentId });
+  async createDirectory(name: string, parentPath: string | null): Promise<FSNode> {
+    return this.engine.driver.createDirectory({ name, parentPath });
   }
 
   async createFile(
     name: string,
-    parentId: string | null,
+    parentPath: string | null,
     _content?: string | ArrayBuffer
   ): Promise<FSNode> {
     const baseName = (name || 'New Chat').replace(/\.chat$/i, '');
-    const availableName = await this.findAvailableFileName(baseName, parentId);
+    const availableName = await this.findAvailableFileName(baseName, parentPath);
 
     // Create .chat file first, then build session structure
     const node = await this.engine.driver.createFile({
       name: `${availableName}.chat`,
-      parentIdOrPath: parentId,
+      parentPath,
       content: '{}',
       metadata: { title: availableName, icon: '💬' },
     });
 
     const { sessionId } = await this.createSessionStructure(
-      node.id, availableName, 'You are a helpful assistant.'
+      node.path, availableName, 'You are a helpful assistant.'
     );
-    await this.engine.driver.updateMetadata(node.id, { title: availableName, icon: '💬', sessionId });
+    await this.engine.driver.updateMetadata(node.path, { title: availableName, icon: '💬', sessionId });
 
     this.notify();
     return node;
@@ -1538,14 +1538,14 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
 
   private async findAvailableFileName(
     baseName: string,
-    parentId: string | null
+    parentPath: string | null
   ): Promise<string> {
     const existingNames = new Set<string>();
 
     try {
-      const children = parentId
-        ? await this.engine.driver.getChildren(parentId)
-        : (await this.engine.driver.getChildren('/')).filter(n => !n.parentId);
+      const children = parentPath
+        ? await this.engine.driver.getChildren(parentPath)
+        : (await this.engine.driver.getChildren('/')).filter(n => !n.parentPath);
 
       children.forEach(child => {
         if (child.name.endsWith('.chat')) {
@@ -1628,12 +1628,12 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   }
 
   async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
-    return this.engine.meta.assets.getAssetDirId(ownerNodeId);
+    return this.engine.meta.assets.getAssetDirPath(ownerNodeId);
   }
 
   async getAssets(ownerNodeId: string): Promise<FSNode[]> {
-    const dirId = await this.engine.meta.assets.getAssetDirId(ownerNodeId);
-    return dirId ? await this.engine.driver.getChildren(dirId) as FSNode[] : [];
+    const dirPath = await this.engine.meta.assets.getAssetDirPath(ownerNodeId);
+    return dirPath ? await this.engine.driver.getChildren(dirPath) as FSNode[] : [];
   }
 
   async readSessionAsset(sessionId: string, assetPath: string): Promise<Blob | null> {

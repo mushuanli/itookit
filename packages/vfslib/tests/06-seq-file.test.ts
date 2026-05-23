@@ -12,7 +12,7 @@ describe('SeqFile operations (IndexedDB backend)', () => {
     afterEach(async () => { await vfs.dispose(); });
 
     async function mkSeq(name: string) {
-        await vfs.fs.driver.createFile({ name, parentIdOrPath: null, type: 'seqfile' });
+        await vfs.fs.driver.createFile({ name, parentPath: null, type: 'seqfile' });
         return `/${name}`;
     }
 

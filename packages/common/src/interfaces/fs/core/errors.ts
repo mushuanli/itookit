@@ -52,8 +52,8 @@ export class FSError extends Error {
 }
 
 export class FSNotFoundError extends FSError {
-    constructor(idOrPath: string, operation?: string) {
-        super('ENOENT', `not found: ${idOrPath}`, operation, idOrPath);
+    constructor(path: string, operation?: string) {
+        super('ENOENT', `not found: ${path}`, operation, path);
         this.name = 'FSNotFoundError';
     }
 }
@@ -105,7 +105,7 @@ export class FSModuleNotFoundError extends FSError {
 
 export class FSConflictError extends FSError {
     constructor(
-        idOrPath: string,
+        path: string,
         public readonly expectedVersion: number,
         public readonly actualVersion: number,
     ) {
@@ -113,7 +113,7 @@ export class FSConflictError extends FSError {
             'ECONFLICT',
             `version conflict: expected ${expectedVersion}, actual ${actualVersion}`,
             'write',
-            idOrPath,
+            path,
         );
         this.name = 'FSConflictError';
     }
@@ -158,12 +158,12 @@ export class FSBusyError extends FSError {
 }
 
 export class FSTypeMismatchError extends FSError {
-    constructor(idOrPath: string, expectedType: string, actualType: string) {
+    constructor(path: string, expectedType: string, actualType: string) {
         super(
             'ETYPEMISMATCH',
             `expected type '${expectedType}', got '${actualType}'`,
             undefined,
-            idOrPath,
+            path,
         );
         this.name = 'FSTypeMismatchError';
     }

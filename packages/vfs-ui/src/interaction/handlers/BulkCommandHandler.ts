@@ -41,10 +41,6 @@ export class BulkCommandHandler {
 
             this.commandBus.on('move:end', () => {
                 this.store.dispatch({ type: 'MOVE_OPERATION_END' });
-            }),
-
-            this.commandBus.on('file:move', async ({ itemIds, targetId }) => {
-                await this.service.moveItems({ itemIds, targetId });
             })
         );
     }

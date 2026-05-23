@@ -10,7 +10,7 @@ describe('Tag operations (IndexedDB backend)', () => {
     afterEach(async () => { await vfs.dispose(); });
 
     async function mkFile(fs: TestVFS['fs'], name: string) {
-        await fs.driver.createFile({ name, parentIdOrPath: null, content: '' });
+        await fs.driver.createFile({ name, parentPath: null, content: '' });
         return `/${name}`;
     }
 
@@ -103,7 +103,7 @@ describe('Tag operations (IndexedDB backend)', () => {
 
     it('tags survive rename', async () => {
         const { fs } = vfs;
-        await fs.driver.createFile({ name: 'before-rename.txt', parentIdOrPath: null, content: '' });
+        await fs.driver.createFile({ name: 'before-rename.txt', parentPath: null, content: '' });
         await fs.meta.tags!.addTag('/before-rename.txt', 'keepme');
         await fs.driver.rename('/before-rename.txt', 'after-rename.txt');
         const node = await fs.driver.getNode('/after-rename.txt');

@@ -63,13 +63,13 @@ export interface OperationContext {
      *
      * 具体内容取决于 operation:
      *
-     * - create:  { name, parentIdOrPath, content?, type?, metadata?, tags? }
+     * - create:  { name, parentPath, content?, type?, metadata?, tags? }
      * - read:    { encoding? }
      * - write:   { content, expectedVersion?, mode? }
      * - delete:  { assetDirStrategy?, recursive?, referencePolicy? }
      * - rename:  { newName, syncAssetDir? }
-     * - move:    { targetParentIdOrPath, syncAssetDir? }
-     * - copy:    { targetParentIdOrPath, newName?, copyAssetDir? }
+     * - move:    { targetParentPath, syncAssetDir? }
+     * - copy:    { targetParentPath, newName?, copyAssetDir? }
      * - updateMetadata: { metadata }
      * - symlink: { linkPath, targetPath }
      * - hardlink: { linkPath, targetPath }
@@ -104,8 +104,8 @@ export interface OperationContext {
     /**
      * 元数据读写（受限 API）
      */
-    getMetadata?(idOrPath: string): Promise<Readonly<FSNodeMetadata> | null>;
-    patchMetadata?(idOrPath: string, patch: Partial<FSNodeMetadata>): Promise<void>;
+    getMetadata?(path: string): Promise<Readonly<FSNodeMetadata> | null>;
+    patchMetadata?(path: string, patch: Partial<FSNodeMetadata>): Promise<void>;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -133,10 +133,10 @@ export type MiddlewareNext = () => Promise<void>;
  * const versionMiddleware: MiddlewareHandler = async (ctx, next) => {
  *   if (ctx.operation === 'write' && ctx.node) {
  *     // 写入前：快照当前内容到 assetdir
- *     const current = await ctx.getAsset?.(ctx.node.id, '.versions/latest');
+ *     const current = await ctx.getAsset?.(ctx.node.path, '.versions/latest');
  *     if (current) {
  *       const ts = Date.now().toString();
- *       await ctx.putAsset?.(ctx.node.id, `.versions/${ts}`, current);
+ *       await ctx.putAsset?.(ctx.node.path, `.versions/${ts}`, current);
  *     }
  *   }
  *   await next();
@@ -176,7 +176,7 @@ export interface PluginInfo {
  *         await next();
  *         // 创建/写入后自动根据内容添加标签
  *         if (ctx.result && ctx.node) {
- *           await ctx.patchMetadata?.(ctx.node.id, {
+ *           await ctx.patchMetadata?.(ctx.node.path, {
  *             ai_embeddingStatus: 'pending',
  *           });
  *         }

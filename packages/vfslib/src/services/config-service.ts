@@ -201,7 +201,7 @@ export class ConfigService implements IConfigService {
             if (!(await this.fs.driver.exists(path))) {
                 await this.fs.driver.createFile({
                     name: `${configName}.seq`,
-                    parentIdOrPath: null,
+                    parentPath: null,
                     type: 'seqfile',
                 });
             }
@@ -210,7 +210,7 @@ export class ConfigService implements IConfigService {
             if (!(await this.fs.driver.exists(path))) {
                 await this.fs.driver.createFile({
                     name: `${configName}.json`,
-                    parentIdOrPath: null,
+                    parentPath: null,
                     content: '{}',
                 });
             }

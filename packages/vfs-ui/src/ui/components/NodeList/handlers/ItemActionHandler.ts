@@ -122,15 +122,13 @@ export class ItemActionHandler {
     const titleStartsWithDot = firstItem.metadata?.title?.startsWith('.');
 
     if (isHiddenDir || titleStartsWithDot) {
-      return firstItem.metadata?.parentId || null;
+      return firstItem.metadata?.parentPath || null;
     }
 
     const targetParentId =
       firstItem.type === 'directory'
-        ? firstItem.id
-        : firstItem.metadata?.parentId || null;
-
-    if (targetParentId && !findItemById(targetParentId)) return null;
+        ? firstItem.path
+        : firstItem.metadata?.parentPath || null;
 
     return targetParentId;
   }

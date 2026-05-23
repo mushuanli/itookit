@@ -26,7 +26,7 @@ const SUITE = 'assetdir';
 // ── Setup helper ───────────────────────────────────────────────────────────────
 
 async function withOwner(vfs: LocalTestVFS, ownerName = 'report.md') {
-    await vfs.fs.driver.createFile({ name: ownerName, parentIdOrPath: null, content: '# Report' });
+    await vfs.fs.driver.createFile({ name: ownerName, parentPath: null, content: '# Report' });
     return `/${ownerName}`;
 }
 

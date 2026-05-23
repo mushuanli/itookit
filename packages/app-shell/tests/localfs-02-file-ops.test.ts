@@ -19,14 +19,14 @@ describe('File — create', () => {
     afterEach(async  () => { await vfs.dispose(); });
 
     it('createFile writes real file to disk', async () => {
-        await vfs.fs.driver.createFile({ name: 'hello.md', parentIdOrPath: null, content: '# Hello' });
+        await vfs.fs.driver.createFile({ name: 'hello.md', parentPath: null, content: '# Hello' });
 
         expect(await diskExists(vfs.moduleDir, 'hello.md')).toBe(true);
         expect(await diskRead(vfs.moduleDir,   'hello.md')).toBe('# Hello');
     });
 
     it('createFile appears in getChildren', async () => {
-        await vfs.fs.driver.createFile({ name: 'note.txt', parentIdOrPath: null, content: '' });
+        await vfs.fs.driver.createFile({ name: 'note.txt', parentPath: null, content: '' });
 
         const names = (await vfs.fs.driver.getChildren('/')).map(n => n.name);
         expect(names).toContain('note.txt');
@@ -36,7 +36,7 @@ describe('File — create', () => {
         const bytes = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
         await vfs.fs.driver.createFile({
             name:           'bin.dat',
-            parentIdOrPath: null,
+            parentPath: null,
             content:        bytes.buffer as ArrayBuffer,
         });
 
@@ -47,7 +47,7 @@ describe('File — create', () => {
     it('createFile in a new subdirectory with recursive:true', async () => {
         await vfs.fs.driver.createFile({
             name:           'deep.md',
-            parentIdOrPath: '/a/b',
+            parentPath: '/a/b',
             content:        'deep content',
             recursive:      true,
         });
@@ -71,7 +71,7 @@ describe('File — read', () => {
     afterEach(async  () => { await vfs.dispose(); });
 
     it('readContent returns file text', async () => {
-        await vfs.fs.driver.createFile({ name: 'readme.md', parentIdOrPath: null, content: '# Read me' });
+        await vfs.fs.driver.createFile({ name: 'readme.md', parentPath: null, content: '# Read me' });
         const result = await vfs.fs.driver.readContent('/readme.md', { encoding: 'utf-8' });
         expect(result).toBe('# Read me');
     });
@@ -79,7 +79,7 @@ describe('File — read', () => {
     it('readContent returns binary ArrayBuffer', async () => {
         const bytes = new Uint8Array([1, 2, 3, 4]);
         await vfs.fs.driver.createFile({
-            name: 'blob.bin', parentIdOrPath: null,
+            name: 'blob.bin', parentPath: null,
             content: bytes.buffer as ArrayBuffer,
         });
 
@@ -88,7 +88,7 @@ describe('File — read', () => {
     });
 
     it('getNode returns correct metadata', async () => {
-        await vfs.fs.driver.createFile({ name: 'meta.txt', parentIdOrPath: null, content: 'content' });
+        await vfs.fs.driver.createFile({ name: 'meta.txt', parentPath: null, content: 'content' });
         const node = await vfs.fs.driver.getNode('/meta.txt');
 
         expect(node).not.toBeNull();
@@ -103,21 +103,21 @@ describe('File — write / update', () => {
     afterEach(async  () => { await vfs.dispose(); });
 
     it('writeContent overwrites file on disk', async () => {
-        await vfs.fs.driver.createFile({ name: 'log.txt', parentIdOrPath: null, content: 'v1' });
+        await vfs.fs.driver.createFile({ name: 'log.txt', parentPath: null, content: 'v1' });
         await vfs.fs.driver.writeContent('/log.txt', 'v2');
 
         expect(await diskRead(vfs.moduleDir, 'log.txt')).toBe('v2');
     });
 
     it('writeContent append mode adds to end', async () => {
-        await vfs.fs.driver.createFile({ name: 'append.txt', parentIdOrPath: null, content: 'AAA' });
+        await vfs.fs.driver.createFile({ name: 'append.txt', parentPath: null, content: 'AAA' });
         await vfs.fs.driver.writeContent('/append.txt', 'BBB', { mode: 'append' });
 
         expect(await diskRead(vfs.moduleDir, 'append.txt')).toBe('AAABBB');
     });
 
     it('writeContent reflects on disk immediately', async () => {
-        await vfs.fs.driver.createFile({ name: 'live.md', parentIdOrPath: null, content: 'old' });
+        await vfs.fs.driver.createFile({ name: 'live.md', parentPath: null, content: 'old' });
         await vfs.fs.driver.writeContent('/live.md', 'new content');
 
         // Cross-check: disk and VFS agree
@@ -134,7 +134,7 @@ describe('File — rename', () => {
     afterEach(async  () => { await vfs.dispose(); });
 
     it('rename moves file to new name on disk', async () => {
-        await vfs.fs.driver.createFile({ name: 'old.md', parentIdOrPath: null, content: 'data' });
+        await vfs.fs.driver.createFile({ name: 'old.md', parentPath: null, content: 'data' });
         await vfs.fs.driver.rename('/old.md', 'new.md');
 
         expect(await diskExists(vfs.moduleDir, 'old.md')).toBe(false);
@@ -143,7 +143,7 @@ describe('File — rename', () => {
     });
 
     it('rename updates VFS metadata (getNode by new path)', async () => {
-        await vfs.fs.driver.createFile({ name: 'before.txt', parentIdOrPath: null, content: 'x' });
+        await vfs.fs.driver.createFile({ name: 'before.txt', parentPath: null, content: 'x' });
         await vfs.fs.driver.rename('/before.txt', 'after.txt');
 
         expect(await vfs.fs.driver.exists('/before.txt')).toBe(false);
@@ -158,8 +158,8 @@ describe('File — move', () => {
     afterEach(async  () => { await vfs.dispose(); });
 
     it('move file into subdirectory updates disk', async () => {
-        await vfs.fs.driver.createDirectory({ name: 'sub', parentIdOrPath: null });
-        await vfs.fs.driver.createFile({ name: 'moveme.txt', parentIdOrPath: null, content: 'moving' });
+        await vfs.fs.driver.createDirectory({ name: 'sub', parentPath: null });
+        await vfs.fs.driver.createFile({ name: 'moveme.txt', parentPath: null, content: 'moving' });
 
         const node = await vfs.fs.driver.getNode('/moveme.txt');
         await vfs.fs.driver.move([node!.id], '/sub');
@@ -176,7 +176,7 @@ describe('File — delete', () => {
     afterEach(async  () => { await vfs.dispose(); });
 
     it('delete removes file from disk', async () => {
-        await vfs.fs.driver.createFile({ name: 'gone.txt', parentIdOrPath: null, content: 'bye' });
+        await vfs.fs.driver.createFile({ name: 'gone.txt', parentPath: null, content: 'bye' });
         const node = await vfs.fs.driver.getNode('/gone.txt');
         await vfs.fs.driver.delete([node!.id]);
 
@@ -185,7 +185,7 @@ describe('File — delete', () => {
     });
 
     it('deleted file disappears from getChildren', async () => {
-        await vfs.fs.driver.createFile({ name: 'tmp.md', parentIdOrPath: null, content: '' });
+        await vfs.fs.driver.createFile({ name: 'tmp.md', parentPath: null, content: '' });
         const node = await vfs.fs.driver.getNode('/tmp.md');
         await vfs.fs.driver.delete([node!.id]);
 

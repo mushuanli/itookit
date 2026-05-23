@@ -57,7 +57,7 @@ const SKILLS_CAPS: FSCapabilities = Object.freeze({
 const noopAssets: IAssetOperations = {
     putAsset: async () => ({ type: 'file' } as FSFileNode),
     getAsset: async () => null,
-    getAssetDirId: async () => null,
+    getAssetDirPath: async () => null,
     ensureAssetDir: async () => { throw new FSCapabilityError('assets', 'skills'); },
     listAssets: async () => [],
     deleteAsset: async () => {},
@@ -344,7 +344,7 @@ class SkillsDriver implements IFSDriver {
 function toFSNode(s: LLMSkill): FSFileNode {
     return {
         id: s.id,
-        parentId: null,
+        parentPath: null,
         name: s.name,
         type: 'file',
         icon: s.icon ?? '⚡',
@@ -353,7 +353,6 @@ function toFSNode(s: LLMSkill): FSFileNode {
         createdAt: s.createdAt ?? Date.now(),
         modifiedAt: s.modifiedAt ?? Date.now(),
         version: 0,
-        nlink: 1,
         moduleId: 'skills',
         tags: s.enabled ? [] : ['disabled'],
         metadata: {

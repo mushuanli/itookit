@@ -54,11 +54,11 @@ export class AssetManagerPlugin implements MDxPlugin {
             return;
         }
 
-        // v3.3: IModuleFS.meta.assets.getAssetDirId replaces deprecated IFSEngine.getAssetDirectoryId
-        const assetDirId = await engine.meta.assets.getAssetDirId(ownerNodeId);
+        // v3.3: IModuleFS.meta.assets.getAssetDirPath replaces deprecated getAssetDirId
+        const assetDirPath = await engine.meta.assets.getAssetDirPath(ownerNodeId);
 
-        if (!assetDirId) {
-            // 如果 ID 为空，说明目录尚未创建（即没有附件）
+        if (!assetDirPath) {
+            // 如果路径为空，说明目录尚未创建（即没有附件）
             Toast.info('暂无附件');
             // 可选：也可以打开 UI 显示空状态，但这里选择提示
             return;
@@ -66,7 +66,7 @@ export class AssetManagerPlugin implements MDxPlugin {
 
         if (this.currentUI) this.currentUI.close();
         this.currentUI = new AssetManagerUI(engine, editor, this.options);
-        await this.currentUI.show(assetDirId);
+        await this.currentUI.show(assetDirPath);
     }
 
     destroy(): void {

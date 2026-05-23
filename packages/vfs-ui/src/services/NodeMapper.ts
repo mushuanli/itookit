@@ -22,7 +22,7 @@ export const mapFSNodeToUIItem = (
     node.icon || iconResolver?.(node.name, isDir) || (isDir ? '📁' : '📄');
 
   return {
-    id: node.id,
+    id: node.path,
     type: isDir ? 'directory' : 'file',
     version: '1.0',
     icon: displayIcon,
@@ -31,7 +31,7 @@ export const mapFSNodeToUIItem = (
       tags: node.tags ? [...node.tags] : [],
       createdAt: new Date(node.createdAt).toISOString(),
       lastModified: new Date(node.modifiedAt).toISOString(),
-      parentId: node.parentId,
+      parentPath: node.parentPath,
       path: node.path,
       moduleId: node.moduleId,
       custom: {

@@ -59,7 +59,7 @@ export interface WriteOptions {
 
 export interface CreateFileOptions {
     name: string;
-    parentIdOrPath: string | null;
+    parentPath: string | null;
     content?: string | ArrayBuffer;
     metadata?: FSNodeMetadata;
     tags?: string[];
@@ -80,7 +80,7 @@ export interface CreateFileOptions {
 
 export interface CreateDirectoryOptions {
     name: string;
-    parentIdOrPath: string | null;
+    parentPath: string | null;
     metadata?: FSNodeMetadata;
     icon?: string;
     /**
@@ -169,7 +169,7 @@ export interface TreeWalkOptions extends VisibilityOptions {
     /** 最大深度，-1 无限制 @default -1 */
     maxDepth?: number;
     /** 起始目录 @default 模块根目录 */
-    rootIdOrPath?: string;
+    rootPath?: string;
     /** 类型过滤 */
     typeFilter?: FSNodeType | FSNodeType[];
     /** 最大返回数量 */

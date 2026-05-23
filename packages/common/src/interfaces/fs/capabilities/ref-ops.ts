@@ -16,16 +16,16 @@ export interface RefQueryOptions {
 export interface IRefOperations {
     /** 添加引用 */
     addRef(
-        sourceIdOrPath: string,
-        targetIdOrPath: string,
+        sourcePath: string,
+        targetPath: string,
         refType: RefType,
         extra?: Record<string, unknown>,
     ): Promise<void>;
 
     /** 移除引用 */
     removeRef(
-        sourceIdOrPath: string,
-        targetIdOrPath: string,
+        sourcePath: string,
+        targetPath: string,
         refType: RefType,
     ): Promise<void>;
 
@@ -35,7 +35,7 @@ export interface IRefOperations {
      * 返回实际处理数量。
      */
     walkOutgoing(
-        idOrPath: string,
+        path: string,
         callback: (ref: Reference) => boolean | Promise<boolean>,
         opts?: RefQueryOptions,
     ): Promise<number>;
@@ -46,15 +46,15 @@ export interface IRefOperations {
      * 返回实际处理数量。
      */
     walkIncoming(
-        idOrPath: string,
+        path: string,
         callback: (ref: Reference) => boolean | Promise<boolean>,
         opts?: RefQueryOptions,
     ): Promise<number>;
 
     /** 检查引用是否存在 */
     hasRef(
-        sourceIdOrPath: string,
-        targetIdOrPath: string,
+        sourcePath: string,
+        targetPath: string,
         refType: RefType,
     ): Promise<boolean>;
 
@@ -64,9 +64,9 @@ export interface IRefOperations {
      * 用于内容解析后批量更新。
      */
     syncOutgoing(
-        sourceIdOrPath: string,
+        sourcePath: string,
         refs: Array<{
-            targetIdOrPath: string;
+            targetPath: string;
             refType: RefType;
             extra?: Record<string, unknown>;
         }>,

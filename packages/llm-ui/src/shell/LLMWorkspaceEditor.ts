@@ -475,12 +475,12 @@ export class LLMWorkspaceEditor implements IEditor {
             const ownerNodeId = this.options.ownerNodeId || this.options.nodeId;
             if (!this.engine || !ownerNodeId) throw new Error('Engine not connected');
 
-            const assetDirId = await this.assetService.getAssetDirectoryId(ownerNodeId);
-            if (!assetDirId) { Toast.info('No attachments found'); return; }
+            const assetDirPath = await this.assetService.getAssetDirectoryId(ownerNodeId);
+            if (!assetDirPath) { Toast.info('No attachments found'); return; }
 
             // v3.3: AssetManagerUI expects IFSEngine; IChatEngine is compatible at runtime
             const ui = new AssetManagerUI(this.engine as any, null as any, {});
-            await ui.show(assetDirId);
+            await ui.show(assetDirPath);
         }, 'Open Asset Manager');
     }
 
@@ -497,8 +497,8 @@ export class LLMWorkspaceEditor implements IEditor {
         if (!nodeId) return undefined;
         try {
             const node = await this.engine.getNode(nodeId);
-            if (!node?.parentId) return undefined;
-            const parent = await this.engine.getNode(node.parentId);
+            if (!node?.parentPath) return undefined;
+            const parent = await this.engine.getNode(node.parentPath);
             if (!parent?.metadata) return undefined;
             const agentId = parent.metadata.ai_defaultAgent as string | undefined;
             const text    = parent.metadata.ai_initialPrompt as string | undefined;

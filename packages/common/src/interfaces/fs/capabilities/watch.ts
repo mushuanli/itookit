@@ -29,13 +29,13 @@ export interface IWatchOperations {
     /**
      * 监听路径变更
      *
-     * @param idOrPath 要监听的文件或目录
+     * @param path 要监听的文件或目录路径
      * @param callback 变更回调
      * @param options 选项
      * @returns Watcher 实例
      */
     watch(
-        idOrPath: string,
+        path: string,
         callback: (event: FileChangeEvent) => void,
         options?: WatchOptions,
     ): Watcher;

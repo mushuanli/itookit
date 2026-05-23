@@ -41,15 +41,15 @@ export interface RecordWalkOptions {
 }
 
 export interface IRecordStore {
-    getRecordField(ino: number, field: string): Promise<RecordValue | undefined>;
-    setRecordField(ino: number, field: string, value: RecordValue): Promise<void>;
-    deleteRecordField(ino: number, field: string): Promise<void>;
-    setAllRecordFields(ino: number, fields: Record<string, RecordValue>): Promise<void>;
-    clearRecordFields(ino: number): Promise<void>;
-    createRecordIndex(ino: number, field: string): Promise<void>;
-    deleteRecordIndex(ino: number, field: string): Promise<void>;
+    getRecordField(path: string, field: string): Promise<RecordValue | undefined>;
+    setRecordField(path: string, field: string, value: RecordValue): Promise<void>;
+    deleteRecordField(path: string, field: string): Promise<void>;
+    setAllRecordFields(path: string, fields: Record<string, RecordValue>): Promise<void>;
+    clearRecordFields(path: string): Promise<void>;
+    createRecordIndex(path: string, field: string): Promise<void>;
+    deleteRecordIndex(path: string, field: string): Promise<void>;
     queryRecordFields(
-        ino: number,
+        path: string,
         query: RecordQuery,
         options?: RecordQueryOptions,
     ): Promise<RecordQueryResult[]>;
@@ -60,7 +60,7 @@ export interface IRecordStore {
      * 支持前缀过滤和分页。
      */
     walkRecordFields(
-        ino: number,
+        path: string,
         callback: (field: string, value: RecordValue) => boolean | Promise<boolean>,
         options?: RecordWalkOptions,
     ): Promise<{ total: number; processed: number }>;
@@ -70,7 +70,7 @@ export interface IRecordStore {
      * callback 返回 false 时提前终止。
      */
     walkRecordFieldNames(
-        ino: number,
+        path: string,
         callback: (field: string) => boolean | Promise<boolean>,
         options?: { prefix?: string; limit?: number },
     ): Promise<number>;

@@ -43,7 +43,7 @@ function toFSNode(id: string, config: (typeof SETTINGS_PAGES)[string]): FSFileNo
     const now = Date.now();
     return {
         id,
-        parentId: null,
+        parentPath: null,
         name: config.name,
         type: 'file',
         icon: config.icon,
@@ -52,7 +52,6 @@ function toFSNode(id: string, config: (typeof SETTINGS_PAGES)[string]): FSFileNo
         createdAt: now,
         modifiedAt: now,
         version: 0,
-        nlink: 1,
         moduleId: 'settings_ui',
         tags: [],
         metadata: { title: config.name, description: '' },
@@ -84,7 +83,7 @@ const noopTags: ITagOperations = {
 const noopAssets: IAssetOperations = {
     putAsset: async () => ({ type: 'file' } as FSFileNode),
     getAsset: async () => null,
-    getAssetDirId: async () => null,
+    getAssetDirPath: async () => null,
     ensureAssetDir: async () => { throw new FSCapabilityError('assets', 'settings_root'); },
     listAssets: async () => [],
     deleteAsset: async () => {},

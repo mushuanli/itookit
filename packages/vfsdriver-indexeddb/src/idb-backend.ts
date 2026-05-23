@@ -433,35 +433,35 @@ class LazyRecordStore implements IRecordStore {
         return tx.objectStore(STORE_RECORDS);
     }
 
-    async getRecordField(ino: number, field: string) {
-        return new IDBRecordStore(this.roStore()).getRecordField(ino, field);
+    async getRecordField(path: string, field: string) {
+        return new IDBRecordStore(this.roStore()).getRecordField(path, field);
     }
-    async setRecordField(ino: number, field: string, value: import('@itookit/common').RecordValue) {
-        return new IDBRecordStore(this.store()).setRecordField(ino, field, value);
+    async setRecordField(path: string, field: string, value: import('@itookit/common').RecordValue) {
+        return new IDBRecordStore(this.store()).setRecordField(path, field, value);
     }
-    async deleteRecordField(ino: number, field: string) {
-        return new IDBRecordStore(this.store()).deleteRecordField(ino, field);
+    async deleteRecordField(path: string, field: string) {
+        return new IDBRecordStore(this.store()).deleteRecordField(path, field);
     }
-    async setAllRecordFields(ino: number, fields: Record<string, import('@itookit/common').RecordValue>) {
-        return new IDBRecordStore(this.store()).setAllRecordFields(ino, fields);
+    async setAllRecordFields(path: string, fields: Record<string, import('@itookit/common').RecordValue>) {
+        return new IDBRecordStore(this.store()).setAllRecordFields(path, fields);
     }
-    async clearRecordFields(ino: number) {
-        return new IDBRecordStore(this.store()).clearRecordFields(ino);
+    async clearRecordFields(path: string) {
+        return new IDBRecordStore(this.store()).clearRecordFields(path);
     }
-    async walkRecordFields(ino: number, cb: any, opts?: any) {
-        return new IDBRecordStore(this.roStore()).walkRecordFields(ino, cb, opts);
+    async walkRecordFields(path: string, cb: any, opts?: any) {
+        return new IDBRecordStore(this.roStore()).walkRecordFields(path, cb, opts);
     }
-    async walkRecordFieldNames(ino: number, cb: any, opts?: any) {
-        return new IDBRecordStore(this.roStore()).walkRecordFieldNames(ino, cb, opts);
+    async walkRecordFieldNames(path: string, cb: any, opts?: any) {
+        return new IDBRecordStore(this.roStore()).walkRecordFieldNames(path, cb, opts);
     }
-    async createRecordIndex(ino: number, field: string) {
-        return new IDBRecordStore(this.store()).createRecordIndex(ino, field);
+    async createRecordIndex(path: string, field: string) {
+        return new IDBRecordStore(this.store()).createRecordIndex(path, field);
     }
-    async deleteRecordIndex(ino: number, field: string) {
-        return new IDBRecordStore(this.store()).deleteRecordIndex(ino, field);
+    async deleteRecordIndex(path: string, field: string) {
+        return new IDBRecordStore(this.store()).deleteRecordIndex(path, field);
     }
-    async queryRecordFields(ino: number, query: import('@itookit/common').RecordQuery, opts?: import('@itookit/common').RecordQueryOptions) {
-        return new IDBRecordStore(this.roStore()).queryRecordFields(ino, query, opts);
+    async queryRecordFields(path: string, query: import('@itookit/common').RecordQuery, opts?: import('@itookit/common').RecordQueryOptions) {
+        return new IDBRecordStore(this.roStore()).queryRecordFields(path, query, opts);
     }
 }
 
@@ -469,14 +469,12 @@ function toFSNode(entry: NodeEntry): FSNode {
     const name = entry.path === '/' ? '' : entry.path.split('/').pop()!;
     const parentPath = entry.path === '/' ? null : entry.path.substring(0, entry.path.lastIndexOf('/')) || '/';
     const base = {
-        id: entry.path,
-        parentId: parentPath,
+        parentPath,
         name,
         path: entry.path,
         createdAt: entry.createdAt,
         modifiedAt: entry.modifiedAt,
         version: Math.floor(entry.modifiedAt),
-        nlink: 1,
         icon: entry.icon,
         tags: entry.tags,
         metadata: JSON.parse(entry.metadata) as Record<string, unknown>,
@@ -491,6 +489,6 @@ function toFSNode(entry: NodeEntry): FSNode {
         type: 'file',
         size: entry.size,
         contentHash: undefined,
-        assetDirId: undefined,
+        assetDirPath: undefined,
     } as FSFileNode;
 }

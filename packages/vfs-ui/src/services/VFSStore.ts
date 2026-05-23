@@ -94,9 +94,9 @@ export class VFSStore implements IStatePort {
           prevSelectedIds: [...draft.selectedItemIds],
         };
         draft.selectedItemIds.clear();
-        if (payload.parentId) {
-          this.collapseExpandedSiblings(draft, payload.parentId);
-          draft.expandedFolderIds.add(payload.parentId);
+        if (payload.parentPath) {
+          this.collapseExpandedSiblings(draft, payload.parentPath);
+          draft.expandedFolderIds.add(payload.parentPath);
         }
       },
       'CREATE_ITEM_END': () => {
@@ -135,7 +135,7 @@ export class VFSStore implements IStatePort {
         draft.moveOperation = null;
       },
       'FOLDER_CHILDREN_LOADED': () => {
-        const node = findNodeById(draft.items, payload.parentId);
+        const node = findNodeById(draft.items, payload.parentPath);
         if (node?.type === 'directory') {
           node.children = payload.children;
 
@@ -144,13 +144,13 @@ export class VFSStore implements IStatePort {
           const childIds = new Set(children.map(c => c.id));
           for (const id of draft.expandedFolderIds) {
             const expandedNode = findNodeById(draft.items, id);
-            if (expandedNode?.metadata.parentId === payload.parentId && !childIds.has(id)) {
+            if (expandedNode?.metadata.parentPath === payload.parentPath && !childIds.has(id)) {
               draft.expandedFolderIds.delete(id);
             }
           }
 
-          this.collapseExpandedSiblings(draft, payload.parentId);
-          draft.expandedFolderIds.add(payload.parentId);
+          this.collapseExpandedSiblings(draft, payload.parentPath);
+          draft.expandedFolderIds.add(payload.parentPath);
         }
         draft.tags = rebuildTagsMap(draft.items);
       },
@@ -215,7 +215,7 @@ export class VFSStore implements IStatePort {
   private collapseExpandedSiblings(draft: VFSUIState, folderId: string): void {
     const node = findNodeById(draft.items, folderId);
     if (!node) return;
-    const parentId = node.metadata.parentId;
+    const parentId = node.metadata.parentPath;
     const parent = parentId ? findNodeById(draft.items, parentId) : null;
     const siblings = (parent?.children ?? draft.items).filter(
       n => n.id !== folderId && n.type === 'directory'
@@ -274,7 +274,7 @@ export class VFSStore implements IStatePort {
   }
 
   private handleCreate(draft: VFSUIState, newItem: VFSNodeUI): void {
-    const parentId = newItem.metadata.parentId;
+    const parentId = newItem.metadata.parentPath;
     const parent = parentId ? findNodeById(draft.items, parentId) : null;
 
     if (parent?.type === 'directory') {

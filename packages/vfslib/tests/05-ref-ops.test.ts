@@ -12,7 +12,7 @@ describe('Reference operations (IndexedDB backend)', () => {
     afterEach(async () => { await vfs.dispose(); });
 
     async function mkFile(name: string) {
-        await vfs.fs.driver.createFile({ name, parentIdOrPath: null, content: '' });
+        await vfs.fs.driver.createFile({ name, parentPath: null, content: '' });
         return `/${name}`;
     }
 

@@ -12,8 +12,8 @@ describe('Transaction (IndexedDB backend)', () => {
     it('transaction commits all operations atomically', async () => {
         const { fs } = vfs;
         await fs.driver.transaction(async (tx) => {
-            await tx.createFile({ name: 'a.txt', parentIdOrPath: null, content: 'a-content' });
-            await tx.createDirectory({ name: 'tx-dir', parentIdOrPath: null });
+            await tx.createFile({ name: 'a.txt', parentPath: null, content: 'a-content' });
+            await tx.createDirectory({ name: 'tx-dir', parentPath: null });
         });
         expect(await fs.driver.exists('/a.txt')).toBe(true);
         expect(await fs.driver.exists('/tx-dir')).toBe(true);
@@ -25,7 +25,7 @@ describe('Transaction (IndexedDB backend)', () => {
         let threw = false;
         try {
             await fs.driver.transaction(async (tx) => {
-                await tx.createFile({ name: 'rollback.txt', parentIdOrPath: null, content: 'partial' });
+                await tx.createFile({ name: 'rollback.txt', parentPath: null, content: 'partial' });
                 throw new Error('intentional rollback');
             });
         } catch {
@@ -39,7 +39,7 @@ describe('Transaction (IndexedDB backend)', () => {
 
     it('transaction read-then-write within single tx', async () => {
         const { fs } = vfs;
-        await fs.driver.createFile({ name: 'counter.txt', parentIdOrPath: null, content: '0' });
+        await fs.driver.createFile({ name: 'counter.txt', parentPath: null, content: '0' });
         await fs.driver.transaction(async (tx) => {
             const content = await tx.readContent('/counter.txt');
             const val = parseInt(content as string, 10) + 1;
@@ -51,7 +51,7 @@ describe('Transaction (IndexedDB backend)', () => {
     it('transaction can create, write and rename in sequence', async () => {
         const { fs } = vfs;
         await fs.driver.transaction(async (tx) => {
-            await tx.createFile({ name: 'tmp.txt', parentIdOrPath: null, content: 'draft' });
+            await tx.createFile({ name: 'tmp.txt', parentPath: null, content: 'draft' });
             await tx.writeContent('/tmp.txt', 'final');
             await tx.rename('/tmp.txt', 'done.txt');
         });
@@ -66,8 +66,8 @@ describe('Transaction (IndexedDB backend)', () => {
             e.payload.nodes.forEach(() => events.push('created'));
         });
         await fs.driver.transaction(async (tx) => {
-            await tx.createFile({ name: 'ev1.txt', parentIdOrPath: null, content: '' });
-            await tx.createFile({ name: 'ev2.txt', parentIdOrPath: null, content: '' });
+            await tx.createFile({ name: 'ev1.txt', parentPath: null, content: '' });
+            await tx.createFile({ name: 'ev2.txt', parentPath: null, content: '' });
             // Events not yet emitted during transaction
             expect(events).toHaveLength(0);
         });
@@ -78,8 +78,8 @@ describe('Transaction (IndexedDB backend)', () => {
     it('nested operations within transaction see consistent state', async () => {
         const { fs } = vfs;
         await fs.driver.transaction(async (tx) => {
-            await tx.createFile({ name: 'base.txt', parentIdOrPath: null, content: 'base' });
-            await tx.createDirectory({ name: 'txd', parentIdOrPath: null });
+            await tx.createFile({ name: 'base.txt', parentPath: null, content: 'base' });
+            await tx.createDirectory({ name: 'txd', parentPath: null });
             await tx.move(['/base.txt'], '/txd');
             await tx.updateMetadata('/txd/base.txt', { moved: true });
         });
@@ -91,7 +91,7 @@ describe('Transaction (IndexedDB backend)', () => {
         const { fs } = vfs;
         for (let i = 0; i < 3; i++) {
             await fs.driver.transaction(async (tx) => {
-                await tx.createFile({ name: `seq${i}.txt`, parentIdOrPath: null, content: `${i}` });
+                await tx.createFile({ name: `seq${i}.txt`, parentPath: null, content: `${i}` });
             });
         }
         for (let i = 0; i < 3; i++) {

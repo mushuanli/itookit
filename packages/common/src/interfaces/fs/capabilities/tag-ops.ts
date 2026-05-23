@@ -15,21 +15,21 @@ export interface ITagOperations {
     getAllTags(): Promise<TagDefinition[]>;
 
     /** 设置节点标签（全量替换，空数组清除） */
-    setTags(idOrPath: string, tags: string[]): Promise<void>;
+    setTags(path: string, tags: string[]): Promise<void>;
 
     /** 添加标签（增量） */
-    addTag(idOrPath: string, tag: string): Promise<void>;
+    addTag(path: string, tag: string): Promise<void>;
 
     /** 移除标签 */
-    removeTag(idOrPath: string, tag: string): Promise<void>;
+    removeTag(path: string, tag: string): Promise<void>;
 
     /**
-     * 按标签流式遍历节点 ID（替代 findByTag）。
+     * 按标签流式遍历节点路径（替代 findByTag）。
      * callback 返回 false 时提前终止。
      */
     walkByTag(
         tag: string,
-        callback: (nodeId: string) => boolean | Promise<boolean>,
+        callback: (path: string) => boolean | Promise<boolean>,
         options?: { limit?: number; offset?: number },
     ): Promise<{ total: number; processed: number }>;
 

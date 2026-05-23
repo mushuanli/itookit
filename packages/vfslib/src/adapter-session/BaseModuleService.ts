@@ -110,7 +110,7 @@ export abstract class BaseModuleService {
         for (const part of parts) {
             const next: string = current ? `${current}/${part}` : `/${part}`;
             try {
-                await fs.driver.createDirectory({ name: part, parentIdOrPath: current });
+                await fs.driver.createDirectory({ name: part, parentPath: current });
             } catch (e: any) {
                 if (!isAlreadyExistsLike(e)) throw e;
             }

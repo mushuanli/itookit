@@ -179,7 +179,7 @@ export class ContextMenuHandler {
 
     if (builtInActions.has(action)) {
       if (action.startsWith('create-in-folder-')) {
-        const type = action.split('-')[3] as 'file' | 'directory';
+        const type = action === 'create-in-folder-folder' ? 'directory' : 'file';
         this.commandBus.execute('ui:startCreating', {
           type,
           parentId: contextItem.id,

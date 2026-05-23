@@ -75,7 +75,7 @@ export class EngineAdapter {
             const node = findNodeById(items, folderId);
             if (!node || node.type !== 'directory') continue;
 
-            const pid = node.metadata.parentId;
+            const pid = node.metadata.parentPath;
             const isRoot = pid === null || pid === '/';
             if (!isRoot || node.children !== undefined) continue;
 
@@ -272,7 +272,7 @@ export class EngineAdapter {
 
             this.store.dispatch({
                 type: 'FOLDER_CHILDREN_LOADED',
-                payload: { parentId: folderId, children: uiChildren },
+                payload: { parentPath: folderId, children: uiChildren },
             });
 
             // Recursively expand persisted subdirectories so the full tree is

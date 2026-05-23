@@ -28,16 +28,16 @@ export class FileCommandHandler {
 
   private register(): void {
     this.unsubs.push(
-      this.commandBus.on('file:create', async ({ type, title, parentId }) => {
+      this.commandBus.on('file:create', async ({ type, title, parentPath }) => {
         try {
           if (type === 'file') {
             await this.service.createFile({
               title,
-              parentId,
+              parentId: parentPath ?? null,
               content: this.options.newFileContent || '',
             });
           } else {
-            await this.service.createDirectory({ title, parentId });
+            await this.service.createDirectory({ title, parentId: parentPath ?? null });
           }
         } catch (e) {
           console.error(`[FileCommandHandler] Create ${type} failed:`, e);
@@ -90,7 +90,7 @@ export class FileCommandHandler {
 
           await this.service.createFile({
             title: `${item.metadata.title} (copy)${ext}`,
-            parentId: item.metadata.parentId ?? null,
+            parentId: item.metadata.parentPath ?? null,
             content,
           });
         } catch (e: any) {

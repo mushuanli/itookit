@@ -59,8 +59,8 @@ export interface NavigationRequest {
         title?: string;
         /** 初始内容 */
         content?: string;
-        /** 父目录 ID */
-        parentId?: string | null;
+        /** 父目录路径 */
+        parentPath?: string | null;
     };
 
     /**

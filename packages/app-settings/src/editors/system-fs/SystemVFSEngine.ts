@@ -67,12 +67,12 @@ const BLOCKED_CONTENT = (name: string, path: string, mod: string): string =>
 
 // ── FSNode wrapper for composite IDs ──────────────────────────────────────────
 
-function wrapFSNode(node: FSNode, id: string, parentId: string | null, moduleId: string): FSNode {
+function wrapFSNode(node: FSNode, id: string, parentPath: string | null, moduleId: string): FSNode {
     if (node.type === 'directory') {
         return {
             ...node,
             id,
-            parentId,
+            parentPath,
             moduleId,
             tags: node.tags ? [...node.tags] : [],
             metadata: { ...(node.metadata as Record<string, unknown>), _showAll: true },
@@ -81,7 +81,7 @@ function wrapFSNode(node: FSNode, id: string, parentId: string | null, moduleId:
     return {
         ...node,
         id,
-        parentId,
+        parentPath,
         moduleId,
         tags: node.tags ? [...node.tags] : [],
         metadata: { ...(node.metadata as Record<string, unknown>), _showAll: true },
@@ -92,23 +92,23 @@ function wrapFSNode(node: FSNode, id: string, parentId: string | null, moduleId:
 
 async function collectTree(
     fs: IModuleFS,
-    idOrPath: string,
-    parentId: string,
+    path: string,
+    parentPath: string,
     moduleName: string,
 ): Promise<FSNode[]> {
-    const children = await fs.driver.getChildren(idOrPath, {
+    const children = await fs.driver.getChildren(path, {
         includeHidden: true, includeAssetDirs: true, includeInternalDirs: true,
     }) as FSNode[];
     const result: FSNode[] = [];
 
     for (const child of children) {
-        const cId = compositeId(moduleName, child.id);
-        const wrapped = wrapFSNode(child, cId, parentId, moduleName);
+        const cId = compositeId(moduleName, child.path);
+        const wrapped = wrapFSNode(child, cId, parentPath, moduleName);
 
         // Pre-load content for non-sensitive files (used by editor via item.content.data)
         if (child.type !== 'directory' && !isSensitivePath(child.path)) {
             try {
-                const raw = await fs.driver.readContent(child.id);
+                const raw = await fs.driver.readContent(child.path);
                 (wrapped as any)._content = raw;
             } catch { /* unreadable */ }
         }
@@ -138,7 +138,7 @@ const noopTags: ITagOperations = {
 const noopAssets: IAssetOperations = {
     putAsset: async () => ({ type: 'file' } as FSFileNode),
     getAsset: async () => null,
-    getAssetDirId: async () => null,
+    getAssetDirPath: async () => null,
     ensureAssetDir: async () => { throw new FSCapabilityError('assets', 'system'); },
     listAssets: async () => [],
     deleteAsset: async () => {},
@@ -198,14 +198,13 @@ class SystemFSDriver implements IFSDriver {
             if (!info) return null;
             return {
                 id,
-                parentId: null,
+                parentPath: null,
                 name: moduleName,
                 type: 'directory',
                 path: `/${moduleName}`,
                 createdAt: 0,
                 modifiedAt: 0,
                 version: 0,
-                nlink: 1,
                 tags: [],
                 metadata: { title: moduleName, description: info.description ?? '', _showAll: true },
                 moduleId: 'system',
@@ -231,14 +230,13 @@ class SystemFSDriver implements IFSDriver {
             const modules = this.vfs.getAllModules();
             nodes.push(...modules.map(mod => ({
                 id: moduleNodeId(mod.name),
-                parentId: null,
+                parentPath: null,
                 name: mod.name,
                 type: 'directory' as const,
                 path: `/${mod.name}`,
                 createdAt: 0,
                 modifiedAt: 0,
                 version: 0,
-                nlink: 1,
                 tags: [] as string[],
                 metadata: { title: mod.name, description: mod.description ?? '', _showAll: true },
                 moduleId: 'system',
@@ -269,7 +267,7 @@ class SystemFSDriver implements IFSDriver {
                 includeHidden: true, includeAssetDirs: true, includeInternalDirs: true,
             }) as FSNode[];
             return children.map(c => {
-                const cId = compositeId(parsed.moduleName, c.id);
+                const cId = compositeId(parsed.moduleName, c.path);
                 return wrapFSNode(c, cId, parentId, parsed.moduleName);
             });
         } catch {
@@ -337,14 +335,13 @@ class SystemFSDriver implements IFSDriver {
     private buildDevDirNode(): FSNode {
         return {
             id: DEV_DIR_ID,
-            parentId: null,
+            parentPath: null,
             name: 'dev',
             type: 'directory',
             path: '/dev',
             createdAt: 0,
             modifiedAt: 0,
             version: 0,
-            nlink: 1,
             tags: [],
             metadata: { title: '/dev', description: 'Registered virtual device drivers', _showAll: true },
             moduleId: 'system',
@@ -357,13 +354,13 @@ class SystemFSDriver implements IFSDriver {
         );
     }
 
-    private buildDevFileNode(handlerId: string, parentId: string): FSFileNode {
+    private buildDevFileNode(handlerId: string, parentPath: string): FSFileNode {
         const driver = this.vfs.devices.has(handlerId)
             ? this.vfs.devices.get(handlerId)
             : null;
         return {
             id: devNodeId(handlerId),
-            parentId,
+            parentPath,
             name: handlerId,
             type: 'file',
             path: `/dev/${handlerId}`,
@@ -371,7 +368,6 @@ class SystemFSDriver implements IFSDriver {
             modifiedAt: 0,
             size: 0,
             version: 0,
-            nlink: 1,
             tags: [],
             metadata: { title: handlerId, description: driver?.description ?? '', _showAll: true },
             moduleId: 'system',

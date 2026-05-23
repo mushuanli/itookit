@@ -210,16 +210,14 @@ function normalize(path: string): string {
 
 function toFSNode(path: string, entry: Entry): FSNode {
     const name = path === '/' ? '' : path.split('/').pop()!;
-    const parentDir = path === '/' ? null : path.substring(0, path.lastIndexOf('/')) || '/';
+    const parentPath = path === '/' ? null : path.substring(0, path.lastIndexOf('/')) || '/';
     const base = {
-        id: path,
-        parentId: parentDir,
+        parentPath,
         name,
         path,
         createdAt: entry.createdAt,
         modifiedAt: entry.modifiedAt,
         version: Math.floor(entry.modifiedAt),
-        nlink: 1,
         tags: entry.tags,
         metadata: entry.metadata,
         icon: entry.icon,
@@ -234,7 +232,7 @@ function toFSNode(path: string, entry: Entry): FSNode {
         type: 'file' as const,
         size: entry.content.byteLength,
         contentHash: undefined,
-        assetDirId: undefined,
+        assetDirPath: undefined,
     };
 
     if (entry.symlinkTarget) {

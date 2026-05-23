@@ -949,8 +949,8 @@ export class TaskRunner {
     ): void {
         // 过滤重复的根 node_start
         if (event.type === 'node_start') {
-            const p = event.payload as { parentId?: string; node?: ExecutionNode };
-            if (!p.parentId && !p.node?.parentId) return;
+            const p = event.payload as { parentPath?: string; node?: ExecutionNode };
+            if (!p.parentPath && !p.node?.parentId) return;
         }
 
         // 修正空 nodeId

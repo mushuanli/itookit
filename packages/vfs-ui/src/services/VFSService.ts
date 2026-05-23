@@ -50,12 +50,34 @@ export class VFSService implements IDataOperationPort {
     title,
     parentId = null,
     content = this.newFileContent,
-  }: CreateFileOptions = {}): Promise<FSNode> =>
-    this.engine.driver.createFile({
-      name: this.ensureExtension(title || formatDefaultFileTitle()),
-      parentIdOrPath: parentId,
+  }: CreateFileOptions = {}): Promise<FSNode> => {
+    const rawName = title || formatDefaultFileTitle();
+
+    if (!rawName.includes('/')) {
+      return this.engine.driver.createFile({
+        name: this.ensureExtension(rawName),
+        parentPath: parentId,
+        content,
+      });
+    }
+
+    // Parse "dir/subdir/filename" — build absolute virtual path and enable recursive mkdir.
+    // Since id === path (v4.1 path-based engine), parentId is already a "/" prefixed path.
+    const lastSlash = rawName.lastIndexOf('/');
+    const dirPart = rawName.slice(0, lastSlash);
+    const fileName = rawName.slice(lastSlash + 1) || formatDefaultFileTitle();
+
+    // parentId is a virtual path (e.g. "/projects") or null (module root = "/")
+    const base = parentId ?? '/';
+    const resolvedParentPath: string | null = dirPart ? `${base}/${dirPart}` : (parentId ?? null);
+
+    return this.engine.driver.createFile({
+      name: this.ensureExtension(fileName),
+      parentPath: resolvedParentPath,
       content,
+      recursive: true,
     });
+  };
 
   createFiles = async ({
     parentId = null,
@@ -66,18 +88,35 @@ export class VFSService implements IDataOperationPort {
       files.map(f =>
         this.engine.driver.createFile({
           name: this.ensureExtension(f.title),
-          parentIdOrPath: parentId,
+          parentPath: parentId,
           content: f.content,
         })
       )
     );
   };
 
-  createDirectory = ({
+  createDirectory = async ({
     title = 'New Directory',
     parentId = null,
-  }: { title?: string; parentId?: string | null } = {}): Promise<FSNode> =>
-    this.engine.driver.createDirectory({ name: title, parentIdOrPath: parentId });
+  }: { title?: string; parentId?: string | null } = {}): Promise<FSNode> => {
+    if (!title.includes('/')) {
+      return this.engine.driver.createDirectory({ name: title, parentPath: parentId });
+    }
+
+    // Parse "parent/subdir" path — build absolute virtual path and enable recursive mkdir.
+    const lastSlash = title.lastIndexOf('/');
+    const dirPart = title.slice(0, lastSlash);
+    const dirName = title.slice(lastSlash + 1) || 'New Directory';
+
+    const base = parentId ?? '/';
+    const resolvedParentPath: string | null = dirPart ? `${base}/${dirPart}` : (parentId ?? null);
+
+    return this.engine.driver.createDirectory({
+      name: dirName,
+      parentPath: resolvedParentPath,
+      recursive: true,
+    });
+  };
 
   renameItem = (nodeId: string, newTitle: string): Promise<void> =>
     this.engine.driver.rename(nodeId, newTitle);

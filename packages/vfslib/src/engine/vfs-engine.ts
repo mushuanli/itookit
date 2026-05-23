@@ -89,7 +89,7 @@ export class VFSEngine {
             if (!p) return null;
             return p === '/' ? mountPath : mountPath + p;
         };
-        return { ...node, id: mapPath(node.id)!, path: mapPath(node.path)!, parentId: mapPath(node.parentId) };
+        return { ...node, path: mapPath(node.path)!, parentPath: mapPath(node.parentPath) };
     }
 
     // ── Lifecycle ──
