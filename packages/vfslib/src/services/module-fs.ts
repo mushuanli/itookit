@@ -299,7 +299,10 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     async search(query: FSSearchQuery): Promise<FSSearchResult> {
         const moduleRoot = this.scope.toRealPath('/');
         const nodes = await this.engine.search(moduleRoot, query);
-        const virtualized = nodes.map(n => this.toVirtualNode(n));
+        // VFSEngine.search ignores the path argument when the backend implements search(),
+        // so it returns nodes from all modules. Filter to this module's scope only.
+        const scoped = nodes.filter(n => n.path === moduleRoot || n.path.startsWith(moduleRoot + '/'));
+        const virtualized = scoped.map(n => this.toVirtualNode(n));
         return { nodes: virtualized, total: virtualized.length, hasMore: false };
     }
 
