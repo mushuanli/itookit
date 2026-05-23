@@ -292,13 +292,15 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
     async walkTree(callback: TreeWalkCallback, options?: TreeWalkOptions): Promise<number> {
         const rootPath = options?.rootPath ? this.toRealPath(options.rootPath) : this.scope.toRealPath('/');
-        return this.engine.walkTree(rootPath, callback as any, options);
+        const virtualCallback: TreeWalkCallback = (node, depth) => callback(this.toVirtualNode(node), depth);
+        return this.engine.walkTree(rootPath, virtualCallback as any, options);
     }
 
     async search(query: FSSearchQuery): Promise<FSSearchResult> {
         const moduleRoot = this.scope.toRealPath('/');
         const nodes = await this.engine.search(moduleRoot, query);
-        return { nodes, total: nodes.length, hasMore: false };
+        const virtualized = nodes.map(n => this.toVirtualNode(n));
+        return { nodes: virtualized, total: virtualized.length, hasMore: false };
     }
 
     async getStats(): Promise<import('@itookit/common').FSModuleStats> {
@@ -352,7 +354,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         const newRealPath = `${P.dirname(realPath)}/${newName}`;
         const newVirtualPath = this.scope.toVirtualPath(newRealPath);
         const virtualNode = this.toVirtualNode(node);
-        this._emit('node:renamed', { nodes: [{ nodeId: newVirtualPath, oldName: node.name, newName, oldPath: virtualNode.path, newPath: newVirtualPath }] });
+        this._emit('node:renamed', { nodes: [{ oldPath: virtualNode.path, newPath: newVirtualPath, oldName: node.name, newName }] });
     }
 
     async move(paths: string[], targetParentPath: string | null): Promise<void> {
@@ -362,11 +364,16 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.access.checkAccess(this.caller, targetPath, 'write');
         this.assertWritable(targetPath);
 
+        const nodes: Array<{ oldPath: string; newPath: string; oldParentPath: string | null; newParentPath: string | null }> = [];
         for (const src of paths) {
-            const { realPath } = await this.resolveNode(src);
+            const { node, realPath } = await this.resolveNode(src);
+            const oldPath = this.toVirtualNode(node).path;
+            const newParentVirtual = this.scope.toVirtualPath(targetPath);
+            const newPath = `${newParentVirtual}/${node.name}`;
+            nodes.push({ oldPath, newPath, oldParentPath: this.scope.toVirtualPath(node.parentPath!), newParentPath: newParentVirtual });
             await this.engine.move(realPath, targetPath);
         }
-        this._emit('node:moved', {});
+        this._emit('node:moved', { nodes });
     }
 
     async delete(paths: string[], options?: DeleteOptions): Promise<void> {
