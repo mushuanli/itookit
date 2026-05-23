@@ -18,7 +18,7 @@ export class DirectoryMentionSource extends BaseMentionSource {
         limit: 20,
       });
       return this.filterResults(Array.from(result.nodes)).map(node => ({
-        id: node.id,
+        id: node.path,
         label: `${node.icon || '📁'} ${node.name} (${node.moduleId ? `[${node.moduleId}] ` : ''}${node.path})`,
         title: node.name,
         type: 'directory',
