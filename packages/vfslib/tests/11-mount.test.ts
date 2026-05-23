@@ -64,7 +64,7 @@ describe('Module lifecycle (IndexedDB backend)', () => {
         const docsFS = vfs.manager.getEngine('docs');
         await docsFS.init();
 
-        await testFS.createFile({ name: 'secret.txt', parentIdOrPath: null, content: 'hidden' });
+        await testFS.createFile({ name: 'secret.txt', parentPath: null, content: 'hidden' });
         const children = await docsFS.getChildren('/');
         const names = children.map(c => c.name);
         expect(names).not.toContain('secret.txt');
@@ -87,7 +87,7 @@ describe('Secondary backend mount (IDB root + Memory extra)', () => {
             const extraFS = manager.getEngine('extra');
             await extraFS.init();
 
-            await extraFS.createFile({ name: 'extra.txt', parentIdOrPath: null, content: 'in-extra' });
+            await extraFS.createFile({ name: 'extra.txt', parentPath: null, content: 'in-extra' });
             const text = await extraFS.readContent('/extra.txt', { encoding: 'utf-8' });
             expect(text).toBe('in-extra');
 
@@ -114,8 +114,8 @@ describe('Secondary backend mount (IDB root + Memory extra)', () => {
             await testFS.init();
             await extraFS.init();
 
-            await testFS.createFile({ name: 'idb.txt', parentIdOrPath: null, content: 'idb-data' });
-            await extraFS.createFile({ name: 'mem.txt', parentIdOrPath: null, content: 'mem-data' });
+            await testFS.createFile({ name: 'idb.txt', parentPath: null, content: 'idb-data' });
+            await extraFS.createFile({ name: 'mem.txt', parentPath: null, content: 'mem-data' });
 
             expect(await testFS.exists('/mem.txt')).toBe(false);
             expect(await extraFS.exists('/idb.txt')).toBe(false);
@@ -152,8 +152,8 @@ describe('Secondary backend mount (IDB root + Memory extra)', () => {
         await dataFS.init();
 
         // Writing to /attachments in data module goes to subMem
-        await dataFS.createDirectory({ name: 'attachments', parentIdOrPath: null, recursive: true });
-        await dataFS.createFile({ name: 'file.pdf', parentIdOrPath: '/attachments', content: 'pdf-bytes', recursive: true });
+        await dataFS.createDirectory({ name: 'attachments', parentPath: null, recursive: true });
+        await dataFS.createFile({ name: 'file.pdf', parentPath: '/attachments', content: 'pdf-bytes', recursive: true });
 
         expect(await dataFS.exists('/attachments/file.pdf')).toBe(true);
         await manager.dispose();
@@ -175,8 +175,8 @@ describe('Secondary backend mount (IDB root + Memory extra)', () => {
         await fs1.init();
         await fs2.init();
 
-        await fs1.createFile({ name: 'from1.txt', parentIdOrPath: null, content: 'idb1' });
-        await fs2.createFile({ name: 'from2.txt', parentIdOrPath: null, content: 'idb2' });
+        await fs1.createFile({ name: 'from1.txt', parentPath: null, content: 'idb1' });
+        await fs2.createFile({ name: 'from2.txt', parentPath: null, content: 'idb2' });
 
         expect(await readText(fs1, '/from1.txt')).toBe('idb1');
         expect(await readText(fs2, '/from2.txt')).toBe('idb2');
@@ -198,7 +198,7 @@ describe('System-level readBySystemPath', () => {
 
     it('readBySystemPath reads file via absolute VFS path', async () => {
         const { fs, manager } = vfs;
-        await fs.driver.createFile({ name: 'sys.txt', parentIdOrPath: null, content: 'sys-data' });
+        await fs.driver.createFile({ name: 'sys.txt', parentPath: null, content: 'sys-data' });
         // System path uses real VFS path: /module/test/sys.txt
         const content = await manager.readBySystemPath('/module/test/sys.txt');
         expect(typeof content === 'string' || content instanceof ArrayBuffer).toBe(true);
@@ -206,7 +206,7 @@ describe('System-level readBySystemPath', () => {
 
     it('manager.read convenience method reads file content', async () => {
         const { fs, manager } = vfs;
-        await fs.driver.createFile({ name: 'mgr.txt', parentIdOrPath: null, content: 'mgr-data' });
+        await fs.driver.createFile({ name: 'mgr.txt', parentPath: null, content: 'mgr-data' });
         const content = await manager.read('test', '/mgr.txt');
         // FileContent can be string | ArrayBuffer | Uint8Array
         const text = typeof content === 'string'
@@ -224,7 +224,7 @@ describe('System-level readBySystemPath', () => {
 
     it('manager.exists works across modules', async () => {
         const { fs, manager } = vfs;
-        await fs.driver.createFile({ name: 'check.txt', parentIdOrPath: null, content: '' });
+        await fs.driver.createFile({ name: 'check.txt', parentPath: null, content: '' });
         expect(await manager.exists('test', '/check.txt')).toBe(true);
         expect(await manager.exists('test', '/no-such.txt')).toBe(false);
     });

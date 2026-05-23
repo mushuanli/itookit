@@ -242,7 +242,7 @@ export class MemoryManager {
             content: options.content,
         });
 
-        console.log(`[MemoryManager] Created new file: ${newNode.id}, title: ${title}`);
+        console.log(`[MemoryManager] Created new file: ${newNode.path}, title: ${title}`);
 
         // VFSService.createFile 内部已触发 engine 事件 → EngineAdapter 自动更新侧边栏
         // SESSION_CREATE_SUCCESS 会自动选中新文件
@@ -251,11 +251,11 @@ export class MemoryManager {
 
         // 如果自动选中未生效，手动选中
         const currentId = this.getActiveSessionId();
-        if (currentId !== newNode.id) {
-            await this.openFileInternal(newNode.id);
+        if (currentId !== newNode.path) {
+            await this.openFileInternal(newNode.path);
         }
 
-        return newNode.id;
+        return newNode.path;
     }
 
 

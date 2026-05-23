@@ -195,7 +195,7 @@ describe('LocalFSBackend — createFile writes to disk', () => {
     afterEach(async ()  => { await ctx.cleanup(); });
 
     it('createFile creates a real file', async () => {
-        await ctx.homeFS.createFile({ name: 'hello.md', parentIdOrPath: null, content: 'world' });
+        await ctx.homeFS.createFile({ name: 'hello.md', parentPath: null, content: 'world' });
         expect(await existsDisk(ctx.rootDir, 'hello.md')).toBe(true);
         expect(await readDisk(ctx.rootDir, 'hello.md')).toBe('world');
     });
@@ -203,7 +203,7 @@ describe('LocalFSBackend — createFile writes to disk', () => {
     it('createFile with nested directory (recursive)', async () => {
         await ctx.homeFS.createFile({
             name: 'note.md',
-            parentIdOrPath: '/drafts',
+            parentPath: '/drafts',
             content: 'draft content',
             recursive: true,
         });
@@ -212,13 +212,13 @@ describe('LocalFSBackend — createFile writes to disk', () => {
     });
 
     it('createDirectory creates a real directory', async () => {
-        await ctx.homeFS.createDirectory({ name: 'projects', parentIdOrPath: null });
+        await ctx.homeFS.createDirectory({ name: 'projects', parentPath: null });
         const stat = await fsp.stat(join(ctx.rootDir, 'projects'));
         expect(stat.isDirectory()).toBe(true);
     });
 
     it('created file is visible in getChildren', async () => {
-        await ctx.homeFS.createFile({ name: 'visible.txt', parentIdOrPath: null, content: '' });
+        await ctx.homeFS.createFile({ name: 'visible.txt', parentPath: null, content: '' });
         const children = await ctx.homeFS.getChildren('/');
         expect(children.map(c => c.name)).toContain('visible.txt');
     });
@@ -230,7 +230,7 @@ describe('LocalFSBackend — readContent reads from disk', () => {
     afterEach(async ()  => { await ctx.cleanup(); });
 
     it('reads content written via VFS', async () => {
-        await ctx.homeFS.createFile({ name: 'data.txt', parentIdOrPath: null, content: 'vfs content' });
+        await ctx.homeFS.createFile({ name: 'data.txt', parentPath: null, content: 'vfs content' });
         const result = await ctx.homeFS.readContent('/data.txt', { encoding: 'utf-8' });
         expect(result).toBe('vfs content');
     });
@@ -245,7 +245,7 @@ describe('LocalFSBackend — readContent reads from disk', () => {
         const bytes = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
         await ctx.homeFS.createFile({
             name: 'bin.dat',
-            parentIdOrPath: null,
+            parentPath: null,
             content: bytes.buffer as ArrayBuffer,
         });
         const result = await ctx.homeFS.readContent('/bin.dat', { encoding: 'binary' }) as ArrayBuffer;
@@ -259,13 +259,13 @@ describe('LocalFSBackend — writeContent updates disk', () => {
     afterEach(async ()  => { await ctx.cleanup(); });
 
     it('writeContent overwrites disk file', async () => {
-        await ctx.homeFS.createFile({ name: 'log.txt', parentIdOrPath: null, content: 'v1' });
+        await ctx.homeFS.createFile({ name: 'log.txt', parentPath: null, content: 'v1' });
         await ctx.homeFS.writeContent('/log.txt', 'v2');
         expect(await readDisk(ctx.rootDir, 'log.txt')).toBe('v2');
     });
 
     it('writeContent append mode appends to disk file', async () => {
-        await ctx.homeFS.createFile({ name: 'append.txt', parentIdOrPath: null, content: 'AAA' });
+        await ctx.homeFS.createFile({ name: 'append.txt', parentPath: null, content: 'AAA' });
         await ctx.homeFS.writeContent('/append.txt', 'BBB', { mode: 'append' });
         const onDisk = await readDisk(ctx.rootDir, 'append.txt');
         expect(onDisk).toBe('AAABBB');
@@ -278,7 +278,7 @@ describe('LocalFSBackend — rename updates disk', () => {
     afterEach(async ()  => { await ctx.cleanup(); });
 
     it('rename moves file on disk', async () => {
-        await ctx.homeFS.createFile({ name: 'old.md', parentIdOrPath: null, content: 'data' });
+        await ctx.homeFS.createFile({ name: 'old.md', parentPath: null, content: 'data' });
         await ctx.homeFS.rename('/old.md', 'new.md');
 
         expect(await existsDisk(ctx.rootDir, 'old.md')).toBe(false);
@@ -287,7 +287,7 @@ describe('LocalFSBackend — rename updates disk', () => {
     });
 
     it('renamed file is visible under new name in getChildren', async () => {
-        await ctx.homeFS.createFile({ name: 'alpha.txt', parentIdOrPath: null, content: '' });
+        await ctx.homeFS.createFile({ name: 'alpha.txt', parentPath: null, content: '' });
         await ctx.homeFS.rename('/alpha.txt', 'beta.txt');
 
         const names = (await ctx.homeFS.getChildren('/')).map(c => c.name);
@@ -302,7 +302,7 @@ describe('LocalFSBackend — delete removes from disk', () => {
     afterEach(async ()  => { await ctx.cleanup(); });
 
     it('delete removes the real file', async () => {
-        await ctx.homeFS.createFile({ name: 'gone.txt', parentIdOrPath: null, content: 'bye' });
+        await ctx.homeFS.createFile({ name: 'gone.txt', parentPath: null, content: 'bye' });
         expect(await existsDisk(ctx.rootDir, 'gone.txt')).toBe(true);
 
         const node = await ctx.homeFS.getNode('/gone.txt');
@@ -311,7 +311,7 @@ describe('LocalFSBackend — delete removes from disk', () => {
     });
 
     it('deleted file disappears from getChildren', async () => {
-        await ctx.homeFS.createFile({ name: 'temp.md', parentIdOrPath: null, content: '' });
+        await ctx.homeFS.createFile({ name: 'temp.md', parentPath: null, content: '' });
         const node = await ctx.homeFS.getNode('/temp.md');
         await ctx.homeFS.delete([node!.id]);
 
@@ -320,8 +320,8 @@ describe('LocalFSBackend — delete removes from disk', () => {
     });
 
     it('delete directory recursively removes from disk', async () => {
-        await ctx.homeFS.createDirectory({ name: 'subdir', parentIdOrPath: null });
-        await ctx.homeFS.createFile({ name: 'child.txt', parentIdOrPath: '/subdir', content: 'c' });
+        await ctx.homeFS.createDirectory({ name: 'subdir', parentPath: null });
+        await ctx.homeFS.createFile({ name: 'child.txt', parentPath: '/subdir', content: 'c' });
 
         const dir = await ctx.homeFS.getNode('/subdir');
         await ctx.homeFS.delete([dir!.id], { recursive: true });
@@ -335,18 +335,18 @@ describe('LocalFSBackend — cross-backend isolation', () => {
     afterEach(async ()  => { await ctx.cleanup(); });
 
     it('home (LocalFS) file not visible in test (IndexedDB) module', async () => {
-        await ctx.homeFS.createFile({ name: 'home-only.md', parentIdOrPath: null, content: 'home' });
+        await ctx.homeFS.createFile({ name: 'home-only.md', parentPath: null, content: 'home' });
         expect(await ctx.testFS.exists('/home-only.md')).toBe(false);
     });
 
     it('test (IndexedDB) file not visible in home (LocalFS) module', async () => {
-        await ctx.testFS.createFile({ name: 'idb-only.txt', parentIdOrPath: null, content: 'idb' });
+        await ctx.testFS.createFile({ name: 'idb-only.txt', parentPath: null, content: 'idb' });
         expect(await ctx.homeFS.exists('/idb-only.txt')).toBe(false);
     });
 
     it('same filename in both modules stays independent', async () => {
-        await ctx.homeFS.createFile({ name: 'shared-name.md', parentIdOrPath: null, content: 'localfs' });
-        await ctx.testFS.createFile({ name: 'shared-name.md', parentIdOrPath: null, content: 'indexeddb' });
+        await ctx.homeFS.createFile({ name: 'shared-name.md', parentPath: null, content: 'localfs' });
+        await ctx.testFS.createFile({ name: 'shared-name.md', parentPath: null, content: 'indexeddb' });
 
         const homeText = await ctx.homeFS.readContent('/shared-name.md', { encoding: 'utf-8' });
         const testText = await ctx.testFS.readContent('/shared-name.md', { encoding: 'utf-8' });
@@ -362,20 +362,20 @@ describe('LocalFSBackend — node ID and mountId', () => {
     afterEach(async ()  => { await ctx.cleanup(); });
 
     it('home module nodes carry mount_1 prefix', async () => {
-        await ctx.homeFS.createFile({ name: 'file.txt', parentIdOrPath: null, content: 'x' });
+        await ctx.homeFS.createFile({ name: 'file.txt', parentPath: null, content: 'x' });
         const [node] = await ctx.homeFS.getChildren('/');
         // mount_0 = root IndexedDB, mount_1 = LocalFSBackend at /module/home
         expect(node.id).toMatch(/^mount_1:/);
     });
 
     it('test module nodes carry mount_0 prefix', async () => {
-        await ctx.testFS.createFile({ name: 'file.txt', parentIdOrPath: null, content: 'x' });
+        await ctx.testFS.createFile({ name: 'file.txt', parentPath: null, content: 'x' });
         const [node] = await ctx.testFS.getChildren('/');
         expect(node.id).toMatch(/^mount_0:/);
     });
 
     it('getNode by id round-trips correctly', async () => {
-        await ctx.homeFS.createFile({ name: 'roundtrip.md', parentIdOrPath: null, content: 'rt' });
+        await ctx.homeFS.createFile({ name: 'roundtrip.md', parentPath: null, content: 'rt' });
         const [node] = await ctx.homeFS.getChildren('/');
 
         const fetched = await ctx.homeFS.getNode(node.id);
@@ -390,8 +390,8 @@ describe('LocalFSBackend — move', () => {
     afterEach(async ()  => { await ctx.cleanup(); });
 
     it('move file into subdirectory updates disk', async () => {
-        await ctx.homeFS.createDirectory({ name: 'sub', parentIdOrPath: null });
-        await ctx.homeFS.createFile({ name: 'moveme.txt', parentIdOrPath: null, content: 'move' });
+        await ctx.homeFS.createDirectory({ name: 'sub', parentPath: null });
+        await ctx.homeFS.createFile({ name: 'moveme.txt', parentPath: null, content: 'move' });
 
         const node = await ctx.homeFS.getNode('/moveme.txt');
         await ctx.homeFS.move([node!.id], '/sub');

@@ -23,7 +23,7 @@ export class AssetManagerUI {
     private listContainer!: HTMLElement;
     private statsEl!: HTMLElement;
     private cleanBtn!: HTMLElement;
-    private currentAssetDirId: string = '';
+    private currentAssetDirPath: string = '';
 
     constructor(
         private engine: IModuleFS,
@@ -31,8 +31,8 @@ export class AssetManagerUI {
         private options: AssetConfigOptions = {}
     ) { }
 
-    public async show(assetDirId: string): Promise<void> {
-        this.currentAssetDirId = assetDirId;
+    public async show(assetDirPath: string): Promise<void> {
+        this.currentAssetDirPath = assetDirPath;
         this.createModalStructure();
 
         if (this.overlay) {
@@ -64,7 +64,7 @@ export class AssetManagerUI {
 
         let files: FSNode[] = [];
         try {
-            files = await this.engine.driver.getChildren(this.currentAssetDirId);
+            files = await this.engine.driver.getChildren(this.currentAssetDirPath);
         } catch (e) {
             console.error('[AssetManager] Failed to get children:', e);
             this.listContainer.innerHTML = '<div class="mdx-empty-state">读取目录失败</div>';
@@ -166,7 +166,7 @@ export class AssetManagerUI {
             if (!this.isPreviewableImage(item.node.name)) return;
 
             try {
-                const buffer = await this.engine.driver.readContent(item.node.id);
+                const buffer = await this.engine.driver.readContent(item.node.path);
                 if (!buffer) return;
 
                 const mimeType = guessMimeType(item.node.name);
@@ -280,7 +280,7 @@ export class AssetManagerUI {
             }
 
             try {
-                await this.engine.driver.delete([item.node.id]);
+                await this.engine.driver.delete([item.node.path]);
                 Toast.success('删除成功');
                 await this.refreshAssetList();
             } catch (e) {
@@ -307,7 +307,7 @@ export class AssetManagerUI {
 
     private async handleDownload(node: FSNode): Promise<void> {
         try {
-            const content = await this.engine.driver.readContent(node.id);
+            const content = await this.engine.driver.readContent(node.path);
             if (!content) {
                 Toast.error('文件内容为空');
                 return;
@@ -340,7 +340,7 @@ export class AssetManagerUI {
         if (!confirmed) return;
 
         try {
-            await this.engine.driver.delete(items.map(i => i.node.id));
+            await this.engine.driver.delete(items.map(i => i.node.path));
             Toast.success(`已清理 ${items.length} 个文件`);
             await this.refreshAssetList();
         } catch (e) {

@@ -45,6 +45,6 @@ export function validateFilename(name: string, pattern: RegExp = DEFAULT_FILENAM
     return null;
 }
 
-export function isPath(idOrPath: string): boolean {
-    return idOrPath.startsWith('/');
+export function isPath(path: string): boolean {
+    return path.startsWith('/');
 }

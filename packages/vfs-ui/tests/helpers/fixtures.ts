@@ -15,7 +15,7 @@ export const sleep = (ms: number): Promise<void> =>
 
 export const makeEngineNode = (overrides: Partial<EngineNode> = {}): EngineNode => ({
     id: 'node-1',
-    parentId: null,
+    parentPath: null,
     name: 'test.chat',
     type: 'file',
     path: '/test.chat',
@@ -42,7 +42,7 @@ export const makeVFSNodeUI = (overrides: Partial<VFSNodeUI> = {}): VFSNodeUI => 
         tags: [],
         createdAt: new Date(1000000).toISOString(),
         lastModified: new Date(1000000).toISOString(),
-        parentId: null,
+        parentPath: null,
         path: '/test.chat',
         moduleId: 'chat',
         custom: { _originalName: 'test.chat', _extension: '.chat' },
@@ -125,8 +125,8 @@ export const mockFileTypePort: IFileTypePort = {
 
 // ── FSNodeCreatedPayload builders ────────────────────────────────────────────
 
-export const createdPayload = (nodes: Array<{ nodeId: string; parentId?: string | null; path: string; type?: 'file' | 'directory' }>) => ({
-    nodes: nodes.map(n => ({ nodeId: n.nodeId, parentId: n.parentId ?? null, path: n.path, type: n.type ?? 'file' })),
+export const createdPayload = (nodes: Array<{ nodeId: string; parentPath?: string | null; path: string; type?: 'file' | 'directory' }>) => ({
+    nodes: nodes.map(n => ({ nodeId: n.nodeId, parentPath: n.parentPath ?? null, path: n.path, type: n.type ?? 'file' })),
 });
 
 export const updatedPayload = (nodes: Array<{ nodeId: string; path: string }>) => ({

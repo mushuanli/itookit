@@ -186,32 +186,31 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         const mapPath = (p: string | null) => p ? this.scope.toVirtualPath(p) : null;
         return {
             ...node,
-            id: mapPath(node.id)!,
             path: mapPath(node.path)!,
-            parentId: mapPath(node.parentId),
+            parentPath: mapPath(node.parentPath),
         };
     }
 
-    /** Convert a public ID or virtual path to a system-real path. */
-    private toRealPath(idOrPath: string): string {
-        if (isPath(idOrPath)) {
+    /** Convert a virtual path to a system-real path. */
+    private toRealPath(path: string): string {
+        if (isPath(path)) {
             // Defend against double-mapping: if the path is already a system path
             // (e.g. a caller passed "/module/etc/llm/config.json" directly),
             // return it as-is to avoid "/module/etc/module/etc/..." duplication.
             const mountPrefix = `/module/${this.moduleId}/`;
-            if (idOrPath.startsWith(mountPrefix) || idOrPath.startsWith('/module/')) {
-                return idOrPath;
+            if (path.startsWith(mountPrefix) || path.startsWith('/module/')) {
+                return path;
             }
-            return this.scope.toRealPath(idOrPath);
+            return this.scope.toRealPath(path);
         }
-        throw new FSError('EINVAL', 'path-based engine requires paths, not IDs', 'resolve', idOrPath);
+        throw new FSError('EINVAL', 'path-based engine requires paths, not IDs', 'resolve', path);
     }
 
     /** Stat + return { node, realPath }. Throws if not found. @internal — exposed for InlineAssetOps */
-    async resolveNode(idOrPath: string): Promise<{ node: FSNode; realPath: string }> {
-        const realPath = this.toRealPath(idOrPath);
+    async resolveNode(path: string): Promise<{ node: FSNode; realPath: string }> {
+        const realPath = this.toRealPath(path);
         const node = await this.engine.stat(realPath);
-        if (!node) throw new FSNotFoundError(idOrPath);
+        if (!node) throw new FSNotFoundError(path);
         return { node, realPath };
     }
 
@@ -229,20 +228,20 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     // IFSDriver Read
     // ══════════════════════════════════════════════════════════
 
-    async getNode(idOrPath: string): Promise<FSNode | null> {
+    async getNode(path: string): Promise<FSNode | null> {
         try {
-            const realPath = this.toRealPath(idOrPath);
+            const realPath = this.toRealPath(path);
             const node = await this.engine.stat(realPath);
             return node ? this.toVirtualNode(node) : null;
         } catch { return null; }
     }
 
     // IFSDriver overloaded getChildren signatures
-    getChildren(idOrPath: string, options?: ListOptions & { fields?: 'full' }): Promise<FSNode[]>;
-    getChildren(idOrPath: string, options: ListOptions & { fields: 'entry' }): Promise<DirEntry[]>;
-    getChildren(idOrPath: string, options?: ListOptions): Promise<FSNode[] | DirEntry[]>;
-    async getChildren(idOrPath: string, options?: any): Promise<FSNode[] | DirEntry[]> {
-        const realPath = this.toRealPath(idOrPath);
+    getChildren(path: string, options?: ListOptions & { fields?: 'full' }): Promise<FSNode[]>;
+    getChildren(path: string, options: ListOptions & { fields: 'entry' }): Promise<DirEntry[]>;
+    getChildren(path: string, options?: ListOptions): Promise<FSNode[] | DirEntry[]>;
+    async getChildren(path: string, options?: any): Promise<FSNode[] | DirEntry[]> {
+        const realPath = this.toRealPath(path);
         this.access.checkAccess(this.caller, realPath, 'list');
         const children = await this.engine.listChildren(realPath);
         const filtered = children.filter(c => {
@@ -253,7 +252,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         });
         if (options?.fields === 'entry') {
             return filtered.map(c => ({
-                id: this.scope.toVirtualPath(c.id), name: c.name, type: c.type,
+                path: this.scope.toVirtualPath(c.path), name: c.name, type: c.type,
                 size: (c as any).size, modifiedAt: c.modifiedAt
             } as DirEntry));
         }
@@ -261,11 +260,11 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     }
 
     // IFSDriver overloaded readContent signatures
-    readContent(idOrPath: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
-    readContent(idOrPath: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
-    readContent(idOrPath: string, options?: ReadOptions): Promise<FileContent>;
-    async readContent(idOrPath: string, options?: ReadOptions): Promise<FileContent> {
-        const { realPath } = await this.resolveNode(idOrPath);
+    readContent(path: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
+    readContent(path: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
+    readContent(path: string, options?: ReadOptions): Promise<FileContent>;
+    async readContent(path: string, options?: ReadOptions): Promise<FileContent> {
+        const { realPath } = await this.resolveNode(path);
         this.access.checkAccess(this.caller, realPath, 'read');
         const data = await this.engine.readContent(realPath);
         if (options?.encoding === 'utf-8') return toString(data);
@@ -283,16 +282,16 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         } catch { return null; }
     }
 
-    async exists(idOrPath: string): Promise<boolean> {
+    async exists(path: string): Promise<boolean> {
         try {
-            const realPath = this.toRealPath(idOrPath);
+            const realPath = this.toRealPath(path);
             const node = await this.engine.tryStat(realPath);
             return node !== null;
         } catch { return false; }
     }
 
     async walkTree(callback: TreeWalkCallback, options?: TreeWalkOptions): Promise<number> {
-        const rootPath = options?.rootIdOrPath ? this.toRealPath(options.rootIdOrPath) : this.scope.toRealPath('/');
+        const rootPath = options?.rootPath ? this.toRealPath(options.rootPath) : this.scope.toRealPath('/');
         return this.engine.walkTree(rootPath, callback as any, options);
     }
 
@@ -316,7 +315,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     // ══════════════════════════════════════════════════════════
 
     async createFile(options: CreateFileOptions): Promise<FSNode> {
-        const parentPath = options.parentIdOrPath ? this.toRealPath(options.parentIdOrPath) : this.scope.toRealPath('/');
+        const parentPath = options.parentPath ? this.toRealPath(options.parentPath) : this.scope.toRealPath('/');
         this.access.checkAccess(this.caller, parentPath, 'write');
         this.assertWritable(parentPath);
 
@@ -325,7 +324,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
             { overwrite: options.overwrite, recursive: options.recursive });
 
         const virtual = this.toVirtualNode(node);
-        this._emit('node:created', { nodes: [{ nodeId: virtual.id, parentId: virtual.parentId, path: virtual.path, type: virtual.type }] });
+        this._emit('node:created', { nodes: [{ path: virtual.path, parentPath: virtual.parentPath, type: virtual.type }] });
         return virtual;
     }
 
@@ -333,20 +332,20 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         return this.createFile({ ...options, type: 'directory', content: undefined });
     }
 
-    async writeContent(idOrPath: string, content: FileContent, options?: WriteOptions): Promise<void> {
-        const { node, realPath } = await this.resolveNode(idOrPath);
+    async writeContent(path: string, content: FileContent, options?: WriteOptions): Promise<void> {
+        const { node, realPath } = await this.resolveNode(path);
         this.access.checkAccess(this.caller, realPath, 'write');
         this.assertWritable(realPath);
         await this.engine.writeContent(realPath, content, options);
-        this._emit('node:updated', { nodes: [{ nodeId: node.id, path: node.path, changedFields: ['content'] }] });
+        this._emit('node:updated', { nodes: [{ path: node.path, changedFields: ['content'] }] });
     }
 
-    async appendContent(idOrPath: string, content: FileContent): Promise<void> {
-        return this.writeContent(idOrPath, content, { mode: 'append' });
+    async appendContent(path: string, content: FileContent): Promise<void> {
+        return this.writeContent(path, content, { mode: 'append' });
     }
 
-    async rename(idOrPath: string, newName: string): Promise<void> {
-        const { node, realPath } = await this.resolveNode(idOrPath);
+    async rename(path: string, newName: string): Promise<void> {
+        const { node, realPath } = await this.resolveNode(path);
         this.access.checkAccess(this.caller, realPath, 'write');
         this.assertWritable(realPath);
         await this.engine.rename(realPath, newName);
@@ -356,54 +355,54 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this._emit('node:renamed', { nodes: [{ nodeId: newVirtualPath, oldName: node.name, newName, oldPath: virtualNode.path, newPath: newVirtualPath }] });
     }
 
-    async move(idsOrPaths: string[], targetParentIdOrPath: string | null): Promise<void> {
-        const targetPath = targetParentIdOrPath
-            ? this.toRealPath(targetParentIdOrPath)
+    async move(paths: string[], targetParentPath: string | null): Promise<void> {
+        const targetPath = targetParentPath
+            ? this.toRealPath(targetParentPath)
             : this.scope.toRealPath('/');
         this.access.checkAccess(this.caller, targetPath, 'write');
         this.assertWritable(targetPath);
 
-        for (const src of idsOrPaths) {
+        for (const src of paths) {
             const { realPath } = await this.resolveNode(src);
             await this.engine.move(realPath, targetPath);
         }
         this._emit('node:moved', {});
     }
 
-    async delete(idsOrPaths: string[], options?: DeleteOptions): Promise<void> {
-        for (const idOrPath of idsOrPaths) {
-            const realPath = this.toRealPath(idOrPath);
+    async delete(paths: string[], options?: DeleteOptions): Promise<void> {
+        for (const path of paths) {
+            const realPath = this.toRealPath(path);
             this.access.checkAccess(this.caller, realPath, 'delete');
             this.assertWritable(realPath);
             await this.engine.delete(realPath, options);
         }
-        this._emit('node:deleted', { requestedIds: idsOrPaths, allDeletedIds: idsOrPaths });
+        this._emit('node:deleted', { requestedPaths: paths, allDeletedPaths: paths });
     }
 
-    async updateMetadata(idOrPath: string, metadata: Record<string, unknown>): Promise<void> {
-        const { node, realPath } = await this.resolveNode(idOrPath);
+    async updateMetadata(path: string, metadata: Record<string, unknown>): Promise<void> {
+        const { node, realPath } = await this.resolveNode(path);
         this.access.checkAccess(this.caller, realPath, 'write');
         await this.engine.updateMetadata(realPath, metadata);
-        this._emit('node:updated', { nodes: [{ nodeId: node.id, path: node.path, changedFields: ['metadata'] }] });
+        this._emit('node:updated', { nodes: [{ path: node.path, changedFields: ['metadata'] }] });
     }
 
     // ── Copy ──
-    async copy(sourceIdOrPath: string, targetParentIdOrPath: string | null, newName?: string): Promise<FSNode> {
-        const { node, realPath } = await this.resolveNode(sourceIdOrPath);
-        const targetPath = targetParentIdOrPath ? this.toRealPath(targetParentIdOrPath) : P.dirname(realPath);
+    async copy(sourcePath: string, targetParentPath: string | null, newName?: string): Promise<FSNode> {
+        const { node, realPath } = await this.resolveNode(sourcePath);
+        const targetPath = targetParentPath ? this.toRealPath(targetParentPath) : P.dirname(realPath);
         const name = newName ?? node.name;
 
         if (node.type === 'directory') {
-            const newNode = await this.createDirectory({ name, parentIdOrPath: targetParentIdOrPath, metadata: node.metadata as any });
-            const children = await this.getChildren(sourceIdOrPath);
+            const newNode = await this.createDirectory({ name, parentPath: targetParentPath, metadata: node.metadata as any });
+            const children = await this.getChildren(sourcePath);
             for (const child of children) {
-                await this.copy(child.id, newNode.id);
+                await this.copy(child.path, newNode.path);
             }
             return newNode;
         }
 
-        const fileContent = await this.readContent(sourceIdOrPath);
-        return this.createFile({ name, parentIdOrPath: targetPath, type: node.type, content: fileContent as string | ArrayBuffer, metadata: node.metadata as any, tags: [...node.tags] });
+        const fileContent = await this.readContent(sourcePath);
+        return this.createFile({ name, parentPath: targetPath, type: node.type, content: fileContent as string | ArrayBuffer, metadata: node.metadata as any, tags: [...node.tags] });
     }
 
     // ── Symlink ──
@@ -415,12 +414,12 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.assertWritable(realDir);
         const node = await this.engine.createSymlink(realDir, name, targetPath);
         const virtual = this.toVirtualNode(node);
-        this._emit('node:created', { nodes: [{ nodeId: virtual.id, parentId: virtual.parentId, path: virtual.path, type: 'symlink' }] });
+        this._emit('node:created', { nodes: [{ path: virtual.path, parentPath: virtual.parentPath, type: 'symlink' }] });
         return virtual;
     }
 
-    async readlink(idOrPath: string): Promise<string> {
-        const { realPath } = await this.resolveNode(idOrPath);
+    async readlink(path: string): Promise<string> {
+        const { realPath } = await this.resolveNode(path);
         return this.engine.readSymlink(realPath);
     }
 
@@ -429,23 +428,23 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     }
 
     // ── Device ──
-    async createDeviceFile(name: string, parentIdOrPath: string | null, handlerId: string): Promise<FSNode> {
-        const parentPath = parentIdOrPath ? this.toRealPath(parentIdOrPath) : this.scope.toRealPath('/dev');
-        return this.engine.createFile(parentPath, name, 'device', undefined, undefined, { deviceHandlerId: handlerId });
+    async createDeviceFile(name: string, parentPath: string | null, handlerId: string): Promise<FSNode> {
+        const realParentPath = parentPath ? this.toRealPath(parentPath) : this.scope.toRealPath('/dev');
+        return this.engine.createFile(realParentPath, name, 'device', undefined, undefined, { deviceHandlerId: handlerId });
     }
 
-    async ioctl(idOrPath: string, command: string | number, arg?: unknown): Promise<unknown> {
-        const { node } = await this.resolveNode(idOrPath);
+    async ioctl(path: string, command: string | number, arg?: unknown): Promise<unknown> {
+        const { node } = await this.resolveNode(path);
         if (node.type !== 'device') throw new FSError('ENOTTY', 'not a device file', 'ioctl', node.path);
         const handlerId = (node as any).deviceHandlerId;
         if (!handlerId) throw new FSError('ENOTTY', 'no device handler', 'ioctl', node.path);
         const driver = this.devices.get(handlerId);
         if (!driver.ioctl) throw new FSError('ENOTTY', 'device does not support ioctl', 'ioctl', node.path);
-        return driver.ioctl({ nodeId: node.id, name: node.name, metadata: node.metadata }, command, arg);
+        return driver.ioctl({ nodeId: node.path, name: node.name, metadata: node.metadata }, command, arg);
     }
 
-    async openDevice(idOrPath: string, options?: Record<string, unknown>): Promise<IDeviceHandle> {
-        const { node } = await this.resolveNode(idOrPath);
+    async openDevice(path: string, options?: Record<string, unknown>): Promise<IDeviceHandle> {
+        const { node } = await this.resolveNode(path);
         if (node.type !== 'device') throw new FSError('ENOTTY', 'not a device file', 'openDevice', node.path);
         const handlerId = (node as any).deviceHandlerId;
         if (!handlerId) throw new FSError('ENOTTY', 'no device handler', 'openDevice', node.path);
@@ -454,7 +453,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         // with system identity (driver can mask/filter sensitive data before
         // returning to the non-system caller).
         const baseCtx: DeviceContext = {
-            nodeId: node.id,
+            nodeId: node.path,
             name: node.name,
             metadata: node.metadata,
             systemFS: this.systemFS,
@@ -529,9 +528,9 @@ class InlineAssetOps implements IAssetOperations {
         } catch { return null; }
     }
 
-    async getAssetDirId(ownerIdOrPath: string): Promise<string | null> {
+    async getAssetDirPath(ownerPath: string): Promise<string | null> {
         try {
-            const { realPath } = await this.fs.resolveNode(ownerIdOrPath);
+            const { realPath } = await this.fs.resolveNode(ownerPath);
             const assetDir = await this._engine().getAssetDirPath(realPath);
             return assetDir || null;
         } catch { return null; }
@@ -567,8 +566,8 @@ class InlineAssetOps implements IAssetOperations {
     }
 
     async hasAssetDir(ownerIdOrPath: string): Promise<boolean> {
-        const dirId = await this.getAssetDirId(ownerIdOrPath);
-        return dirId !== null;
+        const dirPath = await this.getAssetDirPath(ownerIdOrPath);
+        return dirPath !== null;
     }
 }
 
@@ -584,31 +583,31 @@ class InlineTagOps implements ITagOperations {
         return tags.map(t => ({ name: t }));
     }
 
-    async setTags(idOrPath: string, tags: string[]): Promise<void> {
-        const { realPath } = await this.fs.resolveNode(idOrPath);
+    async setTags(path: string, tags: string[]): Promise<void> {
+        const { realPath } = await this.fs.resolveNode(path);
         await this.fs._backend.setTags(realPath, tags);
-        this.fs._emit('node:updated', { nodes: [{ nodeId: idOrPath }] });
+        this.fs._emit('node:updated', { nodes: [{ path }] });
     }
 
-    async addTag(idOrPath: string, tag: string): Promise<void> {
-        const { node, realPath } = await this.fs.resolveNode(idOrPath);
+    async addTag(path: string, tag: string): Promise<void> {
+        const { node, realPath } = await this.fs.resolveNode(path);
         const newTags = [...new Set([...node.tags, tag])];
         await this.fs._backend.setTags(realPath, newTags);
     }
 
-    async removeTag(idOrPath: string, tag: string): Promise<void> {
-        const { node, realPath } = await this.fs.resolveNode(idOrPath);
+    async removeTag(path: string, tag: string): Promise<void> {
+        const { node, realPath } = await this.fs.resolveNode(path);
         const newTags = node.tags.filter(t => t !== tag);
         await this.fs._backend.setTags(realPath, newTags);
     }
 
-    async walkByTag(tag: string, callback: (id: string) => boolean | Promise<boolean>): Promise<{ total: number; processed: number }> {
+    async walkByTag(tag: string, callback: (path: string) => boolean | Promise<boolean>): Promise<{ total: number; processed: number }> {
         // Simplified: walk tree and filter by tag
         let processed = 0;
         await this.fs.walkTree((node) => {
             if (node.tags.includes(tag)) {
                 processed++;
-                return callback(node.id);
+                return callback(node.path);
             }
             return true;
         });

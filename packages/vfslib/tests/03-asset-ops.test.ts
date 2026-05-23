@@ -13,7 +13,7 @@ describe('AssetDir operations (IndexedDB backend)', () => {
     const ownerPath = '/report.md';
 
     async function createOwner(fs: Awaited<ReturnType<typeof setupVFS>>['fs']) {
-        await fs.driver.createFile({ name: 'report.md', parentIdOrPath: null, content: '# report' });
+        await fs.driver.createFile({ name: 'report.md', parentPath: null, content: '# report' });
     }
 
     it('putAsset creates assetdir and stores asset', async () => {
@@ -116,8 +116,8 @@ describe('AssetDir operations (IndexedDB backend)', () => {
 
     it('multiple owners have independent asset dirs', async () => {
         const { fs } = vfs;
-        await fs.driver.createFile({ name: 'doc1.md', parentIdOrPath: null, content: '' });
-        await fs.driver.createFile({ name: 'doc2.md', parentIdOrPath: null, content: '' });
+        await fs.driver.createFile({ name: 'doc1.md', parentPath: null, content: '' });
+        await fs.driver.createFile({ name: 'doc2.md', parentPath: null, content: '' });
         await fs.meta.assets!.putAsset('/doc1.md', 'pic.png', 'doc1-asset');
         await fs.meta.assets!.putAsset('/doc2.md', 'pic.png', 'doc2-asset');
         const d1 = await fs.meta.assets!.getAsset('/doc1.md', 'pic.png');

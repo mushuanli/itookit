@@ -43,15 +43,13 @@ export interface FSNodeMetadata extends Record<string, unknown> {
 // ═══════════════════════════════════════════════════════════════
 
 interface FSNodeBase {
-    readonly id: string;
-    readonly parentId: string | null;
+    readonly parentPath: string | null;
     readonly name: string;
     readonly type: FSNodeType;
     readonly createdAt: number;
     readonly modifiedAt: number;
     readonly path: string;
     readonly version: number;
-    readonly nlink: number;
     readonly tags: readonly string[];
     readonly metadata: Readonly<FSNodeMetadata>;
     readonly moduleId?: string;
@@ -63,7 +61,7 @@ export interface FSFileNode extends FSNodeBase {
     readonly type: 'file';
     readonly size: number;
     readonly contentHash?: string;
-    readonly assetDirId?: string;
+    readonly assetDirPath?: string;
 }
 
 export interface FSDirectoryNode extends FSNodeBase {
@@ -74,7 +72,7 @@ export interface FSDirectoryNode extends FSNodeBase {
 export interface FSSeqFileNode extends FSNodeBase {
     readonly type: 'seqfile';
     readonly entryCount?: number;
-    readonly assetDirId?: string;
+    readonly assetDirPath?: string;
 }
 
 export interface FSDeviceNode extends FSNodeBase {
@@ -112,7 +110,7 @@ export type FSNode =
 // ═══════════════════════════════════════════════════════════════
 
 export interface DirEntry {
-    readonly id: string;
+    readonly path: string;
     readonly name: string;
     readonly type: FSNodeType;
     readonly size?: number;
@@ -126,8 +124,8 @@ export interface DirEntry {
 export type RefType = 'mention' | 'depend' | 'related' | 'embed';
 
 export interface Reference {
-    readonly sourceId: string;
-    readonly targetId: string;
+    readonly sourcePath: string;
+    readonly targetPath: string;
     readonly refType: RefType;
     readonly createdAt: number;
     readonly extra?: Readonly<Record<string, unknown>>;

@@ -1329,7 +1329,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             const parent = path.substring(0, path.lastIndexOf('/')) || '/';
             await fs.driver.createFile({
                 name,
-                parentIdOrPath: parent,
+                parentPath: parent,
                 content,
                 recursive: true,
             } as CreateFileOptions);

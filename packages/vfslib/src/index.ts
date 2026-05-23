@@ -22,8 +22,6 @@ export { ModuleFS, type ModuleFSDeps } from './services/module-fs';
 export { VFSManager } from './services/vfs-manager';
 export { ConfigService } from './services/config-service';
 export { ScopedView } from './services/scoped-view';
-export { encodeId, decodeId } from './services/id-mapper';
-
 // ── 内置设备 ──
 export { nullDevice, zeroDevice, randomDevice } from './devices';
 
@@ -36,9 +34,6 @@ export {
     type ChangeListener,
     type ModuleServiceOptions,
 } from './adapter-session/BaseModuleService';
-
-// ── 常量 ──
-// ROOT_INO removed in v4.1 — path-based engine uses '/' instead
 
 // ── File handles ──
 export { FileHandle, createFile, MDXFileHandle, createMDXFile, ChatFileHandle, createChatFile } from './file-io';

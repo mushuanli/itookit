@@ -118,11 +118,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
                 await this.ensureDirectory(parentDir);
                 const node = await this.engine.driver.createFile({
                     name: filename,
-                    parentIdOrPath: parentDir,
+                    parentPath: parentDir,
                     content: JSON.stringify(content, null, 2),
                     metadata: { icon: def.icon || '🤖', title: def.name, description: def.description },
                 });
-                if (initialTags?.length && node?.id) await this.engine.meta.tags?.setTags(node.id, initialTags);
+                if (initialTags?.length && node?.path) await this.engine.meta.tags?.setTags(node.path, initialTags);
                 created++;
             } catch { /* ignore per-agent errors */ }
         }
@@ -181,17 +181,17 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             const results = await this.engine.driver.search(query);
             const existing = Array.from(results.nodes).find((n: FSNode) => n.name === filename);
             if (existing) {
-                this._agentNodeIds.set(agent.id, existing.id);
-                await this.engine.driver.writeContent(existing.id, contentStr);
-                await this.engine.driver.updateMetadata(existing.id, metadata);
+                this._agentNodeIds.set(agent.id, existing.path);
+                await this.engine.driver.writeContent(existing.path, contentStr);
+                await this.engine.driver.updateMetadata(existing.path, metadata);
             } else {
                 const node = await this.engine.driver.createFile({
                     name: filename,
-                    parentIdOrPath: null,
+                    parentPath: null,
                     content: contentStr,
                     metadata,
                 });
-                if (node?.id) this._agentNodeIds.set(agent.id, node.id);
+                if (node?.path) this._agentNodeIds.set(agent.id, node.path);
             }
         }
 
@@ -215,7 +215,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             const query: FSSearchQuery = { name: { contains: filename }, type: 'file' };
             const results = await this.engine.driver.search(query);
             const node = Array.from(results.nodes).find((n: FSNode) => n.name === filename);
-            if (node) await this.engine.driver.delete([node.id]);
+            if (node) await this.engine.driver.delete([node.path]);
         }
         this._agents = this._agents.filter(a => a.id !== agentId);
         this.notify();
@@ -380,7 +380,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             const results = await Promise.all(Array.from(result.nodes).map(async (node) => {
                 if (!node.name.endsWith('.agent')) return null;
                 try {
-                    const content = await this.engine.driver.readContent(node.id);
+                    const content = await this.engine.driver.readContent(node.path);
                     if (!content) return null;
                     const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
                     const data = JSON.parse(jsonStr) as AgentDefinition;
@@ -389,7 +389,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
                         data.config.modelName = (data.config as any).modelId;
                     }
                     if (data.id) {
-                        this._agentNodeIds.set(data.id, node.id);
+                        this._agentNodeIds.set(data.id, node.path);
                         return { ...data, tags: node.tags } as AgentDefinition;
                     }
                     return null;

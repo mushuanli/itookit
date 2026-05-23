@@ -399,7 +399,7 @@ export class SyncService {
         await engine.driver.walkTree?.(async (node) => {
           if (node.type !== 'file') return;
           try {
-            const raw = await engine.driver.readContent(node.id);
+            const raw = await engine.driver.readContent(node.path);
             const buf = this.toArrayBuffer(raw);
             files.push({
               path: `/${mod.name}${node.path}`,

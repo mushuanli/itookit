@@ -32,16 +32,14 @@ export type FSEventType =
 
 export interface FSNodeCreatedPayload {
     nodes: Array<{
-        nodeId: string;
-        parentId: string | null;
         path: string;
+        parentPath: string | null;
         type: FSNodeType;
     }>;
 }
 
 export interface FSNodeUpdatedPayload {
     nodes: Array<{
-        nodeId: string;
         path: string;
         changedFields?: Array<'content' | 'metadata' | 'tags'>;
     }>;
@@ -49,38 +47,35 @@ export interface FSNodeUpdatedPayload {
 }
 
 export interface FSNodeDeletedPayload {
-    /** 用户显式请求删除的 ID */
-    requestedIds: string[];
-    /** 含级联删除的所有 ID（包含 assetdir 内文件） */
-    allDeletedIds: string[];
+    /** 用户显式请求删除的路径 */
+    requestedPaths: string[];
+    /** 含级联删除的所有路径（包含 assetdir 内文件） */
+    allDeletedPaths: string[];
 }
 
 export interface FSNodeMovedPayload {
     nodes: Array<{
-        nodeId: string;
         oldPath: string;
         newPath: string;
-        oldParentId: string | null;
-        newParentId: string | null;
+        oldParentPath: string | null;
+        newParentPath: string | null;
     }>;
 }
 
 export interface FSNodeCopiedPayload {
     copies: Array<{
-        sourceId: string;
-        targetId: string;
+        sourcePath: string;
         targetPath: string;
-        targetParentId: string | null;
+        targetParentPath: string | null;
     }>;
 }
 
 export interface FSNodeRenamedPayload {
     nodes: Array<{
-        nodeId: string;
-        oldName: string;
-        newName: string;
         oldPath: string;
         newPath: string;
+        oldName: string;
+        newName: string;
     }>;
 }
 

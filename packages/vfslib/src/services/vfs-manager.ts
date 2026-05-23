@@ -285,7 +285,7 @@ export class VFSManager implements IVFSManager {
             const name = P.basename(path);
             await eng.driver.createFile({
                 name,
-                parentIdOrPath: dir === '/' ? null : dir,
+                parentPath: dir === '/' ? null : dir,
                 content: content as string | ArrayBuffer,
                 recursive: true,
             });
@@ -715,9 +715,9 @@ class MaintenanceService implements IMaintenanceService {
         await eng.driver.walkTree?.((node) => {
             nodes.push(node);
             if (node.type === 'file') {
-                eng.driver.readContent(node.id, { encoding: 'utf-8' })
+                eng.driver.readContent(node.path, { encoding: 'utf-8' })
                     .then(c => {
-                        if (typeof c === 'string') contents[node.id] = c;
+                        if (typeof c === 'string') contents[node.path] = c;
                     })
                     .catch(() => {});
             }
@@ -729,9 +729,9 @@ class MaintenanceService implements IMaintenanceService {
         for (const node of nodes) {
             if (node.type === 'file') {
                 contentPromises.push(
-                    eng.driver.readContent(node.id, { encoding: 'utf-8' })
+                    eng.driver.readContent(node.path, { encoding: 'utf-8' })
                         .then(c => {
-                            if (typeof c === 'string') contents[node.id] = c;
+                            if (typeof c === 'string') contents[node.path] = c;
                         })
                         .catch(() => {}),
                 );
@@ -760,22 +760,20 @@ class MaintenanceService implements IMaintenanceService {
         });
 
         for (const node of sorted) {
-            // Use path-derived parent instead of node.parentId (which is an inode-based
-            // ID from the source machine and does not exist on the target machine).
             const parentPath = P.dirname(node.path);
             try {
                 if (node.type === 'directory') {
                     await eng.driver.createDirectory({
                         name: node.name,
-                        parentIdOrPath: parentPath,
+                        parentPath,
                         metadata: node.metadata as any,
                         recursive: true,
                     });
                 } else if (node.type === 'file' || node.type === 'seqfile') {
                     await eng.driver.createFile({
                         name: node.name,
-                        parentIdOrPath: parentPath,
-                        content: data.contents[node.id],
+                        parentPath,
+                        content: data.contents[node.path],
                         metadata: node.metadata as any,
                         tags: node.tags ? [...node.tags] : undefined,
                         type: node.type,

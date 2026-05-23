@@ -27,7 +27,7 @@ export class Converters {
                 role: 'user',
                 content: node.content,
                 files,
-                persistedNodeId: node.id
+                persistedNodeId: node.id  // ChatNode.id is the chat-internal message ID (not FSNode.path)
             };
         }
         

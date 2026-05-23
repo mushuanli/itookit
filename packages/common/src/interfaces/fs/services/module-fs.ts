@@ -55,11 +55,11 @@ export interface IModuleFS extends FSEventEmitter {
     // ── VFS 特有设备操作（非 POSIX CRUD，不在 IFSDriver 内） ──
 
     /** 打开设备文件，返回绑定上下文的设备句柄 */
-    openDevice?(idOrPath: string, options?: Record<string, unknown>): Promise<IDeviceHandle>;
+    openDevice?(path: string, options?: Record<string, unknown>): Promise<IDeviceHandle>;
 
     /** 创建设备文件节点 */
-    createDeviceFile?(name: string, parentIdOrPath: string | null, handlerId: string): Promise<FSNode>;
+    createDeviceFile?(name: string, parentPath: string | null, handlerId: string): Promise<FSNode>;
 
     /** 设备控制命令 */
-    ioctl?(idOrPath: string, command: string | number, arg?: unknown): Promise<unknown>;
+    ioctl?(path: string, command: string | number, arg?: unknown): Promise<unknown>;
 }

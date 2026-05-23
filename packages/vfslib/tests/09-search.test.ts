@@ -11,13 +11,13 @@ describe('Search (IndexedDB backend)', () => {
         vfs = await setupVFS();
         const { fs } = vfs;
         // Populate fixture data
-        await fs.driver.createDirectory({ name: 'docs', parentIdOrPath: null });
-        await fs.driver.createDirectory({ name: 'images', parentIdOrPath: null });
-        await fs.driver.createFile({ name: 'readme.md', parentIdOrPath: '/docs', content: 'This is the readme file with important info.' });
-        await fs.driver.createFile({ name: 'guide.md', parentIdOrPath: '/docs', content: 'User guide content here.' });
-        await fs.driver.createFile({ name: 'logo.png', parentIdOrPath: '/images', content: 'fake-png' });
-        await fs.driver.createFile({ name: 'banner.png', parentIdOrPath: '/images', content: 'fake-banner' });
-        await fs.driver.createFile({ name: 'notes.txt', parentIdOrPath: null, content: 'Quick notes' });
+        await fs.driver.createDirectory({ name: 'docs', parentPath: null });
+        await fs.driver.createDirectory({ name: 'images', parentPath: null });
+        await fs.driver.createFile({ name: 'readme.md', parentPath: '/docs', content: 'This is the readme file with important info.' });
+        await fs.driver.createFile({ name: 'guide.md', parentPath: '/docs', content: 'User guide content here.' });
+        await fs.driver.createFile({ name: 'logo.png', parentPath: '/images', content: 'fake-png' });
+        await fs.driver.createFile({ name: 'banner.png', parentPath: '/images', content: 'fake-banner' });
+        await fs.driver.createFile({ name: 'notes.txt', parentPath: null, content: 'Quick notes' });
         await fs.meta.tags!.setTags('/docs/readme.md', ['pinned', 'public']);
         await fs.meta.tags!.setTags('/docs/guide.md', ['public']);
         await fs.driver.updateMetadata('/docs/readme.md', { priority: 1 });
@@ -102,7 +102,7 @@ describe('Search (IndexedDB backend)', () => {
         await vfs.manager.mount('other');
         const otherFS = vfs.manager.getEngine('other');
         await otherFS.init();
-        await otherFS.createFile({ name: 'cross.txt', parentIdOrPath: null, content: 'cross-module' });
+        await otherFS.createFile({ name: 'cross.txt', parentPath: null, content: 'cross-module' });
         await otherFS.tags!.addTag('/cross.txt', 'crosstest');
         const result = await vfs.manager.search({ tags: { any: ['crosstest'] } });
         expect(result.nodes.length).toBeGreaterThanOrEqual(1);

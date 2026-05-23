@@ -7,7 +7,7 @@
  * message nodes, user attachments) use this same uniform API.
  *
  * Performance:
- *  - Assetdir ID fetched once (cached in _assetDirId)
+ *  - Assetdir path fetched once (cached in _assetDirPath)
  *  - Assetdir listing fetched once (cached in _assetIndex)
  *  - put / delete maintain the index incrementally
  */
@@ -56,7 +56,7 @@ class InlineAssetObj implements AssetObj {
         this._file._invalidateAssetCache();
         // Update the index in-place if it was already loaded
         const index = await this._file._assetIndex();
-        if (index) index.set(this.name, node.id);
+        if (index) index.set(this.name, node.path);
         return `@asset/${this.name}`;
     }
 
@@ -82,8 +82,8 @@ class InlineAssetObj implements AssetObj {
 export class FileHandle implements IFile {
     readonly nodeId: string;
 
-    /** Cached assetdir ID. undefined = not fetched; null = no assetdir; string = known. */
-    private _assetDirId: string | null | undefined = undefined;
+    /** Cached assetdir path. undefined = not fetched; null = no assetdir; string = known. */
+    private _assetDirPath: string | null | undefined = undefined;
 
     /** Cached name→nodeId index for sub-files in the assetdir. */
     private _cachedAssetIndex: Map<string, string> | null = null;
@@ -116,8 +116,8 @@ export class FileHandle implements IFile {
     async copy(destDirNodeId: string, newName?: string): Promise<IFile> {
         const name = newName ?? await this.getName();
         const content = await this.readRaw();
-        const newNode = await this.fs.driver.createFile({ name, parentIdOrPath: destDirNodeId, content });
-        const newFile = new FileHandle(this.fs, newNode.id);
+        const newNode = await this.fs.driver.createFile({ name, parentPath: destDirNodeId, content });
+        const newFile = new FileHandle(this.fs, newNode.path);
         const assetNames = await this.listAssets();
         for (const assetName of assetNames) {
             const data = await this.asset(assetName).read();
@@ -127,16 +127,16 @@ export class FileHandle implements IFile {
     }
 
     async move(destDirNodeId: string): Promise<void> {
-        const assetDirId = await this._resolveAssetDirId();
+        const assetDirPath = await this._resolveAssetDirPath();
         const ids = [this.nodeId];
-        if (assetDirId) ids.push(assetDirId);
+        if (assetDirPath) ids.push(assetDirPath);
         await this.fs.driver.move(ids, destDirNodeId);
     }
 
     async delete(): Promise<void> {
-        const assetDirId = await this._resolveAssetDirId();
+        const assetDirPath = await this._resolveAssetDirPath();
         const ids = [this.nodeId];
-        if (assetDirId) ids.push(assetDirId);
+        if (assetDirPath) ids.push(assetDirPath);
         await this.fs.driver.delete(ids);
     }
 
@@ -163,7 +163,7 @@ export class FileHandle implements IFile {
     }
 
     async hasAssetDir(): Promise<boolean> {
-        return (await this._resolveAssetDirId()) !== null;
+        return (await this._resolveAssetDirPath()) !== null;
     }
 
     // ══ Events ═════════════════════════════════════════════════
@@ -174,22 +174,22 @@ export class FileHandle implements IFile {
 
     // ══ Internal (exposed for InlineAssetObj and subclasses) ══
 
-    /** @internal — resolve the assetdir ID on demand, caching the result */
-    async _resolveAssetDirId(): Promise<string | null> {
-        if (this._assetDirId === undefined) {
-            this._assetDirId = await this.fs.meta.assets.getAssetDirId(this.nodeId);
+    /** @internal — resolve the assetdir path on demand, caching the result */
+    async _resolveAssetDirPath(): Promise<string | null> {
+        if (this._assetDirPath === undefined) {
+            this._assetDirPath = await this.fs.meta.assets.getAssetDirPath(this.nodeId);
         }
-        return this._assetDirId;
+        return this._assetDirPath;
     }
 
-    /** @internal — fetch and cache the assetdir name→nodeId index */
+    /** @internal — fetch and cache the assetdir name→path index */
     async _assetIndex(): Promise<Map<string, string> | null> {
-        const dirId = await this._resolveAssetDirId();
-        if (!dirId) return null;
+        const dirPath = await this._resolveAssetDirPath();
+        if (!dirPath) return null;
         if (!this._cachedAssetIndex) {
-            const children = await this.fs.driver.getChildren(dirId) as FSNode[];
+            const children = await this.fs.driver.getChildren(dirPath) as FSNode[];
             this._cachedAssetIndex = new Map(
-                children.filter(c => c.type === 'file').map(c => [c.name, c.id])
+                children.filter(c => c.type === 'file').map(c => [c.name, c.path])
             );
         }
         return this._cachedAssetIndex;
@@ -197,7 +197,7 @@ export class FileHandle implements IFile {
 
     /** @internal — invalidate cached assetdir info after a write that creates one */
     _invalidateAssetCache(): void {
-        this._assetDirId = undefined;
+        this._assetDirPath = undefined;
         this._cachedAssetIndex = null;
     }
 

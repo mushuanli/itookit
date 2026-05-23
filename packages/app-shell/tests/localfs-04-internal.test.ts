@@ -29,22 +29,22 @@ describe('Internal paths (__config/) — storage location', () => {
     afterEach(async  () => { await vfs.dispose(); });
 
     it('__config/ directory is NOT created in moduleDir', async () => {
-        await vfs.fs.driver.createDirectory({ name: '__config', parentIdOrPath: null });
+        await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
         expect(await diskExists(vfs.moduleDir, '__config')).toBe(false);
     });
 
     it('file inside __config/ is NOT in moduleDir', async () => {
-        await vfs.fs.driver.createDirectory({ name: '__config', parentIdOrPath: null });
+        await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
         await vfs.fs.driver.createFile({
-            name: 'history.yaml', parentIdOrPath: '/__config', content: 'entries: []',
+            name: 'history.yaml', parentPath: '/__config', content: 'entries: []',
         });
         expect(await diskExists(vfs.moduleDir, '__config/history.yaml')).toBe(false);
     });
 
     it('file inside __config/ content goes to sidecarDir/vfs-internal/', async () => {
-        await vfs.fs.driver.createDirectory({ name: '__config', parentIdOrPath: null });
+        await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
         await vfs.fs.driver.createFile({
-            name: 'history.yaml', parentIdOrPath: '/__config', content: 'entries: []',
+            name: 'history.yaml', parentPath: '/__config', content: 'entries: []',
         });
         // rootBackend: DB rel = 'module/test/__config/history.yaml' → sidecar mirrors it
         const internalBase = join(vfs.sidecarDir, 'vfs-internal');
@@ -60,24 +60,24 @@ describe('Internal paths (__config/) — VFS access', () => {
     afterEach(async  () => { await vfs.dispose(); });
 
     it('can readContent from __config/ path', async () => {
-        await vfs.fs.driver.createDirectory({ name: '__config', parentIdOrPath: null });
+        await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
         await vfs.fs.driver.createFile({
-            name: 'settings.json', parentIdOrPath: '/__config', content: '{"key":"value"}',
+            name: 'settings.json', parentPath: '/__config', content: '{"key":"value"}',
         });
         const result = await vfs.fs.driver.readContent('/__config/settings.json', { encoding: 'utf-8' });
         expect(result).toBe('{"key":"value"}');
     });
 
     it('can writeContent to __config/ path', async () => {
-        await vfs.fs.driver.createDirectory({ name: '__config', parentIdOrPath: null });
-        await vfs.fs.driver.createFile({ name: 'cache.json', parentIdOrPath: '/__config', content: 'v1' });
+        await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
+        await vfs.fs.driver.createFile({ name: 'cache.json', parentPath: '/__config', content: 'v1' });
         await vfs.fs.driver.writeContent('/__config/cache.json', 'v2');
         const result = await vfs.fs.driver.readContent('/__config/cache.json', { encoding: 'utf-8' });
         expect(result).toBe('v2');
     });
 
     it('can getNode for __config/ directory', async () => {
-        await vfs.fs.driver.createDirectory({ name: '__config', parentIdOrPath: null });
+        await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
         const node = await vfs.fs.driver.getNode('/__config');
         expect(node).not.toBeNull();
         expect(node!.type).toBe('directory');
@@ -92,9 +92,9 @@ describe('Internal paths (__config/) — visibility', () => {
     afterEach(async  () => { await vfs.dispose(); });
 
     it('__config/ is hidden from normal getChildren', async () => {
-        await vfs.fs.driver.createFile({ name: 'visible.md', parentIdOrPath: null, content: 'hi' });
-        await vfs.fs.driver.createDirectory({ name: '__config', parentIdOrPath: null });
-        await vfs.fs.driver.createFile({ name: 'data.json', parentIdOrPath: '/__config', content: '{}' });
+        await vfs.fs.driver.createFile({ name: 'visible.md', parentPath: null, content: 'hi' });
+        await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
+        await vfs.fs.driver.createFile({ name: 'data.json', parentPath: '/__config', content: '{}' });
 
         const names = (await vfs.fs.driver.getChildren('/')).map(c => c.name);
         expect(names).toContain('visible.md');
@@ -102,9 +102,9 @@ describe('Internal paths (__config/) — visibility', () => {
     });
 
     it('moduleDir stays clean — only user files appear there', async () => {
-        await vfs.fs.driver.createFile({ name: 'user.md', parentIdOrPath: null, content: 'u' });
-        await vfs.fs.driver.createDirectory({ name: '__config', parentIdOrPath: null });
-        await vfs.fs.driver.createFile({ name: 'cfg.json', parentIdOrPath: '/__config', content: '{}' });
+        await vfs.fs.driver.createFile({ name: 'user.md', parentPath: null, content: 'u' });
+        await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
+        await vfs.fs.driver.createFile({ name: 'cfg.json', parentPath: '/__config', content: '{}' });
 
         const diskEntries = await diskList(vfs.moduleDir);
         expect(diskEntries).toContain('user.md');
@@ -120,9 +120,9 @@ describe('Single _ (assetdir) vs __ (internal) on disk', () => {
     afterEach(async  () => { await vfs.dispose(); });
 
     it('_name/ (assetdir) is real on disk; __name/ is not', async () => {
-        await vfs.fs.driver.createFile({ name: 'doc.md', parentIdOrPath: null, content: '# Doc' });
+        await vfs.fs.driver.createFile({ name: 'doc.md', parentPath: null, content: '# Doc' });
         await vfs.fs.meta.assets!.putAsset('/doc.md', 'img.png', 'image');
-        await vfs.fs.driver.createDirectory({ name: '__config', parentIdOrPath: null });
+        await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
 
         const diskEntries = await diskList(vfs.moduleDir);
         expect(diskEntries).toContain('doc.md');

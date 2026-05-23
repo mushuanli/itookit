@@ -18,44 +18,44 @@ export interface IAssetOperations {
     /**
      * 写入资产（assetdir 不存在则自动创建）
      *
-     * @param ownerIdOrPath 宿主文件（必须是 file 或 seqfile）
+     * @param ownerPath 宿主文件（必须是 file 或 seqfile）
      * @param assetName 资产文件名
      * @param content 内容
      * @throws FSError('EISDIR') owner 是目录
      */
     putAsset(
-        ownerIdOrPath: string,
+        ownerPath: string,
         assetName: string,
         content: FileContent,
     ): Promise<FSNode>;
 
     /** 读取资产 @returns 不存在返回 null */
-    getAsset(ownerIdOrPath: string, assetName: string): Promise<FileContent | null>;
+    getAsset(ownerPath: string, assetName: string): Promise<FileContent | null>;
 
-    /** 获取 assetdir 节点 ID @returns 不存在返回 null */
-    getAssetDirId(ownerIdOrPath: string): Promise<string | null>;
+    /** 获取 assetdir 路径 @returns 不存在返回 null */
+    getAssetDirPath(ownerPath: string): Promise<string | null>;
 
-    /** 确保 assetdir 存在（幂等） @returns assetdir 节点 ID */
-    ensureAssetDir(ownerIdOrPath: string): Promise<string>;
+    /** 确保 assetdir 存在（幂等） @returns assetdir 路径 */
+    ensureAssetDir(ownerPath: string): Promise<string>;
 
     /** 列出资产文件名 */
-    listAssets(ownerIdOrPath: string, includeHidden?: boolean): Promise<string[]>;
+    listAssets(ownerPath: string, includeHidden?: boolean): Promise<string[]>;
 
     /** 删除单个资产 */
-    deleteAsset(ownerIdOrPath: string, assetName: string): Promise<void>;
+    deleteAsset(ownerPath: string, assetName: string): Promise<void>;
 
     /** 删除整个 assetdir */
-    removeAssetDir(ownerIdOrPath: string, removeContent?: boolean): Promise<void>;
+    removeAssetDir(ownerPath: string, removeContent?: boolean): Promise<void>;
 
     /** 检查 assetdir 是否存在 */
-    hasAssetDir(ownerIdOrPath: string): Promise<boolean>;
+    hasAssetDir(ownerPath: string): Promise<boolean>;
 
     /**
      * 校验 assetdir 完整性
      * @returns 问题列表（空数组表示正常）
      */
-    validateAssetDir?(ownerIdOrPath: string): Promise<string[]>;
+    validateAssetDir?(ownerPath: string): Promise<string[]>;
 
     /** 修复 assetdir（重建关联等） */
-    repairAssetDir?(ownerIdOrPath: string): Promise<void>;
+    repairAssetDir?(ownerPath: string): Promise<void>;
 }

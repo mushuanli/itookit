@@ -57,14 +57,14 @@ export class NodeListRenderer {
     context: RenderContext,
     newInstances: Map<string, BaseNodeItem>
   ): void {
-    if (!state.readOnly && state.creatingItem?.parentId === currentParentId) {
+    if (!state.readOnly && state.creatingItem?.parentPath === currentParentId) {
       const creatorDiv = document.createElement('div');
       creatorDiv.innerHTML = createItemInputHTML(state.creatingItem);
       parentEl.appendChild(creatorDiv.firstElementChild!);
     }
 
     if (itemList.length === 0 && currentParentId !== null) {
-      if (state.creatingItem?.parentId !== currentParentId) {
+      if (state.creatingItem?.parentPath !== currentParentId) {
         (parentEl as HTMLElement).innerHTML =
           '<div class="vfs-directory-item__empty-placeholder">(空)</div>';
       }

@@ -464,7 +464,7 @@ export class SettingsService {
         await engine.driver.walkTree?.(async (node) => {
             if (node.type !== 'file') return;
             try {
-                const raw = await engine.driver.readContent(node.id);
+                const raw = await engine.driver.readContent(node.path);
                 const buffer = this.toArrayBuffer(raw);
                 const hash = await this.computeSHA256(buffer);
                 list.push({

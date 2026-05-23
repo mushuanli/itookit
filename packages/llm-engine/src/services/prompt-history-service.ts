@@ -354,7 +354,7 @@ export class PromptHistoryService extends BaseModuleService {
 
             await this.engine.driver.createFile({
                 name: fileName,
-                parentIdOrPath: parentPath,
+                parentPath: parentPath,
                 content: yamlContent,
             });
         }
