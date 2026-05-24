@@ -29,6 +29,7 @@ export class FileCommandHandler {
   private register(): void {
     this.unsubs.push(
       this.commandBus.on('file:create', async ({ type, title, parentPath }) => {
+        console.warn('[FileCommandHandler] file:create received', { type, title, parentPath });
         try {
           if (type === 'file') {
             await this.service.createFile({
