@@ -182,7 +182,7 @@ export class ContextMenuHandler {
         const type = action === 'create-in-folder-folder' ? 'directory' : 'file';
         this.commandBus.execute('ui:startCreating', {
           type,
-          parentId: contextItem.id,
+          parentPath: contextItem.id,
         });
       } else if (action === 'moveTo') {
         this.commandBus.execute('move:start', { itemIds: [contextItem.id] });
