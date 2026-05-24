@@ -15,6 +15,18 @@ export const mapFSNodeToUIItem = (
 ): VFSNodeUI => {
   const isDir = node.type === 'directory';
 
+  // Debug: detect system paths leaking into UI tree
+  if (node.path?.startsWith('/module/') || node.parentPath?.startsWith('/module/')) {
+    console.warn('[NodeMapper] SYSTEM PATH LEAK', {
+      path: node.path,
+      parentPath: node.parentPath,
+      name: node.name,
+      type: node.type,
+      moduleId: node.moduleId,
+      stack: new Error().stack?.split('\n').slice(1, 6).join('\n'),
+    });
+  }
+
   const displayTitle =
     (node.metadata?.title as string) ||
     (isDir ? node.name : (showFileExtensions ? node.name : stripExtension(node.name)));

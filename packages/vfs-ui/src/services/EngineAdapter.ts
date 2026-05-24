@@ -41,6 +41,12 @@ export class EngineAdapter {
         try {
             this.store.dispatch({ type: 'ITEMS_LOAD_START' });
             const rootChildren = await this.engine.driver.getChildren('/') as FSNode[];
+            // Debug: check for system paths in getChildren('/') results
+            const sysLeaks = rootChildren.filter(n => n.path?.startsWith('/module/'));
+            if (sysLeaks.length > 0) {
+                console.warn('[EngineAdapter] loadData: getChildren(/) returned system paths!',
+                    sysLeaks.map(n => ({ path: n.path, parentPath: n.parentPath, name: n.name })));
+            }
             const uiItems = mapFSNodesToUIItems(
                 rootChildren,
                 this.iconResolver,
@@ -263,6 +269,13 @@ export class EngineAdapter {
     async expandDirectory(folderId: string): Promise<void> {
         if (this.loadingFolderIds.has(folderId)) return;
         this.loadingFolderIds.add(folderId);
+
+        // Debug: trace system path leaks into expandDirectory
+        if (folderId.startsWith('/module/')) {
+            console.warn('[EngineAdapter] expandDirectory called with system path:', folderId, {
+                stack: new Error().stack?.split('\n').slice(1, 8).join('\n'),
+            });
+        }
 
         try {
             const children = await this.engine.driver.getChildren(folderId) as FSNode[];
