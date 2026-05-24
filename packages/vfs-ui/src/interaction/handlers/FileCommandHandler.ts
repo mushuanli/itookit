@@ -29,7 +29,6 @@ export class FileCommandHandler {
   private register(): void {
     this.unsubs.push(
       this.commandBus.on('file:create', async ({ type, title, parentPath }) => {
-        console.warn('[FileCommandHandler] file:create received', { type, title, parentPath });
         try {
           if (type === 'file') {
             await this.service.createFile({
@@ -48,7 +47,6 @@ export class FileCommandHandler {
       }),
 
       this.commandBus.on('file:delete', async ({ itemIds }) => {
-        console.warn('[FileCommandHandler] file:delete triggered', { itemIds, stack: new Error().stack?.split('\n').slice(1, 8).join('\n') });
         await this.service.deleteItems(itemIds);
       }),
 
