@@ -15,14 +15,18 @@ export const mapFSNodeToUIItem = (
 ): VFSNodeUI => {
   const isDir = node.type === 'directory';
 
-  // Debug: detect system paths leaking into UI tree
-  if (node.path?.startsWith('/module/') || node.parentPath?.startsWith('/module/')) {
+  // Debug: detect system paths leaking into UI tree.
+  // Skip false positives: a user directory named "module" containing "anki"
+  // legitimately produces virtual path "/module/anki" — this is NOT a system path.
+  // Only flag nodes whose path equals or starts with "/module/" AND
+  // whose moduleId is undefined (true system paths have no moduleId).
+  if ((node.path?.startsWith('/module/') || node.parentPath?.startsWith('/module/'))
+      && !node.moduleId) {
     console.warn('[NodeMapper] SYSTEM PATH LEAK', {
       path: node.path,
       parentPath: node.parentPath,
       name: node.name,
       type: node.type,
-      moduleId: node.moduleId,
       stack: new Error().stack?.split('\n').slice(1, 6).join('\n'),
     });
   }

@@ -206,11 +206,13 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     private toRealPath(path: string): string {
         if (isPath(path)) {
             // Defend against double-mapping: only accept paths already under THIS
-            // module's mount prefix. The old "/module/" catch-all allowed system
-            // paths from other modules (shared IndexedDB) to bypass scope mapping.
-            const mountRoot = `/module/${this.moduleId}`;
-            const mountPrefix = mountRoot + '/';
-            if (path === mountRoot || path.startsWith(mountPrefix)) {
+            // module's mount prefix (e.g. /module/anki/file.md).
+            // Do NOT match just the mount root (/module/anki) because a user
+            // directory named /module/anki is a legitimate virtual path whose
+            // system form is /module/anki/module/anki — matching mountRoot would
+            // conflate the two and resolve to the wrong backend path.
+            const mountPrefix = `/module/${this.moduleId}/`;
+            if (path.startsWith(mountPrefix)) {
                 return path;
             }
             return this.scope.toRealPath(path);
