@@ -199,9 +199,10 @@ export class ContextMenuHandler {
         this.commandBus.execute('file:duplicate', { itemId: contextItem.id });
       } else if (action === 'delete') {
         const title = contextItem.metadata.title || 'this item';
+        console.warn('[ContextMenuHandler] before confirm:', { title });
         const result = confirm(`确定删除 "${title}"?`);
-        console.warn('[ContextMenuHandler] confirm result:', { result, type: typeof result, title });
-        if (result === true) {
+        console.warn('[ContextMenuHandler] after confirm:', { result, type: typeof result, title });
+        if (result) {
           this.commandBus.execute('file:delete', { itemIds: [contextItem.id] });
         }
       }
