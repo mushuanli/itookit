@@ -127,7 +127,7 @@ export class ItemActionHandler {
 
     const targetParentId =
       firstItem.type === 'directory'
-        ? firstItem.path
+        ? firstItem.id     // VFSNodeUI has no top-level .path; id === virtual path
         : firstItem.metadata?.parentPath || null;
 
     return targetParentId;
