@@ -184,11 +184,22 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     /** Map a system-path FSNode to a module-virtual-path FSNode. */
     private toVirtualNode(node: FSNode): FSNode {
         const mapPath = (p: string | null) => p ? this.scope.toVirtualPath(p) : null;
-        return {
+        const result = {
             ...node,
             path: mapPath(node.path)!,
             parentPath: mapPath(node.parentPath),
         };
+
+        // Debug: verify virtualization actually changed the path
+        if (node.path.startsWith('/module/') && result.path.startsWith('/module/')) {
+            console.error('[ModuleFS] toVirtualNode FAILED to virtualize!', {
+                moduleId: this.moduleId,
+                input: { path: node.path, parentPath: node.parentPath },
+                output: { path: result.path, parentPath: result.parentPath },
+            });
+        }
+
+        return result;
     }
 
     /** Convert a virtual path to a system-real path. */
@@ -245,6 +256,18 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         const realPath = this.toRealPath(path);
         this.access.checkAccess(this.caller, realPath, 'list');
         const children = await this.engine.listChildren(realPath);
+
+        // Debug: trace system path leaks through getChildren
+        const sysChildren = children.filter(c => c.path.startsWith('/module/'));
+        if (sysChildren.length > 0) {
+            console.warn('[ModuleFS] getChildren: backend returned system-path nodes!', {
+                moduleId: this.moduleId,
+                requestPath: path,
+                realPath,
+                sysNodes: sysChildren.map(c => ({ path: c.path, parentPath: c.parentPath, name: c.name })),
+            });
+        }
+
         const filtered = children.filter(c => {
             if (!options?.includeHidden && isHiddenName(c.name)) return false;
             if (!options?.includeAssetDirs && isAssetDirName(c.name)) return false;
@@ -257,7 +280,10 @@ export class ModuleFS implements IModuleFS, IFSDriver {
                 size: (c as any).size, modifiedAt: c.modifiedAt
             } as DirEntry));
         }
-        return filtered.map(c => this.toVirtualNode(c));
+        // Filter out any child whose virtualized path equals the request path
+        // (would create a self-cycle in the tree, crashing the renderer).
+        const virtualChildren = filtered.map(c => this.toVirtualNode(c));
+        return virtualChildren.filter(c => c.path !== path);
     }
 
     // IFSDriver overloaded readContent signatures
