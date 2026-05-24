@@ -55,10 +55,16 @@ export const findNodeById = <T extends { id: string; children?: T[] }>(
   items: T[],
   id: string
 ): T | undefined => {
-  for (const item of items) {
+  // Iterative DFS — avoids stack overflow on deep trees.
+  const stack: T[] = [...items];
+  while (stack.length > 0) {
+    const item = stack.pop()!;
     if (item.id === id) return item;
-    const found = item.children && findNodeById(item.children, id);
-    if (found) return found;
+    if (item.children) {
+      for (let i = item.children.length - 1; i >= 0; i--) {
+        stack.push(item.children[i]);
+      }
+    }
   }
 };
 
@@ -66,10 +72,17 @@ export const traverseNodes = <T extends { children?: T[] }>(
   items: T[],
   callback: (item: T) => void
 ): void => {
-  items.forEach(item => {
+  // Iterative DFS — avoids stack overflow on deep trees.
+  const stack: T[] = [...items];
+  while (stack.length > 0) {
+    const item = stack.pop()!;
     callback(item);
-    item.children && traverseNodes(item.children, callback);
-  });
+    if (item.children) {
+      for (let i = item.children.length - 1; i >= 0; i--) {
+        stack.push(item.children[i]);
+      }
+    }
+  }
 };
 
 export const ensureSet = <T>(

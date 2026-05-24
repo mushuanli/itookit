@@ -231,12 +231,17 @@ export class VFSStore implements IStatePort {
     items: VFSNodeUI[],
     folderId: string,
   ): void {
-    expandedIds.delete(folderId);
-    const node = findNodeById(items, folderId);
-    if (node?.children) {
-      for (const child of node.children) {
-        if (child.type === 'directory') {
-          this.collapseSubtree(expandedIds, items, child.id);
+    // Use iterative DFS to avoid stack overflow on deeply nested trees.
+    const stack: string[] = [folderId];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      expandedIds.delete(id);
+      const node = findNodeById(items, id);
+      if (node?.children) {
+        for (const child of node.children) {
+          if (child.type === 'directory') {
+            stack.push(child.id);
+          }
         }
       }
     }
