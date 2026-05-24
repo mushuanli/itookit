@@ -273,9 +273,11 @@ export class AssetManagerUI {
         // 删除按钮
         const deleteBtn = this.createButton('删除', 'danger', async () => {
             if (item.isUsed) {
-                const confirmed = confirm(
+                // Tauri v2 replaces window.confirm() with a Promise-based dialog.
+                let confirmed: boolean | Promise<boolean> = confirm(
                     `文件 "${item.node.name}" 正在被引用，删除将导致文档内容缺失。\n\n确定要删除吗？`
                 );
+                if (confirmed instanceof Promise) confirmed = await confirmed;
                 if (!confirmed) return;
             }
 
@@ -336,7 +338,9 @@ export class AssetManagerUI {
     private async handleBatchDelete(items: AssetDisplayItem[]): Promise<void> {
         if (items.length === 0) return;
 
-        const confirmed = confirm(`确定要永久删除这 ${items.length} 个未引用的文件吗？`);
+        // Tauri v2 replaces window.confirm() with a Promise-based dialog.
+        let confirmed: boolean | Promise<boolean> = confirm(`确定要永久删除这 ${items.length} 个未引用的文件吗？`);
+        if (confirmed instanceof Promise) confirmed = await confirmed;
         if (!confirmed) return;
 
         try {
