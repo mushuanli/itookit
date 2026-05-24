@@ -21,6 +21,7 @@ export class ImportCommandHandler {
   private register(): void {
     this.unsubs.push(
       this.commandBus.on('file:import', ({ parentPath }) => {
+        console.warn('[ImportCommandHandler] file:import received', { parentPath });
         this.showFilePicker(parentPath);
       })
     );

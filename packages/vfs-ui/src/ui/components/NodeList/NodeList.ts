@@ -183,6 +183,11 @@ export class NodeList extends BaseComponent<NodeListState> {
       id => this.findItemById(id)
     );
 
+    console.warn('[NodeList] handleNewControlsClick', {
+      action, parentPath,
+      selectedIds: [...this.state.selectedItemIds],
+    });
+
     if (action === 'import') {
       this.commandBus.execute('file:import', { parentPath });
     } else if (action === 'create-file' || action === 'create-directory') {
