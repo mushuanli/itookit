@@ -34,7 +34,8 @@ export class NodeListRenderer {
       null,
       state,
       context,
-      newInstances
+      newInstances,
+      new Set<string>()
     );
 
     container.innerHTML = '';
@@ -55,7 +56,8 @@ export class NodeListRenderer {
     currentParentId: string | null,
     state: NodeListState,
     context: RenderContext,
-    newInstances: Map<string, BaseNodeItem>
+    newInstances: Map<string, BaseNodeItem>,
+    visitedIds: Set<string>
   ): void {
     if (!state.readOnly && state.creatingItem?.parentPath === currentParentId) {
       const creatorDiv = document.createElement('div');
@@ -72,6 +74,11 @@ export class NodeListRenderer {
     }
 
     for (const item of itemList) {
+      // Guard against tree cycles (e.g. a node appearing as its own descendant).
+      // Rendering a cycle would cause HierarchyRequestError in appendChild.
+      if (visitedIds.has(item.id)) continue;
+      visitedIds.add(item.id);
+
       let itemInstance = this.itemInstances.get(item.id);
 
       if (!itemInstance) {
@@ -111,7 +118,8 @@ export class NodeListRenderer {
             item.id,
             state,
             context,
-            newInstances
+            newInstances,
+            visitedIds
           );
         }
       }

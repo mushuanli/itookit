@@ -137,10 +137,14 @@ export class VFSStore implements IStatePort {
       'FOLDER_CHILDREN_LOADED': () => {
         const node = findNodeById(draft.items, payload.parentPath);
         if (node?.type === 'directory') {
-          node.children = payload.children;
+          // Filter out children whose id collides with the parent (would create a self-cycle
+          // that crashes the renderer with HierarchyRequestError).
+          const children = (payload.children as VFSNodeUI[]).filter(
+            c => c.id !== payload.parentPath
+          );
+          node.children = children;
 
           // 清理 expandedFolderIds 中不存在于新 children 中的子目录 ID
-          const children = payload.children as VFSNodeUI[];
           const childIds = new Set(children.map(c => c.id));
           for (const id of draft.expandedFolderIds) {
             const expandedNode = findNodeById(draft.items, id);
@@ -282,7 +286,7 @@ export class VFSStore implements IStatePort {
     const parentId = newItem.metadata.parentPath;
     const parent = parentId ? findNodeById(draft.items, parentId) : null;
 
-    if (parent?.type === 'directory') {
+    if (parent?.type === 'directory' && newItem.id !== parent.id) {
       (parent.children ??= []).unshift(newItem);
       this.collapseExpandedSiblings(draft, parentId!);
       draft.expandedFolderIds.add(parentId!);
