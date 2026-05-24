@@ -72,7 +72,7 @@ export class EngineAdapter {
      * and expands it (recursively). The accordion constraint means at most
      * one root-level path is restored.
      *
-     * Root-level items may have parentId === null or parentId === '/'
+     * Root-level items may have parentPath === null or parentPath === '/'
      * depending on the storage backend — handled transparently here.
      */
     async restoreExpansion(expandedFolderIds: Set<string>): Promise<void> {

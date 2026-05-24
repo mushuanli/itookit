@@ -75,7 +75,7 @@ function setupAppUIHandlers(vfsUIManager, vfsCore) {
     });
 
     // 监听文件导入请求
-    vfsUIManager.on('importRequested', ({ parentId }) => {
+    vfsUIManager.on('importRequested', ({ parentPath }) => {
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.accept = '.md,.txt';
@@ -90,12 +90,12 @@ function setupAppUIHandlers(vfsUIManager, vfsCore) {
                     if (e.target?.result && typeof e.target.result === 'string') {
                         const content = e.target.result;
                         const title = file.name.replace(/\.(md|txt)$/, '');
-                        
+
                         // [修正] VFSService 中没有 createSession，方法名是 createFile
-                        await vfsUIManager.sessionService.createFile({ 
-                            title, 
-                            content, 
-                            parentId 
+                        await vfsUIManager.sessionService.createFile({
+                            title,
+                            content,
+                            parentPath
                         });
                     }
                 };

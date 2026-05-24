@@ -221,13 +221,13 @@ export class MemoryManager {
      * 走与侧边栏 "+" 按钮相同的路径。
      * 
      * @param title    文件标题
-     * @param parentId 父目录 ID（可选）
+     * @param parentPath 父目录路径（可选，null = 根目录）
      * @param content  初始内容（可选）
-     * @returns 新创建的文件 ID
+     * @returns 新创建的文件路径
      */
     public async createAndOpenFile(options: {
         title?: string;
-        parentId?: string | null;
+        parentPath?: string | null;
         content?: string;
     } = {}): Promise<string> {
         if (!this.hasStarted) {
@@ -238,7 +238,7 @@ export class MemoryManager {
         const title = options.title || 'Untitled';
         const newNode = await this.vfsUI.sessionService.createFile({
             title,
-            parentId: options.parentId ?? null,
+            parentPath: options.parentPath ?? null,
             content: options.content,
         });
 

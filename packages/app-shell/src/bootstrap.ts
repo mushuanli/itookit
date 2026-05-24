@@ -581,7 +581,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                         const newId = await mgr.createAndOpenFile({
                             title:    req.create?.title,
                             content:  req.create?.content,
-                            parentId: req.create?.parentPath,
+                            parentPath: req.create?.parentPath,
                         });
                         console.log(`[Shell] createAndOpenFile ok: newId=${newId}`);
                         updateHistory(targetWsId, newId, 'replace');
