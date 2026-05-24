@@ -20,8 +20,9 @@ export class BulkCommandHandler {
     private register(): void {
         this.unsubs.push(
             this.commandBus.on('bulk:delete', async ({ itemIds }) => {
-                const result = confirm(`确定要删除 ${itemIds.length} 个项目吗?`);
-                console.warn('[BulkCommandHandler] after confirm:', { result, type: typeof result, count: itemIds.length });
+                // Tauri v2 replaces window.confirm() with a Promise-based dialog.
+                let result: boolean | Promise<boolean> = confirm(`确定要删除 ${itemIds.length} 个项目吗?`);
+                if (result instanceof Promise) result = await result;
                 if (result) {
                     await this.service.deleteItems(itemIds);
                 }

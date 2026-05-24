@@ -87,23 +87,23 @@ export class ContextMenuHandler {
     this.menuEl.style.top = `${y}px`;
     this.menuEl.style.left = `${x}px`;
 
-    this.menuEl.addEventListener('click', (e: MouseEvent) => {
+    this.menuEl.addEventListener('click', async (e: MouseEvent) => {
       const actionEl = (e.target as Element).closest<HTMLButtonElement>(
         'button[data-action]'
       );
       if (!actionEl) return;
-      this.handleAction(actionEl.dataset.action!, contextItem, { x, y });
+      await this.handleAction(actionEl.dataset.action!, contextItem, { x, y });
       this.hide();
     });
 
     document.body.appendChild(this.menuEl);
   }
 
-  private handleAction(
+  private async handleAction(
     action: string,
     contextItem: VFSNodeUI | null,
     position: { x: number; y: number }
-  ): void {
+  ): Promise<void> {
     // Custom onClick handler takes priority
     const onClickHandler = this.activeOnClickMap.get(action);
     if (onClickHandler && contextItem) {
@@ -188,7 +188,9 @@ export class ContextMenuHandler {
         this.commandBus.execute('move:start', { itemIds: [contextItem.id] });
       } else if (action === 'rename') {
         const currentTitle = contextItem.metadata.title || '';
-        const newTitle = prompt('输入新名称:', currentTitle);
+        // Tauri v2 replaces window.prompt() with a Promise-based dialog.
+        let newTitle: string | null | Promise<string | null> = prompt('输入新名称:', currentTitle);
+        if (newTitle instanceof Promise) newTitle = await newTitle;
         if (newTitle?.trim() && newTitle.trim() !== currentTitle) {
           this.commandBus.execute('file:rename', {
             itemId: contextItem.id,
@@ -199,9 +201,9 @@ export class ContextMenuHandler {
         this.commandBus.execute('file:duplicate', { itemId: contextItem.id });
       } else if (action === 'delete') {
         const title = contextItem.metadata.title || 'this item';
-        console.warn('[ContextMenuHandler] before confirm:', { title });
-        const result = confirm(`确定删除 "${title}"?`);
-        console.warn('[ContextMenuHandler] after confirm:', { result, type: typeof result, title });
+        // Tauri v2 replaces window.confirm() with a Promise-based dialog.
+        let result: boolean | Promise<boolean> = confirm(`确定删除 "${title}"?`);
+        if (result instanceof Promise) result = await result;
         if (result) {
           this.commandBus.execute('file:delete', { itemIds: [contextItem.id] });
         }
