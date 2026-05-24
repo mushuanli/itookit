@@ -178,16 +178,16 @@ export class NodeList extends BaseComponent<NodeListState> {
     if (!actionEl) return;
 
     const action = actionEl.dataset.action;
-    const parentId = this.itemActionHandler.getTargetParentId(
+    const parentPath = this.itemActionHandler.getTargetParentId(
       this.state.selectedItemIds,
       id => this.findItemById(id)
     );
 
     if (action === 'import') {
-      this.commandBus.execute('file:import', { parentId });
+      this.commandBus.execute('file:import', { parentPath });
     } else if (action === 'create-file' || action === 'create-directory') {
       const type = action.split('-')[1] as 'file' | 'directory';
-      this.commandBus.execute('ui:startCreating', { type, parentId });
+      this.commandBus.execute('ui:startCreating', { type, parentPath });
     }
   };
 
@@ -315,10 +315,10 @@ export class NodeList extends BaseComponent<NodeListState> {
     if (!this.state.creatingItem) return;
 
     const title = inputElement.value.trim();
-    const { type, parentId } = this.state.creatingItem;
+    const { type, parentPath } = this.state.creatingItem;
 
     this.commandBus.execute('ui:cancelCreating', undefined as any);
-    this.commandBus.execute('file:create', { type, title, parentId });
+    this.commandBus.execute('file:create', { type, title, parentPath });
   }
 
   private buildInitialHTML(options: NodeListOptions): void {

@@ -20,8 +20,8 @@ export class ImportCommandHandler {
 
   private register(): void {
     this.unsubs.push(
-      this.commandBus.on('file:import', ({ parentId }) => {
-        this.showFilePicker(parentId);
+      this.commandBus.on('file:import', ({ parentPath }) => {
+        this.showFilePicker(parentPath);
       })
     );
   }
