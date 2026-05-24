@@ -47,6 +47,7 @@ export class FileCommandHandler {
       }),
 
       this.commandBus.on('file:delete', async ({ itemIds }) => {
+        console.warn('[FileCommandHandler] file:delete triggered', { itemIds, stack: new Error().stack?.split('\n').slice(1, 8).join('\n') });
         await this.service.deleteItems(itemIds);
       }),
 
