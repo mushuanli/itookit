@@ -194,11 +194,12 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     /** Convert a virtual path to a system-real path. */
     private toRealPath(path: string): string {
         if (isPath(path)) {
-            // Defend against double-mapping: if the path is already a system path
-            // (e.g. a caller passed "/module/etc/llm/config.json" directly),
-            // return it as-is to avoid "/module/etc/module/etc/..." duplication.
-            const mountPrefix = `/module/${this.moduleId}/`;
-            if (path.startsWith(mountPrefix) || path.startsWith('/module/')) {
+            // Defend against double-mapping: only accept paths already under THIS
+            // module's mount prefix. The old "/module/" catch-all allowed system
+            // paths from other modules (shared IndexedDB) to bypass scope mapping.
+            const mountRoot = `/module/${this.moduleId}`;
+            const mountPrefix = mountRoot + '/';
+            if (path === mountRoot || path.startsWith(mountPrefix)) {
                 return path;
             }
             return this.scope.toRealPath(path);
