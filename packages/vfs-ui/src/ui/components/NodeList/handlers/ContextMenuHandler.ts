@@ -198,7 +198,10 @@ export class ContextMenuHandler {
       } else if (action === 'duplicate') {
         this.commandBus.execute('file:duplicate', { itemId: contextItem.id });
       } else if (action === 'delete') {
-        if (confirm(`确定删除 "${contextItem.metadata.title || 'this item'}"?`)) {
+        const title = contextItem.metadata.title || 'this item';
+        const result = confirm(`确定删除 "${title}"?`);
+        console.warn('[ContextMenuHandler] confirm result:', { result, type: typeof result, title });
+        if (result === true) {
           this.commandBus.execute('file:delete', { itemIds: [contextItem.id] });
         }
       }
