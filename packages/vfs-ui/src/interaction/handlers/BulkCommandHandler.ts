@@ -20,7 +20,9 @@ export class BulkCommandHandler {
     private register(): void {
         this.unsubs.push(
             this.commandBus.on('bulk:delete', async ({ itemIds }) => {
-                if (confirm(`确定要删除 ${itemIds.length} 个项目吗?`)) {
+                const result = confirm(`确定要删除 ${itemIds.length} 个项目吗?`);
+                console.warn('[BulkCommandHandler] confirm result:', { result, type: typeof result, count: itemIds.length });
+                if (result === true) {
                     await this.service.deleteItems(itemIds);
                 }
             }),
