@@ -186,7 +186,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
         await this.vfsService.createFile({
           title: startup.startupFileName,
           content: startup.startupContent || '# Welcome\n\nSelect a file to start.',
-          parentId: null,
+          parentPath: null,
         });
       } catch (e) {
         console.error('[VFSUIShell] Failed to create default file:', e);

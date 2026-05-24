@@ -34,7 +34,7 @@ export interface CommandMap {
   // --- UI State ---
   'ui:toggleSidebar': void;
   'ui:updateSettings': { settings: Partial<UISettings> };
-  'ui:startCreating': { type: 'file' | 'directory'; parentId: string | null };
+  'ui:startCreating': { type: 'file' | 'directory'; parentPath: string | null };
   'ui:cancelCreating': void;
   'ui:updateSearch': { query: string };
   'ui:toggleOutline': { itemId: string };

@@ -26,7 +26,7 @@ export class ImportCommandHandler {
     );
   }
 
-  private showFilePicker(parentId: string | null): void {
+  private showFilePicker(parentPath: string | null): void {
     const input = Object.assign(document.createElement('input'), {
       type: 'file',
       multiple: true,
@@ -47,7 +47,7 @@ export class ImportCommandHandler {
         );
 
         const created = await this.service.createFiles({
-          parentId,
+          parentPath,
           files: filesWithContent,
         });
 
