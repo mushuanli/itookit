@@ -39,9 +39,9 @@ export interface IEventPort {
  * Services layer implements this; Interaction layer consumes it.
  */
 export interface IDataOperationPort {
-  createFile(options: { title?: string; parentId?: string | null; content?: string | ArrayBuffer }): Promise<any>;
-  createFiles(options: { parentId?: string | null; files: { title: string; content: string | ArrayBuffer }[] }): Promise<any[]>;
-  createDirectory(options: { title?: string; parentId?: string | null }): Promise<any>;
+  createFile(options: { title?: string; parentPath?: string | null; content?: string | ArrayBuffer }): Promise<any>;
+  createFiles(options: { parentPath?: string | null; files: { title: string; content: string | ArrayBuffer }[] }): Promise<any[]>;
+  createDirectory(options: { title?: string; parentPath?: string | null }): Promise<any>;
   renameItem(nodeId: string, newTitle: string): Promise<void>;
   deleteItems(nodeIds: string[]): Promise<void>;
   moveItems(options: { itemIds: string[]; targetId: string | null }): Promise<void>;

@@ -17,7 +17,7 @@ export interface NodeListState {
   expandedFolderIds: Set<string>;
   expandedOutlineIds: Set<string>;
   selectedItemIds: Set<string>;
-  creatingItem: { type: 'file' | 'directory'; parentId: string | null } | null;
+  creatingItem: { type: 'file' | 'directory'; parentPath: string | null } | null;
   selectionStatus: 'none' | 'partial' | 'all';
   visibleItemIds: string[];
   readOnly: boolean;

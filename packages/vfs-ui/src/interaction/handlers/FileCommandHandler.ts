@@ -33,11 +33,11 @@ export class FileCommandHandler {
           if (type === 'file') {
             await this.service.createFile({
               title,
-              parentId: parentPath ?? null,
+              parentPath: parentPath ?? null,
               content: this.options.newFileContent || '',
             });
           } else {
-            await this.service.createDirectory({ title, parentId: parentPath ?? null });
+            await this.service.createDirectory({ title, parentPath: parentPath ?? null });
           }
         } catch (e) {
           console.error(`[FileCommandHandler] Create ${type} failed:`, e);
@@ -90,7 +90,7 @@ export class FileCommandHandler {
 
           await this.service.createFile({
             title: `${item.metadata.title} (copy)${ext}`,
-            parentId: item.metadata.parentPath ?? null,
+            parentPath: item.metadata.parentPath ?? null,
             content,
           });
         } catch (e: any) {

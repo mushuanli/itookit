@@ -14,12 +14,12 @@ export interface VFSServiceDependencies {
 
 export interface CreateFileOptions {
   title?: string;
-  parentId?: string | null;
+  parentPath?: string | null;
   content?: string | ArrayBuffer;
 }
 
 export interface CreateMultipleFilesOptions {
-  parentId?: string | null;
+  parentPath?: string | null;
   files: { title: string; content: string | ArrayBuffer }[];
 }
 
@@ -48,7 +48,7 @@ export class VFSService implements IDataOperationPort {
 
   createFile = async ({
     title,
-    parentId = null,
+    parentPath = null,
     content = this.newFileContent,
   }: CreateFileOptions = {}): Promise<FSNode> => {
     const rawName = title || formatDefaultFileTitle();
@@ -56,20 +56,18 @@ export class VFSService implements IDataOperationPort {
     if (!rawName.includes('/')) {
       return this.engine.driver.createFile({
         name: this.ensureExtension(rawName),
-        parentPath: parentId,
+        parentPath,
         content,
       });
     }
 
     // Parse "dir/subdir/filename" — build absolute virtual path and enable recursive mkdir.
-    // Since id === path (v4.1 path-based engine), parentId is already a "/" prefixed path.
     const lastSlash = rawName.lastIndexOf('/');
     const dirPart = rawName.slice(0, lastSlash);
     const fileName = rawName.slice(lastSlash + 1) || formatDefaultFileTitle();
 
-    // parentId is a virtual path (e.g. "/projects") or null (module root = "/")
-    const base = parentId ?? '/';
-    const resolvedParentPath: string | null = dirPart ? `${base}/${dirPart}` : (parentId ?? null);
+    const base = parentPath ?? '/';
+    const resolvedParentPath: string | null = dirPart ? `${base}/${dirPart}` : (parentPath ?? null);
 
     return this.engine.driver.createFile({
       name: this.ensureExtension(fileName),
@@ -80,7 +78,7 @@ export class VFSService implements IDataOperationPort {
   };
 
   createFiles = async ({
-    parentId = null,
+    parentPath = null,
     files,
   }: CreateMultipleFilesOptions): Promise<FSNode[]> => {
     if (!files?.length) return [];
@@ -88,7 +86,7 @@ export class VFSService implements IDataOperationPort {
       files.map(f =>
         this.engine.driver.createFile({
           name: this.ensureExtension(f.title),
-          parentPath: parentId,
+          parentPath,
           content: f.content,
         })
       )
@@ -97,10 +95,10 @@ export class VFSService implements IDataOperationPort {
 
   createDirectory = async ({
     title = 'New Directory',
-    parentId = null,
-  }: { title?: string; parentId?: string | null } = {}): Promise<FSNode> => {
+    parentPath = null,
+  }: { title?: string; parentPath?: string | null } = {}): Promise<FSNode> => {
     if (!title.includes('/')) {
-      return this.engine.driver.createDirectory({ name: title, parentPath: parentId });
+      return this.engine.driver.createDirectory({ name: title, parentPath });
     }
 
     // Parse "parent/subdir" path — build absolute virtual path and enable recursive mkdir.
@@ -108,8 +106,8 @@ export class VFSService implements IDataOperationPort {
     const dirPart = title.slice(0, lastSlash);
     const dirName = title.slice(lastSlash + 1) || 'New Directory';
 
-    const base = parentId ?? '/';
-    const resolvedParentPath: string | null = dirPart ? `${base}/${dirPart}` : (parentId ?? null);
+    const base = parentPath ?? '/';
+    const resolvedParentPath: string | null = dirPart ? `${base}/${dirPart}` : (parentPath ?? null);
 
     return this.engine.driver.createDirectory({
       name: dirName,

@@ -15,7 +15,7 @@ import type { VFSNodeUI, VFSUIState } from './types';
 export interface PublicEventMap {
   'sessionSelected': { item: VFSNodeUI | undefined };
   'navigateToHeading': { elementId: string };
-  'importRequested': { parentId: string | null };
+  'importRequested': { parentPath: string | null };
   'sidebarStateChanged': { isCollapsed: boolean };
   'menuItemClicked': { actionId: string; item: VFSNodeUI };
   'stateChanged': { state: VFSUIState };
