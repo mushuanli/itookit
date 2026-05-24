@@ -219,8 +219,8 @@ export class VFSStore implements IStatePort {
   private collapseExpandedSiblings(draft: VFSUIState, folderId: string): void {
     const node = findNodeById(draft.items, folderId);
     if (!node) return;
-    const parentId = node.metadata.parentPath;
-    const parent = parentId ? findNodeById(draft.items, parentId) : null;
+    const parentPath = node.metadata.parentPath;
+    const parent = parentPath ? findNodeById(draft.items, parentPath) : null;
     const siblings = (parent?.children ?? draft.items).filter(
       n => n.id !== folderId && n.type === 'directory'
     );
@@ -283,13 +283,13 @@ export class VFSStore implements IStatePort {
   }
 
   private handleCreate(draft: VFSUIState, newItem: VFSNodeUI): void {
-    const parentId = newItem.metadata.parentPath;
-    const parent = parentId ? findNodeById(draft.items, parentId) : null;
+    const parentPath = newItem.metadata.parentPath;
+    const parent = parentPath ? findNodeById(draft.items, parentPath) : null;
 
     if (parent?.type === 'directory' && newItem.id !== parent.id) {
       (parent.children ??= []).unshift(newItem);
-      this.collapseExpandedSiblings(draft, parentId!);
-      draft.expandedFolderIds.add(parentId!);
+      this.collapseExpandedSiblings(draft, parentPath!);
+      draft.expandedFolderIds.add(parentPath!);
     } else {
       draft.items.unshift(newItem);
     }

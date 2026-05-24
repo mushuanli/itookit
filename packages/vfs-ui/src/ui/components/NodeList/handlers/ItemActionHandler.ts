@@ -125,11 +125,11 @@ export class ItemActionHandler {
       return firstItem.metadata?.parentPath || null;
     }
 
-    const targetParentId =
+    const targetParentPath =
       firstItem.type === 'directory'
         ? firstItem.id     // VFSNodeUI has no top-level .path; id === virtual path
         : firstItem.metadata?.parentPath || null;
 
-    return targetParentId;
+    return targetParentPath;
   }
 }
