@@ -14,15 +14,16 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     private currentEditTierThinking: Partial<Record<ModelTier, boolean>> = {};
     private providers: Record<string, LLMProvider> = {};
     private _checkedIds = new Set<string>();
+    private _selectedProviderId: string | null = null;
 
     async render() {
         this.providers = Object.fromEntries(
             this.service.getProviders().map(p => [p.id, p])
         );
-        let connections = await this.service.getConnections();
+        const allConnections = await this.service.getConnections();
 
         // enabled first, then disabled; within each group alphabetically
-        connections.sort((a, b) => {
+        allConnections.sort((a, b) => {
             const aOn = a.enabled !== false;
             const bOn = b.enabled !== false;
             if (aOn && !bOn) return -1;
@@ -30,53 +31,107 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             return (a.name || '').localeCompare(b.name || '');
         });
 
+        // Filter by selected provider
+        const connections = this._selectedProviderId
+            ? allConnections.filter(c => (c.providerId ?? c.provider) === this._selectedProviderId)
+            : allConnections;
+
         const checkedCount = this._checkedIds.size;
+        const pageTitle = this._selectedProviderId
+            ? `${this.providers[this._selectedProviderId]?.name ?? ''} 连接`
+            : 'LLM 连接配置';
 
         this.container.innerHTML = `
-            <div class="settings-page">
-                <div class="settings-page__header">
-                    <div>
-                        <h2 class="settings-page__title">LLM 连接配置</h2>
-                        <p class="settings-page__description">为云提供商配置 API Key，并设置模型层级（optimal / standard / fast）</p>
+            <div class="settings-split conn-split-sidebar">
+                <aside class="settings-split__sidebar">
+                    <div class="settings-split__header">
+                        <h3>Provider</h3>
                     </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                        <input type="file" id="llm-conn-import-file"
-                               accept=".llm,.yaml,.yml" multiple style="display:none">
-                        <button id="btn-import-conn-llm" class="settings-btn settings-btn--secondary"
-                                title="从 .llm 文件导入连接（和可选的 Provider 定义）">
-                            ↑ 导入 .llm
-                        </button>
-                        <button id="btn-export-conn-llm" class="settings-btn settings-btn--secondary"
-                                ${checkedCount === 0 ? 'disabled' : ''}
-                                title="将选中连接导出为 .llm 文件">
-                            ↓ 导出${checkedCount > 0 ? ` (${checkedCount})` : ''}
-                        </button>
-                        <button id="btn-delete-conn-batch" class="settings-btn settings-btn--danger"
-                                ${checkedCount === 0 ? 'disabled' : ''}
-                                title="删除选中的连接（默认连接不可删除）">
-                            🗑️ 删除${checkedCount > 0 ? ` (${checkedCount})` : ''}
-                        </button>
-                        <button id="btn-add-connection" class="settings-btn settings-btn--primary">
-                            <span class="settings-btn__icon">+</span> 添加连接
-                        </button>
+                    <div class="settings-split__list">
+                        ${this.renderProviderSidebar(allConnections)}
                     </div>
-                </div>
+                </aside>
+                <div class="settings-split__content">
+                    <div class="settings-page__header">
+                        <div>
+                            <h2 class="settings-page__title">${pageTitle}</h2>
+                            <p class="settings-page__description">为云提供商配置 API Key，并设置模型层级（optimal / standard / fast）</p>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                            <input type="file" id="llm-conn-import-file"
+                                   accept=".llm,.yaml,.yml" multiple style="display:none">
+                            <button id="btn-import-conn-llm" class="settings-btn settings-btn--secondary"
+                                    title="从 .llm 文件导入连接（和可选的 Provider 定义）">
+                                ↑ 导入 .llm
+                            </button>
+                            <button id="btn-export-conn-llm" class="settings-btn settings-btn--secondary"
+                                    ${checkedCount === 0 ? 'disabled' : ''}
+                                    title="将选中连接导出为 .llm 文件">
+                                ↓ 导出${checkedCount > 0 ? ` (${checkedCount})` : ''}
+                            </button>
+                            <button id="btn-delete-conn-batch" class="settings-btn settings-btn--danger"
+                                    ${checkedCount === 0 ? 'disabled' : ''}
+                                    title="删除选中的连接（默认连接不可删除）">
+                                🗑️ 删除${checkedCount > 0 ? ` (${checkedCount})` : ''}
+                            </button>
+                            <button id="btn-add-connection" class="settings-btn settings-btn--primary">
+                                <span class="settings-btn__icon">+</span> 添加连接
+                            </button>
+                        </div>
+                    </div>
 
-                <div id="connections-list" class="settings-connection-grid">
-                    ${connections.map(conn => this.renderConnectionCard(conn)).join('')}
-                </div>
-
-                ${connections.length === 0 ? `
-                    <div class="settings-empty">
-                        <div class="settings-empty__icon">🔌</div>
-                        <h3 class="settings-empty__title">还没有配置连接</h3>
-                        <p class="settings-empty__text">点击"添加连接"按钮，选择云提供商并填写 API Key</p>
+                    <div id="connections-list" class="settings-connection-grid">
+                        ${connections.map(conn => this.renderConnectionCard(conn)).join('')}
                     </div>
-                ` : ''}
+
+                    ${connections.length === 0 ? `
+                        <div class="settings-empty">
+                            <div class="settings-empty__icon">🔌</div>
+                            <h3 class="settings-empty__title">还没有配置连接</h3>
+                            <p class="settings-empty__text">点击"添加连接"按钮，选择云提供商并填写 API Key</p>
+                        </div>
+                    ` : ''}
+                </div>
             </div>
         `;
 
         this.bindEvents();
+    }
+
+    // ── Provider Sidebar ────────────────────────────────────────────────────────
+
+    private renderProviderSidebar(allConnections: ConnectionMeta[]): string {
+        const allItem = `
+            <div class="conn-provider-item ${!this._selectedProviderId ? 'conn-provider-item--active' : ''}"
+                 data-provider-id="">
+                <span class="conn-provider-item__icon">🔗</span>
+                <span class="conn-provider-item__name">全部</span>
+                <span class="conn-provider-item__count">${allConnections.length}</span>
+            </div>
+            <div class="conn-provider-divider"></div>
+        `;
+
+        const providerItems = Object.entries(this.providers).map(([id, p]) => {
+            const provConns = allConnections.filter(c => (c.providerId ?? c.provider) === id);
+            const count = provConns.length;
+            // A provider has no key if it has connections and ALL of them report !hasApiKey
+            const noKey = count > 0 && provConns.every(c => !c.hasApiKey);
+            const isActive = this._selectedProviderId === id;
+            return `
+                <div class="conn-provider-item ${isActive ? 'conn-provider-item--active' : ''} ${noKey ? 'conn-provider-item--no-key' : ''}"
+                     data-provider-id="${id}"
+                     title="${noKey ? 'Provider 未配置 API Key，相关连接均无效' : p.name}">
+                    <span class="conn-provider-item__icon">${p.icon ?? '🤖'}</span>
+                    <span class="conn-provider-item__name">${p.name}</span>
+                    ${noKey
+                        ? '<span class="conn-provider-item__nokey-badge">无 Key</span>'
+                        : `<span class="conn-provider-item__count ${count === 0 ? 'conn-provider-item__count--empty' : ''}">${count}</span>`
+                    }
+                </div>
+            `;
+        }).join('');
+
+        return allItem + providerItems;
     }
 
     // ── Card rendering ─────────────────────────────────────────────────────────
@@ -182,6 +237,17 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     private bindEvents() {
         this.clearListeners();
         this.bindButton('#btn-add-connection', () => this.showEditModal(null));
+
+        // Provider sidebar filter
+        const sidebarList = this.container.querySelector('.settings-split__list');
+        if (sidebarList) {
+            this.addEventListener(sidebarList, 'click', (e) => {
+                const item = (e.target as HTMLElement).closest('.conn-provider-item') as HTMLElement | null;
+                if (!item) return;
+                this._selectedProviderId = item.dataset.providerId || null;
+                this.render();
+            });
+        }
         this.bindButton('#btn-import-conn-llm', () => {
             (this.container.querySelector('#llm-conn-import-file') as HTMLInputElement)?.click();
         });
@@ -305,7 +371,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     private showEditModal(connection: LLMConnection | null) {
         const isNew = !connection;
         const providerKeys = Object.keys(this.providers);
-        const initialPid = connection?.providerId ?? connection?.provider ?? providerKeys[0];
+        const initialPid = connection?.providerId ?? connection?.provider ?? this._selectedProviderId ?? providerKeys[0];
         const initialProvider = this.providers[initialPid] ?? this.providers[providerKeys[0]];
 
         this.currentEditTiers = connection?.tiers ? { ...connection.tiers } : {};

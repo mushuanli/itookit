@@ -28,6 +28,11 @@
     background: #f0fdf4;
 }
 
+.settings-connection-card--incomplete {
+    border-color: var(--st-color-warning, #f59e0b);
+    border-left-width: 4px;
+}
+
 .settings-connection-card__header {
     display: flex;
     justify-content: space-between;
@@ -301,4 +306,106 @@
     .settings-tier-badge--optimal  { background: #1e3a5f; color: #93c5fd; }
     .settings-tier-badge--standard { background: #064e3b; color: #6ee7b7; }
     .settings-tier-badge--fast     { background: #451a03; color: #fde68a; }
+}
+
+/* ── Provider Filter Sidebar ─────────────────────────────────────── */
+
+/* Narrow sidebar variant for the connection list split layout */
+.conn-split-sidebar {
+    grid-template-columns: 200px 1fr;
+}
+
+@media (max-width: 1024px) {
+    .conn-split-sidebar {
+        grid-template-columns: 180px 1fr;
+    }
+}
+
+.conn-provider-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--st-radius-md);
+    cursor: pointer;
+    transition: background 0.15s;
+    font-size: 0.875rem;
+    color: var(--st-text-primary);
+}
+
+.conn-provider-item:hover {
+    background: var(--st-bg-tertiary);
+}
+
+.conn-provider-item--active {
+    background: var(--st-color-primary-light, rgba(99,102,241,.1));
+    color: var(--st-color-primary);
+    font-weight: 600;
+}
+
+.conn-provider-item__icon {
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+    font-size: 1rem;
+}
+
+.conn-provider-item__name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.conn-provider-item__count {
+    background: var(--st-bg-tertiary);
+    color: var(--st-text-secondary);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 10px;
+    flex-shrink: 0;
+    min-width: 18px;
+    text-align: center;
+}
+
+.conn-provider-item--active .conn-provider-item__count {
+    background: var(--st-color-primary-light, rgba(99,102,241,.15));
+    color: var(--st-color-primary);
+}
+
+.conn-provider-item__count--empty {
+    opacity: 0.45;
+}
+
+/* Provider with no API key configured */
+.conn-provider-item--no-key .conn-provider-item__name {
+    color: var(--st-color-warning, #f59e0b);
+}
+
+.conn-provider-item__nokey-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 10px;
+    background: rgba(245,158,11,.15);
+    color: var(--st-color-warning, #f59e0b);
+    white-space: nowrap;
+    flex-shrink: 0;
+    letter-spacing: 0.01em;
+}
+
+.conn-provider-divider {
+    height: 1px;
+    background: var(--st-border-color);
+    margin: 6px 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .conn-provider-item--active {
+        background: rgba(99,102,241,.15);
+    }
+    .conn-provider-item--active .conn-provider-item__count {
+        background: rgba(99,102,241,.2);
+    }
 }

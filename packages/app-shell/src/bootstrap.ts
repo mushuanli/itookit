@@ -391,11 +391,37 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // ── 5. File type resolver ──────────────────────────────────────────────────
 
+    // contentParser for .agent files — embeds connectionId in searchableText
+    // so all agents (even unopened) are searchable by connection/provider ID.
+    const agentFileParser = (content: string) => {
+        try {
+            const def = JSON.parse(content);
+            const parts = [def.name, def.description, def.config?.connectionId].filter(Boolean);
+            return { summary: '', searchableText: parts.join(' '), headings: [] };
+        } catch {
+            return { summary: '', searchableText: '', headings: [] };
+        }
+    };
+
+    // searchFilter for agent workspace — extends default corpus with ai_connectionLabel
+    // so searching by human-readable provider/connection name works for opened agents.
+    const agentSearchFilter = (item: { metadata?: any; content?: any }, tokens: string[]) => {
+        const corpus = [
+            item.metadata?.title ?? '',
+            item.content?.summary ?? '',
+            item.content?.searchableText ?? '',
+            (item.metadata?.custom?.ai_connectionLabel as string) ?? '',
+        ].join(' ').toLowerCase();
+        return tokens.every(t => corpus.includes(t));
+    };
+
     const getFileTypeDef = (typeId: string): FileTypeDefinition | null => {
         const def = FILE_REGISTRY[typeId];
         if (!def) { console.warn(`[app-shell] Unknown file type: ${typeId}`); return null; }
         const factory = def.editorType !== 'standard' ? editorFactoryMap[def.editorType] : undefined;
-        const parser  = def.id === 'chat' ? chatFileParser : undefined;
+        const parser  = def.id === 'chat' ? chatFileParser
+                      : def.id === 'agent' ? agentFileParser
+                      : undefined;
         return {
             extensions:           [def.extension],
             icon:                 def.icon,
@@ -459,6 +485,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             // Skills workspace: summary=skill ID, tags="disabled" pill, dot=enabled.
             ...(strategyType === 'skills' && {
                 defaultUiSettings: { showSummary: true, showTags: true, showBadges: false },
+            }),
+            // Agent workspace: include ai_connectionLabel in search corpus.
+            ...(strategyType === 'agent' && {
+                searchFilter: agentSearchFilter,
             }),
         };
 
