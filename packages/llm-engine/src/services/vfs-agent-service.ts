@@ -132,6 +132,22 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     // ─── IAgentConfigService — reads ────────────────────────────────────────────────
 
+    listAgents(): AgentDefinition[] {
+        return [...this._agents];
+    }
+
+    findAgent(id: string): AgentDefinition | undefined {
+        return this._agents.find(a => a.id === id);
+    }
+
+    listConnections(): ConnectionMeta[] {
+        return this.llmService.listConnections();
+    }
+
+    findConnection(id: string): ConnectionMeta | undefined {
+        return this.llmService.findConnection(id);
+    }
+
     async getAgents(): Promise<AgentDefinition[]> {
         return [...this._agents];
     }

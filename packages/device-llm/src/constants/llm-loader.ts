@@ -163,7 +163,8 @@ export function parseLLMConfig(yamlContent: string): LLMConfigFile {
     if (!raw || typeof raw !== 'object') {
         throw new Error('Invalid .llm file: root must be an object');
     }
-    return {
+
+    const config: LLMConfigFile = {
         // Support both singular `provider` and plural `providers`
         provider: !raw.providers && raw.provider ? (raw.provider as LLMProviderDef) : undefined,
         providers: raw.providers ? (raw.providers as LLMProviderDef[]) : undefined,
@@ -172,6 +173,42 @@ export function parseLLMConfig(yamlContent: string): LLMConfigFile {
         skills: raw.skills ? (raw.skills as LLMSkillDef[]) : undefined,
         mcp: raw.mcp ? (raw.mcp as LLMMCPDef) : undefined,
     };
+
+    validateLLMConfig(config);
+    return config;
+}
+
+/**
+ * Validate required fields in a parsed LLMConfigFile.
+ * Throws a descriptive Error on the first violation found.
+ */
+function validateLLMConfig(config: LLMConfigFile): void {
+    const providerDefs = config.providers ?? (config.provider ? [config.provider] : []);
+    const providerIds = new Set<string>();
+
+    for (const p of providerDefs) {
+        if (!p.id)             throw new Error(`Provider missing required field: id`);
+        if (!p.name)           throw new Error(`Provider "${p.id}" missing required field: name`);
+        if (!p.implementation) throw new Error(`Provider "${p.id}" missing required field: implementation`);
+        if (!p.baseURL)        throw new Error(`Provider "${p.id}" missing required field: baseURL`);
+        if (!Array.isArray(p.models) || p.models.length === 0) {
+            throw new Error(`Provider "${p.id}" must define at least one model`);
+        }
+        for (const m of p.models) {
+            if (!m.id)   throw new Error(`Provider "${p.id}" has a model missing required field: id`);
+            if (!m.name) throw new Error(`Provider "${p.id}" model "${m.id}" missing required field: name`);
+        }
+        providerIds.add(p.id);
+    }
+
+    for (const c of config.connections ?? []) {
+        if (!c.id)         throw new Error(`Connection missing required field: id`);
+        if (!c.name)       throw new Error(`Connection "${c.id}" missing required field: name`);
+        if (!c.providerId) throw new Error(`Connection "${c.id}" missing required field: providerId`);
+        if (providerIds.size > 0 && !providerIds.has(c.providerId)) {
+            throw new Error(`Connection "${c.id}" references unknown provider: "${c.providerId}"`);
+        }
+    }
 }
 
 /**

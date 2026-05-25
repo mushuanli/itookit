@@ -170,6 +170,10 @@ export interface IConnectionService {
     deleteConnection(id: string): Promise<void>;
     /** 监听连接数据变化 */
     onChange(listener: () => void): () => void;
+    /** 同步返回连接列表（从内存缓存读取，无 apiKey） */
+    listConnections(): ConnectionMeta[];
+    /** 同步查找单个连接（从内存缓存读取，无 apiKey） */
+    findConnection(id: string): ConnectionMeta | undefined;
     /** 返回所有内置 Provider 目录（含模型列表、baseURL 等） */
     getProviderDefaults(): Record<string, LLMProvider>;
     /** 获取单个 Provider 定义 */
@@ -246,6 +250,10 @@ export interface IAgentConfigService {
     /** 保存完整连接（含 dailyCosts 更新） */
     saveConnection(conn: LLMConnection): Promise<void>;
     onChange(callback: () => void): () => void;
+    /** 同步返回 agent 列表（从内存缓存读取） */
+    listAgents(): AgentDefinition[];
+    /** 同步查找单个 agent（从内存缓存读取） */
+    findAgent(id: string): AgentDefinition | undefined;
 }
 
 // ─── IAgentManagementService ──────────────────────────────────────────────────

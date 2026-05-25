@@ -260,21 +260,31 @@ export class LLMDriver {
     
     private async *wrapStreamWithTimeout(
         stream: AsyncGenerator<ChatCompletionChunk>,
-        _controller: AbortController,
+        controller: AbortController,
         timeoutId: ReturnType<typeof setTimeout>,
         requestId: string
     ): AsyncGenerator<ChatCompletionChunk> {
         let chunkCount = 0;
+        // Rolling inactivity timeout: reset on every chunk.
+        // The initial timeoutId covers "time to first chunk";
+        // after each chunk we replace it so silence also triggers abort.
+        let activeTimeout = timeoutId;
+        const reschedule = () => {
+            clearTimeout(activeTimeout);
+            activeTimeout = setTimeout(() => {
+                log.warn('Stream inactivity timeout', { requestId, chunkCount });
+                controller.abort();
+            }, this.config.timeout);
+        };
         try {
             for await (const chunk of stream) {
-                // 每次收到数据时重置超时
-                clearTimeout(timeoutId);
+                reschedule();
                 chunkCount++;
                 yield chunk;
             }
             log.debug('Stream completed', { requestId, chunkCount });
         } finally {
-            clearTimeout(timeoutId);
+            clearTimeout(activeTimeout);
         }
     }
     

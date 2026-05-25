@@ -686,6 +686,15 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return () => this._listeners.delete(listener);
     }
 
+    listConnections(): ConnectionMeta[] {
+        return this._connections.map(c => this.connToMeta(c));
+    }
+
+    findConnection(id: string): ConnectionMeta | undefined {
+        const c = this.findConn(id);
+        return c ? this.connToMeta(c) : undefined;
+    }
+
     // ─── ILLMManagementService — MCP ─────────────────────────────────────────
 
     async getMCPServers(): Promise<MCPServer[]> {
@@ -1043,7 +1052,11 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             model: resolvedModel,
         };
 
-        const driver = new LLMDriver({ connection: connForDriver });
+        // Pass the resolved provider as customProviderDefaults so createProvider can
+        // find the correct implementation class and baseURL even for user-defined providers
+        // that are not in the built-in LLM_PROVIDERS catalog.
+        const customProviderDefaults = provider ? { [connForDriver.provider]: provider } : undefined;
+        const driver = new LLMDriver({ connection: connForDriver, customProviderDefaults });
         const history: ChatMessage[] = opts?.systemPrompt
             ? [{ role: 'system', content: opts.systemPrompt }]
             : [];
