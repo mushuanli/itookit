@@ -67,6 +67,9 @@ export const createFileItemHTML = (
   } = props;
   const { isPinned = false, hasUnreadUpdate = false, hasWaitingInput = false } = custom;
   const summary = content?.summary || '';
+  const connLabel = custom._extension === '.agent'
+    ? (custom.ai_connectionLabel as string | undefined)
+    : undefined;
 
   let deleteBtnHTML = '';
   if (!isReadOnly) {
@@ -138,7 +141,7 @@ export const createFileItemHTML = (
               ${hasWaitingInput ? '<span class="vfs-node-item__indicator vfs-node-item__indicator--waiting" title="等待用户输入"></span>' : ''}
               ${hasUnreadUpdate && !hasWaitingInput ? '<span class="vfs-node-item__indicator"></span>' : ''}
             </div>
-            
+            ${connLabel ? `<div class="vfs-node-item__conn-label">${escapeHTML(connLabel)}</div>` : ''}
             <div class="vfs-node-item__row-secondary">
               <div class="vfs-node-item__secondary-left">
                 ${summaryHTML}

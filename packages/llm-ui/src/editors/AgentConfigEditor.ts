@@ -118,10 +118,18 @@ export class AgentConfigEditor implements IEditor {
         const agent = this.content;
         const config = agent.config;
 
-        // Only show connections that are enabled AND have an apiKey configured, sorted alphabetically
-        const connections = (await this.service.getConnections())
+        // Fetch all connections, then split into valid (enabled + hasApiKey) and invalid
+        const allConns = await this.service.getConnections();
+        const connections = allConns
             .filter(c => c.enabled !== false && c.hasApiKey)
             .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        // Connections excluded because their Provider has no API key
+        const noKeyConns = allConns.filter(c => c.enabled !== false && !c.hasApiKey);
+
+        // Detect if the saved connectionId is now invalid (provider lost its key)
+        const savedConnId = config.connectionId;
+        const savedConnInvalid = !!(savedConnId && !connections.find(c => c.id === savedConnId));
+        const savedConnMeta = savedConnInvalid ? allConns.find(c => c.id === savedConnId) : null;
 
         // 确保有有效的连接选择
         let selectedConn = connections.find(c => c.id === config.connectionId);
@@ -133,6 +141,37 @@ export class AgentConfigEditor implements IEditor {
                 this.content.config.connectionId = selectedConn.id;
             }
         }
+
+        // Group connections by provider for optgroup display
+        const providers = this.service.getProviders();
+        const providerMap = new Map(providers.map(p => [p.id, p]));
+        const grouped = providers
+            .map(p => ({
+                provider: p,
+                conns: connections.filter(c => (c.providerId ?? c.provider) === p.id),
+            }))
+            .filter(g => g.conns.length > 0);
+        const ungrouped = connections.filter(c => !providerMap.has(c.providerId ?? c.provider ?? ''));
+        const connectionOptionsHtml = [
+            ...grouped.map(g => `
+                <optgroup label="${g.provider.icon ?? ''} ${this.escapeHtml(g.provider.name)}">
+                    ${g.conns.map(c => `
+                        <option value="${c.id}" ${selectedConn?.id === c.id ? 'selected' : ''}>
+                            ${c.id === 'default' ? '⭐ ' : ''}${this.escapeHtml(c.name)}
+                        </option>
+                    `).join('')}
+                </optgroup>
+            `),
+            ungrouped.length > 0 ? `
+                <optgroup label="其他">
+                    ${ungrouped.map(c => `
+                        <option value="${c.id}" ${selectedConn?.id === c.id ? 'selected' : ''}>
+                            ${this.escapeHtml(c.name)}
+                        </option>
+                    `).join('')}
+                </optgroup>
+            ` : '',
+        ].join('');
 
         const currentTier = config.modelTier ?? 'optimal';
         const allMCPServers = await this.service.getMCPServers();
@@ -197,24 +236,25 @@ export class AgentConfigEditor implements IEditor {
                             <label class="agent-form-label">
                                 连接 <small>选择已配置的 LLM 服务</small>
                             </label>
-                            <select class="agent-form-select" name="connectionId" id="connection-select">
+                            ${savedConnInvalid ? `
+                                <div class="agent-conn-invalid-banner">
+                                    ⚠️ 连接「${this.escapeHtml(savedConnMeta?.name ?? savedConnId)}」不可用 — Provider 未配置 API Key。
+                                    已自动切换至首个可用连接。请前往
+                                    <strong>设置 → LLM Providers</strong> 配置 API Key。
+                                </div>
+                            ` : ''}
+                            <select class="agent-form-select" name="connectionId" id="connection-select"
+                                    ${connections.length === 0 ? 'disabled' : ''}>
                                 <option value="">-- 选择连接 --</option>
-                                ${connections.map(c => {
-            const hasKey = c.hasApiKey;
-            const isDefault = c.id === 'default';
-            // User Friendly Display
-            let displayName = this.escapeHtml(c.name);
-            if (isDefault) displayName = `⭐ ${displayName}`;
-            if (!hasKey && !isDefault) displayName = `${displayName} (需配置)`;
-
-            return `
-                                    <option value="${c.id}" ${(selectedConn?.id === c.id) ? 'selected' : ''}>
-                                        ${displayName} - ${c.provider}
-                                    </option>
-                                `}).join('')}
+                                ${connectionOptionsHtml}
                             </select>
                             <p class="agent-form-help">
-                                ${connections.length === 0 ? '⚠️ 请先在设置中添加 LLM 连接' : '选择此 Agent 使用的 LLM 服务'}
+                                ${connections.length === 0
+                                    ? '⚠️ 所有连接均不可用，请先在 <strong>设置 → LLM Providers</strong> 配置 API Key'
+                                    : noKeyConns.length > 0
+                                        ? `另有 ${noKeyConns.length} 个连接因 Provider 未配置 API Key 而不可用`
+                                        : '选择此 Agent 使用的 LLM 服务'
+                                }
                             </p>
                         </div>
 
@@ -353,6 +393,18 @@ export class AgentConfigEditor implements IEditor {
         `;
 
         this.bindEvents();
+
+        // Non-critical: write resolved connection label to FSNode metadata for vfs-ui display.
+        // Must run AFTER innerHTML is set so a failure here never breaks rendering.
+        const engine = this.options.sessionEngine;
+        const nodeId = this.options.nodeId;
+        if (engine?.driver && nodeId && selectedConn) {
+            const connGroup = grouped.find(g => g.conns.some(c => c.id === selectedConn!.id));
+            if (connGroup) {
+                const label = `${connGroup.provider.icon ?? ''} ${connGroup.provider.name} · ${selectedConn.name}`.trim();
+                engine.driver.updateMetadata(nodeId, { ai_connectionLabel: label }).catch(() => {});
+            }
+        }
     }
 
     private renderError(message: string) {
@@ -453,6 +505,15 @@ export class AgentConfigEditor implements IEditor {
         if (connSelect) {
             connSelect.addEventListener('change', () => {
                 if (this.content?.config) this.content.config.connectionId = connSelect.value;
+                // Update connection label in FSNode metadata for vfs-ui list display
+                const engine = this.options.sessionEngine;
+                const nodeId = this.options.nodeId;
+                if (engine?.driver && nodeId && connSelect.value) {
+                    const selectedOpt = connSelect.options[connSelect.selectedIndex];
+                    const groupLabel = (selectedOpt?.closest('optgroup') as HTMLOptGroupElement | null)?.label ?? '';
+                    const label = groupLabel ? `${groupLabel} · ${selectedOpt.text.trim()}` : selectedOpt.text.trim();
+                    engine.driver.updateMetadata(nodeId, { ai_connectionLabel: label }).catch(() => {});
+                }
                 handleChange();
             });
         }

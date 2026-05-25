@@ -394,3 +394,15 @@
 .agent-tier-btn__icon { font-size: 1.2rem; }
 .agent-tier-btn__label { font-weight: 600; }
 .agent-tier-btn__desc { color: var(--st-text-secondary); font-size: 0.72rem; }
+
+/* Invalid connection warning banner */
+.agent-conn-invalid-banner {
+    font-size: 0.82rem;
+    padding: 8px 12px;
+    margin-bottom: var(--st-space-sm);
+    border-radius: var(--st-radius-md);
+    border: 1px solid rgba(245,158,11,.4);
+    background: rgba(245,158,11,.08);
+    color: var(--st-text-primary);
+    line-height: 1.5;
+}
