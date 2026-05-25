@@ -1175,7 +1175,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             for (const child of children) {
                 if (child.type !== 'file' || !child.name.endsWith('.json')) continue;
                 try {
-                    const raw = await this.engine.driver.readContent(child.id);
+                    const raw = await this.engine.driver.readContent(child.path);
                     const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
                     await this.engineUpsert(`${CONNECTIONS_DIR}/${child.name}`, text);
                 } catch { /* skip */ }
@@ -1214,7 +1214,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             for (const child of children) {
                 if (child.type !== 'file' || !child.name.endsWith('.json')) continue;
                 try {
-                    const raw = await agentsEngine.driver.readContent(child.id);
+                    const raw = await agentsEngine.driver.readContent(child.path);
                     const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
                     await this.engineUpsert(`${MCP_DIR}/${child.name}`, text);
                 } catch { /* skip */ }
@@ -1352,13 +1352,15 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 const isJson = child.name.endsWith('.json');
                 if (!isYaml && !isJson) continue;
                 try {
-                    const raw = await fs.driver.readContent(child.id);
+                    const raw = await fs.driver.readContent(child.path);
                     const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
                     const parsed = isYaml
                         ? yaml.load(text) as T
                         : JSON.parse(text) as T;
                     items.push(parsed);
-                } catch { /* skip malformed */ }
+                } catch (e) {
+                    console.warn(`[LLMDeviceDriver] loadDir skip ${child.name}:`, e instanceof Error ? e.message : e);
+                }
             }
             console.log(`[Boot]       loadDir ${dirPath}: ${items.length} loaded in ${(performance.now() - t0).toFixed(0)}ms`);
         } catch { /* directory not yet created */ }

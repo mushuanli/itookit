@@ -380,12 +380,15 @@ export class VFSEngine {
     // ── Search ──
 
     async search(path: string, query: import('@itookit/common').FSSearchQuery): Promise<import('@itookit/common').FSNode[]> {
-        const { backend } = this.resolveStore(path);
-        if (backend.search) return backend.search(query);
+        const { backend, mountPath } = this.resolveStore(path);
+        if (backend.search) {
+            const nodes = await backend.search(query);
+            return nodes.map(n => this.mapToSystemNode(n, mountPath));
+        }
         // Fallback: naive linear scan
         const all: import('@itookit/common').FSNode[] = [];
         await this._walkAndCollect(backend, '/', query, all);
-        return all;
+        return all.map(n => this.mapToSystemNode(n, mountPath));
     }
 
     private async _walkAndCollect(

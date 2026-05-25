@@ -2,6 +2,7 @@
 import type { EditorFactory, IEditor, EditorOptions, IConnectionService } from '@itookit/common';
 import type { IAgentManagementService } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
+import { SETTINGS_PAGES } from '../engine/SettingsEngine';
 import { MCPSettingsEditor, ConnectionSettingsEditor, ProviderSettingsEditor } from '@itookit/llm-ui';
 
 import { TagSettingsEditor } from '../editors/TagSettingsEditor';
@@ -12,6 +13,20 @@ import { RecoverySettingsEditor } from '../editors/RecoverySettingsEditor';
 import { LogSettingsEditor } from '../editors/LogSettingsEditor';
 import { SystemFSExploreEditor } from '../editors/SystemFSExploreEditor';
 
+/**
+ * VFS-UI 使用 path（如 "/文件系统"）作为 nodeId，而内部编辑器用 slug（如 "storage"）。
+ * 此函数将 path → 内部分类 slug，确保 switch 正确匹配。
+ */
+function resolveSettingsSlug(nodeId: string): string {
+    // 直接匹配 slug（向后兼容）
+    if (SETTINGS_PAGES[nodeId]) return nodeId;
+    // 按 path 反向查找
+    for (const [slug, cfg] of Object.entries(SETTINGS_PAGES)) {
+        if (`/${cfg.name}` === nodeId) return slug;
+    }
+    return nodeId;
+}
+
 export const createSettingsFactory = (
     settingsService: SettingsService,
     /** 用于 Agent、MCP、Recovery 编辑器 */
@@ -20,7 +35,7 @@ export const createSettingsFactory = (
     connectionService: IConnectionService,
 ): EditorFactory => {
     return async (container: HTMLElement, options: EditorOptions) => {
-        const nodeId = options.nodeId;
+        const nodeId = resolveSettingsSlug(options.nodeId);
         await settingsService.init();
 
         let editor: IEditor | null = null;
