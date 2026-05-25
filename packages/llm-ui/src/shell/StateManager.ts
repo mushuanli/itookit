@@ -6,11 +6,9 @@ import type { StateService } from '../services/StateService';
 import type { SessionManager } from '@itookit/llm-engine';
 import { createDebouncedSave, DebouncedFn } from '../utils/debounce';
 import { ErrorHandler } from '../utils/errorHandler';
-import { AgentLoader } from '../services';
-
 /**
  * 状态管理器
- * 
+ *
  * ✅ 面向 IChatInputPresenter 接口，不依赖 ChatInput 实现
  * ✅ 支持新版 NavigationRequest.state 协议读取创建参数
  */
@@ -25,7 +23,7 @@ export class StateManager {
         private stateService: StateService,
         private sessionManager: SessionManager,
         private nodeId: string,
-        private agentLoader: AgentLoader
+        private readonly validateAgentFn: (id: string) => string
     ) {
         this.errorHandler = new ErrorHandler({
             module: 'StateManager',
@@ -114,7 +112,7 @@ export class StateManager {
             onTitleRestore?: (title: string) => void;
         }
     ): void {
-        const validate = (id: string) => this.agentLoader.validateAgentId(id);
+        const validate = (id: string) => this.validateAgentFn(id);
 
         // 优先级 1：外部指定的初始状态
         if (options.initialInputState) {

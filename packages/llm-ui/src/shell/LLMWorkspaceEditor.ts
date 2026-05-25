@@ -21,7 +21,8 @@ import type { INavigationPresenter, NavPanelData } from '../domain/ports/INaviga
 import type { IEditorEventBus } from '../domain/events';
 
 // Services
-import { SessionService, StateService, AssetService, AgentLoader, BranchStore, BranchService, NavDataBuilder } from '../services';
+import { SessionService, StateService, AssetService, BranchStore, BranchService, NavDataBuilder } from '../services';
+import type { ExecutorOption, ConnectionOption } from '../domain/types';
 
 // Commands
 import type { CommandContext } from '../commands/CommandContext';
@@ -99,7 +100,6 @@ export class LLMWorkspaceEditor implements IEditor {
     private sessionService!: SessionService;
     private stateService!: StateService;
     private assetService!: AssetService;
-    private agentLoader!: AgentLoader;
     private stateManager!: StateManager;
     private errorHandler!: ErrorHandler;
     private branchStore!: BranchStore;
@@ -130,6 +130,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private listeners = new Map<string, Set<EditorEventCallback>>();
     private globalEventUnsub: (() => void) | null = null;
     private sessionEventUnsub: (() => void) | null = null;
+    private agentServiceUnsub: (() => void) | null = null;
     private titleInput!: HTMLInputElement;
     private currentTitle: string = 'New Chat';
     private currentSessionId: string | null = null;
@@ -212,10 +213,9 @@ export class LLMWorkspaceEditor implements IEditor {
         this.sessionService = new SessionService(this.engine, this.sessionManager);
         this.stateService = new StateService(this.engine);
         this.assetService = new AssetService(this.engine);
-        this.agentLoader = new AgentLoader(this.options.agentService);
         this.stateManager = new StateManager(
             this.stateService, this.sessionManager, this.options.nodeId!,
-            this.agentLoader
+            (id) => this.validateAgentId(id)
         );
         this.branchStore = new BranchStore(this.sessionManager, this.errorHandler);
         this.branchService = new BranchService(this.sessionManager, this.branchStore);
@@ -254,10 +254,10 @@ export class LLMWorkspaceEditor implements IEditor {
             (loading) => this.chatInput?.setLoading(loading)
         );
 
-        const initialAgents = await this.agentLoader.loadAgents();
+        const initialAgents = this.buildExecutorOptions();
         const savedUIState = await this.stateManager.loadUIState();
         const savedAgentId = savedUIState?.input_agent_id || 'default';
-        const validAgentId = this.agentLoader.validateAgentId(savedAgentId);
+        const validAgentId = this.validateAgentId(savedAgentId);
 
         let initialSettings;
         if (this.currentSessionId && !this.options.isNewSession) {
@@ -282,7 +282,7 @@ export class LLMWorkspaceEditor implements IEditor {
             },
             onConfigChange: (config) => this.handleConfigChange(config),
             onExecutorChange: () => this.bus.emit('state:inputChanged', {}),
-            onRequestConnections: () => this.agentLoader.loadConnections(),
+            onRequestConnections: () => Promise.resolve(this.buildConnectionOptions()),
 
             // ── Harness callbacks (only wired when skill service is available) ──
             ...this.buildHarnessCallbacks(harnessAdapter, harnessRuntime),
@@ -390,6 +390,11 @@ export class LLMWorkspaceEditor implements IEditor {
         this.globalEventUnsub = this.sessionManager.onGlobalEvent(
             (event) => this.sessionEventHandler.handleGlobalEvent(event)
         );
+
+        // Reactive: rebuild executor list whenever agent/connection data changes.
+        // VFSAgentService already propagates llmDriver.onChange internally, so a
+        // single subscription covers both agent and connection mutations.
+        this.agentServiceUnsub = this.options.agentService.onChange(() => this.refreshAgents());
     }
 
     // ================================================================
@@ -515,7 +520,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.sessionEventUnsub?.();
         this.sessionEventUnsub = null;
 
-        await this.refreshAgents();
+        this.refreshAgents();
 
         const { sessionId, snapshot, title } = await this.sessionService.loadSession(
             this.options.nodeId, this.currentTitle
@@ -569,15 +574,69 @@ export class LLMWorkspaceEditor implements IEditor {
         this.statusIndicator.updateFromSnapshot(snapshot);
     }
 
-    private async refreshAgents(): Promise<void> {
-        if (!this.chatInput) return;
+    // ================================================================
+    // Agent / Connection 辅助 — 替代已删除的 AgentLoader
+    // ================================================================
 
-        const agents = await this.agentLoader.loadAgents();
-        const changed = this.chatInput.refreshAgents(
-            agents,
-            (id) => this.agentLoader.validateAgentId(id)
+    /** 从 agentService 缓存同步构建 ExecutorOption 列表 */
+    private buildExecutorOptions(): ExecutorOption[] {
+        const agents = this.options.agentService.listAgents();
+        const connMap = new Map(
+            this.options.agentService.listConnections().map(c => [c.id, c])
         );
 
+        const seen = new Set<string>();
+        const options: ExecutorOption[] = [];
+
+        // Ensure 'default' exists — inject fallback when absent in VFS
+        if (!agents.some(a => a.id === 'default')) {
+            options.push({ id: 'default', name: 'Default Assistant', icon: '🤖', category: 'System' });
+            seen.add('default');
+        }
+
+        for (const agent of agents) {
+            if (seen.has(agent.id)) continue;
+            seen.add(agent.id);
+            const conn = agent.config?.connectionId ? connMap.get(agent.config.connectionId) : undefined;
+            options.push({
+                id: agent.id,
+                name: agent.name,
+                icon: agent.icon,
+                category: agent.type === 'agent' ? 'Agents' :
+                    agent.type === 'workflow' ? 'Workflows' : 'Other',
+                description: agent.description,
+                provider: conn?.provider,
+                connectionName: conn?.name,
+                connectionId: agent.config?.connectionId,
+            });
+        }
+
+        return options;
+    }
+
+    /** agentId 合法性校验 — 缓存中不存在则 fallback 到 'default' */
+    private validateAgentId(id: string): string {
+        return this.options.agentService.findAgent(id) ? id : 'default';
+    }
+
+    /** 构建连接选项列表（过滤已禁用，供 ChatInput 连接选择器使用） */
+    private buildConnectionOptions(): ConnectionOption[] {
+        return this.options.agentService.listConnections()
+            .filter(c => c.enabled !== false)
+            .map(c => ({
+                id: c.id,
+                name: c.name,
+                provider: c.provider,
+                hasTiers: !!(c.tiers?.standard || c.tiers?.fast),
+            }));
+    }
+
+    private refreshAgents(): void {
+        if (!this.chatInput) return;
+        const changed = this.chatInput.refreshAgents(
+            this.buildExecutorOptions(),
+            (id) => this.validateAgentId(id)
+        );
         if (changed) {
             this.bus.emit('state:inputChanged', {});
         }
@@ -1487,8 +1546,7 @@ export class LLMWorkspaceEditor implements IEditor {
      * 获取 agent 的可读显示名称
      */
     private getAgentDisplayName(agentId: string): string {
-        const agents = this.agentLoader.agents;
-        const agent = agents.find(a => a.id === agentId);
+        const agent = this.options.agentService.findAgent(agentId);
         return agent?.name || agentId;
     }
 
@@ -1522,8 +1580,10 @@ export class LLMWorkspaceEditor implements IEditor {
         // 2. 外部事件解绑
         this.sessionEventUnsub?.();
         this.globalEventUnsub?.();
+        this.agentServiceUnsub?.();
         this.sessionEventUnsub = null;
         this.globalEventUnsub = null;
+        this.agentServiceUnsub = null;
 
         // 3. 事件系统
         this.eventBinder?.cleanup();

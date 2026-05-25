@@ -16,3 +16,4 @@ export * from './connections';
 export * from './agents';
 export * from './llm-loader';
 export * from './llm-configs';
+export * from './register';
