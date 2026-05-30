@@ -62,13 +62,13 @@ function waitForEditorMount(container: HTMLElement): Promise<void> {
 // translates those into VFSStore state so the session list renders an orange
 // pulsing indicator on the waiting session's .chat file entry.
 
-function setupHitlVfsBridge(sessionManager: SessionManager, manager: MemoryManager): void {
+function setupHitlVfsBridge(sessionManager: SessionManager, manager: MemoryManager): () => void {
     // NOTE: This bridge is "eventual" — it only responds to events that fire
     // AFTER the workspace is loaded. Sessions that started waiting before the
     // workspace loaded won't be highlighted until the NEXT input request.
     // In practice this is not an issue because chat workspaces are loaded at
     // app startup, before any background session can trigger human_input.
-    sessionManager.onGlobalEvent((event) => {
+    return sessionManager.onGlobalEvent((event) => {
         if (event.type === 'session_hitl_active') {
             const runtime = sessionManager.getSessionRuntime(event.payload.sessionId);
             if (runtime) {
@@ -245,6 +245,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const { backend, additionalMounts, defaultSlug, routeAliases = {}, onProgress } = options;
     const t0 = performance.now();
     let t = t0;
+    const cleanupFns: Array<() => void> = [];
     const logStep = (label: string) => {
         const now = performance.now();
         console.log(`[Boot] ${label}: +${(now - t).toFixed(0)}ms (累计 ${(now - t0).toFixed(0)}ms)`);
@@ -341,7 +342,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     await syncSkillsToHarness(llmDriver, harness);
     console.log(`[Boot]   ↳ syncSkillsToHarness: +${(performance.now() - ts).toFixed(0)}ms`);
     // Keep skills in sync when the user adds / edits / deletes skills in Settings.
-    llmDriver.onChange(() => { syncSkillsToHarness(llmDriver, harness).catch(() => {}); });
+    cleanupFns.push(
+        llmDriver.onChange(() => { syncSkillsToHarness(llmDriver, harness).catch(() => {}); })
+    );
 
     // Initialize file-system skill scope (Node.js / Tauri only; browser gracefully no-ops).
     // Scans _agent/skills/ directories from project root to CWD and registers FS skills.
@@ -518,7 +521,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         // Bridge: session HITL status → vfs-ui session list highlight.
         // Calls manager.setNodeWaitingInput() which delegates to VFSUIShell internally,
         // keeping bootstrap decoupled from the concrete VFSUIShell type.
-        setupHitlVfsBridge(sessionManager, manager);
+        cleanupFns.push(setupHitlVfsBridge(sessionManager, manager));
 
         if (initialResourceId && manager.getActiveSessionId() !== initialResourceId) {
             await manager.openFile(initialResourceId);
@@ -694,6 +697,13 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         addWorkspace(config: WorkspaceConfig): void {
             workspaces.push(config);
             registerWorkspaceRoute(config);
+        },
+
+        destroy(): void {
+            for (const fn of cleanupFns) {
+                try { fn(); } catch { /* ignore */ }
+            }
+            cleanupFns.length = 0;
         },
     };
 }

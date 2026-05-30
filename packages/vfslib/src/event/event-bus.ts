@@ -47,13 +47,14 @@ export class EventBus {
             moduleId: extra?.moduleId,
             fromTransaction: extra?.fromTransaction,
         });
+        // Copy before iterating: handlers may subscribe/unsubscribe in callback
         if (set) {
-            for (const h of set) {
+            for (const h of [...set]) {
                 try { h(event); } catch { /* swallow */ }
             }
         }
 
-        for (const h of this.anyHandlers) {
+        for (const h of [...this.anyHandlers]) {
             try { h(event as FSEvent); } catch { /* swallow */ }
         }
     }

@@ -51,5 +51,7 @@ export interface AppHandle {
     navigate(slug: string, resourceId?: string): Promise<void>;
     /** Register a dynamically created workspace (e.g. a local mount tab). */
     addWorkspace(config: WorkspaceConfig): void;
+    /** Unsubscribe all global event listeners and release resources. */
+    destroy(): void;
     vfs: IVFSManager;
 }

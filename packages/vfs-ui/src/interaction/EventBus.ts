@@ -17,13 +17,16 @@ export class EventBus implements IEventPort {
     event: T,
     payload: PublicEventPayload<T>
   ): void {
-    this.listeners.get(event)?.forEach(listener => {
+    // Copy before iterating: handlers may subscribe/unsubscribe in callback
+    const set = this.listeners.get(event);
+    if (!set) return;
+    for (const listener of [...set]) {
       try {
         listener(payload);
       } catch (e) {
         console.error(`[EventBus] Error in listener for ${event}:`, e);
       }
-    });
+    }
   }
 
   on<T extends PublicEventName>(

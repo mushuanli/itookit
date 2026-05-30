@@ -167,17 +167,17 @@ export class SettingsService {
             }, 2000);
         };
 
-        const isConfigEvent = (moduleId: string) => moduleId === CONFIG_MODULE;
+        const relevant = (moduleId: string) => moduleId === CONFIG_MODULE;
 
         this.eventUnsubscribers.push(
             this.vfs.on('node:created', (e: VFSManagerEvent<'node:created'>) => {
-                if (!isConfigEvent(e.payload.moduleId)) debounce();
+                if (relevant(e.payload.moduleId)) debounce();
             }),
             this.vfs.on('node:updated', (e: VFSManagerEvent<'node:updated'>) => {
-                if (!isConfigEvent(e.payload.moduleId)) debounce();
+                if (relevant(e.payload.moduleId)) debounce();
             }),
             this.vfs.on('node:deleted', (e: VFSManagerEvent<'node:deleted'>) => {
-                if (!isConfigEvent(e.payload.moduleId)) debounce();
+                if (relevant(e.payload.moduleId)) debounce();
             }),
         );
     }

@@ -646,7 +646,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     async saveConnection(conn: LLMConnection, systemFS?: IModuleFS): Promise<void> {
         await this.writeToDisk(conn, systemFS);
-        // Update in-memory cache directly; bindVFSEvents debounce handles cross-tab sync
+        this.cancelPendingSync();
+        // Update in-memory cache directly
         const idx = this._connections.findIndex(c => c.id === conn.id);
         if (idx >= 0) { this._connections[idx] = conn; } else { this._connections.push(conn); }
         await this.vfs.createDeviceNode('llm', `/dev/llm/connection/${conn.id}`, {
@@ -676,6 +677,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     async deleteConnection(id: string, systemFS?: IModuleFS): Promise<void> {
         if (id === 'default') throw new Error('Cannot delete the default connection');
         await this.deleteFromDisk(id, systemFS);
+        this.cancelPendingSync();
         this._connections = this._connections.filter(c => c.id !== id);
         await this.vfs.removeDeviceNode(`/dev/llm/connection/${id}`);
         this.notify();
@@ -703,6 +705,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     async saveMCPServer(server: MCPServer, systemFS?: IModuleFS): Promise<void> {
         await this.writeMCPToDisk(server, systemFS);
+        this.cancelPendingSync();
         const idx = this._mcpServers.findIndex(s => s.id === server.id);
         if (idx >= 0) { this._mcpServers[idx] = server; } else { this._mcpServers.push(server); }
         await this.vfs.createDeviceNode('llm', `/dev/llm/mcp/${server.id}`, {
@@ -714,6 +717,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     async deleteMCPServer(id: string, systemFS?: IModuleFS): Promise<void> {
         await this.deleteMCPFromDisk(id, systemFS);
+        this.cancelPendingSync();
         this._mcpServers = this._mcpServers.filter(s => s.id !== id);
         const conn = this._activeMCPConns.get(id);
         if (conn) {
@@ -749,6 +753,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     async saveProvider(provider: LLMProvider, systemFS?: IModuleFS): Promise<void> {
         await this.writeProviderToDisk(provider, systemFS);
+        this.cancelPendingSync();
         this._providers.set(provider.id, provider);
         this.notify();
     }
@@ -757,6 +762,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         const provider = this._providers.get(id);
         if (provider?.isBuiltin) throw new Error(`Cannot delete built-in provider: ${id}`);
         await this.deleteProviderFromDisk(id, systemFS);
+        this.cancelPendingSync();
         this._providers.delete(id);
         this.notify();
     }
@@ -864,6 +870,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     async saveSkill(skill: LLMSkill, systemFS?: IModuleFS): Promise<void> {
         skill = { ...skill, modifiedAt: Date.now() };
         await this.writeSkillToDisk(skill, systemFS);
+        this.cancelPendingSync();
         const idx = this._skills.findIndex(s => s.id === skill.id);
         if (idx >= 0) { this._skills[idx] = skill; } else { this._skills.push(skill); }
         await this.vfs.createDeviceNode('llm', `/dev/llm/skills/${skill.id}`, {
@@ -875,6 +882,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     async deleteSkill(id: string, systemFS?: IModuleFS): Promise<void> {
         await this.deleteSkillFromDisk(id, systemFS);
+        this.cancelPendingSync();
         this._skills = this._skills.filter(s => s.id !== id);
         await this.vfs.removeDeviceNode(`/dev/llm/skills/${id}`);
         this.notify();
@@ -1239,6 +1247,14 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     // ─── VFS event binding ────────────────────────────────────────────────────
+
+    /** Cancel any pending VFS-event-driven reload — used after local writes */
+    private cancelPendingSync(): void {
+        if (this._syncTimer) {
+            clearTimeout(this._syncTimer);
+            this._syncTimer = null;
+        }
+    }
 
     private bindVFSEvents(): void {
         const debounce = () => {
