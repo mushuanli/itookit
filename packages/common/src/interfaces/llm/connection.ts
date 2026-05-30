@@ -243,17 +243,75 @@ export interface ConnectionTestResult {
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 /**
+ * 在 provider 的模型目录中按 name（display name）查找模型。
+ * 返回匹配的 model ID，未找到返回 undefined。
+ */
+function findModelByName(provider: LLMProvider, name: string): string | undefined {
+    return provider.models.find(m => m.name === name)?.id;
+}
+
+/**
+ * 跨 provider 解析 model ID。
+ *
+ * 当 connection 从 provider A 切换到 provider B 时，tiers 中存储的是 A 的 model ID，
+ * 在 B 的模型目录中可能不存在。此函数尝试按以下策略解析：
+ *   1. 直接 ID 匹配（modelId 在 provider.models 中存在）
+ *   2. 在所有 provider 中查找 modelId 的 name，再在目标 provider 中按 name 匹配
+ *   3. 在目标 provider 中按 name 直接匹配（当 modelId 恰好是 display name 时）
+ *
+ * @param modelId  待解析的模型 ID
+ * @param provider  目标 provider
+ * @param allProviders  所有 provider 的集合（用于跨 provider name 查找），可选
+ * @returns 匹配到的 model ID，未匹配到返回 undefined
+ */
+export function resolveModelId(
+    modelId: string,
+    provider: LLMProvider,
+    allProviders?: Iterable<LLMProvider>,
+): string | undefined {
+    // 1. Direct ID match
+    if (provider.models.some(m => m.id === modelId)) return modelId;
+
+    // 2. Cross-provider: find the model's name from any provider, then match by name
+    if (allProviders) {
+        for (const p of allProviders) {
+            const srcModel = p.models.find(m => m.id === modelId);
+            if (srcModel) {
+                const match = findModelByName(provider, srcModel.name);
+                if (match) return match;
+                break; // found the source model but no name match in target
+            }
+        }
+    }
+
+    // 3. Fallback: try direct name match in target provider
+    return findModelByName(provider, modelId);
+}
+
+/**
  * 将完整连接转换为安全元数据。
  * hasApiKey 从 provider.apiKey 解析（再 fallback 到 legacy conn.apiKey）。
+ *
+ * @param allProviders  所有 provider（用于跨 provider 的 model ID → name → ID 解析）
  */
-export function toConnectionMeta(conn: LLMConnection, provider?: LLMProvider): ConnectionMeta {
+export function toConnectionMeta(
+    conn: LLMConnection,
+    provider?: LLMProvider,
+    allProviders?: Iterable<LLMProvider>,
+): ConnectionMeta {
     // Tier config lives exclusively on Connection; Provider has no defaultTiers.
     const effectiveTiers = conn.tiers;
-    const resolvedModel =
+    const directModel =
         effectiveTiers?.optimal
         ?? conn.model             // legacy fallback
         ?? provider?.models[0]?.id
         ?? '';
+    const resolvedModel =
+        provider && effectiveTiers?.optimal
+            ? resolveModelId(effectiveTiers.optimal, provider, allProviders)
+                ?? provider.models[0]?.id
+                ?? ''
+            : directModel;
     const pid = conn.providerId ?? conn.provider ?? '';
 
     return {
