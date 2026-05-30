@@ -185,7 +185,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
       try {
         await this.vfsService.createFile({
           title: startup.startupFileName,
-          content: startup.startupContent || '# Welcome\n\nSelect a file to start.',
+          content: startup.startupContent ?? (startup.startupFileName?.endsWith('.chat') ? '' : '# Welcome\n\nSelect a file to start.'),
           parentPath: null,
         });
       } catch (e) {
