@@ -154,7 +154,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                         ✏️ 编辑
                     </button>
                     ${isCurrentBuiltin
-                        ? '<button class="settings-btn settings-btn--sm btn-reset-provider" style="flex:1">↩️ 重置</button>'
+                        ? '<button class="settings-btn settings-btn--danger settings-btn--sm btn-delete-provider" style="flex:1">🗑️ 删除</button>'
                         : '<button class="settings-btn settings-btn--danger settings-btn--sm btn-delete-provider" style="flex:1">🗑️ 删除</button>'
                     }
                 </div>
@@ -266,12 +266,10 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         if (!ids.length) return;
 
         const allProviders = this.service.getProviders();
-        const currentBuiltins = this.service.getProviderDefaults?.() ?? {};
-        const deletable = allProviders.filter(p => ids.includes(p.id) && !currentBuiltins[p.id]);
-        const skipped   = ids.length - deletable.length;
+        const deletable = allProviders.filter(p => ids.includes(p.id));
 
         if (!deletable.length) {
-            Toast.error('选中的 Provider 均为当前内置项，无法删除（可禁用或重置）');
+            Toast.error('未找到可删除的 Provider');
             return;
         }
 
@@ -294,16 +292,40 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
             : [];
 
         this.showDeleteImpactModal({
-            deletable, skipped,
+            deletable,
             affectedConns,
             affectedAgents, replacementConns,
             agentSvc,
         });
     }
 
+    /**
+     * Pick the best default replacement connection for agents:
+     * 1. Has API key + same model (tiers.optimal) as the agent's old connection
+     * 2. Has API key (any model)
+     * 3. First available connection
+     */
+    private pickBestReplacement(
+        affectedConns: ConnectionMeta[],
+        replacementConns: ConnectionMeta[],
+    ): string {
+        // Build a quick lookup: connectionId → model
+        const modelMap = new Map(affectedConns.map(c => [c.id, c.model]));
+        // Filter to connections with API keys
+        const withKey = replacementConns.filter(c => c.hasApiKey);
+        // Try same-model match among key-bearing connections
+        for (const rc of (withKey.length > 0 ? withKey : replacementConns)) {
+            for (const ac of affectedConns) {
+                const oldModel = modelMap.get(ac.id);
+                if (oldModel && rc.model === oldModel) return rc.id;
+            }
+        }
+        // Fallback: first key-bearing, otherwise first available
+        return withKey[0]?.id ?? replacementConns[0]?.id ?? '';
+    }
+
     private showDeleteImpactModal(opts: {
         deletable: LLMProvider[];
-        skipped: number;
         affectedConns: ConnectionMeta[];
         affectedAgents: AgentDefinition[];
         replacementConns: ConnectionMeta[];
@@ -312,17 +334,11 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
             deleteAgent(id: string): Promise<void>;
         } | null;
     }): void {
-        const { deletable, skipped, affectedConns, affectedAgents, replacementConns, agentSvc } = opts;
+        const { deletable, affectedConns, affectedAgents, replacementConns, agentSvc } = opts;
 
         const providerListHtml = deletable.map(p =>
             `<li>${p.icon ?? ''} <strong>${p.name}</strong> <code style="font-size:.75rem;opacity:.7">${p.id}</code></li>`,
         ).join('');
-
-        const skippedHint = skipped > 0
-            ? `<p style="margin:0 0 12px;font-size:.8rem;color:var(--st-text-secondary)">
-                   另有 ${skipped} 个当前内置 Provider 将跳过。
-               </p>`
-            : '';
 
         const connSectionHtml = affectedConns.length > 0 ? `
             <div class="llm-delete-impact-section llm-delete-impact-section--warn">
@@ -335,8 +351,9 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
             </div>
         ` : '';
 
+        const bestReplacement = this.pickBestReplacement(affectedConns, replacementConns);
         const replacementOptions = replacementConns.map(c =>
-            `<option value="${c.id}">${c.name}</option>`,
+            `<option value="${c.id}" ${c.id === bestReplacement ? 'selected' : ''}>${c.name}${c.hasApiKey ? ' ✓' : ''}</option>`,
         ).join('');
 
         const agentSectionHtml = affectedAgents.length > 0 ? `
@@ -375,7 +392,6 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
 
         const body = `
             <div style="font-size:.875rem">
-                ${skippedHint}
                 <div class="llm-delete-impact-section">
                     <div class="llm-delete-impact-section__title">将删除以下 Provider（${deletable.length} 个）</div>
                     <ul class="llm-delete-impact-list">${providerListHtml}</ul>
@@ -701,7 +717,6 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
 
         this.showDeleteImpactModal({
             deletable: [provider],
-            skipped: 0,
             affectedConns,
             affectedAgents,
             replacementConns,

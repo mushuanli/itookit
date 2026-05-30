@@ -746,7 +746,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     private reloadProvidersFrom(fromVFS: LLMProvider[]): void {
         const merged = new Map(Object.entries(LLM_PROVIDERS).map(([k, v]) => [k, { ...v, id: k }]));
         for (const p of fromVFS) {
-            merged.set(p.id, p);
+            if ((p as any).__deleted) { merged.delete(p.id); } else { merged.set(p.id, p); }
         }
         this._providers = merged;
     }
@@ -760,8 +760,13 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     async deleteProvider(id: string, systemFS?: IModuleFS): Promise<void> {
         const provider = this._providers.get(id);
-        if (provider?.isBuiltin) throw new Error(`Cannot delete built-in provider: ${id}`);
-        await this.deleteProviderFromDisk(id, systemFS);
+        if (provider?.isBuiltin) {
+            // Mark as deleted in VFS rather than removing the file, so
+            // reloadProvidersFrom & syncDefaultProviders skip re-creation.
+            await this.writeProviderToDisk({ ...provider, __deleted: true as any }, systemFS);
+        } else {
+            await this.deleteProviderFromDisk(id, systemFS);
+        }
         this.cancelPendingSync();
         this._providers.delete(id);
         this.notify();
