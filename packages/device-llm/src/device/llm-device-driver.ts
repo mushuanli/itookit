@@ -1298,7 +1298,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
      * 所有对外暴露 ConnectionMeta 的地方都应通过此方法，而非直接调用 toConnectionMeta()。
      */
     private connToMeta(conn: LLMConnection): ConnectionMeta {
-        return toConnectionMeta(conn, this.getProviderForConn(conn));
+        return toConnectionMeta(conn, this.getProviderForConn(conn), this._providers.values());
     }
 
     /**
