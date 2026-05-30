@@ -53,7 +53,10 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     private bindVFSEvents(): void {
         const debounce = () => {
             if (this._syncTimer) clearTimeout(this._syncTimer);
-            this._syncTimer = setTimeout(() => this.refreshData(), 300);
+            this._syncTimer = setTimeout(async () => {
+                await this.refreshData();
+                this.notify();
+            }, 300);
         };
 
         const relevant = (path: string, moduleId: string): boolean => {
@@ -76,11 +79,18 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     // ─── Data refresh ─────────────────────────────────────────────────────────
 
+    /** Cancel any pending VFS-event-driven refresh — used after local writes */
+    private cancelPendingSync(): void {
+        if (this._syncTimer) {
+            clearTimeout(this._syncTimer);
+            this._syncTimer = null;
+        }
+    }
+
     private async refreshData(): Promise<void> {
         try {
             this._agents = await this.scanAgentFiles();
             log.info('Agent service data refreshed', { agentCount: this._agents.length });
-            this.notify();
         } catch (e) {
             log.error('Failed to refresh agent service data', { error: e });
         }
@@ -211,7 +221,8 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             }
         }
 
-        // Update in-memory list directly; VFS event debounce will refresh from disk
+        // Update in-memory list directly; suppress VFS event round-trip for local writes
+        this.cancelPendingSync();
         const idx = this._agents.findIndex(a => a.id === agent.id);
         if (idx >= 0) {
             this._agents[idx] = { ...agent, tags: this._agents[idx].tags };
@@ -233,6 +244,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             const node = Array.from(results.nodes).find((n: FSNode) => n.name === filename);
             if (node) await this.engine.driver.delete([node.path]);
         }
+        this.cancelPendingSync();
         this._agents = this._agents.filter(a => a.id !== agentId);
         this.notify();
     }

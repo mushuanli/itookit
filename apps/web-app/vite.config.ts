@@ -1,14 +1,14 @@
-import { defineConfig, searchForWorkspaceRoot } from 'vite'; 
+import { defineConfig, searchForWorkspaceRoot } from 'vite';
 import path from 'path';
 
 export default defineConfig({
     // ✅ 关键 1: 相对路径，确保在非根目录或通过简单 server 启动时能找到 assets
-    base: './', 
+    base: './',
 
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './src'),
-            
+
             // ✅ 映射所有 workspace 包到源码
             '@itookit/vfs-ui/style.css': path.resolve(__dirname, '../../packages/vfs-ui/src/styles/index.css'),
             '@itookit/mdxeditor/style.css': path.resolve(__dirname, '../../packages/mdx/src/styles/index.css'),
@@ -32,7 +32,7 @@ export default defineConfig({
             '@itookit/vfsdriver-indexeddb': path.resolve(__dirname, '../../packages/vfsdriver-indexeddb/src/index.ts'),
         },
         // ✅ 建议: 防止 React/Vue 等库在 Monorepo 中被打包两次 (双重实例问题)
-        dedupe: ['react', 'react-dom', 'dexie', 'mermaid', '@codemirror/state', '@codemirror/view'] 
+        dedupe: ['react', 'react-dom', 'dexie', 'mermaid', '@codemirror/state', '@codemirror/view']
     },
     server: {
         port: 3000,
@@ -67,10 +67,10 @@ export default defineConfig({
             // 如果这些包已经编译成了 JS (dist)，加在这里没问题。
             // 如果这些包 main 指向的是 .ts 源码，建议从这里移除，
             // 让 Vite 直接把它们当源码处理，这样热更新 (HMR) 会更快。
-            // '@itookit/common', 
+            // '@itookit/common',
             // '@itookit/vfs',
             // ...
-            
+
             // 建议保留第三方纯 JS 库的预构建
             'mermaid',
             'dexie',

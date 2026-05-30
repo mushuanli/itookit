@@ -19,13 +19,16 @@ export class EditorEventBus implements IEditorEventBus {
     }
 
     emit<K extends EditorEventKey>(event: K, payload: EditorBusEvents[K]): void {
-        this.handlers.get(event)?.forEach(cb => {
+        // Copy before iterating: handlers may subscribe/unsubscribe in callback
+        const set = this.handlers.get(event);
+        if (!set) return;
+        for (const cb of [...set]) {
             try {
                 (cb as EventCallback<K>)(payload);
             } catch (e) {
                 console.error(`[EditorEventBus] Error in "${event}":`, e);
             }
-        });
+        }
     }
 
     once<K extends EditorEventKey>(event: K, callback: EventCallback<K>): () => void {

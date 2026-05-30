@@ -53,7 +53,8 @@ export class EventBus {
     }
 
     private dispatch(event: string, handlers: Map<symbol, EventCallback>, payload: any): void {
-        for (const cb of handlers.values()) {
+        // Copy before iterating: handlers may subscribe/unsubscribe in callback
+        for (const cb of [...handlers.values()]) {
             try { cb(payload); }
             catch (err) { console.error(`[EventBus] Error in "${event}":`, err); }
         }
