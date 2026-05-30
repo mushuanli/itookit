@@ -1063,7 +1063,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         // Pass the resolved provider as customProviderDefaults so createProvider can
         // find the correct implementation class and baseURL even for user-defined providers
         // that are not in the built-in LLM_PROVIDERS catalog.
-        const customProviderDefaults = provider ? { [connForDriver.provider]: provider } : undefined;
+        const pkey = connForDriver.provider as string;
+        const customProviderDefaults = provider && pkey ? { [pkey]: provider } : undefined;
         const driver = new LLMDriver({ connection: connForDriver, customProviderDefaults });
         const history: ChatMessage[] = opts?.systemPrompt
             ? [{ role: 'system', content: opts.systemPrompt }]
