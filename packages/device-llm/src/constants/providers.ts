@@ -110,6 +110,10 @@ export const MODEL_NAME_DOUBAO_SEED_20_PRO = 'Doubao Seed 2.0 Pro';
 export const MODEL_NAME_DOUBAO_SEED_20_LITE = 'Doubao Seed 2.0 Lite';
 export const MODEL_NAME_DOUBAO_SEED_20_MINI = 'Doubao Seed 2.0 Mini';
 export const MODEL_NAME_DOUBAO_SEED_20_CODE = 'Doubao Seed 2.0 Code';
+// Volcengine / Doubao — 第三方模型
+export const MODEL_NAME_GLM_51 = 'GLM 5.1';
+export const MODEL_NAME_KIMI_K26 = 'Kimi K2.6';
+export const MODEL_NAME_MINIMAX_LATEST = 'MiniMax Latest';
 // Volcengine / Doubao — 图片生成 (Seedream) / 视频生成 (Seedance)
 export const MODEL_NAME_DOUBAO_SEEDREAM_50 = 'Doubao Seedream 5.0';
 export const MODEL_NAME_DOUBAO_SEEDREAM_45 = 'Doubao Seedream 4.5';
@@ -261,20 +265,24 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         },
         models: [
             // Seed-2.0 系列：对话 + 多模态视觉 + 工具调用 + 深度思考
-            { id: 'doubao-seed-2-0-pro-260215', name: MODEL_NAME_DOUBAO_SEED_20_PRO, icon: '👑', category: 'chat', inputPricePerMillion: P.DOUBAO_VISION_IN, outputPricePerMillion: P.DOUBAO_VISION_OUT, supportsThinking: true, supportsVision: true, supportsTools: true },
-            { id: 'doubao-seed-2-0-lite-260428', name: MODEL_NAME_DOUBAO_SEED_20_LITE, icon: '⚡', category: 'chat', inputPricePerMillion: P.DOUBAO_LITE_IN, outputPricePerMillion: P.DOUBAO_LITE_OUT, supportsThinking: true, supportsVision: true, supportsTools: true },
-            { id: 'doubao-seed-2-0-mini-260428', name: MODEL_NAME_DOUBAO_SEED_20_MINI, icon: '🍃', category: 'chat', inputPricePerMillion: P.DOUBAO_LITE_IN, outputPricePerMillion: P.DOUBAO_LITE_OUT, supportsThinking: true, supportsVision: true, supportsTools: true },
+            { id: 'doubao-seed-2-0-pro', name: MODEL_NAME_DOUBAO_SEED_20_PRO, icon: '👑', category: 'chat', inputPricePerMillion: P.DOUBAO_VISION_IN, outputPricePerMillion: P.DOUBAO_VISION_OUT, supportsThinking: true, supportsVision: true, supportsTools: true },
+            { id: 'doubao-seed-2-0-lite', name: MODEL_NAME_DOUBAO_SEED_20_LITE, icon: '⚡', category: 'chat', inputPricePerMillion: P.DOUBAO_LITE_IN, outputPricePerMillion: P.DOUBAO_LITE_OUT, supportsThinking: true, supportsVision: true, supportsTools: true },
+            { id: 'doubao-seed-2-0-mini', name: MODEL_NAME_DOUBAO_SEED_20_MINI, icon: '🍃', category: 'chat', inputPricePerMillion: P.DOUBAO_LITE_IN, outputPricePerMillion: P.DOUBAO_LITE_OUT, supportsThinking: true, supportsVision: true, supportsTools: true },
             // Seed-2.0 Code：对话 + 工具调用（代码增强）
-            { id: 'doubao-seed-2-0-code-preview-260215', name: MODEL_NAME_DOUBAO_SEED_20_CODE, icon: '💻', category: 'chat', inputPricePerMillion: P.DOUBAO_PRO_IN, outputPricePerMillion: P.DOUBAO_PRO_OUT, supportsTools: true },
+            { id: 'doubao-seed-2-0-code-preview', name: MODEL_NAME_DOUBAO_SEED_20_CODE, icon: '💻', category: 'chat', inputPricePerMillion: P.DOUBAO_PRO_IN, outputPricePerMillion: P.DOUBAO_PRO_OUT, supportsTools: true },
             // DeepSeek-V4 系列：对话 + 深度思考 + 工具调用（纯文本推理）
-            { id: 'deepseek-v4-pro-260425', name: MODEL_NAME_DEEPSEEK_V4_PRO, icon: '🧠', category: 'chat', inputPricePerMillion: P.DOUBAO_PRO_IN, outputPricePerMillion: P.DOUBAO_PRO_OUT, supportsThinking: true, supportsTools: true },
-            { id: 'deepseek-v4-flash-260425', name: MODEL_NAME_DEEPSEEK_V4_FLASH, icon: '🚀', category: 'chat', inputPricePerMillion: P.DOUBAO_LITE_IN, outputPricePerMillion: P.DOUBAO_LITE_OUT, supportsThinking: true, supportsTools: true },
+            { id: 'deepseek-v4-pro', name: MODEL_NAME_DEEPSEEK_V4_PRO, icon: '🧠', category: 'chat', inputPricePerMillion: P.DOUBAO_PRO_IN, outputPricePerMillion: P.DOUBAO_PRO_OUT, supportsThinking: true, supportsTools: true },
+            { id: 'deepseek-v4-flash', name: MODEL_NAME_DEEPSEEK_V4_FLASH, icon: '🚀', category: 'chat', inputPricePerMillion: P.DOUBAO_LITE_IN, outputPricePerMillion: P.DOUBAO_LITE_OUT, supportsThinking: true, supportsTools: true },
+            // 第三方模型：GLM-5.1 (智谱, 长线推理+Agent) / Kimi-K2.6 (月之暗面, 原生多模态视觉) / MiniMax (低成本+Agent Teams)
+            { id: 'glm-5.1', name: MODEL_NAME_GLM_51, icon: '🌐', category: 'chat', supportsThinking: true, supportsTools: true },
+            { id: 'kimi-k2.6', name: MODEL_NAME_KIMI_K26, icon: '🌙', category: 'chat', supportsThinking: true, supportsVision: true, supportsTools: true },
+            { id: 'minimax-latest', name: MODEL_NAME_MINIMAX_LATEST, icon: '⚡', category: 'chat', supportsTools: true },
             // 文生图 (Seedream)：按张计费，走 images/generations 端点（非 chat/completions）
-            { id: 'doubao-seedream-5-0-260128', name: MODEL_NAME_DOUBAO_SEEDREAM_50, icon: '🎨', category: 'image' },
-            { id: 'doubao-seedream-4-5-251128', name: MODEL_NAME_DOUBAO_SEEDREAM_45, icon: '🖼️', category: 'image' },
+            { id: 'doubao-seedream-5-0', name: MODEL_NAME_DOUBAO_SEEDREAM_50, icon: '🎨', category: 'image' },
+            { id: 'doubao-seedream-4-5', name: MODEL_NAME_DOUBAO_SEEDREAM_45, icon: '🖼️', category: 'image' },
             // 视频生成 (Seedance)：按时长计费，走异步任务端点（非 chat/completions）
-            { id: 'doubao-seedance-2-0-260128', name: MODEL_NAME_DOUBAO_SEEDANCE_20, icon: '🎬', category: 'video' },
-            { id: 'doubao-seedance-2-0-fast-260128', name: MODEL_NAME_DOUBAO_SEEDANCE_20_FAST, icon: '⚡', category: 'video' },
+            { id: 'doubao-seedance-2-0', name: MODEL_NAME_DOUBAO_SEEDANCE_20, icon: '🎬', category: 'video' },
+            { id: 'doubao-seedance-2-0-fast', name: MODEL_NAME_DOUBAO_SEEDANCE_20_FAST, icon: '⚡', category: 'video' },
         ],
     },
 
