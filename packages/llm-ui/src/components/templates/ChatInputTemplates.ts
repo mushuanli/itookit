@@ -216,6 +216,7 @@ export const ChatInputTemplates = {
                 <div class="llm-input__selectors-row">
                     ${this.renderAgentPicker()}
                     ${this.renderConnQuick()}
+                    ${this.renderPromptPicker()}
                 </div>
                 <div class="llm-input__input-row">
                     ${this.renderFieldWrapper()}
@@ -258,6 +259,24 @@ export const ChatInputTemplates = {
                     <span class="llm-input__conn-quick-icon">🔌</span>
                     <span class="llm-input__conn-quick-label">Default</span>
                     <span class="llm-input__conn-quick-clear" style="display:none" title="Clear override">×</span>
+                </button>
+            </div>
+        `;
+    },
+
+    /**
+     * 预设 Prompt 快速选择 pill（位于 selectors-row）
+     *
+     * 仅当当前 Agent 配置了 defaultPrompts 时显示（由 ChatInput 控制可见性）。
+     * 下拉列表由 PopupPanel 管理，选中后将 prompt 填入输入框。
+     */
+    renderPromptPicker(): string {
+        return `
+            <div class="llm-input__prompt-picker-wrapper" style="display:none">
+                <button class="llm-input__prompt-picker" type="button" title="插入预设 Prompt">
+                    <span class="llm-input__prompt-picker-icon">💬</span>
+                    <span class="llm-input__prompt-picker-label">Prompts</span>
+                    <span class="llm-input__prompt-picker-chevron">▾</span>
                 </button>
             </div>
         `;

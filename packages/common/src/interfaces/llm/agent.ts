@@ -32,6 +32,17 @@ export interface AgentInterfaceDef {
     outputs: Array<{ name: string; type: string }>;
 }
 
+/**
+ * 预设 Prompt 条目（name → prompt）。
+ * 用于 Agent 配置中预定义的快捷提示词，可在输入框下拉选择填入。
+ */
+export interface PromptPreset {
+    /** 显示名称 */
+    name: string;
+    /** 提示词内容 */
+    prompt: string;
+}
+
 export interface AgentDefinition {
     id: string;
     name: string;
@@ -41,6 +52,11 @@ export interface AgentDefinition {
     config: AgentConfig;
     tags?: string[];
     interface?: AgentInterfaceDef;
+    /**
+     * 预设 Prompt 列表（有序）。
+     * 输入框提供下拉框，选中后将对应 prompt 填入输入区。
+     */
+    defaultPrompts?: PromptPreset[];
     createdAt?: number;
     modifiedAt?: number;
 }

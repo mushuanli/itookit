@@ -1,6 +1,8 @@
 // @file: llm-ui/domain/types.ts
 
-import type { ModelTier } from '@itookit/common';
+import type { ModelTier, PromptPreset } from '@itookit/common';
+
+export type { PromptPreset } from '@itookit/common';
 
 // ============================================================
 // 节点操作
@@ -63,6 +65,8 @@ export interface ExecutorOption {
     connectionName?: string;
     /** Agent's configured connectionId (for connection override linkage) */
     connectionId?: string;
+    /** Agent 预设的快捷 Prompt 列表（供输入框下拉选择填入） */
+    defaultPrompts?: PromptPreset[];
 }
 
 export interface ModelOption {
