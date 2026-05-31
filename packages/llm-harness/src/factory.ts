@@ -15,6 +15,7 @@ import type {
     IAgentRuntimeConfig,
     IToolService,
     ISkillService,
+    ILLMService,
     IDeviceDriver,
     ITTYDriver,
 } from '@itookit/common';
@@ -55,6 +56,11 @@ export interface HarnessInstance {
     toolService: IToolService;
     /** Skill service (register / load Skills) */
     skillService: ISkillService;
+    /**
+     * One-shot LLM service (chat against any connectionId, no session).
+     * Used for utility calls such as image OCR via the vision connection.
+     */
+    llmService: ILLMService;
     /** Agent device driver (mountable at VFS /dev/agent) */
     agentDriver: AgentDeviceDriver;
     /** Tool device driver (mountable at VFS /dev/tools) */
@@ -115,6 +121,7 @@ export async function createHarness(options: HarnessOptions): Promise<HarnessIns
         config: agentDriver,
         toolService: toolDriver.getService(),
         skillService: skillDriver.getService(),
+        llmService,
         agentDriver,
         toolDriver,
         skillDriver,

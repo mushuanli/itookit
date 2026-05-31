@@ -37,6 +37,7 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm build"
   },
   "keywords": [

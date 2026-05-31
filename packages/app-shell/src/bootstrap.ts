@@ -369,7 +369,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     });
 
     const settingsFactory = createSettingsFactory(settingsModule.service, agentService, llmDriver);
-    const llmFactory      = createLLMFactory(agentService);
+    // Pass llmService only when the vision connection is actually configured —
+    // this is the single place that knows both the harness and the connection list.
+    const visionConnExists = agentService.listConnections().some(c => c.id === 'conn-volcengine-vision');
+    const llmFactory = createLLMFactory(agentService, visionConnExists ? { llmService: harness.llmService } : undefined);
     const agentFactory    = createAgentEditorFactory(agentService);
 
     // Skills workspace: VFSUIShell list (SkillsEngine) + form editor (SkillSettingsEditor)
