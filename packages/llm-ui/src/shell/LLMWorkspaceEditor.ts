@@ -264,7 +264,7 @@ export class LLMWorkspaceEditor implements IEditor {
             (loading) => this.chatInput?.setLoading(loading)
         );
 
-        const initialAgents = this.buildExecutorOptions();
+        const initialAgents = await this.buildExecutorOptions();
         const savedUIState = await this.stateManager.loadUIState();
         const savedAgentId = savedUIState?.input_agent_id || 'default';
         const validAgentId = this.validateAgentId(savedAgentId);
@@ -292,7 +292,7 @@ export class LLMWorkspaceEditor implements IEditor {
             },
             onConfigChange: (config) => this.handleConfigChange(config),
             onExecutorChange: () => this.bus.emit('state:inputChanged', {}),
-            onRequestConnections: () => Promise.resolve(this.buildConnectionOptions()),
+            onRequestConnections: () => this.buildConnectionOptions(),
 
             // ── Harness callbacks (only wired when skill service is available) ──
             ...this.buildHarnessCallbacks(harnessAdapter, harnessRuntime),
@@ -595,12 +595,11 @@ export class LLMWorkspaceEditor implements IEditor {
     // Agent / Connection 辅助 — 替代已删除的 AgentLoader
     // ================================================================
 
-    /** 从 agentService 缓存同步构建 ExecutorOption 列表 */
-    private buildExecutorOptions(): ExecutorOption[] {
+    /** 从 agentService 缓存异步构建 ExecutorOption 列表 */
+    private async buildExecutorOptions(): Promise<ExecutorOption[]> {
         const agents = this.options.agentService.listAgents();
-        const connMap = new Map(
-            this.options.agentService.listConnections().map(c => [c.id, c])
-        );
+        const connections = await this.options.agentService.getConnections();
+        const connMap = new Map(connections.map(c => [c.id, c]));
 
         const seen = new Set<string>();
         const options: ExecutorOption[] = [];
@@ -622,7 +621,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 category: agent.type === 'agent' ? 'Agents' :
                     agent.type === 'workflow' ? 'Workflows' : 'Other',
                 description: agent.description,
-                provider: conn?.provider,
+                provider: conn?.providerId,
                 connectionName: conn?.name,
                 connectionId: agent.config?.connectionId,
                 defaultPrompts: agent.defaultPrompts,
@@ -638,21 +637,22 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /** 构建连接选项列表（过滤已禁用，供 ChatInput 连接选择器使用） */
-    private buildConnectionOptions(): ConnectionOption[] {
-        return this.options.agentService.listConnections()
+    private async buildConnectionOptions(): Promise<ConnectionOption[]> {
+        const connections = await this.options.agentService.getConnections();
+        return connections
             .filter(c => c.enabled !== false)
             .map(c => ({
                 id: c.id,
                 name: c.name,
-                provider: c.provider,
+                provider: c.providerId,
                 hasTiers: !!(c.tiers?.standard || c.tiers?.fast),
             }));
     }
 
-    private refreshAgents(): void {
+    private async refreshAgents(): Promise<void> {
         if (!this.chatInput) return;
         const changed = this.chatInput.refreshAgents(
-            this.buildExecutorOptions(),
+            await this.buildExecutorOptions(),
             (id) => this.validateAgentId(id)
         );
         if (changed) {
