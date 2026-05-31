@@ -23,8 +23,10 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         );
         const allConnections = await this.service.getConnections();
 
-        // enabled first, then disabled; within each group alphabetically
+        // Sort: has-apiKey first → enabled first → alphabetical
         allConnections.sort((a, b) => {
+            if (a.hasApiKey && !b.hasApiKey) return -1;
+            if (!a.hasApiKey && b.hasApiKey) return 1;
             const aOn = a.enabled !== false;
             const bOn = b.enabled !== false;
             if (aOn && !bOn) return -1;
@@ -112,7 +114,15 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             <div class="conn-provider-divider"></div>
         `;
 
-        const providerItems = Object.entries(this.providers).map(([id, p]) => {
+        // Sort sidebar: providers with hasApiKey connections first, then alphabetical
+        const sortedProviders = Object.entries(this.providers).sort(([, pa], [, pb]) => {
+            const aHasKey = allConnections.some(c => (c.providerId ?? c.provider) === pa.id && c.hasApiKey);
+            const bHasKey = allConnections.some(c => (c.providerId ?? c.provider) === pb.id && c.hasApiKey);
+            if (aHasKey && !bHasKey) return -1;
+            if (!aHasKey && bHasKey) return 1;
+            return (pa.name || '').localeCompare(pb.name || '');
+        });
+        const providerItems = sortedProviders.map(([id, p]) => {
             const provConns = allConnections.filter(c => (c.providerId ?? c.provider) === id);
             const count = provConns.length;
             // A provider has no key if it has connections and ALL of them report !hasApiKey

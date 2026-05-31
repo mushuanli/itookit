@@ -38,8 +38,17 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
     async render() {
         const providers = this.service.getProviders();
 
-        // enabled first, then disabled; within each group alphabetically
+        // Sort: has-apiKey first → enabled first → alphabetical
+        const keyedIds = new Set<string>();
+        for (const p of providers) {
+            const full = this.service.getFullProvider?.(p.id);
+            if (full?.apiKey?.trim()) keyedIds.add(p.id);
+        }
         const sorted = [...providers].sort((a, b) => {
+            const aKey = keyedIds.has(a.id);
+            const bKey = keyedIds.has(b.id);
+            if (aKey && !bKey) return -1;
+            if (!aKey && bKey) return 1;
             const aOn = a.enabled !== false;
             const bOn = b.enabled !== false;
             if (aOn && !bOn) return -1;
