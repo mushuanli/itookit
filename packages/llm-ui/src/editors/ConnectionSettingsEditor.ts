@@ -204,7 +204,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                         </span>
                     </div>
                     <div class="settings-detail-item">
-                        <span class="settings-detail-item__label">成本层级</span>
+                        <span class="settings-detail-item__label">质量层级</span>
                         <span class="settings-detail-item__value">${this.renderTierBadges(conn)}</span>
                     </div>
                     <div class="settings-detail-item">
