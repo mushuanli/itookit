@@ -5,9 +5,14 @@ import {
     EditorEventCallback, CollapseExpandResult, Toast, Modal, guessMimeType,
     showConfirmDialog, formatDefaultFileTitle,
 } from '@itookit/common';
+import type { ILLMService } from '@itookit/common';
 
 /** Alias: infer MIME from filename (used for @mention file suggestions) */
 const guessMimeTypeFromName = guessMimeType;
+
+/** Vision connection used for image OCR (image → text). */
+const OCR_CONNECTION_ID = 'conn-volcengine-vision';
+
 import {
     IChatEngine, IAgentConfigService, SessionManager, getSessionManager,
 } from '@itookit/llm-engine';
@@ -68,6 +73,11 @@ export interface LLMEditorOptions extends Omit<EditorOptions, 'sessionEngine'> {
     agentService: IAgentConfigService;
     initialInputState?: { text?: string; agentId?: string };
     isNewSession?: boolean;
+    /**
+     * 一次性 LLM 服务（无会话，针对任意 connectionId 调用）。
+     * 由组合根注入，供图片 OCR 等工具型调用使用。未提供时 OCR 入口不显示。
+     */
+    llmService?: ILLMService;
 }
 
 /**
@@ -289,6 +299,13 @@ export class LLMWorkspaceEditor implements IEditor {
 
             // ── @mention file reference ───────────────────────────────────────
             onRequestFiles: async (query) => this.searchSessionFiles(query),
+
+            // ── OCR (image → text) — only when a one-shot LLM service is injected ─
+            // bootstrap is responsible for only passing llmService when the vision
+            // connection (conn-volcengine-vision) is actually configured.
+            ...(this.options.llmService
+                ? { onOcrImage: (image: Blob) => this.ocrImage(image) }
+                : {}),
         });
 
         this.registerInputPlugins();
@@ -1519,8 +1536,34 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
+     * 对图片做 OCR(图片转文字),返回 Markdown。
+     *
+     * 使用组合根注入的一次性 ILLMService 调用视觉连接
+     * (conn-volcengine-vision),不创建会话/任务。
+     */
+    private async ocrImage(image: Blob): Promise<string> {
+        const llm = this.options.llmService;
+        if (!llm) {
+            throw new Error('OCR service unavailable');
+        }
+        const resp = await llm.chat(OCR_CONNECTION_ID, {
+            messages: [{
+                role: 'user',
+                content: '将图片中的内容忠实转换为 Markdown:保留标题、列表、表格等结构;数学公式用 LaTeX($$ 包裹);只输出内容本身,不要添加任何解释或说明。',
+                attachments: [{
+                    type: 'image',
+                    source: image,
+                    mimeType: (image as { type?: string }).type || 'image/jpeg',
+                }],
+            }],
+            maxTokens: 4096,
+        });
+        return resp.choices?.[0]?.message?.content ?? '';
+    }
+
+    /**
      * 发送跟进消息（用于 /shorter /longer /simplify /summarize /continue）
-     * 
+     *
      * 复用 SendMessageCommand，保持与正常发送完全一致的流程。
      */
     private sendFollowUp(text: string): void {

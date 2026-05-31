@@ -8,6 +8,7 @@ import {
     IChatEngine,
 } from '@itookit/llm-engine';
 import { EditorFactory, EditorOptions, formatDefaultFileTitle } from '@itookit/common';
+import type { ILLMService } from '@itookit/common';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
@@ -60,6 +61,7 @@ export interface LLMFactoryOptions {
  */
 export const createLLMFactory = (
     agentService: VFSAgentService,
+    deps?: { llmService?: ILLMService },
 ): EditorFactory => {
 
     // ✅ 跟踪进行中的创建，按 nodeId 去重
@@ -104,6 +106,7 @@ export const createLLMFactory = (
             nodeId: effectiveNodeId,
             sessionEngine: engine,
             isNewSession,
+            llmService: deps?.llmService,
         };
 
         // ✅ 将创建过程包装为 Promise，注册到 pendingCreations
