@@ -13,11 +13,23 @@
 
 import { Modal, Toast, BaseSettingsEditor, generateShortUUID } from '@itookit/common';
 import type {
-    IConnectionService, LLMProvider, LLMModel,
+    IConnectionService, LLMProvider, LLMModel, ModelCategory,
     LLMProviderImplementation, ConnectionMeta, AgentDefinition,
 } from '@itookit/common';
 import { exportBundleToLLM, fromConnectionDef } from '@itookit/device-llm';
 import { runLLMImport } from './llm-import';
+
+/** 模型用途分类选项（顺序即下拉顺序） */
+const MODEL_CATEGORIES: ModelCategory[] = ['chat', 'image', 'video', 'audio', 'embedding'];
+/** 能力 chip：[能力键, LLMModel 字段, emoji] */
+const MODEL_CAP_CHIPS: ReadonlyArray<[string, keyof LLMModel, string]> = [
+    ['vision', 'supportsVision', '👁️'],
+    ['thinking', 'supportsThinking', '🧠'],
+    ['tools', 'supportsTools', '🔧'],
+    ['audio', 'supportsAudio', '🎵'],
+    ['video', 'supportsVideo', '🎬'],
+    ['structuredOutput', 'supportsStructuredOutput', '📋'],
+];
 
 export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionService> {
     private editModels: LLMModel[] = [];
@@ -598,11 +610,28 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         return this.editModels.map((m, i) => `
             <div class="settings-model-item">
                 <div class="settings-model-item__drag">::</div>
-                <div class="settings-model-item__content">
-                    <input type="text" class="settings-input-sm model-id-input" data-idx="${i}"
-                           value="${m.id}" placeholder="Model ID" title="Model ID（API 用）">
-                    <input type="text" class="settings-input-sm model-name-input" data-idx="${i}"
-                           value="${m.name}" placeholder="显示名称">
+                <div class="settings-model-item__content" style="flex-direction:column;gap:4px;align-items:stretch">
+                    <div style="display:flex;gap:4px">
+                        <input type="text" class="settings-input-sm model-id-input" data-idx="${i}"
+                               value="${m.id}" placeholder="Model ID" title="Model ID（API 用）">
+                        <input type="text" class="settings-input-sm model-name-input" data-idx="${i}"
+                               value="${m.name}" placeholder="显示名称">
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                        <select class="settings-input-sm model-category-select" data-idx="${i}" title="模型用途" style="max-width:110px">
+                            ${MODEL_CATEGORIES.map(cat => `
+                                <option value="${cat}" ${(m.category ?? 'chat') === cat ? 'selected' : ''}>${cat}</option>
+                            `).join('')}
+                        </select>
+                        ${MODEL_CAP_CHIPS.map(([cap, field, emoji]) => `
+                            <label class="model-cap-chip" title="${cap}"
+                                   style="display:inline-flex;align-items:center;cursor:pointer;font-size:13px;padding:2px 4px;border-radius:4px;opacity:${m[field] === true ? '1' : '0.35'}">
+                                <input type="checkbox" class="model-cap-chk" data-cap="${cap}" data-idx="${i}"
+                                       ${m[field] === true ? 'checked' : ''} style="display:none">
+                                ${emoji}
+                            </label>
+                        `).join('')}
+                    </div>
                 </div>
                 <div class="settings-model-item__actions">
                     <button type="button" class="btn-icon btn-up"   data-idx="${i}" ${i === 0 ? 'disabled' : ''}>⬆️</button>
@@ -660,7 +689,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         // Add model
         addModelBtn?.addEventListener('click', () => {
             this.syncInputsToModelData();
-            this.editModels.push({ id: 'new-model-id', name: 'New Model' });
+            this.editModels.push({ id: 'new-model-id', name: 'New Model', category: 'chat' });
             renderList();
             listContainer?.scrollTo({ top: listContainer.scrollHeight, behavior: 'smooth' });
         });
@@ -681,6 +710,14 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
             }
             renderList();
         });
+
+        // Capability chip toggle — visual feedback (dim when unchecked)
+        listContainer?.addEventListener('change', (e) => {
+            const chk = e.target as HTMLElement;
+            if (!chk.classList.contains('model-cap-chk')) return;
+            const label = chk.closest('.model-cap-chip') as HTMLElement | null;
+            if (label) label.style.opacity = (chk as HTMLInputElement).checked ? '1' : '0.35';
+        });
     }
 
     // ── Sync helpers ───────────────────────────────────────────────────────────
@@ -688,12 +725,30 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
     private syncInputsToModelData() {
         const container = document.getElementById('model-list-container');
         if (!container) return;
+        const capMap: Record<string, keyof LLMModel> = {
+            vision: 'supportsVision',
+            thinking: 'supportsThinking',
+            tools: 'supportsTools',
+            audio: 'supportsAudio',
+            video: 'supportsVideo',
+            structuredOutput: 'supportsStructuredOutput',
+        };
         container.querySelectorAll('.settings-model-item').forEach((row, i) => {
             if (i >= this.editModels.length) return;
             const idEl   = row.querySelector('.model-id-input') as HTMLInputElement | null;
             const nameEl = row.querySelector('.model-name-input') as HTMLInputElement | null;
             if (idEl)   this.editModels[i].id   = idEl.value.trim();
             if (nameEl) this.editModels[i].name = nameEl.value.trim();
+
+            const catEl = row.querySelector('.model-category-select') as HTMLSelectElement | null;
+            if (catEl) this.editModels[i].category = (catEl.value as ModelCategory) || undefined;
+
+            const model = this.editModels[i] as unknown as Record<string, unknown>;
+            row.querySelectorAll('.model-cap-chk').forEach((chk) => {
+                const el = chk as HTMLInputElement;
+                const field = capMap[el.dataset.cap ?? ''];
+                if (field) model[field] = el.checked || undefined;
+            });
         });
     }
 

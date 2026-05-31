@@ -28,7 +28,8 @@ function registerBuiltinProviders(): void {
     providerRegistry.set('openrouter', OpenAIProvider);
     providerRegistry.set('ollama', OpenAIProvider);
     providerRegistry.set('custom', OpenAIProvider);
-    
+    providerRegistry.set('volcengine', OpenAIProvider);
+
     // Anthropic
     providerRegistry.set('anthropic', AnthropicProvider);
     

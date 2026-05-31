@@ -46,6 +46,12 @@ const P = {
     MISTRAL_LARGE_IN: 2, MISTRAL_LARGE_OUT: 6,
     GLM46_IN: 0.5, GLM46_OUT: 0.5,
     GROK4_IN: 2, GROK4_OUT: 8,
+
+    // Doubao 系列 (人民币价格按 ~7.2 汇率折算 USD)
+    // 豆包视觉模型极便宜，1.6-vision: ¥0.0008/千输入 ≈ $0.11/百万
+    DOUBAO_VISION_IN: 0.11, DOUBAO_VISION_OUT: 0.28,
+    DOUBAO_PRO_IN: 0.08, DOUBAO_PRO_OUT: 0.28,
+    DOUBAO_LITE_IN: 0.04, DOUBAO_LITE_OUT: 0.14,
 } as const;
 
 // ─── 模型显示名称常量 ──────────────────────────────────────────────────────────
@@ -98,6 +104,17 @@ export const MODEL_NAME_DEEPSEEK_R1_AWS = 'DeepSeek R1 AWS';
 export const MODEL_NAME_DEEPSEEK_V31 = 'DeepSeek v3.1';
 export const MODEL_NAME_DEEPSEEK_V4_PRO = 'DeepSeek V4 Pro';
 export const MODEL_NAME_DEEPSEEK_V4_FLASH = 'DeepSeek V4 Flash';
+
+// Volcengine / Doubao
+export const MODEL_NAME_DOUBAO_SEED_20_PRO = 'Doubao Seed 2.0 Pro';
+export const MODEL_NAME_DOUBAO_SEED_20_LITE = 'Doubao Seed 2.0 Lite';
+export const MODEL_NAME_DOUBAO_SEED_20_MINI = 'Doubao Seed 2.0 Mini';
+export const MODEL_NAME_DOUBAO_SEED_20_CODE = 'Doubao Seed 2.0 Code';
+// Volcengine / Doubao — 图片生成 (Seedream) / 视频生成 (Seedance)
+export const MODEL_NAME_DOUBAO_SEEDREAM_50 = 'Doubao Seedream 5.0';
+export const MODEL_NAME_DOUBAO_SEEDREAM_45 = 'Doubao Seedream 4.5';
+export const MODEL_NAME_DOUBAO_SEEDANCE_20 = 'Doubao Seedance 2.0';
+export const MODEL_NAME_DOUBAO_SEEDANCE_20_FAST = 'Doubao Seedance 2.0 Fast';
 
 // Others
 export const MODEL_NAME_OPENROUTER_AUTO = 'Auto (Best Model)';
@@ -225,6 +242,39 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
             { id: 'gpt-5-mini', name: MODEL_NAME_GPT5_MINI, icon: '🍃', inputPricePerMillion: P.GPT_MINI_IN, outputPricePerMillion: P.GPT_MINI_OUT },
             { id: 'gpt-5-codex', name: MODEL_NAME_GPT5_CODEX, icon: '💻', inputPricePerMillion: P.GPT_PRO_IN, outputPricePerMillion: P.GPT_PRO_OUT },
             { id: 'gpt-4o', name: MODEL_NAME_GPT4O, icon: '⚡', inputPricePerMillion: P.GPT4O_IN, outputPricePerMillion: P.GPT4O_OUT },
+        ],
+    },
+
+    volcengine: {
+        id: 'volcengine', isBuiltin: true,
+        name: 'Volcengine (火山方舟)',
+        implementation: 'openai-compatible',
+        baseURL: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+        icon: '🌋',
+        capabilities: {
+            vision: true,
+            audioInput: false,
+            audioOutput: false,
+            tools: true,
+            thinking: true,
+            streaming: true,
+        },
+        models: [
+            // Seed-2.0 系列：对话 + 多模态视觉 + 工具调用 + 深度思考
+            { id: 'doubao-seed-2-0-pro-260215', name: MODEL_NAME_DOUBAO_SEED_20_PRO, icon: '👑', category: 'chat', inputPricePerMillion: P.DOUBAO_VISION_IN, outputPricePerMillion: P.DOUBAO_VISION_OUT, supportsThinking: true, supportsVision: true, supportsTools: true },
+            { id: 'doubao-seed-2-0-lite-260428', name: MODEL_NAME_DOUBAO_SEED_20_LITE, icon: '⚡', category: 'chat', inputPricePerMillion: P.DOUBAO_LITE_IN, outputPricePerMillion: P.DOUBAO_LITE_OUT, supportsThinking: true, supportsVision: true, supportsTools: true },
+            { id: 'doubao-seed-2-0-mini-260428', name: MODEL_NAME_DOUBAO_SEED_20_MINI, icon: '🍃', category: 'chat', inputPricePerMillion: P.DOUBAO_LITE_IN, outputPricePerMillion: P.DOUBAO_LITE_OUT, supportsThinking: true, supportsVision: true, supportsTools: true },
+            // Seed-2.0 Code：对话 + 工具调用（代码增强）
+            { id: 'doubao-seed-2-0-code-preview-260215', name: MODEL_NAME_DOUBAO_SEED_20_CODE, icon: '💻', category: 'chat', inputPricePerMillion: P.DOUBAO_PRO_IN, outputPricePerMillion: P.DOUBAO_PRO_OUT, supportsTools: true },
+            // DeepSeek-V4 系列：对话 + 深度思考 + 工具调用（纯文本推理）
+            { id: 'deepseek-v4-pro-260425', name: MODEL_NAME_DEEPSEEK_V4_PRO, icon: '🧠', category: 'chat', inputPricePerMillion: P.DOUBAO_PRO_IN, outputPricePerMillion: P.DOUBAO_PRO_OUT, supportsThinking: true, supportsTools: true },
+            { id: 'deepseek-v4-flash-260425', name: MODEL_NAME_DEEPSEEK_V4_FLASH, icon: '🚀', category: 'chat', inputPricePerMillion: P.DOUBAO_LITE_IN, outputPricePerMillion: P.DOUBAO_LITE_OUT, supportsThinking: true, supportsTools: true },
+            // 文生图 (Seedream)：按张计费，走 images/generations 端点（非 chat/completions）
+            { id: 'doubao-seedream-5-0-260128', name: MODEL_NAME_DOUBAO_SEEDREAM_50, icon: '🎨', category: 'image' },
+            { id: 'doubao-seedream-4-5-251128', name: MODEL_NAME_DOUBAO_SEEDREAM_45, icon: '🖼️', category: 'image' },
+            // 视频生成 (Seedance)：按时长计费，走异步任务端点（非 chat/completions）
+            { id: 'doubao-seedance-2-0-260128', name: MODEL_NAME_DOUBAO_SEEDANCE_20, icon: '🎬', category: 'video' },
+            { id: 'doubao-seedance-2-0-fast-260128', name: MODEL_NAME_DOUBAO_SEEDANCE_20_FAST, icon: '⚡', category: 'video' },
         ],
     },
 

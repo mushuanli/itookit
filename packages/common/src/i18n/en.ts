@@ -27,6 +27,19 @@ export const en: LocaleStrings = {
     'mcpTransport.sse.option':   'SSE — Server-Sent Events',
     'mcpTransport.http.option':  'HTTP — REST endpoint',
 
+    'model.capability.vision':           'Vision',
+    'model.capability.thinking':         'Thinking',
+    'model.capability.tools':            'Tools',
+    'model.capability.audio':            'Audio',
+    'model.capability.video':            'Video',
+    'model.capability.structuredOutput': 'Structured Output',
+
+    'model.category.chat':      'Chat',
+    'model.category.image':     'Image Gen',
+    'model.category.video':     'Video Gen',
+    'model.category.audio':     'Audio',
+    'model.category.embedding': 'Embedding',
+
     'status.connected':  'Connected',
     'status.error':      'Error',
     'status.idle':       'Disconnected',

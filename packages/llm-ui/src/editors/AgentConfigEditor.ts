@@ -9,6 +9,7 @@ import {
     CollapseExpandResult
 } from '@itookit/common';
 import type { AgentType, AgentDefinition, IAgentManagementService, ModelTier, PromptPreset } from '@itookit/common';
+import { renderModelCategoryBadge, renderModelCapabilityBadges } from '../utils/modelBadges';
 
 /**
  * Agent 配置编辑器
@@ -263,6 +264,9 @@ export class AgentConfigEditor implements IEditor {
                                 <option value="">-- 选择连接 --</option>
                                 ${connectionOptionsHtml}
                             </select>
+                            <div id="conn-model-caps" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">
+                                ${this.renderConnModelCaps(selectedConn)}
+                            </div>
                             <p class="agent-form-help">
                                 ${connections.length === 0
                                     ? '⚠️ 所有连接均不可用，请先在 <strong>设置 → LLM Providers</strong> 配置 API Key'
@@ -571,6 +575,8 @@ export class AgentConfigEditor implements IEditor {
                     const label = groupLabel ? `${groupLabel} · ${selectedOpt.text.trim()}` : selectedOpt.text.trim();
                     engine.driver.updateMetadata(nodeId, { ai_connectionLabel: label }).catch(() => {});
                 }
+                // Refresh capability badges for the newly selected connection
+                this.refreshConnModelCaps(connSelect.value);
                 handleChange();
             });
         }
@@ -774,6 +780,24 @@ export class AgentConfigEditor implements IEditor {
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
+    }
+
+    /** 渲染指定连接 optimal 模型的用途分类 + 能力 badges（无模型时返回空字符串） */
+    private renderConnModelCaps(conn?: { providerId?: string; provider?: string; model?: string }): string {
+        if (!conn) return '';
+        const pid = conn.providerId ?? conn.provider ?? '';
+        const provider = this.service.getProviders().find(p => p.id === pid);
+        const modelDef = provider?.models.find(m => m.id === conn.model);
+        if (!modelDef) return '';
+        return renderModelCategoryBadge(modelDef) + renderModelCapabilityBadges(modelDef);
+    }
+
+    /** connection select 变更后刷新 #conn-model-caps 区域 */
+    private async refreshConnModelCaps(connId: string): Promise<void> {
+        const slot = this.container.querySelector('#conn-model-caps') as HTMLElement | null;
+        if (!slot) return;
+        const conn = (await this.service.getConnections()).find(c => c.id === connId);
+        slot.innerHTML = this.renderConnModelCaps(conn);
     }
 
     // --- IEditor Interface Implementation ---

@@ -133,6 +133,8 @@ export type { Locale, LocaleKey, LocaleStrings } from './i18n';
 export {
     SKILL_TYPE_META,
     MCP_TRANSPORT_ICONS,
+    MODEL_CAPABILITY_META,
+    MODEL_CATEGORY_META,
     STATUS_META,
     EXECUTOR_TYPE_ICONS,
     ACTION_ICONS,
