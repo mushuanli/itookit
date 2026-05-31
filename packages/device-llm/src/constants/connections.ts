@@ -66,18 +66,6 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         },
     },
 
-    // ── DeepSeek ──────────────────────────────────────────────────────────
-    {
-        id: 'conn-deepseek',
-        name: 'DeepSeek',
-        providerId: 'deepseek',
-        tiers: {
-            optimal: 'deepseek-v4-pro',
-            standard: 'deepseek-v4-flash',
-            fast: 'deepseek-v4-flash',
-        },
-    },
-
     // ── CloudAPI — Claude 系列 ────────────────────────────────────────────
     {
         id: 'conn-cloudapi',
