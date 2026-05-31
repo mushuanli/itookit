@@ -109,6 +109,18 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
             fast: 'gpt-5-mini',
         },
     },
+
+    // ── Volcengine — 图片 OCR / 视觉理解 ─────────────────────────────────
+    {
+        id: 'conn-volcengine-vision',
+        name: '图片转文字',
+        providerId: 'volcengine',
+        tiers: {
+            optimal: 'doubao-seed-2-0-pro-260215',
+            standard: 'doubao-seed-2-0-lite-260428',
+            fast: 'doubao-seed-2-0-mini-260428',
+        },
+    },
 ];
 
 /** @deprecated 使用 DEFAULT_CONNECTIONS 代替 */
