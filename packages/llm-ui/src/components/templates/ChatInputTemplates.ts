@@ -1,6 +1,6 @@
 // @file: llm-ui/views/templates/ChatInputTemplates.ts
 
-import { escapeHTML, t, ENTITY_ICONS } from '@itookit/common';
+import { escapeHTML, t, ENTITY_ICONS, ACTION_ICONS } from '@itookit/common';
 import { ExecutorOption, ConnectionOption } from '../../domain/types';
 
 export const ChatInputTemplates = {
@@ -344,8 +344,8 @@ export const ChatInputTemplates = {
                 <button class="llm-input__btn llm-input__btn--settings" title="Chat Settings">
                     ${this.sliderIcon()}
                 </button>
-                <button class="llm-input__btn llm-input__btn--attach" title="Attach File">
-                    ${this.attachIcon()}
+                <button class="llm-input__btn llm-input__btn--attach" title="${t('chatInput.add.menu')}">
+                    ${this.addIcon()}
                 </button>
                 <button class="llm-input__btn llm-input__btn--send" title="Send">
                     ${this.sendIcon()}
@@ -479,16 +479,26 @@ export const ChatInputTemplates = {
 
     /**
      * 渲染附件列表
+     *
+     * @param files     附件文件列表
+     * @param canOcr    是否注入了 OCR 能力(决定图片 chip 是否显示「提取文字」按钮)
      */
-    renderAttachments(files: File[]): string {
-        return files.map((f, i) => `
+    renderAttachments(files: File[], canOcr = false): string {
+        return files.map((f, i) => {
+            const isImage = f.type.startsWith('image/');
+            const ocrBtn = (isImage && canOcr)
+                ? `<button class="llm-input__ocr-btn" data-index="${i}" type="button" title="${t('chatInput.ocr.tooltip')}">${ACTION_ICONS.ocr}</button>`
+                : '';
+            return `
             <div class="llm-input__attachment-tag">
-                <span class="llm-input__file-icon">${f.type.startsWith('image/') ? '🖼️' : '📄'}</span>
+                <span class="llm-input__file-icon">${isImage ? '🖼️' : '📄'}</span>
                 <span class="llm-input__filename">${escapeHTML(f.name)}</span>
                 <span class="llm-input__filesize">(${ChatInputTemplates.formatSize(f.size)})</span>
+                ${ocrBtn}
                 <span class="llm-input__remove-btn" data-index="${i}" title="Remove">×</span>
             </div>
-        `).join('');
+        `;
+        }).join('');
     },
 
     /**
@@ -591,6 +601,15 @@ export const ChatInputTemplates = {
     attachIcon(): string {
         return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+        </svg>`;
+    },
+
+    /** "+" add-source trigger icon (plus in circle). */
+    addIcon(): string {
+        return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="16"></line>
+            <line x1="8" y1="12" x2="16" y2="12"></line>
         </svg>`;
     },
 

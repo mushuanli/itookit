@@ -14,6 +14,10 @@ import { MentionPlugin } from './plugins/MentionPlugin';
 import { TokenMeterPlugin } from './plugins/TokenMeterPlugin';
 import { PopupPanel } from './plugins/PopupPanel';
 import type { PopupItem } from './plugins/PopupPanel';
+import { OcrReviewPanel } from './OcrReviewPanel';
+import { downscaleImageForOcr } from '../../utils/imageDownscale';
+import { delegate } from '../../utils/domEvents';
+import { t } from '@itookit/common';
 
 export interface ChatInputOptions {
     onSend: (text: string, files: File[], executorId: string, overrides?: ChatOverrides) => Promise<void>;
@@ -69,6 +73,20 @@ export interface ChatInputOptions {
      * 发送时由 AttachmentProcessor 自动解析并附加文件内容。
      */
     onRequestFiles?: (query: string) => Promise<FileSuggestion[]>;
+
+    /**
+     * 对图片做 OCR（图片转文字），返回 Markdown 文本。
+     *
+     * 由 Shell 注入：内部调用视觉连接（conn-volcengine-vision）做单次 LLM 调用。
+     * 未提供时，图片附件 chip 不显示「提取文字」按钮（优雅降级）。
+     */
+    onOcrImage?: (image: Blob) => Promise<string>;
+
+    /**
+     * 预留（本期不接线）：语音转文字。
+     * 实现后将复用 OcrReviewPanel 的审阅流程把转写文本插入输入框。
+     */
+    onTranscribeAudio?: (audio: Blob) => Promise<string>;
 }
 
 /**
@@ -137,6 +155,11 @@ export class ChatInput implements IChatInputPresenter {
     // ── Tool output panel ─────────────────────────────────────────────────────
     private toolOutputEl: HTMLElement | null = null;
 
+    // ── OCR (image → text) ─────────────────────────────────────────────────────
+    private ocrPanel: OcrReviewPanel | null = null;
+    /** "+" add-source menu popup (attach / file reference). */
+    private addPopup: PopupPanel | null = null;
+
     // ── Harness state ────────────────────────────────────────────────────────
     private skills: SkillInfo[] = [];
     private isLoadingSkills = false;
@@ -173,6 +196,11 @@ export class ChatInput implements IChatInputPresenter {
         // Register MentionPlugin if file-request callback is available
         if (options.onRequestFiles) {
             this.registerPlugin(new MentionPlugin({ onRequestFiles: options.onRequestFiles }));
+        }
+
+        // OCR review panel — only created when OCR capability is injected.
+        if (options.onOcrImage) {
+            this.ocrPanel = new OcrReviewPanel(this.container);
         }
     }
 
@@ -379,6 +407,10 @@ export class ChatInput implements IChatInputPresenter {
         this.connPopup = null;
         this.promptPopup?.destroy();
         this.promptPopup = null;
+        this.addPopup?.destroy();
+        this.addPopup = null;
+        this.ocrPanel?.destroy();
+        this.ocrPanel = null;
         this.container.innerHTML = '';
         this.files = [];
     }
@@ -604,7 +636,7 @@ code {
 
         this.sendBtn.addEventListener('click', () => this.triggerSend());
         this.stopBtn.addEventListener('click', () => this.options.onStop());
-        this.attachBtn.addEventListener('click', () => this.fileInput.click());
+        this.attachBtn.addEventListener('click', () => this.toggleAddMenu());
         this.settingsBtn.addEventListener('click', () => this.toggleSettings());
 
         this.container.querySelector('.llm-input__settings-close')
@@ -615,6 +647,20 @@ code {
                 this.addFiles(Array.from(this.fileInput.files));
                 this.fileInput.value = '';
             }
+        });
+
+        // Attachment chips use event delegation: one listener on the persistent
+        // container, dispatched by selector. Re-rendering innerHTML never rebinds.
+        delegate(this.attachmentContainer, 'click', '.llm-input__remove-btn', ({ event, index }) => {
+            event.stopPropagation();
+            if (Number.isNaN(index)) return;
+            this.files.splice(index, 1);
+            this.renderAttachments();
+        });
+        delegate(this.attachmentContainer, 'click', '.llm-input__ocr-btn', ({ event, index }) => {
+            event.stopPropagation();
+            if (Number.isNaN(index)) return;
+            this.ocrImage(this.files[index], index);
         });
 
         this.bindSettingsEvents();
@@ -1242,16 +1288,59 @@ code {
             return;
         }
         this.attachmentContainer.style.display = 'flex';
-        this.attachmentContainer.innerHTML = ChatInputTemplates.renderAttachments(this.files);
+        const canOcr = !!this.options.onOcrImage;
+        // Event handlers are bound once via delegation in bindEvents();
+        // re-rendering innerHTML here does not require rebinding listeners.
+        this.attachmentContainer.innerHTML = ChatInputTemplates.renderAttachments(this.files, canOcr);
+    }
 
-        this.attachmentContainer.querySelectorAll('.llm-input__remove-btn').forEach(el => {
-            el.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const idx = parseInt((e.target as HTMLElement).dataset.index!);
-                this.files.splice(idx, 1);
-                this.renderAttachments();
+    /**
+     * 对指定图片附件执行 OCR:降采样 → 调用注入的 onOcrImage → 审阅面板。
+     * 审阅确认后把(编辑过的)文本插入光标,默认移除原图。
+     */
+    private async ocrImage(file: File, index: number): Promise<void> {
+        if (!this.options.onOcrImage || !this.ocrPanel) return;
+        const panel = this.ocrPanel;
+        const ocr = this.options.onOcrImage;
+
+        let cancelled = false;
+        panel.showProcessing(file.name, () => { cancelled = true; panel.hide(); });
+
+        try {
+            const downscaled = await downscaleImageForOcr(file);
+            const markdown = (await ocr(downscaled)).trim();
+            if (cancelled) return;
+
+            if (!markdown) {
+                panel.showError(t('chatInput.ocr.empty'),
+                    () => this.ocrImage(file, index), () => panel.hide());
+                return;
+            }
+
+            panel.showReview(file, markdown, {
+                onConfirm: (text) => this.applyOcrResult(text, index, true),
+                onConfirmKeep: (text) => this.applyOcrResult(text, index, false),
+                onRetry: () => this.ocrImage(file, index),
+                onCancel: () => panel.hide(),
             });
-        });
+        } catch (err) {
+            if (cancelled) return;
+            const msg = err instanceof Error ? err.message : String(err);
+            panel.showError(msg, () => this.ocrImage(file, index), () => panel.hide());
+        }
+    }
+
+    /** 把 OCR 文本插入光标,可选移除原图,并同步 config。 */
+    private applyOcrResult(text: string, index: number, removeImage: boolean): void {
+        this.pluginCtx?.insertAtCursor(text);
+        if (removeImage && this.files[index]) {
+            this.files.splice(index, 1);
+            this.renderAttachments();
+        }
+        this.config.text = this.textarea.value;
+        this.notifyConfigChange();
+        this.ocrPanel?.hide();
+        this.textarea.focus();
     }
 
     // ================================================================
@@ -1411,6 +1500,44 @@ code {
         this.config.text = this.textarea.value;
         this.notifyConfigChange();
         this.textarea.focus();
+    }
+
+    // ── "+" add-source menu ──────────────────────────────────────────────────
+
+    private getOrCreateAddPopup(): PopupPanel {
+        if (!this.addPopup) {
+            this.addPopup = new PopupPanel(this.attachBtn, { animated: true });
+        }
+        return this.addPopup;
+    }
+
+    /**
+     * Toggle the "+" add-source menu: upload attachment + (optionally) file reference.
+     * Single attach-only case still opens the menu for consistency and future sources.
+     */
+    private toggleAddMenu(): void {
+        const popup = this.getOrCreateAddPopup();
+        if (popup.isVisible) { popup.hide(); return; }
+
+        const items: PopupItem[] = [
+            { id: 'attach', label: t('chatInput.add.attach'), icon: '📎' },
+        ];
+        // File reference only meaningful when @mention (onRequestFiles) is wired.
+        if (this.options.onRequestFiles) {
+            items.push({ id: 'fileRef', label: t('chatInput.add.fileRef'), icon: '@' });
+        }
+
+        popup.show(items, {
+            onSelect: (item) => {
+                if (item.id === 'attach') {
+                    this.fileInput.click();
+                } else if (item.id === 'fileRef') {
+                    // Insert '@' at cursor to trigger MentionPlugin's file picker.
+                    this.pluginCtx?.insertAtCursor('@');
+                    this.textarea.focus();
+                }
+            },
+        });
     }
 
     // ── Connection Quick-Switch methods ──────────────────────────────────────

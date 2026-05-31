@@ -275,6 +275,23 @@ export const zhCN = {
     'chatInput.agentMode':       'Agent 模式',
     'chatInput.agentMode.tooltip': '启用多轮 Agent 循环与工具调用',
 
+    // ── Chat input — OCR (image to text) ─────────────────────────────────────
+    'chatInput.ocr':             '提取文字',
+    'chatInput.ocr.tooltip':     '从图片中提取文字（OCR）',
+    'chatInput.ocr.processing':  '识别中…',
+    'chatInput.ocr.review.title': '提取结果（可编辑）',
+    'chatInput.ocr.review.confirm': '插入并移除图片',
+    'chatInput.ocr.review.confirmKeep': '插入并保留图片',
+    'chatInput.ocr.retry':       '重试',
+    'chatInput.ocr.cancel':      '取消',
+    'chatInput.ocr.failed':      '识别失败',
+    'chatInput.ocr.empty':       '未识别到文字',
+
+    // ── Chat input — "+" add-source menu ─────────────────────────────────────
+    'chatInput.add.menu':        '添加内容',
+    'chatInput.add.attach':      '上传附件',
+    'chatInput.add.fileRef':     '引用文件',
+
     // ── HITL (human-in-the-loop) input banner ────────────────────────────────
     'hitl.inputPlaceholder':    '输入你的回答\u2026',
     'hitl.submit':              '回应',

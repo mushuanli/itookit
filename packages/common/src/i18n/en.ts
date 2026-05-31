@@ -263,6 +263,23 @@ export const en: LocaleStrings = {
     'chatInput.agentMode':       'Agent Mode',
     'chatInput.agentMode.tooltip': 'Enable multi-turn agent loop with tools',
 
+    // ── Chat input — OCR (image to text) ─────────────────────────────────────
+    'chatInput.ocr':             'Extract Text',
+    'chatInput.ocr.tooltip':     'Extract text from image (OCR)',
+    'chatInput.ocr.processing':  'Recognizing\u2026',
+    'chatInput.ocr.review.title': 'Extracted text (editable)',
+    'chatInput.ocr.review.confirm': 'Insert & remove image',
+    'chatInput.ocr.review.confirmKeep': 'Insert & keep image',
+    'chatInput.ocr.retry':       'Retry',
+    'chatInput.ocr.cancel':      'Cancel',
+    'chatInput.ocr.failed':      'Recognition failed',
+    'chatInput.ocr.empty':       'No text detected',
+
+    // ── Chat input — "+" add-source menu ─────────────────────────────────────
+    'chatInput.add.menu':        'Add content',
+    'chatInput.add.attach':      'Upload attachment',
+    'chatInput.add.fileRef':     'Reference file',
+
     // ── HITL (human-in-the-loop) input banner ────────────────────────────────
     'hitl.inputPlaceholder':    'Enter your response\u2026',
     'hitl.submit':              'Respond',
