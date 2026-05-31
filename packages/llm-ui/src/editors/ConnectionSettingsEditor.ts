@@ -8,6 +8,7 @@ import { Modal, Toast, BaseSettingsEditor, generateShortUUID, ENTITY_ICONS } fro
 import type { IConnectionService, ConnectionMeta, LLMConnection, LLMProvider, ModelTier } from '@itookit/common';
 import { fromConnectionDef, serializeLLMConfig } from '@itookit/device-llm';
 import { runLLMImport } from './llm-import';
+import { renderModelCapabilityBadges } from '../utils/modelBadges';
 
 export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionService> {
     private currentEditTiers: Partial<Record<ModelTier, string>> = {};
@@ -187,7 +188,10 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     </div>
                     <div class="settings-detail-item">
                         <span class="settings-detail-item__label">最优模型</span>
-                        <span class="settings-detail-item__value">${this.resolvedModelName(conn)}</span>
+                        <span class="settings-detail-item__value" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+                            ${this.resolvedModelName(conn)}
+                            ${this.resolvedModelBadges(conn)}
+                        </span>
                     </div>
                     <div class="settings-detail-item">
                         <span class="settings-detail-item__label">成本层级</span>
@@ -219,6 +223,14 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         if (!modelId) return '未设置';
         const modelDef = provider?.models.find(m => m.id === modelId);
         return modelDef ? modelDef.name : modelId;
+    }
+
+    /** 解析最优模型的能力 badges（无模型/无能力时返回空字符串） */
+    private resolvedModelBadges(conn: ConnectionMeta): string {
+        const pid = conn.providerId ?? conn.provider;
+        const provider = this.providers[pid];
+        const modelDef = provider?.models.find(m => m.id === conn.model);
+        return modelDef ? renderModelCapabilityBadges(modelDef) : '';
     }
 
     private renderTierBadges(conn: ConnectionMeta): string {
@@ -519,9 +531,10 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             </label>`;
     }
 
-    /** 渲染 tier 配置三行（optimal/standard/fast 全部可选），每行带 thinking 开关 */
+    /** 渲染 tier 配置三行（optimal/standard/fast 全部可选），每行带 thinking 开关 + 能力 badges */
     private renderTierForm(provider: LLMProvider | undefined): string {
-        const models = provider?.models ?? [];
+        // tier 是对话质量分层，只列 chat 类模型（缺省 category 视为 chat）
+        const models = (provider?.models ?? []).filter(m => (m.category ?? 'chat') === 'chat');
         const noneOpt = '<option value="">— 未指定（使用 Provider 首个模型）—</option>';
         const modelOpts = models.map(m =>
             `<option value="${m.id}">${m.name}</option>`
@@ -538,6 +551,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     <span class="settings-tier-badge ${badgeClass}">${label}</span>
                     <select class="settings-form__select settings-form__select--sm" id="tier-${tier}" data-tier="${tier}" style="flex:1">${noneOpt}${modelOpts}</select>
                     <div class="tier-thinking-slot" id="tier-thinking-${tier}">${this.renderTierThinkingToggle(tier, modelId, thinkingOn)}</div>
+                    <div class="tier-cap-slot" id="tier-caps-${tier}" style="display:flex;gap:2px;align-items:center">${modelDef ? renderModelCapabilityBadges(modelDef) : ''}</div>
                 </div>`;
         };
 
@@ -554,12 +568,16 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
 
         const refreshTierThinkingSlot = (tier: ModelTier, provider: LLMProvider | undefined) => {
             const slot = document.getElementById(`tier-thinking-${tier}`);
-            if (!slot) return;
             const modelId = this.currentEditTiers[tier] ?? '';
             const modelDef = provider?.models.find(m => m.id === modelId);
-            const thinkingOn = this.currentEditTierThinking[tier] ??
-                (modelDef?.supportsThinking ?? false);
-            slot.innerHTML = this.renderTierThinkingToggle(tier, modelId, thinkingOn);
+            if (slot) {
+                const thinkingOn = this.currentEditTierThinking[tier] ??
+                    (modelDef?.supportsThinking ?? false);
+                slot.innerHTML = this.renderTierThinkingToggle(tier, modelId, thinkingOn);
+            }
+            // Refresh capability badges alongside thinking toggle
+            const capSlot = document.getElementById(`tier-caps-${tier}`);
+            if (capSlot) capSlot.innerHTML = modelDef ? renderModelCapabilityBadges(modelDef) : '';
         };
 
         const refreshTierSelects = (provider: LLMProvider | undefined, tiers: Partial<Record<ModelTier, string>>) => {

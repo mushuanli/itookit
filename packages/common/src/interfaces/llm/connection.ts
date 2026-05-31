@@ -9,10 +9,22 @@
 
 // ─── Model ───────────────────────────────────────────────────────────────────
 
+/**
+ * 模型用途分类。决定模型出现在哪些选择器、用哪个主图标。
+ * - `chat`      — 对话 / 文本生成（默认，未设置时视为 chat）
+ * - `image`     — 文生图（如 Seedream、DALL·E）
+ * - `video`     — 视频生成（如 Seedance、Sora）
+ * - `audio`     — 语音合成 / 识别（如 TTS、Whisper）
+ * - `embedding` — 向量嵌入（如 text-embedding）
+ */
+export type ModelCategory = 'chat' | 'image' | 'video' | 'audio' | 'embedding';
+
 export interface LLMModel {
     id: string;
     name: string;
     icon?: string;
+    /** 模型用途分类，缺省视为 'chat'。 */
+    category?: ModelCategory;
     contextWindow?: number;
     maxOutput?: number;
     supportsVision?: boolean;

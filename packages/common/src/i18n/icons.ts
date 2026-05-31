@@ -34,6 +34,32 @@ export const MCP_TRANSPORT_ICONS: Record<MCPTransport, string> = {
     http:  '🌐',
 } as const;
 
+// ── Model capabilities & category ─────────────────────────────────────────────
+
+export interface ModelMeta {
+    icon:  string;
+    color: string;
+}
+
+/** 模型能力标志元数据（对应 LLMModel.supportsXXX 字段，用于能力 badge） */
+export const MODEL_CAPABILITY_META: Record<string, ModelMeta> = {
+    vision:           { icon: '👁️', color: '#0ea5e9' }, // sky-500
+    thinking:         { icon: '🧠', color: '#8b5cf6' }, // violet-500
+    tools:            { icon: '🔧', color: '#f97316' }, // orange-500
+    audio:            { icon: '🎵', color: '#10b981' }, // emerald-500
+    video:            { icon: '🎬', color: '#ef4444' }, // red-500
+    structuredOutput: { icon: '📋', color: '#6366f1' }, // indigo-500
+} as const;
+
+/** 模型用途分类元数据（对应 LLMModel.category 字段，用于分类 badge） */
+export const MODEL_CATEGORY_META: Record<string, ModelMeta> = {
+    chat:      { icon: '💬', color: '#10b981' }, // emerald-500
+    image:     { icon: '🖼️', color: '#f59e0b' }, // amber-500
+    video:     { icon: '🎬', color: '#ef4444' }, // red-500
+    audio:     { icon: '🎵', color: '#0ea5e9' }, // sky-500
+    embedding: { icon: '🔢', color: '#6366f1' }, // indigo-500
+} as const;
+
 // ── MCP / connection status ───────────────────────────────────────────────────
 
 export interface StatusMeta {

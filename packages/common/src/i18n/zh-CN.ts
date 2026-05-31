@@ -30,6 +30,21 @@ export const zhCN = {
     'mcpTransport.sse.option':  'SSE — Server-Sent Events',
     'mcpTransport.http.option': 'HTTP — REST 端点',
 
+    // ── Model capability labels ─────────────────────────────────────────────
+    'model.capability.vision':           '视觉',
+    'model.capability.thinking':         '思考',
+    'model.capability.tools':            '工具',
+    'model.capability.audio':            '音频',
+    'model.capability.video':            '视频',
+    'model.capability.structuredOutput': '结构化输出',
+
+    // ── Model category labels ───────────────────────────────────────────────
+    'model.category.chat':      '对话',
+    'model.category.image':     '文生图',
+    'model.category.video':     '视频生成',
+    'model.category.audio':     '语音',
+    'model.category.embedding': '向量嵌入',
+
     // ── Status ──────────────────────────────────────────────────────────────
     'status.connected':  '已连接',
     'status.error':      '错误',
