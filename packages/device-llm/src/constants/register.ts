@@ -17,6 +17,11 @@ export function registerLLMConfig(config: LLMConfigFile): void {
     const defs = config.providers ?? (config.provider ? [config.provider] : []);
 
     for (const def of defs) {
+        // Skip if already registered (idempotent — same as connection guard below)
+        if (LLM_PROVIDERS[def.id]) {
+            console.warn(`[registerLLMConfig] Provider "${def.id}" already registered, skipping external definition`);
+            continue;
+        }
         LLM_PROVIDERS[def.id] = toLLMProvider(def);
     }
 
