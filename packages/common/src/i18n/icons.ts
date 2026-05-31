@@ -116,6 +116,7 @@ export const ACTION_ICONS = {
     refresh:  '🔄',
     close:    '✕',
     help:     '❓',
+    ocr:      '🔤',
 } as const;
 
 // ── Status / feedback ─────────────────────────────────────────────────────────
