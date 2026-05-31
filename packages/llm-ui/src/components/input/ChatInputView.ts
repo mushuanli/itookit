@@ -108,6 +108,11 @@ export class ChatInput implements IChatInputPresenter {
     private connQuickClear!: HTMLElement;
     private connPopup: PopupPanel | null = null;
 
+    // ── Prompt Picker (preset prompts dropdown, popup via PopupPanel) ────────
+    private promptPickerWrapper!: HTMLElement;
+    private promptPickerBtn!: HTMLButtonElement;
+    private promptPopup: PopupPanel | null = null;
+
     private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
     private loading = false;
     private files: File[] = [];
@@ -372,6 +377,8 @@ export class ChatInput implements IChatInputPresenter {
         this.agentPopup = null;
         this.connPopup?.destroy();
         this.connPopup = null;
+        this.promptPopup?.destroy();
+        this.promptPopup = null;
         this.container.innerHTML = '';
         this.files = [];
     }
@@ -531,6 +538,10 @@ code {
         this.connQuickLabel = q('.llm-input__conn-quick-label');
         this.connQuickClear = q('.llm-input__conn-quick-clear');
 
+        // Prompt picker elements
+        this.promptPickerWrapper = q('.llm-input__prompt-picker-wrapper');
+        this.promptPickerBtn = q('.llm-input__prompt-picker');
+
         this.connectionSelect = q('.llm-input__connection-select');
         this.tierPillsContainer = q('.llm-input__tier-pills');
         this.historySlider = q('.llm-input__history-slider');
@@ -628,6 +639,9 @@ code {
             }
             this.toggleConnPicker();
         });
+
+        // Prompt picker — popup handled by PopupPanel
+        this.promptPickerBtn?.addEventListener('click', () => this.togglePromptPicker());
 
         // Settings panel connection select — keeps in sync with conn-quick
         this.connectionSelect.addEventListener('change', () => {
@@ -1331,6 +1345,72 @@ code {
             this.agentMetaEl.textContent = '';
             this.agentMetaEl.style.display = 'none';
         }
+        this.updatePromptPickerVisibility();
+    }
+
+    // ── Prompt Picker methods ─────────────────────────────────────────────────
+
+    /** Current agent's preset prompts (empty when none configured). */
+    private getCurrentPrompts(): import('@itookit/common').PromptPreset[] {
+        const agent = this.agents.find(a => a.id === this.config.agentId);
+        return agent?.defaultPrompts ?? [];
+    }
+
+    /** Show/hide the prompt picker pill based on whether the agent has presets. */
+    private updatePromptPickerVisibility(): void {
+        if (!this.promptPickerWrapper) return;
+        const hasPrompts = this.getCurrentPrompts().length > 0;
+        this.promptPickerWrapper.style.display = hasPrompts ? '' : 'none';
+        if (!hasPrompts) this.promptPopup?.hide();
+    }
+
+    private getOrCreatePromptPopup(): PopupPanel {
+        if (!this.promptPopup) {
+            this.promptPopup = new PopupPanel(this.promptPickerBtn, {
+                maxVisible: 12,
+                showSearch: true,
+                searchPlaceholder: 'Search prompts...',
+                emptyText: 'No preset prompts',
+                animated: true,
+            });
+        }
+        return this.promptPopup;
+    }
+
+    private openPromptPicker(): void {
+        this.agentPopup?.hide();
+        this.connPopup?.hide();
+        const popup = this.getOrCreatePromptPopup();
+        popup.show(this.buildPromptItems(), {
+            onSelect: (item) => this.selectPrompt(parseInt(item.id, 10)),
+        });
+    }
+
+    private togglePromptPicker(): void {
+        const popup = this.getOrCreatePromptPopup();
+        if (popup.isVisible) popup.hide();
+        else this.openPromptPicker();
+    }
+
+    /** Convert preset prompts to PopupItem[] (id = index). */
+    private buildPromptItems(): PopupItem[] {
+        return this.getCurrentPrompts().map((p, i) => ({
+            id: String(i),
+            label: p.name || `Prompt ${i + 1}`,
+            icon: '💬',
+            description: p.prompt.replace(/\s+/g, ' ').slice(0, 60),
+            searchText: `${p.name} ${p.prompt}`,
+        }));
+    }
+
+    /** Insert the selected preset prompt into the textarea at the cursor. */
+    private selectPrompt(index: number): void {
+        const prompt = this.getCurrentPrompts()[index]?.prompt;
+        if (!prompt) return;
+        this.pluginCtx?.insertAtCursor(prompt);
+        this.config.text = this.textarea.value;
+        this.notifyConfigChange();
+        this.textarea.focus();
     }
 
     // ── Connection Quick-Switch methods ──────────────────────────────────────

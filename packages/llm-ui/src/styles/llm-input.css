@@ -391,6 +391,56 @@
 
 /* Connection dropdown is managed by PopupPanel (mounted on body, position:fixed) */
 
+/* ─── Prompt Picker (preset prompts quick-insert) ──────────────────────────── */
+
+.llm-input__prompt-picker-wrapper {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.llm-input__prompt-picker {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 7px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--llm-radius-md);
+    font-size: 0.8rem;
+    color: var(--llm-text-secondary);
+    cursor: pointer;
+    transition: background var(--llm-transition-fast), color var(--llm-transition-fast);
+    white-space: nowrap;
+}
+
+.llm-input__prompt-picker:hover {
+    background: var(--llm-bg-hover);
+    color: var(--llm-text-primary);
+}
+
+.llm-input__prompt-picker:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.llm-input__prompt-picker-icon {
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+.llm-input__prompt-picker-label {
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.llm-input__prompt-picker-chevron {
+    font-size: 0.7em;
+    color: var(--llm-text-tertiary);
+}
+
+/* Prompt dropdown is managed by PopupPanel (mounted on body, position:fixed) */
+
 /* Input row: field-wrapper + action buttons side-by-side */
 .llm-input__input-row {
     display: flex;

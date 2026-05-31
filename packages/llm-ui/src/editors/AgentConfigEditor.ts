@@ -8,7 +8,7 @@ import {
     UnifiedSearchResult,
     CollapseExpandResult
 } from '@itookit/common';
-import type { AgentType, AgentDefinition, IAgentManagementService, ModelTier } from '@itookit/common';
+import type { AgentType, AgentDefinition, IAgentManagementService, ModelTier, PromptPreset } from '@itookit/common';
 
 /**
  * Agent 配置编辑器
@@ -78,7 +78,8 @@ export class AgentConfigEditor implements IEditor {
                 interface: parsed.interface || {
                     inputs: [],
                     outputs: []
-                }
+                },
+                defaultPrompts: this.normalizePrompts(parsed.defaultPrompts)
                 // 注意：这里不再处理 tags
             };
             this.render();
@@ -86,6 +87,20 @@ export class AgentConfigEditor implements IEditor {
             this.renderError((e as Error).message);
             this.content = null;
         }
+    }
+
+    /**
+     * ✅ 规范化 defaultPrompts
+     * 过滤非法项，保证每项为 { name, prompt } 字符串对。
+     */
+    private normalizePrompts(raw: unknown): PromptPreset[] {
+        if (!Array.isArray(raw)) return [];
+        return raw
+            .filter((p): p is Record<string, unknown> => !!p && typeof p === 'object')
+            .map(p => ({
+                name: typeof p.name === 'string' ? p.name : '',
+                prompt: typeof p.prompt === 'string' ? p.prompt : '',
+            }));
     }
 
     /**
@@ -366,6 +381,26 @@ export class AgentConfigEditor implements IEditor {
                     </div>
                 </div>
 
+                <!-- Default Prompts -->
+                <div class="agent-section">
+                    <div class="agent-section__header">
+                        <span class="agent-section__icon">💬</span>
+                        <span class="agent-section__title">预设 Prompt</span>
+                        <span class="agent-section__toggle">▼</span>
+                    </div>
+                    <div class="agent-section__body">
+                        <p class="agent-form-help" style="margin-bottom:12px;">
+                            预定义常用提示词。输入框可通过下拉框快速选择填入，支持调整顺序。
+                        </p>
+                        <div class="agent-prompt-list" id="prompt-list">
+                            ${(agent.defaultPrompts || []).map((p, i) => this.renderPromptRow(p, i)).join('')}
+                        </div>
+                        <button type="button" class="agent-prompt-add" id="prompt-add">
+                            ＋ 添加 Prompt
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Advanced Settings -->
                 <div class="agent-section collapsed">
                     <div class="agent-section__header">
@@ -405,6 +440,28 @@ export class AgentConfigEditor implements IEditor {
                 engine.driver.updateMetadata(nodeId, { ai_connectionLabel: label }).catch(() => {});
             }
         }
+    }
+
+    /** 渲染单个预设 Prompt 行（name + prompt + 排序/删除操作） */
+    private renderPromptRow(p: PromptPreset, index: number): string {
+        return `
+            <div class="agent-prompt-item" data-index="${index}">
+                <div class="agent-prompt-item__head">
+                    <input type="text"
+                           class="agent-form-input agent-prompt-name"
+                           placeholder="名称（如：代码审查）"
+                           value="${this.escapeHtml(p.name)}">
+                    <div class="agent-prompt-actions">
+                        <button type="button" class="agent-prompt-btn" data-action="up" title="上移">▲</button>
+                        <button type="button" class="agent-prompt-btn" data-action="down" title="下移">▼</button>
+                        <button type="button" class="agent-prompt-btn agent-prompt-btn--danger" data-action="remove" title="删除">✕</button>
+                    </div>
+                </div>
+                <textarea class="agent-form-textarea agent-prompt-text"
+                          rows="2"
+                          placeholder="提示词内容...">${this.escapeHtml(p.prompt)}</textarea>
+            </div>
+        `;
     }
 
     private renderError(message: string) {
@@ -540,6 +597,83 @@ export class AgentConfigEditor implements IEditor {
         if (iconPicker) {
             iconPicker.addEventListener('click', () => this.showIconPicker());
         }
+
+        // Default Prompts 列表
+        this.bindPromptEvents(handleChange);
+    }
+
+    /**
+     * 绑定预设 Prompt 列表事件：添加、删除、上移、下移。
+     *
+     * 编辑（name/prompt 输入）已由全局 input/change 监听覆盖，
+     * 这里仅处理需要重排 DOM 的操作（增删/排序），重排后重新索引并触发变更。
+     */
+    private bindPromptEvents(handleChange: () => void): void {
+        const list = this.container.querySelector('#prompt-list');
+        const addBtn = this.container.querySelector('#prompt-add');
+
+        addBtn?.addEventListener('click', () => {
+            // 先回写当前 DOM 状态，再追加空行重渲染，避免丢失未保存输入
+            this.collectPromptsToContent();
+            this.content?.defaultPrompts?.push({ name: '', prompt: '' });
+            if (this.content && !this.content.defaultPrompts) {
+                this.content.defaultPrompts = [{ name: '', prompt: '' }];
+            }
+            this.rerenderPromptList();
+            handleChange();
+        });
+
+        list?.addEventListener('click', (e) => {
+            const btn = (e.target as HTMLElement).closest('.agent-prompt-btn') as HTMLElement | null;
+            if (!btn) return;
+            const item = btn.closest('.agent-prompt-item') as HTMLElement | null;
+            const index = parseInt(item?.dataset.index ?? '-1', 10);
+            if (index < 0) return;
+
+            this.collectPromptsToContent();
+            const prompts = this.content?.defaultPrompts;
+            if (!prompts) return;
+
+            const action = btn.dataset.action;
+            if (action === 'remove') {
+                prompts.splice(index, 1);
+            } else if (action === 'up' && index > 0) {
+                [prompts[index - 1], prompts[index]] = [prompts[index], prompts[index - 1]];
+            } else if (action === 'down' && index < prompts.length - 1) {
+                [prompts[index + 1], prompts[index]] = [prompts[index], prompts[index + 1]];
+            } else {
+                return;
+            }
+            this.rerenderPromptList();
+            handleChange();
+        });
+
+        // 行内编辑（name/prompt）— 委托监听，因 DOM 动态重建无法依赖全局绑定
+        list?.addEventListener('input', (e) => {
+            const target = e.target as HTMLElement;
+            if (target.classList.contains('agent-prompt-name') ||
+                target.classList.contains('agent-prompt-text')) {
+                handleChange();
+            }
+        });
+    }
+
+    /** 重新渲染 Prompt 列表 DOM（增删/排序后调用） */
+    private rerenderPromptList(): void {
+        const list = this.container.querySelector('#prompt-list');
+        if (!list) return;
+        const prompts = this.content?.defaultPrompts ?? [];
+        list.innerHTML = prompts.map((p, i) => this.renderPromptRow(p, i)).join('');
+    }
+
+    /** 从 DOM 读取当前 Prompt 行，回写到 this.content.defaultPrompts */
+    private collectPromptsToContent(): void {
+        if (!this.content) return;
+        const rows = Array.from(this.container.querySelectorAll('.agent-prompt-item'));
+        this.content.defaultPrompts = rows.map(row => ({
+            name: (row.querySelector('.agent-prompt-name') as HTMLInputElement)?.value ?? '',
+            prompt: (row.querySelector('.agent-prompt-text') as HTMLTextAreaElement)?.value ?? '',
+        }));
     }
 
     private showIconPicker() {
@@ -617,6 +751,11 @@ export class AgentConfigEditor implements IEditor {
         this.content.icon = getVal('icon');
         this.content.description = getVal('description');
         this.content.type = type;
+
+        // 回写预设 Prompt 列表（过滤掉 name 和 prompt 均为空的行）
+        this.collectPromptsToContent();
+        this.content.defaultPrompts = (this.content.defaultPrompts ?? [])
+            .filter(p => p.name.trim() !== '' || p.prompt.trim() !== '');
 
         if (type === 'agent') {
             const tempVal = parseFloat(getVal('temperature'));

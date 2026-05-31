@@ -608,6 +608,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 provider: conn?.provider,
                 connectionName: conn?.name,
                 connectionId: agent.config?.connectionId,
+                defaultPrompts: agent.defaultPrompts,
             });
         }
 
