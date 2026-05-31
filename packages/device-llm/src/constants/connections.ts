@@ -48,8 +48,8 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'Anthropic',
         providerId: 'anthropic',
         tiers: {
-            optimal: 'claude-opus-4-1-20250805',
-            standard: 'claude-sonnet-4-5-20250929',
+            optimal: 'claude-opus-4-8-20251101',
+            standard: 'claude-sonnet-4-6-20250514',
             fast: 'claude-haiku-4-5-20251001',
         },
     },
@@ -60,9 +60,9 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'Google Gemini',
         providerId: 'gemini',
         tiers: {
-            optimal: 'gemini-2.5-pro',
-            standard: 'gemini-2.5-flash',
-            fast: 'gemini-2.5-flash',
+            optimal: 'gemini-3.1-pro',
+            standard: 'gemini-3.5-flash',
+            fast: 'gemini-3.5-flash',
         },
     },
 
@@ -73,8 +73,8 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         providerId: 'cloudapi',
         tiers: {
             optimal: 'claude-opus-4-6',
-            standard: 'claude-sonnet-4-6-thinking',
-            fast: 'claude-haiku-4-5-20251001-r',
+            standard: 'claude-sonnet-4-6',
+            fast: 'claude-haiku-4-5',
         },
     },
 
@@ -92,8 +92,8 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'OpenAI',
         providerId: 'openai',
         tiers: {
-            optimal: 'gpt-5-pro',
-            standard: 'gpt-5',
+            optimal: 'gpt-5.5',
+            standard: 'gpt-5-pro',
             fast: 'gpt-5-mini',
         },
     },
