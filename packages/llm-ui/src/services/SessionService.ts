@@ -39,8 +39,8 @@ export class SessionService {
      */
     async createSession(title: string, parentId: string | null = null): Promise<{ nodeId: string; sessionId: string }> {
         const newNode = await this.engine.createFile(title, parentId);
-        const sessionId = await this.engine.initializeExistingFile(newNode.id, title);
-        return { nodeId: newNode.id, sessionId };
+        const sessionId = await this.engine.initializeExistingFile(newNode.path, title);
+        return { nodeId: newNode.path, sessionId };
     }
 
     /**

@@ -84,7 +84,7 @@ export const createLLMFactory = (
         if (!effectiveNodeId && engine) {
             // 如果没有 nodeId，创建新文件
             const newNode = await engine.createFile(options.title || formatDefaultFileTitle(), null);
-            effectiveNodeId = newNode.id;
+            effectiveNodeId = newNode.path;
             isNewSession = true;
             console.log(`[LLMFactory] New file created: ${effectiveNodeId}`);
         }

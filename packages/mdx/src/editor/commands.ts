@@ -145,7 +145,7 @@ export async function applyAudioCloze(view: EditorView): Promise<boolean> {
   const selectedText = state.doc.sliceString(from, to);
   // Tauri v2 replaces window.prompt() with a Promise-based dialog.
   let audioText: string | null | Promise<string | null> = prompt("请输入音频提示文本:", selectedText);
-  if (audioText instanceof Promise) audioText = await audioText;
+  audioText = await Promise.resolve(audioText);
   if (audioText === null) return false;
 
   const newText = `--${selectedText}--^^audio:${audioText.trim()}^^`;
@@ -268,9 +268,9 @@ export function insertHorizontalRule(view: EditorView): boolean {
 export async function insertTable(view: EditorView): Promise<boolean> {
   // Tauri v2 replaces window.prompt() with a Promise-based dialog.
   let rowsStr: string | null | Promise<string | null> = prompt('行数：', '3');
-  if (rowsStr instanceof Promise) rowsStr = await rowsStr;
+  rowsStr = await Promise.resolve(rowsStr);
   let colsStr: string | null | Promise<string | null> = prompt('列数：', '3');
-  if (colsStr instanceof Promise) colsStr = await colsStr;
+  colsStr = await Promise.resolve(colsStr);
 
   if (!rowsStr || !colsStr) return false;
 
@@ -310,7 +310,7 @@ export async function insertTable(view: EditorView): Promise<boolean> {
 export async function applyCodeBlock(view: EditorView): Promise<boolean> {
   // Tauri v2 replaces window.prompt() with a Promise-based dialog.
   let lang: string | null | Promise<string | null> = prompt('编程语言 (可选):', '');
-  if (lang instanceof Promise) lang = await lang;
+  lang = await Promise.resolve(lang);
   const { state } = view;
   const { from, to } = state.selection.main;
   const selectedText = state.sliceDoc(from, to) || '代码';
