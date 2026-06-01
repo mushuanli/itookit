@@ -143,6 +143,16 @@ export class VFSService implements IDataOperationPort {
   findItemById = (itemId: string) => this.engine.driver.getNode(itemId);
   updateItemMetadata = (itemId: string, updates: Record<string, any>) =>
     this.engine.driver.updateMetadata(itemId, updates);
+  hasAssetDir = (ownerPath: string): Promise<boolean> =>
+    this.engine.meta.assets.hasAssetDir(ownerPath);
+
+  putAsset = (
+    ownerPath: string,
+    assetName: string,
+    content: string | ArrayBuffer,
+  ): Promise<FSNode> =>
+    this.engine.meta.assets.putAsset(ownerPath, assetName, content);
+
   getAllFolders = () => this.engine.driver.search({ type: 'directory' });
   getAllFiles = () => this.engine.driver.search({ type: 'file' });
 }
