@@ -57,7 +57,7 @@ export class ImportCommandHandler {
           setTimeout(() => {
             this.store.dispatch({
               type: 'SESSION_SELECT',
-              payload: { sessionId: created[0].id },
+              payload: { sessionId: created[0].path },
             });
           }, 50);
         }

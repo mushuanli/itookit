@@ -190,7 +190,7 @@ export class ContextMenuHandler {
         const currentTitle = contextItem.metadata.title || '';
         // Tauri v2 replaces window.prompt() with a Promise-based dialog.
         let newTitle: string | null | Promise<string | null> = prompt('输入新名称:', currentTitle);
-        if (newTitle instanceof Promise) newTitle = await newTitle;
+        newTitle = await Promise.resolve(newTitle);
         if (newTitle?.trim() && newTitle.trim() !== currentTitle) {
           this.commandBus.execute('file:rename', {
             itemId: contextItem.id,
@@ -203,7 +203,7 @@ export class ContextMenuHandler {
         const title = contextItem.metadata.title || 'this item';
         // Tauri v2 replaces window.confirm() with a Promise-based dialog.
         let result: boolean | Promise<boolean> = confirm(`确定删除 "${title}"?`);
-        if (result instanceof Promise) result = await result;
+        result = await Promise.resolve(result);
         if (result) {
           this.commandBus.execute('file:delete', { itemIds: [contextItem.id] });
         }

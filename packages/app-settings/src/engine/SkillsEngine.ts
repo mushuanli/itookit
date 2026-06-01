@@ -343,7 +343,6 @@ class SkillsDriver implements IFSDriver {
 
 function toFSNode(s: LLMSkill): FSFileNode {
     return {
-        id: s.id,
         parentPath: null,
         name: s.name,
         type: 'file',

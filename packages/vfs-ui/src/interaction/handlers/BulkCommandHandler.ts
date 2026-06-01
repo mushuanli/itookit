@@ -22,7 +22,7 @@ export class BulkCommandHandler {
             this.commandBus.on('bulk:delete', async ({ itemIds }) => {
                 // Tauri v2 replaces window.confirm() with a Promise-based dialog.
                 let result: boolean | Promise<boolean> = confirm(`确定要删除 ${itemIds.length} 个项目吗?`);
-                if (result instanceof Promise) result = await result;
+                result = await Promise.resolve(result);
                 if (result) {
                     await this.service.deleteItems(itemIds);
                 }
