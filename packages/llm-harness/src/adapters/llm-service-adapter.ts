@@ -14,7 +14,7 @@ import type {
     IDeviceDriver,
     DeviceContext,
 } from '@itookit/common';
-import { LLM_IOCTL } from '@itookit/device-llm';
+import { LLM_IOCTL, expandMessagesAttachments } from '@itookit/device-llm';
 
 const BASE_CTX: DeviceContext = { nodeId: 'llm', name: 'llm' };
 
@@ -75,18 +75,21 @@ export class LLMServiceAdapter implements ILLMService {
         const sessionId = await this.driver.open?.(BASE_CTX, { connectionId }) ?? connectionId;
         const ctx: DeviceContext = { ...BASE_CTX, sessionId };
 
-        await this.driver.write(ctx, JSON.stringify(request));
+        // Expand blob/downscaled-blob attachments to base64 data URIs
+        // so they survive JSON serialization. Without this, JSON.stringify
+        // would turn every Blob into {}.
+        const expandedMessages = await expandMessagesAttachments(request.messages);
+        const params: ChatCompletionParams = { ...request, messages: expandedMessages };
 
-        if (!this.driver.readStream) throw new Error('LLM driver does not support streaming');
-        for await (const chunk of this.driver.readStream(ctx)) {
-            if (typeof chunk === 'string') {
-                // driver.readStream already parses SSE and yields plain-text delta content.
-                // Wrap it as a ChatCompletionChunk so callers can access delta.content uniformly.
-                yield {
-                    id: '', object: 'chat.completion.chunk', created: 0, model: '',
-                    choices: [{ index: 0, delta: { content: chunk, role: 'assistant' }, finish_reason: null }],
-                } as unknown as ChatCompletionChunk;
-            }
+        // CHAT ioctl passes the full request (including image content parts)
+        // to the provider as-is, bypassing the session-history write/readStream
+        // path that expects individual ChatMessage objects.
+        const raw = await this.driver.ioctl!(ctx, LLM_IOCTL.CHAT, params);
+        const generator = raw as AsyncIterable<ChatCompletionChunk> | undefined;
+        if (!generator) throw new Error('LLM driver did not return a stream');
+
+        for await (const chunk of generator) {
+            yield chunk;
         }
         await this.driver.close?.(ctx);
     }
