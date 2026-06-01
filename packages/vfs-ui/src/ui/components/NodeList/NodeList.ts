@@ -6,7 +6,7 @@
 import { BaseComponent, BaseComponentDeps } from '../../core/BaseComponent';
 import type { VFSNodeUI, VFSUIState, SearchFilter } from '../../../contracts/types';
 import type { FileCreationConfig } from '@itookit/common';
-import { debounce, escapeHTML } from '@itookit/common';
+import { debounce, escapeHTML, ACTION_ICONS } from '@itookit/common';
 
 import { NodeListStateTransformer, NodeListState } from './NodeListState';
 import { SelectionHandler } from './handlers/SelectionHandler';
@@ -185,6 +185,16 @@ export class NodeList extends BaseComponent<NodeListState> {
 
     if (action === 'import') {
       this.commandBus.execute('file:import', { parentPath });
+    } else if (action === 'export') {
+      const selectedFileIds = [...this.state.selectedItemIds].filter(id => {
+        const item = this.findItemById(id);
+        return item?.type === 'file';
+      });
+      if (selectedFileIds.length) {
+        this.commandBus.execute('file:export', { itemIds: selectedFileIds });
+      } else {
+        alert('请先选择要导出的文件');
+      }
     } else if (action === 'create-file' || action === 'create-directory') {
       const type = action.split('-')[1] as 'file' | 'directory';
       this.commandBus.execute('ui:startCreating', { type, parentPath });
@@ -336,7 +346,8 @@ export class NodeList extends BaseComponent<NodeListState> {
               <span>+</span><span class="btn-label">${escapeHTML(this.fileCreation?.label ?? 'File')}</span>
             </button>
             <button class="vfs-node-list__new-btn vfs-node-list__new-btn--folder" data-action="create-directory" title="新建目录"><span>📁+</span></button>
-            <button class="vfs-node-list__new-btn vfs-node-list__new-btn--icon" data-action="import" title="导入文件"><i class="fas fa-upload"></i></button>
+            <button class="vfs-node-list__new-btn vfs-node-list__new-btn--icon" data-action="import" title="导入文件"><span>${ACTION_ICONS.import}</span></button>
+            <button class="vfs-node-list__new-btn vfs-node-list__new-btn--icon" data-action="export" title="导出文件"><span>${ACTION_ICONS.export}</span></button>
           </div>
         </div>
         <div class="vfs-node-list__body"></div>
