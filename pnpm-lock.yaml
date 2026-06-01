@@ -710,6 +710,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
+      '@itookit/vfslib':
+        specifier: workspace:*
+        version: link:../vfslib
       immer:
         specifier: ^10.2.0
         version: 10.2.0

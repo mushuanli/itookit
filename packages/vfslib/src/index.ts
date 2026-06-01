@@ -52,3 +52,15 @@ export {
 } from './utils/validation';
 export { generateId } from './utils/id';
 export { toBuffer, toString, toUint8Array } from './utils/encoding';
+export {
+    serialize,
+    deserialize,
+    decodeContent,
+} from './utils/serialization';
+export type {
+    VFSExportManifest,
+    VFSExportFileEntry,
+    VFSExportAsset,
+    VFSEncodedContent,
+    SerializeDeps,
+} from './utils/serialization';
