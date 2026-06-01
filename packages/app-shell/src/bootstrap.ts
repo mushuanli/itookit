@@ -1,7 +1,6 @@
 import { FileTypeDefinition } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem, formatDefaultFileTitle } from '@itookit/common';
-import type { LLMSkill, SkillDefinition, SkillToolBinding, ToolVFSContext } from '@itookit/common';
-import type { IVFSManager } from '@itookit/vfslib';
+import type { LLMSkill, SkillDefinition, SkillToolBinding, ToolVFSContext, IVFSManager, FSNode } from '@itookit/common';
 import { createVFS } from '@itookit/vfslib';
 import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
 import {
@@ -130,7 +129,7 @@ function createVFSToolContext(vfsManager: IVFSManager): ToolVFSContext {
 
         // Prefer an exact path match; fall back to the first result.
         const node = result.nodes.find(
-            (n) => n.path === `/${clean}` || n.path === `/${filename}` || n.name === filename,
+            (n: FSNode) => n.path === `/${clean}` || n.path === `/${filename}` || n.name === filename,
         ) ?? result.nodes[0];
 
         if (!node || !node.moduleId) {
@@ -163,9 +162,9 @@ function createVFSToolContext(vfsManager: IVFSManager): ToolVFSContext {
         async listFiles(dir?: string): Promise<string[]> {
             const result = await vfsManager.search({ type: 'file', limit: 500 });
             return result.nodes
-                .filter((n) => n.type === 'file')
-                .map((n) => n.path ?? n.name)
-                .filter((p) => !dir || p.includes(dir));
+                .filter((n: FSNode) => n.type === 'file')
+                .map((n: FSNode) => n.path)
+                .filter((p: string) => !dir || p.includes(dir));
         },
     };
 }

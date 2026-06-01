@@ -42,7 +42,6 @@ export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
 function toFSNode(id: string, config: (typeof SETTINGS_PAGES)[string]): FSFileNode {
     const now = Date.now();
     return {
-        id,
         parentPath: null,
         name: config.name,
         type: 'file',
