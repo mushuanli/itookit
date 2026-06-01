@@ -24,6 +24,7 @@ export interface CommandMap {
   'file:rename': { itemId: string; newTitle: string };
   'file:move': { itemIds: string[]; targetId: string | null; position?: 'before' | 'after' | 'into' };
   'file:import': { parentPath: string | null };
+  'file:export': { itemIds: string[] };
   'file:updateTags': { itemIds: string[]; tags: string[] };
 
   // --- Navigation ---

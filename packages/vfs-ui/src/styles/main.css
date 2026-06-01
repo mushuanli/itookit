@@ -100,7 +100,7 @@ a { color: inherit; text-decoration: none; }
 
 .vfs-node-list__new-controls {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   gap: var(--spacing-2);
   margin-top: var(--spacing-2);
 }

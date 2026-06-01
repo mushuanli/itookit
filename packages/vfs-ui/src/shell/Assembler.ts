@@ -22,6 +22,7 @@ import { UICommandHandler } from '../interaction/handlers/UICommandHandler';
 import { SelectionCommandHandler } from '../interaction/handlers/SelectionCommandHandler';
 import { BulkCommandHandler } from '../interaction/handlers/BulkCommandHandler';
 import { ImportCommandHandler } from '../interaction/handlers/ImportCommandHandler';
+import { ExportCommandHandler } from '../interaction/handlers/ExportCommandHandler';
 import { CustomMenuCommandHandler } from '../interaction/handlers/CustomMenuCommandHandler';
 
 import type { VFSUIShellOptions } from './VFSUIShell';
@@ -112,6 +113,7 @@ export function assemble(
             service,
             () => engineAdapter.loadData()
         ),
+        new ExportCommandHandler(commandBus, service, engine),
         new CustomMenuCommandHandler(commandBus, eventBus),
     ];
 

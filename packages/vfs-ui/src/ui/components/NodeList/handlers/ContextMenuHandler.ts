@@ -121,6 +121,13 @@ export class ContextMenuHandler {
       return;
     }
 
+    if (action === 'bulk-export') {
+      this.commandBus.execute('file:export', {
+        itemIds: [...state.selectedItemIds],
+      });
+      return;
+    }
+
     if (action === 'bulk-move') {
       this.commandBus.execute('bulk:move', {
         itemIds: [...state.selectedItemIds],
@@ -173,6 +180,7 @@ export class ContextMenuHandler {
       'duplicate',
       'delete',
       'moveTo',
+      'export',
       'create-in-folder-session',
       'create-in-folder-folder',
     ]);
@@ -186,6 +194,8 @@ export class ContextMenuHandler {
         });
       } else if (action === 'moveTo') {
         this.commandBus.execute('move:start', { itemIds: [contextItem.id] });
+      } else if (action === 'export') {
+        this.commandBus.execute('file:export', { itemIds: [contextItem.id] });
       } else if (action === 'rename') {
         const currentTitle = contextItem.metadata.title || '';
         // Tauri v2 replaces window.prompt() with a Promise-based dialog.
@@ -243,6 +253,11 @@ export class ContextMenuHandler {
         label: '复制',
         iconHTML: '<i class="fas fa-copy"></i>',
       });
+      items.push({
+        id: 'export',
+        label: '导出',
+        iconHTML: '<i class="fas fa-download"></i>',
+      });
     }
 
     items.push(
@@ -274,6 +289,11 @@ export class ContextMenuHandler {
 
   private getBulkContextMenuItems(count: number): MenuItem[] {
     return [
+      {
+        id: 'bulk-export',
+        label: `导出 ${count} 个项目`,
+        iconHTML: '<i class="fas fa-download"></i>',
+      },
       {
         id: 'bulk-edit-tags',
         label: `编辑 ${count} 个项目的标签...`,
