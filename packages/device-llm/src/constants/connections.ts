@@ -104,9 +104,9 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: '图片转文字',
         providerId: 'volcengine',
         tiers: {
-            optimal: 'doubao-seed-2-0-pro',
-            standard: 'doubao-seed-2-0-lite',
-            fast: 'doubao-seed-2-0-mini',
+            optimal: 'doubao-seed-2-0-lite-260428',
+            standard: 'doubao-seed-2-0-lite-260428',
+            fast: 'doubao-seed-2-0-mini-260428',
         },
     },
 ];
