@@ -1,4 +1,4 @@
-// @file: llm-ui/views/history/EditController.ts
+// @file: llm-ui/components/history/EditController.ts
 
 import { MDxController } from '../mdx/MDxController';
 import type { NodeActionCallback } from '../../domain/types';

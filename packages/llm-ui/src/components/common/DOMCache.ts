@@ -1,4 +1,4 @@
-// @file: llm-ui/views/common/DOMCache.ts
+// @file: llm-ui/components/common/DOMCache.ts
 
 /**
  * DOM 元素缓存

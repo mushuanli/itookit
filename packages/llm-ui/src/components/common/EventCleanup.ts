@@ -1,4 +1,4 @@
-// @file: llm-ui/views/common/EventCleanup.ts
+// @file: llm-ui/components/common/EventCleanup.ts
 
 /**
  * 事件监听器生命周期管理器

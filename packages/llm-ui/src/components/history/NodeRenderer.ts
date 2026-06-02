@@ -1,4 +1,4 @@
-// @file: llm-ui/views/history/NodeRenderer.ts
+// @file: llm-ui/components/history/NodeRenderer.ts
 
 import { escapeHTML } from '@itookit/common';
 import { ExecutionNode } from '@itookit/llm-engine';

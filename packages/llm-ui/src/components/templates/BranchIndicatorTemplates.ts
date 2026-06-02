@@ -1,4 +1,4 @@
-// @file: llm-ui/views/templates/BranchIndicatorTemplates.ts
+// @file: llm-ui/components/templates/BranchIndicatorTemplates.ts
 
 import { escapeHTML } from '@itookit/common';
 import { BranchItem } from '../../domain/types';
@@ -51,7 +51,9 @@ export const BranchIndicatorTemplates = {
         `).join('');
     },
 
-    chevronUp: '<polyline points="18 15 12 9 6 15"></polyline>',
-    chevronDown: '<polyline points="6 9 12 15 18 9"></polyline>',
+    chevronUp:   IconTemplates.chevronUp,
+    chevronDown:  IconTemplates.chevronDown,
 };
+
+import { IconTemplates } from './IconTemplates';
 

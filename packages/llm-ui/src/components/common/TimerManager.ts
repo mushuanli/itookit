@@ -1,4 +1,4 @@
-// @file: llm-ui/views/common/TimerManager.ts
+// @file: llm-ui/components/common/TimerManager.ts
 
 /**
  * 定时器生命周期管理器

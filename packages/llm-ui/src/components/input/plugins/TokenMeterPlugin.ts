@@ -17,6 +17,7 @@
 
 import type { InputPlugin, InputPluginContext } from './InputPlugin';
 import type { TokenStats } from '../../../domain/types';
+import { injectStyle } from '../../../utils/styleInjector';
 
 const BAR_BLOCKS = 10;
 
@@ -147,10 +148,7 @@ export class TokenMeterPlugin implements InputPlugin {
     }
 
     private injectStyles(): void {
-        if (document.getElementById('token-meter-styles')) return;
-        const s = document.createElement('style');
-        s.id = 'token-meter-styles';
-        s.textContent = `
+        injectStyle('token-meter-styles', `
 /* ── Token Meter strip ─────────────────────────────────────────────────── */
 .token-meter {
     display: flex;
@@ -204,7 +202,8 @@ export class TokenMeterPlugin implements InputPlugin {
 @media (max-width: 380px) {
     .token-meter__tokens { display: none; }
 }
-`;
-        document.head.appendChild(s);
+`);
     }
+
+// injectStyles now uses shared injectStyle utility from utils/styleInjector.ts
 }

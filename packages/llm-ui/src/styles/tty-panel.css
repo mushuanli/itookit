@@ -1,0 +1,135 @@
+/* @file: llm-ui/styles/tty-panel.css */
+/* =========================================
+   TTY Panel — inline terminal widget
+   Frequently modified: TTY UI is actively iterated.
+   ========================================= */
+
+.llm-ui-node__tty-panels {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 4px 0;
+}
+
+.llm-ui-tty-panel {
+    border: 1px solid var(--llm-border-color);
+    border-radius: 6px;
+    overflow: hidden;
+    font-family: var(--llm-font-mono, 'SF Mono', 'Menlo', 'Consolas', monospace);
+    font-size: 12px;
+}
+
+.llm-ui-tty-panel__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    background: var(--llm-bg-secondary);
+    border-bottom: 1px solid var(--llm-border-color);
+    font-size: 11px;
+    flex-wrap: wrap;
+}
+
+.llm-ui-tty-panel__cmd {
+    font-weight: 600;
+    color: var(--llm-text-primary);
+}
+
+.llm-ui-tty-panel__pid {
+    color: var(--llm-text-tertiary);
+    font-size: 10px;
+}
+
+.llm-ui-tty-panel__status {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.llm-ui-tty-panel__status--running::before {
+    content: '● ';
+    color: #27ae60;
+}
+
+.llm-ui-tty-panel__status--exited::before {
+    content: '■ ';
+    color: var(--llm-text-tertiary);
+}
+
+.llm-ui-tty-panel__output {
+    margin: 0;
+    padding: 8px 10px;
+    max-height: 320px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: var(--llm-bg-code, #1a1a1a);
+    color: var(--llm-text-code, #d4d4d4);
+    line-height: 1.5;
+    font-size: 12px;
+    scrollbar-width: thin;
+}
+
+.llm-ui-tty-panel__input-row {
+    display: flex;
+    border-top: 1px solid var(--llm-border-color);
+}
+
+.llm-ui-tty-panel__input {
+    flex: 1;
+    padding: 6px 10px;
+    border: none;
+    outline: none;
+    font-family: inherit;
+    font-size: 12px;
+    background: var(--llm-bg-primary);
+    color: var(--llm-text-primary);
+    min-width: 0;
+}
+
+.llm-ui-tty-panel__input::placeholder {
+    color: var(--llm-text-tertiary);
+    opacity: 0.7;
+}
+
+.llm-ui-tty-panel__input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.llm-ui-tty-panel__send {
+    padding: 6px 14px;
+    border: none;
+    border-left: 1px solid var(--llm-border-color);
+    background: var(--llm-bg-secondary);
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--llm-text-secondary);
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+
+.llm-ui-tty-panel__send:hover:not(:disabled) {
+    background: var(--llm-bg-hover);
+    color: var(--llm-text-primary);
+}
+
+.llm-ui-tty-panel__send:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.llm-ui-tty-panel__exit-info {
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--llm-text-tertiary);
+    border-top: 1px solid var(--llm-border-color);
+    background: var(--llm-bg-secondary);
+}
+
+@media (prefers-color-scheme: dark) {
+    .llm-ui-tty-panel__output {
+        background: #0d0d0d;
+        color: #e0e0e0;
+    }
+}

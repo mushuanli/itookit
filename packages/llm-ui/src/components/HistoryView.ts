@@ -1,4 +1,4 @@
-// @file: llm-ui/components/history/HistoryView.ts
+// @file: llm-ui/components/HistoryView.ts
 
 import type { SessionGroup, OrchestratorEvent } from '@itookit/llm-engine';
 import type { IModuleFS, IAgentRuntime } from '@itookit/common';
@@ -288,7 +288,6 @@ export class HistoryView implements IHistoryPresenter {
         }
 
         for (const [nodeId, chunks] of batched.chunks) {
-            console.log('[harness][4] handleBatchedEvents chunk nodeId=', nodeId, 'output.len=', chunks.output.length);
             if (chunks.thought) this.stream.updateContent(nodeId, chunks.thought, 'thought');
             if (chunks.output) this.stream.updateContent(nodeId, chunks.output, 'output');
         }

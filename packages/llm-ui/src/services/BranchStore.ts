@@ -1,16 +1,17 @@
 // @file: llm-ui/services/BranchStore.ts
 
 import type { BranchItem } from '../domain/types';
+import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { SessionManager } from '@itookit/llm-engine';
 import type { ErrorHandler } from '../utils/errorHandler';
 
 /**
  * Branch 数据的唯一真实来源
- * 
+ *
  * ✅ 层级：Service（数据管理，不涉及 UI）
  * ✅ 性能：合并并发请求，脏检查避免无意义通知
  */
-export class BranchStore {
+export class BranchStore implements IBranchStore {
     private branches: BranchItem[] = [
         { name: 'main', headNodeId: '', isCurrent: true }
     ];

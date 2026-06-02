@@ -1,6 +1,5 @@
 // @file: llm-ui/domain/ports/IChatInputPresenter.ts
 
-import type { IAgentRuntime } from '@itookit/common';
 import type { ExecutorOption, SkillInfo, TokenStats } from '../types';
 
 export interface IChatInputConfig {
@@ -51,19 +50,6 @@ export interface IChatInputPresenter {
      * （含 loaded 状态）。ChatInput 负责渲染 Load/Unload 按钮。
      */
     refreshSkills(skills: SkillInfo[]): void;
-
-    /**
-     * 注入 AgentLoopExecutor 运行时，用于展示执行状态。
-     *
-     * HarnessPlugin 订阅此运行时的事件，在输入区展示：
-     * - 工具执行状态（正在运行的工具名称）
-     * - 预算警告（token/cost 接近上限）
-     * - 上下文压缩提示
-     * - 权限确认 UI（file_write 等需要用户批准的操作）
-     *
-     * 传 null 时停止订阅并隐藏状态条。
-     */
-    setHarnessRuntime(runtime: IAgentRuntime | null): void;
 
     /**
      * 在输入框上方内联显示工具执行结果（不弹 Modal）。

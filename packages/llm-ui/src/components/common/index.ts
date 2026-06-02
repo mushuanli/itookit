@@ -1,4 +1,4 @@
-// @file: llm-ui/views/common/index.ts
+// @file: llm-ui/components/common/index.ts
 
 export { TimerManager } from './TimerManager';
 export { EventCleanup } from './EventCleanup';

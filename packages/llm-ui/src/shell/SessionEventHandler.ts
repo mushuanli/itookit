@@ -7,7 +7,7 @@ import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
 import type { IBranchPresenter } from '../domain/ports/IBranchPresenter';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { IEditorEventBus } from '../domain/events';
-import type { BranchStore } from '../services/BranchStore';
+import type { IBranchStore } from '../domain/ports/IBranchStore';
 
 // ----------------------------------------------------------------
 // 副作用声明表
@@ -58,7 +58,7 @@ export interface SessionEventHandlerDeps {
     statusIndicator: IStatusPresenter;
     /** ChatInput presenter — 用于更新 token 用量显示 */
     chatInput: IChatInputPresenter;
-    branchStore: BranchStore;
+    branchStore: IBranchStore;
     getCurrentSessionId: () => string | null;
     onContentChanged: () => void;
     onNavRefresh: () => void;

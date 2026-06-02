@@ -2,16 +2,9 @@
 
 import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent,
-    EditorEventCallback, CollapseExpandResult, Toast, Modal, guessMimeType,
-    showConfirmDialog, formatDefaultFileTitle,
+    EditorEventCallback, CollapseExpandResult, Toast,
 } from '@itookit/common';
 import type { ILLMService } from '@itookit/common';
-
-/** Alias: infer MIME from filename (used for @mention file suggestions) */
-const guessMimeTypeFromName = guessMimeType;
-
-/** Vision connection used for image OCR (image → text). */
-const OCR_CONNECTION_ID = 'conn-volcengine-vision';
 
 import {
     IChatEngine, IAgentConfigService, SessionManager, getSessionManager,
@@ -22,12 +15,11 @@ import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
 import type { IBranchPresenter } from '../domain/ports/IBranchPresenter';
-import type { INavigationPresenter, NavPanelData } from '../domain/ports/INavigationPresenter';
 import type { IEditorEventBus } from '../domain/events';
+import type { IBranchStore } from '../domain/ports/IBranchStore';
 
 // Services
-import { SessionService, StateService, AssetService, BranchStore, BranchService, NavDataBuilder } from '../services';
-import type { ExecutorOption, ConnectionOption } from '../domain/types';
+import { SessionService, StateService, AssetService, BranchStore, BranchService, NavDataBuilder, FileSearchService, OcrService } from '../services';
 
 // Commands
 import type { CommandContext } from '../commands/CommandContext';
@@ -44,6 +36,15 @@ import { EditorEventBus } from './EditorEventBus';
 import { SessionEventHandler } from './SessionEventHandler';
 import { StateManager } from './StateManager';
 import { EventBinder } from './EventBinder';
+import { NavigationHelper } from './NavigationHelper';
+import {
+    buildExecutorOptions, validateAgentId, buildConnectionOptions,
+} from './AgentProvider';
+import {
+    buildHarnessCallbacks, checkInterruptedSessions, injectIntoRunningHarness,
+    wirePlanConfirmIntercept,
+} from './HarnessIntegration';
+import { buildSlashCallbacks } from './SlashCommandRouter';
 
 // Infrastructure
 import { TimerManager, DOMCache } from '../components/common';
@@ -54,19 +55,13 @@ import { HistoryView } from '../components/HistoryView';
 import { ChatInput } from '../components/input/ChatInputView';
 import { BranchIndicatorView } from '../components/indicators/BranchIndicatorView';
 import { StatusIndicatorView } from '../components/indicators/StatusIndicatorView';
-import { FloatingNavPanel } from '../components/FloatingNavPanel';
 import { LayoutTemplates } from '../components/templates/LayoutTemplates';
 
 import { HistoryPlugin } from '../components/input/plugins/HistoryPlugin';
 import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlugin';
-import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
 import { HarnessPlugin } from '../components/input/plugins/HarnessPlugin';
 import { getPromptHistory, getHarnessAdapter } from '@itookit/llm-engine';
 import { AssetManagerUI } from '@itookit/mdxeditor';
-import {
-    buildSkillPrompt, getShellTemplateParams, getMissingParams, buildWizardRefill,
-} from '../components/input/SkillInvocationParser';
-import type { SkillInvocation } from '../components/input/SkillInvocationParser';
 
 export interface LLMEditorOptions extends Omit<EditorOptions, 'sessionEngine'> {
     sessionEngine: IChatEngine;
@@ -103,7 +98,9 @@ export class LLMWorkspaceEditor implements IEditor {
     private chatInput!: IChatInputPresenter;
     private branchIndicator!: IBranchPresenter;
     private statusIndicator!: IStatusPresenter;
-    private floatingNav: INavigationPresenter | null = null;
+
+    // === 委托的子模块 ===
+    private navigation!: NavigationHelper;
 
     // === Services ===
     private sessionManager: SessionManager;
@@ -112,9 +109,11 @@ export class LLMWorkspaceEditor implements IEditor {
     private assetService!: AssetService;
     private stateManager!: StateManager;
     private errorHandler!: ErrorHandler;
-    private branchStore!: BranchStore;
+    private branchStore!: IBranchStore;
     private branchService!: BranchService;
     private navDataBuilder!: NavDataBuilder;
+    private fileSearchService!: FileSearchService;
+    private ocrService!: OcrService;
 
     // === 事件系统 ===
     private bus!: IEditorEventBus;
@@ -147,7 +146,6 @@ export class LLMWorkspaceEditor implements IEditor {
     private isBeingDeleted = false;
     private initPromise: Promise<void> | null = null;
     private initResolve: (() => void) | null = null;
-    private navRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
     private initComplete = false;
 
@@ -159,6 +157,10 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private get hostContext(): EditorHostContext | undefined {
         return this.options.hostContext;
+    }
+
+    private get agentService(): IAgentConfigService {
+        return this.options.agentService;
     }
 
     constructor(_container: HTMLElement, options: LLMEditorOptions) {
@@ -193,7 +195,7 @@ export class LLMWorkspaceEditor implements IEditor {
             this.emit('ready');
             this.initResolve?.();
             // Q2: Check for interrupted harness sessions after init.
-            this.checkInterruptedSessions();
+            checkInterruptedSessions();
         } catch (e: any) {
             if (e.code === 'ABORTED' || e.message?.includes('Bind cancelled')) {
                 this.initResolve?.();
@@ -225,11 +227,15 @@ export class LLMWorkspaceEditor implements IEditor {
         this.assetService = new AssetService(this.engine);
         this.stateManager = new StateManager(
             this.stateService, this.sessionManager, this.options.nodeId!,
-            (id) => this.validateAgentId(id)
+            (id) => validateAgentId(this.agentService, id)
         );
         this.branchStore = new BranchStore(this.sessionManager, this.errorHandler);
         this.branchService = new BranchService(this.sessionManager, this.branchStore);
         this.navDataBuilder = new NavDataBuilder(this.sessionManager);
+        this.fileSearchService = new FileSearchService(this.engine);
+        if (this.options.llmService) {
+            this.ocrService = new OcrService(this.options.llmService);
+        }
     }
 
     private async initComponents(): Promise<void> {
@@ -246,12 +252,22 @@ export class LLMWorkspaceEditor implements IEditor {
             bus: this.bus,
             nodeId: this.options.nodeId,
             ownerNodeId: this.options.ownerNodeId || this.options.nodeId,
-            // v3.3: HistoryView still expects IFSEngine shape; IChatEngine is compatible at runtime
             sessionEngine: this.options.sessionEngine as any,
             initialCollapseStates: this.stateManager.getCollapseStates(),
-            onScroll: () => this.updateActiveSessionHighlight(),
+            onScroll: () => this.navigation.updateActiveSessionHighlight(),
         });
         this.historyView = historyView;
+
+        // Create NavigationHelper now that historyView is available
+        this.navigation = new NavigationHelper({
+            domCache: this.domCache,
+            sessionManager: this.sessionManager,
+            historyView: this.historyView,
+            bus: this.bus,
+            branchStore: this.branchStore,
+            navDataBuilder: this.navDataBuilder,
+            timers: this.timers,
+        });
 
         // BranchIndicator → IBranchPresenter
         this.branchIndicator = new BranchIndicatorView(
@@ -264,10 +280,10 @@ export class LLMWorkspaceEditor implements IEditor {
             (loading) => this.chatInput?.setLoading(loading)
         );
 
-        const initialAgents = await this.buildExecutorOptions();
+        const initialAgents = await buildExecutorOptions(this.agentService);
         const savedUIState = await this.stateManager.loadUIState();
         const savedAgentId = savedUIState?.input_agent_id || 'default';
-        const validAgentId = this.validateAgentId(savedAgentId);
+        const validAgentId = validateAgentId(this.agentService, savedAgentId);
 
         let initialSettings;
         if (this.currentSessionId && !this.options.isNewSession) {
@@ -292,17 +308,15 @@ export class LLMWorkspaceEditor implements IEditor {
             },
             onConfigChange: (config) => this.handleConfigChange(config),
             onExecutorChange: () => this.bus.emit('state:inputChanged', {}),
-            onRequestConnections: () => this.buildConnectionOptions(),
+            onRequestConnections: () => buildConnectionOptions(this.agentService),
 
             // ── Harness callbacks (only wired when skill service is available) ──
-            ...this.buildHarnessCallbacks(harnessAdapter, harnessRuntime),
+            ...buildHarnessCallbacks(harnessAdapter, harnessRuntime),
 
             // ── @mention file reference ───────────────────────────────────────
-            onRequestFiles: async (query) => this.searchSessionFiles(query),
+            onRequestFiles: async (query) => this.fileSearchService.search(query),
 
             // ── OCR (image → text) — only when a one-shot LLM service is injected ─
-            // bootstrap is responsible for only passing llmService when the vision
-            // connection (conn-volcengine-vision) is actually configured.
             ...(this.options.llmService
                 ? { onOcrImage: (image: Blob) => this.ocrImage(image) }
                 : {}),
@@ -348,7 +362,7 @@ export class LLMWorkspaceEditor implements IEditor {
             branchStore: this.branchStore,
             getCurrentSessionId: () => this.currentSessionId,
             onContentChanged: () => this.emit('change'),
-            onNavRefresh: () => this.pushNavData(),
+            onNavRefresh: () => this.navigation.pushNavData(),
         });
     }
 
@@ -377,9 +391,9 @@ export class LLMWorkspaceEditor implements IEditor {
             onToggleSidebar: () => this.hostContext?.toggleSidebar(),
             onTitleChange: (title) => this.handleTitleChange(title),
             onOpenAssetManager: () => this.handleOpenAssetManager(),
-            onToggleNavigator: () => this.toggleNavigator(),
-            onPrevUnfolded: () => this.navigateUnfolded('prev'),
-            onNextUnfolded: () => this.navigateUnfolded('next'),
+            onToggleNavigator: () => this.navigation.toggleNavigator(this.container),
+            onPrevUnfolded: () => this.navigation.navigateUnfolded('prev'),
+            onNextUnfolded: () => this.navigation.navigateUnfolded('next'),
             onFoldCurrent: () => this.historyView.foldCurrentUnfolded(),
             onCollapseAll: () => this.handleToggleAllFold(),
             onCopy: () => this.handleCopy(),
@@ -389,11 +403,11 @@ export class LLMWorkspaceEditor implements IEditor {
         this.eventBinder.bindTitleBarEvents();
         this.eventBinder.bindNavigationEvents();
         this.eventBinder.bindGlobalShortcuts({
-            onToggleNavigator: () => this.toggleNavigator(),
-            onNavigatePrev: () => this.navigateToUserChat('prev'),
-            onNavigateNext: () => this.navigateToUserChat('next'),
+            onToggleNavigator: () => this.navigation.toggleNavigator(this.container),
+            onNavigatePrev: () => this.navigation.navigateToUserChat('prev'),
+            onNavigateNext: () => this.navigation.navigateToUserChat('next'),
             onCreateBranch: () => {
-                const id = this.findCurrentVisibleSession();
+                const id = this.navigation.findCurrentVisibleSession();
                 if (id) this.bus.emit('branch:create', { sourceNodeId: id });
             },
             onSwitchBranchPrev: () => this.switchBranchByOffsetCommand.run({
@@ -408,10 +422,7 @@ export class LLMWorkspaceEditor implements IEditor {
             (event) => this.sessionEventHandler.handleGlobalEvent(event)
         );
 
-        // Reactive: rebuild executor list whenever agent/connection data changes.
-        // VFSAgentService already propagates llmDriver.onChange internally, so a
-        // single subscription covers both agent and connection mutations.
-        this.agentServiceUnsub = this.options.agentService.onChange(() => this.refreshAgents());
+        this.agentServiceUnsub = this.agentService.onChange(() => this.refreshAgents());
     }
 
     // ================================================================
@@ -500,7 +511,6 @@ export class LLMWorkspaceEditor implements IEditor {
             const assetDirPath = await this.assetService.getAssetDirectoryId(ownerNodeId);
             if (!assetDirPath) { Toast.info('No attachments found'); return; }
 
-            // v3.3: AssetManagerUI expects IFSEngine; IChatEngine is compatible at runtime
             const ui = new AssetManagerUI(this.engine as any, null as any, {});
             await ui.show(assetDirPath);
         }, 'Open Asset Manager');
@@ -510,10 +520,6 @@ export class LLMWorkspaceEditor implements IEditor {
     // 会话加载
     // ================================================================
 
-    /**
-     * Reads ai_defaultAgent and ai_initialPrompt from the parent directory of the
-     * current node. Used to pre-configure new, empty chat sessions.
-     */
     private async readParentDirAIDefaults(): Promise<{ agentId?: string; text?: string } | undefined> {
         const nodeId = this.options.nodeId;
         if (!nodeId) return undefined;
@@ -551,15 +557,11 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.currentSessionId = sessionId;
         this.currentTitle = title;
-        // Reset token meter when switching sessions
         this.chatInput?.updateTokenStats?.(null);
         this.titleInput.value = title;
 
         const savedUIState = await this.stateManager.loadUIState();
 
-        // When the session is brand-new (no messages) and no explicit initialInputState was
-        // injected by the caller, inherit ai_defaultAgent / ai_initialPrompt from the
-        // containing directory so new chats start with the right agent and prompt preset.
         const emptySession = snapshot.sessions.length === 0;
         const effectiveInitialInputState = this.options.initialInputState
             ?? (emptySession ? await this.readParentDirAIDefaults() : undefined);
@@ -592,68 +594,14 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     // ================================================================
-    // Agent / Connection 辅助 — 替代已删除的 AgentLoader
+    // Agent / Connection 辅助 → 委托到 AgentProvider
     // ================================================================
-
-    /** 从 agentService 缓存异步构建 ExecutorOption 列表 */
-    private async buildExecutorOptions(): Promise<ExecutorOption[]> {
-        const agents = this.options.agentService.listAgents();
-        const connections = await this.options.agentService.getConnections();
-        const connMap = new Map(connections.map(c => [c.id, c]));
-
-        const seen = new Set<string>();
-        const options: ExecutorOption[] = [];
-
-        // Ensure 'default' exists — inject fallback when absent in VFS
-        if (!agents.some(a => a.id === 'default')) {
-            options.push({ id: 'default', name: 'Default Assistant', icon: '🤖', category: 'System' });
-            seen.add('default');
-        }
-
-        for (const agent of agents) {
-            if (seen.has(agent.id)) continue;
-            seen.add(agent.id);
-            const conn = agent.config?.connectionId ? connMap.get(agent.config.connectionId) : undefined;
-            options.push({
-                id: agent.id,
-                name: agent.name,
-                icon: agent.icon,
-                category: agent.type === 'agent' ? 'Agents' :
-                    agent.type === 'workflow' ? 'Workflows' : 'Other',
-                description: agent.description,
-                provider: conn?.providerId,
-                connectionName: conn?.name,
-                connectionId: agent.config?.connectionId,
-                defaultPrompts: agent.defaultPrompts,
-            });
-        }
-
-        return options;
-    }
-
-    /** agentId 合法性校验 — 缓存中不存在则 fallback 到 'default' */
-    private validateAgentId(id: string): string {
-        return this.options.agentService.findAgent(id) ? id : 'default';
-    }
-
-    /** 构建连接选项列表（过滤已禁用，供 ChatInput 连接选择器使用） */
-    private async buildConnectionOptions(): Promise<ConnectionOption[]> {
-        const connections = await this.options.agentService.getConnections();
-        return connections
-            .filter(c => c.enabled !== false)
-            .map(c => ({
-                id: c.id,
-                name: c.name,
-                provider: c.providerId,
-                hasTiers: !!(c.tiers?.standard || c.tiers?.fast),
-            }));
-    }
 
     private async refreshAgents(): Promise<void> {
         if (!this.chatInput) return;
         const changed = this.chatInput.refreshAgents(
-            await this.buildExecutorOptions(),
-            (id) => this.validateAgentId(id)
+            await buildExecutorOptions(this.agentService),
+            (id) => validateAgentId(this.agentService, id)
         );
         if (changed) {
             this.bus.emit('state:inputChanged', {});
@@ -661,143 +609,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     // ================================================================
-    // 导航
-    // ================================================================
-
-    private findCurrentVisibleSession(): string | null {
-        const historyEl = this.domCache.byId('llm-ui-history');
-        if (!historyEl) return null;
-
-        const rect = historyEl.getBoundingClientRect();
-        const viewLine = rect.top + rect.height * 0.4;
-        const sessions = historyEl.querySelectorAll('.llm-ui-session');
-
-        let closest: Element | null = null;
-        let minDist = Infinity;
-
-        for (const session of sessions) {
-            const r = session.getBoundingClientRect();
-            if (r.top <= viewLine && r.bottom >= viewLine) {
-                return (session as HTMLElement).dataset.sessionId || null;
-            }
-            const dist = Math.abs(r.top + r.height / 2 - viewLine);
-            if (dist < minDist) { minDist = dist; closest = session; }
-        }
-
-        return (closest as HTMLElement)?.dataset.sessionId || null;
-    }
-
-    private updateActiveSessionHighlight(): void {
-        const currentId = this.findCurrentVisibleSession();
-        if (!currentId) return;
-
-        const historyEl = this.domCache.byId('llm-ui-history');
-        if (!historyEl) return;
-
-        const prev = historyEl.querySelector('.llm-ui-session.is-active');
-        if (prev && (prev as HTMLElement).dataset.sessionId === currentId) return;
-        prev?.classList.remove('is-active');
-
-        const el = historyEl.querySelector(`[data-session-id="${currentId}"]`);
-        el?.classList.add('is-active');
-    }
-
-    private navigateToUserChat(direction: 'prev' | 'next'): void {
-        const sessions = this.sessionManager.getSessions();
-        const currentId = this.findCurrentVisibleSession();
-        if (!currentId) return;
-
-        const idx = sessions.findIndex(s => s.id === currentId);
-        const step = direction === 'prev' ? -1 : 1;
-
-        for (let i = idx + step; i >= 0 && i < sessions.length; i += step) {
-            if (sessions[i].role === 'user') {
-                this.bus.emit('nav:scrollTo', { sessionId: sessions[i].id });
-                return;
-            }
-        }
-    }
-
-    /**
-     * 导航到上/下一个 unfold chat
-     * 
-     * 统一使用 IHistoryPresenter.getUnfoldedNavigationTarget()，
-     * 与 foldCurrentUnfolded() 共享 CollapseController 的视口感知逻辑。
-     */
-    private navigateUnfolded(direction: 'prev' | 'next'): void {
-        const result = this.historyView.getUnfoldedNavigationTarget(direction);
-
-        if (result === '__end__') {
-            this.historyView.scrollToBottom(true);
-        } else if (result === '__start__') {
-            const historyEl = this.domCache.byId('llm-ui-history');
-            historyEl?.scrollTo({ top: 0, behavior: 'smooth' });
-        } else if (result) {
-            this.bus.emit('nav:scrollTo', { sessionId: result });
-        } else {
-            Toast.info(direction === 'prev'
-                ? 'No previous unfolded chat'
-                : 'Already at the last unfolded chat');
-        }
-    }
-
-    // ================================================================
-    // 浮动导航面板
-    // ================================================================
-
-    private pushNavData(): void {
-        if (!this.floatingNav?.isVisible) return;
-
-        if (this.navRefreshTimer !== null) {
-            this.timers.clearTimeout(this.navRefreshTimer);
-        }
-
-        this.navRefreshTimer = this.timers.setTimeout(async () => {
-            this.navRefreshTimer = null;
-            if (!this.floatingNav?.isVisible) return;
-
-            const data = await this.buildNavData();
-            this.floatingNav.update(data);
-        }, 50);
-    }
-
-    private async pushNavDataImmediate(): Promise<void> {
-        if (!this.floatingNav) return;
-
-        if (this.navRefreshTimer !== null) {
-            this.timers.clearTimeout(this.navRefreshTimer);
-            this.navRefreshTimer = null;
-        }
-
-        const data = await this.buildNavData();
-        this.floatingNav.update(data);
-    }
-
-    private async buildNavData(): Promise<NavPanelData> {
-        return this.navDataBuilder.build(
-            this.sessionManager.getSessions(),
-            (this.historyView as HistoryView).getCollapseStates(),
-            this.branchStore.current,
-            this.findCurrentVisibleSession() ?? undefined
-        );
-    }
-
-    private async toggleNavigator(): Promise<void> {
-        if (!this.floatingNav) {
-            this.floatingNav = new FloatingNavPanel(
-                this.container, this.bus as EditorEventBus
-            );
-        }
-
-        if (!this.floatingNav.isVisible) {
-            await this.pushNavDataImmediate();
-        }
-
-        this.floatingNav.toggle();
-    }
-
-    // ================================================================
-    // UI 辅助 — 仅限 Shell 自身需要的 DOM 操作
+    // UI 辅助
     // ================================================================
 
     private updateCollapseButtonIcon(isAllCollapsed?: boolean): void {
@@ -891,51 +703,9 @@ export class LLMWorkspaceEditor implements IEditor {
     // 插件注册
     // ================================================================
 
-    /**
-     * Skill 回调：仅在 HarnessAdapter 含 SkillService 时注入。
-     *
-     * onRequestSkills  — 返回所有 Skill 含 loaded 状态（供设置面板渲染）
-     * onLoadSkill      — 加载 Skill：向 ToolService 注册工具，注入 system prompt
-     * onUnloadSkill    — 卸载 Skill
-     */
-    private buildHarnessCallbacks(
-        adapter: import('@itookit/llm-engine').HarnessAdapter | null,
-        runtime: import('@itookit/common').IAgentRuntime | undefined,
-    ): Partial<import('../components/input/ChatInputView').ChatInputOptions> {
-        const skillSvc = adapter?.getSkillService();
-        if (!skillSvc || !runtime) return {};
-
-        return {
-            onRequestSkills: async () => {
-                const session = runtime.getCurrentSession();
-                const loadedIds = new Set(session?.loadedSkills ?? []);
-                return skillSvc.listSkills().map((s) => ({
-                    id: s.id,
-                    name: s.name,
-                    description: s.description,
-                    loaded: loadedIds.has(s.id),
-                    enabled: s.enabled,
-                    toolCount: s.tools?.length ?? 0,
-                    icon: s.icon,
-                }));
-            },
-
-            onLoadSkill: async (skillId) => {
-                const result = await skillSvc.loadSkill(skillId);
-                return result.toolIds;
-            },
-
-            onUnloadSkill: async (skillId) => {
-                await skillSvc.unloadSkill(skillId);
-            },
-        };
-    }
-
     private registerInputPlugins(): void {
         const chatInput = this.chatInput as ChatInput;
 
-        // HarnessPlugin — must be registered first (lowest priority number)
-        // so its status bar appears above other plugin UI.
         const harnessAdapter = getHarnessAdapter();
         const harnessRuntime = harnessAdapter?.getRuntime() ?? undefined;
         this.harnessPlugin = new HarnessPlugin(harnessRuntime);
@@ -943,7 +713,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // Q1: Wire plan-confirm intercept when harness runtime is available.
         if (harnessRuntime) {
-            this.wirePlanConfirmIntercept(harnessRuntime);
+            wirePlanConfirmIntercept(harnessRuntime);
         }
 
         // Wire harness runtime into HistoryView so TtyController can call ttyWrite().
@@ -955,654 +725,43 @@ export class LLMWorkspaceEditor implements IEditor {
             chatInput.registerPlugin(this.historyPlugin);
         }
 
-        this.slashPlugin = new SlashCommandPlugin(this.buildSlashCallbacks());
+        this.slashPlugin = new SlashCommandPlugin(
+            buildSlashCallbacks({
+                sessionManager: this.sessionManager,
+                chatInput: this.chatInput,
+                bus: this.bus,
+                historyView: this.historyView,
+                nodeCommands: this.nodeCommands,
+                branchStore: this.branchStore,
+                branchService: this.branchService,
+                domCache: this.domCache,
+                hostContext: this.hostContext,
+                sendCommand: this.sendCommand,
+                switchBranchByOffsetCommand: this.switchBranchByOffsetCommand,
+                agentService: this.agentService,
+                _sessionEngine: this.engine,
+                handleCopy: () => this.handleCopy(),
+                handlePrint: () => this.handlePrint(),
+                toggleNavigator: () => this.navigation.toggleNavigator(this.container),
+                findCurrentVisibleSession: () => this.navigation.findCurrentVisibleSession(),
+                updateCollapseButtonIcon: (isAllCollapsed) => this.updateCollapseButtonIcon(isAllCollapsed),
+            })
+        );
         chatInput.registerPlugin(this.slashPlugin);
-    }
-
-    private buildSlashCallbacks(): SlashCommandCallbacks {
-        return {
-            // ── Common ──────────────────────────────────────────
-
-            onNew: (args: string) => {
-                const agentId = this.chatInput.getConfig().agentId;
-                const title = args.trim() || this.formatDefaultTitle(agentId);
-
-                if (!this.hostContext?.navigate) {
-                    Toast.info('Navigation not available in this context');
-                    return;
-                }
-
-                sessionStorage.setItem('app_create_params', JSON.stringify({
-                    target: 'chat',
-                    state: { agentId: agentId !== 'default' ? agentId : undefined },
-                    create: { title },
-                    agentId: agentId !== 'default' ? agentId : undefined,
-                    title,
-                    timestamp: Date.now(),
-                }));
-
-                this.hostContext.navigate({
-                    target: 'chat',
-                    action: 'create',
-                    create: { title },
-                    state: {
-                        agentId: agentId !== 'default' ? agentId : undefined,
-                    },
-                });
-            },
-
-            onRetry: () => {
-                const sessions = this.sessionManager.getSessions();
-                const lastAssistant = [...sessions].reverse()
-                    .find(s => s.role === 'assistant');
-                if (lastAssistant) {
-                    const cmd = this.nodeCommands.get('regenerate');
-                    cmd?.run({ nodeId: lastAssistant.id });
-                }
-            },
-
-            onContinue: () => {
-                this.sendFollowUp('Please continue from where you left off.');
-            },
-
-            onReedit: async () => {
-                const sessions = this.sessionManager.getSessions();
-                if (sessions.length === 0) {
-                    Toast.info('No messages to reedit');
-                    return;
-                }
-
-                const lastUser = [...sessions].reverse().find(s => s.role === 'user');
-                if (!lastUser) {
-                    Toast.info('No user message found');
-                    return;
-                }
-
-                const originalText = lastUser.content || '';
-                const cmd = this.nodeCommands.get('delete');
-                if (cmd) {
-                    await cmd.run({ nodeId: lastUser.id });
-                }
-                this.chatInput.restoreInput(originalText);
-            },
-
-            onDeleteLast: async () => {
-                const sessions = this.sessionManager.getSessions();
-                if (sessions.length === 0) {
-                    Toast.info('No messages to delete');
-                    return;
-                }
-
-                const lastUser = [...sessions].reverse().find(s => s.role === 'user');
-                if (!lastUser) {
-                    Toast.info('No user message found');
-                    return;
-                }
-
-                const confirmed = await showConfirmDialog(
-                    'Delete last user message and its responses?'
-                );
-                if (!confirmed) return;
-
-                const cmd = this.nodeCommands.get('delete');
-                cmd?.run({ nodeId: lastUser.id });
-            },
-
-            onClear: async () => {
-                const sessions = this.sessionManager.getSessions();
-                if (sessions.length === 0) return;
-
-                const confirmed = await showConfirmDialog(
-                    'Clear all messages in this conversation?'
-                );
-                if (!confirmed) return;
-
-                const ids = sessions.map(s => s.id);
-                this.bus.emit('batch:delete', { ids });
-            },
-
-            // ── Refine ──────────────────────────────────────────
-
-            onShorter: () => {
-                this.sendFollowUp(
-                    'Please make your last response more concise and to the point. Keep only the essential information.'
-                );
-            },
-
-            onLonger: () => {
-                this.sendFollowUp(
-                    'Please elaborate on your last response with more details, examples, and explanations.'
-                );
-            },
-
-            onSimplify: () => {
-                this.sendFollowUp(
-                    'Please explain your last response in simpler terms, as if explaining to someone unfamiliar with the topic.'
-                );
-            },
-
-            onSummarize: () => {
-                this.sendFollowUp(
-                    'Please provide a concise summary of our entire conversation so far, highlighting the key points and conclusions.'
-                );
-            },
-
-            // ── Context ─────────────────────────────────────────
-
-            onHistory: (length: string) => {
-                const value = parseInt(length, 10);
-                if (isNaN(value)) {
-                    Toast.error('Usage: /history <number>  (-1 = unlimited, 0 = none)');
-                    return;
-                }
-                this.chatInput.setConfig({
-                    settings: { historyLength: value },
-                });
-                this.bus.emit('state:inputChanged', {});
-
-                const label = value === -1 ? 'unlimited'
-                    : value === 0 ? 'none'
-                    : `${value} messages`;
-                Toast.info(`History context set to ${label}`);
-            },
-
-            onFresh: () => {
-                this.chatInput.setConfig({
-                    settings: { historyLength: 0 },
-                });
-                this.bus.emit('state:inputChanged', {});
-                Toast.info('Next message will be sent without history context');
-            },
-
-            // ── View ────────────────────────────────────────────
-
-            onFoldCurrent: () => {
-                this.historyView.foldCurrentUnfolded();
-            },
-
-            onFoldAll: () => {
-                this.historyView.setAllCollapsed(true);
-                this.bus.emit('state:collapseChanged', {
-                    states: (this.historyView as HistoryView).getCollapseStates(),
-                });
-                this.updateCollapseButtonIcon(true);
-            },
-
-            onUnfoldAll: () => {
-                this.historyView.setAllCollapsed(false);
-                this.bus.emit('state:collapseChanged', {
-                    states: (this.historyView as HistoryView).getCollapseStates(),
-                });
-                this.updateCollapseButtonIcon(false);
-            },
-
-            onTop: () => {
-                const historyEl = this.domCache.byId('llm-ui-history');
-                historyEl?.scrollTo({ top: 0, behavior: 'smooth' });
-            },
-
-            onBottom: () => {
-                this.historyView.scrollToBottom(true);
-            },
-
-            onNav: () => {
-                this.toggleNavigator();
-            },
-
-            // ── Tools ───────────────────────────────────────────
-
-            onExport: async () => {
-                await this.handleCopy();
-                Toast.success('Conversation copied as Markdown');
-            },
-
-            onCopyAll: () => this.handleCopy(),
-            onPrint: () => this.handlePrint(),
-
-            // ── Branch ──────────────────────────────────────────
-
-            onCreateBranch: () => {
-                const id = this.findCurrentVisibleSession();
-                if (id) this.bus.emit('branch:create', { sourceNodeId: id });
-            },
-
-            onSwitchBranch: (name: string) => {
-                // Fuzzy match for good UX (shows available branches on miss)
-                const branches = this.branchStore.current;
-                const target = branches.find(
-                    b => b.name.toLowerCase() === name.toLowerCase()
-                );
-                if (!target) {
-                    const available = branches.map(b => b.name).join(', ');
-                    Toast.error(`Branch "${name}" not found. Available: ${available}`);
-                    return;
-                }
-                this.bus.emit('branch:switch', { branchName: target.name });
-            },
-
-            onBranchPrev: () => {
-                this.switchBranchByOffsetCommand.run({
-                    offset: -1,
-                    cachedBranches: this.branchStore.current,
-                });
-            },
-
-            onBranchNext: () => {
-                this.switchBranchByOffsetCommand.run({
-                    offset: 1,
-                    cachedBranches: this.branchStore.current,
-                });
-            },
-
-            onListBranches: () => {
-                const branches = this.branchService.list;
-                if (branches.length <= 1) {
-                    Toast.info('Only one branch: main');
-                    return;
-                }
-                const list = branches.map((b, i) => {
-                    const marker = b.isCurrent ? '→ ' : '  ';
-                    return `${marker}${i + 1}. ${b.name}`;
-                }).join('\n');
-                Toast.info(`Branches (${branches.length}):\n${list}`);
-            },
-
-            onRenameBranch: (args: string) => {
-                const parts = args.trim().split(/\s+/);
-                if (parts.length < 2) {
-                    Toast.error('Usage: /renamebranch <old-name> <new-name>');
-                    return;
-                }
-                // Validation (branch exists, name non-empty) now in BranchService
-                this.bus.emit('branch:rename', { oldName: parts[0], newName: parts[1] });
-            },
-
-            onDeleteBranch: (name: string) => {
-                // Validation (branch exists, not current) now in BranchService → Command
-                this.bus.emit('branch:delete', { branchName: name });
-            },
-
-            // ── Settings ────────────────────────────────────────
-
-            onSwitchAgent: (agentId: string) => {
-                this.chatInput.setConfig({ agentId });
-                this.bus.emit('state:inputChanged', {});
-            },
-
-            onModel: (modelId: string) => {
-                this.chatInput.setConfig({
-                    settings: { modelId },
-                });
-                this.bus.emit('state:inputChanged', {});
-                Toast.info(`Model switched to ${modelId}`);
-            },
-
-            // ── Help ────────────────────────────────────────────
-
-            onHelp: () => {
-                // Open the inline help panel inside ChatInput
-                this.chatInput.showHelp?.();
-            },
-
-            // ── Harness: Skills ──────────────────────────────────────────────
-            ...this.buildHarnessSlashCallbacks(),
-        };
-    }
-
-    /**
-     * Harness slash 命令回调（仅在 harness 可用时注入）。
-     *
-     * onSkill  — `/skill docker` → 加载 Skill（注册工具 + 注入 system prompt）
-     * onSkills — `/skills`       → 打开设置面板的 Skill 选项卡
-     * onTools  — `/tools`        → 展示当前会话已注册的工具列表
-     */
-    private buildHarnessSlashCallbacks(): Partial<SlashCommandCallbacks> {
-        const skillSvc = getHarnessAdapter()?.getSkillService();
-        if (!skillSvc) return {};
-
-        const toolSvc  = getHarnessAdapter()?.getToolService();
-        const runtime  = getHarnessAdapter()?.getRuntime();
-
-        return {
-            // ── Load-only (existing behavior for /skill <id>) ─────────────────
-            onSkill: async (skillId: string) => {
-                const result = await skillSvc.loadSkill(skillId);
-                if (result.success) {
-                    Toast.success(`Skill "${skillId}" loaded (${result.toolIds.length} tools)`);
-                    const skills = skillSvc.listSkills().map((s) => ({
-                        id: s.id, name: s.name, description: s.description,
-                        loaded: s.id === skillId, toolCount: s.tools?.length ?? 0, icon: s.icon,
-                    }));
-                    (this.chatInput as ChatInput & { refreshSkills?: (s: unknown[]) => void }).refreshSkills?.(skills);
-                } else {
-                    Toast.error(`Failed to load skill "${skillId}": ${result.error ?? 'unknown error'}`);
-                }
-            },
-
-            onSkills: () => {
-                const skills = skillSvc.listSkills();
-                if (skills.length === 0) {
-                    Toast.info('没有可用的 Skill。请前往 Settings → Skills 添加。');
-                    return;
-                }
-                // Open the ChatInput settings panel (contains the skill picker).
-                const settingsBtn = document.querySelector('.llm-input__btn--settings') as HTMLButtonElement | null;
-                if (settingsBtn) {
-                    settingsBtn.click();
-                } else {
-                    // Fallback: show skill list as toast if panel unavailable.
-                    const names = skills.map((s) => `${s.icon ?? '⚡'} ${s.name}`).join('\n');
-                    Toast.info(`可用 Skills (${skills.length}):\n${names}\n\n使用 /skill <id> 加载`);
-                }
-            },
-
-            onTools: () => {
-                const tools = skillSvc.listSkills()
-                    .filter((s) => s.enabled)
-                    .flatMap((s) => s.tools.map((t) => `${t.toolId} (${s.name})`));
-                const toolService = (getHarnessAdapter() as unknown as {
-                    toolService?: { listTools(): Array<{ id: string }> }
-                })?.toolService;
-                const builtinTools = toolService?.listTools().map((t) => t.id) ??
-                    ['file_read', 'file_write', 'shell_exec', 'glob_search', 'grep_search'];
-                Toast.info(`Available tools:\n${builtinTools.concat(tools).join('\n  ')}`);
-            },
-
-            // ── Dynamic skill list for slash popup ─────────────────────────────
-            getSkills: () => {
-                const session = runtime?.getCurrentSession();
-                const loadedIds = new Set(session?.loadedSkills ?? []);
-                return skillSvc.listSkills().map((s) => ({
-                    id: s.id,
-                    name: s.name,
-                    description: s.description,
-                    loaded: loadedIds.has(s.id),
-                    enabled: s.enabled,
-                    toolCount: s.tools?.length ?? 0,
-                    icon: s.icon,
-                }));
-            },
-
-            // ── Parameterized skill invocation (/skillname @file --arg text) ───
-            onSkillInvoke: async (invocation: SkillInvocation) => {
-                await this.executeSkillInvocation(invocation, skillSvc);
-            },
-
-            // ── Direct tool invocation (/exec /read /grep /glob) ─────────────
-            // Bypasses the LLM: calls toolService.invoke() directly and shows
-            // the result in a Modal — no agent round-trip needed.
-            ...(toolSvc ? {
-                // displayCmd = the original "/read src/index.ts" string from the slash command.
-                onToolInvoke: async (toolId: string, args: Record<string, unknown>, displayCmd: string) => {
-                    const cwd = this.chatInput.getConfig()?.settings?.workingDirectory || undefined;
-                    this.chatInput.showToolOutput?.(displayCmd, '⏳ Running…', true);
-                    const result = await toolSvc.invoke({ toolId, args, cwd });
-                    this.chatInput.showToolOutput?.(displayCmd, result.output, result.success);
-                },
-            } : {}),
-
-            // ── Session Graph commands ────────────────────────────────────────
-            // Available when harness runtime is connected.
-            ...(runtime ? this.buildSessionGraphCallbacks(runtime) : {}),
-        };
-    }
-
-    private buildSessionGraphCallbacks(
-        runtime: import('@itookit/common').IAgentRuntime,
-    ): Partial<SlashCommandCallbacks> {
-        // Session graph slash commands are registered as additional harness commands.
-        // They are handled via onToolInvoke with synthetic tool IDs.
-        // The slash command definitions live in SlashCommandPlugin.buildHarnessCommands().
-        // Here we just need to expose an onSessionGraph callback for routing.
-        // For now, session-run is wired through the existing onToolInvoke extension point.
-        void runtime;  // referenced for future graph-aware routing
-        return {};
-    }
-
-    // showToolResultModal removed — output is now shown inline via chatInput.showToolOutput()
-
-    // ── Q2: Interrupted session recovery ────────────────────────────────────
-
-    private checkInterruptedSessions(): void {
-        // Q2: Dynamically import session-store to check for interrupted sessions.
-        // This avoids a hard dependency on llm-harness in the llm-ui package.
-        try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const store = (globalThis as any)['localStorage'];
-            if (!store) return;
-            const interrupted: Array<{ sessionId: string; task: { prompt: string } }> = [];
-            for (let i = 0; i < store.length; i++) {
-                const k: string = store.key(i) ?? '';
-                if (!k.startsWith('harness:session:')) continue;
-                try {
-                    const p = JSON.parse(store.getItem(k)) as { status: string; sessionId: string; task: { prompt: string } };
-                    if (p.status === 'running') interrupted.push(p);
-                } catch { /* skip */ }
-            }
-            if (interrupted.length === 0) return;
-            const latest = interrupted[0];
-            const preview = latest.task.prompt.slice(0, 80);
-            Toast.action(
-                `上次有未完成的 Agent 任务: "${preview}"`,
-                '重新执行',
-                () => {
-                    const runtime = getHarnessAdapter()?.getRuntime();
-                    if (!runtime) { Toast.error('需要先开启 Agent Mode'); return; }
-                    runtime.resumeSession(latest.sessionId).catch(() => {
-                        Toast.info('旧任务将重新运行，请确保 Agent Mode 已开启');
-                    });
-                },
-            );
-        } catch { /* localStorage not available */ }
     }
 
     // ── Q3: Mid-execution user injection ─────────────────────────────────────
 
-    /**
-     * Called when the user sends a message while harness is running.
-     * Instead of rejecting with SESSION_BUSY, inject the message into the
-     * running harness so the Agent sees it on the next loop iteration.
-     */
     injectIntoRunningHarness(message: string): boolean {
-        const runtime = getHarnessAdapter()?.getRuntime();
-        const session = runtime?.getCurrentSession();
-        if (!session || session.status !== 'running') return false;
-        runtime!.inject(message);
-        Toast.info('已注入指令 — Agent 将在下一轮感知到');
-        return true;
+        return injectIntoRunningHarness(getHarnessAdapter, message);
     }
 
-    // ── Q1: Plan confirm intercept ───────────────────────────────────────────
-    // Wired in registerInputPlugins() when harness runtime is available.
+    // ================================================================
+    // 文件搜索 / OCR → 委托到专用 Service
+    // ================================================================
 
-    private wirePlanConfirmIntercept(runtime: import('@itookit/common').IAgentRuntime): () => void {
-        return runtime.onIntercept('agent:plan:confirm', (payload) => {
-            const toolList = payload.plannedTools
-                .map((t) => `• ${t.name}(${JSON.stringify(t.args).slice(0, 60)})`)
-                .join('\n');
-            return new Promise<boolean | string>((resolve) => {
-                // Modal.confirm(title, body, onConfirm) — simple 3-arg form
-                Modal.confirm(
-                    'Plan 确认',
-                    `Agent 计划执行以下操作:\n${toolList}\n\n点击"确认"批准执行，或关闭取消任务。`,
-                    () => resolve(true),
-                );
-                // No cancel hook in the simple Modal.confirm — resolve false on timeout
-                setTimeout(() => resolve(false), 120_000);
-            });
-        });
-    }
-
-    /**
-     * Execute a skill invocation with file resolution, glob expansion,
-     * missing-arg wizard, and prompt building.
-     */
-    private async executeSkillInvocation(
-        invocation: SkillInvocation,
-        skillSvc: import('@itookit/common').ISkillService,
-    ): Promise<void> {
-        const skill = skillSvc.getSkill(invocation.skillId);
-
-        // 1. Load the skill if not already loaded
-        if (skill) {
-            const result = await skillSvc.loadSkill(invocation.skillId);
-            if (!result.success) {
-                Toast.error(`Failed to load skill "${invocation.skillId}": ${result.error}`);
-                return;
-            }
-        } else {
-            Toast.error(`Skill "${invocation.skillId}" not found. Use /skills to browse available skills.`);
-            return;
-        }
-
-        // 2. Check for missing required params (shell skills with {{placeholder}} templates)
-        if (skill.type === 'shell') {
-            const shellCmd = skill.tools.find((t) => t.executionType === 'shell' && t.command)?.command;
-            if (shellCmd) {
-                const required = getShellTemplateParams(shellCmd);
-                const missing = getMissingParams(required, invocation.args);
-                if (missing.length > 0) {
-                    const refill = buildWizardRefill(invocation, missing);
-                    this.chatInput.restoreInput(refill);
-                    this.chatInput.focus();
-                    Toast.error(
-                        `Missing: ${missing.map(m => `--${m}`).join(', ')} — fill blanks (___) and press Enter.`,
-                    );
-                    return;
-                }
-            }
-        }
-
-        // 3. Expand glob patterns → resolve to concrete file paths
-        let resolvedFilePaths = [...invocation.filePaths];
-        if (invocation.globPatterns.length > 0) {
-            const engine = this.options.sessionEngine;
-            for (const pattern of invocation.globPatterns) {
-                try {
-                    const results = await engine.search({ text: pattern, type: 'file', limit: 50 });
-                    const paths = results
-                        .filter((n) => n.type === 'file')
-                        .map((n) => n.path.startsWith('/') ? `.${n.path}` : `./${n.path}`);
-                    resolvedFilePaths = [...resolvedFilePaths, ...paths];
-                } catch { /* ignore, best-effort */ }
-            }
-        }
-
-        // 4. Build the prompt for the agent
-        const fullInvocation = { ...invocation, filePaths: resolvedFilePaths };
-        const prompt = buildSkillPrompt(fullInvocation, skill.name, skill.type);
-
-        // 5. Send (AttachmentProcessor resolves [name](path) markdown links)
-        // Skill invocations always run via harness — tools, HITL and TTY require the agent loop.
-        const agentId = this.chatInput.getConfig().agentId;
-        const overrides = {
-            useHarness: true,
-            workingDirectory: this.chatInput.getConfig().settings.workingDirectory || undefined,
-        };
-
-        await this.sendCommand.run({ text: prompt, files: [], agentId, overrides });
-    }
-
-    /**
-     * 搜索当前会话模块的文件，供 `@` mention 使用。
-     *
-     * 通过 IFSEngine.loadTree() 获取文件节点列表，
-     * 按 query 模糊筛选文件名和路径后返回 FileSuggestion[]。
-     *
-     * 返回的 path 格式为 `./relative/path`，
-     * AttachmentProcessor 发送时会解析并附加文件内容。
-     */
-    private async searchSessionFiles(query: string): Promise<import('../domain/types').FileSuggestion[]> {
-        try {
-            const engine = this.options.sessionEngine;
-            // Use search() to find file nodes matching the query
-            const results = await engine.search({
-                text: query || undefined,
-                type: 'file',
-                limit: 20,
-            });
-
-            return results
-                .filter((n) => n.type === 'file')
-                .map((n) => ({
-                    name: n.name,
-                    path: n.path.startsWith('/') ? `.${n.path}` : `./${n.path}`,
-                    mimeType: guessMimeTypeFromName(n.name),
-                    size: n.size,
-                }));
-        } catch {
-            return [];
-        }
-    }
-
-    /**
-     * 对图片做 OCR(图片转文字),返回 Markdown。
-     *
-     * 使用组合根注入的一次性 ILLMService 调用视觉连接
-     * (conn-volcengine-vision),不创建会话/任务。
-     */
     private async ocrImage(image: Blob): Promise<string> {
-        const llm = this.options.llmService;
-        if (!llm) {
-            throw new Error('OCR service unavailable');
-        }
-        const resp = await llm.chat(OCR_CONNECTION_ID, {
-            messages: [{
-                role: 'user',
-                content: '将图片中的内容忠实转换为 Markdown:保留标题、列表、表格等结构;数学公式用 LaTeX($$ 包裹);只输出内容本身,不要添加任何解释或说明。',
-                attachments: [{
-                    type: 'image',
-                    source: image,
-                    mimeType: (image as { type?: string }).type || 'image/jpeg',
-                }],
-            }],
-            maxTokens: 4096,
-        });
-        return resp.choices?.[0]?.message?.content ?? '';
-    }
-
-    /**
-     * 发送跟进消息（用于 /shorter /longer /simplify /summarize /continue）
-     *
-     * 复用 SendMessageCommand，保持与正常发送完全一致的流程。
-     */
-    private sendFollowUp(text: string): void {
-        const config  = this.chatInput.getConfig();
-        const agentId = config.agentId;
-        // Preserve harness/workingDirectory overrides so /continue /shorter etc.
-        // honour the current harness toggle instead of silently using the kernel path.
-        const overrides = config.settings?.useHarness
-            ? { useHarness: true as const, workingDirectory: config.settings.workingDirectory }
-            : undefined;
-        this.sendCommand.run({ text, files: [], agentId, overrides });
-    }
-
-    /**
-     * 生成默认会话标题：YYYY-MM-DD HH:mm agentName
-     */
-    private formatDefaultTitle(agentId: string): string {
-        const base = formatDefaultFileTitle();
-        const agentName = this.sanitizeFileName(this.getAgentDisplayName(agentId));
-        return `${base}_${agentName}`;
-    }
-
-    /**
-     * 获取 agent 的可读显示名称
-     */
-    private getAgentDisplayName(agentId: string): string {
-        const agent = this.options.agentService.findAgent(agentId);
-        return agent?.name || agentId;
-    }
-
-    /**
-     * 清理文件名中的非法字符
-     */
-    private sanitizeFileName(name: string): string {
-        return name
-            .replace(/[\/\\:*?"<>|]/g, '')  // 移除路径非法字符
-            .replace(/\s+/g, '-')            // 空格 → 连字符
-            .replace(/-+/g, '-')             // 合并连续连字符
-            .replace(/^-|-$/g, '');          // 去除首尾连字符
+        return this.ocrService.ocr(image);
     }
 
     // ================================================================
@@ -1633,14 +792,13 @@ export class LLMWorkspaceEditor implements IEditor {
         this.eventBinder?.cleanup();
         this.commandRegistry?.destroy();
 
-        // 4. 浮动组件
-        this.floatingNav?.destroy();
-        this.floatingNav = null;
+        // 4. 导航子模块
+        this.navigation?.destroy();
 
         // 5. 基础设施
         this.timers.destroy();
 
-        // 6. 插件清理（在 UI 组件之前）
+        // 6. 插件清理
         this.historyPlugin?.deactivate();
         this.slashPlugin?.deactivate();
         this.historyPlugin = null;

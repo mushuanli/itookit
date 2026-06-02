@@ -1,6 +1,8 @@
-// @file: llm-ui/components/navigation/FloatingNavPanel.ts
+// @file: llm-ui/components/FloatingNavPanel.ts
 
 import type { INavigationPresenter, NavPanelData, ChatNavItem } from '../domain/ports/INavigationPresenter';
+import { formatTime } from '../utils/timeUtils';
+import { IconTemplates } from './templates/IconTemplates';
 import type { IEditorEventBus } from '../domain/events';
 import type { BranchItem } from '../domain/types';
 import { EventCleanup, TimerManager } from './common';
@@ -417,7 +419,7 @@ export class FloatingNavPanel implements INavigationPresenter {
         return this.filteredItems.map((item, idx) => {
             const isActive = idx === this.currentIndex;
             const isSelected = this.selectedIds.has(item.id);
-            const timeStr = this.formatTime(item.timestamp);
+            const timeStr = formatTime(item.timestamp);
             const title = item.role === 'user'
                 ? 'You'
                 : (item.agentName || 'Assistant');
@@ -487,7 +489,7 @@ export class FloatingNavPanel implements INavigationPresenter {
 
         const chevron = this.panel?.querySelector('.llm-nav-panel__branch-chevron');
         if (chevron) {
-            chevron.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+            chevron.innerHTML = IconTemplates.chevronUp;
         }
 
         // "All" 选项
@@ -562,7 +564,7 @@ export class FloatingNavPanel implements INavigationPresenter {
 
         const chevron = this.panel?.querySelector('.llm-nav-panel__branch-chevron');
         if (chevron) {
-            chevron.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+            chevron.innerHTML = IconTemplates.chevronDown;
         }
     }
 
@@ -795,21 +797,6 @@ export class FloatingNavPanel implements INavigationPresenter {
         itemEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
-    // ================================================================
-    // 工具
-    // ================================================================
-
-    private formatTime(timestamp: number): string {
-        const date = new Date(timestamp);
-        const now = new Date();
-        const isToday = date.toDateString() === now.toDateString();
-
-        if (isToday) {
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        }
-        return date.toLocaleDateString([], {
-            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-        });
-    }
+    // formatTime moved to utils/timeUtils.ts
 
 }

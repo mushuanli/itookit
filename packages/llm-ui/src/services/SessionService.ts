@@ -101,8 +101,20 @@ export class SessionService {
 
     /**
      * 保存会话设置
+     *
+     * FSAlreadyExistsError is expected — the settings.yaml file is created
+     * during session initialization and the engine may attempt to re-create
+     * it on each save. We silently ignore this; the settings write succeeds
+     * regardless (the file already exists and will be updated in-place).
      */
     async saveSessionSettings(settings: any): Promise<void> {
-        await this.sessionManager.saveSessionSettings(settings);
+        try {
+            await this.sessionManager.saveSessionSettings(settings);
+        } catch (e) {
+            if (e instanceof FSAlreadyExistsError) {
+                return; // settings.yaml already exists — normal for initialized sessions
+            }
+            throw e;
+        }
     }
 }

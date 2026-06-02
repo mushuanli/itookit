@@ -1,4 +1,4 @@
-// @file: llm-ui/views/templates/LayoutTemplates.ts
+// @file: llm-ui/components/templates/LayoutTemplates.ts
 import { escapeHTML } from '@itookit/common';
 
 export const LayoutTemplates = {
@@ -123,11 +123,8 @@ export const LayoutTemplates = {
         </svg>`;
     },
 
-    chevronDown: () => {
-        return '<polyline points="6 9 12 15 18 9"></polyline>';
-    },
-
-    chevronUp: () => {
-        return '<polyline points="18 15 12 9 6 15"></polyline>';
-    }
+    chevronDown: () => IconTemplates.chevronDown,
+    chevronUp:   () => IconTemplates.chevronUp,
 };
+
+import { IconTemplates } from './IconTemplates';

@@ -5,7 +5,7 @@ import type { IEditorEventBus } from '../../domain/events';
 import type { DOMCache } from '../common';
 import { EventCleanup, TimerManager } from '../common';
 import { BranchIndicatorTemplates } from '../templates/BranchIndicatorTemplates';
-import type { BranchStore } from '../../services/BranchStore';
+import type { IBranchStore } from '../../domain/ports/IBranchStore';
 
 /**
  * 实现 IBranchPresenter
@@ -21,7 +21,7 @@ export class BranchIndicatorView implements IBranchPresenter {
     constructor(
         private domCache: DOMCache,
         private bus: IEditorEventBus,
-        private branchStore: BranchStore
+        private branchStore: IBranchStore
     ) {
         this.unsub = this.branchStore.onChange(() => this.render());
     }

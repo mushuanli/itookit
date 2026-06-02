@@ -1,4 +1,4 @@
-// @file: llm-ui/views/templates/ChatInputTemplates.ts
+// @file: llm-ui/components/templates/ChatInputTemplates.ts
 
 import { escapeHTML, t, ENTITY_ICONS, ACTION_ICONS } from '@itookit/common';
 import { ExecutorOption, ConnectionOption } from '../../domain/types';

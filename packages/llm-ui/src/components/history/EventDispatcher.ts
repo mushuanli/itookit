@@ -1,7 +1,6 @@
-// @file: llm-ui/views/history/EventDispatcher.ts
+// @file: llm-ui/components/history/EventDispatcher.ts
 
-import { EventCleanup } from '../common/EventCleanup';
-import { TimerManager } from '../common/TimerManager';
+import { EventCleanup, TimerManager } from '../common';
 import { showConfirmDialog } from '@itookit/common';
 import type { SessionRenderer } from './SessionRenderer';
 import type { StreamController } from './StreamController';
@@ -92,7 +91,7 @@ export class EventDispatcher {
             });
         });
 
-        // ✅ 新增：点击 agent 图标 → 导航到 agent 编辑器
+        // Click agent icon → navigate to agent editor
         m.set('edit-agent', (ctx) => {
             const agentId = ctx.actionEl.dataset.agentId;
             if (agentId) {

@@ -3,6 +3,8 @@
 import type { InputPlugin, InputPluginContext } from './InputPlugin';
 import { PopupPanel, PopupItem } from './PopupPanel';
 import type { PromptHistoryService, PromptHistoryEntry } from '@itookit/llm-engine';
+import { truncateText } from '../../../utils/textUtils';
+import { formatTimeAgo } from '../../../utils/timeUtils';
 
 /**
  * Prompt History 插件
@@ -125,8 +127,8 @@ export class HistoryPlugin implements InputPlugin {
     private entriesToItems(entries: PromptHistoryEntry[]): PopupItem[] {
         return entries.map(entry => ({
             id: entry.text,
-            label: this.truncate(entry.text, 80),
-            description: this.formatTimeAgo(entry.timestamp),
+            label: truncateText(entry.text, 80),
+            description: formatTimeAgo(entry.timestamp),
             icon: entry.agentId && entry.agentId !== 'default' ? '🤖' : undefined,
             searchText: entry.text,
         }));
@@ -138,27 +140,6 @@ export class HistoryPlugin implements InputPlugin {
 
     private isCursorAtStart(): boolean {
         return (this.ctx?.getCursorPosition() ?? 0) === 0;
-    }
-
-    private truncate(text: string, maxLen: number): string {
-        const oneLine = text.replace(/\n/g, ' ').trim();
-        return oneLine.length > maxLen ? oneLine.slice(0, maxLen) + '…' : oneLine;
-    }
-
-    private formatTimeAgo(timestamp: number): string {
-        const diff = Date.now() - timestamp;
-        const minutes = Math.floor(diff / 60000);
-
-        if (minutes < 1) return 'just now';
-        if (minutes < 60) return `${minutes}m ago`;
-
-        const hours = Math.floor(minutes / 60);
-        if (hours < 24) return `${hours}h ago`;
-
-        const days = Math.floor(hours / 24);
-        if (days < 30) return `${days}d ago`;
-
-        return new Date(timestamp).toLocaleDateString();
     }
 
     deactivate(): void {
