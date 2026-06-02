@@ -7,3 +7,5 @@ export { AssetService } from './AssetService';
 export { BranchStore } from './BranchStore';
 export { BranchService, BranchError } from './BranchService';
 export { NavDataBuilder } from './NavDataBuilder';
+export { FileSearchService } from './FileSearchService';
+export { OcrService } from './OcrService';

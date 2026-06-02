@@ -1,4 +1,4 @@
-// @file: llm-ui/views/history/SessionRenderer.ts
+// @file: llm-ui/components/history/SessionRenderer.ts
 
 import { SessionGroup, ExecutionNode } from '@itookit/llm-engine';
 import { MDxController } from '../mdx/MDxController';
@@ -6,7 +6,7 @@ import { NodeRenderer } from './NodeRenderer';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { LayoutTemplates } from '../templates/LayoutTemplates';
 import type { IModuleFS } from '@itookit/common';
-import { TimerManager } from '../common/TimerManager';
+import { TimerManager } from '../common';
 import { getPreviewText } from '../../utils/textUtils';
 import { IconResolver } from '../../utils/iconResolver';
 

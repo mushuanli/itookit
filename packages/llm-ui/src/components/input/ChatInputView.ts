@@ -6,18 +6,14 @@ import type {
     ChatOverrides, SkillInfo, FileSuggestion,
 } from '../../domain/types';
 import type { ModelTier } from '@itookit/common';
-import type { IAgentRuntime } from '@itookit/common';
 import { ChatInputTemplates } from '../templates/ChatInputTemplates';
 import type { InputPlugin, InputPluginContext } from './plugins/InputPlugin';
-import type { HarnessPlugin } from './plugins/HarnessPlugin';
 import { MentionPlugin } from './plugins/MentionPlugin';
 import { TokenMeterPlugin } from './plugins/TokenMeterPlugin';
 import { PopupPanel } from './plugins/PopupPanel';
 import type { PopupItem } from './plugins/PopupPanel';
-import { OcrReviewPanel } from './OcrReviewPanel';
-import { downscaleImageForOcr } from '../../utils/imageDownscale';
+import { AttachmentManager } from './AttachmentManager';
 import { delegate } from '../../utils/domEvents';
-import { t } from '@itookit/common';
 
 export interface ChatInputOptions {
     onSend: (text: string, files: File[], executorId: string, overrides?: ChatOverrides) => Promise<void>;
@@ -155,11 +151,6 @@ export class ChatInput implements IChatInputPresenter {
     // ── Tool output panel ─────────────────────────────────────────────────────
     private toolOutputEl: HTMLElement | null = null;
 
-    // ── OCR (image → text) ─────────────────────────────────────────────────────
-    private ocrPanel: OcrReviewPanel | null = null;
-    /** "+" add-source menu popup (attach / file reference). */
-    private addPopup: PopupPanel | null = null;
-
     // ── Harness state ────────────────────────────────────────────────────────
     private skills: SkillInfo[] = [];
     private isLoadingSkills = false;
@@ -167,8 +158,10 @@ export class ChatInput implements IChatInputPresenter {
     // ── Plugin system ────────────────────────────────────────────────────────
     private plugins: InputPlugin[] = [];
     private pluginCtx: InputPluginContext | null = null;
-    private harnessPlugin: HarnessPlugin | null = null;
     private tokenMeterPlugin: TokenMeterPlugin | null = null;
+
+    // ── Attachment manager ────────────────────────────────────────────────────
+    private attachmentMgr!: AttachmentManager;
 
     private config: IChatInputConfig = {
         text: '',
@@ -198,10 +191,6 @@ export class ChatInput implements IChatInputPresenter {
             this.registerPlugin(new MentionPlugin({ onRequestFiles: options.onRequestFiles }));
         }
 
-        // OCR review panel — only created when OCR capability is injected.
-        if (options.onOcrImage) {
-            this.ocrPanel = new OcrReviewPanel(this.container);
-        }
     }
 
     /**
@@ -214,9 +203,6 @@ export class ChatInput implements IChatInputPresenter {
         this.plugins.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
 
         // Track known plugins for typed access
-        if (plugin.id === 'harness-status') {
-            this.harnessPlugin = plugin as HarnessPlugin;
-        }
         if (plugin.id === 'token-meter') {
             this.tokenMeterPlugin = plugin as TokenMeterPlugin;
         }
@@ -342,12 +328,6 @@ export class ChatInput implements IChatInputPresenter {
         return changed;
     }
 
-    setHarnessRuntime(runtime: IAgentRuntime | null): void {
-        if (this.harnessPlugin) {
-            this.harnessPlugin.setRuntime(runtime);
-        }
-    }
-
     updateTokenStats(stats: import('../../domain/types').TokenStats | null): void {
         this.tokenMeterPlugin?.update(stats);
     }
@@ -407,10 +387,7 @@ export class ChatInput implements IChatInputPresenter {
         this.connPopup = null;
         this.promptPopup?.destroy();
         this.promptPopup = null;
-        this.addPopup?.destroy();
-        this.addPopup = null;
-        this.ocrPanel?.destroy();
-        this.ocrPanel = null;
+        this.attachmentMgr?.destroy();
         this.container.innerHTML = '';
         this.files = [];
     }
@@ -432,121 +409,21 @@ export class ChatInput implements IChatInputPresenter {
         this.bindElements();
         this.updateConnectionOptions();
         this.updateHistoryDisplay();
-        this.injectHelpStyles();
-    }
 
-    private injectHelpStyles(): void {
-        if (document.getElementById('llm-input-help-styles')) return;
-        const s = document.createElement('style');
-        s.id = 'llm-input-help-styles';
-        s.textContent = `
-.llm-input__btn--help { opacity: 0.6; font-size: 13px; }
-.llm-input__btn--help:hover, .llm-input__btn--help.active { opacity: 1; }
-
-.llm-input__help-panel {
-    border-radius: 8px 8px 0 0;
-    border: 1px solid var(--border-color, #e0e0e0);
-    border-bottom: none;
-    background: var(--bg-primary, #fff);
-    max-height: 420px;
-    overflow-y: auto;
-    box-shadow: 0 -4px 16px rgba(0,0,0,.08);
-}
-.llm-input__help-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px 8px;
-    border-bottom: 1px solid var(--border-color, #e0e0e0);
-    position: sticky;
-    top: 0;
-    background: var(--bg-primary, #fff);
-    z-index: 1;
-}
-.llm-input__help-title { font-weight: 600; font-size: 13px; color: var(--text-primary, #333); }
-.llm-input__help-close {
-    background: none; border: none; cursor: pointer;
-    font-size: 18px; line-height: 1; color: var(--text-secondary, #888);
-    padding: 0 2px;
-}
-.llm-input__help-close:hover { color: var(--text-primary, #333); }
-.llm-input__help-body { padding: 4px 0 8px; }
-
-.llm-input__help-section { padding: 8px 14px 4px; }
-.llm-input__help-section + .llm-input__help-section {
-    border-top: 1px solid var(--border-color-subtle, #f0f0f0);
-}
-.llm-input__help-section-title {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .05em;
-    color: var(--text-tertiary, #aaa);
-    margin: 0 0 6px;
-}
-.llm-input__help-section-desc {
-    font-size: 12px;
-    color: var(--text-secondary, #666);
-    margin: 0 0 6px;
-}
-
-.llm-input__help-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12px;
-}
-.llm-input__help-table tr { vertical-align: top; }
-.llm-input__help-table td {
-    padding: 2px 6px 2px 0;
-    color: var(--text-primary, #333);
-    white-space: nowrap;
-}
-.llm-input__help-table td:last-child { white-space: normal; color: var(--text-secondary, #666); }
-.llm-input__help-group {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    color: var(--text-tertiary, #bbb);
-    padding-top: 8px !important;
-    padding-bottom: 2px !important;
-}
-
-kbd {
-    display: inline-block;
-    padding: 1px 5px;
-    font-size: 11px;
-    font-family: monospace;
-    background: var(--bg-secondary, #f5f5f5);
-    border: 1px solid var(--border-color, #ddd);
-    border-radius: 3px;
-    color: var(--text-primary, #333);
-    white-space: nowrap;
-}
-code {
-    font-size: 11px;
-    font-family: monospace;
-    background: var(--bg-secondary, #f5f5f5);
-    padding: 1px 4px;
-    border-radius: 3px;
-}
-
-.llm-input__help-hint {
-    font-size: 11px;
-    color: var(--text-tertiary, #aaa);
-    margin: 4px 0 0;
-}
-.llm-input__help-hint code { background: none; padding: 0; }
-.llm-input__help-dim { font-size: 10px; color: var(--text-tertiary, #aaa); }
-
-.llm-input__help-footer {
-    font-size: 11px;
-    color: var(--text-tertiary, #aaa);
-    padding: 6px 14px 4px;
-    border-top: 1px solid var(--border-color-subtle, #f0f0f0);
-    margin: 0;
-}
-`;
-        document.head.appendChild(s);
+        this.attachmentMgr = new AttachmentManager({
+            container: this.container,
+            fileInput: this.fileInput,
+            attachmentContainer: this.attachmentContainer,
+            textarea: this.textarea,
+            inputWrapper: this.inputWrapper,
+            attachBtn: this.attachBtn,
+            onOcrImage: this.options.onOcrImage,
+            onRequestFiles: this.options.onRequestFiles,
+            getLoading: () => this.loading,
+            getFiles: () => this.files,
+            setFiles: (f) => { this.files = f; },
+            notifyConfigChange: () => this.notifyConfigChange(),
+        });
     }
 
     private bindElements(): void {
@@ -632,11 +509,13 @@ code {
             }
         });
 
-        this.textarea.addEventListener('paste', (e) => this.handlePaste(e));
+        this.textarea.addEventListener('paste', (e) => this.attachmentMgr.handlePaste(e));
 
         this.sendBtn.addEventListener('click', () => this.triggerSend());
         this.stopBtn.addEventListener('click', () => this.options.onStop());
-        this.attachBtn.addEventListener('click', () => this.toggleAddMenu());
+        this.attachBtn.addEventListener('click', () => this.attachmentMgr.toggleAddMenu(
+            (anchor, opts) => new PopupPanel(anchor, opts)
+        ));
         this.settingsBtn.addEventListener('click', () => this.toggleSettings());
 
         this.container.querySelector('.llm-input__settings-close')
@@ -644,7 +523,7 @@ code {
 
         this.fileInput.addEventListener('change', () => {
             if (this.fileInput.files) {
-                this.addFiles(Array.from(this.fileInput.files));
+                this.attachmentMgr.addFiles(Array.from(this.fileInput.files));
                 this.fileInput.value = '';
             }
         });
@@ -655,16 +534,16 @@ code {
             event.stopPropagation();
             if (Number.isNaN(index)) return;
             this.files.splice(index, 1);
-            this.renderAttachments();
+            this.attachmentMgr.renderAttachments();
         });
         delegate(this.attachmentContainer, 'click', '.llm-input__ocr-btn', ({ event, index }) => {
             event.stopPropagation();
             if (Number.isNaN(index)) return;
-            this.ocrImage(this.files[index], index);
+            this.attachmentMgr.ocrImage(this.files[index], index);
         });
 
         this.bindSettingsEvents();
-        this.bindDragEvents();
+        this.attachmentMgr.bindDragEvents();
         this.bindHelpEvents();
         this.bindOutsideClickHandler();
 
@@ -813,35 +692,6 @@ code {
         document.addEventListener('click', this.outsideClickHandler);
     }
 
-    private bindDragEvents(): void {
-        const wrapper = this.inputWrapper;
-
-        wrapper.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (!this.loading) {
-                wrapper.classList.add('llm-input__field-wrapper--drag-active');
-            }
-        });
-
-        wrapper.addEventListener('dragleave', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            wrapper.classList.remove('llm-input__field-wrapper--drag-active');
-        });
-
-        wrapper.addEventListener('drop', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            wrapper.classList.remove('llm-input__field-wrapper--drag-active');
-            if (this.loading) return;
-            const droppedFiles = e.dataTransfer?.files;
-            if (droppedFiles && droppedFiles.length > 0) {
-                this.addFiles(Array.from(droppedFiles));
-            }
-        });
-    }
-
     // ================================================================
     // 发送
     // ================================================================
@@ -863,7 +713,7 @@ code {
         this.textarea.style.height = 'auto';
         this.config.text = '';
         this.files = [];
-        this.renderAttachments();
+        this.attachmentMgr.renderAttachments();
 
         // Clear the inline tool output when sending to the agent —
         // the user is switching from tool mode back to conversation mode.
@@ -1251,99 +1101,6 @@ code {
     }
 
     // ================================================================
-    // 附件
-    // ================================================================
-
-    private handlePaste(e: ClipboardEvent): void {
-        if (this.loading) return;
-        const items = e.clipboardData?.items;
-        if (!items) return;
-
-        const pastedFiles: File[] = [];
-        for (let i = 0; i < items.length; i++) {
-            if (items[i].kind === 'file') {
-                const file = items[i].getAsFile();
-                if (file) pastedFiles.push(this.renameFileIfNeeded(file));
-            }
-        }
-        if (pastedFiles.length > 0) this.addFiles(pastedFiles);
-    }
-
-    private renameFileIfNeeded(file: File): File {
-        if (file.name === 'image.png' || file.name === 'image.jpg') {
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            return new File([file], `paste_${timestamp}.${file.name.split('.').pop()}`, { type: file.type });
-        }
-        return file;
-    }
-
-    private addFiles(newFiles: File[]): void {
-        this.files = [...this.files, ...newFiles];
-        this.renderAttachments();
-    }
-
-    private renderAttachments(): void {
-        if (this.files.length === 0) {
-            this.attachmentContainer.style.display = 'none';
-            return;
-        }
-        this.attachmentContainer.style.display = 'flex';
-        const canOcr = !!this.options.onOcrImage;
-        // Event handlers are bound once via delegation in bindEvents();
-        // re-rendering innerHTML here does not require rebinding listeners.
-        this.attachmentContainer.innerHTML = ChatInputTemplates.renderAttachments(this.files, canOcr);
-    }
-
-    /**
-     * 对指定图片附件执行 OCR:降采样 → 调用注入的 onOcrImage → 审阅面板。
-     * 审阅确认后把(编辑过的)文本插入光标,默认移除原图。
-     */
-    private async ocrImage(file: File, index: number): Promise<void> {
-        if (!this.options.onOcrImage || !this.ocrPanel) return;
-        const panel = this.ocrPanel;
-        const ocr = this.options.onOcrImage;
-
-        let cancelled = false;
-        panel.showProcessing(file.name, () => { cancelled = true; panel.hide(); });
-
-        try {
-            const downscaled = await downscaleImageForOcr(file);
-            const markdown = (await ocr(downscaled)).trim();
-            if (cancelled) return;
-
-            if (!markdown) {
-                panel.showError(t('chatInput.ocr.empty'),
-                    () => this.ocrImage(file, index), () => panel.hide());
-                return;
-            }
-
-            panel.showReview(file, markdown, {
-                onConfirm: (text) => this.applyOcrResult(text, index, true),
-                onConfirmKeep: (text) => this.applyOcrResult(text, index, false),
-                onRetry: () => this.ocrImage(file, index),
-                onCancel: () => panel.hide(),
-            });
-        } catch (err) {
-            if (cancelled) return;
-            const msg = err instanceof Error ? err.message : String(err);
-            panel.showError(msg, () => this.ocrImage(file, index), () => panel.hide());
-        }
-    }
-
-    /** 把 OCR 文本插入光标,可选移除原图,并同步 config。 */
-    private applyOcrResult(text: string, index: number, removeImage: boolean): void {
-        this.pluginCtx?.insertAtCursor(text);
-        if (removeImage && this.files[index]) {
-            this.files.splice(index, 1);
-            this.renderAttachments();
-        }
-        this.config.text = this.textarea.value;
-        this.notifyConfigChange();
-        this.ocrPanel?.hide();
-        this.textarea.focus();
-    }
-
-    // ================================================================
     // 执行器/模型 UI
     // ================================================================
 
@@ -1500,44 +1257,6 @@ code {
         this.config.text = this.textarea.value;
         this.notifyConfigChange();
         this.textarea.focus();
-    }
-
-    // ── "+" add-source menu ──────────────────────────────────────────────────
-
-    private getOrCreateAddPopup(): PopupPanel {
-        if (!this.addPopup) {
-            this.addPopup = new PopupPanel(this.attachBtn, { animated: true });
-        }
-        return this.addPopup;
-    }
-
-    /**
-     * Toggle the "+" add-source menu: upload attachment + (optionally) file reference.
-     * Single attach-only case still opens the menu for consistency and future sources.
-     */
-    private toggleAddMenu(): void {
-        const popup = this.getOrCreateAddPopup();
-        if (popup.isVisible) { popup.hide(); return; }
-
-        const items: PopupItem[] = [
-            { id: 'attach', label: t('chatInput.add.attach'), icon: '📎' },
-        ];
-        // File reference only meaningful when @mention (onRequestFiles) is wired.
-        if (this.options.onRequestFiles) {
-            items.push({ id: 'fileRef', label: t('chatInput.add.fileRef'), icon: '@' });
-        }
-
-        popup.show(items, {
-            onSelect: (item) => {
-                if (item.id === 'attach') {
-                    this.fileInput.click();
-                } else if (item.id === 'fileRef') {
-                    // Insert '@' at cursor to trigger MentionPlugin's file picker.
-                    this.pluginCtx?.insertAtCursor('@');
-                    this.textarea.focus();
-                }
-            },
-        });
     }
 
     // ── Connection Quick-Switch methods ──────────────────────────────────────

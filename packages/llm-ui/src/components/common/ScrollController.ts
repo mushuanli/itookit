@@ -1,4 +1,4 @@
-// @file: llm-ui/views/common/ScrollController.ts
+// @file: llm-ui/components/common/ScrollController.ts
 
 import { TimerManager } from './TimerManager';
 

@@ -1,4 +1,4 @@
-// @file: llm-ui/views/templates/FloatingNavPanelTemplates.ts
+// @file: llm-ui/components/templates/FloatingNavPanelTemplates.ts
 
 import { escapeHTML } from '@itookit/common';
 import { BranchItem } from '../../domain/types';

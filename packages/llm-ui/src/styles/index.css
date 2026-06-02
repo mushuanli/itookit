@@ -3,6 +3,9 @@
 @import 'base.css';
 @import 'llm-input.css';
 @import 'llm-workspace.css';
+@import 'workspace-titlebar.css';
+@import 'chat-nodes.css';
+@import 'tty-panel.css';
 @import 'floating-nav.css';
 @import 'dialogs.css';
 @import 'input-plugins.css';

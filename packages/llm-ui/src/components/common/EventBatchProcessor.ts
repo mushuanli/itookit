@@ -1,4 +1,4 @@
-// @file: llm-ui/views/common/EventBatchProcessor.ts
+// @file: llm-ui/components/common/EventBatchProcessor.ts
 
 /**
  * 泛化的事件批处理器

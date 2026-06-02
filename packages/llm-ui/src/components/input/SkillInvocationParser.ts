@@ -9,23 +9,9 @@
 //   /lint @src/*.ts
 //   /explain [utils.ts](./utils.ts) what does this do?
 
-export interface SkillInvocation {
-    skillId: string;
-    /** Named arguments: --key value */
-    args: Record<string, string>;
-    /**
-     * File paths resolved from:
-     *   - Markdown links: [file.ts](./file.ts)  ← inserted by MentionPlugin
-     *   - Direct @refs:   @auth.ts
-     */
-    filePaths: string[];
-    /** Glob patterns from @*.ts / @src/*.ts syntax */
-    globPatterns: string[];
-    /** Remaining free text (after removing args/files) */
-    text: string;
-    /** Text selected in textarea at invocation time (captured by ChatInput) */
-    selectionText?: string;
-}
+export type { SkillInvocation };
+
+import type { SkillInvocation } from '../../domain/types';
 
 // Matches Markdown-link file refs: [name](./path) or [name](path)
 const MD_LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;

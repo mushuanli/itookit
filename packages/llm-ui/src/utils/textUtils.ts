@@ -18,6 +18,14 @@ export function getPreviewText(content: string, maxLen: number = 60): string {
 }
 
 /**
+ * Truncate text to maxLen, replacing newlines with spaces.
+ */
+export function truncateText(text: string, maxLen: number): string {
+    const oneLine = text.replace(/\n/g, ' ').trim();
+    return oneLine.length > maxLen ? oneLine.slice(0, maxLen) + '\u2026' : oneLine;
+}
+
+/**
  * 递归提取执行树的输出内容
  */
 export function extractExecutionOutput(node: any): string {

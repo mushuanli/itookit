@@ -1,4 +1,4 @@
-// @file: llm-ui/views/common/ContentResizeTracker.ts
+// @file: llm-ui/components/common/ContentResizeTracker.ts
 
 import { TimerManager } from './TimerManager';
 

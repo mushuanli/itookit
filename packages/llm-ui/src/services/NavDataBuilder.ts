@@ -1,4 +1,4 @@
-// @file: llm-uiservices/NavDataBuilder.ts
+// @file: llm-ui/services/NavDataBuilder.ts
 
 import { SessionGroup, SessionManager } from '@itookit/llm-engine';
 import { ChatNavItem, NavPanelData } from '../domain/ports/INavigationPresenter';

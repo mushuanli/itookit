@@ -1,12 +1,8 @@
 // @file: llm-ui/services/StateService.ts
 
 import { IChatEngine } from '@itookit/llm-engine';
-
-export interface UIState {
-    collapse_states: Record<string, boolean>;
-    input_text?: string;
-    input_agent_id?: string;
-}
+import type { UIState } from '../domain/types';
+import { ErrorHandler } from '../utils/errorHandler';
 
 /**
  * UI 状态持久化服务
@@ -23,8 +19,8 @@ export class StateService {
             await this.engine.updateUIState(nodeId, state);
             console.log('[StateService] UI state saved');
         } catch (e: any) {
-            if (this.isNodeNotFoundError(e)) {
-                return; // 节点已删除，忽略错误
+            if (e instanceof Error && ErrorHandler.classifyError(e).userMessage === 'The requested resource was not found.') {
+                return; // node deleted, ignore
             }
             console.warn('[StateService] Failed to save UI state:', e);
             throw e;
@@ -41,13 +37,5 @@ export class StateService {
             console.warn('[StateService] Failed to load UI state:', e);
             return null;
         }
-    }
-
-    /**
-     * 判断是否为节点不存在错误
-     */
-    private isNodeNotFoundError(error: any): boolean {
-        return error.message?.includes('not found') ||
-            error.message?.includes('Node not found');
     }
 }

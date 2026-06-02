@@ -7,6 +7,8 @@
 // that routes directly to the process stdin via the onWrite callback,
 // bypassing the LLM loop entirely.
 
+import { escapeHTML } from '@itookit/common';
+
 const MAX_OUTPUT_CHARS = 100_000; // prevent unbounded DOM growth
 
 export class TtyPanel {
@@ -86,8 +88,8 @@ export class TtyPanel {
         const pidText = pid !== undefined ? `PID:${pid}` : '';
         el.innerHTML = `
             <div class="llm-ui-tty-panel__header">
-                <span class="llm-ui-tty-panel__cmd">$ ${escapeHtml(command)}</span>
-                ${pidText ? `<span class="llm-ui-tty-panel__pid">${escapeHtml(pidText)}</span>` : ''}
+                <span class="llm-ui-tty-panel__cmd">$ ${escapeHTML(command)}</span>
+                ${pidText ? `<span class="llm-ui-tty-panel__pid">${escapeHTML(pidText)}</span>` : ''}
                 <span class="llm-ui-tty-panel__status llm-ui-tty-panel__status--running">running</span>
             </div>
             <pre class="llm-ui-tty-panel__output"></pre>
@@ -119,6 +121,5 @@ export class TtyPanel {
     }
 }
 
-function escapeHtml(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+// escapeHtml removed — use import { escapeHTML } from '@itookit/common' instead
+

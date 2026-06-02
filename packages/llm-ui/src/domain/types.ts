@@ -199,8 +199,23 @@ export interface FileSuggestion {
 
 // ── Skill invocation types ──────────────────────────────────────────────────
 
-// Re-export so Shell layer can reference via domain types
-export type { SkillInvocation } from '../components/input/SkillInvocationParser';
+export interface SkillInvocation {
+    skillId: string;
+    /** Named arguments: --key value */
+    args: Record<string, string>;
+    /**
+     * File paths resolved from:
+     *   - Markdown links: [file.ts](./file.ts)  ← inserted by MentionPlugin
+     *   - Direct @refs:   @auth.ts
+     */
+    filePaths: string[];
+    /** Glob patterns from @*.ts / @src/*.ts syntax */
+    globPatterns: string[];
+    /** Remaining free text (after removing args/files) */
+    text: string;
+    /** Text selected in textarea at invocation time (captured by ChatInput) */
+    selectionText?: string;
+}
 
 // ── Skill picker types ──────────────────────────────────────────────────────
 

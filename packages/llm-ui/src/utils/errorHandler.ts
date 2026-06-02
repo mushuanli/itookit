@@ -85,7 +85,7 @@ export class ErrorHandler {
 
         switch (level) {
             case 'silent':
-                console.warn(`${prefix} ${context}:`, err);
+                // Intentionally no output — caller handles the error silently
                 break;
 
             case 'warn':

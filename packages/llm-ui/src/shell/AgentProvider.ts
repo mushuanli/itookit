@@ -1,0 +1,81 @@
+// @file: llm-ui/shell/AgentProvider.ts
+// Agent/Connection data-fetching helpers — extracted from LLMWorkspaceEditor.
+// Pure async functions: no DOM access, no mutable state.
+
+import type { IAgentConfigService } from '@itookit/llm-engine';
+import type { ExecutorOption, ConnectionOption } from '../domain/types';
+import { formatDefaultFileTitle } from '@itookit/common';
+
+export async function buildExecutorOptions(
+    agentService: IAgentConfigService,
+): Promise<ExecutorOption[]> {
+    const agents = agentService.listAgents();
+    const connections = await agentService.getConnections();
+    const connMap = new Map(connections.map(c => [c.id, c]));
+
+    const seen = new Set<string>();
+    const options: ExecutorOption[] = [];
+
+    // Ensure 'default' exists — inject fallback when absent in VFS
+    if (!agents.some(a => a.id === 'default')) {
+        options.push({ id: 'default', name: 'Default Assistant', icon: '🤖', category: 'System' });
+        seen.add('default');
+    }
+
+    for (const agent of agents) {
+        if (seen.has(agent.id)) continue;
+        seen.add(agent.id);
+        const conn = agent.config?.connectionId ? connMap.get(agent.config.connectionId) : undefined;
+        options.push({
+            id: agent.id,
+            name: agent.name,
+            icon: agent.icon,
+            category: agent.type === 'agent' ? 'Agents' :
+                agent.type === 'workflow' ? 'Workflows' : 'Other',
+            description: agent.description,
+            provider: conn?.providerId,
+            connectionName: conn?.name,
+            connectionId: agent.config?.connectionId,
+            defaultPrompts: agent.defaultPrompts,
+        });
+    }
+
+    return options;
+}
+
+export function validateAgentId(agentService: IAgentConfigService, id: string): string {
+    return agentService.findAgent(id) ? id : 'default';
+}
+
+export async function buildConnectionOptions(
+    agentService: IAgentConfigService,
+): Promise<ConnectionOption[]> {
+    const connections = await agentService.getConnections();
+    return connections
+        .filter(c => c.enabled !== false)
+        .map(c => ({
+            id: c.id,
+            name: c.name,
+            provider: c.providerId,
+            hasTiers: !!(c.tiers?.standard || c.tiers?.fast),
+        }));
+}
+
+export function formatDefaultTitle(agentId: string, agentService: IAgentConfigService): string {
+    const base = formatDefaultFileTitle();
+    const agentName = sanitizeFileName(getAgentDisplayName(agentId, agentService));
+    return `${base}_${agentName}`;
+}
+
+export function getAgentDisplayName(agentId: string, agentService: IAgentConfigService): string {
+    const agent = agentService.findAgent(agentId);
+    return agent?.name || agentId;
+}
+
+export function sanitizeFileName(name: string): string {
+    return name
+        .replace(/[\/\\:*?"<>|]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+}

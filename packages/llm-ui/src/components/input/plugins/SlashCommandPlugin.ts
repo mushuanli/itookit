@@ -2,9 +2,10 @@
 
 import type { InputPlugin, InputPluginContext } from './InputPlugin';
 import { PopupPanel, PopupItem } from './PopupPanel';
-import type { SkillInfo } from '../../../domain/types';
+import type { SkillInfo, SkillInvocation } from '../../../domain/types';
 import { parseSkillArgs } from '../SkillInvocationParser';
-import type { SkillInvocation } from '../SkillInvocationParser';
+import { injectStyle } from '../../../utils/styleInjector';
+import { insertBeforeWrapper } from '../../../utils/domInsertion';
 
 // ── Tool arg parser ──────────────────────────────────────────────────────────
 // Parses slash command args: positionals and --flag value pairs.
@@ -884,19 +885,14 @@ export class SlashCommandPlugin implements InputPlugin {
         const existing = container.querySelector('.slash-cmd__agent-hint');
         existing?.remove();
 
-        const wrapper = container.querySelector('.llm-input__field-wrapper');
-        const parent = wrapper?.parentElement ?? container;
-        parent.insertBefore(hint, wrapper ?? parent.firstChild);
+        insertBeforeWrapper(container, hint, '.llm-input__field-wrapper');
 
         this.injectAgentHintStyles();
         setTimeout(() => hint.remove(), 4000);
     }
 
     private injectAgentHintStyles(): void {
-        if (document.getElementById('slash-cmd-hint-styles')) return;
-        const s = document.createElement('style');
-        s.id = 'slash-cmd-hint-styles';
-        s.textContent = `
+        injectStyle('slash-cmd-hint-styles', `
 .slash-cmd__agent-hint {
     padding: 7px 12px;
     font-size: 12px;
@@ -916,8 +912,7 @@ export class SlashCommandPlugin implements InputPlugin {
     font-family: inherit;
 }
 @keyframes slash-hint-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-`;
-        document.head.appendChild(s);
+`);
     }
 
     private commandsToPopupItems(commands: SlashCommandDef[]): PopupItem[] {

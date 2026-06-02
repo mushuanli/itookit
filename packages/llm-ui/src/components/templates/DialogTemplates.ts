@@ -1,4 +1,4 @@
-// @file: llm-ui/views/templates/DialogTemplates.ts
+// @file: llm-ui/components/templates/DialogTemplates.ts
 
 export const DialogTemplates = {
     /**

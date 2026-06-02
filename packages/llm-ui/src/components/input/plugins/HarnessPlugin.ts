@@ -13,8 +13,10 @@
 // 在 setRuntime(null) 或 deactivate() 时清理。
 
 import type { IAgentRuntime } from '@itookit/common';
-import { t, FEEDBACK_ICONS, ENTITY_ICONS, EXECUTOR_TYPE_ICONS } from '@itookit/common';
+import { t, FEEDBACK_ICONS, ENTITY_ICONS, EXECUTOR_TYPE_ICONS, escapeHTML } from '@itookit/common';
 import type { InputPlugin, InputPluginContext } from './InputPlugin';
+import { injectStyle } from '../../../utils/styleInjector';
+import { insertBeforeWrapper } from '../../../utils/domInsertion';
 
 /** 单个活跃工具的状态 */
 interface ActiveTool {
@@ -191,9 +193,7 @@ export class HarnessPlugin implements InputPlugin {
             this.statusBar.style.display = 'none';
             // .llm-input__field-wrapper is inside .llm-input__main, not a direct
             // child of ctx.container — use wrapper.parentElement to insertBefore correctly.
-            const wrapper = this.ctx!.container.querySelector('.llm-input__field-wrapper');
-            const parent = wrapper?.parentElement ?? this.ctx!.container;
-            parent.insertBefore(this.statusBar, wrapper ?? parent.firstChild);
+            insertBeforeWrapper(this.ctx!.container, this.statusBar, '.llm-input__field-wrapper');
         }
         return this.statusBar;
     }
@@ -209,7 +209,7 @@ export class HarnessPlugin implements InputPlugin {
         bar.style.display = 'flex';
 
         const chips = this.activeTools
-            .map((tool) => `<span class="${STATUS_BAR_CLASS}__chip ${STATUS_BAR_CLASS}__chip--running">${EXECUTOR_TYPE_ICONS.tool} ${escapeHtml(tool.id)}</span>`)
+            .map((tool) => `<span class="${STATUS_BAR_CLASS}__chip ${STATUS_BAR_CLASS}__chip--running">${EXECUTOR_TYPE_ICONS.tool} ${escapeHTML(tool.id)}</span>`)
             .join('');
 
         const stats = this.completedCount > 0
@@ -282,14 +282,12 @@ export class HarnessPlugin implements InputPlugin {
             this.permBanner = document.createElement('div');
             this.permBanner.className = PERM_BANNER_CLASS;
             // Same fix: use wrapper.parentElement (not ctx.container directly)
-            const wrapper = this.ctx!.container.querySelector('.llm-input__field-wrapper');
-            const parent = wrapper?.parentElement ?? this.ctx!.container;
-            parent.insertBefore(this.permBanner, wrapper ?? parent.firstChild);
+            insertBeforeWrapper(this.ctx!.container, this.permBanner, '.llm-input__field-wrapper');
         }
 
         const argSummary = this.summarizeArgs(args);
         this.permBanner.innerHTML =
-            `<span class="${PERM_BANNER_CLASS}__msg">Allow <b>${escapeHtml(toolId)}</b>${argSummary ? `: ${escapeHtml(argSummary)}` : ''}?</span>` +
+            `<span class="${PERM_BANNER_CLASS}__msg">Allow <b>${escapeHTML(toolId)}</b>${argSummary ? `: ${escapeHTML(argSummary)}` : ''}?</span>` +
             `<button class="${PERM_BANNER_CLASS}__allow" type="button">Allow</button>` +
             `<button class="${PERM_BANNER_CLASS}__deny" type="button">Deny</button>`;
 
@@ -349,9 +347,7 @@ export class HarnessPlugin implements InputPlugin {
             this.hitlBanner = document.createElement('div');
             this.hitlBanner.className = HITL_BANNER_CLASS;
             this.hitlBanner.style.display = 'none';
-            const wrapper = this.ctx!.container.querySelector('.llm-input__field-wrapper');
-            const parent = wrapper?.parentElement ?? this.ctx!.container;
-            parent.insertBefore(this.hitlBanner, wrapper ?? parent.firstChild);
+            insertBeforeWrapper(this.ctx!.container, this.hitlBanner, '.llm-input__field-wrapper');
         }
         return this.hitlBanner;
     }
@@ -368,18 +364,18 @@ export class HarnessPlugin implements InputPlugin {
         const itemsHtml = entries.map((req, idx) => {
             const optionsHtml = req.options?.length
                 ? `<div class="${HITL_BANNER_CLASS}__options">${req.options
-                    .map((opt, oi) => `<button class="${HITL_BANNER_CLASS}__option" data-hitl-idx="${idx}" data-hitl-opt="${oi}" type="button">${escapeHtml(opt)}</button>`)
+                    .map((opt, oi) => `<button class="${HITL_BANNER_CLASS}__option" data-hitl-idx="${idx}" data-hitl-opt="${oi}" type="button">${escapeHTML(opt)}</button>`)
                     .join('')}</div>`
                 : '';
 
             return `
                 <div class="${HITL_BANNER_CLASS}__item" data-hitl-idx="${idx}">
-                    <div class="${HITL_BANNER_CLASS}__question">${escapeHtml(req.question)}</div>
-                    <div class="${HITL_BANNER_CLASS}__context">${escapeHtml(req.context.slice(0, 200))}${req.context.length > 200 ? '...' : ''}</div>
+                    <div class="${HITL_BANNER_CLASS}__question">${escapeHTML(req.question)}</div>
+                    <div class="${HITL_BANNER_CLASS}__context">${escapeHTML(req.context.slice(0, 200))}${req.context.length > 200 ? '...' : ''}</div>
                     ${optionsHtml}
                     <div class="${HITL_BANNER_CLASS}__input-row">
-                        <input class="${HITL_BANNER_CLASS}__input" type="text" placeholder="${escapeHtml(t('hitl.inputPlaceholder'))}" data-hitl-idx="${idx}" />
-                        <button class="${HITL_BANNER_CLASS}__submit" type="button" data-hitl-idx="${idx}">${escapeHtml(t('hitl.submit'))}</button>
+                        <input class="${HITL_BANNER_CLASS}__input" type="text" placeholder="${escapeHTML(t('hitl.inputPlaceholder'))}" data-hitl-idx="${idx}" />
+                        <button class="${HITL_BANNER_CLASS}__submit" type="button" data-hitl-idx="${idx}">${escapeHTML(t('hitl.submit'))}</button>
                     </div>
                 </div>`;
         }).join('');
@@ -454,10 +450,7 @@ export class HarnessPlugin implements InputPlugin {
     // ── Styles ────────────────────────────────────────────────────────────────
 
     private injectStyles(): void {
-        if (document.getElementById('harness-plugin-styles')) return;
-        const style = document.createElement('style');
-        style.id = 'harness-plugin-styles';
-        style.textContent = `
+        injectStyle('harness-plugin-styles', `
 .${STATUS_BAR_CLASS} {
     display: flex;
     align-items: center;
@@ -603,11 +596,8 @@ export class HarnessPlugin implements InputPlugin {
 .${HITL_BANNER_CLASS}__submit:hover {
     opacity: 0.9;
 }
-`;
-        document.head.appendChild(style);
+`);
     }
 }
 
-function escapeHtml(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+// escapeHTML removed — imported from @itookit/common instead

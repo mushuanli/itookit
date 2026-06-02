@@ -1,8 +1,8 @@
 // @file: llm-ui/services/BranchService.ts
 
 import type { BranchItem } from '../domain/types';
+import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { SessionManager } from '@itookit/llm-engine';
-import type { BranchStore } from './BranchStore';
 
 export class BranchError extends Error {
     constructor(
@@ -29,7 +29,7 @@ export class BranchError extends Error {
 export class BranchService {
     constructor(
         private sessionManager: SessionManager,
-        private branchStore: BranchStore,
+        private branchStore: IBranchStore,
     ) {}
 
     get list(): BranchItem[] { return this.branchStore.current; }
