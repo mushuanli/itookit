@@ -104,19 +104,94 @@
     .settings-page {
         padding: var(--st-space-lg);
     }
+
     .settings-page__header {
         flex-direction: column;
         gap: var(--st-space-lg);
     }
+
+    /* 主从导航：默认只显示列表，选中后只显示详情 */
     .settings-split {
         grid-template-columns: 1fr;
+        grid-template-rows: 1fr;
+        position: relative;
     }
+
+    /* 未选中时：详情区隐藏 */
+    .settings-split:not(.has-detail) .settings-split__content {
+        display: none;
+    }
+
+    /* 选中时：列表隐藏，详情全屏 */
+    .settings-split.has-detail .settings-split__sidebar {
+        display: none;
+    }
+
+    .settings-split.has-detail .settings-split__content {
+        display: block;
+    }
+
     .settings-split__sidebar {
         border-right: none;
-        border-bottom: 1px solid var(--st-border-color);
-        max-height: 200px;
+        border-bottom: none;
+        max-height: none;
     }
+
     .settings-split__content {
         padding: var(--st-space-lg);
+    }
+}
+
+@media (max-width: 480px) {
+    .settings-page {
+        padding: var(--st-space-md);
+    }
+
+    .settings-split__content {
+        padding: var(--st-space-md);
+    }
+
+    .settings-split__header {
+        padding: var(--st-space-md);
+        min-height: 48px;
+    }
+}
+
+/* ── 移动端返回按钮：桌面隐藏，移动端显示 ── */
+.settings-mobile-back {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .settings-mobile-back {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
+        background: var(--st-bg-secondary);
+        border: none;
+        border-bottom: 1px solid var(--st-border-color);
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--st-color-primary);
+        width: 100%;
+        text-align: left;
+        min-height: 48px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .settings-mobile-back:hover {
+        background: var(--st-bg-tertiary);
+    }
+}
+
+/* 列表项增大触摸目标 */
+@media (max-width: 768px) {
+    .settings-list-item,
+    .settings-split__list [data-id],
+    .settings-split__list [class*="item"] {
+        min-height: 48px;
     }
 }

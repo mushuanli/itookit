@@ -72,6 +72,29 @@
     padding: var(--st-space-xs) var(--st-space-md);
 }
 
+/* 触摸设备：增大最小触摸目标 */
+@media (max-width: 768px) {
+    .settings-btn {
+        min-height: 44px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .settings-btn--sm {
+        min-height: 40px;
+        padding: var(--st-space-sm) var(--st-space-md);
+    }
+}
+
+/* 防止 iOS Safari 输入框自动缩放 */
+@media (max-width: 480px) {
+    .settings-root input,
+    .settings-root select,
+    .settings-root textarea {
+        font-size: 16px;
+    }
+}
+
 .settings-btn--lg {
     font-size: 1rem;
     padding: var(--st-space-md) var(--st-space-xl);

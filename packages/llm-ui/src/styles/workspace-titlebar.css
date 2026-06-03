@@ -258,6 +258,47 @@
     flex-shrink: 0;
 }
 
+/* --- 响应式：标题栏按钮折叠 --- */
+@media (max-width: 768px) {
+    .llm-workspace-titlebar {
+        padding: 0.4rem 0.75rem;
+        min-height: 44px;
+    }
+
+    /* 隐藏低频按钮，保留 Copy + Navigator */
+    #llm-btn-sidebar,
+    #llm-btn-fold-current,
+    #llm-btn-prev-unfolded,
+    #llm-btn-next-unfolded,
+    #llm-btn-assets,
+    #llm-btn-collapse {
+        display: none;
+    }
+
+    /* 隐藏状态文字，只保留圆点 */
+    .llm-workspace-status__text { display: none; }
+
+    /* 分隔线按需隐藏 */
+    .llm-workspace-titlebar__sep { display: none; }
+
+    .llm-workspace-titlebar__input {
+        min-width: 80px;
+        font-size: 13px;
+    }
+
+    .llm-workspace-titlebar__btn {
+        width: var(--llm-titlebar-btn-size);
+        height: var(--llm-titlebar-btn-size);
+    }
+}
+
+@media (max-width: 480px) {
+    #llm-btn-copy { display: none; }
+    .llm-workspace-status { display: none; }
+    .llm-workspace-titlebar__input { min-width: 50px; }
+    .llm-branch-indicator-name { max-width: 70px; }
+}
+
 /* Dark mode overrides for titlebar */
 @media (prefers-color-scheme: dark) {
     .llm-workspace-titlebar {

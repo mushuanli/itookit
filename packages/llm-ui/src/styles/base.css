@@ -119,6 +119,13 @@
     transition: opacity var(--llm-transition-normal);
 }
 
+/* 触摸设备：操作按钮始终可见（hover 在触摸屏无效） */
+@media (hover: none), (pointer: coarse) {
+    .llm-ui-actions {
+        opacity: 1 !important;
+    }
+}
+
 /* --- 动画 --- */
 @keyframes llm-ui-fadeIn {
     from {
