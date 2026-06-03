@@ -69,12 +69,14 @@ body {
     justify-content: center;
     cursor: pointer;
     text-decoration: none;
-    
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+
     /* 默认状态 */
     background: rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.7);
     border: 1px solid transparent;
-    
+
     width: 40px;
     height: 40px;
     border-radius: var(--border-radius);
@@ -96,6 +98,86 @@ body {
 
 .app-nav-btn i {
     font-size: 1.1rem;
+}
+
+/* =================================================================== */
+/*                5. 响应式：侧边栏 → 底部 Tab Bar (≤768px)             */
+/* =================================================================== */
+@media (max-width: 768px) {
+    body {
+        flex-direction: column;
+    }
+
+    .app-sidebar {
+        width: 100%;
+        height: 56px;
+        order: 2;               /* 放到内容下方 */
+        padding-top: 0;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        flex-shrink: 0;
+        display: flex;
+        align-items: stretch;
+        position: sticky;
+        bottom: 0;
+        z-index: 100;
+    }
+
+    .main-nav-list {
+        flex-direction: row;
+        justify-content: space-around;
+        align-items: center;
+        width: 100%;
+        gap: 0;
+        padding: 0 4px;
+    }
+
+    .main-nav-list > li {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+    }
+
+    /* 只显示前5个核心 Tab，其余隐藏 */
+    .main-nav-list > li:nth-child(n+6) {
+        display: none;
+    }
+
+    .app-nav-btn {
+        width: 100%;
+        height: 48px;           /* ≥ 44px 触摸目标 */
+        border-radius: 0;
+        flex-direction: column;
+        gap: 2px;
+        transform: none !important;  /* 禁止移动端 translateY 悬浮效果 */
+    }
+
+    .app-nav-btn i {
+        font-size: 1.15rem;
+    }
+
+    .main-content-area {
+        order: 1;
+        flex: 1;
+        min-height: 0;          /* 允许 flex 子项收缩 */
+        height: 0;              /* 配合 flex: 1 撑满剩余空间 */
+    }
+}
+
+/* 全局触摸优化 */
+button, a, [role="button"], input[type="button"], input[type="submit"] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* 防止 iOS Safari 输入框自动缩放 */
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+select,
+textarea {
+    font-size: 16px;
 }
 
 /* =================================================================== */

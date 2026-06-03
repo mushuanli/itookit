@@ -22,7 +22,7 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 20px;
+    padding: var(--llm-history-padding, 20px);
     scrollbar-width: thin;
     overflow-anchor: none;
     scroll-behavior: auto;
@@ -34,10 +34,18 @@
 
 .llm-ui-workspace__input {
     flex-shrink: 0;
-    padding: 16px 20px;
+    padding: var(--llm-input-padding-y, 16px) var(--llm-input-padding-x, 20px);
+    /* 键盘弹出时兼容 iOS 底部安全区 */
+    padding-bottom: max(var(--llm-input-padding-y, 16px), env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--llm-border-color);
     background: var(--llm-bg-primary);
     z-index: 10;
+}
+
+@media (max-width: 480px) {
+    .llm-ui-workspace__history {
+        scroll-behavior: smooth;
+    }
 }
 
 /* --- File Badges --- */

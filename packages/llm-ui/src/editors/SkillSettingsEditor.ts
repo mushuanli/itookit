@@ -157,7 +157,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         const selected = skills.find(s => s.id === this.selectedId) ?? null;
 
         this.container.innerHTML = `
-            <div class="settings-split">
+            <div class="settings-split${this.selectedId ? ' has-detail' : ''}">
                 <div class="settings-split__sidebar">
                     <div class="settings-split__header">
                         <h3 style="margin:0;font-size:.9375rem;font-weight:600">
@@ -192,6 +192,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                 </div>
 
                 <div class="settings-split__content">
+                    <button class="settings-mobile-back" data-action="mobile-back">&#8592; Skills</button>
                     ${selected ? renderDetail(selected, mcpServers, (params) => this.renderEntityHeader(params)) : renderEmptyState()}
                 </div>
             </div>`;
@@ -228,6 +229,9 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                 if (titleEl) this._startSkillInlineRename(titleEl, titleEl.dataset.nameFor!);
             });
         }
+
+        // ── Mobile: back button clears selection ─────────────────────────────
+        this.bindAction('mobile-back', () => { this.selectedId = null; this.render(); });
 
         // ── Batch actions ────────────────────────────────────────────────────
         this.bindAction('batch-clear',  () => { this._checkedIds.clear(); this.render(); });

@@ -53,6 +53,41 @@
     --llm-input-radius: 12px;
     --llm-input-padding: 12px;
     --llm-settings-bg: #f8fafc;
+
+    /* ── 响应式布局变量（桌面默认值）── */
+    --llm-history-padding: 20px;
+    --llm-input-padding-x: 20px;
+    --llm-input-padding-y: 16px;
+    --llm-bubble-max-width: 80%;
+    --llm-bubble-min-width: 300px;
+    --llm-titlebar-btn-size: 32px;
+    --llm-avatar-size: 32px;
+    --llm-textarea-max-height: 200px;
+}
+
+@media (max-width: 768px) {
+    :root {
+        --llm-history-padding: 12px;
+        --llm-input-padding-x: 10px;
+        --llm-input-padding-y: 10px;
+        --llm-bubble-max-width: 92%;
+        --llm-bubble-min-width: 0px;
+        --llm-titlebar-btn-size: 28px;
+        --llm-avatar-size: 28px;
+        --llm-textarea-max-height: 150px;
+    }
+}
+
+@media (max-width: 480px) {
+    :root {
+        --llm-history-padding: 8px;
+        --llm-input-padding-x: 6px;
+        --llm-input-padding-y: 8px;
+        --llm-bubble-max-width: 95%;
+        --llm-titlebar-btn-size: 26px;
+        --llm-avatar-size: 24px;
+        --llm-textarea-max-height: 120px;
+    }
 }
 
 /* 暗色模式 */

@@ -45,7 +45,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             : 'LLM 连接配置';
 
         this.container.innerHTML = `
-            <div class="settings-split conn-split-sidebar">
+            <div class="settings-split conn-split-sidebar${this._selectedProviderId ? ' has-detail' : ''}">
                 <aside class="settings-split__sidebar">
                     <div class="settings-split__header">
                         <h3>Provider</h3>
@@ -55,6 +55,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     </div>
                 </aside>
                 <div class="settings-split__content">
+                    <button class="settings-mobile-back" data-action="mobile-back">&#8592; Providers</button>
                     <div class="settings-page__header">
                         <div>
                             <h2 class="settings-page__title">${pageTitle}</h2>
@@ -259,6 +260,10 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     private bindEvents() {
         this.clearListeners();
         this.bindButton('#btn-add-connection', () => this.showEditModal(null));
+
+        // Mobile: back button clears provider selection
+        const mobileBack = this.container.querySelector<HTMLButtonElement>('[data-action="mobile-back"]');
+        mobileBack?.addEventListener('click', () => { this._selectedProviderId = null; this.render(); });
 
         // Provider sidebar filter
         const sidebarList = this.container.querySelector('.settings-split__list');

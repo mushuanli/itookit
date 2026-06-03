@@ -180,6 +180,24 @@
     gap: 8px;
 }
 
+/* ≤480px：对话框改为底部 Sheet */
+@media (max-width: 480px) {
+    .llm-recovery-dialog,
+    .llm-branch-name-dialog,
+    .llm-confirm-dialog {
+        align-items: flex-end;
+    }
+
+    .llm-recovery-dialog__content,
+    .llm-branch-name-dialog__content,
+    .llm-confirm-dialog__content {
+        width: 100%;
+        max-width: 100%;
+        border-radius: 16px 16px 0 0;
+        padding-bottom: max(24px, env(safe-area-inset-bottom, 24px));
+    }
+}
+
 /* --- Confirm 对话框 --- */
 .llm-confirm-dialog {
     position: fixed;

@@ -39,7 +39,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         const selected = servers.find(s => s.id === this.selectedId) ?? null;
 
         this.container.innerHTML = `
-            <div class="settings-split">
+            <div class="settings-split${this.selectedId ? ' has-detail' : ''}">
                 <div class="settings-split__sidebar">
                     <div class="settings-split__header">
                         <h3 style="margin:0;font-size:.9375rem;font-weight:600">
@@ -56,6 +56,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                     </div>
                 </div>
                 <div class="settings-split__content">
+                    <button class="settings-mobile-back" data-action="mobile-back">&#8592; MCP Servers</button>
                     ${selected ? this.renderDetail(selected) : this.renderEmptyState()}
                 </div>
             </div>`;
@@ -294,6 +295,10 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
     private bindEvents(servers: MCPServer[]) {
         this.clearListeners();
+
+        // ── Mobile: back button clears selection ─────────────────────────────
+        const mobileBack = this.container.querySelector<HTMLButtonElement>('[data-action="mobile-back"]');
+        mobileBack?.addEventListener('click', () => { this.selectedId = null; this.render(); });
 
         // ── Sidebar: single click = select, double click = inline rename ──────
         const list = this.container.querySelector('.settings-split__list');

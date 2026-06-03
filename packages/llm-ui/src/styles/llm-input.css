@@ -785,6 +785,84 @@
         max-width: 90px;
     }
 }
+
+/* ≤768px：平板适配 */
+@media (max-width: 768px) {
+    /* Agent meta 隐藏，降低噪音 */
+    .llm-input__agent-meta { display: none; }
+
+    /* 设置面板限高 */
+    .llm-input__settings-panel,
+    .llm-input__help-panel {
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+}
+
+/* ≤480px：手机激进优化 */
+@media (max-width: 480px) {
+    /* 所有输入操作按钮满足 44px 触摸目标 */
+    .llm-input__btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    /* 隐藏 Help 按钮（低频，通过设置面板访问） */
+    .llm-input__btn--help { display: none; }
+
+    /* Textarea 限高避免占满屏幕 */
+    .llm-input__textarea {
+        max-height: var(--llm-textarea-max-height, 120px);
+    }
+
+    /* Agent 名称截断，meta 隐藏 */
+    .llm-input__agent-name { max-width: 80px; }
+
+    /* Connection quick switch 仅显示图标 */
+    .llm-input__conn-quick-label { display: none; }
+
+    /* Prompt picker 隐藏（可通过 Agent 配置访问） */
+    .llm-input__prompt-picker-wrapper { display: none; }
+
+    /* 附件 chips：横向单行滚动，避免纵向堆叠占屏幕空间 */
+    .llm-input__attachments {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: 4px;
+    }
+    .llm-input__attachments::-webkit-scrollbar { display: none; }
+
+    /* 设置面板和帮助面板：底部 Sheet 模式 */
+    .llm-input__settings-panel,
+    .llm-input__help-panel {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-height: 65vh;
+        border-radius: 16px 16px 0 0;
+        border: none;
+        box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
+        z-index: 200;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* 拖拽指示条 */
+    .llm-input__settings-panel::before,
+    .llm-input__help-panel::before {
+        content: '';
+        display: block;
+        width: 36px;
+        height: 4px;
+        margin: 10px auto 6px;
+        border-radius: 2px;
+        background: var(--llm-border-color);
+        flex-shrink: 0;
+    }
+}
 /* ── Enable / Disable toggle (shared by Provider & Connection cards) ── */
 .llm-enable-toggle {
     display: inline-flex;
