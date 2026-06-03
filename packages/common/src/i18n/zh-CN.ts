@@ -289,6 +289,8 @@ export const zhCN = {
 
     // ── Chat input — "+" add-source menu ─────────────────────────────────────
     'chatInput.add.menu':        '添加内容',
+    'chatInput.add.camera':      '拍照',
+    'chatInput.add.photoAlbum':  '相册',
     'chatInput.add.attach':      '上传附件',
     'chatInput.add.fileRef':     '引用文件',
 

@@ -1,11 +1,14 @@
 // @file: llm-ui/components/input/AttachmentManager.ts
-// File attachment handling: paste, drag-drop, OCR — extracted from ChatInputView.
+// File attachment handling: paste, drag-drop, OCR, camera, photo album.
 
 import { ChatInputTemplates } from '../templates/ChatInputTemplates';
 import { downscaleImageForOcr } from '../../utils/imageDownscale';
 import { t } from '@itookit/common';
 import type { OcrReviewPanel } from './OcrReviewPanel';
 import type { PopupPanel, PopupItem } from './plugins/PopupPanel';
+
+let CAMERA_GUARD = false;      // prevent double-open on some mobile browsers
+let PHOTO_ALBUM_GUARD = false;
 
 export interface AttachmentManagerOptions {
     container: HTMLElement;
@@ -113,7 +116,9 @@ export class AttachmentManager {
         if (this.addPopup.isVisible) { this.addPopup.hide(); return; }
 
         const items: PopupItem[] = [
-            { id: 'attach', label: t('chatInput.add.attach'), icon: '📎' },
+            { id: 'camera',     label: t('chatInput.add.camera'),     icon: '📷' },
+            { id: 'photoAlbum', label: t('chatInput.add.photoAlbum'), icon: '🖼️' },
+            { id: 'attach',     label: t('chatInput.add.attach'),     icon: '📎' },
         ];
         if (this.opts.onRequestFiles) {
             items.push({ id: 'fileRef', label: t('chatInput.add.fileRef'), icon: '@' });
@@ -121,21 +126,103 @@ export class AttachmentManager {
 
         this.addPopup.show(items, {
             onSelect: (item) => {
-                if (item.id === 'attach') {
-                    this.opts.fileInput.click();
-                } else if (item.id === 'fileRef') {
-                    // Insert '@' at cursor to trigger MentionPlugin's file picker
-                    const ta = this.opts.textarea;
-                    const pos = ta.selectionStart;
-                    const before = ta.value.slice(0, pos);
-                    const after = ta.value.slice(pos);
-                    ta.value = before + '@' + after;
-                    ta.selectionStart = ta.selectionEnd = pos + 1;
-                    ta.focus();
-                    this.opts.notifyConfigChange();
+                switch (item.id) {
+                    case 'camera':
+                        this.openCamera();
+                        break;
+                    case 'photoAlbum':
+                        this.openPhotoAlbum();
+                        break;
+                    case 'attach':
+                        this.opts.fileInput.click();
+                        break;
+                    case 'fileRef':
+                        this.insertFileRef();
+                        break;
                 }
             },
         });
+    }
+
+    // ── Camera ────────────────────────────────────────────────────────────
+
+    private openCamera(): void {
+        if (CAMERA_GUARD) return;
+        CAMERA_GUARD = true;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.setAttribute('capture', 'environment');
+        input.style.display = 'none';
+        document.body.appendChild(input);
+
+        // Some Android browsers fire both cancel + change; guard clears after both
+        let settled = false;
+        const done = () => {
+            if (settled) return;
+            settled = true;
+            CAMERA_GUARD = false;
+            setTimeout(() => input.remove(), 100);
+        };
+
+        input.addEventListener('change', () => {
+            if (input.files?.length) {
+                this.addFiles(Array.from(input.files!));
+            }
+            done();
+        });
+        // cancel event is not standard — use window focus as fallback
+        input.addEventListener('cancel', done);
+        const onFocus = () => { window.removeEventListener('focus', onFocus); done(); };
+        window.addEventListener('focus', onFocus);
+
+        input.click();
+    }
+
+    // ── Photo Album ───────────────────────────────────────────────────────
+
+    private openPhotoAlbum(): void {
+        if (PHOTO_ALBUM_GUARD) return;
+        PHOTO_ALBUM_GUARD = true;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = true;
+        input.style.display = 'none';
+        document.body.appendChild(input);
+
+        let settled = false;
+        const done = () => {
+            if (settled) return;
+            settled = true;
+            PHOTO_ALBUM_GUARD = false;
+            setTimeout(() => input.remove(), 100);
+        };
+
+        input.addEventListener('change', () => {
+            if (input.files?.length) {
+                this.addFiles(Array.from(input.files!));
+            }
+            done();
+        });
+        input.addEventListener('cancel', done);
+        const onFocus = () => { window.removeEventListener('focus', onFocus); done(); };
+        window.addEventListener('focus', onFocus);
+
+        input.click();
+    }
+
+    // ── File reference ────────────────────────────────────────────────────
+
+    private insertFileRef(): void {
+        const ta = this.opts.textarea;
+        const pos = ta.selectionStart;
+        const before = ta.value.slice(0, pos);
+        const after = ta.value.slice(pos);
+        ta.value = before + '@' + after;
+        ta.selectionStart = ta.selectionEnd = pos + 1;
+        ta.focus();
+        this.opts.notifyConfigChange();
     }
 
     // ── OCR (image → text) ────────────────────────────────────────────────

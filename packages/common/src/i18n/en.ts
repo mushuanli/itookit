@@ -277,6 +277,8 @@ export const en: LocaleStrings = {
 
     // ── Chat input — "+" add-source menu ─────────────────────────────────────
     'chatInput.add.menu':        'Add content',
+    'chatInput.add.camera':      'Camera',
+    'chatInput.add.photoAlbum':  'Photo Album',
     'chatInput.add.attach':      'Upload attachment',
     'chatInput.add.fileRef':     'Reference file',
 
