@@ -18,6 +18,8 @@ import {
     RegenerateOptions,
     RegenerateResult,
     RegenerateTrigger,
+    SessionOrigin,
+    HistoryPolicy,
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
@@ -288,7 +290,9 @@ export class SessionManager {
         text: string,
         files: ChatAttachment[],
         agentId: string,
-        overrides?: ExecutionOverrides
+        overrides?: ExecutionOverrides,
+        origin?: SessionOrigin,
+        historyPolicy?: HistoryPolicy,
     ): Promise<void> {
         const { sessionId, nodeId, runtime, state } = this.ensureBound();
 
@@ -306,7 +310,7 @@ export class SessionManager {
         });
 
         await this.taskRunner.submit(
-            { sessionId, nodeId, text, files, agentId, overrides },
+            { sessionId, nodeId, text, files, agentId, overrides, origin, historyPolicy },
             runtime
         );
     }

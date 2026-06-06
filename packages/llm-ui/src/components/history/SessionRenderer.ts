@@ -6,6 +6,7 @@ import { NodeRenderer } from './NodeRenderer';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { LayoutTemplates } from '../templates/LayoutTemplates';
 import type { IModuleFS } from '@itookit/common';
+import { t } from '@itookit/common';
 import { TimerManager } from '../common';
 import { getPreviewText } from '../../utils/textUtils';
 import { IconResolver } from '../../utils/iconResolver';
@@ -78,6 +79,14 @@ export class SessionRenderer {
         wrapper.className = `llm-ui-session llm-ui-session--${group.role}`;
         wrapper.dataset.sessionId = group.id;
 
+        // origin CSS class + label element
+        if (group.origin && group.origin !== 'user') {
+            wrapper.classList.add(`llm-ui-session--origin-${group.origin}`);
+        }
+        if (group.historyPolicy === 'exclude') {
+            wrapper.classList.add('llm-ui-session--ephemeral');
+        }
+
         if (group.role === 'user') {
             const preview = getPreviewText(group.content || '');
             wrapper.innerHTML = NodeTemplates.renderUserBubble(group, preview, isCollapsed);
@@ -89,8 +98,16 @@ export class SessionRenderer {
                 ? IconResolver.getIcon(group.executionRoot)
                 : '🤖';
 
+            const originKey = group.origin === 'agent' || group.origin === 'system'
+                ? `chat.origin.${group.origin}` as const
+                : null;
+            const originLabelHtml = originKey
+                ? `<span class="llm-ui-session__origin-label">${t(originKey)}</span>`
+                : '';
+
             wrapper.innerHTML = `
                 <div class="llm-ui-avatar">${icon}</div>
+                ${originLabelHtml}
                 <div class="llm-ui-execution-root" id="container-${group.id}"></div>
             `;
             this.container.appendChild(wrapper);

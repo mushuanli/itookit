@@ -311,6 +311,11 @@ export const zhCN = {
     'session.hitlActive':            '后台会话等待输入: {question}',
     'session.hitlActive.switch':     '切换',
 
+    // ── Chat origin labels ────────────────────────────────────────────────────
+    'chat.origin.agent':             'Agent',
+    'chat.origin.system':            '系统',
+    'chat.ephemeral':                '不计入上下文',
+
 } as const;
 
 // LocaleStrings maps every key to string (not literal), so other locales can provide different values.
