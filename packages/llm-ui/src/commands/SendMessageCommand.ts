@@ -4,18 +4,21 @@ import { Command } from './Command';
 import { Toast } from '@itookit/common';
 import { ErrorHandler } from '../utils/errorHandler';
 import type { ChatOverrides } from '../domain/types';
+import type { SessionOrigin, HistoryPolicy } from '@itookit/llm-engine';
 
 export interface SendMessageParams {
     text: string;
     files: File[];
     agentId?: string;
     overrides?: ChatOverrides;
+    origin?: SessionOrigin;
+    historyPolicy?: HistoryPolicy;
 }
 
 export class SendMessageCommand extends Command<SendMessageParams> {
     protected name = 'Send Message';
 
-    protected async execute({ text, files, agentId, overrides }: SendMessageParams): Promise<void> {
+    protected async execute({ text, files, agentId, overrides, origin, historyPolicy }: SendMessageParams): Promise<void> {
         const ownerNodeId = this.ctx.getOwnerNodeId();
         if (!ownerNodeId) throw new Error('No session loaded');
 
@@ -47,7 +50,7 @@ export class SendMessageCommand extends Command<SendMessageParams> {
             }
 
             await this.ctx.sessionManager.sendMessage(
-                finalText.trim(), files, agentId || 'default', overrides
+                finalText.trim(), files, agentId || 'default', overrides, origin, historyPolicy
             );
         } catch (error: any) {
             this.rollbackFailedSend(sessionsBeforeSend);

@@ -58,7 +58,7 @@ export class NodeRenderer {
         el.innerHTML = `
             ${NodeTemplates.renderAgentHeader(node, previewText, icon, isCollapsed)}
             <div class="llm-ui-node__body">
-                ${NodeTemplates.renderThinking(node.data.thought || '', hasThought)}
+                ${NodeTemplates.renderThinking(node.data.thought || '', hasThought, node.status)}
                 ${errorHtml}
                 <div class="llm-ui-node__output">
                     <div class="llm-ui-mount-point" id="mount-${node.id}"></div>

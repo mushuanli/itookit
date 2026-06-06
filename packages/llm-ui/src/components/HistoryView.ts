@@ -306,8 +306,11 @@ export class HistoryView implements IHistoryPresenter {
                 this.clearErrors();
                 this.enterStreamingMode();
                 const isUser = event.payload.role === 'user';
-                this.renderer.appendSession(event.payload, isUser);
-                this.collapse.setState(event.payload.id, isUser);
+                // agent/system 来源的消息默认折叠
+                const isAgentOrigin = event.payload.origin === 'agent' || event.payload.origin === 'system';
+                const defaultCollapsed = isUser || isAgentOrigin;
+                this.renderer.appendSession(event.payload, defaultCollapsed);
+                this.collapse.setState(event.payload.id, defaultCollapsed);
                 this.scrollController.scrollToBottom(false);
                 break;
             }

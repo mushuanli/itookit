@@ -6,6 +6,8 @@ import {
     ExecutionNode,
     ChatAttachment,
     BranchInfo,
+    SessionOrigin,
+    HistoryPolicy,
 } from '../core/types';
 import { ChatNode } from '../persistence/types';
 import { Converters } from '../utils/converters';
@@ -125,7 +127,13 @@ export class SessionState {
      * 创建用户消息
      * 使用 persistedNodeId 作为 id
      */
-    addUserMessage(text: string, files: ChatAttachment[], persistedNodeId: string): SessionGroup {
+    addUserMessage(
+        text: string,
+        files: ChatAttachment[],
+        persistedNodeId: string,
+        origin?: SessionOrigin,
+        historyPolicy?: HistoryPolicy,
+    ): SessionGroup {
         const session: SessionGroup = {
             id: persistedNodeId,
             persistedNodeId,
@@ -133,6 +141,8 @@ export class SessionState {
             content: text,
             files,
             timestamp: Date.now(),
+            origin: origin ?? 'user',
+            historyPolicy: historyPolicy ?? 'include',
         };
 
         this.sessions.push(session);
@@ -145,7 +155,9 @@ export class SessionState {
     createAssistantMessage(
         config: any, // ExecutorConfig
         persistedNodeId: string,
-        branchInfo?: BranchInfo
+        branchInfo?: BranchInfo,
+        origin?: SessionOrigin,
+        historyPolicy?: HistoryPolicy,
     ): ExecutionNode {
         const rootNode: ExecutionNode = {
             id: persistedNodeId,
@@ -175,6 +187,8 @@ export class SessionState {
             executionRoot: rootNode,
             siblingIndex: branchInfo?.siblingIndex,
             siblingCount: branchInfo?.siblingCount,
+            origin: origin ?? 'user',
+            historyPolicy: historyPolicy ?? 'include',
         };
 
         this.sessions.push(session);
@@ -268,6 +282,9 @@ export class SessionState {
         const history: HistoryMessage[] = [];
 
         for (const session of this.sessions) {
+            // 跳过不进 LLM history 的消息
+            if (session.historyPolicy === 'exclude') continue;
+
             if (session.role === 'user') {
                 history.push({
                     role: 'user',

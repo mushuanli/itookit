@@ -214,6 +214,11 @@ export interface SlashCommandCallbacks {
      * @param displayCmd  用于 UI 显示的原始命令字符串（如 "/read src/index.ts"）
      */
     onToolInvoke?: (toolId: string, args: Record<string, unknown>, displayCmd: string) => Promise<void>;
+
+    // ── By the way ────────────────────────────────────────────────────────────
+
+    /** /btw 命令：发送不记入历史的旁注请求 */
+    onBtw: (args: string) => void;
 }
 
 /**
@@ -502,6 +507,16 @@ export class SlashCommandPlugin implements InputPlugin {
                 icon: '🗑️',
                 group: 'Common',
                 execute: () => cb.onClear(),
+            },
+            {
+                name: 'btw',
+                label: '/btw',
+                description: 'Send a by-the-way request without affecting chat history',
+                icon: '💬',
+                group: 'Common',
+                hasArgs: true,
+                argsPlaceholder: 'message...',
+                execute: (args) => cb.onBtw(args),
             },
 
             // ── Refine ──────────────────────────────────────────

@@ -209,9 +209,10 @@ export class NodeTemplates {
         </div>`;
     }
 
-    static renderThinking(thought: string, hasThought: boolean): string {
+    static renderThinking(thought: string, hasThought: boolean, status?: string): string {
+        const collapsedClass = hasThought && status && status !== 'running' ? ' llm-ui-thought--collapsed' : '';
         return `
-        <div class="llm-ui-thought" style="display: ${hasThought ? 'block' : 'none'}">
+        <div class="llm-ui-thought${collapsedClass}" style="display: ${hasThought ? 'block' : 'none'}">
             <div class="llm-ui-thought__label">💭 Thinking</div>
             <div class="llm-ui-thought__content">${escapeHTML(thought)}</div>
         </div>`;

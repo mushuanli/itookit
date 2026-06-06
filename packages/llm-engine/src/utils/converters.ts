@@ -1,7 +1,7 @@
 // @file: llm-engine/src/utils/converters.ts
 
 import { generateUUID } from '@itookit/common';
-import { SessionGroup, ExecutionNode, ChatAttachment } from '../core/types';
+import { SessionGroup, ExecutionNode, ChatAttachment, SessionOrigin, HistoryPolicy } from '../core/types';
 import { ChatNode } from '../persistence/types';
 
 /**
@@ -27,7 +27,9 @@ export class Converters {
                 role: 'user',
                 content: node.content,
                 files,
-                persistedNodeId: node.id  // ChatNode.id is the chat-internal message ID (not FSNode.path)
+                persistedNodeId: node.id,  // ChatNode.id is the chat-internal message ID (not FSNode.path)
+                origin: (node.meta?.origin as SessionOrigin) ?? 'user',
+                historyPolicy: (node.meta?.historyPolicy as HistoryPolicy) ?? 'include',
             };
         }
         
@@ -55,7 +57,9 @@ export class Converters {
                     },
                     children: []
                 },
-                persistedNodeId: node.id
+                persistedNodeId: node.id,
+                origin: (node.meta?.origin as SessionOrigin) ?? 'user',
+                historyPolicy: (node.meta?.historyPolicy as HistoryPolicy) ?? 'include',
             };
         }
         

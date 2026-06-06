@@ -285,6 +285,7 @@ export class TaskRunner {
         // 4. Create assistant node
         const { assistantNodeId, rootNode } = await this.createAssistantNode(
             sessionId, task.nodeId, state, executorConfig, input.branchInfo, userNodeId,
+            input.origin, input.historyPolicy,
         );
 
         // 5. Throttled persistence writer
@@ -812,10 +813,18 @@ export class TaskRunner {
 
         const userNodeId = await this.engine.appendMessage(
             nodeId, sessionId, 'user', input.text,
-            { files: persistedFiles, executorId: input.agentId }
+            {
+                files: persistedFiles,
+                executorId: input.agentId,
+                origin: input.origin,
+                historyPolicy: input.historyPolicy,
+            }
         );
 
-        const userSession = state.addUserMessage(input.text, contextFiles, userNodeId);
+        const userSession = state.addUserMessage(
+            input.text, contextFiles, userNodeId,
+            input.origin, input.historyPolicy,
+        );
 
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         if (isBound) {
@@ -834,7 +843,9 @@ export class TaskRunner {
         state: SessionState,
         executorConfig: ExecutorConfig,
         branchInfo?: BranchInfo,
-        parentUserNodeId?: string
+        parentUserNodeId?: string,
+        origin?: import('../core/types').SessionOrigin,
+        historyPolicy?: import('../core/types').HistoryPolicy,
     ): Promise<{ assistantNodeId: string; rootNode: ExecutionNode }> {
         const assistantNodeId = await this.engine.appendMessage(
             nodeId, sessionId, 'assistant', '',
@@ -847,11 +858,14 @@ export class TaskRunner {
                 siblingCount: branchInfo?.siblingCount ?? 1,
                 parentAssistantId: branchInfo?.parentAssistantId,
                 parentUserNodeId,
+                origin,
+                historyPolicy,
             }
         );
 
         const rootNode = state.createAssistantMessage(
-            executorConfig, assistantNodeId, branchInfo
+            executorConfig, assistantNodeId, branchInfo,
+            origin, historyPolicy,
         );
 
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;

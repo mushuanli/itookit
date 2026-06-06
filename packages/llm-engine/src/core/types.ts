@@ -7,6 +7,16 @@ import type { ModelTier, ChatAttachment } from '@itookit/common';
 export type { ChatAttachment, ChatSessionSettings } from '@itookit/common';
 export { DEFAULT_SESSION_SETTINGS } from '@itookit/common';
 
+// ═══════════════════════════════════════════════════════════════
+// Session origin & history policy
+// ═══════════════════════════════════════════════════════════════
+
+/** 请求来源 */
+export type SessionOrigin = 'user' | 'agent' | 'system';
+
+/** LLM history 策略 */
+export type HistoryPolicy = 'include' | 'exclude';
+
 /**
  * 单次任务（或整个会话）的 token 用量统计。
  *
@@ -180,6 +190,11 @@ export interface SessionGroup {
 
     /** 关联的用户消息 ID */
     parentUserSessionId?: string;
+
+    /** 请求来源，默认 'user' */
+    origin?: SessionOrigin;
+    /** LLM history 策略，默认 'include' */
+    historyPolicy?: HistoryPolicy;
 }
 
 /**
@@ -277,6 +292,11 @@ export interface TaskInput {
         trigger: RegenerateTrigger;
         branchName: string;
     };
+
+    /** 任务来源，默认 'user' */
+    origin?: SessionOrigin;
+    /** LLM history 策略，默认 'include' */
+    historyPolicy?: HistoryPolicy;
 }
 
 /**

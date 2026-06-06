@@ -298,4 +298,9 @@ export const en: LocaleStrings = {
     'session.ttyActive.switchView':  'Switch',
     'session.hitlActive':            'Background session waiting for input: {question}',
     'session.hitlActive.switch':     'Switch',
+
+    // ── Chat origin labels ────────────────────────────────────────────────────
+    'chat.origin.agent':             'Agent',
+    'chat.origin.system':            'System',
+    'chat.ephemeral':                'ephemeral',
 };

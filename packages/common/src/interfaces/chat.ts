@@ -47,6 +47,10 @@ export interface AppendMessageMeta {
     parentUserNodeId?: string;
     branchCreatedFrom?: 'regenerate' | 'edit' | 'manual';
     branchCreatedAt?: string;
+
+    // -- Message origin & history policy --
+    origin?: 'user' | 'agent' | 'system';
+    historyPolicy?: 'include' | 'exclude';
 }
 
 /** Metadata used when updating an existing message node. */

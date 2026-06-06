@@ -151,6 +151,20 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
             deps.bus.emit('batch:delete', { ids });
         },
 
+        onBtw: (args: string) => {
+            if (!args.trim()) {
+                Toast.error('Usage: /btw <message>');
+                return;
+            }
+            deps.sendCommand.run({
+                text: args.trim(),
+                files: [],
+                origin: 'user',
+                historyPolicy: 'exclude',
+                overrides: { historyLength: 0 },
+            });
+        },
+
         // ── Refine ──────────────────────────────────────────
 
         onShorter: () => {

@@ -160,6 +160,17 @@ export class StreamController {
         if (editor && (status === 'success' || status === 'failed')) {
             editor.finalize();
         }
+
+        // 生成结束后折叠 thinking 面板
+        if (el && (status === 'success' || status === 'failed')) {
+            this.collapseThought(el);
+        }
+    }
+
+    private collapseThought(nodeEl: HTMLElement): void {
+        const thoughtEl = nodeEl.querySelector('.llm-ui-thought') as HTMLElement | null;
+        if (!thoughtEl || thoughtEl.style.display === 'none') return;
+        thoughtEl.classList.add('llm-ui-thought--collapsed');
     }
 
     // ================================================================

@@ -419,6 +419,8 @@
     border-bottom: 1px solid var(--llm-border-color);
     font-size: 0.9em;
     color: var(--llm-text-secondary);
+    overflow: hidden;
+    transition: max-height 0.3s ease-out, opacity 0.2s ease-out;
 }
 
 .llm-ui-thought__label {
@@ -428,6 +430,8 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--llm-text-muted);
+    cursor: pointer;
+    user-select: none;
 }
 
 .llm-ui-thought__content {
@@ -439,6 +443,19 @@
     font-size: 0.85em;
     line-height: 1.5;
     background: var(--llm-bg-primary);
+}
+
+/* Thinking panel — collapsed state (after streaming ends) */
+.llm-ui-thought--collapsed .llm-ui-thought__content {
+    max-height: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+.llm-ui-thought--collapsed .llm-ui-thought__label::after {
+    content: ' (click to expand)';
+    font-weight: normal;
+    opacity: 0.6;
 }
 
 /* Output area */
@@ -706,4 +723,26 @@
         color: #fca5a5;
         border-bottom-color: #7f1d1d;
     }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Session origin labels
+   ═══════════════════════════════════════════════════════════════ */
+
+.llm-ui-session--origin-agent .llm-ui-session__origin-label,
+.llm-ui-session--origin-system .llm-ui-session__origin-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.72rem;
+    color: var(--llm-text-muted);
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--llm-bg-secondary);
+}
+
+/* Ephemeral message marker */
+.llm-ui-session--ephemeral .llm-ui-session__origin-label::after {
+    content: ' · ephemeral';
+    opacity: 0.5;
 }

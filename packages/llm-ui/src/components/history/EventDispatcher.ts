@@ -138,6 +138,23 @@ export class EventDispatcher {
                 }
             }
 
+            // thinking 面板 toggle：点击标签折叠/展开
+            const thoughtLabel = target.closest('.llm-ui-thought__label') as HTMLElement;
+            if (thoughtLabel) {
+                const thoughtEl = thoughtLabel.closest('.llm-ui-thought') as HTMLElement;
+                if (thoughtEl) {
+                    thoughtEl.classList.toggle('llm-ui-thought--collapsed');
+                }
+                return;
+            }
+
+            // 折叠的 thinking 面板任意位置点击展开
+            const collapsedThought = target.closest('.llm-ui-thought--collapsed') as HTMLElement;
+            if (collapsedThought) {
+                collapsedThought.classList.remove('llm-ui-thought--collapsed');
+                return;
+            }
+
             // data-action 委托
             const actionEl = target.closest('[data-action]') as HTMLElement;
             if (!actionEl) return;
