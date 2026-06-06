@@ -90,11 +90,17 @@ export class TokenMeterPlugin implements InputPlugin {
             this.strip.className = 'token-meter';
             this.strip.style.display = 'none';
 
-            // Append as the last child of .llm-input__main so it renders as a
-            // full-width status row below the input row, not as a flex sibling
-            // inside the horizontal .llm-input__input-row.
-            const main = this.ctx!.container.querySelector('.llm-input__main') ?? this.ctx!.container;
-            main.appendChild(this.strip);
+            // Insert inside .llm-input__toolbar-right, before the settings button,
+            // so token stats share the toolbar row instead of occupying a full row.
+            const toolbarRight = this.ctx!.container.querySelector('.llm-input__toolbar-right');
+            const settingsBtn  = toolbarRight?.querySelector('.llm-input__btn--settings');
+            if (toolbarRight && settingsBtn) {
+                toolbarRight.insertBefore(this.strip, settingsBtn);
+            } else {
+                // Fallback: append to main (original behavior)
+                const main = this.ctx!.container.querySelector('.llm-input__main') ?? this.ctx!.container;
+                main.appendChild(this.strip);
+            }
         }
         return this.strip;
     }
@@ -149,32 +155,36 @@ export class TokenMeterPlugin implements InputPlugin {
 
     private injectStyles(): void {
         injectStyle('token-meter-styles', `
-/* ── Token Meter strip ─────────────────────────────────────────────────── */
+/* ── Token Meter — inline in toolbar-right ─────────────────────────────── */
 .token-meter {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 10px;
+    gap: 5px;
+    padding: 0 6px;
     font-size: 11px;
     color: var(--text-tertiary, #aaa);
-    background: var(--bg-primary, #fff);
-    border-top: 1px solid var(--border-color-subtle, #f0f0f0);
     flex-wrap: nowrap;
     overflow: hidden;
     white-space: nowrap;
     user-select: none;
+    /* Separator from toolbar-left via flex spacer in toolbar */
+    border-right: 1px solid var(--border-color-subtle, #eee);
+    margin-right: 2px;
+    max-width: 280px;
+    flex-shrink: 1;
+    min-width: 0;
 }
-.token-meter__sep { opacity: 0.4; }
+.token-meter__sep { opacity: 0.35; flex-shrink: 0; }
 .token-meter__arrow { font-size: 10px; margin-right: 1px; opacity: 0.7; }
 .token-meter__arrow--in  { color: var(--accent, #1967d2); }
 .token-meter__arrow--out { color: var(--color-orange, #e67e22); }
-.token-meter__tokens { display: flex; align-items: center; gap: 2px; }
+.token-meter__tokens { display: flex; align-items: center; gap: 2px; flex-shrink: 1; min-width: 0; }
 .token-meter__cache { color: var(--color-green, #27ae60); margin-left: 3px; }
-.token-meter__cost { font-weight: 500; color: var(--text-secondary, #666); }
+.token-meter__cost { font-weight: 500; color: var(--text-secondary, #666); flex-shrink: 0; }
 .token-meter__est { opacity: 0.6; font-size: 9px; vertical-align: super; cursor: help; }
 
 /* Context bar */
-.token-meter__ctx { display: flex; align-items: center; gap: 4px; }
+.token-meter__ctx { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .token-meter__ctx-label { opacity: 0.6; font-size: 10px; }
 .token-meter__bar {
     font-family: monospace;
@@ -188,19 +198,22 @@ export class TokenMeterPlugin implements InputPlugin {
 .token-meter__ctx--warn   { color: #e67e22; }
 .token-meter__ctx--danger { color: #e74c3c; animation: token-pulse 1.5s ease-in-out infinite; }
 
-.token-meter__dur { opacity: 0.6; }
+.token-meter__dur { opacity: 0.6; flex-shrink: 0; }
 
 @keyframes token-pulse {
     0%,100% { opacity: 1; }
     50%      { opacity: 0.6; }
 }
 
-/* Responsive: hide less important parts on narrow viewports */
-@media (max-width: 480px) {
+/* Narrow toolbar: progressively hide lower-priority items */
+@media (max-width: 640px) {
     .token-meter__dur { display: none; }
+    .token-meter__cost { display: none; }
 }
-@media (max-width: 380px) {
+@media (max-width: 480px) {
+    /* Only show context bar on very small screens */
     .token-meter__tokens { display: none; }
+    .token-meter .token-meter__sep { display: none; }
 }
 `);
     }
