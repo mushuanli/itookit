@@ -206,21 +206,49 @@ export const ChatInputTemplates = {
     /**
      * 渲染主输入区域
      *
-     * 布局分两行：
-     * - 第一行：agent picker + connection quick-switch
-     * - 第二行：field-wrapper + action buttons（水平排列）
+     * Claude.ai 风格布局：
+     * - 上方：field-wrapper（附件 + 活动 badge + textarea）
+     * - 下方：toolbar（左侧功能组 + 右侧操作组）
      */
     renderInputArea(): string {
         return `
             <div class="llm-input__main">
-                <div class="llm-input__selectors-row">
+                ${this.renderFieldWrapper()}
+                ${this.renderToolbar()}
+            </div>
+        `;
+    },
+
+    /**
+     * 底部工具栏
+     *
+     * 左侧：attach / agent picker / conn quick-switch / more
+     * 右侧：settings / send / stop
+     */
+    renderToolbar(): string {
+        return `
+            <div class="llm-input__toolbar">
+                <div class="llm-input__toolbar-left">
+                    <button class="llm-input__btn llm-input__btn--attach" title="${t('chatInput.add.menu')}">
+                        ${this.addIcon()}
+                    </button>
                     ${this.renderAgentPicker()}
                     ${this.renderConnQuick()}
                     ${this.renderPromptPicker()}
+                    <button class="llm-input__btn llm-input__btn--more" title="More options">
+                        ${this.moreIcon()}
+                    </button>
                 </div>
-                <div class="llm-input__input-row">
-                    ${this.renderFieldWrapper()}
-                    ${this.renderActions()}
+                <div class="llm-input__toolbar-right">
+                    <button class="llm-input__btn llm-input__btn--settings" title="Chat Settings">
+                        ${this.sliderIcon()}
+                    </button>
+                    <button class="llm-input__btn llm-input__btn--send" title="Send (Enter)">
+                        ${this.sendIcon()}
+                    </button>
+                    <button class="llm-input__btn llm-input__btn--stop" title="Stop Generation" style="display:none;">
+                        ${this.stopIcon()}
+                    </button>
                 </div>
             </div>
         `;
@@ -247,7 +275,7 @@ export const ChatInputTemplates = {
 
 
     /**
-     * Connection 快速切换 pill（位于 selectors-row，始终可见）
+     * Connection 快速切换 pill（位于 toolbar 左侧）
      *
      * 默认显示 "Default"；有 override 时显示连接名并附带 × 清除按钮。
      * 下拉列表由 PopupPanel 管理（挂载在 body，position:fixed，规避 overflow:hidden）。
@@ -265,7 +293,7 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * 预设 Prompt 快速选择 pill（位于 selectors-row）
+     * 预设 Prompt 快速选择 pill（位于 toolbar 左侧，有 prompts 时显示）
      *
      * 仅当当前 Agent 配置了 defaultPrompts 时显示（由 ChatInput 控制可见性）。
      * 下拉列表由 PopupPanel 管理，选中后将 prompt 填入输入框。
@@ -297,10 +325,10 @@ export const ChatInputTemplates = {
             <div class="llm-input__field-wrapper">
                 <div class="llm-input__attachments" style="display:none"></div>
                 ${this.renderActiveBadges()}
-                <textarea 
-                    class="llm-input__textarea" 
-                    placeholder="Message... (Paste images or Drag & Drop)" 
-                    rows="1"
+                <textarea
+                    class="llm-input__textarea"
+                    placeholder="Message... (Paste images or Drag & Drop)"
+                    rows="2"
                 ></textarea>
             </div>
         `;
@@ -333,28 +361,10 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * 操作按钮组
+     * @deprecated 由 renderToolbar() 取代，保留以防外部引用
      */
     renderActions(): string {
-        return `
-            <div class="llm-input__actions">
-                <button class="llm-input__btn llm-input__btn--help" title="Show keyboard shortcuts &amp; commands (?)">
-                    ${this.helpIcon()}
-                </button>
-                <button class="llm-input__btn llm-input__btn--settings" title="Chat Settings">
-                    ${this.sliderIcon()}
-                </button>
-                <button class="llm-input__btn llm-input__btn--attach" title="${t('chatInput.add.menu')}">
-                    ${this.addIcon()}
-                </button>
-                <button class="llm-input__btn llm-input__btn--send" title="Send">
-                    ${this.sendIcon()}
-                </button>
-                <button class="llm-input__btn llm-input__btn--stop" title="Stop Generation" style="display:none;">
-                    ${this.stopIcon()}
-                </button>
-            </div>
-        `;
+        return this.renderToolbar();
     },
 
     /**
@@ -631,6 +641,14 @@ export const ChatInputTemplates = {
             <circle cx="12" cy="12" r="10"></circle>
             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
             <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>`;
+    },
+
+    moreIcon(): string {
+        return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"></circle>
+            <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"></circle>
+            <circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"></circle>
         </svg>`;
     },
 };

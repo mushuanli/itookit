@@ -143,10 +143,14 @@ export class ChatInput implements IChatInputPresenter {
     private skillsList!: HTMLElement;
 
     // ── Help panel ───────────────────────────────────────────────────────────
-    private helpBtn!: HTMLButtonElement;
+    private helpBtn!: HTMLButtonElement; // lives inside more popup, bound lazily
     private helpPanel!: HTMLElement;
     private helpBody!: HTMLElement;
     private helpVisible = false;
+
+    // ── More menu ─────────────────────────────────────────────────────────────
+    private moreBtn!: HTMLButtonElement;
+    private morePopup: PopupPanel | null = null;
 
     // ── Tool output panel ─────────────────────────────────────────────────────
     private toolOutputEl: HTMLElement | null = null;
@@ -262,6 +266,7 @@ export class ChatInput implements IChatInputPresenter {
         this.connectionSelect.disabled = loading;
         this.attachBtn.disabled = loading;
         this.settingsBtn.disabled = loading;
+        if (this.moreBtn) this.moreBtn.disabled = loading;
 
         if (loading) {
             this.inputWrapper.classList.add('llm-input__field-wrapper--disabled');
@@ -387,6 +392,8 @@ export class ChatInput implements IChatInputPresenter {
         this.connPopup = null;
         this.promptPopup?.destroy();
         this.promptPopup = null;
+        this.morePopup?.destroy();
+        this.morePopup = null;
         this.attachmentMgr?.destroy();
         this.container.innerHTML = '';
         this.files = [];
@@ -435,6 +442,7 @@ export class ChatInput implements IChatInputPresenter {
         this.stopBtn = q('.llm-input__btn--stop');
         this.attachBtn = q('.llm-input__btn--attach');
         this.settingsBtn = q('.llm-input__btn--settings');
+        this.moreBtn = q('.llm-input__btn--more');
 
         // Agent Picker combobox elements
         this.agentPickerBtn = q('.llm-input__agent-trigger');
@@ -447,7 +455,7 @@ export class ChatInput implements IChatInputPresenter {
         this.connQuickLabel = q('.llm-input__conn-quick-label');
         this.connQuickClear = q('.llm-input__conn-quick-clear');
 
-        // Prompt picker elements
+        // Prompt picker elements (in toolbar)
         this.promptPickerWrapper = q('.llm-input__prompt-picker-wrapper');
         this.promptPickerBtn = q('.llm-input__prompt-picker');
 
@@ -469,10 +477,11 @@ export class ChatInput implements IChatInputPresenter {
         this.skillSection = q('.llm-input__skill-section');
         this.skillsList = q('.llm-input__skills-list');
 
-        // Help panel
-        this.helpBtn = q('.llm-input__btn--help');
+        // Help panel (button is inside the more popup — bound lazily in toggleMoreMenu)
         this.helpPanel = q('.llm-input__help-panel');
         this.helpBody = q('.llm-input__help-body');
+        // helpBtn is assigned in bindHelpEvents() after the popup renders
+        this.helpBtn = document.createElement('button'); // placeholder to avoid null checks
     }
 
     private bindEvents(): void {
@@ -517,6 +526,7 @@ export class ChatInput implements IChatInputPresenter {
             (anchor, opts) => new PopupPanel(anchor, opts)
         ));
         this.settingsBtn.addEventListener('click', () => this.toggleSettings());
+        this.moreBtn?.addEventListener('click', () => this.toggleMoreMenu());
 
         this.container.querySelector('.llm-input__settings-close')
             ?.addEventListener('click', () => this.toggleSettings(false));
@@ -832,7 +842,9 @@ export class ChatInput implements IChatInputPresenter {
 
     private adjustTextareaHeight(): void {
         this.textarea.style.height = 'auto';
-        const newHeight = Math.min(this.textarea.scrollHeight, 200);
+        const lineHeight = parseFloat(getComputedStyle(this.textarea).lineHeight) || 24;
+        const minHeight = lineHeight * 2 + 8; // 2 rows + padding
+        const newHeight = Math.max(minHeight, Math.min(this.textarea.scrollHeight, 200));
         this.textarea.style.height = `${newHeight}px`;
     }
 
@@ -904,6 +916,48 @@ export class ChatInput implements IChatInputPresenter {
         if (label) label.textContent = this.config.settings.streamMode ? 'Enabled' : 'Disabled';
     }
 
+    // ── More menu ─────────────────────────────────────────────────────────────
+
+    /**
+     * 切换 "..." 更多菜单。
+     *
+     * 菜单内容：Help（始终）+ Prompt Picker 入口（有 prompts 时）。
+     * 使用 PopupPanel 实现，锚点为 moreBtn。
+     */
+    private toggleMoreMenu(): void {
+        if (!this.morePopup) {
+            this.morePopup = new PopupPanel(this.moreBtn, {
+                showSearch: false,
+                animated: true,
+            });
+        }
+        if (this.morePopup.isVisible) {
+            this.morePopup.hide();
+            this.moreBtn.classList.remove('active');
+            return;
+        }
+
+        const items = this.buildMoreMenuItems();
+        this.morePopup.show(items, {
+            onSelect: (item) => {
+                this.moreBtn.classList.remove('active');
+                if (item.id === '__help') this.toggleHelp();
+                else if (item.id === '__prompts') this.togglePromptPicker();
+            },
+        });
+        this.moreBtn.classList.add('active');
+    }
+
+    private buildMoreMenuItems(): PopupItem[] {
+        const items: PopupItem[] = [
+            { id: '__help', label: 'Keyboard shortcuts & commands', icon: '?' },
+        ];
+        if (this.getCurrentPrompts().length > 0) {
+            items.push({ id: '__prompts', label: 'Preset Prompts', icon: '💬' });
+        }
+        return items;
+    }
+
     // ── Help panel ────────────────────────────────────────────────────────────
 
     /**
@@ -942,19 +996,13 @@ export class ChatInput implements IChatInputPresenter {
     }
 
     private bindHelpEvents(): void {
-        this.helpBtn?.addEventListener('click', () => this.toggleHelp());
-
         // Close button inside panel
         this.helpPanel?.querySelector('.llm-input__help-close')
             ?.addEventListener('click', () => this.hideHelp());
 
-        // Click outside help panel closes it
+        // Click outside help panel closes it (moreBtn not excluded since help is triggered via popup)
         document.addEventListener('click', (e: MouseEvent) => {
-            if (
-                this.helpVisible &&
-                !this.helpPanel.contains(e.target as Node) &&
-                !this.helpBtn.contains(e.target as Node)
-            ) {
+            if (this.helpVisible && !this.helpPanel.contains(e.target as Node)) {
                 this.hideHelp();
             }
         });

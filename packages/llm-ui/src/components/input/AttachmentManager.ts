@@ -4,7 +4,7 @@
 import { ChatInputTemplates } from '../templates/ChatInputTemplates';
 import { downscaleImageForOcr } from '../../utils/imageDownscale';
 import { t } from '@itookit/common';
-import type { OcrReviewPanel } from './OcrReviewPanel';
+import { OcrReviewPanel } from './OcrReviewPanel';
 import type { PopupPanel, PopupItem } from './plugins/PopupPanel';
 
 let CAMERA_GUARD = false;      // prevent double-open on some mobile browsers
@@ -231,7 +231,6 @@ export class AttachmentManager {
         if (!this.opts.onOcrImage) return;
         // Lazy-create OcrReviewPanel
         if (!this.ocrPanel) {
-            const { OcrReviewPanel } = require('./OcrReviewPanel');
             this.ocrPanel = new OcrReviewPanel(this.opts.container);
         }
         const panel = this.ocrPanel!;
