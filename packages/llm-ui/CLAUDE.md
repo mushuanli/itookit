@@ -18,7 +18,10 @@ src/
 └── commands/      ← SendMessageCommand, NodeCommands, BranchCommands
 ```
 
-详情: [工厂函数 + 插件系统](./doc/factories-and-plugins.md)
+详情:
+- 工厂函数 + 插件系统: [factories-and-plugins.md](./doc/factories-and-plugins.md)
+- 事件处理 + 渲染管线: [event-processing.md](./doc/event-processing.md)
+- Slash 命令系统: [slash-commands.md](./doc/slash-commands.md)
 
 ## Conventions
 

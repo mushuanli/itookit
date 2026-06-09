@@ -346,40 +346,31 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   private async tryReadValidManifest(nodeId: string): Promise<ChatManifest | null> {
     try {
       const content = await this.engine.driver.readContent(nodeId);
-      const byteLen = content instanceof ArrayBuffer ? content.byteLength : (content as string).length;
-      console.log(`[tryReadValidManifest] nodeId=${nodeId} contentBytes=${byteLen}`);
       if (!content) return null;
 
       const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
-      if (!str) {
-        console.warn(`[tryReadValidManifest] nodeId=${nodeId} → empty string after decode`);
-        return null;
-      }
+      if (!str) return null;
+
       const parsed = JSON.parse(str);
       const valid = this.isValidManifest(parsed);
-      if (!valid) console.warn(`[tryReadValidManifest] nodeId=${nodeId} → parsed but failed isValidManifest`, parsed);
+      if (!valid) log.warn('Manifest parsed but failed structure check', { nodeId });
       return valid ? parsed : null;
-    } catch (e) {
-      console.warn(`[tryReadValidManifest] nodeId=${nodeId} → exception`, e);
+    } catch {
       return null;
     }
   }
 
   private async isSessionStructureIntact(chatFileId: string, manifest: ChatManifest): Promise<boolean> {
     const assetDirPath = await this.engine.meta.assets.getAssetDirPath(chatFileId);
-    console.log(`[isSessionStructureIntact] chatFileId=${chatFileId} assetDirPath=${assetDirPath}`);
     if (!assetDirPath) return false;
 
     const assetDir = await this.getAssetDirPath(chatFileId);
     const rootPath = `${assetDir}/${manifest.root_id}.chat`;
     const rootNode = await this.readJson<ChatNode>(rootPath);
-    console.log(`[isSessionStructureIntact] rootPath=${rootPath} rootNode=${rootNode ? 'OK' : 'NULL'}`);
     // If the root node file exists (assetDirId found) but can't be parsed,
     // treat as intact — unreadable != absent. Rebuild would wipe all nodes.
     if (!rootNode) {
-      const exists = await this.engine.driver.exists(rootPath);
-      console.log(`[isSessionStructureIntact] rootNode unreadable, file exists=${exists}`);
-      return exists;
+      return this.engine.driver.exists(rootPath);
     }
     return rootNode.status !== 'deleted';
   }
@@ -706,7 +697,6 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     title: string,
     systemPrompt: string = 'You are a helpful assistant.'
   ): Promise<string> {
-    console.log(`[initializeExistingFile] path=${nodeId} title="${title}"`);
     const manifest = await this.tryReadValidManifest(nodeId);
 
     if (!manifest) {
@@ -720,25 +710,21 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
         : (existing as string).length;
 
       if (existingSize > 0) {
-        console.warn(`[initializeExistingFile] nodeId=${nodeId} → file has ${existingSize} bytes but manifest is invalid — refusing to auto-create (would overwrite user data)`);
+        log.error('Session file is corrupt, refusing to auto-create', { nodeId, existingSize });
         throw new Error(`Session file is corrupt and cannot be parsed (nodeId=${nodeId}). Manual recovery required.`);
       }
 
-      console.warn(`[initializeExistingFile] nodeId=${nodeId} → file is empty, creating new session`);
       return this.createNewSessionForNode(nodeId, title, systemPrompt);
     }
 
-    console.log(`[initializeExistingFile] manifest OK: id=${manifest.id} head=${manifest.current_head} next_sn=${manifest.next_sn}`);
-
     const intact = await this.isSessionStructureIntact(nodeId, manifest);
     if (!intact) {
-      console.warn(`[initializeExistingFile] nodeId=${nodeId} → structure broken, rebuilding (will lose nodes)`);
+      log.warn('Session structure broken, attempting rebuild', { nodeId });
       return this.rebuildSessionStructure(nodeId, manifest, systemPrompt);
     }
 
     // Populate cache
     this.chatFileIds.set(manifest.id, nodeId);
-    console.log(`[initializeExistingFile] session loaded: ${manifest.id}`);
     return manifest.id;
   }
 
@@ -767,7 +753,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     if (assetDirPath) {
       const assets = await this.engine.driver.getChildren(assetDirPath) as FSNode[];
       if (assets.length > 0) {
-        console.warn(`[rebuildSessionStructure] nodeId=${nodeId} → asset dir has ${assets.length} nodes, refusing to delete user data`);
+        log.error('Session structure broken but asset dir has nodes, refusing to rebuild', { nodeId, count: assets.length });
         throw new Error(`Session structure is broken but asset dir contains ${assets.length} node(s) — cannot auto-rebuild without data loss (nodeId=${nodeId}). Manual recovery required.`);
       }
       // Asset dir exists but is empty — safe to remove and recreate
@@ -1478,27 +1464,42 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
 
   async validateManifest(nodeId: string, _sessionId: string): Promise<boolean> {
     try {
+      const manifest = await this.getManifest(nodeId);
       const assetDir = await this.getAssetDirPath(nodeId);
-      console.log(`[validateManifest] nodeId=${nodeId} assetDir=${assetDir}`);
-      const io = this.getManifestIO();
-      const { repaired } = await repairManifest(
-        io,
+
+      const isNodeInvalid = async (id: string): Promise<boolean> => {
+        const node: ChatNode | null = await this.readJson<ChatNode>(`${assetDir}/${id}.chat`);
+        return node === null || node.status === 'deleted';
+      };
+
+      // Check if any head/branch reference is invalid before attempting repair
+      let needsRepair = await isNodeInvalid(manifest.current_head);
+      if (!needsRepair) {
+        for (const branchHead of Object.values(manifest.branches)) {
+          if (await isNodeInvalid(branchHead)) {
+            needsRepair = true;
+            break;
+          }
+        }
+      }
+
+      if (!needsRepair) return true;
+
+      // Repair manifest pointers only — never deletes chat data files
+      log.warn('Manifest has invalid references, repairing pointers', { nodeId });
+      await repairManifest(
+        this.getManifestIO(),
         nodeId,
-        async (id) => {
-          const nodePath = `${assetDir}/${id}.chat`;
-          const node: ChatNode | null = await this.readJson<ChatNode>(nodePath);
-          console.log(`[validateManifest] isInvalid check: ${nodePath} → node=${node ? `role=${node.role} status=${node.status}` : 'NULL'}`);
-          // Only treat explicitly soft-deleted nodes as invalid.
-          // Unreadable nodes (empty file, parse error) are a storage
-          // corruption issue — do NOT remove their branch pointers.
-          return node !== null && node.status === 'deleted';
-        },
-        async (_invalidId, manifest) => manifest.root_id
+        isNodeInvalid,
+        async (_invalidId, m) => {
+          // Walk ancestors of root to find a valid fallback
+          const rootNode: ChatNode | null = await this.readJson<ChatNode>(`${assetDir}/${m.root_id}.chat`);
+          return (rootNode && rootNode.status !== 'deleted') ? m.root_id : m.root_id;
+        }
       );
-      return repaired;
+      return false;
     } catch (e) {
       log.error('Manifest validation failed', { nodeId, error: e });
-      console.error(`[validateManifest] exception for nodeId=${nodeId}`, e);
       return false;
     }
   }

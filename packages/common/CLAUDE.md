@@ -9,23 +9,31 @@
 ```
 src/
 ├── index.ts              ← 统一导出入口
-├── interfaces/           ← 接口定义
+├── interfaces/
 │   ├── fs/               ← VFS 核心接口
-│   │   ├── services/
-│   │   │   ├── fs-driver.ts      ← IFSDriver + IFSDriverTransaction (v3.3)
-│   │   │   ├── fs-meta-driver.ts ← IFSMetaDriver (v3.3)
-│   │   │   ├── module-fs.ts      ← IModuleFS + IFSTransaction
-│   │   │   ├── vfs-manager.ts    ← IVFSManager
-│   │   │   ├── config-service.ts ← IConfigService
-│   │   │   └── factory.ts        ← VFSFactory
+│   │   ├── services/     ← IVFSManager, IModuleFS, IFSDriver, IFSMetaDriver
 │   │   ├── core/         ← FSNode, FSEvent, FSError, Options
-│   │   ├── storage/      ← IStorageBackend (path-based) + IRecordStore
-│   │   ├── capabilities/ ← IAssetOperations, ITagOperations, ISeqFileOperations, IRefOperations, IWatchOperations
+│   │   ├── storage/      ← IStorageBackend (path-based)
+│   │   ├── capabilities/ ← IAssetOps, ITagOps, ISeqFileOps, IRefOps, IWatchOps
 │   │   ├── device/       ← IDeviceDriver, IDeviceHandle
 │   │   ├── mount/        ← IMountRouter, MountPoint
 │   │   ├── plugin/       ← IPlugin, IPluginManager
 │   │   └── sync/         ← ISyncService
-│   ├── IFSEngine.ts      ← @deprecated v3.3
+│   ├── llm/              ← LLM 核心接口
+│   │   ├── connection.ts ← LLMProvider, LLMConnection, ModelTier
+│   │   ├── message.ts    ← ChatMessage, ToolCall, Attachment
+│   │   ├── completion.ts ← ChatCompletionParams/Response, TokenUsage
+│   │   ├── llm-service.ts← ILLMService
+│   │   ├── agent.ts      ← AgentDefinition, LLMSkill, MCPServer, IConnectionService
+│   │   └── mission.ts    ← MissionPlan, TodoItem, HITLRequest
+│   ├── agent/            ← Agent 运行时接口
+│   │   ├── agent-types.ts   ← AgentEventType, AgentEventPayloads, AgentTaskRequest
+│   │   ├── agent-service.ts ← IAgentRuntime (run/abort/inject/on)
+│   │   ├── context-manager.ts, budget-controller.ts, error-recovery.ts
+│   │   ├── back-pressure.ts, sub-agent.ts
+│   ├── skills/           ← Skill 接口 (SkillDefinition, ISkillService)
+│   ├── tty/              ← TTY 接口 (ITTYSession, ITTYDriver)
+│   ├── tools/            ← Tool 接口 (ToolMeta, ToolSideEffect)
 │   ├── IFile.ts          ← IFile + AssetObj (v4.1: asset(name) API)
 │   ├── IMDXFile.ts       ← extends IFile
 │   ├── IChatFile.ts      ← extends IFile
@@ -52,6 +60,46 @@ src/
 | `AssetObj` | 子文件 | assetdir 内子文件轻量句柄 (read/write/delete/exists) |
 
 调用方始终以接口为类型，具体装配只在 `app-shell/bootstrap.ts` 中。
+
+## LLM 三层架构
+
+```
+LLMProvider (云厂商，持有 apiKey + 模型目录)
+    → connection.ts
+    ↕
+LLMConnection (绑定 Provider，配置 tier→model 映射，不存 apiKey)
+    → connection.ts
+    ↕
+AgentDefinition (绑定 Connection + tier 偏好 + system prompt)
+    → agent.ts
+```
+
+| 接口/类型 | 文件 | 说明 |
+|---|---|---|
+| `LLMProvider` | `interfaces/llm/connection.ts` | 云厂商定义 (id, implementation, baseURL, models[]) |
+| `LLMConnection` | `interfaces/llm/connection.ts` | 连接配置 (providerId, tiers, metadata) — 不含 apiKey |
+| `ConnectionMeta` | `interfaces/llm/connection.ts` | 连接安全元数据（UI 列表用，strip apiKey） |
+| `ModelTier` | `interfaces/llm/connection.ts` | `'optimal' | 'standard' | 'fast'` |
+| `AgentDefinition` | `interfaces/llm/agent.ts` | Agent 定义 (config: {connectionId, modelTier, systemPrompt}) |
+| `IConnectionService` | `interfaces/llm/agent.ts` | 连接 CRUD + Provider 查询 |
+| `IAgentConfigService` | `interfaces/llm/agent.ts` | Agent/Connection 读取（SessionManager 依赖） |
+| `IAgentManagementService` | `interfaces/llm/agent.ts` | 完整管理接口（Settings UI 消费，extends ConfigService + ConnectionService） |
+
+## Agent 任务流
+
+```
+IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult
+    → 定义在 interfaces/agent/agent-service.ts + agent-types.ts
+```
+
+| 接口/类型 | 文件 | 说明 |
+|---|---|---|
+| `AgentTaskRequest` | `interfaces/agent/agent-types.ts` | 任务请求 (prompt, modelOverride, budgetOverride, …) |
+| `AgentTaskResult` | `interfaces/agent/agent-types.ts` | 任务结果 (sessionId, status, response, usage) |
+| `IAgentRuntime` | `interfaces/agent/agent-service.ts` | 核心运行时 (run/abort/inject/on/onIntercept/respondToHumanInput) |
+| `IAgentRuntimeConfig` | `interfaces/agent/agent-service.ts` | 运行时配置 (modelRoles, budgetLimits, loopConfig) |
+| `AgentEventType` | `interfaces/agent/agent-types.ts` | 25 种事件联合类型 |
+| `AgentEventPayloads` | `interfaces/agent/agent-types.ts` | 事件→payload 映射 |
 
 ## Conventions
 

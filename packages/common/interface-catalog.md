@@ -20,26 +20,50 @@
 
 ## LLM 体系 (interfaces/llm/)
 
+**三层架构**: `LLMProvider` → `LLMConnection` → `AgentDefinition`
+
 | 文件 | 核心导出 |
 |---|---|
-| `connection.ts` | `LLMConnection`, `LLMProvider`, `ModelTier`, `ConnectionMeta` |
-| `message.ts` | `ChatMessage`, `ToolCall`, `ToolDefinition`, `Attachment` |
-| `completion.ts` | `ChatCompletionParams`, `ChatCompletionResponse`, `TokenUsage` |
+| `connection.ts` | `LLMConnection`, `LLMProvider`, `ModelTier`, `ConnectionMeta`, `LLMModel` |
+| `message.ts` | `ChatMessage`, `ToolCall`, `ToolDefinition`, `Attachment`, `Role`, `MessageContentPart` |
+| `completion.ts` | `ChatCompletionParams`, `ChatCompletionResponse`, `TokenUsage`, `FinishReason` |
 | `llm-service.ts` | `ILLMService` (chat, chatStream, abort) |
-| `agent.ts` | `AgentDefinition`, `LLMSkill`, `MCPServer` |
+| `agent.ts` | `AgentDefinition`, `LLMSkill`, `MCPServer`, `IConnectionService`, `IAgentConfigService`, `IAgentManagementService` |
 | `mission.ts` | `MissionPlan`, `TodoItem`, `HITLRequest`, `VerifierVerdict` |
 
 ## Agent 体系 (interfaces/agent/)
 
+**核心入口**: `IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult`
+
 | 文件 | 核心导出 |
 |---|---|
-| `agent-types.ts` | `AgentEventType`, `AgentEventPayloads`, `AgentTaskRequest`, `AgentBudgetLimits` |
-| `agent-service.ts` | `IAgentRuntime` (run/abort/inject/on/onIntercept/respondToHumanInput/ttyWrite) |
+| `agent-types.ts` | `AgentTaskRequest`, `AgentTaskResult`, `AgentEventType` (25 种), `AgentEventPayloads`, `AgentBudgetLimits`, `AgentSessionInfo` |
+| `agent-service.ts` | `IAgentRuntime` (run/abort/inject/on/onIntercept/respondToHumanInput/ttyWrite), `IAgentRuntimeConfig` |
 | `context-manager.ts` | `IContextManager` |
 | `budget-controller.ts` | `IBudgetController`, `BudgetExhaustedError` |
 | `error-recovery.ts` | `IErrorRecoveryService` |
 | `back-pressure.ts` | `BackPressureRule` |
 | `sub-agent.ts` | `ISubAgentRouter`, `SubAgentTask` |
+
+## Skill 体系 (interfaces/skills/)
+
+| 文件 | 核心导出 |
+|---|---|
+| `skill-types.ts` | `SkillDefinition`, `SkillType`, `SkillToolBinding`, `SkillRouteLayer`, `CompactSection` |
+| `skill-service.ts` | `ISkillService` (listSkills/loadSkill/getRouteLayers/semanticMatchSkills/setCwd) |
+| `fs-skill-types.ts` | `SkillFrontmatter`, `FSSkillDirectory`, `ScopeEntry` |
+
+## TTY 体系 (interfaces/tty/)
+
+| 文件 | 核心导出 |
+|---|---|
+| `tty-types.ts` | `ITTYSession` (write/kill/on), `ITTYDriver` (spawn sessions), `ITTYSessionManager` |
+
+## Tool 体系 (interfaces/tools/)
+
+| 文件 | 核心导出 |
+|---|---|
+| `tool-types.ts` | `ToolMeta` (id/sideEffect/timeoutMs), `ToolSideEffect` ('none'|'local'|'external'), `ToolInvokeRequest/Result` |
 
 ## 其他接口
 
@@ -49,6 +73,3 @@
 | `ISessionUI.ts` | `ISessionUI<TSession, TService>`, `ContextMenuConfig` |
 | `IEditor.ts` | `IEditor` 抽象类 |
 | `IEditorFactory.ts` | `EditorFactory` 类型 |
-| `tools/tool-types.ts` | `ToolMeta`, `ToolSideEffect`, `ToolInvokeRequest/Result` |
-| `skills/skill-types.ts` | `SkillDefinition`, `SkillType`, `SkillToolBinding` |
-| `tty/tty-types.ts` | `ITTYSession`, `ITTYDriver`, `ITTYSessionManager` |
