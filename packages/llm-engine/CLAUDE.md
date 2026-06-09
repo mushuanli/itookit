@@ -20,7 +20,9 @@ src/
 - **initializeLLMEngine()**: 初始化顺序 → Kernel → agentService.init() → sessionEngine.init() → SessionManager + HarnessAdapter
 - **TaskRunner**: 内部调度器，统一管理双路径和后台事件提升
 
-详情: [持久化 + 事件映射 + Mission + SDG](./doc/engine-details.md)
+详情:
+- 核心类型 + 运行时: [core-types.md](./doc/core-types.md)
+- 持久化 + 事件映射 + Mission + SDG: [engine-details.md](./doc/engine-details.md)
 
 ## Conventions
 
