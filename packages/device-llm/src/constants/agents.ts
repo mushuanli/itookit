@@ -3,13 +3,13 @@
 // 职责：绑定 Connection（通过 connectionId）+ system prompt + tier 偏好。
 // Agent 不持有 apiKey，也不关心具体 model ID（通过 modelTier 抽象）。
 
-import type { AgentType, AgentConfig, AgentDefinition, InitialAgentDef } from '@itookit/common';
+import type { AgentType, AgentConfig, PromptPreset, AgentDefinition, InitialAgentDef } from '@itookit/common';
 
 // 向后兼容：从 common 重新导出，避免其他包直接引用 device-llm 内部路径
 export type { AgentType, AgentConfig, AgentDefinition, InitialAgentDef };
 
 /** Agent 文件存储根目录 */
-export const AGENT_DEFAULT_DIR    = '/default';
+export const AGENT_DEFAULT_DIR = '/default';
 /** Provider 专属 Agent 存储目录 */
 export const LLM_AGENT_TARGET_DIR = '/default/providers';
 
@@ -22,6 +22,22 @@ const DEV_SYSTEM_PROMPT =
 
 const FEYNMAN_SYSTEM_PROMPT =
     "你是一位体现理查德·费曼简化复杂概念理念的杰出教师。你善于使用更简洁、更清晰、更直观的方式捕捉概念的精髓。";
+
+const FEYNMAN_PROMPTLIST: PromptPreset[] = [
+    {
+        name: '作文分析',
+        prompt: '按照优秀中学生作文标准审查分析下面作文要求和内容'
+    }
+];
+
+
+const DEV_PROMPTLIST: PromptPreset[] = [
+    {
+        name: '事件流',
+        prompt: '梳理下面日志，最前面是 tid, 画出 api 事件流:'
+    }
+];
+
 
 /**
  * 内置默认 Agent 列表。
@@ -67,6 +83,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '编程大师：遵循 SOLID / DRY / KISS / YAGNI / CoC / LoD 开发原则',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
+        defaultPrompts: DEV_PROMPTLIST,
         config: { connectionId: '', modelTier: 'optimal', systemPrompt: DEV_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
@@ -78,6 +95,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '编程大师（Gemini）：遵循 SOLID / DRY / KISS / YAGNI / CoC / LoD 开发原则',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
+        defaultPrompts: DEV_PROMPTLIST,
         config: { connectionId: 'conn-gemini', modelTier: 'optimal', systemPrompt: DEV_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
@@ -89,6 +107,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '编程大师（DeepSeek）：遵循 SOLID / DRY / KISS / YAGNI / CoC / LoD 开发原则',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
+        defaultPrompts: DEV_PROMPTLIST,
         config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPrompt: DEV_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
@@ -101,6 +120,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '你是一位体现理查德·费曼简化复杂概念理念的杰出教师。',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
+        defaultPrompts: FEYNMAN_PROMPTLIST,
         config: { connectionId: '', modelTier: 'optimal', systemPrompt: FEYNMAN_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
@@ -112,6 +132,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '你是一位体现理查德·费曼简化复杂概念理念的杰出教师。',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
+        defaultPrompts: FEYNMAN_PROMPTLIST,
         config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPrompt: FEYNMAN_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
@@ -123,6 +144,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '你是一位体现理查德·费曼简化复杂概念理念的杰出教师。',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
+        defaultPrompts: FEYNMAN_PROMPTLIST,
         config: { connectionId: 'default', modelTier: 'optimal', systemPrompt: FEYNMAN_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
