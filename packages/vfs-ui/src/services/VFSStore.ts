@@ -89,8 +89,10 @@ export class VFSStore implements IStatePort {
         draft.error = payload.error;
       },
       'CREATE_ITEM_START': () => {
+        const normalizedParentPath = payload.parentPath === '/' ? null : payload.parentPath;
         draft.creatingItem = {
           ...payload,
+          parentPath: normalizedParentPath,
           prevSelectedIds: [...draft.selectedItemIds],
         };
         draft.selectedItemIds.clear();
