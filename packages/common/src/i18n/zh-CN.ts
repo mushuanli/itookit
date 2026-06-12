@@ -286,6 +286,9 @@ export const zhCN = {
     'chatInput.ocr.cancel':      '取消',
     'chatInput.ocr.failed':      '识别失败',
     'chatInput.ocr.empty':       '未识别到文字',
+    'chatInput.ocr.all':         '全部提取文字',
+    'chatInput.ocr.all.tooltip': '批量识别所有图片并插入文字',
+    'chatInput.ocr.all.done':    '已处理 {done}/{total} 张图片',
 
     // ── Chat input — "+" add-source menu ─────────────────────────────────────
     'chatInput.add.menu':        '添加内容',

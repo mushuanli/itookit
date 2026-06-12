@@ -274,6 +274,9 @@ export const en: LocaleStrings = {
     'chatInput.ocr.cancel':      'Cancel',
     'chatInput.ocr.failed':      'Recognition failed',
     'chatInput.ocr.empty':       'No text detected',
+    'chatInput.ocr.all':         'Extract all text',
+    'chatInput.ocr.all.tooltip': 'Batch OCR all images and insert text',
+    'chatInput.ocr.all.done':    'Processed {done}/{total} images',
 
     // ── Chat input — "+" add-source menu ─────────────────────────────────────
     'chatInput.add.menu':        'Add content',
