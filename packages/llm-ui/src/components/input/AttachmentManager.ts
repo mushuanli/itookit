@@ -227,6 +227,79 @@ export class AttachmentManager {
 
     // ── OCR (image → text) ────────────────────────────────────────────────
 
+    /**
+     * Batch OCR: process all image attachments sequentially without review panel.
+     * Results are appended to the textarea separated by newlines.
+     * Failures are skipped silently; a status message is shown via the OCR panel.
+     */
+    async ocrAllImages(): Promise<void> {
+        if (!this.opts.onOcrImage) return;
+        const files = this.opts.getFiles();
+        const imageEntries = files
+            .map((f, i) => ({ file: f, index: i }))
+            .filter(e => e.file.type.startsWith('image/'));
+        if (imageEntries.length < 2) return;
+
+        if (!this.ocrPanel) {
+            this.ocrPanel = new OcrReviewPanel(this.opts.container);
+        }
+        const panel = this.ocrPanel;
+        const ocr = this.opts.onOcrImage;
+        let cancelled = false;
+
+        panel.showProcessing(
+            t('chatInput.ocr.all'),
+            () => { cancelled = true; panel.hide(); },
+        );
+
+        const results: string[] = [];
+        const removeIndices: number[] = [];
+        let done = 0;
+
+        for (const { file, index } of imageEntries) {
+            if (cancelled) return;
+            try {
+                const downscaled = await downscaleImageForOcr(file);
+                const text = (await ocr(downscaled)).trim();
+                if (text) {
+                    results.push(text);
+                    removeIndices.push(index);
+                }
+            } catch {
+                // skip failed images silently
+            }
+            done++;
+            // Update progress label between images
+            if (!cancelled) {
+                panel.showProcessing(
+                    t('chatInput.ocr.all.done')
+                        .replace('{done}', String(done))
+                        .replace('{total}', String(imageEntries.length)),
+                    () => { cancelled = true; panel.hide(); },
+                );
+            }
+        }
+
+        if (cancelled) return;
+        panel.hide();
+
+        if (results.length === 0) return;
+
+        // Insert all results at cursor, joined by blank lines
+        const ta = this.opts.textarea;
+        const pos = ta.selectionStart;
+        const combined = results.join('\n\n');
+        ta.value = ta.value.slice(0, pos) + combined + ta.value.slice(pos);
+        ta.selectionStart = ta.selectionEnd = pos + combined.length;
+
+        // Remove processed images (high → low index to preserve positions)
+        const remaining = this.opts.getFiles().filter((_, i) => !removeIndices.includes(i));
+        this.opts.setFiles(remaining);
+        this.renderAttachments();
+        this.opts.notifyConfigChange();
+        ta.focus();
+    }
+
     async ocrImage(file: File, index: number): Promise<void> {
         if (!this.opts.onOcrImage) return;
         // Lazy-create OcrReviewPanel

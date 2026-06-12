@@ -587,6 +587,28 @@
     opacity: 1;
 }
 
+/* 批量 OCR 按钮 — 附件区尾部，仅 ≥2 张图时出现 */
+.llm-input__ocr-all-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    border: 1px solid var(--llm-border-color);
+    border-radius: 4px;
+    background: none;
+    color: var(--llm-text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background var(--llm-transition-fast), color var(--llm-transition-fast);
+    align-self: center;
+}
+
+.llm-input__ocr-all-btn:hover {
+    background: var(--llm-bg-tertiary);
+    color: var(--llm-text-primary);
+}
+
 /* OCR 审阅面板 — 处理 / 审阅 / 错误三态 */
 .llm-input__ocr-panel {
     display: none;

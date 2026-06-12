@@ -551,6 +551,10 @@ export class ChatInput implements IChatInputPresenter {
             if (Number.isNaN(index)) return;
             this.attachmentMgr.ocrImage(this.files[index], index);
         });
+        delegate(this.attachmentContainer, 'click', '.llm-input__ocr-all-btn', ({ event }) => {
+            event.stopPropagation();
+            this.attachmentMgr.ocrAllImages();
+        });
 
         this.bindSettingsEvents();
         this.attachmentMgr.bindDragEvents();

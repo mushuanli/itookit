@@ -494,7 +494,8 @@ export const ChatInputTemplates = {
      * @param canOcr    是否注入了 OCR 能力(决定图片 chip 是否显示「提取文字」按钮)
      */
     renderAttachments(files: File[], canOcr = false): string {
-        return files.map((f, i) => {
+        const imageCount = files.filter(f => f.type.startsWith('image/')).length;
+        const chips = files.map((f, i) => {
             const isImage = f.type.startsWith('image/');
             const ocrBtn = (isImage && canOcr)
                 ? `<button class="llm-input__ocr-btn" data-index="${i}" type="button" title="${t('chatInput.ocr.tooltip')}">${ACTION_ICONS.ocr}</button>`
@@ -509,6 +510,12 @@ export const ChatInputTemplates = {
             </div>
         `;
         }).join('');
+
+        const batchBtn = (canOcr && imageCount >= 2)
+            ? `<button class="llm-input__ocr-all-btn" type="button" title="${t('chatInput.ocr.all.tooltip')}">${ACTION_ICONS.ocr} ${t('chatInput.ocr.all')}</button>`
+            : '';
+
+        return chips + batchBtn;
     },
 
     /**
