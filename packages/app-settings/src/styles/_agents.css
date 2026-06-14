@@ -394,6 +394,38 @@
 .agent-tier-btn__icon { font-size: 1.2rem; }
 .agent-tier-btn__label { font-weight: 600; }
 .agent-tier-btn__desc { color: var(--st-text-secondary); font-size: 0.72rem; }
+.agent-tier-btn__model {
+    color: var(--st-text-secondary);
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+/* Jump-to-settings inline link button */
+.agent-goto-btn {
+    display: inline;
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--st-color-primary, #6366f1);
+    font-size: inherit;
+    text-decoration: underline;
+    white-space: nowrap;
+}
+.agent-goto-btn--inline {
+    padding: 4px 8px;
+    font-size: 0.78rem;
+    border: 1px solid var(--st-color-primary, #6366f1);
+    border-radius: 4px;
+    text-decoration: none;
+    flex-shrink: 0;
+}
+.agent-goto-btn--inline:hover {
+    background: var(--st-color-primary-light, rgba(99,102,241,.08));
+}
 
 /* Invalid connection warning banner */
 .agent-conn-invalid-banner {

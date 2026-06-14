@@ -46,7 +46,7 @@ function toFSNode(id: string, config: (typeof SETTINGS_PAGES)[string]): FSFileNo
         name: config.name,
         type: 'file',
         icon: config.icon,
-        path: `/${config.name}`,
+        path: id,
         size: 0,
         createdAt: now,
         modifiedAt: now,
@@ -165,6 +165,9 @@ class SettingsDriver implements IFSDriver {
     }
 
     async resolvePath(_path: string): Promise<string | null> {
+        // path === slug after toFSNode change
+        if (_path in SETTINGS_PAGES) return _path;
+        // backward-compat: accept legacy "/${name}" paths
         for (const [id, cfg] of Object.entries(SETTINGS_PAGES)) {
             if (_path === `/${cfg.name}`) return id;
         }

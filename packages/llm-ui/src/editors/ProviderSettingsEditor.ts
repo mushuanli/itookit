@@ -98,6 +98,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         `;
 
         this.bindListEvents();
+        this.consumeAnchor(sorted);
     }
 
     // ── Card ───────────────────────────────────────────────────────────────────
@@ -185,6 +186,39 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
 
 
     // ── List events ────────────────────────────────────────────────────────────
+
+    /**
+     * Consumes the one-shot `settings_anchor` from sessionStorage.
+     * If the anchor matches a provider id, highlights the card, scrolls it into view,
+     * and opens the edit modal automatically. Clears the entry to avoid repeat triggers.
+     */
+    private consumeAnchor(providers: LLMProvider[]): void {
+        const raw = sessionStorage.getItem('settings_anchor');
+        if (!raw) return;
+        try {
+            const { target, anchor, timestamp } = JSON.parse(raw) as { target: string; anchor: string; timestamp: number };
+            // Discard stale entries (> 5s old) or entries not for this page
+            if (target !== 'settings' || Date.now() - timestamp > 5000) {
+                sessionStorage.removeItem('settings_anchor');
+                return;
+            }
+            sessionStorage.removeItem('settings_anchor');
+            const provider = providers.find(p => p.id === anchor);
+            if (!provider) return;
+
+            // Highlight card and scroll into view
+            const card = this.container.querySelector(`[data-id="${CSS.escape(anchor)}"]`) as HTMLElement | null;
+            if (card) {
+                card.classList.add('settings-card--anchored');
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => card.classList.remove('settings-card--anchored'), 2000);
+            }
+            // Auto-open the edit modal
+            setTimeout(() => this.showEditModal(provider), 120);
+        } catch {
+            sessionStorage.removeItem('settings_anchor');
+        }
+    }
 
     private bindListEvents() {
         this.clearListeners();

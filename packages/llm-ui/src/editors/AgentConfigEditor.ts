@@ -9,7 +9,7 @@ import {
     CollapseExpandResult
 } from '@itookit/common';
 import type { AgentType, AgentDefinition, IAgentManagementService, ModelTier, PromptPreset } from '@itookit/common';
-import { renderModelCategoryBadge, renderModelCapabilityBadges } from '../utils/modelBadges';
+import { renderModelCapabilityBadges } from '../utils/modelBadges';
 
 /**
  * Agent 配置编辑器
@@ -255,31 +255,45 @@ export class AgentConfigEditor implements IEditor {
                             ${savedConnInvalid ? `
                                 <div class="agent-conn-invalid-banner">
                                     ⚠️ 连接「${this.escapeHtml(savedConnMeta?.name ?? savedConnId)}」不可用 — Provider 未配置 API Key。
-                                    已自动切换至首个可用连接。请前往
-                                    <strong>设置 → LLM Providers</strong> 配置 API Key。
+                                    已自动切换至首个可用连接。
+                                    <button class="agent-goto-btn" data-action="goto-providers"
+                                            data-provider-id="${this.escapeHtml(savedConnMeta?.providerId ?? savedConnMeta?.provider ?? '')}">
+                                        → 配置 Provider API Key
+                                    </button>
                                 </div>
                             ` : ''}
-                            <select class="agent-form-select" name="connectionId" id="connection-select"
-                                    ${connections.length === 0 ? 'disabled' : ''}>
-                                <option value="">-- 选择连接 --</option>
-                                ${connectionOptionsHtml}
-                            </select>
-                            <div id="conn-model-caps" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">
-                                ${this.renderConnModelCaps(selectedConn)}
+                            <div style="display:flex;align-items:center;gap:6px">
+                                <select class="agent-form-select" name="connectionId" id="connection-select"
+                                        style="flex:1" ${connections.length === 0 ? 'disabled' : ''}>
+                                    <option value="">-- 选择连接 --</option>
+                                    ${connectionOptionsHtml}
+                                </select>
+                                ${selectedConn ? `
+                                    <button class="agent-goto-btn agent-goto-btn--inline" data-action="goto-connection"
+                                            data-connection-id="${selectedConn.id}" title="编辑此连接的模型配置">
+                                        → 编辑连接
+                                    </button>
+                                ` : ''}
                             </div>
-                            <p class="agent-form-help">
-                                ${connections.length === 0
-                                    ? '⚠️ 所有连接均不可用，请先在 <strong>设置 → LLM Providers</strong> 配置 API Key'
-                                    : noKeyConns.length > 0
-                                        ? `另有 ${noKeyConns.length} 个连接因 Provider 未配置 API Key 而不可用`
-                                        : '选择此 Agent 使用的 LLM 服务'
-                                }
-                            </p>
+                            <div id="conn-info-panel" style="margin-top:8px">
+                                ${this.renderConnInfoPanel(selectedConn)}
+                            </div>
+                            ${connections.length === 0 ? `
+                                <p class="agent-form-help" style="color:var(--st-color-warning,#f59e0b)">
+                                    ⚠️ 所有连接均不可用，请先配置 API Key。
+                                    <button class="agent-goto-btn" data-action="goto-providers">→ 前往 LLM Providers</button>
+                                </p>
+                            ` : noKeyConns.length > 0 ? `
+                                <p class="agent-form-help">
+                                    另有 ${noKeyConns.length} 个连接因 Provider 未配置 API Key 而不可用。
+                                    <button class="agent-goto-btn" data-action="goto-providers">→ 配置 API Key</button>
+                                </p>
+                            ` : ''}
                         </div>
 
                         <div class="agent-form-row">
                             <label class="agent-form-label">
-                                模型层级 <small>cost vs quality 偏好</small>
+                                模型层级 <small>选择本次对话使用的质量/成本偏好</small>
                             </label>
                             <div class="agent-tier-selector" id="tier-selector">
                                 ${(['optimal', 'standard', 'fast'] as ModelTier[]).map(t => {
@@ -289,16 +303,16 @@ export class AgentConfigEditor implements IEditor {
                     fast:     { label: '快速', desc: '简单任务',   icon: '⚡' },
                 };
                 const m = meta[t];
+                const modelName = this.resolveTierModelName(selectedConn, t);
                 return `
                                     <button type="button" class="agent-tier-btn ${currentTier === t ? 'selected' : ''}" data-tier="${t}" title="${m.desc}">
                                         <span class="agent-tier-btn__icon">${m.icon}</span>
                                         <span class="agent-tier-btn__label">${m.label}</span>
-                                        <span class="agent-tier-btn__desc">${m.desc}</span>
+                                        <span class="agent-tier-btn__model" id="tier-model-${t}">${modelName}</span>
                                     </button>`;
             }).join('')}
                             </div>
                             <input type="hidden" name="modelTier" id="model-tier-input" value="${currentTier}">
-                            <p class="agent-form-help">连接需在 Settings → Connections 中配置对应 tier 模型</p>
                         </div>
 
                         <div class="agent-form-row">
@@ -564,7 +578,7 @@ export class AgentConfigEditor implements IEditor {
         // Connection 变更（只更新 connectionId，tier 独立管理）
         const connSelect = this.container.querySelector('#connection-select') as HTMLSelectElement;
         if (connSelect) {
-            connSelect.addEventListener('change', () => {
+            connSelect.addEventListener('change', async () => {
                 if (this.content?.config) this.content.config.connectionId = connSelect.value;
                 // Update connection label in FSNode metadata for vfs-ui list display
                 const engine = this.options.sessionEngine;
@@ -575,11 +589,32 @@ export class AgentConfigEditor implements IEditor {
                     const label = groupLabel ? `${groupLabel} · ${selectedOpt.text.trim()}` : selectedOpt.text.trim();
                     engine.driver.updateMetadata(nodeId, { ai_connectionLabel: label }).catch(() => {});
                 }
-                // Refresh capability badges for the newly selected connection
-                this.refreshConnModelCaps(connSelect.value);
+                await this.refreshConnInfo(connSelect.value);
                 handleChange();
             });
         }
+
+        // Navigate buttons (goto-providers / goto-connection) — delegated on container
+        this.container.addEventListener('click', (e) => {
+            const btn = (e.target as HTMLElement).closest('[data-action]') as HTMLElement | null;
+            if (!btn) return;
+            const action = btn.dataset.action;
+            if (action === 'goto-providers') {
+                const providerId = btn.dataset.providerId;
+                this.options.hostContext?.navigate?.({
+                    target: 'settings',
+                    resourceId: 'providers',
+                    ...(providerId ? { state: { anchor: providerId } } : {}),
+                });
+            } else if (action === 'goto-connection') {
+                const connId = btn.dataset.connectionId;
+                this.options.hostContext?.navigate?.({
+                    target: 'settings',
+                    resourceId: 'connections',
+                    ...(connId ? { state: { anchor: `conn:${connId}` } } : {}),
+                });
+            }
+        });
 
         // Tier 选择器
         const tierSelector = this.container.querySelector('#tier-selector');
@@ -782,22 +817,75 @@ export class AgentConfigEditor implements IEditor {
         return div.innerHTML;
     }
 
-    /** 渲染指定连接 optimal 模型的用途分类 + 能力 badges（无模型时返回空字符串） */
-    private renderConnModelCaps(conn?: { providerId?: string; provider?: string; model?: string }): string {
+    /** 解析连接某个 tier 对应的模型显示名（未配置时返回空字符串） */
+    private resolveTierModelName(conn: { providerId?: string; provider?: string; tiers?: Partial<Record<ModelTier, string>> } | undefined, tier: ModelTier): string {
+        if (!conn?.tiers?.[tier]) return '';
+        const pid = conn.providerId ?? conn.provider ?? '';
+        const provider = this.service.getProviders().find(p => p.id === pid);
+        const modelId = conn.tiers[tier]!;
+        const modelDef = provider?.models.find(m => m.id === modelId);
+        return modelDef ? modelDef.name : modelId;
+    }
+
+    /** 渲染连接信息面板：三个 tier 的模型名 + 能力 badges */
+    private renderConnInfoPanel(conn?: { providerId?: string; provider?: string; model?: string; tiers?: Partial<Record<ModelTier, string>> }): string {
         if (!conn) return '';
         const pid = conn.providerId ?? conn.provider ?? '';
         const provider = this.service.getProviders().find(p => p.id === pid);
-        const modelDef = provider?.models.find(m => m.id === conn.model);
-        if (!modelDef) return '';
-        return renderModelCategoryBadge(modelDef) + renderModelCapabilityBadges(modelDef);
+
+        const tierMeta: Record<string, { label: string; cls: string }> = {
+            optimal:  { label: '最优', cls: 'settings-tier-badge--optimal' },
+            standard: { label: '标准', cls: 'settings-tier-badge--standard' },
+            fast:     { label: '快速', cls: 'settings-tier-badge--fast' },
+        };
+
+        const rows = (['optimal', 'standard', 'fast'] as ModelTier[])
+            .filter(t => conn.tiers?.[t])
+            .map(t => {
+                const modelId = conn.tiers![t]!;
+                const modelDef = provider?.models.find(m => m.id === modelId);
+                const name = modelDef ? modelDef.name : modelId;
+                const caps = modelDef ? renderModelCapabilityBadges(modelDef) : '';
+                const { label, cls } = tierMeta[t];
+                return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0">
+                    <span class="settings-tier-badge ${cls}" style="flex-shrink:0">${label}</span>
+                    <span style="font-size:0.8rem;color:var(--st-text-primary)">${this.escapeHtml(name)}</span>
+                    ${caps ? `<span style="display:flex;gap:2px">${caps}</span>` : ''}
+                </div>`;
+            });
+
+        if (rows.length === 0) {
+            // No tiers configured — show the optimal model from conn.model as fallback
+            const modelDef = provider?.models.find(m => m.id === conn.model);
+            const caps = modelDef ? renderModelCapabilityBadges(modelDef) : '';
+            return `<div style="font-size:0.8rem;color:var(--st-text-secondary);display:flex;align-items:center;gap:6px">
+                <span>模型：${this.escapeHtml(modelDef?.name ?? conn.model ?? '未配置')}</span>
+                ${caps ? `<span style="display:flex;gap:2px">${caps}</span>` : ''}
+            </div>`;
+        }
+
+        return `<div style="background:var(--st-bg-secondary,#f8f9fa);border-radius:6px;padding:6px 10px;display:flex;flex-direction:column;gap:0">
+            ${rows.join('')}
+        </div>`;
     }
 
-    /** connection select 变更后刷新 #conn-model-caps 区域 */
-    private async refreshConnModelCaps(connId: string): Promise<void> {
-        const slot = this.container.querySelector('#conn-model-caps') as HTMLElement | null;
-        if (!slot) return;
-        const conn = (await this.service.getConnections()).find(c => c.id === connId);
-        slot.innerHTML = this.renderConnModelCaps(conn);
+    /** 连接变更后刷新信息面板和 tier 按钮上的模型名 */
+    private async refreshConnInfo(connId: string): Promise<void> {
+        const allConns = await this.service.getConnections();
+        const conn = allConns.find(c => c.id === connId);
+
+        const panel = this.container.querySelector('#conn-info-panel') as HTMLElement | null;
+        if (panel) panel.innerHTML = this.renderConnInfoPanel(conn);
+
+        // Update model name shown on each tier button
+        (['optimal', 'standard', 'fast'] as ModelTier[]).forEach(t => {
+            const slot = this.container.querySelector(`#tier-model-${t}`) as HTMLElement | null;
+            if (slot) slot.textContent = this.resolveTierModelName(conn, t);
+        });
+
+        // Update goto-connection button data attribute
+        const gotoBtn = this.container.querySelector('[data-action="goto-connection"]') as HTMLElement | null;
+        if (gotoBtn && conn) gotoBtn.dataset.connectionId = conn.id;
     }
 
     // --- IEditor Interface Implementation ---

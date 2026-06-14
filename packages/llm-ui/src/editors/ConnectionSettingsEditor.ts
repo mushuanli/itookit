@@ -100,6 +100,54 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         `;
 
         this.bindEvents();
+        this.consumeAnchor(allConnections);
+    }
+
+    /**
+     * Consumes the one-shot `settings_anchor` from sessionStorage.
+     * anchor format: `conn:<connectionId>` — highlights the card and opens its edit modal.
+     * Stale entries (> 5s) are discarded.
+     */
+    private consumeAnchor(allConnections: ConnectionMeta[]): void {
+        const raw = sessionStorage.getItem('settings_anchor');
+        if (!raw) return;
+        try {
+            const { target, anchor, timestamp } = JSON.parse(raw) as { target: string; anchor: string; timestamp: number };
+            if (target !== 'settings' || Date.now() - timestamp > 5000) {
+                sessionStorage.removeItem('settings_anchor');
+                return;
+            }
+            sessionStorage.removeItem('settings_anchor');
+            if (!anchor.startsWith('conn:')) return;
+            const connId = anchor.slice(5);
+            const conn = allConnections.find(c => c.id === connId);
+            if (!conn) return;
+
+            // Pre-select the provider sidebar so the card is visible
+            const pid = conn.providerId ?? conn.provider;
+            if (pid && this._selectedProviderId !== pid) {
+                this._selectedProviderId = pid;
+                this.render();
+                // render() will call consumeAnchor again but sessionStorage is already cleared,
+                // so we post the highlight/modal work via setTimeout to run after re-render.
+                setTimeout(() => this.highlightAndOpenConn(connId), 150);
+                return;
+            }
+            this.highlightAndOpenConn(connId);
+        } catch {
+            sessionStorage.removeItem('settings_anchor');
+        }
+    }
+
+    private async highlightAndOpenConn(connId: string): Promise<void> {
+        const card = this.container.querySelector(`.settings-connection-card[data-id="${CSS.escape(connId)}"]`) as HTMLElement | null;
+        if (card) {
+            card.classList.add('settings-card--anchored');
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => card.classList.remove('settings-card--anchored'), 2000);
+        }
+        const connection = await this.service.getFullConnection(connId);
+        if (connection) setTimeout(() => this.showEditModal(connection), 120);
     }
 
     // ── Provider Sidebar ────────────────────────────────────────────────────────
@@ -197,15 +245,8 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                         <span class="settings-detail-item__label">提供商</span>
                         <span class="settings-detail-item__value">${provider?.icon ?? ''} ${provider?.name ?? pid}</span>
                     </div>
-                    <div class="settings-detail-item">
-                        <span class="settings-detail-item__label">最优模型</span>
-                        <span class="settings-detail-item__value" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
-                            ${this.resolvedModelName(conn)}
-                            ${this.resolvedModelBadges(conn)}
-                        </span>
-                    </div>
-                    <div class="settings-detail-item">
-                        <span class="settings-detail-item__label">质量层级</span>
+<div class="settings-detail-item" style="align-items:flex-start">
+                        <span class="settings-detail-item__label" style="padding-top:2px">质量层级</span>
                         <span class="settings-detail-item__value">${this.renderTierBadges(conn)}</span>
                     </div>
                     <div class="settings-detail-item">
@@ -213,7 +254,11 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                         <span class="settings-detail-item__value">
                             ${hasKey
                                 ? '<span style="color:var(--st-color-success,#10b981)">✓ 已配置</span>'
-                                : '<span style="color:var(--st-text-disabled)">未配置（在 Providers 中设置）</span>'
+                                : `<button class="settings-btn-goto-providers" data-provider-id="${pid}"
+                                          style="padding:0;background:none;border:none;cursor:pointer;
+                                                 color:var(--st-primary,#6366f1);font-size:inherit;text-decoration:underline">
+                                       未配置 → 去设置
+                                   </button>`
                             }
                         </span>
                     </div>
@@ -227,32 +272,33 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         `;
     }
 
-    private resolvedModelName(conn: ConnectionMeta): string {
-        const pid = conn.providerId ?? conn.provider;
-        const provider = this.providers[pid];
-        const modelId = conn.model;
-        if (!modelId) return '未设置';
-        const modelDef = provider?.models.find(m => m.id === modelId);
-        return modelDef ? modelDef.name : modelId;
-    }
-
-    /** 解析最优模型的能力 badges（无模型/无能力时返回空字符串） */
-    private resolvedModelBadges(conn: ConnectionMeta): string {
-        const pid = conn.providerId ?? conn.provider;
-        const provider = this.providers[pid];
-        const modelDef = provider?.models.find(m => m.id === conn.model);
-        return modelDef ? renderModelCapabilityBadges(modelDef) : '';
-    }
-
     private renderTierBadges(conn: ConnectionMeta): string {
         const tiers = conn.tiers;
-        if (!tiers || (!tiers.standard && !tiers.fast)) {
+        if (!tiers || (!tiers.optimal && !tiers.standard && !tiers.fast)) {
             return '<span style="color:var(--st-text-disabled)">未配置</span>';
         }
-        const badges: string[] = ['<span class="settings-tier-badge settings-tier-badge--optimal">最优</span>'];
-        if (tiers.standard) badges.push('<span class="settings-tier-badge settings-tier-badge--standard">标准</span>');
-        if (tiers.fast)     badges.push('<span class="settings-tier-badge settings-tier-badge--fast">快速</span>');
-        return badges.join(' ');
+        const pid = conn.providerId ?? conn.provider;
+        const provider = this.providers[pid];
+        const modelName = (modelId: string) => {
+            if (!modelId) return '';
+            const def = provider?.models.find(m => m.id === modelId);
+            return def ? def.name : modelId;
+        };
+
+        const rows: string[] = [];
+        const addRow = (tier: string, badgeClass: string, label: string, modelId: string | undefined) => {
+            if (!modelId) return;
+            rows.push(`
+                <div style="display:flex;align-items:center;gap:4px;min-width:0">
+                    <span class="settings-tier-badge ${badgeClass}" style="flex-shrink:0">${label}</span>
+                    <span style="font-size:0.78rem;color:var(--st-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                          title="${modelId}">${modelName(modelId)}</span>
+                </div>`);
+        };
+        addRow('optimal',  'settings-tier-badge--optimal',  '最优', tiers.optimal);
+        addRow('standard', 'settings-tier-badge--standard', '标准', tiers.standard);
+        addRow('fast',     'settings-tier-badge--fast',     '快速', tiers.fast);
+        return `<div style="display:flex;flex-direction:column;gap:3px;width:100%">${rows.join('')}</div>`;
     }
 
     // ── Events ─────────────────────────────────────────────────────────────────
@@ -322,6 +368,19 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             this.addEventListener(list, 'click', async (e) => {
                 const target = e.target as HTMLElement;
                 if (target.closest('.llm-enable-toggle') || target.classList.contains('chk-conn-select')) return;
+
+                // Navigate to Providers settings page — carry providerId as anchor
+                const gotoBtn = target.closest('.settings-btn-goto-providers') as HTMLElement | null;
+                if (gotoBtn) {
+                    const providerId = gotoBtn.dataset.providerId;
+                    this.options.hostContext?.navigate?.({
+                        target: 'settings',
+                        resourceId: 'providers',
+                        ...(providerId ? { state: { anchor: providerId } } : {}),
+                    });
+                    return;
+                }
+
                 const card = target.closest('.settings-connection-card') as HTMLElement;
                 if (!card) return;
                 const id = card.dataset.id!;
