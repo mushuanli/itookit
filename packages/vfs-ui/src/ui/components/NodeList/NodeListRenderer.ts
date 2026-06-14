@@ -104,7 +104,7 @@ export class NodeListRenderer {
       parentEl.appendChild(itemInstance.element);
       newInstances.set(item.id, itemInstance);
 
-      if (item.type === 'directory' && item.children) {
+      if (item.type === 'directory') {
         const isExpanded =
           state.expandedFolderIds.has(item.id) || !!state.searchQuery;
 
@@ -113,7 +113,7 @@ export class NodeListRenderer {
             .childrenContainer;
           childrenContainer.innerHTML = '';
           this.traverseAndRender(
-            item.children,
+            item.children || [],
             childrenContainer,
             item.id,
             state,

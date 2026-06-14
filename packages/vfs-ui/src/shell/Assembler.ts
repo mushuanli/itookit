@@ -88,6 +88,10 @@ export function assemble(
 
     const engineAdapter = new EngineAdapter(engine, store, registry, options.showFileExtensions ?? false);
 
+    // Wire auto-expand: when a file is created inside an unexpanded directory,
+    // trigger a full load so all siblings are visible (not just the new file).
+    store.setOnExpandNeeded((folderId) => engineAdapter.expandDirectory(folderId));
+
     // --- Interaction ---
     const commandBus = new CommandBus();
     const eventBus = new EventBus();
