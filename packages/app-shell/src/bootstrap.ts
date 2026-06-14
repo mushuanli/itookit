@@ -638,6 +638,13 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 await performNavigation(targetWsId);
                 break;
             default: {
+                if (req.state?.anchor) {
+                    sessionStorage.setItem('settings_anchor', JSON.stringify({
+                        target: req.target,
+                        anchor: req.state.anchor,
+                        timestamp: Date.now(),
+                    }));
+                }
                 updateHistory(targetWsId, req.resourceId ?? null, 'push');
                 await performNavigation(targetWsId, req.resourceId);
             }

@@ -158,6 +158,17 @@
     border-color: var(--st-color-danger);
 }
 
+/* Anchor-jump highlight: briefly pulses the card when navigated to via deep-link */
+@keyframes settings-anchor-pulse {
+    0%   { box-shadow: 0 0 0 0   rgba(99,102,241,.5), var(--st-shadow-md); border-color: var(--st-color-primary, #6366f1); }
+    50%  { box-shadow: 0 0 0 6px rgba(99,102,241,.15), var(--st-shadow-md); }
+    100% { box-shadow: var(--st-shadow-md); border-color: transparent; }
+}
+.settings-card--anchored,
+.settings-connection-card.settings-card--anchored {
+    animation: settings-anchor-pulse 2s ease-out forwards;
+}
+
 /* ============================================
    表单 - Forms
    ============================================ */
