@@ -586,7 +586,24 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             const wsConfig = workspaces.find(w => w.elementId === workspaceId);
             if (wsConfig) await loadWorkspace(wsConfig, resourceId);
         } else if (resourceId) {
-            await managerCache.get(workspaceId)!.openFile(resourceId);
+            const mgr = managerCache.get(workspaceId)!;
+            const wasAlreadyOpen = mgr.getActiveSessionId() === resourceId;
+            await mgr.openFile(resourceId);
+            // If the file was already open, render() was skipped → dispatch anchor manually
+            if (wasAlreadyOpen) {
+                const raw = sessionStorage.getItem('settings_anchor');
+                if (raw) {
+                    try {
+                        const { anchor } = JSON.parse(raw) as { anchor: string };
+                        sessionStorage.removeItem('settings_anchor');
+                        document.getElementById(workspaceId)?.dispatchEvent(
+                            new CustomEvent('consume-anchor', { detail: { anchor } }),
+                        );
+                    } catch {
+                        sessionStorage.removeItem('settings_anchor');
+                    }
+                }
+            }
         }
     };
 

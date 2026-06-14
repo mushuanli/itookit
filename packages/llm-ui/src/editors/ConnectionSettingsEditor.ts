@@ -100,7 +100,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         `;
 
         this.bindEvents();
-        this.consumeAnchor(allConnections);
+        await this.consumeAnchor(allConnections);
     }
 
     /**
@@ -108,7 +108,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
      * anchor format: `conn:<connectionId>` — highlights the card and opens its edit modal.
      * Stale entries (> 5s) are discarded.
      */
-    private consumeAnchor(allConnections: ConnectionMeta[]): void {
+    private async consumeAnchor(allConnections: ConnectionMeta[]): Promise<void> {
         const raw = sessionStorage.getItem('settings_anchor');
         if (!raw) return;
         try {
@@ -127,10 +127,10 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             const pid = conn.providerId ?? conn.provider;
             if (pid && this._selectedProviderId !== pid) {
                 this._selectedProviderId = pid;
-                this.render();
+                await this.render();
                 // render() will call consumeAnchor again but sessionStorage is already cleared,
-                // so we post the highlight/modal work via setTimeout to run after re-render.
-                setTimeout(() => this.highlightAndOpenConn(connId), 150);
+                // so we post the highlight/modal work via setTimeout to run after the DOM settles.
+                setTimeout(() => this.highlightAndOpenConn(connId), 50);
                 return;
             }
             this.highlightAndOpenConn(connId);
@@ -148,6 +148,24 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         }
         const connection = await this.service.getFullConnection(connId);
         if (connection) setTimeout(() => this.showEditModal(connection), 120);
+    }
+
+    /** Navigate to a specific connection by anchor string (`conn:<id>`). Called by the host when
+     *  the settings page is already open and openFile() would be a no-op. */
+    async navigateToAnchor(anchor: string): Promise<void> {
+        if (!anchor.startsWith('conn:')) return;
+        const connId = anchor.slice(5);
+        const allConnections = await this.service.getConnections();
+        const conn = allConnections.find(c => c.id === connId);
+        if (!conn) return;
+        const pid = conn.providerId ?? conn.provider;
+        if (pid && this._selectedProviderId !== pid) {
+            this._selectedProviderId = pid;
+            await this.render();
+            setTimeout(() => this.highlightAndOpenConn(connId), 50);
+            return;
+        }
+        this.highlightAndOpenConn(connId);
     }
 
     // ── Provider Sidebar ────────────────────────────────────────────────────────
@@ -701,6 +719,14 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             this.currentEditTierThinking = {};
             refreshTierSelects(provider, this.currentEditTiers);
         });
+
+        // Receive anchor navigation when the settings page is already open (openFile is a no-op)
+        const wsEl = this.container.closest<HTMLElement>('[id]');
+        if (wsEl) {
+            this.addEventListener(wsEl, 'consume-anchor', ((e: CustomEvent) => {
+                void this.navigateToAnchor(e.detail.anchor as string);
+            }) as EventListener);
+        }
     }
 
     private deleteConnection(id: string, name: string) {

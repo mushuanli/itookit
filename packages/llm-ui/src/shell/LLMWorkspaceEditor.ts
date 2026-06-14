@@ -255,6 +255,9 @@ export class LLMWorkspaceEditor implements IEditor {
             sessionEngine: this.options.sessionEngine as any,
             initialCollapseStates: this.stateManager.getCollapseStates(),
             onScroll: () => this.navigation.updateActiveSessionHighlight(),
+            onNavigateSettings: () => {
+                this.hostContext?.navigate?.({ target: 'settings', resourceId: 'connections' });
+            },
         });
         this.historyView = historyView;
 
@@ -320,6 +323,15 @@ export class LLMWorkspaceEditor implements IEditor {
             ...(this.options.llmService
                 ? { onOcrImage: (image: Blob) => this.ocrImage(image) }
                 : {}),
+
+            // ── Settings navigation ──────────────────────────────────────────
+            onNavigateSettings: ({ resourceId, anchor }) => {
+                this.hostContext?.navigate?.({
+                    target: 'settings',
+                    resourceId,
+                    ...(anchor ? { state: { anchor } } : {}),
+                });
+            },
         });
 
         this.registerInputPlugins();

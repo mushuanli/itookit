@@ -83,6 +83,13 @@ export interface ChatInputOptions {
      * 实现后将复用 OcrReviewPanel 的审阅流程把转写文本插入输入框。
      */
     onTranscribeAudio?: (audio: Blob) => Promise<string>;
+
+    /**
+     * 导航到设置页（如点击连接 badge 跳转到具体连接的编辑页）。
+     * resourceId: 'connections' | 'providers'
+     * anchor:  连接时 'conn:<id>'，Provider 时 '<providerId>'
+     */
+    onNavigateSettings?: (target: { resourceId: string; anchor?: string }) => void;
 }
 
 /**
@@ -661,6 +668,15 @@ export class ChatInput implements IChatInputPresenter {
             });
         });
 
+        // Connection badge click → navigate to edit that connection
+        const connBadge = this.container.querySelector('.llm-input__active-badge[data-type="connection"]') as HTMLElement | null;
+        connBadge?.addEventListener('click', (e) => {
+            // Don't navigate if the × clear button was clicked (handled above)
+            if ((e.target as HTMLElement).closest('.llm-input__badge-clear')) return;
+            const connId = connBadge.dataset.connectionId ?? this.config.settings.connectionId;
+            if (connId) this.options.onNavigateSettings?.({ resourceId: 'connections', anchor: `conn:${connId}` });
+        });
+
         // ── Mode toggle (Simple / Full) ──────────────────────────────────────
         this.harnessToggle?.addEventListener('change', () => {
             const enabled = this.harnessToggle.checked;
@@ -1109,9 +1125,15 @@ export class ChatInput implements IChatInputPresenter {
             const conn = this.connections.find(c => c.id === this.config.settings.connectionId);
             const text = connBadge?.querySelector('.llm-input__badge-text');
             if (text) text.textContent = conn?.name || this.config.settings.connectionId;
-            if (connBadge) connBadge.style.display = 'inline-flex';
+            if (connBadge) {
+                connBadge.dataset.connectionId = this.config.settings.connectionId;
+                connBadge.style.display = 'inline-flex';
+            }
             hasActive = true;
-        } else if (connBadge) { connBadge.style.display = 'none'; }
+        } else if (connBadge) {
+            delete connBadge.dataset.connectionId;
+            connBadge.style.display = 'none';
+        }
 
         const tier = this.config.settings.modelTier;
         if (tier && tier !== 'auto') {
@@ -1327,7 +1349,13 @@ export class ChatInput implements IChatInputPresenter {
         this.agentPopup?.hide();
         const popup = this.getOrCreateConnPopup();
         popup.show(this.buildConnItems(), {
-            onSelect: (item) => this.selectConnection(item.id),
+            onSelect: (item) => {
+                if (item.id === '__manage') {
+                    this.options.onNavigateSettings?.({ resourceId: 'connections' });
+                    return;
+                }
+                this.selectConnection(item.id);
+            },
         });
     }
 
@@ -1351,6 +1379,9 @@ export class ChatInput implements IChatInputPresenter {
                 icon: c.id === currentId ? '✓' : (c.hasTiers ? '⚡' : ''),
             });
         }
+        items.push(
+            { id: '__manage', label: '管理连接 →', icon: '⚙️', description: '配置 Provider 和模型层级' },
+        );
         return items;
     }
 

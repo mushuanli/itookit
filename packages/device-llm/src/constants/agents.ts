@@ -27,6 +27,10 @@ const FEYNMAN_PROMPTLIST: PromptPreset[] = [
     {
         name: '作文分析',
         prompt: '按照优秀中学生作文标准审查分析下面作文要求和内容'
+    },
+    {
+        name: '解题思路',
+        prompt: '像费曼一样审查分析试卷中题目，先抓住所有题目共同点、本质、基本思考方法和步骤，然后使用这个基本方法和步骤去解释每一道题：'
     }
 ];
 
@@ -34,7 +38,7 @@ const FEYNMAN_PROMPTLIST: PromptPreset[] = [
 const DEV_PROMPTLIST: PromptPreset[] = [
     {
         name: '事件流',
-        prompt: '梳理下面日志，最前面是 tid, 画出 api 事件流:'
+        prompt: '梳理下面日志， 画出 api 事件流:'
     }
 ];
 
