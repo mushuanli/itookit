@@ -502,6 +502,13 @@
     border-color: #fcd34d;
 }
 
+.llm-input__active-badge[data-type="connection"] {
+    cursor: pointer;
+}
+.llm-input__active-badge[data-type="connection"]:hover {
+    filter: brightness(0.95);
+}
+
 .llm-input__badge-clear {
     background: none;
     border: none;

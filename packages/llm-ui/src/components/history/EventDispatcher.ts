@@ -32,6 +32,7 @@ export class EventDispatcher {
         private edit: EditController,
         private bus: IEditorEventBus | undefined,
         private onNodeAction: NodeActionCallback | undefined,
+        private onNavigateSettings?: () => void,
     ) {
         this.registerActions();
         this.bindDelegation();
@@ -107,9 +108,7 @@ export class EventDispatcher {
 
         // 错误操作
         m.set('open-settings', () => {
-            this.container.dispatchEvent(
-                new CustomEvent('open-connection-settings', { bubbles: true })
-            );
+            this.onNavigateSettings?.();
         });
 
         m.set('retry-last', (ctx) => {

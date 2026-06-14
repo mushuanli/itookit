@@ -29,6 +29,8 @@ export interface HistoryViewOptions {
     sessionEngine?: IModuleFS;
     initialCollapseStates?: CollapseStateMap;
     onScroll?: () => void;
+    /** 点击错误气泡中的"配置连接"按钮时触发（通常导航到 settings/connections） */
+    onNavigateSettings?: () => void;
 }
 
 /**
@@ -101,6 +103,7 @@ export class HistoryView implements IHistoryPresenter {
         this.dispatcher = new EventDispatcher(
             container, this.renderer, this.stream,
             this.collapse, this.edit, options.bus, options.onNodeAction,
+            options.onNavigateSettings,
         );
 
         this.ttyCtrl = new TtyController((id) => this.renderer.getNode(id) ?? undefined);
