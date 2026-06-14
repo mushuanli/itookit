@@ -278,7 +278,8 @@ export class VFSManager implements IVFSManager {
 
     async write(moduleName: string, path: string, content: FileContent): Promise<void> {
         const eng = this.getEngine(moduleName);
-        if (await eng.driver.exists(path)) {
+        const exists = await eng.driver.exists(path);
+        if (exists) {
             await eng.driver.writeContent(path, content);
         } else {
             const dir = P.dirname(path);

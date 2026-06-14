@@ -40,7 +40,12 @@ export class TauriFsOps implements IFsOps {
     }
 
     async mkdir(p: string): Promise<void> {
-        await invoke('fs_mkdir', { path: p });
+        try {
+            await invoke('fs_mkdir', { path: p });
+        } catch (e) {
+            console.error('[DEBUG-ASSET] TauriFsOps.mkdir FAILED path=', p, e);
+            throw e;
+        }
     }
 
     async readFile(p: string): Promise<ArrayBuffer | null> {
@@ -53,10 +58,15 @@ export class TauriFsOps implements IFsOps {
     }
 
     async writeFile(p: string, data: ArrayBuffer): Promise<void> {
-        await invoke('fs_write_file', {
-            path: p,
-            data: Array.from(new Uint8Array(data)),
-        });
+        try {
+            await invoke('fs_write_file', {
+                path: p,
+                data: Array.from(new Uint8Array(data)),
+            });
+        } catch (e) {
+            console.error('[DEBUG-ASSET] TauriFsOps.writeFile FAILED path=', p, e);
+            throw e;
+        }
     }
 
     async appendFile(p: string, data: ArrayBuffer): Promise<void> {

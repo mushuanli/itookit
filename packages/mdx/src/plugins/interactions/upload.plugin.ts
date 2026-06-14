@@ -51,8 +51,8 @@ export class UploadPlugin implements MDxPlugin {
         // 3. 注册 CodeMirror 事件 (粘贴/拖拽)
         const extension = EditorView.domEventHandlers({
             paste: (event, view) => {
-                const files = event.clipboardData?.files;
-                if (files && files.length > 0) {
+                const files = this.extractFilesFromClipboard(event.clipboardData);
+                if (files.length > 0) {
                     event.preventDefault();
                     this.processFiles(files, view).catch(e => console.error(e));
                     return true;
@@ -111,9 +111,27 @@ export class UploadPlugin implements MDxPlugin {
     }
 
     /**
+     * Extract files from ClipboardData, falling back to items when files is empty.
+     * macOS screenshots are only available via clipboardData.items, not .files.
+     */
+    private extractFilesFromClipboard(clipboardData: DataTransfer | null): File[] {
+        if (!clipboardData) return [];
+        if (clipboardData.files.length > 0) return Array.from(clipboardData.files);
+        // Fallback: extract from items (e.g. macOS screenshot paste)
+        const files: File[] = [];
+        for (const item of Array.from(clipboardData.items)) {
+            if (item.kind === 'file') {
+                const file = item.getAsFile();
+                if (file) files.push(file);
+            }
+        }
+        return files;
+    }
+
+    /**
      * 核心处理逻辑：校验 -> 上传 -> 替换 Markdown
      */
-    private async processFiles(fileList: FileList, view: EditorView): Promise<void> {
+    private async processFiles(fileList: FileList | File[], view: EditorView): Promise<void> {
         const engine = this.context.getSessionEngine?.();
         // ✅ 获取 ownerNodeId (由 EditorOptions 传入，或默认为 nodeId)
         const ownerNodeId = this.context.getOwnerNodeId?.();
@@ -218,9 +236,18 @@ export class UploadPlugin implements MDxPlugin {
     }
 
     private generateSafeFilename(originalName: string): string {
-        // 简单清理文件名，保留扩展名
-        // 例如: "My File (1).png" -> "My_File_1_.png"
-        return originalName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        // Sanitize filename and inject timestamp to ensure uniqueness.
+        // Strip leading underscores/dots to avoid matching ASSET_DIR_PREFIX ('_') or hidden-file prefix ('.').
+        // e.g. "  1 Miss Jade.jpg" → "1_Miss_Jade_2026-06-14T00-37-32-355Z.jpg"
+        const dotIndex = originalName.lastIndexOf('.');
+        const base = dotIndex >= 0 ? originalName.slice(0, dotIndex) : originalName;
+        const ext = dotIndex >= 0 ? originalName.slice(dotIndex) : '';
+        const safeBase = base
+            .replace(/[^a-zA-Z0-9._-]/g, '_') // replace illegal chars
+            .replace(/^[_.\s]+/, '');           // strip leading _ and . (reserved prefixes)
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const safePart = safeBase || 'file';    // fallback if base becomes empty
+        return `${safePart}_${timestamp}${ext}`;
     }
 
     private generateMarkdown(file: File, path: string): string {

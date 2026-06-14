@@ -64,7 +64,9 @@ export class AssetManagerUI {
 
         let files: FSNode[] = [];
         try {
-            files = await this.engine.driver.getChildren(this.currentAssetDirPath);
+            // includeAssetDirs: true — asset filenames may start with '_' (reserved prefix);
+            // without this flag they would be silently filtered out by getChildren.
+            files = await this.engine.driver.getChildren(this.currentAssetDirPath, { includeAssetDirs: true });
         } catch (e) {
             console.error('[AssetManager] Failed to get children:', e);
             this.listContainer.innerHTML = '<div class="mdx-empty-state">读取目录失败</div>';
