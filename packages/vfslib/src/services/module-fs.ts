@@ -553,7 +553,14 @@ class InlineAssetOps implements IAssetOperations {
         const { realPath } = await this.fs.resolveNode(ownerIdOrPath);
         const assetDir = await this._engine().ensureAssetDir(realPath);
         const buf = toBuffer(content);
-        return this._engine().createFile(assetDir, assetName, 'file', buf);
+        // Use ModuleFS.createFile (not raw engine) so toRealPath adds the
+        // mount prefix, routing the asset to the correct module directory.
+        const result = await this.fs.createFile({
+            name: assetName,
+            parentPath: assetDir,
+            content: buf as string | ArrayBuffer,
+        });
+        return result;
     }
 
     async getAsset(ownerIdOrPath: string, assetName: string): Promise<FileContent | null> {

@@ -84,12 +84,15 @@ export class ClipboardPlugin implements MDxPlugin {
         if (!clipboardData) return false;
 
         // 优先级 1: 处理文件（图片等）
-        if (this.options.enableImagePaste && clipboardData.files.length > 0) {
-            // 检查是否有图片文件
-            const imageFiles = Array.from(clipboardData.files).filter(f =>
-                f.type.startsWith('image/')
-            );
+        if (this.options.enableImagePaste) {
+            const allFiles = clipboardData.files.length > 0
+                ? Array.from(clipboardData.files)
+                : Array.from(clipboardData.items)
+                    .filter(item => item.kind === 'file')
+                    .map(item => item.getAsFile())
+                    .filter((f): f is File => f !== null);
 
+            const imageFiles = allFiles.filter(f => f.type.startsWith('image/'));
             if (imageFiles.length > 0) {
                 // 让 UploadPlugin 处理
                 return false;

@@ -56,8 +56,9 @@ export function createThrottledWriter(
                     throw e;
                 }
             })
-            .catch(() => {
+            .catch((e) => {
                 /* 错误已在上面 log.error 记录，此处防止 promise chain 中断 */
+                console.warn('[DEBUG-ASSET] throttled-writer persist catch (chain kept alive):', e instanceof Error ? e.message : e);
             });
     };
 

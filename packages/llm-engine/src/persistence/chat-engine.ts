@@ -884,7 +884,12 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
         meta,
         status: 'active'
       };
-      await this.engine.meta.assets.putAsset(nodeId, `${newNodeId}.chat`, JSON.stringify(newNode));
+      try {
+        await this.engine.meta.assets.putAsset(nodeId, `${newNodeId}.chat`, JSON.stringify(newNode));
+      } catch (e) {
+        console.error('[DEBUG-ASSET] appendMessage putAsset FAILED:', e);
+        throw e;
+      }
 
       await this.appendToParentChildren(assetDir, parentId, newNodeId);
 
@@ -912,11 +917,17 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   ): Promise<void> {
     return this.lockManager.acquire(`node:${sessionId}:${messageId}`, async () => {
       const chatFileId = await this.resolveChatFileId(sessionId);
-      if (!chatFileId) return;
+      if (!chatFileId) {
+        console.warn('[DEBUG-ASSET] updateNode resolveChatFileId returned null for sessionId=', sessionId);
+        return;
+      }
       const assetDir = await this.getAssetDirPath(chatFileId);
       const nodePath = `${assetDir}/${messageId}.chat`;
       const node: ChatNode | null = await this.readJson<ChatNode>(nodePath);
-      if (!node) return;
+      if (!node) {
+        console.warn('[DEBUG-ASSET] updateNode readJson returned null for nodePath=', nodePath);
+        return;
+      }
 
       let hasChanges = false;
 
