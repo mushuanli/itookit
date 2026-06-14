@@ -257,8 +257,13 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
     // ── Import / Export ────────────────────────────────────────────────────────
 
     private async importLLMFiles(files: FileList): Promise<void> {
-        const imported = await runLLMImport(files, this.service);
-        if (imported) this.render();
+        try {
+            const imported = await runLLMImport(files, this.service);
+            if (imported) this.render();
+        } catch (err) {
+            console.error('LLM import failed:', err);
+            Toast.error(`导入失败: ${err instanceof Error ? err.message : String(err)}`);
+        }
     }
 
     private async exportSelected(): Promise<void> {

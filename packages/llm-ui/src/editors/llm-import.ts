@@ -316,6 +316,56 @@ export async function executeImport(
     return stats;
 }
 
+// ─── YAML error formatting ────────────────────────────────────────────────────
+
+/**
+ * Translate js-yaml errors into user-friendly Chinese messages with fix guidance.
+ * Uses file content to provide line context and expected indentation.
+ */
+function formatYAMLError(fileName: string, err: unknown, fileContent: string): string {
+    const message = err instanceof Error ? err.message : String(err);
+
+    // Detect indentation errors — the most common .llm editing mistake
+    if (message.includes('bad indentation')) {
+        const lineMatch = message.match(/\((\d+):/);
+        if (lineMatch) {
+            const lineNum = parseInt(lineMatch[1]);
+            const lines = fileContent.split('\n');
+            const badLine = lines[lineNum - 1] || '';
+            const actualIndent = badLine.match(/^(\s*)/)?.[1].length ?? 0;
+
+            // Find expected indentation from preceding sibling list items
+            let expectedIndent = 2;
+            for (let i = lineNum - 2; i >= 0 && i >= lineNum - 10; i--) {
+                const m = lines[i]?.match(/^(\s*)-/);
+                if (m) { expectedIndent = m[1].length; break; }
+            }
+
+            return [
+                `${fileName}: YAML 缩进错误`,
+                `  第 ${lineNum} 行缩进 ${actualIndent} 空格，应为 ${expectedIndent} 空格（与同级条目一致）`,
+                `  出错行: ${badLine.trim()}`,
+                `  请将该行及子属性的缩进增加 ${expectedIndent - actualIndent} 个空格`,
+            ].join('\n');
+        }
+    }
+
+    // Generic YAML errors — extract line number if present
+    const genericMatch = message.match(/at line\s+(\d+)|\((\d+)[,:]/);
+    if (genericMatch) {
+        const lineNum = parseInt(genericMatch[1] || genericMatch[2]);
+        const lines = fileContent.split('\n');
+        const contextLine = lines[lineNum - 1]?.trim() || '';
+        return [
+            `${fileName}: YAML 语法错误 (第 ${lineNum} 行)`,
+            `  内容: ${contextLine}`,
+            `  原因: ${message}`,
+        ].join('\n');
+    }
+
+    return `${fileName}: ${message}`;
+}
+
 // ─── Main entry: parse files + detect + show modal + execute ─────────────────
 
 /**
@@ -338,24 +388,44 @@ export async function runLLMImport(
     const errors: string[] = [];
 
     for (const file of Array.from(files)) {
+        const text = await file.text();
         try {
-            const config = parseLLMConfig(await file.text());
+            const config = parseLLMConfig(text);
             merged.providers!.push(...getProviderDefs(config));
             merged.connections!.push(...(config.connections ?? []));
             merged.agents!.push(...(config.agents ?? []));
             merged.skills!.push(...(config.skills ?? []));
         } catch (err) {
-            errors.push(`${file.name}: ${err instanceof Error ? err.message : String(err)}`);
+            errors.push(formatYAMLError(file.name, err, text));
         }
     }
 
     if (errors.length) {
-        Toast.error(`文件解析失败:\n${errors.join('\n')}`);
+        const msg = `文件解析失败:\n${errors.join('\n')}`;
+        console.error('LLM import parse errors:', errors);
+        Toast.error(msg);
+        return false;
+    }
+
+    // Validate that at least one importable item exists
+    const hasProviders   = (merged.providers?.length ?? 0) > 0;
+    const hasConnections = (merged.connections?.length ?? 0) > 0;
+    const hasAgents      = (merged.agents?.length ?? 0) > 0;
+    const hasSkills      = (merged.skills?.length ?? 0) > 0;
+    if (!hasProviders && !hasConnections && !hasAgents && !hasSkills) {
+        Toast.error('文件中未找到可导入的 Provider、连接、Agent 或 Skill');
         return false;
     }
 
     // Detect conflicts
-    const conflicts = await detectConflicts(merged, service);
+    let conflicts: ConflictItem[];
+    try {
+        conflicts = await detectConflicts(merged, service);
+    } catch (err) {
+        console.error('LLM import conflict detection failed:', err);
+        Toast.error(`导入冲突检测失败: ${err instanceof Error ? err.message : String(err)}`);
+        return false;
+    }
 
     let strategy: ConflictStrategy = 'overwrite';
     if (conflicts.length > 0) {
@@ -365,7 +435,14 @@ export async function runLLMImport(
     }
 
     // Execute
-    const stats = await executeImport(merged, service, strategy);
+    let stats: ImportStats;
+    try {
+        stats = await executeImport(merged, service, strategy);
+    } catch (err) {
+        console.error('LLM import execution failed:', err);
+        Toast.error(`导入执行失败: ${err instanceof Error ? err.message : String(err)}`);
+        return false;
+    }
 
     // Toast result
     const parts: string[] = [];
