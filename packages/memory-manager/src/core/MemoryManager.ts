@@ -45,6 +45,7 @@ export class MemoryManager {
                 sessionListContainer: this.layout.sidebarContainer,
                 fileCreation: {
                     ...config.uiOptions?.fileCreation,
+                    instant: true, // 默认使用自动文件名
                     startupFileName: config.uiOptions?.fileCreation?.startupFileName ?? config.defaultContentConfig?.fileName,
                     startupContent:  config.uiOptions?.fileCreation?.startupContent  ?? config.defaultContentConfig?.content,
                 },

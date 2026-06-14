@@ -43,6 +43,12 @@ export interface FileCreationConfig {
     startupFileName?: string;
     /** Content for the auto-created startup file. */
     startupContent?: string;
+    /**
+     * Skip the inline name-prompt and create the file instantly with {@link title}.
+     * Focus goes directly to the editor; rename via titlebar if needed.
+     * @default false
+     */
+    instant?: boolean;
 }
 
 export interface SessionUIOptions {

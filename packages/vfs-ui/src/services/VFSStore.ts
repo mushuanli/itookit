@@ -52,10 +52,15 @@ const createInitialState = (initial: Partial<VFSUIState> = {}): VFSUIState => ({
 export class VFSStore implements IStatePort {
   private state: VFSUIState;
   private listeners = new Set<(state: VFSUIState) => void>();
+  private onExpandNeeded?: (folderId: string) => void;
 
   constructor(initial: Partial<VFSUIState> = {}) {
     this.state = createInitialState(initial);
   }
+
+  setOnExpandNeeded = (cb: (folderId: string) => void): void => {
+    this.onExpandNeeded = cb;
+  };
 
   getState = (): VFSUIState => this.state;
 
@@ -289,9 +294,15 @@ export class VFSStore implements IStatePort {
     const parent = parentPath ? findNodeById(draft.items, parentPath) : null;
 
     if (parent?.type === 'directory' && newItem.id !== parent.id) {
+      const wasUnexpanded = parent.children === undefined;
       (parent.children ??= []).unshift(newItem);
       this.collapseExpandedSiblings(draft, parentPath!);
       draft.expandedFolderIds.add(parentPath!);
+      // If the directory was never expanded, trigger a full load so all
+      // existing siblings are fetched (not just the newly created file).
+      if (wasUnexpanded) {
+        this.onExpandNeeded?.(parentPath!);
+      }
     } else {
       draft.items.unshift(newItem);
     }
