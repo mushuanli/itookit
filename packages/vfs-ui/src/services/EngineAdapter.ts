@@ -221,8 +221,8 @@ export class EngineAdapter {
                     const oldIds: string[] = [];
                     data.nodes?.forEach(n => {
                         if (n.newPath) {
-                            this.queues.update.add(n.newPath);
-                            adapterDEBUG.queued('update', n.newPath, this.queues.update.size);
+                            this.queues.create.add(n.newPath);
+                            adapterDEBUG.queued('create', n.newPath, this.queues.create.size);
                         }
                         if (n.oldPath) {
                             oldIds.push(n.oldPath);
@@ -233,7 +233,7 @@ export class EngineAdapter {
                         adapterDEBUG.dispatch('ITEM_DELETE_SUCCESS', `rename-old ids=[${oldIds.join(',')}]`);
                         this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: oldIds } });
                     }
-                    if (this.queues.update.size) scheduleProcess(this.queues.update, 'update', 50);
+                    if (this.queues.create.size) scheduleProcess(this.queues.create, 'create', 50);
                     break;
                 }
             }
