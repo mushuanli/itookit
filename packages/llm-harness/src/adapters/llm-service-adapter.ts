@@ -19,60 +19,32 @@ import { LLM_IOCTL, expandMessagesAttachments } from '@itookit/device-llm';
 const BASE_CTX: DeviceContext = { nodeId: 'llm', name: 'llm' };
 
 export class LLMServiceAdapter implements ILLMService {
-    constructor(private readonly driver: IDeviceDriver) {}
+    constructor(
+        private readonly driver: IDeviceDriver,
+        /** 运行模式；harness 下层自动选 anthropic-messages 协议。 */
+        private readonly runMode?: 'harness' | 'kernel',
+    ) {}
 
     async chat(connectionId: string, request: ChatCompletionParams): Promise<ChatCompletionResponse> {
-        // Use streaming internally to support APIs that only respond via SSE.
-        // CHAT_SYNC (stream:false) hangs on some proxy endpoints; collecting
-        // streaming chunks is universally compatible.
-        const contentParts: string[] = [];
-        const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
-        let finishReason = 'stop';
-        let usage: ChatCompletionResponse['usage'];
-        let model = '';
+        const openOpts: Record<string, unknown> = { connectionId };
+        if (this.runMode) openOpts.runMode = this.runMode;
+        const sessionId = await this.driver.open?.(BASE_CTX, openOpts) ?? connectionId;
+        const ctx: DeviceContext = { ...BASE_CTX, sessionId };
 
-        for await (const chunk of this.chatStream(connectionId, request)) {
-            model = model || chunk.model || '';
-            const delta = chunk.choices?.[0]?.delta;
-            if (delta?.content) contentParts.push(delta.content);
-            if (delta?.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                    const idx = tc.index ?? 0;
-                    if (!toolCallMap.has(idx)) {
-                        toolCallMap.set(idx, { id: tc.id ?? '', name: tc.function?.name ?? '', args: '' });
-                    }
-                    if (tc.function?.arguments) {
-                        toolCallMap.get(idx)!.args += tc.function.arguments;
-                    }
-                }
-            }
-            if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
-            if (chunk.usage) usage = chunk.usage;
-        }
+        // Expand blob/downscaled-blob attachments to base64 data URIs
+        // so they survive JSON serialization.
+        const expandedMessages = await expandMessagesAttachments(request.messages);
+        const params: ChatCompletionParams = { ...request, messages: expandedMessages };
 
-        const toolCalls = toolCallMap.size > 0
-            ? [...toolCallMap.entries()].sort(([a], [b]) => a - b).map(([, tc]) => ({
-                id: tc.id, type: 'function' as const,
-                function: { name: tc.name, arguments: tc.args },
-            }))
-            : undefined;
-
-        return {
-            id: '',
-            object: 'chat.completion',
-            created: Date.now(),
-            model,
-            choices: [{
-                index: 0,
-                message: { role: 'assistant', content: contentParts.join(''), tool_calls: toolCalls },
-                finish_reason: finishReason,
-            }],
-            usage,
-        } as unknown as ChatCompletionResponse;
+        const result = await this.driver.ioctl!(ctx, LLM_IOCTL.CHAT_SYNC, params);
+        await this.driver.close?.(ctx);
+        return result as ChatCompletionResponse;
     }
 
     async *chatStream(connectionId: string, request: ChatCompletionParams): AsyncIterable<ChatCompletionChunk> {
-        const sessionId = await this.driver.open?.(BASE_CTX, { connectionId }) ?? connectionId;
+        const openOpts: Record<string, unknown> = { connectionId };
+        if (this.runMode) openOpts.runMode = this.runMode;
+        const sessionId = await this.driver.open?.(BASE_CTX, openOpts) ?? connectionId;
         const ctx: DeviceContext = { ...BASE_CTX, sessionId };
 
         // Expand blob/downscaled-blob attachments to base64 data URIs

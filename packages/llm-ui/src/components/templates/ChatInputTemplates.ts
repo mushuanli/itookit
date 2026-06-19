@@ -140,53 +140,48 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * Thinking 模式 — 手动控制开关 + 推理强度
+     * Thinking 模式 — toggle + 推理强度（同一行）
      */
     renderThinkingSetting(): string {
         return `
-            <div class="llm-input__setting-row">
+            <div class="llm-input__setting-row llm-input__setting-row--inline">
                 <label class="llm-input__toggle" title="${t('thinking.tooltip')}">
                     <input type="checkbox" class="llm-input__thinking-toggle" checked>
                     <span class="llm-input__toggle-slider"></span>
                 </label>
-                <span style="margin-left:8px;">${ENTITY_ICONS.llm} ${t('thinking.label')}</span>
-            </div>
-            <div class="llm-input__setting-row llm-input__reasoning-row">
-                <label class="llm-input__setting-label">
-                    <span style="font-size:0.75rem; margin-left:44px;">${t('thinking.effort.label')}</span>
-                </label>
-                <select class="llm-input__reasoning-select" title="${t('thinking.effort.label')}">
-                    <option value="auto" selected>${t('thinking.effort.auto')}</option>
-                    <option value="low">${t('thinking.effort.low')}</option>
-                    <option value="medium">${t('thinking.effort.medium')}</option>
-                    <option value="xhigh">${t('thinking.effort.xhigh')}</option>
-                </select>
+                <span>${ENTITY_ICONS.llm} ${t('thinking.label')}</span>
+                <span class="llm-input__setting-spacer"></span>
+                <span class="llm-input__reasoning-wrapper">
+                    <select class="llm-input__reasoning-select" title="${t('thinking.effort.label')}">
+                        <option value="auto" selected>${t('thinking.effort.auto')}</option>
+                        <option value="low">${t('thinking.effort.low')}</option>
+                        <option value="medium">${t('thinking.effort.medium')}</option>
+                        <option value="xhigh">${t('thinking.effort.xhigh')}</option>
+                    </select>
+                </span>
             </div>
         `;
     },
 
     /**
-     * Agent 模式 — 多轮 Agent Loop + 工具
+     * Harness 模式 — toggle + Working Dir（同一行）
      */
     renderModeSetting(): string {
         return `
-            <div class="llm-input__setting-row llm-input__harness-section">
-                <label class="llm-input__toggle" title="${t('chatInput.agentMode.tooltip')}">
+            <div class="llm-input__setting-row llm-input__setting-row--inline llm-input__harness-section">
+                <label class="llm-input__toggle" title="${t('chatInput.harnessMode.tooltip')}">
                     <input type="checkbox" class="llm-input__harness-toggle">
                     <span class="llm-input__toggle-slider"></span>
                 </label>
-                <span style="margin-left:8px;">${t('chatInput.agentMode')}</span>
-            </div>
-
-            <div class="llm-input__setting-row llm-input__cwd-row" style="display:none">
-                <label class="llm-input__setting-label">
+                <span>${t('chatInput.harnessMode')}</span>
+                <span class="llm-input__setting-spacer"></span>
+                <span class="llm-input__cwd-wrapper" style="display:none">
                     <span class="llm-input__setting-icon">📁</span>
-                    Working dir
-                </label>
-                <input type="text"
-                       class="llm-input__cwd-input"
-                       placeholder="Default"
-                       title="Root directory for file and shell tools">
+                    <input type="text"
+                           class="llm-input__cwd-input"
+                           placeholder="Working dir"
+                           title="Root directory for file and shell tools">
+                </span>
             </div>
         `;
     },
@@ -253,20 +248,17 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * Advanced 折叠区 — Block Mode（默认 unchecked = streaming）
+     * Block Mode — toggle 独立行（非流式，等待完整响应）
      */
     renderAdvancedSection(): string {
         return `
-            <details class="llm-input__advanced">
-                <summary class="llm-input__setting-divider llm-input__advanced-toggle">Advanced</summary>
-                <div class="llm-input__setting-row">
-                    <label class="llm-input__toggle" title="Wait for full response before displaying (disables streaming)">
-                        <input type="checkbox" class="llm-input__stream-toggle">
-                        <span class="llm-input__toggle-slider"></span>
-                    </label>
-                    <span style="margin-left:8px;">Block Mode</span>
-                </div>
-            </details>
+            <div class="llm-input__setting-row llm-input__setting-row--inline">
+                <label class="llm-input__toggle" title="Wait for full response before displaying (disables streaming)">
+                    <input type="checkbox" class="llm-input__stream-toggle">
+                    <span class="llm-input__toggle-slider"></span>
+                </label>
+                <span>Block Mode</span>
+            </div>
         `;
     },
 

@@ -150,6 +150,7 @@ export class StateManager {
 
         // 兜底：保持现有 agentId，仅应用 settings
         if (!options.isNewSession && options.sessionSettings) {
+            console.log('[StateManager] restoreInputState applying sessionSettings:', JSON.stringify(options.sessionSettings));
             const current = chatInput.getConfig();
             chatInput.setConfig({
                 text: current.text,

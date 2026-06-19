@@ -559,6 +559,7 @@ class InlineAssetOps implements IAssetOperations {
             name: assetName,
             parentPath: assetDir,
             content: buf as string | ArrayBuffer,
+            overwrite: true,
         });
         return result;
     }
