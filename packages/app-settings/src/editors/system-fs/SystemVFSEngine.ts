@@ -37,6 +37,11 @@ import type {
 } from '@itookit/common';
 import { FSCapabilityError } from '@itookit/common';
 
+// ── System FS internal types ─────────────────────────────────────────────────
+
+/** FSNode with a composite id for cross-module addressing */
+type SystemFSNode<T extends FSNode = FSNode> = T & { id: string };
+
 // ── ID helpers ────────────────────────────────────────────────────────────────
 
 const DEV_DIR_ID = '__dev__';
@@ -67,7 +72,7 @@ const BLOCKED_CONTENT = (name: string, path: string, mod: string): string =>
 
 // ── FSNode wrapper for composite IDs ──────────────────────────────────────────
 
-function wrapFSNode(node: FSNode, id: string, parentPath: string | null, moduleId: string): FSNode {
+function wrapFSNode(node: FSNode, id: string, parentPath: string | null, moduleId: string): SystemFSNode {
     if (node.type === 'directory') {
         return {
             ...node,
@@ -76,7 +81,7 @@ function wrapFSNode(node: FSNode, id: string, parentPath: string | null, moduleI
             moduleId,
             tags: node.tags ? [...node.tags] : [],
             metadata: { ...(node.metadata as Record<string, unknown>), _showAll: true },
-        } as FSDirectoryNode;
+        } as SystemFSNode<FSDirectoryNode>;
     }
     return {
         ...node,
@@ -85,7 +90,7 @@ function wrapFSNode(node: FSNode, id: string, parentPath: string | null, moduleI
         moduleId,
         tags: node.tags ? [...node.tags] : [],
         metadata: { ...(node.metadata as Record<string, unknown>), _showAll: true },
-    } as FSFileNode;
+    } as SystemFSNode<FSFileNode>;
 }
 
 // ── Tree collection ───────────────────────────────────────────────────────────
@@ -200,7 +205,7 @@ class SystemFSDriver implements IFSDriver {
                 id,
                 parentPath: null,
                 name: moduleName,
-                type: 'directory',
+                type: 'directory' as const,
                 path: `/${moduleName}`,
                 createdAt: 0,
                 modifiedAt: 0,
@@ -208,7 +213,7 @@ class SystemFSDriver implements IFSDriver {
                 tags: [],
                 metadata: { title: moduleName, description: info.description ?? '', _showAll: true },
                 moduleId: 'system',
-            };
+            } as SystemFSNode<FSDirectoryNode>;
         }
 
         const parsed = parseComposite(id);
@@ -240,7 +245,7 @@ class SystemFSDriver implements IFSDriver {
                 tags: [] as string[],
                 metadata: { title: mod.name, description: mod.description ?? '', _showAll: true },
                 moduleId: 'system',
-            })));
+            } as SystemFSNode<FSDirectoryNode>)));
             return nodes;
         }
 
@@ -332,12 +337,12 @@ class SystemFSDriver implements IFSDriver {
 
     // ── /dev/ helpers ───────────────────────────────
 
-    private buildDevDirNode(): FSNode {
+    private buildDevDirNode(): SystemFSNode<FSDirectoryNode> {
         return {
             id: DEV_DIR_ID,
             parentPath: null,
             name: 'dev',
-            type: 'directory',
+            type: 'directory' as const,
             path: '/dev',
             createdAt: 0,
             modifiedAt: 0,
@@ -345,7 +350,7 @@ class SystemFSDriver implements IFSDriver {
             tags: [],
             metadata: { title: '/dev', description: 'Registered virtual device drivers', _showAll: true },
             moduleId: 'system',
-        };
+        } as SystemFSNode<FSDirectoryNode>;
     }
 
     private buildDevChildNodes(): FSNode[] {
@@ -354,7 +359,7 @@ class SystemFSDriver implements IFSDriver {
         );
     }
 
-    private buildDevFileNode(handlerId: string, parentPath: string): FSFileNode {
+    private buildDevFileNode(handlerId: string, parentPath: string): SystemFSNode<FSFileNode> {
         const driver = this.vfs.devices.has(handlerId)
             ? this.vfs.devices.get(handlerId)
             : null;
@@ -362,7 +367,7 @@ class SystemFSDriver implements IFSDriver {
             id: devNodeId(handlerId),
             parentPath,
             name: handlerId,
-            type: 'file',
+            type: 'file' as const,
             path: `/dev/${handlerId}`,
             createdAt: 0,
             modifiedAt: 0,
@@ -371,7 +376,7 @@ class SystemFSDriver implements IFSDriver {
             tags: [],
             metadata: { title: handlerId, description: driver?.description ?? '', _showAll: true },
             moduleId: 'system',
-        };
+        } as SystemFSNode<FSFileNode>;
     }
 
     private buildDevContent(handlerId: string): string {
