@@ -219,7 +219,7 @@
     color: white;
 }
 
-/* ── Tier Pills ─────────────────────────────────────────────── */
+/* ── Tier Pills (legacy, kept for compat) ───────────────────── */
 .llm-input__tier-pills {
     display: flex;
     gap: 4px;
@@ -245,6 +245,62 @@
     background: var(--llm-color-primary);
     border-color: var(--llm-color-primary);
     color: white;
+}
+
+/* ── Tier Cards (settings panel, shows tier name + model name) ── */
+.llm-input__tier-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+}
+
+.llm-input__tier-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 4px;
+    border: 1px solid var(--llm-border-color);
+    border-radius: var(--llm-radius-md);
+    background: var(--llm-bg-primary);
+    color: var(--llm-text-secondary);
+    cursor: pointer;
+    transition: all var(--llm-transition-fast);
+    min-width: 0;
+    text-align: center;
+}
+
+.llm-input__tier-card:hover {
+    border-color: var(--llm-color-primary);
+    color: var(--llm-color-primary);
+    background: var(--llm-color-primary-bg);
+}
+
+.llm-input__tier-card.active {
+    border-color: var(--llm-color-primary);
+    background: var(--llm-color-primary);
+    color: white;
+}
+
+.llm-input__tier-card.active .llm-input__tier-card-model {
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.llm-input__tier-card-name {
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.llm-input__tier-card-model {
+    font-size: 0.68rem;
+    color: var(--llm-text-muted);
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
 }
 
 /* --- 主输入区域 --- */
@@ -408,6 +464,71 @@
 }
 
 /* Connection dropdown is managed by PopupPanel (mounted on body, position:fixed) */
+
+/* ─── Tier Quick-Switch ─────────────────────────────────────────────────────── */
+
+.llm-input__tier-quick-wrapper {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.llm-input__tier-quick {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 7px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--llm-radius-md);
+    font-size: 0.8rem;
+    color: var(--llm-text-secondary);
+    cursor: pointer;
+    transition: background var(--llm-transition-fast), color var(--llm-transition-fast);
+    white-space: nowrap;
+}
+
+.llm-input__tier-quick:hover {
+    background: var(--llm-bg-hover);
+    color: var(--llm-text-primary);
+}
+
+.llm-input__tier-quick--active {
+    color: var(--llm-color-primary);
+    background: var(--llm-color-primary-bg);
+}
+
+.llm-input__tier-quick--active:hover {
+    background: var(--llm-color-primary-bg);
+}
+
+.llm-input__tier-quick:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.llm-input__tier-quick-icon {
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+.llm-input__tier-quick-label {
+    max-width: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.llm-input__tier-quick-clear {
+    font-size: 0.9em;
+    line-height: 1;
+    opacity: 0.6;
+    cursor: pointer;
+}
+
+.llm-input__tier-quick-clear:hover {
+    opacity: 1;
+}
+
+/* Tier dropdown is managed by PopupPanel (mounted on body, position:fixed) */
 
 /* ─── Prompt Picker (preset prompts quick-insert) ──────────────────────────── */
 

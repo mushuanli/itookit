@@ -129,6 +129,12 @@ export class ChatInput implements IChatInputPresenter {
     private connQuickClear!: HTMLElement;
     private connPopup: PopupPanel | null = null;
 
+    // ── Tier Quick Switch (popup via PopupPanel) ─────────────────────────────
+    private tierQuickBtn!: HTMLButtonElement;
+    private tierQuickLabel!: HTMLSpanElement;
+    private tierQuickClear!: HTMLElement;
+    private tierPopup: PopupPanel | null = null;
+
     // ── Prompt Picker (preset prompts dropdown, popup via PopupPanel) ────────
     private promptPickerWrapper!: HTMLElement;
     private promptPickerBtn!: HTMLButtonElement;
@@ -161,6 +167,9 @@ export class ChatInput implements IChatInputPresenter {
 
     // ── Tool output panel ─────────────────────────────────────────────────────
     private toolOutputEl: HTMLElement | null = null;
+
+    // ── Session profile ───────────────────────────────────────────────────────
+    private systemPromptAppendInput!: HTMLTextAreaElement;
 
     // ── Harness state ────────────────────────────────────────────────────────
     private skills: SkillInfo[] = [];
@@ -270,6 +279,7 @@ export class ChatInput implements IChatInputPresenter {
         this.textarea.disabled = loading;
         this.agentPickerBtn.disabled = loading;
         this.connQuickBtn.disabled = loading;
+        this.tierQuickBtn.disabled = loading;
         this.connectionSelect.disabled = loading;
         this.attachBtn.disabled = loading;
         this.settingsBtn.disabled = loading;
@@ -333,6 +343,7 @@ export class ChatInput implements IChatInputPresenter {
             this.currentAgentId = validatedId;
             this.config.settings.modelTier = 'auto';
             this.updateTierPills('auto');
+            this.updateTierQuick();
             this.updateActiveBadges();
         }
 
@@ -397,6 +408,8 @@ export class ChatInput implements IChatInputPresenter {
         this.agentPopup = null;
         this.connPopup?.destroy();
         this.connPopup = null;
+        this.tierPopup?.destroy();
+        this.tierPopup = null;
         this.promptPopup?.destroy();
         this.promptPopup = null;
         this.morePopup?.destroy();
@@ -462,12 +475,17 @@ export class ChatInput implements IChatInputPresenter {
         this.connQuickLabel = q('.llm-input__conn-quick-label');
         this.connQuickClear = q('.llm-input__conn-quick-clear');
 
+        // Tier quick-switch elements
+        this.tierQuickBtn = q('.llm-input__tier-quick');
+        this.tierQuickLabel = q('.llm-input__tier-quick-label');
+        this.tierQuickClear = q('.llm-input__tier-quick-clear');
+
         // Prompt picker elements (in toolbar)
         this.promptPickerWrapper = q('.llm-input__prompt-picker-wrapper');
         this.promptPickerBtn = q('.llm-input__prompt-picker');
 
         this.connectionSelect = q('.llm-input__connection-select');
-        this.tierPillsContainer = q('.llm-input__tier-pills');
+        this.tierPillsContainer = q('.llm-input__tier-cards');
         this.historySlider = q('.llm-input__history-slider');
         this.historyValue = this.container.querySelector('.llm-input__history-value');
         this.streamToggle = q('.llm-input__stream-toggle');
@@ -489,6 +507,9 @@ export class ChatInput implements IChatInputPresenter {
         this.helpBody = q('.llm-input__help-body');
         // helpBtn is assigned in bindHelpEvents() after the popup renders
         this.helpBtn = document.createElement('button'); // placeholder to avoid null checks
+
+        // Session profile
+        this.systemPromptAppendInput = this.container.querySelector('.llm-input__system-prompt-append') as HTMLTextAreaElement;
     }
 
     private bindEvents(): void {
@@ -586,24 +607,35 @@ export class ChatInput implements IChatInputPresenter {
             this.toggleConnPicker();
         });
 
+        // Tier quick-switch — popup handled by PopupPanel
+        this.tierQuickBtn.addEventListener('click', (e) => {
+            if ((e.target as HTMLElement).closest('.llm-input__tier-quick-clear')) {
+                this.selectTier('auto');
+                return;
+            }
+            this.toggleTierPicker();
+        });
+
         // Prompt picker — popup handled by PopupPanel
         this.promptPickerBtn?.addEventListener('click', () => this.togglePromptPicker());
 
-        // Settings panel connection select — keeps in sync with conn-quick
+        // Settings panel connection select — keeps in sync with conn-quick and tier card model names
         this.connectionSelect.addEventListener('change', () => {
             this.config.settings.connectionId = this.connectionSelect.value || undefined;
             this.updateConnQuick();
+            this.updateTierCardModels();
             this.updateActiveBadges();
             this.notifyConfigChange();
         });
 
         this.tierPillsContainer?.addEventListener('click', (e) => {
-            const pill = (e.target as HTMLElement).closest('.llm-input__tier-pill') as HTMLElement | null;
+            const pill = (e.target as HTMLElement).closest('.llm-input__tier-card') as HTMLElement | null;
             if (!pill) return;
             const tier = pill.dataset.tier as 'auto' | ModelTier;
             if (!tier) return;
             this.config.settings.modelTier = tier;
             this.updateTierPills(tier);
+            this.updateTierQuick();
             this.updateActiveBadges();
             this.notifyConfigChange();
         });
@@ -708,6 +740,12 @@ export class ChatInput implements IChatInputPresenter {
         // Skills refresh button (click, not change)
         this.container.querySelector('.llm-input__skills-refresh')
             ?.addEventListener('click', () => this.reloadSkills());
+
+        // Session profile — system prompt append
+        this.systemPromptAppendInput?.addEventListener('input', () => {
+            this.config.settings.systemPromptAppend = this.systemPromptAppendInput.value.trim() || undefined;
+            this.notifyConfigChange();
+        });
     }
 
     private bindOutsideClickHandler(): void {
@@ -784,6 +822,10 @@ export class ChatInput implements IChatInputPresenter {
         if (this.config.settings.thinkingEnabled !== undefined) {
             overrides.thinkingEnabled = this.config.settings.thinkingEnabled;
         }
+        // Session profile — system prompt append
+        if (this.config.settings.systemPromptAppend) {
+            overrides.systemPromptAppend = this.config.settings.systemPromptAppend;
+        }
 
         return overrides;
     }
@@ -798,6 +840,8 @@ export class ChatInput implements IChatInputPresenter {
             this.connections = await this.options.onRequestConnections();
             this.updateConnectionOptions();
             this.updateConnQuick();
+            this.updateTierQuick();
+            this.updateTierCardModels();
         } catch (e) {
             console.error('[ChatInput] Failed to load connections:', e);
         }
@@ -818,6 +862,8 @@ export class ChatInput implements IChatInputPresenter {
         }
         if (this.connQuickBtn) this.updateConnQuick();
         this.updateTierPills(this.config.settings.modelTier ?? 'auto');
+        if (this.tierQuickBtn) this.updateTierQuick();
+        this.updateTierCardModels();
         if (this.historySlider) {
             this.historySlider.value = this.config.settings.historyLength.toString();
             this.updateHistoryDisplay();
@@ -846,6 +892,9 @@ export class ChatInput implements IChatInputPresenter {
         if (reasoningSelect && this.config.settings.reasoningEffort) {
             reasoningSelect.value = this.config.settings.reasoningEffort;
         }
+        if (this.systemPromptAppendInput) {
+            this.systemPromptAppendInput.value = this.config.settings.systemPromptAppend ?? '';
+        }
         this.updateActiveBadges();
     }
 
@@ -858,6 +907,7 @@ export class ChatInput implements IChatInputPresenter {
         this.config.settings.streamMode = !(this.streamToggle?.checked ?? false);
         this.config.settings.useHarness = this.harnessToggle?.checked ?? false;
         this.config.settings.workingDirectory = this.cwdInput?.value.trim() ?? '';
+        this.config.settings.systemPromptAppend = this.systemPromptAppendInput?.value.trim() || undefined;
     }
 
     private adjustTextareaHeight(): void {
@@ -898,6 +948,7 @@ export class ChatInput implements IChatInputPresenter {
             case 'tier':
                 this.config.settings.modelTier = 'auto';
                 this.updateTierPills('auto');
+                this.updateTierQuick();
                 break;
             case 'history':
                 this.historySlider.value = '-1';
@@ -1165,8 +1216,26 @@ export class ChatInput implements IChatInputPresenter {
     }
 
     private updateTierPills(tier: 'auto' | ModelTier): void {
-        this.tierPillsContainer?.querySelectorAll('.llm-input__tier-pill').forEach(pill => {
-            pill.classList.toggle('active', (pill as HTMLElement).dataset.tier === tier);
+        this.tierPillsContainer?.querySelectorAll('.llm-input__tier-card').forEach(card => {
+            card.classList.toggle('active', (card as HTMLElement).dataset.tier === tier);
+        });
+    }
+
+    /** Refresh the model-name subtitle on each tier card to match the currently selected connection. */
+    private updateTierCardModels(): void {
+        const tiers = this.resolveEffectiveTiers();
+
+        // 'auto' card shows the optimal model name (indicates what will actually be used)
+        const modelLabels: Record<string, string> = {
+            auto:     tiers.optimal ?? '',
+            optimal:  tiers.optimal ?? '',
+            standard: tiers.standard ?? '',
+            fast:     tiers.fast ?? '',
+        };
+
+        this.tierPillsContainer?.querySelectorAll('[data-tier-model]').forEach(el => {
+            const t = (el as HTMLElement).dataset.tierModel ?? '';
+            el.textContent = modelLabels[t] ?? '';
         });
     }
 
@@ -1245,6 +1314,7 @@ export class ChatInput implements IChatInputPresenter {
         this.config.agentId = id;
         this.currentAgentId = id;
         this.updateAgentTrigger();
+        this.updateTierCardModels();
         this.options.onExecutorChange?.(id);
         this.notifyConfigChange();
     }
@@ -1390,6 +1460,7 @@ export class ChatInput implements IChatInputPresenter {
         this.config.settings.connectionId = id || undefined;
         if (this.connectionSelect) this.connectionSelect.value = id;
         this.updateConnQuick();
+        this.updateTierCardModels();
         this.updateActiveBadges();
         this.notifyConfigChange();
     }
@@ -1407,6 +1478,94 @@ export class ChatInput implements IChatInputPresenter {
             this.connQuickLabel.textContent = 'Default';
             this.connQuickClear.style.display = 'none';
             this.connQuickBtn.classList.remove('llm-input__conn-quick--active');
+        }
+    }
+
+    // ── Tier Quick-Switch methods ─────────────────────────────────────────────
+
+    private getOrCreateTierPopup(): PopupPanel {
+        if (!this.tierPopup) {
+            this.tierPopup = new PopupPanel(this.tierQuickBtn, {
+                emptyText: 'No tiers configured',
+                animated: true,
+            });
+        }
+        return this.tierPopup;
+    }
+
+    private openTierPicker(): void {
+        this.connPopup?.hide();
+        this.agentPopup?.hide();
+        const popup = this.getOrCreateTierPopup();
+        popup.show(this.buildTierItems(), {
+            onSelect: (item) => this.selectTier(item.id as 'auto' | ModelTier),
+        });
+    }
+
+    private toggleTierPicker(): void {
+        const popup = this.getOrCreateTierPopup();
+        if (popup.isVisible) popup.hide();
+        else this.openTierPicker();
+    }
+
+    /**
+     * Resolve the effective tier→modelName map for the current session.
+     * Priority: connection override → agent's default connection → first available connection.
+     */
+    private resolveEffectiveTiers(): Partial<Record<string, string>> {
+        const overrideId = this.config.settings.connectionId;
+        let conn = overrideId
+            ? this.connections.find(c => c.id === overrideId)
+            : undefined;
+
+        if (!conn) {
+            const agent = this.agents.find(a => a.id === this.config.agentId);
+            conn = agent?.connectionId
+                ? this.connections.find(c => c.id === agent.connectionId)
+                : this.connections[0];
+        }
+        return conn?.tiers ?? {};
+    }
+
+    /** Build tier popup items, resolving model names from the selected connection's tiers. */
+    private buildTierItems(): PopupItem[] {
+        const currentTier = this.config.settings.modelTier ?? 'auto';
+        const tierMap = this.resolveEffectiveTiers();
+
+        const items: PopupItem[] = [
+            { id: 'auto', label: 'Auto', description: 'Use agent default', icon: currentTier === 'auto' ? '✓' : '' },
+            { id: 'optimal', label: '最优', description: tierMap.optimal, icon: currentTier === 'optimal' ? '✓' : '' },
+        ];
+        if (tierMap.standard) {
+            items.push({ id: 'standard', label: '标准', description: tierMap.standard, icon: currentTier === 'standard' ? '✓' : '' });
+        }
+        if (tierMap.fast) {
+            items.push({ id: 'fast', label: '快速', description: tierMap.fast, icon: currentTier === 'fast' ? '✓' : '' });
+        }
+        return items;
+    }
+
+    /** Select a tier from the quick-switch popup ('auto' = clear override). */
+    private selectTier(tier: 'auto' | ModelTier): void {
+        this.config.settings.modelTier = tier;
+        this.updateTierQuick();
+        this.updateTierPills(tier);
+        this.updateActiveBadges();
+        this.notifyConfigChange();
+    }
+
+    /** Update the tier-quick button label, active class, and clear button visibility. */
+    private updateTierQuick(): void {
+        if (!this.tierQuickLabel) return;
+        const tier = this.config.settings.modelTier ?? 'auto';
+        const TIER_LABELS: Record<string, string> = { auto: 'Auto', optimal: '最优', standard: '标准', fast: '快速' };
+        this.tierQuickLabel.textContent = TIER_LABELS[tier] ?? tier;
+        if (tier !== 'auto') {
+            this.tierQuickClear.style.display = '';
+            this.tierQuickBtn.classList.add('llm-input__tier-quick--active');
+        } else {
+            this.tierQuickClear.style.display = 'none';
+            this.tierQuickBtn.classList.remove('llm-input__tier-quick--active');
         }
     }
 }

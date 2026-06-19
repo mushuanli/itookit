@@ -1106,6 +1106,11 @@ export class TaskRunner {
         if (overrides.streamMode !== undefined) newConfig.stream = overrides.streamMode;
         if (overrides.reasoningEffort) newConfig.reasoningEffort = overrides.reasoningEffort;
         if (overrides.thinkingEnabled !== undefined) newConfig.enableThinking = overrides.thinkingEnabled;
+        if (overrides.systemPromptAppend) {
+            newConfig.systemPrompt = newConfig.systemPrompt
+                ? `${newConfig.systemPrompt}\n\n${overrides.systemPromptAppend}`
+                : overrides.systemPromptAppend;
+        }
         return newConfig;
     }
 

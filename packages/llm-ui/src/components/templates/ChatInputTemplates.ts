@@ -36,11 +36,13 @@ export const ChatInputTemplates = {
                 </div>
 
                 <div class="llm-input__settings-body">
-                    ${this.renderConnectionTierRow()}
+                    ${this.renderConnectionRow()}
+                    ${this.renderTierRow()}
                     ${this.renderContextSetting()}
                     ${this.renderThinkingSetting()}
                     ${this.renderAdvancedSection()}
                     ${this.renderModeSetting()}
+                    ${this.renderSessionProfileSection()}
                     ${this.renderSkillsSetting()}
                 </div>
             </div>
@@ -48,25 +50,71 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * 连接 + Tier 合并行：🔌 [select] ⚡ [Auto][最优][标准][快速]
+     * 连接选择行（独立一行）
      */
-    renderConnectionTierRow(): string {
+    renderConnectionRow(): string {
         return `
-            <div class="llm-input__setting-row llm-input__conn-tier-row">
-                <span class="llm-input__setting-icon" style="flex-shrink:0;">🔌</span>
-                <select class="llm-input__connection-select" title="Override LLM connection for this session"
-                        style="flex:1; min-width:0;">
+            <div class="llm-input__setting-row">
+                <label class="llm-input__setting-label">
+                    <span class="llm-input__setting-icon">🔌</span>
+                    Connection
+                </label>
+                <select class="llm-input__connection-select" title="Override LLM connection for this session">
                     <option value="">Agent Default</option>
                 </select>
-                <span class="llm-input__setting-icon" style="flex-shrink:0; margin-left:6px;">⚡</span>
-                <div class="llm-input__tier-pills" role="group" aria-label="Model tier" style="flex-shrink:0;">
-                    <button type="button" class="llm-input__tier-pill active" data-tier="auto"     title="Use agent's configured tier">Auto</button>
-                    <button type="button" class="llm-input__tier-pill"        data-tier="optimal"  title="Best quality — complex reasoning">最优</button>
-                    <button type="button" class="llm-input__tier-pill"        data-tier="standard" title="Balanced — most daily work">标准</button>
-                    <button type="button" class="llm-input__tier-pill"        data-tier="fast"     title="Cheapest — simple tasks">快速</button>
+            </div>
+        `;
+    },
+
+    /**
+     * Model Tier 卡片行（独立一行）
+     *
+     * 每张卡片两行：tier 名称 + 模型显示名（可动态更新）。
+     * tiers 参数来自 ConnectionOption.tiers，key 为 ModelTier，value 为模型显示名。
+     */
+    renderTierRow(tiers?: Partial<Record<string, string>>): string {
+        const t_auto  = tiers?.optimal ?? '';
+        const t_opt   = tiers?.optimal ?? '';
+        const t_std   = tiers?.standard ?? '';
+        const t_fast  = tiers?.fast ?? '';
+        return `
+            <div class="llm-input__setting-row">
+                <label class="llm-input__setting-label">
+                    <span class="llm-input__setting-icon">⚡</span>
+                    Model Tier
+                </label>
+                <div class="llm-input__tier-cards" role="group" aria-label="Model tier">
+                    <button type="button" class="llm-input__tier-card active" data-tier="auto"
+                            title="Use agent's configured tier">
+                        <span class="llm-input__tier-card-name">Auto</span>
+                        <span class="llm-input__tier-card-model" data-tier-model="auto">${escapeHTML(t_auto)}</span>
+                    </button>
+                    <button type="button" class="llm-input__tier-card" data-tier="optimal"
+                            title="Best quality — complex reasoning">
+                        <span class="llm-input__tier-card-name">最优</span>
+                        <span class="llm-input__tier-card-model" data-tier-model="optimal">${escapeHTML(t_opt)}</span>
+                    </button>
+                    <button type="button" class="llm-input__tier-card" data-tier="standard"
+                            title="Balanced — most daily work">
+                        <span class="llm-input__tier-card-name">标准</span>
+                        <span class="llm-input__tier-card-model" data-tier-model="standard">${escapeHTML(t_std)}</span>
+                    </button>
+                    <button type="button" class="llm-input__tier-card" data-tier="fast"
+                            title="Cheapest — simple tasks">
+                        <span class="llm-input__tier-card-name">快速</span>
+                        <span class="llm-input__tier-card-model" data-tier-model="fast">${escapeHTML(t_fast)}</span>
+                    </button>
                 </div>
             </div>
         `;
+    },
+
+    /**
+     * 连接 + Tier 合并行：🔌 [select] ⚡ [Auto][最优][标准][快速]
+     * @deprecated 由 renderConnectionRow() + renderTierRow() 取代，保留避免外部引用报错
+     */
+    renderConnectionTierRow(): string {
+        return this.renderConnectionRow() + this.renderTierRow();
     },
 
     /**
@@ -139,6 +187,25 @@ export const ChatInputTemplates = {
                        class="llm-input__cwd-input"
                        placeholder="Default"
                        title="Root directory for file and shell tools">
+            </div>
+        `;
+    },
+
+    /**
+     * Session Profile — 会话级 system prompt 追加
+     */
+    renderSessionProfileSection(): string {
+        return `
+            <div class="llm-input__setting-divider">Session Profile</div>
+            <div class="llm-input__setting-row" style="flex-direction:column; align-items:stretch; gap:4px;">
+                <label class="llm-input__setting-label">
+                    <span class="llm-input__setting-icon">📝</span>
+                    System Prompt Append
+                </label>
+                <textarea class="llm-input__system-prompt-append"
+                    placeholder="Extra instructions appended to the agent's system prompt for this session..."
+                    rows="3"
+                ></textarea>
             </div>
         `;
     },
@@ -222,7 +289,7 @@ export const ChatInputTemplates = {
     /**
      * 底部工具栏
      *
-     * 左侧：attach / agent picker / conn quick-switch / more
+     * 左侧：attach / agent picker / conn quick-switch / tier quick-switch / more
      * 右侧：settings / send / stop
      */
     renderToolbar(): string {
@@ -234,6 +301,7 @@ export const ChatInputTemplates = {
                     </button>
                     ${this.renderAgentPicker()}
                     ${this.renderConnQuick()}
+                    ${this.renderTierQuick()}
                     ${this.renderPromptPicker()}
                     <button class="llm-input__btn llm-input__btn--more" title="More options">
                         ${this.moreIcon()}
@@ -287,6 +355,24 @@ export const ChatInputTemplates = {
                     <span class="llm-input__conn-quick-icon">🔌</span>
                     <span class="llm-input__conn-quick-label">Default</span>
                     <span class="llm-input__conn-quick-clear" style="display:none" title="Clear override">×</span>
+                </button>
+            </div>
+        `;
+    },
+
+    /**
+     * Tier 快速切换 pill（位于 toolbar 左侧，紧跟 conn-quick）
+     *
+     * 默认显示 "Auto"；有 override 时显示层级名并附带 × 清除按钮。
+     * 下拉列表由 PopupPanel 管理，选项含对应模型显示名。
+     */
+    renderTierQuick(): string {
+        return `
+            <div class="llm-input__tier-quick-wrapper">
+                <button class="llm-input__tier-quick" type="button" title="Override model tier">
+                    <span class="llm-input__tier-quick-icon">⚡</span>
+                    <span class="llm-input__tier-quick-label">Auto</span>
+                    <span class="llm-input__tier-quick-clear" style="display:none" title="Clear tier">×</span>
                 </button>
             </div>
         `;

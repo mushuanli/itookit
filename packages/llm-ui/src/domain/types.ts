@@ -84,6 +84,8 @@ export interface ConnectionOption {
     provider?: string;
     /** 是否配置了 standard 或 fast tier（决定 tier 选择器是否有实际意义） */
     hasTiers: boolean;
+    /** tier → model 显示名，供 tier quick-switch popup 展示。key 为 ModelTier，value 为 model name */
+    tiers?: Partial<Record<ModelTier, string>>;
 }
 
 // ============================================================
@@ -123,6 +125,8 @@ export interface ChatSessionSettings {
     reasoningEffort?: 'auto' | 'low' | 'medium' | 'xhigh';
     /** 强制开启/关闭 thinking，undefined=auto（跟随模型默认） */
     thinkingEnabled?: boolean;
+    /** 追加到 Agent system prompt 的会话级指令，发送时拼接在原 system prompt 后 */
+    systemPromptAppend?: string;
 }
 
 export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
@@ -152,6 +156,8 @@ export interface ChatOverrides {
     reasoningEffort?: 'low' | 'medium' | 'xhigh';
     /** 强制开启/关闭 thinking（覆盖模型默认） */
     thinkingEnabled?: boolean;
+    /** 追加到 Agent system prompt（覆盖本次请求） */
+    systemPromptAppend?: string;
 }
 
 // ── Token meter types ──────────────────────────────────────────────────────
