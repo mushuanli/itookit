@@ -497,7 +497,7 @@ export class ChatInput implements IChatInputPresenter {
         // Mode / skills controls
         this.harnessToggle = q('.llm-input__harness-toggle');
         this.harnessToggleLabel = this.container.querySelector('.llm-input__harness-toggle-label') as HTMLSpanElement;
-        this.cwdRow = q('.llm-input__cwd-row');
+        this.cwdRow = q('.llm-input__cwd-wrapper');
         this.cwdInput = q('.llm-input__cwd-input');
         this.skillSection = q('.llm-input__skill-section');
         this.skillsList = q('.llm-input__skills-list');
@@ -660,7 +660,7 @@ export class ChatInput implements IChatInputPresenter {
         });
 
         const thinkingToggle = this.container.querySelector('.llm-input__thinking-toggle') as HTMLInputElement | null;
-        const reasoningRow = this.container.querySelector('.llm-input__reasoning-row') as HTMLElement | null;
+        const reasoningRow = this.container.querySelector('.llm-input__reasoning-wrapper') as HTMLElement | null;
         const reasoningSelect = this.container.querySelector('.llm-input__reasoning-select') as HTMLSelectElement | null;
 
         const syncThinkingUI = () => {
@@ -712,6 +712,7 @@ export class ChatInput implements IChatInputPresenter {
         // ── Mode toggle (Simple / Full) ──────────────────────────────────────
         this.harnessToggle?.addEventListener('change', () => {
             const enabled = this.harnessToggle.checked;
+            console.log('[ChatInput] harness toggle changed:', enabled);
             this.config.settings.useHarness = enabled;
             this.updateHarnessToggleLabel();
             this.updateHarnessVisibility();
@@ -875,6 +876,7 @@ export class ChatInput implements IChatInputPresenter {
             this.updateStreamToggleLabel();
         }
         if (this.harnessToggle) {
+            console.log('[ChatInput] syncUIFromConfig useHarness:', this.config.settings.useHarness);
             this.harnessToggle.checked = this.config.settings.useHarness ?? false;
             this.updateHarnessVisibility();
         }
@@ -883,7 +885,7 @@ export class ChatInput implements IChatInputPresenter {
         }
         // Sync thinking toggle and reasoning effort from persisted settings.
         const thinkingToggle = this.container.querySelector('.llm-input__thinking-toggle') as HTMLInputElement | null;
-        const reasoningRow = this.container.querySelector('.llm-input__reasoning-row') as HTMLElement | null;
+        const reasoningRow = this.container.querySelector('.llm-input__reasoning-wrapper') as HTMLElement | null;
         const reasoningSelect = this.container.querySelector('.llm-input__reasoning-select') as HTMLSelectElement | null;
         if (thinkingToggle) {
             thinkingToggle.checked = this.config.settings.thinkingEnabled ?? true;
@@ -1240,7 +1242,9 @@ export class ChatInput implements IChatInputPresenter {
     }
 
     private notifyConfigChange(): void {
-        this.options.onConfigChange?.(this.getConfig());
+        const config = this.getConfig();
+        console.log('[ChatInput] notifyConfigChange useHarness:', config.settings?.useHarness);
+        this.options.onConfigChange?.(config);
     }
 
     // ================================================================

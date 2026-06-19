@@ -108,13 +108,6 @@ export class SessionService {
      * regardless (the file already exists and will be updated in-place).
      */
     async saveSessionSettings(settings: any): Promise<void> {
-        try {
-            await this.sessionManager.saveSessionSettings(settings);
-        } catch (e) {
-            if (e instanceof FSAlreadyExistsError) {
-                return; // settings.yaml already exists — normal for initialized sessions
-            }
-            throw e;
-        }
+        await this.sessionManager.saveSessionSettings(settings);
     }
 }

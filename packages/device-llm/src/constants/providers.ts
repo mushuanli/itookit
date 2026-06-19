@@ -96,7 +96,7 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         id: 'anthropic', isBuiltin: true,
         name: 'Anthropic',
         implementation: 'anthropic',
-        baseURL: 'https://api.anthropic.com/v1/messages',
+        baseURL: 'https://api.anthropic.com',
         icon: '🏺',
         supportsThinking: true,
         models: [
@@ -111,7 +111,7 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         id: 'gemini', isBuiltin: true,
         name: 'Google Gemini',
         implementation: 'gemini',
-        baseURL: 'https://generativelanguage.googleapis.com/v1beta/models',
+        baseURL: 'https://generativelanguage.googleapis.com',
         icon: '💎',
         supportsThinking: true,
         models: [
@@ -124,7 +124,8 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         id: 'deepseek', isBuiltin: true,
         name: 'DeepSeek',
         implementation: 'openai-compatible',
-        baseURL: 'https://api.deepseek.com/v1/chat/completions',
+        baseURL: 'https://api.deepseek.com',
+        anthropicPath: '/anthropic/v1/messages',
         icon: '🐋',
         supportsThinking: true,
         models: [
@@ -137,7 +138,8 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         id: 'openrouter', isBuiltin: true,
         name: 'OpenRouter',
         implementation: 'openai-compatible',
-        baseURL: 'https://openrouter.ai/api/v1/chat/completions',
+        baseURL: 'https://openrouter.ai',
+        defaultPath: '/api/v1/chat/completions',
         icon: '🌐',
         requiresReferer: true,
         supportsThinking: true,
@@ -157,7 +159,8 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         id: 'cloudapi', isBuiltin: true,
         name: 'CloudAPI',
         implementation: 'openai-compatible',
-        baseURL: 'https://chat.cloudapi.vip/v1/chat/completions',
+        baseURL: 'https://chat.cloudapi.vip',
+        defaultPath: '/v1/chat/completions',
         icon: '☁️',
         supportsThinking: true,
         models: [
@@ -174,7 +177,7 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         id: 'openai', isBuiltin: true,
         name: 'OpenAI',
         implementation: 'openai-compatible',
-        baseURL: 'https://api.openai.com/v1/chat/completions',
+        baseURL: 'https://api.openai.com',
         icon: '🤖',
         supportsThinking: true,
         models: [
@@ -189,7 +192,8 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         id: 'volcengine', isBuiltin: true,
         name: 'Volcengine (火山方舟)',
         implementation: 'openai-compatible',
-        baseURL: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+        baseURL: 'https://ark.cn-beijing.volces.com',
+        defaultPath: '/api/v3/chat/completions',
         icon: '🌋',
         capabilities: {
             vision: true,

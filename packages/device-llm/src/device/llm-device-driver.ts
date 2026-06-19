@@ -122,6 +122,8 @@ export interface LLMDeviceOpenOptions {
     connectionId: string;
     systemPrompt?: string;
     completionDefaults?: Record<string, unknown>;
+    /** 调用方的运行模式；harness 强制走 anthropic-messages 协议。 */
+    runMode?: 'harness' | 'kernel';
 }
 
 // ILLMManagementService 统一管理接口已定义在 @itookit/common
@@ -739,6 +741,27 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         for (const [key, def] of Object.entries(LLM_PROVIDERS)) {
             if (!existingIds.has(key)) {
                 await this.writeProviderToDisk({ ...def, id: key, isBuiltin: true });
+            } else {
+                // Built-in definition may have changed (e.g. anthropicPath fix).
+                // Sync structural fields while preserving user data like apiKey.
+                const vfs = existing.find(p => p.id === key);
+                if (vfs && def) {
+                    const needsUpdate =
+                        vfs.baseURL !== def.baseURL ||
+                        vfs.anthropicPath !== def.anthropicPath ||
+                        vfs.implementation !== def.implementation ||
+                        vfs.defaultPath !== def.defaultPath;
+                    if (needsUpdate) {
+                        await this.writeProviderToDisk({
+                            ...vfs,
+                            baseURL: def.baseURL,
+                            anthropicPath: def.anthropicPath,
+                            implementation: def.implementation,
+                            defaultPath: def.defaultPath,
+                            isBuiltin: true,
+                        });
+                    }
+                }
             }
         }
     }
@@ -763,7 +786,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         if (provider?.isBuiltin) {
             // Mark as deleted in VFS rather than removing the file, so
             // reloadProvidersFrom & syncDefaultProviders skip re-creation.
-            await this.writeProviderToDisk({ ...provider, __deleted: true as any }, systemFS);
+            await this.writeProviderToDisk({ ...provider, __deleted: true } as LLMProvider & { __deleted?: boolean }, systemFS);
         } else {
             await this.deleteProviderFromDisk(id, systemFS);
         }
@@ -1057,12 +1080,20 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             ?? provider?.models[0]?.id
             ?? '';
 
-        // Build a connection object for LLMDriver (which reads .provider, .apiKey, .model)
+        // Protocol priority:
+        //   1. conn.protocol        — 用户在连接上显式选择
+        //   2. runMode === 'harness' — harness 强制 anthropic-messages（需 provider 支持）
+        //   3. provider.anthropicPath — provider 声明了 anthropic 端点（harness / 未指定时自动推荐，kernel 模式不启用）
+        const effectiveProtocol =
+            conn.protocol
+            ?? (opts?.runMode === 'harness' && provider?.anthropicPath ? 'anthropic-messages' as const : undefined)
+            ?? (opts?.runMode !== 'kernel' && provider?.anthropicPath ? 'anthropic-messages' as const : undefined);
         const connForDriver: LLMConnection = {
             ...conn,
             provider: conn.providerId ?? conn.provider ?? '',  // LLMDriver reads `provider`
             apiKey,                                            // resolved from provider
             model: resolvedModel,
+            protocol: effectiveProtocol,
         };
 
         // Pass the resolved provider as customProviderDefaults so createProvider can

@@ -60,12 +60,12 @@ export class AnthropicProvider extends BaseProvider {
         this.validateParams(params);
         const processedParams = await this.preprocessMessages(params);
 
-        const url = `${this.baseURL}/v1/messages`;
+        const url = this.resolveMessagesUrl();
         const body = this.buildRequestBody(processedParams);
 
         const response = await this.fetchJSON<any>(url, {
             method: 'POST',
-            headers: this.buildHeaders(),
+            headers: this.buildHeaders(processedParams),
             body: JSON.stringify(body),
             signal: params.signal
         });
@@ -77,12 +77,12 @@ export class AnthropicProvider extends BaseProvider {
         this.validateParams(params);
         const processedParams = await this.preprocessMessages(params);
 
-        const url = `${this.baseURL}/v1/messages`;
+        const url = this.resolveMessagesUrl();
         const body = this.buildRequestBody({ ...processedParams, stream: true });
 
         const stream = await this.fetchStream(url, {
             method: 'POST',
-            headers: this.buildHeaders(),
+            headers: this.buildHeaders(processedParams),
             body: JSON.stringify(body),
             signal: params.signal
         });
@@ -112,13 +112,33 @@ export class AnthropicProvider extends BaseProvider {
 
     // ============== 请求构建 ==============
 
-    protected buildHeaders(): Record<string, string> {
+    /**
+     * Resolve the actual Messages API URL.
+     * Priority: anthropicPath > defaultPath > built-in default (/v1/messages).
+     *
+     * anthropicPath replaces the built-in /v1/messages suffix entirely,
+     * so it must include the full path (e.g. "/anthropic/v1/messages").
+     */
+    private resolveMessagesUrl(): string {
+        const base = this.baseURL.replace(/\/+$/, '');
+        if (this.config.anthropicPath) {
+            return base + this.config.anthropicPath;
+        }
+        return base + (this.config.defaultPath ?? '/v1/messages');
+    }
+
+    protected buildHeaders(params?: ChatCompletionParams): Record<string, string> {
+        const base = 'computer-use-2024-10-22,prompt-caching-2024-07-31';
+        // effort 模式需追加 beta header
+        const effortBeta = 'effort-2025-11-24';
+        const betaHeader = params?.thinking && params.reasoningEffort
+            ? `${base},${effortBeta}`
+            : base;
         return {
             ...super.buildHeaders(),
             'x-api-key': this.config.apiKey,
             'anthropic-version': this.API_VERSION,
-            // 启用 beta 功能
-            'anthropic-beta': 'computer-use-2024-10-22,prompt-caching-2024-07-31'
+            'anthropic-beta': betaHeader
         };
     }
 
@@ -148,13 +168,21 @@ export class AnthropicProvider extends BaseProvider {
             body.stream = true;
         }
 
-        // Extended Thinking
+        // Extended Thinking — 双模式：
+        // 1. reasoningEffort → output_config.effort（需要 effort beta header，DeepSeek /anthropic 端点使用）
+        // 2. thinking.budget_tokens → 精确控制 token 预算（标准 Anthropic API）
+        // reasoningEffort 优先级高于 thinkingBudget。
         if (params.thinking) {
-            const budget = params.thinkingBudget || this.config.metadata?.thinkingBudget || 10000;
-            body.thinking = {
-                type: 'enabled',
-                budget_tokens: budget
-            };
+            if (params.reasoningEffort) {
+                body.output_config = { effort: params.reasoningEffort };
+                // effort beta header 在 buildHeaders() 中按需追加（见下方 buildHeaders 覆盖）
+            } else {
+                const budget = params.thinkingBudget || this.config.metadata?.thinkingBudget || 10000;
+                body.thinking = {
+                    type: 'enabled',
+                    budget_tokens: budget
+                };
+            }
         }
 
         // 工具 (包括 Computer Use)
@@ -204,7 +232,8 @@ export class AnthropicProvider extends BaseProvider {
      * 转换工具定义
      */
     private convertTools(tools: ToolDefinition[]): any[] {
-        return tools.map(tool => {
+        return tools
+            .map(tool => {
             // Computer Use 工具
             if (tool.type === 'computer_20241022') {
                 return {
@@ -232,11 +261,13 @@ export class AnthropicProvider extends BaseProvider {
                 };
             }
 
-            // 普通函数工具
+            // 普通函数工具 — 兼容两种格式：
+            //   common ToolDefinition: { function: { name, description, parameters } }
+            //   llm-kernel ToolDefinition: { name, description, parameters }
             return {
-                name: tool.function?.name,
-                description: tool.function?.description,
-                input_schema: tool.function?.parameters
+                name: tool.function?.name || tool.name || 'unknown',
+                description: tool.function?.description || (tool as any).description || '',
+                input_schema: tool.function?.parameters || (tool as any).parameters || { type: 'object', properties: {} },
             };
         });
     }
@@ -351,6 +382,21 @@ export class AnthropicProvider extends BaseProvider {
                         tool_use_id: part.tool_use_id,
                         content: part.content,
                         is_error: part.is_error
+                    };
+
+                case 'thinking':
+                    return {
+                        type: 'thinking',
+                        thinking: part.thinking,
+                        signature: part.signature,
+                    };
+
+                case 'tool_use':
+                    return {
+                        type: 'tool_use',
+                        id: part.id,
+                        name: part.name,
+                        input: part.input,
                     };
 
                 default:

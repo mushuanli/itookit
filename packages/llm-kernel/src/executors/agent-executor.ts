@@ -123,6 +123,7 @@ export class AgentExecutor implements IExecutor {
             const sessionId = await driver.open!(baseCtx, {
                 connectionId: this.config.connectionId ?? 'default',
                 systemPrompt: this.config.systemPrompt,
+                runMode: 'kernel' as const,
             });
             this._deviceHandle = createDeviceHandle(driver, { ...baseCtx, sessionId });
         }

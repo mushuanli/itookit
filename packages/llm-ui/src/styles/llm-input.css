@@ -74,6 +74,42 @@
     gap: 6px;
 }
 
+/* Inline variant: toggle + label + optional sub-control on a single row */
+.llm-input__setting-row--inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.llm-input__setting-spacer {
+    flex: 1;
+    min-width: 12px;
+}
+
+.llm-input__setting-sub {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    color: var(--llm-text-secondary);
+}
+
+.llm-input__setting-sub .llm-input__cwd-input {
+    width: 130px;
+    padding: 3px 6px;
+    font-size: 0.8rem;
+    border: 1px solid var(--llm-border);
+    border-radius: 4px;
+    background: var(--llm-bg-input);
+    color: var(--llm-text-primary);
+}
+
+.llm-input__setting-sub .llm-input__reasoning-select {
+    font-size: 0.8rem;
+    padding: 2px 4px;
+}
+
 .llm-input__setting-label {
     display: flex;
     align-items: center;
