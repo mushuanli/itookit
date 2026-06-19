@@ -10,6 +10,7 @@
     "build:libs": "pnpm --filter './packages/*' build",
     "test": "echo \"Error: no test specified\" && exit 1",
     "release": "pnpm --filter ./apps/web-app build && node scripts/release.js",
+    "deploy:pages": "pnpm --filter ./apps/web-app build && node scripts/deploy-gh-pages.js",
     "tauri:dev": "pnpm --filter tauri-app tauri:dev",
     "tau": "pnpm --filter tauri-app tauri:dev",
     "tauri:build": "pnpm build:libs && pnpm --filter tauri-app tauri:build",
