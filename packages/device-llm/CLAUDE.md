@@ -24,3 +24,5 @@ LLMDeviceDriver 管理 VFS 存储路径：`/llm/.connections/` `/llm/.providers/
 - `ConnectionMeta` 不含 apiKey，`LLMConnection` 含完整信息
 - 流式响应使用 `AsyncGenerator<ChatCompletionChunk>`
 - Provider 通过 `registerProvider('openai', OpenAIProvider)` 注册
+- 附件 blob 在 `LLMServiceAdapter` 中展开为 base64 后传递
+- 定期清理过期模型 ID，仅保留最新版本

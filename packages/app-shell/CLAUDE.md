@@ -11,10 +11,10 @@ src/
 ├── index.ts              ← initApp() + AppOptions/AppHandle
 ├── bootstrap.ts          ← initApp() 主函数
 ├── types.ts              ← AppOptions, AppHandle, WorkspaceConfig...
-├── strategies/           ← WorkspaceStrategy 接口 + 3 种实现
-│   ├── standard.ts       ← MDxEditor + VFSModuleEngine
-│   ├── settings.ts       ← ISettingsWidget
-│   └── chat.ts           ← LLMWorkspaceEditor + LLMSessionEngine
+├── strategies/           ← 3 种 WorkspaceStrategy 实现 (单文件)
+│   ├── StandardWorkspaceStrategy  ← MDxEditor + IModuleFS
+│   ├── SettingsWorkspaceStrategy   ← settings factory
+│   └── ChatWorkspaceStrategy      ← LLMWorkspaceEditor + ChatEngine
 └── config/
     └── file-registry.ts  ← FILE_REGISTRY (文件类型→编辑器)
 ```
@@ -24,9 +24,18 @@ src/
 ```typescript
 interface WorkspaceStrategy {
     getFactory(): EditorFactory;
-    getEngine?(moduleName: string): ISessionEngine;
+    getEngine?(moduleName: string): IModuleFS | IChatEngine;
 }
 ```
+
+## WorkspaceConfig 速查
+
+| 关键字段 | 说明 |
+|---|---|
+| `type` | `'standard'` / `'settings'` / `'chat'` / `'agent'` / `'skills'` |
+| `fileCreation` | 即时创建文件配置 (label/title/content/startupFileName) |
+| `aiEnabled` | chat workspace 是否启用 AI 右键菜单 |
+| `showFileExtensions` | 外部文件系统挂载设为 true |
 
 详情: [启动流程 + 配置](./doc/bootstrap-details.md)
 

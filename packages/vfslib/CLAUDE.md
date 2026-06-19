@@ -18,7 +18,8 @@ src/
 ├── adapter-session/        ← VFSModuleEngine (@deprecated), BaseModuleService
 ├── event/                  ← EventBus, TransactionEventBuffer
 ├── devices/                ← nullDevice, zeroDevice, randomDevice
-└── backend/                ← MemoryBackend (测试用)
+├── backend/                ← MemoryBackend (测试用)
+└── utils/                  ← serialization (YAML export/import bundle)
 ```
 
 详情: [关键类 + createVFS](./doc/key-classes.md)
@@ -52,7 +53,6 @@ Path-based 统一接口。4 个实现：
 | MemoryBackend | vfslib | Map<path, Entry> |
 | IndexedDBBackend | vfsdriver-indexeddb | IDB nodes store (path key) |
 | LocalFSBackend | vfsdriver-localfs | 原生 FS + sidecar SQLite |
-| FsBackend | vfsdriver-fs | SQLite + OS filesystem |
 
 新后端需实现: `stat/list/read/write/mkdir/delete/rename/updateMetadata/setTags/getAllTags`，可选 `records/search/symlink/readlink/transaction`。
 
@@ -64,3 +64,4 @@ Path-based 统一接口。4 个实现：
 - `FileHandle._resolveAssetDirId()` 和 `_assetIndex()` 有缓存
 - `validateFilename` 阻止 `_` 前缀，允许 `__` 前缀
 - 消费方始终用 `IModuleFS` 类型，不用 `ModuleFS` 具体类
+- **VFS 导出/导入**: `serialization.ts` 提供 YAML bundle 序列化（文件内容 + assetdir 一并打包）
