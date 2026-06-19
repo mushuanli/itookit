@@ -79,6 +79,8 @@ export interface ExecutionOverrides {
     reasoningEffort?: 'low' | 'medium' | 'xhigh';
     /** 强制开启/关闭 thinking（覆盖模型默认） */
     thinkingEnabled?: boolean;
+    /** 追加到 Agent system prompt（本次请求生效） */
+    systemPromptAppend?: string;
 }
 
 /**

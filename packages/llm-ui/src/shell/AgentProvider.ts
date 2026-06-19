@@ -5,6 +5,7 @@
 import type { IAgentConfigService } from '@itookit/llm-engine';
 import type { ExecutorOption, ConnectionOption } from '../domain/types';
 import { formatDefaultFileTitle } from '@itookit/common';
+import type { ModelTier } from '@itookit/common';
 
 export async function buildExecutorOptions(
     agentService: IAgentConfigService,
@@ -51,14 +52,36 @@ export async function buildConnectionOptions(
     agentService: IAgentConfigService,
 ): Promise<ConnectionOption[]> {
     const connections = await agentService.getConnections();
+
     return connections
         .filter(c => c.enabled !== false)
-        .map(c => ({
-            id: c.id,
-            name: c.name,
-            provider: c.providerId,
-            hasTiers: !!(c.tiers?.standard || c.tiers?.fast),
-        }));
+        .map(c => {
+            // Use getProvider() — same cache as getProviders() but more direct
+            const provider = agentService.getProvider(c.providerId);
+            const tiersMap: Partial<Record<ModelTier, string>> = {};
+
+            // Map tier model IDs → display names from provider catalog
+            for (const [tier, modelId] of Object.entries(c.tiers ?? {}) as [ModelTier, string][]) {
+                if (!modelId) continue;
+                const modelName = provider?.models.find(m => m.id === modelId)?.name;
+                tiersMap[tier] = modelName ?? modelId;
+            }
+            // Always populate optimal from c.model (already resolved by toConnectionMeta)
+            if (!tiersMap.optimal && c.model) {
+                const modelName = provider?.models.find(m => m.id === c.model)?.name;
+                tiersMap.optimal = modelName ?? c.model;
+            }
+
+            console.debug('[buildConnectionOptions]', c.id, c.providerId, '→ provider:', provider?.id, 'tiers:', tiersMap);
+
+            return {
+                id: c.id,
+                name: c.name,
+                provider: c.providerId,
+                hasTiers: !!(c.tiers?.standard || c.tiers?.fast),
+                tiers: tiersMap,
+            };
+        });
 }
 
 export function formatDefaultTitle(agentId: string, agentService: IAgentConfigService): string {
