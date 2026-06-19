@@ -11,8 +11,9 @@ src/
 ├── adapters/      ← CodeMirror 6 + marked 适配
 ├── core/          ← PluginManager, EventBus, DI 容器
 ├── managers/      ← Navigation, Save, Search, Mode, StreamingDiffer
-├── plugins/       ← 20+ 插件 (语法/交互/自动完成/Cloze/UI)
-└── services/      ← MDxProcessor, PrintService
+├── plugins/       ← 20+ 插件 (语法/交互/自动完成/Cloze/Asset/Upload/UI)
+├── services/      ← MDxProcessor, PrintService
+└── utils/         ← 工具函数
 ```
 
 `registerPlugin(MyPlugin)` — 全局注册。`defaultEditorFactory` — 默认 `EditorFactory`。
@@ -32,3 +33,4 @@ const file = createMDXFile(fs, ownerNodeId);  // v3.3: 参数改为 IModuleFS
 - 流式更新使用 `StreamingDiffer` 而非整体替换
 - `ScopedPersistenceStore` — 插件私有 localStorage（scopeId 隔离）
 - `AssetResolverPlugin` 通过 `createMDXFile(fs, nodeId)` 创建文件句柄
+- Asset 上传路径路由修复：正确处理 `/` vs `null` parentPath

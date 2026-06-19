@@ -28,10 +28,16 @@ class MemoryManager {
 }
 ```
 
+## Config 要点
+
+- `customEngine` — 传入自定义 IModuleFS 实现（如 SystemVFSEngine）
+- `uiOptions.fileCreation` — 透传给 VFSUIShell 的即时创建配置
+- `editorConfig` — 编辑器选项（readOnly/initialMode）
+
 详情: [初始化流程 + Config](./doc/init-and-config.md)
 
 ## Conventions
 
 - 一个实例 = 一个工作区 Tab
-- 提供 `vfs` + `moduleName` 则自动创建 `VFSModuleEngine`
+- 提供 `vfs` + `moduleName` 则自动装配模块 FS
 - `mentionScope: ['*']` = 全局 @mention 搜索

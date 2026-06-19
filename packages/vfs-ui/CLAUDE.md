@@ -18,9 +18,17 @@ src/
 ├── services/       ← VFSService, EngineAdapter, NodeMapper, FileTypeRegistry
 ├── ui/             ← NodeList, FileOutline, MoveToModal, items/
 ├── contracts/      ← VFSNodeUI, VFSUIState, UISettings, Ports
-├── commands/       ← File/Bulk/Navigation CommandHandler
+├── commands/       ← File/Bulk/Navigation/Export CommandHandler
+├── integrations/   ← editor-connector (VFS-UI ↔ Editor lifecycle)
+├── interaction/    ← Import/Export 交互处理
 └── mention/        ← FileMentionSource, createVFSMentionProviders
 ```
+
+## 近期关键功能
+
+- **即时文件创建**: 新文件按钮点击后直接创建并打开，目录自动展开
+- **文件导出**: 工具栏按钮 + 右键菜单导出，支持 YAML bundle (文件+assetdir)
+- **parentPath 规范化**: `'/'` → `null`，消除 CREATE_ITEM_START 路径不一致
 
 详情: [组件 + Options](./doc/components.md)
 

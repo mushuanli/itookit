@@ -12,8 +12,7 @@ src/
 ├── tools/                ← Harness 专属工具 (load-skill, delegate-task); 通用工具已迁至 @itookit/tools
 ├── adapters/             ← LLMServiceAdapter (IDeviceDriver → ILLMService)
 ├── services/             ← HITLQueue
-├── (tty: @itookit/device-tty) ← NodeTTYDriver, TTYSessionManager
-└── shell/                ← NodeShellRunner
+├── shell/                ← NodeShellRunner
 ```
 
 ## 核心流程
