@@ -304,7 +304,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         };
 
         const rows: string[] = [];
-        const addRow = (tier: string, badgeClass: string, label: string, modelId: string | undefined) => {
+        const addRow = (_tier: string, badgeClass: string, label: string, modelId: string | undefined) => {
             if (!modelId) return;
             rows.push(`
                 <div style="display:flex;align-items:center;gap:4px;min-width:0">

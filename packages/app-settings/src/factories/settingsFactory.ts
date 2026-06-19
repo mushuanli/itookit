@@ -35,7 +35,7 @@ export const createSettingsFactory = (
     connectionService: IConnectionService,
 ): EditorFactory => {
     return async (container: HTMLElement, options: EditorOptions) => {
-        const nodeId = resolveSettingsSlug(options.nodeId);
+        const nodeId = resolveSettingsSlug(options.nodeId || '');
         await settingsService.init();
 
         let editor: IEditor | null = null;

@@ -82,6 +82,9 @@ importers:
       '@itookit/memory-manager':
         specifier: workspace:*
         version: link:../../packages/memory-manager
+      '@itookit/tools':
+        specifier: workspace:*
+        version: link:../../packages/tools
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../../packages/vfs-ui

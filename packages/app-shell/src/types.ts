@@ -1,4 +1,4 @@
-import type { IStorageBackend, IVFSManager, MountOptions } from '@itookit/common';
+import type { IStorageBackend, IVFSManager, MountOptions, FileCreationConfig } from '@itookit/common';
 
 export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills';
 
@@ -25,6 +25,8 @@ export interface WorkspaceConfig {
      * 外部文件系统挂载（home、mount）设为 true；内部模块保持 false（默认）。
      */
     showFileExtensions?: boolean;
+    /** Instant file creation config — passed through to VFSUIShell */
+    fileCreation?: FileCreationConfig;
 }
 
 export interface AdditionalMount {

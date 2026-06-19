@@ -6,6 +6,7 @@ import type { IVFSManager } from '@itookit/common';
 import type {
   FSNode,
   FSEvent,
+  FSEventType,
 } from '@itookit/common';
 import {
   FS_MODULE_CHAT,
@@ -1727,8 +1728,8 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     return tags ?? [];
   }
 
-  on(event: string, callback: (e: FSEvent) => void): () => void {
-    return this.engine.driver.on(event as any, callback as any);
+  on<E extends FSEventType>(event: E, callback: (e: FSEvent<E>) => void): () => void {
+    return this.engine.driver.on(event, callback as any);
   }
 
   // ============================================================

@@ -1,3 +1,4 @@
+import type { WorkspaceConfig } from '@itookit/app-shell';
 import {
     WS_SETTINGS, WS_CHAT, WS_AGENTS, WS_MINDS,
     WS_ANKI, WS_PROJECTS, WS_EMAILS, WS_PRIVATE, WS_SKILLS,
