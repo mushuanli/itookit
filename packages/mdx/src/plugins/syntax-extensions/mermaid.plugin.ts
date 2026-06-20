@@ -169,8 +169,10 @@ class MermaidManager {
       if (window.mermaid?.run) {
         const elementsArray = Array.from(queue);
 
-        // [优化] 检查元素是否仍在 DOM 中
-        const validElements = elementsArray.filter(el => document.contains(el));
+        // [优化] 检查元素是否仍在 DOM 中，且未渲染过（防止重复渲染失败元素）
+        const validElements = elementsArray.filter(
+          el => document.contains(el) && !el.hasAttribute('data-mermaid-error')
+        );
         if (validElements.length === 0) {
           queue.clear();
           return;
@@ -187,7 +189,22 @@ class MermaidManager {
 
         const nodeList = document.querySelectorAll(selector);
 
-        await window.mermaid.run({ nodes: nodeList });
+        // 逐个渲染，避免一个失败导致整批放弃
+        for (const node of Array.from(nodeList)) {
+          try {
+            await window.mermaid.run({ nodes: document.querySelectorAll(`[${uniqueAttr}="${node.getAttribute(uniqueAttr)}"]`) });
+          } catch (err) {
+            // 标记失败元素，防止后续反复重试；显示简洁错误提示
+            const el = node as HTMLElement;
+            el.setAttribute('data-mermaid-error', 'true');
+            const wrapper = el.closest('pre') ?? el;
+            const errEl = document.createElement('div');
+            errEl.className = 'mermaid-error';
+            errEl.style.cssText = 'color:var(--color-error,#c0392b);font-size:0.8em;padding:4px 8px;';
+            errEl.textContent = '⚠ Mermaid render failed';
+            wrapper.parentNode?.insertBefore(errEl, wrapper.nextSibling);
+          }
+        }
 
         validElements.forEach(el => {
           (el as HTMLElement).removeAttribute(uniqueAttr);

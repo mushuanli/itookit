@@ -86,7 +86,7 @@ export interface HarnessInstance {
  * ```
  */
 export async function createHarness(options: HarnessOptions): Promise<HarnessInstance> {
-    const llmService = new LLMServiceAdapter(options.llmDriver);
+    const llmService = new LLMServiceAdapter(options.llmDriver, 'harness');
     const toolDriver = new ToolDeviceDriver(BUILTIN_TOOLS);
     const skillDriver = new SkillDeviceDriver();
     const agentDriver = new AgentDeviceDriver();
@@ -114,6 +114,8 @@ export async function createHarness(options: HarnessOptions): Promise<HarnessIns
     });
 
     // Auto-detect primary connection + derive per-token pricing.
+    // Also initialize tool descriptions (lazy-loaded from Tool.description()).
+    await toolDriver.init();
     await agentDriver.init();
 
     return {

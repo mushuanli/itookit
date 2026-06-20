@@ -81,6 +81,13 @@ export interface ExecutionOverrides {
     thinkingEnabled?: boolean;
     /** 追加到 Agent system prompt（本次请求生效） */
     systemPromptAppend?: string;
+    /**
+     * 使用 Claude Code Agent Loop 路径（多轮工具调用，内置于 llm-engine）。
+     * 与 useHarness 互斥，优先级高于 useHarness。
+     */
+    useClaudeCode?: boolean;
+    /** Claude Code 路径最大循环轮次，默认 50 */
+    maxTurns?: number;
 }
 
 /**
@@ -390,7 +397,19 @@ export type OrchestratorEvent =
     | { type: 'branch_created'; payload: { sourceId: string; newId: string; branchName?: string } }
     | { type: 'branch_renamed'; payload: { nodeId: string; newName: string } }
     | { type: 'branch_deleted'; payload: { deletedIds: string[] } }
-    | { type: 'branch_switched'; payload: { fromBranch: string; toBranch: string } };
+    | { type: 'branch_switched'; payload: { fromBranch: string; toBranch: string } }
+    // Agent Loop — content block 粒度事件（Claude Code 路径使用）
+    | { type: 'stream:thinking:start'; payload: { nodeId: string } }
+    | { type: 'stream:thinking:stop';  payload: { nodeId: string; signature?: string } }
+    | { type: 'stream:content:start';  payload: { nodeId: string } }
+    | { type: 'stream:content:stop';   payload: { nodeId: string } }
+    | { type: 'tool:queued';   payload: { nodeId: string; name: string; toolId: string } }
+    | { type: 'tool:input';    payload: { nodeId: string; toolId: string; chunk: string } }
+    | { type: 'tool:running';  payload: { nodeId: string; toolId: string } }
+    | { type: 'tool:success';  payload: { nodeId: string; toolId: string; result: string } }
+    | { type: 'tool:error';    payload: { nodeId: string; toolId: string; error: string } }
+    | { type: 'turn:start';    payload: { sessionId: string; turn: number } }
+    | { type: 'turn:end';      payload: { sessionId: string; turn: number; usage?: SessionTokenUsage } };
 
 /**
  * 注册表事件

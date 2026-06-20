@@ -156,6 +156,14 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                             ${p.baseURL || '—'}
                         </span>
                     </div>
+                    ${p.anthropicPath ? `
+                    <div class="settings-detail-item">
+                        <span class="settings-detail-item__label">Anthropic 端点</span>
+                        <span class="settings-detail-item__value" style="font-size:0.75rem;word-break:break-all">
+                            ${p.baseURL}${p.anthropicPath}
+                        </span>
+                    </div>
+                    ` : ''}
                     <div class="settings-detail-item">
                         <span class="settings-detail-item__label">模型数量</span>
                         <span class="settings-detail-item__value">${p.models.length} 个</span>
@@ -592,7 +600,30 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                         <div class="settings-form__group">
                             <label class="settings-form__label">Base URL *</label>
                             <input type="text" class="settings-form__input" name="baseURL"
-                                   value="${fullProvider?.baseURL ?? provider?.baseURL ?? ''}" required placeholder="https://api.example.com/v1">
+                                   value="${fullProvider?.baseURL ?? provider?.baseURL ?? ''}" required placeholder="https://api.example.com">
+                            <small class="settings-form__help">
+                                Provider 根域地址，不含路径（如 https://api.deepseek.com）。
+                            </small>
+                        </div>
+
+                        <div class="settings-form__group">
+                            <label class="settings-form__label">默认 API 路径</label>
+                            <input type="text" class="settings-form__input" name="defaultPath"
+                                   value="${(fullProvider?.defaultPath ?? provider?.defaultPath) ?? ''}"
+                                   placeholder="如 /v1/chat/completions（留空使用内置默认值）">
+                            <small class="settings-form__help">
+                                覆盖实现类内置路径：openai-compatible 默认 /v1/chat/completions，anthropic 默认 /v1/messages。
+                            </small>
+                        </div>
+
+                        <div class="settings-form__group">
+                            <label class="settings-form__label">Anthropic Messages 端点路径</label>
+                            <input type="text" class="settings-form__input" name="anthropicPath"
+                                   value="${(fullProvider?.anthropicPath ?? provider?.anthropicPath) ?? ''}"
+                                   placeholder="如 /anthropic（填写后可使用 anthropic-messages 协议）">
+                            <small class="settings-form__help">
+                                部分厂商（如 DeepSeek）同时提供 Anthropic Messages API 格式端点，填写后连接可选用 anthropic-messages 协议（支持 thinking block）。
+                            </small>
                         </div>
 
                     </div>
@@ -631,6 +662,8 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                     icon: data.icon || undefined,
                     implementation: data.implementation as LLMProviderImplementation,
                     baseURL: data.baseURL,
+                    defaultPath: (data.defaultPath as string || '').trim() || undefined,
+                    anthropicPath: (data.anthropicPath as string || '').trim() || undefined,
                     // Keep existing apiKey if field was left empty
                     apiKey: newApiKey || existingApiKey || undefined,
                     models: [...this.editModels],

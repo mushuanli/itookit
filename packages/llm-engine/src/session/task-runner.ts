@@ -18,8 +18,11 @@ import {
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { SessionState, HistoryMessage } from './session-state';
+import { ClaudeCodeStrategy } from './claude-code-runner';
 import { LLMKernelAdapter, getLLMKernelAdapter } from '../adapters/llmkernel-adapter';
-import { HarnessAdapter, HARNESS_META_KEYS } from '../adapters/harness-adapter';
+import { HarnessAdapter, HarnessStrategy, HARNESS_META_KEYS } from '../adapters/harness-adapter';
+import type { IAgentLoopStrategy, IToolExecutor, AgentLoopRequest } from './agent-loop-strategy';
+import { nullToolExecutor } from './agent-loop-strategy';
 import { IChatEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
@@ -204,16 +207,18 @@ export class TaskRunner {
         let i = 0;
         while (this.running.size < this.maxConcurrent && i < this.queue.length) {
             const task = this.queue[i];
-            const isHarness = !!(this.harnessAdapter && task.input.overrides?.useHarness);
+            // harnessMode toggle → useHarness=true → Agent Loop 路径
+            const isAgentLoop = !!task.input.overrides?.useHarness;
 
-            // Harness tasks must run one at a time: the AgentLoopExecutor singleton
-            // has global event handlers that are not scoped per session.
-            if (isHarness && this.harnessRunning) {
-                i++; // skip for now; try remaining kernel tasks
+            // Agent Loop 任务串行：HarnessStrategy 包装的 IAgentRuntime 单例
+            // 事件处理器是全局的，并发会混事件。ClaudeCodeStrategy 本身无此限制，
+            // 但保持与原 harness 相同的串行保证更安全。
+            if (isAgentLoop && this.harnessRunning) {
+                i++;
                 continue;
             }
 
-            this.queue.splice(i, 1); // remove from queue (don't advance i)
+            this.queue.splice(i, 1);
 
             const ctx = this.callbacks.getSessionContext(task.sessionId);
             if (!ctx) {
@@ -224,9 +229,9 @@ export class TaskRunner {
                 continue;
             }
 
-            if (isHarness) {
+            if (isAgentLoop) {
                 this.harnessRunning = true;
-                this.executeHarnessTask(task, ctx.state, ctx.runtime);
+                this.executeAgentLoopTask(task, ctx.state, ctx.runtime);
             } else {
                 this.executeTask(task, ctx.state, ctx.runtime);
             }
@@ -297,18 +302,20 @@ export class TaskRunner {
     }
 
     // ============================================
-    // 内部：任务执行（harness 路径）
+    // 内部：Agent Loop 统一执行入口
     // ============================================
 
     /**
-     * Harness 执行路径。
+     * Agent Loop 统一执行路径（harnessMode=ON 时调用）。
      *
-     * 与 kernel 路径的区别：
-     * - 无 auto-continue（由 AgentLoopExecutor 内部处理）
-     * - 无自定义历史截断（AgentLoopExecutor 自行管理上下文）
-     * - 事件通过 HarnessAdapter 桥接到 OrchestratorEvent
+     * 策略选择：
+     *   - 有 HarnessAdapter 注入 → HarnessStrategy（兼容 llm-harness 旧部署）
+     *   - 否则 → ClaudeCodeStrategy（内置主框架）
+     *
+     * 两种策略共享同一套 setup/teardown/事件桥接逻辑，
+     * 通过 IAgentLoopStrategy 接口隔离执行细节。
      */
-    private async executeHarnessTask(
+    private async executeAgentLoopTask(
         task: ExecutionTask,
         state: SessionState,
         runtime: SessionRuntime,
@@ -325,11 +332,9 @@ export class TaskRunner {
             const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize } =
                 await this.setupTaskExecution(task, state);
 
-            // 6. Event bridge: harness events → OrchestratorEvent → UI + persistence
+            // ── Event bridge ─────────────────────────────────────────────────
             const onEvent = (event: OrchestratorEvent) => {
-                // Persist streaming content regardless of bound state
                 if (event.type === 'node_update' && event.payload.chunk) {
-                    console.log('[harness][3] onEvent node_update chunk, nodeId=', event.payload.nodeId, 'field=', event.payload.field, 'isBound=', isBound, 'rootId=', rootNode.id);
                     if (!event.payload.nodeId || event.payload.nodeId === rootNode.id) {
                         if (event.payload.field === 'output') {
                             accumulator.output += event.payload.chunk;
@@ -344,7 +349,6 @@ export class TaskRunner {
 
                 if (isBound) {
                     if (event.type === 'error') errorAlreadyEmitted = true;
-                    // Fix missing nodeId on root-level events
                     if (
                         (event.type === 'node_update' || event.type === 'node_status') &&
                         !event.payload.nodeId
@@ -353,104 +357,87 @@ export class TaskRunner {
                     }
                     this.eventBus.emitSession(sessionId, event);
                 } else if (event.type === 'node_update') {
-                    // Background session: promote harness-specific signals to the global bus.
-                    // Keys are defined in HARNESS_META_KEYS (harness-adapter.ts) as single source of truth.
+                    // Background session: promote harness-specific signals to the global bus
                     const meta = event.payload.metaInfo as Record<string, unknown> | undefined;
-                    const ttyOpen    = meta?.[HARNESS_META_KEYS.TTY_OPEN];
-                    const hitlRequest  = meta?.[HARNESS_META_KEYS.HITL_REQUEST];
+                    const ttyOpen     = meta?.[HARNESS_META_KEYS.TTY_OPEN];
+                    const hitlRequest = meta?.[HARNESS_META_KEYS.HITL_REQUEST];
                     const hitlResolved = meta?.[HARNESS_META_KEYS.HITL_RESOLVED];
                     if (ttyOpen) {
-                        this.eventBus.emitGlobal({
-                            type: 'session_tty_active',
-                            payload: {
-                                sessionId,
-                                command: (ttyOpen as { command: string }).command,
-                            },
-                        });
+                        this.eventBus.emitGlobal({ type: 'session_tty_active',
+                            payload: { sessionId, command: (ttyOpen as any).command } });
                     }
                     if (hitlRequest) {
-                        this.eventBus.emitGlobal({
-                            type: 'session_hitl_active',
-                            payload: {
-                                sessionId,
-                                question: (hitlRequest as { question: string }).question,
-                            },
-                        });
+                        this.eventBus.emitGlobal({ type: 'session_hitl_active',
+                            payload: { sessionId, question: (hitlRequest as any).question } });
                     }
                     if (hitlResolved) {
-                        this.eventBus.emitGlobal({
-                            type: 'session_hitl_resolved',
-                            payload: { sessionId },
-                        });
+                        this.eventBus.emitGlobal({ type: 'session_hitl_resolved',
+                            payload: { sessionId } });
                     }
                 }
             };
 
-            // 7. Build harness task request
-            const harnessCwd = input.overrides?.workingDirectory
-                ?? (typeof process !== 'undefined' && typeof process.cwd === 'function' ? process.cwd() : '/');
-            const harnessRequest = {
-                prompt: input.text,
-                workingDirectory: harnessCwd,
-                sessionId,
-                // Connection: user override takes priority, then agent's configured connection.
-                modelOverride: input.overrides?.connectionId || (executorConfig as any).connectionId || undefined,
-                // Tier: user override > agent's configured tier (already resolved into executorConfig.model).
-                // When a user tier override is present we let tier routing handle it instead of pinning model.
-                modelTier: input.overrides?.modelTier || undefined,
-                modelIdOverride: input.overrides?.connectionId ? undefined : (executorConfig.model || undefined),
-                systemPromptOverride: executorConfig.systemPrompt || undefined,
-                context: { agentId: input.agentId },
+            // ── 选择策略 ─────────────────────────────────────────────────────
+            const strategy = this.selectStrategy(input.overrides);
+
+            // ── 构建初始 messages ─────────────────────────────────────────────
+            const history = this.buildHistoryForTask(state, input.text, input.overrides?.historyLength);
+            const historyMessages = await this.buildHistoryMessages(sessionId, history);
+            const messages = [
+                ...historyMessages,
+                { role: 'user' as const, content: input.text },
+            ];
+
+            const llmParams = {
+                model: executorConfig.model,
+                tools: (executorConfig as any).tools ?? [],
+                thinking: executorConfig.enableThinking ?? false,
+                reasoningEffort: (executorConfig as any).reasoningEffort,
+                thinkingBudget: (executorConfig as any).thinkingBudget,
+                maxTokens: (executorConfig as any).maxTokens ?? 32000,
+                metadata: (executorConfig as any).metadata,
             };
 
-            // 8. Execute via harness (multi-turn loop, no auto-continue needed)
-            const { result } = await this.harnessAdapter!.execute(
-                harnessRequest, rootNode, onEvent, task.abortController.signal,
-            );
+            const request: AgentLoopRequest = {
+                messages,
+                llmParams,
+                maxTurns: input.overrides?.maxTurns ?? 50,
+                signal: task.abortController.signal,
+            };
 
-            // 9. Final persistence — harness has exact token data
+            // ── 执行 ─────────────────────────────────────────────────────────
+            const result = await strategy.run(request, {
+                nodeId: rootNode.id,
+                sessionId,
+                onEvent,
+            });
+
+            // ── 持久化 ────────────────────────────────────────────────────────
             await finalize();
-            const hEnd = Date.now();
-            const hUsage = result.usage;
+            const endMs = Date.now();
+
             await this.engine.updateNode(sessionId, assistantNodeId, {
-                content: accumulator.output || result.response || '',
+                content: accumulator.output || result.output,
                 meta: {
                     thinking:     accumulator.thinking,
-                    status: result.status === 'completed' ? 'success'
-                          : result.status === 'partial'   ? 'success'
-                          : result.status === 'cancelled' ? 'aborted'
-                          : 'failed',
-                    endTime:      hEnd,
-                    durationMs:   hUsage.elapsedMs,
-                    inputTokens:  hUsage.inputTokens,
-                    outputTokens: hUsage.outputTokens,
-                    costUsd:      hUsage.costUsd,
+                    status:       'success',
+                    endTime:      endMs,
+                    durationMs:   result.totalUsage.durationMs,
+                    inputTokens:  result.totalUsage.inputTokens,
+                    outputTokens: result.totalUsage.outputTokens,
+                    costUsd:      result.totalUsage.costUsd,
                     isEstimated:  false,
                 },
             });
 
-            // 10. Complete
-            const harnessMaxCtx = 200_000;
-            const hTokenUsage: SessionTokenUsage = {
-                inputTokens:       hUsage.inputTokens,
-                outputTokens:      hUsage.outputTokens,
-                cacheTokens:       0,
-                costUsd:           hUsage.costUsd,
-                contextUsageRatio: Math.min(1, hUsage.inputTokens / harnessMaxCtx),
-                turns:             hUsage.turns,
-                durationMs:        hUsage.elapsedMs,
-                isEstimated:       false,
-            };
-
             state.updateNodeStatus(rootNode.id, 'success');
 
-            // Record cost to connection dailyCosts
-            const hConnectionId = executorConfig.connectionId;
-            if (hConnectionId) {
-                this.agentResolver.recordUsageCost(hConnectionId, {
-                    inputTokens: hUsage.inputTokens,
-                    outputTokens: hUsage.outputTokens,
-                    cost: hUsage.costUsd,
+            const connectionId = executorConfig.connectionId;
+            if (connectionId) {
+                this.agentResolver.recordUsageCost(connectionId, {
+                    inputTokens:  result.totalUsage.inputTokens,
+                    outputTokens: result.totalUsage.outputTokens,
+                    cost:         result.totalUsage.costUsd,
                 }).catch(() => {});
             }
 
@@ -459,17 +446,15 @@ export class TaskRunner {
                     type: 'node_status',
                     payload: { nodeId: rootNode.id, status: 'success' },
                 });
-
                 if (input.regenerateContext) {
                     this.eventBus.emitSession(sessionId, {
                         type: 'regenerate_completed',
                         payload: { branchName: input.regenerateContext.branchName, assistantNodeId },
                     });
                 }
-
                 this.eventBus.emitSession(sessionId, {
                     type: 'finished',
-                    payload: { sessionId, tokenUsage: hTokenUsage },
+                    payload: { sessionId, tokenUsage: result.totalUsage },
                 });
             }
 
@@ -487,9 +472,28 @@ export class TaskRunner {
         }
     }
 
-    // ============================================
-    // 内部：任务执行（kernel 路径）
-    // ============================================
+    /**
+     * 选择 Agent Loop 执行策略。
+     *
+     * 规则：有 HarnessAdapter 注入时走 HarnessStrategy（兼容旧部署），
+     * 否则走 ClaudeCodeStrategy（内置主框架）。
+     */
+    private selectStrategy(_overrides?: ExecutionOverrides): IAgentLoopStrategy {
+        if (this.harnessAdapter) {
+            return new HarnessStrategy(this.harnessAdapter);
+        }
+        return new ClaudeCodeStrategy(
+            this.kernelAdapter,
+            (this as any)._toolExecutor ?? nullToolExecutor,
+        );
+    }
+
+    /**
+     * 注入工具执行器（供 ClaudeCodeStrategy 使用）。
+     */
+    setToolExecutor(executor: IToolExecutor): void {
+        (this as any)._toolExecutor = executor;
+    }
 
     private async executeTask(
         task: ExecutionTask,

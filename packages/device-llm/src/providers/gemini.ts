@@ -47,8 +47,13 @@ export class GeminiProvider extends BaseProvider {
     constructor(config: LLMProviderConfig) {
         super(config);
         if (!this.baseURL) {
-            this.baseURL = 'https://generativelanguage.googleapis.com/v1beta';
+            this.baseURL = 'https://generativelanguage.googleapis.com';
         }
+    }
+
+    private resolveModelsBase(): string {
+        const base = this.baseURL.replace(/\/+$/, '');
+        return base + (this.config.defaultPath ?? '/v1beta/models');
     }
 
     protected getProviderFormat(): 'openai' | 'anthropic' | 'gemini' {
@@ -60,7 +65,7 @@ export class GeminiProvider extends BaseProvider {
         const processedParams = await this.preprocessMessages(params);
 
         const model = this.getModel(processedParams);
-        const url = `${this.baseURL}/models/${model}:generateContent?key=${this.config.apiKey}`;
+        const url = `${this.resolveModelsBase()}/${model}:generateContent?key=${this.config.apiKey}`;
         const body = this.buildRequestBody(processedParams);
 
         const response = await this.fetchJSON<any>(url, {
@@ -78,7 +83,7 @@ export class GeminiProvider extends BaseProvider {
         const processedParams = await this.preprocessMessages(params);
 
         const model = this.getModel(processedParams);
-        const url = `${this.baseURL}/models/${model}:streamGenerateContent?alt=sse&key=${this.config.apiKey}`;
+        const url = `${this.resolveModelsBase()}/${model}:streamGenerateContent?alt=sse&key=${this.config.apiKey}`;
         const body = this.buildRequestBody(processedParams);
 
         const stream = await this.fetchStream(url, {

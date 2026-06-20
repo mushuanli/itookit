@@ -260,8 +260,8 @@ export const en: LocaleStrings = {
     'thinking.toggle.off':       'Enable thinking',
 
     // ── Chat input — Mode toggle ─────────────────────────────────────────────
-    'chatInput.agentMode':       'Agent Mode',
-    'chatInput.agentMode.tooltip': 'Enable multi-turn agent loop with tools',
+    'chatInput.harnessMode':         'Harness Mode',
+    'chatInput.harnessMode.tooltip': 'Enable multi-turn agent loop with tools',
 
     // ── Chat input — OCR (image to text) ─────────────────────────────────────
     'chatInput.ocr':             'Extract Text',
