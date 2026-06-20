@@ -49,6 +49,7 @@ export class LLMDriver {
             apiKey,
             apiBaseUrl,
             model,
+            protocol: config.connection?.protocol,
             supportsThinking: config.supportsThinking,
             requiresReferer: config.requiresReferer,
             headers: config.headers,

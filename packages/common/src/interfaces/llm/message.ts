@@ -75,6 +75,21 @@ export interface MessageContentCitation {
     page?: number;
 }
 
+/** Anthropic thinking block — carries signature for chain integrity. */
+export interface MessageContentThinking {
+    type: 'thinking';
+    thinking: string;
+    signature: string;
+}
+
+/** Anthropic tool_use block — represents an assistant-initiated tool call. */
+export interface MessageContentToolUse {
+    type: 'tool_use';
+    id: string;
+    name: string;
+    input: Record<string, unknown>;
+}
+
 export type MessageContentPart =
     | MessageContentText
     | MessageContentImage
@@ -83,7 +98,9 @@ export type MessageContentPart =
     | MessageContentFile
     | MessageContentToolResult
     | MessageContentCodeExecution
-    | MessageContentCitation;
+    | MessageContentCitation
+    | MessageContentThinking
+    | MessageContentToolUse;
 
 export type MessageContent = string | MessageContentPart[];
 

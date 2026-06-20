@@ -5,7 +5,7 @@
 // 模型目录由 Provider 统一管理，不在 Connection 中存储/编辑。
 
 import { Modal, Toast, BaseSettingsEditor, generateShortUUID, ENTITY_ICONS } from '@itookit/common';
-import type { IConnectionService, ConnectionMeta, LLMConnection, LLMProvider, ModelTier } from '@itookit/common';
+import type { IConnectionService, ConnectionMeta, LLMConnection, LLMProvider, ModelTier, ApiProtocol } from '@itookit/common';
 import { fromConnectionDef, serializeLLMConfig } from '@itookit/device-llm';
 import { runLLMImport } from './llm-import';
 import { renderModelCapabilityBadges } from '../utils/modelBadges';
@@ -549,6 +549,25 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                         仅对支持 thinking 的模型生效（DeepSeek V4 Pro 等）。设置后自动带入请求。
                     </small>
                 </div>
+
+                <!-- API 协议（Claude CLI / Anthropic Messages API 支持） -->
+                <div class="settings-form__group">
+                    <label class="settings-form__label" style="display:flex;align-items:center;gap:6px">
+                        API 协议
+                        <span class="settings-help-icon"
+                              title="同一 Provider 可通过不同 URL 提供多种协议：&#10;• 自动推断 — 按 Provider 类型和 URL 自动判断&#10;• OpenAI Chat — /v1/chat/completions 标准格式&#10;• Anthropic Messages — /v1/messages 格式，支持 Claude CLI / thinking block&#10;• Gemini Generate — Google Gemini generateContent">?</span>
+                    </label>
+                    <select class="settings-form__select" name="protocol" style="max-width:260px">
+                        <option value="" ${!connection?.protocol ? 'selected' : ''}>自动推断（按 Provider 类型）</option>
+                        <option value="openai-chat"        ${connection?.protocol === 'openai-chat'        ? 'selected' : ''}>OpenAI Chat Completions</option>
+                        <option value="anthropic-messages" ${connection?.protocol === 'anthropic-messages' ? 'selected' : ''}>Anthropic Messages（Claude CLI 兼容）</option>
+                        <option value="gemini-generate"    ${connection?.protocol === 'gemini-generate'    ? 'selected' : ''}>Gemini generateContent</option>
+                    </select>
+                    <small class="settings-form__help">
+                        选择 <strong>Anthropic Messages</strong> 可让 DeepSeek / OpenRouter 等兼容厂商走
+                        Claude Code Agent Loop（支持 thinking block 和工具循环）。
+                    </small>
+                </div>
             </form>
         `;
 
@@ -596,6 +615,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     providerId: pid,
                     tiers: Object.keys(tiers).length > 0 ? tiers : undefined,
                     temperature: !isNaN(tempVal) ? tempVal : undefined,
+                    protocol: (data.protocol as ApiProtocol) || undefined,
                     dailyCosts: connection?.dailyCosts,
                     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
                 };

@@ -272,8 +272,8 @@ export const zhCN = {
     'thinking.toggle.off':       '开启思考',
 
     // ── Chat input — Mode toggle ─────────────────────────────────────────────
-    'chatInput.agentMode':       'Agent 模式',
-    'chatInput.agentMode.tooltip': '启用多轮 Agent 循环与工具调用',
+    'chatInput.harnessMode':         'Harness 模式',
+    'chatInput.harnessMode.tooltip': '启用多轮 Agent 循环与工具调用',
 
     // ── Chat input — OCR (image to text) ─────────────────────────────────────
     'chatInput.ocr':             '提取文字',

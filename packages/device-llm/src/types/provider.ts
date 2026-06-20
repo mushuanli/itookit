@@ -2,6 +2,7 @@
 
 import { LLMConnection } from './connection';
 import { ChatCompletionParams, ChatCompletionResponse } from './response';
+import type { ApiProtocol } from '@itookit/common';
 
 // ─── MCP Types (local definition, no device-mcp dependency) ──────────────────
 
@@ -39,9 +40,25 @@ export interface LLMProviderConfig {
     /** API Key */
     apiKey: string;
     
-    /** API 地址 */
+    /** API 地址（Provider 根域） */
     apiBaseUrl?: string;
-    
+
+    /**
+     * 覆盖内置默认路径（如 "/api/v1/chat/completions"）。
+     * 未设置时各 Provider 实现使用自身默认值。
+     */
+    defaultPath?: string;
+
+    /**
+     * Anthropic Messages 兼容路径（相对于 apiBaseUrl）。
+     * 如 "/anthropic"，完整 URL = apiBaseUrl + anthropicPath。
+     * AnthropicProvider 在以 anthropic-messages 协议请求时使用此路径。
+     */
+    anthropicPath?: string;
+
+    /** API 协议类型；显式设置时优先于 implementation + URL 推断 */
+    protocol?: ApiProtocol;
+
     /** 默认模型 */
     model?: string;
 

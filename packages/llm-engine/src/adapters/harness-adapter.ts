@@ -363,3 +363,82 @@ export function getHarnessAdapter(): HarnessAdapter | null {
 export function resetHarnessAdapter(): void {
     instance = null;
 }
+
+// ── HarnessStrategy — 将 HarnessAdapter 适配为 IAgentLoopStrategy ────────────
+
+import type {
+    IAgentLoopStrategy,
+    AgentLoopRequest,
+    AgentLoopResult,
+    AgentLoopContext,
+} from '../session/agent-loop-strategy';
+
+/**
+ * 将现有 HarnessAdapter（llm-harness / IAgentRuntime）包装为 IAgentLoopStrategy，
+ * 使其与 ClaudeCodeStrategy 使用同一调用约定，由 TaskRunner.selectStrategy() 透明分发。
+ */
+export class HarnessStrategy implements IAgentLoopStrategy {
+    constructor(private readonly adapter: HarnessAdapter) {}
+
+    async run(request: AgentLoopRequest, ctx: AgentLoopContext): Promise<AgentLoopResult> {
+        // 从 messages 末尾提取最后一条 user 文本作为 prompt
+        const prompt = this.extractUserPrompt(request.messages);
+        const { nodeId, sessionId, onEvent } = ctx;
+
+        const harnessRequest: AgentTaskRequest = {
+            prompt,
+            sessionId,
+            modelIdOverride: request.llmParams.model,
+        };
+
+        // 构造占位 rootNode 供 HarnessAdapter 填充事件的 nodeId
+        const rootNode: ExecutionNode = {
+            id: nodeId,
+            executorId: 'harness',
+            executorType: 'agent',
+            name: 'Agent',
+            status: 'running',
+            startTime: Date.now(),
+            parentId: undefined,
+            data: {},
+        };
+
+        const { result } = await this.adapter.execute(
+            harnessRequest,
+            rootNode,
+            onEvent,
+            request.signal ?? new AbortController().signal,
+        );
+
+        return {
+            output: result.response ?? '',
+            turns: [],  // HarnessAdapter 不暴露 turn 级别细节
+            totalUsage: {
+                inputTokens:       result.usage?.inputTokens  ?? 0,
+                outputTokens:      result.usage?.outputTokens ?? 0,
+                cacheTokens:       0,
+                costUsd:           result.usage?.costUsd      ?? 0,
+                contextUsageRatio: 0,
+                turns:             result.usage?.turns        ?? 0,
+                durationMs:        result.usage?.elapsedMs    ?? 0,
+                isEstimated:       false,
+            },
+        };
+    }
+
+    private extractUserPrompt(messages: AgentLoopRequest['messages']): string {
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i];
+            if (msg.role !== 'user') continue;
+            if (typeof msg.content === 'string') return msg.content;
+            if (Array.isArray(msg.content)) {
+                const texts = (msg.content as any[])
+                    .filter((b: any) => b.type === 'text')
+                    .map((b: any) => b.text as string);
+                if (texts.length > 0) return texts.join('\n');
+            }
+        }
+        return '';
+    }
+}
+

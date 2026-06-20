@@ -63,6 +63,20 @@ export interface DailyCost {
  */
 export type ModelTier = 'optimal' | 'standard' | 'fast';
 
+// ─── ApiProtocol ──────────────────────────────────────────────────────────────
+
+/**
+ * API 协议类型。同一厂商可提供多种协议端点
+ * （如 DeepSeek 同时支持 OpenAI Chat Completions 和 Anthropic Messages 格式）。
+ *
+ * - `openai-chat`        — OpenAI Chat Completions API (/v1/chat/completions)
+ * - `anthropic-messages` — Anthropic Messages API (/v1/messages)
+ * - `gemini-generate`    — Google Gemini generateContent API
+ *
+ * 未设置时由 `resolveProtocol()` 按 URL + provider 名自动推断，向后兼容。
+ */
+export type ApiProtocol = 'openai-chat' | 'anthropic-messages' | 'gemini-generate';
+
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 export type LLMProviderImplementation =
@@ -82,8 +96,25 @@ export interface LLMProvider {
     id: string;
     name: string;
     implementation: LLMProviderImplementation;
-    /** API 端点地址 */
+    /**
+     * Provider 根域地址，不含路径（如 "https://api.deepseek.com"）。
+     * Provider 实现类会在此基础上拼接 defaultPath 或内置默认路径。
+     */
     baseURL: string;
+    /**
+     * 覆盖 Provider 实现类的内置默认 API 路径。
+     * 仅当与默认值不同时填写，否则省略：
+     * - openai-compatible 默认：/v1/chat/completions
+     * - anthropic 默认：/v1/messages
+     * - gemini 默认：/v1beta/models
+     */
+    defaultPath?: string;
+    /**
+     * 该 Provider 支持的 Anthropic Messages API 兼容路径（相对于 baseURL）。
+     * 如 "/anthropic"，完整 URL = baseURL + anthropicPath。
+     * 填写后 Connection 可以选择 anthropic-messages 协议使用此端点。
+     */
+    anthropicPath?: string;
     /**
      * API Key — 认证凭据，存储于 Provider 层（而非 Connection 层）。
      * 仅在 LLMDeviceDriver 内部流通；对外 `getProviders()` 会剥离此字段。
@@ -123,7 +154,6 @@ export interface LLMProvider {
      * key 为 ISO 日期字符串 YYYY-MM-DD。
      */
     dailyCosts?: Record<string, DailyCost>;
-    [key: string]: unknown;
 }
 
 /**
@@ -149,6 +179,13 @@ export interface LLMConnection {
      * 不填则直接使用 Provider.defaultTiers。
      */
     tiers?: Partial<Record<ModelTier, string>>;
+    /**
+     * API 协议类型。同一厂商可通过不同 URL 提供多种协议（如 DeepSeek 的
+     * openai-chat 端点和 anthropic-messages 端点）。
+     *
+     * 未设置时由 `resolveProtocol()` 按 URL + provider 名自动推断，向后兼容。
+     */
+    protocol?: ApiProtocol;
     metadata?: {
         isSystemDefault?: boolean;
         thinkingBudget?: number;
@@ -189,7 +226,11 @@ export interface LLMConnection {
     model?: string;
     /** @deprecated 模型目录由 Provider 统一管理 */
     availableModels?: LLMModel[];
-    /** @deprecated baseURL 由 Provider 统一管理 */
+    /**
+     * 覆盖 Provider.baseURL。用于同一厂商多协议端点场景
+     * （如 DeepSeek openai-chat 用 /v1，anthropic-messages 用 /anthropic）。
+     * 未设置则使用 Provider.baseURL。
+     */
     baseURL?: string;
 }
 
@@ -241,6 +282,8 @@ export interface DefaultConnectionDef {
     providerId: string;
     /** Tier → model ID 映射 */
     tiers?: Partial<Record<ModelTier, string>>;
+    /** API 协议类型；未设置时由 resolveProtocol() 自动推断 */
+    protocol?: ApiProtocol;
 }
 
 // ─── ConnectionTestResult ─────────────────────────────────────────────────────

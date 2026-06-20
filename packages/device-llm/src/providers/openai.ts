@@ -42,11 +42,16 @@ export class OpenAIProvider extends BaseProvider {
     constructor(config: LLMProviderConfig) {
         super(config);
         if (!this.baseURL) {
-            this.baseURL = 'https://api.openai.com/v1';
+            this.baseURL = 'https://api.openai.com';
         }
 
         // 根据 provider 调整能力
         this.adjustCapabilities(config.provider);
+    }
+
+    private resolveCompletionsUrl(): string {
+        const base = this.baseURL.replace(/\/+$/, '');
+        return base + (this.config.defaultPath ?? '/v1/chat/completions');
     }
 
     /**
@@ -83,9 +88,7 @@ export class OpenAIProvider extends BaseProvider {
         // 预处理消息（处理附件）
         const processedParams = await this.preprocessMessages(params);
 
-        const url = this.baseURL.endsWith('/chat/completions')
-            ? this.baseURL
-            : `${this.baseURL}/chat/completions`;
+        const url = this.resolveCompletionsUrl();
         const body = this.buildRequestBody(processedParams);
 
         const response = await this.fetchJSON<any>(url, {
@@ -108,9 +111,7 @@ export class OpenAIProvider extends BaseProvider {
         // 预处理消息
         const processedParams = await this.preprocessMessages(params);
 
-        const url = this.baseURL.endsWith('/chat/completions')
-            ? this.baseURL
-            : `${this.baseURL}/chat/completions`;
+        const url = this.resolveCompletionsUrl();
         const body = this.buildRequestBody({ ...processedParams, stream: true });
 
         const stream = await this.fetchStream(url, {

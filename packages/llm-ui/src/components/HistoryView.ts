@@ -129,6 +129,10 @@ export class HistoryView implements IHistoryPresenter {
                     'messages_deleted', 'message_edited',
                     'regenerate_started', 'regenerate_completed',
                     'sibling_switch',
+                    // Claude Code Agent Loop — 需要立即处理的事件
+                    'tool:queued',
+                    'stream:thinking:stop',
+                    'tool:success', 'tool:error',
                 ],
             }
         );
@@ -387,6 +391,58 @@ export class HistoryView implements IHistoryPresenter {
                 break;
 
             case 'regenerate_completed':
+                break;
+
+            // ── Claude Code Agent Loop 事件 ───────────────────────────────
+            case 'tool:queued': {
+                // 在 agent 节点下创建 tool 子节点
+                const toolNode = {
+                    id: event.payload.toolId,
+                    parentId: event.payload.nodeId,
+                    executorId: event.payload.name,
+                    executorType: 'tool' as const,
+                    name: event.payload.name,
+                    status: 'queued' as const,
+                    startTime: Date.now(),
+                    data: { input: '' },
+                };
+                this.renderer.appendNode(event.payload.nodeId, toolNode, false);
+                break;
+            }
+
+            case 'tool:input': {
+                // tool input JSON 增量渲染
+                const toolEl = this.renderer.getNode(event.payload.toolId);
+                if (toolEl) {
+                    const inputPre = toolEl.querySelector('.llm-ui-node__input pre') as HTMLElement;
+                    if (inputPre) {
+                        inputPre.textContent = (inputPre.textContent || '') + event.payload.chunk;
+                    }
+                }
+                break;
+            }
+
+            case 'tool:running':
+                this.stream.updateStatus(event.payload.toolId, 'running');
+                break;
+
+            case 'tool:success':
+                this.stream.updateStatus(event.payload.toolId, 'success', event.payload.result);
+                break;
+
+            case 'tool:error':
+                this.stream.updateStatus(event.payload.toolId, 'failed', event.payload.error);
+                break;
+
+            case 'stream:thinking:start':
+            case 'stream:content:start':
+            case 'turn:start':
+            case 'turn:end':
+                // 仅用于内部状态追踪，UI 层无需特殊处理
+                break;
+
+            case 'stream:thinking:stop':
+                // thinking 块结束，signature 不展示
                 break;
         }
     }
