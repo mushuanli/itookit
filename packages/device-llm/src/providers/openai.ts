@@ -51,7 +51,12 @@ export class OpenAIProvider extends BaseProvider {
 
     private resolveCompletionsUrl(): string {
         const base = this.baseURL.replace(/\/+$/, '');
-        return base + (this.config.defaultPath ?? '/v1/chat/completions');
+        const defaultPath = this.config.defaultPath ?? '/v1/chat/completions';
+        // 如果 baseURL 已经以 defaultPath 结尾，不再重复拼接
+        if (defaultPath && base.endsWith(defaultPath)) {
+            return base;
+        }
+        return base + defaultPath;
     }
 
     /**

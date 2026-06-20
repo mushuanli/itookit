@@ -124,7 +124,11 @@ export class AnthropicProvider extends BaseProvider {
         if (this.config.anthropicPath) {
             return base + this.config.anthropicPath;
         }
-        return base + (this.config.defaultPath ?? '/v1/messages');
+        const defaultPath = this.config.defaultPath ?? '/v1/messages';
+        if (defaultPath && base.endsWith(defaultPath)) {
+            return base;
+        }
+        return base + defaultPath;
     }
 
     protected buildHeaders(params?: ChatCompletionParams): Record<string, string> {
@@ -301,6 +305,29 @@ export class AnthropicProvider extends BaseProvider {
                         content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
                     }]
                 });
+            } else if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+                // Assistant message with tool_calls: convert to Anthropic content blocks
+                const content = this.convertContent(msg.content);
+                const contentBlocks: any[] = typeof content === 'string'
+                    ? (content ? [{ type: 'text', text: content }] : [])
+                    : content;
+                for (const tc of msg.tool_calls) {
+                    contentBlocks.push({
+                        type: 'tool_use',
+                        id: tc.id,
+                        name: tc.function?.name ?? tc.name,
+                        input: (() => {
+                            try {
+                                return typeof tc.function?.arguments === 'string'
+                                    ? JSON.parse(tc.function.arguments)
+                                    : (tc.input ?? {});
+                            } catch {
+                                return {};
+                            }
+                        })(),
+                    });
+                }
+                userMessages.push({ role: 'assistant', content: contentBlocks });
             } else {
                 userMessages.push({
                     role: msg.role === 'assistant' ? 'assistant' : 'user',
