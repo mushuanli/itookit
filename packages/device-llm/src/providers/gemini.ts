@@ -53,7 +53,11 @@ export class GeminiProvider extends BaseProvider {
 
     private resolveModelsBase(): string {
         const base = this.baseURL.replace(/\/+$/, '');
-        return base + (this.config.defaultPath ?? '/v1beta/models');
+        const defaultPath = this.config.defaultPath ?? '/v1beta/models';
+        if (defaultPath && base.endsWith(defaultPath)) {
+            return base;
+        }
+        return base + defaultPath;
     }
 
     protected getProviderFormat(): 'openai' | 'anthropic' | 'gemini' {
