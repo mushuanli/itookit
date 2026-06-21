@@ -182,6 +182,13 @@ export class LLMWorkspaceEditor implements IEditor {
             this.initLayout();
             this.initInfrastructure();
             this.initServices();
+
+            // Ensure VFS session structure exists before ChatInput renders,
+            // so settings can be read/written directly to {assetDir}/settings.yaml.
+            this.currentSessionId = await this.sessionService.ensureReady(
+                this.options.nodeId!, this.currentTitle
+            );
+
             await this.initComponents();
             this.initCommands();
             this.initEventHandler();
@@ -289,7 +296,7 @@ export class LLMWorkspaceEditor implements IEditor {
         const validAgentId = validateAgentId(this.agentService, savedAgentId);
 
         let initialSettings;
-        if (this.currentSessionId && !this.options.isNewSession) {
+        if (this.currentSessionId) {
             initialSettings = await this.errorHandler.wrap(
                 () => this.sessionService.getSessionSettings(),
                 'Load session settings', 'warn'
@@ -471,12 +478,6 @@ export class LLMWorkspaceEditor implements IEditor {
     private async handleConfigChange(config: any): Promise<void> {
         if (config.settings) {
             console.log('[Shell] handleConfigChange useHarness:', config.settings.useHarness, 'sessionId:', this.currentSessionId);
-            // Always buffer to sessionStorage so settings survive browser refresh
-            // even when the chat file hasn't been created yet (new session).
-            try {
-                sessionStorage.setItem('llm:pendingSettings', JSON.stringify(config.settings));
-            } catch { /* storage full or unavailable */ }
-
             if (this.currentSessionId) {
                 await this.errorHandler.wrap(
                     () => this.sessionService.saveSessionSettings(config.settings),
@@ -579,22 +580,6 @@ export class LLMWorkspaceEditor implements IEditor {
         this.currentSessionId = sessionId;
         this.currentTitle = title;
 
-        // Flush pending settings from sessionStorage to VFS settings.yaml.
-        // When the user toggles harness mode (or other settings) before the
-        // first message creates the chat file, settings only land in
-        // sessionStorage. Now that the session exists we persist them.
-        try {
-            const raw = sessionStorage.getItem('llm:pendingSettings');
-            if (raw) {
-                const pending = JSON.parse(raw);
-                console.log('[Shell] loadSession flushing pending to VFS:', JSON.stringify(pending));
-                await this.sessionService.saveSessionSettings(pending);
-                console.log('[Shell] loadSession flush succeeded');
-            }
-        } catch (e) {
-            console.error('[Shell] loadSession flush failed:', e);
-        }
-
         this.chatInput?.updateTokenStats?.(null);
         this.titleInput.value = title;
 
@@ -605,25 +590,11 @@ export class LLMWorkspaceEditor implements IEditor {
             ?? (emptySession ? await this.readParentDirAIDefaults() : undefined);
 
         let sessionSettings;
-        if (!this.options.isNewSession) {
-            sessionSettings = await this.errorHandler.wrap(
-                () => this.sessionService.getSessionSettings(),
-                'Load session settings', 'warn'
-            );
-            console.log('[Shell] loadSession VFS settings:', JSON.stringify(sessionSettings));
-        }
-
-        // Merge sessionStorage fallback (survives refresh when chat file not yet created).
-        // VFS settings take priority; sessionStorage fills in missing fields.
-        try {
-            const raw = sessionStorage.getItem('llm:pendingSettings');
-            if (raw) {
-                const pending = JSON.parse(raw);
-                console.log('[Shell] loadSession sessionStorage pending:', JSON.stringify(pending));
-                sessionSettings = { ...pending, ...sessionSettings };
-                console.log('[Shell] loadSession merged settings:', JSON.stringify(sessionSettings));
-            }
-        } catch { /* ignore */ }
+        sessionSettings = await this.errorHandler.wrap(
+            () => this.sessionService.getSessionSettings(),
+            'Load session settings', 'warn'
+        );
+        console.log('[Shell] loadSession VFS settings:', JSON.stringify(sessionSettings));
 
         this.stateManager.restoreInputState(this.chatInput, {
             initialInputState: effectiveInitialInputState,

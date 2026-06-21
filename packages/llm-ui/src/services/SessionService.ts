@@ -20,10 +20,22 @@ export class SessionService {
     ) { }
 
     /**
+     * 确保 VFS 会话结构已就绪，供 ChatInput 渲染前调用。
+     *
+     * 创建 manifest + asset 目录（幂等），并绑定 sessionManager，
+     * 使得后续 getSessionSettings / saveSessionSettings 可直接读写 VFS。
+     */
+    async ensureReady(nodeId: string, title: string): Promise<string> {
+        const sessionId = await this.getOrCreateSessionId(nodeId, title);
+        await this.sessionManager.bindSession(nodeId, sessionId);
+        return sessionId;
+    }
+
+    /**
      * 加载现有会话
      */
     async loadSession(nodeId: string, defaultTitle: string): Promise<SessionLoadResult> {
-        let sessionId = await this.getOrCreateSessionId(nodeId, defaultTitle);
+        const sessionId = await this.getOrCreateSessionId(nodeId, defaultTitle);
 
         // 绑定会话并获取快照
         const snapshot = await this.sessionManager.bindSession(nodeId, sessionId);
