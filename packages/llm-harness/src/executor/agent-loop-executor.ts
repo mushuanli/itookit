@@ -40,9 +40,7 @@ import { ErrorRecoveryService } from './error-recovery';
 import { BackPressureValidator } from './back-pressure';
 import { ContextManager } from './context-manager';
 import { getToolName, getToolArgs, extractXmlToolCalls } from '../utils/tool-call';
-import { saveSession, removeSession } from './session-store';
 import type { HITLQueue } from '../services/hitl-queue';
-export { loadInterruptedSessions } from './session-store';
 
 type NotifyHandler<E extends AgentEventType> = (payload: AgentEventPayloads[E]) => void;
 type InterceptHandler<E extends AgentEventType> = (payload: AgentEventPayloads[E]) => Promise<boolean | string | undefined>;
@@ -257,16 +255,6 @@ export class AgentLoopExecutor implements IAgentRuntime {
                 // 5. Update usage — ONCE per loop iteration with total tool count.
                 budgetController.updateUsage(usage, tokenUsage, toolCalls.length);
 
-                // Q2: Persist session state after each turn for crash recovery.
-                saveSession({
-                    sessionId,
-                    task,
-                    messages: this.contextManager.buildMessages(sessionId),
-                    usage,
-                    status: 'running',
-                    savedAt: Date.now(),
-                });
-
                 // 6. Branch
                 if (toolCalls.length > 0) {
                     // Q1: Plan confirmation on the first turn with tool calls.
@@ -364,10 +352,6 @@ export class AgentLoopExecutor implements IAgentRuntime {
                 incompleteReason = err instanceof Error ? err.message : String(err);
                 console.error('[harness][ERR] run() caught error:', err);
             }
-        } finally {
-            // Q2: Remove persisted session on any completion (success / error / cancel).
-            // Interrupted sessions (browser crash) are detected by the absence of this call.
-            removeSession(sessionId);
         }
 
         const result: AgentTaskResult = {

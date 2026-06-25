@@ -243,6 +243,8 @@ export interface SessionSnapshot {
     sessions: SessionGroup[];
     status: SessionStatus;
     isRunning: boolean;
+    /** 如果上次执行被中断，指向被中断的 assistant session id */
+    interruptedAssistantId?: string;
 }
 
 /**

@@ -52,6 +52,7 @@ const createInitialState = (initial: Partial<VFSUIState> = {}): VFSUIState => ({
 export class VFSStore implements IStatePort {
   private state: VFSUIState;
   private listeners = new Set<(state: VFSUIState) => void>();
+  private actionListeners = new Set<(action: { type: string; payload?: any }, state: VFSUIState) => void>();
   private onExpandNeeded?: (folderId: string) => void;
 
   constructor(initial: Partial<VFSUIState> = {}) {
@@ -67,12 +68,19 @@ export class VFSStore implements IStatePort {
   dispatch(action: Action): void {
     const prev = this.state;
     this.state = this.reduce(this.state, action);
+    // Fire action hooks first so rename handlers can register intent before state subscribers run.
+    this.actionListeners.forEach(l => l(action, this.state));
     if (prev !== this.state) this.listeners.forEach(l => l(this.state));
   }
 
   subscribe(listener: (state: VFSUIState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  onAction(listener: (action: { type: string; payload?: any }, state: VFSUIState) => void): () => void {
+    this.actionListeners.add(listener);
+    return () => this.actionListeners.delete(listener);
   }
 
   private reduce = produce((draft: VFSUIState, { type, payload }: Action) => {
@@ -114,6 +122,7 @@ export class VFSStore implements IStatePort {
         }
       },
       'ITEM_DELETE_SUCCESS': () => this.handleDelete(draft, new Set(payload.itemIds)),
+      'ITEM_RENAME_SUCCESS': () => this.handleRename(draft, payload.oldId, payload.newItem),
       'ITEM_SELECTION_REPLACE': () => {
         draft.selectedItemIds = new Set(payload.ids || []);
       },
@@ -270,6 +279,35 @@ export class VFSStore implements IStatePort {
       if (draft.activeId === id) draft.activeId = null;
       draft.selectedItemIds.delete(id);
     });
+    draft.tags = rebuildTagsMap(draft.items);
+  }
+
+  /**
+   * Atomically replace oldId with newItem in the tree.
+   * Preserves activeId/selectedItemIds so the editor stays open.
+   */
+  private handleRename(draft: VFSUIState, oldId: string, newItem: VFSNodeUI): void {
+    const replace = (items: VFSNodeUI[]): boolean => {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].id === oldId) {
+          items[i] = { ...newItem, children: items[i].children };
+          return true;
+        }
+        if (items[i].children && replace(items[i].children!)) return true;
+      }
+      return false;
+    };
+    replace(draft.items);
+
+    if (draft.activeId === oldId) draft.activeId = newItem.id;
+    if (draft.selectedItemIds.has(oldId)) {
+      draft.selectedItemIds.delete(oldId);
+      draft.selectedItemIds.add(newItem.id);
+    }
+    if (draft.expandedFolderIds.has(oldId)) {
+      draft.expandedFolderIds.delete(oldId);
+      draft.expandedFolderIds.add(newItem.id);
+    }
     draft.tags = rebuildTagsMap(draft.items);
   }
 

@@ -127,6 +127,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
     // ===== Initialize UI =====
     this.initializeComponents();
     this.connectStoreToPublicEvents();
+    this.connectRenameEvents();
   }
 
   // ===== editor-connector compatibility =====
@@ -255,10 +256,13 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
   }
 
   on(
-    eventName: SessionManagerEvent,
+    eventName: SessionManagerEvent | 'fileRenamed',
     callback: SessionManagerCallback
   ): () => void {
-    const publicEventName = EVENT_MAP[eventName];
+    if (eventName === 'fileRenamed') {
+      return this.eventPort.on('fileRenamed', callback as any);
+    }
+    const publicEventName = EVENT_MAP[eventName as SessionManagerEvent];
     return publicEventName
       ? this.eventPort.on(publicEventName as any, (e: any) => callback(e))
       : () => { };
@@ -390,6 +394,14 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
       }
 
       this.eventPort.emit('stateChanged', { state });
+    });
+  }
+
+  private connectRenameEvents(): void {
+    this.statePort.onAction((action, _state) => {
+      if (action.type !== 'ITEM_RENAME_SUCCESS') return;
+      const { oldId, newItem } = action.payload as { oldId: string; newItem: import('../contracts/types').VFSNodeUI };
+      this.eventPort.emit('fileRenamed', { oldId, newId: newItem.id, item: newItem });
     });
   }
 

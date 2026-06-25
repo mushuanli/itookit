@@ -41,7 +41,8 @@ import {
     buildExecutorOptions, validateAgentId, buildConnectionOptions,
 } from './AgentProvider';
 import {
-    buildHarnessCallbacks, checkInterruptedSessions, injectIntoRunningHarness,
+    buildHarnessCallbacks, checkSessionInterrupted, cleanupLegacyHarnessKeys,
+    injectIntoRunningHarness,
     wirePlanConfirmIntercept,
 } from './HarnessIntegration';
 import { buildSlashCallbacks } from './SlashCommandRouter';
@@ -201,8 +202,8 @@ export class LLMWorkspaceEditor implements IEditor {
             this.initComplete = true;
             this.emit('ready');
             this.initResolve?.();
-            // Q2: Check for interrupted harness sessions after init.
-            checkInterruptedSessions();
+            // Clean up legacy harness:session:* keys from old localStorage-based recovery.
+            cleanupLegacyHarnessKeys();
         } catch (e: any) {
             if (e.code === 'ABORTED' || e.message?.includes('Bind cancelled')) {
                 this.initResolve?.();
@@ -577,6 +578,13 @@ export class LLMWorkspaceEditor implements IEditor {
             this.historyView.renderWelcome();
         }
 
+        // Check if this session was interrupted (VFS meta.status === 'running')
+        checkSessionInterrupted(snapshot, (interruptedAssistantId) => {
+            this.sessionManager.regenerate(interruptedAssistantId).catch(() => {
+                Toast.info('重新执行失败，请手动重试');
+            });
+        });
+
         this.currentSessionId = sessionId;
         this.currentTitle = title;
 
@@ -650,6 +658,11 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     public markAsDeleted(): void { this.isBeingDeleted = true; }
+
+    /** Update the VFS nodeId when the backing file is renamed. */
+    public updateNodeId(newNodeId: string): void {
+        this.options = { ...this.options, nodeId: newNodeId };
+    }
 
     async waitUntilReady(): Promise<void> {
         return this.initPromise ?? Promise.resolve();

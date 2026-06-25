@@ -18,6 +18,8 @@ import { parseFileInfo, extractTaskCounts } from '../utils/parser';
 import { MediaViewerEditor, isBinaryViewable } from '../editors/MediaViewerEditor';
 import { guessMimeType } from '@itookit/common';
 
+import type { PublicEventMap } from '../contracts/events';
+
 export interface ConnectOptions {
   onEditorCreated?: (editor: IEditor | null) => void;
   saveDebounceMs?: number;
@@ -27,6 +29,8 @@ export interface ConnectOptions {
 type VFSManager = ISessionUI<VFSNodeUI, VFSService> & {
   resolveEditorFactory?: (node: VFSNodeUI) => EditorFactory;
   store?: { getState(): VFSUIState; dispatch(action: any): void };
+  on(event: 'fileRenamed', handler: (payload: PublicEventMap['fileRenamed']) => void): () => void;
+  on(event: string, handler: (payload: any) => void): () => void;
 };
 
 /**
@@ -150,6 +154,10 @@ export function connectEditorLifecycle(
   }: {
     item?: VFSNodeUI;
   }) => {
+    // If this activeId change was caused by a rename, fileRenamed already updated
+    // activeNode and called updateNodeId — just skip teardown.
+    if (item && activeEditor && activeNode?.id === item.id) return;
+
     await teardown();
     const myToken = sessionToken;
     editorContainer.innerHTML = '';
@@ -273,6 +281,16 @@ export function connectEditorLifecycle(
 
   const unsubSession = vfsManager.on('sessionSelected', handleSessionChange);
 
+  const unsubRename = vfsManager.on(
+    'fileRenamed',
+    ({ oldId, newId, item }: PublicEventMap['fileRenamed']) => {
+      if (activeEditor && activeNode?.id === oldId) {
+        activeNode = item;
+        (activeEditor as any).updateNodeId?.(newId);
+      }
+    }
+  );
+
   // Set initial placeholder — the first sessionSelected event will replace it
   // when VFSUIShell.start() restores the active session.
   editorContainer.innerHTML =
@@ -281,6 +299,7 @@ export function connectEditorLifecycle(
   return () => {
     unsubSession();
     unsubNav();
+    unsubRename?.();
     teardown().catch(console.error);
   };
 }
