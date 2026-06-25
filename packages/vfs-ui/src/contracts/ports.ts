@@ -15,6 +15,8 @@ export interface IStatePort {
   getState(): VFSUIState;
   dispatch(action: { type: string; payload?: any }): void;
   subscribe(listener: (state: VFSUIState) => void): () => void;
+  /** Post-dispatch hook: fires after every action, receives the action and new state. */
+  onAction(listener: (action: { type: string; payload?: any }, state: VFSUIState) => void): () => void;
 }
 
 /**

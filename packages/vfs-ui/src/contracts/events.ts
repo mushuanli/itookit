@@ -14,6 +14,7 @@ import type { VFSNodeUI, VFSUIState } from './types';
  */
 export interface PublicEventMap {
   'sessionSelected': { item: VFSNodeUI | undefined };
+  'fileRenamed': { oldId: string; newId: string; item: VFSNodeUI };
   'navigateToHeading': { elementId: string };
   'importRequested': { parentPath: string | null };
   'sidebarStateChanged': { isCollapsed: boolean };

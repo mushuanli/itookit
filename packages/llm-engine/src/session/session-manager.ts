@@ -175,12 +175,25 @@ export class SessionManager {
         const state = this.states.get(this.boundSessionId);
         const runtime = this.sessions.get(this.boundSessionId);
         const status = runtime?.status || 'idle';
+        const sessions = state?.getSessions() || [];
+
+        // Detect interrupted execution from VFS meta.status
+        let interruptedAssistantId: string | undefined;
+        for (let i = sessions.length - 1; i >= 0; i--) {
+            const s = sessions[i];
+            if (s.role === 'assistant' && s.executionRoot?.status === 'running') {
+                interruptedAssistantId = s.id;
+                break;
+            }
+        }
+
         return {
             sessionId: this.boundSessionId,
             nodeId: this.boundNodeId,
-            sessions: state?.getSessions() || [],
+            sessions,
             status,
             isRunning: status === 'running' || status === 'queued',
+            interruptedAssistantId,
         };
     }
 

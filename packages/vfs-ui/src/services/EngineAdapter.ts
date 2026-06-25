@@ -24,6 +24,8 @@ export class EngineAdapter {
 
     private engineUnsubscribe: (() => void) | null = null;
     private loadingFolderIds = new Set<string>();
+    /** Paths dispatched via ITEM_RENAME_SUCCESS — skip the redundant node:updated echo. */
+    private suppressedUpdatePaths = new Set<string>();
 
     constructor(
         private readonly engine: IModuleFS,
@@ -201,10 +203,13 @@ export class EngineAdapter {
                         break;
                     }
                     data.nodes?.forEach(n => {
-                        if (n.path) {
-                            this.queues.update.add(n.path);
-                            adapterDEBUG.queued('update', n.path, this.queues.update.size);
+                        if (!n.path) return;
+                        if (this.suppressedUpdatePaths.delete(n.path)) {
+                            adapterDEBUG.received('node:updated[rename-suppress]', { path: n.path });
+                            return;
                         }
+                        this.queues.update.add(n.path);
+                        adapterDEBUG.queued('update', n.path, this.queues.update.size);
                     });
                     if (this.queues.update.size) scheduleProcess(this.queues.update, 'update', 50);
                     break;
@@ -218,22 +223,27 @@ export class EngineAdapter {
                 }
                 case 'node:renamed': {
                     const data = payload as { nodes?: Array<{ oldPath: string; newPath: string; oldName: string; newName: string }> };
-                    const oldIds: string[] = [];
-                    data.nodes?.forEach(n => {
-                        if (n.newPath) {
-                            this.queues.create.add(n.newPath);
-                            adapterDEBUG.queued('create', n.newPath, this.queues.create.size);
+                    void (async () => {
+                        for (const n of data.nodes ?? []) {
+                            if (!n.oldPath || !n.newPath) continue;
+                            try {
+                                const node = await this.engine.driver.getNode(n.newPath) as FSNode | null;
+                                adapterDEBUG.nodeResult(n.newPath, node);
+                                if (!node || shouldFilterNode(node)) continue;
+                                const newItem = mapFSNodeToUIItem(node, this.iconResolver, undefined, this.showFileExtensions);
+                                // Suppress the node:updated echo VFSlib emits after rename
+                                this.suppressedUpdatePaths.add(n.newPath);
+                                adapterDEBUG.dispatch('ITEM_RENAME_SUCCESS', `${n.oldPath} → ${newItem.id}`);
+                                this.store.dispatch({
+                                    type: 'ITEM_RENAME_SUCCESS',
+                                    payload: { oldId: n.oldPath, newItem },
+                                });
+                            } catch {
+                                adapterDEBUG.loadData('node:renamed getNode failed');
+                                this.loadData();
+                            }
                         }
-                        if (n.oldPath) {
-                            oldIds.push(n.oldPath);
-                        }
-                    });
-                    // Immediately remove old nodes so they don't linger as dead entries
-                    if (oldIds.length) {
-                        adapterDEBUG.dispatch('ITEM_DELETE_SUCCESS', `rename-old ids=[${oldIds.join(',')}]`);
-                        this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: oldIds } });
-                    }
-                    if (this.queues.create.size) scheduleProcess(this.queues.create, 'create', 50);
+                    })();
                     break;
                 }
             }
@@ -311,5 +321,6 @@ export class EngineAdapter {
     destroy(): void {
         this.engineUnsubscribe?.();
         Object.values(this.timers).forEach(t => t && clearTimeout(t));
+        this.suppressedUpdatePaths.clear();
     }
 }

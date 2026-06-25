@@ -59,34 +59,45 @@ export function buildHarnessCallbacks(
 
 // ── Interrupted session recovery ───────────────────────────────────────────
 
-export function checkInterruptedSessions(): void {
+/**
+ * 检查当前会话是否在上次执行中被中断。
+ *
+ * 从 VFS .chat 文件的 meta.status 检测：如果最后一个 assistant
+ * 的 executionRoot.status === 'running'，说明上次执行未正常结束。
+ *
+ * 仅在加载到该 session 时调用，替代旧的全局 localStorage 扫描。
+ *
+ * @param snapshot - bindSession 返回的快照
+ * @param onResume - 用户点击"重新执行"时的回调，传入被中断的 assistant ID
+ */
+export function checkSessionInterrupted(
+    snapshot: { interruptedAssistantId?: string },
+    onResume: (interruptedAssistantId: string) => void,
+): void {
+    if (!snapshot.interruptedAssistantId) return;
+    Toast.action(
+        '上次 Agent 任务未完成，是否需要重新执行？',
+        '重新执行',
+        () => onResume(snapshot.interruptedAssistantId!),
+    );
+}
+
+/**
+ * 一次性清理残留的 harness:session:* 旧 key。
+ *
+ * 旧版本（Q2）在 localStorage 中持久化 harness session 快照，
+ * 现在改为 VFS meta.status 检测。此函数清理迁移后遗留的旧数据。
+ */
+export function cleanupLegacyHarnessKeys(): void {
     try {
         const store = (globalThis as any)['localStorage'];
         if (!store) return;
-        const interrupted: Array<{ sessionId: string; task: { prompt: string } }> = [];
+        const toDelete: string[] = [];
         for (let i = 0; i < store.length; i++) {
             const k: string = store.key(i) ?? '';
-            if (!k.startsWith('harness:session:')) continue;
-            try {
-                const p = JSON.parse(store.getItem(k)) as { status: string; sessionId: string; task: { prompt: string } };
-                if (p.status === 'running') interrupted.push(p);
-            } catch { /* skip */ }
+            if (k.startsWith('harness:session:')) toDelete.push(k);
         }
-        if (interrupted.length === 0) return;
-        const latest = interrupted[0];
-        const preview = latest.task.prompt.slice(0, 80);
-        Toast.action(
-            `上次有未完成的 Agent 任务: "${preview}"`,
-            '重新执行',
-            () => {
-                const { getHarnessAdapter } = require('@itookit/llm-engine');
-                const runtime = getHarnessAdapter()?.getRuntime();
-                if (!runtime) { Toast.error('需要先开启 Agent Mode'); return; }
-                runtime.resumeSession(latest.sessionId).catch(() => {
-                    Toast.info('旧任务将重新运行，请确保 Agent Mode 已开启');
-                });
-            },
-        );
+        toDelete.forEach((k) => store.removeItem(k));
     } catch { /* localStorage not available */ }
 }
 
