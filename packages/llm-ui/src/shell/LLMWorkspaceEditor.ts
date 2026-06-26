@@ -147,7 +147,6 @@ export class LLMWorkspaceEditor implements IEditor {
     private isBeingDeleted = false;
     private initPromise: Promise<void> | null = null;
     private initResolve: (() => void) | null = null;
-    private pendingSessionSettings: any = null;
 
     private initComplete = false;
 
@@ -191,11 +190,11 @@ export class LLMWorkspaceEditor implements IEditor {
                 this.options.nodeId!, this.currentTitle
             );
 
-            await this.initComponents();
+            const preloadedSettings = await this.initComponents();
             this.initCommands();
             this.initEventHandler();
             this.bindEvents();
-            await this.loadSession();
+            await this.loadSession(preloadedSettings);
 
             this.statusIndicator.cacheElements();
             await this.branchIndicator.refresh();
@@ -247,7 +246,7 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
-    private async initComponents(): Promise<void> {
+    private async initComponents(): Promise<Awaited<ReturnType<SessionService['getSessionSettings']>> | undefined> {
         const historyEl = this.domCache.byId('llm-ui-history')!;
         const inputEl = this.domCache.byId('llm-ui-input')!;
 
@@ -303,7 +302,6 @@ export class LLMWorkspaceEditor implements IEditor {
                 () => this.sessionService.getSessionSettings(),
                 'Load session settings', 'warn'
             );
-            this.pendingSessionSettings = initialSettings;
         }
 
         const harnessAdapter = getHarnessAdapter();
@@ -347,6 +345,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.registerInputPlugins();
 
         this.stateManager.setChatInputGetter(() => this.chatInput);
+        return initialSettings;
     }
 
     private initCommands(): void {
@@ -562,7 +561,7 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
-    private async loadSession(_initialContent?: string): Promise<void> {
+    private async loadSession(preloadedSettings?: Awaited<ReturnType<SessionService['getSessionSettings']>>): Promise<void> {
         if (!this.options.nodeId) throw new Error('nodeId is required');
 
         this.sessionEventUnsub?.();
@@ -580,6 +579,8 @@ export class LLMWorkspaceEditor implements IEditor {
             this.historyView.renderWelcome();
         }
 
+        // Assign before checkSessionInterrupted: the resume callback accesses
+        // currentSessionId (via sessionManager event routing) synchronously.
         this.currentSessionId = sessionId;
         this.currentTitle = title;
 
@@ -599,16 +600,12 @@ export class LLMWorkspaceEditor implements IEditor {
         const effectiveInitialInputState = this.options.initialInputState
             ?? (emptySession ? await this.readParentDirAIDefaults() : undefined);
 
-        let sessionSettings;
-        if (this.pendingSessionSettings !== null) {
-            sessionSettings = this.pendingSessionSettings;
-            this.pendingSessionSettings = null;
-        } else {
-            sessionSettings = await this.errorHandler.wrap(
+        const sessionSettings = preloadedSettings !== undefined
+            ? preloadedSettings
+            : await this.errorHandler.wrap(
                 () => this.sessionService.getSessionSettings(),
                 'Load session settings', 'warn'
             );
-        }
         console.log('[Shell] loadSession VFS settings:', JSON.stringify(sessionSettings));
 
         this.stateManager.restoreInputState(this.chatInput, {
@@ -687,7 +684,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     setText(text: string): void {
-        this.loadSession(text)
+        this.loadSession()
             .then(() => this.emit('contentLoaded' as EditorEvent))
             .catch(e => {
                 this.historyView.renderError(e);
@@ -696,7 +693,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     async setTextAsync(text: string): Promise<void> {
-        await this.loadSession(text);
+        await this.loadSession();
     }
 
     isDirty(): boolean { return false; }

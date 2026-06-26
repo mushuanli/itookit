@@ -142,9 +142,14 @@ export abstract class BaseProvider {
      * Prevents double-suffix when a custom baseURL already contains the full path.
      */
     protected resolveEndpointUrl(defaultPath: string): string {
-        const base = this.baseURL.replace(/\/+$/, '');
+        const base = this.trimBase();
         if (defaultPath && base.endsWith(defaultPath)) return base;
         return base + defaultPath;
+    }
+
+    /** Strip trailing slashes from baseURL. */
+    protected trimBase(): string {
+        return this.baseURL.replace(/\/+$/, '');
     }
     
     /**

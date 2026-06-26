@@ -121,7 +121,7 @@ export class AnthropicProvider extends BaseProvider {
      */
     private resolveMessagesUrl(): string {
         if (this.config.anthropicPath) {
-            return this.baseURL.replace(/\/+$/, '') + this.config.anthropicPath;
+            return this.trimBase() + this.config.anthropicPath;
         }
         return this.resolveEndpointUrl(this.config.defaultPath ?? '/v1/messages');
     }
