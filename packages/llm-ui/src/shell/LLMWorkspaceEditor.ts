@@ -147,6 +147,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private isBeingDeleted = false;
     private initPromise: Promise<void> | null = null;
     private initResolve: (() => void) | null = null;
+    private pendingSessionSettings: any = null;
 
     private initComplete = false;
 
@@ -302,6 +303,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 () => this.sessionService.getSessionSettings(),
                 'Load session settings', 'warn'
             );
+            this.pendingSessionSettings = initialSettings;
         }
 
         const harnessAdapter = getHarnessAdapter();
@@ -569,7 +571,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.refreshAgents();
 
         const { sessionId, snapshot, title } = await this.sessionService.loadSession(
-            this.options.nodeId, this.currentTitle
+            this.options.nodeId, this.currentTitle, this.currentSessionId ?? undefined
         );
 
         if (snapshot.sessions.length > 0) {
@@ -578,15 +580,15 @@ export class LLMWorkspaceEditor implements IEditor {
             this.historyView.renderWelcome();
         }
 
+        this.currentSessionId = sessionId;
+        this.currentTitle = title;
+
         // Check if this session was interrupted (VFS meta.status === 'running')
         checkSessionInterrupted(snapshot, (interruptedAssistantId) => {
             this.sessionManager.regenerate(interruptedAssistantId).catch(() => {
                 Toast.info('重新执行失败，请手动重试');
             });
         });
-
-        this.currentSessionId = sessionId;
-        this.currentTitle = title;
 
         this.chatInput?.updateTokenStats?.(null);
         this.titleInput.value = title;
@@ -598,10 +600,15 @@ export class LLMWorkspaceEditor implements IEditor {
             ?? (emptySession ? await this.readParentDirAIDefaults() : undefined);
 
         let sessionSettings;
-        sessionSettings = await this.errorHandler.wrap(
-            () => this.sessionService.getSessionSettings(),
-            'Load session settings', 'warn'
-        );
+        if (this.pendingSessionSettings !== null) {
+            sessionSettings = this.pendingSessionSettings;
+            this.pendingSessionSettings = null;
+        } else {
+            sessionSettings = await this.errorHandler.wrap(
+                () => this.sessionService.getSessionSettings(),
+                'Load session settings', 'warn'
+            );
+        }
         console.log('[Shell] loadSession VFS settings:', JSON.stringify(sessionSettings));
 
         this.stateManager.restoreInputState(this.chatInput, {
@@ -662,6 +669,8 @@ export class LLMWorkspaceEditor implements IEditor {
     /** Update the VFS nodeId when the backing file is renamed. */
     public updateNodeId(newNodeId: string): void {
         this.options = { ...this.options, nodeId: newNodeId };
+        this.stateManager.updateNodeId(newNodeId);
+        this.sessionManager.updateBoundNodeId(newNodeId);
     }
 
     async waitUntilReady(): Promise<void> {

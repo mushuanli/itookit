@@ -205,6 +205,16 @@ export class SessionManager {
     getCurrentSessionId(): string | null { return this.boundSessionId; }
     getCurrentNodeId(): string | null { return this.boundNodeId; }
 
+    /** Update the bound nodeId after the backing VFS file is renamed. */
+    updateBoundNodeId(newNodeId: string): void {
+        this.boundNodeId = newNodeId;
+        // Also update the runtime entry so SessionRecovery serializes the correct path.
+        if (this.boundSessionId) {
+            const runtime = this.sessions.get(this.boundSessionId);
+            if (runtime) runtime.nodeId = newNodeId;
+        }
+    }
+
     getStatus(): SessionStatus | 'unbound' {
         if (!this.boundSessionId) return 'unbound';
         return this.sessions.get(this.boundSessionId)?.status || 'idle';

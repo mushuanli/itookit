@@ -136,6 +136,16 @@ export abstract class BaseProvider {
         }
         return '';
     }
+
+    /**
+     * Append defaultPath to baseURL, but skip if baseURL already ends with it.
+     * Prevents double-suffix when a custom baseURL already contains the full path.
+     */
+    protected resolveEndpointUrl(defaultPath: string): string {
+        const base = this.baseURL.replace(/\/+$/, '');
+        if (defaultPath && base.endsWith(defaultPath)) return base;
+        return base + defaultPath;
+    }
     
     /**
      * 构建请求头

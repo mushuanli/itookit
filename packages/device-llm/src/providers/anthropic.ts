@@ -120,15 +120,10 @@ export class AnthropicProvider extends BaseProvider {
      * so it must include the full path (e.g. "/anthropic/v1/messages").
      */
     private resolveMessagesUrl(): string {
-        const base = this.baseURL.replace(/\/+$/, '');
         if (this.config.anthropicPath) {
-            return base + this.config.anthropicPath;
+            return this.baseURL.replace(/\/+$/, '') + this.config.anthropicPath;
         }
-        const defaultPath = this.config.defaultPath ?? '/v1/messages';
-        if (defaultPath && base.endsWith(defaultPath)) {
-            return base;
-        }
-        return base + defaultPath;
+        return this.resolveEndpointUrl(this.config.defaultPath ?? '/v1/messages');
     }
 
     protected buildHeaders(params?: ChatCompletionParams): Record<string, string> {

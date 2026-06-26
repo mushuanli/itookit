@@ -32,10 +32,10 @@ export class SessionService {
     }
 
     /**
-     * 加载现有会话
+     * 加载现有会话。若已通过 ensureReady 拿到 sessionId，传入可跳过重复解析。
      */
-    async loadSession(nodeId: string, defaultTitle: string): Promise<SessionLoadResult> {
-        const sessionId = await this.getOrCreateSessionId(nodeId, defaultTitle);
+    async loadSession(nodeId: string, defaultTitle: string, knownSessionId?: string): Promise<SessionLoadResult> {
+        const sessionId = knownSessionId ?? await this.getOrCreateSessionId(nodeId, defaultTitle);
 
         // 绑定会话并获取快照
         const snapshot = await this.sessionManager.bindSession(nodeId, sessionId);
