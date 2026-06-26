@@ -49,6 +49,10 @@ export class StateManager {
         this.chatInputGetter = getter;
     }
 
+    updateNodeId(newNodeId: string): void {
+        this.nodeId = newNodeId;
+    }
+
     getCollapseStates(): CollapseStateMap { return this.collapseStatesCache; }
 
     setCollapseStates(states: CollapseStateMap): void {

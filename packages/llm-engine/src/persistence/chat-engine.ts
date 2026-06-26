@@ -1595,6 +1595,14 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     const lastSlash = id.lastIndexOf('/');
     const newId = lastSlash >= 0 ? id.substring(0, lastSlash + 1) + filename : filename;
 
+    // Update chatFileIds cache: remap sessionId → newId
+    for (const [sessionId, cachedId] of this.chatFileIds) {
+      if (cachedId === id) {
+        this.chatFileIds.set(sessionId, newId);
+        break;
+      }
+    }
+
     try {
       const manifest = await this.getManifest(newId);
       manifest.title = cleanName;
