@@ -197,11 +197,11 @@ export class NodeList extends BaseComponent<NodeListState> {
       }
     } else if (action === 'create-file' || action === 'create-directory') {
       const type = action.split('-')[1] as 'file' | 'directory';
-      if (type === 'file' && this.fileCreation?.instant && this.fileCreation?.title) {
-        // Instant create: skip inline name-prompt, focus will go to editor
+      if (type === 'file' && this.fileCreation?.instant) {
+        // Instant create: skip inline name-prompt, let service generate a unique timestamped name
         this.commandBus.execute('file:create', {
           type: 'file',
-          title: this.fileCreation.title,
+          title: undefined,
           parentPath,
         });
       } else {
