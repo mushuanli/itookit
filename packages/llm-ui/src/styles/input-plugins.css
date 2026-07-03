@@ -132,6 +132,14 @@
     background: var(--llm-color-primary-bg);
 }
 
+.llm-popup__item--dimmed {
+    opacity: 0.45;
+}
+
+.llm-popup__item--dimmed:hover {
+    opacity: 0.65;
+}
+
 .llm-popup__item-icon {
     flex-shrink: 0;
     width: 20px;

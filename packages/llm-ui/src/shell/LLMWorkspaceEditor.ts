@@ -141,6 +141,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private globalEventUnsub: (() => void) | null = null;
     private sessionEventUnsub: (() => void) | null = null;
     private agentServiceUnsub: (() => void) | null = null;
+    private refreshAgentsTimer: ReturnType<typeof setTimeout> | null = null;
     private titleInput!: HTMLInputElement;
     private currentTitle: string = 'New Chat';
     private currentSessionId: string | null = null;
@@ -443,7 +444,13 @@ export class LLMWorkspaceEditor implements IEditor {
             (event) => this.sessionEventHandler.handleGlobalEvent(event)
         );
 
-        this.agentServiceUnsub = this.agentService.onChange(() => this.refreshAgents());
+        this.agentServiceUnsub = this.agentService.onChange(() => {
+            if (this.refreshAgentsTimer) clearTimeout(this.refreshAgentsTimer);
+            this.refreshAgentsTimer = setTimeout(() => {
+                this.refreshAgentsTimer = null;
+                this.refreshAgents();
+            }, 300);
+        });
     }
 
     // ================================================================
@@ -633,10 +640,12 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async refreshAgents(): Promise<void> {
         if (!this.chatInput) return;
+        const agents = await buildExecutorOptions(this.agentService);
         const changed = this.chatInput.refreshAgents(
-            await buildExecutorOptions(this.agentService),
+            agents,
             (id) => validateAgentId(this.agentService, id)
         );
+        await this.chatInput.refreshConnections();
         if (changed) {
             this.bus.emit('state:inputChanged', {});
         }
@@ -828,6 +837,10 @@ export class LLMWorkspaceEditor implements IEditor {
         this.sessionEventUnsub = null;
         this.globalEventUnsub = null;
         this.agentServiceUnsub = null;
+        if (this.refreshAgentsTimer) {
+            clearTimeout(this.refreshAgentsTimer);
+            this.refreshAgentsTimer = null;
+        }
 
         // 3. 事件系统
         this.eventBinder?.cleanup();

@@ -21,6 +21,9 @@ export interface IChatInputPresenter {
     focus(): void;
     refreshAgents(agents: ExecutorOption[], validateAgentId: (id: string) => string): boolean;
 
+    /** 重新拉取连接列表（import/save connection 后由 Shell 调用）。 */
+    refreshConnections(): Promise<void>;
+
     /**
      * 更新 token 用量统计显示。
      *

@@ -704,6 +704,11 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                                 <option value="${cat}" ${(m.category ?? 'chat') === cat ? 'selected' : ''}>${cat}</option>
                             `).join('')}
                         </select>
+                        <select class="settings-input-sm model-thinking-select" data-idx="${i}" title="Thinking 模式" style="max-width:110px">
+                            <option value="" ${!m.thinkingMode ? 'selected' : ''}>think: auto</option>
+                            <option value="enabled" ${m.thinkingMode === 'enabled' ? 'selected' : ''}>think: on</option>
+                            <option value="disabled" ${m.thinkingMode === 'disabled' ? 'selected' : ''}>think: off</option>
+                        </select>
                         ${MODEL_CAP_CHIPS.map(([cap, field, emoji]) => `
                             <label class="model-cap-chip" title="${cap}"
                                    style="display:inline-flex;align-items:center;cursor:pointer;font-size:13px;padding:2px 4px;border-radius:4px;opacity:${m[field] === true ? '1' : '0.35'}">
@@ -823,6 +828,12 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
 
             const catEl = row.querySelector('.model-category-select') as HTMLSelectElement | null;
             if (catEl) this.editModels[i].category = (catEl.value as ModelCategory) || undefined;
+
+            const thinkEl = row.querySelector('.model-thinking-select') as HTMLSelectElement | null;
+            if (thinkEl) {
+                const val = thinkEl.value as 'auto' | 'enabled' | 'disabled' | '';
+                this.editModels[i].thinkingMode = val || undefined;
+            }
 
             const model = this.editModels[i] as unknown as Record<string, unknown>;
             row.querySelectorAll('.model-cap-chk').forEach((chk) => {

@@ -72,12 +72,11 @@ export async function buildConnectionOptions(
                 tiersMap.optimal = modelName ?? c.model;
             }
 
-            console.debug('[buildConnectionOptions]', c.id, c.providerId, '→ provider:', provider?.id, 'tiers:', tiersMap);
-
             return {
                 id: c.id,
                 name: c.name,
                 provider: c.providerId,
+                hasApiKey: c.hasApiKey,
                 hasTiers: !!(c.tiers?.standard || c.tiers?.fast),
                 tiers: tiersMap,
             };
