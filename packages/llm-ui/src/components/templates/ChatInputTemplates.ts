@@ -598,15 +598,26 @@ export const ChatInputTemplates = {
 
     /**
      * 渲染连接选项（替代原 renderModelOptions）
+     * 有 key 的连接在前，无 key 的归入「需配置 API Key」分组置灰。
      */
     renderConnectionOptions(connections: ConnectionOption[], selectedId?: string): string {
-        let html = '<option value="">Agent Default</option>';
-        connections.forEach(c => {
-            const label = c.provider ? `${escapeHTML(c.name)} (${escapeHTML(c.provider)})` : escapeHTML(c.name);
+        const withKey    = connections.filter(c => c.hasApiKey);
+        const withoutKey = connections.filter(c => !c.hasApiKey);
+
+        const renderOption = (c: ConnectionOption) => {
+            const label    = c.provider ? `${escapeHTML(c.name)} (${escapeHTML(c.provider)})` : escapeHTML(c.name);
             const selected = c.id === selectedId ? ' selected' : '';
             const tierHint = c.hasTiers ? ' ⚡' : '';
-            html += `<option value="${escapeHTML(c.id)}"${selected}>${label}${tierHint}</option>`;
-        });
+            return `<option value="${escapeHTML(c.id)}"${selected}>${label}${tierHint}</option>`;
+        };
+
+        let html = '<option value="">Agent Default</option>';
+        html += withKey.map(renderOption).join('');
+        if (withoutKey.length > 0) {
+            html += `<optgroup label="⚠️ 需配置 API Key">`;
+            html += withoutKey.map(renderOption).join('');
+            html += `</optgroup>`;
+        }
         return html;
     },
 

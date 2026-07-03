@@ -29,6 +29,14 @@ export interface LLMModel {
     maxOutput?: number;
     supportsVision?: boolean;
     supportsThinking?: boolean;
+    /**
+     * 控制该模型的 thinking 字段发送策略：
+     * - 'auto'     不发送 thinking 字段，由模型/代理自适应（默认，适用于不明确支持 disabled 的代理模型）
+     * - 'enabled'  发送 thinking.type=enabled（明确开启 extended thinking）
+     * - 'disabled' 发送 thinking.type=disabled（适用于 DeepSeek 等默认开启 thinking 的模型）
+     * 未设置时行为同 'auto'。
+     */
+    thinkingMode?: 'auto' | 'enabled' | 'disabled';
     supportsTools?: boolean;
     supportsAudio?: boolean;
     supportsVideo?: boolean;

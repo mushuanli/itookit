@@ -835,6 +835,10 @@ export class ChatInput implements IChatInputPresenter {
     // 连接加载
     // ================================================================
 
+    async refreshConnections(): Promise<void> {
+        await this.loadConnections();
+    }
+
     private async loadConnections(): Promise<void> {
         if (!this.options.onRequestConnections) return;
         try {
@@ -1414,6 +1418,7 @@ export class ChatInput implements IChatInputPresenter {
             this.connPopup = new PopupPanel(this.connQuickBtn, {
                 emptyText: 'No connections',
                 animated: true,
+                maxVisible: 30,
             });
         }
         return this.connPopup;
@@ -1445,7 +1450,12 @@ export class ChatInput implements IChatInputPresenter {
         const items: PopupItem[] = [
             { id: '', label: 'Agent Default', icon: currentId === '' ? '✓' : '' },
         ];
-        for (const c of this.connections) {
+
+        // Sort: has API key first, then no-key connections
+        const withKey    = this.connections.filter(c => c.hasApiKey);
+        const withoutKey = this.connections.filter(c => !c.hasApiKey);
+
+        for (const c of withKey) {
             items.push({
                 id: c.id,
                 label: c.name,
@@ -1453,6 +1463,16 @@ export class ChatInput implements IChatInputPresenter {
                 icon: c.id === currentId ? '✓' : (c.hasTiers ? '⚡' : ''),
             });
         }
+        for (const c of withoutKey) {
+            items.push({
+                id: c.id,
+                label: c.name,
+                description: c.provider,
+                icon: c.id === currentId ? '✓' : '',
+                group: '⚠️ 需配置 API Key',
+            });
+        }
+
         items.push(
             { id: '__manage', label: '管理连接 →', icon: '⚙️', description: '配置 Provider 和模型层级' },
         );

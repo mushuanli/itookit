@@ -131,6 +131,7 @@ export interface LLMDeviceOpenOptions {
 // ─── 内部会话状态 ─────────────────────────────────────────────────────────────
 
 interface LLMSessionState {
+    readonly id: string;
     readonly kind: 'llm';
     readonly driver: LLMDriver;
     readonly connection: LLMConnection;
@@ -176,6 +177,12 @@ export interface LLMDeviceDriverOptions {
      * 未注入时 shell 类型 Skill 返回"环境不支持"提示。
      */
     shellRunner?: IShellRunner;
+
+    /**
+     * LLM 流量日志记录器（可选）。
+     * Web 环境注入 NoopLLMLogger，Tauri 环境注入 FileLogger。
+     */
+    llmLogger?: import('@itookit/common').ILLMLogger;
 }
 
 export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
@@ -208,6 +215,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     private engine!: ReturnType<IVFSManager['getEngine']>;
     private readonly shellRunner: IShellRunner | undefined;
+    private readonly llmLogger: import('@itookit/common').ILLMLogger | undefined;
 
     /**
      * Resolve the system FS for /etc hidden-file access.
@@ -222,6 +230,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     constructor(private readonly vfs: IVFSManager, options?: LLMDeviceDriverOptions) {
         this.shellRunner = options?.shellRunner;
+        this.llmLogger = options?.llmLogger;
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -406,7 +415,13 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
         const abort = new AbortController();
         session.abortController = abort;
-        session.history.push(this.decodeMessage(content));
+        const msg = this.decodeMessage(content);
+        session.history.push(msg);
+
+        // Log user message to /var/log/llm/{session}-messages.jsonl
+        if (msg.role === 'user' || msg.role === 'system') {
+            this.llmLogger?.logMessage(session.id, msg.role, this.extractContent(msg));
+        }
 
         const rawStream = await session.driver.chat.create({
             ...session.completionDefaults,
@@ -584,6 +599,13 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 const abort = new AbortController();
                 params.signal?.addEventListener('abort', () => abort.abort(), { once: true });
                 llmSession.abortController = abort;
+
+                // Log user messages (last non-system message)
+                const lastUserMsg = params.messages.filter(m => m.role === 'user').pop();
+                if (lastUserMsg) {
+                    this.llmLogger?.logMessage(llmSession.id, 'user', this.extractContent(lastUserMsg));
+                }
+
                 const rawStream = await llmSession.driver.chat.create({
                     ...params, stream: true, signal: abort.signal,
                 });
@@ -1080,6 +1102,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             ?? provider?.models[0]?.id
             ?? '';
 
+        // Resolve thinkingMode from the model definition in provider catalog.
+        // This allows per-model overrides (e.g. 'auto' for proxy models that don't
+        // support thinking.type=disabled, 'disabled' for DeepSeek-style defaults).
+        const resolvedModelDef = provider?.models.find(m => m.id === resolvedModel);
+        const resolvedThinkingMode = resolvedModelDef?.thinkingMode;
+
         // Protocol priority:
         //   1. conn.protocol        — 用户在连接上显式选择
         //   2. runMode === 'harness' — harness 强制 anthropic-messages（需 provider 支持）
@@ -1094,6 +1122,10 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             apiKey,                                            // resolved from provider
             model: resolvedModel,
             protocol: effectiveProtocol,
+            // Inject model-level thinkingMode into metadata so the provider can read it
+            ...(resolvedThinkingMode ? {
+                metadata: { ...conn.metadata, thinkingMode: resolvedThinkingMode },
+            } : {}),
         };
 
         // Pass the resolved provider as customProviderDefaults so createProvider can
@@ -1108,6 +1140,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
         const sessionId = `llm-${++this.sessionSeq}`;
         this.sessions.set(sessionId, {
+            id: sessionId,
             kind: 'llm',
             driver,
             connection: conn,
@@ -1370,6 +1403,19 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return { role: 'user', content: text };
     }
 
+    /** Extract plain text from a ChatMessage's content field */
+    private extractContent(msg: ChatMessage): string {
+        const c = msg.content;
+        if (typeof c === 'string') return c;
+        if (Array.isArray(c)) {
+            return c
+                .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+                .map(p => p.text)
+                .join('');
+        }
+        return '';
+    }
+
     private async readJson<T>(path: string, systemFS?: IModuleFS): Promise<T | null> {
         try {
             const fs = systemFS ?? this.engine;
@@ -1449,20 +1495,28 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             if (response) {
                 session.history.push({ role: 'assistant', content: response });
                 session.lastResponse = response;
+                this.llmLogger?.logMessage(session.id, 'assistant', response);
             }
             if (usage) session.lastUsage = usage;
             session.abortController = null;
         }
     }
 
-    /** 无状态包装：不写 history（CHAT ioctl 使用） */
+    /** 无状态包装：不写 history（CHAT ioctl 使用），但记录日志 */
     private async *wrapStreamOnly(gen: AsyncGenerator<ChatCompletionChunk>, session: LLMSessionState): AsyncGenerator<ChatCompletionChunk> {
+        const parts: string[] = [];
         try {
             for await (const chunk of gen) {
+                const delta = chunk.choices?.[0]?.delta?.content;
+                if (delta) parts.push(delta);
                 if (chunk.usage) session.lastUsage = chunk.usage;
                 yield chunk;
             }
         } finally {
+            const response = parts.join('');
+            if (response) {
+                this.llmLogger?.logMessage(session.id, 'assistant', response);
+            }
             session.abortController = null;
         }
     }

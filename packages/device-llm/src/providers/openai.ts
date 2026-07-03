@@ -184,18 +184,29 @@ export class OpenAIProvider extends BaseProvider {
         }
         
         // Thinking mode — only for providers that declare capabilities.thinking.
-        // DeepSeek API defaults thinking=enabled, so we must explicitly disable it
-        // for models that don't have thinking enabled. Other providers just ignore.
+        // Priority: model-level thinkingMode (from provider catalog) > caller params.
+        //
+        // thinkingMode='auto'     → omit thinking field (model/proxy uses adaptive default)
+        // thinkingMode='disabled' → send thinking.type=disabled (DeepSeek-style explicit off)
+        // thinkingMode='enabled'  → send thinking.type=enabled (force extended thinking)
+        // thinkingMode unset      → fall back to params.thinking boolean logic:
+        //   - params.thinking=true  → enabled
+        //   - params.thinking=false → disabled ONLY for deepseek (it defaults thinking ON)
+        //   - otherwise            → omit (adaptive)
         if (this.capabilities.thinking) {
-            if (params.thinking === false) {
-                body.thinking = { type: 'disabled' };
-            } else if (params.thinking === true) {
-                const thinking: Record<string, unknown> = { type: 'enabled' };
-                body.thinking = thinking;
+            const thinkingMode = this.config.metadata?.thinkingMode as string | undefined;
+            if (thinkingMode === 'auto') {
+                // Explicitly omit — adaptive mode
+            } else if (thinkingMode === 'enabled' || params.thinking === true) {
+                body.thinking = { type: 'enabled' };
                 if (params.reasoningEffort) {
                     body.reasoning_effort = params.reasoningEffort;
                 }
+            } else if (thinkingMode === 'disabled' ||
+                       (params.thinking === false && this.config.provider === 'deepseek')) {
+                body.thinking = { type: 'disabled' };
             }
+            // All other cases: omit thinking field → adaptive/default mode
         }
 
         // 音频配置 (新增)

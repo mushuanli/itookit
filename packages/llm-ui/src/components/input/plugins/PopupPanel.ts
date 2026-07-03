@@ -306,6 +306,8 @@ export class PopupPanel {
                 ? ' llm-popup__item--selected' : '';
             const argsCls = item.hasArgs
                 ? ' llm-popup__item--has-args' : '';
+            const dimmedCls = item.group
+                ? ' llm-popup__item--dimmed' : '';
 
             const icon = item.icon
                 ? `<span class="llm-popup__item-icon">${item.icon}</span>`
@@ -324,7 +326,7 @@ export class PopupPanel {
                 : '';
 
             html += `
-                <div class="llm-popup__item${selectedCls}${argsCls}" data-index="${index}">
+                <div class="llm-popup__item${selectedCls}${argsCls}${dimmedCls}" data-index="${index}">
                     ${icon}
                     <span class="llm-popup__item-label">${escapeHTML(item.label)}</span>
                     ${desc}
