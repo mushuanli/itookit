@@ -200,7 +200,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
                 this.emit('agent:llm:start', { model: effectiveModelId ?? connId, messageCount: messages.length });
                 const response = await recovery.callWithRecovery(
                     connId,
-                    { messages, tools: effectiveTools, signal: this.abortController.signal, model: effectiveModelId },
+                    { messages, tools: effectiveTools, signal: this.abortController.signal, model: effectiveModelId, _label: sessionId },
                     {
                         maxRetries: this.loopConfig.maxApiRetries,
                         baseDelayMs: this.loopConfig.baseRetryDelayMs,

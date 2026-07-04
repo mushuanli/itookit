@@ -115,6 +115,18 @@ export const LLM_IOCTL = {
 
 export type LLMIoctlCommand = typeof LLM_IOCTL[keyof typeof LLM_IOCTL];
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Replace path separators and other problematic chars for a log-friendly filename */
+function sanitizeLabel(label: string): string {
+    return label
+        .replace(/[\\/]/g, '_')   // / and \ → _
+        .replace(/[^a-zA-Z0-9_.-]/g, '_') // other special chars → _
+        .replace(/_+/g, '_')       // collapse runs
+        .replace(/^_|_$/g, '')     // trim leading/trailing _
+        .slice(0, 80);             // cap length
+}
+
 // ─── 公共接口 ─────────────────────────────────────────────────────────────────
 
 /** open() options（LLM session） */
@@ -124,6 +136,8 @@ export interface LLMDeviceOpenOptions {
     completionDefaults?: Record<string, unknown>;
     /** 调用方的运行模式；harness 强制走 anthropic-messages 协议。 */
     runMode?: 'harness' | 'kernel';
+    /** 日志文件名标签（如聊天文件名），将转义后用于 /var/log/llm/{label}.json */
+    sessionLabel?: string;
 }
 
 // ILLMManagementService 统一管理接口已定义在 @itookit/common
@@ -1151,7 +1165,10 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         const pkey = connForDriver.provider as string;
         const customProviderDefaults = provider && pkey ? { [pkey]: provider } : undefined;
 
-        const sessionId = `llm-${++this.sessionSeq}`;
+        // Use caller-provided label (e.g. chat file name) for session ID;
+        // fall back to numbered sequence.
+        const baseLabel = sanitizeLabel((opts?.sessionLabel as string) ?? '');
+        const sessionId = baseLabel || `llm-${++this.sessionSeq}`;
         const driver = new LLMDriver({
             connection: connForDriver,
             customProviderDefaults,
