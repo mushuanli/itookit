@@ -211,6 +211,8 @@ export {
     mergeStreams
 } from './utils/stream';
 
+export { NoopLLMLogger } from './utils/llm-logger';
+
 // ============================================
 // 设备插件 (IDeviceDriver 实现)
 // ============================================

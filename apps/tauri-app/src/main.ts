@@ -17,6 +17,7 @@ import { WORKSPACES } from './config/modules';
 import { LocalMountService, MountEntry, MOUNT_EVENTS } from './services/local-mounts';
 import { TauriSqlSidecarDb } from './db/tauri-sql-sidecar';
 import { TauriFsOps } from './fs/tauri-fs-ops';
+import { TauriLLMLogger } from './log/tauri-llm-logger';
 
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
@@ -223,6 +224,7 @@ async function bootstrap(): Promise<void> {
         defaultSlug: 'files',
         routeAliases: { home: 'home-workspace' },
         onProgress: showLoading,
+        llmLogger: new TauriLLMLogger(rootDir),
     });
     log('App 初始化完成');
 

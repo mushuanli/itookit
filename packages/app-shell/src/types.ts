@@ -47,6 +47,8 @@ export interface AppOptions {
     routeAliases?: Record<string, string>;
     /** Called during boot steps; use this to drive a loading overlay. */
     onProgress?: (msg: string) => void;
+    /** LLM traffic logger (NoopLLMLogger for web, TauriLLMLogger for Tauri) */
+    llmLogger?: import('@itookit/common').ILLMLogger;
 }
 
 export interface AppHandle {
