@@ -28,6 +28,7 @@ export class LLMServiceAdapter implements ILLMService {
     async chat(connectionId: string, request: ChatCompletionParams): Promise<ChatCompletionResponse> {
         const openOpts: Record<string, unknown> = { connectionId };
         if (this.runMode) openOpts.runMode = this.runMode;
+        if (request._label) openOpts.sessionLabel = request._label;
         const sessionId = await this.driver.open?.(BASE_CTX, openOpts) ?? connectionId;
         const ctx: DeviceContext = { ...BASE_CTX, sessionId };
 
@@ -44,6 +45,7 @@ export class LLMServiceAdapter implements ILLMService {
     async *chatStream(connectionId: string, request: ChatCompletionParams): AsyncIterable<ChatCompletionChunk> {
         const openOpts: Record<string, unknown> = { connectionId };
         if (this.runMode) openOpts.runMode = this.runMode;
+        if (request._label) openOpts.sessionLabel = request._label;
         const sessionId = await this.driver.open?.(BASE_CTX, openOpts) ?? connectionId;
         const ctx: DeviceContext = { ...BASE_CTX, sessionId };
 

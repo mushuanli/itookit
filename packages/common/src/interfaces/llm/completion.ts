@@ -63,6 +63,9 @@ export interface ChatCompletionParams {
     modalities?: string[];
     serviceTier?: string;
     metadata?: Record<string, any>;
+
+    /** Internal: session label for log file naming (e.g. chat file name) */
+    _label?: string;
 }
 
 // ─── Response ─────────────────────────────────────────────────────────────────
