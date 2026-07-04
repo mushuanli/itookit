@@ -13,7 +13,7 @@ import type {
     LLMProvider, DefaultConnectionDef, LLMModel, LLMConnection,
     AgentDefinition, AgentType, AgentConfig,
     LLMSkill, LLMSkillType,
-    ModelTier,
+    ModelTier, ModelPricingEntry,
 } from '@itookit/common';
 
 // ─── .llm File Types ─────────────────────────────────────────────────────────
@@ -143,6 +143,12 @@ export interface LLMConfigFile {
     agents?: LLMAgentDef[];
     skills?: LLMSkillDef[];
     mcp?: LLMMCPDef;
+    /**
+     * 可选的 model pricing 配置。
+     * 导入时：若存在，写入 VFS /llm/pricing.json（覆盖已有）。
+     * 导出时：仅在调用方明确传入时才包含（不自动读取 VFS）。
+     */
+    pricing?: ModelPricingEntry[];
 }
 
 /** Normalized view: always returns a (possibly empty) array of providers. */
@@ -172,6 +178,7 @@ export function parseLLMConfig(yamlContent: string): LLMConfigFile {
         agents: raw.agents ? (raw.agents as LLMAgentDef[]) : undefined,
         skills: raw.skills ? (raw.skills as LLMSkillDef[]) : undefined,
         mcp: raw.mcp ? (raw.mcp as LLMMCPDef) : undefined,
+        pricing: raw.pricing ? (raw.pricing as ModelPricingEntry[]) : undefined,
     };
 
     validateLLMConfig(config);
@@ -478,13 +485,16 @@ export function exportToLLM(
 
 /**
  * Serialize multiple providers + connections to a single .llm YAML bundle.
+ * Pass `options.pricing` to include model pricing entries in the bundle.
  */
 export function exportBundleToLLM(
     providers: LLMProvider[],
     connections: DefaultConnectionDef[],
+    options?: { pricing?: ModelPricingEntry[] },
 ): string {
     return serializeLLMConfig({
         providers: providers.map(fromLLMProvider),
         connections: connections.map(fromConnectionDef),
+        pricing: options?.pricing,
     });
 }

@@ -127,36 +127,35 @@ export class AgentResolver {
     }
 
     /**
-     * 记录一次 LLM 用量到对应连接的 dailyCosts。
+     * 记录一次 LLM 用量到 cost.seq（按 sessionId|providerId|date 累加）。
      */
-    async recordUsageCost(connectionId: string, usage: {
-        inputTokens: number; outputTokens: number; cost: number;
-    }): Promise<void> {
+    async recordUsageCost(
+        connectionId: string,
+        sessionId: string,
+        usage: {
+            inputTokens: number;
+            outputTokens: number;
+            cost: number;
+            cacheWriteTokens?: number;
+            cacheReadTokens?: number;
+        },
+    ): Promise<void> {
         if (!connectionId) return;
         try {
-            const conn = await this.agentService.getFullConnection(connectionId);
-            if (!conn) return;
-            const today = new Date().toISOString().slice(0, 10);
-            const dailyCosts = { ...(conn.dailyCosts ?? {}) };
-            const entry = dailyCosts[today];
-            if (entry) {
-                entry.inputTokens  += usage.inputTokens;
-                entry.outputTokens += usage.outputTokens;
-                entry.cost         += usage.cost;
-                entry.requests     += 1;
-            } else {
-                dailyCosts[today] = {
-                    date: today,
-                    inputTokens:  usage.inputTokens,
-                    outputTokens: usage.outputTokens,
-                    cost:         usage.cost,
-                    requests:     1,
-                };
-            }
-            conn.dailyCosts = dailyCosts;
-            await this.agentService.saveConnection(conn);
+            const connMeta = await this.agentService.getConnection(connectionId);
+            if (!connMeta) return;
+            const svc = this.agentService as unknown as {
+                recordCost?(p: unknown): Promise<void>;
+            };
+            await svc.recordCost?.({
+                sessionId,
+                providerId:   connMeta.providerId,
+                connectionId,
+                modelId:      connMeta.model,
+                usage,
+            });
         } catch (e) {
-            log.error('Failed to record usage cost', { connectionId, error: e });
+            log.error('Failed to record usage cost', { connectionId, sessionId, error: e });
         }
     }
 

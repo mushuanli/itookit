@@ -275,6 +275,14 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     async saveSkill(skill: LLMSkill): Promise<void> { return this.llmService.saveSkill(skill); }
     async deleteSkill(id: string): Promise<void> { return this.llmService.deleteSkill(id); }
 
+    async recordCost(params: Parameters<ILLMManagementService['recordCost']>[0]): Promise<void> {
+        return this.llmService.recordCost(params);
+    }
+
+    async writePricing(config: Parameters<ILLMManagementService['writePricing']>[0]): Promise<void> {
+        return this.llmService.writePricing(config);
+    }
+
     // ─── Restore / Diagnose ───────────────────────────────────────────────────
 
     async getRestorableItems(): Promise<RestorableItem[]> {

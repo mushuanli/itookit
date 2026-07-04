@@ -225,6 +225,24 @@ export interface ILLMManagementService extends IConnectionService {
     saveSkill(skill: LLMSkill): Promise<void>;
     deleteSkill(id: string): Promise<void>;
 
+    // ── Cost tracking ─────────────────────────────────────────────
+    /** 记录一次请求费用到 cost.seq，按 sessionId|providerId|date 累加 */
+    recordCost(params: {
+        sessionId: string;
+        providerId: string;
+        connectionId: string;
+        modelId: string;
+        usage: {
+            inputTokens: number;
+            outputTokens: number;
+            cacheWriteTokens?: number;
+            cacheReadTokens?: number;
+            cost: number;
+        };
+    }): Promise<void>;
+    /** 将 pricing 配置写入 VFS /llm/pricing.json（供 .llm 导入使用） */
+    writePricing(config: import('./pricing').ModelPricingConfig): Promise<void>;
+
     // ── Defaults metadata ─────────────────────────────────────────
     /** 返回当前配置数据版本号，用于增量同步默认数据 */
     getConfigVersion(): number;

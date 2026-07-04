@@ -27,6 +27,9 @@ import { testLLMConnection } from '../core/api';
 import { LLM_PROVIDERS, DEFAULT_CONNECTIONS, CONST_CONFIG_VERSION, DEFAULT_AGENTS } from '../constants';
 import { MCPServerConnection, type MCPToolInfo } from '../skills/mcp-client';
 import type { MCPServerConfig } from '../types/provider';
+import { loadPricingConfig, writePricingConfig, applyPricingToModel } from '../constants/pricing';
+import { CostStore } from '../cost/cost-store';
+import type { ModelPricingConfig } from '../constants/pricing';
 
 // ─── 存储路径 ────────────────────────────────────────────────────────────────
 const STORAGE_MODULE   = CONFIG_MODULE;             // '__config'
@@ -105,6 +108,14 @@ export const LLM_IOCTL = {
     SAVE_SKILL:       'save-skill',
     /** arg: id → void */
     DELETE_SKILL:     'delete-skill',
+
+    // ── Cost 查询（无需 sessionId）───────────────────────────────────────────
+    /** arg: sessionId → CostRecord[] */
+    QUERY_COSTS_BY_SESSION:  'query-costs-by-session',
+    /** arg: { providerId, dateFrom?, dateTo? } → CostRecord[] */
+    QUERY_COSTS_BY_PROVIDER: 'query-costs-by-provider',
+    /** arg: { dateFrom?, dateTo?, providerId? } → CostRecord[] */
+    QUERY_COSTS_ALL:         'query-costs-all',
 
     // ── Skill 会话（需要 sessionId，由 /dev/llm/skills/<id> 打开）────────────
     /** arg: { args: Record<string,unknown> } → unknown — 调用 HTTP 端点 */
@@ -210,6 +221,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     private _providers: Map<string, LLMProvider> =
         new Map(Object.entries(LLM_PROVIDERS).map(([k, v]) => [k, { ...v, id: k }]));
 
+    // ── Pricing config (loaded from /llm/pricing.json at init) ──
+    private _pricingConfig!: ModelPricingConfig;
+
+    // ── Cost store (cost.seq) ──
+    private _costStore!: CostStore;
+
     // ── Connection store ──
     private _connections: LLMConnection[] = [];
     private _listeners = new Set<() => void>();
@@ -282,6 +299,13 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             this.loadJsonFilesFromDir<LLMSkill>(SKILLS_DIR),
         ]);
         _log('preloadDirs');
+
+        // Load pricing config (write default if missing), then init cost store
+        this._pricingConfig = await loadPricingConfig(this.engine);
+        _log('loadPricing');
+        this._costStore = new CostStore(this.engine);
+        await this._costStore.ensureFile();
+        _log('initCostStore');
 
         // Sync default providers (write missing built-ins), then merge into cache
         await this.syncDefaultProviders(preProviders);
@@ -567,6 +591,17 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             case LLM_IOCTL.DELETE_SKILL:
                 await this.deleteSkill(arg as string, this.getSystemFS(ctx));
                 return;
+
+            case LLM_IOCTL.QUERY_COSTS_BY_SESSION:
+                return this._costStore.queryBySession(arg as string);
+
+            case LLM_IOCTL.QUERY_COSTS_BY_PROVIDER: {
+                const f = arg as { providerId: string; dateFrom?: string; dateTo?: string };
+                return this._costStore.queryAll({ providerId: f.providerId, dateFrom: f.dateFrom, dateTo: f.dateTo });
+            }
+
+            case LLM_IOCTL.QUERY_COSTS_ALL:
+                return this._costStore.queryAll(arg as { providerId?: string; dateFrom?: string; dateTo?: string } | undefined);
         }
 
         // ── MCP / Skill 会话命令 ────────────────────────────────────────────────
@@ -824,6 +859,13 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         for (const p of fromVFS) {
             if ((p as any).__deleted) { merged.delete(p.id); } else { merged.set(p.id, p); }
         }
+        // Apply pricing config to all model price fields
+        for (const [id, provider] of merged) {
+            merged.set(id, {
+                ...provider,
+                models: provider.models.map(m => applyPricingToModel(m, provider.id, this._pricingConfig)),
+            });
+        }
         this._providers = merged;
     }
 
@@ -967,6 +1009,18 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         this._skills = this._skills.filter(s => s.id !== id);
         await this.vfs.removeDeviceNode(`/dev/llm/skills/${id}`);
         this.notify();
+    }
+
+    // ─── ILLMManagementService — Cost tracking ────────────────────────────────
+
+    async recordCost(params: Parameters<import('@itookit/common').ILLMManagementService['recordCost']>[0]): Promise<void> {
+        await this._costStore.recordCost(params);
+    }
+
+    async writePricing(config: import('@itookit/common').ModelPricingConfig): Promise<void> {
+        await writePricingConfig(this.engine, config);
+        this._pricingConfig = config;
+        this.reloadProvidersFrom([...this._providers.values()].filter(p => !p.isBuiltin));
     }
 
     // ─── ILLMManagementService — Defaults metadata ────────────────────────────

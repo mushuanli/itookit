@@ -16,6 +16,7 @@ import {
     getProviderDefs,
     type LLMConfigFile, type LLMAgentDef, type LLMConnectionDef,
 } from '@itookit/device-llm';
+import type { ModelPricingConfig } from '@itookit/common';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,11 @@ interface AgentSvc {
     saveAgent(a: unknown): Promise<void>;
     getSkills(): Promise<Array<{ id: string }>>;
     saveSkill(s: unknown): Promise<void>;
+}
+
+/** Duck-typed: service 实现了 writePricing 方法（如 VFSAgentService → LLMDeviceDriver） */
+interface PricingSvc {
+    writePricing(config: ModelPricingConfig): Promise<void>;
 }
 
 function asAgentSvc(service: IConnectionService): AgentSvc | null {
@@ -310,6 +316,14 @@ export async function executeImport(
             }
             await agentSvc.saveSkill(toRuntimeSkill(effectiveDef));
             stats.skills++;
+        }
+    }
+
+    // ── Pricing ───────────────────────────────────────────────────────────────
+    if (resolved.pricing?.length) {
+        const pricingSvc = 'writePricing' in service ? service as unknown as PricingSvc : null;
+        if (pricingSvc) {
+            await pricingSvc.writePricing({ model_pricing: resolved.pricing });
         }
     }
 

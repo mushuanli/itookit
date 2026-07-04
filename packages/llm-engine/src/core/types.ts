@@ -29,7 +29,11 @@ export interface SessionTokenUsage {
     inputTokens: number;
     /** 输出 token */
     outputTokens: number;
-    /** 缓存命中 token（Anthropic prompt caching） */
+    /** cache 写入 token（cache_creation_input_tokens，仅 Anthropic） */
+    cacheWriteTokens?: number;
+    /** cache 读取 token（cache_read_input_tokens，仅 Anthropic） */
+    cacheReadTokens?: number;
+    /** @deprecated 使用 cacheReadTokens，此字段填 cacheReadTokens 的值以向后兼容展示层 */
     cacheTokens: number;
     /** 估算费用（USD） */
     costUsd: number;
