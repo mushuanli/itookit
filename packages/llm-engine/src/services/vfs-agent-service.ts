@@ -283,6 +283,18 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         return this.llmService.writePricing(config);
     }
 
+    async queryCosts(filter?: Parameters<ILLMManagementService['queryCosts']>[0]): Promise<import('@itookit/common').CostRecord[]> {
+        return this.llmService.queryCosts(filter);
+    }
+
+    getPricingConfig(): import('@itookit/common').ModelPricingConfig {
+        return this.llmService.getPricingConfig();
+    }
+
+    getPricingDefaults(): import('@itookit/common').ModelPricingConfig {
+        return this.llmService.getPricingDefaults();
+    }
+
     // ─── Restore / Diagnose ───────────────────────────────────────────────────
 
     async getRestorableItems(): Promise<RestorableItem[]> {
@@ -355,6 +367,8 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         for (const def of this.llmService.getDefaultAgents()) {
             await this.restoreAgent(def.id);
         }
+        // Reset pricing to built-in defaults
+        await this.llmService.writePricing(this.llmService.getPricingDefaults());
     }
 
     private async restoreProvider(providerId: string): Promise<void> {

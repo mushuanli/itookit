@@ -15,6 +15,7 @@ export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
 export { ProviderSettingsEditor } from './editors/ProviderSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 export { SkillSettingsEditor } from './editors/SkillSettingsEditor';
+export { CostEditor } from './editors/CostEditor';
 
 import type { PromptHistoryService } from '@itookit/llm-engine';
 import type { IAgentManagementService } from '@itookit/common';
