@@ -242,6 +242,16 @@ export interface ILLMManagementService extends IConnectionService {
     }): Promise<void>;
     /** 将 pricing 配置写入 VFS /llm/pricing.json（供 .llm 导入使用） */
     writePricing(config: import('./pricing').ModelPricingConfig): Promise<void>;
+    /** 查询 cost.seq 记录，支持可选的时间范围和 provider 过滤（O(n) 遍历） */
+    queryCosts(filter?: {
+        dateFrom?: string;   // YYYY-MM-DD
+        dateTo?: string;     // YYYY-MM-DD
+        providerId?: string;
+    }): Promise<import('./pricing').CostRecord[]>;
+    /** 返回当前加载的 pricing 快照（从内存读取，同步） */
+    getPricingConfig(): import('./pricing').ModelPricingConfig;
+    /** 返回内置默认定价表（编译时常量 MODEL_PRICING，用于恢复出厂设置） */
+    getPricingDefaults(): import('./pricing').ModelPricingConfig;
 
     // ── Defaults metadata ─────────────────────────────────────────
     /** 返回当前配置数据版本号，用于增量同步默认数据 */

@@ -24,7 +24,7 @@ import yaml from 'js-yaml';
 
 import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';
-import { LLM_PROVIDERS, DEFAULT_CONNECTIONS, CONST_CONFIG_VERSION, DEFAULT_AGENTS } from '../constants';
+import { LLM_PROVIDERS, DEFAULT_CONNECTIONS, CONST_CONFIG_VERSION, DEFAULT_AGENTS, MODEL_PRICING } from '../constants';
 import { MCPServerConnection, type MCPToolInfo } from '../skills/mcp-client';
 import type { MCPServerConfig } from '../types/provider';
 import { loadPricingConfig, writePricingConfig, applyPricingToModel } from '../constants/pricing';
@@ -1021,6 +1021,22 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         await writePricingConfig(this.engine, config);
         this._pricingConfig = config;
         this.reloadProvidersFrom([...this._providers.values()].filter(p => !p.isBuiltin));
+    }
+
+    async queryCosts(filter?: {
+        dateFrom?: string;
+        dateTo?: string;
+        providerId?: string;
+    }): Promise<import('@itookit/common').CostRecord[]> {
+        return this._costStore.queryAll(filter);
+    }
+
+    getPricingConfig(): import('@itookit/common').ModelPricingConfig {
+        return this._pricingConfig ?? { model_pricing: [] };
+    }
+
+    getPricingDefaults(): import('@itookit/common').ModelPricingConfig {
+        return { model_pricing: MODEL_PRICING };
     }
 
     // ─── ILLMManagementService — Defaults metadata ────────────────────────────
