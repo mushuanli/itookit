@@ -12,6 +12,8 @@ export {
     type ModuleLog
 } from './interfaces/ILogger';
 
+export type { ILLMLogger, LLMRequestLog, LLMResponseLog } from './interfaces/ILLMLogger';
+
 export {
     getLogger,
     createModuleLogger

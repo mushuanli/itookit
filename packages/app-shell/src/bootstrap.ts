@@ -241,7 +241,7 @@ async function syncSkillsToHarness(
 }
 
 export async function initApp(options: AppOptions): Promise<AppHandle> {
-    const { backend, additionalMounts, defaultSlug, routeAliases = {}, onProgress } = options;
+    const { backend, additionalMounts, defaultSlug, routeAliases = {}, onProgress, llmLogger } = options;
     const t0 = performance.now();
     let t = t0;
     const cleanupFns: Array<() => void> = [];
@@ -306,7 +306,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // ── 2. LLM device driver ───────────────────────────────────────────────────
 
     logStep('加载 LLM 驱动…');
-    const llmDriver = new LLMDeviceDriver(vfs);
+    const llmDriver = new LLMDeviceDriver(vfs, { llmLogger });
     let ts = performance.now();
     await llmDriver.init();
     console.log(`[Boot]   ↳ llmDriver.init: +${(performance.now() - ts).toFixed(0)}ms`);

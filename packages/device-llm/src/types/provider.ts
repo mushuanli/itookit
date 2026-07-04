@@ -76,13 +76,15 @@ export interface LLMProviderConfig {
     capabilities?: ProviderCapabilities;
     
     // ===== 请求配置 =====
-    
     /** 额外 HTTP 头 */
     headers?: Record<string, string>;
-    
+
     /** 额外元数据 */
     metadata?: Record<string, any>;
-    
+
+    /** 生命周期钩子（透传自 LLMClientConfig） */
+    hooks?: LLMHooks;
+
     // ===== MCP 配置 (新增) =====
     
     mcp?: MCPConfig;
@@ -136,21 +138,24 @@ export interface ProviderCapabilities {
 export interface LLMHooks {
     /** 请求前处理 */
     beforeRequest?: (params: ChatCompletionParams) => Promise<ChatCompletionParams>;
-    
+
     /** 响应后处理 */
     afterResponse?: (response: ChatCompletionResponse) => Promise<ChatCompletionResponse>;
-    
+
     /** 错误处理 */
     onError?: (error: Error, params: ChatCompletionParams) => Promise<void>;
-    
+
     /** 流式块处理 (新增) */
     onStreamChunk?: (chunk: import('./response').ChatCompletionChunk) => void;
-    
+
     /** 工具调用前 (新增) */
     beforeToolCall?: (toolCall: import('./message').ToolCall) => Promise<import('./message').ToolCall>;
-    
+
     /** 工具调用后 (新增) */
     afterToolCall?: (toolCall: import('./message').ToolCall, result: any) => Promise<any>;
+
+    /** HTTP 响应头捕获（用于 LLM 故障排查日志） */
+    onResponseHeaders?: (headers: Record<string, string>, status: number) => void;
 }
 
 /**
@@ -186,7 +191,7 @@ export interface LLMClientConfig {
     // ===== 扩展 =====
     /** 生命周期钩子 */
     hooks?: LLMHooks;
-    
+
     /** 自定义 Provider 定义 */
     customProviderDefaults?: Record<string, import('./connection').LLMProviderDefinition>;
     

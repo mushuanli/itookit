@@ -53,7 +53,8 @@ export class LLMDriver {
             supportsThinking: config.supportsThinking,
             requiresReferer: config.requiresReferer,
             headers: config.headers,
-            metadata: config.connection?.metadata
+            metadata: config.connection?.metadata,
+            hooks: config.hooks,
         };
         
         // 4. 保存配置
@@ -129,7 +130,7 @@ export class LLMDriver {
             stream: !!params.stream,
             messageCount: params.messages.length
         });
-        
+
         let finalParams = { ...params };
 
         // ── 自动展开 attachments ──
@@ -281,6 +282,7 @@ export class LLMDriver {
             for await (const chunk of stream) {
                 reschedule();
                 chunkCount++;
+                this.config.hooks?.onStreamChunk?.(chunk);
                 yield chunk;
             }
             log.debug('Stream completed', { requestId, chunkCount });

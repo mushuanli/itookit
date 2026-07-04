@@ -5,7 +5,8 @@ import {
     ChatCompletionParams,
     ChatCompletionResponse,
     ChatCompletionChunk,
-    ProviderCapabilities
+    ProviderCapabilities,
+    LLMHooks,
 } from '../types';
 import { LLMError } from '../errors';
 import { processAttachments } from '../utils/attachment';
@@ -28,11 +29,13 @@ export abstract class BaseProvider {
     protected config: LLMProviderConfig;
     protected baseURL: string;
     protected defaultModel: string;
-    
+    protected hooks?: LLMHooks;
+
     constructor(config: LLMProviderConfig) {
         this.config = config;
         this.baseURL = this.resolveBaseURL(config);
         this.defaultModel = config.model || '';
+        this.hooks = config.hooks;
     }
     
     /**
@@ -151,7 +154,14 @@ export abstract class BaseProvider {
     protected trimBase(): string {
         return this.baseURL.replace(/\/+$/, '');
     }
-    
+
+    /** Snapshot response headers into a plain object for logging */
+    private headersSnapshot(response: Response): Record<string, string> {
+        const headers: Record<string, string> = {};
+        response.headers.forEach((value, key) => { headers[key] = value; });
+        return headers;
+    }
+
     /**
      * 构建请求头
      */
@@ -179,7 +189,10 @@ export abstract class BaseProvider {
         options: RequestInit
     ): Promise<T> {
         const response = await fetch(url, options);
-        
+
+        // Capture response headers for troubleshooting
+        this.hooks?.onResponseHeaders?.(this.headersSnapshot(response), response.status);
+
         if (!response.ok) {
             const text = await response.text();
             let body: any;
@@ -202,6 +215,9 @@ export abstract class BaseProvider {
         options: RequestInit
     ): Promise<ReadableStream<Uint8Array>> {
         const response = await fetch(url, options);
+
+        // Capture response headers for troubleshooting
+        this.hooks?.onResponseHeaders?.(this.headersSnapshot(response), response.status);
 
         if (!response.ok) {
             const text = await response.text();

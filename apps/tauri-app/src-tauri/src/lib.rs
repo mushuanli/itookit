@@ -172,6 +172,9 @@ fn fs_write_file(path: String, data: Vec<u8>, state: State<AppPaths>) -> Result<
 fn fs_append_file(path: String, data: Vec<u8>, state: State<AppPaths>) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new().append(true).create(true).open(&p)
         .map_err(|e| e.to_string())?;

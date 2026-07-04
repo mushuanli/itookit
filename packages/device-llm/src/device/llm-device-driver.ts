@@ -418,10 +418,18 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         const msg = this.decodeMessage(content);
         session.history.push(msg);
 
-        // Log user message to /var/log/llm/{session}-messages.jsonl
+        // Log user message to /var/log/llm/{session}.jsonl
         if (msg.role === 'user' || msg.role === 'system') {
             this.llmLogger?.logMessage(session.id, msg.role, this.extractContent(msg));
         }
+
+        // Log full request for troubleshooting
+        this.llmLogger?.logRequest(session.id, {
+            provider: session.driver.providerName,
+            model: session.driver.currentModel ?? '',
+            messages: session.history,
+            params: session.completionDefaults,
+        });
 
         const rawStream = await session.driver.chat.create({
             ...session.completionDefaults,
@@ -605,6 +613,15 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 if (lastUserMsg) {
                     this.llmLogger?.logMessage(llmSession.id, 'user', this.extractContent(lastUserMsg));
                 }
+
+                // Log full request for troubleshooting
+                const { signal: _sig, ...logParams } = params as ChatCompletionParams & { signal?: unknown };
+                this.llmLogger?.logRequest(llmSession.id, {
+                    provider: llmSession.driver.providerName,
+                    model: llmSession.driver.currentModel ?? '',
+                    messages: params.messages,
+                    params: logParams as Record<string, unknown>,
+                });
 
                 const rawStream = await llmSession.driver.chat.create({
                     ...params, stream: true, signal: abort.signal,
@@ -1133,12 +1150,21 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         // that are not in the built-in LLM_PROVIDERS catalog.
         const pkey = connForDriver.provider as string;
         const customProviderDefaults = provider && pkey ? { [pkey]: provider } : undefined;
-        const driver = new LLMDriver({ connection: connForDriver, customProviderDefaults });
+
+        const sessionId = `llm-${++this.sessionSeq}`;
+        const driver = new LLMDriver({
+            connection: connForDriver,
+            customProviderDefaults,
+            hooks: {
+                onResponseHeaders: (headers, status) => {
+                    this.llmLogger?.logResponse(sessionId, { status, headers });
+                },
+            },
+        });
         const history: ChatMessage[] = opts?.systemPrompt
             ? [{ role: 'system', content: opts.systemPrompt }]
             : [];
 
-        const sessionId = `llm-${++this.sessionSeq}`;
         this.sessions.set(sessionId, {
             id: sessionId,
             kind: 'llm',
