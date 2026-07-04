@@ -43,6 +43,10 @@ export interface LLMModel {
     supportsStructuredOutput?: boolean;
     inputPricePerMillion?: number;
     outputPricePerMillion?: number;
+    /** cache 写入价格，USD/M tokens（仅支持 prompt caching 的 provider） */
+    cacheWritePricePerMillion?: number;
+    /** cache 读取价格，USD/M tokens */
+    cacheReadPricePerMillion?: number;
 }
 
 // ─── DailyCost ───────────────────────────────────────────────────────────────

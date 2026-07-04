@@ -434,7 +434,7 @@ export class TaskRunner {
 
             const connectionId = executorConfig.connectionId;
             if (connectionId) {
-                this.agentResolver.recordUsageCost(connectionId, {
+                this.agentResolver.recordUsageCost(connectionId, sessionId, {
                     inputTokens:  result.totalUsage.inputTokens,
                     outputTokens: result.totalUsage.outputTokens,
                     cost:         result.totalUsage.costUsd,
@@ -758,10 +758,10 @@ export class TaskRunner {
             // 完成
             state.updateNodeStatus(rootNode.id, 'success');
 
-            // Record cost to connection dailyCosts
+            // Record cost to cost.seq
             const kConnectionId = executorConfig.connectionId;
             if (kConnectionId) {
-                this.agentResolver.recordUsageCost(kConnectionId, {
+                this.agentResolver.recordUsageCost(kConnectionId, sessionId, {
                     inputTokens: estInputTokens,
                     outputTokens: estOutputTokens,
                     cost: estCost,

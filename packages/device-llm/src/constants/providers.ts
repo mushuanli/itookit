@@ -14,8 +14,11 @@ export const PROVIDERS_DIR = '/llm/.providers';
 const P = {
     // Claude 系列
     CLAUDE_OPUS_IN: 15, CLAUDE_OPUS_OUT: 75,
+    CLAUDE_OPUS_CACHE_WRITE: 18.75, CLAUDE_OPUS_CACHE_READ: 1.5,
     CLAUDE_SONNET_IN: 3, CLAUDE_SONNET_OUT: 15,
+    CLAUDE_SONNET_CACHE_WRITE: 3.75, CLAUDE_SONNET_CACHE_READ: 0.3,
     CLAUDE_HAIKU_IN: 0.8, CLAUDE_HAIKU_OUT: 4,
+    CLAUDE_HAIKU_CACHE_WRITE: 1.0, CLAUDE_HAIKU_CACHE_READ: 0.08,
 
     // GPT 系列
     GPT_PRO_IN: 5, GPT_PRO_OUT: 15,
@@ -38,6 +41,98 @@ const P = {
     DOUBAO_PRO_IN: 0.08, DOUBAO_PRO_OUT: 0.28,
     DOUBAO_LITE_IN: 0.04, DOUBAO_LITE_OUT: 0.14,
 } as const;
+
+// ─── 内置 Pricing 表 ──────────────────────────────────────────────────────────
+//
+// 将同族模型（跨 provider、跨版本小升级）归为同一 pricing id。
+// price = [input, output, cache_write, cache_read]，单位 USD/M tokens。
+//
+// providers.<name> = []        → 该 provider 下的实际模型 id = 逻辑 id 本身
+// providers.<name> = ["a","b"] → 路由使用 "a"，反向查找匹配 "a" 或 "b"
+// key absent                   → 该 provider 不支持此模型
+//
+// 此常量同时作为 pricing.json 不存在时的编译期 fallback，
+// 以及首次启动时写入 /llm/pricing.json 的默认内容。
+
+import type { ModelPricingEntry } from '@itookit/common';
+
+export const MODEL_PRICING: ModelPricingEntry[] = [
+    {
+        id: 'claude-opus',
+        price: [P.CLAUDE_OPUS_IN, P.CLAUDE_OPUS_OUT, P.CLAUDE_OPUS_CACHE_WRITE, P.CLAUDE_OPUS_CACHE_READ],
+        providers: {
+            anthropic: ['claude-opus-4-8-20251101', 'claude-opus-4-6-20250514'],
+            cloudapi:  ['claude-opus-4-6'],
+        },
+    },
+    {
+        id: 'claude-sonnet',
+        price: [P.CLAUDE_SONNET_IN, P.CLAUDE_SONNET_OUT, P.CLAUDE_SONNET_CACHE_WRITE, P.CLAUDE_SONNET_CACHE_READ],
+        providers: {
+            anthropic: ['claude-sonnet-4-6-20250514'],
+            cloudapi:  ['claude-sonnet-4-6'],
+            openrouter: ['anthropic/claude-sonnet-4.6'],
+        },
+    },
+    {
+        id: 'claude-haiku',
+        price: [P.CLAUDE_HAIKU_IN, P.CLAUDE_HAIKU_OUT, P.CLAUDE_HAIKU_CACHE_WRITE, P.CLAUDE_HAIKU_CACHE_READ],
+        providers: {
+            anthropic: ['claude-haiku-4-5-20251001'],
+            cloudapi:  ['claude-haiku-4-5'],
+        },
+    },
+    {
+        id: 'deepseek-v4-pro',
+        price: [P.DEEPSEEK_REASONER_IN, P.DEEPSEEK_REASONER_OUT, P.DEEPSEEK_REASONER_IN, 0],
+        providers: {
+            deepseek:    ['deepseek-v4-pro'],
+            volcengine:  ['deepseek-v4-pro-260425'],
+        },
+    },
+    {
+        id: 'deepseek-v4-flash',
+        price: [P.DEEPSEEK_CHAT_IN, P.DEEPSEEK_CHAT_OUT, P.DEEPSEEK_CHAT_IN, 0],
+        providers: {
+            deepseek:   ['deepseek-v4-flash'],
+            volcengine: ['deepseek-v4-flash-260425'],
+        },
+    },
+    {
+        id: 'gpt-pro',
+        price: [P.GPT_PRO_IN, P.GPT_PRO_OUT, 0, 0],
+        providers: {
+            openai:     ['gpt-5.5', 'gpt-5-pro', 'gpt-5-codex'],
+            openrouter: ['openai/gpt-5.5', 'openai/gpt-5-pro'],
+            cloudapi:   ['gpt-5.5'],
+        },
+    },
+    {
+        id: 'gpt-mini',
+        price: [P.GPT_MINI_IN, P.GPT_MINI_OUT, 0, 0],
+        providers: {
+            openai: ['gpt-5-mini'],
+        },
+    },
+    {
+        id: 'gemini-pro',
+        price: [P.GEMINI_PRO_IN, P.GEMINI_PRO_OUT, 0, 0],
+        providers: {
+            gemini:     ['gemini-3.1-pro'],
+            cloudapi:   ['gemini-3.1-pro'],
+            openrouter: ['google/gemini-3.1-pro'],
+        },
+    },
+    {
+        id: 'gemini-flash',
+        price: [P.GEMINI_FLASH_IN, P.GEMINI_FLASH_OUT, 0, 0],
+        providers: {
+            gemini:     ['gemini-3.5-flash'],
+            cloudapi:   ['gemini-3.5-flash'],
+            openrouter: ['google/gemini-3.5-flash'],
+        },
+    },
+];
 
 // ─── 模型显示名称常量 ──────────────────────────────────────────────────────────
 
@@ -100,10 +195,10 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         icon: '🏺',
         supportsThinking: true,
         models: [
-            { id: 'claude-opus-4-8-20251101', name: MODEL_NAME_CLAUDE_48_OPUS, icon: '👑', inputPricePerMillion: P.CLAUDE_OPUS_IN, outputPricePerMillion: P.CLAUDE_OPUS_OUT },
-            { id: 'claude-opus-4-6-20250514', name: MODEL_NAME_CLAUDE_46_OPUS, icon: '💎', inputPricePerMillion: P.CLAUDE_OPUS_IN, outputPricePerMillion: P.CLAUDE_OPUS_OUT },
-            { id: 'claude-sonnet-4-6-20250514', name: MODEL_NAME_CLAUDE_46_SONNET, icon: '🎭', inputPricePerMillion: P.CLAUDE_SONNET_IN, outputPricePerMillion: P.CLAUDE_SONNET_OUT },
-            { id: 'claude-haiku-4-5-20251001', name: MODEL_NAME_CLAUDE_45_HAIKU, icon: '🍃', inputPricePerMillion: P.CLAUDE_HAIKU_IN, outputPricePerMillion: P.CLAUDE_HAIKU_OUT },
+            { id: 'claude-opus-4-8-20251101', name: MODEL_NAME_CLAUDE_48_OPUS, icon: '👑', inputPricePerMillion: P.CLAUDE_OPUS_IN, outputPricePerMillion: P.CLAUDE_OPUS_OUT, cacheWritePricePerMillion: P.CLAUDE_OPUS_CACHE_WRITE, cacheReadPricePerMillion: P.CLAUDE_OPUS_CACHE_READ },
+            { id: 'claude-opus-4-6-20250514', name: MODEL_NAME_CLAUDE_46_OPUS, icon: '💎', inputPricePerMillion: P.CLAUDE_OPUS_IN, outputPricePerMillion: P.CLAUDE_OPUS_OUT, cacheWritePricePerMillion: P.CLAUDE_OPUS_CACHE_WRITE, cacheReadPricePerMillion: P.CLAUDE_OPUS_CACHE_READ },
+            { id: 'claude-sonnet-4-6-20250514', name: MODEL_NAME_CLAUDE_46_SONNET, icon: '🎭', inputPricePerMillion: P.CLAUDE_SONNET_IN, outputPricePerMillion: P.CLAUDE_SONNET_OUT, cacheWritePricePerMillion: P.CLAUDE_SONNET_CACHE_WRITE, cacheReadPricePerMillion: P.CLAUDE_SONNET_CACHE_READ },
+            { id: 'claude-haiku-4-5-20251001', name: MODEL_NAME_CLAUDE_45_HAIKU, icon: '🍃', inputPricePerMillion: P.CLAUDE_HAIKU_IN, outputPricePerMillion: P.CLAUDE_HAIKU_OUT, cacheWritePricePerMillion: P.CLAUDE_HAIKU_CACHE_WRITE, cacheReadPricePerMillion: P.CLAUDE_HAIKU_CACHE_READ },
         ],
     },
 
