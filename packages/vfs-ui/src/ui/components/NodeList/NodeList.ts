@@ -201,7 +201,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         // Instant create: skip inline name-prompt, let service generate a unique timestamped name
         this.commandBus.execute('file:create', {
           type: 'file',
-          title: undefined,
+          title: '',
           parentPath,
         });
       } else {

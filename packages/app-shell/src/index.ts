@@ -6,3 +6,5 @@ export type { AppFileTypeConfig, EditorTypeKey } from './config/file-registry';
 export * from './config/templates';
 export { StandardWorkspaceStrategy, SettingsWorkspaceStrategy, ChatWorkspaceStrategy } from './strategies/index';
 export type { WorkspaceStrategy } from './strategies/types';
+export { themeService } from './ThemeService';
+export type { ThemeMode } from './ThemeService';

@@ -692,7 +692,7 @@ export class LLMWorkspaceEditor implements IEditor {
         }, null, 2);
     }
 
-    setText(text: string): void {
+    setText(_text: string): void {
         this.loadSession()
             .then(() => this.emit('contentLoaded' as EditorEvent))
             .catch(e => {
@@ -701,7 +701,7 @@ export class LLMWorkspaceEditor implements IEditor {
             });
     }
 
-    async setTextAsync(text: string): Promise<void> {
+    async setTextAsync(_text: string): Promise<void> {
         await this.loadSession();
     }
 

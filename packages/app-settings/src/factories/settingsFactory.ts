@@ -12,6 +12,7 @@ import { AboutSettingsEditor } from '../editors/AboutSettingsEditor';
 import { RecoverySettingsEditor } from '../editors/RecoverySettingsEditor';
 import { LogSettingsEditor } from '../editors/LogSettingsEditor';
 import { SystemFSExploreEditor } from '../editors/SystemFSExploreEditor';
+import { AppearanceSettingsEditor } from '../editors/AppearanceSettingsEditor';
 
 /**
  * VFS-UI 使用 path（如 "/文件系统"）作为 nodeId，而内部编辑器用 slug（如 "storage"）。
@@ -52,6 +53,7 @@ export const createSettingsFactory = (
             case 'log':         editor = new LogSettingsEditor(container, settingsService, options); break;
             case 'about':       editor = new AboutSettingsEditor(container, settingsService, options); break;
             case 'fs-explorer': editor = new SystemFSExploreEditor(container, settingsService, options); break;
+            case 'appearance':  editor = new AppearanceSettingsEditor(container, settingsService, options); break;
             default:
                 container.innerHTML = `<div style="padding:2rem;text-align:center;color:#666">Select a setting category</div>`;
                 return { init: async () => {}, destroy: async () => {}, getText: () => '', setText: () => {}, focus: () => {}, getMode: () => 'render', switchToMode: async () => {}, setTitle: () => {}, setReadOnly: () => {}, isDirty: () => false, setDirty: () => {}, commands: {}, getHeadings: async () => [], getSearchableText: async () => '', getSummary: async () => null, search: async () => [], gotoMatch: () => {}, clearSearch: () => {}, on: () => () => {}, navigateTo: async () => {} } as unknown as IEditor;
