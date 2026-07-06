@@ -26,6 +26,7 @@ import {
 } from './strategies/index';
 import { WorkspaceStrategy } from './strategies/types';
 import { FILE_REGISTRY, EditorTypeKey } from './config/file-registry';
+import { themeService, ThemeMode } from './ThemeService';
 
 /** Resolves when an actual editor mounts inside the container (not just placeholder). */
 function waitForEditorMount(container: HTMLElement): Promise<void> {
@@ -302,6 +303,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         } catch { /* ignore */ }
     };
     logIO('createVFS');
+
+    // Init theme from VFS before anything renders
+    await themeService.init(vfs);
+    cleanupFns.push(() => themeService.destroy());
 
     // ── 2. LLM device driver ───────────────────────────────────────────────────
 
@@ -719,6 +724,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             const wsId = resolveTarget(slug);
             updateHistory(wsId, resourceId ?? null, 'push');
             await performNavigation(wsId, resourceId);
+        },
+
+        async setTheme(mode: ThemeMode): Promise<void> {
+            await themeService.setMode(mode);
         },
 
         addWorkspace(config: WorkspaceConfig): void {

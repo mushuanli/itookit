@@ -6,8 +6,8 @@
 //   - 仪表盘：按时间（今日/本周/本月）+ provider 过滤展示费用汇总、按 provider 分组、Top 10 Sessions
 //   - 定价配置：可视化编辑 pricing.json（ModelPricingEntry 列表），保存后写入 VFS
 
-import { BaseSettingsEditor, Modal, Toast, aggregateCostRecords, lookupPricingEntry } from '@itookit/common';
-import type { IAgentManagementService, CostRecord, ModelPricingEntry, ModelPricingConfig, LLMProvider } from '@itookit/common';
+import { BaseSettingsEditor, Toast, aggregateCostRecords, lookupPricingEntry } from '@itookit/common';
+import type { IAgentManagementService, CostRecord, ModelPricingEntry, ModelPricingConfig } from '@itookit/common';
 
 type Period = 'today' | 'week' | 'month';
 type Tab = 'dashboard' | 'pricing';

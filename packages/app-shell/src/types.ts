@@ -1,4 +1,5 @@
 import type { IStorageBackend, IVFSManager, MountOptions, FileCreationConfig } from '@itookit/common';
+import type { ThemeMode } from './ThemeService';
 
 export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills';
 
@@ -53,6 +54,8 @@ export interface AppOptions {
 
 export interface AppHandle {
     navigate(slug: string, resourceId?: string): Promise<void>;
+    /** Set the global UI theme and persist to etc:/ui/theme.json */
+    setTheme(mode: ThemeMode): Promise<void>;
     /** Register a dynamically created workspace (e.g. a local mount tab). */
     addWorkspace(config: WorkspaceConfig): void;
     /** Unsubscribe all global event listeners and release resources. */

@@ -18,15 +18,20 @@ declare global {
 export interface MermaidPluginOptions {
   /**
    * Mermaid CDN URL
-   * @default 'https://fastly.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs'
+   * @default 'https://fastly.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'
    */
   cdnUrl?: string;
 
   /**
-   * Mermaid 主题
-   * @default 'default'
+   * Mermaid light mode 主题，@default 'neutral'
+   * @see https://mermaid.js.org/config/theming.html
    */
   theme?: 'default' | 'forest' | 'dark' | 'neutral' | 'base';
+
+  /**
+   * Mermaid dark mode 主题，@default 'dark'
+   */
+  darkTheme?: 'default' | 'forest' | 'dark' | 'neutral' | 'base';
 
   /**
    * 自定义 Mermaid 配置
@@ -52,6 +57,9 @@ class MermaidManager {
   private instanceCount = 0;
   private renderQueues: Map<string, Set<Element>> = new Map();
   private renderTimers: Map<string, number> = new Map();
+  // Callbacks registered by plugin instances to re-render on theme change
+  private themeChangeCallbacks: Map<string, () => void> = new Map();
+  private colorSchemeListener: (() => void) | null = null;
 
   private constructor() { }
 
@@ -65,12 +73,14 @@ class MermaidManager {
   /**
    * 注册实例（引用计数）
    */
-  registerInstance(config: any, cdnUrl: string): void {
+  registerInstance(config: any, cdnUrl: string, instanceId: string, onThemeChange: () => void): void {
     this.instanceCount++;
+    this.themeChangeCallbacks.set(instanceId, onThemeChange);
 
     if (this.instanceCount === 1) {
       this.config = config;
       this.cdnUrl = cdnUrl;
+      this.setupColorSchemeListener();
     } else if (JSON.stringify(this.config) !== JSON.stringify(config)) {
       console.warn('Mermaid config differs between instances. Using first config.');
     }
@@ -90,11 +100,23 @@ class MermaidManager {
       this.renderTimers.delete(instanceId);
     }
 
+    this.themeChangeCallbacks.delete(instanceId);
     this.instanceCount--;
 
     if (this.instanceCount === 0) {
       this.cleanup();
     }
+  }
+
+  /**
+   * 监听系统 color scheme 变化，切换 mermaid 主题并触发重渲染
+   */
+  private setupColorSchemeListener(): void {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    this.colorSchemeListener = () => {
+      this.themeChangeCallbacks.forEach(cb => cb());
+    };
+    mq.addEventListener('change', this.colorSchemeListener);
   }
 
   /**
@@ -132,6 +154,16 @@ class MermaidManager {
     });
 
     return this.loadPromise;
+  }
+
+  /**
+   * 切换主题并重新初始化（color scheme 变化时调用）
+   */
+  reinitialize(newConfig: any): void {
+    this.config = newConfig;
+    if (this.isLoaded && window.mermaid) {
+      window.mermaid.initialize(newConfig);
+    }
   }
 
   /**
@@ -225,6 +257,11 @@ class MermaidManager {
     this.renderTimers.forEach(timer => clearTimeout(timer));
     this.renderTimers.clear();
     this.renderQueues.clear();
+    this.themeChangeCallbacks.clear();
+    if (this.colorSchemeListener) {
+      window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', this.colorSchemeListener);
+      this.colorSchemeListener = null;
+    }
   }
 }
 
@@ -246,23 +283,54 @@ export class MermaidPlugin implements MDxPlugin {
   private manager: MermaidManager;
   private cleanupFns: Array<() => void> = [];
   private instanceId: string;
+  // Tracked DOM container for re-render on theme switch
+  private lastRenderedContainer: HTMLElement | null = null;
 
   constructor(options: MermaidPluginOptions = {}) {
     this.options = {
-      cdnUrl: options.cdnUrl || 'https://fastly.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs',
-      theme: options.theme || 'default',
-      mermaidConfig: {
-        startOnLoad: false,
-        theme: options.theme || 'default',
-        ...options.mermaidConfig,
-      },
+      cdnUrl: options.cdnUrl || 'https://fastly.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs',
+      theme: options.theme || 'neutral',
+      darkTheme: options.darkTheme || 'dark',
+      mermaidConfig: options.mermaidConfig ?? {},
       autoLoad: options.autoLoad !== false,
     };
 
     this.instanceId = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-
     this.manager = MermaidManager.getInstance();
-    this.manager.registerInstance(this.options.mermaidConfig, this.options.cdnUrl);
+    this.manager.registerInstance(this.getEffectiveConfig(), this.options.cdnUrl, this.instanceId, () => {
+      this.onColorSchemeChange();
+    });
+  }
+
+  /** Returns mermaid config merged with the correct theme for current color scheme */
+  private getEffectiveConfig(): Record<string, any> {
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const theme = isDark ? this.options.darkTheme : this.options.theme;
+    return {
+      startOnLoad: false,
+      theme,
+      ...this.options.mermaidConfig,
+    };
+  }
+
+  /** Called by manager when color scheme changes — re-init mermaid and re-render all visible diagrams */
+  private onColorSchemeChange(): void {
+    this.manager.reinitialize(this.getEffectiveConfig());
+    if (this.lastRenderedContainer) {
+      // Strip already-rendered SVGs so mermaid re-processes the source
+      this.lastRenderedContainer.querySelectorAll('.mermaid svg').forEach(svg => {
+        const mermaidEl = svg.closest('.mermaid') as HTMLElement | null;
+        if (mermaidEl) {
+          // Restore to un-rendered state so mermaid.run() picks it up again
+          mermaidEl.removeAttribute('data-mermaid-error');
+          mermaidEl.removeAttribute('data-processed');
+        }
+      });
+      const nodes = this.lastRenderedContainer.querySelectorAll('pre code.language-mermaid');
+      if (nodes.length > 0) {
+        this.manager.queueRender(this.instanceId, nodes);
+      }
+    }
   }
 
   /**
@@ -277,6 +345,7 @@ export class MermaidPlugin implements MDxPlugin {
 
     const removeListener = context.on('domUpdated', async ({ element }: { element: HTMLElement }) => {
       try {
+        this.lastRenderedContainer = element;
         const mermaidElements = element.querySelectorAll('pre code.language-mermaid');
         if (mermaidElements.length > 0) {
           this.manager.queueRender(this.instanceId, mermaidElements);
@@ -297,6 +366,7 @@ export class MermaidPlugin implements MDxPlugin {
   destroy(): void {
     this.cleanupFns.forEach(fn => fn());
     this.cleanupFns = [];
+    this.lastRenderedContainer = null;
     this.manager.unregisterInstance(this.instanceId);
   }
 }

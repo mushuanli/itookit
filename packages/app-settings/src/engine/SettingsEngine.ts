@@ -38,6 +38,7 @@ export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
     'log':         { name: '系统日志',      icon: '📋' },
     'about':       { name: 'About',         icon: 'ℹ️' },
     'fs-explorer': { name: 'FS Explorer',   icon: '🗂️' },
+    'appearance':  { name: '外观',           icon: '🎨' },
 };
 
 function toFSNode(id: string, config: (typeof SETTINGS_PAGES)[string]): FSFileNode {

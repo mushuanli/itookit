@@ -159,12 +159,19 @@
 }
 
 /* 深色主题 */
-@media (prefers-color-scheme: dark) {
-  .mdx-streaming-block--active pre code.language-mermaid {
+
+[data-theme="dark"] .mdx-streaming-block--active pre code.language-mermaid {
     color: #666;
   }
-  
-  .mdx-streaming-block--active pre code.language-mermaid::after {
+[data-theme="dark"] .mdx-streaming-block--active pre code.language-mermaid::after {
+    color: #666;
+  }
+
+@media (prefers-color-scheme: dark) {
+  :not([data-theme="light"]) .mdx-streaming-block--active pre code.language-mermaid {
+    color: #666;
+  }
+  :not([data-theme="light"]) .mdx-streaming-block--active pre code.language-mermaid::after {
     color: #666;
   }
 }
@@ -202,51 +209,54 @@
    Dark Theme Support
    =========================== */
 
-@media (prefers-color-scheme: dark) {
-  .mdx-editor-renderer pre code.language-mermaid {
+
+[data-theme="dark"] .mdx-editor-renderer pre code.language-mermaid {
     background-color: #2d2d2d;
     border-color: #444;
     color: #e0e0e0;
   }
-
-  .mdx-editor-renderer .mermaid {
+[data-theme="dark"] .mdx-editor-renderer .mermaid {
     background-color: #1e1e1e;
     border-color: #444;
   }
-
-  /* 加载状态 - 深色主题 */
-  .mdx-editor-renderer pre code.language-mermaid.mermaid-loading::before {
+/* 加载状态 - 深色主题 */
+[data-theme="dark"] .mdx-editor-renderer pre code.language-mermaid.mermaid-loading::before {
     border-color: #444;
     border-top-color: #66b3ff;
   }
-
-  .mdx-editor-renderer pre code.language-mermaid.mermaid-loading::after {
+[data-theme="dark"] .mdx-editor-renderer pre code.language-mermaid.mermaid-loading::after {
     color: #999;
   }
-
-  /* 错误状态 - 深色主题 */
-  .mdx-editor-renderer .mermaid.error {
+/* 错误状态 - 深色主题 */
+[data-theme="dark"] .mdx-editor-renderer .mermaid.error {
     background-color: #3d2020;
     border-color: #ff6b6b;
     color: #ff8787;
   }
 
-  /* Mermaid 深色主题样式覆盖 */
-  .mdx-editor-renderer .mermaid .node rect,
-  .mdx-editor-renderer .mermaid .node circle,
-  .mdx-editor-renderer .mermaid .node ellipse,
-  .mdx-editor-renderer .mermaid .node polygon {
-    fill: #2d2d2d;
-    stroke: #66b3ff;
-  }
-
-  .mdx-editor-renderer .mermaid .edgeLabel {
-    background-color: #1e1e1e;
+@media (prefers-color-scheme: dark) {
+  :not([data-theme="light"]) .mdx-editor-renderer pre code.language-mermaid {
+    background-color: #2d2d2d;
+    border-color: #444;
     color: #e0e0e0;
   }
-
-  .mdx-editor-renderer .mermaid text {
-    fill: #e0e0e0 !important;
+  :not([data-theme="light"]) .mdx-editor-renderer .mermaid {
+    background-color: #1e1e1e;
+    border-color: #444;
+  }
+  /* 加载状态 - 深色主题 */
+  :not([data-theme="light"]) .mdx-editor-renderer pre code.language-mermaid.mermaid-loading::before {
+    border-color: #444;
+    border-top-color: #66b3ff;
+  }
+  :not([data-theme="light"]) .mdx-editor-renderer pre code.language-mermaid.mermaid-loading::after {
+    color: #999;
+  }
+  /* 错误状态 - 深色主题 */
+  :not([data-theme="light"]) .mdx-editor-renderer .mermaid.error {
+    background-color: #3d2020;
+    border-color: #ff6b6b;
+    color: #ff8787;
   }
 }
 
@@ -303,16 +313,25 @@
   background: #555;
 }
 
-@media (prefers-color-scheme: dark) {
-  .mdx-editor-renderer .mermaid::-webkit-scrollbar-track {
+
+[data-theme="dark"] .mdx-editor-renderer .mermaid::-webkit-scrollbar-track {
     background: #2d2d2d;
   }
-
-  .mdx-editor-renderer .mermaid::-webkit-scrollbar-thumb {
+[data-theme="dark"] .mdx-editor-renderer .mermaid::-webkit-scrollbar-thumb {
     background: #555;
   }
+[data-theme="dark"] .mdx-editor-renderer .mermaid::-webkit-scrollbar-thumb:hover {
+    background: #777;
+  }
 
-  .mdx-editor-renderer .mermaid::-webkit-scrollbar-thumb:hover {
+@media (prefers-color-scheme: dark) {
+  :not([data-theme="light"]) .mdx-editor-renderer .mermaid::-webkit-scrollbar-track {
+    background: #2d2d2d;
+  }
+  :not([data-theme="light"]) .mdx-editor-renderer .mermaid::-webkit-scrollbar-thumb {
+    background: #555;
+  }
+  :not([data-theme="light"]) .mdx-editor-renderer .mermaid::-webkit-scrollbar-thumb:hover {
     background: #777;
   }
 }
