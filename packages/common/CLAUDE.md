@@ -101,6 +101,31 @@ IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult
 | `AgentEventType` | `interfaces/agent/agent-types.ts` | 25 种事件联合类型 |
 | `AgentEventPayloads` | `interfaces/agent/agent-types.ts` | 事件→payload 映射 |
 
+## LLM Pricing & Billing
+
+| 类型/函数 | 文件 | 说明 |
+|---|---|---|
+| `ModelPricingEntry` | `interfaces/llm/pricing.ts` | 单模型定价 (id, price[4], providers, names) |
+| `ModelPricingConfig` | `interfaces/llm/pricing.ts` | pricing.json 根结构 |
+| `CostRecord` | `interfaces/llm/pricing.ts` | 单次请求成本记录 (sessionId, tokens, cost, date) |
+| `lookupPricingEntry(config, providerId, modelId)` | `interfaces/llm/pricing.ts` | 三级匹配: providers exact > names glob > default fallback |
+| `aggregateCostRecords(records)` | `interfaces/llm/pricing.ts` | 汇总 CostRecord[] 为聚合值 |
+| `extractPrices(entry)` | `interfaces/llm/pricing.ts` | 从 price[4] 解构为具名字段 |
+
+**Pricing 匹配优先级**: providers 精确匹配 > names/id glob 匹配（支持 `*` 通配符）> `id="default"` fallback。
+
+`IAgentManagementService` 新增 `queryCosts(filter?)` 和 `getPricingConfig()` 方法。
+
+## LLM Logging
+
+| 接口/类型 | 文件 | 说明 |
+|---|---|---|
+| `ILLMLogger` | `interfaces/ILLMLogger.ts` | 平台无关的 LLM 消息/请求/响应日志接口 |
+| `LLMRequestLog` | `interfaces/ILLMLogger.ts` | 完整出站请求快照 |
+| `LLMResponseLog` | `interfaces/ILLMLogger.ts` | HTTP 响应元数据 |
+
+`ChatCompletionParams._label` 用于日志文件命名（如 session 标识）。
+
 ## Conventions
 
 - **所有 cross-package 类型必须定义在此包**，其他包通过 `import type { X } from '@itookit/common'` 引用

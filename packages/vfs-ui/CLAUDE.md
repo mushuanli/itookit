@@ -26,7 +26,9 @@ src/
 
 ## 近期关键功能
 
-- **即时文件创建**: 新文件按钮点击后直接创建并打开，目录自动展开
+- **即时文件创建**: 新文件按钮点击后直接创建并打开，目录自动展开。传入 undefined title 让 VFSService 使用 `formatDefaultFileTitle()` 避免碰撞
+- **文件名碰撞防护**: 时间戳精度从分钟提升到秒，`createConflictFreeTitle()` 检测并解决冲突
+- **重命名事件处理**: `VFSEvent.RENAMED` + `VFSStore.handleRenameUpdate()` 处理重命名后的 UI 一致性
 - **文件导出**: 工具栏按钮 + 右键菜单导出，支持 YAML bundle (文件+assetdir)
 - **parentPath 规范化**: `'/'` → `null`，消除 CREATE_ITEM_START 路径不一致
 

@@ -34,3 +34,4 @@ const file = createMDXFile(fs, ownerNodeId);  // v3.3: 参数改为 IModuleFS
 - `ScopedPersistenceStore` — 插件私有 localStorage（scopeId 隔离）
 - `AssetResolverPlugin` 通过 `createMDXFile(fs, nodeId)` 创建文件句柄
 - Asset 上传路径路由修复：正确处理 `/` vs `null` parentPath
+- 暗色主题 CSS 同时使用 `[data-theme="dark"]` 和 `@media (prefers-color-scheme: dark)` 选择器，支持手动和系统主题切换

@@ -43,3 +43,12 @@ const { manager } = await createVFS({ rootBackend: backend, modules: [...] });
 - 废弃 inode/meta/content 三层 object store → 单一 `nodes` store
 - path (string) 替代 ino (number) 作为主键
 - `ITransactionScope` → `transaction?(fn: (tx: IStorageBackend) => T)`
+
+## 自动恢复（v4.1+）
+
+- `openDB()` 失败时自动调用 `deleteDatabase` 重建数据库
+- `write()` / `mkdir()` 自动通过 `_ensureParents()` 创建缺失的父目录
+- `init()` 检查所有必需 store 是否存在，缺失时升级版本重建
+- `verify()` 健康检查返回 `{ ok, errors, warnings }` — 检测孤儿 tag 和元数据不一致
+- `repair(result)` 清理孤儿 tag，修复 sidecar 与主 store 的一致性
+- 新增导出: `VerifyResult` 类型, `REQUIRED_STORES` 常量

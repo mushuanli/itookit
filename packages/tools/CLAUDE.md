@@ -20,10 +20,14 @@ src/
 │   ├── Bash/                    ← BashTool — Shell 命令执行（含危险命令拦截）
 │   ├── Skill/                   ← SkillTool — 动态加载 Skill（工厂模式）
 │   ├── Agent/                   ← AgentTool — 子代理委派（工厂模式）
-│   ├── Task/                    ← TaskCreate/Get/List/Update — 任务管理
+│   ├── Task/                    ← TaskCreate/Get/List/Update + TaskOutput — 任务管理
 │   ├── PlanMode/                ← EnterPlanMode/ExitPlanMode — 计划模式
 │   ├── AskUserQuestion/         ← AskUserQuestionTool — 用户问答
-│   └── WebFetch/                ← WebFetchTool — URL 抓取
+│   ├── WebFetch/                ← WebFetchTool — URL 抓取
+│   ├── WebSearch/               ← WebSearchTool — 网络搜索（IWebSearchProvider 工厂，P0）
+│   ├── MCP/                     ← MCPTool — MCP 协议客户端（IMCPClient 工厂，P0）
+│   ├── SendMessage/             ← SendMessageTool — 消息路由（IMessageRouter 工厂，P1）
+│   └── ToolSearch/              ← ToolSearchTool — 延迟工具发现（P1）
 ├── adapters/
 │   └── tool-device-driver.ts    ← ToolDeviceDriver — Tool[] → IToolService
 └── utils/                       ← 工具函数
@@ -49,6 +53,18 @@ ToolName/
 ### 静态 vs 动态工具
 - **静态工具**: 无运行时依赖，直接 `export const XxxTool = buildTool({...})`，在 `BUILTIN_TOOLS` 数组注册
 - **动态工具**: 需要运行时服务（ISkillService/ISubAgentRouter），工厂模式 `createXxxTool(service)` 返回 Tool
+- **P0 工具** (WebSearch, MCP): 工厂模式，需要外部服务注入
+- **P1 工具** (TaskOutput, SendMessage, ToolSearch): 同样工厂模式
+
+### Tool 接口新增成员
+
+| 成员 | 类型 | 用途 |
+|---|---|---|
+| `shouldDefer` | `boolean` | 为 true 时带 `defer_loading` 标记发送，需 ToolSearch 先调用 |
+| `interruptBehavior` | `() => 'cancel' \| 'block'` | 用户提交新消息时的中断行为 |
+| `isSearchOrReadCommand` | `(input) => 'search' \| 'read' \| 'list' \| 'none'` | UI 折叠分类 |
+
+`ToolDeviceDriver.invoke()` 处理 `interruptBehavior`。
 
 ## 添加新工具
 
