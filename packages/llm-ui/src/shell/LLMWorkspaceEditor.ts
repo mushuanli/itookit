@@ -41,7 +41,7 @@ import {
     buildExecutorOptions, validateAgentId, buildConnectionOptions,
 } from './AgentProvider';
 import {
-    buildHarnessCallbacks, checkSessionInterrupted, cleanupLegacyHarnessKeys,
+    buildHarnessCallbacks, checkSessionInterrupted,
     injectIntoRunningHarness,
     wirePlanConfirmIntercept,
 } from './HarnessIntegration';
@@ -203,8 +203,6 @@ export class LLMWorkspaceEditor implements IEditor {
             this.initComplete = true;
             this.emit('ready');
             this.initResolve?.();
-            // Clean up legacy harness:session:* keys from old localStorage-based recovery.
-            cleanupLegacyHarnessKeys();
         } catch (e: any) {
             if (e.code === 'ABORTED' || e.message?.includes('Bind cancelled')) {
                 this.initResolve?.();

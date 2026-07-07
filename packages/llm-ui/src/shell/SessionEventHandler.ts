@@ -198,7 +198,7 @@ export class SessionEventHandler {
                 this.deps.chatInput.updateTokenStats({
                     inputTokens:       tu.inputTokens,
                     outputTokens:      tu.outputTokens,
-                    cacheTokens:       tu.cacheTokens,
+                    cacheReadTokens:   tu.cacheReadTokens,
                     costUsd:           tu.costUsd,
                     contextUsageRatio: tu.contextUsageRatio,
                     turns:             tu.turns,

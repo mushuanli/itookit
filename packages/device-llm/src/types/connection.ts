@@ -4,7 +4,6 @@ export type {
     LLMModel,
     LLMProviderImplementation,
     LLMProvider,
-    LLMProviderDefinition,  // @deprecated alias for LLMProvider
     LLMConnection,
     ConnectionMeta,
 } from '@itookit/common';

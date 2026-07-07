@@ -33,8 +33,6 @@ export interface SessionTokenUsage {
     cacheWriteTokens?: number;
     /** cache 读取 token（cache_read_input_tokens，仅 Anthropic） */
     cacheReadTokens?: number;
-    /** @deprecated 使用 cacheReadTokens，此字段填 cacheReadTokens 的值以向后兼容展示层 */
-    cacheTokens: number;
     /** 估算费用（USD） */
     costUsd: number;
     /** 上下文窗口使用率 [0, 1]（inputTokens / modelMaxContextTokens） */

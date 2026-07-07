@@ -193,7 +193,7 @@ export interface LLMClientConfig {
     hooks?: LLMHooks;
 
     /** 自定义 Provider 定义 */
-    customProviderDefaults?: Record<string, import('./connection').LLMProviderDefinition>;
+    customProviderDefaults?: Record<string, import('./connection').LLMProvider>;
     
     // ===== 新增配置 =====
     

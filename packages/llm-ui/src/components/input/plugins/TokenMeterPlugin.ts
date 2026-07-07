@@ -123,8 +123,8 @@ export class TokenMeterPlugin implements InputPlugin {
         const cost   = fmtCost(s.costUsd);
         const dur    = fmtDuration(s.durationMs);
 
-        const cachePart = s.cacheTokens > 0
-            ? ` <span class="token-meter__cache" title="Cache hit tokens">⚡${fmtTokens(s.cacheTokens)}</span>`
+        const cachePart = (s.cacheReadTokens ?? 0) > 0
+            ? ` <span class="token-meter__cache" title="Cache hit tokens">⚡${fmtTokens(s.cacheReadTokens!)}</span>`
             : '';
 
         const turnsPart = s.turns > 1

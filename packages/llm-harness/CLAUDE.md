@@ -27,6 +27,15 @@ AgentLoopExecutor:
                              : → BackPressure → break/inject→loop
 ```
 
+## Session Persistence（已废弃）
+
+`executor/session-store.ts` 已删除。会话中断检测现在使用 VFS `.chat` 文件的 `meta.status` 字段。
+遗留 `harness:session:*` localStorage key 的清理由 `llm-ui/src/shell/HarnessIntegration.ts` 的 `cleanupLegacyHarnessKeys()` 负责。
+
+## Harness Call from llm-engine
+
+llm-engine 的 `HarnessStrategy`（在 `adapters/harness-adapter.ts`）将 `IAgentRuntime` 包装为 `IAgentLoopStrategy`，通过 `initializeLLMEngine({ harnessRuntime })` 注入。
+
 详情: [关键设计 + ToolMeta + 扩展点](./doc/design-details.md)
 
 ## Conventions

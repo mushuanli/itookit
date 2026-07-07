@@ -416,7 +416,6 @@ export class HarnessStrategy implements IAgentLoopStrategy {
             totalUsage: {
                 inputTokens:       result.usage?.inputTokens  ?? 0,
                 outputTokens:      result.usage?.outputTokens ?? 0,
-                cacheTokens:       0,
                 costUsd:           result.usage?.costUsd      ?? 0,
                 contextUsageRatio: 0,
                 turns:             result.usage?.turns        ?? 0,

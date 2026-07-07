@@ -367,9 +367,6 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
     },
 };
 
-/** @deprecated 请使用 LLM_PROVIDERS */
-export const LLM_PROVIDER_DEFAULTS = LLM_PROVIDERS;
-
 export function getProviderDefinition(provider: string): LLMProvider | undefined {
     return LLM_PROVIDERS[provider];
 }

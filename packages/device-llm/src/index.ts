@@ -45,7 +45,6 @@ export type {
     LLMConnection,
     LLMModel,
     LLMProvider,
-    LLMProviderDefinition,  // @deprecated alias for LLMProvider
 } from './types/connection';
 
 // 消息
@@ -137,7 +136,6 @@ export {
     PROVIDERS_DIR,
     LLM_PROVIDERS,
     DEFAULT_CONNECTIONS,
-    LLM_PROVIDER_DEFAULTS,  // @deprecated
     LLM_DEFAULT_ID,
     LLM_DEFAULT_NAME,
     DEFAULT_TIMEOUT,
@@ -222,8 +220,4 @@ export type { LLMIoctlCommand, LLMDeviceOpenOptions, IShellRunner, LLMDeviceDriv
 // ILLMManagementService 统一从 @itookit/common 导入
 
 // ============================================
-// 兼容性导出 (deprecated)
 // ============================================
-
-/** @deprecated 使用 MessageContentFile 代替 */
-export type { MessageContentFile as MessageContentDocument } from './types/message';
