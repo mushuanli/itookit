@@ -82,25 +82,6 @@ export function checkSessionInterrupted(
     );
 }
 
-/**
- * 一次性清理残留的 harness:session:* 旧 key。
- *
- * 旧版本（Q2）在 localStorage 中持久化 harness session 快照，
- * 现在改为 VFS meta.status 检测。此函数清理迁移后遗留的旧数据。
- */
-export function cleanupLegacyHarnessKeys(): void {
-    try {
-        const store = (globalThis as any)['localStorage'];
-        if (!store) return;
-        const toDelete: string[] = [];
-        for (let i = 0; i < store.length; i++) {
-            const k: string = store.key(i) ?? '';
-            if (k.startsWith('harness:session:')) toDelete.push(k);
-        }
-        toDelete.forEach((k) => store.removeItem(k));
-    } catch { /* localStorage not available */ }
-}
-
 // ── Mid-execution injection ────────────────────────────────────────────────
 
 export function injectIntoRunningHarness(

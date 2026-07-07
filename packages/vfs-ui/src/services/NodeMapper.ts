@@ -76,9 +76,3 @@ export const mapFSNodesToUIItems = (
   nodes
     ?.filter(n => !shouldFilterNode(n))
     .map(n => mapFSNodeToUIItem(n, iconResolver, parserResolver, showFileExtensions)) || [];
-
-// ── Backward-compat aliases ───────────────────────────────────────────────────
-/** @deprecated Use mapFSNodeToUIItem */
-export const mapEngineNodeToUIItem = mapFSNodeToUIItem as any;
-/** @deprecated Use mapFSNodesToUIItems */
-export const mapEngineTreeToUIItems = mapFSNodesToUIItems as any;

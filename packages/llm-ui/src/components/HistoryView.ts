@@ -334,7 +334,7 @@ export class HistoryView implements IHistoryPresenter {
 
             case 'finished':
                 this.exitStreamingMode();
-                this.renderer.editors.forEach(editor => editor.finishStream());
+                this.renderer.editors.forEach(editor => editor.finalize().catch(e => console.error('[HistoryView] finalize failed:', e)));
                 this.clearErrors();
                 this.bus?.emit('state:collapseChanged', {
                     states: this.collapse.getStates(),
@@ -347,7 +347,7 @@ export class HistoryView implements IHistoryPresenter {
                 const code = (event.payload as any).code;
                 const prefix = code === 401 ? '🔐 ' : code === 429 ? '⏳ ' : '';
                 this.appendErrorBubble(new Error(`${prefix}${msg}`));
-                this.renderer.editors.forEach(editor => editor.finishStream(false));
+                this.renderer.editors.forEach(editor => editor.finalize().catch(e => console.error('[HistoryView] finalize failed:', e)));
                 break;
             }
 

@@ -61,6 +61,7 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
         const startMs = Date.now();
         let totalInput = 0;
         let totalOutput = 0;
+        let totalCacheRead = 0;
 
         for (let turn = 0; turn < maxTurns; turn++) {
             this.checkAbort(signal);
@@ -72,6 +73,7 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
 
             totalInput  += usage?.inputTokens  ?? 0;
             totalOutput += usage?.outputTokens ?? 0;
+            totalCacheRead += usage?.cacheReadTokens ?? 0;
             onEvent({ type: 'turn:end', payload: { sessionId, turn } });
 
             const toolUses = assistantBlocks.filter((b): b is ToolUseBlock => b.type === 'tool_use');
@@ -124,7 +126,7 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
             totalUsage: {
                 inputTokens: totalInput,
                 outputTokens: totalOutput,
-                cacheTokens: 0,
+                cacheReadTokens: totalCacheRead > 0 ? totalCacheRead : undefined,
                 costUsd: 0,
                 contextUsageRatio: 0,
                 turns: turns.length,
@@ -142,9 +144,9 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
         signal: AbortSignal | undefined,
         onEvent: (e: OrchestratorEvent) => void,
         nodeId: string,
-    ): Promise<{ assistantBlocks: ContentBlock[]; usage?: { inputTokens: number; outputTokens: number } }> {
+    ): Promise<{ assistantBlocks: ContentBlock[]; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } }> {
         const assistantBlocks: ContentBlock[] = [];
-        let usage: { inputTokens: number; outputTokens: number } | undefined;
+        let usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } | undefined;
 
         let currentType: 'thinking' | 'text' | 'tool_use' | null = null;
         let thinkingBuf = '';
@@ -168,6 +170,7 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
                 usage = {
                     inputTokens: (chunk.usage as any).prompt_tokens ?? 0,
                     outputTokens: (chunk.usage as any).completion_tokens ?? 0,
+                    cacheReadTokens: (chunk.usage as any).prompt_cache_hit_tokens ?? (chunk.usage as any).cache_read_input_tokens,
                 };
             }
 
@@ -315,7 +318,4 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
     }
 }
 
-// ─── 向后兼容别名 ─────────────────────────────────────────────────────────────
-/** @deprecated 使用 ClaudeCodeStrategy */
-export { ClaudeCodeStrategy as ClaudeCodeRunner };
 export type { IToolExecutor, TurnRecord };

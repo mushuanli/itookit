@@ -168,11 +168,6 @@ export interface LLMProvider {
     dailyCosts?: Record<string, DailyCost>;
 }
 
-/**
- * @deprecated 请使用 LLMProvider。
- */
-export type LLMProviderDefinition = LLMProvider;
-
 // ─── Connection ───────────────────────────────────────────────────────────────
 
 /**

@@ -4,8 +4,9 @@ import { BaseProvider } from './base';
 import { OpenAIProvider } from './openai';
 import { AnthropicProvider } from './anthropic';
 import { GeminiProvider } from './gemini';
-import { LLMProviderConfig, LLMProviderDefinition } from '../types';
-import { LLM_PROVIDER_DEFAULTS } from '../constants';
+import { LLMProviderConfig } from '../types';
+import type { LLMProvider } from '@itookit/common';
+import { LLM_PROVIDERS } from '../constants';
 import type { ApiProtocol } from '@itookit/common';
 
 /**
@@ -88,12 +89,12 @@ export function resolveProtocol(
  */
 export function createProvider(
     config: LLMProviderConfig,
-    customDefaults?: Record<string, LLMProviderDefinition>
+    customDefaults?: Record<string, LLMProvider>
 ): BaseProvider {
     const { provider } = config;
 
     // 1. 查找 Provider 定义
-    const definition = customDefaults?.[provider] || LLM_PROVIDER_DEFAULTS[provider];
+    const definition = customDefaults?.[provider] || LLM_PROVIDERS[provider];
 
     // 2. 按 protocol 字段显式分发（优先级最高）
     let ProviderClass: ProviderConstructor | undefined;

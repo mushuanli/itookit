@@ -732,7 +732,6 @@ export class TaskRunner {
             const tokenUsage: SessionTokenUsage = {
                 inputTokens:       estInputTokens,
                 outputTokens:      estOutputTokens,
-                cacheTokens:       0,
                 costUsd:           estCost,
                 contextUsageRatio: estContextRatio,
                 turns:             continuationCount + 1,

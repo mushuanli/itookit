@@ -2,7 +2,7 @@
 
 import type { ConnectionTestResult } from '@itookit/common';
 import { LLMDriver } from './driver';
-import { LLM_PROVIDER_DEFAULTS } from '../constants';
+import { LLM_PROVIDERS } from '../constants';
 import { LLMError } from '../errors';
 import { log } from '../utils/logger';
 
@@ -30,7 +30,7 @@ export async function testLLMConnection(config: {
     
     // 2. 确定模型
     const testModel = model || 
-        LLM_PROVIDER_DEFAULTS[provider]?.models?.[0]?.id ||
+        LLM_PROVIDERS[provider]?.models?.[0]?.id ||
         'gpt-4o-mini';
     
     log.debug('Testing connection', { provider, model: testModel });

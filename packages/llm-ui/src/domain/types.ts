@@ -173,7 +173,7 @@ export interface ChatOverrides {
 export interface TokenStats {
     inputTokens: number;
     outputTokens: number;
-    cacheTokens: number;
+    cacheReadTokens?: number;
     costUsd: number;
     /** 上下文窗口使用率 [0, 1] */
     contextUsageRatio: number;

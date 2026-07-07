@@ -110,6 +110,3 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         },
     },
 ];
-
-/** @deprecated 使用 DEFAULT_CONNECTIONS 代替 */
-export const DEFAULT_CONNECTION_TIERS = {} as Record<string, unknown>;

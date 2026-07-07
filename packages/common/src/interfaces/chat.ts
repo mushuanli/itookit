@@ -63,7 +63,7 @@ export interface UpdateMessageMeta {
     siblingCount?: number;
     inputTokens?: number;
     outputTokens?: number;
-    cacheTokens?: number;
+    cacheReadTokens?: number;
     costUsd?: number;
     durationMs?: number;
     isEstimated?: boolean;

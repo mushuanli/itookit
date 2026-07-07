@@ -253,44 +253,6 @@ export class MDxController implements IStreamableEditor {
     // 兼容旧 API（逐步废弃）
     // ================================================================
 
-    /**
-     * @deprecated 使用 appendDelta + flush 替代
-     */
-    appendStream(delta: string): void {
-        this.appendDelta(delta);
-    }
-
-    /**
-     * @deprecated 使用 flush 替代
-     */
-    async flushStream(): Promise<void> {
-        await this.flush();
-    }
-
-    /**
-     * @deprecated 使用 finalize 替代
-     */
-    finishStream(emitChange: boolean = false): void {
-        this.isStreaming = false;
-        this.pendingDelta = '';
-
-        if (emitChange) {
-            this.onChangeCallback?.(this.currentContent);
-        }
-
-        // 异步执行最终渲染
-        this.finalize().catch(e => {
-            console.error('[MDxController] finishStream failed:', e);
-        });
-    }
-
-    /**
-     * @deprecated 使用 hasPending 替代
-     */
-    hasPendingRender(): boolean {
-        return this.hasPending;
-    }
-
     // ================================================================
     // 销毁
     // ================================================================
