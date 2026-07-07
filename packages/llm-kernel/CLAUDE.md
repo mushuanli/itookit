@@ -15,6 +15,10 @@ src/
 
 详情: [Executors + Orchestrators 表](./doc/components.md)
 
+## 近期变更
+
+- `agent-executor` 设置 `runMode: 'kernel'` 以防止非 kernel 模式走 `anthropicPath` fallback
+
 ## Conventions
 
 - 不依赖 UI 库

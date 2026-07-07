@@ -10,6 +10,7 @@ peerDependencies: 所有 `@itookit/*` 包
 src/
 ├── index.ts              ← initApp() + AppOptions/AppHandle
 ├── bootstrap.ts          ← initApp() 主函数
+├── ThemeService.ts       ← 主题管理 (data-theme attribute + system/os 检测)
 ├── types.ts              ← AppOptions, AppHandle, WorkspaceConfig...
 ├── strategies/           ← 3 种 WorkspaceStrategy 实现 (单文件)
 │   ├── StandardWorkspaceStrategy  ← MDxEditor + IModuleFS
@@ -44,3 +45,5 @@ interface WorkspaceStrategy {
 - `initApp()` 是唯一装配点 — 不要在外部模块直接装配 VFS/Harness/LLM
 - `loadWorkspace()` 包含去重 — 并发加载同一工作区共享同一个 Promise
 - 路由使用 `hashChange` + `popstate` + `NAVIGATION_EVENTS`
+- `ThemeService` 管理 `<html>` 的 `data-theme` attribute，监听 `app:theme-change` 事件
+- `AppOptions.theme` 配置主题初始模式 (`light` / `dark` / `system`)
