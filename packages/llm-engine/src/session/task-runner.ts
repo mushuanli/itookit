@@ -209,11 +209,11 @@ export class TaskRunner {
             const task = this.queue[i];
             // harnessMode toggle → useHarness=true → Agent Loop 路径
             const isAgentLoop = !!task.input.overrides?.useHarness;
+            // Only HarnessStrategy shares a singleton IAgentRuntime with global event handlers;
+            // ClaudeCodeStrategy has no shared mutable state and can run concurrently.
+            const isHarness = isAgentLoop && this.harnessAdapter !== null;
 
-            // Agent Loop 任务串行：HarnessStrategy 包装的 IAgentRuntime 单例
-            // 事件处理器是全局的，并发会混事件。ClaudeCodeStrategy 本身无此限制，
-            // 但保持与原 harness 相同的串行保证更安全。
-            if (isAgentLoop && this.harnessRunning) {
+            if (isHarness && this.harnessRunning) {
                 i++;
                 continue;
             }
@@ -230,8 +230,8 @@ export class TaskRunner {
             }
 
             if (isAgentLoop) {
-                this.harnessRunning = true;
-                this.executeAgentLoopTask(task, ctx.state, ctx.runtime);
+                if (isHarness) this.harnessRunning = true;
+                this.executeAgentLoopTask(task, ctx.state, ctx.runtime, isHarness);
             } else {
                 this.executeTask(task, ctx.state, ctx.runtime);
             }
@@ -319,6 +319,7 @@ export class TaskRunner {
         task: ExecutionTask,
         state: SessionState,
         runtime: SessionRuntime,
+        isHarnessTask: boolean,
     ): Promise<void> {
         const { sessionId, input } = task;
         this.running.set(task.id, task);
@@ -464,7 +465,7 @@ export class TaskRunner {
         } catch (error: any) {
             await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted);
         } finally {
-            this.harnessRunning = false;
+            if (isHarnessTask) this.harnessRunning = false;
             this.running.delete(task.id);
             runtime.currentTaskId = undefined;
             this.emitPoolStatus();
