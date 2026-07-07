@@ -1557,7 +1557,7 @@ export class ChatInput implements IChatInputPresenter {
         const tierMap = this.resolveEffectiveTiers();
 
         const items: PopupItem[] = [
-            { id: 'auto', label: 'Auto', description: 'Use agent default', icon: currentTier === 'auto' ? '✓' : '' },
+            { id: 'auto', label: 'Auto', description: tierMap.optimal || 'Use agent default', icon: currentTier === 'auto' ? '✓' : '' },
             { id: 'optimal', label: '最优', description: tierMap.optimal, icon: currentTier === 'optimal' ? '✓' : '' },
         ];
         if (tierMap.standard) {
@@ -1582,8 +1582,13 @@ export class ChatInput implements IChatInputPresenter {
     private updateTierQuick(): void {
         if (!this.tierQuickLabel) return;
         const tier = this.config.settings.modelTier ?? 'auto';
-        const TIER_LABELS: Record<string, string> = { auto: 'Auto', optimal: '最优', standard: '标准', fast: '快速' };
-        this.tierQuickLabel.textContent = TIER_LABELS[tier] ?? tier;
+        const TIER_LABELS: Record<string, string> = { optimal: '最优', standard: '标准', fast: '快速' };
+        if (tier === 'auto') {
+            const autoModel = this.resolveEffectiveTiers().optimal;
+            this.tierQuickLabel.textContent = autoModel ? `Auto (${autoModel})` : 'Auto';
+        } else {
+            this.tierQuickLabel.textContent = TIER_LABELS[tier] ?? tier;
+        }
         if (tier !== 'auto') {
             this.tierQuickClear.style.display = '';
             this.tierQuickBtn.classList.add('llm-input__tier-quick--active');
