@@ -1,12 +1,9 @@
 /**
- * @file common/interfaces/srs/ISRSService.ts
- * @desc SRS 服务接口
+ * @file mdx/src/types/srs.ts
+ * SRS (Spaced Repetition System) interfaces — used only by the cloze/memory plugin.
  *
- * 领域特定服务，不属于 fs 基础设施。
- * 通过 DI 注入 IModuleFS，组合使用 assets + seqfile 能力实现存储。
- *
- * 存储约定：
- * 文件 /notes/hello.md 的 SRS 数据 → /notes/.hello.md/srs (seqfile)
+ * Storage convention:
+ *   /notes/hello.md SRS data → /notes/.hello.md/srs (seqfile)
  */
 
 export interface SRSItemData {

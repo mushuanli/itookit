@@ -35,14 +35,12 @@
     "@itookit/common": "workspace:*",
     "@itookit/device-llm": "workspace:*",
     "@itookit/llm-engine": "workspace:*",
-    "@itookit/llm-ui": "workspace:*",
     "@itookit/memory-manager": "workspace:*"
   },
   "devDependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/device-llm": "workspace:*",
     "@itookit/llm-engine": "workspace:*",
-    "@itookit/llm-ui": "workspace:*",
     "@itookit/memory-manager": "workspace:*",
     "@types/node": "^20.19.25",
     "typescript": "^5.9.3",

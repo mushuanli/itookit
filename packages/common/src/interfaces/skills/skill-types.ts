@@ -155,6 +155,11 @@ export interface SkillDefinition {
     /** LLM function-calling 参数 Schema（type='http' 时使用） */
     parameters?: Record<string, unknown>;
 
+    /** MCP Server 引用 ID（type='mcp' 时使用） */
+    mcpServerId?: string;
+    /** MCP Server 上的具体工具名称（type='mcp' 时使用） */
+    mcpToolName?: string;
+
     /** 额外元数据 */
     metadata?: Record<string, unknown>;
     createdAt?: number;

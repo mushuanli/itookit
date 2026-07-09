@@ -88,11 +88,7 @@ export class PluginManager {
             registerExecutor: (type, creator) => {
                 this.registry.registerExecutor(type as any, creator);
             },
-            
-            registerOrchestrator: (mode, creator) => {
-                this.registry.registerOrchestrator(mode as any, creator);
-            },
-            
+
             onEvent: (type, handler) => {
                 return this.eventBus.on(type, handler);
             },

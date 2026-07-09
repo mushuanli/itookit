@@ -1,7 +1,7 @@
 /**
  * @file vfs-ui/mention/DirectoryMentionSource.ts
  */
-import { type Suggestion, type HoverPreviewData } from '@itookit/common';
+import { type Suggestion, type HoverPreviewData } from './autocomplete-source';
 import { BaseMentionSource, MentionSourceDependencies } from './BaseMentionSource';
 
 export type DirectorySourceDependencies = MentionSourceDependencies;

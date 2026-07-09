@@ -7,19 +7,7 @@ export type ExecutorType =
     | 'agent'       // LLM Agent
     | 'http'        // HTTP 请求
     | 'tool'        // 工具调用
-    | 'script'      // 脚本执行
-    | 'composite';  // 复合/编排
-
-/**
- * 编排模式
- */
-export type OrchestrationMode =
-    | 'serial'
-    | 'parallel'
-    | 'router'
-    | 'loop'
-    | 'dag'
-    | 'state-machine';
+    | 'script';     // 脚本执行
 
 /**
  * 节点状态

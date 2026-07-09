@@ -1,6 +1,6 @@
 // @file: llm-kernel/plugins/plugin-interface.ts
 
-import { ExecutorType, OrchestrationMode } from '../core/types';
+import { ExecutorType } from '../core/types';
 import { IExecutor, ExecutorConfig, IExecutorFactory } from '../core/interfaces';
 import {  KernelEventType } from '../core/event-bus';
 
@@ -21,12 +21,12 @@ export interface PluginMetadata {
  */
 export interface IKernelPlugin {
     readonly metadata: PluginMetadata;
-    
+
     /**
      * 插件初始化
      */
     initialize(context: PluginContext): Promise<void>;
-    
+
     /**
      * 插件卸载
      */
@@ -44,25 +44,17 @@ export interface PluginContext {
         type: ExecutorType | string,
         creator: (config: ExecutorConfig, factory: IExecutorFactory) => IExecutor
     ): void;
-    
-    /**
-     * 注册新的编排模式
-     */
-    registerOrchestrator(
-        mode: OrchestrationMode | string,
-        creator: (config: ExecutorConfig, factory: IExecutorFactory) => IExecutor
-    ): void;
-    
+
     /**
      * 订阅内核事件
      */
     onEvent(type: KernelEventType | '*', handler: (event: any) => void): () => void;
-    
+
     /**
      * 获取配置
      */
     getConfig<T>(key: string): T | undefined;
-    
+
     /**
      * 日志
      */

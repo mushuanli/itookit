@@ -6,6 +6,8 @@ import {
   IMentionSource,
   type Suggestion,
   type HoverPreviewData,
+} from './autocomplete-source';
+import {
   type IModuleFS,
   type FSNode,
 } from '@itookit/common';

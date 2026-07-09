@@ -3,6 +3,7 @@
 
 import type { LLMConnection, ConnectionMeta, LLMProvider, DefaultConnectionDef, ConnectionTestResult, ModelTier } from './connection';
 import type { RestorableItem } from '../../types/types';
+import type { SkillDefinition, SkillType } from '../skills/skill-types';
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
 
@@ -70,77 +71,16 @@ export type InitialAgentDef = AgentDefinition & {
 // ─── LLMSkill ─────────────────────────────────────────────────────────────────
 
 /**
- * Skill 类型：
- * - builtin: 代码内置工具（已在 device-tools 注册，skill 只是引用）
- * - http:    远程 REST 端点，包装为 function-calling 工具
- * - shell:   本地 Shell 命令，包装为 function-calling 工具
- * - prompt:  纯 Markdown 指令注入，不产生可调用工具
- * - custom:  预留扩展
+ * @deprecated Use SkillType from @itookit/common instead.
  */
-export type LLMSkillType = 'builtin' | 'http' | 'shell' | 'prompt' | 'mcp' | 'custom';
+export type LLMSkillType = SkillType;
 
 /**
- * 持久化 Skill 配置（存储在 __config:/llm/.skills/<id>.json）。
- * 运行时通过 /dev/llm/skills/<id> 访问。
+ * VFS 持久化 Skill 配置。
+ * LLMSkill 现在是 SkillDefinition 的类型别名，两者统一为同一类型。
+ * 旧格式数据（扁平 command/endpoint/parameters 字段）由 device-llm 读取时迁移。
  */
-export interface LLMSkill {
-    id: string;
-    name: string;
-    description?: string;
-    type: LLMSkillType;
-    enabled: boolean;
-    icon?: string;
-
-    // ── HTTP 端点配置（type = 'http'）────────────────────────────
-    endpoint?: string;
-    method?: 'GET' | 'POST' | 'PUT';
-    headers?: Record<string, string>;
-
-    // ── Shell 命令配置（type = 'shell'）──────────────────────────
-    /**
-     * Shell 命令模板。支持 {{argName}} 占位符。
-     * 例：`git log --oneline -{{n}}` → LLM 传 { n: 10 } → `git log --oneline -10`
-     */
-    command?: string;
-
-    // ── Prompt 指令配置（type = 'prompt'）────────────────────────
-    /**
-     * Markdown 格式的指令文本，注入到 LLM 的 system prompt。
-     * 不产生可调用工具，只为 LLM 提供上下文和行为规范。
-     */
-    instructions?: string;
-
-    // ── LLM function-calling 参数 Schema（http / shell 类型）─────
-    /** JSON Schema（object 类型），描述 LLM 调用此 skill 时的参数格式 */
-    parameters?: Record<string, unknown>;
-
-    // ── MCP 工具引用（type = 'mcp'）──────────────────────────────
-    /**
-     * 引用已配置的 MCP Server ID。
-     * 端点、认证、协议全部继承自 MCPServer 配置，无需重复填写。
-     */
-    mcpServerId?: string;
-    /** 该 MCP Server 上的具体工具名称 */
-    mcpToolName?: string;
-
-    metadata?: Record<string, unknown>;
-    createdAt?: number;
-    modifiedAt?: number;
-
-    // ── 触发行为配置（v3.2 新增）──────────────────────────────────
-    /** 触发策略：reference（自动按需）| action（仅手动 slash 命令） */
-    triggerStrategy?: 'reference' | 'action';
-    /** 是否随会话自动加载（triggerStrategy=reference 时通常设为 true） */
-    autoLoad?: boolean;
-    /** 加载优先级（越小越优先），默认 50 */
-    priority?: number;
-    /** Glob 模式列表，匹配文件打开时自动挂载（L4 空间联动） */
-    globs?: string[];
-    /** 修正日志文件路径（相对项目根，如 docs/agent-corrections.md） */
-    correctionLog?: string;
-    /** 禁止模型通过 load_skill 加载（action skill 专用） */
-    disableModelInvocation?: boolean;
-}
+export type LLMSkill = SkillDefinition;
 
 // ─── MCP ──────────────────────────────────────────────────────────────────────
 
@@ -163,15 +103,13 @@ export interface MCPServer {
     description?: string;
 }
 
-// ─── IConnectionService ───────────────────────────────────────────────────────
+// ─── IConnectionReader ────────────────────────────────────────────────────────
 
 /**
- * 连接配置服务接口 — 由 LLMDeviceDriver 实现。
- *
- * 读取方法返回 ConnectionMeta（不含 apiKey），保持隐私边界；
- * 仅 getFullConnection() 返回完整连接，供 Settings UI 编辑使用。
+ * 连接只读接口 — Agent 消费所需的最小连接读取契约。
+ * IConnectionService 和 IAgentConfigService 共同继承此接口，消除重复方法声明。
  */
-export interface IConnectionService {
+export interface IConnectionReader {
     /** 返回安全元数据列表（不含 apiKey） */
     getConnections(): Promise<ConnectionMeta[]>;
     /** 按 ID 返回安全元数据 */
@@ -180,24 +118,35 @@ export interface IConnectionService {
     getDefaultConnection(): Promise<ConnectionMeta | null>;
     /** 返回完整连接（含 apiKey），仅供 Settings UI 编辑表单使用 */
     getFullConnection(id: string): Promise<LLMConnection | null>;
-    /** 保存连接（接受完整连接，含 apiKey） */
-    saveConnection(conn: LLMConnection): Promise<void>;
-    /** 删除连接 */
-    deleteConnection(id: string): Promise<void>;
     /** 监听连接数据变化 */
     onChange(listener: () => void): () => void;
     /** 同步返回连接列表（从内存缓存读取，无 apiKey） */
     listConnections(): ConnectionMeta[];
     /** 同步查找单个连接（从内存缓存读取，无 apiKey） */
     findConnection(id: string): ConnectionMeta | undefined;
-    /** 返回所有内置 Provider 目录（含模型列表、baseURL 等） */
-    getProviderDefaults(): Record<string, LLMProvider>;
     /** 获取单个 Provider 定义 */
     getProvider(providerId: string): LLMProvider | undefined;
     /** 列出所有 Provider（不含 apiKey，供 UI 列表使用） */
     getProviders(): LLMProvider[];
     /** 返回含 apiKey 的完整 Provider（仅供 Settings UI 编辑表单使用） */
     getFullProvider(id: string): LLMProvider | undefined;
+}
+
+// ─── IConnectionService ───────────────────────────────────────────────────────
+
+/**
+ * 连接配置服务接口 — 由 LLMDeviceDriver 实现。
+ *
+ * 读取方法返回 ConnectionMeta（不含 apiKey），保持隐私边界；
+ * 仅 getFullConnection() / getFullProvider() 返回完整对象，供 Settings UI 编辑使用。
+ */
+export interface IConnectionService extends IConnectionReader {
+    /** 保存连接（接受完整连接，含 apiKey） */
+    saveConnection(conn: LLMConnection): Promise<void>;
+    /** 删除连接 */
+    deleteConnection(id: string): Promise<void>;
+    /** 返回所有内置 Provider 目录（含模型列表、baseURL 等） */
+    getProviderDefaults(): Record<string, LLMProvider>;
     /** 保存 Provider 到 VFS（新建或更新，含 apiKey） */
     saveProvider(provider: LLMProvider): Promise<void>;
     /** 删除用户自定义 Provider（内置 Provider 不可删除） */
@@ -266,34 +215,13 @@ export interface ILLMManagementService extends IConnectionService {
 
 /**
  * Agent 核心读取接口（SessionManager / AgentResolver 依赖）。
- * getConnection / getDefaultConnection 返回 ConnectionMeta（不含 apiKey），
- * 实现内部委托给 LLMDeviceDriver ioctl。
+ * 继承 IConnectionReader 获得连接只读能力（Agent 可切换不同 connection），
+ * 自身只添加 Agent 特有的读取方法。
  */
-export interface IAgentConfigService {
+export interface IAgentConfigService extends IConnectionReader {
     init(): Promise<void>;
     getAgentConfig(agentId: string): Promise<AgentDefinition | null>;
     getAgents(): Promise<AgentDefinition[]>;
-    /** 返回所有连接的安全元数据列表（不含 apiKey） */
-    getConnections(): Promise<ConnectionMeta[]>;
-    /** 返回安全元数据，不含 apiKey */
-    getConnection(id: string): Promise<ConnectionMeta | undefined>;
-    /** 返回安全元数据，不含 apiKey */
-    getDefaultConnection(): Promise<ConnectionMeta | null>;
-    /** 列出所有 Provider（不含 apiKey） */
-    getProviders(): LLMProvider[];
-    /** 返回含 apiKey 的完整 Provider（仅供 Settings UI 使用） */
-    getFullProvider(id: string): LLMProvider | undefined;
-    /** 获取单个 Provider（不含 apiKey） */
-    getProvider(providerId: string): LLMProvider | undefined;
-    /** 保存 Provider（含 apiKey） */
-    saveProvider(provider: LLMProvider): Promise<void>;
-    /** 删除用户自定义 Provider */
-    deleteProvider(id: string): Promise<void>;
-    /** 获取完整连接（含 dailyCosts），用于更新用量统计 */
-    getFullConnection(id: string): Promise<LLMConnection | null>;
-    /** 保存完整连接（含 dailyCosts 更新） */
-    saveConnection(conn: LLMConnection): Promise<void>;
-    onChange(callback: () => void): () => void;
     /** 同步返回 agent 列表（从内存缓存读取） */
     listAgents(): AgentDefinition[];
     /** 同步查找单个 agent（从内存缓存读取） */

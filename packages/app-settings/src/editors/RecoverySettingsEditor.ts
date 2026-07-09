@@ -1,7 +1,6 @@
 // @file: app-settings/editors/RecoverySettingsEditor.ts
 
-import { BaseSettingsEditor, Toast, Modal, type RestorableItem } from '@itookit/common';
-import { IAgentManagementService } from '@itookit/llm-engine';
+import { BaseSettingsEditor, Toast, Modal, type RestorableItem, type IAgentManagementService } from '@itookit/common';
 
 export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
     private selectedItems = new Set<string>(); // key = "type:id"

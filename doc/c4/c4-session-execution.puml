@@ -1,0 +1,72 @@
+@startuml C4_SessionExecution
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C4 - Session 执行双路径
+
+Container_Boundary(task_runner, "TaskRunner 双执行路径") {
+  Component(input, "用户输入 (ChatInput)", "", "消息 → TaskRunner.execute()")
+
+  Component(decision, "useHarness?\n(ChatSessionSettings)", "", "配置决定执行路径")
+
+  ' === Kernel 路径 ===
+  Container_Boundary(kernel_path, "Kernel 路径 (default)") {
+    Component(k1, "LLMKernelAdapter", "llm-engine/adapters/", "适配 kernel 调用")
+    Component(k2, "AgentExecutor", "llm-kernel/executors/", "单轮 agent 执行")
+    Component(k3, "LLMChain", "device-llm/core/", "LLM 推理 + 流式")
+    Component(k4, "AutoContinueHandler", "llm-engine/session/", "自动继续（多次推理）")
+
+    Rel(k1, k2, "执行")
+    Rel(k2, k3, "LLM 调用")
+    Rel(k3, k4, "流式输出")
+    Rel(k4, k2, "继续推理")
+  }
+
+  ' === Harness 路径 ===
+  Container_Boundary(harness_path, "Harness 路径 (useHarness=true)") {
+    Component(h1, "HarnessAdapter", "llm-engine/adapters/", "事件桥接")
+    Component(h2, "AgentLoopExecutor", "llm-harness/executor/", "多轮 while(true) 循环")
+    Component(h3, "SkillDeviceDriver", "llm-harness/drivers/", "技能工具注册")
+    Component(h4, "ContextManager", "llm-harness/executor/", "System Prompt 构建")
+    Component(h5, "SubAgentRouter", "llm-harness/executor/", "子 Agent 路由")
+
+    Rel(h1, h2, "启动 agent 循环")
+    Rel(h2, h3, "获取可用工具")
+    Rel(h2, h4, "构建 context")
+    Rel(h2, h5, "委派子任务")
+  }
+
+  Rel(input, decision, "路由")
+  Rel(decision, kernel_path, "false → 单轮")
+  Rel(decision, harness_path, "true → 多轮")
+}
+
+' === Mission 路径 ===
+Container_Boundary(mission, "Mission 编排路径") {
+  Component(m1, "MissionService.createMission()", "llm-engine/mission/", "并行 LLM 规划器 → 合并 TodoItem[]")
+  Component(m2, "TodoStateManager", "llm-engine/mission/", "plan.json 原子读写")
+  Component(m3, "MissionScheduler.run()", "llm-engine/mission/", "getReadyTodos() → 调度 → verify → HITL")
+  Component(m4, "SubAgentRouter.delegate()", "llm-harness/executor/", "独立上下文执行子任务")
+  Component(m5, "ResultPersistenceService", "llm-engine/mission/", "保存结果到 VFS")
+
+  Rel(m1, m2, "写入 plan.json")
+  Rel(m2, m3, "读取待办")
+  Rel(m3, m4, "执行子任务")
+  Rel(m3, m5, "持久化结果")
+}
+
+' === Session Graph 路径 ===
+Container_Boundary(session_graph, "Session 依赖图路径") {
+  Component(g1, "GraphOrchestrator.execute()", "llm-engine/session-graph/", "拓扑排序 → 自底向上执行")
+  Component(g2, "DependencyGraph", "llm-engine/session-graph/", "读取 session-meta.json → 展开目录 → 检测循环")
+  Component(g3, "CompletionAnalyzer", "llm-engine/session-graph/", "LLM 输出验证 (advance 模式)")
+  Component(g4, "SessionMetaStore", "llm-engine/session-graph/", "读写 session-meta.json + result.md")
+
+  Rel(g1, g2, "构建依赖图")
+  Rel(g2, g4, "读取元数据")
+  Rel(g1, g3, "验证输出", "advance 模式")
+  Rel(g1, h2, "委派 agent 执行", "单个 session")
+}
+
+@enduml

@@ -10,14 +10,14 @@ import { FS_MODULE_AGENTS } from '@itookit/common';
 import type {
     ILLMManagementService, ConnectionMeta, LLMConnection,
     AgentDefinition, MCPServer, LLMSkill, LLMProvider,
-    InitialAgentDef, ConnectionTestResult,
+    InitialAgentDef, DefaultConnectionDef, ConnectionTestResult,
 } from '@itookit/common';
 
 import { IAgentManagementService } from './agent-service';
+import { log } from '../utils/logger';
 
 // Agent 默认存储目录（VFS module-relative path）
 const AGENT_DEFAULT_DIR = '/default';
-import { log } from '../utils/logger';
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────────
 
@@ -308,7 +308,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             const vfsProvider = this.llmService.getFullProvider(key);
             const status: RestorableItem['status'] = !vfsProvider
                 ? 'missing'
-                : vfsProvider.baseURL !== def.baseURL || vfsProvider.models.length !== def.models.length
+                : this.isProviderModified(vfsProvider, def)
                     ? 'modified'
                     : 'ok';
             items.push({
@@ -321,9 +321,9 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         // ── Layer 2: Connections ───────────────────────────────────────────────
         for (const connDef of this.llmService.getDefaultConnections()) {
             const existing = connMap.get(connDef.id);
-            const provider = providerDefaults[connDef.providerId];
             const status: RestorableItem['status'] = !existing ? 'missing'
-                : existing.providerId !== connDef.providerId ? 'modified' : 'ok';
+                : await this.isConnectionModified(existing, connDef) ? 'modified' : 'ok';
+            const provider = providerDefaults[connDef.providerId];
             items.push({
                 id: connDef.id, type: 'connection', name: connDef.name,
                 description: `${connDef.name}（${provider?.name ?? connDef.providerId}）`,
@@ -336,7 +336,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         for (const def of this.llmService.getDefaultAgents()) {
             const existing = agentMap.get(def.id);
             const status: RestorableItem['status'] = !existing ? 'missing'
-                : existing.name !== def.name ? 'modified' : 'ok';
+                : this.isAgentModified(existing, def) ? 'modified' : 'ok';
             items.push({
                 id: def.id, type: 'agent', name: def.name,
                 description: def.description, icon: def.icon || '🤖', status,
@@ -344,6 +344,48 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         }
 
         return items;
+    }
+
+    // ── Diff helpers ─────────────────────────────────────────────────────────
+
+    private isProviderModified(current: LLMProvider, def: LLMProvider): boolean {
+        if (current.name !== def.name) return true;
+        if (current.baseURL !== def.baseURL) return true;
+        if (current.defaultPath !== def.defaultPath) return true;
+        if (current.anthropicPath !== def.anthropicPath) return true;
+        if (current.enabled !== def.enabled) return true;
+        // Compare model identity only. Full deep-equal is unreliable because
+        // getFullProvider() returns models with pricing fields injected
+        // (applyPricingToModel), which are absent from the built-in defaults.
+        if (!deepEqual(current.models.map(m => m.id).sort(), def.models.map(m => m.id).sort())) return true;
+        return false;
+    }
+
+    private async isConnectionModified(current: ConnectionMeta, def: DefaultConnectionDef): Promise<boolean> {
+        if (current.name !== def.name) return true;
+        if (current.providerId !== def.providerId) return true;
+        // ConnectionMeta doesn't expose tiers/protocol,
+        // so fetch full connection for deeper comparison
+        const full = await this.llmService.getFullConnection(current.id);
+        if (full) {
+            if (!deepEqual(full.tiers, def.tiers)) return true;
+            if (full.protocol !== def.protocol) return true;
+        }
+        return false;
+    }
+
+    private isAgentModified(current: AgentDefinition, def: InitialAgentDef): boolean {
+        if (current.name !== def.name) return true;
+        // saveAgent() normalizes empty connectionId → 'default'; mirror that here
+        // so a restored agent isn't perpetually flagged as modified.
+        const defConnId = def.config.connectionId || 'default';
+        if ((current.config.connectionId || 'default') !== defConnId) return true;
+        if (current.config.modelTier !== def.config.modelTier) return true;
+        if (current.config.systemPrompt !== def.config.systemPrompt) return true;
+        if (current.config.temperature !== def.config.temperature) return true;
+        if (current.config.maxHistoryLength !== def.config.maxHistoryLength) return true;
+        if (!deepEqual(current.defaultPrompts, def.defaultPrompts)) return true;
+        return false;
     }
 
     async restoreItem(type: 'provider' | 'connection' | 'agent', id: string): Promise<void> {
@@ -460,4 +502,15 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         this._agentNodeIds.clear();
         await super.dispose();
     }
+}
+
+// ─── Utils ────────────────────────────────────────────────────────────────────
+
+/** Shallow-enough deep equal for config objects (JSON-serializable values). */
+function deepEqual(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (a == null || b == null) return a == b;
+    if (typeof a !== typeof b) return false;
+    if (typeof a !== 'object') return false;
+    return JSON.stringify(a) === JSON.stringify(b);
 }

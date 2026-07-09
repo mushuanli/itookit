@@ -1,7 +1,7 @@
 // @file: llm-kernel/core/interfaces.ts
 
 import { IExecutionContext } from './execution-context';
-import { ExecutionResult, ExecutorType, OrchestrationMode } from './types';
+import { ExecutionResult, ExecutorType } from './types';
 
 /**
  * 执行器接口 - 所有执行器的统一契约
@@ -46,26 +46,4 @@ export interface ExecutorConfig {
 export interface IExecutorFactory {
     create(config: ExecutorConfig): IExecutor;
     supports(type: ExecutorType): boolean;
-}
-
-export interface OrchestratorConfig extends ExecutorConfig {
-    mode: OrchestrationMode;
-    children: ExecutorConfig[];
-    modeConfig?: {
-        parallel?: { maxConcurrency?: number; mergeStrategy?: 'all' | 'first' };
-        router?: { strategy: 'llm' | 'rule'; rules?: RouterRule[] };
-        loop?: { maxIterations: number; exitCondition?: string };
-        dag?: { edges: DAGEdge[] };
-    };
-}
-
-export interface RouterRule {
-    condition: string;
-    target: string;
-}
-
-export interface DAGEdge {
-    from: string;
-    to: string;
-    condition?: string;
 }

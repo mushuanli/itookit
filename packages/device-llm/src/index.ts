@@ -113,19 +113,12 @@ export {
 // 技能/MCP 系统
 // ============================================
 
-export { SkillRegistry, globalSkillRegistry } from './skills/registry';
 export { MCPClient, MCPServerConnection } from './skills/mcp-client';
 export type {
     MCPSkill,
     MCPSkillContext,
     MCPSkillResult,
 } from './skills/mcp-client';
-export type {
-    Skill,
-    SkillDefinition,
-    SkillExecutionContext,
-    SkillResult
-} from './skills/types';
 
 // ============================================
 // 常量

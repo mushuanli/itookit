@@ -2,22 +2,15 @@
 
 // Export all interfaces
 
-export {
-    LogLevel,
-    LogLevelNames,
-    type LogEntry,
-    type LogFilter,
-    type LoggerStats,
-    type ILogger,
-    type ModuleLog
-} from './interfaces/ILogger';
-
 export type { ILLMLogger, LLMRequestLog, LLMResponseLog } from './interfaces/ILLMLogger';
 
 export {
     getLogger,
     createModuleLogger
 } from './utils/MemoryLogger';
+
+export { LogLevel, LogLevelNames } from './interfaces/ILogger';
+export type { ModuleLog } from './interfaces/ILogger';
 
 // ── IModuleFS: 模块文件系统接口及相关类型 ──
 export * from './interfaces/fs';
@@ -41,20 +34,13 @@ export {
 } from './interfaces/IEditor';
 export { type EditorFactory } from './interfaces/IEditorFactory';
 export { type NavigationRequest } from './interfaces/INavigation';
-export type { DocumentInfo, ReferenceExtractionResult, IDocumentAnalyzer, GCResult, AnalysisContext } from './interfaces/IDocumentAnalyzer';
 
-export { IAutocompleteSource, type Suggestion } from './interfaces/IAutocompleteSource';
-
-export { IMentionSource, type HoverPreviewData } from './interfaces/IMentionSource';
 export {
     ISessionUI,
     type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions, type FileCreationConfig,
     type SessionManagerEvent,
     type SessionManagerCallback
 } from './interfaces/ISessionUI';
-
-// SRS types — canonical source (SRSItemData was previously re-exported from deprecated IFSEngine.ts)
-export type { SRSItemData, SRSCardRef, SRSStats, ISRSService } from './interfaces/srs/ISRSService';
 
 export type { AssetObj, IFile } from './interfaces/IFile';
 export type { IMDXFile } from './interfaces/IMDXFile';
@@ -71,8 +57,6 @@ export type {
     ChatSessionSettings,
 } from './interfaces/chat';
 export { DEFAULT_SESSION_SETTINGS } from './interfaces/chat';
-
-export { ISettingsWidget } from './interfaces/ISettingsWidget';
 
 // Export all utils
 export {

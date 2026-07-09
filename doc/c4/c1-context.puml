@@ -1,0 +1,31 @@
+@startuml C1_SystemContext
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C1 - 系统上下文图 (System Context Diagram)
+
+Person(end_user, "最终用户", "使用 itookit 工作区进行文档编辑、AI 对话和知识管理")
+
+System_Boundary(itookit, "itookit 系统") {
+  System(itookit_app, "itookit 工作区应用", "一体化 AI 写作与知识管理平台")
+}
+
+System_Ext(openai_api, "OpenAI API", "GPT-4o / o3 等模型 API")
+System_Ext(anthropic_api, "Anthropic API", "Claude 3.5/4 系列模型 API")
+System_Ext(gemini_api, "Gemini API", "Gemini 2.0/2.5 模型 API")
+System_Ext(mcp_servers, "MCP 服务器", "外部 MCP 协议服务（数据库/API 等）")
+System_Ext(local_fs, "本地文件系统", "Node.js 原生文件系统 / SQLite")
+System_Ext(browser_storage, "浏览器存储", "IndexedDB 持久化存储")
+System_Ext(sync_server, "同步服务器", "可选的远程文件同步服务 (Hono)")
+
+Rel(end_user, itookit_app, "编辑文档、发送消息、管理工作区")
+Rel(itookit_app, openai_api, "LLM 推理调用 (HTTPS/SSE)")
+Rel(itookit_app, anthropic_api, "LLM 推理调用 (HTTPS/SSE)")
+Rel(itookit_app, gemini_api, "LLM 推理调用 (HTTPS/SSE)")
+Rel(itookit_app, mcp_servers, "MCP 协议通信")
+Rel_R(itookit_app, local_fs, "读取/写入文件元数据")
+Rel_B(itookit_app, browser_storage, "读取/写入文件内容")
+Rel_B(itookit_app, sync_server, "文件同步 (diff-based)")
+
+@enduml

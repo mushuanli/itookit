@@ -5,7 +5,7 @@ import { SettingsService } from './services/SettingsService';
 import { SettingsEngine } from './engine/SettingsEngine';
 
 export * from './types/types';
-export { createSettingsFactory } from './factories/settingsFactory';
+export { createSettingsFactory, type LLMUIEditors } from './factories/settingsFactory';
 export { SkillsEngine } from './engine/SkillsEngine';
 
 /**

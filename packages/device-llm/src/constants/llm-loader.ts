@@ -243,34 +243,50 @@ export function toLLMProvider(def: LLMProviderDef): LLMProvider {
 }
 
 /**
- * Convert a parsed LLMSkillDef to the runtime LLMSkill type.
+ * Convert a parsed LLMSkillDef to the runtime SkillDefinition type.
  * `prompt` is treated as an alias for `instructions` (backward compat).
  */
 export function toRuntimeSkill(def: LLMSkillDef): LLMSkill {
+    const hasTool = (def.type === 'http' || def.type === 'shell') && def.parameters;
+    const tools = hasTool ? [{
+        toolId: `${def.id}__tool`,
+        definition: {
+            name: `${def.id}__tool`,
+            description: def.description ?? def.name,
+            parameters: def.parameters,
+        },
+        executionType: def.type as 'http' | 'shell',
+        command: def.command,
+        sideEffect: (def.type === 'http' ? 'external' : 'local') as 'external' | 'local',
+        timeoutMs: 30_000,
+    }] : [];
+
     return {
         id: def.id,
         name: def.name,
-        description: def.description,
+        description: def.description ?? '',
         type: (def.type ?? 'prompt') as LLMSkillType,
         enabled: def.enabled ?? true,
         icon: def.icon,
-        instructions: def.instructions ?? def.prompt,
+        instructions: def.instructions ?? def.prompt ?? '',
+        tools,
+        triggerPatterns: [],
         endpoint: def.endpoint,
         method: def.method as LLMSkill['method'],
         headers: def.headers,
-        command: def.command,
         parameters: def.parameters,
         mcpServerId: def.mcpServerId,
         mcpToolName: def.mcpToolName,
         triggerStrategy: def.triggerStrategy as LLMSkill['triggerStrategy'],
-        autoLoad: def.autoLoad,
-        priority: def.priority,
-        globs: def.globs,
-        correctionLog: def.correctionLog,
-        disableModelInvocation: def.disableModelInvocation,
+        autoLoad: def.autoLoad ?? (def.triggerStrategy === 'reference'),
+        priority: def.priority ?? 50,
+        globs: def.globs ?? [],
+        correctionLog: def.correctionLog ? { path: def.correctionLog, enabled: true } : undefined,
+        disableModelInvocation: def.disableModelInvocation ?? false,
+        source: 'vfs',
         metadata: def.metadata,
         createdAt: Date.now(),
-    };
+    } as LLMSkill;
 }
 
 /**
@@ -366,10 +382,11 @@ export function fromLLMProvider(p: LLMProvider): LLMProviderDef {
 }
 
 /**
- * Convert runtime LLMSkill → LLMSkillDef for .llm serialization.
- * Strips runtime-only timestamps.
+ * Convert runtime SkillDefinition → LLMSkillDef for .llm serialization.
+ * Strips runtime-only fields and flattens tools[] back to legacy fields.
  */
 export function fromSkillDef(skill: LLMSkill): LLMSkillDef {
+    const firstTool = skill.tools?.[0];
     return {
         id: skill.id,
         name: skill.name,
@@ -381,7 +398,7 @@ export function fromSkillDef(skill: LLMSkill): LLMSkillDef {
         endpoint: skill.endpoint,
         method: skill.method,
         headers: skill.headers,
-        command: skill.command,
+        command: firstTool?.command,
         parameters: skill.parameters,
         mcpServerId: skill.mcpServerId,
         mcpToolName: skill.mcpToolName,
@@ -389,7 +406,9 @@ export function fromSkillDef(skill: LLMSkill): LLMSkillDef {
         autoLoad: skill.autoLoad,
         priority: skill.priority,
         globs: skill.globs,
-        correctionLog: skill.correctionLog,
+        correctionLog: typeof skill.correctionLog === 'string'
+            ? skill.correctionLog
+            : skill.correctionLog?.path,
         disableModelInvocation: skill.disableModelInvocation,
         metadata: skill.metadata,
     };

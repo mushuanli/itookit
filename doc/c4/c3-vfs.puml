@@ -1,0 +1,62 @@
+@startuml C3_VFS_Subsystem
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C3 - VFS 子系统组件图 (Virtual File System)
+
+Container_Boundary(vfs, "VFS 子系统 (vfslib + vfsdrivers)") {
+
+  ' === 存储后端 ===
+  Component(memory_backend, "MemoryBackend", "内存存储", "IFSDriver 测试用内存后端")
+  Component(idb_backend, "IndexedDBBackend\n(vfsdriver-indexeddb)", "IndexedDB", "path-based IStorageBackend，浏览器持久化")
+  Component(localfs_backend, "LocalFSBackend\n(vfsdriver-localfs)", "SQLite+原生FS", "IStorageBackend 文件内容在磁盘，元数据在SQLite")
+
+  ' === VFS 引擎核心 ===
+  Component(vfs_engine, "VFSEngine", "vfslib", "resolveStore / mapToSystemNode / 访问控制")
+  Component(access_ctrl, "AccessController", "vfslib", "点号文件访问控制（isSystem 模块可写入）")
+  Component(plugin_pipeline, "PluginPipeline", "vfslib", "操作前/后插件钩子")
+  Component(device_registry, "DeviceRegistry", "vfslib", "设备注册 /dev/ 管理")
+
+  ' === VFS 门面 ===
+  Component(vfs_manager, "VFSManager\n(IVFSManager)", "vfslib", "模块生命周期协调器")
+  Component(config_svc, "ConfigService\n(IConfigService)", "vfslib", "VFS 配置读取")
+
+  ' === 模块文件系统 ===
+  Component(module_fs, "ModuleFS\n(IModuleFS + IFSDriver)", "vfslib", "chroot 隔离的模块视图")
+  Component(file_handle, "FileHandle / MDXFileHandle\n/ ChatFileHandle", "vfslib", "文件句柄工厂（三种实现）")
+  Component(asset_ops, "AssetObj", "vfslib", "资产目录内子文件轻量句柄")
+
+  ' === 后端 ===
+  Component(base_svc, "BaseModuleService", "adapter-session", "带 readJson/writeJson 的基础服务类")
+
+  ' === 关系 ===
+  Rel(vfs_engine, memory_backend, "底层存储", "IStorageBackend")
+  Rel(vfs_engine, idb_backend, "底层存储", "IStorageBackend")
+  Rel(vfs_engine, localfs_backend, "底层存储", "IStorageBackend")
+  Rel(vfs_engine, access_ctrl, "权限检查", "")
+  Rel(vfs_engine, plugin_pipeline, "钩子触发", "")
+  Rel(vfs_engine, device_registry, "设备操作", "")
+
+  Rel(vfs_manager, vfs_engine, "委派操作", "")
+  Rel(vfs_manager, config_svc, "提供配置", "")
+
+  Rel(module_fs, vfs_manager, "获取引擎", "")
+  Rel(module_fs, file_handle, "创建句柄", "openFile()")
+  Rel(file_handle, asset_ops, "子文件操作", "asset(name)")
+  Rel(base_svc, module_fs, "持有引用", "IModuleFS")
+
+  Rel(vfs_manager, base_svc, "注册服务", "")
+}
+
+' === VFS 文件布局说明 ===
+System_Ext(vfs_layout, "VFS 目录结构", "
+  /etc/             系统配置模块
+  /dev/             设备目录
+  /module/          用户模块挂载点
+    /chats/         LLM 对话模块
+    /notes/         笔记模块
+    /missions/      Mission 编排模块
+")
+
+@enduml

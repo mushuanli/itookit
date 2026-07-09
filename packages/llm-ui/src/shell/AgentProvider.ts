@@ -2,7 +2,7 @@
 // Agent/Connection data-fetching helpers — extracted from LLMWorkspaceEditor.
 // Pure async functions: no DOM access, no mutable state.
 
-import type { IAgentConfigService } from '@itookit/llm-engine';
+import type { IAgentConfigService } from '@itookit/common';
 import type { ExecutorOption, ConnectionOption } from '../domain/types';
 import { formatDefaultFileTitle } from '@itookit/common';
 import type { ModelTier } from '@itookit/common';
