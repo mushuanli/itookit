@@ -1,7 +1,7 @@
 // @file: llm-kernel/src/utils/validators.ts
 
-import { ExecutorConfig, OrchestratorConfig } from '../core/interfaces';
-import { ExecutorType, OrchestrationMode } from '../core/types';
+import { ExecutorConfig } from '../core/interfaces';
+import { ExecutorType } from '../core/types';
 
 /**
  * 验证结果
@@ -95,148 +95,11 @@ export function validateExecutorConfig(config: ExecutorConfig): ValidationResult
 }
 
 /**
- * 验证编排器配置
- */
-export function validateOrchestratorConfig(config: OrchestratorConfig): ValidationResult {
-    // 首先验证基础执行器配置
-    const baseResult = validateExecutorConfig(config);
-    const errors = [...baseResult.errors];
-    const warnings = [...baseResult.warnings];
-    
-    // 验证编排模式
-    if (!config.mode) {
-        errors.push({
-            path: 'mode',
-            message: 'Orchestration mode is required',
-            code: 'MISSING_MODE'
-        });
-    } else if (!isValidOrchestrationMode(config.mode)) {
-        errors.push({
-            path: 'mode',
-            message: `Invalid orchestration mode: ${config.mode}`,
-            code: 'INVALID_MODE'
-        });
-    }
-    
-    // 验证子节点
-    if (!config.children || config.children.length === 0) {
-        errors.push({
-            path: 'children',
-            message: 'Orchestrator must have at least one child',
-            code: 'MISSING_CHILDREN'
-        });
-    } else {
-        // 递归验证子节点
-        config.children.forEach((child, index) => {
-            const childResult = validateExecutorConfig(child);
-            
-            for (const error of childResult.errors) {
-                errors.push({
-                    ...error,
-                    path: `children[${index}].${error.path}`
-                });
-            }
-            
-            for (const warning of childResult.warnings) {
-                warnings.push({
-                    ...warning,
-                    path: `children[${index}].${warning.path}`
-                });
-            }
-        });
-        
-        // 检查子节点 ID 唯一性
-        const ids = config.children.map(c => c.id);
-        const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
-        
-        if (duplicates.length > 0) {
-            errors.push({
-                path: 'children',
-                message: `Duplicate child IDs: ${duplicates.join(', ')}`,
-                code: 'DUPLICATE_CHILD_IDS'
-            });
-        }
-    }
-    
-    // 验证模式特定配置
-    if (config.mode === 'dag' && config.modeConfig?.dag?.edges) {
-        const dagResult = validateDAGEdges(config.modeConfig.dag.edges, config.children);
-        errors.push(...dagResult.errors);
-        warnings.push(...dagResult.warnings);
-    }
-    
-    if (config.mode === 'loop' && config.modeConfig?.loop) {
-        if (config.modeConfig.loop.maxIterations <= 0) {
-            errors.push({
-                path: 'modeConfig.loop.maxIterations',
-                message: 'Max iterations must be positive',
-                code: 'INVALID_MAX_ITERATIONS'
-            });
-        }
-    }
-    
-    return {
-        valid: errors.length === 0,
-        errors,
-        warnings
-    };
-}
-
-/**
- * 验证 DAG 边配置
- */
-function validateDAGEdges(
-    edges: Array<{ from: string; to: string; condition?: string }>,
-    children: ExecutorConfig[]
-): { errors: ValidationError[]; warnings: ValidationWarning[] } {
-    const errors: ValidationError[] = [];
-    const warnings: ValidationWarning[] = [];
-    
-    const childIds = new Set(children.map(c => c.id));
-    
-    edges.forEach((edge, index) => {
-        if (!childIds.has(edge.from)) {
-            errors.push({
-                path: `modeConfig.dag.edges[${index}].from`,
-                message: `Invalid source node: ${edge.from}`,
-                code: 'INVALID_EDGE_SOURCE'
-            });
-        }
-
-        if (!childIds.has(edge.to)) {
-            errors.push({
-                path: `modeConfig.dag.edges[${index}].to`,
-                message: `Invalid target node: ${edge.to}`,
-                code: 'INVALID_EDGE_TARGET'
-            });
-        }
-        
-        if (edge.from === edge.to) {
-            errors.push({
-                path: `modeConfig.dag.edges[${index}]`,
-                message: 'Self-referencing edge is not allowed',
-                code: 'SELF_REFERENCE'
-            });
-        }
-    });
-    
-    return { errors, warnings };
-}
-
-/**
  * 检查是否为有效的执行器类型
  */
 export function isValidExecutorType(type: string): type is ExecutorType {
-    const validTypes: string[] = ['agent', 'http', 'tool', 'script', 'composite'];
+    const validTypes: string[] = ['agent', 'http', 'tool', 'script'];
     return validTypes.includes(type);
-}
-
-/**
- * 检查是否为有效的编排模式
- */
-export function isValidOrchestrationMode(mode: string): mode is OrchestrationMode {
-    const validModes: string[] = ['serial', 'parallel', 'router', 'loop', 'dag', 'state-machine'];
-    return validModes.includes(mode);
 }
 
 /**

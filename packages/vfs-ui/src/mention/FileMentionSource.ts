@@ -1,12 +1,8 @@
 /**
  * @file vfs-ui/mention/FileMentionSource.ts
  */
-import {
-  escapeHTML,
-  type Suggestion,
-  type HoverPreviewData,
-  type FSNode,
-} from '@itookit/common';
+import { escapeHTML, type FSNode } from '@itookit/common';
+import { type Suggestion, type HoverPreviewData } from './autocomplete-source';
 import { BaseMentionSource } from './BaseMentionSource';
 
 export class FileMentionSource extends BaseMentionSource {

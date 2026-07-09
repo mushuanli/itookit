@@ -8,7 +8,7 @@ import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IEditorEventBus } from '../domain/events';
 import type { SessionManager } from '@itookit/llm-engine';
-import type { IAgentConfigService } from '@itookit/llm-engine';
+import type { IAgentConfigService } from '@itookit/common';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { BranchService } from '../services/BranchService';
 import type { DOMCache } from '../components/common/DOMCache';

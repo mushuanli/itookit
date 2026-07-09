@@ -1,0 +1,45 @@
+@startuml C4_BootstrapSequence
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C4 - 应用引导序列 (initApp() — v4.1 优化后)
+
+Container_Boundary(bootstrap, "initApp() 引导序列") {
+  Component(s1, "Step 1: createVFS()", "bootstrap.ts", "创建 VFS 引擎 + 注册存储后端 + 挂载模块")
+  Component(s2, "Step 2: LLMDeviceDriver", "bootstrap.ts", "初始化 LLM 设备驱动 → 注册 /dev/llm + createDeviceNodes()")
+  Component(s3, "Step 3: createSettingsModule()", "bootstrap.ts", "创建设置模块 (SettingsEngine + SkillsEngine)")
+  Component(s4, "Step 4: VFSAgentService\n(IConnectionReader)", "bootstrap.ts", "Agent 配置 VFS 持久化服务")
+  Component(s5, "Step 5: createHarness()", "bootstrap.ts", "装配多轮 Agent 循环 (AgentLoopExecutor + 工具 + 设备驱动)")
+  Component(s5b, "Step 5b: LLMUIEditors 注入", "bootstrap.ts", "app-shell 导入 llm-ui 编辑器 → inject 到 app-settings\n(解耦 app-settings 上行依赖)")
+  Component(s6, "Step 6: setVFSContext()", "bootstrap.ts", "浏览器 VFS 桥接 → 文件工具可访问 VFS")
+  Component(s7, "Step 7: syncSkillsToHarness()", "bootstrap.ts", "Skill 直接传递 (LLMSkill=SkillDefinition)\n无需 llmSkillToSkillDef 转换")
+  Component(s8, "Step 8: initializeLLMEngine()", "bootstrap.ts", "→ SessionManager + 工作区策略装配 + Hash 路由")
+
+  Rel(s1, s2, "VFS 就绪后")
+  Rel(s2, s3, "设备就绪后")
+  Rel(s3, s4, "设置就绪后")
+  Rel(s4, s5, "Agent 服务就绪后")
+  Rel(s5, s5b, "Harness 就绪后")
+  Rel(s5b, s6, "注入完成后")
+  Rel(s6, s7, "VFS 上下文就绪后")
+  Rel(s7, s8, "Skill 同步完成后")
+}
+
+' === 依赖 ===
+System_Ext(vfslib, "@itookit/vfslib", "createVFS()")
+System_Ext(device_llm, "@itookit/device-llm", "LLMDeviceDriver\n(getSkills→SkillDefinition[])")
+System_Ext(settings, "@itookit/app-settings", "createSettingsModule()\n(LLMUIEditors 注入)")
+System_Ext(harness, "@itookit/llm-harness", "createHarness()")
+System_Ext(engine, "@itookit/llm-engine", "initializeLLMEngine()")
+System_Ext(llm_ui, "@itookit/llm-ui", "编辑器类 (Provider/Conn/MCP/Cost)")
+
+Rel(s1, vfslib, "调用")
+Rel(s2, device_llm, "调用")
+Rel(s3, settings, "调用")
+Rel(s5, harness, "调用")
+Rel(s5b, llm_ui, "导入编辑器类", "→ LLMUIEditors")
+Rel(s5b, settings, "注入", "createSettingsFactory(..., llmUiEditors)")
+Rel(s8, engine, "调用")
+
+@enduml

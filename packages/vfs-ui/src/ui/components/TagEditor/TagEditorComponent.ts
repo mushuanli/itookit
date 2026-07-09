@@ -2,7 +2,8 @@
  * @file vfs-ui/ui/components/TagEditor/TagEditorComponent.ts
  * @desc Inline tag editor with autocomplete. Standalone — no dependency on ports.
  */
-import { escapeHTML, IAutocompleteSource, Suggestion } from '@itookit/common';
+import { escapeHTML } from '@itookit/common';
+import { IAutocompleteSource, Suggestion } from '../../../mention/autocomplete-source';
 
 export interface TagEditorParams {
   container: HTMLElement;

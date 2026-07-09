@@ -1,0 +1,104 @@
+@startuml C3_LLM_Subsystem
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C3 - LLM 子系统组件图 (v4.1 优化后)
+
+Container_Boundary(llm, "LLM 子系统 (device-llm + llm-kernel + llm-harness + llm-engine)") {
+
+  ' ======== device-llm ========
+  Container_Boundary(device_layer, "device-llm — LLM 设备驱动") {
+    Component(llm_driver, "LLMDeviceDriver", "device/dev", "IOCTL 接口、设备注册 (/dev/llm)")
+    Component(providers, "BaseProvider\nOpenAIProvider\nAnthropicProvider\nGeminiProvider", "providers/", "多 Provider 抽象层 (registerProvider)")
+    Component(llm_chain, "LLMChain", "core/", "链式调用、SSE 流式、工具调用")
+    Component(skill_manager, "SkillManager", "device/", "SkillDefinition CRUD + 旧格式读时迁移\n(migrateOldSkill())")
+    Component(mcp_client, "MCPClient / MCPServerConnection", "skills/", "MCP 协议客户端")
+    Component(cost_store, "CostStore", "cost/", "费用跟踪（按模型/时间）")
+    Component(llm_logger, "LLMLogger", "utils/", "LLM 调用日志 (VFS)")
+
+    Rel(providers, llm_chain, "提供流式接口", "ChatCompletion 流式")
+    Rel(llm_chain, skill_manager, "工具注册", "SkillDefinition → ToolDefinition")
+    Rel(llm_chain, mcp_client, "MCP 工具调用", "")
+    Rel(llm_driver, llm_chain, "委派推理", "")
+  }
+
+  ' ======== llm-kernel ========
+  Container_Boundary(kernel_layer, "llm-kernel — 执行引擎核心") {
+    Component(executors, "BaseExecutor / AgentExecutor\nHttpExecutor / ToolExecutor\nScriptExecutor", "executors/", "4 种执行器实现")
+    Component(kernel_runtime, "ExecutionRuntime\nStateMachine", "runtime/", "运行时、状态机")
+    Component(plugin_mgr, "PluginManager", "plugins/", "内核插件管理")
+    Component(kernel_init, "initializeKernel()", "core/", "内核初始化入口")
+
+    Rel(kernel_init, executors, "注册执行器", "ExecutorRegistry")
+    Rel(executors, kernel_runtime, "执行上下文", "")
+    Rel(plugin_mgr, kernel_runtime, "注入插件", "IKernelPlugin")
+  }
+
+  ' ======== llm-harness ========
+  Container_Boundary(harness_layer, "llm-harness — Agent 循环框架") {
+    Component(agent_loop, "AgentLoopExecutor", "executor/", "多轮 while(true) agent 循环")
+    Component(budget_ctrl, "BudgetController", "executor/", "6 维度预算控制")
+    Component(context_mgr, "ContextManager", "executor/", "4 层上下文压缩")
+    Component(error_recovery, "ErrorRecoveryService", "executor/", "5 类错误恢复")
+    Component(sub_agent, "SubAgentRouter", "executor/", "上下文防火墙的子 Agent 路由")
+    Component(harness_skills, "SkillDeviceDriver", "drivers/", "Skill 设备驱动 (消费 SkillDefinition)")
+    Component(harness_tools, "ToolDeviceDriver\nAgentDeviceDriver", "drivers/", "工具/Agent 设备驱动")
+    Component(tty_tools, "shell_session / tty_write\n/ tty_close", "tools/", "TTY 工具")
+    Component(hitl_queue, "HITLQueue", "services/", "Human-in-the-loop 阻塞队列\n(唯一实现 — 正确 reject on abort)")
+
+    Rel(agent_loop, budget_ctrl, "每次迭代检查", "BudgetExhaustedError")
+    Rel(agent_loop, context_mgr, "构建 System Prompt", "")
+    Rel(agent_loop, error_recovery, "LLM 调用重试", "callWithRecovery()")
+    Rel(agent_loop, sub_agent, "委派子任务", "delegate()")
+    Rel(agent_loop, hitl_queue, "人机交互", "")
+    Rel(context_mgr, harness_skills, "技能注入", "P2/P3/P4 优先级")
+    Rel(harness_tools, tty_tools, "TTY 工具注册", "setTTYDriver()")
+  }
+
+  ' ======== llm-engine ========
+  Container_Boundary(engine_layer, "llm-engine — 会话引擎") {
+    Component(session_mgr, "SessionManager", "session/", "会话生命周期管理")
+    Component(task_runner, "TaskRunner", "session/", "双路径执行（Kernel/Harness）")
+    Component(agent_resolver, "AgentResolver", "session/", "Agent 配置解析")
+    Component(chat_engine, "ChatEngine", "persistence/", ".chat 文件持久化")
+    Component(harness_adapter, "HarnessAdapter", "adapters/", "Agent 事件 → UI 事件映射")
+    Component(vfs_agent_svc, "VFSAgentService", "services/", "Agent 配置 VFS 存储\n(IConnectionReader + IAgentConfigService)")
+    Component(mission_svc, "MissionService", "mission/", "Mission 编排入口")
+    Component(mission_scheduler, "MissionScheduler", "mission/", "Mission 调度主循环")
+    Component(graph_orch, "GraphOrchestrator", "session-graph/", "Session 依赖图拓扑排序执行")
+    Component(scheduler, "dependency-resolver\n(getReadyItems/topologicalSort)", "scheduler/", "共享调度核心 — 被 Mission 和 SessionGraph 复用")
+
+    Rel(session_mgr, task_runner, "创建执行任务", "")
+    Rel(task_runner, agent_resolver, "解析配置", "")
+    Rel(task_runner, chat_engine, "持久化对话", ".chat 文件")
+    Rel(task_runner, harness_adapter, "事件桥接", "agent:event → OrchestratorEvent")
+    Rel(agent_resolver, vfs_agent_svc, "读取 Agent 配置", "IConnectionReader")
+    Rel(mission_svc, mission_scheduler, "启动调度", "run()")
+    Rel(mission_scheduler, scheduler, "getReadyItems()", "")
+    Rel(graph_orch, scheduler, "topologicalSort()", "")
+  }
+}
+
+' === 外部依赖 ===
+System_Ext(openai_api, "OpenAI API", "HTTPS/SSE")
+System_Ext(anthropic_api, "Anthropic API", "HTTPS/SSE")
+System_Ext(gemini_api, "Gemini API", "HTTPS/SSE")
+
+' === 接口抽象 ===
+System_Ext(common_ifaces, "@itookit/common 接口", "IConnectionReader\nSkillDefinition(统一)\nIConnectionService\nIAgentConfigService\nIAgentRuntime")
+
+' === 层间依赖 ===
+Rel(providers, openai_api, "HTTP 调用", "OpenAI 协议")
+Rel(providers, anthropic_api, "HTTP 调用", "Anthropic 协议")
+Rel(providers, gemini_api, "HTTP 调用", "Gemini 协议")
+Rel(llm_chain, executors, "Agent 执行", "AgentExecutor")
+Rel(kernel_init, llm_chain, "LLM 通信", "LLMChain")
+Rel(agent_loop, llm_driver, "LLM 调用", "LLMDeviceDriver")
+Rel(task_runner, agent_loop, "多轮路径", "useHarness=true")
+Rel(task_runner, kernel_init, "单轮路径", "default")
+Rel(vfs_agent_svc, common_ifaces, "实现", "IConnectionReader")
+Rel(harness_skills, common_ifaces, "消费", "SkillDefinition")
+Rel(skill_manager, common_ifaces, "存储", "SkillDefinition")
+
+@enduml

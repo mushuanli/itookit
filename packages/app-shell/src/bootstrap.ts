@@ -1,13 +1,17 @@
 import { FileTypeDefinition } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem, formatDefaultFileTitle } from '@itookit/common';
-import type { LLMSkill, SkillDefinition, SkillToolBinding, ToolVFSContext, IVFSManager, FSNode } from '@itookit/common';
+import type { SkillDefinition, ToolVFSContext, IVFSManager, FSNode } from '@itookit/common';
 import { createVFS } from '@itookit/vfslib';
-import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
+import { createSettingsModule, createSettingsFactory, type LLMUIEditors } from '@itookit/app-settings';
 import {
     createLLMFactory,
     createAgentEditorFactory,
     VFSAgentService,
     createAIContextMenuConfig,
+    MCPSettingsEditor,
+    ConnectionSettingsEditor,
+    ProviderSettingsEditor,
+    CostEditor,
 } from '@itookit/llm-ui';
 import { initializeLLMEngine, ChatEngine, chatFileParser } from '@itookit/llm-engine';
 import type { SessionManager } from '@itookit/llm-engine';
@@ -170,72 +174,22 @@ function createVFSToolContext(vfsManager: IVFSManager): ToolVFSContext {
     };
 }
 
-// ── LLMSkill → SkillDefinition bridge ─────────────────────────────────────────
-//
-// Two independent skill stores exist:
-//   - LLMSkill   (device-llm / VFS)          — user-configured, persisted
-//   - SkillDefinition (harness SkillDeviceDriver) — runtime, in-memory
-//
-// This bridge ensures the harness skill picker always reflects the VFS skills.
-
-function llmSkillToSkillDef(s: LLMSkill): SkillDefinition {
-    // For http / shell type skills, build a SkillToolBinding so the harness
-    // can register and invoke the tool when the skill is loaded.
-    const hasTool = (s.type === 'http' || s.type === 'shell') && s.parameters;
-    const tools: SkillToolBinding[] = hasTool ? [{
-        toolId: `${s.id}__tool`,
-        definition: {
-            name: `${s.id}__tool`,
-            description: s.description ?? s.name,
-            parameters: s.parameters as Record<string, unknown>,
-        },
-        executionType: s.type as 'http' | 'shell',
-        command: s.command,
-        sideEffect: s.type === 'http' ? 'external' : 'local',
-        timeoutMs: 30_000,
-    }] : [];
-
-    return {
-        id:          s.id,
-        name:        s.name,
-        description: s.description ?? '',
-        type:        s.type as SkillDefinition['type'],
-        enabled:     s.enabled,
-        icon:        s.icon,
-        instructions: s.instructions ?? '',
-        tools,
-        triggerPatterns: [],
-        triggerStrategy: s.triggerStrategy,
-        autoLoad:    s.autoLoad ?? (s.triggerStrategy === 'reference'),
-        priority:    s.priority ?? 50,
-        globs:       s.globs ?? [],
-        correctionLog: s.correctionLog ? { path: s.correctionLog, enabled: true } : undefined,
-        disableModelInvocation: s.disableModelInvocation ?? false,
-        source:      'vfs',
-        endpoint:    s.endpoint,
-        method:      s.method,
-        headers:     s.headers,
-        parameters:  s.parameters as Record<string, unknown> | undefined,
-        metadata:    s.metadata,
-        createdAt:   s.createdAt,
-        modifiedAt:  s.modifiedAt,
-    };
-}
+// ── Skill sync ─────────────────────────────────────────────────────────────────
+// LLMSkill is now a type alias for SkillDefinition. device-llm migrates old flat
+// format on read, so skills can be passed directly to the harness.
 
 async function syncSkillsToHarness(
     llmDriver: LLMDeviceDriver,
     harness: HarnessInstance,
 ): Promise<void> {
-    const llmSkills = await llmDriver.getSkills();
-    // Snapshot current harness skill IDs to detect deletions.
+    const skills = await llmDriver.getSkills() as SkillDefinition[];
     const harnessIds = new Set(harness.skillService.getSkillNames());
 
-    for (const s of llmSkills) {
-        await harness.skillService.saveSkill(llmSkillToSkillDef(s));
+    for (const s of skills) {
+        await harness.skillService.saveSkill(s);
         harnessIds.delete(s.id);
     }
 
-    // Remove skills that were deleted from VFS.
     for (const id of harnessIds) {
         await harness.skillService.deleteSkill(id);
     }
@@ -372,7 +326,13 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         harnessToolService:  harness.toolService,
     });
 
-    const settingsFactory = createSettingsFactory(settingsModule.service, agentService, llmDriver);
+    const llmUiEditors: LLMUIEditors = {
+        ProviderSettingsEditor,
+        ConnectionSettingsEditor,
+        MCPSettingsEditor,
+        CostEditor,
+    };
+    const settingsFactory = createSettingsFactory(settingsModule.service, agentService, llmDriver, llmUiEditors);
     // Pass llmService only when the vision connection is actually configured —
     // this is the single place that knows both the harness and the connection list.
     const connections = await agentService.getConnections();

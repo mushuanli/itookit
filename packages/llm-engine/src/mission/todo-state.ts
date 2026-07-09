@@ -5,6 +5,7 @@ import type { IVFSManager } from '@itookit/common';
 import type { MissionPlan, TodoItem, MissionStatus, TodoStatus } from '@itookit/common';
 import { MISSION_MODULE } from '@itookit/common';
 import { BaseModuleService } from '@itookit/vfslib';
+import { getReadyItems } from '../scheduler/dependency-resolver';
 
 export class TodoStateManager extends BaseModuleService {
     constructor(vfs: IVFSManager) {
@@ -85,16 +86,11 @@ export class TodoStateManager extends BaseModuleService {
         const doneIds = new Set(
             plan.todos.filter(t => t.status === 'done').map(t => t.id),
         );
-        const runningCount = plan.todos.filter(t => t.status === 'running').length;
-        const available = plan.config.maxParallelAgents - runningCount;
-        if (available <= 0) return [];
-
-        const ready = plan.todos.filter(
-            t => t.status === 'pending' && t.dependsOn.every(depId => doneIds.has(depId)),
+        const runningIds = new Set(
+            plan.todos.filter(t => t.status === 'running').map(t => t.id),
         );
-        // Higher priority first
-        ready.sort((a, b) => b.priority - a.priority);
-        return ready.slice(0, available);
+        const pendingItems = plan.todos.filter(t => t.status === 'pending');
+        return getReadyItems(pendingItems, doneIds, runningIds, plan.config.maxParallelAgents);
     }
 
     /** True when all todos are in a terminal state. */

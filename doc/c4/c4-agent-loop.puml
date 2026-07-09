@@ -1,0 +1,75 @@
+@startuml C4_AgentLoop
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C4 - Agent 循环执行流程
+
+' === Agent Loop ===
+Container_Boundary(agent_loop, "AgentLoopExecutor.run() 每次迭代") {
+  Component(p1, "1. Flush Injections", "agent-loop-executor.ts", "处理 inject() 注入的用户消息")
+  Component(p2, "2. Budget Check", "budget-controller.ts", "6 维度预算检查 (maxTurns/tokens/cost/duration/toolCalls)")
+  Component(p3, "3. Context Compress", "context-manager.ts", "ratio≥0.75 触发 4 层渐进压缩")
+  Component(p4, "4. Build Messages", "context-manager.ts", "System Prompt (P0-P4) + History + CompressionSummary")
+  Component(p5, "5. LLM Call", "error-recovery.ts", "callWithRecovery() — 5 类错误重试")
+  Component(p6, "6. Update Usage", "budget-controller.ts", "Token 计数 + 费用累计")
+
+  Rel(p1, p2, "顺序执行")
+  Rel(p2, p3, "通过")
+  Rel(p3, p4, "通过")
+  Rel(p4, p5, "通过")
+  Rel(p5, p6, "通过")
+}
+
+Container_Boundary(branch_a, "分支 A — 有 tool_calls") {
+  Component(a1, "Plan Confirm", "", "turn===1 时拦截 agent:plan:confirm")
+  Component(a2, "Permission Check", "", "sideEffect!==none 拦截 agent:permission:request")
+  Component(a3, "并行执行读工具", "", "sideEffect=none → Promise.all")
+  Component(a4, "串行执行写工具", "", "sideEffect!==none → for 循环")
+  Component(a5, "Back-pressure Check", "", "checkAfterTool()")
+
+  Rel(a1, a2, "批准后")
+  Rel(a2, a3, "读工具", "sideEffect=none")
+  Rel(a2, a4, "写工具", "sideEffect=local/external")
+  Rel(a3, a5, "读完成后")
+  Rel(a4, a5, "写完成后")
+  Rel(a5, p1, "→ GOTO 下一轮", "emit agent:step:complete")
+}
+
+Container_Boundary(branch_b, "分支 B — 无 tool_calls") {
+  Component(b1, "Back-pressure Check", "", "checkBeforeFinal()")
+  Component(b2, "设 finalResponse", "", "break 循环")
+  Component(b3, "失败 → Inject 修正", "", "→ GOTO 1")
+
+  Rel(b1, b2, "通过")
+  Rel(b1, b3, "失败")
+  Rel(b3, p1, "重试")
+}
+
+Rel(p6, branch_a, "有 tool_calls")
+Rel(p6, branch_b, "无 tool_calls")
+
+' === 上下文压缩说明 ===
+Container_Boundary(context_compress, "4 层上下文压缩 (ContextManager)") {
+  Component(l1, "L1 history_snip\n(≥70%)", "", "截断 >2000 chars 消息：保留头 30 行 + 尾 10 行")
+  Component(l2, "L2 cache_prune\n(≥80%)", "", "移除旧 assistant 消息（保留最后 10 条安全区）")
+  Component(l3, "L3 llm_summarize\n(≥85%)", "", "取前 60% 消息调 LLM 摘要（≤1024 tokens）")
+  Component(l4, "L4 sliding_window\n(≥95%)", "", "只保留最后 6 条消息")
+
+  Rel(l1, l2, "仍超阈值")
+  Rel(l2, l3, "仍超阈值")
+  Rel(l3, l4, "仍超阈值")
+}
+
+' === Error recovery ===
+Container_Boundary(error_rec, "5 类错误恢复 (ErrorRecoveryService.callWithRecovery())") {
+  Component(e1, "Rate Limit (429)", "", "指数退避 baseDelayMs×2^(n-1), max=5")
+  Component(e2, "Context Too Large (413)", "", "强制 L3 压缩后重试")
+  Component(e3, "Service Overload (529)", "", "切换 fallbackConnectionId")
+  Component(e4, "Output Truncated (length)", "", "无延迟重试，max=3")
+  Component(e5, "其他错误", "", "立即 re-throw")
+}
+
+Rel(p5, error_rec, "错误处理", "")
+
+@enduml

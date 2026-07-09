@@ -1,12 +1,12 @@
 /**
  * @file common/utils/MarkdownAnalyzer.ts
  */
-import { 
-    IDocumentAnalyzer, 
-    DocumentInfo, 
-    ReferenceExtractionResult, 
-    AnalysisContext 
-} from '@itookit/common';
+import {
+    IDocumentAnalyzer,
+    DocumentInfo,
+    ReferenceExtractionResult,
+    AnalysisContext
+} from '../interfaces/IDocumentAnalyzer';
 
 export class MarkdownAnalyzer implements IDocumentAnalyzer {
     readonly id = 'markdown-analyzer';

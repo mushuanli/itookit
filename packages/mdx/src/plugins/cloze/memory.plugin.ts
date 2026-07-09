@@ -1,6 +1,6 @@
 // mdx/plugins/cloze/memory.plugin.ts
 import type { MDxPlugin, PluginContext, ScopedPersistenceStore } from '../../core/types';
-import type { SRSItemData } from '@itookit/common';  // ✅ 导入类型
+import type { SRSItemData } from '../../types/srs';
 
 export interface MemoryPluginOptions {
   gradingTimeout?: number;

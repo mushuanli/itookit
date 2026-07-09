@@ -1,0 +1,115 @@
+@startuml C2_Containers
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_LEFT_RIGHT()
+
+title C2 - 容器图 (Container Diagram) — 包级别总览 (v4.1 优化后)
+
+Person(end_user, "最终用户", "使用 itookit 工作区")
+
+System_Boundary(itookit, "itookit 系统 (packages/)") {
+
+  ' === 接口层 (零依赖) ===
+  Container_Boundary(common, "common") {
+    Container(common_pkg, "@itookit/common", "TypeScript 接口+类型", "共享接口 · IConnectionReader · SkillDefinition(统一) · i18n · 图标")
+  }
+
+  ' === 存储驱动层 ===
+  Container_Boundary(drivers, "存储驱动") {
+    Container(idb_driver, "@itookit/vfsdriver-indexeddb", "IndexedDB 后端", "浏览器端持久化存储")
+    Container(localfs_driver, "@itookit/vfsdriver-localfs", "SQLite+FS 后端", "Node/Electron 本地文件存储")
+  }
+
+  ' === 引擎层 ===
+  Container_Boundary(engine_layer, "引擎层") {
+    Container(vfslib, "@itookit/vfslib", "VFS 引擎核心", "虚拟文件系统、模块隔离、设备注册")
+    Container(device_llm, "@itookit/device-llm", "LLM 设备驱动", "多 Provider 通信、SSE 流式、MCP")
+    Container(llm_kernel, "@itookit/llm-kernel", "执行引擎核心", "执行器(Agent/HTTP/Tool/Script)、状态机、Worker")
+    Container(tools, "@itookit/tools", "内置工具集", "文件/搜索/Shell/Agent/Task 工具")
+    Container(device_tty, "@itookit/device-tty", "TTY 设备驱动", "交互式 Shell 会话 (Node PTY)")
+  }
+
+  ' === 业务层 ===
+  Container_Boundary(business_layer, "业务层") {
+    Container(llm_harness, "@itookit/llm-harness", "Agent 循环框架", "多轮 agent 循环、上下文压缩、HITL")
+    Container(llm_engine, "@itookit/llm-engine", "会话引擎", "Session 管理、VFS 持久化、Mission/SessionGraph 编排\n共享调度核心(scheduler/)")
+    Container(app_settings, "@itookit/app-settings", "设置模块", "设置编辑器、系统 FS 浏览、技能引擎\n(LLMUIEditors 注入 → 无 llm-ui 上行依赖)")
+  }
+
+  ' === UI 层 ===
+  Container_Boundary(ui_layer, "UI 层") {
+    Container(llm_ui, "@itookit/llm-ui", "Chat UI", "对话界面、设置编辑器(注入给 app-settings)、Agent 事件渲染")
+    Container(vfs_ui, "@itookit/vfs-ui", "VFS UI", "文件树导航、标签、大纲\n(含 AutocompleteSource/MentionSource)")
+    Container(mdx, "@itookit/mdxeditor", "MDX 编辑器", "CodeMirror 6 Markdown 编辑器\n(含 SRS 接口)")
+    Container(memory_mgr, "@itookit/memory-manager", "工作区容器", "VFS-UI + MDxEditor + BackgroundBrain 粘合")
+  }
+
+  ' === 引导/应用层 ===
+  Container_Boundary(app_layer, "引导/应用层") {
+    Container(app_shell, "@itookit/app-shell", "应用引导", "initApp() 启动序列、工作区策略、路由\n(LLMUIEditors 注入 app-settings)")
+    Container(demo, "@itookit/demo", "Demo 演示", "Playground 开发演示应用")
+  }
+}
+
+' === 外部系统 ===
+System_Ext(openai, "OpenAI API")
+System_Ext(anthropic, "Anthropic API")
+System_Ext(gemini, "Gemini API")
+System_Ext(mcp, "MCP 服务器")
+System_Ext(localfs_sys, "本地文件系统")
+System_Ext(sync_srv, "同步服务器")
+
+' === 用户交互 ===
+Rel(end_user, app_shell, "使用", "浏览器/Electron")
+Rel(end_user, demo, "开发测试")
+
+' === 数据流 ===
+Rel(device_llm, openai, "HTTPS/SSE", "LLM 调用")
+Rel(device_llm, anthropic, "HTTPS/SSE", "LLM 调用")
+Rel(device_llm, gemini, "HTTPS/SSE", "LLM 调用")
+Rel(device_llm, mcp, "MCP 协议", "工具注册")
+Rel(localfs_driver, localfs_sys, "fs + SQLite", "文件读写")
+
+' === 层间依赖 (向上依赖) ===
+Rel_D(drivers, common_pkg, "依赖接口", "IStorageBackend")
+Rel_D(engine_layer, common_pkg, "依赖接口+类型", "所有核心接口")
+Rel_D(business_layer, common_pkg, "依赖接口+类型", "Agent/Session 接口")
+Rel_D(ui_layer, common_pkg, "依赖图标+i18n+接口", "t()/图标常量")
+
+Rel_D(vfslib, idb_driver, "可挂载", "IStorageBackend")
+Rel_D(vfslib, localfs_driver, "可挂载", "IStorageBackend")
+
+Rel_D(device_llm, vfslib, "VFS 持久化", "ConfigService")
+Rel_D(llm_kernel, device_llm, "LLM 调用", "LLMDriver")
+Rel_D(device_tty, common_pkg, "TTY 接口", "ITTYDriver/ITTYSession")
+
+Rel_D(llm_harness, device_llm, "LLM 通信", "LLMDriver")
+Rel_D(llm_harness, device_tty, "TTY 会话", "NodeTTYDriver")
+Rel_D(llm_harness, tools, "内置工具", "buildTool()/ToolMeta")
+Rel_D(llm_engine, llm_kernel, "执行引擎", "Executor")
+Rel_D(llm_engine, vfslib, "VFS 存储", "IModuleFS/IFile")
+
+' app-settings 不再直接依赖 llm-ui
+Rel_D(app_settings, llm_engine, "会话查询", "SessionManager")
+
+Rel_D(llm_ui, llm_engine, "会话渲染", "SessionState/ChatEngine")
+Rel_D(vfs_ui, vfslib, "文件操作", "IModuleFS/IFSDriver")
+Rel_D(mdx, vfslib, "文件读写", "IModuleFS/MDXFileHandle")
+Rel_D(memory_mgr, mdx, "编辑器实例", "IEditor/EditorFactory")
+Rel_D(memory_mgr, vfs_ui, "文件树", "VFSUIShell")
+
+Rel_D(app_shell, app_settings, "设置模块 + 注入 LLMUIEditors", "createSettingsModule()")
+Rel_D(app_shell, llm_engine, "会话管理器", "initializeLLMEngine()")
+Rel_D(app_shell, llm_harness, "Agent 循环", "createHarness()")
+Rel_D(app_shell, vfslib, "创建 VFS", "createVFS()")
+Rel_D(app_shell, memory_mgr, "工作区实例", "MemoryManager")
+Rel_D(app_shell, llm_ui, "UI 工厂 + 编辑器注入", "createLLMFactory()/SettingsEditors")
+Rel_D(app_shell, vfs_ui, "文件树", "createVFSUI()")
+
+' app-shell 将 llm-ui 编辑器注入 app-settings (LLMUIEditors)
+Rel(app_shell, app_settings, "注入 llm-ui 编辑器", "LLMUIEditors{Provider,Connection,MCP,Cost}")
+
+Rel_D(demo, app_shell, "完整集成", "全部依赖")
+
+@enduml
