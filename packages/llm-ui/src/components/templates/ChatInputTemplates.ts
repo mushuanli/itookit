@@ -110,14 +110,6 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * 连接 + Tier 合并行：🔌 [select] ⚡ [Auto][最优][标准][快速]
-     * @deprecated 由 renderConnectionRow() + renderTierRow() 取代，保留避免外部引用报错
-     */
-    renderConnectionTierRow(): string {
-        return this.renderConnectionRow() + this.renderTierRow();
-    },
-
-    /**
      * Context 长度设置 — radio-pill 预设取代 slider + 独立预设行
      */
     renderContextSetting(): string {
@@ -389,13 +381,6 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * @deprecated 由 renderAgentPicker() 取代，保留以防外部引用
-     */
-    renderExecutorSelector(): string {
-        return this.renderAgentPicker();
-    },
-
-    /**
      * 输入字段包装器（含附件预览和活动设置指示器）
      */
     renderFieldWrapper(): string {
@@ -436,13 +421,6 @@ export const ChatInputTemplates = {
                 </span>
             </div>
         `;
-    },
-
-    /**
-     * @deprecated 由 renderToolbar() 取代，保留以防外部引用
-     */
-    renderActions(): string {
-        return this.renderToolbar();
     },
 
     /**

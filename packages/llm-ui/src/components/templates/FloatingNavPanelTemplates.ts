@@ -351,29 +351,4 @@ export const FloatingNavPanelTemplates = {
             </div>
         `;
     },
-
-    // 保留旧方法以防其他地方调用，但标记为废弃
-    /** @deprecated 使用 renderUnifiedItem 替代 */
-    renderListItem: (
-        item: ChatNavItem,
-        idx: number,
-        isActive: boolean,
-        isSelected: boolean,
-        timeStr: string,
-        title: string
-    ): string => {
-        return FloatingNavPanelTemplates.renderUnifiedItem(item, idx, isActive, isSelected, timeStr, title);
-    },
-
-    /** @deprecated 使用 renderUnifiedItem 替代 */
-    renderTreeItem: (
-        item: ChatNavItem,
-        idx: number,
-        isActive: boolean,
-        isSelected: boolean,
-        timeStr: string,
-        title: string
-    ): string => {
-        return FloatingNavPanelTemplates.renderUnifiedItem(item, idx, isActive, isSelected, timeStr, title);
-    }
 };
