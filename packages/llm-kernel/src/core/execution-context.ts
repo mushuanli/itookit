@@ -1,6 +1,6 @@
 // @file: llm-kernel/core/execution-context.ts
 
-import { IScopedEventBus } from './event-bus';
+import type { IScopedEventBus } from './event-bus';
 import { NodeStatus, ExecutionResult } from './types';
 
 /**
@@ -115,23 +115,24 @@ export class ExecutionContext implements IExecutionContext {
     }
 
     emitThinking(content: string): void {
-        this.events.emit('stream:thinking', { delta: content }, this.currentNodeId);
+        this.events.emit('stream:thinking', { delta: content, nodeId: this.currentNodeId }, { executionId: this.executionId, ...(this.currentNodeId ? { nodeId: this.currentNodeId } : {}) });
     }
 
     emitContent(content: string): void {
-        this.events.emit('stream:content', { delta: content }, this.currentNodeId);
+        this.events.emit('stream:content', { delta: content, nodeId: this.currentNodeId }, { executionId: this.executionId, ...(this.currentNodeId ? { nodeId: this.currentNodeId } : {}) });
     }
 
     emitNodeStatus(status: NodeStatus): void {
-        this.events.emit('node:update', { status }, this.currentNodeId);
+        this.events.emit('node:update', { status, nodeId: this.currentNodeId }, { executionId: this.executionId, ...(this.currentNodeId ? { nodeId: this.currentNodeId } : {}) });
     }
 
     emitError(error: Error): void {
         this.events.emit('execution:error', {
+            executionId: this.executionId,
             code: (error as any).code || 'UNKNOWN',
             message: error.message,
             stack: error.stack
-        }, this.currentNodeId);
+        }, { executionId: this.executionId, ...(this.currentNodeId ? { nodeId: this.currentNodeId } : {}) });
     }
 
     checkCancelled(): void {

@@ -130,6 +130,9 @@ export {
     getFileIcon,
 } from './i18n/icons';
 
+// ── EventBus: 统一事件总线 ──
+export * from './eventbus';
+
 // Constants
 export const FS_MODULE_CHAT = 'chats';
 export const FS_MODULE_AGENTS = 'agents';

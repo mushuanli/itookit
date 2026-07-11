@@ -1,184 +1,71 @@
 // @file: llm-kernel/core/event-bus.ts
+// Replaces the hand-rolled EventBus with the shared core from @itookit/common.
 
-/**
- * 内核事件类型 - 完全解耦于 UI
- */
+import { EventBus, type IEventChannel, type IEventBus } from '@itookit/common';
+export { EventBus };
+
+// ── Kernel event type catalogue ──────────────────────────────────────────────
+
 export type KernelEventType =
-    // 执行生命周期
     | 'execution:start'
     | 'execution:progress'
     | 'execution:complete'
     | 'execution:error'
     | 'execution:cancel'
-
-    // 节点事件
     | 'node:start'
     | 'node:update'
     | 'node:complete'
     | 'node:error'
-
-    // 流式输出
     | 'stream:thinking'
     | 'stream:content'
     | 'stream:tool_call'
-
-    // 交互请求
     | 'interaction:request_input'
     | 'interaction:confirm'
-
-    // 状态变更
     | 'state:changed';
 
-export interface KernelEvent<T = any> {
+/** Per-event payload shapes. */
+export interface KernelEventMap {
+    'execution:start':    { executionId: string; [k: string]: unknown };
+    'execution:progress': { executionId: string; progress?: number; [k: string]: unknown };
+    'execution:complete': { executionId: string; result?: unknown; [k: string]: unknown };
+    'execution:error':    { executionId: string; code: string; message: string; stack?: string; [k: string]: unknown };
+    'execution:cancel':   { executionId: string; [k: string]: unknown };
+    'node:start':         { nodeId?: string; executionId?: string; executorId?: string; executorType?: string; name?: string; input?: unknown; [k: string]: unknown };
+    'node:update':        { nodeId?: string; status?: string; thought?: string; output?: string; [k: string]: unknown };
+    'node:complete':      { nodeId?: string; executionId?: string; executorId?: string; status?: string; output?: unknown; [k: string]: unknown };
+    'node:error':         { nodeId?: string; error?: string; message?: string; executionId?: string; [k: string]: unknown };
+    'stream:thinking':    { delta: string; nodeId?: string };
+    'stream:content':     { delta: string; content?: string; nodeId?: string };
+    'stream:tool_call':   { nodeId?: string; [k: string]: unknown };
+    'interaction:request_input': { prompt?: string; [k: string]: unknown };
+    'interaction:confirm':       { message?: string; [k: string]: unknown };
+    'state:changed':      { from: string; to: string; executionId: string; [k: string]: unknown };
+}
+
+/** Envelope type used by the Worker protocol (postMessage serialization). */
+export interface KernelEvent<T = unknown> {
     type: KernelEventType;
     executionId: string;
     nodeId?: string;
     timestamp: number;
     payload: T;
-    metadata?: object;
 }
+
+export type KernelEventBus = IEventBus<KernelEventMap>;
+export type KernelEventChannel = IEventChannel<KernelEventMap>;
 
 /**
- * 事件订阅选项
+ * Scoped event bus — alias kept for ExecutionContext compatibility.
+ * Prefer IEventChannel<KernelEventMap> in new code.
  */
-export interface SubscribeOptions {
-    filter?: (event: KernelEvent) => boolean;
-    once?: boolean;
-    priority?: number;
-}
+export type IScopedEventBus = KernelEventChannel;
 
-/**
- * 事件总线接口
- */
-export interface IEventBus {
-    emit<T>(event: KernelEvent<T>): void;
-    on(type: KernelEventType | '*', handler: EventHandler, options?: SubscribeOptions): Unsubscribe;
-    once(type: KernelEventType, handler: EventHandler): Unsubscribe;
-    off(type: KernelEventType, handler: EventHandler): void;
+// Singleton
+let globalEventBus: EventBus<KernelEventMap> | null = null;
 
-    // 执行上下文相关
-    createScope(executionId: string): IScopedEventBus;
-    destroyScope(executionId: string): void;
-}
-
-export type EventHandler<T = any> = (event: KernelEvent<T>) => void | Promise<void>;
-export type Unsubscribe = () => void;
-
-/**
- * 作用域事件总线 - 隔离不同执行的事件
- */
-export interface IScopedEventBus {
-    readonly executionId: string;
-    emit<T>(type: KernelEventType, payload: T, nodeId?: string): void;
-    on(type: KernelEventType | '*', handler: EventHandler): Unsubscribe;
-}
-
-/**
- * 事件总线实现
- */
-export class EventBus implements IEventBus {
-    private handlers = new Map<string, Set<{ handler: EventHandler; options: SubscribeOptions }>>();
-    private scopes = new Map<string, ScopedEventBus>();
-
-    emit<T>(event: KernelEvent<T>): void {
-        // 按优先级排序处理
-        const typeHandlers = this.handlers.get(event.type) || new Set();
-        const wildcardHandlers = this.handlers.get('*') || new Set();
-
-        const allHandlers = [...typeHandlers, ...wildcardHandlers]
-            .sort((a, b) => (b.options.priority || 0) - (a.options.priority || 0));
-
-        for (const { handler, options } of allHandlers) {
-            // 应用过滤器
-            if (options.filter && !options.filter(event)) continue;
-
-            try {
-                handler(event);
-            } catch (e) {
-                console.error(`[EventBus] Handler error for ${event.type}:`, e);
-            }
-
-            // 处理 once
-            if (options.once) {
-                this.off(event.type, handler);
-            }
-        }
-    }
-
-    on(type: KernelEventType | '*', handler: EventHandler, options: SubscribeOptions = {}): Unsubscribe {
-        if (!this.handlers.has(type)) {
-            this.handlers.set(type, new Set());
-        }
-        const entry = { handler, options };
-        this.handlers.get(type)!.add(entry);
-
-        return () => {
-            this.handlers.get(type)?.delete(entry);
-        };
-    }
-
-    once(type: KernelEventType, handler: EventHandler): Unsubscribe {
-        return this.on(type, handler, { once: true });
-    }
-
-    off(type: KernelEventType, handler: EventHandler): void {
-        const handlers = this.handlers.get(type);
-        if (!handlers) return;
-
-        for (const entry of handlers) {
-            if (entry.handler === handler) {
-                handlers.delete(entry);
-                break;
-            }
-        }
-    }
-
-    createScope(executionId: string): IScopedEventBus {
-        if (this.scopes.has(executionId)) {
-            return this.scopes.get(executionId)!;
-        }
-        const scope = new ScopedEventBus(executionId, this);
-        this.scopes.set(executionId, scope);
-        return scope;
-    }
-
-    destroyScope(executionId: string): void {
-        this.scopes.delete(executionId);
-    }
-}
-
-/**
- * 作用域事件总线实现
- */
-class ScopedEventBus implements IScopedEventBus {
-    constructor(
-        public readonly executionId: string,
-        private parent: EventBus
-    ) { }
-
-    emit<T>(type: KernelEventType, payload: T, nodeId?: string): void {
-        this.parent.emit({
-            type,
-            executionId: this.executionId,
-            nodeId,
-            timestamp: Date.now(),
-            payload
-        });
-    }
-
-    on(type: KernelEventType | '*', handler: EventHandler): Unsubscribe {
-        return this.parent.on(type, handler, {
-            filter: (event) => event.executionId === this.executionId
-        });
-    }
-}
-
-// 单例导出
-let globalEventBus: EventBus | null = null;
-
-export function getEventBus(): EventBus {
+export function getEventBus(): EventBus<KernelEventMap> {
     if (!globalEventBus) {
-        globalEventBus = new EventBus();
+        globalEventBus = new EventBus<KernelEventMap>();
     }
     return globalEventBus;
 }

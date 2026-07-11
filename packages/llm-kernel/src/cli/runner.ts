@@ -2,7 +2,7 @@
 
 import { ExecutionRuntime, getRuntime } from '../runtime/execution-runtime';
 import { ExecutorConfig } from '../core/interfaces';
-import { getEventBus, KernelEvent } from '../core/event-bus';
+import { getEventBus } from '../core/event-bus';
 
 /**
  * CLI 运行器配置
@@ -54,11 +54,11 @@ export class CLIRunner {
     private setupVerboseLogging(): void {
         const eventBus = getEventBus();
         
-        this.unsubscribe = eventBus.on('*', (event: KernelEvent) => {
-            const ts = this.options.showTimestamp 
-                ? `[${new Date().toISOString()}] ` 
+        this.unsubscribe = eventBus.onAny((payload, meta) => {
+            const ts = this.options.showTimestamp
+                ? `[${new Date().toISOString()}] `
                 : '';
-            console.log(`${ts}${event.type}:`, JSON.stringify(event.payload, null, 2));
+            console.log(`${ts}${meta.type}:`, JSON.stringify(payload, null, 2));
         });
     }
     
@@ -81,17 +81,17 @@ export class CLIRunner {
         let thinkingBuffer = '';
         let outputBuffer = '';
         
-        const streamUnsubscribe = eventBus.on('*', (event: KernelEvent) => {
-            if (event.type === 'stream:thinking' && this.options.showThinking) {
-                const delta = event.payload?.delta || '';
+        const streamUnsubscribe = eventBus.onAny((payload: any, meta) => {
+            if (meta.type === 'stream:thinking' && this.options.showThinking) {
+                const delta = payload?.delta || '';
                 thinkingBuffer += delta;
                 if (this.options.outputFormat === 'text') {
-                    process.stdout.write(`\x1b[2m${delta}\x1b[0m`); // 灰色输出
+                    process.stdout.write(`\x1b[2m${delta}\x1b[0m`);
                 }
             }
-            
-            if (event.type === 'stream:content') {
-                const delta = event.payload?.delta || '';
+
+            if (meta.type === 'stream:content') {
+                const delta = payload?.delta || '';
                 outputBuffer += delta;
                 if (this.options.outputFormat === 'text') {
                     process.stdout.write(delta);

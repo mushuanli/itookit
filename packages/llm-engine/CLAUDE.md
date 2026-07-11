@@ -6,10 +6,13 @@
 
 ```
 src/
-├── session/        ← SessionManager, SessionState, TaskRunner, EventBus
+├── session/        ← SessionManager, SessionState, TaskRunner
+│                     SessionEventBus (session + global 双 track, channel 路由)
 │                     ClaudeCodeStrategy (内置 Agent Loop), agent-loop-strategy
 ├── persistence/    ← ChatEngine (IChatEngine), ChatManifest, ChatNode
-├── adapters/       ← HarnessAdapter (Agent事件→OrchestratorEvent), llmkernel-adapter
+├── adapters/       ← HarnessAdapter (Agent事件→OrchestratorEvent)
+│                     UIEventAdapter (channel(sessionId).onAny 零过滤转发)
+│                     llmkernel-adapter
 ├── mission/        ← MissionService, MissionScheduler, TodoState
 ├── session-graph/  ← DependencyGraph, GraphOrchestrator
 ├── services/       ← VFSAgentService, PromptHistoryService

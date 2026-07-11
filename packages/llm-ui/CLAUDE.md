@@ -8,7 +8,7 @@ peerDependency: `@itookit/mdxeditor`
 
 ```
 src/
-├── shell/         ← LLMWorkspaceEditor
+├── shell/         ← LLMWorkspaceEditor, EditorEventBus (wraps common/EventBus), SessionEventHandler
 ├── components/    ← input/ChatInputView (textarea + 附件 + 图片上传 + OCR), history, mdx, tty
 ├── domain/        ← types, events, ports
 ├── editors/       ← Agent/Connection/Provider/MCP/Skill/Cost Settings

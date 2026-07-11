@@ -1,59 +1,47 @@
 // @file: llm-engine/adapters/ui-event-adapter.ts
 
-import { generateUUID } from '@itookit/common';
-import { KernelEvent, getEventBus } from '@itookit/llm-kernel';
+import { generateUUID, type EventMeta } from '@itookit/common';
+import { getEventBus } from '@itookit/llm-kernel';
+import type { KernelEventMap } from '@itookit/llm-kernel';
 import { OrchestratorEvent, ExecutionNode } from '../core/types';
 
+type KernelEventType = keyof KernelEventMap;
+
 /**
- * UI 事件适配器
- * 将 Kernel 事件转换为 UI 事件
+ * UI 事件适配器 — 将 Kernel channel 事件转换为 OrchestratorEvent。
+ * Uses channel(sessionId/executionId) for O(1) routing, no manual filtering.
  */
 export class UIEventAdapter {
     private nodeMap = new Map<string, ExecutionNode>();
 
     /**
-     * 桥接 Kernel 事件到 UI 事件
+     * Subscribe to the execution channel and forward converted UI events.
+     * Returns a cleanup function that must be called when the session ends.
      */
     bridge(
         sessionId: string,
-        onUIEvent: (event: OrchestratorEvent) => void
+        onUIEvent: (event: OrchestratorEvent) => void,
     ): () => void {
-        const eventBus = getEventBus();
+        const channel = getEventBus().channel(sessionId);
 
-        const handler = (kernelEvent: KernelEvent) => {
-            // 只处理当前会话的事件
-            if (kernelEvent.executionId !== sessionId) return;
-
-            const uiEvent = this.convertToUIEvent(kernelEvent);
-            if (uiEvent) {
-                onUIEvent(uiEvent);
-            }
-        };
-
-        // 订阅相关事件
-        const unsubscribers = [
-            eventBus.on('node:start', handler),
-            eventBus.on('node:update', handler),
-            eventBus.on('node:complete', handler),
-            eventBus.on('node:error', handler),
-            eventBus.on('stream:thinking', handler),
-            eventBus.on('stream:content', handler),
-            eventBus.on('stream:tool_call', handler),
-            eventBus.on('execution:complete', handler),
-            eventBus.on('execution:error', handler)
-        ];
+        const unsubscribe = channel.onAny((payload: any, meta: EventMeta) => {
+            const uiEvent = this.convertToUIEvent(meta.type as KernelEventType, payload, meta);
+            if (uiEvent) onUIEvent(uiEvent);
+        });
 
         return () => {
-            unsubscribers.forEach(unsub => unsub());
+            unsubscribe();
             this.nodeMap.clear();
         };
     }
 
-    /**
-     * 转换 Kernel 事件为 UI 事件
-     */
-    private convertToUIEvent(kernelEvent: KernelEvent): OrchestratorEvent | null {
-        const { type, nodeId, payload, executionId, metadata } = kernelEvent;
+    private convertToUIEvent(
+        type: KernelEventType,
+        payload: any,
+        meta: EventMeta,
+    ): OrchestratorEvent | null {
+        const nodeId = (meta.nodeId as string | undefined) || payload?.nodeId;
+        const executionId = (meta.executionId as string | undefined) || meta.channel as string;
 
         switch (type) {
             case 'node:start':
@@ -62,31 +50,24 @@ export class UIEventAdapter {
             case 'stream:thinking':
                 return {
                     type: 'node_update',
-                    payload: {
-                        nodeId: nodeId || '',
-                        chunk: payload.delta,
-                        field: 'thought'
-                    }
+                    payload: { nodeId: nodeId || '', chunk: payload.delta, field: 'thought' },
                 };
 
             case 'stream:content':
                 return {
                     type: 'node_update',
                     payload: {
-                        nodeId: nodeId || payload?.nodeId || '',  // 保留 fallback
-                        chunk: payload.delta || payload.content,  // 保留兼容性
-                        field: 'output'
-                    }
+                        nodeId: nodeId || '',
+                        chunk: payload.delta || payload.content,
+                        field: 'output',
+                    },
                 };
 
             case 'node:update':
                 if (payload.status) {
                     return {
                         type: 'node_status',
-                        payload: {
-                            nodeId: nodeId || '',
-                            status: payload.status
-                        }
+                        payload: { nodeId: nodeId || '', status: payload.status },
                     };
                 }
                 return null;
@@ -97,8 +78,8 @@ export class UIEventAdapter {
                     payload: {
                         nodeId: nodeId || '',
                         status: payload.status === 'success' ? 'success' : 'failed',
-                        result: payload.output
-                    }
+                        result: payload.output,
+                    },
                 };
 
             case 'node:error':
@@ -106,32 +87,25 @@ export class UIEventAdapter {
                     type: 'error',
                     payload: {
                         message: payload.error || payload.message || 'Unknown error',
-                        error: new Error(payload.error || payload.message)
-                    }
+                        error: new Error(payload.error || payload.message),
+                    },
                 };
 
             case 'execution:complete':
                 return {
                     type: 'finished',
-                    payload: { sessionId: executionId, metadata: metadata }
+                    payload: { sessionId: executionId || '', metadata: meta },
                 };
 
             case 'execution:error': {
-                // execution-runtime.ts emits { error, code } while
-                // execution-context.ts emits { message, code, stack }.
-                // Support both field names.
                 const errMsg = payload.error || payload.message || 'Execution failed';
                 return {
                     type: 'error',
-                    payload: {
-                        message: errMsg,
-                        error: new Error(errMsg)
-                    }
+                    payload: { message: errMsg, error: new Error(errMsg) },
                 };
             }
 
             case 'stream:tool_call':
-                // 可以扩展为专门的工具调用事件
                 return {
                     type: 'node_update',
                     payload: {
@@ -141,10 +115,10 @@ export class UIEventAdapter {
                                 name: payload.toolName,
                                 args: payload.args,
                                 result: payload.result,
-                                status: payload.status
-                            }
-                        }
-                    }
+                                status: payload.status,
+                            },
+                        },
+                    },
                 };
 
             default:
@@ -152,13 +126,8 @@ export class UIEventAdapter {
         }
     }
 
-    /**
-     * 处理节点开始事件
-     */
     private handleNodeStart(nodeId: string | undefined, payload: any): OrchestratorEvent {
         const id = nodeId || generateUUID();
-
-        // 创建 UI 节点
         const uiNode: ExecutionNode = {
             id,
             parentId: payload.parentId,
@@ -167,32 +136,17 @@ export class UIEventAdapter {
             name: payload.name || payload.executorId || 'Node',
             status: 'running',
             startTime: Date.now(),
-            data: {
-                output: '',
-                thought: '',
-                metaInfo: payload.metaInfo || {}
-            },
-            children: []
+            data: { output: '', thought: '', metaInfo: payload.metaInfo || {} },
+            children: [],
         };
-
         this.nodeMap.set(id, uiNode);
-
-        return {
-            type: 'node_start',
-            payload: { node: uiNode, parentId: payload.parentId }
-        };
+        return { type: 'node_start', payload: { node: uiNode, parentId: payload.parentId } };
     }
 
-    /**
-     * 获取节点
-     */
     getNode(nodeId: string): ExecutionNode | undefined {
         return this.nodeMap.get(nodeId);
     }
 
-    /**
-     * 清理
-     */
     clear(): void {
         this.nodeMap.clear();
     }

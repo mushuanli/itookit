@@ -2,7 +2,7 @@
 
 import { ExecutorConfig, IExecutorFactory } from '../core/interfaces';
 import { ExecutionContext } from '../core/execution-context';
-import { EventBus, getEventBus } from '../core/event-bus';
+import { type KernelEventBus, getEventBus } from '../core/event-bus';
 import { ExecutionResult } from '../core/types';
 import { getExecutorRegistry } from '../executors';
 import { generateUUID } from '@itookit/common';
@@ -28,7 +28,7 @@ export interface ExecutionOptions {
  * 执行运行时 - Kernel 的主入口
  */
 export class ExecutionRuntime {
-    private eventBus: EventBus;
+    private eventBus: KernelEventBus;
     private factory: IExecutorFactory;
     private activeExecutions = new Map<string, AbortController>();
 
@@ -70,7 +70,7 @@ export class ExecutionRuntime {
         this.activeExecutions.set(executionId, abortController);
 
         // 创建事件作用域
-        const scopedEvents = this.eventBus.createScope(executionId);
+        const scopedEvents = this.eventBus.channel(executionId);
 
         // 创建执行上下文
         const context = new ExecutionContext(
@@ -119,8 +119,9 @@ export class ExecutionRuntime {
         } catch (error: any) {
             scopedEvents.emit('execution:error', {
                 executionId,
+                message: error.message,
                 error: error.message,
-                code: error.code
+                code: error.code || 'UNKNOWN'
             });
 
             return {
@@ -138,7 +139,7 @@ export class ExecutionRuntime {
             // 清理
             if (timeoutId) clearTimeout(timeoutId);
             this.activeExecutions.delete(executionId);
-            this.eventBus.destroyScope(executionId);
+            this.eventBus.closeChannel(executionId);
         }
     }
 
@@ -175,16 +176,12 @@ export class ExecutionRuntime {
      * 订阅事件
      */
     onEvent(handler: (event: any) => void): () => void {
-        return this.eventBus.on('*', handler);
+        return this.eventBus.onAny((payload, meta) => handler({ ...meta, payload }));
     }
 
-    /**
-     * 订阅特定执行的事件
-     */
     onExecutionEvent(executionId: string, handler: (event: any) => void): () => void {
-        return this.eventBus.on('*', handler, {
-            filter: (event) => event.executionId === executionId
-        });
+        return this.eventBus.channel(executionId).onAny((payload, meta) =>
+            handler({ ...meta, payload }));
     }
 }
 

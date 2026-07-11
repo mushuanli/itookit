@@ -115,11 +115,14 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     private readonly _moduleBackend: IStorageBackend;
     private readonly systemFS?: import('@itookit/common').IModuleFS;
     private initialized = false;
+    /** Points to the active event target — bus normally, EventBuffer during a transaction. */
+    private _emitTarget: import('@itookit/common').IEventEmitter<import('@itookit/common').FSEventPayloadMap>;
 
     constructor(deps: ModuleFSDeps) {
         this.moduleId = deps.moduleId;
         this.engine = deps.engine;
         this.bus = deps.eventBus;
+        this._emitTarget = deps.eventBus;
         this.access = deps.access;
         this.devices = deps.devices;
         this.scope = new ScopedView(deps.moduleId);
@@ -164,13 +167,15 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     // ══════════════════════════════════════════════════════════
 
     on<E extends FSEventType>(event: E, callback: (event: FSEvent<E>) => void): () => void {
-        return this.bus.on(event, (e) => {
-            if (e.moduleId === this.moduleId) callback(e);
+        return this.bus.on(event, (payload, meta) => {
+            if (meta.moduleId !== this.moduleId) return;
+            callback({ type: event, payload, timestamp: meta.timestamp, moduleId: meta.moduleId as string | undefined, fromTransaction: meta.fromTransaction as boolean | undefined, mountId: meta.mountId as string | undefined } as FSEvent<E>);
         });
     }
     onAny(callback: (event: FSEvent) => void): () => void {
-        return this.bus.onAny((e) => {
-            if (e.moduleId === this.moduleId) callback(e);
+        return this.bus.onAny((payload, meta) => {
+            if (meta.moduleId !== this.moduleId) return;
+            callback({ type: meta.type as FSEventType, payload, timestamp: meta.timestamp, moduleId: meta.moduleId as string | undefined, fromTransaction: meta.fromTransaction as boolean | undefined, mountId: meta.mountId as string | undefined } as FSEvent);
         });
     }
 
@@ -235,7 +240,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
     /** Emit a namespaced event. @internal — exposed for inline ops classes */
     _emit(type: FSEventType, payload: any): void {
-        this.bus.emit(type, payload, { moduleId: this.moduleId, mountId: this.mountId });
+        this._emitTarget.emit(type, payload, { moduleId: this.moduleId, mountId: this.mountId });
     }
 
     // ══════════════════════════════════════════════════════════
@@ -507,13 +512,9 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     // ══════════════════════════════════════════════════════════
 
     async transaction<T>(fn: (tx: IFSDriverTransaction) => Promise<T>): Promise<T> {
-        const buffer = new TransactionEventBuffer(this.bus, this.moduleId);
-        const originalEmit = this.bus.emit.bind(this.bus);
-        const bufferedEmit: typeof originalEmit = (type, payload, opts) => {
-            if (opts?.moduleId === this.moduleId) buffer.add(type, payload as any, opts?.mountId);
-            else originalEmit(type, payload, opts);
-        };
-        (this.bus as any).emit = bufferedEmit;
+        const buffer = new TransactionEventBuffer(this.bus, { moduleId: this.moduleId });
+        // Redirect _emit calls through the buffer for the duration of the transaction.
+        this._emitTarget = buffer;
 
         const tx: IFSDriverTransaction = {
             getNode: (id) => this.getNode(id),
@@ -529,11 +530,11 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
         try {
             const result = await fn(tx);
-            (this.bus as any).emit = originalEmit;
+            this._emitTarget = this.bus;
             buffer.commit();
             return result;
         } catch (e) {
-            (this.bus as any).emit = originalEmit;
+            this._emitTarget = this.bus;
             buffer.rollback();
             throw e;
         }

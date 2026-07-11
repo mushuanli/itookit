@@ -92,7 +92,7 @@ export class VFSManager implements IVFSManager {
         }
         this.engines.clear();
         this.modules.clear();
-        this.managerBus.removeAllListeners();
+        this.managerBus.clear();
         await this.engine.dispose();
         this.initialized = false;
     }
@@ -408,15 +408,15 @@ export class VFSManager implements IVFSManager {
         eventType: E,
         handler: (event: VFSManagerEvent<E>) => void,
     ): () => void {
-        return this.managerBus.on(eventType as any, handler as any);
+        return this.managerBus.on(eventType as any, (payload, meta) =>
+            handler({ type: eventType, payload, timestamp: meta.timestamp } as VFSManagerEvent<E>));
     }
 
     onAny(
         handler: (type: string, event: VFSManagerEvent) => void,
     ): () => void {
-        return this.managerBus.onAny((event) => {
-            handler(event.type, event as any);
-        });
+        return this.managerBus.onAny((payload, meta) =>
+            handler(meta.type, { type: meta.type as VFSManagerEventType, payload, timestamp: meta.timestamp } as VFSManagerEvent));
     }
 
     // ══════════════════════════════════════════════════════════
