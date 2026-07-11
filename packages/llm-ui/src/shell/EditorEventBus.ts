@@ -1,45 +1,27 @@
 // @file: llm-ui/shell/EditorEventBus.ts
 
+import { EventBus as CoreEventBus } from '@itookit/common';
 import type { IEditorEventBus, EditorBusEvents, EditorEventKey } from '../domain/events';
-
-type EventCallback<K extends EditorEventKey> = (payload: EditorBusEvents[K]) => void;
 
 /**
  * 编辑器内部事件总线 — 实例级（非全局单例）
  */
 export class EditorEventBus implements IEditorEventBus {
-    private handlers = new Map<string, Set<Function>>();
+    private bus = new CoreEventBus<EditorBusEvents>();
 
-    on<K extends EditorEventKey>(event: K, callback: EventCallback<K>): () => void {
-        if (!this.handlers.has(event)) {
-            this.handlers.set(event, new Set());
-        }
-        this.handlers.get(event)!.add(callback);
-        return () => { this.handlers.get(event)?.delete(callback); };
+    on<K extends EditorEventKey>(event: K, callback: (payload: EditorBusEvents[K]) => void): () => void {
+        return this.bus.on(event, (payload) => callback(payload));
     }
 
     emit<K extends EditorEventKey>(event: K, payload: EditorBusEvents[K]): void {
-        // Copy before iterating: handlers may subscribe/unsubscribe in callback
-        const set = this.handlers.get(event);
-        if (!set) return;
-        for (const cb of [...set]) {
-            try {
-                (cb as EventCallback<K>)(payload);
-            } catch (e) {
-                console.error(`[EditorEventBus] Error in "${event}":`, e);
-            }
-        }
+        this.bus.emit(event, payload);
     }
 
-    once<K extends EditorEventKey>(event: K, callback: EventCallback<K>): () => void {
-        const unsub = this.on(event, (payload) => {
-            unsub();
-            callback(payload);
-        });
-        return unsub;
+    once<K extends EditorEventKey>(event: K, callback: (payload: EditorBusEvents[K]) => void): () => void {
+        return this.bus.once(event, (payload) => callback(payload));
     }
 
     destroy(): void {
-        this.handlers.clear();
+        this.bus.clear();
     }
 }

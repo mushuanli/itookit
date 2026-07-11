@@ -149,18 +149,13 @@ export class StateMachine<TContext = any> {
         // 5. 通知监听器
         this.notifyListeners();
         
-        // 6. 发送事件总线事件
-        const eventBus = getEventBus();
-        eventBus.emit({
-            type: 'state:changed',
+        // 6. 发送事件总线事件（via channel so WorkerAdapter.onAny receives it）
+        getEventBus().channel(this.config.id).emit('state:changed', {
+            from: fromState,
+            to: targetState,
             executionId: this.config.id,
-            timestamp: Date.now(),
-            payload: {
-                from: fromState,
-                to: targetState,
-                context: this.context
-            }
-        });
+            context: this.context
+        }, { executionId: this.config.id });
     }
     
     /**

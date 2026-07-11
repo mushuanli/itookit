@@ -2,7 +2,7 @@
 
 import { IKernelPlugin, PluginContext, PluginMetadata } from './plugin-interface';
 import { getExecutorRegistry, ExecutorRegistry } from '../executors';
-import { getEventBus, EventBus } from '../core/event-bus';
+import { getEventBus, type KernelEventBus } from '../core/event-bus';
 
 /**
  * 插件管理器
@@ -10,7 +10,7 @@ import { getEventBus, EventBus } from '../core/event-bus';
 export class PluginManager {
     private plugins = new Map<string, IKernelPlugin>();
     private registry: ExecutorRegistry;
-    private eventBus: EventBus;
+    private eventBus: KernelEventBus;
     private config: Record<string, any> = {};
     
     constructor() {
@@ -90,7 +90,8 @@ export class PluginManager {
             },
 
             onEvent: (type, handler) => {
-                return this.eventBus.on(type, handler);
+                if (type === '*') return this.eventBus.onAny((payload, meta) => handler({ type: meta.type, payload } as any));
+                return this.eventBus.on(type as any, (payload, meta) => handler({ type: meta.type, payload } as any));
             },
             
             getConfig: <T>(key: string) => {

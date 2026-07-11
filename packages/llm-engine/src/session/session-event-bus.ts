@@ -1,299 +1,120 @@
 // @file: llm-engine/session/session-event-bus.ts
 
+import { EventBus } from '@itookit/common';
 import { OrchestratorEvent, RegistryEvent } from '../core/types';
 import { log } from '../utils/logger';
 
+// ── Type maps for the two tracks ─────────────────────────────────────────────
+
+/** Map from OrchestratorEvent.type → payload, for the session track. */
+type OrchestratorEventMap = {
+    [E in OrchestratorEvent as E['type']]: E['payload'];
+};
+
+/** Map from RegistryEvent.type → payload, for the global track. */
+type RegistryEventMap = {
+    [E in RegistryEvent as E['type']]: E['payload'];
+};
+
 /**
- * 会话事件总线
- * 
- * 职责：
- * - 管理会话级事件监听（UI 事件）
- * - 管理全局事件监听（注册表事件）
- * - 确保事件只发送给已注册的会话
+ * Session event bus — two isolated tracks:
+ *   • session track  — per-session OrchestratorEvent, routed via channel(sessionId)
+ *   • global track   — broadcast RegistryEvent
+ *
+ * Channel lifecycle = session registration lifecycle:
+ *   ensureSession → channel open (emits accepted)
+ *   removeSession → channel closed (subsequent emits silently dropped)
  */
 export class SessionEventBus {
-    /** 会话级事件监听器：sessionId -> handlers[] */
-    private sessionListeners = new Map<string, Array<(event: OrchestratorEvent) => void>>();
+    private readonly sessionBus = new EventBus<OrchestratorEventMap>();
+    private readonly globalBus  = new EventBus<RegistryEventMap>();
 
-    /** 全局事件监听器 */
-    private globalListeners: Array<(event: RegistryEvent) => void> = [];
+    // ── Session lifecycle ──────────────────────────────────────────────────
 
-    /** 已注册的会话 ID 集合（即使没有监听器也保留） */
-    private registeredSessions = new Set<string>();
-
-    // ============================================
-    // 会话管理
-    // ============================================
-
-    /**
-     * 确保会话已注册（幂等）
-     * 即使没有监听器，也标记为已注册，允许后续事件发送
-     */
     ensureSession(sessionId: string): void {
-        this.registeredSessions.add(sessionId);
-        if (!this.sessionListeners.has(sessionId)) {
-            this.sessionListeners.set(sessionId, []);
-        }
+        this.sessionBus.channel(sessionId); // idempotent
     }
 
-    /**
-     * 移除会话（清理所有监听器和注册状态）
-     */
     removeSession(sessionId: string): void {
-        this.registeredSessions.delete(sessionId);
-        this.sessionListeners.delete(sessionId); log.debug('Session removed from event bus', { sessionId });
+        this.sessionBus.closeChannel(sessionId);
+        log.debug('Session removed from event bus', { sessionId });
     }
 
-    /**
-     * 检查会话是否已注册
-     */
     hasSession(sessionId: string): boolean {
-        return this.registeredSessions.has(sessionId);
+        return this.sessionBus.hasChannel(sessionId);
     }
 
-    // ============================================
-    // 会话级事件
-    // ============================================
+    // ── Session events ─────────────────────────────────────────────────────
 
-    /**
-     * 订阅会话事件
-     * @returns 取消订阅函数
-     */
     onSession(
         sessionId: string,
-        handler: (event: OrchestratorEvent) => void
+        handler: (event: OrchestratorEvent) => void,
     ): () => void {
         this.ensureSession(sessionId);
-
-        const listeners = this.sessionListeners.get(sessionId)!;
-        listeners.push(handler);
-
-        log.debug('Session event listener added', {
-            sessionId,
-            listenerCount: listeners.length
-        });
-
-        // 返回取消订阅函数
-        return () => {
-            const index = listeners.indexOf(handler);
-            if (index !== -1) {
-                listeners.splice(index, 1);
-                log.debug('Session event listener removed', {
-                    sessionId,
-                    remainingListeners: listeners.length
-                });
-            }
-        };
-    }
-
-    /**
-     * 发送会话事件
-     * 只有已注册的会话才会收到事件
-     */
-    emitSession(sessionId: string, event: OrchestratorEvent): void {
-        // 检查会话是否已注册
-        if (!this.registeredSessions.has(sessionId)) {
-            log.debug('Event dropped (session not registered)', {
-                sessionId,
-                eventType: event.type
-            });
-            return;
-        }
-
-        const listeners = this.sessionListeners.get(sessionId);
-        if (!listeners || listeners.length === 0) {
-            log.debug('Event dropped (no listeners)', {
-                sessionId,
-                eventType: event.type
-            });
-            return;
-        }
-
-        log.debug('Emitting session event', {
-            sessionId,
-            eventType: event.type,
-            listenerCount: listeners.length
-        });
-
-        // 复制监听器数组，避免在回调中修改导致问题
-        const listenersCopy = [...listeners];
-
-        for (const listener of listenersCopy) {
+        return this.sessionBus.channel(sessionId).onAny((payload, meta) => {
             try {
-                listener(event);
-            } catch (error) {
-                log.error('Session event listener error', {
-                    sessionId,
-                    eventType: event.type,
-                    error
-                });
+                handler({ type: meta.type, payload } as OrchestratorEvent);
+            } catch (err) {
+                log.error('Session event listener error', { sessionId, eventType: meta.type, err });
             }
+        });
+    }
+
+    emitSession(sessionId: string, event: OrchestratorEvent): void {
+        if (!this.sessionBus.hasChannel(sessionId)) {
+            log.debug('Event dropped (session not registered)', { sessionId, eventType: event.type });
+            return;
         }
+        this.sessionBus.channel(sessionId).emit(
+            event.type as keyof OrchestratorEventMap,
+            event.payload as any,
+        );
     }
 
     /**
-     * 清除会话的所有监听器（但保留注册状态）
-     * 用于解绑会话但保留后台任务
+     * Clear all local listeners for a session without closing its channel.
+     * Background tasks can still emit; UI just stops receiving.
      */
     clearSessionListeners(sessionId: string): void {
-        const listeners = this.sessionListeners.get(sessionId);
-        if (listeners) {
-            const count = listeners.length;
-            listeners.length = 0; // 清空数组但保留引用
-            log.debug('Session listeners cleared', {
-                sessionId,
-                clearedCount: count
-            });
-        }
+        if (!this.sessionBus.hasChannel(sessionId)) return;
+        this.sessionBus.channel(sessionId).clearLocal();
     }
 
-    // ============================================
-    // 全局事件
-    // ============================================
+    // ── Global events ──────────────────────────────────────────────────────
 
-    /**
-     * 订阅全局事件
-     * @returns 取消订阅函数
-     */
     onGlobal(handler: (event: RegistryEvent) => void): () => void {
-        this.globalListeners.push(handler);
-
-        log.debug('Global event listener added', {
-            listenerCount: this.globalListeners.length
-        });
-
-        return () => {
-            const index = this.globalListeners.indexOf(handler);
-            if (index !== -1) {
-                this.globalListeners.splice(index, 1);
-                log.debug('Global event listener removed', {
-                    remainingListeners: this.globalListeners.length
-                });
-            }
-        };
-    }
-
-    /**
-     * 发送全局事件
-     */
-    emitGlobal(event: RegistryEvent): void {
-        if (this.globalListeners.length === 0) {
-            return;
-        }
-
-        log.debug('Emitting global event', {
-            eventType: event.type,
-            listenerCount: this.globalListeners.length
-        });
-
-        // 复制监听器数组
-        const listenersCopy = [...this.globalListeners];
-
-        for (const listener of listenersCopy) {
+        return this.globalBus.onAny((payload, meta) => {
             try {
-                listener(event);
-            } catch (error) {
-                log.error('Global event listener error', {
-                    eventType: event.type,
-                    error
-                });
+                handler({ type: meta.type, payload } as RegistryEvent);
+            } catch (err) {
+                log.error('Global event listener error', { eventType: meta.type, err });
             }
-        }
+        });
     }
 
-    /**
-     * ✅ 新增：只清理全局监听器
-     * 用于 SessionManager 销毁时，保留会话监听器让后台任务继续
-     */
+    emitGlobal(event: RegistryEvent): void {
+        this.globalBus.emit(
+            event.type as keyof RegistryEventMap,
+            event.payload as any,
+        );
+    }
+
     clearGlobalListeners(): void {
-        const count = this.globalListeners.length;
-        this.globalListeners = [];
-        log.debug('Global event listeners cleared', { clearedCount: count });
+        this.globalBus.clear();
     }
 
-    // ============================================
-    // 清理
-    // ============================================
+    // ── Cleanup ────────────────────────────────────────────────────────────
 
-    /**
-     * 完全清理（包括会话和全局）
-     */
     clear(): void {
-        this.sessionListeners.clear();
-        this.registeredSessions.clear();
-        this.globalListeners = [];
+        this.sessionBus.clear();
+        this.globalBus.clear();
     }
 
-    // ============================================
-    // 调试
-    // ============================================
+    // ── Debug ──────────────────────────────────────────────────────────────
 
-    /**
-     * 获取调试信息
-     */
-    getDebugInfo(): {
-        registeredSessions: string[];
-        sessionListenerCounts: Record<string, number>;
-        globalListenerCount: number;
-    } {
-        const sessionListenerCounts: Record<string, number> = {};
-
-        for (const [sessionId, listeners] of this.sessionListeners) {
-            sessionListenerCounts[sessionId] = listeners.length;
-        }
-
-        return {
-            registeredSessions: Array.from(this.registeredSessions),
-            sessionListenerCounts,
-            globalListenerCount: this.globalListeners.length
-        };
-    }
-
-    /**
-     * 打印调试信息
-     */
-    debug(): void {
-        const info = this.getDebugInfo();
-
-        console.group('[SessionEventBus] Debug Info');
-        console.log('Registered Sessions:', info.registeredSessions.length);
-        console.log('Global Listeners:', info.globalListenerCount);
-        console.log('Session Listeners:');
-
-        for (const [sessionId, count] of Object.entries(info.sessionListenerCounts)) {
-            const isRegistered = this.registeredSessions.has(sessionId) ? '✓' : '✗';
-            console.log(`  ${isRegistered} ${sessionId}: ${count} listener(s)`);
-        }
-
-        console.groupEnd();
-    }
-
-    /**
-     * 获取统计信息
-     */
-    getStats(): {
-        totalSessions: number;
-        totalSessionListeners: number;
-        totalGlobalListeners: number;
-        sessionsWithListeners: number;
-        sessionsWithoutListeners: number;
-    } {
-        let totalSessionListeners = 0;
-        let sessionsWithListeners = 0;
-
-        for (const listeners of this.sessionListeners.values()) {
-            totalSessionListeners += listeners.length;
-            if (listeners.length > 0) {
-                sessionsWithListeners++;
-            }
-        }
-
-        return {
-            totalSessions: this.registeredSessions.size,
-            totalSessionListeners,
-            totalGlobalListeners: this.globalListeners.length,
-            sessionsWithListeners,
-            sessionsWithoutListeners: this.registeredSessions.size - sessionsWithListeners
-        };
+    stats(): { sessions: number; globalHandlers: number } {
+        const s = this.sessionBus.stats();
+        const g = this.globalBus.stats();
+        return { sessions: s.channels, globalHandlers: g.handlers };
     }
 }

@@ -9,7 +9,7 @@ src/
 ├── editor/        ← MDxEditor (实现 IEditor，v3.3: sessionEngine = IModuleFS)
 ├── renderer/      ← MDxRenderer (实时预览)
 ├── adapters/      ← CodeMirror 6 + marked 适配
-├── core/          ← PluginManager, EventBus, DI 容器
+├── core/          ← PluginManager, EventBus (wraps common/EventBus with coalesce), DI 容器
 ├── managers/      ← Navigation, Save, Search, Mode, StreamingDiffer
 ├── plugins/       ← 20+ 插件 (语法/交互/自动完成/Cloze/Asset/Upload/UI)
 ├── services/      ← MDxProcessor, PrintService

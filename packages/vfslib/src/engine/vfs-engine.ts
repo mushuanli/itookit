@@ -107,7 +107,7 @@ export class VFSEngine {
         if (!this.initialized) return;
         await this.plugins.disposeAll();
         await this.devices.disposeAll();
-        this.events.removeAll();
+        this.events.clear();
         await this.backend.close();
         this.initialized = false;
     }

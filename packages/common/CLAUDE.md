@@ -1,10 +1,10 @@
 # CLAUDE.md — @itookit/common
 
-共享接口、类型、工具函数和 i18n 的基础包。**零运行时依赖**，所有 `@itookit/*` 包的类型源头。
+共享接口、类型、工具函数、i18n 和统一 EventBus 的基础包。**零运行时依赖**，所有 `@itookit/*` 包的类型源头。
 
 ## Architecture
 
-此包**不包含实现逻辑**，只导出 interfaces / types / utils / components / i18n。
+此包包含接口/类型/工具/i18n，以及唯一的共享实现 — 统一事件总线。
 
 ```
 src/
@@ -38,6 +38,11 @@ src/
 │   ├── IMDXFile.ts       ← extends IFile
 │   ├── IChatFile.ts      ← extends IFile
 │   └── IEditor.ts        ← sessionEngine?: IModuleFS (v3.3)
+├── eventbus/             ← 统一事件总线 (共享实现)
+│   ├── types.ts          ← IEventEmitter, IEventBus, IEventChannel, EventMeta, Handler
+│   ├── event-bus.ts      ← EventBus<M> — channel(key) 隔离, coalesce 批处理
+│   ├── event-buffer.ts   ← EventBuffer<M> — 事务缓冲 (commit/rollback)
+│   └── index.ts
 ├── utils/                ← 工具函数
 ├── components/           ← 基础 UI 组件
 ├── i18n/                 ← zh-CN.ts / en.ts / icons.ts / t()

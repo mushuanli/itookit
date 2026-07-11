@@ -23,6 +23,7 @@ SOLID / DRY / KISS / YAGNI / CoC / LoD — 函数≤30行，圈复杂度≤10
 | [集成链](./doc/integration-chains.md) | VFS / Chat / AppShell 端到端调用链 |
 | [接口契约](./doc/interface-contracts.md) | 跨包核心接口 + 实现/消费关系 |
 | [事件流](./doc/event-flows.md) | Agent / VFS / HITL / TTY 事件消费链 |
+| [事件系统重构](./doc/feat/events.md) | 6→1 EventBus 统一设计、Channel 隔离、EventBuffer、coalesce |
 | [开发模式](./doc/dev-patterns.md) | 新增 Provider/Connection/Agent/Tool/i18n 流程 |
 | [文件索引](./doc/file-index.md) | 场景 → 关键文件快速定位 |
 

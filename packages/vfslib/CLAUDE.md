@@ -16,7 +16,7 @@ src/
 │   └── fs-driver-adapter.ts ← FSMetaDriverAdapter
 ├── file-io/                ← FileHandle, MDXFileHandle, ChatFileHandle, AssetObj
 ├── adapter-session/        ← VFSModuleEngine (@deprecated), BaseModuleService
-├── event/                  ← EventBus, TransactionEventBuffer
+├── event/                  ← EventBus, TransactionEventBuffer (typed subclasses of common/EventBus, EventBuffer)
 ├── devices/                ← nullDevice, zeroDevice, randomDevice
 ├── backend/                ← MemoryBackend (测试用)
 └── utils/                  ← serialization (YAML export/import bundle)

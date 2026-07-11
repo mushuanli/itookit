@@ -3,7 +3,7 @@
 import { ExecutionRuntime, getRuntime } from '../runtime/execution-runtime';
 import { ExecutorConfig } from '../core/interfaces';
 import { ExecutionResult } from '../core/types';
-import { getEventBus, KernelEvent } from '../core/event-bus';
+import { getEventBus, type KernelEvent } from '../core/event-bus';
 
 /**
  * Worker 消息类型（主线程 → Worker）
@@ -66,17 +66,16 @@ export class WorkerAdapter {
         
         this.activeExecutions.set(id, abortController);
         
-        // 转发事件
+        // Subscribe to the execution-scoped channel — no manual executionId filtering needed.
         const eventBus = getEventBus();
-        const unsubscribe = eventBus.on('*', (event: KernelEvent) => {
-            // 只转发当前执行的事件
-            if (event.executionId === id) {
-                this.postMessage({ type: 'event', id, event });
-            }
+        const channel = eventBus.channel(id);
+        const unsubscribe = channel.onAny((payload, meta) => {
+            this.postMessage({ type: 'event', id, event: { type: meta.type, executionId: id, nodeId: meta.nodeId, timestamp: meta.timestamp, payload } as KernelEvent });
         });
         
         try {
             const result = await this.runtime.execute(config, input, {
+                executionId: id,
                 variables,
                 signal: abortController.signal
             });
