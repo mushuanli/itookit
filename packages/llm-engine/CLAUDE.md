@@ -8,43 +8,63 @@
 src/
 ├── session/        ← SessionManager, SessionState, TaskRunner
 │                     SessionEventBus (session + global 双 track, channel 路由)
-│                     ClaudeCodeStrategy (内置 Agent Loop), agent-loop-strategy
-├── persistence/    ← ChatEngine (IChatEngine), ChatManifest, ChatNode
-├── adapters/       ← HarnessAdapter (Agent事件→OrchestratorEvent)
-│                     UIEventAdapter (channel(sessionId).onAny 零过滤转发)
-│                     llmkernel-adapter
-├── mission/        ← MissionService, MissionScheduler, TodoState
+│                     UnifiedLoopStrategy, agent-loop-strategy, ClaudeCodeStrategy
+├── persistence/    ← ChatEngine (IChatEngine), ChatEngineLog (ILog facade), ulid
+│                     ChatManifest, ChatNode
+├── adapters/       ← HarnessAdapter (AgentEvent→OrchestratorEvent)
+│                     UIEventAdapter, llmkernel-adapter, tool-executor-bridge
+├── mission/        ← MissionService, MissionScheduler, LiteSubAgentRouter, TodoState
 ├── session-graph/  ← DependencyGraph, GraphOrchestrator
 ├── services/       ← VFSAgentService, PromptHistoryService
-├── core/           ← types, session origin & history policy
-└── utils/          ← converters, LockManager, manifest-repair
+├── core/           ← types, errors, constants
+│                     ★ executor-registry (ILoop 分发)
+│                     ★ loop-driver (drive() 协程宿主)
+│                     ★ middleware-pipeline (composeMiddleware)
+├── executors/      ← (保留目录，待 S5~S6 executor 插件)
+└── utils/          ← converters, LockManager, manifest-repair, throttled-writer
 ```
 
 ## 核心机制
 
-- **三执行路径**: Kernel (默认/单轮) vs Harness (`useHarness=true`) vs ClaudeCode (内置 Agent Loop)
-- **Agent Loop 策略模式**: `IAgentLoopStrategy` 接口 — `ClaudeCodeStrategy` (内置) 和 `HarnessStrategy` (包装 `IAgentRuntime`) 统一调用约定
-- **ClaudeCodeStrategy**: 完整 LLM 流式循环 — content block 解析 (thinking/text/tool_use) → 工具执行 → messages 拼接 → 循环。支持 thinking signature 链维护、AbortSignal 中断、默认 max 50 turns
-- **HarnessStrategy**: 包装 `HarnessAdapter` 为 `IAgentLoopStrategy`，串行化执行（单 `IAgentRuntime`）
-- **ILLMService 注入**: 通过组合根注入，替代 DeviceDriver 直连，统一 LLM 调用入口
-- **Session Origin**: 会话来源追踪 (user/mission/sub-agent) + history policy 控制回传策略
-- **Billing/Cost Tracking**: 完成时通过 `agentResolver.recordUsageCost()` 记录到 `cost.seq`
-- **LLM Logging**: 通过 `ILLMLogger` 将完整 request/response 记录到 `/var/log/llm/{session}.json`
-- **initializeLLMEngine()**: Kernel → agentService.init() → sessionEngine.init() → PromptHistory → SessionManager + (可选) HarnessAdapter
+### 两条执行路径
+
+```
+SessionManager.sendMessage()
+  └─ TaskRunner.submit() → processQueue()
+       ├─ useHarness=true → executeAgentLoopTask()
+       │   └─ selectStrategy() → UnifiedLoopStrategy(★ ILLMService) | HarnessStrategy
+       │       └─ ★ llmService.chatStream()  ← 统一 LLM 入口
+       └─ useHarness=false → executeTask()
+           └─ kernelAdapter.executeQuery()   ← 旧 kernel 路径 (auto-continue 循环)
+```
+
+### LLM 2.0 四原语（渐进迁移中）
+
+| 原语 | 状态 | 关键文件 |
+|---|---|---|
+| **AgentEvent** | canonical schema 已定义，旧事件标记 @deprecated | `common/.../agent-event.ts` |
+| **ILoop** | 接口 + 注册表已就绪，待接入 TaskRunner | `common/.../loop.ts`, `core/executor-registry.ts` |
+| **drive()** | 协程宿主已就绪，pause/resume 一条路径 | `core/loop-driver.ts` |
+| **ILog** | 接口已定义，ChatEngineLog facade 已实现 | `common/.../loop.ts`, `persistence/chat-engine-log.ts` |
+
+### ILLMService 注入（★ S1 已完成）
+
+- `initializeLLMEngine({ llmService })` 接收 `ILLMService`（由 `createHarness().llmService` 提供）
+- Agent Loop 路径（`UnifiedLoopStrategy` / `ClaudeCodeStrategy` / `LiteSubAgentRouter`）全部走 `ILLMService.chatStream()`
+- 旧 `LLMKernelAdapter.streamRaw()` 已删除
+- Kernel 路径（`executeTask`）仍使用 `LLMKernelAdapter.executeQuery()`，待 S6 迁移
 
 ### Agent Loop Strategy Types
 
 | 类型/接口 | 文件 | 说明 |
 |---|---|---|
-| `IAgentLoopStrategy` | `session/agent-loop-strategy.ts` | 策略接口 (run) |
-| `AgentLoopRequest` | `session/agent-loop-strategy.ts` | 请求 (messages, llmParams, maxTurns, signal) |
-| `AgentLoopResult` | `session/agent-loop-strategy.ts` | 结果 (output, turns[], totalUsage) |
-| `TurnRecord` | `session/agent-loop-strategy.ts` | 单轮记录 (assistantBlocks[], toolResults[], usage) |
-| `IToolExecutor` | `session/agent-loop-strategy.ts` | 工具执行器接口 |
-| `ClaudeCodeStrategy` | `session/claude-code-runner.ts` | 内置 Agent Loop 实现 |
+| `IAgentLoopStrategy` | `session/agent-loop-strategy.ts` | 策略接口 (run) — 待 `ILoop` 替代 |
+| `UnifiedLoopStrategy` | `session/unified-loop-strategy.ts` | 默认策略，依赖 `ILLMService` |
+| `ClaudeCodeStrategy` | `session/claude-code-runner.ts` | 轻量策略，依赖 `ILLMService`（当前未实例化） |
 | `HarnessStrategy` | `adapters/harness-adapter.ts` | 包装 HarnessAdapter 的策略实现 |
+| `IToolExecutor` | `session/agent-loop-strategy.ts` | 工具执行器接口 |
 
-### OrchestratorEvent 新增事件
+### OrchestratorEvent（@deprecated — 待迁移至 canonical AgentEvent）
 
 Agent Loop 路径发送 content-block 粒度事件:
 - `stream:thinking:start/stop` — thinking block 边界
@@ -66,4 +86,6 @@ TaskRunner 在两个路径完成时回调 `agentResolver.recordUsageCost(connect
 - `VFSAgentService` 同时实现 `IAgentConfigService` 和 `IAgentManagementService`
 - Chat 文件以 `.chat` 扩展名存储在 `chats` 模块
 - `chatFileParser` 解析 `.chat` 文件为结构化数据
-- 新 Agent Loop 策略实现 `IAgentLoopStrategy`，通过 `TaskRunner.selectStrategy()` 分发
+- 新 Agent Loop 策略实现 `IAgentLoopStrategy`（未来实现 `ILoop`），通过 `TaskRunner.selectStrategy()` 分发
+- LLM 调用入口统一为 `ILLMService`，禁止绕过接口直接调用 device driver
+- 事件迁移期间新旧事件并行，新代码优先使用 `AgentEvent`（from `@itookit/common`）

@@ -27,8 +27,10 @@ src/
 │   │   ├── agent.ts      ← AgentDefinition, LLMSkill, MCPServer, IConnectionService
 │   │   └── mission.ts    ← MissionPlan, TodoItem, HITLRequest
 │   ├── agent/            ← Agent 运行时接口
-│   │   ├── agent-types.ts   ← AgentEventType, AgentEventPayloads, AgentTaskRequest
+│   │   ├── agent-types.ts   ← AgentEventType (@deprecated), AgentEventPayloads, AgentTaskRequest
+│   │   ├── agent-event.ts   ← ★ canonical AgentEvent (~22 events, 消灭 5→1)
 │   │   ├── agent-service.ts ← IAgentRuntime (run/abort/inject/on)
+│   │   ├── loop.ts          ← ★ ILoop / LoopContext / Signal / ILog / Turn / ILoopMiddleware
 │   │   ├── context-manager.ts, budget-controller.ts, error-recovery.ts
 │   │   ├── back-pressure.ts, sub-agent.ts
 │   ├── skills/           ← Skill 接口 (SkillDefinition, ISkillService)
@@ -103,8 +105,29 @@ IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult
 | `AgentTaskResult` | `interfaces/agent/agent-types.ts` | 任务结果 (sessionId, status, response, usage) |
 | `IAgentRuntime` | `interfaces/agent/agent-service.ts` | 核心运行时 (run/abort/inject/on/onIntercept/respondToHumanInput) |
 | `IAgentRuntimeConfig` | `interfaces/agent/agent-service.ts` | 运行时配置 (modelRoles, budgetLimits, loopConfig) |
-| `AgentEventType` | `interfaces/agent/agent-types.ts` | 25 种事件联合类型 |
-| `AgentEventPayloads` | `interfaces/agent/agent-types.ts` | 事件→payload 映射 |
+| `AgentEventType` | `interfaces/agent/agent-types.ts` | @deprecated — 25 种旧事件联合类型，迁移至 `AgentEvent` |
+| `AgentEventPayloads` | `interfaces/agent/agent-types.ts` | @deprecated — 旧事件→payload 映射 |
+| `AgentEvent` | `interfaces/agent/agent-event.ts` | ★ canonical 事件 schema（~22 个，5 套→1 套） |
+| `ILoop` | `interfaces/agent/loop.ts` | ★ 执行原语 — AsyncGenerator 协程 |
+| `ILoopMiddleware` | `interfaces/agent/loop.ts` | 轮次级 hook (beforeTurn / afterTurn / onError) |
+| `ILog` / `Turn` / `RefStore` | `interfaces/agent/loop.ts` | Log 原语契约 |
+
+## LLM 2.0 四原语模型
+
+```
+Goal      控制回路 — reconcile(goal, predicate, loop) → Verdict
+Channel   会话即进程 — SignalChannel(入) + EventStream(出)
+Loop      归约循环 — AsyncGenerator: yield AgentEvent, receive Signal
+Log       不可变历史 — append-only Turn DAG + refs; state = fold(log, ref)
+```
+
+| 原语 | 接口 | 文件 |
+|---|---|---|
+| AgentEvent | `type AgentEvent = ...` (~22 variants) | `interfaces/agent/agent-event.ts` |
+| Loop | `ILoop.run(): AsyncGenerator<AgentEvent, Turn[], Signal>` | `interfaces/agent/loop.ts` |
+| Channel | `ISession { signal(), events() }` | (待定义) |
+| Goal | `IController { reconcile() }` | (待定义) |
+| Log | `ILog { append, fold, refs, draft, merge, rebase }` | `interfaces/agent/loop.ts` |
 
 ## LLM Pricing & Billing
 

@@ -8,8 +8,7 @@
 //   - 通过 OrchestratorEvent 向 llm-ui 暴露 content block 粒度事件
 //   - 用户可通过 AbortSignal 随时中断
 
-import type { ChatCompletionParams, ChatCompletionChunk, MessageContentPart } from '@itookit/common';
-import type { LLMKernelAdapter } from '../adapters/llmkernel-adapter';
+import type { ChatCompletionParams, MessageContentPart, ILLMService } from '@itookit/common';
 import type { OrchestratorEvent } from '../core/types';
 import type {
     IAgentLoopStrategy,
@@ -48,7 +47,7 @@ type ContentBlock = ThinkingBlock | TextBlock | ToolUseBlock;
 
 export class ClaudeCodeStrategy implements IAgentLoopStrategy {
     constructor(
-        private readonly kernelAdapter: LLMKernelAdapter,
+        private readonly llmService: ILLMService,
         private readonly toolExecutor: IToolExecutor = nullToolExecutor,
     ) {}
 
@@ -158,7 +157,7 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
         let toolInputBuf = '';
 
         const params: ChatCompletionParams = { ...llmParams, messages, stream: true, signal };
-        const stream = await this.kernelAdapter.streamRaw(params, connectionId);
+        const stream = this.llmService.chatStream(connectionId ?? 'default', params);
 
         for await (const chunk of stream) {
             this.checkAbort(signal);

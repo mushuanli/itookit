@@ -367,6 +367,9 @@ export interface DeleteResult {
 
 /**
  * UI 事件类型
+ *
+ * @deprecated Migrate to canonical {@link import('@itookit/common').AgentEvent} from '@itookit/common'.
+ * This ~38-event vocabulary will be retired in favor of the canonical AgentEvent schema.
  */
 export type OrchestratorEvent =
     | { type: 'session_start'; payload: SessionGroup }

@@ -1,6 +1,6 @@
 // @file: llm-engine/session/task-runner.ts
 
-import type { ChatMessage } from '@itookit/common';
+import type { ChatMessage, ILLMService, IToolService } from '@itookit/common';
 import { ExecutorConfig } from '@itookit/llm-kernel';
 import {
     ExecutionTask,
@@ -24,7 +24,6 @@ import { UnifiedLoopStrategy } from './unified-loop-strategy';
 import type { UnifiedLoopConfig } from './unified-loop-strategy';
 import type { IAgentLoopStrategy, IToolExecutor, AgentLoopRequest } from './agent-loop-strategy';
 import { nullToolExecutor } from './agent-loop-strategy';
-import type { IToolService } from '@itookit/common';
 import { ToolServiceToExecutorAdapter } from '../adapters/tool-executor-bridge';
 import { IChatEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
@@ -76,6 +75,7 @@ export class TaskRunner {
     private maxConcurrent: number;
     private maxQueueSize: number;
     private kernelAdapter: LLMKernelAdapter;
+    private llmService: ILLMService | null = null;
     private harnessAdapter: HarnessAdapter | null = null;
     private _toolExecutor: IToolExecutor = nullToolExecutor;
     /**
@@ -114,6 +114,16 @@ export class TaskRunner {
      */
     setHarnessAdapter(adapter: HarnessAdapter): void {
         this.harnessAdapter = adapter;
+    }
+
+    /**
+     * Inject ILLMService for unified LLM calls.
+     *
+     * After injection, all strategy paths (UnifiedLoopStrategy, ClaudeCodeStrategy)
+     * use this single ILLMService entry point instead of LLMKernelAdapter.streamRaw().
+     */
+    setLLMService(llmService: ILLMService): void {
+        this.llmService = llmService;
     }
 
     async submit(input: TaskInput, runtime: SessionRuntime): Promise<string> {
@@ -487,8 +497,11 @@ export class TaskRunner {
         if (this.harnessAdapter) {
             return new HarnessStrategy(this.harnessAdapter);
         }
+        if (!this.llmService) {
+            throw new Error('TaskRunner.selectStrategy: llmService not injected. Call setLLMService() first.');
+        }
         return new UnifiedLoopStrategy(
-            this.kernelAdapter,
+            this.llmService,
             this._toolExecutor,
             this.getUnifiedLoopConfig(),
         );

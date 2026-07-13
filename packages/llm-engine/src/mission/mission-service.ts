@@ -11,6 +11,7 @@ import type {
     ISubAgentRouter,
     IAgentLookup,
     IHITLQueue,
+    ILLMService,
     MissionPlan,
     MissionConfig,
     MissionPaths,
@@ -22,7 +23,6 @@ import { TodoStateManager } from './todo-state';
 import { ResultPersistenceService } from './result-persister';
 import { MissionScheduler } from './mission-scheduler';
 import { LiteSubAgentRouter } from './lite-sub-agent-router';
-import type { LLMKernelAdapter } from '../adapters/llmkernel-adapter';
 import type { IToolExecutor } from '../session/agent-loop-strategy';
 
 export interface MissionServiceOptions {
@@ -32,7 +32,7 @@ export interface MissionServiceOptions {
     agentLookup: IAgentLookup;
     hitlQueue?: IHITLQueue;
     /** Required if router is not provided — used to auto-create LiteSubAgentRouter */
-    kernelAdapter?: LLMKernelAdapter;
+    llmService?: ILLMService;
     /** Optional — used by LiteSubAgentRouter for tool execution */
     toolExecutor?: IToolExecutor;
 }
@@ -72,10 +72,10 @@ export class MissionService {
         this.todoState = new TodoStateManager(opts.vfs);
         this.resultPersistence = new ResultPersistenceService(opts.vfs);
         this.router = opts.router ?? (() => {
-            if (!opts.kernelAdapter) {
-                throw new Error('MissionService: either router or kernelAdapter must be provided');
+            if (!opts.llmService) {
+                throw new Error('MissionService: either router or llmService must be provided');
             }
-            return new LiteSubAgentRouter(opts.kernelAdapter, opts.toolExecutor);
+            return new LiteSubAgentRouter(opts.llmService, opts.toolExecutor);
         })();
         this.agentLookup = opts.agentLookup;
         this.hitlQueue = opts.hitlQueue;

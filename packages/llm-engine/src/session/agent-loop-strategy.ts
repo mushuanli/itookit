@@ -50,7 +50,7 @@ export interface AgentLoopRequest {
     /** 最大循环轮次，默认 50 */
     maxTurns: number;
     signal?: AbortSignal;
-    /** LLM connection ID — forwarded to streamRaw for provider selection */
+    /** LLM connection ID — forwarded to ILLMService.chatStream for provider selection */
     connectionId?: string;
 }
 

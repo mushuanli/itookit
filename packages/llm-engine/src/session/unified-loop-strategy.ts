@@ -8,8 +8,7 @@
 //   - 特性可配置 — 不传配置 = 功能关闭，行为等同于原 ClaudeCodeStrategy
 //   - 轻量内联 — 预算和错误恢复直接内联实现，避免引入大型类依赖
 
-import type { ChatCompletionParams, ChatCompletionChunk, MessageContentPart } from '@itookit/common';
-import type { LLMKernelAdapter } from '../adapters/llmkernel-adapter';
+import type { ChatCompletionParams, MessageContentPart, ILLMService } from '@itookit/common';
 import type { OrchestratorEvent, SessionTokenUsage } from '../core/types';
 import type {
     IAgentLoopStrategy,
@@ -60,7 +59,7 @@ export interface UnifiedLoopConfig {
 
 export class UnifiedLoopStrategy implements IAgentLoopStrategy {
     constructor(
-        private readonly kernelAdapter: LLMKernelAdapter,
+        private readonly llmService: ILLMService,
         private readonly toolExecutor: IToolExecutor = nullToolExecutor,
         private readonly config: UnifiedLoopConfig = {},
     ) {}
@@ -287,7 +286,7 @@ export class UnifiedLoopStrategy implements IAgentLoopStrategy {
         let toolInputBuf = '';
 
         const params: ChatCompletionParams = { ...llmParams, messages, stream: true, signal };
-        const stream = await this.kernelAdapter.streamRaw(params, connectionId);
+        const stream = this.llmService.chatStream(connectionId ?? 'default', params);
 
         for await (const chunk of stream) {
             this.checkAbort(signal);

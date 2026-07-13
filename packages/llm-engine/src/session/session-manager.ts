@@ -24,7 +24,8 @@ import {
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { IChatEngine, BranchTreeNode } from '../persistence/types';
-import { IAgentConfigService } from '../services/agent-service';
+import type { IAgentConfigService } from '../services/agent-service';
+import type { ILLMService } from '@itookit/common';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
 import { TaskRunner } from './task-runner';
@@ -1170,6 +1171,16 @@ export class SessionManager {
      */
     setHarnessAdapter(adapter: HarnessAdapter): void {
         this.taskRunner.setHarnessAdapter(adapter);
+    }
+
+    /**
+     * Inject ILLMService for unified LLM access.
+     *
+     * After injection, all Agent Loop strategies use this single ILLMService
+     * entry point instead of LLMKernelAdapter.streamRaw().
+     */
+    setLLMService(llmService: ILLMService): void {
+        this.taskRunner.setLLMService(llmService);
     }
 
     destroy(): void {

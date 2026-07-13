@@ -5,8 +5,7 @@
 // 替代 llm-harness 的 SubAgentRouter，使 Mission 系统不再依赖 harness。
 // 子代理使用独立的 UnifiedLoopStrategy 实例（最小配置），在隔离的上下文中执行。
 
-import type { ISubAgentRouter, SubAgentTask, SubAgentResult, ChatMessage } from '@itookit/common';
-import type { LLMKernelAdapter } from '../adapters/llmkernel-adapter';
+import type { ISubAgentRouter, SubAgentTask, SubAgentResult, ChatMessage, ILLMService } from '@itookit/common';
 import type { IToolExecutor } from '../session/agent-loop-strategy';
 import { nullToolExecutor } from '../session/agent-loop-strategy';
 import { UnifiedLoopStrategy } from '../session/unified-loop-strategy';
@@ -15,7 +14,7 @@ export class LiteSubAgentRouter implements ISubAgentRouter {
     private activeAbortController: AbortController | null = null;
 
     constructor(
-        private readonly kernelAdapter: LLMKernelAdapter,
+        private readonly llmService: ILLMService,
         private readonly toolExecutor: IToolExecutor = nullToolExecutor,
     ) {}
 
@@ -38,7 +37,7 @@ export class LiteSubAgentRouter implements ISubAgentRouter {
                 : this.toolExecutor;
 
             const strategy = new UnifiedLoopStrategy(
-                this.kernelAdapter,
+                this.llmService,
                 executor,
                 { maxTurns: task.maxTurns ?? 10 },
             );

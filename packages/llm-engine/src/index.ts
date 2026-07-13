@@ -25,6 +25,14 @@ export * from './core/types';
 export * from './core/errors';
 export { ENGINE_DEFAULTS, STORAGE_KEYS } from './core/constants';
 
+// ── LLM 2.0: 协程式 Loop + Executor 注册表 ──────────────────────────
+
+export { ExecutorRegistry, getExecutorRegistry, resetExecutorRegistry } from './core/executor-registry';
+export { drive, LoopAbortedError, notSupported } from './core/loop-driver';
+export type { SessionActor } from './core/loop-driver';
+export { composeMiddleware } from './core/middleware-pipeline';
+export type { MiddlewarePipeline } from './core/middleware-pipeline';
+
 // ============================================
 // 会话管理
 // ============================================
@@ -197,7 +205,7 @@ export type {
 // 初始化
 // ============================================
 
-import type { IAgentRuntime, ISkillService, IToolService } from '@itookit/common';
+import type { IAgentRuntime, ILLMService, ISkillService, IToolService } from '@itookit/common';
 import { IAgentConfigService } from './services/agent-service';
 import { IChatEngine } from './persistence/types';
 import { initializeKernel, KernelInitOptions } from '@itookit/llm-kernel';
@@ -245,6 +253,15 @@ export interface EngineInitOptions extends KernelInitOptions {
      * 由 @itookit/llm-harness 的 createHarness().toolService 提供。
      */
     harnessToolService?: IToolService;
+
+    /**
+     * （可选）ILLMService 实例。
+     *
+     * 注入后所有 Agent Loop 策略统一通过此入口调用 LLM，
+     * 不再通过 LLMKernelAdapter.streamRaw()。
+     * 由 @itookit/llm-harness 的 createHarness().llmService 提供。
+     */
+    llmService?: ILLMService;
 }
 
 /**
@@ -285,6 +302,11 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
             harnessAdapter.setToolService(options.harnessToolService);
         }
         sessionManager.setHarnessAdapter(harnessAdapter);
+    }
+
+    // Wire ILLMService for unified LLM access
+    if (options.llmService) {
+        sessionManager.setLLMService(options.llmService);
     }
 
     return { sessionManager };

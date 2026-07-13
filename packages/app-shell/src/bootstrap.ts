@@ -324,6 +324,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         harnessRuntime:      harness.runtime,
         harnessSkillService: harness.skillService,
         harnessToolService:  harness.toolService,
+        llmService:          harness.llmService,
     });
 
     const llmUiEditors: LLMUIEditors = {

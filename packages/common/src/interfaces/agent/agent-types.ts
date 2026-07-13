@@ -178,6 +178,9 @@ export interface AgentLoopConfig {
 
 /**
  * Agent 事件类型枚举
+ *
+ * @deprecated Use {@link import('./agent-event').AgentEvent} from './agent-event' instead.
+ * This ~25-event vocabulary will be retired in favor of the canonical AgentEvent.
  */
 export type AgentEventType =
     // 任务生命周期
