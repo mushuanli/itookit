@@ -16,6 +16,9 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementS
         const selectedCount = this.selectedItems.size;
         const hasSelection  = selectedCount > 0;
 
+        // Collect duplicate warnings
+        const dupWarnings = this.buildDuplicateWarnings();
+
         this.container.innerHTML = `
             <div class="settings-page">
                 <div class="settings-page__header">
@@ -37,6 +40,8 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementS
                     </div>
                 </div>
 
+                ${dupWarnings}
+
                 ${this.renderSection('🏭 Provider 配置', 'provider', providers)}
                 ${this.renderSection('🔗 默认连接（Connection）', 'connection', connections)}
                 ${this.renderSection('🤖 默认智能体（Agent）', 'agent', agents)}
@@ -45,6 +50,27 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementS
 
         this.updateAllSelectAllState(providers, connections, agents);
         this.bindEvents();
+    }
+
+    private buildDuplicateWarnings(): string {
+        const dupItems = this.allItems.filter(i => i.duplicatePaths?.length);
+        if (dupItems.length === 0) return '';
+
+        const rows = dupItems.map(i => {
+            const paths = i.duplicatePaths!.map(p => `<code>${this.escapeHtml(p)}</code>`).join(', ');
+            return `<li><strong>${i.type}/${i.id}</strong> — 重复路径: ${paths}</li>`;
+        }).join('');
+
+        return `
+            <div class="settings-banner settings-banner--warning" style="margin-bottom:1rem">
+                ⚠️ 检测到 ${dupItems.length} 个项目存在重复文件，全量重置时将自动合并（保留 /default/ 路径，删除冗余副本）：
+                <ul style="margin:8px 0 0 16px;font-size:0.875rem">${rows}</ul>
+            </div>
+        `;
+    }
+
+    private escapeHtml(s: string): string {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     // ── Render ─────────────────────────────────────────────────────────────────
@@ -78,6 +104,10 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementS
             ok:       { badge: '<span class="settings-badge settings-badge--success">正常</span>',   cls: 'status-ok' },
         }[item.status];
 
+        const dupBadge = item.duplicatePaths?.length
+            ? ` <span class="settings-badge settings-badge--danger" title="重复文件: ${item.duplicatePaths.join(', ')}">⚠️ 重复</span>`
+            : '';
+
         return `
             <div class="settings-list-item ${cls}${isSelected ? ' settings-list-item--selected' : ''}"
                  data-key="${key}">
@@ -86,7 +116,7 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementS
                 </div>
                 <div class="settings-list-item__icon">${item.icon ?? ''}</div>
                 <div class="settings-list-item__content">
-                    <div class="settings-list-item__title">${item.name} ${badge}</div>
+                    <div class="settings-list-item__title">${item.name} ${badge}${dupBadge}</div>
                     <div class="settings-list-item__desc">${item.description ?? ''} · ID: ${item.id}</div>
                 </div>
             </div>
@@ -202,23 +232,31 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementS
         const selected = this.getSelectedObjects();
         const hasOk    = selected.some(i => i.status === 'ok');
         const hasProviders = selected.some(i => i.type === 'provider');
+        const hasDuplicates = selected.some(i => i.duplicatePaths?.length);
 
         let msg = `确定要重置这 ${selected.length} 个项目吗？`;
         if (hasOk) msg += '\n\n⚠️ 注意：包含状态正常的项目，重置将覆盖当前配置。';
         if (hasProviders) msg += '\n\n✅ Provider 重置会保留已配置的 API Key，仅重置模型列表和地址。';
+        if (hasDuplicates) {
+            const dupItems = selected.filter(i => i.duplicatePaths?.length);
+            const dupDetail = dupItems.map(i =>
+                `  · ${i.type}/${i.id}: ${i.duplicatePaths!.join(', ')}`
+            ).join('\n');
+            msg += `\n\n⚠️ 以下项目存在重复文件，重置时将自动合并（保留 /default/ 路径）：\n${dupDetail}`;
+        }
 
-        Modal.confirm(hasOk ? '强制重置确认' : '恢复确认', msg, async () => {
+        Modal.confirm(hasOk || hasDuplicates ? '强制重置确认' : '恢复确认', msg, async () => {
             const btn = this.container.querySelector('#btn-batch-restore') as HTMLButtonElement;
             if (btn) { btn.disabled = true; btn.innerHTML = '⏳ 处理中...'; }
 
             let ok = 0; let err = 0;
             await Promise.all(
                 Array.from(this.selectedItems).map(async (key) => {
-                    const [type, id] = key.split(':');
+                    const sep = key.indexOf(':');
+                    const type = key.slice(0, sep) as 'provider' | 'connection' | 'agent';
+                    const id = key.slice(sep + 1);
                     try {
-                        await this.service.restoreItem(
-                            type as 'provider' | 'connection' | 'agent', id
-                        );
+                        await this.service.restoreItem(type, id);
                         ok++;
                     } catch (e: unknown) {
                         err++;
@@ -238,12 +276,20 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementS
     }
 
     private handleResetAll() {
+        const dupItems = this.allItems.filter(i => i.duplicatePaths?.length);
+        let dupMsg = '';
+        if (dupItems.length > 0) {
+            dupMsg = '\n\n⚠️ 检测到以下项目存在重复文件，将自动合并（保留 /default/ 路径）：\n' +
+                dupItems.map(i => `  · ${i.type}/${i.id}: ${i.duplicatePaths!.join(', ')}`).join('\n');
+        }
+
         Modal.confirm(
             '强制全量重置',
             '将所有内置 Provider、Connection、Agent 恢复为出厂默认值。\n\n' +
             '✅ Provider 的 API Key 会被保留。\n' +
             '⚠️ 用户对模型列表、地址、Agent 配置的自定义修改将丢失。\n\n' +
-            '建议在遇到配置混乱或版本升级后使用此功能。',
+            '建议在遇到配置混乱或版本升级后使用此功能。' +
+            dupMsg,
             async () => {
                 const btn = this.container.querySelector('#btn-reset-all') as HTMLButtonElement;
                 if (btn) { btn.disabled = true; btn.innerHTML = '⏳ 重置中...'; }

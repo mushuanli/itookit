@@ -6,7 +6,7 @@
 //   - Colors follow Tailwind 500/600 range for consistency.
 //   - Add a new entry here before using an icon in any component.
 
-import type { LLMSkillType } from '../interfaces/llm/agent';
+import type { SkillType } from '../interfaces/skills/skill-types';
 
 // ── Skill types ───────────────────────────────────────────────────────────────
 
@@ -15,7 +15,7 @@ export interface SkillTypeMeta {
     color: string;
 }
 
-export const SKILL_TYPE_META: Record<LLMSkillType, SkillTypeMeta> = {
+export const SKILL_TYPE_META: Record<SkillType, SkillTypeMeta> = {
     prompt:  { icon: '📝', color: '#10b981' }, // emerald-500
     shell:   { icon: '🖥️', color: '#8b5cf6' }, // violet-500
     mcp:     { icon: '🔌', color: '#f97316' }, // orange-500

@@ -29,8 +29,7 @@ AgentLoopExecutor:
 
 ## Session Persistence（已废弃）
 
-`executor/session-store.ts` 已删除。会话中断检测现在使用 VFS `.chat` 文件的 `meta.status` 字段。
-遗留 `harness:session:*` localStorage key 的清理由 `llm-ui/src/shell/HarnessIntegration.ts` 的 `cleanupLegacyHarnessKeys()` 负责。
+`executor/session-store.ts` 已删除。会话中断检测现在使用 VFS `.chat` 文件的 `meta.status` 字段（见 `HarnessIntegration.ts` 的 `checkSessionInterrupted`）。不再使用 localStorage 方案。
 
 ## Harness Call from llm-engine
 

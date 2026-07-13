@@ -21,12 +21,20 @@ import { generateUUID } from '@itookit/common';
 import { TodoStateManager } from './todo-state';
 import { ResultPersistenceService } from './result-persister';
 import { MissionScheduler } from './mission-scheduler';
+import { LiteSubAgentRouter } from './lite-sub-agent-router';
+import type { LLMKernelAdapter } from '../adapters/llmkernel-adapter';
+import type { IToolExecutor } from '../session/agent-loop-strategy';
 
 export interface MissionServiceOptions {
     vfs: IVFSManager;
-    router: ISubAgentRouter;
+    /** ISubAgentRouter (from harness or LiteSubAgentRouter). Auto-created if not provided. */
+    router?: ISubAgentRouter;
     agentLookup: IAgentLookup;
     hitlQueue?: IHITLQueue;
+    /** Required if router is not provided — used to auto-create LiteSubAgentRouter */
+    kernelAdapter?: LLMKernelAdapter;
+    /** Optional — used by LiteSubAgentRouter for tool execution */
+    toolExecutor?: IToolExecutor;
 }
 
 const PLANNER_SYSTEM_PROMPT = `You are a mission planner. Given a goal and context, decompose it into concrete tasks.
@@ -63,7 +71,12 @@ export class MissionService {
     constructor(opts: MissionServiceOptions) {
         this.todoState = new TodoStateManager(opts.vfs);
         this.resultPersistence = new ResultPersistenceService(opts.vfs);
-        this.router = opts.router;
+        this.router = opts.router ?? (() => {
+            if (!opts.kernelAdapter) {
+                throw new Error('MissionService: either router or kernelAdapter must be provided');
+            }
+            return new LiteSubAgentRouter(opts.kernelAdapter, opts.toolExecutor);
+        })();
         this.agentLookup = opts.agentLookup;
         this.hitlQueue = opts.hitlQueue;
     }
