@@ -1,6 +1,6 @@
 // @file: llm-engine/session/task-runner.ts
 
-import type { ChatMessage, ILLMService, IToolService } from '@itookit/common';
+import type { ChatMessage, ILLMService, AgentEvent } from '@itookit/common';
 import { ExecutorConfig } from '@itookit/llm-kernel';
 import {
     ExecutionTask,
@@ -19,12 +19,6 @@ import { ENGINE_DEFAULTS } from '../core/constants';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { SessionState, HistoryMessage } from './session-state';
 import { LLMKernelAdapter, getLLMKernelAdapter } from '../adapters/llmkernel-adapter';
-import { HarnessAdapter, HarnessStrategy, HARNESS_META_KEYS } from '../adapters/harness-adapter';
-import { UnifiedLoopStrategy } from './unified-loop-strategy';
-import type { UnifiedLoopConfig } from './unified-loop-strategy';
-import type { IAgentLoopStrategy, IToolExecutor, AgentLoopRequest } from './agent-loop-strategy';
-import { nullToolExecutor } from './agent-loop-strategy';
-import { ToolServiceToExecutorAdapter } from '../adapters/tool-executor-bridge';
 import { IChatEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
@@ -33,6 +27,11 @@ import { AutoContinueHandler, AutoContinueConfig } from './auto-continue';
 import { createThrottledWriter } from '../utils/throttled-writer';
 import { formatErrorMessage } from '../utils/error-formatter';
 import { log } from '../utils/logger';
+// ── LLM 2.0: Executor-driven dispatch ──
+import { ExecutorRegistry, getExecutorRegistry } from '../core/executor-registry';
+import { drive, LoopAbortedError } from '../core/loop-driver';
+import { SessionActor } from '../core/session-actor';
+import type { LoopContext } from '@itookit/common';
 
 export interface TaskRunnerOptions {
     maxConcurrent?: number;
@@ -76,14 +75,7 @@ export class TaskRunner {
     private maxQueueSize: number;
     private kernelAdapter: LLMKernelAdapter;
     private llmService: ILLMService | null = null;
-    private harnessAdapter: HarnessAdapter | null = null;
-    private _toolExecutor: IToolExecutor = nullToolExecutor;
-    /**
-     * Harness sessions must be serialized: a single AgentLoopExecutor instance
-     * is shared across all sessions and its event handlers are not scoped per session.
-     * Concurrent harness runs would mix each other's events.
-     */
-    private harnessRunning = false;
+    private executorRegistry: ExecutorRegistry;
 
     /** 自动续写配置模板 */
     private autoContinueConfig: Partial<AutoContinueConfig>;
@@ -99,6 +91,7 @@ export class TaskRunner {
         this.maxConcurrent = options?.maxConcurrent ?? ENGINE_DEFAULTS.MAX_CONCURRENT;
         this.maxQueueSize = options?.maxQueueSize ?? ENGINE_DEFAULTS.MAX_QUEUE_SIZE;
         this.kernelAdapter = getLLMKernelAdapter();
+        this.executorRegistry = getExecutorRegistry();
         this.autoContinueConfig = options?.autoContinue ?? {};
     }
 
@@ -107,23 +100,18 @@ export class TaskRunner {
     // ============================================
 
     /**
-     * 注入 HarnessAdapter（初始化后调用）。
-     *
-     * 注入后，当 input.overrides.useHarness === true 时，
-     * 任务会通过 AgentLoopExecutor 执行而非 llm-kernel。
-     */
-    setHarnessAdapter(adapter: HarnessAdapter): void {
-        this.harnessAdapter = adapter;
-    }
-
-    /**
      * Inject ILLMService for unified LLM calls.
      *
-     * After injection, all strategy paths (UnifiedLoopStrategy, ClaudeCodeStrategy)
-     * use this single ILLMService entry point instead of LLMKernelAdapter.streamRaw().
+     * After injection, all executor paths use this single ILLMService
+     * entry point instead of LLMKernelAdapter.streamRaw().
      */
     setLLMService(llmService: ILLMService): void {
         this.llmService = llmService;
+    }
+
+    /** Get the executor registry for external configuration. */
+    getExecutorRegistry(): ExecutorRegistry {
+        return this.executorRegistry;
     }
 
     async submit(input: TaskInput, runtime: SessionRuntime): Promise<string> {
@@ -221,16 +209,16 @@ export class TaskRunner {
         let i = 0;
         while (this.running.size < this.maxConcurrent && i < this.queue.length) {
             const task = this.queue[i];
-            // harnessMode toggle → useHarness=true → Agent Loop 路径
-            const isAgentLoop = !!task.input.overrides?.useHarness;
-            // Only HarnessStrategy shares a singleton IAgentRuntime with global event handlers;
-            // ClaudeCodeStrategy has no shared mutable state and can run concurrently.
-            const isHarness = isAgentLoop && this.harnessAdapter !== null;
 
-            if (isHarness && this.harnessRunning) {
-                i++;
-                continue;
-            }
+            // Determine execution mode:
+            //   1. Explicit mode from overrides (e.g. 'chat', 'loop', 'loop:full')
+            //   2. Legacy: useHarness=true → 'loop' mode via executor registry
+            //   3. Default: kernel path (executeTask) for backward compat
+            const mode: string | undefined =
+                task.input.overrides?.mode ??
+                (task.input.overrides?.useHarness ? this.executorRegistry.defaultMode : undefined);
+
+            const useExecutor = mode !== undefined && this.llmService !== null;
 
             this.queue.splice(i, 1);
 
@@ -243,9 +231,8 @@ export class TaskRunner {
                 continue;
             }
 
-            if (isAgentLoop) {
-                if (isHarness) this.harnessRunning = true;
-                this.executeAgentLoopTask(task, ctx.state, ctx.runtime, isHarness);
+            if (useExecutor && mode) {
+                this.executeAgentLoopTask(task, ctx.state, ctx.runtime, mode);
             } else {
                 this.executeTask(task, ctx.state, ctx.runtime);
             }
@@ -320,20 +307,16 @@ export class TaskRunner {
     // ============================================
 
     /**
-     * Agent Loop 统一执行路径（harnessMode=ON 时调用）。
+     * Agent Loop 执行路径 — 通过 ExecutorRegistry + drive() 调度。
      *
-     * 策略选择：
-     *   - 有 HarnessAdapter 注入 → HarnessStrategy（兼容 llm-harness 旧部署）
-     *   - 否则 → ClaudeCodeStrategy（内置主框架）
-     *
-     * 两种策略共享同一套 setup/teardown/事件桥接逻辑，
-     * 通过 IAgentLoopStrategy 接口隔离执行细节。
+     * 所有 Agent Loop 模式（chat / loop / loop:full）
+     * 通过统一的 ILoop 协程协议执行。UI 只见统一的 AgentEvent 流。
      */
     private async executeAgentLoopTask(
         task: ExecutionTask,
         state: SessionState,
         runtime: SessionRuntime,
-        isHarnessTask: boolean,
+        mode: string,
     ): Promise<void> {
         const { sessionId, input } = task;
         this.running.set(task.id, task);
@@ -347,101 +330,129 @@ export class TaskRunner {
             const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize } =
                 await this.setupTaskExecution(task, state);
 
-            // ── Event bridge ─────────────────────────────────────────────────
-            const onEvent = (event: OrchestratorEvent) => {
-                if (event.type === 'node_update' && event.payload.chunk) {
-                    if (!event.payload.nodeId || event.payload.nodeId === rootNode.id) {
-                        if (event.payload.field === 'output') {
-                            accumulator.output += event.payload.chunk;
-                            state.appendToNode(rootNode.id, event.payload.chunk, 'output');
-                        } else if (event.payload.field === 'thought') {
-                            accumulator.thinking += event.payload.chunk;
-                            state.appendToNode(rootNode.id, event.payload.chunk, 'thought');
-                        }
-                        persist();
-                    }
-                }
+            // ── Get executor ──────────────────────────────────────────────
+            const executor = this.executorRegistry.get(mode);
+            const llmService = this.llmService!;
 
-                if (isBound) {
-                    if (event.type === 'error') errorAlreadyEmitted = true;
-                    if (
-                        (event.type === 'node_update' || event.type === 'node_status') &&
-                        !event.payload.nodeId
-                    ) {
-                        (event.payload as { nodeId: string }).nodeId = rootNode.id;
-                    }
-                    this.eventBus.emitSession(sessionId, event);
-                } else if (event.type === 'node_update') {
-                    // Background session: promote harness-specific signals to the global bus
-                    const meta = event.payload.metaInfo as Record<string, unknown> | undefined;
-                    const ttyOpen     = meta?.[HARNESS_META_KEYS.TTY_OPEN];
-                    const hitlRequest = meta?.[HARNESS_META_KEYS.HITL_REQUEST];
-                    const hitlResolved = meta?.[HARNESS_META_KEYS.HITL_RESOLVED];
-                    if (ttyOpen) {
-                        this.eventBus.emitGlobal({ type: 'session_tty_active',
-                            payload: { sessionId, command: (ttyOpen as any).command } });
-                    }
-                    if (hitlRequest) {
-                        this.eventBus.emitGlobal({ type: 'session_hitl_active',
-                            payload: { sessionId, question: (hitlRequest as any).question } });
-                    }
-                    if (hitlResolved) {
-                        this.eventBus.emitGlobal({ type: 'session_hitl_resolved',
-                            payload: { sessionId } });
-                    }
-                }
-            };
-
-            // ── 选择策略 ─────────────────────────────────────────────────────
-            const strategy = this.selectStrategy(input.overrides);
-
-            // ── 构建初始 messages ─────────────────────────────────────────────
+            // ── Build pre-computed messages ────────────────────────────────
             const history = this.buildHistoryForTask(state, input.text, input.overrides?.historyLength);
             const historyMessages = await this.buildHistoryMessages(sessionId, history);
-            const messages = [
+            const prebuiltMessages: ChatMessage[] = [
                 ...historyMessages,
                 { role: 'user' as const, content: input.text },
             ];
 
-            const llmParams = {
-                model: executorConfig.model,
-                tools: (executorConfig as any).tools ?? [],
-                thinking: executorConfig.enableThinking ?? false,
-                reasoningEffort: (executorConfig as any).reasoningEffort,
-                thinkingBudget: (executorConfig as any).thinkingBudget,
-                maxTokens: (executorConfig as any).maxTokens ?? 32000,
-                metadata: (executorConfig as any).metadata,
-            };
+            // ── Minimal ILog adapter (S3 pragmatic — replaced by ChatEngineLog in S4) ──
+            const logAdapter = this.createSessionLogAdapter(sessionId, prebuiltMessages);
 
-            const request: AgentLoopRequest = {
-                messages,
-                llmParams,
-                maxTurns: input.overrides?.maxTurns ?? 50,
+            // ── Event bridge: AgentEvent → accumulator + event bus ────────
+            const actor = new SessionActor((event: AgentEvent) => {
+                switch (event.type) {
+                    case 'stream:content':
+                        accumulator.output += event.delta;
+                        state.appendToNode(rootNode.id, event.delta, 'output');
+                        persist();
+                        if (isBound) {
+                            this.eventBus.emitSession(sessionId, {
+                                type: 'node_update',
+                                payload: { nodeId: rootNode.id, field: 'output', chunk: event.delta },
+                            } as OrchestratorEvent);
+                        }
+                        break;
+                    case 'stream:thinking':
+                        accumulator.thinking += event.delta;
+                        state.appendToNode(rootNode.id, event.delta, 'thought');
+                        persist();
+                        if (isBound) {
+                            this.eventBus.emitSession(sessionId, {
+                                type: 'node_update',
+                                payload: { nodeId: rootNode.id, field: 'thought', chunk: event.delta },
+                            } as OrchestratorEvent);
+                        }
+                        break;
+                    case 'error':
+                        errorAlreadyEmitted = true;
+                        if (isBound) {
+                            this.eventBus.emitSession(sessionId, {
+                                type: 'error',
+                                payload: { message: event.error.message, code: event.error.code },
+                            } as OrchestratorEvent);
+                        }
+                        break;
+                    case 'turn:start':
+                    case 'turn:end':
+                    case 'tool:queued':
+                    case 'tool:running':
+                    case 'tool:success':
+                    case 'tool:error':
+                    case 'finished':
+                        // Forward to event bus for UI; finished handled after drive()
+                        if (isBound) {
+                            this.eventBus.emitSession(sessionId, {
+                                type: event.type,
+                                payload: event as any,
+                            } as OrchestratorEvent);
+                        }
+                        break;
+                    case 'await_signal':
+                        // Handled internally by drive() — no emission needed
+                        break;
+                    default:
+                        break;
+                }
+            });
+
+            // ── Build LoopContext ──────────────────────────────────────────
+            const branchRef = 'main';
+
+            const loopCtx: LoopContext = {
+                sessionId,
+                ref: branchRef,
+                log: logAdapter,
+                llm: llmService,
+                tools: (executorConfig as any)._toolService ?? {
+                    getToolMeta: () => undefined,
+                    getToolDefinitions: () => [],
+                    invoke: async () => ({ success: false, output: 'no tool service' }),
+                },
+                middlewares: [],
                 signal: task.abortController.signal,
             };
 
-            // ── 执行 ─────────────────────────────────────────────────────────
-            const result = await strategy.run(request, {
-                nodeId: rootNode.id,
-                sessionId,
-                onEvent,
-            });
+            // ── Execute via drive() ──────────────────────────────────────
+            const gen = executor.run(loopCtx);
+            const turns = await drive(gen, actor, loopCtx);
 
-            // ── 持久化 ────────────────────────────────────────────────────────
+            // ── Persist ──────────────────────────────────────────────────
             await finalize();
             const endMs = Date.now();
 
+            let inTokens = 0;
+            let outTokens = 0;
+            for (const t of turns) {
+                const u = t.meta.usage as any;
+                inTokens += u?.inputTokens ?? 0;
+                outTokens += u?.outputTokens ?? 0;
+            }
+            const totalUsage: SessionTokenUsage = {
+                inputTokens: inTokens,
+                outputTokens: outTokens,
+                costUsd: 0,
+                contextUsageRatio: 0,
+                turns: turns.length,
+                durationMs: 0,
+                isEstimated: true,
+            };
+
             await this.engine.updateNode(sessionId, assistantNodeId, {
-                content: accumulator.output || result.output,
+                content: accumulator.output,
                 meta: {
-                    thinking:     accumulator.thinking,
-                    status:       'success',
-                    endTime:      endMs,
-                    durationMs:   result.totalUsage.durationMs,
-                    inputTokens:  result.totalUsage.inputTokens,
-                    outputTokens: result.totalUsage.outputTokens,
-                    costUsd:      result.totalUsage.costUsd,
-                    isEstimated:  false,
+                    thinking: accumulator.thinking,
+                    status: 'success',
+                    endTime: endMs,
+                    inputTokens: totalUsage.inputTokens,
+                    outputTokens: totalUsage.outputTokens,
+                    isEstimated: false,
                 },
             });
 
@@ -450,9 +461,9 @@ export class TaskRunner {
             const connectionId = executorConfig.connectionId;
             if (connectionId) {
                 this.agentResolver.recordUsageCost(connectionId, sessionId, {
-                    inputTokens:  result.totalUsage.inputTokens,
-                    outputTokens: result.totalUsage.outputTokens,
-                    cost:         result.totalUsage.costUsd,
+                    inputTokens: totalUsage.inputTokens ?? 0,
+                    outputTokens: totalUsage.outputTokens ?? 0,
+                    cost: 0,
                 }).catch(() => {});
             }
 
@@ -469,7 +480,7 @@ export class TaskRunner {
                 }
                 this.eventBus.emitSession(sessionId, {
                     type: 'finished',
-                    payload: { sessionId, tokenUsage: result.totalUsage },
+                    payload: { sessionId, tokenUsage: totalUsage },
                 });
             }
 
@@ -477,9 +488,12 @@ export class TaskRunner {
             this.callbacks.onUnread(sessionId);
 
         } catch (error: any) {
-            await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted);
+            if (error instanceof LoopAbortedError) {
+                this.callbacks.onStatusChange(sessionId, 'aborted');
+            } else {
+                await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted);
+            }
         } finally {
-            if (isHarnessTask) this.harnessRunning = false;
             this.running.delete(task.id);
             runtime.currentTaskId = undefined;
             this.emitPoolStatus();
@@ -488,47 +502,43 @@ export class TaskRunner {
     }
 
     /**
-     * 选择 Agent Loop 执行策略。
+     * Create a minimal ILog adapter backed by SessionState + ChatEngine.
      *
-     * 默认使用 UnifiedLoopStrategy（流式 content block 解析 + 可配置预算/错误恢复）。
-     * 若注入了 HarnessAdapter 则走 HarnessStrategy（向后兼容）。
+     * This is a pragmatic S3 bridge — replaced by ChatEngineLog in S4.
      */
-    private selectStrategy(_overrides?: ExecutionOverrides): IAgentLoopStrategy {
-        if (this.harnessAdapter) {
-            return new HarnessStrategy(this.harnessAdapter);
-        }
-        if (!this.llmService) {
-            throw new Error('TaskRunner.selectStrategy: llmService not injected. Call setLLMService() first.');
-        }
-        return new UnifiedLoopStrategy(
-            this.llmService,
-            this._toolExecutor,
-            this.getUnifiedLoopConfig(),
-        );
-    }
-
-    private _unifiedLoopConfig?: UnifiedLoopConfig;
-
-    setUnifiedLoopConfig(config: UnifiedLoopConfig): void {
-        this._unifiedLoopConfig = config;
-    }
-
-    private getUnifiedLoopConfig(): UnifiedLoopConfig {
-        return this._unifiedLoopConfig ?? {};
-    }
-
-    /**
-     * Inject a tool executor for UnifiedLoopStrategy.
-     */
-    setToolExecutor(executor: IToolExecutor): void {
-        this._toolExecutor = executor;
-    }
-
-    /**
-     * Inject an IToolService — automatically adapted to IToolExecutor.
-     */
-    setToolService(toolService: IToolService, cwd?: string): void {
-        this._toolExecutor = new ToolServiceToExecutorAdapter(toolService, cwd);
+    private createSessionLogAdapter(_sessionId: string, initialMessages: ChatMessage[]) {
+        const messages = [...initialMessages];
+        return {
+            async fold(_ref: string): Promise<ChatMessage[]> {
+                return [...messages];
+            },
+            async append(_ref: string, turn: any): Promise<string> {
+                // Push assistant response into messages for the next fold()
+                if (turn.payload) {
+                    const lastMsg = turn.payload[turn.payload.length - 1];
+                    if (lastMsg) messages.push(lastMsg);
+                }
+                return turn.id ?? `turn_${Date.now()}`;
+            },
+            refs() {
+                return {
+                    create: () => 'main',
+                    move: () => {},
+                    tag: () => {},
+                    delete: () => {},
+                    list: () => ['main'],
+                };
+            },
+            draft() {
+                return {
+                    checkpoint: async () => {},
+                    flush: async () => {},
+                    current: () => null,
+                };
+            },
+            async merge(_refs: string[], _strategy: any) { return 'main'; },
+            async rebase(_ref: string, _at: string, _turns: any[], _opts?: any) { return 'main'; },
+        };
     }
 
     private async executeTask(

@@ -90,6 +90,12 @@ export interface ExecutionOverrides {
     useClaudeCode?: boolean;
     /** Claude Code 路径最大循环轮次，默认 50 */
     maxTurns?: number;
+    /**
+     * LLM 2.0 executor mode.
+     * Determines which ILoop implementation is used.
+     * Values: 'chat', 'loop', 'loop:full', 'mission', 'graph'
+     */
+    mode?: string;
 }
 
 /**

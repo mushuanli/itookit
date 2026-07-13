@@ -321,9 +321,6 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         agentService,
         sessionEngine,
         maxConcurrent:       20,
-        harnessRuntime:      harness.runtime,
-        harnessSkillService: harness.skillService,
-        harnessToolService:  harness.toolService,
         llmService:          harness.llmService,
     });
 

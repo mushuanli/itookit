@@ -29,9 +29,23 @@ export { ENGINE_DEFAULTS, STORAGE_KEYS } from './core/constants';
 
 export { ExecutorRegistry, getExecutorRegistry, resetExecutorRegistry } from './core/executor-registry';
 export { drive, LoopAbortedError, notSupported } from './core/loop-driver';
-export type { SessionActor } from './core/loop-driver';
+export type { SessionActor as ISessionActor } from './core/loop-driver';
+export { SessionActor } from './core/session-actor';
 export { composeMiddleware } from './core/middleware-pipeline';
 export type { MiddlewarePipeline } from './core/middleware-pipeline';
+
+// ── LLM 2.0: Executors (ILoop implementations) ──────────────────────
+
+export { chatExecutor, LoopExecutor, createLoopExecutor } from './executors';
+export type { LoopPresetConfig } from './executors';
+export {
+    createBudgetMiddleware,
+    createErrorRecoveryMiddleware,
+    createCompressionMiddleware,
+    createHITLMiddleware,
+    createSkillsMiddleware,
+    createBackPressureMiddleware,
+} from './executors';
 
 // ============================================
 // 会话管理
@@ -172,26 +186,6 @@ export { formatErrorMessage } from './utils/error-formatter';
 export { createThrottledWriter } from './utils/throttled-writer';
 export type { ThrottledWriter } from './utils/throttled-writer';
 
-// Unified Agent Loop Strategy (replaces ClaudeCodeStrategy)
-export { UnifiedLoopStrategy } from './session/unified-loop-strategy';
-export type { UnifiedLoopConfig, BudgetConfig, ErrorRecoveryConfig } from './session/unified-loop-strategy';
-
-// Tool executor bridge — adapts IToolService → IToolExecutor
-export { ToolServiceToExecutorAdapter } from './adapters/tool-executor-bridge';
-
-// Agent loop strategy core types
-export type {
-    IToolExecutor,
-    IAgentLoopStrategy,
-    AgentLoopRequest,
-    AgentLoopResult,
-    AgentLoopContext,
-    TurnRecord,
-    AssistantBlock,
-    ToolResult,
-} from './session/agent-loop-strategy';
-export { nullToolExecutor } from './session/agent-loop-strategy';
-
 export { TruncationDetector } from './session/truncation-detector';
 export type { TruncationResult } from './session/truncation-detector';
 
@@ -205,14 +199,16 @@ export type {
 // 初始化
 // ============================================
 
-import type { IAgentRuntime, ILLMService, ISkillService, IToolService } from '@itookit/common';
+import type { ILLMService, ILoop } from '@itookit/common';
 import { IAgentConfigService } from './services/agent-service';
 import { IChatEngine } from './persistence/types';
 import { initializeKernel, KernelInitOptions } from '@itookit/llm-kernel';
 import { ChatEngine } from './persistence/chat-engine';
 import { SessionManager, createSessionManager } from './session/session-manager';
 import { initializePromptHistory } from './services/prompt-history-service';
-import { initHarnessAdapter } from './adapters/harness-adapter';
+import { getExecutorRegistry } from './core/executor-registry';
+import { chatExecutor } from './executors/chat-executor';
+import { createLoopExecutor } from './executors/loop-presets';
 
 /**
  * Engine 初始化选项
@@ -228,33 +224,6 @@ export interface EngineInitOptions extends KernelInitOptions {
     maxConcurrent?: number;
 
     /**
-     * （可选）AgentLoopExecutor 运行时。
-     *
-     * 提供后，发送消息时可通过 overrides.useHarness=true 切换到
-     * 多轮 Agent 循环（含工具调用、上下文压缩、反压验证）。
-     * 由 @itookit/llm-harness 的 createHarness() 创建。
-     */
-    harnessRuntime?: IAgentRuntime;
-
-    /**
-     * （可选）Skill 服务实例。
-     *
-     * 与 harnessRuntime 配合使用，注入后 ChatInput 的
-     * Skill 选择面板可以列出、加载、卸载 Skill。
-     * 由 @itookit/llm-harness 的 createHarness().skillService 提供。
-     */
-    harnessSkillService?: ISkillService;
-
-    /**
-     * （可选）Tool 服务实例。
-     *
-     * 注入后 ChatInput 的 `/exec` `/read` `/grep` `/glob` slash 命令可以
-     * 直接调用 harness 内置工具，绕过 LLM 直接执行并在 Modal 中展示结果。
-     * 由 @itookit/llm-harness 的 createHarness().toolService 提供。
-     */
-    harnessToolService?: IToolService;
-
-    /**
      * （可选）ILLMService 实例。
      *
      * 注入后所有 Agent Loop 策略统一通过此入口调用 LLM，
@@ -262,6 +231,14 @@ export interface EngineInitOptions extends KernelInitOptions {
      * 由 @itookit/llm-harness 的 createHarness().llmService 提供。
      */
     llmService?: ILLMService;
+
+    /**
+     * （可选）额外的 ILoop executor 列表。
+     *
+     * chat + loop(lite) executor 已默认注册。
+     * 传入额外 executor（如 loop:full / mission / graph）以扩展执行模式。
+     */
+    executors?: ILoop[];
 }
 
 /**
@@ -286,23 +263,24 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
         });
     }
 
+    // ── Register default executors ──────────────────────────────────
+    const registry = getExecutorRegistry();
+    registry.register(chatExecutor);
+    registry.register(createLoopExecutor('lite'));
+    registry.setDefaultMode('loop');
+
+    // Register any extra executors provided by the caller
+    if (options.executors) {
+        for (const executor of options.executors) {
+            registry.register(executor);
+        }
+    }
+
     const sessionManager = createSessionManager(
         options.sessionEngine,
         options.agentService,
         { maxConcurrent: options.maxConcurrent }
     );
-
-    // Wire harness if provided
-    if (options.harnessRuntime) {
-        const harnessAdapter = initHarnessAdapter(options.harnessRuntime);
-        if (options.harnessSkillService) {
-            harnessAdapter.setSkillService(options.harnessSkillService);
-        }
-        if (options.harnessToolService) {
-            harnessAdapter.setToolService(options.harnessToolService);
-        }
-        sessionManager.setHarnessAdapter(harnessAdapter);
-    }
 
     // Wire ILLMService for unified LLM access
     if (options.llmService) {
