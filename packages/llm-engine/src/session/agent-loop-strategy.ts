@@ -50,6 +50,8 @@ export interface AgentLoopRequest {
     /** 最大循环轮次，默认 50 */
     maxTurns: number;
     signal?: AbortSignal;
+    /** LLM connection ID — forwarded to streamRaw for provider selection */
+    connectionId?: string;
 }
 
 export interface AgentLoopResult {
@@ -83,6 +85,8 @@ export interface IAgentLoopStrategy {
 
 export interface IToolExecutor {
     execute(name: string, input: Record<string, unknown>): Promise<string>;
+    /** Optional: return tool metadata for permission gating and parallel scheduling */
+    getMeta?(name: string): { sideEffect: 'none' | 'local' | 'external' } | undefined;
 }
 
 /** 空实现：工具未配置时的 fallback */

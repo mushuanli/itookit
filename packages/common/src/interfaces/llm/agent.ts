@@ -237,7 +237,7 @@ export interface IAgentConfigService extends IConnectionReader {
  */
 export interface IAgentManagementService extends IAgentConfigService, ILLMManagementService {
     // Agent CRUD
-    saveAgent(agent: AgentDefinition): Promise<void>;
+    saveAgent(agent: AgentDefinition, options?: { onDuplicate?: 'merge' | 'error' }): Promise<void>;
     deleteAgent(agentId: string): Promise<void>;
 
     // 恢复/诊断

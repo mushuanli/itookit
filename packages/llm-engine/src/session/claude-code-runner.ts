@@ -53,7 +53,7 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
     ) {}
 
     async run(request: AgentLoopRequest, ctx: AgentLoopContext): Promise<AgentLoopResult> {
-        const { maxTurns = 50, signal, messages: initialMessages, llmParams } = request;
+        const { maxTurns = 50, signal, messages: initialMessages, llmParams, connectionId } = request;
         const { nodeId, sessionId, onEvent } = ctx;
 
         const messages = [...initialMessages];
@@ -68,7 +68,7 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
             onEvent({ type: 'turn:start', payload: { sessionId, turn } });
 
             const { assistantBlocks, usage } = await this.callLLM(
-                messages, llmParams, signal, onEvent, nodeId,
+                messages, llmParams, signal, onEvent, nodeId, connectionId,
             );
 
             totalInput  += usage?.inputTokens  ?? 0;
@@ -144,6 +144,7 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
         signal: AbortSignal | undefined,
         onEvent: (e: OrchestratorEvent) => void,
         nodeId: string,
+        connectionId?: string,
     ): Promise<{ assistantBlocks: ContentBlock[]; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } }> {
         const assistantBlocks: ContentBlock[] = [];
         let usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } | undefined;
@@ -157,11 +158,7 @@ export class ClaudeCodeStrategy implements IAgentLoopStrategy {
         let toolInputBuf = '';
 
         const params: ChatCompletionParams = { ...llmParams, messages, stream: true, signal };
-        const stream = await (this.kernelAdapter as any).streamRaw?.(params) as AsyncGenerator<ChatCompletionChunk> | null;
-
-        if (!stream) {
-            throw new Error('[ClaudeCodeStrategy] kernelAdapter.streamRaw() is required');
-        }
+        const stream = await this.kernelAdapter.streamRaw(params, connectionId);
 
         for await (const chunk of stream) {
             this.checkAbort(signal);

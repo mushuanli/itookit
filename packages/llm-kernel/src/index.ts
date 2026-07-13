@@ -25,6 +25,7 @@ export * from './core/types';
 export * from './core/interfaces';
 export * from './core/event-bus';
 export * from './core/execution-context';
+export * from './core/orchestrator-interfaces';
 export { setKernelDeviceManager, getKernelDeviceManager } from './core/device-registry';
 
 // ============================================
@@ -52,6 +53,22 @@ export { ExecutorRegistry, getExecutorRegistry } from './executors';
 
 export { ExecutionRuntime, getRuntime } from './runtime/execution-runtime';
 export type { ExecutionOptions } from './runtime/execution-runtime';
+
+// ============================================
+// 编排器
+// ============================================
+
+export {
+    OrchestratorRegistry,
+    getOrchestratorRegistry,
+    resetOrchestratorRegistry,
+    SerialOrchestrator,
+    ParallelOrchestrator,
+    RouterOrchestrator,
+    LoopOrchestrator,
+    DagOrchestrator,
+    CycleError,
+} from './orchestrators';
 
 export { 
     StateMachine, 

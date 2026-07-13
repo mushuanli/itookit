@@ -28,6 +28,7 @@ const VERSION_FILE = '/.defaults_version.json';
 export class VFSAgentService extends BaseModuleService implements IAgentManagementService {
     private _agents: AgentDefinition[] = [];
     private _agentNodeIds = new Map<string, string>(); // agentId → VFS node ID
+    private _duplicatePaths = new Map<string, string[]>(); // agentId → duplicate paths (cleaned on scan)
     private _syncTimer: ReturnType<typeof setTimeout> | null = null;
     private _eventUnsubscribers: Array<() => void> = [];
 
@@ -191,7 +192,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     // ─── IAgentManagementService — Agent CRUD ─────────────────────────────────
 
-    async saveAgent(agent: AgentDefinition): Promise<void> {
+    async saveAgent(agent: AgentDefinition, options?: { onDuplicate?: 'merge' | 'error' }): Promise<void> {
         if (!agent.config.connectionId) agent.config.connectionId = 'default';
         const filename = `${agent.id}.agent`;
         const contentStr = JSON.stringify(agent, null, 2);
@@ -202,18 +203,45 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             await this.engine.driver.writeContent(cachedId, contentStr);
             await this.engine.driver.updateMetadata(cachedId, metadata);
         } else {
-            // Cache miss: search for existing file (only before first scan completes)
+            // Search for ALL existing files with this agent filename
             const query: FSSearchQuery = { name: { contains: filename }, type: 'file' };
             const results = await this.engine.driver.search(query);
-            const existing = Array.from(results.nodes).find((n: FSNode) => n.name === filename);
-            if (existing) {
-                this._agentNodeIds.set(agent.id, existing.path);
-                await this.engine.driver.writeContent(existing.path, contentStr);
-                await this.engine.driver.updateMetadata(existing.path, metadata);
+            const allExisting = Array.from(results.nodes).filter((n: FSNode) => n.name === filename);
+
+            if (allExisting.length > 1 && options?.onDuplicate === 'error') {
+                const paths = allExisting.map(n => n.path).join(', ');
+                throw new Error(
+                    `Agent ID "${agent.id}" already exists at multiple paths: ${paths}. ` +
+                    `Resolve duplicates before saving.`
+                );
+            }
+
+            if (allExisting.length > 0) {
+                // Pick canonical path (prefer /default/), update content, delete duplicates
+                const canonical = allExisting.find(n => n.path.includes('/default/')) || allExisting[0];
+                this._agentNodeIds.set(agent.id, canonical.path);
+                await this.engine.driver.writeContent(canonical.path, contentStr);
+                await this.engine.driver.updateMetadata(canonical.path, metadata);
+
+                for (const dup of allExisting) {
+                    if (dup.path !== canonical.path) {
+                        try {
+                            await this.engine.driver.delete([dup.path]);
+                            log.warn('Cleaned up duplicate agent file during save', {
+                                agentId: agent.id, kept: canonical.path, removed: dup.path,
+                            });
+                        } catch (e) {
+                            log.error('Failed to delete duplicate agent file', { path: dup.path, error: e });
+                        }
+                    }
+                }
             } else {
+                // Create new — use /default/ directory, not module root
+                const parentDir = AGENT_DEFAULT_DIR;
+                await this.ensureDirectory(parentDir);
                 const node = await this.engine.driver.createFile({
                     name: filename,
-                    parentPath: null,
+                    parentPath: parentDir,
                     content: contentStr,
                     metadata,
                 });
@@ -234,16 +262,25 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     async deleteAgent(agentId: string): Promise<void> {
         const cachedId = this._agentNodeIds.get(agentId);
+        const filename = `${agentId}.agent`;
+
+        // Delete cached node first, then search for any remaining duplicates
         if (cachedId) {
             await this.engine.driver.delete([cachedId]);
             this._agentNodeIds.delete(agentId);
-        } else {
-            const filename = `${agentId}.agent`;
-            const query: FSSearchQuery = { name: { contains: filename }, type: 'file' };
-            const results = await this.engine.driver.search(query);
-            const node = Array.from(results.nodes).find((n: FSNode) => n.name === filename);
-            if (node) await this.engine.driver.delete([node.path]);
         }
+
+        // Also clean up any duplicate files with the same filename
+        const query: FSSearchQuery = { name: { contains: filename }, type: 'file' };
+        const results = await this.engine.driver.search(query);
+        const allNodes = Array.from(results.nodes).filter((n: FSNode) => n.name === filename);
+        for (const node of allNodes) {
+            if (node.path !== cachedId) {
+                try { await this.engine.driver.delete([node.path]); } catch { /* ignore */ }
+            }
+        }
+
+        this._duplicatePaths.delete(agentId);
         this.cancelPendingSync();
         this._agents = this._agents.filter(a => a.id !== agentId);
         this.notify();
@@ -337,9 +374,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             const existing = agentMap.get(def.id);
             const status: RestorableItem['status'] = !existing ? 'missing'
                 : this.isAgentModified(existing, def) ? 'modified' : 'ok';
+            const dupPaths = this._duplicatePaths.get(def.id);
             items.push({
                 id: def.id, type: 'agent', name: def.name,
                 description: def.description, icon: def.icon || '🤖', status,
+                ...(dupPaths?.length ? { duplicatePaths: dupPaths } : {}),
             });
         }
 
@@ -395,9 +434,19 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     }
 
     async resetAllDefaults(): Promise<void> {
-        const providerDefaults = this.llmService.getProviderDefaults();
+        // Scan and clean up any duplicate agent files before resetting
+        await this.refreshData();
+        if (this._duplicatePaths.size > 0) {
+            const dupSummary = Array.from(this._duplicatePaths.entries()).map(
+                ([id, paths]) => `${id}: [${paths.join(', ')}]`
+            );
+            log.warn('Duplicate agent files cleaned before full reset', {
+                count: this._duplicatePaths.size, details: dupSummary,
+            });
+        }
 
         // Reset providers (keep existing apiKey)
+        const providerDefaults = this.llmService.getProviderDefaults();
         for (const id of Object.keys(providerDefaults)) {
             await this.restoreProvider(id);
         }
@@ -466,10 +515,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     private async scanAgentFiles(): Promise<AgentDefinition[]> {
         const agents: AgentDefinition[] = [];
         this._agentNodeIds.clear();
+        this._duplicatePaths.clear();
         try {
             const result = await this.engine.driver.search({ name: { contains: '.agent' }, type: 'file' });
 
-            const results = await Promise.all(Array.from(result.nodes).map(async (node) => {
+            const scanned = await Promise.all(Array.from(result.nodes).map(async (node) => {
                 if (!node.name.endsWith('.agent')) return null;
                 try {
                     const content = await this.engine.driver.readContent(node.path);
@@ -481,14 +531,54 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
                         data.config.modelName = (data.config as any).modelId;
                     }
                     if (data.id) {
-                        this._agentNodeIds.set(data.id, node.path);
-                        return { ...data, tags: node.tags } as AgentDefinition;
+                        return { ...data, tags: node.tags, _scanPath: node.path } as AgentDefinition & { _scanPath: string };
                     }
                     return null;
                 } catch { return null; }
             }));
 
-            results.forEach(r => r && agents.push(r));
+            // Group by agent ID, detect and clean up duplicates
+            const byId = new Map<string, Array<AgentDefinition & { _scanPath: string }>>();
+            for (const item of scanned) {
+                if (!item) continue;
+                const group = byId.get(item.id) || [];
+                group.push(item);
+                byId.set(item.id, group);
+            }
+
+            for (const [agentId, group] of byId) {
+                const { _scanPath, ...clean } = group[0];
+                if (group.length === 1) {
+                    this._agentNodeIds.set(agentId, _scanPath);
+                    agents.push(clean);
+                } else {
+                    // Duplicates detected: prefer /default/ path, delete others
+                    const defaultItem = group.find(g => g._scanPath.includes('/default/')) || group[0];
+                    const duplicates = group.filter(g => g !== defaultItem);
+
+                    const { _scanPath: _sp, ...canonical } = defaultItem;
+                    this._agentNodeIds.set(agentId, _sp);
+                    agents.push(canonical);
+
+                    const dupPaths = duplicates.map(d => d._scanPath);
+                    this._duplicatePaths.set(agentId, dupPaths);
+
+                    log.warn('Duplicate agent files detected — merging', {
+                        agentId, kept: _sp, removed: dupPaths,
+                    });
+
+                    // Delete duplicate files
+                    for (const dup of duplicates) {
+                        try {
+                            await this.engine.driver.delete([dup._scanPath]);
+                        } catch (e) {
+                            log.error('Failed to delete duplicate agent file', {
+                                path: dup._scanPath, error: e,
+                            });
+                        }
+                    }
+                }
+            }
         } catch (e) {
             console.error('[VFSAgentService] Failed to scan agents:', e);
         }
@@ -500,6 +590,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         this._eventUnsubscribers = [];
         if (this._syncTimer) { clearTimeout(this._syncTimer); this._syncTimer = null; }
         this._agentNodeIds.clear();
+        this._duplicatePaths.clear();
         await super.dispose();
     }
 }

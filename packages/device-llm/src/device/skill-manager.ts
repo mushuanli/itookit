@@ -152,9 +152,17 @@ export class SkillManager {
 // top-level fields without a tools[] array. This function converts that format
 // to the canonical SkillDefinition shape on read.
 
+/**
+ * @deprecated 2026-07 — Legacy skill format migration.
+ * Converts old flat VFS-persisted JSON format (command/endpoint/parameters at top level, no tools[])
+ * into canonical SkillDefinition shape.
+ * Once all VFS-stored skills are in the canonical format, this function can be removed.
+ */
 function migrateOldSkill(raw: any): SkillDefinition {
     // Already migrated (has tools array as SkillDefinition) — pass through.
     if (Array.isArray(raw.tools)) return raw as SkillDefinition;
+
+    console.warn('[skill-manager] Migrating legacy skill format for', raw.id ?? raw.name);
 
     const tools: SkillToolBinding[] = [];
     const hasTool = (raw.type === 'http' || raw.type === 'shell') && raw.parameters;

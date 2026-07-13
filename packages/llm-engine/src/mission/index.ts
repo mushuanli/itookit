@@ -5,3 +5,4 @@ export { MissionScheduler } from './mission-scheduler';
 export type { MissionSchedulerOptions } from './mission-scheduler';
 export { MissionService } from './mission-service';
 export type { MissionServiceOptions } from './mission-service';
+export { LiteSubAgentRouter } from './lite-sub-agent-router';

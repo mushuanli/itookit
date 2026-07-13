@@ -39,7 +39,7 @@ export interface ImportStats {
 // Duck-typed agent management service (superset of IConnectionService)
 interface AgentSvc {
     getAgents(): Promise<Array<{ id: string }>>;
-    saveAgent(a: unknown): Promise<void>;
+    saveAgent(a: unknown, opts?: { onDuplicate?: 'merge' | 'error' }): Promise<void>;
     getSkills(): Promise<Array<{ id: string }>>;
     saveSkill(s: unknown): Promise<void>;
 }
@@ -297,7 +297,7 @@ export async function executeImport(
                 allocatedAgents.add(newId);
                 effectiveDef = { ...def, id: newId };
             }
-            await agentSvc.saveAgent(toRuntimeAgent(effectiveDef));
+            await agentSvc.saveAgent(toRuntimeAgent(effectiveDef), { onDuplicate: 'error' });
             stats.agents++;
         }
 

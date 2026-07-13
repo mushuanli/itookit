@@ -97,22 +97,15 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
 
         onReedit: async () => {
             const sessions = deps.sessionManager.getSessions();
-            if (sessions.length === 0) {
+            const lastUser = [...sessions].reverse().find(s => s.role === 'user');
+            if (!lastUser) {
                 Toast.info('No messages to reedit');
                 return;
             }
-
-            const lastUser = [...sessions].reverse().find(s => s.role === 'user');
-            if (!lastUser) {
-                Toast.info('No user message found');
-                return;
-            }
-
             const originalText = lastUser.content || '';
-            const cmd = deps.nodeCommands.get('delete');
-            if (cmd) {
-                await cmd.run({ nodeId: lastUser.id });
-            }
+            await deps.sessionManager.deleteMessage(lastUser.id, {
+                deleteAssociatedResponses: true,
+            });
             deps.chatInput.restoreInput(originalText);
         },
 

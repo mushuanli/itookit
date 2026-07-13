@@ -115,6 +115,7 @@ export {
     ResultPersistenceService,
     MissionScheduler,
     MissionService,
+    LiteSubAgentRouter,
 } from './mission';
 export type {
     MissionSchedulerOptions,
@@ -162,6 +163,26 @@ export { chatFileParser } from './utils/parsers';
 export { formatErrorMessage } from './utils/error-formatter';
 export { createThrottledWriter } from './utils/throttled-writer';
 export type { ThrottledWriter } from './utils/throttled-writer';
+
+// Unified Agent Loop Strategy (replaces ClaudeCodeStrategy)
+export { UnifiedLoopStrategy } from './session/unified-loop-strategy';
+export type { UnifiedLoopConfig, BudgetConfig, ErrorRecoveryConfig } from './session/unified-loop-strategy';
+
+// Tool executor bridge — adapts IToolService → IToolExecutor
+export { ToolServiceToExecutorAdapter } from './adapters/tool-executor-bridge';
+
+// Agent loop strategy core types
+export type {
+    IToolExecutor,
+    IAgentLoopStrategy,
+    AgentLoopRequest,
+    AgentLoopResult,
+    AgentLoopContext,
+    TurnRecord,
+    AssistantBlock,
+    ToolResult,
+} from './session/agent-loop-strategy';
+export { nullToolExecutor } from './session/agent-loop-strategy';
 
 export { TruncationDetector } from './session/truncation-detector';
 export type { TruncationResult } from './session/truncation-detector';

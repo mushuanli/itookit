@@ -18,11 +18,14 @@ import {
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { SessionState, HistoryMessage } from './session-state';
-import { ClaudeCodeStrategy } from './claude-code-runner';
 import { LLMKernelAdapter, getLLMKernelAdapter } from '../adapters/llmkernel-adapter';
 import { HarnessAdapter, HarnessStrategy, HARNESS_META_KEYS } from '../adapters/harness-adapter';
+import { UnifiedLoopStrategy } from './unified-loop-strategy';
+import type { UnifiedLoopConfig } from './unified-loop-strategy';
 import type { IAgentLoopStrategy, IToolExecutor, AgentLoopRequest } from './agent-loop-strategy';
 import { nullToolExecutor } from './agent-loop-strategy';
+import type { IToolService } from '@itookit/common';
+import { ToolServiceToExecutorAdapter } from '../adapters/tool-executor-bridge';
 import { IChatEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
@@ -74,6 +77,7 @@ export class TaskRunner {
     private maxQueueSize: number;
     private kernelAdapter: LLMKernelAdapter;
     private harnessAdapter: HarnessAdapter | null = null;
+    private _toolExecutor: IToolExecutor = nullToolExecutor;
     /**
      * Harness sessions must be serialized: a single AgentLoopExecutor instance
      * is shared across all sessions and its event handlers are not scoped per session.
@@ -476,24 +480,42 @@ export class TaskRunner {
     /**
      * 选择 Agent Loop 执行策略。
      *
-     * 规则：有 HarnessAdapter 注入时走 HarnessStrategy（兼容旧部署），
-     * 否则走 ClaudeCodeStrategy（内置主框架）。
+     * 默认使用 UnifiedLoopStrategy（流式 content block 解析 + 可配置预算/错误恢复）。
+     * 若注入了 HarnessAdapter 则走 HarnessStrategy（向后兼容）。
      */
     private selectStrategy(_overrides?: ExecutionOverrides): IAgentLoopStrategy {
         if (this.harnessAdapter) {
             return new HarnessStrategy(this.harnessAdapter);
         }
-        return new ClaudeCodeStrategy(
+        return new UnifiedLoopStrategy(
             this.kernelAdapter,
-            (this as any)._toolExecutor ?? nullToolExecutor,
+            this._toolExecutor,
+            this.getUnifiedLoopConfig(),
         );
     }
 
+    private _unifiedLoopConfig?: UnifiedLoopConfig;
+
+    setUnifiedLoopConfig(config: UnifiedLoopConfig): void {
+        this._unifiedLoopConfig = config;
+    }
+
+    private getUnifiedLoopConfig(): UnifiedLoopConfig {
+        return this._unifiedLoopConfig ?? {};
+    }
+
     /**
-     * 注入工具执行器（供 ClaudeCodeStrategy 使用）。
+     * Inject a tool executor for UnifiedLoopStrategy.
      */
     setToolExecutor(executor: IToolExecutor): void {
-        (this as any)._toolExecutor = executor;
+        this._toolExecutor = executor;
+    }
+
+    /**
+     * Inject an IToolService — automatically adapted to IToolExecutor.
+     */
+    setToolService(toolService: IToolService, cwd?: string): void {
+        this._toolExecutor = new ToolServiceToExecutorAdapter(toolService, cwd);
     }
 
     private async executeTask(

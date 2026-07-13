@@ -244,6 +244,14 @@ export function toLLMProvider(def: LLMProviderDef): LLMProvider {
 
 /**
  * Convert a parsed LLMSkillDef to the runtime SkillDefinition type.
+// ─── Skill Format Conversion ─────────────────────────────────────────────────
+// @deprecated 2026-07 — These functions convert between the flat LLMSkillDef .llm YAML
+// format and the canonical SkillDefinition (with tools[]). They should be replaced
+// when the .llm format is upgraded to use SkillDefinition natively.
+// ────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @deprecated Flat→canonical conversion; remove when .llm format uses SkillDefinition natively.
  * `prompt` is treated as an alias for `instructions` (backward compat).
  */
 export function toRuntimeSkill(def: LLMSkillDef): LLMSkill {
@@ -383,6 +391,8 @@ export function fromLLMProvider(p: LLMProvider): LLMProviderDef {
 
 /**
  * Convert runtime SkillDefinition → LLMSkillDef for .llm serialization.
+/**
+ * @deprecated Canonical→flat conversion; remove when .llm format uses SkillDefinition natively.
  * Strips runtime-only fields and flattens tools[] back to legacy fields.
  */
 export function fromSkillDef(skill: LLMSkill): LLMSkillDef {
