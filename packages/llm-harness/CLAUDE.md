@@ -32,21 +32,17 @@ AgentLoopExecutor:
 
 | 组件 | 状态 |
 |---|---|
-| `AgentLoopExecutor` | 保持，S3 协程式改造待做（AsyncGenerator 化） |
+| `AgentLoopExecutor` | 保持 — while-true 循环，S3 协程式改造待做（AsyncGenerator 化） |
 | `LLMServiceAdapter` | ★ ILLMService 的标准实现，`llm-engine` 通过此入口调用 LLM |
 | `HITLQueue` | 保持，S3 后将被 `yield await_signal` 替代 |
 | `BudgetController` 等 | 保持，S3 后适配为 `ILoopMiddleware` |
 | `BackPressureValidator` | 保持 — 高级 shell 验证逻辑保留；简单工具错误反馈已迁移至 `createBackPressureMiddleware`（S5） |
 
-## Session Persistence（已废弃）
-
-`executor/session-store.ts` 已删除。会话中断检测现在使用 VFS `.chat` 文件的 `meta.status` 字段（见 `HarnessIntegration.ts` 的 `checkSessionInterrupted`）。不再使用 localStorage 方案。
-
 ## Harness Call from llm-engine
 
-llm-engine 的 `HarnessStrategy`（在 `adapters/harness-adapter.ts`）将 `IAgentRuntime` 包装为 `IAgentLoopStrategy`，通过 `initializeLLMEngine({ harnessRuntime })` 注入。
+S9 (2026-07-14): `HarnessAdapter` 已删除（`adapters/harness-adapter.ts` + `core/harness-context.ts`）。`IAgentRuntime` 不再通过 `HarnessAdapter` 包装——llm-engine 的 `TaskRunner` 直接通过 ILoop 路径（`executeAgentLoopTask` → `drive()`）执行。
 
-`createHarness().llmService`（`LLMServiceAdapter` 实例）通过 `initializeLLMEngine({ llmService })` 注入，成为 engine 侧 `UnifiedLoopStrategy` / `ClaudeCodeStrategy` / `LiteSubAgentRouter` 的统一 LLM 入口。
+`createHarness().llmService`（`LLMServiceAdapter` 实例）通过 `initializeLLMEngine({ llmService })` 注入，成为 engine 侧 `LoopExecutor` / `chatExecutor` / `LiteSubAgentRouter` 的统一 LLM 入口。
 
 详情: [关键设计 + ToolMeta + 扩展点](./doc/design-details.md)
 

@@ -11,7 +11,6 @@
  * - 多会话并发控制
  * 
  * 依赖：
- * - @itookit/llm-kernel (执行引擎)
  * - @itookit/device-llm (LLM 通信)
  * - @itookit/vfslib (文件系统)
  * - @itookit/common (公共接口和工具)
@@ -88,20 +87,6 @@ export { AgentResolver } from './session/agent-resolver';
 export type { AgentInfo, ModelInfo } from './session/agent-resolver';
 
 export { AttachmentProcessor } from './session/attachment-processor';
-
-// ============================================
-// 适配器
-// ============================================
-
-export {
-    HarnessAdapter,
-    initHarnessAdapter,
-    resetHarnessAdapter,
-} from './adapters/harness-adapter';
-
-// S6c: Harness context — preferred way for UI to access harness services
-export type { IHarnessContext } from './core/harness-context';
-export { setHarnessContext, getHarnessContext } from './core/harness-context';
 
 // ============================================
 // 持久化

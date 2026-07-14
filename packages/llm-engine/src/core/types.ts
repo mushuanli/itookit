@@ -3,10 +3,10 @@
 import type { ModelTier, ChatAttachment } from '@itookit/common';
 
 // ═══════════════════════════════════════════════════════════════
-// Core types (absorbed from @itookit/llm-kernel in S8)
+// Core types (NodeStatus, ExecutorConfig, ExecutorType — S8 from llm-kernel)
 // ═══════════════════════════════════════════════════════════════
 
-/** 节点状态（从 llm-kernel 迁移） */
+/** 节点状态 */
 export type NodeStatus =
     | 'pending'
     | 'queued'
@@ -22,7 +22,7 @@ export type NodeStatus =
 export type ExecutorType = 'agent';
 
 /**
- * 执行器配置（从 llm-kernel 迁移）。
+ * 执行器配置。
  * connectionId 替代旧的 connection: LLMConnection —— API Key 由 LLMDeviceDriver 内部解析。
  */
 export interface ExecutorConfig {
@@ -123,13 +123,6 @@ export interface ExecutionOverrides {
     thinkingEnabled?: boolean;
     /** 追加到 Agent system prompt（本次请求生效） */
     systemPromptAppend?: string;
-    /**
-     * 使用 Claude Code Agent Loop 路径（多轮工具调用，内置于 llm-engine）。
-     * 与 useHarness 互斥，优先级高于 useHarness。
-     */
-    useClaudeCode?: boolean;
-    /** Claude Code 路径最大循环轮次，默认 50 */
-    maxTurns?: number;
     /**
      * LLM 2.0 executor mode.
      * Determines which ILoop implementation is used.

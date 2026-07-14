@@ -6,6 +6,7 @@
 > **S6c ✅ (2026-07-14)**: LLMKernelAdapter + UIEventAdapter 删除；DependencyGraph 删除；auto-continue.ts 删除；AgentExecutor 物理删除（llm-kernel）；HarnessAdapter 解耦（IHarnessContext 服务定位器）。
 > **S7 ✅ (2026-07-14)**: `OrchestratorEvent` 类型已删除 — 全部生产者迁移到 `SessionEvent`（= canonical AgentEvent + MessageProjectionEvent + SessionStructuralEvent）；UI 旧事件 fallback 已清理；`TransitionalEvent` 过渡期代码已移除。
 > **S8 ✅ (2026-07-14)**: `@itookit/llm-kernel` 包消除 — `NodeStatus`、`ExecutorConfig`、`ExecutorType` 内联至 `core/types.ts`；`setKernelDeviceManager` 迁移至 `core/device-registry.ts`；`initializeKernel()` inline 至 `initializeLLMEngine()`。
+> **S9 ✅ (2026-07-14)**: `@itookit/llm-kernel` 物理删除；`HarnessAdapter` + `IHarnessContext` 删除（均为死代码）；UI 层 harness 引用清理。
 
 ## Architecture
 
@@ -16,7 +17,7 @@ src/
 │                     truncation-detector, session-recovery
 ├── persistence/    ← ChatEngine (IChatEngine), ★ ChatEngineLog (完整 ILog facade)
 │                     ulid (ULID 生成), types (IChatEngine + ChatManifest/ChatNode)
-├── adapters/       ← HarnessAdapter, tool-executor-bridge
+├── adapters/       ← tool-executor-bridge
 ├── mission/        ← MissionService, ★ MissionScheduler (reconcile-driven), LiteSubAgentRouter
 │                     TodoState, ★ sub-agent-loop-adapter, ★ mission-goal-factory
 ├── session-graph/  ← ★ GraphOrchestrator (+executeWithReconcile)
@@ -30,7 +31,6 @@ src/
 │                     ★ middleware-pipeline (composeMiddleware)
 │                     ★ session-actor (SessionActor — drive ↔ EventBus 桥接)
 │                     ★ goal/ (S5 ✅) — DependencyScheduler + reconcile + 3 Predicate
-│                     ★ harness-context (S6c) — IHarnessContext 服务定位器
 ├── executors/      ← chat-executor, loop-executor, loop-middleware (7 个中间件), loop-presets
 └── utils/          ← converters, error-formatter, logger, parsers
 ```
@@ -115,10 +115,10 @@ SessionManager.sendMessage()
 - 所有路径（Agent Loop + kernel fallback）统一走 `ILLMService.chatStream()`
 - S6c: kernel 路径 `executeTask()` 也切换为 ILLMService 直连
 
-## Harness 服务访问（S6c）
+## Harness 服务访问（S9 已删除）
 
-- **推荐**: `getHarnessContext(): IHarnessContext | null` — 服务定位器（runtime + skillService + toolService）
-- `initHarnessAdapter()` 同步注册 `IHarnessContext`；UI 层通过 `getHarnessContext()` 访问 harness 服务
+- ~~`getHarnessContext(): IHarnessContext \| null`~~ — HarnessAdapter + IHarnessContext 已删除（S9）。
+- UI 层 harness 功能（Skill 加载、inject、plan confirm）当前处于休眠状态。
 
 ## 事件系统（S7 ✅）
 
@@ -141,7 +141,6 @@ S6c: kernel 路径优先使用 `chatStream` 返回的真实 token 数，回退�
 - LLM 调用入口统一为 `ILLMService`，禁止绕过接口直接调用 device driver
 - 事件统一使用 `SessionEvent`；生产者 emit `AgentEvent`（flat）或 `MessageProjectionEvent`/`SessionStructuralEvent`（wrapper），EventBus 自动归一化
 - 新 Agent Loop 策略实现 `ILoop`，通过 `ExecutorRegistry.register()` 注册
-- UI 层访问 harness 服务通过 `getHarnessContext()`，不直接依赖 `HarnessAdapter`
 - `setKernelDeviceManager()` / `getKernelDeviceManager()` 从 `@itookit/llm-engine` 导入（S8 从 llm-kernel 迁移）
 - `NodeStatus`、`ExecutorConfig`、`ExecutorType` 定义在 `core/types.ts`（S8 从 llm-kernel 吸收）
-- 死代码清单：`ClaudeCodeStrategy`（S7 删除）、`HarnessStrategy`（S7 删除）、`getHarnessAdapter()`（S7 删除）
+- 已删除：`ClaudeCodeStrategy`（S7）、`HarnessStrategy`（S7）、`getHarnessAdapter()`（S7）、`HarnessAdapter`（S9）、`IHarnessContext`（S9）、`@itookit/llm-kernel` 包（S9）

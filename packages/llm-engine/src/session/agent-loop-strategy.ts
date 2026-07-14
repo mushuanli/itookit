@@ -74,8 +74,7 @@ export interface AgentLoopContext {
  * Agent Loop 执行策略接口。
  *
  * 实现：
- *   - ClaudeCodeStrategy — 内置主框架（claude-code-strategy.ts）
- *   - HarnessStrategy    — 包装 IAgentRuntime（harness-adapter.ts）
+ *   - LoopExecutor — ILoop-based agent loop (executors/)
  */
 export interface IAgentLoopStrategy {
     run(request: AgentLoopRequest, ctx: AgentLoopContext): Promise<AgentLoopResult>;

@@ -42,7 +42,7 @@ interface WorkspaceStrategy {
 
 ## Conventions
 
-- `initApp()` 是唯一装配点 — 不要在外部模块直接装配 VFS/Harness/LLM
+- `initApp()` 是唯一装配点 — 不要在外部模块直接装配 VFS/LLM
 - `loadWorkspace()` 包含去重 — 并发加载同一工作区共享同一个 Promise
 - 路由使用 `hashChange` + `popstate` + `NAVIGATION_EVENTS`
 - `ThemeService` 管理 `<html>` 的 `data-theme` attribute，监听 `app:theme-change` 事件

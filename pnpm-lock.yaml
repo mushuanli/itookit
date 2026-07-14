@@ -99,9 +99,6 @@ importers:
       '@itookit/llm-engine':
         specifier: workspace:*
         version: link:../../packages/llm-engine
-      '@itookit/llm-kernel':
-        specifier: workspace:*
-        version: link:../../packages/llm-kernel
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../../packages/llm-ui
@@ -205,9 +202,6 @@ importers:
       '@itookit/llm-engine':
         specifier: workspace:*
         version: link:../../packages/llm-engine
-      '@itookit/llm-kernel':
-        specifier: workspace:*
-        version: link:../../packages/llm-kernel
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../../packages/llm-ui
@@ -270,9 +264,6 @@ importers:
       '@itookit/llm-engine':
         specifier: workspace:*
         version: link:../llm-engine
-      '@itookit/llm-ui':
-        specifier: workspace:*
-        version: link:../llm-ui
       '@itookit/memory-manager':
         specifier: workspace:*
         version: link:../memory-manager
@@ -306,9 +297,6 @@ importers:
       '@itookit/llm-harness':
         specifier: workspace:*
         version: link:../llm-harness
-      '@itookit/llm-kernel':
-        specifier: workspace:*
-        version: link:../llm-kernel
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../llm-ui
@@ -384,9 +372,6 @@ importers:
       '@itookit/llm-engine':
         specifier: workspace:*
         version: link:../llm-engine
-      '@itookit/llm-kernel':
-        specifier: workspace:*
-        version: link:../llm-kernel
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../llm-ui
@@ -471,9 +456,6 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/llm-kernel':
-        specifier: workspace:*
-        version: link:../llm-kernel
       '@itookit/vfslib':
         specifier: workspace:*
         version: link:../vfslib
@@ -536,31 +518,6 @@ importers:
       typescript:
         specifier: ^5.3.0
         version: 5.9.3
-      vitest:
-        specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
-
-  packages/llm-kernel:
-    dependencies:
-      '@itookit/common':
-        specifier: workspace:*
-        version: link:../common
-    devDependencies:
-      '@types/node':
-        specifier: ^20.10.0
-        version: 20.19.25
-      rimraf:
-        specifier: ^5.0.5
-        version: 5.0.10
-      typescript:
-        specifier: ^5.3.0
-        version: 5.9.3
-      vite:
-        specifier: ^5.4.0
-        version: 5.4.21(@types/node@20.19.25)
-      vite-plugin-dts:
-        specifier: ^3.9.0
-        version: 3.9.1(@types/node@20.19.25)(rollup@4.62.2)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.25))
       vitest:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)

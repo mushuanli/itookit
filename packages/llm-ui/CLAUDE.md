@@ -21,6 +21,7 @@ src/
 ## 近期关键功能
 
 - **S7 事件统一 ✅ (2026-07-14)**: HistoryView + SessionEventHandler 全面切换至 `SessionEvent`；旧 `OrchestratorEvent`（`session_start`、`node_update`、`node_start` 等）已从 UI 消费端完全移除；`EventBatchProcessor` 默认使用 `message:updated`/`message:status`
+- **S9 清理 ✅ (2026-07-14)**: `IHarnessContext`/`getHarnessContext` 已移除 — HarnessAdapter 删除后，harness 功能（Skill 加载、inject、plan confirm）处于休眠状态。`buildHarnessCallbacks`/`injectIntoRunningHarness` 已简化为空实现。
 - **Billing & Cost Dashboard**: CostEditor 双标签编辑器 — 仪表板 (time/provider 过滤、top sessions) + 定价配置 (可编辑 MODEL_PRICING、可展开匹配面板)
 - **Harness Agent Loop 事件渲染**: HistoryView 渲染 tool:queued/running/success/error 等工具事件为 agent 消息子节点，含输入流式展示
 - **API Protocol 选择器**: Connection 编辑器支持 Anthropic Messages 协议，适配 Claude CLI / thinking block / tool loop

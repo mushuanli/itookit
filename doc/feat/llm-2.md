@@ -1,6 +1,6 @@
 # LLM 子系统 2.0 — 四原语内核 + 插件框架设计
 
-> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S7 收尾完成：OrchestratorEvent 删除 + 全生产者迁移）| 分支: v4.1
+> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S9 完成：llm-kernel 物理删除 + HarnessAdapter 清理）| 分支: v4.1
 > 前置分析: [llm-design.md](./llm-design.md)（现状五包架构审查）
 > 定位: 本文档是重构的**宪法**——定义不变的内核原语与扩展契约，现有功能全部归约为原语组合
 
@@ -8,7 +8,7 @@
 
 ## 实施进度
 
-**S1~S8 全部完成**（2026-07-14）。S7 分两阶段交付（基础设施 → 收尾清理），S6+S7+S8 拆分为五个子阶段全部交付。剩余 2 项为延后的 llm-harness 相关迁移。
+**S1~S9 全部完成**（2026-07-14）。S7 分两阶段交付（基础设施 → 收尾清理），S6+S7+S8 拆分为五个子阶段全部交付。S9 完成 llm-kernel 物理删除 + HarnessAdapter/IHarnessContext 清理。剩余 1 项为延后的 llm-harness AgentLoopExecutor ILoop 化迁移。
 
 | 阶段 | 状态 | 关键交付 | 剩余工作 |
 |---|---|---|---|
@@ -22,6 +22,7 @@
 | **S6c** 内核收敛 + 适配器清理 | ✅ | `LLMKernelAdapter` + `UIEventAdapter` 删除；`executeTask()` 切换为 `ILLMService.chatStream()` 直连；`AgentExecutor` + `BaseExecutor` 物理删除（llm-kernel）；`DependencyGraph` 删除（`resolveDependencyTree()` 替代）；`auto-continue.ts` 删除；`HarnessAdapter` 解耦（`IHarnessContext` 服务定位器 + llm-ui 3 文件迁移） | — |
 | **S7** 事件统一 | ✅ | ★ `SessionEvent` = canonical `AgentEvent` (15) + `MessageProjectionEvent` (3) + `SessionStructuralEvent` (8，含 regenerate) 替代 `OrchestratorEvent` (28)；`OrchestratorEvent` 类型已删除；`SessionEventBus` 直接接受 `SessionEvent`（无过渡期格式检测）；所有生产者（SessionManager、TaskRunner、HarnessAdapter、SessionActor）统一 emit `SessionEvent`；`HistoryView` / `SessionEventHandler` 旧事件 fallback 已清理；`EventBatchProcessor` 默认 chunkType/statusType 切换为 `message:updated`/`message:status`；`ClaudeCodeStrategy`（死代码）已删除；`HarnessStrategy` 已删除；`getHarnessAdapter()` 已删除 | — |
 | **S8** llm-kernel 消除 | ✅ | ★ `@itookit/llm-kernel` 包消除 — `NodeStatus`/`ExecutorConfig`/`ExecutorType` 内联至 `llm-engine/core/types.ts`；`setKernelDeviceManager`/`getKernelDeviceManager` 迁移至 `llm-engine/core/device-registry.ts`（新建）；`initializeKernel()` inline 至 `initializeLLMEngine()`；所有 7 处 import 路径更新（llm-engine ×4、app-shell ×2、test ×1）；6 个 `package.json` 依赖移除（llm-engine、app-shell、web-app、tauri-app、demo）；3 个 `vite.config` alias 移除（web-app、tauri-app、demo）；`tsup.config.ts` external 清理 | — |
+| **S9** 清理收尾 | ✅ | ★ `@itookit/llm-kernel` 包物理删除（源码 + dist + package.json + 配置）；`HarnessAdapter` 类删除（~370 行，`execute()` 从未被调用）；`IHarnessContext` 删除（`harness-context.ts`，从未被初始化）；`useClaudeCode`/`maxTurns` 死字段移除（`ExecutionOverrides`）；llm-ui 3 文件清理 `getHarnessContext()` 调用；SlashCommandRouter 删除 `buildHarnessSlashCallbacks`（~90 行）；`buildHarnessCallbacks`/`injectIntoRunningHarness` 简化为空实现；6 个 CLAUDE.md 文档更新 | — |
 
 ### S3 完成内容（2026-07-14）
 
@@ -491,14 +492,17 @@ S7 分两个阶段交付：基础设施（07-14 上午）→ 收尾清理（07-1
 
 ### 剩余工作（后续 PR）
 
-S7 收尾已全部完成（2026-07-14 下午）。剩余 2 项为延后的 llm-harness 相关迁移：
+S9 收尾已完成（2026-07-14）：llm-kernel 物理删除 + HarnessAdapter/IHarnessContext 清理。剩余 1 项为延后的 llm-harness 相关迁移：
 
 | 项目 | 原因 | 影响面 | 优先级 |
 |---|---|---|---|
-| llm-harness 整体迁移（AgentLoopExecutor 等 22 文件） | 待 executor-mission/graph 插件完成后逐步迁移 | llm-harness 全量 | P2 |
-| `HarnessAdapter` 类本身删除 | 仍用于 harness 事件翻译，需等 llm-harness 迁移完成 | `harness-adapter.ts` | P3 |
+| llm-harness AgentLoopExecutor → ILoop 改造 | AgentLoopExecutor 仍是 while-true 循环，需改造为 AsyncGenerator ILoop，中间件抽取为 ILoopMiddleware | llm-harness ~22 文件 | P2 |
 
-**S8 已完成**（2026-07-14）：`@itookit/llm-kernel` 包已消除，所有符号迁移至 llm-engine 或删除。详见下方 S8 完成内容。
+~~HarnessAdapter 类本身删除~~ → **S9 已完成**：`harness-adapter.ts` + `harness-context.ts` 已删除。经代码审计确认 `execute()` 从未被调用、`initHarnessAdapter()` 无外部调用者。
+
+**S8~S9 已完成**（2026-07-14）：
+- S8: `@itookit/llm-kernel` 包符号消除，所有引用迁移至 llm-engine
+- S9: `@itookit/llm-kernel` 物理删除（源码 + dist + 配置）；`HarnessAdapter` + `IHarnessContext` 删除；llm-ui harness 引用清理
 
 ---
 

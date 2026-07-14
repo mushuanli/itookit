@@ -19,7 +19,6 @@ import type { EditorHostContext } from '@itookit/common';
 import type { IChatEngine } from '@itookit/llm-engine';
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
 import type { SkillInvocation } from '../domain/types';
-import { getHarnessContext } from '@itookit/llm-engine';
 import { executeSkillInvocation } from './HarnessIntegration';
 import { getAgentDisplayName, sanitizeFileName } from './AgentProvider';
 
@@ -336,98 +335,6 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
         onHelp: () => {
             deps.chatInput.showHelp?.();
         },
-
-        // ── Harness: Skills ──────────────────────────────────────────────
-        ...buildHarnessSlashCallbacks(deps),
-    };
-}
-
-// ── Harness slash callbacks ─────────────────────────────────────────────────
-
-function buildHarnessSlashCallbacks(
-    deps: SlashCommandRouterDeps,
-): Partial<SlashCommandCallbacks> {
-    const ctx = getHarnessContext();
-    const skillSvc = ctx?.skillService;
-    if (!skillSvc) return {};
-
-    const toolSvc = ctx?.toolService;
-    const runtime = ctx?.runtime;
-
-    return {
-        onSkill: async (skillId: string) => {
-            const result = await skillSvc.loadSkill(skillId);
-            if (result.success) {
-                Toast.success(`Skill "${skillId}" loaded (${result.toolIds.length} tools)`);
-                const skills = skillSvc.listSkills().map((s) => ({
-                    id: s.id, name: s.name, description: s.description,
-                    loaded: s.id === skillId, toolCount: s.tools?.length ?? 0, icon: s.icon,
-                    enabled: s.enabled,
-                }));
-                deps.chatInput.refreshSkills(skills);
-            } else {
-                Toast.error(`Failed to load skill "${skillId}": ${result.error ?? 'unknown error'}`);
-            }
-        },
-
-        onSkills: () => {
-            const skills = skillSvc.listSkills();
-            if (skills.length === 0) {
-                Toast.info('没有可用的 Skill。请前往 Settings → Skills 添加。');
-                return;
-            }
-            const settingsBtn = document.querySelector('.llm-input__btn--settings') as HTMLButtonElement | null;
-            if (settingsBtn) {
-                settingsBtn.click();
-            } else {
-                const names = skills.map((s) => `${s.icon ?? '⚡'} ${s.name}`).join('\n');
-                Toast.info(`可用 Skills (${skills.length}):\n${names}\n\n使用 /skill <id> 加载`);
-            }
-        },
-
-        onTools: () => {
-            const skills = skillSvc.listSkills()
-                .filter((s) => s.enabled)
-                .flatMap((s) => s.tools.map((t) => `${t.toolId} (${s.name})`));
-            const toolService = (getHarnessContext() as unknown as {
-                toolService?: { listTools(): Array<{ id: string }> }
-            })?.toolService;
-            const builtinTools = toolService?.listTools().map((t) => t.id) ??
-                ['file_read', 'file_write', 'shell_exec', 'glob_search', 'grep_search'];
-            Toast.info(`Available tools:\n${builtinTools.concat(skills).join('\n  ')}`);
-        },
-
-        getSkills: () => {
-            const session = runtime?.getCurrentSession();
-            const loadedIds = new Set(session?.loadedSkills ?? []);
-            return skillSvc.listSkills().map((s) => ({
-                id: s.id,
-                name: s.name,
-                description: s.description,
-                loaded: loadedIds.has(s.id),
-                enabled: s.enabled,
-                toolCount: s.tools?.length ?? 0,
-                icon: s.icon,
-            }));
-        },
-
-        onSkillInvoke: async (invocation: SkillInvocation) => {
-            await executeSkillInvocation(invocation, skillSvc, {
-                chatInput: deps.chatInput,
-                sendCommand: deps.sendCommand,
-                sessionEngine: deps._sessionEngine,
-            });
-        },
-
-        // ── Direct tool invocation (/exec /read /grep /glob) ─────────────
-        ...(toolSvc ? {
-            onToolInvoke: async (toolId: string, args: Record<string, unknown>, displayCmd: string) => {
-                const cwd = deps.chatInput.getConfig()?.settings?.workingDirectory || undefined;
-                deps.chatInput.showToolOutput?.(displayCmd, '⏳ Running…', true);
-                const result = await toolSvc.invoke({ toolId, args, cwd });
-                deps.chatInput.showToolOutput?.(displayCmd, result.output, result.success);
-            },
-        } : {}),
     };
 }
 

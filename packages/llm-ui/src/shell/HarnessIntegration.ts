@@ -5,7 +5,6 @@
 import type { IAgentRuntime } from '@itookit/common';
 import type { ISkillService } from '@itookit/common';
 import { Toast, Modal } from '@itookit/common';
-import type { IHarnessContext } from '@itookit/llm-engine';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { SendMessageCommand } from '../commands/SendMessageCommand';
 import type { SkillInvocation } from '../domain/types';
@@ -22,39 +21,15 @@ export interface HarnessIntegrationDeps {
 
 /**
  * Build harness callbacks for ChatInput construction.
- * Only wired when HarnessAdapter with SkillService is available.
+ *
+ * Previously required IHarnessContext + SkillService from HarnessAdapter.
+ * Since HarnessAdapter was deleted (S9), harness features are dormant.
+ * Returns empty callbacks; the UI gracefully degrades.
  */
 export function buildHarnessCallbacks(
-    ctx: IHarnessContext | null,
-    runtime: IAgentRuntime | undefined,
+    _runtime: IAgentRuntime | undefined,
 ): Partial<Record<string, any>> {
-    const skillSvc = ctx?.skillService;
-    if (!skillSvc || !runtime) return {};
-
-    return {
-        onRequestSkills: async () => {
-            const session = runtime.getCurrentSession();
-            const loadedIds = new Set(session?.loadedSkills ?? []);
-            return skillSvc.listSkills().map((s) => ({
-                id: s.id,
-                name: s.name,
-                description: s.description,
-                loaded: loadedIds.has(s.id),
-                enabled: s.enabled,
-                toolCount: s.tools?.length ?? 0,
-                icon: s.icon,
-            }));
-        },
-
-        onLoadSkill: async (skillId: string) => {
-            const result = await skillSvc.loadSkill(skillId);
-            return result.toolIds;
-        },
-
-        onUnloadSkill: async (skillId: string) => {
-            await skillSvc.unloadSkill(skillId);
-        },
-    };
+    return {};
 }
 
 // ── Interrupted session recovery ───────────────────────────────────────────
@@ -85,15 +60,9 @@ export function checkSessionInterrupted(
 // ── Mid-execution injection ────────────────────────────────────────────────
 
 export function injectIntoRunningHarness(
-    getContextFn: () => IHarnessContext | null,
     message: string,
 ): boolean {
-    const runtime = getContextFn()?.runtime;
-    const session = runtime?.getCurrentSession();
-    if (!session || session.status !== 'running') return false;
-    runtime!.inject(message);
-    Toast.info('已注入指令 — Agent 将在下一轮感知到');
-    return true;
+    return false;
 }
 
 // ── Plan confirm intercept ─────────────────────────────────────────────────

@@ -14,7 +14,7 @@
  * - 支持技能/工具系统
  * 
  * 不包含：
- * - 执行逻辑 (→ @itookit/llm-kernel)
+ * - 执行逻辑 (→ @itookit/llm-engine)
  * - 会话管理 (→ @itookit/llm-engine)
  * - 持久化 (→ @itookit/llm-engine)
  * - Agent 定义 (→ @itookit/llm-engine)
