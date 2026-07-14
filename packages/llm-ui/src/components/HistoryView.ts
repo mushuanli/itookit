@@ -394,7 +394,6 @@ export class HistoryView implements IHistoryPresenter {
             // ── LLM 2.0 canonical events (S7) ─────────────────────────────
             case 'message:appended': {
                 const { sessionGroup, isExecutionRoot, parentId } = e.payload;
-                console.debug('[HistoryView] message:appended', { id: sessionGroup?.id, role: sessionGroup?.role, isExecutionRoot, parentId });
                 if (!sessionGroup) {
                     console.warn('[HistoryView] message:appended missing sessionGroup', e.payload);
                     break;
