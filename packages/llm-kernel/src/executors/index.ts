@@ -1,8 +1,11 @@
 // @file: llm-kernel/executors/index.ts
+//
+// Executor registry — kept as a minimal framework shell after S6c removal
+// of AgentExecutor. No built-in executors are registered; external consumers
+// may register custom executors via registerExecutor().
 
 import { IExecutor, IExecutorFactory, ExecutorConfig } from '../core/interfaces';
 import { ExecutorType } from '../core/types';
-import { AgentExecutor, AgentExecutorConfig } from './agent-executor';
 
 /**
  * 执行器工厂函数类型
@@ -15,17 +18,6 @@ type ExecutorCreator = (config: ExecutorConfig, factory: IExecutorFactory) => IE
 export class ExecutorRegistry implements IExecutorFactory {
     private executorCreators = new Map<ExecutorType, ExecutorCreator>();
     private instances = new Map<string, IExecutor>();
-
-    constructor() {
-        this.registerBuiltins();
-    }
-
-    private registerBuiltins(): void {
-        this.registerExecutor('agent', (config) => {
-            const agentConfig = config as AgentExecutorConfig;
-            return new AgentExecutor(config.id, config.name, agentConfig);
-        });
-    }
 
     /**
      * 注册执行器类型

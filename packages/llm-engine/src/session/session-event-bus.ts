@@ -1,14 +1,23 @@
 // @file: llm-engine/session/session-event-bus.ts
 
 import { EventBus } from '@itookit/common';
-import { OrchestratorEvent, RegistryEvent } from '../core/types';
+import { SessionEvent, OrchestratorEvent, RegistryEvent } from '../core/types';
 import { log } from '../utils/logger';
 
 // ── Type maps for the two tracks ─────────────────────────────────────────────
 
-/** Map from OrchestratorEvent.type → payload, for the session track. */
-type OrchestratorEventMap = {
-    [E in OrchestratorEvent as E['type']]: E['payload'];
+/**
+ * Map from SessionEvent.type → payload for the EventBus.
+ *
+ * All events normalize to { type, payload } at the bus level:
+ *   - OrchestratorEvent already has { type, payload }
+ *   - SessionEvent flat fields become the payload
+ *
+ * After S7 Step 5 (cleanup), this switches to Omit<E, 'type'> for
+ * true flat reconstruction.
+ */
+type SessionEventMap = {
+    [E in SessionEvent as E['type']]: E extends { payload: infer P } ? P : Omit<E, 'type'>;
 };
 
 /** Map from RegistryEvent.type → payload, for the global track. */
@@ -17,8 +26,14 @@ type RegistryEventMap = {
 };
 
 /**
+ * Transitional event type — accepts both old OrchestratorEvent and new
+ * SessionEvent during migration. Remove after S7 Step 5.
+ */
+type TransitionalEvent = SessionEvent | OrchestratorEvent;
+
+/**
  * Session event bus — two isolated tracks:
- *   • session track  — per-session OrchestratorEvent, routed via channel(sessionId)
+ *   • session track  — per-session events, routed via channel(sessionId)
  *   • global track   — broadcast RegistryEvent
  *
  * Channel lifecycle = session registration lifecycle:
@@ -26,7 +41,7 @@ type RegistryEventMap = {
  *   removeSession → channel closed (subsequent emits silently dropped)
  */
 export class SessionEventBus {
-    private readonly sessionBus = new EventBus<OrchestratorEventMap>();
+    private readonly sessionBus = new EventBus<SessionEventMap>();
     private readonly globalBus  = new EventBus<RegistryEventMap>();
 
     // ── Session lifecycle ──────────────────────────────────────────────────
@@ -48,26 +63,46 @@ export class SessionEventBus {
 
     onSession(
         sessionId: string,
-        handler: (event: OrchestratorEvent) => void,
+        handler: (event: SessionEvent) => void,
     ): () => void {
         this.ensureSession(sessionId);
         return this.sessionBus.channel(sessionId).onAny((payload, meta) => {
             try {
-                handler({ type: meta.type, payload } as OrchestratorEvent);
+                // During transition: reconstruct as { type, payload } wrapper.
+                // Consumers handle both old (OrchestratorEvent) and new
+                // (SessionEvent) type names via their switch statements.
+                handler({ type: meta.type, payload } as SessionEvent);
             } catch (err) {
                 log.error('Session event listener error', { sessionId, eventType: meta.type, err });
             }
         });
     }
 
-    emitSession(sessionId: string, event: OrchestratorEvent): void {
+    /**
+     * Emit a session event.
+     *
+     * Accepts both {@link SessionEvent} and deprecated {@link OrchestratorEvent}
+     * during migration. Normalizes to { type, payload } at the bus level.
+     */
+    emitSession(sessionId: string, event: TransitionalEvent): void {
         if (!this.sessionBus.hasChannel(sessionId)) {
             log.debug('Event dropped (session not registered)', { sessionId, eventType: event.type });
             return;
         }
+
+        let payload: unknown;
+        if ('payload' in event) {
+            // OrchestratorEvent or wrapper-style SessionEvent
+            payload = (event as OrchestratorEvent).payload;
+        } else {
+            // Flat canonical AgentEvent — rest becomes payload
+            const { type: _, ...rest } = event;
+            payload = rest;
+        }
+
         this.sessionBus.channel(sessionId).emit(
-            event.type as keyof OrchestratorEventMap,
-            event.payload as any,
+            event.type as keyof SessionEventMap,
+            payload as any,
         );
     }
 

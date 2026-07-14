@@ -70,6 +70,11 @@ export interface AgentEventToolRunning {
     call: ToolCallInfo;
 }
 
+export interface AgentEventToolInput {
+    type: 'tool:input';
+    call: ToolCallInfo & { delta: string };
+}
+
 export interface AgentEventToolSuccess {
     type: 'tool:success';
     call: ToolCallInfo & { result: string };
@@ -109,6 +114,13 @@ export interface AgentEventLogRefMoved {
     newHead: string;
 }
 
+export interface AgentEventLogRefRenamed {
+    type: 'log:ref_renamed';
+    ref: string;
+    oldName: string;
+    newName: string;
+}
+
 // ─── Canonical union ─────────────────────────────────────────────────
 
 export type AgentEvent =
@@ -120,8 +132,10 @@ export type AgentEvent =
     | AgentEventStreamContent
     | AgentEventToolQueued
     | AgentEventToolRunning
+    | AgentEventToolInput
     | AgentEventToolSuccess
     | AgentEventToolError
     | AgentEventAwaitSignal
     | AgentEventLogAppended
-    | AgentEventLogRefMoved;
+    | AgentEventLogRefMoved
+    | AgentEventLogRefRenamed;

@@ -15,9 +15,19 @@ import type {
     RecoveryAction,
 } from '@itookit/common';
 import { TruncationDetector } from '../session/truncation-detector';
-import type { AutoContinueConfig } from '../session/auto-continue';
 
-const TRUNCATION_DETECTION_DEFAULTS: AutoContinueConfig = {
+// ─── Truncation Detection Config (formerly in session/auto-continue.ts) ───
+
+interface TruncationDetectionConfig {
+    enabled: boolean;
+    maxContinuations: number;
+    continuePrompt: string;
+    highConfidenceOnly: boolean;
+    continuationTimeout: number;
+    maxAccumulatedChars: number;
+}
+
+const TRUNCATION_DETECTION_DEFAULTS: TruncationDetectionConfig = {
     enabled: true,
     maxContinuations: 5,
     continuePrompt: [
@@ -205,7 +215,7 @@ export function createSkillsMiddleware(): ILoopMiddleware {
  * instance. Create a fresh instance per LoopExecutor.
  */
 export function createTruncationDetectionMiddleware(
-    config?: Partial<AutoContinueConfig>,
+    config?: Partial<TruncationDetectionConfig>,
 ): ILoopMiddleware {
     const cfg = { ...TRUNCATION_DETECTION_DEFAULTS, ...config };
     const detector = new TruncationDetector();

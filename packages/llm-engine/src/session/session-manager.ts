@@ -5,7 +5,7 @@ import {
     SessionStatus,
     SessionRuntime,
     SessionSnapshot,
-    OrchestratorEvent,
+    SessionEvent,
     ChatAttachment,
     ExecutionOverrides,
     ChatSessionSettings,
@@ -289,7 +289,7 @@ export class SessionManager {
     // 事件
     // ================================================================
 
-    onEvent(handler: (event: OrchestratorEvent) => void): () => void {
+    onEvent(handler: (event: SessionEvent) => void): () => void {
         if (!this.boundSessionId) return () => { };
         if (this.eventUnsubscribe) this.eventUnsubscribe();
         this.eventUnsubscribe = this.eventBus.onSession(this.boundSessionId, handler);
@@ -625,7 +625,7 @@ export class SessionManager {
 
         // 4. 消息删除事件
         this.eventBus.emitSession(sessionId, {
-            type: 'messages_deleted',
+            type: 'messages:deleted',
             payload: { deletedIds: idsToDelete },
         });
 
@@ -773,7 +773,7 @@ export class SessionManager {
 
         // 通知 UI
         this.eventBus.emitSession(sessionId, {
-            type: 'message_edited',
+            type: 'message:edited',
             payload: {
                 messageId,
                 newContent,
@@ -861,7 +861,7 @@ export class SessionManager {
         await this.reloadSessionData(nodeId, sessionId, state);
 
         this.eventBus.emitSession(sessionId, {
-            type: 'sibling_switch',
+            type: 'sibling:switched',
             payload: { messageId, newIndex: siblingIndex, total: siblings.length },
         });
     }

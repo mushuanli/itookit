@@ -23,6 +23,7 @@
 
 export * from './core/types';
 export * from './core/errors';
+export { setKernelDeviceManager, getKernelDeviceManager } from './core/device-registry';
 export { ENGINE_DEFAULTS, STORAGE_KEYS } from './core/constants';
 
 // ── LLM 2.0: 协程式 Loop + Executor 注册表 ──────────────────────────
@@ -92,14 +93,17 @@ export { AttachmentProcessor } from './session/attachment-processor';
 // 适配器
 // ============================================
 
-export { UIEventAdapter } from './adapters/ui-event-adapter';
-export { LLMKernelAdapter, getLLMKernelAdapter } from './adapters/llmkernel-adapter';
 export {
     HarnessAdapter,
     initHarnessAdapter,
+    /** @deprecated Use getHarnessContext() instead */
     getHarnessAdapter,
     resetHarnessAdapter,
 } from './adapters/harness-adapter';
+
+// S6c: Harness context — preferred way for UI to access harness services
+export type { IHarnessContext } from './core/harness-context';
+export { setHarnessContext, getHarnessContext } from './core/harness-context';
 
 // ============================================
 // 持久化
@@ -127,7 +131,6 @@ export type {
     HistoryQueryOptions,
 } from './services/prompt-history-service';
 
-//export { VFSHistoryStorage } from './services/prompt-history-storage';
 
 // ============================================
 // 服务
@@ -171,7 +174,6 @@ export type {
 
 export {
     GraphOrchestrator,
-    DependencyGraph,
     SessionMetaStore,
     CycleError,
     DEFAULT_SESSION_META,
@@ -207,11 +209,6 @@ export { formatErrorMessage } from './utils/error-formatter';
 export { TruncationDetector } from './session/truncation-detector';
 export type { TruncationResult } from './session/truncation-detector';
 
-export type {
-    AutoContinueConfig,
-    ContinueDecision,
-} from './session/auto-continue';
-
 // ============================================
 // 初始化
 // ============================================
@@ -219,7 +216,6 @@ export type {
 import type { ILLMService, ILoop } from '@itookit/common';
 import { IAgentConfigService } from './services/agent-service';
 import { IChatEngine } from './persistence/types';
-import { initializeKernel, KernelInitOptions } from '@itookit/llm-kernel';
 import { ChatEngine } from './persistence/chat-engine';
 import { SessionManager, createSessionManager } from './session/session-manager';
 import { initializePromptHistory } from './services/prompt-history-service';
@@ -230,7 +226,7 @@ import { createLoopExecutor } from './executors/loop-presets';
 /**
  * Engine 初始化选项
  */
-export interface EngineInitOptions extends KernelInitOptions {
+export interface EngineInitOptions {
     /** Agent 服务 */
     agentService: IAgentConfigService;
 
@@ -264,10 +260,9 @@ export interface EngineInitOptions extends KernelInitOptions {
 export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
     sessionManager: SessionManager;
 }> {
-    await initializeKernel({
-        plugins: options.plugins,
-        config: options.config,
-    });
+    // S8: initializeKernel inlined — kernel package eliminated.
+    // PluginManager was removed in S6a; KernelInitOptions.plugins/config were vestigial.
+    console.log('[Kernel] Initialized');
 
     await options.agentService.init();
     await options.sessionEngine.init();

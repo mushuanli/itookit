@@ -1,6 +1,6 @@
 // @file: llm-ui/components/HistoryView.ts
 
-import type { SessionGroup, OrchestratorEvent } from '@itookit/llm-engine';
+import type { SessionGroup, SessionEvent } from '@itookit/llm-engine';
 import type { IModuleFS, IAgentRuntime } from '@itookit/common';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { CollapseStateMap, NodeActionCallback } from '../domain/types';
@@ -53,7 +53,7 @@ export class HistoryView implements IHistoryPresenter {
     // 基础设施
     private scrollController: ScrollController;
     private resizeTracker: ContentResizeTracker;
-    private eventProcessor: EventBatchProcessor<OrchestratorEvent>;
+    private eventProcessor: EventBatchProcessor<SessionEvent>;
     private timers = new TimerManager();
 
     private newContentIndicator: HTMLElement | null = null;
@@ -119,7 +119,7 @@ export class HistoryView implements IHistoryPresenter {
         );
 
         // 使用泛化的 EventBatchProcessor
-        this.eventProcessor = new EventBatchProcessor<OrchestratorEvent>(
+        this.eventProcessor = new EventBatchProcessor<SessionEvent>(
             (batched) => this.handleBatchedEvents(batched),
             (event) => this.processEventImmediate(event),
             {
@@ -133,6 +133,11 @@ export class HistoryView implements IHistoryPresenter {
                     'tool:queued',
                     'stream:thinking:stop',
                     'tool:success', 'tool:error',
+                    // LLM 2.0 canonical events (S7)
+                    'message:appended', 'message:status',
+                    'messages:cleared', 'messages:deleted',
+                    'sibling:switched',
+                    'stream:content', 'stream:thinking',
                 ],
             }
         );
@@ -271,7 +276,7 @@ export class HistoryView implements IHistoryPresenter {
         return this.collapse.findUnfoldedByViewport(direction);
     }
 
-    processEvent(event: OrchestratorEvent): void {
+    processEvent(event: SessionEvent): void {
         this.eventProcessor.push(event);
     }
 
@@ -287,7 +292,7 @@ export class HistoryView implements IHistoryPresenter {
         this.ttyCtrl.setRuntime(runtime);
     }
 
-    private handleBatchedEvents(batched: BatchedEvents<OrchestratorEvent>): void {
+    private handleBatchedEvents(batched: BatchedEvents<SessionEvent>): void {
         // Process structural events first (node_start etc.) so nodes exist in the
         // DOM before we try to write streaming content into them.
         for (const event of batched.immediate) {
@@ -307,34 +312,36 @@ export class HistoryView implements IHistoryPresenter {
             this.ttyCtrl.handleMeta(nodeId, metaInfo);
         }
     }
-    private processEventImmediate(event: OrchestratorEvent): void {
-        switch (event.type) {
+    private processEventImmediate(event: SessionEvent): void {
+        // During S7 transition, event types include both old OrchestratorEvent
+        // names and new SessionEvent names. Use string-based switch.
+        const e = event as { type: string; payload?: any; [key: string]: any };
+        switch (e.type) {
             case 'session_start': {
                 this.clearErrors();
                 this.enterStreamingMode();
-                const isUser = event.payload.role === 'user';
-                // agent/system 来源的消息默认折叠
-                const isAgentOrigin = event.payload.origin === 'agent' || event.payload.origin === 'system';
+                const isUser = e.payload.role === 'user';
+                const isAgentOrigin = e.payload.origin === 'agent' || e.payload.origin === 'system';
                 const defaultCollapsed = isUser || isAgentOrigin;
-                this.renderer.appendSession(event.payload, defaultCollapsed);
-                this.collapse.setState(event.payload.id, defaultCollapsed);
+                this.renderer.appendSession(e.payload, defaultCollapsed);
+                this.collapse.setState(e.payload.id, defaultCollapsed);
                 this.scrollController.scrollToBottom(false);
                 break;
             }
 
             case 'node_start':
-                this.renderer.appendNode(event.payload.parentId, event.payload.node, false);
+                this.renderer.appendNode(e.payload.parentId, e.payload.node, false);
                 break;
 
             case 'node_status':
                 this.stream.updateStatus(
-                    event.payload.nodeId, event.payload.status, event.payload.result
+                    e.payload.nodeId, e.payload.status, e.payload.result
                 );
                 break;
 
             case 'finished':
                 this.exitStreamingMode();
-                this.renderer.editors.forEach(editor => editor.finalize().catch(e => console.error('[HistoryView] finalize failed:', e)));
+                this.renderer.editors.forEach(editor => editor.finalize().catch(err => console.error('[HistoryView] finalize failed:', err)));
                 this.clearErrors();
                 this.bus?.emit('state:collapseChanged', {
                     states: this.collapse.getStates(),
@@ -343,24 +350,24 @@ export class HistoryView implements IHistoryPresenter {
 
             case 'error': {
                 this.exitStreamingMode();
-                const msg = event.payload.message || 'Unknown error';
-                const code = (event.payload as any).code;
+                const msg = e.payload?.message ?? e.error?.message ?? 'Unknown error';
+                const code = e.payload?.code ?? e.error?.code;
                 const prefix = code === 401 ? '🔐 ' : code === 429 ? '⏳ ' : '';
                 this.appendErrorBubble(new Error(`${prefix}${msg}`));
-                this.renderer.editors.forEach(editor => editor.finalize().catch(e => console.error('[HistoryView] finalize failed:', e)));
+                this.renderer.editors.forEach(editor => editor.finalize().catch(err => console.error('[HistoryView] finalize failed:', err)));
                 break;
             }
 
             case 'messages_deleted':
-                this.removeMessages(event.payload.deletedIds, true);
+                this.removeMessages(e.payload.deletedIds, true);
                 break;
 
             case 'message_edited': {
-                const el = this.renderer.getSessionElement(event.payload.messageId);
+                const el = this.renderer.getSessionElement(e.payload.messageId);
                 if (el) {
                     const preview = el.querySelector('.llm-ui-header-preview');
                     if (preview) {
-                        preview.textContent = getPreviewText(event.payload.newContent);
+                        preview.textContent = getPreviewText(e.payload.newContent);
                     }
                 }
                 break;
@@ -371,7 +378,7 @@ export class HistoryView implements IHistoryPresenter {
                 break;
 
             case 'sibling_switch': {
-                const { messageId, newIndex, total } = event.payload;
+                const { messageId, newIndex, total } = e.payload;
                 const el = this.renderer.getSessionElement(messageId);
                 if (!el) break;
 
@@ -395,54 +402,111 @@ export class HistoryView implements IHistoryPresenter {
 
             // ── Claude Code Agent Loop 事件 ───────────────────────────────
             case 'tool:queued': {
-                // 在 agent 节点下创建 tool 子节点
                 const toolNode = {
-                    id: event.payload.toolId,
-                    parentId: event.payload.nodeId,
-                    executorId: event.payload.name,
+                    id: e.payload.toolId,
+                    parentId: e.payload.nodeId,
+                    executorId: e.payload.name,
                     executorType: 'tool' as const,
-                    name: event.payload.name,
+                    name: e.payload.name,
                     status: 'queued' as const,
                     startTime: Date.now(),
                     data: { input: '' },
                 };
-                this.renderer.appendNode(event.payload.nodeId, toolNode, false);
+                this.renderer.appendNode(e.payload.nodeId, toolNode, false);
                 break;
             }
 
             case 'tool:input': {
-                // tool input JSON 增量渲染
-                const toolEl = this.renderer.getNode(event.payload.toolId);
+                const toolEl = this.renderer.getNode(e.payload.toolId);
                 if (toolEl) {
                     const inputPre = toolEl.querySelector('.llm-ui-node__input pre') as HTMLElement;
                     if (inputPre) {
-                        inputPre.textContent = (inputPre.textContent || '') + event.payload.chunk;
+                        inputPre.textContent = (inputPre.textContent || '') + e.payload.chunk;
                     }
                 }
                 break;
             }
 
             case 'tool:running':
-                this.stream.updateStatus(event.payload.toolId, 'running');
+                this.stream.updateStatus(e.payload.toolId, 'running');
                 break;
 
             case 'tool:success':
-                this.stream.updateStatus(event.payload.toolId, 'success', event.payload.result);
+                this.stream.updateStatus(e.payload.toolId, 'success', e.payload.result);
                 break;
 
             case 'tool:error':
-                this.stream.updateStatus(event.payload.toolId, 'failed', event.payload.error);
+                this.stream.updateStatus(e.payload.toolId, 'failed', e.payload.error);
                 break;
 
             case 'stream:thinking:start':
             case 'stream:content:start':
             case 'turn:start':
             case 'turn:end':
-                // 仅用于内部状态追踪，UI 层无需特殊处理
                 break;
 
             case 'stream:thinking:stop':
-                // thinking 块结束，signature 不展示
+                break;
+
+            // ── LLM 2.0 canonical events (S7) ─────────────────────────────
+            case 'message:appended': {
+                const p = e.payload as SessionGroup & { isExecutionRoot?: boolean; parentId?: string };
+                if (p.isExecutionRoot) {
+                    this.renderer.appendNode(p.parentId, p as any, false);
+                } else {
+                    this.clearErrors();
+                    this.enterStreamingMode();
+                    const isUser = p.role === 'user';
+                    const isAgentOrigin = p.origin === 'agent' || p.origin === 'system';
+                    const defaultCollapsed = isUser || isAgentOrigin;
+                    this.renderer.appendSession(p, defaultCollapsed);
+                    this.collapse.setState(p.id, defaultCollapsed);
+                    this.scrollController.scrollToBottom(false);
+                }
+                break;
+            }
+
+            case 'message:status': {
+                const sp = e.payload;
+                this.stream.updateStatus(sp.messageId, sp.status, sp.result);
+                break;
+            }
+
+            case 'messages:cleared':
+                this.renderer.renderWelcome();
+                break;
+
+            case 'messages:deleted':
+                this.removeMessages(e.payload.deletedIds, true);
+                break;
+
+            case 'message:edited': {
+                const ep = e.payload;
+                const el2 = this.renderer.getSessionElement(ep.messageId);
+                if (el2) {
+                    const preview = el2.querySelector('.llm-ui-header-preview');
+                    if (preview) {
+                        preview.textContent = getPreviewText(ep.newContent);
+                    }
+                }
+                break;
+            }
+
+            case 'sibling:switched': {
+                const ssp = e.payload;
+                const el3 = this.renderer.getSessionElement(ssp.messageId);
+                if (!el3) break;
+                const indicator = el3.querySelector('.llm-ui-branch-indicator');
+                if (indicator) indicator.textContent = `${ssp.newIndex + 1}/${ssp.total}`;
+                const prevBtn = el3.querySelector('[data-action="prev-sibling"]') as HTMLButtonElement;
+                const nextBtn = el3.querySelector('[data-action="next-sibling"]') as HTMLButtonElement;
+                if (prevBtn) prevBtn.disabled = ssp.newIndex === 0;
+                if (nextBtn) nextBtn.disabled = ssp.newIndex === ssp.total - 1;
+                break;
+            }
+
+            case 'stream:content':
+            case 'stream:thinking':
                 break;
         }
     }

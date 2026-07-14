@@ -1,6 +1,6 @@
 // @file: llm-engine/session/agent-resolver.ts
 
-import { ExecutorConfig } from '@itookit/llm-kernel';
+import { ExecutorConfig } from '../core/types';
 import { resolveModelForTier, ModelTier } from '@itookit/common';
 import type { ConnectionMeta } from '@itookit/common';
 import { IAgentConfigService } from '../services/agent-service';

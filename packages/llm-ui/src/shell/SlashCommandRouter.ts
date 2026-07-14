@@ -19,7 +19,7 @@ import type { EditorHostContext } from '@itookit/common';
 import type { IChatEngine } from '@itookit/llm-engine';
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
 import type { SkillInvocation } from '../domain/types';
-import { getHarnessAdapter } from '@itookit/llm-engine';
+import { getHarnessContext } from '@itookit/llm-engine';
 import { executeSkillInvocation } from './HarnessIntegration';
 import { getAgentDisplayName, sanitizeFileName } from './AgentProvider';
 
@@ -347,11 +347,12 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
 function buildHarnessSlashCallbacks(
     deps: SlashCommandRouterDeps,
 ): Partial<SlashCommandCallbacks> {
-    const skillSvc = getHarnessAdapter()?.getSkillService();
+    const ctx = getHarnessContext();
+    const skillSvc = ctx?.skillService;
     if (!skillSvc) return {};
 
-    const toolSvc = getHarnessAdapter()?.getToolService();
-    const runtime = getHarnessAdapter()?.getRuntime();
+    const toolSvc = ctx?.toolService;
+    const runtime = ctx?.runtime;
 
     return {
         onSkill: async (skillId: string) => {
@@ -388,7 +389,7 @@ function buildHarnessSlashCallbacks(
             const skills = skillSvc.listSkills()
                 .filter((s) => s.enabled)
                 .flatMap((s) => s.tools.map((t) => `${t.toolId} (${s.name})`));
-            const toolService = (getHarnessAdapter() as unknown as {
+            const toolService = (getHarnessContext() as unknown as {
                 toolService?: { listTools(): Array<{ id: string }> }
             })?.toolService;
             const builtinTools = toolService?.listTools().map((t) => t.id) ??

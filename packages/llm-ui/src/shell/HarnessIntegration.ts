@@ -5,7 +5,7 @@
 import type { IAgentRuntime } from '@itookit/common';
 import type { ISkillService } from '@itookit/common';
 import { Toast, Modal } from '@itookit/common';
-import type { HarnessAdapter } from '@itookit/llm-engine';
+import type { IHarnessContext } from '@itookit/llm-engine';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { SendMessageCommand } from '../commands/SendMessageCommand';
 import type { SkillInvocation } from '../domain/types';
@@ -25,10 +25,10 @@ export interface HarnessIntegrationDeps {
  * Only wired when HarnessAdapter with SkillService is available.
  */
 export function buildHarnessCallbacks(
-    adapter: HarnessAdapter | null,
+    ctx: IHarnessContext | null,
     runtime: IAgentRuntime | undefined,
 ): Partial<Record<string, any>> {
-    const skillSvc = adapter?.getSkillService();
+    const skillSvc = ctx?.skillService;
     if (!skillSvc || !runtime) return {};
 
     return {
@@ -85,10 +85,10 @@ export function checkSessionInterrupted(
 // ── Mid-execution injection ────────────────────────────────────────────────
 
 export function injectIntoRunningHarness(
-    getHarnessAdapterFn: () => HarnessAdapter | null,
+    getContextFn: () => IHarnessContext | null,
     message: string,
 ): boolean {
-    const runtime = getHarnessAdapterFn()?.getRuntime();
+    const runtime = getContextFn()?.runtime;
     const session = runtime?.getCurrentSession();
     if (!session || session.status !== 'running') return false;
     runtime!.inject(message);

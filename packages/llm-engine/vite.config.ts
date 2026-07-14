@@ -20,13 +20,11 @@ export default defineConfig({
     },
     rollupOptions: {
       external: [
-        '@itookit/llm-kernel',
         '@itookit/device-llm',
         '@itookit/vfs'
       ],
       output: {
         globals: {
-          '@itookit/llm-kernel': 'LLMKernel',
           '@itookit/device-llm': 'LLMDriver',
           '@itookit/vfs': 'VFSCore'
         }

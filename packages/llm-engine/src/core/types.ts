@@ -1,7 +1,49 @@
 // @file: llm-engine/src/core/types.ts
 
-import { NodeStatus } from '@itookit/llm-kernel';
 import type { ModelTier, ChatAttachment } from '@itookit/common';
+
+// ═══════════════════════════════════════════════════════════════
+// Core types (absorbed from @itookit/llm-kernel in S8)
+// ═══════════════════════════════════════════════════════════════
+
+/** 节点状态（从 llm-kernel 迁移） */
+export type NodeStatus =
+    | 'pending'
+    | 'queued'
+    | 'running'
+    | 'success'
+    | 'failed'
+    | 'aborted'
+    | 'cancelled'
+    | 'paused'
+    | 'waiting_input';
+
+/** 执行器类型（S6: 收缩为 'agent'） */
+export type ExecutorType = 'agent';
+
+/**
+ * 执行器配置（从 llm-kernel 迁移）。
+ * connectionId 替代旧的 connection: LLMConnection —— API Key 由 LLMDeviceDriver 内部解析。
+ */
+export interface ExecutorConfig {
+    id: string;
+    name: string;
+    type: ExecutorType;
+    icon?: string;
+    description?: string;
+    model?: string;
+    temperature?: number;
+    stream?: boolean;
+    enableThinking?: boolean;
+    reasoningEffort?: 'low' | 'medium' | 'xhigh';
+    connectionId?: string;
+    systemPrompt?: string;
+    constraints?: {
+        maxRetries?: number;
+        timeout?: number;
+        maxTokens?: number;
+    };
+}
 
 // Re-export chat types that moved to @itookit/common for backward compatibility
 export type { ChatAttachment, ChatSessionSettings } from '@itookit/common';
@@ -421,6 +463,74 @@ export type OrchestratorEvent =
     | { type: 'tool:error';    payload: { nodeId: string; toolId: string; error: string } }
     | { type: 'turn:start';    payload: { sessionId: string; turn: number } }
     | { type: 'turn:end';      payload: { sessionId: string; turn: number; usage?: SessionTokenUsage } };
+
+// ═══════════════════════════════════════════════════════════════
+// LLM 2.0 canonical event types (S7: replacing OrchestratorEvent)
+// ═══════════════════════════════════════════════════════════════
+
+import type { AgentEvent } from '@itookit/common';
+
+/**
+ * Engine-level UI projection events for tree-based rendering.
+ * These are NOT part of the canonical AgentEvent schema — they are
+ * UI-forwarding events emitted by the engine to drive the execution tree.
+ */
+export type MessageProjectionEvent =
+    | {
+        type: 'message:appended';
+        payload: {
+            /** The session group (message) being appended. */
+            sessionGroup: SessionGroup;
+            /** true = assistant node that contains the execution tree. */
+            isExecutionRoot?: boolean;
+            /** Parent message ID for child nodes (tool calls etc). */
+            parentId?: string;
+        };
+    }
+    | {
+        type: 'message:updated';
+        payload: {
+            messageId: string;
+            /** Streaming chunk — text delta appended to field. */
+            delta?: string;
+            /** Which field the chunk belongs to. */
+            field?: 'thought' | 'output';
+            /** Arbitrary metadata (TTY, HITL, budget, skill, etc). */
+            metaInfo?: Record<string, unknown>;
+        };
+    }
+    | {
+        type: 'message:status';
+        payload: {
+            messageId: string;
+            status: NodeStatus;
+            result?: unknown;
+        };
+    };
+
+/**
+ * Session structural events — operations that modify the session tree
+ * but are NOT agent-loop events (branch ops, message deletion, etc).
+ */
+export type SessionStructuralEvent =
+    | { type: 'messages:cleared'; payload: Record<string, never> }
+    | { type: 'messages:deleted'; payload: { deletedIds: string[] } }
+    | { type: 'message:edited';  payload: { messageId: string; newContent: string; newPersistedNodeId?: string } }
+    | { type: 'sibling:switched'; payload: { messageId: string; newIndex: number; total: number } };
+
+/**
+ * Unified session event vocabulary.
+ *
+ * Replaces the deprecated {@link OrchestratorEvent}. Consumers should
+ * handle all three layers:
+ *   - Canonical AgentEvent (from ILoop executors)
+ *   - MessageProjectionEvent (engine-level tree projection)
+ *   - SessionStructuralEvent (branch / message lifecycle)
+ */
+export type SessionEvent =
+    | AgentEvent
+    | MessageProjectionEvent
+    | SessionStructuralEvent;
 
 /**
  * 注册表事件

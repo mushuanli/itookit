@@ -1,31 +1,36 @@
 # CLAUDE.md — @itookit/llm-engine
 
-会话引擎 — 多会话管理、VFS 持久化、Mission 编排、Session Graph、Agent Loop。消费 `llm-kernel` 和 `llm-harness`。
+会话引擎 — 多会话管理、VFS 持久化、Mission 编排、Session Graph、Agent Loop。
 
 > **S4~S5 ✅ (2026-07-14)**: ChatEngineLog 完整 ILog 实现；Goal 控制回路（DependencyScheduler + reconcile + 3 Predicate）；**S5 验收达成** — 4 个控制回路全部切换至 reconcile() 驱动。
+> **S6c ✅ (2026-07-14)**: LLMKernelAdapter + UIEventAdapter 删除；DependencyGraph 删除；auto-continue.ts 删除；AgentExecutor 物理删除（llm-kernel）；HarnessAdapter 解耦（IHarnessContext 服务定位器）。
+> **S7 ✅ (2026-07-14)**: SessionEventBus 切换至 `SessionEvent`（= canonical AgentEvent + MessageProjectionEvent + SessionStructuralEvent），替代 deprecated `OrchestratorEvent`；UI 消费者（HistoryView、SessionEventHandler）支持新旧双路径；SessionActor 桥接改为 canonical forward。
+> **S8 ✅ (2026-07-14)**: `@itookit/llm-kernel` 包消除 — `NodeStatus`、`ExecutorConfig`、`ExecutorType` 内联至 `core/types.ts`；`setKernelDeviceManager` 迁移至 `core/device-registry.ts`；`initializeKernel()` inline 至 `initializeLLMEngine()`。
 
 ## Architecture
 
 ```
 src/
 ├── session/        ← SessionManager, SessionState (in-memory projection cache), TaskRunner
-│                     SessionEventBus (session + global 双 track, channel 路由)
-│                     truncation-detector, auto-continue (types only), session-recovery
+│                     SessionEventBus (SessionEvent = AgentEvent | Projection | Structural, channel 路由)
+│                     truncation-detector, session-recovery
 ├── persistence/    ← ChatEngine (IChatEngine), ★ ChatEngineLog (完整 ILog facade)
 │                     ulid (ULID 生成), types (IChatEngine + ChatManifest/ChatNode)
-├── adapters/       ← HarnessAdapter, UIEventAdapter, llmkernel-adapter, tool-executor-bridge
+├── adapters/       ← HarnessAdapter, tool-executor-bridge
 ├── mission/        ← MissionService, ★ MissionScheduler (reconcile-driven), LiteSubAgentRouter
 │                     TodoState, ★ sub-agent-loop-adapter, ★ mission-goal-factory
-├── session-graph/  ← ★ GraphOrchestrator (+executeWithReconcile), DependencyGraph (@deprecated topoSort)
-│                     ★ agent-runtime-loop-adapter, ★ graph-goal-factory
+├── session-graph/  ← ★ GraphOrchestrator (+executeWithReconcile)
+│                     ★ agent-runtime-loop-adapter, ★ graph-goal-factory（含 resolveDependencyTree）
 │                     SessionMetaStore
 ├── services/       ← VFSAgentService, PromptHistoryService
-├── core/           ← types, errors, constants
+├── core/           ← types（含 NodeStatus/ExecutorConfig/ExecutorType/SessionEvent，S8 从 llm-kernel 吸收）
+│                     errors, constants, device-registry（S8 从 llm-kernel 迁移）
 │                     ★ executor-registry (ILoop 分发)
 │                     ★ loop-driver (drive() 协程宿主)
 │                     ★ middleware-pipeline (composeMiddleware)
 │                     ★ session-actor (SessionActor — drive ↔ EventBus 桥接)
 │                     ★ goal/ (S5 ✅) — DependencyScheduler + reconcile + 3 Predicate
+│                     ★ harness-context (S6c) — IHarnessContext 服务定位器
 ├── executors/      ← chat-executor, loop-executor, loop-middleware (7 个中间件), loop-presets
 └── utils/          ← converters, error-formatter, logger, parsers
 ```
@@ -41,10 +46,10 @@ SessionManager.sendMessage()
        │       ├─ mode='loop'     → LoopExecutor(lite) = [budget, error-recovery, truncation]
        │       └─ mode='loop:full' → LoopExecutor(full) = 全部 7 个中间件
        └─ mode absent → executeTask()
-           └─ kernelAdapter.executeQuery()   ← 旧 kernel 路径（auto-continue 已迁移至 ILoop 中间件）
+           └─ ILLMService.chatStream()   ← S6c: 直接调用 ILLMService，不再经 LLMKernelAdapter
 ```
 
-> **S5**: `executeTask()` 的 while(true) auto-continue 循环已删除，截断检测由 `createTruncationDetectionMiddleware` 在 ILoop 管线中处理。
+> **S6c**: `executeTask()` 改为 `ILLMService.chatStream()` 直连，token 统计优先使用真实数据。LLMKernelAdapter + UIEventAdapter 已删除。
 
 ## LLM 2.0 四原语（S1~S6 实施状态）
 
@@ -94,22 +99,40 @@ SessionManager.sendMessage()
 | AutoContinue | while(true) → `createTruncationDetectionMiddleware` (ILoop afterTurn) | ✅ |
 | BackPressure | 存根 → 真实 `createBackPressureMiddleware` (注入错误反馈) | ✅ |
 
-**已删除（S6 cleanup）**:
-- `AutoContinueHandler` → `createTruncationDetectionMiddleware`（ILoop 中间件管线）
-- `CompletionAnalyzer` → `createLLMJudgePredicate`（统一 Goal predicate 系统）
-- `GraphOrchestrator.executeSession()` → `executeWithReconcile()`（DependencyScheduler + reconcile）
-- `DependencyGraph.topoSort()` 标记 @deprecated → `DependencyScheduler`（仍被 graph-goal-factory 活跃使用）
+**已删除（S6 + S6c）**:
+- ~~`AutoContinueHandler`~~ → `createTruncationDetectionMiddleware`（ILoop 中间件管线）
+- ~~`CompletionAnalyzer`~~ → `createLLMJudgePredicate`（统一 Goal predicate 系统）
+- ~~`GraphOrchestrator.executeSession()`~~ → `executeWithReconcile()`（DependencyScheduler + reconcile）
+- ~~`DependencyGraph`~~ (类 + topoSort) → `resolveDependencyTree()` 自由函数（graph-goal-factory）
+- ~~`auto-continue.ts`~~ → 类型定义内联至 `loop-middleware.ts`（TruncationDetectionConfig）
+- ~~`LLMKernelAdapter`~~ + ~~`UIEventAdapter`~~ → `ILLMService.chatStream()` 直连
+- ~~`AgentExecutor`~~ + ~~`BaseExecutor`~~ (llm-kernel) → LLM 调用统一走 ILLMService
+- ~~`llm-kernel/ExecutionRuntime.execute()`~~ → 随 AgentExecutor 删除
 
 ## ILLMService 注入（S1）
 
 - `initializeLLMEngine({ llmService })` 接收 `ILLMService`
-- Agent Loop 路径全部走 `ILLMService.chatStream()`
-- 旧 `LLMKernelAdapter.streamRaw()` 已删除
+- 所有路径（Agent Loop + kernel fallback）统一走 `ILLMService.chatStream()`
+- S6c: kernel 路径 `executeTask()` 也切换为 ILLMService 直连
+
+## Harness 服务访问（S6c）
+
+- **推荐**: `getHarnessContext(): IHarnessContext | null` — 服务定位器（runtime + skillService + toolService）
+- **@deprecated**: `getHarnessAdapter(): HarnessAdapter | null` — 委托给 IHarnessContext，待 OrchestratorEvent 替换后移除
+
+## 事件系统（S7）
+
+- **SessionEvent** = `AgentEvent`（canonical，15 变体）| `MessageProjectionEvent`（3 变体，UI 树投影）| `SessionStructuralEvent`（6 变体，分支/消息操作）
+- SessionEventBus 过渡期同时接受新旧格式；`onSession` handler 类型为 `(event: SessionEvent) => void`
+- `SessionActor` 桥接：canonical AgentEvent 直接 forward + 同步 emit `node_update` 树投影事件（兼容现有 UI）
+- 新代码优先 emit canonical `AgentEvent`（`stream:content`、`turn:start`、`tool:queued` 等）
+- `@deprecated` `OrchestratorEvent` 待所有生产者迁移后移除
 
 ## Cost Recording
 
 TaskRunner 在两个路径完成时回调 `agentResolver.recordUsageCost(connectionId, sessionId, {...})`。
 `SessionTokenUsage` 包含 `cacheWriteTokens`, `cacheReadTokens`, `costUsd`, `isEstimated` 字段。
+S6c: kernel 路径优先使用 `chatStream` 返回的真实 token 数，回退到字符估算。
 
 ## Conventions
 
@@ -118,3 +141,6 @@ TaskRunner 在两个路径完成时回调 `agentResolver.recordUsageCost(connect
 - LLM 调用入口统一为 `ILLMService`，禁止绕过接口直接调用 device driver
 - 事件迁移期间新旧事件并行，新代码优先使用 `AgentEvent`（from `@itookit/common`）
 - 新 Agent Loop 策略实现 `ILoop`，通过 `ExecutorRegistry.register()` 注册
+- UI 层访问 harness 服务通过 `getHarnessContext()`，不直接依赖 `HarnessAdapter`
+- `setKernelDeviceManager()` / `getKernelDeviceManager()` 从 `@itookit/llm-engine` 导入（S8 从 llm-kernel 迁移）
+- `NodeStatus`、`ExecutorConfig`、`ExecutorType` 定义在 `core/types.ts`（S8 从 llm-kernel 吸收）

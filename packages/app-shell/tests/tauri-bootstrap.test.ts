@@ -23,7 +23,7 @@ import { createVFS } from '@itookit/vfslib';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { ChatEngine, VFSAgentService, initializeLLMEngine } from '@itookit/llm-engine';
 import { LLMDeviceDriver } from '@itookit/device-llm';
-import { setKernelDeviceManager } from '@itookit/llm-kernel';
+import { setKernelDeviceManager } from '@itookit/llm-engine';
 import { FS_MODULE_CHAT, FS_MODULE_AGENTS, IVFSManager } from '@itookit/common';
 
 // ── Module list (mirrors tauri-app/src/config/modules.ts, minus settings/home) ─

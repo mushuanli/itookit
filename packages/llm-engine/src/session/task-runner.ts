@@ -1,7 +1,7 @@
 // @file: llm-engine/session/task-runner.ts
 
-import type { ChatMessage, ILLMService, AgentEvent } from '@itookit/common';
-import { ExecutorConfig } from '@itookit/llm-kernel';
+import type { ChatMessage, ILLMService, AgentEvent, ChatCompletionChunk } from '@itookit/common';
+import { ExecutorConfig } from '../core/types';
 import {
     ExecutionTask,
     TaskInput,
@@ -18,7 +18,6 @@ import {
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { SessionState, HistoryMessage } from './session-state';
-import { LLMKernelAdapter, getLLMKernelAdapter } from '../adapters/llmkernel-adapter';
 import { IChatEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
@@ -70,12 +69,9 @@ export class TaskRunner {
     private running = new Map<string, ExecutionTask>();
     private maxConcurrent: number;
     private maxQueueSize: number;
-    private kernelAdapter: LLMKernelAdapter;
     private llmService: ILLMService | null = null;
     private executorRegistry: ExecutorRegistry;
-
-    /** 自动续写配置模板
-     * @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware. */
+    /** @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware. */
 
     constructor(
         private engine: IChatEngine,
@@ -87,7 +83,6 @@ export class TaskRunner {
     ) {
         this.maxConcurrent = options?.maxConcurrent ?? ENGINE_DEFAULTS.MAX_CONCURRENT;
         this.maxQueueSize = options?.maxQueueSize ?? ENGINE_DEFAULTS.MAX_QUEUE_SIZE;
-        this.kernelAdapter = getLLMKernelAdapter();
         this.executorRegistry = getExecutorRegistry();
     }
 
@@ -348,7 +343,7 @@ export class TaskRunner {
             // ── ILog via ChatEngineLog (S4: real facade over ChatEngine) ──
             const logAdapter = new ChatEngineLog(this.engine, sessionId);
 
-            // ── Event bridge: AgentEvent → accumulator + event bus ────────
+            // ── Event bridge: AgentEvent → canonical + tree projection ────
             const actor = new SessionActor((event: AgentEvent) => {
                 switch (event.type) {
                     case 'stream:content':
@@ -356,10 +351,13 @@ export class TaskRunner {
                         state.appendToNode(rootNode.id, event.delta, 'output');
                         persist();
                         if (isBound) {
+                            // Canonical event
+                            this.eventBus.emitSession(sessionId, event);
+                            // Tree projection for UI rendering
                             this.eventBus.emitSession(sessionId, {
                                 type: 'node_update',
                                 payload: { nodeId: rootNode.id, field: 'output', chunk: event.delta },
-                            } as OrchestratorEvent);
+                            });
                         }
                         break;
                     case 'stream:thinking':
@@ -367,19 +365,17 @@ export class TaskRunner {
                         state.appendToNode(rootNode.id, event.delta, 'thought');
                         persist();
                         if (isBound) {
+                            this.eventBus.emitSession(sessionId, event);
                             this.eventBus.emitSession(sessionId, {
                                 type: 'node_update',
                                 payload: { nodeId: rootNode.id, field: 'thought', chunk: event.delta },
-                            } as OrchestratorEvent);
+                            });
                         }
                         break;
                     case 'error':
                         errorAlreadyEmitted = true;
                         if (isBound) {
-                            this.eventBus.emitSession(sessionId, {
-                                type: 'error',
-                                payload: { message: event.error.message, code: event.error.code },
-                            } as OrchestratorEvent);
+                            this.eventBus.emitSession(sessionId, event);
                         }
                         break;
                     case 'turn:start':
@@ -389,12 +385,8 @@ export class TaskRunner {
                     case 'tool:success':
                     case 'tool:error':
                     case 'finished':
-                        // Forward to event bus for UI; finished handled after drive()
                         if (isBound) {
-                            this.eventBus.emitSession(sessionId, {
-                                type: event.type,
-                                payload: event as any,
-                            } as OrchestratorEvent);
+                            this.eventBus.emitSession(sessionId, event);
                         }
                         break;
                     case 'await_signal':
@@ -554,6 +546,7 @@ export class TaskRunner {
             // =====================================================
             // 8. 单次执行（auto-continue 已迁移至 ILoop 路径的
             //    createTruncationDetectionMiddleware）
+            //    S6c: LLM 调用从 LLMKernelAdapter 切换为 ILLMService 直连
             // =====================================================
 
             if (task.abortController.signal.aborted) {
@@ -566,31 +559,91 @@ export class TaskRunner {
                 agent: executorConfig.name,
                 model: executorConfig.model,
                 historyCount: historyWithFiles.length,
-                continuation: 0,
             });
 
-            const result = await this.kernelAdapter.executeQuery(
-                input.text, executorConfig,
-                {
-                    sessionId,
-                    history: historyWithFiles,
+            // ── Build messages for ILLMService ────────────────────
+            const llmMessages: ChatMessage[] = [];
+            if (executorConfig.systemPrompt) {
+                llmMessages.push({ role: 'system', content: executorConfig.systemPrompt });
+            }
+            llmMessages.push(...historyWithFiles);
+            // Current user input with attachments (already Attachment[] from convertToAttachments)
+            if (attachmentList.length > 0) {
+                llmMessages.push({
+                    role: 'user',
+                    content: input.text,
                     attachments: attachmentList,
-                    onEvent,
-                    signal: task.abortController.signal,
-                    rootNodeId: rootNode.id,
-                    stream: input.overrides?.streamMode ?? true,
-                }
-            );
+                });
+            } else {
+                llmMessages.push({ role: 'user', content: input.text });
+            }
 
-            if (result.status === 'failed') {
-                const firstError = result.errors?.[0];
-                const msg = firstError?.message
-                    || (firstError?.code ? `Execution failed [${firstError.code}]` : 'Execution failed');
+            const connectionId = executorConfig.connectionId || 'default';
+
+            // ── Emit turn start ───────────────────────────────────
+            onEvent({
+                type: 'turn:start',
+                payload: { sessionId, turn: 0 },
+            } as OrchestratorEvent);
+
+            // ── Stream via ILLMService ────────────────────────────
+            let llmUsage: any = {};
+
+            if (!this.llmService) {
+                throw new EngineError(
+                    EngineErrorCode.EXECUTION_FAILED,
+                    'ILLMService not injected — cannot execute kernel-path task. Ensure llmService is passed to initializeLLMEngine().',
+                );
+            }
+
+            const stream: AsyncIterable<ChatCompletionChunk> = this.llmService.chatStream(connectionId, {
+                messages: llmMessages,
+                model: executorConfig.model,
+                temperature: executorConfig.temperature,
+                maxTokens: executorConfig.constraints?.maxTokens,
+                thinking: executorConfig.enableThinking,
+                reasoningEffort: executorConfig.reasoningEffort,
+                signal: task.abortController.signal,
+            });
+
+            try {
+                for await (const chunk of stream) {
+                    if (task.abortController.signal.aborted) break;
+
+                    const delta = chunk.choices?.[0]?.delta;
+                    if (!delta) continue;
+
+                    if (delta.thinking) {
+                        onEvent({
+                            type: 'node_update',
+                            payload: { nodeId: rootNode.id, chunk: delta.thinking, field: 'thought' },
+                        } as OrchestratorEvent);
+                    }
+
+                    if (delta.content) {
+                        onEvent({
+                            type: 'node_update',
+                            payload: { nodeId: rootNode.id, chunk: delta.content, field: 'output' },
+                        } as OrchestratorEvent);
+                    }
+
+                    if (chunk.usage) {
+                        llmUsage = chunk.usage;
+                    }
+                }
+            } catch (streamError: any) {
+                const msg = streamError?.message || String(streamError);
                 const error = new Error(msg);
-                (error as any).status = firstError?.code;
-                (error as any)._model = (result as any)._model || executorConfig.model;
+                (error as any).status = streamError?.status || streamError?.code;
+                (error as any)._model = executorConfig.model;
                 throw error;
             }
+
+            // ── Emit turn end ─────────────────────────────────────
+            onEvent({
+                type: 'turn:end',
+                payload: { turnId: assistantNodeId, sessionId, turn: 0 },
+            } as OrchestratorEvent);
 
             // =====================================================
             // 收尾
@@ -599,21 +652,25 @@ export class TaskRunner {
             // 最终持久化
             await finalize();
 
-            // ── Token 估算 ─────────────────────────────────────────────────────
-            // 普通 kernel 路径没有精确 token 返回，从字符数估算（÷4）。
-            // 历史输入 = 所有发送给 LLM 的消息文本；输出 = 本次生成内容。
+            // ── Token 统计 ─────────────────────────────────────────────────────
+            // S6c: 优先使用 ILLMService 返回的真实 token 数，回退到字符估算
             const startMs = task.createdAt;
             const endMs = Date.now();
-            const historyChars = historyWithFiles.reduce(
-                (s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0
-            );
             const outputChars = accumulator.output.length + accumulator.thinking.length;
-            const estInputTokens  = Math.ceil((historyChars + input.text.length) / 4);
-            const estOutputTokens = Math.ceil(outputChars / 4);
-            // Conservative cost: $3/M input, $15/M output (Sonnet-class default)
-            const estCost = estInputTokens * 0.000003 + estOutputTokens * 0.000015;
-            // Context ratio: use history chars / 800k chars (≈ 200k tokens × 4)
-            const estContextRatio = Math.min(1, (historyChars + outputChars) / 800_000);
+
+            const hasRealUsage = llmUsage && (llmUsage.inputTokens || llmUsage.outputTokens);
+            const estInputTokens = hasRealUsage
+                ? (llmUsage.inputTokens ?? 0)
+                : Math.ceil((historyWithFiles.reduce(
+                    (s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0
+                ) + input.text.length) / 4);
+            const estOutputTokens = hasRealUsage
+                ? (llmUsage.outputTokens ?? 0)
+                : Math.ceil(outputChars / 4);
+            const estCost = hasRealUsage
+                ? (llmUsage.costUsd ?? (estInputTokens * 0.000003 + estOutputTokens * 0.000015))
+                : (estInputTokens * 0.000003 + estOutputTokens * 0.000015);
+            const estContextRatio = Math.min(1, outputChars / 800_000);
 
             const tokenUsage: SessionTokenUsage = {
                 inputTokens:       estInputTokens,
@@ -622,7 +679,7 @@ export class TaskRunner {
                 contextUsageRatio: estContextRatio,
                 turns:             1,
                 durationMs:        endMs - startMs,
-                isEstimated:       true,
+                isEstimated:       !hasRealUsage,
             };
 
             await this.engine.updateNode(sessionId, assistantNodeId, {
@@ -635,7 +692,7 @@ export class TaskRunner {
                     inputTokens:  estInputTokens,
                     outputTokens: estOutputTokens,
                     costUsd:      estCost,
-                    isEstimated:  true,
+                    isEstimated:  !hasRealUsage,
                 },
             });
 

@@ -20,6 +20,7 @@ src/
 
 ## 近期关键功能
 
+- **S7 事件统一 (2026-07-14)**: HistoryView + SessionEventHandler 支持 `SessionEvent`（canonical AgentEvent + projection + structural），新旧事件名双路径并行；`processEvent` / `handleSessionEvent` 类型从 `OrchestratorEvent` 切换至 `SessionEvent`
 - **Billing & Cost Dashboard**: CostEditor 双标签编辑器 — 仪表板 (time/provider 过滤、top sessions) + 定价配置 (可编辑 MODEL_PRICING、可展开匹配面板)
 - **Harness Agent Loop 事件渲染**: HistoryView 渲染 tool:queued/running/success/error 等工具事件为 agent 消息子节点，含输入流式展示
 - **API Protocol 选择器**: Connection 编辑器支持 Anthropic Messages 协议，适配 Claude CLI / thinking block / tool loop
@@ -49,5 +50,7 @@ src/
 - 所有文本通过 `t()` 导入（`@itookit/common`）
 - Port 接口定义在 `domain/`，视图通过 port 通信
 - 流式内容通过 `HistoryView` 增量渲染
+- `processEvent(event: SessionEvent)` — 事件类型来自 `@itookit/llm-engine`（S7 替代 `OrchestratorEvent`）
+- 事件处理支持新旧双路径：`processEventImmediate` switch 同时处理旧事件名（`session_start`、`node_update` 等）和新事件名（`message:appended`、`stream:content` 等）
 - `IChatInputPresenter.refreshConnections()` — Shell 在 import/save 后调用以同步连接下拉
 - Session 设置直接读写 VFS，不再使用 localStorage/sessionStorage 中间层

@@ -25,7 +25,7 @@ vfs-ui (VFSUIShell)
   → SendMessageCommand
     → llm-engine SessionManager.chat()
       → TaskRunner.execute()
-        → [kernel 路径] AgentExecutor (单轮)
+        → [kernel 路径] ILLMService.chatStream() 直连（S6c: 替代 AgentExecutor）
         → [harness 路径] AgentLoopExecutor (多轮+工具)
           → LLMServiceAdapter → Provider (device-llm)
 ```

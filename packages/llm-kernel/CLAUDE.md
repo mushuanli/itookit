@@ -1,8 +1,27 @@
 # CLAUDE.md — @itookit/llm-kernel
 
-执行引擎核心层 — AgentExecutor + EventBus + 运行时。**无 UI 依赖**。
+> **S8 ✅ (2026-07-14)**: 此包已消除。所有符号迁移至 `@itookit/llm-engine` 或删除。
+>
+> **迁移映射**:
+> | 符号 | 迁移目标 |
+> |---|---|
+> | `NodeStatus`, `ExecutorConfig`, `ExecutorType` | → `@itookit/llm-engine` (`core/types.ts` 内联) |
+> | `setKernelDeviceManager`, `getKernelDeviceManager` | → `@itookit/llm-engine` (`core/device-registry.ts`) |
+> | `initializeKernel`, `KernelInitOptions` | → inline 至 `initializeLLMEngine()` |
+> | `EventBus`, `getEventBus`, `KernelEventMap` | → 删除（llm-engine 有自己的 SessionEventBus） |
+> | `IExecutor`, `IExecutorFactory`, `ExecutorRegistry` | → 删除（llm-engine 有自己的 ExecutorRegistry） |
+> | `ExecutionRuntime`, `getRuntime` | → 删除 |
+> | `IExecutionContext`, `ContextVariables` | → 删除 |
+> | ID generators | → 删除（common 已有 `generateId`） |
+>
+> 外部 import 路径变更：`from '@itookit/llm-kernel'` → `from '@itookit/llm-engine'`
+
+## 历史架构（S6c 状态）
+
+执行引擎核心层 — EventBus + 运行时外壳。**无 UI 依赖**。
 
 > **S6 (2026-07-14)**: 裁剪 ~60% 死代码 — CLI、Worker、PluginManager、StateMachine、MemoryStore、5 种 Orchestrator、Script/Http/Tool Executor、validators、logger 已删除。
+> **S6c (2026-07-14)**: AgentExecutor + BaseExecutor 物理删除；`ExecutionRuntime.execute()` 移除。LLM 调用已统一走 `ILLMService`，kernel 退化为 EventBus + 设备注册表 + 工具函数的最小外壳。
 
 ## Architecture
 
@@ -15,11 +34,10 @@ src/
 │   ├── interfaces.ts      ← IExecutor, ExecutorConfig, IExecutorFactory
 │   ├── device-registry.ts ← set/getKernelDeviceManager（app-shell 注入）
 ├── executors/
-│   ├── index.ts           ← ExecutorRegistry（仅注册 'agent'，单例）
-│   ├── agent-executor.ts  ← AgentExecutor — LLM 调用（844 行，被 LLMKernelAdapter 使用）
-│   └── base-executor.ts   ← BaseExecutor 抽象类
+│   └── index.ts           ← ExecutorRegistry（空注册表，S6c 移除 AgentExecutor）
 ├── runtime/
-│   └── execution-runtime.ts ← ExecutionRuntime（主入口）+ getRuntime() 单例
+│   └── execution-runtime.ts ← ExecutionRuntime（cancel/event 操作）+ getRuntime() 单例
+│                              S6c: execute() 方法已删除
 └── utils/
     └── id-generator.ts    ← generateId, generateUUID, generateExecutionId 等
 ```
@@ -33,27 +51,19 @@ src/
 - 导出类型别名 `IScopedEventBus` = `IEventChannel<KernelEventMap>`
 - 重新导出 `EventBus` 类
 
-**Channel 生命周期**:
-```
-ExecutionRuntime.execute()
-  → channel(executionId)    // 创建/复用以 executionId 为 key 的隔离通道
-  → ExecutionContext(events)  // emit 经过 channel 冒泡到 bus 级 handler
-  → finally: closeChannel(executionId)  // 清空 handler + 关门
-```
-
 ## 外部消费方
 
 llm-kernel 仅被两个包使用：
 
 | 消费者 | 导入的符号 |
 |---|---|
-| `llm-engine` | `ExecutorConfig`, `NodeStatus`, `ExecutionRuntime`, `getRuntime`, `ExecutionResult`, `getEventBus`, `KernelEventMap`, `initializeKernel`, `KernelInitOptions` |
+| `llm-engine` | `ExecutorConfig`, `NodeStatus`, `getEventBus`, `KernelEventMap`, `initializeKernel`, `KernelInitOptions` |
 | `app-shell` | `setKernelDeviceManager` |
 
 ## 近期变更
 
+- **S6c**: AgentExecutor（844 行）+ BaseExecutor 物理删除；`ExecutionRuntime.execute()` 移除（~100 行）；ExecutorRegistry 清空内置注册
 - **S6**: 删除 15 个死代码文件；`ExecutorType` 收缩为 `'agent'`；`executePlan()` 删除；`initializeKernel()` 简化（移除 PluginManager）
-- `agent-executor` 设置 `runMode: 'kernel'` 以防止非 kernel 模式走 `anthropicPath` fallback
 - EventBus 重构：6 套独立实现统一为 `@itookit/common/eventbus`，kernel 层退化为类型目录
 
 ## Conventions

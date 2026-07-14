@@ -1,11 +1,10 @@
 // @file: llm-kernel/runtime/execution-runtime.ts
+//
+// S6c: execute() method removed — AgentExecutor (the only built-in executor)
+// has been deleted. The runtime is kept as a minimal shell for cancel/event
+// operations. External LLM calls now go through ILLMService directly.
 
-import { ExecutorConfig, IExecutorFactory } from '../core/interfaces';
-import { ExecutionContext } from '../core/execution-context';
 import { type KernelEventBus, getEventBus } from '../core/event-bus';
-import { ExecutionResult } from '../core/types';
-import { getExecutorRegistry } from '../executors';
-import { generateUUID } from '@itookit/common';
 
 /**
  * 执行配置
@@ -19,128 +18,23 @@ export interface ExecutionOptions {
     signal?: AbortSignal;
     /** 自定义执行 ID（用于事件关联） */
     executionId?: string;
-    /** ✨ [新增] 根节点 ID（用于关联 UI 预创建的节点） */
+    /** 根节点 ID（用于关联 UI 预创建的节点） */
     rootNodeId?: string;
     stream?: boolean;
 }
 
 /**
  * 执行运行时 - Kernel 的主入口
+ *
+ * S6c: execute() removed. The only built-in executor (AgentExecutor) was
+ * deleted. LLM calls now go through ILLMService in llm-engine.
  */
 export class ExecutionRuntime {
     private eventBus: KernelEventBus;
-    private factory: IExecutorFactory;
     private activeExecutions = new Map<string, AbortController>();
 
-    constructor(factory?: IExecutorFactory) {
+    constructor() {
         this.eventBus = getEventBus();
-        this.factory = factory || getExecutorRegistry();
-    }
-
-    /**
-     * 执行配置
-     */
-    async execute(
-        config: ExecutorConfig,
-        input: unknown,
-        options: ExecutionOptions = {}
-    ): Promise<ExecutionResult> {
-        // ✅ 修复：允许外部传入 executionId
-        const executionId = options.executionId
-            || options.variables?.sessionId
-            || generateUUID();
-
-        const abortController = new AbortController();
-
-        // 链接外部信号
-        if (options.signal) {
-            options.signal.addEventListener('abort', () => {
-                abortController.abort();
-            });
-        }
-
-        // 超时控制
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        if (options.timeout) {
-            timeoutId = setTimeout(() => {
-                abortController.abort();
-            }, options.timeout);
-        }
-
-        this.activeExecutions.set(executionId, abortController);
-
-        // 创建事件作用域
-        const scopedEvents = this.eventBus.channel(executionId);
-
-        // 创建执行上下文
-        const context = new ExecutionContext(
-            executionId,
-            scopedEvents,
-            undefined,
-            0,
-            undefined,
-            abortController
-        );
-
-        // ✨ [核心修复] 如果提供了 rootNodeId，设置当前节点 ID
-        // 这样后续的 emitContent/emitThinking 就会携带这个 ID
-        if (options.rootNodeId) {
-            context.setCurrentNode(options.rootNodeId);
-        }
-
-        // 注入初始变量
-        if (options.variables) {
-            for (const [key, value] of Object.entries(options.variables)) {
-                context.variables.set(key, value);
-            }
-        }
-
-        try {
-            // 发送执行开始事件
-            scopedEvents.emit('execution:start', {
-                executionId,
-                config: { id: config.id, name: config.name, type: config.type }
-            });
-
-            // 创建并执行
-            const executor = this.factory.create(config);
-            const result = await executor.execute(input, context);
-
-            // 发送执行完成事件
-            scopedEvents.emit('execution:complete', {
-                executionId,
-                status: result.status,
-                output: result.output,
-                metadata: result.metadata
-            });
-
-            return result;
-
-        } catch (error: any) {
-            scopedEvents.emit('execution:error', {
-                executionId,
-                message: error.message,
-                error: error.message,
-                code: error.code || 'UNKNOWN'
-            });
-
-            return {
-                status: 'failed',
-                output: null,
-                control: { action: 'end', reason: error.message },
-                errors: [{
-                    code: error.code || 'RUNTIME_ERROR',
-                    message: error.message,
-                    recoverable: false
-                }]
-            };
-
-        } finally {
-            // 清理
-            if (timeoutId) clearTimeout(timeoutId);
-            this.activeExecutions.delete(executionId);
-            this.eventBus.closeChannel(executionId);
-        }
     }
 
     /**

@@ -20,10 +20,6 @@ export { setKernelDeviceManager, getKernelDeviceManager } from './core/device-re
 // 执行器
 // ============================================
 
-export { BaseExecutor } from './executors/base-executor';
-export { AgentExecutor } from './executors/agent-executor';
-export type { AgentExecutorConfig } from './executors/agent-executor';
-
 export { ExecutorRegistry, getExecutorRegistry } from './executors';
 
 // ============================================

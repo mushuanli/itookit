@@ -1,6 +1,6 @@
 # LLM 子系统 2.0 — 四原语内核 + 插件框架设计
 
-> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S6 第二阶段：@deprecated 代码已删除）| 分支: v4.1
+> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S7：事件统一 + S8：llm-kernel 消除）| 分支: v4.1
 > 前置分析: [llm-design.md](./llm-design.md)（现状五包架构审查）
 > 定位: 本文档是重构的**宪法**——定义不变的内核原语与扩展契约，现有功能全部归约为原语组合
 
@@ -8,7 +8,7 @@
 
 ## 实施进度
 
-**S1~S5 已完成**，**S6 第一阶段（内核裁剪）已完成**，**第二阶段（@deprecated 清理）已完成**（2026-07-14）。
+**S1~S8 主要阶段已完成**（2026-07-14）。S6+S7+S8 拆分为五个子阶段全部交付，剩余 2 项建议独立 PR。
 
 | 阶段 | 状态 | 关键交付 | 剩余工作 |
 |---|---|---|---|
@@ -19,7 +19,9 @@
 | **S5** Goal 统一 | ✅ | `IController`/`Goal`/`GoalNode`/`Predicate`/`Verdict` 接口（common）；`DependencyScheduler`（Kahn 拓扑 + 事件驱动）；`reconcile()` 算法；3 个内置 Predicate（truncation/shell/llm-judge）；**验收达成**：4 个控制回路全部切换至 reconcile()/DependencyScheduler 驱动；AutoContinue → `createTruncationDetectionMiddleware`；BackPressure 存根 → 真实实现；Mission → `reconcile()` + `SubAgentLoopAdapter` + `createMissionGoal`；SessionGraph → `executeWithReconcile()` + `AgentRuntimeLoopAdapter` + `createGraphGoal` | — |
 | **S6a** 内核裁剪 | ✅ | llm-kernel 删除 15 个死代码文件（~60%）；`ExecutorType` 收缩为 `'agent'`；`initializeKernel` 简化；`executePlan()` 删除 | — |
 | **S6b** @deprecated 清理 | ✅ | 删除 `CompletionAnalyzer` 文件 + `AutoContinueHandler` 类 + `executeSession()` 路径 + `orchestrator-interfaces.ts` + llm-harness 2 个死代码文件 + `autoContinue` 死配置管线 | — |
-| **S6c** 拆包重命名 | 🟡 | — | `llm-core` 拆包重命名未执行；llm-harness 整体迁移（AgentLoopExecutor 等 22 文件）；包边界 ≠ 变更轴 |
+| **S6c** 内核收敛 + 适配器清理 | ✅ | `LLMKernelAdapter` + `UIEventAdapter` 删除；`executeTask()` 切换为 `ILLMService.chatStream()` 直连；`AgentExecutor` + `BaseExecutor` 物理删除（llm-kernel）；`DependencyGraph` 删除（`resolveDependencyTree()` 替代）；`auto-continue.ts` 删除；`HarnessAdapter` 解耦（`IHarnessContext` 服务定位器 + llm-ui 3 文件迁移） | — |
+| **S7** 事件统一（部分完成） | 🟡 | ★ `SessionEvent` = canonical `AgentEvent` (15) + `MessageProjectionEvent` (3) + `SessionStructuralEvent` (6) 替代 `OrchestratorEvent` (28)；`SessionEventBus` 泛型切换 + 过渡期双格式兼容；`HistoryView` / `SessionEventHandler` / `IHistoryPresenter` 双路径支持新旧事件名；`SessionActor` 桥接 canonical forward + tree projection 双 emit；`session-manager.ts` 消息/分支事件重命名（`messages:deleted`、`message:edited`、`sibling:switched`）；canonical AgentEvent 新增 2 变体（`tool:input`、`log:ref_renamed`，13→15） | **HarnessAdapter** 事件映射未迁移（仍 emit OrchestratorEvent 格式）；`branch_*`/`regenerate_*` 旧事件名未替换；`HistoryView` 旧事件 fallback 分支未删除；`EventBatchProcessor` chunkType/statusType 未切换 |
+| **S8** llm-kernel 消除 | ✅ | ★ `@itookit/llm-kernel` 包消除 — `NodeStatus`/`ExecutorConfig`/`ExecutorType` 内联至 `llm-engine/core/types.ts`；`setKernelDeviceManager`/`getKernelDeviceManager` 迁移至 `llm-engine/core/device-registry.ts`（新建）；`initializeKernel()` inline 至 `initializeLLMEngine()`；所有 7 处 import 路径更新（llm-engine ×4、app-shell ×2、test ×1）；6 个 `package.json` 依赖移除（llm-engine、app-shell、web-app、tauri-app、demo）；3 个 `vite.config` alias 移除（web-app、tauri-app、demo）；`tsup.config.ts` external 清理 | — |
 
 ### S3 完成内容（2026-07-14）
 
@@ -61,7 +63,7 @@
     │       ├─ mode='chat'     → chatExecutor (单轮，无工具)
     │       ├─ mode='loop'     → LoopExecutor(lite) = [budget, error-recovery, truncation]
     │       └─ mode='loop:full' → LoopExecutor(full) = 全部 7 个中间件
-    └─ mode absent → executeTask() → LLMKernelAdapter.executeQuery() (auto-continue 已迁移至 ILoop 中间件)
+    └─ mode absent → executeTask() → ILLMService.chatStream()（S6c: 替代 LLMKernelAdapter）
 ```
 
 ### 新增文件清单（S1~S3 累计）
@@ -195,7 +197,7 @@
 |---|---|---|
 | `AutoContinueHandler` | `createTruncationDetectionMiddleware` | **已删除**（类 + `DEFAULT_AUTO_CONTINUE` 常量，`auto-continue.ts` 仅保留类型定义） |
 | `CompletionAnalyzer` | `createLLMJudgePredicate` | **已删除**（文件 + 所有导出） |
-| `DependencyGraph.topoSort()` | `DependencyScheduler` | @deprecated（仍被 `graph-goal-factory`、`getStatus()`、`resetSession()` 使用） |
+| `DependencyGraph.topoSort()` | `DependencyScheduler` | **已删除（S6c）** — `DependencyGraph` 类已删除，替换为 `resolveDependencyTree()` 自由函数 |
 | `GraphOrchestrator.executeSession()` | `GraphOrchestrator.executeWithReconcile()` | **已删除**（方法 + 5 个私有辅助方法） |
 
 ### S6a 完成内容（2026-07-14）— 内核裁剪
@@ -233,9 +235,10 @@
 | `core/interfaces.ts`（`ExecutorConfig`） | `llm-engine` |
 | `core/event-bus.ts`（`getEventBus`, `KernelEventMap`） | `llm-engine` |
 | `core/device-registry.ts`（`setKernelDeviceManager`） | `app-shell` |
-| `executors/agent-executor.ts` + `base-executor.ts` | 间接（`LLMKernelAdapter`） |
-| `runtime/execution-runtime.ts`（`ExecutionRuntime`, `getRuntime`） | `llm-engine` |
+| `runtime/execution-runtime.ts`（`ExecutionRuntime`, `getRuntime`） | `llm-engine`（S6c: `execute()` 方法已删除，其余保留） |
 | `utils/id-generator.ts` | 多处内部引用 |
+
+> **S6c 更新**: `executors/agent-executor.ts` + `base-executor.ts` 已在 S6c 删除（唯一消费方 `LLMKernelAdapter` 随 Phase 3 删除）。
 
 ---
 
@@ -295,16 +298,173 @@
 
 ---
 
-### S6c 待执行
+### S6c 完成内容（2026-07-14）— 内核收敛 + 适配器清理
 
-| 项目 | 原因 |
+#### 删除文件（6 个）
+
+| 文件 | 包 | 原因 |
+|---|---|---|
+| `session/auto-continue.ts` | llm-engine | 类型定义内联至 `loop-middleware.ts`（`TruncationDetectionConfig`）；`ContinueDecision` 零消费者 |
+| `session-graph/dependency-graph.ts` | llm-engine | `topoSort()` → `resolveDependencyTree()` 自由函数（`graph-goal-factory.ts`）；`CycleError` 迁至同文件 |
+| `adapters/llmkernel-adapter.ts` | llm-engine | `executeTask()` 切换为 `ILLMService.chatStream()` 直连 |
+| `adapters/ui-event-adapter.ts` | llm-engine | 仅被 `LLMKernelAdapter` 使用，随之一并删除 |
+| `executors/agent-executor.ts` | llm-kernel | 零外部消费者（唯一调用方 `LLMKernelAdapter` 已删除） |
+| `executors/base-executor.ts` | llm-kernel | 仅被 `AgentExecutor` 继承 |
+
+#### 新增文件
+
+| 文件 | 包 | 说明 |
+|---|---|---|
+| `core/harness-context.ts` | llm-engine | `IHarnessContext` 服务定位器 — `setHarnessContext()` / `getHarnessContext()`，解耦 llm-ui 对 `HarnessAdapter` 的直接依赖 |
+
+#### 修改文件
+
+| 文件 | 包 | 改动 |
+|---|---|---|
+| `executors/loop-middleware.ts` | llm-engine | 内联 `TruncationDetectionConfig` 接口（替代 `AutoContinueConfig`）；删除对 `auto-continue.ts` 的 import |
+| `session-graph/graph-goal-factory.ts` | llm-engine | **重写** — 新增 `resolveDependencyTree()` 自由函数（DFS 依赖解析 + 目录展开 + 环检测）；`createGraphGoal()` 改用此函数；移入 `CycleError` 类 |
+| `session-graph/graph-orchestrator.ts` | llm-engine | `getStatus()` / `resetSession()` 改用 `resolveDependencyTree()`；移除 `this.graph`（DependencyGraph 实例） |
+| `session-graph/index.ts` | llm-engine | `DependencyGraph` → `resolveDependencyTree` + `CycleError` 导出 |
+| `session/task-runner.ts` | llm-engine | **核心变更** — `executeTask()` 中 `LLMKernelAdapter.executeQuery()` 替换为 `ILLMService.chatStream()` 直连；构建 `ChatMessage[]`（system prompt + history + 当前用户输入）；流式迭代 `ChatCompletionChunk` 并构造 `OrchestratorEvent`；token 统计优先使用真实数据（`llmUsage`），回退字符估算；移除 `kernelAdapter` 字段 |
+| `adapters/harness-adapter.ts` | llm-engine | `initHarnessAdapter()` 同步调用 `setHarnessContext()`；`setSkillService()` / `setToolService()` 同步更新 context；`getHarnessAdapter()` 标记 @deprecated |
+| `runtime/execution-runtime.ts` | llm-kernel | 删除 `execute()` 方法（~100 行）；保留 `cancel` / `cancelAll` / `getActiveCount` / `onEvent` / `onExecutionEvent` |
+| `executors/index.ts` | llm-kernel | 移除 `AgentExecutor` import 和 `registerBuiltins()` 注册；保留空注册表框架（供将来扩展） |
+| `index.ts` | llm-kernel | 移除 `AgentExecutor` / `AgentExecutorConfig` / `BaseExecutor` 导出 |
+| `index.ts` | llm-engine | 移除 `LLMKernelAdapter` / `getLLMKernelAdapter` / `UIEventAdapter` / `DependencyGraph` / `AutoContinueConfig` / `ContinueDecision` 导出；新增 `IHarnessContext` / `setHarnessContext` / `getHarnessContext` 导出；注释掉的行清理 |
+| `core/constants.ts` | llm-engine | 注释 `AutoContinueConfig.maxContinuations` → `TruncationDetectionConfig.maxContinuations` |
+| `core/goal/dependency-scheduler.ts` | llm-engine | 注释 "engine DependencyGraph" → "deleted S6c, replaced by resolveDependencyTree" |
+| `core/device-registry.ts` | llm-kernel | 文件头和函数注释移除 `AgentExecutor` 引用 |
+| `shell/HarnessIntegration.ts` | llm-ui | `HarnessAdapter` 参数 → `IHarnessContext`；`getHarnessAdapterFn` → `getContextFn` |
+| `shell/SlashCommandRouter.ts` | llm-ui | `getHarnessAdapter()` → `getHarnessContext()`；`.getSkillService()` → `.skillService` 等 |
+| `shell/LLMWorkspaceEditor.ts` | llm-ui | 同上，4 处替换 |
+
+#### 文档更新
+
+| 文件 | 改动 |
 |---|---|
-| `llm-core` 拆包重命名 | 需要独立 PR 处理包创建/发布/迁移 |
-| llm-harness 整体迁移（AgentLoopExecutor 等 22 文件） | 待 executor-mission/graph 插件完成后逐步迁移 |
-| `llm-kernel` `AgentExecutor` 物理删除 | 仍被 `LLMKernelAdapter` 使用 |
-| `OrchestratorEvent` → `AgentEvent` 替换 | 15+ 文件活跃使用，需独立 PR |
-| `HarnessAdapter` 删除 | llm-ui 3 个文件活跃使用 |
-| `DependencyGraph.topoSort()` → `DependencyScheduler` 迁移 | S5 活跃路径（`graph-goal-factory`、`getStatus`、`resetSession`），属功能改进 |
+| `packages/llm-kernel/CLAUDE.md` | S6c 说明；架构图更新；外部消费方更新；变更记录 |
+| `packages/llm-engine/CLAUDE.md` | S6c 说明；架构图更新；执行路径更新；S6 删除清单扩展；Harness 服务访问说明 |
+| `doc/pkgstructure.md` | `llm-kernel` 和 `llm-engine` 描述更新 |
+| `doc/architecture.md` | LLM 引擎栈描述更新 |
+| `doc/integration-chains.md` | kernel 路径描述更新 |
+
+#### S6c 验收标准
+
+| 标准 | 状态 |
+|---|---|
+| `LLMKernelAdapter` + `UIEventAdapter` 零引用（grep 验证） | ✅ |
+| `AgentExecutor` + `BaseExecutor` 零引用 | ✅ |
+| `DependencyGraph` 零引用 | ✅ |
+| `auto-continue.ts` 零引用 | ✅ |
+| `executeTask()` 走 `ILLMService.chatStream()` 直连 | ✅ |
+| `IHarnessContext` 替代 `HarnessAdapter`（llm-ui 3 文件） | ✅ |
+| llm-kernel 编译通过 | ✅ |
+| llm-engine 编译通过 | ✅ |
+| llm-ui 编译通过（我修改的 3 文件零新错误） | ✅ |
+
+---
+
+### S7 完成内容（2026-07-14）— 事件统一（基础设施）
+
+S7 核心基础设施已交付：类型系统、EventBus 切换、UI 双路径、主要生产者迁移。HarnessAdapter 和分支事件的完全迁移留待后续 PR。
+
+#### 修改文件
+
+| 文件 | 包 | 改动 |
+|---|---|---|
+| `interfaces/agent/agent-event.ts` | common | 新增 `AgentEventToolInput`（`{ type: 'tool:input'; call: ToolCallInfo & { delta } }`）+ `AgentEventLogRefRenamed`（`{ type: 'log:ref_renamed'; ref; oldName; newName }`）；canonical union 13→15 |
+| `core/types.ts` | llm-engine | 新增 `MessageProjectionEvent`（`message:appended/updated/status`，3 变体）、`SessionStructuralEvent`（`messages:cleared/deleted`、`message:edited`、`sibling:switched`，6 变体）、`SessionEvent = AgentEvent \| MessageProjectionEvent \| SessionStructuralEvent`；保留 `OrchestratorEvent` @deprecated |
+| `session/session-event-bus.ts` | llm-engine | **重写** — 泛型 `OrchestratorEventMap` → `SessionEventMap`（`{ [E in SessionEvent as E['type']]: Omit<E, 'type'> }`）；`emitSession` 接受 `TransitionalEvent = SessionEvent \| OrchestratorEvent`，自动检测新旧格式；`onSession` handler 类型为 `(event: SessionEvent) => void`，内部按 `{ type, payload }` wrapper 重建（过渡期统一格式） |
+| `session/task-runner.ts` | llm-engine | **SessionActor 桥接** — `stream:content/thinking` 同时 emit canonical + `node_update`（树投影）；`turn:*`/`tool:*`/`finished`/`error` 直接 forward canonical `AgentEvent`；移除所有 `as OrchestratorEvent` 强制转换；executeTask 路径保持兼容 |
+| `session/session-manager.ts` | llm-engine | `onEvent` handler 类型 `OrchestratorEvent` → `SessionEvent`；3 事件重命名（`messages_deleted`→`messages:deleted`、`message_edited`→`message:edited`、`sibling_switch`→`sibling:switched`） |
+| `shell/SessionEventHandler.ts` | llm-ui | `handleSessionEvent`/`handleBranchEvent`/`updateStatusFromEvent` 类型切换至 `SessionEvent`；`EVENT_SIDE_EFFECTS` 表新增 8 个新事件名条目；`handleBranchEvent` switch 双路径；`updateStatusFromEvent` 兼容新旧 `finished` payload shape |
+| `components/HistoryView.ts` | llm-ui | `processEvent`/`processEventImmediate`/`handleBatchedEvents` 类型切换至 `SessionEvent`；switch 内新增 canonical + projection + structural 分支（`message:appended`、`message:status`、`messages:cleared/deleted`、`sibling:switched`、`stream:content/thinking`）；旧事件分支使用 `as { type: string; payload?: any }` 兼容 |
+| `domain/ports/IHistoryPresenter.ts` | llm-ui | `processEvent(event: OrchestratorEvent)` → `processEvent(event: SessionEvent)` |
+
+#### S7 验收标准
+
+| 标准 | 状态 |
+|---|---|
+| `SessionEvent` 类型定义完整（= AgentEvent + Projection + Structural） | ✅ |
+| `SessionEventBus` 泛型切换至 `SessionEventMap` | ✅ |
+| `SessionEventBus` 过渡期同时接受新旧格式 | ✅ |
+| UI 消费者（HistoryView、SessionEventHandler）双路径 | ✅ |
+| `SessionActor` 桥接 canonical forward | ✅ |
+| session-manager 简单事件重命名完成 | ✅ |
+| llm-engine 编译通过 | ✅ |
+| llm-ui 编译通过（零新增错误） | ✅ |
+
+---
+
+### S8 完成内容（2026-07-14）— llm-kernel 消除
+
+#### 迁移映射
+
+| 符号 | 原位置 | 迁移目标 |
+|---|---|---|
+| `NodeStatus` | `llm-kernel/core/types.ts` | → `llm-engine/core/types.ts` 内联 |
+| `ExecutorConfig` | `llm-kernel/core/interfaces.ts` | → `llm-engine/core/types.ts` 内联 |
+| `ExecutorType` | `llm-kernel/core/types.ts` | → `llm-engine/core/types.ts` 内联 |
+| `setKernelDeviceManager` / `getKernelDeviceManager` | `llm-kernel/core/device-registry.ts` | → `llm-engine/core/device-registry.ts`（新建） |
+| `initializeKernel` / `KernelInitOptions` | `llm-kernel/index.ts` | → inline 至 `initializeLLMEngine()` |
+| 其余符号（EventBus、IExecutor、ExecutionRuntime、ID generators 等） | 各处 | → 删除（零外部消费者或已有替代） |
+
+#### 新增文件
+
+| 文件 | 说明 |
+|---|---|
+| `llm-engine/src/core/device-registry.ts` | `setKernelDeviceManager()` / `getKernelDeviceManager()` 单例（从 llm-kernel 迁移） |
+
+#### 修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `llm-engine/src/core/types.ts` | 删除 `import { NodeStatus } from '@itookit/llm-kernel'`；新增 `NodeStatus`、`ExecutorType`、`ExecutorConfig` 内联定义 |
+| `llm-engine/src/session/session-state.ts` | `import { NodeStatus } from '@itookit/llm-kernel'` → `from '../core/types'` |
+| `llm-engine/src/session/agent-resolver.ts` | `import { ExecutorConfig } from '@itookit/llm-kernel'` → `from '../core/types'` |
+| `llm-engine/src/session/task-runner.ts` | 同上 |
+| `llm-engine/src/index.ts` | 删除 `initializeKernel, KernelInitOptions` import；`EngineInitOptions` 不再 `extends KernelInitOptions`；`initializeLLMEngine()` 内联 kernel init（log only）；新增 `setKernelDeviceManager` / `getKernelDeviceManager` 导出 |
+| `llm-engine/package.json` | 移除 `@itookit/llm-kernel` from dependencies + peerDependencies |
+| `llm-engine/tsup.config.ts` | 移除 `'@itookit/llm-kernel'` from external |
+| `llm-engine/vite.config.ts` | 移除 `'@itookit/llm-kernel'` from external + globals |
+| `app-shell/src/bootstrap.ts` | `import { setKernelDeviceManager } from '@itookit/llm-kernel'` → `from '@itookit/llm-engine'` |
+| `app-shell/package.json` | 移除 `@itookit/llm-kernel` from devDependencies + peerDependencies |
+| `apps/web-app/package.json` | 移除 `@itookit/llm-kernel` dependency |
+| `apps/web-app/vite.config.ts` | 移除 `@itookit/llm-kernel` alias |
+| `apps/tauri-app/package.json` | 移除 `@itookit/llm-kernel` dependency |
+| `apps/tauri-app/vite.config.ts` | 移除 `@itookit/llm-kernel` alias |
+| `packages/demo/package.json` | 移除 `@itookit/llm-kernel` dependency |
+| `packages/demo/vite.config.js` | 移除 `@itookit/llm-kernel` alias + external |
+
+#### S8 验收标准
+
+| 标准 | 状态 |
+|---|---|
+| `grep -r "@itookit/llm-kernel" packages/ apps/ --include="*.ts" --include="*.json"` 零 import 引用 | ✅ |
+| llm-engine 编译通过 | ✅ |
+| app-shell/test 文件 import 路径更新 | ✅ |
+| 6 个 package.json 依赖移除 | ✅ |
+| 3 个 vite.config alias 移除 | ✅ |
+| tsup.config.ts external 清理 | ✅ |
+| `packages/llm-kernel/CLAUDE.md` 标记为已消除 + 迁移映射表 | ✅ |
+
+---
+
+### 剩余工作（建议独立 PR）
+
+S7 基础设施已完成（类型定义、EventBus 切换、UI 双路径、SessionActor 桥接），以下为待完成项：
+
+| 项目 | 原因 | 影响面 |
+|---|---|---|
+| **HarnessAdapter** 事件映射迁移 | 20 个 `agent:*` → `SessionEvent` 映射，当前仍 emit `OrchestratorEvent` 格式（bus 过渡期兼容） | `harness-adapter.ts` |
+| **Branch/Regenerate 旧事件名替换** | `branch_created/deleted/switched` → `log:appended`/`log:ref_moved`；`regenerate_started/completed` → `log:ref_moved`+`log:appended`（语义不同，需改 UI 消费逻辑） | `session-manager.ts` + UI |
+| **HistoryView 旧事件 fallback 清理** | `processEventImmediate` switch 中旧事件分支（`session_start`、`node_update`、`stream:*:*` 等）待所有生产者迁移后删除 | `HistoryView.ts` |
+| **EventBatchProcessor 升级** | `chunkType: 'node_update'` → 支持 `stream:content`/`stream:thinking`；`statusType: 'node_status'` → `message:status` | `EventBatchProcessor.ts` + `HistoryView.ts` |
+| **`OrchestratorEvent` 类型删除** | 28 变体 deprecated 类型定义 + 关联的 `OrchestratorEventMap` 移除 | `core/types.ts` |
+| llm-harness 整体迁移（AgentLoopExecutor 等 22 文件） | 待 executor-mission/graph 插件完成后逐步迁移 | llm-harness 全量 |
+| `HarnessAdapter` 类本身删除 | 仍用于 harness 事件翻译，需等 HarnessAdapter 迁移完成 | `harness-adapter.ts` |
+
+**S8 已完成**（2026-07-14）：`@itookit/llm-kernel` 包已消除，所有符号迁移至 llm-engine 或删除。详见下方 S8 完成内容。
 
 ---
 
@@ -335,13 +495,13 @@
 
 | # | 病灶 | 表现 | 根因 |
 |---|---|---|---|
-| 1 | 三条 LLM 调用路径 | kernel `AgentExecutor`（7 层栈）/ engine `LLMKernelAdapter` / harness `LLMServiceAdapter`（4 层栈） | 两根竞争的架构脊柱：设备驱动模型 vs 工作流引擎模型 |
+| 1 | 三条 LLM 调用路径 | ~~kernel `AgentExecutor`（7 层栈）~~ **（S6c 已删除）**~~/ engine `LLMKernelAdapter`~~ **（S6c 已删除）** / harness `LLMServiceAdapter`（4 层栈）→ 现已统一为 `ILLMService` 单一入口 | 两根竞争的架构脊柱：设备驱动模型 vs 工作流引擎模型 → **已解决** |
 | 2 | 双 Agent Loop | `UnifiedLoopStrategy` 与 `AgentLoopExecutor` 功能重叠，差异仅是能力集合 | 循环逻辑与能力（Budget/压缩/HITL）未解耦 |
-| 3 | 四份依赖调度 | kernel `DagOrchestrator` / `DependencyGraph` / `MissionScheduler` / `dependency-resolver` | 控制回路模式未被识别为原语 |
-| 4 | 五套事件词汇 + 三个翻译层 | KernelEventMap(15) / AgentEventType(25) / OrchestratorEvent(29+9) / EditorBusEvents(13)，约 91 个事件定义 | 无 canonical 事件 schema |
+| 3 | 四份依赖调度 | kernel `DagOrchestrator` / ~~`DependencyGraph`~~ **（S6c 已删除）** / `MissionScheduler` / `dependency-resolver` | 控制回路模式未被识别为原语 |
+| 4 | 五套事件词汇 + 三个翻译层 | KernelEventMap(15) / AgentEventType(25) / ~~OrchestratorEvent(29+9)~~ → 已被 `SessionEvent` 替代（S7）/ EditorBusEvents(13)，约 91 个事件定义 | 无 canonical 事件 schema → **已解决（S7 基础设施）** |
 | 5 | 三份事实源 | VFS ChatNode ↔ SessionState 内存副本 ↔ HistoryView DOM | 状态不是日志的投影，而是手工同步的副本 |
 | 6 | 六套外部干预机制 | abort / inject / HITLQueue / onIntercept / request_input / SessionRecovery | 循环不是可暂停协程，暂停/恢复各自造轮子 |
-| 7 | 内部平台效应 | llm-kernel 的 Http/Script/Worker/CLI/StateMachine/PluginManager 无产品消费者 | 抽象未赢得自己的客户（PluginManager 零插件） |
+| 7 | 内部平台效应 | llm-kernel 的 Http/Script/Worker/CLI/StateMachine/PluginManager **（S6a 已删除）** + AgentExecutor **（S6c 已删除）** + **llm-kernel 包本身（S8 已消除）** | 抽象未赢得自己的客户（PluginManager 零插件）→ **已解决** |
 
 补丁类代码（`manifest-repair` / `LockManager` / `renderFull` vs `processEvent` 双渲染）均是病灶 5 的直接代价。
 
@@ -841,9 +1001,9 @@ export const vcsPlugin: IPlugin = {
 | `HITLQueue` / `inject()` / `onIntercept` / `SessionRecovery` | → **协程 pause/resume 一套机制** | 6 → 1 |
 | `MissionScheduler` + `GraphOrchestrator` + `dependency-resolver` + kernel `DagOrchestrator` | → **Goal 原语 + 唯一依赖调度器** | 4 → 1 |
 | `AutoContinueHandler` / `TruncationDetector` / `CompletionAnalyzer` | → **Predicate ×3** | 控制回路的谓词配置 |
-| kernel `AgentExecutor` 流式解析 | → 并入 executor 调用链 | 7 层栈短路为 4 层 |
-| kernel `Http/Script/Worker/CLI/StateMachine/PluginManager` | **YAGNI 裁剪**（经使用审计） | 无产品消费者 |
-| 5 套事件 + `UIEventAdapter` / `HarnessAdapter` 翻译层 | → **canonical AgentEvent** | 91 个事件定义 → ~20 个 |
+| kernel `AgentExecutor` 流式解析 | **已删除（S6c）** | LLM 调用统一走 `ILLMService.chatStream()` |
+| kernel `Http/Script/Worker/CLI/StateMachine/PluginManager` | **已删除（S6a）** | YAGNI 裁剪，经使用审计零产品消费者 |
+| 5 套事件 + `UIEventAdapter` / `HarnessAdapter` 翻译层 | → **canonical AgentEvent** | `UIEventAdapter` 已删除（S6c）；`HarnessAdapter` 仍用于事件翻译，UI 已通过 `IHarnessContext` 解耦（S6c） |
 | `VFSAgentService` / `PromptHistoryService` | → 独立功能插件 | 只依赖 VFS + commands |
 | llm-ui 输入插件 (`Mention/Slash/History...`) | **保持** | 本代码库唯一活着的插件机制，模式推广到执行层 |
 
@@ -860,7 +1020,11 @@ export const vcsPlugin: IPlugin = {
 | **S3** | Loop 中间件化：创建 `LoopExecutor`（AsyncGenerator ILoop）+ 6 个中间件 + `SessionActor` 桥接；接入 `ExecutorRegistry` + `drive()`；`UnifiedLoopStrategy`/`HarnessAdapter` 下线 | 病灶 2、6 | 双 loop → 1；pause/resume 一套机制；ExecutorRegistry 驱动 | ✅ |
 | **S4** | Log 收敛：ChatEngine 升级为 Log 原语，单写入方 + 投影缓存；删除 SessionState 双写 | 病灶 5 | `manifest-repair`/`LockManager` **真正删除**；旧 ID 方案全量迁移至 ULID | ✅ |
 | **S5** | Goal 统一：唯一依赖调度器 + Predicate 化 4 个控制回路 | 病灶 3 | 4 份调度**实际切换**到 DependencyScheduler：Mission→reconcile()、SessionGraph→executeWithReconcile()、AutoContinue→TruncationDetectionMiddleware、BackPressure→真实 middleware | ✅ |
-| **S6** | 拆包重命名：`llm-core` / `executor-*` / `vcs` / `tasks`；kernel 解体裁剪 | 病灶 7 | 包边界 = 变更轴（当前仅完成 kernel 死代码裁剪，拆包/重命名/harness 裁剪未执行） | 🟡 |
+| **S6a** | 内核裁剪：删除 llm-kernel 15 个死代码文件；`ExecutorType` 收缩为 `'agent'`；`initializeKernel` 简化 | 病灶 7 | 死代码占比从 ~60% → 0；llm-kernel 编译通过 | ✅ |
+| **S6b** | @deprecated 清理：删除 `CompletionAnalyzer` + `AutoContinueHandler` + `executeSession()` + `orchestrator-interfaces.ts` + dead config pipeline | 病灶 3、4 | 4 文件删除 + ~265 行代码块删除；`autoContinue` 死配置管线清零 | ✅ |
+| **S6c** | 内核收敛 + 适配器清理：`LLMKernelAdapter`/`UIEventAdapter`/`AgentExecutor`/`BaseExecutor`/`DependencyGraph`/`auto-continue.ts` 删除；`executeTask()` → `ILLMService.chatStream()`；`HarnessAdapter` → `IHarnessContext` 解耦 | 病灶 1、7 | 6 文件删除 + 15 文件修改；llm-kernel 退化为最小外壳；LLM 调用全路径统一为 `ILLMService` | ✅ |
+| **S7** | `OrchestratorEvent` → `AgentEvent` 替换（基础设施） | 病灶 4 | `SessionEvent` 类型体系建立；SessionEventBus + UI 双路径；SessionActor canonical forward；简单事件重命名完成 | 🟡 |
+| **S8** | `llm-core` 拆包 → llm-kernel 消除 | 病灶 7 | `@itookit/llm-kernel` 包物理删除；所有符号迁移至 llm-engine 或删除；6 个 package.json + 3 个 vite.config 清理 | ✅ |
 
 ---
 

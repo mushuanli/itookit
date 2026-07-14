@@ -28,7 +28,7 @@ src/
 │   │   └── mission.ts    ← MissionPlan, TodoItem, HITLRequest
 │   ├── agent/            ← Agent 运行时接口
 │   │   ├── agent-types.ts   ← AgentEventType (@deprecated), AgentEventPayloads, AgentTaskRequest
-│   │   ├── agent-event.ts   ← ★ canonical AgentEvent (~22 events, 消灭 5→1)
+│   │   ├── agent-event.ts   ← ★ canonical AgentEvent (15 events, S7: +tool:input +log:ref_renamed)
 │   │   ├── agent-service.ts ← IAgentRuntime (run/abort/inject/on)
 │   │   ├── loop.ts          ← ★ ILoop / LoopContext / Signal / ILog / Turn / ILoopMiddleware
 │   │   ├── goal.ts          ← ★ IController / Goal / GoalNode / Predicate / Verdict（S5）
@@ -108,7 +108,7 @@ IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult
 | `IAgentRuntimeConfig` | `interfaces/agent/agent-service.ts` | 运行时配置 (modelRoles, budgetLimits, loopConfig) |
 | `AgentEventType` | `interfaces/agent/agent-types.ts` | @deprecated — 25 种旧事件联合类型，迁移至 `AgentEvent` |
 | `AgentEventPayloads` | `interfaces/agent/agent-types.ts` | @deprecated — 旧事件→payload 映射 |
-| `AgentEvent` | `interfaces/agent/agent-event.ts` | ★ canonical 事件 schema（~22 个，5 套→1 套） |
+| `AgentEvent` | `interfaces/agent/agent-event.ts` | ★ canonical 事件 schema（15 个，S7: +tool:input +log:ref_renamed） |
 | `ILoop` | `interfaces/agent/loop.ts` | ★ 执行原语 — AsyncGenerator 协程 |
 | `ILoopMiddleware` | `interfaces/agent/loop.ts` | 轮次级 hook (beforeTurn / afterTurn / onError) |
 | `ILog` / `Turn` / `RefStore` | `interfaces/agent/loop.ts` | Log 原语契约 — `Turn.result` 携带 LoopExecutor 运行时输出 |
@@ -126,7 +126,7 @@ Log       不可变历史 — append-only Turn DAG + refs; state = fold(log, ref
 
 | 原语 | 接口 | 文件 |
 |---|---|---|
-| AgentEvent | `type AgentEvent = ...` (~22 variants) | `interfaces/agent/agent-event.ts` |
+| AgentEvent | `type AgentEvent = ...` (15 variants) | `interfaces/agent/agent-event.ts` |
 | Loop | `ILoop.run(): AsyncGenerator<AgentEvent, Turn[], Signal>` | `interfaces/agent/loop.ts` |
 | Channel | `ISession { signal(), events() }` | (待定义) |
 | Goal | `IController { reconcile() }` | `interfaces/agent/goal.ts` ✅ S5 |

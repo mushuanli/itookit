@@ -27,6 +27,7 @@ import type {
 } from '@itookit/common';
 import { generateId } from '@itookit/common';
 import type { OrchestratorEvent, ExecutionNode } from '../core/types';
+import { setHarnessContext, getHarnessContext } from '../core/harness-context';
 
 /**
  * String keys used in OrchestratorEvent.payload.metaInfo for harness-specific signals.
@@ -68,6 +69,9 @@ export class HarnessAdapter {
      */
     setSkillService(service: ISkillService): void {
         this.skillService = service;
+        // S6c: sync to harness context
+        const ctx = getHarnessContext();
+        if (ctx) (ctx as any).skillService = service;
     }
 
     /** 获取 SkillService（harness 未配置时为 null） */
@@ -77,6 +81,9 @@ export class HarnessAdapter {
 
     setToolService(service: IToolService): void {
         this.toolService = service;
+        // S6c: sync to harness context
+        const ctx = getHarnessContext();
+        if (ctx) (ctx as any).toolService = service;
     }
 
     getToolService(): IToolService | null {
@@ -353,9 +360,20 @@ let instance: HarnessAdapter | null = null;
 
 export function initHarnessAdapter(runtime: IAgentRuntime): HarnessAdapter {
     instance = new HarnessAdapter(runtime);
+    // S6c: Also set the harness context for UI service locator access
+    setHarnessContext({
+        runtime,
+        skillService: instance.getSkillService(),
+        toolService: instance.getToolService(),
+    });
     return instance;
 }
 
+/**
+ * @deprecated Use getHarnessContext() from '../core/harness-context' instead.
+ *             The HarnessAdapter class will be removed once OrchestratorEvent
+ *             is fully replaced by canonical AgentEvent.
+ */
 export function getHarnessAdapter(): HarnessAdapter | null {
     return instance;
 }

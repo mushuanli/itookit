@@ -1,5 +1,5 @@
 // @file: llm-engine/session/session-state.ts
-import { NodeStatus } from '@itookit/llm-kernel';
+import { NodeStatus } from '../core/types';
 
 import {
     SessionGroup,

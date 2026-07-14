@@ -17,7 +17,7 @@ import { initializeLLMEngine, ChatEngine, chatFileParser } from '@itookit/llm-en
 import type { SessionManager } from '@itookit/llm-engine';
 import { MemoryManager } from '@itookit/memory-manager';
 import { LLMDeviceDriver } from '@itookit/device-llm';
-import { setKernelDeviceManager } from '@itookit/llm-kernel';
+import { setKernelDeviceManager } from '@itookit/llm-engine';
 import { createHarness, type HarnessInstance } from '@itookit/llm-harness';
 import { SkillsEngine } from '@itookit/app-settings';
 import { createSkillsEditorFactory } from '@itookit/llm-ui';

@@ -2,7 +2,7 @@
 //
 // Replaces 4 separate implementations:
 //   - kernel DagOrchestrator
-//   - engine DependencyGraph
+//   - engine DependencyGraph (deleted S6c, replaced by resolveDependencyTree)
 //   - engine MissionScheduler (embedded scheduling loop)
 //   - engine scheduler/dependency-resolver
 //

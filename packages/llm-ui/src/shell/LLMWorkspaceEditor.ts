@@ -61,7 +61,7 @@ import { LayoutTemplates } from '../components/templates/LayoutTemplates';
 import { HistoryPlugin } from '../components/input/plugins/HistoryPlugin';
 import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlugin';
 import { HarnessPlugin } from '../components/input/plugins/HarnessPlugin';
-import { getPromptHistory, getHarnessAdapter } from '@itookit/llm-engine';
+import { getPromptHistory, getHarnessContext } from '@itookit/llm-engine';
 import { AssetManagerUI } from '@itookit/mdxeditor';
 
 export interface LLMEditorOptions extends Omit<EditorOptions, 'sessionEngine'> {
@@ -303,8 +303,8 @@ export class LLMWorkspaceEditor implements IEditor {
             );
         }
 
-        const harnessAdapter = getHarnessAdapter();
-        const harnessRuntime = harnessAdapter?.getRuntime();
+        const harnessContext = getHarnessContext();
+        const harnessRuntime = harnessContext?.runtime;
 
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId, overrides) =>
@@ -321,7 +321,7 @@ export class LLMWorkspaceEditor implements IEditor {
             onRequestConnections: () => buildConnectionOptions(this.agentService),
 
             // ── Harness callbacks (only wired when skill service is available) ──
-            ...buildHarnessCallbacks(harnessAdapter, harnessRuntime),
+            ...buildHarnessCallbacks(harnessContext, harnessRuntime),
 
             // ── @mention file reference ───────────────────────────────────────
             onRequestFiles: async (query) => this.fileSearchService.search(query),
@@ -754,8 +754,8 @@ export class LLMWorkspaceEditor implements IEditor {
     private registerInputPlugins(): void {
         const chatInput = this.chatInput as ChatInput;
 
-        const harnessAdapter = getHarnessAdapter();
-        const harnessRuntime = harnessAdapter?.getRuntime() ?? undefined;
+        const harnessContext = getHarnessContext();
+        const harnessRuntime = harnessContext?.runtime ?? undefined;
         this.harnessPlugin = new HarnessPlugin(harnessRuntime);
         chatInput.registerPlugin(this.harnessPlugin);
 
@@ -801,7 +801,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // ── Q3: Mid-execution user injection ─────────────────────────────────────
 
     injectIntoRunningHarness(message: string): boolean {
-        return injectIntoRunningHarness(getHarnessAdapter, message);
+        return injectIntoRunningHarness(getHarnessContext, message);
     }
 
     // ================================================================

@@ -1,6 +1,6 @@
 // @file: llm-ui/shell/SessionEventHandler.ts
 
-import type { OrchestratorEvent, RegistryEvent, SessionManager } from '@itookit/llm-engine';
+import type { SessionEvent, RegistryEvent, SessionManager } from '@itookit/llm-engine';
 import { Toast, t } from '@itookit/common';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
@@ -44,6 +44,16 @@ const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
     // 重新生成
     regenerate_started: ['clearErrors', 'flashIndicator'],
     regenerate_completed: ['refreshBranch', 'refreshNav'],
+
+    // ── LLM 2.0 canonical / projection event names (S7) ──
+    'message:appended': ['clearErrors', 'updateStatus', 'notifyChange', 'scrollToBottom'],
+    'messages:cleared': ['refreshNav', 'refreshBranch'],
+    'messages:deleted': ['refreshNav', 'notifyChange'],
+    'message:edited': ['refreshNav'],
+    'sibling:switched': ['renderFull', 'refreshBranch'],
+    'log:appended': ['renderFull', 'scrollToBottom', 'refreshBranch'],
+    'log:ref_moved': ['resetCollapse', 'renderFull', 'refreshBranch', 'flashIndicator'],
+    'log:ref_renamed': ['refreshBranch'],
 };
 
 // ----------------------------------------------------------------
@@ -100,14 +110,14 @@ export class SessionEventHandler {
     // 会话事件入口
     // ================================================================
 
-    handleSessionEvent(event: OrchestratorEvent): void {
+    handleSessionEvent(event: SessionEvent): void {
         // 1. 始终转发给 HistoryView 处理 DOM 级更新（流式内容、节点追加等）
         this.deps.historyView.processEvent(event);
 
         // 2. 状态指示器（需要 payload，单独处理）
         this.updateStatusFromEvent(event);
 
-        // 3. 分支事件携带 payload 的特定处理（从 HistoryView.processEventImmediate 迁移至此）
+        // 3. 分支事件携带 payload 的特定处理
         this.handleBranchEvent(event);
 
         // 4. 查表执行副作用
@@ -125,21 +135,33 @@ export class SessionEventHandler {
 
     /**
      * 分支事件处理 — 需要事件 payload 的操作集中于此
-     *
-     * 从 HistoryView.processEventImmediate 迁移，消除双重消费。
-     * payload 无关的副作用（renderFull、refreshBranch 等）仍在 EVENT_SIDE_EFFECTS 表中声明。
      */
-    private handleBranchEvent(event: OrchestratorEvent): void {
-        switch (event.type) {
+    private handleBranchEvent(event: SessionEvent): void {
+        const e = event as { type: string; payload?: any; [key: string]: any };
+        switch (e.type) {
             case 'branch_deleted':
-                this.deps.historyView.removeMessages(event.payload.deletedIds, true);
+                this.deps.historyView.removeMessages(e.payload.deletedIds, true);
                 break;
 
             case 'branch_renamed': {
-                const el = this.deps.historyView.getElement(event.payload.nodeId);
+                const el = this.deps.historyView.getElement(e.payload.nodeId);
                 if (el) {
                     const nameEl = el.querySelector('.llm-branch-name');
-                    if (nameEl) nameEl.textContent = event.payload.newName;
+                    if (nameEl) nameEl.textContent = e.payload.newName;
+                }
+                break;
+            }
+
+            // LLM 2.0 equivalents (S7)
+            case 'messages:deleted':
+                this.deps.historyView.removeMessages(e.payload.deletedIds, true);
+                break;
+
+            case 'log:ref_renamed': {
+                const el2 = this.deps.historyView.getElement(e.payload.ref);
+                if (el2) {
+                    const nameEl2 = el2.querySelector('.llm-branch-name');
+                    if (nameEl2) nameEl2.textContent = e.payload.newName;
                 }
                 break;
             }
@@ -188,24 +210,30 @@ export class SessionEventHandler {
         }
     }
 
-    private updateStatusFromEvent(event: OrchestratorEvent): void {
+    private updateStatusFromEvent(event: SessionEvent): void {
         if (event.type === 'finished') {
             this.deps.statusIndicator.update('completed');
 
-            // Forward token usage to ChatInput TokenMeterPlugin
-            const tu = event.payload.tokenUsage;
+            // Support both old OrchestratorEvent { payload: { tokenUsage } }
+            // and new canonical AgentEventFinished { usage: TokenUsage }
+            // (both arrive as { type, payload } during transition via EventBus)
+            const p = (event as any).payload;
+            const tu = p?.tokenUsage ?? p?.usage ? {
+                inputTokens: p?.tokenUsage?.inputTokens ?? p?.usage?.inputTokens ?? 0,
+                outputTokens: p?.tokenUsage?.outputTokens ?? p?.usage?.outputTokens ?? 0,
+                cacheReadTokens: p?.tokenUsage?.cacheReadTokens ?? p?.usage?.cacheReadTokens,
+                costUsd: p?.tokenUsage?.costUsd ?? p?.usage?.costUsd ?? 0,
+                contextUsageRatio: p?.tokenUsage?.contextUsageRatio ?? p?.usage?.contextUsageRatio ?? 0,
+                turns: p?.tokenUsage?.turns ?? 0,
+                durationMs: p?.tokenUsage?.durationMs ?? 0,
+                isEstimated: p?.tokenUsage?.isEstimated ?? true,
+            } : null;
+
             if (tu) {
-                this.deps.chatInput.updateTokenStats({
-                    inputTokens:       tu.inputTokens,
-                    outputTokens:      tu.outputTokens,
-                    cacheReadTokens:   tu.cacheReadTokens,
-                    costUsd:           tu.costUsd,
-                    contextUsageRatio: tu.contextUsageRatio,
-                    turns:             tu.turns,
-                    durationMs:        tu.durationMs,
-                    isEstimated:       tu.isEstimated,
-                });
+                this.deps.chatInput.updateTokenStats(tu);
             }
-        } else if (event.type === 'error') this.deps.statusIndicator.update('failed');
+        } else if (event.type === 'error') {
+            this.deps.statusIndicator.update('failed');
+        }
     }
 }

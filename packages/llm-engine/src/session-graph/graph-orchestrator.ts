@@ -5,22 +5,19 @@
 // S5: Uses DependencyScheduler + reconcile() via executeWithReconcile().
 
 import type { IVFSManager, ILLMService, ILoop, LoopContext, GoalNode, ILog, Ref, RefStore, DraftArea, AssemblyStrategy, Turn, ChatMessage, AgentEvent, Signal, IToolService } from '@itookit/common';
-import { DependencyGraph } from './dependency-graph';
 import { SessionMetaStore } from './session-meta-store';
 import type { GraphExecutionOptions, GraphEvent, SessionExecutionResult } from './types';
-import { createGraphGoal } from './graph-goal-factory';
+import { createGraphGoal, resolveDependencyTree } from './graph-goal-factory';
 import { createAgentRuntimeLoopAdapter } from './agent-runtime-loop-adapter';
 import { reconcile } from '../core/goal/reconciler';
 import { createLLMJudgePredicate } from '../core/goal/predicates';
 
 export class GraphOrchestrator {
     private readonly vfs: IVFSManager;
-    private readonly graph: DependencyGraph;
     private readonly store: SessionMetaStore;
 
     constructor(vfs: IVFSManager) {
         this.vfs = vfs;
-        this.graph = new DependencyGraph(vfs);
         this.store = new SessionMetaStore(vfs);
     }
 
@@ -30,7 +27,7 @@ export class GraphOrchestrator {
         deps: Array<{ path: string; status: string }>;
     }> {
         const meta = await this.store.read(moduleName, sessionPath);
-        const order = await this.graph.topoSort(moduleName, sessionPath).catch(() => []);
+        const order = await resolveDependencyTree(this.vfs, moduleName, sessionPath).catch(() => []);
         const deps = await Promise.all(
             order.slice(0, -1).map(async (n) => {
                 const m = await this.store.read(n.moduleName, n.path);
@@ -43,7 +40,7 @@ export class GraphOrchestrator {
     /** Reset a session (and optionally its deps) back to pending. */
     async resetSession(moduleName: string, sessionPath: string, recursive = false): Promise<void> {
         if (recursive) {
-            const order = await this.graph.topoSort(moduleName, sessionPath).catch(() => []);
+            const order = await resolveDependencyTree(this.vfs, moduleName, sessionPath).catch(() => []);
             await Promise.all(order.map((n) => this.store.updateStatus(n.moduleName, n.path, 'pending', { runCount: 0 })));
         } else {
             await this.store.updateStatus(moduleName, sessionPath, 'pending', { runCount: 0 });
