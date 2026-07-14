@@ -1,7 +1,7 @@
 // @file: llm-engine/session/session-event-bus.ts
 
 import { EventBus } from '@itookit/common';
-import { SessionEvent, OrchestratorEvent, RegistryEvent } from '../core/types';
+import { SessionEvent, RegistryEvent } from '../core/types';
 import { log } from '../utils/logger';
 
 // ── Type maps for the two tracks ─────────────────────────────────────────────
@@ -9,12 +9,9 @@ import { log } from '../utils/logger';
 /**
  * Map from SessionEvent.type → payload for the EventBus.
  *
- * All events normalize to { type, payload } at the bus level:
- *   - OrchestratorEvent already has { type, payload }
- *   - SessionEvent flat fields become the payload
- *
- * After S7 Step 5 (cleanup), this switches to Omit<E, 'type'> for
- * true flat reconstruction.
+ * Canonical AgentEvents use flat fields (no payload wrapper);
+ * MessageProjectionEvent and SessionStructuralEvent use { type, payload }.
+ * The bus normalizes both to { type, payload } at the boundary.
  */
 type SessionEventMap = {
     [E in SessionEvent as E['type']]: E extends { payload: infer P } ? P : Omit<E, 'type'>;
@@ -24,12 +21,6 @@ type SessionEventMap = {
 type RegistryEventMap = {
     [E in RegistryEvent as E['type']]: E['payload'];
 };
-
-/**
- * Transitional event type — accepts both old OrchestratorEvent and new
- * SessionEvent during migration. Remove after S7 Step 5.
- */
-type TransitionalEvent = SessionEvent | OrchestratorEvent;
 
 /**
  * Session event bus — two isolated tracks:
@@ -68,9 +59,7 @@ export class SessionEventBus {
         this.ensureSession(sessionId);
         return this.sessionBus.channel(sessionId).onAny((payload, meta) => {
             try {
-                // During transition: reconstruct as { type, payload } wrapper.
-                // Consumers handle both old (OrchestratorEvent) and new
-                // (SessionEvent) type names via their switch statements.
+                // Reconstruct as { type, payload } wrapper at the bus boundary
                 handler({ type: meta.type, payload } as SessionEvent);
             } catch (err) {
                 log.error('Session event listener error', { sessionId, eventType: meta.type, err });
@@ -81,10 +70,10 @@ export class SessionEventBus {
     /**
      * Emit a session event.
      *
-     * Accepts both {@link SessionEvent} and deprecated {@link OrchestratorEvent}
-     * during migration. Normalizes to { type, payload } at the bus level.
+     * Normalizes canonical AgentEvent (flat fields) and projection/structural
+     * events ({ type, payload } wrapper) to { type, payload } at the bus level.
      */
-    emitSession(sessionId: string, event: TransitionalEvent): void {
+    emitSession(sessionId: string, event: SessionEvent): void {
         if (!this.sessionBus.hasChannel(sessionId)) {
             log.debug('Event dropped (session not registered)', { sessionId, eventType: event.type });
             return;
@@ -92,10 +81,10 @@ export class SessionEventBus {
 
         let payload: unknown;
         if ('payload' in event) {
-            // OrchestratorEvent or wrapper-style SessionEvent
-            payload = (event as OrchestratorEvent).payload;
+            // MessageProjectionEvent / SessionStructuralEvent — already wrapped
+            payload = event.payload;
         } else {
-            // Flat canonical AgentEvent — rest becomes payload
+            // Canonical AgentEvent — flat fields become payload
             const { type: _, ...rest } = event;
             payload = rest;
         }

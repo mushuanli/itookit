@@ -125,10 +125,8 @@ export class HistoryView implements IHistoryPresenter {
             {
                 interval: 50,
                 immediateTypes: [
-                    'session_start', 'node_start', 'finished', 'error', 'session_cleared',
-                    'messages_deleted', 'message_edited',
+                    'finished', 'error',
                     'regenerate_started', 'regenerate_completed',
-                    'sibling_switch',
                     // Claude Code Agent Loop — 需要立即处理的事件
                     'tool:queued',
                     'stream:thinking:stop',
@@ -314,31 +312,10 @@ export class HistoryView implements IHistoryPresenter {
     }
     private processEventImmediate(event: SessionEvent): void {
         // During S7 transition, event types include both old OrchestratorEvent
-        // names and new SessionEvent names. Use string-based switch.
+        // names (finished, error, regenerate_*, tool:*) and new SessionEvent names.
+        // Use string-based switch for compatibility.
         const e = event as { type: string; payload?: any; [key: string]: any };
         switch (e.type) {
-            case 'session_start': {
-                this.clearErrors();
-                this.enterStreamingMode();
-                const isUser = e.payload.role === 'user';
-                const isAgentOrigin = e.payload.origin === 'agent' || e.payload.origin === 'system';
-                const defaultCollapsed = isUser || isAgentOrigin;
-                this.renderer.appendSession(e.payload, defaultCollapsed);
-                this.collapse.setState(e.payload.id, defaultCollapsed);
-                this.scrollController.scrollToBottom(false);
-                break;
-            }
-
-            case 'node_start':
-                this.renderer.appendNode(e.payload.parentId, e.payload.node, false);
-                break;
-
-            case 'node_status':
-                this.stream.updateStatus(
-                    e.payload.nodeId, e.payload.status, e.payload.result
-                );
-                break;
-
             case 'finished':
                 this.exitStreamingMode();
                 this.renderer.editors.forEach(editor => editor.finalize().catch(err => console.error('[HistoryView] finalize failed:', err)));
@@ -355,40 +332,6 @@ export class HistoryView implements IHistoryPresenter {
                 const prefix = code === 401 ? '🔐 ' : code === 429 ? '⏳ ' : '';
                 this.appendErrorBubble(new Error(`${prefix}${msg}`));
                 this.renderer.editors.forEach(editor => editor.finalize().catch(err => console.error('[HistoryView] finalize failed:', err)));
-                break;
-            }
-
-            case 'messages_deleted':
-                this.removeMessages(e.payload.deletedIds, true);
-                break;
-
-            case 'message_edited': {
-                const el = this.renderer.getSessionElement(e.payload.messageId);
-                if (el) {
-                    const preview = el.querySelector('.llm-ui-header-preview');
-                    if (preview) {
-                        preview.textContent = getPreviewText(e.payload.newContent);
-                    }
-                }
-                break;
-            }
-
-            case 'session_cleared':
-                this.renderer.renderWelcome();
-                break;
-
-            case 'sibling_switch': {
-                const { messageId, newIndex, total } = e.payload;
-                const el = this.renderer.getSessionElement(messageId);
-                if (!el) break;
-
-                const indicator = el.querySelector('.llm-ui-branch-indicator');
-                if (indicator) indicator.textContent = `${newIndex + 1}/${total}`;
-
-                const prevBtn = el.querySelector('[data-action="prev-sibling"]') as HTMLButtonElement;
-                const nextBtn = el.querySelector('[data-action="next-sibling"]') as HTMLButtonElement;
-                if (prevBtn) prevBtn.disabled = newIndex === 0;
-                if (nextBtn) nextBtn.disabled = newIndex === total - 1;
                 break;
             }
 

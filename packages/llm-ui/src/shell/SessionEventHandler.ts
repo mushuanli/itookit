@@ -26,24 +26,8 @@ type SideEffect =
  */
 const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
     // 会话生命周期
-    session_start: ['clearErrors', 'updateStatus', 'notifyChange'],
     finished: ['clearErrors', 'updateStatus', 'notifyChange', 'refreshNav'],
     error: ['updateStatus'],
-
-    // 分支结构变更
-    branch_created: ['renderFull', 'scrollToBottom', 'refreshBranch', 'flashIndicator'],
-    branch_switched: ['resetCollapse', 'renderFull', 'scrollToBottom', 'refreshBranch', 'flashIndicator'],
-    branch_deleted: ['refreshBranch', 'refreshNav'],
-    branch_renamed: ['refreshBranch'],
-
-    // 内容变更
-    messages_deleted: ['refreshNav', 'notifyChange'],
-    message_edited: ['refreshNav'],
-    session_cleared: ['refreshNav', 'refreshBranch'],
-
-    // 重新生成
-    regenerate_started: ['clearErrors', 'flashIndicator'],
-    regenerate_completed: ['refreshBranch', 'refreshNav'],
 
     // ── LLM 2.0 canonical / projection event names (S7) ──
     'message:appended': ['clearErrors', 'updateStatus', 'notifyChange', 'scrollToBottom'],
@@ -51,9 +35,13 @@ const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
     'messages:deleted': ['refreshNav', 'notifyChange'],
     'message:edited': ['refreshNav'],
     'sibling:switched': ['renderFull', 'refreshBranch'],
-    'log:appended': ['renderFull', 'scrollToBottom', 'refreshBranch'],
-    'log:ref_moved': ['resetCollapse', 'renderFull', 'refreshBranch', 'flashIndicator'],
+    'log:appended': ['renderFull', 'scrollToBottom', 'refreshBranch', 'flashIndicator'],
+    'log:ref_moved': ['resetCollapse', 'renderFull', 'scrollToBottom', 'refreshBranch', 'flashIndicator'],
     'log:ref_renamed': ['refreshBranch'],
+
+    // 重新生成（保留 — 无 canonical 等价事件）
+    regenerate_started: ['clearErrors', 'flashIndicator'],
+    regenerate_completed: ['refreshBranch', 'refreshNav'],
 };
 
 // ----------------------------------------------------------------
@@ -139,20 +127,6 @@ export class SessionEventHandler {
     private handleBranchEvent(event: SessionEvent): void {
         const e = event as { type: string; payload?: any; [key: string]: any };
         switch (e.type) {
-            case 'branch_deleted':
-                this.deps.historyView.removeMessages(e.payload.deletedIds, true);
-                break;
-
-            case 'branch_renamed': {
-                const el = this.deps.historyView.getElement(e.payload.nodeId);
-                if (el) {
-                    const nameEl = el.querySelector('.llm-branch-name');
-                    if (nameEl) nameEl.textContent = e.payload.newName;
-                }
-                break;
-            }
-
-            // LLM 2.0 equivalents (S7)
             case 'messages:deleted':
                 this.deps.historyView.removeMessages(e.payload.deletedIds, true);
                 break;

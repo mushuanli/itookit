@@ -612,7 +612,7 @@ export class SessionManager {
                     result.deletedIds.push(...deletedBranchIds);
 
                     this.eventBus.emitSession(sessionId, {
-                        type: 'branch_deleted',
+                        type: 'messages:deleted',
                         payload: { deletedIds: deletedBranchIds },
                     });
 
@@ -918,8 +918,9 @@ export class SessionManager {
         await this.reloadSessionData(nodeId, sessionId, state);
 
         this.eventBus.emitSession(sessionId, {
-            type: 'branch_created',
-            payload: { sourceId: branchNodeId, newId: newNodeId, branchName: options?.name },
+            type: 'log:appended',
+            ref: options?.name ?? '',
+            turnId: newNodeId,
         });
 
         return newNodeId;
@@ -944,8 +945,10 @@ export class SessionManager {
         await this.reloadSessionData(nodeId, sessionId, state);
 
         this.eventBus.emitSession(sessionId, {
-            type: 'branch_switched',
-            payload: { fromBranch, toBranch: branchName },
+            type: 'log:ref_moved',
+            ref: branchName,
+            previousHead: fromBranch,
+            newHead: branchName,
         });
     }
 
@@ -968,8 +971,10 @@ export class SessionManager {
         await this.engine.renameBranch(nodeId, sessionId, oldName, newName);
 
         this.eventBus.emitSession(sessionId, {
-            type: 'branch_renamed',
-            payload: { nodeId: manifest.branches[oldName], newName },
+            type: 'log:ref_renamed',
+            ref: manifest.branches[oldName],
+            oldName,
+            newName,
         });
     }
 
@@ -992,7 +997,7 @@ export class SessionManager {
         await this.reloadSessionData(nodeId, sessionId, state);
 
         this.eventBus.emitSession(sessionId, {
-            type: 'branch_deleted',
+            type: 'messages:deleted',
             payload: { deletedIds },
         });
     }
@@ -1259,14 +1264,14 @@ export class SessionManager {
         await this.populateState(state, nodeId, sessionId);
 
         this.eventBus.emitSession(sessionId, {
-            type: 'session_cleared',
+            type: 'messages:cleared',
             payload: {},
         });
 
         for (const sess of state.getSessions()) {
             this.eventBus.emitSession(sessionId, {
-                type: 'session_start',
-                payload: sess,
+                type: 'message:appended',
+                payload: { sessionGroup: sess },
             });
         }
     }

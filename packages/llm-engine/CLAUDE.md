@@ -4,7 +4,7 @@
 
 > **S4~S5 ✅ (2026-07-14)**: ChatEngineLog 完整 ILog 实现；Goal 控制回路（DependencyScheduler + reconcile + 3 Predicate）；**S5 验收达成** — 4 个控制回路全部切换至 reconcile() 驱动。
 > **S6c ✅ (2026-07-14)**: LLMKernelAdapter + UIEventAdapter 删除；DependencyGraph 删除；auto-continue.ts 删除；AgentExecutor 物理删除（llm-kernel）；HarnessAdapter 解耦（IHarnessContext 服务定位器）。
-> **S7 ✅ (2026-07-14)**: SessionEventBus 切换至 `SessionEvent`（= canonical AgentEvent + MessageProjectionEvent + SessionStructuralEvent），替代 deprecated `OrchestratorEvent`；UI 消费者（HistoryView、SessionEventHandler）支持新旧双路径；SessionActor 桥接改为 canonical forward。
+> **S7 ✅ (2026-07-14)**: `OrchestratorEvent` 类型已删除 — 全部生产者迁移到 `SessionEvent`（= canonical AgentEvent + MessageProjectionEvent + SessionStructuralEvent）；UI 旧事件 fallback 已清理；`TransitionalEvent` 过渡期代码已移除。
 > **S8 ✅ (2026-07-14)**: `@itookit/llm-kernel` 包消除 — `NodeStatus`、`ExecutorConfig`、`ExecutorType` 内联至 `core/types.ts`；`setKernelDeviceManager` 迁移至 `core/device-registry.ts`；`initializeKernel()` inline 至 `initializeLLMEngine()`。
 
 ## Architecture
@@ -51,11 +51,11 @@ SessionManager.sendMessage()
 
 > **S6c**: `executeTask()` 改为 `ILLMService.chatStream()` 直连，token 统计优先使用真实数据。LLMKernelAdapter + UIEventAdapter 已删除。
 
-## LLM 2.0 四原语（S1~S6 实施状态）
+## LLM 2.0 四原语（S1~S7 实施状态）
 
 | 原语 | 状态 | 关键文件 |
 |---|---|---|
-| **AgentEvent** | ✅ canonical schema，旧事件标记 @deprecated | `common/.../agent-event.ts` |
+| **AgentEvent** | ✅ canonical schema（15 变体），唯一事件词汇 | `common/.../agent-event.ts` |
 | **ILoop** | ✅ 接口 + ExecutorRegistry + chat/loop executor | `common/.../loop.ts`, `core/executor-registry.ts` |
 | **drive()** | ✅ 协程宿主，pause/resume 一条路径 | `core/loop-driver.ts` |
 | **ILog** | ✅ 完整实现 — ChatEngineLog（VFS DraftArea + RefStore + fold 缓存） | `persistence/chat-engine-log.ts` |
@@ -118,15 +118,15 @@ SessionManager.sendMessage()
 ## Harness 服务访问（S6c）
 
 - **推荐**: `getHarnessContext(): IHarnessContext | null` — 服务定位器（runtime + skillService + toolService）
-- **@deprecated**: `getHarnessAdapter(): HarnessAdapter | null` — 委托给 IHarnessContext，待 OrchestratorEvent 替换后移除
+- `initHarnessAdapter()` 同步注册 `IHarnessContext`；UI 层通过 `getHarnessContext()` 访问 harness 服务
 
-## 事件系统（S7）
+## 事件系统（S7 ✅）
 
-- **SessionEvent** = `AgentEvent`（canonical，15 变体）| `MessageProjectionEvent`（3 变体，UI 树投影）| `SessionStructuralEvent`（6 变体，分支/消息操作）
-- SessionEventBus 过渡期同时接受新旧格式；`onSession` handler 类型为 `(event: SessionEvent) => void`
-- `SessionActor` 桥接：canonical AgentEvent 直接 forward + 同步 emit `node_update` 树投影事件（兼容现有 UI）
-- 新代码优先 emit canonical `AgentEvent`（`stream:content`、`turn:start`、`tool:queued` 等）
-- `@deprecated` `OrchestratorEvent` 待所有生产者迁移后移除
+- **SessionEvent** = `AgentEvent`（canonical，15 变体）| `MessageProjectionEvent`（3 变体，UI 树投影）| `SessionStructuralEvent`（8 变体，含 regenerate）
+- `SessionEventBus.emitSession(sessionId, event: SessionEvent)` — 直接接受 `SessionEvent`，无过渡期格式检测
+- `SessionActor` 桥接：canonical AgentEvent forward + `message:updated` 树投影事件
+- 树投影事件使用 `messageId`（替代旧 `nodeId`）、`delta`（替代旧 `chunk`）
+- `OrchestratorEvent` 已删除（S7 收尾），所有生产者统一 emit `SessionEvent`
 
 ## Cost Recording
 
@@ -139,8 +139,9 @@ S6c: kernel 路径优先使用 `chatStream` 返回的真实 token 数，回退�
 - `VFSAgentService` 同时实现 `IAgentConfigService` 和 `IAgentManagementService`
 - Chat 文件以 `.chat` 扩展名存储在 `chats` 模块
 - LLM 调用入口统一为 `ILLMService`，禁止绕过接口直接调用 device driver
-- 事件迁移期间新旧事件并行，新代码优先使用 `AgentEvent`（from `@itookit/common`）
+- 事件统一使用 `SessionEvent`；生产者 emit `AgentEvent`（flat）或 `MessageProjectionEvent`/`SessionStructuralEvent`（wrapper），EventBus 自动归一化
 - 新 Agent Loop 策略实现 `ILoop`，通过 `ExecutorRegistry.register()` 注册
 - UI 层访问 harness 服务通过 `getHarnessContext()`，不直接依赖 `HarnessAdapter`
 - `setKernelDeviceManager()` / `getKernelDeviceManager()` 从 `@itookit/llm-engine` 导入（S8 从 llm-kernel 迁移）
 - `NodeStatus`、`ExecutorConfig`、`ExecutorType` 定义在 `core/types.ts`（S8 从 llm-kernel 吸收）
+- 死代码清单：`ClaudeCodeStrategy`（S7 删除）、`HarnessStrategy`（S7 删除）、`getHarnessAdapter()`（S7 删除）

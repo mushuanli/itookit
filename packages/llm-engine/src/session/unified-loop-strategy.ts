@@ -9,7 +9,7 @@
 //   - 轻量内联 — 预算和错误恢复直接内联实现，避免引入大型类依赖
 
 import type { ChatCompletionParams, MessageContentPart, ILLMService } from '@itookit/common';
-import type { OrchestratorEvent, SessionTokenUsage } from '../core/types';
+import type { SessionTokenUsage } from '../core/types';
 import type {
     IAgentLoopStrategy,
     AgentLoopRequest,
@@ -205,7 +205,7 @@ export class UnifiedLoopStrategy implements IAgentLoopStrategy {
         messages: ChatCompletionParams['messages'],
         llmParams: Omit<ChatCompletionParams, 'messages' | 'signal'>,
         signal: AbortSignal | undefined,
-        onEvent: (e: OrchestratorEvent) => void,
+        onEvent: (e: { type: string; [key: string]: any }) => void,
         nodeId: string,
         recovery?: Partial<ErrorRecoveryConfig>,
         connectionId?: string,
@@ -246,7 +246,7 @@ export class UnifiedLoopStrategy implements IAgentLoopStrategy {
         messages: ChatCompletionParams['messages'],
         llmParams: Omit<ChatCompletionParams, 'messages' | 'signal'>,
         signal: AbortSignal | undefined,
-        onEvent: (e: OrchestratorEvent) => void,
+        onEvent: (e: { type: string; [key: string]: any }) => void,
         nodeId: string,
         maxTruncationRetries: number,
         connectionId?: string,
@@ -270,7 +270,7 @@ export class UnifiedLoopStrategy implements IAgentLoopStrategy {
         messages: ChatCompletionParams['messages'],
         llmParams: Omit<ChatCompletionParams, 'messages' | 'signal'>,
         signal: AbortSignal | undefined,
-        onEvent: (e: OrchestratorEvent) => void,
+        onEvent: (e: { type: string; [key: string]: any }) => void,
         nodeId: string,
         connectionId?: string,
     ): Promise<{ assistantBlocks: ContentBlock[]; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } }> {
@@ -370,7 +370,7 @@ export class UnifiedLoopStrategy implements IAgentLoopStrategy {
         blocks: ContentBlock[],
         currentType: string | null,
         thinkingBuf: string, thinkingSig: string, textBuf: string,
-        onEvent: (e: OrchestratorEvent) => void,
+        onEvent: (e: { type: string; [key: string]: any }) => void,
         nodeId: string,
     ): void {
         if (currentType === 'thinking') {
@@ -387,7 +387,7 @@ export class UnifiedLoopStrategy implements IAgentLoopStrategy {
 
     private async execToolSafely(
         tool: ToolUseBlock, signal: AbortSignal | undefined,
-        onEvent: (e: OrchestratorEvent) => void, nodeId: string,
+        onEvent: (e: { type: string; [key: string]: any }) => void, nodeId: string,
     ): Promise<TurnRecord['toolResults'][number]> {
         onEvent({ type: 'tool:running', payload: { nodeId, toolId: tool.id } });
         try {

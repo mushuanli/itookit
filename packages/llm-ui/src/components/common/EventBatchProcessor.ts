@@ -49,8 +49,8 @@ export class EventBatchProcessor<T extends BatchableEvent = BatchableEvent> {
     ) {
         this.currentInterval = options?.interval ?? 50;
         this.immediateTypes = new Set(options?.immediateTypes ?? []);
-        this.chunkType = options?.chunkEventType ?? 'node_update';
-        this.statusType = options?.statusEventType ?? 'node_status';
+        this.chunkType = options?.chunkEventType ?? 'message:updated';
+        this.statusType = options?.statusEventType ?? 'message:status';
     }
 
     push(event: T): void {
@@ -98,26 +98,30 @@ export class EventBatchProcessor<T extends BatchableEvent = BatchableEvent> {
 
         for (const event of events) {
             if (event.type === this.chunkType) {
-                const { nodeId, chunk, field } = event.payload ?? {};
-                if (!chunk || !field) {
-                    // metaInfo-only node_update — collect for TtyController / other meta handlers
-                    if (nodeId && event.payload?.metaInfo) {
-                        const prev = result.metaUpdates.get(nodeId) ?? {};
-                        result.metaUpdates.set(nodeId, { ...prev, ...event.payload.metaInfo });
+                const p = event.payload ?? {};
+                const messageId = p.messageId;
+                const delta = p.delta;
+                const field = p.field;
+                if (!delta || !field) {
+                    // metaInfo-only — collect for TtyController / other meta handlers
+                    if (messageId && p.metaInfo) {
+                        const prev = result.metaUpdates.get(messageId) ?? {};
+                        result.metaUpdates.set(messageId, { ...prev, ...p.metaInfo });
                     }
                     continue;
                 }
 
-                if (!result.chunks.has(nodeId)) {
-                    result.chunks.set(nodeId, { thought: '', output: '' });
+                if (!result.chunks.has(messageId)) {
+                    result.chunks.set(messageId, { thought: '', output: '' });
                 }
-                const merged = result.chunks.get(nodeId)!;
-                if (field === 'thought') merged.thought += chunk;
-                else if (field === 'output') merged.output += chunk;
+                const merged = result.chunks.get(messageId)!;
+                if (field === 'thought') merged.thought += delta;
+                else if (field === 'output') merged.output += delta;
 
             } else if (event.type === this.statusType) {
-                const { nodeId, status, result: r } = event.payload ?? {};
-                result.statusChanges.set(nodeId, { status, result: r });
+                const p = event.payload ?? {};
+                const { messageId, status, result: r } = p;
+                result.statusChanges.set(messageId, { status, result: r });
 
             } else {
                 result.immediate.push(event);

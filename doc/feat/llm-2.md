@@ -1,6 +1,6 @@
 # LLM 子系统 2.0 — 四原语内核 + 插件框架设计
 
-> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S7：事件统一 + S8：llm-kernel 消除）| 分支: v4.1
+> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S7 收尾完成：OrchestratorEvent 删除 + 全生产者迁移）| 分支: v4.1
 > 前置分析: [llm-design.md](./llm-design.md)（现状五包架构审查）
 > 定位: 本文档是重构的**宪法**——定义不变的内核原语与扩展契约，现有功能全部归约为原语组合
 
@@ -8,7 +8,7 @@
 
 ## 实施进度
 
-**S1~S8 主要阶段已完成**（2026-07-14）。S6+S7+S8 拆分为五个子阶段全部交付，剩余 2 项建议独立 PR。
+**S1~S8 全部完成**（2026-07-14）。S7 分两阶段交付（基础设施 → 收尾清理），S6+S7+S8 拆分为五个子阶段全部交付。剩余 2 项为延后的 llm-harness 相关迁移。
 
 | 阶段 | 状态 | 关键交付 | 剩余工作 |
 |---|---|---|---|
@@ -20,7 +20,7 @@
 | **S6a** 内核裁剪 | ✅ | llm-kernel 删除 15 个死代码文件（~60%）；`ExecutorType` 收缩为 `'agent'`；`initializeKernel` 简化；`executePlan()` 删除 | — |
 | **S6b** @deprecated 清理 | ✅ | 删除 `CompletionAnalyzer` 文件 + `AutoContinueHandler` 类 + `executeSession()` 路径 + `orchestrator-interfaces.ts` + llm-harness 2 个死代码文件 + `autoContinue` 死配置管线 | — |
 | **S6c** 内核收敛 + 适配器清理 | ✅ | `LLMKernelAdapter` + `UIEventAdapter` 删除；`executeTask()` 切换为 `ILLMService.chatStream()` 直连；`AgentExecutor` + `BaseExecutor` 物理删除（llm-kernel）；`DependencyGraph` 删除（`resolveDependencyTree()` 替代）；`auto-continue.ts` 删除；`HarnessAdapter` 解耦（`IHarnessContext` 服务定位器 + llm-ui 3 文件迁移） | — |
-| **S7** 事件统一（部分完成） | 🟡 | ★ `SessionEvent` = canonical `AgentEvent` (15) + `MessageProjectionEvent` (3) + `SessionStructuralEvent` (6) 替代 `OrchestratorEvent` (28)；`SessionEventBus` 泛型切换 + 过渡期双格式兼容；`HistoryView` / `SessionEventHandler` / `IHistoryPresenter` 双路径支持新旧事件名；`SessionActor` 桥接 canonical forward + tree projection 双 emit；`session-manager.ts` 消息/分支事件重命名（`messages:deleted`、`message:edited`、`sibling:switched`）；canonical AgentEvent 新增 2 变体（`tool:input`、`log:ref_renamed`，13→15） | **HarnessAdapter** 事件映射未迁移（仍 emit OrchestratorEvent 格式）；`branch_*`/`regenerate_*` 旧事件名未替换；`HistoryView` 旧事件 fallback 分支未删除；`EventBatchProcessor` chunkType/statusType 未切换 |
+| **S7** 事件统一 | ✅ | ★ `SessionEvent` = canonical `AgentEvent` (15) + `MessageProjectionEvent` (3) + `SessionStructuralEvent` (8，含 regenerate) 替代 `OrchestratorEvent` (28)；`OrchestratorEvent` 类型已删除；`SessionEventBus` 直接接受 `SessionEvent`（无过渡期格式检测）；所有生产者（SessionManager、TaskRunner、HarnessAdapter、SessionActor）统一 emit `SessionEvent`；`HistoryView` / `SessionEventHandler` 旧事件 fallback 已清理；`EventBatchProcessor` 默认 chunkType/statusType 切换为 `message:updated`/`message:status`；`ClaudeCodeStrategy`（死代码）已删除；`HarnessStrategy` 已删除；`getHarnessAdapter()` 已删除 | — |
 | **S8** llm-kernel 消除 | ✅ | ★ `@itookit/llm-kernel` 包消除 — `NodeStatus`/`ExecutorConfig`/`ExecutorType` 内联至 `llm-engine/core/types.ts`；`setKernelDeviceManager`/`getKernelDeviceManager` 迁移至 `llm-engine/core/device-registry.ts`（新建）；`initializeKernel()` inline 至 `initializeLLMEngine()`；所有 7 处 import 路径更新（llm-engine ×4、app-shell ×2、test ×1）；6 个 `package.json` 依赖移除（llm-engine、app-shell、web-app、tauri-app、demo）；3 个 `vite.config` alias 移除（web-app、tauri-app、demo）；`tsup.config.ts` external 清理 | — |
 
 ### S3 完成内容（2026-07-14）
@@ -366,20 +366,54 @@
 
 ### S7 完成内容（2026-07-14）— 事件统一（基础设施）
 
-S7 核心基础设施已交付：类型系统、EventBus 切换、UI 双路径、主要生产者迁移。HarnessAdapter 和分支事件的完全迁移留待后续 PR。
+S7 分两个阶段交付：基础设施（07-14 上午）→ 收尾清理（07-14 下午）。
 
-#### 修改文件
+#### Phase 1 — 基础设施（上午）
+
+类型系统、EventBus 切换、UI 双路径、主要生产者迁移。
 
 | 文件 | 包 | 改动 |
 |---|---|---|
 | `interfaces/agent/agent-event.ts` | common | 新增 `AgentEventToolInput`（`{ type: 'tool:input'; call: ToolCallInfo & { delta } }`）+ `AgentEventLogRefRenamed`（`{ type: 'log:ref_renamed'; ref; oldName; newName }`）；canonical union 13→15 |
 | `core/types.ts` | llm-engine | 新增 `MessageProjectionEvent`（`message:appended/updated/status`，3 变体）、`SessionStructuralEvent`（`messages:cleared/deleted`、`message:edited`、`sibling:switched`，6 变体）、`SessionEvent = AgentEvent \| MessageProjectionEvent \| SessionStructuralEvent`；保留 `OrchestratorEvent` @deprecated |
-| `session/session-event-bus.ts` | llm-engine | **重写** — 泛型 `OrchestratorEventMap` → `SessionEventMap`（`{ [E in SessionEvent as E['type']]: Omit<E, 'type'> }`）；`emitSession` 接受 `TransitionalEvent = SessionEvent \| OrchestratorEvent`，自动检测新旧格式；`onSession` handler 类型为 `(event: SessionEvent) => void`，内部按 `{ type, payload }` wrapper 重建（过渡期统一格式） |
-| `session/task-runner.ts` | llm-engine | **SessionActor 桥接** — `stream:content/thinking` 同时 emit canonical + `node_update`（树投影）；`turn:*`/`tool:*`/`finished`/`error` 直接 forward canonical `AgentEvent`；移除所有 `as OrchestratorEvent` 强制转换；executeTask 路径保持兼容 |
+| `session/session-event-bus.ts` | llm-engine | **重写** — 泛型 `OrchestratorEventMap` → `SessionEventMap`；`emitSession` 接受 `TransitionalEvent = SessionEvent \| OrchestratorEvent`，自动检测新旧格式；`onSession` handler 类型为 `(event: SessionEvent) => void` |
+| `session/task-runner.ts` | llm-engine | **SessionActor 桥接** — `stream:content/thinking` 同时 emit canonical + `node_update`（树投影）；`turn:*`/`tool:*`/`finished`/`error` 直接 forward canonical `AgentEvent`；移除所有 `as OrchestratorEvent` 强制转换 |
 | `session/session-manager.ts` | llm-engine | `onEvent` handler 类型 `OrchestratorEvent` → `SessionEvent`；3 事件重命名（`messages_deleted`→`messages:deleted`、`message_edited`→`message:edited`、`sibling_switch`→`sibling:switched`） |
-| `shell/SessionEventHandler.ts` | llm-ui | `handleSessionEvent`/`handleBranchEvent`/`updateStatusFromEvent` 类型切换至 `SessionEvent`；`EVENT_SIDE_EFFECTS` 表新增 8 个新事件名条目；`handleBranchEvent` switch 双路径；`updateStatusFromEvent` 兼容新旧 `finished` payload shape |
-| `components/HistoryView.ts` | llm-ui | `processEvent`/`processEventImmediate`/`handleBatchedEvents` 类型切换至 `SessionEvent`；switch 内新增 canonical + projection + structural 分支（`message:appended`、`message:status`、`messages:cleared/deleted`、`sibling:switched`、`stream:content/thinking`）；旧事件分支使用 `as { type: string; payload?: any }` 兼容 |
+| `shell/SessionEventHandler.ts` | llm-ui | `handleSessionEvent`/`handleBranchEvent`/`updateStatusFromEvent` 类型切换至 `SessionEvent`；`EVENT_SIDE_EFFECTS` 表新增 8 个新事件名条目 |
+| `components/HistoryView.ts` | llm-ui | `processEvent`/`processEventImmediate`/`handleBatchedEvents` 类型切换至 `SessionEvent`；switch 内新增 canonical + projection + structural 分支 |
 | `domain/ports/IHistoryPresenter.ts` | llm-ui | `processEvent(event: OrchestratorEvent)` → `processEvent(event: SessionEvent)` |
+
+#### Phase 2 — 收尾清理（下午）
+
+全部生产者迁移至 `SessionEvent`、`OrchestratorEvent` 类型删除、UI 旧 fallback 清理、死代码删除。
+
+##### 新增文件
+
+| 文件 | 包 | 说明 |
+|---|---|---|
+| — | — | Phase 2 无新增文件，全部为修改/删除 |
+
+##### 修改文件
+
+| 文件 | 包 | 改动 |
+|---|---|---|
+| `core/types.ts` | llm-engine | ★ **删除 `OrchestratorEvent` 类型定义**（28 变体，~45 行）；`SessionStructuralEvent` 新增 `regenerate_started` / `regenerate_completed`（6→8 变体） |
+| `session/session-event-bus.ts` | llm-engine | ★ 删除 `TransitionalEvent` 类型；删除 `'payload' in event` 格式检测；`emitSession(sessionId, event: SessionEvent)` 直接接受 `SessionEvent`；移除 `OrchestratorEvent` import |
+| `session/session-manager.ts` | llm-engine | ★ 6 个旧事件名替换：`branch_created`→`log:appended`（canonical flat）、`branch_switched`→`log:ref_moved`、`branch_renamed`→`log:ref_renamed`、`branch_deleted`→`messages:deleted`、`session_cleared`→`messages:cleared`、`session_start`→`message:appended`（payload 包装为 `{ sessionGroup }`） |
+| `session/task-runner.ts` | llm-engine | ★ 树投影 `node_update`→`message:updated`（`nodeId`→`messageId`、`chunk`→`delta`）、`node_status`→`message:status`；`session_start`→`message:appended`、`node_start`→`message:appended`（`isExecutionRoot: true`）；`createEventHandler`/`handleUIEvents` 类型从 `OrchestratorEvent` 切换至 `SessionEvent`；清理旧事件名兼容逻辑 |
+| `session/agent-loop-strategy.ts` | llm-engine | `AgentLoopContext.onEvent` 类型从 `(event: OrchestratorEvent) => void` → `(event: { type: string; [key: string]: any }) => void` |
+| `session/unified-loop-strategy.ts` | llm-engine | 移除 `OrchestratorEvent` import；所有 `onEvent` 参数类型改为通用回调 |
+| `adapters/harness-adapter.ts` | llm-engine | ★ `execute()` 的 `onEvent` 回调类型从 `OrchestratorEvent` → `SessionEvent`；内部所有 emit 改用 `message:updated`/`message:status`/`message:appended`（含 `as SessionEvent` cast）；error 事件改为 canonical `{ type: 'error', error: {...} }` 格式；删除 `HarnessStrategy` 死代码类（~65 行）；删除 `getHarnessAdapter()`；注释清理 |
+| `index.ts` | llm-engine | 移除 `getHarnessAdapter` 导出 |
+| `shell/SessionEventHandler.ts` | llm-ui | ★ `EVENT_SIDE_EFFECTS` 删除 10 个旧事件条目（`session_start`、`branch_*`、`messages_deleted` 等）；`handleBranchEvent` 删除 `branch_deleted`/`branch_renamed` 旧 case；`log:appended` 补充 `flashIndicator` 副作用 |
+| `components/HistoryView.ts` | llm-ui | ★ `processEventImmediate` 删除 7 个旧 case（`session_start`、`node_start`、`node_status`、`messages_deleted`、`message_edited`、`session_cleared`、`sibling_switch`）；`immediateTypes` 移除旧事件名 |
+| `components/common/EventBatchProcessor.ts` | llm-ui | ★ `chunkEventType` 默认值 `'node_update'`→`'message:updated'`；`statusEventType` 默认值 `'node_status'`→`'message:status'`；统一使用 `messageId`（移除 `nodeId` fallback）；移除双格式检测逻辑 |
+
+##### 删除文件
+
+| 文件 | 包 | 原因 |
+|---|---|---|
+| `session/claude-code-runner.ts` | llm-engine | 死代码 — 未导出、未注册、未实例化。已被 S3 的 `LoopExecutor` 替代 |
 
 #### S7 验收标准
 
@@ -387,12 +421,17 @@ S7 核心基础设施已交付：类型系统、EventBus 切换、UI 双路径�
 |---|---|
 | `SessionEvent` 类型定义完整（= AgentEvent + Projection + Structural） | ✅ |
 | `SessionEventBus` 泛型切换至 `SessionEventMap` | ✅ |
-| `SessionEventBus` 过渡期同时接受新旧格式 | ✅ |
-| UI 消费者（HistoryView、SessionEventHandler）双路径 | ✅ |
+| ~~`SessionEventBus` 过渡期兼容~~ → 过渡期代码已删除 | ✅ |
+| UI 消费者（HistoryView、SessionEventHandler）双路径 → 旧 fallback 已删除 | ✅ |
 | `SessionActor` 桥接 canonical forward | ✅ |
-| session-manager 简单事件重命名完成 | ✅ |
+| session-manager 全部旧事件名替换完成 | ✅ |
+| `OrchestratorEvent` 类型定义已物理删除 | ✅ |
+| `HarnessAdapter` 事件映射已迁移至 `SessionEvent` | ✅ |
+| `EventBatchProcessor` 默认值已切换 | ✅ |
+| `ClaudeCodeStrategy` / `HarnessStrategy` / `getHarnessAdapter` 死代码已删除 | ✅ |
 | llm-engine 编译通过 | ✅ |
 | llm-ui 编译通过（零新增错误） | ✅ |
+| `grep -r "OrchestratorEvent" packages/ --include="*.ts"` 仅剩注释引用 | ✅ |
 
 ---
 
@@ -450,19 +489,14 @@ S7 核心基础设施已交付：类型系统、EventBus 切换、UI 双路径�
 
 ---
 
-### 剩余工作（建议独立 PR）
+### 剩余工作（后续 PR）
 
-S7 基础设施已完成（类型定义、EventBus 切换、UI 双路径、SessionActor 桥接），以下为待完成项：
+S7 收尾已全部完成（2026-07-14 下午）。剩余 2 项为延后的 llm-harness 相关迁移：
 
-| 项目 | 原因 | 影响面 |
-|---|---|---|
-| **HarnessAdapter** 事件映射迁移 | 20 个 `agent:*` → `SessionEvent` 映射，当前仍 emit `OrchestratorEvent` 格式（bus 过渡期兼容） | `harness-adapter.ts` |
-| **Branch/Regenerate 旧事件名替换** | `branch_created/deleted/switched` → `log:appended`/`log:ref_moved`；`regenerate_started/completed` → `log:ref_moved`+`log:appended`（语义不同，需改 UI 消费逻辑） | `session-manager.ts` + UI |
-| **HistoryView 旧事件 fallback 清理** | `processEventImmediate` switch 中旧事件分支（`session_start`、`node_update`、`stream:*:*` 等）待所有生产者迁移后删除 | `HistoryView.ts` |
-| **EventBatchProcessor 升级** | `chunkType: 'node_update'` → 支持 `stream:content`/`stream:thinking`；`statusType: 'node_status'` → `message:status` | `EventBatchProcessor.ts` + `HistoryView.ts` |
-| **`OrchestratorEvent` 类型删除** | 28 变体 deprecated 类型定义 + 关联的 `OrchestratorEventMap` 移除 | `core/types.ts` |
-| llm-harness 整体迁移（AgentLoopExecutor 等 22 文件） | 待 executor-mission/graph 插件完成后逐步迁移 | llm-harness 全量 |
-| `HarnessAdapter` 类本身删除 | 仍用于 harness 事件翻译，需等 HarnessAdapter 迁移完成 | `harness-adapter.ts` |
+| 项目 | 原因 | 影响面 | 优先级 |
+|---|---|---|---|
+| llm-harness 整体迁移（AgentLoopExecutor 等 22 文件） | 待 executor-mission/graph 插件完成后逐步迁移 | llm-harness 全量 | P2 |
+| `HarnessAdapter` 类本身删除 | 仍用于 harness 事件翻译，需等 llm-harness 迁移完成 | `harness-adapter.ts` | P3 |
 
 **S8 已完成**（2026-07-14）：`@itookit/llm-kernel` 包已消除，所有符号迁移至 llm-engine 或删除。详见下方 S8 完成内容。
 
@@ -1023,7 +1057,7 @@ export const vcsPlugin: IPlugin = {
 | **S6a** | 内核裁剪：删除 llm-kernel 15 个死代码文件；`ExecutorType` 收缩为 `'agent'`；`initializeKernel` 简化 | 病灶 7 | 死代码占比从 ~60% → 0；llm-kernel 编译通过 | ✅ |
 | **S6b** | @deprecated 清理：删除 `CompletionAnalyzer` + `AutoContinueHandler` + `executeSession()` + `orchestrator-interfaces.ts` + dead config pipeline | 病灶 3、4 | 4 文件删除 + ~265 行代码块删除；`autoContinue` 死配置管线清零 | ✅ |
 | **S6c** | 内核收敛 + 适配器清理：`LLMKernelAdapter`/`UIEventAdapter`/`AgentExecutor`/`BaseExecutor`/`DependencyGraph`/`auto-continue.ts` 删除；`executeTask()` → `ILLMService.chatStream()`；`HarnessAdapter` → `IHarnessContext` 解耦 | 病灶 1、7 | 6 文件删除 + 15 文件修改；llm-kernel 退化为最小外壳；LLM 调用全路径统一为 `ILLMService` | ✅ |
-| **S7** | `OrchestratorEvent` → `AgentEvent` 替换（基础设施） | 病灶 4 | `SessionEvent` 类型体系建立；SessionEventBus + UI 双路径；SessionActor canonical forward；简单事件重命名完成 | 🟡 |
+| **S7** | `OrchestratorEvent` → `SessionEvent` 全面替换 | 病灶 4 | `OrchestratorEvent` 类型删除；全部生产者迁移至 `SessionEvent`；UI 旧 fallback 清理；`EventBatchProcessor` 升级；`ClaudeCodeStrategy`/`HarnessStrategy`/`getHarnessAdapter` 删除 | ✅ |
 | **S8** | `llm-core` 拆包 → llm-kernel 消除 | 病灶 7 | `@itookit/llm-kernel` 包物理删除；所有符号迁移至 llm-engine 或删除；6 个 package.json + 3 个 vite.config 清理 | ✅ |
 
 ---

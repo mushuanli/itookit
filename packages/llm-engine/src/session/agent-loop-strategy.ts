@@ -1,13 +1,13 @@
 // @file: llm-engine/session/agent-loop-strategy.ts
 //
-// Agent Loop 策略接口 — 统一 ClaudeCodeStrategy 和 HarnessStrategy 的调用约定。
+// Agent Loop 策略接口 — 定义 Agent Loop 执行策略的调用约定。
 //
 // 关系：
-//   ClaudeCodeStrategy — 内置主框架，完全自建，默认使用
-//   HarnessStrategy    — 包装 llm-harness IAgentRuntime，向后兼容
+//   UnifiedLoopStrategy — 内置主框架，通过 ILLMService 流式调用
+//   HarnessStrategy       — 包装 llm-harness IAgentRuntime，向后兼容（已删除）
 
 import type { ChatMessage, ChatCompletionParams } from '@itookit/common';
-import type { OrchestratorEvent, SessionTokenUsage } from '../core/types';
+import type { SessionTokenUsage } from '../core/types';
 
 // ─── TurnRecord ───────────────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ export interface AgentLoopResult {
 export interface AgentLoopContext {
     nodeId: string;
     sessionId: string;
-    onEvent: (event: OrchestratorEvent) => void;
+    onEvent: (event: { type: string; [key: string]: any }) => void;
 }
 
 /**

@@ -96,8 +96,6 @@ export { AttachmentProcessor } from './session/attachment-processor';
 export {
     HarnessAdapter,
     initHarnessAdapter,
-    /** @deprecated Use getHarnessContext() instead */
-    getHarnessAdapter,
     resetHarnessAdapter,
 } from './adapters/harness-adapter';
 

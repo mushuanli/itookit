@@ -5,7 +5,7 @@ import { ExecutorConfig } from '../core/types';
 import {
     ExecutionTask,
     TaskInput,
-    OrchestratorEvent,
+    SessionEvent,
     ExecutionNode,
     SessionRuntime,
     SessionStatus,
@@ -245,7 +245,7 @@ export class TaskRunner {
         state: SessionState,
     ): Promise<{
         userNodeId: string | undefined;
-        executorConfig: import('@itookit/llm-kernel').ExecutorConfig;
+        executorConfig: ExecutorConfig;
         assistantNodeId: string;
         rootNode: ExecutionNode;
         accumulator: { output: string; thinking: string };
@@ -355,8 +355,8 @@ export class TaskRunner {
                             this.eventBus.emitSession(sessionId, event);
                             // Tree projection for UI rendering
                             this.eventBus.emitSession(sessionId, {
-                                type: 'node_update',
-                                payload: { nodeId: rootNode.id, field: 'output', chunk: event.delta },
+                                type: 'message:updated',
+                                payload: { messageId: rootNode.id, field: 'output', delta: event.delta },
                             });
                         }
                         break;
@@ -367,8 +367,8 @@ export class TaskRunner {
                         if (isBound) {
                             this.eventBus.emitSession(sessionId, event);
                             this.eventBus.emitSession(sessionId, {
-                                type: 'node_update',
-                                payload: { nodeId: rootNode.id, field: 'thought', chunk: event.delta },
+                                type: 'message:updated',
+                                payload: { messageId: rootNode.id, field: 'thought', delta: event.delta },
                             });
                         }
                         break;
@@ -464,8 +464,8 @@ export class TaskRunner {
 
             if (isBound) {
                 this.eventBus.emitSession(sessionId, {
-                    type: 'node_status',
-                    payload: { nodeId: rootNode.id, status: 'success' },
+                    type: 'message:status',
+                    payload: { messageId: rootNode.id, status: 'success' },
                 });
                 if (input.regenerateContext) {
                     this.eventBus.emitSession(sessionId, {
@@ -476,7 +476,7 @@ export class TaskRunner {
                 this.eventBus.emitSession(sessionId, {
                     type: 'finished',
                     payload: { sessionId, tokenUsage: totalUsage },
-                });
+                } as unknown as SessionEvent);
             }
 
             this.callbacks.onStatusChange(sessionId, 'completed');
@@ -583,8 +583,10 @@ export class TaskRunner {
             // ── Emit turn start ───────────────────────────────────
             onEvent({
                 type: 'turn:start',
-                payload: { sessionId, turn: 0 },
-            } as OrchestratorEvent);
+                turnId: assistantNodeId,
+                sessionId,
+                turn: 0,
+            } as any);
 
             // ── Stream via ILLMService ────────────────────────────
             let llmUsage: any = {};
@@ -615,16 +617,16 @@ export class TaskRunner {
 
                     if (delta.thinking) {
                         onEvent({
-                            type: 'node_update',
-                            payload: { nodeId: rootNode.id, chunk: delta.thinking, field: 'thought' },
-                        } as OrchestratorEvent);
+                            type: 'message:updated',
+                            payload: { messageId: rootNode.id, delta: delta.thinking, field: 'thought' },
+                        } as any);
                     }
 
                     if (delta.content) {
                         onEvent({
-                            type: 'node_update',
-                            payload: { nodeId: rootNode.id, chunk: delta.content, field: 'output' },
-                        } as OrchestratorEvent);
+                            type: 'message:updated',
+                            payload: { messageId: rootNode.id, delta: delta.content, field: 'output' },
+                        } as any);
                     }
 
                     if (chunk.usage) {
@@ -642,8 +644,10 @@ export class TaskRunner {
             // ── Emit turn end ─────────────────────────────────────
             onEvent({
                 type: 'turn:end',
-                payload: { turnId: assistantNodeId, sessionId, turn: 0 },
-            } as OrchestratorEvent);
+                turnId: assistantNodeId,
+                sessionId,
+                turn: 0,
+            } as any);
 
             // =====================================================
             // 收尾
@@ -711,8 +715,8 @@ export class TaskRunner {
 
             if (isBound) {
                 this.eventBus.emitSession(sessionId, {
-                    type: 'node_status',
-                    payload: { nodeId: rootNode.id, status: 'success' },
+                    type: 'message:status',
+                    payload: { messageId: rootNode.id, status: 'success' },
                 });
 
                 if (input.regenerateContext) {
@@ -728,7 +732,7 @@ export class TaskRunner {
                 this.eventBus.emitSession(sessionId, {
                     type: 'finished',
                     payload: { sessionId, tokenUsage },
-                });
+                } as unknown as SessionEvent);
             }
 
             this.callbacks.onStatusChange(sessionId, 'completed');
@@ -774,8 +778,8 @@ export class TaskRunner {
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         if (isBound) {
             this.eventBus.emitSession(sessionId, {
-                type: 'session_start',
-                payload: userSession,
+                type: 'message:appended',
+                payload: { sessionGroup: userSession },
             });
         }
 
@@ -816,13 +820,13 @@ export class TaskRunner {
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         if (isBound) {
             this.eventBus.emitSession(sessionId, {
-                type: 'session_start',
-                payload: state.getLastSession()!,
+                type: 'message:appended',
+                payload: { sessionGroup: state.getLastSession()! },
             });
 
             this.eventBus.emitSession(sessionId, {
-                type: 'node_start',
-                payload: { node: rootNode },
+                type: 'message:appended',
+                payload: { sessionGroup: rootNode as any, isExecutionRoot: true },
             });
         }
 
@@ -859,34 +863,38 @@ export class TaskRunner {
         markErrorEmitted: () => void,
         isBound: boolean,
         shouldSuppressTerminal: () => boolean
-    ): (event: OrchestratorEvent) => void {
-        return (event: OrchestratorEvent) => {
+    ): (event: SessionEvent | { type: string; payload?: any; [key: string]: any }) => void {
+        return (event) => {
+            const p = (event as any).payload ?? {};
+
             // 终结事件抑制
             if (shouldSuppressTerminal()) {
                 if (event.type === 'finished') {
                     log.debug('Suppressed finished event (terminal events managed by TaskRunner)');
                     return;
                 }
-                if (event.type === 'node_status') {
-                    const status = (event.payload as any).status;
+                if (event.type === 'message:status') {
+                    const status = p.status;
                     if (status === 'success' || status === 'completed') {
-                        log.debug('Suppressed node_status event during execution', { status });
+                        log.debug('Suppressed status event during execution', { status });
                         return;
                     }
                 }
             }
 
             // 持久化处理（不依赖绑定状态）
-            if (event.type === 'node_update' && event.payload.chunk) {
-                if (event.payload.nodeId === rootNode.id || !event.payload.nodeId) {
-                    const targetNodeId = event.payload.nodeId || rootNode.id;
+            const isChunk = event.type === 'message:updated';
+            if (isChunk) {
+                const chunk = p.delta ?? p.chunk;
+                if (chunk) {
+                    const targetNodeId = p.messageId ?? p.nodeId ?? rootNode.id;
 
-                    if (event.payload.field === 'thought') {
-                        accumulator.thinking += event.payload.chunk;
-                        state.appendToNode(targetNodeId, event.payload.chunk, 'thought');
-                    } else if (event.payload.field === 'output') {
-                        accumulator.output += event.payload.chunk;
-                        state.appendToNode(targetNodeId, event.payload.chunk, 'output');
+                    if (p.field === 'thought') {
+                        accumulator.thinking += chunk;
+                        state.appendToNode(targetNodeId, chunk, 'thought');
+                    } else if (p.field === 'output') {
+                        accumulator.output += chunk;
+                        state.appendToNode(targetNodeId, chunk, 'output');
                     }
 
                     persist();
@@ -901,30 +909,31 @@ export class TaskRunner {
     }
 
     private handleUIEvents(
-        event: OrchestratorEvent,
+        event: SessionEvent | { type: string; payload?: any; [key: string]: any },
         sessionId: string,
         rootNode: ExecutionNode,
         markErrorEmitted: () => void
     ): void {
-        // 过滤重复的根 node_start
-        if (event.type === 'node_start') {
-            const p = event.payload as { parentPath?: string; node?: ExecutionNode };
-            if (!p.parentPath && !p.node?.parentId) return;
+        // 过滤重复的根 message:appended (前 node_start)
+        if (event.type === 'message:appended') {
+            const p = (event as any).payload as { parentId?: string; sessionGroup?: any };
+            if (!p?.parentId && !p?.sessionGroup?.parentId) return;
         }
 
-        // 修正空 nodeId
-        if (
-            (event.type === 'node_update' || event.type === 'node_status') &&
-            !event.payload.nodeId
-        ) {
-            event.payload.nodeId = rootNode.id;
+        // 修正空 messageId
+        const isChunkOrStatus = event.type === 'message:updated' || event.type === 'message:status';
+        if (isChunkOrStatus) {
+            const p = (event as any).payload ?? {};
+            if (!p.messageId) {
+                (event as any).payload = { ...p, messageId: rootNode.id };
+            }
         }
 
         if (event.type === 'error') {
             markErrorEmitted();
         }
 
-        this.eventBus.emitSession(sessionId, event);
+        this.eventBus.emitSession(sessionId, event as any);
     }
 
     // ============================================
@@ -1087,8 +1096,8 @@ export class TaskRunner {
 
             if (!errorAlreadyEmitted && isBound) {
                 this.eventBus.emitSession(sessionId, {
-                    type: 'node_status',
-                    payload: { nodeId: rootId, status, result: errorMessage },
+                    type: 'message:status',
+                    payload: { messageId: rootId, status, result: errorMessage },
                 });
             }
 
@@ -1115,7 +1124,7 @@ export class TaskRunner {
                     error: error instanceof Error ? error
                         : new Error(String(error)),
                 },
-            });
+            } as unknown as SessionEvent);
         }
     }
 

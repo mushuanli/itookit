@@ -410,62 +410,8 @@ export interface DeleteResult {
     deletedBranches: string[];
 }
 
-
-/**
- * UI 事件类型
- *
- * @deprecated Migrate to canonical {@link import('@itookit/common').AgentEvent} from '@itookit/common'.
- * This ~38-event vocabulary will be retired in favor of the canonical AgentEvent schema.
- */
-export type OrchestratorEvent =
-    | { type: 'session_start'; payload: SessionGroup }
-    | { type: 'session_cleared'; payload: Record<string, never> }
-    | { type: 'node_start'; payload: { parentId?: string; node: ExecutionNode } }
-    | { type: 'node_update'; payload: { nodeId: string; chunk?: string; field?: 'thought' | 'output'; metaInfo?: any } }
-    | { type: 'node_status'; payload: { nodeId: string; status: NodeStatus; result?: any } }
-    | { type: 'request_input'; payload: { nodeId: string; schema: any } }
-    | { type: 'finished'; payload: {
-        sessionId: string;
-        metadata?: object;
-        /** 本次任务的 token 使用统计（普通模式为估算，harness 模式为精确值） */
-        tokenUsage?: SessionTokenUsage;
-    } }
-    | { type: 'error'; payload: { message: string; error?: Error; code?: string | number } }
-    | { type: 'messages_deleted'; payload: { deletedIds: string[] } }
-    | { type: 'message_edited'; payload: { messageId: string; newContent: string; newPersistedNodeId?: string } }
-    // 重新生成事件
-    | { type: 'regenerate_started'; payload: {
-        sourceId: string;
-        newUserNodeId: string;
-        branchName: string;
-        agentId: string;
-        trigger: RegenerateTrigger;
-    }}
-    | { type: 'regenerate_completed'; payload: {
-        branchName: string;
-        assistantNodeId: string;
-    }}
-    // 分支事件
-    | { type: 'sibling_switch'; payload: { messageId: string; newIndex: number; total: number } }
-    | { type: 'branch_created'; payload: { sourceId: string; newId: string; branchName?: string } }
-    | { type: 'branch_renamed'; payload: { nodeId: string; newName: string } }
-    | { type: 'branch_deleted'; payload: { deletedIds: string[] } }
-    | { type: 'branch_switched'; payload: { fromBranch: string; toBranch: string } }
-    // Agent Loop — content block 粒度事件（Claude Code 路径使用）
-    | { type: 'stream:thinking:start'; payload: { nodeId: string } }
-    | { type: 'stream:thinking:stop';  payload: { nodeId: string; signature?: string } }
-    | { type: 'stream:content:start';  payload: { nodeId: string } }
-    | { type: 'stream:content:stop';   payload: { nodeId: string } }
-    | { type: 'tool:queued';   payload: { nodeId: string; name: string; toolId: string } }
-    | { type: 'tool:input';    payload: { nodeId: string; toolId: string; chunk: string } }
-    | { type: 'tool:running';  payload: { nodeId: string; toolId: string } }
-    | { type: 'tool:success';  payload: { nodeId: string; toolId: string; result: string } }
-    | { type: 'tool:error';    payload: { nodeId: string; toolId: string; error: string } }
-    | { type: 'turn:start';    payload: { sessionId: string; turn: number } }
-    | { type: 'turn:end';      payload: { sessionId: string; turn: number; usage?: SessionTokenUsage } };
-
 // ═══════════════════════════════════════════════════════════════
-// LLM 2.0 canonical event types (S7: replacing OrchestratorEvent)
+// LLM 2.0 canonical event types (S7)
 // ═══════════════════════════════════════════════════════════════
 
 import type { AgentEvent } from '@itookit/common';
@@ -516,13 +462,23 @@ export type SessionStructuralEvent =
     | { type: 'messages:cleared'; payload: Record<string, never> }
     | { type: 'messages:deleted'; payload: { deletedIds: string[] } }
     | { type: 'message:edited';  payload: { messageId: string; newContent: string; newPersistedNodeId?: string } }
-    | { type: 'sibling:switched'; payload: { messageId: string; newIndex: number; total: number } };
+    | { type: 'sibling:switched'; payload: { messageId: string; newIndex: number; total: number } }
+    | { type: 'regenerate_started'; payload: {
+        sourceId: string;
+        newUserNodeId: string;
+        branchName: string;
+        agentId: string;
+        trigger: string;
+    }}
+    | { type: 'regenerate_completed'; payload: {
+        branchName: string;
+        assistantNodeId: string;
+    }};
 
 /**
  * Unified session event vocabulary.
  *
- * Replaces the deprecated {@link OrchestratorEvent}. Consumers should
- * handle all three layers:
+ * Consumers should handle all three layers:
  *   - Canonical AgentEvent (from ILoop executors)
  *   - MessageProjectionEvent (engine-level tree projection)
  *   - SessionStructuralEvent (branch / message lifecycle)
