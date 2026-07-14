@@ -100,6 +100,8 @@ async function runForward<T>(
 export class HarnessLoopExecutor implements ILoop {
     readonly mode = 'harness';
 
+    private lastCtx: LoopContext | null = null;
+
     constructor(
         private readonly llm: ILLMService,
         private readonly toolService: IToolService,
@@ -113,6 +115,7 @@ export class HarnessLoopExecutor implements ILoop {
     ) {}
 
     async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
+        this.lastCtx = ctx;
         const sessionId = ctx.sessionId;
         const cwd = typeof process !== 'undefined' ? process.cwd() : '/';
 
@@ -472,8 +475,30 @@ export class HarnessLoopExecutor implements ILoop {
     }
 
     async *resume(_checkpoint: string): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
-        yield { type: 'error', error: { message: 'HarnessLoopExecutor.resume() not yet implemented', code: 'NOT_IMPLEMENTED' } };
-        return [];
+        const ctx = this.lastCtx;
+        if (!ctx) {
+            yield {
+                type: 'error',
+                error: { message: 'HarnessLoopExecutor.resume(): no prior context. Call run() first.', code: 'NO_CONTEXT' },
+            };
+            return [];
+        }
+
+        // Reconstruct state from the Log. Since turn boundaries are persisted,
+        // we count completed turns and re-enter the loop with full history.
+        const allMessages = await ctx.log.fold(ctx.ref);
+        const completedTurns = allMessages.filter(m => m.role === 'assistant').length;
+
+        if (completedTurns === 0) {
+            return yield* this.run(ctx);
+        }
+
+        // Re-run with full log state. The LLM sees the complete conversation
+        // history from log.fold() and continues naturally.
+        // Full harness state reconstruction (BudgetController usage, tier state,
+        // ContextManager seeding with all messages, turn count tracking) is
+        // deferred to a follow-up.
+        return yield* this.run(ctx);
     }
 }
 

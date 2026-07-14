@@ -168,6 +168,7 @@ function createNoopLog(): ILog {
                 checkpoint: async () => {},
                 flush: async () => {},
                 current: () => null,
+                restore: async () => null,
             };
         },
         async merge(): Promise<string> { return ''; },

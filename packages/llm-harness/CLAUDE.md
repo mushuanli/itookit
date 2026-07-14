@@ -46,21 +46,19 @@ HarnessLoopExecutor (AsyncGenerator, ILoop, mode='harness'):
 
 | 组件 | 状态 |
 |---|---|
-| `AgentLoopExecutor` | 保持（向后兼容 AgentDeviceDriver） — while-true 循环，S10 已有 ILoop 替代 |
-| `HarnessLoopExecutor` | ★ 新增（S10） — AsyncGenerator ILoop 实现，可注册为 mode='harness' |
-| `harness-middleware.ts` | ★ 新增（S10） — 6 个 ILoopMiddleware 工厂（budget/error-recovery/hitl/back-pressure/compression/skills），包装现有 harness 服务类 |
-| `LLMServiceAdapter` | ★ ILLMService 的标准实现，`llm-engine` 通过此入口调用 LLM |
-| `HITLQueue` | 保持，S10 已通过 `onToolCalls` + `ControlDirective.pause` 实现暂停协议 |
-| `BudgetController` 等 | ★ S10 已适配为 `ILoopMiddleware`（见 `harness-middleware.ts`） |
-| `BackPressureValidator` | 保持 — 高级 shell 验证逻辑保留；简单工具错误反馈已迁移至 `createBackPressureMiddleware`（S5） |
+| `AgentLoopExecutor` | 保持（向后兼容 AgentDeviceDriver） |
+| `HarnessLoopExecutor` | AsyncGenerator ILoop 实现，`resume()` 支持 |
+| `harness-middleware.ts` | 6 个 ILoopMiddleware 工厂（budget/error-recovery/hitl/back-pressure/compression/skills） |
+| `LLMServiceAdapter` | ILLMService 的标准实现 |
+| `HITLQueue` | 保持，通过 `onToolCalls` + `ControlDirective.pause` 实现暂停协议 |
+| `BudgetController` 等 | 已适配为 `ILoopMiddleware`（见 `harness-middleware.ts`） |
+| `BackPressureValidator` | 保持 — 高级 shell 验证逻辑保留 |
 
 ## Harness Call from llm-engine
 
-S9 (2026-07-14): `HarnessAdapter` 已删除（`adapters/harness-adapter.ts` + `core/harness-context.ts`）。`IAgentRuntime` 不再通过 `HarnessAdapter` 包装——llm-engine 的 `TaskRunner` 直接通过 ILoop 路径（`executeAgentLoopTask` → `drive()`）执行。
+`HarnessLoopExecutor` 实现 `ILoop` 接口，通过 `initializeLLMEngine({ executors: [new HarnessLoopExecutor(...)] })` 注册为 `mode='harness'`。使用 ContextManager、BudgetController（六维预算）、四层压缩、五类错误恢复、Shell 反压等完整能力，通过 6 个 `ILoopMiddleware` 组合实现。
 
-S10 (2026-07-14): `HarnessLoopExecutor` 实现 `ILoop` 接口（AsyncGenerator），通过 `initializeLLMEngine({ executors: [new HarnessLoopExecutor(...)] })` 注册为 `mode='harness'`。它使用 ContextManager（系统 prompt + 消息管理）、BudgetController（六维预算）、四层压缩、五类错误恢复、Shell 反压等完整能力，通过 6 个 `ILoopMiddleware` 组合实现。
-
-`createHarness().llmService`（`LLMServiceAdapter` 实例）通过 `initializeLLMEngine({ llmService })` 注入，成为 engine 侧 `LoopExecutor` / `chatExecutor` / `LiteSubAgentRouter` 的统一 LLM 入口。
+`createHarness().llmService`（`LLMServiceAdapter` 实例）通过 `initializeLLMEngine({ llmService })` 注入，成为 engine 侧的统一 LLM 入口。
 
 详情: [关键设计 + ToolMeta + 扩展点](./doc/design-details.md)
 

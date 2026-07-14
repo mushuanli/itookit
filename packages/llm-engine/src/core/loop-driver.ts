@@ -8,7 +8,7 @@
 // This is the single implementation of the pause/resume protocol.
 // HITL / inject / abort / crash-recovery all flow through this function.
 
-import type { LoopContext, Signal, AgentEvent, Turn } from '@itookit/common';
+import type { LoopContext, Signal, AgentEvent, Turn, ILoop, TurnId } from '@itookit/common';
 
 export interface SessionActor {
     emit(event: AgentEvent): void;
@@ -35,6 +35,36 @@ export class LoopAbortedError extends Error {
  *   - NotFound: the next yield point will detect the abort
  */
 export async function drive(
+    gen: AsyncGenerator<AgentEvent, Turn[], Signal | undefined>,
+    session: SessionActor,
+    ctx: LoopContext,
+): Promise<Turn[]> {
+    return driveGenerator(gen, session, ctx);
+}
+
+/**
+ * Resume a paused ILoop from a checkpoint TurnId.
+ *
+ * Calls `loop.resume(checkpoint)` to reconstruct coroutine state from the Log,
+ * then drives the resulting generator identically to `drive()`.
+ *
+ * This is the single path for HITL-resume and crash-recovery — the ILoop
+ * implementation is responsible for reconstructing its state from the Log
+ * at the checkpoint boundary.
+ */
+export async function resumeDrive(
+    loop: ILoop,
+    checkpoint: TurnId,
+    session: SessionActor,
+    ctx: LoopContext,
+): Promise<Turn[]> {
+    const gen = loop.resume(checkpoint);
+    return driveGenerator(gen, session, ctx);
+}
+
+// ─── Internal: shared generator driving logic ─────────────────────
+
+async function driveGenerator(
     gen: AsyncGenerator<AgentEvent, Turn[], Signal | undefined>,
     session: SessionActor,
     ctx: LoopContext,

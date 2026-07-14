@@ -1,10 +1,7 @@
 // @file: llm-engine/adapters/tool-executor-bridge.ts
 //
 // Adapts IToolService (from @itookit/tools) to IToolExecutor (from llm-engine agent-loop-strategy).
-// This bridge allows ClaudeCodeStrategy and UnifiedLoopStrategy to use the full tools package.
-//
-// Without this bridge, ClaudeCodeStrategy defaults to nullToolExecutor which returns
-// "[Tool X is not available in this session]" for every tool call.
+// This bridge allows ILoop-based executors to use the full tools package.
 
 import type { IToolService, ToolMeta } from '@itookit/common';
 import type { IToolExecutor } from '../session/agent-loop-strategy';

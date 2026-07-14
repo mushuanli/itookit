@@ -28,7 +28,7 @@ export { ENGINE_DEFAULTS, STORAGE_KEYS } from './core/constants';
 // ── LLM 2.0: 协程式 Loop + Executor 注册表 ──────────────────────────
 
 export { ExecutorRegistry, getExecutorRegistry, resetExecutorRegistry } from './core/executor-registry';
-export { drive, LoopAbortedError, notSupported } from './core/loop-driver';
+export { drive, resumeDrive, LoopAbortedError, notSupported } from './core/loop-driver';
 export type { SessionActor as ISessionActor } from './core/loop-driver';
 export { SessionActor } from './core/session-actor';
 export { composeMiddleware } from './core/middleware-pipeline';

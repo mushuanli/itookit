@@ -62,6 +62,7 @@ export interface DraftArea {
     checkpoint(pause: PauseRequest): Promise<void>;
     flush(turn: Turn): Promise<void>;
     current(): Turn | null;
+    restore(): Promise<Turn | null>;
 }
 
 export type Ref = string;

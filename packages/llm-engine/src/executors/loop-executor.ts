@@ -51,6 +51,7 @@ export class LoopExecutor implements ILoop {
     readonly mode: string;
 
     private readonly pipeline: MiddlewarePipeline;
+    private lastCtx: LoopContext | null = null;
 
     constructor(
         mode: string,
@@ -61,9 +62,44 @@ export class LoopExecutor implements ILoop {
     }
 
     async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
+        this.lastCtx = ctx;
+        return yield* this.executeLoop(ctx, 0, []);
+    }
+
+    async *resume(_checkpoint: string): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
+        const ctx = this.lastCtx;
+        if (!ctx) {
+            yield {
+                type: 'error',
+                error: { message: 'Cannot resume: no prior context. Call run() first.', code: 'NO_CONTEXT' },
+            };
+            return [];
+        }
+
+        // Reconstruct state from the Log.
+        // Since turn boundaries are persisted, we count completed turns
+        // and re-enter the loop at the next turn.
+        const messages = await ctx.log.fold(ctx.ref);
+        const completedTurns = messages.filter(m => m.role === 'assistant').length;
+
+        return yield* this.executeLoop(ctx, completedTurns, []);
+    }
+
+    /**
+     * Internal loop execution — shared by run() and resume().
+     *
+     * @param ctx          Loop context (stored during run())
+     * @param startTurn    Starting turn number (0 for fresh, N for resume)
+     * @param initialTurns Previously completed turns (empty for fresh)
+     */
+    private async *executeLoop(
+        ctx: LoopContext,
+        startTurn: number,
+        initialTurns: Turn[],
+    ): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
         const maxTurns = 50;
-        let turnNumber = 0;
-        const turns: Turn[] = [];
+        let turnNumber = startTurn;
+        const turns: Turn[] = [...initialTurns];
         let signal: Signal | undefined;
 
         try {
@@ -429,16 +465,6 @@ export class LoopExecutor implements ILoop {
         }
 
         return turns;
-    }
-
-    async *resume(_checkpoint: string): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
-        // Resume is not supported for loop executor in initial S3.
-        // Full resume support requires checkpoint serialization (S4).
-        const { notSupported } = await import('../core/loop-driver');
-        notSupported(this.mode);
-        // unreachable — satisfy AsyncGenerator return type
-        yield { type: 'error' as any, error: { message: 'unreachable' } };
-        return [];
     }
 }
 

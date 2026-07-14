@@ -26,7 +26,7 @@ import { formatErrorMessage } from '../utils/error-formatter';
 import { log } from '../utils/logger';
 // ── LLM 2.0: Executor-driven dispatch ──
 import { ExecutorRegistry, getExecutorRegistry } from '../core/executor-registry';
-import { drive, LoopAbortedError } from '../core/loop-driver';
+import { drive, resumeDrive, LoopAbortedError } from '../core/loop-driver';
 import { SessionActor } from '../core/session-actor';
 import { ChatEngineLog } from '../persistence/chat-engine-log';
 import type { LoopContext } from '@itookit/common';
@@ -414,9 +414,20 @@ export class TaskRunner {
                 signal: task.abortController.signal,
             };
 
-            // ── Execute via drive() ──────────────────────────────────────
-            const gen = executor.run(loopCtx);
-            const turns = await drive(gen, actor, loopCtx);
+            // ── Execute via drive() or resumeDrive() ──────────────────────
+            // Check for a persisted checkpoint from a previous session
+            const restoredTurn = await logAdapter.draft().restore();
+            let turns: import('@itookit/common').Turn[];
+
+            if (restoredTurn) {
+                // Resume from checkpoint — the ILoop reconstructs its state
+                // from the Log and continues from where it left off.
+                turns = await resumeDrive(executor, restoredTurn.id, actor, loopCtx);
+            } else {
+                // Fresh execution
+                const gen = executor.run(loopCtx);
+                turns = await drive(gen, actor, loopCtx);
+            }
 
             // ── Persist ──────────────────────────────────────────────────
             await finalize();
