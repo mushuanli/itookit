@@ -12,3 +12,6 @@ export * from './back-pressure';
 export * from './loop';
 export * from './goal';
 export * from './sub-agent';
+export * from './command-bus';
+export * from './extension';
+export * from './session';

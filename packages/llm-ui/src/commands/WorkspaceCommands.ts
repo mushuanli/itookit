@@ -12,7 +12,7 @@ export class CopyAllCommand extends Command {
     protected severity: ErrorSeverity = 'toast';
 
     protected async execute(): Promise<void> {
-        const md = this.ctx.sessionManager.exportToMarkdown();
+        const md = await this.ctx.commands.execute<string>('session.export');
         await navigator.clipboard.writeText(md);
     }
 }
@@ -29,7 +29,7 @@ export class PrintCommand extends Command<{ title: string; engine: any; nodeId?:
     protected async execute({ title, engine, nodeId }: {
         title: string; engine: any; nodeId?: string;
     }): Promise<void> {
-        const md = this.ctx.sessionManager.exportToMarkdown();
+        const md = await this.ctx.commands.execute<string>('session.export');
         if (!this.printService) {
             this.printService = new LLMPrintService(engine, nodeId);
         }

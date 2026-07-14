@@ -2,7 +2,7 @@
 
 import type { BranchItem } from '../domain/types';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
-import type { SessionManager } from '@itookit/llm-engine';
+import type { ICommandBus } from '@itookit/common';
 import type { ErrorHandler } from '../utils/errorHandler';
 
 /**
@@ -19,7 +19,7 @@ export class BranchStore implements IBranchStore {
     private refreshPromise: Promise<BranchItem[]> | null = null;
 
     constructor(
-        private sessionManager: SessionManager,
+        private commands: ICommandBus,
         private errorHandler: ErrorHandler
     ) {}
 
@@ -44,7 +44,7 @@ export class BranchStore implements IBranchStore {
 
     private async doRefresh(): Promise<BranchItem[]> {
         const raw = await this.errorHandler.wrapWithFallback(
-            () => this.sessionManager.listBranches(), [],
+            () => this.commands.execute<Array<{ name: string; headNodeId: string; isCurrent: boolean }>>('vcs.branch.list'), [],
             'Refresh branches', 'warn'
         );
 

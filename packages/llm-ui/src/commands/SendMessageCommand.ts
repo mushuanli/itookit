@@ -4,7 +4,7 @@ import { Command } from './Command';
 import { Toast } from '@itookit/common';
 import { ErrorHandler } from '../utils/errorHandler';
 import type { ChatOverrides } from '../domain/types';
-import type { SessionOrigin, HistoryPolicy } from '@itookit/llm-engine';
+import type { SessionGroup, SessionOrigin, HistoryPolicy } from '@itookit/llm-engine';
 
 export interface SendMessageParams {
     text: string;
@@ -24,7 +24,7 @@ export class SendMessageCommand extends Command<SendMessageParams> {
 
         const savedText = text;
         const savedAgentId = agentId;
-        const sessionsBeforeSend = this.ctx.sessionManager.getSessions().map(s => s.id);
+        const sessionsBeforeSend = (await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions')).map(s => s.id);
 
         this.ctx.chatInput.setLoading(true);
         this.ctx.historyView.scrollToBottom(true);
@@ -49,11 +49,16 @@ export class SendMessageCommand extends Command<SendMessageParams> {
                 return;
             }
 
-            await this.ctx.sessionManager.sendMessage(
-                finalText.trim(), files, agentId || 'default', overrides, origin, historyPolicy
-            );
+            await this.ctx.commands.execute('session.send', {
+                text: finalText.trim(),
+                files,
+                agentId: agentId || 'default',
+                overrides,
+                origin,
+                historyPolicy,
+            });
         } catch (error: any) {
-            this.rollbackFailedSend(sessionsBeforeSend);
+            await this.rollbackFailedSend(sessionsBeforeSend);
             this.ctx.chatInput.restoreInput(savedText, savedAgentId);
 
             const classified = ErrorHandler.classifyError(error);
@@ -66,18 +71,20 @@ export class SendMessageCommand extends Command<SendMessageParams> {
         }
     }
 
-    private rollbackFailedSend(sessionsBeforeSend: string[]): void {
-        const sessionsAfterFail = this.ctx.sessionManager.getSessions().map(s => s.id);
+    private async rollbackFailedSend(sessionsBeforeSend: string[]): Promise<void> {
+        const sessionsAfterFail = (await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions')).map(s => s.id);
         const ghostIds = sessionsAfterFail.filter(id => !sessionsBeforeSend.includes(id));
 
         if (ghostIds.length > 0) {
             this.ctx.historyView.removeMessages(ghostIds, false);
             for (const id of ghostIds) {
                 try {
-                    this.ctx.sessionManager.deleteMessage(id, { deleteAssociatedResponses: true });
+                    this.ctx.commands.execute('session.delete-message', {
+                        messageId: id,
+                        options: { deleteAssociatedResponses: true },
+                    });
                 } catch (_) { /* silent */ }
             }
         }
-
     }
 }

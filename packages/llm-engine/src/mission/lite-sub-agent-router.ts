@@ -39,6 +39,7 @@ const noopDraftArea = {
     flush: async () => {},
     current: () => null,
     restore: async () => null,
+    setCurrent: () => {},
 };
 
 function createInMemoryLog(initialMessages: ChatMessage[]): ILog {

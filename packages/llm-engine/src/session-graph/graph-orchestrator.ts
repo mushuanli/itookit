@@ -124,7 +124,7 @@ function createNoopLog(): ILog {
             return { create: () => '', move: () => {}, tag: () => {}, delete: () => {}, list: () => [] };
         },
         draft(): DraftArea {
-            return { checkpoint: async () => {}, flush: async () => {}, current: () => null, restore: async () => null };
+            return { checkpoint: async () => {}, flush: async () => {}, current: () => null, restore: async () => null, setCurrent: () => {} };
         },
         async merge(): Promise<string> { return ''; },
         async rebase(): Promise<string> { return ''; },

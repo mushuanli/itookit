@@ -71,6 +71,8 @@ export class TaskRunner {
     private maxQueueSize: number;
     private llmService: ILLMService | null = null;
     private executorRegistry: ExecutorRegistry;
+    /** Tracks the active SessionActor per session for signal routing. */
+    private readonly activeActors = new Map<string, import('../core/session-actor').SessionActor>();
     /** @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware. */
 
     constructor(
@@ -103,6 +105,19 @@ export class TaskRunner {
     /** Get the executor registry for external configuration. */
     getExecutorRegistry(): ExecutorRegistry {
         return this.executorRegistry;
+    }
+
+    /**
+     * Push a signal to the active SessionActor for a given session.
+     * Used by SessionManager.signal({ type: 'respond' }) to route HITL responses.
+     */
+    respondToSignal(sessionId: string, signal: import('@itookit/common').Signal): void {
+        const actor = this.activeActors.get(sessionId);
+        if (actor) {
+            actor.pushSignal(signal);
+        } else {
+            log.warn('respondToSignal: no active actor for session', { sessionId });
+        }
     }
 
     async submit(input: TaskInput, runtime: SessionRuntime): Promise<string> {
@@ -397,6 +412,9 @@ export class TaskRunner {
                 }
             });
 
+            // Register actor so signal(respond) can route to it
+            this.activeActors.set(sessionId, actor);
+
             // ── Build LoopContext ──────────────────────────────────────────
             const branchRef = 'main';
 
@@ -428,6 +446,9 @@ export class TaskRunner {
                 const gen = executor.run(loopCtx);
                 turns = await drive(gen, actor, loopCtx);
             }
+
+            // Unregister actor once execution completes
+            this.activeActors.delete(sessionId);
 
             // ── Persist ──────────────────────────────────────────────────
             await finalize();
@@ -494,6 +515,7 @@ export class TaskRunner {
             this.callbacks.onUnread(sessionId);
 
         } catch (error: any) {
+            this.activeActors.delete(sessionId);
             if (error instanceof LoopAbortedError) {
                 this.callbacks.onStatusChange(sessionId, 'aborted');
             } else {

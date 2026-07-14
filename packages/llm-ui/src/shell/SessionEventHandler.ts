@@ -1,7 +1,9 @@
 // @file: llm-ui/shell/SessionEventHandler.ts
 
-import type { SessionEvent, RegistryEvent, SessionManager } from '@itookit/llm-engine';
+import type { SessionEvent, RegistryEvent } from '@itookit/llm-engine';
+import type { ICommandBus } from '@itookit/common';
 import { Toast, t } from '@itookit/common';
+import type { SessionGroup } from '@itookit/llm-engine';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
 import type { IBranchPresenter } from '../domain/ports/IBranchPresenter';
@@ -49,7 +51,7 @@ const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
 // ----------------------------------------------------------------
 
 export interface SessionEventHandlerDeps {
-    sessionManager: SessionManager;
+    commands: ICommandBus;
     historyView: IHistoryPresenter;
     bus: IEditorEventBus;
     branchIndicator: IBranchPresenter;
@@ -80,9 +82,11 @@ export class SessionEventHandler {
     constructor(private deps: SessionEventHandlerDeps) {
         // 一次性绑定，避免每次事件都创建闭包
         this.executors = {
-            renderFull:     () => this.deps.historyView.renderFull(
-                this.deps.sessionManager.getSessions()
-            ),
+            renderFull:     () => {
+                this.deps.commands.execute<SessionGroup[]>('session.get-sessions').then(sessions => {
+                    this.deps.historyView.renderFull(sessions);
+                }).catch(() => {});
+            },
             refreshBranch:  () => this.deps.branchStore.refresh(),
             refreshNav:     () => this.deps.onNavRefresh(),
             flashIndicator: () => this.deps.branchIndicator.flash(),

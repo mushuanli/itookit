@@ -34,6 +34,14 @@ export { SessionActor } from './core/session-actor';
 export { composeMiddleware } from './core/middleware-pipeline';
 export type { MiddlewarePipeline } from './core/middleware-pipeline';
 
+// ── LLM 2.0: Plugin system (CommandBus + ExtensionRegistry) ─────────
+
+export { CommandBus } from './core/command-bus';
+export { ExtensionRegistry } from './core/extension-registry';
+export { createSessionPlugin } from './plugins/session-plugin';
+export { createVcsPlugin } from './plugins/vcs-plugin';
+export { createHistoryPlugin } from './plugins/history-plugin';
+
 // ── LLM 2.0: Executors (ILoop implementations) ──────────────────────
 
 export { chatExecutor, LoopExecutor, createLoopExecutor } from './executors';
@@ -205,6 +213,11 @@ import { initializePromptHistory } from './services/prompt-history-service';
 import { getExecutorRegistry } from './core/executor-registry';
 import { chatExecutor } from './executors/chat-executor';
 import { createLoopExecutor } from './executors/loop-presets';
+import { CommandBus } from './core/command-bus';
+import { ExtensionRegistry } from './core/extension-registry';
+import { createSessionPlugin } from './plugins/session-plugin';
+import { createVcsPlugin } from './plugins/vcs-plugin';
+import { createHistoryPlugin } from './plugins/history-plugin';
 
 /**
  * Engine 初始化选项
@@ -242,6 +255,7 @@ export interface EngineInitOptions {
  */
 export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
     sessionManager: SessionManager;
+    commandBus: CommandBus;
 }> {
     // S8: initializeKernel inlined — kernel package eliminated.
     // PluginManager was removed in S6a; KernelInitOptions.plugins/config were vestigial.
@@ -282,5 +296,22 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
         sessionManager.setLLMService(options.llmService);
     }
 
-    return { sessionManager };
+    // ── Plugin system: CommandBus + ExtensionRegistry ───────────────
+    const commandBus = new CommandBus();
+    const extensionRegistry = new ExtensionRegistry();
+
+    // Register built-in plugins (dogfooding: they use the same public ICommandBus API)
+    extensionRegistry.register(createSessionPlugin(sessionManager));
+    extensionRegistry.register(createVcsPlugin(sessionManager));
+    extensionRegistry.register(createHistoryPlugin(sessionManager));
+
+    // Activate all plugins with a minimal ExtensionContext
+    // ILog is not session-specific at engine init time; plugins that need it
+    // should accept sessionManager as dependency (as the built-in plugins do).
+    extensionRegistry.activate({
+        log: null as any, // session-specific ILog injected per-session in future iterations
+        commands: commandBus,
+    });
+
+    return { sessionManager, commandBus };
 }

@@ -99,6 +99,13 @@ export interface AgentEventAwaitSignal {
     request: PauseRequest;
 }
 
+// ─── Pause resolved ──────────────────────────────────────────────────
+
+export interface AgentEventSignalResolved {
+    type: 'signal_resolved';
+    requestId: string;
+}
+
 // ─── Log mutations (UI re-projects on these) ─────────────────────────
 
 export interface AgentEventLogAppended {
@@ -121,6 +128,51 @@ export interface AgentEventLogRefRenamed {
     newName: string;
 }
 
+export interface AgentEventLogRefCreated {
+    type: 'log:ref_created';
+    ref: string;
+}
+
+export interface AgentEventLogRefDeleted {
+    type: 'log:ref_deleted';
+    ref: string;
+}
+
+export interface AgentEventLogMerged {
+    type: 'log:merged';
+    mergeTurnId: string;
+    refs: string[];
+}
+
+// ─── Budget / context middleware events ──────────────────────────────
+
+export interface AgentEventBudgetWarning {
+    type: 'budget:warning';
+    remaining: number;
+    total: number;
+}
+
+export interface AgentEventBudgetExhausted {
+    type: 'budget:exhausted';
+    used: number;
+    total: number;
+}
+
+export interface AgentEventContextCompressed {
+    type: 'context:compressed';
+    originalTokens: number;
+    reducedTokens: number;
+}
+
+// ─── Goal progress ───────────────────────────────────────────────────
+
+export interface AgentEventGoalProgress {
+    type: 'goal:progress';
+    done: number;
+    total: number;
+    goalId: string;
+}
+
 // ─── Canonical union ─────────────────────────────────────────────────
 
 export type AgentEvent =
@@ -136,6 +188,14 @@ export type AgentEvent =
     | AgentEventToolSuccess
     | AgentEventToolError
     | AgentEventAwaitSignal
+    | AgentEventSignalResolved
     | AgentEventLogAppended
     | AgentEventLogRefMoved
-    | AgentEventLogRefRenamed;
+    | AgentEventLogRefRenamed
+    | AgentEventLogRefCreated
+    | AgentEventLogRefDeleted
+    | AgentEventLogMerged
+    | AgentEventBudgetWarning
+    | AgentEventBudgetExhausted
+    | AgentEventContextCompressed
+    | AgentEventGoalProgress;

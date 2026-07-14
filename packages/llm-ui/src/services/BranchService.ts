@@ -2,7 +2,8 @@
 
 import type { BranchItem } from '../domain/types';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
-import type { SessionManager } from '@itookit/llm-engine';
+import type { ICommandBus } from '@itookit/common';
+import type { SessionGroup } from '@itookit/llm-engine';
 
 export class BranchError extends Error {
     constructor(
@@ -20,7 +21,7 @@ export class BranchError extends Error {
  *
  * 职责：
  * - 参数校验（统一入口，消除 Slash/Command/FloatingNav 中的重复）
- * - 调用 SessionManager 执行引擎操作
+ * - 通过 ICommandBus 执行引擎操作
  * - 不涉及 UI（无 DOM、无 Toast）
  *
  * Commands 和 Slash 回调通过此服务操作分支，
@@ -28,7 +29,7 @@ export class BranchError extends Error {
  */
 export class BranchService {
     constructor(
-        private sessionManager: SessionManager,
+        private commands: ICommandBus,
         private branchStore: IBranchStore,
     ) {}
 
@@ -37,15 +38,15 @@ export class BranchService {
     // ── Create ──────────────────────────────────────────
 
     async create(sourceNodeId: string, name: string): Promise<void> {
-        const branchPoint = this.findBranchPoint(sourceNodeId);
-        const newNodeId = await this.sessionManager.createBranch(branchPoint, {
-            name: name || undefined,
-            copyContent: true,
+        const branchPoint = await this.findBranchPoint(sourceNodeId);
+        const newNodeId = await this.commands.execute<string>('vcs.branch.create', {
+            branchNodeId: branchPoint,
+            options: { name: name || undefined, copyContent: true },
         });
-        const branches = await this.sessionManager.listBranches();
+        const branches = await this.commands.execute<Array<{ name: string; headNodeId: string; isCurrent: boolean }>>('vcs.branch.list');
         const branch = branches.find(b => b.headNodeId === newNodeId);
         if (branch) {
-            await this.sessionManager.switchBranch(branch.name);
+            await this.commands.execute('vcs.branch.switch', { branchName: branch.name });
         }
     }
 
@@ -56,7 +57,7 @@ export class BranchService {
         const target = this.branchStore.current.find(b => b.name === branchName);
         if (!target) throw new BranchError('NOT_FOUND', `Branch "${branchName}" does not exist`);
         if (target.isCurrent) throw new BranchError('ALREADY_CURRENT', `Already on branch "${branchName}"`);
-        await this.sessionManager.switchBranch(branchName);
+        await this.commands.execute('vcs.branch.switch', { branchName });
     }
 
     /** 大小写不敏感匹配切换（供 Slash 命令 / FloatingNav 使用） */
@@ -69,10 +70,10 @@ export class BranchService {
 
     /** 按 headNodeId 切换 */
     async switchById(headNodeId: string): Promise<void> {
-        const branches = await this.sessionManager.listBranches();
+        const branches = await this.commands.execute<Array<{ name: string; headNodeId: string }>>('vcs.branch.list');
         const branch = branches.find(b => b.headNodeId === headNodeId);
         if (!branch) throw new BranchError('NOT_FOUND', `No branch found for head node: ${headNodeId}`);
-        await this.sessionManager.switchBranch(branch.name);
+        await this.commands.execute('vcs.branch.switch', { branchName: branch.name });
     }
 
     /** 按偏移量切换（快捷键 Cmd+Shift+[/] ) */
@@ -83,7 +84,7 @@ export class BranchService {
         const len = cachedBranches.length;
         const newIndex = ((currentIndex + offset) % len + len) % len;
         if (newIndex === currentIndex) return;
-        await this.sessionManager.switchBranch(cachedBranches[newIndex].name);
+        await this.commands.execute('vcs.branch.switch', { branchName: cachedBranches[newIndex].name });
     }
 
     // ── Rename ─────────────────────────────────────────
@@ -93,7 +94,7 @@ export class BranchService {
         const lower = oldName.toLowerCase();
         const target = this.branchStore.current.find(b => b.name.toLowerCase() === lower);
         if (!target) throw new BranchError('NOT_FOUND', `Branch "${oldName}" does not exist`);
-        await this.sessionManager.renameBranch(target.name, newName);
+        await this.commands.execute('vcs.branch.rename', { oldName: target.name, newName });
     }
 
     // ── Delete ─────────────────────────────────────────
@@ -104,13 +105,13 @@ export class BranchService {
         if (!target) throw new BranchError('NOT_FOUND', `Branch "${branchName}" does not exist`);
         if (target.isCurrent) throw new BranchError('CANNOT_DELETE_CURRENT',
             'Cannot delete the current branch. Switch to another branch first.');
-        await this.sessionManager.deleteBranch(target.name, true);
+        await this.commands.execute('vcs.branch.delete', { branchName: target.name, cascade: true });
     }
 
     // ── Helpers ────────────────────────────────────────
 
-    private findBranchPoint(sourceNodeId: string): string {
-        const sessions = this.sessionManager.getSessions();
+    private async findBranchPoint(sourceNodeId: string): Promise<string> {
+        const sessions = await this.commands.execute<SessionGroup[]>('session.get-sessions');
         const idx = sessions.findIndex(s => s.id === sourceNodeId);
         if (idx === -1) return sourceNodeId;
         const session = sessions[idx];

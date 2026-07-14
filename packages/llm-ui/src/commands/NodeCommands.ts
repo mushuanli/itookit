@@ -24,28 +24,29 @@ function findInTree(node: any, targetId: string): boolean {
  * 重新生成命令（统一 retry + resend）
  *
  * 行为：
- * - 如果目标是 assistant 消息 → regenerate(assistantId)
- * - 如果目标是 user 消息 → regenerateFromUser(userId)
+ * - 如果目标是 assistant 消息 → session.regenerate
+ * - 如果目标是 user 消息 → session.regenerate-from-user
  * - 两者都会创建分支，不破坏现有对话路径
  */
 export class RegenerateCommand extends Command<{ nodeId: string }> {
     protected readonly name = 'Regenerate';
 
     protected async execute({ nodeId }: { nodeId: string }): Promise<void> {
-        const sessions = this.ctx.sessionManager.getSessions();
+        const sessions = await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions');
         const session = findSession(sessions, nodeId);
         if (!session) throw new Error('Message not found');
 
-        const check = this.ctx.sessionManager.canRegenerate(session.id);
+        const check = await this.ctx.commands.execute<{ allowed: boolean; reason?: string }>(
+            'session.can-regenerate', { messageId: session.id }
+        );
         if (!check.allowed) throw new Error(check.reason || 'Cannot regenerate');
 
         this.ctx.chatInput.setLoading(true);
 
-        // 根据角色自动路由
         if (session.role === 'user') {
-            await this.ctx.sessionManager.regenerateFromUser(session.id);
+            await this.ctx.commands.execute('session.regenerate-from-user', { userMessageId: session.id });
         } else {
-            await this.ctx.sessionManager.regenerate(session.id);
+            await this.ctx.commands.execute('session.regenerate', { assistantId: session.id });
         }
     }
 }
@@ -54,22 +55,24 @@ export class DeleteMessageCommand extends Command<{ nodeId: string }> {
     protected readonly name = 'Delete Message';
 
     protected async execute({ nodeId }: { nodeId: string }): Promise<void> {
-        const previewIds = this.previewDeletionIds(nodeId);
+        const previewIds = await this.previewDeletionIds(nodeId);
         this.ctx.historyView.removeMessages(previewIds, true);
 
         try {
-            await this.ctx.sessionManager.deleteMessage(nodeId, {
-                deleteAssociatedResponses: true,
+            await this.ctx.commands.execute('session.delete-message', {
+                messageId: nodeId,
+                options: { deleteAssociatedResponses: true },
             });
         } catch (e) {
             // 删除失败：回滚 UI
-            this.ctx.historyView.renderFull(this.ctx.sessionManager.getSessions());
+            const sessions = await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions');
+            this.ctx.historyView.renderFull(sessions);
             throw e;
         }
     }
 
-    private previewDeletionIds(nodeId: string): string[] {
-        const sessions = this.ctx.sessionManager.getSessions();
+    private async previewDeletionIds(nodeId: string): Promise<string[]> {
+        const sessions = await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions');
         const ids = [nodeId];
         const idx = sessions.findIndex(s => s.id === nodeId);
         if (idx === -1) return ids;
@@ -88,12 +91,16 @@ export class EditAndRetryCommand extends Command<{ nodeId: string }> {
     protected readonly name = 'Edit and Retry';
 
     protected async execute({ nodeId }: { nodeId: string }): Promise<void> {
-        const session = this.ctx.sessionManager.getSessions().find(s => s.id === nodeId);
+        const sessions = await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions');
+        const session = sessions.find(s => s.id === nodeId);
         if (!session || session.role !== 'user') return;
 
         this.ctx.chatInput.setLoading(true);
-        // ✅ 使用 commitEdit 替代 editMessage
-        await this.ctx.sessionManager.commitEdit(nodeId, session.content || '', true);
+        await this.ctx.commands.execute('session.commit-edit', {
+            messageId: nodeId,
+            newContent: session.content || '',
+            autoRerun: true,
+        });
     }
 }
 
@@ -104,7 +111,8 @@ export class SiblingSwitchCommand extends Command<{ nodeId: string; direction: '
     protected async execute({ nodeId, direction }: {
         nodeId: string; direction: 'prev' | 'next';
     }): Promise<void> {
-        const session = this.ctx.sessionManager.getSessions().find(s => s.id === nodeId);
+        const sessions = await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions');
+        const session = sessions.find(s => s.id === nodeId);
         if (!session) return;
 
         const currentIndex = session.siblingIndex ?? 0;
@@ -114,7 +122,7 @@ export class SiblingSwitchCommand extends Command<{ nodeId: string; direction: '
             : Math.min(total - 1, currentIndex + 1);
 
         if (newIndex !== currentIndex) {
-            await this.ctx.sessionManager.switchToSibling(nodeId, newIndex);
+            await this.ctx.commands.execute('session.switch-sibling', { messageId: nodeId, siblingIndex: newIndex });
         }
     }
 }

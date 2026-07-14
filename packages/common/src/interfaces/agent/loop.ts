@@ -63,6 +63,8 @@ export interface DraftArea {
     flush(turn: Turn): Promise<void>;
     current(): Turn | null;
     restore(): Promise<Turn | null>;
+    /** Set the in-flight turn so crash-resume knows the current turn boundary. */
+    setCurrent(turn: Turn): void;
 }
 
 export type Ref = string;

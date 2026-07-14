@@ -4,7 +4,7 @@ import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent,
     EditorEventCallback, CollapseExpandResult, Toast,
 } from '@itookit/common';
-import type { ILLMService } from '@itookit/common';
+import type { ILLMService, ICommandBus } from '@itookit/common';
 
 import {
     IChatEngine, IAgentConfigService, SessionManager, getSessionManager,
@@ -73,6 +73,11 @@ export interface LLMEditorOptions extends Omit<EditorOptions, 'sessionEngine'> {
      * 由组合根注入，供图片 OCR 等工具型调用使用。未提供时 OCR 入口不显示。
      */
     llmService?: ILLMService;
+    /**
+     * LLM 2.0: 插件命令总线 — 由 initializeLLMEngine() 返回。
+     * 所有高层操作通过 commands.execute('session.*') / 'vcs.*' 调用。
+     */
+    commandBus?: ICommandBus;
 }
 
 /**
@@ -104,6 +109,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     // === Services ===
     private sessionManager: SessionManager;
+    private commandBus!: ICommandBus;
     private sessionService!: SessionService;
     private stateService!: StateService;
     private assetService!: AssetService;
@@ -225,19 +231,25 @@ export class LLMWorkspaceEditor implements IEditor {
             onRenderError: (err) => this.historyView?.renderError(err),
             onResetLoading: () => this.chatInput?.setLoading(false),
         });
+        // LLM 2.0: CommandBus from initializeLLMEngine, or noop fallback
+        this.commandBus = this.options.commandBus ?? {
+            register: () => ({ dispose: () => {} }),
+            execute: async (name) => { throw new Error(`CommandBus not provided; cannot execute: ${name}`); },
+            list: () => [],
+        };
     }
 
     private initServices(): void {
-        this.sessionService = new SessionService(this.engine, this.sessionManager);
+        this.sessionService = new SessionService(this.engine, this.commandBus);
         this.stateService = new StateService(this.engine);
         this.assetService = new AssetService(this.engine);
         this.stateManager = new StateManager(
             this.stateService, this.sessionManager, this.options.nodeId!,
             (id) => validateAgentId(this.agentService, id)
         );
-        this.branchStore = new BranchStore(this.sessionManager, this.errorHandler);
-        this.branchService = new BranchService(this.sessionManager, this.branchStore);
-        this.navDataBuilder = new NavDataBuilder(this.sessionManager);
+        this.branchStore = new BranchStore(this.commandBus, this.errorHandler);
+        this.branchService = new BranchService(this.commandBus, this.branchStore);
+        this.navDataBuilder = new NavDataBuilder(this.commandBus);
         this.fileSearchService = new FileSearchService(this.engine);
         if (this.options.llmService) {
             this.ocrService = new OcrService(this.options.llmService);
@@ -270,7 +282,7 @@ export class LLMWorkspaceEditor implements IEditor {
         // Create NavigationHelper now that historyView is available
         this.navigation = new NavigationHelper({
             domCache: this.domCache,
-            sessionManager: this.sessionManager,
+            commands: this.commandBus,
             historyView: this.historyView,
             bus: this.bus,
             branchStore: this.branchStore,
@@ -285,7 +297,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // StatusIndicator → IStatusPresenter
         this.statusIndicator = new StatusIndicatorView(
-            this.domCache, this.sessionManager,
+            this.domCache, () => this.sessionManager.isGenerating(),
             (loading) => this.chatInput?.setLoading(loading)
         );
 
@@ -307,7 +319,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId, overrides) =>
                 this.sendCommand.run({ text, files, agentId, overrides }),
-            onStop: () => this.sessionManager.abort(),
+            onStop: () => this.commandBus.execute('session.abort').catch(() => {}),
             initialAgents,
             initialConfig: {
                 text: savedUIState?.input_text || '',
@@ -371,7 +383,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private initEventHandler(): void {
         this.sessionEventHandler = new SessionEventHandler({
-            sessionManager: this.sessionManager,
+            commands: this.commandBus,
             historyView: this.historyView,
             bus: this.bus,
             branchIndicator: this.branchIndicator,
@@ -387,6 +399,8 @@ export class LLMWorkspaceEditor implements IEditor {
     private buildCommandContext(): CommandContext {
         return {
             sessionManager: this.sessionManager,
+            commands: this.commandBus,
+            session: this.sessionManager,
             sessionService: this.sessionService,
             stateService: this.stateService,
             assetService: this.assetService,
@@ -469,13 +483,13 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private handleContentChange(id: string, content: string, _type: 'user' | 'node'): void {
-        this.sessionManager.updateDraft(id, content);
+        this.commandBus.execute('session.update-draft', { messageId: id, newContent: content }).catch(() => {});
         this.emit('change');
     }
 
     private async handleCommitEdit(id: string, content: string): Promise<void> {
         await this.errorHandler.wrap(async () => {
-            await this.sessionManager.commitEdit(id, content, false);
+            await this.commandBus.execute('session.commit-edit', { messageId: id, newContent: content, autoRerun: false });
             this.emit('change');
         }, 'Commit edit', 'warn');
     }
@@ -589,7 +603,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // Check if this session was interrupted (VFS meta.status === 'running')
         checkSessionInterrupted(snapshot, (interruptedAssistantId) => {
-            this.sessionManager.regenerate(interruptedAssistantId).catch(() => {
+            this.commandBus.execute('session.regenerate', { assistantId: interruptedAssistantId }).catch(() => {
                 Toast.info('重新执行失败，请手动重试');
             });
         });
@@ -672,7 +686,7 @@ export class LLMWorkspaceEditor implements IEditor {
     public updateNodeId(newNodeId: string): void {
         this.options = { ...this.options, nodeId: newNodeId };
         this.stateManager.updateNodeId(newNodeId);
-        this.sessionManager.updateBoundNodeId(newNodeId);
+        this.commandBus.execute('session.update-node', { newNodeId }).catch(() => {});
     }
 
     async waitUntilReady(): Promise<void> {
@@ -680,6 +694,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     getText(): string {
+        // Synchronous snapshot — use cached session state; commandBus is async
         return JSON.stringify({
             sessionId: this.currentSessionId,
             title: this.currentTitle,
@@ -715,7 +730,7 @@ export class LLMWorkspaceEditor implements IEditor {
     getMode() { return 'edit' as const; }
     async switchToMode(): Promise<void> { }
     async getHeadings() { return []; }
-    async getSearchableText() { return this.sessionManager.exportToMarkdown(); }
+    async getSearchableText() { return this.commandBus.execute<string>('session.export').catch(() => ''); }
     async getSummary() { return null; }
     async navigateTo(): Promise<void> { }
     async search() { return []; }
@@ -772,7 +787,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.slashPlugin = new SlashCommandPlugin(
             buildSlashCallbacks({
-                sessionManager: this.sessionManager,
+                commands: this.commandBus,
                 chatInput: this.chatInput,
                 bus: this.bus,
                 historyView: this.historyView,
@@ -865,7 +880,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.bus?.destroy();
 
         // 9. 引擎解绑
-        this.sessionManager.unbindSession();
+        this.commandBus.execute('session.unbind').catch(() => {});
 
         // 10. DOM 清理
         this.container.innerHTML = '';

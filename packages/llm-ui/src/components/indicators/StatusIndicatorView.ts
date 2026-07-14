@@ -2,7 +2,6 @@
 
 import type { IStatusPresenter } from '../../domain/ports/IStatusPresenter';
 import type { DOMCache } from '../common';
-import type { SessionManager } from '@itookit/llm-engine';
 
 interface StatusInfo {
     cls: string;
@@ -21,7 +20,7 @@ const DEFAULT_STATUS: StatusInfo = { cls: '--idle', text: 'Ready', loading: fals
 
 /**
  * 实现 IStatusPresenter
- * 
+ *
  * 内部 DOM 操作对 Shell 完全不可见。
  */
 export class StatusIndicatorView implements IStatusPresenter {
@@ -30,7 +29,8 @@ export class StatusIndicatorView implements IStatusPresenter {
 
     constructor(
         private domCache: DOMCache,
-        private sessionManager: SessionManager,
+        /** Synchronous getter for isGenerating — avoids async dependency on CommandBus. */
+        private isGenerating: () => boolean,
         private onLoadingChange: (loading: boolean) => void
     ) { }
 
@@ -65,7 +65,7 @@ export class StatusIndicatorView implements IStatusPresenter {
         const el = this.domCache.byId('llm-bg-indicator');
         if (!el) return;
 
-        const isCurrentGen = this.sessionManager.isGenerating();
+        const isCurrentGen = this.isGenerating();
         const otherRunning = isCurrentGen ? Math.max(0, payload.running - 1) : payload.running;
         const total = otherRunning + payload.queued;
 

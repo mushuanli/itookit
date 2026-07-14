@@ -7,7 +7,8 @@ import { Toast, showConfirmDialog, formatDefaultFileTitle } from '@itookit/commo
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IEditorEventBus } from '../domain/events';
-import type { SessionManager } from '@itookit/llm-engine';
+import type { ICommandBus } from '@itookit/common';
+import type { SessionGroup } from '@itookit/llm-engine';
 import type { IAgentConfigService } from '@itookit/common';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { BranchService } from '../services/BranchService';
@@ -18,12 +19,10 @@ import type { SwitchBranchByOffsetCommand } from '../commands/BranchCommands';
 import type { EditorHostContext } from '@itookit/common';
 import type { IChatEngine } from '@itookit/llm-engine';
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
-import type { SkillInvocation } from '../domain/types';
-import { executeSkillInvocation } from './HarnessIntegration';
 import { getAgentDisplayName, sanitizeFileName } from './AgentProvider';
 
 export interface SlashCommandRouterDeps {
-    sessionManager: SessionManager;
+    commands: ICommandBus;
     chatInput: IChatInputPresenter;
     bus: IEditorEventBus;
     historyView: IHistoryPresenter;
@@ -81,13 +80,14 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
         },
 
         onRetry: () => {
-            const sessions = deps.sessionManager.getSessions();
-            const lastAssistant = [...sessions].reverse()
-                .find(s => s.role === 'assistant');
-            if (lastAssistant) {
-                const cmd = deps.nodeCommands.get('regenerate');
-                cmd?.run({ nodeId: lastAssistant.id });
-            }
+            deps.commands.execute<SessionGroup[]>('session.get-sessions').then(sessions => {
+                const lastAssistant = [...sessions].reverse()
+                    .find(s => s.role === 'assistant');
+                if (lastAssistant) {
+                    const cmd = deps.nodeCommands.get('regenerate');
+                    cmd?.run({ nodeId: lastAssistant.id });
+                }
+            }).catch(() => {});
         },
 
         onContinue: () => {
@@ -95,21 +95,22 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
         },
 
         onReedit: async () => {
-            const sessions = deps.sessionManager.getSessions();
+            const sessions = await deps.commands.execute<SessionGroup[]>('session.get-sessions');
             const lastUser = [...sessions].reverse().find(s => s.role === 'user');
             if (!lastUser) {
                 Toast.info('No messages to reedit');
                 return;
             }
             const originalText = lastUser.content || '';
-            await deps.sessionManager.deleteMessage(lastUser.id, {
-                deleteAssociatedResponses: true,
+            await deps.commands.execute('session.delete-message', {
+                messageId: lastUser.id,
+                options: { deleteAssociatedResponses: true },
             });
             deps.chatInput.restoreInput(originalText);
         },
 
         onDeleteLast: async () => {
-            const sessions = deps.sessionManager.getSessions();
+            const sessions = await deps.commands.execute<SessionGroup[]>('session.get-sessions');
             if (sessions.length === 0) {
                 Toast.info('No messages to delete');
                 return;
@@ -131,7 +132,7 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
         },
 
         onClear: async () => {
-            const sessions = deps.sessionManager.getSessions();
+            const sessions = await deps.commands.execute<SessionGroup[]>('session.get-sessions');
             if (sessions.length === 0) return;
 
             const confirmed = await showConfirmDialog(

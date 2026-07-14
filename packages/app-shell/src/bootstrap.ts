@@ -317,7 +317,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     logIO('core services');
 
     logStep('初始化 LLM 引擎…');
-    const { sessionManager } = await initializeLLMEngine({
+    const { sessionManager, commandBus } = await initializeLLMEngine({
         agentService,
         sessionEngine,
         maxConcurrent:       20,
@@ -346,7 +346,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // this is the single place that knows both the harness and the connection list.
     const connections = await agentService.getConnections();
     const visionConnExists = connections.some(c => c.id === 'conn-volcengine-vision');
-    const llmFactory = createLLMFactory(agentService, visionConnExists ? { llmService: harness.llmService } : undefined);
+    const llmFactory = createLLMFactory(agentService, visionConnExists ? { llmService: harness.llmService, commandBus } : { commandBus });
     const agentFactory    = createAgentEditorFactory(agentService);
 
     // Skills workspace: VFSUIShell list (SkillsEngine) + form editor (SkillSettingsEditor)

@@ -1,18 +1,19 @@
 // @file: llm-ui/services/NavDataBuilder.ts
 
-import { SessionGroup, SessionManager } from '@itookit/llm-engine';
+import { SessionGroup } from '@itookit/llm-engine';
+import type { ICommandBus } from '@itookit/common';
 import { ChatNavItem, NavPanelData } from '../domain/ports/INavigationPresenter';
 import { BranchItem, CollapseStateMap } from '../domain/types';
 import { getPreviewText } from '../utils/textUtils';
 
 /**
  * 导航面板数据构建器
- * 
+ *
  * 职责：将 SessionManager 的数据转换为 FloatingNavPanel 需要的格式
  * 单一职责：数据转换，不涉及 UI
  */
 export class NavDataBuilder {
-    constructor(private sessionManager: SessionManager) { }
+    constructor(private commands: ICommandBus) { }
 
     async build(
         sessions: SessionGroup[],
@@ -23,7 +24,7 @@ export class NavDataBuilder {
         let items: ChatNavItem[];
 
         try {
-            const branchTree = await this.sessionManager.getBranchTree();
+            const branchTree = await this.commands.execute<any>('vcs.branch.tree');
             items = this.buildFromTree(sessions, collapseStates, branchTree);
         } catch (e) {
             console.warn('[NavDataBuilder] Branch tree unavailable, using flat list');

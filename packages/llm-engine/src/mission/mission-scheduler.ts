@@ -169,6 +169,7 @@ function createNoopLog(): ILog {
                 flush: async () => {},
                 current: () => null,
                 restore: async () => null,
+                setCurrent: () => {},
             };
         },
         async merge(): Promise<string> { return ''; },

@@ -25,7 +25,7 @@ import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { IChatEngine, BranchTreeNode } from '../persistence/types';
 import type { IAgentConfigService } from '../services/agent-service';
-import type { ILLMService } from '@itookit/common';
+import type { ILLMService, ISession, Signal, AgentEvent } from '@itookit/common';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
 import { TaskRunner } from './task-runner';
@@ -49,7 +49,83 @@ import { log } from '../utils/logger';
  * - 分支操作（创建/切换/删除/重命名）
  * - 事件分发协调
  */
-export class SessionManager {
+export class SessionManager implements ISession {
+    // === ISession: id returns the currently bound session ===
+    get id(): string {
+        return this.boundSessionId ?? '';
+    }
+
+    /** ISession.signal() — route signals to the appropriate SessionManager operations. */
+    signal(s: Signal): void {
+        switch (s.type) {
+            case 'send':
+                // Fire-and-forget; errors are surfaced via events()
+                this.sendMessage(s.text, s.attachments as any ?? [], '', undefined, undefined, undefined).catch(e => {
+                    this.eventBus.emitSession(this.boundSessionId ?? '', { type: 'error', error: { message: String(e) } });
+                });
+                break;
+            case 'abort':
+                this.abort();
+                break;
+            case 'inject':
+                // Inject text as a follow-up user message into an active run
+                this.sendMessage(s.text, [], '', undefined, 'inject' as any, undefined).catch(() => {});
+                break;
+            case 'respond':
+                // Deliver a response to a pending await_signal (HITL / plan confirm)
+                this.taskRunner.respondToSignal(this.boundSessionId ?? '', s);
+                break;
+            case 'navigate':
+                // Branch navigation — switch to the named ref
+                this.switchBranch(s.ref).catch(e => {
+                    log.warn('signal(navigate) failed', { ref: s.ref, error: e });
+                });
+                break;
+        }
+    }
+
+    /**
+     * ISession.events() — outbound AgentEvent stream for the current session.
+     *
+     * Converts the callback-based SessionEventBus into an AsyncIterable using
+     * a simple push-based queue. Each subscriber gets an independent generator.
+     */
+    async *events(): AsyncIterableIterator<AgentEvent> {
+        const sessionId = this.boundSessionId;
+        if (!sessionId) return;
+
+        const queue: AgentEvent[] = [];
+        let notifyResolve: (() => void) | null = null;
+        let closed = false;
+
+        const unsub = this.onEvent((event) => {
+            if (closed) return;
+            // Forward only flat canonical AgentEvent variants
+            if ('type' in event && !('payload' in event)) {
+                queue.push(event as unknown as AgentEvent);
+                notifyResolve?.();
+                notifyResolve = null;
+            }
+        });
+
+        const waitForEvent = () => new Promise<void>((res) => { notifyResolve = res; });
+
+        try {
+            while (!closed) {
+                while (queue.length > 0) {
+                    yield queue.shift()!;
+                }
+                if (!this.boundSessionId || this.boundSessionId !== sessionId) {
+                    break;
+                }
+                await waitForEvent();
+            }
+        } finally {
+            closed = true;
+            unsub();
+        }
+    }
+
     // === 全局会话存储 ===
     private sessions = new Map<string, SessionRuntime>();
     private states = new Map<string, SessionState>();
@@ -923,6 +999,11 @@ export class SessionManager {
             turnId: newNodeId,
         });
 
+        this.eventBus.emitSession(sessionId, {
+            type: 'log:ref_created',
+            ref: options?.name ?? newNodeId,
+        });
+
         return newNodeId;
     }
 
@@ -999,6 +1080,11 @@ export class SessionManager {
         this.eventBus.emitSession(sessionId, {
             type: 'messages:deleted',
             payload: { deletedIds },
+        });
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'log:ref_deleted',
+            ref: branchName,
         });
     }
 

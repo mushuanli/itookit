@@ -5,7 +5,8 @@
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { INavigationPresenter, NavPanelData } from '../domain/ports/INavigationPresenter';
 import type { IEditorEventBus } from '../domain/events';
-import type { SessionManager } from '@itookit/llm-engine';
+import type { ICommandBus } from '@itookit/common';
+import type { SessionGroup } from '@itookit/llm-engine';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { NavDataBuilder } from '../services/NavDataBuilder';
 import type { DOMCache } from '../components/common/DOMCache';
@@ -15,7 +16,7 @@ import { Toast } from '@itookit/common';
 
 export interface NavigationDeps {
     domCache: DOMCache;
-    sessionManager: SessionManager;
+    commands: ICommandBus;
     historyView: IHistoryPresenter;
     bus: IEditorEventBus;
     branchStore: IBranchStore;
@@ -74,19 +75,20 @@ export class NavigationHelper {
     }
 
     navigateToUserChat(direction: 'prev' | 'next'): void {
-        const sessions = this.deps.sessionManager.getSessions();
         const currentId = this.findCurrentVisibleSession();
         if (!currentId) return;
 
-        const idx = sessions.findIndex(s => s.id === currentId);
-        const step = direction === 'prev' ? -1 : 1;
+        this.deps.commands.execute<SessionGroup[]>('session.get-sessions').then(sessions => {
+            const idx = sessions.findIndex(s => s.id === currentId);
+            const step = direction === 'prev' ? -1 : 1;
 
-        for (let i = idx + step; i >= 0 && i < sessions.length; i += step) {
-            if (sessions[i].role === 'user') {
-                this.deps.bus.emit('nav:scrollTo', { sessionId: sessions[i].id });
-                return;
+            for (let i = idx + step; i >= 0 && i < sessions.length; i += step) {
+                if (sessions[i].role === 'user') {
+                    this.deps.bus.emit('nav:scrollTo', { sessionId: sessions[i].id });
+                    return;
+                }
             }
-        }
+        }).catch(() => {});
     }
 
     navigateUnfolded(direction: 'prev' | 'next'): void {
@@ -136,8 +138,9 @@ export class NavigationHelper {
     }
 
     private async buildNavData(): Promise<NavPanelData> {
+        const sessions = await this.deps.commands.execute<SessionGroup[]>('session.get-sessions');
         return this.deps.navDataBuilder.build(
-            this.deps.sessionManager.getSessions(),
+            sessions,
             this.deps.historyView.getCollapseStates(),
             this.deps.branchStore.current,
             this.findCurrentVisibleSession() ?? undefined

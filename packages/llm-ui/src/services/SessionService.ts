@@ -1,6 +1,7 @@
 // @file: llm-ui/services/SessionService.ts
 
-import { IChatEngine, SessionManager, SessionSnapshot } from '@itookit/llm-engine';
+import { IChatEngine, SessionSnapshot } from '@itookit/llm-engine';
+import type { ICommandBus } from '@itookit/common';
 import { FSAlreadyExistsError } from '@itookit/common';
 
 export interface SessionLoadResult {
@@ -16,7 +17,7 @@ export interface SessionLoadResult {
 export class SessionService {
     constructor(
         private engine: IChatEngine,
-        private sessionManager: SessionManager
+        private commands: ICommandBus,
     ) { }
 
     /**
@@ -27,7 +28,7 @@ export class SessionService {
      */
     async ensureReady(nodeId: string, title: string): Promise<string> {
         const sessionId = await this.getOrCreateSessionId(nodeId, title);
-        await this.sessionManager.bindSession(nodeId, sessionId);
+        await this.commands.execute('session.bind', { nodeId, sessionId });
         return sessionId;
     }
 
@@ -38,7 +39,7 @@ export class SessionService {
         const sessionId = knownSessionId ?? await this.getOrCreateSessionId(nodeId, defaultTitle);
 
         // 绑定会话并获取快照
-        const snapshot = await this.sessionManager.bindSession(nodeId, sessionId);
+        const snapshot = await this.commands.execute<SessionSnapshot>('session.bind', { nodeId, sessionId });
 
         // 加载标题
         const title = await this.getSessionTitle(nodeId, defaultTitle);
@@ -108,7 +109,7 @@ export class SessionService {
      * 获取会话设置
      */
     async getSessionSettings() {
-        return await this.sessionManager.getSessionSettings();
+        return await this.commands.execute('session.get-settings');
     }
 
     /**
@@ -120,6 +121,6 @@ export class SessionService {
      * regardless (the file already exists and will be updated in-place).
      */
     async saveSessionSettings(settings: any): Promise<void> {
-        await this.sessionManager.saveSessionSettings(settings);
+        await this.commands.execute('session.save-settings', settings);
     }
 }

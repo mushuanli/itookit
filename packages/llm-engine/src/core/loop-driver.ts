@@ -95,7 +95,12 @@ async function driveGenerator(
 
         const ev = result.value;
 
-        if (ev.type === 'await_signal') {
+        if (ev.type === 'turn:start') {
+            // Track the in-flight turn so DraftArea can persist the turn boundary
+            // and crash-resume can reconstruct state correctly.
+            ctx.log.draft().setCurrent({ id: ev.turnId, parents: [], payload: [], meta: { createdAt: Date.now(), origin: 'loop' } });
+            session.emit(ev);
+        } else if (ev.type === 'await_signal') {
             // Persist the pause point so crash-resume can recover
             await ctx.log.draft().checkpoint(ev.request);
 
