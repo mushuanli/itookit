@@ -14,4 +14,5 @@ export {
     createHITLMiddleware,
     createSkillsMiddleware,
     createBackPressureMiddleware,
+    createTruncationDetectionMiddleware,
 } from './loop-middleware';

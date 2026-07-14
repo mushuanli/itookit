@@ -16,6 +16,7 @@ import {
     createHITLMiddleware,
     createSkillsMiddleware,
     createBackPressureMiddleware,
+    createTruncationDetectionMiddleware,
 } from './loop-middleware';
 
 export interface LoopPresetConfig {
@@ -50,15 +51,17 @@ export function createLoopExecutor(
     }));
 
     if (preset === 'full') {
-        // Full preset: all 6 middleware in order
+        // Full preset: all 7 middleware in order
         middlewares.push(createCompressionMiddleware());
         middlewares.push(createErrorRecoveryMiddleware(config?.errorRecovery));
         middlewares.push(createHITLMiddleware());
         middlewares.push(createSkillsMiddleware());
         middlewares.push(createBackPressureMiddleware());
+        middlewares.push(createTruncationDetectionMiddleware());
     } else {
-        // Lite preset: just error recovery
+        // Lite preset: error recovery + truncation detection
         middlewares.push(createErrorRecoveryMiddleware(config?.errorRecovery));
+        middlewares.push(createTruncationDetectionMiddleware());
     }
 
     const mode = preset === 'full' ? 'loop:full' : 'loop';

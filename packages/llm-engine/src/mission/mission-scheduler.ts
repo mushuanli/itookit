@@ -1,286 +1,139 @@
 // @file: llm-engine/src/mission/mission-scheduler.ts
 // Deterministic scheduling loop for Mission Orchestration.
 //
+// S5: Replaced 500ms polling while(true) with DependencyScheduler + reconcile().
+//     Verifier agent replaced by createLLMJudgePredicate.
+//     Sub-agent execution wrapped in SubAgentLoopAdapter (ILoop).
+//
 // Responsibilities:
-//   - Read plan.json → find ready todos → dispatch to sub-agent router
-//   - After execution: write results → run verifier → update todo status
-//   - Propagate skipped on failure; terminate when all todos are in terminal state
+//   - Read plan.json → create Goal → reconcile(goal, loopFactory, predicate)
+//   - DependencyScheduler replaces getReadyTodos() + propagateSkipped()
+//   - llm-judge predicate replaces runVerifier()
 
 import type {
     ISubAgentRouter,
     SubAgentTask,
     IResultPersistenceService,
-    IAgentLookup,
-    IHITLQueue,
     MissionPlan,
-    TodoItem,
-    VerifierVerdict,
+    ILLMService,
+    ILoop,
+    LoopContext,
+    GoalNode,
+    ILog,
+    Turn,
+    Ref,
+    RefStore,
+    DraftArea,
+    AssemblyStrategy,
+    ChatMessage,
+    AgentEvent,
+    Signal,
+    IToolService,
 } from '@itookit/common';
-import { generateUUID } from '@itookit/common';
 import { TodoStateManager } from './todo-state';
-
-const POLL_INTERVAL_MS = 500;
-
-const VERIFIER_SYSTEM_PROMPT = `You are a task verifier. Review the executor's output and determine if the task is complete.
-
-Respond with a JSON object (no markdown):
-{
-  "verdict": "done" | "retry" | "hitl",
-  "feedback": "<required when retry: specific instructions for the executor>",
-  "hitlContext": "<required when hitl: context for human decision>",
-  "hitlQuestion": "<required when hitl: question for human>"
-}
-
-Rules:
-- "done": task objective fully met
-- "retry": result incomplete or incorrect — provide actionable feedback
-- "hitl": ambiguous or requires human judgement — provide enough context`;
+import { createMissionGoal } from './mission-goal-factory';
+import { createSubAgentLoopAdapter } from './sub-agent-loop-adapter';
+import { reconcile } from '../core/goal/reconciler';
+import { createLLMJudgePredicate } from '../core/goal/predicates';
 
 export interface MissionSchedulerOptions {
     todoState: TodoStateManager;
     router: ISubAgentRouter;
     resultPersistence: IResultPersistenceService;
-    agentLookup: IAgentLookup;
-    hitlQueue?: IHITLQueue;
+    /** Required for llm-judge predicate (S5). */
+    llmService: ILLMService;
+    /** Connection ID for the verifier LLM. Defaults to first agent pool entry. */
+    verifierConnectionId?: string;
 }
 
 export class MissionScheduler {
     private readonly todoState: TodoStateManager;
     private readonly router: ISubAgentRouter;
     private readonly resultPersistence: IResultPersistenceService;
-    private readonly agentLookup: IAgentLookup;
-    private readonly hitlQueue?: IHITLQueue;
+    private readonly llmService: ILLMService;
+    private readonly verifierConnectionId?: string;
 
     constructor(opts: MissionSchedulerOptions) {
         this.todoState = opts.todoState;
         this.router = opts.router;
         this.resultPersistence = opts.resultPersistence;
-        this.agentLookup = opts.agentLookup;
-        this.hitlQueue = opts.hitlQueue;
+        this.llmService = opts.llmService;
+        this.verifierConnectionId = opts.verifierConnectionId;
     }
 
     /**
-     * Main scheduling loop. Runs until mission is complete, all todos are terminal,
-     * or the signal is aborted.
+     * Main scheduling loop using reconcile() (S5).
+     *
+     * Replaces the old while(true) + 500ms polling with event-driven
+     * DependencyScheduler dispatch.
      */
     async run(missionId: string, signal: AbortSignal): Promise<void> {
-        while (!signal.aborted) {
-            const plan = await this.todoState.getPlan(missionId);
-            if (!plan) throw new Error(`Mission ${missionId} not found`);
+        const plan = await this.todoState.getPlan(missionId);
+        if (!plan) throw new Error(`Mission ${missionId} not found`);
 
-            if (this.todoState.isComplete(plan)) break;
+        if (this.todoState.isComplete(plan)) return;
 
-            const ready = this.todoState.getReadyTodos(plan);
-            if (ready.length === 0) {
-                // Wait for running/verifying/blocked todos to resolve
-                await delay(POLL_INTERVAL_MS);
-                continue;
-            }
+        // Convert plan to Goal
+        const goal = createMissionGoal(plan);
+        const verifierConnId = this.verifierConnectionId ?? plan.config.agentPoolIds[0] ?? 'default';
 
-            // Mark todos as running atomically before dispatching
-            await this.todoState.markTodosRunning(missionId, ready.map(t => t.id));
+        // Build a minimal no-op ILog — Mission uses VFS persistence via
+        // TodoStateManager, not the ILoop's Log append/fold mechanism.
+        const noopLog: ILog = createNoopLog();
 
-            // Execute all ready todos — parallel ones concurrently, serial ones sequentially
-            const parallelTodos = ready.filter(t => t.canParallel);
-            const serialTodos   = ready.filter(t => !t.canParallel);
+        // Build a minimal no-op IToolService — Mission sub-agents call
+        // router.delegate() directly, not the ILoop tool execution path.
+        const noopTools: IToolService = createNoopToolService();
 
-            const parallelRuns = parallelTodos.map(todo =>
-                this.executeTodo(todo, plan, signal).catch(err => {
-                    console.error(`[MissionScheduler] Todo ${todo.id} failed:`, err);
-                }),
-            );
+        const predicate = createLLMJudgePredicate(this.llmService, verifierConnId);
 
-            // Serial todos run one by one
-            const serialRun = (async () => {
-                for (const todo of serialTodos) {
-                    if (signal.aborted) break;
-                    await this.executeTodo(todo, plan, signal).catch(err => {
-                        console.error(`[MissionScheduler] Todo ${todo.id} failed:`, err);
-                    });
-                }
-            })();
-
-            await Promise.all([...parallelRuns, serialRun]);
-
-            // After a batch, propagate skipped to todos whose deps failed
-            await this.todoState.propagateSkipped(missionId);
-        }
-    }
-
-    // ── Private ──────────────────────────────────────────────
-
-    private async executeTodo(todo: TodoItem, plan: MissionPlan, signal: AbortSignal): Promise<void> {
-        const missionId = plan.id;
-
-        try {
-            // Build sub-agent task with agent config + mission context
-            const task = await this.buildTask(todo, plan);
-
-            // Run executor agent
-            const result = await this.router.delegate(task);
-
-            if (signal.aborted) return;
-
-            const summary = result.success ? result.summary : `[FAILED] ${result.error ?? result.summary}`;
-
-            // Persist results
-            const { resultPath, summaryPath } = await this.resultPersistence.saveResult(
-                missionId, todo.id, result.summary, summary,
-            );
-            await this.resultPersistence.appendJournal(
-                missionId,
-                `[${todo.title}] Executor ${result.success ? 'done' : 'failed'} (${result.turns} turns)`,
-            );
-
-            // Update todo to verifying
-            await this.todoState.updateTodo(missionId, todo.id, {
-                status: 'verifying',
-                resultPath,
-                summaryPath,
+        const loopFactory = (node: GoalNode): ILoop => {
+            return createSubAgentLoopAdapter({
+                router: this.router,
+                buildTask: (_prompt, _context) => this.buildTaskForNode(node, plan),
             });
-
-            // Run verifier
-            await this.runVerifier(todo, plan, summary, signal);
-
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            const newRetryCount = todo.retryCount + 1;
-            const exhausted = newRetryCount > todo.maxRetries;
-            await this.todoState.updateTodo(missionId, todo.id, {
-                status: exhausted ? 'failed' : 'pending',
-                retryCount: newRetryCount,
-                feedback: `Execution error: ${msg}`,
-            });
-            await this.resultPersistence.appendJournal(
-                missionId,
-                `[${todo.title}] Execution error: ${msg}${exhausted ? ' — FAILED (max retries)' : ' — will retry'}`,
-            );
-        }
-    }
-
-    private async runVerifier(
-        todo: TodoItem,
-        plan: MissionPlan,
-        executorSummary: string,
-        signal: AbortSignal,
-    ): Promise<void> {
-        const missionId = plan.id;
-
-        // Build verifier system prompt
-        const verifierSystemPrompt = plan.config.verifierAgentId
-            ? await this.getAgentSystemPrompt(plan.config.verifierAgentId) ?? VERIFIER_SYSTEM_PROMPT
-            : VERIFIER_SYSTEM_PROMPT;
-
-        const verifierInstruction = [
-            `Task: ${todo.title}`,
-            `Description: ${todo.description}`,
-            '',
-            `Executor output:`,
-            executorSummary,
-            '',
-            `Evaluate whether this task is complete. Respond with JSON only.`,
-        ].join('\n');
-
-        const verifierTask: SubAgentTask = {
-            instruction: verifierInstruction,
-            systemPrompt: verifierSystemPrompt,
-            connectionId: plan.config.verifierAgentId
-                ? await this.getAgentConnectionId(plan.config.verifierAgentId)
-                : undefined,
-            responseFormat: 'JSON object with verdict, feedback, hitlContext, hitlQuestion fields',
-            maxTurns: 3,
-            allowedTools: [],
         };
 
-        let verdict: VerifierVerdict = { verdict: 'done' };
-        try {
-            const verifierResult = await this.router.delegate(verifierTask);
-            verdict = parseVerdict(verifierResult.summary);
-        } catch {
-            // If verifier fails, assume done to avoid infinite loop
-        }
+        const actorFactory = (_nodeId: string) => createNoopSessionActor();
 
-        if (signal.aborted) return;
+        const baseCtx: Omit<LoopContext, 'ref'> = {
+            sessionId: missionId,
+            log: noopLog,
+            llm: this.llmService,
+            tools: noopTools,
+            middlewares: [],
+            signal,
+        };
 
-        if (verdict.verdict === 'done') {
-            await this.todoState.updateTodo(missionId, todo.id, { status: 'done' });
-            await this.resultPersistence.appendJournal(missionId, `[${todo.title}] ✓ Verified done`);
+        // Run reconcile — event-driven, no polling
+        await reconcile(goal, loopFactory, predicate, actorFactory, baseCtx, {
+            maxConcurrent: plan.config.maxParallelAgents,
+        });
 
-        } else if (verdict.verdict === 'retry') {
-            const newRetryCount = todo.retryCount + 1;
-            const exhausted = newRetryCount > todo.maxRetries;
-            await this.todoState.updateTodo(missionId, todo.id, {
-                status: exhausted ? 'failed' : 'pending',
-                retryCount: newRetryCount,
-                feedback: verdict.feedback ?? 'Retry without specific feedback',
-            });
-            await this.resultPersistence.appendJournal(
-                missionId,
-                `[${todo.title}] Verifier: retry (${newRetryCount}/${todo.maxRetries})${exhausted ? ' — FAILED' : ''}`,
-            );
-
-        } else if (verdict.verdict === 'hitl' && this.hitlQueue) {
-            const requestId = generateUUID();
-            await this.todoState.updateTodo(missionId, todo.id, {
-                status: 'blocked',
-                hitlRequestId: requestId,
-            });
-            await this.resultPersistence.appendJournal(
-                missionId,
-                `[${todo.title}] Blocked — waiting for human input (${requestId})`,
-            );
-
-            // Push to queue — awaits human response
-            const response = await this.hitlQueue.push({
-                id: requestId,
-                missionId,
-                todoId: todo.id,
-                context: verdict.hitlContext ?? executorSummary,
-                question: verdict.hitlQuestion ?? 'Please review and provide guidance.',
-                createdAt: Date.now(),
-            });
-
-            // Resume with human feedback
-            await this.todoState.updateTodo(missionId, todo.id, {
-                status: 'pending',
-                hitlRequestId: undefined,
-                feedback: `Human response: ${response}`,
-            });
-            await this.resultPersistence.appendJournal(
-                missionId,
-                `[${todo.title}] Human responded — resuming`,
-            );
-        } else {
-            // hitl requested but no queue — treat as done
-            await this.todoState.updateTodo(missionId, todo.id, { status: 'done' });
-        }
+        // Update plan status to reflect completion
+        await this.todoState.updateMissionStatus(missionId, 'done');
+        await this.resultPersistence.appendJournal(missionId, 'Mission completed via reconcile()');
     }
 
-    private async buildTask(todo: TodoItem, plan: MissionPlan): Promise<SubAgentTask> {
-        // Resolve agent definition if specified
-        let systemPrompt: string | undefined;
-        let connectionId: string | undefined;
-        let modelName: string | undefined;
+    // ── Task building (preserved from original) ────────────────
 
-        const agentId = todo.agentId ?? this.pickAgentFromPool(todo, plan);
-        if (agentId) {
-            const agentDef = await this.agentLookup.getAgentConfig(agentId);
-            if (agentDef) {
-                systemPrompt = agentDef.config.systemPrompt;
-                connectionId = agentDef.config.connectionId;
-                modelName    = agentDef.config.modelName;
-            }
+    private buildTaskForNode(node: GoalNode, plan: MissionPlan): SubAgentTask {
+        const todo = plan.todos.find(t => t.id === node.id);
+        if (!todo) {
+            return {
+                instruction: node.task.prompt,
+                maxTurns: 20,
+                allowedTools: [],
+            };
         }
 
-        // Build instruction with optional feedback
-        const instruction = todo.feedback
-            ? `${todo.description}\n\n---\nPrevious attempt feedback:\n${todo.feedback}`
+        // Build instruction with any feedback from context
+        const feedback = node.task.context?.feedback as string | undefined;
+        const instruction = feedback
+            ? `${todo.description}\n\n---\nPrevious attempt feedback:\n${feedback}`
             : todo.description;
 
-        // Context files: journal + existing summaries
         const contextFiles = [plan.paths.journalFile];
-
-        // Add summaries of completed deps
         for (const depId of todo.dependsOn) {
             const dep = plan.todos.find(t => t.id === depId);
             if (dep?.summaryPath) contextFiles.push(dep.summaryPath);
@@ -288,47 +141,52 @@ export class MissionScheduler {
 
         return {
             instruction: `Mission context: ${plan.goal}\n\nTask: ${instruction}`,
-            systemPrompt,
-            connectionId,
-            modelName,
             contextFiles,
             allowedTools: ['file_read', 'glob_search', 'grep_search', 'file_write', 'write_result'],
             maxTurns: 20,
         };
     }
-
-    private pickAgentFromPool(_todo: TodoItem, plan: MissionPlan): string | undefined {
-        // Simple heuristic: pick first agent in pool (Swarm routing can enhance this later)
-        return plan.config.agentPoolIds[0];
-    }
-
-    private async getAgentSystemPrompt(agentId: string): Promise<string | undefined> {
-        const def = await this.agentLookup.getAgentConfig(agentId);
-        return def?.config.systemPrompt;
-    }
-
-    private async getAgentConnectionId(agentId: string): Promise<string | undefined> {
-        const def = await this.agentLookup.getAgentConfig(agentId);
-        return def?.config.connectionId;
-    }
 }
 
-// ── Helpers ───────────────────────────────────────────────────
+// ── No-op stubs for reconcile() compatibility ─────────────────────────
 
-function delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+function createNoopLog(): ILog {
+    return {
+        async append(_ref: Ref, _turn: Turn): Promise<string> { return ''; },
+        async fold(_ref: Ref, _strategy?: AssemblyStrategy): Promise<ChatMessage[]> { return []; },
+        refs(): RefStore {
+            return {
+                create: () => '',
+                move: () => {},
+                tag: () => {},
+                delete: () => {},
+                list: () => [],
+            };
+        },
+        draft(): DraftArea {
+            return {
+                checkpoint: async () => {},
+                flush: async () => {},
+                current: () => null,
+            };
+        },
+        async merge(): Promise<string> { return ''; },
+        async rebase(): Promise<string> { return ''; },
+    };
 }
 
-function parseVerdict(text: string): VerifierVerdict {
-    try {
-        const cleaned = text.replace(/```json\n?|\n?```/g, '').trim();
-        const parsed = JSON.parse(cleaned);
-        if (['done', 'retry', 'hitl'].includes(parsed.verdict)) {
-            return parsed as VerifierVerdict;
-        }
-    } catch {
-        // fall through
-    }
-    // Default: done (conservative — avoid infinite retry loops)
-    return { verdict: 'done' };
+function createNoopToolService(): IToolService {
+    return {
+        getToolMeta: () => undefined,
+        invoke: async () => ({ success: false, output: 'no-op tool service' }),
+        listTools: () => [],
+        register: () => {},
+    } as unknown as IToolService;
+}
+
+function createNoopSessionActor(): { emit(event: AgentEvent): void; waitSignal(): Promise<Signal> } {
+    return {
+        emit: () => {},
+        waitSignal: async () => ({ type: 'abort' }),
+    };
 }

@@ -79,7 +79,10 @@ export class LoopExecutor implements ILoop {
                     signal = undefined;
                 }
 
-                // ── 1. Before-turn middleware ──
+                // ── 1. Build messages from log ──
+                let messages = await ctx.log.fold(ctx.ref);
+
+                // ── 1b. Before-turn middleware ──
                 const turnCtx: TurnContext = {
                     turnId: `turn_${turnNumber}`,
                     sessionId: ctx.sessionId,
@@ -96,17 +99,18 @@ export class LoopExecutor implements ILoop {
                         break;
                     }
                     if (beforeDirective.action === 'skip_turn') continue;
-                    // inject: append to messages and continue
+                    if (beforeDirective.action === 'inject') {
+                        // Inject feedback text as a user message
+                        messages = [...messages, { role: 'user' as const, content: beforeDirective.text }];
+                    }
                 }
 
-                // ── 2. Build messages from log ──
-                const messages = await ctx.log.fold(ctx.ref);
                 if (messages.length === 0) {
                     // Nothing to respond to — wait for user input
                     break;
                 }
 
-                // ── 3. LLM Call ──
+                // ── 2. LLM Call ──
                 yield {
                     type: 'turn:start',
                     turnId: turnCtx.turnId,
@@ -117,6 +121,7 @@ export class LoopExecutor implements ILoop {
                 let responseText = '';
                 let toolCalls: ToolCall[] = [];
                 let usage: TokenUsage = {};
+                let finishReason: string | undefined;
                 const assistantBlocks: AssistantBlock[] = [];
 
                 try {
@@ -130,7 +135,8 @@ export class LoopExecutor implements ILoop {
                     for await (const chunk of stream) {
                         if (ctx.signal.aborted) break;
 
-                        const delta = chunk.choices?.[0]?.delta;
+                        const choice = chunk.choices?.[0];
+                        const delta = choice?.delta;
                         if (!delta) continue;
 
                         if (delta.content) {
@@ -157,6 +163,11 @@ export class LoopExecutor implements ILoop {
                                     });
                                 }
                             }
+                        }
+
+                        // Capture finish_reason from the final chunk
+                        if (choice?.finish_reason) {
+                            finishReason = choice.finish_reason;
                         }
 
                         // Collect usage from final chunks
@@ -291,6 +302,7 @@ export class LoopExecutor implements ILoop {
                     })),
                     toolResults,
                     usage,
+                    finishReason,
                 };
 
                 const afterDirective = await this.pipeline.applyAfterTurn(turnCtx, turnResult);
@@ -318,6 +330,7 @@ export class LoopExecutor implements ILoop {
                         origin: 'loop',
                         usage,
                     },
+                    result: turnResult,
                 };
 
                 turns.push(turn);

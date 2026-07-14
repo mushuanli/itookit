@@ -27,4 +27,9 @@ export { DEFAULT_SESSION_META } from './types';
 export { GraphOrchestrator } from './graph-orchestrator';
 export { DependencyGraph, CycleError } from './dependency-graph';
 export { SessionMetaStore } from './session-meta-store';
+/** @deprecated Use createLLMJudgePredicate from llm-engine/core/goal/predicates.ts */
 export { CompletionAnalyzer } from './completion-analyzer';
+// S5: Goal-based scheduling
+export { createGraphGoal } from './graph-goal-factory';
+export type { GraphGoalResult } from './graph-goal-factory';
+export { createAgentRuntimeLoopAdapter } from './agent-runtime-loop-adapter';

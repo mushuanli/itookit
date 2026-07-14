@@ -4,6 +4,9 @@
 //
 // Used only when SessionMeta.type === 'advance'. For 'standard' mode,
 // completion is assumed as soon as the agent finishes without error.
+//
+// @deprecated Use createLLMJudgePredicate from llm-engine/core/goal/predicates.ts
+// instead. This class is superseded by the unified Goal predicate system (S5).
 
 import type { ILLMService } from '@itookit/common';
 import type { CompletionVerdict } from './types';

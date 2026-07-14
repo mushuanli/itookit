@@ -45,6 +45,7 @@ export {
     createHITLMiddleware,
     createSkillsMiddleware,
     createBackPressureMiddleware,
+    createTruncationDetectionMiddleware,
 } from './executors';
 
 // ── LLM 2.0: Goal control loop (S5) ─────────────────────────────────
@@ -151,10 +152,14 @@ export {
     MissionScheduler,
     MissionService,
     LiteSubAgentRouter,
+    // S5: Goal-based scheduling adapters
+    createMissionGoal,
+    createSubAgentLoopAdapter,
 } from './mission';
 export type {
     MissionSchedulerOptions,
     MissionServiceOptions,
+    SubAgentLoopAdapterOptions,
 } from './mission';
 
 // ============================================
@@ -171,6 +176,9 @@ export {
     CompletionAnalyzer,
     CycleError,
     DEFAULT_SESSION_META,
+    // S5: Goal-based scheduling adapters
+    createGraphGoal,
+    createAgentRuntimeLoopAdapter,
 } from './session-graph';
 export type {
     SessionMeta,
@@ -180,6 +188,7 @@ export type {
     GraphExecutionOptions,
     GraphEvent,
     CompletionVerdict,
+    GraphGoalResult,
 } from './session-graph';
 
 // ============================================
@@ -200,6 +209,7 @@ export { formatErrorMessage } from './utils/error-formatter';
 export { TruncationDetector } from './session/truncation-detector';
 export type { TruncationResult } from './session/truncation-detector';
 
+/** @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware in the ILoop path. */
 export { AutoContinueHandler } from './session/auto-continue';
 export type {
     AutoContinueConfig,

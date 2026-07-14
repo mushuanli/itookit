@@ -35,6 +35,10 @@ export class DependencyGraph {
     /**
      * Resolve all dependencies of a session recursively and return them in
      * topological order (leaves first, the target session last).
+     *
+     * @deprecated Use DependencyScheduler from llm-engine/core/goal/ instead.
+     *             This DFS-based topoSort is superseded by Kahn-algorithm
+     *             DependencyScheduler used by reconcile().
      * @throws CycleError if a cycle is detected.
      */
     async topoSort(

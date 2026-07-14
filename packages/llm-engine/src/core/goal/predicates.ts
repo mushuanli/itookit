@@ -5,7 +5,7 @@
 //   - shell: exit-code-based completion check
 //   - llm-judge: LLM-based structured verdict
 
-import type { Predicate, TurnResult, GoalNode } from '@itookit/common';
+import type { Predicate, TurnResult, GoalNode, Verdict } from '@itookit/common';
 import type { ILLMService } from '@itookit/common';
 
 // ─── truncation ──────────────────────────────────────────────────────
@@ -20,10 +20,10 @@ import type { ILLMService } from '@itookit/common';
  */
 export function createTruncationPredicate(): Predicate {
     return async (result: TurnResult, _node: GoalNode) => {
-        // Check if any tool result indicates truncation
+        // Check if any assistant text block indicates truncation
         const hasTruncation = result.assistantBlocks.some(block => {
-            if (block.type === 'text') {
-                const content = String(block.content ?? '');
+            if (block.type === 'text' || block.type === 'thinking') {
+                const content = String((block as any).text ?? '');
                 return hasTruncationSignals(content);
             }
             return false;
@@ -51,7 +51,7 @@ function hasTruncationSignals(content: string): boolean {
 
     // Trailing incomplete sentence (abrupt cutoff)
     const trimmed = content.trimEnd();
-    if (trimmed.length > 2000) {
+    if (trimmed.length > 200 && trimmed.length < 2000) {
         const lastChars = trimmed.slice(-50);
         // Incomplete sentence patterns
         if (/[a-zA-Z]$/.test(lastChars) && !/[.!?;:]\s*$/.test(lastChars)) {
@@ -132,10 +132,10 @@ export function createLLMJudgePredicate(
             const response = await llmService.chat(connectionId, {
                 messages,
                 maxTokens: 256,
-                modelTier: options?.modelTier,
             });
 
-            const verdict = parseVerdict(response.content);
+            const content = response.choices?.[0]?.message?.content ?? '';
+            const verdict = parseVerdict(content);
             return verdict;
         } catch {
             // On LLM failure, default to done (don't block the pipeline)
@@ -157,26 +157,35 @@ Respond in JSON only:
 function summarizeResult(result: TurnResult): string {
     const parts: string[] = [];
     for (const block of result.assistantBlocks) {
-        if (block.type === 'text') {
-            parts.push(String(block.content ?? ''));
+        if (block.type === 'text' || block.type === 'thinking') {
+            parts.push(String((block as any).text ?? ''));
         } else if (block.type === 'tool_use') {
-            parts.push(`[Tool: ${(block as any).name}]`);
+            parts.push(`[Tool: ${(block as any).toolName ?? (block as any).name ?? 'unknown'}]`);
         }
+    }
+    for (const tr of result.toolResults) {
+        parts.push(`[ToolResult ${tr.toolUseId}${tr.isError ? ' ERROR' : ''}: ${tr.content.slice(0, 200)}]`);
     }
     return parts.join('\n') || '(no output)';
 }
 
-function parseVerdict(content: string): { status: 'done' | 'retry' | 'hitl' | 'failed'; feedback?: string } {
+function parseVerdict(content: string): Verdict {
     try {
         // Try to extract JSON from the response
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
             if (['done', 'retry', 'hitl', 'failed'].includes(parsed.status)) {
-                return {
-                    status: parsed.status,
-                    feedback: parsed.feedback,
-                };
+                if (parsed.status === 'retry') {
+                    return { status: 'retry', feedback: parsed.feedback ?? content };
+                }
+                if (parsed.status === 'hitl') {
+                    return { status: 'hitl', request: { requestId: '', reason: 'request_input', message: parsed.feedback ?? '' } };
+                }
+                if (parsed.status === 'failed') {
+                    return { status: 'failed', reason: parsed.feedback ?? '' };
+                }
+                return { status: 'done' };
             }
         }
     } catch { /* fall through */ }
@@ -185,7 +194,7 @@ function parseVerdict(content: string): { status: 'done' | 'retry' | 'hitl' | 'f
     const lower = content.toLowerCase();
     if (lower.includes('done') || lower.includes('complete')) return { status: 'done' };
     if (lower.includes('retry')) return { status: 'retry', feedback: content };
-    if (lower.includes('hitl') || lower.includes('human')) return { status: 'hitl', feedback: content };
+    if (lower.includes('hitl') || lower.includes('human')) return { status: 'hitl', request: { requestId: '', reason: 'request_input', message: content } };
     if (lower.includes('fail')) return { status: 'failed', reason: content };
 
     return { status: 'done' };

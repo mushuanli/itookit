@@ -26,6 +26,8 @@ export interface Turn {
     /** One user/assistant message group. */
     payload: ChatMessage[];
     meta: TurnMeta;
+    /** Runtime execution result — populated by LoopExecutor for Goal predicate consumption. */
+    result?: TurnResult;
 }
 
 export interface TurnMeta {
@@ -125,6 +127,8 @@ export interface TurnResult {
         isError: boolean;
     }>;
     usage?: TokenUsage;
+    /** API-level finish reason from the final chunk (e.g. 'stop', 'length'). */
+    finishReason?: string;
 }
 
 export type ControlDirective =

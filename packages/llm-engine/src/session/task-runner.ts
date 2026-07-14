@@ -23,7 +23,7 @@ import { IChatEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
-import { AutoContinueHandler, AutoContinueConfig } from './auto-continue';
+import type { AutoContinueConfig } from './auto-continue';
 import { formatErrorMessage } from '../utils/error-formatter';
 import { log } from '../utils/logger';
 // ── LLM 2.0: Executor-driven dispatch ──
@@ -77,8 +77,8 @@ export class TaskRunner {
     private llmService: ILLMService | null = null;
     private executorRegistry: ExecutorRegistry;
 
-    /** 自动续写配置模板 */
-    private autoContinueConfig: Partial<AutoContinueConfig>;
+    /** 自动续写配置模板
+     * @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware. */
 
     constructor(
         private engine: IChatEngine,
@@ -92,7 +92,6 @@ export class TaskRunner {
         this.maxQueueSize = options?.maxQueueSize ?? ENGINE_DEFAULTS.MAX_QUEUE_SIZE;
         this.kernelAdapter = getLLMKernelAdapter();
         this.executorRegistry = getExecutorRegistry();
-        this.autoContinueConfig = options?.autoContinue ?? {};
     }
 
     // ============================================
@@ -523,14 +522,7 @@ export class TaskRunner {
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
 
         // ✅ 每个任务独立的续写处理器
-        const autoContinueEnabled = input.overrides?.autoContinue
-            ?? this.autoContinueConfig.enabled
-            ?? true;
-
-        const autoContinue = new AutoContinueHandler({
-            ...this.autoContinueConfig,
-            enabled: autoContinueEnabled,
-        });
+        /** @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware in the ILoop path. */
 
         try {
             // 1-5. 公共 setup（附件解析、消息创建、执行器配置、持久化写入器）
@@ -550,27 +542,12 @@ export class TaskRunner {
                 state, input.text, input.overrides?.historyLength
             );
 
-            // 6. 终结事件抑制标志
-            //
-            // 为什么始终抑制（而非仅续写时抑制）：
-            //   kernel 的终结事件（execution:complete → finished）在 executeQuery
-            //   返回之前就已经通过 onEvent 回调发出。我们在 executeQuery 返回后
-            //   才能调用 evaluate() 判断是否续写——此时事件已经到达 UI。
-            //
-            //   因此无法做到"先判断要不要续写，再决定是否抑制"。
-            //
-            //   安全策略：始终抑制 kernel 的终结事件，由 TaskRunner 在循环
-            //   真正结束后统一发送。无论是否发生续写，行为都是一致的。
-            //
-            //   error 事件不抑制——错误应该立即展示。
-            let suppressTerminalEvents = true;
-
-            // 8. 事件处理器
+            // 6. 事件处理器
             const onEvent = this.createEventHandler(
                 sessionId, rootNode, state, accumulator, persist,
                 () => { errorAlreadyEmitted = true; },
                 isBound,
-                () => suppressTerminalEvents
+                () => false, // No longer suppress terminal events — single execution
             );
 
             // 7. 准备附件和历史
@@ -578,150 +555,49 @@ export class TaskRunner {
             const historyWithFiles = await this.buildHistoryMessages(sessionId, history);
 
             // =====================================================
-            // 8. 执行循环（支持 auto-continue）
-            //
-            // 历史构建策略：
-            //
-            //   首次请求：
-            //     history = originalHistory（不含当前轮 user/assistant）
-            //     input = 用户原文
-            //     → kernel 拼接为: [...history, user(input)]
-            //
-            //   续写请求：
-            //     history = [...originalHistoryForContinue, assistant(累积输出)]
-            //     input = continue prompt
-            //     → kernel 拼接为: [..., user, assistant(累积), user(continue)]
-            //
-            //   originalHistoryForContinue = originalHistory 去掉末尾 assistant
-            //   这样追加当前轮 assistant 不会产生连续 assistant 违反 role 交替。
-            //
-            // token 增长分析：
-            //   每次续写只是 assistant 那一条记录变长，不产生多余的 role 对。
-            //   总 token = 原始历史 + 累积输出 + continue prompt（线性增长）。
+            // 8. 单次执行（auto-continue 已迁移至 ILoop 路径的
+            //    createTruncationDetectionMiddleware）
             // =====================================================
 
-            let currentInput = input.text;
-            let currentHistory = historyWithFiles;
+            if (task.abortController.signal.aborted) {
+                throw new DOMException('Aborted', 'AbortError');
+            }
 
-            // 预处理：移除末尾 assistant，为续写准备干净的历史前缀
-            const originalHistoryForContinue = this.trimTrailingAssistant(historyWithFiles);
+            log.info('Executing LLM query', {
+                taskId: task.id,
+                sessionId,
+                agent: executorConfig.name,
+                model: executorConfig.model,
+                historyCount: historyWithFiles.length,
+                continuation: 0,
+            });
 
-            while (true) {
-                // 每次执行前检查中止信号
-                if (task.abortController.signal.aborted) {
-                    log.info('Task aborted', {
-                        taskId: task.id,
-                        phase: 'before_execute',
-                        continuation: autoContinue.getStatus().count,
-                    });
-                    throw new DOMException('Aborted', 'AbortError');
-                }
-
-                log.info('Executing LLM query', {
-                    taskId: task.id,
+            const result = await this.kernelAdapter.executeQuery(
+                input.text, executorConfig,
+                {
                     sessionId,
-                    agent: executorConfig.name,
-                    model: executorConfig.model,
-                    historyCount: currentHistory.length,
-                    continuation: autoContinue.getStatus().count,
-                });
-
-                const result = await this.kernelAdapter.executeQuery(
-                    currentInput, executorConfig,
-                    {
-                        sessionId,
-                        history: currentHistory,
-                        // 续写时不重复发送附件（上下文已在历史中）
-                        attachments: autoContinue.getStatus().count === 0
-                            ? attachmentList
-                            : [],
-                        onEvent,
-                        signal: task.abortController.signal,
-                        rootNodeId: rootNode.id,
-                        stream: input.overrides?.streamMode ?? true,
-                    }
-                );
-
-                // 执行后检查中止信号
-                if (task.abortController.signal.aborted) {
-                    log.info('Task aborted', {
-                        taskId: task.id,
-                        phase: 'after_execute',
-                        continuation: autoContinue.getStatus().count,
-                    });
-                    throw new DOMException('Aborted', 'AbortError');
+                    history: historyWithFiles,
+                    attachments: attachmentList,
+                    onEvent,
+                    signal: task.abortController.signal,
+                    rootNodeId: rootNode.id,
+                    stream: input.overrides?.streamMode ?? true,
                 }
+            );
 
-                if (result.status === 'failed') {
-                    const firstError = result.errors?.[0];
-                    const msg = firstError?.message
-                        || (firstError?.code ? `Execution failed [${firstError.code}]` : 'Execution failed');
-                    const error = new Error(msg);
-                    (error as any).status = firstError?.code;
-                    (error as any)._model = (result as any)._model || executorConfig.model;
-                    throw error;
-                }
-
-                // 12. 提取 finish_reason
-                const finishReason = result.metadata?.finishReason
-                    ?? result.metadata?.finish_reason;
-
-                // 13. 判断是否需要续写
-                const decision = autoContinue.evaluate(
-                    accumulator.output,
-                    finishReason
-                );
-
-                if (!decision.shouldContinue) {
-                    if (decision.reason === 'max_continuations_reached') {
-                        log.warn('Auto-continue limit reached, content may be incomplete', {
-                            count: decision.continuationCount,
-                            outputLength: accumulator.output.length,
-                        });
-                    }
-                    break;
-                }
-
-                // 准备续写前再次检查中止信号
-                if (task.abortController.signal.aborted) {
-                    log.info('Task aborted', {
-                        taskId: task.id,
-                        phase: 'before_continuation',
-                        continuation: autoContinue.getStatus().count,
-                    });
-                    throw new DOMException('Aborted', 'AbortError');
-                }
-
-                autoContinue.incrementCount();
-
-                // 基于裁剪后的历史重建：
-                //   [...user1, assistant1, user2, assistant(累积输出)]
-                // kernel 会把 currentInput 作为最终 user message 追加：
-                //   [...user1, assistant1, user2, assistant(累积), user(continue)]
-                // role 交替正确 ✓
-                currentHistory = [
-                    ...originalHistoryForContinue,
-                    { role: 'assistant' as const, content: accumulator.output },
-                ];
-
-                currentInput = autoContinue.getContinuePrompt();
-
-                log.info('Auto-continuing', {
-                    count: autoContinue.getStatus().count,
-                    reason: decision.reason,
-                    outputLength: accumulator.output.length,
-                    historyMessages: currentHistory.length,
-                });
+            if (result.status === 'failed') {
+                const firstError = result.errors?.[0];
+                const msg = firstError?.message
+                    || (firstError?.code ? `Execution failed [${firstError.code}]` : 'Execution failed');
+                const error = new Error(msg);
+                (error as any).status = firstError?.code;
+                (error as any)._model = (result as any)._model || executorConfig.model;
+                throw error;
             }
 
             // =====================================================
-            // 循环结束：收尾
+            // 收尾
             // =====================================================
-
-            // 关闭终结事件抑制（此后如有事件可正常通过）
-            suppressTerminalEvents = false;
-
-            const continuationCount = autoContinue.getStatus().count;
 
             // 最终持久化
             await finalize();
@@ -747,7 +623,7 @@ export class TaskRunner {
                 outputTokens:      estOutputTokens,
                 costUsd:           estCost,
                 contextUsageRatio: estContextRatio,
-                turns:             continuationCount + 1,
+                turns:             1,
                 durationMs:        endMs - startMs,
                 isEstimated:       true,
             };
@@ -763,7 +639,6 @@ export class TaskRunner {
                     outputTokens: estOutputTokens,
                     costUsd:      estCost,
                     isEstimated:  true,
-                    ...(continuationCount > 0 && { continuations: continuationCount }),
                 },
             });
 
@@ -1070,16 +945,6 @@ export class TaskRunner {
      *
      * 注意：只移除末尾的一条，不影响中间的 assistant。
      */
-    private trimTrailingAssistant(history: ChatMessage[]): ChatMessage[] {
-        if (history.length === 0) return history;
-
-        if (history[history.length - 1].role === 'assistant') {
-            return history.slice(0, -1);
-        }
-
-        return history;
-    }
-
     private async buildHistoryMessages(
         sessionId: string,
         history: HistoryMessage[]

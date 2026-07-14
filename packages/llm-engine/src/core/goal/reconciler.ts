@@ -6,7 +6,7 @@
 // Mission / SessionGraph / AutoContinue / BackPressure are all
 // configurations of this single reconcile function.
 
-import type { ILoop, LoopContext, Goal, GoalNode, Predicate, Verdict } from '@itookit/common';
+import type { ILoop, LoopContext, Goal, GoalNode, Predicate } from '@itookit/common';
 import { DependencyScheduler } from './dependency-scheduler';
 import type { SchedulerSnapshot } from './dependency-scheduler';
 import { drive } from '../loop-driver';
@@ -130,13 +130,15 @@ async function runOneNode(
         try {
             const gen = loop.run(ctx);
             const turns = await drive(gen, actor, ctx);
-            const lastResult = turns[turns.length - 1];
+            const lastTurn = turns[turns.length - 1];
 
+            // Read TurnResult from the last turn's stored execution result.
+            // LoopExecutor populates turn.result with assistantBlocks + toolResults.
             const verdict = await predicate(
-                {
+                lastTurn?.result ?? {
                     assistantBlocks: [],
                     toolResults: [],
-                    usage: lastResult?.meta?.usage,
+                    usage: lastTurn?.meta?.usage,
                 },
                 node,
             );
@@ -154,12 +156,11 @@ async function runOneNode(
                     scheduler.setStatus(node.id, 'retrying');
                     // Inject feedback into next iteration
                     if (verdict.feedback && baseCtx.log) {
-                        // Feedback is passed through context for the next loop iteration
                         ctx.middlewares.push({
                             name: 'retry-feedback',
-                            beforeTurn: async (turnCtx) => {
-                                // Feedback injection handled by the loop executor
-                                return undefined;
+                            beforeTurn: async (_turnCtx) => {
+                                // Inject feedback as a user message that will be folded into context
+                                return { action: 'inject', text: verdict.feedback };
                             },
                         });
                     }

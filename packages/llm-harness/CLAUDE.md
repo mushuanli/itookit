@@ -36,6 +36,7 @@ AgentLoopExecutor:
 | `LLMServiceAdapter` | ★ ILLMService 的标准实现，`llm-engine` 通过此入口调用 LLM |
 | `HITLQueue` | 保持，S3 后将被 `yield await_signal` 替代 |
 | `BudgetController` 等 | 保持，S3 后适配为 `ILoopMiddleware` |
+| `BackPressureValidator` | 保持 — 高级 shell 验证逻辑保留；简单工具错误反馈已迁移至 `createBackPressureMiddleware`（S5） |
 
 ## Session Persistence（已废弃）
 

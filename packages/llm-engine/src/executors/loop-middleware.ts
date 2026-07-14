@@ -1,6 +1,6 @@
 // Loop middleware — built-in ILoopMiddleware implementations.
 //
-// These are the 6 canonical middleware from the llm-2 design.
+// These are the 7 canonical middleware from the llm-2 design.
 // For S3, they are self-contained implementations that mirror
 // the corresponding llm-harness classes.
 //
@@ -14,6 +14,9 @@ import type {
     ControlDirective,
     RecoveryAction,
 } from '@itookit/common';
+import { TruncationDetector } from '../session/truncation-detector';
+import type { AutoContinueConfig } from '../session/auto-continue';
+import { DEFAULT_AUTO_CONTINUE } from '../session/auto-continue';
 
 // ─── Budget Middleware ────────────────────────────────────────────────
 
@@ -141,8 +144,14 @@ export function createBackPressureMiddleware(): ILoopMiddleware {
             // Check for tool errors that indicate back-pressure failure
             const errors = result.toolResults.filter(r => r.isError);
             if (errors.length > 0) {
-                // Allow LLM to self-correct; don't inject
-                return;
+                // Pass tool errors back as injection for LLM self-correction
+                const errorSummary = errors
+                    .map(e => `Tool ${e.toolUseId}: ${e.content}`)
+                    .join('\n');
+                return {
+                    action: 'inject',
+                    text: `The following tool calls failed:\n${errorSummary}\n\nPlease fix the errors and retry.`,
+                };
             }
         },
     };
@@ -166,5 +175,60 @@ export function createSkillsMiddleware(): ILoopMiddleware {
         name: '06-skills',
         // Full implementation requires ContextManager + ISkillService
         // from llm-harness. Stub for now.
+    };
+}
+
+// ─── Truncation Detection Middleware ──────────────────────────────────
+
+/**
+ * Truncation detection middleware — replaces the AutoContinue while(true)
+ * loop in TaskRunner.executeTask().
+ *
+ * On each afterTurn, checks if the assistant output was truncated (via
+ * finish_reason='length' or unclosed Markdown structures). If truncated,
+ * injects a continue prompt so the LoopExecutor automatically continues.
+ *
+ * State (continuation count, accumulated output) is tracked per-middleware
+ * instance. Create a fresh instance per LoopExecutor.
+ */
+export function createTruncationDetectionMiddleware(
+    config?: Partial<AutoContinueConfig>,
+): ILoopMiddleware {
+    const cfg = { ...DEFAULT_AUTO_CONTINUE, ...config };
+    const detector = new TruncationDetector();
+    let continuationCount = 0;
+    let accumulatedChars = 0;
+
+    return {
+        name: '07-truncation-detection',
+
+        async afterTurn(_ctx: TurnContext, result: TurnResult): Promise<ControlDirective | void> {
+            if (!cfg.enabled) return;
+            if (continuationCount >= cfg.maxContinuations) return;
+
+            // Extract the full text from assistant blocks
+            const textBlocks = result.assistantBlocks
+                .filter(b => b.type === 'text' || b.type === 'thinking')
+                .map(b => (b.text as string) ?? '');
+            const outputText = textBlocks.join('');
+
+            accumulatedChars += outputText.length;
+
+            // Accumulated output length protection
+            if (cfg.maxAccumulatedChars > 0 && accumulatedChars >= cfg.maxAccumulatedChars) {
+                return;
+            }
+
+            const detection = detector.detect(outputText, result.finishReason);
+
+            if (!detection.truncated) return;
+
+            if (cfg.highConfidenceOnly && detection.confidence !== 'high') {
+                return;
+            }
+
+            continuationCount++;
+            return { action: 'inject', text: cfg.continuePrompt };
+        },
     };
 }

@@ -64,6 +64,10 @@ export interface ContinueDecision {
 /**
  * 自动续写处理器
  *
+ * @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware
+ * in the ILoop middleware pipeline (see llm-engine/src/executors/loop-middleware.ts).
+ * This class is retained for reference.
+ *
  * 职责：
  * - 判断是否需要续写（finish_reason + Markdown 结构检测）
  * - 追踪续写次数

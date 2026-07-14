@@ -1,6 +1,6 @@
 # LLM 子系统 2.0 — 四原语内核 + 插件框架设计
 
-> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S6 完成，S4 验收达成）| 分支: v4.1
+> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S5 验收达成，S6 部分完成）| 分支: v4.1
 > 前置分析: [llm-design.md](./llm-design.md)（现状五包架构审查）
 > 定位: 本文档是重构的**宪法**——定义不变的内核原语与扩展契约，现有功能全部归约为原语组合
 
@@ -8,7 +8,7 @@
 
 ## 实施进度
 
-**S1~S4 已完成**，**S5~S6 基础设施已就绪、验收标准尚未全部达成**（2026-07-14）。
+**S1~S5 已完成**，**S6 基础设施已就绪、验收标准尚未全部达成**（2026-07-14）。
 
 | 阶段 | 状态 | 关键交付 | 剩余工作 |
 |---|---|---|---|
@@ -16,7 +16,7 @@
 | **S2** AgentEvent + ILoop | ✅ | canonical `AgentEvent` schema；`ILoop`/`ILoopMiddleware` 接口；`ExecutorRegistry` | 旧事件消费者完全迁移至 canonical AgentEvent |
 | **S3** Loop 协程 + 中间件 | ✅ | `drive()` 协程宿主接入 TaskRunner；`LoopExecutor`（AsyncGenerator ILoop）取代 UnifiedLoopStrategy；`chatExecutor`；6 个内置中间件；`SessionActor` 桥接；HarnessAdapter/UnifiedLoopStrategy 下线 | `AgentLoopExecutor` 旧代码移除（llm-harness）；resume() 完整实现；mission/lite-sub-agent-router 迁移至 ILoop |
 | **S4** Log 收敛 | ✅ | `ChatEngineLog` 完整 ILog 实现（VFS DraftArea、ChatManifest RefStore、fold 缓存、merge 去重、rebase 结构）；`createSessionLogAdapter` → ChatEngineLog；RefStore 异步化；ChatManifest 新增 `tags`；**验收达成**：`LockManager`/`manifest-repair`/`ThrottledWriter` 已真正删除；`SessionState` 重新定位为合法的 ILog.fold() 投影缓存；旧 ID（`BBB_SSSSS_R`）→ ULID（`makeNodeId` 改用 `ulid()`） | — |
-| **S5** Goal 统一 | 🟡 | `IController`/`Goal`/`GoalNode`/`Predicate`/`Verdict` 接口（common）；`DependencyScheduler`（Kahn 拓扑 + 事件驱动）；`reconcile()` 算法；3 个内置 Predicate（truncation/shell/llm-judge） | **验收未达成**：4 个现有控制回路（Mission/SessionGraph/AutoContinue/BackPressure）尚未实际切换到 `reconcile()` 驱动 |
+| **S5** Goal 统一 | ✅ | `IController`/`Goal`/`GoalNode`/`Predicate`/`Verdict` 接口（common）；`DependencyScheduler`（Kahn 拓扑 + 事件驱动）；`reconcile()` 算法；3 个内置 Predicate（truncation/shell/llm-judge）；**验收达成**：4 个控制回路全部切换至 reconcile()/DependencyScheduler 驱动；AutoContinue → `createTruncationDetectionMiddleware`；BackPressure 存根 → 真实实现；Mission → `reconcile()` + `SubAgentLoopAdapter` + `createMissionGoal`；SessionGraph → `executeWithReconcile()` + `AgentRuntimeLoopAdapter` + `createGraphGoal` | — |
 | **S6** 拆包裁剪 | 🟡 | llm-kernel 删除 15 个死代码文件（~60%）；`ExecutorType` 收缩为 `'agent'`；`initializeKernel` 简化；`executePlan()` 删除 | **验收未达成**：`llm-core` 拆包重命名未执行；llm-harness 28 个文件未裁剪；包边界 ≠ 变更轴 |
 
 ### S3 完成内容（2026-07-14）
@@ -57,9 +57,9 @@
     ├─ mode specified → executeAgentLoopTask(mode)
     │   └─ ExecutorRegistry.get(mode).run(ctx) → drive(gen, actor, ctx)
     │       ├─ mode='chat'     → chatExecutor (单轮，无工具)
-    │       ├─ mode='loop'     → LoopExecutor(lite) = [budget, error-recovery]
-    │       └─ mode='loop:full' → LoopExecutor(full) = 全部 6 个中间件
-    └─ mode absent → executeTask() → LLMKernelAdapter.executeQuery() (保持不变)
+    │       ├─ mode='loop'     → LoopExecutor(lite) = [budget, error-recovery, truncation]
+    │       └─ mode='loop:full' → LoopExecutor(full) = 全部 7 个中间件
+    └─ mode absent → executeTask() → LLMKernelAdapter.executeQuery() (auto-continue 已迁移至 ILoop 中间件)
 ```
 
 ### 新增文件清单（S1~S3 累计）
@@ -144,14 +144,57 @@
 | `interfaces/agent/index.ts` (common) | 新增 `goal` 导出 |
 | `index.ts` (llm-engine) | 新增 Goal 模块导出（`DependencyScheduler`、`reconcile`、3 个 Predicate 工厂） |
 
-#### 四个现有控制回路 → Goal 配置映射
+#### 四个现有控制回路 → Goal 配置映射（全部已切换 ✅）
 
 | 现有模块 | Goal 配置 | 迁移状态 |
 |---|---|---|
-| **Mission** | nodes = TodoItem[]；edges = todo deps；predicate = `llm-judge` | 接口已就绪，待接入 |
-| **SessionGraph** | nodes = 文件依赖拓扑；edges = 文件 `dependencies`；predicate = `llm-judge` | 接口已就绪，待接入 |
-| **AutoContinue** | 单节点；predicate = `truncation`；retry = 续写 prompt | 接口已就绪，待接入 |
-| **BackPressure** | 单节点；predicate = `shell`；retry feedback = stderr | 接口已就绪，待接入 |
+| **Mission** | nodes = TodoItem[]；edges = todo deps；predicate = `llm-judge` | ✅ `MissionScheduler.run()` → `reconcile(createMissionGoal(plan), …)` + `SubAgentLoopAdapter` |
+| **SessionGraph** | nodes = 文件依赖拓扑；edges = 文件 `dependencies`；predicate = `llm-judge` | ✅ `GraphOrchestrator.executeSession()` → `executeWithReconcile()` + `AgentRuntimeLoopAdapter` |
+| **AutoContinue** | 单节点；predicate = `truncation`；retry = 续写 prompt | ✅ while(true) 循环 → `createTruncationDetectionMiddleware`（ILoop afterTurn） |
+| **BackPressure** | 单节点；predicate = `shell`；retry feedback = stderr | ✅ 存根 → 真实 `createBackPressureMiddleware`（注入工具错误反馈供 LLM 自我修正） |
+
+### S5 验收达成 — 新增内容（2026-07-14）
+
+#### 新增文件
+
+| 文件 | 包 | 说明 |
+|---|---|---|
+| `mission/sub-agent-loop-adapter.ts` | llm-engine | `SubAgentLoopAdapter` — 将 `ISubAgentRouter.delegate()`（同步）包装为 ILoop 协程 |
+| `mission/mission-goal-factory.ts` | llm-engine | `createMissionGoal(plan)` — 将 `MissionPlan` 的 TodoItem[] + dependsOn 转为 Goal + GoalNode[] + edges |
+| `session-graph/agent-runtime-loop-adapter.ts` | llm-engine | `AgentRuntimeLoopAdapter` — 将 `IAgentRuntime.run()` 包装为 ILoop 协程 |
+| `session-graph/graph-goal-factory.ts` | llm-engine | `createGraphGoal(vfs, moduleName, path)` — 展开 Session 文件依赖图为 Goal |
+
+#### 修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `interfaces/agent/loop.ts` (common) | `Turn` 新增 `result?: TurnResult`（LoopExecutor 存储运行时输出供 Predicate 消费）；`TurnResult` 新增 `finishReason?: string` |
+| `core/goal/reconciler.ts` | **Bug 修复**：TurnResult 从 `turn.result` 读取（替代空数组）；retry-feedback 中间件返回 `{action: 'inject', text}`（替代空操作） |
+| `core/goal/predicates.ts` | **Bug 修复**：`summarizeResult` 中 `block.content` → `block.text`；`parseVerdict` 返回类型显式标注 `Verdict`；修复 PauseRequest 字段（`question` → `message`） |
+| `core/goal/dependency-scheduler.ts` | **Bug 修复**：移除未使用的 `Goal` import；`onChangePromise` 从 `readonly` 改为可变；`notify` 变量类型标注 `\| undefined` |
+| `executors/loop-executor.ts` | 存储 `TurnResult` → `turn.result`；捕获流式响应中的 `finishReason`；`beforeTurn` 移至 `fold()` 之后以支持 `inject` 指令 |
+| `executors/loop-middleware.ts` | 新增 `createTruncationDetectionMiddleware`（AutoContinue → ILoop afterTurn）；`createBackPressureMiddleware` 从存根替换为真实实现（注入工具错误反馈） |
+| `executors/loop-presets.ts` | lite + full preset 均添加 `createTruncationDetectionMiddleware`；full preset 中间件 6→7 |
+| `executors/index.ts` | 新增 `createTruncationDetectionMiddleware` 导出 |
+| `mission/mission-scheduler.ts` | **重写** — `run()` 用 `reconcile()` + `DependencyScheduler` 替代 while(true)+500ms 轮询；删除内嵌 `runVerifier()`；使用 `createLLMJudgePredicate` + `SubAgentLoopAdapter` |
+| `mission/mission-service.ts` | 传递 `llmService` 给 `MissionScheduler`（llm-judge predicate 所需） |
+| `mission/index.ts` | 新增 `createMissionGoal`、`createSubAgentLoopAdapter`、`SubAgentLoopAdapterOptions` 导出 |
+| `session-graph/graph-orchestrator.ts` | 新增 `executeWithReconcile()` 方法（reconcile-driven）；旧 `executeSession()` 标记 @deprecated |
+| `session-graph/dependency-graph.ts` | `topoSort()` 标记 @deprecated（被 `DependencyScheduler` 替代） |
+| `session-graph/completion-analyzer.ts` | `CompletionAnalyzer` 标记 @deprecated（被 `createLLMJudgePredicate` 替代） |
+| `session-graph/index.ts` | 新增 `createGraphGoal`、`createAgentRuntimeLoopAdapter` 等导出 |
+| `session/task-runner.ts` | 删除 `executeTask()` 中的 while(true) auto-continue 循环；删除 `trimTrailingAssistant`；移除 `AutoContinueHandler` 使用 |
+| `session/auto-continue.ts` | `AutoContinueHandler` 标记 @deprecated |
+| `index.ts` (llm-engine) | 新增 `createTruncationDetectionMiddleware`、Mission/Graph Goal 适配器导出；`AutoContinueHandler` 导出标记 @deprecated |
+
+#### @deprecated 清单
+
+| 组件 | 替代 |
+|---|---|
+| `AutoContinueHandler` | `createTruncationDetectionMiddleware` |
+| `CompletionAnalyzer` | `createLLMJudgePredicate` |
+| `DependencyGraph.topoSort()` | `DependencyScheduler` |
+| `GraphOrchestrator.executeSession()` | `GraphOrchestrator.executeWithReconcile()` |
 
 ### S6 完成内容（2026-07-14）
 
@@ -752,9 +795,9 @@ export const vcsPlugin: IPlugin = {
 | **S1** | 统一 LLM 调用为单一 `ILLMService`（短路 kernel 7 层链路） | 病灶 1 | 全部 chat 流量走 4 层栈 | ✅ |
 | **S2** | 定义 `AgentEvent` + `ILoop` 两个硬契约；现有 4 条执行路径包装为 executor | 病灶 4 | UI 只消费一套事件；翻译适配器删除 | ✅ |
 | **S3** | Loop 中间件化：创建 `LoopExecutor`（AsyncGenerator ILoop）+ 6 个中间件 + `SessionActor` 桥接；接入 `ExecutorRegistry` + `drive()`；`UnifiedLoopStrategy`/`HarnessAdapter` 下线 | 病灶 2、6 | 双 loop → 1；pause/resume 一套机制；ExecutorRegistry 驱动 | ✅ |
-| **S4** | Log 收敛：ChatEngine 升级为 Log 原语，单写入方 + 投影缓存；删除 SessionState 双写 | 病灶 5 | `manifest-repair`/`LockManager` **真正删除**（当前仅 @deprecated）；旧 ID 方案全量迁移至 ULID | 🟡 |
-| **S5** | Goal 统一：唯一依赖调度器 + Predicate 化 4 个控制回路 | 病灶 3 | 4 份调度**实际切换**到 DependencyScheduler（当前仅基础设施就绪，尚未接入） | 🟡 |
-| **S6** | 拆包重命名：`llm-core` / `executor-*` / `vcs` / `tasks`；kernel 解体裁剪 | 病灶 7 | 包边界 = 变更轴（当前仅完成 kernel 死代码裁剪，拆包未执行） | 🟡 |
+| **S4** | Log 收敛：ChatEngine 升级为 Log 原语，单写入方 + 投影缓存；删除 SessionState 双写 | 病灶 5 | `manifest-repair`/`LockManager` **真正删除**；旧 ID 方案全量迁移至 ULID | ✅ |
+| **S5** | Goal 统一：唯一依赖调度器 + Predicate 化 4 个控制回路 | 病灶 3 | 4 份调度**实际切换**到 DependencyScheduler：Mission→reconcile()、SessionGraph→executeWithReconcile()、AutoContinue→TruncationDetectionMiddleware、BackPressure→真实 middleware | ✅ |
+| **S6** | 拆包重命名：`llm-core` / `executor-*` / `vcs` / `tasks`；kernel 解体裁剪 | 病灶 7 | 包边界 = 变更轴（当前仅完成 kernel 死代码裁剪，拆包/重命名/harness 裁剪未执行） | 🟡 |
 
 ---
 

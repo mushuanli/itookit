@@ -111,8 +111,9 @@ IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult
 | `AgentEvent` | `interfaces/agent/agent-event.ts` | ★ canonical 事件 schema（~22 个，5 套→1 套） |
 | `ILoop` | `interfaces/agent/loop.ts` | ★ 执行原语 — AsyncGenerator 协程 |
 | `ILoopMiddleware` | `interfaces/agent/loop.ts` | 轮次级 hook (beforeTurn / afterTurn / onError) |
-| `ILog` / `Turn` / `RefStore` | `interfaces/agent/loop.ts` | Log 原语契约 |
-| `Goal` / `GoalNode` / `IController` / `Predicate` / `Verdict` | `interfaces/agent/goal.ts` | Goal 控制回路契约（S5） |
+| `ILog` / `Turn` / `RefStore` | `interfaces/agent/loop.ts` | Log 原语契约 — `Turn.result` 携带 LoopExecutor 运行时输出 |
+| `TurnResult` | `interfaces/agent/loop.ts` | 轮次结果 — assistantBlocks + toolResults + usage + finishReason |
+| `Goal` / `GoalNode` / `IController` / `Predicate` / `Verdict` | `interfaces/agent/goal.ts` | Goal 控制回路契约（S5 ✅） |
 
 ## LLM 2.0 四原语模型
 

@@ -9,7 +9,7 @@
 // Uses Kahn's algorithm for topological sort + cycle detection.
 // Event-driven (onChange) instead of polling (500ms → 0ms).
 
-import type { Goal, GoalNode, GoalNodeStatus } from '@itookit/common';
+import type { GoalNode, GoalNodeStatus } from '@itookit/common';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -33,7 +33,8 @@ export class DependencyScheduler {
     private readonly inDegree = new Map<string, number>();    // node → remaining deps
     private readonly topoOrder: string[];
     private readonly resolveNotify: () => void;
-    private readonly onChangePromise: Promise<void>;
+    // eslint-disable-next-line @typescript-eslint/prefer-readonly
+    private onChangePromise: Promise<void>;
 
     constructor(nodes: GoalNode[], edges: Array<[string, string]> = []) {
         // Initialize statuses
@@ -193,8 +194,8 @@ export class DependencyScheduler {
     }
 
     private resetNotify(): void {
-        let notify: () => void;
+        let notify: (() => void) | undefined;
         this.onChangePromise = new Promise<void>(resolve => { notify = resolve; });
-        (this as any).resolveNotify = notify;
+        (this as any).resolveNotify = notify!;
     }
 }

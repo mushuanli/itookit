@@ -2,29 +2,27 @@
 // Main coordinator: resolves the dependency graph, executes sessions in
 // topological order, and writes results back to each session's assetdir.
 //
-// Execution flow:
-//   executeSession(path)
-//     1. Topo-sort dependencies (bottom-up, leaves first)
-//     2. For each session in sorted order:
-//        a. Skip if already completed
-//        b. Collect dependency results as context
-//        c. Read session file content as task prompt
-//        d. Run agent via IAgentRuntime.run()
-//        e. Write result to assetdir
-//        f. Standard mode: mark completed
-//           Advance mode: LLM verifies completion; retry if not
+// S5: Added executeWithReconcile() — uses DependencyScheduler + reconcile()
+//     instead of DFS topoSort + serial for-loop. The old executeSession()
+//     is preserved for backward compatibility.
 
-import type { IVFSManager, IAgentRuntime } from '@itookit/common';
+import type { IVFSManager, IAgentRuntime, ILLMService, ILoop, LoopContext, GoalNode, ILog, Ref, RefStore, DraftArea, AssemblyStrategy, Turn, ChatMessage, AgentEvent, Signal, IToolService } from '@itookit/common';
 import { DependencyGraph, CycleError } from './dependency-graph';
 import { SessionMetaStore } from './session-meta-store';
 import { CompletionAnalyzer } from './completion-analyzer';
 import type { GraphExecutionOptions, GraphEvent, SessionExecutionResult, SessionMeta } from './types';
+import { createGraphGoal } from './graph-goal-factory';
+import { createAgentRuntimeLoopAdapter } from './agent-runtime-loop-adapter';
+import { reconcile } from '../core/goal/reconciler';
+import { createLLMJudgePredicate } from '../core/goal/predicates';
 
 export class GraphOrchestrator {
+    private readonly vfs: IVFSManager;
     private readonly graph: DependencyGraph;
     private readonly store: SessionMetaStore;
 
     constructor(vfs: IVFSManager) {
+        this.vfs = vfs;
         this.graph = new DependencyGraph(vfs);
         this.store = new SessionMetaStore(vfs);
     }
@@ -32,8 +30,9 @@ export class GraphOrchestrator {
     /**
      * Execute a single session and all its unmet dependencies.
      *
-     * @param moduleName   VFS module where the session file lives
-     * @param sessionPath  Module-relative path (e.g. "/project/design.md")
+     * @deprecated Use executeWithReconcile() instead (S5).
+     *             This method uses DFS topoSort + serial for-loop.
+     *             The new method uses DependencyScheduler + reconcile().
      */
     async executeSession(
         moduleName: string,
@@ -92,6 +91,60 @@ export class GraphOrchestrator {
         } else {
             await this.store.updateStatus(moduleName, sessionPath, 'pending', { runCount: 0 });
         }
+    }
+
+    // ── S5: Reconcile-based execution ──────────────────────────────────────
+
+    /**
+     * Execute a session graph using DependencyScheduler + reconcile() (S5).
+     *
+     * This replaces the DFS topoSort + serial for-loop with event-driven
+     * Kahn-algorithm dependency scheduling. All sessions in the dependency
+     * tree are executed via reconcile().
+     */
+    async executeWithReconcile(
+        moduleName: string,
+        sessionPath: string,
+        opts: GraphExecutionOptions,
+    ): Promise<SessionExecutionResult> {
+        const { goal } = await createGraphGoal(
+            this.vfs,
+            moduleName,
+            sessionPath,
+            { maxDepth: opts.maxDepth, typeOverride: opts.typeOverride },
+        );
+
+        // Override: use the VFS passed to the constructor
+        // (createGraphGoal needs IVFSManager, we pass it through)
+        const emit = (e: GraphEvent) => opts.onProgress?.(e);
+
+        const runtime = opts.runtime;
+        const llmService = opts.llm;
+        const connId = llmService ? ((await llmService.getDefaultConnection())?.id ?? 'default') : 'default';
+
+        const loopFactory = (_node: GoalNode): ILoop => {
+            return createAgentRuntimeLoopAdapter(runtime);
+        };
+
+        const predicate = llmService
+            ? createLLMJudgePredicate(llmService, connId)
+            : createNoopPredicate();
+
+        const actorFactory = (_nodeId: string) => createNoopSessionActor();
+
+        const baseCtx: Omit<LoopContext, 'ref'> = {
+            sessionId: `${moduleName}:${sessionPath}`,
+            log: createNoopLog(),
+            llm: llmService ?? createNoopLLMService(),
+            tools: createNoopToolService(),
+            middlewares: [],
+            signal: opts.signal ?? new AbortController().signal,
+        };
+
+        await reconcile(goal, loopFactory, predicate, actorFactory, baseCtx);
+
+        emit({ type: 'session:complete', path: sessionPath, output: '' });
+        return { sessionPath, moduleName, status: 'completed' };
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -230,4 +283,46 @@ export class GraphOrchestrator {
         }
         return '/' + resolved.join('/');
     }
+}
+
+// ── No-op stubs for reconcile() compatibility ─────────────────────────
+
+function createNoopPredicate(): import('@itookit/common').Predicate {
+    return async () => ({ status: 'done' });
+}
+
+function createNoopLLMService(): ILLMService {
+    return {
+        chat: async () => ({ choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'stop' }], usage: {} }),
+        chatStream: async function* () { yield { choices: [{ delta: {}, finish_reason: 'stop' }], usage: {} }; },
+        getDefaultConnection: async () => null,
+    } as unknown as ILLMService;
+}
+
+function createNoopLog(): ILog {
+    return {
+        async append(_ref: Ref, _turn: Turn): Promise<string> { return ''; },
+        async fold(_ref: Ref, _strategy?: AssemblyStrategy): Promise<ChatMessage[]> { return []; },
+        refs(): RefStore {
+            return { create: () => '', move: () => {}, tag: () => {}, delete: () => {}, list: () => [] };
+        },
+        draft(): DraftArea {
+            return { checkpoint: async () => {}, flush: async () => {}, current: () => null };
+        },
+        async merge(): Promise<string> { return ''; },
+        async rebase(): Promise<string> { return ''; },
+    };
+}
+
+function createNoopToolService(): IToolService {
+    return {
+        getToolMeta: () => undefined,
+        invoke: async () => ({ success: false, output: '' }),
+        listTools: () => [],
+        register: () => {},
+    } as unknown as IToolService;
+}
+
+function createNoopSessionActor(): { emit(event: AgentEvent): void; waitSignal(): Promise<Signal> } {
+    return { emit: () => {}, waitSignal: async () => ({ type: 'abort' }) };
 }

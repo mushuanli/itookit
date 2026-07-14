@@ -6,3 +6,7 @@ export type { MissionSchedulerOptions } from './mission-scheduler';
 export { MissionService } from './mission-service';
 export type { MissionServiceOptions } from './mission-service';
 export { LiteSubAgentRouter } from './lite-sub-agent-router';
+// S5: Goal-based scheduling
+export { createMissionGoal } from './mission-goal-factory';
+export { createSubAgentLoopAdapter } from './sub-agent-loop-adapter';
+export type { SubAgentLoopAdapterOptions } from './sub-agent-loop-adapter';

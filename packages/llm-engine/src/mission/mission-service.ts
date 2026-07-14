@@ -64,6 +64,7 @@ export class MissionService {
     private readonly todoState: TodoStateManager;
     private readonly resultPersistence: ResultPersistenceService;
     private readonly router: ISubAgentRouter;
+    private readonly llmService: ILLMService | undefined;
     private readonly agentLookup: IAgentLookup;
     private readonly hitlQueue?: IHITLQueue;
     private readonly activeControllers = new Map<string, AbortController>();
@@ -78,6 +79,7 @@ export class MissionService {
             return new LiteSubAgentRouter(opts.llmService, opts.toolExecutor);
         })();
         this.agentLookup = opts.agentLookup;
+        this.llmService = opts.llmService;
         this.hitlQueue = opts.hitlQueue;
     }
 
@@ -122,8 +124,7 @@ export class MissionService {
             todoState: this.todoState,
             router: this.router,
             resultPersistence: this.resultPersistence,
-            agentLookup: this.agentLookup,
-            hitlQueue: this.hitlQueue,
+            llmService: this.llmService!,
         });
 
         scheduler.run(missionId, controller.signal)
