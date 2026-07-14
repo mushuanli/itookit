@@ -781,6 +781,7 @@ export class TaskRunner {
             const prevSession = state.getLastSession();
             const parentId = prevSession?.role === 'assistant' ? prevSession.id : undefined;
 
+            console.debug('[TaskRunner] emit message:appended user', { id: userSession?.id, parentId, sessionId });
             this.eventBus.emitSession(sessionId, {
                 type: 'message:appended',
                 payload: { sessionGroup: userSession, parentId },
@@ -825,6 +826,7 @@ export class TaskRunner {
         if (isBound) {
             // Only emit rootNode — createAssistantMessage already updated getLastSession()
             // to point to the same node. Emitting both causes "Duplicate session" in UI.
+            console.debug('[TaskRunner] emit message:appended assistant', { id: (rootNode as any)?.id, parentId: parentUserNodeId, sessionId });
             this.eventBus.emitSession(sessionId, {
                 type: 'message:appended',
                 payload: {
@@ -922,7 +924,10 @@ export class TaskRunner {
         // 过滤重复的根 message:appended (前 node_start)
         if (event.type === 'message:appended') {
             const p = (event as any).payload as { parentId?: string; sessionGroup?: any };
-            if (!p?.parentId && !p?.sessionGroup?.parentId) return;
+            if (!p?.parentId && !p?.sessionGroup?.parentId) {
+                console.debug('[TaskRunner] handleUIEvents: dropped message:appended (no parentId)', p);
+                return;
+            }
         }
 
         // 修正空 messageId

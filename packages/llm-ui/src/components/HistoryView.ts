@@ -393,17 +393,31 @@ export class HistoryView implements IHistoryPresenter {
 
             // ── LLM 2.0 canonical events (S7) ─────────────────────────────
             case 'message:appended': {
-                const p = e.payload as SessionGroup & { isExecutionRoot?: boolean; parentId?: string };
-                if (p.isExecutionRoot) {
-                    this.renderer.appendNode(p.parentId, p as any, false);
+                const { sessionGroup, isExecutionRoot, parentId } = e.payload;
+                console.debug('[HistoryView] message:appended', { id: sessionGroup?.id, role: sessionGroup?.role, isExecutionRoot, parentId });
+                if (!sessionGroup) {
+                    console.warn('[HistoryView] message:appended missing sessionGroup', e.payload);
+                    break;
+                }
+                if (isExecutionRoot) {
+                    // Step 1: create the session bubble (avatar + execution-root container)
+                    this.renderer.appendSession(sessionGroup, false);
+                    this.collapse.setState(sessionGroup.id, false);
+                    // Step 2: mount the node itself into the execution-root container
+                    this.renderer.appendNode(undefined, sessionGroup as any, false);
+                    // Step 3: recursively mount any pre-existing children (rare at stream start)
+                    (sessionGroup as any).children?.forEach((c: any) =>
+                        this.renderer.renderExecutionTree(c, false)
+                    );
+                    this.scrollController.scrollToBottom(false);
                 } else {
                     this.clearErrors();
                     this.enterStreamingMode();
-                    const isUser = p.role === 'user';
-                    const isAgentOrigin = p.origin === 'agent' || p.origin === 'system';
+                    const isUser = sessionGroup.role === 'user';
+                    const isAgentOrigin = sessionGroup.origin === 'agent' || sessionGroup.origin === 'system';
                     const defaultCollapsed = isUser || isAgentOrigin;
-                    this.renderer.appendSession(p, defaultCollapsed);
-                    this.collapse.setState(p.id, defaultCollapsed);
+                    this.renderer.appendSession(sessionGroup, defaultCollapsed);
+                    this.collapse.setState(sessionGroup.id, defaultCollapsed);
                     this.scrollController.scrollToBottom(false);
                 }
                 break;

@@ -28,6 +28,7 @@ export class CommandRegistry {
      * 注册所有命令并绑定到事件总线
      */
     initialize(): void {
+        console.debug('[CommandRegistry] initialize — binding branch commands');
         // 复杂命令保留独立类
         this.bindCommand('branch:create', new CreateBranchCommand(this.ctx));
         this.bindCommand('branch:switch', new SwitchBranchCommand(this.ctx));

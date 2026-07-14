@@ -87,6 +87,7 @@ export class EventDispatcher {
         m.set('next-sibling', (ctx) => this.fireNodeAction('next-sibling', ctx.sessionId));
 
         m.set('create-branch', (ctx) => {
+            console.debug('[EventDispatcher] create-branch', { sessionId: ctx.sessionId, nodeId: ctx.nodeId, hasBus: !!this.bus });
             this.bus?.emit('branch:create', {
                 sourceNodeId: ctx.sessionId || ctx.nodeId,
             });
