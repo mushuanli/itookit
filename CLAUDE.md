@@ -18,7 +18,7 @@ SOLID / DRY / KISS / YAGNI / CoC / LoD — 函数≤30行，圈复杂度≤10
 
 | 文档 | 内容 |
 |---|---|
-| [包结构](./doc/pkgstructure.md) | 16 个包及职责 |
+| [包结构](./doc/pkgstructure.md) | 15 个包及职责 |
 | [架构设计](./doc/architecture.md) | 系统全貌 — VFS / LLM / Agent / Skill / Mission / Session / TTY |
 | [集成链](./doc/integration-chains.md) | VFS / Chat / AppShell 端到端调用链 |
 | [接口契约](./doc/interface-contracts.md) | 跨包核心接口 + 实现/消费关系 |

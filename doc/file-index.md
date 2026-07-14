@@ -50,7 +50,7 @@
 | AgentLoopExecutor | `llm-harness/src/executor/agent-loop-executor.ts` |
 | ContextManager | `llm-harness/src/executor/context-manager.ts` |
 | SubAgentRouter | `llm-harness/src/executor/sub-agent-router.ts` |
-| HarnessAdapter 事件桥接 | `llm-engine/src/adapters/harness-adapter.ts` |
+| SessionActor 事件桥接 | `llm-engine/src/core/session-actor.ts` |
 | HITL Queue | `llm-harness/src/services/hitl-queue.ts` |
 | Skill 内置工具 | `llm-harness/src/tools/load-skill.ts` |
 

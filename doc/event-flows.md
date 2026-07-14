@@ -40,43 +40,40 @@ agent:plan:confirm → agent:user:injected
 
 ---
 
-## HarnessAdapter 事件桥接
+## SessionActor 事件桥接
 
-`llm-engine/src/adapters/harness-adapter.ts` 将 Agent 事件映射为 `OrchestratorEvent`:
+`SessionActor`（`llm-engine/src/core/session-actor.ts`）将 ILoop 协程的 canonical `AgentEvent` 桥接至 `SessionEventBus`。事件统一为 `SessionEvent`（= `AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`），不再有 `OrchestratorEvent` 翻译层：
 
-| Agent Event | OrchestratorEvent |
+| ILoop yield | 桥接后事件 |
 |---|---|
-| `agent:stream:content` | `node_update` field=`output` |
-| `agent:stream:thinking` | `node_update` field=`thought` |
-| `agent:tool:start` | `node_start` (tool 子节点) |
-| `agent:tool:success` | `node_update` metaInfo.toolResult → `node_status(success)` |
-| `agent:tool:error/timeout` | `node_status(failed)` |
-| `agent:context:compressed` | `node_update` metaInfo.compressed |
-| `agent:budget:warning` | `node_update` metaInfo.budgetWarning |
-| `agent:budget:exhausted` | `error` code=`BUDGET_EXHAUSTED` |
-| `agent:tty:open/data/close` | `node_update` metaInfo.ttyOpen/ttyData/ttyClose |
-| `agent:plan:confirm` | `node_update` metaInfo.planConfirm |
+| `stream:content` | `message:updated` field=`output` |
+| `stream:thinking` | `message:updated` field=`thought` |
+| `tool:queued` / `tool:running` / `tool:success` / `tool:error` | canonical AgentEvent forward |
+| `turn:start` / `turn:end` | canonical AgentEvent forward |
+| `finished` | canonical AgentEvent forward |
+| `error` | canonical AgentEvent forward |
+| `await_signal` | 由 `drive()` 内部处理，不 emit |
 
 ---
+
 
 ## UI 消费链
 
 ```
-HarnessAdapter (onEvent) → SessionEventHandler → HistoryView / StreamController
-                                                      ├─ createNode (node_start)
-                                                      ├─ appendChunk (node_update)
-                                                      └─ markDone (node_status)
+SessionActor (onEvent) → SessionEventBus → SessionEventHandler → HistoryView / StreamController
+                                                     ├─ createNode (message:appended)
+                                                     ├─ appendChunk (message:updated)
+                                                     └─ markDone (message:status)
 ```
 
-### OrchestratorEvent → UI
+### SessionEvent → UI
 
 | 事件 | UI 操作 |
 |---|---|
-| `session_start` | 创建 session group, 渲染消息列表 |
-| `node_start` | 在树中创建新节点 |
-| `node_update` | 流式追加文字, 更新 thought, 更新 metaInfo |
-| `node_status` | 标记完成/失败/工具结果 |
-| `finished` | 更新 token stats, 停止 loading |
+| `message:appended` | 创建 session group，渲染消息到列表 |
+| `message:updated` | 流式追加文字，更新 thought，更新 metaInfo |
+| `message:status` | 标记完成/失败/工具结果 |
+| `finished` | 更新 token stats，停止 loading |
 | `error` | 显示错误信息 |
 | `regenerate_started/completed` | 分支再生 |
 | `branch_switched/deleted` | 切换/删除分支 |

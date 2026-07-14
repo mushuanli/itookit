@@ -12,8 +12,8 @@ pnpm monorepo. All packages under `packages/`, main app under `apps/web-app/` (p
 | `@itookit/device-llm` | LLM API communication — OpenAI/Anthropic/Gemini, SSE streaming, MCP protocol, Skill/Connection VFS storage |
 | `@itookit/device-tty` | TTY device driver — Node.js child_process interactive shell sessions |
 | `@itookit/tools` | Built-in tool implementations (`buildTool()` factory) — FileRead/Write/Edit, Glob, Grep, Bash, Skill, Agent, Task, PlanMode, AskUserQuestion, WebFetch; adapter `ToolDeviceDriver` |
-| `@itookit/llm-harness` | Multi-turn agent loop — `AgentLoopExecutor`, harness-specific tools (load_skill, delegate_task), context compression, HITL queue, SubAgentRouter |
-| `@itookit/llm-engine` | Session management + VFS persistence (`.chat` files) + Mission orchestration + Session dependency graph + Goal control loop (reconcile) + ILoop executors + ILog (ChatEngineLog) + ISession + ICommandBus |
+| `@itookit/llm-harness` | Multi-turn agent loop — `HarnessLoopExecutor`（AsyncGenerator ILoop, mode='harness'）、harness middleware（Budget/Context/ErrorRecovery/HITL/Skill/BackPressure）、SubAgentRouter |
+| `@itookit/llm-engine` | Session management + VFS persistence + Mission orchestration + Session Graph + Goal control loop (reconcile) + ILoop executors + ILog (ChatEngineLog) + ISession + ICommandBus + SessionEventBus。Dogfooding 完成：所有路径统一走 ILoop（无特权后备） |
 | `@itookit/mdxeditor` | CodeMirror 6 Markdown editor with frontmatter/GFM/Mermaid |
 | `@itookit/llm-ui` | Chat UI components and Agent editor factory |
 | `@itookit/vfs-ui` | File-tree UI shell (`VFSUIShell`) backed by `ISessionEngine` |

@@ -166,7 +166,7 @@ agent:tty:open  { sessionId, command, pid }
 agent:tty:data  { sessionId, chunk }          ← real-time output
 agent:tty:close { sessionId, exitCode, signal }
 ```
-HarnessAdapter bridges these to `OrchestratorEvent(metaInfo.ttyOpen/ttyData/ttyClose)` for UI rendering (Phase 2: xterm.js TtyPanel).
+SessionActor bridges these to canonical `AgentEvent` (stream:content / tool:* / etc.) for UI rendering, with `SessionEventBus` routing events to the bound UI.
 
 **Multi-turn session example:**
 ```
@@ -478,26 +478,22 @@ agent:tty:open   agent:tty:data   agent:tty:close   agent:tty:error
 agent:plan:confirm    agent:user:injected
 ```
 
-### HarnessAdapter — 事件映射
+### SessionActor — 事件桥接
 
-`HarnessAdapter`（`llm-engine/src/adapters/harness-adapter.ts`）将 agent 事件桥接为 `OrchestratorEvent`：
+`SessionActor`（`llm-engine/src/core/session-actor.ts`）将 ILoop 协程产出的 canonical `AgentEvent` 桥接至 `SessionEventBus`：
 
-| Agent Event | OrchestratorEvent |
+| ILoop yield | SessionEvent / UI 效果 |
 |---|---|
-| `agent:stream:content` | `node_update` field=`output` |
-| `agent:stream:thinking` | `node_update` field=`thought` |
-| `agent:tool:start` | `node_start`（新建 tool 子节点） |
-| `agent:tool:success` | `node_update` metaInfo.toolResult + `node_status(success)` |
-| `agent:tool:error/timeout` | `node_status(failed)` |
-| `agent:context:compressed` | `node_update` metaInfo.compressed |
-| `agent:budget:warning` | `node_update` metaInfo.budgetWarning |
-| `agent:budget:exhausted` | `error` code=`BUDGET_EXHAUSTED` |
-| `agent:tty:open/data/close` | `node_update` metaInfo.ttyOpen/ttyData/ttyClose |
-| `agent:plan:confirm` | `node_update` metaInfo.planConfirm |
+| `stream:content` | `message:updated` field=`output`（增量渲染） |
+| `stream:thinking` | `message:updated` field=`thought` |
+| `tool:queued` / `tool:running` | 创建 tool 子节点 |
+| `tool:success` / `tool:error` | 更新 tool 子节点状态 |
+| `turn:start` / `turn:end` | 轮次边界标记 |
+| `finished` | 会话完成，汇总 token 用量 |
+| `error` | 错误展示 |
+| `await_signal` | 暂停等待用户输入（HITL / plan confirm） |
 
-注意：`agent:llm:start/end` 故意不映射（已移除 LLM 子节点以减少 UI 噪音）。
-
-使用单例模式：`initHarnessAdapter(runtime)` / `getHarnessAdapter()` / `resetHarnessAdapter()`。
+事件统一为 `SessionEvent`（canonical `AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`），不再有 `OrchestratorEvent` 翻译层。
 
 ### 扩展点 Recipes
 

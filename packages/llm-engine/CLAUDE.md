@@ -2,7 +2,7 @@
 
 会话引擎 — 多会话管理、VFS 持久化、Mission 编排、Session Graph、Agent Loop。
 
-> **S1~S12 ✅ (2026-07-14)**: 四原语内核（Log/Loop/Channel/Goal）全部实施。llm-kernel 消除、事件统一（SessionEvent）、控制回路统一（Goal/reconcile）、resume 实现、LiteSubAgentRouter ILoop 迁移、ISession 接口 + ICommandBus + SessionManager 降级。详见 [llm-2.md](../../doc/feat/llm-2.md)。
+> **S1~S12 + Dogfooding ✅ (2026-07-14)**: 四原语内核（Log/Loop/Channel/Goal）全部实施。llm-kernel 消除、事件统一（SessionEvent）、控制回路统一（Goal/reconcile）、resume 实现、LiteSubAgentRouter ILoop 迁移、ISession 接口 + ICommandBus + SessionManager 降级、**Dogfooding 强制执行（`executeTask()` 后备路径消除）**。详见 [llm-2.md](../../doc/feat/llm-2.md)。
 
 ## Architecture
 
@@ -13,7 +13,7 @@ src/
 │                     truncation-detector, session-recovery
 ├── persistence/    ← ChatEngine (IChatEngine), ★ ChatEngineLog (完整 ILog facade)
 │                     ulid (ULID 生成), types (IChatEngine + ChatManifest/ChatNode)
-├── adapters/       ← tool-executor-bridge
+├── adapters/       ← tool-executor-bridge（HarnessAdapter 已删除 — S9）
 ├── mission/        ← MissionService, ★ MissionScheduler (reconcile-driven), LiteSubAgentRouter
 │                     TodoState, ★ sub-agent-loop-adapter, ★ mission-goal-factory
 ├── session-graph/  ← ★ GraphOrchestrator (+executeWithReconcile)
@@ -26,27 +26,35 @@ src/
 │                     ★ loop-driver (drive() + resumeDrive() 协程宿主)
 │                     ★ middleware-pipeline (composeMiddleware)
 │                     ★ session-actor (SessionActor — drive ↔ EventBus 桥接)
+│                     ★ command-bus (ICommandBus + CommandBus — 插件命令调度)
+│                     ★ extension-registry (ILLMPlugin + ExtensionContext — 插件注册)
 │                     ★ goal/ (S5 ✅) — DependencyScheduler + reconcile + 3 Predicate
 ├── executors/      ← chat-executor, loop-executor, loop-middleware (7 个中间件 + harness 委托),
 │                     loop-presets (lite/full + HarnessMiddlewareSet)
 └── utils/          ← converters, error-formatter, logger, parsers
 ```
 
-## 两条执行路径
+## 执行路径（Dogfooding: executeTask 后备已消除）
 
 ```
 SessionManager.sendMessage()
   └─ TaskRunner.submit() → processQueue()
-       ├─ mode specified → executeAgentLoopTask(mode)
-       │   └─ ExecutorRegistry.get(mode).run(ctx) → drive(gen, actor, ctx)
-       │       │                                      ↕ checkpoint? → resumeDrive(loop, id, actor, ctx)
-       │       ├─ mode='chat'      → chatExecutor (单轮，无工具)
-       │       ├─ mode='loop'      → LoopExecutor(lite) = [budget, error-recovery, truncation]
-       │       ├─ mode='loop:full' → LoopExecutor(full) = 全部 7 个中间件
-       │       └─ mode='harness'   → HarnessLoopExecutor (llm-harness) = ContextManager + 六维预算 + 四层压缩 + …
-       └─ mode absent → executeTask()
-           └─ ILLMService.chatStream()   ← S6c: 直接调用 ILLMService，不再经 LLMKernelAdapter
+       └─ mode = overrides.mode ?? executorRegistry.defaultMode  // 'loop' by default
+            └─ executeAgentLoopTask(mode)
+                 └─ ExecutorRegistry.get(mode).run(ctx) → drive(gen, actor, ctx)
+                      │                                      ↕ checkpoint? → resumeDrive(loop, id, actor, ctx)
+                      ├─ mode='chat'      → chatExecutor (单轮，无工具)
+                      ├─ mode='loop'      → LoopExecutor(lite) = [budget, error-recovery, truncation]
+                      ├─ mode='loop:full' → LoopExecutor(full) = 全部 7 个中间件
+                      └─ mode='harness'   → HarnessLoopExecutor (llm-harness)
 ```
+
+### LoopContext（已补全 LLM 配置）
+
+`executeTask()` 消除后，所有 LLM 调用参数通过 `LoopContext` 传入 executor。
+`LoopContext` 在 `common/.../loop.ts` 中新增字段：`connectionId`、`model`、`systemPrompt`、`temperature`、`maxTokens`、`thinking`、`reasoningEffort`、`historyLength`、`startedAt`。
+
+`executeAgentLoopTask()` 在构建 `loopCtx` 时从 `executorConfig` 平铺这些字段，并读取 `ai_systemPrompt` 文件级覆盖。chat-executor / loop-executor 直接消费这些字段，不再硬编码 `'default'` connectionId。详见 [llm-2.md](../../doc/feat/llm-2.md) 红线 #2。
 
 ## LLM 2.0 四原语
 
@@ -55,7 +63,7 @@ SessionManager.sendMessage()
 | **AgentEvent** | ✅ canonical schema（15 变体），唯一事件词汇 | `common/.../agent-event.ts` |
 | **ILoop** | ✅ 接口 + ExecutorRegistry + chat/loop executor | `common/.../loop.ts`, `core/executor-registry.ts` |
 | **drive()** | ✅ 协程宿主，pause/resume 一条路径；`resumeDrive()` 支持跨进程恢复 | `core/loop-driver.ts` |
-| **ILog** | ✅ 完整实现 — ChatEngineLog（VFS DraftArea + RefStore + fold 缓存）| `persistence/chat-engine-log.ts` |
+| **ILog** | ✅ 完整实现 — ChatEngineLog（VFS DraftArea + RefStore + fold 缓存）；**Dogfooding 关闭**：所有路径统一走 ILoop + LoopContext（connectionId/model/systemPrompt 等平铺字段），无特权后备路径 | `persistence/chat-engine-log.ts` |
 | **Goal** | ✅ 接口 + DependencyScheduler + reconcile + 3 Predicate；**4 控制回路全部切换** | `common/.../goal.ts`, `core/goal/`, `mission/`, `session-graph/` |
 | **Resume** | ✅ `LoopExecutor.resume()` + `resumeDrive()` + TaskRunner checkpoint 检测 | `core/loop-driver.ts`, `executors/loop-executor.ts`, `session/task-runner.ts` |
 | **LiteSubAgentRouter** | ✅ 迁移至 ILoop（`LoopExecutor` 替代 `UnifiedLoopStrategy`）| `mission/lite-sub-agent-router.ts` |
@@ -143,5 +151,6 @@ TaskRunner 在两个路径完成时回调 `agentResolver.recordUsageCost(connect
 - LLM 调用入口统一为 `ILLMService`，禁止绕过接口直接调用 device driver
 - 事件统一使用 `SessionEvent`；生产者 emit `AgentEvent`（flat）或 `MessageProjectionEvent`/`SessionStructuralEvent`（wrapper），EventBus 自动归一化
 - 新 Agent Loop 策略实现 `ILoop`，通过 `ExecutorRegistry.register()` 注册
+- 所有 LLM 配置（connectionId/model/systemPrompt/temperature 等）通过 `LoopContext` 传入 executor
 - `NodeStatus`、`ExecutorConfig`、`ExecutorType` 定义在 `core/types.ts`
-- 已删除：`ClaudeCodeStrategy`、`HarnessStrategy`、`HarnessAdapter`、`IHarnessContext`、`@itookit/llm-kernel`、`UnifiedLoopStrategy`
+- 已删除：`ClaudeCodeStrategy`、`HarnessStrategy`、`HarnessAdapter`、`IHarnessContext`、`@itookit/llm-kernel`、`UnifiedLoopStrategy`、**`executeTask()` + `createEventHandler()` + `handleUIEvents()` + `buildHistoryForTask()` + `buildHistoryMessages()` + `getHistory()`（后备路径 ~390 行）**

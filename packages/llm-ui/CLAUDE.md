@@ -20,6 +20,7 @@ src/
 
 ## 近期关键功能
 
+- **Dogfooding ✅ (2026-07-14)**: `executeTask()` 后备路径已消除；所有发送路径统一走 ILoop 协程协议；`LoopContext` 补全 connectionId/model/systemPrompt 等 LLM 配置字段
 - **S7 事件统一 ✅ (2026-07-14)**: HistoryView + SessionEventHandler 全面切换至 `SessionEvent`；旧 `OrchestratorEvent`（`session_start`、`node_update`、`node_start` 等）已从 UI 消费端完全移除；`EventBatchProcessor` 默认使用 `message:updated`/`message:status`
 - **S9 清理 ✅ (2026-07-14)**: `IHarnessContext`/`getHarnessContext` 已移除 — HarnessAdapter 删除后，harness 功能（Skill 加载、inject、plan confirm）处于休眠状态。`buildHarnessCallbacks`/`injectIntoRunningHarness` 已简化为空实现。
 - **Billing & Cost Dashboard**: CostEditor 双标签编辑器 — 仪表板 (time/provider 过滤、top sessions) + 定价配置 (可编辑 MODEL_PRICING、可展开匹配面板)

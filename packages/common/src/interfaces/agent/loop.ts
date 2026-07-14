@@ -102,6 +102,25 @@ export interface LoopContext {
     tools: IToolService;
     middlewares: ILoopMiddleware[];
     signal: AbortSignal;
+    // ── LLM config (flattened from executorConfig, eliminates executeTask fallback) ──
+    /** LLM connection ID passed to chatStream. Defaults to 'default' if absent. */
+    connectionId?: string;
+    /** Model override passed to chatStream. */
+    model?: string;
+    /** System prompt prepended before fold() messages (deduplicates any system in fold result). */
+    systemPrompt?: string;
+    /** Temperature override. */
+    temperature?: number;
+    /** Max output tokens. */
+    maxTokens?: number;
+    /** Enable extended thinking. */
+    thinking?: boolean;
+    /** Reasoning effort for o-series models. */
+    reasoningEffort?: string;
+    /** History length limit (undefined/-1 = no limit, 0 = empty). Only non-system messages are counted. */
+    historyLength?: number;
+    /** Task creation timestamp (ms) for durationMs calculation. */
+    startedAt?: number;
 }
 
 // ─── ILoopMiddleware — turn-level hooks ──────────────────────────────

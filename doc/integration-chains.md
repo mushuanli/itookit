@@ -23,21 +23,22 @@ vfs-ui (VFSUIShell)
 ```
 用户输入 (ChatInput.send)
   → SendMessageCommand
-    → llm-engine SessionManager.chat()
-      → TaskRunner.execute()
-        → [kernel 路径] ILLMService.chatStream() 直连（S6c: 替代 AgentExecutor）
-        → [harness 路径] AgentLoopExecutor (多轮+工具)
-          → LLMServiceAdapter → Provider (device-llm)
+    → llm-engine SessionManager.sendMessage()
+      → TaskRunner.submit() → processQueue()
+        → executeAgentLoopTask(mode)    // 统一 ILoop 路径（defaultMode='loop'）
+          → ExecutorRegistry.get(mode).run(ctx)
+            → drive(gen, actor, ctx)    // 协程宿主
+              → ctx.llm.chatStream()    // ILLMService（唯一 LLM 入口）
 ```
 
 | 步骤 | 组件 | 关键文件 |
 |---|---|---|
 | 输入 | `ChatInput.triggerSend()` | `llm-ui/src/components/input/ChatInputView.ts` |
 | 路由 | `SlashCommandRouter` / `SendMessageCommand` | `llm-ui/src/shell/`, `commands/` |
-| 会话 | `SessionManager.chat()` | `llm-engine/src/session/` |
-| 任务 | `TaskRunner.execute()` — kernal vs harness path | `llm-engine/src/session/task-runner.ts` |
-| 执行 | `AgentLoopExecutor.run()` | `llm-harness/src/executor/agent-loop-executor.ts` |
-| LLM | `LLMDriver.chat()` → Provider (OpenAI/Anthropic/Gemini) | `device-llm/src/core/driver.ts` |
+| 会话 | `SessionManager.sendMessage()` | `llm-engine/src/session/session-manager.ts` |
+| 任务 | `TaskRunner.submit()` → `processQueue()` → `executeAgentLoopTask()` | `llm-engine/src/session/task-runner.ts` |
+| 执行 | `ExecutorRegistry.get(mode).run(ctx)` | `llm-engine/src/core/executor-registry.ts` |
+| LLM | `ILLMService.chatStream()` → Provider (OpenAI/Anthropic/Gemini) | `device-llm/src/` |
 
 ## App 装配链
 
@@ -57,12 +58,12 @@ apps/web-app (entry)
 | 工作区 | `app-shell/src/strategies/` (5 种策略) |
 | 模块配置 | `apps/web-app/src/config/modules.ts` (WORKSPACES) |
 
-## Harness 5 步组装 (createHarness)
+## LLM 引擎装配 (initializeLLMEngine)
 
 ```
-1. LLMServiceAdapter(llmDriver)     // IDeviceDriver → ILLMService
+1. ILLMService 注入             // device-llm → llm-engine（唯一 LLM 调用路径）
 2. ToolDeviceDriver(BUILTIN_TOOLS)  // 加载内置工具
 3. SkillDeviceDriver()              // Skill 注册与管理
-4. AgentDeviceDriver()              // agent runtime
-5. init() + syncSkillsToHarness()   // 同步 VFS skill → harness
+4. ExecutorRegistry 注册            // chat / loop / loop:full / harness 四种 ILoop executor
+5. initializeLLMEngine({ llmService })  // 装配 SessionManager + TaskRunner + EventBus
 ```

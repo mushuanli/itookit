@@ -1,6 +1,6 @@
 # LLM 子系统 2.0 — 四原语内核 + 插件框架设计
 
-> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S10 完成：AgentLoopExecutor → ILoop 改造 + 中间件抽取）| 分支: v4.1
+> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（Dogfooding 强制执行：`executeTask()` 后备路径消除，LoopContext 补全，三条红线全部关闭）| 分支: v4.2
 > 前置分析: [llm-design.md](./llm-design.md)（现状五包架构审查）
 > 定位: 本文档是重构的**宪法**——定义不变的内核原语与扩展契约，现有功能全部归约为原语组合
 
@@ -8,7 +8,7 @@
 
 ## 实施进度
 
-**S1~S11 全部完成**（2026-07-14）。四原语内核 + 插件框架全部实施完毕，所有病灶已消除。
+**S1~S12 全部完成，七病灶全部消除**（2026-07-14）。四原语内核 + 插件框架 + 外层契约 + Dogfooding 强制执行全部实施完毕。
 
 | 阶段 | 状态 | 关键交付 | 剩余工作 |
 |---|---|---|---|
@@ -25,14 +25,16 @@
 | **S9** 清理收尾 | ✅ | ★ `@itookit/llm-kernel` 包物理删除（源码 + dist + package.json + 配置）；`HarnessAdapter` 类删除（~370 行，`execute()` 从未被调用）；`IHarnessContext` 删除（`harness-context.ts`，从未被初始化）；`useClaudeCode`/`maxTurns` 死字段移除（`ExecutionOverrides`）；llm-ui 3 文件清理 `getHarnessContext()` 调用；SlashCommandRouter 删除 `buildHarnessSlashCallbacks`（~90 行）；`buildHarnessCallbacks`/`injectIntoRunningHarness` 简化为空实现；6 个 CLAUDE.md 文档更新 | — |
 | **S10** AgentLoopExecutor → ILoop | ✅ | ★ `AgentLoopExecutor` while-true 循环 → `HarnessLoopExecutor`（AsyncGenerator ILoop, mode='harness'）；`harness-middleware.ts`（6 个 ILoopMiddleware 工厂，包装 BudgetController/ContextManager/ErrorRecoveryService/BackPressureValidator/HITLQueue/SkillService）；`ILoopMiddleware.onToolCalls` 钩子 + `ControlDirective.pause` action 统一 plan confirm / permission / HITL 暂停路径；loop-middleware 存根改为委托模式（接受可选 `harnessImpl`）；`HarnessMiddlewareSet` 允许外部注入；`app-shell/bootstrap.ts` 注册 `HarnessLoopExecutor` | — |
 | **S11** Resume + LiteSubAgentRouter ILoop | ✅ | ★ `LoopExecutor.resume()` — 抽取 `executeLoop(ctx, startTurn, initialTurns)`，`run()` 和 `resume()` 共享；`resume()` 从 `log.fold()` 重建消息 → 计数已完成轮次 → 重入循环；`resumeDrive()` — 调用 `loop.resume(checkpoint)` + `driveGenerator()`；`HarnessLoopExecutor.resume()` — 存储 `lastCtx`，基础重建后委托 `run()`；TaskRunner checkpoint 检测 — `log.draft().restore()` → `resumeDrive()` : `drive()`；★ `LiteSubAgentRouter` 迁移至 ILoop — 用 `LoopExecutor` + 手动驱动替代 `UnifiedLoopStrategy`；`createInMemoryLog()` + `createToolServiceAdapter()` + ILLMService connection/model wrapper；`loopFactory` 可选注入 | — |
+| **S12** 外层架构 | ✅ | ★ `ISession` 接口 — `signal()` + `events()` 两个方法；`SessionManager implements ISession` — 51 方法门面降级为 Channel 原语 + CommandBus 命令；`DraftArea.setCurrent()` 接线 — `driveGenerator()` 在 `turn:start` 处持久化 in-flight 轮次边界；canonical `AgentEvent` 补全 — 15→23 变体（`signal_resolved`、`log:ref_created/deleted/merged`、`budget:warning/exhausted`、`context:compressed`、`goal:progress`）；`ICommandBus` + `CommandBus` 实现（llm-engine 层）；`ILLMPlugin` + `ExtensionRegistry` + 3 个内置插件（session/vcs/history）；15 个 UI 文件迁移至 `commands.execute()` | — |
 
-### 全部完成（S1~S11）
+### 全部完成（S1~S12）
 
 | 阶段 | 状态 | 关键交付 |
 |---|---|---|
 | S1~S9 | ✅ | 四原语内核（Log/Loop/Channel/Goal）+ 插件框架全部实施；llm-kernel 消除；事件统一；控制回路统一 |
 | **S10** | ✅ | `AgentLoopExecutor` → ILoop 改造：`HarnessLoopExecutor`（AsyncGenerator ILoop, mode='harness'）、`harness-middleware.ts`（6 个 ILoopMiddleware 工厂包装现有服务类）、`ILoopMiddleware.onToolCalls` 钩子 + `ControlDirective.pause` action 统一 plan confirm / permission / HITL 暂停路径、loop-middleware 存根改为委托模式（`harnessImpl` 参数）、`HarnessMiddlewareSet` 外部注入接口 |
 | **S11** | ✅ | `resume()` 实现 — `LoopExecutor.resume()` 从 Log 重建状态后重入循环、`resumeDrive()` 协程宿主、`HarnessLoopExecutor.resume()` 基础实现、TaskRunner checkpoint 检测 + resume 路径；`LiteSubAgentRouter` ILoop 迁移 — 用 `LoopExecutor` 替代 `UnifiedLoopStrategy` |
+| **S12** | ✅ | 外层架构 — `ISession` 接口（`signal()` + `events()`）、`SessionManager implements ISession`（51→2 方法收缩）、`DraftArea.setCurrent()` 接线、canonical `AgentEvent` 15→23 变体补全、`ICommandBus` + `CommandBus` 实现、`ILLMPlugin` + `ExtensionRegistry` + 3 个内置插件（session/vcs/history）、15 个 UI 文件迁移至 `commands.execute()` |
 
 **七病灶全部消除**：
 
@@ -47,21 +49,19 @@
 | 7 | 内部平台效应 | S6a + S8 + S9 |
 
 
-## 未开始 — 外层架构（设计文档 §4~§7 理想架构）
+## 外层架构 — S12 已完成
 
-以下各项在设计文档第 4~7 节有详细定义，属于四原语模型的外层契约和插件生态。核心内核（Log/Loop/Channel/Goal 的数据结构与执行管线）已落地，但这些外层抽象尚未实施：
+以下各项在设计文档第 4~7 节有详细定义。全部 7/7 项已在 S12 + Dogfooding 补丁落地：
 
-| # | 项目 | 设计位置 | 说明 |
+| # | 项目 | 设计位置 | S12 状态 |
 |---|---|---|---|
-| 1 | **`ISession` 接口** | §4 Channel 原语 | `signal()` + `events()` 两个方法；SessionManager 当前仍有 23 个 public 方法 |
-| 2 | **`DraftArea.setCurrent()` 接线** | §2.1 / loop-driver | 在 `driveGenerator()` 中 await_signal 前调用 `setCurrent()`，使 checkpoint 持久化完整 |
-| 3 | **`ExtensionRegistry` + `IPlugin`** | §6 扩展系统 | 通用扩展注册表 + 6 个扩展点（executors/middleware/commands/tools/views/predicates）+ 插件生命周期（activate/deactivate） |
-| 4 | **`ICommandBus`**（llm-engine 层） | §6.2 / §6.3 | SessionManager 30+ API → plugin-contributed commands（`vcs.*`、`tasks.*` 等） |
-| 5 | **SessionManager 瘦身** | §6.3 | 30+ 方法 → `signal()` + `events()`，其余功能通过 CommandBus 暴露 |
-| 6 | **Dogfooding 强制执行** | §10 红线 2 | 内置功能走公开 ILoop 注册，零特权路径；`executeTask()` 后备路径消除 |
-| 7 | **canonical AgentEvent 补全** | §4 / 03-channel.md | 设计中约 22 个变体，当前实现 15 个；缺失：`signal_resolved`、`log:ref_created`、`log:ref_deleted`、`log:merged`、`budget:warning`、`budget:exhausted`、`context:compressed`、`goal:progress` |
-
-**实施建议**：从改动最小的开始（#2 `setCurrent` 接线 ~5 行），或从设计价值最高的开始（#1 `ISession` 接口 → #4 `ICommandBus` → #5 SessionManager 瘦身）。#3 扩展系统依赖 #4 命令总线先落地。
+| 1 | **`ISession` 接口** | §4 Channel 原语 | ✅ `signal()` + `events()`；`SessionManager implements ISession` |
+| 2 | **`DraftArea.setCurrent()` 接线** | §2.1 / loop-driver | ✅ 接口声明 + `driveGenerator()` 在 `turn:start` 处调用 |
+| 3 | **`ExtensionRegistry` + `IPlugin`** | §6 扩展系统 | ✅ `ILLMPlugin`/`ExtensionContext`/`IExtensionRegistry` 接口 + 实现 |
+| 4 | **`ICommandBus`**（llm-engine 层） | §6.2 / §6.3 | ✅ 接口 + `CommandBus` 实现；51 方法 → 60+ 命令 |
+| 5 | **SessionManager 瘦身** | §6.3 | ✅ `SessionManager implements ISession`；15 个 UI 文件迁移至 `commands.execute()` |
+| 6 | **Dogfooding 强制执行** | §10 红线 2 | ✅ `processQueue()` 默认 mode 消灭后备路径；`LoopContext` 补全 connectionId/model/systemPrompt 等字段；chat/loop executor 消费新字段；`executeTask()` 及专属方法（~390 行）已物理删除 |
+| 7 | **canonical AgentEvent 补全** | §4 / 03-channel.md | ✅ 15→23 变体：`signal_resolved`、`log:ref_created/deleted/merged`、`budget:warning/exhausted`、`context:compressed`、`goal:progress` |
 
 ---
 
@@ -624,6 +624,7 @@ export const vcsPlugin: IPlugin = {
 | **S8** | `llm-core` 拆包 → llm-kernel 消除 | 病灶 7 | `@itookit/llm-kernel` 包物理删除；所有符号迁移至 llm-engine 或删除；6 个 package.json + 3 个 vite.config 清理 | ✅ |
 | **S10** | `AgentLoopExecutor` → ILoop 改造 + 中间件抽取 | 病灶 2、6 | `HarnessLoopExecutor`（AsyncGenerator ILoop, mode='harness'）；`harness-middleware.ts`（6 个 ILoopMiddleware 工厂）；`ILoopMiddleware.onToolCalls` + `ControlDirective.pause` 统一暂停路径；loop-middleware 委托模式；S1~S10 全七病灶消除 | ✅ |
 | **S11** | `resume()` 完整实现 + LiteSubAgentRouter ILoop 迁移 | 病灶 2（收尾） | `LoopExecutor.resume()` + `resumeDrive()`；TaskRunner checkpoint 检测；`LiteSubAgentRouter` 用 `LoopExecutor` 替代 `UnifiedLoopStrategy`；`UnifiedLoopStrategy` 零消费者 | ✅ |
+| **S12** | 外层架构：`ISession` 接口 + `ICommandBus` + SessionManager 降级 + AgentEvent 补全 | 外层契约 | `SessionManager implements ISession`（51→2 方法收缩）；`DraftArea.setCurrent()` 接线；AgentEvent 15→23 变体；`ICommandBus`/`CommandBus` + `ExtensionRegistry` + 3 内置插件；15 个 UI 文件迁移至 `commands.execute()` | ✅ |
 
 ---
 
@@ -654,8 +655,8 @@ export const vcsPlugin: IPlugin = {
 
 ## 10. 架构纪律（三条红线）
 
-1. **不先建框架**。顺序：定两个硬契约（`AgentEvent` + `ILoop`）→ 包装现有路径 → 抽中间件 → 最后才建注册表和拆包。framework-first 是第二次 llm-kernel 悲剧的配方。
-2. **内置吃自己的狗粮**。chat/loop 必须走 `ILoop` 注册，内核对内置功能零特权路径。
+1. **不先建框架**。顺序：定两个硬契约（`AgentEvent` + `ILoop`）→ 包装现有路径 → 抽中间件 → 最后才建注册表和拆包。framework-first 是第二次 llm-kernel 悲剧的配方。✅ S12 服从：插件框架在 S1~S11 内核稳定后才落地。
+2. **内置吃自己的狗粮**。chat/loop 必须走 `ILoop` 注册，内核对内置功能零特权路径。✅ session/vcs/history 插件通过 `ICommandBus.register()` 注册，与第三方插件使用同一 API。✅ `executeTask()` 后备路径已物理删除（`LoopContext` 补全 LLM 配置字段 + `processQueue()` 默认 mode）——所有调用路径统一走 `ILoop` 协程协议。
 3. **不做进程隔离/沙箱**。当前全部插件是第一方代码，进程内注册表足够；extension host 隔离是第三方生态的需求（YAGNI）。
 
 ---

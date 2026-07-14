@@ -13,7 +13,19 @@ export const chatExecutor: ILoop = {
 
     async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
         const turnId = ulid();
-        const messages = await ctx.log.fold(ctx.ref);
+        let messages = await ctx.log.fold(ctx.ref);
+
+        // Apply historyLength limit (system messages are never counted/truncated)
+        if (ctx.historyLength !== undefined && ctx.historyLength !== -1 && ctx.historyLength >= 0) {
+            const sys = messages.filter(m => m.role === 'system');
+            const rest = messages.filter(m => m.role !== 'system');
+            messages = [...sys, ...rest.slice(-ctx.historyLength)];
+        }
+
+        // Prepend systemPrompt, deduplicating any system message already in fold result
+        const finalMessages = ctx.systemPrompt
+            ? [{ role: 'system' as const, content: ctx.systemPrompt }, ...messages.filter(m => m.role !== 'system')]
+            : messages;
 
         yield {
             type: 'turn:start',
@@ -25,8 +37,13 @@ export const chatExecutor: ILoop = {
         const assistantContent: string[] = [];
 
         try {
-            const stream = ctx.llm.chatStream('default', {
-                messages,
+            const stream = ctx.llm.chatStream(ctx.connectionId ?? 'default', {
+                messages: finalMessages,
+                model: ctx.model,
+                temperature: ctx.temperature,
+                maxTokens: ctx.maxTokens,
+                thinking: ctx.thinking,
+                reasoningEffort: ctx.reasoningEffort as any,
                 signal: ctx.signal,
             });
 
@@ -56,7 +73,7 @@ export const chatExecutor: ILoop = {
             id: turnId,
             parents: [],
             payload: [
-                ...messages,
+                ...finalMessages,
                 { role: 'assistant', content: finalContent },
             ],
             meta: {

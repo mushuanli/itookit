@@ -47,4 +47,4 @@
 | `SkillInfo` | `llm-ui/domain/types.ts` |
 | `TokenStats` | `llm-ui/domain/types.ts` |
 | `SkillType` (builtin/http/shell/prompt/mcp/custom) | `common/interfaces/skills/skill-types.ts` |
-| `OrchestratorEvent` | `llm-engine/src/core/types.ts` |
+| `SessionEvent` | `llm-engine/src/core/types.ts` |
