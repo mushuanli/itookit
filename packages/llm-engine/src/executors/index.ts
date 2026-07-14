@@ -6,7 +6,7 @@
 export { chatExecutor } from './chat-executor';
 export { LoopExecutor } from './loop-executor';
 export { createLoopExecutor } from './loop-presets';
-export type { LoopPresetConfig } from './loop-presets';
+export type { LoopPresetConfig, HarnessMiddlewareSet } from './loop-presets';
 export {
     createBudgetMiddleware,
     createErrorRecoveryMiddleware,

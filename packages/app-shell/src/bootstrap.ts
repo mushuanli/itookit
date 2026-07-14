@@ -18,7 +18,7 @@ import type { SessionManager } from '@itookit/llm-engine';
 import { MemoryManager } from '@itookit/memory-manager';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { setKernelDeviceManager } from '@itookit/llm-engine';
-import { createHarness, type HarnessInstance } from '@itookit/llm-harness';
+import { createHarness, HarnessLoopExecutor, type HarnessInstance } from '@itookit/llm-harness';
 import { SkillsEngine } from '@itookit/app-settings';
 import { createSkillsEditorFactory } from '@itookit/llm-ui';
 
@@ -322,6 +322,17 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         sessionEngine,
         maxConcurrent:       20,
         llmService:          harness.llmService,
+        executors: [
+            new HarnessLoopExecutor(
+                harness.llmService,
+                harness.toolService,
+                harness.skillService,
+                harness.config.getModelRoles(),
+                harness.config.getLoopConfig(),
+                harness.config.getBudgetLimits(),
+                undefined!, // subAgentRouter — harness loop delegates via tools, not inline
+            ),
+        ],
     });
 
     const llmUiEditors: LLMUIEditors = {

@@ -1,8 +1,9 @@
 // Middleware pipeline — composes ILoopMiddleware into a turn-level wrapper.
 //
 // Middleware execution order (LIFO, like a stack):
-//   beforeTurn: [mw1, mw2, mw3] → mw1 → mw2 → mw3 → turn execution
-//   afterTurn:  turn execution → mw3 → mw2 → mw1
+//   beforeTurn:  [mw1, mw2, mw3] → mw1 → mw2 → mw3 → turn execution
+//   onToolCalls: [mw1, mw2, mw3] → mw1 → mw2 → mw3 (first non-void wins)
+//   afterTurn:   turn execution → mw3 → mw2 → mw1
 //   onError:     first non-undefined result wins (mw1, then mw2, ...)
 
 import type {
@@ -11,10 +12,12 @@ import type {
     TurnResult,
     ControlDirective,
     RecoveryAction,
+    PlannedTool,
 } from '@itookit/common';
 
 export interface MiddlewarePipeline {
     applyBeforeTurn(ctx: TurnContext): Promise<ControlDirective | void>;
+    applyOnToolCalls(ctx: TurnContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void>;
     applyAfterTurn(ctx: TurnContext, result: TurnResult): Promise<ControlDirective | void>;
     applyOnError(ctx: TurnContext, error: Error): Promise<RecoveryAction | void>;
 }
@@ -28,6 +31,15 @@ export function composeMiddleware(middlewares: ILoopMiddleware[]): MiddlewarePip
             for (const mw of sorted) {
                 if (mw.beforeTurn) {
                     const directive = await mw.beforeTurn(ctx);
+                    if (directive) return directive;
+                }
+            }
+        },
+
+        async applyOnToolCalls(ctx: TurnContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void> {
+            for (const mw of sorted) {
+                if (mw.onToolCalls) {
+                    const directive = await mw.onToolCalls(ctx, toolCalls);
                     if (directive) return directive;
                 }
             }

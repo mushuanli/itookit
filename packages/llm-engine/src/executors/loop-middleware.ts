@@ -1,11 +1,9 @@
 // Loop middleware — built-in ILoopMiddleware implementations.
 //
 // These are the 7 canonical middleware from the llm-2 design.
-// For S3, they are self-contained implementations that mirror
-// the corresponding llm-harness classes.
-//
-// In S6, these will be replaced by thin wrappers around the
-// harness classes (BudgetController, ContextManager, etc.).
+// Each factory accepts an optional `harnessImpl` parameter — when provided,
+// the harness implementation is returned instead of the built-in stub.
+// This allows llm-harness middleware to be injected without cross-package deps.
 
 import type {
     ILoopMiddleware,
@@ -16,7 +14,7 @@ import type {
 } from '@itookit/common';
 import { TruncationDetector } from '../session/truncation-detector';
 
-// ─── Truncation Detection Config (formerly in session/auto-continue.ts) ───
+// ─── Truncation Detection Config ────────────────────────────────────
 
 interface TruncationDetectionConfig {
     enabled: boolean;
@@ -51,7 +49,9 @@ interface BudgetConfig {
     maxDurationMs?: number;
 }
 
-export function createBudgetMiddleware(limits: BudgetConfig): ILoopMiddleware {
+export function createBudgetMiddleware(limits: BudgetConfig, harnessImpl?: ILoopMiddleware): ILoopMiddleware {
+    if (harnessImpl) return harnessImpl;
+
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let turnCount = 0;
@@ -103,7 +103,9 @@ interface ErrorRecoveryConfig {
     baseDelayMs?: number;
 }
 
-export function createErrorRecoveryMiddleware(config: ErrorRecoveryConfig = {}): ILoopMiddleware {
+export function createErrorRecoveryMiddleware(config: ErrorRecoveryConfig = {}, harnessImpl?: ILoopMiddleware): ILoopMiddleware {
+    if (harnessImpl) return harnessImpl;
+
     const maxRetries = config.maxRetries ?? 3;
     const baseDelayMs = config.baseDelayMs ?? 1000;
     const retryCounts = new Map<string, number>();
@@ -146,7 +148,9 @@ export function createErrorRecoveryMiddleware(config: ErrorRecoveryConfig = {}):
 
 // ─── HITL Middleware ──────────────────────────────────────────────────
 
-export function createHITLMiddleware(): ILoopMiddleware {
+export function createHITLMiddleware(harnessImpl?: ILoopMiddleware): ILoopMiddleware {
+    if (harnessImpl) return harnessImpl;
+
     return {
         name: '03-hitl',
 
@@ -159,7 +163,9 @@ export function createHITLMiddleware(): ILoopMiddleware {
 
 // ─── Back-Pressure Middleware ─────────────────────────────────────────
 
-export function createBackPressureMiddleware(): ILoopMiddleware {
+export function createBackPressureMiddleware(harnessImpl?: ILoopMiddleware): ILoopMiddleware {
+    if (harnessImpl) return harnessImpl;
+
     return {
         name: '04-back-pressure',
 
@@ -182,7 +188,9 @@ export function createBackPressureMiddleware(): ILoopMiddleware {
 
 // ─── Compression Middleware (stub) ────────────────────────────────────
 
-export function createCompressionMiddleware(): ILoopMiddleware {
+export function createCompressionMiddleware(harnessImpl?: ILoopMiddleware): ILoopMiddleware {
+    if (harnessImpl) return harnessImpl;
+
     return {
         name: '05-compression',
         // Full implementation requires ContextManager from llm-harness.
@@ -193,7 +201,9 @@ export function createCompressionMiddleware(): ILoopMiddleware {
 
 // ─── Skills Middleware (stub) ─────────────────────────────────────────
 
-export function createSkillsMiddleware(): ILoopMiddleware {
+export function createSkillsMiddleware(harnessImpl?: ILoopMiddleware): ILoopMiddleware {
+    if (harnessImpl) return harnessImpl;
+
     return {
         name: '06-skills',
         // Full implementation requires ContextManager + ISkillService

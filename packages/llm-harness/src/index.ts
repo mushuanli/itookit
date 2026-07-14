@@ -3,6 +3,7 @@
 
 // ── Executor components ──
 export { AgentLoopExecutor } from './executor/agent-loop-executor';
+export { HarnessLoopExecutor } from './executor/harness-loop-executor';
 export { BudgetController } from './executor/budget-controller';
 export { ErrorRecoveryService } from './executor/error-recovery';
 export { BackPressureValidator } from './executor/back-pressure';

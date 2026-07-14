@@ -777,9 +777,13 @@ export class TaskRunner {
 
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         if (isBound) {
+            // Determine parent: the user message is a child of the last assistant message
+            const prevSession = state.getLastSession();
+            const parentId = prevSession?.role === 'assistant' ? prevSession.id : undefined;
+
             this.eventBus.emitSession(sessionId, {
                 type: 'message:appended',
-                payload: { sessionGroup: userSession },
+                payload: { sessionGroup: userSession, parentId },
             });
         }
 
@@ -819,14 +823,15 @@ export class TaskRunner {
 
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         if (isBound) {
+            // Only emit rootNode — createAssistantMessage already updated getLastSession()
+            // to point to the same node. Emitting both causes "Duplicate session" in UI.
             this.eventBus.emitSession(sessionId, {
                 type: 'message:appended',
-                payload: { sessionGroup: state.getLastSession()! },
-            });
-
-            this.eventBus.emitSession(sessionId, {
-                type: 'message:appended',
-                payload: { sessionGroup: rootNode as any, isExecutionRoot: true },
+                payload: {
+                    sessionGroup: rootNode as any,
+                    isExecutionRoot: true,
+                    parentId: parentUserNodeId,
+                },
             });
         }
 

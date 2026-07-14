@@ -25,6 +25,7 @@ import type {
     RecoveryAction,
     TokenUsage,
     ToolCall,
+    PlannedTool,
 } from '@itookit/common';
 import { composeMiddleware, type MiddlewarePipeline } from '../core/middleware-pipeline';
 
@@ -221,6 +222,50 @@ export class LoopExecutor implements ILoop {
                     });
                 }
 
+                // ── 4b. onToolCalls middleware (plan confirm before execution) ──
+                if (toolCalls.length > 0) {
+                    const plannedTools: PlannedTool[] = toolCalls.map(tc => ({
+                        id: tc.id,
+                        name: tc.function?.name ?? '',
+                        arguments: safeParseJson(tc.function?.arguments ?? '{}'),
+                    }));
+
+                    const toolCallsDirective = await this.pipeline.applyOnToolCalls(turnCtx, plannedTools);
+                    if (toolCallsDirective) {
+                        if (toolCallsDirective.action === 'abort') {
+                            yield { type: 'error', error: { message: toolCallsDirective.reason, code: 'PLAN_REJECTED' } };
+                            break;
+                        }
+                        if (toolCallsDirective.action === 'pause') {
+                            // Pause for user confirmation — drive() checkpoints, waits for Signal,
+                            // then resumes the generator with gen.next(signal).
+                            signal = yield {
+                                type: 'await_signal',
+                                request: toolCallsDirective.request,
+                            } as AgentEvent;
+                            // signal is the Signal passed by drive() via gen.next(signal)
+                            if (signal?.type === 'abort') break;
+                            if (signal?.type === 'respond') {
+                                const resp = signal.response;
+                                if (resp === false) {
+                                    yield { type: 'error', error: { message: 'Plan rejected by user', code: 'PLAN_REJECTED' } };
+                                    break;
+                                }
+                                if (typeof resp === 'string') {
+                                    // User modified the plan — inject as correction, skip tools this turn
+                                    messages.push({ role: 'user', content: `[Plan adjustment] ${resp}` });
+                                    continue;
+                                }
+                            }
+                            // true, undefined, or unrecognized → approved, proceed to tool execution
+                        }
+                        if (toolCallsDirective.action === 'inject') {
+                            messages.push({ role: 'user', content: toolCallsDirective.text });
+                            continue;
+                        }
+                    }
+                }
+
                 // ── 5. Execute tools ──
                 const toolResults: ToolExecResult[] = [];
 
@@ -306,10 +351,29 @@ export class LoopExecutor implements ILoop {
                 };
 
                 const afterDirective = await this.pipeline.applyAfterTurn(turnCtx, turnResult);
-                if (afterDirective?.action === 'inject') {
-                    // Back-pressure injected a correction — feed back to LLM
-                    messages.push({ role: 'user', content: afterDirective.text });
-                    continue;
+                if (afterDirective) {
+                    if (afterDirective.action === 'abort') {
+                        yield { type: 'error', error: { message: afterDirective.reason, code: 'AFTERTURN_ABORT' } };
+                        break;
+                    }
+                    if (afterDirective.action === 'inject') {
+                        messages.push({ role: 'user', content: afterDirective.text });
+                        continue;
+                    }
+                    if (afterDirective.action === 'pause') {
+                        signal = yield {
+                            type: 'await_signal',
+                            request: afterDirective.request,
+                        } as AgentEvent;
+                        if (signal?.type === 'abort') break;
+                        if (signal?.type === 'respond') {
+                            const resp = signal.response;
+                            if (typeof resp === 'string') {
+                                messages.push({ role: 'user', content: resp });
+                            }
+                            continue;
+                        }
+                    }
                 }
 
                 // ── 7. Build the turn and checkpoint ──

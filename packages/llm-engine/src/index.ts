@@ -37,7 +37,7 @@ export type { MiddlewarePipeline } from './core/middleware-pipeline';
 // ── LLM 2.0: Executors (ILoop implementations) ──────────────────────
 
 export { chatExecutor, LoopExecutor, createLoopExecutor } from './executors';
-export type { LoopPresetConfig } from './executors';
+export type { LoopPresetConfig, HarnessMiddlewareSet } from './executors';
 export {
     createBudgetMiddleware,
     createErrorRecoveryMiddleware,

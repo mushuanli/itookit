@@ -7,6 +7,7 @@
 > **S7 ✅ (2026-07-14)**: `OrchestratorEvent` 类型已删除 — 全部生产者迁移到 `SessionEvent`（= canonical AgentEvent + MessageProjectionEvent + SessionStructuralEvent）；UI 旧事件 fallback 已清理；`TransitionalEvent` 过渡期代码已移除。
 > **S8 ✅ (2026-07-14)**: `@itookit/llm-kernel` 包消除 — `NodeStatus`、`ExecutorConfig`、`ExecutorType` 内联至 `core/types.ts`；`setKernelDeviceManager` 迁移至 `core/device-registry.ts`；`initializeKernel()` inline 至 `initializeLLMEngine()`。
 > **S9 ✅ (2026-07-14)**: `@itookit/llm-kernel` 物理删除；`HarnessAdapter` + `IHarnessContext` 删除（均为死代码）；UI 层 harness 引用清理。
+> **S10 ✅ (2026-07-14)**: `AgentLoopExecutor` → ILoop 改造完成 — `HarnessLoopExecutor`（AsyncGenerator ILoop）替代 while-true 循环；6 个 harness 中间件抽取；`ILoopMiddleware.onToolCalls` + `ControlDirective.pause` 统一 plan confirm / permission / HITL 暂停路径。
 
 ## Architecture
 
@@ -31,7 +32,8 @@ src/
 │                     ★ middleware-pipeline (composeMiddleware)
 │                     ★ session-actor (SessionActor — drive ↔ EventBus 桥接)
 │                     ★ goal/ (S5 ✅) — DependencyScheduler + reconcile + 3 Predicate
-├── executors/      ← chat-executor, loop-executor, loop-middleware (7 个中间件), loop-presets
+├── executors/      ← chat-executor, loop-executor, loop-middleware (7 个中间件 + harness 委托),
+│                     loop-presets (lite/full + HarnessMiddlewareSet)
 └── utils/          ← converters, error-formatter, logger, parsers
 ```
 
@@ -42,14 +44,16 @@ SessionManager.sendMessage()
   └─ TaskRunner.submit() → processQueue()
        ├─ mode specified → executeAgentLoopTask(mode)
        │   └─ ExecutorRegistry.get(mode).run(ctx) → drive(gen, actor, ctx)
-       │       ├─ mode='chat'     → chatExecutor (单轮，无工具)
-       │       ├─ mode='loop'     → LoopExecutor(lite) = [budget, error-recovery, truncation]
-       │       └─ mode='loop:full' → LoopExecutor(full) = 全部 7 个中间件
+       │       ├─ mode='chat'      → chatExecutor (单轮，无工具)
+       │       ├─ mode='loop'      → LoopExecutor(lite) = [budget, error-recovery, truncation]
+       │       ├─ mode='loop:full' → LoopExecutor(full) = 全部 7 个中间件
+       │       └─ mode='harness'   → HarnessLoopExecutor (llm-harness) = ContextManager + 六维预算 + 四层压缩 + …
        └─ mode absent → executeTask()
            └─ ILLMService.chatStream()   ← S6c: 直接调用 ILLMService，不再经 LLMKernelAdapter
 ```
 
 > **S6c**: `executeTask()` 改为 `ILLMService.chatStream()` 直连，token 统计优先使用真实数据。LLMKernelAdapter + UIEventAdapter 已删除。
+> **S10**: `HarnessLoopExecutor`（mode='harness'）注册到 ExecutorRegistry，提供完整 harness 体验。loop-middleware 各工厂接受可选 `harnessImpl` 参数实现委托模式；`HarnessMiddlewareSet` 允许外部注入 harness 中间件替代内置存根。
 
 ## LLM 2.0 四原语（S1~S7 实施状态）
 

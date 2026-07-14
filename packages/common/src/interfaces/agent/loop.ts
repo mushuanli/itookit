@@ -103,9 +103,19 @@ export interface LoopContext {
 
 // ─── ILoopMiddleware — turn-level hooks ──────────────────────────────
 
+/** Lightweight tool call info passed to onToolCalls hook. */
+export interface PlannedTool {
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+}
+
 export interface ILoopMiddleware {
     readonly name: string;
     beforeTurn?(ctx: TurnContext): Promise<void | ControlDirective>;
+    /** Called after LLM response parsing, before tool execution.
+     *  Use for plan-confirm: return `{ action: 'pause' }` to await user approval. */
+    onToolCalls?(ctx: TurnContext, toolCalls: PlannedTool[]): Promise<void | ControlDirective>;
     afterTurn?(ctx: TurnContext, result: TurnResult): Promise<void | ControlDirective>;
     onError?(ctx: TurnContext, error: Error): Promise<RecoveryAction>;
 }
@@ -134,7 +144,10 @@ export interface TurnResult {
 export type ControlDirective =
     | { action: 'abort'; reason: string }
     | { action: 'skip_turn' }
-    | { action: 'inject'; text: string };
+    | { action: 'inject'; text: string }
+    /** Pause the loop and wait for user signal (plan confirm, permission, HITL).
+     *  The loop body yields `await_signal` and resumes when drive() passes the Signal. */
+    | { action: 'pause'; request: PauseRequest };
 
 export type RecoveryAction =
     | { action: 'retry'; delayMs?: number }

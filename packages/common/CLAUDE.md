@@ -110,7 +110,9 @@ IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult
 | `AgentEventPayloads` | `interfaces/agent/agent-types.ts` | @deprecated — 旧事件→payload 映射 |
 | `AgentEvent` | `interfaces/agent/agent-event.ts` | ★ canonical 事件 schema（15 个，S7: +tool:input +log:ref_renamed） |
 | `ILoop` | `interfaces/agent/loop.ts` | ★ 执行原语 — AsyncGenerator 协程 |
-| `ILoopMiddleware` | `interfaces/agent/loop.ts` | 轮次级 hook (beforeTurn / afterTurn / onError) |
+| `ILoopMiddleware` | `interfaces/agent/loop.ts` | 轮次级 hook — `beforeTurn` / `onToolCalls` / `afterTurn` / `onError`。`onToolCalls` 在 LLM 响应解析后、工具执行前调用（plan confirm 等） |
+| `PlannedTool` | `interfaces/agent/loop.ts` | 轻量工具调用信息（id, name, arguments），onToolCalls 钩子入参 |
+| `ControlDirective` | `interfaces/agent/loop.ts` | 中间件控制指令 — `abort` / `skip_turn` / `inject` / `pause`（暂停等待用户确认，驱动 yield `await_signal`） |
 | `ILog` / `Turn` / `RefStore` | `interfaces/agent/loop.ts` | Log 原语契约 — `Turn.result` 携带 LoopExecutor 运行时输出 |
 | `TurnResult` | `interfaces/agent/loop.ts` | 轮次结果 — assistantBlocks + toolResults + usage + finishReason |
 | `Goal` / `GoalNode` / `IController` / `Predicate` / `Verdict` | `interfaces/agent/goal.ts` | Goal 控制回路契约（S5 ✅） |
