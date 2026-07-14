@@ -8,7 +8,7 @@
 
 ```
 src/
-├── session/        ← SessionManager, SessionState (@deprecated), TaskRunner
+├── session/        ← SessionManager, SessionState (in-memory projection cache), TaskRunner
 │                     SessionEventBus (session + global 双 track, channel 路由)
 │                     truncation-detector, auto-continue, session-recovery
 ├── persistence/    ← ChatEngine (IChatEngine), ★ ChatEngineLog (完整 ILog facade)
@@ -24,8 +24,7 @@ src/
 │                     ★ session-actor (SessionActor — drive ↔ EventBus 桥接)
 │                     ★ goal/ (S5) — DependencyScheduler + reconcile + 3 Predicate
 ├── executors/      ← chat-executor, loop-executor, loop-middleware, loop-presets
-└── utils/          ← converters, LockManager (@deprecated), manifest-repair (@deprecated),
-│                     throttled-writer (@deprecated)
+└── utils/          ← converters, error-formatter, logger, parsers
 ```
 
 ## 两条执行路径
@@ -52,20 +51,21 @@ SessionManager.sendMessage()
 | **ILog** | ✅ 完整实现 — ChatEngineLog（VFS DraftArea + RefStore + fold 缓存） | `persistence/chat-engine-log.ts` |
 | **Goal** | ✅ 接口 + DependencyScheduler + reconcile + 3 Predicate | `common/.../goal.ts`, `core/goal/` |
 
-### ILog (S4)
+### ILog (S4) — completed 2026-07-14
 
 | 组件 | 文件 | 说明 |
 |---|---|---|
 | `ChatEngineLog` | `persistence/chat-engine-log.ts` | 完整 ILog 实现：append/fold/merge/rebase + fold TTL 缓存 |
 | `VFSDraftArea` | 同上（内部类） | 崩溃安全草稿持久化到 VFS assetdir |
 | `ChatEngineRefStore` | 同上（内部类） | ChatManifest 驱动的分支/标签 CRUD |
-| `ulid()` | `persistence/ulid.ts` | Crockford base32 ULID 生成 |
+| `ulid()` | `persistence/ulid.ts` | Crockford base32 ULID 生成（替代 BBB_SSSSS_R 位置编码） |
+| `SessionState` | `session/session-state.ts` | 内存投影缓存 — ILog.fold() 的 UI 层投影，非独立事实源 |
 
-**已标记 @deprecated（待后续删除）**:
-- `SessionState` — 内存历史副本 → `ILog.fold()` 替代
-- `LockManager` — 互斥锁 → ILog I2 单写入方架构保证
-- `manifest-repair` — 修复工具 → append-only 无不一致态
-- `ThrottledWriter` — 节流写入 → DraftArea 替代
+**已删除**（S4）:
+- ~~`LockManager`~~ → 内联 Promise 链 (ChatEngine.withLock)
+- ~~`manifest-repair`~~ → append-only 无不一致态
+- ~~`ThrottledWriter`~~ → 内联 accumulator 模式
+- ~~`BBB_SSSSS_R` ID~~ → ULID（`makeNodeId` 改用 `ulid()`）
 
 ### Goal (S5)
 

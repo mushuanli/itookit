@@ -24,7 +24,6 @@ import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
 import { AutoContinueHandler, AutoContinueConfig } from './auto-continue';
-import { createThrottledWriter } from '../utils/throttled-writer';
 import { formatErrorMessage } from '../utils/error-formatter';
 import { log } from '../utils/logger';
 // ── LLM 2.0: Executor-driven dispatch ──
@@ -295,10 +294,25 @@ export class TaskRunner {
             input.origin, input.historyPolicy,
         );
 
-        // 5. Throttled persistence writer
-        const { accumulator, persist, finalize } = createThrottledWriter(
-            this.engine, sessionId, assistantNodeId, ENGINE_DEFAULTS.PERSIST_THROTTLE,
-        );
+        // 5. Content accumulator + throttled persistence
+        const accumulator = { output: '', thinking: '' };
+        let lastPersistTime = 0;
+        let pendingPromise: Promise<void> = Promise.resolve();
+        const persist = () => {
+            if (!accumulator.output && !accumulator.thinking) return;
+            const now = Date.now();
+            if (now - lastPersistTime < ENGINE_DEFAULTS.PERSIST_THROTTLE) return;
+            lastPersistTime = now;
+            const outputSnapshot = accumulator.output;
+            const thinkingSnapshot = accumulator.thinking;
+            pendingPromise = pendingPromise
+                .then(() => this.engine.updateNode(sessionId, assistantNodeId, {
+                    content: outputSnapshot,
+                    meta: { thinking: thinkingSnapshot, status: 'running' },
+                }))
+                .catch(() => { /* chain stays alive */ });
+        };
+        const finalize = () => pendingPromise;
 
         return { userNodeId, executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles };
     }

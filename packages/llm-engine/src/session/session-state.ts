@@ -19,17 +19,17 @@ export interface HistoryMessage {
 }
 
 /**
- * 会话状态管理
+ * In-memory session projection cache.
  *
- * @deprecated S4: Replaced by ILog.fold() + ILog.append().
- *             Migrate consumers to use ChatEngineLog for history access.
- *             UI should re-project from fold() instead of mutating
- *             a separate in-memory copy.
+ * S4: SessionState is the in-memory fold() projection used by the UI layer.
+ *     The single source of truth is ILog (ChatEngineLog). SessionState caches
+ *     the linearized message history + ExecutionNode tree for fast UI access.
+ *     All persistence goes through ILog.append(); SessionState is read-only
+ *     from the persistence perspective.
  *
- * ID 策略：
- *   SessionGroup.id = persistedNodeId（如果有），否则生成临时 ID
- *   这保证了 reloadSessionData 后 ID 保持稳定，
- *   消除了双重查找和 fallback 链。
+ * ID strategy:
+ *   SessionGroup.id = persistedNodeId (when available), otherwise generated.
+ *   This ensures stable IDs across reloadSessionData without double-lookup.
  */
 export class SessionState {
     private sessions: SessionGroup[] = [];

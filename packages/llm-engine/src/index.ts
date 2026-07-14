@@ -196,8 +196,6 @@ export { ChatFileHandle, createChatFile } from '@itookit/vfslib';
 export { Converters } from './utils/converters';
 export { chatFileParser } from './utils/parsers';
 export { formatErrorMessage } from './utils/error-formatter';
-export { createThrottledWriter } from './utils/throttled-writer';
-export type { ThrottledWriter } from './utils/throttled-writer';
 
 export { TruncationDetector } from './session/truncation-detector';
 export type { TruncationResult } from './session/truncation-detector';

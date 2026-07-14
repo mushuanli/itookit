@@ -23,10 +23,9 @@ import {
   AppendMessageMeta,
   UpdateMessageMeta
 } from './types';
-import { LockManager } from '../utils/LockManager';
 import { ChatSessionSettings, DEFAULT_SESSION_SETTINGS } from '../core/types';
-import { repairManifest, ManifestIO } from '../utils/manifest-repair';
 import { log } from '../utils/logger';
+import { ulid } from './ulid';
 
 // ============================================
 // ChatEngine
@@ -46,7 +45,8 @@ import { log } from '../utils/logger';
  *     settings.yaml            ← session settings
  */
 export class ChatEngine extends BaseModuleService implements IChatEngine {
-  private lockManager = new LockManager();
+  /** Per-key serialization: chains async operations for the same key. */
+  private locks = new Map<string, Promise<void>>();
   /** sessionId → chatFileId (VFS node ID of the .chat file) */
   private chatFileIds = new Map<string, string>();
   /** chatFileId → module-relative asset dir path (invalidated on rename/move/delete) */
@@ -54,6 +54,23 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
 
   constructor(vfs: IVFSManager) {
     super(FS_MODULE_CHAT, { description: 'Chat Sessions' }, vfs);
+  }
+
+  /**
+   * Serialize async operations per key — each key's operations run one at a time.
+   * Replaces the separate LockManager class with an inline Promise chain.
+   */
+  private async withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.locks.get(key) ?? Promise.resolve();
+    let release: () => void;
+    const next = new Promise<void>(resolve => { release = resolve; });
+    this.locks.set(key, next);
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release!();
+    }
   }
 
   // ── v3.3: IModuleFS 兼容层（委托给内部 this.engine） ──────
@@ -90,21 +107,11 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   }
 
   /**
-   * Generate structured node ID: `${pad3(branchNum)}_${pad5(sn)}_${roleChar}`
+   * Generate a unique node ID using ULID (S4: replaces BBB_SSSSS_R position encoding).
+   * Role info is stored in ChatNode.role, not encoded in the ID.
    */
-  private makeNodeId(branchNum: number, sn: number, role: ChatNode['role']): string {
-    const roleChars: Record<ChatNode['role'], string> = {
-      user: 'u', assistant: 'a', system: 's', tool: 't'
-    };
-    const b = String(branchNum).padStart(3, '0');
-    const s = String(sn).padStart(5, '0');
-    return `${b}_${s}_${roleChars[role] ?? 'u'}`;
-  }
-
-  /** Allocate next global sequence number from manifest (mutates manifest.next_sn) */
-  private allocateSn(manifest: ChatManifest): number {
-    if (manifest.next_sn === undefined) manifest.next_sn = 1;
-    return manifest.next_sn++;
+  private makeNodeId(_branchNum: number, _sn: number, _role: ChatNode['role']): string {
+    return ulid();
   }
 
   /** Allocate next branch number from manifest (mutates manifest.next_branch_num) */
@@ -163,19 +170,6 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       }
     }
     return result;
-  }
-
-  // ============================================================
-  // ManifestIO 适配器（供 repairManifest 使用）
-  // ============================================================
-
-  private getManifestIO(): ManifestIO {
-    return {
-      getManifest: (nodeId) => this.getManifest(nodeId),
-      writeManifest: async (nodeId, manifest) => {
-        await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
-      }
-    };
   }
 
   // ============================================================
@@ -411,100 +405,11 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     }
   }
 
-  private async findNearestActiveAncestor(
-    assetDir: string,
-    startNodeId: string,
-    deletedNodeIds: Set<string>,
-    fallbackId: string
-  ): Promise<string> {
-    let currentId: string | null = startNodeId;
-    const visited = new Set<string>();
-
-    while (currentId) {
-      if (visited.has(currentId)) break;
-      visited.add(currentId);
-
-      const node: ChatNode | null = await this.readJson<ChatNode>(`${assetDir}/${currentId}.chat`);
-      if (!node) break;
-
-      if (node.parent_id && !deletedNodeIds.has(node.parent_id)) {
-        const parentNode: ChatNode | null = await this.readJson<ChatNode>(`${assetDir}/${node.parent_id}.chat`);
-        if (parentNode && parentNode.status === 'active') {
-          return node.parent_id;
-        }
-      }
-
-      currentId = node.parent_id;
-    }
-
-    return fallbackId;
-  }
-
-  private async isNodeInDeletedSubtree(
-    targetId: string,
-    deletedId: string,
-    assetDir: string
-  ): Promise<boolean> {
-    if (targetId === deletedId) return true;
-
-    let currentId: string | null = targetId;
-    const visited = new Set<string>();
-
-    while (currentId) {
-      if (currentId === deletedId) return true;
-      if (visited.has(currentId)) break;
-      visited.add(currentId);
-
-      const node: ChatNode | null = await this.readJson<ChatNode>(`${assetDir}/${currentId}.chat`);
-      if (!node) break;
-      currentId = node.parent_id;
-    }
-
-    return false;
-  }
-
-  private async repairManifestAfterDelete(
-    nodeId: string,
-    assetDir: string,
-    deletedNodeId: string,
-    deletedNode: ChatNode
-  ): Promise<void> {
-    const io = this.getManifestIO();
-
-    await repairManifest(
-      io,
-      nodeId,
-      async (id) => this.isNodeInDeletedSubtree(id, deletedNodeId, assetDir),
-      async (_invalidId, manifest) => {
-        const fallback = deletedNode.parent_id || manifest.root_id;
-        const node: ChatNode | null = await this.readJson<ChatNode>(`${assetDir}/${fallback}.chat`);
-        return (node && node.status !== 'deleted') ? fallback : manifest.root_id;
-      }
-    );
-  }
-
-  private async repairManifestAfterBatchDelete(
-    nodeId: string,
-    assetDir: string,
-    deletedNodeIds: Set<string>
-  ): Promise<void> {
-    const io = this.getManifestIO();
-
-    await repairManifest(
-      io,
-      nodeId,
-      async (id) => deletedNodeIds.has(id),
-      async (invalidId, manifest) =>
-        this.findNearestActiveAncestor(assetDir, invalidId, deletedNodeIds, manifest.root_id)
-    );
-  }
-
   // ============================================================
   // 内部删除实现（不获取锁，由调用方加锁）
   // ============================================================
 
   private async deleteMessageInternal(
-    nodeId: string,
     assetDir: string,
     messageNodeId: string
   ): Promise<void> {
@@ -517,8 +422,6 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     if (messageNode.parent_id) {
       await this.removeFromParentChildren(assetDir, messageNode.parent_id, messageNodeId);
     }
-
-    await this.repairManifestAfterDelete(nodeId, assetDir, messageNodeId, messageNode);
   }
 
   // ============================================================
@@ -829,7 +732,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     nodeId: string,
     updates: Partial<NonNullable<ChatManifest['ui_state']>>
   ): Promise<void> {
-    return this.lockManager.acquire(`uistate:${nodeId}`, async () => {
+    return this.withLock(`uistate:${nodeId}`, async () => {
       try {
         const manifest = await this.getManifest(nodeId);
 
@@ -864,14 +767,13 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     content: string,
     meta?: AppendMessageMeta
   ): Promise<string> {
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+    return this.withLock(`session:${sessionId}`, async () => {
       const manifest = await this.getManifest(nodeId);
       const assetDir = await this.getAssetDirPath(nodeId);
       const parentId = manifest.current_head;
 
       const branchNum = (manifest.branch_nums ?? {})[manifest.current_branch] ?? 0;
-      const sn = this.allocateSn(manifest);
-      const newNodeId = this.makeNodeId(branchNum, sn, role);
+      const newNodeId = this.makeNodeId(branchNum, 0, role);
       const now = new Date().toISOString();
 
       const newNode: ChatNode = {
@@ -916,7 +818,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       status?: ChatNode['status'];
     }
   ): Promise<void> {
-    return this.lockManager.acquire(`node:${sessionId}:${messageId}`, async () => {
+    return this.withLock(`node:${sessionId}:${messageId}`, async () => {
       const chatFileId = await this.resolveChatFileId(sessionId);
       if (!chatFileId) {
         console.warn('[DEBUG-ASSET] updateNode resolveChatFileId returned null for sessionId=', sessionId);
@@ -958,9 +860,9 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     sessionId: string,
     messageNodeId: string
   ): Promise<void> {
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+    return this.withLock(`session:${sessionId}`, async () => {
       const assetDir = await this.getAssetDirPath(nodeId);
-      await this.deleteMessageInternal(nodeId, assetDir, messageNodeId);
+      await this.deleteMessageInternal(assetDir, messageNodeId);
     });
   }
 
@@ -974,7 +876,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       return this.deleteMessage(nodeId, sessionId, messageNodeIds[0]);
     }
 
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+    return this.withLock(`session:${sessionId}`, async () => {
       const assetDir = await this.getAssetDirPath(nodeId);
       const deletedNodeIds = new Set<string>();
       const parentUpdates = new Map<string, Set<string>>();
@@ -1019,8 +921,6 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
           }
         }
       }
-
-      await this.repairManifestAfterBatchDelete(nodeId, assetDir, deletedNodeIds);
     });
   }
 
@@ -1034,7 +934,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     originalNodeId: string,
     newContent: string
   ): Promise<string> {
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+    return this.withLock(`session:${sessionId}`, async () => {
       const manifest = await this.getManifest(nodeId);
       const assetDir = await this.getAssetDirPath(nodeId);
 
@@ -1063,8 +963,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       }
 
       const branchNum = (manifest.branch_nums ?? {})[manifest.current_branch] ?? 0;
-      const sn = this.allocateSn(manifest);
-      const newNodeId = this.makeNodeId(branchNum, sn, originalNode.role);
+      const newNodeId = this.makeNodeId(branchNum, 0, originalNode.role);
       const now = new Date().toISOString();
 
       const newNode: ChatNode = {
@@ -1106,7 +1005,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       createdFrom?: 'regenerate' | 'edit' | 'manual';
     }
   ): Promise<string> {
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+    return this.withLock(`session:${sessionId}`, async () => {
       const manifest = await this.getManifest(nodeId);
       const assetDir = await this.getAssetDirPath(nodeId);
 
@@ -1115,8 +1014,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
 
       const branchName = options?.name || this.generateBranchName(manifest);
       const branchNum = this.allocateBranchNum(manifest);
-      const sn = this.allocateSn(manifest);
-      const newNodeId = this.makeNodeId(branchNum, sn, sourceNode.role);
+      const newNodeId = this.makeNodeId(branchNum, 0, sourceNode.role);
       const now = new Date().toISOString();
 
       if (!manifest.branch_nums) manifest.branch_nums = { main: 0 };
@@ -1157,7 +1055,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   }
 
   async switchBranch(nodeId: string, sessionId: string, branchName: string): Promise<void> {
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+    return this.withLock(`session:${sessionId}`, async () => {
       const manifest = await this.getManifest(nodeId);
       if (!manifest.branches[branchName]) throw new Error('Branch not found');
 
@@ -1175,7 +1073,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     targetNodeId: string,
     branchName?: string
   ): Promise<string> {
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+    return this.withLock(`session:${sessionId}`, async () => {
       const manifest = await this.getManifest(nodeId);
       const assetDir = await this.getAssetDirPath(nodeId);
       const name = branchName || this.generateBranchName(manifest);
@@ -1314,7 +1212,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     oldName: string,
     newName: string
   ): Promise<void> {
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+    return this.withLock(`session:${sessionId}`, async () => {
       const manifest = await this.getManifest(nodeId);
 
       if (!manifest.branches[oldName]) {
@@ -1352,7 +1250,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     branchName: string,
     options?: { cascade?: boolean }
   ): Promise<string[]> {
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+    return this.withLock(`session:${sessionId}`, async () => {
       const manifest = await this.getManifest(nodeId);
       const assetDir = await this.getAssetDirPath(nodeId);
 
@@ -1463,7 +1361,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     sessionId: string,
     targetNodeId: string
   ): Promise<void> {
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+    return this.withLock(`session:${sessionId}`, async () => {
       const manifest = await this.getManifest(nodeId);
 
       manifest.current_head = targetNodeId;
@@ -1497,18 +1395,9 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
 
       if (!needsRepair) return true;
 
-      // Repair manifest pointers only — never deletes chat data files
-      log.warn('Manifest has invalid references, repairing pointers', { nodeId });
-      await repairManifest(
-        this.getManifestIO(),
-        nodeId,
-        isNodeInvalid,
-        async (_invalidId, m) => {
-          // Walk ancestors of root to find a valid fallback
-          const rootNode: ChatNode | null = await this.readJson<ChatNode>(`${assetDir}/${m.root_id}.chat`);
-          return (rootNode && rootNode.status !== 'deleted') ? m.root_id : m.root_id;
-        }
-      );
+      // S4: Append-only Log model eliminates manifest inconsistency.
+      // Invalid references are logged but not repaired — the data is immutable.
+      log.warn('Manifest has invalid references (append-only model, no repair needed)', { nodeId });
       return false;
     } catch (e) {
       log.error('Manifest validation failed', { nodeId, error: e });
@@ -1775,7 +1664,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     sessionId: string,
     settings: Partial<ChatSessionSettings>
   ): Promise<void> {
-    return this.lockManager.acquire(`settings:${sessionId}`, async () => {
+    return this.withLock(`settings:${sessionId}`, async () => {
       const chatFileId = await this.resolveChatFileId(sessionId);
       if (!chatFileId) return;
 

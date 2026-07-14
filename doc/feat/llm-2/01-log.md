@@ -161,14 +161,14 @@ rebase(ref, insertAfter, newTurns, opts):
 |---|---|
 | `ChatEngine` | → `Log` 实现主体（append/fold/refs 骨架现成） |
 | `ChatManifest` | → RefStore JSON（分支指针语义不变，格式升级） |
-| `ChatNode`（`BBB_SSSSS_R`） | → Turn（ULID + parents，见 §2.1 迁移） |
-| `ThrottledWriter` | → DraftArea 节流写（删独立模块） |
-| `SessionState`（内存副本） | **删除** → fold 缓存 |
-| `LockManager` | **删除** → 单写入方（I2） |
-| `manifest-repair` | **删除** → append-only 无不一致态 |
+| `ChatNode`（`BBB_SSSSS_R`） | ✅ **已迁移** → `makeNodeId` 改用 `ulid()`（2026-07-14）；旧 ID 保持可读 |
+| `ThrottledWriter` | ✅ **已删除** → TaskRunner 内联 accumulator 模式（2026-07-14） |
+| `SessionState`（内存副本） | 保留为 ILog.fold() 投影缓存（2026-07-14） |
+| `LockManager` | ✅ **已删除** → ChatEngine 内联 `withLock()` Promise 链（2026-07-14） |
+| `manifest-repair` | ✅ **已删除** → append-only 无不一致态（2026-07-14） |
 | `chatFileParser` / `Converters` | → Turn 序列化模块 |
 
-**数据迁移**：一次性脚本将旧 `BBB_SSSSS_R` 节点按 (分支号→ref, 序号→parents 链) 转换；sibling 变体转为同 parent 的多子节点。
+`makeNodeId()` 已改用 `ulid()`（2026-07-14）。现有 `BBB_SSSSS_R` 数据保持可读（向后兼容），新节点使用 ULID。全量历史迁移脚本待后续执行（低优先级——新旧 ID 共存不影响功能）。
 
 ---
 

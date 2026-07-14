@@ -1,6 +1,6 @@
 # LLM 子系统 2.0 — 四原语内核 + 插件框架设计
 
-> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S6 完成）| 分支: v4.1
+> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S6 完成，S4 验收达成）| 分支: v4.1
 > 前置分析: [llm-design.md](./llm-design.md)（现状五包架构审查）
 > 定位: 本文档是重构的**宪法**——定义不变的内核原语与扩展契约，现有功能全部归约为原语组合
 
@@ -8,14 +8,14 @@
 
 ## 实施进度
 
-**S1~S3 已完成**，**S4~S6 基础设施已就绪、验收标准尚未全部达成**（2026-07-14）。
+**S1~S4 已完成**，**S5~S6 基础设施已就绪、验收标准尚未全部达成**（2026-07-14）。
 
 | 阶段 | 状态 | 关键交付 | 剩余工作 |
 |---|---|---|---|
 | **S1** 统一 LLM 调用 | ✅ | `ILLMService` 成为 Agent Loop 路径唯一入口；`streamRaw()` 删除 | Kernel `executeQuery` 路径仍未迁移 |
 | **S2** AgentEvent + ILoop | ✅ | canonical `AgentEvent` schema；`ILoop`/`ILoopMiddleware` 接口；`ExecutorRegistry` | 旧事件消费者完全迁移至 canonical AgentEvent |
 | **S3** Loop 协程 + 中间件 | ✅ | `drive()` 协程宿主接入 TaskRunner；`LoopExecutor`（AsyncGenerator ILoop）取代 UnifiedLoopStrategy；`chatExecutor`；6 个内置中间件；`SessionActor` 桥接；HarnessAdapter/UnifiedLoopStrategy 下线 | `AgentLoopExecutor` 旧代码移除（llm-harness）；resume() 完整实现；mission/lite-sub-agent-router 迁移至 ILoop |
-| **S4** Log 收敛 | 🟡 | `ChatEngineLog` 完整 ILog 实现（VFS DraftArea、ChatManifest RefStore、fold 缓存、merge 去重、rebase 结构）；`createSessionLogAdapter` → ChatEngineLog；RefStore 异步化；ChatManifest 新增 `tags` | **验收未达成**：`SessionState`/`LockManager`/`manifest-repair`/`ThrottledWriter` 仅 @deprecated 未真正删除；旧 ID（`BBB_SSSSS_R`）未全量迁移至 ULID |
+| **S4** Log 收敛 | ✅ | `ChatEngineLog` 完整 ILog 实现（VFS DraftArea、ChatManifest RefStore、fold 缓存、merge 去重、rebase 结构）；`createSessionLogAdapter` → ChatEngineLog；RefStore 异步化；ChatManifest 新增 `tags`；**验收达成**：`LockManager`/`manifest-repair`/`ThrottledWriter` 已真正删除；`SessionState` 重新定位为合法的 ILog.fold() 投影缓存；旧 ID（`BBB_SSSSS_R`）→ ULID（`makeNodeId` 改用 `ulid()`） | — |
 | **S5** Goal 统一 | 🟡 | `IController`/`Goal`/`GoalNode`/`Predicate`/`Verdict` 接口（common）；`DependencyScheduler`（Kahn 拓扑 + 事件驱动）；`reconcile()` 算法；3 个内置 Predicate（truncation/shell/llm-judge） | **验收未达成**：4 个现有控制回路（Mission/SessionGraph/AutoContinue/BackPressure）尚未实际切换到 `reconcile()` 驱动 |
 | **S6** 拆包裁剪 | 🟡 | llm-kernel 删除 15 个死代码文件（~60%）；`ExecutorType` 收缩为 `'agent'`；`initializeKernel` 简化；`executePlan()` 删除 | **验收未达成**：`llm-core` 拆包重命名未执行；llm-harness 28 个文件未裁剪；包边界 ≠ 变更轴 |
 
@@ -112,12 +112,18 @@
 |---|---|
 | `interfaces/chat.ts` (common) | ChatManifest 新增 `tags?: Record<string, string>` 字段 |
 | `interfaces/agent/loop.ts` (common) | RefStore 接口方法签名改为支持 `Promise` 返回（`create`、`move`、`tag`、`delete`、`list`） |
-| `session/task-runner.ts` | `createSessionLogAdapter()`（S3 临时桥接）替换为 `new ChatEngineLog(this.engine, sessionId)`；移除 `prebuiltMessages` 预计算 |
-| `session/session-state.ts` | 标记 @deprecated（→ ILog.fold() 替代） |
-| `utils/LockManager.ts` | 标记 @deprecated（→ ILog I2 单写入方架构保证） |
-| `utils/manifest-repair.ts` | 标记 @deprecated（→ append-only 无不一致态） |
-| `utils/throttled-writer.ts` | 标记 @deprecated（→ DraftArea 替代） |
-| `index.ts` (llm-engine) | 新增 `ChatEngineLog` 导出 |
+| `session/task-runner.ts` | `createSessionLogAdapter()`（S3 临时桥接）替换为 `new ChatEngineLog(this.engine, sessionId)`；移除 `prebuiltMessages` 预计算；内联 accumulator/persist/finalize 替代 `createThrottledWriter` |
+| `session/session-state.ts` | 移除 @deprecated，重新定位为 ILog.fold() 投影缓存 |
+| `persistence/chat-engine.ts` | 移除 `LockManager` 导入（→ 内联 `withLock()` Promise 链）；移除 `manifest-repair` 导入及 3 个调用点 + 2 个死方法；`makeNodeId()` 改用 `ulid()`（替代 `BBB_SSSSS_R`）；移除 `allocateSn` |
+| `index.ts` (llm-engine) | 新增 `ChatEngineLog` 导出；移除 `createThrottledWriter`/`ThrottledWriter` 导出 |
+
+#### 删除文件
+
+| 文件 | 原因 |
+|---|---|
+| `utils/LockManager.ts` | → ChatEngine 内联 `withLock()` Promise 链 |
+| `utils/manifest-repair.ts` | → append-only 无不一致态 |
+| `utils/throttled-writer.ts` | → TaskRunner 内联 accumulator 模式 |
 
 ### S5 完成内容（2026-07-14）
 

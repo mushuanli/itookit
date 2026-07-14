@@ -631,7 +631,7 @@ src/
 ├── session-graph/  ← DependencyGraph, GraphOrchestrator, CompletionAnalyzer
 ├── services/       ← VFSAgentService, PromptHistoryService
 ├── core/           ← types, errors, constants
-└── utils/          ← Converters, LockManager, chatFileParser, ThrottledWriter
+└── utils/          ← Converters, chatFileParser, error-formatter, logger
 ```
 
 #### SessionManager — 统一入口
@@ -782,9 +782,9 @@ _my-session.chat/          ← VFS assetdir
     settings.yaml          ← session settings
 ```
 
-`ChatNode` 结构化 ID：`BBB_SSSSS_R`（B=分支号, S=序列号, R=角色字符）
+`ChatNode` ID 方案：S4 已从 `BBB_SSSSS_R` 位置编码迁移至 ULID（`makeNodeId` 改用 `ulid()`）。旧数据保持可读。
 
-关键操作通过 `LockManager` 保护（session/node 级别锁定）。
+关键操作通过 ChatEngine 内联 `withLock()` Promise 链保护（替代已删除的 `LockManager` 类）。
 
 #### Mission 编排
 
