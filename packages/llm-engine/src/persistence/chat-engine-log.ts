@@ -232,6 +232,8 @@ export class ChatEngineLog implements ILog {
     private readonly _refs: ChatEngineRefStore;
     private readonly _draft: VFSDraftArea;
     private readonly _cache = new FoldCache();
+    private readonly _sessionId: string | undefined;
+    private _nodeIdCache: string | null = null;
 
     /**
      * @param engine    The underlying ChatEngine instance
@@ -242,6 +244,8 @@ export class ChatEngineLog implements ILog {
         private readonly engine: IChatEngine,
         sessionId?: string,
     ) {
+        this._sessionId = sessionId;
+
         // Lazy session resolution: nodeId lookup from sessionId
         const resolveNodeId = sessionId
             ? () => this.resolveNodeId(sessionId!)
@@ -284,9 +288,16 @@ export class ChatEngineLog implements ILog {
         const cached = this._cache.get(cacheKey);
         if (cached) return cached;
 
-        const sessionId = ref;
         try {
-            const context = await this.engine.getSessionContext('', sessionId);
+            // Resolve VFS nodeId from sessionId (not from ref parameter)
+            if (!this._nodeIdCache) {
+                if (!this._sessionId) return [];
+                this._nodeIdCache = await this.resolveNodeId(this._sessionId);
+                if (!this._nodeIdCache) return [];
+            }
+            const nodeId = this._nodeIdCache;
+
+            const context = await this.engine.getSessionContext(nodeId, this._sessionId!);
             const messages: ChatMessage[] = context
                 .filter(c => c.node?.role === 'user' || c.node?.role === 'assistant' || c.node?.role === 'system')
                 .map(c => ({

@@ -60,7 +60,9 @@ export class SessionManager implements ISession {
         switch (s.type) {
             case 'send':
                 // Fire-and-forget; errors are surfaced via events()
-                this.sendMessage(s.text, s.attachments as any ?? [], '', undefined, undefined, undefined).catch(e => {
+                // Use 'default' agent when not specified — signal() is the low-level API;
+                // UI should prefer commands.execute('session.send', { agentId, ... })
+                this.sendMessage(s.text, s.attachments as any ?? [], 'default', undefined, undefined, undefined).catch(e => {
                     this.eventBus.emitSession(this.boundSessionId ?? '', { type: 'error', error: { message: String(e) } });
                 });
                 break;
@@ -69,7 +71,7 @@ export class SessionManager implements ISession {
                 break;
             case 'inject':
                 // Inject text as a follow-up user message into an active run
-                this.sendMessage(s.text, [], '', undefined, 'inject' as any, undefined).catch(() => {});
+                this.sendMessage(s.text, [], 'default', undefined, 'inject' as any, undefined).catch(() => {});
                 break;
             case 'respond':
                 // Deliver a response to a pending await_signal (HITL / plan confirm)

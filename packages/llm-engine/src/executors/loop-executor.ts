@@ -119,6 +119,18 @@ export class LoopExecutor implements ILoop {
                 // ── 1. Build messages from log ──
                 let messages = await ctx.log.fold(ctx.ref);
 
+                // Apply historyLength limit (system messages are never counted/truncated)
+                if (ctx.historyLength !== undefined && ctx.historyLength !== -1 && ctx.historyLength >= 0) {
+                    const sys = messages.filter(m => m.role === 'system');
+                    const rest = messages.filter(m => m.role !== 'system');
+                    messages = [...sys, ...rest.slice(-ctx.historyLength)];
+                }
+
+                // Prepend systemPrompt, deduplicating any system message already in fold result
+                if (ctx.systemPrompt) {
+                    messages = [{ role: 'system' as const, content: ctx.systemPrompt }, ...messages.filter(m => m.role !== 'system')];
+                }
+
                 // ── 1b. Before-turn middleware ──
                 const turnCtx: TurnContext = {
                     turnId: `turn_${turnNumber}`,
@@ -163,9 +175,14 @@ export class LoopExecutor implements ILoop {
 
                 try {
                     // Use streaming for content; collect tool_calls from final chunk
-                    const stream = ctx.llm.chatStream('default', {
+                    const stream = ctx.llm.chatStream(ctx.connectionId ?? 'default', {
                         messages,
                         tools: undefined, // tools injected via LoopContext.tools if needed
+                        model: ctx.model,
+                        temperature: ctx.temperature,
+                        maxTokens: ctx.maxTokens,
+                        thinking: ctx.thinking,
+                        reasoningEffort: ctx.reasoningEffort as any,
                         signal: ctx.signal,
                     });
 
