@@ -1,6 +1,6 @@
 // @file: llm-engine/session/task-runner.ts
 
-import type { ChatMessage, ILLMService, AgentEvent, ChatCompletionChunk } from '@itookit/common';
+import type { ILLMService, AgentEvent } from '@itookit/common';
 import { ExecutorConfig } from '../core/types';
 import {
     ExecutionTask,
@@ -17,7 +17,7 @@ import {
 } from '../core/types';
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { EngineError, EngineErrorCode } from '../core/errors';
-import { SessionState, HistoryMessage } from './session-state';
+import { SessionState } from './session-state';
 import { IChatEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
@@ -216,15 +216,13 @@ export class TaskRunner {
         while (this.running.size < this.maxConcurrent && i < this.queue.length) {
             const task = this.queue[i];
 
-            // Determine execution mode:
-            //   1. Explicit mode from overrides (e.g. 'chat', 'loop', 'loop:full')
-            //   2. Legacy: useHarness=true → 'loop' mode via executor registry
-            //   3. Default: kernel path (executeTask) for backward compat
-            const mode: string | undefined =
+            // Determine execution mode — always falls back to defaultMode (eliminates executeTask fallback path)
+            const mode: string =
                 task.input.overrides?.mode ??
-                (task.input.overrides?.useHarness ? this.executorRegistry.defaultMode : undefined);
+                (task.input.overrides?.useHarness ? this.executorRegistry.defaultMode : undefined) ??
+                this.executorRegistry.defaultMode;
 
-            const useExecutor = mode !== undefined && this.llmService !== null;
+            const useExecutor = this.llmService !== null;
 
             this.queue.splice(i, 1);
 
@@ -237,10 +235,13 @@ export class TaskRunner {
                 continue;
             }
 
-            if (useExecutor && mode) {
+            if (useExecutor) {
                 this.executeAgentLoopTask(task, ctx.state, ctx.runtime, mode);
             } else {
-                this.executeTask(task, ctx.state, ctx.runtime);
+                log.error('ILLMService not injected, dropping task', {
+                    taskId: task.id,
+                    sessionId: task.sessionId,
+                });
             }
         }
     }
@@ -358,6 +359,11 @@ export class TaskRunner {
             // ── ILog via ChatEngineLog (S4: real facade over ChatEngine) ──
             const logAdapter = new ChatEngineLog(this.engine, sessionId);
 
+            // ── 文件级 ai_systemPrompt 覆盖（与 executeTask 对齐）──
+            const fileNode = await this.engine.getNode(task.nodeId);
+            const fileSystemPrompt = fileNode?.metadata?.ai_systemPrompt as string | undefined;
+            const effectiveSystemPrompt = fileSystemPrompt ?? executorConfig.systemPrompt;
+
             // ── Event bridge: AgentEvent → canonical + tree projection ────
             const actor = new SessionActor((event: AgentEvent) => {
                 switch (event.type) {
@@ -416,7 +422,14 @@ export class TaskRunner {
             this.activeActors.set(sessionId, actor);
 
             // ── Build LoopContext ──────────────────────────────────────────
-            const branchRef = 'main';
+            // Resolve current branch name from manifest (ref must match actual branch, not hardcoded 'main')
+            let branchRef = 'main';
+            try {
+                const manifest = await this.engine.getManifest(task.nodeId);
+                branchRef = manifest.current_branch || 'main';
+            } catch {
+                // Fallback: use 'main' if manifest is unavailable
+            }
 
             const loopCtx: LoopContext = {
                 sessionId,
@@ -430,6 +443,16 @@ export class TaskRunner {
                 },
                 middlewares: [],
                 signal: task.abortController.signal,
+                // ── LLM 配置（从 executorConfig 平铺）──
+                connectionId: executorConfig.connectionId ?? 'default',
+                model: executorConfig.model,
+                systemPrompt: effectiveSystemPrompt,
+                temperature: executorConfig.temperature,
+                maxTokens: executorConfig.constraints?.maxTokens,
+                thinking: executorConfig.enableThinking,
+                reasoningEffort: executorConfig.reasoningEffort,
+                historyLength: input.overrides?.historyLength,
+                startedAt: task.createdAt,
             };
 
             // ── Execute via drive() or resumeDrive() ──────────────────────
@@ -453,6 +476,8 @@ export class TaskRunner {
             // ── Persist ──────────────────────────────────────────────────
             await finalize();
             const endMs = Date.now();
+            const startMs = loopCtx.startedAt ?? task.createdAt;
+            const durationMs = endMs - startMs;
 
             let inTokens = 0;
             let outTokens = 0;
@@ -461,14 +486,24 @@ export class TaskRunner {
                 inTokens += u?.inputTokens ?? 0;
                 outTokens += u?.outputTokens ?? 0;
             }
+
+            // Character-based estimation fallback when LLM doesn't return usage
+            const hasRealUsage = inTokens > 0 || outTokens > 0;
+            if (!hasRealUsage) {
+                const outputChars = accumulator.output.length + accumulator.thinking.length;
+                outTokens = Math.ceil(outputChars / 4);
+                inTokens = outTokens; // rough symmetry estimate
+            }
+            const costUsd = inTokens * 0.000003 + outTokens * 0.000015;
+
             const totalUsage: SessionTokenUsage = {
                 inputTokens: inTokens,
                 outputTokens: outTokens,
-                costUsd: 0,
+                costUsd,
                 contextUsageRatio: 0,
                 turns: turns.length,
-                durationMs: 0,
-                isEstimated: true,
+                durationMs,
+                isEstimated: !hasRealUsage,
             };
 
             await this.engine.updateNode(sessionId, assistantNodeId, {
@@ -477,9 +512,11 @@ export class TaskRunner {
                     thinking: accumulator.thinking,
                     status: 'success',
                     endTime: endMs,
+                    durationMs,
                     inputTokens: totalUsage.inputTokens,
                     outputTokens: totalUsage.outputTokens,
-                    isEstimated: false,
+                    costUsd,
+                    isEstimated: !hasRealUsage,
                 },
             });
 
@@ -521,258 +558,6 @@ export class TaskRunner {
             } else {
                 await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted);
             }
-        } finally {
-            this.running.delete(task.id);
-            runtime.currentTaskId = undefined;
-            this.emitPoolStatus();
-            this.processQueue();
-        }
-    }
-
-    private async executeTask(
-        task: ExecutionTask,
-        state: SessionState,
-        runtime: SessionRuntime
-    ): Promise<void> {
-        const { sessionId, input } = task;
-
-        this.running.set(task.id, task);
-        this.callbacks.onStatusChange(sessionId, 'running');
-        this.emitPoolStatus();
-
-        let errorAlreadyEmitted = false;
-        const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
-
-        // ✅ 每个任务独立的续写处理器
-        /** @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware in the ILoop path. */
-
-        try {
-            // 1-5. 公共 setup（附件解析、消息创建、执行器配置、持久化写入器）
-            const { executorConfig: baseConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles } =
-                await this.setupTaskExecution(task, state);
-
-            // 文件级 system prompt 覆盖：ai_systemPrompt 设置时优先于 agent 配置
-            let executorConfig = baseConfig;
-            const fileNode = await this.engine.getNode(task.nodeId);
-            const fileSystemPrompt = fileNode?.metadata?.ai_systemPrompt as string | undefined;
-            if (fileSystemPrompt) {
-                executorConfig = { ...executorConfig, systemPrompt: fileSystemPrompt };
-            }
-
-            // 4. 构建历史
-            const history = this.buildHistoryForTask(
-                state, input.text, input.overrides?.historyLength
-            );
-
-            // 6. 事件处理器
-            const onEvent = this.createEventHandler(
-                sessionId, rootNode, state, accumulator, persist,
-                () => { errorAlreadyEmitted = true; },
-                isBound,
-                () => false, // No longer suppress terminal events — single execution
-            );
-
-            // 7. 准备附件和历史
-            const attachmentList = await this.attachments.convertToAttachments(sessionId, contextFiles);
-            const historyWithFiles = await this.buildHistoryMessages(sessionId, history);
-
-            // =====================================================
-            // 8. 单次执行（auto-continue 已迁移至 ILoop 路径的
-            //    createTruncationDetectionMiddleware）
-            //    S6c: LLM 调用从 LLMKernelAdapter 切换为 ILLMService 直连
-            // =====================================================
-
-            if (task.abortController.signal.aborted) {
-                throw new DOMException('Aborted', 'AbortError');
-            }
-
-            log.info('Executing LLM query', {
-                taskId: task.id,
-                sessionId,
-                agent: executorConfig.name,
-                model: executorConfig.model,
-                historyCount: historyWithFiles.length,
-            });
-
-            // ── Build messages for ILLMService ────────────────────
-            const llmMessages: ChatMessage[] = [];
-            if (executorConfig.systemPrompt) {
-                llmMessages.push({ role: 'system', content: executorConfig.systemPrompt });
-            }
-            llmMessages.push(...historyWithFiles);
-            // Current user input with attachments (already Attachment[] from convertToAttachments)
-            if (attachmentList.length > 0) {
-                llmMessages.push({
-                    role: 'user',
-                    content: input.text,
-                    attachments: attachmentList,
-                });
-            } else {
-                llmMessages.push({ role: 'user', content: input.text });
-            }
-
-            const connectionId = executorConfig.connectionId || 'default';
-
-            // ── Emit turn start ───────────────────────────────────
-            onEvent({
-                type: 'turn:start',
-                turnId: assistantNodeId,
-                sessionId,
-                turn: 0,
-            } as any);
-
-            // ── Stream via ILLMService ────────────────────────────
-            let llmUsage: any = {};
-
-            if (!this.llmService) {
-                throw new EngineError(
-                    EngineErrorCode.EXECUTION_FAILED,
-                    'ILLMService not injected — cannot execute kernel-path task. Ensure llmService is passed to initializeLLMEngine().',
-                );
-            }
-
-            const stream: AsyncIterable<ChatCompletionChunk> = this.llmService.chatStream(connectionId, {
-                messages: llmMessages,
-                model: executorConfig.model,
-                temperature: executorConfig.temperature,
-                maxTokens: executorConfig.constraints?.maxTokens,
-                thinking: executorConfig.enableThinking,
-                reasoningEffort: executorConfig.reasoningEffort,
-                signal: task.abortController.signal,
-            });
-
-            try {
-                for await (const chunk of stream) {
-                    if (task.abortController.signal.aborted) break;
-
-                    const delta = chunk.choices?.[0]?.delta;
-                    if (!delta) continue;
-
-                    if (delta.thinking) {
-                        onEvent({
-                            type: 'message:updated',
-                            payload: { messageId: rootNode.id, delta: delta.thinking, field: 'thought' },
-                        } as any);
-                    }
-
-                    if (delta.content) {
-                        onEvent({
-                            type: 'message:updated',
-                            payload: { messageId: rootNode.id, delta: delta.content, field: 'output' },
-                        } as any);
-                    }
-
-                    if (chunk.usage) {
-                        llmUsage = chunk.usage;
-                    }
-                }
-            } catch (streamError: any) {
-                const msg = streamError?.message || String(streamError);
-                const error = new Error(msg);
-                (error as any).status = streamError?.status || streamError?.code;
-                (error as any)._model = executorConfig.model;
-                throw error;
-            }
-
-            // ── Emit turn end ─────────────────────────────────────
-            onEvent({
-                type: 'turn:end',
-                turnId: assistantNodeId,
-                sessionId,
-                turn: 0,
-            } as any);
-
-            // =====================================================
-            // 收尾
-            // =====================================================
-
-            // 最终持久化
-            await finalize();
-
-            // ── Token 统计 ─────────────────────────────────────────────────────
-            // S6c: 优先使用 ILLMService 返回的真实 token 数，回退到字符估算
-            const startMs = task.createdAt;
-            const endMs = Date.now();
-            const outputChars = accumulator.output.length + accumulator.thinking.length;
-
-            const hasRealUsage = llmUsage && (llmUsage.inputTokens || llmUsage.outputTokens);
-            const estInputTokens = hasRealUsage
-                ? (llmUsage.inputTokens ?? 0)
-                : Math.ceil((historyWithFiles.reduce(
-                    (s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0
-                ) + input.text.length) / 4);
-            const estOutputTokens = hasRealUsage
-                ? (llmUsage.outputTokens ?? 0)
-                : Math.ceil(outputChars / 4);
-            const estCost = hasRealUsage
-                ? (llmUsage.costUsd ?? (estInputTokens * 0.000003 + estOutputTokens * 0.000015))
-                : (estInputTokens * 0.000003 + estOutputTokens * 0.000015);
-            const estContextRatio = Math.min(1, outputChars / 800_000);
-
-            const tokenUsage: SessionTokenUsage = {
-                inputTokens:       estInputTokens,
-                outputTokens:      estOutputTokens,
-                costUsd:           estCost,
-                contextUsageRatio: estContextRatio,
-                turns:             1,
-                durationMs:        endMs - startMs,
-                isEstimated:       !hasRealUsage,
-            };
-
-            await this.engine.updateNode(sessionId, assistantNodeId, {
-                content: accumulator.output,
-                meta: {
-                    thinking:     accumulator.thinking,
-                    status:       'success',
-                    endTime:      endMs,
-                    durationMs:   endMs - startMs,
-                    inputTokens:  estInputTokens,
-                    outputTokens: estOutputTokens,
-                    costUsd:      estCost,
-                    isEstimated:  !hasRealUsage,
-                },
-            });
-
-            // 完成
-            state.updateNodeStatus(rootNode.id, 'success');
-
-            // Record cost to cost.seq
-            const kConnectionId = executorConfig.connectionId;
-            if (kConnectionId) {
-                this.agentResolver.recordUsageCost(kConnectionId, sessionId, {
-                    inputTokens: estInputTokens,
-                    outputTokens: estOutputTokens,
-                    cost: estCost,
-                }).catch(() => {});
-            }
-
-            if (isBound) {
-                this.eventBus.emitSession(sessionId, {
-                    type: 'message:status',
-                    payload: { messageId: rootNode.id, status: 'success' },
-                });
-
-                if (input.regenerateContext) {
-                    this.eventBus.emitSession(sessionId, {
-                        type: 'regenerate_completed',
-                        payload: {
-                            branchName: input.regenerateContext.branchName,
-                            assistantNodeId,
-                        },
-                    });
-                }
-
-                this.eventBus.emitSession(sessionId, {
-                    type: 'finished',
-                    payload: { sessionId, tokenUsage },
-                } as unknown as SessionEvent);
-            }
-
-            this.callbacks.onStatusChange(sessionId, 'completed');
-            this.callbacks.onUnread(sessionId);
-
-        } catch (error: any) {
-            await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted);
         } finally {
             this.running.delete(task.id);
             runtime.currentTaskId = undefined;
@@ -869,213 +654,6 @@ export class TaskRunner {
         }
 
         return { assistantNodeId, rootNode };
-    }
-
-    // ============================================
-    // 内部：事件处理
-    // ============================================
-
-    /**
-     * 创建事件处理器
-     *
-     * 终结事件抑制策略：
-     *   kernel 每次 executeQuery 结束都会发 execution:complete → finished，
-     *   但在续写循环中，只有最后一轮才是真正的完成。
-     *
-     *   由于 kernel 事件在 executeQuery 返回之前就通过回调发出，
-     *   我们无法在 evaluate() 之后再决定是否抑制——时序上来不及。
-     *
-     *   因此采用"始终抑制、统一发送"策略：
-     *   - onEvent 中始终过滤 finished 和 node_status(success/completed)
-     *   - 流式 chunk（node_update）和错误（error）正常通过
-     *   - 循环结束后由 TaskRunner 自己发送 node_status + finished
-     *
-     *   无论是否发生续写，行为一致。
-     */
-    private createEventHandler(
-        sessionId: string,
-        rootNode: ExecutionNode,
-        state: SessionState,
-        accumulator: { output: string; thinking: string },
-        persist: () => void,
-        markErrorEmitted: () => void,
-        isBound: boolean,
-        shouldSuppressTerminal: () => boolean
-    ): (event: SessionEvent | { type: string; payload?: any; [key: string]: any }) => void {
-        return (event) => {
-            const p = (event as any).payload ?? {};
-
-            // 终结事件抑制
-            if (shouldSuppressTerminal()) {
-                if (event.type === 'finished') {
-                    log.debug('Suppressed finished event (terminal events managed by TaskRunner)');
-                    return;
-                }
-                if (event.type === 'message:status') {
-                    const status = p.status;
-                    if (status === 'success' || status === 'completed') {
-                        log.debug('Suppressed status event during execution', { status });
-                        return;
-                    }
-                }
-            }
-
-            // 持久化处理（不依赖绑定状态）
-            const isChunk = event.type === 'message:updated';
-            if (isChunk) {
-                const chunk = p.delta ?? p.chunk;
-                if (chunk) {
-                    const targetNodeId = p.messageId ?? p.nodeId ?? rootNode.id;
-
-                    if (p.field === 'thought') {
-                        accumulator.thinking += chunk;
-                        state.appendToNode(targetNodeId, chunk, 'thought');
-                    } else if (p.field === 'output') {
-                        accumulator.output += chunk;
-                        state.appendToNode(targetNodeId, chunk, 'output');
-                    }
-
-                    persist();
-                }
-            }
-
-            // UI 事件（只在绑定时转发）
-            if (isBound) {
-                this.handleUIEvents(event, sessionId, rootNode, markErrorEmitted);
-            }
-        };
-    }
-
-    private handleUIEvents(
-        event: SessionEvent | { type: string; payload?: any; [key: string]: any },
-        sessionId: string,
-        rootNode: ExecutionNode,
-        markErrorEmitted: () => void
-    ): void {
-        // 过滤重复的根 message:appended (前 node_start)
-        if (event.type === 'message:appended') {
-            const p = (event as any).payload as { parentId?: string; sessionGroup?: any };
-            if (!p?.parentId && !p?.sessionGroup?.parentId) {
-                return;
-            }
-        }
-
-        // 修正空 messageId
-        const isChunkOrStatus = event.type === 'message:updated' || event.type === 'message:status';
-        if (isChunkOrStatus) {
-            const p = (event as any).payload ?? {};
-            if (!p.messageId) {
-                (event as any).payload = { ...p, messageId: rootNode.id };
-            }
-        }
-
-        if (event.type === 'error') {
-            markErrorEmitted();
-        }
-
-        this.eventBus.emitSession(sessionId, event as any);
-    }
-
-    // ============================================
-    // 内部：历史消息
-    // ============================================
-
-    /**
-     * 为任务构建历史消息
-     *
-     * 规则：
-     * 1. history 只包含已完成的对话轮次
-     * 2. 当前用户输入不在 history 中
-     * 3. 确保末尾不是 user message
-     */
-    private buildHistoryForTask(
-        state: SessionState,
-        currentInputText: string,
-        historyLength?: number
-    ): HistoryMessage[] {
-        let history = this.getHistory(state, historyLength);
-
-        // 移除末尾与当前输入重复的 user message
-        if (
-            history.length > 0 &&
-            history[history.length - 1].role === 'user' &&
-            history[history.length - 1].content.trim() === currentInputText.trim()
-        ) {
-            history = history.slice(0, -1);
-        }
-
-        // 确保末尾不是 user message
-        while (history.length > 0 && history[history.length - 1].role === 'user') {
-            history.pop();
-        }
-
-        return history;
-    }
-
-    /**
-     * 获取历史（含防御性清理）
-     */
-    private getHistory(state: SessionState, historyLength?: number): HistoryMessage[] {
-        let history = state.getHistory();
-
-        if (historyLength !== undefined && historyLength !== -1) {
-            if (historyLength === 0) return [];
-            history = history.slice(-historyLength);
-        }
-
-        // 防御性清理：移除连续的 user message
-        return history.filter((msg, i, arr) => {
-            if (i === 0) return true;
-            if (msg.role === 'user' && arr[i - 1].role === 'user') {
-                log.warn('Removed consecutive user message from history');
-                return false;
-            }
-            return true;
-        });
-    }
-
-    /**
-     * 移除历史末尾的 assistant 消息
-     *
-     * 用途：为续写准备"干净"的历史前缀。
-     *
-     * 续写时会追加当前轮的 assistant(累积输出)，如果 originalHistory
-     * 末尾已有上一轮的 assistant，就会产生连续 assistant 违反 role 交替。
-     *
-     * 移除末尾 assistant 后，续写历史变为：
-     *   [..., user(上一轮), assistant(当前轮累积)]
-     * role 交替正确。
-     *
-     * 注意：只移除末尾的一条，不影响中间的 assistant。
-     */
-    private async buildHistoryMessages(
-        sessionId: string,
-        history: HistoryMessage[]
-    ): Promise<ChatMessage[]> {
-        const result: ChatMessage[] = [];
-
-        for (const msg of history) {
-            const chatMessage: ChatMessage = {
-                role: msg.role as 'user' | 'assistant',
-                content: msg.content,
-            };
-
-            if (msg.files && msg.files.length > 0) {
-                chatMessage.attachments = [];
-                for (const file of msg.files) {
-                    const attachment = await this.attachments.resolveHistoryAttachment(
-                        sessionId, file
-                    );
-                    if (attachment) {
-                        chatMessage.attachments.push(attachment);
-                    }
-                }
-            }
-
-            result.push(chatMessage);
-        }
-
-        return result;
     }
 
     // ============================================

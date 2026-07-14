@@ -264,9 +264,15 @@ export class ChatEngineLog implements ILog {
             typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
         ).join('\n');
 
+        // Resolve nodeId from sessionId for the engine call
+        if (!this._nodeIdCache && this._sessionId) {
+            this._nodeIdCache = await this.resolveNodeId(this._sessionId);
+        }
+        const nodeId = this._nodeIdCache ?? '';
+
         await this.engine.appendMessage(
-            '', // nodeId — ChatEngine derives from sessionId
-            ref,  // sessionId = ref in current model
+            nodeId,
+            ref,
             role,
             content,
             {
@@ -289,7 +295,6 @@ export class ChatEngineLog implements ILog {
         if (cached) return cached;
 
         try {
-            // Resolve VFS nodeId from sessionId (not from ref parameter)
             if (!this._nodeIdCache) {
                 if (!this._sessionId) return [];
                 this._nodeIdCache = await this.resolveNodeId(this._sessionId);
