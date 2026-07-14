@@ -10,4 +10,5 @@ export * from './budget-controller';
 export * from './error-recovery';
 export * from './back-pressure';
 export * from './loop';
+export * from './goal';
 export * from './sub-agent';

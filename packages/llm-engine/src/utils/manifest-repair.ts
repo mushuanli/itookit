@@ -1,10 +1,16 @@
 // @file: llm-engine/src/utils/manifest-repair.ts
+//
+// @deprecated S4: Append-only Log invariant makes manifest-repair unnecessary.
+//             Once data model fully migrates to Turn DAG (ULID + parents[]),
+//             no repair is needed. Remove call sites in ChatEngine when ready.
 
 import { ChatManifest } from '../persistence/types';
 import { log } from './logger';
 
 /**
  * Manifest 修复结果
+ *
+ * @deprecated S4: See file-level comment.
  */
 export interface RepairResult {
     repaired: boolean;

@@ -49,11 +49,11 @@ export interface ILog {
 }
 
 export interface RefStore {
-    create(name: string, at: TurnId): Ref;
-    move(ref: Ref, to: TurnId): void;
-    tag(name: string, at: TurnId): void;
-    delete(ref: Ref): void;
-    list(): Ref[];
+    create(name: string, at: TurnId): Ref | Promise<Ref>;
+    move(ref: Ref, to: TurnId): void | Promise<void>;
+    tag(name: string, at: TurnId): void | Promise<void>;
+    delete(ref: Ref): void | Promise<void>;
+    list(): Ref[] | Promise<Ref[]>;
 }
 
 export interface DraftArea {

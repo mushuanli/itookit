@@ -4,9 +4,7 @@ import { ExecutorConfig, IExecutorFactory } from '../core/interfaces';
 import { ExecutionContext } from '../core/execution-context';
 import { type KernelEventBus, getEventBus } from '../core/event-bus';
 import { ExecutionResult } from '../core/types';
-import type { OrchestrationPlan } from '../core/orchestrator-interfaces';
 import { getExecutorRegistry } from '../executors';
-import { getOrchestratorRegistry } from '../orchestrators';
 import { generateUUID } from '@itookit/common';
 
 /**
@@ -172,71 +170,6 @@ export class ExecutionRuntime {
      */
     getActiveCount(): number {
         return this.activeExecutions.size;
-    }
-
-    /**
-     * 执行编排计划
-     * Uses the OrchestratorRegistry to select the right orchestrator for the plan type.
-     */
-    async executePlan(
-        plan: OrchestrationPlan,
-        options: ExecutionOptions = {},
-    ): Promise<ExecutionResult[]> {
-        const registry = getOrchestratorRegistry();
-        const orchestrator = registry.create(plan.type);
-        const executionId = options.executionId ?? generateUUID();
-
-        const abortController = new AbortController();
-        if (options.signal) {
-            options.signal.addEventListener('abort', () => abortController.abort());
-        }
-        this.activeExecutions.set(executionId, abortController);
-
-        const scopedEvents = this.eventBus.channel(executionId);
-        const context = new ExecutionContext(
-            executionId,
-            scopedEvents,
-            undefined,
-            0,
-            undefined,
-            abortController,
-        );
-
-        if (options.variables) {
-            for (const [key, value] of Object.entries(options.variables)) {
-                context.variables.set(key, value);
-            }
-        }
-
-        try {
-            scopedEvents.emit('execution:start', {
-                executionId,
-                planId: plan.id,
-                planType: plan.type,
-                stepCount: plan.steps.length,
-            });
-
-            const results = await orchestrator.execute(plan, context);
-
-            scopedEvents.emit('execution:complete', {
-                executionId,
-                planId: plan.id,
-                stepResults: results.map((r) => r.status),
-            });
-
-            return results;
-        } catch (error: any) {
-            scopedEvents.emit('execution:error', {
-                executionId,
-                message: error.message,
-                error: error.message,
-                code: error.code || 'ORCHESTRATION_ERROR',
-            });
-            throw error;
-        } finally {
-            this.activeExecutions.delete(executionId);
-            this.eventBus.closeChannel(executionId);
-        }
     }
 
     /**

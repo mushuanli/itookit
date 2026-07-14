@@ -1,4 +1,8 @@
 // @file: llm-engine/utils/throttled-writer.ts
+//
+// @deprecated S4: DraftArea subsumes throttled content persistence.
+//             Once streaming content flows through DraftArea.setCurrent(),
+//             this standalone module can be removed.
 
 import { IChatEngine } from '../persistence/types';
 import { log } from './logger';

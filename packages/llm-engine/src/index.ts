@@ -47,6 +47,18 @@ export {
     createBackPressureMiddleware,
 } from './executors';
 
+// ── LLM 2.0: Goal control loop (S5) ─────────────────────────────────
+
+export {
+    DependencyScheduler,
+    CycleError as GoalCycleError,
+    reconcile,
+    createTruncationPredicate,
+    createShellPredicate,
+    createLLMJudgePredicate,
+} from './core/goal';
+export type { SchedulerSnapshot, ReconcileOptions } from './core/goal';
+
 // ============================================
 // 会话管理
 // ============================================
@@ -93,6 +105,7 @@ export {
 // ============================================
 
 export { ChatEngine } from './persistence/chat-engine';
+export { ChatEngineLog } from './persistence/chat-engine-log';
 export type {
     IChatEngine,
     ChatManifest,

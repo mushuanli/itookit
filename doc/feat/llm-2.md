@@ -1,6 +1,6 @@
 # LLM 子系统 2.0 — 四原语内核 + 插件框架设计
 
-> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S3 完成）| 分支: v4.1
+> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S6 完成）| 分支: v4.1
 > 前置分析: [llm-design.md](./llm-design.md)（现状五包架构审查）
 > 定位: 本文档是重构的**宪法**——定义不变的内核原语与扩展契约，现有功能全部归约为原语组合
 
@@ -8,16 +8,16 @@
 
 ## 实施进度
 
-**S1~S3 已完成**（2026-07-14）。S4~S6 待实施。
+**S1~S3 已完成**，**S4~S6 基础设施已就绪、验收标准尚未全部达成**（2026-07-14）。
 
-| 阶段 | 状态 | 关键交付 | 待做 |
+| 阶段 | 状态 | 关键交付 | 剩余工作 |
 |---|---|---|---|
 | **S1** 统一 LLM 调用 | ✅ | `ILLMService` 成为 Agent Loop 路径唯一入口；`streamRaw()` 删除 | Kernel `executeQuery` 路径仍未迁移 |
 | **S2** AgentEvent + ILoop | ✅ | canonical `AgentEvent` schema；`ILoop`/`ILoopMiddleware` 接口；`ExecutorRegistry` | 旧事件消费者完全迁移至 canonical AgentEvent |
-| **S3** Loop 协程 + 中间件 | ✅ | `drive()` 协程宿主接入 TaskRunner；`LoopExecutor`（AsyncGenerator ILoop）取代 UnifiedLoopStrategy；`chatExecutor`；6 个内置中间件；`SessionActor` 桥接；HarnessAdapter/UnifiedLoopStrategy 下线 | `AgentLoopExecutor` 旧代码移除（llm-harness）；resume() 完整实现（需 S4 checkpoint 序列化）；mission/lite-sub-agent-router 迁移至 ILoop |
-| **S4** Log 收敛 | ❌ | `ILog` 接口；`ChatEngineLog` facade（桩代码）；`ulid()` 生成；S3 中 `createSessionLogAdapter` 作为临时桥接 | ID 方案迁移（`BBB_SSSSS_R`→ULID）；完善 ChatEngineLog merge/rebase/DraftArea；删 `SessionState`/`LockManager`/`manifest-repair` |
-| **S5** Goal 统一 | ❌ | — | 唯一依赖调度器；4→1 Predicate 化 |
-| **S6** 拆包裁剪 | ❌ | — | `llm-core` 拆包；kernel 内部平台代码裁剪 |
+| **S3** Loop 协程 + 中间件 | ✅ | `drive()` 协程宿主接入 TaskRunner；`LoopExecutor`（AsyncGenerator ILoop）取代 UnifiedLoopStrategy；`chatExecutor`；6 个内置中间件；`SessionActor` 桥接；HarnessAdapter/UnifiedLoopStrategy 下线 | `AgentLoopExecutor` 旧代码移除（llm-harness）；resume() 完整实现；mission/lite-sub-agent-router 迁移至 ILoop |
+| **S4** Log 收敛 | 🟡 | `ChatEngineLog` 完整 ILog 实现（VFS DraftArea、ChatManifest RefStore、fold 缓存、merge 去重、rebase 结构）；`createSessionLogAdapter` → ChatEngineLog；RefStore 异步化；ChatManifest 新增 `tags` | **验收未达成**：`SessionState`/`LockManager`/`manifest-repair`/`ThrottledWriter` 仅 @deprecated 未真正删除；旧 ID（`BBB_SSSSS_R`）未全量迁移至 ULID |
+| **S5** Goal 统一 | 🟡 | `IController`/`Goal`/`GoalNode`/`Predicate`/`Verdict` 接口（common）；`DependencyScheduler`（Kahn 拓扑 + 事件驱动）；`reconcile()` 算法；3 个内置 Predicate（truncation/shell/llm-judge） | **验收未达成**：4 个现有控制回路（Mission/SessionGraph/AutoContinue/BackPressure）尚未实际切换到 `reconcile()` 驱动 |
+| **S6** 拆包裁剪 | 🟡 | llm-kernel 删除 15 个死代码文件（~60%）；`ExecutorType` 收缩为 `'agent'`；`initializeKernel` 简化；`executePlan()` 删除 | **验收未达成**：`llm-core` 拆包重命名未执行；llm-harness 28 个文件未裁剪；包边界 ≠ 变更轴 |
 
 ### S3 完成内容（2026-07-14）
 
@@ -97,6 +97,102 @@
 | `agent-types.ts` (common) | `AgentEventType` 标记 @deprecated |
 | `types.ts` (engine) | `OrchestratorEvent` 标记 @deprecated |
 | `interfaces/agent/index.ts` (common) | 新增 agent-event、loop 导出 |
+
+### S4 完成内容（2026-07-14）
+
+#### 新增/重写文件
+
+| 文件 | 包 | 说明 |
+|---|---|---|
+| `persistence/chat-engine-log.ts` | llm-engine | **重写** — 完整 ILog 实现：VFSDraftArea（崩溃安全草稿持久化）、ChatEngineRefStore（ChatManifest 驱动的分支/标签管理）、fold TTL 缓存、merge 去重 + 三策略支持、rebase 下游结构 |
+
+#### 修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `interfaces/chat.ts` (common) | ChatManifest 新增 `tags?: Record<string, string>` 字段 |
+| `interfaces/agent/loop.ts` (common) | RefStore 接口方法签名改为支持 `Promise` 返回（`create`、`move`、`tag`、`delete`、`list`） |
+| `session/task-runner.ts` | `createSessionLogAdapter()`（S3 临时桥接）替换为 `new ChatEngineLog(this.engine, sessionId)`；移除 `prebuiltMessages` 预计算 |
+| `session/session-state.ts` | 标记 @deprecated（→ ILog.fold() 替代） |
+| `utils/LockManager.ts` | 标记 @deprecated（→ ILog I2 单写入方架构保证） |
+| `utils/manifest-repair.ts` | 标记 @deprecated（→ append-only 无不一致态） |
+| `utils/throttled-writer.ts` | 标记 @deprecated（→ DraftArea 替代） |
+| `index.ts` (llm-engine) | 新增 `ChatEngineLog` 导出 |
+
+### S5 完成内容（2026-07-14）
+
+#### 新增文件
+
+| 文件 | 包 | 说明 |
+|---|---|---|
+| `interfaces/agent/goal.ts` | common | `IController` / `Goal` / `GoalNode` / `TaskSpec` / `Predicate` / `Verdict` / `GoalNodeStatus` — 控制回路全部类型定义 |
+| `core/goal/dependency-scheduler.ts` | llm-engine | `DependencyScheduler` — Kahn 拓扑排序 + `CycleError` 环检测；`readySet()` / `complete()` / `fail()` + 自动 `propagateSkipped`；事件驱动 `onChange()` 替代 500ms 轮询；`snapshot()` 驱动 `goal:progress` 事件 |
+| `core/goal/reconciler.ts` | llm-engine | `reconcile()` 算法 — 并行/串行节点分发、并发上限控制、重试循环、HITL 暂停、Predicate 评估 |
+| `core/goal/predicates.ts` | llm-engine | 3 个内置 Predicate：`truncation`（启发式截断检测）、`shell`（退出码判定）、`llm-judge`（verifier LLM 结构化判定） |
+| `core/goal/index.ts` | llm-engine | 桶导出 |
+
+#### 修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `interfaces/agent/index.ts` (common) | 新增 `goal` 导出 |
+| `index.ts` (llm-engine) | 新增 Goal 模块导出（`DependencyScheduler`、`reconcile`、3 个 Predicate 工厂） |
+
+#### 四个现有控制回路 → Goal 配置映射
+
+| 现有模块 | Goal 配置 | 迁移状态 |
+|---|---|---|
+| **Mission** | nodes = TodoItem[]；edges = todo deps；predicate = `llm-judge` | 接口已就绪，待接入 |
+| **SessionGraph** | nodes = 文件依赖拓扑；edges = 文件 `dependencies`；predicate = `llm-judge` | 接口已就绪，待接入 |
+| **AutoContinue** | 单节点；predicate = `truncation`；retry = 续写 prompt | 接口已就绪，待接入 |
+| **BackPressure** | 单节点；predicate = `shell`；retry feedback = stderr | 接口已就绪，待接入 |
+
+### S6 完成内容（2026-07-14）
+
+#### 删除文件（llm-kernel 死代码，共 15 个）
+
+| 删除项 | 文件数 | 原因 |
+|---|---|---|
+| CLI Runner | `cli/runner.ts` + `cli/index.ts` | 零外部导入 |
+| Worker 协议 | `worker/worker-adapter.ts` + `worker/worker-client.ts` + `worker/index.ts` | 零外部导入 |
+| Plugin 系统 | `plugins/plugin-manager.ts` + `plugins/plugin-interface.ts` | 零插件注册 |
+| Script Executor | `executors/script-executor.ts` | 未注册，零外部使用 |
+| Http Executor | `executors/http-executor.ts` | 仅注册表中自引用，零外部使用 |
+| Tool Executor | `executors/tool-executor.ts` | 仅注册表中自引用，零外部使用 |
+| StateMachine | `runtime/state-machine.ts` | 零外部使用 |
+| MemoryStore | `runtime/memory-store.ts` | 零外部使用 |
+| 5 Orchestrator | `orchestrators/serial\|parallel\|router\|loop\|dag-orchestrator.ts` + `index.ts` | 零外部调用 `executePlan()` |
+| Validators | `utils/validators.ts` | 零外部导入 |
+| Logger | `utils/logger.ts` | 零外部导入 |
+
+#### 修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `index.ts` (llm-kernel) | **重写** — 移除 ~15 个死代码导出；`initializeKernel()` 简化为仅初始化 Runtime（移除 PluginManager）；`KernelInitOptions.plugins` 保留为空接受项 |
+| `executors/index.ts` (llm-kernel) | 移除 `HttpExecutor` 导入及 `registerBuiltins` 注册（仅保留 `agent`） |
+| `core/types.ts` (llm-kernel) | `ExecutorType` 收缩为 `'agent'`（删除 `'http'` `'tool'` `'script'`） |
+| `runtime/execution-runtime.ts` (llm-kernel) | 移除 `getOrchestratorRegistry` 导入；删除 `executePlan()` 方法（依赖已删除的 Orchestrator） |
+
+#### 保留项（被外部引用，不能删）
+
+| 模块 | 引用方 |
+|---|---|
+| `core/types.ts`（`NodeStatus`） | `llm-engine` |
+| `core/interfaces.ts`（`ExecutorConfig`） | `llm-engine` |
+| `core/event-bus.ts`（`getEventBus`, `KernelEventMap`） | `llm-engine` |
+| `core/device-registry.ts`（`setKernelDeviceManager`） | `app-shell` |
+| `executors/agent-executor.ts` + `base-executor.ts` | 间接（`LLMKernelAdapter`） |
+| `runtime/execution-runtime.ts`（`ExecutionRuntime`, `getRuntime`） | `llm-engine` |
+| `utils/id-generator.ts` | 多处内部引用 |
+
+#### 暂不执行
+
+| 项目 | 原因 |
+|---|---|
+| `llm-core` 拆包重命名 | 需要独立 PR 处理包创建/发布/迁移 |
+| llm-harness 28 个文件删除 | 待 executor-mission/graph 插件完成后逐步迁移 |
+| `llm-kernel` 物理文件删除 | `AgentExecutor` 仍被 `LLMKernelAdapter` 使用；内部平台代码待后续裁剪 |
 
 ---
 
@@ -650,9 +746,9 @@ export const vcsPlugin: IPlugin = {
 | **S1** | 统一 LLM 调用为单一 `ILLMService`（短路 kernel 7 层链路） | 病灶 1 | 全部 chat 流量走 4 层栈 | ✅ |
 | **S2** | 定义 `AgentEvent` + `ILoop` 两个硬契约；现有 4 条执行路径包装为 executor | 病灶 4 | UI 只消费一套事件；翻译适配器删除 | ✅ |
 | **S3** | Loop 中间件化：创建 `LoopExecutor`（AsyncGenerator ILoop）+ 6 个中间件 + `SessionActor` 桥接；接入 `ExecutorRegistry` + `drive()`；`UnifiedLoopStrategy`/`HarnessAdapter` 下线 | 病灶 2、6 | 双 loop → 1；pause/resume 一套机制；ExecutorRegistry 驱动 | ✅ |
-| **S4** | Log 收敛：ChatEngine 升级为 Log 原语，单写入方 + 投影缓存；删除 SessionState 双写 | 病灶 5 | `manifest-repair`/`LockManager` 删除 | ❌ |
-| **S5** | Goal 统一：唯一依赖调度器 + Predicate 化 4 个控制回路 | 病灶 3 | 4 份调度 → 1 | ❌ |
-| **S6** | 拆包重命名：`llm-core` / `executor-*` / `vcs` / `tasks`；kernel 解体裁剪 | 病灶 7 | 包边界 = 变更轴 | ❌ |
+| **S4** | Log 收敛：ChatEngine 升级为 Log 原语，单写入方 + 投影缓存；删除 SessionState 双写 | 病灶 5 | `manifest-repair`/`LockManager` **真正删除**（当前仅 @deprecated）；旧 ID 方案全量迁移至 ULID | 🟡 |
+| **S5** | Goal 统一：唯一依赖调度器 + Predicate 化 4 个控制回路 | 病灶 3 | 4 份调度**实际切换**到 DependencyScheduler（当前仅基础设施就绪，尚未接入） | 🟡 |
+| **S6** | 拆包重命名：`llm-core` / `executor-*` / `vcs` / `tasks`；kernel 解体裁剪 | 病灶 7 | 包边界 = 变更轴（当前仅完成 kernel 死代码裁剪，拆包未执行） | 🟡 |
 
 ---
 

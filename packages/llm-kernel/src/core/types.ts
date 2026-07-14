@@ -1,13 +1,10 @@
 // @file: llm-kernel/core/types.ts
 
 /**
- * 执行器类型枚举
+ * 执行器类型
+ * S6: 'http' / 'tool' / 'script' 执行器已删除，仅保留 'agent'
  */
-export type ExecutorType =
-    | 'agent'       // LLM Agent
-    | 'http'        // HTTP 请求
-    | 'tool'        // 工具调用
-    | 'script';     // 脚本执行
+export type ExecutorType = 'agent';
 
 /**
  * 节点状态

@@ -136,6 +136,8 @@ export interface ChatManifest {
     next_branch_num: number;
     /** branchName → branchNum (main = 0) */
     branch_nums: Record<string, number>;
+    /** Immutable named save points (tag name → turn node ID) */
+    tags?: Record<string, string>;
 
     ui_state?: {
         collapse_states?: Record<string, boolean>;

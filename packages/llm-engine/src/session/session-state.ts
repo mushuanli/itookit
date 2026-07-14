@@ -21,6 +21,11 @@ export interface HistoryMessage {
 /**
  * 会话状态管理
  *
+ * @deprecated S4: Replaced by ILog.fold() + ILog.append().
+ *             Migrate consumers to use ChatEngineLog for history access.
+ *             UI should re-project from fold() instead of mutating
+ *             a separate in-memory copy.
+ *
  * ID 策略：
  *   SessionGroup.id = persistedNodeId（如果有），否则生成临时 ID
  *   这保证了 reloadSessionData 后 ID 保持稳定，

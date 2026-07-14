@@ -1,6 +1,10 @@
 
 // ============================================
 // 锁管理器
+//
+// @deprecated S4: ILog invariant I2 (single writer per session) ensures
+//             serialization architecturally. Replace with per-session
+//             Promise chain when ChatEngine is refactored.
 // ============================================
 
 export class LockManager {

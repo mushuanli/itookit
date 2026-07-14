@@ -3,7 +3,6 @@
 import { IExecutor, IExecutorFactory, ExecutorConfig } from '../core/interfaces';
 import { ExecutorType } from '../core/types';
 import { AgentExecutor, AgentExecutorConfig } from './agent-executor';
-import { HttpExecutor, HttpExecutorConfig } from './http-executor';
 
 /**
  * 执行器工厂函数类型
@@ -25,11 +24,6 @@ export class ExecutorRegistry implements IExecutorFactory {
         this.registerExecutor('agent', (config) => {
             const agentConfig = config as AgentExecutorConfig;
             return new AgentExecutor(config.id, config.name, agentConfig);
-        });
-
-        this.registerExecutor('http', (config) => {
-            const httpConfig = config as HttpExecutorConfig;
-            return new HttpExecutor(config.id, config.name, httpConfig);
         });
     }
 

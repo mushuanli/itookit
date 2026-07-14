@@ -31,6 +31,7 @@ src/
 │   │   ├── agent-event.ts   ← ★ canonical AgentEvent (~22 events, 消灭 5→1)
 │   │   ├── agent-service.ts ← IAgentRuntime (run/abort/inject/on)
 │   │   ├── loop.ts          ← ★ ILoop / LoopContext / Signal / ILog / Turn / ILoopMiddleware
+│   │   ├── goal.ts          ← ★ IController / Goal / GoalNode / Predicate / Verdict（S5）
 │   │   ├── context-manager.ts, budget-controller.ts, error-recovery.ts
 │   │   ├── back-pressure.ts, sub-agent.ts
 │   ├── skills/           ← Skill 接口 (SkillDefinition, ISkillService)
@@ -111,6 +112,7 @@ IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult
 | `ILoop` | `interfaces/agent/loop.ts` | ★ 执行原语 — AsyncGenerator 协程 |
 | `ILoopMiddleware` | `interfaces/agent/loop.ts` | 轮次级 hook (beforeTurn / afterTurn / onError) |
 | `ILog` / `Turn` / `RefStore` | `interfaces/agent/loop.ts` | Log 原语契约 |
+| `Goal` / `GoalNode` / `IController` / `Predicate` / `Verdict` | `interfaces/agent/goal.ts` | Goal 控制回路契约（S5） |
 
 ## LLM 2.0 四原语模型
 
@@ -126,8 +128,8 @@ Log       不可变历史 — append-only Turn DAG + refs; state = fold(log, ref
 | AgentEvent | `type AgentEvent = ...` (~22 variants) | `interfaces/agent/agent-event.ts` |
 | Loop | `ILoop.run(): AsyncGenerator<AgentEvent, Turn[], Signal>` | `interfaces/agent/loop.ts` |
 | Channel | `ISession { signal(), events() }` | (待定义) |
-| Goal | `IController { reconcile() }` | (待定义) |
-| Log | `ILog { append, fold, refs, draft, merge, rebase }` | `interfaces/agent/loop.ts` |
+| Goal | `IController { reconcile() }` | `interfaces/agent/goal.ts` ✅ S5 |
+| Log | `ILog { append, fold, refs, draft, merge, rebase }` | `interfaces/agent/loop.ts` ✅ S4 |
 
 ## LLM Pricing & Billing
 

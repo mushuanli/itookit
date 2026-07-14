@@ -31,6 +31,7 @@ import { log } from '../utils/logger';
 import { ExecutorRegistry, getExecutorRegistry } from '../core/executor-registry';
 import { drive, LoopAbortedError } from '../core/loop-driver';
 import { SessionActor } from '../core/session-actor';
+import { ChatEngineLog } from '../persistence/chat-engine-log';
 import type { LoopContext } from '@itookit/common';
 
 export interface TaskRunnerOptions {
@@ -334,16 +335,8 @@ export class TaskRunner {
             const executor = this.executorRegistry.get(mode);
             const llmService = this.llmService!;
 
-            // ── Build pre-computed messages ────────────────────────────────
-            const history = this.buildHistoryForTask(state, input.text, input.overrides?.historyLength);
-            const historyMessages = await this.buildHistoryMessages(sessionId, history);
-            const prebuiltMessages: ChatMessage[] = [
-                ...historyMessages,
-                { role: 'user' as const, content: input.text },
-            ];
-
-            // ── Minimal ILog adapter (S3 pragmatic — replaced by ChatEngineLog in S4) ──
-            const logAdapter = this.createSessionLogAdapter(sessionId, prebuiltMessages);
+            // ── ILog via ChatEngineLog (S4: real facade over ChatEngine) ──
+            const logAdapter = new ChatEngineLog(this.engine, sessionId);
 
             // ── Event bridge: AgentEvent → accumulator + event bus ────────
             const actor = new SessionActor((event: AgentEvent) => {
@@ -499,46 +492,6 @@ export class TaskRunner {
             this.emitPoolStatus();
             this.processQueue();
         }
-    }
-
-    /**
-     * Create a minimal ILog adapter backed by SessionState + ChatEngine.
-     *
-     * This is a pragmatic S3 bridge — replaced by ChatEngineLog in S4.
-     */
-    private createSessionLogAdapter(_sessionId: string, initialMessages: ChatMessage[]) {
-        const messages = [...initialMessages];
-        return {
-            async fold(_ref: string): Promise<ChatMessage[]> {
-                return [...messages];
-            },
-            async append(_ref: string, turn: any): Promise<string> {
-                // Push assistant response into messages for the next fold()
-                if (turn.payload) {
-                    const lastMsg = turn.payload[turn.payload.length - 1];
-                    if (lastMsg) messages.push(lastMsg);
-                }
-                return turn.id ?? `turn_${Date.now()}`;
-            },
-            refs() {
-                return {
-                    create: () => 'main',
-                    move: () => {},
-                    tag: () => {},
-                    delete: () => {},
-                    list: () => ['main'],
-                };
-            },
-            draft() {
-                return {
-                    checkpoint: async () => {},
-                    flush: async () => {},
-                    current: () => null,
-                };
-            },
-            async merge(_refs: string[], _strategy: any) { return 'main'; },
-            async rebase(_ref: string, _at: string, _turns: any[], _opts?: any) { return 'main'; },
-        };
     }
 
     private async executeTask(
