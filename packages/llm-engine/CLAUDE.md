@@ -10,7 +10,7 @@
 src/
 ├── session/        ← SessionManager, SessionState (in-memory projection cache), TaskRunner
 │                     SessionEventBus (session + global 双 track, channel 路由)
-│                     truncation-detector, auto-continue (@deprecated), session-recovery
+│                     truncation-detector, auto-continue (types only), session-recovery
 ├── persistence/    ← ChatEngine (IChatEngine), ★ ChatEngineLog (完整 ILog facade)
 │                     ulid (ULID 生成), types (IChatEngine + ChatManifest/ChatNode)
 ├── adapters/       ← HarnessAdapter, UIEventAdapter, llmkernel-adapter, tool-executor-bridge
@@ -18,7 +18,7 @@ src/
 │                     TodoState, ★ sub-agent-loop-adapter, ★ mission-goal-factory
 ├── session-graph/  ← ★ GraphOrchestrator (+executeWithReconcile), DependencyGraph (@deprecated topoSort)
 │                     ★ agent-runtime-loop-adapter, ★ graph-goal-factory
-│                     SessionMetaStore, CompletionAnalyzer (@deprecated)
+│                     SessionMetaStore
 ├── services/       ← VFSAgentService, PromptHistoryService
 ├── core/           ← types, errors, constants
 │                     ★ executor-registry (ILoop 分发)
@@ -90,15 +90,15 @@ SessionManager.sendMessage()
 | 现有模块 | Goal 配置 | 迁移状态 |
 |---|---|---|
 | Mission | `MissionScheduler.run()` → `reconcile(createMissionGoal(plan), …)` | ✅ |
-| SessionGraph | `GraphOrchestrator.executeSession()` → `executeWithReconcile()` | ✅ |
+| SessionGraph | `GraphOrchestrator.executeWithReconcile()` — reconcile-driven (S5) | ✅ |
 | AutoContinue | while(true) → `createTruncationDetectionMiddleware` (ILoop afterTurn) | ✅ |
 | BackPressure | 存根 → 真实 `createBackPressureMiddleware` (注入错误反馈) | ✅ |
 
-**已标记 @deprecated**:
-- `AutoContinueHandler` → `createTruncationDetectionMiddleware`
-- `CompletionAnalyzer` → `createLLMJudgePredicate`
-- `DependencyGraph.topoSort()` → `DependencyScheduler`
-- `GraphOrchestrator.executeSession()` → `executeWithReconcile()`
+**已删除（S6 cleanup）**:
+- `AutoContinueHandler` → `createTruncationDetectionMiddleware`（ILoop 中间件管线）
+- `CompletionAnalyzer` → `createLLMJudgePredicate`（统一 Goal predicate 系统）
+- `GraphOrchestrator.executeSession()` → `executeWithReconcile()`（DependencyScheduler + reconcile）
+- `DependencyGraph.topoSort()` 标记 @deprecated → `DependencyScheduler`（仍被 graph-goal-factory 活跃使用）
 
 ## ILLMService 注入（S1）
 

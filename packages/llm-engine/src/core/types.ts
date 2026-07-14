@@ -67,8 +67,6 @@ export interface ExecutionOverrides {
     temperature?: number;
     /** 流式输出开关 */
     streamMode?: boolean;
-    /** 覆盖自动续写 */
-    autoContinue?: boolean;
     /**
      * 路由到 AgentLoopExecutor（harness 模式）。
      */

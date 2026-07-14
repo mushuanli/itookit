@@ -3,9 +3,9 @@
 //
 // Quick-start:
 //   const orchestrator = new GraphOrchestrator(vfsManager);
-//   await orchestrator.executeSession('minds', '/project/impl.md', {
+//   await orchestrator.executeWithReconcile('minds', '/project/impl.md', {
 //     runtime: harness.runtime,
-//     llm:     harness.llmService,   // only needed for advance mode
+//     llm:     harness.llmService,
 //     onProgress: (e) => console.log(e),
 //   });
 //
@@ -20,15 +20,12 @@ export type {
     SessionExecutionResult,
     GraphExecutionOptions,
     GraphEvent,
-    CompletionVerdict,
 } from './types';
 
 export { DEFAULT_SESSION_META } from './types';
 export { GraphOrchestrator } from './graph-orchestrator';
 export { DependencyGraph, CycleError } from './dependency-graph';
 export { SessionMetaStore } from './session-meta-store';
-/** @deprecated Use createLLMJudgePredicate from llm-engine/core/goal/predicates.ts */
-export { CompletionAnalyzer } from './completion-analyzer';
 // S5: Goal-based scheduling
 export { createGraphGoal } from './graph-goal-factory';
 export type { GraphGoalResult } from './graph-goal-factory';

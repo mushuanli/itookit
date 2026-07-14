@@ -125,14 +125,16 @@ export class SkillManager {
     }
 
     private async invokeShellSkill(skill: LLMSkill, args: Record<string, unknown>): Promise<string> {
-        if (!skill.command) throw new Error(`Skill '${skill.id}' has no command configured`);
+        const shellTool = skill.tools?.find(t => t.executionType === 'shell');
+        const command = shellTool?.command;
+        if (!command) throw new Error(`Skill '${skill.id}' has no command configured`);
         if (!this.shellRunner) {
             return (
                 `Shell skills require a native execution environment.\n` +
                 `Inject an IShellRunner when constructing LLMDeviceDriver, or use the harness path.`
             );
         }
-        return this.shellRunner.run(skill.command, args);
+        return this.shellRunner.run(command, args);
     }
 
     private async invokeMcpSkill(skill: LLMSkill, args: Record<string, unknown>): Promise<unknown> {

@@ -23,7 +23,6 @@ import { IChatEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
-import type { AutoContinueConfig } from './auto-continue';
 import { formatErrorMessage } from '../utils/error-formatter';
 import { log } from '../utils/logger';
 // ── LLM 2.0: Executor-driven dispatch ──
@@ -36,8 +35,6 @@ import type { LoopContext } from '@itookit/common';
 export interface TaskRunnerOptions {
     maxConcurrent?: number;
     maxQueueSize?: number;
-    /** ✅ 新增：自动续写配置 */
-    autoContinue?: Partial<AutoContinueConfig>;
 }
 
 /**

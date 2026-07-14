@@ -1,6 +1,6 @@
 # LLM 子系统 2.0 — 四原语内核 + 插件框架设计
 
-> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S5 验收达成，S6 部分完成）| 分支: v4.1
+> 设计日期: 2026-07-13 | 最后更新: 2026-07-14（S6 第二阶段：@deprecated 代码已删除）| 分支: v4.1
 > 前置分析: [llm-design.md](./llm-design.md)（现状五包架构审查）
 > 定位: 本文档是重构的**宪法**——定义不变的内核原语与扩展契约，现有功能全部归约为原语组合
 
@@ -8,7 +8,7 @@
 
 ## 实施进度
 
-**S1~S5 已完成**，**S6 基础设施已就绪、验收标准尚未全部达成**（2026-07-14）。
+**S1~S5 已完成**，**S6 第一阶段（内核裁剪）已完成**，**第二阶段（@deprecated 清理）已完成**（2026-07-14）。
 
 | 阶段 | 状态 | 关键交付 | 剩余工作 |
 |---|---|---|---|
@@ -17,7 +17,9 @@
 | **S3** Loop 协程 + 中间件 | ✅ | `drive()` 协程宿主接入 TaskRunner；`LoopExecutor`（AsyncGenerator ILoop）取代 UnifiedLoopStrategy；`chatExecutor`；6 个内置中间件；`SessionActor` 桥接；HarnessAdapter/UnifiedLoopStrategy 下线 | `AgentLoopExecutor` 旧代码移除（llm-harness）；resume() 完整实现；mission/lite-sub-agent-router 迁移至 ILoop |
 | **S4** Log 收敛 | ✅ | `ChatEngineLog` 完整 ILog 实现（VFS DraftArea、ChatManifest RefStore、fold 缓存、merge 去重、rebase 结构）；`createSessionLogAdapter` → ChatEngineLog；RefStore 异步化；ChatManifest 新增 `tags`；**验收达成**：`LockManager`/`manifest-repair`/`ThrottledWriter` 已真正删除；`SessionState` 重新定位为合法的 ILog.fold() 投影缓存；旧 ID（`BBB_SSSSS_R`）→ ULID（`makeNodeId` 改用 `ulid()`） | — |
 | **S5** Goal 统一 | ✅ | `IController`/`Goal`/`GoalNode`/`Predicate`/`Verdict` 接口（common）；`DependencyScheduler`（Kahn 拓扑 + 事件驱动）；`reconcile()` 算法；3 个内置 Predicate（truncation/shell/llm-judge）；**验收达成**：4 个控制回路全部切换至 reconcile()/DependencyScheduler 驱动；AutoContinue → `createTruncationDetectionMiddleware`；BackPressure 存根 → 真实实现；Mission → `reconcile()` + `SubAgentLoopAdapter` + `createMissionGoal`；SessionGraph → `executeWithReconcile()` + `AgentRuntimeLoopAdapter` + `createGraphGoal` | — |
-| **S6** 拆包裁剪 | 🟡 | llm-kernel 删除 15 个死代码文件（~60%）；`ExecutorType` 收缩为 `'agent'`；`initializeKernel` 简化；`executePlan()` 删除 | **验收未达成**：`llm-core` 拆包重命名未执行；llm-harness 28 个文件未裁剪；包边界 ≠ 变更轴 |
+| **S6a** 内核裁剪 | ✅ | llm-kernel 删除 15 个死代码文件（~60%）；`ExecutorType` 收缩为 `'agent'`；`initializeKernel` 简化；`executePlan()` 删除 | — |
+| **S6b** @deprecated 清理 | ✅ | 删除 `CompletionAnalyzer` 文件 + `AutoContinueHandler` 类 + `executeSession()` 路径 + `orchestrator-interfaces.ts` + llm-harness 2 个死代码文件 + `autoContinue` 死配置管线 | — |
+| **S6c** 拆包重命名 | 🟡 | — | `llm-core` 拆包重命名未执行；llm-harness 整体迁移（AgentLoopExecutor 等 22 文件）；包边界 ≠ 变更轴 |
 
 ### S3 完成内容（2026-07-14）
 
@@ -184,19 +186,19 @@
 | `session-graph/completion-analyzer.ts` | `CompletionAnalyzer` 标记 @deprecated（被 `createLLMJudgePredicate` 替代） |
 | `session-graph/index.ts` | 新增 `createGraphGoal`、`createAgentRuntimeLoopAdapter` 等导出 |
 | `session/task-runner.ts` | 删除 `executeTask()` 中的 while(true) auto-continue 循环；删除 `trimTrailingAssistant`；移除 `AutoContinueHandler` 使用 |
-| `session/auto-continue.ts` | `AutoContinueHandler` 标记 @deprecated |
-| `index.ts` (llm-engine) | 新增 `createTruncationDetectionMiddleware`、Mission/Graph Goal 适配器导出；`AutoContinueHandler` 导出标记 @deprecated |
+| `session/auto-continue.ts` | `AutoContinueHandler` 标记 @deprecated → **S6b 已删除** |
+| `index.ts` (llm-engine) | 新增 `createTruncationDetectionMiddleware`、Mission/Graph Goal 适配器导出；`AutoContinueHandler` 导出标记 @deprecated → **S6b 已移除** |
 
-#### @deprecated 清单
+#### @deprecated 清单（S5 标记 → S6b 已删除）
 
-| 组件 | 替代 |
-|---|---|
-| `AutoContinueHandler` | `createTruncationDetectionMiddleware` |
-| `CompletionAnalyzer` | `createLLMJudgePredicate` |
-| `DependencyGraph.topoSort()` | `DependencyScheduler` |
-| `GraphOrchestrator.executeSession()` | `GraphOrchestrator.executeWithReconcile()` |
+| 组件 | 替代 | 最终状态 |
+|---|---|---|
+| `AutoContinueHandler` | `createTruncationDetectionMiddleware` | **已删除**（类 + `DEFAULT_AUTO_CONTINUE` 常量，`auto-continue.ts` 仅保留类型定义） |
+| `CompletionAnalyzer` | `createLLMJudgePredicate` | **已删除**（文件 + 所有导出） |
+| `DependencyGraph.topoSort()` | `DependencyScheduler` | @deprecated（仍被 `graph-goal-factory`、`getStatus()`、`resetSession()` 使用） |
+| `GraphOrchestrator.executeSession()` | `GraphOrchestrator.executeWithReconcile()` | **已删除**（方法 + 5 个私有辅助方法） |
 
-### S6 完成内容（2026-07-14）
+### S6a 完成内容（2026-07-14）— 内核裁剪
 
 #### 删除文件（llm-kernel 死代码，共 15 个）
 
@@ -223,7 +225,7 @@
 | `core/types.ts` (llm-kernel) | `ExecutorType` 收缩为 `'agent'`（删除 `'http'` `'tool'` `'script'`） |
 | `runtime/execution-runtime.ts` (llm-kernel) | 移除 `getOrchestratorRegistry` 导入；删除 `executePlan()` 方法（依赖已删除的 Orchestrator） |
 
-#### 保留项（被外部引用，不能删）
+#### S6a 保留项（被外部引用，不能删）
 
 | 模块 | 引用方 |
 |---|---|
@@ -235,13 +237,74 @@
 | `runtime/execution-runtime.ts`（`ExecutionRuntime`, `getRuntime`） | `llm-engine` |
 | `utils/id-generator.ts` | 多处内部引用 |
 
-#### 暂不执行
+---
+
+### S6b 完成内容（2026-07-14）— @deprecated 清理
+
+在 S6a 内核裁剪基础上，删除已确认零消费者的 @deprecated 代码和死代码。
+
+#### 删除文件（4 个）
+
+| 文件 | 包 | 原因 |
+|---|---|---|
+| `skills/correction-log.ts` | llm-harness | 零内部/外部导入 |
+| `skills/subagent-skill-bridge.ts` | llm-harness | 零内部/外部导入 |
+| `core/orchestrator-interfaces.ts` | llm-kernel | 5 个 orchestrator 在 S6a 已删除，仅剩类型空壳 |
+| `session-graph/completion-analyzer.ts` | llm-engine | 仅被已废弃的 `executeSession()` 使用 |
+
+#### 删除代码块（llm-engine）
+
+| 文件 | 删除内容 | 行数 |
+|---|---|---|
+| `session-graph/graph-orchestrator.ts` | `executeSession()` + 5 个私有方法（`runOneSession`、`buildPrompt`、`invokeAgent`、`skipRemaining`、`resolvePath`） | ~135 |
+| `session/auto-continue.ts` | `AutoContinueHandler` 类 + `DEFAULT_AUTO_CONTINUE` 常量 + 相关 import | ~130 |
+
+#### 清理死配置管线（llm-engine）
+
+| 文件 | 删除内容 |
+|---|---|
+| `session/task-runner.ts` | `AutoContinueConfig` import；`TaskRunnerOptions.autoContinue` 字段（从不读取） |
+| `session/session-manager.ts` | `AutoContinueConfig` import；constructor `autoContinue` 选项 + 透传 |
+| `core/types.ts` | `ExecutionOverrides.autoContinue` 字段 |
+
+#### 修改文件（llm-engine 导出清理）
+
+| 文件 | 改动 |
+|---|---|
+| `index.ts` | 移除 `CompletionAnalyzer`、`AutoContinueHandler`、`CompletionVerdict` 导出 |
+| `session-graph/index.ts` | 移除 `CompletionAnalyzer`、`CompletionVerdict` 导出；快速开始示例改用 `executeWithReconcile()` |
+| `executors/loop-middleware.ts` | `DEFAULT_AUTO_CONTINUE` → 内联 `TRUNCATION_DETECTION_DEFAULTS` 常量 |
+
+#### 附带修复
+
+| 文件 | 包 | 问题 | 修复 |
+|---|---|---|---|
+| `device/skill-manager.ts` | device-llm | `invokeShellSkill` 访问不存在的 `skill.command`（`SkillDefinition` 无此属性） | 改为 `skill.tools.find(t => t.executionType === 'shell')?.command` |
+
+#### S6b 验收标准
+
+| 标准 | 状态 |
+|---|---|
+| 所有删除文件的符号零引用（grep 验证） | ✅ |
+| llm-kernel 编译通过 | ✅ |
+| llm-engine 编译通过 | ✅ |
+| llm-harness 编译通过 | ✅ |
+| device-llm 编译通过 | ✅ |
+| 旧执行路径（`executeSession`）不可访问 | ✅ |
+| `AutoContinueHandler` 零消费者 | ✅ |
+
+---
+
+### S6c 待执行
 
 | 项目 | 原因 |
 |---|---|
 | `llm-core` 拆包重命名 | 需要独立 PR 处理包创建/发布/迁移 |
-| llm-harness 28 个文件删除 | 待 executor-mission/graph 插件完成后逐步迁移 |
-| `llm-kernel` 物理文件删除 | `AgentExecutor` 仍被 `LLMKernelAdapter` 使用；内部平台代码待后续裁剪 |
+| llm-harness 整体迁移（AgentLoopExecutor 等 22 文件） | 待 executor-mission/graph 插件完成后逐步迁移 |
+| `llm-kernel` `AgentExecutor` 物理删除 | 仍被 `LLMKernelAdapter` 使用 |
+| `OrchestratorEvent` → `AgentEvent` 替换 | 15+ 文件活跃使用，需独立 PR |
+| `HarnessAdapter` 删除 | llm-ui 3 个文件活跃使用 |
+| `DependencyGraph.topoSort()` → `DependencyScheduler` 迁移 | S5 活跃路径（`graph-goal-factory`、`getStatus`、`resetSession`），属功能改进 |
 
 ---
 

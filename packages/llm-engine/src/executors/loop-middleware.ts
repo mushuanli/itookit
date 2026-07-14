@@ -16,7 +16,20 @@ import type {
 } from '@itookit/common';
 import { TruncationDetector } from '../session/truncation-detector';
 import type { AutoContinueConfig } from '../session/auto-continue';
-import { DEFAULT_AUTO_CONTINUE } from '../session/auto-continue';
+
+const TRUNCATION_DETECTION_DEFAULTS: AutoContinueConfig = {
+    enabled: true,
+    maxContinuations: 5,
+    continuePrompt: [
+        'Continue from the exact point where the text was cut off.',
+        'Do not repeat any content. Do not add opening code fences, markdown headers,',
+        'or any structural markers that already exist in the prior output.',
+        'If the cutoff was mid-word or mid-sentence, resume from that exact character.',
+    ].join(' '),
+    highConfidenceOnly: true,
+    continuationTimeout: 30_000,
+    maxAccumulatedChars: 120_000,
+};
 
 // ─── Budget Middleware ────────────────────────────────────────────────
 
@@ -194,7 +207,7 @@ export function createSkillsMiddleware(): ILoopMiddleware {
 export function createTruncationDetectionMiddleware(
     config?: Partial<AutoContinueConfig>,
 ): ILoopMiddleware {
-    const cfg = { ...DEFAULT_AUTO_CONTINUE, ...config };
+    const cfg = { ...TRUNCATION_DETECTION_DEFAULTS, ...config };
     const detector = new TruncationDetector();
     let continuationCount = 0;
     let accumulatedChars = 0;

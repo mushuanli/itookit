@@ -14,7 +14,6 @@ src/
 │   ├── types.ts           ← ExecutorType = 'agent'（S6 收缩）；NodeStatus
 │   ├── interfaces.ts      ← IExecutor, ExecutorConfig, IExecutorFactory
 │   ├── device-registry.ts ← set/getKernelDeviceManager（app-shell 注入）
-│   └── orchestrator-interfaces.ts ← OrchestrationPlan 类型（仅类型，无运行时）
 ├── executors/
 │   ├── index.ts           ← ExecutorRegistry（仅注册 'agent'，单例）
 │   ├── agent-executor.ts  ← AgentExecutor — LLM 调用（844 行，被 LLMKernelAdapter 使用）

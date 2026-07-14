@@ -14,7 +14,6 @@ export * from './core/types';
 export * from './core/interfaces';
 export * from './core/event-bus';
 export * from './core/execution-context';
-export * from './core/orchestrator-interfaces';
 export { setKernelDeviceManager, getKernelDeviceManager } from './core/device-registry';
 
 // ============================================

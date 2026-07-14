@@ -173,7 +173,6 @@ export {
     GraphOrchestrator,
     DependencyGraph,
     SessionMetaStore,
-    CompletionAnalyzer,
     CycleError,
     DEFAULT_SESSION_META,
     // S5: Goal-based scheduling adapters
@@ -187,7 +186,6 @@ export type {
     SessionExecutionResult,
     GraphExecutionOptions,
     GraphEvent,
-    CompletionVerdict,
     GraphGoalResult,
 } from './session-graph';
 
@@ -209,8 +207,6 @@ export { formatErrorMessage } from './utils/error-formatter';
 export { TruncationDetector } from './session/truncation-detector';
 export type { TruncationResult } from './session/truncation-detector';
 
-/** @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware in the ILoop path. */
-export { AutoContinueHandler } from './session/auto-continue';
 export type {
     AutoContinueConfig,
     ContinueDecision,
