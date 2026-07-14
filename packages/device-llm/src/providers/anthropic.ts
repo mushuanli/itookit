@@ -262,7 +262,7 @@ export class AnthropicProvider extends BaseProvider {
 
             // 普通函数工具 — 兼容两种格式：
             //   common ToolDefinition: { function: { name, description, parameters } }
-            //   llm-kernel ToolDefinition: { name, description, parameters }
+            //   legacy ToolDefinition: { name, description, parameters }
             return {
                 name: tool.function?.name || tool.name || 'unknown',
                 description: tool.function?.description || (tool as any).description || '',

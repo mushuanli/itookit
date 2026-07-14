@@ -3,7 +3,7 @@
 import type { ModelTier, ChatAttachment } from '@itookit/common';
 
 // ═══════════════════════════════════════════════════════════════
-// Core types (NodeStatus, ExecutorConfig, ExecutorType — S8 from llm-kernel)
+// Core types (NodeStatus, ExecutorConfig, ExecutorType — consolidated in llm-engine)
 // ═══════════════════════════════════════════════════════════════
 
 /** 节点状态 */

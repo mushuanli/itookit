@@ -108,7 +108,7 @@ IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult
 | `IAgentRuntimeConfig` | `interfaces/agent/agent-service.ts` | 运行时配置 (modelRoles, budgetLimits, loopConfig) |
 | `AgentEventType` | `interfaces/agent/agent-types.ts` | @deprecated — 25 种旧事件联合类型，迁移至 `AgentEvent` |
 | `AgentEventPayloads` | `interfaces/agent/agent-types.ts` | @deprecated — 旧事件→payload 映射 |
-| `AgentEvent` | `interfaces/agent/agent-event.ts` | ★ canonical 事件 schema（15 个，S7: +tool:input +log:ref_renamed） |
+| `AgentEvent` | `interfaces/agent/agent-event.ts` | ★ canonical 事件 schema（23 个变体） |
 | `ILoop` | `interfaces/agent/loop.ts` | ★ 执行原语 — AsyncGenerator 协程 |
 | `ILoopMiddleware` | `interfaces/agent/loop.ts` | 轮次级 hook — `beforeTurn` / `onToolCalls` / `afterTurn` / `onError`。`onToolCalls` 在 LLM 响应解析后、工具执行前调用（plan confirm 等） |
 | `PlannedTool` | `interfaces/agent/loop.ts` | 轻量工具调用信息（id, name, arguments），onToolCalls 钩子入参 |
@@ -128,7 +128,7 @@ Log       不可变历史 — append-only Turn DAG + refs; state = fold(log, ref
 
 | 原语 | 接口 | 文件 |
 |---|---|---|
-| AgentEvent | `type AgentEvent = ...` (15 variants) | `interfaces/agent/agent-event.ts` |
+| AgentEvent | `type AgentEvent = ...` (23 variants) | `interfaces/agent/agent-event.ts` |
 | Loop | `ILoop.run(): AsyncGenerator<AgentEvent, Turn[], Signal>` | `interfaces/agent/loop.ts` |
 | Channel | `ISession { signal(), events() }` | (待定义) |
 | Goal | `IController { reconcile() }` | `interfaces/agent/goal.ts` ✅ S5 |

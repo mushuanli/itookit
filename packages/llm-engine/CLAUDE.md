@@ -2,7 +2,7 @@
 
 会话引擎 — 多会话管理、VFS 持久化、Mission 编排、Session Graph、Agent Loop。
 
-> **S1~S11 ✅ (2026-07-14)**: 四原语内核（Log/Loop/Channel/Goal）全部实施。llm-kernel 消除、事件统一（SessionEvent）、控制回路统一（Goal/reconcile）、resume 实现、LiteSubAgentRouter ILoop 迁移。详见 [llm-2.md](../../doc/feat/llm-2.md)。
+> **S1~S12 ✅ (2026-07-14)**: 四原语内核（Log/Loop/Channel/Goal）全部实施。llm-kernel 消除、事件统一（SessionEvent）、控制回路统一（Goal/reconcile）、resume 实现、LiteSubAgentRouter ILoop 迁移、ISession 接口 + ICommandBus + SessionManager 降级。详见 [llm-2.md](../../doc/feat/llm-2.md)。
 
 ## Architecture
 

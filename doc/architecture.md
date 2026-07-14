@@ -80,11 +80,8 @@ Five strategies: `StandardWorkspaceStrategy` (MDxEditor + `IModuleFS`), `ChatWor
 device-llm  →  LLMConnection / streaming / MCP / multi-provider / Skill storage
 llm-harness →  AgentLoopExecutor (multi-turn) + built-in tools + TTY device + Skill/Tool drivers
 llm-engine  →  SessionManager, LLMSessionEngine (→ vfslib), VFSAgentService (→ vfslib)
-               S8: 吸收 llm-kernel 的 NodeStatus/ExecutorConfig/device-registry
 llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
 ```
-
-> **S8**: `@itookit/llm-kernel` 包已消除。原 kernel 中的 `NodeStatus`、`ExecutorConfig`、`ExecutorType` 内联至 llm-engine `core/types.ts`，`setKernelDeviceManager` / `getKernelDeviceManager` 迁移至 `core/device-registry.ts`，`initializeKernel()` inline 至 `initializeLLMEngine()`。
 
 `initializeLLMEngine(options)` in `packages/llm-engine/src/index.ts` wires the kernel, `VFSAgentService`, `LLMSessionEngine`, `PromptHistoryService`, and returns a `SessionManager`.
 

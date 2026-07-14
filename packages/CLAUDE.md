@@ -1,6 +1,6 @@
 # packages/ 模块协作指南
 
-17 个模块的协作关系。各模块自身的架构和命令详见 `packages/<pkg>/CLAUDE.md`。
+16 个模块的协作关系。各模块自身的架构和命令详见 `packages/<pkg>/CLAUDE.md`。
 
 ## 模块分层
 

@@ -11,14 +11,14 @@ SOLID / DRY / KISS / YAGNI / CoC / LoD — 函数≤30行，圈复杂度≤10
 
 | 类型 | 工具 |
 |---|---|
-| 逻辑包 (`common`, `vfslib`, `device-llm`, `llm-kernel`, `llm-engine`, `tools`, vfsdrivers) | **tsup** (CJS+ESM+.d.ts) |
+| 逻辑包 (`common`, `vfslib`, `device-llm`, `llm-engine`, `tools`, vfsdrivers) | **tsup** (CJS+ESM+.d.ts) |
 | UI 包 (`memory-manager`, `vfs-ui`, `llm-ui`, `mdx`, `app-settings`) | **vite build** |
 
 ## 项目文档
 
 | 文档 | 内容 |
 |---|---|
-| [包结构](./doc/pkgstructure.md) | 18 个包及职责 |
+| [包结构](./doc/pkgstructure.md) | 16 个包及职责 |
 | [架构设计](./doc/architecture.md) | 系统全貌 — VFS / LLM / Agent / Skill / Mission / Session / TTY |
 | [集成链](./doc/integration-chains.md) | VFS / Chat / AppShell 端到端调用链 |
 | [接口契约](./doc/interface-contracts.md) | 跨包核心接口 + 实现/消费关系 |

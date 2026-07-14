@@ -15,7 +15,7 @@ import type {
 /**
  * Agent 服务接口。
  *
- * 这是 llm-kernel 中 ExecutionLoop 对外暴露的契约。
+ * 这是 Agent 运行时对外暴露的契约。
  * UI 层、CLI 层、Worker 层通过此接口与 Agent 交互。
  *
  * 设计要点：

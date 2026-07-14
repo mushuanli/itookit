@@ -80,7 +80,7 @@ export interface IDeviceManager {
 /**
  * 从已有的驱动实例和上下文创建 IDeviceHandle。
  *
- * 供无法访问 IModuleFS（VFS 路径）的调用方使用（如 llm-kernel）：
+ * 供无法访问 IModuleFS（VFS 路径）的调用方使用：
  *   const sessionId = await driver.open!(baseCtx, options);
  *   const handle = createDeviceHandle(driver, { ...baseCtx, sessionId });
  *   await handle.write(data);

@@ -1,6 +1,6 @@
 // @file: llm-engine/core/device-registry.ts
 //
-// 全局 IDeviceManager 持有者（S8 从 llm-kernel 迁移至 llm-engine）。
+// 全局 IDeviceManager 持有者（S8 迁移至 llm-engine）。
 // 由应用层（main.ts）在 VFS 初始化完成后注入。
 
 import type { IDeviceManager } from '@itookit/common';

@@ -73,7 +73,7 @@ export const STATUS_META: Record<'connected' | 'error' | 'idle', StatusMeta> = {
     idle:      { dot: '○', color: '#9ca3af' }, // gray-400
 } as const;
 
-// ── Executor / node types (llm-kernel OrchestratorEvent) ─────────────────────
+// ── Executor / node types ─────────────────────
 
 export const EXECUTOR_TYPE_ICONS: Record<string, string> = {
     agent:     '🤖',
