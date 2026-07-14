@@ -61,8 +61,8 @@ describe('node:created event', () => {
         await sleep(AFTER_CREATE);
 
         expect(store.getState().items).toHaveLength(1);
-        expect(store.getState().items[0].id).toBe('f1');
-        expect(store.getState().activeId).toBe('f1');
+        expect(store.getState().items[0].id).toBe('/chat.chat');
+        expect(store.getState().activeId).toBe('/chat.chat');
     });
 
     it('adds a new directory to store', async () => {
@@ -92,7 +92,7 @@ describe('node:created event', () => {
         expect(store.getState().items).toHaveLength(2);
     });
 
-    it('inserts file into parent directory when parentId is set', async () => {
+    it('inserts file into parent directory when parentPath is set', async () => {
         // Pre-populate store with a directory
         store.dispatch({
             type: 'STATE_LOAD_SUCCESS',
@@ -102,14 +102,14 @@ describe('node:created event', () => {
             },
         });
 
-        const childNode = makeEngineNode({ id: 'child-1', parentId: 'dir-1', path: '/folder/child-1.chat' });
+        const childNode = makeEngineNode({ id: 'child-1', parentPath: 'dir-1', path: '/folder/child-1.chat' });
         engine.nodes.set('child-1', childNode);
 
-        engine.emit('node:created', createdPayload([{ nodeId: 'child-1', parentId: 'dir-1', path: '/folder/child-1.chat' }]));
+        engine.emit('node:created', createdPayload([{ nodeId: 'child-1', parentPath: 'dir-1', path: '/folder/child-1.chat' }]));
         await sleep(AFTER_CREATE);
 
         const dir = store.getState().items.find(i => i.id === 'dir-1');
-        expect(dir?.children?.some(c => c.id === 'child-1')).toBe(true);
+        expect(dir?.children?.some(c => c.id === '/folder/child-1.chat')).toBe(true);
     });
 
     it('IGNORES asset-dir files (path inside _ prefix directory)', async () => {
@@ -243,33 +243,35 @@ describe('node:deleted event', () => {
 
 describe('node:updated event', () => {
     it('updates existing item in store', async () => {
-        // Pre-load with icon '📄'
+        const path = '/f1.chat';
+        // Pre-load with icon '📄' using path-based id (matching NodeMapper behaviour)
         store.dispatch({
             type: 'STATE_LOAD_SUCCESS',
-            payload: { items: [makeVFSNodeUI({ id: 'f1', icon: '📄' })], tags: new Map() },
+            payload: { items: [makeVFSNodeUI({ id: path, icon: '📄' })], tags: new Map() },
         });
 
         // Update: engine.getNode returns node with new icon
-        const updatedNode = makeEngineNode({ id: 'f1', path: '/f1.chat' });
+        const updatedNode = makeEngineNode({ id: 'f1', path });
         engine.nodes.set('f1', { ...updatedNode, icon: '🔥' });
 
-        engine.emit('node:updated', updatedPayload([{ nodeId: 'f1', path: '/f1.chat' }]));
+        engine.emit('node:updated', updatedPayload([{ nodeId: 'f1', path }]));
         await sleep(AFTER_UPDATE);
 
         expect(store.getState().items[0].icon).toBe('🔥');
     });
 
     it('REMOVES item from store when updated node becomes a filtered (hidden) node', async () => {
+        const path = '/.hidden';
         // Pre-load a regular file
         store.dispatch({
             type: 'STATE_LOAD_SUCCESS',
-            payload: { items: [makeVFSNodeUI({ id: 'f1' })], tags: new Map() },
+            payload: { items: [makeVFSNodeUI({ id: path })], tags: new Map() },
         });
 
-        // After update, getNode returns a node that shouldFilterNode → true (dot prefix path)
-        engine.nodes.set('f1', makeEngineNode({ id: 'f1', name: '.hidden', path: '/.hidden' }));
+        // After update, getNode returns a node that shouldFilterNode → true (dot prefix name)
+        engine.nodes.set('f1', makeEngineNode({ id: 'f1', name: '.hidden', path }));
 
-        engine.emit('node:updated', updatedPayload([{ nodeId: 'f1', path: '/.hidden' }]));
+        engine.emit('node:updated', updatedPayload([{ nodeId: 'f1', path }]));
         await sleep(AFTER_UPDATE);
 
         // shouldFilterNode returned true → ITEM_DELETE_SUCCESS was dispatched
@@ -324,11 +326,11 @@ describe('connectEngineEvents subscription lifecycle', () => {
         // event as their base counterparts. Subscribing to both would fire handleEvent twice
         // for a single FS event. EngineAdapter subscribes to the 4 base types + node:renamed.
         // node:renamed is kept separate because rename has its own payload shape and skip rules.
-        const origOn = engine.on.bind(engine);
+        const origOn = engine.driver.on.bind(engine.driver);
         // Rebuild adapter with an instrumented engine
         const spy = new MockSessionEngine();
         const registeredTypes: string[] = [];
-        spy.on = (event, cb) => {
+        spy.driver.on = (event, cb) => {
             registeredTypes.push(event);
             return origOn(event, cb);
         };
@@ -357,14 +359,14 @@ describe('loadData', () => {
         node.content = 'hello';
 
         // Override loadTree to return nodes
-        engine.getChildren = async () => [node];
+        engine.driver.getChildren = async () => [node];
 
         await adapter.loadData();
 
         const state = store.getState();
         expect(state.status).toBe('success');
         expect(state.items).toHaveLength(1);
-        expect(state.items[0].id).toBe('f1');
+        expect(state.items[0].id).toBe('/f1.chat');
     });
 
     it('filters hidden nodes from tree during load', async () => {
@@ -372,18 +374,18 @@ describe('loadData', () => {
         const assetDir = makeDirectoryNode({ id: 'ad1', name: '_session.chat', path: '/_session.chat' });
         const visible = makeEngineNode({ id: 'v1', name: 'visible.chat', path: '/visible.chat' });
 
-        engine.getChildren = async () => [hidden, assetDir, visible];
+        engine.driver.getChildren = async () => [hidden, assetDir, visible];
 
         await adapter.loadData();
 
         const ids = store.getState().items.map(i => i.id);
-        expect(ids).not.toContain('h1');
-        expect(ids).not.toContain('ad1');
-        expect(ids).toContain('v1');
+        expect(ids).not.toContain('/.hidden');
+        expect(ids).not.toContain('/_session.chat');
+        expect(ids).toContain('/visible.chat');
     });
 
     it('dispatches ITEMS_LOAD_ERROR on loadTree failure', async () => {
-        engine.getChildren = async () => { throw new Error('storage error'); };
+        engine.driver.getChildren = async () => { throw new Error('storage error'); };
 
         await adapter.loadData();
 

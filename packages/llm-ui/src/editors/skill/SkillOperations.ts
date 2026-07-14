@@ -21,12 +21,18 @@ export interface SkillOperationsDeps {
 
 export async function addNew(deps: SkillOperationsDeps): Promise<void> {
     const skill: LLMSkill = {
-        id:         `skill-${generateShortUUID()}`,
-        name:       'New Skill',
-        type:       'prompt',
-        enabled:    false,
-        createdAt:  Date.now(),
-        modifiedAt: Date.now(),
+        id:              `skill-${generateShortUUID()}`,
+        name:            'New Skill',
+        type:            'prompt',
+        enabled:         false,
+        description:     '',
+        instructions:    '',
+        tools:           [],
+        triggerPatterns: [],
+        autoLoad:        false,
+        priority:        50,
+        createdAt:       Date.now(),
+        modifiedAt:      Date.now(),
     };
     await deps.service.saveSkill(skill);
     deps.selectedId = skill.id;
@@ -77,10 +83,10 @@ export async function saveCurrent(deps: SkillOperationsDeps): Promise<void> {
         id:           newId,
         name:         deps.val('header-name') || existing.name,
         icon:         deps.val('header-icon') || undefined,
-        description:  deps.val('description') || undefined,
+        description:  deps.val('description') || existing.description,
         type,
         enabled:      deps.chk('enabled'),
-        instructions: type === 'prompt' ? (deps.val('instructions') || undefined) : undefined,
+        instructions: type === 'prompt' ? (deps.val('instructions') || existing.instructions) : existing.instructions,
         command:      type === 'shell'  ? (deps.val('command')      || undefined) : undefined,
         mcpServerId:  type === 'mcp'    ? (deps.val('mcpServerId')  || undefined) : undefined,
         mcpToolName:  type === 'mcp'    ? (deps.val('mcpToolName')  || undefined) : undefined,
@@ -92,7 +98,10 @@ export async function saveCurrent(deps: SkillOperationsDeps): Promise<void> {
         autoLoad:     deps.chk('autoLoad'),
         priority:     parseInt(deps.val('priority') || '50', 10),
         globs:        globs.length > 0 ? globs : undefined,
-        correctionLog: deps.val('correctionLog').trim() || undefined,
+        correctionLog: deps.val('correctionLog').trim() ? {
+            path: deps.val('correctionLog').trim(),
+            enabled: true,
+        } : undefined,
         disableModelInvocation: deps.chk('disableModelInvocation') || undefined,
         modifiedAt:   Date.now(),
     };

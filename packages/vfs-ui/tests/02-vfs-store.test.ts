@@ -11,11 +11,11 @@ import { makeVFSNodeUI } from './helpers/fixtures';
 
 let store: VFSStore;
 
-const file = (id: string, parentId: string | null = null, overrides: Partial<VFSNodeUI> = {}): VFSNodeUI =>
-    makeVFSNodeUI({ id, metadata: { ...makeVFSNodeUI().metadata, parentId, path: `/${id}`, title: id }, ...overrides });
+const file = (id: string, parentPath: string | null = null, overrides: Partial<VFSNodeUI> = {}): VFSNodeUI =>
+    makeVFSNodeUI({ id, metadata: { ...makeVFSNodeUI().metadata, parentPath, path: `/${id}`, title: id }, ...overrides });
 
-const dir = (id: string, parentId: string | null = null, children: VFSNodeUI[] = []): VFSNodeUI =>
-    makeVFSNodeUI({ id, type: 'directory', content: undefined, metadata: { ...makeVFSNodeUI().metadata, parentId, path: `/${id}`, title: id }, children });
+const dir = (id: string, parentPath: string | null = null, children: VFSNodeUI[] = []): VFSNodeUI =>
+    makeVFSNodeUI({ id, type: 'directory', content: undefined, metadata: { ...makeVFSNodeUI().metadata, parentPath, path: `/${id}`, title: id }, children });
 
 beforeEach(() => {
     store = new VFSStore();
@@ -174,7 +174,7 @@ describe('FOLDER_TOGGLE — accordion behavior', () => {
         loadTree(dir('a', null, [inner]), dir('b'));
         toggle('a');
         // simulate 'a-child' being loaded and expanded
-        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'a', children: [inner] } });
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentPath: 'a', children: [inner] } });
         toggle('a-child');
         expect(expanded().has('a-child')).toBe(true);
 
@@ -189,7 +189,7 @@ describe('FOLDER_TOGGLE — accordion behavior', () => {
         const child = dir('a-child', 'a');  // parentId = 'a'
         loadTree(dir('a', null, [child]));
         toggle('a');
-        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'a', children: [child] } });
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentPath: 'a', children: [child] } });
         toggle('a-child');
         expect(expanded().has('a-child')).toBe(true);
 
@@ -203,13 +203,13 @@ describe('FOLDER_TOGGLE — accordion behavior', () => {
     it('FOLDER_CHILDREN_LOADED collapses siblings (startup path bypasses FOLDER_TOGGLE)', () => {
         // Simulate old persisted state: multiple siblings were expanded
         loadTree(dir('a'), dir('b'), dir('c'));
-        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'a', children: [] } });
-        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'b', children: [] } });
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentPath: 'a', children: [] } });
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentPath: 'b', children: [] } });
         // 'a' should have been collapsed when 'b' loaded
         expect(expanded().has('a')).toBe(false);
         expect(expanded().has('b')).toBe(true);
 
-        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'c', children: [] } });
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentPath: 'c', children: [] } });
         expect(expanded().has('b')).toBe(false);
         expect(expanded().has('c')).toBe(true);
     });
@@ -219,7 +219,7 @@ describe('FOLDER_TOGGLE — accordion behavior', () => {
         const child2 = dir('a-c2', 'a');  // parentId = 'a'
         loadTree(dir('a', null, [child1, child2]), dir('b'));
         toggle('a');
-        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'a', children: [child1, child2] } });
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentPath: 'a', children: [child1, child2] } });
         toggle('a-c1');
         toggle('a-c2'); // collapses sibling 'a-c1', NOT the parent 'a'
         expect(expanded().has('a')).toBe(true);  // parent still open

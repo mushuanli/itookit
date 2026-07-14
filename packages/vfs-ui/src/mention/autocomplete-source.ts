@@ -1,8 +1,12 @@
 /**
  * @file vfs-ui/src/mention/autocomplete-source.ts
  * Generic autocomplete / mention source interfaces — vfs-ui internal.
- * Moved from @itookit/common as these are only consumed by vfs-ui.
+ * HoverPreviewData is defined in @itookit/common and re-exported here for convenience.
  */
+
+import type { HoverPreviewData } from '@itookit/common';
+
+export type { HoverPreviewData };
 
 export interface Suggestion {
     id: string | number;
@@ -18,12 +22,6 @@ export abstract class IAutocompleteSource {
         }
     }
     abstract getSuggestions(query: string): Promise<Suggestion[]>;
-}
-
-export interface HoverPreviewData {
-    title: string;
-    contentHTML: string;
-    icon?: string;
 }
 
 export abstract class IMentionSource extends IAutocompleteSource {

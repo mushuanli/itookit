@@ -1,7 +1,7 @@
 /**
  * Shared test fixtures and mock factories for vfs-ui tests.
  */
-import type { EngineNode, EngineEventType, EngineEvent, IFSEngine } from '@itookit/common';
+import type { EngineNode, EngineEventType, EngineEvent } from '@itookit/common';
 import type { IFileTypePort } from '../../src/contracts/ports';
 import type { VFSNodeUI } from '../../src/contracts/types';
 
@@ -54,65 +54,72 @@ export const makeVFSNodeUI = (overrides: Partial<VFSNodeUI> = {}): VFSNodeUI => 
 // ── MockSessionEngine ────────────────────────────────────────────────────────
 
 /**
- * Minimal IFSEngine mock that:
- * - Stores event handlers via on() so tests can call emit()
- * - Returns nodes from an internal map via getNode()
- * - Returns '' for readContent()
+ * Minimal IModuleFS mock that:
+ * - Exposes driver.on() for EngineAdapter.connectEngineEvents()
+ * - Returns nodes from an internal map via driver.getNode() (by id or path fallback)
+ * - Returns [] for driver.getChildren()
  */
-export class MockSessionEngine implements Pick<IFSEngine,
-    'on' | 'getChildren' | 'getNode' | 'readContent' | 'writeContent' |
-    'createFile' | 'createDirectory' | 'delete' | 'rename' | 'move' |
-    'setTags' | 'setTagsBatch' | 'getAllTags' | 'search' | 'updateMetadata'
-> {
+export class MockSessionEngine {
     private handlers = new Map<string, Array<(e: EngineEvent) => void>>();
-    /** Pre-populated node map for getNode() responses. */
+    /** Pre-populated node map for driver.getNode() responses. Keyed by id or path. */
     readonly nodes = new Map<string, EngineNode>();
 
-    on(event: EngineEventType, callback: (e: EngineEvent) => void): () => void {
-        if (!this.handlers.has(event)) this.handlers.set(event, []);
-        this.handlers.get(event)!.push(callback);
-        return () => {
-            const arr = this.handlers.get(event) ?? [];
-            const idx = arr.indexOf(callback);
-            if (idx >= 0) arr.splice(idx, 1);
-        };
-    }
+    driver = {
+        on: (event: EngineEventType, callback: (e: EngineEvent) => void): (() => void) => {
+            if (!this.handlers.has(event)) this.handlers.set(event, []);
+            this.handlers.get(event)!.push(callback);
+            return () => {
+                const arr = this.handlers.get(event) ?? [];
+                const idx = arr.indexOf(callback);
+                if (idx >= 0) arr.splice(idx, 1);
+            };
+        },
+
+        getChildren: async (_parentPath: string): Promise<EngineNode[]> => {
+            return [];
+        },
+
+        getNode: async (idOrPath: string): Promise<EngineNode | null> => {
+            // Direct lookup by id first, then fallback to path scan
+            if (this.nodes.has(idOrPath)) return this.nodes.get(idOrPath) ?? null;
+            for (const node of this.nodes.values()) {
+                if (node.path === idOrPath) return node;
+            }
+            return null;
+        },
+
+        createFile: async (opts: { name: string; parentPath: string | null; content?: string | ArrayBuffer; recursive?: boolean }): Promise<EngineNode> =>
+            makeEngineNode({ id: `created-${Date.now()}`, name: opts.name, parentPath: opts.parentPath }),
+
+        createDirectory: async (opts: { name: string; parentPath: string | null; recursive?: boolean }): Promise<EngineNode> =>
+            makeEngineNode({ id: `dir-${Date.now()}`, name: opts.name, parentPath: opts.parentPath, type: 'directory' }),
+
+        delete: async (_ids: string[]): Promise<void> => {},
+
+        rename: async (_id: string, _newName: string): Promise<void> => {},
+
+        move: async (_ids: string[], _targetParentId: string | null): Promise<void> => {},
+
+        search: async (_query?: any): Promise<EngineNode[]> => [],
+
+        updateMetadata: async (_id: string, _metadata: Record<string, unknown>): Promise<void> => {},
+    };
+
+    meta = {
+        tags: {
+            setTags: async (_id: string, _tags: string[]): Promise<void> => {},
+        },
+        assets: {
+            hasAssetDir: async (_ownerPath: string): Promise<boolean> => false,
+            putAsset: async (_ownerPath: string, _assetName: string, _content: string | ArrayBuffer): Promise<EngineNode> =>
+                makeEngineNode({}),
+        },
+    };
 
     /** Fire a VFS event — simulates ModuleFS emitting through VFSModuleEngine */
     emit(type: EngineEventType, payload: unknown): void {
         this.handlers.get(type)?.forEach(cb => cb({ type, payload }));
     }
-
-    async getChildren(_parentId: string): Promise<EngineNode[]> {
-        return [];
-    }
-
-    async getNode(id: string): Promise<EngineNode | null> {
-        return this.nodes.get(id) ?? null;
-    }
-
-    async readContent(_id: string): Promise<string | ArrayBuffer> {
-        return '';
-    }
-
-    async writeContent(_id: string, _content: string | ArrayBuffer): Promise<void> {}
-
-    async createFile(name: string, parentId: string | null): Promise<EngineNode> {
-        return makeEngineNode({ id: `created-${Date.now()}`, name, parentId });
-    }
-
-    async createDirectory(name: string, parentId: string | null): Promise<EngineNode> {
-        return makeEngineNode({ id: `dir-${Date.now()}`, name, parentId, type: 'directory' });
-    }
-
-    async delete(_ids: string[]): Promise<void> {}
-    async rename(_id: string, _newName: string): Promise<void> {}
-    async move(_ids: string[], _targetParentId: string | null): Promise<void> {}
-    async setTags(_id: string, _tags: string[]): Promise<void> {}
-    async setTagsBatch(_updates: Array<{ id: string; tags: string[] }>): Promise<void> {}
-    async getAllTags(): Promise<Array<{ name: string; color?: string }>> { return []; }
-    async search(): Promise<EngineNode[]> { return []; }
-    async updateMetadata(_id: string, _metadata: Record<string, unknown>): Promise<void> {}
 }
 
 // ── MockFileTypePort ─────────────────────────────────────────────────────────
@@ -134,7 +141,7 @@ export const updatedPayload = (nodes: Array<{ nodeId: string; path: string }>) =
     reason: 'content' as const,
 });
 
-export const deletedPayload = (requestedIds: string[], allDeletedIds?: string[]) => ({
-    requestedIds,
-    allDeletedIds: allDeletedIds ?? requestedIds,
+export const deletedPayload = (requestedPaths: string[], allDeletedPaths?: string[]) => ({
+    requestedPaths,
+    allDeletedPaths: allDeletedPaths ?? requestedPaths,
 });

@@ -60,7 +60,7 @@ export function checkSessionInterrupted(
 // ── Mid-execution injection ────────────────────────────────────────────────
 
 export function injectIntoRunningHarness(
-    message: string,
+    _message: string,
 ): boolean {
     return false;
 }

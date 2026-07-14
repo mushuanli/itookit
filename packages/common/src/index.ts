@@ -10,7 +10,7 @@ export {
 } from './utils/MemoryLogger';
 
 export { LogLevel, LogLevelNames } from './interfaces/ILogger';
-export type { ModuleLog } from './interfaces/ILogger';
+export type { LogEntry, LogFilter, LoggerStats, ModuleLog } from './interfaces/ILogger';
 
 // ── IModuleFS: 模块文件系统接口及相关类型 ──
 export * from './interfaces/fs';
@@ -33,6 +33,7 @@ export {
     type CollapseExpandResult
 } from './interfaces/IEditor';
 export { type EditorFactory } from './interfaces/IEditorFactory';
+export { type HoverPreviewData } from './interfaces/IHoverPreview';
 export { type NavigationRequest } from './interfaces/INavigation';
 
 export {

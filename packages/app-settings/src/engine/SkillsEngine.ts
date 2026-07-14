@@ -290,7 +290,12 @@ class SkillsDriver implements IFSDriver {
         const name = cleanName(rawName);
         const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `skill-${Date.now()}`;
         const now = Date.now();
-        const skill: LLMSkill = { id, name, type: 'prompt', enabled: false, createdAt: now, modifiedAt: now };
+        const skill: LLMSkill = {
+            id, name, type: 'prompt', enabled: false,
+            description: '', instructions: '', tools: [],
+            triggerPatterns: [], autoLoad: false, priority: 50,
+            createdAt: now, modifiedAt: now,
+        };
         await this.service.saveSkill(skill);
         const node = toFSNode(skill);
         this.fire('node:created', { nodes: [{ nodeId: id, parentId: null, path: `/${id}`, type: 'file' }] });

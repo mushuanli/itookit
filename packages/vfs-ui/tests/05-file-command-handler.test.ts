@@ -45,13 +45,13 @@ describe('FileCommandHandler — command → engine wiring', () => {
         engine = new MockSessionEngine();
 
         // Spy on engine.createFile to verify it gets called
-        engine.createFile = vi.fn(async (name: string, parentId: string | null) =>
-            makeEngineNode({ id: 'new-id', name, parentId, path: `/${name}` })
+        engine.driver.createFile = vi.fn(async (opts: { name: string; parentPath: string | null; content?: string | ArrayBuffer }) =>
+            makeEngineNode({ id: 'new-id', name: opts.name, parentPath: opts.parentPath, path: `/${opts.name}` })
         );
-        engine.createDirectory = vi.fn(async (name: string, parentId: string | null) =>
-            makeEngineNode({ id: 'dir-id', name, parentId, path: `/${name}`, type: 'directory' })
+        engine.driver.createDirectory = vi.fn(async (opts: { name: string; parentPath: string | null }) =>
+            makeEngineNode({ id: 'dir-id', name: opts.name, parentPath: opts.parentPath, path: `/${opts.name}`, type: 'directory' })
         );
-        engine.delete = vi.fn(async () => {});
+        engine.driver.delete = vi.fn(async () => {});
 
         service = new VFSService({ engine: engine as any, defaultExtension: '.chat' });
         handler = new FileCommandHandler(commandBus, store, service);
@@ -62,24 +62,24 @@ describe('FileCommandHandler — command → engine wiring', () => {
     });
 
     it('file:create command calls engine.createFile()', async () => {
-        commandBus.execute('file:create', { type: 'file', title: 'My Chat', parentId: null });
+        commandBus.execute('file:create', { type: 'file', title: 'My Chat', parentPath: null });
         await sleep(10); // allow async handler to run
 
-        expect(engine.createFile).toHaveBeenCalledWith('My Chat.chat', null, '');
+        expect(engine.driver.createFile).toHaveBeenCalledWith({ name: 'My Chat.chat', parentPath: null, content: '' });
     });
 
     it('file:create with directory calls engine.createDirectory()', async () => {
-        commandBus.execute('file:create', { type: 'directory', title: 'My Folder', parentId: null });
+        commandBus.execute('file:create', { type: 'directory', title: 'My Folder', parentPath: null });
         await sleep(10);
 
-        expect(engine.createDirectory).toHaveBeenCalledWith('My Folder', null);
+        expect(engine.driver.createDirectory).toHaveBeenCalledWith({ name: 'My Folder', parentPath: null });
     });
 
     it('file:delete command calls engine.delete() with correct IDs', async () => {
         commandBus.execute('file:delete', { itemIds: ['id-1', 'id-2'] });
         await sleep(10);
 
-        expect(engine.delete).toHaveBeenCalledWith(['id-1', 'id-2']);
+        expect(engine.driver.delete).toHaveBeenCalledWith(['id-1', 'id-2']);
     });
 
     it('file:create fires the same engine that EngineAdapter is subscribed to', async () => {
@@ -90,17 +90,17 @@ describe('FileCommandHandler — command → engine wiring', () => {
 
         const created = makeEngineNode({ id: 'new-id', path: '/My Chat.chat' });
         engine.nodes.set('new-id', created);
-        engine.createFile = vi.fn(async () => {
+        engine.driver.createFile = vi.fn(async () => {
             // Simulate the event that VFSModuleEngine.createFile() would fire
             engine.emit('node:created', createdPayload([{ nodeId: 'new-id', path: '/My Chat.chat' }]));
             return created;
         });
 
-        commandBus.execute('file:create', { type: 'file', title: 'My Chat', parentId: null });
+        commandBus.execute('file:create', { type: 'file', title: 'My Chat', parentPath: null });
         await sleep(120); // wait for command handler + debounce + async
 
         unsub();
-        expect(store.getState().items.some(i => i.id === 'new-id')).toBe(true);
+        expect(store.getState().items.some(i => i.id === '/My Chat.chat')).toBe(true);
     });
 });
 
@@ -123,20 +123,28 @@ class FilteredEventEngine {
 
     readonly nodes = new Map<string, ReturnType<typeof makeEngineNode>>();
 
-    /**
-     * Simulates VFSModuleEngine.on() after the .has() fix.
-     * Internally uses a per-event list filtered by moduleId.
-     */
-    on(event: EngineEventType, callback: (e: EngineEvent) => void): () => void {
-        if (!this.subscriptions.has(event)) this.subscriptions.set(event, []);
-        const entry = { moduleId: 'chat', cb: callback };
-        this.subscriptions.get(event)!.push(entry);
-        return () => {
-            const list = this.subscriptions.get(event) ?? [];
-            const idx = list.indexOf(entry);
-            if (idx >= 0) list.splice(idx, 1);
-        };
-    }
+    driver = {
+        on: (event: EngineEventType, callback: (e: EngineEvent) => void): (() => void) => {
+            if (!this.subscriptions.has(event)) this.subscriptions.set(event, []);
+            const entry = { moduleId: 'chat', cb: callback };
+            this.subscriptions.get(event)!.push(entry);
+            return () => {
+                const list = this.subscriptions.get(event) ?? [];
+                const idx = list.indexOf(entry);
+                if (idx >= 0) list.splice(idx, 1);
+            };
+        },
+
+        getChildren: async (_parentPath: string): Promise<EngineNode[]> => [],
+
+        getNode: async (idOrPath: string): Promise<EngineNode | null> => {
+            if (this.nodes.has(idOrPath)) return this.nodes.get(idOrPath) ?? null;
+            for (const node of this.nodes.values()) {
+                if (node.path === idOrPath) return node;
+            }
+            return null;
+        },
+    };
 
     /**
      * Simulates ModuleFS._emit() — only reaches subscribers whose moduleId matches.
@@ -150,10 +158,6 @@ class FilteredEventEngine {
             }
         });
     }
-
-    async getChildren(_parentId: string) { return []; }
-    async getNode(id: string) { return this.nodes.get(id) ?? null; }
-    async readContent(_id: string): Promise<string | ArrayBuffer> { return ''; }
 }
 
 describe('Event filter: only matching moduleId reaches EngineAdapter', () => {
@@ -184,7 +188,7 @@ describe('Event filter: only matching moduleId reaches EngineAdapter', () => {
         );
 
         await sleep(120);
-        expect(store.getState().items.some(i => i.id === 'f1')).toBe(true);
+        expect(store.getState().items.some(i => i.id === '/f1.chat')).toBe(true);
     });
 
     it('event with WRONG moduleId is filtered out — store not updated', async () => {
@@ -247,7 +251,7 @@ describe('concurrent create + update events for same node', () => {
         adapter.destroy();
 
         // The file should appear in the store
-        expect(store.getState().items.some(i => i.id === 'chat-1')).toBe(true);
+        expect(store.getState().items.some(i => i.id === '/chat.chat')).toBe(true);
     });
 
     it('asset-dir node:created events do NOT pollute the store', async () => {
@@ -281,8 +285,8 @@ describe('concurrent create + update events for same node', () => {
         adapter.destroy();
 
         const ids = store.getState().items.map(i => i.id);
-        expect(ids).toContain('chat-1');         // visible chat file ✓
-        expect(ids).not.toContain('asset-dir');   // filtered: _ prefix ✓
-        expect(ids).not.toContain('root-node');   // filtered: inside asset dir ✓
+        expect(ids).toContain('/session.chat');         // visible chat file ✓
+        expect(ids).not.toContain('/_session.chat');   // filtered: _ prefix ✓
+        expect(ids).not.toContain('/_session.chat/000_00000_s.chat');   // filtered: inside asset dir ✓
     });
 });
