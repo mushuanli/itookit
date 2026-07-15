@@ -201,6 +201,8 @@ export abstract class BaseProvider {
             } catch {
                 body = text;
             }
+            let requestBody: any;
+            try { requestBody = JSON.parse(options.body as string); } catch { requestBody = options.body; }
             console.error('[LLM] HTTP error (non-stream)', {
                 provider: this.name,
                 url,
@@ -208,6 +210,7 @@ export abstract class BaseProvider {
                 statusText: response.statusText,
                 responseHeaders: this.headersSnapshot(response),
                 responseBody: body,
+                requestBody,
             });
             throw LLMError.fromResponse(this.name, response.status, body);
         }
@@ -235,6 +238,8 @@ export abstract class BaseProvider {
             } catch {
                 body = text;
             }
+            let requestBody: any;
+            try { requestBody = JSON.parse(options.body as string); } catch { requestBody = options.body; }
             console.error('[LLM] HTTP error (stream)', {
                 provider: this.name,
                 url,
@@ -242,6 +247,7 @@ export abstract class BaseProvider {
                 statusText: response.statusText,
                 responseHeaders: this.headersSnapshot(response),
                 responseBody: body,
+                requestBody,
             });
             throw LLMError.fromResponse(this.name, response.status, body);
         }
