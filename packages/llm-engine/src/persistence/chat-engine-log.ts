@@ -310,21 +310,24 @@ export class ChatEngineLog implements ILog {
                     content: c.node.content ?? '',
                 }));
 
-            // Drop empty assistant turns together with their preceding user turn.
-            // An empty assistant content means the LLM call failed (e.g. HTTP 400)
-            // and sending it to the API would cause another 400.
+            // Drop empty assistant turns — they result from failed LLM calls (e.g. HTTP 400).
+            // Sending empty assistant content to Anthropic causes another 400.
+            // Also ensure the final message is always from the user (Anthropic requirement).
             const messages: ChatMessage[] = [];
             for (let i = 0; i < raw.length; i++) {
                 const c = raw[i].content;
                 const isEmpty = typeof c === 'string' ? !c.trim() : (c as any[]).length === 0;
                 if (raw[i].role === 'assistant' && isEmpty) {
-                    // Also remove the immediately preceding user message (the pair is incomplete)
-                    if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
-                        messages.pop();
-                    }
-                    continue;
+                    continue; // skip empty assistant; keep preceding user as context
                 }
                 messages.push(raw[i]);
+            }
+
+            // Anthropic requires the last message to be from the user.
+            // Trim any trailing assistant messages (shouldn't happen in normal flow,
+            // but can occur if the last turn had content and is the current head).
+            while (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
+                messages.pop();
             }
 
             this._cache.set(cacheKey, messages);
