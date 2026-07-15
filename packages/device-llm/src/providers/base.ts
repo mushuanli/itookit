@@ -201,6 +201,14 @@ export abstract class BaseProvider {
             } catch {
                 body = text;
             }
+            console.error('[LLM] HTTP error (non-stream)', {
+                provider: this.name,
+                url,
+                status: response.status,
+                statusText: response.statusText,
+                responseHeaders: this.headersSnapshot(response),
+                responseBody: body,
+            });
             throw LLMError.fromResponse(this.name, response.status, body);
         }
 
@@ -227,6 +235,14 @@ export abstract class BaseProvider {
             } catch {
                 body = text;
             }
+            console.error('[LLM] HTTP error (stream)', {
+                provider: this.name,
+                url,
+                status: response.status,
+                statusText: response.statusText,
+                responseHeaders: this.headersSnapshot(response),
+                responseBody: body,
+            });
             throw LLMError.fromResponse(this.name, response.status, body);
         }
         

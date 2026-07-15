@@ -1117,7 +1117,7 @@ export class SessionManager implements ISession {
 
         return contextItems
             .filter(item => item.node.role !== 'system')
-            .filter(item => !(item.node.role === 'assistant' && !item.node.content?.trim()))
+            .filter(item => !(item.node.role === 'assistant' && !item.node.content?.trim() && item.node.meta?.status === 'running'))
             .map(item => Converters.chatNodeToSessionGroup(item.node))
             .filter(Boolean) as SessionGroup[];
     }
@@ -1338,7 +1338,9 @@ export class SessionManager implements ISession {
         for (const item of context) {
             const node = item.node;
             if (node.role === 'system') continue;
-            if (node.role === 'assistant' && !node.content?.trim()) continue;
+            // Skip only in-flight empty assistant nodes (status='running'); completed nodes
+            // (success/failed/aborted) with empty content are still rendered to preserve history.
+            if (node.role === 'assistant' && !node.content?.trim() && node.meta?.status === 'running') continue;
             state.loadFromChatNode(node);
         }
     }

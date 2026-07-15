@@ -189,6 +189,9 @@ export class ChatInput implements IChatInputPresenter {
         settings: { connectionId: undefined, modelTier: 'auto', historyLength: -1, streamMode: true, useHarness: false, workingDirectory: '' },
     };
 
+    /** 上次已通知的 settings JSON — 内容不变则跳过保存 */
+    private lastNotifiedSettings: string | null = null;
+
     constructor(private container: HTMLElement, private options: ChatInputOptions) {
         if (options.initialConfig) {
             this.config = this.mergeConfig(this.config, options.initialConfig);
@@ -1247,6 +1250,9 @@ export class ChatInput implements IChatInputPresenter {
 
     private notifyConfigChange(): void {
         const config = this.getConfig();
+        const settingsJson = JSON.stringify(config.settings);
+        if (settingsJson === this.lastNotifiedSettings) return;
+        this.lastNotifiedSettings = settingsJson;
         console.log('[ChatInput] notifyConfigChange useHarness:', config.settings?.useHarness);
         this.options.onConfigChange?.(config);
     }
