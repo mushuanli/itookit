@@ -303,12 +303,29 @@ export class ChatEngineLog implements ILog {
             const nodeId = this._nodeIdCache;
 
             const context = await this.engine.getSessionContext(nodeId, this._sessionId!);
-            const messages: ChatMessage[] = context
+            const raw: ChatMessage[] = context
                 .filter(c => c.node?.role === 'user' || c.node?.role === 'assistant' || c.node?.role === 'system')
                 .map(c => ({
                     role: c.node.role as 'user' | 'assistant' | 'system',
                     content: c.node.content ?? '',
                 }));
+
+            // Drop empty assistant turns together with their preceding user turn.
+            // An empty assistant content means the LLM call failed (e.g. HTTP 400)
+            // and sending it to the API would cause another 400.
+            const messages: ChatMessage[] = [];
+            for (let i = 0; i < raw.length; i++) {
+                const c = raw[i].content;
+                const isEmpty = typeof c === 'string' ? !c.trim() : (c as any[]).length === 0;
+                if (raw[i].role === 'assistant' && isEmpty) {
+                    // Also remove the immediately preceding user message (the pair is incomplete)
+                    if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
+                        messages.pop();
+                    }
+                    continue;
+                }
+                messages.push(raw[i]);
+            }
 
             this._cache.set(cacheKey, messages);
             return messages;
