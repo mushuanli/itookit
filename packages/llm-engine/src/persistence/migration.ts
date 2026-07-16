@@ -194,7 +194,7 @@ function buildTurnIdMap(
             const node = allNodes.get(nodeId);
             if (!node) continue;
 
-            // Prefer _turnId from legacy ChatEngineLog.append() meta
+            // Prefer _turnId from legacy append() meta
             const existingTurnId = node.meta?._turnId as string | undefined;
             if (existingTurnId) {
                 map.set(nodeId, existingTurnId);

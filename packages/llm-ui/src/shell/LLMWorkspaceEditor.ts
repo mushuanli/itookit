@@ -398,7 +398,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private buildCommandContext(): CommandContext {
         return {
-            sessionManager: this.sessionManager,
+            getSessions: () => this.sessionManager.getSessions(),
             commands: this.commandBus,
             session: this.sessionManager,
             sessionService: this.sessionService,

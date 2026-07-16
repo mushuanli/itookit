@@ -62,7 +62,7 @@ export class CommandRegistry {
         });
 
         this.bindInline('content:copy', async ({ sessionId }) => {
-            const sessions = this.ctx.sessionManager.getSessions();
+            const sessions = this.ctx.getSessions();
             const session = sessions.find(s => s.id === sessionId);
             if (!session) return;
             await navigator.clipboard.writeText(session.content || '');
@@ -71,7 +71,7 @@ export class CommandRegistry {
     }
 
     private emitCollapseStates(collapsed: boolean): void {
-        const sessions = this.ctx.sessionManager.getSessions();
+        const sessions = this.ctx.getSessions();
         const states: Record<string, boolean> = {};
         sessions.forEach(s => { states[s.id] = collapsed; });
         this.ctx.bus.emit('state:collapseChanged', { states });

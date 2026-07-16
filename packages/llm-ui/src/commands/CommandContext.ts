@@ -1,7 +1,7 @@
 // @file: llm-ui/commands/CommandContext.ts
 
 import type { ICommandBus, ISession } from '@itookit/common';
-import type { SessionManager } from '@itookit/llm-engine';
+import type { SessionGroup } from '@itookit/llm-engine';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { IEditorEventBus } from '../domain/events';
@@ -26,9 +26,8 @@ import type { BranchService } from '../services/BranchService';
  */
 export interface CommandContext {
     // 数据层
-    /** @deprecated 使用 commands.execute('session.*') 代替直接调用 */
-    sessionManager: SessionManager;
-    /** LLM 2.0: 插件命令总线 — 所有高层操作通过命令执行 */
+    /** 获取当前会话的所有消息投影 */
+    getSessions: () => SessionGroup[];
     commands: ICommandBus;
     /** LLM 2.0: Channel 原语 — signal() 入向 + events() 出向 */
     session: ISession;

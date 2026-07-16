@@ -157,7 +157,6 @@ export {
     toRuntimeAgent,
     fromLLMProvider,
     fromConnectionDef,
-    fromSkillDef,
     fromAgentDef,
     exportToLLM,
     exportBundleToLLM,

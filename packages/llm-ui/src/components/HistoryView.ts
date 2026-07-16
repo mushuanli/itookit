@@ -1,6 +1,6 @@
 // @file: llm-ui/components/HistoryView.ts
 
-import type { SessionGroup, SessionEvent } from '@itookit/llm-engine';
+import type { SessionGroup, SessionEvent, ExecutionNode } from '@itookit/llm-engine';
 import type { IModuleFS, IAgentRuntime } from '@itookit/common';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { CollapseStateMap, NodeActionCallback } from '../domain/types';
@@ -407,7 +407,7 @@ export class HistoryView implements IHistoryPresenter {
                     if (rootNode) {
                         this.renderer.appendNode(undefined, rootNode, false);
                         // Step 3: recursively mount any pre-existing children
-                        rootNode.children?.forEach(c =>
+                        rootNode.children?.forEach((c: ExecutionNode) =>
                             this.renderer.renderExecutionTree(c, false)
                         );
                     } else {

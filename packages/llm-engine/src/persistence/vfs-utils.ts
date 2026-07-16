@@ -1,5 +1,5 @@
 // @file: llm-engine/src/persistence/vfs-utils.ts
-// Shared VFS traversal utilities used by ChatEngine and ChatEngineLog.
+// Shared VFS traversal utilities used by ChatEngine.
 
 import type { FSNode } from '@itookit/common';
 

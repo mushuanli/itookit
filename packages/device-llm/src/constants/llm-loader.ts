@@ -242,12 +242,10 @@ export function toLLMProvider(def: LLMProviderDef): LLMProvider {
     };
 }
 
-/**
- * Convert a parsed LLMSkillDef to the runtime SkillDefinition type.
 // ─── Skill Format Conversion ─────────────────────────────────────────────────
-// @deprecated 2026-07 — These functions convert between the flat LLMSkillDef .llm YAML
-// format and the canonical SkillDefinition (with tools[]). They should be replaced
-// when the .llm format is upgraded to use SkillDefinition natively.
+// @deprecated 2026-07 — toRuntimeSkill converts between the flat LLMSkillDef .llm YAML
+// format and the canonical SkillDefinition (with tools[]). Replace when the .llm
+// format is upgraded to use SkillDefinition natively.
 // ────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -386,41 +384,6 @@ export function fromLLMProvider(p: LLMProvider): LLMProviderDef {
             inputPricePerMillion: m.inputPricePerMillion,
             outputPricePerMillion: m.outputPricePerMillion,
         })),
-    };
-}
-
-/**
- * Convert runtime SkillDefinition → LLMSkillDef for .llm serialization.
-/**
- * @deprecated Canonical→flat conversion; remove when .llm format uses SkillDefinition natively.
- * Strips runtime-only fields and flattens tools[] back to legacy fields.
- */
-export function fromSkillDef(skill: LLMSkill): LLMSkillDef {
-    const firstTool = skill.tools?.[0];
-    return {
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        type: skill.type,
-        enabled: skill.enabled,
-        icon: skill.icon,
-        instructions: skill.instructions,
-        endpoint: skill.endpoint,
-        method: skill.method,
-        headers: skill.headers,
-        command: firstTool?.command,
-        parameters: skill.parameters,
-        mcpServerId: skill.mcpServerId,
-        mcpToolName: skill.mcpToolName,
-        triggerStrategy: skill.triggerStrategy,
-        autoLoad: skill.autoLoad,
-        priority: skill.priority,
-        globs: skill.globs,
-        correctionLog: typeof skill.correctionLog === 'string'
-            ? skill.correctionLog
-            : skill.correctionLog?.path,
-        disableModelInvocation: skill.disableModelInvocation,
-        metadata: skill.metadata,
     };
 }
 

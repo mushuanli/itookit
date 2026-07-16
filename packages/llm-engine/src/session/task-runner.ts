@@ -77,7 +77,6 @@ export class TaskRunner {
     private readonly activeActors = new Map<string, import('../core/session-actor').SessionActor>();
     /** ILog instances keyed by sessionId to avoid per-task cold VFS scans. */
     private readonly logCache = new Map<string, ILog>();
-    /** @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware. */
 
     constructor(
         private engine: IChatEngine,
