@@ -30,7 +30,7 @@ export class LLMDriver {
     
     constructor(config: LLMClientConfig) {
         // 1. 解析配置（优先使用 connection 对象）
-        const provider = config.connection?.provider || config.provider;
+        const provider = config.connection?.providerId || config.provider;
         const apiKey = config.connection?.apiKey || config.apiKey;
         const apiBaseUrl = config.connection?.baseURL || config.apiBaseUrl;
         const model = config.connection?.model || config.model;
@@ -96,7 +96,7 @@ export class LLMDriver {
      * 获取当前模型
      */
     get currentModel(): string | undefined {
-        return this.config.model || this.config.connection?.model;
+        return this.config.model;
     }
 
     /**

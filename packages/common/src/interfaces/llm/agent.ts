@@ -3,7 +3,7 @@
 
 import type { LLMConnection, ConnectionMeta, LLMProvider, DefaultConnectionDef, ConnectionTestResult, ModelTier } from './connection';
 import type { RestorableItem } from '../../types/types';
-import type { SkillDefinition, SkillType } from '../skills/skill-types';
+import type { SkillDefinition } from '../skills/skill-types';
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
 
@@ -69,11 +69,6 @@ export type InitialAgentDef = AgentDefinition & {
 };
 
 // ─── LLMSkill ─────────────────────────────────────────────────────────────────
-
-/**
- * @deprecated Use SkillType from @itookit/common instead.
- */
-export type LLMSkillType = SkillType;
 
 /**
  * VFS 持久化 Skill 配置。

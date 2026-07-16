@@ -225,12 +225,6 @@ export interface LLMConnection {
 
     // ── 向后兼容字段（迁移旧数据时读取，新数据不再写入） ────────────────
 
-    /** @deprecated 已由 `providerId` 替代 */
-    provider?: string;
-    /** @deprecated apiKey 已移至 LLMProvider.apiKey */
-    apiKey?: string;
-    /** @deprecated 模型由 Provider.models[0] 决定 */
-    model?: string;
     /** @deprecated 模型目录由 Provider 统一管理 */
     availableModels?: LLMModel[];
     /**
@@ -352,7 +346,7 @@ export function resolveModelId(
 
 /**
  * 将完整连接转换为安全元数据。
- * hasApiKey 从 provider.apiKey 解析（再 fallback 到 legacy conn.apiKey）。
+ * hasApiKey 从 provider.apiKey 解析。
  *
  * @param allProviders  所有 provider（用于跨 provider 的 model ID → name → ID 解析）
  */
@@ -365,7 +359,6 @@ export function toConnectionMeta(
     const effectiveTiers = conn.tiers;
     const directModel =
         effectiveTiers?.optimal
-        ?? conn.model             // legacy fallback
         ?? provider?.models[0]?.id
         ?? '';
     const resolvedModel =
@@ -374,7 +367,7 @@ export function toConnectionMeta(
                 ?? provider.models[0]?.id
                 ?? ''
             : directModel;
-    const pid = conn.providerId ?? conn.provider ?? '';
+    const pid = conn.providerId;
 
     return {
         id: conn.id,
@@ -383,7 +376,7 @@ export function toConnectionMeta(
         provider: pid,
         model: resolvedModel,
         tiers: effectiveTiers,
-        hasApiKey: !!(provider?.apiKey?.trim() ?? conn.apiKey?.trim()),
+        hasApiKey: !!(provider?.apiKey?.trim()),
         // enabled = both connection and provider must be enabled (undefined treated as true)
         enabled: conn.enabled !== false && provider?.enabled !== false,
         metadata: conn.metadata as Record<string, unknown>,

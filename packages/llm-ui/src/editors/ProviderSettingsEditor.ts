@@ -316,7 +316,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         const providers = allProviders.filter(p => ids.includes(p.id));
         const allConns = await this.service.getConnections();
         const connections = allConns
-            .filter(c => ids.includes(c.providerId ?? (c as { provider?: string }).provider ?? ''))
+            .filter(c => ids.includes(c.providerId))
             .map(c => fromConnectionDef({ id: c.id, name: c.name, providerId: c.providerId, tiers: c.tiers }));
 
         const yamlStr = exportBundleToLLM(providers, connections);

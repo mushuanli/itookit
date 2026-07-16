@@ -1,6 +1,6 @@
 // @file llm-ui/editors/SkillSettingsEditor.ts
 import { BaseSettingsEditor, t } from '@itookit/common';
-import type { LLMSkill, LLMSkillType, IAgentManagementService } from '@itookit/common';
+import type { LLMSkill, SkillType, IAgentManagementService } from '@itookit/common';
 import yaml from 'js-yaml';
 
 // Render helpers
@@ -63,7 +63,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
     getText(): string {
         if (!this._formOnly || !this.selectedId) return '';
-        const type = this.val('type') as LLMSkillType;
+        const type = this.val('type') as SkillType;
         let parameters: Record<string, unknown> | undefined;
         const rawParams = this.val('parameters').trim();
         if (rawParams) { try { parameters = JSON.parse(rawParams); } catch { /* invalid */ } }

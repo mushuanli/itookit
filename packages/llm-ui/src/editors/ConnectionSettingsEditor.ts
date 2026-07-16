@@ -124,7 +124,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             if (!conn) return;
 
             // Pre-select the provider sidebar so the card is visible
-            const pid = conn.providerId ?? conn.provider;
+            const pid = conn.providerId;
             if (pid && this._selectedProviderId !== pid) {
                 this._selectedProviderId = pid;
                 await this.render();
@@ -475,7 +475,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     private showEditModal(connection: LLMConnection | null) {
         const isNew = !connection;
         const providerKeys = Object.keys(this.providers);
-        const initialPid = connection?.providerId ?? connection?.provider ?? this._selectedProviderId ?? providerKeys[0];
+        const initialPid = connection?.providerId ?? this._selectedProviderId ?? providerKeys[0];
         const initialProvider = this.providers[initialPid] ?? this.providers[providerKeys[0]];
 
         this.currentEditTiers = connection?.tiers ? { ...connection.tiers } : {};

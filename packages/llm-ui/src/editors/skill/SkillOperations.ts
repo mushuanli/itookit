@@ -3,7 +3,7 @@
 // Infrequently modified: operation patterns are stable; only types change.
 
 import { Toast, Modal, generateShortUUID, t, SKILL_TYPE_META } from '@itookit/common';
-import type { LLMSkill, LLMSkillType, IAgentManagementService } from '@itookit/common';
+import type { LLMSkill, SkillType, IAgentManagementService } from '@itookit/common';
 
 export interface SkillOperationsDeps {
     service: IAgentManagementService;
@@ -64,7 +64,7 @@ export async function saveCurrent(deps: SkillOperationsDeps): Promise<void> {
     }
     if (authVal) headers = { ...(headers ?? {}), Authorization: authVal };
 
-    const type = deps.val('type') as LLMSkillType;
+    const type = deps.val('type') as SkillType;
     const rawId  = deps.val('id').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
     const newId  = rawId || existing.id;
     const idChanged = newId !== existing.id;

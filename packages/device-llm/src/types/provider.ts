@@ -162,8 +162,8 @@ export interface LLMHooks {
  * LLMDriver 构造配置
  */
 export interface LLMClientConfig {
-    // ===== 方式 A: 传入连接对象 =====
-    connection?: LLMConnection;
+    // ===== 方式 A: 传入连接对象（运行时可能被调用方注入 apiKey/model/provider 等解析字段） =====
+    connection?: LLMConnection & { apiKey?: string; model?: string; provider?: string; protocol?: string };
     
     // ===== 方式 B: 直接传参 =====
     provider?: string;

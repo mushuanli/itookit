@@ -12,7 +12,7 @@ import yaml from 'js-yaml';
 import type {
     LLMProvider, DefaultConnectionDef, LLMModel, LLMConnection,
     AgentDefinition, AgentType, AgentConfig,
-    LLMSkill, LLMSkillType,
+    LLMSkill, SkillType,
     ModelTier, ModelPricingEntry,
 } from '@itookit/common';
 
@@ -62,7 +62,7 @@ export interface LLMSkillDef {
     id: string;
     name: string;
     description?: string;
-    type?: string;              // LLMSkillType; defaults to 'prompt' on import
+    type?: string;              // SkillType; defaults to 'prompt' on import
     enabled?: boolean;          // defaults to true on import
     icon?: string;
     /** Alias for `instructions` (backward compat). */
@@ -271,7 +271,7 @@ export function toRuntimeSkill(def: LLMSkillDef): LLMSkill {
         id: def.id,
         name: def.name,
         description: def.description ?? '',
-        type: (def.type ?? 'prompt') as LLMSkillType,
+        type: (def.type ?? 'prompt') as SkillType,
         enabled: def.enabled ?? true,
         icon: def.icon,
         instructions: def.instructions ?? def.prompt ?? '',

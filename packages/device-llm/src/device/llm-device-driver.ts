@@ -830,22 +830,21 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         if (conn.enabled === false) {
             throw new Error(`LLMDeviceDriver: connection '${conn.id}' is disabled`);
         }
-        const pid = conn.providerId ?? conn.provider ?? '';
+        const pid = conn.providerId;
         const provider = this.providerManager.getFullProviderMap().get(pid);
         if (provider?.enabled === false) {
-            throw new Error(`LLMDeviceDriver: provider '${conn.providerId ?? conn.provider}' is disabled`);
+            throw new Error(`LLMDeviceDriver: provider '${conn.providerId}' is disabled`);
         }
-        const apiKey = provider?.apiKey?.trim() ?? conn.apiKey?.trim();
+        const apiKey = provider?.apiKey?.trim();
         if (!apiKey) {
             throw new Error(
-                `LLMDeviceDriver: provider '${conn.providerId ?? conn.provider}' has no API key configured`
+                `LLMDeviceDriver: provider '${conn.providerId}' has no API key configured`
             );
         }
 
         const effectiveTiers = conn.tiers;
         const resolvedModel =
             effectiveTiers?.optimal
-            ?? conn.model
             ?? provider?.models[0]?.id
             ?? '';
 
@@ -856,9 +855,9 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             conn.protocol
             ?? (opts?.runMode === 'harness' && provider?.anthropicPath ? 'anthropic-messages' as const : undefined)
             ?? (opts?.runMode !== 'kernel' && provider?.anthropicPath ? 'anthropic-messages' as const : undefined);
-        const connForDriver: LLMConnection = {
+        const connForDriver = {
             ...conn,
-            provider: conn.providerId ?? conn.provider ?? '',
+            provider: conn.providerId,
             apiKey,
             model: resolvedModel,
             protocol: effectiveProtocol,

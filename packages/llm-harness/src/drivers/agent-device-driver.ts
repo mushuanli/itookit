@@ -138,12 +138,12 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
             if (conn) {
                 this.modelRoles.primary = conn.id;
                 // Derive per-token pricing from the provider's model catalog.
-                const pid = conn.providerId ?? conn.provider;
+                const pid = conn.providerId;
                 if (pid) {
                     const provider = this.llm.getProvider
                         ? await this.llm.getProvider(pid)
                         : undefined;
-                    const modelId = conn.model;
+                    const modelId = conn.tiers?.optimal ?? provider?.models[0]?.id;
                     const modelInfo = provider?.models.find(m => m.id === modelId);
                     if (modelInfo?.inputPricePerMillion !== undefined) {
                         this.costModel = {

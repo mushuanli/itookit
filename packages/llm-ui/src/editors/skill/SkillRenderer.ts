@@ -3,11 +3,11 @@
 // Frequently modified: each new field or type changes the rendered template.
 
 import { t, SKILL_TYPE_META, ENTITY_ICONS } from '@itookit/common';
-import type { LLMSkill, LLMSkillType, MCPServer } from '@itookit/common';
+import type { LLMSkill, SkillType, MCPServer } from '@itookit/common';
 
 // ─── Badge helpers (top-level, shared) ────────────────────────────────────
 
-export function typeBadge(type: LLMSkillType) {
+export function typeBadge(type: SkillType) {
     const m = SKILL_TYPE_META[type] ?? SKILL_TYPE_META.custom;
     const label = t(`skillType.${type}` as Parameters<typeof t>[0]);
     return `<span class="settings-badge" style="background:${m.color}15;color:${m.color};

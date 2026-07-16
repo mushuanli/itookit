@@ -167,7 +167,7 @@ export class AgentConfigEditor implements IEditor {
                 conns: connections.filter(c => (c.providerId ?? c.provider) === p.id),
             }))
             .filter(g => g.conns.length > 0);
-        const ungrouped = connections.filter(c => !providerMap.has(c.providerId ?? c.provider ?? ''));
+        const ungrouped = connections.filter(c => !providerMap.has(c.providerId));
         const connectionOptionsHtml = [
             ...grouped.map(g => `
                 <optgroup label="${g.provider.icon ?? ''} ${this.escapeHtml(g.provider.name)}">
@@ -257,7 +257,7 @@ export class AgentConfigEditor implements IEditor {
                                     ⚠️ 连接「${this.escapeHtml(savedConnMeta?.name ?? savedConnId)}」不可用 — Provider 未配置 API Key。
                                     已自动切换至首个可用连接。
                                     <button class="agent-goto-btn" data-action="goto-providers"
-                                            data-provider-id="${this.escapeHtml(savedConnMeta?.providerId ?? savedConnMeta?.provider ?? '')}">
+                                            data-provider-id="${this.escapeHtml(savedConnMeta?.providerId ?? '')}">
                                         → 配置 Provider API Key
                                     </button>
                                 </div>
@@ -818,9 +818,9 @@ export class AgentConfigEditor implements IEditor {
     }
 
     /** 解析连接某个 tier 对应的模型显示名（未配置时返回空字符串） */
-    private resolveTierModelName(conn: { providerId?: string; provider?: string; tiers?: Partial<Record<ModelTier, string>> } | undefined, tier: ModelTier): string {
+    private resolveTierModelName(conn: { providerId?: string; tiers?: Partial<Record<ModelTier, string>> } | undefined, tier: ModelTier): string {
         if (!conn?.tiers?.[tier]) return '';
-        const pid = conn.providerId ?? conn.provider ?? '';
+        const pid = conn.providerId ?? '';
         const provider = this.service.getProviders().find(p => p.id === pid);
         const modelId = conn.tiers[tier]!;
         const modelDef = provider?.models.find(m => m.id === modelId);
@@ -828,9 +828,9 @@ export class AgentConfigEditor implements IEditor {
     }
 
     /** 渲染连接信息面板：三个 tier 的模型名 + 能力 badges */
-    private renderConnInfoPanel(conn?: { providerId?: string; provider?: string; model?: string; tiers?: Partial<Record<ModelTier, string>> }): string {
+    private renderConnInfoPanel(conn?: { providerId?: string; tiers?: Partial<Record<ModelTier, string>> }): string {
         if (!conn) return '';
-        const pid = conn.providerId ?? conn.provider ?? '';
+        const pid = conn.providerId ?? '';
         const provider = this.service.getProviders().find(p => p.id === pid);
 
         const tierMeta: Record<string, { label: string; cls: string }> = {
@@ -855,11 +855,11 @@ export class AgentConfigEditor implements IEditor {
             });
 
         if (rows.length === 0) {
-            // No tiers configured — show the optimal model from conn.model as fallback
-            const modelDef = provider?.models.find(m => m.id === conn.model);
+            // No tiers configured — show the first model from provider
+            const modelDef = provider?.models[0];
             const caps = modelDef ? renderModelCapabilityBadges(modelDef) : '';
             return `<div style="font-size:0.8rem;color:var(--st-text-secondary);display:flex;align-items:center;gap:6px">
-                <span>模型：${this.escapeHtml(modelDef?.name ?? conn.model ?? '未配置')}</span>
+                <span>模型：${this.escapeHtml(modelDef?.name ?? '未配置')}</span>
                 ${caps ? `<span style="display:flex;gap:2px">${caps}</span>` : ''}
             </div>`;
         }

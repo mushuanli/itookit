@@ -132,10 +132,6 @@ export class ConnectionManager {
             } else {
                 const updated: LLMConnection = JSON.parse(JSON.stringify(existing));
                 let dirty = false;
-                if (!updated.providerId && updated.provider) {
-                    updated.providerId = updated.provider;
-                    dirty = true;
-                }
                 if (!updated.tiers && def.tiers) {
                     updated.tiers = def.tiers;
                     dirty = true;
@@ -187,14 +183,11 @@ export class ConnectionManager {
     }
 
     private getProviderForConn(conn: LLMConnection) {
-        const pid = conn.providerId ?? conn.provider ?? '';
+        const pid = conn.providerId;
         return this.providerManager.getFullProviderMap().get(pid);
     }
 
     private normalizeConn(raw: LLMConnection): LLMConnection {
-        if (!raw.providerId && raw.provider) {
-            return { ...raw, providerId: raw.provider };
-        }
         return raw;
     }
 
@@ -204,7 +197,7 @@ export class ConnectionManager {
         if (!provider) return;
         const pid = providerId;
         const sameProviderConns = this._connections.filter(
-            c => (c.providerId ?? c.provider) === pid
+            c => c.providerId === pid
         );
         provider.dailyCosts = aggregateProviderCosts(sameProviderConns);
         await this.providerManager.saveProvider(provider, systemFS);
