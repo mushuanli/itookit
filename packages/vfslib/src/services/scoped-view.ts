@@ -19,11 +19,11 @@ interface MountMapping {
 export class ScopedView {
     private readonly mappings: readonly MountMapping[];
 
-    constructor(readonly moduleId: string) {
+    constructor(readonly moduleId: string, rootRealPath?: string) {
         this.mappings = Object.freeze([
             { virtualPrefix: '/dev', realPrefix: '/dev', readOnly: true },
             { virtualPrefix: '/etc', realPrefix: '/etc', readOnly: true },
-            { virtualPrefix: '/', realPrefix: `/module/${moduleId}`, readOnly: false },
+            { virtualPrefix: '/', realPrefix: rootRealPath ?? `/module/${moduleId}`, readOnly: false },
         ]);
     }
 

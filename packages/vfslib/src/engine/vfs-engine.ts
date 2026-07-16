@@ -124,6 +124,21 @@ export class VFSEngine {
                 this._inc('mkdir'); await this.backend.mkdir(`/${dirName}`);
             }
         }
+        // Ensure default system subdirectories exist (idempotent — only creates if missing)
+        await this.initDefaultConfig();
+    }
+
+    /**
+     * Ensure default system subdirectories under /etc exist.
+     * Idempotent — does not overwrite existing files or directories.
+     * Actual config file initialization is handled by the app layer via
+     * ConfigService / ISystemAccess on first write.
+     */
+    private async initDefaultConfig(): Promise<void> {
+        const etcSubdirs = ['/etc/llm'];
+        for (const dir of etcSubdirs) {
+            await this.ensureDirectoryPath(dir);
+        }
     }
 
     // ── Path Resolution ──
@@ -408,6 +423,43 @@ export class VFSEngine {
                 }
             }
         } catch { /* skip */ }
+    }
+
+    // ── System /etc Operations ──
+
+    /**
+     * 以系统身份写入任意路径（绕过 AccessController）。
+     * 由 ISystemAccess 实现调用，调用方负责传入已拼接的完整路径。
+     */
+    async writeEtcFile(path: string, content: string): Promise<void> {
+        const { backend, localPath } = this.resolveStore(path);
+        this._inc('write');
+        const buf = new TextEncoder().encode(content);
+        await backend.write(localPath, buf);
+    }
+
+    /**
+     * 以系统身份读取任意路径（绕过 AccessController）。
+     */
+    async readEtcFile(path: string): Promise<string> {
+        const { backend, localPath } = this.resolveStore(path);
+        try {
+            this._inc('read');
+            const data = await backend.read(localPath);
+            return toString(data.buffer as ArrayBuffer);
+        } catch {
+            return '';
+        }
+    }
+
+    /**
+     * 列出任意目录下的条目名称。
+     */
+    async listEtcDir(path: string): Promise<string[]> {
+        const { backend, localPath } = this.resolveStore(path);
+        this._inc('list');
+        const children = await backend.list(localPath);
+        return children.map(c => c.name);
     }
 
     // ── Ensure Directory Path (recursive mkdir) ──

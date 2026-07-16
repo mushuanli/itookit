@@ -10,6 +10,7 @@
 // ── 常量 ──
 export {
     CONFIG_MODULE,
+    ETC_DIR,
     SYSTEM_DIRS,
     ASSET_DIR_PREFIX,
     INTERNAL_DIR_PREFIX,
@@ -192,6 +193,9 @@ export type {
     ConfigChangeEvent,
     IConfigService,
 } from './services/config-service';
+
+// ── 系统访问 ──
+export type { ISystemAccess } from './system-access';
 
 // ── 工厂 ──
 export type {

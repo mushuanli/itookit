@@ -31,13 +31,14 @@ import type {
     MountPoint,
     MountOptions,
     ISyncService,
+    ISystemAccess,
 } from '@itookit/common';
 
 import {
     FSModuleNotFoundError,
     FSAlreadyExistsError,
     FSError,
-    CONFIG_MODULE,
+    ETC_DIR,
     type IDeviceDriver,
 } from '@itookit/common';
 
@@ -80,7 +81,8 @@ export class VFSManager implements IVFSManager {
         this.engine.access.setSystemModuleChecker(
             (moduleId) => this.modules.get(moduleId)?.isSystem ?? false,
         );
-        await this.mount(CONFIG_MODULE, { isSystem: true, description: 'System configuration' });
+        // /etc is now a rootfs built-in directory (bootstrap creates it).
+        // No mount() call needed — systemAccess and etc engine are created on demand.
         this.initialized = true;
     }
 
@@ -195,9 +197,7 @@ export class VFSManager implements IVFSManager {
     }
 
     async unmount(moduleName: string, removeData?: boolean): Promise<void> {
-        if (moduleName === CONFIG_MODULE) {
-            throw new FSError('EINVAL', 'cannot unmount __config', 'unmount');
-        }
+        // etc is not a module anymore — no special guard needed
 
         const eng = this.engines.get(moduleName);
         if (eng) {
@@ -229,17 +229,23 @@ export class VFSManager implements IVFSManager {
         const cached = this.engines.get(moduleName);
         if (cached) return cached;
 
+        // /etc is a rootfs built-in directory, not a mounted module.
+        // Create a special ModuleFS with root at /etc/ (instead of /module/etc/).
+        if (moduleName === 'etc') {
+            return this.createEtcEngine();
+        }
+
         if (!this.modules.has(moduleName)) {
             throw new FSModuleNotFoundError(moduleName);
         }
 
         const moduleInfo = this.modules.get(moduleName)!;
         const { mount } = this.mounts.router.resolve(`/module/${moduleName}`);
-        // Resolve systemFS for non-system modules so openDevice can inject
-        // it into DeviceContext, allowing device drivers to proxy /etc hidden files.
-        const systemFS = moduleInfo.isSystem
+        // Resolve systemAccess for non-system modules so openDevice can inject
+        // it into DeviceContext, allowing device drivers to proxy /etc files.
+        const systemAccess = moduleInfo.isSystem
             ? undefined
-            : this.getEngine(CONFIG_MODULE);
+            : this.createSystemAccess();
 
         const deps: ModuleFSDeps = {
             moduleId: moduleName,
@@ -250,7 +256,7 @@ export class VFSManager implements IVFSManager {
             devices: this.engine.devices,
             mountId: mount.mountId,
             isSystem: moduleInfo.isSystem,
-            systemFS,
+            systemAccess,
         };
         const fs = new ModuleFS(deps);
         fs.init().catch(() => {}); // lazy init
@@ -266,6 +272,69 @@ export class VFSManager implements IVFSManager {
         if (!this.modules.has(moduleName)) {
             this.modules.set(moduleName, { name: moduleName });
         }
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // System Access
+    // ══════════════════════════════════════════════════════════
+
+    /**
+     * Create an ISystemAccess backed by direct /etc engine operations.
+     * Used by getEngine() to inject into non-system modules' DeviceContext.
+     */
+    private createSystemAccess(): ISystemAccess {
+        const engine = this.engine;
+        const etcRoot = '/etc';
+        return {
+            async readEtc(relativePath: string): Promise<string> {
+                const clean = relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
+                const fullPath = clean ? P.join(etcRoot, clean) : etcRoot;
+                return engine.readEtcFile(fullPath);
+            },
+            async writeEtc(relativePath: string, content: string): Promise<void> {
+                const clean = relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
+                const fullPath = P.join(etcRoot, clean);
+                const parentDir = P.dirname(fullPath);
+                await engine.ensureDirectoryPath(parentDir);
+                await engine.writeEtcFile(fullPath, content);
+            },
+            async listEtc(relativePath?: string): Promise<string[]> {
+                const fullPath = relativePath ? P.join(etcRoot, relativePath) : etcRoot;
+                return engine.listEtcDir(fullPath);
+            },
+            async deleteEtc(relativePath: string): Promise<void> {
+                const clean = relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
+                const fullPath = P.join(etcRoot, clean);
+                try {
+                    await engine.delete(fullPath, { force: true });
+                } catch { /* file may not exist */ }
+            },
+        };
+    }
+
+    /**
+     * Create a special IModuleFS for /etc that maps root to /etc/ directly
+     * (not /module/etc/). Used internally by getEngine('etc') so existing
+     * consumers like ConfigService continue to work.
+     */
+    private createEtcEngine(): IModuleFS {
+        const deps: ModuleFSDeps = {
+            moduleId: 'etc',
+            engine: this.engine,
+            eventBus: this.engine.events,
+            plugins: this.engine.plugins,
+            access: this.engine.access,
+            devices: this.engine.devices,
+            mountId: 'mount_0',
+            isSystem: true,
+            rootRealPath: ETC_DIR,
+            // etc doesn't need systemAccess — it IS the system config store
+            systemAccess: undefined,
+        };
+        const fs = new ModuleFS(deps);
+        fs.init().catch(() => {});
+        this.engines.set('etc', fs);
+        return fs;
     }
 
     // ══════════════════════════════════════════════════════════
@@ -367,11 +436,18 @@ export class VFSManager implements IVFSManager {
         return Array.from(tagMap.values());
     }
 
-    async updateTagDefinition(tagName:string, updates: { color?: string }): Promise<void> {
-        const eng = this.getEngine(CONFIG_MODULE);
-        if (eng.meta.tags?.updateTagDefinition) {
-            await eng.meta.tags.updateTagDefinition(tagName, updates);
-        }
+    async updateTagDefinition(tagName: string, updates: { color?: string }): Promise<void> {
+        // Tag definitions are stored in /etc/tags.json (system-level, not per-module).
+        const tagsPath = '/etc/tags.json';
+        try {
+            const raw = await this.engine.readEtcFile(tagsPath);
+            const tags = raw ? JSON.parse(raw) : {};
+            if (tags[tagName]) {
+                Object.assign(tags[tagName], updates);
+                await this.engine.ensureDirectoryPath('/etc');
+                await this.engine.writeEtcFile(tagsPath, JSON.stringify(tags, null, 2));
+            }
+        } catch { /* ignore */ }
     }
 
     async findByTag(tagName: string): Promise<string[]> {

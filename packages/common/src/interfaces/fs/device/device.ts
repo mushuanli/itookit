@@ -21,11 +21,11 @@ export interface DeviceContext {
     /** 会话 ID（sessionable 设备需要） */
     sessionId?: string;
     /**
-     * 系统文件系统引用（CONFIG_MODULE 的 IModuleFS，isSystem=true）。
-     * 设备驱动可通过此引用以系统身份访问 /etc 下的隐藏文件。
+     * 系统 /etc 访问接口。
+     * 设备驱动可通过此接口以系统身份读写 /etc 路径（含隐藏文件）。
      * 仅在通过 IModuleFS.openDevice() 打开设备时注入。
      */
-    systemFS?: import('../services/module-fs').IModuleFS;
+    systemAccess?: import('../system-access').ISystemAccess;
 }
 
 export interface IDeviceDriver {

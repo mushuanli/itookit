@@ -3,8 +3,11 @@
  * @desc 全局常量
  */
 
-/** 配置模块名（始终自动挂载，存储所有系统级配置） */
+/** @deprecated Use ETC_DIR constant or '/etc' literal instead. etc is no longer a mountable module. */
 export const CONFIG_MODULE = 'etc';
+
+/** 系统配置目录路径（rootfs 内置，始终存在，不可卸载） */
+export const ETC_DIR = '/etc';
 
 /** 系统保留目录 */
 export const SYSTEM_DIRS = ['etc', 'dev', 'module'] as const;

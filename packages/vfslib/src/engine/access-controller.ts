@@ -19,9 +19,15 @@ export const SYSTEM_CALLER: CallerIdentity = {
 
 export type AccessOperation = 'read' | 'write' | 'delete' | 'list';
 
+export interface IAccessPolicy {
+    /** 在默认规则之后调用。抛出即拒绝；正常返回即通过。 */
+    checkAccess(caller: CallerIdentity, absolutePath: string, operation: AccessOperation): void;
+}
+
 export class AccessController {
     // Injected by VFSManager after construction so it can consult live module registry.
     private systemModuleChecker: ((moduleId: string) => boolean) | null = null;
+    private policies: IAccessPolicy[] = [];
 
     /**
      * Register a predicate that returns true for system modules.
@@ -29,6 +35,14 @@ export class AccessController {
      */
     setSystemModuleChecker(fn: (moduleId: string) => boolean): void {
         this.systemModuleChecker = fn;
+    }
+
+    addPolicy(policy: IAccessPolicy): void {
+        this.policies.push(policy);
+    }
+
+    removePolicy(policy: IAccessPolicy): void {
+        this.policies = this.policies.filter(p => p !== policy);
     }
 
     private isSystemModule(moduleId: string): boolean {
@@ -92,6 +106,11 @@ export class AccessController {
 
         if (isSystemDir && operation !== 'read' && operation !== 'list') {
             throw new FSReadOnlyError(normalPath, operation);
+        }
+
+        // Extension point: execute registered policies (any throw rejects)
+        for (const policy of this.policies) {
+            policy.checkAccess(caller, normalPath, operation);
         }
     }
 

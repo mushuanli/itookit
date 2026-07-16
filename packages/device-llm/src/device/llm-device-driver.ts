@@ -19,7 +19,6 @@ import type {
     MCPServer, LLMSkill, ToolDefinition,
     ConnectionTestResult, InitialAgentDef, IModuleFS,
 } from '@itookit/common';
-import { CONFIG_MODULE } from '@itookit/common';
 
 import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';
@@ -36,7 +35,7 @@ import { MCPManager } from './mcp-manager';
 import { SkillManager } from './skill-manager';
 
 // ─── 存储路径 ────────────────────────────────────────────────────────────────
-const STORAGE_MODULE   = CONFIG_MODULE;             // '__config'
+const STORAGE_MODULE   = 'etc';                // /etc directory (rootfs built-in)
 const CONNECTIONS_DIR  = '/llm/.connections';       // LLM 连接（新路径）
 const PROVIDERS_DIR    = '/llm/.providers';         // Provider 配置（用户自定义 + 内置覆盖）
 const MCP_DIR          = '/llm/.mcp';               // MCP 服务器配置（新路径）
@@ -239,11 +238,13 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     private skillManager!: SkillManager;
 
     /**
-     * Resolve the system FS for /etc hidden-file access.
-     * Prefers ctx.systemFS (injected by openDevice) over this.engine (constructor-injected).
+     * Resolve the system access for /etc hidden-file operations.
+     * Prefers ctx.systemAccess (injected by openDevice) over the local engine.
      */
-    private getSystemFS(ctx?: DeviceContext): IModuleFS {
-        return (ctx?.systemFS as IModuleFS | undefined) ?? this.engine;
+    private getSystemFS(_ctx?: DeviceContext): IModuleFS {
+        // ctx.systemAccess is ISystemAccess but for internal consumers that need
+        // IModuleFS, fall back to the local etc engine (which writes to /etc/).
+        return this.engine;
     }
 
     constructor(private readonly vfs: IVFSManager, options?: LLMDeviceDriverOptions) {
@@ -261,14 +262,11 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             console.log(`[Boot]     ↳ llm.${label}: +${(now - t).toFixed(0)}ms`);
             t = now;
         };
-        if (!this.vfs.getModule(STORAGE_MODULE)) {
-            await this.vfs.mount(STORAGE_MODULE, {
-                description: 'Settings Persistence',
-                isSystem: true,
-            });
-        }
-        _log('mount');
+
+        // /etc is a rootfs built-in directory — no mount() needed.
+        // getEngine('etc') returns a special ModuleFS with root at /etc/.
         this.engine = this.vfs.getEngine(STORAGE_MODULE);
+        _log('getEngine');
 
         // Initialise helpers first (no async deps)
         this.vfsHelpers = new VFSHelpers(this.engine);

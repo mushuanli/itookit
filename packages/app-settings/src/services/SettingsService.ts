@@ -3,7 +3,7 @@
  */
 import { FS_MODULE_AGENTS, CONFIG_MODULE } from '@itookit/common';
 import type { IVFSManager, VFSManagerEvent } from '@itookit/common';
-import { FSAlreadyExistsError, FSNotFoundError } from '@itookit/common';
+import { FSNotFoundError } from '@itookit/common';
 import type { SyncMode } from '../types/sync';
 import { SettingsState, Contact, Tag } from '../types/types';
 import { SnapshotService } from './SnapshotService';
@@ -99,42 +99,21 @@ export class SettingsService {
     async init(): Promise<void> {
         if (this.initialized) return;
 
-        // 1. 挂载配置存储模块
-        if (!this.vfs.getModule(CONFIG_MODULE)) {
-            try {
-                await this.vfs.mount(CONFIG_MODULE, {
-                    description: 'Settings Persistence',
-                    isSystem: true,
-                });
-            } catch (e: any) {
-                if (!this.isAlreadyExistsError(e)) throw e;
-            }
-        }
+        // /etc is a rootfs built-in directory — no mount() needed.
+        // getEngine('etc') returns a special ModuleFS with root at /etc/.
 
-        // 2. 加载数据
+        // 1. 加载数据
         await Promise.all([
             this.loadEntity('contacts'),
             this.syncTags(),
             this.loadSyncConfig(),
         ]);
 
-        // 3. 启动 VFS 事件监听
+        // 2. 启动 VFS 事件监听
         this.bindVFSEvents();
 
         this.initialized = true;
         this.notify();
-    }
-
-    /**
-     * 检查是否为"已存在"错误
-     */
-    private isAlreadyExistsError(e: any): boolean {
-        return (
-            e instanceof FSAlreadyExistsError ||
-            e?.code === 'EEXIST' ||
-            e?.code === 'ALREADY_EXISTS' ||
-            String(e?.message).toLowerCase().includes('exist')
-        );
     }
 
     /**

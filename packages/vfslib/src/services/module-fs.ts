@@ -33,6 +33,7 @@ import type {
     IDeviceHandle,
     DeviceContext,
     IStorageBackend,
+    ISystemAccess,
 } from '@itookit/common';
 
 import {
@@ -65,10 +66,15 @@ export interface ModuleFSDeps {
     mountId?: string;
     isSystem?: boolean;
     /**
-     * CONFIG_MODULE 的系统级 IModuleFS 引用（isSystem=true）。
-     * 注入给非系统模块，用于 openDevice 时为设备驱动提供系统身份访问能力。
+     * ISystemAccess for /etc operations, injected into DeviceContext for device drivers.
+     * Non-system modules receive this so openDevice() can pass it to device drivers.
      */
-    systemFS?: import('@itookit/common').IModuleFS;
+    systemAccess?: ISystemAccess;
+    /**
+     * Override the root real path for ScopedView. Used by the etc pseudo-module
+     * so `/` maps to `/etc/` instead of `/module/etc/`.
+     */
+    rootRealPath?: string;
 }
 
 // ─── DeviceHandle ─────────────────────────────────────────────────────────────
@@ -113,7 +119,8 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     private readonly mountId: string;
     private readonly caller: CallerIdentity;
     private readonly _moduleBackend: IStorageBackend;
-    private readonly systemFS?: import('@itookit/common').IModuleFS;
+    private readonly systemAccess?: ISystemAccess;
+    private readonly _isCustomRoot: boolean;
     private initialized = false;
     /** Points to the active event target — bus normally, EventBuffer during a transaction. */
     private _emitTarget: import('@itookit/common').IEventEmitter<import('@itookit/common').FSEventPayloadMap>;
@@ -125,10 +132,11 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this._emitTarget = deps.eventBus;
         this.access = deps.access;
         this.devices = deps.devices;
-        this.scope = new ScopedView(deps.moduleId);
+        this.scope = new ScopedView(deps.moduleId, deps.rootRealPath);
+        this._isCustomRoot = deps.rootRealPath !== undefined;
         this.mountId = deps.mountId ?? 'mount_0';
         this.caller = { moduleId: deps.moduleId, isSystem: deps.isSystem ?? false };
-        this.systemFS = deps.systemFS;
+        this.systemAccess = deps.systemAccess;
         this._moduleBackend = deps.engine.getBackendForPath(`/module/${deps.moduleId}`);
         const backend = this._moduleBackend;
         this.capabilities = Object.freeze({
@@ -156,7 +164,11 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
     async init(): Promise<void> {
         if (this.initialized) return;
-        await this.engine.ensureModuleDir(this.moduleId);
+        // Skip ensureModuleDir when rootRealPath is set (e.g. /etc pseudo-module).
+        // In that case the directory is created by bootstrap or is a system directory.
+        if (!this._isCustomRoot) {
+            await this.engine.ensureModuleDir(this.moduleId);
+        }
         this.initialized = true;
     }
 
@@ -233,8 +245,9 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         return { node, realPath };
     }
 
-    /** Check writable + permissions. */
+    /** Check writable + permissions. System callers bypass ScopedView read-only (same as AccessController). */
     private assertWritable(realPath: string): void {
+        if (this.caller.isSystem) return;
         if (this.scope.isRealPathReadOnly(realPath)) throw new FSReadOnlyError(this.moduleId, realPath);
     }
 
@@ -500,7 +513,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
             nodeId: node.path,
             name: node.name,
             metadata: node.metadata,
-            systemFS: this.systemFS,
+            systemAccess: this.systemAccess,
         };
         let sessionId: string | undefined;
         if (driver.sessionable && driver.open) sessionId = await driver.open(baseCtx, options);
