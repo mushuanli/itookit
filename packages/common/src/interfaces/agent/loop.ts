@@ -122,6 +122,13 @@ export interface LoopContext {
     historyLength?: number;
     /** Task creation timestamp (ms) for durationMs calculation. */
     startedAt?: number;
+    /**
+     * Pre-allocated turn ID for the first turn.
+     * When set, the executor uses this ID instead of generating a new one.
+     * Required for TurnLog sessions so that the streaming rootNode.id matches
+     * the persisted turn.id (preventing duplicate UI messages).
+     */
+    preallocatedTurnId?: string;
 }
 
 // ─── ILoopMiddleware — turn-level hooks ──────────────────────────────

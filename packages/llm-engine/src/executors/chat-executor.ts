@@ -12,7 +12,7 @@ export const chatExecutor: ILoop = {
     mode: 'chat',
 
     async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
-        const turnId = ulid();
+        const turnId = ctx.preallocatedTurnId ?? ulid();
         const foldStart = performance.now();
         let messages = await ctx.log.fold(ctx.ref);
         console.log('[chat-executor] fold() completed', {

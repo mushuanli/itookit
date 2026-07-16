@@ -7,6 +7,7 @@ import {
     ExecutionTask,
     TaskInput,
     ExecutionNode,
+    SessionGroup,
     SessionRuntime,
     SessionStatus,
     PoolStatus,
@@ -273,6 +274,7 @@ export class TaskRunner {
         persist: () => void;
         finalize: () => Promise<void>;
         contextFiles: ChatAttachment[];
+        preallocatedTurnId: string | undefined;
     }> {
         const { sessionId, input } = task;
 
@@ -301,9 +303,13 @@ export class TaskRunner {
         }
 
         // 4. Create assistant node
+        // For TurnLog sessions, pre-allocate the turn ID so that:
+        //   (a) rootNode.id matches the persisted turn.id, and
+        //   (b) we skip the legacy state.sessions write (TurnLog drives UI via turn:appended).
+        const preallocatedTurnId = isTurnFormat ? ulid() : undefined;
         const { assistantNodeId, rootNode } = await this.createAssistantNode(
             sessionId, task.nodeId, state, executorConfig, isTurnFormat, input.branchInfo, userNodeId,
-            input.origin, input.historyPolicy,
+            input.origin, input.historyPolicy, preallocatedTurnId,
         );
 
         // 5. Content accumulator + throttled persistence
@@ -328,7 +334,7 @@ export class TaskRunner {
             };
         const finalize = () => pendingPromise;
 
-        return { userNodeId, executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles };
+        return { userNodeId, executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles, preallocatedTurnId };
     }
 
     // ============================================
@@ -365,6 +371,10 @@ export class TaskRunner {
                 (logAdapter as TurnLog).setEventListener((event) => {
                     const events = state.apply(event);
                     for (const e of events) {
+                        // Skip message:appended — createAssistantNode already emits it
+                        // for the streaming placeholder. Re-emitting here would duplicate
+                        // the assistant bubble in the UI.
+                        if (e.type === 'message:appended') continue;
                         this.eventBus.emitSession(sessionId, e);
                     }
                 });
@@ -373,7 +383,7 @@ export class TaskRunner {
         const isTurnFormat = logAdapter instanceof TurnLog;
 
         try {
-            const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles } =
+            const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles, preallocatedTurnId } =
                 await this.setupTaskExecution(task, state, isTurnFormat);
 
             // ── Get executor ──────────────────────────────────────────────
@@ -456,10 +466,17 @@ export class TaskRunner {
                 // Fallback: use 'main' if manifest is unavailable
             }
 
+            // For TurnLog sessions, user message is written after the executor finishes
+            // (task-runner post-execution persist). Wrap the log so fold() appends the
+            // pending user message, preventing "messages: at least one message is required".
+            const effectiveLog: ILog = isTurnFormat && !input.skipUserMessage
+                ? buildFoldPrependLog(logAdapter, input.text, contextFiles)
+                : logAdapter;
+
             const loopCtx: LoopContext = {
                 sessionId,
                 ref: branchRef,
-                log: logAdapter,
+                log: effectiveLog,
                 llm: llmService,
                 tools: executorConfig._toolService ?? {
                     listTools: () => [],
@@ -482,6 +499,7 @@ export class TaskRunner {
                 reasoningEffort: executorConfig.reasoningEffort,
                 historyLength: input.overrides?.historyLength,
                 startedAt: task.createdAt,
+                preallocatedTurnId,
             };
 
             // ── Execute via drive() or resumeDrive() ──────────────────────
@@ -682,9 +700,10 @@ export class TaskRunner {
         parentUserNodeId?: string,
         origin?: import('../core/types').SessionOrigin,
         historyPolicy?: import('../core/types').HistoryPolicy,
+        preallocatedTurnId?: string,
     ): Promise<{ assistantNodeId: string; rootNode: ExecutionNode }> {
         const assistantNodeId = isTurnFormat
-            ? ulid()
+            ? (preallocatedTurnId ?? ulid())
             : await this.engine.appendMessage(
                 nodeId, sessionId, 'assistant', '',
                 {
@@ -700,6 +719,60 @@ export class TaskRunner {
                     historyPolicy,
                 }
             );
+
+        if (isTurnFormat) {
+            // TurnLog path: build a pure in-memory rootNode for streaming.
+            // state.sessions is NOT written here — TurnLog.applyAppended() drives
+            // the single authoritative message:appended event after persist.
+            const rootNode: ExecutionNode = {
+                id: assistantNodeId,
+                name: executorConfig.name || executorConfig.id,
+                executorType: executorConfig.type || 'agent',
+                executorId: executorConfig.id,
+                status: 'running',
+                startTime: Date.now(),
+                parentId: undefined,
+                data: {
+                    output: '',
+                    thought: '',
+                    metaInfo: {
+                        agentId: executorConfig.id,
+                        agentIcon: executorConfig.icon,
+                    },
+                },
+                children: [],
+            };
+
+            const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
+            if (isBound) {
+                // Emit streaming placeholder now. TurnLog.applyAppended() fires after
+                // persist (too late for streaming), so we emit here with the correct
+                // agent info. The TurnLog event listener filters out its own
+                // message:appended to prevent duplication.
+                const placeholderSession: SessionGroup = {
+                    id: assistantNodeId,
+                    persistedNodeId: assistantNodeId,
+                    role: 'assistant',
+                    content: '',
+                    timestamp: Date.now(),
+                    executionRoot: rootNode,
+                    siblingIndex: branchInfo?.siblingIndex,
+                    siblingCount: branchInfo?.siblingCount,
+                    origin: origin ?? 'user',
+                    historyPolicy: historyPolicy ?? 'include',
+                };
+                this.eventBus.emitSession(sessionId, {
+                    type: 'message:appended',
+                    payload: {
+                        sessionGroup: placeholderSession,
+                        isExecutionRoot: true,
+                        parentId: parentUserNodeId,
+                    },
+                });
+            }
+
+            return { assistantNodeId, rootNode };
+        }
 
         const assistantSession = state.createAssistantMessage(
             executorConfig, assistantNodeId, branchInfo,
@@ -849,4 +922,41 @@ export class TaskRunner {
             payload: this.getPoolStatus(),
         });
     }
+}
+
+// ── Module-level helper ────────────────────────────────────────────────────
+
+/**
+ * Wraps an ILog so that fold() appends the pending user message at the end.
+ *
+ * TurnLog sessions write the user message only after the executor finishes
+ * (post-execution persist in executeAgentLoopTask). During execution, fold()
+ * cannot see the in-flight user message, which causes a "messages: at least
+ * one message is required" 400 from the LLM API.
+ *
+ * This wrapper prepends nothing to storage — it only patches the in-memory
+ * fold() result for the duration of one executor run.
+ */
+function buildFoldPrependLog(inner: ILog, userText: string, contextFiles: ChatAttachment[]): ILog {
+    const pendingUserMsg: import('@itookit/common').ChatMessage = { role: 'user', content: userText };
+    if (contextFiles.length > 0) {
+        (pendingUserMsg as any).attachments = contextFiles.map(f => ({
+            name: f.name,
+            type: f.type ?? 'file',
+            source: f.path ?? f.name,
+            size: f.size,
+        }));
+    }
+
+    return {
+        async fold(ref, strategy) {
+            const history = await inner.fold(ref, strategy);
+            return [...history, pendingUserMsg];
+        },
+        append: inner.append.bind(inner),
+        refs: inner.refs.bind(inner),
+        draft: inner.draft.bind(inner),
+        merge: inner.merge.bind(inner),
+        rebase: inner.rebase.bind(inner),
+    };
 }
