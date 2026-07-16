@@ -402,12 +402,17 @@ export class HistoryView implements IHistoryPresenter {
                     // Step 1: create the session bubble (avatar + execution-root container)
                     this.renderer.appendSession(sessionGroup, false);
                     this.collapse.setState(sessionGroup.id, false);
-                    // Step 2: mount the node itself into the execution-root container
-                    this.renderer.appendNode(undefined, sessionGroup as any, false);
-                    // Step 3: recursively mount any pre-existing children (rare at stream start)
-                    (sessionGroup as any).children?.forEach((c: any) =>
-                        this.renderer.renderExecutionTree(c, false)
-                    );
+                    // Step 2: mount the root ExecutionNode into the execution-root container
+                    const rootNode = sessionGroup.executionRoot;
+                    if (rootNode) {
+                        this.renderer.appendNode(undefined, rootNode, false);
+                        // Step 3: recursively mount any pre-existing children
+                        rootNode.children?.forEach(c =>
+                            this.renderer.renderExecutionTree(c, false)
+                        );
+                    } else {
+                        console.warn('[HistoryView] message:appended isExecutionRoot missing executionRoot', sessionGroup);
+                    }
                     this.scrollController.scrollToBottom(false);
                 } else {
                     this.clearErrors();

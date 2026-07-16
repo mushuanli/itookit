@@ -1098,9 +1098,6 @@ export class SessionManager implements ISession {
         const { nodeId } = this.ensureBound();
         const manifest = await this.engine.getManifest(nodeId);
 
-        console.log('[listBranches] manifest.branches:', JSON.stringify(manifest.branches));
-        console.log('[listBranches] current_branch:', manifest.current_branch);
-
         return Object.entries(manifest.branches).map(([name, headNodeId]) => ({
             name,
             headNodeId,
@@ -1335,14 +1332,22 @@ export class SessionManager implements ISession {
         sessionId: string
     ): Promise<void> {
         const context = await this.engine.getSessionContext(nodeId, sessionId);
+        console.log('[extra-node-debug] populateState loading', { nodeId, sessionId, totalNodes: context.length });
         for (const item of context) {
             const node = item.node;
+            console.log('[extra-node-debug] populateState node', {
+                id: node.id,
+                role: node.role,
+                contentPreview: (node.content || '').slice(0, 80),
+                meta: node.meta,
+            });
             if (node.role === 'system') continue;
             // Skip only in-flight empty assistant nodes (status='running'); completed nodes
             // (success/failed/aborted) with empty content are still rendered to preserve history.
             if (node.role === 'assistant' && !node.content?.trim() && node.meta?.status === 'running') continue;
             state.loadFromChatNode(node);
         }
+        console.log('[extra-node-debug] populateState done, sessions count:', state.getSessions().length);
     }
 
     private async reloadSessionData(

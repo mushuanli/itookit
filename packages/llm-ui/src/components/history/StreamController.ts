@@ -201,7 +201,8 @@ export class StreamController {
                 if (this.dirtyNodes.size === 0) return;
 
                 const now = performance.now();
-                if (now - this.lastFlushTime < this.FLUSH_INTERVAL) return;
+                const sinceLast = now - this.lastFlushTime;
+                if (sinceLast < this.FLUSH_INTERVAL) return;
 
                 // 帧内：执行渲染（DOM write）
                 this.flushAll();

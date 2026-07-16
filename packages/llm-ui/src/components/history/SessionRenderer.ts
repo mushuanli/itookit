@@ -263,6 +263,7 @@ export class SessionRenderer {
     // ================================================================
 
     renderWelcome(): void {
+        this.clear();
         this.container.innerHTML = LayoutTemplates.renderWelcome();
     }
 

@@ -26,6 +26,7 @@ import {
 import { ChatSessionSettings, DEFAULT_SESSION_SETTINGS } from '../core/types';
 import { log } from '../utils/logger';
 import { ulid } from './ulid';
+import { collectAllFileNodes } from './vfs-utils';
 
 // ============================================
 // ChatEngine
@@ -158,18 +159,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   }
 
   private async collectAllFileNodes(nodes: FSNode[]): Promise<FSNode[]> {
-    const result: FSNode[] = [];
-    for (const node of nodes) {
-      if (node.type === 'file') {
-        result.push(node);
-      } else if (node.type === 'directory') {
-        try {
-          const children = await this.engine.driver.getChildren(node.path) as FSNode[];
-          result.push(...await this.collectAllFileNodes(children));
-        } catch { /* ignore */ }
-      }
-    }
-    return result;
+    return collectAllFileNodes(path => this.engine.driver.getChildren(path) as Promise<FSNode[]>, nodes);
   }
 
   // ============================================================

@@ -4,7 +4,7 @@
 // This bridge allows ILoop-based executors to use the full tools package.
 
 import type { IToolService, ToolMeta } from '@itookit/common';
-import type { IToolExecutor } from '../session/agent-loop-strategy';
+import type { IToolExecutor } from '../core/types';
 
 export class ToolServiceToExecutorAdapter implements IToolExecutor {
     constructor(

@@ -13,7 +13,13 @@ export const chatExecutor: ILoop = {
 
     async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
         const turnId = ulid();
+        const foldStart = performance.now();
         let messages = await ctx.log.fold(ctx.ref);
+        console.log('[chat-executor] fold() completed', {
+            durationMs: (performance.now() - foldStart).toFixed(1),
+            messageCount: messages.length,
+            roles: messages.map(m => m.role),
+        });
 
         // Apply historyLength limit (system messages are never counted/truncated)
         if (ctx.historyLength !== undefined && ctx.historyLength !== -1 && ctx.historyLength >= 0) {
@@ -37,6 +43,13 @@ export const chatExecutor: ILoop = {
         const assistantContent: string[] = [];
 
         try {
+            const llmStart = performance.now();
+            console.log('[chat-executor] calling chatStream', {
+                connectionId: ctx.connectionId,
+                model: ctx.model,
+                messageCount: finalMessages.length,
+                signalAborted: ctx.signal.aborted,
+            });
             const stream = ctx.llm.chatStream(ctx.connectionId ?? 'default', {
                 messages: finalMessages,
                 model: ctx.model,
@@ -53,12 +66,22 @@ export const chatExecutor: ILoop = {
                 const delta = chunk.choices?.[0]?.delta;
                 if (!delta) continue;
 
+                if (delta.thinking) {
+                    yield { type: 'stream:thinking', delta: delta.thinking };
+                }
+
                 if (delta.content) {
                     assistantContent.push(delta.content);
                     yield { type: 'stream:content', delta: delta.content };
                 }
             }
+            console.log('[chat-executor] chatStream completed', {
+                durationMs: (performance.now() - llmStart).toFixed(1),
+                contentLen: assistantContent.join('').length,
+                chunkCount: assistantContent.length,
+            });
         } catch (err) {
+            console.error('[chat-executor] chatStream error', err);
             yield {
                 type: 'error',
                 error: {

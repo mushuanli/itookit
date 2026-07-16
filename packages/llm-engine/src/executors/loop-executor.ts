@@ -193,6 +193,10 @@ export class LoopExecutor implements ILoop {
                         const delta = choice?.delta;
                         if (!delta) continue;
 
+                        if (delta.thinking) {
+                            yield { type: 'stream:thinking', delta: delta.thinking };
+                        }
+
                         if (delta.content) {
                             responseText += delta.content;
                             assistantBlocks.push({ type: 'text', text: delta.content });

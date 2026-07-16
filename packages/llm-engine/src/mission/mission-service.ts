@@ -23,7 +23,7 @@ import { TodoStateManager } from './todo-state';
 import { ResultPersistenceService } from './result-persister';
 import { MissionScheduler } from './mission-scheduler';
 import { LiteSubAgentRouter } from './lite-sub-agent-router';
-import type { IToolExecutor } from '../session/agent-loop-strategy';
+import type { IToolExecutor } from '../core/types';
 
 export interface MissionServiceOptions {
     vfs: IVFSManager;

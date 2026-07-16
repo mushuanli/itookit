@@ -29,6 +29,8 @@ import { ExecutorRegistry, getExecutorRegistry } from '../core/executor-registry
 import { drive, resumeDrive, LoopAbortedError } from '../core/loop-driver';
 import { SessionActor } from '../core/session-actor';
 import { ChatEngineLog } from '../persistence/chat-engine-log';
+import { TurnLog } from '../persistence/turn-log';
+import type { ILog } from '@itookit/common';
 import type { LoopContext } from '@itookit/common';
 
 export interface TaskRunnerOptions {
@@ -73,6 +75,8 @@ export class TaskRunner {
     private executorRegistry: ExecutorRegistry;
     /** Tracks the active SessionActor per session for signal routing. */
     private readonly activeActors = new Map<string, import('../core/session-actor').SessionActor>();
+    /** ILog instances keyed by sessionId to avoid per-task cold VFS scans. */
+    private readonly logCache = new Map<string, ILog>();
     /** @deprecated Auto-continue is now handled by createTruncationDetectionMiddleware. */
 
     constructor(
@@ -219,7 +223,7 @@ export class TaskRunner {
             // Determine execution mode — always falls back to defaultMode (eliminates executeTask fallback path)
             const mode: string =
                 task.input.overrides?.mode ??
-                (task.input.overrides?.useHarness ? this.executorRegistry.defaultMode : undefined) ??
+                (task.input.overrides?.useHarness ? 'loop' : undefined) ??
                 this.executorRegistry.defaultMode;
 
             const useExecutor = this.llmService !== null;
@@ -356,8 +360,12 @@ export class TaskRunner {
             const executor = this.executorRegistry.get(mode);
             const llmService = this.llmService!;
 
-            // ── ILog via ChatEngineLog (S4: real facade over ChatEngine) ──
-            const logAdapter = new ChatEngineLog(this.engine, sessionId);
+            // ── ILog via format-routed adapter ─────────────────────────
+            let logAdapter = this.logCache.get(sessionId);
+            if (!logAdapter) {
+                logAdapter = await this.createLog(sessionId, task.nodeId);
+                this.logCache.set(sessionId, logAdapter);
+            }
 
             // ── 文件级 ai_systemPrompt 覆盖（与 executeTask 对齐）──
             const fileNode = await this.engine.getNode(task.nodeId);
@@ -405,6 +413,10 @@ export class TaskRunner {
                     case 'tool:running':
                     case 'tool:success':
                     case 'tool:error':
+                        if (isBound) {
+                            this.eventBus.emitSession(sessionId, event);
+                        }
+                        break;
                     case 'finished':
                         if (isBound) {
                             this.eventBus.emitSession(sessionId, event);
@@ -456,8 +468,11 @@ export class TaskRunner {
             };
 
             // ── Execute via drive() or resumeDrive() ──────────────────────
-            // Check for a persisted checkpoint from a previous session
-            const restoredTurn = await logAdapter.draft().restore();
+            // Check for a persisted checkpoint from a previous session.
+            // Chat mode doesn't support pause/resume — skip the VFS scan.
+            const restoredTurn = mode !== 'chat'
+                ? await logAdapter.draft().restore()
+                : null;
             let turns: import('@itookit/common').Turn[];
 
             if (restoredTurn) {
@@ -634,19 +649,20 @@ export class TaskRunner {
             }
         );
 
-        const rootNode = state.createAssistantMessage(
+        const assistantSession = state.createAssistantMessage(
             executorConfig, assistantNodeId, branchInfo,
             origin, historyPolicy,
         );
+        const rootNode = assistantSession.executionRoot!;
 
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         if (isBound) {
-            // Only emit rootNode — createAssistantMessage already updated getLastSession()
+            // Only emit assistantSession — createAssistantMessage already updated getLastSession()
             // to point to the same node. Emitting both causes "Duplicate session" in UI.
             this.eventBus.emitSession(sessionId, {
                 type: 'message:appended',
                 payload: {
-                    sessionGroup: rootNode as any,
+                    sessionGroup: assistantSession,
                     isExecutionRoot: true,
                     parentId: parentUserNodeId,
                 },
@@ -654,6 +670,25 @@ export class TaskRunner {
         }
 
         return { assistantNodeId, rootNode };
+    }
+
+    // ============================================
+    // 内部：ILog 工厂（格式路由）
+    // ============================================
+
+    /**
+     * Create an ILog instance for the given session.
+     * Routes to TurnLog for sessions with format === 'turn',
+     * falls back to ChatEngineLog for legacy sessions.
+     */
+    private async createLog(sessionId: string, nodeId: string): Promise<ILog> {
+        try {
+            const manifest = await this.engine.getManifest(nodeId);
+            if ((manifest as any).format === 'turn') {
+                return new TurnLog(this.engine, nodeId, sessionId);
+            }
+        } catch { /* manifest unreadable — use legacy */ }
+        return new ChatEngineLog(this.engine, sessionId, nodeId);
     }
 
     // ============================================

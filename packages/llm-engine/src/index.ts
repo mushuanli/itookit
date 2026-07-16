@@ -102,6 +102,9 @@ export { AttachmentProcessor } from './session/attachment-processor';
 
 export { ChatEngine } from './persistence/chat-engine';
 export { ChatEngineLog } from './persistence/chat-engine-log';
+export { TurnLog } from './persistence/turn-log';
+export { VFSDraftArea } from './persistence/draft-area';
+export type { TurnManifest, TurnProjection, PersistedTurn } from './persistence/turn-types';
 export type {
     IChatEngine,
     ChatManifest,
@@ -276,7 +279,7 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
     const registry = getExecutorRegistry();
     registry.register(chatExecutor);
     registry.register(createLoopExecutor('lite'));
-    registry.setDefaultMode('loop');
+    registry.setDefaultMode('chat');
 
     // Register any extra executors provided by the caller
     if (options.executors) {

@@ -139,6 +139,13 @@ export interface ChatManifest {
     /** Immutable named save points (tag name → turn node ID) */
     tags?: Record<string, string>;
 
+    /**
+     * Persistence format for this session.
+     * - 'legacy' (default when absent): ChatNode tree stored inline in the manifest.
+     * - 'turn': Turn DAG stored as individual turns/<id>.json files; TurnManifest header.
+     */
+    format?: 'legacy' | 'turn';
+
     ui_state?: {
         collapse_states?: Record<string, boolean>;
         scroll_position?: number;

@@ -19,8 +19,8 @@ import type {
     Turn,
     Ref,
 } from '@itookit/common';
-import type { IToolExecutor } from '../session/agent-loop-strategy';
-import { nullToolExecutor } from '../session/agent-loop-strategy';
+import type { IToolExecutor } from '../core/types';
+import { nullToolExecutor } from '../core/types';
 import { createLoopExecutor } from '../executors/loop-presets';
 import type { LoopPresetConfig } from '../executors/loop-presets';
 

@@ -505,3 +505,19 @@ export type RegistryEvent =
     | { type: 'session_hitl_active'; payload: { sessionId: string; question: string } }
     /** 人工输入已被响应，Agent 继续执行。 */
     | { type: 'session_hitl_resolved'; payload: { sessionId: string } };
+
+// ═══════════════════════════════════════════════════════════════
+// Tool executor (moved from session/agent-loop-strategy.ts)
+// ═══════════════════════════════════════════════════════════════
+
+export interface IToolExecutor {
+    execute(name: string, input: Record<string, unknown>): Promise<string>;
+    /** Optional: return tool metadata for permission gating and parallel scheduling */
+    getMeta?(name: string): { sideEffect: 'none' | 'local' | 'external' } | undefined;
+}
+
+/** Fallback when no tools are configured for the session */
+export const nullToolExecutor: IToolExecutor = {
+    execute: async (name: string) =>
+        `[Tool "${name}" is not available in this session]`,
+};

@@ -1,6 +1,5 @@
 // @file: llm-engine/src/utils/converters.ts
 
-import { generateUUID } from '@itookit/common';
 import { SessionGroup, ExecutionNode, ChatAttachment, SessionOrigin, HistoryPolicy } from '../core/types';
 import { ChatNode } from '../persistence/types';
 
@@ -22,7 +21,7 @@ export class Converters {
             }));
 
             return {
-                id: generateUUID(),
+                id: node.id,
                 timestamp: new Date(node.created_at).getTime(),
                 role: 'user',
                 content: node.content,
@@ -35,11 +34,13 @@ export class Converters {
         
         if (node.role === 'assistant') {
             return {
-                id: generateUUID(),
+                id: node.id,
                 timestamp: new Date(node.created_at).getTime(),
                 role: 'assistant',
                 executionRoot: {
-                    id: generateUUID(),
+                    // Use the raw node.id so CSS selectors like #mount-{id} remain valid.
+                    // Suffixes containing ':' break querySelector (treated as pseudo-class).
+                    id: node.id,
                     executorId: node.meta?.agentId || 'unknown',
                     executorType: 'agent',
                     name: node.meta?.agentName || 'Assistant',
@@ -110,7 +111,7 @@ export class Converters {
         persistedNodeId: string
     ): SessionGroup {
         return {
-            id: generateUUID(),
+            id: persistedNodeId + ':user',
             timestamp: Date.now(),
             role: 'user',
             content,
@@ -127,7 +128,7 @@ export class Converters {
         persistedNodeId: string
     ): SessionGroup {
         return {
-            id: generateUUID(),
+            id: persistedNodeId + ':assistant',
             timestamp: Date.now(),
             role: 'assistant',
             executionRoot: rootNode,

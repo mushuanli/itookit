@@ -18,11 +18,12 @@ import type {
     RefStore,
     DraftArea,
     AssemblyStrategy,
-    PauseRequest,
     ChatMessage,
 } from '@itookit/common';
 import type { IChatEngine } from './types';
 import { ulid } from './ulid';
+import { collectAllFileNodes } from './vfs-utils';
+import { VFSDraftArea } from './draft-area';
 
 // ─── Fold cache ──────────────────────────────────────────────────────
 
@@ -53,83 +54,6 @@ class FoldCache {
         for (const key of this.store.keys()) {
             if (key.startsWith(ref)) this.store.delete(key);
         }
-    }
-}
-
-// ─── DraftArea ───────────────────────────────────────────────────────
-
-/**
- * DraftArea backed by VFS for crash safety.
- *
- * In-flight turn is kept in memory for fast read/write during streaming.
- * On checkpoint (pause), the turn is persisted to the session's asset
- * directory so it survives a crash. On flush (successful append), the
- * persisted copy is deleted.
- */
-class VFSDraftArea implements DraftArea {
-    private _current: Turn | null = null;
-    private _draftNodeId: string | null = null;
-
-    constructor(
-        private readonly engine: IChatEngine,
-        private readonly getSessionNodeId: () => Promise<string | null>,
-    ) {}
-
-    async checkpoint(_pause: PauseRequest): Promise<void> {
-        if (!this._current) return;
-        const nodeId = await this.getSessionNodeId();
-        if (!nodeId) return;
-        try {
-            const content = JSON.stringify({
-                ...this._current,
-                meta: { ...this._current.meta, _checkpointAt: Date.now() },
-            });
-            // Store draft as an asset of the .chat file
-            if (this._draftNodeId) {
-                // Update existing draft
-                await this.engine.driver.writeContent(this._draftNodeId, content);
-            } else {
-                const created = await this.engine.createAsset(nodeId, 'draft.json', content);
-                this._draftNodeId = created.path;
-            }
-        } catch {
-            // Non-critical: draft persistence failure shouldn't crash the loop
-        }
-    }
-
-    async flush(_turn: Turn): Promise<void> {
-        this._current = null;
-        if (this._draftNodeId) {
-            try {
-                await this.engine.delete([this._draftNodeId]);
-            } catch { /* best-effort */ }
-            this._draftNodeId = null;
-        }
-    }
-
-    current(): Turn | null {
-        return this._current;
-    }
-
-    setCurrent(turn: Turn): void {
-        this._current = turn;
-    }
-
-    async restore(): Promise<Turn | null> {
-        const nodeId = await this.getSessionNodeId();
-        if (!nodeId) return null;
-        try {
-            const assets = await this.engine.getAssets(nodeId);
-            const draftAsset = assets.find(a => a.name === 'draft.json');
-            if (!draftAsset) return null;
-            const content = await this.engine.readContent(draftAsset.path);
-            if (typeof content === 'string') {
-                this._current = JSON.parse(content);
-                this._draftNodeId = draftAsset.path;
-                return this._current;
-            }
-        } catch { /* ignore */ }
-        return null;
     }
 }
 
@@ -239,16 +163,26 @@ export class ChatEngineLog implements ILog {
      * @param engine    The underlying ChatEngine instance
      * @param sessionId Optional pre-resolved session ID.
      *                  If omitted, the session is resolved from ref on first use.
+     * @param nodeId    Optional pre-resolved node path (VFS path to the .chat file).
+     *                  When provided, avoids the cold VFS scan in fold() / restore().
      */
     constructor(
         private readonly engine: IChatEngine,
         sessionId?: string,
+        nodeId?: string,
     ) {
         this._sessionId = sessionId;
+        this._nodeIdCache = nodeId ?? null;
 
-        // Lazy session resolution: nodeId lookup from sessionId
+        // Lazy session resolution: nodeId lookup from sessionId.
+        // Cache-aware: draft/refStore/fold/append all share the same cache entry.
         const resolveNodeId = sessionId
-            ? () => this.resolveNodeId(sessionId!)
+            ? async () => {
+                if (!this._nodeIdCache) {
+                    this._nodeIdCache = await this.resolveNodeId(sessionId);
+                }
+                return this._nodeIdCache;
+            }
             : () => Promise.resolve(null);
 
         this._refs = new ChatEngineRefStore(engine, resolveNodeId);
@@ -259,10 +193,14 @@ export class ChatEngineLog implements ILog {
 
     async append(ref: Ref, turn: Turn): Promise<TurnId> {
         const turnId = turn.id || ulid();
-        const role = turn.payload[0]?.role === 'assistant' ? 'assistant' as const : 'user' as const;
-        const content = turn.payload.map(m =>
-            typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-        ).join('\n');
+
+        console.log('[extra-node-debug] ChatEngineLog.append() called', {
+            ref,
+            turnId,
+            payloadRoles: turn.payload.map(m => m.role),
+            payloadCount: turn.payload.length,
+            stack: new Error().stack?.split('\n').slice(1, 5).join('\n'),
+        });
 
         // Resolve nodeId from sessionId for the engine call
         if (!this._nodeIdCache && this._sessionId) {
@@ -270,18 +208,29 @@ export class ChatEngineLog implements ILog {
         }
         const nodeId = this._nodeIdCache ?? '';
 
-        await this.engine.appendMessage(
-            nodeId,
-            ref,
-            role,
-            content,
-            {
-                status: 'active',
-                _turnId: turnId,
-                _parents: turn.parents ?? [ref],
-                _origin: turn.meta?.origin,
-            } as any,
-        );
+        // Create individual ChatNodes per message — skip system/user since
+        // TaskRunner already persists those directly via engine.appendMessage().
+        // Without this, the old code joined all messages into a single ChatNode
+        // with role='user', causing a duplicate node on refresh.
+        for (const msg of turn.payload) {
+            if (msg.role === 'system' || msg.role === 'user') continue;
+            const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            if (!content.trim()) continue;
+
+            await this.engine.appendMessage(
+                nodeId,
+                this._sessionId!,
+                msg.role,
+                content,
+                {
+                    status: 'active',
+                    _turnId: turnId,
+                    _parents: turn.parents ?? [ref],
+                    _origin: turn.meta?.origin,
+                } as any,
+            );
+            console.log('[extra-node-debug] ChatEngineLog.append() persisted', { role: msg.role, contentPreview: content.slice(0, 80) });
+        }
 
         this._cache.invalidateRef(ref);
         return turnId;
@@ -440,16 +389,6 @@ export class ChatEngineLog implements ILog {
     }
 
     private async collectAllFiles(nodes: any[]): Promise<any[]> {
-        const result: any[] = [];
-        for (const node of nodes) {
-            if (node.type === 'file') result.push(node);
-            else if (node.type === 'directory') {
-                try {
-                    const children = await this.engine.getChildren(node.path);
-                    result.push(...await this.collectAllFiles(children));
-                } catch { /* ignore */ }
-            }
-        }
-        return result;
+        return collectAllFileNodes(path => this.engine.getChildren(path), nodes);
     }
 }

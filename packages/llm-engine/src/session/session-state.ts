@@ -155,7 +155,7 @@ export class SessionState {
     }
 
     /**
-     * 创建 assistant 消息并返回执行根节点
+     * 创建 assistant 消息并返回 SessionGroup
      */
     createAssistantMessage(
         config: any, // ExecutorConfig
@@ -163,7 +163,7 @@ export class SessionState {
         branchInfo?: BranchInfo,
         origin?: SessionOrigin,
         historyPolicy?: HistoryPolicy,
-    ): ExecutionNode {
+    ): SessionGroup {
         const rootNode: ExecutionNode = {
             id: persistedNodeId,
             name: config.name || config.id,
@@ -197,7 +197,7 @@ export class SessionState {
         };
 
         this.sessions.push(session);
-        return rootNode;
+        return session;
     }
 
     // ================================================================
