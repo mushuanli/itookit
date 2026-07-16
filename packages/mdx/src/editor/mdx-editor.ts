@@ -158,6 +158,9 @@ export class MDxEditor extends IEditor {
         this.cmAdapter.setText(finalMarkdown);
         this.saveManager.setDirty(false);
 
+        // 取消待执行的防抖渲染，防止 finalize 后被覆盖
+        this.modeManager.cancelDebounce();
+
         const renderContainer = this.modeManager.getRenderContainer();
         if (renderContainer && this.modeManager.getMode() === 'render') {
             await this.renderer.finishStreaming(renderContainer, finalMarkdown);

@@ -9,6 +9,7 @@ export class ModeManager {
     private renderContainer: HTMLElement | null = null;
     private renderDebounceTimer: number | null = null;
     private pendingResolvers: Array<() => void> = [];
+    private latestRenderFn: (() => Promise<void>) | null = null;
 
     constructor(initialMode: 'edit' | 'render') {
         this.currentMode = initialMode;
@@ -63,23 +64,51 @@ export class ModeManager {
 
     /**
      * 流式渲染防抖：合并高频调用，16ms 内只执行一次渲染
+     * 始终使用最新传入的 renderFn，避免丢弃末尾 delta
      */
     async debouncedRender(renderFn: () => Promise<void>): Promise<void> {
+        this.latestRenderFn = renderFn;
+
         return new Promise((resolve) => {
             this.pendingResolvers.push(resolve);
 
             if (!this.renderDebounceTimer) {
                 this.renderDebounceTimer = window.setTimeout(async () => {
                     this.renderDebounceTimer = null;
-                    try { await renderFn(); }
-                    catch (e) { console.error('[ModeManager] Render failed:', e); }
+                    const fn = this.latestRenderFn;
+                    this.latestRenderFn = null;
 
-                    const resolvers = this.pendingResolvers;
-                    this.pendingResolvers = [];
-                    resolvers.forEach(r => r());
+                    if (!fn) {
+                        const resolvers = this.pendingResolvers;
+                        this.pendingResolvers = [];
+                        resolvers.forEach(r => r());
+                        return;
+                    }
+
+                    try { await fn(); }
+                    catch (e) { console.error('[ModeManager] Render failed:', e); }
+                    finally {
+                        const resolvers = this.pendingResolvers;
+                        this.pendingResolvers = [];
+                        resolvers.forEach(r => r());
+                    }
                 }, 16);
             }
         });
+    }
+
+    /**
+     * 取消防抖定时器，防止 finalize 后被残留的 debouncedRender 覆盖
+     */
+    cancelDebounce(): void {
+        if (this.renderDebounceTimer) {
+            clearTimeout(this.renderDebounceTimer);
+            this.renderDebounceTimer = null;
+        }
+        this.latestRenderFn = null;
+        const resolvers = this.pendingResolvers;
+        this.pendingResolvers = [];
+        resolvers.forEach(r => r());
     }
 
     private applyModeClasses(root: HTMLElement, isEdit: boolean): void {
@@ -97,6 +126,7 @@ export class ModeManager {
             clearTimeout(this.renderDebounceTimer);
             this.renderDebounceTimer = null;
         }
+        this.latestRenderFn = null;
         this.pendingResolvers.forEach(r => r());
         this.pendingResolvers = [];
         this.editContainer = null;
