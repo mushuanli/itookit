@@ -208,13 +208,8 @@ export class SessionRegistry {
         }
 
         if (session.role === 'assistant') {
-            if (state.isTurnFormat) {
-                const userTurn = state.findUserTurnForAssistant(messageId);
-                if (!userTurn?.userMessage) return { allowed: false, reason: 'No user message found' };
-                return { allowed: true };
-            }
-            const userBefore = state.findUserMessageBefore(messageId);
-            if (!userBefore) return { allowed: false, reason: 'No user message found' };
+            const userTurn = state.findUserTurnForAssistant(messageId);
+            if (!userTurn?.userMessage) return { allowed: false, reason: 'No user message found' };
             return { allowed: true };
         }
 
@@ -286,26 +281,7 @@ export class SessionRegistry {
         sessionId: string,
         state: SessionState
     ): Promise<void> {
-        if (state.isTurnFormat) {
-            await this.diffAndApply(nodeId, sessionId, state);
-            return;
-        }
-
-        // Legacy format: full reload
-        state.clear();
-        await this.populateState(state, nodeId, sessionId);
-
-        this._eventBus.emitSession(sessionId, {
-            type: 'messages:cleared',
-            payload: {},
-        });
-
-        for (const sess of state.getSessions()) {
-            this._eventBus.emitSession(sessionId, {
-                type: 'message:appended',
-                payload: { sessionGroup: sess },
-            });
-        }
+        await this.diffAndApply(nodeId, sessionId, state);
     }
 
     // ================================================================
@@ -403,26 +379,7 @@ export class SessionRegistry {
         nodeId: string,
         sessionId: string
     ): Promise<void> {
-        const isTurn = await this.isTurnFormatSession(nodeId);
-        if (isTurn) {
-            await this.populateFromTurnLog(state, nodeId, sessionId);
-            return;
-        }
-
-        const context = await this._engine.getSessionContext(nodeId, sessionId);
-        for (const item of context) {
-            const node = item.node;
-            if (node.role === 'system') continue;
-            if (node.role === 'assistant' && !node.content?.trim() && node.meta?.status === 'running') continue;
-            state.loadFromChatNode(node);
-        }
-    }
-
-    private async isTurnFormatSession(nodeId: string): Promise<boolean> {
-        try {
-            const manifest = await this._engine.getManifest(nodeId) as unknown as Record<string, unknown>;
-            return manifest?.format === 'turn';
-        } catch { return false; }
+        await this.populateFromTurnLog(state, nodeId, sessionId);
     }
 
     private async collectHeadChain(nodeId: string, sessionId: string): Promise<{ chain: string[]; log: TurnLog }> {
@@ -456,7 +413,6 @@ export class SessionRegistry {
             if (!t || t._deleted) continue;
             state.loadFromProjection(turnToProjection(t, t.id));
         }
-        state.setTurnFormat(true);
     }
 
     private async diffAndApply(

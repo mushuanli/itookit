@@ -19,14 +19,12 @@ import { SessionState } from '../src/session/session-state';
 
 // ── In-memory IChatEngine mock ──────────────────────────────────────────────
 
-type AssetEntry = { name: string; path: string; content: string };
-
 class InMemoryChatEngine implements Partial<IChatEngine> {
     private manifest: Record<string, unknown> = {};
-    private assets: Map<string, AssetEntry[]> = new Map();
+    /** ownerNodeId → Map<assetName, content> */
+    private assets: Map<string, Map<string, string>> = new Map();
     private files: Map<string, string> = new Map();
     private children: Map<string, FSNode[]> = new Map();
-    private nextAssetIdx = 1;
 
     // ── Manifest ────────────────────────────────────────────────────────
 
@@ -44,18 +42,49 @@ class InMemoryChatEngine implements Partial<IChatEngine> {
         return `_${nodeId}`;
     }
 
-    async createAsset(dirId: string, name: string, content: string): Promise<FSNode> {
-        const path = `${dirId}/${name}`;
-        if (!this.assets.has(dirId)) this.assets.set(dirId, []);
-        this.assets.get(dirId)!.push({ name, path, content });
+    /** ownerNodeId is the .chat file id; name is relative asset filename */
+    async createAsset(ownerNodeId: string, name: string, content: string): Promise<FSNode> {
+        if (!this.assets.has(ownerNodeId)) this.assets.set(ownerNodeId, new Map());
+        this.assets.get(ownerNodeId)!.set(name, content);
+        const path = `_${ownerNodeId}/${name}`;
         this.files.set(path, content);
         return { path, name } as unknown as FSNode;
     }
 
-    async getAssets(dirId: string): Promise<FSNode[]> {
-        return (this.assets.get(dirId) ?? []).map(a => ({
-            name: a.name, path: a.path,
+    async getAssets(ownerNodeId: string): Promise<FSNode[]> {
+        const map = this.assets.get(ownerNodeId) ?? new Map();
+        return Array.from(map.keys()).map(name => ({
+            name, path: `_${ownerNodeId}/${name}`,
         } as unknown as FSNode));
+    }
+
+    /** IFile handle backed by this mock's asset store */
+    openFile(nodeId: string): import('@itookit/common').IFile {
+        const engine = this;
+        return {
+            nodeId,
+            asset(name: string) {
+                return {
+                    name,
+                    async readText(): Promise<string | null> {
+                        return engine.assets.get(nodeId)?.get(name) ?? null;
+                    },
+                    async read(): Promise<ArrayBuffer | null> {
+                        const text = engine.assets.get(nodeId)?.get(name);
+                        if (!text) return null;
+                        return new TextEncoder().encode(text).buffer;
+                    },
+                    async write(content: string | ArrayBuffer | Uint8Array): Promise<string> {
+                        const text = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
+                        if (!engine.assets.has(nodeId)) engine.assets.set(nodeId, new Map());
+                        engine.assets.get(nodeId)!.set(name, text);
+                        return `@asset/${name}`;
+                    },
+                    async delete(): Promise<void> { engine.assets.get(nodeId)?.delete(name); },
+                    async exists(): Promise<boolean> { return engine.assets.get(nodeId)?.has(name) ?? false; },
+                };
+            },
+        } as unknown as import('@itookit/common').IFile;
     }
 
     // ── Content ──────────────────────────────────────────────────────────
@@ -82,9 +111,6 @@ class InMemoryChatEngine implements Partial<IChatEngine> {
     async delete(paths: string[]): Promise<void> {
         for (const p of paths) {
             this.files.delete(p);
-            for (const [dir, entries] of this.assets) {
-                this.assets.set(dir, entries.filter(e => e.path !== p));
-            }
         }
     }
 
@@ -230,7 +256,6 @@ describe('TurnLog', () => {
 
             // Verify SessionState cascade
             const state = new SessionState(nodeId, sessionId);
-            state.setTurnFormat(true);
             for (const tId of [t1Id, t2Id, t3Id, t4Id]) {
                 const t = await log.readTurn(tId);
                 if (t && !t._deleted) state.loadFromProjection(turnToProjection(t, tId));
@@ -481,7 +506,6 @@ describe('TurnLog', () => {
 describe('SessionState (turn format)', () => {
     it('should cascade delete children via collectCascadeTurnIds', () => {
         const state = new SessionState('node', 'session');
-        state.setTurnFormat(true);
 
         const p1: TurnProjection = { turnId: 't1', parents: [], kind: 'chat', userMessage: { content: 'Q1', persistedNodeId: 't1' }, meta: { createdAt: 1, origin: 'user' } };
         const p2: TurnProjection = { turnId: 't2', parents: ['t1'], kind: 'chat', assistantMessage: { content: 'A1', status: 'success', persistedNodeId: 't2' }, meta: { createdAt: 2, origin: 'user' } };
@@ -499,7 +523,6 @@ describe('SessionState (turn format)', () => {
 
     it('should apply turn:appended event', () => {
         const state = new SessionState('node', 'session');
-        state.setTurnFormat(true);
 
         const events = state.apply({
             type: 'turn:appended',

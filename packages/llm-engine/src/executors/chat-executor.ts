@@ -41,6 +41,7 @@ export const chatExecutor: ILoop = {
         };
 
         const assistantContent: string[] = [];
+        const thinkingContent: string[] = [];
 
         try {
             const llmStart = performance.now();
@@ -67,6 +68,7 @@ export const chatExecutor: ILoop = {
                 if (!delta) continue;
 
                 if (delta.thinking) {
+                    thinkingContent.push(delta.thinking);
                     yield { type: 'stream:thinking', delta: delta.thinking };
                 }
 
@@ -92,12 +94,16 @@ export const chatExecutor: ILoop = {
         }
 
         const finalContent = assistantContent.join('');
+        const finalThinking = thinkingContent.join('');
         const turn: Turn = {
             id: turnId,
             parents: [],
             payload: [
-                ...finalMessages,
-                { role: 'assistant', content: finalContent },
+                {
+                    role: 'assistant',
+                    content: finalContent,
+                    ...(finalThinking ? { thinking: finalThinking } : {}),
+                } as import('@itookit/common').ChatMessage,
             ],
             meta: {
                 createdAt: Date.now(),

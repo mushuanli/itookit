@@ -88,8 +88,14 @@ export class LoopExecutor implements ILoop {
     /**
      * Internal loop execution — shared by run() and resume().
      *
-     * @param ctx          Loop context (stored during run())
-     * @param startTurn    Starting turn number (0 for fresh, N for resume)
+     * One call = one Turn (a single user-initiated interaction).
+     * The while-loop handles tool calls and auto-continue within that Turn.
+     * Each LLM exchange appends its delta messages to `currentPayload`.
+     * On completion, all exchanges are packed into a single Turn.payload
+     * so fold() reconstructs a correct multi-exchange history.
+     *
+     * @param ctx          Loop context
+     * @param startTurn    Starting turn number (0 fresh, N for resume)
      * @param initialTurns Previously completed turns (empty for fresh)
      */
     private async *executeLoop(
@@ -98,44 +104,45 @@ export class LoopExecutor implements ILoop {
         initialTurns: Turn[],
     ): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
         const maxTurns = 50;
-        let turnNumber = startTurn;
-        const turns: Turn[] = [...initialTurns];
+        let exchangeNumber = startTurn;
+        const completedTurns: Turn[] = [...initialTurns];
         let signal: Signal | undefined;
 
+        // Messages from history (fold once, extend in-memory for subsequent exchanges)
+        let baseMessages = await ctx.log.fold(ctx.ref);
+
+        // Apply historyLength limit (system messages are never counted/truncated)
+        if (ctx.historyLength !== undefined && ctx.historyLength !== -1 && ctx.historyLength >= 0) {
+            const sys = baseMessages.filter(m => m.role === 'system');
+            const rest = baseMessages.filter(m => m.role !== 'system');
+            baseMessages = [...sys, ...rest.slice(-ctx.historyLength)];
+        }
+
+        // Prepend systemPrompt, deduplicating any system message already in fold result
+        if (ctx.systemPrompt) {
+            baseMessages = [{ role: 'system' as const, content: ctx.systemPrompt }, ...baseMessages.filter(m => m.role !== 'system')];
+        }
+
+        // Delta payload for this Turn — accumulates across exchanges (tool calls, auto-continue).
+        // task-runner prepends the user message on persist, so we start empty here.
+        const currentPayload: import('@itookit/common').ChatMessage[] = [];
+        let totalUsage: TokenUsage = {};
+
         try {
-            while (turnNumber < maxTurns) {
-                // Check hard abort
+            while (exchangeNumber < maxTurns) {
                 if (ctx.signal.aborted) break;
 
-                turnNumber++;
+                exchangeNumber++;
 
-                // ── Process pending injection signal ──
-                if (signal?.type === 'inject') {
-                    // Injection is handled by the caller via log.append
-                    // before re-entering the loop; the signal carries the text
-                    signal = undefined;
-                }
+                // ── Build message list for this exchange ──
+                // base history + everything accumulated so far in this Turn
+                let messages: import('@itookit/common').ChatMessage[] = [...baseMessages, ...currentPayload];
 
-                // ── 1. Build messages from log ──
-                let messages = await ctx.log.fold(ctx.ref);
-
-                // Apply historyLength limit (system messages are never counted/truncated)
-                if (ctx.historyLength !== undefined && ctx.historyLength !== -1 && ctx.historyLength >= 0) {
-                    const sys = messages.filter(m => m.role === 'system');
-                    const rest = messages.filter(m => m.role !== 'system');
-                    messages = [...sys, ...rest.slice(-ctx.historyLength)];
-                }
-
-                // Prepend systemPrompt, deduplicating any system message already in fold result
-                if (ctx.systemPrompt) {
-                    messages = [{ role: 'system' as const, content: ctx.systemPrompt }, ...messages.filter(m => m.role !== 'system')];
-                }
-
-                // ── 1b. Before-turn middleware ──
+                // ── Before-turn middleware ──
                 const turnCtx: TurnContext = {
-                    turnId: `turn_${ctx.sessionId}_${turnNumber}`,
+                    turnId: `turn_${ctx.sessionId}_${exchangeNumber}`,
                     sessionId: ctx.sessionId,
-                    turnNumber,
+                    turnNumber: exchangeNumber,
                 };
 
                 const beforeDirective = await this.pipeline.applyBeforeTurn(turnCtx);
@@ -149,35 +156,32 @@ export class LoopExecutor implements ILoop {
                     }
                     if (beforeDirective.action === 'skip_turn') continue;
                     if (beforeDirective.action === 'inject') {
-                        // Inject feedback text as a user message
-                        messages = [...messages, { role: 'user' as const, content: beforeDirective.text }];
+                        const injectMsg = { role: 'user' as const, content: beforeDirective.text };
+                        messages = [...messages, injectMsg];
+                        currentPayload.push(injectMsg);
                     }
                 }
 
-                if (messages.length === 0) {
-                    // Nothing to respond to — wait for user input
-                    break;
-                }
+                if (messages.length === 0) break;
 
-                // ── 2. LLM Call ──
+                // ── LLM Call ──
                 yield {
                     type: 'turn:start',
                     turnId: turnCtx.turnId,
                     sessionId: ctx.sessionId,
-                    turn: turnNumber,
+                    turn: exchangeNumber,
                 };
 
                 let responseText = '';
+                let thinkingText = '';
                 let toolCalls: ToolCall[] = [];
                 let usage: TokenUsage = {};
                 let finishReason: string | undefined;
                 const assistantBlocks: AssistantBlock[] = [];
 
                 try {
-                    // Use streaming for content; collect tool_calls from final chunk
                     const stream = ctx.llm.chatStream(ctx.connectionId ?? 'default', {
                         messages,
-                        tools: undefined, // tools injected via LoopContext.tools if needed
                         model: ctx.model,
                         temperature: ctx.temperature,
                         maxTokens: ctx.maxTokens,
@@ -194,6 +198,7 @@ export class LoopExecutor implements ILoop {
                         if (!delta) continue;
 
                         if (delta.thinking) {
+                            thinkingText += delta.thinking;
                             yield { type: 'stream:thinking', delta: delta.thinking };
                         }
 
@@ -223,12 +228,8 @@ export class LoopExecutor implements ILoop {
                             }
                         }
 
-                        // Capture finish_reason from the final chunk
-                        if (choice?.finish_reason) {
-                            finishReason = choice.finish_reason;
-                        }
+                        if (choice?.finish_reason) finishReason = choice.finish_reason;
 
-                        // Collect usage from final chunks
                         if (chunk.usage) {
                             usage = {
                                 inputTokens: chunk.usage.prompt_tokens ?? 0,
@@ -237,7 +238,6 @@ export class LoopExecutor implements ILoop {
                         }
                     }
                 } catch (err) {
-                    // ── Error recovery via middleware ──
                     const recoveryAction: RecoveryAction | void = await this.pipeline.applyOnError(
                         turnCtx,
                         err instanceof Error ? err : new Error(String(err)),
@@ -258,10 +258,9 @@ export class LoopExecutor implements ILoop {
                         if (recoveryAction.delayMs) {
                             await new Promise(r => setTimeout(r, recoveryAction.delayMs));
                         }
-                        continue; // retry the turn
+                        continue;
                     }
 
-                    // compress / fallback: break out (simplified)
                     yield {
                         type: 'error',
                         error: { message: `Recovery action "${recoveryAction.action}" not fully implemented` },
@@ -269,7 +268,13 @@ export class LoopExecutor implements ILoop {
                     break;
                 }
 
-                // ── 4. Build assistant blocks from tool calls ──
+                // Accumulate usage across exchanges
+                totalUsage = {
+                    inputTokens: ((totalUsage.inputTokens as number | undefined) ?? 0) + ((usage.inputTokens as number | undefined) ?? 0),
+                    outputTokens: ((totalUsage.outputTokens as number | undefined) ?? 0) + ((usage.outputTokens as number | undefined) ?? 0),
+                };
+
+                // ── Build assistant message delta for this exchange ──
                 for (const tc of toolCalls) {
                     assistantBlocks.push({
                         type: 'tool_use',
@@ -279,7 +284,16 @@ export class LoopExecutor implements ILoop {
                     });
                 }
 
-                // ── 4b. onToolCalls middleware (plan confirm before execution) ──
+                // Persist this exchange's assistant message into the Turn payload.
+                // thinking is stored as a custom field so turnToProjection can recover it on reload.
+                currentPayload.push({
+                    role: 'assistant',
+                    content: responseText,
+                    ...(thinkingText ? { thinking: thinkingText } : {}),
+                    tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+                } as import('@itookit/common').ChatMessage);
+
+                // ── onToolCalls middleware ──
                 if (toolCalls.length > 0) {
                     const plannedTools: PlannedTool[] = toolCalls.map(tc => ({
                         id: tc.id,
@@ -294,13 +308,10 @@ export class LoopExecutor implements ILoop {
                             break;
                         }
                         if (toolCallsDirective.action === 'pause') {
-                            // Pause for user confirmation — drive() checkpoints, waits for Signal,
-                            // then resumes the generator with gen.next(signal).
                             signal = yield {
                                 type: 'await_signal',
                                 request: toolCallsDirective.request,
                             } as AgentEvent;
-                            // signal is the Signal passed by drive() via gen.next(signal)
                             if (signal?.type === 'abort') break;
                             if (signal?.type === 'respond') {
                                 const resp = signal.response;
@@ -309,62 +320,50 @@ export class LoopExecutor implements ILoop {
                                     break;
                                 }
                                 if (typeof resp === 'string') {
-                                    // User modified the plan — inject as correction, skip tools this turn
-                                    messages.push({ role: 'user', content: `[Plan adjustment] ${resp}` });
+                                    const adjustMsg = { role: 'user' as const, content: `[Plan adjustment] ${resp}` };
+                                    currentPayload.push(adjustMsg);
                                     continue;
                                 }
                             }
-                            // true, undefined, or unrecognized → approved, proceed to tool execution
                         }
                         if (toolCallsDirective.action === 'inject') {
-                            messages.push({ role: 'user', content: toolCallsDirective.text });
+                            const injectMsg = { role: 'user' as const, content: toolCallsDirective.text };
+                            currentPayload.push(injectMsg);
                             continue;
                         }
                     }
                 }
 
-                // ── 5. Execute tools ──
+                // ── Execute tools ──
                 const toolResults: ToolExecResult[] = [];
 
                 if (toolCalls.length > 0) {
-                    // Separate reads (parallel) from writes (serial)
                     const reads: ToolCall[] = [];
                     const writes: ToolCall[] = [];
 
                     for (const tc of toolCalls) {
                         const name = tc.function?.name ?? '';
                         const meta = ctx.tools.getToolMeta(name);
-                        if (meta?.sideEffect === 'none') {
-                            reads.push(tc);
-                        } else {
-                            writes.push(tc);
-                        }
+                        if (meta?.sideEffect === 'none') reads.push(tc);
+                        else writes.push(tc);
                     }
 
-                    // Queue all reads
                     for (const tc of reads) {
                         const name = tc.function?.name ?? '';
                         yield { type: 'tool:queued', call: { toolId: tc.id, name } };
                         yield { type: 'tool:running', call: { toolId: tc.id, name } };
                     }
 
-                    // Execute reads in parallel (no yield inside Promise.all)
-                    const readPromises = reads.map(async (tc) => {
+                    const readResults = await Promise.all(reads.map(async (tc) => {
                         const name = tc.function?.name ?? '';
                         try {
-                            const result = await ctx.tools.invoke({
-                                toolId: name,
-                                args: safeParseJson(tc.function?.arguments ?? '{}'),
-                            });
+                            const result = await ctx.tools.invoke({ toolId: name, args: safeParseJson(tc.function?.arguments ?? '{}') });
                             return { toolUseId: tc.id, name, content: result.output, isError: !result.success };
                         } catch (err) {
-                            const msg = err instanceof Error ? err.message : String(err);
-                            return { toolUseId: tc.id, name, content: msg, isError: true };
+                            return { toolUseId: tc.id, name, content: err instanceof Error ? err.message : String(err), isError: true };
                         }
-                    });
-                    const readResults = await Promise.all(readPromises);
+                    }));
 
-                    // Emit success/error events for reads
                     for (const r of readResults) {
                         if (r.isError) {
                             yield { type: 'tool:error', call: { toolId: r.toolUseId, name: r.name, error: r.content } };
@@ -374,17 +373,12 @@ export class LoopExecutor implements ILoop {
                         toolResults.push(r);
                     }
 
-                    // Execute writes serially
                     for (const tc of writes) {
                         const name = tc.function?.name ?? '';
                         yield { type: 'tool:queued', call: { toolId: tc.id, name } };
                         yield { type: 'tool:running', call: { toolId: tc.id, name } };
-
                         try {
-                            const result = await ctx.tools.invoke({
-                                toolId: name,
-                                args: safeParseJson(tc.function?.arguments ?? '{}'),
-                            });
+                            const result = await ctx.tools.invoke({ toolId: name, args: safeParseJson(tc.function?.arguments ?? '{}') });
                             yield { type: 'tool:success', call: { toolId: tc.id, name, result: result.output } };
                             toolResults.push({ toolUseId: tc.id, content: result.output, isError: !result.success });
                         } catch (err) {
@@ -393,9 +387,18 @@ export class LoopExecutor implements ILoop {
                             toolResults.push({ toolUseId: tc.id, content: msg, isError: true });
                         }
                     }
+
+                    // Append tool results to payload so next exchange sees them
+                    for (const r of toolResults) {
+                        currentPayload.push({
+                            role: 'tool' as const,
+                            content: r.content,
+                            tool_call_id: r.toolUseId,
+                        } as import('@itookit/common').ChatMessage);
+                    }
                 }
 
-                // ── 6. After-turn middleware (back-pressure) ──
+                // ── After-turn middleware ──
                 const turnResult: TurnResult = {
                     assistantBlocks: assistantBlocks.map(b => ({
                         type: b.type,
@@ -414,7 +417,15 @@ export class LoopExecutor implements ILoop {
                         break;
                     }
                     if (afterDirective.action === 'inject') {
-                        messages.push({ role: 'user', content: afterDirective.text });
+                        // Auto-continue: inject prompt is persisted in payload so fold() and resume see it
+                        const injectMsg = { role: 'user' as const, content: afterDirective.text };
+                        currentPayload.push(injectMsg);
+                        yield {
+                            type: 'turn:end',
+                            turnId: turnCtx.turnId,
+                            sessionId: ctx.sessionId,
+                            turn: exchangeNumber,
+                        };
                         continue;
                     }
                     if (afterDirective.action === 'pause') {
@@ -426,66 +437,58 @@ export class LoopExecutor implements ILoop {
                         if (signal?.type === 'respond') {
                             const resp = signal.response;
                             if (typeof resp === 'string') {
-                                messages.push({ role: 'user', content: resp });
+                                const respondMsg = { role: 'user' as const, content: resp };
+                                currentPayload.push(respondMsg);
                             }
                             continue;
                         }
                     }
                 }
 
-                // ── 7. Build the turn and checkpoint ──
-                const turnId = `turn_${ctx.sessionId}_${turnNumber}`;
-                const turn: Turn = {
-                    id: turnId,
-                    parents: turns.length > 0 ? [turns[turns.length - 1].id] : [],
-                    payload: [
-                        ...messages,
-                        {
-                            role: 'assistant',
-                            content: responseText,
-                            tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-                        },
-                    ],
-                    meta: {
-                        createdAt: Date.now(),
-                        origin: 'loop',
-                        usage,
-                    },
-                    result: turnResult,
-                };
-
-                turns.push(turn);
-
-                // Append to log
-                await ctx.log.append(ctx.ref, turn);
-
                 yield {
                     type: 'turn:end',
-                    turnId,
+                    turnId: turnCtx.turnId,
                     sessionId: ctx.sessionId,
-                    turn: turnNumber,
+                    turn: exchangeNumber,
                 };
 
-                // If no tool calls, we're done
-                if (toolCalls.length === 0) {
-                    break;
-                }
-
-                // Otherwise continue the loop with tool results fed back
-                // The next fold() will include the tool results via log
+                // No tool calls and no continue directive — this Turn is complete
+                if (toolCalls.length === 0) break;
             }
         } finally {
-            // Always emit finished
             let inTokens = 0;
             let outTokens = 0;
-            for (const t of turns) {
-                inTokens += (t.meta.usage as any)?.inputTokens ?? 0;
-                outTokens += (t.meta.usage as any)?.outputTokens ?? 0;
-            }
+            // completedTurns is empty for a single-turn run; totalUsage covers this run
+            inTokens += (totalUsage.inputTokens as number | undefined) ?? 0;
+            outTokens += (totalUsage.outputTokens as number | undefined) ?? 0;
             yield { type: 'finished', usage: { inputTokens: inTokens, outputTokens: outTokens } };
         }
 
-        return turns;
+        // Pack all exchanges into a single Turn.
+        // task-runner will prepend the user message on persist.
+        // payload structure: [assistant, tool_results?, user(inject)?, assistant, ...]
+        // fold() traverses the parents chain and concatenates payloads,
+        // so the LLM sees: [history..., user, assistant, tool, assistant, ...]
+        const singleTurn: Turn = {
+            id: ctx.preallocatedTurnId ?? `turn_${ctx.sessionId}_${exchangeNumber}`,
+            parents: [],
+            payload: currentPayload,
+            meta: {
+                createdAt: Date.now(),
+                origin: 'loop',
+                usage: totalUsage,
+                historyPolicy: 'include',
+            },
+            result: {
+                assistantBlocks: [],
+                toolResults: [],
+                usage: totalUsage,
+                finishReason: undefined,
+            },
+        };
+
+        completedTurns.push(singleTurn);
+        return completedTurns;
     }
 }
 

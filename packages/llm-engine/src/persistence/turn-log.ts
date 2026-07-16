@@ -1,8 +1,8 @@
 // @file: llm-engine/src/persistence/turn-log.ts
 // TurnLog — native Turn DAG ILog implementation.
 //
-// Each Turn is stored as turns/<turnId>.json inside the session's asset
-// directory. The TurnManifest (stored in manifest.json alongside the legacy
+// Each Turn is stored as turn/<turnId>.json inside the session's asset
+// directory (flat, no sub-directory). The TurnManifest (stored in manifest.json alongside the legacy
 // ChatManifest fields) holds the DAG index and children reverse-index for
 // O(1) sibling enumeration.
 //
@@ -114,7 +114,7 @@ class TurnRefStore implements RefStore {
  * Native Turn DAG ILog implementation.
  *
  * Storage layout (under the .chat file's asset directory):
- *   turns/<turnId>.json   — individual Turn files
+ *   turn-<turnId>.json    — individual Turn files (flat, no sub-directory)
  *   manifest.json         — TurnManifest DAG index (merged with legacy fields)
  *   draft.json            — in-flight Turn checkpoint (via VFSDraftArea)
  */
@@ -122,9 +122,6 @@ export class TurnLog implements ILog {
     private readonly _refs: TurnRefStore;
     private readonly _draft: VFSDraftArea;
     private readonly _cache = new FoldCache();
-
-    /** Cached asset directory path — set on first access. */
-    private _assetDirPath: string | null = null;
 
     /** Optional listener for TurnLogEvent — drives SessionState.apply(). */
     private onEvent?: (event: TurnLogEvent) => void;
@@ -209,11 +206,12 @@ export class TurnLog implements ILog {
             const messages: ChatMessage[] = [];
             for (const t of turns) {
                 if (!t || t._deleted) continue; // §3.4: skip soft-deleted
+                if (t.meta?.historyPolicy === 'exclude') continue; // skip excluded turns
                 for (const msg of t.payload) {
-                    if (msg.role === 'system' || msg.role === 'user' || msg.role === 'assistant') {
+                    if (msg.role === 'system' || msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool') {
                         const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-                        if (msg.role === 'assistant' && !content.trim()) continue; // drop empty assistant
-                        messages.push({ role: msg.role as 'system' | 'user' | 'assistant', content });
+                        if (msg.role === 'assistant' && !content.trim() && !(msg as any).tool_calls) continue; // drop empty assistant
+                        messages.push({ ...msg, role: msg.role as 'system' | 'user' | 'assistant' | 'tool', content });
                     }
                 }
             }
@@ -322,43 +320,20 @@ export class TurnLog implements ILog {
 
     // ── Internal helpers ──────────────────────────────────────────────────
 
-    private async getAssetDirPath(): Promise<string> {
-        if (this._assetDirPath) return this._assetDirPath;
-        const dirId = await this.engine.getAssetDirectoryId(this.nodeId);
-        if (!dirId) throw new Error(`No asset directory for session node: ${this.nodeId}`);
-        this._assetDirPath = dirId;
-        return dirId;
-    }
-
     async readTurn(turnId: TurnId): Promise<PersistedTurn | null> {
         try {
-            const assetDir = await this.getAssetDirPath();
-            const turnPath = `${assetDir}/turns/${turnId}.json`;
-            const content = await this.engine.readContent(turnPath);
-            if (typeof content === 'string') return JSON.parse(content) as PersistedTurn;
+            const file = this.engine.openFile(this.nodeId);
+            const text = await file.asset(`turn-${turnId}.json`).readText();
+            if (text) return JSON.parse(text) as PersistedTurn;
         } catch { /* turn file missing or unreadable */ }
         return null;
     }
 
     private async writeTurn(turnId: TurnId, turn: PersistedTurn): Promise<void> {
-        const assetDir = await this.getAssetDirPath();
-        const turnsDir = `${assetDir}/turns`;
-        const turnPath = `${turnsDir}/${turnId}.json`;
-
-        // Ensure turns/ sub-directory exists
-        try {
-            await this.engine.getChildren(turnsDir);
-        } catch {
-            await this.engine.createDirectory('turns', assetDir);
-        }
-
-        try {
-            // Try to update existing file
-            await this.engine.driver.writeContent(turnPath, JSON.stringify(turn, null, 2));
-        } catch {
-            // File doesn't exist yet — create it
-            await this.engine.createAsset(assetDir, `turns/${turnId}.json`, JSON.stringify(turn, null, 2));
-        }
+        // Always go through createAsset so the VFS meta layer (index + events)
+        // is kept in sync. driver.writeContent bypasses the meta layer and
+        // causes data loss on reload.
+        await this.engine.createAsset(this.nodeId, `turn-${turnId}.json`, JSON.stringify(turn, null, 2));
     }
 
     // ── Manifest access (package-internal, used by TurnRefStore) ─────────
@@ -427,6 +402,7 @@ export function turnToProjection(turn: PersistedTurn, turnId: TurnId): TurnProje
         } : undefined,
         assistantMessage: assistantMsg ? {
             content: typeof assistantMsg.content === 'string' ? assistantMsg.content : JSON.stringify(assistantMsg.content),
+            thinking: (assistantMsg as any).thinking as string | undefined,
             status: 'success',
             persistedNodeId: turnId,
         } : undefined,

@@ -17,6 +17,7 @@ import { EngineError, EngineErrorCode } from '../core/errors';
 import { SessionState } from './session-state';
 import { SessionRegistry } from './session-registry';
 import { TaskRunner } from './task-runner';
+import { TurnLog } from '../persistence/turn-log';
 import { getPromptHistory } from '../services/prompt-history-service';
 import { log } from '../utils/logger';
 
@@ -85,18 +86,14 @@ export class TurnOperations {
 
         let userMessage: SessionGroup | undefined;
 
-        if (state.isTurnFormat) {
-            const userTurn = state.findUserTurnForAssistant(assistantId);
-            if (!userTurn?.userMessage) {
-                throw new EngineError(
-                    EngineErrorCode.SESSION_INVALID,
-                    'No user message found before the specified assistant message'
-                );
-            }
-            userMessage = state.findSessionById(userTurn.userMessage.persistedNodeId);
-        } else {
-            userMessage = state.findUserMessageBefore(assistantId);
+        const userTurn = state.findUserTurnForAssistant(assistantId);
+        if (!userTurn?.userMessage) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'No user message found before the specified assistant message'
+            );
         }
+        userMessage = state.findSessionById(userTurn.userMessage.persistedNodeId);
 
         if (!userMessage) {
             throw new EngineError(
@@ -135,7 +132,7 @@ export class TurnOperations {
 
         const agentId = this.resolveAgentId(
             options?.agentId,
-            state.isTurnFormat ? undefined : state.getOriginalAgentId(userMessageId)
+            undefined
         );
 
         return this.executeRegenerate(userMessage, agentId, {
@@ -159,7 +156,6 @@ export class TurnOperations {
         }
     ): Promise<RegenerateResult> {
         const { sessionId, nodeId, state, runtime } = this.registry.ensureBound();
-        const engine = this.registry.engine;
         const eventBus = this.registry.eventBus;
 
         if (!userMessage.persistedNodeId) {
@@ -169,50 +165,54 @@ export class TurnOperations {
             );
         }
 
-        // Create branch from the user message
-        const newBranchNodeId = await engine.createBranch(
-            nodeId, sessionId, userMessage.persistedNodeId,
-            { createdFrom: 'regenerate', copyContent: true }
-        );
+        const userTurnId = userMessage.persistedNodeId;
 
-        const manifest = await engine.getManifest(nodeId);
-        const branchName = manifest.current_branch;
+        // TurnLog branch: fork a new ref pointing to the parent of the user
+        // turn (i.e. above the user+assistant pair). This way fold() walking
+        // the new branch skips the old assistant entirely.
+        const turnLog = new TurnLog(this.registry.engine, nodeId, sessionId);
+        const userTurn = await turnLog.readTurn(userTurnId);
+        const forkPointId = userTurn?.parents?.[0] ?? userTurnId;
+
+        const manifest = await turnLog.loadManifest();
+        const branchNum = Object.keys(manifest.branches).length;
+        const branchName = `branch-${branchNum}`;
+        await turnLog.refs().create(branchName, forkPointId);
+
+        // Switch to the new branch
+        manifest.currentBranch = branchName;
+        manifest.currentHead = forkPointId;
+        await turnLog.saveManifest(manifest);
 
         await this.registry.reloadSessionData(nodeId, sessionId, state);
 
-        const reloadedUser = state.findSessionById(newBranchNodeId);
-        if (!reloadedUser) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                `Branch user message not found: ${newBranchNodeId}`
-            );
-        }
-
-        const branchInfo = await this.getSiblingInfo(sessionId, newBranchNodeId);
+        const branchInfo = await this.getSiblingInfo(sessionId, forkPointId);
 
         // 6. 发送事件
         eventBus.emitSession(sessionId, {
             type: 'regenerate_started',
             payload: {
                 sourceId: context.sourceId,
-                newUserNodeId: newBranchNodeId,
+                newUserNodeId: userTurnId,
                 branchName,
                 agentId,
                 trigger: context.trigger,
             },
         });
 
-        // 7. 提交任务
+        // 7. 提交任务 - fork from the parent turn (above the old user+assistant pair).
+        //    The new turn will be a sibling of the original user turn, containing
+        //    the same user message + new assistant response.
         await this.taskRunner.submit(
             {
                 sessionId,
                 nodeId,
-                text: reloadedUser.content || '',
-                files: reloadedUser.files || [],
+                text: userMessage.content || '',
+                files: userMessage.files || [],
                 agentId,
                 overrides: context.overrides,
                 skipUserMessage: true,
-                parentUserNodeId: newBranchNodeId,
+                parentUserNodeId: forkPointId,
                 branchInfo,
                 regenerateContext: {
                     sourceId: context.sourceId,
@@ -223,7 +223,7 @@ export class TurnOperations {
             runtime
         );
 
-        return { branchName, userNodeId: newBranchNodeId, agentId };
+        return { branchName, userNodeId: userTurnId, agentId };
     }
 
     // ================================================================
@@ -261,46 +261,50 @@ export class TurnOperations {
         idsToDelete: string[],
         options?: DeleteOptions
     ): Promise<DeleteResult> {
-        const engine = this.registry.engine;
         const eventBus = this.registry.eventBus;
         const result: DeleteResult = { deletedIds: [], deletedBranches: [] };
         if (idsToDelete.length === 0) return result;
 
-        const persistedIds = idsToDelete
-            .map(id => state.findSessionById(id)?.persistedNodeId)
-            .filter((id): id is string => !!id);
-
-        if (persistedIds.length > 0) {
-            try {
-                if (persistedIds.length === 1) {
-                    await engine.deleteMessage(nodeId, sessionId, persistedIds[0]);
-                } else {
-                    await engine.deleteMessages(nodeId, sessionId, persistedIds);
+        // TurnLog: soft-delete turns. Resolve each message ID to its turn ID
+        // and call TurnLog.deleteTurn() to set _deleted = true.
+        const turnLog = new TurnLog(this.registry.engine, nodeId, sessionId);
+        for (const id of idsToDelete) {
+            const session = state.findSessionById(id);
+            const turnId = session?.persistedNodeId;
+            if (turnId) {
+                try {
+                    await turnLog.deleteTurn(turnId);
+                } catch (e) {
+                    log.warn('Failed to delete turn', { sessionId, turnId, error: e });
                 }
-            } catch (e) {
-                log.warn('Failed to delete persisted messages', { sessionId, error: e });
             }
         }
 
+        // Apply deletion to in-memory state (cascade handled by SessionState.collectCascadeTurnIds)
+        const allDeletedIds = new Set<string>();
+        for (const id of idsToDelete) {
+            const session = state.findSessionById(id);
+            const turnId = session?.persistedNodeId;
+            if (turnId) {
+                const events = state.apply({ type: 'turn:deleted', turnId });
+                for (const e of events) {
+                    if (e.type === 'messages:deleted') {
+                        (e.payload?.deletedIds as string[])?.forEach(d => allDeletedIds.add(d));
+                    }
+                    eventBus.emitSession(sessionId, e);
+                }
+            }
+        }
         state.removeMessages(idsToDelete);
-        result.deletedIds = [...idsToDelete];
+        result.deletedIds = [...idsToDelete, ...allDeletedIds];
 
         const shouldCleanup = options?.cleanupOrphanedBranches ?? true;
         if (shouldCleanup) {
-            const orphaned = await this.findOrphanedBranches(nodeId, sessionId);
+            const orphaned = await this.findOrphanedBranches(turnLog);
             for (const branchName of orphaned) {
                 try {
-                    const deletedBranchIds = await engine.deleteBranch(
-                        nodeId, sessionId, branchName, { cascade: true }
-                    );
+                    await turnLog.refs().delete(branchName);
                     result.deletedBranches.push(branchName);
-                    result.deletedIds.push(...deletedBranchIds);
-
-                    eventBus.emitSession(sessionId, {
-                        type: 'messages:deleted',
-                        payload: { deletedIds: deletedBranchIds },
-                    });
-
                     log.info('Orphaned branch cleaned up', { branchName });
                 } catch (e) {
                     log.warn('Failed to cleanup orphaned branch', { branchName, error: e });
@@ -316,22 +320,21 @@ export class TurnOperations {
         return result;
     }
 
-    private async findOrphanedBranches(nodeId: string, sessionId: string): Promise<string[]> {
-        const engine = this.registry.engine;
+    private async findOrphanedBranches(turnLog: TurnLog): Promise<string[]> {
         const orphaned: string[] = [];
         try {
-            const manifest = await engine.getManifest(nodeId);
-            const currentBranch = manifest.current_branch;
-            for (const [branchName, headNodeId] of Object.entries(manifest.branches)) {
-                if (branchName === currentBranch) continue;
+            const manifest = await turnLog.loadManifest();
+            const currentBranch = manifest.currentBranch;
+            for (const branchName of Object.keys(manifest.branches)) {
+                if (branchName === currentBranch || branchName === 'main') continue;
                 try {
-                    const context = await engine.getSessionContextFromHead(nodeId, sessionId, headNodeId);
-                    if (!context.some(item => item.node.role !== 'system')) {
+                    const messages = await turnLog.fold(branchName);
+                    if (messages.length === 0) {
                         orphaned.push(branchName);
                     }
                 } catch { orphaned.push(branchName); }
             }
-        } catch (e) { log.warn('Failed to check orphaned branches', { nodeId, error: e }); }
+        } catch (e) { log.warn('Failed to check orphaned branches', { error: e }); }
         return orphaned;
     }
 
@@ -340,11 +343,7 @@ export class TurnOperations {
         if (!includeResponses) return ids;
         const session = state.findSessionById(messageId);
         if (!session || session.role !== 'user') return ids;
-        if (state.isTurnFormat) {
-            ids.push(...state.getChildTurnIds(messageId));
-        } else {
-            ids.push(...state.collectAssistantIdsAfter(messageId));
-        }
+        ids.push(...state.getChildTurnIds(messageId));
         return ids;
     }
 
@@ -369,7 +368,6 @@ export class TurnOperations {
     ): Promise<void> {
         const { sessionId, state, runtime, nodeId } = this.registry.ensureBound();
         this.registry.ensureNotGenerating('commit edit');
-        const engine = this.registry.engine;
         const eventBus = this.registry.eventBus;
 
         const session = state.findSessionById(messageId);
@@ -385,14 +383,26 @@ export class TurnOperations {
         }
 
         const resolvedAgentId = autoRerun
-            ? this.resolveAgentId(undefined, state.isTurnFormat ? undefined : state.getOriginalAgentId(messageId))
+            ? this.resolveAgentId(undefined, undefined)
             : 'default';
 
+        // Update in-memory state (draft)
+        state.updateMessageContent(messageId, newContent);
+
+        // For TurnLog, turns are immutable — editing forks a new branch.
+        const userTurnId = session.persistedNodeId;
         let newPersistedNodeId: string | undefined;
-        if (session.persistedNodeId) {
-            newPersistedNodeId = await engine.editMessage(
-                nodeId, sessionId, session.persistedNodeId, newContent
-            );
+
+        if (autoRerun && userTurnId) {
+            const turnLog = new TurnLog(this.registry.engine, nodeId, sessionId);
+            const manifest = await turnLog.loadManifest();
+            const branchNum = Object.keys(manifest.branches).length;
+            const branchName = `branch-${branchNum}`;
+            await turnLog.refs().create(branchName, userTurnId);
+            manifest.currentBranch = branchName;
+            manifest.currentHead = userTurnId;
+            await turnLog.saveManifest(manifest);
+            newPersistedNodeId = userTurnId;
         }
 
         await this.registry.reloadSessionData(nodeId, sessionId, state);
@@ -416,8 +426,9 @@ export class TurnOperations {
             }
 
             const branchInfo = await this.getSiblingInfo(sessionId, newPersistedNodeId);
-            const manifest = await engine.getManifest(nodeId);
-            const branchName = manifest.current_branch;
+            const turnLog2 = new TurnLog(this.registry.engine, nodeId, sessionId);
+            const m2 = await turnLog2.loadManifest();
+            const branchName = m2.currentBranch;
 
             eventBus.emitSession(sessionId, {
                 type: 'regenerate_started',

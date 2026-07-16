@@ -106,7 +106,6 @@ export { AttachmentProcessor } from './session/attachment-processor';
 // ============================================
 
 export { ChatEngine } from './persistence/chat-engine';
-export { ChatEngineLog } from './persistence/chat-engine-log';
 export { TurnLog, turnToProjection } from './persistence/turn-log';
 export { VFSDraftArea } from './persistence/draft-area';
 export { migrateToTurnFormat } from './persistence/migration';

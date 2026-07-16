@@ -32,11 +32,18 @@ export interface Turn {
 
 export interface TurnMeta {
     createdAt: number;
-    origin: 'loop' | 'merge' | 'rebase' | 'edit';
+    origin: 'loop' | 'merge' | 'rebase' | 'edit' | 'user';
     usage?: TokenUsage;
     stale?: boolean;
     rebasedFrom?: TurnId;
     assembly?: AssemblyStrategy;
+    /**
+     * Controls whether fold() includes this turn in LLM history.
+     * - 'include' (default): always include
+     * - 'exclude': skip entirely (e.g. system-only, soft-hidden turns)
+     * - 'summary': include a collapsed summary instead of full payload
+     */
+    historyPolicy?: 'include' | 'exclude' | 'summary';
 }
 
 // ─── Log (minimal interface — full spec in llm-2/01-log.md) ──────────

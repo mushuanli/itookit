@@ -1,11 +1,7 @@
 // @file: llm-engine/session/session-state.ts
 //
-// In-memory session projection cache.
-//
-// Dual-format: supports both legacy ChatNode sessions (SessionGroup[]) and
-// Turn DAG sessions (TurnProjection[]). The _isTurnFormat flag switches between
-// the two. Turn-format state is updated exclusively via apply(TurnLogEvent);
-// legacy-format state uses addUserMessage/createAssistantMessage.
+// In-memory session projection cache (Turn DAG format).
+// Updated via apply(TurnLogEvent); consumed by UI via getSessions().
 
 import type { TurnId } from '@itookit/common';
 import type { TurnProjection } from '../persistence/turn-types';
@@ -15,13 +11,10 @@ import {
     SessionGroup,
     ExecutionNode,
     ChatAttachment,
-    BranchInfo,
     SessionOrigin,
     HistoryPolicy,
 } from '../core/types';
 import type { SessionEvent } from '../core/types';
-import { ChatNode } from '../persistence/types';
-import { Converters } from '../utils/converters';
 
 export interface HistoryMessage {
     role: 'user' | 'assistant';
@@ -40,7 +33,7 @@ export class SessionState {
     private childrenByParent = new Map<TurnId, TurnId[]>();
 
     // ── Format flag ───────────────────────────────────────────────────
-    private _isTurnFormat = false;
+    private _isTurnFormat = true;
 
     constructor(
         private readonly _nodeId: string,
@@ -53,11 +46,6 @@ export class SessionState {
 
     get nodeId(): string { return this._nodeId; }
     get sessionId(): string { return this._sessionId; }
-    get isTurnFormat(): boolean { return this._isTurnFormat; }
-
-    setTurnFormat(enabled: boolean): void {
-        this._isTurnFormat = enabled;
-    }
 
     // ── Unified getSessions (adapter for UI) ─────────────────────────
 
@@ -85,7 +73,6 @@ export class SessionState {
      * Only effective when _isTurnFormat is true.
      */
     apply(event: TurnLogEvent): SessionEvent[] {
-        if (!this._isTurnFormat) return [];
 
         switch (event.type) {
             case 'turn:appended': return this.applyAppended(event);
@@ -115,13 +102,26 @@ export class SessionState {
             if (!children.includes(turnId)) children.push(turnId);
         }
 
-        const sessionGroup = this.turnProjectionToSessionGroup(projection);
+        const sessionGroups = this.turnProjectionToSessionGroups(projection);
         const isExecutionRoot = projection.kind === 'chat' && !!projection.assistantMessage;
         const parentId = projection.parents.length > 0 ? projection.parents[projection.parents.length - 1] : undefined;
-        return [{
-            type: 'message:appended',
-            payload: { sessionGroup, isExecutionRoot, parentId },
-        }];
+
+        // Emit one message:appended per SessionGroup produced by this turn.
+        // A chat turn with both user and assistant emits two events so both bubbles appear.
+        const events: SessionEvent[] = [];
+        let prevId: string | undefined = parentId;
+        for (const sessionGroup of sessionGroups) {
+            events.push({
+                type: 'message:appended',
+                payload: {
+                    sessionGroup,
+                    isExecutionRoot: isExecutionRoot && sessionGroup.role === 'assistant',
+                    parentId: prevId,
+                },
+            });
+            prevId = sessionGroup.id;
+        }
+        return events;
     }
 
     private applyUpdated(event: TurnLogEvent & { type: 'turn:updated' }): SessionEvent[] {
@@ -230,65 +230,8 @@ export class SessionState {
     }
 
     // ================================================================
-    // Legacy format: position-based lookups (keep for old format compat)
-    // ================================================================
-
-    /**
-     * @deprecated Use findUserTurnForAssistant for turn format.
-     * Find the user message before a given assistant message (position-based).
-     */
-    findUserMessageBefore(assistantId: string): SessionGroup | undefined {
-        const index = this.sessions.findIndex(s => s.id === assistantId);
-        if (index === -1) return undefined;
-        for (let i = index - 1; i >= 0; i--) {
-            if (this.sessions[i].role === 'user') return this.sessions[i];
-        }
-        return undefined;
-    }
-
-    /**
-     * @deprecated Use getChildTurnIds for turn format.
-     * Find assistant messages after a given user message (position-based).
-     */
-    findAssistantMessagesAfter(userMessageId: string): SessionGroup[] {
-        const index = this.sessions.findIndex(s => s.id === userMessageId);
-        if (index === -1) return [];
-        const assistants: SessionGroup[] = [];
-        for (let i = index + 1; i < this.sessions.length; i++) {
-            if (this.sessions[i].role === 'user') break;
-            if (this.sessions[i].role === 'assistant') assistants.push(this.sessions[i]);
-        }
-        return assistants;
-    }
-
-    /**
-     * @deprecated Use TurnProjection for turn format.
-     */
-    getOriginalAgentId(userMessageId: string): string | null {
-        const assistants = this.findAssistantMessagesAfter(userMessageId);
-        if (assistants.length === 0) return null;
-        return assistants[0].executionRoot?.executorId || null;
-    }
-
-    /**
-     * @deprecated Use getChildTurnIds for turn format.
-     */
-    collectAssistantIdsAfter(userMessageId: string): string[] {
-        return this.findAssistantMessagesAfter(userMessageId).map(s => s.id);
-    }
-
-    // ================================================================
     // 从持久化加载
     // ================================================================
-
-    /** Load a ChatNode into the legacy sessions array. */
-    loadFromChatNode(node: ChatNode): void {
-        const converted = Converters.chatNodeToSessionGroup(node);
-        if (!converted) return;
-        converted.id = node.id;
-        converted.persistedNodeId = node.id;
-        this.sessions.push(converted);
-    }
 
     /** Load a TurnProjection into the turn-format arrays. */
     loadFromProjection(projection: TurnProjection): void {
@@ -328,49 +271,8 @@ export class SessionState {
         return session;
     }
 
-    createAssistantMessage(
-        config: any,
-        persistedNodeId: string,
-        branchInfo?: BranchInfo,
-        origin?: SessionOrigin,
-        historyPolicy?: HistoryPolicy,
-    ): SessionGroup {
-        const rootNode: ExecutionNode = {
-            id: persistedNodeId,
-            name: config.name || config.id,
-            executorType: config.type || 'agent',
-            executorId: config.id,
-            status: 'running',
-            startTime: Date.now(),
-            parentId: undefined,
-            data: {
-                output: '',
-                thought: '',
-                metaInfo: {
-                    agentId: config.id,
-                    agentIcon: config.icon,
-                },
-            },
-            children: [],
-        };
-        const session: SessionGroup = {
-            id: persistedNodeId,
-            persistedNodeId,
-            role: 'assistant',
-            content: '',
-            timestamp: Date.now(),
-            executionRoot: rootNode,
-            siblingIndex: branchInfo?.siblingIndex,
-            siblingCount: branchInfo?.siblingCount,
-            origin: origin ?? 'user',
-            historyPolicy: historyPolicy ?? 'include',
-        };
-        this.sessions.push(session);
-        return session;
-    }
-
     // ================================================================
-    // Legacy format: 更新
+    // 更新
     // ================================================================
 
     updateMessageContent(messageId: string, newContent: string): void {
@@ -493,44 +395,60 @@ export class SessionState {
     // TurnProjection → SessionGroup adapter
     // ================================================================
 
-    private turnProjectionToSessionGroup(p: TurnProjection): SessionGroup {
-        const base: SessionGroup = {
-            id: p.assistantMessage?.persistedNodeId ?? p.userMessage?.persistedNodeId ?? p.turnId,
-            persistedNodeId: p.assistantMessage?.persistedNodeId ?? p.userMessage?.persistedNodeId ?? p.turnId,
-            role: p.assistantMessage ? 'assistant' : (p.userMessage ? 'user' : 'assistant'),
-            timestamp: p.meta?.createdAt ?? Date.now(),
-            origin: (p.meta?.origin as SessionOrigin) ?? 'user',
-            historyPolicy: 'include',
-        };
+    /**
+     * Converts one TurnProjection into 1 or 2 SessionGroups.
+     * A chat turn with both userMessage and assistantMessage produces:
+     *   [SessionGroup(role:'user'), SessionGroup(role:'assistant')]
+     * so that both bubbles appear in the UI on reload.
+     */
+    private turnProjectionToSessionGroups(p: TurnProjection): SessionGroup[] {
+        const groups: SessionGroup[] = [];
 
         if (p.userMessage) {
-            base.content = p.userMessage.content;
-            base.files = p.userMessage.files;
+            groups.push({
+                id: `${p.turnId}-user`,
+                persistedNodeId: p.userMessage.persistedNodeId,
+                role: 'user',
+                content: p.userMessage.content,
+                files: p.userMessage.files,
+                timestamp: p.meta?.createdAt ?? Date.now(),
+                origin: (p.meta?.origin as SessionOrigin) ?? 'user',
+                historyPolicy: (p.meta?.historyPolicy === 'exclude' ? 'exclude' : 'include') as HistoryPolicy,
+            });
         }
 
         if (p.assistantMessage) {
-            base.content = p.assistantMessage.content;
-            base.executionRoot = {
+            groups.push({
                 id: p.assistantMessage.persistedNodeId,
-                name: 'Assistant',
-                executorType: 'agent',
-                executorId: '',
-                status: p.assistantMessage.status,
-                startTime: p.meta?.createdAt ?? Date.now(),
-                parentId: undefined,
-                data: {
-                    output: p.assistantMessage.content,
-                    thought: p.assistantMessage.thinking ?? '',
+                persistedNodeId: p.assistantMessage.persistedNodeId,
+                role: 'assistant',
+                content: p.assistantMessage.content,
+                timestamp: p.meta?.createdAt ?? Date.now(),
+                origin: (p.meta?.origin as SessionOrigin) ?? 'user',
+                historyPolicy: (p.meta?.historyPolicy === 'exclude' ? 'exclude' : 'include') as HistoryPolicy,
+                executionRoot: {
+                    id: p.assistantMessage.persistedNodeId,
+                    name: 'Assistant',
+                    executorType: 'agent',
+                    executorId: '',
+                    status: p.assistantMessage.status,
+                    startTime: p.meta?.createdAt ?? Date.now(),
+                    parentId: undefined,
+                    data: {
+                        output: p.assistantMessage.content,
+                        thought: p.assistantMessage.thinking ?? '',
+                    },
+                    children: [],
                 },
-                children: [],
-            };
+            });
         }
 
-        return base;
+        // System / merge turns with no user or assistant message — return empty (not shown in UI)
+        return groups;
     }
 
     private turnProjectionsToSessionGroups(): SessionGroup[] {
-        return this.turns.map(t => this.turnProjectionToSessionGroup(t));
+        return this.turns.flatMap(t => this.turnProjectionToSessionGroups(t));
     }
 
     // ================================================================

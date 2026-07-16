@@ -29,7 +29,6 @@ import { log } from '../utils/logger';
 import { ExecutorRegistry, getExecutorRegistry } from '../core/executor-registry';
 import { drive, resumeDrive, LoopAbortedError } from '../core/loop-driver';
 import { SessionActor } from '../core/session-actor';
-import { ChatEngineLog } from '../persistence/chat-engine-log';
 import { TurnLog } from '../persistence/turn-log';
 import type { ILog } from '@itookit/common';
 import type { LoopContext } from '@itookit/common';
@@ -264,7 +263,6 @@ export class TaskRunner {
     private async setupTaskExecution(
         task: ExecutionTask,
         state: SessionState,
-        isTurnFormat: boolean,
     ): Promise<{
         userNodeId: string | undefined;
         executorConfig: ExecutorConfig;
@@ -286,7 +284,7 @@ export class TaskRunner {
         // 2. Create user message
         let userNodeId = input.parentUserNodeId;
         if (!input.skipUserMessage) {
-            userNodeId = await this.createUserMessage(task, state, contextFiles, isTurnFormat);
+            userNodeId = await this.createUserMessage(task, state, contextFiles);
         }
 
         // 3. Resolve executor config
@@ -302,37 +300,19 @@ export class TaskRunner {
             }
         }
 
-        // 4. Create assistant node
-        // For TurnLog sessions, pre-allocate the turn ID so that:
-        //   (a) rootNode.id matches the persisted turn.id, and
-        //   (b) we skip the legacy state.sessions write (TurnLog drives UI via turn:appended).
-        const preallocatedTurnId = isTurnFormat ? ulid() : undefined;
+        // 4. Create assistant node with pre-allocated turn ID
+        //    rootNode.id == turn.id ensures streaming message:updated and
+        //    TurnLog.applyAppended message:appended share the same messageId.
+        const preallocatedTurnId = ulid();
         const { assistantNodeId, rootNode } = await this.createAssistantNode(
-            sessionId, task.nodeId, state, executorConfig, isTurnFormat, input.branchInfo, userNodeId,
+            sessionId, executorConfig, input.branchInfo, userNodeId,
             input.origin, input.historyPolicy, preallocatedTurnId,
         );
 
-        // 5. Content accumulator + throttled persistence
+        // 5. Content accumulator — crash safety handled by DraftArea.checkpoint()
         const accumulator = { output: '', thinking: '' };
-        let lastPersistTime = 0;
-        let pendingPromise: Promise<void> = Promise.resolve();
-        const persist = isTurnFormat
-            ? () => { /* no-op: crash safety handled by DraftArea.checkpoint() in loop-driver */ }
-            : () => {
-                if (!accumulator.output && !accumulator.thinking) return;
-                const now = Date.now();
-                if (now - lastPersistTime < ENGINE_DEFAULTS.PERSIST_THROTTLE) return;
-                lastPersistTime = now;
-                const outputSnapshot = accumulator.output;
-                const thinkingSnapshot = accumulator.thinking;
-                pendingPromise = pendingPromise
-                    .then(() => this.engine.updateNode(sessionId, assistantNodeId, {
-                        content: outputSnapshot,
-                        meta: { thinking: thinkingSnapshot, status: 'running' },
-                    }))
-                    .catch(() => { /* chain stays alive */ });
-            };
-        const finalize = () => pendingPromise;
+        const persist = () => { /* no-op: crash safety handled by DraftArea.checkpoint() in loop-driver */ };
+        const finalize = () => Promise.resolve();
 
         return { userNodeId, executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles, preallocatedTurnId };
     }
@@ -361,30 +341,27 @@ export class TaskRunner {
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         let errorAlreadyEmitted = false;
 
-        // ── ILog via format-routed adapter (before setupTaskExecution for isTurnFormat) ─
+        // ── ILog via TurnLog (always turn-format) ─
         let logAdapter = this.logCache.get(sessionId);
         if (!logAdapter) {
             logAdapter = await this.createLog(sessionId, task.nodeId);
             this.logCache.set(sessionId, logAdapter);
             // Wire TurnLog events → SessionState projection
-            if (logAdapter instanceof TurnLog) {
-                (logAdapter as TurnLog).setEventListener((event) => {
-                    const events = state.apply(event);
-                    for (const e of events) {
-                        // Skip message:appended — createAssistantNode already emits it
-                        // for the streaming placeholder. Re-emitting here would duplicate
-                        // the assistant bubble in the UI.
-                        if (e.type === 'message:appended') continue;
-                        this.eventBus.emitSession(sessionId, e);
-                    }
-                });
-            }
+            (logAdapter as TurnLog).setEventListener((event) => {
+                const events = state.apply(event);
+                for (const e of events) {
+                    // Skip message:appended — createAssistantNode already emits it
+                    // for the streaming placeholder. Re-emitting here would duplicate
+                    // the assistant bubble in the UI.
+                    if (e.type === 'message:appended') continue;
+                    this.eventBus.emitSession(sessionId, e);
+                }
+            });
         }
-        const isTurnFormat = logAdapter instanceof TurnLog;
 
         try {
             const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles, preallocatedTurnId } =
-                await this.setupTaskExecution(task, state, isTurnFormat);
+                await this.setupTaskExecution(task, state);
 
             // ── Get executor ──────────────────────────────────────────────
             const executor = this.executorRegistry.get(mode);
@@ -457,21 +434,19 @@ export class TaskRunner {
             this.activeActors.set(sessionId, actor);
 
             // ── Build LoopContext ──────────────────────────────────────────
-            // Resolve current branch name from manifest (ref must match actual branch, not hardcoded 'main')
+            // Resolve current branch from TurnLog manifest (camelCase fields).
             let branchRef = 'main';
             try {
-                const manifest = await this.engine.getManifest(task.nodeId);
-                branchRef = manifest.current_branch || 'main';
+                const tm = await (logAdapter as TurnLog).loadManifest();
+                branchRef = tm.currentBranch || 'main';
             } catch {
                 // Fallback: use 'main' if manifest is unavailable
             }
 
-            // For TurnLog sessions, user message is written after the executor finishes
-            // (task-runner post-execution persist). Wrap the log so fold() appends the
-            // pending user message, preventing "messages: at least one message is required".
-            const effectiveLog: ILog = isTurnFormat && !input.skipUserMessage
-                ? buildFoldPrependLog(logAdapter, input.text, contextFiles)
-                : logAdapter;
+            // Wrap the log so fold() always appends the pending user message
+            // for the LLM API call. TurnLog writes userMsg to turn.payload
+            // during persist, so fold() can't see the in-flight message.
+            const effectiveLog: ILog = buildFoldPrependLog(logAdapter, input.text, contextFiles);
 
             const loopCtx: LoopContext = {
                 sessionId,
@@ -556,43 +531,43 @@ export class TaskRunner {
                 isEstimated: !hasRealUsage,
             };
 
-            if (isTurnFormat) {
-                // Single writer: persist completed turns via TurnLog
-                for (const turn of turns) {
-                    if (!input.skipUserMessage) {
-                        const userMsg: ChatMessage = {
-                            role: 'user',
-                            content: input.text,
-                        };
-                        if (contextFiles.length > 0) {
-                            userMsg.attachments = contextFiles.map(f => ({
-                                name: f.name,
-                                type: f.type as import('@itookit/common').AttachmentType,
-                                source: f.path ?? f.name,
-                                size: f.size,
-                            }));
-                        }
-                        turn.payload = [userMsg, ...turn.payload];
-                    }
-                    await logAdapter.append('main', turn);
-                }
-                await logAdapter.draft().flush();
-            } else {
-                // Legacy: persist via engine.updateNode
-                await this.engine.updateNode(sessionId, assistantNodeId, {
-                    content: accumulator.output,
-                    meta: {
-                        thinking: accumulator.thinking,
-                        status: 'success',
-                        endTime: endMs,
-                        durationMs,
-                        inputTokens: totalUsage.inputTokens,
-                        outputTokens: totalUsage.outputTokens,
-                        costUsd,
-                        isEstimated: !hasRealUsage,
-                    },
-                });
+            // Persist completed turns via TurnLog.
+            // Each turn is self-contained: [userMsg, ...assistantDelta].
+            // fold() reconstructs history by walking the parents chain and
+            // concatenating payloads — no full-history duplication.
+            //
+            // Resolve the parent: for regenerate, fork above the old user turn;
+            // for normal flow, chain onto the current branch head.
+            let chainParent = input.parentUserNodeId;
+            if (!chainParent) {
+                try {
+                    const tm = await (logAdapter as TurnLog).loadManifest();
+                    chainParent = tm.currentHead || undefined;
+                } catch { /* use empty parents */ }
             }
+
+            for (const turn of turns) {
+                const userMsg: ChatMessage = {
+                    role: 'user',
+                    content: input.text,
+                };
+                if (contextFiles.length > 0) {
+                    userMsg.attachments = contextFiles.map(f => ({
+                        name: f.name,
+                        type: f.type as import('@itookit/common').AttachmentType,
+                        source: f.path ?? f.name,
+                        size: f.size,
+                    }));
+                }
+                turn.payload = [userMsg, ...turn.payload];
+                if (chainParent) {
+                    turn.parents = [chainParent, ...(turn.parents || [])];
+                }
+                await logAdapter.append(branchRef, turn);
+                // Subsequent turns in this batch chain from this one
+                chainParent = turn.id;
+            }
+            await logAdapter.draft().flush();
 
             state.updateNodeStatus(rootNode.id, 'success');
 
@@ -635,7 +610,7 @@ export class TaskRunner {
             if (error instanceof LoopAbortedError) {
                 this.callbacks.onStatusChange(sessionId, 'aborted');
             } else {
-                await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted, isTurnFormat, logAdapter);
+                await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted, logAdapter);
             }
         } finally {
             this.running.delete(task.id);
@@ -653,22 +628,10 @@ export class TaskRunner {
         task: ExecutionTask,
         state: SessionState,
         contextFiles: ChatAttachment[],
-        isTurnFormat: boolean,
     ): Promise<string> {
-        const { sessionId, nodeId, input } = task;
-        const persistedFiles = this.attachments.stripFileRefs(contextFiles);
+        const { sessionId, input } = task;
 
-        const userNodeId = isTurnFormat
-            ? ulid()
-            : await this.engine.appendMessage(
-                nodeId, sessionId, 'user', input.text,
-                {
-                    files: persistedFiles,
-                    executorId: input.agentId,
-                    origin: input.origin as 'user' | 'agent' | 'system' | undefined,
-                    historyPolicy: input.historyPolicy,
-                }
-            );
+        const userNodeId = ulid();
 
         const userSession = state.addUserMessage(
             input.text, contextFiles, userNodeId,
@@ -692,102 +655,59 @@ export class TaskRunner {
 
     private async createAssistantNode(
         sessionId: string,
-        nodeId: string,
-        state: SessionState,
         executorConfig: ExecutorConfig,
-        isTurnFormat: boolean,
         branchInfo?: BranchInfo,
         parentUserNodeId?: string,
         origin?: import('../core/types').SessionOrigin,
         historyPolicy?: import('../core/types').HistoryPolicy,
         preallocatedTurnId?: string,
     ): Promise<{ assistantNodeId: string; rootNode: ExecutionNode }> {
-        const assistantNodeId = isTurnFormat
-            ? (preallocatedTurnId ?? ulid())
-            : await this.engine.appendMessage(
-                nodeId, sessionId, 'assistant', '',
-                {
+        const assistantNodeId = preallocatedTurnId ?? ulid();
+
+        // Build a pure in-memory rootNode for streaming.
+        // state.sessions is NOT written here — TurnLog.applyAppended() drives
+        // the single authoritative message:appended event after persist.
+        const rootNode: ExecutionNode = {
+            id: assistantNodeId,
+            name: executorConfig.name || executorConfig.id,
+            executorType: executorConfig.type || 'agent',
+            executorId: executorConfig.id,
+            status: 'running',
+            startTime: Date.now(),
+            parentId: undefined,
+            data: {
+                output: '',
+                thought: '',
+                metaInfo: {
                     agentId: executorConfig.id,
-                    agentName: executorConfig.name,
                     agentIcon: executorConfig.icon,
-                    status: 'running',
-                    siblingIndex: branchInfo?.siblingIndex ?? 0,
-                    siblingCount: branchInfo?.siblingCount ?? 1,
-                    parentAssistantId: branchInfo?.parentAssistantId,
-                    parentUserNodeId,
-                    origin: origin as 'user' | 'agent' | 'system' | undefined,
-                    historyPolicy,
-                }
-            );
-
-        if (isTurnFormat) {
-            // TurnLog path: build a pure in-memory rootNode for streaming.
-            // state.sessions is NOT written here — TurnLog.applyAppended() drives
-            // the single authoritative message:appended event after persist.
-            const rootNode: ExecutionNode = {
-                id: assistantNodeId,
-                name: executorConfig.name || executorConfig.id,
-                executorType: executorConfig.type || 'agent',
-                executorId: executorConfig.id,
-                status: 'running',
-                startTime: Date.now(),
-                parentId: undefined,
-                data: {
-                    output: '',
-                    thought: '',
-                    metaInfo: {
-                        agentId: executorConfig.id,
-                        agentIcon: executorConfig.icon,
-                    },
                 },
-                children: [],
-            };
-
-            const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
-            if (isBound) {
-                // Emit streaming placeholder now. TurnLog.applyAppended() fires after
-                // persist (too late for streaming), so we emit here with the correct
-                // agent info. The TurnLog event listener filters out its own
-                // message:appended to prevent duplication.
-                const placeholderSession: SessionGroup = {
-                    id: assistantNodeId,
-                    persistedNodeId: assistantNodeId,
-                    role: 'assistant',
-                    content: '',
-                    timestamp: Date.now(),
-                    executionRoot: rootNode,
-                    siblingIndex: branchInfo?.siblingIndex,
-                    siblingCount: branchInfo?.siblingCount,
-                    origin: origin ?? 'user',
-                    historyPolicy: historyPolicy ?? 'include',
-                };
-                this.eventBus.emitSession(sessionId, {
-                    type: 'message:appended',
-                    payload: {
-                        sessionGroup: placeholderSession,
-                        isExecutionRoot: true,
-                        parentId: parentUserNodeId,
-                    },
-                });
-            }
-
-            return { assistantNodeId, rootNode };
-        }
-
-        const assistantSession = state.createAssistantMessage(
-            executorConfig, assistantNodeId, branchInfo,
-            origin, historyPolicy,
-        );
-        const rootNode = assistantSession.executionRoot!;
+            },
+            children: [],
+        };
 
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         if (isBound) {
-            // Only emit assistantSession — createAssistantMessage already updated getLastSession()
-            // to point to the same node. Emitting both causes "Duplicate session" in UI.
+            // Emit streaming placeholder now. TurnLog.applyAppended() fires after
+            // persist (too late for streaming), so we emit here with the correct
+            // agent info. The TurnLog event listener filters out its own
+            // message:appended to prevent duplication.
+            const placeholderSession: SessionGroup = {
+                id: assistantNodeId,
+                persistedNodeId: assistantNodeId,
+                role: 'assistant',
+                content: '',
+                timestamp: Date.now(),
+                executionRoot: rootNode,
+                siblingIndex: branchInfo?.siblingIndex,
+                siblingCount: branchInfo?.siblingCount,
+                origin: origin ?? 'user',
+                historyPolicy: historyPolicy ?? 'include',
+            };
             this.eventBus.emitSession(sessionId, {
                 type: 'message:appended',
                 payload: {
-                    sessionGroup: assistantSession,
+                    sessionGroup: placeholderSession,
                     isExecutionRoot: true,
                     parentId: parentUserNodeId,
                 },
@@ -798,22 +718,14 @@ export class TaskRunner {
     }
 
     // ============================================
-    // 内部：ILog 工厂（格式路由）
+    // 内部：ILog 工厂
     // ============================================
 
     /**
-     * Create an ILog instance for the given session.
-     * Routes to TurnLog for sessions with format === 'turn',
-     * falls back to ChatEngineLog for legacy sessions.
+     * Create a TurnLog instance for the given session.
      */
     private async createLog(sessionId: string, nodeId: string): Promise<ILog> {
-        try {
-            const manifest = await this.engine.getManifest(nodeId);
-            if ((manifest as unknown as Record<string, unknown>).format === 'turn') {
-                return new TurnLog(this.engine, nodeId, sessionId);
-            }
-        } catch { /* manifest unreadable — use legacy */ }
-        return new ChatEngineLog(this.engine, sessionId, nodeId);
+        return new TurnLog(this.engine, nodeId, sessionId);
     }
 
     // ============================================
@@ -847,7 +759,6 @@ export class TaskRunner {
         state: SessionState,
         sessionId: string,
         errorAlreadyEmitted: boolean,
-        isTurnFormat: boolean,
         logAdapter: ILog,
     ): Promise<void> {
         const isAborted = error.name === 'AbortError' || task.abortController.signal.aborted;
@@ -881,24 +792,10 @@ export class TaskRunner {
                 });
             }
 
-            if (isTurnFormat) {
-                // Clean up incomplete draft — no engine write needed
-                await logAdapter.draft().flush(null as unknown as import('@itookit/common').Turn).catch((e) => {
-                    log.error('Failed to clean up draft on error', { sessionId, error: e });
-                });
-            } else if (lastSession.persistedNodeId) {
-                await this.engine
-                    .updateNode(sessionId, lastSession.persistedNodeId, {
-                        meta: { status, error: errorMessage, endTime: Date.now() },
-                    })
-                    .catch((e) => {
-                        log.error('Failed to persist error state', {
-                            sessionId,
-                            nodeId: lastSession.persistedNodeId,
-                            error: e,
-                        });
-                    });
-            }
+            // Clean up incomplete draft — no engine write needed
+            await logAdapter.draft().flush(null as unknown as import('@itookit/common').Turn).catch((e) => {
+                log.error('Failed to clean up draft on error', { sessionId, error: e });
+            });
         }
 
         if (!errorAlreadyEmitted && isBound) {
