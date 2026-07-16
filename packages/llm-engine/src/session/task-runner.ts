@@ -1,6 +1,7 @@
 // @file: llm-engine/session/task-runner.ts
 
-import type { ILLMService, AgentEvent } from '@itookit/common';
+import type { ILLMService, AgentEvent, ChatMessage } from '@itookit/common';
+import { ulid } from '../persistence/ulid';
 import { ExecutorConfig } from '../core/types';
 import {
     ExecutionTask,
@@ -263,6 +264,7 @@ export class TaskRunner {
     private async setupTaskExecution(
         task: ExecutionTask,
         state: SessionState,
+        isTurnFormat: boolean,
     ): Promise<{
         userNodeId: string | undefined;
         executorConfig: ExecutorConfig;
@@ -283,7 +285,7 @@ export class TaskRunner {
         // 2. Create user message
         let userNodeId = input.parentUserNodeId;
         if (!input.skipUserMessage) {
-            userNodeId = await this.createUserMessage(task, state, contextFiles);
+            userNodeId = await this.createUserMessage(task, state, contextFiles, isTurnFormat);
         }
 
         // 3. Resolve executor config
@@ -301,7 +303,7 @@ export class TaskRunner {
 
         // 4. Create assistant node
         const { assistantNodeId, rootNode } = await this.createAssistantNode(
-            sessionId, task.nodeId, state, executorConfig, input.branchInfo, userNodeId,
+            sessionId, task.nodeId, state, executorConfig, isTurnFormat, input.branchInfo, userNodeId,
             input.origin, input.historyPolicy,
         );
 
@@ -309,20 +311,22 @@ export class TaskRunner {
         const accumulator = { output: '', thinking: '' };
         let lastPersistTime = 0;
         let pendingPromise: Promise<void> = Promise.resolve();
-        const persist = () => {
-            if (!accumulator.output && !accumulator.thinking) return;
-            const now = Date.now();
-            if (now - lastPersistTime < ENGINE_DEFAULTS.PERSIST_THROTTLE) return;
-            lastPersistTime = now;
-            const outputSnapshot = accumulator.output;
-            const thinkingSnapshot = accumulator.thinking;
-            pendingPromise = pendingPromise
-                .then(() => this.engine.updateNode(sessionId, assistantNodeId, {
-                    content: outputSnapshot,
-                    meta: { thinking: thinkingSnapshot, status: 'running' },
-                }))
-                .catch(() => { /* chain stays alive */ });
-        };
+        const persist = isTurnFormat
+            ? () => { /* no-op: crash safety handled by DraftArea.checkpoint() in loop-driver */ }
+            : () => {
+                if (!accumulator.output && !accumulator.thinking) return;
+                const now = Date.now();
+                if (now - lastPersistTime < ENGINE_DEFAULTS.PERSIST_THROTTLE) return;
+                lastPersistTime = now;
+                const outputSnapshot = accumulator.output;
+                const thinkingSnapshot = accumulator.thinking;
+                pendingPromise = pendingPromise
+                    .then(() => this.engine.updateNode(sessionId, assistantNodeId, {
+                        content: outputSnapshot,
+                        meta: { thinking: thinkingSnapshot, status: 'running' },
+                    }))
+                    .catch(() => { /* chain stays alive */ });
+            };
         const finalize = () => pendingPromise;
 
         return { userNodeId, executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles };
@@ -352,20 +356,21 @@ export class TaskRunner {
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         let errorAlreadyEmitted = false;
 
+        // ── ILog via format-routed adapter (before setupTaskExecution for isTurnFormat) ─
+        let logAdapter = this.logCache.get(sessionId);
+        if (!logAdapter) {
+            logAdapter = await this.createLog(sessionId, task.nodeId);
+            this.logCache.set(sessionId, logAdapter);
+        }
+        const isTurnFormat = logAdapter instanceof TurnLog;
+
         try {
-            const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize } =
-                await this.setupTaskExecution(task, state);
+            const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles } =
+                await this.setupTaskExecution(task, state, isTurnFormat);
 
             // ── Get executor ──────────────────────────────────────────────
             const executor = this.executorRegistry.get(mode);
             const llmService = this.llmService!;
-
-            // ── ILog via format-routed adapter ─────────────────────────
-            let logAdapter = this.logCache.get(sessionId);
-            if (!logAdapter) {
-                logAdapter = await this.createLog(sessionId, task.nodeId);
-                this.logCache.set(sessionId, logAdapter);
-            }
 
             // ── 文件级 ai_systemPrompt 覆盖（与 executeTask 对齐）──
             const fileNode = await this.engine.getNode(task.nodeId);
@@ -521,19 +526,38 @@ export class TaskRunner {
                 isEstimated: !hasRealUsage,
             };
 
-            await this.engine.updateNode(sessionId, assistantNodeId, {
-                content: accumulator.output,
-                meta: {
-                    thinking: accumulator.thinking,
-                    status: 'success',
-                    endTime: endMs,
-                    durationMs,
-                    inputTokens: totalUsage.inputTokens,
-                    outputTokens: totalUsage.outputTokens,
-                    costUsd,
-                    isEstimated: !hasRealUsage,
-                },
-            });
+            if (isTurnFormat) {
+                // Single writer: persist completed turns via TurnLog
+                for (const turn of turns) {
+                    if (!input.skipUserMessage) {
+                        const userMsg: ChatMessage = {
+                            role: 'user',
+                            content: input.text,
+                        };
+                        if (contextFiles.length > 0) {
+                            (userMsg as any).attachments = contextFiles;
+                        }
+                        turn.payload = [userMsg, ...turn.payload];
+                    }
+                    await logAdapter.append('main', turn);
+                }
+                await logAdapter.draft().flush();
+            } else {
+                // Legacy: persist via engine.updateNode
+                await this.engine.updateNode(sessionId, assistantNodeId, {
+                    content: accumulator.output,
+                    meta: {
+                        thinking: accumulator.thinking,
+                        status: 'success',
+                        endTime: endMs,
+                        durationMs,
+                        inputTokens: totalUsage.inputTokens,
+                        outputTokens: totalUsage.outputTokens,
+                        costUsd,
+                        isEstimated: !hasRealUsage,
+                    },
+                });
+            }
 
             state.updateNodeStatus(rootNode.id, 'success');
 
@@ -571,7 +595,7 @@ export class TaskRunner {
             if (error instanceof LoopAbortedError) {
                 this.callbacks.onStatusChange(sessionId, 'aborted');
             } else {
-                await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted);
+                await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted, isTurnFormat, logAdapter);
             }
         } finally {
             this.running.delete(task.id);
@@ -588,20 +612,23 @@ export class TaskRunner {
     private async createUserMessage(
         task: ExecutionTask,
         state: SessionState,
-        contextFiles: ChatAttachment[]
+        contextFiles: ChatAttachment[],
+        isTurnFormat: boolean,
     ): Promise<string> {
         const { sessionId, nodeId, input } = task;
         const persistedFiles = this.attachments.stripFileRefs(contextFiles);
 
-        const userNodeId = await this.engine.appendMessage(
-            nodeId, sessionId, 'user', input.text,
-            {
-                files: persistedFiles,
-                executorId: input.agentId,
-                origin: input.origin,
-                historyPolicy: input.historyPolicy,
-            }
-        );
+        const userNodeId = isTurnFormat
+            ? ulid()
+            : await this.engine.appendMessage(
+                nodeId, sessionId, 'user', input.text,
+                {
+                    files: persistedFiles,
+                    executorId: input.agentId,
+                    origin: input.origin,
+                    historyPolicy: input.historyPolicy,
+                }
+            );
 
         const userSession = state.addUserMessage(
             input.text, contextFiles, userNodeId,
@@ -628,26 +655,29 @@ export class TaskRunner {
         nodeId: string,
         state: SessionState,
         executorConfig: ExecutorConfig,
+        isTurnFormat: boolean,
         branchInfo?: BranchInfo,
         parentUserNodeId?: string,
         origin?: import('../core/types').SessionOrigin,
         historyPolicy?: import('../core/types').HistoryPolicy,
     ): Promise<{ assistantNodeId: string; rootNode: ExecutionNode }> {
-        const assistantNodeId = await this.engine.appendMessage(
-            nodeId, sessionId, 'assistant', '',
-            {
-                agentId: executorConfig.id,
-                agentName: executorConfig.name,
-                agentIcon: (executorConfig as any).icon,
-                status: 'running',
-                siblingIndex: branchInfo?.siblingIndex ?? 0,
-                siblingCount: branchInfo?.siblingCount ?? 1,
-                parentAssistantId: branchInfo?.parentAssistantId,
-                parentUserNodeId,
-                origin,
-                historyPolicy,
-            }
-        );
+        const assistantNodeId = isTurnFormat
+            ? ulid()
+            : await this.engine.appendMessage(
+                nodeId, sessionId, 'assistant', '',
+                {
+                    agentId: executorConfig.id,
+                    agentName: executorConfig.name,
+                    agentIcon: (executorConfig as any).icon,
+                    status: 'running',
+                    siblingIndex: branchInfo?.siblingIndex ?? 0,
+                    siblingCount: branchInfo?.siblingCount ?? 1,
+                    parentAssistantId: branchInfo?.parentAssistantId,
+                    parentUserNodeId,
+                    origin,
+                    historyPolicy,
+                }
+            );
 
         const assistantSession = state.createAssistantMessage(
             executorConfig, assistantNodeId, branchInfo,
@@ -721,7 +751,9 @@ export class TaskRunner {
         runtime: SessionRuntime,
         state: SessionState,
         sessionId: string,
-        errorAlreadyEmitted: boolean
+        errorAlreadyEmitted: boolean,
+        isTurnFormat: boolean,
+        logAdapter: ILog,
     ): Promise<void> {
         const isAborted = error.name === 'AbortError' || task.abortController.signal.aborted;
         const status: SessionStatus = isAborted ? 'aborted' : 'failed';
@@ -754,7 +786,12 @@ export class TaskRunner {
                 });
             }
 
-            if (lastSession.persistedNodeId) {
+            if (isTurnFormat) {
+                // Clean up incomplete draft — no engine write needed
+                await logAdapter.draft().flush().catch((e) => {
+                    log.error('Failed to clean up draft on error', { sessionId, error: e });
+                });
+            } else if (lastSession.persistedNodeId) {
                 await this.engine
                     .updateNode(sessionId, lastSession.persistedNodeId, {
                         meta: { status, error: errorMessage, endTime: Date.now() },

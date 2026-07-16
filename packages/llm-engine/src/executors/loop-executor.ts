@@ -133,7 +133,7 @@ export class LoopExecutor implements ILoop {
 
                 // ── 1b. Before-turn middleware ──
                 const turnCtx: TurnContext = {
-                    turnId: `turn_${turnNumber}`,
+                    turnId: `turn_${ctx.sessionId}_${turnNumber}`,
                     sessionId: ctx.sessionId,
                     turnNumber,
                 };

@@ -278,7 +278,7 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 ## 9. 实施进度
 
-> 最后更新：2026-07-15 | 实施分支：v4.2
+> 最后更新：2026-07-16 | 实施分支：v4.2
 
 ### 已完成
 
@@ -286,6 +286,7 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 |---|---|---|---|
 | **Phase 0** | 快赢清理（7 项） | 见下方 P0.1~P0.7 | ✅ 完成 |
 | **Phase 1** | TurnLog 落地（TurnManifest + TurnLog + 格式路由） | 4 个新文件，3 个修改文件 | ✅ 完成 |
+| **Phase 2** | 单一写路径 — TaskRunner 全经 TurnLog（turn 格式） | 2 个修改文件，~70 行改动 | ✅ 完成 |
 
 #### Phase 0 明细
 
@@ -310,24 +311,27 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 | P1.5 | 格式路由：`TaskRunner.createLog()` 按 `manifest.format` 选 TurnLog/ChatEngineLog | `task-runner.ts` | ✅ |
 | P1.6 | 导出新类型（TurnManifest, TurnProjection, PersistedTurn, TurnLog, VFSDraftArea）| `index.ts` | ✅ |
 
+#### Phase 2 明细
+
+| # | 项 | 文件 | 状态 |
+|---|---|---|---|
+| P2.1 | 前置修复：loop-executor TurnId 不一致（`turn:start` vs `log.append`） | `executors/loop-executor.ts:136` | ✅ |
+| P2.2 | `createUserMessage` — turn 格式用 `ulid()` 替代 `engine.appendMessage` | `task-runner.ts` | ✅ |
+| P2.3 | `createAssistantNode` — turn 格式用 `ulid()` 替代 `engine.appendMessage` | `task-runner.ts` | ✅ |
+| P2.4 | `persist()` 节流闭包 — turn 格式 no-op（DraftArea.checkpoint 替代） | `task-runner.ts` | ✅ |
+| P2.5 | 完成写入 — turn 格式走 `log.append()` + `draft().flush()` | `task-runner.ts` | ✅ |
+| P2.6 | `handleError` — turn 格式走 `draft().flush()` 替代 `engine.updateNode` | `task-runner.ts` | ✅ |
+| P2.7 | 旧格式 session 保持旧路径（Strangler-Fig） | `task-runner.ts` | ✅ |
+
+> **注**：`TaskInput.skipUserMessage` / `parentUserNodeId` 未删除——旧格式 session 仍依赖这些字段；turn 格式下 `skipUserMessage` 用于判断是否在 `log.append()` 前将 user message 前置到 turn payload。`draft().setCurrent()` 也未显式调用——user message 在 `log.append()` 时直接拼入 turn.payload，而非通过 draft 预填充。
+
 ### 待完成
 
 | 阶段 | 内容 | 优先级 | 依赖 |
 |---|---|---|---|
-| **Phase 2** | 单一写路径 — 删除 `createUserMessage`/`createAssistantNode`/`updateNode` 直写，TaskRunner 全经 TurnLog | 高 | Phase 1 |
 | **Phase 3** | SessionState 投影化 — `TurnProjection[]` + `TurnLogEvent` 单向数据流，删除位置推导 | 高 | Phase 2 |
 | **Phase 4** | SessionManager 拆分 — 4 组件 (< 500 行)，ISession 门面不变 | 中 | Phase 3 |
 | **Phase 5** | 迁移工具 — `migrateToTurnFormat()` 分支感知算法 | 低（独立） | Phase 1 |
-
-#### Phase 2 待办清单
-
-- [ ] **删除双写路径**：TaskRunner 不再调 `engine.appendMessage` / `engine.updateNode`
-- [ ] 构建初始 Turn → `draft().setCurrent()`
-- [ ] `drive(loop)` — 流式期间只更新 DraftArea（checkpoint 替代 updateNode 节流）
-- [ ] `turn:end` → `log.append(完成的 Turn)`
-- [ ] `clearAssistantInTurn` 场景走原地更新
-- [ ] 删除 `TaskInput.skipUserMessage` / `TaskInput.parentUserNodeId`
-- [ ] 旧格式 session 保持旧路径（Strangler-Fig）
 
 #### Phase 3 待办清单
 
@@ -337,6 +341,7 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 - [ ] 删除 `findUserMessageBefore` / `findAssistantMessagesAfter` / `collectAssistantIdsAfter` / `collectDeletableIds`
 - [ ] `interruptedAssistantId` 反向扫描 → 由 DraftArea checkpoint 判定
 - [ ] UI 侧 `SessionEventHandler` 适配增量结构事件
+- [ ] `clearAssistantInTurn` 场景走原地更新（regenerate/resend）
 
 #### Phase 4 待办清单
 
@@ -358,9 +363,9 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 | # | 标准 | 当前 |
 |---|---|---|
-| 1 | `grep engine.appendMessage\|engine.updateNode` session/ 零命中 | ❌ 待 Phase 2 |
+| 1 | `grep engine.appendMessage\|engine.updateNode` session/ 零命中（turn 格式路径） | ✅ Phase 2 完成 — 4 处调用均在 `else`/legacy 分支 |
 | 2 | `findUserMessageBefore` 等函数删除 | ❌ 待 Phase 3 |
 | 3 | persistence/ + session/ 中 `as any` 归零 | ⚠️ P0.7 部分（`converters.ts` `node.meta?.status as any` 预存） |
 | 4 | 切分支增量事件（不重放全量） | ❌ 待 Phase 3 |
-| 5 | 三条删除语义集成测试 | ❌ 待 Phase 2~3 |
+| 5 | 三条删除语义集成测试 | ❌ 待 Phase 3 |
 | 6 | 后继组件均 < 500 行 | ❌ 待 Phase 4 |
