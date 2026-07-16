@@ -198,7 +198,7 @@ export class AgentResolver {
         tier: ModelTier,
         modelId: string,
     ): { enableThinking: boolean; reasoningEffort: 'low' | 'medium' | 'xhigh' | undefined } {
-        const pid = connMeta.providerId ?? connMeta.provider;
+        const pid = connMeta.providerId;
         const cmData = connMeta.metadata as Record<string, unknown> | undefined;
         const tierThinking = cmData?.tierThinking as Record<string, boolean> | undefined;
         const tierOverride = tierThinking?.[tier];

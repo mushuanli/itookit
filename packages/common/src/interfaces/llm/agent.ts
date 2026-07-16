@@ -19,7 +19,6 @@ export interface AgentConfig {
     /**
      * 精确固定某一 model ID（高级用途）。
      * 优先级高于 modelTier；设置后 tier 系统对该 agent 无效。
-     * @deprecated 优先使用 modelTier + connection.tiers 配置。
      */
     modelName?: string;
     systemPrompt?: string;

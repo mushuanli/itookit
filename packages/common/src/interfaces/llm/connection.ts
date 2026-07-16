@@ -225,8 +225,6 @@ export interface LLMConnection {
 
     // ── 向后兼容字段（迁移旧数据时读取，新数据不再写入） ────────────────
 
-    /** @deprecated 模型目录由 Provider 统一管理 */
-    availableModels?: LLMModel[];
     /**
      * 覆盖 Provider.baseURL。用于同一厂商多协议端点场景
      * （如 DeepSeek openai-chat 用 /v1，anthropic-messages 用 /anthropic）。
@@ -246,8 +244,6 @@ export interface ConnectionMeta {
     name: string;
     /** Provider ID */
     providerId: string;
-    /** @deprecated 与 providerId 相同，保留兼容 */
-    provider: string;
     /** 已解析的 optimal 层级模型 ID（tiers.optimal → provider.models[0]） */
     model: string;
     /** Tier 映射（继承自 Connection.tiers 或 Provider.defaultTiers） */
@@ -373,7 +369,6 @@ export function toConnectionMeta(
         id: conn.id,
         name: conn.name,
         providerId: pid,
-        provider: pid,
         model: resolvedModel,
         tiers: effectiveTiers,
         hasApiKey: !!(provider?.apiKey?.trim()),

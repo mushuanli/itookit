@@ -12,7 +12,6 @@ import yaml from 'js-yaml';
 import type {
     LLMProvider, DefaultConnectionDef, LLMModel, LLMConnection,
     AgentDefinition, AgentType, AgentConfig,
-    LLMSkill, SkillType,
     ModelTier, ModelPricingEntry,
 } from '@itookit/common';
 
@@ -240,59 +239,6 @@ export function toLLMProvider(def: LLMProviderDef): LLMProvider {
             thinking: def.supportsThinking,
         },
     };
-}
-
-// ─── Skill Format Conversion ─────────────────────────────────────────────────
-// @deprecated 2026-07 — toRuntimeSkill converts between the flat LLMSkillDef .llm YAML
-// format and the canonical SkillDefinition (with tools[]). Replace when the .llm
-// format is upgraded to use SkillDefinition natively.
-// ────────────────────────────────────────────────────────────────────────────────
-
-/**
- * @deprecated Flat→canonical conversion; remove when .llm format uses SkillDefinition natively.
- * `prompt` is treated as an alias for `instructions` (backward compat).
- */
-export function toRuntimeSkill(def: LLMSkillDef): LLMSkill {
-    const hasTool = (def.type === 'http' || def.type === 'shell') && def.parameters;
-    const tools = hasTool ? [{
-        toolId: `${def.id}__tool`,
-        definition: {
-            name: `${def.id}__tool`,
-            description: def.description ?? def.name,
-            parameters: def.parameters,
-        },
-        executionType: def.type as 'http' | 'shell',
-        command: def.command,
-        sideEffect: (def.type === 'http' ? 'external' : 'local') as 'external' | 'local',
-        timeoutMs: 30_000,
-    }] : [];
-
-    return {
-        id: def.id,
-        name: def.name,
-        description: def.description ?? '',
-        type: (def.type ?? 'prompt') as SkillType,
-        enabled: def.enabled ?? true,
-        icon: def.icon,
-        instructions: def.instructions ?? def.prompt ?? '',
-        tools,
-        triggerPatterns: [],
-        endpoint: def.endpoint,
-        method: def.method as LLMSkill['method'],
-        headers: def.headers,
-        parameters: def.parameters,
-        mcpServerId: def.mcpServerId,
-        mcpToolName: def.mcpToolName,
-        triggerStrategy: def.triggerStrategy as LLMSkill['triggerStrategy'],
-        autoLoad: def.autoLoad ?? (def.triggerStrategy === 'reference'),
-        priority: def.priority ?? 50,
-        globs: def.globs ?? [],
-        correctionLog: def.correctionLog ? { path: def.correctionLog, enabled: true } : undefined,
-        disableModelInvocation: def.disableModelInvocation ?? false,
-        source: 'vfs',
-        metadata: def.metadata,
-        createdAt: Date.now(),
-    } as LLMSkill;
 }
 
 /**

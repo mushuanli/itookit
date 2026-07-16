@@ -2,7 +2,7 @@
 //
 // SkillManager — SkillDefinition CRUD, HTTP/Shell/MCP invocation.
 
-import type { LLMSkill, IVFSManager, IModuleFS, SkillDefinition, SkillToolBinding } from '@itookit/common';
+import type { LLMSkill, IVFSManager, IModuleFS } from '@itookit/common';
 import yaml from 'js-yaml';
 import { VFSHelpers } from './vfs-helpers';
 import type { MCPManager } from './mcp-manager';
@@ -89,7 +89,7 @@ export class SkillManager {
 
     private async loadAllSkills(): Promise<LLMSkill[]> {
         const raw = await this.helpers.loadJsonFilesFromDir<any>(SKILLS_DIR);
-        return raw.map(migrateOldSkill);
+        return raw;
     }
 
     private async writeSkillToDisk(skill: LLMSkill, systemFS?: IModuleFS): Promise<void> {
@@ -148,53 +148,3 @@ export class SkillManager {
     }
 }
 
-// ─── VFS data migration ────────────────────────────────────────────────────────
-//
-// Old LLMSkill JSON (pre-unification) stored command/endpoint/parameters as flat
-// top-level fields without a tools[] array. This function converts that format
-// to the canonical SkillDefinition shape on read.
-
-/**
- * @deprecated 2026-07 — Legacy skill format migration.
- * Converts old flat VFS-persisted JSON format (command/endpoint/parameters at top level, no tools[])
- * into canonical SkillDefinition shape.
- * Once all VFS-stored skills are in the canonical format, this function can be removed.
- */
-function migrateOldSkill(raw: any): SkillDefinition {
-    // Already migrated (has tools array as SkillDefinition) — pass through.
-    if (Array.isArray(raw.tools)) return raw as SkillDefinition;
-
-    console.warn('[skill-manager] Migrating legacy skill format for', raw.id ?? raw.name);
-
-    const tools: SkillToolBinding[] = [];
-    const hasTool = (raw.type === 'http' || raw.type === 'shell') && raw.parameters;
-    if (hasTool) {
-        tools.push({
-            toolId: `${raw.id}__tool`,
-            definition: {
-                name: `${raw.id}__tool`,
-                description: raw.description ?? raw.name,
-                parameters: raw.parameters,
-            },
-            executionType: raw.type as 'http' | 'shell',
-            command: raw.command,
-            sideEffect: raw.type === 'http' ? 'external' : 'local',
-            timeoutMs: 30_000,
-        });
-    }
-
-    return {
-        ...raw,
-        tools,
-        instructions: raw.instructions ?? '',
-        triggerPatterns: raw.triggerPatterns ?? [],
-        autoLoad: raw.autoLoad ?? (raw.triggerStrategy === 'reference'),
-        priority: raw.priority ?? 50,
-        globs: raw.globs ?? [],
-        correctionLog: raw.correctionLog
-            ? { path: raw.correctionLog, enabled: true }
-            : undefined,
-        disableModelInvocation: raw.disableModelInvocation ?? false,
-        source: raw.source ?? 'vfs',
-    } as SkillDefinition;
-}

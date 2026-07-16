@@ -648,8 +648,10 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 llmSession.history = llmSession.history.filter(m => m.role === 'system');
                 return;
 
-            case LLM_IOCTL.GET_MODELS:
-                return llmSession.connection.availableModels ?? [];
+            case LLM_IOCTL.GET_MODELS: {
+                const provider = this.providerManager.getProvider(llmSession.connection.providerId);
+                return provider?.models ?? [];
+            }
 
             case LLM_IOCTL.ABORT:
                 llmSession.abortController?.abort();

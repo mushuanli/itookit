@@ -164,7 +164,7 @@ export class AgentConfigEditor implements IEditor {
         const grouped = providers
             .map(p => ({
                 provider: p,
-                conns: connections.filter(c => (c.providerId ?? c.provider) === p.id),
+                conns: connections.filter(c => c.providerId === p.id),
             }))
             .filter(g => g.conns.length > 0);
         const ungrouped = connections.filter(c => !providerMap.has(c.providerId));

@@ -12,7 +12,7 @@ import { Modal, Toast } from '@itookit/common';
 import type { IConnectionService } from '@itookit/common';
 import {
     parseLLMConfig,
-    toLLMProvider, toRuntimeConnection, toRuntimeAgent, toRuntimeSkill,
+    toLLMProvider, toRuntimeConnection, toRuntimeAgent,
     getProviderDefs,
     type LLMConfigFile, type LLMAgentDef, type LLMConnectionDef,
 } from '@itookit/device-llm';
@@ -314,7 +314,7 @@ export async function executeImport(
                 allocatedSkills.add(newId);
                 effectiveDef = { ...def, id: newId };
             }
-            await agentSvc.saveSkill(toRuntimeSkill(effectiveDef));
+            await agentSvc.saveSkill(effectiveDef);
             stats.skills++;
         }
     }

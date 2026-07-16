@@ -136,10 +136,6 @@ export class ConnectionManager {
                     updated.tiers = def.tiers;
                     dirty = true;
                 }
-                if (updated.availableModels !== undefined) {
-                    delete updated.availableModels;
-                    dirty = true;
-                }
                 if (dirty) {
                     await this.writeToDisk(updated);
                     const idx = result.findIndex(c => c.id === def.id);

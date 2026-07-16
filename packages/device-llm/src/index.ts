@@ -153,7 +153,6 @@ export {
     toLLMProvider,
     toConnectionDef,
     toRuntimeConnection,
-    toRuntimeSkill,
     toRuntimeAgent,
     fromLLMProvider,
     fromConnectionDef,

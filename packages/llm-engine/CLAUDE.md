@@ -11,8 +11,9 @@ src/
 ├── session/        ← SessionManager, SessionState (in-memory projection cache), TaskRunner
 │                     SessionEventBus (SessionEvent = AgentEvent | Projection | Structural, channel 路由)
 │                     truncation-detector, session-recovery
-├── persistence/    ← ChatEngine (IChatEngine), ★ ChatEngineLog (完整 ILog facade)
+├── persistence/    ← ChatEngine (IChatEngine), ★ TurnLog (完整 ILog facade), TurnManifest
 │                     ulid (ULID 生成), types (IChatEngine + ChatManifest/ChatNode)
+│                     draft-area, migration, turn-types, turn-events, vfs-utils
 ├── adapters/       ← tool-executor-bridge（HarnessAdapter 已删除 — S9）
 ├── mission/        ← MissionService, ★ MissionScheduler (reconcile-driven), LiteSubAgentRouter
 │                     TodoState, ★ sub-agent-loop-adapter, ★ mission-goal-factory
@@ -63,7 +64,7 @@ SessionManager.sendMessage()
 | **AgentEvent** | ✅ canonical schema（15 变体），唯一事件词汇 | `common/.../agent-event.ts` |
 | **ILoop** | ✅ 接口 + ExecutorRegistry + chat/loop executor | `common/.../loop.ts`, `core/executor-registry.ts` |
 | **drive()** | ✅ 协程宿主，pause/resume 一条路径；`resumeDrive()` 支持跨进程恢复 | `core/loop-driver.ts` |
-| **ILog** | ✅ 完整实现 — ChatEngineLog（VFS DraftArea + RefStore + fold 缓存）；**Dogfooding 关闭**：所有路径统一走 ILoop + LoopContext（connectionId/model/systemPrompt 等平铺字段），无特权后备路径 | `persistence/chat-engine-log.ts` |
+| **ILog** | ✅ 完整实现 — TurnLog（VFS DraftArea + TurnRefStore + fold 缓存 + cloneTurn）；**Dogfooding 关闭**：所有路径统一走 ILoop + LoopContext（connectionId/model/systemPrompt 等平铺字段），无特权后备路径 | `persistence/turn-log.ts` |
 | **Goal** | ✅ 接口 + DependencyScheduler + reconcile + 3 Predicate；**4 控制回路全部切换** | `common/.../goal.ts`, `core/goal/`, `mission/`, `session-graph/` |
 | **Resume** | ✅ `LoopExecutor.resume()` + `resumeDrive()` + TaskRunner checkpoint 检测 | `core/loop-driver.ts`, `executors/loop-executor.ts`, `session/task-runner.ts` |
 | **LiteSubAgentRouter** | ✅ 迁移至 ILoop（`LoopExecutor` 替代 `UnifiedLoopStrategy`）| `mission/lite-sub-agent-router.ts` |
@@ -72,10 +73,10 @@ SessionManager.sendMessage()
 
 | 组件 | 文件 | 说明 |
 |---|---|---|
-| `ChatEngineLog` | `persistence/chat-engine-log.ts` | 完整 ILog 实现：append/fold/merge/rebase + fold TTL 缓存 |
-| `VFSDraftArea` | 同上（内部类） | 崩溃安全草稿持久化到 VFS assetdir |
-| `ChatEngineRefStore` | 同上（内部类） | ChatManifest 驱动的分支/标签 CRUD |
-| `ulid()` | `persistence/ulid.ts` | Crockford base32 ULID 生成（替代 BBB_SSSSS_R 位置编码） |
+| `TurnLog` | `persistence/turn-log.ts` | 完整 ILog 实现：append/fold/merge/rebase + cloneTurn + fold TTL 缓存 |
+| `VFSDraftArea` | `persistence/draft-area.ts` | 崩溃安全草稿持久化到 VFS assetdir |
+| `TurnRefStore` | `persistence/turn-log.ts`（内部类） | TurnManifest 驱动的分支/标签 CRUD |
+| `ulid()` | `persistence/ulid.ts` | Crockford base32 ULID 生成 |
 | `SessionState` | `session/session-state.ts` | 内存投影缓存 — ILog.fold() 的 UI 层投影，非独立事实源 |
 
 ### Goal (S5) ✅ — 验收达成 2026-07-14
