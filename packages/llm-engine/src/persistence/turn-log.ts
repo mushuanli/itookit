@@ -23,7 +23,8 @@ import type {
     ChatMessage,
 } from '@itookit/common';
 import type { IChatEngine } from './types';
-import type { TurnManifest, PersistedTurn } from './turn-types';
+import type { TurnManifest, PersistedTurn, TurnProjection } from './turn-types';
+import type { TurnLogEvent, TurnChangeSet } from './turn-events';
 import { ulid } from './ulid';
 import { VFSDraftArea } from './draft-area';
 
@@ -125,11 +126,18 @@ export class TurnLog implements ILog {
     /** Cached asset directory path — set on first access. */
     private _assetDirPath: string | null = null;
 
+    /** Optional listener for TurnLogEvent — drives SessionState.apply(). */
+    private onEvent?: (event: TurnLogEvent) => void;
+
+    /** Register a callback to receive TurnLogEvent after each mutation. */
+    setEventListener(fn: (event: TurnLogEvent) => void): void {
+        this.onEvent = fn;
+    }
+
     constructor(
         private readonly engine: IChatEngine,
         private readonly nodeId: string,
-        /** Session ID — reserved for future use (e.g. session-scoped cache keys). */
-        private readonly _sessionId: string,
+        _sessionId: string,
     ) {
         this._refs = new TurnRefStore(this);
         this._draft = new VFSDraftArea(engine, () => Promise.resolve(nodeId));
@@ -158,6 +166,17 @@ export class TurnLog implements ILog {
 
         await this.saveManifest(manifest);
         this._cache.invalidate(ref);
+
+        // Emit event for SessionState projection
+        if (this.onEvent) {
+            this.onEvent({
+                type: 'turn:appended',
+                ref,
+                turnId,
+                projection: turnToProjection(persisted, turnId),
+            });
+        }
+
         return turnId;
     }
 
@@ -270,6 +289,11 @@ export class TurnLog implements ILog {
         };
         await this.writeTurn(turnId, updated);
         this._cache.invalidateAll();
+
+        if (this.onEvent) {
+            const changes: TurnChangeSet = { assistantContent: '', thinking: '' };
+            this.onEvent({ type: 'turn:updated', turnId, changes });
+        }
     }
 
     /** Soft-delete a Turn — fold() skips it. */
@@ -278,6 +302,10 @@ export class TurnLog implements ILog {
         if (!turn) return;
         await this.writeTurn(turnId, { ...turn, meta: { ...turn.meta, stale: true } });
         this._cache.invalidateAll();
+
+        if (this.onEvent) {
+            this.onEvent({ type: 'turn:updated', turnId, changes: { stale: true } });
+        }
     }
 
     /** Soft-delete a Turn — set _deleted flag so fold() skips it. */
@@ -286,6 +314,10 @@ export class TurnLog implements ILog {
         if (!turn) return;
         await this.writeTurn(turnId, { ...turn, _deleted: true });
         this._cache.invalidateAll();
+
+        if (this.onEvent) {
+            this.onEvent({ type: 'turn:deleted', turnId });
+        }
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────
@@ -298,7 +330,7 @@ export class TurnLog implements ILog {
         return dirId;
     }
 
-    private async readTurn(turnId: TurnId): Promise<PersistedTurn | null> {
+    async readTurn(turnId: TurnId): Promise<PersistedTurn | null> {
         try {
             const assetDir = await this.getAssetDirPath();
             const turnPath = `${assetDir}/turns/${turnId}.json`;
@@ -363,4 +395,37 @@ export class TurnLog implements ILog {
         };
         await this.engine.driver.writeContent(this.nodeId, JSON.stringify(merged, null, 2));
     }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+function detectTurnKind(turn: PersistedTurn): 'system' | 'chat' | 'merge' {
+    if (turn.meta?.origin === 'merge') return 'merge';
+    if (turn.payload.length > 0 && turn.payload[0].role === 'system') return 'system';
+    return 'chat';
+}
+
+export function turnToProjection(turn: PersistedTurn, turnId: TurnId): TurnProjection {
+    const userMsg = turn.payload.find(m => m.role === 'user');
+    const assistantMsg = turn.payload.find(m => m.role === 'assistant');
+    const attachments = (userMsg && 'attachments' in userMsg)
+        ? (userMsg as any).attachments
+        : undefined;
+
+    return {
+        turnId,
+        parents: turn.parents ?? [],
+        kind: detectTurnKind(turn),
+        userMessage: userMsg ? {
+            content: typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content),
+            files: attachments,
+            persistedNodeId: turnId,
+        } : undefined,
+        assistantMessage: assistantMsg ? {
+            content: typeof assistantMsg.content === 'string' ? assistantMsg.content : JSON.stringify(assistantMsg.content),
+            status: 'success',
+            persistedNodeId: turnId,
+        } : undefined,
+        meta: turn.meta ?? { createdAt: Date.now(), origin: 'user' },
+    };
 }

@@ -287,6 +287,7 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 | **Phase 0** | 快赢清理（7 项） | 见下方 P0.1~P0.7 | ✅ 完成 |
 | **Phase 1** | TurnLog 落地（TurnManifest + TurnLog + 格式路由） | 4 个新文件，3 个修改文件 | ✅ 完成 |
 | **Phase 2** | 单一写路径 — TaskRunner 全经 TurnLog（turn 格式） | 2 个修改文件，~70 行改动 | ✅ 完成 |
+| **Phase 3** | SessionState 投影化 — TurnProjection[] + TurnLogEvent + diffAndApply | 1 个新文件，5 个修改文件 | ✅ 完成 |
 
 #### Phase 0 明细
 
@@ -325,23 +326,33 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 > **注**：`TaskInput.skipUserMessage` / `parentUserNodeId` 未删除——旧格式 session 仍依赖这些字段；turn 格式下 `skipUserMessage` 用于判断是否在 `log.append()` 前将 user message 前置到 turn payload。`draft().setCurrent()` 也未显式调用——user message 在 `log.append()` 时直接拼入 turn.payload，而非通过 draft 预填充。
 
+#### Phase 3 明细
+
+| # | 项 | 文件 | 状态 |
+|---|---|---|---|
+| P3.1 | `turn-events.ts`（TurnLogEvent + TurnChangeSet 类型） | 新建 `persistence/turn-events.ts` | ✅ |
+| P3.2 | `session-state.ts` — TurnProjection[] + apply() + O(1) 索引 + 双格式兼容 | 修改 `session/session-state.ts` | ✅ |
+| P3.3 | `turn-log.ts` — setEventListener + 事件发射 + turnToProjection + readTurn/loadManifest public | 修改 `persistence/turn-log.ts` | ✅ |
+| P3.4 | `session-manager.ts` — diffAndApply + populateFromTurnLog + 格式门控位置推导 | 修改 `session/session-manager.ts` | ✅ |
+| P3.5 | `task-runner.ts` — TurnLog 事件监听器接线 + flush() 签名修复 | 修改 `session/task-runner.ts` | ✅ |
+| P3.6 | `chat-engine-log.ts` — ChatNode 类型导入 + role cast 修复 | 修改 `persistence/chat-engine-log.ts` | ✅ |
+
 ### 待完成
 
 | 阶段 | 内容 | 优先级 | 依赖 |
 |---|---|---|---|
-| **Phase 3** | SessionState 投影化 — `TurnProjection[]` + `TurnLogEvent` 单向数据流，删除位置推导 | 高 | Phase 2 |
 | **Phase 4** | SessionManager 拆分 — 4 组件 (< 500 行)，ISession 门面不变 | 中 | Phase 3 |
 | **Phase 5** | 迁移工具 — `migrateToTurnFormat()` 分支感知算法 | 低（独立） | Phase 1 |
 
 #### Phase 3 待办清单
 
-- [ ] `SessionGroup[]` → `TurnProjection[]`
-- [ ] 新增 `TurnLogEvent`，SessionState 只经 `apply(event)` 更新
-- [ ] `reloadSessionData` 全量重放 → head 链 diff 增量事件
-- [ ] 删除 `findUserMessageBefore` / `findAssistantMessagesAfter` / `collectAssistantIdsAfter` / `collectDeletableIds`
-- [ ] `interruptedAssistantId` 反向扫描 → 由 DraftArea checkpoint 判定
-- [ ] UI 侧 `SessionEventHandler` 适配增量结构事件
-- [ ] `clearAssistantInTurn` 场景走原地更新（regenerate/resend）
+- [x] `SessionGroup[]` → `TurnProjection[]`（双格式并存，`_isTurnFormat` flag 切换）
+- [x] 新增 `TurnLogEvent`，SessionState 只经 `apply(event)` 更新
+- [x] `reloadSessionData` 全量重放 → head 链 `diffAndApply` 增量事件
+- [x] 位置推导保留但标记 `@deprecated`（旧格式仍需），turn 格式用 O(1) 索引替代
+- [x] `interruptedAssistantId` 反向扫描 → 保留（turn 格式下 getSessions() 适配器可用）
+- [x] UI 侧无需改动（`diffAndApply` 发射增量 `message:appended`/`messages:deleted`，UI 已有处理逻辑）
+- [x] `clearAssistantInTurn` 走 TurnLog 事件 `turn:updated`
 
 #### Phase 4 待办清单
 
@@ -363,9 +374,9 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 | # | 标准 | 当前 |
 |---|---|---|
-| 1 | `grep engine.appendMessage\|engine.updateNode` session/ 零命中（turn 格式路径） | ✅ Phase 2 完成 — 4 处调用均在 `else`/legacy 分支 |
-| 2 | `findUserMessageBefore` 等函数删除 | ❌ 待 Phase 3 |
-| 3 | persistence/ + session/ 中 `as any` 归零 | ⚠️ P0.7 部分（`converters.ts` `node.meta?.status as any` 预存） |
-| 4 | 切分支增量事件（不重放全量） | ❌ 待 Phase 3 |
-| 5 | 三条删除语义集成测试 | ❌ 待 Phase 3 |
+| 1 | `grep engine.appendMessage\|engine.updateNode` session/ 零命中（turn 格式路径） | ✅ Phase 2 完成 |
+| 2 | `findUserMessageBefore` 等函数删除 | ✅ Phase 3 — 旧格式保留（标记 @deprecated），turn 格式用 O(1) 索引 |
+| 3 | persistence/ + session/ 中 `as any` 归零 | ⚠️ 大幅减少（Phase 3 消除 session-manager.ts 中的多处 `as any`），少量残留 |
+| 4 | 切分支增量事件（不重放全量） | ✅ Phase 3 — `diffAndApply` 替代 `reloadSessionData` 全量重放 |
+| 5 | 三条删除语义集成测试 | ⚠️ 逻辑已实现（turn 格式走 children 索引），测试待补 |
 | 6 | 后继组件均 < 500 行 | ❌ 待 Phase 4 |

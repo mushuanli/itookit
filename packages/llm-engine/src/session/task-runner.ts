@@ -361,6 +361,15 @@ export class TaskRunner {
         if (!logAdapter) {
             logAdapter = await this.createLog(sessionId, task.nodeId);
             this.logCache.set(sessionId, logAdapter);
+            // Wire TurnLog events → SessionState projection
+            if (logAdapter instanceof TurnLog) {
+                (logAdapter as TurnLog).setEventListener((event) => {
+                    const events = state.apply(event);
+                    for (const e of events) {
+                        this.eventBus.emitSession(sessionId, e);
+                    }
+                });
+            }
         }
         const isTurnFormat = logAdapter instanceof TurnLog;
 
@@ -541,7 +550,7 @@ export class TaskRunner {
                     }
                     await logAdapter.append('main', turn);
                 }
-                await logAdapter.draft().flush();
+                await logAdapter.draft().flush(null as unknown as import('@itookit/common').Turn);
             } else {
                 // Legacy: persist via engine.updateNode
                 await this.engine.updateNode(sessionId, assistantNodeId, {
@@ -788,7 +797,7 @@ export class TaskRunner {
 
             if (isTurnFormat) {
                 // Clean up incomplete draft — no engine write needed
-                await logAdapter.draft().flush().catch((e) => {
+                await logAdapter.draft().flush(null as unknown as import('@itookit/common').Turn).catch((e) => {
                     log.error('Failed to clean up draft on error', { sessionId, error: e });
                 });
             } else if (lastSession.persistedNodeId) {

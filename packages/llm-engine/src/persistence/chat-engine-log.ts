@@ -20,7 +20,7 @@ import type {
     AssemblyStrategy,
     ChatMessage,
 } from '@itookit/common';
-import type { IChatEngine } from './types';
+import type { IChatEngine, ChatNode } from './types';
 import { ulid } from './ulid';
 import { collectAllFileNodes } from './vfs-utils';
 import { VFSDraftArea } from './draft-area';
@@ -220,7 +220,7 @@ export class ChatEngineLog implements ILog {
             await this.engine.appendMessage(
                 nodeId,
                 this._sessionId!,
-                msg.role,
+                msg.role as ChatNode['role'],
                 content,
                 {
                     status: 'active',

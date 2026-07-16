@@ -38,6 +38,7 @@ import {
     getPromptHistory,
 } from '../services/prompt-history-service';
 import { log } from '../utils/logger';
+import { TurnLog, turnToProjection } from '../persistence/turn-log';
 
 /**
  * 会话管理器 — llm-engine 对外的唯一入口
@@ -338,6 +339,13 @@ export class SessionManager implements ISession {
         }
 
         if (session.role === 'assistant') {
+            // Turn format: O(1) parent lookup
+            if (state.isTurnFormat) {
+                const userTurn = state.findUserTurnForAssistant(messageId);
+                if (!userTurn?.userMessage) return { allowed: false, reason: 'No user message found' };
+                return { allowed: true };
+            }
+            // Legacy format: position-based scan
             const userBefore = state.findUserMessageBefore(messageId);
             if (!userBefore) return { allowed: false, reason: 'No user message found' };
             return { allowed: true };
@@ -436,7 +444,21 @@ export class SessionManager implements ISession {
         const { state } = this.ensureBound();
         this.ensureNotGenerating('regenerate');
 
-        const userMessage = state.findUserMessageBefore(assistantId);
+        let userMessage: SessionGroup | undefined;
+
+        if (state.isTurnFormat) {
+            const userTurn = state.findUserTurnForAssistant(assistantId);
+            if (!userTurn?.userMessage) {
+                throw new EngineError(
+                    EngineErrorCode.SESSION_INVALID,
+                    'No user message found before the specified assistant message'
+                );
+            }
+            userMessage = state.findSessionById(userTurn.userMessage.persistedNodeId);
+        } else {
+            userMessage = state.findUserMessageBefore(assistantId);
+        }
+
         if (!userMessage) {
             throw new EngineError(
                 EngineErrorCode.SESSION_INVALID,
@@ -481,7 +503,7 @@ export class SessionManager implements ISession {
 
         const agentId = this.resolveAgentId(
             options?.agentId,
-            state.getOriginalAgentId(userMessageId)
+            state.isTurnFormat ? undefined : state.getOriginalAgentId(userMessageId)
         );
 
         return this.executeRegenerate(userMessage, agentId, {
@@ -775,6 +797,14 @@ export class SessionManager implements ISession {
         const session = state.findSessionById(messageId);
         if (!session || session.role !== 'user') return ids;
 
+        // Turn format: O(1) child lookup via reverse index
+        if (state.isTurnFormat) {
+            const childIds = state.getChildTurnIds(messageId);
+            ids.push(...childIds);
+            return ids;
+        }
+
+        // Legacy format: position-based scan
         const assistantIds = state.collectAssistantIdsAfter(messageId);
         ids.push(...assistantIds);
 
@@ -835,7 +865,7 @@ export class SessionManager implements ISession {
 
         // 编辑前解析 agent
         const resolvedAgentId = autoRerun
-            ? this.resolveAgentId(undefined, state.getOriginalAgentId(messageId))
+            ? this.resolveAgentId(undefined, state.isTurnFormat ? undefined : state.getOriginalAgentId(messageId))
             : 'default';
 
         // 持久化编辑（创建并列节点 + 自动保留旧路径为分支）
@@ -1331,23 +1361,64 @@ export class SessionManager implements ISession {
         nodeId: string,
         sessionId: string
     ): Promise<void> {
+        // Detect turn format
+        const isTurn = await this.isTurnFormatSession(nodeId);
+        if (isTurn) {
+            await this.populateFromTurnLog(state, nodeId, sessionId);
+            return;
+        }
+
+        // Legacy format: load via ChatEngine
         const context = await this.engine.getSessionContext(nodeId, sessionId);
-        console.log('[extra-node-debug] populateState loading', { nodeId, sessionId, totalNodes: context.length });
         for (const item of context) {
             const node = item.node;
-            console.log('[extra-node-debug] populateState node', {
-                id: node.id,
-                role: node.role,
-                contentPreview: (node.content || '').slice(0, 80),
-                meta: node.meta,
-            });
             if (node.role === 'system') continue;
-            // Skip only in-flight empty assistant nodes (status='running'); completed nodes
-            // (success/failed/aborted) with empty content are still rendered to preserve history.
             if (node.role === 'assistant' && !node.content?.trim() && node.meta?.status === 'running') continue;
             state.loadFromChatNode(node);
         }
-        console.log('[extra-node-debug] populateState done, sessions count:', state.getSessions().length);
+    }
+
+    /** Check if a session uses the Turn persistence format. */
+    private async isTurnFormatSession(nodeId: string): Promise<boolean> {
+        try {
+            const manifest = await this.engine.getManifest(nodeId) as any;
+            return manifest?.format === 'turn';
+        } catch {
+            return false;
+        }
+    }
+
+    /** Load turn-format session state via TurnLog. */
+    private async populateFromTurnLog(
+        state: SessionState,
+        nodeId: string,
+        sessionId: string
+    ): Promise<void> {
+        const log = new TurnLog(this.engine, nodeId, sessionId);
+        const manifest = await log.loadManifest();
+        const headId = manifest.currentHead;
+        if (!headId) return;
+
+        // Walk parents[0] chain from head to root
+        const chain: string[] = [];
+        let current: string | undefined = headId;
+        const visited = new Set<string>();
+        while (current && !visited.has(current)) {
+            visited.add(current);
+            chain.unshift(current);
+            const t = await log.readTurn(current);
+            current = t?.parents?.[0];
+        }
+
+        // Parallel-load and project all turns in chain
+        const turns = await Promise.all(chain.map(id => log.readTurn(id)));
+        for (const t of turns) {
+            if (!t || t._deleted) continue;
+            const projection = turnToProjection(t, t.id);
+            state.loadFromProjection(projection);
+        }
+
+        state.setTurnFormat(true);
     }
 
     private async reloadSessionData(
@@ -1355,6 +1426,13 @@ export class SessionManager implements ISession {
         sessionId: string,
         state: SessionState
     ): Promise<void> {
+        // Turn format: use incremental diff instead of full clear+replay
+        if (state.isTurnFormat) {
+            await this.diffAndApply(nodeId, sessionId, state);
+            return;
+        }
+
+        // Legacy format: full reload
         state.clear();
         await this.populateState(state, nodeId, sessionId);
 
@@ -1368,6 +1446,64 @@ export class SessionManager implements ISession {
                 type: 'message:appended',
                 payload: { sessionGroup: sess },
             });
+        }
+    }
+
+    /**
+     * Incremental diff for turn-format sessions.
+     *
+     * Instead of clear + N × message:appended (which causes UI flicker),
+     * compute the diff between current state and the new head chain,
+     * emitting only delta events.
+     */
+    private async diffAndApply(
+        nodeId: string,
+        sessionId: string,
+        state: SessionState
+    ): Promise<void> {
+        const log = new TurnLog(this.engine, nodeId, sessionId);
+        const manifest = await log.loadManifest();
+        const headId = manifest.currentHead;
+        if (!headId) return;
+
+        // Build the new head chain
+        const headChain: string[] = [];
+        let current: string | undefined = headId;
+        const visited = new Set<string>();
+        while (current && !visited.has(current)) {
+            visited.add(current);
+            headChain.unshift(current);
+            const t = await log.readTurn(current);
+            current = t?.parents?.[0];
+        }
+
+        const headSet = new Set(headChain);
+
+        // Remove turns no longer on the head chain (branch switch away)
+        const toRemove = state.getTurns().filter(t => !headSet.has(t.turnId));
+        for (const t of toRemove) {
+            const events = state.apply({ type: 'turn:deleted', turnId: t.turnId });
+            for (const e of events) {
+                this.eventBus.emitSession(sessionId, e);
+            }
+        }
+
+        // Add new turns (not yet in state)
+        const turns = await Promise.all(headChain.map(id => log.readTurn(id)));
+        for (const t of turns) {
+            if (!t || t._deleted) continue;
+            if (state.hasTurn(t.id)) continue;
+
+            const projection = turnToProjection(t, t.id);
+            const events = state.apply({
+                type: 'turn:appended',
+                ref: manifest.currentBranch,
+                turnId: t.id,
+                projection,
+            });
+            for (const e of events) {
+                this.eventBus.emitSession(sessionId, e);
+            }
         }
     }
 
