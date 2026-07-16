@@ -79,6 +79,11 @@ export {
     resetSessionManager,
 } from './session/session-manager';
 
+export { SessionRegistry } from './session/session-registry';
+export type { BoundContext } from './session/session-registry';
+export { TurnOperations } from './session/turn-operations';
+export { BranchService } from './session/branch-service';
+
 export { SessionState } from './session/session-state';
 export type { HistoryMessage } from './session/session-state';
 export { SessionRecovery } from './session/session-recovery';

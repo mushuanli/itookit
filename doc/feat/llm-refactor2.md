@@ -278,7 +278,7 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 ## 9. 实施进度
 
-> 最后更新：2026-07-16 | 实施分支：v4.2
+> 最后更新：2026-07-16 | 实施分支：v4.2 | Phase 4 完成
 
 ### 已完成
 
@@ -288,6 +288,7 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 | **Phase 1** | TurnLog 落地（TurnManifest + TurnLog + 格式路由） | 4 个新文件，3 个修改文件 | ✅ 完成 |
 | **Phase 2** | 单一写路径 — TaskRunner 全经 TurnLog（turn 格式） | 2 个修改文件，~70 行改动 | ✅ 完成 |
 | **Phase 3** | SessionState 投影化 — TurnProjection[] + TurnLogEvent + diffAndApply | 1 个新文件，5 个修改文件 | ✅ 完成 |
+| **Phase 4** | SessionManager 拆分 — 3 新组件 + Facade，ISession 门面不变 | 3 个新文件，1 个重写，1 个修改 | ✅ 完成 |
 
 #### Phase 0 明细
 
@@ -341,7 +342,6 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 | 阶段 | 内容 | 优先级 | 依赖 |
 |---|---|---|---|
-| **Phase 4** | SessionManager 拆分 — 4 组件 (< 500 行)，ISession 门面不变 | 中 | Phase 3 |
 | **Phase 5** | 迁移工具 — `migrateToTurnFormat()` 分支感知算法 | 低（独立） | Phase 1 |
 
 #### Phase 3 待办清单
@@ -354,13 +354,18 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 - [x] UI 侧无需改动（`diffAndApply` 发射增量 `message:appended`/`messages:deleted`，UI 已有处理逻辑）
 - [x] `clearAssistantInTurn` 走 TurnLog 事件 `turn:updated`
 
-#### Phase 4 待办清单
+#### Phase 4 明细
 
-- [ ] 新建 `session-registry.ts`（~400 行）— 注册/绑定/解绑/清理/恢复
-- [ ] 新建 `turn-operations.ts`（~450 行）— 全 turnId 操作
-- [ ] 新建 `branch-service.ts`（~350 行）— branch CRUD / sibling / tags
-- [ ] 新建 `session-facade.ts`（~300 行）— 组合三者 + settings + prompt history
-- [ ] `ChatEngineLog` 标 `@deprecated`
+| # | 项 | 文件 | 状态 |
+|---|---|---|---|
+| P4.1 | `session-registry.ts`（556 行）— 注册/绑定/解绑/状态查询/事件/加载/回调 | 新建 `session/session-registry.ts` | ✅ |
+| P4.2 | `turn-operations.ts`（518 行）— send/regenerate/delete/edit/draft 全 turnId 操作 | 新建 `session/turn-operations.ts` | ✅ |
+| P4.3 | `branch-service.ts`（245 行）— branch CRUD / sibling 导航 / tags | 新建 `session/branch-service.ts` | ✅ |
+| P4.4 | `session-manager.ts`（437 行）— Facade 门面，组合三者 + ISession + settings + history | 重写 `session/session-manager.ts` | ✅ |
+| P4.5 | 导出新组件（SessionRegistry, BoundContext, TurnOperations, BranchService）| 修改 `index.ts` | ✅ |
+| P4.6 | `ChatEngineLog` 标 `@deprecated` | — | ❌ 跳过（旧格式仍需，用户要求删除 @deprecated 代码而非标记） |
+
+> **注**：SessionRegistry（556 行）和 TurnOperations（518 行）略超 500 行目标，但均包含 JSDoc 注释和空行，实际代码密度高。BranchService（245 行）和 Facade（437 行）符合 < 500 行目标。总计从 1672 行拆分为 4 个文件 1756 行。
 
 #### Phase 5 待办清单
 
@@ -379,4 +384,4 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 | 3 | persistence/ + session/ 中 `as any` 归零 | ⚠️ 大幅减少（Phase 3 消除 session-manager.ts 中的多处 `as any`），少量残留 |
 | 4 | 切分支增量事件（不重放全量） | ✅ Phase 3 — `diffAndApply` 替代 `reloadSessionData` 全量重放 |
 | 5 | 三条删除语义集成测试 | ⚠️ 逻辑已实现（turn 格式走 children 索引），测试待补 |
-| 6 | 后继组件均 < 500 行 | ❌ 待 Phase 4 |
+| 6 | 后继组件均 < 500 行 | ⚠️ 原 1672 行拆为 4 文件。SessionRegistry 556 行 / TurnOperations 518 行略超目标；BranchService 245 行 / Facade 437 行符合 |
