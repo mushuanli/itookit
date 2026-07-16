@@ -97,7 +97,11 @@ export class SessionManager implements ISession {
     signal(s: Signal): void {
         switch (s.type) {
             case 'send':
-                this.turnOps.sendMessage(s.text, s.attachments as any ?? [], 'default', undefined, undefined, undefined).catch(e => {
+                this.turnOps.sendMessage(s.text, (s.attachments ?? []).map(a => ({
+                    name: a.name ?? a.filename ?? '',
+                    type: a.type ?? 'file',
+                    size: a.size,
+                })), 'default', undefined, undefined, undefined).catch(e => {
                     this.registry.eventBus.emitSession(this.registry.boundSessionId ?? '', { type: 'error', error: { message: String(e) } });
                 });
                 break;
@@ -105,7 +109,7 @@ export class SessionManager implements ISession {
                 this.turnOps.abort();
                 break;
             case 'inject':
-                this.turnOps.sendMessage(s.text, [], 'default', undefined, 'inject' as any, undefined).catch(() => {});
+                this.turnOps.sendMessage(s.text, [], 'default', undefined, 'inject', undefined).catch(() => {});
                 break;
             case 'respond':
                 this.taskRunner.respondToSignal(this.registry.boundSessionId ?? '', s);

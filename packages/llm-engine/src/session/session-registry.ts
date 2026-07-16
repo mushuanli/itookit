@@ -61,27 +61,20 @@ export class SessionRegistry {
     get boundNodeId(): string | null { return this._boundNodeId; }
     get activeSessionId(): string | null { return this._activeSessionId; }
 
-    // ================================================================
-    // 会话绑定
-    // ================================================================
+    // ── 会话绑定 ───────────────────────────────────────────────────────
 
     async bindSession(nodeId: string, sessionId: string): Promise<SessionSnapshot> {
         const currentVersion = ++this.bindingVersion;
         this.unbindSession();
         this.bindingVersion = currentVersion;
-
         try {
             await this.ensureRegistered(nodeId, sessionId);
-
             if (this.bindingVersion !== currentVersion) {
                 throw new EngineError(EngineErrorCode.ABORTED, 'Bind cancelled');
             }
-
             this._boundNodeId = nodeId;
             this._boundSessionId = sessionId;
             this._activeSessionId = sessionId;
-
-            // 清除未读
             const runtime = this.sessions.get(sessionId);
             if (runtime && runtime.unreadCount > 0) {
                 runtime.unreadCount = 0;
@@ -90,7 +83,6 @@ export class SessionRegistry {
                     payload: { sessionId, count: 0 },
                 });
             }
-
             return this.getSnapshot();
         } catch (e) {
             log.error('Failed to bind session', { sessionId, nodeId, error: e });
@@ -126,9 +118,7 @@ export class SessionRegistry {
         }
     }
 
-    // ================================================================
-    // 状态查询
-    // ================================================================
+    // ── 状态查询
 
     getSnapshot(): SessionSnapshot {
         if (!this._boundSessionId || !this._boundNodeId) {
@@ -327,56 +317,32 @@ export class SessionRegistry {
             const existing = this.sessions.get(sessionId)!;
             existing.lastActiveTime = Date.now();
             this._eventBus.ensureSession(sessionId);
-
             const state = this.states.get(sessionId);
             if (state && (existing.status === 'completed' || existing.status === 'failed')) {
                 await this.reloadSessionData(nodeId, sessionId, state);
             }
-
             return;
         }
 
         await this._engine.validateManifest(nodeId, sessionId);
-
-        const runtime: SessionRuntime = {
-            sessionId,
-            nodeId,
-            status: 'idle',
-            lastActiveTime: Date.now(),
-            unreadCount: 0,
-        };
-
+        const runtime: SessionRuntime = { sessionId, nodeId, status: 'idle', lastActiveTime: Date.now(), unreadCount: 0 };
         const state = new SessionState(nodeId, sessionId);
         await this.populateState(state, nodeId, sessionId);
 
         this.sessions.set(sessionId, runtime);
         this.states.set(sessionId, state);
         this._eventBus.ensureSession(sessionId);
-
-        this._eventBus.emitGlobal({
-            type: 'session_registered',
-            payload: { sessionId },
-        });
+        this._eventBus.emitGlobal({ type: 'session_registered', payload: { sessionId } });
     }
 
     unregisterSession(sessionId: string, abortFn: (id: string) => void): void {
         const runtime = this.sessions.get(sessionId);
-        if (runtime && (runtime.status === 'running' || runtime.status === 'queued')) {
-            abortFn(sessionId);
-        }
-
+        if (runtime && (runtime.status === 'running' || runtime.status === 'queued')) abortFn(sessionId);
         this.sessions.delete(sessionId);
         this.states.delete(sessionId);
         this._eventBus.removeSession(sessionId);
-
-        if (this._activeSessionId === sessionId) {
-            this._activeSessionId = null;
-        }
-
-        this._eventBus.emitGlobal({
-            type: 'session_unregistered',
-            payload: { sessionId },
-        });
+        if (this._activeSessionId === sessionId) this._activeSessionId = null;
+        this._eventBus.emitGlobal({ type: 'session_unregistered', payload: { sessionId } });
     }
 
     // ================================================================
@@ -386,34 +352,23 @@ export class SessionRegistry {
     updateStatus(sessionId: string, status: SessionStatus): void {
         const runtime = this.sessions.get(sessionId);
         if (!runtime) return;
-
         const prevStatus = runtime.status;
         runtime.status = status;
         runtime.lastActiveTime = Date.now();
         if (status !== 'failed') runtime.error = undefined;
-
-        this._eventBus.emitGlobal({
-            type: 'session_status_changed',
-            payload: { sessionId, status, prevStatus },
-        });
+        this._eventBus.emitGlobal({ type: 'session_status_changed', payload: { sessionId, status, prevStatus } });
     }
 
     incrementUnread(sessionId: string): void {
         if (sessionId === this._boundSessionId) return;
-
         const runtime = this.sessions.get(sessionId);
         if (runtime) {
             runtime.unreadCount++;
-            this._eventBus.emitGlobal({
-                type: 'session_unread_updated',
-                payload: { sessionId, count: runtime.unreadCount },
-            });
+            this._eventBus.emitGlobal({ type: 'session_unread_updated', payload: { sessionId, count: runtime.unreadCount } });
         }
     }
 
-    // ================================================================
-    // 清理
-    // ================================================================
+    // ── 清理
 
     clearAll(abortAllFn: () => void): void {
         abortAllFn();
@@ -426,19 +381,15 @@ export class SessionRegistry {
     cleanupIdleSessions(maxIdleTime: number, abortFn: (id: string) => void): number {
         const now = Date.now();
         let cleaned = 0;
-
         for (const [sessionId, runtime] of this.sessions) {
-            if (sessionId === this._activeSessionId) continue;
-            if (sessionId === this._boundSessionId) continue;
+            if (sessionId === this._activeSessionId || sessionId === this._boundSessionId) continue;
             if (runtime.status === 'running' || runtime.status === 'queued') continue;
             if (runtime.unreadCount > 0) continue;
-
             if (now - runtime.lastActiveTime > maxIdleTime) {
                 this.unregisterSession(sessionId, abortFn);
                 cleaned++;
             }
         }
-
         if (cleaned > 0) log.info('Idle sessions cleaned', { count: cleaned });
         return cleaned;
     }
@@ -469,22 +420,16 @@ export class SessionRegistry {
 
     private async isTurnFormatSession(nodeId: string): Promise<boolean> {
         try {
-            const manifest = await this._engine.getManifest(nodeId) as any;
+            const manifest = await this._engine.getManifest(nodeId) as unknown as Record<string, unknown>;
             return manifest?.format === 'turn';
-        } catch {
-            return false;
-        }
+        } catch { return false; }
     }
 
-    private async populateFromTurnLog(
-        state: SessionState,
-        nodeId: string,
-        sessionId: string
-    ): Promise<void> {
+    private async collectHeadChain(nodeId: string, sessionId: string): Promise<{ chain: string[]; log: TurnLog }> {
         const log = new TurnLog(this._engine, nodeId, sessionId);
         const manifest = await log.loadManifest();
         const headId = manifest.currentHead;
-        if (!headId) return;
+        if (!headId) return { chain: [], log };
 
         const chain: string[] = [];
         let current: string | undefined = headId;
@@ -495,38 +440,34 @@ export class SessionRegistry {
             const t = await log.readTurn(current);
             current = t?.parents?.[0];
         }
+        return { chain, log };
+    }
+
+    private async populateFromTurnLog(
+        state: SessionState,
+        nodeId: string,
+        sessionId: string,
+    ): Promise<void> {
+        const { chain, log } = await this.collectHeadChain(nodeId, sessionId);
+        if (chain.length === 0) return;
 
         const turns = await Promise.all(chain.map(id => log.readTurn(id)));
         for (const t of turns) {
             if (!t || t._deleted) continue;
-            const projection = turnToProjection(t, t.id);
-            state.loadFromProjection(projection);
+            state.loadFromProjection(turnToProjection(t, t.id));
         }
-
         state.setTurnFormat(true);
     }
 
     private async diffAndApply(
         nodeId: string,
         sessionId: string,
-        state: SessionState
+        state: SessionState,
     ): Promise<void> {
-        const log = new TurnLog(this._engine, nodeId, sessionId);
-        const manifest = await log.loadManifest();
-        const headId = manifest.currentHead;
-        if (!headId) return;
+        const { chain } = await this.collectHeadChain(nodeId, sessionId);
+        if (chain.length === 0) return;
 
-        const headChain: string[] = [];
-        let current: string | undefined = headId;
-        const visited = new Set<string>();
-        while (current && !visited.has(current)) {
-            visited.add(current);
-            headChain.unshift(current);
-            const t = await log.readTurn(current);
-            current = t?.parents?.[0];
-        }
-
-        const headSet = new Set(headChain);
+        const headSet = new Set(chain);
 
         const toRemove = state.getTurns().filter(t => !headSet.has(t.turnId));
         for (const t of toRemove) {
@@ -536,7 +477,8 @@ export class SessionRegistry {
             }
         }
 
-        const turns = await Promise.all(headChain.map(id => log.readTurn(id)));
+        const log = new TurnLog(this._engine, nodeId, sessionId);
+        const turns = await Promise.all(chain.map(id => log.readTurn(id)));
         for (const t of turns) {
             if (!t || t._deleted) continue;
             if (state.hasTurn(t.id)) continue;
@@ -544,7 +486,7 @@ export class SessionRegistry {
             const projection = turnToProjection(t, t.id);
             const events = state.apply({
                 type: 'turn:appended',
-                ref: manifest.currentBranch,
+                ref: (await log.loadManifest()).currentBranch,
                 turnId: t.id,
                 projection,
             });

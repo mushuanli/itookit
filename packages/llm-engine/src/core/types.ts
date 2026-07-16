@@ -1,6 +1,6 @@
 // @file: llm-engine/src/core/types.ts
 
-import type { ModelTier, ChatAttachment } from '@itookit/common';
+import type { ModelTier, ChatAttachment, IToolService } from '@itookit/common';
 
 // ═══════════════════════════════════════════════════════════════
 // Core types (NodeStatus, ExecutorConfig, ExecutorType — consolidated in llm-engine)
@@ -43,6 +43,8 @@ export interface ExecutorConfig {
         timeout?: number;
         maxTokens?: number;
     };
+    /** Runtime-injected tool service (set by harness adapter). Not persisted. */
+    _toolService?: IToolService;
 }
 
 // Re-export chat types that moved to @itookit/common for backward compatibility
@@ -54,7 +56,7 @@ export { DEFAULT_SESSION_SETTINGS } from '@itookit/common';
 // ═══════════════════════════════════════════════════════════════
 
 /** 请求来源 */
-export type SessionOrigin = 'user' | 'agent' | 'system';
+export type SessionOrigin = 'user' | 'agent' | 'system' | 'inject';
 
 /** LLM history 策略 */
 export type HistoryPolicy = 'include' | 'exclude';

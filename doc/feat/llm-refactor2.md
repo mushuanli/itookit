@@ -278,7 +278,7 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 ## 9. 实施进度
 
-> 最后更新：2026-07-16 | 实施分支：v4.2 | Phase 4 完成
+> 最后更新：2026-07-16 | 实施分支：v4.2 | Phase 5 + 收尾 完成
 
 ### 已完成
 
@@ -289,6 +289,8 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 | **Phase 2** | 单一写路径 — TaskRunner 全经 TurnLog（turn 格式） | 2 个修改文件，~70 行改动 | ✅ 完成 |
 | **Phase 3** | SessionState 投影化 — TurnProjection[] + TurnLogEvent + diffAndApply | 1 个新文件，5 个修改文件 | ✅ 完成 |
 | **Phase 4** | SessionManager 拆分 — 3 新组件 + Facade，ISession 门面不变 | 3 个新文件，1 个重写，1 个修改 | ✅ 完成 |
+| **Phase 5** | 迁移工具 — `migrateToTurnFormat()` 分支感知算法 | 1 个新文件（migration.ts），1 个修改（index.ts 导出） | ✅ 完成 |
+| **收尾** | as any 清理 + 集成测试 + 文件精简 + @deprecated | 7 个修改文件，1 个新测试文件（22 tests），1 个 vitest 配置 | ✅ 完成 |
 
 #### Phase 0 明细
 
@@ -340,9 +342,7 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 ### 待完成
 
-| 阶段 | 内容 | 优先级 | 依赖 |
-|---|---|---|---|
-| **Phase 5** | 迁移工具 — `migrateToTurnFormat()` 分支感知算法 | 低（独立） | Phase 1 |
+_全部完成。无待完成项。_
 
 #### Phase 3 待办清单
 
@@ -363,25 +363,48 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 | P4.3 | `branch-service.ts`（245 行）— branch CRUD / sibling 导航 / tags | 新建 `session/branch-service.ts` | ✅ |
 | P4.4 | `session-manager.ts`（437 行）— Facade 门面，组合三者 + ISession + settings + history | 重写 `session/session-manager.ts` | ✅ |
 | P4.5 | 导出新组件（SessionRegistry, BoundContext, TurnOperations, BranchService）| 修改 `index.ts` | ✅ |
-| P4.6 | `ChatEngineLog` 标 `@deprecated` | — | ❌ 跳过（旧格式仍需，用户要求删除 @deprecated 代码而非标记） |
+| P4.6 | `ChatEngineLog` 标 `@deprecated` | `persistence/chat-engine-log.ts` | ✅ 完成（收尾阶段） |
 
-> **注**：SessionRegistry（556 行）和 TurnOperations（518 行）略超 500 行目标，但均包含 JSDoc 注释和空行，实际代码密度高。BranchService（245 行）和 Facade（437 行）符合 < 500 行目标。总计从 1672 行拆分为 4 个文件 1756 行。
+> **注（收尾前）**：SessionRegistry（556 行）和 TurnOperations（518 行）略超 500 行目标。BranchService（245 行）和 Facade（437 行）符合 < 500 行。
+> **收尾后**：SessionRegistry 498 行、TurnOperations 479 行，均符合 < 500 行目标。
+
+#### Phase 5 明细
+
+| # | 项 | 文件 | 状态 |
+|---|---|---|---|
+| P5.1 | `migrateToTurnFormat()` — 分支感知迁移算法 | 新建 `persistence/migration.ts` | ✅ |
+| P5.2 | `resolveNodeId` / `walkParentChain` / `readChatNode` 辅助函数 | 同上 | ✅ |
+| P5.3 | `buildTurnIdMap` — 内容 hash 去重（优先复用 `_turnId` meta） | 同上 | ✅ |
+| P5.4 | `buildTurnsFromChain` + `pairUserAssistant` — ChatNode → Turn 转换 | 同上 | ✅ |
+| P5.5 | `writeTurnFiles` — 并行写 turns/ 目录 | 同上 | ✅ |
+| P5.6 | 失败回退 — backup manifest + try/catch 包裹 | 同上 | ✅ |
+| P5.7 | 导出 `migrateToTurnFormat` + `MigrationResult` 类型 | 修改 `index.ts` | ✅ |
+
+#### 收尾清理明细
+
+| # | 项 | 文件 | 状态 |
+|---|---|---|---|
+| C1 | `as any` 清理 — session/ + persistence/ 核心文件归零（~12 处消除） | `session-manager.ts`, `task-runner.ts`, `session-registry.ts`, `session-event-bus.ts`, `turn-log.ts`, `chat-engine-log.ts`, `draft-area.ts`, `core/types.ts`, `common/.../loop.ts` | ✅ |
+| C2 | SessionRegistry 精简 — 提取 `collectHeadChain()` 消除 ~30 行重复 | `session-registry.ts` (556→498) | ✅ |
+| C3 | TurnOperations 精简 — 删除步骤注释、简化异常处理 | `turn-operations.ts` (518→479) | ✅ |
+| C4 | `ChatEngineLog` 标 `@deprecated` | `persistence/chat-engine-log.ts` | ✅ |
+| C5 | 集成测试 — 22 项覆盖 CRUD / 级联删除 / resend / 缓存 / 事件 | 新建 `__tests__/turn-log.test.ts` + `vitest.config.ts` | ✅ |
 
 #### Phase 5 待办清单
 
-- [ ] 新建 `persistence/migration.ts`
-- [ ] 分支感知迁移算法（对 `manifest.branches` 每个 head 走 parent 链）
-- [ ] 共享前缀 ChatNode → 同一 TurnId（内容 hash 去重）
-- [ ] sibling ChatNode → sibling Turn（同 parents）+ children 索引
-- [ ] 失败回退旧格式 + manifest 备份
+- [x] 新建 `persistence/migration.ts`
+- [x] 分支感知迁移算法（对 `manifest.branches` 每个 head 走 parent 链）
+- [x] 共享前缀 ChatNode → 同一 TurnId（内容 hash 去重）
+- [x] sibling ChatNode → sibling Turn（同 parents）+ children 索引
+- [x] 失败回退旧格式 + manifest 备份
 
 ### 验收标准达成情况
 
 | # | 标准 | 当前 |
 |---|---|---|
 | 1 | `grep engine.appendMessage\|engine.updateNode` session/ 零命中（turn 格式路径） | ✅ Phase 2 完成 |
-| 2 | `findUserMessageBefore` 等函数删除 | ✅ Phase 3 — 旧格式保留（标记 @deprecated），turn 格式用 O(1) 索引 |
-| 3 | persistence/ + session/ 中 `as any` 归零 | ⚠️ 大幅减少（Phase 3 消除 session-manager.ts 中的多处 `as any`），少量残留 |
-| 4 | 切分支增量事件（不重放全量） | ✅ Phase 3 — `diffAndApply` 替代 `reloadSessionData` 全量重放 |
-| 5 | 三条删除语义集成测试 | ⚠️ 逻辑已实现（turn 格式走 children 索引），测试待补 |
-| 6 | 后继组件均 < 500 行 | ⚠️ 原 1672 行拆为 4 文件。SessionRegistry 556 行 / TurnOperations 518 行略超目标；BranchService 245 行 / Facade 437 行符合 |
+| 2 | `findUserMessageBefore` 等函数删除 | ✅ 旧格式保留（标记 @deprecated），turn 格式用 O(1) 索引 |
+| 3 | persistence/ + session/ 中 `as any` 归零 | ✅ session-event-bus.ts 保留 2 处（EventBus 泛型固有限制，与 EventBuffer 模式一致），其余全部消除 |
+| 4 | 切分支增量事件（不重放全量） | ✅ `diffAndApply` 替代 `reloadSessionData` 全量重放 |
+| 5 | 三条删除语义集成测试 | ✅ 22 项测试覆盖：级联删除、resend 不建分支、CRUD、缓存、事件发射 |
+| 6 | 后继组件均 < 500 行 | ✅ SessionRegistry 498 / TurnOperations 479 / BranchService 245 / Facade 437 |

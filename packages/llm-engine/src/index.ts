@@ -109,6 +109,8 @@ export { ChatEngine } from './persistence/chat-engine';
 export { ChatEngineLog } from './persistence/chat-engine-log';
 export { TurnLog, turnToProjection } from './persistence/turn-log';
 export { VFSDraftArea } from './persistence/draft-area';
+export { migrateToTurnFormat } from './persistence/migration';
+export type { MigrationResult } from './persistence/migration';
 export type { TurnManifest, TurnProjection, PersistedTurn } from './persistence/turn-types';
 export type { TurnLogEvent, TurnChangeSet } from './persistence/turn-events';
 export type {

@@ -47,7 +47,7 @@ export class VFSDraftArea implements DraftArea {
         }
     }
 
-    async flush(_turn: Turn): Promise<void> {
+    async flush(_turn?: Turn | null): Promise<void> {
         this._current = null;
         if (this._draftPath) {
             try {

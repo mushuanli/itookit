@@ -169,22 +169,17 @@ export class TurnOperations {
             );
         }
 
-        // 1. 创建分支
+        // Create branch from the user message
         const newBranchNodeId = await engine.createBranch(
-            nodeId,
-            sessionId,
-            userMessage.persistedNodeId,
+            nodeId, sessionId, userMessage.persistedNodeId,
             { createdFrom: 'regenerate', copyContent: true }
         );
 
-        // 2. 获取新分支名称
         const manifest = await engine.getManifest(nodeId);
         const branchName = manifest.current_branch;
 
-        // 3. 重新加载状态
         await this.registry.reloadSessionData(nodeId, sessionId, state);
 
-        // 4. 定位分支中的 user message
         const reloadedUser = state.findSessionById(newBranchNodeId);
         if (!reloadedUser) {
             throw new EngineError(
@@ -193,7 +188,6 @@ export class TurnOperations {
             );
         }
 
-        // 5. 获取兄弟节点信息
         const branchInfo = await this.getSiblingInfo(sessionId, newBranchNodeId);
 
         // 6. 发送事件
@@ -272,7 +266,6 @@ export class TurnOperations {
         const result: DeleteResult = { deletedIds: [], deletedBranches: [] };
         if (idsToDelete.length === 0) return result;
 
-        // 1. 持久化删除
         const persistedIds = idsToDelete
             .map(id => state.findSessionById(id)?.persistedNodeId)
             .filter((id): id is string => !!id);
@@ -289,11 +282,9 @@ export class TurnOperations {
             }
         }
 
-        // 2. 内存删除
         state.removeMessages(idsToDelete);
         result.deletedIds = [...idsToDelete];
 
-        // 3. 清理孤立分支
         const shouldCleanup = options?.cleanupOrphanedBranches ?? true;
         if (shouldCleanup) {
             const orphaned = await this.findOrphanedBranches(nodeId, sessionId);
@@ -317,7 +308,6 @@ export class TurnOperations {
             }
         }
 
-        // 4. 消息删除事件
         eventBus.emitSession(sessionId, {
             type: 'messages:deleted',
             payload: { deletedIds: idsToDelete },
@@ -326,64 +316,35 @@ export class TurnOperations {
         return result;
     }
 
-    private async findOrphanedBranches(
-        nodeId: string,
-        sessionId: string
-    ): Promise<string[]> {
+    private async findOrphanedBranches(nodeId: string, sessionId: string): Promise<string[]> {
         const engine = this.registry.engine;
         const orphaned: string[] = [];
-
         try {
             const manifest = await engine.getManifest(nodeId);
             const currentBranch = manifest.current_branch;
-
             for (const [branchName, headNodeId] of Object.entries(manifest.branches)) {
                 if (branchName === currentBranch) continue;
-
                 try {
-                    const context = await engine.getSessionContextFromHead(
-                        nodeId, sessionId, headNodeId
-                    );
-
-                    const hasActiveMessages = context.some(
-                        item => item.node.role !== 'system'
-                    );
-
-                    if (!hasActiveMessages) {
+                    const context = await engine.getSessionContextFromHead(nodeId, sessionId, headNodeId);
+                    if (!context.some(item => item.node.role !== 'system')) {
                         orphaned.push(branchName);
                     }
-                } catch {
-                    orphaned.push(branchName);
-                }
+                } catch { orphaned.push(branchName); }
             }
-        } catch (e) {
-            log.warn('Failed to check orphaned branches', { nodeId, error: e });
-        }
-
+        } catch (e) { log.warn('Failed to check orphaned branches', { nodeId, error: e }); }
         return orphaned;
     }
 
-    static collectDeletableIds(
-        state: SessionState,
-        messageId: string,
-        includeResponses: boolean
-    ): string[] {
+    static collectDeletableIds(state: SessionState, messageId: string, includeResponses: boolean): string[] {
         const ids: string[] = [messageId];
-
         if (!includeResponses) return ids;
-
         const session = state.findSessionById(messageId);
         if (!session || session.role !== 'user') return ids;
-
         if (state.isTurnFormat) {
-            const childIds = state.getChildTurnIds(messageId);
-            ids.push(...childIds);
-            return ids;
+            ids.push(...state.getChildTurnIds(messageId));
+        } else {
+            ids.push(...state.collectAssistantIdsAfter(messageId));
         }
-
-        const assistantIds = state.collectAssistantIdsAfter(messageId);
-        ids.push(...assistantIds);
-
         return ids;
     }
 

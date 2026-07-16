@@ -60,7 +60,8 @@ export interface RefStore {
 
 export interface DraftArea {
     checkpoint(pause: PauseRequest): Promise<void>;
-    flush(turn: Turn): Promise<void>;
+    /** Flush (clear) the current draft. The turn parameter is optional — implementations may ignore it. */
+    flush(turn?: Turn | null): Promise<void>;
     current(): Turn | null;
     restore(): Promise<Turn | null>;
     /** Set the in-flight turn so crash-resume knows the current turn boundary. */

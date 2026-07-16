@@ -152,6 +152,13 @@ class ChatEngineRefStore implements RefStore {
 
 // ─── ChatEngineLog: ILog Adapter ─────────────────────────────────────
 
+/**
+ * @deprecated Use {@link TurnLog} for new sessions. ChatEngineLog is the
+ * legacy ILog adapter over ChatNode-based persistence (manifest.format !== 'turn').
+ * It remains for backward-compatible read access to legacy sessions but will
+ * not receive new features. To migrate a legacy session, use
+ * {@link migrateToTurnFormat} from './migration'.
+ */
 export class ChatEngineLog implements ILog {
     private readonly _refs: ChatEngineRefStore;
     private readonly _draft: VFSDraftArea;
@@ -227,7 +234,7 @@ export class ChatEngineLog implements ILog {
                     _turnId: turnId,
                     _parents: turn.parents ?? [ref],
                     _origin: turn.meta?.origin,
-                } as any,
+                } as unknown as Record<string, unknown>,
             );
             console.log('[extra-node-debug] ChatEngineLog.append() persisted', { role: msg.role, contentPreview: content.slice(0, 80) });
         }
@@ -265,7 +272,7 @@ export class ChatEngineLog implements ILog {
             const messages: ChatMessage[] = [];
             for (let i = 0; i < raw.length; i++) {
                 const c = raw[i].content;
-                const isEmpty = typeof c === 'string' ? !c.trim() : (c as any[]).length === 0;
+                const isEmpty = typeof c === 'string' ? !c.trim() : Array.isArray(c) && c.length === 0;
                 if (raw[i].role === 'assistant' && isEmpty) {
                     continue; // skip empty assistant; keep preceding user as context
                 }

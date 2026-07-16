@@ -6,7 +6,6 @@ import { ExecutorConfig } from '../core/types';
 import {
     ExecutionTask,
     TaskInput,
-    SessionEvent,
     ExecutionNode,
     SessionRuntime,
     SessionStatus,
@@ -462,11 +461,15 @@ export class TaskRunner {
                 ref: branchRef,
                 log: logAdapter,
                 llm: llmService,
-                tools: (executorConfig as any)._toolService ?? {
+                tools: executorConfig._toolService ?? {
+                    listTools: () => [],
                     getToolMeta: () => undefined,
                     getToolDefinitions: () => [],
-                    invoke: async () => ({ success: false, output: 'no tool service' }),
-                },
+                    invoke: async () => ({ toolId: 'noop', success: false, output: '', durationMs: 0 }),
+                    invokeBatch: async () => ({ results: [] }),
+                    registerTool: () => {},
+                    unregisterTool: () => {},
+                } as unknown as import('@itookit/common').IToolService,
                 middlewares: [],
                 signal: task.abortController.signal,
                 // ── LLM 配置（从 executorConfig 平铺）──
@@ -511,7 +514,7 @@ export class TaskRunner {
             let inTokens = 0;
             let outTokens = 0;
             for (const t of turns) {
-                const u = t.meta.usage as any;
+                const u = t.meta.usage as { inputTokens?: number; outputTokens?: number } | undefined;
                 inTokens += u?.inputTokens ?? 0;
                 outTokens += u?.outputTokens ?? 0;
             }
@@ -544,13 +547,18 @@ export class TaskRunner {
                             content: input.text,
                         };
                         if (contextFiles.length > 0) {
-                            (userMsg as any).attachments = contextFiles;
+                            userMsg.attachments = contextFiles.map(f => ({
+                                name: f.name,
+                                type: f.type as import('@itookit/common').AttachmentType,
+                                source: f.path ?? f.name,
+                                size: f.size,
+                            }));
                         }
                         turn.payload = [userMsg, ...turn.payload];
                     }
                     await logAdapter.append('main', turn);
                 }
-                await logAdapter.draft().flush(null as unknown as import('@itookit/common').Turn);
+                await logAdapter.draft().flush();
             } else {
                 // Legacy: persist via engine.updateNode
                 await this.engine.updateNode(sessionId, assistantNodeId, {
@@ -592,8 +600,13 @@ export class TaskRunner {
                 }
                 this.eventBus.emitSession(sessionId, {
                     type: 'finished',
-                    payload: { sessionId, tokenUsage: totalUsage },
-                } as unknown as SessionEvent);
+                    usage: {
+                        inputTokens: totalUsage.inputTokens,
+                        outputTokens: totalUsage.outputTokens,
+                        totalTokens: totalUsage.inputTokens + totalUsage.outputTokens,
+                        ...(totalUsage.costUsd !== undefined ? { costUsd: totalUsage.costUsd } : {}),
+                    },
+                });
             }
 
             this.callbacks.onStatusChange(sessionId, 'completed');
@@ -634,7 +647,7 @@ export class TaskRunner {
                 {
                     files: persistedFiles,
                     executorId: input.agentId,
-                    origin: input.origin,
+                    origin: input.origin as 'user' | 'agent' | 'system' | undefined,
                     historyPolicy: input.historyPolicy,
                 }
             );
@@ -677,13 +690,13 @@ export class TaskRunner {
                 {
                     agentId: executorConfig.id,
                     agentName: executorConfig.name,
-                    agentIcon: (executorConfig as any).icon,
+                    agentIcon: executorConfig.icon,
                     status: 'running',
                     siblingIndex: branchInfo?.siblingIndex ?? 0,
                     siblingCount: branchInfo?.siblingCount ?? 1,
                     parentAssistantId: branchInfo?.parentAssistantId,
                     parentUserNodeId,
-                    origin,
+                    origin: origin as 'user' | 'agent' | 'system' | undefined,
                     historyPolicy,
                 }
             );
@@ -723,7 +736,7 @@ export class TaskRunner {
     private async createLog(sessionId: string, nodeId: string): Promise<ILog> {
         try {
             const manifest = await this.engine.getManifest(nodeId);
-            if ((manifest as any).format === 'turn') {
+            if ((manifest as unknown as Record<string, unknown>).format === 'turn') {
                 return new TurnLog(this.engine, nodeId, sessionId);
             }
         } catch { /* manifest unreadable — use legacy */ }
@@ -818,12 +831,11 @@ export class TaskRunner {
         if (!errorAlreadyEmitted && isBound) {
             this.eventBus.emitSession(sessionId, {
                 type: 'error',
-                payload: {
+                error: {
                     message: errorMessage,
-                    error: error instanceof Error ? error
-                        : new Error(String(error)),
+                    stack: error instanceof Error ? error.stack : String(error),
                 },
-            } as unknown as SessionEvent);
+            });
         }
     }
 

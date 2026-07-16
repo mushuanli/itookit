@@ -89,9 +89,12 @@ export class SessionEventBus {
             payload = rest;
         }
 
+        // SAFETY: Discriminated union dispatch — SessionEvent.type narrows to the
+        // correct payload type at runtime. TS can't verify generically, same as
+        // EventBuffer.commit() (event-buffer.ts:58).
         this.sessionBus.channel(sessionId).emit(
             event.type as keyof SessionEventMap,
-            payload as any,
+            payload as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         );
     }
 
@@ -117,9 +120,10 @@ export class SessionEventBus {
     }
 
     emitGlobal(event: RegistryEvent): void {
+        // SAFETY: Same discriminated union dispatch pattern as emitSession.
         this.globalBus.emit(
             event.type as keyof RegistryEventMap,
-            event.payload as any,
+            event.payload as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         );
     }
 

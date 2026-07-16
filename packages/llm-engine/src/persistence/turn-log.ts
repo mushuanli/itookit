@@ -365,9 +365,9 @@ export class TurnLog implements ILog {
 
     /** Load the TurnManifest portion from the session manifest. */
     async loadManifest(): Promise<TurnManifest> {
-        const raw = await this.engine.getManifest(this.nodeId) as any;
+        const raw = await this.engine.getManifest(this.nodeId) as unknown as Record<string, unknown>;
         if (raw?.format === 'turn') {
-            return raw as TurnManifest;
+            return raw as unknown as TurnManifest;
         }
         // Bootstrap: first access on a new turn-format session
         const rootId = ulid();
@@ -386,7 +386,7 @@ export class TurnLog implements ILog {
         // Merge with any existing legacy fields (id, title, etc.)
         let existing: Record<string, unknown> = {};
         try {
-            existing = (await this.engine.getManifest(this.nodeId)) as any;
+            existing = (await this.engine.getManifest(this.nodeId)) as unknown as Record<string, unknown>;
         } catch { /* new session */ }
         const merged = {
             ...existing,
@@ -408,8 +408,12 @@ function detectTurnKind(turn: PersistedTurn): 'system' | 'chat' | 'merge' {
 export function turnToProjection(turn: PersistedTurn, turnId: TurnId): TurnProjection {
     const userMsg = turn.payload.find(m => m.role === 'user');
     const assistantMsg = turn.payload.find(m => m.role === 'assistant');
-    const attachments = (userMsg && 'attachments' in userMsg)
-        ? (userMsg as any).attachments
+    const attachments = (userMsg && 'attachments' in userMsg && Array.isArray(userMsg.attachments))
+        ? userMsg.attachments.map(a => ({
+            name: a.name ?? a.filename ?? '',
+            type: a.type ?? 'file',
+            size: a.size,
+        }))
         : undefined;
 
     return {
