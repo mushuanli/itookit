@@ -42,7 +42,7 @@ const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
     'log:ref_renamed': ['refreshBranch'],
 
     // 重新生成（保留 — 无 canonical 等价事件）
-    regenerate_started: ['clearErrors', 'flashIndicator'],
+    regenerate_started: ['clearErrors', 'renderFull', 'flashIndicator'],
     regenerate_completed: ['refreshBranch', 'refreshNav'],
 };
 

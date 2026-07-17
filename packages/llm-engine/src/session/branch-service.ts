@@ -140,9 +140,10 @@ export class BranchService {
             );
         }
 
-        if (manifest.current_branch === branchName) return;
+        const currentBranch = (manifest as any).currentBranch;
+        if (currentBranch === branchName) return;
 
-        const fromBranch = manifest.current_branch;
+        const fromBranch = currentBranch;
         await engine.switchBranch(nodeId, sessionId, branchName);
         await this.registry.reloadSessionData(nodeId, sessionId, state);
 
@@ -224,7 +225,7 @@ export class BranchService {
         return Object.entries(manifest.branches).map(([name, headNodeId]) => ({
             name,
             headNodeId,
-            isCurrent: name === manifest.current_branch,
+            isCurrent: name === (manifest as any).currentBranch,
         }));
     }
 

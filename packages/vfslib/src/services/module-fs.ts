@@ -277,17 +277,6 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.access.checkAccess(this.caller, realPath, 'list');
         const children = await this.engine.listChildren(realPath);
 
-        // Debug: trace system path leaks through getChildren
-        const sysChildren = children.filter(c => c.path.startsWith('/module/'));
-        if (sysChildren.length > 0) {
-            console.warn('[ModuleFS] getChildren: backend returned system-path nodes!', {
-                moduleId: this.moduleId,
-                requestPath: path,
-                realPath,
-                sysNodes: sysChildren.map(c => ({ path: c.path, parentPath: c.parentPath, name: c.name })),
-            });
-        }
-
         const filtered = children.filter(c => {
             if (!options?.includeHidden && isHiddenName(c.name)) return false;
             if (!options?.includeAssetDirs && isAssetDirName(c.name)) return false;
@@ -593,7 +582,14 @@ class InlineAssetOps implements IAssetOperations {
         try {
             const { realPath } = await this.fs.resolveNode(ownerPath);
             const assetDir = await this._engine().getAssetDirPath(realPath);
-            return assetDir || null;
+            if (!assetDir) return null;
+            // Convert back to virtual path so callers (e.g. FileHandle._assetIndex)
+            // pass a module-relative path to driver.getChildren().
+            const prefix = `/module/${this.fs.moduleId}/`;
+            if (assetDir.startsWith(prefix)) {
+                return '/' + assetDir.slice(prefix.length);
+            }
+            return assetDir;
         } catch { return null; }
     }
 
