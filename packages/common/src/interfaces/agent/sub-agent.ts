@@ -51,7 +51,7 @@ export interface SubAgentTask {
     /** 期望的响应格式提示（如 "返回 JSON 数组" / "返回文件路径:行号格式"） */
     responseFormat?: string;
     /** 最大执行轮次 @default 10 */
-    maxTurns?: number;
+    maxRounds?: number;
     /** 使用的 LLM 连接 ID（默认使用 subAgent 角色对应的连接） */
     connectionId?: string;
     /**
@@ -87,7 +87,7 @@ export interface SubAgentResult {
      */
     summary: string;
     /** 子代理实际执行的轮次 */
-    turns: number;
+    rounds: number;
     /** Token 使用统计 */
     tokenUsage: { input: number; output: number };
     /** 错误信息（仅 success=false 时） */

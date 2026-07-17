@@ -14,7 +14,7 @@ import type { ModelTier } from '../llm/connection';
 export interface AgentSessionInfo {
     sessionId: string;
     status: AgentStatus;
-    turns: number;
+    rounds: number;
     usage: AgentUsageSnapshot;
     loadedSkills: string[];
     isCompressed: boolean;
@@ -34,7 +34,7 @@ export type AgentStatus =
  * 资源使用快照
  */
 export interface AgentUsageSnapshot {
-    turns: number;
+    rounds: number;
     inputTokens: number;
     outputTokens: number;
     costUsd: number;
@@ -47,7 +47,7 @@ export interface AgentUsageSnapshot {
  * 预算限制配置
  */
 export interface AgentBudgetLimits {
-    maxTurns: number;
+    maxRounds: number;
     maxInputTokens: number;
     maxOutputTokens: number;
     maxCostUsd: number;
@@ -95,7 +95,7 @@ export interface AgentTaskResult {
     status: AgentStatus;
     response: string;
     usage: AgentUsageSnapshot;
-    turns: number;
+    rounds: number;
     incompleteReason?: string;
 }
 

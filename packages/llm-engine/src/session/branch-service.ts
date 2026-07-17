@@ -115,7 +115,7 @@ export class BranchService {
         eventBus.emitSession(sessionId, {
             type: 'log:appended',
             ref: options?.name ?? '',
-            turnId: newNodeId,
+            roundId: newNodeId,
         });
 
         eventBus.emitSession(sessionId, {

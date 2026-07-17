@@ -213,7 +213,7 @@ export class MissionService {
             connectionId,
             modelName,
             responseFormat: 'JSON array of TodoItem objects',
-            maxTurns: 5,
+            maxRounds: 5,
             allowedTools: [],
         };
 

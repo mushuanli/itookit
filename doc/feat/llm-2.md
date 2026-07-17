@@ -22,10 +22,10 @@
 | **S6c** 内核收敛 + 适配器清理 | ✅ | `LLMKernelAdapter` + `UIEventAdapter` 删除；`executeTask()` 切换为 `ILLMService.chatStream()` 直连；`AgentExecutor` + `BaseExecutor` 物理删除（llm-kernel）；`DependencyGraph` 删除（`resolveDependencyTree()` 替代）；`auto-continue.ts` 删除；`HarnessAdapter` 解耦（`IHarnessContext` 服务定位器 + llm-ui 3 文件迁移） | — |
 | **S7** 事件统一 | ✅ | ★ `SessionEvent` = canonical `AgentEvent` (15) + `MessageProjectionEvent` (3) + `SessionStructuralEvent` (8，含 regenerate) 替代 `OrchestratorEvent` (28)；`OrchestratorEvent` 类型已删除；`SessionEventBus` 直接接受 `SessionEvent`（无过渡期格式检测）；所有生产者（SessionManager、TaskRunner、HarnessAdapter、SessionActor）统一 emit `SessionEvent`；`HistoryView` / `SessionEventHandler` 旧事件 fallback 已清理；`EventBatchProcessor` 默认 chunkType/statusType 切换为 `message:updated`/`message:status`；`ClaudeCodeStrategy`（死代码）已删除；`HarnessStrategy` 已删除；`getHarnessAdapter()` 已删除 | — |
 | **S8** llm-kernel 消除 | ✅ | ★ `@itookit/llm-kernel` 包消除 — `NodeStatus`/`ExecutorConfig`/`ExecutorType` 内联至 `llm-engine/core/types.ts`；`setKernelDeviceManager`/`getKernelDeviceManager` 迁移至 `llm-engine/core/device-registry.ts`（新建）；`initializeKernel()` inline 至 `initializeLLMEngine()`；所有 7 处 import 路径更新（llm-engine ×4、app-shell ×2、test ×1）；6 个 `package.json` 依赖移除（llm-engine、app-shell、web-app、tauri-app、demo）；3 个 `vite.config` alias 移除（web-app、tauri-app、demo）；`tsup.config.ts` external 清理 | — |
-| **S9** 清理收尾 | ✅ | ★ `@itookit/llm-kernel` 包物理删除（源码 + dist + package.json + 配置）；`HarnessAdapter` 类删除（~370 行，`execute()` 从未被调用）；`IHarnessContext` 删除（`harness-context.ts`，从未被初始化）；`useClaudeCode`/`maxTurns` 死字段移除（`ExecutionOverrides`）；llm-ui 3 文件清理 `getHarnessContext()` 调用；SlashCommandRouter 删除 `buildHarnessSlashCallbacks`（~90 行）；`buildHarnessCallbacks`/`injectIntoRunningHarness` 简化为空实现；6 个 CLAUDE.md 文档更新 | — |
+| **S9** 清理收尾 | ✅ | ★ `@itookit/llm-kernel` 包物理删除（源码 + dist + package.json + 配置）；`HarnessAdapter` 类删除（~370 行，`execute()` 从未被调用）；`IHarnessContext` 删除（`harness-context.ts`，从未被初始化）；`useClaudeCode`/`maxRounds` 死字段移除（`ExecutionOverrides`）；llm-ui 3 文件清理 `getHarnessContext()` 调用；SlashCommandRouter 删除 `buildHarnessSlashCallbacks`（~90 行）；`buildHarnessCallbacks`/`injectIntoRunningHarness` 简化为空实现；6 个 CLAUDE.md 文档更新 | — |
 | **S10** AgentLoopExecutor → ILoop | ✅ | ★ `AgentLoopExecutor` while-true 循环 → `HarnessLoopExecutor`（AsyncGenerator ILoop, mode='harness'）；`harness-middleware.ts`（6 个 ILoopMiddleware 工厂，包装 BudgetController/ContextManager/ErrorRecoveryService/BackPressureValidator/HITLQueue/SkillService）；`ILoopMiddleware.onToolCalls` 钩子 + `ControlDirective.pause` action 统一 plan confirm / permission / HITL 暂停路径；loop-middleware 存根改为委托模式（接受可选 `harnessImpl`）；`HarnessMiddlewareSet` 允许外部注入；`app-shell/bootstrap.ts` 注册 `HarnessLoopExecutor` | — |
-| **S11** Resume + LiteSubAgentRouter ILoop | ✅ | ★ `LoopExecutor.resume()` — 抽取 `executeLoop(ctx, startTurn, initialTurns)`，`run()` 和 `resume()` 共享；`resume()` 从 `log.fold()` 重建消息 → 计数已完成轮次 → 重入循环；`resumeDrive()` — 调用 `loop.resume(checkpoint)` + `driveGenerator()`；`HarnessLoopExecutor.resume()` — 存储 `lastCtx`，基础重建后委托 `run()`；TaskRunner checkpoint 检测 — `log.draft().restore()` → `resumeDrive()` : `drive()`；★ `LiteSubAgentRouter` 迁移至 ILoop — 用 `LoopExecutor` + 手动驱动替代 `UnifiedLoopStrategy`；`createInMemoryLog()` + `createToolServiceAdapter()` + ILLMService connection/model wrapper；`loopFactory` 可选注入 | — |
-| **S12** 外层架构 | ✅ | ★ `ISession` 接口 — `signal()` + `events()` 两个方法；`SessionManager implements ISession` — 51 方法门面降级为 Channel 原语 + CommandBus 命令；`DraftArea.setCurrent()` 接线 — `driveGenerator()` 在 `turn:start` 处持久化 in-flight 轮次边界；canonical `AgentEvent` 补全 — 15→23 变体（`signal_resolved`、`log:ref_created/deleted/merged`、`budget:warning/exhausted`、`context:compressed`、`goal:progress`）；`ICommandBus` + `CommandBus` 实现（llm-engine 层）；`ILLMPlugin` + `ExtensionRegistry` + 3 个内置插件（session/vcs/history）；15 个 UI 文件迁移至 `commands.execute()` | — |
+| **S11** Resume + LiteSubAgentRouter ILoop | ✅ | ★ `LoopExecutor.resume()` — 抽取 `executeLoop(ctx, startRound, initialRounds)`，`run()` 和 `resume()` 共享；`resume()` 从 `log.fold()` 重建消息 → 计数已完成轮次 → 重入循环；`resumeDrive()` — 调用 `loop.resume(checkpoint)` + `driveGenerator()`；`HarnessLoopExecutor.resume()` — 存储 `lastCtx`，基础重建后委托 `run()`；TaskRunner checkpoint 检测 — `log.draft().restore()` → `resumeDrive()` : `drive()`；★ `LiteSubAgentRouter` 迁移至 ILoop — 用 `LoopExecutor` + 手动驱动替代 `UnifiedLoopStrategy`；`createInMemoryLog()` + `createToolServiceAdapter()` + ILLMService connection/model wrapper；`loopFactory` 可选注入 | — |
+| **S12** 外层架构 | ✅ | ★ `ISession` 接口 — `signal()` + `events()` 两个方法；`SessionManager implements ISession` — 51 方法门面降级为 Channel 原语 + CommandBus 命令；`DraftArea.setCurrent()` 接线 — `driveGenerator()` 在 `round:start` 处持久化 in-flight 轮次边界；canonical `AgentEvent` 补全 — 15→23 变体（`signal_resolved`、`log:ref_created/deleted/merged`、`budget:warning/exhausted`、`context:compressed`、`goal:progress`）；`ICommandBus` + `CommandBus` 实现（llm-engine 层）；`ILLMPlugin` + `ExtensionRegistry` + 3 个内置插件（session/vcs/history）；15 个 UI 文件迁移至 `commands.execute()` | — |
 
 ### 全部完成（S1~S12）
 
@@ -56,7 +56,7 @@
 | # | 项目 | 设计位置 | S12 状态 |
 |---|---|---|---|
 | 1 | **`ISession` 接口** | §4 Channel 原语 | ✅ `signal()` + `events()`；`SessionManager implements ISession` |
-| 2 | **`DraftArea.setCurrent()` 接线** | §2.1 / loop-driver | ✅ 接口声明 + `driveGenerator()` 在 `turn:start` 处调用 |
+| 2 | **`DraftArea.setCurrent()` 接线** | §2.1 / loop-driver | ✅ 接口声明 + `driveGenerator()` 在 `round:start` 处调用 |
 | 3 | **`ExtensionRegistry` + `IPlugin`** | §6 扩展系统 | ✅ `ILLMPlugin`/`ExtensionContext`/`IExtensionRegistry` 接口 + 实现 |
 | 4 | **`ICommandBus`**（llm-engine 层） | §6.2 / §6.3 | ✅ 接口 + `CommandBus` 实现；51 方法 → 60+ 命令 |
 | 5 | **SessionManager 瘦身** | §6.3 | ✅ `SessionManager implements ISession`；15 个 UI 文件迁移至 `commands.execute()` |
@@ -124,7 +124,7 @@
 
 ### 2.1 Log — 状态存储的本质
 
-对话不是"可变的消息列表"，而是 **append-only 的轮次 DAG + 可移动引用**（Turn 可有多个 parent）：
+对话不是"可变的消息列表"，而是 **append-only 的轮次 DAG + 可移动引用**（Round 可有多个 parent）：
 
 - 任意时刻的"当前状态" = `fold(log, ref, strategy)` — 沿 ref 将 DAG 线性化的投影
 - 分支 = 新 ref；回退 = 移动 ref；保存 = tag（命名 ref）；编辑 = 新 sibling 节点
@@ -136,7 +136,7 @@
 ```mermaid
 graph RL
     N["后续对话"] --> M
-    M["🔀 merge turn<br/>parents=[B2, C2]<br/>strategy=summarize"] --> B2 & C2
+    M["🔀 merge round<br/>parents=[B2, C2]<br/>strategy=summarize"] --> B2 & C2
     B2 --> B1 --> F["fork 点"]
     C2 --> C1 --> F
     F --> R["root"]
@@ -151,7 +151,7 @@ graph RL
 Agent Loop 是一个**协程**，不是函数调用：
 
 ```typescript
-run(context): AsyncGenerator<AgentEvent, Turn[], Signal>
+run(context): AsyncGenerator<AgentEvent, Round[], Signal>
 //                    ↑ yield 出去          ↑ next(signal) 送回来
 ```
 
@@ -213,7 +213,7 @@ graph TB
     Core -->|"events()<br/>AsyncIterable&lt;AgentEvent&gt;"| UI
     Plugins -->|"注册 executor/middleware<br/>/command/view"| Core
     Core -->|"ILLMService<br/>(唯一调用路径)"| LLM_API
-    Core -->|"append-only turns + refs"| VFS
+    Core -->|"append-only rounds + refs"| VFS
     Plugins -->|"工具调用"| MCP
 ```
 
@@ -282,11 +282,11 @@ graph TB
 graph TB
     subgraph Log_P["<b>Log 原语</b>"]
         style Log_P fill:#e8f5e9,stroke:#388e3c
-        Append["append(ref, turn)<br/><i>唯一写入口</i>"]
+        Append["append(ref, round)<br/><i>唯一写入口</i>"]
         Fold["fold(ref, strategy) → Message[]<br/><i>DAG 线性化投影（带缓存）</i>"]
         Refs["RefStore<br/>create/move/delete/tag"]
         MergeOp["merge(refs, strategy)<br/><i>多父节点 · 分支组合</i>"]
-        RebaseOp["rebase(ref, at, turns)<br/><i>插入 = 新 ref · 旧支不动</i>"]
+        RebaseOp["rebase(ref, at, rounds)<br/><i>插入 = 新 ref · 旧支不动</i>"]
         Draft["DraftArea<br/><i>in-flight 轮次草稿<br/>崩溃安全</i>"]
     end
 
@@ -294,8 +294,8 @@ graph TB
         style Loop_P fill:#fff3e0,stroke:#f57c00
         Coroutine["AsyncGenerator 协程<br/>yield AgentEvent<br/>receive Signal"]
         Checkpoint["轮次边界检查点<br/><i>唯一合法暂停点</i>"]
-        Resume["resume(turnId)<br/><i>HITL 恢复 ≡ 崩溃恢复</i>"]
-        Pipeline["中间件管线<br/>before/after turn hooks"]
+        Resume["resume(roundId)<br/><i>HITL 恢复 ≡ 崩溃恢复</i>"]
+        Pipeline["中间件管线<br/>before/after round hooks"]
     end
 
     subgraph Channel_P["<b>Channel 原语</b>"]
@@ -352,7 +352,7 @@ sequenceDiagram
 
     User->>View: 输入消息
     View->>Chan: signal({type:'send', text})
-    Chan->>Log: append(ref, userTurn)
+    Chan->>Log: append(ref, userRound)
     Chan->>Loop: dispatch(executor='loop')
 
     activate Loop
@@ -360,7 +360,7 @@ sequenceDiagram
     Loop->>Exec: run(ctx) — 启动协程
 
     activate Exec
-    loop 每轮 (turn)
+    loop 每轮 (round)
         Exec->>MW: beforeTurn hooks (budget 检查...)
         Exec->>LLM: chatStream(messages)
         LLM-->>Exec: chunk 流
@@ -381,9 +381,9 @@ sequenceDiagram
         end
 
         Exec->>MW: afterTurn hooks (back-pressure...)
-        Exec->>Log: append(ref, assistantTurn) — 检查点
+        Exec->>Log: append(ref, assistantRound) — 检查点
     end
-    Exec-->>Loop: return Turn[] (协程结束)
+    Exec-->>Loop: return Round[] (协程结束)
     deactivate Exec
 
     Loop-->>Chan: yield finished(usage)
@@ -398,30 +398,30 @@ sequenceDiagram
 四个接口即内核的全部对外承诺（**唯二的硬契约是 `AgentEvent` schema 与 `ILoop` 签名**，其余可演化）：
 
 ```typescript
-// ── 1. Log — single source of truth (append-only turn DAG) ───
-interface Turn {
-    id: TurnId;
+// ── 1. Log — single source of truth (append-only round DAG) ───
+interface Round {
+    id: RoundId;
     /** 1 parent = linear; 2+ parents = merge point. */
-    parents: TurnId[];
+    parents: RoundId[];
     /** One user/assistant message group. */
     payload: Message[];
 }
 
 interface ILog {
     /** The only write entry. Streaming deltas do NOT go here. */
-    append(ref: Ref, turn: Turn): Promise<TurnId>;
+    append(ref: Ref, round: Round): Promise<RoundId>;
     /** State = linearized projection of the DAG, cached by (ref, strategy). */
     fold(ref: Ref, strategy?: AssemblyStrategy): Promise<Message[]>;
     /** branch/rollback/save/tag are all ref operations. */
     refs(): RefStore;
-    /** Crash-safe area for the in-flight turn. */
+    /** Crash-safe area for the in-flight round. */
     draft(): DraftArea;
-    /** Combine branches: creates a merge turn whose parents are the ref tips. */
+    /** Combine branches: creates a merge round whose parents are the ref tips. */
     merge(refs: Ref[], strategy: AssemblyStrategy): Promise<Ref>;
     /** Insertion in an immutable DAG: new ref with cherry-picked downstream
-     *  turns; the old branch stays intact. regenerate=true cascades
-     *  re-generation of causally-invalidated downstream turns. */
-    rebase(ref: Ref, insertAfter: TurnId, turns: Turn[],
+     *  rounds; the old branch stays intact. regenerate=true cascades
+     *  re-generation of causally-invalidated downstream rounds. */
+    rebase(ref: Ref, insertAfter: RoundId, rounds: Round[],
            opts?: { regenerate?: boolean }): Promise<Ref>;
 }
 
@@ -429,12 +429,12 @@ interface ILog {
 type AssemblyStrategy =
     | { type: 'concat'; order: 'topo' | 'timestamp' }   // topics don't overlap
     | { type: 'summarize-branches'; mainline: Ref }     // converge after parallel exploration
-    | { type: 'pick'; turns: TurnId[] };                // cherry-pick exact turns
+    | { type: 'pick'; rounds: RoundId[] };                // cherry-pick exact rounds
 
 interface RefStore {
-    create(name: string, at: TurnId): Ref;
-    move(ref: Ref, to: TurnId): void;        // rollback = move backwards
-    tag(name: string, at: TurnId): void;     // save = named immutable ref
+    create(name: string, at: RoundId): Ref;
+    move(ref: Ref, to: RoundId): void;        // rollback = move backwards
+    tag(name: string, at: RoundId): void;     // save = named immutable ref
     delete(ref: Ref): void;
     list(): Ref[];
 }
@@ -443,17 +443,17 @@ interface RefStore {
 interface ILoop {
     readonly mode: string; // 'chat' | 'loop' | 'mission' | 'graph' | ...
     /** Yields events out; receives signals at yield points.
-     *  Turn boundary = checkpoint = the only legal pause point. */
-    run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal>;
+     *  Round boundary = checkpoint = the only legal pause point. */
+    run(ctx: LoopContext): AsyncGenerator<AgentEvent, Round[], Signal>;
     /** HITL-resume and crash-resume share this single path. */
-    resume(checkpoint: TurnId): AsyncGenerator<AgentEvent, Turn[], Signal>;
+    resume(checkpoint: RoundId): AsyncGenerator<AgentEvent, Round[], Signal>;
 }
 
 interface ILoopMiddleware {
     readonly name: string;
-    beforeTurn?(ctx: TurnContext): Promise<void | ControlDirective>;
-    afterTurn?(ctx: TurnContext, result: TurnResult): Promise<void | ControlDirective>;
-    onError?(ctx: TurnContext, error: Error): Promise<RecoveryAction>;
+    beforeTurn?(ctx: RoundContext): Promise<void | ControlDirective>;
+    afterTurn?(ctx: RoundContext, result: RoundResult): Promise<void | ControlDirective>;
+    onError?(ctx: RoundContext, error: Error): Promise<RecoveryAction>;
 }
 
 // ── 3. Channel — session as process ──────────────────────────
@@ -485,7 +485,7 @@ interface Goal {
     edges?: Array<[string, string]>;
 }
 
-type Predicate = (result: TurnResult) => Promise<Verdict>;
+type Predicate = (result: RoundResult) => Promise<Verdict>;
 type Verdict = { status: 'done' | 'retry' | 'hitl' | 'failed'; feedback?: string };
 ```
 
@@ -494,7 +494,7 @@ type Verdict = { status: 'done' | 'retry' | 'hitl' | 'failed'; feedback?: string
 ```typescript
 type AgentEvent =
     // lifecycle
-    | { type: 'turn:start' | 'turn:end'; turnId: TurnId }
+    | { type: 'round:start' | 'round:end'; roundId: RoundId }
     | { type: 'finished'; usage: TokenUsage }
     | { type: 'error'; error: SerializedError }
     // streaming (transient — never written to Log)
@@ -525,7 +525,7 @@ UI 消费规则：`视图 = f(fold(log), 瞬时事件)`。收到 `log:*` 事件�
 | `createBranch` / `deleteBranch` | `refs.create` / `refs.delete` |
 | **git 式保存 / 回退 / tag（新增）** | `refs.tag` / `refs.move` —— **免费副产品** |
 | **并行探索后组合（新增）** | N 个 ref 并发 `loop.run` + `log.merge(refs, strategy)` |
-| **节点间插入（新增）** | `log.rebase(ref, at, turns)` —— 新 ref，旧支可回；`regenerate` 级联重生成 |
+| **节点间插入（新增）** | `log.rebase(ref, at, rounds)` —— 新 ref，旧支可回；`regenerate` 级联重生成 |
 | HITL 响应 / plan 确认 | `channel.signal(respond)` → 协程 resume |
 | 用户中途注入 (`inject`) | `channel.signal(inject)` → yield 点消费 |
 | `SessionRecovery` | `loop.resume(lastCheckpoint)` —— 与 HITL 同路径 |
@@ -568,8 +568,8 @@ export const vcsPlugin: IPlugin = {
         ctx.commands.register('vcs.rollback',      ({ ref, to }) => refs.move(ref, to));
         ctx.commands.register('vcs.save',          ({ name, at }) => refs.tag(name, at));
         ctx.commands.register('vcs.merge',         ({ refs: r, strategy }) => ctx.log.merge(r, strategy));
-        ctx.commands.register('vcs.rebase',        ({ ref, at, turns, regenerate }) =>
-            ctx.log.rebase(ref, at, turns, { regenerate }));
+        ctx.commands.register('vcs.rebase',        ({ ref, at, rounds, regenerate }) =>
+            ctx.log.rebase(ref, at, rounds, { regenerate }));
         ctx.commands.register('vcs.log',           () => refs.list());
     },
 };
@@ -637,7 +637,7 @@ export const vcsPlugin: IPlugin = {
 | **Jujutsu (jj)** | 改写历史是一等操作：rebase 记入 oplog，旧支永远可回 | `rebase()` 产生新 ref，因果失效显式化（stale 标记 / 级联重生成） |
 | **Event Sourcing** | 日志是真相，状态是投影 | `fold(log, ref)`；删除三份事实源 |
 | **LangGraph** | Checkpointer 与 runtime 分离；`interrupt()` = checkpoint 暂停 | Loop 检查点；HITL 统一 |
-| **Temporal** | 暂停/恢复/崩溃恢复同一代码路径 | `resume(turnId)` 单一入口 |
+| **Temporal** | 暂停/恢复/崩溃恢复同一代码路径 | `resume(roundId)` 单一入口 |
 | **Kubernetes** | 声明式期望状态 + reconcile 控制回路 | Goal 原语；Mission/Graph 收敛 |
 | **Erlang/OTP** | 进程 + mailbox；交互即消息 | Channel 原语；Signal 类型 |
 | **Elm/Redux** | UI = f(state)，单向数据流 | 投影渲染；消灭双渲染路径 |
@@ -667,7 +667,7 @@ export const vcsPlugin: IPlugin = {
 
 | 文档 | 模块 | 核心内容 |
 |---|---|---|
-| [01-log.md](./llm-2/01-log.md) | **Log 原语** | 四不变式 · Turn/Ref 结构 · ULID ID 方案 · fold/merge/rebase 算法 · DraftArea · VFS 布局 · ChatEngine 迁移 |
+| [01-log.md](./llm-2/01-log.md) | **Log 原语** | 四不变式 · Round/Ref 结构 · ULID ID 方案 · fold/merge/rebase 算法 · DraftArea · VFS 布局 · ChatEngine 迁移 |
 | [02-loop.md](./llm-2/02-loop.md) | **Loop 原语** | 协程协议（5 条规则）· 轮次状态机 · 六机制归一的 pause/resume · 中间件管线 · 6 个内置中间件规格 |
 | [03-channel.md](./llm-2/03-channel.md) | **Channel 原语** | Session 生命周期状态机 · Signal×状态语义矩阵 · canonical AgentEvent 全集（~22 个，权威/瞬时分类）· CommandBus |
 | [04-goal.md](./llm-2/04-goal.md) | **Goal 原语** | reconcile 算法（事件驱动）· 唯一 DependencyScheduler · 3 个内置 Predicate · 4 个现有控制回路的配置化表达 |

@@ -10,20 +10,20 @@
 
 import type { TokenUsage } from '../llm/completion';
 
-// ─── Turn lifecycle (authoritative) ──────────────────────────────────
+// ─── Round lifecycle (authoritative) ──────────────────────────────────
 
-export interface AgentEventTurnStart {
-    type: 'turn:start';
-    turnId: string;
+export interface AgentEventRoundStart {
+    type: 'round:start';
+    roundId: string;
     sessionId: string;
-    turn: number;
+    round: number;
 }
 
-export interface AgentEventTurnEnd {
-    type: 'turn:end';
-    turnId: string;
+export interface AgentEventRoundEnd {
+    type: 'round:end';
+    roundId: string;
     sessionId: string;
-    turn: number;
+    round: number;
 }
 
 export interface AgentEventFinished {
@@ -111,7 +111,7 @@ export interface AgentEventSignalResolved {
 export interface AgentEventLogAppended {
     type: 'log:appended';
     ref: string;
-    turnId: string;
+    roundId: string;
 }
 
 export interface AgentEventLogRefMoved {
@@ -140,7 +140,7 @@ export interface AgentEventLogRefDeleted {
 
 export interface AgentEventLogMerged {
     type: 'log:merged';
-    mergeTurnId: string;
+    mergeRoundId: string;
     refs: string[];
 }
 
@@ -176,8 +176,8 @@ export interface AgentEventGoalProgress {
 // ─── Canonical union ─────────────────────────────────────────────────
 
 export type AgentEvent =
-    | AgentEventTurnStart
-    | AgentEventTurnEnd
+    | AgentEventRoundStart
+    | AgentEventRoundEnd
     | AgentEventFinished
     | AgentEventError
     | AgentEventStreamThinking

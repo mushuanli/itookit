@@ -2,7 +2,7 @@
 // shell_session — spawn a persistent shell with bidirectional I/O.
 //
 // Unlike shell_exec (fire-and-forget), shell_session:
-//   • Keeps the process alive between agent turns
+//   • Keeps the process alive between agent rounds
 //   • Preserves working directory and environment across commands
 //   • Accepts user/agent input via tty_write
 //   • Emits real-time output events for the UI

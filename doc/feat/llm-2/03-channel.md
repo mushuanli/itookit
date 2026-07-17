@@ -60,16 +60,16 @@ Mailbox 规则：信号按到达序处理；`abort` 插队到队首。
 
 | 事件 | 类别 | 权威性 | UI 反应 |
 |---|---|---|---|
-| `turn:start` / `turn:end` | lifecycle | 权威 | 轮次容器创建/封口 |
+| `round:start` / `round:end` | lifecycle | 权威 | 轮次容器创建/封口 |
 | `finished` (usage) | lifecycle | 权威 | 退出流式态 + token 统计 |
 | `error` | lifecycle | 权威 | 错误卡片 |
 | `stream:thinking` / `stream:content` (delta) | streaming | **瞬时** | 临时增量渲染 |
 | `tool:queued` / `tool:input` / `tool:running` / `tool:success` / `tool:error` | tool | 权威 | 工具子节点状态 |
 | `await_signal` (PauseRequest) | pause | 权威 | HITL/确认对话框 |
 | `signal_resolved` | pause | 权威 | 对话框关闭 |
-| `log:appended` (turnId) | log | 权威 | **重投影该轮次**（覆盖瞬时增量） |
+| `log:appended` (roundId) | log | 权威 | **重投影该轮次**（覆盖瞬时增量） |
 | `log:ref_moved` / `log:ref_created` / `log:ref_deleted` | log | 权威 | 分支指示器 / 历史重投影 |
-| `log:merged` (mergeTurnId) | log | 权威 | merge 节点渲染 |
+| `log:merged` (mergeRoundId) | log | 权威 | merge 节点渲染 |
 | `budget:warning` / `budget:exhausted` | middleware | 权威 | 预算提示 |
 | `context:compressed` (info) | middleware | 权威 | 压缩标记 |
 | `goal:progress` (done/total) | goal | 权威 | Mission/任务面板 |
@@ -128,5 +128,5 @@ interface ICommandBus {
 | 问题 | 倾向 |
 |---|---|
 | 多窗口/多视图订阅同一 session | events() 多播（EventBus 天然支持）；投影各自独立 |
-| 事件持久化（审计） | 权威事件已在 Log 中（turn/ref 即审计线索）；瞬时事件不持久（YAGNI） |
+| 事件持久化（审计） | 权威事件已在 Log 中（round/ref 即审计线索）；瞬时事件不持久（YAGNI） |
 | 背压（LLM 产出快于 UI 消费） | 瞬时事件 coalesce 已覆盖；权威事件量级低无需处理 |

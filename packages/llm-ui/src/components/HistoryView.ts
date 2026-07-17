@@ -384,8 +384,8 @@ export class HistoryView implements IHistoryPresenter {
 
             case 'stream:thinking:start':
             case 'stream:content:start':
-            case 'turn:start':
-            case 'turn:end':
+            case 'round:start':
+            case 'round:end':
                 break;
 
             case 'stream:thinking:stop':

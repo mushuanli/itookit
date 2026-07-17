@@ -22,7 +22,7 @@ import {
 
 export interface LoopPresetConfig {
     budget?: {
-        maxTurns?: number;
+        maxRounds?: number;
         maxInputTokens?: number;
         maxOutputTokens?: number;
     };
@@ -61,7 +61,7 @@ export function createLoopExecutor(
 
     // Budget (always included)
     middlewares.push(createBudgetMiddleware({
-        maxTurns: config?.budget?.maxTurns ?? 50,
+        maxRounds: config?.budget?.maxRounds ?? 50,
         maxInputTokens: config?.budget?.maxInputTokens,
         maxOutputTokens: config?.budget?.maxOutputTokens,
     }, harness?.budget));

@@ -12,11 +12,11 @@ import { EngineError, EngineErrorCode } from '../core/errors';
 import { IChatEngine } from '../persistence/types';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
-import { TurnLog, turnToProjection } from '../persistence/turn-log';
+import { RoundLog, roundToProjection } from '../persistence/round-log';
 import { log } from '../utils/logger';
 
 /**
- * Context returned by ensureBound() — shared across TurnOperations and BranchService.
+ * Context returned by ensureBound() — shared across RoundOperations and BranchService.
  */
 export interface BoundContext {
     sessionId: string;
@@ -28,7 +28,7 @@ export interface BoundContext {
 /**
  * SessionRegistry — session lifecycle, binding, state queries, and event routing.
  *
- * Owns the sessions Map, states Map, and binding state. TurnOperations and
+ * Owns the sessions Map, states Map, and binding state. RoundOperations and
  * BranchService depend on this component for ensureBound(), reloadSessionData(),
  * and event emission.
  */
@@ -53,7 +53,7 @@ export class SessionRegistry {
         this._eventBus = new SessionEventBus();
     }
 
-    // === 访问器（供 TurnOperations / BranchService 使用）===
+    // === 访问器（供 RoundOperations / BranchService 使用）===
 
     get eventBus(): SessionEventBus { return this._eventBus; }
     get engine(): IChatEngine { return this._engine; }
@@ -208,8 +208,8 @@ export class SessionRegistry {
         }
 
         if (session.role === 'assistant') {
-            const userTurn = state.findUserTurnForAssistant(messageId);
-            if (!userTurn?.userMessage) return { allowed: false, reason: 'No user message found' };
+            const userRound = state.findUserRoundForAssistant(messageId);
+            if (!userRound?.userMessage) return { allowed: false, reason: 'No user message found' };
             return { allowed: true };
         }
 
@@ -249,7 +249,7 @@ export class SessionRegistry {
     }
 
     // ================================================================
-    // 守卫：ensureBound — TurnOperations / BranchService 的入口守卫
+    // 守卫：ensureBound — RoundOperations / BranchService 的入口守卫
     // ================================================================
 
     ensureBound(): BoundContext {
@@ -379,11 +379,11 @@ export class SessionRegistry {
         nodeId: string,
         sessionId: string
     ): Promise<void> {
-        await this.populateFromTurnLog(state, nodeId, sessionId);
+        await this.populateFromRoundLog(state, nodeId, sessionId);
     }
 
-    private async collectHeadChain(nodeId: string, sessionId: string): Promise<{ chain: string[]; log: TurnLog }> {
-        const log = new TurnLog(this._engine, nodeId, sessionId);
+    private async collectHeadChain(nodeId: string, sessionId: string): Promise<{ chain: string[]; log: RoundLog }> {
+        const log = new RoundLog(this._engine, nodeId, sessionId);
         const manifest = await log.loadManifest();
         const headId = manifest.currentHead;
         if (!headId) return { chain: [], log };
@@ -394,13 +394,13 @@ export class SessionRegistry {
         while (current && !visited.has(current)) {
             visited.add(current);
             chain.unshift(current);
-            const t = await log.readTurn(current);
+            const t = await log.readRound(current);
             current = t?.parents?.[0];
         }
         return { chain, log };
     }
 
-    private async populateFromTurnLog(
+    private async populateFromRoundLog(
         state: SessionState,
         nodeId: string,
         sessionId: string,
@@ -408,10 +408,10 @@ export class SessionRegistry {
         const { chain, log } = await this.collectHeadChain(nodeId, sessionId);
         if (chain.length === 0) return;
 
-        const turns = await Promise.all(chain.map(id => log.readTurn(id)));
-        for (const t of turns) {
+        const rounds = await Promise.all(chain.map(id => log.readRound(id)));
+        for (const t of rounds) {
             if (!t || t._deleted) continue;
-            state.loadFromProjection(turnToProjection(t, t.id));
+            state.loadFromProjection(roundToProjection(t, t.id));
         }
     }
 
@@ -425,25 +425,25 @@ export class SessionRegistry {
 
         const headSet = new Set(chain);
 
-        const toRemove = state.getTurns().filter(t => !headSet.has(t.turnId));
+        const toRemove = state.getRounds().filter(t => !headSet.has(t.roundId));
         for (const t of toRemove) {
-            const events = state.apply({ type: 'turn:deleted', turnId: t.turnId });
+            const events = state.apply({ type: 'round:deleted', roundId: t.roundId });
             for (const e of events) {
                 this._eventBus.emitSession(sessionId, e);
             }
         }
 
-        const log = new TurnLog(this._engine, nodeId, sessionId);
-        const turns = await Promise.all(chain.map(id => log.readTurn(id)));
-        for (const t of turns) {
+        const log = new RoundLog(this._engine, nodeId, sessionId);
+        const rounds = await Promise.all(chain.map(id => log.readRound(id)));
+        for (const t of rounds) {
             if (!t || t._deleted) continue;
-            if (state.hasTurn(t.id)) continue;
+            if (state.hasRound(t.id)) continue;
 
-            const projection = turnToProjection(t, t.id);
+            const projection = roundToProjection(t, t.id);
             const events = state.apply({
-                type: 'turn:appended',
+                type: 'round:appended',
                 ref: (await log.loadManifest()).currentBranch,
-                turnId: t.id,
+                roundId: t.id,
                 projection,
             });
             for (const e of events) {

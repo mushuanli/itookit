@@ -202,7 +202,7 @@ export class SessionEventHandler {
                 cacheReadTokens: p?.tokenUsage?.cacheReadTokens ?? p?.usage?.cacheReadTokens,
                 costUsd: p?.tokenUsage?.costUsd ?? p?.usage?.costUsd ?? 0,
                 contextUsageRatio: p?.tokenUsage?.contextUsageRatio ?? p?.usage?.contextUsageRatio ?? 0,
-                turns: p?.tokenUsage?.turns ?? 0,
+                rounds: p?.tokenUsage?.rounds ?? 0,
                 durationMs: p?.tokenUsage?.durationMs ?? 0,
                 isEstimated: p?.tokenUsage?.isEstimated ?? true,
             } : null;

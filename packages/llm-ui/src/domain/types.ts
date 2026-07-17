@@ -177,7 +177,7 @@ export interface TokenStats {
     costUsd: number;
     /** 上下文窗口使用率 [0, 1] */
     contextUsageRatio: number;
-    turns: number;
+    rounds: number;
     durationMs: number;
     /** true = 字符估算；false = API 精确值 */
     isEstimated: boolean;

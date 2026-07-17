@@ -4,7 +4,7 @@
 //
 // S5: Uses DependencyScheduler + reconcile() via executeWithReconcile().
 
-import type { IVFSManager, ILLMService, ILoop, LoopContext, GoalNode, ILog, Ref, RefStore, DraftArea, AssemblyStrategy, Turn, ChatMessage, AgentEvent, Signal, IToolService } from '@itookit/common';
+import type { IVFSManager, ILLMService, ILoop, LoopContext, GoalNode, ILog, Ref, RefStore, DraftArea, AssemblyStrategy, Round, ChatMessage, AgentEvent, Signal, IToolService } from '@itookit/common';
 import { SessionMetaStore } from './session-meta-store';
 import type { GraphExecutionOptions, GraphEvent, SessionExecutionResult } from './types';
 import { createGraphGoal, resolveDependencyTree } from './graph-goal-factory';
@@ -118,7 +118,7 @@ function createNoopLLMService(): ILLMService {
 
 function createNoopLog(): ILog {
     return {
-        async append(_ref: Ref, _turn: Turn): Promise<string> { return ''; },
+        async append(_ref: Ref, _round: Round): Promise<string> { return ''; },
         async fold(_ref: Ref, _strategy?: AssemblyStrategy): Promise<ChatMessage[]> { return []; },
         refs(): RefStore {
             return { create: () => '', move: () => {}, tag: () => {}, delete: () => {}, list: () => [] };

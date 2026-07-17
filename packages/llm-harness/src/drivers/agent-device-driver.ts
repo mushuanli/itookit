@@ -45,7 +45,7 @@ interface CostModel {
 }
 
 const DEFAULT_BUDGET: AgentBudgetLimits = {
-    maxTurns: 100,
+    maxRounds: 100,
     maxInputTokens: 5_000_000,
     maxOutputTokens: 1_000_000,
     maxCostUsd: 10,

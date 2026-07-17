@@ -3,26 +3,26 @@
 // Mirrors AgentLoopExecutor's while(true) loop but uses AsyncGenerator (yield AgentEvent)
 // and composes middleware for cross-cutting concerns.
 //
-// Loop invariant (each turn):
-//   1. Flush injections (HITL middleware beforeTurn)
-//   2. Budget check + auto-downgrade (budget middleware beforeTurn)
-//   3. Context compress (compression middleware beforeTurn)
+// Loop invariant (each round):
+//   1. Flush injections (HITL middleware beforeRound)
+//   2. Budget check + auto-downgrade (budget middleware beforeRound)
+//   3. Context compress (compression middleware beforeRound)
 //   4. Build system prompt + messages from ContextManager
 //   5. LLM call (streaming via ILLMService.chatStream)
 //   6. Error recovery (error-recovery middleware onError → retry/compress/fallback)
 //   7. Parse tool calls (structured + XML fallback)
 //   8. onToolCalls middleware (plan confirm → pause)
 //   9. Execute tools (reads parallel, writes serial)
-//  10. afterTurn middleware (back-pressure → inject)
-//  11. Build turn → log.append() → yield turn:end
+//  10. afterRound middleware (back-pressure → inject)
+//  11. Build round → log.append() → yield round:end
 //  12. No tool calls → break; otherwise continue
 
 import type {
     ILoop,
     LoopContext,
-    Turn,
-    TurnContext,
-    TurnResult,
+    Round,
+    RoundContext,
+    RoundResult,
     AgentEvent,
     Signal,
     ControlDirective,
@@ -62,25 +62,25 @@ import type { ILoopMiddleware } from '@itookit/common';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-const MAX_TURNS = 100;
+const MAX_ROUNDS = 100;
 
 // ─── Inline middleware runner (avoids cross-package dependency) ──────
 
-function runBeforeTurn(mws: ILoopMiddleware[], ctx: TurnContext): Promise<ControlDirective | void> {
-    return runForward(mws, 'beforeTurn', (mw) => mw.beforeTurn?.(ctx));
+function runBeforeRound(mws: ILoopMiddleware[], ctx: RoundContext): Promise<ControlDirective | void> {
+    return runForward(mws, 'beforeRound', (mw) => mw.beforeRound?.(ctx));
 }
 
-function runOnToolCalls(mws: ILoopMiddleware[], ctx: TurnContext, tools: PlannedTool[]): Promise<ControlDirective | void> {
+function runOnToolCalls(mws: ILoopMiddleware[], ctx: RoundContext, tools: PlannedTool[]): Promise<ControlDirective | void> {
     return runForward(mws, 'onToolCalls', (mw) => mw.onToolCalls?.(ctx, tools));
 }
 
-function runAfterTurn(mws: ILoopMiddleware[], ctx: TurnContext, result: TurnResult): Promise<ControlDirective | void> {
-    // Reverse order for afterTurn (stack unwinding)
+function runAfterRound(mws: ILoopMiddleware[], ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
+    // Reverse order for afterRound (stack unwinding)
     const reversed = [...mws].reverse();
-    return runForward(reversed, 'afterTurn', (mw) => mw.afterTurn?.(ctx, result));
+    return runForward(reversed, 'afterRound', (mw) => mw.afterRound?.(ctx, result));
 }
 
-function runOnError(mws: ILoopMiddleware[], ctx: TurnContext, error: Error): Promise<RecoveryAction | void> {
+function runOnError(mws: ILoopMiddleware[], ctx: RoundContext, error: Error): Promise<RecoveryAction | void> {
     return runForward(mws, 'onError', (mw) => mw.onError?.(ctx, error));
 }
 
@@ -114,7 +114,7 @@ export class HarnessLoopExecutor implements ILoop {
         private readonly costModel?: { perInputToken: number; perOutputToken: number },
     ) {}
 
-    async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
+    async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Round[], Signal | undefined> {
         this.lastCtx = ctx;
         const sessionId = ctx.sessionId;
         const cwd = typeof process !== 'undefined' ? process.cwd() : '/';
@@ -153,7 +153,7 @@ export class HarnessLoopExecutor implements ILoop {
         // ── Shared state for middleware ──
         const budgetState: HarnessBudgetState = { snapshot: usage, controller: budgetController };
         const tierState: HarnessTierState = { effectiveModelId, currentTier, tierModelIds, modelPinned: false };
-        const sessionState: HarnessSessionState = { cwd, isFirstTurn: true, pendingInjections: [] };
+        const sessionState: HarnessSessionState = { cwd, isFirstRound: true, pendingInjections: [] };
 
         const recoveryState = {
             rateLimitRetries: 0, contextRetries: 0,
@@ -180,23 +180,23 @@ export class HarnessLoopExecutor implements ILoop {
         ].sort((a, b) => a.name.localeCompare(b.name));
 
         // ── Main loop ──
-        let turnNumber = 0;
-        const turns: Turn[] = [];
+        let roundNumber = 0;
+        const rounds: Round[] = [];
         let signal: Signal | undefined;
 
         try {
-            while (turnNumber < MAX_TURNS) {
+            while (roundNumber < MAX_ROUNDS) {
                 if (ctx.signal.aborted) break;
-                turnNumber++;
+                roundNumber++;
 
                 // Drain event queue
                 while (eventQueue.length > 0) yield eventQueue.shift()!;
 
-                // ── 1-4. beforeTurn middleware ──
-                const turnId = `turn_${sessionId}_${turnNumber}`;
-                const turnCtx: TurnContext = { turnId, sessionId, turnNumber };
+                // ── 1-4. beforeRound middleware ──
+                const roundId = `round_${sessionId}_${roundNumber}`;
+                const roundCtx: RoundContext = { roundId, sessionId, roundNumber };
 
-                const beforeDirective = await runBeforeTurn(middlewares, turnCtx);
+                const beforeDirective = await runBeforeRound(middlewares, roundCtx);
                 if (beforeDirective) {
                     if (beforeDirective.action === 'abort') {
                         yield { type: 'error', error: { message: beforeDirective.reason, code: 'BUDGET_EXHAUSTED' } };
@@ -205,7 +205,7 @@ export class HarnessLoopExecutor implements ILoop {
                     if (beforeDirective.action === 'inject') {
                         contextManager.addMessage(sessionId, { role: 'user', content: beforeDirective.text });
                     }
-                    if (beforeDirective.action === 'skip_turn') continue;
+                    if (beforeDirective.action === 'skip_round') continue;
                 }
 
                 // ── 5. Build messages ──
@@ -214,7 +214,7 @@ export class HarnessLoopExecutor implements ILoop {
                     ...contextManager.buildMessages(sessionId),
                 ];
 
-                yield { type: 'turn:start', turnId, sessionId, turn: turnNumber };
+                yield { type: 'round:start', roundId, sessionId, round: roundNumber };
                 while (eventQueue.length > 0) yield eventQueue.shift()!;
 
                 // ── 6. LLM call (streaming) ──
@@ -259,7 +259,7 @@ export class HarnessLoopExecutor implements ILoop {
                     }
                 } catch (err) {
                     // ── 7. Error recovery ──
-                    const recoveryAction = await runOnError(middlewares, turnCtx,
+                    const recoveryAction = await runOnError(middlewares, roundCtx,
                         err instanceof Error ? err : new Error(String(err)));
 
                     if (!recoveryAction || recoveryAction.action === 'fail') {
@@ -308,7 +308,7 @@ export class HarnessLoopExecutor implements ILoop {
                         arguments: safeParseJson(tc.function?.arguments ?? '{}'),
                     }));
 
-                    const directive = await runOnToolCalls(middlewares, turnCtx, plannedTools);
+                    const directive = await runOnToolCalls(middlewares, roundCtx, plannedTools);
                     if (directive) {
                         if (directive.action === 'abort') {
                             yield { type: 'error', error: { message: directive.reason, code: 'PLAN_REJECTED' } };
@@ -337,8 +337,8 @@ export class HarnessLoopExecutor implements ILoop {
                 }
 
                 // ── 10. Execute tools ──
-                const toolResults: TurnResult['toolResults'] = [];
-                const assistantBlocks: TurnResult['assistantBlocks'] = [];
+                const toolResults: RoundResult['toolResults'] = [];
+                const assistantBlocks: RoundResult['assistantBlocks'] = [];
 
                 if (responseText) {
                     assistantBlocks.push({ type: 'text', text: responseText });
@@ -407,12 +407,12 @@ export class HarnessLoopExecutor implements ILoop {
                     }
                 }
 
-                // ── 11. afterTurn middleware ──
-                const turnResult: TurnResult = { assistantBlocks, toolResults, usage: usage_, finishReason };
-                const afterDirective = await runAfterTurn(middlewares, turnCtx, turnResult);
+                // ── 11. afterRound middleware ──
+                const roundResult: RoundResult = { assistantBlocks, toolResults, usage: usage_, finishReason };
+                const afterDirective = await runAfterRound(middlewares, roundCtx, roundResult);
                 if (afterDirective) {
                     if (afterDirective.action === 'abort') {
-                        yield { type: 'error', error: { message: afterDirective.reason, code: 'AFTERTURN_ABORT' } };
+                        yield { type: 'error', error: { message: afterDirective.reason, code: 'AFTERROUND_ABORT' } };
                         break;
                     }
                     if (afterDirective.action === 'inject') {
@@ -429,29 +429,29 @@ export class HarnessLoopExecutor implements ILoop {
                     }
                 }
 
-                // ── 12. Build turn & checkpoint ──
-                const turn: Turn = {
-                    id: turnId,
-                    parents: turns.length > 0 ? [turns[turns.length - 1].id] : [],
+                // ── 12. Build round & checkpoint ──
+                const round: Round = {
+                    id: roundId,
+                    parents: rounds.length > 0 ? [rounds[rounds.length - 1].id] : [],
                     payload: [
                         ...messages,
                         { role: 'assistant' as const, content: responseText, tool_calls: toolCalls.length > 0 ? toolCalls : undefined },
                     ],
                     meta: { createdAt: Date.now(), origin: 'loop', usage: usage_ },
-                    result: turnResult,
+                    result: roundResult,
                 };
-                turns.push(turn);
-                await ctx.log.append(ctx.ref, turn);
-                yield { type: 'turn:end', turnId, sessionId, turn: turnNumber };
+                rounds.push(round);
+                await ctx.log.append(ctx.ref, round);
+                yield { type: 'round:end', roundId, sessionId, round: roundNumber };
 
                 // ── 13. Continue or break ──
                 if (toolCalls.length === 0) break;
 
-                // Feed tool results back for next turn
+                // Feed tool results back for next round
                 for (const tr of toolResults) {
                     contextManager.addMessage(sessionId, { role: 'tool', content: tr.content, tool_call_id: tr.toolUseId });
                 }
-                sessionState.isFirstTurn = false;
+                sessionState.isFirstRound = false;
             }
         } catch (err) {
             if (err instanceof BudgetExhaustedError) {
@@ -463,7 +463,7 @@ export class HarnessLoopExecutor implements ILoop {
             while (eventQueue.length > 0) yield eventQueue.shift()!;
 
             let inTokens = 0, outTokens = 0;
-            for (const t of turns) {
+            for (const t of rounds) {
                 const u = t.meta.usage as Record<string, unknown> | undefined;
                 inTokens += (u?.inputTokens as number) ?? 0;
                 outTokens += (u?.outputTokens as number) ?? 0;
@@ -471,10 +471,10 @@ export class HarnessLoopExecutor implements ILoop {
             yield { type: 'finished', usage: { inputTokens: inTokens, outputTokens: outTokens } };
         }
 
-        return turns;
+        return rounds;
     }
 
-    async *resume(_checkpoint: string): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
+    async *resume(_checkpoint: string): AsyncGenerator<AgentEvent, Round[], Signal | undefined> {
         const ctx = this.lastCtx;
         if (!ctx) {
             yield {
@@ -484,19 +484,19 @@ export class HarnessLoopExecutor implements ILoop {
             return [];
         }
 
-        // Reconstruct state from the Log. Since turn boundaries are persisted,
-        // we count completed turns and re-enter the loop with full history.
+        // Reconstruct state from the Log. Since round boundaries are persisted,
+        // we count completed rounds and re-enter the loop with full history.
         const allMessages = await ctx.log.fold(ctx.ref);
-        const completedTurns = allMessages.filter(m => m.role === 'assistant').length;
+        const completedRounds = allMessages.filter(m => m.role === 'assistant').length;
 
-        if (completedTurns === 0) {
+        if (completedRounds === 0) {
             return yield* this.run(ctx);
         }
 
         // Re-run with full log state. The LLM sees the complete conversation
         // history from log.fold() and continues naturally.
         // Full harness state reconstruction (BudgetController usage, tier state,
-        // ContextManager seeding with all messages, turn count tracking) is
+        // ContextManager seeding with all messages, round count tracking) is
         // deferred to a follow-up.
         return yield* this.run(ctx);
     }

@@ -49,7 +49,7 @@ agent:plan:confirm → agent:user:injected
 | `stream:content` | `message:updated` field=`output` |
 | `stream:thinking` | `message:updated` field=`thought` |
 | `tool:queued` / `tool:running` / `tool:success` / `tool:error` | canonical AgentEvent forward |
-| `turn:start` / `turn:end` | canonical AgentEvent forward |
+| `round:start` / `round:end` | canonical AgentEvent forward |
 | `finished` | canonical AgentEvent forward |
 | `error` | canonical AgentEvent forward |
 | `await_signal` | 由 `drive()` 内部处理，不 emit |

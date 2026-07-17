@@ -199,7 +199,7 @@ private selectStrategy(): IAgentLoopStrategy {
 ```
 
 `UnifiedLoopStrategy` 与原 `ClaudeCodeStrategy` **行为完全一致**（默认配置），额外支持：
-- `config.budget` — 6 维预算（turns / inputTokens / outputTokens / costUsd / durationMs，80% 预警）
+- `config.budget` — 6 维预算（rounds / inputTokens / outputTokens / costUsd / durationMs，80% 预警）
 - `config.errorRecovery` — 速率限制指数退避重试 + 截断自动续写
 - 通过 `IToolExecutor.getMeta()` 自动并行执行只读工具、串行执行写工具
 
@@ -563,7 +563,7 @@ flowchart TB
 
 | 维度 | 限制参数 | 80% 时行为 |
 |---|---|---|
-| 轮次 | `maxTurns` | 自动降级模型层级 |
+| 轮次 | `maxRounds` | 自动降级模型层级 |
 | 输入 Token | `maxInputTokens` | 同上 |
 | 输出 Token | `maxOutputTokens` | 同上 |
 | 费用 | `maxCostUsd` | 同上 |
@@ -683,7 +683,7 @@ flowchart TB
         C2["kernelAdapter.streamRaw()<br/><i>AsyncGenerator&#60;Chunk&#62;</i>"]
         C3["Content Block 解析<br/>thinking · text · tool_use"]
         C4["IToolExecutor.execute()<br/><i>+ Budget / ErrorRecovery</i>"]
-        C5["循环 max 50 turns"]
+        C5["循环 max 50 rounds"]
         C1 --> C2 --> C3
         C3 -->|"tool_use"| C4 --> C5 --> C2
         C3 -->|"text"| C1
@@ -710,8 +710,8 @@ flowchart TB
 **UnifiedLoopStrategy**（默认主路径，2026-07-13 取代 ClaudeCodeStrategy）完整流程：
 
 ```
-loop (max 50 turns):
-    [可选] Budget 检查 — 6 维：turns/inputTokens/outputTokens/costUsd/durationMs
+loop (max 50 rounds):
+    [可选] Budget 检查 — 6 维：rounds/inputTokens/outputTokens/costUsd/durationMs
     kernelAdapter.streamRaw(messages, params, connectionId)
         → AsyncGenerator<ChatCompletionChunk>
         → content block 状态机解析：thinking / text / tool_use
@@ -735,7 +735,7 @@ taskRunner.setToolService(toolService, cwd);
 taskRunner.setToolExecutor(myExecutor);
 // 配置预算和错误恢复
 taskRunner.setUnifiedLoopConfig({
-    budget: { maxTurns: 30, maxCostUsd: 0.5 },
+    budget: { maxRounds: 30, maxCostUsd: 0.5 },
     errorRecovery: { maxRetries: 3, baseRetryDelayMs: 1000, maxTruncationRetries: 2 },
 });
 ```
@@ -760,7 +760,7 @@ OrchestratorEvent (Session 轨，29 种):
     stream:thinking:start / stream:thinking:stop
     stream:content:start / stream:content:stop
     tool:queued / tool:input / tool:running / tool:success / tool:error
-    turn:start / turn:end
+    round:start / round:end
 
 RegistryEvent (Global 轨，9 种):
     session_registered / session_unregistered
@@ -1033,9 +1033,9 @@ selectStrategy()
     │   UnifiedLoopStrategy.run()                                  │
     │       → kernelAdapter.streamRaw(params, connectionId)        │
     │       → content block 解析 (thinking / text / tool_use)      │
-    │       → [可选] Budget 检查 — turns/inputTokens/outputTokens/  │
+    │       → [可选] Budget 检查 — rounds/inputTokens/outputTokens/  │
     │         costUsd/durationMs                                   │
-    │       → turn:start                                          │
+    │       → round:start                                          │
     │       → stream:thinking:start/stop                          │
     │       → stream:content:start/stop                           │
     │       → tool:queued → tool:input → tool:running →           │
@@ -1043,7 +1043,7 @@ selectStrategy()
     │       → 并行执行只读工具 (sideEffect=none)                     │
     │       → 顺序执行写工具                                        │
     │       → [可选] ErrorRecovery — 429 重试 / length 续写        │
-    │       → turn:end                                            │
+    │       → round:end                                            │
     │       → finished (含 SessionTokenUsage)                     │
     │                                                             │
     └── Harness 路径 ─────────────────────────────────────────────┤
@@ -1167,7 +1167,7 @@ sequenceDiagram
     deactivate TaskRunner
 
     activate CCode
-    loop Agent Loop (max 50 turns)
+    loop Agent Loop (max 50 rounds)
         CCode->>Kernel: streamRaw(messages, params)
         activate Kernel
         Kernel->>Runtime: execute(agentConfig)

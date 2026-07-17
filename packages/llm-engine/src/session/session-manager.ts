@@ -34,18 +34,18 @@ import {
 } from '../services/prompt-history-service';
 import { log } from '../utils/logger';
 import { SessionRegistry } from './session-registry';
-import { TurnOperations } from './turn-operations';
+import { RoundOperations } from './round-operations';
 import { BranchService } from './branch-service';
 
 /**
  * 会话管理器 — llm-engine 对外的唯一入口
  *
- * 门面模式：组合 SessionRegistry + TurnOperations + BranchService，
+ * 门面模式：组合 SessionRegistry + RoundOperations + BranchService，
  * ISession 门面签名不变，公开 API 完全向后兼容。
  */
 export class SessionManager implements ISession {
     private registry: SessionRegistry;
-    private turnOps: TurnOperations;
+    private roundOps: RoundOperations;
     private branchService: BranchService;
     private taskRunner: TaskRunner;
     private agentResolver: AgentResolver;
@@ -82,7 +82,7 @@ export class SessionManager implements ISession {
             }
         );
 
-        this.turnOps = new TurnOperations(this.registry, this.taskRunner);
+        this.roundOps = new RoundOperations(this.registry, this.taskRunner);
         this.branchService = new BranchService(this.registry);
     }
 
@@ -97,7 +97,7 @@ export class SessionManager implements ISession {
     signal(s: Signal): void {
         switch (s.type) {
             case 'send':
-                this.turnOps.sendMessage(s.text, (s.attachments ?? []).map(a => ({
+                this.roundOps.sendMessage(s.text, (s.attachments ?? []).map(a => ({
                     name: a.name ?? a.filename ?? '',
                     type: a.type ?? 'file',
                     size: a.size,
@@ -106,10 +106,10 @@ export class SessionManager implements ISession {
                 });
                 break;
             case 'abort':
-                this.turnOps.abort();
+                this.roundOps.abort();
                 break;
             case 'inject':
-                this.turnOps.sendMessage(s.text, [], 'default', undefined, 'inject', undefined).catch(() => {});
+                this.roundOps.sendMessage(s.text, [], 'default', undefined, 'inject', undefined).catch(() => {});
                 break;
             case 'respond':
                 this.taskRunner.respondToSignal(this.registry.boundSessionId ?? '', s);
@@ -201,40 +201,40 @@ export class SessionManager implements ISession {
     onGlobalEvent(handler: (event: RegistryEvent) => void): () => void { return this.registry.onGlobalEvent(handler); }
 
     // ================================================================
-    // 消息操作 → TurnOperations
+    // 消息操作 → RoundOperations
     // ================================================================
 
     async sendMessage(
         text: string, files: ChatAttachment[], agentId: string,
         overrides?: ExecutionOverrides, origin?: SessionOrigin, historyPolicy?: HistoryPolicy,
     ): Promise<void> {
-        return this.turnOps.sendMessage(text, files, agentId, overrides, origin, historyPolicy);
+        return this.roundOps.sendMessage(text, files, agentId, overrides, origin, historyPolicy);
     }
 
-    abort(): void { this.turnOps.abort(); }
+    abort(): void { this.roundOps.abort(); }
 
     async regenerate(assistantId: string, options?: RegenerateOptions): Promise<RegenerateResult> {
-        return this.turnOps.regenerate(assistantId, options);
+        return this.roundOps.regenerate(assistantId, options);
     }
 
     async regenerateFromUser(userMessageId: string, options?: RegenerateOptions): Promise<RegenerateResult> {
-        return this.turnOps.regenerateFromUser(userMessageId, options);
+        return this.roundOps.regenerateFromUser(userMessageId, options);
     }
 
     async deleteMessage(messageId: string, options?: DeleteOptions): Promise<DeleteResult> {
-        return this.turnOps.deleteMessage(messageId, options);
+        return this.roundOps.deleteMessage(messageId, options);
     }
 
     async deleteMessages(messageIds: string[], options?: DeleteOptions): Promise<DeleteResult> {
-        return this.turnOps.deleteMessages(messageIds, options);
+        return this.roundOps.deleteMessages(messageIds, options);
     }
 
     updateDraft(messageId: string, newContent: string): void {
-        this.turnOps.updateDraft(messageId, newContent);
+        this.roundOps.updateDraft(messageId, newContent);
     }
 
     async commitEdit(messageId: string, newContent: string, autoRerun: boolean = false): Promise<void> {
-        return this.turnOps.commitEdit(messageId, newContent, autoRerun);
+        return this.roundOps.commitEdit(messageId, newContent, autoRerun);
     }
 
     // ================================================================

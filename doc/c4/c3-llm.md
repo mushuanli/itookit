@@ -5,7 +5,7 @@
 ```
 device-llm    →  LLMConnection / streaming / MCP / SkillDefinition 存储 / migrateOldSkill
 llm-kernel    →  Executor (Agent/HTTP/Tool/Script) + Runtime + PluginManager
-llm-harness   →  AgentLoopExecutor (multi-turn) + built-in tools + TTY + HITLQueue
+llm-harness   →  AgentLoopExecutor (multi-round) + built-in tools + TTY + HITLQueue
 llm-engine    →  SessionManager, LLMSessionEngine, VFSAgentService + scheduler/
 ```
 

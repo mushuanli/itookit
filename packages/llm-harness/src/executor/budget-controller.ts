@@ -7,7 +7,7 @@ import type { TokenUsage } from '@itookit/common';
 
 const WARN_THRESHOLD = 0.8;
 
-type DimKey = 'turns' | 'inputTokens' | 'outputTokens' | 'costUsd' | 'durationMs' | 'toolCalls';
+type DimKey = 'rounds' | 'inputTokens' | 'outputTokens' | 'costUsd' | 'durationMs' | 'toolCalls';
 
 interface CostModel {
     perInputToken: number;
@@ -29,7 +29,7 @@ export class BudgetController implements IBudgetController {
 
     createSnapshot(): AgentUsageSnapshot {
         return {
-            turns: 0,
+            rounds: 0,
             inputTokens: 0,
             outputTokens: 0,
             costUsd: 0,
@@ -42,7 +42,7 @@ export class BudgetController implements IBudgetController {
     updateUsage(snapshot: AgentUsageSnapshot, tokenUsage: TokenUsage, toolCallCount: number): void {
         const input = (tokenUsage as Record<string, unknown>)['prompt_tokens'] as number ?? 0;
         const output = (tokenUsage as Record<string, unknown>)['completion_tokens'] as number ?? 0;
-        snapshot.turns += 1;
+        snapshot.rounds += 1;
         snapshot.inputTokens += input;
         snapshot.outputTokens += output;
         snapshot.costUsd += input * this.cost.perInputToken + output * this.cost.perOutputToken;
@@ -71,7 +71,7 @@ export class BudgetController implements IBudgetController {
 
     getMostConstrainedResource(snapshot: AgentUsageSnapshot): { resource: string; usedRatio: number } {
         const ratios = this.getUsedRatios(snapshot);
-        let max = { resource: 'turns', usedRatio: 0 };
+        let max = { resource: 'rounds', usedRatio: 0 };
         for (const [resource, usedRatio] of Object.entries(ratios)) {
             if (usedRatio > max.usedRatio) max = { resource, usedRatio };
         }
@@ -92,7 +92,7 @@ export class BudgetController implements IBudgetController {
     private getDims(snapshot: AgentUsageSnapshot): Record<DimKey, { used: number; limit: number }> {
         const elapsed = Date.now() - snapshot.startTime;
         return {
-            turns:        { used: snapshot.turns,        limit: this.limits.maxTurns },
+            rounds:        { used: snapshot.rounds,        limit: this.limits.maxRounds },
             inputTokens:  { used: snapshot.inputTokens,  limit: this.limits.maxInputTokens },
             outputTokens: { used: snapshot.outputTokens, limit: this.limits.maxOutputTokens },
             costUsd:      { used: snapshot.costUsd,      limit: this.limits.maxCostUsd },

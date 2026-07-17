@@ -78,7 +78,7 @@ Five strategies: `StandardWorkspaceStrategy` (MDxEditor + `IModuleFS`), `ChatWor
 
 ```
 device-llm  →  LLMConnection / streaming / MCP / multi-provider / Skill storage
-llm-harness →  AgentLoopExecutor (multi-turn) + built-in tools + TTY device + Skill/Tool drivers
+llm-harness →  AgentLoopExecutor (multi-round) + built-in tools + TTY device + Skill/Tool drivers
 llm-engine  →  SessionManager, LLMSessionEngine (→ vfslib), VFSAgentService (→ vfslib)
 llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
 ```
@@ -92,7 +92,7 @@ llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
 1. `createVFS({ rootBackend, modules })` — one VFS module per workspace
 2. `new LLMDeviceDriver(vfs)` → `init()` → `vfs.devices.register()` → `createDeviceNodes()`
 3. `createSettingsModule(vfs)`, `new VFSAgentService(vfs, llmDriver)`, `new LLMSessionEngine(vfs)`
-4. `createHarness({ llmDriver })` — assembles the multi-turn agent loop
+4. `createHarness({ llmDriver })` — assembles the multi-round agent loop
 5. `harness.toolDriver.setVFSContext(createVFSToolContext(vfs))` — browser VFS bridge for file tools
 6. `syncSkillsToHarness(llmDriver, harness)` — syncs VFS-persisted `LLMSkill` → harness `SkillDefinition`; watches `llmDriver.onChange()`
 7. `initializeLLMEngine({ agentService, sessionEngine, harnessRuntime, ... })` → `SessionManager`
@@ -100,7 +100,7 @@ llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
 
 ### LLM Harness — Agent Loop Executor
 
-`@itookit/llm-harness` implements the multi-turn Agent loop with:
+`@itookit/llm-harness` implements the multi-round Agent loop with:
 
 - **AgentLoopExecutor** — `while(true)` loop: budget check → context compress → LLM call → tool execution → back-pressure
 - **Four-layer context compression** (HISTORY_SNIP / CACHE_PRUNE / LLM_SUMMARIZE / SLIDING_WINDOW)
@@ -109,16 +109,16 @@ llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
 - **TTY tools** (when `NodeTTYDriver` is injected): `shell_session`, `tty_write`, `tty_close`
 
 **Agent loop enhancements (Q1/Q2/Q3):**
-- **Q1 Plan Confirm** — emits `agent:plan:confirm` before first tool-calling turn; UI can approve/reject/redirect
-- **Q2 Crash Recovery** — persists per-turn session state to localStorage; `resumeSession()` reconstructs from snapshot
+- **Q1 Plan Confirm** — emits `agent:plan:confirm` before first tool-calling round; UI can approve/reject/redirect
+- **Q2 Crash Recovery** — persists per-round session state to localStorage; `resumeSession()` reconstructs from snapshot
 - **Q3 Mid-run Injection** — `agentRuntime.inject(message)` queues user instructions for the next loop iteration
 
 **Dual execution path in TaskRunner:**
 
 | Path | Trigger | Features |
 |---|---|---|
-| Kernel path | default | single-turn, auto-continue, streaming |
-| Harness path | `ChatSessionSettings.useHarness=true` | multi-turn agent loop, tool calling, context compression, HITL |
+| Kernel path | default | single-round, auto-continue, streaming |
+| Harness path | `ChatSessionSettings.useHarness=true` | multi-round agent loop, tool calling, context compression, HITL |
 
 **Wiring:**
 ```ts
@@ -142,7 +142,7 @@ const harness = await createHarness({
 |---|---|
 | `ITTYDriver` | Factory — spawns sessions. Different environments inject different drivers. |
 | `ITTYSession` | Single live process with `write()`, `kill()`, `on('data'/'exit'/'error')` |
-| `ITTYSessionManager` | Registry — `add/get/remove/abortAll` across agent turns |
+| `ITTYSessionManager` | Registry — `add/get/remove/abortAll` across agent rounds |
 
 **Implementations** (`packages/llm-harness/src/tty/`):
 
@@ -168,12 +168,12 @@ agent:tty:close { sessionId, exitCode, signal }
 ```
 SessionActor bridges these to canonical `AgentEvent` (stream:content / tool:* / etc.) for UI rendering, with `SessionEventBus` routing events to the bound UI.
 
-**Multi-turn session example:**
+**Multi-round session example:**
 ```
-Turn 1: shell_session("python3")  → "[TTY tty_abc]\nPython 3.11 >>>\n[Waiting]"
-Turn 2: tty_write("import math\n") → ">>>"
-Turn 3: tty_write("print(math.pi)\n") → "3.14159...\n>>>"
-Turn 4: tty_close("tty_abc")      → "Session closed"
+Round 1: shell_session("python3")  → "[TTY tty_abc]\nPython 3.11 >>>\n[Waiting]"
+Round 2: tty_write("import math\n") → ">>>"
+Round 3: tty_write("print(math.pi)\n") → "3.14159...\n>>>"
+Round 4: tty_close("tty_abc")      → "Session closed"
 ```
 
 **Platform injection pattern:**
@@ -364,7 +364,7 @@ type ToolHandler = (
 6. Update usage（含 tool call 计数）
 
 分支 A — 有 tool_calls：
-  → Plan Confirm（enablePlanConfirm && turnNumber===1）
+  → Plan Confirm（enablePlanConfirm && roundNumber===1）
       → intercept 'agent:plan:confirm'
       → false → cancel；string → inject "[Plan adjustment]..." 重规划；true → 继续
   → Permission Check（sideEffect !== 'none' → intercept 'agent:permission:request'）
@@ -410,7 +410,7 @@ Fallback 一旦激活（`fallbackActive=true`）持续生效；调 `resetFallbac
 
 | 维度 | 配置字段 | 默认上限 |
 |---|---|---|
-| 轮次 | `maxTurns` | 100 |
+| 轮次 | `maxRounds` | 100 |
 | 输入 Token | `maxInputTokens` | 5,000,000 |
 | 输出 Token | `maxOutputTokens` | 1,000,000 |
 | 费用 | `maxCostUsd` | $10.00 |
@@ -488,7 +488,7 @@ agent:plan:confirm    agent:user:injected
 | `stream:thinking` | `message:updated` field=`thought` |
 | `tool:queued` / `tool:running` | 创建 tool 子节点 |
 | `tool:success` / `tool:error` | 更新 tool 子节点状态 |
-| `turn:start` / `turn:end` | 轮次边界标记 |
+| `round:start` / `round:end` | 轮次边界标记 |
 | `finished` | 会话完成，汇总 token 用量 |
 | `error` | 错误展示 |
 | `await_signal` | 暂停等待用户输入（HITL / plan confirm） |
@@ -551,7 +551,7 @@ export const myToolHandler: ToolHandler = async (args, ctx) => {
 // 在 AgentTaskRequest 中
 {
     prompt: '...',
-    budgetOverride: { maxTurns: 20, maxCostUsd: 2 },  // 覆盖全局 budget
+    budgetOverride: { maxRounds: 20, maxCostUsd: 2 },  // 覆盖全局 budget
     modelOverride: 'my-connection-id',                   // 覆盖连接
     modelIdOverride: 'claude-opus-4-5',                  // 覆盖模型 ID
     systemPromptOverride: '...',                          // 替换 identity section

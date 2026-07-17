@@ -142,9 +142,9 @@ export interface ChatManifest {
     /**
      * Persistence format for this session.
      * - 'legacy' (default when absent): ChatNode tree stored inline in the manifest.
-     * - 'turn': Turn DAG stored as individual turns/<id>.json files; TurnManifest header.
+     * - 'round': Round DAG stored as individual round-<id>.json files; RoundManifest header.
      */
-    format?: 'legacy' | 'turn';
+    format?: 'legacy' | 'round';
 
     ui_state?: {
         collapse_states?: Record<string, boolean>;

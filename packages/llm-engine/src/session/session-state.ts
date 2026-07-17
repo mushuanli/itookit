@@ -1,11 +1,11 @@
 // @file: llm-engine/session/session-state.ts
 //
-// In-memory session projection cache (Turn DAG format).
-// Updated via apply(TurnLogEvent); consumed by UI via getSessions().
+// In-memory session projection cache (Round DAG format).
+// Updated via apply(RoundLogEvent); consumed by UI via getSessions().
 
-import type { TurnId } from '@itookit/common';
-import type { TurnProjection } from '../persistence/turn-types';
-import type { TurnLogEvent } from '../persistence/turn-events';
+import type { RoundId } from '@itookit/common';
+import type { RoundProjection } from '../persistence/round-types';
+import type { RoundLogEvent } from '../persistence/round-events';
 import { NodeStatus } from '../core/types';
 import {
     SessionGroup,
@@ -26,14 +26,14 @@ export class SessionState {
     // ── Legacy-format storage (ChatNode sessions) ──────────────────────
     private sessions: SessionGroup[] = [];
 
-    // ── Turn-format storage (Turn DAG) ─────────────────────────────────
-    private turns: TurnProjection[] = [];
-    private turnById = new Map<TurnId, TurnProjection>();
-    /** Reverse index: parentTurnId → childTurnIds. Maintained incrementally. */
-    private childrenByParent = new Map<TurnId, TurnId[]>();
+    // ── Round-format storage (Round DAG) ─────────────────────────────────
+    private rounds: RoundProjection[] = [];
+    private roundById = new Map<RoundId, RoundProjection>();
+    /** Reverse index: parentRoundId → childRoundIds. Maintained incrementally. */
+    private childrenByParent = new Map<RoundId, RoundId[]>();
 
     // ── Format flag ───────────────────────────────────────────────────
-    private _isTurnFormat = true;
+    private _isRoundFormat = true;
 
     constructor(
         private readonly _nodeId: string,
@@ -50,7 +50,7 @@ export class SessionState {
     // ── Unified getSessions (adapter for UI) ─────────────────────────
 
     getSessions(): SessionGroup[] {
-        if (this._isTurnFormat && this.turns.length > 0) return this.turnProjectionsToSessionGroups();
+        if (this._isRoundFormat && this.rounds.length > 0) return this.roundProjectionsToSessionGroups();
         return this.sessions;
     }
 
@@ -64,34 +64,34 @@ export class SessionState {
     }
 
     // ================================================================
-    // Turn format: single mutation entry
+    // Round format: single mutation entry
     // ================================================================
 
     /**
-     * Apply a TurnLogEvent to the in-memory projection.
+     * Apply a RoundLogEvent to the in-memory projection.
      * Returns SessionEvent[] to be emitted by the caller.
-     * Only effective when _isTurnFormat is true.
+     * Only effective when _isRoundFormat is true.
      */
-    apply(event: TurnLogEvent): SessionEvent[] {
+    apply(event: RoundLogEvent): SessionEvent[] {
 
         switch (event.type) {
-            case 'turn:appended': return this.applyAppended(event);
-            case 'turn:updated': return this.applyUpdated(event);
-            case 'turn:deleted': return this.applyDeleted(event);
+            case 'round:appended': return this.applyAppended(event);
+            case 'round:updated': return this.applyUpdated(event);
+            case 'round:deleted': return this.applyDeleted(event);
         }
     }
 
-    private applyAppended(event: TurnLogEvent & { type: 'turn:appended' }): SessionEvent[] {
-        const { turnId, projection } = event;
-        if (this.turnById.has(turnId)) return [];
+    private applyAppended(event: RoundLogEvent & { type: 'round:appended' }): SessionEvent[] {
+        const { roundId, projection } = event;
+        if (this.roundById.has(roundId)) return [];
 
-        // First TurnProjection added: clear legacy sessions (superseded)
-        if (this.turns.length === 0) {
+        // First RoundProjection added: clear legacy sessions (superseded)
+        if (this.rounds.length === 0) {
             this.sessions = [];
         }
 
-        this.turns.push(projection);
-        this.turnById.set(turnId, projection);
+        this.rounds.push(projection);
+        this.roundById.set(roundId, projection);
 
         // Maintain childrenByParent reverse index
         for (const parentId of projection.parents) {
@@ -99,15 +99,15 @@ export class SessionState {
                 this.childrenByParent.set(parentId, []);
             }
             const children = this.childrenByParent.get(parentId)!;
-            if (!children.includes(turnId)) children.push(turnId);
+            if (!children.includes(roundId)) children.push(roundId);
         }
 
-        const sessionGroups = this.turnProjectionToSessionGroups(projection);
+        const sessionGroups = this.roundProjectionToSessionGroups(projection);
         const isExecutionRoot = projection.kind === 'chat' && !!projection.assistantMessage;
         const parentId = projection.parents.length > 0 ? projection.parents[projection.parents.length - 1] : undefined;
 
-        // Emit one message:appended per SessionGroup produced by this turn.
-        // A chat turn with both user and assistant emits two events so both bubbles appear.
+        // Emit one message:appended per SessionGroup produced by this round.
+        // A chat round with both user and assistant emits two events so both bubbles appear.
         const events: SessionEvent[] = [];
         let prevId: string | undefined = parentId;
         for (const sessionGroup of sessionGroups) {
@@ -124,32 +124,47 @@ export class SessionState {
         return events;
     }
 
-    private applyUpdated(event: TurnLogEvent & { type: 'turn:updated' }): SessionEvent[] {
-        const turn = this.turnById.get(event.turnId);
-        if (!turn) return [];
+    private applyUpdated(event: RoundLogEvent & { type: 'round:updated' }): SessionEvent[] {
+        const round = this.roundById.get(event.roundId);
+        if (!round) return [];
 
         const { changes } = event;
-        if (turn.assistantMessage) {
+
+        // Clear assistant: remove assistantMessage and notify UI
+        if (changes.assistantContent !== undefined && !changes.assistantContent) {
+            const assistantId = round.assistantMessage?.persistedNodeId;
+            round.assistantMessage = undefined;
+            const events: SessionEvent[] = [];
+            if (assistantId) {
+                events.push({
+                    type: 'messages:deleted',
+                    payload: { deletedIds: [assistantId] },
+                });
+            }
+            return events;
+        }
+
+        if (round.assistantMessage) {
             if (changes.assistantContent !== undefined) {
-                turn.assistantMessage.content = changes.assistantContent;
+                round.assistantMessage.content = changes.assistantContent;
             }
             if (changes.thinking !== undefined) {
-                turn.assistantMessage.thinking = changes.thinking;
+                round.assistantMessage.thinking = changes.thinking;
             }
             if (changes.status !== undefined) {
-                turn.assistantMessage.status = changes.status;
+                round.assistantMessage.status = changes.status;
             }
         }
-        if (turn.meta) {
-            if (changes.stale !== undefined) turn.meta.stale = changes.stale;
+        if (round.meta) {
+            if (changes.stale !== undefined) round.meta.stale = changes.stale;
         }
 
         const events: SessionEvent[] = [];
-        if (changes.status && turn.assistantMessage) {
+        if (changes.status && round.assistantMessage) {
             events.push({
                 type: 'message:status',
                 payload: {
-                    messageId: turn.assistantMessage.persistedNodeId,
+                    messageId: round.assistantMessage.persistedNodeId,
                     status: changes.status,
                 },
             });
@@ -157,13 +172,13 @@ export class SessionState {
         return events;
     }
 
-    private applyDeleted(event: TurnLogEvent & { type: 'turn:deleted' }): SessionEvent[] {
-        const cascadeIds = event.cascadeIds ?? this.collectCascadeTurnIds(event.turnId);
+    private applyDeleted(event: RoundLogEvent & { type: 'round:deleted' }): SessionEvent[] {
+        const cascadeIds = event.cascadeIds ?? this.collectCascadeRoundIds(event.roundId);
         const idSet = new Set(cascadeIds);
 
-        this.turns = this.turns.filter(t => !idSet.has(t.turnId));
+        this.rounds = this.rounds.filter(t => !idSet.has(t.roundId));
         for (const id of cascadeIds) {
-            this.turnById.delete(id);
+            this.roundById.delete(id);
             this.childrenByParent.delete(id);
         }
         // Clean parent index entries
@@ -177,72 +192,72 @@ export class SessionState {
         }];
     }
 
-    /** Collect all TurnIds that should be cascade-deleted when this turn is removed. */
-    private collectCascadeTurnIds(turnId: TurnId): TurnId[] {
-        const result = [turnId];
-        const childIds = this.childrenByParent.get(turnId);
+    /** Collect all RoundIds that should be cascade-deleted when this round is removed. */
+    private collectCascadeRoundIds(roundId: RoundId): RoundId[] {
+        const result = [roundId];
+        const childIds = this.childrenByParent.get(roundId);
         if (childIds) {
             for (const childId of childIds) {
-                result.push(...this.collectCascadeTurnIds(childId));
+                result.push(...this.collectCascadeRoundIds(childId));
             }
         }
         return result;
     }
 
     // ================================================================
-    // Turn format: O(1) index-based lookups
+    // Round format: O(1) index-based lookups
     // ================================================================
 
-    /** Get the first parent turn of a given turn. */
-    getParentTurn(turnId: TurnId): TurnProjection | undefined {
-        const turn = this.turnById.get(turnId);
-        if (!turn || turn.parents.length === 0) return undefined;
-        return this.turnById.get(turn.parents[0]);
+    /** Get the first parent round of a given round. */
+    getParentRound(roundId: RoundId): RoundProjection | undefined {
+        const round = this.roundById.get(roundId);
+        if (!round || round.parents.length === 0) return undefined;
+        return this.roundById.get(round.parents[0]);
     }
 
     /**
-     * Find the user-containing turn before an assistant turn.
-     * Walks the parents chain until it finds a chat turn with a userMessage.
+     * Find the user-containing round before an assistant round.
+     * Walks the parents chain until it finds a chat round with a userMessage.
      */
-    findUserTurnForAssistant(assistantId: TurnId): TurnProjection | undefined {
-        let current = this.turnById.get(assistantId);
+    findUserRoundForAssistant(assistantId: RoundId): RoundProjection | undefined {
+        let current = this.roundById.get(assistantId);
         while (current) {
             if (current.kind === 'chat' && current.userMessage) return current;
             if (current.parents.length === 0) return undefined;
-            current = this.turnById.get(current.parents[0]);
+            current = this.roundById.get(current.parents[0]);
         }
         return undefined;
     }
 
-    /** Get child turn IDs via the reverse index (O(1)). */
-    getChildTurnIds(turnId: TurnId): TurnId[] {
-        return this.childrenByParent.get(turnId) ?? [];
+    /** Get child round IDs via the reverse index (O(1)). */
+    getChildRoundIds(roundId: RoundId): RoundId[] {
+        return this.childrenByParent.get(roundId) ?? [];
     }
 
-    /** Diff support: check if a turn is already in the projection. */
-    hasTurn(turnId: TurnId): boolean {
-        return this.turnById.has(turnId);
+    /** Diff support: check if a round is already in the projection. */
+    hasRound(roundId: RoundId): boolean {
+        return this.roundById.has(roundId);
     }
 
-    /** Get all turn projections (for diff computation). */
-    getTurns(): TurnProjection[] {
-        return this.turns;
+    /** Get all round projections (for diff computation). */
+    getRounds(): RoundProjection[] {
+        return this.rounds;
     }
 
     // ================================================================
     // 从持久化加载
     // ================================================================
 
-    /** Load a TurnProjection into the turn-format arrays. */
-    loadFromProjection(projection: TurnProjection): void {
-        this.turns.push(projection);
-        this.turnById.set(projection.turnId, projection);
+    /** Load a RoundProjection into the round-format arrays. */
+    loadFromProjection(projection: RoundProjection): void {
+        this.rounds.push(projection);
+        this.roundById.set(projection.roundId, projection);
         for (const parentId of projection.parents) {
             if (!this.childrenByParent.has(parentId)) {
                 this.childrenByParent.set(parentId, []);
             }
             const children = this.childrenByParent.get(parentId)!;
-            if (!children.includes(projection.turnId)) children.push(projection.turnId);
+            if (!children.includes(projection.roundId)) children.push(projection.roundId);
         }
     }
 
@@ -386,27 +401,27 @@ export class SessionState {
 
     clear(): void {
         this.sessions = [];
-        this.turns = [];
-        this.turnById.clear();
+        this.rounds = [];
+        this.roundById.clear();
         this.childrenByParent.clear();
     }
 
     // ================================================================
-    // TurnProjection → SessionGroup adapter
+    // ── RoundProjection → SessionGroup adapter ─────────────────────────
     // ================================================================
 
     /**
-     * Converts one TurnProjection into 1 or 2 SessionGroups.
-     * A chat turn with both userMessage and assistantMessage produces:
+     * Converts one RoundProjection into 1 or 2 SessionGroups.
+     * A chat round with both userMessage and assistantMessage produces:
      *   [SessionGroup(role:'user'), SessionGroup(role:'assistant')]
      * so that both bubbles appear in the UI on reload.
      */
-    private turnProjectionToSessionGroups(p: TurnProjection): SessionGroup[] {
+    private roundProjectionToSessionGroups(p: RoundProjection): SessionGroup[] {
         const groups: SessionGroup[] = [];
 
         if (p.userMessage) {
             groups.push({
-                id: `${p.turnId}-user`,
+                id: `${p.roundId}-user`,
                 persistedNodeId: p.userMessage.persistedNodeId,
                 role: 'user',
                 content: p.userMessage.content,
@@ -443,12 +458,12 @@ export class SessionState {
             });
         }
 
-        // System / merge turns with no user or assistant message — return empty (not shown in UI)
+        // System / merge rounds with no user or assistant message — return empty (not shown in UI)
         return groups;
     }
 
-    private turnProjectionsToSessionGroups(): SessionGroup[] {
-        return this.turns.flatMap(t => this.turnProjectionToSessionGroups(t));
+    private roundProjectionsToSessionGroups(): SessionGroup[] {
+        return this.rounds.flatMap(t => this.roundProjectionToSessionGroups(t));
     }
 
     // ================================================================

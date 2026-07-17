@@ -81,7 +81,7 @@ export {
 
 export { SessionRegistry } from './session/session-registry';
 export type { BoundContext } from './session/session-registry';
-export { TurnOperations } from './session/turn-operations';
+export { RoundOperations } from './session/round-operations';
 export { BranchService } from './session/branch-service';
 
 export { SessionState } from './session/session-state';
@@ -106,12 +106,12 @@ export { AttachmentProcessor } from './session/attachment-processor';
 // ============================================
 
 export { ChatEngine } from './persistence/chat-engine';
-export { TurnLog, turnToProjection } from './persistence/turn-log';
+export { RoundLog, roundToProjection } from './persistence/round-log';
 export { VFSDraftArea } from './persistence/draft-area';
-export { migrateToTurnFormat } from './persistence/migration';
+export { migrateToRoundFormat } from './persistence/migration';
 export type { MigrationResult } from './persistence/migration';
-export type { TurnManifest, TurnProjection, PersistedTurn } from './persistence/turn-types';
-export type { TurnLogEvent, TurnChangeSet } from './persistence/turn-events';
+export type { RoundManifest, RoundProjection, PersistedRound } from './persistence/round-types';
+export type { RoundLogEvent, RoundChangeSet } from './persistence/round-events';
 export type {
     IChatEngine,
     ChatManifest,

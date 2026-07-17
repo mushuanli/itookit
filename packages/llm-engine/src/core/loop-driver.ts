@@ -3,12 +3,12 @@
 // The ONLY place that touches the ILoop generator. Handles:
 //   - yield AgentEvent → emit to EventStream
 //   - yield await_signal → checkpoint to Log → suspend → wait for Signal
-//   - generator return → final Turn[]
+//   - generator return → final Round[]
 //
 // This is the single implementation of the pause/resume protocol.
 // HITL / inject / abort / crash-recovery all flow through this function.
 
-import type { LoopContext, Signal, AgentEvent, Turn, ILoop, TurnId } from '@itookit/common';
+import type { LoopContext, Signal, AgentEvent, Round, ILoop, RoundId } from '@itookit/common';
 
 export interface SessionActor {
     emit(event: AgentEvent): void;
@@ -35,15 +35,15 @@ export class LoopAbortedError extends Error {
  *   - NotFound: the next yield point will detect the abort
  */
 export async function drive(
-    gen: AsyncGenerator<AgentEvent, Turn[], Signal | undefined>,
+    gen: AsyncGenerator<AgentEvent, Round[], Signal | undefined>,
     session: SessionActor,
     ctx: LoopContext,
-): Promise<Turn[]> {
+): Promise<Round[]> {
     return driveGenerator(gen, session, ctx);
 }
 
 /**
- * Resume a paused ILoop from a checkpoint TurnId.
+ * Resume a paused ILoop from a checkpoint RoundId.
  *
  * Calls `loop.resume(checkpoint)` to reconstruct coroutine state from the Log,
  * then drives the resulting generator identically to `drive()`.
@@ -54,10 +54,10 @@ export async function drive(
  */
 export async function resumeDrive(
     loop: ILoop,
-    checkpoint: TurnId,
+    checkpoint: RoundId,
     session: SessionActor,
     ctx: LoopContext,
-): Promise<Turn[]> {
+): Promise<Round[]> {
     const gen = loop.resume(checkpoint);
     return driveGenerator(gen, session, ctx);
 }
@@ -65,10 +65,10 @@ export async function resumeDrive(
 // ─── Internal: shared generator driving logic ─────────────────────
 
 async function driveGenerator(
-    gen: AsyncGenerator<AgentEvent, Turn[], Signal | undefined>,
+    gen: AsyncGenerator<AgentEvent, Round[], Signal | undefined>,
     session: SessionActor,
     ctx: LoopContext,
-): Promise<Turn[]> {
+): Promise<Round[]> {
     let input: Signal | undefined;
 
     while (true) {
@@ -78,7 +78,7 @@ async function driveGenerator(
             throw new LoopAbortedError();
         }
 
-        let result: IteratorResult<AgentEvent, Turn[]>;
+        let result: IteratorResult<AgentEvent, Round[]>;
         try {
             result = await gen.next(input);
         } catch (err) {
@@ -90,15 +90,15 @@ async function driveGenerator(
         input = undefined;
 
         if (result.done) {
-            return result.value; // Turn[]
+            return result.value; // Round[]
         }
 
         const ev = result.value;
 
-        if (ev.type === 'turn:start') {
-            // Track the in-flight turn so DraftArea can persist the turn boundary
+        if (ev.type === 'round:start') {
+            // Track the in-flight round so DraftArea can persist the round boundary
             // and crash-resume can reconstruct state correctly.
-            ctx.log.draft().setCurrent({ id: ev.turnId, parents: [], payload: [], meta: { createdAt: Date.now(), origin: 'loop' } });
+            ctx.log.draft().setCurrent({ id: ev.roundId, parents: [], payload: [], meta: { createdAt: Date.now(), origin: 'loop' } });
             session.emit(ev);
         } else if (ev.type === 'await_signal') {
             // Persist the pause point so crash-resume can recover

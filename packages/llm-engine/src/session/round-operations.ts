@@ -1,7 +1,8 @@
-// @file: llm-engine/session/turn-operations.ts
+// @file: llm-engine/session/round-operations.ts
 
 import {
     SessionGroup,
+    SessionEvent,
     ChatAttachment,
     ExecutionOverrides,
     DeleteOptions,
@@ -17,16 +18,16 @@ import { EngineError, EngineErrorCode } from '../core/errors';
 import { SessionState } from './session-state';
 import { SessionRegistry } from './session-registry';
 import { TaskRunner } from './task-runner';
-import { TurnLog } from '../persistence/turn-log';
+import { RoundLog } from '../persistence/round-log';
 import { getPromptHistory } from '../services/prompt-history-service';
 import { log } from '../utils/logger';
 
 /**
- * TurnOperations — all turn/message mutation operations.
+ * RoundOperations — all round/message mutation operations.
  *
  * Depends on SessionRegistry for binding/state/events and TaskRunner for execution.
  */
-export class TurnOperations {
+export class RoundOperations {
     private registry: SessionRegistry;
     private taskRunner: TaskRunner;
 
@@ -86,14 +87,14 @@ export class TurnOperations {
 
         let userMessage: SessionGroup | undefined;
 
-        const userTurn = state.findUserTurnForAssistant(assistantId);
-        if (!userTurn?.userMessage) {
+        const userRound = state.findUserRoundForAssistant(assistantId);
+        if (!userRound?.userMessage) {
             throw new EngineError(
                 EngineErrorCode.SESSION_INVALID,
                 'No user message found before the specified assistant message'
             );
         }
-        userMessage = state.findSessionById(userTurn.userMessage.persistedNodeId);
+        userMessage = state.findSessionById(userRound.userMessage.persistedNodeId);
 
         if (!userMessage) {
             throw new EngineError(
@@ -165,24 +166,24 @@ export class TurnOperations {
             );
         }
 
-        const userTurnId = userMessage.persistedNodeId;
+        const userRoundId = userMessage.persistedNodeId;
 
-        // TurnLog branch: fork a new ref pointing to the parent of the user
-        // turn (i.e. above the user+assistant pair). This way fold() walking
+        // RoundLog branch: fork a new ref pointing to the parent of the user
+        // round (i.e. above the user+assistant pair). This way fold() walking
         // the new branch skips the old assistant entirely.
-        const turnLog = new TurnLog(this.registry.engine, nodeId, sessionId);
-        const userTurn = await turnLog.readTurn(userTurnId);
-        const forkPointId = userTurn?.parents?.[0] ?? userTurnId;
+        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const userRound = await roundLog.readRound(userRoundId);
+        const forkPointId = userRound?.parents?.[0] ?? userRoundId;
 
-        const manifest = await turnLog.loadManifest();
+        const manifest = await roundLog.loadManifest();
         const branchNum = Object.keys(manifest.branches).length;
         const branchName = `branch-${branchNum}`;
-        await turnLog.refs().create(branchName, forkPointId);
+        await roundLog.refs().create(branchName, forkPointId);
 
         // Switch to the new branch
         manifest.currentBranch = branchName;
         manifest.currentHead = forkPointId;
-        await turnLog.saveManifest(manifest);
+        await roundLog.saveManifest(manifest);
 
         await this.registry.reloadSessionData(nodeId, sessionId, state);
 
@@ -193,15 +194,15 @@ export class TurnOperations {
             type: 'regenerate_started',
             payload: {
                 sourceId: context.sourceId,
-                newUserNodeId: userTurnId,
+                newUserNodeId: userRoundId,
                 branchName,
                 agentId,
                 trigger: context.trigger,
             },
         });
 
-        // 7. 提交任务 - fork from the parent turn (above the old user+assistant pair).
-        //    The new turn will be a sibling of the original user turn, containing
+        // 7. 提交任务 - fork from the parent round (above the old user+assistant pair).
+        //    The new round will be a sibling of the original user round, containing
         //    the same user message + new assistant response.
         await this.taskRunner.submit(
             {
@@ -223,7 +224,7 @@ export class TurnOperations {
             runtime
         );
 
-        return { branchName, userNodeId: userTurnId, agentId };
+        return { branchName, userNodeId: userRoundId, agentId };
     }
 
     // ================================================================
@@ -232,7 +233,7 @@ export class TurnOperations {
 
     async deleteMessage(messageId: string, options?: DeleteOptions): Promise<DeleteResult> {
         const { sessionId, nodeId, state } = this.registry.ensureBound();
-        const idsToDelete = TurnOperations.collectDeletableIds(
+        const idsToDelete = RoundOperations.collectDeletableIds(
             state, messageId, options?.deleteAssociatedResponses ?? true
         );
         return this.executeDelete(nodeId, sessionId, state, idsToDelete, options);
@@ -246,7 +247,7 @@ export class TurnOperations {
         const allIds = new Set<string>();
 
         for (const id of messageIds) {
-            TurnOperations.collectDeletableIds(
+            RoundOperations.collectDeletableIds(
                 state, id, options?.deleteAssociatedResponses ?? true
             ).forEach(x => allIds.add(x));
         }
@@ -265,34 +266,49 @@ export class TurnOperations {
         const result: DeleteResult = { deletedIds: [], deletedBranches: [] };
         if (idsToDelete.length === 0) return result;
 
-        // TurnLog: soft-delete turns. Resolve each message ID to its turn ID
-        // and call TurnLog.deleteTurn() to set _deleted = true.
-        const turnLog = new TurnLog(this.registry.engine, nodeId, sessionId);
+        // RoundLog: soft-delete rounds or clear assistant only.
+        // Assistant messages just clear the payload (keep user); user messages delete the entire round.
+        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
         for (const id of idsToDelete) {
             const session = state.findSessionById(id);
-            const turnId = session?.persistedNodeId;
-            if (turnId) {
-                try {
-                    await turnLog.deleteTurn(turnId);
-                } catch (e) {
-                    log.warn('Failed to delete turn', { sessionId, turnId, error: e });
+            const roundId = session?.persistedNodeId;
+            if (!roundId) continue;
+            try {
+                if (session?.role === 'assistant') {
+                    await roundLog.clearAssistantInRound(roundId);
+                } else {
+                    await roundLog.deleteRound(roundId);
                 }
+            } catch (e) {
+                log.warn('Failed to delete round', { sessionId, roundId, role: session?.role, error: e });
             }
         }
 
-        // Apply deletion to in-memory state (cascade handled by SessionState.collectCascadeTurnIds)
+        // Apply deletion to in-memory state
         const allDeletedIds = new Set<string>();
         for (const id of idsToDelete) {
             const session = state.findSessionById(id);
-            const turnId = session?.persistedNodeId;
-            if (turnId) {
-                const events = state.apply({ type: 'turn:deleted', turnId });
-                for (const e of events) {
-                    if (e.type === 'messages:deleted') {
-                        (e.payload?.deletedIds as string[])?.forEach(d => allDeletedIds.add(d));
-                    }
-                    eventBus.emitSession(sessionId, e);
+            const roundId = session?.persistedNodeId;
+            if (!roundId) continue;
+
+            let events: SessionEvent[];
+            if (session?.role === 'assistant') {
+                // Assistant deletion: clear assistant in projection
+                events = state.apply({
+                    type: 'round:updated',
+                    roundId,
+                    changes: { assistantContent: '' },
+                });
+            } else {
+                // User deletion: cascade delete entire round
+                events = state.apply({ type: 'round:deleted', roundId });
+            }
+
+            for (const e of events) {
+                if (e.type === 'messages:deleted') {
+                    (e.payload?.deletedIds as string[])?.forEach(d => allDeletedIds.add(d));
                 }
+                eventBus.emitSession(sessionId, e);
             }
         }
         state.removeMessages(idsToDelete);
@@ -300,10 +316,10 @@ export class TurnOperations {
 
         const shouldCleanup = options?.cleanupOrphanedBranches ?? true;
         if (shouldCleanup) {
-            const orphaned = await this.findOrphanedBranches(turnLog);
+            const orphaned = await this.findOrphanedBranches(roundLog);
             for (const branchName of orphaned) {
                 try {
-                    await turnLog.refs().delete(branchName);
+                    await roundLog.refs().delete(branchName);
                     result.deletedBranches.push(branchName);
                     log.info('Orphaned branch cleaned up', { branchName });
                 } catch (e) {
@@ -320,15 +336,15 @@ export class TurnOperations {
         return result;
     }
 
-    private async findOrphanedBranches(turnLog: TurnLog): Promise<string[]> {
+    private async findOrphanedBranches(roundLog: RoundLog): Promise<string[]> {
         const orphaned: string[] = [];
         try {
-            const manifest = await turnLog.loadManifest();
+            const manifest = await roundLog.loadManifest();
             const currentBranch = manifest.currentBranch;
             for (const branchName of Object.keys(manifest.branches)) {
                 if (branchName === currentBranch || branchName === 'main') continue;
                 try {
-                    const messages = await turnLog.fold(branchName);
+                    const messages = await roundLog.fold(branchName);
                     if (messages.length === 0) {
                         orphaned.push(branchName);
                     }
@@ -343,7 +359,7 @@ export class TurnOperations {
         if (!includeResponses) return ids;
         const session = state.findSessionById(messageId);
         if (!session || session.role !== 'user') return ids;
-        ids.push(...state.getChildTurnIds(messageId));
+        ids.push(...state.getChildRoundIds(messageId));
         return ids;
     }
 
@@ -389,20 +405,20 @@ export class TurnOperations {
         // Update in-memory state (draft)
         state.updateMessageContent(messageId, newContent);
 
-        // For TurnLog, turns are immutable — editing forks a new branch.
-        const userTurnId = session.persistedNodeId;
+        // For RoundLog, rounds are immutable — editing forks a new branch.
+        const userRoundId = session.persistedNodeId;
         let newPersistedNodeId: string | undefined;
 
-        if (autoRerun && userTurnId) {
-            const turnLog = new TurnLog(this.registry.engine, nodeId, sessionId);
-            const manifest = await turnLog.loadManifest();
+        if (autoRerun && userRoundId) {
+            const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+            const manifest = await roundLog.loadManifest();
             const branchNum = Object.keys(manifest.branches).length;
             const branchName = `branch-${branchNum}`;
-            await turnLog.refs().create(branchName, userTurnId);
+            await roundLog.refs().create(branchName, userRoundId);
             manifest.currentBranch = branchName;
-            manifest.currentHead = userTurnId;
-            await turnLog.saveManifest(manifest);
-            newPersistedNodeId = userTurnId;
+            manifest.currentHead = userRoundId;
+            await roundLog.saveManifest(manifest);
+            newPersistedNodeId = userRoundId;
         }
 
         await this.registry.reloadSessionData(nodeId, sessionId, state);
@@ -426,8 +442,8 @@ export class TurnOperations {
             }
 
             const branchInfo = await this.getSiblingInfo(sessionId, newPersistedNodeId);
-            const turnLog2 = new TurnLog(this.registry.engine, nodeId, sessionId);
-            const m2 = await turnLog2.loadManifest();
+            const roundLog2 = new RoundLog(this.registry.engine, nodeId, sessionId);
+            const m2 = await roundLog2.loadManifest();
             const branchName = m2.currentBranch;
 
             eventBus.emitSession(sessionId, {

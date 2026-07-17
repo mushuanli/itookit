@@ -39,7 +39,7 @@ export class SubAgentRouter implements ISubAgentRouter {
             if (connMeta) effectiveModelId = resolveModelForTier(connMeta, task.modelTier);
         }
         const allowedTools = task.allowedTools ?? READ_ONLY_TOOLS;
-        const maxTurns = task.maxTurns ?? DEFAULT_MAX_TURNS;
+        const maxRounds = task.maxRounds ?? DEFAULT_MAX_TURNS;
 
         const toolDefs: ToolDefinition[] = this.toolService
             .getToolDefinitions()
@@ -64,14 +64,14 @@ export class SubAgentRouter implements ISubAgentRouter {
             { role: 'user', content: task.instruction },
         ];
 
-        let turns = 0;
+        let rounds = 0;
         let inputTokens = 0;
         let outputTokens = 0;
 
         try {
-            while (turns < maxTurns) {
+            while (rounds < maxRounds) {
                 if (signal.aborted) break;
-                turns++;
+                rounds++;
 
                 const response = await this.llm.chat(connectionId, { messages, tools: toolDefs, signal, model: effectiveModelId });
                 const choice = response.choices[0];
@@ -84,7 +84,7 @@ export class SubAgentRouter implements ISubAgentRouter {
                 messages.push({ role: 'assistant', content: text, tool_calls: toolCalls.length > 0 ? toolCalls : undefined });
 
                 if (toolCalls.length === 0) {
-                    return { success: true, summary: text, turns, tokenUsage: { input: inputTokens, output: outputTokens } };
+                    return { success: true, summary: text, rounds, tokenUsage: { input: inputTokens, output: outputTokens } };
                 }
 
                 for (const call of toolCalls) {
@@ -100,14 +100,14 @@ export class SubAgentRouter implements ISubAgentRouter {
 
             return {
                 success: false,
-                summary: 'Sub-agent reached max turns without completing',
-                turns,
+                summary: 'Sub-agent reached max rounds without completing',
+                rounds,
                 tokenUsage: { input: inputTokens, output: outputTokens },
-                error: 'max_turns_exceeded',
+                error: 'max_rounds_exceeded',
             };
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            return { success: false, summary: '', turns, tokenUsage: { input: inputTokens, output: outputTokens }, error: msg };
+            return { success: false, summary: '', rounds, tokenUsage: { input: inputTokens, output: outputTokens }, error: msg };
         }
     }
 

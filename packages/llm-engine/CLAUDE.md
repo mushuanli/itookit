@@ -11,9 +11,9 @@ src/
 ├── session/        ← SessionManager, SessionState (in-memory projection cache), TaskRunner
 │                     SessionEventBus (SessionEvent = AgentEvent | Projection | Structural, channel 路由)
 │                     truncation-detector, session-recovery
-├── persistence/    ← ChatEngine (IChatEngine), ★ TurnLog (完整 ILog facade), TurnManifest
+├── persistence/    ← ChatEngine (IChatEngine), ★ RoundLog (完整 ILog facade), RoundManifest
 │                     ulid (ULID 生成), types (IChatEngine + ChatManifest/ChatNode)
-│                     draft-area, migration, turn-types, turn-events, vfs-utils
+│                     draft-area, migration, round-types, round-events, vfs-utils
 ├── adapters/       ← tool-executor-bridge（HarnessAdapter 已删除 — S9）
 ├── mission/        ← MissionService, ★ MissionScheduler (reconcile-driven), LiteSubAgentRouter
 │                     TodoState, ★ sub-agent-loop-adapter, ★ mission-goal-factory
@@ -64,7 +64,7 @@ SessionManager.sendMessage()
 | **AgentEvent** | ✅ canonical schema（15 变体），唯一事件词汇 | `common/.../agent-event.ts` |
 | **ILoop** | ✅ 接口 + ExecutorRegistry + chat/loop executor | `common/.../loop.ts`, `core/executor-registry.ts` |
 | **drive()** | ✅ 协程宿主，pause/resume 一条路径；`resumeDrive()` 支持跨进程恢复 | `core/loop-driver.ts` |
-| **ILog** | ✅ 完整实现 — TurnLog（VFS DraftArea + TurnRefStore + fold 缓存 + cloneTurn）；**Dogfooding 关闭**：所有路径统一走 ILoop + LoopContext（connectionId/model/systemPrompt 等平铺字段），无特权后备路径 | `persistence/turn-log.ts` |
+| **ILog** | ✅ 完整实现 — RoundLog（VFS DraftArea + RoundRefStore + fold 缓存 + cloneRound）；**Dogfooding 关闭**：所有路径统一走 ILoop + LoopContext（connectionId/model/systemPrompt 等平铺字段），无特权后备路径 | `persistence/round-log.ts` |
 | **Goal** | ✅ 接口 + DependencyScheduler + reconcile + 3 Predicate；**4 控制回路全部切换** | `common/.../goal.ts`, `core/goal/`, `mission/`, `session-graph/` |
 | **Resume** | ✅ `LoopExecutor.resume()` + `resumeDrive()` + TaskRunner checkpoint 检测 | `core/loop-driver.ts`, `executors/loop-executor.ts`, `session/task-runner.ts` |
 | **LiteSubAgentRouter** | ✅ 迁移至 ILoop（`LoopExecutor` 替代 `UnifiedLoopStrategy`）| `mission/lite-sub-agent-router.ts` |
@@ -73,9 +73,9 @@ SessionManager.sendMessage()
 
 | 组件 | 文件 | 说明 |
 |---|---|---|
-| `TurnLog` | `persistence/turn-log.ts` | 完整 ILog 实现：append/fold/merge/rebase + cloneTurn + fold TTL 缓存 |
+| `RoundLog` | `persistence/round-log.ts` | 完整 ILog 实现：append/fold/merge/rebase + cloneRound + fold TTL 缓存 |
 | `VFSDraftArea` | `persistence/draft-area.ts` | 崩溃安全草稿持久化到 VFS assetdir |
-| `TurnRefStore` | `persistence/turn-log.ts`（内部类） | TurnManifest 驱动的分支/标签 CRUD |
+| `RoundRefStore` | `persistence/round-log.ts`（内部类） | RoundManifest 驱动的分支/标签 CRUD |
 | `ulid()` | `persistence/ulid.ts` | Crockford base32 ULID 生成 |
 | `SessionState` | `session/session-state.ts` | 内存投影缓存 — ILog.fold() 的 UI 层投影，非独立事实源 |
 
@@ -123,13 +123,13 @@ TaskRunner 在两个路径完成时回调 `agentResolver.recordUsageCost(connect
 | 组件 | 文件 | 说明 |
 |---|---|---|
 | `resumeDrive()` | `core/loop-driver.ts` | 调用 `loop.resume(checkpoint)` 并驱动生成器，与 `drive()` 共享 `driveGenerator()` |
-| `LoopExecutor.resume()` | `executors/loop-executor.ts` | 从 Log 重建消息状态 + 计数已完成轮次 → `executeLoop(ctx, completedTurns, [])` |
+| `LoopExecutor.resume()` | `executors/loop-executor.ts` | 从 Log 重建消息状态 + 计数已完成轮次 → `executeLoop(ctx, completedRounds, [])` |
 | `HarnessLoopExecutor.resume()` | llm-harness | 从 `lastCtx` 重建；委托 `run()`（完整 harness 状态重建后续跟进） |
 | TaskRunner checkpoint 检测 | `session/task-runner.ts` | `log.draft().restore()` → 有则 `resumeDrive()`，无则 `drive()` |
 
 **设计要点**：
 - `resume()` 不序列化协程栈 — 轮次边界状态全在 Log 中，通过 `fold()` 重建
-- `executeLoop(ctx, startTurn, initialTurns)` 是 `run()` 和 `resume()` 的共享实现
+- `executeLoop(ctx, startRound, initialRounds)` 是 `run()` 和 `resume()` 的共享实现
 - `lastCtx` 存储 `run()` 时的 `LoopContext`，供 `resume()` 使用
 - checkpoint 持久化（`DraftArea.setCurrent()` 接线）后续跟进
 
@@ -139,7 +139,7 @@ TaskRunner 在两个路径完成时回调 `agentResolver.recordUsageCost(connect
 
 | 组件 | 说明 |
 |---|---|
-| `createInMemoryLog()` | 子代理内存 ILog — `fold()` 返回当前消息；`append()` 更新为 `turn.payload` |
+| `createInMemoryLog()` | 子代理内存 ILog — `fold()` 返回当前消息；`append()` 更新为 `round.payload` |
 | `createToolServiceAdapter()` | `IToolExecutor` → `IToolService` 适配（含工具过滤） |
 | ILLMService wrapper | 覆盖 `chatStream()` 注入 `task.connectionId` / `task.modelName` |
 | 手动生成器驱动 | 子代理用 lite preset，无需 HITL；`await_signal` 视为错误 |

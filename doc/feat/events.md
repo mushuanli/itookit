@@ -441,8 +441,8 @@ Agent Loop 内容块:
   tool:error              → 工具执行失败
 
 轮次:
-  turn:start              → 一轮对话开始
-  turn:end                → 一轮对话结束
+  round:start              → 一轮对话开始
+  round:end                → 一轮对话结束
 ```
 
 **全局事件（`RegistryEvent`，9 种）：**
@@ -750,7 +750,7 @@ SessionManager 创建 TaskInput → TaskRunner 入队
         stream:thinking:start/stop
         stream:content:start/stop
         tool:queued → tool:input → tool:running → tool:success/tool:error
-        turn:start → turn:end
+        round:start → round:end
         │
         ▼
       SessionEventBus → UI 渲染

@@ -1,46 +1,46 @@
 // @file: llm-engine/src/persistence/migration.ts
-// ChatNode → Turn DAG format migration.
+// ChatNode → Round DAG format migration.
 //
 // Branch-aware algorithm (§3.6): for each branch head in the old ChatManifest,
-// walk the parent_id chain to build Turn chains. Shared-prefix ChatNodes map to
-// the same TurnId (via content hash or _turnId meta). Sibling ChatNodes become
-// sibling Turns with the same parents.
+// walk the parent_id chain to build Round chains. Shared-prefix ChatNodes map to
+// the same RoundId (via content hash or _roundId meta). Sibling ChatNodes become
+// sibling Rounds with the same parents.
 
 import type { IChatEngine, ChatNode } from './types';
-import type { TurnManifest, PersistedTurn } from './turn-types';
-import type { TurnId, ChatMessage } from '@itookit/common';
-import { TurnLog } from './turn-log';
+import type { RoundManifest, PersistedRound } from './round-types';
+import type { RoundId, ChatMessage } from '@itookit/common';
+import { RoundLog } from './round-log';
 import { ulid } from './ulid';
 import { collectAllFileNodes } from './vfs-utils';
 import { log } from '../utils/logger';
 
 export interface MigrationResult {
     success: boolean;
-    turnCount: number;
+    roundCount: number;
     branchesMigrated: string[];
     error?: string;
 }
 
 /**
- * Migrate a legacy ChatNode-format session to the Turn DAG format.
+ * Migrate a legacy ChatNode-format session to the Round DAG format.
  *
  * The migration is non-destructive by default: a backup of the original manifest
- * is written before any changes. On failure, turn files are cleaned up and the
+ * is written before any changes. On failure, round files are cleaned up and the
  * original manifest is restored.
  */
-export async function migrateToTurnFormat(
+export async function migrateToRoundFormat(
     engine: IChatEngine,
     sessionId: string,
     options?: { dryRun?: boolean; backup?: boolean },
 ): Promise<MigrationResult> {
     const nodeId = await resolveNodeId(engine, sessionId);
     if (!nodeId) {
-        return { success: false, turnCount: 0, branchesMigrated: [], error: 'Session node not found' };
+        return { success: false, roundCount: 0, branchesMigrated: [], error: 'Session node not found' };
     }
 
     const oldManifest = await engine.getManifest(nodeId) as unknown as Record<string, unknown>;
-    if (oldManifest?.format === 'turn') {
-        return { success: true, turnCount: 0, branchesMigrated: [], error: 'Already in turn format' };
+    if (oldManifest?.format === 'round') {
+        return { success: true, roundCount: 0, branchesMigrated: [], error: 'Already in round format' };
     }
 
     const backup = options?.backup !== false;
@@ -58,13 +58,13 @@ export async function migrateToTurnFormat(
     try {
         const assetDirId = await engine.getAssetDirectoryId(nodeId);
         if (!assetDirId) {
-            return { success: false, turnCount: 0, branchesMigrated: [], error: 'No asset directory' };
+            return { success: false, roundCount: 0, branchesMigrated: [], error: 'No asset directory' };
         }
 
         const branches = (oldManifest.branches ?? {}) as Record<string, string>;
         const branchNames = Object.keys(branches);
         if (branchNames.length === 0) {
-            return { success: false, turnCount: 0, branchesMigrated: [], error: 'No branches in manifest' };
+            return { success: false, roundCount: 0, branchesMigrated: [], error: 'No branches in manifest' };
         }
 
         // Collect all ChatNodes from all branch chains
@@ -84,53 +84,52 @@ export async function migrateToTurnFormat(
             }
         }
 
-        // Build nodeId → TurnId mapping (shared prefix dedup)
-        const nodeToTurnId = buildTurnIdMap(allNodes, branchChains);
+        // Build nodeId → RoundId mapping (shared prefix dedup)
+        const nodeToRoundId = buildRoundIdMap(allNodes, branchChains);
 
-        // Build Turns from branch chains
-        const turns = new Map<TurnId, PersistedTurn>();
-        const childrenIndex: Record<TurnId, TurnId[]> = {};
-        const branchHeadTurnIds = new Map<string, TurnId>();
+        // Build Rounds from branch chains
+        const rounds = new Map<RoundId, PersistedRound>();
+        const childrenIndex: Record<RoundId, RoundId[]> = {};
+        const branchHeadRoundIds = new Map<string, RoundId>();
 
         for (const [branchName, chain] of branchChains) {
-            const turnIds = buildTurnsFromChain(
-                chain, allNodes, nodeToTurnId, turns, childrenIndex,
+            const roundIds = buildRoundsFromChain(
+                chain, allNodes, nodeToRoundId, rounds, childrenIndex,
             );
-            if (turnIds.length > 0) {
-                branchHeadTurnIds.set(branchName, turnIds[turnIds.length - 1]);
+            if (roundIds.length > 0) {
+                branchHeadRoundIds.set(branchName, roundIds[roundIds.length - 1]);
             }
         }
 
-        const rootTurnId = findRoot(turns)?.id ?? ulid();
+        const rootRoundId = findRoot(rounds)?.id ?? ulid();
 
         if (options?.dryRun) {
             return {
                 success: true,
-                turnCount: turns.size,
+                roundCount: rounds.size,
                 branchesMigrated: branchNames,
             };
         }
 
-        // Write turn files and manifest
-        await writeTurnFiles(engine, assetDirId, turns);
+        // Write round files and manifest
+        await writeRoundFiles(engine, assetDirId, rounds);
 
-        const turnLog = new TurnLog(engine, nodeId, sessionId);
-        const newManifest: TurnManifest = {
-            format: 'turn',
-            rootTurnId,
-            branches: Object.fromEntries(branchHeadTurnIds),
+        const roundLog = new RoundLog(engine, nodeId, sessionId);
+        const newManifest: RoundManifest = {
+            rootRoundId,
+            branches: Object.fromEntries(branchHeadRoundIds),
             currentBranch: (oldManifest.current_branch as string) ?? 'main',
-            currentHead: branchHeadTurnIds.get((oldManifest.current_branch as string) ?? 'main') ?? rootTurnId,
+            currentHead: branchHeadRoundIds.get((oldManifest.current_branch as string) ?? 'main') ?? rootRoundId,
             children: childrenIndex,
         };
-        await turnLog.saveManifest(newManifest);
+        await roundLog.saveManifest(newManifest);
 
-        log.info('Migration completed', { sessionId, turnCount: turns.size, branches: branchNames });
-        return { success: true, turnCount: turns.size, branchesMigrated: branchNames };
+        log.info('Migration completed', { sessionId, roundCount: rounds.size, branches: branchNames });
+        return { success: true, roundCount: rounds.size, branchesMigrated: branchNames };
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         log.error('Migration failed', { sessionId, error: msg });
-        return { success: false, turnCount: 0, branchesMigrated: [], error: msg };
+        return { success: false, roundCount: 0, branchesMigrated: [], error: msg };
     }
 }
 
@@ -181,12 +180,12 @@ async function readChatNode(
     return null;
 }
 
-/** Build NodeId → TurnId mapping with shared-prefix dedup via content hash. */
-function buildTurnIdMap(
+/** Build NodeId → RoundId mapping with shared-prefix dedup via content hash. */
+function buildRoundIdMap(
     allNodes: Map<string, ChatNode>,
     branchChains: Map<string, string[]>,
-): Map<string, TurnId> {
-    const map = new Map<string, TurnId>();
+): Map<string, RoundId> {
+    const map = new Map<string, RoundId>();
 
     for (const chain of branchChains.values()) {
         for (const nodeId of chain) {
@@ -194,10 +193,10 @@ function buildTurnIdMap(
             const node = allNodes.get(nodeId);
             if (!node) continue;
 
-            // Prefer _turnId from legacy append() meta
-            const existingTurnId = node.meta?._turnId as string | undefined;
-            if (existingTurnId) {
-                map.set(nodeId, existingTurnId);
+            // Prefer _roundId from legacy append() meta
+            const existingRoundId = node.meta?._roundId as string | undefined;
+            if (existingRoundId) {
+                map.set(nodeId, existingRoundId);
             } else {
                 // Content hash: role + content
                 const hash = simpleHash(`${node.role}:${node.content ?? ''}`);
@@ -208,21 +207,21 @@ function buildTurnIdMap(
     return map;
 }
 
-/** Build PersistedTurn objects from a sorted node chain, maintaining DAG relationships. */
-function buildTurnsFromChain(
+/** Build PersistedRound objects from a sorted node chain, maintaining DAG relationships. */
+function buildRoundsFromChain(
     chain: string[],
     allNodes: Map<string, ChatNode>,
-    nodeToTurnId: Map<string, TurnId>,
-    turns: Map<TurnId, PersistedTurn>,
-    childrenIndex: Record<TurnId, TurnId[]>,
-): TurnId[] {
-    const result: TurnId[] = [];
+    nodeToRoundId: Map<string, RoundId>,
+    rounds: Map<RoundId, PersistedRound>,
+    childrenIndex: Record<RoundId, RoundId[]>,
+): RoundId[] {
+    const result: RoundId[] = [];
     const paired = pairUserAssistant(chain, allNodes);
 
     for (const { userNodeId, assistantNodeId } of paired) {
-        const turnId = nodeToTurnId.get(userNodeId) ?? ulid();
-        if (turns.has(turnId)) {
-            result.push(turnId);
+        const roundId = nodeToRoundId.get(userNodeId) ?? ulid();
+        if (rounds.has(roundId)) {
+            result.push(roundId);
             continue;
         }
 
@@ -239,25 +238,25 @@ function buildTurnsFromChain(
             payload.push({ role: 'assistant', content: assistantNode.content ?? '' });
         }
 
-        const parentTurnId = result.length > 0 ? result[result.length - 1] : null;
-        const turn: PersistedTurn = {
-            id: turnId,
-            parents: parentTurnId ? [parentTurnId] : [],
+        const parentRoundId = result.length > 0 ? result[result.length - 1] : null;
+        const round: PersistedRound = {
+            id: roundId,
+            parents: parentRoundId ? [parentRoundId] : [],
             payload,
             meta: {
                 createdAt: userNode?.created_at ? new Date(userNode.created_at).getTime() : Date.now(),
-                origin: ((userNode?.meta?.origin ?? 'user') as PersistedTurn['meta']['origin']),
+                origin: ((userNode?.meta?.origin ?? 'user') as PersistedRound['meta']['origin']),
             },
         };
 
-        turns.set(turnId, turn);
-        result.push(turnId);
+        rounds.set(roundId, round);
+        result.push(roundId);
 
         // Maintain children index
-        if (parentTurnId) {
-            if (!childrenIndex[parentTurnId]) childrenIndex[parentTurnId] = [];
-            if (!childrenIndex[parentTurnId].includes(turnId)) {
-                childrenIndex[parentTurnId].push(turnId);
+        if (parentRoundId) {
+            if (!childrenIndex[parentRoundId]) childrenIndex[parentRoundId] = [];
+            if (!childrenIndex[parentRoundId].includes(roundId)) {
+                childrenIndex[parentRoundId].push(roundId);
             }
         }
     }
@@ -265,7 +264,7 @@ function buildTurnsFromChain(
     return result;
 }
 
-/** Pair user+assistant ChatNodes that should be merged into a single Turn. */
+/** Pair user+assistant ChatNodes that should be merged into a single Round. */
 function pairUserAssistant(
     chain: string[],
     allNodes: Map<string, ChatNode>,
@@ -290,7 +289,7 @@ function pairUserAssistant(
                 i++;
             }
         } else {
-            // Standalone assistant (regenerated etc.) — pair with previous user turn
+            // Standalone assistant (regenerated etc.) — pair with previous user round
             const lastPair = result[result.length - 1];
             if (lastPair && !lastPair.assistantNodeId) {
                 lastPair.assistantNodeId = chain[i];
@@ -303,26 +302,26 @@ function pairUserAssistant(
     return result;
 }
 
-async function writeTurnFiles(
+async function writeRoundFiles(
     engine: IChatEngine,
     assetDirId: string,
-    turns: Map<TurnId, PersistedTurn>,
+    rounds: Map<RoundId, PersistedRound>,
 ): Promise<void> {
-    // Ensure turns/ sub-directory
-    try { await engine.getChildren(`${assetDirId}/turns`); } catch {
-        await engine.createDirectory('turns', assetDirId);
+    // Ensure rounds/ sub-directory
+    try { await engine.getChildren(`${assetDirId}/rounds`); } catch {
+        await engine.createDirectory('rounds', assetDirId);
     }
 
-    const entries = Array.from(turns.entries());
-    await Promise.all(entries.map(([turnId, turn]) =>
-        engine.createAsset(assetDirId, `turns/${turnId}.json`, JSON.stringify(turn, null, 2))
-            .catch((e) => { log.warn('Failed to write turn file', { turnId, error: e }); }),
+    const entries = Array.from(rounds.entries());
+    await Promise.all(entries.map(([roundId, round]) =>
+        engine.createAsset(assetDirId, `rounds/${roundId}.json`, JSON.stringify(round, null, 2))
+            .catch((e) => { log.warn('Failed to write round file', { roundId, error: e }); }),
     ));
 }
 
-function findRoot(turns: Map<TurnId, PersistedTurn>): PersistedTurn | undefined {
-    for (const turn of turns.values()) {
-        if (turn.parents.length === 0) return turn;
+function findRoot(rounds: Map<RoundId, PersistedRound>): PersistedRound | undefined {
+    for (const round of rounds.values()) {
+        if (round.parents.length === 0) return round;
     }
     return undefined;
 }

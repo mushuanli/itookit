@@ -3,12 +3,12 @@
 // ISubAgentRouter.delegate() returns a synchronous SubAgentResult,
 // but reconcile() expects an ILoop (AsyncGenerator). This adapter
 // bridges the two: it calls delegate(), yields stream events, and
-// returns a single synthesized Turn.
+// returns a single synthesized Round.
 
 import type {
     ILoop,
     LoopContext,
-    Turn,
+    Round,
     AgentEvent,
     Signal,
     TokenUsage,
@@ -26,7 +26,7 @@ export function createSubAgentLoopAdapter(opts: SubAgentLoopAdapterOptions): ILo
     return {
         mode: 'sub-agent',
 
-        async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
+        async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Round[], Signal | undefined> {
             const task = opts.buildTask(
                 // Use the ref as a prompt hint — the actual prompt comes from GoalNode.task.prompt
                 ctx.ref,
@@ -34,10 +34,10 @@ export function createSubAgentLoopAdapter(opts: SubAgentLoopAdapterOptions): ILo
             );
 
             yield {
-                type: 'turn:start',
-                turnId: `sub_${ctx.sessionId}`,
+                type: 'round:start',
+                roundId: `sub_${ctx.sessionId}`,
                 sessionId: ctx.sessionId,
-                turn: 1,
+                round: 1,
             };
 
             let result;
@@ -59,8 +59,8 @@ export function createSubAgentLoopAdapter(opts: SubAgentLoopAdapterOptions): ILo
                 outputTokens: result.tokenUsage?.output ?? 0,
             };
 
-            const turn: Turn = {
-                id: `turn_sub_${ctx.sessionId}`,
+            const round: Round = {
+                id: `round_sub_${ctx.sessionId}`,
                 parents: [],
                 payload: [
                     { role: 'user', content: task.instruction },
@@ -79,18 +79,18 @@ export function createSubAgentLoopAdapter(opts: SubAgentLoopAdapterOptions): ILo
             };
 
             yield {
-                type: 'turn:end',
-                turnId: turn.id,
+                type: 'round:end',
+                roundId: round.id,
                 sessionId: ctx.sessionId,
-                turn: 1,
+                round: 1,
             };
 
             yield { type: 'finished', usage };
 
-            return [turn];
+            return [round];
         },
 
-        async *resume(_checkpoint: string): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
+        async *resume(_checkpoint: string): AsyncGenerator<AgentEvent, Round[], Signal | undefined> {
             yield { type: 'error' as any, error: { message: 'Sub-agent resume not supported' } };
             return [];
         },

@@ -392,7 +392,7 @@ describe.skipIf(!apiKey)(
 
         describe('multi-turn conversation', () => {
             it('image in first turn is referenced in follow-up', async () => {
-                // Turn 1: upload image
+                // Round 1: upload image
                 const turn1Resp = await driver.chat.create({
                     messages: [{
                         role: 'user',
@@ -405,7 +405,7 @@ describe.skipIf(!apiKey)(
 
                 const assistantReply = toText(turn1Resp);
 
-                // Turn 2: follow-up without re-uploading
+                // Round 2: follow-up without re-uploading
                 const messages: ChatMessage[] = [
                     {
                         role: 'user',
@@ -423,7 +423,7 @@ describe.skipIf(!apiKey)(
                 expect(text.length).toBeGreaterThan(0);
             });
 
-            it('mixed text + image turns maintain history', async () => {
+            it('mixed text + image rounds maintain history', async () => {
                 const messages: ChatMessage[] = [
                     { role: 'user', content: 'Remember the number 7.' },
                     { role: 'assistant', content: 'I will remember the number 7.' },

@@ -8,7 +8,7 @@ title C4 - Agent 循环执行流程
 ' === Agent Loop ===
 Container_Boundary(agent_loop, "AgentLoopExecutor.run() 每次迭代") {
   Component(p1, "1. Flush Injections", "agent-loop-executor.ts", "处理 inject() 注入的用户消息")
-  Component(p2, "2. Budget Check", "budget-controller.ts", "6 维度预算检查 (maxTurns/tokens/cost/duration/toolCalls)")
+  Component(p2, "2. Budget Check", "budget-controller.ts", "6 维度预算检查 (maxRounds/tokens/cost/duration/toolCalls)")
   Component(p3, "3. Context Compress", "context-manager.ts", "ratio≥0.75 触发 4 层渐进压缩")
   Component(p4, "4. Build Messages", "context-manager.ts", "System Prompt (P0-P4) + History + CompressionSummary")
   Component(p5, "5. LLM Call", "error-recovery.ts", "callWithRecovery() — 5 类错误重试")
@@ -22,7 +22,7 @@ Container_Boundary(agent_loop, "AgentLoopExecutor.run() 每次迭代") {
 }
 
 Container_Boundary(branch_a, "分支 A — 有 tool_calls") {
-  Component(a1, "Plan Confirm", "", "turn===1 时拦截 agent:plan:confirm")
+  Component(a1, "Plan Confirm", "", "round===1 时拦截 agent:plan:confirm")
   Component(a2, "Permission Check", "", "sideEffect!==none 拦截 agent:permission:request")
   Component(a3, "并行执行读工具", "", "sideEffect=none → Promise.all")
   Component(a4, "串行执行写工具", "", "sideEffect!==none → for 循环")

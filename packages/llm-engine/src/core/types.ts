@@ -82,7 +82,7 @@ export interface SessionTokenUsage {
     /** 上下文窗口使用率 [0, 1]（inputTokens / modelMaxContextTokens） */
     contextUsageRatio: number;
     /** 会话累计轮次 */
-    turns: number;
+    rounds: number;
     /** 任务耗时（ms） */
     durationMs: number;
     /** true = 字符估算；false = API 精确值 */

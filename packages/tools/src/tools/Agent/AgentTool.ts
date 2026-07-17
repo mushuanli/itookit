@@ -15,7 +15,7 @@ const inputSchema = lazySchema(() =>
       .array(z.string())
       .optional()
       .describe('Tool IDs the sub-agent may use (default: file_read, glob_search, grep_search)'),
-    max_turns: z.number().optional().describe('Maximum turns for the sub-agent (default: 10)'),
+    max_rounds: z.number().optional().describe('Maximum rounds for the sub-agent (default: 10)'),
   }),
 );
 type InputSchema = ReturnType<typeof inputSchema>;
@@ -24,7 +24,7 @@ const outputSchema = lazySchema(() =>
   z.object({
     success: z.boolean(),
     summary: z.string(),
-    turns: z.number(),
+    rounds: z.number(),
     tokenUsage: z.object({
       input: z.number(),
       output: z.number(),
@@ -71,14 +71,14 @@ export function createAgentTool(router: ISubAgentRouter) {
       const result = await router.delegate({
         instruction: input.instruction,
         allowedTools: input.allowed_tools,
-        maxTurns: input.max_turns,
+        maxRounds: input.max_rounds,
         cwd: context.cwd,
       });
 
       const output: Output = {
         success: result.success,
         summary: result.summary,
-        turns: result.turns,
+        rounds: result.rounds,
         tokenUsage: result.tokenUsage,
       };
       return { data: output };

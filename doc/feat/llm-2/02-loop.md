@@ -12,8 +12,8 @@
 ```typescript
 interface ILoop {
     readonly mode: string;
-    run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal | undefined>;
-    resume(checkpoint: TurnId): AsyncGenerator<AgentEvent, Turn[], Signal | undefined>;
+    run(ctx: LoopContext): AsyncGenerator<AgentEvent, Round[], Signal | undefined>;
+    resume(checkpoint: RoundId): AsyncGenerator<AgentEvent, Round[], Signal | undefined>;
 }
 
 interface LoopContext {
@@ -36,7 +36,7 @@ async function drive(gen: LoopGenerator, session: SessionActor) {
     while (true) {
         const { value: ev, done } = await gen.next(input);
         input = undefined;
-        if (done) return ev;                          // Turn[]
+        if (done) return ev;                          // Round[]
         if (ev.type === 'await_signal') {
             await log.draft().checkpoint(ev.request); // persist pause point
             input = await session.waitSignal();       // suspend — hours/days OK
@@ -55,9 +55,9 @@ async function drive(gen: LoopGenerator, session: SessionActor) {
 | R2 | `yield {type:'await_signal'}` 是唯一暂停方式；宿主负责持久化 + 挂起 |
 | R3 | 轮次边界必须 `log.append`（检查点）后才能进入下一轮 |
 | R4 | 收到的 Signal 在**下一个 yield 点**生效（abort 例外：AbortSignal 硬中断） |
-| R5 | 协程 return `Turn[]`；异常向上抛，宿主转 `error` 事件 |
+| R5 | 协程 return `Round[]`；异常向上抛，宿主转 `error` 事件 |
 
-### 1.3 一轮（turn）的状态机
+### 1.3 一轮（round）的状态机
 
 ```mermaid
 stateDiagram-v2
@@ -72,8 +72,8 @@ stateDiagram-v2
     ToolPhase --> AfterTurn: 工具结果 push
     AfterTurn --> Checkpoint: middleware afterTurn hooks
     Finalize --> Checkpoint
-    Checkpoint --> BeforeTurn: log.append(turn) → 继续循环
-    Checkpoint --> [*]: 无 tool_use → return Turn[]
+    Checkpoint --> BeforeTurn: log.append(round) → 继续循环
+    Checkpoint --> [*]: 无 tool_use → return Round[]
 ```
 
 ---
@@ -98,7 +98,7 @@ interface PauseRequest {
 }
 ```
 
-**resume 的实现**：`resume(turnId)` = `fold(ref)` 重建上下文 + 从 DraftArea 读取暂停点元数据 + 重新进入协程。因为轮次边界的状态全部在 Log 中，resume 不需要序列化协程栈——**这是"轮次边界是唯一合法暂停点"这条约束换来的红利**。
+**resume 的实现**：`resume(roundId)` = `fold(ref)` 重建上下文 + 从 DraftArea 读取暂停点元数据 + 重新进入协程。因为轮次边界的状态全部在 Log 中，resume 不需要序列化协程栈——**这是"轮次边界是唯一合法暂停点"这条约束换来的红利**。
 
 ---
 
@@ -110,11 +110,11 @@ interface PauseRequest {
 interface ILoopMiddleware {
     readonly name: string;
     /** Runs before LLM call. May stop/inject/downgrade. */
-    beforeTurn?(ctx: TurnContext): Promise<ControlDirective | void>;
+    beforeTurn?(ctx: RoundContext): Promise<ControlDirective | void>;
     /** Runs after tools / before checkpoint. May inject correction. */
-    afterTurn?(ctx: TurnContext, result: TurnResult): Promise<ControlDirective | void>;
+    afterTurn?(ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void>;
     /** Error recovery chain — first middleware that returns an action wins. */
-    onError?(ctx: TurnContext, error: Error): Promise<RecoveryAction | void>;
+    onError?(ctx: RoundContext, error: Error): Promise<RecoveryAction | void>;
 }
 
 type ControlDirective =
@@ -135,7 +135,7 @@ type RecoveryAction =
 
 | 中间件 | hook | 行为（继承现有实现） |
 |---|---|---|
-| `budget` | beforeTurn | 6 维检查（turns/in/out tokens/cost/duration/toolCalls）；超限 `stop`；≥80% `downgrade` |
+| `budget` | beforeTurn | 6 维检查（rounds/in/out tokens/cost/duration/toolCalls）；超限 `stop`；≥80% `downgrade` |
 | `compression` | beforeTurn | 上下文使用率分层压缩：L1 70% snip → L2 80% prune → L3 85% LLM 摘要 → L4 95% 滑窗 |
 | `error-recovery` | onError | 429 指数退避 / 413 compress-retry / 529 fallback / length continue-truncated |
 | `hitl` | (工具拦截) | 需确认工具 → `yield await_signal(tool_approval)`；首轮 plan 确认 |
@@ -170,6 +170,6 @@ type RecoveryAction =
 
 | 问题 | 倾向 |
 |---|---|
-| 协程版本升级后旧 checkpoint 能否 resume | checkpoint 只含 (turnId, PauseRequest)，不含代码状态 → 天然向前兼容 |
-| 中间件之间的依赖（compression 需要 llm） | TurnContext 注入 `llm`，中间件间禁止互相引用 |
+| 协程版本升级后旧 checkpoint 能否 resume | checkpoint 只含 (roundId, PauseRequest)，不含代码状态 → 天然向前兼容 |
+| 中间件之间的依赖（compression 需要 llm） | RoundContext 注入 `llm`，中间件间禁止互相引用 |
 | 多 loop 并发共享 session | 禁止：一个 ref 同时至多一个活跃协程（宿主排它），并行探索用多 ref |

@@ -1,18 +1,18 @@
-// executor-chat — minimal ILoop implementation for single-turn chat.
+// executor-chat — minimal ILoop implementation for single-round chat.
 //
-// This is the simplest ILoop: no tools, no middleware, single turn.
+// This is the simplest ILoop: no tools, no middleware, single round.
 // It serves as both a reference implementation and the test baseline
 // for the ILoop contract.
 
-import type { ILoop, LoopContext, Turn, AgentEvent, Signal } from '@itookit/common';
+import type { ILoop, LoopContext, Round, AgentEvent, Signal } from '@itookit/common';
 import { notSupported } from '../core/loop-driver';
 import { ulid } from '../persistence/ulid';
 
 export const chatExecutor: ILoop = {
     mode: 'chat',
 
-    async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
-        const turnId = ctx.preallocatedTurnId ?? ulid();
+    async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Round[], Signal | undefined> {
+        const roundId = ctx.preallocatedRoundId ?? ulid();
         const foldStart = performance.now();
         let messages = await ctx.log.fold(ctx.ref);
         console.log('[chat-executor] fold() completed', {
@@ -34,10 +34,10 @@ export const chatExecutor: ILoop = {
             : messages;
 
         yield {
-            type: 'turn:start',
-            turnId,
+            type: 'round:start',
+            roundId,
             sessionId: ctx.sessionId,
-            turn: 1,
+            round: 1,
         };
 
         const assistantContent: string[] = [];
@@ -95,8 +95,8 @@ export const chatExecutor: ILoop = {
 
         const finalContent = assistantContent.join('');
         const finalThinking = thinkingContent.join('');
-        const turn: Turn = {
-            id: turnId,
+        const round: Round = {
+            id: roundId,
             parents: [],
             payload: [
                 {
@@ -111,12 +111,12 @@ export const chatExecutor: ILoop = {
             },
         };
 
-        yield { type: 'turn:end', turnId, sessionId: ctx.sessionId, turn: 1 };
+        yield { type: 'round:end', roundId, sessionId: ctx.sessionId, round: 1 };
 
-        return [turn];
+        return [round];
     },
 
-    resume(_checkpoint: string): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
+    resume(_checkpoint: string): AsyncGenerator<AgentEvent, Round[], Signal | undefined> {
         notSupported('chat');
     },
 };

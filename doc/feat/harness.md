@@ -88,13 +88,13 @@ executeAgentLoopTask() 内部：
 interface AgentLoopRequest {
     messages: ChatMessage[];
     llmParams: Omit<ChatCompletionParams, 'messages' | 'signal'>;
-    maxTurns: number;
+    maxRounds: number;
     signal?: AbortSignal;
 }
 
 interface AgentLoopResult {
     output: string;
-    turns: TurnRecord[];
+    rounds: RoundRecord[];
     totalUsage: SessionTokenUsage;
 }
 
@@ -121,8 +121,8 @@ class ClaudeCodeStrategy implements IAgentLoopStrategy {
     async run(request, opts): Promise<AgentLoopResult> {
         const messages = [...request.messages];
 
-        for (let turn = 0; turn < request.maxTurns; turn++) {
-            opts.onEvent({ type: 'turn:start', payload: { sessionId: opts.sessionId, turn } });
+        for (let round = 0; round < request.maxRounds; round++) {
+            opts.onEvent({ type: 'round:start', payload: { sessionId: opts.sessionId, round } });
 
             // 1. LLM 调用（流式，解析 content blocks）
             const { assistantBlocks, usage } = await this.callLLM(
@@ -142,11 +142,11 @@ class ClaudeCodeStrategy implements IAgentLoopStrategy {
                 continue;
             }
 
-            // end_turn — 退出循环
+            // end_round — 退出循环
             break;
         }
 
-        return { output: extractFinalText(messages), turns, totalUsage };
+        return { output: extractFinalText(messages), rounds, totalUsage };
     }
 }
 ```
@@ -174,7 +174,7 @@ class HarnessStrategy implements IAgentLoopStrategy {
 
         return {
             output: result.response,
-            turns: [],  // harness 不暴露 turn 级别细节
+            rounds: [],  // harness 不暴露 round 级别细节
             totalUsage: mapHarnessUsage(result.usage),
         };
     }
@@ -220,7 +220,7 @@ class TaskRunner {
 
         // 9. 运行
         const result = await strategy.run(
-            { messages, llmParams, maxTurns: task.input.overrides?.maxTurns ?? 50,
+            { messages, llmParams, maxRounds: task.input.overrides?.maxRounds ?? 50,
               signal: task.abortController.signal },
             { nodeId: rootNode.id, sessionId: task.sessionId, onEvent },
         );
@@ -291,7 +291,7 @@ if (this.config.settings.useHarness) {
   │
   └─ strategy.run()            Agent Loop
        │
-       ├─ [turn 0]
+       ├─ [round 0]
        │   ├─ kernelAdapter.streamRaw() → SSE chunks
        │   ├─ 解析 thinking_delta → emit stream:thinking chunk
        │   ├─ 解析 text_delta    → emit node_update(field='output')
@@ -303,9 +303,9 @@ if (this.config.settings.useHarness) {
        │   │   └─ messages.push(assistant + tool_result)
        │   └─ continue
        │
-       ├─ [turn 1, 2, ...]
+       ├─ [round 1, 2, ...]
        │
-       └─ finish_reason=end_turn → break
+       └─ finish_reason=end_round → break
   │
   └─ finalizeAgentLoop()       持久化 + emit node_status:success + finished
 ```
@@ -313,15 +313,15 @@ if (this.config.settings.useHarness) {
 ### 6.2 Messages 拼接示意
 
 ```
-Turn 0 初始:
+Round 0 初始:
   messages = [
     { role: 'user', content: "用户输入" }
   ]
 
-Turn 0 模型返回 tool_use:
+Round 0 模型返回 tool_use:
   assistant blocks = [thinking(sig=A), text("让我读文件"), tool_use(Read, id=t1)]
 
-Turn 1 拼接后:
+Round 1 拼接后:
   messages = [
     { role: 'user', content: "用户输入" },
     { role: 'assistant', content: [
@@ -346,8 +346,8 @@ type OrchestratorEvent =
     // ... 原有事件 ...
 
     // Agent Loop 生命周期
-    | { type: 'turn:start';  payload: { sessionId: string; turn: number } }
-    | { type: 'turn:end';    payload: { sessionId: string; turn: number } }
+    | { type: 'round:start';  payload: { sessionId: string; round: number } }
+    | { type: 'round:end';    payload: { sessionId: string; round: number } }
 
     // Content block 粒度（ClaudeCodeStrategy 发出）
     | { type: 'stream:thinking:start'; payload: { nodeId: string } }
@@ -418,7 +418,7 @@ interface LLMConnection {
 
 - [ ] 删除 `useClaudeCode`（改为 `selectStrategy` 内部自动判断）
 - [ ] 保留 `useHarness`（UI toggle 的唯一入口，语义升级为"启用 Agent Loop"）
-- [ ] `maxTurns` 保留
+- [ ] `maxRounds` 保留
 
 #### Step 4 — ChatInputView
 

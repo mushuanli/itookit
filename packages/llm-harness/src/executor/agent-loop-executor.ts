@@ -359,7 +359,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
             status: state.status,
             response: finalResponse,
             usage,
-            turns: usage.turns,
+            rounds: usage.rounds,
             incompleteReason,
         };
         this.emit('agent:task:end', { result });
@@ -585,7 +585,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
         return {
             sessionId,
             status: s.status,
-            turns: s.usage.turns,
+            rounds: s.usage.rounds,
             usage: s.usage,
             loadedSkills: this.contextManager.getLoadedSkillIds(sessionId),
             isCompressed: this.contextManager.isSessionCompressed(sessionId),

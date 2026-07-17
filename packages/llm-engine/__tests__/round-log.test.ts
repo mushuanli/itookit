@@ -1,20 +1,20 @@
-// @file: llm-engine/__tests__/turn-log.test.ts
-// Integration tests for TurnLog with an in-memory IChatEngine mock.
+// @file: llm-engine/__tests__/round-log.test.ts
+// Integration tests for RoundLog with an in-memory IChatEngine mock.
 //
 // Covers:
-//   - TurnLog CRUD: append, fold, readTurn, writeTurn
+//   - RoundLog CRUD: append, fold, readRound, writeRound
 //   - Delete semantics: user→cascade, assistant→keep, resend→no-branch
 //   - Children reverse index + fold caching + soft-delete filtering
-//   - Event emission: turn:appended, turn:updated, turn:deleted
+//   - Event emission: round:appended, round:updated, round:deleted
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type {
-    Turn, TurnId, Ref, ChatMessage, ILog, DraftArea, RefStore,
+    Round, RoundId, Ref, ChatMessage, ILog, DraftArea, RefStore,
 } from '@itookit/common';
 import type { IChatEngine, FSNode } from '../src/persistence/types';
-import type { TurnManifest, PersistedTurn, TurnProjection } from '../src/persistence/turn-types';
-import type { TurnLogEvent } from '../src/persistence/turn-events';
-import { TurnLog, turnToProjection } from '../src/persistence/turn-log';
+import type { RoundManifest, PersistedRound, RoundProjection } from '../src/persistence/round-types';
+import type { RoundLogEvent } from '../src/persistence/round-events';
+import { RoundLog, roundToProjection } from '../src/persistence/round-log';
 import { SessionState } from '../src/session/session-state';
 
 // ── In-memory IChatEngine mock ──────────────────────────────────────────────
@@ -126,7 +126,7 @@ class InMemoryChatEngine implements Partial<IChatEngine> {
 
 // ── Test helpers ────────────────────────────────────────────────────────────
 
-function makeTurn(overrides: Partial<Turn> = {}): Turn {
+function makeRound(overrides: Partial<Round> = {}): Round {
     return {
         id: '',
         parents: [],
@@ -135,20 +135,20 @@ function makeTurn(overrides: Partial<Turn> = {}): Turn {
     };
 }
 
-function makeUserPayload(text: string): Turn['payload'] {
+function makeUserPayload(text: string): Round['payload'] {
     return [{ role: 'user' as const, content: text }];
 }
 
-function makeAssistantPayload(text: string): Turn['payload'] {
+function makeAssistantPayload(text: string): Round['payload'] {
     return [{ role: 'assistant' as const, content: text }];
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
-describe('TurnLog', () => {
+describe('RoundLog', () => {
     let engine: InMemoryChatEngine;
-    let log: TurnLog;
-    let events: TurnLogEvent[];
+    let log: RoundLog;
+    let events: RoundLogEvent[];
     const nodeId = 'test-session.chat';
     const sessionId = 'test-session-id';
 
@@ -156,39 +156,39 @@ describe('TurnLog', () => {
         engine = new InMemoryChatEngine();
         engine.setManifest({
             id: sessionId,
-            format: 'turn',
-            rootTurnId: 'root',
+            // format removed - default is round,
+            rootRoundId: 'root',
             branches: { main: 'root' },
             current_branch: 'main',
             current_head: 'root',
             children: {},
         });
         events = [];
-        log = new TurnLog(engine as unknown as IChatEngine, nodeId, sessionId);
+        log = new RoundLog(engine as unknown as IChatEngine, nodeId, sessionId);
         log.setEventListener((e) => events.push(e));
     });
 
     // ── Basic CRUD ────────────────────────────────────────────────────────
 
     describe('append & fold', () => {
-        it('should append a turn and fold returns its messages', async () => {
-            const turn = makeTurn({ payload: [{ role: 'user', content: 'Hello' }] });
-            const turnId = await log.append('main', turn);
+        it('should append a round and fold returns its messages', async () => {
+            const round = makeRound({ payload: [{ role: 'user', content: 'Hello' }] });
+            const roundId = await log.append('main', round);
 
             const messages = await log.fold('main');
             expect(messages).toHaveLength(1);
             expect(messages[0]).toEqual({ role: 'user', content: 'Hello' });
         });
 
-        it('should append multiple turns and fold returns them in order', async () => {
-            const t1 = makeTurn({ payload: [{ role: 'user', content: 'Q1' }] });
+        it('should append multiple rounds and fold returns them in order', async () => {
+            const t1 = makeRound({ payload: [{ role: 'user', content: 'Q1' }] });
             const t1Id = await log.append('main', t1);
-            const t2 = makeTurn({
+            const t2 = makeRound({
                 parents: [t1Id],
                 payload: [{ role: 'assistant', content: 'A1' }],
             });
             const t2Id = await log.append('main', t2);
-            const t3 = makeTurn({
+            const t3 = makeRound({
                 parents: [t2Id],
                 payload: [{ role: 'user', content: 'Q2' }],
             });
@@ -202,9 +202,9 @@ describe('TurnLog', () => {
         });
 
         it('should trim trailing assistant from fold (Anthropic requirement)', async () => {
-            const t1 = makeTurn({ payload: [{ role: 'user', content: 'Q1' }] });
+            const t1 = makeRound({ payload: [{ role: 'user', content: 'Q1' }] });
             const t1Id = await log.append('main', t1);
-            const t2 = makeTurn({
+            const t2 = makeRound({
                 parents: [t1Id],
                 payload: [{ role: 'assistant', content: 'A1' }],
             });
@@ -216,7 +216,7 @@ describe('TurnLog', () => {
         });
 
         it('should skip empty assistant messages in fold', async () => {
-            const t1 = makeTurn({ payload: [
+            const t1 = makeRound({ payload: [
                 { role: 'user', content: 'Q1' },
                 { role: 'assistant', content: '' },
             ]});
@@ -230,26 +230,26 @@ describe('TurnLog', () => {
 
     // ── Delete semantics (core acceptance criteria) ─────────────────────
 
-    describe('delete user turn → cascade delete assistant', () => {
-        it('fold() should skip deleted turns and SessionState should cascade', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
-            const t2Id = await log.append('main', makeTurn({
+    describe('delete user round → cascade delete assistant', () => {
+        it('fold() should skip deleted rounds and SessionState should cascade', async () => {
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
+            const t2Id = await log.append('main', makeRound({
                 parents: [t1Id],
                 payload: makeAssistantPayload('A1'),
             }));
-            const t3Id = await log.append('main', makeTurn({
+            const t3Id = await log.append('main', makeRound({
                 parents: [t2Id],
                 payload: makeUserPayload('Q2'),
             }));
-            const t4Id = await log.append('main', makeTurn({
+            const t4Id = await log.append('main', makeRound({
                 parents: [t3Id],
                 payload: makeAssistantPayload('A2'),
             }));
 
-            // Delete user turn T3 — T4 should cascade in SessionState projection
-            await log.deleteTurn(t3Id);
+            // Delete user round T3 — T4 should cascade in SessionState projection
+            await log.deleteRound(t3Id);
 
-            // fold() skips _deleted turns (T3) and trims trailing assistant (A1 → T2)
+            // fold() skips _deleted rounds (T3) and trims trailing assistant (A1 → T2)
             const messages = await log.fold('main');
             expect(messages).toHaveLength(1); // Q1 only (A1 trimmed as trailing assistant)
             expect(messages[0]).toEqual({ role: 'user', content: 'Q1' });
@@ -257,44 +257,44 @@ describe('TurnLog', () => {
             // Verify SessionState cascade
             const state = new SessionState(nodeId, sessionId);
             for (const tId of [t1Id, t2Id, t3Id, t4Id]) {
-                const t = await log.readTurn(tId);
-                if (t && !t._deleted) state.loadFromProjection(turnToProjection(t, tId));
+                const t = await log.readRound(tId);
+                if (t && !t._deleted) state.loadFromProjection(roundToProjection(t, tId));
             }
-            const cascadeIds = getCascadeTurnIds(state, t3Id);
+            const cascadeIds = getCascadeRoundIds(state, t3Id);
             expect(cascadeIds).toContain(t3Id);
             expect(cascadeIds).toContain(t4Id);
         });
     });
 
-    describe('delete assistant turn → keep user', () => {
-        it('should keep the user turn visible after deleting assistant', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
-            const t2Id = await log.append('main', makeTurn({
+    describe('delete assistant round → keep user', () => {
+        it('should keep the user round visible after deleting assistant', async () => {
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
+            const t2Id = await log.append('main', makeRound({
                 parents: [t1Id],
                 payload: makeAssistantPayload('A1'),
             }));
 
-            await log.deleteTurn(t2Id);
+            await log.deleteRound(t2Id);
 
             const messages = await log.fold('main');
             expect(messages).toHaveLength(1);
             expect(messages[0]).toEqual({ role: 'user', content: 'Q1' });
 
             // T1 should NOT be marked _deleted
-            const t1 = await log.readTurn(t1Id);
+            const t1 = await log.readRound(t1Id);
             expect(t1).not.toBeNull();
             expect(t1!._deleted).toBeFalsy();
 
             // T2 should be marked _deleted
-            const t2 = await log.readTurn(t2Id);
+            const t2 = await log.readRound(t2Id);
             expect(t2!._deleted).toBe(true);
         });
     });
 
-    describe('resend (clearAssistantInTurn) → no new branch', () => {
+    describe('resend (clearAssistantInRound) → no new branch', () => {
         it('should clear assistant without creating a new branch', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
-            const t2Id = await log.append('main', makeTurn({
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
+            const t2Id = await log.append('main', makeRound({
                 parents: [t1Id],
                 payload: [
                     { role: 'user', content: 'Q1' },
@@ -302,7 +302,7 @@ describe('TurnLog', () => {
                 ],
             }));
 
-            await log.clearAssistantInTurn(t2Id);
+            await log.clearAssistantInRound(t2Id);
 
             // fold should show Q1 from both T1 and T2 user message
             const messages = await log.fold('main');
@@ -311,7 +311,7 @@ describe('TurnLog', () => {
             expect(messages[1]).toEqual({ role: 'user', content: 'Q1' });
 
             // T2 should have no assistant payload
-            const t2 = await log.readTurn(t2Id);
+            const t2 = await log.readRound(t2Id);
             expect(t2!.payload.find(m => m.role === 'assistant')).toBeUndefined();
             expect(t2!.result).toBeUndefined();
 
@@ -326,8 +326,8 @@ describe('TurnLog', () => {
 
     describe('children reverse index', () => {
         it('should maintain children index across append operations', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
-            const t2Id = await log.append('main', makeTurn({
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
+            const t2Id = await log.append('main', makeRound({
                 parents: [t1Id],
                 payload: makeAssistantPayload('A1'),
             }));
@@ -337,16 +337,16 @@ describe('TurnLog', () => {
             expect(manifest.children[t1Id]).toContain(t2Id);
         });
 
-        it('should supportO(1) sibling lookup via children index', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
-            const t2aId = await log.append('main', makeTurn({
+        it('should support O(1) sibling lookup via children index', async () => {
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
+            const t2aId = await log.append('main', makeRound({
                 parents: [t1Id],
                 payload: makeAssistantPayload('A1-v1'),
             }));
 
             // Simulate regenerate: another assistant under the same parent
-            const t2bId = await log.append('main', makeTurn({
-                id: 'sibling-turn-id',
+            const t2bId = await log.append('main', makeRound({
+                id: 'sibling-round-id',
                 parents: [t1Id],
                 payload: makeAssistantPayload('A1-v2'),
             }));
@@ -362,71 +362,71 @@ describe('TurnLog', () => {
     // ── Soft-delete filtering in fold ─────────────────────────────────────
 
     describe('soft-delete filtering', () => {
-        it('fold() should skip _deleted turns', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
-            const t2Id = await log.append('main', makeTurn({
+        it('fold() should skip _deleted rounds', async () => {
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
+            const t2Id = await log.append('main', makeRound({
                 parents: [t1Id],
                 payload: makeAssistantPayload('A1'),
             }));
 
-            await log.deleteTurn(t2Id);
+            await log.deleteRound(t2Id);
 
             const messages = await log.fold('main');
-            const deletedTurnIds = (await Promise.all(
-                [t1Id, t2Id].map(id => log.readTurn(id)),
+            const deletedRoundIds = (await Promise.all(
+                [t1Id, t2Id].map(id => log.readRound(id)),
             )).filter(t => t?._deleted).map(t => t!.id);
 
-            expect(deletedTurnIds).toContain(t2Id);
-            expect(deletedTurnIds).not.toContain(t1Id);
+            expect(deletedRoundIds).toContain(t2Id);
+            expect(deletedRoundIds).not.toContain(t1Id);
         });
     });
 
     // ── Event emission ────────────────────────────────────────────────────
 
     describe('event emission', () => {
-        it('should emit turn:appended on append', async () => {
-            await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
+        it('should emit round:appended on append', async () => {
+            await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
 
             expect(events.length).toBeGreaterThanOrEqual(1);
-            expect(events[0].type).toBe('turn:appended');
+            expect(events[0].type).toBe('round:appended');
             expect((events[0] as any).projection).toBeDefined();
         });
 
-        it('should emit turn:updated on clearAssistantInTurn', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: [
+        it('should emit round:updated on clearAssistantInRound', async () => {
+            const t1Id = await log.append('main', makeRound({ payload: [
                 { role: 'user', content: 'Q1' },
                 { role: 'assistant', content: 'A1' },
             ]}));
 
             const beforeCount = events.length;
-            await log.clearAssistantInTurn(t1Id);
+            await log.clearAssistantInRound(t1Id);
 
             const newEvents = events.slice(beforeCount);
             expect(newEvents.length).toBeGreaterThanOrEqual(1);
-            expect(newEvents[0].type).toBe('turn:updated');
+            expect(newEvents[0].type).toBe('round:updated');
         });
 
-        it('should emit turn:updated on markStale', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
+        it('should emit round:updated on markStale', async () => {
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
 
             const beforeCount = events.length;
             await log.markStale(t1Id);
 
             const newEvents = events.slice(beforeCount);
             expect(newEvents.length).toBeGreaterThanOrEqual(1);
-            expect(newEvents[0].type).toBe('turn:updated');
+            expect(newEvents[0].type).toBe('round:updated');
             expect((newEvents[0] as any).changes.stale).toBe(true);
         });
 
-        it('should emit turn:deleted on deleteTurn', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
+        it('should emit round:deleted on deleteRound', async () => {
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
 
             const beforeCount = events.length;
-            await log.deleteTurn(t1Id);
+            await log.deleteRound(t1Id);
 
             const newEvents = events.slice(beforeCount);
             expect(newEvents.length).toBeGreaterThanOrEqual(1);
-            expect(newEvents[0].type).toBe('turn:deleted');
+            expect(newEvents[0].type).toBe('round:deleted');
         });
     });
 
@@ -434,9 +434,9 @@ describe('TurnLog', () => {
 
     describe('fold caching', () => {
         it('should invalidate cache on append', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
             const first = await log.fold('main'); // populate cache
-            await log.append('main', makeTurn({
+            await log.append('main', makeRound({
                 parents: [t1Id],
                 payload: makeUserPayload('Q2'),
             }));
@@ -446,9 +446,9 @@ describe('TurnLog', () => {
         });
 
         it('should invalidate cache on delete', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
             await log.fold('main'); // populate cache
-            await log.deleteTurn(t1Id);
+            await log.deleteRound(t1Id);
 
             const messages = await log.fold('main');
             expect(messages).toHaveLength(0);
@@ -460,16 +460,16 @@ describe('TurnLog', () => {
     describe('manifest management', () => {
         it('should bootstrap manifest on first access', async () => {
             engine.setManifest({}); // empty manifest
-            const freshLog = new TurnLog(engine as unknown as IChatEngine, nodeId, sessionId);
+            const freshLog = new RoundLog(engine as unknown as IChatEngine, nodeId, sessionId);
 
             const manifest = await freshLog.loadManifest();
-            expect(manifest.format).toBe('turn');
+            // RoundManifest has no format field;
             expect(manifest.branches.main).toBeDefined();
         });
 
         it('should persist children index in manifest', async () => {
-            const t1Id = await log.append('main', makeTurn({ payload: makeUserPayload('Q1') }));
-            await log.append('main', makeTurn({
+            const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
+            await log.append('main', makeRound({
                 parents: [t1Id],
                 payload: makeAssistantPayload('A1'),
             }));
@@ -483,19 +483,19 @@ describe('TurnLog', () => {
 
     // ── Read/write turn files ─────────────────────────────────────────────
 
-    describe('readTurn / writeTurn', () => {
-        it('should persist and read back turn data', async () => {
-            const turnId = await log.append('main', makeTurn({
+    describe('readRound / writeRound', () => {
+        it('should persist and read back round data', async () => {
+            const roundId = await log.append('main', makeRound({
                 payload: makeUserPayload('Hello World'),
             }));
 
-            const persisted = await log.readTurn(turnId);
+            const persisted = await log.readRound(roundId);
             expect(persisted).not.toBeNull();
             expect(persisted!.payload[0].content).toBe('Hello World');
         });
 
-        it('should return null for non-existent turn', async () => {
-            const result = await log.readTurn('non-existent-id');
+        it('should return null for non-existent round', async () => {
+            const result = await log.readRound('non-existent-id');
             expect(result).toBeNull();
         });
     });
@@ -503,33 +503,33 @@ describe('TurnLog', () => {
 
 // ── SessionState projection tests ──────────────────────────────────────────
 
-describe('SessionState (turn format)', () => {
-    it('should cascade delete children via collectCascadeTurnIds', () => {
+describe('SessionState (round format)', () => {
+    it('should cascade delete children via collectCascadeRoundIds', () => {
         const state = new SessionState('node', 'session');
 
-        const p1: TurnProjection = { turnId: 't1', parents: [], kind: 'chat', userMessage: { content: 'Q1', persistedNodeId: 't1' }, meta: { createdAt: 1, origin: 'user' } };
-        const p2: TurnProjection = { turnId: 't2', parents: ['t1'], kind: 'chat', assistantMessage: { content: 'A1', status: 'success', persistedNodeId: 't2' }, meta: { createdAt: 2, origin: 'user' } };
-        const p3: TurnProjection = { turnId: 't3', parents: ['t2'], kind: 'chat', userMessage: { content: 'Q2', persistedNodeId: 't3' }, meta: { createdAt: 3, origin: 'user' } };
-        const p4: TurnProjection = { turnId: 't4', parents: ['t3'], kind: 'chat', assistantMessage: { content: 'A2', status: 'success', persistedNodeId: 't4' }, meta: { createdAt: 4, origin: 'user' } };
+        const p1: RoundProjection = { roundId: 't1', parents: [], kind: 'chat', userMessage: { content: 'Q1', persistedNodeId: 't1' }, meta: { createdAt: 1, origin: 'user' } };
+        const p2: RoundProjection = { roundId: 't2', parents: ['t1'], kind: 'chat', assistantMessage: { content: 'A1', status: 'success', persistedNodeId: 't2' }, meta: { createdAt: 2, origin: 'user' } };
+        const p3: RoundProjection = { roundId: 't3', parents: ['t2'], kind: 'chat', userMessage: { content: 'Q2', persistedNodeId: 't3' }, meta: { createdAt: 3, origin: 'user' } };
+        const p4: RoundProjection = { roundId: 't4', parents: ['t3'], kind: 'chat', assistantMessage: { content: 'A2', status: 'success', persistedNodeId: 't4' }, meta: { createdAt: 4, origin: 'user' } };
 
         for (const p of [p1, p2, p3, p4]) state.loadFromProjection(p);
 
-        const cascadeIds = getCascadeTurnIds(state, 't3');
+        const cascadeIds = getCascadeRoundIds(state, 't3');
         expect(cascadeIds).toContain('t3');
         expect(cascadeIds).toContain('t4');
         expect(cascadeIds).not.toContain('t1');
         expect(cascadeIds).not.toContain('t2');
     });
 
-    it('should apply turn:appended event', () => {
+    it('should apply round:appended event', () => {
         const state = new SessionState('node', 'session');
 
         const events = state.apply({
-            type: 'turn:appended',
+            type: 'round:appended',
             ref: 'main',
-            turnId: 't1',
+            roundId: 't1',
             projection: {
-                turnId: 't1', parents: [], kind: 'chat',
+                roundId: 't1', parents: [], kind: 'chat',
                 userMessage: { content: 'Hello', persistedNodeId: 't1' },
                 meta: { createdAt: 1, origin: 'user' },
             },
@@ -542,9 +542,9 @@ describe('SessionState (turn format)', () => {
 
 // ── Helper ─────────────────────────────────────────────────────────────────
 
-/** Access the private collectCascadeTurnIds via apply("turn:deleted"). */
-function getCascadeTurnIds(state: SessionState, turnId: string): string[] {
-    const events = state.apply({ type: 'turn:deleted', turnId });
+/** Access the private collectCascadeRoundIds via apply("round:deleted"). */
+function getCascadeRoundIds(state: SessionState, roundId: string): string[] {
+    const events = state.apply({ type: 'round:deleted', roundId });
     const deletedEvent = events.find(e => e.type === 'messages:deleted');
     if (deletedEvent && 'payload' in deletedEvent) {
         return (deletedEvent.payload as { deletedIds: string[] }).deletedIds;

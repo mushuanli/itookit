@@ -42,7 +42,7 @@ export const delegateAgentDefinition: ToolDefinition = {
                 },
                 max_turns: {
                     type: 'number',
-                    description: 'Maximum execution turns (default: 15)',
+                    description: 'Maximum execution rounds (default: 15)',
                 },
             },
             required: ['agent_id', 'instruction'],
@@ -57,7 +57,7 @@ export function createDelegateAgentHandler(
     return async (args) => {
         const agentId  = String(args['agent_id'] ?? '');
         const instruction = String(args['instruction'] ?? '');
-        const maxTurns = typeof args['max_turns'] === 'number' ? args['max_turns'] : 15;
+        const maxRounds = typeof args['max_turns'] === 'number' ? args['max_turns'] : 15;
 
         if (!agentId) return 'Error: agent_id is required';
         if (!instruction) return 'Error: instruction is required';
@@ -70,7 +70,7 @@ export function createDelegateAgentHandler(
             systemPrompt: agentDef.config.systemPrompt,
             connectionId: agentDef.config.connectionId || undefined,
             modelName:    agentDef.config.modelName || undefined,
-            maxTurns,
+            maxRounds,
             allowedTools: ['file_read', 'glob_search', 'grep_search', 'file_write', 'write_result'],
         });
 

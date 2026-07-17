@@ -9,8 +9,8 @@
 
 import type {
     ILoopMiddleware,
-    TurnContext,
-    TurnResult,
+    RoundContext,
+    RoundResult,
     ControlDirective,
     RecoveryAction,
     AgentEvent,
@@ -45,9 +45,9 @@ export interface HarnessTierState {
 export interface HarnessSessionState {
     /** Working directory for back-pressure shell commands. */
     cwd: string;
-    /** First-turn flag for plan confirm + skill auto-load. */
-    isFirstTurn: boolean;
-    /** Pending injections flushed at turn start. */
+    /** First-round flag for plan confirm + skill auto-load. */
+    isFirstRound: boolean;
+    /** Pending injections flushed at round start. */
     pendingInjections: string[];
 }
 
@@ -68,7 +68,7 @@ export function createHarnessBudgetMiddleware(
     return {
         name: '01-budget',
 
-        async beforeTurn(_ctx: TurnContext): Promise<ControlDirective | void> {
+        async beforeRound(_ctx: RoundContext): Promise<ControlDirective | void> {
             try {
                 state.controller.checkOrThrow(state.snapshot);
             } catch (err) {
@@ -112,7 +112,7 @@ export function createHarnessBudgetMiddleware(
             }
         },
 
-        async onError(_ctx: TurnContext, error: Error): Promise<RecoveryAction> {
+        async onError(_ctx: RoundContext, error: Error): Promise<RecoveryAction> {
             if (error instanceof BudgetExhaustedError) {
                 return { action: 'fail' };
             }
@@ -143,7 +143,7 @@ export function createHarnessErrorRecoveryMiddleware(
     return {
         name: '02-error-recovery',
 
-        async onError(_ctx: TurnContext, error: Error): Promise<RecoveryAction> {
+        async onError(_ctx: RoundContext, error: Error): Promise<RecoveryAction> {
             const msg = error.message ?? '';
             const statusCode = (error as unknown as Record<string, unknown>)['statusCode'] as number | undefined
                 ?? (error as unknown as Record<string, unknown>)['status'] as number | undefined;
@@ -198,7 +198,7 @@ export function createHarnessHITLMiddleware(
     return {
         name: '03-hitl',
 
-        async beforeTurn(_ctx: TurnContext): Promise<ControlDirective | void> {
+        async beforeRound(_ctx: RoundContext): Promise<ControlDirective | void> {
             // Flush pending user injections before the LLM call.
             if (session.pendingInjections.length > 0) {
                 const injections = session.pendingInjections.splice(0);
@@ -211,14 +211,14 @@ export function createHarnessHITLMiddleware(
             }
         },
 
-        async onToolCalls(ctx: TurnContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void> {
-            // Plan confirmation on first turn with tool calls.
-            if (!enablePlanConfirm || ctx.turnNumber !== 1 || toolCalls.length === 0) return;
+        async onToolCalls(ctx: RoundContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void> {
+            // Plan confirmation on first round with tool calls.
+            if (!enablePlanConfirm || ctx.roundNumber !== 1 || toolCalls.length === 0) return;
 
             return {
                 action: 'pause',
                 request: {
-                    requestId: `plan_${ctx.sessionId}_${ctx.turnNumber}`,
+                    requestId: `plan_${ctx.sessionId}_${ctx.roundNumber}`,
                     reason: 'plan_confirm',
                     message: `The agent plans to execute ${toolCalls.length} tool(s):\n${toolCalls.map(tc => `- ${tc.name}`).join('\n')}`,
                     options: [
@@ -241,7 +241,7 @@ export function createHarnessBackPressureMiddleware(
     return {
         name: '04-back-pressure',
 
-        async afterTurn(_ctx: TurnContext, result: TurnResult): Promise<ControlDirective | void> {
+        async afterRound(_ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
             const toolNames = extractToolNames(result);
 
             if (toolNames.length > 0) {
@@ -294,7 +294,7 @@ export function createHarnessCompressionMiddleware(
     return {
         name: '05-compression',
 
-        async beforeTurn(_ctx: TurnContext): Promise<ControlDirective | void> {
+        async beforeRound(_ctx: RoundContext): Promise<ControlDirective | void> {
             const usageRatio = contextManager.getContextUsageRatio(sessionId);
             if (usageRatio >= compressionThreshold) {
                 const info = await contextManager.maybeCompress(sessionId, usageRatio);
@@ -325,7 +325,7 @@ export function createHarnessSkillsMiddleware(
     return {
         name: '06-skills',
 
-        async beforeTurn(_ctx: TurnContext): Promise<ControlDirective | void> {
+        async beforeRound(_ctx: RoundContext): Promise<ControlDirective | void> {
             if (!skillsLoaded) {
                 skillsLoaded = true;
                 // Auto-detect and pre-load skills matching the task prompt
@@ -333,7 +333,7 @@ export function createHarnessSkillsMiddleware(
             }
         },
 
-        async afterTurn(_ctx: TurnContext, _result: TurnResult): Promise<ControlDirective | void> {
+        async afterRound(_ctx: RoundContext, _result: RoundResult): Promise<ControlDirective | void> {
             // Skill post-processing (markSkillLoaded) is handled by the loop body
             // after tool execution, since middleware doesn't have IToolService access.
         },
@@ -342,7 +342,7 @@ export function createHarnessSkillsMiddleware(
 
 // ─── helpers ─────────────────────────────────────────────────────────
 
-function extractToolNames(result: TurnResult): string[] {
+function extractToolNames(result: RoundResult): string[] {
     const names: string[] = [];
     for (const block of result.assistantBlocks) {
         if (block.type === 'tool_use' && block.toolName) {

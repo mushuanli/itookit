@@ -6,7 +6,7 @@
 // Existing 4 control loops (Mission / SessionGraph / AutoContinue /
 // BackPressure) are configurations of this single primitive.
 
-import type { ILoop, TurnResult } from './loop';
+import type { ILoop, RoundResult } from './loop';
 import type { PauseRequest } from './agent-event';
 
 // ─── Goal definition ────────────────────────────────────────────────
@@ -59,7 +59,7 @@ export interface IController {
 
 // ─── Predicate — completion judgment ─────────────────────────────────
 
-export type Predicate = (result: TurnResult, node: GoalNode) => Promise<Verdict>;
+export type Predicate = (result: RoundResult, node: GoalNode) => Promise<Verdict>;
 
 export type Verdict =
     | { status: 'done' }

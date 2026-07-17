@@ -10,15 +10,15 @@
 //   3. Build messages from log.fold()
 //   4. LLM Call with error recovery (via error-recovery middleware)
 //   5. Parse Response → handle tool_calls or finalize
-//   6. After-turn hooks (back-pressure via middleware)
-//   7. Checkpoint → yield turn:end → continue or return
+//   6. After-round hooks (back-pressure via middleware)
+//   7. Checkpoint → yield round:end → continue or return
 
 import type {
     ILoop,
     LoopContext,
-    Turn,
-    TurnContext,
-    TurnResult,
+    Round,
+    RoundContext,
+    RoundResult,
     AgentEvent,
     Signal,
     ILoopMiddleware,
@@ -61,12 +61,12 @@ export class LoopExecutor implements ILoop {
         this.pipeline = composeMiddleware(middlewares);
     }
 
-    async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
+    async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Round[], Signal | undefined> {
         this.lastCtx = ctx;
         return yield* this.executeLoop(ctx, 0, []);
     }
 
-    async *resume(_checkpoint: string): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
+    async *resume(_checkpoint: string): AsyncGenerator<AgentEvent, Round[], Signal | undefined> {
         const ctx = this.lastCtx;
         if (!ctx) {
             yield {
@@ -77,35 +77,35 @@ export class LoopExecutor implements ILoop {
         }
 
         // Reconstruct state from the Log.
-        // Since turn boundaries are persisted, we count completed turns
-        // and re-enter the loop at the next turn.
+        // Since round boundaries are persisted, we count completed rounds
+        // and re-enter the loop at the next round.
         const messages = await ctx.log.fold(ctx.ref);
-        const completedTurns = messages.filter(m => m.role === 'assistant').length;
+        const completedRounds = messages.filter(m => m.role === 'assistant').length;
 
-        return yield* this.executeLoop(ctx, completedTurns, []);
+        return yield* this.executeLoop(ctx, completedRounds, []);
     }
 
     /**
      * Internal loop execution — shared by run() and resume().
      *
-     * One call = one Turn (a single user-initiated interaction).
-     * The while-loop handles tool calls and auto-continue within that Turn.
+     * One call = one Round (a single user-initiated interaction).
+     * The while-loop handles tool calls and auto-continue within that Round.
      * Each LLM exchange appends its delta messages to `currentPayload`.
-     * On completion, all exchanges are packed into a single Turn.payload
+     * On completion, all exchanges are packed into a single Round.payload
      * so fold() reconstructs a correct multi-exchange history.
      *
      * @param ctx          Loop context
-     * @param startTurn    Starting turn number (0 fresh, N for resume)
-     * @param initialTurns Previously completed turns (empty for fresh)
+     * @param startRound    Starting round number (0 fresh, N for resume)
+     * @param initialRounds Previously completed rounds (empty for fresh)
      */
     private async *executeLoop(
         ctx: LoopContext,
-        startTurn: number,
-        initialTurns: Turn[],
-    ): AsyncGenerator<AgentEvent, Turn[], Signal | undefined> {
-        const maxTurns = 50;
-        let exchangeNumber = startTurn;
-        const completedTurns: Turn[] = [...initialTurns];
+        startRound: number,
+        initialRounds: Round[],
+    ): AsyncGenerator<AgentEvent, Round[], Signal | undefined> {
+        const maxRounds = 50;
+        let exchangeNumber = startRound;
+        const completedRounds: Round[] = [...initialRounds];
         let signal: Signal | undefined;
 
         // Messages from history (fold once, extend in-memory for subsequent exchanges)
@@ -123,29 +123,29 @@ export class LoopExecutor implements ILoop {
             baseMessages = [{ role: 'system' as const, content: ctx.systemPrompt }, ...baseMessages.filter(m => m.role !== 'system')];
         }
 
-        // Delta payload for this Turn — accumulates across exchanges (tool calls, auto-continue).
+        // Delta payload for this Round — accumulates across exchanges (tool calls, auto-continue).
         // task-runner prepends the user message on persist, so we start empty here.
         const currentPayload: import('@itookit/common').ChatMessage[] = [];
         let totalUsage: TokenUsage = {};
 
         try {
-            while (exchangeNumber < maxTurns) {
+            while (exchangeNumber < maxRounds) {
                 if (ctx.signal.aborted) break;
 
                 exchangeNumber++;
 
                 // ── Build message list for this exchange ──
-                // base history + everything accumulated so far in this Turn
+                // base history + everything accumulated so far in this Round
                 let messages: import('@itookit/common').ChatMessage[] = [...baseMessages, ...currentPayload];
 
-                // ── Before-turn middleware ──
-                const turnCtx: TurnContext = {
-                    turnId: `turn_${ctx.sessionId}_${exchangeNumber}`,
+                // ── Before-round middleware ──
+                const roundCtx: RoundContext = {
+                    roundId: `round_${ctx.sessionId}_${exchangeNumber}`,
                     sessionId: ctx.sessionId,
-                    turnNumber: exchangeNumber,
+                    roundNumber: exchangeNumber,
                 };
 
-                const beforeDirective = await this.pipeline.applyBeforeTurn(turnCtx);
+                const beforeDirective = await this.pipeline.applyBeforeRound(roundCtx);
                 if (beforeDirective) {
                     if (beforeDirective.action === 'abort') {
                         yield {
@@ -154,7 +154,7 @@ export class LoopExecutor implements ILoop {
                         };
                         break;
                     }
-                    if (beforeDirective.action === 'skip_turn') continue;
+                    if (beforeDirective.action === 'skip_round') continue;
                     if (beforeDirective.action === 'inject') {
                         const injectMsg = { role: 'user' as const, content: beforeDirective.text };
                         messages = [...messages, injectMsg];
@@ -166,10 +166,10 @@ export class LoopExecutor implements ILoop {
 
                 // ── LLM Call ──
                 yield {
-                    type: 'turn:start',
-                    turnId: turnCtx.turnId,
+                    type: 'round:start',
+                    roundId: roundCtx.roundId,
                     sessionId: ctx.sessionId,
-                    turn: exchangeNumber,
+                    round: exchangeNumber,
                 };
 
                 let responseText = '';
@@ -239,7 +239,7 @@ export class LoopExecutor implements ILoop {
                     }
                 } catch (err) {
                     const recoveryAction: RecoveryAction | void = await this.pipeline.applyOnError(
-                        turnCtx,
+                        roundCtx,
                         err instanceof Error ? err : new Error(String(err)),
                     );
 
@@ -284,8 +284,8 @@ export class LoopExecutor implements ILoop {
                     });
                 }
 
-                // Persist this exchange's assistant message into the Turn payload.
-                // thinking is stored as a custom field so turnToProjection can recover it on reload.
+                // Persist this exchange's assistant message into the Round payload.
+                // thinking is stored as a custom field so roundToProjection can recover it on reload.
                 currentPayload.push({
                     role: 'assistant',
                     content: responseText,
@@ -301,7 +301,7 @@ export class LoopExecutor implements ILoop {
                         arguments: safeParseJson(tc.function?.arguments ?? '{}'),
                     }));
 
-                    const toolCallsDirective = await this.pipeline.applyOnToolCalls(turnCtx, plannedTools);
+                    const toolCallsDirective = await this.pipeline.applyOnToolCalls(roundCtx, plannedTools);
                     if (toolCallsDirective) {
                         if (toolCallsDirective.action === 'abort') {
                             yield { type: 'error', error: { message: toolCallsDirective.reason, code: 'PLAN_REJECTED' } };
@@ -398,8 +398,8 @@ export class LoopExecutor implements ILoop {
                     }
                 }
 
-                // ── After-turn middleware ──
-                const turnResult: TurnResult = {
+                // ── After-round middleware ──
+                const roundResult: RoundResult = {
                     assistantBlocks: assistantBlocks.map(b => ({
                         type: b.type,
                         ...(b.text ? { text: b.text } : {}),
@@ -410,10 +410,10 @@ export class LoopExecutor implements ILoop {
                     finishReason,
                 };
 
-                const afterDirective = await this.pipeline.applyAfterTurn(turnCtx, turnResult);
+                const afterDirective = await this.pipeline.applyAfterRound(roundCtx, roundResult);
                 if (afterDirective) {
                     if (afterDirective.action === 'abort') {
-                        yield { type: 'error', error: { message: afterDirective.reason, code: 'AFTERTURN_ABORT' } };
+                        yield { type: 'error', error: { message: afterDirective.reason, code: 'AFTERROUND_ABORT' } };
                         break;
                     }
                     if (afterDirective.action === 'inject') {
@@ -421,10 +421,10 @@ export class LoopExecutor implements ILoop {
                         const injectMsg = { role: 'user' as const, content: afterDirective.text };
                         currentPayload.push(injectMsg);
                         yield {
-                            type: 'turn:end',
-                            turnId: turnCtx.turnId,
+                            type: 'round:end',
+                            roundId: roundCtx.roundId,
                             sessionId: ctx.sessionId,
-                            turn: exchangeNumber,
+                            round: exchangeNumber,
                         };
                         continue;
                     }
@@ -446,31 +446,31 @@ export class LoopExecutor implements ILoop {
                 }
 
                 yield {
-                    type: 'turn:end',
-                    turnId: turnCtx.turnId,
+                    type: 'round:end',
+                    roundId: roundCtx.roundId,
                     sessionId: ctx.sessionId,
-                    turn: exchangeNumber,
+                    round: exchangeNumber,
                 };
 
-                // No tool calls and no continue directive — this Turn is complete
+                // No tool calls and no continue directive — this Round is complete
                 if (toolCalls.length === 0) break;
             }
         } finally {
             let inTokens = 0;
             let outTokens = 0;
-            // completedTurns is empty for a single-turn run; totalUsage covers this run
+            // completedRounds is empty for a single-round run; totalUsage covers this run
             inTokens += (totalUsage.inputTokens as number | undefined) ?? 0;
             outTokens += (totalUsage.outputTokens as number | undefined) ?? 0;
             yield { type: 'finished', usage: { inputTokens: inTokens, outputTokens: outTokens } };
         }
 
-        // Pack all exchanges into a single Turn.
+        // Pack all exchanges into a single Round.
         // task-runner will prepend the user message on persist.
         // payload structure: [assistant, tool_results?, user(inject)?, assistant, ...]
         // fold() traverses the parents chain and concatenates payloads,
         // so the LLM sees: [history..., user, assistant, tool, assistant, ...]
-        const singleTurn: Turn = {
-            id: ctx.preallocatedTurnId ?? `turn_${ctx.sessionId}_${exchangeNumber}`,
+        const singleRound: Round = {
+            id: ctx.preallocatedRoundId ?? `round_${ctx.sessionId}_${exchangeNumber}`,
             parents: [],
             payload: currentPayload,
             meta: {
@@ -487,8 +487,8 @@ export class LoopExecutor implements ILoop {
             },
         };
 
-        completedTurns.push(singleTurn);
-        return completedTurns;
+        completedRounds.push(singleRound);
+        return completedRounds;
     }
 }
 

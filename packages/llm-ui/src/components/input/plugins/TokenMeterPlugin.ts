@@ -127,8 +127,8 @@ export class TokenMeterPlugin implements InputPlugin {
             ? ` <span class="token-meter__cache" title="Cache hit tokens">⚡${fmtTokens(s.cacheReadTokens!)}</span>`
             : '';
 
-        const turnsPart = s.turns > 1
-            ? `<span class="token-meter__sep">·</span><span title="${s.turns} turns">${s.turns} turns</span>`
+        const roundsPart = s.rounds > 1
+            ? `<span class="token-meter__sep">·</span><span title="${s.rounds} rounds">${s.rounds} rounds</span>`
             : '';
 
         strip.style.display = 'flex';
@@ -146,7 +146,7 @@ export class TokenMeterPlugin implements InputPlugin {
                 <span class="token-meter__ctx-label">Ctx</span>
                 <span class="token-meter__bar">${bar}</span>
             </span>
-            ${turnsPart}
+            ${roundsPart}
             <span class="token-meter__sep">·</span>
             <span class="token-meter__dur" title="Generation time">${dur}</span>
             <span class="token-meter__total" style="display:none" aria-label="Total tokens: ${totalOut}"></span>

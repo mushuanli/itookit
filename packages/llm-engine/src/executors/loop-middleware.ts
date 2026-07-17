@@ -7,8 +7,8 @@
 
 import type {
     ILoopMiddleware,
-    TurnContext,
-    TurnResult,
+    RoundContext,
+    RoundResult,
     ControlDirective,
     RecoveryAction,
 } from '@itookit/common';
@@ -42,7 +42,7 @@ const TRUNCATION_DETECTION_DEFAULTS: TruncationDetectionConfig = {
 // ─── Budget Middleware ────────────────────────────────────────────────
 
 interface BudgetConfig {
-    maxTurns?: number;
+    maxRounds?: number;
     maxInputTokens?: number;
     maxOutputTokens?: number;
     maxCostUsd?: number;
@@ -54,17 +54,17 @@ export function createBudgetMiddleware(limits: BudgetConfig, harnessImpl?: ILoop
 
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
-    let turnCount = 0;
+    let roundCount = 0;
     const startTime = Date.now();
 
     return {
         name: '01-budget',
 
-        async beforeTurn(_ctx: TurnContext): Promise<ControlDirective | void> {
-            turnCount++;
+        async beforeRound(_ctx: RoundContext): Promise<ControlDirective | void> {
+            roundCount++;
 
-            if (limits.maxTurns && turnCount > limits.maxTurns) {
-                return { action: 'abort', reason: `Turn limit exceeded (${limits.maxTurns})` };
+            if (limits.maxRounds && roundCount > limits.maxRounds) {
+                return { action: 'abort', reason: `Round limit exceeded (${limits.maxRounds})` };
             }
 
             if (limits.maxInputTokens && totalInputTokens > limits.maxInputTokens) {
@@ -83,14 +83,14 @@ export function createBudgetMiddleware(limits: BudgetConfig, harnessImpl?: ILoop
             }
         },
 
-        async afterTurn(_ctx: TurnContext, result: TurnResult): Promise<ControlDirective | void> {
+        async afterRound(_ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
             if (result.usage) {
                 totalInputTokens += (result.usage as any).inputTokens ?? 0;
                 totalOutputTokens += (result.usage as any).outputTokens ?? 0;
             }
         },
 
-        async onError(_ctx: TurnContext, _error: Error): Promise<RecoveryAction> {
+        async onError(_ctx: RoundContext, _error: Error): Promise<RecoveryAction> {
             return { action: 'fail' };
         },
     };
@@ -113,7 +113,7 @@ export function createErrorRecoveryMiddleware(config: ErrorRecoveryConfig = {}, 
     return {
         name: '02-error-recovery',
 
-        async onError(ctx: TurnContext, error: Error): Promise<RecoveryAction> {
+        async onError(ctx: RoundContext, error: Error): Promise<RecoveryAction> {
             const key = ctx.sessionId;
             const count = (retryCounts.get(key) ?? 0) + 1;
             retryCounts.set(key, count);
@@ -169,7 +169,7 @@ export function createBackPressureMiddleware(harnessImpl?: ILoopMiddleware): ILo
     return {
         name: '04-back-pressure',
 
-        async afterTurn(_ctx: TurnContext, result: TurnResult): Promise<ControlDirective | void> {
+        async afterRound(_ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
             // Check for tool errors that indicate back-pressure failure
             const errors = result.toolResults.filter(r => r.isError);
             if (errors.length > 0) {
@@ -217,7 +217,7 @@ export function createSkillsMiddleware(harnessImpl?: ILoopMiddleware): ILoopMidd
  * Truncation detection middleware — replaces the AutoContinue while(true)
  * loop in TaskRunner.executeTask().
  *
- * On each afterTurn, checks if the assistant output was truncated (via
+ * On each afterRound, checks if the assistant output was truncated (via
  * finish_reason='length' or unclosed Markdown structures). If truncated,
  * injects a continue prompt so the LoopExecutor automatically continues.
  *
@@ -235,7 +235,7 @@ export function createTruncationDetectionMiddleware(
     return {
         name: '07-truncation-detection',
 
-        async afterTurn(_ctx: TurnContext, result: TurnResult): Promise<ControlDirective | void> {
+        async afterRound(_ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
             if (!cfg.enabled) return;
             if (continuationCount >= cfg.maxContinuations) return;
 

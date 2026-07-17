@@ -16,7 +16,7 @@ import type {
     LoopContext,
     ILog,
     IToolService,
-    Turn,
+    Round,
     Ref,
 } from '@itookit/common';
 import type { IToolExecutor } from '../core/types';
@@ -47,11 +47,11 @@ function createInMemoryLog(initialMessages: ChatMessage[]): ILog {
 
     return {
         fold: async () => [...messageLog],
-        append: async (_ref, turn) => {
-            // turn.payload is the full conversation state after this turn
+        append: async (_ref, round) => {
+            // round.payload is the full conversation state after this round
             messageLog.length = 0;
-            messageLog.push(...turn.payload);
-            return turn.id;
+            messageLog.push(...round.payload);
+            return round.id;
         },
         refs: () => noopRefStore,
         draft: () => noopDraftArea,
@@ -125,7 +125,7 @@ export class LiteSubAgentRouter implements ISubAgentRouter {
         private readonly toolExecutor: IToolExecutor = nullToolExecutor,
         private readonly loopFactory: (config?: LoopPresetConfig) => ILoop = (config) =>
             createLoopExecutor('lite', {
-                budget: { maxTurns: config?.budget?.maxTurns ?? 10 },
+                budget: { maxRounds: config?.budget?.maxRounds ?? 10 },
             }),
     ) {}
 
@@ -144,7 +144,7 @@ export class LiteSubAgentRouter implements ISubAgentRouter {
 
             // Create LoopExecutor via factory
             const executor = this.loopFactory({
-                budget: { maxTurns: task.maxTurns ?? 10 },
+                budget: { maxRounds: task.maxRounds ?? 10 },
             });
 
             // Wrap ILLMService to override connection/model for sub-agent
@@ -163,7 +163,7 @@ export class LiteSubAgentRouter implements ISubAgentRouter {
                 task.allowedTools,
             );
 
-            // In-memory log that tracks message state across turns
+            // In-memory log that tracks message state across rounds
             const log = createInMemoryLog(initialMessages);
 
             const ctx: LoopContext = {
@@ -188,7 +188,7 @@ export class LiteSubAgentRouter implements ISubAgentRouter {
                     return {
                         success: false,
                         summary: '',
-                        turns: 0,
+                        rounds: 0,
                         tokenUsage: { input: 0, output: 0 },
                         error: 'HITL pause not supported in sub-agent execution',
                     };
@@ -196,11 +196,11 @@ export class LiteSubAgentRouter implements ISubAgentRouter {
                 genResult = await gen.next();
             }
 
-            const turns: Turn[] = genResult.value;
-            const lastTurn = turns[turns.length - 1];
-            const usage = lastTurn?.result?.usage ?? lastTurn?.meta?.usage;
+            const rounds: Round[] = genResult.value;
+            const lastRound = rounds[rounds.length - 1];
+            const usage = lastRound?.result?.usage ?? lastRound?.meta?.usage;
 
-            const summary = lastTurn?.payload
+            const summary = lastRound?.payload
                 ?.filter(m => m.role === 'assistant')
                 ?.map(m => m.content)
                 ?.filter(Boolean)
@@ -209,7 +209,7 @@ export class LiteSubAgentRouter implements ISubAgentRouter {
             return {
                 success: true,
                 summary,
-                turns: turns.length,
+                rounds: rounds.length,
                 tokenUsage: {
                     input: (usage as any)?.inputTokens ?? 0,
                     output: (usage as any)?.outputTokens ?? 0,
@@ -219,7 +219,7 @@ export class LiteSubAgentRouter implements ISubAgentRouter {
             return {
                 success: false,
                 summary: '',
-                turns: 0,
+                rounds: 0,
                 tokenUsage: { input: 0, output: 0 },
                 error: e?.message ?? String(e),
             };

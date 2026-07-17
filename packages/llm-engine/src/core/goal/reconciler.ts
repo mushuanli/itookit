@@ -129,16 +129,16 @@ async function runOneNode(
 
         try {
             const gen = loop.run(ctx);
-            const turns = await drive(gen, actor, ctx);
-            const lastTurn = turns[turns.length - 1];
+            const rounds = await drive(gen, actor, ctx);
+            const lastRound = rounds[rounds.length - 1];
 
-            // Read TurnResult from the last turn's stored execution result.
-            // LoopExecutor populates turn.result with assistantBlocks + toolResults.
+            // Read RoundResult from the last round's stored execution result.
+            // LoopExecutor populates round.result with assistantBlocks + toolResults.
             const verdict = await predicate(
-                lastTurn?.result ?? {
+                lastRound?.result ?? {
                     assistantBlocks: [],
                     toolResults: [],
-                    usage: lastTurn?.meta?.usage,
+                    usage: lastRound?.meta?.usage,
                 },
                 node,
             );
@@ -158,7 +158,7 @@ async function runOneNode(
                     if (verdict.feedback && baseCtx.log) {
                         ctx.middlewares.push({
                             name: 'retry-feedback',
-                            beforeTurn: async (_turnCtx) => {
+                            beforeRound: async (_roundCtx) => {
                                 // Inject feedback as a user message that will be folded into context
                                 return { action: 'inject', text: verdict.feedback };
                             },

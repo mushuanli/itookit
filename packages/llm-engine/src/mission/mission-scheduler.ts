@@ -20,7 +20,7 @@ import type {
     LoopContext,
     GoalNode,
     ILog,
-    Turn,
+    Round,
     Ref,
     RefStore,
     DraftArea,
@@ -122,7 +122,7 @@ export class MissionScheduler {
         if (!todo) {
             return {
                 instruction: node.task.prompt,
-                maxTurns: 20,
+                maxRounds: 20,
                 allowedTools: [],
             };
         }
@@ -143,7 +143,7 @@ export class MissionScheduler {
             instruction: `Mission context: ${plan.goal}\n\nTask: ${instruction}`,
             contextFiles,
             allowedTools: ['file_read', 'glob_search', 'grep_search', 'file_write', 'write_result'],
-            maxTurns: 20,
+            maxRounds: 20,
         };
     }
 }
@@ -152,7 +152,7 @@ export class MissionScheduler {
 
 function createNoopLog(): ILog {
     return {
-        async append(_ref: Ref, _turn: Turn): Promise<string> { return ''; },
+        async append(_ref: Ref, _round: Round): Promise<string> { return ''; },
         async fold(_ref: Ref, _strategy?: AssemblyStrategy): Promise<ChatMessage[]> { return []; },
         refs(): RefStore {
             return {

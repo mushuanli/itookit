@@ -29,7 +29,7 @@ import { log } from '../utils/logger';
 import { ExecutorRegistry, getExecutorRegistry } from '../core/executor-registry';
 import { drive, resumeDrive, LoopAbortedError } from '../core/loop-driver';
 import { SessionActor } from '../core/session-actor';
-import { TurnLog } from '../persistence/turn-log';
+import { RoundLog } from '../persistence/round-log';
 import type { ILog } from '@itookit/common';
 import type { LoopContext } from '@itookit/common';
 
@@ -271,7 +271,7 @@ export class TaskRunner {
         persist: () => void;
         finalize: () => Promise<void>;
         contextFiles: ChatAttachment[];
-        preallocatedTurnId: string | undefined;
+        preallocatedRoundId: string | undefined;
     }> {
         const { sessionId, input } = task;
 
@@ -300,12 +300,12 @@ export class TaskRunner {
         }
 
         // 4. Create assistant node with pre-allocated turn ID
-        //    rootNode.id == turn.id ensures streaming message:updated and
-        //    TurnLog.applyAppended message:appended share the same messageId.
-        const preallocatedTurnId = ulid();
+        //    rootNode.id == round.id ensures streaming message:updated and
+        //    RoundLog.applyAppended message:appended share the same messageId.
+        const preallocatedRoundId = ulid();
         const { assistantNodeId, rootNode } = await this.createAssistantNode(
             sessionId, executorConfig, input.branchInfo, userNodeId,
-            input.origin, input.historyPolicy, preallocatedTurnId,
+            input.origin, input.historyPolicy, preallocatedRoundId,
         );
 
         // 5. Content accumulator — crash safety handled by DraftArea.checkpoint()
@@ -313,7 +313,7 @@ export class TaskRunner {
         const persist = () => { /* no-op: crash safety handled by DraftArea.checkpoint() in loop-driver */ };
         const finalize = () => Promise.resolve();
 
-        return { userNodeId, executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles, preallocatedTurnId };
+        return { userNodeId, executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles, preallocatedRoundId };
     }
 
     // ============================================
@@ -340,13 +340,13 @@ export class TaskRunner {
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         let errorAlreadyEmitted = false;
 
-        // ── ILog via TurnLog (always turn-format) ─
+        // ── ILog via RoundLog (always round-format) ─
         let logAdapter = this.logCache.get(sessionId);
         if (!logAdapter) {
             logAdapter = await this.createLog(sessionId, task.nodeId);
             this.logCache.set(sessionId, logAdapter);
-            // Wire TurnLog events → SessionState projection
-            (logAdapter as TurnLog).setEventListener((event) => {
+            // Wire RoundLog events → SessionState projection
+            (logAdapter as RoundLog).setEventListener((event) => {
                 const events = state.apply(event);
                 for (const e of events) {
                     // Skip message:appended — createAssistantNode already emits it
@@ -359,7 +359,7 @@ export class TaskRunner {
         }
 
         try {
-            const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles, preallocatedTurnId } =
+            const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles, preallocatedRoundId } =
                 await this.setupTaskExecution(task, state);
 
             // ── Get executor ──────────────────────────────────────────────
@@ -406,8 +406,8 @@ export class TaskRunner {
                             this.eventBus.emitSession(sessionId, event);
                         }
                         break;
-                    case 'turn:start':
-                    case 'turn:end':
+                    case 'round:start':
+                    case 'round:end':
                     case 'tool:queued':
                     case 'tool:running':
                     case 'tool:success':
@@ -433,17 +433,17 @@ export class TaskRunner {
             this.activeActors.set(sessionId, actor);
 
             // ── Build LoopContext ──────────────────────────────────────────
-            // Resolve current branch from TurnLog manifest (camelCase fields).
+            // Resolve current branch from RoundLog manifest (camelCase fields).
             let branchRef = 'main';
             try {
-                const tm = await (logAdapter as TurnLog).loadManifest();
+                const tm = await (logAdapter as RoundLog).loadManifest();
                 branchRef = tm.currentBranch || 'main';
             } catch {
                 // Fallback: use 'main' if manifest is unavailable
             }
 
             // Wrap the log so fold() always appends the pending user message
-            // for the LLM API call. TurnLog writes userMsg to turn.payload
+            // for the LLM API call. RoundLog writes userMsg to round.payload
             // during persist, so fold() can't see the in-flight message.
             const effectiveLog: ILog = buildFoldPrependLog(logAdapter, input.text, contextFiles);
 
@@ -473,25 +473,25 @@ export class TaskRunner {
                 reasoningEffort: executorConfig.reasoningEffort,
                 historyLength: input.overrides?.historyLength,
                 startedAt: task.createdAt,
-                preallocatedTurnId,
+                preallocatedRoundId,
             };
 
             // ── Execute via drive() or resumeDrive() ──────────────────────
             // Check for a persisted checkpoint from a previous session.
             // Chat mode doesn't support pause/resume — skip the VFS scan.
-            const restoredTurn = mode !== 'chat'
+            const restoredRound = mode !== 'chat'
                 ? await logAdapter.draft().restore()
                 : null;
-            let turns: import('@itookit/common').Turn[];
+            let rounds: import('@itookit/common').Round[];
 
-            if (restoredTurn) {
+            if (restoredRound) {
                 // Resume from checkpoint — the ILoop reconstructs its state
                 // from the Log and continues from where it left off.
-                turns = await resumeDrive(executor, restoredTurn.id, actor, loopCtx);
+                rounds = await resumeDrive(executor, restoredRound.id, actor, loopCtx);
             } else {
                 // Fresh execution
                 const gen = executor.run(loopCtx);
-                turns = await drive(gen, actor, loopCtx);
+                rounds = await drive(gen, actor, loopCtx);
             }
 
             // Unregister actor once execution completes
@@ -505,8 +505,8 @@ export class TaskRunner {
 
             let inTokens = 0;
             let outTokens = 0;
-            for (const t of turns) {
-                const u = t.meta.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+            for (const r of rounds) {
+                const u = r.meta.usage as { inputTokens?: number; outputTokens?: number } | undefined;
                 inTokens += u?.inputTokens ?? 0;
                 outTokens += u?.outputTokens ?? 0;
             }
@@ -525,27 +525,27 @@ export class TaskRunner {
                 outputTokens: outTokens,
                 costUsd,
                 contextUsageRatio: 0,
-                turns: turns.length,
+                rounds: rounds.length,
                 durationMs,
                 isEstimated: !hasRealUsage,
             };
 
-            // Persist completed turns via TurnLog.
-            // Each turn is self-contained: [userMsg, ...assistantDelta].
+            // Persist completed rounds via RoundLog.
+            // Each round is self-contained: [userMsg, ...assistantDelta].
             // fold() reconstructs history by walking the parents chain and
             // concatenating payloads — no full-history duplication.
             //
-            // Resolve the parent: for regenerate, fork above the old user turn;
+            // Resolve the parent: for regenerate, fork above the old user round;
             // for normal flow, chain onto the current branch head.
             let chainParent = input.parentUserNodeId;
             if (!chainParent) {
                 try {
-                    const tm = await (logAdapter as TurnLog).loadManifest();
+                    const tm = await (logAdapter as RoundLog).loadManifest();
                     chainParent = tm.currentHead || undefined;
                 } catch { /* use empty parents */ }
             }
 
-            for (const turn of turns) {
+            for (const round of rounds) {
                 const userMsg: ChatMessage = {
                     role: 'user',
                     content: input.text,
@@ -558,13 +558,13 @@ export class TaskRunner {
                         size: f.size,
                     }));
                 }
-                turn.payload = [userMsg, ...turn.payload];
+                round.payload = [userMsg, ...round.payload];
                 if (chainParent) {
-                    turn.parents = [chainParent, ...(turn.parents || [])];
+                    round.parents = [chainParent, ...(round.parents || [])];
                 }
-                await logAdapter.append(branchRef, turn);
-                // Subsequent turns in this batch chain from this one
-                chainParent = turn.id;
+                await logAdapter.append(branchRef, round);
+                // Subsequent rounds in this batch chain from this one
+                chainParent = round.id;
             }
             await logAdapter.draft().flush();
 
@@ -659,12 +659,12 @@ export class TaskRunner {
         parentUserNodeId?: string,
         origin?: import('../core/types').SessionOrigin,
         historyPolicy?: import('../core/types').HistoryPolicy,
-        preallocatedTurnId?: string,
+        preallocatedRoundId?: string,
     ): Promise<{ assistantNodeId: string; rootNode: ExecutionNode }> {
-        const assistantNodeId = preallocatedTurnId ?? ulid();
+        const assistantNodeId = preallocatedRoundId ?? ulid();
 
         // Build a pure in-memory rootNode for streaming.
-        // state.sessions is NOT written here — TurnLog.applyAppended() drives
+        // state.sessions is NOT written here — RoundLog.applyAppended() drives
         // the single authoritative message:appended event after persist.
         const rootNode: ExecutionNode = {
             id: assistantNodeId,
@@ -687,9 +687,9 @@ export class TaskRunner {
 
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         if (isBound) {
-            // Emit streaming placeholder now. TurnLog.applyAppended() fires after
+            // Emit streaming placeholder now. RoundLog.applyAppended() fires after
             // persist (too late for streaming), so we emit here with the correct
-            // agent info. The TurnLog event listener filters out its own
+            // agent info. The RoundLog event listener filters out its own
             // message:appended to prevent duplication.
             const placeholderSession: SessionGroup = {
                 id: assistantNodeId,
@@ -721,10 +721,10 @@ export class TaskRunner {
     // ============================================
 
     /**
-     * Create a TurnLog instance for the given session.
+     * Create a RoundLog instance for the given session.
      */
     private async createLog(sessionId: string, nodeId: string): Promise<ILog> {
-        return new TurnLog(this.engine, nodeId, sessionId);
+        return new RoundLog(this.engine, nodeId, sessionId);
     }
 
     // ============================================
@@ -792,7 +792,7 @@ export class TaskRunner {
             }
 
             // Clean up incomplete draft — no engine write needed
-            await logAdapter.draft().flush(null as unknown as import('@itookit/common').Turn).catch((e) => {
+            await logAdapter.draft().flush(null as unknown as import('@itookit/common').Round).catch((e) => {
                 log.error('Failed to clean up draft on error', { sessionId, error: e });
             });
         }
@@ -825,7 +825,7 @@ export class TaskRunner {
 /**
  * Wraps an ILog so that fold() appends the pending user message at the end.
  *
- * TurnLog sessions write the user message only after the executor finishes
+ * RoundLog sessions write the user message only after the executor finishes
  * (post-execution persist in executeAgentLoopTask). During execution, fold()
  * cannot see the in-flight user message, which causes a "messages: at least
  * one message is required" 400 from the LLM API.

@@ -27,12 +27,12 @@ export const chatExecutor: ILoop = {
     mode: 'chat',
     async *run(ctx) {
         const messages = await ctx.log.fold(ctx.ref);
-        yield { type: 'turn:start', ... };
+        yield { type: 'round:start', ... };
         for await (const chunk of ctx.llm.chatStream(conn, { messages })) {
             yield { type: 'stream:content', delta: chunk.delta };   // → DraftArea
         }
-        yield { type: 'turn:end', ... };
-        return [await promoteDraft(ctx)];      // single turn, no tools
+        yield { type: 'round:end', ... };
+        return [await promoteDraft(ctx)];      // single round, no tools
     },
     resume: notSupported,   // 无暂停点
 };
@@ -73,7 +73,7 @@ Phase 1  规划（并行多角度）:
         ref_i = refs.create('mission/plan-' + i, base)      // 每 planner 一个分支
         并发 drive(loopExecutor.run(ref_i, plannerPrompt))
     plans = 各分支解析出 TodoItem[]
-    合并计划: log.merge(refs, { type: 'pick', turns: 去重后的 todo 轮次 })
+    合并计划: log.merge(refs, { type: 'pick', rounds: 去重后的 todo 轮次 })
 
 Phase 2  构建 Goal:
     goal = { nodes: todos → GoalNode, edges: todo 依赖 }
@@ -121,7 +121,7 @@ run(ctx):
 
 | executor | 特征事件 |
 |---|---|
-| chat | `turn:*` + `stream:*` |
+| chat | `round:*` + `stream:*` |
 | loop | + `tool:*` / `await_signal` / `budget:*` / `context:compressed` |
 | mission / graph | + `goal:progress` / `log:merged` |
 

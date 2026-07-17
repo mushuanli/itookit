@@ -31,7 +31,7 @@ AgentLoopExecutor (while-true, IAgentRuntime):
                                        : → BackPressure → break/inject→loop
 
 HarnessLoopExecutor (AsyncGenerator, ILoop, mode='harness'):
-  while(turnNumber < maxTurns):
+  while(roundNumber < maxRounds):
     1. beforeTurn middleware (budget/compression/skills/HITL)
     2. ContextManager.buildSystemPrompt() + buildMessages()
     3. LLM Call via ILLMService.chatStream() → yield stream:content
@@ -39,7 +39,7 @@ HarnessLoopExecutor (AsyncGenerator, ILoop, mode='harness'):
     5. onToolCalls middleware (plan confirm → pause → yield await_signal)
     6. Execute tools (reads parallel, writes serial)
     7. afterTurn middleware (back-pressure)
-    8. Build turn → log.append() → yield turn:end
+    8. Build round → log.append() → yield round:end
 ```
 
 ## LLM 2.0 迁移状态

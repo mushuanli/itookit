@@ -1,25 +1,25 @@
-// Middleware pipeline — composes ILoopMiddleware into a turn-level wrapper.
+// Middleware pipeline — composes ILoopMiddleware into a round-level wrapper.
 //
 // Middleware execution order (LIFO, like a stack):
-//   beforeTurn:  [mw1, mw2, mw3] → mw1 → mw2 → mw3 → turn execution
+//   beforeRound:  [mw1, mw2, mw3] → mw1 → mw2 → mw3 → round execution
 //   onToolCalls: [mw1, mw2, mw3] → mw1 → mw2 → mw3 (first non-void wins)
-//   afterTurn:   turn execution → mw3 → mw2 → mw1
+//   afterRound:   round execution → mw3 → mw2 → mw1
 //   onError:     first non-undefined result wins (mw1, then mw2, ...)
 
 import type {
     ILoopMiddleware,
-    TurnContext,
-    TurnResult,
+    RoundContext,
+    RoundResult,
     ControlDirective,
     RecoveryAction,
     PlannedTool,
 } from '@itookit/common';
 
 export interface MiddlewarePipeline {
-    applyBeforeTurn(ctx: TurnContext): Promise<ControlDirective | void>;
-    applyOnToolCalls(ctx: TurnContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void>;
-    applyAfterTurn(ctx: TurnContext, result: TurnResult): Promise<ControlDirective | void>;
-    applyOnError(ctx: TurnContext, error: Error): Promise<RecoveryAction | void>;
+    applyBeforeRound(ctx: RoundContext): Promise<ControlDirective | void>;
+    applyOnToolCalls(ctx: RoundContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void>;
+    applyAfterRound(ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void>;
+    applyOnError(ctx: RoundContext, error: Error): Promise<RecoveryAction | void>;
 }
 
 export function composeMiddleware(middlewares: ILoopMiddleware[]): MiddlewarePipeline {
@@ -27,16 +27,16 @@ export function composeMiddleware(middlewares: ILoopMiddleware[]): MiddlewarePip
     const sorted = [...middlewares].sort((a, b) => a.name.localeCompare(b.name));
 
     return {
-        async applyBeforeTurn(ctx: TurnContext): Promise<ControlDirective | void> {
+        async applyBeforeRound(ctx: RoundContext): Promise<ControlDirective | void> {
             for (const mw of sorted) {
-                if (mw.beforeTurn) {
-                    const directive = await mw.beforeTurn(ctx);
+                if (mw.beforeRound) {
+                    const directive = await mw.beforeRound(ctx);
                     if (directive) return directive;
                 }
             }
         },
 
-        async applyOnToolCalls(ctx: TurnContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void> {
+        async applyOnToolCalls(ctx: RoundContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void> {
             for (const mw of sorted) {
                 if (mw.onToolCalls) {
                     const directive = await mw.onToolCalls(ctx, toolCalls);
@@ -45,18 +45,18 @@ export function composeMiddleware(middlewares: ILoopMiddleware[]): MiddlewarePip
             }
         },
 
-        async applyAfterTurn(ctx: TurnContext, result: TurnResult): Promise<ControlDirective | void> {
-            // Reverse order for afterTurn (stack unwinding)
+        async applyAfterRound(ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
+            // Reverse order for afterRound (stack unwinding)
             for (let i = sorted.length - 1; i >= 0; i--) {
                 const mw = sorted[i];
-                if (mw.afterTurn) {
-                    const directive = await mw.afterTurn(ctx, result);
+                if (mw.afterRound) {
+                    const directive = await mw.afterRound(ctx, result);
                     if (directive) return directive;
                 }
             }
         },
 
-        async applyOnError(ctx: TurnContext, error: Error): Promise<RecoveryAction | void> {
+        async applyOnError(ctx: RoundContext, error: Error): Promise<RecoveryAction | void> {
             for (const mw of sorted) {
                 if (mw.onError) {
                     const action = await mw.onError(ctx, error);

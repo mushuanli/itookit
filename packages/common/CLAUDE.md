@@ -30,7 +30,7 @@ src/
 │   │   ├── agent-types.ts   ← AgentEventType (@deprecated), AgentEventPayloads, AgentTaskRequest
 │   │   ├── agent-event.ts   ← ★ canonical AgentEvent (15 events, S7: +tool:input +log:ref_renamed)
 │   │   ├── agent-service.ts ← IAgentRuntime (run/abort/inject/on)
-│   │   ├── loop.ts          ← ★ ILoop / LoopContext / Signal / ILog / Turn / ILoopMiddleware
+│   │   ├── loop.ts          ← ★ ILoop / LoopContext / Signal / ILog / Round / ILoopMiddleware
 │   │   ├── goal.ts          ← ★ IController / Goal / GoalNode / Predicate / Verdict（S5）
 │   │   ├── context-manager.ts, budget-controller.ts, error-recovery.ts
 │   │   ├── back-pressure.ts, sub-agent.ts
@@ -112,9 +112,9 @@ IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult
 | `ILoop` | `interfaces/agent/loop.ts` | ★ 执行原语 — AsyncGenerator 协程 |
 | `ILoopMiddleware` | `interfaces/agent/loop.ts` | 轮次级 hook — `beforeTurn` / `onToolCalls` / `afterTurn` / `onError`。`onToolCalls` 在 LLM 响应解析后、工具执行前调用（plan confirm 等） |
 | `PlannedTool` | `interfaces/agent/loop.ts` | 轻量工具调用信息（id, name, arguments），onToolCalls 钩子入参 |
-| `ControlDirective` | `interfaces/agent/loop.ts` | 中间件控制指令 — `abort` / `skip_turn` / `inject` / `pause`（暂停等待用户确认，驱动 yield `await_signal`） |
-| `ILog` / `Turn` / `RefStore` | `interfaces/agent/loop.ts` | Log 原语契约 — `Turn.result` 携带 LoopExecutor 运行时输出 |
-| `TurnResult` | `interfaces/agent/loop.ts` | 轮次结果 — assistantBlocks + toolResults + usage + finishReason |
+| `ControlDirective` | `interfaces/agent/loop.ts` | 中间件控制指令 — `abort` / `skip_round` / `inject` / `pause`（暂停等待用户确认，驱动 yield `await_signal`） |
+| `ILog` / `Round` / `RefStore` | `interfaces/agent/loop.ts` | Log 原语契约 — `Round.result` 携带 LoopExecutor 运行时输出 |
+| `RoundResult` | `interfaces/agent/loop.ts` | 轮次结果 — assistantBlocks + toolResults + usage + finishReason |
 | `Goal` / `GoalNode` / `IController` / `Predicate` / `Verdict` | `interfaces/agent/goal.ts` | Goal 控制回路契约（S5 ✅） |
 
 ## LLM 2.0 四原语模型
@@ -123,13 +123,13 @@ IAgentRuntime.run(task: AgentTaskRequest) → AgentTaskResult
 Goal      控制回路 — reconcile(goal, predicate, loop) → Verdict
 Channel   会话即进程 — SignalChannel(入) + EventStream(出)
 Loop      归约循环 — AsyncGenerator: yield AgentEvent, receive Signal
-Log       不可变历史 — append-only Turn DAG + refs; state = fold(log, ref)
+Log       不可变历史 — append-only Round DAG + refs; state = fold(log, ref)
 ```
 
 | 原语 | 接口 | 文件 |
 |---|---|---|
 | AgentEvent | `type AgentEvent = ...` (23 variants) | `interfaces/agent/agent-event.ts` |
-| Loop | `ILoop.run(): AsyncGenerator<AgentEvent, Turn[], Signal>` | `interfaces/agent/loop.ts` |
+| Loop | `ILoop.run(): AsyncGenerator<AgentEvent, Round[], Signal>` | `interfaces/agent/loop.ts` |
 | Channel | `ISession { signal(), events() }` | (待定义) |
 | Goal | `IController { reconcile() }` | `interfaces/agent/goal.ts` ✅ S5 |
 | Log | `ILog { append, fold, refs, draft, merge, rebase }` | `interfaces/agent/loop.ts` ✅ S4 |

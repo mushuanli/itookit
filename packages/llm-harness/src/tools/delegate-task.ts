@@ -41,7 +41,7 @@ export const delegateTaskDefinition: ToolDefinition = {
             },
             max_turns: {
                 type: 'number',
-                description: 'Maximum turns for the sub-agent (default: 10)',
+                description: 'Maximum rounds for the sub-agent (default: 10)',
             },
         },
         required: ['instruction'],
@@ -55,7 +55,7 @@ export function createDelegateTaskHandler(router: ISubAgentRouter): ToolHandler 
             instruction: args['instruction'] as string,
             allowedTools: args['allowed_tools'] as string[] | undefined,
             responseFormat: args['response_format'] as string | undefined,
-            maxTurns: args['max_turns'] as number | undefined,
+            maxRounds: args['max_turns'] as number | undefined,
             cwd: ctx.cwd,
         });
         if (!result.success) {

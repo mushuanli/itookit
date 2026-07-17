@@ -9,7 +9,7 @@
 //
 // Why not just use child_process directly in tools?
 //   1. Platform isolation: browser / Tauri / Node need different implementations
-//   2. Session lifecycle: the agent may write to a session across multiple turns
+//   2. Session lifecycle: the agent may write to a session across multiple rounds
 //   3. Testability: MockTTYDriver injects pre-scripted responses in tests
 
 /** Options passed to ITTYDriver.spawn() */

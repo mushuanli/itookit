@@ -186,7 +186,7 @@ import type { TokenUsage, ToolCall } from '../llm';
 export interface AgentSessionInfo {
     sessionId: string;
     status: AgentStatus;
-    turns: number;
+    rounds: number;
     usage: AgentUsageSnapshot;
     loadedSkills: string[];
     isCompressed: boolean;
@@ -206,7 +206,7 @@ export type AgentStatus =
  * 资源使用快照
  */
 export interface AgentUsageSnapshot {
-    turns: number;
+    rounds: number;
     inputTokens: number;
     outputTokens: number;
     costUsd: number;
@@ -223,7 +223,7 @@ export interface AgentUsageSnapshot {
  * 六维预算限制
  */
 export interface AgentBudgetLimits {
-    maxTurns: number;
+    maxRounds: number;
     maxInputTokens: number;
     maxOutputTokens: number;
     maxCostUsd: number;
@@ -303,7 +303,7 @@ export interface AgentTaskResult {
     status: AgentStatus;
     response: string;
     usage: AgentUsageSnapshot;
-    turns: number;
+    rounds: number;
     incompleteReason?: string;
 }
 
@@ -677,7 +677,7 @@ export interface LLMChatResponse {
     model: string;
 }
 
-export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence';
+export type StopReason = 'end_round' | 'tool_use' | 'max_tokens' | 'stop_sequence';
 
 // ═══════════════════════════════════════════════════════════════
 // 消息结构
@@ -1642,7 +1642,7 @@ import type { TokenUsage } from '../llm';
  * 预算控制器接口。
  *
  * 六维预算控制：
- * - turns: 最大轮次
+ * - rounds: 最大轮次
  * - inputTokens: 输入 token 上限
  * - outputTokens: 输出 token 上限
  * - costUsd: 费用上限
@@ -1852,7 +1852,7 @@ export interface SubAgentTask {
     /** 期望的响应格式 */
     responseFormat?: string;
     /** 最大轮次 */
-    maxTurns?: number;
+    maxRounds?: number;
     /** 使用的 LLM 连接（默认用 subAgent 角色） */
     connectionId?: string;
 }
@@ -1865,7 +1865,7 @@ export interface SubAgentResult {
     /** 精炼后的结果摘要 */
     summary: string;
     /** 执行轮次 */
-    turns: number;
+    rounds: number;
     /** Token 使用 */
     tokenUsage: { input: number; output: number };
 }
@@ -2714,7 +2714,7 @@ agent:task:end
 ```
 agent:task:start
   │
-  ├── [Turn 1]
+  ├── [Round 1]
   │   ├── agent:llm:start
   │   ├── agent:llm:end
   │   ├── agent:permission:request (拦截点)
@@ -2723,7 +2723,7 @@ agent:task:start
   │   ├── agent:backpressure:check
   │   └── agent:step:complete (type: tool_execution)
   │
-  ├── [Turn 2]
+  ├── [Round 2]
   │   ├── agent:llm:start
   │   ├── agent:llm:end
   │   ├── agent:backpressure:check (final)
@@ -2760,25 +2760,25 @@ agent:task:end
 ```
 agent:task:start
   │
-  ├── [Turn 1-10] (省略细节)
+  ├── [Round 1-10] (省略细节)
   │
-  ├── [Turn 11]
+  ├── [Round 11]
   │   ├── agent:context:compressed (layer 1: history_snip)
   │   ├── agent:llm:start
   │   └── ...
   │
-  ├── [Turn 20]
+  ├── [Round 20]
   │   ├── agent:context:compressed (layer 2: cache_prune)
   │   └── ...
   │
-  ├── [Turn 30]
+  ├── [Round 30]
   │   ├── agent:context:compressed (layer 3: llm_summarize)
   │   └── ...
   │
-  ├── agent:budget:warning (turns: 80%)
+  ├── agent:budget:warning (rounds: 80%)
   │
-  ├── [Turn 40]
-  │   └── agent:budget:exhausted (turns: 100%)
+  ├── [Round 40]
+  │   └── agent:budget:exhausted (rounds: 100%)
   │
 agent:task:end (status: partial)
 ```
@@ -3482,7 +3482,7 @@ LLM 调用 / 工具执行
 │ 1. 系统默认配置 (代码内置)                                                   │
 │                                                                             │
 │    DEFAULT_BUDGET_LIMITS = {                                                │
-│      maxTurns: 100,                                                         │
+│      maxRounds: 100,                                                         │
 │      maxInputTokens: 5_000_000,                                             │
 │      maxOutputTokens: 1_000_000,                                            │
 │      maxCostUsd: 10.0,                                                      │
@@ -3514,7 +3514,7 @@ LLM 调用 / 工具执行
 │ 3. 项目配置 (.executor/config.yaml)                                          │
 │                                                                             │
 │    budget:                                                                  │
-│      maxTurns: 50                                                           │
+│      maxRounds: 50                                                           │
 │                                                                             │
 │    backPressureRules:                                                       │
 │      - name: typecheck                                                      │
@@ -3536,7 +3536,7 @@ LLM 调用 / 工具执行
 │      prompt: "Fix the bug in auth.ts",                                      │
 │      budgetOverride: {                                                      │
 │        maxCostUsd: 1.0,                                                     │
-│        maxTurns: 20                                                         │
+│        maxRounds: 20                                                         │
 │      }                                                                      │
 │    }                                                                        │
 │                                                                             │
@@ -3565,7 +3565,7 @@ models:
 # 预算限制
 # ═══════════════════════════════════════════════════════════════
 budget:
-  maxTurns: 100
+  maxRounds: 100
   maxInputTokens: 5000000
   maxOutputTokens: 1000000
   maxCostUsd: 10.0
@@ -3952,7 +3952,7 @@ export interface IA2AService {
 
 | 指标 | 说明 |
 |------|------|
-| `agent.turns.total` | 总轮次 |
+| `agent.rounds.total` | 总轮次 |
 | `agent.tokens.input` | 输入 token 总量 |
 | `agent.tokens.output` | 输出 token 总量 |
 | `agent.cost.usd` | 总费用 |

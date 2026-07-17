@@ -6,19 +6,19 @@
 // IDs at this abstraction level, so mixing path with a different nodeId concept
 // is avoided by always passing the path through a single _draftPath variable.
 
-import type { Turn, DraftArea, PauseRequest } from '@itookit/common';
+import type { Round, DraftArea, PauseRequest } from '@itookit/common';
 import type { IChatEngine } from './types';
 
 /**
  * DraftArea backed by VFS for crash safety.
  *
- * In-flight turn is kept in memory for fast read/write during streaming.
- * On checkpoint (pause), the turn is persisted to the session's asset
+ * In-flight round is kept in memory for fast read/write during streaming.
+ * On checkpoint (pause), the round is persisted to the session's asset
  * directory as 'draft.json' so it survives a process crash.
  * On flush (successful append), the persisted copy is deleted.
  */
 export class VFSDraftArea implements DraftArea {
-    private _current: Turn | null = null;
+    private _current: Round | null = null;
     /** FSNode.path of the persisted draft asset — null if not yet written. */
     private _draftPath: string | null = null;
 
@@ -47,7 +47,7 @@ export class VFSDraftArea implements DraftArea {
         }
     }
 
-    async flush(_turn?: Turn | null): Promise<void> {
+    async flush(_round?: Round | null): Promise<void> {
         this._current = null;
         if (this._draftPath) {
             try {
@@ -57,15 +57,15 @@ export class VFSDraftArea implements DraftArea {
         }
     }
 
-    current(): Turn | null {
+    current(): Round | null {
         return this._current;
     }
 
-    setCurrent(turn: Turn): void {
-        this._current = turn;
+    setCurrent(round: Round): void {
+        this._current = round;
     }
 
-    async restore(): Promise<Turn | null> {
+    async restore(): Promise<Round | null> {
         const nodeId = await this.getSessionNodeId();
         if (!nodeId) return null;
         try {

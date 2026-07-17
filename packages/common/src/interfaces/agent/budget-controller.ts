@@ -8,7 +8,7 @@ import type { AgentBudgetLimits, AgentUsageSnapshot } from './agent-types';
  * 预算控制器接口。
  *
  * 六维预算控制，在每轮循环开始前检查：
- *   - turns:        最大轮次
+ *   - rounds:        最大轮次
  *   - inputTokens:  输入 token 上限
  *   - outputTokens: 输出 token 上限
  *   - costUsd:      费用上限（USD）
@@ -46,7 +46,7 @@ export interface IBudgetController {
     /**
      * 获取各维度已用比例（0~1）。
      *
-     * key 为维度名称（turns / inputTokens / outputTokens / costUsd / durationMs / toolCalls）
+     * key 为维度名称（rounds / inputTokens / outputTokens / costUsd / durationMs / toolCalls）
      */
     getUsedRatios(snapshot: AgentUsageSnapshot): Record<string, number>;
 

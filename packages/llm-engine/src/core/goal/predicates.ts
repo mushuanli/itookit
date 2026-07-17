@@ -5,7 +5,7 @@
 //   - shell: exit-code-based completion check
 //   - llm-judge: LLM-based structured verdict
 
-import type { Predicate, TurnResult, GoalNode, Verdict } from '@itookit/common';
+import type { Predicate, RoundResult, GoalNode, Verdict } from '@itookit/common';
 import type { ILLMService } from '@itookit/common';
 
 // ─── truncation ──────────────────────────────────────────────────────
@@ -19,7 +19,7 @@ import type { ILLMService } from '@itookit/common';
  * False negative preferred over false positive (don't continue when done).
  */
 export function createTruncationPredicate(): Predicate {
-    return async (result: TurnResult, _node: GoalNode) => {
+    return async (result: RoundResult, _node: GoalNode) => {
         // Check if any assistant text block indicates truncation
         const hasTruncation = result.assistantBlocks.some(block => {
             if (block.type === 'text' || block.type === 'thinking') {
@@ -76,7 +76,7 @@ function hasTruncationSignals(content: string): boolean {
 export function createShellPredicate(
     runShell: (command: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>,
 ): Predicate {
-    return async (result: TurnResult, _node: GoalNode) => {
+    return async (result: RoundResult, _node: GoalNode) => {
         // Extract shell command from the last assistant block
         const shellBlock = result.assistantBlocks.find(b => b.type === 'tool_use');
         if (!shellBlock) return { status: 'done' };
@@ -120,7 +120,7 @@ export function createLLMJudgePredicate(
 ): Predicate {
     const verifierPrompt = options?.verifierPrompt ?? DEFAULT_VERIFIER_PROMPT;
 
-    return async (result: TurnResult, node: GoalNode) => {
+    return async (result: RoundResult, node: GoalNode) => {
         const output = summarizeResult(result);
 
         const messages = [
@@ -154,7 +154,7 @@ Analyze the output and decide:
 Respond in JSON only:
 {"status":"done|retry|hitl|failed","feedback":"explanation"}`;
 
-function summarizeResult(result: TurnResult): string {
+function summarizeResult(result: RoundResult): string {
     const parts: string[] = [];
     for (const block of result.assistantBlocks) {
         if (block.type === 'text' || block.type === 'thinking') {

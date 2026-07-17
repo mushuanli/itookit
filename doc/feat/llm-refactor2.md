@@ -1,27 +1,27 @@
-# LLM 架构重构计划 2 — Turn 持久化审计 + 系统性简化
+# LLM 架构重构计划 2 — Round 持久化审计 + 系统性简化
 
 > 设计日期: 2026-07-15 | 分支: v4.2
-> 审计对象: [llm-turn.md](./llm-turn.md) | 系统全貌: [design.md](../llm/design.md)
+> 审计对象: [llm-round.md](./llm-round.md) | 系统全貌: [design.md](../llm/design.md)
 > 目标: 低耦合高内聚 — 单一事实源、单一写路径、消除适配层阻抗
 
 ---
 
 ## 1. 审计结论（TL;DR）
 
-**llm-turn.md 的方向正确，问题诊断经代码验证全部属实**，但存在 6 处设计缺口需要修正（§3）。
-更重要的是：**Turn 持久化只解决了"存储格式"这一层，当前架构还有三个同级别的结构性问题**（§4），
-若不一并处理，TurnLog 落地后依然是"新格式 + 旧数据流"，收益减半。
+**llm-round.md 的方向正确，问题诊断经代码验证全部属实**，但存在 6 处设计缺口需要修正（§3）。
+更重要的是：**Round 持久化只解决了"存储格式"这一层，当前架构还有三个同级别的结构性问题**（§4），
+若不一并处理，RoundLog 落地后依然是"新格式 + 旧数据流"，收益减半。
 
-| # | 结构性问题 | Turn 方案是否覆盖 |
+| # | 结构性问题 | Round 方案是否覆盖 |
 |---|---|---|
-| 1 | Turn → ChatNode 拍扁，配对靠位置推导 | ✅ 覆盖（TurnLog） |
+| 1 | Round → ChatNode 拍扁，配对靠位置推导 | ✅ 覆盖（RoundLog） |
 | 2 | **双写路径**：ILog.append 与 TaskRunner 直写 engine 并存 | ❌ 未提及 |
-| 3 | **双重状态**：SessionState 内存投影与持久化层手动双写同步 | ⚠️ 部分（TurnProjection 只换了数据结构，没换同步机制） |
+| 3 | **双重状态**：SessionState 内存投影与持久化层手动双写同步 | ⚠️ 部分（RoundProjection 只换了数据结构，没换同步机制） |
 | 4 | **SessionManager 职责过载**（1530 行，10+ 职责） | ❌ 未提及 |
 
 ---
 
-## 2. 代码验证：llm-turn.md 问题诊断核实
+## 2. 代码验证：llm-round.md 问题诊断核实
 
 对文档 §1.1 五个症状逐条核实（均属实）：
 
@@ -30,8 +30,8 @@
 | 1 | 配对靠位置推导 | `session-state.ts:64-92` — `findUserMessageBefore`/`findAssistantMessagesAfter` O(n) 线性扫描，遇下一个 user 停止 |
 | 2 | `parentUserNodeId` 只在 regenerate/edit 设置 | `session-manager.ts:575,895` 设置；正常 `sendMessage` 路径（`task-runner.ts:573-608`）不写 |
 | 3 | 删除靠位置搜索 | `session-manager.ts:766-782` `collectDeletableIds` → `collectAssistantIdsAfter` |
-| 4 | Turn 语义在持久化层丢失 | `chat-engine-log.ts:260-288` `append()` 取 `payload[0].role`，multi-part payload `join('\n')` |
-| 5 | 阻抗适配代码 | `chat-engine-log.ts:279-283` `_turnId/_parents/_origin` 以 `as any` 塞进 meta；`Turn.parents[]`（DAG 多亲）无法映射到 `ChatNode.parent_id`（单亲） |
+| 4 | Round 语义在持久化层丢失 | `chat-engine-log.ts:260-288` `append()` 取 `payload[0].role`，multi-part payload `join('\n')` |
+| 5 | 阻抗适配代码 | `chat-engine-log.ts:279-283` `_roundId/_parents/_origin` 以 `as any` 塞进 meta；`Round.parents[]`（DAG 多亲）无法映射到 `ChatNode.parent_id`（单亲） |
 
 **审计还发现文档未列出的同层问题**：
 
@@ -45,74 +45,74 @@
 
 ---
 
-## 3. llm-turn.md 设计缺口与修正
+## 3. llm-round.md 设计缺口与修正
 
-### 3.1 缺口一：Turn DAG 无反向索引 → sibling 导航退化为 O(N) 全目录扫描
+### 3.1 缺口一：Round DAG 无反向索引 → sibling 导航退化为 O(N) 全目录扫描
 
-Turn 只有 `parents: TurnId[]`。现有功能 `switchToSibling`/`getSiblings`（regenerate 分支切换）
-需要"某 Turn 的所有 children"，在纯 parents 模型下必须扫描全部 turn 文件。
+Round 只有 `parents: RoundId[]`。现有功能 `switchToSibling`/`getSiblings`（regenerate 分支切换）
+需要"某 Round 的所有 children"，在纯 parents 模型下必须扫描全部 round 文件。
 
-**修正**：TurnManifest 增加 children 反向索引（append 时增量维护，无需扫描）：
+**修正**：RoundManifest 增加 children 反向索引（append 时增量维护，无需扫描）：
 
 ```typescript
-interface TurnManifest {
-    // ... llm-turn.md §2.2 原有字段
-    children: Record<TurnId, TurnId[]>;   // ★ 反向索引: turnId → child turnIds
+interface RoundManifest {
+    // ... llm-round.md §2.2 原有字段
+    children: Record<RoundId, RoundId[]>;   // ★ 反向索引: roundId → child roundIds
 }
 ```
 
-sibling 枚举 = `children[turn.parents[0]]`，O(1)。
+sibling 枚举 = `children[round.parents[0]]`，O(1)。
 
-### 3.2 缺口二：编辑 user 后旧 Turn 变成不可达孤儿
+### 3.2 缺口二：编辑 user 后旧 Round 变成不可达孤儿
 
-文档 §4.3：编辑创建新 Turn（与旧 Turn 同 parents），旧 Turn 只标记 `stale`。
-但 manifest 的 ref 移到新 Turn 后，**旧 Turn 不在任何 ref 的祖先链上**——除非有 children 索引，
+文档 §4.3：编辑创建新 Round（与旧 Round 同 parents），旧 Round 只标记 `stale`。
+但 manifest 的 ref 移到新 Round 后，**旧 Round 不在任何 ref 的祖先链上**——除非有 children 索引，
 否则 UI 无法发现它，"保留旧路径"名存实亡。
 
-**修正**：依赖 §3.1 的 children 索引，旧 Turn 作为 sibling 可被 `getSiblings` 枚举；
+**修正**：依赖 §3.1 的 children 索引，旧 Round 作为 sibling 可被 `getSiblings` 枚举；
 不需要为它创建命名分支（与现有 editMessage 的"匿名分支"语义一致）。
 
-### 3.3 缺口三：`clearAssistantInTurn` 原地改写破坏 append-only 语义
+### 3.3 缺口三：`clearAssistantInRound` 原地改写破坏 append-only 语义
 
-文档 §4.2/§4.4 允许原地改写 Turn 文件（清空 assistant、resend 复用）。这与 Log 原语的
+文档 §4.2/§4.4 允许原地改写 Round 文件（清空 assistant、resend 复用）。这与 Log 原语的
 append-only 直觉冲突，需明确边界，否则缓存失效、DraftArea 恢复、并发写都会踩坑。
 
 **修正**：明确唯一合法的原地变更集合，其余一律 append：
 
 | 操作 | 变更方式 | 理由 |
 |---|---|---|
-| assistant 生成完成 | 原地：payload 追加 assistant 消息 | Turn 的生命周期本就是 "user 就绪 → assistant 填充" |
-| 删除 assistant / resend | 原地：payload 过滤只留 user，删 result | 同一 Turn 内的状态回退 |
+| assistant 生成完成 | 原地：payload 追加 assistant 消息 | Round 的生命周期本就是 "user 就绪 → assistant 填充" |
+| 删除 assistant / resend | 原地：payload 过滤只留 user，删 result | 同一 Round 内的状态回退 |
 | 标记 stale / 软删除 | 原地：只改 meta | 元数据不影响 DAG 结构 |
-| 编辑 user 内容 | **append 新 Turn**（origin: 'edit'） | 内容变更必须保留历史 |
+| 编辑 user 内容 | **append 新 Round**（origin: 'edit'） | 内容变更必须保留历史 |
 | 任何 parents 变更 | 禁止 | DAG 结构不可变 |
 
-配套要求：所有原地变更必须走 `TurnLog` 单一入口并同步 `invalidate` fold 缓存。
+配套要求：所有原地变更必须走 `RoundLog` 单一入口并同步 `invalidate` fold 缓存。
 
 ### 3.4 缺口四：fold() 串行逐文件 I/O
 
-文档 §3.1 的 fold 沿 parents[0] 链逐个 `await readTurn()`，长会话 = N 次串行 VFS 读。
+文档 §3.1 的 fold 沿 parents[0] 链逐个 `await readRound()`，长会话 = N 次串行 VFS 读。
 
 **修正**：
 1. fold 缓存保留（沿用 FoldCache TTL 机制），append/原地变更精确失效
 2. 首次 fold 时按 manifest 收集完整链路后**并行读**（`Promise.all` 分批）
-3. 读到 `_deleted: true` 的 Turn 时跳过（文档 §3.1 deleteTurn 软删除后 fold 未提过滤——补上）
+3. 读到 `_deleted: true` 的 Round 时跳过（文档 §3.1 deleteRound 软删除后 fold 未提过滤——补上）
 
-### 3.5 缺口五：TurnProjection 假设 "1 user + 0/1 assistant" 过窄
+### 3.5 缺口五：RoundProjection 假设 "1 user + 0/1 assistant" 过窄
 
-root Turn 是 system（无 user）；agent loop 一轮可能含多条 tool_call/tool_result；
-Mission/merge Turn 可能无 user。
+root Round 是 system（无 user）；agent loop 一轮可能含多条 tool_call/tool_result；
+Mission/merge Round 可能无 user。
 
 **修正**：
 
 ```typescript
-interface TurnProjection {
-    turnId: TurnId;
-    parents: TurnId[];
+interface RoundProjection {
+    roundId: RoundId;
+    parents: RoundId[];
     kind: 'system' | 'chat' | 'merge';        // ★ 显式区分
-    userMessage?: { ... };                     // system/merge Turn 可为空
+    userMessage?: { ... };                     // system/merge Round 可为空
     assistantMessage?: { ... };
-    meta: TurnMeta;
+    meta: RoundMeta;
 }
 ```
 
@@ -120,42 +120,42 @@ interface TurnProjection {
 
 文档 §6.2 的迁移是线性 walk，但旧 ChatNode 树有 `children_ids` 多子分支（regenerate/edit 产生）。
 
-**修正**：迁移按分支逐条处理——对 `manifest.branches` 每个 head 走 parent 链生成 Turn 链，
-共享前缀的 ChatNode 映射到同一 TurnId（用 `_turnId` meta 或内容 hash 去重）；
-sibling ChatNode → sibling Turn（同 parents），并写入 children 索引。
+**修正**：迁移按分支逐条处理——对 `manifest.branches` 每个 head 走 parent 链生成 Round 链，
+共享前缀的 ChatNode 映射到同一 RoundId（用 `_roundId` meta 或内容 hash 去重）；
+sibling ChatNode → sibling Round（同 parents），并写入 children 索引。
 
 ---
 
-## 4. 超越 Turn：三个必须一并解决的结构性问题
+## 4. 超越 Round：三个必须一并解决的结构性问题
 
 ### 4.1 问题一：双写路径 — TaskRunner 绕过 ILog 直写 engine ★ 最高优先级
 
 **现状**（`task-runner.ts`）：
 
 ```
-路径 A（ILog）:   loop 内部 → log.append(turn)            → ChatEngineLog → engine.appendMessage
+路径 A（ILog）:   loop 内部 → log.append(round)            → ChatEngineLog → engine.appendMessage
 路径 B（直写）:   TaskRunner.createUserMessage    (L573)  → engine.appendMessage
                  TaskRunner.createAssistantNode  (L611)  → engine.appendMessage
                  TaskRunner 流式节流 + 完成       (L509)  → engine.updateNode
 ```
 
 同一个 assistant 消息被两条路径操作，语义靠"恰好不冲突"维持。**这是比存储格式更深的耦合**：
-只要路径 B 存在，TurnLog 落地后 TaskRunner 依然要理解存储细节。
+只要路径 B 存在，RoundLog 落地后 TaskRunner 依然要理解存储细节。
 
 **目标：单一写者（Single Writer）——持久化只经过 ILog**：
 
 ```
 TaskRunner 职责收缩为:
-  1. 构建初始 Turn { payload: [userMessage] } → draft().setCurrent()
+  1. 构建初始 Round { payload: [userMessage] } → draft().setCurrent()
   2. drive(loop) — 流式期间只更新 DraftArea（checkpoint 即崩溃安全，替代 updateNode 节流）
-  3. turn:end → log.append(完成的 Turn) / clearAssistantInTurn 场景走原地更新
+  3. round:end → log.append(完成的 Round) / clearAssistantInRound 场景走原地更新
   4. 只发事件，不碰 engine
 ```
 
 收益：
-- `engine`（IChatEngine）从 TaskRunner/SessionManager 的依赖中移除，降为 TurnLog 的内部实现细节
+- `engine`（IChatEngine）从 TaskRunner/SessionManager 的依赖中移除，降为 RoundLog 的内部实现细节
 - 崩溃安全统一由 DraftArea 承担（现在是 DraftArea + updateNode 节流两套机制并存）
-- `parentUserNodeId`/`skipUserMessage` 等 hack 参数消失——regenerate 就是 `clearAssistantInTurn(turnId)` + 重驱动
+- `parentUserNodeId`/`skipUserMessage` 等 hack 参数消失——regenerate 就是 `clearAssistantInRound(roundId)` + 重驱动
 
 ### 4.2 问题二：双重状态 — SessionState 与持久化层手动双写
 
@@ -163,20 +163,20 @@ TaskRunner 职责收缩为:
 且编辑/regenerate/切分支后靠 `reloadSessionData`（`session-manager.ts:1348-1367`）
 **全量 clear + 逐条重发 message:appended**，UI 闪烁、O(N) 事件风暴。
 
-**目标：SessionState 变成 TurnLog 的纯投影（Projection），单向数据流**：
+**目标：SessionState 变成 RoundLog 的纯投影（Projection），单向数据流**：
 
 ```
-TurnLog (事实源)
-   │  append / clearAssistant / markStale / deleteTurn
+RoundLog (事实源)
+   │  append / clearAssistant / markStale / deleteRound
    ▼
-TurnLogEvent  { type: 'turn:appended' | 'turn:updated' | 'turn:deleted', turn }
+RoundLogEvent  { type: 'round:appended' | 'round:updated' | 'round:deleted', round }
    ▼
 SessionState.apply(event)      ← 唯一的状态更新入口（消灭手动双写）
    ▼
 MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 ```
 
-- 切分支/编辑不再全量 reload：diff 新旧 head 链，只对差异 Turn 发 `turn:appended/deleted`
+- 切分支/编辑不再全量 reload：diff 新旧 head 链，只对差异 Round 发 `round:appended/deleted`
 - `interruptedAssistantId` 反向扫描 hack（`session-manager.ts:253-261`）→ 由 DraftArea 是否存在 checkpoint 判定
 
 ### 4.3 问题三：SessionManager 职责过载（1530 行）
@@ -186,11 +186,11 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 | 新组件 | 迁入职责 | 来源行数（约） |
 |---|---|---|
 | `SessionRegistry` | 注册/绑定/解绑/自动清理/恢复 | ~400 |
-| `TurnOperations` | send/delete/edit/regenerate/resend — 全部基于 turnId | ~450 |
-| `BranchService` | branch CRUD / sibling 导航 / tags（委托 TurnLog.refs()） | ~350 |
+| `RoundOperations` | send/delete/edit/regenerate/resend — 全部基于 roundId | ~450 |
+| `BranchService` | branch CRUD / sibling 导航 / tags（委托 RoundLog.refs()） | ~350 |
 | `SessionFacade`（实现 ISession） | 组合上述三者 + settings + prompt history 委托 | ~300 |
 
-拆分与 Turn 重构天然协同：`TurnOperations` 直接消费 `TurnLog`，
+拆分与 Round 重构天然协同：`RoundOperations` 直接消费 `RoundLog`，
 `collectDeletableIds`/`findUserMessageBefore` 等位置推导代码在迁移中自然消亡而非搬家。
 
 ---
@@ -216,27 +216,27 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 ### Phase 0 — 快赢清理（§5）
 无行为变化，纯清理 + 修 bug。回归：现有会话读写、分支切换。
 
-### Phase 1 — TurnLog 落地（llm-turn.md 主体 + §3 六项修正）
+### Phase 1 — RoundLog 落地（llm-round.md 主体 + §3 六项修正）
 
-- 新建 `llm-engine/src/persistence/turn-log.ts`：实现 ILog + `clearAssistantInTurn`/`markStale`/`deleteTurn`
-- TurnManifest 含 `children` 反向索引（§3.1）
+- 新建 `llm-engine/src/persistence/round-log.ts`：实现 ILog + `clearAssistantInRound`/`markStale`/`deleteRound`
+- RoundManifest 含 `children` 反向索引（§3.1）
 - fold 并行读 + 软删除过滤 + 缓存（§3.4）
-- 原地变更边界表落地为 TurnLog 私有方法（§3.3）
+- 原地变更边界表落地为 RoundLog 私有方法（§3.3）
 - DraftArea 抽出为独立文件，统一用 nodeId（修复 §2-D）
-- **格式路由**：`SessionManager.bindSession` 检测 `manifest.format === 'turn'` 选择 TurnLog / ChatEngineLog
-- 新 session 默认 turn 格式；旧 session 只读兼容
+- **格式路由**：`SessionManager.bindSession` 检测 `manifest.format === 'round'` 选择 RoundLog / ChatEngineLog
+- 新 session 默认 round 格式；旧 session 只读兼容
 
 ### Phase 2 — 单一写路径（§4.1）★ 本计划核心增量
 
-- TaskRunner 删除 `createUserMessage`/`createAssistantNode`/`updateNode` 直写，全部经 TurnLog
+- TaskRunner 删除 `createUserMessage`/`createAssistantNode`/`updateNode` 直写，全部经 RoundLog
 - 流式崩溃安全统一到 DraftArea checkpoint，删除 updateNode 节流
 - 删除 `TaskInput.parentUserNodeId`/`skipUserMessage`，regenerate = clearAssistant + 重驱动
-- 仅对 turn 格式 session 启用（旧格式 session 保持旧路径，Strangler-Fig）
+- 仅对 round 格式 session 启用（旧格式 session 保持旧路径，Strangler-Fig）
 
-### Phase 3 — 投影化 SessionState（§4.2 + llm-turn.md §5）
+### Phase 3 — 投影化 SessionState（§4.2 + llm-round.md §5）
 
-- `SessionGroup[]` → `TurnProjection[]`（含 §3.5 kind 修正）
-- 新增 `TurnLogEvent`，SessionState 只经 `apply(event)` 更新
+- `SessionGroup[]` → `RoundProjection[]`（含 §3.5 kind 修正）
+- 新增 `RoundLogEvent`，SessionState 只经 `apply(event)` 更新
 - `reloadSessionData` 全量重放 → head 链 diff 增量事件
 - 删除 `findUserMessageBefore`/`findAssistantMessagesAfter`/`collectAssistantIdsAfter`/`collectDeletableIds`
 - UI 侧 `SessionEventHandler` 适配增量结构事件（llm-ui 改动集中在此一处）
@@ -248,7 +248,7 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 ### Phase 5 — 迁移工具（可选，独立）
 
-- `migrateToTurnFormat(sessionId)`：按 §3.6 修正的分支感知算法
+- `migrateToRoundFormat(sessionId)`：按 §3.6 修正的分支感知算法
 - 失败回退旧格式；迁移前 manifest 备份
 
 ---
@@ -258,16 +258,16 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 | 风险/问题 | 缓解 |
 |---|---|
 | Phase 2 改变崩溃安全语义（updateNode 节流 → DraftArea） | DraftArea checkpoint 频率对齐原节流间隔；恢复路径已有 `resumeDrive` 覆盖 |
-| children 索引与 turn 文件不一致（写 turn 成功、写 manifest 失败） | append 顺序：先 turn 文件后 manifest；启动时可从 parents 重建 children（自愈） |
+| children 索引与 round 文件不一致（写 round 成功、写 manifest 失败） | append 顺序：先 round 文件后 manifest；启动时可从 parents 重建 children（自愈） |
 | 旧格式 session 长期共存的维护成本 | ChatEngineLog 冻结只修 bug；UI 层经投影统一，不感知格式 |
 | fold 的 AssemblyStrategy（§2-C）实现时机 | Phase 1 只实现 `concat`；`summarize-branches`/`pick` 留待 merge 功能实际启用时（YAGNI） |
-| SessionRecovery 的 localStorage 快照是否含 turnId | Phase 3 时同步升级快照 schema，版本号不兼容则丢弃重建 |
+| SessionRecovery 的 localStorage 快照是否含 roundId | Phase 3 时同步升级快照 schema，版本号不兼容则丢弃重建 |
 
 ---
 
 ## 8. 验收标准
 
-1. **单一写者**：`grep engine.appendMessage\|engine.updateNode` 在 session/ 目录零命中（turn 格式路径）
+1. **单一写者**：`grep engine.appendMessage\|engine.updateNode` 在 session/ 目录零命中（round 格式路径）
 2. **无位置推导**：`findUserMessageBefore`/`collectAssistantIdsAfter` 等函数删除
 3. **无类型逃逸**：persistence/ 与 session/ 中 `as any` 归零
 4. **事件增量**：切分支不再发 `messages:cleared` + N 条 `message:appended`
@@ -285,11 +285,11 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 | 阶段 | 内容 | 关键产出 | 状态 |
 |---|---|---|---|
 | **Phase 0** | 快赢清理（7 项） | 见下方 P0.1~P0.7 | ✅ 完成 |
-| **Phase 1** | TurnLog 落地（TurnManifest + TurnLog + 格式路由） | 4 个新文件，3 个修改文件 | ✅ 完成 |
-| **Phase 2** | 单一写路径 — TaskRunner 全经 TurnLog（turn 格式） | 2 个修改文件，~70 行改动 | ✅ 完成 |
-| **Phase 3** | SessionState 投影化 — TurnProjection[] + TurnLogEvent + diffAndApply | 1 个新文件，5 个修改文件 | ✅ 完成 |
+| **Phase 1** | RoundLog 落地（RoundManifest + RoundLog + 格式路由） | 4 个新文件，3 个修改文件 | ✅ 完成 |
+| **Phase 2** | 单一写路径 — TaskRunner 全经 RoundLog（round 格式） | 2 个修改文件，~70 行改动 | ✅ 完成 |
+| **Phase 3** | SessionState 投影化 — RoundProjection[] + RoundLogEvent + diffAndApply | 1 个新文件，5 个修改文件 | ✅ 完成 |
 | **Phase 4** | SessionManager 拆分 — 3 新组件 + Facade，ISession 门面不变 | 3 个新文件，1 个重写，1 个修改 | ✅ 完成 |
-| **Phase 5** | 迁移工具 — `migrateToTurnFormat()` 分支感知算法 | 1 个新文件（migration.ts），1 个修改（index.ts 导出） | ✅ 完成 |
+| **Phase 5** | 迁移工具 — `migrateToRoundFormat()` 分支感知算法 | 1 个新文件（migration.ts），1 个修改（index.ts 导出） | ✅ 完成 |
 | **收尾** | as any 清理 + 集成测试 + 文件精简 + @deprecated | 7 个修改文件，1 个新测试文件（22 tests），1 个 vitest 配置 | ✅ 完成 |
 
 #### Phase 0 明细
@@ -308,36 +308,36 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 | # | 项 | 文件 | 状态 |
 |---|---|---|---|
-| P1.1 | `turn-types.ts`（TurnManifest + children 索引 + TurnProjection.kind）| 新建 `persistence/turn-types.ts` | ✅ |
+| P1.1 | `round-types.ts`（RoundManifest + children 索引 + RoundProjection.kind）| 新建 `persistence/round-types.ts` | ✅ |
 | P1.2 | `draft-area.ts`（VFSDraftArea 独立，统一 `_draftPath`） | 新建 `persistence/draft-area.ts` | ✅ |
 | P1.3 | `ChatManifest.format` 可选字段 | `common/.../chat.ts` | ✅ |
-| P1.4 | `TurnLog` — 完整 ILog 实现（fold 并行读 + 缓存 + 原地变更白名单） | 新建 `persistence/turn-log.ts` | ✅ |
-| P1.5 | 格式路由：`TaskRunner.createLog()` 按 `manifest.format` 选 TurnLog/ChatEngineLog | `task-runner.ts` | ✅ |
-| P1.6 | 导出新类型（TurnManifest, TurnProjection, PersistedTurn, TurnLog, VFSDraftArea）| `index.ts` | ✅ |
+| P1.4 | `RoundLog` — 完整 ILog 实现（fold 并行读 + 缓存 + 原地变更白名单） | 新建 `persistence/round-log.ts` | ✅ |
+| P1.5 | 格式路由：`TaskRunner.createLog()` 按 `manifest.format` 选 RoundLog/ChatEngineLog | `task-runner.ts` | ✅ |
+| P1.6 | 导出新类型（RoundManifest, RoundProjection, PersistedTurn, RoundLog, VFSDraftArea）| `index.ts` | ✅ |
 
 #### Phase 2 明细
 
 | # | 项 | 文件 | 状态 |
 |---|---|---|---|
-| P2.1 | 前置修复：loop-executor TurnId 不一致（`turn:start` vs `log.append`） | `executors/loop-executor.ts:136` | ✅ |
-| P2.2 | `createUserMessage` — turn 格式用 `ulid()` 替代 `engine.appendMessage` | `task-runner.ts` | ✅ |
-| P2.3 | `createAssistantNode` — turn 格式用 `ulid()` 替代 `engine.appendMessage` | `task-runner.ts` | ✅ |
-| P2.4 | `persist()` 节流闭包 — turn 格式 no-op（DraftArea.checkpoint 替代） | `task-runner.ts` | ✅ |
-| P2.5 | 完成写入 — turn 格式走 `log.append()` + `draft().flush()` | `task-runner.ts` | ✅ |
-| P2.6 | `handleError` — turn 格式走 `draft().flush()` 替代 `engine.updateNode` | `task-runner.ts` | ✅ |
+| P2.1 | 前置修复：loop-executor RoundId 不一致（`round:start` vs `log.append`） | `executors/loop-executor.ts:136` | ✅ |
+| P2.2 | `createUserMessage` — round 格式用 `ulid()` 替代 `engine.appendMessage` | `task-runner.ts` | ✅ |
+| P2.3 | `createAssistantNode` — round 格式用 `ulid()` 替代 `engine.appendMessage` | `task-runner.ts` | ✅ |
+| P2.4 | `persist()` 节流闭包 — round 格式 no-op（DraftArea.checkpoint 替代） | `task-runner.ts` | ✅ |
+| P2.5 | 完成写入 — round 格式走 `log.append()` + `draft().flush()` | `task-runner.ts` | ✅ |
+| P2.6 | `handleError` — round 格式走 `draft().flush()` 替代 `engine.updateNode` | `task-runner.ts` | ✅ |
 | P2.7 | 旧格式 session 保持旧路径（Strangler-Fig） | `task-runner.ts` | ✅ |
 
-> **注**：`TaskInput.skipUserMessage` / `parentUserNodeId` 未删除——旧格式 session 仍依赖这些字段；turn 格式下 `skipUserMessage` 用于判断是否在 `log.append()` 前将 user message 前置到 turn payload。`draft().setCurrent()` 也未显式调用——user message 在 `log.append()` 时直接拼入 turn.payload，而非通过 draft 预填充。
+> **注**：`TaskInput.skipUserMessage` / `parentUserNodeId` 未删除——旧格式 session 仍依赖这些字段；round 格式下 `skipUserMessage` 用于判断是否在 `log.append()` 前将 user message 前置到 round payload。`draft().setCurrent()` 也未显式调用——user message 在 `log.append()` 时直接拼入 round.payload，而非通过 draft 预填充。
 
 #### Phase 3 明细
 
 | # | 项 | 文件 | 状态 |
 |---|---|---|---|
-| P3.1 | `turn-events.ts`（TurnLogEvent + TurnChangeSet 类型） | 新建 `persistence/turn-events.ts` | ✅ |
-| P3.2 | `session-state.ts` — TurnProjection[] + apply() + O(1) 索引 + 双格式兼容 | 修改 `session/session-state.ts` | ✅ |
-| P3.3 | `turn-log.ts` — setEventListener + 事件发射 + turnToProjection + readTurn/loadManifest public | 修改 `persistence/turn-log.ts` | ✅ |
-| P3.4 | `session-manager.ts` — diffAndApply + populateFromTurnLog + 格式门控位置推导 | 修改 `session/session-manager.ts` | ✅ |
-| P3.5 | `task-runner.ts` — TurnLog 事件监听器接线 + flush() 签名修复 | 修改 `session/task-runner.ts` | ✅ |
+| P3.1 | `round-events.ts`（RoundLogEvent + RoundChangeSet 类型） | 新建 `persistence/round-events.ts` | ✅ |
+| P3.2 | `session-state.ts` — RoundProjection[] + apply() + O(1) 索引 + 双格式兼容 | 修改 `session/session-state.ts` | ✅ |
+| P3.3 | `round-log.ts` — setEventListener + 事件发射 + roundToProjection + readRound/loadManifest public | 修改 `persistence/round-log.ts` | ✅ |
+| P3.4 | `session-manager.ts` — diffAndApply + populateFromRoundLog + 格式门控位置推导 | 修改 `session/session-manager.ts` | ✅ |
+| P3.5 | `task-runner.ts` — RoundLog 事件监听器接线 + flush() 签名修复 | 修改 `session/task-runner.ts` | ✅ |
 | P3.6 | `chat-engine-log.ts` — ChatNode 类型导入 + role cast 修复 | 修改 `persistence/chat-engine-log.ts` | ✅ |
 
 ### 待完成
@@ -346,65 +346,65 @@ _全部完成。无待完成项。_
 
 #### Phase 3 待办清单
 
-- [x] `SessionGroup[]` → `TurnProjection[]`（双格式并存，`_isTurnFormat` flag 切换）
-- [x] 新增 `TurnLogEvent`，SessionState 只经 `apply(event)` 更新
+- [x] `SessionGroup[]` → `RoundProjection[]`（双格式并存，`_isRoundFormat` flag 切换）
+- [x] 新增 `RoundLogEvent`，SessionState 只经 `apply(event)` 更新
 - [x] `reloadSessionData` 全量重放 → head 链 `diffAndApply` 增量事件
-- [x] 位置推导保留但标记 `@deprecated`（旧格式仍需），turn 格式用 O(1) 索引替代
-- [x] `interruptedAssistantId` 反向扫描 → 保留（turn 格式下 getSessions() 适配器可用）
+- [x] 位置推导保留但标记 `@deprecated`（旧格式仍需），round 格式用 O(1) 索引替代
+- [x] `interruptedAssistantId` 反向扫描 → 保留（round 格式下 getSessions() 适配器可用）
 - [x] UI 侧无需改动（`diffAndApply` 发射增量 `message:appended`/`messages:deleted`，UI 已有处理逻辑）
-- [x] `clearAssistantInTurn` 走 TurnLog 事件 `turn:updated`
+- [x] `clearAssistantInRound` 走 RoundLog 事件 `round:updated`
 
 #### Phase 4 明细
 
 | # | 项 | 文件 | 状态 |
 |---|---|---|---|
 | P4.1 | `session-registry.ts`（556 行）— 注册/绑定/解绑/状态查询/事件/加载/回调 | 新建 `session/session-registry.ts` | ✅ |
-| P4.2 | `turn-operations.ts`（518 行）— send/regenerate/delete/edit/draft 全 turnId 操作 | 新建 `session/turn-operations.ts` | ✅ |
+| P4.2 | `round-operations.ts`（518 行）— send/regenerate/delete/edit/draft 全 roundId 操作 | 新建 `session/round-operations.ts` | ✅ |
 | P4.3 | `branch-service.ts`（245 行）— branch CRUD / sibling 导航 / tags | 新建 `session/branch-service.ts` | ✅ |
 | P4.4 | `session-manager.ts`（437 行）— Facade 门面，组合三者 + ISession + settings + history | 重写 `session/session-manager.ts` | ✅ |
-| P4.5 | 导出新组件（SessionRegistry, BoundContext, TurnOperations, BranchService）| 修改 `index.ts` | ✅ |
+| P4.5 | 导出新组件（SessionRegistry, BoundContext, RoundOperations, BranchService）| 修改 `index.ts` | ✅ |
 | P4.6 | `ChatEngineLog` 标 `@deprecated` | `persistence/chat-engine-log.ts` | ✅ 完成（收尾阶段） |
 
-> **注（收尾前）**：SessionRegistry（556 行）和 TurnOperations（518 行）略超 500 行目标。BranchService（245 行）和 Facade（437 行）符合 < 500 行。
-> **收尾后**：SessionRegistry 498 行、TurnOperations 479 行，均符合 < 500 行目标。
+> **注（收尾前）**：SessionRegistry（556 行）和 RoundOperations（518 行）略超 500 行目标。BranchService（245 行）和 Facade（437 行）符合 < 500 行。
+> **收尾后**：SessionRegistry 498 行、RoundOperations 479 行，均符合 < 500 行目标。
 
 #### Phase 5 明细
 
 | # | 项 | 文件 | 状态 |
 |---|---|---|---|
-| P5.1 | `migrateToTurnFormat()` — 分支感知迁移算法 | 新建 `persistence/migration.ts` | ✅ |
+| P5.1 | `migrateToRoundFormat()` — 分支感知迁移算法 | 新建 `persistence/migration.ts` | ✅ |
 | P5.2 | `resolveNodeId` / `walkParentChain` / `readChatNode` 辅助函数 | 同上 | ✅ |
-| P5.3 | `buildTurnIdMap` — 内容 hash 去重（优先复用 `_turnId` meta） | 同上 | ✅ |
-| P5.4 | `buildTurnsFromChain` + `pairUserAssistant` — ChatNode → Turn 转换 | 同上 | ✅ |
-| P5.5 | `writeTurnFiles` — 并行写 turns/ 目录 | 同上 | ✅ |
+| P5.3 | `buildRoundIdMap` — 内容 hash 去重（优先复用 `_roundId` meta） | 同上 | ✅ |
+| P5.4 | `buildRoundsFromChain` + `pairUserAssistant` — ChatNode → Round 转换 | 同上 | ✅ |
+| P5.5 | `writeRoundFiles` — 并行写 rounds/ 目录 | 同上 | ✅ |
 | P5.6 | 失败回退 — backup manifest + try/catch 包裹 | 同上 | ✅ |
-| P5.7 | 导出 `migrateToTurnFormat` + `MigrationResult` 类型 | 修改 `index.ts` | ✅ |
+| P5.7 | 导出 `migrateToRoundFormat` + `MigrationResult` 类型 | 修改 `index.ts` | ✅ |
 
 #### 收尾清理明细
 
 | # | 项 | 文件 | 状态 |
 |---|---|---|---|
-| C1 | `as any` 清理 — session/ + persistence/ 核心文件归零（~12 处消除） | `session-manager.ts`, `task-runner.ts`, `session-registry.ts`, `session-event-bus.ts`, `turn-log.ts`, `chat-engine-log.ts`, `draft-area.ts`, `core/types.ts`, `common/.../loop.ts` | ✅ |
+| C1 | `as any` 清理 — session/ + persistence/ 核心文件归零（~12 处消除） | `session-manager.ts`, `task-runner.ts`, `session-registry.ts`, `session-event-bus.ts`, `round-log.ts`, `chat-engine-log.ts`, `draft-area.ts`, `core/types.ts`, `common/.../loop.ts` | ✅ |
 | C2 | SessionRegistry 精简 — 提取 `collectHeadChain()` 消除 ~30 行重复 | `session-registry.ts` (556→498) | ✅ |
-| C3 | TurnOperations 精简 — 删除步骤注释、简化异常处理 | `turn-operations.ts` (518→479) | ✅ |
+| C3 | RoundOperations 精简 — 删除步骤注释、简化异常处理 | `round-operations.ts` (518→479) | ✅ |
 | C4 | `ChatEngineLog` 标 `@deprecated` | `persistence/chat-engine-log.ts` | ✅ |
-| C5 | 集成测试 — 22 项覆盖 CRUD / 级联删除 / resend / 缓存 / 事件 | 新建 `__tests__/turn-log.test.ts` + `vitest.config.ts` | ✅ |
+| C5 | 集成测试 — 22 项覆盖 CRUD / 级联删除 / resend / 缓存 / 事件 | 新建 `__tests__/round-log.test.ts` + `vitest.config.ts` | ✅ |
 
 #### Phase 5 待办清单
 
 - [x] 新建 `persistence/migration.ts`
 - [x] 分支感知迁移算法（对 `manifest.branches` 每个 head 走 parent 链）
-- [x] 共享前缀 ChatNode → 同一 TurnId（内容 hash 去重）
-- [x] sibling ChatNode → sibling Turn（同 parents）+ children 索引
+- [x] 共享前缀 ChatNode → 同一 RoundId（内容 hash 去重）
+- [x] sibling ChatNode → sibling Round（同 parents）+ children 索引
 - [x] 失败回退旧格式 + manifest 备份
 
 ### 验收标准达成情况
 
 | # | 标准 | 当前 |
 |---|---|---|
-| 1 | `grep engine.appendMessage\|engine.updateNode` session/ 零命中（turn 格式路径） | ✅ Phase 2 完成 |
-| 2 | `findUserMessageBefore` 等函数删除 | ✅ 旧格式保留（标记 @deprecated），turn 格式用 O(1) 索引 |
+| 1 | `grep engine.appendMessage\|engine.updateNode` session/ 零命中（round 格式路径） | ✅ Phase 2 完成 |
+| 2 | `findUserMessageBefore` 等函数删除 | ✅ 旧格式保留（标记 @deprecated），round 格式用 O(1) 索引 |
 | 3 | persistence/ + session/ 中 `as any` 归零 | ✅ session-event-bus.ts 保留 2 处（EventBus 泛型固有限制，与 EventBuffer 模式一致），其余全部消除 |
 | 4 | 切分支增量事件（不重放全量） | ✅ `diffAndApply` 替代 `reloadSessionData` 全量重放 |
 | 5 | 三条删除语义集成测试 | ✅ 22 项测试覆盖：级联删除、resend 不建分支、CRUD、缓存、事件发射 |
-| 6 | 后继组件均 < 500 行 | ✅ SessionRegistry 498 / TurnOperations 479 / BranchService 245 / Facade 437 |
+| 6 | 后继组件均 < 500 行 | ✅ SessionRegistry 498 / RoundOperations 479 / BranchService 245 / Facade 437 |

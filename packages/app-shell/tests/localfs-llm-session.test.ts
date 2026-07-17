@@ -161,16 +161,16 @@ describe.skipIf(!cfg)(
 
         // ── 2. Multi-turn session — context retention ─────────────────────────
 
-        it('multi-turn — model retains context across turns', async () => {
-            // Turn 1: establish a fact
+        it('multi-turn — model retains context across rounds', async () => {
+            // Round 1: establish a fact
             let r = await send(driver, [], 'My name is Alice. Reply with only: OK', 8);
             console.log('[multi t1]', r.reply);
 
-            // Turn 2: ask an unrelated question (tests context isn't dropped)
+            // Round 2: ask an unrelated question (tests context isn't dropped)
             r = await send(r.history, 'What city is the Eiffel Tower in? One word.', 8);
             console.log('[multi t2]', r.reply);
 
-            // Turn 3: ask about the established fact
+            // Round 3: ask about the established fact
             r = await send(r.history, 'What is my name? Reply with only the name.', 8);
             console.log('[multi t3]', r.reply);
 
@@ -220,7 +220,7 @@ describe.skipIf(!cfg)(
 
         // ── 5. Multi-turn streaming ───────────────────────────────────────────
 
-        it('multi-turn streaming — context retained over streamed turns', async () => {
+        it('multi-turn streaming — context retained over streamed rounds', async () => {
             let r = await sendStream(driver, [], 'My lucky number is 42. Reply with only: GOT IT', 8);
             console.log('[mts t1]', r.reply);
 
