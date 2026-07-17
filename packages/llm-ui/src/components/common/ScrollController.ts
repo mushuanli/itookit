@@ -125,6 +125,19 @@ export class ScrollController {
     // 滚动操作
     // ================================================================
 
+    forceScrollToTop(): void {
+        this.shouldAutoScroll = false;
+        this._isUserScrolledUp = false;
+        this.markProgrammaticScroll();
+        if (this.scrollFrameId !== null) cancelAnimationFrame(this.scrollFrameId);
+        this.scrollFrameId = this.timers.requestAnimationFrame(() => {
+            this.scrollFrameId = null;
+            this.container.scrollTop = 0;
+            this.lastScrollHeight = this.container.scrollHeight;
+            this.scrollLockUntil = Date.now() + 100;
+        });
+    }
+
     scrollToBottom(force: boolean = false): void {
         if (!force && !this.shouldAutoScroll) return;
         if (force && this._isStreamingMode && this._isUserScrolledUp) return;

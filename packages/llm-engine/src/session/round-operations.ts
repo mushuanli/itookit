@@ -173,37 +173,59 @@ export class RoundOperations {
         // the new branch skips the old assistant entirely.
         const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
         const userRound = await roundLog.readRound(userRoundId);
-        const forkPointId = userRound?.parents?.[0] ?? userRoundId;
+        if (!userRound) throw new EngineError(EngineErrorCode.SESSION_INVALID, 'User Round not found');
 
+        // The in-memory projection is updated immediately when the user
+        // deletes an assistant. Prefer it over a possibly stale Round file;
+        // otherwise resend can incorrectly see the old assistant on disk and
+        // fork a new branch.
+        const projectedRound = state.getRounds().find(round => round.roundId === userRoundId);
+        const projectedContent = projectedRound?.assistantMessage?.content;
+        const hasAssistant = projectedRound
+            ? typeof projectedContent === 'string' && projectedContent.trim().length > 0
+            : RoundLog.hasEffectiveAssistant(userRound);
         const manifest = await roundLog.loadManifest();
-        const branchNum = Object.keys(manifest.branches).length;
-        const branchName = `branch-${branchNum}`;
-        await roundLog.refs().create(branchName, forkPointId);
-
-        // Switch to the new branch
-        manifest.currentBranch = branchName;
-        manifest.currentHead = forkPointId;
-        await roundLog.saveManifest(manifest);
+        let branchName = manifest.currentBranch;
+        let targetRoundId = userRoundId;
+        let branchCreated = false;
+        if (hasAssistant) {
+            const forked = await roundLog.forkUserRound(userRoundId, { createdFrom: 'regenerate' });
+            branchName = forked.branchName;
+            targetRoundId = forked.newRoundId;
+            branchCreated = true;
+        }
 
         await this.registry.reloadSessionData(nodeId, sessionId, state);
 
-        const branchInfo = await this.getSiblingInfo(sessionId, forkPointId);
+        const branchInfo = await this.getSiblingInfo(sessionId, targetRoundId);
+
+        if (branchCreated) {
+            eventBus.emitSession(sessionId, {
+                type: 'branch:switched',
+                payload: {
+                    branchName,
+                    headRoundId: targetRoundId,
+                    branchRootRoundId: targetRoundId,
+                    reason: 'regenerate',
+                    displayPosition: 'top',
+                },
+            });
+        }
 
         // 6. 发送事件
         eventBus.emitSession(sessionId, {
             type: 'regenerate_started',
             payload: {
                 sourceId: context.sourceId,
-                newUserNodeId: userRoundId,
+                newUserNodeId: targetRoundId,
                 branchName,
                 agentId,
                 trigger: context.trigger,
             },
         });
 
-        // 7. 提交任务 - fork from the parent round (above the old user+assistant pair).
-        //    The new round will be a sibling of the original user round, containing
-        //    the same user message + new assistant response.
+        // 7. Update the existing target Round. The target is either the original
+        // empty-assistant Round or the user-only sibling created above.
         await this.taskRunner.submit(
             {
                 sessionId,
@@ -213,7 +235,8 @@ export class RoundOperations {
                 agentId,
                 overrides: context.overrides,
                 skipUserMessage: true,
-                parentUserNodeId: forkPointId,
+                parentUserNodeId: targetRoundId,
+                roundTarget: { mode: 'update-existing', targetRoundId },
                 branchInfo,
                 regenerateContext: {
                     sourceId: context.sourceId,
@@ -224,7 +247,7 @@ export class RoundOperations {
             runtime
         );
 
-        return { branchName, userNodeId: userRoundId, agentId };
+        return { branchName, userNodeId: targetRoundId, agentId, branchCreated };
     }
 
     // ================================================================
@@ -445,6 +468,17 @@ export class RoundOperations {
             const roundLog2 = new RoundLog(this.registry.engine, nodeId, sessionId);
             const m2 = await roundLog2.loadManifest();
             const branchName = m2.currentBranch;
+
+            eventBus.emitSession(sessionId, {
+                type: 'branch:switched',
+                payload: {
+                    branchName,
+                    headRoundId: m2.currentHead,
+                    branchRootRoundId: newPersistedNodeId,
+                    reason: 'create',
+                    displayPosition: 'top',
+                },
+            });
 
             eventBus.emitSession(sessionId, {
                 type: 'regenerate_started',

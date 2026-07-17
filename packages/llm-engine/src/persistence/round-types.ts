@@ -34,6 +34,9 @@ export interface RoundManifest {
     /** Branch name → head RoundId. */
     branches: Record<string, RoundId>;
 
+    /** Metadata describing where each branch was split from. */
+    branchMeta: Record<string, BranchMeta>;
+
     /** The active branch name. */
     currentBranch: string;
 
@@ -46,6 +49,15 @@ export interface RoundManifest {
      * Self-healing: can be rebuilt from all Round.parents on startup.
      */
     children: Record<RoundId, RoundId[]>;
+}
+
+export interface BranchMeta {
+    createdAt: number;
+    createdFrom: 'regenerate' | 'manual' | 'edit';
+    forkedFromBranch: Ref;
+    sourceRoundId: RoundId;
+    commonHeadId?: RoundId;
+    branchRootRoundId: RoundId;
 }
 
 // ─── RoundProjection ──────────────────────────────────────────────────────

@@ -36,13 +36,14 @@ const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
     'messages:cleared': ['refreshNav', 'refreshBranch'],
     'messages:deleted': ['refreshNav', 'notifyChange'],
     'message:edited': ['refreshNav'],
-    'sibling:switched': ['renderFull', 'refreshBranch'],
-    'log:appended': ['renderFull', 'scrollToBottom', 'refreshBranch', 'flashIndicator'],
-    'log:ref_moved': ['resetCollapse', 'renderFull', 'scrollToBottom', 'refreshBranch', 'flashIndicator'],
+    'sibling:switched': ['refreshBranch'],
+    'branch:switched': ['refreshBranch', 'refreshNav', 'flashIndicator'],
+    'log:appended': ['refreshBranch', 'flashIndicator'],
+    'log:ref_moved': ['resetCollapse', 'refreshBranch', 'flashIndicator'],
     'log:ref_renamed': ['refreshBranch'],
 
     // 重新生成（保留 — 无 canonical 等价事件）
-    regenerate_started: ['clearErrors', 'renderFull', 'flashIndicator'],
+    regenerate_started: ['clearErrors', 'flashIndicator'],
     regenerate_completed: ['refreshBranch', 'refreshNav'],
 };
 
@@ -131,6 +132,13 @@ export class SessionEventHandler {
     private handleBranchEvent(event: SessionEvent): void {
         const e = event as { type: string; payload?: any; [key: string]: any };
         switch (e.type) {
+            case 'branch:switched':
+                this.deps.commands.execute<SessionGroup[]>('session.get-sessions').then(sessions => {
+                    this.deps.historyView.renderFull(sessions, {
+                        position: e.payload?.displayPosition === 'bottom' ? 'bottom' : 'top',
+                    });
+                }).catch(() => {});
+                break;
             case 'messages:deleted':
                 this.deps.historyView.removeMessages(e.payload.deletedIds, true);
                 break;

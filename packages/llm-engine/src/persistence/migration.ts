@@ -118,6 +118,7 @@ export async function migrateToRoundFormat(
         const newManifest: RoundManifest = {
             rootRoundId,
             branches: Object.fromEntries(branchHeadRoundIds),
+            branchMeta: {},
             currentBranch: (oldManifest.current_branch as string) ?? 'main',
             currentHead: branchHeadRoundIds.get((oldManifest.current_branch as string) ?? 'main') ?? rootRoundId,
             children: childrenIndex,

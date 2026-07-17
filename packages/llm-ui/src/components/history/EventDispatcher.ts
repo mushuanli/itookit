@@ -162,7 +162,10 @@ export class EventDispatcher {
             const action = actionEl.dataset.action;
             if (!action) return;
 
-            e.stopPropagation();
+            // This delegated action owns the click. stopPropagation() alone
+            // does not prevent a stale second EventDispatcher attached to the
+            // same container from consuming the same physical click.
+            e.stopImmediatePropagation();
 
             const sessionEl = actionEl.closest('[data-session-id]') as HTMLElement;
             const nodeEl = actionEl.closest('.llm-ui-node') as HTMLElement;

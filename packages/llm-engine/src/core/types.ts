@@ -269,6 +269,8 @@ export interface RegenerateResult {
     userNodeId: string;
     /** 实际使用的 agent ID */
     agentId: string;
+    /** Whether a new sibling branch was created. */
+    branchCreated?: boolean;
 }
 
 /**
@@ -351,6 +353,10 @@ export interface TaskInput {
     origin?: SessionOrigin;
     /** LLM history 策略，默认 'include' */
     historyPolicy?: HistoryPolicy;
+    /** Explicit Round persistence target. */
+    roundTarget?:
+        | { mode: 'append-new'; parentRoundId?: string }
+        | { mode: 'update-existing'; targetRoundId: string };
 }
 
 /**
@@ -458,6 +464,13 @@ export type SessionStructuralEvent =
     | { type: 'messages:deleted'; payload: { deletedIds: string[] } }
     | { type: 'message:edited';  payload: { messageId: string; newContent: string; newPersistedNodeId?: string } }
     | { type: 'sibling:switched'; payload: { messageId: string; newIndex: number; total: number } }
+    | { type: 'branch:switched'; payload: {
+        branchName: string;
+        headRoundId: string;
+        branchRootRoundId?: string;
+        reason: 'create' | 'regenerate' | 'manual-switch' | 'sibling-switch';
+        displayPosition: 'top' | 'branch-root' | 'bottom';
+    }}
     | { type: 'regenerate_started'; payload: {
         sourceId: string;
         newUserNodeId: string;

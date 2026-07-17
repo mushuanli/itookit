@@ -106,11 +106,11 @@ export { AttachmentProcessor } from './session/attachment-processor';
 // ============================================
 
 export { ChatEngine } from './persistence/chat-engine';
-export { RoundLog, roundToProjection } from './persistence/round-log';
+export { RoundLog, roundToProjection, hasEffectiveAssistant } from './persistence/round-log';
 export { VFSDraftArea } from './persistence/draft-area';
 export { migrateToRoundFormat } from './persistence/migration';
 export type { MigrationResult } from './persistence/migration';
-export type { RoundManifest, RoundProjection, PersistedRound } from './persistence/round-types';
+export type { RoundManifest, RoundProjection, PersistedRound, BranchMeta } from './persistence/round-types';
 export type { RoundLogEvent, RoundChangeSet } from './persistence/round-events';
 export type {
     IChatEngine,

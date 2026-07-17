@@ -17,7 +17,7 @@ import type { IStreamingController } from './IStreamingController';
  */
 export interface IHistoryPresenter extends ICollapseManager, IStreamingController {
     // === 渲染 ===
-    renderFull(sessions: SessionGroup[]): void;
+    renderFull(sessions: SessionGroup[], options?: { position?: 'top' | 'bottom' }): void;
     renderWelcome(): void;
     renderError(error: Error): void;
     clearErrors(): void;

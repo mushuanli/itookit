@@ -302,7 +302,9 @@ export class TaskRunner {
         // 4. Create assistant node with pre-allocated turn ID
         //    rootNode.id == round.id ensures streaming message:updated and
         //    RoundLog.applyAppended message:appended share the same messageId.
-        const preallocatedRoundId = ulid();
+        const preallocatedRoundId = input.roundTarget?.mode === 'update-existing'
+            ? input.roundTarget.targetRoundId
+            : ulid();
         const { assistantNodeId, rootNode } = await this.createAssistantNode(
             sessionId, executorConfig, input.branchInfo, userNodeId,
             input.origin, input.historyPolicy, preallocatedRoundId,
@@ -537,7 +539,18 @@ export class TaskRunner {
             //
             // Resolve the parent: for regenerate, fork above the old user round;
             // for normal flow, chain onto the current branch head.
-            let chainParent = input.parentUserNodeId;
+            if (input.roundTarget?.mode === 'update-existing') {
+                const assistantPayload = rounds.flatMap(round => round.payload)
+                    .filter(message => message.role === 'assistant' || message.role === 'tool');
+                const lastResult = rounds[rounds.length - 1]?.result;
+                await (logAdapter as RoundLog).setAssistantInRound(
+                    input.roundTarget.targetRoundId,
+                    { assistantMessages: assistantPayload, result: lastResult },
+                );
+            } else {
+            let chainParent = input.roundTarget?.mode === 'append-new'
+                ? input.roundTarget.parentRoundId
+                : input.parentUserNodeId;
             if (!chainParent) {
                 try {
                     const tm = await (logAdapter as RoundLog).loadManifest();
@@ -565,6 +578,7 @@ export class TaskRunner {
                 await logAdapter.append(branchRef, round);
                 // Subsequent rounds in this batch chain from this one
                 chainParent = round.id;
+            }
             }
             await logAdapter.draft().flush();
 

@@ -135,6 +135,7 @@ export class HistoryView implements IHistoryPresenter {
                     'message:appended', 'message:status',
                     'messages:cleared', 'messages:deleted',
                     'sibling:switched',
+                    'branch:switched',
                     'stream:content', 'stream:thinking',
                 ],
             }
@@ -145,7 +146,7 @@ export class HistoryView implements IHistoryPresenter {
     // IHistoryPresenter 实现
     // ================================================================
 
-    renderFull(sessions: SessionGroup[]): void {
+    renderFull(sessions: SessionGroup[], options?: { position?: 'top' | 'bottom' }): void {
         this.clear();
         if (sessions.length === 0) {
             this.renderer.renderWelcome();
@@ -163,7 +164,11 @@ export class HistoryView implements IHistoryPresenter {
             }
         });
 
-        this.scrollToBottom(true);
+        if (options?.position === 'top') {
+            this.scrollController.forceScrollToTop();
+        } else {
+            this.scrollToBottom(true);
+        }
     }
 
     renderWelcome(): void {

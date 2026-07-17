@@ -144,6 +144,28 @@ export class SessionState {
             return events;
         }
 
+        // update-existing fills an assistant into a user-only Round. Keep the
+        // projection authoritative after completion; previously it remained
+        // user-only even though persistence contained the new assistant.
+        if (!round.assistantMessage && changes.assistantContent) {
+            round.assistantMessage = {
+                content: changes.assistantContent,
+                thinking: changes.thinking,
+                status: changes.status ?? 'success',
+                persistedNodeId: round.roundId,
+            };
+            const assistant = this.roundProjectionToSessionGroups(round)
+                .find(group => group.role === 'assistant');
+            return assistant ? [{
+                type: 'message:appended',
+                payload: {
+                    sessionGroup: assistant,
+                    isExecutionRoot: true,
+                    parentId: round.userMessage?.persistedNodeId,
+                },
+            }] : [];
+        }
+
         if (round.assistantMessage) {
             if (changes.assistantContent !== undefined) {
                 round.assistantMessage.content = changes.assistantContent;

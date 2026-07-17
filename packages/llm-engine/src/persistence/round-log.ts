@@ -20,9 +20,10 @@ import type {
     DraftArea,
     AssemblyStrategy,
     ChatMessage,
+    RoundResult,
 } from '@itookit/common';
 import type { IChatEngine } from './types';
-import type { RoundManifest, PersistedRound, RoundProjection } from './round-types';
+import type { RoundManifest, PersistedRound, RoundProjection, BranchMeta } from './round-types';
 import type { RoundLogEvent, RoundChangeSet } from './round-events';
 import { ulid } from './ulid';
 import { VFSDraftArea } from './draft-area';
@@ -293,6 +294,113 @@ export class RoundLog implements ILog {
         }
     }
 
+    /** True when a Round contains a meaningful assistant response. */
+    static hasEffectiveAssistant(round: PersistedRound): boolean {
+        return hasEffectiveAssistant(round);
+    }
+
+    /** Create and activate a sibling Round containing only the source user message. */
+    async forkUserRound(
+        sourceRoundId: RoundId,
+        options: { branchName?: Ref; createdFrom: 'regenerate' | 'manual' | 'edit' },
+    ): Promise<{ branchName: Ref; sourceRoundId: RoundId; newRoundId: RoundId; commonHeadId?: RoundId }> {
+        const source = await this.readRound(sourceRoundId);
+        if (!source) throw new Error(`Source round not found: ${sourceRoundId}`);
+        const userMessages = source.payload.filter(m => m.role === 'user');
+        if (userMessages.length === 0) throw new Error(`Source round has no user message: ${sourceRoundId}`);
+
+        const manifest = await this.loadManifest();
+        const fromBranch = manifest.currentBranch;
+        const commonHeadId = source.parents?.[0];
+        let branchName = options.branchName;
+        if (!branchName) {
+            let n = Object.keys(manifest.branches).length;
+            do { branchName = `branch-${n++}`; } while (manifest.branches[branchName]);
+        }
+        if (manifest.branches[branchName]) throw new Error(`Branch already exists: ${branchName}`);
+
+        const newRoundId = ulid();
+        const copiedPayload = userMessages.map(message => ({
+            ...message,
+            ...(Array.isArray((message as any).attachments)
+                ? { attachments: (message as any).attachments.map((a: any) => ({ ...a })) }
+                : {}),
+        } as ChatMessage));
+        const newRound: PersistedRound = {
+            id: newRoundId,
+            parents: commonHeadId ? [commonHeadId] : [],
+            payload: copiedPayload,
+            meta: { ...source.meta, createdAt: Date.now(), origin: 'rebase', rebasedFrom: sourceRoundId },
+        };
+        await this.writeRound(newRoundId, newRound);
+        if (commonHeadId) {
+            const children = manifest.children[commonHeadId] ?? (manifest.children[commonHeadId] = []);
+            if (!children.includes(newRoundId)) children.push(newRoundId);
+        }
+        const meta: BranchMeta = {
+            createdAt: Date.now(),
+            createdFrom: options.createdFrom,
+            forkedFromBranch: fromBranch,
+            sourceRoundId,
+            commonHeadId,
+            branchRootRoundId: newRoundId,
+        };
+        manifest.branches[branchName] = newRoundId;
+        manifest.branchMeta[branchName] = meta;
+        manifest.currentBranch = branchName;
+        manifest.currentHead = newRoundId;
+        await this.saveManifest(manifest);
+        this._cache.invalidateAll();
+        return { branchName, sourceRoundId, newRoundId, commonHeadId };
+    }
+
+    /** Replace assistant/tool output in an existing Round without changing its ID or parents. */
+    async setAssistantInRound(
+        roundId: RoundId,
+        update: { assistantMessages: ChatMessage[]; result?: RoundResult },
+    ): Promise<void> {
+        const round = await this.readRound(roundId);
+        if (!round) throw new Error(`Round not found: ${roundId}`);
+        const userPayload = round.payload.filter(m => m.role === 'user');
+        const updated: PersistedRound = {
+            ...round,
+            payload: [...userPayload, ...update.assistantMessages.map(m => ({ ...m }))],
+            result: update.result,
+        };
+        await this.writeRound(roundId, updated);
+        this._cache.invalidateAll();
+        const assistant = update.assistantMessages.find(m => m.role === 'assistant');
+        this.onEvent?.({ type: 'round:updated', roundId, changes: {
+            assistantContent: assistant && typeof assistant.content === 'string' ? assistant.content : '',
+            thinking: assistant && typeof (assistant as any).thinking === 'string' ? (assistant as any).thinking : '',
+        }});
+    }
+
+    /** Enumerate siblings using the persisted Round DAG index. */
+    async getSiblingRoundIds(roundId: RoundId): Promise<RoundId[]> {
+        const round = await this.readRound(roundId);
+        if (!round) return [];
+        const manifest = await this.loadManifest();
+        const parentId = round.parents?.[0];
+        const ids = parentId ? (manifest.children[parentId] ?? []) : [roundId];
+        const rounds = await Promise.all(ids.map(id => this.readRound(id)));
+        return ids.map((id, index) => ({ id, round: rounds[index] }))
+            .filter(item => item.round && !item.round._deleted)
+            .sort((a, b) => {
+                const at = a.round!.meta?.createdAt ?? 0;
+                const bt = b.round!.meta?.createdAt ?? 0;
+                return at - bt || a.id.localeCompare(b.id);
+            })
+            .map(item => item.id);
+    }
+
+    async getSiblingRounds(roundId: RoundId): Promise<RoundProjection[]> {
+        const ids = await this.getSiblingRoundIds(roundId);
+        const rounds = await Promise.all(ids.map(id => this.readRound(id)));
+        return rounds.filter((round): round is PersistedRound => !!round && !round._deleted)
+            .map(round => roundToProjection(round, round.id));
+    }
+
     /** Soft-delete a Round — fold() skips it. */
     async markStale(roundId: RoundId): Promise<void> {
         const round = await this.readRound(roundId);
@@ -341,13 +449,17 @@ export class RoundLog implements ILog {
     async loadManifest(): Promise<RoundManifest> {
         const raw = await this.engine.getManifest(this.nodeId) as unknown as Record<string, unknown>;
         if (raw?.children && raw?.rootRoundId) {
-            return raw as unknown as RoundManifest;
+            return {
+                ...(raw as unknown as RoundManifest),
+                branchMeta: (raw as any).branchMeta ?? {},
+            };
         }
         // Bootstrap: first access on a new round-format session
         const rootId = ulid();
         return {
             rootRoundId: rootId,
             branches: { main: rootId },
+            branchMeta: {},
             currentBranch: 'main',
             currentHead: rootId,
             children: {},
@@ -368,6 +480,17 @@ export class RoundLog implements ILog {
         };
         await this.engine.driver.writeContent(this.nodeId, JSON.stringify(merged, null, 2));
     }
+}
+
+/** Shared assistant validity predicate for operations, persistence and tests. */
+export function hasEffectiveAssistant(round: PersistedRound): boolean {
+    return round.payload.some(message => {
+        if (message.role !== 'assistant') return false;
+        const content = message.content as unknown;
+        return typeof content === 'string'
+            ? content.trim().length > 0
+            : content != null && String(content).trim().length > 0;
+    });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────

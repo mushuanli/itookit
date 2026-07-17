@@ -11,7 +11,12 @@ function findSession(sessions: SessionGroup[], nodeId: string): SessionGroup | u
     return sessions.find(s => s.id === nodeId)
         || sessions.find(s =>
             s.executionRoot?.id === nodeId || findInTree(s.executionRoot, nodeId)
-        );
+        )
+        // After deleting an assistant, its UI bubble may still be in the
+        // remove animation while the Round projection already contains only
+        // the user. The persisted Round ID is shared by both projections, so
+        // recover the user as the resend target.
+        || sessions.find(s => s.role === 'user' && s.persistedNodeId === nodeId);
 }
 
 function findInTree(node: any, targetId: string): boolean {
@@ -30,23 +35,33 @@ function findInTree(node: any, targetId: string): boolean {
  */
 export class RegenerateCommand extends Command<{ nodeId: string }> {
     protected readonly name = 'Regenerate';
+    private running = false;
 
     protected async execute({ nodeId }: { nodeId: string }): Promise<void> {
-        const sessions = await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions');
-        const session = findSession(sessions, nodeId);
-        if (!session) throw new Error('Message not found');
+        // A single physical click must submit at most one regenerate task,
+        // even if a stale UI delegate dispatches the action twice.
+        if (this.running) return;
+        this.running = true;
+        try {
+            const sessions = await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions');
+            const session = findSession(sessions, nodeId);
+            // A disappearing animated DOM node is not an engine failure.
+            if (!session) return;
 
-        const check = await this.ctx.commands.execute<{ allowed: boolean; reason?: string }>(
-            'session.can-regenerate', { messageId: session.id }
-        );
-        if (!check.allowed) throw new Error(check.reason || 'Cannot regenerate');
+            const check = await this.ctx.commands.execute<{ allowed: boolean; reason?: string }>(
+                'session.can-regenerate', { messageId: session.id }
+            );
+            if (!check.allowed) throw new Error(check.reason || 'Cannot regenerate');
 
-        this.ctx.chatInput.setLoading(true);
+            this.ctx.chatInput.setLoading(true);
 
-        if (session.role === 'user') {
-            await this.ctx.commands.execute('session.regenerate-from-user', { userMessageId: session.id });
-        } else {
-            await this.ctx.commands.execute('session.regenerate', { assistantId: session.id });
+            if (session.role === 'user') {
+                await this.ctx.commands.execute('session.regenerate-from-user', { userMessageId: session.id });
+            } else {
+                await this.ctx.commands.execute('session.regenerate', { assistantId: session.id });
+            }
+        } finally {
+            this.running = false;
         }
     }
 }
