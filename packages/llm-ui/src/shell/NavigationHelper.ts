@@ -3,7 +3,7 @@
 // Handles: viewport-aware session finding, scroll-to navigation, and the floating nav panel.
 
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
-import type { INavigationPresenter, NavPanelData } from '../domain/ports/INavigationPresenter';
+import type { INavigationPresenter, NavPanelData, NavigatorWorkspaceState } from '../domain/ports/INavigationPresenter';
 import type { IEditorEventBus } from '../domain/events';
 import type { ICommandBus } from '@itookit/common';
 import type { SessionGroup } from '@itookit/llm-engine';
@@ -22,6 +22,8 @@ export interface NavigationDeps {
     branchStore: IBranchStore;
     navDataBuilder: NavDataBuilder;
     timers: TimerManager;
+    getWorkspaceState: () => NavigatorWorkspaceState;
+    onToggleDag: () => void;
 }
 
 export class NavigationHelper {
@@ -150,15 +152,32 @@ export class NavigationHelper {
     async toggleNavigator(container: HTMLElement): Promise<void> {
         if (!this.floatingNav) {
             this.floatingNav = new FloatingNavPanel(
-                container, this.deps.bus as any
+                container,
+                this.deps.bus as any,
+                {
+                    onToggleDag: this.deps.onToggleDag,
+                    onSetContext: async (roundIds, mode) => {
+                        await this.deps.commands.execute('session.context.set', {
+                            roundIds,
+                            mode,
+                            scope: 'subtree',
+                        });
+                    },
+                },
             );
         }
+
+        this.syncWorkspaceControls();
 
         if (!this.floatingNav.isVisible) {
             await this.pushNavDataImmediate();
         }
 
         this.floatingNav.toggle();
+    }
+
+    syncWorkspaceControls(): void {
+        this.floatingNav?.setWorkspaceState(this.deps.getWorkspaceState());
     }
 
     destroy(): void {

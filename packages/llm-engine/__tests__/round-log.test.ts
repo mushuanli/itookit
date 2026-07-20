@@ -29,7 +29,8 @@ class InMemoryChatEngine implements Partial<IChatEngine> {
     // ── Manifest ────────────────────────────────────────────────────────
 
     async getManifest(_nodeId: string): Promise<unknown> {
-        return { ...this.manifest };
+        const persisted = this.files.get(_nodeId);
+        return persisted ? JSON.parse(persisted) : { ...this.manifest };
     }
 
     setManifest(m: Record<string, unknown>): void {
@@ -201,7 +202,7 @@ describe('RoundLog', () => {
             expect(messages[2]).toEqual({ role: 'user', content: 'Q2' });
         });
 
-        it('should trim trailing assistant from fold (Anthropic requirement)', async () => {
+        it('should NOT trim trailing assistant from fold (provider validation is Phase 2)', async () => {
             const t1 = makeRound({ payload: [{ role: 'user', content: 'Q1' }] });
             const t1Id = await log.append('main', t1);
             const t2 = makeRound({
@@ -210,9 +211,12 @@ describe('RoundLog', () => {
             });
             await log.append('main', t2);
 
+            // Phase 0: trailing assistant is NOT removed by fold().
+            // Provider-specific validation will move to ProviderMessageAdapter in Phase 2.
             const messages = await log.fold('main');
-            expect(messages).toHaveLength(1);
+            expect(messages).toHaveLength(2);
             expect(messages[0]).toEqual({ role: 'user', content: 'Q1' });
+            expect(messages[1]).toEqual({ role: 'assistant', content: 'A1' });
         });
 
         it('should skip empty assistant messages in fold', async () => {
@@ -249,10 +253,14 @@ describe('RoundLog', () => {
             // Delete user round T3 — T4 should cascade in SessionState projection
             await log.deleteRound(t3Id);
 
-            // fold() skips _deleted rounds (T3) and trims trailing assistant (A1 → T2)
+            // fold() skips _deleted rounds (T3).
+            // Phase 0: trailing assistant is no longer trimmed — provider
+            // validation will move to ProviderMessageAdapter in Phase 2.
             const messages = await log.fold('main');
-            expect(messages).toHaveLength(1); // Q1 only (A1 trimmed as trailing assistant)
+            expect(messages).toHaveLength(3); // Q1, A1, A2 (T3 deleted, no trim)
             expect(messages[0]).toEqual({ role: 'user', content: 'Q1' });
+            expect(messages[1]).toEqual({ role: 'assistant', content: 'A1' });
+            expect(messages[2]).toEqual({ role: 'assistant', content: 'A2' });
 
             // Verify SessionState cascade
             const state = new SessionState(nodeId, sessionId);
@@ -357,6 +365,36 @@ describe('RoundLog', () => {
             expect(siblings).toContain(t2aId);
             expect(siblings).toContain(t2bId);
         });
+    });
+
+    it('keeps content containment separate from lineage children', async () => {
+        const root = makeRound({ id: 'interaction', parents: [], kind: 'interaction', payload: [{ role: 'user', content: 'top' }] });
+        await log.append('main', root);
+        const child = makeRound({ id: 'agent-child', parents: ['interaction'], containerRoundId: 'interaction', kind: 'agent', payload: [{ role: 'assistant', content: 'child' }] });
+        await log.append('main', child);
+        const manifest = await log.loadManifest();
+        expect(manifest.children.interaction).toContain('agent-child');
+        expect(manifest.containmentChildren?.interaction).toContain('agent-child');
+        expect((await log.listContainmentChildren('interaction'))).toEqual(['agent-child']);
+    });
+
+    it('applies branch context profile rules to fold()', async () => {
+        await log.append('main', makeRound({
+            id: 'context-r1', parents: [],
+            payload: [{ role: 'user', content: 'exclude me' }, { role: 'assistant', content: 'old answer' }],
+        }));
+        await log.append('main', makeRound({
+            id: 'context-r2', parents: ['context-r1'],
+            payload: [{ role: 'user', content: 'keep me' }, { role: 'assistant', content: 'new answer' }],
+        }));
+
+        await log.setRoundContextRules('main', ['context-r1'], 'exclude');
+        expect((await log.fold('main')).map(message => message.content)).toEqual(['keep me', 'new answer']);
+
+        await log.setRoundContextRules('main', ['context-r1'], 'include');
+        expect((await log.fold('main')).map(message => message.content)).toEqual([
+            'exclude me', 'old answer', 'keep me', 'new answer',
+        ]);
     });
 
     // ── Soft-delete filtering in fold ─────────────────────────────────────

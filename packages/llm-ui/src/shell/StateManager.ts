@@ -14,6 +14,7 @@ import { ErrorHandler } from '../utils/errorHandler';
  */
 export class StateManager {
     private collapseStatesCache: CollapseStateMap = {};
+    private historyVisibilityCache: 'visible' | 'hidden' = 'visible';
     private debouncedUIStateSave: DebouncedFn;
     private debouncedInputStateSave: DebouncedFn;
     private chatInputGetter: (() => IChatInputPresenter | undefined) | null = null;
@@ -59,6 +60,13 @@ export class StateManager {
         this.collapseStatesCache = states;
     }
 
+    getHistoryVisibility(): 'visible' | 'hidden' { return this.historyVisibilityCache; }
+
+    setHistoryVisibility(visibility: 'visible' | 'hidden'): void {
+        this.historyVisibilityCache = visibility;
+        this.debouncedUIStateSave();
+    }
+
     scheduleUIStateSave(states: CollapseStateMap): void {
         this.collapseStatesCache = states;
         this.debouncedUIStateSave();
@@ -81,6 +89,7 @@ export class StateManager {
             collapse_states: this.collapseStatesCache,
             input_text: inputConfig?.text,
             input_agent_id: inputConfig?.agentId,
+            history_visibility: this.historyVisibilityCache,
         };
 
         await this.errorHandler.wrap(
@@ -98,6 +107,7 @@ export class StateManager {
         if (result?.collapse_states) {
             this.collapseStatesCache = result.collapse_states;
         }
+        this.historyVisibilityCache = result?.history_visibility ?? 'visible';
         return result;
     }
 

@@ -8,7 +8,7 @@
 
 import type {
     ILoopMiddleware,
-    RoundContext,
+    ExchangeContext,
     RoundResult,
     ControlDirective,
     RecoveryAction,
@@ -16,10 +16,10 @@ import type {
 } from '@itookit/common';
 
 export interface MiddlewarePipeline {
-    applyBeforeRound(ctx: RoundContext): Promise<ControlDirective | void>;
-    applyOnToolCalls(ctx: RoundContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void>;
-    applyAfterRound(ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void>;
-    applyOnError(ctx: RoundContext, error: Error): Promise<RecoveryAction | void>;
+    applyBeforeExchange(ctx: ExchangeContext): Promise<ControlDirective | void>;
+    applyOnToolCalls(ctx: ExchangeContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void>;
+    applyAfterExchange(ctx: ExchangeContext, result: RoundResult): Promise<ControlDirective | void>;
+    applyOnError(ctx: ExchangeContext, error: Error): Promise<RecoveryAction | void>;
 }
 
 export function composeMiddleware(middlewares: ILoopMiddleware[]): MiddlewarePipeline {
@@ -27,16 +27,16 @@ export function composeMiddleware(middlewares: ILoopMiddleware[]): MiddlewarePip
     const sorted = [...middlewares].sort((a, b) => a.name.localeCompare(b.name));
 
     return {
-        async applyBeforeRound(ctx: RoundContext): Promise<ControlDirective | void> {
+        async applyBeforeExchange(ctx: ExchangeContext): Promise<ControlDirective | void> {
             for (const mw of sorted) {
-                if (mw.beforeRound) {
-                    const directive = await mw.beforeRound(ctx);
+                if (mw.beforeExchange) {
+                    const directive = await mw.beforeExchange(ctx);
                     if (directive) return directive;
                 }
             }
         },
 
-        async applyOnToolCalls(ctx: RoundContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void> {
+        async applyOnToolCalls(ctx: ExchangeContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void> {
             for (const mw of sorted) {
                 if (mw.onToolCalls) {
                     const directive = await mw.onToolCalls(ctx, toolCalls);
@@ -45,18 +45,18 @@ export function composeMiddleware(middlewares: ILoopMiddleware[]): MiddlewarePip
             }
         },
 
-        async applyAfterRound(ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
-            // Reverse order for afterRound (stack unwinding)
+        async applyAfterExchange(ctx: ExchangeContext, result: RoundResult): Promise<ControlDirective | void> {
+            // Reverse order for afterExchange (stack unwinding)
             for (let i = sorted.length - 1; i >= 0; i--) {
                 const mw = sorted[i];
-                if (mw.afterRound) {
-                    const directive = await mw.afterRound(ctx, result);
+                if (mw.afterExchange) {
+                    const directive = await mw.afterExchange(ctx, result);
                     if (directive) return directive;
                 }
             }
         },
 
-        async applyOnError(ctx: RoundContext, error: Error): Promise<RecoveryAction | void> {
+        async applyOnError(ctx: ExchangeContext, error: Error): Promise<RecoveryAction | void> {
             for (const mw of sorted) {
                 if (mw.onError) {
                     const action = await mw.onError(ctx, error);

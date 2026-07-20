@@ -9,7 +9,7 @@
 
 import type {
     ILoopMiddleware,
-    RoundContext,
+    ExchangeContext,
     RoundResult,
     ControlDirective,
     RecoveryAction,
@@ -68,7 +68,7 @@ export function createHarnessBudgetMiddleware(
     return {
         name: '01-budget',
 
-        async beforeRound(_ctx: RoundContext): Promise<ControlDirective | void> {
+        async beforeExchange(_ctx: ExchangeContext): Promise<ControlDirective | void> {
             try {
                 state.controller.checkOrThrow(state.snapshot);
             } catch (err) {
@@ -112,7 +112,7 @@ export function createHarnessBudgetMiddleware(
             }
         },
 
-        async onError(_ctx: RoundContext, error: Error): Promise<RecoveryAction> {
+        async onError(_ctx: ExchangeContext, error: Error): Promise<RecoveryAction> {
             if (error instanceof BudgetExhaustedError) {
                 return { action: 'fail' };
             }
@@ -143,7 +143,7 @@ export function createHarnessErrorRecoveryMiddleware(
     return {
         name: '02-error-recovery',
 
-        async onError(_ctx: RoundContext, error: Error): Promise<RecoveryAction> {
+        async onError(_ctx: ExchangeContext, error: Error): Promise<RecoveryAction> {
             const msg = error.message ?? '';
             const statusCode = (error as unknown as Record<string, unknown>)['statusCode'] as number | undefined
                 ?? (error as unknown as Record<string, unknown>)['status'] as number | undefined;
@@ -198,7 +198,7 @@ export function createHarnessHITLMiddleware(
     return {
         name: '03-hitl',
 
-        async beforeRound(_ctx: RoundContext): Promise<ControlDirective | void> {
+        async beforeExchange(_ctx: ExchangeContext): Promise<ControlDirective | void> {
             // Flush pending user injections before the LLM call.
             if (session.pendingInjections.length > 0) {
                 const injections = session.pendingInjections.splice(0);
@@ -211,7 +211,7 @@ export function createHarnessHITLMiddleware(
             }
         },
 
-        async onToolCalls(ctx: RoundContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void> {
+        async onToolCalls(ctx: ExchangeContext, toolCalls: PlannedTool[]): Promise<ControlDirective | void> {
             // Plan confirmation on first round with tool calls.
             if (!enablePlanConfirm || ctx.roundNumber !== 1 || toolCalls.length === 0) return;
 
@@ -241,7 +241,7 @@ export function createHarnessBackPressureMiddleware(
     return {
         name: '04-back-pressure',
 
-        async afterRound(_ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
+        async afterExchange(_ctx: ExchangeContext, result: RoundResult): Promise<ControlDirective | void> {
             const toolNames = extractToolNames(result);
 
             if (toolNames.length > 0) {
@@ -294,7 +294,7 @@ export function createHarnessCompressionMiddleware(
     return {
         name: '05-compression',
 
-        async beforeRound(_ctx: RoundContext): Promise<ControlDirective | void> {
+        async beforeExchange(_ctx: ExchangeContext): Promise<ControlDirective | void> {
             const usageRatio = contextManager.getContextUsageRatio(sessionId);
             if (usageRatio >= compressionThreshold) {
                 const info = await contextManager.maybeCompress(sessionId, usageRatio);
@@ -325,7 +325,7 @@ export function createHarnessSkillsMiddleware(
     return {
         name: '06-skills',
 
-        async beforeRound(_ctx: RoundContext): Promise<ControlDirective | void> {
+        async beforeExchange(_ctx: ExchangeContext): Promise<ControlDirective | void> {
             if (!skillsLoaded) {
                 skillsLoaded = true;
                 // Auto-detect and pre-load skills matching the task prompt
@@ -333,7 +333,7 @@ export function createHarnessSkillsMiddleware(
             }
         },
 
-        async afterRound(_ctx: RoundContext, _result: RoundResult): Promise<ControlDirective | void> {
+        async afterExchange(_ctx: ExchangeContext, _result: RoundResult): Promise<ControlDirective | void> {
             // Skill post-processing (markSkillLoaded) is handled by the loop body
             // after tool execution, since middleware doesn't have IToolService access.
         },

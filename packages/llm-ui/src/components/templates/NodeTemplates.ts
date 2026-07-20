@@ -102,7 +102,11 @@ export class NodeTemplates {
             : LayoutTemplates.chevronUp();
 
         return `
-        <div class="llm-ui-bubble llm-ui-bubble--user ${collapsedClass}">
+        <div class="llm-ui-bubble llm-ui-bubble--user ${collapsedClass}"
+             data-round-id="${escapeHTML(group.roundId ?? '')}"
+             data-round-role="user"
+             data-context-mode="${escapeHTML(group.historyPolicy ?? 'include')}"
+             data-context-source="default">>
             <div class="llm-ui-bubble__header">
                 <div class="llm-ui-avatar">👤</div>
                 

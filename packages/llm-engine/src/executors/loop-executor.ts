@@ -17,7 +17,7 @@ import type {
     ILoop,
     LoopContext,
     Round,
-    RoundContext,
+    ExchangeContext,
     RoundResult,
     AgentEvent,
     Signal,
@@ -28,6 +28,7 @@ import type {
     PlannedTool,
 } from '@itookit/common';
 import { composeMiddleware, type MiddlewarePipeline } from '../core/middleware-pipeline';
+import { ProviderMessageAdapter } from '../core/provider-message-adapter';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -138,14 +139,29 @@ export class LoopExecutor implements ILoop {
                 // base history + everything accumulated so far in this Round
                 let messages: import('@itookit/common').ChatMessage[] = [...baseMessages, ...currentPayload];
 
-                // ── Before-round middleware ──
-                const roundCtx: RoundContext = {
+                // ── Provider validation (Phase 2: moved from RoundLog.fold) ──
+                const adapter = new ProviderMessageAdapter();
+                try {
+                    messages = adapter.validate(messages, { provider: 'anthropic' });
+                } catch (err) {
+                    yield {
+                        type: 'error',
+                        error: {
+                            message: `Provider validation failed: ${err instanceof Error ? err.message : String(err)}`,
+                            code: 'PROVIDER_VALIDATION',
+                        },
+                    };
+                    break;
+                }
+
+                // ── Before-exchange middleware ──
+                const roundCtx: ExchangeContext = {
                     roundId: `round_${ctx.sessionId}_${exchangeNumber}`,
                     sessionId: ctx.sessionId,
                     roundNumber: exchangeNumber,
                 };
 
-                const beforeDirective = await this.pipeline.applyBeforeRound(roundCtx);
+                const beforeDirective = await this.pipeline.applyBeforeExchange(roundCtx);
                 if (beforeDirective) {
                     if (beforeDirective.action === 'abort') {
                         yield {
@@ -398,7 +414,7 @@ export class LoopExecutor implements ILoop {
                     }
                 }
 
-                // ── After-round middleware ──
+                // ── After-exchange middleware ──
                 const roundResult: RoundResult = {
                     assistantBlocks: assistantBlocks.map(b => ({
                         type: b.type,
@@ -410,10 +426,10 @@ export class LoopExecutor implements ILoop {
                     finishReason,
                 };
 
-                const afterDirective = await this.pipeline.applyAfterRound(roundCtx, roundResult);
+                const afterDirective = await this.pipeline.applyAfterExchange(roundCtx, roundResult);
                 if (afterDirective) {
                     if (afterDirective.action === 'abort') {
-                        yield { type: 'error', error: { message: afterDirective.reason, code: 'AFTERROUND_ABORT' } };
+                        yield { type: 'error', error: { message: afterDirective.reason, code: 'AFTER_EXCHANGE_ABORT' } };
                         break;
                     }
                     if (afterDirective.action === 'inject') {

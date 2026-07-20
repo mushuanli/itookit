@@ -4,7 +4,7 @@
 //
 // S5: Uses DependencyScheduler + reconcile() via executeWithReconcile().
 
-import type { IVFSManager, ILLMService, ILoop, LoopContext, GoalNode, ILog, Ref, RefStore, DraftArea, AssemblyStrategy, Round, ChatMessage, AgentEvent, Signal, IToolService } from '@itookit/common';
+import type { IVFSManager, ILLMService, ILoop, LoopContext, AgentRunSpec, ILog, Ref, RefStore, DraftArea, AssemblyStrategy, Round, ChatMessage, AgentEvent, Signal, IToolService } from '@itookit/common';
 import { SessionMetaStore } from './session-meta-store';
 import type { GraphExecutionOptions, GraphEvent, SessionExecutionResult } from './types';
 import { createGraphGoal, resolveDependencyTree } from './graph-goal-factory';
@@ -76,7 +76,7 @@ export class GraphOrchestrator {
         const llmService = opts.llm;
         const connId = llmService ? ((await llmService.getDefaultConnection())?.id ?? 'default') : 'default';
 
-        const loopFactory = (_node: GoalNode): ILoop => {
+        const loopFactory = (_spec: AgentRunSpec): ILoop => {
             return createAgentRuntimeLoopAdapter(runtime);
         };
 

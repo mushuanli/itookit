@@ -37,6 +37,7 @@ export const ChatInputTemplates = {
 
                 <div class="llm-input__settings-body">
                     ${this.renderConnectionRow()}
+                    ${this.renderFlowInvocationRow()}
                     ${this.renderTierRow()}
                     ${this.renderContextSetting()}
                     ${this.renderThinkingSetting()}
@@ -62,6 +63,25 @@ export const ChatInputTemplates = {
                 <select class="llm-input__connection-select" title="Override LLM connection for this session">
                     <option value="">Agent Default</option>
                 </select>
+            </div>
+        `;
+    },
+
+    renderFlowInvocationRow(): string {
+        return `
+            <div class="llm-input__setting-row llm-input__flow-row">
+                <label class="llm-input__setting-label"><span class="llm-input__setting-icon">◇</span> Flow / branch</label>
+                <div class="llm-input__flow-controls">
+                    <input class="llm-input__flow-id" type="text" placeholder="Flow ID (optional)" aria-label="Flow ID" />
+                    <select class="llm-input__branch-mode" aria-label="Branch mode">
+                        <option value="continue">Continue branch</option>
+                        <option value="fork">Start new branch</option>
+                    </select>
+                    <select class="llm-input__retention-mode" aria-label="History retention">
+                        <option value="persistent">Keep in history</option>
+                        <option value="temporary">Temporary (exclude subtree)</option>
+                    </select>
+                </div>
             </div>
         `;
     },
@@ -726,4 +746,3 @@ export const ChatInputTemplates = {
         </svg>`;
     },
 };
-

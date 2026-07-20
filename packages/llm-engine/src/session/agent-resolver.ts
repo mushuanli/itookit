@@ -31,47 +31,25 @@ export interface ModelInfo {
 export class AgentResolver {
     constructor(private agentService: IAgentConfigService) {}
 
+    /**
+     * Resolve agent for chat — falls back to Default Agent if not found.
+     * This is the standard chat path where users may not have configured an agent.
+     */
     async resolve(agentId: string): Promise<ExecutorConfig> {
+        return this.resolveForChat(agentId);
+    }
+
+    /**
+     * Resolve agent for chat — uses Default Agent fallback on missing agent.
+     */
+    async resolveForChat(agentId: string): Promise<ExecutorConfig> {
         let config: ExecutorConfig | null = null;
 
         try {
             const agentDef = await this.agentService.getAgentConfig(agentId);
 
             if (agentDef) {
-                const connMeta = await this.agentService.getConnection(agentDef.config.connectionId);
-
-                if (!connMeta) {
-                    log.error('Connection not found for agent', {
-                        agentId, agentName: agentDef.name, connectionId: agentDef.config.connectionId,
-                    });
-                    throw new EngineError(
-                        EngineErrorCode.EXECUTOR_NOT_FOUND,
-                        `Connection '${agentDef.config.connectionId}' for agent '${agentDef.name}' not found.`
-                    );
-                }
-
-                // Priority: explicit modelName pin > tier lookup > resolved optimal (conn.model)
-                const modelId = agentDef.config.modelName
-                    || resolveModelForTier(connMeta, agentDef.config.modelTier ?? 'optimal')
-                    || '';
-
-                const currentTier = agentDef.config.modelTier ?? 'optimal';
-                const { enableThinking, reasoningEffort } =
-                    this.resolveThinkingConfig(connMeta, currentTier, modelId);
-
-                config = {
-                    id: agentDef.id,
-                    name: agentDef.name,
-                    type: 'agent', // AgentDefinition.type is a UI category; chat always runs via agent executor
-                    connectionId: agentDef.config.connectionId,
-                    model: modelId,
-                    enableThinking,
-                    reasoningEffort,
-                    systemPrompt: agentDef.config.systemPrompt,
-                    icon: agentDef.icon,
-                    temperature: agentDef.config.temperature,
-                };
-
+                config = await this.buildConfig(agentDef);
             }
         } catch (e) {
             if (e instanceof EngineError) throw e;
@@ -84,6 +62,73 @@ export class AgentResolver {
         }
 
         return config;
+    }
+
+    /**
+     * Resolve agent exactly — no fallback.
+     * Throws if agent or version is not found. Used by Harness where
+     * silent fallback would mask configuration errors.
+     */
+    async resolveExact(agentId: string, version?: string): Promise<ExecutorConfig> {
+        const agentDef = await this.agentService.getAgentConfig(agentId);
+
+        if (!agentDef) {
+            throw new EngineError(
+                EngineErrorCode.EXECUTOR_NOT_FOUND,
+                `Agent not found: ${agentId}. Harness requires exact agent resolution.`,
+            );
+        }
+
+        if (version && agentDef.version && agentDef.version !== version) {
+            throw new EngineError(
+                EngineErrorCode.EXECUTOR_NOT_FOUND,
+                `Agent version mismatch: requested ${version}, found ${agentDef.version}`,
+            );
+        }
+
+        return this.buildConfig(agentDef);
+    }
+
+    /** Build ExecutorConfig from an AgentDefinition. */
+    private async buildConfig(agentDef: import('@itookit/common').AgentDefinition): Promise<ExecutorConfig> {
+        const connId = agentDef.modelPolicy?.connectionId ?? agentDef.config.connectionId;
+        console.log('[AgentResolver] buildConfig resolving agent', {
+            agentId: agentDef.id,
+            agentName: agentDef.name,
+            modelPolicyConnId: agentDef.modelPolicy?.connectionId,
+            configConnId: agentDef.config.connectionId,
+            resolvedConnId: connId,
+        });
+        const connMeta = await this.agentService.getConnection(connId);
+
+        if (!connMeta) {
+            throw new EngineError(
+                EngineErrorCode.EXECUTOR_NOT_FOUND,
+                `Connection '${connId}' for agent '${agentDef.name}' not found.`,
+            );
+        }
+
+        const tier = agentDef.modelPolicy?.modelTier ?? agentDef.config.modelTier ?? 'optimal';
+        const modelId = agentDef.modelPolicy?.modelName
+            ?? agentDef.config.modelName
+            ?? resolveModelForTier(connMeta, tier)
+            ?? '';
+
+        const { enableThinking, reasoningEffort } =
+            this.resolveThinkingConfig(connMeta, tier, modelId);
+
+        return {
+            id: agentDef.id,
+            name: agentDef.name,
+            type: 'agent',
+            connectionId: connId,
+            model: modelId,
+            enableThinking: agentDef.modelPolicy?.thinking ?? enableThinking,
+            reasoningEffort: agentDef.modelPolicy?.reasoningEffort ?? reasoningEffort,
+            systemPrompt: agentDef.systemPrompt ?? agentDef.config.systemPrompt,
+            icon: agentDef.icon,
+            temperature: agentDef.modelPolicy?.temperature ?? agentDef.config.temperature,
+        } as ExecutorConfig;
     }
 
     async getAvailableAgents(): Promise<AgentInfo[]> {
@@ -185,6 +230,15 @@ export class AgentResolver {
                 newConfig.enableThinking = enableThinking;
                 newConfig.reasoningEffort = reasoningEffort;
 
+                log.info('reResolveModel: model resolved for override connection', {
+                    connectionId: connId,
+                    model: newConfig.model,
+                    tier,
+                });
+            } else {
+                log.warn('reResolveModel: override connection not found, keeping original', {
+                    connectionId: connId,
+                });
             }
         } catch (e) {
             log.error('Failed to re-resolve model', { connectionId: connId, error: e });

@@ -50,17 +50,30 @@ export function createSessionPlugin(sessionManager: SessionManager): ILLMPlugin 
             });
 
             ctx.commands.register('session.send', async (args) => {
-                const { text, files, agentId, overrides, origin, historyPolicy } = args as {
+                const { text, files, agentId, overrides, origin, historyPolicy, sendIntent } = args as {
                     text: string;
                     files?: unknown[];
                     agentId?: string;
                     overrides?: unknown;
                     origin?: unknown;
                     historyPolicy?: unknown;
+                    sendIntent?: unknown;
                 };
-                return sm.sendMessage(text, files as any, agentId ?? '', overrides as any, origin as any, historyPolicy as any);
+                return sm.sendMessage(text, files as any, agentId ?? '', overrides as any, origin as any, historyPolicy as any, sendIntent as any);
             });
             ctx.commands.register('session.abort', async () => sm.abort());
+            ctx.commands.register('session.context.set', async (args) => {
+                const { roundIds, mode, scope } = args as {
+                    roundIds: string[];
+                    mode: 'include' | 'exclude';
+                    scope?: 'node' | 'subtree';
+                };
+                return sm.setContextMode(roundIds, mode, scope);
+            });
+            ctx.commands.register('session.context.get', async (args) => {
+                const { roundIds } = args as { roundIds: string[] };
+                return sm.getContextModes(roundIds);
+            });
 
             ctx.commands.register('session.regenerate', async (args) => {
                 const { assistantId, options } = args as { assistantId: string; options?: unknown };

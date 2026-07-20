@@ -23,6 +23,13 @@ export interface Round {
     id: RoundId;
     /** 1 parent = linear; 2+ parents = merge point; [] = root. */
     parents: RoundId[];
+    /** Content-tree containment; unlike parents, this is never a lineage edge. */
+    containerRoundId?: RoundId;
+    /** interaction/agent/group are content projections, not scheduler nodes. */
+    kind?: 'interaction' | 'agent' | 'group';
+    producedByRunId?: string;
+    producedByFlowRunId?: string;
+    exposure?: 'public' | 'internal' | 'artifact';
     /** One user/assistant message group. */
     payload: ChatMessage[];
     meta: RoundMeta;
@@ -44,6 +51,9 @@ export interface RoundMeta {
      * - 'summary': include a collapsed summary instead of full payload
      */
     historyPolicy?: 'include' | 'exclude' | 'summary';
+    /** New name for the default policy; branch profile overrides it. */
+    defaultContextMode?: 'include' | 'exclude';
+    defaultContextScope?: 'node' | 'subtree';
 }
 
 // ─── Log (minimal interface — full spec in llm-2/01-log.md) ──────────
@@ -149,15 +159,15 @@ export interface PlannedTool {
 
 export interface ILoopMiddleware {
     readonly name: string;
-    beforeRound?(ctx: RoundContext): Promise<void | ControlDirective>;
+    beforeExchange?(ctx: ExchangeContext): Promise<void | ControlDirective>;
     /** Called after LLM response parsing, before tool execution.
      *  Use for plan-confirm: return `{ action: 'pause' }` to await user approval. */
-    onToolCalls?(ctx: RoundContext, toolCalls: PlannedTool[]): Promise<void | ControlDirective>;
-    afterRound?(ctx: RoundContext, result: RoundResult): Promise<void | ControlDirective>;
-    onError?(ctx: RoundContext, error: Error): Promise<RecoveryAction>;
+    onToolCalls?(ctx: ExchangeContext, toolCalls: PlannedTool[]): Promise<void | ControlDirective>;
+    afterExchange?(ctx: ExchangeContext, result: RoundResult): Promise<void | ControlDirective>;
+    onError?(ctx: ExchangeContext, error: Error): Promise<RecoveryAction>;
 }
 
-export interface RoundContext {
+export interface ExchangeContext {
     roundId: RoundId;
     sessionId: string;
     roundNumber: number;

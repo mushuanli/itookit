@@ -2,7 +2,7 @@
 
 import { escapeHTML } from '@itookit/common';
 import { BranchItem } from '../../domain/types';
-import { ChatNavItem } from '../../domain/ports/INavigationPresenter';
+import { ChatNavItem, NavigatorWorkspaceState } from '../../domain/ports/INavigationPresenter';
 
 export const FloatingNavPanelTemplates = {
     /**
@@ -16,10 +16,24 @@ export const FloatingNavPanelTemplates = {
         selectedCount: number,
         _viewMode: 'list' | 'tree', // 保留参数兼容，但不再使用
         listContent: string,
-        branchDropdownHtml: string
+        branchDropdownHtml: string,
+        workspaceState: NavigatorWorkspaceState,
+        contextEnabled: boolean,
     ): string => `
         <div class="llm-nav-panel__header">
             <span class="llm-nav-panel__title">Chat Navigator</span>
+            <div class="llm-nav-panel__workspace-switches" role="group" aria-label="Workspace views">
+                <button class="llm-nav-panel__view-switch ${contextEnabled ? 'is-active' : ''}"
+                        data-action="toggle-context" aria-pressed="${contextEnabled}"
+                        title="Toggle selected rounds, or all visible rounds, in LLM history">
+                    <span aria-hidden="true">◉</span><span>LLM History</span>
+                </button>
+                <button class="llm-nav-panel__view-switch ${workspaceState.dagVisible ? 'is-active' : ''}"
+                        data-action="toggle-dag" aria-pressed="${workspaceState.dagVisible}"
+                        title="${workspaceState.dagVisible ? 'Close' : 'Open'} DAG Designer">
+                    <span aria-hidden="true">◇</span><span>DAG</span>
+                </button>
+            </div>
             <span class="llm-nav-panel__counter">${currentUserIdx + 1} / ${totalUsers}</span>
             <button class="llm-nav-panel__close" title="Close (Esc)">×</button>
         </div>
@@ -54,6 +68,8 @@ export const FloatingNavPanelTemplates = {
                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                     </svg>
                 </button>
+                <button class="llm-nav-panel__btn llm-nav-panel__btn--context-include" data-action="context-include" title="Include selected rounds in future LLM context">＋</button>
+                <button class="llm-nav-panel__btn llm-nav-panel__btn--context-exclude" data-action="context-exclude" title="Exclude selected rounds from future LLM context">−</button>
                 <button class="llm-nav-panel__btn llm-nav-panel__btn--danger" data-action="batch-delete" title="Delete Selected">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="3 6 5 6 21 6"></polyline>
@@ -228,6 +244,7 @@ export const FloatingNavPanelTemplates = {
         const foldIcon = item.isCollapsed ? '▶' : '▼';
         const activeClass = isActive ? 'llm-nav-item--active' : '';
         const collapsedClass = item.isCollapsed ? 'llm-nav-item--collapsed' : '';
+        const contextExcluded = item.contextMode === 'exclude';
 
         // Branch 信息
         const hasBranches = (item.siblingCount || 0) > 1;
@@ -265,7 +282,7 @@ export const FloatingNavPanelTemplates = {
         const branchActionsHtml = FloatingNavPanelTemplates.renderBranchActions(item);
 
         return `
-            <div class="llm-nav-item ${activeClass} ${collapsedClass} ${isSelected ? 'selected' : ''}" 
+            <div class="llm-nav-item ${activeClass} ${collapsedClass} ${contextExcluded ? 'llm-nav-item--context-excluded' : ''} ${isSelected ? 'selected' : ''}"
                  data-id="${item.id}" 
                  data-index="${idx}">
                 <div class="llm-nav-item__checkbox ${isSelected ? 'checked' : ''}" data-checkbox="true"></div>
@@ -276,6 +293,14 @@ export const FloatingNavPanelTemplates = {
                         <span class="llm-nav-item__title">${escapeHTML(title)}</span>
                         ${branchName}
                         ${branchBadge}
+                        ${contextExcluded ? '<span class="llm-nav-item__context-badge" title="Excluded from future LLM context">Context off</span>' : ''}
+                        <button class="llm-nav-item__context-toggle ${contextExcluded ? 'is-excluded' : 'is-included'}"
+                                data-action="toggle-round-context"
+                                aria-pressed="${!contextExcluded}"
+                                title="${contextExcluded ? 'Include this Round in future LLM context' : 'Exclude this Round from future LLM context'}">
+                            <span aria-hidden="true">${contextExcluded ? '○' : '●'}</span>
+                            <span class="llm-nav-item__context-toggle-label">Context</span>
+                        </button>
                         <span class="llm-nav-item__time">${timeStr}</span>
                     </div>
                     <div class="llm-nav-item__preview">${escapeHTML(item.preview)}</div>

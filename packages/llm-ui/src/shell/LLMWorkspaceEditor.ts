@@ -36,6 +36,7 @@ import { EditorEventBus } from './EditorEventBus';
 import { SessionEventHandler } from './SessionEventHandler';
 import { StateManager } from './StateManager';
 import { EventBinder } from './EventBinder';
+import { WorkspacePaneController } from './WorkspacePaneController';
 import { NavigationHelper } from './NavigationHelper';
 import {
     buildExecutorOptions, validateAgentId, buildConnectionOptions,
@@ -52,6 +53,7 @@ import { ErrorHandler } from '../utils/errorHandler';
 
 // Components — 仅在 init 中用于构造，之后通过接口引用
 import { HistoryView } from '../components/HistoryView';
+import { GoalGraphEditor } from '../components/GoalGraphEditor';
 import { ChatInput } from '../components/input/ChatInputView';
 import { BranchIndicatorView } from '../components/indicators/BranchIndicatorView';
 import { StatusIndicatorView } from '../components/indicators/StatusIndicatorView';
@@ -106,6 +108,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
     // === 委托的子模块 ===
     private navigation!: NavigationHelper;
+    private workspacePanes!: WorkspacePaneController;
+    private goalEditor!: GoalGraphEditor;
 
     // === Services ===
     private sessionManager: SessionManager;
@@ -259,6 +263,35 @@ export class LLMWorkspaceEditor implements IEditor {
     private async initComponents(): Promise<Awaited<ReturnType<SessionService['getSessionSettings']>> | undefined> {
         const historyEl = this.domCache.byId('llm-ui-history')!;
         const inputEl = this.domCache.byId('llm-ui-input')!;
+        const historyToggle = this.domCache.byId('llm-btn-history-visibility') as HTMLButtonElement;
+        const runGraphEl = this.domCache.byId('llm-ui-run-graph')!;
+        const inspectorEl = this.domCache.byId('llm-ui-inspector')!;
+        const dagToggle = this.domCache.byId('llm-btn-dag') as HTMLButtonElement;
+
+        this.workspacePanes = new WorkspacePaneController(
+            this.container,
+            historyEl,
+            historyToggle,
+            (visibility) => this.stateManager.setHistoryVisibility(visibility),
+            runGraphEl,
+            inspectorEl,
+            dagToggle,
+        );
+
+        this.goalEditor = new GoalGraphEditor(runGraphEl, inspectorEl, {
+            engine: this.engine,
+            nodeId: this.options.nodeId!,
+            agents: () => this.agentService.listAgents(),
+            onInspectorVisibilityChange: visible => this.workspacePanes.setInspectorVisible(visible),
+            onRun: async (_revision, goal) => {
+                if (this.commandBus.list().some(command => command.name === 'goal.run')) {
+                    await this.commandBus.execute('goal.run', { goal });
+                } else {
+                    Toast.info('Goal revision created. Runtime command "goal.run" is not registered yet.');
+                }
+            },
+        });
+        await this.goalEditor.init();
 
         const historyView = new HistoryView(historyEl, {
             onContentChange: (id: string, content: string, type: 'user' | 'node') =>
@@ -276,6 +309,11 @@ export class LLMWorkspaceEditor implements IEditor {
             onNavigateSettings: () => {
                 this.hostContext?.navigate?.({ target: 'settings', resourceId: 'connections' });
             },
+            onHistoryActivity: (kind, error) => {
+                const hidden = this.workspacePanes.getHistoryVisibility() === 'hidden';
+                this.workspacePanes.markUnread(kind);
+                if (hidden && kind === 'error' && error) Toast.error(error.message);
+            },
         });
         this.historyView = historyView;
 
@@ -288,6 +326,10 @@ export class LLMWorkspaceEditor implements IEditor {
             branchStore: this.branchStore,
             navDataBuilder: this.navDataBuilder,
             timers: this.timers,
+            getWorkspaceState: () => ({
+                dagVisible: this.workspacePanes.isGraphVisible(),
+            }),
+            onToggleDag: () => this.toggleDagDesigner(),
         });
 
         // BranchIndicator → IBranchPresenter
@@ -303,6 +345,10 @@ export class LLMWorkspaceEditor implements IEditor {
 
         const initialAgents = await buildExecutorOptions(this.agentService);
         const savedUIState = await this.stateManager.loadUIState();
+        this.workspacePanes.setHistoryVisibility(
+            savedUIState?.history_visibility ?? 'visible',
+            { persist: false },
+        );
         const savedAgentId = savedUIState?.input_agent_id || 'default';
         const validAgentId = validateAgentId(this.agentService, savedAgentId);
 
@@ -421,6 +467,8 @@ export class LLMWorkspaceEditor implements IEditor {
     private bindEvents(): void {
         this.eventBinder = new EventBinder(this.container, {
             onToggleSidebar: () => this.hostContext?.toggleSidebar(),
+            onToggleHistory: () => this.toggleHistoryView(),
+            onToggleDag: () => this.toggleDagDesigner(),
             onTitleChange: (title) => this.handleTitleChange(title),
             onOpenAssetManager: () => this.handleOpenAssetManager(),
             onToggleNavigator: () => this.navigation.toggleNavigator(this.container),
@@ -461,6 +509,16 @@ export class LLMWorkspaceEditor implements IEditor {
                 this.refreshAgents();
             }, 300);
         });
+    }
+
+    private toggleHistoryView(): void {
+        this.workspacePanes.toggleHistory();
+        this.navigation?.syncWorkspaceControls();
+    }
+
+    private toggleDagDesigner(): void {
+        this.workspacePanes.toggleGraph();
+        this.navigation?.syncWorkspaceControls();
     }
 
     // ================================================================
@@ -656,6 +714,7 @@ export class LLMWorkspaceEditor implements IEditor {
             (id) => validateAgentId(this.agentService, id)
         );
         await this.chatInput.refreshConnections();
+        this.goalEditor?.refreshAgents();
         if (changed) {
             this.bus.emit('state:inputChanged', {});
         }

@@ -5,6 +5,7 @@ import { Toast } from '@itookit/common';
 import { ErrorHandler } from '../utils/errorHandler';
 import type { ChatOverrides } from '../domain/types';
 import type { SessionGroup, SessionOrigin, HistoryPolicy } from '@itookit/llm-engine';
+import { createAgentSendIntent } from '@itookit/common';
 
 export interface SendMessageParams {
     text: string;
@@ -56,6 +57,18 @@ export class SendMessageCommand extends Command<SendMessageParams> {
                 overrides,
                 origin,
                 historyPolicy,
+                sendIntent: {
+                    ...createAgentSendIntent(agentId || 'default'),
+                    branch: {
+                        mode: overrides?.branchMode ?? 'continue',
+                        baseRoundId: overrides?.baseRoundId,
+                        newBranchName: overrides?.newBranchName,
+                    },
+                    retention: { mode: overrides?.retentionMode ?? 'persistent' },
+                    execution: overrides?.flowId
+                        ? { kind: 'flow', flowId: overrides.flowId, revision: overrides.flowRevision }
+                        : { kind: 'agent', agentId: agentId || 'default' },
+                },
             });
         } catch (error: any) {
             await this.rollbackFailedSend(sessionsBeforeSend);

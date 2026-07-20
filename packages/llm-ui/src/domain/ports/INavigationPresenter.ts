@@ -4,6 +4,7 @@ import type { BranchItem } from '../types';
 
 export interface ChatNavItem {
     id: string;
+    roundId: string;
     role: 'user' | 'assistant';
     preview: string;
     isCollapsed: boolean;
@@ -21,6 +22,7 @@ export interface ChatNavItem {
         headNodeId: string;
         isCurrent: boolean;
     }>;
+    contextMode?: 'include' | 'exclude' | 'summary';
 }
 
 export interface NavPanelData {
@@ -29,10 +31,14 @@ export interface NavPanelData {
     currentSessionId?: string;
 }
 
+export interface NavigatorWorkspaceState {
+    dagVisible: boolean;
+}
+
 export interface INavigationPresenter {
     readonly isVisible: boolean;
     toggle(): void;
     update(data: NavPanelData): void;
+    setWorkspaceState(state: NavigatorWorkspaceState): void;
     destroy(): void;
 }
-

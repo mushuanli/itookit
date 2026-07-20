@@ -116,6 +116,7 @@ export async function migrateToRoundFormat(
 
         const roundLog = new RoundLog(engine, nodeId, sessionId);
         const newManifest: RoundManifest = {
+            schemaVersion: 3,
             rootRoundId,
             branches: Object.fromEntries(branchHeadRoundIds),
             branchMeta: {},

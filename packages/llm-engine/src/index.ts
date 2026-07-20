@@ -107,7 +107,10 @@ export { AttachmentProcessor } from './session/attachment-processor';
 
 export { ChatEngine } from './persistence/chat-engine';
 export { RoundLog, roundToProjection, hasEffectiveAssistant } from './persistence/round-log';
+export { RoundGraphService, RoundGraphError } from './persistence/round-graph-service';
 export { VFSDraftArea } from './persistence/draft-area';
+export { GoalDraftService, GoalDraftConflictError } from './persistence/goal-draft-service';
+export type { RemovedGoalNode } from './persistence/goal-draft-service';
 export { migrateToRoundFormat } from './persistence/migration';
 export type { MigrationResult } from './persistence/migration';
 export type { RoundManifest, RoundProjection, PersistedRound, BranchMeta } from './persistence/round-types';

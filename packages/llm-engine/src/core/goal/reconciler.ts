@@ -1,12 +1,10 @@
 // reconcile — Goal control loop implementation.
 //
-// Repeatedly invokes Loop for ready nodes until all nodes are resolved.
-// Uses DependencyScheduler for event-driven (non-polling) dispatch.
-//
-// Mission / SessionGraph / AutoContinue / BackPressure are all
-// configurations of this single reconcile function.
+// Phase 4 (WP-07): Continuous capacity fill (not batch wait).
+// Each AgentRun gets independent context, trace, pause state, and middleware.
+// HITL is removed from Predicate Verdict — handled by loop-level await_signal.
 
-import type { ILoop, LoopContext, Goal, GoalNode, Predicate } from '@itookit/common';
+import type { ILoop, LoopContext, Goal, AgentRunSpec, Predicate } from '@itookit/common';
 import { DependencyScheduler } from './dependency-scheduler';
 import type { SchedulerSnapshot } from './dependency-scheduler';
 import { drive } from '../loop-driver';
@@ -25,7 +23,7 @@ export interface ReconcileOptions {
 
 export async function reconcile(
     goal: Goal,
-    loopFactory: (node: GoalNode) => ILoop,
+    loopFactory: (spec: AgentRunSpec) => ILoop,
     predicate: Predicate,
     actorFactory: (nodeId: string) => ISessionActor,
     baseCtx: Omit<LoopContext, 'ref'>,
@@ -33,69 +31,45 @@ export async function reconcile(
 ): Promise<SchedulerSnapshot> {
     const { maxConcurrent = 8 } = options;
     const scheduler = new DependencyScheduler(goal.nodes, goal.edges ?? []);
+    const specMap = new Map(goal.nodes.map(n => [n.id, n]));
 
-    // Track running count for concurrency limit
-    let running = 0;
-    const pendingResolves: Array<() => void> = [];
+    // Continuous capacity fill — launch new work as soon as a slot opens.
+    // Each AgentRun gets an independent loop, context, trace, and pause state.
+    const running = new Map<string, Promise<void>>();
 
-    const bumpConcurrency = () => {
-        running--;
-        const resolve = pendingResolves.shift();
-        if (resolve) resolve();
-    };
-
-    const waitForSlot = async () => {
-        if (running < maxConcurrent) {
-            running++;
-            return;
-        }
-        return new Promise<void>(resolve => {
-            pendingResolves.push(() => {
-                running++;
-                resolve();
-            });
-        });
+    const runNext = async (id: string): Promise<void> => {
+        scheduler.setStatus(id, 'running');
+        const spec = specMap.get(id)!;
+        await runOneNode(spec, scheduler, loopFactory, predicate, actorFactory, baseCtx);
     };
 
     while (!scheduler.finished()) {
-        const ready = scheduler.readySet();
-
-        if (ready.length === 0) {
-            // No ready nodes: wait for in-flight work to complete
-            await scheduler.onChange();
-            continue;
+        // Fill available capacity
+        const readyIds = scheduler.readyIds();
+        for (const id of readyIds) {
+            if (running.size >= maxConcurrent) break;
+            if (running.has(id)) continue;
+            scheduler.setStatus(id, 'ready');
+            const promise = runNext(id).finally(() => {
+                running.delete(id);
+            });
+            running.set(id, promise);
         }
 
-        // Separate parallel vs serial
-        const parallelNodes = ready.filter(n => {
-            const node = goal.nodes.find(gn => gn.id === n.id);
-            return node?.canParallel !== false;
-        });
-        const serialNodes = ready.filter(n => {
-            const node = goal.nodes.find(gn => gn.id === n.id);
-            return node?.canParallel === false;
-        });
-
-        // Dispatch parallel nodes
-        const parallelPromises = parallelNodes.map(async (readyNode) => {
-            await waitForSlot();
-            const fullNode = goal.nodes.find(gn => gn.id === readyNode.id)!;
-            await runOneNode(fullNode, scheduler, loopFactory, predicate, actorFactory, baseCtx);
-            bumpConcurrency();
-        });
-
-        // Dispatch serial nodes sequentially
-        for (const readyNode of serialNodes) {
-            await waitForSlot();
-            const fullNode = goal.nodes.find(gn => gn.id === readyNode.id)!;
-            await runOneNode(fullNode, scheduler, loopFactory, predicate, actorFactory, baseCtx);
-            bumpConcurrency();
+        if (running.size === 0) {
+            // No work in flight and nothing ready — deadlock or done
+            if (!scheduler.finished()) {
+                throw new Error('Scheduler deadlock: no running nodes but not finished');
+            }
+            break;
         }
 
-        // Wait for all parallel work to settle
-        if (parallelPromises.length > 0) {
-            await Promise.allSettled(parallelPromises);
-        }
+        // Wait for any running node to complete
+        await Promise.race(
+            [...running].map(([id, promise]) =>
+                promise.then(() => id).catch(() => id)
+            ),
+        );
 
         options.onProgress?.(scheduler.snapshot());
     }
@@ -106,25 +80,26 @@ export async function reconcile(
 // ─── runOneNode ──────────────────────────────────────────────────────
 
 async function runOneNode(
-    node: GoalNode,
+    spec: AgentRunSpec,
     scheduler: DependencyScheduler,
-    loopFactory: (node: GoalNode) => ILoop,
+    loopFactory: (spec: AgentRunSpec) => ILoop,
     predicate: Predicate,
     actorFactory: (nodeId: string) => ISessionActor,
     baseCtx: Omit<LoopContext, 'ref'>,
 ): Promise<void> {
-    scheduler.setStatus(node.id, 'running');
+    scheduler.setStatus(spec.id, 'running');
 
     let retries = 0;
-    const maxRetries = node.maxRetries ?? 2;
+    const maxRetries = spec.maxRetries ?? 2;
 
     while (retries <= maxRetries) {
-        const loop = loopFactory(node);
-        const actor = actorFactory(node.id);
+        const loop = loopFactory(spec);
+        const actor = actorFactory(spec.id);
+        // Each AgentRun gets an independent middleware copy (isolated context).
         const ctx: LoopContext = {
             ...baseCtx,
-            ref: `goal/${node.id}`,
-            middlewares: baseCtx.middlewares ?? [],
+            ref: `goal/${spec.id}`,
+            middlewares: [...(baseCtx.middlewares ?? [])],
         };
 
         try {
@@ -132,56 +107,49 @@ async function runOneNode(
             const rounds = await drive(gen, actor, ctx);
             const lastRound = rounds[rounds.length - 1];
 
-            // Read RoundResult from the last round's stored execution result.
-            // LoopExecutor populates round.result with assistantBlocks + toolResults.
             const verdict = await predicate(
                 lastRound?.result ?? {
                     assistantBlocks: [],
                     toolResults: [],
                     usage: lastRound?.meta?.usage,
                 },
-                node,
+                spec,
             );
 
             switch (verdict.status) {
                 case 'done':
-                    scheduler.complete(node.id);
+                    scheduler.complete(spec.id);
                     return;
                 case 'retry':
                     retries++;
                     if (retries > maxRetries) {
-                        scheduler.fail(node.id);
+                        scheduler.fail(spec.id);
                         return;
                     }
-                    scheduler.setStatus(node.id, 'retrying');
-                    // Inject feedback into next iteration
-                    if (verdict.feedback && baseCtx.log) {
+                    scheduler.setStatus(spec.id, 'retrying');
+                    // Phase 4: retry feedback is isolated per AgentRun (not shared middleware)
+                    if (verdict.feedback) {
                         ctx.middlewares.push({
                             name: 'retry-feedback',
-                            beforeRound: async (_roundCtx) => {
-                                // Inject feedback as a user message that will be folded into context
+                            beforeExchange: async (_roundCtx) => {
                                 return { action: 'inject', text: verdict.feedback };
                             },
                         });
                     }
                     break;
-                case 'hitl':
-                    scheduler.setStatus(node.id, 'awaiting_signal');
-                    // Loop already yielded await_signal — pause is handled by drive()
-                    return;
                 case 'failed':
-                    scheduler.fail(node.id);
+                    scheduler.fail(spec.id);
                     return;
             }
         } catch (err) {
             retries++;
             if (retries > maxRetries) {
-                scheduler.fail(node.id);
+                scheduler.fail(spec.id);
                 return;
             }
-            scheduler.setStatus(node.id, 'retrying');
+            scheduler.setStatus(spec.id, 'retrying');
         }
     }
 
-    scheduler.fail(node.id);
+    scheduler.fail(spec.id);
 }

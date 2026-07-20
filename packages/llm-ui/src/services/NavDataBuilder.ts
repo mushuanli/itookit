@@ -31,6 +31,17 @@ export class NavDataBuilder {
             items = this.buildFlat(sessions, collapseStates);
         }
 
+
+        try {
+            const roundIds = [...new Set(items.map(item => item.roundId).filter(Boolean))];
+            const modes = await this.commands.execute<Record<string, 'include' | 'exclude' | 'summary'>>(
+                'session.context.get', { roundIds },
+            );
+            items.forEach(item => { item.contextMode = modes[item.roundId] ?? 'include'; });
+        } catch {
+            items.forEach(item => { item.contextMode = item.contextMode ?? 'include'; });
+        }
+
         return { items, branches, currentSessionId };
     }
 
@@ -52,6 +63,7 @@ export class NavDataBuilder {
 
             return {
                 id: session.id,
+                roundId: session.roundId || persistedId,
                 role: session.role,
                 preview: getPreviewText(
                     session.content || session.executionRoot?.data.output || '', 30
@@ -76,6 +88,7 @@ export class NavDataBuilder {
     ): ChatNavItem[] {
         return sessions.map((session, index) => ({
             id: session.id,
+            roundId: session.roundId || session.persistedNodeId || session.id,
             role: session.role,
             preview: getPreviewText(
                 session.content || session.executionRoot?.data.output || '', 30

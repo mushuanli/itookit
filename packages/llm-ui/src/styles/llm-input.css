@@ -74,6 +74,25 @@
     gap: 6px;
 }
 
+.llm-input__flow-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+}
+
+.llm-input__flow-id,
+.llm-input__branch-mode,
+.llm-input__retention-mode {
+    min-height: 30px;
+    border: 1px solid var(--llm-border, #d0d7de);
+    border-radius: 6px;
+    background: var(--llm-bg, #fff);
+    color: inherit;
+    padding: 4px 8px;
+}
+
+.llm-input__retention-mode { grid-column: 1 / -1; }
+
 /* Inline variant: toggle + label + optional sub-control on a single row */
 .llm-input__setting-row--inline {
     flex-direction: row;

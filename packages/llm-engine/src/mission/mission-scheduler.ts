@@ -18,7 +18,7 @@ import type {
     ILLMService,
     ILoop,
     LoopContext,
-    GoalNode,
+    AgentRunSpec,
     ILog,
     Round,
     Ref,
@@ -87,10 +87,10 @@ export class MissionScheduler {
 
         const predicate = createLLMJudgePredicate(this.llmService, verifierConnId);
 
-        const loopFactory = (node: GoalNode): ILoop => {
+        const loopFactory = (spec: AgentRunSpec): ILoop => {
             return createSubAgentLoopAdapter({
                 router: this.router,
-                buildTask: (_prompt, _context) => this.buildTaskForNode(node, plan),
+                buildTask: (_prompt, _context) => this.buildTaskForNode(spec, plan),
             });
         };
 
@@ -117,18 +117,18 @@ export class MissionScheduler {
 
     // ── Task building (preserved from original) ────────────────
 
-    private buildTaskForNode(node: GoalNode, plan: MissionPlan): SubAgentTask {
-        const todo = plan.todos.find(t => t.id === node.id);
+    private buildTaskForNode(spec: AgentRunSpec, plan: MissionPlan): SubAgentTask {
+        const todo = plan.todos.find(t => t.id === spec.id);
         if (!todo) {
             return {
-                instruction: node.task.prompt,
+                instruction: spec.prompt,
                 maxRounds: 20,
                 allowedTools: [],
             };
         }
 
         // Build instruction with any feedback from context
-        const feedback = node.task.context?.feedback as string | undefined;
+        const feedback = todo.feedback;
         const instruction = feedback
             ? `${todo.description}\n\n---\nPrevious attempt feedback:\n${feedback}`
             : todo.description;

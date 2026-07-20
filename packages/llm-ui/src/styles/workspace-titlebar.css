@@ -52,6 +52,24 @@
     pointer-events: none;
 }
 
+.llm-workspace-titlebar__btn[aria-pressed="false"] {
+    color: var(--llm-text-muted);
+}
+
+.llm-workspace-titlebar__badge {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--llm-color-error);
+}
+
+#llm-btn-history-visibility {
+    position: relative;
+}
+
 .llm-workspace-titlebar__sep {
     width: 1px;
     height: 20px;

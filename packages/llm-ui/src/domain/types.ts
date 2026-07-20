@@ -47,6 +47,8 @@ export interface UIState {
     collapse_states: CollapseStateMap;
     input_text?: string;
     input_agent_id?: string;
+    /** Pure workspace preference; never changes the model context. */
+    history_visibility?: 'visible' | 'hidden';
 }
 
 // ============================================================
@@ -160,6 +162,12 @@ export interface ChatOverrides {
     thinkingEnabled?: boolean;
     /** 追加到 Agent system prompt（覆盖本次请求） */
     systemPromptAppend?: string;
+    flowId?: string;
+    flowRevision?: number;
+    branchMode?: 'continue' | 'fork';
+    baseRoundId?: string;
+    newBranchName?: string;
+    retentionMode?: 'persistent' | 'temporary';
 }
 
 // ── Token meter types ──────────────────────────────────────────────────────

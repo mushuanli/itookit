@@ -12,7 +12,7 @@
 //
 // Cycle detection: throws CycleError listing the cycle path.
 
-import type { Goal, GoalNode } from '@itookit/common';
+import type { Goal, AgentRunSpec, RunEdge } from '@itookit/common';
 import type { SessionType } from './types';
 import { SessionMetaStore } from './session-meta-store';
 import type { IVFSManager } from '@itookit/common';
@@ -162,7 +162,7 @@ export async function createGraphGoal(
     const order = await resolveDependencyTree(vfs, moduleName, sessionPath, opts?.maxDepth ?? 30);
 
     const nodeMap = new Map<string, { moduleName: string; path: string; type: SessionType }>();
-    const nodes: GoalNode[] = [];
+    const nodes: AgentRunSpec[] = [];
 
     for (const item of order) {
         const meta = await store.read(item.moduleName, item.path);
@@ -173,11 +173,10 @@ export async function createGraphGoal(
 
         nodes.push({
             id,
-            task: {
-                prompt: item.path,
-                mode: 'agent-runtime',
-                context: { moduleName: item.moduleName, path: item.path, type },
-            },
+            agent: { id: 'default', version: '1' },
+            prompt: item.path,
+            mode: 'agent-runtime',
+            inputs: [],
             predicate: type === 'advance' ? 'llm-judge' : 'truncation',
             canParallel: false,
             maxRetries: type === 'advance' ? (meta.maxRetries ?? 3) : 1,
@@ -185,7 +184,7 @@ export async function createGraphGoal(
     }
 
     // Build dependency edges from SessionMeta
-    const edges: Array<[string, string]> = [];
+    const edges: RunEdge[] = [];
     for (const item of order) {
         const meta = await store.read(item.moduleName, item.path);
         const toId = `${item.moduleName}:${item.path}`;
@@ -198,8 +197,8 @@ export async function createGraphGoal(
                 );
                 if (fromNode) {
                     const fromId = `${fromNode.moduleName}:${fromNode.path}`;
-                    if (!edges.some(([f, t]) => f === fromId && t === toId)) {
-                        edges.push([fromId, toId]);
+                    if (!edges.some(e => e.from === fromId && e.to === toId)) {
+                        edges.push({ from: fromId, to: toId, kind: 'control' });
                     }
                 }
             }

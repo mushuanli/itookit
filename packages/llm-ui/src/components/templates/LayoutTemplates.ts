@@ -60,6 +60,25 @@ export const LayoutTemplates = {
                     </svg>
                 </button>
 
+                <button class="llm-workspace-titlebar__btn" id="llm-btn-history-visibility"
+                        title="Hide history" aria-label="Hide history"
+                        aria-controls="llm-ui-history" aria-pressed="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    <span class="llm-workspace-titlebar__badge" hidden></span>
+                </button>
+
+                <button class="llm-workspace-titlebar__btn" id="llm-btn-dag"
+                        title="Open DAG designer" aria-label="Open DAG designer"
+                        aria-controls="llm-ui-run-graph" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="5" cy="6" r="2"></circle><circle cx="19" cy="6" r="2"></circle><circle cx="12" cy="18" r="2"></circle>
+                        <path d="M7 6h10M6.5 8l4.5 8M17.5 8L13 16"></path>
+                    </svg>
+                </button>
+
                 <button class="llm-workspace-titlebar__btn" id="llm-btn-collapse" title="Collapse/Expand All Messages">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="4 14 10 14 10 20"></polyline>
@@ -89,7 +108,11 @@ export const LayoutTemplates = {
             </div>
         </div>
 
-        <div class="llm-ui-workspace__history" id="llm-ui-history"></div>
+        <div class="llm-ui-workspace__workbench" id="llm-ui-workbench">
+            <section class="llm-ui-workspace__history" id="llm-ui-history" aria-label="Chat history"></section>
+            <section class="llm-ui-workspace__run-graph" id="llm-ui-run-graph" aria-label="Agent run graph" hidden></section>
+            <aside class="llm-ui-workspace__inspector" id="llm-ui-inspector" aria-label="Graph inspector" hidden></aside>
+        </div>
         <div class="llm-ui-workspace__input" id="llm-ui-input"></div>
     `,
 

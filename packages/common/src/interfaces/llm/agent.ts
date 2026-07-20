@@ -45,6 +45,8 @@ export interface PromptPreset {
 
 export interface AgentDefinition {
     id: string;
+    /** Version identifier. Phase 3: derived from SHA-256 of canonical JSON. */
+    version?: string;
     name: string;
     type: AgentType;
     icon?: string;
@@ -52,13 +54,44 @@ export interface AgentDefinition {
     config: AgentConfig;
     tags?: string[];
     interface?: AgentInterfaceDef;
-    /**
-     * 预设 Prompt 列表（有序）。
-     * 输入框提供下拉框，选中后将对应 prompt 填入输入区。
-     */
     defaultPrompts?: PromptPreset[];
     createdAt?: number;
     modifiedAt?: number;
+
+    // ── Phase 3: Structured capability declarations ──────────────────────
+
+    /** Model selection policy (elevated from config for versioning). */
+    modelPolicy?: {
+        connectionId: string;
+        modelName?: string;
+        modelTier?: ModelTier;
+        temperature?: number;
+        thinking?: boolean;
+        reasoningEffort?: string;
+    };
+
+    /** System prompt — elevated to top-level for snapshot audit. */
+    systemPrompt?: string;
+
+    /** Tool & MCP capability declarations. */
+    capabilityPolicy?: {
+        toolIds: string[];
+        mcpProfileIds: string[];
+    };
+
+    /** Memory configuration. */
+    memoryPolicy?: {
+        namespaceId: string;
+        readScopes: string[];
+        writeScopes: string[];
+        retrievalLimit?: number;
+    };
+
+    /** Default context assembly policy. */
+    defaultContextPolicy?: {
+        tokenBudget?: number;
+        automaticCompression?: boolean;
+    };
 }
 
 /** 仅用于默认 agent 初始化，不持久化 initPath/initialTags */

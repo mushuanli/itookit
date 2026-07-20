@@ -149,6 +149,8 @@ export interface ChatManifest {
     ui_state?: {
         collapse_states?: Record<string, boolean>;
         scroll_position?: number;
+        /** Pure workspace preference; does not affect model context/historyPolicy. */
+        history_visibility?: 'visible' | 'hidden';
     };
 }
 

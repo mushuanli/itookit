@@ -19,6 +19,7 @@ import {
     SessionOrigin,
     HistoryPolicy,
 } from '../core/types';
+import type { SendIntent } from '@itookit/common';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { IChatEngine, BranchTreeNode } from '../persistence/types';
@@ -207,11 +208,20 @@ export class SessionManager implements ISession {
     async sendMessage(
         text: string, files: ChatAttachment[], agentId: string,
         overrides?: ExecutionOverrides, origin?: SessionOrigin, historyPolicy?: HistoryPolicy,
+        sendIntent?: SendIntent,
     ): Promise<void> {
-        return this.roundOps.sendMessage(text, files, agentId, overrides, origin, historyPolicy);
+        return this.roundOps.sendMessage(text, files, agentId, overrides, origin, historyPolicy, sendIntent);
     }
 
     abort(): void { this.roundOps.abort(); }
+
+    async setContextMode(roundIds: string[], mode: 'include' | 'exclude', scope: 'node' | 'subtree' = 'subtree') {
+        return this.roundOps.setContextMode(roundIds, mode, scope);
+    }
+
+    async getContextModes(roundIds: string[]) {
+        return this.roundOps.getContextModes(roundIds);
+    }
 
     async regenerate(assistantId: string, options?: RegenerateOptions): Promise<RegenerateResult> {
         return this.roundOps.regenerate(assistantId, options);

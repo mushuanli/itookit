@@ -443,7 +443,7 @@ export class SessionState {
 
         if (p.userMessage) {
             groups.push({
-                id: `${p.roundId}-user`,
+                id: `round-${p.roundId}-user`,
                 persistedNodeId: p.userMessage.persistedNodeId,
                 role: 'user',
                 content: p.userMessage.content,
@@ -451,18 +451,20 @@ export class SessionState {
                 timestamp: p.meta?.createdAt ?? Date.now(),
                 origin: (p.meta?.origin as SessionOrigin) ?? 'user',
                 historyPolicy: (p.meta?.historyPolicy === 'exclude' ? 'exclude' : 'include') as HistoryPolicy,
+                roundId: p.roundId,
             });
         }
 
         if (p.assistantMessage) {
             groups.push({
-                id: p.assistantMessage.persistedNodeId,
+                id: `round-${p.roundId}-assistant`,
                 persistedNodeId: p.assistantMessage.persistedNodeId,
                 role: 'assistant',
                 content: p.assistantMessage.content,
                 timestamp: p.meta?.createdAt ?? Date.now(),
                 origin: (p.meta?.origin as SessionOrigin) ?? 'user',
                 historyPolicy: (p.meta?.historyPolicy === 'exclude' ? 'exclude' : 'include') as HistoryPolicy,
+                roundId: p.roundId,
                 executionRoot: {
                     id: p.assistantMessage.persistedNodeId,
                     name: 'Assistant',

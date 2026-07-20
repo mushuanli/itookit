@@ -1,6 +1,6 @@
 // @file: llm-engine/src/core/types.ts
 
-import type { ModelTier, ChatAttachment, IToolService } from '@itookit/common';
+import type { ModelTier, ChatAttachment, IToolService, SendIntent } from '@itookit/common';
 
 // ═══════════════════════════════════════════════════════════════
 // Core types (NodeStatus, ExecutorConfig, ExecutorType — consolidated in llm-engine)
@@ -131,6 +131,13 @@ export interface ExecutionOverrides {
      * Values: 'chat', 'loop', 'loop:full', 'mission', 'graph'
      */
     mode?: string;
+    /** Optional Flow/branch controls supplied by ChatInput. */
+    flowId?: string;
+    flowRevision?: number;
+    branchMode?: 'continue' | 'fork';
+    baseRoundId?: string;
+    newBranchName?: string;
+    retentionMode?: 'persistent' | 'temporary';
 }
 
 /**
@@ -247,6 +254,8 @@ export interface SessionGroup {
     origin?: SessionOrigin;
     /** LLM history 策略，默认 'include' */
     historyPolicy?: HistoryPolicy;
+    /** Round ID for data-round-id attribute (Phase 5). */
+    roundId?: string;
 }
 
 /**
@@ -353,6 +362,8 @@ export interface TaskInput {
     origin?: SessionOrigin;
     /** LLM history 策略，默认 'include' */
     historyPolicy?: HistoryPolicy;
+    /** Normalized user intent; kept separate from the legacy historyPolicy flag. */
+    sendIntent?: SendIntent;
     /** Explicit Round persistence target. */
     roundTarget?:
         | { mode: 'append-new'; parentRoundId?: string }

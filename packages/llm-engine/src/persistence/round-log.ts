@@ -21,12 +21,15 @@ import type {
     AssemblyStrategy,
     ChatMessage,
     RoundResult,
+    ContextRule,
 } from '@itookit/common';
 import type { IChatEngine } from './types';
-import type { RoundManifest, PersistedRound, RoundProjection, BranchMeta } from './round-types';
-import type { RoundLogEvent, RoundChangeSet } from './round-events';
+import type { RoundManifest, PersistedRound, RoundProjection } from './round-types';
+import type { RoundLogEvent } from './round-events';
 import { ulid } from './ulid';
 import { VFSDraftArea } from './draft-area';
+import { RoundGraphService } from './round-graph-service';
+import { ContextProfileStore } from './context-profile-store';
 
 // ─── Fold cache ───────────────────────────────────────────────────────────
 
@@ -68,22 +71,15 @@ class FoldCache {
 
 class RoundRefStore implements RefStore {
     constructor(
-        private readonly log: RoundLog,
+        private readonly graph: RoundGraphService,
     ) {}
 
     async create(name: string, at: RoundId): Promise<Ref> {
-        const manifest = await this.log.loadManifest();
-        if (manifest.branches[name]) throw new Error(`Branch already exists: ${name}`);
-        manifest.branches[name] = at;
-        await this.log.saveManifest(manifest);
-        return name;
+        return this.graph.createRef(name, at);
     }
 
     async move(ref: Ref, to: RoundId): Promise<void> {
-        const manifest = await this.log.loadManifest();
-        manifest.branches[ref] = to;
-        if (manifest.currentBranch === ref) manifest.currentHead = to;
-        await this.log.saveManifest(manifest);
+        return this.graph.moveRef(ref, to);
     }
 
     async tag(_name: string, _at: RoundId): Promise<void> {
@@ -92,19 +88,11 @@ class RoundRefStore implements RefStore {
     }
 
     async delete(ref: Ref): Promise<void> {
-        if (ref === 'main') return;
-        const manifest = await this.log.loadManifest();
-        delete manifest.branches[ref];
-        if (manifest.currentBranch === ref) {
-            manifest.currentBranch = 'main';
-            manifest.currentHead = manifest.branches['main'];
-        }
-        await this.log.saveManifest(manifest);
+        return this.graph.deleteRef(ref);
     }
 
     async list(): Promise<Ref[]> {
-        const manifest = await this.log.loadManifest();
-        return Object.keys(manifest.branches);
+        return this.graph.listRefs();
     }
 }
 
@@ -122,110 +110,79 @@ export class RoundLog implements ILog {
     private readonly _refs: RoundRefStore;
     private readonly _draft: VFSDraftArea;
     private readonly _cache = new FoldCache();
-
-    /** Optional listener for RoundLogEvent — drives SessionState.apply(). */
-    private onEvent?: (event: RoundLogEvent) => void;
+    private readonly graph: RoundGraphService;
+    private readonly profileStore: ContextProfileStore;
 
     /** Register a callback to receive RoundLogEvent after each mutation. */
     setEventListener(fn: (event: RoundLogEvent) => void): void {
-        this.onEvent = fn;
+        this.graph.setEventListener(fn);
     }
 
     constructor(
-        private readonly engine: IChatEngine,
-        private readonly nodeId: string,
+        engine: IChatEngine,
+        nodeId: string,
         _sessionId: string,
     ) {
-        this._refs = new RoundRefStore(this);
+        this.graph = new RoundGraphService(engine, nodeId);
+        this.profileStore = new ContextProfileStore(engine, nodeId);
+        this._refs = new RoundRefStore(this.graph);
         this._draft = new VFSDraftArea(engine, () => Promise.resolve(nodeId));
     }
 
     // ── ILog implementation ───────────────────────────────────────────────
 
     async append(ref: Ref, round: Round): Promise<RoundId> {
-        const roundId = round.id || ulid();
-        const persisted: PersistedRound = { ...round, id: roundId };
-
-        // Write round file first, then update manifest (§7: self-healing order)
-        await this.writeRound(roundId, persisted);
-
-        const manifest = await this.loadManifest();
-        manifest.branches[ref] = roundId;
-        if (manifest.currentBranch === ref) manifest.currentHead = roundId;
-
-        // Maintain children reverse-index (§3.1)
-        for (const parentId of round.parents ?? []) {
-            if (!manifest.children[parentId]) manifest.children[parentId] = [];
-            if (!manifest.children[parentId].includes(roundId)) {
-                manifest.children[parentId].push(roundId);
-            }
-        }
-
-        await this.saveManifest(manifest);
+        const roundId = await this.graph.append(ref, round);
         this._cache.invalidate(ref);
-
-        // Emit event for SessionState projection
-        if (this.onEvent) {
-            this.onEvent({
-                type: 'round:appended',
-                ref,
-                roundId,
-                projection: roundToProjection(persisted, roundId),
-            });
-        }
-
         return roundId;
     }
 
     async fold(ref: Ref, _strategy?: AssemblyStrategy): Promise<ChatMessage[]> {
         // Strategy: §3.4 — only 'concat' is implemented (YAGNI for now)
-        const cacheKey = ref;
+        const manifest = await this.loadManifest();
+        const headId = manifest.branches[ref];
+        if (!headId) return []; // empty branch — no phantom root
+        const profilePointer = manifest.branchMeta[ref]?.contextProfile;
+        const cacheKey = `${ref}@${headId}@${profilePointer?.id ?? 'default'}:${profilePointer?.revision ?? 0}`;
         const cached = this._cache.get(cacheKey);
         if (cached) return cached;
+        const profile = profilePointer
+            ? await this.profileStore.getProfile(profilePointer.id, profilePointer.revision)
+            : null;
 
-        try {
-            const manifest = await this.loadManifest();
-            const headId = manifest.branches[ref];
-            if (!headId) return [];
+        // Collect the parents[0] chain from head to root
+        const chain: RoundId[] = [];
+        let current: RoundId | undefined = headId ?? undefined;
+        const visited = new Set<RoundId>();
+        while (current && !visited.has(current)) {
+            visited.add(current);
+            chain.unshift(current);
+            const r = await this.readRound(current);
+            current = r?.parents?.[0];
+        }
 
-            // Collect the parents[0] chain from head to root
-            const chain: RoundId[] = [];
-            let current: RoundId | undefined = headId;
-            const visited = new Set<RoundId>();
-            while (current && !visited.has(current)) {
-                visited.add(current);
-                chain.unshift(current);
-                // Read the round to find its parent
-                const r = await this.readRound(current);
-                current = r?.parents?.[0];
-            }
+        // Parallel-read all rounds in chain (§3.4)
+        const rounds = await Promise.all(chain.map(id => this.readRound(id)));
 
-            // Parallel-read all rounds in chain (§3.4)
-            const rounds = await Promise.all(chain.map(id => this.readRound(id)));
-
-            const messages: ChatMessage[] = [];
-            for (const r of rounds) {
-                if (!r || r._deleted) continue; // §3.4: skip soft-deleted
-                if (r.meta?.historyPolicy === 'exclude') continue; // skip excluded rounds
-                for (const msg of r.payload) {
-                    if (msg.role === 'system' || msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool') {
-                        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-                        if (msg.role === 'assistant' && !content.trim() && !(msg as any).tool_calls) continue; // drop empty assistant
-                        messages.push({ ...msg, role: msg.role as 'system' | 'user' | 'assistant' | 'tool', content });
-                    }
+        const messages: ChatMessage[] = [];
+        for (const r of rounds) {
+            if (!r || r._deleted) continue; // §3.4: skip soft-deleted
+            const rule = profile?.rules[r.id];
+            const defaultExcluded = r.meta?.historyPolicy === 'exclude' || r.meta?.defaultContextMode === 'exclude';
+            if (rule ? rule.mode === 'exclude' : defaultExcluded) continue;
+            for (const msg of r.payload) {
+                if (msg.role === 'system' || msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool') {
+                    const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+                    if (msg.role === 'assistant' && !content.trim() && !(msg as any).tool_calls) continue; // drop empty assistant
+                    messages.push({ ...msg, role: msg.role as 'system' | 'user' | 'assistant' | 'tool', content });
                 }
             }
-
-            // Anthropic requires last message to be from user
-            while (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
-                messages.pop();
-            }
-
-            this._cache.set(cacheKey, messages);
-            return messages;
-        } catch {
-            return [];
         }
+
+        // Phase 2: Provider-specific validation handled by ProviderMessageAdapter
+        // in loop-executor.ts, right before the LLM call.
+        this._cache.set(cacheKey, messages);
+        return messages;
     }
 
     refs(): RefStore {
@@ -236,6 +193,14 @@ export class RoundLog implements ILog {
         return this._draft;
     }
 
+    /**
+     * @deprecated — merge() is suspended until Phase 1 rewrite.
+     * RoundLog.merge() currently concatenates full branch histories which
+     * duplicates ancestor rounds in the merged payload. The rewrite will:
+     *   - Accept head RoundIds (not refs) as parents
+     *   - Only include the aggregator's new output in payload
+     *   - Delegate branch-summary to upstream Artifacts
+     */
     async merge(refs: Ref[], strategy: AssemblyStrategy): Promise<Ref> {
         const mergeRef = `merge-${ulid().slice(0, 8)}`;
         const branches = await Promise.all(refs.map(r => this.fold(r)));
@@ -278,20 +243,8 @@ export class RoundLog implements ILog {
 
     /** Remove assistant payload from a Round — used by delete-assistant and resend. */
     async clearAssistantInRound(roundId: RoundId): Promise<void> {
-        const round = await this.readRound(roundId);
-        if (!round) return;
-        const updated: PersistedRound = {
-            ...round,
-            payload: round.payload.filter(m => m.role !== 'assistant'),
-            result: undefined,
-        };
-        await this.writeRound(roundId, updated);
+        await this.graph.clearAssistantInRound(roundId);
         this._cache.invalidateAll();
-
-        if (this.onEvent) {
-            const changes: RoundChangeSet = { assistantContent: '', thinking: '' };
-            this.onEvent({ type: 'round:updated', roundId, changes });
-        }
     }
 
     /** True when a Round contains a meaningful assistant response. */
@@ -304,54 +257,9 @@ export class RoundLog implements ILog {
         sourceRoundId: RoundId,
         options: { branchName?: Ref; createdFrom: 'regenerate' | 'manual' | 'edit' },
     ): Promise<{ branchName: Ref; sourceRoundId: RoundId; newRoundId: RoundId; commonHeadId?: RoundId }> {
-        const source = await this.readRound(sourceRoundId);
-        if (!source) throw new Error(`Source round not found: ${sourceRoundId}`);
-        const userMessages = source.payload.filter(m => m.role === 'user');
-        if (userMessages.length === 0) throw new Error(`Source round has no user message: ${sourceRoundId}`);
-
-        const manifest = await this.loadManifest();
-        const fromBranch = manifest.currentBranch;
-        const commonHeadId = source.parents?.[0];
-        let branchName = options.branchName;
-        if (!branchName) {
-            let n = Object.keys(manifest.branches).length;
-            do { branchName = `branch-${n++}`; } while (manifest.branches[branchName]);
-        }
-        if (manifest.branches[branchName]) throw new Error(`Branch already exists: ${branchName}`);
-
-        const newRoundId = ulid();
-        const copiedPayload = userMessages.map(message => ({
-            ...message,
-            ...(Array.isArray((message as any).attachments)
-                ? { attachments: (message as any).attachments.map((a: any) => ({ ...a })) }
-                : {}),
-        } as ChatMessage));
-        const newRound: PersistedRound = {
-            id: newRoundId,
-            parents: commonHeadId ? [commonHeadId] : [],
-            payload: copiedPayload,
-            meta: { ...source.meta, createdAt: Date.now(), origin: 'rebase', rebasedFrom: sourceRoundId },
-        };
-        await this.writeRound(newRoundId, newRound);
-        if (commonHeadId) {
-            const children = manifest.children[commonHeadId] ?? (manifest.children[commonHeadId] = []);
-            if (!children.includes(newRoundId)) children.push(newRoundId);
-        }
-        const meta: BranchMeta = {
-            createdAt: Date.now(),
-            createdFrom: options.createdFrom,
-            forkedFromBranch: fromBranch,
-            sourceRoundId,
-            commonHeadId,
-            branchRootRoundId: newRoundId,
-        };
-        manifest.branches[branchName] = newRoundId;
-        manifest.branchMeta[branchName] = meta;
-        manifest.currentBranch = branchName;
-        manifest.currentHead = newRoundId;
-        await this.saveManifest(manifest);
+        const result = await this.graph.forkUserRound(sourceRoundId, options);
         this._cache.invalidateAll();
-        return { branchName, sourceRoundId, newRoundId, commonHeadId };
+        return result;
     }
 
     /** Replace assistant/tool output in an existing Round without changing its ID or parents. */
@@ -359,39 +267,13 @@ export class RoundLog implements ILog {
         roundId: RoundId,
         update: { assistantMessages: ChatMessage[]; result?: RoundResult },
     ): Promise<void> {
-        const round = await this.readRound(roundId);
-        if (!round) throw new Error(`Round not found: ${roundId}`);
-        const userPayload = round.payload.filter(m => m.role === 'user');
-        const updated: PersistedRound = {
-            ...round,
-            payload: [...userPayload, ...update.assistantMessages.map(m => ({ ...m }))],
-            result: update.result,
-        };
-        await this.writeRound(roundId, updated);
+        await this.graph.setAssistantInRound(roundId, update);
         this._cache.invalidateAll();
-        const assistant = update.assistantMessages.find(m => m.role === 'assistant');
-        this.onEvent?.({ type: 'round:updated', roundId, changes: {
-            assistantContent: assistant && typeof assistant.content === 'string' ? assistant.content : '',
-            thinking: assistant && typeof (assistant as any).thinking === 'string' ? (assistant as any).thinking : '',
-        }});
     }
 
     /** Enumerate siblings using the persisted Round DAG index. */
     async getSiblingRoundIds(roundId: RoundId): Promise<RoundId[]> {
-        const round = await this.readRound(roundId);
-        if (!round) return [];
-        const manifest = await this.loadManifest();
-        const parentId = round.parents?.[0];
-        const ids = parentId ? (manifest.children[parentId] ?? []) : [roundId];
-        const rounds = await Promise.all(ids.map(id => this.readRound(id)));
-        return ids.map((id, index) => ({ id, round: rounds[index] }))
-            .filter(item => item.round && !item.round._deleted)
-            .sort((a, b) => {
-                const at = a.round!.meta?.createdAt ?? 0;
-                const bt = b.round!.meta?.createdAt ?? 0;
-                return at - bt || a.id.localeCompare(b.id);
-            })
-            .map(item => item.id);
+        return this.graph.getSiblingRoundIds(roundId);
     }
 
     async getSiblingRounds(roundId: RoundId): Promise<RoundProjection[]> {
@@ -403,82 +285,77 @@ export class RoundLog implements ILog {
 
     /** Soft-delete a Round — fold() skips it. */
     async markStale(roundId: RoundId): Promise<void> {
-        const round = await this.readRound(roundId);
-        if (!round) return;
-        await this.writeRound(roundId, { ...round, meta: { ...round.meta, stale: true } });
+        await this.graph.markStale(roundId);
         this._cache.invalidateAll();
-
-        if (this.onEvent) {
-            this.onEvent({ type: 'round:updated', roundId, changes: { stale: true } });
-        }
     }
 
     /** Soft-delete a Round — set _deleted flag so fold() skips it. */
     async deleteRound(roundId: RoundId): Promise<void> {
-        const round = await this.readRound(roundId);
-        if (!round) return;
-        await this.writeRound(roundId, { ...round, _deleted: true });
+        await this.graph.deleteRound(roundId);
         this._cache.invalidateAll();
-
-        if (this.onEvent) {
-            this.onEvent({ type: 'round:deleted', roundId });
-        }
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────
 
     async readRound(roundId: RoundId): Promise<PersistedRound | null> {
-        try {
-            const file = this.engine.openFile(this.nodeId);
-            const text = await file.asset(`round-${roundId}.json`).readText();
-            if (text) return JSON.parse(text) as PersistedRound;
-        } catch { /* round file missing or unreadable */ }
-        return null;
-    }
-
-    private async writeRound(roundId: RoundId, round: PersistedRound): Promise<void> {
-        // Always go through createAsset so the VFS meta layer (index + events)
-        // is kept in sync. driver.writeContent bypasses the meta layer and
-        // causes data loss on reload.
-        await this.engine.createAsset(this.nodeId, `round-${roundId}.json`, JSON.stringify(round, null, 2));
+        return this.graph.readRound(roundId);
     }
 
     // ── Manifest access (package-internal, used by RoundRefStore) ─────────
 
     /** Load the RoundManifest from the session manifest. */
     async loadManifest(): Promise<RoundManifest> {
-        const raw = await this.engine.getManifest(this.nodeId) as unknown as Record<string, unknown>;
-        if (raw?.children && raw?.rootRoundId) {
-            return {
-                ...(raw as unknown as RoundManifest),
-                branchMeta: (raw as any).branchMeta ?? {},
-            };
+        return this.graph.loadManifest();
+    }
+
+    async listContainmentChildren(roundId: RoundId): Promise<RoundId[]> {
+        return this.graph.listContainmentChildren(roundId);
+    }
+
+    async listContainmentTree(roundId: RoundId): Promise<PersistedRound[]> {
+        return this.graph.listContainmentTree(roundId);
+    }
+
+    /** Copy-on-write branch context rules used by fold(). */
+    async setRoundContextRules(
+        ref: Ref,
+        roundIds: RoundId[],
+        mode: 'include' | 'exclude',
+        scope: 'node' | 'subtree' = 'subtree',
+    ): Promise<{ profileId: string; revision: number }> {
+        const manifest = await this.loadManifest();
+        let pointer = manifest.branchMeta[ref]?.contextProfile;
+        if (!pointer) {
+            const created = await this.profileStore.createProfile();
+            pointer = { id: created.id, revision: created.revision };
         }
-        // Bootstrap: first access on a new round-format session
-        const rootId = ulid();
-        return {
-            rootRoundId: rootId,
-            branches: { main: rootId },
-            branchMeta: {},
-            currentBranch: 'main',
-            currentHead: rootId,
-            children: {},
-        };
+        const updates = Object.fromEntries(
+            [...new Set(roundIds)].map(id => [id, { mode, scope } satisfies ContextRule]),
+        );
+        const profile = await this.profileStore.updateProfile(pointer.id, pointer.revision, updates);
+        await this.graph.setContextProfile(ref, profile.id, profile.revision);
+        this._cache.invalidate(ref);
+        return { profileId: profile.id, revision: profile.revision };
+    }
+
+    async getRoundContextModes(ref: Ref, roundIds: RoundId[]): Promise<Record<RoundId, 'include' | 'exclude' | 'summary'>> {
+        const manifest = await this.loadManifest();
+        const pointer = manifest.branchMeta[ref]?.contextProfile;
+        const profile = pointer
+            ? await this.profileStore.getProfile(pointer.id, pointer.revision)
+            : null;
+        const result: Record<RoundId, 'include' | 'exclude' | 'summary'> = {};
+        for (const id of [...new Set(roundIds)]) {
+            const round = await this.readRound(id);
+            result[id] = profile?.rules[id]?.mode
+                ?? (round?.meta.defaultContextMode === 'exclude' || round?.meta.historyPolicy === 'exclude' ? 'exclude' : 'include');
+        }
+        return result;
     }
 
     /** Persist the RoundManifest back to the session manifest file. */
     async saveManifest(manifest: RoundManifest): Promise<void> {
-        // Merge with any existing legacy fields (id, title, etc.)
-        let existing: Record<string, unknown> = {};
-        try {
-            existing = (await this.engine.getManifest(this.nodeId)) as unknown as Record<string, unknown>;
-        } catch { /* new session */ }
-        const merged = {
-            ...existing,
-            ...manifest,
-            updated_at: new Date().toISOString(),
-        };
-        await this.engine.driver.writeContent(this.nodeId, JSON.stringify(merged, null, 2));
+        return this.graph.saveManifest(manifest);
     }
 }
 
@@ -503,7 +380,9 @@ function detectRoundKind(round: PersistedRound): 'system' | 'chat' | 'merge' {
 
 export function roundToProjection(round: PersistedRound, roundId: RoundId): RoundProjection {
     const userMsg = round.payload.find(m => m.role === 'user');
-    const assistantMsg = round.payload.find(m => m.role === 'assistant');
+    // Use the LAST assistant message (final exchange), not the first.
+    const assistantMsgs = round.payload.filter(m => m.role === 'assistant');
+    const assistantMsg = assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1] : undefined;
     const attachments = (userMsg && 'attachments' in userMsg && Array.isArray(userMsg.attachments))
         ? userMsg.attachments.map(a => ({
             name: a.name ?? a.filename ?? '',
@@ -515,6 +394,8 @@ export function roundToProjection(round: PersistedRound, roundId: RoundId): Roun
     return {
         roundId,
         parents: round.parents ?? [],
+        containerRoundId: round.containerRoundId,
+        contentKind: round.kind,
         kind: detectRoundKind(round),
         userMessage: userMsg ? {
             content: typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content),

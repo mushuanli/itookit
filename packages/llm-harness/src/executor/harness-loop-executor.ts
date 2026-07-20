@@ -4,16 +4,16 @@
 // and composes middleware for cross-cutting concerns.
 //
 // Loop invariant (each round):
-//   1. Flush injections (HITL middleware beforeRound)
-//   2. Budget check + auto-downgrade (budget middleware beforeRound)
-//   3. Context compress (compression middleware beforeRound)
+//   1. Flush injections (HITL middleware beforeExchange)
+//   2. Budget check + auto-downgrade (budget middleware beforeExchange)
+//   3. Context compress (compression middleware beforeExchange)
 //   4. Build system prompt + messages from ContextManager
 //   5. LLM call (streaming via ILLMService.chatStream)
 //   6. Error recovery (error-recovery middleware onError → retry/compress/fallback)
 //   7. Parse tool calls (structured + XML fallback)
 //   8. onToolCalls middleware (plan confirm → pause)
 //   9. Execute tools (reads parallel, writes serial)
-//  10. afterRound middleware (back-pressure → inject)
+//  10. afterExchange middleware (back-pressure → inject)
 //  11. Build round → log.append() → yield round:end
 //  12. No tool calls → break; otherwise continue
 
@@ -21,7 +21,7 @@ import type {
     ILoop,
     LoopContext,
     Round,
-    RoundContext,
+    ExchangeContext,
     RoundResult,
     AgentEvent,
     Signal,
@@ -66,21 +66,21 @@ const MAX_ROUNDS = 100;
 
 // ─── Inline middleware runner (avoids cross-package dependency) ──────
 
-function runBeforeRound(mws: ILoopMiddleware[], ctx: RoundContext): Promise<ControlDirective | void> {
-    return runForward(mws, 'beforeRound', (mw) => mw.beforeRound?.(ctx));
+function runBeforeExchange(mws: ILoopMiddleware[], ctx: ExchangeContext): Promise<ControlDirective | void> {
+    return runForward(mws, 'beforeExchange', (mw) => mw.beforeExchange?.(ctx));
 }
 
-function runOnToolCalls(mws: ILoopMiddleware[], ctx: RoundContext, tools: PlannedTool[]): Promise<ControlDirective | void> {
+function runOnToolCalls(mws: ILoopMiddleware[], ctx: ExchangeContext, tools: PlannedTool[]): Promise<ControlDirective | void> {
     return runForward(mws, 'onToolCalls', (mw) => mw.onToolCalls?.(ctx, tools));
 }
 
-function runAfterRound(mws: ILoopMiddleware[], ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
-    // Reverse order for afterRound (stack unwinding)
+function runAfterExchange(mws: ILoopMiddleware[], ctx: ExchangeContext, result: RoundResult): Promise<ControlDirective | void> {
+    // Reverse order for afterExchange (stack unwinding)
     const reversed = [...mws].reverse();
-    return runForward(reversed, 'afterRound', (mw) => mw.afterRound?.(ctx, result));
+    return runForward(reversed, 'afterExchange', (mw) => mw.afterExchange?.(ctx, result));
 }
 
-function runOnError(mws: ILoopMiddleware[], ctx: RoundContext, error: Error): Promise<RecoveryAction | void> {
+function runOnError(mws: ILoopMiddleware[], ctx: ExchangeContext, error: Error): Promise<RecoveryAction | void> {
     return runForward(mws, 'onError', (mw) => mw.onError?.(ctx, error));
 }
 
@@ -192,11 +192,11 @@ export class HarnessLoopExecutor implements ILoop {
                 // Drain event queue
                 while (eventQueue.length > 0) yield eventQueue.shift()!;
 
-                // ── 1-4. beforeRound middleware ──
+                // ── 1-4. beforeExchange middleware ──
                 const roundId = `round_${sessionId}_${roundNumber}`;
-                const roundCtx: RoundContext = { roundId, sessionId, roundNumber };
+                const roundCtx: ExchangeContext = { roundId, sessionId, roundNumber };
 
-                const beforeDirective = await runBeforeRound(middlewares, roundCtx);
+                const beforeDirective = await runBeforeExchange(middlewares, roundCtx);
                 if (beforeDirective) {
                     if (beforeDirective.action === 'abort') {
                         yield { type: 'error', error: { message: beforeDirective.reason, code: 'BUDGET_EXHAUSTED' } };
@@ -407,9 +407,9 @@ export class HarnessLoopExecutor implements ILoop {
                     }
                 }
 
-                // ── 11. afterRound middleware ──
+                // ── 11. afterExchange middleware ──
                 const roundResult: RoundResult = { assistantBlocks, toolResults, usage: usage_, finishReason };
-                const afterDirective = await runAfterRound(middlewares, roundCtx, roundResult);
+                const afterDirective = await runAfterExchange(middlewares, roundCtx, roundResult);
                 if (afterDirective) {
                     if (afterDirective.action === 'abort') {
                         yield { type: 'error', error: { message: afterDirective.reason, code: 'AFTERROUND_ABORT' } };

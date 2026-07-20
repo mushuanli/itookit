@@ -111,6 +111,9 @@ export class ChatInput implements IChatInputPresenter {
     private historyValue: HTMLSpanElement | null = null; // removed from new template
     private streamToggle!: HTMLInputElement;
     private settingsPanel!: HTMLElement;
+    private flowIdInput!: HTMLInputElement;
+    private branchModeSelect!: HTMLSelectElement;
+    private retentionModeSelect!: HTMLSelectElement;
     private fileInput!: HTMLInputElement;
     private attachmentContainer!: HTMLElement;
     private inputWrapper!: HTMLElement;
@@ -186,7 +189,7 @@ export class ChatInput implements IChatInputPresenter {
     private config: IChatInputConfig = {
         text: '',
         agentId: 'default',
-        settings: { connectionId: undefined, modelTier: 'auto', historyLength: -1, streamMode: true, useHarness: false, workingDirectory: '' },
+        settings: { connectionId: undefined, modelTier: 'auto', historyLength: -1, streamMode: true, useHarness: false, workingDirectory: '', branchMode: 'continue', retentionMode: 'persistent' },
     };
 
     /** 上次已通知的 settings JSON — 内容不变则跳过保存 */
@@ -493,6 +496,9 @@ export class ChatInput implements IChatInputPresenter {
         this.historyValue = this.container.querySelector('.llm-input__history-value');
         this.streamToggle = q('.llm-input__stream-toggle');
         this.settingsPanel = q('.llm-input__settings-panel');
+        this.flowIdInput = q('.llm-input__flow-id');
+        this.branchModeSelect = q('.llm-input__branch-mode');
+        this.retentionModeSelect = q('.llm-input__retention-mode');
         this.fileInput = q('.llm-input__file-input');
         this.attachmentContainer = q('.llm-input__attachments');
         this.inputWrapper = q('.llm-input__field-wrapper');
@@ -516,6 +522,9 @@ export class ChatInput implements IChatInputPresenter {
     }
 
     private bindEvents(): void {
+        this.flowIdInput?.addEventListener('input', () => { this.config.settings.flowId = this.flowIdInput.value.trim() || undefined; this.notifyConfigChange(); });
+        this.branchModeSelect?.addEventListener('change', () => { this.config.settings.branchMode = this.branchModeSelect.value; this.notifyConfigChange(); });
+        this.retentionModeSelect?.addEventListener('change', () => { this.config.settings.retentionMode = this.retentionModeSelect.value; this.notifyConfigChange(); });
         this.textarea.addEventListener('input', () => {
             this.adjustTextareaHeight();
             this.config.text = this.textarea.value;
@@ -830,6 +839,9 @@ export class ChatInput implements IChatInputPresenter {
         if (this.config.settings.systemPromptAppend) {
             overrides.systemPromptAppend = this.config.settings.systemPromptAppend;
         }
+        if (this.config.settings.flowId) overrides.flowId = this.config.settings.flowId;
+        if (this.config.settings.branchMode === 'fork') overrides.branchMode = 'fork';
+        if (this.config.settings.retentionMode === 'temporary') overrides.retentionMode = 'temporary';
 
         return overrides;
     }
@@ -868,6 +880,9 @@ export class ChatInput implements IChatInputPresenter {
         if (this.connectionSelect && this.config.settings.connectionId) {
             this.connectionSelect.value = this.config.settings.connectionId;
         }
+        if (this.flowIdInput) this.flowIdInput.value = this.config.settings.flowId ?? '';
+        if (this.branchModeSelect) this.branchModeSelect.value = this.config.settings.branchMode ?? 'continue';
+        if (this.retentionModeSelect) this.retentionModeSelect.value = this.config.settings.retentionMode ?? 'persistent';
         if (this.connQuickBtn) this.updateConnQuick();
         this.updateTierPills(this.config.settings.modelTier ?? 'auto');
         if (this.tierQuickBtn) this.updateTierQuick();

@@ -56,7 +56,7 @@ export class BranchService {
             type: 'branch:switched',
             payload: {
                 branchName: targetBranch,
-                headRoundId: manifest.currentHead,
+                headRoundId: manifest.currentHead ?? '',
                 branchRootRoundId: manifest.branchMeta[targetBranch]?.branchRootRoundId,
                 reason: 'sibling-switch',
                 displayPosition: 'top',
@@ -70,7 +70,7 @@ export class BranchService {
         targetRoundId: string,
     ): Promise<string | undefined> {
         for (const [name, head] of Object.entries(manifest.branches)) {
-            let current: string | undefined = head;
+            let current: string | null | undefined = head;
             const visited = new Set<string>();
             while (current && !visited.has(current)) {
                 if (current === targetRoundId) return name;
@@ -98,12 +98,12 @@ export class BranchService {
                     .find(p => p.roundId === ids[index]);
                 if (!projection) continue;
                 if (projection.userMessage) result.push({
-                    id: `${ids[index]}-user`, persistedNodeId: ids[index], role: 'user',
+                    id: `round-${ids[index]}-user`, persistedNodeId: ids[index], role: 'user',
                     content: projection.userMessage.content, files: projection.userMessage.files,
                     timestamp: projection.meta.createdAt, siblingIndex: index, siblingCount: count,
                 });
                 if (projection.assistantMessage) result.push({
-                    id: ids[index], persistedNodeId: ids[index], role: 'assistant',
+                    id: `round-${ids[index]}-assistant`, persistedNodeId: ids[index], role: 'assistant',
                     content: projection.assistantMessage.content, timestamp: projection.meta.createdAt,
                     siblingIndex: index, siblingCount: count,
                 });
@@ -157,13 +157,13 @@ export class BranchService {
 
         eventBus.emitSession(sessionId, {
             type: 'log:appended',
-            ref: options?.name ?? '',
+            ref: forked.branchName,
             roundId: newNodeId,
         });
 
         eventBus.emitSession(sessionId, {
             type: 'log:ref_created',
-            ref: options?.name ?? newNodeId,
+            ref: forked.branchName,
         });
 
         return newNodeId;
@@ -186,8 +186,10 @@ export class BranchService {
         if (currentBranch === branchName) return;
 
         const fromBranch = currentBranch;
+        const previousHead = manifest.branches[fromBranch] ?? '';
+        const newHead = manifest.branches[branchName] ?? '';
         manifest.currentBranch = branchName;
-        manifest.currentHead = manifest.branches[branchName];
+        manifest.currentHead = newHead;
         await roundLog.saveManifest(manifest);
         await this.registry.reloadSessionData(nodeId, sessionId, state);
 
@@ -195,7 +197,7 @@ export class BranchService {
             type: 'branch:switched',
             payload: {
                 branchName,
-                headRoundId: manifest.currentHead,
+                headRoundId: manifest.currentHead ?? '',
                 branchRootRoundId: manifest.branchMeta[branchName]?.branchRootRoundId,
                 reason: 'manual-switch',
                 displayPosition: 'top',
@@ -205,8 +207,8 @@ export class BranchService {
         eventBus.emitSession(sessionId, {
             type: 'log:ref_moved',
             ref: branchName,
-            previousHead: fromBranch,
-            newHead: branchName,
+            previousHead,
+            newHead,
         });
     }
 
@@ -217,21 +219,23 @@ export class BranchService {
 
     async renameBranch(oldName: string, newName: string): Promise<void> {
         const { sessionId, nodeId } = this.registry.ensureBound();
-        const engine = this.registry.engine;
+        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
 
-        const manifest = await engine.getManifest(nodeId);
-        if (!manifest.branches[oldName]) {
+        const manifest = await roundLog.loadManifest();
+        if (manifest.branches[oldName] === undefined) {
             throw new EngineError(
                 EngineErrorCode.SESSION_INVALID,
                 `Branch not found: ${oldName}`
             );
         }
 
-        await engine.renameBranch(nodeId, sessionId, oldName, newName);
+        const oldHead = manifest.branches[oldName];
+        const graph = (roundLog as any).graph;
+        await graph.renameRef(oldName, newName);
 
         this.registry.eventBus.emitSession(sessionId, {
             type: 'log:ref_renamed',
-            ref: manifest.branches[oldName],
+            ref: oldHead ?? '',
             oldName,
             newName,
         });
@@ -279,7 +283,7 @@ export class BranchService {
 
         return Object.entries(manifest.branches).map(([name, headNodeId]) => ({
             name,
-            headNodeId,
+            headNodeId: headNodeId ?? '',
             isCurrent: name === manifest.currentBranch,
         }));
     }

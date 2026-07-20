@@ -1,70 +1,125 @@
 // Goal — control loop primitive for the LLM subsystem.
 //
-// Goal = desired-state nodes + dependency edges. A Controller repeatedly
+// Goal = AgentRunSpec nodes + typed RunEdges. A Controller repeatedly
 // invokes Loop for each ready node until a Predicate returns a verdict.
 //
-// Existing 4 control loops (Mission / SessionGraph / AutoContinue /
-// BackPressure) are configurations of this single primitive.
+// Phase 4 (WP-07): GoalNode replaced by AgentRunSpec; edges use RunEdge
+// (separating control vs data dependencies); Predicate no longer returns hitl.
 
 import type { ILoop, RoundResult } from './loop';
-import type { PauseRequest } from './agent-event';
+import type { AgentRunSpec, RunEdge } from './agent-run-types';
+import type { InputBinding } from './context-types';
 
 // ─── Goal definition ────────────────────────────────────────────────
 
 export interface Goal {
     id: string;
-    nodes: GoalNode[];
-    /** Dependency edges: [from, to] means 'to' depends on 'from'. */
-    edges?: Array<[from: string, to: string]>;
+    /** Present for goals instantiated from an immutable design revision. */
+    definition?: { id: GoalDefinitionId; revision: number; digest: string };
+    nodes: AgentRunSpec[];
+    /** Typed dependency edges. Control edges gate execution; data edges feed InputBindings. */
+    edges?: RunEdge[];
+    /** Stable design node → this execution's AgentRun mapping. */
+    nodeRuns?: Record<GoalNodeId, string>;
 }
 
+export type GoalDefinitionId = string;
+export type GoalNodeId = string;
+
+export type GoalInputBinding =
+    | Exclude<InputBinding, { kind: 'upstream-output' }>
+    | {
+        kind: 'upstream-output';
+        nodeId: GoalNodeId;
+        outputPort: string;
+        inputLabel: string;
+        order: number;
+    };
+
+export interface GoalNodeDefinition {
+    id: GoalNodeId;
+    label: string;
+    agent: { id: string; version?: string };
+    prompt: string;
+    mode?: string;
+    inputs: GoalInputBinding[];
+    outputPorts?: string[];
+    joinPolicy?: AgentRunSpec['joinPolicy'];
+    maxRetries?: number;
+    canParallel?: boolean;
+    position?: { x: number; y: number };
+}
+
+export interface GoalDefinitionEdge {
+    id: string;
+    from: GoalNodeId;
+    to: GoalNodeId;
+    kind: 'control' | 'data';
+    outputPort?: string;
+    inputPort?: string;
+    order?: number;
+}
+
+export interface GoalDraft {
+    id: GoalDefinitionId;
+    draftVersion: number;
+    baseRevision?: number;
+    name: string;
+    nodes: GoalNodeDefinition[];
+    edges: GoalDefinitionEdge[];
+    updatedAt: number;
+}
+
+export interface GoalRevision {
+    id: GoalDefinitionId;
+    revision: number;
+    name: string;
+    nodes: GoalNodeDefinition[];
+    edges: GoalDefinitionEdge[];
+    createdAt: number;
+    digest: string;
+}
+
+export interface GoalValidationIssue {
+    code: string;
+    message: string;
+    severity: 'error' | 'warning';
+    nodeId?: GoalNodeId;
+    edgeId?: string;
+}
+
+/** @deprecated — replaced by AgentRunSpec. Kept for reference. */
 export interface GoalNode {
     id: string;
-    /** What to run — prompt, loop mode, tool allowlist, etc. */
     task: TaskSpec;
-    /** How to judge completion. */
     predicate: PredicateRef;
-    /** Can run in parallel when dependencies allow. Default true. */
     canParallel?: boolean;
-    /** Max retries on predicate=retry. Default 2. */
     maxRetries?: number;
 }
 
-/** What a GoalNode needs to execute. */
+/** @deprecated — replaced by fields on AgentRunSpec. */
 export interface TaskSpec {
-    /** System/instruction prompt for the node. */
     prompt: string;
-    /** Loop executor mode ('chat' | 'loop' | 'loop:full'). */
     mode?: string;
-    /** Tool allowlist (empty = all tools). */
     tools?: string[];
-    /** Additional context fed to the loop. */
     context?: Record<string, unknown>;
 }
 
-export type PredicateRef = string; // registered predicate name
+export type PredicateRef = string;
 
 // ─── Controller — the reconcile loop ─────────────────────────────────
 
 export interface IController {
-    /**
-     * Repeatedly invoke loop for each ready node until the predicate
-     * returns a verdict or all nodes are resolved.
-     *
-     * Mission / SessionGraph / AutoContinue / BackPressure are all
-     * configurations of this single control loop.
-     */
-    reconcile(goal: Goal, loopFactory: (node: GoalNode) => ILoop): Promise<Verdict>;
+    reconcile(goal: Goal, loopFactory: (spec: AgentRunSpec) => ILoop): Promise<Verdict>;
 }
 
-// ─── Predicate — completion judgment ─────────────────────────────────
+// ─── Predicate — completion judgment (Phase 4: hitl removed) ─────────
 
-export type Predicate = (result: RoundResult, node: GoalNode) => Promise<Verdict>;
+export type Predicate = (result: RoundResult, spec: AgentRunSpec) => Promise<Verdict>;
 
 export type Verdict =
     | { status: 'done' }
     | { status: 'retry'; feedback: string }
-    | { status: 'hitl'; request: PauseRequest }
     | { status: 'failed'; reason: string };
 
 // ─── Node status (replaces NodeStatus in kernel) ─────────────────────

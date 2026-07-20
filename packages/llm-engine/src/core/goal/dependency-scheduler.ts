@@ -1,21 +1,19 @@
 // DependencyScheduler — the ONE dependency scheduler for the LLM subsystem.
 //
-// Replaces 4 separate implementations:
-//   - kernel DagOrchestrator
-//   - engine DependencyGraph (deleted S6c, replaced by resolveDependencyTree)
-//   - engine MissionScheduler (embedded scheduling loop)
-//   - engine scheduler/dependency-resolver
+// Phase 4 (WP-07): Updated to use AgentRunSpec + RunEdge. Adds joinPolicy
+// support, versioned snapshots, and readyIds() returning IDs not fake nodes.
 //
 // Uses Kahn's algorithm for topological sort + cycle detection.
-// Event-driven (onChange) instead of polling (500ms → 0ms).
+// Event-driven (onChange) instead of polling.
 
-import type { GoalNode, GoalNodeStatus } from '@itookit/common';
+import type { GoalNodeStatus, AgentRunSpec, RunEdge, AgentRunId } from '@itookit/common';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
 export interface SchedulerSnapshot {
+    version: number;
     nodes: Record<string, GoalNodeStatus>;
-    order: string[]; // topological order
+    order: string[];
 }
 
 export class CycleError extends Error {
@@ -25,42 +23,57 @@ export class CycleError extends Error {
     }
 }
 
+export class UnknownNodeError extends Error {
+    constructor(nodeId: string) {
+        super(`Unknown node in edge: ${nodeId}`);
+        this.name = 'UnknownNodeError';
+    }
+}
+
 // ─── DependencyScheduler ─────────────────────────────────────────────
 
 export class DependencyScheduler {
     private statuses = new Map<string, GoalNodeStatus>();
     private readonly adjacency = new Map<string, string[]>(); // node → dependents
     private readonly inDegree = new Map<string, number>();    // node → remaining deps
+    private readonly joinPolicies = new Map<string, AgentRunSpec['joinPolicy']>();
+    private readonly depCounts = new Map<string, number>();   // total control + data deps per node
     private readonly topoOrder: string[];
-    private readonly resolveNotify: () => void;
+    private version = 0;
+
+    // eslint-disable-next-line @typescript-eslint/prefer-readonly
+    private resolveNotify: () => void;
     // eslint-disable-next-line @typescript-eslint/prefer-readonly
     private onChangePromise: Promise<void>;
 
-    constructor(nodes: GoalNode[], edges: Array<[string, string]> = []) {
+    constructor(nodes: AgentRunSpec[], edges: RunEdge[] = []) {
+        // Validate all nodes have unique IDs
+        const ids = new Set<string>();
+        for (const node of nodes) {
+            if (ids.has(node.id)) throw new Error(`Duplicate node ID: ${node.id}`);
+            ids.add(node.id);
+        }
+
         // Initialize statuses
         for (const node of nodes) {
             this.statuses.set(node.id, 'pending');
             this.adjacency.set(node.id, []);
             this.inDegree.set(node.id, 0);
+            this.joinPolicies.set(node.id, node.joinPolicy ?? 'all-success');
+            this.depCounts.set(node.id, 0);
         }
 
-        // Build adjacency and in-degree from edges
-        for (const [from, to] of edges) {
-            const adj = this.adjacency.get(from);
-            if (adj) adj.push(to);
-            this.inDegree.set(to, (this.inDegree.get(to) ?? 0) + 1);
-            // Ensure 'from' exists
-            if (!this.inDegree.has(from)) {
-                throw new Error(`Unknown node in edge: ${from}`);
-            }
-        }
-        if (!this.inDegree.has(edges[0]?.[1] ?? '')) {
-            // Validate all 'to' nodes exist
-            for (const [, to] of edges) {
-                if (!this.statuses.has(to)) {
-                    throw new Error(`Unknown node in edge target: ${to}`);
-                }
-            }
+        // Validate and build adjacency from edges
+        for (const edge of edges) {
+            if (!this.statuses.has(edge.from)) throw new UnknownNodeError(edge.from);
+            if (!this.statuses.has(edge.to)) throw new UnknownNodeError(edge.to);
+            if (edge.from === edge.to) throw new Error(`Self-edge not allowed: ${edge.from}`);
+
+            // Both edge kinds gate execution. A data consumer cannot start until
+            // the producer has created the referenced Artifact.
+            this.adjacency.get(edge.from)!.push(edge.to);
+            this.inDegree.set(edge.to, (this.inDegree.get(edge.to) ?? 0) + 1);
+            this.depCounts.set(edge.to, (this.depCounts.get(edge.to) ?? 0) + 1);
         }
 
         // Kahn topological sort + cycle detection
@@ -74,44 +87,61 @@ export class DependencyScheduler {
 
     // ── Public API ──────────────────────────────────────────────────
 
-    /** Nodes with all dependencies satisfied that haven't started yet. */
-    readySet(): GoalNode[] {
-        const ready: GoalNode[] = [];
+    /** Returns IDs (not fake nodes) of all ready nodes. */
+    readyIds(): AgentRunId[] {
+        const ready: AgentRunId[] = [];
         for (const [id, status] of this.statuses) {
             if (status !== 'pending') continue;
             if ((this.inDegree.get(id) ?? 0) === 0) {
-                ready.push({ id, task: { prompt: '' }, predicate: '' });
+                ready.push(id);
             }
         }
         return ready;
     }
 
-    /** Mark a node as done. Unblocks dependents. */
+    /** Mark a node as done. Unblocks dependents. Idempotent. */
     complete(id: string): void {
         if (!this.statuses.has(id)) return;
+        const current = this.statuses.get(id);
+        if (current === 'done' || current === 'failed' || current === 'skipped') return;
         this.statuses.set(id, 'done');
-        // Decrement in-degree of dependents
+        this.version++;
+
+        // Decrement in-degree of control/data dependents
         for (const dep of this.adjacency.get(id) ?? []) {
-            const current = this.inDegree.get(dep) ?? 0;
-            this.inDegree.set(dep, Math.max(0, current - 1));
+            const degree = this.inDegree.get(dep) ?? 0;
+            this.inDegree.set(dep, Math.max(0, degree - 1));
         }
-        this.resolveNotify();
-        this.resetNotify();
+        this.notify();
     }
 
-    /** Mark a node as failed. Automatically propagates to dependents. */
+    /** Mark a node as failed. Propagates to dependents based on joinPolicy. Idempotent. */
     fail(id: string): void {
         if (!this.statuses.has(id)) return;
+        const current = this.statuses.get(id);
+        if (current === 'failed' || current === 'skipped') return;
         this.statuses.set(id, 'failed');
+        this.version++;
         this.propagateSkipped(id);
-        this.resolveNotify();
-        this.resetNotify();
+        this.notify();
+    }
+
+    /** Skip a node (e.g. when dependency fails and joinPolicy is all-success). */
+    skip(id: string): void {
+        if (!this.statuses.has(id)) return;
+        const current = this.statuses.get(id);
+        if (current === 'done' || current === 'failed' || current === 'skipped') return;
+        this.statuses.set(id, 'skipped');
+        this.version++;
+        this.propagateSkipped(id);
+        this.notify();
     }
 
     /** Check if all nodes are resolved. */
     finished(): boolean {
         for (const status of this.statuses.values()) {
-            if (status === 'pending' || status === 'ready' || status === 'running' || status === 'retrying' || status === 'awaiting_signal') {
+            if (status === 'pending' || status === 'ready' || status === 'running'
+                || status === 'retrying' || status === 'awaiting_signal') {
                 return false;
             }
         }
@@ -123,19 +153,29 @@ export class DependencyScheduler {
         return this.onChangePromise;
     }
 
-    /** Snapshot for goal:progress events. */
+    /** Versioned snapshot for goal:progress events. */
     snapshot(): SchedulerSnapshot {
         const nodes: Record<string, GoalNodeStatus> = {};
         for (const [id, status] of this.statuses) {
             nodes[id] = status;
         }
-        return { nodes, order: [...this.topoOrder] };
+        return { version: this.version, nodes, order: [...this.topoOrder] };
     }
 
-    /** Update node status directly (for running/retrying/awaiting_signal). */
+    /** Wait for a snapshot newer than the given version (eliminates lost wakeup). */
+    async changedAfter(minVersion: number): Promise<SchedulerSnapshot> {
+        while (this.version <= minVersion && !this.finished()) {
+            await this.onChange();
+        }
+        return this.snapshot();
+    }
+
+    /** Update node status (for running/retrying/awaiting_signal). */
     setStatus(id: string, status: GoalNodeStatus): void {
         if (this.statuses.has(id)) {
             this.statuses.set(id, status);
+            this.version++;
+            this.notify();
         }
     }
 
@@ -150,7 +190,6 @@ export class DependencyScheduler {
         const queue: string[] = [];
         const result: string[] = [];
 
-        // Start with nodes that have no dependencies
         for (const [id, degree] of inDegree) {
             if (degree === 0) queue.push(id);
         }
@@ -165,12 +204,10 @@ export class DependencyScheduler {
             }
         }
 
-        // Cycle detection: if not all nodes reached, there's a cycle
         if (result.length !== this.statuses.size) {
             const remaining = new Set(this.statuses.keys());
             for (const id of result) remaining.delete(id);
-            const cycleNodes = [...remaining];
-            throw new CycleError(cycleNodes);
+            throw new CycleError([...remaining]);
         }
 
         return result;
@@ -184,18 +221,27 @@ export class DependencyScheduler {
             for (const dep of this.adjacency.get(current) ?? []) {
                 if (visited.has(dep)) continue;
                 visited.add(dep);
-                // Only skip nodes that are still pending
                 if (this.statuses.get(dep) === 'pending') {
-                    this.statuses.set(dep, 'skipped');
-                    queue.push(dep);
+                    const policy = this.joinPolicies.get(dep) ?? 'all-success';
+                    if (policy === 'all-success') {
+                        // Any dependency failure → skip
+                        this.statuses.set(dep, 'skipped');
+                        queue.push(dep);
+                    }
+                    // all-settled / any-success: don't skip, let remaining deps resolve
                 }
             }
         }
     }
 
+    private notify(): void {
+        this.resolveNotify();
+        this.resetNotify();
+    }
+
     private resetNotify(): void {
         let notify: (() => void) | undefined;
         this.onChangePromise = new Promise<void>(resolve => { notify = resolve; });
-        (this as any).resolveNotify = notify!;
+        this.resolveNotify = notify!;
     }
 }

@@ -5,6 +5,7 @@
 // asset directory. The session manifest (RoundManifest) holds the DAG index.
 
 import type { Round, RoundId, Ref } from '@itookit/common';
+import type { ContextProfileId } from '@itookit/common';
 
 // ─── Re-export for consumers ──────────────────────────────────────────────
 export type { Round, RoundId, Ref };
@@ -28,11 +29,14 @@ export interface PersistedRound extends Round {
  * Uses a Round DAG index to track branch heads and children.
  */
 export interface RoundManifest {
-    /** RoundId of the root round (system prompt / conversation start). */
-    rootRoundId: RoundId;
+    /** Schema version — v3. */
+    schemaVersion: 3;
 
-    /** Branch name → head RoundId. */
-    branches: Record<string, RoundId>;
+    /** RoundId of the root round — null for empty sessions (no phantom root). */
+    rootRoundId: RoundId | null;
+
+    /** Branch name → head RoundId (null if branch has no rounds). */
+    branches: Record<string, RoundId | null>;
 
     /** Metadata describing where each branch was split from. */
     branchMeta: Record<string, BranchMeta>;
@@ -40,8 +44,8 @@ export interface RoundManifest {
     /** The active branch name. */
     currentBranch: string;
 
-    /** Head RoundId of the current branch. */
-    currentHead: RoundId;
+    /** Head RoundId of the current branch — null if empty. */
+    currentHead: RoundId | null;
 
     /**
      * Reverse index: parentRoundId → childRoundIds.
@@ -49,6 +53,9 @@ export interface RoundManifest {
      * Self-healing: can be rebuilt from all Round.parents on startup.
      */
     children: Record<RoundId, RoundId[]>;
+
+    /** Content-tree reverse index. Never used for branch lineage or fold(). */
+    containmentChildren?: Record<RoundId, RoundId[]>;
 }
 
 export interface BranchMeta {
@@ -58,6 +65,13 @@ export interface BranchMeta {
     sourceRoundId: RoundId;
     commonHeadId?: RoundId;
     branchRootRoundId: RoundId;
+
+    /** Context profile pointer — which profile revision this branch uses.
+     *  Optional during migration; populated on first context profile access. */
+    contextProfile?: {
+        id: ContextProfileId;
+        revision: number;
+    };
 }
 
 // ─── RoundProjection ──────────────────────────────────────────────────────
@@ -71,6 +85,8 @@ export interface BranchMeta {
 export interface RoundProjection {
     roundId: RoundId;
     parents: RoundId[];
+    containerRoundId?: RoundId;
+    contentKind?: 'interaction' | 'agent' | 'group';
 
     /** Structural kind of this round. */
     kind: 'system' | 'chat' | 'merge';

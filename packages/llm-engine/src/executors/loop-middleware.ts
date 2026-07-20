@@ -7,7 +7,7 @@
 
 import type {
     ILoopMiddleware,
-    RoundContext,
+    ExchangeContext,
     RoundResult,
     ControlDirective,
     RecoveryAction,
@@ -60,7 +60,7 @@ export function createBudgetMiddleware(limits: BudgetConfig, harnessImpl?: ILoop
     return {
         name: '01-budget',
 
-        async beforeRound(_ctx: RoundContext): Promise<ControlDirective | void> {
+        async beforeExchange(_ctx: ExchangeContext): Promise<ControlDirective | void> {
             roundCount++;
 
             if (limits.maxRounds && roundCount > limits.maxRounds) {
@@ -83,14 +83,14 @@ export function createBudgetMiddleware(limits: BudgetConfig, harnessImpl?: ILoop
             }
         },
 
-        async afterRound(_ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
+        async afterExchange(_ctx: ExchangeContext, result: RoundResult): Promise<ControlDirective | void> {
             if (result.usage) {
                 totalInputTokens += (result.usage as any).inputTokens ?? 0;
                 totalOutputTokens += (result.usage as any).outputTokens ?? 0;
             }
         },
 
-        async onError(_ctx: RoundContext, _error: Error): Promise<RecoveryAction> {
+        async onError(_ctx: ExchangeContext, _error: Error): Promise<RecoveryAction> {
             return { action: 'fail' };
         },
     };
@@ -113,7 +113,7 @@ export function createErrorRecoveryMiddleware(config: ErrorRecoveryConfig = {}, 
     return {
         name: '02-error-recovery',
 
-        async onError(ctx: RoundContext, error: Error): Promise<RecoveryAction> {
+        async onError(ctx: ExchangeContext, error: Error): Promise<RecoveryAction> {
             const key = ctx.sessionId;
             const count = (retryCounts.get(key) ?? 0) + 1;
             retryCounts.set(key, count);
@@ -169,7 +169,7 @@ export function createBackPressureMiddleware(harnessImpl?: ILoopMiddleware): ILo
     return {
         name: '04-back-pressure',
 
-        async afterRound(_ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
+        async afterExchange(_ctx: ExchangeContext, result: RoundResult): Promise<ControlDirective | void> {
             // Check for tool errors that indicate back-pressure failure
             const errors = result.toolResults.filter(r => r.isError);
             if (errors.length > 0) {
@@ -217,7 +217,7 @@ export function createSkillsMiddleware(harnessImpl?: ILoopMiddleware): ILoopMidd
  * Truncation detection middleware — replaces the AutoContinue while(true)
  * loop in TaskRunner.executeTask().
  *
- * On each afterRound, checks if the assistant output was truncated (via
+ * On each afterExchange, checks if the assistant output was truncated (via
  * finish_reason='length' or unclosed Markdown structures). If truncated,
  * injects a continue prompt so the LoopExecutor automatically continues.
  *
@@ -235,7 +235,7 @@ export function createTruncationDetectionMiddleware(
     return {
         name: '07-truncation-detection',
 
-        async afterRound(_ctx: RoundContext, result: RoundResult): Promise<ControlDirective | void> {
+        async afterExchange(_ctx: ExchangeContext, result: RoundResult): Promise<ControlDirective | void> {
             if (!cfg.enabled) return;
             if (continuationCount >= cfg.maxContinuations) return;
 

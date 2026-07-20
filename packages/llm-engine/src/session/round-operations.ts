@@ -14,6 +14,7 @@ import {
     SessionOrigin,
     HistoryPolicy,
 } from '../core/types';
+import type { SendIntent } from '@itookit/common';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { SessionState } from './session-state';
 import { SessionRegistry } from './session-registry';
@@ -47,6 +48,7 @@ export class RoundOperations {
         overrides?: ExecutionOverrides,
         origin?: SessionOrigin,
         historyPolicy?: HistoryPolicy,
+        sendIntent?: SendIntent,
     ): Promise<void> {
         const { sessionId, nodeId, runtime, state } = this.registry.ensureBound();
 
@@ -63,7 +65,7 @@ export class RoundOperations {
         });
 
         await this.taskRunner.submit(
-            { sessionId, nodeId, text, files, agentId, overrides, origin, historyPolicy },
+            { sessionId, nodeId, text, files, agentId, overrides, origin, historyPolicy, sendIntent },
             runtime
         );
     }
@@ -72,6 +74,24 @@ export class RoundOperations {
         if (this.registry.boundSessionId) {
             this.taskRunner.abort(this.registry.boundSessionId);
         }
+    }
+
+    async setContextMode(
+        roundIds: string[],
+        mode: 'include' | 'exclude',
+        scope: 'node' | 'subtree' = 'subtree',
+    ): Promise<{ profileId: string; revision: number }> {
+        const { sessionId, nodeId } = this.registry.ensureBound();
+        const log = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const manifest = await log.loadManifest();
+        return log.setRoundContextRules(manifest.currentBranch, roundIds, mode, scope);
+    }
+
+    async getContextModes(roundIds: string[]): Promise<Record<string, 'include' | 'exclude' | 'summary'>> {
+        const { sessionId, nodeId } = this.registry.ensureBound();
+        const log = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const manifest = await log.loadManifest();
+        return log.getRoundContextModes(manifest.currentBranch, roundIds);
     }
 
     // ================================================================
@@ -473,7 +493,7 @@ export class RoundOperations {
                 type: 'branch:switched',
                 payload: {
                     branchName,
-                    headRoundId: m2.currentHead,
+                    headRoundId: m2.currentHead ?? newPersistedNodeId,
                     branchRootRoundId: newPersistedNodeId,
                     reason: 'create',
                     displayPosition: 'top',

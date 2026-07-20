@@ -31,6 +31,8 @@ export interface HistoryViewOptions {
     onScroll?: () => void;
     /** 点击错误气泡中的"配置连接"按钮时触发（通常导航到 settings/connections） */
     onNavigateSettings?: () => void;
+    /** Workspace-level notification used when the history pane is hidden. */
+    onHistoryActivity?: (kind: 'update' | 'error', error?: Error) => void;
 }
 
 /**
@@ -59,10 +61,12 @@ export class HistoryView implements IHistoryPresenter {
     private newContentIndicator: HTMLElement | null = null;
     private bus?: IEditorEventBus;
     private suppressScrollHighlight = false;
+    private onHistoryActivity?: HistoryViewOptions['onHistoryActivity'];
 
     constructor(container: HTMLElement, options: HistoryViewOptions) {
         this.container = container;
         this.bus = options.bus;
+        this.onHistoryActivity = options.onHistoryActivity;
 
         const ctx: RendererContext = {
             nodeId: options.nodeId,
@@ -176,6 +180,7 @@ export class HistoryView implements IHistoryPresenter {
     }
 
     renderError(error: Error): void {
+        this.onHistoryActivity?.('error', error);
         this.container.querySelector('.llm-ui-error-banner')?.remove();
 
         const banner = document.createElement('div');
@@ -280,6 +285,11 @@ export class HistoryView implements IHistoryPresenter {
     }
 
     processEvent(event: SessionEvent): void {
+        if (event.type === 'finished' || event.type === 'message:appended') {
+            this.onHistoryActivity?.('update');
+        } else if (event.type === 'error') {
+            this.onHistoryActivity?.('error');
+        }
         this.eventProcessor.push(event);
     }
 

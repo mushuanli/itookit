@@ -1,13 +1,18 @@
 // @file: llm-ui/components/FloatingNavPanel.ts
 
-import type { INavigationPresenter, NavPanelData, ChatNavItem } from '../domain/ports/INavigationPresenter';
+import type { INavigationPresenter, NavPanelData, ChatNavItem, NavigatorWorkspaceState } from '../domain/ports/INavigationPresenter';
 import { formatTime } from '../utils/timeUtils';
 import { IconTemplates } from './templates/IconTemplates';
 import type { IEditorEventBus } from '../domain/events';
 import type { BranchItem } from '../domain/types';
 import { EventCleanup, TimerManager } from './common';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
-import { showConfirmDialog } from '@itookit/common';
+import { showConfirmDialog, Toast } from '@itookit/common';
+
+export interface FloatingNavWorkspaceActions {
+    onToggleDag: () => void;
+    onSetContext: (roundIds: string[], mode: 'include' | 'exclude') => Promise<void>;
+}
 
 
 /**
@@ -30,13 +35,18 @@ export class FloatingNavPanel implements INavigationPresenter {
     private lastSelectedIndex = -1;
     private selectedIds = new Set<string>();
     private filterBranch: string | null = null;
+    private workspaceState: NavigatorWorkspaceState = { dagVisible: false };
 
     private bus: IEditorEventBus;
     private events = new EventCleanup();
     private timers = new TimerManager();
     private panelEvents = new EventCleanup();
 
-    constructor(private container: HTMLElement, bus: IEditorEventBus) {
+    constructor(
+        private container: HTMLElement,
+        bus: IEditorEventBus,
+        private workspaceActions?: FloatingNavWorkspaceActions,
+    ) {
         this.bus = bus;
     }
 
@@ -68,6 +78,11 @@ export class FloatingNavPanel implements INavigationPresenter {
 
     toggle(): void {
         this._isVisible ? this.hide() : this.show();
+    }
+
+    setWorkspaceState(state: NavigatorWorkspaceState): void {
+        this.workspaceState = { ...state };
+        this.syncWorkspaceSwitches();
     }
 
     destroy(): void {
@@ -139,6 +154,22 @@ export class FloatingNavPanel implements INavigationPresenter {
 
             case 'next':
                 this.navigateNext();
+                break;
+
+            case 'toggle-context':
+                await this.toggleContextForSelectionOrAll();
+                break;
+
+            case 'toggle-dag':
+                this.workspaceActions?.onToggleDag();
+                break;
+
+            case 'context-include':
+                await this.setSelectedContextMode('include');
+                break;
+
+            case 'context-exclude':
+                await this.setSelectedContextMode('exclude');
                 break;
 
             // --- 远程操作：emit 意图，等数据回流 ---
@@ -359,8 +390,18 @@ export class FloatingNavPanel implements INavigationPresenter {
         this.bus.emit('nav:scrollTo', { sessionId: id });
     }
 
-    private handleItemAction(action: string, sessionId: string, _index: number): void {
+    private handleItemAction(action: string, sessionId: string, index: number): void {
         switch (action) {
+            case 'toggle-round-context': {
+                const item = this.filteredItems[index];
+                if (item?.roundId) {
+                    void this.applyContextMode(
+                        [item.roundId],
+                        item.contextMode === 'exclude' ? 'include' : 'exclude',
+                    );
+                }
+                break;
+            }
             case 'prev-branch':
             case 'next-branch':
                 this.bus.emit('branch:switchById', { headNodeId: sessionId });
@@ -399,11 +440,15 @@ export class FloatingNavPanel implements INavigationPresenter {
         const branchBarHtml = FloatingNavPanelTemplates.renderBranchBar(
             this.branches, this.filterBranch
         );
+        const contextItems = hasSelection
+            ? this.filteredItems.filter(item => this.selectedIds.has(item.id))
+            : this.filteredItems;
 
         this.panel.innerHTML = FloatingNavPanelTemplates.renderPanel(
             currentUserIdx, totalUsers,
             hasSelection, isAllSelected, this.selectedIds.size,
-            'list', listContent, branchBarHtml
+            'list', listContent, branchBarHtml, this.workspaceState,
+            contextItems.some(item => item.contextMode !== 'exclude'),
         );
 
         this.container.appendChild(this.panel);
@@ -442,7 +487,7 @@ export class FloatingNavPanel implements INavigationPresenter {
             this.panelEvents.add(closeBtn, 'click', () => this.hide());
         }
 
-        this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__btn').forEach(btn => {
+        this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__btn, .llm-nav-panel__view-switch').forEach(btn => {
             this.panelEvents.add(btn, 'click', ((e: MouseEvent) => {
                 e.stopPropagation();
                 this.handleToolbarAction(btn.dataset.action);
@@ -666,6 +711,53 @@ export class FloatingNavPanel implements INavigationPresenter {
         );
         actionsGroup?.classList.toggle('visible', hasSelection);
         viewGroup?.classList.toggle('hidden', hasSelection);
+    }
+
+    private selectedRoundIds(): string[] {
+        const selected = this.filteredItems.filter(item => this.selectedIds.has(item.id));
+        return [...new Set(selected.map(item => item.roundId).filter(Boolean))];
+    }
+
+    private async setSelectedContextMode(mode: 'include' | 'exclude'): Promise<void> {
+        const roundIds = this.selectedRoundIds();
+        if (roundIds.length === 0) return;
+        await this.applyContextMode(roundIds, mode);
+    }
+
+    private async toggleContextForSelectionOrAll(): Promise<void> {
+        const selected = this.selectedRoundIds();
+        const roundIds = selected.length > 0
+            ? selected
+            : [...new Set(this.filteredItems.map(item => item.roundId).filter(Boolean))];
+        if (roundIds.length === 0) return;
+        const target = new Set(roundIds);
+        const hasIncluded = this.allItems.some(item => target.has(item.roundId) && item.contextMode !== 'exclude');
+        await this.applyContextMode(roundIds, hasIncluded ? 'exclude' : 'include');
+    }
+
+    private async applyContextMode(roundIds: string[], mode: 'include' | 'exclude'): Promise<void> {
+        try {
+            await this.workspaceActions?.onSetContext(roundIds, mode);
+            const targets = new Set(roundIds);
+            this.allItems.forEach(item => {
+                if (targets.has(item.roundId)) item.contextMode = mode;
+            });
+            this.applyFilter();
+            this.render();
+        } catch (error) {
+            Toast.error(error instanceof Error ? error.message : 'Failed to update LLM context');
+        }
+    }
+
+    private syncWorkspaceSwitches(): void {
+        if (!this.panel) return;
+        const sync = (action: string, active: boolean, label: string): void => {
+            const button = this.panel?.querySelector<HTMLElement>(`[data-action="${action}"]`);
+            button?.classList.toggle('is-active', active);
+            button?.setAttribute('aria-pressed', String(active));
+            button?.setAttribute('title', `${active ? (label === 'DAG Designer' ? 'Close' : 'Hide') : (label === 'DAG Designer' ? 'Open' : 'Show')} ${label}`);
+        };
+        sync('toggle-dag', this.workspaceState.dagVisible, 'DAG Designer');
     }
 
     private updateHighlight(): void {

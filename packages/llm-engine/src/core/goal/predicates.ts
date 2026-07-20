@@ -5,7 +5,7 @@
 //   - shell: exit-code-based completion check
 //   - llm-judge: LLM-based structured verdict
 
-import type { Predicate, RoundResult, GoalNode, Verdict } from '@itookit/common';
+import type { Predicate, RoundResult, AgentRunSpec, Verdict } from '@itookit/common';
 import type { ILLMService } from '@itookit/common';
 
 // ─── truncation ──────────────────────────────────────────────────────
@@ -19,7 +19,7 @@ import type { ILLMService } from '@itookit/common';
  * False negative preferred over false positive (don't continue when done).
  */
 export function createTruncationPredicate(): Predicate {
-    return async (result: RoundResult, _node: GoalNode) => {
+    return async (result: RoundResult, _node: AgentRunSpec) => {
         // Check if any assistant text block indicates truncation
         const hasTruncation = result.assistantBlocks.some(block => {
             if (block.type === 'text' || block.type === 'thinking') {
@@ -76,7 +76,7 @@ function hasTruncationSignals(content: string): boolean {
 export function createShellPredicate(
     runShell: (command: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>,
 ): Predicate {
-    return async (result: RoundResult, _node: GoalNode) => {
+    return async (result: RoundResult, _node: AgentRunSpec) => {
         // Extract shell command from the last assistant block
         const shellBlock = result.assistantBlocks.find(b => b.type === 'tool_use');
         if (!shellBlock) return { status: 'done' };
@@ -120,12 +120,12 @@ export function createLLMJudgePredicate(
 ): Predicate {
     const verifierPrompt = options?.verifierPrompt ?? DEFAULT_VERIFIER_PROMPT;
 
-    return async (result: RoundResult, node: GoalNode) => {
+    return async (result: RoundResult, node: AgentRunSpec) => {
         const output = summarizeResult(result);
 
         const messages = [
             { role: 'system' as const, content: verifierPrompt },
-            { role: 'user' as const, content: `Task: ${node.task.prompt}\n\nOutput:\n${output}` },
+            { role: 'user' as const, content: `Task: ${node.prompt}\n\nOutput:\n${output}` },
         ];
 
         try {
@@ -148,11 +148,10 @@ const DEFAULT_VERIFIER_PROMPT = `You are a task completion verifier.
 Analyze the output and decide:
 - done: the task is fully and correctly completed
 - retry: the task needs more work (provide specific feedback)
-- hitl: the task requires human input to proceed
 - failed: the task cannot be completed
 
 Respond in JSON only:
-{"status":"done|retry|hitl|failed","feedback":"explanation"}`;
+{"status":"done|retry|failed","feedback":"explanation"}`;
 
 function summarizeResult(result: RoundResult): string {
     const parts: string[] = [];
@@ -171,31 +170,29 @@ function summarizeResult(result: RoundResult): string {
 
 function parseVerdict(content: string): Verdict {
     try {
-        // Try to extract JSON from the response
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
-            if (['done', 'retry', 'hitl', 'failed'].includes(parsed.status)) {
+            if (['done', 'retry', 'failed'].includes(parsed.status)) {
                 if (parsed.status === 'retry') {
                     return { status: 'retry', feedback: parsed.feedback ?? content };
-                }
-                if (parsed.status === 'hitl') {
-                    return { status: 'hitl', request: { requestId: '', reason: 'request_input', message: parsed.feedback ?? '' } };
                 }
                 if (parsed.status === 'failed') {
                     return { status: 'failed', reason: parsed.feedback ?? '' };
                 }
                 return { status: 'done' };
             }
+            // Map legacy 'hitl' to 'failed' with reason
+            if (parsed.status === 'hitl') {
+                return { status: 'failed', reason: `HITL required but not supported: ${parsed.feedback ?? ''}` };
+            }
         }
     } catch { /* fall through */ }
 
-    // Heuristic fallback
     const lower = content.toLowerCase();
     if (lower.includes('done') || lower.includes('complete')) return { status: 'done' };
     if (lower.includes('retry')) return { status: 'retry', feedback: content };
-    if (lower.includes('hitl') || lower.includes('human')) return { status: 'hitl', request: { requestId: '', reason: 'request_input', message: content } };
-    if (lower.includes('fail')) return { status: 'failed', reason: content };
+    if (lower.includes('fail') || lower.includes('hitl') || lower.includes('human')) return { status: 'failed', reason: content };
 
     return { status: 'done' };
 }

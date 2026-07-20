@@ -222,6 +222,7 @@ export class TaskRunner {
             // Determine execution mode — always falls back to defaultMode (eliminates executeTask fallback path)
             const mode: string =
                 task.input.overrides?.mode ??
+                (task.input.sendIntent?.execution.kind === 'flow' ? 'graph' : undefined) ??
                 (task.input.overrides?.useHarness ? 'loop' : undefined) ??
                 this.executorRegistry.defaultMode;
 
@@ -289,6 +290,7 @@ export class TaskRunner {
         // 3. Resolve executor config
         let executorConfig = await this.agentResolver.resolve(input.agentId);
         if (input.overrides) {
+            const beforeConnId = executorConfig.connectionId;
             executorConfig = this.applyOverrides(executorConfig, input.overrides);
             // Re-resolve model when connection or tier override is present
             if (input.overrides.connectionId || input.overrides.modelTier) {
@@ -297,6 +299,13 @@ export class TaskRunner {
                     modelTier: input.overrides.modelTier,
                 });
             }
+            log.info('setupTaskExecution: connection override applied', {
+                agentId: input.agentId,
+                before: beforeConnId,
+                after: executorConfig.connectionId,
+                overrideConnId: input.overrides.connectionId,
+                finalModel: executorConfig.model,
+            });
         }
 
         // 4. Create assistant node with pre-allocated turn ID
@@ -361,6 +370,30 @@ export class TaskRunner {
         }
 
         try {
+            // ── Freeze branch at submit time ──────────────────────────────
+            // Capture the active branch before any async work.
+            // Branch switches during execution must not change the context source.
+            let branchRef = 'main';
+            try {
+                const tm = await (logAdapter as RoundLog).loadManifest();
+                branchRef = tm.currentBranch || 'main';
+                if (task.input.sendIntent?.branch.mode === 'fork') {
+                    const sourceRoundId = task.input.sendIntent.branch.baseRoundId ?? tm.currentHead;
+                    if (sourceRoundId) {
+                        const source = await (logAdapter as RoundLog).readRound(sourceRoundId);
+                        if (source?.payload.some(message => message.role === 'user')) {
+                            const forked = await (logAdapter as RoundLog).forkUserRound(sourceRoundId, {
+                                branchName: task.input.sendIntent.branch.newBranchName,
+                                createdFrom: 'manual',
+                            });
+                            branchRef = forked.branchName;
+                        }
+                    }
+                }
+            } catch {
+                // Fallback: use 'main' if manifest is unavailable
+            }
+
             const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles, preallocatedRoundId } =
                 await this.setupTaskExecution(task, state);
 
@@ -435,14 +468,7 @@ export class TaskRunner {
             this.activeActors.set(sessionId, actor);
 
             // ── Build LoopContext ──────────────────────────────────────────
-            // Resolve current branch from RoundLog manifest (camelCase fields).
-            let branchRef = 'main';
-            try {
-                const tm = await (logAdapter as RoundLog).loadManifest();
-                branchRef = tm.currentBranch || 'main';
-            } catch {
-                // Fallback: use 'main' if manifest is unavailable
-            }
+            // branchRef was frozen at submit time above.
 
             // Wrap the log so fold() always appends the pending user message
             // for the LLM API call. RoundLog writes userMsg to round.payload
@@ -572,6 +598,22 @@ export class TaskRunner {
                     }));
                 }
                 round.payload = [userMsg, ...round.payload];
+                // A submitted ChatInput creates a top-level interaction round.
+                // Flow/agent internals can later append contained child rounds;
+                // containment is intentionally independent from `parents`.
+                round.kind = 'interaction';
+                if (input.sendIntent?.execution.kind === 'flow') {
+                    round.producedByFlowRunId = input.sendIntent.execution.flowId;
+                }
+                if (input.sendIntent?.retention.mode === 'temporary' || input.overrides?.retentionMode === 'temporary') {
+                    round.exposure = 'internal';
+                    round.meta = {
+                        ...round.meta,
+                        historyPolicy: 'exclude',
+                        defaultContextMode: 'exclude',
+                        defaultContextScope: 'subtree',
+                    };
+                }
                 if (chainParent) {
                     round.parents = [chainParent, ...(round.parents || [])];
                 }

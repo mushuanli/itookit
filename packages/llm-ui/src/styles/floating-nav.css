@@ -52,6 +52,41 @@
     flex: 1;
 }
 
+.llm-nav-panel__workspace-switches {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px;
+    border: 1px solid var(--vscode-panel-border, var(--llm-border-color));
+    border-radius: var(--llm-radius-md);
+    background: var(--vscode-input-background, rgba(255, 255, 255, 0.04));
+}
+
+.llm-nav-panel__view-switch {
+    min-height: 26px;
+    padding: 3px 8px;
+    border: none;
+    border-radius: var(--llm-radius-sm);
+    background: transparent;
+    color: var(--vscode-descriptionForeground, var(--llm-text-muted));
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font: inherit;
+    font-size: 11px;
+}
+
+.llm-nav-panel__view-switch:hover {
+    background: var(--vscode-toolbar-hoverBackground, var(--llm-bg-hover));
+    color: var(--vscode-foreground, var(--llm-text-primary));
+}
+
+.llm-nav-panel__view-switch.is-active {
+    background: var(--vscode-button-background, var(--llm-color-primary));
+    color: var(--vscode-button-foreground, #fff);
+}
+
 .llm-nav-panel__counter {
     font-size: 12px;
     color: var(--vscode-descriptionForeground, var(--llm-text-muted));
@@ -367,6 +402,52 @@
     background: rgba(255, 107, 107, 0.15);
     color: var(--llm-color-error);
 }
+
+.llm-nav-panel__btn--context-include,
+.llm-nav-panel__btn--context-exclude {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.llm-nav-panel__btn--context-include:hover { color: var(--vscode-testing-iconPassed, #3fb950); }
+.llm-nav-panel__btn--context-exclude:hover { color: var(--vscode-testing-iconFailed, #f85149); }
+
+.llm-nav-item--context-excluded {
+    opacity: 0.62;
+}
+
+.llm-nav-item__context-badge {
+    padding: 1px 5px;
+    border: 1px solid var(--vscode-testing-iconFailed, #f85149);
+    border-radius: 999px;
+    color: var(--vscode-testing-iconFailed, #f85149);
+    font-size: 9px;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.llm-nav-item__context-toggle {
+    min-height: 22px;
+    padding: 1px 6px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--vscode-descriptionForeground, var(--llm-text-muted));
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font: inherit;
+    font-size: 10px;
+}
+
+.llm-nav-item__context-toggle:hover {
+    border-color: var(--vscode-focusBorder, var(--llm-color-primary));
+    color: var(--vscode-foreground, var(--llm-text-primary));
+}
+
+.llm-nav-item__context-toggle.is-included { color: var(--vscode-testing-iconPassed, #3fb950); }
+.llm-nav-item__context-toggle.is-excluded { color: var(--vscode-testing-iconFailed, #f85149); }
 
 .llm-nav-panel__btn--checkbox {
     position: relative;
@@ -807,6 +888,15 @@
     .llm-nav-panel__header {
         border-radius: 0;
         padding-top: max(12px, env(safe-area-inset-top, 12px));
+    }
+
+    .llm-nav-panel__view-switch span:last-child {
+        display: none;
+    }
+
+    .llm-nav-item__context-toggle-label,
+    .llm-nav-item__context-badge {
+        display: none;
     }
 
     .llm-nav-panel__footer {

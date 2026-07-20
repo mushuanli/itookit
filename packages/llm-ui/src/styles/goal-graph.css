@@ -1,0 +1,37 @@
+.llm-goal-editor { height: 100%; display: flex; flex-direction: column; background: var(--llm-bg-primary); }
+.llm-goal-editor__toolbar { display: flex; align-items: center; gap: 8px; padding: 10px; border-bottom: 1px solid var(--llm-border-color); background: var(--llm-bg-secondary); }
+.llm-goal-editor button, .llm-goal-inspector button { border: 1px solid var(--llm-border-color); border-radius: 6px; padding: 6px 9px; background: var(--llm-bg-primary); color: var(--llm-text-primary); cursor: pointer; }
+.llm-goal-editor button:disabled, .llm-goal-inspector button:disabled { opacity: .45; cursor: default; }
+.llm-goal-editor__name { min-width: 120px; flex: 0 1 220px; border: 1px solid var(--llm-border-color); border-radius: 6px; padding: 6px 8px; background: var(--llm-bg-primary); color: var(--llm-text-primary); }
+.llm-goal-editor__run { background: var(--llm-color-primary) !important; color: white !important; }
+.llm-goal-editor__status { margin-left: auto; color: var(--llm-text-muted); font-size: 12px; }
+.llm-goal-editor__body { flex: 1; min-height: 0; overflow: auto; padding: 16px; }
+.llm-goal-editor__canvas { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; align-items: start; }
+.llm-goal-node { border: 1px solid var(--llm-border-color); border-radius: 10px; padding: 12px; background: var(--llm-bg-secondary); box-shadow: 0 2px 8px rgba(0,0,0,.06); cursor: pointer; }
+.llm-goal-node:hover, .llm-goal-node.is-selected { border-color: var(--llm-color-primary); }
+.llm-goal-node.is-invalid { box-shadow: inset 3px 0 var(--llm-color-error); }
+.llm-goal-node__header, .llm-goal-node__footer { display: flex; align-items: center; gap: 7px; }
+.llm-goal-node__header strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.llm-goal-node__version { font-size: 10px; color: var(--llm-text-muted); }
+.llm-goal-node__agent { margin-top: 8px; color: var(--llm-color-primary); font-size: 12px; }
+.llm-goal-node__prompt { height: 42px; overflow: hidden; margin: 8px 0; color: var(--llm-text-secondary); font-size: 12px; white-space: pre-wrap; }
+.llm-goal-node__footer { border-top: 1px solid var(--llm-border-color); padding-top: 8px; font-size: 10px; color: var(--llm-text-muted); }
+.llm-goal-node__footer span { flex: 1; }
+.llm-goal-node__footer button { padding: 2px 5px; font-size: 10px; }
+.llm-goal-editor__empty { width: min(420px, 100%); min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; border-style: dashed !important; color: var(--llm-text-muted) !important; }
+.llm-goal-editor__edges, .llm-goal-editor__issues { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px; }
+.llm-goal-editor__section-title { width: 100%; font-weight: 600; font-size: 12px; color: var(--llm-text-secondary); }
+.llm-goal-edge { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; }
+.llm-goal-edge.is-selected { border-color: var(--llm-color-primary); }
+.llm-goal-edge__kind { padding: 1px 5px; border-radius: 8px; background: var(--llm-bg-tertiary); text-transform: uppercase; font-size: 9px; }
+.llm-goal-edge small { color: var(--llm-text-muted); }
+.llm-goal-editor__issues { display: block; color: var(--llm-color-error); font-size: 12px; }
+.llm-goal-editor__issues > div { margin: 5px 0; }
+.llm-goal-editor__muted { color: var(--llm-text-muted); font-size: 12px; }
+.llm-goal-inspector { padding: 14px; color: var(--llm-text-primary); }
+.llm-goal-inspector__header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.llm-goal-inspector label { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; color: var(--llm-text-secondary); font-size: 12px; }
+.llm-goal-inspector input, .llm-goal-inspector select, .llm-goal-inspector textarea { width: 100%; box-sizing: border-box; padding: 7px; border: 1px solid var(--llm-border-color); border-radius: 6px; background: var(--llm-bg-primary); color: var(--llm-text-primary); font: inherit; }
+.llm-goal-inspector hr { margin: 18px 0; border: 0; border-top: 1px solid var(--llm-border-color); }
+.llm-goal-inspector__danger { color: var(--llm-color-error) !important; margin-top: 14px; }
+@media (max-width: 768px) { .llm-goal-editor__toolbar { flex-wrap: wrap; } .llm-ui-workspace__inspector { width: min(320px, 80vw); } }
