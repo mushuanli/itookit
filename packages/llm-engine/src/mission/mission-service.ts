@@ -3,7 +3,7 @@
 //
 // Responsibilities:
 //   - Create missions: run multi-angle planning → generate MissionPlan → persist
-//   - Run scheduling loop via MissionScheduler
+//   - Build a TaskGraph flow for mission execution
 //   - Cancel / query missions
 
 import type {
@@ -11,7 +11,6 @@ import type {
     ISubAgentRouter,
     IAgentLookup,
     IHITLQueue,
-    ILLMService,
     MissionPlan,
     MissionConfig,
     MissionPaths,
@@ -21,20 +20,17 @@ import type {
 import { generateUUID } from '@itookit/common';
 import { TodoStateManager } from './todo-state';
 import { ResultPersistenceService } from './result-persister';
-import { MissionScheduler } from './mission-scheduler';
-import { LiteSubAgentRouter } from './lite-sub-agent-router';
-import type { IToolExecutor } from '../core/types';
+import { MissionTaskGraphRunner } from './mission-task-graph-runner';
+import type { TaskGraphReconciler } from '../task-graph/reconciler';
+import type { TaskExecutorRegistry } from '../task-graph/registry';
 
 export interface MissionServiceOptions {
     vfs: IVFSManager;
-    /** ISubAgentRouter (from harness or LiteSubAgentRouter). Auto-created if not provided. */
-    router?: ISubAgentRouter;
+    /** AgentTask capability executor supplied by the active harness. */
+    router: ISubAgentRouter;
     agentLookup: IAgentLookup;
     hitlQueue?: IHITLQueue;
-    /** Required if router is not provided — used to auto-create LiteSubAgentRouter */
-    llmService?: ILLMService;
-    /** Optional — used by LiteSubAgentRouter for tool execution */
-    toolExecutor?: IToolExecutor;
+    taskGraph: { reconciler: TaskGraphReconciler; registry: TaskExecutorRegistry };
 }
 
 const PLANNER_SYSTEM_PROMPT = `You are a mission planner. Given a goal and context, decompose it into concrete tasks.
@@ -64,23 +60,18 @@ export class MissionService {
     private readonly todoState: TodoStateManager;
     private readonly resultPersistence: ResultPersistenceService;
     private readonly router: ISubAgentRouter;
-    private readonly llmService: ILLMService | undefined;
     private readonly agentLookup: IAgentLookup;
     private readonly hitlQueue?: IHITLQueue;
+    private readonly taskGraph: MissionServiceOptions['taskGraph'];
     private readonly activeControllers = new Map<string, AbortController>();
 
     constructor(opts: MissionServiceOptions) {
         this.todoState = new TodoStateManager(opts.vfs);
         this.resultPersistence = new ResultPersistenceService(opts.vfs);
-        this.router = opts.router ?? (() => {
-            if (!opts.llmService) {
-                throw new Error('MissionService: either router or llmService must be provided');
-            }
-            return new LiteSubAgentRouter(opts.llmService, opts.toolExecutor);
-        })();
+        this.router = opts.router;
         this.agentLookup = opts.agentLookup;
-        this.llmService = opts.llmService;
         this.hitlQueue = opts.hitlQueue;
+        this.taskGraph = opts.taskGraph;
     }
 
     async init(): Promise<void> {
@@ -120,14 +111,14 @@ export class MissionService {
         const controller = new AbortController();
         this.activeControllers.set(missionId, controller);
 
-        const scheduler = new MissionScheduler({
+        const runner = new MissionTaskGraphRunner({
             todoState: this.todoState,
             router: this.router,
             resultPersistence: this.resultPersistence,
-            llmService: this.llmService!,
+            taskGraph: this.taskGraph,
         });
 
-        scheduler.run(missionId, controller.signal)
+        runner.run(missionId, controller.signal)
             .then(async () => {
                 const finalPlan = await this.todoState.getPlan(missionId);
                 const allDone = finalPlan?.todos.every(t => t.status === 'done');

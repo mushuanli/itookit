@@ -96,12 +96,11 @@ async function driveGenerator(
         const ev = result.value;
 
         if (ev.type === 'round:start') {
-            // Track the in-flight round so DraftArea can persist the round boundary
-            // and crash-resume can reconstruct state correctly.
-            ctx.log.draft().setCurrent({ id: ev.roundId, parents: [], payload: [], meta: { createdAt: Date.now(), origin: 'loop' } });
             session.emit(ev);
         } else if (ev.type === 'await_signal') {
-            // Persist the pause point so crash-resume can recover
+            // The UI must see the request before execution starts waiting.
+            session.emit(ev);
+            // Checkpoint is diagnostic only; cross-restart resume is unsupported.
             await ctx.log.draft().checkpoint(ev.request);
 
             // Suspend — may be hours/days

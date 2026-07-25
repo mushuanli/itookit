@@ -1,6 +1,14 @@
 // @file: llm-engine/src/core/types.ts
 
-import type { ModelTier, ChatAttachment, IToolService, SendIntent } from '@itookit/common';
+import type {
+    AgentDefinition,
+    ChatAttachment,
+    FlowId,
+    IToolService,
+    ModelTier,
+    SendIntent,
+    TaskGraphRunId,
+} from '@itookit/common';
 
 // ═══════════════════════════════════════════════════════════════
 // Core types (NodeStatus, ExecutorConfig, ExecutorType — consolidated in llm-engine)
@@ -38,6 +46,11 @@ export interface ExecutorConfig {
     reasoningEffort?: 'low' | 'medium' | 'xhigh';
     connectionId?: string;
     systemPrompt?: string;
+    /** Frozen AgentDefinition version used for reproducible AgentTasks. */
+    agentVersion?: string;
+    capabilityPolicy?: AgentDefinition['capabilityPolicy'];
+    memoryPolicy?: AgentDefinition['memoryPolicy'];
+    defaultContextPolicy?: AgentDefinition['defaultContextPolicy'];
     constraints?: {
         maxRetries?: number;
         timeout?: number;
@@ -366,7 +379,7 @@ export interface TaskInput {
     sendIntent?: SendIntent;
     /** Explicit Round persistence target. */
     roundTarget?:
-        | { mode: 'append-new'; parentRoundId?: string }
+        | { mode: 'append-new'; parentRoundId?: string; roundId?: string }
         | { mode: 'update-existing'; targetRoundId: string };
 }
 
@@ -390,6 +403,13 @@ export interface ExecutionTask {
     priority: number;
     createdAt: number;
     abortController: AbortController;
+    /** Context/definition pointers frozen before the task enters the queue. */
+    frozen?: {
+        branchRef: string;
+        branchHead: string | null;
+        contextProfile?: { id: string; revision: number };
+        agentVersion: string;
+    };
 }
 
 /**
@@ -517,6 +537,10 @@ export type RegistryEvent =
     | { type: 'session_unread_updated'; payload: { sessionId: string; count: number } }
     | { type: 'pool_status_changed'; payload: { running: number; queued: number; maxConcurrent: number } }
     | { type: 'background_task_completed'; payload: { sessionId: string } }
+    | {
+        type: 'task_graph_run_projected';
+        payload: { sessionId: string; graphRunId: TaskGraphRunId; flowId: FlowId; revision: number };
+    }
     /**
      * 后台会话打开了 TTY 交互进程。
      *

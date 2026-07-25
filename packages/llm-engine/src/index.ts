@@ -56,18 +56,6 @@ export {
     createTruncationDetectionMiddleware,
 } from './executors';
 
-// ── LLM 2.0: Goal control loop (S5) ─────────────────────────────────
-
-export {
-    DependencyScheduler,
-    CycleError as GoalCycleError,
-    reconcile,
-    createTruncationPredicate,
-    createShellPredicate,
-    createLLMJudgePredicate,
-} from './core/goal';
-export type { SchedulerSnapshot, ReconcileOptions } from './core/goal';
-
 // ============================================
 // 会话管理
 // ============================================
@@ -109,8 +97,12 @@ export { ChatEngine } from './persistence/chat-engine';
 export { RoundLog, roundToProjection, hasEffectiveAssistant } from './persistence/round-log';
 export { RoundGraphService, RoundGraphError } from './persistence/round-graph-service';
 export { VFSDraftArea } from './persistence/draft-area';
-export { GoalDraftService, GoalDraftConflictError } from './persistence/goal-draft-service';
-export type { RemovedGoalNode } from './persistence/goal-draft-service';
+export {
+    FlowDefinitionStore,
+    FlowDraftVersionConflictError,
+} from './persistence/flow-definition-store';
+export * from './task-graph';
+export type { AgentRuntimeFactory } from './session/task-runner';
 export { migrateToRoundFormat } from './persistence/migration';
 export type { MigrationResult } from './persistence/migration';
 export type { RoundManifest, RoundProjection, PersistedRound, BranchMeta } from './persistence/round-types';
@@ -156,17 +148,12 @@ export { VFSAgentService } from './services/vfs-agent-service';
 export {
     TodoStateManager,
     ResultPersistenceService,
-    MissionScheduler,
+    MissionTaskGraphRunner,
     MissionService,
-    LiteSubAgentRouter,
-    // S5: Goal-based scheduling adapters
-    createMissionGoal,
-    createSubAgentLoopAdapter,
 } from './mission';
 export type {
-    MissionSchedulerOptions,
+    MissionTaskGraphRunnerOptions,
     MissionServiceOptions,
-    SubAgentLoopAdapterOptions,
 } from './mission';
 
 // ============================================
@@ -174,16 +161,14 @@ export type {
 // ============================================
 // File-based cross-session dependency system.
 // Each VFS file = a session; dependencies declared via SessionMetaStore.
-// GraphOrchestrator resolves the graph bottom-up and executes each session.
+// SessionTaskGraphRunner projects file dependencies into TaskGraphRun.
 
 export {
-    GraphOrchestrator,
+    SessionTaskGraphRunner,
     SessionMetaStore,
     CycleError,
     DEFAULT_SESSION_META,
-    // S5: Goal-based scheduling adapters
-    createGraphGoal,
-    createAgentRuntimeLoopAdapter,
+    createSessionFlow,
 } from './session-graph';
 export type {
     SessionMeta,
@@ -192,7 +177,7 @@ export type {
     SessionExecutionResult,
     GraphExecutionOptions,
     GraphEvent,
-    GraphGoalResult,
+    SessionFlowResult,
 } from './session-graph';
 
 // ============================================
@@ -222,6 +207,7 @@ import { IAgentConfigService } from './services/agent-service';
 import { IChatEngine } from './persistence/types';
 import { ChatEngine } from './persistence/chat-engine';
 import { SessionManager, createSessionManager } from './session/session-manager';
+import type { AgentRuntimeFactory } from './session/task-runner';
 import { initializePromptHistory } from './services/prompt-history-service';
 import { getExecutorRegistry } from './core/executor-registry';
 import { chatExecutor } from './executors/chat-executor';
@@ -231,6 +217,13 @@ import { ExtensionRegistry } from './core/extension-registry';
 import { createSessionPlugin } from './plugins/session-plugin';
 import { createVcsPlugin } from './plugins/vcs-plugin';
 import { createHistoryPlugin } from './plugins/history-plugin';
+import { createBuiltinTaskExecutorRegistry } from './task-graph/builtins';
+import { BUILTIN_TASK_KIND_DESCRIPTORS } from './task-graph/catalog';
+import { HarnessContributionRegistry } from './task-graph/registry';
+import { VfsTaskGraphRunStore, VfsTaskGraphEventStore, VfsArtifactStore, VfsAgentStateStore, VfsContextSnapshotStore } from './task-graph/vfs-stores';
+import { TaskGraphReconciler } from './task-graph/reconciler';
+import { FlowDefinitionStore } from './persistence/flow-definition-store';
+import { registerTaskGraphCommands, type TaskGraphCommandService } from './task-graph/commands';
 
 /**
  * Engine 初始化选项
@@ -244,6 +237,8 @@ export interface EngineInitOptions {
 
     /** 最大并发数 */
     maxConcurrent?: number;
+    /** Creates isolated tool/MCP/memory capabilities for each AgentTask. */
+    runtimeFactory?: AgentRuntimeFactory;
 
     /**
      * （可选）ILLMService 实例。
@@ -269,6 +264,7 @@ export interface EngineInitOptions {
 export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
     sessionManager: SessionManager;
     commandBus: CommandBus;
+    taskGraph: TaskGraphCommandService;
 }> {
     // S8: initializeKernel inlined — kernel package eliminated.
     // PluginManager was removed in S6a; KernelInitOptions.plugins/config were vestigial.
@@ -301,7 +297,7 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
     const sessionManager = createSessionManager(
         options.sessionEngine,
         options.agentService,
-        { maxConcurrent: options.maxConcurrent }
+        { maxConcurrent: options.maxConcurrent, runtimeFactory: options.runtimeFactory }
     );
 
     // Wire ILLMService for unified LLM access
@@ -311,6 +307,40 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
 
     // ── Plugin system: CommandBus + ExtensionRegistry ───────────────
     const commandBus = new CommandBus();
+    const taskExecutorRegistry = createBuiltinTaskExecutorRegistry();
+    const contributionRegistry = new HarnessContributionRegistry(taskExecutorRegistry);
+    contributionRegistry.register({
+        id: 'builtin',
+        version: '1',
+        schemaVersion: 1,
+        taskKinds: BUILTIN_TASK_KIND_DESCRIPTORS,
+    });
+    contributionRegistry.activate();
+    const harnessNodeId = 'harness-v3';
+    const taskRunStore = new VfsTaskGraphRunStore(sessionEngine, harnessNodeId, handler => taskExecutorRegistry.resolve(handler));
+    const taskEventStore = new VfsTaskGraphEventStore(sessionEngine, harnessNodeId);
+    const taskArtifactStore = new VfsArtifactStore(sessionEngine, harnessNodeId);
+    const taskContextSnapshotStore = new VfsContextSnapshotStore(sessionEngine, harnessNodeId);
+    const taskStateStore = new VfsAgentStateStore(sessionEngine, harnessNodeId);
+    const taskReconciler = new TaskGraphReconciler({
+        executorRegistry: taskExecutorRegistry,
+        runStore: taskRunStore,
+        eventStore: taskEventStore,
+        artifactStore: taskArtifactStore,
+        contextSnapshotStore: taskContextSnapshotStore,
+        stateStore: taskStateStore,
+    });
+    const taskGraph = registerTaskGraphCommands(commandBus, {
+        flowStore: new FlowDefinitionStore(sessionEngine, harnessNodeId, () => taskExecutorRegistry.keys()),
+        reconciler: taskReconciler,
+        runStore: taskRunStore,
+        eventStore: taskEventStore,
+        artifactStore: taskArtifactStore,
+        contextSnapshotStore: taskContextSnapshotStore,
+        taskExecutorRegistry,
+        contributionRegistry,
+    });
+    sessionManager.setTaskGraphRuntime({ reconciler: taskReconciler, registry: taskExecutorRegistry });
     const extensionRegistry = new ExtensionRegistry();
 
     // Register built-in plugins (dogfooding: they use the same public ICommandBus API)
@@ -326,5 +356,5 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
         commands: commandBus,
     });
 
-    return { sessionManager, commandBus };
+    return { sessionManager, commandBus, taskGraph };
 }

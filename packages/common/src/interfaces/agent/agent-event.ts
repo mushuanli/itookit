@@ -164,13 +164,23 @@ export interface AgentEventContextCompressed {
     reducedTokens: number;
 }
 
-// ─── Goal progress ───────────────────────────────────────────────────
+export interface AgentEventContextSnapshotCreated {
+    type: 'context:snapshot_created';
+    taskRunId: string;
+    snapshotId: string;
+    tokenCount: number;
+}
 
-export interface AgentEventGoalProgress {
-    type: 'goal:progress';
-    done: number;
-    total: number;
-    goalId: string;
+export interface EventEnvelope<T> {
+    eventId: string;
+    sequence: number;
+    occurredAt: number;
+    sessionId?: string;
+    goalId?: string;
+    taskRunId?: string;
+    causationId?: string;
+    correlationId?: string;
+    event: T;
 }
 
 // ─── Canonical union ─────────────────────────────────────────────────
@@ -198,4 +208,5 @@ export type AgentEvent =
     | AgentEventBudgetWarning
     | AgentEventBudgetExhausted
     | AgentEventContextCompressed
-    | AgentEventGoalProgress;
+    | AgentEventContextSnapshotCreated
+    ;

@@ -4,6 +4,8 @@
 // ── Executor components ──
 export { AgentLoopExecutor } from './executor/agent-loop-executor';
 export { HarnessLoopExecutor } from './executor/harness-loop-executor';
+export { HarnessAgentTaskExecutor, HARNESS_AGENT_TASK_HANDLER } from './executor/agent-task-executor';
+export type { HarnessAgentTaskRuntime } from './executor/agent-task-executor';
 export { BudgetController } from './executor/budget-controller';
 export { ErrorRecoveryService } from './executor/error-recovery';
 export { BackPressureValidator } from './executor/back-pressure';

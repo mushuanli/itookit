@@ -6,6 +6,7 @@ import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { INavigationPresenter, NavPanelData, NavigatorWorkspaceState } from '../domain/ports/INavigationPresenter';
 import type { IEditorEventBus } from '../domain/events';
 import type { ICommandBus } from '@itookit/common';
+import type { TaskKindDescriptor } from '@itookit/common';
 import type { SessionGroup } from '@itookit/llm-engine';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { NavDataBuilder } from '../services/NavDataBuilder';
@@ -24,6 +25,7 @@ export interface NavigationDeps {
     timers: TimerManager;
     getWorkspaceState: () => NavigatorWorkspaceState;
     onToggleDag: () => void;
+    onCreateTask: (descriptor: TaskKindDescriptor) => Promise<void>;
 }
 
 export class NavigationHelper {
@@ -163,6 +165,8 @@ export class NavigationHelper {
                             scope: 'subtree',
                         });
                     },
+                    listTaskKinds: () => this.deps.commands.execute<TaskKindDescriptor[]>('plugin.taskKinds.list'),
+                    onCreateTask: this.deps.onCreateTask,
                 },
             );
         }

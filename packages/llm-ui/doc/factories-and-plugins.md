@@ -5,10 +5,15 @@
 ### createLLMFactory
 
 ```typescript
-const factory = createLLMFactory(agentService: VFSAgentService): EditorFactory;
+const factory = createLLMFactory(agentService: VFSAgentService, deps?: {
+    llmService?: ILLMService;
+    commandBus?: ICommandBus;
+}): EditorFactory;
 ```
 
 返回 `EditorFactory`，供 `MemoryManager` 使用。包含去重（同一 nodeId 复用 promise）和自动创建文件（无 nodeId 时通过 `sessionEngine.createFile()` 创建）。
+
+`deps.commandBus` 传递给 `LLMWorkspaceEditor`，所有高层操作委托给 `commands.execute()`。
 
 ### createAgentEditorFactory / createSkillsEditorFactory
 
@@ -23,9 +28,15 @@ const factory = createSkillsEditorFactory(agentService: IAgentManagementService)
 LLMWorkspaceEditor
 ├── ChatInputView        ← 输入框 + /command + @mention + Skill 选择
 ├── HistoryView          ← 消息列表 + 流式渲染 + 折叠 + TTY 面板
+├── TaskGraphWorkbench   ← Flow 设计/运行工作台（按需）
 ├── BranchIndicatorView  ← 分支名 + 切换 + fork
 └── StatusIndicatorView  ← 连接状态 + token 用量
 ```
+
+Shell 通过 `ICommandBus` 执行操作：
+- `commands.execute('session.send', { text, files, ... })` → 发送消息
+- `commands.execute('vcs.branch.switch', { name })` → 切换分支
+- `commands.execute('flow.draft.load', { id })` → 加载 Flow 草稿
 
 ## 输入插件系统
 

@@ -53,7 +53,7 @@ import { ErrorHandler } from '../utils/errorHandler';
 
 // Components — 仅在 init 中用于构造，之后通过接口引用
 import { HistoryView } from '../components/HistoryView';
-import { GoalGraphEditor } from '../components/GoalGraphEditor';
+import { TaskGraphWorkbench } from '../components/TaskGraphWorkbench';
 import { ChatInput } from '../components/input/ChatInputView';
 import { BranchIndicatorView } from '../components/indicators/BranchIndicatorView';
 import { StatusIndicatorView } from '../components/indicators/StatusIndicatorView';
@@ -109,7 +109,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // === 委托的子模块 ===
     private navigation!: NavigationHelper;
     private workspacePanes!: WorkspacePaneController;
-    private goalEditor!: GoalGraphEditor;
+    private taskGraphWorkbench!: TaskGraphWorkbench;
 
     // === Services ===
     private sessionManager: SessionManager;
@@ -278,20 +278,15 @@ export class LLMWorkspaceEditor implements IEditor {
             dagToggle,
         );
 
-        this.goalEditor = new GoalGraphEditor(runGraphEl, inspectorEl, {
-            engine: this.engine,
-            nodeId: this.options.nodeId!,
-            agents: () => this.agentService.listAgents(),
-            onInspectorVisibilityChange: visible => this.workspacePanes.setInspectorVisible(visible),
-            onRun: async (_revision, goal) => {
-                if (this.commandBus.list().some(command => command.name === 'goal.run')) {
-                    await this.commandBus.execute('goal.run', { goal });
-                } else {
-                    Toast.info('Goal revision created. Runtime command "goal.run" is not registered yet.');
-                }
-            },
+        this.taskGraphWorkbench = new TaskGraphWorkbench(runGraphEl, {
+            commands: this.commandBus,
+            onModeChange: mode => this.workspacePanes.setInspectorVisible(mode === 'run'),
+            onSelectFlow: (flowId, revision) => this.chatInput.selectFlow(flowId, revision),
         });
-        await this.goalEditor.init();
+        void this.taskGraphWorkbench.initialize().catch(error => {
+            console.warn('[TaskGraphWorkbench] initialization failed:', error);
+            this.taskGraphWorkbench.render();
+        });
 
         const historyView = new HistoryView(historyEl, {
             onContentChange: (id: string, content: string, type: 'user' | 'node') =>
@@ -330,6 +325,11 @@ export class LLMWorkspaceEditor implements IEditor {
                 dagVisible: this.workspacePanes.isGraphVisible(),
             }),
             onToggleDag: () => this.toggleDagDesigner(),
+            onCreateTask: async descriptor => {
+                if (!this.workspacePanes.isGraphVisible()) this.workspacePanes.toggleGraph();
+                await this.taskGraphWorkbench.addTask(descriptor);
+                this.navigation?.syncWorkspaceControls();
+            },
         });
 
         // BranchIndicator → IBranchPresenter
@@ -437,6 +437,12 @@ export class LLMWorkspaceEditor implements IEditor {
             chatInput: this.chatInput,
             branchStore: this.branchStore,
             getCurrentSessionId: () => this.currentSessionId,
+            onTaskGraphRun: graphRunId => {
+                if (!this.workspacePanes.isGraphVisible()) this.workspacePanes.toggleGraph();
+                void this.taskGraphWorkbench.openRun(graphRunId).catch(error =>
+                    Toast.error(error instanceof Error ? error.message : 'Unable to load Flow run'),
+                );
+            },
             onContentChanged: () => this.emit('change'),
             onNavRefresh: () => this.navigation.pushNavData(),
         });
@@ -696,7 +702,9 @@ export class LLMWorkspaceEditor implements IEditor {
         });
 
         this.sessionEventUnsub = this.sessionManager.onEvent(
-            (event) => this.sessionEventHandler.handleSessionEvent(event)
+            (event) => {
+                this.sessionEventHandler.handleSessionEvent(event);
+            }
         );
 
         this.statusIndicator.updateFromSnapshot(snapshot);
@@ -714,7 +722,6 @@ export class LLMWorkspaceEditor implements IEditor {
             (id) => validateAgentId(this.agentService, id)
         );
         await this.chatInput.refreshConnections();
-        this.goalEditor?.refreshAgents();
         if (changed) {
             this.bus.emit('state:inputChanged', {});
         }
@@ -931,6 +938,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.branchIndicator?.destroy();
         this.statusIndicator?.destroy();
         this.historyView?.destroy();
+        this.taskGraphWorkbench?.destroy();
         this.chatInput?.destroy();
 
         // 8. 服务

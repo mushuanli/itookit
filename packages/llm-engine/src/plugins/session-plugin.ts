@@ -74,7 +74,14 @@ export function createSessionPlugin(sessionManager: SessionManager): ILLMPlugin 
                 const { roundIds } = args as { roundIds: string[] };
                 return sm.getContextModes(roundIds);
             });
-
+            ctx.commands.register('session.context.snapshot.get', async (args) => {
+                const { snapshotId } = args as { snapshotId: string };
+                return sm.getContextSnapshot(snapshotId);
+            });
+            ctx.commands.register('session.context.preview', async (args) => {
+                const { agentId, pendingText } = args as { agentId: string; pendingText?: string };
+                return sm.previewContext(agentId, pendingText);
+            });
             ctx.commands.register('session.regenerate', async (args) => {
                 const { assistantId, options } = args as { assistantId: string; options?: unknown };
                 return sm.regenerate(assistantId, options as any);

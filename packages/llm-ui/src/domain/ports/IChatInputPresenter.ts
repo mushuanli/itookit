@@ -20,6 +20,8 @@ export interface IChatInputPresenter {
     restoreInput(text: string, agentId?: string): void;
     focus(): void;
     refreshAgents(agents: ExecutorOption[], validateAgentId: (id: string) => string): boolean;
+    /** Select the immutable Flow revision used by the next send. */
+    selectFlow(flowId: string, revision: number): void;
 
     /** 重新拉取连接列表（import/save connection 后由 Shell 调用）。 */
     refreshConnections(): Promise<void>;

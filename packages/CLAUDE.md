@@ -38,7 +38,6 @@
 | [集成链](../doc/integration-chains.md) | 3 条核心集成链（VFS / Chat / AppShell）|
 | [接口契约](../doc/interface-contracts.md) | 跨包接口表（VFS / LLM / UI 体系）|
 | [事件流](../doc/event-flows.md) | Agent / VFS / HITL / TTY 事件流 |
-| [Skill 同步](../doc/skill-sync.md) | LLMSkill ↔ SkillDefinition 双体系 |
 | [Skill 设计](../doc/design/skill-design.md) | 触发策略、作用域、四层路由、类型系统 |
 | [VFS 设计](../doc/design/VFS-design.md) | VFS 详细设计 |
 | [开发模式](../doc/dev-patterns.md) | 新增 Provider/Connection/Agent/Tool/i18n 流程 |

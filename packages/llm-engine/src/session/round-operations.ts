@@ -22,6 +22,7 @@ import { TaskRunner } from './task-runner';
 import { RoundLog } from '../persistence/round-log';
 import { getPromptHistory } from '../services/prompt-history-service';
 import { log } from '../utils/logger';
+import { ulid } from '../persistence/ulid';
 
 /**
  * RoundOperations — all round/message mutation operations.
@@ -151,9 +152,12 @@ export class RoundOperations {
             );
         }
 
+        const sourceRound = state.getRounds().find(
+            round => round.roundId === userMessage.persistedNodeId
+        );
         const agentId = this.resolveAgentId(
             options?.agentId,
-            undefined
+            sourceRound?.meta.agentId
         );
 
         return this.executeRegenerate(userMessage, agentId, {
@@ -207,11 +211,24 @@ export class RoundOperations {
         const manifest = await roundLog.loadManifest();
         let branchName = manifest.currentBranch;
         let targetRoundId = userRoundId;
+        let roundTarget: NonNullable<import('../core/types').TaskInput['roundTarget']> = {
+            mode: 'update-existing',
+            targetRoundId: userRoundId,
+        };
         let branchCreated = false;
         if (hasAssistant) {
-            const forked = await roundLog.forkUserRound(userRoundId, { createdFrom: 'regenerate' });
+            targetRoundId = ulid();
+            const forked = await roundLog.createBranchForReplacement(
+                userRoundId,
+                targetRoundId,
+                { createdFrom: 'regenerate' },
+            );
             branchName = forked.branchName;
-            targetRoundId = forked.newRoundId;
+            roundTarget = {
+                mode: 'append-new',
+                parentRoundId: forked.commonHeadId,
+                roundId: targetRoundId,
+            };
             branchCreated = true;
         }
 
@@ -244,8 +261,8 @@ export class RoundOperations {
             },
         });
 
-        // 7. Update the existing target Round. The target is either the original
-        // empty-assistant Round or the user-only sibling created above.
+        // Empty/missing assistant: fill the existing Round. Effective assistant:
+        // commit a replacement Round on the newly-created branch.
         await this.taskRunner.submit(
             {
                 sessionId,
@@ -256,7 +273,7 @@ export class RoundOperations {
                 overrides: context.overrides,
                 skipUserMessage: true,
                 parentUserNodeId: targetRoundId,
-                roundTarget: { mode: 'update-existing', targetRoundId },
+                roundTarget,
                 branchInfo,
                 regenerateContext: {
                     sourceId: context.sourceId,
@@ -336,14 +353,12 @@ export class RoundOperations {
 
             let events: SessionEvent[];
             if (session?.role === 'assistant') {
-                // Assistant deletion: clear assistant in projection
                 events = state.apply({
                     type: 'round:updated',
                     roundId,
-                    changes: { assistantContent: '' },
+                    changes: { assistantContent: '', thinking: '' },
                 });
             } else {
-                // User deletion: cascade delete entire round
                 events = state.apply({ type: 'round:deleted', roundId });
             }
 
@@ -451,17 +466,17 @@ export class RoundOperations {
         // For RoundLog, rounds are immutable — editing forks a new branch.
         const userRoundId = session.persistedNodeId;
         let newPersistedNodeId: string | undefined;
+        let editParentRoundId: string | undefined;
 
         if (autoRerun && userRoundId) {
             const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
-            const manifest = await roundLog.loadManifest();
-            const branchNum = Object.keys(manifest.branches).length;
-            const branchName = `branch-${branchNum}`;
-            await roundLog.refs().create(branchName, userRoundId);
-            manifest.currentBranch = branchName;
-            manifest.currentHead = userRoundId;
-            await roundLog.saveManifest(manifest);
-            newPersistedNodeId = userRoundId;
+            newPersistedNodeId = ulid();
+            const replacement = await roundLog.createBranchForReplacement(
+                userRoundId,
+                newPersistedNodeId,
+                { createdFrom: 'edit' },
+            );
+            editParentRoundId = replacement.commonHeadId;
         }
 
         await this.registry.reloadSessionData(nodeId, sessionId, state);
@@ -476,14 +491,6 @@ export class RoundOperations {
         });
 
         if (autoRerun && newPersistedNodeId) {
-            const reloadedSession = state.findSessionById(newPersistedNodeId);
-            if (!reloadedSession) {
-                throw new EngineError(
-                    EngineErrorCode.SESSION_INVALID,
-                    `Edited user message not found after reload: ${newPersistedNodeId}`
-                );
-            }
-
             const branchInfo = await this.getSiblingInfo(sessionId, newPersistedNodeId);
             const roundLog2 = new RoundLog(this.registry.engine, nodeId, sessionId);
             const m2 = await roundLog2.loadManifest();
@@ -516,10 +523,13 @@ export class RoundOperations {
                     sessionId,
                     nodeId,
                     text: newContent,
-                    files: reloadedSession.files || [],
+                    files: session.files || [],
                     agentId: resolvedAgentId,
-                    skipUserMessage: true,
-                    parentUserNodeId: newPersistedNodeId,
+                    roundTarget: {
+                        mode: 'append-new',
+                        parentRoundId: editParentRoundId,
+                        roundId: newPersistedNodeId,
+                    },
                     branchInfo,
                     regenerateContext: {
                         sourceId: messageId,

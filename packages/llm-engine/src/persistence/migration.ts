@@ -39,7 +39,7 @@ export async function migrateToRoundFormat(
     }
 
     const oldManifest = await engine.getManifest(nodeId) as unknown as Record<string, unknown>;
-    if (oldManifest?.format === 'round') {
+    if (oldManifest?.schemaVersion === 3) {
         return { success: true, roundCount: 0, branchesMigrated: [], error: 'Already in round format' };
     }
 
@@ -101,7 +101,7 @@ export async function migrateToRoundFormat(
             }
         }
 
-        const rootRoundId = findRoot(rounds)?.id ?? ulid();
+        const rootRoundId = findRoot(rounds)?.id ?? null;
 
         if (options?.dryRun) {
             return {
@@ -121,8 +121,9 @@ export async function migrateToRoundFormat(
             branches: Object.fromEntries(branchHeadRoundIds),
             branchMeta: {},
             currentBranch: (oldManifest.current_branch as string) ?? 'main',
-            currentHead: branchHeadRoundIds.get((oldManifest.current_branch as string) ?? 'main') ?? rootRoundId,
+            currentHead: branchHeadRoundIds.get((oldManifest.current_branch as string) ?? 'main') ?? null,
             children: childrenIndex,
+            containmentChildren: {},
         };
         await roundLog.saveManifest(newManifest);
 

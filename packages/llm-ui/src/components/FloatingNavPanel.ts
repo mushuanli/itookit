@@ -7,11 +7,14 @@ import type { IEditorEventBus } from '../domain/events';
 import type { BranchItem } from '../domain/types';
 import { EventCleanup, TimerManager } from './common';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
-import { showConfirmDialog, Toast } from '@itookit/common';
+import { escapeHTML, showConfirmDialog, Toast } from '@itookit/common';
+import type { TaskKindDescriptor } from '@itookit/common';
 
 export interface FloatingNavWorkspaceActions {
     onToggleDag: () => void;
     onSetContext: (roundIds: string[], mode: 'include' | 'exclude') => Promise<void>;
+    listTaskKinds: () => Promise<TaskKindDescriptor[]>;
+    onCreateTask: (descriptor: TaskKindDescriptor) => Promise<void>;
 }
 
 
@@ -360,7 +363,7 @@ export class FloatingNavPanel implements INavigationPresenter {
         // action 按钮（远程）
         const actionBtn = target.closest('[data-action]') as HTMLElement;
         if (actionBtn && itemEl.contains(actionBtn)) {
-            this.handleItemAction(actionBtn.dataset.action!, id, idx);
+            this.handleItemAction(actionBtn.dataset.action!, id, idx, actionBtn);
             return;
         }
 
@@ -390,7 +393,7 @@ export class FloatingNavPanel implements INavigationPresenter {
         this.bus.emit('nav:scrollTo', { sessionId: id });
     }
 
-    private handleItemAction(action: string, sessionId: string, index: number): void {
+    private handleItemAction(action: string, sessionId: string, index: number, actionButton?: HTMLElement): void {
         switch (action) {
             case 'toggle-round-context': {
                 const item = this.filteredItems[index];
@@ -409,6 +412,38 @@ export class FloatingNavPanel implements INavigationPresenter {
             case 'create-branch':
                 this.bus.emit('branch:create', { sourceNodeId: sessionId });
                 break;
+            case 'open-create-menu':
+                if (actionButton) void this.openCreateMenu(actionButton, sessionId);
+                break;
+        }
+    }
+
+    private async openCreateMenu(anchor: HTMLElement, sourceNodeId: string): Promise<void> {
+        this.panel?.querySelector('.llm-nav-create-menu')?.remove();
+        try {
+            const descriptors = await this.workspaceActions?.listTaskKinds() ?? [];
+            const menu = document.createElement('div');
+            menu.className = 'llm-nav-create-menu';
+            menu.innerHTML = `<strong>Conversation</strong>
+                <button data-create-branch>Create Branch</button>
+                <strong>Flow Node</strong>
+                ${descriptors.map((item, index) =>
+                    `<button data-task-kind="${index}"><span>${escapeHTML(item.icon ?? '◇')}</span><span>${escapeHTML(item.displayName)}</span><small>${escapeHTML(item.description ?? '')}</small></button>`,
+                ).join('') || '<small>No registered Task types</small>'}`;
+            anchor.closest('.llm-nav-item__branch-actions')?.append(menu);
+            menu.querySelector('[data-create-branch]')?.addEventListener('click', () => {
+                this.bus.emit('branch:create', { sourceNodeId });
+                menu.remove();
+            });
+            menu.querySelectorAll<HTMLElement>('[data-task-kind]').forEach(button => {
+                button.addEventListener('click', () => {
+                    const descriptor = descriptors[Number(button.dataset.taskKind)];
+                    menu.remove();
+                    if (descriptor) void this.workspaceActions?.onCreateTask(descriptor);
+                });
+            });
+        } catch (error) {
+            Toast.error(error instanceof Error ? error.message : 'Unable to load Task types');
         }
     }
 

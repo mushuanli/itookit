@@ -172,6 +172,12 @@ describe('RoundLog', () => {
     // ── Basic CRUD ────────────────────────────────────────────────────────
 
     describe('append & fold', () => {
+        it('rejects a stale expected branch head before writing', async () => {
+            const round = makeRound({ id: 'new', payload: makeUserPayload('Hello') });
+            await expect(log.appendExpected('main', round, null)).rejects.toMatchObject({ code: 'HEAD_CONFLICT' });
+            expect(await log.readRound('new')).toBeNull();
+        });
+
         it('should append a round and fold returns its messages', async () => {
             const round = makeRound({ payload: [{ role: 'user', content: 'Hello' }] });
             const roundId = await log.append('main', round);
@@ -300,7 +306,7 @@ describe('RoundLog', () => {
     });
 
     describe('resend (clearAssistantInRound) → no new branch', () => {
-        it('should clear assistant without creating a new branch', async () => {
+        it('should replace an empty assistant in the same round without creating a branch', async () => {
             const t1Id = await log.append('main', makeRound({ payload: makeUserPayload('Q1') }));
             const t2Id = await log.append('main', makeRound({
                 parents: [t1Id],
@@ -323,10 +329,29 @@ describe('RoundLog', () => {
             expect(t2!.payload.find(m => m.role === 'assistant')).toBeUndefined();
             expect(t2!.result).toBeUndefined();
 
-            // Manifest branches should be unchanged
+            await log.setAssistantInRound(t2Id, {
+                assistantMessages: [{ role: 'assistant', content: 'A1-resend' }],
+                agentId: 'configured-agent',
+            });
+
+            const replaced = await log.readRound(t2Id);
+            expect(replaced!.id).toBe(t2Id);
+            expect(replaced!.parents).toEqual([t1Id]);
+            expect(replaced!.payload).toEqual([
+                { role: 'user', content: 'Q1' },
+                { role: 'assistant', content: 'A1-resend' },
+            ]);
+            expect(replaced!.meta.agentId).toBe('configured-agent');
+
+            // Same Round remains the branch head; no sibling/branch is created.
             const manifest = await log.loadManifest();
-            const branchCount = Object.keys(manifest.branches).length;
-            expect(branchCount).toBe(1); // only 'main'
+            expect(Object.keys(manifest.branches)).toEqual(['main']);
+            expect(manifest.branches.main).toBe(t2Id);
+            expect(manifest.currentHead).toBe(t2Id);
+
+            await expect(log.setAssistantInRound(t2Id, {
+                assistantMessages: [{ role: 'assistant', content: 'must-not-overwrite' }],
+            })).rejects.toMatchObject({ code: 'ROUND_ALREADY_COMPLETED' });
         });
     });
 

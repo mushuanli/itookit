@@ -1,12 +1,7 @@
 // @file: llm-engine/src/mission/index.ts
 export { TodoStateManager } from './todo-state';
 export { ResultPersistenceService } from './result-persister';
-export { MissionScheduler } from './mission-scheduler';
-export type { MissionSchedulerOptions } from './mission-scheduler';
+export { MissionTaskGraphRunner } from './mission-task-graph-runner';
+export type { MissionTaskGraphRunnerOptions } from './mission-task-graph-runner';
 export { MissionService } from './mission-service';
 export type { MissionServiceOptions } from './mission-service';
-export { LiteSubAgentRouter } from './lite-sub-agent-router';
-// S5: Goal-based scheduling
-export { createMissionGoal } from './mission-goal-factory';
-export { createSubAgentLoopAdapter } from './sub-agent-loop-adapter';
-export type { SubAgentLoopAdapterOptions } from './sub-agent-loop-adapter';

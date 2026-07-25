@@ -840,6 +840,9 @@ export class ChatInput implements IChatInputPresenter {
             overrides.systemPromptAppend = this.config.settings.systemPromptAppend;
         }
         if (this.config.settings.flowId) overrides.flowId = this.config.settings.flowId;
+        if (this.config.settings.flowRevision !== undefined) {
+            overrides.flowRevision = this.config.settings.flowRevision;
+        }
         if (this.config.settings.branchMode === 'fork') overrides.branchMode = 'fork';
         if (this.config.settings.retentionMode === 'temporary') overrides.retentionMode = 'temporary';
 
@@ -852,6 +855,14 @@ export class ChatInput implements IChatInputPresenter {
 
     async refreshConnections(): Promise<void> {
         await this.loadConnections();
+    }
+
+    selectFlow(flowId: string, revision: number): void {
+        this.config.settings.flowId = flowId;
+        this.config.settings.flowRevision = revision;
+        if (this.flowIdInput) this.flowIdInput.value = flowId;
+        this.notifyConfigChange();
+        this.focus();
     }
 
     private async loadConnections(): Promise<void> {

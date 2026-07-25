@@ -1,7 +1,7 @@
 // @file: llm-engine/src/scheduler/dependency-resolver.ts
 //
-// Generic dependency resolution utilities shared by MissionScheduler and
-// GraphOrchestrator. Eliminates duplicate topo-sort / ready-set logic.
+// Generic dependency resolution utilities shared by Mission and session-graph
+// flow builders. The TaskGraph reconciler owns execution readiness.
 
 export interface DependableItem {
     id: string;

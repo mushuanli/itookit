@@ -17,6 +17,7 @@ export type RoundLogEvent =
 export interface RoundChangeSet {
     assistantContent?: string;
     thinking?: string;
+    agentId?: string;
     status?: NodeStatus;
     stale?: boolean;
     _deleted?: boolean;

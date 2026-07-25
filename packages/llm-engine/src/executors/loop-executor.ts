@@ -80,7 +80,9 @@ export class LoopExecutor implements ILoop {
         // Reconstruct state from the Log.
         // Since round boundaries are persisted, we count completed rounds
         // and re-enter the loop at the next round.
-        const messages = await ctx.log.fold(ctx.ref);
+        const messages = ctx.contextSnapshot
+            ? [...ctx.contextSnapshot.canonicalMessages]
+            : await ctx.log.fold(ctx.ref);
         const completedRounds = messages.filter(m => m.role === 'assistant').length;
 
         return yield* this.executeLoop(ctx, completedRounds, []);
@@ -110,7 +112,9 @@ export class LoopExecutor implements ILoop {
         let signal: Signal | undefined;
 
         // Messages from history (fold once, extend in-memory for subsequent exchanges)
-        let baseMessages = await ctx.log.fold(ctx.ref);
+        let baseMessages = ctx.contextSnapshot
+            ? [...ctx.contextSnapshot.canonicalMessages]
+            : await ctx.log.fold(ctx.ref);
 
         // Apply historyLength limit (system messages are never counted/truncated)
         if (ctx.historyLength !== undefined && ctx.historyLength !== -1 && ctx.historyLength >= 0) {

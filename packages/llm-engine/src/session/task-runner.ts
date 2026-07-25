@@ -1,6 +1,6 @@
 // @file: llm-engine/session/task-runner.ts
 
-import type { ILLMService, AgentEvent, ChatMessage } from '@itookit/common';
+import type { ILLMService, ChatMessage, TaskExecutor, TaskExecutionContext, TaskResult, AgentTaskConfig, TaskRun, ResolvedInputPort, FlowRevision, Artifact } from '@itookit/common';
 import { ulid } from '../persistence/ulid';
 import { ExecutorConfig } from '../core/types';
 import {
@@ -14,7 +14,6 @@ import {
     BranchInfo,
     ExecutionOverrides,
     ChatAttachment,
-    SessionTokenUsage,
 } from '../core/types';
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { EngineError, EngineErrorCode } from '../core/errors';
@@ -27,15 +26,75 @@ import { formatErrorMessage } from '../utils/error-formatter';
 import { log } from '../utils/logger';
 // ── LLM 2.0: Executor-driven dispatch ──
 import { ExecutorRegistry, getExecutorRegistry } from '../core/executor-registry';
-import { drive, resumeDrive, LoopAbortedError } from '../core/loop-driver';
+import { drive } from '../core/loop-driver';
 import { SessionActor } from '../core/session-actor';
 import { RoundLog } from '../persistence/round-log';
 import type { ILog } from '@itookit/common';
 import type { LoopContext } from '@itookit/common';
+import { ContextAssembler, type ContextAssemblerDeps } from '../core/context-assembler';
+import { ContextProfileStore } from '../persistence/context-profile-store';
+import { FlowDefinitionStore } from '../persistence/flow-definition-store';
+import { TaskGraphReconciler } from '../task-graph/reconciler';
+import { TaskExecutorRegistry as TaskGraphExecutorRegistry } from '../task-graph/registry';
+import { BUILTIN_HANDLERS } from '../task-graph/builtins';
+import { createTaskGraphRun } from '../task-graph/runtime';
+import { flowRevisionDigest } from '../task-graph/validation';
 
 export interface TaskRunnerOptions {
     maxConcurrent?: number;
     maxQueueSize?: number;
+    runtimeFactory?: AgentRuntimeFactory;
+}
+
+export interface TaskGraphRuntimeBinding {
+    reconciler: TaskGraphReconciler;
+    registry: TaskGraphExecutorRegistry;
+}
+
+export interface AgentRuntimeFactory {
+    createCapabilities(config: ExecutorConfig): Promise<{
+        tools?: import('@itookit/common').IToolService;
+        retrieveMemory?: ContextAssemblerDeps['retrieveMemory'];
+    }>;
+}
+
+function createNoopToolService(): import('@itookit/common').IToolService {
+    return {
+        listTools: () => [],
+        getToolMeta: () => undefined,
+        getToolDefinitions: () => [],
+        invoke: async () => ({ toolId: 'noop', success: false, output: '', durationMs: 0 }),
+        invokeBatch: async () => ({ results: [] }),
+        registerTool: () => {},
+        unregisterTool: () => {},
+    } as unknown as import('@itookit/common').IToolService;
+}
+
+function createScopedToolService(
+    base: import('@itookit/common').IToolService | undefined,
+    allowedIds: string[] | undefined,
+): import('@itookit/common').IToolService {
+    if (!base) return createNoopToolService();
+    if (!allowedIds) return base;
+    const allowed = new Set(allowedIds);
+    const source = base as any;
+    const assertAllowed = (id: string) => {
+        if (!allowed.has(id)) throw new Error(`Tool is not allowed for this AgentTask: ${id}`);
+    };
+    return {
+        ...source,
+        listTools: () => (source.listTools?.() ?? []).filter((tool: any) => allowed.has(tool.id ?? tool.name)),
+        getToolMeta: (id: string) => allowed.has(id) ? source.getToolMeta?.(id) : undefined,
+        getToolDefinitions: () => (source.getToolDefinitions?.() ?? []).filter((tool: any) => allowed.has(tool.id ?? tool.name ?? tool.function?.name)),
+        invoke: async (request: { toolId: string }) => {
+            assertAllowed(request.toolId);
+            return source.invoke(request);
+        },
+        invokeBatch: async (requests: Array<{ toolId: string }>) => {
+            for (const request of requests) assertAllowed(request.toolId);
+            return source.invokeBatch(requests);
+        },
+    } as unknown as import('@itookit/common').IToolService;
 }
 
 /**
@@ -75,8 +134,12 @@ export class TaskRunner {
     private executorRegistry: ExecutorRegistry;
     /** Tracks the active SessionActor per session for signal routing. */
     private readonly activeActors = new Map<string, import('../core/session-actor').SessionActor>();
+    private readonly activeTaskActors = new Map<string, import('../core/session-actor').SessionActor>();
+    private readonly runtimeFactory?: AgentRuntimeFactory;
     /** ILog instances keyed by sessionId to avoid per-task cold VFS scans. */
     private readonly logCache = new Map<string, ILog>();
+    private taskGraphRuntime?: TaskGraphRuntimeBinding;
+    private readonly v3TaskBindings = new Map<string, { sessionId: string; nodeId: string }>();
 
     constructor(
         private engine: IChatEngine,
@@ -88,6 +151,7 @@ export class TaskRunner {
     ) {
         this.maxConcurrent = options?.maxConcurrent ?? ENGINE_DEFAULTS.MAX_CONCURRENT;
         this.maxQueueSize = options?.maxQueueSize ?? ENGINE_DEFAULTS.MAX_QUEUE_SIZE;
+        this.runtimeFactory = options?.runtimeFactory;
         this.executorRegistry = getExecutorRegistry();
     }
 
@@ -104,6 +168,18 @@ export class TaskRunner {
     setLLMService(llmService: ILLMService): void {
         this.llmService = llmService;
     }
+
+    /** Attach the single TaskGraph control plane used by every submission. */
+    setTaskGraphRuntime(runtime: TaskGraphRuntimeBinding): void {
+        this.taskGraphRuntime = runtime;
+        if (!runtime.registry.has(BUILTIN_HANDLERS.agent)) {
+            runtime.registry.register(this.createV3AgentExecutor());
+        }
+        runtime.reconciler.setAgentContextProvider((task, inputs) => this.prepareV3AgentContext(task, inputs));
+        runtime.reconciler.setRoundCommitter((taskRunId, draft) => this.commitV3Round(taskRunId, draft));
+    }
+
+    getTaskGraphRuntime(): TaskGraphRuntimeBinding | undefined { return this.taskGraphRuntime; }
 
     /** Get the executor registry for external configuration. */
     getExecutorRegistry(): ExecutorRegistry {
@@ -123,6 +199,144 @@ export class TaskRunner {
         }
     }
 
+    private createV3AgentExecutor(): TaskExecutor<AgentTaskConfig> {
+        return {
+            handler: BUILTIN_HANDLERS.agent,
+            execute: context => {
+                const config = context.config as AgentTaskConfig & { _sessionId?: string; _nodeId?: string; _branchRef?: string; _branchHead?: string | null };
+                if (!config._sessionId || !config._nodeId) throw new Error('AgentTask is missing its runtime session binding');
+                return this.executeV3Agent(context, config._sessionId, config._nodeId);
+            },
+        };
+    }
+
+    private async prepareV3AgentContext(
+        task: TaskRun,
+        inputs: ResolvedInputPort[],
+    ): Promise<{ snapshot: import('@itookit/common').ContextSnapshot; state?: import('@itookit/common').AgentStateRevision }> {
+        const config = task.spec.config as unknown as AgentTaskConfig & { _sessionId?: string; _nodeId?: string; _branchRef?: string; _branchHead?: string | null };
+        if (!config._sessionId || !config._nodeId) throw new Error(`AgentTask ${task.id} is missing runtime session binding`);
+        const sessionId = config._sessionId;
+        const nodeId = config._nodeId;
+        this.v3TaskBindings.set(String(task.id), { sessionId, nodeId });
+        const logAdapter = this.logCache.get(sessionId) ?? await this.createLog(sessionId, nodeId);
+        this.logCache.set(sessionId, logAdapter);
+        const manifest = await (logAdapter as RoundLog).loadManifest();
+        const branchRef = config._branchRef ?? manifest.currentBranch ?? 'main';
+        const branchHead = config._branchHead !== undefined ? config._branchHead : (manifest.branches[branchRef] ?? null);
+        const profile = manifest.branchMeta[branchRef]?.contextProfile ?? { id: '', revision: 0 };
+        const resolved = await this.agentResolver.resolveExact(String(config.agent.id), config.agent.version);
+        const explicitInputs = [
+            ...task.spec.explicitInputs,
+            ...inputs.flatMap(input => input.artifacts.map((artifactId, index) => ({
+                kind: 'artifact' as const,
+                artifactId,
+                label: input.port.name,
+                order: input.port.order * 1000 + index,
+            }))),
+        ];
+        const assembler = new ContextAssembler({
+            log: logAdapter,
+            manifest,
+            profileStore: new ContextProfileStore(this.engine, nodeId),
+            readRound: roundId => (logAdapter as RoundLog).readRound(roundId),
+            loadArtifact: artifactId => this.taskGraphRuntime?.reconciler.stores.artifactStore.get(artifactId) ?? Promise.resolve(null),
+        });
+        const { snapshot } = await assembler.assemble({
+            branchRef,
+            branchHead,
+            profile,
+            pendingUserMessage: { role: 'user', content: config.prompt },
+            explicitInputs,
+            tokenBudget: resolved.defaultContextPolicy?.tokenBudget,
+        }, String(task.id), { id: resolved.id, version: resolved.agentVersion ?? config.agent.version }, resolved.systemPrompt, undefined, { persist: false });
+        return { snapshot, state: undefined };
+    }
+
+    private async commitV3Round(taskRunId: string, draft: import('@itookit/common').RoundDraftV3): Promise<import('@itookit/common').RoundId> {
+        const binding = this.v3TaskBindings.get(String(taskRunId));
+        if (!binding) throw new Error(`Cannot persist Round for TaskRun ${taskRunId}`);
+        const logAdapter = this.logCache.get(binding.sessionId) ?? await this.createLog(binding.sessionId, binding.nodeId);
+        const round = {
+            id: draft.id ?? ulid(),
+            parents: [],
+            kind: 'agent' as const,
+            producedByRunId: taskRunId,
+            exposure: draft.exposure ?? 'artifact',
+            payload: draft.payload,
+            meta: { createdAt: Date.now(), origin: 'loop' },
+        } as unknown as import('@itookit/common').Round;
+        await (logAdapter as RoundLog).appendContained(round);
+        this.v3TaskBindings.delete(String(taskRunId));
+        return round.id;
+    }
+
+    private async executeV3Agent(
+        context: TaskExecutionContext<AgentTaskConfig>,
+        sessionId: string,
+        nodeId: string,
+    ): Promise<TaskResult> {
+        const config = context.config;
+        const resolved = await this.agentResolver.resolveExact(String(config.agent.id), config.agent.version);
+        const capabilities = await this.runtimeFactory?.createCapabilities(resolved);
+        const logAdapter = this.logCache.get(sessionId) ?? await this.createLog(sessionId, nodeId);
+        this.logCache.set(sessionId, logAdapter);
+        const manifest = await (logAdapter as RoundLog).loadManifest();
+        const configWithRuntime = config as AgentTaskConfig & { _branchRef?: string; _branchHead?: string | null };
+        const branchRef = configWithRuntime._branchRef ?? manifest.currentBranch ?? 'main';
+        const actor = new SessionActor(event => this.eventBus.emitSession(sessionId, event));
+        this.activeTaskActors.set(String(context.taskRunId), actor);
+        this.activeActors.set(sessionId, actor);
+        if (!this.llmService) throw new Error('ILLMService is required for AgentTask execution');
+        const loopContext: LoopContext = {
+            sessionId,
+            ref: branchRef,
+            log: logAdapter,
+            llm: this.llmService,
+            tools: createScopedToolService(capabilities?.tools ?? resolved._toolService, resolved.capabilityPolicy?.toolIds),
+            middlewares: [],
+            signal: context.signal,
+            runId: String(context.taskRunId),
+            contextSnapshot: context.contextSnapshot,
+            connectionId: resolved.connectionId ?? 'default',
+            model: resolved.model,
+            systemPrompt: resolved.systemPrompt,
+            temperature: resolved.temperature,
+            maxTokens: resolved.constraints?.maxTokens,
+            thinking: resolved.enableThinking,
+            reasoningEffort: resolved.reasoningEffort,
+            preallocatedRoundId: ulid(),
+        };
+        try {
+            const executor = this.executorRegistry.get(config.loopMode === 'chat' ? 'chat' : 'loop');
+            const rounds = await drive(executor.run(loopContext), actor, loopContext);
+            const round = rounds.at(-1);
+            if (!round) throw new Error(`AgentTask ${String(context.taskRunId)} completed without a Round`);
+            round.kind = 'agent';
+            round.producedByRunId = String(context.taskRunId);
+            round.exposure = 'artifact';
+            const final = [...round.payload].reverse().find(message => message.role === 'assistant');
+            const content = typeof final?.content === 'string' ? final.content : JSON.stringify(final?.content ?? '');
+            return {
+                artifacts: [{ outputName: 'final', type: 'final-answer', content, metadata: { outputPort: 'final' } }],
+                roundDraft: { id: round.id, payload: round.payload, exposure: 'artifact' },
+                agentExecution: {
+                    definition: { id: config.agent.id, version: config.agent.version },
+                    contextSnapshotId: context.contextSnapshot?.id ?? ('' as never),
+                    exchangeCount: rounds.length,
+                },
+            };
+        } finally {
+            this.activeTaskActors.delete(String(context.taskRunId));
+            if (this.activeActors.get(sessionId) === actor) this.activeActors.delete(sessionId);
+        }
+    }
+
+    async runFlow(flow: FlowRevision, context: { signal?: AbortSignal }): Promise<import('../task-graph/reconciler').TaskGraphReconcileResult> {
+        if (!this.taskGraphRuntime) throw new Error('TaskGraph runtime is not initialized');
+        return this.taskGraphRuntime.reconciler.run(createTaskGraphRun(flow), { signal: context.signal });
+    }
+
     async submit(input: TaskInput, runtime: SessionRuntime): Promise<string> {
         if (runtime.status === 'running' || runtime.status === 'queued') {
             throw new EngineError(EngineErrorCode.SESSION_BUSY, 'Session already has active task');
@@ -140,6 +354,20 @@ export class TaskRunner {
             priority: 0,
             createdAt: Date.now(),
             abortController: new AbortController(),
+        };
+
+        // Freeze mutable conversation/definition pointers before queueing.
+        const frozenLog = this.logCache.get(input.sessionId)
+            ?? await this.createLog(input.sessionId, input.nodeId);
+        this.logCache.set(input.sessionId, frozenLog);
+        const manifest = await (frozenLog as RoundLog).loadManifest();
+        const frozenAgent = await this.agentResolver.resolveForChat(input.agentId);
+        const branchRef = manifest.currentBranch || 'main';
+        task.frozen = {
+            branchRef,
+            branchHead: manifest.branches[branchRef] ?? null,
+            contextProfile: manifest.branchMeta[branchRef]?.contextProfile,
+            agentVersion: frozenAgent.agentVersion ?? 'legacy-unversioned',
         };
 
         runtime.currentTaskId = task.id;
@@ -240,7 +468,11 @@ export class TaskRunner {
             }
 
             if (useExecutor) {
-                this.executeAgentLoopTask(task, ctx.state, ctx.runtime, mode);
+                if (task.input.sendIntent?.execution.kind === 'flow') {
+                    this.executeFlowTask(task, ctx.state, ctx.runtime);
+                } else {
+                    this.executeV3ChatTask(task, ctx.state, ctx.runtime, mode);
+                }
             } else {
                 log.error('ILLMService not injected, dropping task', {
                     taskId: task.id,
@@ -251,14 +483,13 @@ export class TaskRunner {
     }
 
     // ============================================
-    // 内部：共享 setup（harness + kernel 路径公共部分）
+    // 内部：共享会话投影前置步骤
     // ============================================
 
     /**
      * 初始化任务执行的公共前置步骤（steps 1-5）。
      *
-     * 两条路径（harness / kernel）在步骤 1-5 完全相同，
-     * 只有步骤 6+ 的执行逻辑（LLM 调用方式）有差异，提取为共享方法。
+     * TaskGraph executor 只负责控制平面执行；这里负责会话 UI 投影。
      */
     private async setupTaskExecution(
         task: ExecutionTask,
@@ -313,7 +544,7 @@ export class TaskRunner {
         //    RoundLog.applyAppended message:appended share the same messageId.
         const preallocatedRoundId = input.roundTarget?.mode === 'update-existing'
             ? input.roundTarget.targetRoundId
-            : ulid();
+            : input.roundTarget?.roundId ?? ulid();
         const { assistantNodeId, rootNode } = await this.createAssistantNode(
             sessionId, executorConfig, input.branchInfo, userNodeId,
             input.origin, input.historyPolicy, preallocatedRoundId,
@@ -328,16 +559,136 @@ export class TaskRunner {
     }
 
     // ============================================
-    // 内部：Agent Loop 统一执行入口
+    // 内部：Flow TaskGraph 提交
     // ============================================
 
-    /**
-     * Agent Loop 执行路径 — 通过 ExecutorRegistry + drive() 调度。
-     *
-     * 所有 Agent Loop 模式（chat / loop / loop:full）
-     * 通过统一的 ILoop 协程协议执行。UI 只见统一的 AgentEvent 流。
-     */
-    private async executeAgentLoopTask(
+    private async executeFlowTask(
+        task: ExecutionTask,
+        state: SessionState,
+        runtime: SessionRuntime,
+    ): Promise<void> {
+        const { sessionId, input } = task;
+        const execution = input.sendIntent?.execution;
+        if (!execution || execution.kind !== 'flow') throw new Error('Flow task is missing SendIntent');
+        this.running.set(task.id, task);
+        this.callbacks.onStatusChange(sessionId, 'running');
+        this.emitPoolStatus();
+
+        let logAdapter = this.logCache.get(sessionId);
+        if (!logAdapter) {
+            logAdapter = await this.createLog(sessionId, task.nodeId);
+            this.logCache.set(sessionId, logAdapter);
+        }
+        try {
+            const setup = await this.setupTaskExecution(task, state);
+            const store = new FlowDefinitionStore(this.engine, task.nodeId);
+            const definition = await store.loadRevision(execution.flowId, execution.revision);
+            if (!definition) throw new Error(`Flow revision not found: ${execution.flowId}${execution.revision ? ` r${execution.revision}` : ''}`);
+
+            let branchRef = task.frozen?.branchRef ?? 'main';
+            if (input.sendIntent?.branch.mode === 'fork') {
+                const sourceRoundId = input.sendIntent.branch.baseRoundId ?? task.frozen?.branchHead;
+                if (sourceRoundId) {
+                    const forked = await (logAdapter as RoundLog).forkUserRound(sourceRoundId, {
+                        branchName: input.sendIntent.branch.newBranchName,
+                        createdFrom: 'manual',
+                    });
+                    branchRef = forked.branchName;
+                }
+            }
+            const manifest = await (logAdapter as RoundLog).loadManifest();
+            const branchHead = manifest.branches[branchRef] ?? task.frozen?.branchHead ?? null;
+            const boundFlow = {
+                ...definition,
+                nodes: definition.nodes.map(node => ({
+                    ...node,
+                    config: {
+                        ...((node.config && typeof node.config === 'object' && !Array.isArray(node.config)) ? node.config as Record<string, unknown> : {}),
+                        _sessionId: sessionId,
+                        _nodeId: task.nodeId,
+                        _branchRef: branchRef,
+                        _branchHead: branchHead,
+                    },
+                })),
+            };
+            const flow = { ...boundFlow, digest: flowRevisionDigest(boundFlow as unknown as Omit<FlowRevision, 'digest'>) } as FlowRevision;
+            const graphRun = createTaskGraphRun(flow);
+            const result = await this.taskGraphRuntime!.reconciler.run(
+                graphRun,
+                {
+                    signal: task.abortController.signal,
+                    onCreated: created => this.eventBus.emitGlobal({
+                        type: 'task_graph_run_projected',
+                        payload: {
+                            sessionId,
+                            graphRunId: created.id,
+                            flowId: flow.id,
+                            revision: flow.revision,
+                        },
+                    }),
+                },
+            );
+            const terminalIds = flow.nodes
+                .map(node => String(node.id))
+                .filter(id => !flow.edges.some(edge => String(edge.from) === id));
+            const terminalArtifacts: Array<Artifact | null> = await Promise.all(Object.values(result.graphRun.tasks ?? {})
+                .filter(taskRun => terminalIds.includes(String(taskRun.spec.sourceNodeId)))
+                .flatMap(taskRun => taskRun.outputArtifactIds
+                .map(artifactId => this.taskGraphRuntime!.reconciler.stores.artifactStore.get(artifactId))));
+            const output = terminalArtifacts.filter((artifact): artifact is NonNullable<typeof artifact> => Boolean(artifact))
+                .map(artifact => typeof artifact.content === 'string' ? artifact.content : JSON.stringify(artifact.content))
+                .join('\n\n');
+            state.appendToNode(setup.rootNode.id, output, 'output');
+            const userMessage: ChatMessage = { role: 'user', content: input.text };
+            if (setup.contextFiles.length) {
+                userMessage.attachments = setup.contextFiles.map(file => ({
+                    name: file.name,
+                    type: file.type as import('@itookit/common').AttachmentType,
+                    source: file.path ?? file.name,
+                    size: file.size,
+                }));
+            }
+            const topRound: import('@itookit/common').Round = {
+                id: setup.preallocatedRoundId ?? ulid(),
+                parents: branchHead ? [branchHead] : [],
+                kind: 'interaction',
+                producedByFlowRunId: result.graphRun.id,
+                exposure: input.sendIntent?.retention.mode === 'temporary' ? 'internal' : 'public',
+                payload: [userMessage, { role: 'assistant', content: output }],
+                meta: {
+                    createdAt: Date.now(), origin: 'loop',
+                    defaultContextMode: input.sendIntent?.retention.mode === 'temporary' ? 'exclude' : 'include',
+                    defaultContextScope: 'subtree',
+                },
+            };
+            await (logAdapter as RoundLog).appendExpected(branchRef, topRound, branchHead);
+            await setup.finalize();
+            state.updateNodeStatus(setup.rootNode.id, 'success');
+            this.eventBus.emitSession(sessionId, {
+                type: 'message:updated',
+                payload: { messageId: setup.rootNode.id, field: 'output', delta: output },
+            });
+            this.eventBus.emitSession(sessionId, {
+                type: 'message:status', payload: { messageId: setup.rootNode.id, status: 'success' },
+            });
+            this.eventBus.emitSession(sessionId, {
+                type: 'finished',
+                usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            });
+            this.callbacks.onStatusChange(sessionId, 'completed');
+            this.callbacks.onUnread(sessionId);
+        } catch (error: any) {
+            await this.handleError(error, task, runtime, state, sessionId, false, logAdapter);
+        } finally {
+            this.running.delete(task.id);
+            runtime.currentTaskId = undefined;
+            this.emitPoolStatus();
+            this.processQueue();
+        }
+    }
+
+    /** Direct chat submission compiled to a single v3 AgentTask. */
+    private async executeV3ChatTask(
         task: ExecutionTask,
         state: SessionState,
         runtime: SessionRuntime,
@@ -347,326 +698,77 @@ export class TaskRunner {
         this.running.set(task.id, task);
         this.callbacks.onStatusChange(sessionId, 'running');
         this.emitPoolStatus();
-
-        const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         let errorAlreadyEmitted = false;
-
-        // ── ILog via RoundLog (always round-format) ─
         let logAdapter = this.logCache.get(sessionId);
-        if (!logAdapter) {
-            logAdapter = await this.createLog(sessionId, task.nodeId);
-            this.logCache.set(sessionId, logAdapter);
-            // Wire RoundLog events → SessionState projection
-            (logAdapter as RoundLog).setEventListener((event) => {
-                const events = state.apply(event);
-                for (const e of events) {
-                    // Skip message:appended — createAssistantNode already emits it
-                    // for the streaming placeholder. Re-emitting here would duplicate
-                    // the assistant bubble in the UI.
-                    if (e.type === 'message:appended') continue;
-                    this.eventBus.emitSession(sessionId, e);
-                }
-            });
-        }
-
         try {
-            // ── Freeze branch at submit time ──────────────────────────────
-            // Capture the active branch before any async work.
-            // Branch switches during execution must not change the context source.
-            let branchRef = 'main';
-            try {
-                const tm = await (logAdapter as RoundLog).loadManifest();
-                branchRef = tm.currentBranch || 'main';
-                if (task.input.sendIntent?.branch.mode === 'fork') {
-                    const sourceRoundId = task.input.sendIntent.branch.baseRoundId ?? tm.currentHead;
-                    if (sourceRoundId) {
-                        const source = await (logAdapter as RoundLog).readRound(sourceRoundId);
-                        if (source?.payload.some(message => message.role === 'user')) {
-                            const forked = await (logAdapter as RoundLog).forkUserRound(sourceRoundId, {
-                                branchName: task.input.sendIntent.branch.newBranchName,
-                                createdFrom: 'manual',
-                            });
-                            branchRef = forked.branchName;
-                        }
-                    }
-                }
-            } catch {
-                // Fallback: use 'main' if manifest is unavailable
-            }
-
-            const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles, preallocatedRoundId } =
-                await this.setupTaskExecution(task, state);
-
-            // ── Get executor ──────────────────────────────────────────────
-            const executor = this.executorRegistry.get(mode);
-            const llmService = this.llmService!;
-
-            // ── 文件级 ai_systemPrompt 覆盖（与 executeTask 对齐）──
-            const fileNode = await this.engine.getNode(task.nodeId);
-            const fileSystemPrompt = fileNode?.metadata?.ai_systemPrompt as string | undefined;
-            const effectiveSystemPrompt = fileSystemPrompt ?? executorConfig.systemPrompt;
-
-            // ── Event bridge: AgentEvent → canonical + tree projection ────
-            const actor = new SessionActor((event: AgentEvent) => {
-                switch (event.type) {
-                    case 'stream:content':
-                        accumulator.output += event.delta;
-                        state.appendToNode(rootNode.id, event.delta, 'output');
-                        persist();
-                        if (isBound) {
-                            // Canonical event
-                            this.eventBus.emitSession(sessionId, event);
-                            // Tree projection for UI rendering
-                            this.eventBus.emitSession(sessionId, {
-                                type: 'message:updated',
-                                payload: { messageId: rootNode.id, field: 'output', delta: event.delta },
-                            });
-                        }
-                        break;
-                    case 'stream:thinking':
-                        accumulator.thinking += event.delta;
-                        state.appendToNode(rootNode.id, event.delta, 'thought');
-                        persist();
-                        if (isBound) {
-                            this.eventBus.emitSession(sessionId, event);
-                            this.eventBus.emitSession(sessionId, {
-                                type: 'message:updated',
-                                payload: { messageId: rootNode.id, field: 'thought', delta: event.delta },
-                            });
-                        }
-                        break;
-                    case 'error':
-                        errorAlreadyEmitted = true;
-                        if (isBound) {
-                            this.eventBus.emitSession(sessionId, event);
-                        }
-                        break;
-                    case 'round:start':
-                    case 'round:end':
-                    case 'tool:queued':
-                    case 'tool:running':
-                    case 'tool:success':
-                    case 'tool:error':
-                        if (isBound) {
-                            this.eventBus.emitSession(sessionId, event);
-                        }
-                        break;
-                    case 'finished':
-                        if (isBound) {
-                            this.eventBus.emitSession(sessionId, event);
-                        }
-                        break;
-                    case 'await_signal':
-                        // Handled internally by drive() — no emission needed
-                        break;
-                    default:
-                        break;
-                }
-            });
-
-            // Register actor so signal(respond) can route to it
-            this.activeActors.set(sessionId, actor);
-
-            // ── Build LoopContext ──────────────────────────────────────────
-            // branchRef was frozen at submit time above.
-
-            // Wrap the log so fold() always appends the pending user message
-            // for the LLM API call. RoundLog writes userMsg to round.payload
-            // during persist, so fold() can't see the in-flight message.
-            const effectiveLog: ILog = buildFoldPrependLog(logAdapter, input.text, contextFiles);
-
-            const loopCtx: LoopContext = {
-                sessionId,
-                ref: branchRef,
-                log: effectiveLog,
-                llm: llmService,
-                tools: executorConfig._toolService ?? {
-                    listTools: () => [],
-                    getToolMeta: () => undefined,
-                    getToolDefinitions: () => [],
-                    invoke: async () => ({ toolId: 'noop', success: false, output: '', durationMs: 0 }),
-                    invokeBatch: async () => ({ results: [] }),
-                    registerTool: () => {},
-                    unregisterTool: () => {},
-                } as unknown as import('@itookit/common').IToolService,
-                middlewares: [],
-                signal: task.abortController.signal,
-                // ── LLM 配置（从 executorConfig 平铺）──
-                connectionId: executorConfig.connectionId ?? 'default',
-                model: executorConfig.model,
-                systemPrompt: effectiveSystemPrompt,
-                temperature: executorConfig.temperature,
-                maxTokens: executorConfig.constraints?.maxTokens,
-                thinking: executorConfig.enableThinking,
-                reasoningEffort: executorConfig.reasoningEffort,
-                historyLength: input.overrides?.historyLength,
-                startedAt: task.createdAt,
-                preallocatedRoundId,
-            };
-
-            // ── Execute via drive() or resumeDrive() ──────────────────────
-            // Check for a persisted checkpoint from a previous session.
-            // Chat mode doesn't support pause/resume — skip the VFS scan.
-            const restoredRound = mode !== 'chat'
-                ? await logAdapter.draft().restore()
-                : null;
-            let rounds: import('@itookit/common').Round[];
-
-            if (restoredRound) {
-                // Resume from checkpoint — the ILoop reconstructs its state
-                // from the Log and continues from where it left off.
-                rounds = await resumeDrive(executor, restoredRound.id, actor, loopCtx);
-            } else {
-                // Fresh execution
-                const gen = executor.run(loopCtx);
-                rounds = await drive(gen, actor, loopCtx);
-            }
-
-            // Unregister actor once execution completes
-            this.activeActors.delete(sessionId);
-
-            // ── Persist ──────────────────────────────────────────────────
-            await finalize();
-            const endMs = Date.now();
-            const startMs = loopCtx.startedAt ?? task.createdAt;
-            const durationMs = endMs - startMs;
-
-            let inTokens = 0;
-            let outTokens = 0;
-            for (const r of rounds) {
-                const u = r.meta.usage as { inputTokens?: number; outputTokens?: number } | undefined;
-                inTokens += u?.inputTokens ?? 0;
-                outTokens += u?.outputTokens ?? 0;
-            }
-
-            // Character-based estimation fallback when LLM doesn't return usage
-            const hasRealUsage = inTokens > 0 || outTokens > 0;
-            if (!hasRealUsage) {
-                const outputChars = accumulator.output.length + accumulator.thinking.length;
-                outTokens = Math.ceil(outputChars / 4);
-                inTokens = outTokens; // rough symmetry estimate
-            }
-            const costUsd = inTokens * 0.000003 + outTokens * 0.000015;
-
-            const totalUsage: SessionTokenUsage = {
-                inputTokens: inTokens,
-                outputTokens: outTokens,
-                costUsd,
-                contextUsageRatio: 0,
-                rounds: rounds.length,
-                durationMs,
-                isEstimated: !hasRealUsage,
-            };
-
-            // Persist completed rounds via RoundLog.
-            // Each round is self-contained: [userMsg, ...assistantDelta].
-            // fold() reconstructs history by walking the parents chain and
-            // concatenating payloads — no full-history duplication.
-            //
-            // Resolve the parent: for regenerate, fork above the old user round;
-            // for normal flow, chain onto the current branch head.
-            if (input.roundTarget?.mode === 'update-existing') {
-                const assistantPayload = rounds.flatMap(round => round.payload)
-                    .filter(message => message.role === 'assistant' || message.role === 'tool');
-                const lastResult = rounds[rounds.length - 1]?.result;
-                await (logAdapter as RoundLog).setAssistantInRound(
-                    input.roundTarget.targetRoundId,
-                    { assistantMessages: assistantPayload, result: lastResult },
-                );
-            } else {
-            let chainParent = input.roundTarget?.mode === 'append-new'
-                ? input.roundTarget.parentRoundId
-                : input.parentUserNodeId;
-            if (!chainParent) {
-                try {
-                    const tm = await (logAdapter as RoundLog).loadManifest();
-                    chainParent = tm.currentHead || undefined;
-                } catch { /* use empty parents */ }
-            }
-
-            for (const round of rounds) {
-                const userMsg: ChatMessage = {
-                    role: 'user',
-                    content: input.text,
-                };
-                if (contextFiles.length > 0) {
-                    userMsg.attachments = contextFiles.map(f => ({
-                        name: f.name,
-                        type: f.type as import('@itookit/common').AttachmentType,
-                        source: f.path ?? f.name,
-                        size: f.size,
-                    }));
-                }
-                round.payload = [userMsg, ...round.payload];
-                // A submitted ChatInput creates a top-level interaction round.
-                // Flow/agent internals can later append contained child rounds;
-                // containment is intentionally independent from `parents`.
-                round.kind = 'interaction';
-                if (input.sendIntent?.execution.kind === 'flow') {
-                    round.producedByFlowRunId = input.sendIntent.execution.flowId;
-                }
-                if (input.sendIntent?.retention.mode === 'temporary' || input.overrides?.retentionMode === 'temporary') {
-                    round.exposure = 'internal';
-                    round.meta = {
-                        ...round.meta,
-                        historyPolicy: 'exclude',
-                        defaultContextMode: 'exclude',
-                        defaultContextScope: 'subtree',
-                    };
-                }
-                if (chainParent) {
-                    round.parents = [chainParent, ...(round.parents || [])];
-                }
-                await logAdapter.append(branchRef, round);
-                // Subsequent rounds in this batch chain from this one
-                chainParent = round.id;
-            }
-            }
-            await logAdapter.draft().flush();
-
-            state.updateNodeStatus(rootNode.id, 'success');
-
-            const connectionId = executorConfig.connectionId;
-            if (connectionId) {
-                this.agentResolver.recordUsageCost(connectionId, sessionId, {
-                    inputTokens: totalUsage.inputTokens ?? 0,
-                    outputTokens: totalUsage.outputTokens ?? 0,
-                    cost: 0,
-                }).catch(() => {});
-            }
-
-            if (isBound) {
-                this.eventBus.emitSession(sessionId, {
-                    type: 'message:status',
-                    payload: { messageId: rootNode.id, status: 'success' },
-                });
-                if (input.regenerateContext) {
-                    this.eventBus.emitSession(sessionId, {
-                        type: 'regenerate_completed',
-                        payload: { branchName: input.regenerateContext.branchName, assistantNodeId },
-                    });
-                }
-                this.eventBus.emitSession(sessionId, {
-                    type: 'finished',
-                    usage: {
-                        inputTokens: totalUsage.inputTokens,
-                        outputTokens: totalUsage.outputTokens,
-                        totalTokens: totalUsage.inputTokens + totalUsage.outputTokens,
-                        ...(totalUsage.costUsd !== undefined ? { costUsd: totalUsage.costUsd } : {}),
+            logAdapter = logAdapter ?? await this.createLog(sessionId, task.nodeId);
+            this.logCache.set(sessionId, logAdapter);
+            const setup = await this.setupTaskExecution(task, state);
+            const agentVersion = task.frozen?.agentVersion ?? setup.executorConfig.agentVersion;
+            if (!agentVersion) throw new Error(`Agent ${input.agentId} has no immutable version`);
+            const manifestBeforeRun = await (logAdapter as RoundLog).loadManifest();
+            const branchRef = task.frozen?.branchRef ?? manifestBeforeRun.currentBranch ?? 'main';
+            const branchHead = task.frozen?.branchHead ?? manifestBeforeRun.branches[branchRef] ?? null;
+            const flowWithoutDigest = {
+                id: `chat-${task.id}` as FlowRevision['id'],
+                revision: 1,
+                name: `Chat ${task.id}`,
+                createdAt: Date.now(),
+                nodes: [{
+                    id: task.id as FlowRevision['nodes'][number]['id'],
+                    name: input.agentId,
+                    handler: BUILTIN_HANDLERS.agent,
+                    inputPorts: [],
+                    outputPorts: [{ name: 'final', required: true, order: 0 }],
+                    config: {
+                        agent: { id: setup.executorConfig.id, version: agentVersion },
+                        prompt: input.text,
+                        contextPolicy: { mode: 'branch' },
+                        statePolicy: { mode: 'stateless' },
+                        loopMode: mode === 'chat' ? 'chat' : 'loop',
+                        _sessionId: sessionId,
+                        _nodeId: task.nodeId,
+                        _branchRef: branchRef,
+                        _branchHead: branchHead,
                     },
-                });
-            }
-
+                    joinPolicy: { kind: 'all-success' as const },
+                    retryPolicy: { maxAttempts: (setup.executorConfig.constraints?.maxRetries ?? 0) + 1, backoff: { kind: 'none' as const } },
+                }],
+                edges: [],
+            };
+            const flow = { ...flowWithoutDigest, digest: flowRevisionDigest(flowWithoutDigest as unknown as Omit<FlowRevision, 'digest'>) } as unknown as FlowRevision;
+            const result = await this.runFlow(flow, { signal: task.abortController.signal });
+            const taskRun = Object.values(result.graphRun.tasks ?? {})
+                .find(item => String(item.spec.sourceNodeId) === String(task.id));
+            const outputArtifacts: Array<Artifact | null> = taskRun
+                ? await Promise.all(taskRun.outputArtifactIds
+                    .map(artifactId => this.taskGraphRuntime!.reconciler.stores.artifactStore.get(artifactId)))
+                : [];
+            const output = outputArtifacts.filter((artifact): artifact is NonNullable<typeof artifact> => Boolean(artifact))
+                .map(artifact => typeof artifact.content === 'string' ? artifact.content : JSON.stringify(artifact.content)).join('\n\n');
+            state.appendToNode(setup.rootNode.id, output, 'output');
+            const manifest = await (logAdapter as RoundLog).loadManifest();
+            const committedBranchHead = manifest.branches[branchRef] ?? branchHead;
+            const userMessage: ChatMessage = { role: 'user', content: input.text };
+            if (setup.contextFiles.length) userMessage.attachments = setup.contextFiles.map(file => ({ name: file.name, type: file.type as import('@itookit/common').AttachmentType, source: file.path ?? file.name, size: file.size }));
+            const topRound: import('@itookit/common').Round = {
+                id: (setup.preallocatedRoundId ?? ulid()) as import('@itookit/common').RoundId,
+                parents: committedBranchHead ? [committedBranchHead] : [],
+                kind: 'interaction',
+                producedByFlowRunId: task.id,
+                exposure: input.sendIntent?.retention.mode === 'temporary' ? 'internal' : 'public',
+                payload: [userMessage, { role: 'assistant', content: output }],
+                meta: { createdAt: Date.now(), origin: 'loop', defaultContextMode: input.sendIntent?.retention.mode === 'temporary' ? 'exclude' : 'include', defaultContextScope: 'subtree' },
+            };
+            await (logAdapter as RoundLog).appendExpected(branchRef, topRound, committedBranchHead);
+            state.updateNodeStatus(setup.rootNode.id, 'success');
+            this.eventBus.emitSession(sessionId, { type: 'message:updated', payload: { messageId: setup.rootNode.id, field: 'output', delta: output } });
+            this.eventBus.emitSession(sessionId, { type: 'message:status', payload: { messageId: setup.rootNode.id, status: 'success' } });
+            this.eventBus.emitSession(sessionId, { type: 'finished', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } });
             this.callbacks.onStatusChange(sessionId, 'completed');
             this.callbacks.onUnread(sessionId);
-
         } catch (error: any) {
-            this.activeActors.delete(sessionId);
-            if (error instanceof LoopAbortedError) {
-                this.callbacks.onStatusChange(sessionId, 'aborted');
-            } else {
-                await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted, logAdapter);
-            }
+            await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted, logAdapter!);
         } finally {
             this.running.delete(task.id);
             runtime.currentTaskId = undefined;
@@ -674,10 +776,6 @@ export class TaskRunner {
             this.processQueue();
         }
     }
-
-    // ============================================
-    // 内部：消息创建
-    // ============================================
 
     private async createUserMessage(
         task: ExecutionTask,
@@ -877,38 +975,3 @@ export class TaskRunner {
 }
 
 // ── Module-level helper ────────────────────────────────────────────────────
-
-/**
- * Wraps an ILog so that fold() appends the pending user message at the end.
- *
- * RoundLog sessions write the user message only after the executor finishes
- * (post-execution persist in executeAgentLoopTask). During execution, fold()
- * cannot see the in-flight user message, which causes a "messages: at least
- * one message is required" 400 from the LLM API.
- *
- * This wrapper prepends nothing to storage — it only patches the in-memory
- * fold() result for the duration of one executor run.
- */
-function buildFoldPrependLog(inner: ILog, userText: string, contextFiles: ChatAttachment[]): ILog {
-    const pendingUserMsg: import('@itookit/common').ChatMessage = { role: 'user', content: userText };
-    if (contextFiles.length > 0) {
-        (pendingUserMsg as any).attachments = contextFiles.map(f => ({
-            name: f.name,
-            type: f.type ?? 'file',
-            source: f.path ?? f.name,
-            size: f.size,
-        }));
-    }
-
-    return {
-        async fold(ref, strategy) {
-            const history = await inner.fold(ref, strategy);
-            return [...history, pendingUserMsg];
-        },
-        append: inner.append.bind(inner),
-        refs: inner.refs.bind(inner),
-        draft: inner.draft.bind(inner),
-        merge: inner.merge.bind(inner),
-        rebase: inner.rebase.bind(inner),
-    };
-}

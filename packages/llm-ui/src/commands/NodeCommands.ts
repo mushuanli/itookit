@@ -56,7 +56,14 @@ export class RegenerateCommand extends Command<{ nodeId: string }> {
             this.ctx.chatInput.setLoading(true);
 
             if (session.role === 'user') {
-                await this.ctx.commands.execute('session.regenerate-from-user', { userMessageId: session.id });
+                // User bubbles do not own an executionRoot. Pass the currently
+                // selected Agent explicitly; the engine still prefers persisted
+                // Round metadata when callers omit this option (legacy/API use).
+                const agentId = this.ctx.chatInput.getConfig().agentId;
+                await this.ctx.commands.execute('session.regenerate-from-user', {
+                    userMessageId: session.id,
+                    options: agentId ? { agentId } : undefined,
+                });
             } else {
                 await this.ctx.commands.execute('session.regenerate', { assistantId: session.id });
             }

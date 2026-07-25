@@ -2,6 +2,7 @@
 
 import type { SessionEvent, RegistryEvent } from '@itookit/llm-engine';
 import type { ICommandBus } from '@itookit/common';
+import type { TaskGraphRunId } from '@itookit/common';
 import { Toast, t } from '@itookit/common';
 import type { SessionGroup } from '@itookit/llm-engine';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
@@ -70,6 +71,7 @@ export interface SessionEventHandlerDeps {
      * 由 Shell 注入，不提供时仅展示无操作的 Toast。
      */
     onNavigateToSession?: (sessionId: string) => void;
+    onTaskGraphRun?: (graphRunId: TaskGraphRunId) => void;
 }
 
 // ----------------------------------------------------------------
@@ -191,6 +193,11 @@ export class SessionEventHandler {
                     } else {
                         Toast.info(hitlMsg);
                     }
+                }
+                break;
+            case 'task_graph_run_projected':
+                if (event.payload.sessionId === this.deps.getCurrentSessionId()) {
+                    this.deps.onTaskGraphRun?.(event.payload.graphRunId);
                 }
                 break;
         }

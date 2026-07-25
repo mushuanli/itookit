@@ -926,3 +926,43 @@
         font-size: 16px;  /* 防止 iOS 缩放 */
     }
 }
+.llm-nav-create-menu {
+    position: absolute;
+    z-index: 20;
+    right: 0;
+    display: grid;
+    width: 250px;
+    padding: 8px;
+    border: 1px solid var(--llm-border, #4b5563);
+    border-radius: 8px;
+    background: var(--llm-bg-primary, #111827);
+    box-shadow: 0 12px 30px rgb(0 0 0 / 35%);
+}
+
+.llm-nav-create-menu strong {
+    padding: 7px 8px 4px;
+    color: var(--llm-text-secondary, #9ca3af);
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.llm-nav-create-menu button {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 2px 6px;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 5px;
+    color: inherit;
+    text-align: left;
+    background: transparent;
+}
+
+.llm-nav-create-menu button:hover {
+    background: var(--llm-bg-hover, #1f2937);
+}
+
+.llm-nav-create-menu button small {
+    grid-column: 2;
+    color: var(--llm-text-secondary, #9ca3af);
+}

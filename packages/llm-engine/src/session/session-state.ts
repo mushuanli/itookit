@@ -130,6 +130,12 @@ export class SessionState {
 
         const { changes } = event;
 
+        // Metadata updates must survive an empty assistant result; resend uses
+        // the persisted agentId to avoid falling back to the default provider.
+        if (round.meta && changes.agentId !== undefined) {
+            round.meta.agentId = changes.agentId;
+        }
+
         // Clear assistant: remove assistantMessage and notify UI
         if (changes.assistantContent !== undefined && !changes.assistantContent) {
             const assistantId = round.assistantMessage?.persistedNodeId;
@@ -469,13 +475,14 @@ export class SessionState {
                     id: p.assistantMessage.persistedNodeId,
                     name: 'Assistant',
                     executorType: 'agent',
-                    executorId: '',
+                    executorId: p.meta?.agentId ?? '',
                     status: p.assistantMessage.status,
                     startTime: p.meta?.createdAt ?? Date.now(),
                     parentId: undefined,
                     data: {
                         output: p.assistantMessage.content,
                         thought: p.assistantMessage.thinking ?? '',
+                        metaInfo: p.meta?.agentId ? { agentId: p.meta.agentId } : undefined,
                     },
                     children: [],
                 },

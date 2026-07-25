@@ -20,8 +20,8 @@ import type {
     DraftArea,
     AssemblyStrategy,
     ChatMessage,
-    RoundResult,
     ContextRule,
+    RoundResult,
 } from '@itookit/common';
 import type { IChatEngine } from './types';
 import type { RoundManifest, PersistedRound, RoundProjection } from './round-types';
@@ -137,6 +137,18 @@ export class RoundLog implements ILog {
         return roundId;
     }
 
+    async appendExpected(ref: Ref, round: Round, expectedHead: RoundId | null): Promise<RoundId> {
+        const roundId = await this.graph.append(ref, round, expectedHead);
+        this._cache.invalidate(ref);
+        return roundId;
+    }
+
+    async appendContained(round: Round): Promise<RoundId> {
+        const roundId = await this.graph.appendContained(round);
+        this._cache.invalidateAll();
+        return roundId;
+    }
+
     async fold(ref: Ref, _strategy?: AssemblyStrategy): Promise<ChatMessage[]> {
         // Strategy: §3.4 — only 'concat' is implemented (YAGNI for now)
         const manifest = await this.loadManifest();
@@ -247,6 +259,15 @@ export class RoundLog implements ILog {
         this._cache.invalidateAll();
     }
 
+    /** Replace assistant/tool output in an existing Round without changing its identity. */
+    async setAssistantInRound(
+        roundId: RoundId,
+        update: { assistantMessages: ChatMessage[]; result?: RoundResult; agentId?: string },
+    ): Promise<void> {
+        await this.graph.setAssistantInRound(roundId, update);
+        this._cache.invalidateAll();
+    }
+
     /** True when a Round contains a meaningful assistant response. */
     static hasEffectiveAssistant(round: PersistedRound): boolean {
         return hasEffectiveAssistant(round);
@@ -262,13 +283,14 @@ export class RoundLog implements ILog {
         return result;
     }
 
-    /** Replace assistant/tool output in an existing Round without changing its ID or parents. */
-    async setAssistantInRound(
-        roundId: RoundId,
-        update: { assistantMessages: ChatMessage[]; result?: RoundResult },
-    ): Promise<void> {
-        await this.graph.setAssistantInRound(roundId, update);
+    async createBranchForReplacement(
+        sourceRoundId: RoundId,
+        newRootRoundId: RoundId,
+        options: { branchName?: Ref; createdFrom: 'regenerate' | 'manual' | 'edit' },
+    ): Promise<{ branchName: Ref; commonHeadId?: RoundId }> {
+        const result = await this.graph.createBranchForReplacement(sourceRoundId, newRootRoundId, options);
         this._cache.invalidateAll();
+        return result;
     }
 
     /** Enumerate siblings using the persisted Round DAG index. */
@@ -325,6 +347,7 @@ export class RoundLog implements ILog {
     ): Promise<{ profileId: string; revision: number }> {
         const manifest = await this.loadManifest();
         let pointer = manifest.branchMeta[ref]?.contextProfile;
+        const expectedRevision = pointer?.revision;
         if (!pointer) {
             const created = await this.profileStore.createProfile();
             pointer = { id: created.id, revision: created.revision };
@@ -333,7 +356,7 @@ export class RoundLog implements ILog {
             [...new Set(roundIds)].map(id => [id, { mode, scope } satisfies ContextRule]),
         );
         const profile = await this.profileStore.updateProfile(pointer.id, pointer.revision, updates);
-        await this.graph.setContextProfile(ref, profile.id, profile.revision);
+        await this.graph.setContextProfile(ref, profile.id, profile.revision, expectedRevision);
         this._cache.invalidate(ref);
         return { profileId: profile.id, revision: profile.revision };
     }

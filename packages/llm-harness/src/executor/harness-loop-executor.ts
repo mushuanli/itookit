@@ -130,7 +130,9 @@ export class HarnessLoopExecutor implements ILoop {
         );
         contextManager.initSession(sessionId, cwd, '');
 
-        const initialMessages = await ctx.log.fold(ctx.ref);
+        const initialMessages = ctx.contextSnapshot
+            ? [...ctx.contextSnapshot.canonicalMessages]
+            : await ctx.log.fold(ctx.ref);
         const taskPrompt = initialMessages.find(m => m.role === 'user')?.content as string ?? '';
         contextManager.addMessage(sessionId, { role: 'user', content: taskPrompt });
         contextManager.autoDetectAndLoadSkills(sessionId, taskPrompt);
@@ -486,7 +488,9 @@ export class HarnessLoopExecutor implements ILoop {
 
         // Reconstruct state from the Log. Since round boundaries are persisted,
         // we count completed rounds and re-enter the loop with full history.
-        const allMessages = await ctx.log.fold(ctx.ref);
+        const allMessages = ctx.contextSnapshot
+            ? [...ctx.contextSnapshot.canonicalMessages]
+            : await ctx.log.fold(ctx.ref);
         const completedRounds = allMessages.filter(m => m.role === 'assistant').length;
 
         if (completedRounds === 0) {

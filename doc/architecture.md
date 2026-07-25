@@ -78,12 +78,12 @@ Five strategies: `StandardWorkspaceStrategy` (MDxEditor + `IModuleFS`), `ChatWor
 
 ```
 device-llm  →  LLMConnection / streaming / MCP / multi-provider / Skill storage
-llm-harness →  AgentLoopExecutor (multi-round) + built-in tools + TTY device + Skill/Tool drivers
-llm-engine  →  SessionManager, LLMSessionEngine (→ vfslib), VFSAgentService (→ vfslib)
-llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
+llm-harness →  HarnessLoopExecutor (ILoop) + HarnessAgentTaskExecutor (TaskExecutor) + built-in tools + TTY device + Skill/Tool drivers
+llm-engine  →  SessionManager, ChatEngine (VFS persistence), TaskGraph reconciler, ILoop executors, Plugin system
+llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor, TaskGraphWorkbench
 ```
 
-`initializeLLMEngine(options)` in `packages/llm-engine/src/index.ts` wires the kernel, `VFSAgentService`, `LLMSessionEngine`, `PromptHistoryService`, and returns a `SessionManager`.
+`initializeLLMEngine(options)` in `packages/llm-engine/src/index.ts` wires `VFSAgentService`, `ChatEngine`, `PromptHistoryService`, ExecutorRegistry, TaskGraph stores + reconciler + CommandBus, plugins, and returns `{ sessionManager, commandBus, taskGraph }`.
 
 ### App-Shell Bootstrap Sequence
 
@@ -91,11 +91,11 @@ llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
 
 1. `createVFS({ rootBackend, modules })` — one VFS module per workspace
 2. `new LLMDeviceDriver(vfs)` → `init()` → `vfs.devices.register()` → `createDeviceNodes()`
-3. `createSettingsModule(vfs)`, `new VFSAgentService(vfs, llmDriver)`, `new LLMSessionEngine(vfs)`
+3. `createSettingsModule(vfs)`, `new VFSAgentService(vfs, llmDriver)`, `new ChatEngine(vfs)`
 4. `createHarness({ llmDriver })` — assembles the multi-round agent loop
 5. `harness.toolDriver.setVFSContext(createVFSToolContext(vfs))` — browser VFS bridge for file tools
 6. `syncSkillsToHarness(llmDriver, harness)` — syncs VFS-persisted `LLMSkill` → harness `SkillDefinition`; watches `llmDriver.onChange()`
-7. `initializeLLMEngine({ agentService, sessionEngine, harnessRuntime, ... })` → `SessionManager`
+7. `initializeLLMEngine({ agentService, sessionEngine, llmService: harness.llmService, ... })` → `{ sessionManager, commandBus, taskGraph }`
 8. Workspace strategies wired; hash-based routing with lazy `MemoryManager` creation (one per workspace, cached)
 
 ### LLM Harness — Agent Loop Executor
@@ -113,12 +113,18 @@ llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
 - **Q2 Crash Recovery** — persists per-round session state to localStorage; `resumeSession()` reconstructs from snapshot
 - **Q3 Mid-run Injection** — `agentRuntime.inject(message)` queues user instructions for the next loop iteration
 
-**Dual execution path in TaskRunner:**
+**Unified execution via TaskGraph v3:**
 
-| Path | Trigger | Features |
-|---|---|---|
-| Kernel path | default | single-round, auto-continue, streaming |
-| Harness path | `ChatSessionSettings.useHarness=true` | multi-round agent loop, tool calling, context compression, HITL |
+All chat / loop / flow / mission / session-graph submissions compile to `TaskGraphRun` and execute through `TaskGraphReconciler` — the single control-plane writer. There is no dual-path branching; `executeTask()` and `executeHarnessTask()` have been eliminated.
+
+| Submission | Compiled to |
+|---|---|
+| Chat / Loop | Single-node AgentTask Flow → TaskGraphRun |
+| Flow (sendIntent) | Multi-node FlowRevision → TaskGraphRun |
+| Mission | MissionPlan → TaskGraphRun (via MissionTaskGraphRunner) |
+| Session Graph | Dependency tree → TaskGraphRun (via SessionTaskGraphRunner) |
+
+`TaskRunner` delegates to `TaskGraphReconciler.run()` for all execution. For AgentTask nodes, `executeV3Agent()` drives the ILoop coroutine via `drive(gen, actor, ctx)`.
 
 **Wiring:**
 ```ts
@@ -218,15 +224,15 @@ createHarness({ llmDriver })           // TTY tools not registered; graceful deg
 | P3 | `prompt` 型 enabled 技能的完整 `instructions` | 无需 load_skill，按类型自动注入 |
 | P4 | `http/shell/mcp/builtin` 型 enabled 技能的 id + description | 渐进式披露，待 function-calling 恢复后由 LLM 调 `load_skill` |
 
-**内核路径（无 advance mode）**：`ContextManager` 不参与，system prompt 仅含 agent 定义的 `systemPrompt`（无任何 skill 注入）。
+**chat / lite loop 路径**：不含 skill 注入，system prompt 仅含 agent 定义的 `systemPrompt`。
+
+**harness loop 路径**：skill 注入由 harness `ContextManager.buildSystemPrompt()` 负责（P2/P3/P4）。
 
 预算门控：`systemPromptBudgetTokens = 4000`，P0 始终通过，其余按 `length/4` 估算超出则丢弃。
 
 **Skill 注入归属：`ContextManager` 独占，`AgentResolver` 不注入**
 
-`AgentResolver.resolve()` 只负责解析 agent 配置（connection、model、systemPrompt），不注入任何 skill。skill 注入完全由 harness `ContextManager.buildSystemPrompt()` 负责（P2/P3/P4），确保：
-- 无 advance mode（内核路径）→ system prompt 无任何 skill 内容
-- 有 advance mode（harness 路径）→ `ContextManager` 统一管理，单一注入点，无双重注入
+`AgentResolver.resolve()` 只负责解析 agent 配置（connection、model、systemPrompt），不注入任何 skill。skill 注入完全由 harness `ContextManager.buildSystemPrompt()` 负责。
 
 **`enabled` 保护机制（多层）：**
 - **P2**：`s.loadedSkillIds.includes(sk.id) && sk.enabled` — 已加载但后来被禁用的技能立即排除
@@ -261,7 +267,7 @@ createHarness({ llmDriver })           // TTY tools not registered; graceful deg
 
 `packages/llm-engine/src/mission/` — multi-agent task decomposition, scheduling, and verification.
 
-**Design principle:** LLM handles intent (plan/execute/verify); deterministic `MissionScheduler` handles dispatch.
+**Design principle:** LLM handles intent (plan/execute/verify); deterministic `MissionTaskGraphRunner` handles dispatch via TaskGraph.
 
 **Core types** (`packages/common/src/interfaces/llm/mission.ts`):
 - `MissionPlan` — VFS-persisted `plan.json`; contains goal + `TodoItem[]` dependency graph + agent pool config
@@ -272,22 +278,19 @@ createHarness({ llmDriver })           // TTY tools not registered; graceful deg
 
 | File | Role |
 |---|---|
-| `mission-service.ts` | Public facade — runs parallel LLM planners, merges `TodoItem[]`, kicks off scheduler |
-| `mission-scheduler.ts` | Main loop — `getReadyTodos()` → dispatch parallel/serial → verify → HITL |
+| `mission-service.ts` | Public facade — runs parallel LLM planners, merges `TodoItem[]`, kicks off TaskGraph run |
+| `mission-task-graph-runner.ts` | Compiles MissionPlan → TaskGraphRun, delegates to `TaskGraphReconciler` |
 | `todo-state.ts` | `TodoStateManager` — atomic read/write of `plan.json` in VFS `missions` module |
 | `result-persister.ts` | Saves executor results and summaries to VFS; appends to `journal.md` |
 
 **Execution flow:**
 ```
 MissionService.createMission(goal)
-  → parallel SubAgentRouter.delegate() planners → merge TodoItem[]
+  → parallel LLM planners → merge TodoItem[]
   → TodoStateManager.createMission() → write plan.json to VFS
-  → MissionScheduler.run() loop:
-      getReadyTodos() [deps satisfied + status=pending]
-      → executeTodo() → SubAgentRouter.delegate() → save result
-      → runVerifier() → SubAgentRouter.delegate()
-          → verdict: 'done' | 'retry' | 'hitl'
-          → 'hitl': HITLQueue.push() → await human response → resume
+  → MissionTaskGraphRunner.execute()
+      → compile MissionPlan → TaskGraphRun (AgentTask per TodoItem)
+      → TaskGraphReconciler.run() → schedule + execute + verify + HITL
 ```
 
 **VFS layout:** `missions` module — `plan.json` + `results/<todoId>.md` + `journal.md`
@@ -296,24 +299,18 @@ MissionService.createMission(goal)
 
 `packages/llm-engine/src/session-graph/` — file-based cross-session dependency execution.
 
-Each VFS file is a "session" whose content is the agent task prompt. Dependencies are declared in `_filename/session-meta.json`. `GraphOrchestrator` topo-sorts and executes bottom-up.
+Each VFS file is a "session" whose content is the agent task prompt. Dependencies are declared in `_filename/session-meta.json`. `SessionTaskGraphRunner` projects the dependency tree into a TaskGraphRun, executed by `TaskGraphReconciler`.
 
 **Key components:**
 
 | File | Role |
 |---|---|
-| `graph-orchestrator.ts` | `GraphOrchestrator` — topo-sort + sequential/parallel execution with retry |
-| `dependency-graph.ts` | `DependencyGraph` — reads `session-meta.json`, expands directory refs, detects cycles |
+| `session-task-graph-runner.ts` | `SessionTaskGraphRunner` — projects dependency tree into TaskGraphRun |
 | `session-meta-store.ts` | `SessionMetaStore` — read/write `session-meta.json` and `result.md` in each file's assetdir |
-| `completion-analyzer.ts` | `CompletionAnalyzer` — LLM-based output verification (advance mode only) |
-| `types.ts` | `SessionMeta`, `SessionType` (`standard`/`advance`), `SessionStatus`, `GraphExecutionOptions` |
+| `session-flow-factory.ts` | `createSessionFlow` + `resolveDependencyTree` — topo-sort + cycle detection |
+| `types.ts` | `SessionMeta`, `SessionType`, `SessionStatus`, `GraphExecutionOptions` |
 
-**Execution modes:**
-
-| Mode | Completion detection | Retry |
-|---|---|---|
-| `standard` | Mark done when agent finishes | No |
-| `advance` | `CompletionAnalyzer` calls LLM to verify output quality | Yes, up to `maxRetries` |
+Execution delegates to `TaskGraphReconciler` — there is no separate `GraphOrchestrator` or `CompletionAnalyzer`. All scheduling, retry, and verification go through the TaskGraph control plane.
 
 **`session-meta.json` location:** `_<filename>/session-meta.json` (assetdir of the owner file)
 
@@ -449,34 +446,28 @@ SubAgentRouter.delegate(task: SubAgentTask): Promise<SubAgentResult>
 - 可通过 `task.allowedTools` 覆盖许可工具列表
 - 不在许可列表的工具返回 `'Error: tool not allowed in sub-agent context'`
 
-### Agent Events — 全部类型
+### Agent Events — Canonical Types
+
+Canonical `AgentEvent` 定义在 `common/src/interfaces/agent/agent-event.ts`（15 变体）：
 
 ```
-// 任务生命周期
-agent:task:start      agent:task:end
-agent:step:complete
+// 流式内容
+stream:content  stream:thinking
 
-// LLM 调用
-agent:llm:start       agent:llm:end
-agent:llm:retry       agent:llm:fallback
-agent:stream:content  agent:stream:thinking
+// 轮次边界
+round:start  round:end
 
 // 工具执行
-agent:tool:start      agent:tool:success
-agent:tool:error      agent:tool:timeout
-agent:permission:request
+tool:queued  tool:running  tool:success  tool:error
 
-// 系统状态
-agent:context:compressed   agent:skill:loaded
-agent:budget:warning       agent:budget:exhausted
-agent:backpressure:check   agent:backpressure:failed
+// 任务生命周期
+finished  error
 
-// TTY
-agent:tty:open   agent:tty:data   agent:tty:close   agent:tty:error
-
-// 交互
-agent:plan:confirm    agent:user:injected
+// HITL 暂停
+await_signal
 ```
+
+Harness 内部的旧事件（`agent:task:start`、`agent:llm:start`、`agent:budget:warning` 等）在 `IAgentRuntime` 的 `on()` 接口上仍然可用，但 ILoop 协程只 yield canonical `AgentEvent`。
 
 ### SessionActor — 事件桥接
 
@@ -539,11 +530,12 @@ export const myToolHandler: ToolHandler = async (args, ctx) => {
 
 #### 扩展 Agent Loop
 
-- 新 event：在 `agent-types.ts` 的 `AgentEventType` 联合类型和 `AgentEventPayloads` 中新增条目
+- 新 ILoop executor：实现 `ILoop` 接口，通过 `ExecutorRegistry.register()` 注册。详见 `packages/llm-engine/CLAUDE.md`
+- 新 ILoopMiddleware：实现 `ILoopMiddleware` 接口（`beforeExchange`/`afterExchange`/`onToolCalls`/`onError`），通过 `createLoopExecutor(preset, config, harness)` 注入。详见 `packages/llm-engine/src/core/middleware-pipeline.ts`
+- 新 TaskGraph TaskKind：实现 `TaskExecutor` 接口，注册到 `HarnessContributionRegistry`。内置 7 种（agent/route/transform/reduce/human/spawn/subflow），详见 `packages/llm-engine/src/task-graph/builtins.ts`
+- 新 Plugin：实现 `ILLMPlugin`，通过 `ExtensionRegistry.register()` 注册。内置 3 个（session/vcs/history），详见 `packages/llm-engine/src/plugins/`
 - 新 back-pressure 规则：`agentDriver.setLoopConfig({ backPressureRules: [...existing, newRule] })`
-- Plan 拦截：`runtime.onIntercept('agent:plan:confirm', handler)` — 返回 string 可注入重规划指令
 - Mid-run 注入：`runtime.inject(message)` — 下次循环迭代开始时作为 `role:'user'` 消息插入
-- 新 Mission 可选服务：在 `agentDriver.setServices()` 中传入 `agentLookup`、`resultPersistence`、`hitlQueue`
 
 #### Per-task 参数覆盖
 

@@ -72,8 +72,6 @@ export type GraphEvent =
 export interface GraphExecutionOptions {
     /** Agent runtime for executing sessions. */
     runtime: import('@itookit/common').IAgentRuntime;
-    /** LLM service — required for advance-mode completion analysis. */
-    llm?: import('@itookit/common').ILLMService;
     onProgress?: (event: GraphEvent) => void;
     signal?: AbortSignal;
     /** Hard limit on recursion depth to guard against deep graphs (default: 30). */

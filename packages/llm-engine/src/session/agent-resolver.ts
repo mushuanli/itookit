@@ -79,10 +79,10 @@ export class AgentResolver {
             );
         }
 
-        if (version && agentDef.version && agentDef.version !== version) {
+        if (!version || !agentDef.version || agentDef.version !== version) {
             throw new EngineError(
                 EngineErrorCode.EXECUTOR_NOT_FOUND,
-                `Agent version mismatch: requested ${version}, found ${agentDef.version}`,
+                `Agent version mismatch: requested ${version ?? '(missing)'}, found ${agentDef.version ?? '(unversioned)'}`,
             );
         }
 
@@ -128,7 +128,31 @@ export class AgentResolver {
             systemPrompt: agentDef.systemPrompt ?? agentDef.config.systemPrompt,
             icon: agentDef.icon,
             temperature: agentDef.modelPolicy?.temperature ?? agentDef.config.temperature,
+            agentVersion: agentDef.version ?? await this.hashDefinition(agentDef),
+            capabilityPolicy: agentDef.capabilityPolicy,
+            memoryPolicy: agentDef.memoryPolicy,
+            defaultContextPolicy: agentDef.defaultContextPolicy,
         } as ExecutorConfig;
+    }
+
+    private async hashDefinition(agentDef: import('@itookit/common').AgentDefinition): Promise<string> {
+        const canonical = this.canonicalize({
+            ...agentDef,
+            version: undefined,
+            modifiedAt: undefined,
+        });
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
+        return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    }
+
+    private canonicalize(value: unknown): string {
+        if (Array.isArray(value)) return `[${value.map(item => this.canonicalize(item)).join(',')}]`;
+        if (value && typeof value === 'object') {
+            const record = value as Record<string, unknown>;
+            return `{${Object.keys(record).filter(key => record[key] !== undefined).sort()
+                .map(key => `${JSON.stringify(key)}:${this.canonicalize(record[key])}`).join(',')}}`;
+        }
+        return JSON.stringify(value);
     }
 
     async getAvailableAgents(): Promise<AgentInfo[]> {

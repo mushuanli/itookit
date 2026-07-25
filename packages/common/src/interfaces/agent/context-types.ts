@@ -1,7 +1,7 @@
 // Context types — BranchContextProfile, ContextPlan, ContextBlock, ContextSnapshot.
 //
 // Phase 2 (WP-03): Defines the data model for per-branch context rules and
-// the frozen ContextSnapshot that represents what an AgentRun actually sees.
+// the frozen ContextSnapshot that represents what an AgentTask actually sees.
 // These types live in common because they are consumed by both llm-engine
 // (ContextAssembler) and UI layers (Context Drawer).
 
@@ -44,7 +44,7 @@ export interface ContextPlan {
 
 export type InputBinding =
     | { kind: 'artifact'; artifactId: string; label: string; order: number }
-    | { kind: 'upstream-output'; runId: string; outputPort: string; inputLabel: string; order: number }
+    | { kind: 'upstream-output'; taskRunId: string; outputPort: string; inputLabel: string; order: number }
     | { kind: 'round'; roundId: RoundId; label: string; order: number }
     | { kind: 'text'; content: string; label: string; order: number };
 
@@ -54,14 +54,14 @@ export type ContextBlock =
     | { kind: 'round'; roundId: RoundId; messages: ChatMessage[] }
     | { kind: 'summary'; sourceRoundIds: RoundId[]; artifactId: string }
     | { kind: 'artifact'; artifactId: string; label: string }
-    | { kind: 'memory'; entryId: string; namespaceId: string; contentHash: string }
+    | { kind: 'memory'; entryId: string; namespaceId: string; contentHash: string; content?: string }
     | { kind: 'system'; source: 'agent' | 'skill' | 'runtime'; content: string };
 
 // ─── ContextSnapshot (frozen output) ───────────────────────────────────────
 
 export interface ContextSnapshot {
     id: ContextSnapshotId;
-    runId: string;
+    taskRunId: string;
     createdAt: number;
 
     branchRef: RefName;
@@ -73,4 +73,5 @@ export interface ContextSnapshot {
     canonicalMessages: ChatMessage[];
     tokenCount: number;
     digest: string;
+    explanation?: import('./harness-v3').ContextExplanation;
 }

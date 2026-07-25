@@ -48,6 +48,9 @@
 |---|---|
 | createHarness 工厂 | `llm-harness/src/factory.ts` |
 | AgentLoopExecutor | `llm-harness/src/executor/agent-loop-executor.ts` |
+| HarnessLoopExecutor (ILoop) | `llm-harness/src/executor/harness-loop-executor.ts` |
+| HarnessAgentTaskExecutor | `llm-harness/src/executor/agent-task-executor.ts` |
+| Harness Middleware (6 个) | `llm-harness/src/executor/harness-middleware.ts` |
 | ContextManager | `llm-harness/src/executor/context-manager.ts` |
 | SubAgentRouter | `llm-harness/src/executor/sub-agent-router.ts` |
 | SessionActor 事件桥接 | `llm-engine/src/core/session-actor.ts` |
@@ -62,8 +65,28 @@
 | TaskRunner | `llm-engine/src/session/task-runner.ts` |
 | AgentResolver | `llm-engine/src/session/agent-resolver.ts` |
 | ChatFile 持久化 | `llm-engine/src/persistence/chat-engine.ts` |
+| RoundLog (ILog) | `llm-engine/src/persistence/round-log.ts` |
 | Mission 编排 | `llm-engine/src/mission/` |
 | Session Graph | `llm-engine/src/session-graph/` |
+
+## TaskGraph / Plugin
+
+| 场景 | 文件 |
+|---|---|
+| TaskGraphReconciler | `llm-engine/src/task-graph/reconciler.ts` |
+| DependencyScheduler | `llm-engine/src/task-graph/dependency-scheduler.ts` |
+| Builtin Executors | `llm-engine/src/task-graph/builtins.ts` |
+| Task Catalog | `llm-engine/src/task-graph/catalog.ts` |
+| ContextAssembler | `llm-engine/src/core/context-assembler.ts` |
+| ExecutorRegistry | `llm-engine/src/core/executor-registry.ts` |
+| Loop Driver (drive/resume) | `llm-engine/src/core/loop-driver.ts` |
+| Middleware Pipeline | `llm-engine/src/core/middleware-pipeline.ts` |
+| CommandBus | `llm-engine/src/core/command-bus.ts` |
+| ExtensionRegistry | `llm-engine/src/core/extension-registry.ts` |
+| Session/Auth/History Plugins | `llm-engine/src/plugins/` |
+| TaskGraph Workbench UI | `llm-ui/src/components/TaskGraphWorkbench.ts` |
+| TaskGraph Draft Controller | `llm-ui/src/components/task-graph/DraftController.ts` |
+| TaskGraph Canvas | `llm-ui/src/components/task-graph/TaskGraphCanvas.ts` |
 
 ## VFS
 

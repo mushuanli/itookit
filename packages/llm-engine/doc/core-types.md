@@ -2,25 +2,28 @@
 
 ## 类型体系
 
-### 三层类型
+### 三层事件类型
 
 ```
-AgentTaskRequest (common)     ← 跨包契约: IAgentRuntime.run() 入口
-    ↓ TaskRunner.submit()
-TaskInput (engine)            ← 引擎内部: +sessionId, nodeId, skipUserMessage
-    ↓ SessionState
-SessionGroup (engine)         ← UI 消费: OrchestratorEvent.session_start payload
+AgentEvent (common)            ← canonical，15 变体（stream:content / tool:queued / finished 等）
+    ↓ SessionActor.emit()
+MessageProjectionEvent (engine) ← UI 树投影（message:appended / message:updated / message:status）
+    ↓ SessionEventBus.emitSession()
+SessionStructuralEvent (engine) ← 结构变更（branch:switched / regenerate_started 等）
 ```
+
+三者组成 `SessionEvent` 联合类型，消费者统一处理。
 
 ### 关键类型
 
-**SessionGroup** (`core/types.ts:152`):
+**SessionGroup** (`core/types.ts`):
 ```
 { id, timestamp, role: 'user'|'assistant', content?, files?, executionRoot?,
-  persistedNodeId?, siblingIndex?, siblingCount?, branchInfo?, parentUserSessionId? }
+  persistedNodeId?, siblingIndex?, siblingCount?, branchInfo?, parentUserSessionId?,
+  origin?, historyPolicy?, roundId? }
 ```
 
-**ExecutionNode** (`core/types.ts:77`):
+**ExecutionNode** (`core/types.ts`):
 ```
 { id, parentId?, executorType: 'agent'|'tool'|'http'|'script'|'composite',
   name, status: NodeStatus, startTime, endTime?,
@@ -28,15 +31,16 @@ SessionGroup (engine)         ← UI 消费: OrchestratorEvent.session_start pay
   children? }
 ```
 
-**OrchestratorEvent** (`core/types.ts:338`) — 16 种事件类型:
-`session_start` | `node_start` | `node_update` | `node_status` | `finished` | `error` |
-`session_cleared` | `messages_deleted` | `message_edited` | `regenerate_*` |
-`sibling_switch` | `branch_*`
+**SessionEvent** (`core/types.ts`) — 三层联合:
+- `AgentEvent` — canonical，15 变体（从 ILoop executor yield）
+- `MessageProjectionEvent` — 3 变体（`message:appended` / `message:updated` / `message:status`）
+- `SessionStructuralEvent` — 7 变体（`branch:switched` / `regenerate_started` / `sibling:switched` 等）
 
-**TaskInput** (`core/types.ts:264`):
+**TaskInput** (`core/types.ts`):
 ```
-{ sessionId, nodeId, text, files, agentId, overrides?,
-  skipUserMessage?, parentUserNodeId?, branchInfo?, regenerateContext? }
+{ sessionId, nodeId, text, files, agentId, overrides?, skipUserMessage?,
+  parentUserNodeId?, branchInfo?, regenerateContext?, origin?, historyPolicy?,
+  sendIntent?, roundTarget? }
 ```
 
 ## SessionState — 会话内存状态
@@ -48,24 +52,25 @@ SessionState
   ├── createAssistantMessage(config, nodeId, branchInfo) → ExecutionNode
   ├── appendToNode(nodeId, chunk, 'thought'|'output')
   ├── updateNodeStatus(nodeId, status)
-  └── getLastSession() / clone() / loadFromChatNode()
+  └── getLastSession() / clone() / exportToMarkdown()
 ```
 
-## TaskRunner — 双执行路径
+## TaskRunner — 统一执行路径
+
+所有任务提交编译为 TaskGraph Flow，由 `TaskGraphReconciler` 调度：
 
 ```
 submit(task) → queue → processQueue()
-  ├── useHarness=true + harnessAdapter
-  │     → executeHarnessTask()
-  │        → AgentLoopExecutor.run() (多轮循环)
-  │           → HarnessAdapter.onEvent → OrchestratorEvent → UI
-  │
-  └── 默认
-        → executeTask()
-           → LLMKernelAdapter.executeQuery() (单轮)
-              → auto-continue loop (evaluate → continue/break)
-                 → suppressTerminalEvents (统一在循环结束后 emit finished)
+  ├─ sendIntent.execution.kind === 'flow'
+  │    → executeFlowTask() → TaskGraphReconciler.run(createTaskGraphRun(flow))
+  └─ 其他
+       → executeV3ChatTask() → 编译为单节点 AgentTask Flow
+            → TaskGraphReconciler.run()
+                 → AgentTaskExecutor → executeV3Agent()
+                      → ExecutorRegistry.get(mode) → drive(gen, actor, ctx)
 ```
+
+不再有 `executeTask()` / `executeHarnessTask()` 分支。所有路径统一走 TaskGraph。
 
 ## 事件路由: bound vs background
 
@@ -73,42 +78,39 @@ submit(task) → queue → processQueue()
 isBound = (sessionId === boundSessionId)
 
 bound session:
-  → 所有 OrchestratorEvent 通过 eventBus.emitSession() 发到 UI
+  → 所有 SessionEvent 通过 eventBus.emitSession() 发到 UI
   → HistoryView 实时渲染流式内容
 
 non-bound (background) session:
-  → 不发送 UI 事件 (节省渲染)
+  → 不发送流式 UI 事件（节省渲染）
   → 仅提升关键信号到 global bus:
       TTY open → session_tty_active
       HITL request → session_hitl_active
       HITL resolved → session_hitl_resolved
+      Flow complete → task_graph_run_projected
   → completed → background_task_completed
 ```
-
-## 消息过滤机制
-
-| 层级 | 机制 | 位置 |
-|------|------|------|
-| 持久化加载 | `role === 'system'` → 跳过 | `session-manager.ts:populateState()` |
-| 转换 | 非 user/assistant 的 ChatNode → null | `converters.ts:chatNodeToSessionGroup()` |
-| 任务创建 | `skipUserMessage=true` → 不 emit user session | `task-runner.ts:createUserMessage()` |
-| LLM 上下文 | 末尾重复/悬空 user → 移除 | `task-runner.ts:getHistory()` |
-| UI 删除 | `messages_deleted` → DOM remove | HistoryView |
 
 ## SessionManager — 公共 API
 
 ```
-chat(text, files?, agentId?, overrides?)    → 发送消息
-regenerate(messageId, options?)             → 重新生成
-regenerateFromUser(userMessageId, text)     → 编辑后重生成
-commitEdit(messageId, newContent)           → 编辑消息
-deleteMessages(ids)                         → 删除消息
-bindSession(sessionId, nodeId)              → 绑定 UI session
-getSessionState(sessionId)                  → 获取内存状态
-onSessionEvent(handler)                     → 订阅 session 事件
-onGlobalEvent(handler)                      → 订阅全局事件
+sendMessage(text, files, agentId, overrides?, origin?, historyPolicy?, sendIntent?)
+regenerate(assistantId, options?)
+regenerateFromUser(userMessageId, options?)
+commitEdit(messageId, newContent, autoRerun?)
+deleteMessage / deleteMessages(ids, options?)
+bindSession(nodeId, sessionId) / unbindSession()
+getSnapshot() / getSessions() / getStatus() / isGenerating()
+switchToSibling(messageId, index) / switchBranch(name)
+createBranch / getBranchTree / listBranches
+getSessionSettings / saveSessionSettings
+getAvailableAgents / getModelsForAgent
+previewContext(agentId, pendingText) → ContextSnapshot
+onEvent(handler) / onGlobalEvent(handler)
 ```
 
-## 扩展预留
+## TaskGraph 控制面
 
-`SessionGroup` 目前 `role` 只有 `'user'|'assistant'`。如需支持 agent 自动生成 / 后台隐藏消息，需新增 `origin` 和 `visibility` 字段（详见 [设计文档](../../../doc/feat/llmsession-ex.md)）。
+所有执行编译为 `TaskGraphRun`（DAG），由 `TaskGraphReconciler` 事件驱动调度。7 个内置 TaskKind：agent / route / transform / reduce / human / spawn / subflow。
+
+详见主 CLAUDE.md § TaskGraph 控制面。

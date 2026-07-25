@@ -19,6 +19,7 @@ import type { IChatEngine } from './types';
 import { ulid } from './ulid';
 
 export class ContextProfileStore {
+    private static readonly writeTails = new Map<string, Promise<void>>();
     constructor(
         private readonly engine: IChatEngine,
         private readonly nodeId: string,
@@ -56,17 +57,22 @@ export class ContextProfileStore {
         revision: number,
         ruleUpdates: Record<RoundId, ContextRule>,
     ): Promise<BranchContextProfile> {
-        const existing = await this.getProfile(id, revision);
-        if (!existing) throw new Error(`Profile not found: ${id} r${revision}`);
-
-        const newProfile: BranchContextProfile = {
-            id,
-            revision: revision + 1,
-            createdAt: Date.now(),
-            rules: { ...existing.rules, ...ruleUpdates },
-        };
-        await this.writeProfile(newProfile);
-        return newProfile;
+        return this.withWrite(async () => {
+            const existing = await this.getProfile(id, revision);
+            if (!existing) throw new Error(`Profile not found: ${id} r${revision}`);
+            const nextRevision = revision + 1;
+            if (await this.getProfile(id, nextRevision)) {
+                throw new Error(`Context profile revision conflict: expected ${revision}, latest is at least ${nextRevision}`);
+            }
+            const newProfile: BranchContextProfile = {
+                id,
+                revision: nextRevision,
+                createdAt: Date.now(),
+                rules: { ...existing.rules, ...ruleUpdates },
+            };
+            await this.writeProfile(newProfile);
+            return newProfile;
+        });
     }
 
     /** Resolve the effective context mode for a given round. */
@@ -92,5 +98,21 @@ export class ContextProfileStore {
 
     private profileName(id: ContextProfileId, revision: number): string {
         return `context-profile-${id}-r${revision}.json`;
+    }
+
+    private async withWrite<T>(operation: () => Promise<T>): Promise<T> {
+        const key = this.nodeId;
+        const previous = ContextProfileStore.writeTails.get(key) ?? Promise.resolve();
+        let release!: () => void;
+        const current = new Promise<void>(resolve => { release = resolve; });
+        const tail = previous.then(() => current);
+        ContextProfileStore.writeTails.set(key, tail);
+        await previous;
+        try {
+            return await operation();
+        } finally {
+            release();
+            if (ContextProfileStore.writeTails.get(key) === tail) ContextProfileStore.writeTails.delete(key);
+        }
     }
 }

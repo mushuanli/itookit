@@ -25,10 +25,11 @@ vfs-ui (VFSUIShell)
   → SendMessageCommand
     → llm-engine SessionManager.sendMessage()
       → TaskRunner.submit() → processQueue()
-        → executeAgentLoopTask(mode)    // 统一 ILoop 路径（defaultMode='loop'）
-          → ExecutorRegistry.get(mode).run(ctx)
-            → drive(gen, actor, ctx)    // 协程宿主
-              → ctx.llm.chatStream()    // ILLMService（唯一 LLM 入口）
+        → 编译为单节点 AgentTask Flow → TaskGraphReconciler.run()
+          → AgentTaskExecutor → executeV3Agent()
+            → ExecutorRegistry.get(mode).run(ctx)
+              → drive(gen, actor, ctx)    // 协程宿主
+                → ctx.llm.chatStream()    // ILLMService（唯一 LLM 入口）
 ```
 
 | 步骤 | 组件 | 关键文件 |
@@ -36,7 +37,8 @@ vfs-ui (VFSUIShell)
 | 输入 | `ChatInput.triggerSend()` | `llm-ui/src/components/input/ChatInputView.ts` |
 | 路由 | `SlashCommandRouter` / `SendMessageCommand` | `llm-ui/src/shell/`, `commands/` |
 | 会话 | `SessionManager.sendMessage()` | `llm-engine/src/session/session-manager.ts` |
-| 任务 | `TaskRunner.submit()` → `processQueue()` → `executeAgentLoopTask()` | `llm-engine/src/session/task-runner.ts` |
+| 任务 | `TaskRunner.submit()` → `processQueue()` → `executeV3ChatTask()` | `llm-engine/src/session/task-runner.ts` |
+| 调度 | `TaskGraphReconciler.run()` → `AgentTaskExecutor` | `llm-engine/src/task-graph/reconciler.ts` |
 | 执行 | `ExecutorRegistry.get(mode).run(ctx)` | `llm-engine/src/core/executor-registry.ts` |
 | LLM | `ILLMService.chatStream()` → Provider (OpenAI/Anthropic/Gemini) | `device-llm/src/` |
 
@@ -61,9 +63,16 @@ apps/web-app (entry)
 ## LLM 引擎装配 (initializeLLMEngine)
 
 ```
-1. ILLMService 注入             // device-llm → llm-engine（唯一 LLM 调用路径）
-2. ToolDeviceDriver(BUILTIN_TOOLS)  // 加载内置工具
-3. SkillDeviceDriver()              // Skill 注册与管理
-4. ExecutorRegistry 注册            // chat / loop / loop:full / harness 四种 ILoop executor
-5. initializeLLMEngine({ llmService })  // 装配 SessionManager + TaskRunner + EventBus
+1. VFSAgentService.init() + ChatEngine.init()
+2. ExecutorRegistry 注册 chat + loop(lite) executor（默认 mode='chat'）
+3. SessionManager 创建（注入 engine + agentService + runtimeFactory）
+4. ILLMService 注入 SessionManager
+5. TaskGraph 装配：
+   - createBuiltinTaskExecutorRegistry()（6 个非-agent executor）
+   - HarnessContributionRegistry + BUILTIN_TASK_KIND_DESCRIPTORS
+   - VFS stores ×5（run / event / artifact / contextSnapshot / state）
+   - TaskGraphReconciler + TaskGraphCommandService → CommandBus
+6. Plugin system:
+   - ExtensionRegistry 注册 session / vcs / history 插件 → 激活
+7. 返回 { sessionManager, commandBus, taskGraph }
 ```

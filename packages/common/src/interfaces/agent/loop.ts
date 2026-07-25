@@ -13,6 +13,7 @@ import type { AgentEvent, PauseRequest } from './agent-event';
 import type { TokenUsage } from '../llm/completion';
 import type { ILLMService } from '../llm/llm-service';
 import type { IToolService } from '../tools/tool-service';
+import type { ContextSnapshot } from './context-types';
 
 // ─── Round (moved from Log for co-location with ILoop) ───────────────
 
@@ -33,13 +34,15 @@ export interface Round {
     /** One user/assistant message group. */
     payload: ChatMessage[];
     meta: RoundMeta;
-    /** Runtime execution result — populated by LoopExecutor for Goal predicate consumption. */
+    /** Runtime execution result populated by the TaskGraph executor. */
     result?: RoundResult;
 }
 
 export interface RoundMeta {
     createdAt: number;
     origin: 'loop' | 'merge' | 'rebase' | 'edit' | 'user';
+    /** Agent that produced (or is expected to produce) this interaction. */
+    agentId?: string;
     usage?: TokenUsage;
     stale?: boolean;
     rebasedFrom?: RoundId;
@@ -120,6 +123,10 @@ export interface LoopContext {
     tools: IToolService;
     middlewares: ILoopMiddleware[];
     signal: AbortSignal;
+    /** Frozen canonical input. Production executors must prefer this over Log.fold(). */
+    contextSnapshot?: ContextSnapshot;
+    /** Logical TaskRun owning this loop. */
+    runId?: string;
     // ── LLM config (flattened from executorConfig, eliminates executeTask fallback) ──
     /** LLM connection ID passed to chatStream. Defaults to 'default' if absent. */
     connectionId?: string;

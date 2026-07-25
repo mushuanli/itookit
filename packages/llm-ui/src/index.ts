@@ -16,6 +16,8 @@ export { ProviderSettingsEditor } from './editors/ProviderSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 export { SkillSettingsEditor } from './editors/SkillSettingsEditor';
 export { CostEditor } from './editors/CostEditor';
+export { TaskGraphWorkbench } from './components/TaskGraphWorkbench';
+export type { TaskGraphWorkbenchOptions } from './components/TaskGraphWorkbench';
 
 import type { PromptHistoryService } from '@itookit/llm-engine';
 import type { IAgentManagementService } from '@itookit/common';

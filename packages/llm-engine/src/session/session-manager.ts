@@ -25,7 +25,7 @@ import { ENGINE_DEFAULTS } from '../core/constants';
 import { IChatEngine, BranchTreeNode } from '../persistence/types';
 import type { IAgentConfigService } from '../services/agent-service';
 import type { ILLMService, ISession, Signal, AgentEvent } from '@itookit/common';
-import { TaskRunner } from './task-runner';
+import { TaskRunner, type AgentRuntimeFactory, type TaskGraphRuntimeBinding } from './task-runner';
 import { AgentResolver, AgentInfo, ModelInfo } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
 import {
@@ -37,6 +37,9 @@ import { log } from '../utils/logger';
 import { SessionRegistry } from './session-registry';
 import { RoundOperations } from './round-operations';
 import { BranchService } from './branch-service';
+import { ContextProfileStore } from '../persistence/context-profile-store';
+import { ContextAssembler } from '../core/context-assembler';
+import { RoundLog } from '../persistence/round-log';
 
 /**
  * 会话管理器 — llm-engine 对外的唯一入口
@@ -56,6 +59,7 @@ export class SessionManager implements ISession {
         agentService: IAgentConfigService,
         options?: {
             maxConcurrent?: number;
+            runtimeFactory?: AgentRuntimeFactory;
         }
     ) {
         this.registry = new SessionRegistry(engine);
@@ -80,6 +84,7 @@ export class SessionManager implements ISession {
             },
             {
                 maxConcurrent: options?.maxConcurrent,
+                runtimeFactory: options?.runtimeFactory,
             }
         );
 
@@ -190,6 +195,11 @@ export class SessionManager implements ISession {
     hasUnsavedChanges(): boolean { return false; }
     getPoolStatus(): PoolStatus { return this.taskRunner.getPoolStatus(); }
 
+    /** Attach the v3 TaskGraph control plane to all task submissions. */
+    setTaskGraphRuntime(runtime: TaskGraphRuntimeBinding): void {
+        this.taskRunner.setTaskGraphRuntime(runtime);
+    }
+
     canRegenerate(messageId: string): { allowed: boolean; reason?: string } { return this.registry.canRegenerate(messageId); }
     canDeleteMessage(messageId: string): { allowed: boolean; reason?: string } { return this.registry.canDeleteMessage(messageId); }
     canEdit(messageId: string): { allowed: boolean; reason?: string } { return this.registry.canEdit(messageId); }
@@ -221,6 +231,41 @@ export class SessionManager implements ISession {
 
     async getContextModes(roundIds: string[]) {
         return this.roundOps.getContextModes(roundIds);
+    }
+
+    async getContextSnapshot(snapshotId: string) {
+        const runtime = this.taskRunner.getTaskGraphRuntime();
+        return runtime?.reconciler.stores.contextSnapshotStore.get(snapshotId) ?? null;
+    }
+
+    async getArtifact(artifactId: string) {
+        const runtime = this.taskRunner.getTaskGraphRuntime();
+        return runtime?.reconciler.stores.artifactStore.get(artifactId) ?? null;
+    }
+
+    async previewContext(agentId: string, pendingText = '') {
+        const { sessionId, nodeId } = this.registry.ensureBound();
+        const log = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const manifest = await log.loadManifest();
+        const branchRef = manifest.currentBranch || 'main';
+        const profile = manifest.branchMeta[branchRef]?.contextProfile ?? { id: '', revision: 0 };
+        const agent = await this.agentResolver.resolveForChat(agentId);
+        const version = agent.agentVersion ?? 'legacy-unversioned';
+        const assembler = new ContextAssembler({
+            log,
+            manifest,
+            profileStore: new ContextProfileStore(this.registry.engine, nodeId),
+            readRound: roundId => log.readRound(roundId),
+            loadArtifact: artifactId => this.taskRunner.getTaskGraphRuntime()?.reconciler.stores.artifactStore.get(artifactId) ?? Promise.resolve(null),
+        });
+        return (await assembler.assemble({
+            branchRef,
+            branchHead: manifest.branches[branchRef] ?? null,
+            profile,
+            pendingUserMessage: { role: 'user', content: pendingText || '[pending message]' },
+            explicitInputs: [],
+            tokenBudget: agent.defaultContextPolicy?.tokenBudget,
+        }, 'preview', { id: agent.id, version }, agent.systemPrompt, undefined, { persist: false })).snapshot;
     }
 
     async regenerate(assistantId: string, options?: RegenerateOptions): Promise<RegenerateResult> {
@@ -422,6 +467,7 @@ export function createSessionManager(
     agentService: IAgentConfigService,
     options?: {
         maxConcurrent?: number;
+        runtimeFactory?: AgentRuntimeFactory;
     }
 ): SessionManager {
     if (sessionManagerInstance) {

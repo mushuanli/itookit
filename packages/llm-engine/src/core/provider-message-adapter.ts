@@ -57,6 +57,7 @@ export class ProviderMessageAdapter {
             }
             return true;
         });
+        this.validateToolGroups(result);
 
         // Provider-specific rules
         switch (provider) {
@@ -77,17 +78,11 @@ export class ProviderMessageAdapter {
     // ── Anthropic-specific ────────────────────────────────────────────────
 
     private validateAnthropic(messages: ChatMessage[]): ChatMessage[] {
-        let result = [...messages];
-
-        // Anthropic requires the last message to be from 'user'
-        while (result.length > 0 && result[result.length - 1].role === 'assistant') {
-            result.pop();
-        }
-
-        if (result.length === 0) {
+        const result = [...messages];
+        if (result.length === 0 || !['user', 'tool'].includes(result[result.length - 1].role)) {
             throw new ProviderMessageError(
-                'After trimming trailing assistant, no messages remain',
-                'NO_USER_MESSAGE',
+                'Anthropic request must end with a user or tool result message',
+                'INVALID_LAST_MESSAGE',
             );
         }
 
@@ -107,21 +102,39 @@ export class ProviderMessageAdapter {
     // ── OpenAI-specific ────────────────────────────────────────────────────
 
     private validateOpenAI(messages: ChatMessage[]): ChatMessage[] {
-        const result = [...messages];
+        return [...messages];
+    }
 
-        // OpenAI: tool role must immediately follow an assistant with tool_calls
-        for (let i = 1; i < result.length; i++) {
-            if (result[i].role === 'tool') {
-                const prev = result[i - 1];
-                if (prev.role !== 'assistant' || !(prev as any).tool_calls?.length) {
+    private validateToolGroups(messages: ChatMessage[]): void {
+        let expected = new Set<string>();
+        for (let index = 0; index < messages.length; index++) {
+            const message = messages[index] as any;
+            if (message.role === 'tool') {
+                const id = message.tool_call_id;
+                if (!id || !expected.has(id)) {
                     throw new ProviderMessageError(
-                        `Tool message at index ${i} must follow an assistant with tool_calls`,
+                        `Tool message at index ${index} has no matching assistant tool_call`,
                         'TOOL_WITHOUT_TOOL_CALLS',
                     );
                 }
+                expected.delete(id);
+                continue;
+            }
+            if (expected.size) {
+                throw new ProviderMessageError(
+                    `Assistant tool_call group is missing results: ${[...expected].join(', ')}`,
+                    'MISSING_TOOL_RESULTS',
+                );
+            }
+            if (message.role === 'assistant' && Array.isArray(message.tool_calls)) {
+                expected = new Set(message.tool_calls.map((call: any) => call.id).filter(Boolean));
             }
         }
-
-        return result;
+        if (expected.size) {
+            throw new ProviderMessageError(
+                `Assistant tool_call group is missing results: ${[...expected].join(', ')}`,
+                'MISSING_TOOL_RESULTS',
+            );
+        }
     }
 }

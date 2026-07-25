@@ -1,17 +1,5 @@
 // @file: llm-engine/session-graph/index.ts
-// File-based session dependency graph — public API.
-//
-// Quick-start:
-//   const orchestrator = new GraphOrchestrator(vfsManager);
-//   await orchestrator.executeWithReconcile('minds', '/project/impl.md', {
-//     runtime: harness.runtime,
-//     llm:     harness.llmService,
-//     onProgress: (e) => console.log(e),
-//   });
-//
-// Dependency declaration — store in each session file's assetdir via
-// GraphOrchestrator.setDependencies() or the slash command /session-deps:
-//   { dependencies: ["./requirements.md", "./data/"] }
+// File-based session dependency graph projected onto TaskGraphRun.
 
 export type {
     SessionMeta,
@@ -23,9 +11,7 @@ export type {
 } from './types';
 
 export { DEFAULT_SESSION_META } from './types';
-export { GraphOrchestrator } from './graph-orchestrator';
+export { SessionTaskGraphRunner } from './session-task-graph-runner';
 export { SessionMetaStore } from './session-meta-store';
-// S5: Goal-based scheduling + dependency resolution
-export { createGraphGoal, resolveDependencyTree, CycleError } from './graph-goal-factory';
-export type { GraphGoalResult } from './graph-goal-factory';
-export { createAgentRuntimeLoopAdapter } from './agent-runtime-loop-adapter';
+export { createSessionFlow, resolveDependencyTree, CycleError } from './session-flow-factory';
+export type { SessionFlowResult } from './session-flow-factory';

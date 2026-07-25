@@ -14,7 +14,9 @@ export const chatExecutor: ILoop = {
     async *run(ctx: LoopContext): AsyncGenerator<AgentEvent, Round[], Signal | undefined> {
         const roundId = ctx.preallocatedRoundId ?? ulid();
         const foldStart = performance.now();
-        let messages = await ctx.log.fold(ctx.ref);
+        let messages = ctx.contextSnapshot
+            ? [...ctx.contextSnapshot.canonicalMessages]
+            : await ctx.log.fold(ctx.ref);
         console.log('[chat-executor] fold() completed', {
             durationMs: (performance.now() - foldStart).toFixed(1),
             messageCount: messages.length,

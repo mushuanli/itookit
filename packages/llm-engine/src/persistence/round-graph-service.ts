@@ -25,6 +25,7 @@ export class RoundGraphError extends Error {
 // ─── RoundGraphService ─────────────────────────────────────────────────────
 
 export class RoundGraphService {
+    private static readonly writeTails = new Map<string, Promise<void>>();
     private onEvent?: (event: RoundLogEvent) => void;
 
     constructor(
@@ -86,9 +87,21 @@ export class RoundGraphService {
      *   - No self-parent (roundId cannot be in parents)
      *   - No phantom parents when session is not empty
      */
-    async append(ref: Ref, round: Round): Promise<RoundId> {
+    async append(ref: Ref, round: Round, expectedHead?: RoundId | null): Promise<RoundId> {
+        return this.withWrite(() => this.appendUnsafe(ref, round, expectedHead));
+    }
+
+    private async appendUnsafe(ref: Ref, round: Round, expectedHead?: RoundId | null): Promise<RoundId> {
         const roundId = round.id || ulid();
         const persisted: PersistedRound = { ...round, id: roundId };
+
+        const before = await this.loadManifest();
+        if (expectedHead !== undefined && (before.branches[ref] ?? null) !== expectedHead) {
+            throw new RoundGraphError(
+                `Branch head conflict for ${ref}: expected ${expectedHead ?? 'null'}, got ${before.branches[ref] ?? 'null'}`,
+                'HEAD_CONFLICT',
+            );
+        }
 
         // ── Validation ──
         await this.validateAppend(roundId, round.parents ?? [], round.containerRoundId);
@@ -133,6 +146,53 @@ export class RoundGraphService {
         }
 
         return roundId;
+    }
+
+    /** Persist a content-tree Round without moving any conversation branch ref. */
+    async appendContained(round: Round): Promise<RoundId> {
+        return this.withWrite(() => this.appendContainedUnsafe(round));
+    }
+
+    private async appendContainedUnsafe(round: Round): Promise<RoundId> {
+        const roundId = round.id || ulid();
+        const persisted: PersistedRound = { ...round, id: roundId };
+        await this.validateAppend(roundId, round.parents ?? [], round.containerRoundId);
+        await this.writeRound(roundId, persisted);
+
+        const manifest = await this.loadManifest();
+        for (const parentId of round.parents ?? []) {
+            const children = manifest.children[parentId] ?? (manifest.children[parentId] = []);
+            if (!children.includes(roundId)) children.push(roundId);
+        }
+        if (round.containerRoundId) {
+            const containment = manifest.containmentChildren ?? (manifest.containmentChildren = {});
+            const children = containment[round.containerRoundId] ?? (containment[round.containerRoundId] = []);
+            if (!children.includes(roundId)) children.push(roundId);
+        }
+        await this.saveManifest(manifest);
+        this.onEvent?.({
+            type: 'round:appended',
+            ref: manifest.currentBranch,
+            roundId,
+            projection: roundToProjection(persisted, roundId),
+        });
+        return roundId;
+    }
+
+    private async withWrite<T>(operation: () => Promise<T>): Promise<T> {
+        const key = this.nodeId;
+        const previous = RoundGraphService.writeTails.get(key) ?? Promise.resolve();
+        let release!: () => void;
+        const current = new Promise<void>(resolve => { release = resolve; });
+        const tail = previous.then(() => current);
+        RoundGraphService.writeTails.set(key, tail);
+        await previous;
+        try {
+            return await operation();
+        } finally {
+            release();
+            if (RoundGraphService.writeTails.get(key) === tail) RoundGraphService.writeTails.delete(key);
+        }
     }
 
     private async validateAppend(roundId: RoundId, parents: RoundId[], containerRoundId?: RoundId): Promise<void> {
@@ -270,27 +330,85 @@ export class RoundGraphService {
         return { branchName, sourceRoundId, newRoundId, commonHeadId };
     }
 
+    /** Create a branch at the source Round's primary parent without committing a partial Round. */
+    async createBranchForReplacement(
+        sourceRoundId: RoundId,
+        newRootRoundId: RoundId,
+        options: { branchName?: Ref; createdFrom: 'regenerate' | 'manual' | 'edit' },
+    ): Promise<{ branchName: Ref; commonHeadId?: RoundId }> {
+        const source = await this.readRound(sourceRoundId);
+        if (!source) throw new RoundGraphError(`Source round not found: ${sourceRoundId}`, 'NOT_FOUND');
+        const manifest = await this.loadManifest();
+        const fromBranch = manifest.currentBranch;
+        const commonHeadId = source.parents?.[0];
+        let branchName = options.branchName;
+        if (!branchName) {
+            let index = Object.keys(manifest.branches).length;
+            do { branchName = `branch-${index++}`; } while (manifest.branches[branchName] !== undefined);
+        }
+        if (manifest.branches[branchName] !== undefined) {
+            throw new RoundGraphError(`Branch already exists: ${branchName}`, 'BRANCH_EXISTS');
+        }
+        manifest.branches[branchName] = commonHeadId ?? null;
+        manifest.branchMeta[branchName] = {
+            createdAt: Date.now(),
+            createdFrom: options.createdFrom,
+            forkedFromBranch: fromBranch,
+            sourceRoundId,
+            commonHeadId,
+            branchRootRoundId: newRootRoundId,
+            contextProfile: manifest.branchMeta[fromBranch]?.contextProfile,
+        };
+        manifest.currentBranch = branchName;
+        manifest.currentHead = commonHeadId ?? null;
+        await this.saveManifest(manifest);
+        return { branchName, commonHeadId };
+    }
+
     // ── In-place mutations (SS3.3 whitelist) ───────────────────────────────
 
-    /** Replace assistant/tool output in a Round without changing ID or parents. */
+    /** Replace assistant/tool output in a Round without changing its ID or parents. */
     async setAssistantInRound(
         roundId: RoundId,
-        update: { assistantMessages: ChatMessage[]; result?: RoundResult },
+        update: { assistantMessages: ChatMessage[]; result?: RoundResult; agentId?: string },
     ): Promise<void> {
         const round = await this.readRound(roundId);
         if (!round) throw new RoundGraphError(`Round not found: ${roundId}`, 'NOT_FOUND');
-        const userPayload = round.payload.filter(m => m.role === 'user');
+        if (round._deleted) {
+            throw new RoundGraphError(`Cannot update deleted Round: ${roundId}`, 'ROUND_DELETED');
+        }
+        const hasEffectiveAssistant = round.payload.some(message => {
+            if (message.role !== 'assistant') return false;
+            const content = message.content as unknown;
+            return typeof content === 'string'
+                ? content.trim().length > 0
+                : content != null && String(content).trim().length > 0;
+        });
+        if (hasEffectiveAssistant) {
+            throw new RoundGraphError(
+                `Cannot overwrite completed Round: ${roundId}`,
+                'ROUND_ALREADY_COMPLETED',
+            );
+        }
+        const userPayload = round.payload.filter(message => message.role === 'user');
         const updated: PersistedRound = {
             ...round,
-            payload: [...userPayload, ...update.assistantMessages.map(m => ({ ...m }))],
+            payload: [...userPayload, ...update.assistantMessages.map(message => ({ ...message }))],
+            meta: {
+                ...round.meta,
+                ...(update.agentId ? { agentId: update.agentId } : {}),
+            },
             result: update.result,
         };
         await this.writeRound(roundId, updated);
 
-        const assistant = update.assistantMessages.find(m => m.role === 'assistant');
+        const assistant = update.assistantMessages.find(message => message.role === 'assistant');
         const changes: RoundChangeSet = {
             assistantContent: assistant && typeof assistant.content === 'string' ? assistant.content : '',
-            thinking: assistant && typeof (assistant as any).thinking === 'string' ? (assistant as any).thinking : '',
+            thinking: assistant && typeof (assistant as any).thinking === 'string'
+                ? (assistant as any).thinking
+                : '',
+            agentId: update.agentId,
         };
         this.onEvent?.({ type: 'round:updated', roundId, changes });
     }
@@ -301,7 +419,10 @@ export class RoundGraphService {
         if (!round) return;
         const updated: PersistedRound = {
             ...round,
-            payload: round.payload.filter(m => m.role !== 'assistant'),
+            // A user-only Round is the canonical resend-ready state. Keeping
+            // tool messages after removing their assistant owner would create
+            // an invalid provider history.
+            payload: round.payload.filter(message => message.role === 'user'),
             result: undefined,
         };
         await this.writeRound(roundId, updated);
@@ -392,7 +513,12 @@ export class RoundGraphService {
     // ── Context profile ────────────────────────────────────────────────────
 
     /** Update the context profile pointer for a branch. */
-    async setContextProfile(ref: Ref, profileId: ContextProfileId, revision: number): Promise<void> {
+    async setContextProfile(
+        ref: Ref,
+        profileId: ContextProfileId,
+        revision: number,
+        expectedRevision?: number,
+    ): Promise<void> {
         const manifest = await this.loadManifest();
         if (manifest.branches[ref] === undefined) {
             throw new RoundGraphError(`Branch not found: ${ref}`, 'NOT_FOUND');
@@ -405,6 +531,13 @@ export class RoundGraphService {
                 sourceRoundId: manifest.branches[ref] ?? '',
                 branchRootRoundId: manifest.branches[ref] ?? '',
             };
+        }
+        const currentRevision = manifest.branchMeta[ref].contextProfile?.revision;
+        if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
+            throw new RoundGraphError(
+                `Context profile pointer conflict for ${ref}: expected r${expectedRevision}, got r${currentRevision ?? 0}`,
+                'PROFILE_CONFLICT',
+            );
         }
         manifest.branchMeta[ref].contextProfile = { id: profileId, revision };
         await this.saveManifest(manifest);
