@@ -115,7 +115,7 @@ llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor, 
 
 **Unified execution via TaskGraph v3:**
 
-All chat / loop / flow / mission / session-graph submissions compile to `TaskGraphRun` and execute through `TaskGraphReconciler` — the single control-plane writer. There is no dual-path branching; `executeTask()` and `executeHarnessTask()` have been eliminated.
+All chat / loop / flow / mission / session-graph submissions compile to `TaskGraphRun` and execute through `TaskGraphReconciler` — the single control-plane writer.
 
 | Submission | Compiled to |
 |---|---|
@@ -256,7 +256,7 @@ createHarness({ llmDriver })           // TTY tools not registered; graceful deg
 
 **Chat input invocation syntax:** `/sk-<id> [--key val]* [[file](path)]* [@glob]* [text]`
 - 静态命令 `/skill <id>` — 只加载技能，不发送消息给 LLM
-- 动态命令 `/sk-<id> [args]` — 加载技能 + 构建结构化 prompt → `executeHarnessTask()`
+- 动态命令 `/sk-<id> [args]` — 加载技能 + 构建结构化 prompt → `TaskRunner` 作为 flow 任务提交
 - File paths from `[name](path)` (MentionPlugin) → read by `AttachmentProcessor`
 - Glob patterns `@*.ts` → expanded via `sessionEngine.search()`
 - Shell skills check `{{arg}}` placeholders, show wizard if missing
@@ -310,7 +310,7 @@ Each VFS file is a "session" whose content is the agent task prompt. Dependencie
 | `session-flow-factory.ts` | `createSessionFlow` + `resolveDependencyTree` — topo-sort + cycle detection |
 | `types.ts` | `SessionMeta`, `SessionType`, `SessionStatus`, `GraphExecutionOptions` |
 
-Execution delegates to `TaskGraphReconciler` — there is no separate `GraphOrchestrator` or `CompletionAnalyzer`. All scheduling, retry, and verification go through the TaskGraph control plane.
+Execution delegates to `TaskGraphReconciler` for scheduling, retry, and verification.
 
 **`session-meta.json` location:** `_<filename>/session-meta.json` (assetdir of the owner file)
 
@@ -484,7 +484,7 @@ Harness 内部的旧事件（`agent:task:start`、`agent:llm:start`、`agent:bud
 | `error` | 错误展示 |
 | `await_signal` | 暂停等待用户输入（HITL / plan confirm） |
 
-事件统一为 `SessionEvent`（canonical `AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`），不再有 `OrchestratorEvent` 翻译层。
+事件统一为 `SessionEvent`（canonical `AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`）。
 
 ### 扩展点 Recipes
 

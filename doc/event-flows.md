@@ -1,48 +1,33 @@
 # 核心事件流
 
-## Agent 事件 (完整)
+## Canonical AgentEvent（15 变体）
 
-所有事件类型定义在 `common/src/interfaces/agent/agent-types.ts` (`AgentEventType`, `AgentEventPayloads`)。
+定义在 `common/src/interfaces/agent/agent-event.ts`。ILoop 协程只 yield canonical `AgentEvent`：
 
-### 任务生命周期
 ```
-agent:task:start → agent:step:complete (×N) → agent:task:end
-```
+// 流式内容
+stream:content  stream:thinking
 
-### LLM 调用
-```
-agent:llm:start → agent:stream:content / agent:stream:thinking → agent:llm:end
-agent:llm:retry → agent:llm:fallback
-```
+// 轮次边界
+round:start  round:end
 
-### 工具执行
-```
-agent:tool:start → agent:tool:success / agent:tool:error / agent:tool:timeout
-agent:permission:request
-```
+// 工具执行
+tool:queued  tool:running  tool:success  tool:error
 
-### 系统状态
-```
-agent:context:compressed → agent:skill:loaded
-agent:budget:warning → agent:budget:exhausted
-agent:backpressure:check → agent:backpressure:failed
+// 任务生命周期
+finished  error
+
+// HITL 暂停
+await_signal
 ```
 
-### TTY
-```
-agent:tty:open → agent:tty:data (×N) → agent:tty:close / agent:tty:error
-```
-
-### 交互
-```
-agent:plan:confirm → agent:user:injected
-```
+Harness 内部的旧事件（`agent:task:start`、`agent:llm:start` 等）在 `IAgentRuntime.on()` 接口上仍然可用，但不在 ILoop 协程协议中。
 
 ---
 
 ## SessionActor 事件桥接
 
-`SessionActor`（`llm-engine/src/core/session-actor.ts`）将 ILoop 协程的 canonical `AgentEvent` 桥接至 `SessionEventBus`。事件统一为 `SessionEvent`（= `AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`），不再有 `OrchestratorEvent` 翻译层：
+`SessionActor`（`llm-engine/src/core/session-actor.ts`）将 ILoop 协程的 canonical `AgentEvent` 桥接至 `SessionEventBus`。事件统一为 `SessionEvent`（`AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`）：
 
 | ILoop yield | 桥接后事件 |
 |---|---|
@@ -60,10 +45,14 @@ agent:plan:confirm → agent:user:injected
 ## UI 消费链
 
 ```
-SessionActor (onEvent) → SessionEventBus → SessionEventHandler → HistoryView / StreamController
-                                                     ├─ createNode (message:appended)
-                                                     ├─ appendChunk (message:updated)
-                                                     └─ markDone (message:status)
+TaskRunner → executeV3Agent()
+  └─ drive(gen, actor, ctx)
+       └─ SessionActor.emit(event)
+            └─ SessionEventBus.emitSession()
+                 └─ SessionEventHandler → HistoryView / StreamController
+                                              ├─ createNode (message:appended)
+                                              ├─ appendChunk (message:updated)
+                                              └─ markDone (message:status)
 ```
 
 ### SessionEvent → UI
@@ -75,8 +64,8 @@ SessionActor (onEvent) → SessionEventBus → SessionEventHandler → HistoryVi
 | `message:status` | 标记完成/失败/工具结果 |
 | `finished` | 更新 token stats，停止 loading |
 | `error` | 显示错误信息 |
-| `regenerate_started/completed` | 分支再生 |
-| `branch_switched/deleted` | 切换/删除分支 |
+| `regenerate_started` / `regenerate_completed` | 分支再生 |
+| `branch:switched` | 切换/删除分支 |
 
 ---
 
@@ -101,10 +90,10 @@ VFSEngine (emit) → VFSManager (转发) → vfs-ui (VFSUIShell 刷新树)
 ## HITL 事件流
 
 ```
-MissionScheduler.checkTodo() → HITLQueue.push(request)
+TaskGraphReconciler → HumanTask executor → HITLQueue.push(request)
   → emit request to listener
-  → UI 展示 HITL 问题 → 用户回答 → HITLQueue.resolve(id, response)
-  → MissionScheduler 继续执行
+  → UI 展示 HITL 问题 → 用户回答 → reconciler.respond(graphRunId, taskRunId, response)
+  → 恢复执行
 ```
 
 相关类型: `HITLRequest`, `IHITLQueue` (`common/src/interfaces/llm/mission.ts`)

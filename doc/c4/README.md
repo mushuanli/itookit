@@ -24,7 +24,7 @@ C2 — 容器图             c2-containers.puml / .md  18 个包的层级总览
 | C1 | `c1-context` | .puml + .md | 系统上下文：用户、LLM API、MCP、文件系统、同步服务器 |
 | C2 | `c2-containers` | .puml + .md | 18 个包分层架构 + v4.1 依赖关系优化 |
 | C3 | `c3-vfs` | .puml + .md | VFS 子系统：存储后端、VFSEngine、ModuleFS、文件句柄 |
-| C3 | `c3-llm` | .puml + .md | LLM 子系统：device-llm/llm-kernel/llm-harness/llm-engine |
+| C3 | `c3-llm` | .puml + .md | LLM 子系统：device-llm/llm-harness/llm-engine |
 | C3 | `c3-ui` | .puml + .md | UI 层：llm-ui/vfs-ui/mdx/memory-manager + 接口归位 |
 | C3 | `c3-bootstrap` | .puml + .md | 引导层：app-shell/app-settings/demo + LLMUIEditors 注入 |
 | C4 | `c4-agent-loop` | .puml | Agent 循环详细执行流程 |
@@ -44,20 +44,20 @@ done
 
 | 优化 | 影响图 |
 |---|---|
-| llm-kernel Orchestrator 删除 | C2、C3-LLM |
+| llm-kernel 删除 + TaskGraph v3 取代 | C2、C3-LLM |
 | Skill 类型统一 (LLMSkill=SkillDefinition) | C2、C3-LLM、C3-Bootstrap、C4-Bootstrap |
 | IConnectionReader 接口提取 | C2、C3-LLM |
 | app-settings ↔ llm-ui 解耦 | C2、C3-UI、C3-Bootstrap、C4-Bootstrap |
 | HITLQueue 统一 | C3-LLM |
 | 死接口清理 | C2、C3-UI |
-| 共享调度核心 | C3-LLM |
+| TaskGraph 控制面统一 | C3-LLM、C4-Session |
 
 ## 核心架构原则
 
 1. **分层单向依赖** — 下层不知道上层存在
 2. **接口隔离** — 跨包契约全部在 `@itookit/common` 中定义，单消费者接口已归位
 3. **ModuleFS 隔离** — 每个模块 chroot 到 `/module/<name>/`
-4. **LLM 双路径** — Kernel 单轮 / Harness 多轮 agent 循环
-5. **事件驱动** — Agent 事件 → HarnessAdapter → UI 渲染
+4. **TaskGraph 统一** — 所有执行编译为 TaskGraphRun，单控制面调度
+5. **事件驱动** — ILoop 协程 → SessionActor → SessionEventBus → UI 渲染
 6. **VFS 持久化** — Agent 配置/Skill/对话/Mission 全部通过 VFS 存储
 7. **依赖注入** — 上行依赖通过接口注入解耦（如 LLMUIEditors）

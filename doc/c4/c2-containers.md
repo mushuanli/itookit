@@ -18,7 +18,7 @@
 ├─────────────────────────────────┤
 │     引擎层                       │
 │  vfslib | device-llm |          │
-│  llm-kernel (无 Orchestrator)   │
+│  llm-engine (task-runner + executor)   │
 │  tools | device-tty             │
 ├─────────────────────────────────┤
 │     存储驱动层                    │
@@ -35,7 +35,7 @@
 
 | 优化 | 说明 |
 |---|---|
-| **Orchestrator 删除** | llm-kernel 中 5 个编排器完全死代码，已删除 |
+| **TaskGraph v3** | 统一控制面，DAG 依赖调度 + Artifact 数据流 |
 | **Skill 类型统一** | LLMSkill = SkillDefinition（类型别名），消除双体系 |
 | **IConnectionReader** | 连接只读接口，IAgentConfigService 和 IConnectionService 共用 |
 | **app-settings 解耦** | 不再上行依赖 llm-ui，编辑器通过 LLMUIEditors 注入 |
@@ -49,7 +49,7 @@
 | 包 | 内部依赖 | 外部依赖 |
 |---|---|---|
 | `@itookit/llm-harness` | common, device-llm, device-tty, tools | 无 |
-| `@itookit/llm-engine` | common, llm-kernel, vfslib | `yaml` |
+| `@itookit/llm-engine` | common, vfslib | `yaml` |
 | `@itookit/app-settings` | common, device-llm, llm-engine, memory-manager | `js-yaml` |
 
 > **变更**: app-settings 不再依赖 llm-ui（上行依赖已解耦）

@@ -1,74 +1,90 @@
-# C4 - 代码级交互图 (v4.1 优化后)
+# C4 - 代码级交互图
 
 ## Agent 循环流程
 
-`AgentLoopExecutor.run()` 每次迭代：
+### AgentLoopExecutor（while-true，兼容旧接口）
 
 ```
-1. Flush pending injections（inject() 注入的 user message）
-2. Budget Check（超任意维度 → BudgetExhaustedError → status:'partial'）
-3. Context Compress（ratio ≥ compressionThreshold=0.75 时触发）
-4. Build messages（system prompt + history + compressionSummary 前置）
-5. LLM Call via ErrorRecoveryService.callWithRecovery()
-6. Update usage（含 tool call 计数）
+while(true):
+  1. Flush injections
+  2. Budget Check（6 维）
+  3. Context Compress（4 层，ratio ≥ 0.75 触发）
+  4. Build messages（system prompt + history + compressionSummary）
+  5. LLM Call via ErrorRecoveryService.callWithRecovery()
+  6. Update usage
 
 分支 A — 有 tool_calls：
-  → Plan Confirm（enablePlanConfirm && turnNumber===1）
-      → intercept 'agent:plan:confirm'
-      → false → cancel；string → inject 重规划；true → 继续
-  → Permission Check（sideEffect !== 'none'）
-      → false → tool 收到 "Permission denied"
+  → Plan Confirm → Permission Check
   → 读操作并行（sideEffect=none，Promise.all）
   → 写操作串行（sideEffect≠none，for 循环）
-  → After-tool Back-pressure check
-  → emit 'agent:step:complete' → GOTO 1
+  → After-tool Back-pressure check → GOTO 1
 
 分支 B — 无 tool_calls：
   → Before-final Back-pressure check
-  → 通过 → 设置 finalResponse，break
+  → 通过 → break
   → 失败 → inject 修正指令 → GOTO 1
 ```
 
-## Session 执行双路径
+### LoopExecutor（AsyncGenerator ILoop，mode='loop'/'loop:full'）
 
-| 路径 | 触发条件 | 特点 |
-|---|---|---|
-| Kernel 路径 | default (useHarness=false) | 单轮、自动继续、流式 |
-| Harness 路径 | useHarness=true | 多轮 agent 循环、工具调用、上下文压缩、HITL |
+```
+drive(gen, actor, ctx):
+  generator.next(signal) → yield AgentEvent → actor.emit(event)
+  1. Budget middleware (beforeExchange)
+  2. Compression middleware (beforeExchange, full preset only)
+  3. Build messages from log.fold() + Provider validation
+  4. LLM Call via ILLMService.chatStream() → yield stream:content/thinking
+  5. Error recovery middleware (onError → retry/compress/fallback)
+  6. Parse tool_calls → onToolCalls middleware (plan confirm → pause)
+  7. Execute tools (reads 并行, writes 串行) → yield tool:queued/running/success/error
+  8. afterExchange middleware (back-pressure → inject/continue)
+  9. yield round:end → checkpoint → continue or return Round[]
+```
 
-## 引导序列图 (v4.1 更新)
+## 会话执行 — 统一 TaskGraph 路径
 
-`initApp()` 8 步 + LLMUIEditors 注入：
+所有提交编译为 TaskGraphRun，由 TaskGraphReconciler 统一调度：
 
-1. `createVFS()` — VFS 引擎 + 存储后端 + 模块挂载
-2. `LLMDeviceDriver` — LLM 设备驱动初始化
-3. `createSettingsModule()` — 设置模块
-4. `VFSAgentService` — Agent 配置 VFS 持久化（实现 IConnectionReader）
-5. `createHarness()` — 装配多轮 Agent 循环
-5b. **LLMUIEditors 注入** — app-shell → app-settings（解耦上行依赖）
-6. `setVFSContext()` — VFS 桥接
-7. `syncSkillsToHarness()` — Skill 直接传递（LLMSkill=SkillDefinition）
-8. `initializeLLMEngine()` — 会话管理器 + 工作区策略
+```
+SessionManager.sendMessage()
+  └─ TaskRunner.submit() → processQueue()
+       ├─ sendIntent.kind === 'flow'
+       │    └─ executeFlowTask()
+       │         └─ TaskGraphReconciler.run(createTaskGraphRun(flow))
+       └─ 其他
+            └─ executeV3ChatTask()
+                 └─ 编译为单节点 AgentTask Flow → TaskGraphReconciler.run()
+                      └─ AgentTaskExecutor → executeV3Agent()
+                           └─ ExecutorRegistry.get(mode).run(ctx) → drive(gen, actor, ctx)
+```
 
-## Skill 同步简化
+## 引导序列图
 
-| 优化前 | 优化后 |
-|---|---|
-| `llmSkillToSkillDef()` 43 行字段映射 | 直接 `saveSkill(s)` |
-| LLMSkill + SkillDefinition 双体系 | LLMSkill = SkillDefinition |
-| device-llm SkillRegistry 孤儿 | 已删除 |
+`initApp()` 在 `app-shell/src/bootstrap.ts`：
+
+1. `createVFS({ rootBackend, modules })` — VFS 引擎 + 模块挂载
+2. `LLMDeviceDriver(vfs)` → `init()` → 注册设备节点
+3. `createSettingsModule(vfs)` — 设置模块
+4. `VFSAgentService(vfs, llmDriver)` — Agent 配置持久化
+5. `createHarness({ llmDriver })` — 装配 Agent 循环 → `{ runtime, llmService, ... }`
+6. `harness.toolDriver.setVFSContext(...)` — VFS 桥接
+7. `syncSkillsToHarness(llmDriver, harness)` — Skill 同步
+8. `initializeLLMEngine({ agentService, sessionEngine, llmService })` — 引擎装配
+9. Workspace 策略注入 + 路由启动
 
 ## 事件流
 
-Agent 事件 → HarnessAdapter → OrchestratorEvent → UI 渲染
+ILoop 协程 → SessionActor → SessionEventBus → SessionEventHandler → UI
 
-| Agent Event | OrchestratorEvent |
-|---|---|
-| `agent:stream:content` | `node_update` field=`output` |
-| `agent:stream:thinking` | `node_update` field=`thought` |
-| `agent:tool:start` | `node_start` (新建 tool 子节点) |
-| `agent:tool:success` | `node_update` metaInfo.toolResult |
-| `agent:context:compressed` | `node_update` metaInfo.compressed |
-| `agent:budget:warning` | `node_update` metaInfo.budgetWarning |
-| `agent:tty:open/data/close` | `node_update` metaInfo.tty* |
-| `agent:plan:confirm` | `node_update` metaInfo.planConfirm |
+| ILoop yield | SessionEvent | UI 效果 |
+|---|---|---|
+| `stream:content` | `message:updated` field=`output` | 流式文字追加 |
+| `stream:thinking` | `message:updated` field=`thought` | 思考过程更新 |
+| `tool:queued` / `tool:running` | canonical AgentEvent forward | 创建 tool 子节点 |
+| `tool:success` / `tool:error` | canonical AgentEvent forward | 更新 tool 节点状态 |
+| `round:start` / `round:end` | canonical AgentEvent forward | 轮次边界标记 |
+| `finished` | canonical AgentEvent forward | 完成，汇总 token 用量 |
+| `error` | canonical AgentEvent forward | 错误展示 |
+| `await_signal` | drive() 内部处理 | HITL 暂停，等待 Signal |
+
+事件统一为 `SessionEvent`（`AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`）。

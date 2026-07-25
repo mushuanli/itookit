@@ -33,9 +33,8 @@ packages/
 ├── vfsdriver-fs/      SQLite + 本地文件系统后端
 ├── vfs-ui/            文件树 UI 组件
 ├── device-llm/        LLM API 通信层（多 Provider）
-├── llm-kernel/        执行引擎核心（Executor + Orchestrator）
-├── llm-harness/       多轮 Agent 循环 + 内置工具 + Skill 系统
-├── llm-engine/        会话管理 + VFS 持久化 + Mission 编排
+├── llm-harness/       多轮 Agent 循环 + 内置工具 + Skill 系统 + ILoop/TaskExecutor
+├── llm-engine/        会话管理 + VFS 持久化 + TaskGraph DAG 编排 + Plugin 系统
 ├── llm-ui/            Chat UI 组件 + Agent/Skill 编辑器
 ├── mdxeditor/         CodeMirror 6 Markdown 编辑器
 ├── memory-manager/    工作区顶层容器
@@ -67,7 +66,7 @@ packages/
                                    │
         ┌──────────────────────────┼──────────────────────────┐
         │              │           │           │              │
-   llm-engine     llm-harness   llm-kernel   device-llm   vfslib
+   llm-engine     llm-harness   device-llm   vfslib
         │              │           │           │              │
         └──────────────┴───────────┼───────────┴──────────────┘
                                    │
@@ -85,13 +84,9 @@ packages/
 
 ```
 ┌─────────────────────────────────────────────┐
-│  ISessionEngine (UI 消费接口)                │
-│  ├─ VFSModuleEngine    (文件工作区适配器)     │
-│  └─ LLMSessionEngine   (Chat 会话适配器)     │
-├─────────────────────────────────────────────┤
-│  IVFSManager / IModuleFS (服务接口)          │
+│  IModuleFS (服务接口)                        │
+│  ├─ ModuleFS            (chroot 文件操作)    │
 │  ├─ VFSManager          (模块生命周期)        │
-│  ├─ ModuleFS            (chroot 文件操作)     │
 │  └─ ConfigService       (配置读写)           │
 ├─────────────────────────────────────────────┤
 │  VFSEngine (引擎核心)                        │
@@ -322,27 +317,19 @@ interface ISessionEngine {
 }
 ```
 
-### 4.2 两种实现
+### 4.2 ChatEngine — Chat 持久化格式
 
-| 实现 | 用途 | 存储 |
-|---|---|---|
-| `VFSModuleEngine` | 标准文件工作区 | 直接适配 `IVFSManager` → `ISessionEngine` |
-| `LLMSessionEngine` | Chat 会话工作区 | `.chat` 文件 + 隐藏 assetdir 消息图 |
-
-### 4.3 LLMSessionEngine — Chat 持久化格式
-
-每个 `.chat` 文件是一个 `ChatManifest` JSON：
+ChatEngine（实现 IChatEngine）管理 .chat 文件和 Round DAG 持久化：
 
 ```
 my-session.chat               ← ChatManifest JSON
 _my-session.chat/             ← 资产目录
-├── 000_00000_s.chat          ← 系统节点
-├── 000_00001_u.chat          ← 用户消息
-├── 000_00002_a.chat          ← 助手消息
+├── manifest.json             ← RoundManifest（Round DAG 索引）
+├── round-<ulid>.json         ← 单个 Round（messages + meta）
 └── settings.yaml             ← 会话设置
 ```
 
-`ChatManifest` 包含 `branches: Record<branchName, headNodeId>` 支持命名分支消息图。
+`RoundManifest` 包含 `branches: Record<branchName, headRoundId>` + `children` 反向索引支持命名分支消息图。RoundLog 提供 ILog 实现（append/fold/merge/rebase），`fold()` 沿 parents[0] 线性链遍历。
 
 ---
 
@@ -398,46 +385,42 @@ registerProvider() / getProvider() / createProvider()
 
 ---
 
-## 6. 执行引擎（llm-kernel）
+## 6. 执行引擎（llm-engine）
 
-### 6.1 职责
+llm-engine 是会话与执行的核心，整合了 ILoop 协程、TaskGraph DAG 编排和插件系统。
 
-- 执行器管理（Agent、HTTP、Tool、Script）
-- 编排器管理（Serial、Parallel、Router、Loop、DAG）
-- 事件驱动架构
-- 插件化扩展
-- 无 UI 依赖
-
-### 6.2 执行器（Executor）
-
-```
-BaseExecutor
-├─ AgentExecutor     ← LLM Agent 执行
-├─ HttpExecutor      ← HTTP 请求执行
-├─ ToolExecutor      ← 工具调用执行
-└─ ScriptExecutor    ← 脚本执行
-```
-
-### 6.3 编排器（Orchestrator）
-
-```
-BaseOrchestrator
-├─ SerialOrchestrator     ← 串行执行
-├─ ParallelOrchestrator   ← 并行执行
-├─ RouterOrchestrator     ← 条件路由
-├─ LoopOrchestrator       ← 循环执行
-└─ DAGOrchestrator        ← DAG 依赖图执行
-```
-
-### 6.4 运行时组件
+### 6.1 核心组件
 
 | 组件 | 说明 |
 |---|---|
-| `ExecutionRuntime` | 执行运行时，管理执行上下文 |
-| `StateMachine` | 状态机，管理执行状态流转 |
-| `MemoryStore` | 内存存储，跨执行器共享状态 |
-| `PluginManager` | 插件管理器 |
-| `EventBus` | 内核事件总线 |
+| `SessionManager` | ISession 门面，组合 SessionRegistry + RoundOperations + BranchService |
+| `TaskRunner` | 任务队列 + 并发控制 + TaskGraph 提交 |
+| `ExecutorRegistry` | ILoop 按 mode 注册/分发（chat / loop / loop:full） |
+| `drive()` / `resumeDrive()` | ILoop 协程宿主（pause/resume 协议） |
+| `SessionActor` | drive ↔ EventBus 桥接，Signal 队列 |
+| `MiddlewarePipeline` | ILoopMiddleware 组合（LIFO 栈） |
+| `LoopExecutor` | AsyncGenerator ILoop（工具执行 + 中间件管线） |
+| `ContextAssembler` | ContextPlan → ContextSnapshot 确定性管线 |
+| `TaskGraphReconciler` | 单写 DAG 控制面，事件驱动调度 |
+| `DependencyScheduler` | Kahn 拓扑排序 + 环检测 |
+| `CommandBus` + `ExtensionRegistry` | 插件系统（session/vcs/history 插件） |
+
+### 6.2 ILoop 协程协议
+
+```
+drive(generator, sessionActor, loopContext)
+  ├─ generator.next(signal) → yield AgentEvent → emit
+  ├─ yield await_signal → checkpoint → waitSignal()
+  └─ generator return → Round[]
+```
+
+### 6.3 TaskGraph 控制面
+
+所有提交（chat / loop / flow / mission / session-graph）编译为 TaskGraphRun，由 TaskGraphReconciler 统一调度。内置 7 个 TaskKind：agent / route / transform / reduce / human / spawn / subflow。
+
+### 6.4 7 个 ILoopMiddleware
+
+budget / error-recovery / compression / hitl / skills / back-pressure / truncation-detection
 
 ---
 
@@ -557,36 +540,37 @@ ITTYDriver         ← 工厂 (spawn)，不同平台不同实现
 
 ### 7.8 Agent 事件总览
 
+#### Canonical AgentEvent（ILoop 协程，15 变体）
+
 ```
-// 任务生命周期
-agent:task:start / agent:task:end / agent:step:complete
-
-// LLM 调用
-agent:llm:start / agent:llm:end / agent:llm:retry / agent:llm:fallback
-
 // 流式内容
-agent:stream:content / agent:stream:thinking
+stream:content  stream:thinking
+
+// 轮次边界
+round:start  round:end
 
 // 工具执行
+tool:queued  tool:running  tool:success  tool:error
+
+// 生命周期
+finished  error
+
+// HITL 暂停
+await_signal
+```
+
+#### Harness 内部事件（IAgentRuntime.on() 接口）
+
+```
+agent:task:start / agent:task:end / agent:step:complete
+agent:llm:start / agent:llm:end / agent:llm:retry / agent:llm:fallback
 agent:tool:start / agent:tool:success / agent:tool:error / agent:tool:timeout
-
-// 权限
 agent:permission:request
-
-// 上下文
 agent:context:compressed / agent:skill:loaded
-
-// 预算
 agent:budget:warning / agent:budget:exhausted
-
-// 反压
 agent:backpressure:check / agent:backpressure:failed
-
-// TTY
 agent:tty:open / agent:tty:data / agent:tty:close / agent:tty:error
-
-// 交互
-agent:plan:confirm (Q1) / agent:user:injected (Q3)
+agent:plan:confirm / agent:user:injected
 ```
 
 ---
@@ -637,28 +621,31 @@ LLMSkill (VFS 持久化, device-llm)          SkillDefinition (运行时内存, 
 ```
 initializeLLMEngine({
     agentService,      // IAgentConfigService
-    sessionEngine,     // ILLMSessionEngine
-    harnessRuntime?,   // IAgentRuntime (可选)
-    harnessSkillService?, // ISkillService (可选)
-    harnessToolService?,  // IToolService (可选)
+    sessionEngine,     // IChatEngine
+    llmService?,       // ILLMService (from createHarness)
+    executors?,        // ILoop[] (额外的 executor)
 })
     │
-    ├─ initializeKernel({ plugins, config })
-    ├─ agentService.init()
-    ├─ sessionEngine.init()
+    ├─ agentService.init() + sessionEngine.init()
     ├─ initializePromptHistory(vfs)   // 非关键
-    ├─ createSessionManager(...)
-    └─ 注入 harness (如有)
-         ├─ initHarnessAdapter(runtime)
-         └─ sessionManager.setHarnessAdapter(adapter)
+    ├─ ExecutorRegistry 注册 chat + loop(lite)
+    ├─ createSessionManager(engine, agentService)
+    ├─ setLLMService(llmService)
+    ├─ TaskGraph 装配（stores + reconciler + CommandBus）
+    ├─ Plugin system（session/vcs/history 插件注册+激活）
+    └─ 返回 { sessionManager, commandBus, taskGraph }
 ```
 
-### 9.2 双执行路径
+### 9.2 统一执行路径（TaskGraph v3）
 
-| 路径 | 触发条件 | 特性 |
-|---|---|---|
-| Kernel 路径 | 默认 (`useHarness=false`) | 单轮、自动继续、流式 |
-| Harness 路径 | `ChatSessionSettings.useHarness=true` | 多轮 Agent 循环、工具调用、上下文压缩、HITL |
+所有提交编译为 TaskGraphRun，由 TaskGraphReconciler 统一调度：
+
+| 提交类型 | 编译方式 |
+|---|---|
+| Chat / Loop | 单节点 AgentTask Flow → TaskGraphRun |
+| Flow (sendIntent) | FlowRevision → TaskGraphRun |
+| Mission | MissionPlan → TaskGraphRun |
+| Session Graph | Dependency tree → TaskGraphRun |
 
 ### 9.3 TaskRunner
 
@@ -693,39 +680,37 @@ SessionManager
 └─ AutoContinueHandler     ← 自动继续
 ```
 
-### 9.5 HarnessAdapter — 事件映射
+### 9.5 SessionActor — 事件桥接
 
-将 Agent 事件桥接为 `OrchestratorEvent`（UI 消费）：
+`SessionActor`（`llm-engine/src/core/session-actor.ts`）将 ILoop 协程的 canonical `AgentEvent` 桥接至 `SessionEventBus`。事件统一为 `SessionEvent`（`AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`）：
 
-| Agent Event | OrchestratorEvent |
+| ILoop yield | SessionEvent / UI 效果 |
 |---|---|
-| `agent:stream:content` | `node_update` field=`output` |
-| `agent:stream:thinking` | `node_update` field=`thought` |
-| `agent:tool:start` | `node_start` (新建 tool 子节点) |
-| `agent:tool:success` | `node_status(success)` + toolResult |
-| `agent:tool:error/timeout` | `node_status(failed)` |
-| `agent:context:compressed` | `node_update` metaInfo.compressed |
-| `agent:budget:warning` | `node_update` metaInfo.budgetWarning |
-| `agent:budget:exhausted` | `error` code=`BUDGET_EXHAUSTED` |
-| `agent:tty:open/data/close` | `node_update` metaInfo.tty* |
-| `agent:plan:confirm` | `node_update` metaInfo.planConfirm |
+| `stream:content` | `message:updated` field=`output` |
+| `stream:thinking` | `message:updated` field=`thought` |
+| `tool:queued` / `tool:running` | canonical AgentEvent forward |
+| `tool:success` / `tool:error` | canonical AgentEvent forward |
+| `round:start` / `round:end` | canonical AgentEvent forward |
+| `finished` | canonical AgentEvent forward（汇总 token 用量） |
+| `error` | canonical AgentEvent forward |
+| `await_signal` | 由 `drive()` 内部处理（暂停等待 Signal） |
 
 ### 9.6 Session Dependency Graph
 
-基于文件的跨会话依赖图执行系统：
+基于文件的跨会话依赖图执行：
 
 ```
-GraphOrchestrator
-├─ DependencyGraph     ← 读取 session-meta.json，拓扑排序，检测环
-├─ SessionMetaStore    ← 读写 _<filename>/session-meta.json
-├─ CompletionAnalyzer  ← LLM 输出质量验证 (advance mode)
-└─ 执行模式:
-    standard  ← 完成即结束，无重试
-    advance   ← CompletionAnalyzer 验证，支持重试
+SessionTaskGraphRunner
+├─ SessionMetaStore        ← 读写 _<filename>/session-meta.json
+├─ DependencyResolver      ← resolveDependencyTree() 拓扑排序 + 环检测
+├─ SessionFlowFactory      ← createSessionFlow() 编译为 FlowRevision
+└─ 执行:
+    SessionGraph → FlowRevision → TaskGraphRun
+    → TaskGraphReconciler（统一调度/重试/取消）
 ```
 
 每个 VFS 文件是一个 "session"，依赖声明在 `_<filename>/session-meta.json`。
-`GraphOrchestrator` 拓扑排序后自底向上按依赖顺序执行。
+执行委派给 `TaskGraphReconciler`。
 
 ---
 
@@ -738,15 +723,13 @@ GraphOrchestrator
 ### 10.2 核心组件
 
 ```
-MissionService       ← 公共门面
-├─ 并行 LLM Planner  ← 多 Agent 并行规划
-├─ TodoStateManager  ← plan.json 原子读写 (VFS missions 模块)
-├─ MissionScheduler  ← 主循环调度
-│   ├─ getReadyTodos()      ← 依赖满足 + status=pending
-│   ├─ executeTodo()        ← SubAgentRouter.delegate()
-│   └─ runVerifier()        ← SubAgentRouter.delegate()
+MissionService              ← 公共门面
+├─ 并行 LLM Planner         ← 多 Agent 并行规划
+├─ TodoStateManager         ← plan.json 原子读写 (VFS missions 模块)
+├─ MissionTaskGraphRunner   ← 编译 MissionPlan → TaskGraphRun
+│   └─ TaskGraphReconciler  ← 统一调度/依赖就绪/重试/取消
 ├─ ResultPersistenceService ← 结果写入 + journal 追加
-└─ HITLQueue         ← human_input 阻塞队列
+└─ HITLQueue                ← human_input 阻塞队列
 ```
 
 ### 10.3 执行流程
@@ -755,12 +738,12 @@ MissionService       ← 公共门面
 MissionService.createMission(goal)
   → 并行 LLM Planner → merge TodoItem[]
   → TodoStateManager.createMission() → write plan.json
-  → MissionScheduler.run() loop:
-      getReadyTodos() [deps satisfied + status=pending]
-      → executeTodo() → SubAgentRouter → save result
-      → runVerifier() → SubAgentRouter
-          → verdict: 'done' | 'retry' | 'hitl'
-          → 'hitl': HITLQueue.push() → await human → resume
+  → MissionTaskGraphRunner.run()
+      → compile MissionPlan → TaskGraphRun（per-todo AgentTask）
+      → TaskGraphReconciler.run()
+          → DependencyScheduler（topo-sort → 就绪判断）
+          → 并行执行 AgentTask（SubAgentRouter.delegate）
+          → HITL: HumanTask executor → HITLQueue.push → reconciler.respond → resume
 ```
 
 ### 10.4 核心数据结构
@@ -816,8 +799,8 @@ interface WorkspaceStrategy {
 }
 
 // 五种策略:
-StandardWorkspaceStrategy    → MDxEditor + VFSModuleEngine
-ChatWorkspaceStrategy        → LLMWorkspaceEditor + LLMSessionEngine
+StandardWorkspaceStrategy    → MDxEditor + IModuleFS
+ChatWorkspaceStrategy        → LLMWorkspaceEditor + ChatEngine
 AgentWorkspaceStrategy       → AgentConfigEditor
 SettingsWorkspaceStrategy    → SettingsEditor + SettingsEngine / SkillsEngine
 SkillsWorkspaceStrategy      → SkillSettingsEditor + SkillsEngine
@@ -866,16 +849,17 @@ initApp(options)
     ├─ 3. 核心服务初始化
     │      ├─ createSettingsModule(vfs)
     │      ├─ new VFSAgentService(vfs, llmDriver)
-    │      └─ new LLMSessionEngine(vfs)
+    │      └─ new ChatEngine(vfs)
     │
     ├─ 4. createHarness({ llmDriver })
     │      → LLMServiceAdapter + ToolDeviceDriver + SkillDeviceDriver + AgentDeviceDriver
     │      → setVFSContext (浏览器 VFS 桥接)
     │      → syncSkillsToHarness (VFS → harness Skill 同步)
     │
-    ├─ 5. initializeLLMEngine({ agentService, sessionEngine, harness* })
-    │      → initializeKernel + SessionManager
-    │      → HarnessAdapter 装配
+    ├─ 5. initializeLLMEngine({ agentService, sessionEngine, llmService })
+    │      → ExecutorRegistry (chat + loop lite) + SessionManager + TaskGraph
+    │      → Plugin system (session/vcs/history 插件)
+    │      → SessionActor 桥接 ILoop → EventBus
     │
     ├─ 6. 策略工厂创建
     │      ├─ StandardWorkspaceStrategy × 2 (standard, agent)
@@ -1097,11 +1081,11 @@ class MemoryManager {
     │       │   └─ Tool calls → ToolDeviceDriver.invoke()
     │       │       └─ VFS ToolContext (浏览器) 或 node:fs (Node)
     │       │
-    │       └─ HarnessAdapter → OrchestratorEvent → UI 更新
+    │       └─ SessionActor → SessionEventBus → UI 更新
     │
-    └─ LLMSessionEngine 持久化
-        ├─ 写入 ChatManifest (branches)
-        └─ 写入消息节点到 assetdir
+    └─ ChatEngine 持久化
+        ├─ RoundLog.append()（Round DAG 写入）
+        └─ RoundManifest 更新（branches + children 索引）
 ```
 
 ### 15.2 文件系统操作流
@@ -1110,9 +1094,8 @@ class MemoryManager {
 UI (vfs-ui/VFSUIShell)
     │
     ├─ VFSService (业务逻辑)
-    │   └─ ISessionEngine (VFSModuleEngine / LLMSessionEngine)
-    │       └─ IModuleFS (ModuleFS, chroot 隔离)
-    │           └─ VFSEngine
+    │   └─ IModuleFS (ModuleFS, chroot 隔离)
+    │       └─ VFSEngine
     │               ├─ PathResolver    (路径 → InodeRecord)
     │               ├─ AccessController (权限检查)
     │               ├─ PluginPipeline  (中间件)
@@ -1133,15 +1116,20 @@ MissionService.createMission(goal)
     ├─ merge TodoItem[] → TodoStateManager.createMission()
     │   └─ VFS: write missions/<id>/plan.json
     │
-    └─ MissionScheduler.run()
+    └─ MissionTaskGraphRunner.run(missionId, signal)
         │
-        ├─ getReadyTodos()  ← 依赖图分析
+        ├─ compile MissionPlan → FlowRevision
+        │   └─ per-todo → TaskNode(agent handler)
         │
-        ├─ executeTodo() (并行/串行)
-        │   └─ SubAgentRouter.delegate()
-        │       ├─ AgentLoopExecutor
-        │       ├─ write_result tool → ResultPersistenceService
-        │       └─ human_input tool → HITLQueue
+        └─ TaskGraphReconciler.run(createTaskGraphRun(flow))
+            │
+            ├─ DependencyScheduler（topo-sort → readyIds）
+            │
+            ├─ executeTask() (并行/串行)
+            │   └─ SubAgentRouter.delegate()
+            │       ├─ AgentLoopExecutor
+            │       ├─ write_result tool → ResultPersistenceService
+            │       └─ human_input tool → HITLQueue
         │
         ├─ runVerifier()
         │   └─ SubAgentRouter.delegate()
@@ -1225,14 +1213,13 @@ MissionService.createMission(goal)
 | vfslib | `src/services/vfs-manager.ts` | VFSManager 实现 |
 | vfslib | `src/services/module-fs.ts` | ModuleFS 实现 |
 | vfslib | `src/factory.ts` | createVFS 工厂 |
-| vfslib | `src/adapter-session/VFSModuleEngine.ts` | VFS→ISessionEngine 适配器 |
+| vfslib | `src/file-io/ModuleFS.ts` | ModuleFS chroot 实现 |
 | device-llm | `src/device/llm-device-driver.ts` | LLMDeviceDriver 实现 |
 | device-llm | `src/core/driver.ts` | LLMDriver 核心调用 |
-| llm-kernel | `src/index.ts` | initializeKernel |
-| llm-kernel | `src/executors/` | 四种 Executor |
-| llm-kernel | `src/orchestrators/` | 五种 Orchestrator |
 | llm-harness | `src/factory.ts` | createHarness 装配工厂 |
 | llm-harness | `src/executor/agent-loop-executor.ts` | AgentLoopExecutor 核心循环 |
+| llm-harness | `src/executor/harness-loop-executor.ts` | HarnessLoopExecutor (ILoop) |
+| llm-harness | `src/executor/agent-task-executor.ts` | HarnessAgentTaskExecutor (TaskExecutor) |
 | llm-harness | `src/executor/context-manager.ts` | ContextManager 系统提示词+压缩 |
 | llm-harness | `src/executor/budget-controller.ts` | 六维预算控制 |
 | llm-harness | `src/executor/error-recovery.ts` | 五类错误恢复 |
@@ -1241,12 +1228,13 @@ MissionService.createMission(goal)
 | llm-harness | `src/drivers/skill-device-driver.ts` | Skill 注册+加载 |
 | llm-engine | `src/index.ts` | initializeLLMEngine |
 | llm-engine | `src/session/session-manager.ts` | SessionManager |
-| llm-engine | `src/session/task-runner.ts` | TaskRunner 双路径 |
-| llm-engine | `src/persistence/session-engine.ts` | LLMSessionEngine |
-| llm-engine | `src/adapters/harness-adapter.ts` | HarnessAdapter 事件映射 |
+| llm-engine | `src/session/task-runner.ts` | TaskRunner（TaskGraph 提交） |
+| llm-engine | `src/persistence/chat-engine.ts` | ChatEngine |
+| llm-engine | `src/core/session-actor.ts` | SessionActor 事件桥接 |
+| llm-engine | `src/task-graph/reconciler.ts` | TaskGraphReconciler 控制面 |
 | llm-engine | `src/mission/mission-service.ts` | Mission 服务门面 |
-| llm-engine | `src/mission/mission-scheduler.ts` | Mission 调度器 |
-| llm-engine | `src/session-graph/graph-orchestrator.ts` | 会话依赖图编排 |
+| llm-engine | `src/mission/mission-task-graph-runner.ts` | Mission → TaskGraphRun |
+| llm-engine | `src/session-graph/session-task-graph-runner.ts` | Session 依赖图执行 |
 | llm-ui | `src/shell/LLMWorkspaceEditor.ts` | Chat 编辑器 |
 | llm-ui | `src/editors/AgentConfigEditor.ts` | Agent 配置编辑器 |
 | vfs-ui | `src/shell/VFSUIShell.ts` | 文件树 UI 主组件 |
