@@ -213,13 +213,13 @@ export function connectEditorLifecycle(
         if (!factory) throw new Error('No suitable editor factory found.');
 
         const editorOptions: EditorOptions = {
-          ...factoryExtraOptions,
           initialContent: initialContent || '',
           title: item.metadata.title,
           nodeId: item.id,
           language: item.metadata.custom?._extension || '',
           sessionEngine: engine,
           hostContext: createHostContext(),
+          ...factoryExtraOptions,
         };
 
         const editor = await factory(editorContainer, editorOptions);

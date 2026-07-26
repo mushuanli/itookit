@@ -19,7 +19,7 @@ import {
     chatFileParser,
 } from '@itookit/llm-conversation';
 import type { SessionManager } from '@itookit/llm-conversation';
-import { MemoryManager } from '@itookit/memory-manager';
+import { Workbench } from './core/Workbench';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { createHarness, type HarnessInstance } from '@itookit/llm-harness';
 import { SkillsEngine } from '@itookit/app-settings';
@@ -69,7 +69,7 @@ function waitForEditorMount(container: HTMLElement): Promise<void> {
 // translates those into VFSStore state so the session list renders an orange
 // pulsing indicator on the waiting session's .chat file entry.
 
-function setupHitlVfsBridge(sessionManager: SessionManager, manager: MemoryManager): () => void {
+function setupHitlVfsBridge(sessionManager: SessionManager, manager: Workbench): () => void {
     // NOTE: This bridge is "eventual" — it only responds to events that fire
     // AFTER the workspace is loaded. Sessions that started waiting before the
     // workspace loaded won't be highlighted until the NEXT input request.
@@ -416,14 +416,14 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // ── 6. Manager cache + workspace loader ────────────────────────────────────
 
-    const managerCache = new Map<string, MemoryManager>();
+    const managerCache = new Map<string, Workbench>();
     // Deduplicate concurrent loads: if the same workspace is loading, reuse the promise.
-    const pendingLoads = new Map<string, Promise<MemoryManager | undefined>>();
+    const pendingLoads = new Map<string, Promise<Workbench | undefined>>();
 
     const doLoadWorkspace = async (
         wsConfig: WorkspaceConfig,
         initialResourceId?: string,
-    ): Promise<MemoryManager | undefined> => {
+    ): Promise<Workbench | undefined> => {
         const { elementId } = wsConfig;
 
         const container = document.getElementById(elementId);
@@ -431,6 +431,23 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             console.warn(`[Shell] doLoadWorkspace: container #${elementId} not found in DOM`);
             return undefined;
         }
+
+        container.innerHTML = '';
+
+        // Create layout DOM (previously in memory-manager's Layout.ts).
+        // Workbench no longer owns DOM — consumers create their own containers.
+        const layoutEl = document.createElement('div');
+        layoutEl.className = 'mm-layout';
+
+        const sidebarEl = document.createElement('div');
+        sidebarEl.className = 'mm-sidebar';
+
+        const editorEl = document.createElement('div');
+        editorEl.className = 'mm-editor-area';
+
+        layoutEl.appendChild(sidebarEl);
+        layoutEl.appendChild(editorEl);
+        container.appendChild(layoutEl);
 
         const strategyType = wsConfig.type ?? 'standard';
         const strategy = strategies[strategyType] ?? strategies.standard;
@@ -475,11 +492,13 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             }),
         };
 
-        const manager = new MemoryManager({
-            container,
+        const manager = new Workbench({
+            sidebarContainer: sidebarEl,
+            editorContainer: editorEl,
             customEngine:  strategy.getEngine?.(moduleName),
             moduleName,
             editorFactory: strategy.getFactory(),
+            sessionEngine: strategy.getSessionEngine?.(),
             scopeId:       elementId,
             fileTypes,
             uiOptions,
@@ -492,6 +511,14 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             aiConfig: { enabled: aiEnabled ?? true },
             onNavigate:      async (req: NavigationRequest) => handleNavigationRequest(req),
             onSessionChange: (sessionId) => updateHistory(elementId, sessionId, 'replace'),
+            onSidebarToggle: (collapsed) => {
+                if (collapsed) {
+                    sidebarEl.classList.add('is-collapsed');
+                } else {
+                    sidebarEl.classList.remove('is-collapsed');
+                }
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 310);
+            },
         });
 
         // Start without resourceId to avoid double sessionSelected race with LLMFactory.
@@ -517,7 +544,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const loadWorkspace = (
         wsConfig: WorkspaceConfig,
         initialResourceId?: string,
-    ): Promise<MemoryManager | undefined> => {
+    ): Promise<Workbench | undefined> => {
         const { elementId } = wsConfig;
         console.log(`[Shell] loadWorkspace: ${elementId} cached=${managerCache.has(elementId)} pending=${pendingLoads.has(elementId)}`);
         if (managerCache.has(elementId)) return Promise.resolve(managerCache.get(elementId));

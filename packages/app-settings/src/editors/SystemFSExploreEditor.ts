@@ -1,6 +1,6 @@
 /**
  * @file SystemFSExploreEditor.ts
- * @desc Debug settings page — read-only view of all VFS modules using MemoryManager.
+ * @desc Debug settings page — read-only view of all VFS modules.
  *
  * Layout (within the settings page):
  *   ┌─ settings page header ────────────────────────────────┐
@@ -17,12 +17,14 @@
  * content is replaced with a placeholder by SystemVFSEngine.readContent().
  */
 import { BaseSettingsEditor } from '@itookit/common';
-import { MemoryManager } from '@itookit/memory-manager';
+import { createVFSUI, connectEditorLifecycle, VFSUIShell } from '@itookit/vfs-ui';
+import '@itookit/mdxeditor/style.css';
 import { SettingsService } from '../services/SettingsService';
 import { SystemVFSEngine } from './system-fs/SystemVFSEngine';
 
 export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
-    private manager?: MemoryManager;
+    private vfsUI?: VFSUIShell;
+    private lifecycleUnsub?: () => void;
     private isStructureInitialized = false;
 
     async init(container: HTMLElement): Promise<void> {
@@ -55,32 +57,49 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
         // ── Engine: cross-module read-only VFS view ───────────────────────────
         const engine = new SystemVFSEngine(this.service.vfs);
 
-        // ── MemoryManager: sidebar (module tree) + MDX viewer ─────────────────
-        this.manager = new MemoryManager({
-            container: mount,
-            scopeId: 'system-fs-explorer',
-            customEngine: engine as any,
-            uiOptions: {
+        // ── Layout DOM ──────────────────────────────────────────────────────
+        const layoutEl = document.createElement('div');
+        layoutEl.className = 'mm-layout';
+
+        const sidebarEl = document.createElement('div');
+        sidebarEl.className = 'mm-sidebar';
+
+        const editorEl = document.createElement('div');
+        editorEl.className = 'mm-editor-area';
+
+        layoutEl.appendChild(sidebarEl);
+        layoutEl.appendChild(editorEl);
+        mount.appendChild(layoutEl);
+
+        // ── VFSUIShell + editor lifecycle ───────────────────────────────────
+        this.vfsUI = createVFSUI(
+            {
                 readOnly: true,
                 title: 'VFS Modules',
                 searchPlaceholder: 'Search files…',
                 initialSidebarCollapsed: false,
+                sessionListContainer: sidebarEl,
             },
-            // Default editor factory (createMDxEditor) displays content.
-            // readOnly is enforced at the engine level — writes throw.
-            editorConfig: {
-                readOnly: true,
-                initialMode: 'render',
-            },
-        });
+            engine,
+        ) as VFSUIShell;
 
-        await this.manager.start();
+        this.lifecycleUnsub = connectEditorLifecycle(
+            this.vfsUI,
+            engine,
+            editorEl,
+            undefined,
+            { readOnly: true },
+        );
+
+        await this.vfsUI.start();
         this.isStructureInitialized = true;
     }
 
     async destroy(): Promise<void> {
-        this.manager?.destroy();
-        this.manager = undefined;
+        this.lifecycleUnsub?.();
+        this.vfsUI?.destroy();
+        this.vfsUI = undefined;
+        this.lifecycleUnsub = undefined;
         this.isStructureInitialized = false;
         await super.destroy();
     }

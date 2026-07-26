@@ -1,3 +1,8 @@
+/* Workspace layout styles — used by consumers (app-shell, app-settings, demo)
+   to create sidebar + editor flex containers. MemoryManager itself creates zero DOM;
+   consumers are responsible for building the .mm-layout / .mm-sidebar / .mm-editor-area
+   structure and passing containers via MemoryManagerConfig. */
+
 .mm-layout {
     display: flex;
     width: 100%;

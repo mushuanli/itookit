@@ -12,7 +12,6 @@ export default defineConfig({
             // ✅ 映射所有 workspace 包到源码
             '@itookit/vfs-ui/style.css': path.resolve(__dirname, '../../packages/vfs-ui/src/styles/index.css'),
             '@itookit/mdxeditor/style.css': path.resolve(__dirname, '../../packages/mdx/src/styles/index.css'),
-            '@itookit/memory-manager/style.css': path.resolve(__dirname, '../../packages/memory-manager/src/styles/memory-manager.css'),
             '@itookit/llm-ui/style.css': path.resolve(__dirname, '../../packages/llm-ui/src/styles/index.css'),
             '@itookit/app-settings/style.css': path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
 
@@ -25,7 +24,6 @@ export default defineConfig({
             '@itookit/llm-harness': path.resolve(__dirname, '../../packages/llm-harness/src/index.ts'),
             '@itookit/llm-ui': path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
             '@itookit/app-settings': path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
-            '@itookit/memory-manager': path.resolve(__dirname, '../../packages/memory-manager/src/index.ts'),
             '@itookit/app-shell': path.resolve(__dirname, '../../packages/app-shell/src/index.ts'),
             '@itookit/vfslib': path.resolve(__dirname, '../../packages/vfslib/src/index.ts'),
             '@itookit/vfsdriver-indexeddb': path.resolve(__dirname, '../../packages/vfsdriver-indexeddb/src/index.ts'),

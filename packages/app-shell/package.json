@@ -25,7 +25,6 @@
     "@itookit/llm-harness": "workspace:*",
     "@itookit/llm-ui": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/memory-manager": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
     "@itookit/vfslib": "workspace:*"
   },
@@ -37,7 +36,6 @@
     "@itookit/llm-harness": "workspace:*",
     "@itookit/llm-ui": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/memory-manager": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
     "@itookit/vfslib": "workspace:*",
     "@itookit/vfsdriver-indexeddb": "workspace:*",

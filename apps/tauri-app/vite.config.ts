@@ -9,7 +9,6 @@ export default defineConfig({
             // CSS virtual modules
             '@itookit/vfs-ui/style.css':         path.resolve(__dirname, '../../packages/vfs-ui/src/styles/index.css'),
             '@itookit/mdxeditor/style.css':      path.resolve(__dirname, '../../packages/mdx/src/styles/index.css'),
-            '@itookit/memory-manager/style.css': path.resolve(__dirname, '../../packages/memory-manager/src/styles/memory-manager.css'),
             '@itookit/llm-ui/style.css':         path.resolve(__dirname, '../../packages/llm-ui/src/styles/index.css'),
             '@itookit/app-settings/style.css':   path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
             // Package source aliases (dev-mode hot reload)
@@ -20,7 +19,6 @@ export default defineConfig({
             '@itookit/llm-conversation': path.resolve(__dirname, '../../packages/llm-conversation/src/index.ts'),
             '@itookit/llm-ui':         path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
             '@itookit/app-settings':   path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
-            '@itookit/memory-manager': path.resolve(__dirname, '../../packages/memory-manager/src/index.ts'),
             '@itookit/vfslib':         path.resolve(__dirname, '../../packages/vfslib/src/index.ts'),
         },
     },

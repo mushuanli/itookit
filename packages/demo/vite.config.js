@@ -12,7 +12,6 @@ export default defineConfig({
       '@itookit/common/style.css': path.resolve(__dirname, '../../packages/common/src/styles/index.css'),
       '@itookit/vfs-ui/style.css': path.resolve(__dirname, '../../packages/vfs-ui/src/styles/index.css'),
       '@itookit/mdxeditor/style.css': path.resolve(__dirname, '../../packages/mdx/src/styles/index.css'),
-      '@itookit/memory-manager/style.css': path.resolve(__dirname, '../../packages/memory-manager/src/styles/memory-manager.css'),
       '@itookit/llm-ui/style.css': path.resolve(__dirname, '../../packages/llm-ui/src/styles/index.css'),
       '@itookit/app-settings/style.css': path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
 
@@ -24,7 +23,6 @@ export default defineConfig({
       '@itookit/device-llm': path.resolve(__dirname, '../../packages/device-llm/src/index.ts'),
       '@itookit/llm-ui': path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
       '@itookit/app-settings': path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
-      '@itookit/memory-manager': path.resolve(__dirname, '../../packages/memory-manager/src/index.ts'),
     },
     dedupe: ['react', 'react-dom', 'dexie', 'mermaid', '@codemirror/state', '@codemirror/view']
   },
@@ -46,8 +44,7 @@ export default defineConfig({
       '@itookit/vfs-ui',
       '@itookit/device-llm',
       '@itookit/llm-ui',
-      '@itookit/app-settings',
-      '@itookit/memory-manager'
+      '@itookit/app-settings'
     ],
     // 预构建第三方依赖
     include: ['mermaid', 'dexie', 'marked', 'immer']

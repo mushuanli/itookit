@@ -1,5 +1,6 @@
-import type { IStorageBackend, IVFSManager, MountOptions, FileCreationConfig } from '@itookit/common';
+import type { IStorageBackend, IVFSManager, MountOptions, FileCreationConfig, IModuleFS, EditorFactory, NavigationRequest, SessionUIOptions } from '@itookit/common';
 import type { ThemeMode } from './ThemeService';
+import type { FileTypeDefinition, CustomEditorResolver } from '@itookit/vfs-ui';
 
 export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills';
 
@@ -61,4 +62,38 @@ export interface AppHandle {
     /** Unsubscribe all global event listeners and release resources. */
     destroy(): void;
     vfs: IVFSManager;
+}
+
+// ── Workbench config ────────────────────────────────────────────────────
+
+export interface WorkbenchConfig {
+    /** VFS 侧边栏挂载容器（消费方负责创建 DOM） */
+    sidebarContainer: HTMLElement;
+    /** 编辑器挂载容器（消费方负责创建 DOM） */
+    editorContainer: HTMLElement;
+    /** Scope ID 用于多实例隔离 (localStorage key, modal ID 等) */
+    scopeId?: string;
+    /** VFS 实例 (与 moduleName 配合使用) */
+    vfs?: IVFSManager;
+    /** 自定义引擎实例 */
+    customEngine?: IModuleFS;
+    /** 会话引擎 (IChatEngine)，用于 .chat 文件 */
+    sessionEngine?: any;
+    moduleName?: string;
+    editorFactory?: EditorFactory;
+    editorConfig?: {
+        plugins?: any[];
+        defaultPluginOptions?: Record<string, any>;
+        [key: string]: any;
+    };
+    onNavigate?: (request: NavigationRequest) => Promise<void>;
+    onSessionChange?: (sessionId: string | null) => void;
+    onSidebarToggle?: (collapsed: boolean) => void;
+    uiOptions?: Partial<SessionUIOptions>;
+    fileTypes?: FileTypeDefinition[];
+    customEditorResolver?: CustomEditorResolver;
+    showFileExtensions?: boolean;
+    defaultContentConfig?: { fileName: string; content: string };
+    createConfig?: { initialInputState?: { text?: string; agentId?: string } };
+    aiConfig?: { enabled: boolean; activeRules?: string[] };
 }

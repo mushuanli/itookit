@@ -36,4 +36,8 @@ export class ChatWorkspaceStrategy implements WorkspaceStrategy {
     getEngine(moduleName: string): IModuleFS {
         return this.chatEngine.vfs.getEngine(moduleName);
     }
+
+    getSessionEngine(): IChatEngine {
+        return this.chatEngine;
+    }
 }

@@ -4,8 +4,7 @@
 
 // --- 模拟导入 ---
 import { createVFSCore, VFSEventType } from '@itookit/vfs'; // [修正] 导入工厂函数
-import { MemoryManager } from '@itookit/memory-manager';
-import '@itookit/memory-manager/style.css';
+import { Workbench } from '@itookit/app-shell';
 import { createMDxEditor } from '@itookit/mdxeditor';
 
 // --- 辅助工具：标准配置生成器 (模拟库提供的 Helper) ---
@@ -20,7 +19,7 @@ const createStandardConfig = (options, customConfig = {}) => {
     const finalPlugins = [...basePlugins, ...(customConfig.plugins || [])];
 
     return {
-        // 展开 MemoryManager 传入的所有上下文 (initialContent, nodeId, callbacks)
+        // 展开 Workbench 传入的所有上下文 (initialContent, nodeId, callbacks)
         ...options,
         initialMode: 'render',
         plugins: finalPlugins,
@@ -48,7 +47,7 @@ async function prepareMockData(vfsCore) {
     updateStatus('Preparing VFS data...');
     const moduleName = 'demo-notes';
     
-    // MemoryManager.start() 会自动处理 mount，这里主要是创建文件
+    // Workbench.start() 会自动处理 mount，这里主要是创建文件
     const safeCreate = async (path, content, tags = []) => {
         try { 
             const file = await vfsCore.createFile(moduleName, path, content); 
@@ -115,21 +114,45 @@ async function bootstrap() {
         await prepareMockData(vfsCore);
 
         const container = document.getElementById('memory-manager-root');
-        
+        container.innerHTML = '';
+
+        // Create layout DOM (previously in memory-manager's Layout.ts)
+        const layoutEl = document.createElement('div');
+        layoutEl.className = 'mm-layout';
+
+        const sidebarEl = document.createElement('div');
+        sidebarEl.className = 'mm-sidebar';
+
+        const editorEl = document.createElement('div');
+        editorEl.className = 'mm-editor-area';
+
+        layoutEl.appendChild(sidebarEl);
+        layoutEl.appendChild(editorEl);
+        container.appendChild(layoutEl);
+
         // 初始化 Manager
-        const manager = new MemoryManager({
-            container,
+        const manager = new Workbench({
+            sidebarContainer: sidebarEl,
+            editorContainer: editorEl,
             vfsCore,
             moduleName: 'demo-notes',
             editorFactory: simpleEditorFactory,
             aiConfig: { enabled: true },
-            uiOptions: { 
+            uiOptions: {
                 title: 'Second Brain',
                 searchPlaceholder: 'Search (e.g. tag:work)...'
-            }
+            },
+            onSidebarToggle: (collapsed) => {
+                if (collapsed) {
+                    sidebarEl.classList.add('is-collapsed');
+                } else {
+                    sidebarEl.classList.remove('is-collapsed');
+                }
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 310);
+            },
         });
 
-        // 启动 (MemoryManager 会自动打开第一个文件)
+        // 启动 (Workbench 会自动打开第一个文件)
         await manager.start();
         updateStatus('System Ready.');
 

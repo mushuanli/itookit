@@ -4,7 +4,6 @@ import { WORKSPACES } from './config/modules';
 
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
-import '@itookit/memory-manager/style.css';
 import '@itookit/llm-ui/style.css';
 import '@itookit/app-settings/style.css';
 import './styles/index.css';

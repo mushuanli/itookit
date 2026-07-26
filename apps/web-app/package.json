@@ -26,7 +26,6 @@
     "@itookit/llm-conversation": "workspace:*",
     "@itookit/llm-ui": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/memory-manager": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
     "codemirror": "^6.0.2",
     "dexie": "^4.2.1",

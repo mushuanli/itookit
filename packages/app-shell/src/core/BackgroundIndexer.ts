@@ -1,13 +1,13 @@
 /**
- * @file memory-manager/core/BackgroundBrain.ts
+ * @file app-shell/core/BackgroundIndexer.ts
+ *
+ * 后台文件索引器 — 监听文件变更，自动提取结构化元数据（标签、提及、任务数等）
+ * 并写回文件 metadata，供搜索和侧边栏摘要使用。
  */
 import { FileMentionSource } from '@itookit/vfs-ui';
 import { MDxProcessor, ProcessResult } from '@itookit/mdxeditor';
-import type { IModuleFS, FSEvent } from "@itookit/common";;
+import type { IModuleFS, FSEvent } from "@itookit/common";
 
-/**
- * 节点更新事件的 payload 类型
- */
 interface NodeUpdatePayload {
     nodeId: string;
     path?: string;
@@ -17,22 +17,20 @@ interface NodeUpdatePayload {
     };
 }
 
-export class BackgroundBrain {
+export class BackgroundIndexer {
     private processor: MDxProcessor;
     private isProcessing = false;
-    // 使用简单的防抖计时器
     private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private unsubscribe: (() => void) | null = null;
 
     constructor(private engine: IModuleFS, _activeRules: string[] = ['*']) {
         const fileProvider = new FileMentionSource({ engine: this.engine });
-        
-        // @ts-ignore MDxProcessor 类型可能需要更新以匹配新的 Source 接口，此处暂忽略
+        // @ts-ignore
         this.processor = new MDxProcessor([fileProvider]);
     }
 
     public start() {
-        console.log(`🧠 [BackgroundBrain] Started.`);
+        console.log(`🔍 [BackgroundIndexer] Started`);
         this.unsubscribe = this.engine.driver.on('node:updated', this.handleNodeUpdate);
     }
 
@@ -40,24 +38,22 @@ export class BackgroundBrain {
         this.unsubscribe?.();
         this.debounceTimers.forEach(clearTimeout);
         this.debounceTimers.clear();
-        console.log(`🧠 [BackgroundBrain] Stopped.`);
+        console.log(`🔍 [BackgroundIndexer] Stopped`);
     }
 
     private handleNodeUpdate = (event: FSEvent<'node:updated'>) => {
         const payload = event.payload as unknown as NodeUpdatePayload | null;
-        
+
         if (!payload || !payload.nodeId) {
             return;
         }
 
-        // 如果更新事件仅仅是元数据变更，忽略此次事件，防止死循环
         if (payload.data?.metadataOnly) {
             return;
         }
 
         const nodeId = payload.nodeId;
 
-        // 防抖：如果在 2秒内连续触发，只处理最后一次
         if (this.debounceTimers.has(nodeId)) {
             clearTimeout(this.debounceTimers.get(nodeId));
         }
@@ -75,19 +71,15 @@ export class BackgroundBrain {
             const node = await this.engine.driver.getNode(nodeId);
             if (!node || node.type !== 'file') return;
 
-            // 3. 检查是否需要处理 (防止死循环)
-            // 如果最近一次更新是我们自己 (AI) 触发的，且距离现在很近，则跳过
             const lastAiScan = node.metadata?._ai_last_scan;
-            const lastModified = node.modifiedAt; // 已经是 number (timestamp)
-            
-            // 如果 AI 扫描时间比文件最后修改时间还晚，说明内容没变，只是 metadata 变了
-            // 或者这次变更就是 AI 写入 metadata 导致的
+            const lastModified = node.modifiedAt;
+
             if (typeof lastAiScan === 'number' && lastAiScan >= lastModified) {
-                return; 
+                return;
             }
 
             this.isProcessing = true;
-            
+
             const content = await this.engine.driver.readContent(nodeId);
             if (typeof content !== 'string') return;
 
@@ -100,7 +92,6 @@ export class BackgroundBrain {
                 }
             });
 
-            // 更新元数据
             const newMetadata: Record<string, unknown> = {
                 ...(node.metadata || {}),
                 ...result.metadata,
@@ -109,11 +100,11 @@ export class BackgroundBrain {
             };
 
             await this.engine.driver.updateMetadata(nodeId, newMetadata);
-            
-            console.log(`🧠 [BackgroundBrain] Processed ${nodeId}`);
-            
+
+            console.log(`🔍 [BackgroundIndexer] Indexed ${nodeId}`);
+
         } catch (e) {
-            console.error('[BackgroundBrain] Error:', e);
+            console.error('[BackgroundIndexer] Error:', e);
         } finally {
             this.isProcessing = false;
         }
