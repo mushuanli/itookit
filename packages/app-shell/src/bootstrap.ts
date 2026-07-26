@@ -13,12 +13,15 @@ import {
     ProviderSettingsEditor,
     CostEditor,
 } from '@itookit/llm-ui';
-import { initializeLLMEngine, ChatEngine, chatFileParser } from '@itookit/llm-engine';
-import type { SessionManager } from '@itookit/llm-engine';
+import {
+    initializeConversationSystem,
+    ChatEngine,
+    chatFileParser,
+} from '@itookit/llm-conversation';
+import type { SessionManager } from '@itookit/llm-conversation';
 import { MemoryManager } from '@itookit/memory-manager';
 import { LLMDeviceDriver } from '@itookit/device-llm';
-import { setKernelDeviceManager } from '@itookit/llm-engine';
-import { createHarness, HarnessLoopExecutor, type HarnessInstance } from '@itookit/llm-harness';
+import { createHarness, type HarnessInstance } from '@itookit/llm-harness';
 import { SkillsEngine } from '@itookit/app-settings';
 import { createSkillsEditorFactory } from '@itookit/llm-ui';
 
@@ -86,8 +89,7 @@ function setupHitlVfsBridge(sessionManager: SessionManager, manager: MemoryManag
         } else if (event.type === 'session_status_changed') {
             // Defensive cleanup: if the session is no longer running (aborted /
             // completed / failed), clear any lingering waiting-input indicator.
-            // This covers abort() during HITL wait, which calls hitlQueue.abortAll()
-            // but does NOT emit agent:human:resolved.
+            // This also clears stale waiting indicators when a Process is cancelled.
             const stopped = event.payload.status !== 'running' && event.payload.status !== 'queued';
             if (stopped) {
                 const runtime = sessionManager.getSessionRuntime(event.payload.sessionId);
@@ -175,8 +177,8 @@ function createVFSToolContext(vfsManager: IVFSManager): ToolVFSContext {
 }
 
 // ── Skill sync ─────────────────────────────────────────────────────────────────
-// LLMSkill is now a type alias for SkillDefinition. device-llm migrates old flat
-// format on read, so skills can be passed directly to the harness.
+// LLMSkill is a type alias for SkillDefinition, so persisted skills can be
+// registered directly with the harness.
 
 async function syncSkillsToHarness(
     llmDriver: LLMDeviceDriver,
@@ -273,7 +275,6 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     ts = performance.now();
     await llmDriver.createDeviceNodes();
     console.log(`[Boot]   ↳ createDeviceNodes: +${(performance.now() - ts).toFixed(0)}ms`);
-    setKernelDeviceManager(vfs.devices);
     vfs.devices.freeze();
     logIO('LLM driver');
 
@@ -284,15 +285,19 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const agentService   = new VFSAgentService(vfs, llmDriver);
     const sessionEngine  = new ChatEngine(vfs);
 
-    // Harness: AgentLoopExecutor + built-in tools + skill service.
-    // createHarness() reads the default LLM connection from llmDriver automatically.
+    // Harness kernel with resource ports, schedulers, and built-in DAG plugins.
     ts = performance.now();
-    const harness = await createHarness({ llmDriver });
+    const vfsResourcePort = createVFSToolContext(vfs);
+    const harness = await createHarness({
+        llmDriver,
+        vfsPort: vfsResourcePort,
+        maxConcurrentProcesses: 20,
+    });
     console.log(`[Boot]   ↳ createHarness: +${(performance.now() - ts).toFixed(0)}ms`);
 
     // Inject VFS context so file tools work with the virtual filesystem in browser.
     // When node:fs is unavailable, tools fall back to ctx.vfs (ToolVFSContext).
-    harness.toolDriver.setVFSContext(createVFSToolContext(vfs));
+    harness.toolDriver.setVFSContext(vfsResourcePort);
 
     // Bridge: sync VFS LLMSkills → harness SkillDefinition so /skills, /skill <id>,
     // and the skill picker panel all show the user's configured skills.
@@ -317,22 +322,11 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     logIO('core services');
 
     logStep('初始化 LLM 引擎…');
-    const { sessionManager, commandBus } = await initializeLLMEngine({
+    const { sessionManager, commandBus } = await initializeConversationSystem({
         agentService,
         sessionEngine,
-        maxConcurrent:       20,
-        llmService:          harness.llmService,
-        executors: [
-            new HarnessLoopExecutor(
-                harness.llmService,
-                harness.toolService,
-                harness.skillService,
-                harness.config.getModelRoles(),
-                harness.config.getLoopConfig(),
-                harness.config.getBudgetLimits(),
-                undefined!, // subAgentRouter — harness loop delegates via tools, not inline
-            ),
-        ],
+        processHost:         harness.kernel,
+        dagPlugins:          harness.dagPlugins,
     });
 
     const llmUiEditors: LLMUIEditors = {
@@ -346,7 +340,16 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // this is the single place that knows both the harness and the connection list.
     const connections = await agentService.getConnections();
     const visionConnExists = connections.some(c => c.id === 'conn-volcengine-vision');
-    const llmFactory = createLLMFactory(agentService, visionConnExists ? { llmService: harness.llmService, commandBus } : { commandBus });
+    const llmFactory = createLLMFactory(
+        agentService,
+        visionConnExists
+            ? {
+                llmService: harness.llmService,
+                commandBus,
+                controlPlane: harness.kernel,
+            }
+            : { commandBus, controlPlane: harness.kernel },
+    );
     const agentFactory    = createAgentEditorFactory(agentService);
 
     // Skills workspace: VFSUIShell list (SkillsEngine) + form editor (SkillSettingsEditor)
@@ -441,7 +444,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         const primaryDef = supportedFileTypes?.[0] ? FILE_REGISTRY[supportedFileTypes[0]] : undefined;
 
         const aiContextMenu = (strategyType === 'chat' && !uiPassThrough.readOnly)
-            ? createAIContextMenuConfig({ agentService, engine: sessionEngine })
+            ? createAIContextMenuConfig({ agentService, engine: strategy.getEngine(moduleName) })
             : null;
 
         const uiOptions = {

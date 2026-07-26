@@ -1,13 +1,16 @@
 # 关键文件快速索引
 
-| 场景 | 查找 |
-|---|---|
-| 理解某个接口 | `packages/common/src/interfaces/` |
-| 理解 VFS 如何工作 | `packages/vfslib/src/engine/vfs-engine.ts` → `services/module-fs.ts` |
-| 理解 Agent 循环 | `packages/llm-harness/src/executor/agent-loop-executor.ts` |
-| 理解 Chat 持久化 | `packages/llm-engine/src/persistence/session-engine.ts` |
-| 理解启动流程 | `packages/app-shell/src/bootstrap.ts` |
-| 理解 Skill 系统 | `packages/llm-harness/src/drivers/skill-device-driver.ts` |
-| 理解 Mission 编排 | `packages/llm-engine/src/mission/mission-scheduler.ts` |
-| 添加新工作区 | `apps/web-app/src/config/modules.ts` → WORKSPACES |
-| 添加文件类型 | `packages/app-shell/src/config/file-registry.ts` → FILE_REGISTRY |
+| 场景 | 路径 |
+| --- | --- |
+| Process/Run 协议 | `packages/common/src/interfaces/agent/process.ts` |
+| DAG 插件协议 | `packages/common/src/interfaces/agent/dag-plugin.ts` |
+| Chat/Agent Process | `packages/llm-engine/src/process/programs/` |
+| Kernel 与生命周期 | `packages/llm-harness/src/kernel/` |
+| Direct/DAG 调度 | `packages/llm-harness/src/scheduling/` |
+| DAG 插件注册 | `packages/llm-harness/src/plugins/` |
+| Round 持久化 | `packages/llm-conversation/src/persistence/round-log.ts` |
+| Session 提交 | `packages/llm-conversation/src/session/session-run-coordinator.ts` |
+| Run/Session 投影 | `packages/llm-conversation/src/session/conversation-run-coordinator.ts` |
+| DAG 编辑器 | `packages/llm-ui/src/components/DagWorkbench.ts` |
+| Run attach | `packages/llm-ui/src/shell/RunAttachmentController.ts` |
+| 应用装配 | `packages/app-shell/src/bootstrap.ts` |

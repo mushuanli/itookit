@@ -11,7 +11,7 @@
 // Elm architecture (view = f(state)).
 
 import type { AgentEvent } from './agent-event';
-import type { Signal } from './loop';
+import type { Signal } from './conversation';
 
 export interface ISession {
     readonly id: string;

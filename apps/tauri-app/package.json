@@ -16,7 +16,7 @@
         "@itookit/app-settings":      "workspace:*",
         "@itookit/common":            "workspace:*",
         "@itookit/device-llm":        "workspace:*",
-        "@itookit/llm-engine":        "workspace:*",
+        "@itookit/llm-conversation":  "workspace:*",
         "@itookit/llm-ui":            "workspace:*",
         "@itookit/mdxeditor":         "workspace:*",
         "@itookit/memory-manager":    "workspace:*",

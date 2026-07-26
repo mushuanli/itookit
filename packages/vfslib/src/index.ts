@@ -36,7 +36,7 @@ export {
 } from './adapter-session/BaseModuleService';
 
 // ── File handles ──
-export { FileHandle, createFile, MDXFileHandle, createMDXFile, ChatFileHandle, createChatFile } from './file-io';
+export { FileHandle, createFile, MDXFileHandle, createMDXFile } from './file-io';
 
 // ── 工具 ──
 export * as pathUtils from './utils/path';

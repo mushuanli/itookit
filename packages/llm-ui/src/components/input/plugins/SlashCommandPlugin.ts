@@ -167,7 +167,7 @@ export interface SlashCommandCallbacks {
     /**
      * 加载指定 Skill（如 `/skill docker`）。
      *
-     * 向 AgentLoopExecutor 注册该 Skill 的工具，并追加 system prompt 指令。
+     * Load a Skill contribution for the next Agent process.
      * 仅在 harness 模式可用时有效，否则为 undefined。
      */
     onSkill?: (skillId: string) => Promise<void>;

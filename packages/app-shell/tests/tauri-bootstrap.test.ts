@@ -21,9 +21,8 @@ import { join } from 'node:path';
 
 import { createVFS } from '@itookit/vfslib';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
-import { ChatEngine, VFSAgentService, initializeLLMEngine } from '@itookit/llm-engine';
+import { ChatEngine, VFSAgentService } from '@itookit/llm-conversation';
 import { LLMDeviceDriver } from '@itookit/device-llm';
-import { setKernelDeviceManager } from '@itookit/llm-engine';
 import { FS_MODULE_CHAT, FS_MODULE_AGENTS, IVFSManager } from '@itookit/common';
 
 // ── Module list (mirrors tauri-app/src/config/modules.ts, minus settings/home) ─
@@ -112,13 +111,13 @@ beforeAll(async () => {
     await llmDriver.init();
     vfs.devices.register(llmDriver);
     await llmDriver.createDeviceNodes();
-    setKernelDeviceManager(vfs.devices);
     vfs.devices.freeze();
 
     // ── 5. Core services ───────────────────────────────────────────────────────
     const agentService   = new VFSAgentService(vfs, llmDriver);
     const sessionEngine  = new ChatEngine(vfs);
-    await initializeLLMEngine({ agentService, sessionEngine, maxConcurrent: 4 });
+    await agentService.init();
+    await sessionEngine.init();
 
     fix = {
         mindosDir, homeDir, tempBase, vfs,

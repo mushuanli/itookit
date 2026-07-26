@@ -1,7 +1,7 @@
 // @file: llm-harness/src/adapters/llm-service-adapter.ts
 // LLMServiceAdapter — 将 LLMDeviceDriver 的设备接口适配为简洁的 ILLMService。
 //
-// AgentLoopExecutor 通过 ILLMService 调用 LLM，
+// Process programs use ILLMService through the injected LLM resource port.
 // 不直接感知 device driver 的 open/write/readStream 模式。
 
 import type {

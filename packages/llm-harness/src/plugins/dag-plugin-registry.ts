@@ -1,0 +1,85 @@
+import type {
+    DagPlugin,
+    DagPluginCatalog,
+    DagPluginManifest,
+    DagRuntimeContribution,
+    DagUIContribution,
+} from '@itookit/common';
+
+export class DagPluginRegistry implements DagPluginCatalog {
+    private readonly plugins = new Map<string, DagPlugin>();
+    private readonly versions = new Map<string, string[]>();
+
+    register(plugin: DagPlugin): void {
+        validateManifest(plugin.manifest);
+        const key = pluginKey(plugin.manifest.id, plugin.manifest.version);
+        if (this.plugins.has(key)) throw new Error(`DAG plugin already registered: ${key}`);
+        this.plugins.set(key, plugin);
+        const versions = this.versions.get(plugin.manifest.id) ?? [];
+        this.versions.set(plugin.manifest.id, sortVersions([...versions, plugin.manifest.version]));
+    }
+
+    listManifests(): DagPluginManifest[] {
+        return [...this.plugins.values()]
+            .map(plugin => structuredClone(plugin.manifest))
+            .sort(compareManifest);
+    }
+
+    getManifest(id: string, version?: string): DagPluginManifest | undefined {
+        const plugin = this.resolve(id, version);
+        return plugin ? structuredClone(plugin.manifest) : undefined;
+    }
+
+    async loadRuntime(
+        id: string,
+        version?: string,
+    ): Promise<DagRuntimeContribution> {
+        const plugin = this.require(id, version);
+        return plugin.runtime();
+    }
+
+    async loadUI(
+        id: string,
+        version?: string,
+    ): Promise<DagUIContribution | undefined> {
+        const plugin = this.require(id, version);
+        return plugin.ui?.();
+    }
+
+    private require(id: string, version?: string): DagPlugin {
+        const plugin = this.resolve(id, version);
+        if (!plugin) throw new Error(`DAG plugin not found: ${id}@${version ?? 'latest'}`);
+        return plugin;
+    }
+
+    private resolve(id: string, version?: string): DagPlugin | undefined {
+        const resolvedVersion = version ?? this.versions.get(id)?.at(-1);
+        return resolvedVersion
+            ? this.plugins.get(pluginKey(id, resolvedVersion))
+            : undefined;
+    }
+}
+
+function validateManifest(manifest: DagPluginManifest): void {
+    if (!manifest.id || !manifest.version || !manifest.kind) {
+        throw new Error('DAG plugin manifest requires id, version and kind');
+    }
+    const serialized = JSON.stringify(manifest);
+    if (!serialized) throw new Error(`DAG plugin manifest is not serializable: ${manifest.id}`);
+}
+
+function pluginKey(id: string, version: string): string {
+    return `${id}@${version}`;
+}
+
+function sortVersions(versions: string[]): string[] {
+    return [...new Set(versions)].sort((left, right) =>
+        left.localeCompare(right, undefined, { numeric: true }),
+    );
+}
+
+function compareManifest(left: DagPluginManifest, right: DagPluginManifest): number {
+    return left.category.localeCompare(right.category)
+        || left.title.localeCompare(right.title)
+        || left.version.localeCompare(right.version, undefined, { numeric: true });
+}

@@ -1,7 +1,7 @@
 // @file: llm-ui/components/history/NodeRenderer.ts
 
 import { escapeHTML } from '@itookit/common';
-import { ExecutionNode } from '@itookit/llm-engine';
+import { ExecutionNode } from '@itookit/llm-conversation';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { IconResolver } from '../../utils/iconResolver';
 

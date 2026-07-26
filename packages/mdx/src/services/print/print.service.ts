@@ -317,6 +317,9 @@ export class DefaultPrintService implements PrintService {
             ${styles}
         `;
 
+        // 打印前预处理：展开所有折叠内容
+        contentHtml = this.preprocessHtmlForPrint(contentHtml);
+
         // 只填充 body 内容（不包含完整的 HTML 文档结构，避免 innerHTML 剥离标签）
         container.innerHTML = `
             <article class="mdx-print ${variantClass} ${headerClass}">
@@ -334,6 +337,18 @@ export class DefaultPrintService implements PrintService {
 
         // 打印后清理
         this.cleanupAfterPrint(container, styleEl);
+    }
+
+    /**
+     * 打印前预处理：展开所有折叠内容
+     * - 确保所有 <details> 带 open 属性（CSS 不足以可靠展开）
+     */
+    private preprocessHtmlForPrint(html: string): string {
+        // 确保所有 <details> 带 open 属性
+        return html.replace(
+            /<details(?![^>]*\bopen\b)([^>]*)>/g,
+            '<details open$1>'
+        );
     }
 
     /**

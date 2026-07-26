@@ -5,7 +5,7 @@
 // These types live in common because they are consumed by both llm-engine
 // (ContextAssembler) and UI layers (Context Drawer).
 
-import type { RoundId, RefName } from './loop';
+import type { RoundId, RefName } from './conversation';
 import type { ChatMessage } from '../llm/message';
 
 // ─── Brand aliases (Phase 2: string-based; branded IDs deferred to Phase 3) ─
@@ -73,5 +73,21 @@ export interface ContextSnapshot {
     canonicalMessages: ChatMessage[];
     tokenCount: number;
     digest: string;
-    explanation?: import('./harness-v3').ContextExplanation;
+    explanation?: ContextExplanation;
+}
+
+export interface ContextDecision {
+    source: string;
+    reason: string;
+    priority: number;
+    required: boolean;
+    tokenCount: number;
+}
+
+export interface ContextExplanation {
+    included: ContextDecision[];
+    excluded: ContextDecision[];
+    summarized: ContextDecision[];
+    tokenCount: number;
+    digest: string;
 }

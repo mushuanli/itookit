@@ -200,7 +200,7 @@ const editor = await factory(container, {
 |------|---------|---------|
 | **infrastructure** | 浏览器 API | domain, services, commands, components, shell |
 | **domain** | 无（纯类型） | 任何实现层 |
-| **services** | domain/types, infrastructure, @itookit/llm-engine | components, shell, commands |
+| **services** | domain/types, infrastructure, @itookit/llm-conversation | components, shell, commands |
 | **commands** | domain/ports, domain/types, services, infrastructure | components, shell |
 | **components** | domain/ports, domain/types, infrastructure, templates | shell, commands, services |
 | **shell** | 全部（组装层） | 无限制，但只在构造时引用 components 具体类 |

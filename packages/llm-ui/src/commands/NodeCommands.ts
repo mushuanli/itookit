@@ -2,7 +2,7 @@
 
 import { Command } from './Command';
 import type { ErrorSeverity } from '../utils/errorHandler';
-import type { SessionGroup } from '@itookit/llm-engine';
+import type { SessionGroup } from '@itookit/llm-conversation';
 
 /**
  * 在 sessions 列表和执行树中查找 session
@@ -57,8 +57,8 @@ export class RegenerateCommand extends Command<{ nodeId: string }> {
 
             if (session.role === 'user') {
                 // User bubbles do not own an executionRoot. Pass the currently
-                // selected Agent explicitly; the engine still prefers persisted
-                // Round metadata when callers omit this option (legacy/API use).
+                // selected Agent explicitly; persisted Round metadata remains
+                // authoritative when no override is supplied.
                 const agentId = this.ctx.chatInput.getConfig().agentId;
                 await this.ctx.commands.execute('session.regenerate-from-user', {
                     userMessageId: session.id,

@@ -3,15 +3,13 @@ import type {
     ChatMessage,
     ContextBlock,
     ContextPlan,
+    BranchContextProfile,
     ContextSnapshot,
     ContextSnapshotId,
     ContextExplanation,
     RoundId,
 } from '@itookit/common';
-import type { ILog } from '@itookit/common';
-import type { RoundManifest } from '../persistence/round-types';
-import type { ContextProfileStore } from '../persistence/context-profile-store';
-import { ulid } from '../persistence/ulid';
+import { generateUUID, type ILog } from '@itookit/common';
 import { ProviderMessageAdapter, type ProviderKind } from './provider-message-adapter';
 
 export interface RetrievedMemoryEntry {
@@ -23,13 +21,18 @@ export interface RetrievedMemoryEntry {
 
 export interface ContextAssemblerDeps {
     log: ILog;
-    manifest: RoundManifest;
-    profileStore: ContextProfileStore;
+    profileStore: {
+        getProfile(
+            profileId: string,
+            revision?: number,
+        ): Promise<BranchContextProfile | null>;
+    };
     snapshotStore?: { save(snapshot: ContextSnapshot): Promise<ContextSnapshot> };
     readRound: (roundId: RoundId) => Promise<{
-        payload: ChatMessage[];
-        parents: RoundId[];
-        meta?: { defaultContextMode?: 'include' | 'exclude' };
+        input: ChatMessage[];
+        output: ChatMessage[];
+        historyParentIds: RoundId[];
+        defaultContextMode?: 'include' | 'exclude';
         _deleted?: boolean;
     } | null>;
     loadArtifact?: (artifactId: string) => Promise<Artifact | null>;
@@ -67,14 +70,14 @@ export class ContextAssembler {
             ? await this.deps.profileStore.getProfile(plan.profile.id, plan.profile.revision)
             : null;
 
-        for (const { roundId, payload, defaultContextMode } of mainlineRounds) {
+        for (const { roundId, messages, defaultContextMode } of mainlineRounds) {
             const rule = profile?.rules[roundId];
             if (rule?.mode === 'exclude' || (!rule && defaultContextMode === 'exclude')) continue;
             if (rule?.mode === 'summary') {
                 await this.requireArtifact(rule.artifactId);
                 historyBlocks.push({ kind: 'summary', sourceRoundIds: [roundId], artifactId: rule.artifactId });
             } else {
-                historyBlocks.push({ kind: 'round', roundId, messages: [...payload] });
+                historyBlocks.push({ kind: 'round', roundId, messages: [...messages] });
             }
         }
 
@@ -86,11 +89,15 @@ export class ContextAssembler {
             } else if (binding.kind === 'round') {
                 const round = await this.deps.readRound(binding.roundId);
                 if (!round || round._deleted) throw new Error(`Context round not found: ${binding.roundId}`);
-                inputBlocks.push({ kind: 'round', roundId: binding.roundId, messages: [...round.payload] });
+                inputBlocks.push({
+                    kind: 'round',
+                    roundId: binding.roundId,
+                    messages: [...round.input, ...round.output],
+                });
             } else if (binding.kind === 'text') {
                 inputBlocks.push({ kind: 'system', source: 'runtime', content: `${binding.label}:\n${binding.content}` });
             }
-            // upstream-output is resolved into an artifact binding by the TaskGraph reconciler.
+            // Upstream outputs are resolved into artifact bindings by the DAG scheduler.
         }
 
         for (const memory of await this.deps.retrieveMemory?.(plan, agent) ?? []) {
@@ -112,7 +119,7 @@ export class ContextAssembler {
         );
         const tokenCount = this.estimateTokens(canonicalMessages);
         const snapshot: ContextSnapshot = {
-            id: ulid() as ContextSnapshotId,
+            id: generateUUID() as ContextSnapshotId,
             taskRunId,
             createdAt: Date.now(),
             branchRef: plan.branchRef,
@@ -129,19 +136,19 @@ export class ContextAssembler {
             ? { ...snapshot, digest: await this.sha256(JSON.stringify(snapshot.canonicalMessages)) }
             : this.deps.snapshotStore
                 ? await this.deps.snapshotStore.save(snapshot)
-                : (() => { throw new Error('Context snapshot persistence must be provided by the TaskGraph store'); })();
+                : (() => { throw new Error('Context snapshot persistence is not configured'); })();
         if (persisted.explanation) persisted.explanation.digest = persisted.digest;
         return { snapshot: persisted, messages: persisted.canonicalMessages };
     }
 
     private async collectMainline(branchHead: RoundId | null): Promise<Array<{
         roundId: RoundId;
-        payload: ChatMessage[];
+        messages: ChatMessage[];
         defaultContextMode?: 'include' | 'exclude';
     }>> {
         const result: Array<{
             roundId: RoundId;
-            payload: ChatMessage[];
+            messages: ChatMessage[];
             defaultContextMode?: 'include' | 'exclude';
         }> = [];
         let current: RoundId | undefined = branchHead ?? undefined;
@@ -154,11 +161,11 @@ export class ContextAssembler {
             if (!round._deleted) {
                 result.unshift({
                     roundId: current,
-                    payload: [...round.payload],
-                    defaultContextMode: round.meta?.defaultContextMode,
+                    messages: [...round.input, ...round.output],
+                    defaultContextMode: round.defaultContextMode,
                 });
             }
-            current = round.parents?.[0];
+            current = round.historyParentIds[0];
         }
         return result;
     }

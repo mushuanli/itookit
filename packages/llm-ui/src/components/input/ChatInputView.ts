@@ -150,11 +150,6 @@ export class ChatInput implements IChatInputPresenter {
     private connections: ConnectionOption[] = [];
     private currentAgentId: string = 'default';
 
-    // ── Mode / harness DOM elements ──────────────────────────────────────────
-    private harnessToggle!: HTMLInputElement;
-    private harnessToggleLabel!: HTMLSpanElement; // kept for backward compat; may be absent
-    private cwdRow!: HTMLElement;
-    private cwdInput!: HTMLInputElement;
     private skillSection!: HTMLElement;
     private skillsList!: HTMLElement;
 
@@ -189,7 +184,14 @@ export class ChatInput implements IChatInputPresenter {
     private config: IChatInputConfig = {
         text: '',
         agentId: 'default',
-        settings: { connectionId: undefined, modelTier: 'auto', historyLength: -1, streamMode: true, useHarness: false, workingDirectory: '', branchMode: 'continue', retentionMode: 'persistent' },
+        settings: {
+            connectionId: undefined,
+            modelTier: 'auto',
+            historyLength: -1,
+            streamMode: true,
+            branchMode: 'continue',
+            retentionMode: 'persistent',
+        },
     };
 
     /** 上次已通知的 settings JSON — 内容不变则跳过保存 */
@@ -503,11 +505,7 @@ export class ChatInput implements IChatInputPresenter {
         this.attachmentContainer = q('.llm-input__attachments');
         this.inputWrapper = q('.llm-input__field-wrapper');
 
-        // Mode / skills controls
-        this.harnessToggle = q('.llm-input__harness-toggle');
-        this.harnessToggleLabel = this.container.querySelector('.llm-input__harness-toggle-label') as HTMLSpanElement;
-        this.cwdRow = q('.llm-input__cwd-wrapper');
-        this.cwdInput = q('.llm-input__cwd-input');
+        // Skill controls
         this.skillSection = q('.llm-input__skill-section');
         this.skillsList = q('.llm-input__skills-list');
 
@@ -721,22 +719,6 @@ export class ChatInput implements IChatInputPresenter {
             if (connId) this.options.onNavigateSettings?.({ resourceId: 'connections', anchor: `conn:${connId}` });
         });
 
-        // ── Mode toggle (Simple / Full) ──────────────────────────────────────
-        this.harnessToggle?.addEventListener('change', () => {
-            const enabled = this.harnessToggle.checked;
-            console.log('[ChatInput] harness toggle changed:', enabled);
-            this.config.settings.useHarness = enabled;
-            this.updateHarnessToggleLabel();
-            this.updateHarnessVisibility();
-            this.updateActiveBadges();
-            this.notifyConfigChange();
-        });
-
-        this.cwdInput?.addEventListener('change', () => {
-            this.config.settings.workingDirectory = this.cwdInput.value.trim();
-            this.notifyConfigChange();
-        });
-
         // Skill list delegation — toggle checkbox drives load/unload
         this.skillSection?.addEventListener('change', (e) => {
             const target = e.target as HTMLInputElement;
@@ -817,14 +799,6 @@ export class ChatInput implements IChatInputPresenter {
         if (this.config.settings.historyLength !== -1) overrides.historyLength = this.config.settings.historyLength;
         if (this.config.settings.temperature !== undefined) overrides.temperature = this.config.settings.temperature;
         if (!this.config.settings.streamMode) overrides.streamMode = false;
-
-        // Harness overrides
-        if (this.config.settings.useHarness) {
-            overrides.useHarness = true;
-            if (this.config.settings.workingDirectory) {
-                overrides.workingDirectory = this.config.settings.workingDirectory;
-            }
-        }
 
         // Reasoning effort override
         const effort = this.config.settings.reasoningEffort;
@@ -908,14 +882,6 @@ export class ChatInput implements IChatInputPresenter {
             this.streamToggle.checked = !this.config.settings.streamMode;
             this.updateStreamToggleLabel();
         }
-        if (this.harnessToggle) {
-            console.log('[ChatInput] syncUIFromConfig useHarness:', this.config.settings.useHarness);
-            this.harnessToggle.checked = this.config.settings.useHarness ?? false;
-            this.updateHarnessVisibility();
-        }
-        if (this.cwdInput && this.config.settings.workingDirectory) {
-            this.cwdInput.value = this.config.settings.workingDirectory;
-        }
         // Sync thinking toggle and reasoning effort from persisted settings.
         const thinkingToggle = this.container.querySelector('.llm-input__thinking-toggle') as HTMLInputElement | null;
         const reasoningRow = this.container.querySelector('.llm-input__reasoning-wrapper') as HTMLElement | null;
@@ -940,8 +906,6 @@ export class ChatInput implements IChatInputPresenter {
         // modelTier is kept in-memory; pills don't have a native value to read
         this.config.settings.historyLength = parseInt(this.historySlider?.value || '-1');
         this.config.settings.streamMode = !(this.streamToggle?.checked ?? false);
-        this.config.settings.useHarness = this.harnessToggle?.checked ?? false;
-        this.config.settings.workingDirectory = this.cwdInput?.value.trim() ?? '';
         this.config.settings.systemPromptAppend = this.systemPromptAppendInput?.value.trim() || undefined;
     }
 
@@ -1072,15 +1036,13 @@ export class ChatInput implements IChatInputPresenter {
      * 帮助内容根据当前配置动态生成：
      * - 基础分区：键盘快捷键、slash 命令列表
      * - @mention 分区：当 onRequestFiles 回调已注入时显示
-     * - Agent Mode 分区：当 harness 已配置时显示
      */
     showHelp(): void {
         if (this.helpVisible) return;
 
-        const hasHarness = !!this.options.onLoadSkill;  // harness wired = skill callback injected
         const hasFiles = !!this.options.onRequestFiles;
 
-        this.helpBody.innerHTML = ChatInputTemplates.renderHelpContent(hasHarness, hasFiles);
+        this.helpBody.innerHTML = ChatInputTemplates.renderHelpContent(hasFiles);
         this.helpPanel.style.display = 'block';
         this.helpBtn.classList.add('active');
         this.helpVisible = true;
@@ -1112,20 +1074,6 @@ export class ChatInput implements IChatInputPresenter {
                 this.hideHelp();
             }
         });
-    }
-
-    private updateHarnessToggleLabel(): void {
-        // Legacy label element may not exist in new template; tolerate gracefully
-        if (this.harnessToggleLabel) {
-            this.harnessToggleLabel.textContent = this.config.settings.useHarness ? 'Full' : 'Simple';
-        }
-    }
-
-    private updateHarnessVisibility(): void {
-        const fullMode = this.config.settings.useHarness;
-        // Working dir only relevant in Full mode
-        if (this.cwdRow) this.cwdRow.style.display = fullMode ? '' : 'none';
-        // Skills are always visible — they affect system prompt in both modes
     }
 
     // ── Skill management ─────────────────────────────────────────────────────
@@ -1279,7 +1227,6 @@ export class ChatInput implements IChatInputPresenter {
         const settingsJson = JSON.stringify(config.settings);
         if (settingsJson === this.lastNotifiedSettings) return;
         this.lastNotifiedSettings = settingsJson;
-        console.log('[ChatInput] notifyConfigChange useHarness:', config.settings?.useHarness);
         this.options.onConfigChange?.(config);
     }
 

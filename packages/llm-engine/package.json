@@ -1,7 +1,7 @@
 {
   "name": "@itookit/llm-engine",
   "version": "0.1.0",
-  "description": "LLM Session Engine - UI Adapter Layer",
+  "description": "Resumable LLM process programs and context policies",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -15,14 +15,14 @@
   },
   "publishConfig": {
     "access": "public",
-    "main": "./dist/index.js",
-    "module": "./dist/index.mjs",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
-        "import": "./dist/index.mjs",
-        "require": "./dist/index.js"
+        "import": "./dist/index.js",
+        "require": "./dist/index.cjs"
       }
     }
   },
@@ -39,15 +39,12 @@
     "test:run": "vitest run",
     "prepublishOnly": "pnpm build",
     "lint": "eslint src --ext .ts",
-    "clean": "rm -rf dist"
+    "clean": "rimraf dist"
   },
   "keywords": [
     "llm-engine",
-    "headless",
-    "agent-orchestrator",
-    "session-management",
-    "vfs",
-    "device-llm",
+    "llm-process",
+    "process-program",
     "typescript"
   ],
   "author": "lizlok@gmail.com",
@@ -64,21 +61,13 @@
   "engines": {
     "node": ">=16.0.0"
   },
-  "peerDependencies": {
-    "@itookit/common": "workspace:*",
-    "@itookit/vfslib": "workspace:*"
-  },
   "dependencies": {
-    "@itookit/common": "workspace:*",
-    "yaml": "^2.8.2",
-    "@itookit/vfslib": "workspace:*"
+    "@itookit/common": "workspace:*"
   },
   "devDependencies": {
-    "@itookit/device-llm": "workspace:*",
-    "@itookit/vfsdriver-localfs": "workspace:*",
-    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.25",
     "@vitest/coverage-v8": "^1.6.1",
+    "rimraf": "^5.0.5",
     "typescript": "^5.9.3",
     "vite": "^5.4.21",
     "vite-plugin-checker": "^0.11.0",

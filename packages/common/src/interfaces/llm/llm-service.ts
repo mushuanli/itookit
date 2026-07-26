@@ -8,7 +8,7 @@ import type { ConnectionMeta, LLMProvider } from './connection';
  * LLM 调用服务接口。
  *
  * 对 LLMDeviceDriver 的轻量封装，屏蔽设备驱动的 open/write/readStream 模式，
- * 暴露更简洁的方法签名供 AgentLoopExecutor 使用。
+ * Exposes a provider-independent resource port for process programs.
  *
  * 设计要点：
  * 1. 通过 connectionId 引用连接，不接触 apiKey

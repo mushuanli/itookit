@@ -6,7 +6,6 @@
 // Receives metaInfo dispatches from handleBatchedEvents() and creates / updates /
 // finalizes TtyPanel widgets accordingly.
 
-import type { IAgentRuntime } from '@itookit/common';
 import { TtyPanel } from './TtyPanel';
 
 type TtyOpenMeta  = { sessionId: string; command: string; pid?: number };
@@ -18,13 +17,8 @@ type GetNodeFn = (nodeId: string) => HTMLElement | undefined;
 
 export class TtyController {
     private panels = new Map<string, TtyPanel>();
-    private runtime: IAgentRuntime | null = null;
 
     constructor(private readonly getNode: GetNodeFn) {}
-
-    setRuntime(runtime: IAgentRuntime | null): void {
-        this.runtime = runtime;
-    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     handleMeta(nodeId: string, metaInfo: Record<string, any>): void {
@@ -51,9 +45,7 @@ export class TtyController {
         const container = nodeEl?.querySelector('.llm-ui-node__tty-panels') as HTMLElement | null;
         if (!container) return;
 
-        const panel = new TtyPanel(container, sessionId, command, pid, (sid, data) => {
-            this.runtime?.ttyWrite(sid, data);
-        });
+        const panel = new TtyPanel(container, sessionId, command, pid);
         this.panels.set(sessionId, panel);
     }
 

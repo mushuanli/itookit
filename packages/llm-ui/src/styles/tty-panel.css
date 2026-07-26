@@ -70,55 +70,6 @@
     scrollbar-width: thin;
 }
 
-.llm-ui-tty-panel__input-row {
-    display: flex;
-    border-top: 1px solid var(--llm-border-color);
-}
-
-.llm-ui-tty-panel__input {
-    flex: 1;
-    padding: 6px 10px;
-    border: none;
-    outline: none;
-    font-family: inherit;
-    font-size: 12px;
-    background: var(--llm-bg-primary);
-    color: var(--llm-text-primary);
-    min-width: 0;
-}
-
-.llm-ui-tty-panel__input::placeholder {
-    color: var(--llm-text-tertiary);
-    opacity: 0.7;
-}
-
-.llm-ui-tty-panel__input:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.llm-ui-tty-panel__send {
-    padding: 6px 14px;
-    border: none;
-    border-left: 1px solid var(--llm-border-color);
-    background: var(--llm-bg-secondary);
-    cursor: pointer;
-    font-size: 14px;
-    color: var(--llm-text-secondary);
-    flex-shrink: 0;
-    transition: background 0.15s;
-}
-
-.llm-ui-tty-panel__send:hover:not(:disabled) {
-    background: var(--llm-bg-hover);
-    color: var(--llm-text-primary);
-}
-
-.llm-ui-tty-panel__send:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
 .llm-ui-tty-panel__exit-info {
     padding: 4px 10px;
     font-size: 11px;

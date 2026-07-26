@@ -6,9 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: [
-    '@itookit/common',
-    '@itookit/device-llm',
-    '@itookit/vfs'
-  ]
+  external: ['@itookit/common']
 });

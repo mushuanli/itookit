@@ -1,7 +1,7 @@
 // @file: llm-ui/components/HistoryView.ts
 
-import type { SessionGroup, SessionEvent, ExecutionNode } from '@itookit/llm-engine';
-import type { IModuleFS, IAgentRuntime } from '@itookit/common';
+import type { SessionGroup, SessionEvent, ExecutionNode } from '@itookit/llm-conversation';
+import type { IModuleFS } from '@itookit/common';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { CollapseStateMap, NodeActionCallback } from '../domain/types';
 import type { IEditorEventBus } from '../domain/events';
@@ -297,14 +297,6 @@ export class HistoryView implements IHistoryPresenter {
     // 内部事件处理
     // ================================================================
 
-    /**
-     * 注入 harness runtime，供 TtyController 调用 runtime.ttyWrite()。
-     * 由 LLMWorkspaceEditor.registerInputPlugins() 在 HarnessPlugin 注入后同步调用。
-     */
-    setRuntime(runtime: IAgentRuntime | null): void {
-        this.ttyCtrl.setRuntime(runtime);
-    }
-
     private handleBatchedEvents(batched: BatchedEvents<SessionEvent>): void {
         // Process structural events first (node_start etc.) so nodes exist in the
         // DOM before we try to write streaming content into them.
@@ -328,7 +320,7 @@ export class HistoryView implements IHistoryPresenter {
     private processEventImmediate(event: SessionEvent): void {
         // During S7 transition, event types include both old OrchestratorEvent
         // names (finished, error, regenerate_*, tool:*) and new SessionEvent names.
-        // Use string-based switch for compatibility.
+        // Dispatch on the canonical session event discriminator.
         const e = event as { type: string; payload?: any; [key: string]: any };
         switch (e.type) {
             case 'finished':

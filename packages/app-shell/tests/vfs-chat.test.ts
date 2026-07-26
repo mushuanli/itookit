@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { createVFS, VFSModuleEngine } from '@itookit/vfslib';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
-import { ChatEngine } from '@itookit/llm-engine';
+import { ChatEngine } from '@itookit/llm-conversation';
 import { FS_MODULE_CHAT } from '@itookit/common';
 
 // ── Temp dir helpers ──────────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ describe('ChatEngine + LocalFSBackend', () => {
         console.log('[vfs-chat] created file:', chatFile, 'sessionId:', sessionId);
     });
 
-    it('created .chat file contains valid ChatManifest JSON', async () => {
+    it('created .chat file contains a canonical conversation manifest', async () => {
         const sessionId = await fix.engine.createSession('Manifest Test');
 
         const entries = await fsp.readdir(fix.chatsDir);
@@ -109,7 +109,11 @@ describe('ChatEngine + LocalFSBackend', () => {
         const manifest = JSON.parse(raw);
 
         expect(manifest).toMatchObject({
+            schemaVersion: 3,
+            id: sessionId,
+            rootRoundId: null,
             branches: expect.any(Object),
+            children: expect.any(Object),
         });
         console.log('[vfs-chat] manifest keys:', Object.keys(manifest));
     });
@@ -128,8 +132,8 @@ describe('ChatEngine + LocalFSBackend', () => {
         console.log('[vfs-chat] getChildren entries:', nodes.length, '→', (chatNode as { name: string })?.name);
     });
 
-    it('createSession with systemPrompt writes asset node to disk', async () => {
-        await fix.engine.createSession('With Prompt', 'You are a test assistant.');
+    it('createSession writes the settings asset to disk', async () => {
+        await fix.engine.createSession('With Settings');
 
         // Asset dir should exist: _<title>.chat/
         const entries = await fsp.readdir(fix.chatsDir);

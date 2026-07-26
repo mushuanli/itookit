@@ -3,7 +3,7 @@
 import type { UIState, CollapseStateMap } from '../domain/types';
 import type { IChatInputPresenter, IChatInputConfig } from '../domain/ports/IChatInputPresenter';
 import type { StateService } from '../services/StateService';
-import type { SessionManager } from '@itookit/llm-engine';
+import type { SessionManager } from '@itookit/llm-conversation';
 import { createDebouncedSave, DebouncedFn } from '../utils/debounce';
 import { ErrorHandler } from '../utils/errorHandler';
 /**

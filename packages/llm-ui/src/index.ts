@@ -6,9 +6,9 @@ import { LLMWorkspaceEditor, LLMEditorOptions } from './shell/LLMWorkspaceEditor
 import {
     VFSAgentService,
     IChatEngine,
-} from '@itookit/llm-engine';
+} from '@itookit/llm-conversation';
 import { EditorFactory, EditorOptions, formatDefaultFileTitle } from '@itookit/common';
-import type { ILLMService, ICommandBus } from '@itookit/common';
+import type { ILLMService, ICommandBus, HarnessControlPlane } from '@itookit/common';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
@@ -16,10 +16,10 @@ export { ProviderSettingsEditor } from './editors/ProviderSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 export { SkillSettingsEditor } from './editors/SkillSettingsEditor';
 export { CostEditor } from './editors/CostEditor';
-export { TaskGraphWorkbench } from './components/TaskGraphWorkbench';
-export type { TaskGraphWorkbenchOptions } from './components/TaskGraphWorkbench';
+export { DagWorkbench } from './components/DagWorkbench';
+export type { DagWorkbenchOptions } from './components/DagWorkbench';
 
-import type { PromptHistoryService } from '@itookit/llm-engine';
+import type { PromptHistoryService } from '@itookit/llm-conversation';
 import type { IAgentManagementService } from '@itookit/common';
 import { SkillSettingsEditor } from './editors/SkillSettingsEditor';
 
@@ -64,7 +64,11 @@ export interface LLMFactoryOptions {
  */
 export const createLLMFactory = (
     agentService: VFSAgentService,
-    deps?: { llmService?: ILLMService; commandBus?: ICommandBus },
+    deps?: {
+        llmService?: ILLMService;
+        commandBus?: ICommandBus;
+        controlPlane?: HarnessControlPlane;
+    },
 ): EditorFactory => {
 
     // ✅ 跟踪进行中的创建，按 nodeId 去重
@@ -111,6 +115,7 @@ export const createLLMFactory = (
             isNewSession,
             llmService: deps?.llmService,
             commandBus: deps?.commandBus,
+            controlPlane: deps?.controlPlane,
         };
 
         // ✅ 将创建过程包装为 Promise，注册到 pendingCreations

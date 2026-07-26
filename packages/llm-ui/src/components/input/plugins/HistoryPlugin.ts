@@ -2,7 +2,7 @@
 
 import type { InputPlugin, InputPluginContext } from './InputPlugin';
 import { PopupPanel, PopupItem } from './PopupPanel';
-import type { PromptHistoryService, PromptHistoryEntry } from '@itookit/llm-engine';
+import type { PromptHistoryService, PromptHistoryEntry } from '@itookit/llm-conversation';
 import { truncateText } from '../../../utils/textUtils';
 import { formatTimeAgo } from '../../../utils/timeUtils';
 

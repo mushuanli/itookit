@@ -1,7 +1,7 @@
 {
   "name": "@itookit/llm-harness",
   "version": "0.1.0",
-  "description": "LLM Agent harness - AgentLoopExecutor, built-in tools, and device drivers",
+  "description": "LLM process kernel, schedulers, DAG plugins, and resource ports",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -15,14 +15,14 @@
   },
   "publishConfig": {
     "access": "public",
-    "main": "./dist/index.js",
-    "module": "./dist/index.mjs",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
-        "import": "./dist/index.mjs",
-        "require": "./dist/index.js"
+        "import": "./dist/index.js",
+        "require": "./dist/index.cjs"
       }
     }
   },

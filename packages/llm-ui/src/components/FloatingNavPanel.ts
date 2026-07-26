@@ -8,13 +8,13 @@ import type { BranchItem } from '../domain/types';
 import { EventCleanup, TimerManager } from './common';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
 import { escapeHTML, showConfirmDialog, Toast } from '@itookit/common';
-import type { TaskKindDescriptor } from '@itookit/common';
+import type { DagPluginManifest, DagPluginPresentation } from '@itookit/common';
 
 export interface FloatingNavWorkspaceActions {
     onToggleDag: () => void;
     onSetContext: (roundIds: string[], mode: 'include' | 'exclude') => Promise<void>;
-    listTaskKinds: () => Promise<TaskKindDescriptor[]>;
-    onCreateTask: (descriptor: TaskKindDescriptor) => Promise<void>;
+    listDagPlugins: () => Promise<DagPluginPresentation[]>;
+    onCreateNode: (descriptor: DagPluginManifest) => Promise<void>;
 }
 
 
@@ -421,29 +421,31 @@ export class FloatingNavPanel implements INavigationPresenter {
     private async openCreateMenu(anchor: HTMLElement, sourceNodeId: string): Promise<void> {
         this.panel?.querySelector('.llm-nav-create-menu')?.remove();
         try {
-            const descriptors = await this.workspaceActions?.listTaskKinds() ?? [];
+            const descriptors = await this.workspaceActions?.listDagPlugins() ?? [];
             const menu = document.createElement('div');
             menu.className = 'llm-nav-create-menu';
             menu.innerHTML = `<strong>Conversation</strong>
                 <button data-create-branch>Create Branch</button>
                 <strong>Flow Node</strong>
                 ${descriptors.map((item, index) =>
-                    `<button data-task-kind="${index}"><span>${escapeHTML(item.icon ?? '◇')}</span><span>${escapeHTML(item.displayName)}</span><small>${escapeHTML(item.description ?? '')}</small></button>`,
-                ).join('') || '<small>No registered Task types</small>'}`;
+                    `<button data-plugin-index="${index}"><span>${escapeHTML(item.ui?.palette.icon ?? '◇')}</span><span>${escapeHTML(item.ui?.palette.label ?? item.manifest.title)}</span><small>${escapeHTML(item.ui?.palette.group ?? item.manifest.category)}</small></button>`,
+                ).join('') || '<small>No registered DAG plugins</small>'}`;
             anchor.closest('.llm-nav-item__branch-actions')?.append(menu);
             menu.querySelector('[data-create-branch]')?.addEventListener('click', () => {
                 this.bus.emit('branch:create', { sourceNodeId });
                 menu.remove();
             });
-            menu.querySelectorAll<HTMLElement>('[data-task-kind]').forEach(button => {
+            menu.querySelectorAll<HTMLElement>('[data-plugin-index]').forEach(button => {
                 button.addEventListener('click', () => {
-                    const descriptor = descriptors[Number(button.dataset.taskKind)];
+                    const presentation = descriptors[Number(button.dataset.pluginIndex)];
                     menu.remove();
-                    if (descriptor) void this.workspaceActions?.onCreateTask(descriptor);
+                    if (presentation) {
+                        void this.workspaceActions?.onCreateNode(presentation.manifest);
+                    }
                 });
             });
         } catch (error) {
-            Toast.error(error instanceof Error ? error.message : 'Unable to load Task types');
+            Toast.error(error instanceof Error ? error.message : 'Unable to load DAG plugins');
         }
     }
 

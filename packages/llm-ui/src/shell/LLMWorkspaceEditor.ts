@@ -4,11 +4,17 @@ import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent,
     EditorEventCallback, CollapseExpandResult, Toast,
 } from '@itookit/common';
-import type { ILLMService, ICommandBus } from '@itookit/common';
+import type {
+    HarnessControlPlane,
+    ILLMService,
+    ICommandBus,
+    RunEventEnvelope,
+    WaitCondition,
+} from '@itookit/common';
 
 import {
     IChatEngine, IAgentConfigService, SessionManager, getSessionManager,
-} from '@itookit/llm-engine';
+} from '@itookit/llm-conversation';
 
 // Domain — 只依赖接口和类型
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
@@ -38,13 +44,11 @@ import { StateManager } from './StateManager';
 import { EventBinder } from './EventBinder';
 import { WorkspacePaneController } from './WorkspacePaneController';
 import { NavigationHelper } from './NavigationHelper';
+import { RunAttachmentController } from './RunAttachmentController';
 import {
     buildExecutorOptions, validateAgentId, buildConnectionOptions,
 } from './AgentProvider';
-import { buildHarnessCallbacks, checkSessionInterrupted,
-    injectIntoRunningHarness,
-    wirePlanConfirmIntercept,
-} from './HarnessIntegration';
+import { promptInterruptedRun } from './InterruptedRunPrompt';
 import { buildSlashCallbacks } from './SlashCommandRouter';
 
 // Infrastructure
@@ -53,7 +57,7 @@ import { ErrorHandler } from '../utils/errorHandler';
 
 // Components — 仅在 init 中用于构造，之后通过接口引用
 import { HistoryView } from '../components/HistoryView';
-import { TaskGraphWorkbench } from '../components/TaskGraphWorkbench';
+import { DagWorkbench } from '../components/DagWorkbench';
 import { ChatInput } from '../components/input/ChatInputView';
 import { BranchIndicatorView } from '../components/indicators/BranchIndicatorView';
 import { StatusIndicatorView } from '../components/indicators/StatusIndicatorView';
@@ -61,8 +65,7 @@ import { LayoutTemplates } from '../components/templates/LayoutTemplates';
 
 import { HistoryPlugin } from '../components/input/plugins/HistoryPlugin';
 import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlugin';
-import { HarnessPlugin } from '../components/input/plugins/HarnessPlugin';
-import { getPromptHistory } from '@itookit/llm-engine';
+import { getPromptHistory } from '@itookit/llm-conversation';
 import { AssetManagerUI } from '@itookit/mdxeditor';
 
 export interface LLMEditorOptions extends Omit<EditorOptions, 'sessionEngine'> {
@@ -76,10 +79,12 @@ export interface LLMEditorOptions extends Omit<EditorOptions, 'sessionEngine'> {
      */
     llmService?: ILLMService;
     /**
-     * LLM 2.0: 插件命令总线 — 由 initializeLLMEngine() 返回。
+     * Conversation command bus returned by initializeConversationSystem().
      * 所有高层操作通过 commands.execute('session.*') / 'vcs.*' 调用。
      */
     commandBus?: ICommandBus;
+    /** Harness control plane used to attach to process runs. */
+    controlPlane?: HarnessControlPlane;
 }
 
 /**
@@ -109,7 +114,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // === 委托的子模块 ===
     private navigation!: NavigationHelper;
     private workspacePanes!: WorkspacePaneController;
-    private taskGraphWorkbench!: TaskGraphWorkbench;
+    private dagWorkbench!: DagWorkbench;
 
     // === Services ===
     private sessionManager: SessionManager;
@@ -124,6 +129,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private navDataBuilder!: NavDataBuilder;
     private fileSearchService!: FileSearchService;
     private ocrService!: OcrService;
+    private runAttachment?: RunAttachmentController;
 
     // === 事件系统 ===
     private bus!: IEditorEventBus;
@@ -139,7 +145,6 @@ export class LLMWorkspaceEditor implements IEditor {
     // === 插件 ===
     private historyPlugin: HistoryPlugin | null = null;
     private slashPlugin: SlashCommandPlugin | null = null;
-    private harnessPlugin: HarnessPlugin | null = null;
 
     // === 基础设施 ===
     private timers = new TimerManager();
@@ -235,7 +240,7 @@ export class LLMWorkspaceEditor implements IEditor {
             onRenderError: (err) => this.historyView?.renderError(err),
             onResetLoading: () => this.chatInput?.setLoading(false),
         });
-        // LLM 2.0: CommandBus from initializeLLMEngine, or noop fallback
+        // CommandBus comes from initializeConversationSystem, with a no-op fallback.
         this.commandBus = this.options.commandBus ?? {
             register: () => ({ dispose: () => {} }),
             execute: async (name) => { throw new Error(`CommandBus not provided; cannot execute: ${name}`); },
@@ -278,14 +283,14 @@ export class LLMWorkspaceEditor implements IEditor {
             dagToggle,
         );
 
-        this.taskGraphWorkbench = new TaskGraphWorkbench(runGraphEl, {
+        this.dagWorkbench = new DagWorkbench(runGraphEl, {
             commands: this.commandBus,
             onModeChange: mode => this.workspacePanes.setInspectorVisible(mode === 'run'),
             onSelectFlow: (flowId, revision) => this.chatInput.selectFlow(flowId, revision),
         });
-        void this.taskGraphWorkbench.initialize().catch(error => {
-            console.warn('[TaskGraphWorkbench] initialization failed:', error);
-            this.taskGraphWorkbench.render();
+        void this.dagWorkbench.initialize().catch(error => {
+            console.warn('[DagWorkbench] initialization failed:', error);
+            this.dagWorkbench.render();
         });
 
         const historyView = new HistoryView(historyEl, {
@@ -325,9 +330,9 @@ export class LLMWorkspaceEditor implements IEditor {
                 dagVisible: this.workspacePanes.isGraphVisible(),
             }),
             onToggleDag: () => this.toggleDagDesigner(),
-            onCreateTask: async descriptor => {
+            onCreateNode: async descriptor => {
                 if (!this.workspacePanes.isGraphVisible()) this.workspacePanes.toggleGraph();
-                await this.taskGraphWorkbench.addTask(descriptor);
+                await this.dagWorkbench.addNode(descriptor);
                 this.navigation?.syncWorkspaceControls();
             },
         });
@@ -360,8 +365,6 @@ export class LLMWorkspaceEditor implements IEditor {
             );
         }
 
-        const harnessRuntime = undefined;
-
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId, overrides) =>
                 this.sendCommand.run({ text, files, agentId, overrides }),
@@ -375,9 +378,6 @@ export class LLMWorkspaceEditor implements IEditor {
             onConfigChange: (config) => this.handleConfigChange(config),
             onExecutorChange: () => this.bus.emit('state:inputChanged', {}),
             onRequestConnections: () => buildConnectionOptions(this.agentService),
-
-            // ── Harness callbacks (only wired when skill service is available) ──
-            ...buildHarnessCallbacks(harnessRuntime),
 
             // ── @mention file reference ───────────────────────────────────────
             onRequestFiles: async (query) => this.fileSearchService.search(query),
@@ -428,6 +428,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private initEventHandler(): void {
+        this.initRunAttachment();
         this.sessionEventHandler = new SessionEventHandler({
             commands: this.commandBus,
             historyView: this.historyView,
@@ -437,15 +438,39 @@ export class LLMWorkspaceEditor implements IEditor {
             chatInput: this.chatInput,
             branchStore: this.branchStore,
             getCurrentSessionId: () => this.currentSessionId,
-            onTaskGraphRun: graphRunId => {
-                if (!this.workspacePanes.isGraphVisible()) this.workspacePanes.toggleGraph();
-                void this.taskGraphWorkbench.openRun(graphRunId).catch(error =>
-                    Toast.error(error instanceof Error ? error.message : 'Unable to load Flow run'),
+            onExecutionRun: runId => {
+                void this.runAttachment?.attach(runId).catch(error =>
+                    Toast.error(error instanceof Error ? error.message : 'Unable to attach execution run'),
                 );
             },
             onContentChanged: () => this.emit('change'),
             onNavRefresh: () => this.navigation.pushNavData(),
         });
+    }
+
+    private initRunAttachment(): void {
+        if (!this.options.controlPlane) return;
+        this.runAttachment = new RunAttachmentController(this.options.controlPlane, {
+            onEvent: event => this.handleRunEvent(event),
+            onWaiting: condition => this.handleRunWaiting(condition),
+            onError: error => Toast.error(error.message),
+        });
+    }
+
+    private handleRunEvent(event: RunEventEnvelope): void {
+        if (event.event.type !== 'run:status') return;
+        const status = event.event.status;
+        if (status === 'completed') this.statusIndicator.update('completed');
+        else if (status === 'failed' || status === 'cancelled') {
+            this.statusIndicator.update(status === 'failed' ? 'failed' : 'idle');
+        } else {
+            this.statusIndicator.update(status === 'ready' ? 'queued' : 'running');
+        }
+    }
+
+    private handleRunWaiting(condition: WaitCondition): void {
+        if (condition.type !== 'human-signal') return;
+        Toast.info(condition.prompt);
     }
 
     private buildCommandContext(): CommandContext {
@@ -560,7 +585,6 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handleConfigChange(config: any): Promise<void> {
         if (config.settings) {
-            console.log('[Shell] handleConfigChange useHarness:', config.settings.useHarness, 'sessionId:', this.currentSessionId);
             if (this.currentSessionId) {
                 await this.errorHandler.wrap(
                     () => this.sessionService.saveSessionSettings(config.settings),
@@ -660,13 +684,12 @@ export class LLMWorkspaceEditor implements IEditor {
             this.historyView.renderWelcome();
         }
 
-        // Assign before checkSessionInterrupted: the resume callback accesses
-        // currentSessionId (via sessionManager event routing) synchronously.
+        // Assign before prompting because the callback reads the active session.
         this.currentSessionId = sessionId;
         this.currentTitle = title;
 
         // Check if this session was interrupted (VFS meta.status === 'running')
-        checkSessionInterrupted(snapshot, (interruptedAssistantId) => {
+        promptInterruptedRun(snapshot, (interruptedAssistantId) => {
             this.commandBus.execute('session.regenerate', { assistantId: interruptedAssistantId }).catch(() => {
                 Toast.info('重新执行失败，请手动重试');
             });
@@ -833,18 +856,6 @@ export class LLMWorkspaceEditor implements IEditor {
     private registerInputPlugins(): void {
         const chatInput = this.chatInput as ChatInput;
 
-        const harnessRuntime = undefined;
-        this.harnessPlugin = new HarnessPlugin(harnessRuntime);
-        chatInput.registerPlugin(this.harnessPlugin);
-
-        // Q1: Wire plan-confirm intercept when harness runtime is available.
-        if (harnessRuntime) {
-            wirePlanConfirmIntercept(harnessRuntime);
-        }
-
-        // Wire harness runtime into HistoryView so TtyController can call ttyWrite().
-        (this.historyView as HistoryView).setRuntime(harnessRuntime ?? null);
-
         const promptHistory = getPromptHistory();
         if (promptHistory) {
             this.historyPlugin = new HistoryPlugin(promptHistory);
@@ -879,7 +890,10 @@ export class LLMWorkspaceEditor implements IEditor {
     // ── Q3: Mid-execution user injection ─────────────────────────────────────
 
     injectIntoRunningHarness(message: string): boolean {
-        return injectIntoRunningHarness(message);
+        if (!this.runAttachment?.activeRunId) return false;
+        void this.runAttachment.signal({ type: 'inject', text: message })
+            .catch(error => Toast.error(error instanceof Error ? error.message : String(error)));
+        return true;
     }
 
     // ================================================================
@@ -913,6 +927,8 @@ export class LLMWorkspaceEditor implements IEditor {
         this.sessionEventUnsub = null;
         this.globalEventUnsub = null;
         this.agentServiceUnsub = null;
+        await this.runAttachment?.detach();
+        this.runAttachment = undefined;
         if (this.refreshAgentsTimer) {
             clearTimeout(this.refreshAgentsTimer);
             this.refreshAgentsTimer = null;
@@ -938,7 +954,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.branchIndicator?.destroy();
         this.statusIndicator?.destroy();
         this.historyView?.destroy();
-        this.taskGraphWorkbench?.destroy();
+        this.dagWorkbench?.destroy();
         this.chatInput?.destroy();
 
         // 8. 服务

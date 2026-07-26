@@ -42,7 +42,6 @@ export const ChatInputTemplates = {
                     ${this.renderContextSetting()}
                     ${this.renderThinkingSetting()}
                     ${this.renderAdvancedSection()}
-                    ${this.renderModeSetting()}
                     ${this.renderSessionProfileSection()}
                     ${this.renderSkillsSetting()}
                 </div>
@@ -170,29 +169,6 @@ export const ChatInputTemplates = {
                         <option value="medium">${t('thinking.effort.medium')}</option>
                         <option value="xhigh">${t('thinking.effort.xhigh')}</option>
                     </select>
-                </span>
-            </div>
-        `;
-    },
-
-    /**
-     * Harness 模式 — toggle + Working Dir（同一行）
-     */
-    renderModeSetting(): string {
-        return `
-            <div class="llm-input__setting-row llm-input__setting-row--inline llm-input__harness-section">
-                <label class="llm-input__toggle" title="${t('chatInput.harnessMode.tooltip')}">
-                    <input type="checkbox" class="llm-input__harness-toggle">
-                    <span class="llm-input__toggle-slider"></span>
-                </label>
-                <span>${t('chatInput.harnessMode')}</span>
-                <span class="llm-input__setting-spacer"></span>
-                <span class="llm-input__cwd-wrapper" style="display:none">
-                    <span class="llm-input__setting-icon">📁</span>
-                    <input type="text"
-                           class="llm-input__cwd-input"
-                           placeholder="Working dir"
-                           title="Root directory for file and shell tools">
                 </span>
             </div>
         `;
@@ -463,29 +439,9 @@ export const ChatInputTemplates = {
     /**
      * 帮助面板内容（动态注入）。
      *
-     * @param hasHarness  是否启用了 AgentLoopExecutor（决定是否显示 Agent Mode 分区）
      * @param hasFiles    是否注入了 onRequestFiles（决定是否显示 @ 分区）
      */
-    renderHelpContent(hasHarness: boolean, hasFiles: boolean): string {
-        const agentSection = hasHarness ? `
-            <section class="llm-input__help-section">
-                <h3 class="llm-input__help-section-title">🤖 Agent Mode</h3>
-                <p class="llm-input__help-section-desc">
-                    Enable <b>Agent Loop</b> in Settings to use multi-turn AI with tools.
-                </p>
-                <table class="llm-input__help-table">
-                    <tr><td><kbd>/skill &lt;id&gt;</kbd></td><td>Load a skill into the agent</td></tr>
-                    <tr><td><kbd>/skills</kbd></td><td>Browse &amp; manage available skills</td></tr>
-                    <tr><td><kbd>/tools</kbd></td><td>Show registered tools</td></tr>
-                    <tr><td><kbd>Settings → Agent Loop</kbd></td><td>Toggle harness mode</td></tr>
-                    <tr><td><kbd>Settings → Working Dir</kbd></td><td>Set file tool root directory</td></tr>
-                </table>
-                <p class="llm-input__help-hint">
-                    Built-in tools: <code>file_read</code> <code>file_write</code>
-                    <code>shell_exec</code> <code>glob_search</code> <code>grep_search</code>
-                </p>
-            </section>` : '';
-
+    renderHelpContent(hasFiles: boolean): string {
         const fileSection = hasFiles ? `
             <section class="llm-input__help-section">
                 <h3 class="llm-input__help-section-title">@ File References</h3>
@@ -551,7 +507,6 @@ export const ChatInputTemplates = {
             </section>
 
             ${fileSection}
-            ${agentSection}
 
             <p class="llm-input__help-footer">
                 Tip: type <kbd>/</kbd> in the input to browse all commands interactively.

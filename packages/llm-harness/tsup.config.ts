@@ -6,5 +6,11 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ['@itookit/common', '@itookit/device-llm', /^node:/],
+  external: [
+    '@itookit/common',
+    '@itookit/device-llm',
+    '@itookit/device-tty',
+    '@itookit/tools',
+    /^node:/,
+  ],
 });

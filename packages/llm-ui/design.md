@@ -1042,7 +1042,7 @@ data 属性：kebab-case
 ```typescript
 // 1. 外部包（按字母序）
 import { Toast, showConfirmDialog } from '@itookit/common';
-import { SessionManager } from '@itookit/llm-engine';
+import { SessionManager } from '@itookit/llm-conversation';
 
 // 2. domain 层（类型优先）
 import type { CollapseStateMap, BranchItem } from '../domain/types';
@@ -1350,4 +1350,3 @@ await new Promise(r => setTimeout(r, 2000));  // 使用 jest.useFakeTimers()
 添加新工具栏按钮      → templates/ + EventBinder + Shell 路由
 添加新快捷键          → EventBinder.bindGlobalShortcuts()
 ```
-    

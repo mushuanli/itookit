@@ -3,7 +3,7 @@
 import type { BranchItem } from '../domain/types';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { ICommandBus } from '@itookit/common';
-import type { SessionGroup } from '@itookit/llm-engine';
+import type { SessionGroup } from '@itookit/llm-conversation';
 
 export class BranchError extends Error {
     constructor(
@@ -105,7 +105,7 @@ export class BranchService {
         if (!target) throw new BranchError('NOT_FOUND', `Branch "${branchName}" does not exist`);
         if (target.isCurrent) throw new BranchError('CANNOT_DELETE_CURRENT',
             'Cannot delete the current branch. Switch to another branch first.');
-        await this.commands.execute('vcs.branch.delete', { branchName: target.name, cascade: true });
+        await this.commands.execute('vcs.branch.delete', { branchName: target.name });
     }
 
     // ── Helpers ────────────────────────────────────────

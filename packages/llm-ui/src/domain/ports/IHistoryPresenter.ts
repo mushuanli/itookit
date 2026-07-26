@@ -1,14 +1,14 @@
 // @file: llm-ui/domain/ports/IHistoryPresenter.ts
 
-import type { SessionGroup, SessionEvent } from '@itookit/llm-engine';
+import type { SessionGroup, SessionEvent } from '@itookit/llm-conversation';
 import type { ICollapseManager } from './ICollapseManager';
 import type { IStreamingController } from './IStreamingController';
 
 /**
  * History 视图的能力接口
  *
- * Extends ICollapseManager + IStreamingController for backward compatibility.
- * New consumers should depend on the narrowest role interface they need:
+ * Composes collapse and streaming roles. Consumers should depend on the
+ * narrowest role interface they need:
  *   - ICollapseManager for fold/expand operations
  *   - IStreamingController for streaming lifecycle
  *

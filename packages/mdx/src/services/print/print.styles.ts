@@ -412,6 +412,41 @@ export const PRINT_STYLES = `
         margin-left: 0;
         margin-right: 0;
     }
+
+    /* === 打印时展开所有折叠内容 === */
+
+    /* foldable 块：强制展开 <details> */
+    .mdx-print details:not([open]) > :not(summary) {
+        display: revert !important;
+    }
+
+    /* 代码块：移除折叠高度限制 */
+    .mdx-print .mdx-code-block-wrapper--collapsed pre {
+        max-height: none !important;
+        overflow-y: visible !important;
+    }
+
+    /* 代码块：隐藏底部展开触发器 */
+    .mdx-print .mdx-code-block-expand-trigger {
+        display: none !important;
+    }
+
+    /* cloze 卡片：强制显示内容 */
+    .mdx-print .mdx-cloze.hidden .mdx-cloze__content {
+        display: inline !important;
+    }
+
+    /* cloze 卡片：隐藏占位符 */
+    .mdx-print .mdx-cloze.hidden .mdx-cloze__placeholder {
+        display: none !important;
+    }
+
+    /* cloze 卡片：停用打印时的脉冲动画 */
+    .mdx-print .mdx-cloze.is-due,
+    .mdx-print .mdx-cloze.is-danger {
+        animation: none !important;
+    }
+
 }
 
 @page {

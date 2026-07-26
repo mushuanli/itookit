@@ -10,7 +10,7 @@
  *    files inside the companion assetdir. All internal files, attachments, and config
  *    files use the same uniform API (no readInternal/putAsset distinction).
  *
- * Create via: IModuleFS.openFile(nodeId) or createFile / createMDXFile / createChatFile
+ * Create via IModuleFS.openFile(nodeId) or a format-specific file factory.
  */
 import type { FSNode } from './fs/core/types';
 import type { FSEventType, FSEvent } from './fs/core/events';

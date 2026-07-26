@@ -1,10 +1,9 @@
 // @file: llm-ui/shell/SessionEventHandler.ts
 
-import type { SessionEvent, RegistryEvent } from '@itookit/llm-engine';
+import type { SessionEvent, RegistryEvent } from '@itookit/llm-conversation';
 import type { ICommandBus } from '@itookit/common';
-import type { TaskGraphRunId } from '@itookit/common';
 import { Toast, t } from '@itookit/common';
-import type { SessionGroup } from '@itookit/llm-engine';
+import type { SessionGroup } from '@itookit/llm-conversation';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
 import type { IBranchPresenter } from '../domain/ports/IBranchPresenter';
@@ -71,7 +70,7 @@ export interface SessionEventHandlerDeps {
      * 由 Shell 注入，不提供时仅展示无操作的 Toast。
      */
     onNavigateToSession?: (sessionId: string) => void;
-    onTaskGraphRun?: (graphRunId: TaskGraphRunId) => void;
+    onExecutionRun?: (runId: string) => void;
 }
 
 // ----------------------------------------------------------------
@@ -158,9 +157,6 @@ export class SessionEventHandler {
 
     handleGlobalEvent(event: RegistryEvent): void {
         switch (event.type) {
-            case 'pool_status_changed':
-                this.deps.statusIndicator.updateBackground(event.payload);
-                break;
             case 'session_status_changed':
                 if (event.payload.sessionId === this.deps.getCurrentSessionId()) {
                     this.deps.statusIndicator.update(event.payload.status);
@@ -195,9 +191,9 @@ export class SessionEventHandler {
                     }
                 }
                 break;
-            case 'task_graph_run_projected':
+            case 'execution_run_projected':
                 if (event.payload.sessionId === this.deps.getCurrentSessionId()) {
-                    this.deps.onTaskGraphRun?.(event.payload.graphRunId);
+                    this.deps.onExecutionRun?.(event.payload.runId);
                 }
                 break;
         }

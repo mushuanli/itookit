@@ -45,16 +45,8 @@ export {
 
 export type { AssetObj, IFile } from './interfaces/IFile';
 export type { IMDXFile } from './interfaces/IMDXFile';
-export type { IChatFile } from './interfaces/IChatFile';
 export type {
     ChatAttachment,
-    AppendMessageMeta,
-    UpdateMessageMeta,
-    ChatNodeMeta,
-    ChatNode,
-    ChatContextItem,
-    ChatManifest,
-    BranchTreeNode,
     ChatSessionSettings,
 } from './interfaces/chat';
 export { DEFAULT_SESSION_SETTINGS } from './interfaces/chat';

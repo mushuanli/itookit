@@ -10,14 +10,12 @@ export default defineConfig(
       '@itookit/common',
       '@itookit/vfs',
       '@itookit/device-llm',
-      '@itookit/llm-engine',
       '@itookit/llm-ui'
     ],
     globals: {
       '@itookit/common': 'ItookitCommon',
       '@itookit/vfs': 'VFSCore',
       '@itookit/device-llm': 'LLMDriver',
-      '@itookit/llm-engine': 'LLMEngine',
       '@itookit/llm-ui': 'LLMUI'
     }
   })

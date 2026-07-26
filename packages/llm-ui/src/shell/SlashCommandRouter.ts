@@ -8,7 +8,7 @@ import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IEditorEventBus } from '../domain/events';
 import type { ICommandBus } from '@itookit/common';
-import type { SessionGroup } from '@itookit/llm-engine';
+import type { SessionGroup } from '@itookit/llm-conversation';
 import type { IAgentConfigService } from '@itookit/common';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { BranchService } from '../services/BranchService';
@@ -17,7 +17,7 @@ import type { Command } from '../commands/Command';
 import type { SendMessageCommand } from '../commands/SendMessageCommand';
 import type { SwitchBranchByOffsetCommand } from '../commands/BranchCommands';
 import type { EditorHostContext } from '@itookit/common';
-import type { IChatEngine } from '@itookit/llm-engine';
+import type { IChatEngine } from '@itookit/llm-conversation';
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
 import { getAgentDisplayName, sanitizeFileName } from './AgentProvider';
 
@@ -344,10 +344,7 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
 function sendFollowUp(deps: SlashCommandRouterDeps, text: string): void {
     const config = deps.chatInput.getConfig();
     const agentId = config.agentId;
-    const overrides = config.settings?.useHarness
-        ? { useHarness: true as const, workingDirectory: config.settings.workingDirectory }
-        : undefined;
-    deps.sendCommand.run({ text, files: [], agentId, overrides });
+    deps.sendCommand.run({ text, files: [], agentId });
 }
 
 function formatDefaultTitle(agentId: string, agentService: IAgentConfigService): string {

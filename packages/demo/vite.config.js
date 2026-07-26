@@ -22,7 +22,6 @@ export default defineConfig({
       '@itookit/mdxeditor': path.resolve(__dirname, '../../packages/mdx/src/index.ts'),
       '@itookit/vfs-ui': path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
       '@itookit/device-llm': path.resolve(__dirname, '../../packages/device-llm/src/index.ts'),
-      '@itookit/llm-engine': path.resolve(__dirname, '../../packages/llm-engine/src/index.ts'),
       '@itookit/llm-ui': path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
       '@itookit/app-settings': path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
       '@itookit/memory-manager': path.resolve(__dirname, '../../packages/memory-manager/src/index.ts'),
@@ -46,7 +45,6 @@ export default defineConfig({
       '@itookit/mdxeditor',
       '@itookit/vfs-ui',
       '@itookit/device-llm',
-      '@itookit/llm-engine',
       '@itookit/llm-ui',
       '@itookit/app-settings',
       '@itookit/memory-manager'

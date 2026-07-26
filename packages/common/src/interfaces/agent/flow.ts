@@ -1,4 +1,4 @@
-import type { FlowId } from './harness-v3';
+import type { FlowId } from './flow-definition';
 
 export type FlowNodeId = string;
 

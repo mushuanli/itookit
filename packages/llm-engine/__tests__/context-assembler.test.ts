@@ -9,8 +9,16 @@ async function hash(content: string): Promise<string> {
 
 async function fixture(options: { profile?: BranchContextProfile; artifact?: Artifact; tokenBudget?: number } = {}) {
     const rounds = new Map<string, any>([
-        ['r1', { parents: [], payload: [{ role: 'user', content: 'old question' }, { role: 'assistant', content: 'old answer' }] }],
-        ['r2', { parents: ['r1'], payload: [{ role: 'user', content: 'newer question' }, { role: 'assistant', content: 'newer answer' }] }],
+        ['r1', {
+            historyParentIds: [],
+            input: [{ role: 'user', content: 'old question' }],
+            output: [{ role: 'assistant', content: 'old answer' }],
+        }],
+        ['r2', {
+            historyParentIds: ['r1'],
+            input: [{ role: 'user', content: 'newer question' }],
+            output: [{ role: 'assistant', content: 'newer answer' }],
+        }],
     ]);
     const snapshots: ContextSnapshot[] = [];
     const assembler = new ContextAssembler({
@@ -53,7 +61,9 @@ describe('ContextAssembler', () => {
     it('materializes a hash-verified artifact input', async () => {
         const content = 'upstream final answer';
         const artifact: Artifact = {
-            id: 'a1' as Artifact['id'], taskRunId: 'upstream' as Artifact['taskRunId'], outputName: 'final',
+            id: 'a1',
+            nodeRunId: 'upstream',
+            outputName: 'final',
             type: 'final-answer', content, contentHash: await hash(content), createdAt: 1,
         };
         const { assembler, plan } = await fixture({ artifact });
@@ -64,7 +74,9 @@ describe('ContextAssembler', () => {
 
     it('rejects missing or corrupt artifacts instead of hiding context damage', async () => {
         const artifact: Artifact = {
-            id: 'a1' as Artifact['id'], taskRunId: 'upstream' as Artifact['taskRunId'], outputName: 'final',
+            id: 'a1',
+            nodeRunId: 'upstream',
+            outputName: 'final',
             type: 'final-answer', content: 'changed', contentHash: await hash('original'), createdAt: 1,
         };
         const { assembler, plan } = await fixture({ artifact });

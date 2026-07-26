@@ -1,6 +1,6 @@
 // @file: llm-ui/services/AssetService.ts
 
-import { IChatEngine } from '@itookit/llm-engine';
+import { IChatEngine } from '@itookit/llm-conversation';
 
 /**
  * 资源管理服务

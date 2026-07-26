@@ -3,9 +3,8 @@
 // TtyPanel — inline terminal widget for a single TTY session.
 //
 // Rendered inside `.llm-ui-node__tty-panels` of an agent message node.
-// Shows real-time stdout/stderr output and provides a dedicated input field
-// that routes directly to the process stdin via the onWrite callback,
-// bypassing the LLM loop entirely.
+// Shows real-time stdout/stderr output. Process input must travel through the
+// Harness control plane instead of bypassing process lifecycle management.
 
 import { escapeHTML } from '@itookit/common';
 
@@ -16,8 +15,6 @@ export class TtyPanel {
 
     private el: HTMLElement;
     private outputEl: HTMLPreElement;
-    private inputEl: HTMLInputElement;
-    private sendBtn: HTMLButtonElement;
     private statusEl: HTMLElement;
     private exitInfoEl: HTMLElement | null = null;
     private exited = false;
@@ -27,18 +24,13 @@ export class TtyPanel {
         sessionId: string,
         command: string,
         pid: number | undefined,
-        private readonly onWrite: (sessionId: string, data: string) => void,
     ) {
         this.sessionId = sessionId;
         this.el = this.render(command, pid);
         container.appendChild(this.el);
 
         this.outputEl  = this.el.querySelector('.llm-ui-tty-panel__output') as HTMLPreElement;
-        this.inputEl   = this.el.querySelector('.llm-ui-tty-panel__input') as HTMLInputElement;
-        this.sendBtn   = this.el.querySelector('.llm-ui-tty-panel__send') as HTMLButtonElement;
         this.statusEl  = this.el.querySelector('.llm-ui-tty-panel__status') as HTMLElement;
-
-        this.bindEvents();
     }
 
     appendOutput(chunk: string): void {
@@ -58,9 +50,6 @@ export class TtyPanel {
 
     finalize(exitCode: number | null): void {
         this.exited = true;
-        this.inputEl.disabled = true;
-        this.sendBtn.disabled = true;
-        this.inputEl.placeholder = '';
 
         this.statusEl.className = 'llm-ui-tty-panel__status llm-ui-tty-panel__status--exited';
         this.statusEl.textContent = 'exited';
@@ -92,34 +81,7 @@ export class TtyPanel {
                 ${pidText ? `<span class="llm-ui-tty-panel__pid">${escapeHTML(pidText)}</span>` : ''}
                 <span class="llm-ui-tty-panel__status llm-ui-tty-panel__status--running">running</span>
             </div>
-            <pre class="llm-ui-tty-panel__output"></pre>
-            <div class="llm-ui-tty-panel__input-row">
-                <input class="llm-ui-tty-panel__input" type="text"
-                    placeholder="→ stdin (Enter to send)" autocomplete="off" spellcheck="false" />
-                <button class="llm-ui-tty-panel__send" type="button" title="Send to stdin">↵</button>
-            </div>`;
+            <pre class="llm-ui-tty-panel__output"></pre>`;
         return el;
     }
-
-    private bindEvents(): void {
-        this.sendBtn.addEventListener('click', () => this.submit());
-        this.inputEl.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                this.submit();
-            }
-        });
-    }
-
-    private submit(): void {
-        if (this.exited) return;
-        const text = this.inputEl.value;
-        if (!text) return;
-        this.inputEl.value = '';
-        // Append newline so the process receives a complete line
-        this.onWrite(this.sessionId, text + '\n');
-    }
 }
-
-// escapeHtml removed — use import { escapeHTML } from '@itookit/common' instead
-

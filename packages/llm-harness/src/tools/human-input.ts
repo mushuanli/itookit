@@ -1,10 +1,5 @@
 // @file: llm-harness/src/tools/human-input.ts
-// Pauses current task execution and queues a request for human input.
-// Other non-blocked todos continue executing while the human decides.
-
 import type { ToolDefinition, ToolMeta } from '@itookit/common';
-import { generateUUID } from '@itookit/common';
-import type { HITLQueue } from '../services/hitl-queue';
 
 export const humanInputMeta: ToolMeta = {
     id: 'human_input',
@@ -57,37 +52,3 @@ export const humanInputDefinition: ToolDefinition = {
         },
     },
 };
-
-export function createHumanInputHandler(
-    hitlQueue: HITLQueue,
-): (args: Record<string, unknown>) => Promise<string> {
-    return async (args) => {
-        const missionId = String(args['mission_id'] ?? '');
-        const todoId    = String(args['todo_id']    ?? '');
-        const context   = String(args['context']    ?? '');
-        const question  = String(args['question']   ?? '');
-        const options   = Array.isArray(args['options'])
-            ? (args['options'] as unknown[]).map(String)
-            : undefined;
-        const files     = Array.isArray(args['files'])
-            ? (args['files'] as unknown[]).map(String)
-            : undefined;
-
-        // Fallback to sensible defaults outside mission context
-        const effectiveMissionId = missionId || 'default';
-        const effectiveTodoId    = todoId    || 'task-1';
-
-        const response = await hitlQueue.push({
-            id: generateUUID(),
-            missionId: effectiveMissionId,
-            todoId:    effectiveTodoId,
-            context,
-            question,
-            options,
-            files,
-            createdAt: Date.now(),
-        });
-
-        return response || '(no response provided)';
-    };
-}

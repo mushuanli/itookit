@@ -1,6 +1,6 @@
 // @file: llm-ui/services/NavDataBuilder.ts
 
-import { SessionGroup } from '@itookit/llm-engine';
+import { SessionGroup } from '@itookit/llm-conversation';
 import type { ICommandBus } from '@itookit/common';
 import { ChatNavItem, NavPanelData } from '../domain/ports/INavigationPresenter';
 import { BranchItem, CollapseStateMap } from '../domain/types';

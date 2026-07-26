@@ -1,6 +1,6 @@
 // @file: llm-ui/services/SessionService.ts
 
-import { IChatEngine, SessionSnapshot } from '@itookit/llm-engine';
+import { IChatEngine, SessionSnapshot } from '@itookit/llm-conversation';
 import type { ICommandBus } from '@itookit/common';
 import { FSAlreadyExistsError } from '@itookit/common';
 

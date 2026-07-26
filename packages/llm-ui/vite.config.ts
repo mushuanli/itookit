@@ -10,7 +10,7 @@ export default defineConfig(
       '@itookit/common',
       '@itookit/vfs',
       '@itookit/device-llm',
-      '@itookit/llm-engine',
+      '@itookit/llm-conversation',
       '@itookit/mdxeditor',
       'marked',
       'js-yaml'
@@ -19,7 +19,7 @@ export default defineConfig(
       '@itookit/common': 'ItookitCommon',
       '@itookit/vfs': 'VFSCore',
       '@itookit/device-llm': 'LLMDriver',
-      '@itookit/llm-engine': 'LLMEngine',
+      '@itookit/llm-conversation': 'LLMConversation',
       '@itookit/mdxeditor': 'MDxEditor',
       'marked': 'marked',
       'js-yaml': 'jsyaml'

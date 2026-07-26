@@ -45,10 +45,10 @@
  * - 提供连接测试能力
  * 
  * 不包含：
- * - 执行逻辑 (→ @itookit/llm-kernel)
- * - 会话管理 (→ @itookit/llm-engine)
- * - 持久化 (→ @itookit/llm-engine)
- * - Agent 定义 (→ @itookit/llm-engine)
+ * - 执行逻辑 (→ @itookit/llm-engine)
+ * - 会话管理 (→ @itookit/llm-conversation)
+ * - 持久化 (→ @itookit/llm-conversation)
+ * - Agent 定义 (→ @itookit/llm-conversation)
  */
 
 // ============================================

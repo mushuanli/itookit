@@ -113,18 +113,6 @@ export interface ChatSessionSettings {
     historyLength: number;
     temperature?: number;
     streamMode: boolean;
-    /**
-     * 是否使用 AgentLoopExecutor（harness 模式）。
-     *
-     * true  → 多轮循环（工具调用、上下文压缩、反压验证均由 harness 管理）
-     * false → 单轮 kernel 路径（原有行为）
-     */
-    useHarness: boolean;
-    /**
-     * 文件工具的工作目录（harness 模式下有效）。
-     * 空字符串表示使用进程默认目录。
-     */
-    workingDirectory: string;
     /** 推理强度（仅支持 thinking 的模型生效），'auto' 表示使用连接默认 */
     reasoningEffort?: 'auto' | 'low' | 'medium' | 'xhigh';
     /** 强制开启/关闭 thinking，undefined=auto（跟随模型默认） */
@@ -139,23 +127,17 @@ export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
     historyLength: -1,
     temperature: undefined,
     streamMode: true,
-    useHarness: false,
-    workingDirectory: '',
     reasoningEffort: 'auto',
 };
 
 export interface ChatOverrides {
-    /** 覆盖 LLM 连接 ID（对应 AgentTaskRequest.modelOverride） */
+    /** 覆盖 Agent 定义中的 LLM 连接 ID。 */
     connectionId?: string;
     /** 模型层级覆盖（'auto' 不传此字段） */
     modelTier?: ModelTier;
     historyLength?: number;
     temperature?: number;
     streamMode?: boolean;
-    /** 路由到 AgentLoopExecutor（harness 模式） */
-    useHarness?: boolean;
-    /** 文件工具工作目录 */
-    workingDirectory?: string;
     /** 推理强度（仅支持 thinking 的模型生效） */
     reasoningEffort?: 'low' | 'medium' | 'xhigh';
     /** 强制开启/关闭 thinking（覆盖模型默认） */
