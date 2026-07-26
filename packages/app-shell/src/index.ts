@@ -11,4 +11,3 @@ export type { WorkspaceStrategy } from './strategies/types';
 export { themeService } from './ThemeService';
 export type { ThemeMode } from './ThemeService';
 export { Workbench } from './core/Workbench';
-export { BackgroundIndexer } from './core/BackgroundIndexer';

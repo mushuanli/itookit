@@ -12,7 +12,6 @@ import { EditorOptions, IEditor, IModuleFS, EditorHostContext, NavigationRequest
 export class Workbench {
     private vfsUI: VFSUIShell;
     private engine: IModuleFS;
-    private indexer?: any;
     private lifecycleUnsubscribe: () => void;
     private baseEditorFactory: (container: HTMLElement, options: EditorOptions) => Promise<IEditor>;
     private hasStarted = false;
@@ -50,16 +49,6 @@ export class Workbench {
             },
             this.engine
         ) as VFSUIShell;
-
-        if (config.aiConfig?.enabled) {
-            import('./BackgroundIndexer').then(({ BackgroundIndexer }) => {
-                this.indexer = new BackgroundIndexer(
-                    this.engine,
-                    config.aiConfig!.activeRules
-                );
-                this.indexer.start();
-            });
-        }
 
         const sharedHostContext: EditorHostContext = {
             toggleSidebar: (_collapsed?: boolean) => {
@@ -223,6 +212,5 @@ export class Workbench {
     public destroy() {
         this.lifecycleUnsubscribe();
         this.vfsUI.destroy();
-        this.indexer?.stop();
     }
 }

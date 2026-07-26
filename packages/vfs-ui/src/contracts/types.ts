@@ -11,6 +11,7 @@ export interface FileMetadata {
   taskCount?: TaskCounts;
   clozeCount?: number;
   mermaidCount?: number;
+  mentions?: Record<string, string[]>;
 }
 
 export interface ParseResult {

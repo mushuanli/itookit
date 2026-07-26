@@ -24,6 +24,8 @@ export interface ParsedMarkdownContent {
   allLines: string[];
 }
 
+export type MentionMap = Record<string, string[]>;
+
 export interface MarkdownMetadata {
   headings: Heading[];
   summary: string | null;
@@ -31,6 +33,7 @@ export interface MarkdownMetadata {
   taskCounts: TaskCounts | null;
   clozeCount: number;
   mermaidCount: number;
+  mentions: MentionMap;
 }
 
 export interface ParseOptions {
@@ -343,6 +346,24 @@ export function extractMermaidCount(content: string): number {
   return matches.length;
 }
 
+/**
+ * Extract @type:id mentions from content.
+ * Supports both @user:alice and [text](mdx://type/id) forms.
+ * Pure regex extraction — no provider resolution needed for metadata purposes.
+ */
+function extractMentions(content: string): MentionMap {
+  const regex = /@(\w+):([\w-]+)|\[[^\]]+\]\(mdx:\/\/(\w+)\/([^)]+)\)/g;
+  const mentions: MentionMap = {};
+  for (const match of content.matchAll(regex)) {
+    const type = match[1] ?? match[3];
+    const id = match[2] ?? match[4];
+    if (!type || !id) continue;
+    if (!mentions[type]) mentions[type] = [];
+    if (!mentions[type].includes(id)) mentions[type].push(id);
+  }
+  return mentions;
+}
+
 const DEFAULT_PARSE_OPTIONS: Required<ParseOptions> = {
   extractHeadings: true,
   extractSummary: true,
@@ -359,7 +380,7 @@ export function parseMarkdown(
   const opts = { ...DEFAULT_PARSE_OPTIONS, ...options };
   
   if (!content || typeof content !== 'string') {
-    return { headings: [], summary: null, searchableText: '', taskCounts: null, clozeCount: 0, mermaidCount: 0 };
+    return { headings: [], summary: null, searchableText: '', taskCounts: null, clozeCount: 0, mermaidCount: 0, mentions: {} };
   }
 
   const result: MarkdownMetadata = {
@@ -369,6 +390,7 @@ export function parseMarkdown(
     taskCounts: null,
     clozeCount: 0,
     mermaidCount: 0,
+    mentions: {},
   };
 
   if (opts.extractHeadings) result.headings = extractHeadings(content, { nested: true });
@@ -381,6 +403,7 @@ export function parseMarkdown(
 
   result.clozeCount = extractClozeCount(content);
   result.mermaidCount = extractMermaidCount(content);
+  result.mentions = extractMentions(content);
 
   return result;
 }

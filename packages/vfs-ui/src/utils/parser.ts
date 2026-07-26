@@ -49,6 +49,7 @@ export function parseFileInfo(
   if (parsed.taskCounts) metadata.taskCount = parsed.taskCounts;
   if (parsed.clozeCount > 0) metadata.clozeCount = parsed.clozeCount;
   if (parsed.mermaidCount > 0) metadata.mermaidCount = parsed.mermaidCount;
+  if (Object.keys(parsed.mentions).length > 0) metadata.mentions = parsed.mentions;
 
   return {
     summary: parsed.summary || '',

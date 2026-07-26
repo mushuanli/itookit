@@ -83,6 +83,7 @@ export { buildRenamedFilename, formatDefaultFileTitle } from './utils/filename';
 export {
     type TaskCounts,
     type MarkdownMetadata,
+    type MentionMap,
     type ParsedMarkdownContent,
 
     slugify,
