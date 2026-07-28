@@ -36,7 +36,7 @@ export class PluginManager {
   private commandRegistry = new CommandRegistry();
 
   // 上下文信息
-  private sessionEngine: IModuleFS | null = null;
+  private moduleFS: IModuleFS | null = null;
   private currentNodeId: string | null = null;
 
   private ownerNodeId: string | null = null;
@@ -62,7 +62,7 @@ export class PluginManager {
 
   setContext(nodeId?: string, ownerNodeId?: string, engine?: IModuleFS): void {
     if (nodeId) this.currentNodeId = nodeId;
-    if (engine) this.sessionEngine = engine;
+    if (engine) this.moduleFS = engine;
     this.ownerNodeId = ownerNodeId || nodeId || null;
     this.storeCache.clear();
   }
@@ -75,7 +75,7 @@ export class PluginManager {
   }
 
   setSessionEngine(engine: IModuleFS): void {
-    this.sessionEngine = engine;
+    this.moduleFS = engine;
     this.storeCache.clear();
   }
 
@@ -181,7 +181,7 @@ export class PluginManager {
       getScopedStore: () => this.getOrCreateStore(plugin.name),
 
       // 引擎访问
-      getSessionEngine: () => this.sessionEngine,
+      getModuleFS: () => this.moduleFS,
       getCurrentNodeId: () => this.currentNodeId,
       getOwnerNodeId: () => this.ownerNodeId,
 
@@ -206,7 +206,7 @@ export class PluginManager {
     const store = createStore({
       pluginName,
       instanceId: this.instanceId,
-      sessionEngine: this.sessionEngine,
+      moduleFS: this.moduleFS,
       nodeId: this.currentNodeId,
     });
 

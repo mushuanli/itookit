@@ -1,4 +1,4 @@
-import { FileTypeDefinition } from '@itookit/vfs-ui';
+import { FileTypeDefinition, type VFSNodeUI } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem, formatDefaultFileTitle } from '@itookit/common';
 import type { SkillDefinition, ToolVFSContext, IVFSManager, FSNode } from '@itookit/common';
 import { createVFS } from '@itookit/vfslib';
@@ -283,7 +283,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     logStep('初始化核心服务…');
     const settingsModule = await createSettingsModule(vfs);
     const agentService   = new VFSAgentService(vfs, llmDriver);
-    const sessionEngine  = new ChatEngine(vfs);
+    const chatEngine     = new ChatEngine(vfs);
 
     // Harness kernel with resource ports, schedulers, and built-in DAG plugins.
     ts = performance.now();
@@ -324,7 +324,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     logStep('初始化 LLM 引擎…');
     const { sessionManager, commandBus } = await initializeConversationSystem({
         agentService,
-        sessionEngine,
+        sessionEngine: chatEngine,
         processHost:         harness.kernel,
         dagPlugins:          harness.dagPlugins,
     });
@@ -344,11 +344,12 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         agentService,
         visionConnExists
             ? {
+                chatEngine,
                 llmService: harness.llmService,
                 commandBus,
                 controlPlane: harness.kernel,
             }
-            : { commandBus, controlPlane: harness.kernel },
+            : { chatEngine, commandBus, controlPlane: harness.kernel },
     );
     const agentFactory    = createAgentEditorFactory(agentService);
 
@@ -362,7 +363,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         standard: new StandardWorkspaceStrategy(vfs),
         agent:    new StandardWorkspaceStrategy(vfs),
         settings: new SettingsWorkspaceStrategy(settingsFactory, settingsModule.engine),
-        chat:     new ChatWorkspaceStrategy(llmFactory, sessionEngine),
+        chat:     new ChatWorkspaceStrategy(llmFactory, vfs),
         skills:   new SettingsWorkspaceStrategy(skillsFactory, skillsEngine),  // reuse the same strategy pattern
     };
 
@@ -388,12 +389,13 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // searchFilter for agent workspace — extends default corpus with ai_connectionLabel
     // so searching by human-readable provider/connection name works for opened agents.
-    const agentSearchFilter = (item: { metadata?: any; content?: any }, tokens: string[]) => {
+    const agentSearchFilter = (item: VFSNodeUI, tokens: string[]) => {
+        const connectionLabel = item.metadata.custom.ai_connectionLabel;
         const corpus = [
             item.metadata?.title ?? '',
             item.content?.summary ?? '',
             item.content?.searchableText ?? '',
-            (item.metadata?.custom?.ai_connectionLabel as string) ?? '',
+            typeof connectionLabel === 'string' ? connectionLabel : '',
         ].join(' ').toLowerCase();
         return tokens.every(t => corpus.includes(t));
     };
@@ -461,7 +463,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         const primaryDef = supportedFileTypes?.[0] ? FILE_REGISTRY[supportedFileTypes[0]] : undefined;
 
         const aiContextMenu = (strategyType === 'chat' && !uiPassThrough.readOnly)
-            ? createAIContextMenuConfig({ agentService, engine: strategy.getEngine(moduleName) })
+            ? createAIContextMenuConfig<VFSNodeUI>({
+                agentService,
+                engine: strategy.getEngine(moduleName),
+            })
             : null;
 
         const uiOptions = {
@@ -476,9 +481,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 startupContent:  uiPassThrough.fileCreation?.startupContent  ?? primaryDef?.defaultContent,
             },
             contextMenu: {
-                items: (_item: object, defaults: MenuItem[]) => {
+                items: (item: VFSNodeUI, defaults: MenuItem<VFSNodeUI>[]) => {
                     if (uiPassThrough.readOnly) return [];
-                    if (aiContextMenu?.items) return aiContextMenu.items(_item, defaults);
+                    if (aiContextMenu?.items) return aiContextMenu.items(item, defaults);
                     return defaults;
                 },
             },
@@ -498,7 +503,6 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             customEngine:  strategy.getEngine?.(moduleName),
             moduleName,
             editorFactory: strategy.getFactory(),
-            sessionEngine: strategy.getSessionEngine?.(),
             scopeId:       elementId,
             fileTypes,
             uiOptions,

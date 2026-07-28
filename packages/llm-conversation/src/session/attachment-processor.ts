@@ -1,9 +1,10 @@
 // @file: llm-conversation/session/attachment-processor.ts
 
-import { guessMimeType, MarkdownAnalyzer } from '@itookit/common';
+import { guessMimeType } from '@itookit/common';
 import type { Attachment } from '@itookit/common';
 import { ChatAttachment } from '../core/types';
 import { IChatEngine } from '../persistence/types';
+import { MarkdownAnalyzer } from './MarkdownAnalyzer';
 
 /**
  * 附件处理器

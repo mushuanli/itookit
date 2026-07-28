@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { setupVFS, type TestVFS } from './helpers';
-import type { FSEvent } from '@itookit/common';
+import type { FSEvent } from '@itookit/vfslib';
 
 describe('Event emission (IndexedDB backend)', () => {
     let vfs: TestVFS;
@@ -52,7 +52,7 @@ describe('Event emission (IndexedDB backend)', () => {
         await fs.driver.delete(['/dl.txt']);
         unsub();
         expect(events).toHaveLength(1);
-        expect(events[0].payload.requestedIds).toHaveLength(1);
+        expect(events[0].payload.requestedPaths).toHaveLength(1);
     });
 
     it('rename emits node:renamed', async () => {

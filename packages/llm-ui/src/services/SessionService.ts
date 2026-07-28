@@ -3,6 +3,7 @@
 import { IChatEngine, SessionSnapshot } from '@itookit/llm-conversation';
 import type { ICommandBus } from '@itookit/common';
 import { FSAlreadyExistsError } from '@itookit/common';
+import type { ChatInputSettings } from '../domain/ports/IChatInputPresenter';
 
 export interface SessionLoadResult {
     sessionId: string;
@@ -108,8 +109,8 @@ export class SessionService {
     /**
      * 获取会话设置
      */
-    async getSessionSettings() {
-        return await this.commands.execute('session.get-settings');
+    async getSessionSettings(): Promise<ChatInputSettings> {
+        return await this.commands.execute<ChatInputSettings>('session.get-settings');
     }
 
     /**
@@ -120,7 +121,7 @@ export class SessionService {
      * it on each save. We silently ignore this; the settings write succeeds
      * regardless (the file already exists and will be updated in-place).
      */
-    async saveSessionSettings(settings: any): Promise<void> {
+    async saveSessionSettings(settings: ChatInputSettings): Promise<void> {
         await this.commands.execute('session.save-settings', settings);
     }
 }

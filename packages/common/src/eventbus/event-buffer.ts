@@ -10,7 +10,7 @@ import type { IEventEmitter, Handler, AnyHandler, Unsubscribe } from './types';
  * ModuleFS._emitTarget during a transaction). The on/once/onAny methods are
  * no-ops (subscriptions go on the real bus, not the buffer).
  */
-export class EventBuffer<M extends Record<string, any>> implements IEventEmitter<M> {
+export class EventBuffer<M extends object> implements IEventEmitter<M> {
   private buffer: Array<{
     type: keyof M & string;
     payload: M[keyof M & string];
@@ -55,7 +55,11 @@ export class EventBuffer<M extends Record<string, any>> implements IEventEmitter
     if (this.settled) return;
     this.settled = true;
     for (const { type, payload, meta } of this.buffer) {
-      this.target.emit(type, payload as any, { ...this.baseMeta, fromTransaction: true, ...meta });
+      this.target.emit(type, payload as M[typeof type], {
+        ...this.baseMeta,
+        fromTransaction: true,
+        ...meta,
+      });
     }
     this.buffer = [];
   }

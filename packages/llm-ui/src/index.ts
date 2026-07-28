@@ -7,7 +7,7 @@ import {
     VFSAgentService,
     IChatEngine,
 } from '@itookit/llm-conversation';
-import { EditorFactory, EditorOptions, formatDefaultFileTitle } from '@itookit/common';
+import { EditorFactory, EditorOptions, IEditor, formatDefaultFileTitle } from '@itookit/common';
 import type { ILLMService, ICommandBus, HarnessControlPlane } from '@itookit/common';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
@@ -51,20 +51,17 @@ export interface LLMFactoryOptions {
  * 
  * @example 动态创建带初始状态的会话
  * ```ts
- * const factory = createLLMFactory(agentService);
+ * const factory = createLLMFactory(agentService, { chatEngine });
  * const editor = await factory(container, {
  *     title: 'New Chat',
- *     sessionEngine: engine,
- *     initialInputState: {
- *         text: '请帮我分析这个问题...',
- *         agentId: 'my-custom-agent'
- *     }
+ *     moduleFS: chatModuleFS
  * });
  * ```
  */
 export const createLLMFactory = (
     agentService: VFSAgentService,
-    deps?: {
+    deps: {
+        chatEngine: IChatEngine;
         llmService?: ILLMService;
         commandBus?: ICommandBus;
         controlPlane?: HarnessControlPlane;
@@ -73,18 +70,11 @@ export const createLLMFactory = (
 
     // ✅ 跟踪进行中的创建，按 nodeId 去重
     // 防止外部框架在短时间内对同一 nodeId 重复调用 factory
-    const pendingCreations = new Map<string, Promise<any>>();
+    const pendingCreations = new Map<string, Promise<IEditor>>();
 
     return async (container: HTMLElement, options: EditorOptions) => {
         let effectiveNodeId = options.nodeId;
-
-        // 类型转换，此时 sessionEngine 应该已经在 MemoryManager 中通过 Dependency Injection 注入
-        const llmOptions = options as unknown as LLMEditorOptions;
-        const engine = llmOptions.sessionEngine as IChatEngine;
-
-        if (!engine) {
-            console.error('[LLMFactory] Critical: sessionEngine missing in options. Make sure MemoryManager is injecting it correctly.');
-        }
+        const engine = deps.chatEngine;
 
         let isNewSession = false;
 
@@ -108,14 +98,14 @@ export const createLLMFactory = (
         }
 
         const editorOptions: LLMEditorOptions = {
-            ...llmOptions,
+            ...options,
             agentService,
             nodeId: effectiveNodeId,
-            sessionEngine: engine,
+            chatEngine: engine,
             isNewSession,
-            llmService: deps?.llmService,
-            commandBus: deps?.commandBus,
-            controlPlane: deps?.controlPlane,
+            llmService: deps.llmService,
+            commandBus: deps.commandBus,
+            controlPlane: deps.controlPlane,
         };
 
         // ✅ 将创建过程包装为 Promise，注册到 pendingCreations

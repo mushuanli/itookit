@@ -3,6 +3,7 @@
 import { Command } from './Command';
 import { LLMPrintService, type PrintService } from '@itookit/mdxeditor';
 import type { ErrorSeverity } from '../utils/errorHandler';
+import type { IModuleFS } from '@itookit/common';
 
 /**
  * 复制整个会话为 Markdown
@@ -20,14 +21,14 @@ export class CopyAllCommand extends Command {
 /**
  * 打印会话
  */
-export class PrintCommand extends Command<{ title: string; engine: any; nodeId?: string }> {
+export class PrintCommand extends Command<{ title: string; engine: IModuleFS; nodeId?: string }> {
     protected readonly name = 'Print';
     protected severity: ErrorSeverity = 'warn';
 
     private printService: PrintService | null = null;
 
     protected async execute({ title, engine, nodeId }: {
-        title: string; engine: any; nodeId?: string;
+        title: string; engine: IModuleFS; nodeId?: string;
     }): Promise<void> {
         const md = await this.ctx.commands.execute<string>('session.export');
         if (!this.printService) {

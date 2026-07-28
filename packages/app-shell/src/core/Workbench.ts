@@ -5,7 +5,7 @@
  * 不创建 DOM，不拥有布局。消费方负责创建 sidebar/editor 容器并传入。
  */
 import { createVFSUI, connectEditorLifecycle, VFSUIShell, createVFSMentionProviders } from '@itookit/vfs-ui';
-import { createMDxEditor, MentionPlugin } from '@itookit/mdxeditor';
+import { defaultEditorFactory, MentionPlugin } from '@itookit/mdxeditor';
 import type { WorkbenchConfig } from '../types';
 import { EditorOptions, IEditor, IModuleFS, EditorHostContext, NavigationRequest } from '@itookit/common';
 
@@ -27,7 +27,7 @@ export class Workbench {
             );
         }
 
-        this.baseEditorFactory = config.editorFactory || createMDxEditor;
+        this.baseEditorFactory = config.editorFactory ?? defaultEditorFactory;
 
         const scopeId = config.scopeId || config.moduleName || 'default';
 
@@ -73,7 +73,7 @@ export class Workbench {
             this.enhancedEditorFactory,
             {
                 hostContext: sharedHostContext,
-                sessionEngine: this.config.sessionEngine,
+                moduleFS: this.engine,
                 ...config.editorConfig
             }
         );
@@ -87,10 +87,10 @@ export class Workbench {
     ): Promise<IEditor> => {
         const { editorConfig } = this.config;
 
-        const mentionScope = editorConfig?.mentionScope as string[] | undefined;
+        const mentionScope = editorConfig?.mentionScope;
         const mentionPlugin = mentionScope !== undefined
             ? new MentionPlugin({
-                providers: createVFSMentionProviders(this.engine, mentionScope) as any,
+                providers: createVFSMentionProviders(this.engine, mentionScope),
                 onMentionClick: (_providerKey: string, nodeId: string) => {
                     this.config.onNavigate?.({ target: 'self', action: 'open', resourceId: nodeId });
                 },
@@ -102,7 +102,7 @@ export class Workbench {
             ...(runtimeOptions?.plugins || []),
         ];
         const plugins = mentionPlugin
-            ? [...basePlugins.filter((p: any) => p !== 'autocomplete:mention'), mentionPlugin]
+            ? [...basePlugins.filter(p => p !== 'autocomplete:mention'), mentionPlugin]
             : basePlugins;
 
         const mergedOptions: EditorOptions = {
@@ -113,7 +113,7 @@ export class Workbench {
                 ...(editorConfig?.defaultPluginOptions || {}),
                 ...(runtimeOptions?.defaultPluginOptions || {}),
             },
-            sessionEngine: this.config.sessionEngine
+            moduleFS: this.engine
         };
 
         return this.baseEditorFactory(container, mergedOptions);

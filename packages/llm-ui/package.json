@@ -72,10 +72,12 @@
     "marked": "^16.4.2"
   },
   "peerDependencies": {
-    "@itookit/mdxeditor": "workspace:*"
+    "@itookit/mdxeditor": "workspace:*",
+    "@itookit/vfslib": "workspace:*"
   },
   "devDependencies": {
     "@itookit/mdxeditor": "workspace:*",
+    "@itookit/vfslib": "workspace:*",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.25",
     "@vitest/coverage-v8": "^1.6.1",

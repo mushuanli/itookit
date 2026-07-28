@@ -1,6 +1,6 @@
 // @mdx/editor/mdx-editor.ts
 import {
-    IEditor, EditorOptions, EditorEvent, EditorEventCallback,
+    IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback,
     UnifiedSearchResult, CollapseExpandResult, Heading,
     extractSearchableText, extractSummary,
 } from '@itookit/common';
@@ -55,7 +55,7 @@ export class MDxEditor extends IEditor {
             searchMarkClass: config.searchMarkClass,
             nodeId: config.nodeId,
             ownerNodeId: this.config.ownerNodeId,
-            sessionEngine: config.sessionEngine,
+            moduleFS: config.moduleFS,
         });
         this.renderer.setEditorInstance(this);
 
@@ -291,8 +291,11 @@ export class MDxEditor extends IEditor {
 
     // === 事件 ===
 
-    on(eventName: EditorEvent, callback: EditorEventCallback): () => void {
-        return this.eventBus.on(eventName, callback);
+    on<E extends EditorEvent>(
+        eventName: E,
+        callback: EditorEventCallback<E>,
+    ): () => void {
+        return this.eventBus.on<EditorEventMap[E]>(eventName, callback);
     }
 
     // === 资源访问器 ===
@@ -357,7 +360,7 @@ export class MDxEditor extends IEditor {
 
     private getPrintService(): PrintService {
         if (!this.printService) {
-            this.printService = new DefaultPrintService(this.config.sessionEngine, this.config.nodeId);
+            this.printService = new DefaultPrintService(this.config.moduleFS, this.config.nodeId);
         }
         return this.printService;
     }

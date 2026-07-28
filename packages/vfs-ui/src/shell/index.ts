@@ -22,7 +22,7 @@ import type {
 import type { FileTypeDefinition, CustomEditorResolver } from '../services/FileTypeRegistry';
 import { VFSService } from '../services/VFSService';
 
-export type VFSUIOptions = SessionUIOptions & {
+export type VFSUIOptions = SessionUIOptions<VFSNodeUI> & {
     initialState?: Partial<VFSUIState>;
     defaultUiSettings?: Partial<UISettings>;
     fileTypes?: FileTypeDefinition[];

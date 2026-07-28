@@ -50,6 +50,8 @@ import type { FSEventEmitter } from '../core/events';
  */
 export interface IFSDriverTransaction {
     getNode(path: string): Promise<FSNode | null>;
+    readContent(path: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
+    readContent(path: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
     readContent(path: string, options?: ReadOptions): Promise<FileContent>;
     createFile(options: CreateFileOptions): Promise<FSNode>;
     createDirectory(options: CreateDirectoryOptions): Promise<FSNode>;
@@ -117,6 +119,8 @@ export interface IFSDriver extends FSEventEmitter {
         path: string,
         options: ReadOptions & { encoding: 'binary' },
     ): Promise<ArrayBuffer>;
+    readContent(path: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
+    readContent(path: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
     readContent(path: string, options?: ReadOptions): Promise<FileContent>;
 
     /** 解析路径，确认节点存在 @returns 存在返回 path，不存在返回 null */

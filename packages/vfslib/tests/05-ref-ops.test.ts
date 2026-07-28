@@ -16,13 +16,13 @@ describe('Reference operations (IndexedDB backend)', () => {
         return `/${name}`;
     }
 
-    async function collectOutgoing(idOrPath: string, opts?: import('@itookit/common').RefQueryOptions): Promise<Reference[]> {
+    async function collectOutgoing(idOrPath: string, opts?: import('@itookit/vfslib').RefQueryOptions): Promise<Reference[]> {
         const refs: Reference[] = [];
         await vfs.fs.meta.refs!.walkOutgoing(idOrPath, (r) => { refs.push(r); return true; }, opts);
         return refs;
     }
 
-    async function collectIncoming(idOrPath: string, opts?: import('@itookit/common').RefQueryOptions): Promise<Reference[]> {
+    async function collectIncoming(idOrPath: string, opts?: import('@itookit/vfslib').RefQueryOptions): Promise<Reference[]> {
         const refs: Reference[] = [];
         await vfs.fs.meta.refs!.walkIncoming(idOrPath, (r) => { refs.push(r); return true; }, opts);
         return refs;

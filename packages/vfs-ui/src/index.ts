@@ -17,7 +17,7 @@ export { DirectoryMentionSource } from './mention/DirectoryMentionSource';
 export { createVFSMentionProviders } from './mention/createVFSMentionProviders';
 
 // 修改 Options 类型定义以包含新的配置项
-export type VFSUIOptions = SessionUIOptions & {
+export type VFSUIOptions = SessionUIOptions<VFSNodeUI> & {
     initialState?: Partial<VFSUIState>;
     defaultUiSettings?: Partial<UISettings>;
     // [新增]

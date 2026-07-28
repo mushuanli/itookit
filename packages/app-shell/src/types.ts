@@ -1,6 +1,6 @@
-import type { IStorageBackend, IVFSManager, MountOptions, FileCreationConfig, IModuleFS, EditorFactory, NavigationRequest, SessionUIOptions } from '@itookit/common';
+import type { IStorageBackend, IVFSManager, MountOptions, FileCreationConfig, IModuleFS, EditorFactory, EditorOptions, NavigationRequest } from '@itookit/common';
 import type { ThemeMode } from './ThemeService';
-import type { FileTypeDefinition, CustomEditorResolver } from '@itookit/vfs-ui';
+import type { FileTypeDefinition, CustomEditorResolver, VFSUIOptions } from '@itookit/vfs-ui';
 
 export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills';
 
@@ -77,19 +77,15 @@ export interface WorkbenchConfig {
     vfs?: IVFSManager;
     /** 自定义引擎实例 */
     customEngine?: IModuleFS;
-    /** 会话引擎 (IChatEngine)，用于 .chat 文件 */
-    sessionEngine?: any;
     moduleName?: string;
     editorFactory?: EditorFactory;
-    editorConfig?: {
-        plugins?: any[];
-        defaultPluginOptions?: Record<string, any>;
-        [key: string]: any;
+    editorConfig?: Partial<EditorOptions> & {
+        mentionScope?: string[];
     };
     onNavigate?: (request: NavigationRequest) => Promise<void>;
     onSessionChange?: (sessionId: string | null) => void;
     onSidebarToggle?: (collapsed: boolean) => void;
-    uiOptions?: Partial<SessionUIOptions>;
+    uiOptions?: Partial<Omit<VFSUIOptions, 'defaultEditorFactory'>>;
     fileTypes?: FileTypeDefinition[];
     customEditorResolver?: CustomEditorResolver;
     showFileExtensions?: boolean;

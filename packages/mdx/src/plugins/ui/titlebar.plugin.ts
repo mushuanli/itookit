@@ -219,7 +219,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         newTitle,
         this.currentTitle + this.fileExt,
       );
-      const engine = context.getSessionEngine?.();
+      const engine = context.getModuleFS?.();
       const nodeId = context.getCurrentNodeId();
       if (!engine || !nodeId) {
         this.titleEl!.value = this.currentTitle;

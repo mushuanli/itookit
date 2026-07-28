@@ -107,7 +107,7 @@ export interface FSEventPayloadMap {
 
 export interface FSEvent<T extends FSEventType = FSEventType> {
     readonly type: T;
-    readonly payload: T extends keyof FSEventPayloadMap ? FSEventPayloadMap[T] : unknown;
+    readonly payload: FSEventPayloadMap[T];
     readonly timestamp: number;
     /** 事件来源模块 */
     readonly moduleId?: string;

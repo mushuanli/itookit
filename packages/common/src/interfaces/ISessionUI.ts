@@ -3,14 +3,14 @@
  * @description Defines the public interface that a session management module must implement.
  */
 
-interface IRegularMenuItem {
+interface IRegularMenuItem<TItem extends object = Record<string, unknown>> {
     id: string;
     label: string;
     iconHTML?: string;
     type?: 'item'; // 'type' 是可辨识的属性
-    hidden?: (item: Record<string, any>) => boolean;
+    hidden?: (item: TItem) => boolean;
     /** Custom click handler. When provided, bypasses the command-bus dispatch. */
-    onClick?: (item: object) => void;
+    onClick?: (item: TItem) => void;
 }
 
 // 定义一个分割线
@@ -19,14 +19,33 @@ interface ISeparatorMenuItem {
 }
 
 // MenuItem 现在是一个可辨识联合类型
-export type MenuItem = IRegularMenuItem | ISeparatorMenuItem;
+export type MenuItem<TItem extends object = Record<string, unknown>> =
+    | IRegularMenuItem<TItem>
+    | ISeparatorMenuItem;
 
+export type ContextMenuBuilder<TItem extends object = Record<string, unknown>> = (
+    item: TItem,
+    defaultItems: MenuItem<TItem>[],
+) => MenuItem<TItem>[];
 
-export type ContextMenuBuilder = (item: object, defaultItems: MenuItem[]) => MenuItem[];
-
-export interface ContextMenuConfig {
-    items?: ContextMenuBuilder;
+export interface ContextMenuConfig<TItem extends object = Record<string, unknown>> {
+    items?: ContextMenuBuilder<TItem>;
 }
+
+export interface TagEditorOptions {
+    container: HTMLElement;
+    initialTags: string[];
+    onSave: (tags: string[]) => void;
+    onCancel: () => void;
+}
+
+export interface TagEditorInstance {
+    destroy?(): void;
+}
+
+export type TagEditorFactory = (
+    options: TagEditorOptions,
+) => TagEditorInstance | void;
 
 /**
  * Options controlling new-file creation behaviour.
@@ -51,11 +70,11 @@ export interface FileCreationConfig {
     instant?: boolean;
 }
 
-export interface SessionUIOptions {
+export interface SessionUIOptions<TItem extends object = Record<string, unknown>> {
     sessionListContainer: HTMLElement;
     documentOutlineContainer?: HTMLElement;
     initialState?: object;
-    contextMenu?: ContextMenuConfig;
+    contextMenu?: ContextMenuConfig<TItem>;
     readOnly?: boolean;
     initialSidebarCollapsed?: boolean;
     title?: string;
@@ -69,27 +88,33 @@ export interface SessionUIOptions {
      * TagEditor 的构造函数引用
      */
     components?: {
-        /** UPDATE: Changed type to `new (...args: any[]) => any` to correctly type a class constructor. */
-        tagEditor?: new (...args: any[]) => any;
+        tagEditor?: TagEditorFactory;
     };
 }
 
-export type SessionManagerEvent = 
-    | 'sessionSelected' 
-    | 'navigateToHeading' 
-    | 'importRequested' 
-    | 'sidebarStateChanged' 
-    | 'menuItemClicked' 
-    | 'stateChanged';
+export interface SessionUIEventMap<TSession extends object> {
+    sessionSelected: { item: TSession | undefined };
+    fileRenamed: { oldId: string; newId: string; item: TSession };
+    navigateToHeading: { elementId: string };
+    importRequested: { parentPath: string | null };
+    sidebarStateChanged: { isCollapsed: boolean };
+    menuItemClicked: { actionId: string; item: TSession };
+    stateChanged: { state: unknown };
+}
 
-export type SessionManagerCallback = (payload: any) => void;
+export type SessionManagerEvent = keyof SessionUIEventMap<object>;
+export type SessionManagerCallback<TPayload = unknown> = (payload: TPayload) => void;
 
 /**
  * Session UI 主接口
  * @template TSession 会话对象类型 (如 VFSNodeUI)
  * @template TService 服务层类型 (如 VFSService)
  */
-export abstract class ISessionUI<TSession extends object, TService extends object> {
+export abstract class ISessionUI<
+    TSession extends object,
+    TService extends object,
+    TEvents extends object = SessionUIEventMap<TSession>,
+> {
     protected constructor() {
         if (this.constructor === ISessionUI) {
             throw new Error("ISessionUI is an interface and cannot be instantiated directly.");
@@ -104,6 +129,9 @@ export abstract class ISessionUI<TSession extends object, TService extends objec
     abstract toggleSidebar(): void;
     abstract setTitle(newTitle: string): void;
     
-    abstract on(eventName: SessionManagerEvent, callback: SessionManagerCallback): () => void;
+    abstract on<E extends keyof TEvents & string>(
+        eventName: E,
+        callback: SessionManagerCallback<TEvents[E]>,
+    ): () => void;
     abstract destroy(): void;
 }

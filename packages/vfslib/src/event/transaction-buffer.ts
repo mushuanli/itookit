@@ -10,10 +10,7 @@ import type { FSEventType, FSEventPayloadMap } from '@itookit/common';
 import type { EventBus } from './event-bus';
 
 interface BufferedEvent {
-    type: FSEventType;
-    payload: unknown;
-    moduleId?: string;
-    mountId?: string;
+    dispatch(): void;
 }
 
 export class TransactionEventBuffer {
@@ -27,24 +24,24 @@ export class TransactionEventBuffer {
 
     add<E extends FSEventType>(
         type: E,
-        payload: E extends keyof FSEventPayloadMap ? FSEventPayloadMap[E] : unknown,
+        payload: FSEventPayloadMap[E],
         mountId?: string,
     ): void {
         if (this.settled) return;
-        this.buffer.push({ type, payload, moduleId: this.moduleId, mountId });
+        this.buffer.push({
+            dispatch: () => this.bus.emit(type, payload, {
+                moduleId: this.moduleId,
+                fromTransaction: true,
+                mountId,
+            }),
+        });
     }
 
     commit(): void {
         if (this.settled) return;
         this.settled = true;
 
-        for (const evt of this.buffer) {
-            this.bus.emit(evt.type, evt.payload as any, {
-                moduleId: evt.moduleId,
-                fromTransaction: true,
-                mountId: evt.mountId,
-            });
-        }
+        this.buffer.forEach(event => event.dispatch());
         this.buffer.length = 0;
     }
 

@@ -9,7 +9,7 @@ export interface MDxControllerOptions {
     streaming?: boolean;
     nodeId?: string;
     ownerNodeId?: string;
-    sessionEngine?: IModuleFS;
+    moduleFS?: IModuleFS;
 }
 
 /**
@@ -67,7 +67,7 @@ export class MDxController implements IStreamableEditor {
                 initialMode: this.isReadOnly ? 'render' : 'edit',
                 nodeId: this.options.nodeId,
                 ownerNodeId: this.options.ownerNodeId,
-                sessionEngine: this.options.sessionEngine,
+                moduleFS: this.options.moduleFS,
                 plugins: [
                     'editor:core',
                     'ui:formatting',

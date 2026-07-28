@@ -12,8 +12,8 @@
  *
  * Create via IModuleFS.openFile(nodeId) or a format-specific file factory.
  */
-import type { FSNode } from './fs/core/types';
-import type { FSEventType, FSEvent } from './fs/core/events';
+import type { FSNode } from './core/types';
+import type { FSEventType, FSEvent } from './core/events';
 
 /**
  * Lightweight handle for a sub-file inside the companion assetdir.

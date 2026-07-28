@@ -1,7 +1,6 @@
 import { WorkspaceStrategy } from './types';
 import { defaultEditorFactory } from '@itookit/mdxeditor';
 import type { IVFSManager, IModuleFS, EditorFactory } from '@itookit/common';
-import type { IChatEngine } from '@itookit/llm-conversation';
 
 export class StandardWorkspaceStrategy implements WorkspaceStrategy {
     constructor(private vfs: IVFSManager) {}
@@ -28,16 +27,12 @@ export class SettingsWorkspaceStrategy implements WorkspaceStrategy {
 export class ChatWorkspaceStrategy implements WorkspaceStrategy {
     constructor(
         private factory: EditorFactory,
-        private chatEngine: IChatEngine,
+        private vfs: IVFSManager,
     ) {}
 
     getFactory(): EditorFactory { return this.factory; }
 
     getEngine(moduleName: string): IModuleFS {
-        return this.chatEngine.vfs.getEngine(moduleName);
-    }
-
-    getSessionEngine(): IChatEngine {
-        return this.chatEngine;
+        return this.vfs.getEngine(moduleName);
     }
 }

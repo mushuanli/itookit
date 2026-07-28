@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ['@itookit/common', '@itookit/vfs', 'js-yaml']
+  external: ['@itookit/common', '@itookit/vfs', 'js-yaml'],
 });

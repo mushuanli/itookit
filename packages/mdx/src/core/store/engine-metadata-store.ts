@@ -4,6 +4,10 @@ import type { ScopedPersistenceStore } from './types';
 
 type PluginDataRecord = Record<string, unknown>;
 
+function isPluginData(value: unknown): value is PluginDataRecord {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * 基于 IModuleFS 元数据的持久化存储
  * 特性：防抖批量写入、并发安全、销毁保护
@@ -36,8 +40,8 @@ export class EngineMetadataStore implements ScopedPersistenceStore {
         try {
             const node = await this.engine.driver.getNode(this.nodeId);
             if (!node) return undefined;
-            const pluginData = node.metadata?.[this.getMetaKey()] as PluginDataRecord | undefined;
-            return pluginData?.[key];
+            const pluginData = node.metadata?.[this.getMetaKey()];
+            return isPluginData(pluginData) ? pluginData[key] : undefined;
         } catch (error) {
             console.warn(`[EngineMetadataStore] Get "${key}" failed:`, error);
             return undefined;
@@ -77,7 +81,10 @@ export class EngineMetadataStore implements ScopedPersistenceStore {
                 if (!node) throw new Error(`Node ${this.nodeId} not found`);
 
                 const metaKey = this.getMetaKey();
-                const pluginData = { ...(node.metadata?.[metaKey] as PluginDataRecord) || {} };
+                const storedData = node.metadata?.[metaKey];
+                const pluginData: PluginDataRecord = isPluginData(storedData)
+                    ? { ...storedData }
+                    : {};
 
                 for (const [k, v] of this.pendingUpdates) {
                     if (v === undefined) delete pluginData[k];

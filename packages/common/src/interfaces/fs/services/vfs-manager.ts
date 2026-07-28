@@ -79,9 +79,7 @@ export interface VFSManagerEvent<
     T extends VFSManagerEventType = VFSManagerEventType,
 > {
     type: T;
-    payload: T extends keyof VFSManagerEventPayloadMap
-    ? VFSManagerEventPayloadMap[T]
-    : unknown;
+    payload: VFSManagerEventPayloadMap[T];
     timestamp: number;
 }
 

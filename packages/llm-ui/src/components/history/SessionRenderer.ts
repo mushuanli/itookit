@@ -14,7 +14,7 @@ import { IconResolver } from '../../utils/iconResolver';
 export interface RendererContext {
     nodeId?: string;
     ownerNodeId?: string;
-    sessionEngine?: IModuleFS;
+    moduleFS?: IModuleFS;
 }
 
 /**
@@ -169,7 +169,7 @@ export class SessionRenderer {
             },
             nodeId: this.context.nodeId,
             ownerNodeId: this.context.ownerNodeId,
-            sessionEngine: this.context.sessionEngine,
+            moduleFS: this.context.moduleFS,
         });
         this.editorMap.set(group.id, controller);
     }
@@ -193,7 +193,7 @@ export class SessionRenderer {
             },
             nodeId: this.context.nodeId,
             ownerNodeId: this.context.ownerNodeId,
-            sessionEngine: this.context.sessionEngine,
+            moduleFS: this.context.moduleFS,
         });
         this.editorMap.set(node.id, controller);
 

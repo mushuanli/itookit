@@ -77,11 +77,13 @@ export abstract class BaseModuleService {
                     ? content
                     : new TextDecoder().decode(content as ArrayBuffer);
             return JSON.parse(str) as T;
-        } catch (e: any) {
+        } catch (e: unknown) {
+            const message = getErrorMessage(e).toLowerCase();
+            const code = getErrorCode(e);
             const isNotFound =
-                e.message?.toLowerCase().includes('not found') ||
-                e.code === 'ENOENT' ||
-                e.code === 'NOT_FOUND';
+                message.includes('not found') ||
+                code === 'ENOENT' ||
+                code === 'NOT_FOUND';
             if (!isNotFound) {
                 console.warn(`[${this.constructor.name}] Failed to read ${path}:`, e);
             }
@@ -111,7 +113,7 @@ export abstract class BaseModuleService {
             const next: string = current ? `${current}/${part}` : `/${part}`;
             try {
                 await fs.driver.createDirectory({ name: part, parentPath: current });
-            } catch (e: any) {
+            } catch (e: unknown) {
                 if (!isAlreadyExistsLike(e)) throw e;
             }
             current = next;
@@ -155,10 +157,21 @@ export abstract class BaseModuleService {
 
 // ── 内部辅助 ─────────────────────────────────────────────────
 
-function isAlreadyExistsLike(e: any): boolean {
+function isAlreadyExistsLike(e: unknown): boolean {
+    const code = getErrorCode(e);
     return (
-        e?.code === 'EEXIST' ||
-        e?.code === 'ALREADY_EXISTS' ||
-        String(e?.message).toLowerCase().includes('exist')
+        code === 'EEXIST' ||
+        code === 'ALREADY_EXISTS' ||
+        getErrorMessage(e).toLowerCase().includes('exist')
     );
+}
+
+function getErrorCode(error: unknown): string | undefined {
+    if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+    return typeof error.code === 'string' ? error.code : undefined;
+}
+
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return typeof error === 'string' ? error : '';
 }

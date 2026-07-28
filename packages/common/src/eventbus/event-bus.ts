@@ -13,9 +13,9 @@ import type {
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function safeCall(
-  fn: Function,
-  payload: unknown,
+function safeCall<P>(
+  fn: Handler<P>,
+  payload: P,
   meta: EventMeta,
   onError: (err: unknown, type: string) => void,
 ): void {
@@ -31,8 +31,8 @@ const defaultOnError = (err: unknown, type: string): void =>
 
 // ─── ChannelImpl ─────────────────────────────────────────────────────────────
 
-class ChannelImpl<M extends Record<string, any>> implements IEventChannel<M> {
-  private local = new Map<string, Set<Handler<any>>>();
+class ChannelImpl<M extends object> implements IEventChannel<M> {
+  private local = new Map<string, Set<Handler<unknown>>>();
   private localAny = new Set<AnyHandler<M>>();
   private closed = false;
 
@@ -56,8 +56,9 @@ class ChannelImpl<M extends Record<string, any>> implements IEventChannel<M> {
   on<K extends keyof M & string>(type: K, handler: Handler<M[K]>): Unsubscribe {
     let set = this.local.get(type);
     if (!set) { set = new Set(); this.local.set(type, set); }
-    set.add(handler as Handler<any>);
-    return () => this.local.get(type)?.delete(handler as Handler<any>);
+    const storedHandler = handler as Handler<unknown>;
+    set.add(storedHandler);
+    return () => this.local.get(type)?.delete(storedHandler);
   }
 
   once<K extends keyof M & string>(type: K, handler: Handler<M[K]>): Unsubscribe {
@@ -96,8 +97,8 @@ class ChannelImpl<M extends Record<string, any>> implements IEventChannel<M> {
 
 // ─── EventBus ────────────────────────────────────────────────────────────────
 
-export class EventBus<M extends Record<string, any>> implements IEventBus<M> {
-  private topics = new Map<string, Set<Handler<any>>>();
+export class EventBus<M extends object> implements IEventBus<M> {
+  private topics = new Map<string, Set<Handler<unknown>>>();
   private anyHandlers = new Set<AnyHandler<M>>();
   private channels = new Map<string, ChannelImpl<M>>();
 
@@ -109,7 +110,7 @@ export class EventBus<M extends Record<string, any>> implements IEventBus<M> {
 
   private readonly onError: (err: unknown, type: string) => void;
 
-  constructor(opts: EventBusOptions = {}) {
+  constructor(opts: EventBusOptions<M> = {}) {
     this.coalesceSet = new Set(opts.coalesce ?? []);
     this.onError = opts.onError ?? defaultOnError;
   }
@@ -165,8 +166,9 @@ export class EventBus<M extends Record<string, any>> implements IEventBus<M> {
   on<K extends keyof M & string>(type: K, handler: Handler<M[K]>): Unsubscribe {
     let set = this.topics.get(type);
     if (!set) { set = new Set(); this.topics.set(type, set); }
-    set.add(handler as Handler<any>);
-    return () => this.topics.get(type)?.delete(handler as Handler<any>);
+    const storedHandler = handler as Handler<unknown>;
+    set.add(storedHandler);
+    return () => this.topics.get(type)?.delete(storedHandler);
   }
 
   once<K extends keyof M & string>(type: K, handler: Handler<M[K]>): Unsubscribe {

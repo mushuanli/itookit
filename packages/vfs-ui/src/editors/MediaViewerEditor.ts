@@ -5,7 +5,8 @@
  * 用于替代文本编辑器来预览图片、视频、音频、PDF 等二进制文件。
  * 始终处于只读渲染模式，不提供编辑能力。
  */
-import type { IEditor, EditorEvent, EditorEventCallback, Heading, UnifiedSearchResult, CollapseExpandResult } from '@itookit/common';
+import { EventBus } from '@itookit/common';
+import type { IEditor, EditorEvent, EditorEventMap, EditorEventCallback, Heading, UnifiedSearchResult, CollapseExpandResult } from '@itookit/common';
 
 // ── MIME 类型分组 ──────────────────────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ export function isBinaryViewable(mimeType: string): boolean {
 
 export class MediaViewerEditor implements IEditor {
     private objectUrl: string | null = null;
-    private listeners = new Map<string, Set<EditorEventCallback>>();
+    private editorEvents = new EventBus<EditorEventMap>();
 
     constructor(private readonly mimeType: string) {}
 
@@ -153,10 +154,11 @@ export class MediaViewerEditor implements IEditor {
     async toggleBlocks(): Promise<CollapseExpandResult> { return this.collapseBlocks(); }
     async pruneAssets(): Promise<number | null> { return null; }
 
-    on(event: EditorEvent, cb: EditorEventCallback): () => void {
-        if (!this.listeners.has(event)) this.listeners.set(event, new Set());
-        this.listeners.get(event)!.add(cb);
-        return () => this.listeners.get(event)?.delete(cb);
+    on<E extends EditorEvent>(
+        event: E,
+        callback: EditorEventCallback<E>,
+    ): () => void {
+        return this.editorEvents.on(event, payload => callback(payload));
     }
 
     async destroy(): Promise<void> {
@@ -164,6 +166,6 @@ export class MediaViewerEditor implements IEditor {
             URL.revokeObjectURL(this.objectUrl);
             this.objectUrl = null;
         }
-        this.listeners.clear();
+        this.editorEvents.clear();
     }
 }

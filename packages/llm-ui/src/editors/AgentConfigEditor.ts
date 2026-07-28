@@ -1,7 +1,7 @@
 // @file: llm-ui/editors/AgentConfigEditor.ts
 
 import {
-    IEditor, EditorOptions, EditorEvent, EditorEventCallback,
+    IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback, EventBus,
     generateUUID,
     buildRenamedFilename,
     Heading,
@@ -19,7 +19,7 @@ export class AgentConfigEditor implements IEditor {
     private container!: HTMLElement;
     private content: AgentDefinition | null = null;
     private _isDirty = false;
-    private listeners = new Map<string, Set<EditorEventCallback>>();
+    private editorEvents = new EventBus<EditorEventMap>();
     private originalContent: string = '';
     private currentTitle: string = '';
 
@@ -35,7 +35,7 @@ export class AgentConfigEditor implements IEditor {
         this.originalContent = initialContent || '{}';
         this.currentTitle = (this.options.title as string) || '';
         this.setText(this.originalContent);
-        this.emit('ready');
+        this.emit('ready', undefined);
     }
 
 
@@ -449,7 +449,7 @@ export class AgentConfigEditor implements IEditor {
 
         // Non-critical: write resolved connection label to FSNode metadata for vfs-ui display.
         // Must run AFTER innerHTML is set so a failure here never breaks rendering.
-        const engine = this.options.sessionEngine;
+        const engine = this.options.moduleFS;
         const nodeId = this.options.nodeId;
         if (engine?.driver && nodeId && selectedConn) {
             const connGroup = grouped.find(g => g.conns.some(c => c.id === selectedConn!.id));
@@ -499,7 +499,7 @@ export class AgentConfigEditor implements IEditor {
         // 全局变更监听
         const handleChange = () => {
             this._isDirty = true;
-            this.emit('interactiveChange');
+            this.emit('interactiveChange', undefined);
         };
 
         // Input/Select/Textarea 变更
@@ -510,7 +510,7 @@ export class AgentConfigEditor implements IEditor {
 
         // 名称输入框 → 同步重命名 VFS 文件（复用 engine.rename + node:renamed 事件链）
         const nameInput = this.container.querySelector('.agent-header__name-input') as HTMLInputElement;
-        const engine = this.options.sessionEngine;
+        const engine = this.options.moduleFS;
         const nodeId = this.options.nodeId;
         if (nameInput && engine && nodeId) {
             const ext = (this.options.language as string) || '';
@@ -581,7 +581,7 @@ export class AgentConfigEditor implements IEditor {
             connSelect.addEventListener('change', async () => {
                 if (this.content?.config) this.content.config.connectionId = connSelect.value;
                 // Update connection label in FSNode metadata for vfs-ui list display
-                const engine = this.options.sessionEngine;
+                const engine = this.options.moduleFS;
                 const nodeId = this.options.nodeId;
                 if (engine?.driver && nodeId && connSelect.value) {
                     const selectedOpt = connSelect.options[connSelect.selectedIndex];
@@ -759,7 +759,7 @@ export class AgentConfigEditor implements IEditor {
                     if (iconInput) iconInput.value = icon;
 
                     this._isDirty = true;
-                    this.emit('interactiveChange');
+                    this.emit('interactiveChange', undefined);
                 }
                 overlay.remove();
             });
@@ -892,7 +892,7 @@ export class AgentConfigEditor implements IEditor {
 
     async destroy() {
         this.container.innerHTML = '';
-        this.listeners.clear();
+        this.editorEvents.clear();
     }
 
     getMode(): 'edit' | 'render' { return 'edit'; }
@@ -931,13 +931,14 @@ export class AgentConfigEditor implements IEditor {
     }
 
     // Events
-    on(event: EditorEvent, cb: EditorEventCallback) {
-        if (!this.listeners.has(event)) this.listeners.set(event, new Set());
-        this.listeners.get(event)!.add(cb);
-        return () => this.listeners.get(event)?.delete(cb);
+    on<E extends EditorEvent>(
+        event: E,
+        callback: EditorEventCallback<E>,
+    ): () => void {
+        return this.editorEvents.on(event, payload => callback(payload));
     }
 
-    private emit(event: string, payload?: any) {
-        this.listeners.get(event)?.forEach(cb => cb(payload));
+    private emit<E extends EditorEvent>(event: E, payload: EditorEventMap[E]): void {
+        this.editorEvents.emit(event, payload);
     }
 }

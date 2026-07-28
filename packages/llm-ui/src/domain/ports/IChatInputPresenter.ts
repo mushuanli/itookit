@@ -1,11 +1,25 @@
 // @file: llm-ui/domain/ports/IChatInputPresenter.ts
 
-import type { ExecutorOption, SkillInfo, TokenStats } from '../types';
+import type {
+    ChatOverrides,
+    ChatSessionSettings,
+    ExecutorOption,
+    SkillInfo,
+    TokenStats,
+} from '../types';
+
+export type ChatInputSettings =
+    & Partial<ChatSessionSettings>
+    & Pick<
+        ChatOverrides,
+        'branchMode' | 'retentionMode' | 'flowId' | 'flowRevision'
+    >
+    & { modelId?: string };
 
 export interface IChatInputConfig {
     text: string;
     agentId: string;
-    settings?: any;
+    settings: ChatInputSettings;
 }
 
 /**

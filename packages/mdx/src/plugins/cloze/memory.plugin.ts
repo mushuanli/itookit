@@ -1,6 +1,5 @@
 // mdx/plugins/cloze/memory.plugin.ts
 import type { MDxPlugin, PluginContext, ScopedPersistenceStore } from '../../core/types';
-import type { SRSItemData } from '../../types/srs';
 
 export interface MemoryPluginOptions {
   gradingTimeout?: number;
@@ -34,6 +33,22 @@ interface SRSCardState {
   easeFactor: number;
 }
 
+function isSRSCardState(value: unknown): value is SRSCardState {
+  if (typeof value !== 'object' || value === null) return false;
+  const state = value as Record<string, unknown>;
+  return (typeof state.dueAt === 'string' || state.dueAt === null)
+    && (typeof state.lastReviewedAt === 'string' || state.lastReviewedAt === null)
+    && (typeof state.lastGrade === 'number' || state.lastGrade === null)
+    && typeof state.reviewCount === 'number'
+    && typeof state.interval === 'number'
+    && typeof state.easeFactor === 'number';
+}
+
+interface ClozeRevealedPayload {
+  element: HTMLElement;
+  clozeId: string;
+}
+
 // 状态定义：
 // is-new: 新卡片 (Hidden)
 // is-cooling: 冷却中 (Visible, 无菜单)
@@ -65,7 +80,7 @@ export class MemoryPlugin implements MDxPlugin {
     };
   }
 
-  private log(_message: string, ..._args: any[]) {
+  private log(_message: string, ..._args: unknown[]) {
     if (this.options.debug) {
       //console.log(`🧠 [MemoryPlugin] ${message}`, ...args);
     }
@@ -83,7 +98,7 @@ export class MemoryPlugin implements MDxPlugin {
 
     // --- 关键逻辑 1: 监听 Cloze 打开事件 ---
     // 这个事件只有在 Cloze 从 [隐藏] -> [显示] 状态切换时才会触发 (由 ClozePlugin 发出)
-    const removeClozeRevealed = context.listen('clozeRevealed', (data: any) => {
+    const removeClozeRevealed = context.listen('clozeRevealed', (data: ClozeRevealedPayload) => {
       const stateClass = data.element.dataset.stateClass as ClozeStateClass;
 
       // 1. 冷却中的卡片 (Again 之后) 打开时不显示菜单，避免干扰
@@ -138,54 +153,17 @@ export class MemoryPlugin implements MDxPlugin {
     this.syncedContexts.add(context);
   }
 
-  /**
-   * ✨ [重构] 同步逻辑
-   * 优先使用 Engine.getSRSStatus，否则回退到 storeRef (metadata)
-   */
+  /** Sync from the plugin-scoped store backed by IModuleFS metadata or memory. */
   private async syncWithStore(context: PluginContext): Promise<void> {
-    const engine = context.getSessionEngine?.();
-    const fileId = context.getCurrentNodeId();
     const cache = this.getCache(context);
     cache.clear();
 
-    this.log(`Syncing store. FileID: ${fileId || 'N/A'}, Engine Available: ${!!engine}`);
-
-    // 1. 尝试使用 Engine 加载 SRS (VFS SRS Store)
-    if (engine && (engine as any).getSRSStatus && fileId) {
-      try {
-        const srsItems = await (engine as any).getSRSStatus(fileId);
-        const count = Object.keys(srsItems).length;
-        this.log(`Loaded ${count} items from Engine VFS.`);
-
-        // ✅ 现在 item 的类型是 SRSItemData
-        for (const [clozeId, item] of Object.entries(srsItems as Record<string, SRSItemData>)) {
-          cache.set(clozeId, {
-            dueAt: new Date(item.dueAt).toISOString(),
-            lastReviewedAt: new Date(item.lastReviewedAt).toISOString(),
-            lastGrade: 0,
-            reviewCount: item.reviewCount,
-            interval: item.interval,
-            easeFactor: item.ease
-          });
-        }
-        return;
-      } catch (e) {
-        console.warn('[MemoryPlugin] Failed to sync from Engine, falling back to Metadata store.', e);
-      }
-    } else {
-      this.log('Skipping Engine sync (Conditions not met). Fallback to metadata?');
-    }
-
-    // 2. 降级：使用旧的元数据存储
     if (this.storeRef) {
       try {
-        const srsData = (await this.storeRef.get('_mdx_srs')) as Record<string, SRSCardState> | undefined;
-        const count = srsData ? Object.keys(srsData).length : 0;
-        this.log(`Loaded ${count} items from Metadata Store (Fallback).`);
-
-        if (srsData) {
+        const srsData = await this.storeRef.get('_mdx_srs');
+        if (typeof srsData === 'object' && srsData !== null) {
           for (const [key, value] of Object.entries(srsData)) {
-            cache.set(key, value);
+            if (isSRSCardState(value)) cache.set(key, value);
           }
         }
       } catch (error) {
@@ -194,42 +172,8 @@ export class MemoryPlugin implements MDxPlugin {
     }
   }
 
-  /**
-   * ✨ [重构] 保存逻辑
-   * 单个卡片评分后触发
-   */
-  private async saveCardState(
-    context: PluginContext,
-    clozeId: string,
-    newState: SRSCardState
-  ): Promise<void> {
-    const engine = context.getSessionEngine?.();
-    const fileId = context.getCurrentNodeId();
-
-    this.log(`Saving card ${clozeId} to FileID: ${fileId}`);
-
-    // 1. 尝试使用 Engine 保存
-    // v3.3: IModuleFS doesn't have updateSRSStatus; cast to access deprecated IFSEngine method
-    if (engine && (engine as any).updateSRSStatus && fileId) {
-      try {
-        // ✅ 构建符合 SRSItemData 类型的对象
-        const srsData: SRSItemData = {
-          dueAt: newState.dueAt ? new Date(newState.dueAt).getTime() : Date.now(),
-          lastReviewedAt: newState.lastReviewedAt ? new Date(newState.lastReviewedAt).getTime() : Date.now(),
-          interval: newState.interval,
-          ease: newState.easeFactor,
-          reviewCount: newState.reviewCount
-        };
-
-        await (engine as any).updateSRSStatus(fileId, clozeId, srsData);
-        this.log(`Saved successfully to Engine VFS.`);
-        return;
-      } catch (e) {
-        console.error('[MemoryPlugin] Failed to save to Engine:', e);
-      }
-    }
-
-    // 2. 降级：全量保存到元数据
+  /** Persist the complete card-state cache after grading. */
+  private async saveCardState(context: PluginContext): Promise<void> {
     if (this.storeRef) {
       try {
         const cache = this.getCache(context);
@@ -459,7 +403,7 @@ export class MemoryPlugin implements MDxPlugin {
       cache.set(locator, newState);
 
       // 2. ✨ [重构] 调用新的保存逻辑
-      await this.saveCardState(context, locator, newState);
+      await this.saveCardState(context);
 
       // 3. 立即更新视觉
       clozeElement.classList.remove('is-new', 'is-cooling', 'is-learning', 'is-due', 'is-danger', 'is-cleared');

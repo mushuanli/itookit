@@ -43,10 +43,13 @@ export function generateId(prefix: string = 'item'): string {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-export function debounce<T extends (...args: any[]) => any>(func: T, delay: number): ((...args: Parameters<T>) => void) & { cancel: () => void } {
+export function debounce<TArgs extends unknown[], TThis = unknown>(
+    func: (this: TThis, ...args: TArgs) => unknown,
+    delay: number,
+): ((this: TThis, ...args: TArgs) => void) & { cancel: () => void } {
     let timeout: ReturnType<typeof setTimeout>;
     // 必须使用 function 关键字才能动态绑定 this
-    const debounced = function (this: any, ...args: Parameters<T>) {
+    const debounced = function (this: TThis, ...args: TArgs) {
         clearTimeout(timeout);
         // 捕获外部的 this
         const context = this;
@@ -56,7 +59,7 @@ export function debounce<T extends (...args: any[]) => any>(func: T, delay: numb
     return debounced;
 }
 
-export function isClass(v: any): boolean {
+export function isClass(v: unknown): boolean {
     return typeof v === 'function' && /^\s*class\s+/.test(v.toString());
 }
 
@@ -134,13 +137,13 @@ export function sleep(ms: number): Promise<void> {
 /**
  * 节流
  */
-export function throttle<T extends (...args: any[]) => any>(
-    fn: T,
+export function throttle<TArgs extends unknown[]>(
+    fn: (...args: TArgs) => unknown,
     limit: number
-): (...args: Parameters<T>) => void {
+): (...args: TArgs) => void {
     let inThrottle = false;
 
-    return (...args: Parameters<T>) => {
+    return (...args: TArgs) => {
         if (!inThrottle) {
             fn(...args);
             inThrottle = true;
@@ -160,7 +163,7 @@ export async function retry<T>(
         maxAttempts?: number;
         delay?: number;
         backoff?: boolean;
-        shouldRetry?: (error: any) => boolean;
+        shouldRetry?: (error: unknown) => boolean;
     } = {}
 ): Promise<T> {
     const {
@@ -170,7 +173,7 @@ export async function retry<T>(
         shouldRetry = () => true
     } = options;
 
-    let lastError: any;
+    let lastError: unknown;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
@@ -218,7 +221,7 @@ export function withTimeout<T>(
 /**
  * 安全 JSON 解析
  */
-export function safeJsonParse<T>(str: string, fallback: T): T {
+export function safeJsonParse(str: string, fallback: unknown): unknown {
     try {
         return JSON.parse(str);
     } catch {
@@ -230,26 +233,7 @@ export function safeJsonParse<T>(str: string, fallback: T): T {
  * 深度克隆
  */
 export function deepClone<T>(obj: T): T {
-    if (obj === null || typeof obj !== 'object') {
-        return obj;
-    }
-
-    if (obj instanceof Date) {
-        return new Date(obj.getTime()) as any;
-    }
-
-    if (Array.isArray(obj)) {
-        return obj.map(item => deepClone(item)) as any;
-    }
-
-    const cloned: any = {};
-    for (const key in obj) {
-        if (Object.prototype.hasOwnProperty.call(obj, key)) {
-            cloned[key] = deepClone((obj as any)[key]);
-        }
-    }
-
-    return cloned;
+    return structuredClone(obj);
 }
 
 /**

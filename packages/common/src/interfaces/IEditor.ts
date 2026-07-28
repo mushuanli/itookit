@@ -9,12 +9,20 @@ import { NavigationRequest } from './INavigation';
 
 export type SearchResultSource = 'editor' | 'renderer';
 
-export interface UnifiedSearchResult {
-    source: SearchResultSource;
+interface SearchResultBase {
     text: string;
     context: string;
-    details: any;
 }
+
+export type UnifiedSearchResult =
+    | (SearchResultBase & {
+        source: 'editor';
+        details: { from: number; to: number };
+    })
+    | (SearchResultBase & {
+        source: 'renderer';
+        details: { element: HTMLElement };
+    });
 
 export interface Heading {
     /** 标题层级 1-6 */
@@ -57,7 +65,7 @@ export interface EditorHostContext {
     // 未来可扩展: openFile, showNotification 等
 }
 
-// ✨ [重构] 提升 sessionEngine 和 nodeId 为核心配置
+// ✨ [重构] 提升 moduleFS 和 nodeId 为核心配置
 export interface EditorOptions {
     /** 初始 Markdown 内容 */
     initialContent?: string;
@@ -68,9 +76,12 @@ export interface EditorOptions {
     /** 标题（可选） */
     title?: string;
 
+    /** 编辑器界面语言 */
+    language?: string;
+
     /** 
      * 当前编辑器绑定的节点/文件 ID 
-     * 结合 sessionEngine 使用，用于定位存储位置、元数据和上下文。
+     * 结合 moduleFS 使用，用于定位存储位置、元数据和上下文。
      */
     nodeId?: string;
 
@@ -84,11 +95,11 @@ export interface EditorOptions {
     ownerNodeId?: string;
 
     /**
-     * 会话引擎实例。
+     * 当前资源所属的模块文件系统。
      * 提供文件系统操作、元数据读写、资源搜索等核心能力。
      * 这是编辑器与数据层交互的统一接口。
      */
-    sessionEngine?: IModuleFS;
+    moduleFS?: IModuleFS;
 
     /** 是否只读 */
     readOnly?: boolean;
@@ -100,30 +111,32 @@ export interface EditorOptions {
     hostContext?: EditorHostContext;
 
     /** 插件列表 */
-    plugins?: any[];
+    plugins?: unknown[];
 
     /** 插件配置 */
-    defaultPluginOptions?: Record<string, any>;
-
-    /** 允许传递任何特定于实现的选项 */
-    [key: string]: any;
+    defaultPluginOptions?: Record<string, unknown>;
 }
 
-// ✨ [核心修改] 增加 'blur' 和 'focus' 事件类型
-export type EditorEvent =
-    | 'change'            // 内容变化
-    | 'interactiveChange' // 用户交互导致的变化
-    | 'ready'             // 初始化完成
-    | 'modeChanged'       // 编辑/预览模式切换
-    | 'blur'              // 失去焦点 (用于自动保存)
-    | 'focus'             // 获得焦点
-    | 'optimisticUpdate'  // 乐观更新事件
-    | 'saved'             // 保存成功
-    | 'saveError'         // 保存失败
-    | 'blocksCollapsed'   // ✨ [新增] 所有代码块已折叠
-    | 'blocksExpanded';   // ✨ [新增] 所有代码块已展开
+export interface EditorEventMap {
+    change: undefined;
+    interactiveChange: undefined;
+    ready: undefined;
+    modeChanged: { mode: 'edit' | 'render' };
+    blur: undefined;
+    focus: undefined;
+    optimisticUpdate: undefined;
+    saved: undefined;
+    saveError: unknown;
+    contentLoaded: undefined;
+    error: unknown;
+    blocksCollapsed: CollapseExpandResult;
+    blocksExpanded: CollapseExpandResult;
+}
 
-export type EditorEventCallback = (payload?: any) => void;
+export type EditorEvent = keyof EditorEventMap;
+export type EditorEventCallback<E extends EditorEvent = EditorEvent> = (
+    payload: EditorEventMap[E],
+) => void;
 
 /**
  * ✨ [新增] 折叠/展开操作的结果
@@ -277,5 +290,8 @@ export abstract class IEditor {
     abstract clearSearch(): void;
 
     // --- 事件系统 ---
-    abstract on(eventName: EditorEvent, callback: EditorEventCallback): () => void;
+    abstract on<E extends EditorEvent>(
+        eventName: E,
+        callback: EditorEventCallback<E>,
+    ): () => void;
 }

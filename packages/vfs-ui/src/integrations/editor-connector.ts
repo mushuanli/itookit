@@ -217,9 +217,9 @@ export function connectEditorLifecycle(
           title: item.metadata.title,
           nodeId: item.id,
           language: item.metadata.custom?._extension || '',
-          sessionEngine: engine,
-          hostContext: createHostContext(),
           ...factoryExtraOptions,
+          moduleFS: engine,
+          hostContext: createHostContext(),
         };
 
         const editor = await factory(editorContainer, editorOptions);

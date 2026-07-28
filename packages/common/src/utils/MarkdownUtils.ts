@@ -63,10 +63,14 @@ export function slugify(text: string): string {
     .replace(/^-+|-+$/g, '');        // 移除首尾连字符
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * 尝试解析 JSON 字符串
  */
-export function tryParseJson(text: string): any | null {
+export function tryParseJson(text: string): unknown | null {
   if (!text) return null;
   const trimmed = text.trim();
   
@@ -249,16 +253,18 @@ export function extractSummary(
 ): string | null {
   // 1. JSON 处理 (Chat Manifest 等)
   const json = tryParseJson(content);
-  if (json && typeof json === 'object') {
-    const obj = json as Record<string, any>;
+  if (isRecord(json)) {
+    const obj = json;
     
     if (typeof obj.description === 'string') return obj.description;
     if (typeof obj.summary === 'string') return obj.summary;
     
     // Chat 格式
     if (Array.isArray(obj.pairs) && obj.pairs.length > 0) {
-      const firstPair = obj.pairs[0] as Record<string, any>;
-      if (typeof firstPair.human === 'string') return firstPair.human;
+      const firstPair = obj.pairs[0];
+      if (isRecord(firstPair) && typeof firstPair.human === 'string') {
+        return firstPair.human;
+      }
     }
     return null;
   }
@@ -296,8 +302,8 @@ export function extractSummary(
 export function extractSearchableText(content: string): string {
   // JSON 处理
   const json = tryParseJson(content);
-  if (json && typeof json === 'object') {
-    const obj = json as Record<string, any>;
+  if (isRecord(json)) {
+    const obj = json;
     const parts: string[] = [];
     
     if (typeof obj.name === 'string') parts.push(obj.name);
@@ -307,6 +313,7 @@ export function extractSearchableText(content: string): string {
     
     if (Array.isArray(obj.pairs)) {
       for (const pair of obj.pairs) {
+        if (!isRecord(pair)) continue;
         if (typeof pair.human === 'string') parts.push(pair.human);
         if (typeof pair.ai === 'string') parts.push(pair.ai);
       }
@@ -408,9 +415,9 @@ export function parseMarkdown(
   return result;
 }
 
-export function formatJsonSummary(json: any): string {
+export function formatJsonSummary(json: unknown): string {
   if (Array.isArray(json)) return `[List: ${json.length} items]`;
-  if (typeof json !== 'object' || json === null) return String(json);
+  if (!isRecord(json)) return String(json);
 
   const keys = Object.keys(json);
   const parts: string[] = [];

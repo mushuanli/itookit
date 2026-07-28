@@ -1,5 +1,4 @@
-import { describe, expect, it } from 'vitest';
-import type { Artifact, BranchContextProfile, ContextPlan, ContextSnapshot } from '@itookit/common';
+import type { describe, expect, it } from '@itookit/common';
 import { ContextAssembler } from '../src/core/context-assembler';
 
 async function hash(content: string): Promise<string> {

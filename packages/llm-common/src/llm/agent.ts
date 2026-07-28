@@ -2,7 +2,7 @@
 // Agent、MCP 及服务接口定义。
 
 import type { LLMConnection, ConnectionMeta, LLMProvider, DefaultConnectionDef, ConnectionTestResult, ModelTier } from './connection';
-import type { RestorableItem } from '../../types/types';
+import type { RestorableItem } from '../types';
 import type { SkillDefinition } from '../skills/skill-types';
 
 // ─── Agent ────────────────────────────────────────────────────────────────────

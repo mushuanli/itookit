@@ -19,6 +19,7 @@ import type {
     FSSearchQuery,
     FSSearchResult,
     FSEventType,
+    FSEventPayloadMap,
     FSEvent,
     CreateFileOptions,
     CreateDirectoryOptions,
@@ -30,6 +31,17 @@ import type {
     TreeWalkCallback,
     IAssetOperations,
     ITagOperations,
+    ISeqFileOperations,
+    IRefOperations,
+    IRecordStore,
+    SeqFileEntry,
+    RecordQuery,
+    RecordQueryOptions,
+    RecordQueryResult,
+    RecordValue,
+    Reference,
+    RefType,
+    RefQueryOptions,
     IDeviceHandle,
     DeviceContext,
     IStorageBackend,
@@ -100,6 +112,239 @@ class DeviceHandle implements IDeviceHandle {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Record-backed metadata capabilities
+// ═══════════════════════════════════════════════════════════════
+
+function stringifyRecordValue(value: RecordValue): string {
+    return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+const SEQ_FIELD_PREFIX = '__vfs_seq__:';
+const seqField = (key: string): string => `${SEQ_FIELD_PREFIX}${key}`;
+const seqKey = (field: string): string => field.slice(SEQ_FIELD_PREFIX.length);
+
+class InlineSeqFileOps implements ISeqFileOperations {
+    constructor(
+        private readonly fs: ModuleFS,
+        private readonly records: IRecordStore,
+    ) {}
+
+    private async path(path: string): Promise<string> {
+        return (await this.fs.resolveNode(path)).realPath;
+    }
+
+    async getEntry(path: string, key: string): Promise<string | null> {
+        const value = await this.records.getRecordField(await this.path(path), seqField(key));
+        return value === undefined ? null : stringifyRecordValue(value);
+    }
+
+    async getEntries(path: string, keys: string[]): Promise<Record<string, string>> {
+        const entries = await Promise.all(keys.map(async key => [key, await this.getEntry(path, key)] as const));
+        return Object.fromEntries(entries.filter((entry): entry is [string, string] => entry[1] !== null));
+    }
+
+    async setEntry(path: string, key: string, value: string): Promise<void> {
+        await this.records.setRecordField(await this.path(path), seqField(key), value);
+    }
+
+    async setEntries(path: string, entries: Record<string, string>): Promise<void> {
+        const realPath = await this.path(path);
+        await Promise.all(Object.entries(entries).map(
+            ([key, value]) => this.records.setRecordField(realPath, seqField(key), value),
+        ));
+    }
+
+    async deleteEntry(path: string, key: string): Promise<void> {
+        await this.records.deleteRecordField(await this.path(path), seqField(key));
+    }
+
+    async hasEntry(path: string, key: string): Promise<boolean> {
+        return (await this.records.getRecordField(await this.path(path), seqField(key))) !== undefined;
+    }
+
+    async walkEntries(
+        path: string,
+        callback: (entry: SeqFileEntry) => boolean | Promise<boolean>,
+        options?: { keyPrefix?: string; limit?: number; offset?: number },
+    ): Promise<{ total: number; processed: number }> {
+        return this.records.walkRecordFields(
+            await this.path(path),
+            (key, value) => callback({
+                key: seqKey(key),
+                value: stringifyRecordValue(value),
+            }),
+            {
+                prefix: seqField(options?.keyPrefix ?? ''),
+                limit: options?.limit,
+                offset: options?.offset,
+            },
+        );
+    }
+
+    async queryEntries(
+        path: string,
+        query: RecordQuery,
+        options?: RecordQueryOptions,
+    ): Promise<RecordQueryResult[]> {
+        const results = await this.records.queryRecordFields(
+            await this.path(path),
+            { ...query, field: seqField(query.field) },
+            options,
+        );
+        return results.map(result => ({ ...result, field: seqKey(result.field) }));
+    }
+
+    async createIndex(path: string, field: string): Promise<void> {
+        await this.records.createRecordIndex(await this.path(path), seqField(field));
+    }
+
+    async deleteIndex(path: string, field: string): Promise<void> {
+        await this.records.deleteRecordIndex(await this.path(path), seqField(field));
+    }
+}
+
+const OUT_REF_PREFIX = '__vfs_ref_out__:';
+const IN_REF_PREFIX = '__vfs_ref_in__:';
+
+interface RefInput {
+    targetPath?: string;
+    targetIdOrPath?: string;
+    refType: RefType;
+    extra?: Record<string, unknown>;
+}
+
+function refField(prefix: string, refType: RefType, path: string): string {
+    return `${prefix}${refType}:${encodeURIComponent(path)}`;
+}
+
+function isRefType(value: unknown): value is RefType {
+    return value === 'mention'
+        || value === 'depend'
+        || value === 'related'
+        || value === 'embed';
+}
+
+function parseReference(value: RecordValue): Reference | null {
+    if (typeof value !== 'string') return null;
+    try {
+        const parsed: unknown = JSON.parse(value);
+        if (typeof parsed !== 'object' || parsed === null) return null;
+        const ref = parsed as Record<string, unknown>;
+        if (typeof ref.sourcePath !== 'string' || typeof ref.targetPath !== 'string') return null;
+        if (!isRefType(ref.refType) || typeof ref.createdAt !== 'number') return null;
+        const extra = typeof ref.extra === 'object' && ref.extra !== null
+            ? ref.extra as Record<string, unknown>
+            : undefined;
+        return {
+            sourcePath: ref.sourcePath,
+            targetPath: ref.targetPath,
+            refType: ref.refType,
+            createdAt: ref.createdAt,
+            extra,
+        };
+    } catch {
+        return null;
+    }
+}
+
+class InlineRefOps implements IRefOperations {
+    constructor(
+        private readonly fs: ModuleFS,
+        private readonly records: IRecordStore,
+    ) {}
+
+    async addRef(
+        sourcePath: string,
+        targetPath: string,
+        refType: RefType,
+        extra?: Record<string, unknown>,
+    ): Promise<void> {
+        const sourceReal = (await this.fs.resolveNode(sourcePath)).realPath;
+        const targetReal = (await this.fs.resolveNode(targetPath)).realPath;
+        const ref: Reference = { sourcePath, targetPath, refType, createdAt: Date.now(), extra };
+        const encoded = JSON.stringify(ref);
+        await this.records.setRecordField(sourceReal, refField(OUT_REF_PREFIX, refType, targetPath), encoded);
+        await this.records.setRecordField(targetReal, refField(IN_REF_PREFIX, refType, sourcePath), encoded);
+    }
+
+    async removeRef(sourcePath: string, targetPath: string, refType: RefType): Promise<void> {
+        const sourceReal = (await this.fs.resolveNode(sourcePath)).realPath;
+        const targetReal = (await this.fs.resolveNode(targetPath)).realPath;
+        await this.records.deleteRecordField(sourceReal, refField(OUT_REF_PREFIX, refType, targetPath));
+        await this.records.deleteRecordField(targetReal, refField(IN_REF_PREFIX, refType, sourcePath));
+    }
+
+    walkOutgoing(
+        path: string,
+        callback: (ref: Reference) => boolean | Promise<boolean>,
+        opts?: RefQueryOptions,
+    ): Promise<number> {
+        return this.walk(path, OUT_REF_PREFIX, callback, opts);
+    }
+
+    walkIncoming(
+        path: string,
+        callback: (ref: Reference) => boolean | Promise<boolean>,
+        opts?: RefQueryOptions,
+    ): Promise<number> {
+        return this.walk(path, IN_REF_PREFIX, callback, opts);
+    }
+
+    async hasRef(sourcePath: string, targetPath: string, refType: RefType): Promise<boolean> {
+        const sourceReal = (await this.fs.resolveNode(sourcePath)).realPath;
+        const field = refField(OUT_REF_PREFIX, refType, targetPath);
+        return (await this.records.getRecordField(sourceReal, field)) !== undefined;
+    }
+
+    async syncOutgoing(sourcePath: string, refs: RefInput[]): Promise<void> {
+        const existing: Reference[] = [];
+        await this.walkOutgoing(sourcePath, ref => {
+            existing.push(ref);
+            return true;
+        });
+        await Promise.all(existing.map(
+            ref => this.removeRef(sourcePath, ref.targetPath, ref.refType),
+        ));
+        for (const ref of refs) {
+            const targetPath = ref.targetPath ?? ref.targetIdOrPath;
+            if (!targetPath) throw new FSError('EINVAL', 'reference target path is required', 'syncOutgoing');
+            await this.addRef(sourcePath, targetPath, ref.refType, ref.extra);
+        }
+    }
+
+    private async walk(
+        path: string,
+        prefix: string,
+        callback: (ref: Reference) => boolean | Promise<boolean>,
+        opts?: RefQueryOptions,
+    ): Promise<number> {
+        const realPath = (await this.fs.resolveNode(path)).realPath;
+        const refs: Reference[] = [];
+        await this.records.walkRecordFields(realPath, (_field, value) => {
+            const ref = parseReference(value);
+            if (ref && (!opts?.refTypes || opts.refTypes.includes(ref.refType))) refs.push(ref);
+            return true;
+        }, { prefix });
+        return this.dispatch(refs, callback, opts);
+    }
+
+    private async dispatch(
+        refs: Reference[],
+        callback: (ref: Reference) => boolean | Promise<boolean>,
+        opts?: RefQueryOptions,
+    ): Promise<number> {
+        const offset = opts?.offset ?? 0;
+        const limit = opts?.limit ?? refs.length;
+        let processed = 0;
+        for (const ref of refs.slice(offset, offset + limit)) {
+            processed++;
+            if (!(await callback(ref))) break;
+        }
+        return processed;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ModuleFS
 // ═══════════════════════════════════════════════════════════════
 
@@ -142,7 +387,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.capabilities = Object.freeze({
             readonly: false, search: true, semanticSearch: false, syncable: false,
             assets: true, tags: true, deviceFiles: true,
-            seqFiles: !!backend.records, references: true,
+            seqFiles: !!backend.records, references: !!backend.records,
             symlinks: !!backend.symlink, hardlinks: false,
             partialRead: true, partialWrite: true, treeWalk: true,
             streaming: false, watch: false, mount: false,
@@ -151,7 +396,9 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.assets = new InlineAssetOps(this);
         this.tags = new InlineTagOps(this);
         this.driver = this;
-        this.meta = new FSMetaDriverAdapter(this.assets, this.tags);
+        const seq = backend.records ? new InlineSeqFileOps(this, backend.records) : undefined;
+        const refs = backend.records ? new InlineRefOps(this, backend.records) : undefined;
+        this.meta = new FSMetaDriverAdapter(this.assets, this.tags, seq, refs);
     }
 
     openFile(nodeId: string): import('@itookit/common').IFile {
@@ -193,6 +440,8 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
     get _backend(): IStorageBackend { return this._moduleBackend; }
     get _engine(): VFSEngine { return this.engine; }
+    /** @internal Convert a system path to this module's virtual namespace. */
+    _toVirtualPath(path: string): string { return this.scope.toVirtualPath(path); }
 
     // ══════════════════════════════════════════════════════════
     // Path resolution helpers (centralized)
@@ -252,7 +501,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     }
 
     /** Emit a namespaced event. @internal — exposed for inline ops classes */
-    _emit(type: FSEventType, payload: any): void {
+    _emit<E extends FSEventType>(type: E, payload: FSEventPayloadMap[E]): void {
         this._emitTarget.emit(type, payload, { moduleId: this.moduleId, mountId: this.mountId });
     }
 
@@ -272,7 +521,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     getChildren(path: string, options?: ListOptions & { fields?: 'full' }): Promise<FSNode[]>;
     getChildren(path: string, options: ListOptions & { fields: 'entry' }): Promise<DirEntry[]>;
     getChildren(path: string, options?: ListOptions): Promise<FSNode[] | DirEntry[]>;
-    async getChildren(path: string, options?: any): Promise<FSNode[] | DirEntry[]> {
+    async getChildren(path: string, options?: ListOptions): Promise<FSNode[] | DirEntry[]> {
         const realPath = this.toRealPath(path);
         this.access.checkAccess(this.caller, realPath, 'list');
         const children = await this.engine.listChildren(realPath);
@@ -286,7 +535,8 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         if (options?.fields === 'entry') {
             return filtered.map(c => ({
                 path: this.scope.toVirtualPath(c.path), name: c.name, type: c.type,
-                size: (c as any).size, modifiedAt: c.modifiedAt
+                size: c.type === 'file' ? c.size : undefined,
+                modifiedAt: c.modifiedAt,
             } as DirEntry));
         }
         // Filter out any child whose virtualized path equals the request path
@@ -302,9 +552,29 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     async readContent(path: string, options?: ReadOptions): Promise<FileContent> {
         const { realPath } = await this.resolveNode(path);
         this.access.checkAccess(this.caller, realPath, 'read');
+        if (this._moduleBackend.records) {
+            const text = await this.serializeSeqFile(realPath, this._moduleBackend.records);
+            if (text !== null) {
+                return options?.encoding === 'binary' ? toBuffer(text) : text;
+            }
+        }
         const data = await this.engine.readContent(realPath);
         if (options?.encoding === 'utf-8') return toString(data);
         return data;
+    }
+
+    private async serializeSeqFile(path: string, records: IRecordStore): Promise<string | null> {
+        const lines: string[] = [];
+        try {
+            const result = await records.walkRecordFields(path, (field, value) => {
+                lines.push(`${seqKey(field)}=${stringifyRecordValue(value)}`);
+                return true;
+            }, { prefix: SEQ_FIELD_PREFIX });
+            return result.total > 0 ? lines.join('\n') : null;
+        } catch (error) {
+            if (isMissingRecordIndexError(error)) return null;
+            throw error;
+        }
     }
 
     async resolvePath(path: string): Promise<string | null> {
@@ -328,8 +598,17 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
     async walkTree(callback: TreeWalkCallback, options?: TreeWalkOptions): Promise<number> {
         const rootPath = options?.rootPath ? this.toRealPath(options.rootPath) : this.scope.toRealPath('/');
-        const virtualCallback: TreeWalkCallback = (node, depth) => callback(this.toVirtualNode(node), depth);
-        return this.engine.walkTree(rootPath, virtualCallback as any, options);
+        const typeFilter = options?.typeFilter
+            ? new Set(Array.isArray(options.typeFilter) ? options.typeFilter : [options.typeFilter])
+            : null;
+        let processed = 0;
+        const virtualCallback: TreeWalkCallback = async (node, depth) => {
+            if (typeFilter && !typeFilter.has(node.type)) return true;
+            processed++;
+            return callback(this.toVirtualNode(node), depth);
+        };
+        await this.engine.walkTree(rootPath, virtualCallback, options);
+        return processed;
     }
 
     async search(query: FSSearchQuery): Promise<FSSearchResult> {
@@ -346,7 +625,10 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         let fileCount = 0, directoryCount = 0, totalSize = 0;
         await this.walkTree((node) => {
             if (node.type === 'directory') directoryCount++;
-            else { fileCount++; totalSize += (node as any).size ?? 0; }
+            else {
+                fileCount++;
+                if (node.type === 'file') totalSize += node.size;
+            }
         });
         return { fileCount, directoryCount, totalSize, lastModifiedAt: Date.now() };
     }
@@ -370,6 +652,11 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     }
 
     async createDirectory(options: CreateDirectoryOptions): Promise<FSNode> {
+        const parentPath = options.parentPath
+            ? this.toRealPath(options.parentPath)
+            : this.scope.toRealPath('/');
+        const existing = await this.engine.tryStat(P.join(parentPath, options.name));
+        if (existing?.type === 'directory') return this.toVirtualNode(existing);
         return this.createFile({ ...options, type: 'directory', content: undefined });
     }
 
@@ -378,7 +665,10 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.access.checkAccess(this.caller, realPath, 'write');
         this.assertWritable(realPath);
         await this.engine.writeContent(realPath, content, options);
-        this._emit('node:updated', { nodes: [{ path: node.path, changedFields: ['content'] }] });
+        this._emit('node:updated', {
+            nodes: [{ path: this.toVirtualNode(node).path, changedFields: ['content'] }],
+            reason: 'content',
+        });
     }
 
     async appendContent(path: string, content: FileContent): Promise<void> {
@@ -429,17 +719,23 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         const { node, realPath } = await this.resolveNode(path);
         this.access.checkAccess(this.caller, realPath, 'write');
         await this.engine.updateMetadata(realPath, metadata);
-        this._emit('node:updated', { nodes: [{ path: node.path, changedFields: ['metadata'] }] });
+        this._emit('node:updated', {
+            nodes: [{ path: this.toVirtualNode(node).path, changedFields: ['metadata'] }],
+            reason: 'metadata',
+        });
     }
 
     // ── Copy ──
     async copy(sourcePath: string, targetParentPath: string | null, newName?: string): Promise<FSNode> {
-        const { node, realPath } = await this.resolveNode(sourcePath);
-        const targetPath = targetParentPath ? this.toRealPath(targetParentPath) : P.dirname(realPath);
+        const { node } = await this.resolveNode(sourcePath);
         const name = newName ?? node.name;
 
         if (node.type === 'directory') {
-            const newNode = await this.createDirectory({ name, parentPath: targetParentPath, metadata: node.metadata as any });
+            const newNode = await this.createDirectory({
+                name,
+                parentPath: targetParentPath,
+                metadata: { ...node.metadata },
+            });
             const children = await this.getChildren(sourcePath);
             for (const child of children) {
                 await this.copy(child.path, newNode.path);
@@ -448,7 +744,22 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         }
 
         const fileContent = await this.readContent(sourcePath);
-        return this.createFile({ name, parentPath: targetPath, type: node.type, content: fileContent as string | ArrayBuffer, metadata: node.metadata as any, tags: [...node.tags] });
+        const copied = await this.createFile({
+            name,
+            parentPath: targetParentPath,
+            type: node.type,
+            content: fileContent as string | ArrayBuffer,
+            metadata: { ...node.metadata },
+            tags: [...node.tags],
+        });
+        this._emit('node:copied', {
+            copies: [{
+                sourcePath: this.toVirtualNode(node).path,
+                targetPath: copied.path,
+                targetParentPath: copied.parentPath,
+            }],
+        });
+        return copied;
     }
 
     // ── Symlink ──
@@ -465,6 +776,9 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     }
 
     async readlink(path: string): Promise<string> {
+        if (!this.capabilities.symlinks) {
+            throw new FSCapabilityError('symlinks', this.moduleId);
+        }
         const { realPath } = await this.resolveNode(path);
         return this.engine.readSymlink(realPath);
     }
@@ -482,7 +796,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     async ioctl(path: string, command: string | number, arg?: unknown): Promise<unknown> {
         const { node } = await this.resolveNode(path);
         if (node.type !== 'device') throw new FSError('ENOTTY', 'not a device file', 'ioctl', node.path);
-        const handlerId = (node as any).deviceHandlerId;
+        const handlerId = node.deviceHandlerId;
         if (!handlerId) throw new FSError('ENOTTY', 'no device handler', 'ioctl', node.path);
         const driver = this.devices.get(handlerId);
         if (!driver.ioctl) throw new FSError('ENOTTY', 'device does not support ioctl', 'ioctl', node.path);
@@ -492,7 +806,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     async openDevice(path: string, options?: Record<string, unknown>): Promise<IDeviceHandle> {
         const { node } = await this.resolveNode(path);
         if (node.type !== 'device') throw new FSError('ENOTTY', 'not a device file', 'openDevice', node.path);
-        const handlerId = (node as any).deviceHandlerId;
+        const handlerId = node.deviceHandlerId;
         if (!handlerId) throw new FSError('ENOTTY', 'no device handler', 'openDevice', node.path);
         const driver = this.devices.get(handlerId);
         // Inject systemFS so device drivers can read/write /etc hidden files
@@ -520,7 +834,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
         const tx: IFSDriverTransaction = {
             getNode: (id) => this.getNode(id),
-            readContent: (id, opts) => this.readContent(id, opts),
+            readContent: this.readContent.bind(this),
             createFile: (opts) => this.createFile(opts),
             createDirectory: (opts) => this.createDirectory(opts),
             writeContent: (id, content, opts) => this.writeContent(id, content, opts),
@@ -541,6 +855,10 @@ export class ModuleFS implements IModuleFS, IFSDriver {
             throw e;
         }
     }
+}
+
+function isMissingRecordIndexError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'NotFoundError';
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -582,20 +900,14 @@ class InlineAssetOps implements IAssetOperations {
         try {
             const { realPath } = await this.fs.resolveNode(ownerPath);
             const assetDir = await this._engine().getAssetDirPath(realPath);
-            if (!assetDir) return null;
-            // Convert back to virtual path so callers (e.g. FileHandle._assetIndex)
-            // pass a module-relative path to driver.getChildren().
-            const prefix = `/module/${this.fs.moduleId}/`;
-            if (assetDir.startsWith(prefix)) {
-                return '/' + assetDir.slice(prefix.length);
-            }
-            return assetDir;
+            return assetDir ? this.fs._toVirtualPath(assetDir) : null;
         } catch { return null; }
     }
 
     async ensureAssetDir(ownerIdOrPath: string): Promise<string> {
         const { realPath } = await this.fs.resolveNode(ownerIdOrPath);
-        return this._engine().ensureAssetDir(realPath);
+        const assetDir = await this._engine().ensureAssetDir(realPath);
+        return this.fs._toVirtualPath(assetDir);
     }
 
     async listAssets(ownerIdOrPath: string): Promise<string[]> {
@@ -643,19 +955,28 @@ class InlineTagOps implements ITagOperations {
     async setTags(path: string, tags: string[]): Promise<void> {
         const { realPath } = await this.fs.resolveNode(path);
         await this.fs._backend.setTags(realPath, tags);
-        this.fs._emit('node:updated', { nodes: [{ path }] });
+        this.emitTagUpdate(path);
     }
 
     async addTag(path: string, tag: string): Promise<void> {
         const { node, realPath } = await this.fs.resolveNode(path);
         const newTags = [...new Set([...node.tags, tag])];
         await this.fs._backend.setTags(realPath, newTags);
+        this.emitTagUpdate(path);
     }
 
     async removeTag(path: string, tag: string): Promise<void> {
         const { node, realPath } = await this.fs.resolveNode(path);
         const newTags = node.tags.filter(t => t !== tag);
         await this.fs._backend.setTags(realPath, newTags);
+        this.emitTagUpdate(path);
+    }
+
+    private emitTagUpdate(path: string): void {
+        this.fs._emit('node:updated', {
+            nodes: [{ path, changedFields: ['tags'] }],
+            reason: 'tags',
+        });
     }
 
     async walkByTag(tag: string, callback: (path: string) => boolean | Promise<boolean>): Promise<{ total: number; processed: number }> {

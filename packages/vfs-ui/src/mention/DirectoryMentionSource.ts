@@ -39,8 +39,8 @@ export class DirectoryMentionSource extends BaseMentionSource {
       const node = await this.engine.driver.getNode(dirId);
       if (!node) return null;
 
-      const childText = node.type === 'directory' && (node as any).childCount != null
-        ? `Contains ${(node as any).childCount} items`
+      const childText = node.type === 'directory' && node.childCount != null
+        ? `Contains ${node.childCount} items`
         : 'Contents info not available';
       return {
         title: node.name,

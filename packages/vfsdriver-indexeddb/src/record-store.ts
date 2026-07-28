@@ -56,9 +56,13 @@ export class IDBRecordStore implements IRecordStore {
     }
 
     async clearRecordFields(path: string): Promise<void> {
-        const idx = this.records.index('idx_path');
+        const hasPathIndex = this.records.indexNames.contains('idx_path');
+        const cursor = hasPathIndex
+            ? this.records.index('idx_path').openCursor(IDBKeyRange.only(path))
+            : this.records.openCursor();
         await deleteCursor(
-            idx.openCursor(IDBKeyRange.only(path)) as IDBRequest<IDBCursorWithValue | null>,
+            cursor as IDBRequest<IDBCursorWithValue | null>,
+            current => hasPathIndex || isRecordPath(current.value, path),
         );
     }
 
@@ -67,12 +71,19 @@ export class IDBRecordStore implements IRecordStore {
         callback: (field: string, value: RecordValue) => boolean | Promise<boolean>,
         options?: RecordWalkOptions,
     ): Promise<{ total: number; processed: number }> {
-        const idx = this.records.index('idx_path');
+        const hasPathIndex = this.records.indexNames.contains('idx_path');
+        const cursor = hasPathIndex
+            ? this.records.index('idx_path').openCursor(IDBKeyRange.only(path))
+            : this.records.openCursor();
         const rows = await collectCursor<RecordRow>(
-            idx.openCursor(IDBKeyRange.only(path)) as IDBRequest<IDBCursorWithValue | null>,
+            cursor as IDBRequest<IDBCursorWithValue | null>,
             c => c.value as RecordRow,
         );
-        const filtered = options?.prefix ? rows.filter(r => r.field.startsWith(options.prefix!)) : rows;
+        const pathRows = hasPathIndex ? rows : rows.filter(row => row.path === path);
+        const prefix = options?.prefix;
+        const filtered = prefix
+            ? pathRows.filter(row => row.field.startsWith(prefix))
+            : pathRows;
         const total = filtered.length;
         let processed = 0;
         const offset = options?.offset ?? 0;
@@ -126,6 +137,11 @@ export class IDBRecordStore implements IRecordStore {
     }
 }
 
+function isRecordPath(value: unknown, path: string): boolean {
+    if (typeof value !== 'object' || value === null) return false;
+    return 'path' in value && value.path === path;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Query evaluation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,5 +179,11 @@ function matchesQuery(field: string, value: RecordValue, query: RecordQuery): bo
 
 export function createRecordStore(db: IDBDatabase): void {
     const store = db.createObjectStore(STORE_RECORDS, { keyPath: ['path', 'field'] });
-    store.createIndex('idx_path', 'path', { unique: false });
+    ensureRecordIndexes(store);
+}
+
+export function ensureRecordIndexes(store: IDBObjectStore): void {
+    if (!store.indexNames.contains('idx_path')) {
+        store.createIndex('idx_path', 'path', { unique: false });
+    }
 }

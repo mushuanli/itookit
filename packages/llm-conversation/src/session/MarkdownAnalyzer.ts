@@ -1,14 +1,24 @@
 /**
  * @file common/utils/MarkdownAnalyzer.ts
  */
-import {
-    IDocumentAnalyzer,
-    DocumentInfo,
-    ReferenceExtractionResult,
-    AnalysisContext
-} from '../interfaces/IDocumentAnalyzer';
 
-export class MarkdownAnalyzer implements IDocumentAnalyzer {
+interface DocumentInfo {
+    filename: string;
+    path: string;
+    mimeType?: string;
+    size?: number;
+}
+
+interface AnalysisContext {
+    filePath: string;
+}
+
+interface ReferenceExtractionResult {
+    references: string[];
+    metadata?: Record<string, unknown>;
+}
+
+export class MarkdownAnalyzer {
     readonly id = 'markdown-analyzer';
 
     private supportedExtensions: Set<string>;

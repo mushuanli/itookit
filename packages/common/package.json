@@ -52,9 +52,14 @@
     "url": "https://github.com/mushuanli/itookit/issues"
   },
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/common#readme",
+  "dependencies": {
+    "@itookit/llm-common": "workspace:*"
+  },
   "devDependencies": {
+    "@itookit/llm-common": "workspace:*",
     "cpx": "^1.5.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
-  }
+  },
+  "peerDependencies": {}
 }

@@ -13,30 +13,28 @@ export const DB_VERSION = 2;
 
 // ── IDB Promise Wrappers ────────────────────────────────────────────
 
-export function openDB(name: string, version: number, upgrade: (db: IDBDatabase) => void): Promise<IDBDatabase> {
+export type UpgradeHandler = (db: IDBDatabase, transaction: IDBTransaction) => void;
+
+export function openDB(
+    name: string,
+    version: number | undefined,
+    upgrade: UpgradeHandler,
+): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-        let isRetry = false;
-        const attempt = () => {
-            const request = indexedDB.open(name, version);
-            request.onupgradeneeded = () => upgrade(request.result);
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => {
-                if (isRetry) {
-                    reject(request.error ?? new Error('Failed to open IndexedDB'));
-                    return;
-                }
-                isRetry = true;
-                const deleteReq = indexedDB.deleteDatabase(name);
-                deleteReq.onsuccess = () => attempt();
-                deleteReq.onerror = () => reject(request.error ?? new Error('Failed to delete corrupted database'));
-                deleteReq.onblocked = () => {
-                    // Blocked by another connection — retry anyway,
-                    // the blocking connection may close shortly.
-                    attempt();
-                };
-            };
+        const request = version === undefined
+            ? indexedDB.open(name)
+            : indexedDB.open(name, version);
+        request.onupgradeneeded = () => {
+            if (!request.transaction) {
+                reject(new Error('IndexedDB upgrade transaction is unavailable'));
+                return;
+            }
+            upgrade(request.result, request.transaction);
         };
-        attempt();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(
+            request.error ?? new Error(`Failed to open IndexedDB "${name}"`),
+        );
     });
 }
 
@@ -55,15 +53,18 @@ export function req<T>(request: IDBRequest<T>): Promise<T> {
     });
 }
 
-export async function deleteCursor(req: IDBRequest<IDBCursorWithValue | null>): Promise<void> {
+export async function deleteCursor(
+    req: IDBRequest<IDBCursorWithValue | null>,
+    predicate: (cursor: IDBCursorWithValue) => boolean = () => true,
+): Promise<void> {
     const cursor = await new Promise<IDBCursorWithValue | null>((resolve, reject) => {
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
     });
     if (cursor) {
-        cursor.delete();
+        if (predicate(cursor)) cursor.delete();
         cursor.continue();
-        await deleteCursor(req);
+        await deleteCursor(req, predicate);
     }
 }
 

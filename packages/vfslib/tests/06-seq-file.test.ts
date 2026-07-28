@@ -57,7 +57,7 @@ describe('SeqFile operations (IndexedDB backend)', () => {
     it('walkEntries returns all key-value pairs', async () => {
         const p = await mkSeq('all.seq');
         await vfs.fs.meta.seq!.setEntries(p, { name: 'alice', age: '30' });
-        const entries: import('@itookit/common').SeqFileEntry[] = [];
+        const entries: import('@itookit/vfslib').SeqFileEntry[] = [];
         await vfs.fs.meta.seq!.walkEntries(p, (e) => { entries.push(e); return true; });
         const map = Object.fromEntries(entries.map(e => [e.key, e.value]));
         expect(map.name).toBe('alice');
@@ -66,7 +66,7 @@ describe('SeqFile operations (IndexedDB backend)', () => {
 
     it('walkEntries returns empty for new seqfile', async () => {
         const p = await mkSeq('empty.seq');
-        const entries: import('@itookit/common').SeqFileEntry[] = [];
+        const entries: import('@itookit/vfslib').SeqFileEntry[] = [];
         await vfs.fs.meta.seq!.walkEntries(p, (e) => { entries.push(e); return true; });
         expect(entries).toHaveLength(0);
     });

@@ -12,6 +12,17 @@ export interface IEditorHostContext {
     saveContent: (nodeId: string, content: string) => Promise<void>;
 }
 
+interface ChangeObservable {
+    onChange(callback: () => void): () => void;
+}
+
+function isChangeObservable(service: unknown): service is ChangeObservable {
+    if (typeof service !== 'object' || service === null || !('onChange' in service)) {
+        return false;
+    }
+    return typeof service.onChange === 'function';
+}
+
 /** System emoji icons shown in the entity header icon picker. */
 const SYSTEM_ICONS = [
     '📝', '📄', '📋', '✅', '❌', '⚡', '🔥', '⭐', '💡', '🔧',
@@ -26,7 +37,7 @@ const SYSTEM_ICONS = [
  * @template TService 服务层的类型
  */
 export abstract class BaseSettingsEditor<TService> implements IEditor {
-    protected listeners: Array<{ el: Element, type: string, handler: EventListener }> = [];
+    protected listeners: Array<{ target: EventTarget, type: string, handler: EventListener }> = [];
     protected container!: HTMLElement;
 
     // [新增] 宿主能力引用
@@ -51,8 +62,8 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
         }
 
         // Service 变更订阅
-        if (this.service && typeof (this.service as any).onChange === 'function') {
-            const unsubscribe = (this.service as any).onChange(() => this.render());
+        if (isChangeObservable(this.service)) {
+            const unsubscribe = this.service.onChange(() => this.render());
 
             // Hook destroy
             const originalDestroy = this.destroy;
@@ -75,7 +86,7 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
      * refreshes its list display. Safe to call without engine — no-ops silently.
      */
     protected async syncMetadata(changes: Record<string, unknown>): Promise<void> {
-        const engine = this.options.sessionEngine;
+        const engine = this.options.moduleFS;
         const nodeId = this.options.nodeId;
         if (!engine || !nodeId) return;
         await engine.driver.updateMetadata(nodeId, changes);
@@ -86,7 +97,7 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
      * Safe to call without engine — no-ops silently.
      */
     protected async syncName(newName: string): Promise<void> {
-        const engine = this.options.sessionEngine;
+        const engine = this.options.moduleFS;
         const nodeId = this.options.nodeId;
         if (!engine || !nodeId || !newName) return;
         await engine.driver.rename(nodeId, newName);
@@ -96,15 +107,17 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
 
     focus() { }
 
-    protected addEventListener(el: Element | null, type: string, handler: EventListener) {
-        if (el) {
-            el.addEventListener(type, handler);
-            this.listeners.push({ el, type, handler });
+    protected addEventListener(target: EventTarget | null, type: string, handler: EventListener) {
+        if (target) {
+            target.addEventListener(type, handler);
+            this.listeners.push({ target, type, handler });
         }
     }
 
     protected clearListeners() {
-        this.listeners.forEach(l => l.el.removeEventListener(l.type, l.handler));
+        this.listeners.forEach(listener => {
+            listener.target.removeEventListener(listener.type, listener.handler);
+        });
         this.listeners = [];
     }
 
@@ -149,7 +162,12 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
         return null; // 设置页面通常没有附件需要清理
     }
 
-    on(_eventName: EditorEvent, _callback: EditorEventCallback) { return () => { }; }
+    on<E extends EditorEvent>(
+        _eventName: E,
+        _callback: EditorEventCallback<E>,
+    ): () => void {
+        return () => {};
+    }
 
     // ── Entity header helpers (shared by Skill, MCP, and future entity editors) ──
 
@@ -349,7 +367,11 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
             }
         };
         document.addEventListener('click', onClickOutside);
-        this.listeners.push({ el: document as unknown as Element, type: 'click', handler: onClickOutside as unknown as EventListener });
+        this.listeners.push({
+            target: document,
+            type: 'click',
+            handler: onClickOutside as EventListener,
+        });
     }
 
     /** Auto-sizes an input to its content width (max 280px). */

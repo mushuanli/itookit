@@ -7,10 +7,7 @@
 //   - Children reverse index + fold caching + soft-delete filtering
 //   - Event emission: round:appended, round:updated, round:deleted
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import type {
-    Round, RoundId, Ref, ChatMessage, ILog, RefStore,
-} from '@itookit/common';
+import type { describe, it, expect, beforeEach } from '@itookit/common';
 import type { IChatEngine, FSNode } from '../src/persistence/types';
 import type { RoundManifest, PersistedRound, RoundProjection } from '../src/persistence/round-types';
 import type { RoundLogEvent } from '../src/persistence/round-events';

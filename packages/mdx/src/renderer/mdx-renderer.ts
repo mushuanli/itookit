@@ -11,7 +11,7 @@ export interface MDxRendererConfig {
   searchMarkClass?: string;
   nodeId?: string;
   ownerNodeId?: string;
-  sessionEngine?: IModuleFS;
+  moduleFS?: IModuleFS;
 }
 
 export interface RenderOptions {
@@ -53,7 +53,7 @@ export class MDxRenderer {
     this.markedAdapter = new MarkedAdapter();
     this.streamingDiffer = new StreamingDiffer();
 
-    const engine = config.sessionEngine;
+    const engine = config.moduleFS;
     const nodeId = config.nodeId;
     const ownerNodeId = config.ownerNodeId ?? config.nodeId;
 

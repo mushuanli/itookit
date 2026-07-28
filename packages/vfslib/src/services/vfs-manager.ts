@@ -35,6 +35,7 @@ import type {
 } from '@itookit/common';
 
 import {
+    EventBus,
     FSModuleNotFoundError,
     FSAlreadyExistsError,
     FSError,
@@ -44,14 +45,13 @@ import {
 
 import { VFSEngine } from '../engine/vfs-engine';
 import { ModuleFS, type ModuleFSDeps } from './module-fs';
-import { EventBus } from '../event/event-bus';
 import * as P from '../utils/path';
 
 export class VFSManager implements IVFSManager {
     private readonly engine: VFSEngine;
     private readonly modules = new Map<string, ModuleInfo>();
     private readonly engines = new Map<string, IModuleFS>();
-    private readonly managerBus = new EventBus();
+    private readonly managerBus = new EventBus<VFSManagerEventPayloadMap>();
 
     readonly mounts: IMountService;
     readonly devices: IDeviceManager;
@@ -484,8 +484,9 @@ export class VFSManager implements IVFSManager {
         eventType: E,
         handler: (event: VFSManagerEvent<E>) => void,
     ): () => void {
-        return this.managerBus.on(eventType as any, (payload, meta) =>
-            handler({ type: eventType, payload, timestamp: meta.timestamp } as VFSManagerEvent<E>));
+        return this.managerBus.on(eventType, (payload, meta) => {
+            handler({ type: eventType, payload, timestamp: meta.timestamp });
+        });
     }
 
     onAny(
@@ -511,9 +512,9 @@ export class VFSManager implements IVFSManager {
 
     private emitManager<E extends VFSManagerEventType>(
         type: E,
-        payload: E extends keyof VFSManagerEventPayloadMap ? VFSManagerEventPayloadMap[E] : unknown,
+        payload: VFSManagerEventPayloadMap[E],
     ): void {
-        this.managerBus.emit(type as any, payload as any);
+        this.managerBus.emit(type, payload);
     }
 }
 
@@ -740,7 +741,7 @@ class MaintenanceService implements IMaintenanceService {
             try {
                 const eng = this.manager.getEngine(modName);
                 await eng.driver.walkTree?.((node) => {
-                    if (node.type === 'symlink' && !(node as any).symlinkTarget) {
+                    if (node.type === 'symlink' && !node.symlinkTarget) {
                         errors.push({
                             path: node.path,
                             issue: 'symlink has no target',
@@ -761,7 +762,11 @@ class MaintenanceService implements IMaintenanceService {
     }
 
     async createBackup(): Promise<string> {
-        const backup: Record<string, any> = {
+        const backup: {
+            version: number;
+            createdAt: number;
+            modules: Record<string, ModuleExportData>;
+        } = {
             version: 1,
             createdAt: Date.now(),
             modules: {} as Record<string, ModuleExportData>,
@@ -843,7 +848,7 @@ class MaintenanceService implements IMaintenanceService {
                     await eng.driver.createDirectory({
                         name: node.name,
                         parentPath,
-                        metadata: node.metadata as any,
+                        metadata: node.metadata ? { ...node.metadata } : undefined,
                         recursive: true,
                     });
                 } else if (node.type === 'file' || node.type === 'seqfile') {
@@ -851,7 +856,7 @@ class MaintenanceService implements IMaintenanceService {
                         name: node.name,
                         parentPath,
                         content: data.contents[node.path],
-                        metadata: node.metadata as any,
+                        metadata: node.metadata ? { ...node.metadata } : undefined,
                         tags: node.tags ? [...node.tags] : undefined,
                         type: node.type,
                         recursive: true,

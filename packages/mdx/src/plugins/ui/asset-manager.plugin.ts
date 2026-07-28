@@ -42,7 +42,7 @@ export class AssetManagerPlugin implements MDxPlugin {
     }
 
     private async openAssetManager(context: PluginContext, editor: any): Promise<void> {
-        const engine = context.getSessionEngine?.();
+        const engine = context.getModuleFS?.();
         const ownerNodeId = context.getOwnerNodeId?.();
 
         if (!engine) {

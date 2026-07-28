@@ -4,25 +4,25 @@
 
 import { EventBus as CoreEventBus } from '@itookit/common';
 
-export type EventCallback<T = any> = (payload: T) => void;
+export type EventCallback<T = unknown> = (payload: T) => void;
 
 export class EventBus {
-    private bus: CoreEventBus<Record<string, any>>;
+    private bus: CoreEventBus<Record<string, unknown>>;
 
     /**
      * @param coalesce - event names to coalesce via queueMicrotask (overwrite semantics).
      *   Defaults to ['change', 'cursorMove'].
      */
     constructor(coalesce: string[] = ['change', 'cursorMove']) {
-        this.bus = new CoreEventBus<Record<string, any>>({ coalesce });
+        this.bus = new CoreEventBus<Record<string, unknown>>({ coalesce });
     }
 
-    on<T = any>(event: string, callback: EventCallback<T>): () => void {
-        return this.bus.on(event, (payload) => callback(payload));
+    on<T = unknown>(event: string, callback: EventCallback<T>): () => void {
+        return this.bus.on(event, payload => callback(payload as T));
     }
 
-    emit<T = any>(event: string, payload?: T): void {
-        this.bus.emit(event, payload as any);
+    emit<T = unknown>(event: string, payload?: T): void {
+        this.bus.emit(event, payload);
     }
 
     clear(): void {

@@ -26,7 +26,7 @@ export interface HistoryViewOptions {
     bus?: IEditorEventBus;
     nodeId?: string;
     ownerNodeId?: string;
-    sessionEngine?: IModuleFS;
+    moduleFS?: IModuleFS;
     initialCollapseStates?: CollapseStateMap;
     onScroll?: () => void;
     /** 点击错误气泡中的"配置连接"按钮时触发（通常导航到 settings/connections） */
@@ -71,7 +71,7 @@ export class HistoryView implements IHistoryPresenter {
         const ctx: RendererContext = {
             nodeId: options.nodeId,
             ownerNodeId: options.ownerNodeId,
-            sessionEngine: options.sessionEngine,
+            moduleFS: options.moduleFS,
         };
 
         this.renderer = new SessionRenderer(container, ctx, options.onContentChange);

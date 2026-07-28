@@ -10,7 +10,7 @@
  *   node:updated → { nodes: [{nodeId}] }
  *   node:deleted → { requestedIds, allDeletedIds }
  *   node:renamed → { nodes: [{nodeId, oldName, newName}] }
- *   node:moved   → any  (triggers EngineAdapter.loadData() full refresh)
+ *   node:moved   → empty nodes list (triggers EngineAdapter.loadData() full refresh)
  */
 import type {
     IModuleFS,
@@ -22,6 +22,8 @@ import type {
     FSModuleStats,
     FileContent,
     ReadOptions,
+    ListOptions,
+    FSSearchQuery,
     CreateFileOptions,
     CreateDirectoryOptions,
     DeleteOptions,
@@ -29,17 +31,45 @@ import type {
     MoveOptions,
     FSEventType,
     FSEvent,
+    FSEventPayloadMap,
     IAssetOperations,
     ITagOperations,
     LLMSkill,
     IAgentManagementService,
 } from '@itookit/common';
 import { FSCapabilityError } from '@itookit/common';
+import { EventBus } from '@itookit/common';
 import yaml from 'js-yaml';
 
 /** Strip common skill file extensions from a user-typed or imported filename. */
 function cleanName(raw: string): string {
     return raw.replace(/\.(skill\.(yaml|yml)|yaml|yml|json)$/i, '').trim() || raw.trim();
+}
+
+function toSkillId(path: string): string {
+    return path.startsWith('/') ? path.slice(1) : path;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSkillType(value: unknown): value is LLMSkill['type'] {
+    return ['builtin', 'http', 'shell', 'prompt', 'mcp', 'custom'].includes(String(value));
+}
+
+function isSkillDefinition(value: unknown): value is LLMSkill {
+    if (!isRecord(value)) return false;
+    return typeof value.id === 'string'
+        && typeof value.name === 'string'
+        && typeof value.description === 'string'
+        && isSkillType(value.type)
+        && typeof value.enabled === 'boolean'
+        && typeof value.instructions === 'string'
+        && Array.isArray(value.tools)
+        && Array.isArray(value.triggerPatterns)
+        && typeof value.autoLoad === 'boolean'
+        && typeof value.priority === 'number';
 }
 
 // ── 能力声明 ───────────────────────────────────────────────────
@@ -76,12 +106,10 @@ export class SkillsEngine implements IModuleFS {
     readonly meta: import('@itookit/common').IFSMetaDriver;
     readonly tags: ITagOperations;
 
-    private readonly listeners = new Map<string, Set<(e: FSEvent) => void>>();
     private unsubscribe: (() => void) | null = null;
-    private _suppressOnChange = false;
 
-    constructor(private readonly service: IAgentManagementService) {
-        const driverImpl = new SkillsDriver(this, this.listeners);
+    constructor(service: IAgentManagementService) {
+        const driverImpl = new SkillsDriver(service);
         this.driver = driverImpl;
 
         // Tags impl delegates to driver's setTags
@@ -99,10 +127,11 @@ export class SkillsEngine implements IModuleFS {
             tags: this.tags,
         };
 
-        this.unsubscribe = (service as any).onChange?.(() => {
-            if (this._suppressOnChange) return;
-            driverImpl.fire('node:moved', {});
-        }) ?? null;
+        this.unsubscribe = service.onChange(() => {
+            if (!driverImpl.isSuppressingEvents) {
+                driverImpl.fire('node:moved', { nodes: [] });
+            }
+        });
     }
 
     async init(): Promise<void> {}
@@ -113,10 +142,11 @@ export class SkillsEngine implements IModuleFS {
 
     async dispose(): Promise<void> {
         this.unsubscribe?.();
-        this.listeners.clear();
     }
 
-    on = (e: any, cb: any) => this.driver.on(e, cb);
+    on<E extends FSEventType>(event: E, callback: (event: FSEvent<E>) => void): () => void {
+        return this.driver.on(event, callback);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -126,39 +156,42 @@ export class SkillsEngine implements IModuleFS {
 class SkillsDriver implements IFSDriver {
     readonly moduleId = 'skills';
     readonly capabilities: FSCapabilities = SKILLS_CAPS;
+    private readonly events = new EventBus<FSEventPayloadMap>();
+    private suppressEvents = false;
 
-    constructor(
-        private readonly engine: SkillsEngine,
-        private readonly listeners: Map<string, Set<(e: FSEvent) => void>>,
-    ) {}
+    constructor(private readonly service: IAgentManagementService) {}
 
     // ── Events ───────────────────────────────────────
-    on<E extends FSEventType>(event: E, cb: (e: FSEvent<E>) => void): () => void {
-        const key = event;
-        if (!this.listeners.has(key)) this.listeners.set(key, new Set());
-        this.listeners.get(key)!.add(cb as any);
-        return () => this.listeners.get(key)?.delete(cb as any);
+    on<E extends FSEventType>(event: E, callback: (event: FSEvent<E>) => void): () => void {
+        return this.events.on(event, (payload, meta) => {
+            callback({
+                type: event,
+                payload,
+                timestamp: meta.timestamp,
+                moduleId: this.moduleId,
+            });
+        });
     }
 
     /** @internal — used by SkillsEngine to fire events */
-    fire(type: string, payload: unknown): void {
-        const event = { type, payload } as FSEvent;
-        for (const h of this.listeners.get(type) ?? []) (h as any)(event);
+    fire<E extends FSEventType>(type: E, payload: FSEventPayloadMap[E]): void {
+        this.events.emit(type, payload);
     }
 
-    private get _suppress() { return this.engine['_suppressOnChange']; }
-    private set _suppress(v: boolean) { this.engine['_suppressOnChange'] = v; }
-    private get service() { return this.engine['service']; }
+    get isSuppressingEvents(): boolean {
+        return this.suppressEvents;
+    }
 
     // ── Read ─────────────────────────────────────────
 
     async getNode(id: string): Promise<FSNode | null> {
         const skills = await this.service.getSkills();
-        const s = skills.find((x: LLMSkill) => x.id === id);
+        const skillId = toSkillId(id);
+        const s = skills.find((x: LLMSkill) => x.id === skillId);
         return s ? toFSNode(s) : null;
     }
 
-    async getChildren(parentId: string, _options?: any): Promise<FSNode[]> {
+    async getChildren(parentId: string, _options?: ListOptions): Promise<FSNode[]> {
         if (parentId !== '/') return [];
         const skills = await this.service.getSkills();
         return skills.map((s: LLMSkill) => toFSNode(s));
@@ -168,24 +201,25 @@ class SkillsDriver implements IFSDriver {
     readContent(id: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
     readContent(id: string, options?: ReadOptions): Promise<FileContent>;
     async readContent(id: string, _options?: ReadOptions): Promise<FileContent> {
-        return id;
+        return toSkillId(id);
     }
 
     async resolvePath(_path: string): Promise<string | null> {
         const skills = await this.service.getSkills();
         for (const s of skills) {
-            if (_path === `/${s.id}`) return s.id;
+            if (_path === `/${s.id}` || _path === s.id) return `/${s.id}`;
         }
         return null;
     }
 
     async exists(id: string): Promise<boolean> {
         const skills = await this.service.getSkills();
-        return skills.some((s: LLMSkill) => s.id === id);
+        const skillId = toSkillId(id);
+        return skills.some((s: LLMSkill) => s.id === skillId);
     }
 
-    async search(query: any): Promise<FSSearchResult> {
-        const text = query?.name?.contains as string | undefined;
+    async search(query: FSSearchQuery): Promise<FSSearchResult> {
+        const text = query.name?.contains;
         const nodes: FSNode[] = [];
         if (text) {
             const lower = text.toLowerCase();
@@ -209,30 +243,50 @@ class SkillsDriver implements IFSDriver {
     // ── Write ────────────────────────────────────────
 
     async writeContent(id: string, content: FileContent): Promise<void> {
+        id = toSkillId(id);
         const text = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
         if (!text.trim()) { console.warn('[skill] writeContent: empty, skipping'); return; }
 
-        let incoming: any;
+        let incoming: unknown;
         try { incoming = yaml.load(text); } catch (e) { console.error('[skill] writeContent: yaml failed', e); return; }
-        if (!incoming || typeof incoming !== 'object') return;
+        if (!isRecord(incoming)) return;
 
         const skills = await this.service.getSkills() as LLMSkill[];
         const existing = skills.find((s: LLMSkill) => s.id === id);
         const targetId = (typeof incoming.id === 'string' && incoming.id.trim()) ? incoming.id.trim() : id;
 
-        const updated: LLMSkill = { ...existing, ...incoming, id: targetId, modifiedAt: Date.now() };
+        const candidate: unknown = {
+            ...existing,
+            ...incoming,
+            id: targetId,
+            modifiedAt: Date.now(),
+        };
+        if (!isSkillDefinition(candidate)) {
+            console.error('[skill] writeContent: invalid skill definition');
+            return;
+        }
+        const updated = candidate;
         await this.service.saveSkill(updated);
 
         if (targetId !== id) {
             if (existing) await this.service.deleteSkill(id).catch(() => {});
-            this.fire('node:deleted', { requestedIds: [id], allDeletedIds: [id] });
-            this.fire('node:created', { nodes: [{ nodeId: targetId, parentId: null, path: `/${targetId}`, type: 'file' }] });
+            this.fire('node:deleted', {
+                requestedPaths: [`/${id}`],
+                allDeletedPaths: [`/${id}`],
+            });
+            this.fire('node:created', {
+                nodes: [{ parentPath: null, path: `/${targetId}`, type: 'file' }],
+            });
         } else {
-            this.fire('node:updated', { nodes: [{ nodeId: targetId }] });
+            this.fire('node:updated', {
+                nodes: [{ path: `/${targetId}`, changedFields: ['content'] }],
+                reason: 'content',
+            });
         }
     }
 
     async updateMetadata(id: string, metadata: Record<string, unknown>): Promise<void> {
+        id = toSkillId(id);
         const skills = await this.service.getSkills() as LLMSkill[];
         const s = skills.find((x: LLMSkill) => x.id === id);
         if (!s) return;
@@ -243,13 +297,16 @@ class SkillsDriver implements IFSDriver {
 
         if (Object.keys(updates).length === 0) return;
 
-        this._suppress = true;
+        this.suppressEvents = true;
         try {
             await this.service.saveSkill({ ...s, ...updates, modifiedAt: Date.now() });
         } finally {
-            this._suppress = false;
+            this.suppressEvents = false;
         }
-        this.fire('node:updated', { nodes: [{ nodeId: id }] });
+        this.fire('node:updated', {
+            nodes: [{ path: `/${id}`, changedFields: ['metadata'] }],
+            reason: 'metadata',
+        });
     }
 
     async appendContent(): Promise<void> { throw new Error('not supported'); }
@@ -261,8 +318,8 @@ class SkillsDriver implements IFSDriver {
         if (content) {
             const text = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
             try {
-                const parsed = yaml.load(text) as any;
-                if (parsed && typeof parsed === 'object') {
+                const parsed = yaml.load(text);
+                if (isRecord(parsed)) {
                     const skillId = (typeof parsed.id === 'string' && parsed.id.trim())
                         ? parsed.id.trim()
                         : cleanName(rawName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `skill-${Date.now()}`;
@@ -270,15 +327,25 @@ class SkillsDriver implements IFSDriver {
                         ? parsed.name.trim()
                         : cleanName(rawName);
 
-                    const skill: LLMSkill = {
+                    const candidate: unknown = {
+                        description: '', instructions: '', tools: [],
+                        triggerPatterns: [], autoLoad: false, priority: 50,
                         type: 'prompt', enabled: false,
                         ...parsed, id: skillId, name: skillName,
-                        createdAt: parsed.createdAt ?? Date.now(),
+                        createdAt: typeof parsed.createdAt === 'number'
+                            ? parsed.createdAt
+                            : Date.now(),
                         modifiedAt: Date.now(),
                     };
+                    if (!isSkillDefinition(candidate)) {
+                        throw new Error('Invalid skill definition');
+                    }
+                    const skill = candidate;
                     await this.service.saveSkill(skill);
                     const node = toFSNode(skill);
-                    this.fire('node:created', { nodes: [{ nodeId: skill.id, parentId: null, path: `/${skill.id}`, type: 'file' }] });
+                    this.fire('node:created', {
+                        nodes: [{ parentPath: null, path: `/${skill.id}`, type: 'file' }],
+                    });
                     return node;
                 }
             } catch (e) {
@@ -298,7 +365,9 @@ class SkillsDriver implements IFSDriver {
         };
         await this.service.saveSkill(skill);
         const node = toFSNode(skill);
-        this.fire('node:created', { nodes: [{ nodeId: id, parentId: null, path: `/${id}`, type: 'file' }] });
+        this.fire('node:created', {
+            nodes: [{ parentPath: null, path: `/${id}`, type: 'file' }],
+        });
         return node;
     }
 
@@ -307,24 +376,37 @@ class SkillsDriver implements IFSDriver {
     }
 
     async rename(id: string, newName: string, _opts?: RenameOptions): Promise<void> {
+        id = toSkillId(id);
         const skills = await this.service.getSkills() as LLMSkill[];
         const s = skills.find((x: LLMSkill) => x.id === id);
         if (!s || s.name === newName) return;
         const oldName = s.name;
-        this._suppress = true;
+        this.suppressEvents = true;
         try {
             await this.service.saveSkill({ ...s, name: newName, modifiedAt: Date.now() });
         } finally {
-            this._suppress = false;
+            this.suppressEvents = false;
         }
-        this.fire('node:renamed', { nodes: [{ nodeId: id, oldName, newName }] });
+        this.fire('node:renamed', {
+            nodes: [{
+                oldPath: `/${id}`,
+                newPath: `/${id}`,
+                oldName,
+                newName,
+            }],
+        });
     }
 
     async delete(ids: string[], _options?: DeleteOptions): Promise<void> {
+        ids = ids.map(toSkillId);
         for (const id of ids) {
             await this.service.deleteSkill(id);
         }
-        this.fire('node:deleted', { requestedIds: ids, allDeletedIds: ids });
+        const paths = ids.map(id => `/${id}`);
+        this.fire('node:deleted', {
+            requestedPaths: paths,
+            allDeletedPaths: paths,
+        });
     }
 
     async move(_ids: string[], _parent: string | null, _opts?: MoveOptions): Promise<void> {

@@ -117,6 +117,14 @@ function getPluginName(config: PluginConfig): string {
   return '';
 }
 
+function isPluginConfig(config: unknown): config is PluginConfig {
+  if (typeof config === 'string') return true;
+  if (Array.isArray(config)) return typeof config[0] === 'string';
+  return typeof config === 'object' && config !== null && (
+    'name' in config || 'install' in config
+  );
+}
+
 function resolvePluginInstance(
   pluginName: string,
   pluginConfig: PluginConfig,
@@ -292,16 +300,23 @@ export const registerPlugin = globalPluginRegistry.register.bind(globalPluginReg
 // === 默认工厂 ===
 
 export const defaultEditorFactory: EditorFactory = async (container, options) => {
+  const plugins = (options.plugins ?? []).filter(isPluginConfig);
+  const rawDefaults = options.defaultPluginOptions ?? {};
+  const titlebarDefaults = rawDefaults['core:titlebar'];
+  const titlebarOptions = typeof titlebarDefaults === 'object' && titlebarDefaults !== null
+    ? titlebarDefaults
+    : {};
+
   return createMDxEditor(container, {
     ...options,
-    plugins: ['core:titlebar', 'interaction:auto-save', ...(options.plugins || [])],
+    plugins: ['core:titlebar', 'interaction:auto-save', ...plugins],
     initialMode: 'render',
     defaultPluginOptions: {
-      ...options.defaultPluginOptions,
+      ...rawDefaults,
       'core:titlebar': {
         title: options.title || 'Untitled',
         enableToggleEditMode: true,
-        ...(options.defaultPluginOptions?.['core:titlebar'] || {}),
+        ...titlebarOptions,
       },
     },
   });

@@ -6,7 +6,7 @@
 //   - Colors follow Tailwind 500/600 range for consistency.
 //   - Add a new entry here before using an icon in any component.
 
-import type { SkillType } from '../interfaces/skills/skill-types';
+import type { SkillType } from '@itookit/llm-common';
 
 // ── Skill types ───────────────────────────────────────────────────────────────
 

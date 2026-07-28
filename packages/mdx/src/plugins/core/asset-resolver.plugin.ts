@@ -30,7 +30,7 @@ export class AssetResolverPlugin implements MDxPlugin {
     }
 
     private async resolveAssets(root: HTMLElement, context: PluginContext): Promise<void> {
-        const moduleFS = context.getSessionEngine?.();
+        const moduleFS = context.getModuleFS?.();
         const ownerNodeId = context.getOwnerNodeId?.();
         if (!moduleFS || !ownerNodeId) return;
 
@@ -74,7 +74,7 @@ export class AssetResolverPlugin implements MDxPlugin {
      * 清理当前文档中未引用的资产
      */
     private async pruneUnusedAssets(context: PluginContext): Promise<number> {
-        const moduleFS = context.getSessionEngine?.();
+        const moduleFS = context.getModuleFS?.();
         const ownerNodeId = context.getOwnerNodeId?.();
         if (!moduleFS || !ownerNodeId) return 0;
 

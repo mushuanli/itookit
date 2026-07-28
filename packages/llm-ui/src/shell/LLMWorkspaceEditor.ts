@@ -2,7 +2,7 @@
 
 import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent,
-    EditorEventCallback, CollapseExpandResult, Toast,
+    EditorEventMap, EditorEventCallback, EventBus, CollapseExpandResult, Toast,
 } from '@itookit/common';
 import type {
     HarnessControlPlane,
@@ -18,7 +18,7 @@ import {
 
 // Domain — 只依赖接口和类型
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
-import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
+import type { IChatInputConfig, IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
 import type { IBranchPresenter } from '../domain/ports/IBranchPresenter';
 import type { IEditorEventBus } from '../domain/events';
@@ -68,8 +68,8 @@ import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlug
 import { getPromptHistory } from '@itookit/llm-conversation';
 import { AssetManagerUI } from '@itookit/mdxeditor';
 
-export interface LLMEditorOptions extends Omit<EditorOptions, 'sessionEngine'> {
-    sessionEngine: IChatEngine;
+export interface LLMEditorOptions extends EditorOptions {
+    chatEngine: IChatEngine;
     agentService: IAgentConfigService;
     initialInputState?: { text?: string; agentId?: string };
     isNewSession?: boolean;
@@ -151,7 +151,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private domCache!: DOMCache;
 
     // === 状态 ===
-    private listeners = new Map<string, Set<EditorEventCallback>>();
+    private editorEvents = new EventBus<EditorEventMap>();
     private globalEventUnsub: (() => void) | null = null;
     private sessionEventUnsub: (() => void) | null = null;
     private agentServiceUnsub: (() => void) | null = null;
@@ -168,7 +168,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private options: LLMEditorOptions;
 
     private get engine(): IChatEngine {
-        return this.options.sessionEngine as IChatEngine;
+        return this.options.chatEngine;
     }
 
     private get hostContext(): EditorHostContext | undefined {
@@ -215,14 +215,18 @@ export class LLMWorkspaceEditor implements IEditor {
             await this.branchIndicator.refresh();
 
             this.initComplete = true;
-            this.emit('ready');
+            this.emit('ready', undefined);
             this.initResolve?.();
-        } catch (e: any) {
-            if (e.code === 'ABORTED' || e.message?.includes('Bind cancelled')) {
+        } catch (error: unknown) {
+            const code = typeof error === 'object' && error !== null && 'code' in error
+                ? error.code
+                : undefined;
+            const message = error instanceof Error ? error.message : '';
+            if (code === 'ABORTED' || message.includes('Bind cancelled')) {
                 this.initResolve?.();
                 return;
             }
-            throw e;
+            throw error;
         }
     }
 
@@ -303,7 +307,7 @@ export class LLMWorkspaceEditor implements IEditor {
             bus: this.bus,
             nodeId: this.options.nodeId,
             ownerNodeId: this.options.ownerNodeId || this.options.nodeId,
-            sessionEngine: this.options.sessionEngine as any,
+            moduleFS: this.options.moduleFS,
             initialCollapseStates: this.stateManager.getCollapseStates(),
             onScroll: () => this.navigation.updateActiveSessionHighlight(),
             onNavigateSettings: () => {
@@ -443,7 +447,7 @@ export class LLMWorkspaceEditor implements IEditor {
                     Toast.error(error instanceof Error ? error.message : 'Unable to attach execution run'),
                 );
             },
-            onContentChanged: () => this.emit('change'),
+            onContentChanged: () => this.emit('change', undefined),
             onNavRefresh: () => this.navigation.pushNavData(),
         });
     }
@@ -573,17 +577,17 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private handleContentChange(id: string, content: string, _type: 'user' | 'node'): void {
         this.commandBus.execute('session.update-draft', { messageId: id, newContent: content }).catch(() => {});
-        this.emit('change');
+        this.emit('change', undefined);
     }
 
     private async handleCommitEdit(id: string, content: string): Promise<void> {
         await this.errorHandler.wrap(async () => {
             await this.commandBus.execute('session.commit-edit', { messageId: id, newContent: content, autoRerun: false });
-            this.emit('change');
+            this.emit('change', undefined);
         }, 'Commit edit', 'warn');
     }
 
-    private async handleConfigChange(config: any): Promise<void> {
+    private async handleConfigChange(config: IChatInputConfig): Promise<void> {
         if (config.settings) {
             if (this.currentSessionId) {
                 await this.errorHandler.wrap(
@@ -597,7 +601,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handleTitleChange(title: string): Promise<void> {
         this.currentTitle = title;
-        this.emit('change');
+        this.emit('change', undefined);
         if (this.options.nodeId) {
             await this.errorHandler.wrap(
                 () => this.sessionService.renameSession(this.options.nodeId!, title),
@@ -615,7 +619,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private async handleCopy(): Promise<void> {
-        await new CopyAllCommand(this.buildCommandContext()).run(undefined as any);
+        await new CopyAllCommand(this.buildCommandContext()).run();
         const btn = this.domCache.byId('llm-btn-copy');
         if (btn) {
             const orig = btn.innerHTML;
@@ -625,9 +629,13 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private async handlePrint(): Promise<void> {
+        if (!this.options.moduleFS) {
+            Toast.error('File system is unavailable for printing');
+            return;
+        }
         await new PrintCommand(this.buildCommandContext()).run({
             title: this.currentTitle,
-            engine: this.engine,
+            engine: this.options.moduleFS,
             nodeId: this.options.nodeId,
         });
     }
@@ -635,12 +643,14 @@ export class LLMWorkspaceEditor implements IEditor {
     private async handleOpenAssetManager(): Promise<void> {
         await this.errorHandler.wrap(async () => {
             const ownerNodeId = this.options.ownerNodeId || this.options.nodeId;
-            if (!this.engine || !ownerNodeId) throw new Error('Engine not connected');
+            if (!this.options.moduleFS || !ownerNodeId) {
+                throw new Error('Module filesystem not connected');
+            }
 
             const assetDirPath = await this.assetService.getAssetDirectoryId(ownerNodeId);
             if (!assetDirPath) { Toast.info('No attachments found'); return; }
 
-            const ui = new AssetManagerUI(this.engine as any, null as any, {});
+            const ui = new AssetManagerUI(this.options.moduleFS, null, {});
             await ui.show(assetDirPath);
         }, 'Open Asset Manager');
     }
@@ -794,10 +804,10 @@ export class LLMWorkspaceEditor implements IEditor {
 
     setText(_text: string): void {
         this.loadSession()
-            .then(() => this.emit('contentLoaded' as EditorEvent))
+            .then(() => this.emit('contentLoaded', undefined))
             .catch(e => {
                 this.historyView.renderError(e);
-                this.emit('error' as EditorEvent, e);
+                this.emit('error', e);
             });
     }
 
@@ -839,14 +849,15 @@ export class LLMWorkspaceEditor implements IEditor {
         return this.collapseBlocks();
     }
 
-    on(event: EditorEvent, cb: EditorEventCallback): () => void {
-        if (!this.listeners.has(event)) this.listeners.set(event, new Set());
-        this.listeners.get(event)!.add(cb);
-        return () => this.listeners.get(event)?.delete(cb);
+    on<E extends EditorEvent>(
+        event: E,
+        callback: EditorEventCallback<E>,
+    ): () => void {
+        return this.editorEvents.on(event, payload => callback(payload));
     }
 
-    private emit(event: EditorEvent, payload?: any): void {
-        this.listeners.get(event)?.forEach(cb => cb(payload));
+    private emit<E extends EditorEvent>(event: E, payload: EditorEventMap[E]): void {
+        this.editorEvents.emit(event, payload);
     }
 
     // ================================================================
@@ -967,7 +978,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // 10. DOM 清理
         this.container.innerHTML = '';
-        this.listeners.clear();
+        this.editorEvents.clear();
         this.nodeCommands.clear();
     }
 }

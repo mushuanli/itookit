@@ -34,6 +34,9 @@ import type {
     ITagOperations,
     FileContent,
     ReadOptions,
+    ListOptions,
+    FSEventType,
+    FSEvent,
 } from '@itookit/common';
 import { FSCapabilityError } from '@itookit/common';
 
@@ -73,23 +76,30 @@ const BLOCKED_CONTENT = (name: string, path: string, mod: string): string =>
 // ── FSNode wrapper for composite IDs ──────────────────────────────────────────
 
 function wrapFSNode(node: FSNode, id: string, parentPath: string | null, moduleId: string): SystemFSNode {
+    const metadata = {
+        ...node.metadata,
+        _showAll: true,
+        _sourcePath: node.path,
+    };
     if (node.type === 'directory') {
         return {
             ...node,
             id,
+            path: id,
             parentPath,
             moduleId,
             tags: node.tags ? [...node.tags] : [],
-            metadata: { ...(node.metadata as Record<string, unknown>), _showAll: true },
+            metadata,
         } as SystemFSNode<FSDirectoryNode>;
     }
     return {
         ...node,
         id,
+        path: id,
         parentPath,
         moduleId,
         tags: node.tags ? [...node.tags] : [],
-        metadata: { ...(node.metadata as Record<string, unknown>), _showAll: true },
+        metadata,
     } as SystemFSNode<FSFileNode>;
 }
 
@@ -110,13 +120,6 @@ async function collectTree(
         const cId = compositeId(moduleName, child.path);
         const wrapped = wrapFSNode(child, cId, parentPath, moduleName);
 
-        // Pre-load content for non-sensitive files (used by editor via item.content.data)
-        if (child.type !== 'directory' && !isSensitivePath(child.path)) {
-            try {
-                const raw = await fs.driver.readContent(child.path);
-                (wrapped as any)._content = raw;
-            } catch { /* unreadable */ }
-        }
         result.push(wrapped);
     }
     return result;
@@ -171,7 +174,9 @@ export class SystemVFSEngine implements IModuleFS {
     async init(): Promise<void> {}
     openFile(_nodeId: string): never { throw new Error('not supported'); }
 
-    on = (e: any, cb: any) => this.driver.on(e, cb);
+    on<E extends FSEventType>(event: E, callback: (event: FSEvent<E>) => void): () => void {
+        return this.driver.on(event, callback);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -206,7 +211,7 @@ class SystemFSDriver implements IFSDriver {
                 parentPath: null,
                 name: moduleName,
                 type: 'directory' as const,
-                path: `/${moduleName}`,
+                path: id,
                 createdAt: 0,
                 modifiedAt: 0,
                 version: 0,
@@ -229,7 +234,7 @@ class SystemFSDriver implements IFSDriver {
         }
     }
 
-    async getChildren(parentId: string, _options?: any): Promise<FSNode[]> {
+    async getChildren(parentId: string, _options?: ListOptions): Promise<FSNode[]> {
         if (parentId === '/') {
             const nodes: FSNode[] = [this.buildDevDirNode()];
             const modules = this.vfs.getAllModules();
@@ -238,7 +243,7 @@ class SystemFSDriver implements IFSDriver {
                 parentPath: null,
                 name: mod.name,
                 type: 'directory' as const,
-                path: `/${mod.name}`,
+                path: moduleNodeId(mod.name),
                 createdAt: 0,
                 modifiedAt: 0,
                 version: 0,
@@ -283,7 +288,7 @@ class SystemFSDriver implements IFSDriver {
     async readContent(id: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
     async readContent(id: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
     async readContent(id: string, options?: ReadOptions): Promise<FileContent>;
-    async readContent(id: string, _options?: any): Promise<FileContent> {
+    async readContent(id: string, _options?: ReadOptions): Promise<FileContent> {
         if (id === DEV_DIR_ID) return '';
 
         if (id.startsWith(DEV_PREFIX)) {
@@ -296,10 +301,13 @@ class SystemFSDriver implements IFSDriver {
         const parsed = parseComposite(id);
         if (!parsed) return '';
 
-        const node = await this.getNode(id);
+        const source = await this.vfs
+            .getEngine(parsed.moduleName)
+            .driver
+            .getNode(parsed.realId);
 
-        if (node && isSensitivePath(node.path)) {
-            return BLOCKED_CONTENT(node.name, node.path, parsed.moduleName);
+        if (source && isSensitivePath(source.path)) {
+            return BLOCKED_CONTENT(source.name, source.path, parsed.moduleName);
         }
 
         try {
@@ -343,7 +351,7 @@ class SystemFSDriver implements IFSDriver {
             parentPath: null,
             name: 'dev',
             type: 'directory' as const,
-            path: '/dev',
+            path: DEV_DIR_ID,
             createdAt: 0,
             modifiedAt: 0,
             version: 0,
@@ -368,7 +376,7 @@ class SystemFSDriver implements IFSDriver {
             parentPath,
             name: handlerId,
             type: 'file' as const,
-            path: `/dev/${handlerId}`,
+            path: devNodeId(handlerId),
             createdAt: 0,
             modifiedAt: 0,
             size: 0,

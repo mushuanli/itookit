@@ -1,9 +1,4 @@
-import { describe, expect, it } from 'vitest';
-import type {
-    ChatCompletionChunk,
-    ProcessContext,
-    ProcessEvent,
-} from '@itookit/common';
+import type { describe, expect, it } from '@itookit/common';
 import { ChatProgram } from '../src/process';
 
 describe('ChatProgram', () => {

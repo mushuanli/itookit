@@ -10,14 +10,25 @@ import type {
     IFSMetaDriver,
     IAssetOperations,
     ITagOperations,
+    ISeqFileOperations,
+    IRefOperations,
 } from '@itookit/common';
 
 export class FSMetaDriverAdapter implements IFSMetaDriver {
     readonly assets: IAssetOperations;
     readonly tags: ITagOperations;
+    readonly seq?: ISeqFileOperations;
+    readonly refs?: IRefOperations;
 
-    constructor(assets: IAssetOperations, tags: ITagOperations) {
+    constructor(
+        assets: IAssetOperations,
+        tags: ITagOperations,
+        seq?: ISeqFileOperations,
+        refs?: IRefOperations,
+    ) {
         this.assets = assets;
         this.tags = tags;
+        this.seq = seq;
+        this.refs = refs;
     }
 }

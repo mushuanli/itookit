@@ -23,7 +23,7 @@ export const NAVIGATION_EVENTS = {
 export interface NavigationEventPayload {
     target: string;
     resourceId?: string;
-    params?: Record<string, any>;
+    params?: Record<string, unknown>;
 }
 
 /**

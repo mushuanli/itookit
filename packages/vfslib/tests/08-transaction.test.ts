@@ -41,8 +41,8 @@ describe('Transaction (IndexedDB backend)', () => {
         const { fs } = vfs;
         await fs.driver.createFile({ name: 'counter.txt', parentPath: null, content: '0' });
         await fs.driver.transaction(async (tx) => {
-            const content = await tx.readContent('/counter.txt');
-            const val = parseInt(content as string, 10) + 1;
+            const content = await tx.readContent('/counter.txt', { encoding: 'utf-8' });
+            const val = parseInt(content, 10) + 1;
             await tx.writeContent('/counter.txt', String(val));
         });
         expect(await readText(fs, '/counter.txt')).toBe('1');

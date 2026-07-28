@@ -76,11 +76,11 @@ export interface PrintService {
  */
 export class DefaultPrintService implements PrintService {
     private renderer: MDxRenderer | null = null;
-    private sessionEngine?: IModuleFS;
+    private moduleFS?: IModuleFS;
     private nodeId?: string;
 
-    constructor(sessionEngine?: IModuleFS, nodeId?: string) {
-        this.sessionEngine = sessionEngine;
+    constructor(moduleFS?: IModuleFS, nodeId?: string) {
+        this.moduleFS = moduleFS;
         this.nodeId = nodeId;
     }
 
@@ -90,7 +90,7 @@ export class DefaultPrintService implements PrintService {
     private getRenderer(): MDxRenderer {
         if (!this.renderer) {
             this.renderer = new MDxRenderer({
-                sessionEngine: this.sessionEngine,
+                moduleFS: this.moduleFS,
                 nodeId: this.nodeId,
             });
         }

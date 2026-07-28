@@ -29,7 +29,7 @@ interface NodeItem {
     type: 'file' | 'directory';
     metadata: {
         title: string;
-        custom: Record<string, any>;
+        custom: Record<string, unknown>;
     };
 }
 
@@ -55,15 +55,16 @@ export interface AIContextMenuOptions {
  *  - Directory: ai_defaultAgent + ai_initialPrompt (inherited by new sessions created inside)
  *  - File (.chat): ai_systemPrompt (overrides the agent's systemPrompt for this session only)
  */
-export function createAIContextMenuConfig(options: AIContextMenuOptions): ContextMenuConfig {
+export function createAIContextMenuConfig<TNode extends NodeItem>(
+    options: AIContextMenuOptions,
+): ContextMenuConfig<TNode> {
     const { agentService, engine } = options;
 
     return {
-        items: (item: object, defaultItems: MenuItem[]): MenuItem[] => {
-            const node = item as NodeItem;
+        items: (node: TNode, defaultItems: MenuItem<TNode>[]): MenuItem<TNode>[] => {
             const isDir = node.type === 'directory';
 
-            const aiItems: MenuItem[] = [{ type: 'separator' }];
+            const aiItems: MenuItem<TNode>[] = [{ type: 'separator' }];
 
             if (isDir) {
                 // Directory: configure defaults inherited by new sessions inside
@@ -74,12 +75,12 @@ export function createAIContextMenuConfig(options: AIContextMenuOptions): Contex
                     {
                         id: 'ai:setAgent',
                         label: currentAgentId ? '🤖 默认 Agent（已设置）' : '🤖 设置默认 Agent...',
-                        onClick: (_item: object) => showAgentDialog(node, agentService, engine, currentAgentId),
+                        onClick: () => showAgentDialog(node, agentService, engine, currentAgentId),
                     },
                     {
                         id: 'ai:setInitialPrompt',
                         label: currentPrompt ? '💬 新建提示（已设置）' : '💬 设置新建提示...',
-                        onClick: (_item: object) => showInitialPromptDialog(node, engine, currentPrompt),
+                        onClick: () => showInitialPromptDialog(node, engine, currentPrompt),
                     }
                 );
             } else {
@@ -89,7 +90,7 @@ export function createAIContextMenuConfig(options: AIContextMenuOptions): Contex
                 aiItems.push({
                     id: 'ai:setSystemPrompt',
                     label: currentSystemPrompt ? '🔧 系统提示（已自定义）' : '🔧 自定义系统提示...',
-                    onClick: (_item: object) => showSystemPromptDialog(node, engine, currentSystemPrompt),
+                    onClick: () => showSystemPromptDialog(node, engine, currentSystemPrompt),
                 });
             }
 

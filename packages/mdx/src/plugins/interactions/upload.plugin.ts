@@ -132,7 +132,7 @@ export class UploadPlugin implements MDxPlugin {
      * 核心处理逻辑：校验 -> 上传 -> 替换 Markdown
      */
     private async processFiles(fileList: FileList | File[], view: EditorView): Promise<void> {
-        const engine = this.context.getSessionEngine?.();
+        const engine = this.context.getModuleFS?.();
         // ✅ 获取 ownerNodeId (由 EditorOptions 传入，或默认为 nodeId)
         const ownerNodeId = this.context.getOwnerNodeId?.();
 

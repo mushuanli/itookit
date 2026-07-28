@@ -206,25 +206,63 @@ export async function serialize(
  * Throws on invalid format or version mismatch.
  */
 export function deserialize(yamlStr: string): VFSExportManifest {
-    const parsed = YAML.parse(yamlStr);
+    const parsed: unknown = YAML.parse(yamlStr);
 
-    if (!parsed || typeof parsed !== 'object') {
+    if (!isUnknownRecord(parsed)) {
         throw new Error('无效的导出文件：内容为空');
     }
 
-    const manifest = parsed as VFSExportManifest;
-
-    if (manifest.format !== 'vfs-export/v1') {
+    if (parsed.format !== 'vfs-export/v1') {
         throw new Error(
-            `不支持的导出格式版本: ${(manifest as any).format || '未知'}`,
+            `不支持的导出格式版本: ${formatLabel(parsed.format)}`,
         );
     }
 
-    if (!manifest.file?.name || !manifest.file?.content?.data) {
+    if (!isExportManifest(parsed)) {
         throw new Error('无效的导出文件：缺少必要字段');
     }
 
-    return manifest;
+    return parsed;
+}
+
+function isExportManifest(value: unknown): value is VFSExportManifest {
+    if (!isUnknownRecord(value)) return false;
+    if (value.format !== 'vfs-export/v1' || !isExportFile(value.file)) return false;
+    return value.assets === undefined ||
+        (Array.isArray(value.assets) && value.assets.every(isExportAsset));
+}
+
+function isExportFile(value: unknown): value is VFSExportFileEntry {
+    if (!isUnknownRecord(value) || !isEncodedContent(value.content)) return false;
+    if (typeof value.name !== 'string') return false;
+    if (value.type !== 'file' && value.type !== 'seqfile') return false;
+    if (value.tags !== undefined && !isStringArray(value.tags)) return false;
+    if (value.icon !== undefined && typeof value.icon !== 'string') return false;
+    return value.metadata === undefined || isUnknownRecord(value.metadata);
+}
+
+function isExportAsset(value: unknown): value is VFSExportAsset {
+    return isUnknownRecord(value) &&
+        typeof value.name === 'string' &&
+        isEncodedContent(value.content);
+}
+
+function isEncodedContent(value: unknown): value is VFSEncodedContent {
+    return isUnknownRecord(value) &&
+        (value.encoding === 'utf-8' || value.encoding === 'base64') &&
+        typeof value.data === 'string';
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function isStringArray(value: unknown): value is string[] {
+    return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+function formatLabel(value: unknown): string {
+    return typeof value === 'string' && value ? value : '未知';
 }
 
 /**

@@ -24,8 +24,8 @@ import type { PluginManager } from './plugin-manager';
  * 作用域持久化存储接口
  */
 export interface ScopedPersistenceStore {
-    get(key: string): Promise<any>;
-    set(key: string, value: any): Promise<void>;
+    get(key: string): Promise<unknown>;
+    set(key: string, value: unknown): Promise<void>;
     remove(key: string): Promise<void>;
     destroy?(): void;
 }
@@ -86,7 +86,7 @@ export interface PluginContext {
     getScopedStore(): ScopedPersistenceStore;
 
     // 引擎访问
-    getSessionEngine?(): IModuleFS | null;
+    getModuleFS?(): IModuleFS | null;
     getCurrentNodeId(): string | null;
     getOwnerNodeId?(): string | null;
 

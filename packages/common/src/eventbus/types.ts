@@ -14,7 +14,7 @@ export interface EventMeta {
 }
 
 export type Handler<P> = (payload: P, meta: EventMeta) => void;
-export type AnyHandler<M extends Record<string, any>> = (
+export type AnyHandler<M extends object> = (
   payload: M[keyof M],
   meta: EventMeta,
 ) => void;
@@ -22,7 +22,7 @@ export type AnyHandler<M extends Record<string, any>> = (
 /**
  * Core pub/sub surface shared by EventBus and EventChannel.
  */
-export interface IEventEmitter<M extends Record<string, any>> {
+export interface IEventEmitter<M extends object> {
   emit<K extends keyof M & string>(
     type: K,
     payload: M[K],
@@ -37,7 +37,7 @@ export interface IEventEmitter<M extends Record<string, any>> {
  * Top-level typed event bus.
  * Channel = isolated namespace with its own lifecycle (closed channel drops emits silently).
  */
-export interface IEventBus<M extends Record<string, any>> extends IEventEmitter<M> {
+export interface IEventBus<M extends object> extends IEventEmitter<M> {
   /** Idempotent — returns existing channel if already open. */
   channel(key: string): IEventChannel<M>;
   /** Close channel: clears all local handlers, subsequent emits are no-ops. */
@@ -54,7 +54,7 @@ export interface IEventBus<M extends Record<string, any>> extends IEventEmitter<
  *   1. channel-local handlers (fast path, O(1) per handler)
  *   2. parent bus-level handlers (including onAny)
  */
-export interface IEventChannel<M extends Record<string, any>> extends IEventEmitter<M> {
+export interface IEventChannel<M extends object> extends IEventEmitter<M> {
   readonly key: string;
   /**
    * Clear all local handlers without closing the channel (gate stays open).
@@ -64,12 +64,12 @@ export interface IEventChannel<M extends Record<string, any>> extends IEventEmit
   clearLocal(): void;
 }
 
-export interface EventBusOptions {
+export interface EventBusOptions<M extends object> {
   /**
    * High-frequency event coalescing via queueMicrotask.
    * Same-tick emits keep only the latest payload (overwrite semantics).
    */
-  coalesce?: (keyof any & string)[];
+  coalesce?: (keyof M & string)[];
   /** Called when a handler throws; default: console.error. */
   onError?: (err: unknown, type: string) => void;
 }

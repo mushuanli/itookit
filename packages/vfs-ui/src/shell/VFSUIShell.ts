@@ -7,9 +7,8 @@
 import {
   ISessionUI,
   type SessionUIOptions,
-  type SessionManagerEvent,
-  type SessionManagerCallback,
   type IModuleFS,
+  type EditorFactory,
   generateShortUUID,
 } from '@itookit/common';
 
@@ -25,6 +24,7 @@ import type {
   IEventPort,
   IFileTypePort,
 } from '../contracts/ports';
+import type { PublicEventMap, PublicEventName } from '../contracts/events';
 
 import type { FileTypeDefinition, CustomEditorResolver } from '../services/FileTypeRegistry';
 import type { EngineAdapter } from '../services/EngineAdapter';
@@ -40,12 +40,12 @@ import { MoveToModal } from '../ui/components/MoveToModal/MoveToModal';
 
 import { findNodeById } from '../utils/helpers';
 
-export interface VFSUIShellOptions extends SessionUIOptions {
+export interface VFSUIShellOptions extends SessionUIOptions<VFSNodeUI> {
   initialState?: Partial<VFSUIState>;
   defaultUiSettings?: Partial<UISettings>;
   defaultExtension?: string;
   fileTypes?: FileTypeDefinition[];
-  defaultEditorFactory: any;
+  defaultEditorFactory: EditorFactory;
   customEditorResolver?: CustomEditorResolver;
   searchFilter?: SearchFilter;
   scopeId?: string;
@@ -58,16 +58,7 @@ export interface VFSUIShellOptions extends SessionUIOptions {
   showFileExtensions?: boolean;
 }
 
-const EVENT_MAP: Record<SessionManagerEvent, string> = {
-  sessionSelected: 'sessionSelected',
-  navigateToHeading: 'navigateToHeading',
-  importRequested: 'importRequested',
-  sidebarStateChanged: 'sidebarStateChanged',
-  menuItemClicked: 'menuItemClicked',
-  stateChanged: 'stateChanged',
-};
-
-export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
+export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap> {
   public readonly instanceId: string;
 
   // ===== 全部通过接口持有 =====
@@ -255,17 +246,11 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
     this.nodeList.setTitle(title);
   }
 
-  on(
-    eventName: SessionManagerEvent | 'fileRenamed',
-    callback: SessionManagerCallback
+  on<E extends PublicEventName>(
+    eventName: E,
+    callback: (payload: PublicEventMap[E]) => void,
   ): () => void {
-    if (eventName === 'fileRenamed') {
-      return this.eventPort.on('fileRenamed', callback as any);
-    }
-    const publicEventName = EVENT_MAP[eventName as SessionManagerEvent];
-    return publicEventName
-      ? this.eventPort.on(publicEventName as any, (e: any) => callback(e))
-      : () => { };
+    return this.eventPort.on(eventName, callback);
   }
 
   destroy(): void {

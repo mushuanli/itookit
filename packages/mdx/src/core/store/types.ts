@@ -4,8 +4,8 @@ import { EngineMetadataStore } from './engine-metadata-store';
 import { MemoryStore } from './memory-store';
 
 export interface ScopedPersistenceStore {
-    get(key: string): Promise<any>;
-    set(key: string, value: any): Promise<void>;
+    get(key: string): Promise<unknown>;
+    set(key: string, value: unknown): Promise<void>;
     remove(key: string): Promise<void>;
     destroy?(): void;
 }
@@ -13,7 +13,7 @@ export interface ScopedPersistenceStore {
 export interface StoreFactoryConfig {
     pluginName: string;
     instanceId: string;
-    sessionEngine: IModuleFS | null;
+    moduleFS: IModuleFS | null;
     nodeId: string | null;
 }
 
@@ -22,11 +22,11 @@ export interface StoreFactoryConfig {
  * Engine Metadata → Memory
  */
 export function createStore(config: StoreFactoryConfig): ScopedPersistenceStore {
-    const { pluginName, sessionEngine, nodeId } = config;
+    const { pluginName, moduleFS, nodeId } = config;
 
     // 1. 优先：Engine 元数据存储
-    if (sessionEngine && nodeId) {
-        return new EngineMetadataStore(sessionEngine, nodeId, pluginName);
+    if (moduleFS && nodeId) {
+        return new EngineMetadataStore(moduleFS, nodeId, pluginName);
     }
 
     // 2. 兜底：内存存储

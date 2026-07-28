@@ -9,10 +9,10 @@ import type { HoverPreviewData } from '@itookit/common';
 export type { HoverPreviewData };
 
 export interface Suggestion {
-    id: string | number;
+    id: string;
     label: string;
     type?: string;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 export abstract class IAutocompleteSource {
@@ -28,7 +28,7 @@ export abstract class IMentionSource extends IAutocompleteSource {
     abstract readonly key: string;
     public triggerChar: string = '@';
 
-    async getDataForProcess(_targetURL: URL): Promise<any | null> { return null; }
+    async getDataForProcess(_targetURL: URL): Promise<unknown | null> { return null; }
     async handleClick(_targetURL: URL): Promise<void> {}
     async getHoverPreview(_uri: string): Promise<HoverPreviewData | null> { return null; }
     async getContentForTransclusion(_targetURL: URL): Promise<string | null> { return null; }

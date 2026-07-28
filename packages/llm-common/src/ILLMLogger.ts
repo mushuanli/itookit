@@ -10,7 +10,7 @@
  *     response: { status, headers }, messages: [{role, content, ts}] }
  */
 
-import type { ChatMessage } from '../interfaces/llm/message';
+import type { ChatMessage } from './llm/message';
 
 /** Full request snapshot logged before the HTTP call */
 export interface LLMRequestLog {

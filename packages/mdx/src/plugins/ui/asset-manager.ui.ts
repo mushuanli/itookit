@@ -27,7 +27,7 @@ export class AssetManagerUI {
 
     constructor(
         private engine: IModuleFS,
-        private editor: MDxEditor,
+        private editor: MDxEditor | null,
         private options: AssetConfigOptions = {}
     ) { }
 
@@ -85,7 +85,7 @@ export class AssetManagerUI {
         }
 
         // 扫描引用
-        const content = this.editor.getText();
+        const content = this.editor?.getText() ?? '';
         const usedAssets = this.extractReferencedFilenames(content);
 
         const displayItems: AssetDisplayItem[] = assetFiles.map(node => ({
@@ -356,6 +356,10 @@ export class AssetManagerUI {
     }
 
     private insertText(text: string): void {
+        if (!this.editor) {
+            Toast.info('当前视图不支持插入附件链接');
+            return;
+        }
         const view = this.editor.getEditorView();
         if (!view) return;
 

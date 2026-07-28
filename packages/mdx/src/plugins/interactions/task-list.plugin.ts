@@ -4,7 +4,7 @@
  */
 
 import { type MarkedExtension, lexer as markedLexer } from 'marked';
-import type { MDxPlugin, PluginContext, ScopedPersistenceStore } from '../../core/types';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 
 // ... Options 接口保持不变 ...
 export interface TaskListPluginOptions {
@@ -49,7 +49,7 @@ export class TaskListPlugin implements MDxPlugin {
   name = 'interaction:task-list';
   private options: Required<TaskListPluginOptions>;
   private cleanupFns: Array<() => void> = [];
-  private store: ScopedPersistenceStore | null = null;
+  private clickHandlers = new Map<HTMLElement, (event: Event) => void>();
   private currentMarkdown: string = '';
 
   // 存储解析出的位置
@@ -370,7 +370,6 @@ export class TaskListPlugin implements MDxPlugin {
         };
 
         this.currentMarkdown = updated;
-        await this.store?.set('currentMarkdown', updated);
 
         context.emit('taskToggled', result);
         await this.options.onTaskToggled(result);
@@ -399,11 +398,6 @@ export class TaskListPlugin implements MDxPlugin {
 
   install(context: PluginContext): void {
     context.registerSyntaxExtension(this.createMarkedExtension());
-    this.store = context.getScopedStore();
-
-    this.store.get('currentMarkdown').then((saved) => {
-      if (saved) this.currentMarkdown = saved;
-    });
 
     // 监听解析前事件
     const removeBeforeParse = context.on('beforeParse', ({ markdown }: { markdown: string }) => {
@@ -415,11 +409,11 @@ export class TaskListPlugin implements MDxPlugin {
     if (removeBeforeParse) this.cleanupFns.push(removeBeforeParse);
 
     const removeDomUpdated = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
-      const existingHandler = (element as any)._taskListClickHandler;
+      const existingHandler = this.clickHandlers.get(element);
       if (existingHandler) element.removeEventListener('click', existingHandler);
       const clickHandler = this.createClickHandler(context);
       element.addEventListener('click', clickHandler);
-      (element as any)._taskListClickHandler = clickHandler;
+      this.clickHandlers.set(element, clickHandler);
     });
     if (removeDomUpdated) this.cleanupFns.push(removeDomUpdated);
   }
@@ -427,7 +421,6 @@ export class TaskListPlugin implements MDxPlugin {
   setMarkdown(markdown: string): void {
     this.currentMarkdown = markdown;
     this.analyzeTaskLocations(markdown);
-    this.store?.set('currentMarkdown', markdown);
   }
 
   getMarkdown(): string {
@@ -436,6 +429,10 @@ export class TaskListPlugin implements MDxPlugin {
 
   destroy(): void {
     this.cleanupFns.forEach((fn) => fn());
+    this.clickHandlers.forEach((handler, element) => {
+      element.removeEventListener('click', handler);
+    });
+    this.clickHandlers.clear();
     this.cleanupFns = [];
   }
 }

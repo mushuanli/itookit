@@ -521,8 +521,18 @@ export class ChatInput implements IChatInputPresenter {
 
     private bindEvents(): void {
         this.flowIdInput?.addEventListener('input', () => { this.config.settings.flowId = this.flowIdInput.value.trim() || undefined; this.notifyConfigChange(); });
-        this.branchModeSelect?.addEventListener('change', () => { this.config.settings.branchMode = this.branchModeSelect.value; this.notifyConfigChange(); });
-        this.retentionModeSelect?.addEventListener('change', () => { this.config.settings.retentionMode = this.retentionModeSelect.value; this.notifyConfigChange(); });
+        this.branchModeSelect?.addEventListener('change', () => {
+            this.config.settings.branchMode =
+                this.branchModeSelect.value === 'fork' ? 'fork' : 'continue';
+            this.notifyConfigChange();
+        });
+        this.retentionModeSelect?.addEventListener('change', () => {
+            this.config.settings.retentionMode =
+                this.retentionModeSelect.value === 'temporary'
+                    ? 'temporary'
+                    : 'persistent';
+            this.notifyConfigChange();
+        });
         this.textarea.addEventListener('input', () => {
             this.adjustTextareaHeight();
             this.config.text = this.textarea.value;
@@ -873,13 +883,13 @@ export class ChatInput implements IChatInputPresenter {
         if (this.tierQuickBtn) this.updateTierQuick();
         this.updateTierCardModels();
         if (this.historySlider) {
-            this.historySlider.value = this.config.settings.historyLength.toString();
+            this.historySlider.value = (this.config.settings.historyLength ?? -1).toString();
             this.updateHistoryDisplay();
             this.updatePresetButtons();
         }
         if (this.streamToggle) {
             // Block Mode toggle is inverted: checked = block mode = streaming disabled
-            this.streamToggle.checked = !this.config.settings.streamMode;
+            this.streamToggle.checked = !(this.config.settings.streamMode ?? true);
             this.updateStreamToggleLabel();
         }
         // Sync thinking toggle and reasoning effort from persisted settings.

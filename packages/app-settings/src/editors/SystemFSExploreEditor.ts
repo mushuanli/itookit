@@ -18,6 +18,7 @@
  */
 import { BaseSettingsEditor } from '@itookit/common';
 import { createVFSUI, connectEditorLifecycle, VFSUIShell } from '@itookit/vfs-ui';
+import { defaultEditorFactory } from '@itookit/mdxeditor';
 import '@itookit/mdxeditor/style.css';
 import { SettingsService } from '../services/SettingsService';
 import { SystemVFSEngine } from './system-fs/SystemVFSEngine';
@@ -79,6 +80,7 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
                 searchPlaceholder: 'Search files…',
                 initialSidebarCollapsed: false,
                 sessionListContainer: sidebarEl,
+                defaultEditorFactory,
             },
             engine,
         ) as VFSUIShell;
@@ -87,7 +89,7 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
             this.vfsUI,
             engine,
             editorEl,
-            undefined,
+            defaultEditorFactory,
             { readOnly: true },
         );
 

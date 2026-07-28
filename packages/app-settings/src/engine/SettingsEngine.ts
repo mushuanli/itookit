@@ -17,6 +17,8 @@ import type {
     FSModuleStats,
     FileContent,
     ReadOptions,
+    ListOptions,
+    FSSearchQuery,
     FSEventType,
     FSEvent,
     IAssetOperations,
@@ -105,10 +107,8 @@ export class SettingsEngine implements IModuleFS {
         tags: noopTags,
     };
 
-    private listeners = new Map<string, Set<(e: FSEvent) => void>>();
-
     constructor(private _service: SettingsService) {
-        this.driver = new SettingsDriver(this, this.listeners);
+        this.driver = new SettingsDriver(this);
     }
 
     /** @internal — exposed for SettingsDriver */
@@ -121,8 +121,13 @@ export class SettingsEngine implements IModuleFS {
         throw new Error('SettingsEngine: openFile not supported — settings are not real files');
     }
 
-    on = (e: any, cb: any) => this.driver.on(e, cb);
-    onAny = (cb: any): (() => void) => this.driver.onAny?.(cb) ?? (() => {});
+    on<E extends FSEventType>(event: E, callback: (event: FSEvent<E>) => void): () => void {
+        return this.driver.on(event, callback);
+    }
+
+    onAny(callback: (event: FSEvent) => void): () => void {
+        return this.driver.onAny?.(callback) ?? (() => {});
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -133,17 +138,11 @@ class SettingsDriver implements IFSDriver {
     readonly moduleId = 'settings_root';
     readonly capabilities: FSCapabilities = READONLY_CAPS;
 
-    constructor(
-        private readonly engine: SettingsEngine,
-        private readonly listeners: Map<string, Set<(e: FSEvent) => void>>,
-    ) {}
+    constructor(private readonly engine: SettingsEngine) {}
 
     // ── Events ───────────────────────────────────────
-    on<E extends FSEventType>(event: E, cb: (e: FSEvent<E>) => void): () => void {
-        const key = event;
-        if (!this.listeners.has(key)) this.listeners.set(key, new Set());
-        this.listeners.get(key)!.add(cb as any);
-        return () => this.listeners.get(key)?.delete(cb as any);
+    on<E extends FSEventType>(_event: E, _callback: (event: FSEvent<E>) => void): () => void {
+        return () => {};
     }
 
     // ── Read ─────────────────────────────────────────
@@ -153,7 +152,7 @@ class SettingsDriver implements IFSDriver {
         return config ? toFSNode(id, config) : null;
     }
 
-    async getChildren(parentId: string, _options?: any): Promise<FSNode[]> {
+    async getChildren(parentId: string, _options?: ListOptions): Promise<FSNode[]> {
         if (parentId !== '/') return [];
         await this.engine.service.init();
         return Object.entries(SETTINGS_PAGES).map(([id, c]) => toFSNode(id, c));
@@ -180,8 +179,8 @@ class SettingsDriver implements IFSDriver {
         return id in SETTINGS_PAGES;
     }
 
-    async search(query: any): Promise<FSSearchResult> {
-        const text = query?.name?.contains as string | undefined;
+    async search(query: FSSearchQuery): Promise<FSSearchResult> {
+        const text = query.name?.contains;
         const nodes: FSNode[] = [];
         if (text) {
             const lower = text.toLowerCase();

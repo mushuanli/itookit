@@ -33,6 +33,13 @@ import { toBuffer, toString } from '../utils/encoding';
 import * as P from '../utils/path';
 import { toAssetDirName, validateFilename } from '../utils/validation';
 
+const IO_OPERATIONS = [
+    'stat', 'list', 'read', 'write', 'mkdir',
+    'delete', 'rename', 'metadata', 'search',
+] as const;
+
+type IOOperation = typeof IO_OPERATIONS[number];
+
 export class VFSEngine {
     readonly access: AccessController;
     readonly events: EventBus;
@@ -40,14 +47,19 @@ export class VFSEngine {
     readonly devices: DeviceRegistry;
 
     /** Counts of backend operations for performance diagnostics. */
-    readonly ioStats = { stat: 0, list: 0, read: 0, write: 0, mkdir: 0, delete: 0, rename: 0, metadata: 0, search: 0 };
-    resetIOStats(): void { Object.keys(this.ioStats).forEach(k => (this.ioStats as any)[k] = 0); }
+    readonly ioStats: Record<IOOperation, number> = {
+        stat: 0, list: 0, read: 0, write: 0, mkdir: 0,
+        delete: 0, rename: 0, metadata: 0, search: 0,
+    };
+    resetIOStats(): void {
+        IO_OPERATIONS.forEach(operation => { this.ioStats[operation] = 0; });
+    }
 
     private readonly backend: IStorageBackend;
     private _mountRouter: IMountRouter | null = null;
     private initialized = false;
 
-    private _inc(op: keyof VFSEngine['ioStats']): void { this.ioStats[op]++; }
+    private _inc(op: IOOperation): void { this.ioStats[op]++; }
 
     constructor(
         backend: IStorageBackend,
@@ -85,11 +97,13 @@ export class VFSEngine {
     /** Map a backend-local node to a system-path node. */
     private mapToSystemNode(node: FSNode, mountPath: string): FSNode {
         if (mountPath === '/') return node;
-        const mapPath = (p: string | null) => {
-            if (!p) return null;
-            return p === '/' ? mountPath : mountPath + p;
-        };
+        const mapPath = (p: string | null) => p ? this.mapToSystemPath(p, mountPath) : null;
         return { ...node, path: mapPath(node.path)!, parentPath: mapPath(node.parentPath) };
+    }
+
+    private mapToSystemPath(path: string, mountPath: string): string {
+        if (mountPath === '/') return path;
+        return path === '/' ? mountPath : mountPath + path;
     }
 
     // ── Lifecycle ──
@@ -369,41 +383,47 @@ export class VFSEngine {
     // ── Asset Dir ──
 
     async getAssetDirPath(filePath: string): Promise<string | null> {
-        const { backend, localPath } = this.resolveStore(filePath);
+        const { backend, localPath, mountPath } = this.resolveStore(filePath);
         const parentDir = P.dirname(localPath);
         const name = nameFromPath(localPath);
         const assetDirName = toAssetDirName(name);
         const assetPath = parentDir === '/' ? `/${assetDirName}` : `${parentDir}/${assetDirName}`;
         this._inc('stat'); const exists = await backend.stat(assetPath);
-        return exists ? assetPath : null;
+        return exists ? this.mapToSystemPath(assetPath, mountPath) : null;
     }
 
     async ensureAssetDir(filePath: string): Promise<string> {
-        const { backend, localPath } = this.resolveStore(filePath);
+        const { backend, localPath, mountPath } = this.resolveStore(filePath);
         const parentDir = P.dirname(localPath);
         const name = nameFromPath(localPath);
         const assetDirName = toAssetDirName(name);
         const assetPath = parentDir === '/' ? `/${assetDirName}` : `${parentDir}/${assetDirName}`;
 
         this._inc('stat'); const existing = await backend.stat(assetPath);
-        if (existing) return assetPath;
+        if (existing) return this.mapToSystemPath(assetPath, mountPath);
 
         this._inc('mkdir'); await backend.mkdir(assetPath);
-        return assetPath;
+        return this.mapToSystemPath(assetPath, mountPath);
     }
 
     // ── Search ──
 
     async search(path: string, query: import('@itookit/common').FSSearchQuery): Promise<import('@itookit/common').FSNode[]> {
-        const { backend, mountPath } = this.resolveStore(path);
+        const { backend, localPath, mountPath } = this.resolveStore(path);
+        const unpagedQuery = { ...query, offset: 0, limit: Number.MAX_SAFE_INTEGER };
+        let nodes: import('@itookit/common').FSNode[];
         if (backend.search) {
-            const nodes = await backend.search(query);
-            return nodes.map(n => this.mapToSystemNode(n, mountPath));
+            nodes = await backend.search(unpagedQuery);
+        } else {
+            nodes = [];
+            await this._walkAndCollect(backend, '/', unpagedQuery, nodes);
         }
-        // Fallback: naive linear scan
-        const all: import('@itookit/common').FSNode[] = [];
-        await this._walkAndCollect(backend, '/', query, all);
-        return all.map(n => this.mapToSystemNode(n, mountPath));
+        const scoped = nodes.filter(node => isPathInScope(node.path, localPath));
+        const offset = query.offset ?? 0;
+        const limit = query.limit ?? 50;
+        return scoped
+            .slice(offset, offset + limit)
+            .map(node => this.mapToSystemNode(node, mountPath));
     }
 
     private async _walkAndCollect(
@@ -518,6 +538,11 @@ function nameFromPath(path: string): string {
     if (path === '/' || path === '') return '';
     const parts = path.split('/').filter(Boolean);
     return parts[parts.length - 1] || '';
+}
+
+function isPathInScope(path: string, rootPath: string): boolean {
+    if (rootPath === '/') return true;
+    return path === rootPath || path.startsWith(`${rootPath}/`);
 }
 
 function matchSearch(node: import('@itookit/common').FSNode, query: import('@itookit/common').FSSearchQuery): boolean {
