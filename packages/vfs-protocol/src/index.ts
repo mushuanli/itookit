@@ -1,10 +1,10 @@
 /**
- * @file common/interfaces/fs/index.ts
+ * @file vfs-protocol/src/index.ts
  * @desc VFS 接口统一导出
  *
  * 使用方式：
- *   import type { IModuleFS, FSNode, FSFileNode } from '@common/interfaces/fs';
- *   import { FSError, FSNotFoundError } from '@common/interfaces/fs';
+ *   import type { IModuleFS, FSNode, FSFileNode } from '@itookit/vfs-protocol';
+ *   import { FSError, FSNotFoundError } from '@itookit/vfs-protocol';
  */
 
 // ── 常量 ──

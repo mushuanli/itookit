@@ -1,7 +1,7 @@
 {
-  "name": "@itookit/common",
+  "name": "@itookit/vfs-protocol",
   "version": "0.4.1",
-  "description": "Common utilities, types, and components for the itookit ecosystem.",
+  "description": "VFS protocol interfaces, types, and constants for the itookit ecosystem.",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -11,8 +11,7 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./style.css": "./src/styles/index.css"
+    }
   },
   "publishConfig": {
     "access": "public",
@@ -24,44 +23,30 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.mjs",
         "require": "./dist/index.js"
-      },
-      "./style.css": "./dist/index.css"
+      }
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm build"
   },
-  "keywords": [
-    "itookit",
-    "common"
-  ],
+  "keywords": ["itookit", "vfs", "virtual-filesystem", "protocol"],
   "author": "lizlok@gmail.com",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/mushuanli/itookit.git",
-    "directory": "packages/common"
+    "directory": "packages/vfs-protocol"
   },
   "bugs": {
     "url": "https://github.com/mushuanli/itookit/issues"
   },
-  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/common#readme",
-  "dependencies": {
-    "@itookit/llm-common": "workspace:*",
-    "@itookit/vfs-protocol": "workspace:*"
-  },
+  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/vfs-protocol#readme",
   "devDependencies": {
-    "@itookit/llm-common": "workspace:*",
-    "@itookit/vfs-protocol": "workspace:*",
-    "cpx": "^1.5.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
-  },
-  "peerDependencies": {}
+  }
 }

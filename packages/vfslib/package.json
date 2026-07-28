@@ -75,6 +75,7 @@
     "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/vfslib#readme",
     "dependencies": {
         "@itookit/common": "workspace:*",
+        "@itookit/vfs-protocol": "workspace:*",
         "yaml": "^2.8.2"
     },
     "devDependencies": {

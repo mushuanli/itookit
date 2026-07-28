@@ -96,18 +96,15 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../../packages/device-llm
-      '@itookit/llm-engine':
+      '@itookit/llm-conversation':
         specifier: workspace:*
-        version: link:../../packages/llm-engine
+        version: link:../../packages/llm-conversation
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../../packages/llm-ui
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../../packages/mdx
-      '@itookit/memory-manager':
-        specifier: workspace:*
-        version: link:../../packages/memory-manager
       '@itookit/tools':
         specifier: workspace:*
         version: link:../../packages/tools
@@ -199,18 +196,15 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../../packages/device-llm
-      '@itookit/llm-engine':
+      '@itookit/llm-conversation':
         specifier: workspace:*
-        version: link:../../packages/llm-engine
+        version: link:../../packages/llm-conversation
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../../packages/llm-ui
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../../packages/mdx
-      '@itookit/memory-manager':
-        specifier: workspace:*
-        version: link:../../packages/memory-manager
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../../packages/vfs-ui
@@ -261,12 +255,15 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
-      '@itookit/llm-engine':
+      '@itookit/mdxeditor':
         specifier: workspace:*
-        version: link:../llm-engine
-      '@itookit/memory-manager':
+        version: link:../mdx
+      '@itookit/vfs-ui':
         specifier: workspace:*
-        version: link:../memory-manager
+        version: link:../vfs-ui
+      '@itookit/vfslib':
+        specifier: workspace:*
+        version: link:../vfslib
       '@types/node':
         specifier: ^20.19.25
         version: 20.19.25
@@ -291,9 +288,9 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
-      '@itookit/llm-engine':
+      '@itookit/llm-conversation':
         specifier: workspace:*
-        version: link:../llm-engine
+        version: link:../llm-conversation
       '@itookit/llm-harness':
         specifier: workspace:*
         version: link:../llm-harness
@@ -303,9 +300,6 @@ importers:
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
-      '@itookit/memory-manager':
-        specifier: workspace:*
-        version: link:../memory-manager
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../vfs-ui
@@ -329,6 +323,13 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@25.2.3)(jsdom@27.2.0)
 
   packages/common:
+    dependencies:
+      '@itookit/llm-common':
+        specifier: workspace:*
+        version: link:../llm-common
+      '@itookit/vfs-protocol':
+        specifier: workspace:*
+        version: link:../vfs-protocol
     devDependencies:
       cpx:
         specifier: ^1.5.0
@@ -369,18 +370,12 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
-      '@itookit/llm-engine':
-        specifier: workspace:*
-        version: link:../llm-engine
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../llm-ui
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
-      '@itookit/memory-manager':
-        specifier: workspace:*
-        version: link:../memory-manager
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../vfs-ui
@@ -416,6 +411,9 @@ importers:
         specifier: ^4.1.1
         version: 4.1.1
     devDependencies:
+      '@itookit/vfslib':
+        specifier: workspace:*
+        version: link:../vfslib
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -451,11 +449,23 @@ importers:
         specifier: ^3.2.1
         version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.25)(jsdom@27.2.0)
 
-  packages/llm-engine:
+  packages/llm-common:
+    devDependencies:
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@25.2.3))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/llm-conversation:
     dependencies:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
+      '@itookit/llm-engine':
+        specifier: workspace:*
+        version: link:../llm-engine
       '@itookit/vfslib':
         specifier: workspace:*
         version: link:../vfslib
@@ -463,21 +473,34 @@ importers:
         specifier: ^2.8.2
         version: 2.8.2
     devDependencies:
-      '@itookit/device-llm':
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.25
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
+
+  packages/llm-engine:
+    dependencies:
+      '@itookit/common':
         specifier: workspace:*
-        version: link:../device-llm
-      '@itookit/vfsdriver-localfs':
-        specifier: workspace:*
-        version: link:../vfsdriver-localfs
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
+        version: link:../common
+    devDependencies:
       '@types/node':
         specifier: ^20.19.25
         version: 20.19.25
       '@vitest/coverage-v8':
         specifier: ^1.6.1
         version: 1.6.1(vitest@1.6.1(@types/node@20.19.25)(jsdom@27.2.0))
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -508,6 +531,9 @@ importers:
       '@itookit/tools':
         specifier: workspace:*
         version: link:../tools
+      '@itookit/vfslib':
+        specifier: workspace:*
+        version: link:../vfslib
     devDependencies:
       '@types/node':
         specifier: ^20.10.0
@@ -530,9 +556,9 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
-      '@itookit/llm-engine':
+      '@itookit/llm-conversation':
         specifier: workspace:*
-        version: link:../llm-engine
+        version: link:../llm-conversation
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
@@ -543,6 +569,9 @@ importers:
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
+      '@itookit/vfslib':
+        specifier: workspace:*
+        version: link:../vfslib
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -638,37 +667,6 @@ importers:
         specifier: ^3.9.1
         version: 3.9.1(@types/node@20.19.43)(rollup@4.62.2)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.43))
 
-  packages/memory-manager:
-    dependencies:
-      immer:
-        specifier: ^10.2.0
-        version: 10.2.0
-    devDependencies:
-      '@itookit/common':
-        specifier: workspace:*
-        version: link:../common
-      '@itookit/mdxeditor':
-        specifier: workspace:*
-        version: link:../mdx
-      '@itookit/vfs-ui':
-        specifier: workspace:*
-        version: link:../vfs-ui
-      '@itookit/vfslib':
-        specifier: workspace:*
-        version: link:../vfslib
-      '@types/node':
-        specifier: ^20.19.25
-        version: 20.19.25
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vite:
-        specifier: ^5.4.21
-        version: 5.4.21(@types/node@20.19.25)
-      vite-plugin-dts:
-        specifier: ^3.9.1
-        version: 3.9.1(@types/node@20.19.25)(rollup@4.62.2)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.25))
-
   packages/tools:
     dependencies:
       '@itookit/common':
@@ -693,6 +691,15 @@ importers:
       vitest:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
+
+  packages/vfs-protocol:
+    devDependencies:
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@25.2.3))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
   packages/vfs-ui:
     dependencies:
@@ -768,6 +775,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
+      '@itookit/vfs-protocol':
+        specifier: workspace:*
+        version: link:../vfs-protocol
       yaml:
         specifier: ^2.8.2
         version: 2.8.2
@@ -3019,7 +3029,7 @@ packages:
 
   glob@7.2.3:
     resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
-    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+    deprecated: Glob versions prior to v9 are no longer supported
 
   globals@14.0.0:
     resolution: {integrity: sha512-oahGvuMGQlPw/ivIYBjVSrWAfWLBeku5tpPE2fOPLi+WHffIWbuh2tCjhyQhTBPMf5E9jDEH4FOmTYgYwbKwtQ==}

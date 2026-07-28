@@ -1,7 +1,7 @@
 // packages/common/src/index.ts
 
-// ── VFS: 文件系统协议 ──
-export * from './interfaces/fs';
+// ── VFS: 文件系统协议（已提取至 @itookit/vfs-protocol；保留 re-export 向后兼容）──
+export * from '@itookit/vfs-protocol';
 
 // ── LLM: 已分离至 @itookit/llm-common；保持 re-export 向后兼容 ──
 export * from '@itookit/llm-common';

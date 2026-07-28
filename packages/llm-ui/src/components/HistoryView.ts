@@ -298,6 +298,11 @@ export class HistoryView implements IHistoryPresenter {
     // ================================================================
 
     private handleBatchedEvents(batched: BatchedEvents<SessionEvent>): void {
+        // Enter streaming mode before rendering any content chunks
+        if (batched.chunks.size > 0) {
+            this.enterStreamingMode();
+        }
+
         // Process structural events first (node_start etc.) so nodes exist in the
         // DOM before we try to write streaming content into them.
         for (const event of batched.immediate) {

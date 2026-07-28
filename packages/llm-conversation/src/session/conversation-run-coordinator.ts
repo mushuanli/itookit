@@ -84,7 +84,7 @@ export class ConversationRunCoordinator {
             await this.startRound(execution, location, handle.runId);
             roundStarted = true;
             this.projectRun(execution, handle.runId);
-            const output = await this.consume(handle, execution.task.sessionId, parse);
+            const output = await this.consume(handle, execution.task.sessionId, parse, execution.rootNodeId);
             await this.completeRound(execution, output);
             await execution.finalize();
         } catch (error) {
@@ -201,10 +201,11 @@ export class ConversationRunCoordinator {
         handle: RunHandle,
         sessionId: string,
         parse: (value: unknown) => ChatProgramOutput,
+        rootNodeId: string,
     ): Promise<ChatProgramOutput> {
         let output: ChatProgramOutput | undefined;
         for await (const envelope of handle.events()) {
-            this.forwardAgentEvent(envelope, sessionId);
+            this.forwardAgentEvent(envelope, sessionId, rootNodeId);
             if (envelope.event.type === 'run:completed') {
                 output = parse(envelope.event.output);
             }
@@ -216,9 +217,27 @@ export class ConversationRunCoordinator {
         return output;
     }
 
-    private forwardAgentEvent(envelope: RunEventEnvelope, sessionId: string): void {
+    private forwardAgentEvent(envelope: RunEventEnvelope, sessionId: string, rootNodeId: string): void {
         const event = getAgentEvent(envelope);
         if (!event || event.type === 'finished' || event.type === 'error') return;
+
+        // Convert stream events to message:updated for incremental rendering pipeline.
+        // These accumulate in EventBatchProcessor and drive StreamController → MDxController.
+        // We do NOT return early — the original event is still emitted so stream:content
+        // (in immediateTypes) triggers an immediate flush of the queued message:updated.
+        if (event.type === 'stream:content') {
+            this.options.eventBus.emitSession(sessionId, {
+                type: 'message:updated',
+                payload: { messageId: rootNodeId, delta: event.delta, field: 'output' },
+            });
+        }
+        if (event.type === 'stream:thinking') {
+            this.options.eventBus.emitSession(sessionId, {
+                type: 'message:updated',
+                payload: { messageId: rootNodeId, delta: event.delta, field: 'thought' },
+            });
+        }
+
         this.options.eventBus.emitSession(sessionId, event);
     }
 
