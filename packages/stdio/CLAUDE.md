@@ -46,6 +46,17 @@ src/
 
 **约定**:`interfaces/` 内禁止引用 `impl/`(协议不依赖实现);`impl/` 通过 `protocol.ts` barrel 引用协议,不直接引 `interfaces/` 内部文件。
 
+## 通用 IO (IIOStream + pipe)
+
+`IIOStream` 是文件与设备的公共流语义最小公约数:`read` / `write` / `readStream?` / `close?`。
+
+- `IFile`(文件句柄)extends `IIOStream` — fs io
+- `IDeviceHandle`(LLM / TTY 会话)extends `IIOStream` — llm/tty io
+
+`pipe(source, target, opts)` 将源流复制到目标流(优先 `readStream`,回退 `read`),支持关闭选项与逐块回调。用于 LLM↔文件(持久化)、文件↔TTY(展示)、TTY↔LLM(交互循环)等衔接。
+
+**注意**:`write` 语义由实现定义 — 设备为发送,文件为覆盖(非追加)。流式写入文件需自行处理追加语义。
+
 ## 引擎分层 (v4.1 path-based)
 
 ```

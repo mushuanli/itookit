@@ -14,6 +14,7 @@
  */
 import type { FSNode } from './core/types';
 import type { FSEventType, FSEvent } from './core/events';
+import type { IIOStream } from './io';
 
 /**
  * Lightweight handle for a sub-file inside the companion assetdir.
@@ -42,7 +43,7 @@ export interface AssetObj {
     exists(): Promise<boolean>;
 }
 
-export interface IFile {
+export interface IFile extends IIOStream {
     // ========== Identity ==========
     readonly nodeId: string;
     getName(): Promise<string>;

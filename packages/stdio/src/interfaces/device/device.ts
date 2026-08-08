@@ -10,6 +10,7 @@
  */
 
 import type { FileContent } from '../core/types';
+import type { IIOStream } from '../io';
 
 export interface DeviceContext {
     /** 设备节点 ID */
@@ -115,7 +116,7 @@ export function createDeviceHandle(
  *   for await (const chunk of dev.readStream()) { ... }
  *   await dev.close();
  */
-export interface IDeviceHandle {
+export interface IDeviceHandle extends IIOStream {
     /** 绑定的设备节点上下文（含 sessionId） */
     readonly ctx: DeviceContext;
     /** 读取设备输出 */

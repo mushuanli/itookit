@@ -63,6 +63,7 @@ export {
 export { generateId } from './utils/id';
 export { toBuffer, toString, toUint8Array } from './utils/encoding';
 export { guessMimeType } from './utils/guess-mime-type';
+export { pipe, type PipeOptions } from './utils/pipe';
 export {
     serialize,
     deserialize,

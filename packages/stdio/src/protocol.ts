@@ -203,6 +203,9 @@ export type {
 // ── 系统访问 ──
 export type { ISystemAccess } from './interfaces/system-access';
 
+// ── 通用 IO 流 ──
+export type { IIOStream } from './interfaces/io';
+
 // ── 工厂 ──
 export type {
     VFSFactoryOptions,

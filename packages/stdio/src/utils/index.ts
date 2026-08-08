@@ -7,6 +7,7 @@ export * from './validation';
 export { generateId } from './id';
 export { toBuffer, toString, toUint8Array } from './encoding';
 export { guessMimeType } from './guess-mime-type';
+export { pipe, type PipeOptions } from './pipe';
 export {
     serialize,
     deserialize,
