@@ -1,5 +1,5 @@
 import { initApp } from '@itookit/app-shell';
-import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
+import { openIndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { WORKSPACES } from './config/modules';
 
 import '@itookit/vfs-ui/style.css';
@@ -13,9 +13,14 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
 
-initApp({
-    backend: new IndexedDBBackend({ dbName: 'MindOS-v3' }),
-    workspaces: WORKSPACES,
-    defaultSlug: 'chat',
-    routeAliases: { home: 'llm-workspace' },
-}).catch(err => console.error('[Bootstrap] Fatal:', err));
+async function main() {
+    const backend = await openIndexedDBBackend({ dbName: 'MindOS-v3' });
+    await initApp({
+        backend,
+        workspaces: WORKSPACES,
+        defaultSlug: 'chat',
+        routeAliases: { home: 'llm-workspace' },
+    });
+}
+
+main().catch(err => console.error('[Bootstrap] Fatal:', err));

@@ -61,7 +61,7 @@ Three file handle implementations:
 
 ~~`VFSModuleEngine`~~ (deprecated v3.3) — `IVFSManager.getEngine(moduleName)` returns `IModuleFS` directly.
 
-Services needing direct VFS access extend **`BaseModuleService`** (`packages/vfslib/src/adapter-session/`) — provides `readJson`/`writeJson` (upsert semantics), `ensureDirectory`.
+Services needing direct VFS access extend **`BaseModuleService`** (`packages/stdio/src/adapter-session/`) — provides `readJson`/`writeJson` (upsert semantics), `ensureDirectory`.
 
 ### Workspace Strategy Pattern (web-app)
 
@@ -577,11 +577,11 @@ Four categories, enforced by `validateFilename` + `AccessController`:
 |---|---|---|---|---|---|
 | `name` | `notes.md`, `folder/` | user | ✅ visible | ✅ | Normal files |
 | `.name` | `.connections/`, `.nodeId.json` | `isSystem` modules only | ❌ hidden | ❌ | Access-controlled by `AccessController`; non-system modules get EACCES |
-| `_name/` | `_note.md/` | vfslib (auto) | ❌ hidden | ✅ | **Assetdir** — companion dir for `note.md`; lifecycle coupled to owner (auto-renamed/moved/deleted) |
+| `_name/` | `_note.md/` | stdio (auto) | ❌ hidden | ✅ | **Assetdir** — companion dir for `note.md`; lifecycle coupled to owner (auto-renamed/moved/deleted) |
 | `__config/` | `__config/history.yaml` | any module code | ❌ hidden | ✅ | **Module-internal config dir** — one per module, no access restriction, files inside use plain names |
 
 **`validateFilename` rules** (`DEFAULT_FILENAME_PATTERN = /^(?!_(?!_))[^/\\][^/\\]*$/`)**:**
-- Single `_` prefix → **blocked** (assetdirs are created by vfslib internals, not user code)
+- Single `_` prefix → **blocked** (assetdirs are created by stdio internals, not user code)
 - Double `__` prefix → **allowed** (`__config/` is the only conventional use)
 - `.` prefix → allowed by `validateFilename`, restricted by `AccessController`
 
@@ -714,7 +714,7 @@ setLocale(saved ?? (navigator.language.startsWith('zh') ? 'zh-CN' : 'en'));
 - **Avoid `exists` + `read` patterns** (TOCTOU) — just read and catch not-found errors.
 - **Asset directories**: use `IAssetOperations.putAsset(ownerIdOrPath, filename, content)` — never create `_name/` dirs directly.
 - **Module-internal data**: write to `/__config/<filename>` (plain filename, no `_` prefix). Any module can create `__config/` without `isSystem`.
-- **`toBuffer(content)`** from `@itookit/vfslib` converts `string | ArrayBuffer | Uint8Array → ArrayBuffer`.
+- **`toBuffer(content)`** from `@itookit/stdio` converts `string | ArrayBuffer | Uint8Array → ArrayBuffer`.
 - **`SubAgentRouter.delegate(task)`** — context firewall: creates a fresh LLM context with filtered tools, runs its own loop, returns only a summary. Used by Mission scheduler and `delegate_task` tool. Prevents context window pollution.
 - **`etc` module** (`CONFIG_MODULE = 'etc'`) is auto-mounted at VFS init; stores LLM connections (`/llm/.connections/`), MCP configs (`/llm/.mcp/`), sync config, tags, contacts.
 - **DB name** is `'MindOS-v3'` (IndexedDB). Older schemas (`'MindOS-v2'`, `'MindOS'`) are incompatible.

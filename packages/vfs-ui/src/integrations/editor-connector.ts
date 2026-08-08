@@ -7,16 +7,16 @@ import type {
   EditorFactory,
   EditorOptions,
   ISessionUI,
-  IModuleFS,
   EditorHostContext,
   NavigationRequest,
 } from '@itookit/common';
+import type { IModuleFS } from '@itookit/stdio';
 
 import type { VFSNodeUI, VFSUIState } from '../contracts/types';
 import type { VFSService } from '../services/VFSService';
 import { parseFileInfo, extractTaskCounts } from '../utils/parser';
 import { MediaViewerEditor, isBinaryViewable } from '../editors/MediaViewerEditor';
-import { guessMimeType } from '@itookit/common';
+import { guessMimeType } from '@itookit/stdio';
 
 import type { PublicEventMap } from '../contracts/events';
 

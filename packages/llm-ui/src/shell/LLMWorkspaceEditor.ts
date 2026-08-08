@@ -2,8 +2,9 @@
 
 import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent,
-    EditorEventMap, EditorEventCallback, EventBus, CollapseExpandResult, Toast,
+    EditorEventMap, EditorEventCallback, CollapseExpandResult, Toast,
 } from '@itookit/common';
+import { EventBus } from '@itookit/stdio';
 import type {
     HarnessControlPlane,
     ILLMService,

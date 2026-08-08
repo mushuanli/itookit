@@ -6,11 +6,10 @@ export default defineConfig(
     name: 'VFSUI',
     fileName: 'vfs-ui',
     rootDir: __dirname,
-    external: ['@itookit/vfs', '@itookit/common', '@itookit/vfslib', 'immer'],
+    external: ['@itookit/common', '@itookit/stdio', 'immer'],
     globals: {
       '@itookit/common': 'ItookitCommon',
-      '@itookit/vfs': 'VFSCore',
-      '@itookit/vfslib': 'ItookitVfslib',
+      '@itookit/stdio': 'ItookitStdio',
       'immer': 'immer'
     }
   })

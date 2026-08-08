@@ -2,7 +2,8 @@
 //
 // SkillManager — SkillDefinition CRUD, HTTP/Shell/MCP invocation.
 
-import type { LLMSkill, IVFSManager, IModuleFS } from '@itookit/common';
+import type { LLMSkill } from '@itookit/common';
+import type { IVFSManager, IModuleFS } from '@itookit/stdio';
 import yaml from 'js-yaml';
 import { VFSHelpers } from './vfs-helpers';
 import type { MCPManager } from './mcp-manager';

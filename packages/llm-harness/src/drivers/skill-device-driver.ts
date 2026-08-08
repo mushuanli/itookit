@@ -3,7 +3,6 @@
 
 // node:child_process is loaded dynamically in registerShellTool to stay browser-safe.
 import type {
-    IDeviceDriver,
     ISkillService,
     IToolService,
     ToolHandler,
@@ -14,9 +13,12 @@ import type {
     SkillMatchContext,
     SkillScopeLevel,
     ParsedCompactInstructions,
-    DeviceContext,
     ScopeEntry,
 } from '@itookit/common';
+import type {
+    IDeviceDriver,
+    DeviceContext,
+} from '@itookit/stdio';
 import { aggregateCompactInstructions } from '../skills/compact-extractor';
 import { matchGlob } from '../skills/glob-matcher';
 import {

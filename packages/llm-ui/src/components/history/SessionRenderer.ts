@@ -5,7 +5,7 @@ import { MDxController } from '../mdx/MDxController';
 import { NodeRenderer } from './NodeRenderer';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { LayoutTemplates } from '../templates/LayoutTemplates';
-import type { IModuleFS } from '@itookit/common';
+import type { IModuleFS } from '@itookit/stdio';
 import { t } from '@itookit/common';
 import { TimerManager } from '../common';
 import { getPreviewText } from '../../utils/textUtils';

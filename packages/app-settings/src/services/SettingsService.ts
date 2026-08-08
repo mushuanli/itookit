@@ -1,9 +1,10 @@
 /**
  * @file: app-settings/services/SettingsService.ts
  */
-import { FS_MODULE_AGENTS, CONFIG_MODULE } from '@itookit/common';
-import type { IVFSManager, VFSManagerEvent } from '@itookit/common';
-import { FSNotFoundError } from '@itookit/common';
+import { FS_MODULE_AGENTS } from '@itookit/stdio';
+import { CONFIG_MODULE } from '@itookit/stdio';
+import type { IVFSManager, VFSManagerEvent } from '@itookit/stdio';
+import { FSNotFoundError } from '@itookit/stdio';
 import type { SyncMode } from '../types/sync';
 import { SettingsState, Contact, Tag } from '../types/types';
 import { SnapshotService } from './SnapshotService';
@@ -514,7 +515,7 @@ export class SettingsService {
         }
     }
 
-    // Note: same logic as toBuffer() in @itookit/vfslib — duplicated here due to package boundary
+    // Note: same logic as toBuffer() in @itookit/stdio — duplicated here due to package boundary
     private toArrayBuffer(data: string | ArrayBuffer | Uint8Array): ArrayBuffer {
         if (typeof data === 'string') return new TextEncoder().encode(data).buffer as ArrayBuffer;
         if (data instanceof Uint8Array) {

@@ -6,7 +6,7 @@ pnpm monorepo. All packages under `packages/`, main app under `apps/web-app/` (p
 | Package | Role |
 |---|---|
 | `@itookit/common` | Shared interfaces, types, and utilities. Zero runtime deps. Source of truth for all cross-package contracts. |
-| `@itookit/vfslib` | VFS engine core — POSIX-style virtual filesystem abstraction, assetdir/ 模块目录级别隔离，mount 不同 driver 到不同目录 |
+| `@itookit/stdio` | VFS engine core — POSIX-style virtual filesystem abstraction, assetdir/ 模块目录级别隔离，mount 不同 driver 到不同目录 |
 | `@itookit/vfsdriver-indexeddb` | IndexedDB storage backend (browser) |
 | `@itookit/vfsdriver-localfs` | SQLite + local FS backend (Node/Electron) |
 | `@itookit/device-llm` | LLM API communication — OpenAI/Anthropic/Gemini, SSE streaming, MCP protocol, Skill/Connection VFS storage |

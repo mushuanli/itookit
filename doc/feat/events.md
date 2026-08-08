@@ -161,7 +161,7 @@ new EventBus({ coalesce: ['change', 'cursorMove'] })
 | `llm-ui` | `EditorEventBus.ts` (45行) | 门面类委托 `CoreEventBus<EditorBusEvents>` | 45→20 | `destroy()`→`clear()`，handler签名适配 |
 | `vfs-ui` | `EventBus.ts` (47行) | 门面类委托 `CoreEventBus<PublicEventMap>` | 47→23 | 实现 `IEventPort` 不变 |
 | `mdx` | `event-bus.ts` (67行) | 门面类委托 `CoreEventBus<Record<string,any>>` + coalesce | 67→30 | 自身的 batch 逻辑删除，改用核心 |
-| `vfslib` | `event-bus.ts` (113行) | 别名类 `extends CoreEventBus<FSEventPayloadMap>` | 113→10 | `removeAll()`→`clear()`；`TransactionEventBuffer`→泛型 |
+| `stdio` | `event-bus.ts` (113行) | 别名类 `extends CoreEventBus<FSEventPayloadMap>` | 113→10 | `removeAll()`→`clear()`；`TransactionEventBuffer`→泛型 |
 | `llm-kernel` | `event-bus.ts` (185行) | 重写为类型目录 + `getEventBus()` 单例 | 185→76 | `IScopedEventBus`→`IEventChannel`；`createScope`→`channel`；`'*'`→`onAny` |
 | `llm-engine` | `session-event-bus.ts` (299行) | 薄门面，双 `EventBus<M>` 分别管 session/global track | 299→110 | `getDebugInfo/getStats/debug` 删除；`registeredSessions`→channel 生命周期 |
 
@@ -259,7 +259,7 @@ channel.onAny((payload, meta) => this.postMessage(...));
         ┌──────────────────────┼──────────────────────┐
         ▼                      ▼                      ▼
 ┌───────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ llm-kernel    │    │ vfslib          │    │ llm-engine      │
+│ llm-kernel    │    │ stdio          │    │ llm-engine      │
 │ getEventBus() │    │ EventBus extends│    │ SessionEventBus │
 │ → singleton   │    │ CoreEventBus    │    │  session track  │
 │ channel(id)   │    │ FSEventPayload  │    │  global track   │
@@ -296,7 +296,7 @@ channel.onAny((payload, meta) => this.postMessage(...));
 |---|---------|--------|--------|---------|
 | 1 | **Kernel EventBus** | `llm-kernel` | 全局单例 | `src/core/event-bus.ts` |
 | 2 | **SessionEventBus** | `llm-engine` | 每 SessionManager | `src/session/session-event-bus.ts` |
-| 3 | **VFS EventBus** | `vfslib` | 每 VFSEngine / VFSManager | `src/event/event-bus.ts` |
+| 3 | **VFS EventBus** | `stdio` | 每 VFSEngine / VFSManager | `src/event/event-bus.ts` |
 | 4 | **EditorEventBus** | `llm-ui` | 每 LLMWorkspaceEditor | `src/shell/EditorEventBus.ts` |
 | 5 | **MDX EventBus** | `mdx` | 每 PluginManager | `src/core/event-bus.ts` |
 | 6 | **VFS-UI EventBus** | `vfs-ui` | 每 shell 实例 | `src/interaction/EventBus.ts` |
@@ -508,9 +508,9 @@ agent:human:resolved           →  session_hitl_resolved（全局）
 
 ---
 
-### 2.3 VFS EventBus（`vfslib`）
+### 2.3 VFS EventBus（`stdio`）
 
-**文件：** `packages/vfslib/src/event/event-bus.ts`
+**文件：** `packages/stdio/src/event/event-bus.ts`
 
 类型安全的事件总线，支持 `onAny()` 监听所有事件。配合 `TransactionEventBuffer` 在事务中批量提交事件。
 
@@ -550,9 +550,9 @@ ModuleFS 写操作
 
 | 文件 | 角色 | 发出/监听 |
 |------|------|----------|
-| `vfslib/src/services/module-fs.ts` | Emit | 所有 FS 变更事件（带 moduleId、mountId） |
-| `vfslib/src/services/vfs-manager.ts` | Emit | 跨模块 + 挂载事件 |
-| `vfslib/src/utils/debug.ts` | Listen | 所有事件（`onAny()`），调试日志 |
+| `stdio/src/services/module-fs.ts` | Emit | 所有 FS 变更事件（带 moduleId、mountId） |
+| `stdio/src/services/vfs-manager.ts` | Emit | 跨模块 + 挂载事件 |
+| `stdio/src/utils/debug.ts` | Listen | 所有事件（`onAny()`），调试日志 |
 | `vfs-ui/src/services/EngineAdapter.ts` | Listen | 桥接到 VFSStore → UI 更新 |
 | `demo/src/memory-manager.js` | Listen | `node:updated` |
 | `app-settings/src/editors/system-fs/SystemVFSEngine.ts` | Listen | VFS 引擎事件 |
@@ -815,7 +815,7 @@ ModuleFS 操作 (createFile, writeContent, delete, rename, move, copy)
   │   [直接订阅者]
   │   ├─ EngineAdapter (vfs-ui) → VFSStore → UI 状态更新
   │   ├─ VFSManager.managerBus → 跨模块通知
-  │   ├─ Debug 工具 (vfslib) → 调试日志
+  │   ├─ Debug 工具 (stdio) → 调试日志
   │   ├─ demo/memory-manager.js → 业务逻辑
   │   └─ app-settings/SystemVFSEngine → 设置同步
   │
@@ -1016,7 +1016,7 @@ ExecutionRuntime 使用此事件追踪执行器状态
 
 ---
 
-### `vfslib` — VFS 事件源
+### `stdio` — VFS 事件源
 
 **发出事件：**
 
@@ -1131,7 +1131,7 @@ ExecutionRuntime 使用此事件追踪执行器状态
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        VFS 文件事件流                                │
 │                                                                     │
-│  vfslib                     vfs-ui                    外部消费者     │
+│  stdio                     vfs-ui                    外部消费者     │
 │  ┌──────────┐  FS事件      ┌──────────────┐  对外事件  ┌────────┐  │
 │  │ModuleFS  │─────────────→│EngineAdapter │──────────→│app-shell│  │
 │  │  + bus   │              │   │          │           │        │  │

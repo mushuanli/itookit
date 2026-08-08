@@ -27,14 +27,14 @@ Container_Boundary(bootstrap, "initApp() 引导序列") {
 }
 
 ' === 依赖 ===
-System_Ext(vfslib, "@itookit/vfslib", "createVFS()")
+System_Ext(stdio, "@itookit/stdio", "createVFS()")
 System_Ext(device_llm, "@itookit/device-llm", "LLMDeviceDriver\n(getSkills→SkillDefinition[])")
 System_Ext(settings, "@itookit/app-settings", "createSettingsModule()\n(LLMUIEditors 注入)")
 System_Ext(harness, "@itookit/llm-harness", "createHarness()")
 System_Ext(engine, "@itookit/llm-engine", "initializeLLMEngine()")
 System_Ext(llm_ui, "@itookit/llm-ui", "编辑器类 (Provider/Conn/MCP/Cost)")
 
-Rel(s1, vfslib, "调用")
+Rel(s1, stdio, "调用")
 Rel(s2, device_llm, "调用")
 Rel(s3, settings, "调用")
 Rel(s5, harness, "调用")

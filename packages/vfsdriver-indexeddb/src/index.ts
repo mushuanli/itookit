@@ -3,7 +3,7 @@
  * v4.1: Path-based IndexedDB storage backend.
  */
 
-export { IndexedDBBackend, type IndexedDBBackendOptions, type VerifyResult } from './idb-backend';
+export { IndexedDBBackend, openIndexedDBBackend, type IndexedDBBackendOptions, type VerifyResult } from './idb-backend';
 export { IDBRecordStore } from './record-store';
 
 export {

@@ -4,7 +4,7 @@
  * @interface
  */
 
-import type { IModuleFS } from '@itookit/vfs-protocol';
+import type { IModuleFS } from '@itookit/stdio';
 import { NavigationRequest } from './INavigation';
 
 export type SearchResultSource = 'editor' | 'renderer';

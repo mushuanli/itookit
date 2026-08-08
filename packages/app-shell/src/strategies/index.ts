@@ -1,6 +1,7 @@
 import { WorkspaceStrategy } from './types';
 import { defaultEditorFactory } from '@itookit/mdxeditor';
-import type { IVFSManager, IModuleFS, EditorFactory } from '@itookit/common';
+import type { EditorFactory } from '@itookit/common';
+import type { IVFSManager, IModuleFS } from '@itookit/stdio';
 
 export class StandardWorkspaceStrategy implements WorkspaceStrategy {
     constructor(private vfs: IVFSManager) {}

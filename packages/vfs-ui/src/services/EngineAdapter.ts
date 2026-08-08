@@ -3,7 +3,7 @@
  * @desc Bridges IModuleFS events → VFSStore dispatches.
  *       Extracted from VFSUIShell to isolate engine coupling.
  */
-import type { IModuleFS, FSNode, FSEventType, FSEvent } from '@itookit/common';
+import type { IModuleFS, FSNode, FSEventType, FSEvent } from '@itookit/stdio';
 import type { IStatePort, IFileTypePort } from '../contracts/ports';
 import type { VFSNodeUI, TagInfo } from '../contracts/types';
 import { mapFSNodeToUIItem, mapFSNodesToUIItems } from './NodeMapper';

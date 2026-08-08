@@ -1,6 +1,6 @@
 // @file: llm-conversation/session/attachment-processor.ts
 
-import { guessMimeType } from '@itookit/common';
+import { guessMimeType } from '@itookit/stdio';
 import type { Attachment } from '@itookit/common';
 import { ChatAttachment } from '../core/types';
 import { IChatEngine } from '../persistence/types';

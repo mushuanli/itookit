@@ -3,7 +3,7 @@
  * @desc Type-safe public event bus implementing IEventPort.
  *       Only for OUTBOUND events to external consumers.
  */
-import { EventBus as CoreEventBus } from '@itookit/common';
+import { EventBus as CoreEventBus } from '@itookit/stdio';
 import type { IEventPort } from '../contracts/ports';
 import type { PublicEventMap, PublicEventName, PublicEventPayload } from '../contracts/events';
 

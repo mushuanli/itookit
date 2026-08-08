@@ -5,7 +5,7 @@
  * 用于替代文本编辑器来预览图片、视频、音频、PDF 等二进制文件。
  * 始终处于只读渲染模式，不提供编辑能力。
  */
-import { EventBus } from '@itookit/common';
+import { EventBus } from '@itookit/stdio';
 import type { IEditor, EditorEvent, EditorEventMap, EditorEventCallback, Heading, UnifiedSearchResult, CollapseExpandResult } from '@itookit/common';
 
 // ── MIME 类型分组 ──────────────────────────────────────────────────────────────

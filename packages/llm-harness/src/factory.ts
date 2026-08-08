@@ -5,10 +5,12 @@ import type {
     IToolService,
     ISkillService,
     ILLMService,
-    IDeviceDriver,
     ITTYDriver,
     VfsPort,
 } from '@itookit/common';
+import type {
+    IDeviceDriver,
+} from '@itookit/stdio';
 import { LLMServiceAdapter } from './adapters/llm-service-adapter';
 import { ToolDeviceDriver, BUILTIN_TOOLS } from '@itookit/tools';
 import { TTYSessionManager } from '@itookit/device-tty';

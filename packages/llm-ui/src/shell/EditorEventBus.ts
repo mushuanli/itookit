@@ -1,6 +1,6 @@
 // @file: llm-ui/shell/EditorEventBus.ts
 
-import { EventBus as CoreEventBus } from '@itookit/common';
+import { EventBus as CoreEventBus } from '@itookit/stdio';
 import type { IEditorEventBus, EditorBusEvents, EditorEventKey } from '../domain/events';
 
 /**

@@ -51,7 +51,7 @@ Rel(ws_strategies, settings_module, "设置工作区使用", "")
 
 ' === 外部依赖 ===
 System_Ext(common_pkg, "@itookit/common", "SkillDefinition(统一) · IConnectionReader · i18n")
-System_Ext(vfs_pkg, "@itookit/vfslib", "VFS 引擎")
+System_Ext(vfs_pkg, "@itookit/stdio", "VFS 引擎")
 System_Ext(driver_pkg, "@itookit/device-llm", "LLM 驱动\n(getSkills→SkillDefinition[])")
 System_Ext(harness_pkg, "@itookit/llm-harness", "Agent 循环")
 System_Ext(engine_pkg, "@itookit/llm-engine", "会话引擎")

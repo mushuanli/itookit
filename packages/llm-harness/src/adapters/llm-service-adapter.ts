@@ -11,9 +11,11 @@ import type {
     ChatCompletionChunk,
     ConnectionMeta,
     LLMProvider,
+} from '@itookit/common';
+import type {
     IDeviceDriver,
     DeviceContext,
-} from '@itookit/common';
+} from '@itookit/stdio';
 import { LLM_IOCTL, expandMessagesAttachments } from '@itookit/device-llm';
 
 const BASE_CTX: DeviceContext = { nodeId: 'llm', name: 'llm' };

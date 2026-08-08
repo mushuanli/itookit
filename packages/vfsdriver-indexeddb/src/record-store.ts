@@ -21,7 +21,7 @@ import type {
     RecordQueryOptions,
     RecordQueryResult,
     RecordWalkOptions,
-} from '@itookit/common';
+} from '@itookit/stdio';
 import { req, collectCursor, deleteCursor, STORE_RECORDS } from './utils';
 
 interface RecordRow {

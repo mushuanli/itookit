@@ -1,7 +1,7 @@
 // @file: llm-conversation/src/persistence/vfs-utils.ts
 // Shared VFS traversal utilities used by ChatEngine.
 
-import type { FSNode } from '@itookit/common';
+import type { FSNode } from '@itookit/stdio';
 
 /**
  * Recursively collect all file nodes under the given directory listing.

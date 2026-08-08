@@ -11,10 +11,12 @@ import type {
   ToolInvokeResult,
   ToolBatchResult,
   ToolVFSContext,
-  DeviceContext,
-  IDeviceDriver,
   ToolHandler,
 } from '@itookit/common';
+import type {
+  DeviceContext,
+  IDeviceDriver,
+} from '@itookit/stdio';
 import type { Tool } from '../core/Tool';
 import type { INativeShell } from '../core/types';
 

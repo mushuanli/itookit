@@ -3,7 +3,7 @@
 import { Command } from './Command';
 import { LLMPrintService, type PrintService } from '@itookit/mdxeditor';
 import type { ErrorSeverity } from '../utils/errorHandler';
-import type { IModuleFS } from '@itookit/common';
+import type { IModuleFS } from '@itookit/stdio';
 
 /**
  * 复制整个会话为 Markdown

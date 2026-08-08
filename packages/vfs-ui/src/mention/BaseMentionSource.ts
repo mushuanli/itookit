@@ -10,7 +10,7 @@ import {
 import {
   type IModuleFS,
   type FSNode,
-} from '@itookit/common';
+} from '@itookit/stdio';
 import { shouldFilterNode } from '../utils/helpers';
 
 export interface MentionSourceDependencies {

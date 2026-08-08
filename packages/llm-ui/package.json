@@ -68,16 +68,15 @@
     "@itookit/common": "workspace:*",
     "@itookit/device-llm": "workspace:*",
     "@itookit/llm-conversation": "workspace:*",
+    "@itookit/stdio": "workspace:*",
     "js-yaml": "^4.1.1",
     "marked": "^16.4.2"
   },
   "peerDependencies": {
-    "@itookit/mdxeditor": "workspace:*",
-    "@itookit/vfslib": "workspace:*"
+    "@itookit/mdxeditor": "workspace:*"
   },
   "devDependencies": {
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/vfslib": "workspace:*",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.25",
     "@vitest/coverage-v8": "^1.6.1",

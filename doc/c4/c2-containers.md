@@ -17,7 +17,7 @@
 │  app-settings (无 llm-ui 依赖)   │
 ├─────────────────────────────────┤
 │     引擎层                       │
-│  vfslib | device-llm |          │
+│  stdio | device-llm |          │
 │  llm-engine (task-runner + executor)   │
 │  tools | device-tty             │
 ├─────────────────────────────────┤
@@ -49,7 +49,7 @@
 | 包 | 内部依赖 | 外部依赖 |
 |---|---|---|
 | `@itookit/llm-harness` | common, device-llm, device-tty, tools | 无 |
-| `@itookit/llm-engine` | common, vfslib | `yaml` |
+| `@itookit/llm-engine` | common, stdio | `yaml` |
 | `@itookit/app-settings` | common, device-llm, llm-engine, memory-manager | `js-yaml` |
 
 > **变更**: app-settings 不再依赖 llm-ui（上行依赖已解耦）

@@ -26,7 +26,7 @@
     "@itookit/llm-ui": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
-    "@itookit/vfslib": "workspace:*"
+    "@itookit/stdio": "workspace:*"
   },
   "devDependencies": {
     "@itookit/app-settings": "workspace:*",
@@ -37,7 +37,7 @@
     "@itookit/llm-ui": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
-    "@itookit/vfslib": "workspace:*",
+    "@itookit/stdio": "workspace:*",
     "@itookit/vfsdriver-indexeddb": "workspace:*",
     "@itookit/vfsdriver-localfs": "workspace:*",
     "fake-indexeddb": "^6.0.0",

@@ -16,11 +16,12 @@ import { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createVFS, VFSModuleEngine } from '@itookit/common';
+import { createVFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/stdio';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { ChatEngine } from '@itookit/llm-conversation';
-import { FS_MODULE_CHAT } from '@itookit/common';
+import { FS_MODULE_CHAT } from '@itookit/stdio';
 
 // ── Temp dir helpers ──────────────────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ interface Fixture {
     tempBase: string;
     engine: ChatEngine;
     /** File tree view — use this for loadTree / getChildren */
-    treeEngine: VFSModuleEngine;
+    treeEngine: IModuleFS;
     dispose(): Promise<void>;
 }
 
@@ -62,8 +63,8 @@ async function createFixture(): Promise<Fixture> {
     const engine = new ChatEngine(vfs);
     await engine.init();
 
-    // VFSModuleEngine for file-tree operations (loadTree, getChildren)
-    const treeEngine = new VFSModuleEngine(FS_MODULE_CHAT, vfs);
+    // IModuleFS for file-tree operations (loadTree, getChildren)
+    const treeEngine = vfs.getEngine(FS_MODULE_CHAT);
     await treeEngine.init();
 
     return {
@@ -123,7 +124,7 @@ describe('ChatEngine + LocalFSBackend', () => {
 
         // VFSModuleEngine.getChildren('/') lists .chat files visible to the UI.
         // Note: node.id is the VFS inode ID, not the session UUID from createSession.
-        const nodes = await fix.treeEngine.getChildren('/');
+        const nodes = await fix.treeEngine.driver.getChildren('/');
         expect(nodes.length).toBeGreaterThan(0);
 
         const chatNode = nodes.find(n => 'name' in n && (n as { name: string }).name.endsWith('.chat'));
@@ -155,7 +156,7 @@ describe('ChatEngine + LocalFSBackend', () => {
 
         expect(new Set(ids).size).toBe(3);   // all unique IDs
 
-        const tree = await fix.treeEngine.getChildren('/');
+        const tree = await fix.treeEngine.driver.getChildren('/');
         expect(tree.length).toBeGreaterThanOrEqual(3);
     });
 });

@@ -1,4 +1,5 @@
-import type { IStorageBackend, IVFSManager, MountOptions, FileCreationConfig, IModuleFS, EditorFactory, EditorOptions, NavigationRequest } from '@itookit/common';
+import type { FileCreationConfig, EditorFactory, EditorOptions, NavigationRequest } from '@itookit/common';
+import type { IStorageBackend, IVFSManager, MountOptions, IModuleFS } from '@itookit/stdio';
 import type { ThemeMode } from './ThemeService';
 import type { FileTypeDefinition, CustomEditorResolver, VFSUIOptions } from '@itookit/vfs-ui';
 

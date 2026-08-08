@@ -1,9 +1,9 @@
 // @file: llm-conversation/services/prompt-history-service.ts
 
 import YAML from 'yaml';
-import { BaseModuleService } from '@itookit/vfslib';
-import type { IVFSManager } from '@itookit/common';
-import { FS_MODULE_CHAT } from '@itookit/common';
+import { BaseModuleService } from '@itookit/stdio';
+import type { IVFSManager } from '@itookit/stdio';
+import { FS_MODULE_CHAT } from '@itookit/stdio';
 import { log } from '../utils/logger';
 
 // ============================================

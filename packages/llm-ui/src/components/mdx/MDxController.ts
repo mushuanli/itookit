@@ -1,6 +1,7 @@
 // @file llm-ui/views/mdx/MDxController.ts
 import { createMDxEditor, MDxEditor } from '@itookit/mdxeditor';
-import type { IModuleFS, CollapseExpandResult } from '@itookit/common';
+import type { CollapseExpandResult } from '@itookit/common';
+import type { IModuleFS } from '@itookit/stdio';
 import type { IStreamableEditor } from '../../domain/ports/IStreamableEditor';
 
 export interface MDxControllerOptions {

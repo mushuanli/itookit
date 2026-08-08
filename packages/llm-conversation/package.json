@@ -39,7 +39,7 @@
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/llm-engine": "workspace:*",
-    "@itookit/vfslib": "workspace:*",
+    "@itookit/stdio": "workspace:*",
     "yaml": "^2.8.2"
   },
   "devDependencies": {

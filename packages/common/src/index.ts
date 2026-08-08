@@ -1,8 +1,5 @@
 // packages/common/src/index.ts
 
-// ── VFS: 文件系统协议（已提取至 @itookit/vfs-protocol；保留 re-export 向后兼容）──
-export * from '@itookit/vfs-protocol';
-
 // ── LLM: 已分离至 @itookit/llm-common；保持 re-export 向后兼容 ──
 export * from '@itookit/llm-common';
 
@@ -44,7 +41,7 @@ export {
     simpleHash, escapeHTML, escapeAttr,
     generateUUID, generateShortUUID, generateId,
     debounce, isClass,
-    guessMimeType, sleep, throttle, retry, withTimeout,
+    sleep, throttle, retry, withTimeout,
     safeJsonParse, deepClone, truncate,
     formatFileSize, formatDuration, timeAgo,
     isImageMimeType,
@@ -80,9 +77,4 @@ export {
     ENTITY_ICONS, AGENT_ICON_PALETTE, getFileIcon,
 } from './i18n/icons';
 
-// ── EventBus ──
-export * from './eventbus';
-
-// ── 常 ──
-export const FS_MODULE_CHAT = 'chats';
-export const FS_MODULE_AGENTS = 'agents';
+// ── EventBus: 已移入 @itookit/stdio；消费方从 stdio 导入 ──

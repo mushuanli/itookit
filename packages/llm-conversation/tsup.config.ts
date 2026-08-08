@@ -9,7 +9,7 @@ export default defineConfig({
   external: [
     '@itookit/common',
     '@itookit/llm-engine',
-    '@itookit/vfslib',
+    '@itookit/stdio',
     'yaml',
   ],
 });

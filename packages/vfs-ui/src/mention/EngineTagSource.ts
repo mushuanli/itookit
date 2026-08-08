@@ -3,7 +3,7 @@
  * @desc A generic tag autocomplete source that works with any IFSEngine.
  */
 import { IAutocompleteSource, type Suggestion } from './autocomplete-source';
-import type { IModuleFS } from '@itookit/common';
+import type { IModuleFS } from '@itookit/stdio';
 
 interface TagData {
     name: string;

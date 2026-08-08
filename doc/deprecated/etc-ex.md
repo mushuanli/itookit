@@ -54,7 +54,7 @@
 ### 4. 扩展权限接口（新增）
 
 ```ts
-// packages/vfslib/src/engine/access-controller.ts
+// packages/stdio/src/engine/access-controller.ts
 
 export interface IAccessPolicy {
   /** 在默认规则之后调用。抛出即拒绝；正常返回即通过。 */
@@ -145,7 +145,7 @@ export interface ISystemAccess {
 
 ### 步骤 2：`AccessController` 增加策略扩展点
 
-**文件**：`packages/vfslib/src/engine/access-controller.ts`
+**文件**：`packages/stdio/src/engine/access-controller.ts`
 
 在 `checkAccess` 方法末尾（`checkCreate` 之前）插入扩展点调用：
 
@@ -186,7 +186,7 @@ export interface IAccessPolicy {
 
 ### 步骤 3：`VFSEngine` 新增系统级 `/etc` 读写方法
 
-**文件**：`packages/vfslib/src/engine/vfs-engine.ts`
+**文件**：`packages/stdio/src/engine/vfs-engine.ts`
 
 新增方法，供 `ISystemAccess` 实现使用：
 
@@ -228,7 +228,7 @@ async listEtcDir(path: string): Promise<string[]> {
 
 ### 步骤 4：`VFSManager` 创建 `ISystemAccess` 实现，删除 `mount('etc')`
 
-**文件**：`packages/vfslib/src/services/vfs-manager.ts`
+**文件**：`packages/stdio/src/services/vfs-manager.ts`
 
 **4a. 删除 initialize 中的 mount 调用：**
 
@@ -331,7 +331,7 @@ private createSystemAccess(): ISystemAccess {
 
 ### 步骤 5：`ModuleFS` 适配 `systemFS` → `systemAccess`
 
-**文件**：`packages/vfslib/src/services/module-fs.ts`
+**文件**：`packages/stdio/src/services/module-fs.ts`
 
 **5a. 更新 import：**
 
@@ -440,20 +440,20 @@ export type { ISystemAccess } from './interfaces/fs/system-access';
 | 2 | `common/src/interfaces/fs/constants.ts` | 修改 | `CONFIG_MODULE` → `ETC_DIR` |
 | 3 | `common/src/interfaces/fs/device/device.ts` | 修改 | `DeviceContext.systemFS` → `systemAccess: ISystemAccess` |
 | 4 | `common/src/index.ts` | 修改 | 导出 `ISystemAccess` |
-| 5 | `vfslib/src/engine/access-controller.ts` | 修改 | 新增 `IAccessPolicy`、`addPolicy/removePolicy`、checkAccess 扩展点 |
-| 6 | `vfslib/src/engine/vfs-engine.ts` | 修改 | 新增 `writeEtcFile`、`readEtcFile`、`listEtcDir`、`ensureDir` |
-| 7 | `vfslib/src/services/vfs-manager.ts` | 修改 | 删除 `mount('etc')`；新增 `createSystemAccess()`；`getEngine` 改用 `systemAccess`；`updateTagDefinition` 改为直接操作 `/etc`；删除 `unmount` 的 etc 守卫 |
-| 8 | `vfslib/src/services/module-fs.ts` | 修改 | `ModuleFSDeps.systemFS` → `systemAccess`；`openDevice` 注入更新 |
+| 5 | `stdio/src/engine/access-controller.ts` | 修改 | 新增 `IAccessPolicy`、`addPolicy/removePolicy`、checkAccess 扩展点 |
+| 6 | `stdio/src/engine/vfs-engine.ts` | 修改 | 新增 `writeEtcFile`、`readEtcFile`、`listEtcDir`、`ensureDir` |
+| 7 | `stdio/src/services/vfs-manager.ts` | 修改 | 删除 `mount('etc')`；新增 `createSystemAccess()`；`getEngine` 改用 `systemAccess`；`updateTagDefinition` 改为直接操作 `/etc`；删除 `unmount` 的 etc 守卫 |
+| 8 | `stdio/src/services/module-fs.ts` | 修改 | `ModuleFSDeps.systemFS` → `systemAccess`；`openDevice` 注入更新 |
 
-| 9 | `vfslib/src/engine/vfs-engine.ts` | 修改 | 新增 `ensureDir()` 递归创建目录；`bootstrap()` 增加 `initDefaultConfig()` 阶段 |
-| 10 | `vfslib/src/services/vfs-manager.ts` | 修改 | `createSystemAccess().writeEtc` 写入前调用 `ensureDir` 递归建目录 |
+| 9 | `stdio/src/engine/vfs-engine.ts` | 修改 | 新增 `ensureDir()` 递归创建目录；`bootstrap()` 增加 `initDefaultConfig()` 阶段 |
+| 10 | `stdio/src/services/vfs-manager.ts` | 修改 | `createSystemAccess().writeEtc` 写入前调用 `ensureDir` 递归建目录 |
 
 ### 不变文件
 
 | 文件 | 原因 |
 |---|---|
-| `vfslib/src/services/scoped-view.ts` | 已正确映射 `/etc` → `/etc` 直通，无需改动 |
-| `vfslib/src/engine/access-controller.ts` 权限规则 | 三条规则依赖 `/etc` 路径，逻辑不变 |
+| `stdio/src/services/scoped-view.ts` | 已正确映射 `/etc` → `/etc` 直通，无需改动 |
+| `stdio/src/engine/access-controller.ts` 权限规则 | 三条规则依赖 `/etc` 路径，逻辑不变 |
 
 ---
 
@@ -474,7 +474,7 @@ writeContent('/etc/llm/.providers')       ← 普通模块通过 IFSDriver 写 /
 **修复**：`assertWritable` 增加系统 caller 绕过（与 `AccessController.checkAccess` 一致）：
 
 ```ts
-// packages/vfslib/src/services/module-fs.ts
+// packages/stdio/src/services/module-fs.ts
 private assertWritable(realPath: string): void {
     if (this.caller.isSystem) return;  // ← 新增：系统 caller 绕过 ScopedView 只读检查
     if (this.scope.isRealPathReadOnly(realPath)) throw new FSReadOnlyError(this.moduleId, realPath);
@@ -496,7 +496,7 @@ private assertWritable(realPath: string): void {
 
 ### 步骤 9：`VFSEngine` 新增递归 `ensureDir`
 
-**文件**：`packages/vfslib/src/engine/vfs-engine.ts`
+**文件**：`packages/stdio/src/engine/vfs-engine.ts`
 
 ```ts
 /**
@@ -521,7 +521,7 @@ async ensureDir(path: string): Promise<void> {
 
 ### 步骤 10：`ISystemAccess.writeEtc` 自动建目录
 
-**文件**：`packages/vfslib/src/services/vfs-manager.ts`
+**文件**：`packages/stdio/src/services/vfs-manager.ts`
 
 `createSystemAccess()` 中的 `writeEtc` 实现：
 
@@ -550,7 +550,7 @@ private createSystemAccess(): ISystemAccess {
 
 ### 步骤 11：Bootstrap 阶段初始化默认配置目录
 
-**文件**：`packages/vfslib/src/engine/vfs-engine.ts`
+**文件**：`packages/stdio/src/engine/vfs-engine.ts`
 
 在 `bootstrap()` 中增加 `initDefaultConfig()` 调用：
 

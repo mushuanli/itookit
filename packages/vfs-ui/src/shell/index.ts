@@ -9,9 +9,9 @@ import { VFSUIShell } from './VFSUIShell';
 import type {
     SessionUIOptions,
     ISessionUI,
-    IModuleFS,
     EditorFactory,
 } from '@itookit/common';
+import type { IModuleFS } from '@itookit/stdio';
 
 import type {
   VFSNodeUI,

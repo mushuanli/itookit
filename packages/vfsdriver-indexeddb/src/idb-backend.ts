@@ -16,7 +16,7 @@ import type {
     RecordQueryResult,
     RecordValue,
     RecordWalkOptions,
-} from '@itookit/common';
+} from '@itookit/stdio';
 import { openDB, req, collectCursor, REQUIRED_STORES, DB_VERSION, STORE_NODES, STORE_TAGS } from './utils';
 import { IDBRecordStore, createRecordStore, ensureRecordIndexes } from './record-store';
 import { STORE_RECORDS } from './utils';
@@ -640,4 +640,14 @@ function toFSNode(entry: NodeEntry): FSNode {
         contentHash: undefined,
         assetDirPath: undefined,
     } as FSFileNode;
+}
+
+/**
+ * Open (and initialize) an IndexedDB storage backend.
+ * Symmetric with `openLocalFSBackend` from @itookit/vfsdriver-localfs.
+ */
+export async function openIndexedDBBackend(options?: IndexedDBBackendOptions): Promise<IndexedDBBackend> {
+    const backend = new IndexedDBBackend(options);
+    await backend.init();
+    return backend;
 }

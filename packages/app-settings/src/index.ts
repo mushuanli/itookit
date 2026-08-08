@@ -1,6 +1,6 @@
 // @file: app-settings/index.ts
 import './styles/styles.css';
-import type { IVFSManager } from '@itookit/common';
+import type { IVFSManager } from '@itookit/stdio';
 import { SettingsService } from './services/SettingsService';
 import { SettingsEngine } from './engine/SettingsEngine';
 

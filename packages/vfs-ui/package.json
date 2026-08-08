@@ -70,7 +70,7 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/vfslib": "workspace:*",
+    "@itookit/stdio": "workspace:*",
     "immer": "^10.2.0"
   },
   "peerDependencies": {},

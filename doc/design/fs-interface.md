@@ -53,11 +53,11 @@ interfaces/fs/
 ```
 ┌────────────────────────────────────────────────────────────┐
 │                   消费方（UI 层 / 业务层）                    │
-│       import type { IModuleFS, IFile, FSNode } from '@common/interfaces/fs'
+│       import type { IModuleFS, IFile, FSNode } from '@stdio/src'
 └─────────────────┬──────────────────────────────────────────┘
                   │ 只依赖接口，不依赖实现
 ┌─────────────────▼──────────────────────────────────────────┐
-│  接口层 (common/interfaces/fs)  ← 本文档范围                 │
+│  接口层 (stdio/src)  ← 本文档范围                 │
 │                                                             │
 │  IVFSManager ── 系统管理（模块生命周期、跨模块搜索）          │
 │       │                                                     │
@@ -72,7 +72,7 @@ interfaces/fs/
 └─────────────────────────────────────────────────────────────┘
                   │ 实现层不在此包
 ┌─────────────────▼──────────────────────────────────────────┐
-│  实现层（vfslib / vfsdrivers）                               │
+│  实现层（stdio / vfsdrivers）                               │
 │    VFSEngine   ModuleFS   FSDriverAdapter  FSMetaDriverAdapter
 │    MemoryBackend  IndexedDBBackend  LocalFSBackend          │
 └─────────────────────────────────────────────────────────────┘

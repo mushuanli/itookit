@@ -1,13 +1,15 @@
 import YAML from 'yaml';
-import { BaseModuleService } from '@itookit/vfslib';
+import { BaseModuleService } from '@itookit/stdio';
 import {
-    FS_MODULE_CHAT,
     buildRenamedFilename,
     generateUUID,
+} from '@itookit/common';
+import {
+    FS_MODULE_CHAT,
     guessMimeType,
     type FSNode,
     type IVFSManager,
-} from '@itookit/common';
+} from '@itookit/stdio';
 import {
     DEFAULT_SESSION_SETTINGS,
     type ChatSessionSettings,

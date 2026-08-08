@@ -16,7 +16,7 @@ export default defineConfig({
             '@itookit/app-settings/style.css': path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
 
             '@itookit/common': path.resolve(__dirname, '../../packages/common/src/index.ts'),
-            '@itookit/vfs': path.resolve(__dirname, '../../packages/vfs/src/index.ts'),
+            '@itookit/stdio': path.resolve(__dirname, '../../packages/stdio/src/index.ts'),
             '@itookit/mdxeditor': path.resolve(__dirname, '../../packages/mdx/src/index.ts'),
             '@itookit/vfs-ui': path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
             '@itookit/device-llm': path.resolve(__dirname, '../../packages/device-llm/src/index.ts'),
@@ -25,7 +25,6 @@ export default defineConfig({
             '@itookit/llm-ui': path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
             '@itookit/app-settings': path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
             '@itookit/app-shell': path.resolve(__dirname, '../../packages/app-shell/src/index.ts'),
-            '@itookit/vfslib': path.resolve(__dirname, '../../packages/vfslib/src/index.ts'),
             '@itookit/vfsdriver-indexeddb': path.resolve(__dirname, '../../packages/vfsdriver-indexeddb/src/index.ts'),
         },
         // ✅ 建议: 防止 React/Vue 等库在 Monorepo 中被打包两次 (双重实例问题)

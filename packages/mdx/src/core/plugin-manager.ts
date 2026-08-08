@@ -11,7 +11,7 @@ import type {
   MDxPlugin, PluginContext,
   ToolbarButtonConfig, TitleBarButtonConfig,
 } from './types';
-import type { IModuleFS } from '@itookit/common';
+import type { IModuleFS } from '@itookit/stdio';
 
 /**
  * 插件管理器（精简版）

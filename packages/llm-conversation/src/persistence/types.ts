@@ -1,8 +1,10 @@
 import type {
     ChatSessionSettings,
+} from '@itookit/common';
+import type {
     FSNode,
     IVFSManager,
-} from '@itookit/common';
+} from '@itookit/stdio';
 import type { RoundManifest } from './round-types';
 
 export type { ChatSessionSettings } from '@itookit/common';

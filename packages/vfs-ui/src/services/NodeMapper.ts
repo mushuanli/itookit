@@ -2,7 +2,7 @@
  * @file vfs-ui/services/NodeMapper.ts
  * @desc Maps FSNode → VFSNodeUI. Pure functions, no side effects.
  */
-import type { FSNode } from '@itookit/common';
+import type { FSNode } from '@itookit/stdio';
 import type { VFSNodeUI } from '../contracts/types';
 import type { IconResolver, ContentParserResolver } from './FileTypeRegistry';
 import { shouldFilterNode, stripExtension, getExtension } from '../utils/helpers';

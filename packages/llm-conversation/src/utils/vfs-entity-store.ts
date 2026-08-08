@@ -1,6 +1,6 @@
 // @file: llm-conversation/src/utils/vfs-entity-store.ts
 
-import { BaseModuleService } from '@itookit/vfslib';
+import { BaseModuleService } from '@itookit/stdio';
 import { log } from './logger';
 
 /**

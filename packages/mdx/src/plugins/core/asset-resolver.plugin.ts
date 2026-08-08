@@ -4,8 +4,8 @@
  */
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { AssetConfigOptions } from '../../services/asset-helper';
-import { guessMimeType } from '@itookit/common';
-import { createMDXFile } from '@itookit/vfslib';
+import { guessMimeType } from '@itookit/stdio';
+import { createMDXFile } from '@itookit/stdio';
 
 export interface AssetResolverPluginOptions extends AssetConfigOptions { }
 

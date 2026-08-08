@@ -485,7 +485,7 @@ pnpm --filter @itookit/llm-engine test  # 若有 test 脚本
 ### 测试覆盖
 
 有测试的包：
-- `packages/vfslib/tests/` — 17 个测试文件（`pnpm --filter @itookit/vfslib test`）
+- `packages/stdio/tests/` — 17 个测试文件（`pnpm --filter @itookit/stdio test`）
 - `packages/device-llm/tests/` — 4 个测试文件（`pnpm --filter @itookit/device-llm test`）
 
 **构建命令速查**：
@@ -493,7 +493,7 @@ pnpm --filter @itookit/llm-engine test  # 若有 test 脚本
 pnpm --filter @itookit/<pkg> build       # 单包构建
 pnpm --filter './packages/*' build       # 全量库包构建
 pnpm -r typecheck                        # 全量类型检查（最快验证）
-pnpm --filter @itookit/vfslib test       # VFS 单测
+pnpm --filter @itookit/stdio test       # VFS 单测
 ```
 
 ### 各阶段验证脚本
@@ -506,7 +506,7 @@ pnpm -r typecheck && pnpm --filter './packages/*' build
 pnpm -r typecheck
 
 # Phase 3/4/5（中风险）完成后
-pnpm --filter './packages/*' build && pnpm --filter @itookit/vfslib test
+pnpm --filter './packages/*' build && pnpm --filter @itookit/stdio test
 ```
 
 ---

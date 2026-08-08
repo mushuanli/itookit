@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ['@itookit/common', /^node:/],
+  external: ['@itookit/common', '@itookit/stdio', /^node:/],
 });

@@ -93,13 +93,13 @@
 | 场景 | 文件 |
 |---|---|
 | IStorageBackend 接口 | `common/src/interfaces/fs/storage/backend.ts` |
-| createVFS 工厂 | `vfslib/src/factory.ts` |
-| VFSEngine | `vfslib/src/engine/` |
-| VFSManager | `vfslib/src/services/` |
-| ModuleFS | `vfslib/src/file-io/` |
+| createVFS 工厂 | `stdio/src/factory.ts` |
+| VFSEngine | `stdio/src/engine/` |
+| VFSManager | `stdio/src/services/` |
+| ModuleFS | `stdio/src/file-io/` |
 | IndexedDB 后端 | `vfsdriver-indexeddb/src/idb-backend.ts` |
 | LocalFS 后端 | `vfsdriver-localfs/src/localfs-backend.ts` |
-| BaseModuleService | `vfslib/src/adapter-session/BaseModuleService.ts` |
+| BaseModuleService | `stdio/src/adapter-session/BaseModuleService.ts` |
 
 ## VFS UI
 
@@ -143,5 +143,5 @@
 | 场景 | 文件 |
 |---|---|
 | app-shell 测试配置 | `app-shell/vitest.config.ts` |
-| vfslib 测试 | `vfslib/tests/` |
+| stdio 测试 | `stdio/tests/` |
 | vfs-ui 测试 | `vfs-ui/tests/` |

@@ -21,23 +21,23 @@ ModuleFS (implements IModuleFS + IFSDriver)  —  chroot-isolated view per modul
 
 | 组件 | 文件 | 职责 |
 |---|---|---|
-| `VFSEngine` | `vfslib/src/engine/` | 路径解析、存储后端映射、访问控制 |
-| `AccessController` | `vfslib/src/engine/` | 点号文件权限 (isSystem 模块可写入) |
-| `PluginPipeline` | `vfslib/src/engine/` | 操作前/后插件钩子 |
-| `DeviceRegistry` | `vfslib/src/engine/` | /dev/ 设备注册与管理 |
-| `VFSManager` | `vfslib/src/services/` | 模块生命周期协调 |
-| `ConfigService` | `vfslib/src/services/` | VFS 配置读取 |
-| `ModuleFS` | `vfslib/src/services/` | 模块级 chroot 隔离文件系统 |
-| `FileHandle` | `vfslib/src/file-io/` | 基本文件句柄 (IFile) |
-| `MDXFileHandle` | `vfslib/src/file-io/` | MDX 文件句柄 (IMDXFile) |
-| `ChatFileHandle` | `vfslib/src/file-io/` | 聊天文件句柄 (IChatFile) |
-| `AssetObj` | `vfslib/src/file-io/` | 资产目录内子文件句柄 |
+| `VFSEngine` | `stdio/src/engine/` | 路径解析、存储后端映射、访问控制 |
+| `AccessController` | `stdio/src/engine/` | 点号文件权限 (isSystem 模块可写入) |
+| `PluginPipeline` | `stdio/src/engine/` | 操作前/后插件钩子 |
+| `DeviceRegistry` | `stdio/src/engine/` | /dev/ 设备注册与管理 |
+| `VFSManager` | `stdio/src/services/` | 模块生命周期协调 |
+| `ConfigService` | `stdio/src/services/` | VFS 配置读取 |
+| `ModuleFS` | `stdio/src/services/` | 模块级 chroot 隔离文件系统 |
+| `FileHandle` | `stdio/src/file-io/` | 基本文件句柄 (IFile) |
+| `MDXFileHandle` | `stdio/src/file-io/` | MDX 文件句柄 (IMDXFile) |
+| `ChatFileHandle` | `stdio/src/file-io/` | 聊天文件句柄 (IChatFile) |
+| `AssetObj` | `stdio/src/file-io/` | 资产目录内子文件句柄 |
 
 ## 存储驱动
 
 | 驱动 | 包 | 适用环境 |
 |---|---|---|
-| `MemoryBackend` | vfslib (内置) | 测试/内存存储 |
+| `MemoryBackend` | stdio (内置) | 测试/内存存储 |
 | `IndexedDBBackend` | vfsdriver-indexeddb | 浏览器 |
 | `LocalFSBackend` | vfsdriver-localfs | Node.js/Electron |
 

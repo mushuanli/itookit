@@ -2,8 +2,8 @@
 // Manages light / dark / system theme preference.
 // Persists to etc:/ui/theme.json via VFS; applies data-theme on <html>.
 
-import type { IVFSManager } from '@itookit/common';
-import { CONFIG_MODULE } from '@itookit/common';
+import type { IVFSManager } from '@itookit/stdio';
+import { CONFIG_MODULE } from '@itookit/stdio';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 

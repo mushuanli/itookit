@@ -6,12 +6,12 @@
 
 | 接口 | 核心方法 | 定义文件 | 实现 | 消费 |
 |---|---|---|---|---|
-| `IStorageBackend` | `stat`, `list`, `read`, `write`, `mkdir`, `delete`, `rename` | `common/interfaces/fs/storage/backend.ts` | `vfsdriver-indexeddb`, `vfsdriver-localfs` | `vfslib (VFSEngine)` |
-| `IVFSManager` | `getEngine()`, `mountModule()`, `on()` | `common/interfaces/fs/services/vfs-manager.ts` | `vfslib (VFSManager)` | `app-shell`, `memory-manager` |
-| `IModuleFS` | `openFile()`, `driver`, `meta`, `capabilities` | `common/interfaces/fs/services/module-fs.ts` | `vfslib (ModuleFS)` | `vfs-ui`, `mdx`, `llm-ui` |
-| `IFSDriver` | `read`, `write`, `create`, `delete`, `getChildren`, `stat`, `search` | `common/interfaces/fs/services/fs-driver.ts` | `ModuleFS.driver` | `vfs-ui`, editors |
-| `IFSMetaDriver` | `putAsset`, `getAsset`, `setTags`, `watch` | `common/interfaces/fs/services/fs-meta-driver.ts` | `ModuleFS.meta` | `mdx` |
-| `IFile` | `read()`, `write()`, `asset()` | `common/interfaces/fs/` | `FileHandle`, `MDXFileHandle`, `ChatFileHandle` | `mdx`, `llm-engine` |
+| `IStorageBackend` | `stat`, `list`, `read`, `write`, `mkdir`, `delete`, `rename` | `stdio/src/storage/backend.ts` | `vfsdriver-indexeddb`, `vfsdriver-localfs` | `stdio (VFSEngine)` |
+| `IVFSManager` | `getEngine()`, `mountModule()`, `on()` | `stdio/src/services/vfs-manager.ts` | `stdio (VFSManager)` | `app-shell`, `memory-manager` |
+| `IModuleFS` | `openFile()`, `driver`, `meta`, `capabilities` | `stdio/src/services/module-fs.ts` | `stdio (ModuleFS)` | `vfs-ui`, `mdx`, `llm-ui` |
+| `IFSDriver` | `read`, `write`, `create`, `delete`, `getChildren`, `stat`, `search` | `stdio/src/services/fs-driver.ts` | `ModuleFS.driver` | `vfs-ui`, editors |
+| `IFSMetaDriver` | `putAsset`, `getAsset`, `setTags`, `watch` | `stdio/src/services/fs-meta-driver.ts` | `ModuleFS.meta` | `mdx` |
+| `IFile` | `read()`, `write()`, `asset()` | `stdio/src/` | `FileHandle`, `MDXFileHandle`, `ChatFileHandle` | `mdx`, `llm-engine` |
 
 ## LLM 体系
 

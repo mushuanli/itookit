@@ -3,10 +3,11 @@
 // Agent VFS 持久化服务。
 // 连接 / MCP / Skill 管理全部委托给注入的 ILLMManagementService（由 LLMDeviceDriver 实现）。
 
-import { BaseModuleService } from '@itookit/vfslib';
-import type { IVFSManager, VFSManagerEvent } from '@itookit/common';
-import type { FSNode, FSSearchQuery, RestorableItem } from '@itookit/common';
-import { FS_MODULE_AGENTS } from '@itookit/common';
+import { BaseModuleService } from '@itookit/stdio';
+import type { IVFSManager, VFSManagerEvent } from '@itookit/stdio';
+import type { FSNode, FSSearchQuery } from '@itookit/stdio';
+import { FS_MODULE_AGENTS } from '@itookit/stdio';
+import type { RestorableItem } from '@itookit/common';
 import type {
     ILLMManagementService, ConnectionMeta, LLMConnection,
     AgentDefinition, MCPServer, LLMSkill, LLMProvider,

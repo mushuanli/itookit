@@ -104,7 +104,7 @@ MetaMind 是一个 **“认知加速与外部化操作系统”** 。它旨在�
      ┌───────────────┼────────────────┐
      ▼               ▼                ▼
 ┌──────────┐  ┌────────────┐  ┌───────────┐
-│  tools   │  │  vfslib    │  │  common   │
+│  tools   │  │  stdio    │  │  common   │
 │ 内置工具 │  │ 虚拟文件系统│  │ 共享接口  │
 └──────────┘  └────────────┘  └───────────┘
 ```
@@ -120,7 +120,7 @@ MetaMind 是一个 **“认知加速与外部化操作系统”** 。它旨在�
 | 包 | 职责 |
 |---|---|
 | `@itookit/common` | 共享接口、类型、工具函数。零运行时依赖，是跨包契约的唯一来源 |
-| `@itookit/vfslib` | VFS 引擎核心 — POSIX 风格虚拟文件系统，支持 assetdir 隔离与多驱动挂载 |
+| `@itookit/stdio` | VFS 引擎核心 — POSIX 风格虚拟文件系统，支持 assetdir 隔离与多驱动挂载 |
 | `@itookit/device-llm` | LLM API 通信 — OpenAI/Anthropic/Gemini，SSE 流式，MCP 协议，Skill 存储 |
 | `@itookit/llm-harness` | **Agent 执行引擎** — 多轮 Agent 循环、HarnessLoopExecutor (ILoop)、HarnessAgentTaskExecutor (TaskExecutor)、六维预算、上下文压缩、错误恢复 |
 | `@itookit/llm-engine` | **会话 + 执行引擎** — 会话管理、VFS 持久化（ChatEngine）、TaskGraph DAG 编排、ILoop 协程、Plugin 系统 |
@@ -390,7 +390,7 @@ pnpm --filter @itookit/llm-harness build
 
 | 包类型 | 构建工具 | 输出格式 |
 |---|---|---|
-| 逻辑包（`common`, `vfslib`, `llm-harness`, `llm-engine`, `tools`） | **tsup** | CJS + ESM + `.d.ts` |
+| 逻辑包（`common`, `stdio`, `llm-harness`, `llm-engine`, `tools`） | **tsup** | CJS + ESM + `.d.ts` |
 | UI 包（`llm-ui`, `vfs-ui`, `memory-manager`, `app-settings`, `mdx`） | **vite build** | ESM |
 
 ### 添加新 Skill（示例）

@@ -1,7 +1,7 @@
 {
     "name": "@itookit/vfsdriver-indexeddb",
     "version": "0.1.0",
-    "description": "IndexedDB storage backend for @itookit/vfslib — persistent browser-side VFS driver.",
+    "description": "IndexedDB storage backend for @itookit/stdio — persistent browser-side VFS driver.",
     "type": "module",
     "main": "./src/index.ts",
     "module": "./src/index.ts",
@@ -46,7 +46,7 @@
     "author": "lizlok@gmail.com",
     "license": "MIT",
     "dependencies": {
-        "@itookit/common": "workspace:*"
+        "@itookit/stdio": "workspace:*"
     },
     "devDependencies": {
         "tsup": "^8.5.1",

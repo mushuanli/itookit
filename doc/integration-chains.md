@@ -12,10 +12,10 @@ vfs-ui (VFSUIShell)
 
 | 步骤 | 组件 | 关键文件 |
 |---|---|---|
-| 1. 创建 | `createVFS({ rootBackend, modules })` | `vfslib/src/factory.ts` |
-| 2. 引擎 | `VFSEngine` — resolveStore, mapToSystemNode | `vfslib/src/engine/` |
-| 3. 管理器 | `VFSManager` — module lifecycle, module:mounted/unmounted | `vfslib/src/services/` |
-| 4. 模块 | `ModuleFS` (chroot `/` → `/module/<name>/`) | `vfslib/src/file-io/` |
+| 1. 创建 | `createVFS({ rootBackend, modules })` | `stdio/src/factory.ts` |
+| 2. 引擎 | `VFSEngine` — resolveStore, mapToSystemNode | `stdio/src/engine/` |
+| 3. 管理器 | `VFSManager` — module lifecycle, module:mounted/unmounted | `stdio/src/services/` |
+| 4. 模块 | `ModuleFS` (chroot `/` → `/module/<name>/`) | `stdio/src/file-io/` |
 | 5. 存储 | `IStorageBackend` (IndexedDB / LocalFS) | `vfsdriver-*/src/` |
 
 ## LLM Chat 链
@@ -54,7 +54,7 @@ apps/web-app (entry)
 |---|---|
 | 入口 | `apps/web-app/src/main.ts` |
 | 启动 | `app-shell/src/bootstrap.ts::initApp()` |
-| VFS | `vfslib/src/factory.ts::createVFS()` |
+| VFS | `stdio/src/factory.ts::createVFS()` |
 | Harness | `llm-harness/src/factory.ts::createHarness()` |
 | LLM引擎 | `llm-engine/src/index.ts::initializeLLMEngine()` |
 | 工作区 | `app-shell/src/strategies/` (5 种策略) |

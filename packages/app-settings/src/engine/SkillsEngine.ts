@@ -34,11 +34,13 @@ import type {
     FSEventPayloadMap,
     IAssetOperations,
     ITagOperations,
+} from '@itookit/stdio';
+import type {
     LLMSkill,
     IAgentManagementService,
 } from '@itookit/common';
-import { FSCapabilityError } from '@itookit/common';
-import { EventBus } from '@itookit/common';
+import { FSCapabilityError } from '@itookit/stdio';
+import { EventBus } from '@itookit/stdio';
 import yaml from 'js-yaml';
 
 /** Strip common skill file extensions from a user-typed or imported filename. */
@@ -103,7 +105,7 @@ export class SkillsEngine implements IModuleFS {
     readonly moduleId = 'skills';
     readonly capabilities: FSCapabilities = SKILLS_CAPS;
     readonly driver: IFSDriver;
-    readonly meta: import('@itookit/common').IFSMetaDriver;
+    readonly meta: import('@itookit/stdio').IFSMetaDriver;
     readonly tags: ITagOperations;
 
     private unsubscribe: (() => void) | null = null;

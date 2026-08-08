@@ -23,7 +23,7 @@ System_Boundary(itookit, "itookit 系统 (packages/)") {
 
   ' === 引擎层 ===
   Container_Boundary(engine_layer, "引擎层") {
-    Container(vfslib, "@itookit/vfslib", "VFS 引擎核心", "虚拟文件系统、模块隔离、设备注册")
+    Container(stdio, "@itookit/stdio", "VFS 引擎核心", "虚拟文件系统、模块隔离、设备注册")
     Container(device_llm, "@itookit/device-llm", "LLM 设备驱动", "多 Provider 通信、SSE 流式、MCP")
     Container(llm_kernel, "@itookit/llm-kernel", "执行引擎核心", "执行器(Agent/HTTP/Tool/Script)、状态机、Worker")
     Container(tools, "@itookit/tools", "内置工具集", "文件/搜索/Shell/Agent/Task 工具")
@@ -77,10 +77,10 @@ Rel_D(engine_layer, common_pkg, "依赖接口+类型", "所有核心接口")
 Rel_D(business_layer, common_pkg, "依赖接口+类型", "Agent/Session 接口")
 Rel_D(ui_layer, common_pkg, "依赖图标+i18n+接口", "t()/图标常量")
 
-Rel_D(vfslib, idb_driver, "可挂载", "IStorageBackend")
-Rel_D(vfslib, localfs_driver, "可挂载", "IStorageBackend")
+Rel_D(stdio, idb_driver, "可挂载", "IStorageBackend")
+Rel_D(stdio, localfs_driver, "可挂载", "IStorageBackend")
 
-Rel_D(device_llm, vfslib, "VFS 持久化", "ConfigService")
+Rel_D(device_llm, stdio, "VFS 持久化", "ConfigService")
 Rel_D(llm_kernel, device_llm, "LLM 调用", "LLMDriver")
 Rel_D(device_tty, common_pkg, "TTY 接口", "ITTYDriver/ITTYSession")
 
@@ -88,21 +88,21 @@ Rel_D(llm_harness, device_llm, "LLM 通信", "LLMDriver")
 Rel_D(llm_harness, device_tty, "TTY 会话", "NodeTTYDriver")
 Rel_D(llm_harness, tools, "内置工具", "buildTool()/ToolMeta")
 Rel_D(llm_engine, llm_kernel, "执行引擎", "Executor")
-Rel_D(llm_engine, vfslib, "VFS 存储", "IModuleFS/IFile")
+Rel_D(llm_engine, stdio, "VFS 存储", "IModuleFS/IFile")
 
 ' app-settings 不再直接依赖 llm-ui
 Rel_D(app_settings, llm_engine, "会话查询", "SessionManager")
 
 Rel_D(llm_ui, llm_engine, "会话渲染", "SessionState/ChatEngine")
-Rel_D(vfs_ui, vfslib, "文件操作", "IModuleFS/IFSDriver")
-Rel_D(mdx, vfslib, "文件读写", "IModuleFS/MDXFileHandle")
+Rel_D(vfs_ui, stdio, "文件操作", "IModuleFS/IFSDriver")
+Rel_D(mdx, stdio, "文件读写", "IModuleFS/MDXFileHandle")
 Rel_D(memory_mgr, mdx, "编辑器实例", "IEditor/EditorFactory")
 Rel_D(memory_mgr, vfs_ui, "文件树", "VFSUIShell")
 
 Rel_D(app_shell, app_settings, "设置模块 + 注入 LLMUIEditors", "createSettingsModule()")
 Rel_D(app_shell, llm_engine, "会话管理器", "initializeLLMEngine()")
 Rel_D(app_shell, llm_harness, "Agent 循环", "createHarness()")
-Rel_D(app_shell, vfslib, "创建 VFS", "createVFS()")
+Rel_D(app_shell, stdio, "创建 VFS", "createVFS()")
 Rel_D(app_shell, memory_mgr, "工作区实例", "MemoryManager")
 Rel_D(app_shell, llm_ui, "UI 工厂 + 编辑器注入", "createLLMFactory()/SettingsEditors")
 Rel_D(app_shell, vfs_ui, "文件树", "createVFSUI()")

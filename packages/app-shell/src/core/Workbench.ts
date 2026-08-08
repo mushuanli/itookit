@@ -7,7 +7,8 @@
 import { createVFSUI, connectEditorLifecycle, VFSUIShell, createVFSMentionProviders } from '@itookit/vfs-ui';
 import { defaultEditorFactory, MentionPlugin } from '@itookit/mdxeditor';
 import type { WorkbenchConfig } from '../types';
-import { EditorOptions, IEditor, IModuleFS, EditorHostContext, NavigationRequest } from '@itookit/common';
+import { EditorOptions, IEditor, EditorHostContext, NavigationRequest } from '@itookit/common';
+import type { IModuleFS } from '@itookit/stdio';
 
 export class Workbench {
     private vfsUI: VFSUIShell;

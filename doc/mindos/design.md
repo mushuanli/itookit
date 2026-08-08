@@ -28,7 +28,7 @@ MindOS 是一个基于 pnpm monorepo 的 AI 操作系统，以**虚拟文件系�
 ```
 packages/
 ├── common/            共享接口、类型、工具函数、i18n
-├── vfslib/            VFS 引擎核心 + 适配器
+├── stdio/            VFS 引擎核心 + 适配器
 ├── vfsdriver-indexeddb/  IndexedDB 存储后端
 ├── vfsdriver-fs/      SQLite + 本地文件系统后端
 ├── vfs-ui/            文件树 UI 组件
@@ -66,7 +66,7 @@ packages/
                                    │
         ┌──────────────────────────┼──────────────────────────┐
         │              │           │           │              │
-   llm-engine     llm-harness   device-llm   vfslib
+   llm-engine     llm-harness   device-llm   stdio
         │              │           │           │              │
         └──────────────┴───────────┼───────────┴──────────────┘
                                    │
@@ -1209,11 +1209,11 @@ MissionService.createMission(goal)
 | common | `src/interfaces/tools/tool-types.ts` | 工具元数据类型 |
 | common | `src/interfaces/skills/skill-types.ts` | Skill 定义类型 |
 | common | `src/interfaces/tty/tty-types.ts` | TTY 接口定义 |
-| vfslib | `src/engine/vfs-engine.ts` | VFSEngine 核心 |
-| vfslib | `src/services/vfs-manager.ts` | VFSManager 实现 |
-| vfslib | `src/services/module-fs.ts` | ModuleFS 实现 |
-| vfslib | `src/factory.ts` | createVFS 工厂 |
-| vfslib | `src/file-io/ModuleFS.ts` | ModuleFS chroot 实现 |
+| stdio | `src/engine/vfs-engine.ts` | VFSEngine 核心 |
+| stdio | `src/services/vfs-manager.ts` | VFSManager 实现 |
+| stdio | `src/services/module-fs.ts` | ModuleFS 实现 |
+| stdio | `src/factory.ts` | createVFS 工厂 |
+| stdio | `src/file-io/ModuleFS.ts` | ModuleFS chroot 实现 |
 | device-llm | `src/device/llm-device-driver.ts` | LLMDeviceDriver 实现 |
 | device-llm | `src/core/driver.ts` | LLMDriver 核心调用 |
 | llm-harness | `src/factory.ts` | createHarness 装配工厂 |

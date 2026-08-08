@@ -12,13 +12,15 @@
 //  7. 创建 /dev/llm/connection/<id>、/dev/llm/mcp/<id>、/dev/llm/skills/<id> 设备节点
 
 import type {
-    IDeviceDriver, ILLMManagementService,
-    DeviceContext, IVFSManager, FileContent,
+    ILLMManagementService,
     LLMConnection, LLMProvider, ConnectionMeta, ChatMessage, ChatCompletionChunk,
     ChatCompletionParams, ChatCompletionResponse, TokenUsage,
     MCPServer, LLMSkill, ToolDefinition,
-    ConnectionTestResult, InitialAgentDef, IModuleFS,
+    ConnectionTestResult, InitialAgentDef,
 } from '@itookit/common';
+import type {
+    IDeviceDriver, DeviceContext, IVFSManager, FileContent, IModuleFS,
+} from '@itookit/stdio';
 
 import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';

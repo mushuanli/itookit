@@ -7,10 +7,10 @@
 import {
   ISessionUI,
   type SessionUIOptions,
-  type IModuleFS,
   type EditorFactory,
   generateShortUUID,
 } from '@itookit/common';
+import type { IModuleFS } from '@itookit/stdio';
 
 import type {
   VFSNodeUI,

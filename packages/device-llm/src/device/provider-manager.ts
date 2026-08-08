@@ -2,7 +2,8 @@
 //
 // ProviderManager — manages LLMProvider catalog (built-in + user custom).
 
-import type { LLMProvider, IModuleFS } from '@itookit/common';
+import type { LLMProvider } from '@itookit/common';
+import type { IModuleFS } from '@itookit/stdio';
 import { LLM_PROVIDERS, MODEL_PRICING } from '../constants';
 import { loadPricingConfig, writePricingConfig, applyPricingToModel } from '../constants/pricing';
 import type { ModelPricingConfig } from '../constants/pricing';

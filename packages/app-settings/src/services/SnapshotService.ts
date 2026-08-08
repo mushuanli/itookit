@@ -5,7 +5,7 @@
  * Operates below the VFS abstraction — snapshots are raw database clones,
  * not VFS backups. For VFS-level backup/restore use vfs.maintenance.*.
  */
-import type { IVFSManager } from '@itookit/common';
+import type { IVFSManager } from '@itookit/stdio';
 
 const SNAPSHOT_PREFIX = 'snapshot_';
 

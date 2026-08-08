@@ -1,7 +1,8 @@
 import { FileTypeDefinition, type VFSNodeUI } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem, formatDefaultFileTitle } from '@itookit/common';
-import type { SkillDefinition, ToolVFSContext, IVFSManager, FSNode } from '@itookit/common';
-import { createVFS } from '@itookit/vfslib';
+import type { SkillDefinition, ToolVFSContext } from '@itookit/common';
+import type { IVFSManager, FSNode } from '@itookit/stdio';
+import { createVFS } from '@itookit/stdio';
 import { createSettingsModule, createSettingsFactory, type LLMUIEditors } from '@itookit/app-settings';
 import {
     createLLMFactory,

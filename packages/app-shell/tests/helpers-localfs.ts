@@ -19,8 +19,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
-import { createVFS } from '@itookit/common';
-import type { IVFSManager, IModuleFS } from '@itookit/common';
+import { createVFS } from '@itookit/stdio';
+import type { IVFSManager, IModuleFS } from '@itookit/stdio';
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 

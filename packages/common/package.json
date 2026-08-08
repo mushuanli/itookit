@@ -54,11 +54,11 @@
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/common#readme",
   "dependencies": {
     "@itookit/llm-common": "workspace:*",
-    "@itookit/vfs-protocol": "workspace:*"
+    "@itookit/stdio": "workspace:*"
   },
   "devDependencies": {
     "@itookit/llm-common": "workspace:*",
-    "@itookit/vfs-protocol": "workspace:*",
+    "@itookit/stdio": "workspace:*",
     "cpx": "^1.5.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"

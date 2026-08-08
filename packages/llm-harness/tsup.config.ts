@@ -10,6 +10,7 @@ export default defineConfig({
     '@itookit/common',
     '@itookit/device-llm',
     '@itookit/device-tty',
+    '@itookit/stdio',
     '@itookit/tools',
     /^node:/,
   ],
