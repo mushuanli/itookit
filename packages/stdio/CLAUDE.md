@@ -17,25 +17,34 @@ VFS 唯一入口 — 协议层 + 引擎实现 + 事件总线 + 工具。合并�
 src/
 ├── index.ts           统一导出 (协议 + 引擎 + eventbus + utils)
 ├── protocol.ts        协议层 barrel (接口/类型/常量/错误)
-├── constants.ts       常量 (CONFIG_MODULE, SYSTEM_DIRS, FS_MODULE_* ...)
-├── core/              核心类型、错误、事件、选项
-├── storage/           存储后端接口 (IStorageBackend)
-├── capabilities/      可选能力子接口 (assets/tags/seq/refs/watch)
-├── device/            虚拟设备驱动接口
-├── plugin/            插件/中间件系统接口
-├── mount/             挂载系统接口
-├── sync/              同步系统接口
-├── services/          协议接口 (module-fs/vfs-manager/config-service) + 引擎实现 (ModuleFS/VFSManager/ConfigService/ScopedView/FSMetaDriverAdapter)
-├── engine/            引擎实现 (VFSEngine, AccessController, DeviceRegistry, PluginPipeline)
-├── event/             VFS 事件 (FSEventBus, TransactionEventBuffer)
+├── interfaces/        协议契约层 — 只定义接口/类型/常量/错误类
+│   ├── constants.ts   常量 (CONFIG_MODULE, SYSTEM_DIRS, FS_MODULE_* ...)
+│   ├── core/          核心类型、错误、事件、选项
+│   ├── storage/       存储后端接口 (IStorageBackend)
+│   ├── capabilities/  可选能力子接口 (assets/tags/seq/refs/watch)
+│   ├── device/        虚拟设备驱动接口
+│   ├── plugin/        插件/中间件系统接口
+│   ├── mount/         挂载系统接口
+│   ├── sync/          同步系统接口
+│   ├── services/      服务接口 (module-fs/vfs-manager/config-service/fs-driver/fs-meta-driver/factory)
+│   ├── IFile.ts       IFile / AssetObj
+│   ├── IMDXFile.ts    IMDXFile
+│   └── system-access.ts ISystemAccess
+├── impl/              引擎实现层 — 各目录结构镜像 interfaces/ 下的领域划分
+│   ├── factory.ts     createVFS
+│   ├── engine/        VFSEngine, AccessController, DeviceRegistry, PluginPipeline
+│   ├── services/      ModuleFS, VFSManager, ConfigService, ScopedView, FSMetaDriverAdapter
+│   ├── file-io/       FileHandle, MDXFileHandle
+│   ├── devices/       nullDevice, zeroDevice, randomDevice
+│   ├── backend/       MemoryBackend (测试/临时)
+│   ├── adapter-session/ BaseModuleService
+│   └── event/         FSEventBus, TransactionEventBuffer
 ├── eventbus/          通用事件总线 (EventBus, EventBuffer)
-├── file-io/           FileHandle, MDXFileHandle
-├── devices/           nullDevice, zeroDevice, randomDevice
-├── backend/           MemoryBackend (测试/临时)
-├── adapter-session/   BaseModuleService
 ├── testing/           测试工具导出
 └── utils/             path, validation, encoding, id, serialization, guess-mime-type
 ```
+
+**约定**:`interfaces/` 内禁止引用 `impl/`(协议不依赖实现);`impl/` 通过 `protocol.ts` barrel 引用协议,不直接引 `interfaces/` 内部文件。
 
 ## 引擎分层 (v4.1 path-based)
 
@@ -58,7 +67,7 @@ IModuleFS (薄包装器)
 
 包内有**两个 EventBus**:
 - `EventBus`(eventbus/)——通用,LLM/UI 包也在用,从根导出。
-- `FSEventBus`(event/)——VFS 专用,extends 通用,类型化为 FSEventPayloadMap。
+- `FSEventBus`(impl/event/)——VFS 专用,extends 通用,类型化为 FSEventPayloadMap。
 
 ## 测试
 

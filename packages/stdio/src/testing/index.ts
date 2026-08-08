@@ -3,4 +3,4 @@
  * @desc Testing utilities for vfslib
  */
 
-export { MemoryBackend } from '../backend/memory-backend';
+export { MemoryBackend } from '../impl/backend/memory-backend';

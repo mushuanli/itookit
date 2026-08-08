@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { freshIDB, freshMem, setupDualMountVFS, setupVFS, readText, type TestVFS } from './helpers';
-import { createVFS } from '../src/factory';
+import { createVFS } from '../src/impl/factory';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module lifecycle tests

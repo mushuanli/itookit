@@ -13,9 +13,9 @@
       "default": "./src/index.ts"
     },
     "./backend": {
-      "types": "./src/backend/index.ts",
-      "import": "./src/backend/index.ts",
-      "default": "./src/backend/index.ts"
+      "types": "./src/impl/backend/index.ts",
+      "import": "./src/impl/backend/index.ts",
+      "default": "./src/impl/backend/index.ts"
     },
     "./testing": {
       "types": "./src/testing/index.ts",

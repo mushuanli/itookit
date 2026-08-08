@@ -3,7 +3,7 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
     entry: {
         index: 'src/index.ts',
-        'backend/index': 'src/backend/index.ts',
+        'backend/index': 'src/impl/backend/index.ts',
         'testing/index': 'src/testing/index.ts',
     },
     format: ['cjs', 'esm'],

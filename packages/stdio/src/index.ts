@@ -16,37 +16,37 @@ export * from './protocol';
 export * from './eventbus';
 
 // ── 工厂 ──
-export { createVFS } from './factory';
+export { createVFS } from './impl/factory';
 
 // ── 引擎核心 ──
-export { VFSEngine } from './engine/vfs-engine';
-export { FSEventBus, TransactionEventBuffer } from './event/event-bus';
-export { PluginPipeline } from './engine/plugin-pipeline';
-export { DeviceRegistry } from './engine/device-registry';
-export { AccessController, SYSTEM_CALLER, type CallerIdentity } from './engine/access-controller';
+export { VFSEngine } from './impl/engine/vfs-engine';
+export { FSEventBus, TransactionEventBuffer } from './impl/event/event-bus';
+export { PluginPipeline } from './impl/engine/plugin-pipeline';
+export { DeviceRegistry } from './impl/engine/device-registry';
+export { AccessController, SYSTEM_CALLER, type CallerIdentity } from './impl/engine/access-controller';
 
 // ── 服务层实现 ──
-export { ModuleFS, type ModuleFSDeps } from './services/ModuleFS';
-export { VFSManager } from './services/VFSManager';
-export { ConfigService } from './services/ConfigService';
-export { ScopedView } from './services/ScopedView';
-export { FSMetaDriverAdapter } from './services/FSMetaDriverAdapter';
+export { ModuleFS, type ModuleFSDeps } from './impl/services/ModuleFS';
+export { VFSManager } from './impl/services/VFSManager';
+export { ConfigService } from './impl/services/ConfigService';
+export { ScopedView } from './impl/services/ScopedView';
+export { FSMetaDriverAdapter } from './impl/services/FSMetaDriverAdapter';
 
 // ── 内置设备 ──
-export { nullDevice, zeroDevice, randomDevice } from './devices';
+export { nullDevice, zeroDevice, randomDevice } from './impl/devices';
 
 // ── 后端 ──
-export { MemoryBackend } from './backend';
+export { MemoryBackend } from './impl/backend';
 
 // ── 会话适配器 ──
 export {
     BaseModuleService,
     type ChangeListener,
     type ModuleServiceOptions,
-} from './adapter-session/BaseModuleService';
+} from './impl/adapter-session/BaseModuleService';
 
 // ── File handles ──
-export { FileHandle, createFile, MDXFileHandle, createMDXFile } from './file-io';
+export { FileHandle, createFile, MDXFileHandle, createMDXFile } from './impl/file-io';
 
 // ── 工具 ──
 export * as pathUtils from './utils/path';
