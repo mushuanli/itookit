@@ -1,4 +1,4 @@
-// @file: llm-engine/__tests__/round-log.test.ts
+// @file: llm-runtime/__tests__/round-log.test.ts
 // Integration tests for RoundLog with an in-memory IChatEngine mock.
 //
 // Covers:
@@ -7,7 +7,7 @@
 //   - Children reverse index + fold caching + soft-delete filtering
 //   - Event emission: round:appended, round:updated, round:deleted
 
-import type { describe, it, expect, beforeEach } from '@itookit/common';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { IChatEngine, FSNode } from '../src/persistence/types';
 import type { RoundManifest, PersistedRound, RoundProjection } from '../src/persistence/round-types';
 import type { RoundLogEvent } from '../src/persistence/round-events';
@@ -335,6 +335,39 @@ describe('RoundLog', () => {
             await expect(log.setAssistantInRound(t2Id, {
                 assistantMessages: [{ role: 'assistant', content: 'must-not-overwrite' }],
             })).rejects.toMatchObject({ code: 'ROUND_ALREADY_COMPLETED' });
+        });
+    });
+
+    // ── Fork (regenerate) ─────────────────────────────────────────────────
+
+    describe('forkUserRound for regenerate', () => {
+        it('persists the new user round and points currentHead at it so the chain resolves', async () => {
+            const t1Id = await log.append('main', makeRound({ messages: makeUserPayload('Q1') }));
+            const t2Id = await log.append('main', makeRound({
+                historyParentIds: [t1Id],
+                messages: [
+                    { role: 'user', content: 'Q1' },
+                    { role: 'assistant', content: 'A1' },
+                ],
+            }));
+
+            const forked = await log.forkUserRound(t2Id, { createdFrom: 'regenerate' });
+            const manifest = await log.loadManifest();
+
+            // New branch head points at the freshly-persisted user Round.
+            expect(manifest.currentBranch).toBe(forked.branchName);
+            expect(manifest.currentHead).toBe(forked.newRoundId);
+            expect(manifest.branches[forked.branchName]).toBe(forked.newRoundId);
+
+            // The new Round is persisted with the shared history as its parent —
+            // a head chain from it resolves the whole conversation.
+            const newRound = await log.readRound(forked.newRoundId);
+            expect(newRound).not.toBeNull();
+            expect(newRound!.historyParentIds).toEqual([t1Id]);
+
+            // fold from the new branch should include the shared Q1 user message.
+            const messages = await log.fold(forked.branchName);
+            expect(messages.some(m => m.role === 'user' && m.content === 'Q1')).toBe(true);
         });
     });
 

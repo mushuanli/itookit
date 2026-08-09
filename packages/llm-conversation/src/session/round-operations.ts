@@ -106,8 +106,6 @@ export class RoundOperations {
         const { state } = this.registry.ensureBound();
         this.registry.ensureNotGenerating('regenerate');
 
-        let userMessage: SessionGroup | undefined;
-
         const userRound = state.findUserRoundForAssistant(assistantId);
         if (!userRound?.userMessage) {
             throw new ConversationError(
@@ -115,14 +113,20 @@ export class RoundOperations {
                 'No user message found before the specified assistant message'
             );
         }
-        userMessage = state.findSessionById(userRound.userMessage.persistedNodeId);
-
-        if (!userMessage) {
-            throw new ConversationError(
-                ConversationErrorCode.SESSION_INVALID,
-                'No user message found before the specified assistant message'
-            );
-        }
+        // Build the user SessionGroup directly from the projection. findSessionById
+        // expects a session id ("round-X-user") but userMessage.persistedNodeId is a
+        // raw RoundId ("X") — matching by session id would miss.
+        const userMessage: SessionGroup = {
+            id: `round-${userRound.roundId}-user`,
+            persistedNodeId: userRound.userMessage.persistedNodeId,
+            role: 'user',
+            content: userRound.userMessage.content,
+            files: userRound.userMessage.files,
+            timestamp: userRound.createdAt,
+            origin: userRound.origin as SessionOrigin,
+            historyPolicy: (userRound.defaultContextMode === 'exclude' ? 'exclude' : 'include') as HistoryPolicy,
+            roundId: userRound.roundId,
+        };
 
         const currentAssistant = state.findSessionById(assistantId);
         const agentId = this.resolveAgentId(
@@ -203,11 +207,7 @@ export class RoundOperations {
         // deletes an assistant. Prefer it over a possibly stale Round file;
         // otherwise resend can incorrectly see the old assistant on disk and
         // fork a new branch.
-        const projectedRound = state.getRounds().find(round => round.roundId === userRoundId);
-        const projectedContent = projectedRound?.assistantMessage?.content;
-        const hasAssistant = projectedRound
-            ? typeof projectedContent === 'string' && projectedContent.trim().length > 0
-            : RoundLog.hasEffectiveAssistant(userRound);
+        const hasAssistant = hasRegenerateAssistant(state, userRound, userRoundId);
         const manifest = await roundLog.loadManifest();
         let branchName = manifest.currentBranch;
         let targetRoundId = userRoundId;
@@ -217,17 +217,19 @@ export class RoundOperations {
         };
         let branchCreated = false;
         if (hasAssistant) {
-            targetRoundId = ulid();
-            const forked = await roundLog.createBranchForReplacement(
+            // forkUserRound persists a fresh user Round on a new branch and points
+            // currentHead at it. The head chain then resolves from the new user
+            // Round back through the shared history, so the whole branch renders —
+            // the regenerate's execution fills this Round's assistant in-place.
+            const forked = await roundLog.forkUserRound(
                 userRoundId,
-                targetRoundId,
                 { createdFrom: 'regenerate' },
             );
             branchName = forked.branchName;
+            targetRoundId = forked.newRoundId;
             roundTarget = {
-                mode: 'append-new',
-                parentRoundId: forked.commonHeadId,
-                roundId: targetRoundId,
+                mode: 'update-existing',
+                targetRoundId: forked.newRoundId,
             };
             branchCreated = true;
         }
@@ -564,3 +566,28 @@ export class RoundOperations {
         return { siblingIndex: index, siblingCount: siblings.length };
     }
 }
+
+/**
+ * Decide whether a regenerate must fork a new branch (existing assistant) or
+ * may fill the current Round (empty assistant).
+ *
+ * The in-memory projection wins when it shows a real assistant. Otherwise we
+ * trust the persisted Round: the projection can lag behind disk because RoundLog
+ * round:updated events are not wired into the in-memory state, so a completed
+ * assistant may already exist on disk while the projection still shows an empty
+ * round. Treating that as "no assistant" would attempt to overwrite a completed
+ * Round and fail with ROUND_ALREADY_COMPLETED.
+ */
+export function hasRegenerateAssistant(
+    state: SessionState,
+    userRound: import('../persistence/round-types').PersistedRound,
+    userRoundId: string,
+): boolean {
+    const projectedRound = state.getRounds().find(round => round.roundId === userRoundId);
+    const projectedContent = projectedRound?.assistantMessage?.content;
+    const projectedHasAssistant = projectedRound
+        ? typeof projectedContent === 'string' && projectedContent.trim().length > 0
+        : false;
+    return projectedHasAssistant || RoundLog.hasEffectiveAssistant(userRound);
+}
+

@@ -180,6 +180,14 @@ export class SessionRegistry {
         return this.states.get(sessionId);
     }
 
+    restoreRuntimeMetadata(sessionId: string, metadata: { unreadCount?: number }): void {
+        const runtime = this.sessions.get(sessionId);
+        if (!runtime) return;
+        if (Number.isSafeInteger(metadata.unreadCount) && metadata.unreadCount! >= 0) {
+            runtime.unreadCount = metadata.unreadCount!;
+        }
+    }
+
     // ================================================================
     // 操作可行性检查
     // ================================================================
@@ -421,7 +429,27 @@ export class SessionRegistry {
         state: SessionState,
     ): Promise<void> {
         const { chain } = await this.collectHeadChain(nodeId, sessionId);
-        if (chain.length === 0) return;
+        if (chain.length === 0) {
+            // No head chain (e.g. after a regenerate whose new round is not yet
+            // persisted, so currentHead points at a not-yet-existing round).
+            // The previous branch's projection must not linger — clear it so the
+            // UI drops the stale nodes; the new round arrives via execution.
+            const stale = state.getRounds().map(t => t.roundId);
+            for (const roundId of stale) {
+                const events = state.apply({ type: 'round:deleted', roundId });
+                for (const e of events) {
+                    this._eventBus.emitSession(sessionId, e);
+                }
+            }
+            const removedTransient = state.retainTransientForRounds(new Set());
+            if (removedTransient.length > 0) {
+                this._eventBus.emitSession(sessionId, {
+                    type: 'messages:deleted',
+                    payload: { deletedIds: removedTransient },
+                });
+            }
+            return;
+        }
 
         const headSet = new Set(chain);
 
@@ -431,6 +459,17 @@ export class SessionRegistry {
             for (const e of events) {
                 this._eventBus.emitSession(sessionId, e);
             }
+        }
+
+        // Transient groups (execution-time bubbles) not in the new head chain —
+        // e.g. an assistant created on the previous branch before a switch —
+        // must be dropped or the UI would show stale nodes from the old branch.
+        const removedTransient = state.retainTransientForRounds(headSet);
+        if (removedTransient.length > 0) {
+            this._eventBus.emitSession(sessionId, {
+                type: 'messages:deleted',
+                payload: { deletedIds: removedTransient },
+            });
         }
 
         const log = new RoundLog(this._engine, nodeId, sessionId);

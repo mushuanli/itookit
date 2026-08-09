@@ -78,6 +78,12 @@ export class SessionState {
         const { roundId, projection } = event;
         if (this.roundById.has(roundId)) return [];
 
+        // Transient groups are the execution-time placeholders already rendered
+        // to the UI via message:appended (createAssistantNode / createUserMessage).
+        // When the persisted Round is later projected, the same bubbles would be
+        // emitted again — the UI would render a duplicate node. Skip the re-emit
+        // and only replace the state so future getSessions() reads the projection.
+        const hadTransient = this.transientGroups.some(group => group.persistedNodeId === roundId);
         this.transientGroups = this.transientGroups
             .filter(group => group.persistedNodeId !== roundId);
         this.rounds.push(projection);
@@ -91,6 +97,8 @@ export class SessionState {
             const children = this.childrenByParent.get(parentId)!;
             if (!children.includes(roundId)) children.push(roundId);
         }
+
+        if (hadTransient) return [];
 
         const sessionGroups = this.roundProjectionToSessionGroups(projection);
         const isExecutionRoot = projection.kind === 'chat' && !!projection.assistantMessage;
@@ -232,9 +240,14 @@ export class SessionState {
     /**
      * Find the user-containing round before an assistant round.
      * Walks the parents chain until it finds a chat round with a userMessage.
+     *
+     * Accepts either a raw RoundId ("abc123") or a session group id
+     * ("round-abc123-assistant"), matching how both callers (canRegenerate /
+     * regenerate) pass an assistant message.
      */
     findUserRoundForAssistant(assistantId: RoundId): RoundProjection | undefined {
-        let current = this.roundById.get(assistantId);
+        const roundId = extractRoundId(assistantId);
+        let current = this.roundById.get(roundId);
         while (current) {
             if (current.kind === 'chat' && current.userMessage) return current;
             if (current.historyParentIds.length === 0) return undefined;
@@ -352,6 +365,24 @@ export class SessionState {
     removeTransientMessages(messageIds: string[]): void {
         const idSet = new Set(messageIds);
         this.transientGroups = this.transientGroups.filter(s => !idSet.has(s.id));
+    }
+
+    /**
+     * Drop transient (execution-time) groups whose round is not in the given
+     * head chain. Used when switching branches: a transient assistant created on
+     * the previous branch must disappear once the head moves elsewhere.
+     *
+     * @returns session ids of the removed groups, for the caller to emit
+     *          messages:deleted so the UI unmounts those bubbles.
+     */
+    retainTransientForRounds(roundIds: Set<string>): string[] {
+        const removed: string[] = [];
+        this.transientGroups = this.transientGroups.filter(group => {
+            if (group.persistedNodeId && roundIds.has(group.persistedNodeId)) return true;
+            removed.push(group.id);
+            return false;
+        });
+        return removed;
     }
 
     // ================================================================
@@ -492,3 +523,13 @@ export class SessionState {
         return output.trim();
     }
 }
+
+/**
+ * Strip the session-group id prefix/suffix to get the underlying RoundId.
+ * "round-abc123-assistant" → "abc123"; a raw RoundId passes through unchanged.
+ */
+function extractRoundId(id: string): string {
+    const match = /^round-(.+)-(user|assistant)$/.exec(id);
+    return match ? match[1] : id;
+}
+
