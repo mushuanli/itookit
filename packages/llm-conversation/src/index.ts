@@ -68,7 +68,7 @@ export { DurableConversationProjection } from './persistence/durable-conversatio
 export { formatErrorMessage } from './utils/error-formatter';
 import type { DagPluginCatalog, ToolDefinition } from '@itookit/common';
 import type { Harness } from '@itookit/harness';
-import { DurableAgentProgram, DurableChatProgram } from '@itookit/llm-runtime';
+import { DurableAgentProgram, DurableChatProgram, DurablePlanProgram } from '@itookit/llm-runtime';
 import type { IAgentConfigService } from './services/agent-service';
 import type { IChatEngine } from './persistence/types';
 import { SessionManager, createSessionManager } from './session/session-manager';
@@ -123,6 +123,7 @@ async function initializeServices(options: ConversationSystemOptions): Promise<v
 function registerPrograms(harness: Harness): void {
     if (!harness.programs.has('llm.chat', '1')) harness.registerProgram(new DurableChatProgram());
     if (!harness.programs.has('llm.agent', '1')) harness.registerProgram(new DurableAgentProgram());
+    if (!harness.programs.has('llm.plan', '1')) harness.registerProgram(new DurablePlanProgram());
     if (!harness.programs.has('flow.value', '1')) harness.registerProgram(new FlowValueProgram());
     if (!harness.programs.has('flow.human', '1')) harness.registerProgram(new FlowHumanProgram());
     if (!harness.programs.has('flow.aggregate', '1')) harness.registerProgram(new FlowAggregateProgram());

@@ -12,6 +12,7 @@ export {
 } from './core/provider-message-adapter';
 export { DurableChatProgram } from './durable/chat-program';
 export { DurableAgentProgram } from './durable/agent-program';
+export { DurablePlanProgram } from './durable/plan-program';
 export type {
     DurableAgentInput,
     DurableAgentOutput,
@@ -20,3 +21,4 @@ export type {
     DurableDependencyBinding,
     DurableProgramInput,
 } from './durable/types';
+export type { DurablePlanInput, DurablePlanOutput } from './durable/plan-program';

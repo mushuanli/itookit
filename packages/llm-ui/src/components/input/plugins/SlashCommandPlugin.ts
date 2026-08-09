@@ -6,6 +6,7 @@ import type { SkillInfo, SkillInvocation } from '../../../domain/types';
 import { parseSkillArgs } from '../SkillInvocationParser';
 import { injectStyle } from '../../../utils/styleInjector';
 import { insertBeforeWrapper } from '../../../utils/domInsertion';
+import { Toast } from '@itookit/common';
 
 // ── Tool arg parser ──────────────────────────────────────────────────────────
 // Parses slash command args: positionals and --flag value pairs.
@@ -203,8 +204,7 @@ export interface SlashCommandCallbacks {
     /**
      * 直接调用 harness 工具（绕过 LLM，立即执行，结果用 Modal 展示）。
      *
-     * 由 `/exec` `/read` `/grep` `/glob` 等 slash 命令触发。
-     * Shell：  /exec npm run build
+     * 由 `/read` `/grep` `/glob` 等只读 slash 命令触发。
      * 文件：   /read src/index.ts --offset 1 --limit 50
      * 搜索：   /grep "TODO" --glob *.ts
      * 文件搜：/glob "**\/*.test.ts"
@@ -214,6 +214,13 @@ export interface SlashCommandCallbacks {
      * @param displayCmd  用于 UI 显示的原始命令字符串（如 "/read src/index.ts"）
      */
     onToolInvoke?: (toolId: string, args: Record<string, unknown>, displayCmd: string) => Promise<void>;
+
+    // ── Durable privileged task commands ────────────────────────────────────
+    onPlan?: (goal: string) => Promise<void>;
+    onCancelTask?: () => Promise<void>;
+    onResumeTask?: () => Promise<void>;
+    onApproveTask?: (note: string) => Promise<void>;
+    onExec?: (command: string) => Promise<void>;
 
     // ── By the way ────────────────────────────────────────────────────────────
 
@@ -441,6 +448,7 @@ export class SlashCommandPlugin implements InputPlugin {
             await command.execute(args, this.ctx);
         } catch (e) {
             console.error(`[SlashCommand] Failed to execute /${command.name}:`, e);
+            Toast.error(e instanceof Error ? e.message : `/${command.name} failed`);
         }
 
         this.ctx.focus();
@@ -798,24 +806,18 @@ export class SlashCommandPlugin implements InputPlugin {
                 },
             },
 
-            // ── Direct Tool Invocation (bypasses LLM) ────────────────────────
+            // ── Durable Task Control ─────────────────────────────────────────
+            privilegedCommand('plan', 'Create a durable plan task', '🗺️', cb.onPlan, '<goal>'),
+            privilegedCommand('cancel', 'Cancel the attached task', '⏹️', cb.onCancelTask),
+            privilegedCommand('resume', 'Resume the attached task', '▶️', cb.onResumeTask),
+            privilegedCommand('approve', 'Approve the attached task interaction', '✅', cb.onApproveTask),
+            privilegedCommand('exec', 'Execute a shell command after approval', '⬛', cb.onExec, '<command>'),
+
+            // ── Direct read-only Tool Invocation (bypasses LLM) ─────────────
             // Available when onToolInvoke is injected (harness with toolService).
             // Result shown in a Modal — no LLM round-trip.
 
             ...(cb.onToolInvoke ? [
-                {
-                    name: 'exec',
-                    label: '/exec',
-                    description: 'Execute a shell command directly (no LLM)',
-                    icon: '⬛',
-                    group: 'Direct Tools',
-                    hasArgs: true,
-                    argsPlaceholder: '<command>',
-                    execute: async (args?: string) => {
-                        if (!args?.trim()) return;
-                        await cb.onToolInvoke!('shell_exec', { command: args.trim() }, `/exec ${args.trim()}`);
-                    },
-                },
                 {
                     name: 'read',
                     label: '/read',
@@ -917,6 +919,7 @@ export class SlashCommandPlugin implements InputPlugin {
     border-radius: 4px 4px 0 0;
     animation: slash-hint-in .15s ease;
 }
+
 .slash-cmd__agent-hint kbd {
     display: inline-block;
     padding: 1px 5px;
@@ -952,4 +955,29 @@ export class SlashCommandPlugin implements InputPlugin {
         this.ctx = null;
         this.commands = [];
     }
+}
+
+function privilegedCommand(
+    name: string,
+    description: string,
+    icon: string,
+    execute: ((args: string) => Promise<void>) | (() => Promise<void>) | undefined,
+    placeholder?: string,
+): SlashCommandDef {
+    return {
+        name,
+        label: `/${name}`,
+        description: execute ? description : `${description} — Harness unavailable`,
+        icon,
+        group: 'Task Control',
+        hasArgs: Boolean(placeholder),
+        argsPlaceholder: placeholder,
+        execute: async args => {
+            if (!execute) throw new Error(`/${name} requires Harness privileged commands`);
+            if (placeholder?.startsWith('<') && !args.trim()) {
+                throw new Error(`Usage: /${name} ${placeholder}`);
+            }
+            await execute(args.trim());
+        },
+    };
 }

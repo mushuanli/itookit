@@ -12,6 +12,12 @@ import type { ILLMService, ICommandBus } from '@itookit/common';
 import type { Harness } from '@itookit/harness';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
+export type {
+    IPrivilegedCommandService,
+    PlanCommandRequest,
+    ExecCommandRequest,
+} from './domain/ports/IPrivilegedCommandService';
+
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
 export { ProviderSettingsEditor } from './editors/ProviderSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
@@ -66,6 +72,7 @@ export const createLLMFactory = (
         llmService?: ILLMService;
         commandBus?: ICommandBus;
         harness?: Harness;
+        privilegedCommands?: import('./domain/ports/IPrivilegedCommandService').IPrivilegedCommandService;
     },
 ): EditorFactory => {
 
@@ -107,6 +114,7 @@ export const createLLMFactory = (
             llmService: deps.llmService,
             commandBus: deps.commandBus,
             harness: deps.harness,
+            privilegedCommands: deps.privilegedCommands,
         };
 
         // ✅ 将创建过程包装为 Promise，注册到 pendingCreations

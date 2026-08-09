@@ -21,6 +21,14 @@ import type { IChatEngine } from '@itookit/llm-conversation';
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
 import { getAgentDisplayName, sanitizeFileName } from './AgentProvider';
 
+export interface PrivilegedSlashCommands {
+    plan(goal: string): Promise<void>;
+    exec(command: string): Promise<void>;
+    cancel(): Promise<void>;
+    resume(): Promise<void>;
+    approve(note: string): Promise<void>;
+}
+
 export interface SlashCommandRouterDeps {
     commands: ICommandBus;
     chatInput: IChatInputPresenter;
@@ -41,6 +49,7 @@ export interface SlashCommandRouterDeps {
     toggleNavigator: () => Promise<void>;
     findCurrentVisibleSession: () => string | null;
     updateCollapseButtonIcon: (isAllCollapsed?: boolean) => void;
+    privilegedCommands?: PrivilegedSlashCommands;
 }
 
 /**
@@ -157,6 +166,12 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
                 overrides: { historyLength: 0 },
             });
         },
+
+        onPlan: deps.privilegedCommands?.plan,
+        onCancelTask: deps.privilegedCommands?.cancel,
+        onResumeTask: deps.privilegedCommands?.resume,
+        onApproveTask: deps.privilegedCommands?.approve,
+        onExec: deps.privilegedCommands?.exec,
 
         // ── Refine ──────────────────────────────────────────
 

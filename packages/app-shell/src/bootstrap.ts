@@ -38,6 +38,7 @@ import {
 import { WorkspaceStrategy } from './strategies/types';
 import { FILE_REGISTRY, EditorTypeKey } from './config/file-registry';
 import { themeService, ThemeMode } from './ThemeService';
+import { PrivilegedCommandService } from './harness/privileged-command-service';
 
 /** Resolves when an actual editor mounts inside the container (not just placeholder). */
 function waitForEditorMount(container: HTMLElement): Promise<void> {
@@ -363,6 +364,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // this is the single place that knows both the harness and the connection list.
     const connections = await agentService.getConnections();
     const visionConnExists = connections.some(c => c.id === 'conn-volcengine-vision');
+    const privilegedCommands = new PrivilegedCommandService(harness.kernel, agentService);
     const llmFactory = createLLMFactory(
         agentService,
         visionConnExists
@@ -371,8 +373,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 llmService: harness.llmService,
                 commandBus,
                 harness: harness.kernel,
+                privilegedCommands,
             }
-            : { chatEngine, commandBus, harness: harness.kernel },
+            : { chatEngine, commandBus, harness: harness.kernel, privilegedCommands },
     );
     const agentFactory    = createAgentEditorFactory(agentService);
 

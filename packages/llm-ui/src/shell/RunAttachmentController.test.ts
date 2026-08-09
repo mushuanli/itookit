@@ -38,6 +38,36 @@ describe('RunAttachmentController', () => {
 
         expect(controller.activeTaskId).toBe('fast');
     });
+
+    it('approves the latest pending approval on the attached task', async () => {
+        const task = handle('task-1');
+        vi.mocked(task.status).mockResolvedValue({
+            task: taskRecord({
+                approval: {
+                    id: 'approval', kind: 'approval', prompt: 'Approve?', status: 'pending', requestedAt: 1,
+                },
+            }),
+        });
+        const controller = new RunAttachmentController(controlPlane(task), callbacks());
+        await controller.attach('task-1');
+
+        await controller.approve('reviewed');
+
+        expect(task.respond).toHaveBeenCalledWith({
+            interactionId: 'approval', value: { approved: true, note: 'reviewed' },
+        });
+    });
+
+    it('starts a persisted task when resume is requested', async () => {
+        const task = handle('task-1');
+        vi.mocked(task.status).mockResolvedValue({ task: taskRecord({}, 'created') });
+        const controller = new RunAttachmentController(controlPlane(task), callbacks());
+        await controller.attach('task-1');
+
+        await controller.resume();
+
+        expect(task.start).toHaveBeenCalledOnce();
+    });
 });
 
 function controlPlane(task: TaskHandle): TaskControlPlane {
@@ -50,6 +80,23 @@ function handle(id: string, events: EventEnvelope[] = []): TaskHandle {
         events: () => stream(events),
         signal: vi.fn(), start: vi.fn(), cancel: vi.fn(), status: vi.fn(), wait: vi.fn(), poll: vi.fn(),
         respond: vi.fn(), createResource: vi.fn(), history: vi.fn(), attempts: vi.fn(),
+    };
+}
+
+function callbacks() {
+    return { onEvent: vi.fn(), onWaiting: vi.fn() };
+}
+
+function taskRecord(
+    interactions: import('@itookit/harness').TaskRecord['interactions'],
+    status: import('@itookit/harness').TaskStatus = 'waiting',
+): import('@itookit/harness').TaskRecord {
+    return {
+        id: 'task-1', sessionId: 'session-1', rootTaskId: 'task-1',
+        program: { kind: 'test', version: '1' }, status, input: null,
+        pendingEvents: [], unresolvedDeps: 0, priority: 0,
+        retry: { maxAttempts: 1 }, attemptCount: 0, effects: {}, interactions,
+        version: 1, createdAt: 1, updatedAt: 1,
     };
 }
 

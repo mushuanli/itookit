@@ -22,6 +22,7 @@ import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
 import type { IBranchPresenter } from '../domain/ports/IBranchPresenter';
 import type { IEditorEventBus } from '../domain/events';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
+import type { IPrivilegedCommandService } from '../domain/ports/IPrivilegedCommandService';
 
 // Services
 import { SessionService, StateService, AssetService, BranchStore, BranchService, NavDataBuilder, FileSearchService, OcrService } from '../services';
@@ -67,6 +68,8 @@ import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlug
 import { getPromptHistory } from '@itookit/llm-conversation';
 import { AssetManagerUI } from '@itookit/mdxeditor';
 
+const ACTIVE_PRIVILEGED_TASK_KEY = 'ui.privileged.active-task';
+
 export interface LLMEditorOptions extends EditorOptions {
     chatEngine: IChatEngine;
     agentService: IAgentConfigService;
@@ -84,6 +87,8 @@ export interface LLMEditorOptions extends EditorOptions {
     commandBus?: ICommandBus;
     /** Durable Harness used to attach to Tasks. */
     harness?: Harness;
+    /** Application service for durable privileged slash commands. */
+    privilegedCommands?: IPrivilegedCommandService;
 }
 
 /**
@@ -458,6 +463,10 @@ export class LLMWorkspaceEditor implements IEditor {
             onWaiting: condition => this.handleRunWaiting(condition),
             onError: error => Toast.error(error.message),
         });
+        void this.restorePrivilegedTaskAttachment().catch(error => {
+            const message = error instanceof Error ? error.message : 'Unable to restore attached task';
+            Toast.error(message);
+        });
     }
 
     private handleRunEvent(event: EventEnvelope): void {
@@ -469,6 +478,8 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private handleRunWaiting(request: InteractionRequest<JsonValue>): void {
+        const plan = interactionPlan(request.payload);
+        if (plan) this.chatInput.showToolOutput('/plan', plan, true);
         Toast.info(request.prompt);
     }
 
@@ -888,6 +899,13 @@ export class LLMWorkspaceEditor implements IEditor {
                 toggleNavigator: () => this.navigation.toggleNavigator(this.container),
                 findCurrentVisibleSession: () => this.navigation.findCurrentVisibleSession(),
                 updateCollapseButtonIcon: (isAllCollapsed) => this.updateCollapseButtonIcon(isAllCollapsed),
+                privilegedCommands: this.options.privilegedCommands ? {
+                    plan: goal => this.startPlan(goal),
+                    exec: command => this.startExec(command),
+                    cancel: () => this.cancelAttachedTask(),
+                    resume: () => this.resumeAttachedTask(),
+                    approve: note => this.approveAttachedTask(note),
+                } : undefined,
             })
         );
         chatInput.registerPlugin(this.slashPlugin);
@@ -900,6 +918,59 @@ export class LLMWorkspaceEditor implements IEditor {
         void this.runAttachment.signal({ type: 'inject', payload: { text: message } })
             .catch(error => Toast.error(error instanceof Error ? error.message : String(error)));
         return true;
+    }
+
+    private async startPlan(goal: string): Promise<void> {
+        const sessionId = this.requireSessionId();
+        const agentId = this.chatInput.getConfig().agentId;
+        const taskId = await this.options.privilegedCommands!.plan({ sessionId, agentId, goal });
+        await this.attachPrivilegedTask(taskId, 'Plan task created');
+    }
+
+    private async startExec(command: string): Promise<void> {
+        const taskId = await this.options.privilegedCommands!.exec({
+            sessionId: this.requireSessionId(), command,
+        });
+        await this.attachPrivilegedTask(taskId, 'Command is waiting for approval');
+    }
+
+    private async attachPrivilegedTask(taskId: string, message: string): Promise<void> {
+        if (!this.runAttachment) throw new Error('Harness task attachment is unavailable');
+        const session = await this.options.harness!.openSession(this.requireSessionId());
+        await session.setShared(ACTIVE_PRIVILEGED_TASK_KEY, { taskId });
+        await this.runAttachment.attach(taskId);
+        Toast.info(message);
+    }
+
+    private async restorePrivilegedTaskAttachment(): Promise<void> {
+        if (!this.runAttachment || !this.options.harness || !this.currentSessionId) return;
+        const session = await this.options.harness.openSession(this.currentSessionId);
+        const entry = await session.getShared(ACTIVE_PRIVILEGED_TASK_KEY);
+        const taskId = sharedTaskId(entry?.value);
+        if (taskId) await this.runAttachment.attach(taskId);
+    }
+
+    private async cancelAttachedTask(): Promise<void> {
+        if (!this.runAttachment) throw new Error('Harness task attachment is unavailable');
+        await this.runAttachment.cancel();
+        Toast.info('Task cancelled');
+    }
+
+    private async resumeAttachedTask(): Promise<void> {
+        if (!this.runAttachment) throw new Error('Harness task attachment is unavailable');
+        await this.runAttachment.resume();
+        Toast.info('Task resumed');
+    }
+
+    private async approveAttachedTask(note: string): Promise<void> {
+        if (!this.runAttachment) throw new Error('Harness task attachment is unavailable');
+        await this.runAttachment.approve(note);
+        Toast.info('Task approved');
+    }
+
+    private requireSessionId(): string {
+        if (!this.currentSessionId) throw new Error('Session is not ready');
+        return this.currentSessionId;
     }
 
     // ================================================================
@@ -976,4 +1047,14 @@ export class LLMWorkspaceEditor implements IEditor {
         this.editorEvents.clear();
         this.nodeCommands.clear();
     }
+}
+
+function interactionPlan(payload: JsonValue | undefined): string | undefined {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
+    return typeof payload.plan === 'string' ? payload.plan : undefined;
+}
+
+function sharedTaskId(value: JsonValue | undefined): string | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    return typeof value.taskId === 'string' ? value.taskId : undefined;
 }

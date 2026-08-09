@@ -24,7 +24,9 @@ describe('createCoreutilsRuntime', () => {
         expect(effects.map(effect => effect.kind)).toEqual([
             'llm.chat', 'tool.call', 'process.exec', 'skill.load',
         ]);
-        expect(programs.map(program => program.manifest.kind)).toEqual(['coreutils.approved-effect']);
+        expect(programs.map(program => program.manifest.kind)).toEqual([
+            'coreutils.approved-effect', 'coreutils.exec',
+        ]);
 
         await runtime.dispose();
     });

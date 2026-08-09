@@ -73,7 +73,7 @@ export interface IChatInputPresenter {
     /**
      * 在输入框上方内联显示工具执行结果（不弹 Modal）。
      *
-     * 用于 /exec /read /grep /glob 等直接 tool 调用：
+     * 用于 /read /grep /glob 等直接 Tool 调用，也用于展示 /plan 审批内容：
      * - 结果以 monospace 代码块展示在 ChatInput 区域内
      * - 用户可继续输入下一条工具命令或切换回 agent 模式
      * - 发送 agent 消息时自动清除（clearToolOutput）

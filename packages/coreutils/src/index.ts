@@ -44,5 +44,7 @@ export type {
 
 export { ApprovedEffectProgram } from './programs/approved-effect-program';
 export type { ApprovedEffectInput } from './programs/approved-effect-program';
+export { ExecProgram } from './programs/exec-program';
+export type { ExecProgramInput, ExecProgramOutput } from './programs/exec-program';
 
 export { BUILTIN_TOOLS, ToolDeviceDriver } from '@itookit/tools';

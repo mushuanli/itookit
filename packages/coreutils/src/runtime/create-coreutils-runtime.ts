@@ -27,6 +27,7 @@ import type {
     SkillToolHandlerFactory,
 } from '../ports/capabilities';
 import { ApprovedEffectProgram } from '../programs/approved-effect-program';
+import { ExecProgram } from '../programs/exec-program';
 
 export interface CoreutilsRuntimeOptions {
     llmDriver: IDeviceDriver;
@@ -62,7 +63,7 @@ export async function createCoreutilsRuntime(options: CoreutilsRuntimeOptions): 
         sessions: registry,
         plugin: new CoreutilsHarnessPlugin({
             effects,
-            programs: [new ApprovedEffectProgram()],
+            programs: [new ApprovedEffectProgram(), new ExecProgram()],
             onSessionClosed: sessionId => registry.disposeSession(sessionId),
         }),
         disposeSession: sessionId => registry.disposeSession(sessionId),

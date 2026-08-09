@@ -47,7 +47,35 @@ export class RunAttachmentController {
         await this.handle.signal(signal);
     }
 
-    async cancel(): Promise<void> { await this.handle?.cancel(); }
+    async cancel(): Promise<void> {
+        if (!this.handle) throw new Error('No task is attached');
+        await this.handle.cancel('Cancelled by privileged command');
+    }
+
+    async resume(): Promise<void> {
+        const handle = this.requireHandle();
+        const { task } = await handle.status();
+        if (task.status === 'created') return handle.start();
+        if (task.status === 'ready' || task.status === 'running') return;
+        if (task.status === 'waiting' && acceptsSignal(task.wait, 'resume')) {
+            return handle.signal({ type: 'resume' });
+        }
+        if (task.status === 'waiting') throw new Error('Task is waiting for an effect or approval');
+        throw new Error(`Task cannot be resumed from ${task.status}`);
+    }
+
+    async approve(note = ''): Promise<void> {
+        const handle = this.requireHandle();
+        const { task } = await handle.status();
+        const interaction = Object.values(task.interactions)
+            .filter(item => item.status === 'pending' && item.kind === 'approval')
+            .sort((left, right) => right.requestedAt - left.requestedAt)[0];
+        if (!interaction) throw new Error('Attached task has no pending approval');
+        await handle.respond({
+            interactionId: interaction.id,
+            value: { approved: true, ...(note.trim() ? { note: note.trim() } : {}) },
+        });
+    }
 
     async detach(): Promise<void> {
         const taskId = this.handle?.id;
@@ -67,6 +95,20 @@ export class RunAttachmentController {
             if (request) this.callbacks.onWaiting(request);
         }
     }
+
+    private requireHandle(): TaskHandle {
+        if (!this.handle) throw new Error('No task is attached');
+        return this.handle;
+    }
+}
+
+function acceptsSignal(wait: import('@itookit/harness').WaitSpec | undefined, type: string): boolean {
+    if (!wait) return false;
+    if (wait.type === 'signal') return wait.id === undefined || wait.id === type;
+    if (wait.type === 'any' || wait.type === 'all' || wait.type === 'quorum') {
+        return wait.waits.some(item => acceptsSignal(item, type));
+    }
+    return false;
 }
 
 function interactionRequest(event: EventEnvelope): InteractionRequest<JsonValue> | undefined {

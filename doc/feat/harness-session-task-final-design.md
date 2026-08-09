@@ -1,6 +1,6 @@
 # Harness Session / Task 最终设计方案
 
-> 版本：2.9  
+> 版本：3.0
 > 日期：2026-08-09  
 > 状态：最终设计，已按当前实现校准  
 > 范围：定义通用、持久、可恢复、可扩展的 Harness Session/Task 内核，覆盖 LLM loop、动态 DAG、Bash、Skill、MCP、跨进程与跨 Session 协作。
@@ -33,6 +33,7 @@
 | T20 Chat/Agent Durable Program 迁移 | ✅ 已完成 | `@itookit/llm-runtime` 提供 Durable Chat/Agent Program；LLM/Tool 通过授权 Effect 执行，HITL 使用 Interaction；Flow 编译为新 Harness `TaskSpec/dependsOn` DAG。 |
 | T21 Coreutils 可靠性与平台边界加固 | 🟡 待验证 | 已实现 Session 级 Tool/Skill/TTY 隔离、Skill loaded shared-state 恢复、所有能力 ResourceHandle execute 授权、失败结果转 Effect failure、LLM finally 清理、TTY 所有权、Durable approval program、Web/Tauri 应用注入和 Tauri Shell timeout/cancel；待 Tauri 实机与真实进程崩溃验证。 |
 | T22 声明驱动模型与 Durable Skill 契约 | ✅ 已完成 | 已明确 Task/Attempt/Effect/Resource 状态边界；TaskHandle 可直接创建归属自身的 Resource；Skill manifest 可声明 `taskProgram` 并由 `createSkillTaskSpec` 编译为 deferred Durable Task；Program Decision 的 state/output/action payload 在提交前验证为 durable JSON。 |
+| T23 特权 Slash Command | ✅ 已完成 | `/plan`、`/exec` 通过应用端口创建 deferred Durable Task 并绑定最小 ResourceHandle；`/approve`、`/cancel`、`/resume` 操作当前附着 Task，当前特权 Task id 写入 Session shared state 以便编辑器重载后恢复附着。命令文本属于 UI，ExecProgram 属于 Coreutils，PlanProgram 属于 LLM Runtime，依赖由 App Shell 组装。 |
 
 ### 0.1 当前 Task 运行状态语义
 
@@ -64,9 +65,9 @@ created -> blocked -> ready -> running -> waiting -> ready
 | 验证项 | 结果 |
 |---|---|
 | stdio 事务型 SeqFile | 17 项测试通过 |
-| Coreutils capability runtime | 17 项测试通过，覆盖 Effect 注册、Session Skill 隔离与恢复、streaming LLM、scope 释放、Durable approval，以及 Skill manifest→Durable TaskSpec 编译和真实 Task 执行 |
+| Coreutils capability runtime | 20 项测试通过，覆盖 Effect 注册、Session Skill 隔离与恢复、streaming LLM、scope 释放、Durable approval、审批后 Exec，以及 Skill manifest→Durable TaskSpec 编译和真实 Task 执行 |
 | Harness Durable Kernel | 35 项测试通过，覆盖悬挂 Effect deadline/cancel、非 JSON Effect、非 durable Decision 拒绝，以及 TaskHandle 创建归属资源后启动 deferred Task |
-| LLM Runtime | 7 项测试通过，覆盖 ContextAssembler 与 ProviderMessageAdapter；Durable Agent 的 Effect/DAG 集成由 Conversation 测试覆盖 |
+| LLM Runtime | 10 项测试通过，覆盖 ContextAssembler、ProviderMessageAdapter 与 Durable Plan 生成/审批；Durable Agent 的 Effect/DAG 集成由 Conversation 测试覆盖 |
 | Conversation / Durable Flow | 42 项完整测试通过，其中 Durable 测试覆盖 manifest 版本历史、DAG fan-in 聚合及 Agent 节点授权 LLM Effect |
 | LocalFS RecordStore adapter | 2 项事务测试通过 |
 | TypeScript | `common`、`harness`、`coreutils`、`llm-runtime`、`llm-conversation`、`llm-ui`、Web、Tauri 检查通过 |
@@ -1860,7 +1861,7 @@ Task/Event/Effect schema 应保持稳定，以支持 Agent Lightning 类训练�
 @itookit/coreutils
   LLM / Tool / Skill / Bash / TTY capability ports
   platform-neutral Session-scoped runtime
-  CoreutilsHarnessPlugin + approved-effect DurableTaskProgram
+  CoreutilsHarnessPlugin + approved-effect / exec DurableTaskProgram
   llm.chat / tool.call / process.exec / tty.command / skill.load EffectAdapter
 
 apps/web-app
@@ -1871,18 +1872,40 @@ apps/tauri-app
   Tauri process timeout/cancel implementation
 
 @itookit/llm-runtime
-  Durable Chat / Agent TaskProgram
+  Durable Chat / Agent / Plan TaskProgram
   ContextAssembler + provider-neutral message policy
   depends only on common + Harness public contracts
 
 @itookit/llm-conversation
   ChatHarnessStorageResolver / Round and Conversation projection
   Flow manifest registry + TaskSpec/dependsOn DAG compiler
+
+@itookit/llm-ui
+  Slash command syntax + attached Task selection
+  depends on IPrivilegedCommandService, never on concrete Exec/Plan programs
+
+@itookit/app-shell
+  PrivilegedCommandService composition
+  resolves Agent configuration, submits Task, binds ResourceHandle, starts Task
 ```
 
 旧的根目录 `harness.ts/types.ts/store.ts/registry.ts` 兼容 re-export 已在确认无引用后删除，内部测试也直接使用分层入口。Kernel 不能 import provider SDK 或平台数据库 API；provider adapter 不能直接修改 SeqFile 内核状态。插件仅持有 `HarnessRegistration`，因此无法越过公开端口修改 Store。
 
-### 26.1 当前代码归属与清理判定
+### 26.1 特权命令归属与语义
+
+| 命令 | Durable 语义 | 代码归属 |
+|---|---|---|
+| `/plan <goal>` | 创建 `llm.plan@1` Task，绑定 `llm` execute handle；LLM 结果写入 Task state，并创建持久 approval Interaction | 语法在 `llm-ui`；Program 在 `llm-runtime`；提交在 `app-shell` |
+| `/exec <command>` | 创建 `coreutils.exec@1` Task，绑定 `process` execute handle；批准前绝不产生 `process.exec` Effect | 语法在 `llm-ui`；Program/Effect 在 `coreutils`；提交在 `app-shell` |
+| `/approve` | 查找当前附着 Task 最新的 pending approval，并调用 `TaskHandle.respond()` | `llm-ui` Task 控制适配；状态和校验属于 Harness |
+| `/cancel` | 调用当前附着 Task 的 `TaskHandle.cancel()`，终止状态持久化 | `llm-ui` Task 控制适配；取消语义属于 Harness |
+| `/resume` | `created` Task 调用 `start()`；明确等待 `resume` Signal 的 Task 发送 Signal；Effect/Interaction 等待不会被错误唤醒 | `llm-ui` Task 控制适配；调度语义属于 Harness |
+
+斜杠命令不是 Skill：它们是用户到控制面的特权语法。Skill 可以编译为 Task 或 Effect，但不能覆盖 Harness 的授权、审批、取消和恢复规则。`/exec` 也不再使用旧的“直接 Tool 调用”路径，因此刷新或进程重启后仍可从 Task/Interaction/Effect 事实恢复。
+
+当前附着的特权 Task id 保存在 Session shared key `ui.privileged.active-task`；它只是可恢复的 UI 选择指针，不复制 Task 状态。Task 的 state、Interaction、Effect、Attempt 和 ExitRecord 仍以 `tasks/<task-id>/task.seq` 为唯一事实源。
+
+### 26.2 当前代码归属与清理判定
 
 | 模块 | 当前用途 | 现在能否删除 | 清理条件 |
 |---|---|---|---|
@@ -1898,7 +1921,7 @@ apps/tauri-app
 
 因此，“有了新 Harness”不等于其他模块已经无用。可清理的是迁移完成后的**重复状态机、重复 checkpoint、重复 Run/Process 身份和仅服务旧内核的投影**；Bash、TTY、LLM、Skill、Tool、MCP 等能力本身仍需保留，只改变接入方向。
 
-### 26.2 删除门禁
+### 26.3 删除门禁
 
 旧模块删除门禁及当前结果：
 
