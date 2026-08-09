@@ -43,15 +43,28 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
             this.sessionFiles.set(existing.id, nodeId);
             return existing.id;
         }
-        if (existing && Object.keys(existing).length > 0) {
-            throw new Error(`Unsupported conversation manifest: ${nodeId}`);
+        // Tolerate unrecognized / legacy file content instead of failing hard —
+        // a stale .chat file (old schema, interrupted init) would otherwise block
+        // the whole editor from starting. Rebuild a valid manifest, preserving any
+        // id/title the old content carried so references stay stable.
+        const legacy = existing && typeof existing === 'object' && !Array.isArray(existing)
+            ? existing as Record<string, unknown>
+            : null;
+        if (legacy && Object.keys(legacy).length > 0) {
+            console.warn(`[ChatEngine] Migrating non-v3 manifest for ${nodeId}:`, JSON.stringify(legacy));
         }
-        const manifest = createManifest(title);
+        const manifest = createManifest(typeof legacy?.title === 'string' ? legacy.title : title);
+        // Restore a stable session id from either the legacy manifest id or the
+        // editor snapshot's sessionId field, so persisted assets keep their binding.
+        const legacyId = typeof legacy?.id === 'string' ? legacy.id
+            : typeof legacy?.sessionId === 'string' ? legacy.sessionId
+            : undefined;
+        if (legacyId) manifest.id = legacyId;
         await this.engine.driver.writeContent(nodeId, serialize(manifest));
         await this.engine.meta.assets.ensureAssetDir(nodeId);
         await this.writeSettings(nodeId, DEFAULT_SESSION_SETTINGS);
         await this.engine.driver.updateMetadata(nodeId, {
-            title,
+            title: manifest.title,
             icon: '💬',
             sessionId: manifest.id,
         });
@@ -75,6 +88,10 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
         } catch {
             return null;
         }
+    }
+
+    async getSessionNodeId(sessionId: string): Promise<string | null> {
+        return this.resolveSessionFile(sessionId);
     }
 
     async validateManifest(nodeId: string, sessionId: string): Promise<boolean> {

@@ -48,6 +48,7 @@ export interface IChatEngine {
     createSession(title: string): Promise<string>;
     initializeExistingFile(nodeId: string, title: string): Promise<string>;
     getSessionIdFromNodeId(nodeId: string): Promise<string | null>;
+    getSessionNodeId(sessionId: string): Promise<string | null>;
     getManifest(nodeId: string): Promise<ConversationManifest>;
     updateManifest(
         nodeId: string,

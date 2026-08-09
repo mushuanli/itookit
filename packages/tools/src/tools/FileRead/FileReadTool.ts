@@ -69,25 +69,11 @@ export const FileReadTool = buildTool({
 
     let content: string;
 
-    // ── VFS path (browser) ──
-    if (context.vfs) {
-      try {
-        content = await context.vfs.readFile(input.file_path);
-      } catch (err: unknown) {
-        throw new Error(`Error reading file from VFS: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    } else {
-      // ── Node.js path ──
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fs = await import('node:fs/promises' as any);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const nodePath = await import('node:path' as any);
-      const absPath = nodePath.resolve(context.cwd, input.file_path);
-      try {
-        content = await fs.readFile(absPath, 'utf-8');
-      } catch (err: unknown) {
-        throw new Error(`Error reading file: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    if (!context.vfs) throw new Error('FileRead requires an application-provided VFS port');
+    try {
+      content = await context.vfs.readFile(input.file_path);
+    } catch (err: unknown) {
+      throw new Error(`Error reading file: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     const lines = content.split('\n');

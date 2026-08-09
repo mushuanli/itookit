@@ -32,8 +32,10 @@ import type {
     IAssetOperations,
     ITagOperations,
     ISeqFileOperations,
+    ISeqFileTransaction,
     IRefOperations,
     IRecordStore,
+    IRecordTransaction,
     SeqFileEntry,
     RecordQuery,
     RecordQueryOptions,
@@ -122,6 +124,71 @@ function stringifyRecordValue(value: RecordValue): string {
 const SEQ_FIELD_PREFIX = '__vfs_seq__:';
 const seqField = (key: string): string => `${SEQ_FIELD_PREFIX}${key}`;
 const seqKey = (field: string): string => field.slice(SEQ_FIELD_PREFIX.length);
+const SEQ_COUNTER_PREFIX = '__vfs_seq_counter__:';
+
+class InlineSeqTransaction implements ISeqFileTransaction {
+    constructor(
+        private readonly fs: ModuleFS,
+        private readonly records: IRecordTransaction,
+    ) {}
+
+    private path(path: string): string { return this.fs._toRealPath(path); }
+
+    async getEntry(path: string, key: string): Promise<string | null> {
+        const value = await this.records.getRecordField(this.path(path), seqField(key));
+        return value === undefined ? null : stringifyRecordValue(value);
+    }
+
+    async setEntry(path: string, key: string, value: string): Promise<void> {
+        await this.records.setRecordField(this.path(path), seqField(key), value);
+    }
+
+    async deleteEntry(path: string, key: string): Promise<void> {
+        await this.records.deleteRecordField(this.path(path), seqField(key));
+    }
+
+    async compareAndSet(
+        path: string,
+        key: string,
+        options: { expected: string | null; value: string | null },
+    ): Promise<boolean> {
+        const current = await this.getEntry(path, key);
+        if (current !== options.expected) return false;
+        if (options.value === null) await this.deleteEntry(path, key);
+        else await this.setEntry(path, key, options.value);
+        return true;
+    }
+
+    async increment(path: string, key: string, delta = 1): Promise<number> {
+        const current = Number(await this.getEntry(path, key) ?? '0');
+        if (!Number.isSafeInteger(current) || !Number.isSafeInteger(delta)) {
+            throw new FSError('EINVAL', 'SeqFile counter must be a safe integer', 'increment', key);
+        }
+        const next = current + delta;
+        if (!Number.isSafeInteger(next)) throw new FSError('EINVAL', 'SeqFile counter overflow', 'increment', key);
+        await this.setEntry(path, key, String(next));
+        return next;
+    }
+
+    async append(path: string, prefix: string, value: string): Promise<string> {
+        const sequence = await this.increment(path, `${SEQ_COUNTER_PREFIX}${prefix}`);
+        const key = `${prefix}${String(sequence).padStart(16, '0')}`;
+        await this.setEntry(path, key, value);
+        return key;
+    }
+
+    async walkEntries(
+        path: string,
+        callback: (entry: SeqFileEntry) => boolean | Promise<boolean>,
+        options?: { keyPrefix?: string; limit?: number; offset?: number },
+    ): Promise<{ total: number; processed: number }> {
+        return this.records.walkRecordFields(
+            this.path(path),
+            (key, value) => callback({ key: seqKey(key), value: stringifyRecordValue(value) }),
+            { prefix: seqField(options?.keyPrefix ?? ''), limit: options?.limit, offset: options?.offset },
+        );
+    }
+}
 
 class InlineSeqFileOps implements ISeqFileOperations {
     constructor(
@@ -148,10 +215,12 @@ class InlineSeqFileOps implements ISeqFileOperations {
     }
 
     async setEntries(path: string, entries: Record<string, string>): Promise<void> {
-        const realPath = await this.path(path);
-        await Promise.all(Object.entries(entries).map(
-            ([key, value]) => this.records.setRecordField(realPath, seqField(key), value),
-        ));
+        if (!this.records.transaction) {
+            throw new FSCapabilityError('transactionalSeqFiles', this.fs.moduleId);
+        }
+        await this.transaction(async tx => {
+            for (const [key, value] of Object.entries(entries)) await tx.setEntry(path, key, value);
+        });
     }
 
     async deleteEntry(path: string, key: string): Promise<void> {
@@ -200,6 +269,13 @@ class InlineSeqFileOps implements ISeqFileOperations {
 
     async deleteIndex(path: string, field: string): Promise<void> {
         await this.records.deleteRecordIndex(await this.path(path), seqField(field));
+    }
+
+    async transaction<T>(operation: (tx: ISeqFileTransaction) => Promise<T>): Promise<T> {
+        if (!this.records.transaction) {
+            throw new FSCapabilityError('transactionalSeqFiles', this.fs.moduleId);
+        }
+        return this.records.transaction(records => operation(new InlineSeqTransaction(this.fs, records)));
     }
 }
 
@@ -387,7 +463,9 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.capabilities = Object.freeze({
             readonly: false, search: true, semanticSearch: false, syncable: false,
             assets: true, tags: true, deviceFiles: true,
-            seqFiles: !!backend.records, references: !!backend.records,
+            seqFiles: !!backend.records,
+            transactionalSeqFiles: !!backend.records?.transaction,
+            references: !!backend.records,
             symlinks: !!backend.symlink, hardlinks: false,
             partialRead: true, partialWrite: true, treeWalk: true,
             streaming: false, watch: false, mount: false,
@@ -485,6 +563,9 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         }
         throw new FSError('EINVAL', 'path-based engine requires paths, not IDs', 'resolve', path);
     }
+
+    /** @internal Convert a module-relative path without performing I/O. */
+    _toRealPath(path: string): string { return this.toRealPath(path); }
 
     /** Stat + return { node, realPath }. Throws if not found. @internal — exposed for InlineAssetOps */
     async resolveNode(path: string): Promise<{ node: FSNode; realPath: string }> {

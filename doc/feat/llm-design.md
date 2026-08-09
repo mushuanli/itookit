@@ -1,6 +1,6 @@
 # LLM 子系统设计 — 五包架构、接口、事件流
 
-> 分析范围: `packages/device-llm`, `packages/llm-kernel`, `packages/llm-harness`, `packages/llm-engine`, `packages/llm-ui`
+> 分析范围: `packages/device-llm`, `packages/llm-kernel`, `packages/llm-harness`, `packages/llm-runtime`, `packages/llm-ui`
 > 审查日期: 2026-07-12 | 最后更新: 2026-07-13 (实施 P0/P1a/P1b/P2a/P2b/P3 改进) | 分支: v4.1
 
 ---
@@ -16,7 +16,7 @@
   - [3.1 device-llm — LLM 通信层](#31-device-llm--llm-通信层)
   - [3.2 llm-kernel — 执行引擎核心层](#32-llm-kernel--执行引擎核心层)
   - [3.3 llm-harness — 多轮 Agent 循环执行器](#33-llm-harness--多轮-agent-循环执行器)
-  - [3.4 llm-engine — 会话引擎](#34-llm-engine--会话引擎)
+  - [3.4 llm-runtime — 会话引擎](#34-llm-runtime--会话引擎)
   - [3.5 llm-ui — Chat UI 层](#35-llm-ui--chat-ui-层)
 - [4. 接口契约全景](#4-接口契约全景)
 - [5. 事件流分析](#5-事件流分析)
@@ -32,7 +32,7 @@
 ┌──────────────────────────────────────────────────────────────┐
 │  llm-ui            Chat UI — 输入/历史/设置/右键菜单           │
 ├──────────────────────────────────────────────────────────────┤
-│  llm-engine        会话引擎 — 多会话/SessionGraph/Mission      │
+│  llm-runtime        会话引擎 — 多会话/SessionGraph/Mission      │
 │  llm-harness       Agent 循环 — 工具/Budget/HITL/Skill        │
 ├──────────────────────────────────────────────────────────────┤
 │  llm-kernel        执行引擎 — Executor/Orchestrator/Runtime    │
@@ -47,13 +47,13 @@
 | **device-llm** | LLM API 通信 + VFS 设备驱动 | `LLMDriver`, `LLMDeviceDriver`, `CostStore`, `MCPClient` | ✓ |
 | **llm-kernel** | 通用执行引擎运行时 | `ExecutionRuntime`, Executor/Orchestrator 注册表, `StateMachine`, `MemoryStore` | ✓ |
 | **llm-harness** | 多轮 Agent 循环 + 工具编排 | `AgentLoopExecutor` (`IAgentRuntime`), HITL, Budget, Skill 路由 | ✓ |
-| **llm-engine** | 会话管理 + 持久化 + Mission | `SessionManager`, `TaskRunner`, Agent Loop 策略, `SessionEventBus` | ✓ |
+| **llm-runtime** | 会话管理 + 持久化 + Mission | `SessionManager`, `TaskRunner`, Agent Loop 策略, `SessionEventBus` | ✓ |
 | **llm-ui** | Chat 交互界面 | `LLMWorkspaceEditor`, `ChatInputView`, `HistoryView`, 5 种 Settings 编辑器 | ✗ |
 
 ### 关系矩阵
 
 ```
-llm-ui ──依赖──▶ llm-engine ──依赖──▶ llm-kernel
+llm-ui ──依赖──▶ llm-runtime ──依赖──▶ llm-kernel
     │                 │
     │                 ▼
     │            llm-harness ──依赖──▶ device-llm
@@ -72,7 +72,7 @@ graph TB
     subgraph Boundary["LLM 子系统"]
         direction TB
         UI["📱 Chat UI<br/>llm-ui"]
-        Engine["⚙️ 会话引擎<br/>llm-engine"]
+        Engine["⚙️ 会话引擎<br/>llm-runtime"]
         Harness["🔄 Agent 循环<br/>llm-harness"]
         Kernel["🧠 执行内核<br/>llm-kernel"]
         Device["🔌 LLM 通信<br/>device-llm"]
@@ -110,7 +110,7 @@ graph TB
 ├─────────────────────────────────────────────────────────┤
 │  业务层                                                  │
 │  ┌─────────────────┐  ┌──────────────────────────────┐  │
-│  │ llm-engine       │  │ llm-harness                   │  │
+│  │ llm-runtime       │  │ llm-harness                   │  │
 │  │ SessionManager   │  │ AgentLoopExecutor             │  │
 │  │ TaskRunner       │  │ BudgetController              │  │
 │  │ ClaudeCodeStrat  │  │ ContextManager                │  │
@@ -146,7 +146,7 @@ graph LR
 
     subgraph Business_Layer["<b>业务层</b>"]
         style Business_Layer fill:#fff3e0,stroke:#f57c00
-        llmengine["<b>llm-engine</b><br/>SessionManager<br/>TaskRunner<br/>ClaudeCodeStrategy<br/>SessionEventBus<br/>MissionService<br/>ChatEngine"]
+        llmengine["<b>llm-runtime</b><br/>SessionManager<br/>TaskRunner<br/>ClaudeCodeStrategy<br/>SessionEventBus<br/>MissionService<br/>ChatEngine"]
         llmharness["<b>llm-harness</b><br/>AgentLoopExecutor<br/>BudgetController<br/>ContextManager<br/>ErrorRecoveryService<br/>SubAgentRouter<br/>HITLQueue"]
     end
 
@@ -224,7 +224,7 @@ graph TB
         ContextMenu["AIContextMenu"]
     end
 
-    subgraph S_Engine["<b>llm-engine</b> — 会话引擎"]
+    subgraph S_Engine["<b>llm-runtime</b> — 会话引擎"]
         style S_Engine fill:#fff3e0,stroke:#f57c00
         SessMgr["SessionManager<br/><i>门面 · 30+ API</i>"]
         TaskRunner2["TaskRunner<br/><i>队列 · maxConcurrent=8</i>"]
@@ -618,7 +618,7 @@ flowchart TB
 
 ---
 
-### 3.4 llm-engine — 会话引擎
+### 3.4 llm-runtime — 会话引擎
 
 **文件结构：** 11 个目录，39 个源文件
 
@@ -806,7 +806,7 @@ MissionService.createAndRun(goal, context)
 | 实现 | 包 | 依赖 | 使用场景 |
 |---|---|---|---|
 | `SubAgentRouter` | llm-harness | `ILLMService` + `IToolService` + harness | 完整 harness 环境 |
-| `LiteSubAgentRouter` | llm-engine | `LLMKernelAdapter` + `IToolExecutor` (可选) | 无 harness 环境 / Mission 自动创建 |
+| `LiteSubAgentRouter` | llm-runtime | `LLMKernelAdapter` + `IToolExecutor` (可选) | 无 harness 环境 / Mission 自动创建 |
 
 `MissionServiceOptions.router` 现为可选字段——未提供时自动创建 `LiteSubAgentRouter`：
 
@@ -983,7 +983,7 @@ flowchart LR
         KBus["EventBus&#60;KernelEventMap&#62;<br/><i>15 种事件<br/>channel(executionId)</i>"]
     end
 
-    subgraph Engine["llm-engine"]
+    subgraph Engine["llm-runtime"]
         SessionBus["<b>SessionEventBus</b>"]
         SBus["Session 轨<br/>EventBus&#60;OrchestratorEvent&#62;<br/><i>29 种事件 · channel(sessionId)</i>"]
         GBus["Global 轨<br/>EventBus&#60;RegistryEvent&#62;<br/><i>9 种事件 · 全局广播</i>"]
@@ -1086,7 +1086,7 @@ SessionEventHandler.handleGlobalEvent(event)
 |---|---|---|---|
 | llm-kernel | `KernelEventMap` | 15 | channel(id) 隔离 |
 | llm-harness | `AgentEventType` | 25 | `IAgentRuntime.on()` (观察者) + `onIntercept()` (可拦截) |
-| llm-engine | `OrchestratorEvent` + `RegistryEvent` | 29 + 9 | 双轨 (session channel + global broadcast) |
+| llm-runtime | `OrchestratorEvent` + `RegistryEvent` | 29 + 9 | 双轨 (session channel + global broadcast) |
 | llm-ui | `EditorBusEvents` | 13 | 实例级 |
 
 ---
@@ -1136,7 +1136,7 @@ sequenceDiagram
         participant History as HistoryView
         participant SessHandler as SessionEventHandler
     end
-    box rgb(255, 243, 224) llm-engine
+    box rgb(255, 243, 224) llm-runtime
         participant SessMgr as SessionManager
         participant TaskRunner as TaskRunner
         participant CCode as UnifiedLoopStrategy

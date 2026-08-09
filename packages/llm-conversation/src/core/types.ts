@@ -499,7 +499,7 @@ export type SessionStructuralEvent =
  * Unified session event vocabulary.
  *
  * Consumers should handle all three layers:
- *   - Canonical AgentEvent (from ProcessProgram instances)
+ *   - Canonical AgentEvent (from DurableTaskProgram instances)
  *   - MessageProjectionEvent (engine-level tree projection)
  *   - SessionStructuralEvent (branch / message lifecycle)
  */
@@ -518,8 +518,8 @@ export type RegistryEvent =
     | { type: 'session_unread_updated'; payload: { sessionId: string; count: number } }
     | { type: 'background_task_completed'; payload: { sessionId: string } }
     | {
-        type: 'execution_run_projected';
-        payload: { sessionId: string; runId: string; roundId: string };
+        type: 'execution_task_projected';
+        payload: { sessionId: string; taskId: string; roundId: string };
     }
     /**
      * 后台会话打开了 TTY 交互进程。

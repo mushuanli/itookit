@@ -79,11 +79,11 @@ Five strategies: `StandardWorkspaceStrategy` (MDxEditor + `IModuleFS`), `ChatWor
 ```
 device-llm  →  LLMConnection / streaming / MCP / multi-provider / Skill storage
 llm-harness →  HarnessLoopExecutor (ILoop) + HarnessAgentTaskExecutor (TaskExecutor) + built-in tools + TTY device + Skill/Tool drivers
-llm-engine  →  SessionManager, ChatEngine (VFS persistence), TaskGraph reconciler, ILoop executors, Plugin system
+llm-runtime  →  SessionManager, ChatEngine (VFS persistence), TaskGraph reconciler, ILoop executors, Plugin system
 llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor, TaskGraphWorkbench
 ```
 
-`initializeLLMEngine(options)` in `packages/llm-engine/src/index.ts` wires `VFSAgentService`, `ChatEngine`, `PromptHistoryService`, ExecutorRegistry, TaskGraph stores + reconciler + CommandBus, plugins, and returns `{ sessionManager, commandBus, taskGraph }`.
+`initializeLLMEngine(options)` in `packages/llm-runtime/src/index.ts` wires `VFSAgentService`, `ChatEngine`, `PromptHistoryService`, ExecutorRegistry, TaskGraph stores + reconciler + CommandBus, plugins, and returns `{ sessionManager, commandBus, taskGraph }`.
 
 ### App-Shell Bootstrap Sequence
 
@@ -105,7 +105,7 @@ llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor, 
 - **AgentLoopExecutor** — `while(true)` loop: budget check → context compress → LLM call → tool execution → back-pressure
 - **Four-layer context compression** (HISTORY_SNIP / CACHE_PRUNE / LLM_SUMMARIZE / SLIDING_WINDOW)
 - **Five-category error recovery** (rate-limit / context-too-large / overload / truncation / tool-error)
-- **Built-in tools**: 通用工具 (`file_read`, `file_write`, `shell_exec`, `glob_search`, `grep_search` 等) 来自 `@itookit/tools`；harness 专属工具 (`load_skill`, `delegate_task`) 仍在 `llm-harness/src/tools/`
+- **Built-in tools**: 通用工具来自 `@itookit/tools`；需要运行时服务的 Harness 能力位于 `@itookit/coreutils`
 - **TTY tools** (when `NodeTTYDriver` is injected): `shell_session`, `tty_write`, `tty_close`
 
 **Agent loop enhancements (Q1/Q2/Q3):**
@@ -265,7 +265,7 @@ createHarness({ llmDriver })           // TTY tools not registered; graceful deg
 
 ### Mission Orchestration System
 
-`packages/llm-engine/src/mission/` — multi-agent task decomposition, scheduling, and verification.
+`packages/llm-runtime/src/mission/` — multi-agent task decomposition, scheduling, and verification.
 
 **Design principle:** LLM handles intent (plan/execute/verify); deterministic `MissionTaskGraphRunner` handles dispatch via TaskGraph.
 
@@ -297,7 +297,7 @@ MissionService.createMission(goal)
 
 ### Session Dependency Graph
 
-`packages/llm-engine/src/session-graph/` — file-based cross-session dependency execution.
+`packages/llm-runtime/src/session-graph/` — file-based cross-session dependency execution.
 
 Each VFS file is a "session" whose content is the agent task prompt. Dependencies are declared in `_filename/session-meta.json`. `SessionTaskGraphRunner` projects the dependency tree into a TaskGraphRun, executed by `TaskGraphReconciler`.
 
@@ -471,7 +471,7 @@ Harness 内部的旧事件（`agent:task:start`、`agent:llm:start`、`agent:bud
 
 ### SessionActor — 事件桥接
 
-`SessionActor`（`llm-engine/src/core/session-actor.ts`）将 ILoop 协程产出的 canonical `AgentEvent` 桥接至 `SessionEventBus`：
+`SessionActor`（`llm-runtime/src/core/session-actor.ts`）将 ILoop 协程产出的 canonical `AgentEvent` 桥接至 `SessionEventBus`：
 
 | ILoop yield | SessionEvent / UI 效果 |
 |---|---|
@@ -495,10 +495,10 @@ Harness 内部的旧事件（`agent:task:start`、`agent:llm:start`、`agent:bud
 1. 在 `packages/tools/src/tools/MyTool/` 下创建 `prompt.ts` + `MyToolTool.ts`
 2. 使用 `buildTool(def)` 实现，在 `packages/tools/src/index.ts` 的 `BUILTIN_TOOLS` 注册
 
-Harness 专属工具（需 `ISkillService` / `ISubAgentRouter` 等运行时引用）→ 留在 `llm-harness`：
+Harness 能力工具（需 `ISkillService` 等运行时引用）→ 放在 `coreutils`：
 
 ```typescript
-// packages/llm-harness/src/tools/my-tool.ts
+// packages/coreutils/src/tool/my-tool.ts
 export const myToolMeta: ToolMeta = {
     id: 'my_tool',
     sideEffect: 'local',
@@ -530,10 +530,10 @@ export const myToolHandler: ToolHandler = async (args, ctx) => {
 
 #### 扩展 Agent Loop
 
-- 新 ILoop executor：实现 `ILoop` 接口，通过 `ExecutorRegistry.register()` 注册。详见 `packages/llm-engine/CLAUDE.md`
-- 新 ILoopMiddleware：实现 `ILoopMiddleware` 接口（`beforeExchange`/`afterExchange`/`onToolCalls`/`onError`），通过 `createLoopExecutor(preset, config, harness)` 注入。详见 `packages/llm-engine/src/core/middleware-pipeline.ts`
-- 新 TaskGraph TaskKind：实现 `TaskExecutor` 接口，注册到 `HarnessContributionRegistry`。内置 7 种（agent/route/transform/reduce/human/spawn/subflow），详见 `packages/llm-engine/src/task-graph/builtins.ts`
-- 新 Plugin：实现 `ILLMPlugin`，通过 `ExtensionRegistry.register()` 注册。内置 3 个（session/vcs/history），详见 `packages/llm-engine/src/plugins/`
+- 新 ILoop executor：实现 `ILoop` 接口，通过 `ExecutorRegistry.register()` 注册。详见 `packages/llm-runtime/CLAUDE.md`
+- 新 ILoopMiddleware：实现 `ILoopMiddleware` 接口（`beforeExchange`/`afterExchange`/`onToolCalls`/`onError`），通过 `createLoopExecutor(preset, config, harness)` 注入。详见 `packages/llm-runtime/src/core/middleware-pipeline.ts`
+- 新 TaskGraph TaskKind：实现 `TaskExecutor` 接口，注册到 `HarnessContributionRegistry`。内置 7 种（agent/route/transform/reduce/human/spawn/subflow），详见 `packages/llm-runtime/src/task-graph/builtins.ts`
+- 新 Plugin：实现 `ILLMPlugin`，通过 `ExtensionRegistry.register()` 注册。内置 3 个（session/vcs/history），详见 `packages/llm-runtime/src/plugins/`
 - 新 back-pressure 规则：`agentDriver.setLoopConfig({ backPressureRules: [...existing, newRule] })`
 - Mid-run 注入：`runtime.inject(message)` — 下次循环迭代开始时作为 `role:'user'` 消息插入
 

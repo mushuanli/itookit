@@ -33,7 +33,7 @@ System_Boundary(itookit, "itookit 系统 (packages/)") {
   ' === 业务层 ===
   Container_Boundary(business_layer, "业务层") {
     Container(llm_harness, "@itookit/llm-harness", "Agent 循环框架", "多轮 agent 循环、上下文压缩、HITL")
-    Container(llm_engine, "@itookit/llm-engine", "会话引擎", "Session 管理、VFS 持久化、Mission/SessionGraph 编排\n共享调度核心(scheduler/)")
+    Container(llm_engine, "@itookit/llm-runtime", "会话引擎", "Session 管理、VFS 持久化、Mission/SessionGraph 编排\n共享调度核心(scheduler/)")
     Container(app_settings, "@itookit/app-settings", "设置模块", "设置编辑器、系统 FS 浏览、技能引擎\n(LLMUIEditors 注入 → 无 llm-ui 上行依赖)")
   }
 

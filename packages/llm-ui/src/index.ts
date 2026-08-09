@@ -8,7 +8,8 @@ import {
     IChatEngine,
 } from '@itookit/llm-conversation';
 import { EditorFactory, EditorOptions, IEditor, formatDefaultFileTitle } from '@itookit/common';
-import type { ILLMService, ICommandBus, HarnessControlPlane } from '@itookit/common';
+import type { ILLMService, ICommandBus } from '@itookit/common';
+import type { Harness } from '@itookit/harness';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
@@ -64,7 +65,7 @@ export const createLLMFactory = (
         chatEngine: IChatEngine;
         llmService?: ILLMService;
         commandBus?: ICommandBus;
-        controlPlane?: HarnessControlPlane;
+        harness?: Harness;
     },
 ): EditorFactory => {
 
@@ -105,7 +106,7 @@ export const createLLMFactory = (
             isNewSession,
             llmService: deps.llmService,
             commandBus: deps.commandBus,
-            controlPlane: deps.controlPlane,
+            harness: deps.harness,
         };
 
         // ✅ 将创建过程包装为 Promise，注册到 pendingCreations

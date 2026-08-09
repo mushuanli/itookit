@@ -5,7 +5,7 @@ LAYOUT_WITH_LEGEND()
 
 title C3 - LLM 子系统组件图 (v4.1 优化后)
 
-Container_Boundary(llm, "LLM 子系统 (device-llm + llm-kernel + llm-harness + llm-engine)") {
+Container_Boundary(llm, "LLM 子系统 (device-llm + llm-kernel + llm-harness + llm-runtime)") {
 
   ' ======== device-llm ========
   Container_Boundary(device_layer, "device-llm — LLM 设备驱动") {
@@ -56,8 +56,8 @@ Container_Boundary(llm, "LLM 子系统 (device-llm + llm-kernel + llm-harness + 
     Rel(harness_tools, tty_tools, "TTY 工具注册", "setTTYDriver()")
   }
 
-  ' ======== llm-engine ========
-  Container_Boundary(engine_layer, "llm-engine — 会话引擎") {
+  ' ======== llm-runtime ========
+  Container_Boundary(engine_layer, "llm-runtime — 会话引擎") {
     Component(session_mgr, "SessionManager", "session/", "会话生命周期管理")
     Component(task_runner, "TaskRunner", "session/", "双路径执行（Kernel/Harness）")
     Component(agent_resolver, "AgentResolver", "session/", "Agent 配置解析")

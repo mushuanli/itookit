@@ -59,9 +59,16 @@ export type {
 export { VFSAgentService } from './services/vfs-agent-service';
 
 export { chatFileParser } from './utils/parsers';
+export {
+    CHAT_HARNESS_STORAGE_KIND,
+    ChatHarnessStorageResolver,
+    chatHarnessStorage,
+} from './persistence/chat-harness-storage';
+export { DurableConversationProjection } from './persistence/durable-conversation-projection';
 export { formatErrorMessage } from './utils/error-formatter';
-import type { DagPluginCatalog, ProcessHost } from '@itookit/common';
-import { AgentProgram, ChatProgram } from '@itookit/llm-engine';
+import type { DagPluginCatalog, ToolDefinition } from '@itookit/common';
+import type { Harness } from '@itookit/harness';
+import { DurableAgentProgram, DurableChatProgram } from '@itookit/llm-runtime';
 import type { IAgentConfigService } from './services/agent-service';
 import type { IChatEngine } from './persistence/types';
 import { SessionManager, createSessionManager } from './session/session-manager';
@@ -73,11 +80,16 @@ import { createVcsPlugin } from './plugins/vcs-plugin';
 import { createHistoryPlugin } from './plugins/history-plugin';
 import { FlowDefinitionStore } from './persistence/flow-definition-store';
 import { DagCommandService } from './flow/commands';
+import { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from './flow/programs';
 
 export interface ConversationSystemOptions {
     agentService: IAgentConfigService;
     sessionEngine: IChatEngine;
-    processHost: ProcessHost;
+    harness: Harness;
+    resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
+        definitions: ToolDefinition[];
+        externalIds: string[];
+    }>;
     dagPlugins: DagPluginCatalog;
 }
 
@@ -91,11 +103,11 @@ export async function initializeConversationSystem(
     options: ConversationSystemOptions,
 ): Promise<ConversationSystem> {
     await initializeServices(options);
-    registerPrograms(options.processHost);
+    registerPrograms(options.harness);
     const sessionManager = createSessionManager(
         options.sessionEngine,
         options.agentService,
-        { processHost: options.processHost },
+        { harness: options.harness, dagPlugins: options.dagPlugins, resolveTools: options.resolveTools },
     );
     return createControlPlane(options, sessionManager);
 }
@@ -108,13 +120,12 @@ async function initializeServices(options: ConversationSystemOptions): Promise<v
     });
 }
 
-function registerPrograms(processHost: ProcessHost): void {
-    if (!processHost.hasProgram('llm.chat')) {
-        processHost.registerProgram(new ChatProgram());
-    }
-    if (!processHost.hasProgram('llm.agent')) {
-        processHost.registerProgram(new AgentProgram());
-    }
+function registerPrograms(harness: Harness): void {
+    if (!harness.programs.has('llm.chat', '1')) harness.registerProgram(new DurableChatProgram());
+    if (!harness.programs.has('llm.agent', '1')) harness.registerProgram(new DurableAgentProgram());
+    if (!harness.programs.has('flow.value', '1')) harness.registerProgram(new FlowValueProgram());
+    if (!harness.programs.has('flow.human', '1')) harness.registerProgram(new FlowHumanProgram());
+    if (!harness.programs.has('flow.aggregate', '1')) harness.registerProgram(new FlowAggregateProgram());
 }
 
 function createControlPlane(
@@ -138,8 +149,9 @@ function createDagCommands(
     );
     const dag = new DagCommandService({
         flowStore,
-        controlPlane: options.processHost,
+        harness: options.harness,
         plugins: options.dagPlugins,
+        resolveTools: options.resolveTools,
     });
     dag.register(commandBus);
     return dag;

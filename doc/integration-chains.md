@@ -23,7 +23,7 @@ vfs-ui (VFSUIShell)
 ```
 用户输入 (ChatInput.send)
   → SendMessageCommand
-    → llm-engine SessionManager.sendMessage()
+    → llm-runtime SessionManager.sendMessage()
       → TaskRunner.submit() → processQueue()
         → 编译为单节点 AgentTask Flow → TaskGraphReconciler.run()
           → AgentTaskExecutor → executeV3Agent()
@@ -36,10 +36,10 @@ vfs-ui (VFSUIShell)
 |---|---|---|
 | 输入 | `ChatInput.triggerSend()` | `llm-ui/src/components/input/ChatInputView.ts` |
 | 路由 | `SlashCommandRouter` / `SendMessageCommand` | `llm-ui/src/shell/`, `commands/` |
-| 会话 | `SessionManager.sendMessage()` | `llm-engine/src/session/session-manager.ts` |
-| 任务 | `TaskRunner.submit()` → `processQueue()` → `executeV3ChatTask()` | `llm-engine/src/session/task-runner.ts` |
-| 调度 | `TaskGraphReconciler.run()` → `AgentTaskExecutor` | `llm-engine/src/task-graph/reconciler.ts` |
-| 执行 | `ExecutorRegistry.get(mode).run(ctx)` | `llm-engine/src/core/executor-registry.ts` |
+| 会话 | `SessionManager.sendMessage()` | `llm-runtime/src/session/session-manager.ts` |
+| 任务 | `TaskRunner.submit()` → `processQueue()` → `executeV3ChatTask()` | `llm-runtime/src/session/task-runner.ts` |
+| 调度 | `TaskGraphReconciler.run()` → `AgentTaskExecutor` | `llm-runtime/src/task-graph/reconciler.ts` |
+| 执行 | `ExecutorRegistry.get(mode).run(ctx)` | `llm-runtime/src/core/executor-registry.ts` |
 | LLM | `ILLMService.chatStream()` → Provider (OpenAI/Anthropic/Gemini) | `device-llm/src/` |
 
 ## App 装配链
@@ -56,7 +56,7 @@ apps/web-app (entry)
 | 启动 | `app-shell/src/bootstrap.ts::initApp()` |
 | VFS | `stdio/src/factory.ts::createVFS()` |
 | Harness | `llm-harness/src/factory.ts::createHarness()` |
-| LLM引擎 | `llm-engine/src/index.ts::initializeLLMEngine()` |
+| LLM引擎 | `llm-runtime/src/index.ts::initializeLLMEngine()` |
 | 工作区 | `app-shell/src/strategies/` (5 种策略) |
 | 模块配置 | `apps/web-app/src/config/modules.ts` (WORKSPACES) |
 

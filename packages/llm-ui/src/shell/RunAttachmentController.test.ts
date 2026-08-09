@@ -1,41 +1,32 @@
 import { describe, expect, it, vi } from 'vitest';
-import type {
-    HarnessControlPlane,
-    RunEventEnvelope,
-    RunHandle,
-} from '@itookit/common';
-import { RunAttachmentController } from './RunAttachmentController';
+import type { EventEnvelope, TaskHandle } from '@itookit/harness';
+import { RunAttachmentController, type TaskControlPlane } from './RunAttachmentController';
 
 describe('RunAttachmentController', () => {
-    it('replays run events and exposes waiting conditions', async () => {
+    it('replays task events and exposes interaction requests', async () => {
         const events = [statusEvent(), waitingEvent()];
         const onEvent = vi.fn();
         const onWaiting = vi.fn();
         const controller = new RunAttachmentController(
-            controlPlane(handle('run-1', events)),
+            controlPlane(handle('task-1', events)),
             { onEvent, onWaiting },
         );
 
-        await controller.attach('run-1');
+        await controller.attach('task-1');
         await until(() => onEvent.mock.calls.length === events.length);
 
         expect(onEvent).toHaveBeenCalledTimes(2);
-        expect(onWaiting).toHaveBeenCalledWith(expect.objectContaining({
-            type: 'human-signal',
-            requestId: 'approval',
-        }));
+        expect(onWaiting).toHaveBeenCalledWith(expect.objectContaining({ id: 'approval' }));
     });
 
-    it('does not let a stale attach replace the current run', async () => {
-        const slow = deferred<RunHandle>();
-        const fast = deferred<RunHandle>();
-        const plane: HarnessControlPlane = {
-            submit: vi.fn(),
-            attach: runId => runId === 'slow' ? slow.promise : fast.promise,
+    it('does not let a stale attach replace the current task', async () => {
+        const slow = deferred<TaskHandle>();
+        const fast = deferred<TaskHandle>();
+        const plane: TaskControlPlane = {
+            openTask: taskId => taskId === 'slow' ? slow.promise : fast.promise,
         };
         const controller = new RunAttachmentController(plane, {
-            onEvent: vi.fn(),
-            onWaiting: vi.fn(),
+            onEvent: vi.fn(), onWaiting: vi.fn(),
         });
 
         const slowAttach = controller.attach('slow');
@@ -45,65 +36,37 @@ describe('RunAttachmentController', () => {
         slow.resolve(handle('slow'));
         await slowAttach;
 
-        expect(controller.activeRunId).toBe('fast');
+        expect(controller.activeTaskId).toBe('fast');
     });
 });
 
-function controlPlane(runHandle: RunHandle): HarnessControlPlane {
-    return {
-        submit: vi.fn(),
-        attach: vi.fn(async () => runHandle),
-    };
+function controlPlane(task: TaskHandle): TaskControlPlane {
+    return { openTask: vi.fn(async () => task) };
 }
 
-function handle(runId: string, events: RunEventEnvelope[] = []): RunHandle {
+function handle(id: string, events: EventEnvelope[] = []): TaskHandle {
     return {
-        runId,
+        id,
         events: () => stream(events),
-        signal: vi.fn(),
-        cancel: vi.fn(),
-        snapshot: vi.fn(),
+        signal: vi.fn(), start: vi.fn(), cancel: vi.fn(), status: vi.fn(), wait: vi.fn(), poll: vi.fn(),
+        respond: vi.fn(), createResource: vi.fn(), history: vi.fn(), attempts: vi.fn(),
     };
 }
 
-async function* stream(events: RunEventEnvelope[]): AsyncGenerator<RunEventEnvelope> {
+async function* stream(events: EventEnvelope[]): AsyncGenerator<EventEnvelope> {
     for (const event of events) yield event;
 }
 
-function statusEvent(): RunEventEnvelope {
-    return envelope(1, { type: 'run:status', status: 'running' });
-}
+function statusEvent(): EventEnvelope { return envelope(1, 'task.running'); }
 
-function waitingEvent(): RunEventEnvelope {
-    return envelope(2, {
-        type: 'process:checkpoint',
-        checkpoint: {
-            processId: 'process-1',
-            runId: 'run-1',
-            programKind: 'test',
-            state: {},
-            waitFor: {
-                type: 'human-signal',
-                requestId: 'approval',
-                prompt: 'Approve?',
-            },
-            sequence: 1,
-            createdAt: 1,
-        },
+function waitingEvent(): EventEnvelope {
+    return envelope(2, 'task.interaction.requested', {
+        id: 'approval', kind: 'approval', prompt: 'Approve?', payload: null,
     });
 }
 
-function envelope(
-    sequence: number,
-    event: RunEventEnvelope['event'],
-): RunEventEnvelope {
-    return {
-        sequence,
-        occurredAt: sequence,
-        runId: 'run-1',
-        processId: 'process-1',
-        event,
-    };
+function envelope(sequence: number, type: string, payload?: unknown): EventEnvelope {
+    return { sequence, occurredAt: sequence, sessionId: 'session-1', taskId: 'task-1', type, payload };
 }
 
 function deferred<T>() {
@@ -113,7 +76,5 @@ function deferred<T>() {
 }
 
 async function until(predicate: () => boolean): Promise<void> {
-    for (let attempt = 0; attempt < 10 && !predicate(); attempt++) {
-        await Promise.resolve();
-    }
+    for (let index = 0; index < 20 && !predicate(); index++) await new Promise(resolve => setTimeout(resolve, 0));
 }

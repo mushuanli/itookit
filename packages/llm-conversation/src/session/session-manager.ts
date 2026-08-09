@@ -18,12 +18,12 @@ import {
     SessionOrigin,
     HistoryPolicy,
 } from '../core/types';
-import type { SendIntent } from '@itookit/common';
+import type { DagPluginCatalog, SendIntent, ToolDefinition } from '@itookit/common';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
 import { CONVERSATION_DEFAULTS } from '../core/constants';
 import { IChatEngine, BranchTreeNode } from '../persistence/types';
 import type { IAgentConfigService } from '../services/agent-service';
-import type { ISession, Signal, AgentEvent, ProcessHost } from '@itookit/common';
+import type { ISession, Signal, AgentEvent } from '@itookit/common';
 import { SessionRunCoordinator } from './session-run-coordinator';
 import { AgentResolver, AgentInfo, ModelInfo } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
@@ -37,8 +37,11 @@ import { SessionRegistry } from './session-registry';
 import { RoundOperations } from './round-operations';
 import { BranchService } from './branch-service';
 import { ContextProfileStore } from '../persistence/context-profile-store';
-import { ContextAssembler } from '@itookit/llm-engine';
+import { ContextAssembler } from '@itookit/llm-runtime';
 import { RoundLog } from '../persistence/round-log';
+import type { Harness, SessionHandle } from '@itookit/harness';
+import { chatHarnessStorage } from '../persistence/chat-harness-storage';
+import { DurableConversationProjection, RUNTIME_KEY } from '../persistence/durable-conversation-projection';
 
 /**
  * 会话管理器 — llm-conversation 对外的唯一入口
@@ -52,27 +55,44 @@ export class SessionManager implements ISession {
     private branchService: BranchService;
     private runs: SessionRunCoordinator;
     private agentResolver: AgentResolver;
+    private readonly harness: Harness;
+    private readonly durableProjection: DurableConversationProjection;
+    private durableSession?: SessionHandle;
+    private durableProjectionUnsubscribe?: () => void;
 
     constructor(
         engine: IChatEngine,
         agentService: IAgentConfigService,
-        options?: {
-            processHost: ProcessHost;
+        options: {
+            harness: Harness;
+            dagPlugins: DagPluginCatalog;
+            resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
+                definitions: ToolDefinition[];
+                externalIds: string[];
+            }>;
         }
     ) {
         this.registry = new SessionRegistry(engine);
         this.agentResolver = new AgentResolver(agentService);
         const attachments = new AttachmentProcessor(engine);
 
-        if (!options?.processHost) throw new Error('SessionManager requires ProcessHost');
+        if (!options?.harness) throw new Error('SessionManager requires Harness');
+        this.harness = options.harness;
+        this.durableProjection = new DurableConversationProjection(engine);
         this.runs = new SessionRunCoordinator(
             engine,
             this.registry.eventBus,
             this.agentResolver,
             attachments,
             {
-                onStatusChange: (sid, status) => this.registry.updateStatus(sid, status),
-                onUnread: (sid) => this.registry.incrementUnread(sid),
+                onStatusChange: (sid, status) => {
+                    this.registry.updateStatus(sid, status);
+                    this.queueDurableProjectionForSession(sid);
+                },
+                onUnread: (sid) => {
+                    this.registry.incrementUnread(sid);
+                    this.queueDurableProjectionForSession(sid);
+                },
                 getBoundSessionId: () => this.registry.boundSessionId,
                 getSessionContext: (sid) => {
                     const state = this.registry.getSessionState(sid);
@@ -81,7 +101,9 @@ export class SessionManager implements ISession {
                     return { state, runtime };
                 },
             },
-            options.processHost,
+            options.harness,
+            options.dagPlugins,
+            options.resolveTools,
         );
 
         this.roundOps = new RoundOperations(this.registry, this.runs);
@@ -164,15 +186,58 @@ export class SessionManager implements ISession {
     // ================================================================
 
     async bindSession(nodeId: string, sessionId: string): Promise<SessionSnapshot> {
-        return this.registry.bindSession(nodeId, sessionId);
+        this.durableSession = await this.harness.createSession({
+            id: sessionId, storage: chatHarnessStorage(sessionId),
+        });
+        const snapshot = await this.registry.bindSession(nodeId, sessionId);
+        await this.bindDurableProjection(nodeId, sessionId);
+        return snapshot;
     }
 
     unbindSession(): void {
+        this.durableProjectionUnsubscribe?.();
+        this.durableProjectionUnsubscribe = undefined;
+        this.durableSession = undefined;
         this.registry.unbindSession();
     }
 
     updateBoundNodeId(newNodeId: string): void {
         this.registry.updateBoundNodeId(newNodeId);
+        this.queueDurableProjection(newNodeId);
+    }
+
+    private async bindDurableProjection(nodeId: string, sessionId: string): Promise<void> {
+        if (!this.durableProjection || !this.durableSession) return;
+        await this.restoreDurableRuntime(sessionId);
+        await this.durableProjection.sync(
+            this.durableSession, nodeId, this.registry.getSessionRuntime(sessionId),
+        );
+        this.durableProjectionUnsubscribe?.();
+        this.durableProjectionUnsubscribe = this.registry.eventBus.onSession(sessionId, () => {
+            this.queueDurableProjection(this.registry.getCurrentNodeId() ?? nodeId);
+        });
+    }
+
+    private queueDurableProjection(nodeId: string): void {
+        if (!this.durableProjection || !this.durableSession) return;
+        const runtime = this.registry.getSessionRuntime(this.durableSession.id);
+        this.durableProjection.sync(this.durableSession, nodeId, runtime).catch(error => {
+            log.warn('Durable conversation projection failed', { nodeId, error });
+        });
+    }
+
+    private queueDurableProjectionForSession(sessionId: string): void {
+        if (this.durableSession?.id !== sessionId) return;
+        const nodeId = this.registry.getSessionRuntime(sessionId)?.nodeId;
+        if (nodeId) this.queueDurableProjection(nodeId);
+    }
+
+    private async restoreDurableRuntime(sessionId: string): Promise<void> {
+        const entry = await this.durableSession?.getShared(RUNTIME_KEY);
+        const value = entry?.value;
+        if (!value || Array.isArray(value) || typeof value !== 'object') return;
+        const unreadCount = value.unreadCount;
+        if (typeof unreadCount === 'number') this.registry.restoreRuntimeMetadata(sessionId, { unreadCount });
     }
 
     // ================================================================
@@ -396,7 +461,7 @@ export class SessionManager implements ISession {
     }
 
     destroy(): void {
-        this.registry.unbindSession();
+        this.unbindSession();
 
         const runningTasks = this.registry.getAllSessions()
             .filter(r => r.status === 'running' || r.status === 'queued');
@@ -443,8 +508,13 @@ let sessionManagerInstance: SessionManager | null = null;
 export function createSessionManager(
     engine: IChatEngine,
     agentService: IAgentConfigService,
-    options?: {
-        processHost: ProcessHost;
+    options: {
+        harness: Harness;
+        dagPlugins: DagPluginCatalog;
+        resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
+            definitions: ToolDefinition[];
+            externalIds: string[];
+        }>;
     }
 ): SessionManager {
     if (sessionManagerInstance) {

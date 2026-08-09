@@ -79,7 +79,8 @@ export class IDBRecordStore implements IRecordStore {
             cursor as IDBRequest<IDBCursorWithValue | null>,
             c => c.value as RecordRow,
         );
-        const pathRows = hasPathIndex ? rows : rows.filter(row => row.path === path);
+        const pathRows = (hasPathIndex ? rows : rows.filter(row => row.path === path))
+            .sort((left, right) => left.field.localeCompare(right.field));
         const prefix = options?.prefix;
         const filtered = prefix
             ? pathRows.filter(row => row.field.startsWith(prefix))

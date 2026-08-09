@@ -109,11 +109,8 @@ function fileContentToArrayBuffer(content: FileContent): ArrayBuffer {
 
 function fileContentToString(content: FileContent): string {
     if (typeof content === 'string') return content;
-    const buffer =
-        content instanceof Uint8Array
-            ? content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength)
-            : content;
-    return new TextDecoder().decode(buffer);
+    const bytes = content instanceof Uint8Array ? content : new Uint8Array(content);
+    return new TextDecoder().decode(bytes);
 }
 
 // ── Serialize ──────────────────────────────────────────────────

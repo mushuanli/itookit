@@ -139,7 +139,7 @@ interface RoundManifest {
 当前 `ChatEngineLog` 适配 ChatEngine。改造后直接操作 Round 文件，不再经过 ChatEngine 的 ChatNode 层：
 
 ```typescript
-// llm-engine/src/persistence/round-log.ts — 新文件
+// llm-runtime/src/persistence/round-log.ts — 新文件
 
 export class RoundLog implements ILog {
     constructor(
@@ -437,13 +437,13 @@ function migrateSession(oldManifest):
 | 组件 | 改动 |
 |---|---|
 | `common/src/interfaces/agent/loop.ts` | Round 接口不变；新增 `RoundPersisted`（仅持久化用） |
-| `llm-engine/src/persistence/round-log.ts` | **新文件**：RoundLog 实现 ILog |
-| `llm-engine/src/persistence/chat-engine-log.ts` | 保留为遗留适配器（旧 session 读取），标记 `@deprecated` |
-| `llm-engine/src/session/session-state.ts` | `SessionGroup[]` → `RoundProjection[]`；删除 position-based 查找方法 |
-| `llm-engine/src/session/session-manager.ts` | `deleteMessage`/`commitEdit`/`collectDeletableIds` 使用 roundId 关联 |
-| `llm-engine/src/session/task-runner.ts` | `createUserMessage`/`createAssistantNode` → 操作 Round |
-| `llm-engine/src/core/types.ts` | 新增 `RoundProjection`；废弃 `SessionGroup`、`HistoryMessage` |
-| `llm-engine/src/index.ts` | 导出 RoundLog |
+| `llm-runtime/src/persistence/round-log.ts` | **新文件**：RoundLog 实现 ILog |
+| `llm-runtime/src/persistence/chat-engine-log.ts` | 保留为遗留适配器（旧 session 读取），标记 `@deprecated` |
+| `llm-runtime/src/session/session-state.ts` | `SessionGroup[]` → `RoundProjection[]`；删除 position-based 查找方法 |
+| `llm-runtime/src/session/session-manager.ts` | `deleteMessage`/`commitEdit`/`collectDeletableIds` 使用 roundId 关联 |
+| `llm-runtime/src/session/task-runner.ts` | `createUserMessage`/`createAssistantNode` → 操作 Round |
+| `llm-runtime/src/core/types.ts` | 新增 `RoundProjection`；废弃 `SessionGroup`、`HistoryMessage` |
+| `llm-runtime/src/index.ts` | 导出 RoundLog |
 
 ---
 

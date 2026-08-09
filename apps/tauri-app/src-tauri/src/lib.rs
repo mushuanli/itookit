@@ -1,4 +1,11 @@
+use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_fs::FsExt;
 
@@ -34,6 +41,9 @@ struct AppPaths {
     root_dir: PathBuf,
     home_dir: PathBuf,
 }
+
+#[derive(Default)]
+struct ShellProcesses(Mutex<HashMap<String, u32>>);
 
 fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
     let base_dir = std::env::var("MINDOS_ROOT")
@@ -365,21 +375,70 @@ fn search_fd(
 fn shell_exec(
     command: String,
     cwd:     String,
+    timeout_ms: Option<u64>,
+    request_id: String,
     state:   State<AppPaths>,
+    processes: State<ShellProcesses>,
 ) -> Result<(String, i32), String> {
     let p = PathBuf::from(&cwd);
     if !is_allowed(&p, &state) { return Err(format!("cwd not allowed: {cwd}")); }
 
-    let out = std::process::Command::new("sh")
+    let mut command_builder = Command::new("sh");
+    command_builder
         .arg("-c").arg(&command)
         .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("sh exec failed: {e}"))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    command_builder.process_group(0);
+    let mut child = command_builder.spawn().map_err(|e| format!("sh exec failed: {e}"))?;
+    let pid = child.id();
+    processes.0.lock().map_err(|_| "shell process lock poisoned")?
+        .insert(request_id.clone(), pid);
+    let stdout = read_pipe(child.stdout.take());
+    let stderr = read_pipe(child.stderr.take());
+    let status = wait_for_shell(&mut child, timeout_ms.unwrap_or(30_000), pid);
+    processes.0.lock().map_err(|_| "shell process lock poisoned")?.remove(&request_id);
+    let output = stdout.join().unwrap_or_default() + &stderr.join().unwrap_or_default();
+    Ok((output, status?.code().unwrap_or(-1)))
+}
 
-    let code = out.status.code().unwrap_or(-1);
-    let stdout = String::from_utf8_lossy(&out.stdout).into_owned()
-        + &String::from_utf8_lossy(&out.stderr);
-    Ok((stdout, code))
+#[tauri::command]
+fn shell_cancel(request_id: String, processes: State<ShellProcesses>) -> Result<(), String> {
+    let pid = processes.0.lock().map_err(|_| "shell process lock poisoned")?
+        .get(&request_id).copied();
+    if let Some(pid) = pid { terminate_process_group(pid); }
+    Ok(())
+}
+
+fn read_pipe<T: Read + Send + 'static>(pipe: Option<T>) -> std::thread::JoinHandle<String> {
+    std::thread::spawn(move || {
+        let mut output = String::new();
+        if let Some(mut value) = pipe { let _ = value.read_to_string(&mut output); }
+        output
+    })
+}
+
+fn wait_for_shell(
+    child: &mut std::process::Child,
+    timeout_ms: u64,
+    pid: u32,
+) -> Result<std::process::ExitStatus, String> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? { return Ok(status); }
+        if Instant::now() >= deadline {
+            terminate_process_group(pid);
+            std::thread::sleep(Duration::from_millis(100));
+            let _ = child.kill();
+            return child.wait().map_err(|e| e.to_string());
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn terminate_process_group(pid: u32) {
+    let _ = Command::new("kill").arg("-TERM").arg(format!("-{pid}")).status();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -418,6 +477,7 @@ pub fn run() {
             let _ = app.fs_scope().allow_directory(&paths.root_dir, true);
 
             app.manage(paths);
+            app.manage(ShellProcesses::default());
 
             #[cfg(debug_assertions)]
             if let Some(window) = app.get_webview_window("main") {
@@ -447,6 +507,7 @@ pub fn run() {
             search_ripgrep,
             search_fd,
             shell_exec,
+            shell_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -157,7 +157,7 @@ rebase(ref, insertAfter, newRounds, opts):
 
 ## 5. 与现有实现的映射
 
-| 现有（llm-engine/persistence + session） | 归宿 |
+| 现有（llm-runtime/persistence + session） | 归宿 |
 |---|---|
 | `ChatEngine` | → `Log` 实现主体（append/fold/refs 骨架现成） |
 | `ChatManifest` | → RefStore JSON（分支指针语义不变，格式升级） |

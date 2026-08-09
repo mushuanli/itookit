@@ -63,7 +63,7 @@ Container_Boundary(ui, "UI 层 (llm-ui + vfs-ui + mdxeditor + memory-manager)") 
 }
 
 ' === 外部组件引用 ===
-System_Ext(business_layer, "业务层", "llm-engine / app-settings")
+System_Ext(business_layer, "业务层", "llm-runtime / app-settings")
 System_Ext(engine_layer, "引擎层", "stdio / device-llm")
 
 Rel_R(session_svc, business_layer, "会话状态", "SessionManager")

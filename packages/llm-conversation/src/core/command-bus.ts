@@ -1,4 +1,4 @@
-// CommandBus — llm-engine layer command registry.
+// CommandBus — llm-runtime layer command registry.
 //
 // Plugin-contributed commands replace SessionManager's 30+ method facade.
 // UI calls commands.execute('vcs.branch.create', args) instead of

@@ -27,7 +27,7 @@ Harness 内部的旧事件（`agent:task:start`、`agent:llm:start` 等）在 `I
 
 ## SessionActor 事件桥接
 
-`SessionActor`（`llm-engine/src/core/session-actor.ts`）将 ILoop 协程的 canonical `AgentEvent` 桥接至 `SessionEventBus`。事件统一为 `SessionEvent`（`AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`）：
+`SessionActor`（`llm-runtime/src/core/session-actor.ts`）将 ILoop 协程的 canonical `AgentEvent` 桥接至 `SessionEventBus`。事件统一为 `SessionEvent`（`AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`）：
 
 | ILoop yield | 桥接后事件 |
 |---|---|
@@ -82,7 +82,7 @@ TaskRunner → executeV3Agent()
 ### 消费链
 ```
 VFSEngine (emit) → VFSManager (转发) → vfs-ui (VFSUIShell 刷新树)
-                   → llm-engine (syncSkillsToHarness on change)
+                   → llm-runtime (syncSkillsToHarness on change)
 ```
 
 ---
@@ -103,7 +103,7 @@ TaskGraphReconciler → HumanTask executor → HITLQueue.push(request)
 
 ## Registry 事件 (SessionPool)
 
-`RegistryEvent` (定义在 `llm-engine/src/core/types.ts`):
+`RegistryEvent` (定义在 `llm-runtime/src/core/types.ts`):
 - `session_registered` / `session_unregistered`
 - `session_status_changed`
 - `pool_status_changed` (running/queued/maxConcurrent)

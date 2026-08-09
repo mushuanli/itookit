@@ -560,12 +560,14 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     <select class="settings-form__select" name="protocol" style="max-width:260px">
                         <option value="" ${!connection?.protocol ? 'selected' : ''}>自动推断（按 Provider 类型）</option>
                         <option value="openai-chat"        ${connection?.protocol === 'openai-chat'        ? 'selected' : ''}>OpenAI Chat Completions</option>
+                        <option value="openai-responses"   ${connection?.protocol === 'openai-responses'   ? 'selected' : ''}>OpenAI Responses API</option>
                         <option value="anthropic-messages" ${connection?.protocol === 'anthropic-messages' ? 'selected' : ''}>Anthropic Messages（Claude CLI 兼容）</option>
                         <option value="gemini-generate"    ${connection?.protocol === 'gemini-generate'    ? 'selected' : ''}>Gemini generateContent</option>
                     </select>
                     <small class="settings-form__help">
                         选择 <strong>Anthropic Messages</strong> 可让 DeepSeek / OpenRouter 等兼容厂商走
                         Claude Code Agent Loop（支持 thinking block 和工具循环）。
+                        <br/><strong>OpenAI Responses</strong> 走新一代 /responses 接口（input items + 语义化流式）。
                     </small>
                 </div>
             </form>

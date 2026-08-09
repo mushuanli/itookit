@@ -18,6 +18,9 @@ import { LocalMountService, MountEntry, MOUNT_EVENTS } from './services/local-mo
 import { TauriSqlSidecarDb } from './db/tauri-sql-sidecar';
 import { TauriFsOps } from './fs/tauri-fs-ops';
 import { TauriLLMLogger } from './log/tauri-llm-logger';
+import { TauriNativeShell } from './shell/tauri-native-shell';
+import { TauriSkillToolHandlerFactory } from './harness/tauri-skill-tools';
+import { TauriSkillSource } from './harness/tauri-skill-source';
 
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
@@ -213,6 +216,7 @@ async function bootstrap(): Promise<void> {
     }));
 
     // 3. Hand off to app-shell
+    const nativeShell = await TauriNativeShell.create();
     const app = await initApp({
         backend: rootBackend,
         additionalMounts: [
@@ -224,6 +228,14 @@ async function bootstrap(): Promise<void> {
         routeAliases: { home: 'home-workspace' },
         onProgress: showLoading,
         llmLogger: new TauriLLMLogger(rootDir),
+        harnessPlatform: {
+            skillSource: new TauriSkillSource(new TauriFsOps(), homeDir),
+            skillToolHandlerFactory: new TauriSkillToolHandlerFactory(nativeShell),
+            async configure(harness) {
+                harness.toolDriver.setNativeShell(nativeShell);
+                await harness.skillService.setCwd(homeDir);
+            },
+        },
     });
     log('App 初始化完成');
 

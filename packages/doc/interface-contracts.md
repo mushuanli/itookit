@@ -1,20 +1,21 @@
 # 跨包接口契约
 
-所有跨包协议定义在 `@itookit/common`，具体实现由 `app-shell` 注入。
+业务共享协议定义在 `@itookit/common`；执行协议由 `@itookit/harness` 提供，
+能力抽象由 `@itookit/coreutils` 提供，具体实现由 `app-shell` 注入。
 
 ## LLM 执行
 
 | 接口 | 消费者 | 实现者 |
 | --- | --- | --- |
-| `ProcessProgram` | Harness | llm-engine、DAG 插件 |
-| `ProcessHost` | Conversation | HarnessKernel |
-| `HarnessControlPlane` | UI、CLI | HarnessKernel |
-| `SchedulerModule` | HarnessKernel | DirectScheduler、DagScheduler |
-| `SchedulingPolicy` | Dispatcher | FifoSchedulingPolicy |
-| `DagPluginCatalog` | Conversation、UI、DagScheduler | DagPluginRegistry |
-| `LLMPort` | ProcessProgram | LLMServiceAdapter |
-| `ToolPort` | ProcessProgram | Tool service |
-| `VfsPort` | ProcessProgram | App-shell VFS adapter |
+| `DurableTaskProgram` | Harness | llm-runtime、Conversation Flow |
+| `SessionHandle` | Conversation、UI | Harness |
+| `TaskHandle` | Conversation、UI、CLI | Harness |
+| `EffectAdapter` | Harness | coreutils 插件及应用插件 |
+| `HarnessPlugin` | App Shell | coreutils 与功能插件 |
+| `DagPluginCatalog` | Conversation、UI | `FlowPluginRegistry` |
+| `LLMCapability` | coreutils Effect | App-shell LLM adapter |
+| `ToolCapability` | coreutils Effect | Tool service |
+| `SkillCapability` | coreutils Effect | Browser/Tauri adapter |
 
 ## Conversation
 

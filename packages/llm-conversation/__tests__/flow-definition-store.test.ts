@@ -1,4 +1,4 @@
-import type { describe, expect, it } from '@itookit/common';
+import { describe, expect, it } from 'vitest';
 import type { IChatEngine } from '../src/persistence/types';
 import { FlowDefinitionStore } from '../src/persistence/flow-definition-store';
 import { flowRevisionDigest } from '../src/flow/validation';

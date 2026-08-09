@@ -3,12 +3,13 @@ import type {
     FlowNodeId,
     FlowRevision,
     ICommandBus,
-    RunSnapshot,
     FlowEdgeDefinition,
     DagPluginManifest,
     DagPluginPresentation,
     FlowNodeDefinition,
 } from '@itookit/common';
+import type { DurableFlowSnapshot } from '@itookit/llm-conversation';
+import type { TaskStatus } from '@itookit/harness';
 import { escapeHTML, showConfirmDialog, Toast } from '@itookit/common';
 import { DagDraftController, createFlowEdge } from './dag/DagDraftController';
 import { SchemaForm } from './dag/SchemaForm';
@@ -23,7 +24,7 @@ export interface DagWorkbenchOptions {
 export class DagWorkbench {
     private mode: 'design' | 'run' = 'design';
     private controller: DagDraftController | null = null;
-    private run: RunSnapshot | null = null;
+    private run: DurableFlowSnapshot | null = null;
     private catalogue: DagPluginPresentation[] = [];
     private selectedNodeId?: FlowNodeId;
     private canvas?: DagCanvas;
@@ -69,10 +70,10 @@ export class DagWorkbench {
         return node;
     }
 
-    async openRun(runId: string): Promise<void> {
-        this.run = await this.options.commands.execute<RunSnapshot>('dag.run.get', { runId });
+    async openRun(taskId: string): Promise<void> {
+        this.run = await this.options.commands.execute<DurableFlowSnapshot>('dag.run.get', { taskId });
         this.setMode('run');
-        this.scheduleRunRefresh(runId);
+        this.scheduleRunRefresh(taskId);
     }
 
     render(): void {
@@ -81,7 +82,7 @@ export class DagWorkbench {
 
     async cancel(): Promise<void> {
         if (!this.run) return;
-        await this.options.commands.execute('dag.run.cancel', { runId: this.run.run.id });
+        await this.options.commands.execute('dag.run.cancel', { taskId: this.run.root.task.id });
     }
 
     destroy(): void {
@@ -457,31 +458,31 @@ export class DagWorkbench {
     private renderRun(): void {
         const snapshot = this.run;
         if (!snapshot) return this.renderDesign();
-        const run = snapshot.run;
+        const run = snapshot.root.task;
         this.root.innerHTML = `<section class="dag-workbench" data-mode="run">
             <header class="dag-toolbar"><strong>DAG Run</strong><span>${escapeHTML(String(run.id))}</span><span data-status="${escapeHTML(run.status)}">${escapeHTML(run.status)}</span><button data-run-action="cancel">Cancel</button></header>
-            <div class="dag-run-nodes">${snapshot.processes.map(process =>
-                `<article data-process-id="${escapeHTML(process.id)}"><strong>${escapeHTML(process.programKind)}</strong><small>${escapeHTML(process.status)}</small><div>${escapeHTML(process.id)}</div></article>`,
+            <div class="dag-run-nodes">${snapshot.nodes.map(({ nodeId, snapshot: node }) =>
+                `<article data-task-id="${escapeHTML(node.task.id)}"><strong>${escapeHTML(nodeId)}</strong><small>${escapeHTML(node.task.status)}</small><div>${escapeHTML(node.task.program.kind)}</div></article>`,
             ).join('')}</div>
         </section>`;
         this.root.querySelector('[data-run-action="cancel"]')?.addEventListener('click', () => void this.cancel());
     }
 
-    private scheduleRunRefresh(runId: string): void {
+    private scheduleRunRefresh(taskId: string): void {
         this.stopRunRefresh();
-        if (!this.run || isTerminalRun(this.run.run.status)) return;
+        if (!this.run || isTerminalRun(this.run.root.task.status)) return;
         this.runRefreshTimer = setTimeout(() => {
-            void this.refreshRun(runId);
+            void this.refreshRun(taskId);
         }, 1000);
     }
 
-    private async refreshRun(runId: string): Promise<void> {
+    private async refreshRun(taskId: string): Promise<void> {
         try {
-            this.run = await this.options.commands.execute<RunSnapshot>('dag.run.get', {
-                runId,
+            this.run = await this.options.commands.execute<DurableFlowSnapshot>('dag.run.get', {
+                taskId,
             });
             if (this.mode === 'run') this.render();
-            this.scheduleRunRefresh(runId);
+            this.scheduleRunRefresh(taskId);
         } catch {
             this.stopRunRefresh();
         }
@@ -572,6 +573,6 @@ function pluginSummary(
     }
 }
 
-function isTerminalRun(status: RunSnapshot['run']['status']): boolean {
-    return ['completed', 'failed', 'cancelled'].includes(status);
+function isTerminalRun(status: TaskStatus): boolean {
+    return ['succeeded', 'failed', 'cancelled'].includes(status);
 }

@@ -2,6 +2,7 @@
 
 import { BaseProvider } from './base';
 import { OpenAIProvider } from './openai';
+import { ResponsesProvider } from './responses';
 import { AnthropicProvider } from './anthropic';
 import { GeminiProvider } from './gemini';
 import { LLMProviderConfig } from '../types';
@@ -70,6 +71,7 @@ export function resolveProtocol(
     // URL 推断
     if (url.includes('/anthropic') || url.endsWith('/messages')) return 'anthropic-messages';
     if (url.includes('/chat/completions')) return 'openai-chat';
+    if (url.includes('/responses')) return 'openai-responses';
     if (url.includes('generativelanguage') || url.includes('generateContent')) return 'gemini-generate';
 
     // provider 名回退
@@ -104,6 +106,7 @@ export function createProvider(
             case 'anthropic-messages': ProviderClass = AnthropicProvider; break;
             case 'gemini-generate':    ProviderClass = GeminiProvider;    break;
             case 'openai-chat':        ProviderClass = OpenAIProvider;    break;
+            case 'openai-responses':   ProviderClass = ResponsesProvider; break;
         }
     }
 

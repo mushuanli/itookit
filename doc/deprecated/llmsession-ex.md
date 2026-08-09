@@ -123,7 +123,7 @@ agent:stream:thinking 事件
 
 ### 4.2 类型定义
 
-#### 新增联合类型（`llm-engine/src/core/types.ts`）
+#### 新增联合类型（`llm-runtime/src/core/types.ts`）
 
 ```typescript
 /** 请求来源 */
@@ -137,7 +137,7 @@ export type HistoryPolicy =
 
 **`origin` 三值而非四值的原因**：原方案的 `'mission'` 和 `'agent'` 在 UI 表达上没有差异，Mission 也不走 TaskRunner（无需标记），合并为 `'agent'` 足够。
 
-#### Layer ① — `TaskInput`（`llm-engine/src/core/types.ts:264`）
+#### Layer ① — `TaskInput`（`llm-runtime/src/core/types.ts:264`）
 
 ```typescript
 export interface TaskInput {
@@ -161,7 +161,7 @@ export interface TaskInput {
 }
 ```
 
-#### Layer ② — `SessionGroup`（`llm-engine/src/core/types.ts:152`）
+#### Layer ② — `SessionGroup`（`llm-runtime/src/core/types.ts:152`）
 
 ```typescript
 export interface SessionGroup {
@@ -206,7 +206,7 @@ export interface AppendMessageMeta {
 ### 4.3 数据流
 
 ```
-调用者                       引擎（llm-engine）                   UI（llm-ui）
+调用者                       引擎（llm-runtime）                   UI（llm-ui）
 ════════                    ══════════════════                   ════════════
 
 SendMessageCommand           TaskRunner.submit(TaskInput)          HistoryView
@@ -496,10 +496,10 @@ static create(node: ExecutionNode): HTMLElement {
 |---|---|---|---|
 | **common** | `common/src/interfaces/chat.ts` | `AppendMessageMeta` +`origin`, +`historyPolicy` | 持久化 schema |
 | **common** | `common/src/i18n/zh-CN.ts` + `en.ts` | `chat.origin.*` i18n key | 国际化 |
-| **engine** | `llm-engine/src/core/types.ts` | 新增 `SessionOrigin` / `HistoryPolicy` 联合类型；`TaskInput` +`origin`, +`historyPolicy`；`SessionGroup` +`origin`, +`historyPolicy` | 类型定义 |
-| **engine** | `llm-engine/src/session/session-state.ts` | `addUserMessage()` 新增参数；`createAssistantMessage()` 继承 origin/historyPolicy；`getHistory()` 加 `exclude` 过滤 | **核心逻辑** |
-| **engine** | `llm-engine/src/session/task-runner.ts` | `createUserMessage()` 透传 origin/historyPolicy 到 state 和 engine.appendMessage | 数据透传 |
-| **engine** | `llm-engine/src/utils/converters.ts` | `chatNodeToSessionGroup()` 从 `node.meta` 还原 origin/historyPolicy | 持久化加载 |
+| **engine** | `llm-runtime/src/core/types.ts` | 新增 `SessionOrigin` / `HistoryPolicy` 联合类型；`TaskInput` +`origin`, +`historyPolicy`；`SessionGroup` +`origin`, +`historyPolicy` | 类型定义 |
+| **engine** | `llm-runtime/src/session/session-state.ts` | `addUserMessage()` 新增参数；`createAssistantMessage()` 继承 origin/historyPolicy；`getHistory()` 加 `exclude` 过滤 | **核心逻辑** |
+| **engine** | `llm-runtime/src/session/task-runner.ts` | `createUserMessage()` 透传 origin/historyPolicy 到 state 和 engine.appendMessage | 数据透传 |
+| **engine** | `llm-runtime/src/utils/converters.ts` | `chatNodeToSessionGroup()` 从 `node.meta` 还原 origin/historyPolicy | 持久化加载 |
 | **UI** | `llm-ui/src/components/HistoryView.ts` | `processEventImmediate('session_start')` 基于 origin 计算 defaultCollapsed | 渲染策略 |
 | **UI** | `llm-ui/src/components/history/SessionRenderer.ts` | `appendSession()` 附加 origin/ephemeral CSS class | DOM 标记 |
 | **UI** | `llm-ui/src/components/history/StreamController.ts` | `updateStatus()` 在 success/failed 时调用 `collapseThought()`；新增 `collapseThought()` 私有方法 | **Thinking 折叠** |

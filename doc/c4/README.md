@@ -24,7 +24,7 @@ C2 — 容器图             c2-containers.puml / .md  18 个包的层级总览
 | C1 | `c1-context` | .puml + .md | 系统上下文：用户、LLM API、MCP、文件系统、同步服务器 |
 | C2 | `c2-containers` | .puml + .md | 18 个包分层架构 + v4.1 依赖关系优化 |
 | C3 | `c3-vfs` | .puml + .md | VFS 子系统：存储后端、VFSEngine、ModuleFS、文件句柄 |
-| C3 | `c3-llm` | .puml + .md | LLM 子系统：device-llm/llm-harness/llm-engine |
+| C3 | `c3-llm` | .puml + .md | LLM 子系统：device-llm/llm-harness/llm-runtime |
 | C3 | `c3-ui` | .puml + .md | UI 层：llm-ui/vfs-ui/mdx/memory-manager + 接口归位 |
 | C3 | `c3-bootstrap` | .puml + .md | 引导层：app-shell/app-settings/demo + LLMUIEditors 注入 |
 | C4 | `c4-agent-loop` | .puml | Agent 循环详细执行流程 |

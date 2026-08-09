@@ -6,7 +6,7 @@
 device-llm   →  LLMConnection / streaming / MCP / multi-provider / Skill 存储
 llm-harness  →  HarnessLoopExecutor (ILoop) + HarnessAgentTaskExecutor (TaskExecutor)
                 + built-in tools + TTY + HITLQueue + BudgetController + ContextManager
-llm-engine   →  SessionManager + ChatEngine + TaskGraph reconciler + ILoop executors
+llm-runtime   →  SessionManager + ChatEngine + TaskGraph reconciler + ILoop executors
                 + Plugin system (CommandBus + ExtensionRegistry) + ContextAssembler
 llm-ui       →  Chat UI + Agent editor + Settings editors + TaskGraphWorkbench
 ```
@@ -44,7 +44,7 @@ llm-ui       →  Chat UI + Agent editor + Settings editors + TaskGraphWorkbench
 | `NodeShellRunner` | Node.js Shell 执行器 |
 | `AgentDeviceDriver` | IAgentRuntime 实现 |
 
-## llm-engine 核心组件
+## llm-runtime 核心组件
 
 | 组件 | 职责 |
 |---|---|
@@ -70,7 +70,7 @@ llm-ui       →  Chat UI + Agent editor + Settings editors + TaskGraphWorkbench
 | `SessionTaskGraphRunner` | Session 依赖图 → TaskGraphRun 编译 |
 | `VFSAgentService` | IAgentConfigService + IAgentManagementService |
 
-## llm-engine 执行模式（ILoop）
+## llm-runtime 执行模式（ILoop）
 
 | mode | 实现 | 中间件 |
 |---|---|---|

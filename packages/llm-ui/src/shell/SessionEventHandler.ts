@@ -70,7 +70,7 @@ export interface SessionEventHandlerDeps {
      * 由 Shell 注入，不提供时仅展示无操作的 Toast。
      */
     onNavigateToSession?: (sessionId: string) => void;
-    onExecutionRun?: (runId: string) => void;
+    onExecutionTask?: (taskId: string) => void;
 }
 
 // ----------------------------------------------------------------
@@ -191,9 +191,9 @@ export class SessionEventHandler {
                     }
                 }
                 break;
-            case 'execution_run_projected':
+            case 'execution_task_projected':
                 if (event.payload.sessionId === this.deps.getCurrentSessionId()) {
-                    this.deps.onExecutionRun?.(event.payload.runId);
+                    this.deps.onExecutionTask?.(event.payload.taskId);
                 }
                 break;
         }

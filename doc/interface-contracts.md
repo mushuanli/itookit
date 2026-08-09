@@ -11,7 +11,7 @@
 | `IModuleFS` | `openFile()`, `driver`, `meta`, `capabilities` | `stdio/src/services/module-fs.ts` | `stdio (ModuleFS)` | `vfs-ui`, `mdx`, `llm-ui` |
 | `IFSDriver` | `read`, `write`, `create`, `delete`, `getChildren`, `stat`, `search` | `stdio/src/services/fs-driver.ts` | `ModuleFS.driver` | `vfs-ui`, editors |
 | `IFSMetaDriver` | `putAsset`, `getAsset`, `setTags`, `watch` | `stdio/src/services/fs-meta-driver.ts` | `ModuleFS.meta` | `mdx` |
-| `IFile` | `read()`, `write()`, `asset()` | `stdio/src/` | `FileHandle`, `MDXFileHandle`, `ChatFileHandle` | `mdx`, `llm-engine` |
+| `IFile` | `read()`, `write()`, `asset()` | `stdio/src/` | `FileHandle`, `MDXFileHandle`, `ChatFileHandle` | `mdx`, `llm-runtime` |
 
 ## LLM 体系
 
@@ -20,8 +20,8 @@
 | `LLMProvider` | `id`, `implementation`, `baseURL`, `models[]` | `common/interfaces/llm/connection.ts` | `device-llm/constants/providers.ts` | `llm-ui (ProviderSettingsEditor)` |
 | `LLMConnection` | `id`, `provider`, `apiKey`, `model`, `tier` | `common/interfaces/llm/connection.ts` | `LLMDeviceDriver` | `llm-ui`, `llm-harness` |
 | `ChatMessage` | `role`, `content`, `attachments?` | `common/interfaces/llm/message.ts` | device-llm | 全部 |
-| `ILLMService` | `chat()`, `stream()` | `common/interfaces/llm/llm-service.ts` | `harness/adapters/LLMServiceAdapter` | `harness`, `llm-engine` |
-| `IAgentRuntime` | `run()`, `abort()`, `on()`, `inject()` | `common/interfaces/agent/agent-service.ts` | `AgentDeviceDriver` | `llm-engine (TaskRunner)` |
+| `ILLMService` | `chat()`, `stream()` | `common/interfaces/llm/llm-service.ts` | `harness/adapters/LLMServiceAdapter` | `harness`, `llm-runtime` |
+| `IAgentRuntime` | `run()`, `abort()`, `on()`, `inject()` | `common/interfaces/agent/agent-service.ts` | `AgentDeviceDriver` | `llm-runtime (TaskRunner)` |
 | `ISkillService` | `listSkills()`, `loadSkill()`, `getRouteLayers()` | `common/interfaces/skills/skill-service.ts` | `SkillDeviceDriver` | `harness`, `llm-ui` |
 | `IToolService` | `register()`, `getTool()`, `getTools()` | `common/interfaces/tools/` | `ToolDeviceDriver` | `harness` |
 
@@ -47,4 +47,4 @@
 | `SkillInfo` | `llm-ui/domain/types.ts` |
 | `TokenStats` | `llm-ui/domain/types.ts` |
 | `SkillType` (builtin/http/shell/prompt/mcp/custom) | `common/interfaces/skills/skill-types.ts` |
-| `SessionEvent` | `llm-engine/src/core/types.ts` |
+| `SessionEvent` | `llm-runtime/src/core/types.ts` |

@@ -27,8 +27,9 @@
 
 ## 新增 Harness 工具 (需运行时引用)
 
-1. `packages/llm-harness/src/tools/<name>.ts` — ToolMeta + ToolDefinition + ToolHandler
-2. `packages/llm-harness/src/drivers/agent-device-driver.ts` — `registerDynamicTools()` 中注册
+1. `packages/coreutils/src/tool/<name>.ts` — ToolMeta + ToolDefinition + ToolHandler
+2. `packages/coreutils/src/runtime/create-coreutils-runtime.ts` — 运行时注册
+3. 如需 Durable 执行，在 `packages/coreutils/src/effects/` 增加 EffectAdapter，并由 CoreutilsHarnessPlugin 注册
 
 ## 新增 i18n 文案
 

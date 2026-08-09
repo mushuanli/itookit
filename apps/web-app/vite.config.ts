@@ -21,7 +21,6 @@ export default defineConfig({
             '@itookit/vfs-ui': path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
             '@itookit/device-llm': path.resolve(__dirname, '../../packages/device-llm/src/index.ts'),
             '@itookit/llm-conversation': path.resolve(__dirname, '../../packages/llm-conversation/src/index.ts'),
-            '@itookit/llm-harness': path.resolve(__dirname, '../../packages/llm-harness/src/index.ts'),
             '@itookit/llm-ui': path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
             '@itookit/app-settings': path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
             '@itookit/app-shell': path.resolve(__dirname, '../../packages/app-shell/src/index.ts'),

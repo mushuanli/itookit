@@ -11,7 +11,7 @@ SOLID / DRY / KISS / YAGNI / CoC / LoD — 函数≤30行，圈复杂度≤10
 
 | 类型 | 工具 |
 |---|---|
-| 逻辑包 (`common`, `vfslib`, `device-llm`, `llm-engine`, `tools`, vfsdrivers) | **tsup** (CJS+ESM+.d.ts) |
+| 逻辑包 (`common`, `vfslib`, `device-llm`, `llm-runtime`, `tools`, vfsdrivers) | **tsup** (CJS+ESM+.d.ts) |
 | UI 包 (`memory-manager`, `vfs-ui`, `llm-ui`, `mdx`, `app-settings`) | **vite build** |
 
 ## 项目文档

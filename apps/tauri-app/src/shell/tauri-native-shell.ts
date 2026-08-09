@@ -73,14 +73,22 @@ export class TauriNativeShell implements INativeShell {
       }
 
       case 'sh': {
-        // args from BashTool: ['-c', command]
         const shellCmd = args[1] ?? args[0] ?? '';
         const cwd = opts?.cwd ?? '.';
-        const [stdout, code] = await invoke<[string, number]>('shell_exec', {
-          command: shellCmd,
-          cwd,
-        });
-        return { stdout, stderr: '', code };
+        const requestId = crypto.randomUUID();
+        const cancel = () => { void invoke('shell_cancel', { requestId }); };
+        opts?.signal?.addEventListener('abort', cancel, { once: true });
+        try {
+          const [stdout, code] = await invoke<[string, number]>('shell_exec', {
+            command: shellCmd,
+            cwd,
+            timeoutMs: opts?.timeoutMs ?? 30_000,
+            requestId,
+          });
+          return { stdout, stderr: '', code };
+        } finally {
+          opts?.signal?.removeEventListener('abort', cancel);
+        }
       }
 
       default:

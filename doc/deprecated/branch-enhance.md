@@ -523,7 +523,7 @@ renderFull(
 - [ ] 删除 Round branch 流程中遗留的 ChatNode sibling/createBranch 调用。
 - [ ] 删除无效的字段强转，如 `(manifest as any).currentBranch`。
 - [ ] 搜索并消除 `current_branch/current_head` 在 Round 路径中的使用。
-- [ ] 执行 llm-engine 单测、typecheck、llm-ui 测试和 workspace build。
+- [ ] 执行 llm-runtime 单测、typecheck、llm-ui 测试和 workspace build。
 - [ ] 使用真实流式 provider 手工验证空响应、正常响应、tool-call-only、生成失败重试。
 - [ ] 检查现有 session migration 后仍可加载、切 branch 和继续对话。
 

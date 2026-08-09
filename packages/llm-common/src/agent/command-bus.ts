@@ -1,4 +1,4 @@
-// ICommandBus — plugin-contributed command registry (llm-engine layer).
+// ICommandBus — plugin-contributed command registry (llm-runtime layer).
 //
 // SessionManager 30+ API → plugin-contributed commands.
 // UI calls commands.execute('vcs.branch.create', args) instead of

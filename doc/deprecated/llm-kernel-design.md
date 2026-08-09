@@ -653,9 +653,9 @@ packages/llm-kernel/src/
 
 ---
 
-## 九、与 llm-engine 的职责边界
+## 九、与 llm-runtime 的职责边界
 
-| 职责 | llm-kernel | llm-engine |
+| 职责 | llm-kernel | llm-runtime |
 |---|---|---|
 | 单次 LLM 调用 | AgentExecutor | — |
 | 工具调用路由 | ReActOrchestrator | — |

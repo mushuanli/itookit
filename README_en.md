@@ -155,7 +155,7 @@ packages/
 ├── device-llm/          # LLM driver: multi-Provider / streaming / MCP / Skills
 ├── llm-kernel/          # Execution kernel: Executor + Orchestrator
 ├── llm-harness/         # Multi-turn Agent loop + built-in tools + TTY
-├── llm-engine/          # Session management + VFS persistence + Mission orchestration
+├── llm-runtime/          # Session management + VFS persistence + Mission orchestration
 ├── mdx/                 # CodeMirror 6 Markdown editor (plugin architecture)
 ├── llm-ui/              # Chat UI + Agent / Provider / Connection editors
 ├── vfs-ui/              # File-tree shell (VFSUIShell)

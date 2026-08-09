@@ -13,12 +13,12 @@
 │  vfs-ui        | mdxeditor     │
 ├─────────────────────────────────┤
 │     业务层                       │
-│  llm-engine | llm-harness |     │
+│  llm-runtime | llm-harness |     │
 │  app-settings (无 llm-ui 依赖)   │
 ├─────────────────────────────────┤
 │     引擎层                       │
 │  stdio | device-llm |          │
-│  llm-engine (task-runner + executor)   │
+│  llm-runtime (task-runner + executor)   │
 │  tools | device-tty             │
 ├─────────────────────────────────┤
 │     存储驱动层                    │
@@ -41,7 +41,7 @@
 | **app-settings 解耦** | 不再上行依赖 llm-ui，编辑器通过 LLMUIEditors 注入 |
 | **HITLQueue 统一** | 仅保留 llm-harness 版本（正确 reject on abort） |
 | **接口归位** | SRS→mdx、IAutocompleteSource/IMentionSource→vfs-ui |
-| **共享调度核心** | llm-engine/scheduler/ 提取 getReadyItems/topologicalSort |
+| **共享调度核心** | llm-runtime/scheduler/ 提取 getReadyItems/topologicalSort |
 
 ## 包依赖关系表
 
@@ -49,7 +49,7 @@
 | 包 | 内部依赖 | 外部依赖 |
 |---|---|---|
 | `@itookit/llm-harness` | common, device-llm, device-tty, tools | 无 |
-| `@itookit/llm-engine` | common, stdio | `yaml` |
-| `@itookit/app-settings` | common, device-llm, llm-engine, memory-manager | `js-yaml` |
+| `@itookit/llm-runtime` | common, stdio | `yaml` |
+| `@itookit/app-settings` | common, device-llm, llm-runtime, memory-manager | `js-yaml` |
 
 > **变更**: app-settings 不再依赖 llm-ui（上行依赖已解耦）

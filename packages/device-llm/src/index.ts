@@ -14,7 +14,7 @@
  * - 支持技能/工具系统
  * 
  * 不包含：
- * - 执行逻辑 (→ @itookit/llm-engine)
+ * - 执行逻辑 (→ @itookit/llm-runtime)
  * - 会话管理 (→ @itookit/llm-conversation)
  * - 持久化 (→ @itookit/llm-conversation)
  * - Agent 定义 (→ @itookit/llm-conversation)
@@ -98,6 +98,7 @@ export type {
 
 export { BaseProvider } from './providers/base';
 export { OpenAIProvider } from './providers/openai';
+export { ResponsesProvider } from './providers/responses';
 export { AnthropicProvider } from './providers/anthropic';
 export { GeminiProvider } from './providers/gemini';
 

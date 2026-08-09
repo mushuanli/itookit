@@ -54,7 +54,7 @@ System_Ext(common_pkg, "@itookit/common", "SkillDefinition(统一) · IConnectio
 System_Ext(vfs_pkg, "@itookit/stdio", "VFS 引擎")
 System_Ext(driver_pkg, "@itookit/device-llm", "LLM 驱动\n(getSkills→SkillDefinition[])")
 System_Ext(harness_pkg, "@itookit/llm-harness", "Agent 循环")
-System_Ext(engine_pkg, "@itookit/llm-engine", "会话引擎")
+System_Ext(engine_pkg, "@itookit/llm-runtime", "会话引擎")
 System_Ext(memory_pkg, "@itookit/memory-manager", "工作区容器")
 System_Ext(vfsui_pkg, "@itookit/vfs-ui", "文件树 UI")
 System_Ext(llmui_pkg, "@itookit/llm-ui", "Chat UI\n(编辑器注入至 app-settings)")

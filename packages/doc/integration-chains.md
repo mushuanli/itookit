@@ -6,10 +6,10 @@
 LLMWorkspaceEditor
 → SessionManager.sendMessage
 → ConversationRunCoordinator
-→ HarnessKernel.submit("direct")
-→ DirectScheduler
-→ ChatProgram / AgentProgram
-→ RunEventEnvelope
+→ SessionHandle.createTask(TaskSpec)
+→ DurableChatProgram / DurableAgentProgram
+→ Effect + Interaction
+→ EventEnvelope
 → RoundLog + SessionEventBus
 → HistoryView
 ```
@@ -20,10 +20,9 @@ LLMWorkspaceEditor
 DagWorkbench
 → immutable FlowRevision
 → flowToDag
-→ HarnessKernel.submit("dag")
-→ DagScheduler
-→ DagPlugin Runtime
-→ Process per ready node
+→ DurableFlowExecutor.compile
+→ TaskSpec/dependsOn
+→ DurableTaskProgram per ready node
 → terminal artifacts
 → ConversationRound output
 ```
@@ -35,15 +34,15 @@ initApp
 ├── createVFS
 ├── LLMDeviceDriver
 ├── ChatEngine + VFSAgentService
-├── createHarness
-│   ├── resource ports
-│   ├── DirectScheduler
-│   ├── DagScheduler
-│   └── builtin DAG plugins
+├── Harness + CoreutilsHarnessPlugin
+│   ├── Effect adapters
+│   ├── resource grants
+│   └── durable poller
 └── initializeConversationSystem
-    ├── register ChatProgram / AgentProgram
+    ├── register DurableChatProgram / DurableAgentProgram
+    ├── register Flow programs and plugins
     ├── SessionManager
     └── conversation command plugins
 ```
 
-所有 UI 控制通过 `RunHandle`；所有 Process 外部访问通过资源端口。
+所有 UI 控制通过 `TaskHandle`；所有 Task 外部访问通过资源句柄和 Effect 端口。

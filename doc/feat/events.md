@@ -163,7 +163,7 @@ new EventBus({ coalesce: ['change', 'cursorMove'] })
 | `mdx` | `event-bus.ts` (67行) | 门面类委托 `CoreEventBus<Record<string,any>>` + coalesce | 67→30 | 自身的 batch 逻辑删除，改用核心 |
 | `stdio` | `event-bus.ts` (113行) | 别名类 `extends CoreEventBus<FSEventPayloadMap>` | 113→10 | `removeAll()`→`clear()`；`TransactionEventBuffer`→泛型 |
 | `llm-kernel` | `event-bus.ts` (185行) | 重写为类型目录 + `getEventBus()` 单例 | 185→76 | `IScopedEventBus`→`IEventChannel`；`createScope`→`channel`；`'*'`→`onAny` |
-| `llm-engine` | `session-event-bus.ts` (299行) | 薄门面，双 `EventBus<M>` 分别管 session/global track | 299→110 | `getDebugInfo/getStats/debug` 删除；`registeredSessions`→channel 生命周期 |
+| `llm-runtime` | `session-event-bus.ts` (299行) | 薄门面，双 `EventBus<M>` 分别管 session/global track | 299→110 | `getDebugInfo/getStats/debug` 删除；`registeredSessions`→channel 生命周期 |
 
 **净效果**：~756 行 → ~270 行核心 + ~190 行领域适配
 
@@ -259,7 +259,7 @@ channel.onAny((payload, meta) => this.postMessage(...));
         ┌──────────────────────┼──────────────────────┐
         ▼                      ▼                      ▼
 ┌───────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ llm-kernel    │    │ stdio          │    │ llm-engine      │
+│ llm-kernel    │    │ stdio          │    │ llm-runtime      │
 │ getEventBus() │    │ EventBus extends│    │ SessionEventBus │
 │ → singleton   │    │ CoreEventBus    │    │  session track  │
 │ channel(id)   │    │ FSEventPayload  │    │  global track   │
@@ -295,7 +295,7 @@ channel.onAny((payload, meta) => this.postMessage(...));
 | # | 事件总线 | 所在包 | 作用域 | 核心文件 |
 |---|---------|--------|--------|---------|
 | 1 | **Kernel EventBus** | `llm-kernel` | 全局单例 | `src/core/event-bus.ts` |
-| 2 | **SessionEventBus** | `llm-engine` | 每 SessionManager | `src/session/session-event-bus.ts` |
+| 2 | **SessionEventBus** | `llm-runtime` | 每 SessionManager | `src/session/session-event-bus.ts` |
 | 3 | **VFS EventBus** | `stdio` | 每 VFSEngine / VFSManager | `src/event/event-bus.ts` |
 | 4 | **EditorEventBus** | `llm-ui` | 每 LLMWorkspaceEditor | `src/shell/EditorEventBus.ts` |
 | 5 | **MDX EventBus** | `mdx` | 每 PluginManager | `src/core/event-bus.ts` |
@@ -385,13 +385,13 @@ interface IScopedEventBus {
 | 文件 | 监听事件 |
 |------|---------|
 | `src/worker/worker-adapter.ts` | `*`（通配，转发到 Worker） |
-| `llm-engine/src/adapters/ui-event-adapter.ts` | `node:start`, `node:update`, `node:complete`, `node:error`, `stream:thinking`, `stream:content`, `stream:tool_call`, `execution:complete`, `execution:error` |
+| `llm-runtime/src/adapters/ui-event-adapter.ts` | `node:start`, `node:update`, `node:complete`, `node:error`, `stream:thinking`, `stream:content`, `stream:tool_call`, `execution:complete`, `execution:error` |
 
 ---
 
-### 2.2 SessionEventBus（`llm-engine`）
+### 2.2 SessionEventBus（`llm-runtime`）
 
-**文件：** `packages/llm-engine/src/session/session-event-bus.ts`
+**文件：** `packages/llm-runtime/src/session/session-event-bus.ts`
 
 管理 Session 级别和全局级别两种事件通道。是引擎与 UI 之间的桥梁。
 
@@ -461,7 +461,7 @@ Agent Loop 内容块:
 
 **事件桥梁：`UIEventAdapter`**
 
-位于 `packages/llm-engine/src/adapters/ui-event-adapter.ts`，将 Kernel 事件转换为 `OrchestratorEvent`：
+位于 `packages/llm-runtime/src/adapters/ui-event-adapter.ts`，将 Kernel 事件转换为 `OrchestratorEvent`：
 
 ```
 Kernel 事件                    →  OrchestratorEvent
@@ -479,7 +479,7 @@ stream:tool_call               →  [工具相关]
 
 **事件桥梁：`HarnessAdapter`**
 
-位于 `packages/llm-engine/src/adapters/harness-adapter.ts`，将 `IAgentRuntime` 事件转换为 `OrchestratorEvent`：
+位于 `packages/llm-runtime/src/adapters/harness-adapter.ts`，将 `IAgentRuntime` 事件转换为 `OrchestratorEvent`：
 
 ```
 IAgentRuntime 事件             →  OrchestratorEvent
@@ -977,7 +977,7 @@ ExecutionRuntime 使用此事件追踪执行器状态
 
 ---
 
-### `llm-engine` — Session 事件桥梁
+### `llm-runtime` — Session 事件桥梁
 
 **发出事件（emit）：**
 
@@ -1109,7 +1109,7 @@ ExecutionRuntime 使用此事件追踪执行器状态
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        LLM 对话事件流                                │
 │                                                                     │
-│  llm-kernel                  llm-engine                  llm-ui     │
+│  llm-kernel                  llm-runtime                  llm-ui     │
 │  ┌──────────┐   Kernel事件   ┌──────────────┐  OrchestratorEvent  │
 │  │Execution │──────────────→│UIEventAdapter│──────────────────────│
 │  │Runtime   │               │              │                      │

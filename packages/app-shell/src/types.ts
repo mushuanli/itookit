@@ -2,6 +2,20 @@ import type { FileCreationConfig, EditorFactory, EditorOptions, NavigationReques
 import type { IStorageBackend, IVFSManager, MountOptions, IModuleFS } from '@itookit/stdio';
 import type { ThemeMode } from './ThemeService';
 import type { FileTypeDefinition, CustomEditorResolver, VFSUIOptions } from '@itookit/vfs-ui';
+import type { CoreutilsRuntime, CoreutilsRuntimeOptions } from '@itookit/coreutils';
+import type { Harness } from '@itookit/harness';
+import type { DagPluginRegistry } from '@itookit/llm-conversation';
+
+export interface AppHarnessRuntime extends CoreutilsRuntime {
+    kernel: Harness;
+    dagPlugins: DagPluginRegistry;
+}
+
+export interface AppHarnessPlatform {
+    skillSource?: CoreutilsRuntimeOptions['skillSource'];
+    skillToolHandlerFactory?: CoreutilsRuntimeOptions['skillToolHandlerFactory'];
+    configure?(harness: AppHarnessRuntime): void | Promise<void>;
+}
 
 export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills';
 
@@ -52,6 +66,8 @@ export interface AppOptions {
     onProgress?: (msg: string) => void;
     /** LLM traffic logger (NoopLLMLogger for web, TauriLLMLogger for Tauri) */
     llmLogger?: import('@itookit/common').ILLMLogger;
+    /** Platform capabilities implemented by the owning application. */
+    harnessPlatform?: AppHarnessPlatform;
 }
 
 export interface AppHandle {
@@ -61,7 +77,7 @@ export interface AppHandle {
     /** Register a dynamically created workspace (e.g. a local mount tab). */
     addWorkspace(config: WorkspaceConfig): void;
     /** Unsubscribe all global event listeners and release resources. */
-    destroy(): void;
+    destroy(): Promise<void>;
     vfs: IVFSManager;
 }
 

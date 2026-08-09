@@ -218,7 +218,7 @@ MessageProjectionEvent → UI    ← 增量事件，替代 cleared+全量重放
 
 ### Phase 1 — RoundLog 落地（llm-round.md 主体 + §3 六项修正）
 
-- 新建 `llm-engine/src/persistence/round-log.ts`：实现 ILog + `clearAssistantInRound`/`markStale`/`deleteRound`
+- 新建 `llm-runtime/src/persistence/round-log.ts`：实现 ILog + `clearAssistantInRound`/`markStale`/`deleteRound`
 - RoundManifest 含 `children` 反向索引（§3.1）
 - fold 并行读 + 软删除过滤 + 缓存（§3.4）
 - 原地变更边界表落地为 RoundLog 私有方法（§3.3）

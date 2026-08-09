@@ -15,5 +15,6 @@ export type {
     RecordQueryOptions,
     RecordQueryResult,
     RecordWalkOptions,
+    IRecordTransaction,
     IRecordStore,
 } from './record-backend';

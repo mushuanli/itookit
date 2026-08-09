@@ -34,7 +34,7 @@ packages/
 ├── vfs-ui/            文件树 UI 组件
 ├── device-llm/        LLM API 通信层（多 Provider）
 ├── llm-harness/       多轮 Agent 循环 + 内置工具 + Skill 系统 + ILoop/TaskExecutor
-├── llm-engine/        会话管理 + VFS 持久化 + TaskGraph DAG 编排 + Plugin 系统
+├── llm-runtime/        会话管理 + VFS 持久化 + TaskGraph DAG 编排 + Plugin 系统
 ├── llm-ui/            Chat UI 组件 + Agent/Skill 编辑器
 ├── mdxeditor/         CodeMirror 6 Markdown 编辑器
 ├── memory-manager/    工作区顶层容器
@@ -66,7 +66,7 @@ packages/
                                    │
         ┌──────────────────────────┼──────────────────────────┐
         │              │           │           │              │
-   llm-engine     llm-harness   device-llm   stdio
+   llm-runtime     llm-harness   device-llm   stdio
         │              │           │           │              │
         └──────────────┴───────────┼───────────┴──────────────┘
                                    │
@@ -385,9 +385,9 @@ registerProvider() / getProvider() / createProvider()
 
 ---
 
-## 6. 执行引擎（llm-engine）
+## 6. 执行引擎（llm-runtime）
 
-llm-engine 是会话与执行的核心，整合了 ILoop 协程、TaskGraph DAG 编排和插件系统。
+llm-runtime 是会话与执行的核心，整合了 ILoop 协程、TaskGraph DAG 编排和插件系统。
 
 ### 6.1 核心组件
 
@@ -614,7 +614,7 @@ LLMSkill (VFS 持久化, device-llm)          SkillDefinition (运行时内存, 
 
 ---
 
-## 9. 会话管理（llm-engine）
+## 9. 会话管理（llm-runtime）
 
 ### 9.1 会话引擎初始化流程
 
@@ -682,7 +682,7 @@ SessionManager
 
 ### 9.5 SessionActor — 事件桥接
 
-`SessionActor`（`llm-engine/src/core/session-actor.ts`）将 ILoop 协程的 canonical `AgentEvent` 桥接至 `SessionEventBus`。事件统一为 `SessionEvent`（`AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`）：
+`SessionActor`（`llm-runtime/src/core/session-actor.ts`）将 ILoop 协程的 canonical `AgentEvent` 桥接至 `SessionEventBus`。事件统一为 `SessionEvent`（`AgentEvent` | `MessageProjectionEvent` | `SessionStructuralEvent`）：
 
 | ILoop yield | SessionEvent / UI 效果 |
 |---|---|
@@ -1226,15 +1226,15 @@ MissionService.createMission(goal)
 | llm-harness | `src/drivers/agent-device-driver.ts` | AgentDeviceDriver |
 | llm-harness | `src/drivers/tool-device-driver.ts` | 内置工具注册+执行 |
 | llm-harness | `src/drivers/skill-device-driver.ts` | Skill 注册+加载 |
-| llm-engine | `src/index.ts` | initializeLLMEngine |
-| llm-engine | `src/session/session-manager.ts` | SessionManager |
-| llm-engine | `src/session/task-runner.ts` | TaskRunner（TaskGraph 提交） |
-| llm-engine | `src/persistence/chat-engine.ts` | ChatEngine |
-| llm-engine | `src/core/session-actor.ts` | SessionActor 事件桥接 |
-| llm-engine | `src/task-graph/reconciler.ts` | TaskGraphReconciler 控制面 |
-| llm-engine | `src/mission/mission-service.ts` | Mission 服务门面 |
-| llm-engine | `src/mission/mission-task-graph-runner.ts` | Mission → TaskGraphRun |
-| llm-engine | `src/session-graph/session-task-graph-runner.ts` | Session 依赖图执行 |
+| llm-runtime | `src/index.ts` | initializeLLMEngine |
+| llm-runtime | `src/session/session-manager.ts` | SessionManager |
+| llm-runtime | `src/session/task-runner.ts` | TaskRunner（TaskGraph 提交） |
+| llm-runtime | `src/persistence/chat-engine.ts` | ChatEngine |
+| llm-runtime | `src/core/session-actor.ts` | SessionActor 事件桥接 |
+| llm-runtime | `src/task-graph/reconciler.ts` | TaskGraphReconciler 控制面 |
+| llm-runtime | `src/mission/mission-service.ts` | Mission 服务门面 |
+| llm-runtime | `src/mission/mission-task-graph-runner.ts` | Mission → TaskGraphRun |
+| llm-runtime | `src/session-graph/session-task-graph-runner.ts` | Session 依赖图执行 |
 | llm-ui | `src/shell/LLMWorkspaceEditor.ts` | Chat 编辑器 |
 | llm-ui | `src/editors/AgentConfigEditor.ts` | Agent 配置编辑器 |
 | vfs-ui | `src/shell/VFSUIShell.ts` | 文件树 UI 主组件 |

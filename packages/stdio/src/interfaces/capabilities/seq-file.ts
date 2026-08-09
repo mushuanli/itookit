@@ -15,6 +15,29 @@ export interface SeqFileEntry {
     valueType?: 'string' | 'number' | 'boolean' | 'json';
 }
 
+export interface SeqCompareAndSetOptions {
+    expected: string | null;
+    value: string | null;
+}
+
+export interface ISeqFileTransaction {
+    getEntry(fileIdOrPath: string, key: string): Promise<string | null>;
+    setEntry(fileIdOrPath: string, key: string, value: string): Promise<void>;
+    deleteEntry(fileIdOrPath: string, key: string): Promise<void>;
+    compareAndSet(
+        fileIdOrPath: string,
+        key: string,
+        options: SeqCompareAndSetOptions,
+    ): Promise<boolean>;
+    increment(fileIdOrPath: string, key: string, delta?: number): Promise<number>;
+    append(fileIdOrPath: string, prefix: string, value: string): Promise<string>;
+    walkEntries(
+        fileIdOrPath: string,
+        callback: (entry: SeqFileEntry) => boolean | Promise<boolean>,
+        options?: { keyPrefix?: string; limit?: number; offset?: number },
+    ): Promise<{ total: number; processed: number }>;
+}
+
 export interface ISeqFileOperations {
     getEntry(fileIdOrPath: string, key: string): Promise<string | null>;
     getEntries(fileIdOrPath: string, keys: string[]): Promise<Record<string, string>>;
@@ -49,4 +72,7 @@ export interface ISeqFileOperations {
 
     createIndex?(fileIdOrPath: string, field: string): Promise<void>;
     deleteIndex?(fileIdOrPath: string, field: string): Promise<void>;
+
+    /** Execute operations across SeqFiles on this backend atomically. */
+    transaction?<T>(operation: (tx: ISeqFileTransaction) => Promise<T>): Promise<T>;
 }

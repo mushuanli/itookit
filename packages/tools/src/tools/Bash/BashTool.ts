@@ -1,14 +1,7 @@
 // @file: tools/src/tools/Bash/BashTool.ts
 // Shell command execution tool.
 //
-// Factory pattern: createBashTool(shell?) enables the tool in Tauri
-// where node:child_process is unavailable.
-//
-// Execution priority inside call():
-//   1. context.shell (runtime-injected via ToolDeviceDriver.setNativeShell)
-//   2. shell arg     (construction-time injected via createBashTool(shell))
-//   3. Node.js       (child_process.spawn — default for CLI/server)
-//   4. throw         (browser without any shell — tool should be disabled)
+// Platform applications inject INativeShell; this package never spawns processes.
 
 import { z } from 'zod/v4';
 import { buildTool, type ToolDef } from '../../core/Tool';
@@ -107,67 +100,12 @@ function isDangerous(command: string): string | null {
   return null;
 }
 
-// ── Node.js spawn implementation ──
-
-async function spawnNode(
-  command: string,
-  cwd: string,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<Output> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cp = await import('node:child_process' as any);
-  const spawn = cp.spawn as typeof import('node:child_process').spawn;
-
-  return new Promise<Output>((resolve, reject) => {
-    const chunks: string[] = [];
-    let timedOut = false;
-
-    const proc = spawn('sh', ['-c', command], {
-      cwd,
-      env: { ...process.env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      proc.kill();
-    }, timeoutMs);
-
-    const onData = (chunk: Buffer) => {
-      chunks.push(chunk.toString());
-      const total = chunks.reduce((s, c) => s + c.length, 0);
-      if (total > MAX_OUTPUT_CHARS) proc.kill();
-    };
-
-    proc.stdout.on('data', onData);
-    proc.stderr.on('data', onData);
-
-    signal?.addEventListener('abort', () => proc.kill(), { once: true });
-
-    proc.on('close', (code: number | null) => {
-      clearTimeout(timer);
-      let output = chunks.join('');
-      const truncated = output.length > MAX_OUTPUT_CHARS;
-      if (truncated) output = output.slice(0, MAX_OUTPUT_CHARS);
-      if (timedOut) output = `[timeout after ${timeoutMs}ms]\n${output}`;
-      resolve({ stdout: output, exitCode: timedOut ? null : code, truncated });
-    });
-
-    proc.on('error', (err: Error) => {
-      clearTimeout(timer);
-      reject(new Error(`Failed to spawn command: ${err.message}`));
-    });
-  });
-}
-
 // ── Factory ──
 
 /**
  * Create a Bash tool.
  *
- * @param shell - Optional native shell for Tauri environments where
- *   node:child_process is unavailable. The shell's exec() receives
+ * @param shell - Optional application-provided native shell. Its exec() receives
  *   ('sh', ['-c', command]) just like the Node.js path.
  *
  * @example (Tauri)
@@ -208,9 +146,7 @@ export function createBashTool(shell?: INativeShell) {
     },
 
     isEnabled() {
-      // Enabled when: an explicit shell is provided (Tauri), OR Node.js is available.
-      if (shell) return true;
-      return typeof process !== 'undefined' && typeof process.versions?.node === 'string';
+      return Boolean(shell);
     },
 
     async prompt() { return DESCRIPTION; },
@@ -225,31 +161,17 @@ export function createBashTool(shell?: INativeShell) {
 
     async call(input, context) {
       const timeoutMs = input.timeout_ms ?? context.timeoutMs;
-      // Prefer runtime-injected shell, then construction-time shell, then Node.js.
       const sh = context.shell ?? shell;
-
-      if (sh) {
-        const result = await sh.exec('sh', ['-c', input.command], {
-          cwd: context.cwd,
-          timeoutMs,
-          signal: context.signal,
-        });
-        const combined = result.stdout + (result.stderr ? '\n[stderr]\n' + result.stderr : '');
-        const truncated = combined.length > MAX_OUTPUT_CHARS;
-        return {
-          data: {
-            stdout: truncated ? combined.slice(0, MAX_OUTPUT_CHARS) : combined,
-            exitCode: result.code,
-            truncated,
-          },
-        };
-      }
-
-      if (typeof process !== 'undefined' && typeof process.versions?.node === 'string') {
-        return { data: await spawnNode(input.command, context.cwd, timeoutMs, context.signal) };
-      }
-
-      throw new Error('BashTool requires Node.js or a native shell (inject via createBashTool(shell) or ToolDeviceDriver.setNativeShell())');
+      if (!sh) throw new Error('BashTool requires an application-provided native shell');
+      const result = await sh.exec('sh', ['-c', input.command], {
+        cwd: context.cwd, timeoutMs, signal: context.signal,
+      });
+      const combined = result.stdout + (result.stderr ? '\n[stderr]\n' + result.stderr : '');
+      const truncated = combined.length > MAX_OUTPUT_CHARS;
+      return { data: {
+        stdout: truncated ? combined.slice(0, MAX_OUTPUT_CHARS) : combined,
+        exitCode: result.code, truncated,
+      } };
     },
 
     mapToolResultToToolResultBlockParam(output, toolUseID) {
@@ -263,5 +185,5 @@ export function createBashTool(shell?: INativeShell) {
   } satisfies ToolDef<InputSchema, Output>);
 }
 
-/** Default Bash tool instance (Node.js mode, disabled in browsers). */
+/** Default disabled instance; applications enable Bash by injecting INativeShell. */
 export const BashTool = createBashTool();

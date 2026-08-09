@@ -550,7 +550,7 @@ const file = fs.openFile(nodeId);
 |---|---|---|
 | `app-settings/SettingsEngine` | 已实现 IModuleFS（v4.0 去除旧委托桩） | ~~中~~ → ✅ |
 | `app-settings/SkillsEngine` | 已实现 IModuleFS（v4.0 去除旧委托桩） | ~~中~~ → ✅ |
-| `llm-engine/ChatEngine` | `IChatEngine extends IFSEngine`，需专项设计 | 高 |
+| `llm-runtime/ChatEngine` | `IChatEngine extends IFSEngine`，需专项设计 | 高 |
 | `vfs-ui/tests` | 测试 fixtures 引用 `EngineNode` | 低 |
 
 ---

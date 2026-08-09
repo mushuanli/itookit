@@ -2,7 +2,7 @@
 //
 // Phase 2 (WP-03): Defines the data model for per-branch context rules and
 // the frozen ContextSnapshot that represents what an AgentTask actually sees.
-// These types live in common because they are consumed by both llm-engine
+// These types live in common because they are consumed by both llm-runtime
 // (ContextAssembler) and UI layers (Context Drawer).
 
 import type { RoundId, RefName } from './conversation';

@@ -7,7 +7,7 @@
 
 ### 当前实施状态（2026-07-23）
 
-已完成并通过 workspace 全量类型检查、`pnpm build:libs`、llm-engine 构建和 40 项引擎测试：
+已完成并通过 workspace 全量类型检查、`pnpm build:libs`、llm-runtime 构建和 40 项引擎测试：
 
 - v3 contracts、ID parser、FlowRevision 校验/digest、AgentDefinition exact-version registry。
 - TaskGraphRun/TaskRun/Attempt、runtime edge state、五种 Join、稳定 multi-input、Route/Transform/Reduce/Human/Subflow/Spawn executor。
@@ -1041,7 +1041,7 @@ Context Drawer 仅在 AgentTask 上出现，提供 preview/freeze/explain。非 
 - 删除 AgentRun 中心的 Goal/Scheduler 公共接口。
 - 不包含具体 Store、Executor 或 UI 实现。
 
-### 15.2 `packages/llm-engine`
+### 15.2 `packages/llm-runtime`
 
 - `task-graph/`：TaskGraphCompiler、DependencyScheduler、Reconciler、TaskExecutorRegistry。
 - `persistence/`：TaskGraphEventStore、TaskGraphSnapshotStore、ArtifactStore、AgentStateStore、FlowDefinitionStore。

@@ -6,12 +6,10 @@ import {
 } from '@itookit/common';
 import { EventBus } from '@itookit/stdio';
 import type {
-    HarnessControlPlane,
     ILLMService,
     ICommandBus,
-    RunEventEnvelope,
-    WaitCondition,
 } from '@itookit/common';
+import type { EventEnvelope, Harness, InteractionRequest, JsonValue } from '@itookit/harness';
 
 import {
     IChatEngine, IAgentConfigService, SessionManager, getSessionManager,
@@ -84,8 +82,8 @@ export interface LLMEditorOptions extends EditorOptions {
      * 所有高层操作通过 commands.execute('session.*') / 'vcs.*' 调用。
      */
     commandBus?: ICommandBus;
-    /** Harness control plane used to attach to process runs. */
-    controlPlane?: HarnessControlPlane;
+    /** Durable Harness used to attach to Tasks. */
+    harness?: Harness;
 }
 
 /**
@@ -443,9 +441,9 @@ export class LLMWorkspaceEditor implements IEditor {
             chatInput: this.chatInput,
             branchStore: this.branchStore,
             getCurrentSessionId: () => this.currentSessionId,
-            onExecutionRun: runId => {
-                void this.runAttachment?.attach(runId).catch(error =>
-                    Toast.error(error instanceof Error ? error.message : 'Unable to attach execution run'),
+            onExecutionTask: taskId => {
+                void this.runAttachment?.attach(taskId).catch(error =>
+                    Toast.error(error instanceof Error ? error.message : 'Unable to attach execution task'),
                 );
             },
             onContentChanged: () => this.emit('change', undefined),
@@ -454,28 +452,24 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private initRunAttachment(): void {
-        if (!this.options.controlPlane) return;
-        this.runAttachment = new RunAttachmentController(this.options.controlPlane, {
+        if (!this.options.harness) return;
+        this.runAttachment = new RunAttachmentController(this.options.harness, {
             onEvent: event => this.handleRunEvent(event),
             onWaiting: condition => this.handleRunWaiting(condition),
             onError: error => Toast.error(error.message),
         });
     }
 
-    private handleRunEvent(event: RunEventEnvelope): void {
-        if (event.event.type !== 'run:status') return;
-        const status = event.event.status;
-        if (status === 'completed') this.statusIndicator.update('completed');
-        else if (status === 'failed' || status === 'cancelled') {
-            this.statusIndicator.update(status === 'failed' ? 'failed' : 'idle');
-        } else {
-            this.statusIndicator.update(status === 'ready' ? 'queued' : 'running');
-        }
+    private handleRunEvent(event: EventEnvelope): void {
+        if (event.type === 'task.succeeded') this.statusIndicator.update('completed');
+        else if (event.type === 'task.failed' || event.type === 'task.cancelled') {
+            this.statusIndicator.update(event.type === 'task.failed' ? 'failed' : 'idle');
+        } else if (event.type === 'task.ready') this.statusIndicator.update('queued');
+        else if (event.type.startsWith('task.')) this.statusIndicator.update('running');
     }
 
-    private handleRunWaiting(condition: WaitCondition): void {
-        if (condition.type !== 'human-signal') return;
-        Toast.info(condition.prompt);
+    private handleRunWaiting(request: InteractionRequest<JsonValue>): void {
+        Toast.info(request.prompt);
     }
 
     private buildCommandContext(): CommandContext {
@@ -902,8 +896,8 @@ export class LLMWorkspaceEditor implements IEditor {
     // ── Q3: Mid-execution user injection ─────────────────────────────────────
 
     injectIntoRunningHarness(message: string): boolean {
-        if (!this.runAttachment?.activeRunId) return false;
-        void this.runAttachment.signal({ type: 'inject', text: message })
+        if (!this.runAttachment?.activeTaskId) return false;
+        void this.runAttachment.signal({ type: 'inject', payload: { text: message } })
             .catch(error => Toast.error(error instanceof Error ? error.message : String(error)));
         return true;
     }

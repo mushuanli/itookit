@@ -5,7 +5,20 @@
  * v4.1: 简化为 path-based 统一接口，放弃 IInodeStore/IMetaStore/IContentStore 三层分离。
  */
 
-import type { IStorageBackend, FSNode, FSFileNode, FSDirectoryNode, FSSearchQuery } from '../../protocol';
+import type {
+    IStorageBackend,
+    FSNode,
+    FSFileNode,
+    FSDirectoryNode,
+    FSSearchQuery,
+    IRecordStore,
+    IRecordTransaction,
+    RecordValue,
+    RecordQuery,
+    RecordQueryOptions,
+    RecordQueryResult,
+    RecordWalkOptions,
+} from '../../protocol';
 
 interface Entry {
     type: 'file' | 'directory';
@@ -30,6 +43,7 @@ const ROOT_ENTRY: Entry = Object.freeze({
 
 export class MemoryBackend implements IStorageBackend {
     readonly name = 'memory';
+    readonly records = new MemoryRecordStore();
     private data = new Map<string, Entry>();
 
     async init(): Promise<void> {
@@ -38,6 +52,7 @@ export class MemoryBackend implements IStorageBackend {
 
     async close(): Promise<void> {
         this.data.clear();
+        this.records.clear();
     }
 
     // ── Structure ──
@@ -198,6 +213,118 @@ export class MemoryBackend implements IStorageBackend {
 
     async transaction<T>(fn: (tx: IStorageBackend) => Promise<T>): Promise<T> {
         return fn(this); // Memory backend: no isolation
+    }
+}
+
+class MemoryRecordStore implements IRecordStore, IRecordTransaction {
+    private fields = new Map<string, Map<string, RecordValue>>();
+    private tail: Promise<void> = Promise.resolve();
+
+    clear(): void { this.fields.clear(); }
+
+    async getRecordField(path: string, field: string): Promise<RecordValue | undefined> {
+        return structuredClone(this.fields.get(path)?.get(field));
+    }
+
+    async setRecordField(path: string, field: string, value: RecordValue): Promise<void> {
+        const row = this.fields.get(path) ?? new Map<string, RecordValue>();
+        row.set(field, structuredClone(value));
+        this.fields.set(path, row);
+    }
+
+    async deleteRecordField(path: string, field: string): Promise<void> {
+        this.fields.get(path)?.delete(field);
+    }
+
+    async setAllRecordFields(path: string, fields: Record<string, RecordValue>): Promise<void> {
+        this.fields.set(path, new Map(Object.entries(structuredClone(fields))));
+    }
+
+    async clearRecordFields(path: string): Promise<void> { this.fields.delete(path); }
+    async createRecordIndex(): Promise<void> {}
+    async deleteRecordIndex(): Promise<void> {}
+
+    async queryRecordFields(
+        path: string,
+        query: RecordQuery,
+        options?: RecordQueryOptions,
+    ): Promise<RecordQueryResult[]> {
+        const value = this.fields.get(path)?.get(query.field);
+        if (value === undefined || !matchesRecord(value, query)) return [];
+        const rows = [{ field: query.field, value: structuredClone(value) }];
+        return rows.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? rows.length));
+    }
+
+    async walkRecordFields(
+        path: string,
+        callback: (field: string, value: RecordValue) => boolean | Promise<boolean>,
+        options?: RecordWalkOptions,
+    ): Promise<{ total: number; processed: number }> {
+        const prefix = options?.prefix ?? '';
+        const rows = [...(this.fields.get(path)?.entries() ?? [])]
+            .filter(([field]) => field.startsWith(prefix))
+            .sort(([left], [right]) => left.localeCompare(right));
+        let processed = 0;
+        const offset = options?.offset ?? 0;
+        const limit = options?.limit ?? Number.POSITIVE_INFINITY;
+        for (const [field, value] of rows.slice(offset)) {
+            if (processed >= limit || !(await callback(field, structuredClone(value)))) break;
+            processed++;
+        }
+        return { total: rows.length, processed };
+    }
+
+    async walkRecordFieldNames(
+        path: string,
+        callback: (field: string) => boolean | Promise<boolean>,
+        options?: { prefix?: string; limit?: number },
+    ): Promise<number> {
+        let processed = 0;
+        await this.walkRecordFields(path, async field => {
+            if (!(await callback(field))) return false;
+            processed++;
+            return true;
+        }, options);
+        return processed;
+    }
+
+    transaction<T>(operation: (tx: IRecordTransaction) => Promise<T>): Promise<T> {
+        const run = async (): Promise<T> => {
+            const original = this.fields;
+            this.fields = cloneFields(original);
+            try {
+                return await operation(this);
+            } catch (error) {
+                this.fields = original;
+                throw error;
+            }
+        };
+        const result = this.tail.then(run, run);
+        this.tail = result.then(() => undefined, () => undefined);
+        return result;
+    }
+}
+
+function cloneFields(source: Map<string, Map<string, RecordValue>>): Map<string, Map<string, RecordValue>> {
+    return new Map([...source].map(([path, fields]) => [
+        path,
+        new Map([...fields].map(([key, value]) => [key, structuredClone(value)])),
+    ]));
+}
+
+function matchesRecord(value: RecordValue, query: RecordQuery): boolean {
+    const expected = query.value;
+    switch (query.operator) {
+        case '=': return value === expected;
+        case '!=': return value !== expected;
+        case '<': return typeof value === 'number' && typeof expected === 'number' && value < expected;
+        case '<=': return typeof value === 'number' && typeof expected === 'number' && value <= expected;
+        case '>': return typeof value === 'number' && typeof expected === 'number' && value > expected;
+        case '>=': return typeof value === 'number' && typeof expected === 'number' && value >= expected;
+        case 'in': return Array.isArray(expected) && expected.includes(value);
+        case 'contains': return typeof value === 'string' && typeof expected === 'string'
+            ? value.includes(expected)
+            : Array.isArray(value) && value.includes(expected);
     }
 }
 

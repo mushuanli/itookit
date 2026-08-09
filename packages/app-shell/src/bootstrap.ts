@@ -2,7 +2,7 @@ import { FileTypeDefinition, type VFSNodeUI } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem, formatDefaultFileTitle } from '@itookit/common';
 import type { SkillDefinition, ToolVFSContext } from '@itookit/common';
 import type { IVFSManager, FSNode } from '@itookit/stdio';
-import { createVFS } from '@itookit/stdio';
+import { createVFS, FS_MODULE_CHAT } from '@itookit/stdio';
 import { createSettingsModule, createSettingsFactory, type LLMUIEditors } from '@itookit/app-settings';
 import {
     createLLMFactory,
@@ -17,16 +17,19 @@ import {
 import {
     initializeConversationSystem,
     ChatEngine,
+    ChatHarnessStorageResolver,
+    createBuiltinDagPluginRegistry,
     chatFileParser,
 } from '@itookit/llm-conversation';
 import type { SessionManager } from '@itookit/llm-conversation';
 import { Workbench } from './core/Workbench';
 import { LLMDeviceDriver } from '@itookit/device-llm';
-import { createHarness, type HarnessInstance } from '@itookit/llm-harness';
+import { Harness } from '@itookit/harness';
+import { createCoreutilsRuntime } from '@itookit/coreutils';
 import { SkillsEngine } from '@itookit/app-settings';
 import { createSkillsEditorFactory } from '@itookit/llm-ui';
 
-import { AppOptions, AppHandle, WorkspaceConfig } from './types';
+import { AppOptions, AppHandle, WorkspaceConfig, type AppHarnessRuntime } from './types';
 import {
     StandardWorkspaceStrategy,
     SettingsWorkspaceStrategy,
@@ -183,7 +186,7 @@ function createVFSToolContext(vfsManager: IVFSManager): ToolVFSContext {
 
 async function syncSkillsToHarness(
     llmDriver: LLMDeviceDriver,
-    harness: HarnessInstance,
+    harness: AppHarnessRuntime,
 ): Promise<void> {
     const skills = await llmDriver.getSkills() as SkillDefinition[];
     const harnessIds = new Set(harness.skillService.getSkillNames());
@@ -202,7 +205,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const { backend, additionalMounts, defaultSlug, routeAliases = {}, onProgress, llmLogger } = options;
     const t0 = performance.now();
     let t = t0;
-    const cleanupFns: Array<() => void> = [];
+    const cleanupFns: Array<() => void | Promise<void>> = [];
     const logStep = (label: string) => {
         const now = performance.now();
         console.log(`[Boot] ${label}: +${(now - t).toFixed(0)}ms (累计 ${(now - t0).toFixed(0)}ms)`);
@@ -286,13 +289,31 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const agentService   = new VFSAgentService(vfs, llmDriver);
     const chatEngine     = new ChatEngine(vfs);
 
-    // Harness kernel with resource ports, schedulers, and built-in DAG plugins.
+    // Durable Harness with application-owned capability injection.
     ts = performance.now();
     const vfsResourcePort = createVFSToolContext(vfs);
-    const harness = await createHarness({
+    const coreutils = await createCoreutilsRuntime({
         llmDriver,
-        vfsPort: vfsResourcePort,
-        maxConcurrentProcesses: 20,
+        runMode: 'harness',
+        skillSource: options.harnessPlatform?.skillSource,
+        skillToolHandlerFactory: options.harnessPlatform?.skillToolHandlerFactory,
+    });
+    const kernel = new Harness({
+        catalog: { fs: vfs.getEngine(FS_MODULE_CHAT) },
+        maxConcurrent: 20,
+    });
+    kernel.registerStorageResolver(new ChatHarnessStorageResolver(chatEngine));
+    await kernel.use(coreutils.plugin);
+    await kernel.initialize();
+    await kernel.recover();
+    const harness: AppHarnessRuntime = Object.assign(coreutils, {
+        kernel,
+        dagPlugins: createBuiltinDagPluginRegistry(),
+    });
+    await options.harnessPlatform?.configure?.(harness);
+    cleanupFns.push(async () => {
+        kernel.dispose();
+        await coreutils.dispose();
     });
     console.log(`[Boot]   ↳ createHarness: +${(performance.now() - ts).toFixed(0)}ms`);
 
@@ -310,24 +331,25 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         llmDriver.onChange(() => { syncSkillsToHarness(llmDriver, harness).catch(() => {}); })
     );
 
-    // Initialize file-system skill scope (Node.js / Tauri only; browser gracefully no-ops).
-    // Scans _agent/skills/ directories from project root to CWD and registers FS skills.
-    const cwd = typeof process !== 'undefined' && typeof process.cwd === 'function'
-        ? process.cwd()
-        : null;
-    if (cwd) {
-        ts = performance.now();
-        await harness.skillService.setCwd(cwd).catch(() => {});
-        console.log(`[Boot]   ↳ setCwd: +${(performance.now() - ts).toFixed(0)}ms`);
-    }
     logIO('core services');
 
     logStep('初始化 LLM 引擎…');
     const { sessionManager, commandBus } = await initializeConversationSystem({
         agentService,
         sessionEngine: chatEngine,
-        processHost:         harness.kernel,
+        harness:             harness.kernel,
         dagPlugins:          harness.dagPlugins,
+        resolveTools: async (sessionId, allowedIds) => {
+            const tools = (await harness.sessions.get(sessionId)).toolService;
+            const allowed = new Set(allowedIds);
+            return {
+                definitions: tools.getToolDefinitions().filter(definition => {
+                    const name = definition.function?.name ?? definition.name;
+                    return Boolean(name && allowed.has(name));
+                }),
+                externalIds: allowedIds.filter(id => tools.getToolMeta(id)?.sideEffect === 'external'),
+            };
+        },
     });
 
     const llmUiEditors: LLMUIEditors = {
@@ -348,9 +370,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 chatEngine,
                 llmService: harness.llmService,
                 commandBus,
-                controlPlane: harness.kernel,
+                harness: harness.kernel,
             }
-            : { chatEngine, commandBus, controlPlane: harness.kernel },
+            : { chatEngine, commandBus, harness: harness.kernel },
     );
     const agentFactory    = createAgentEditorFactory(agentService);
 
@@ -739,9 +761,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             registerWorkspaceRoute(config);
         },
 
-        destroy(): void {
-            for (const fn of cleanupFns) {
-                try { fn(); } catch { /* ignore */ }
+        async destroy(): Promise<void> {
+            for (const fn of [...cleanupFns].reverse()) {
+                try { await fn(); } catch (error) { console.error('[App] Cleanup failed', error); }
             }
             cleanupFns.length = 0;
         },

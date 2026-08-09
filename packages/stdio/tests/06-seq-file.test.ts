@@ -89,6 +89,36 @@ describe('SeqFile operations (IndexedDB backend)', () => {
         expect(await vfs.fs.meta.seq!.getEntry(p, 'keep')).toBe('here');
     });
 
+    it('transaction atomically updates multiple seqfiles', async () => {
+        const left = await mkSeq('tx-left.seq');
+        const right = await mkSeq('tx-right.seq');
+        await vfs.fs.meta.seq!.transaction!(async tx => {
+            await tx.setEntry(left, 'state', 'ready');
+            await tx.setEntry(right, 'state', 'waiting');
+        });
+        expect(await vfs.fs.meta.seq!.getEntry(left, 'state')).toBe('ready');
+        expect(await vfs.fs.meta.seq!.getEntry(right, 'state')).toBe('waiting');
+    });
+
+    it('transaction rolls back and compareAndSet is conditional', async () => {
+        const path = await mkSeq('tx-rollback.seq');
+        await vfs.fs.meta.seq!.setEntry(path, 'version', '1');
+        await expect(vfs.fs.meta.seq!.transaction!(async tx => {
+            expect(await tx.compareAndSet(path, 'version', { expected: '1', value: '2' })).toBe(true);
+            throw new Error('rollback');
+        })).rejects.toThrow('rollback');
+        expect(await vfs.fs.meta.seq!.getEntry(path, 'version')).toBe('1');
+    });
+
+    it('append allocates monotonic ordered keys', async () => {
+        const path = await mkSeq('tx-append.seq');
+        const keys = await vfs.fs.meta.seq!.transaction!(async tx => [
+            await tx.append(path, 'event/', 'first'),
+            await tx.append(path, 'event/', 'second'),
+        ]);
+        expect(keys[0] < keys[1]).toBe(true);
+    });
+
     it('queryEntries with equality operator', async () => {
         const p = await mkSeq('query.seq');
         await vfs.fs.meta.seq!.setEntries(p, { status: 'active', color: 'blue', role: 'admin' });

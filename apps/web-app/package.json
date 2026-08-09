@@ -22,6 +22,7 @@
     "@itookit/app-shell": "workspace:*",
     "@itookit/app-settings": "workspace:*",
     "@itookit/common": "workspace:*",
+    "@itookit/coreutils": "workspace:*",
     "@itookit/device-llm": "workspace:*",
     "@itookit/llm-conversation": "workspace:*",
     "@itookit/llm-ui": "workspace:*",

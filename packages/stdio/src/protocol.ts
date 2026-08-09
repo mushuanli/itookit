@@ -109,12 +109,17 @@ export type {
     RecordQueryOptions,
     RecordQueryResult,
     RecordWalkOptions,
+    IRecordTransaction,
     IRecordStore,
 } from './interfaces/storage';
 export { hasRecordStore } from './interfaces/storage';
 
 // ── 能力子接口 ──
-export type { ISeqFileOperations } from './interfaces/capabilities/seq-file';
+export type {
+    ISeqFileOperations,
+    ISeqFileTransaction,
+    SeqCompareAndSetOptions,
+} from './interfaces/capabilities/seq-file';
 export type { IAssetOperations } from './interfaces/capabilities/asset-ops';
 export type { TagDefinition, ITagOperations } from './interfaces/capabilities/tag-ops';
 export type { RefQueryOptions, IRefOperations } from './interfaces/capabilities/ref-ops';

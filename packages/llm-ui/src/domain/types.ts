@@ -157,8 +157,8 @@ export interface ChatOverrides {
 /**
  * UI 层 token 用量快照，由 TokenMeterPlugin 显示。
  *
- * 对应 llm-engine 的 SessionTokenUsage，以 re-export 为主——
- * 但 UI 层使用此独立副本，避免直接依赖 llm-engine。
+ * 对应 llm-runtime 的 SessionTokenUsage，以 re-export 为主——
+ * 但 UI 层使用此独立副本，避免直接依赖 llm-runtime。
  */
 export interface TokenStats {
     inputTokens: number;

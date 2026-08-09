@@ -603,12 +603,12 @@ globs:
 
 | 文件 | 内容 |
 |------|------|
-| `packages/llm-harness/src/drivers/skill-device-driver.ts` | `SkillDeviceDriver` — 实现 `ISkillService` + 四层路由 + 作用域 |
+| `packages/coreutils/src/skill/skill-device-driver.ts` | `SkillDeviceDriver` — 实现 `ISkillService` + 四层路由 + 作用域 |
 | `packages/llm-harness/src/executor/context-manager.ts` | `ContextManager` — 系统 Prompt 构建 + 压缩保护 |
-| `packages/llm-harness/src/tools/load-skill.ts` | `load_skill` 工具 — 拒绝 L1 action skills |
-| `packages/llm-harness/src/skills/fs-skill-loader.ts` | 文件系统扫描 + 作用域继承链 |
-| `packages/llm-harness/src/skills/compact-extractor.ts` | Compact Instructions 提取 + 聚合 |
-| `packages/llm-harness/src/skills/glob-matcher.ts` | Glob → RegExp 匹配器 |
+| `packages/coreutils/src/tool/load-skill.ts` | `load_skill` 工具 — 拒绝 L1 action skills |
+| `packages/coreutils/src/skill/fs-skill-loader.ts` | 文件系统扫描 + 作用域继承链 |
+| `packages/coreutils/src/skill/compact-extractor.ts` | Compact Instructions 提取 + 聚合 |
+| `packages/coreutils/src/skill/glob-matcher.ts` | Glob → RegExp 匹配器 |
 | `packages/llm-harness/src/skills/subagent-skill-bridge.ts` | 子代理委托提示生成 |
 | `packages/llm-harness/src/skills/correction-log.ts` | 修正日志读写 + prompt 注入 |
 | `packages/app-shell/src/bootstrap.ts` | `initApp()` + `syncSkillsToHarness()` + 初始 CWD 设置 |

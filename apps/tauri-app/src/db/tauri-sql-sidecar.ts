@@ -68,6 +68,14 @@ const DDL_STATEMENTS = [
     )`,
     'CREATE INDEX IF NOT EXISTS idx_meta_tags_tag ON meta_tags(tag)',
 
+    `CREATE TABLE IF NOT EXISTS records (
+        path TEXT NOT NULL,
+        field TEXT NOT NULL,
+        value TEXT NOT NULL,
+        PRIMARY KEY (path, field)
+    )`,
+    'CREATE INDEX IF NOT EXISTS idx_records_path ON records(path, field)',
+
 ];
 
 export class TauriSqlSidecarDb implements ISidecarDb {
@@ -196,6 +204,38 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         return rows.map(r => r.path);
     }
 
+    async getRecordField(path: string, field: string): Promise<unknown | undefined> {
+        const rows = await this.db.select<Array<{ value: string }>>(
+            'SELECT value FROM records WHERE path = ? AND field = ?', [path, field],
+        );
+        return rows[0] ? JSON.parse(rows[0].value) : undefined;
+    }
+
+    async setRecordField(path: string, field: string, value: unknown): Promise<void> {
+        await this.db.execute(
+            `INSERT INTO records(path, field, value) VALUES (?, ?, ?)
+             ON CONFLICT(path, field) DO UPDATE SET value = excluded.value`,
+            [path, field, JSON.stringify(value)],
+        );
+    }
+
+    async deleteRecordField(path: string, field: string): Promise<void> {
+        await this.db.execute('DELETE FROM records WHERE path = ? AND field = ?', [path, field]);
+    }
+
+    async listRecordFields(path: string, prefix = ''): Promise<Array<{ field: string; value: unknown }>> {
+        const rows = await this.db.select<Array<{ field: string; value: string }>>(
+            `SELECT field, value FROM records
+             WHERE path = ? AND field LIKE ? ESCAPE '\\' ORDER BY field`,
+            [path, `${escapeLike(prefix)}%`],
+        );
+        return rows.map(row => ({ field: row.field, value: JSON.parse(row.value) }));
+    }
+
+    async clearRecordFields(path: string): Promise<void> {
+        await this.db.execute('DELETE FROM records WHERE path = ?', [path]);
+    }
+
     // ── health ─────────────────────────────────────────────────────────────────
 
     async healthCheck(): Promise<{ ok: boolean; error?: string }> {
@@ -237,4 +277,8 @@ export class TauriSqlSidecarDb implements ISidecarDb {
     async close(): Promise<void> {
         await this.db.close();
     }
+}
+
+function escapeLike(value: string): string {
+    return value.replace(/[\\%_]/g, match => `\\${match}`);
 }

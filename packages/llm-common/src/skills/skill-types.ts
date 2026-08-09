@@ -47,6 +47,12 @@ export interface SkillCorrectionLog {
     enabled: boolean;
 }
 
+/** Durable program implemented and registered by a Skill plugin. */
+export interface SkillTaskProgramRef {
+    kind: string;
+    version: string;
+}
+
 /**
  * Glob 空间联动模式配置。
  *
@@ -208,6 +214,9 @@ export interface SkillDefinition {
 
     /** Subagent 角色标识（与 buildSubagentSystemPrompt 配合使用） */
     subagentRole?: string;
+
+    /** 多步 Skill 的 Durable TaskProgram；未设置时 Skill 仅提供指令和工具。 */
+    taskProgram?: SkillTaskProgramRef;
 }
 
 /**
@@ -222,7 +231,7 @@ export interface SkillToolBinding {
     definition: ToolDefinition;
     /**
      * 执行方式：
-     * - 'builtin':   由 llm-harness 内置工具处理（已注册，skill 只是引用）
+     * - 'builtin':   由 coreutils 注册的内置工具处理（skill 只保存引用）
      * - 'http':      HTTP 调用 skill 的 endpoint
      * - 'shell':     本地 Shell 命令，支持 {{argName}} 模板替换
      * - 'handler':   由 Skill 自身的 handler 函数处理（预留）

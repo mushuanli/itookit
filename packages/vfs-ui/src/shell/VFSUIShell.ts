@@ -8,6 +8,7 @@ import {
   ISessionUI,
   type SessionUIOptions,
   type EditorFactory,
+  formatDefaultFileTitle,
   generateShortUUID,
 } from '@itookit/common';
 import type { IModuleFS } from '@itookit/stdio';
@@ -175,8 +176,12 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
     const startup = this.options.fileCreation;
     if (!state.items.length && !this.options.readOnly && startup?.startupFileName) {
       try {
+        // Title uses the timestamped default (formatDefaultFileTitle) so the
+        // startup file isn't a fixed name that can collide with a stale file
+        // from a previous run. The registry supplies defaultExtension, so
+        // VFSService appends the correct suffix (e.g. ".chat").
         await this.vfsService.createFile({
-          title: startup.startupFileName,
+          title: formatDefaultFileTitle(),
           content: startup.startupContent ?? (startup.startupFileName?.endsWith('.chat') ? '' : '# Welcome\n\nSelect a file to start.'),
           parentPath: null,
         });

@@ -8,7 +8,8 @@ export default defineConfig({
   sourcemap: true,
   external: [
     '@itookit/common',
-    '@itookit/llm-engine',
+    '@itookit/harness',
+    '@itookit/llm-runtime',
     '@itookit/stdio',
     'yaml',
   ],

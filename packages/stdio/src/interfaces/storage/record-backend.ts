@@ -40,6 +40,18 @@ export interface RecordWalkOptions {
     offset?: number;
 }
 
+/** Atomic record operations scoped to one storage backend. */
+export interface IRecordTransaction {
+    getRecordField(path: string, field: string): Promise<RecordValue | undefined>;
+    setRecordField(path: string, field: string, value: RecordValue): Promise<void>;
+    deleteRecordField(path: string, field: string): Promise<void>;
+    walkRecordFields(
+        path: string,
+        callback: (field: string, value: RecordValue) => boolean | Promise<boolean>,
+        options?: RecordWalkOptions,
+    ): Promise<{ total: number; processed: number }>;
+}
+
 export interface IRecordStore {
     getRecordField(path: string, field: string): Promise<RecordValue | undefined>;
     setRecordField(path: string, field: string, value: RecordValue): Promise<void>;
@@ -74,4 +86,7 @@ export interface IRecordStore {
         callback: (field: string) => boolean | Promise<boolean>,
         options?: { prefix?: string; limit?: number },
     ): Promise<number>;
+
+    /** Execute record operations as one serializable transaction. */
+    transaction?<T>(operation: (tx: IRecordTransaction) => Promise<T>): Promise<T>;
 }

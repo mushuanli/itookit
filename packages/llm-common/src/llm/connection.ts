@@ -82,12 +82,13 @@ export type ModelTier = 'optimal' | 'standard' | 'fast';
  * （如 DeepSeek 同时支持 OpenAI Chat Completions 和 Anthropic Messages 格式）。
  *
  * - `openai-chat`        — OpenAI Chat Completions API (/v1/chat/completions)
+ * - `openai-responses`   — OpenAI Responses API (/responses，input items + output[])
  * - `anthropic-messages` — Anthropic Messages API (/v1/messages)
  * - `gemini-generate`    — Google Gemini generateContent API
  *
  * 未设置时由 `resolveProtocol()` 按 URL + provider 名自动推断，向后兼容。
  */
-export type ApiProtocol = 'openai-chat' | 'anthropic-messages' | 'gemini-generate';
+export type ApiProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-generate';
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 

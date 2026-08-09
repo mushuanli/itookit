@@ -1,6 +1,6 @@
 // @file app-settings/types.ts
 
-// LLM 相关类型直接从 common 导入，避免对 device-llm / llm-engine 的间接依赖
+// LLM 相关类型直接从 common 导入，避免对 device-llm / llm-runtime 的间接依赖
 import type { LLMConnection, MCPServer } from '@itookit/common';
 
 // 向后兼容重新导出

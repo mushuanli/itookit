@@ -3,22 +3,32 @@ import type {
     DagPluginPresentation,
     FlowDraft,
     FlowRevision,
-    HarnessControlPlane,
     ICommandBus,
-    RunHandle,
+    ToolDefinition,
 } from '@itookit/common';
+import type { Harness, TaskSnapshot } from '@itookit/harness';
 import type { FlowDefinitionStore } from '../persistence/flow-definition-store';
 import { flowToDag } from './to-dag';
 import { validateFlowRevision } from './validation';
+import { DurableFlowExecutor, type FlowExecutionHandle } from './executor';
 
 export interface DagCommandServiceOptions {
     flowStore: FlowDefinitionStore;
-    controlPlane: HarnessControlPlane;
+    harness: Harness;
     plugins: DagPluginCatalog;
+    resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
+        definitions: ToolDefinition[];
+        externalIds: string[];
+    }>;
+}
+
+export interface DurableFlowSnapshot {
+    root: TaskSnapshot;
+    nodes: Array<{ nodeId: string; snapshot: TaskSnapshot }>;
 }
 
 export class DagCommandService {
-    private readonly handles = new Map<string, RunHandle>();
+    private readonly handles = new Map<string, FlowExecutionHandle>();
 
     constructor(private readonly options: DagCommandServiceOptions) {}
 
@@ -26,34 +36,44 @@ export class DagCommandService {
         registerDraftCommands(bus, this.options.flowStore, this.options.plugins);
         bus.register('plugin.dag.presentations', async () =>
             loadPresentations(this.options.plugins));
-        bus.register('dag.run.start', async args => this.start((args as { flow: FlowRevision }).flow));
-        bus.register('dag.run.get', async args => this.snapshot(String((args as { runId: string }).runId)));
-        bus.register('dag.run.cancel', async args => this.cancel(String((args as { runId: string }).runId)));
+        bus.register('dag.run.start', async args => {
+            const input = args as { sessionId: string; flow: FlowRevision };
+            return this.start(input.sessionId, input.flow);
+        });
+        bus.register('dag.run.get', async args => this.snapshot(String((args as { taskId: string }).taskId)));
+        bus.register('dag.run.cancel', async args => this.cancel(String((args as { taskId: string }).taskId)));
     }
 
-    private async start(flow: FlowRevision) {
+    private async start(sessionId: string, flow: FlowRevision) {
+        if (!sessionId) throw new Error('DAG run requires sessionId');
         const issues = validateFlowRevision(flow, this.options.plugins);
         if (issues.length) throw new Error(issues.map(issue => issue.message).join('; '));
-        const handle = await this.options.controlPlane.submit({
-            scheduler: 'dag',
-            spec: flowToDag(flow),
-        });
-        this.handles.set(handle.runId, handle);
-        return { runId: handle.runId };
+        const handle = await new DurableFlowExecutor(this.options).submit(sessionId, flowToDag(flow));
+        this.handles.set(handle.root.id, handle);
+        return { taskId: handle.root.id };
     }
 
-    private async snapshot(runId: string) {
-        const handle = this.handles.get(runId)
-            ?? await this.options.controlPlane.attach(runId);
-        this.handles.set(runId, handle);
-        return handle.snapshot();
+    private async snapshot(taskId: string): Promise<DurableFlowSnapshot> {
+        const handle = this.requireHandle(taskId);
+        return {
+            root: await handle.root.status(),
+            nodes: await Promise.all([...handle.nodes].map(async ([nodeId, task]) => ({
+                nodeId, snapshot: await task.status(),
+            }))),
+        };
     }
 
-    private async cancel(runId: string) {
-        const handle = this.handles.get(runId)
-            ?? await this.options.controlPlane.attach(runId);
-        await handle.cancel();
-        return { runId, cancelled: true };
+    private async cancel(taskId: string) {
+        const handle = this.requireHandle(taskId);
+        await Promise.all([...handle.nodes.values()].map(task => task.cancel()));
+        await handle.root.cancel();
+        return { taskId, cancelled: true };
+    }
+
+    private requireHandle(taskId: string): FlowExecutionHandle {
+        const handle = this.handles.get(taskId);
+        if (!handle) throw new Error(`DAG task is not attached: ${taskId}`);
+        return handle;
     }
 }
 

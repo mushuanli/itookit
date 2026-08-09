@@ -19,8 +19,7 @@ export interface NativeShellResult {
  * Injected into ToolUseContext so tools can use rg/fd/sh without knowing
  * the execution environment.
  *
- * Node.js: implement with child_process.spawn → createNodeNativeShell()
- * Tauri:   implement with invoke('search_ripgrep') → TauriNativeShell.create()
+ * Platform applications provide implementations and inject them at assembly time.
  */
 export interface INativeShell {
   /**
@@ -78,7 +77,7 @@ export interface ToolUseContext {
   /** Virtual filesystem access (browser environments). */
   vfs?: ToolVFSContext;
   /**
-   * Native shell for command execution (Node.js or Tauri).
+   * Native shell for command execution supplied by the owning application.
    * When present, search tools (Grep, Glob) prefer rg/fd over manual FS walking.
    * BashTool uses this to execute commands in Tauri where node:child_process is unavailable.
    *

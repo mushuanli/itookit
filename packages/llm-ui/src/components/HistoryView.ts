@@ -339,8 +339,13 @@ export class HistoryView implements IHistoryPresenter {
 
             case 'error': {
                 this.exitStreamingMode();
-                const msg = e.payload?.message ?? e.error?.message ?? 'Unknown error';
-                const code = e.payload?.code ?? e.error?.code;
+                // SessionEventBus 会把 canonical AgentEvent（扁平字段）重建为
+                // { type, payload } 包装（session-event-bus.ts），所以错误信息
+                // 从 payload.error 读取；保留 payload.message 与扁平字段 fallback，
+                // 兼容两种事件形态。
+                const err = e.payload?.error;
+                const msg = e.payload?.message ?? err?.message ?? 'Unknown error';
+                const code = e.payload?.code ?? err?.code;
                 const prefix = code === 401 ? '🔐 ' : code === 429 ? '⏳ ' : '';
                 this.appendErrorBubble(new Error(`${prefix}${msg}`));
                 this.renderer.editors.forEach(editor => editor.finalize().catch(err => console.error('[HistoryView] finalize failed:', err)));
@@ -494,7 +499,9 @@ export class HistoryView implements IHistoryPresenter {
         const wrapper = document.createElement('div');
         wrapper.className = 'llm-ui-session llm-ui-session--system';
 
-        const isAuthError = error.message.includes('apiKey') || error.message.includes('401');
+        // 匹配 "API key"/"apiKey"/"401" 等多种认证错误形态（大小写不敏感），
+        // 命中时显示"配置连接"入口。
+        const isAuthError = /api\s?key|401/i.test(error.message);
         wrapper.innerHTML = ErrorTemplates.renderErrorBubble(error.message, isAuthError);
 
         this.container.appendChild(wrapper);

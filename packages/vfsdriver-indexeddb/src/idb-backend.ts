@@ -10,6 +10,7 @@ import type {
     FSFileNode,
     FSDirectoryNode,
     IRecordStore,
+    IRecordTransaction,
     FSSearchQuery,
     RecordQuery,
     RecordQueryOptions,
@@ -464,6 +465,29 @@ class LazyRecordStore implements IRecordStore {
     ): Promise<RecordQueryResult[]> {
         return new IDBRecordStore(this.roStore()).queryRecordFields(path, query, options);
     }
+
+    async transaction<T>(operation: (tx: IRecordTransaction) => Promise<T>): Promise<T> {
+        const transaction = this.getDB().transaction(STORE_RECORDS, 'readwrite');
+        const records = new IDBRecordStore(transaction.objectStore(STORE_RECORDS));
+        const completed = waitForTransaction(transaction);
+        try {
+            const result = await operation(records);
+            await completed;
+            return result;
+        } catch (error) {
+            try { transaction.abort(); } catch { /* Transaction already closed. */ }
+            await completed.catch(() => undefined);
+            throw error;
+        }
+    }
+}
+
+function waitForTransaction(transaction: IDBTransaction): Promise<void> {
+    return new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted'));
+        transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB transaction failed'));
+    });
 }
 
 const REQUIRED_INDEXES: Readonly<Record<string, readonly string[]>> = {

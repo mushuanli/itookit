@@ -5,7 +5,6 @@ import type {
     OutputPortSpec,
     FlowEdgeId,
 } from './flow-definition';
-import type { DirectRunSpec, ProcessSignal, RunId } from './process';
 
 export interface DagPluginManifest<Config = unknown> {
     id: string;
@@ -47,11 +46,25 @@ export interface DagRunSpec {
 }
 
 export interface DagNodeContext<Config = unknown> {
-    runId: RunId;
+    sessionId: string;
     nodeRunId: string;
     config: Config;
     inputs: Record<string, unknown>;
-    signal?: ProcessSignal;
+    dependencies: DagTaskDependencyBinding[];
+}
+
+export interface DagTaskDependencyBinding {
+    taskId: string;
+    input: string;
+    output?: string;
+    edgeId?: string;
+}
+
+export interface DagTaskDefinition {
+    programKind: string;
+    programVersion: string;
+    input: unknown;
+    priority?: number;
 }
 
 export interface ValidationResult {
@@ -61,7 +74,7 @@ export interface ValidationResult {
 
 export interface DagRuntimeContribution<Config = unknown> {
     validate?(config: Config): ValidationResult;
-    createProcess(context: DagNodeContext<Config>): DirectRunSpec;
+    createTask(context: DagNodeContext<Config>): DagTaskDefinition;
     mapOutput?(output: unknown): DagNodeOutcome;
 }
 

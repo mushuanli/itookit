@@ -1,4 +1,4 @@
-// Extension system for the LLM subsystem (llm-engine layer).
+// Extension system for the LLM subsystem (llm-runtime layer).
 //
 // Distinct from the VFS-layer IPlugin in common/interfaces/fs/plugin/.
 // This is the LLM-specific plugin system following VS Code's contribution points model.

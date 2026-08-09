@@ -4,7 +4,7 @@
 
 ## 关键边界
 
-- `RunAttachmentController` 通过 `RunHandle` attach、消费事件、signal 和 cancel。
+- `RunAttachmentController` 通过 `TaskHandle` attach、消费事件、signal 和 cancel。
 - `DagWorkbench` 从插件 Manifest/UI Contribution 构建 Palette、端口和表单。
 - UI 不 import DAG Runtime，也不判断具体节点执行类型。
 - Process 输出以文本节点安全写入，不能直接拼接未转义 HTML。

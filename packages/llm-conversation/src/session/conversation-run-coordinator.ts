@@ -3,13 +3,18 @@ import type {
     Artifact,
     ChatMessage,
     ContextSnapshot,
+    DagPluginCatalog,
     DagRunSpec,
-    ProcessHost,
-    ProcessSignal,
-    RunEventEnvelope,
-    RunHandle,
     Signal,
+    ToolDefinition,
 } from '@itookit/common';
+import type {
+    EventEnvelope,
+    Harness,
+    JsonValue,
+    TaskHandle,
+    TaskSpec,
+} from '@itookit/harness';
 import type {
     ChatAttachment,
     ExecutionTask,
@@ -17,13 +22,14 @@ import type {
 } from '../core/types';
 import {
     ContextAssembler,
-    type ChatProgramOutput,
-} from '@itookit/llm-engine';
+    type DurableChatOutput as ChatProgramOutput,
+} from '@itookit/llm-runtime';
 import type { IChatEngine } from '../persistence/types';
 import { ContextProfileStore } from '../persistence/context-profile-store';
 import { RoundLog } from '../persistence/round-log';
 import { SessionEventBus } from './session-event-bus';
 import { SessionState } from './session-state';
+import { DurableFlowExecutor } from '../flow/executor';
 
 export interface ConversationExecution {
     task: ExecutionTask;
@@ -39,7 +45,12 @@ export interface ConversationExecution {
 export interface ConversationRunCoordinatorOptions {
     engine: IChatEngine;
     eventBus: SessionEventBus;
-    processHost: ProcessHost;
+    harness: Harness;
+    dagPlugins: DagPluginCatalog;
+    resolveTools?(sessionId: string, allowedIds: string[]): Promise<{
+        definitions: ToolDefinition[];
+        externalIds: string[];
+    }>;
     loadArtifact(id: string): Promise<Artifact | null>;
 }
 
@@ -49,43 +60,55 @@ interface ConversationLocation {
 }
 
 export class ConversationRunCoordinator {
-    private readonly active = new Map<string, RunHandle>();
+    private readonly active = new Map<string, TaskHandle[]>();
 
     constructor(private readonly options: ConversationRunCoordinatorOptions) {}
 
     async executeDirect(execution: ConversationExecution): Promise<void> {
-        await this.execute(execution, snapshot => ({
-            scheduler: 'direct',
-            spec: directProcessSpec(execution, snapshot),
-        }), parseProcessOutput);
+        await this.execute(execution, async snapshot => {
+            const root = await this.directTask(execution, snapshot);
+            return { root, tasks: [root], parse: parseOutput };
+        });
     }
 
     async executeDag(
         execution: ConversationExecution,
         createSpec: (snapshot: ContextSnapshot) => DagRunSpec,
     ): Promise<void> {
-        await this.execute(execution, snapshot => ({
-            scheduler: 'dag',
-            spec: createSpec(snapshot),
-        }), parseDagOutput);
+        await this.execute(execution, async snapshot => {
+            const flow = new DurableFlowExecutor({
+                harness: this.options.harness,
+                plugins: this.options.dagPlugins,
+                resolveTools: this.options.resolveTools,
+            });
+            const submitted = await flow.submit(execution.task.sessionId, createSpec(snapshot));
+            return { root: submitted.root, tasks: [...submitted.nodes.values()], parse: parseDagOutput };
+        });
     }
 
     private async execute(
         execution: ConversationExecution,
-        request: (snapshot: ContextSnapshot) => import('@itookit/common').RunRequest,
-        parse: (value: unknown) => ChatProgramOutput,
+        createTask: (snapshot: ContextSnapshot) => Promise<{
+            root: TaskHandle;
+            tasks: TaskHandle[];
+            parse: (value: unknown) => ChatProgramOutput;
+        }>,
     ): Promise<void> {
         const location = await this.resolveLocation(execution);
         const snapshot = await this.assembleContext(execution, location);
-        const handle = await this.submit(execution, request(snapshot));
-        this.active.set(execution.task.sessionId, handle);
+        const submission = await createTask(snapshot);
+        const handle = submission.root;
+        this.active.set(execution.task.sessionId, submission.tasks);
         let roundStarted = false;
+        const streamedOutput = { output: false };
         try {
-            await this.startRound(execution, location, handle.runId);
+            await this.startRound(execution, location, handle.id);
             roundStarted = true;
-            this.projectRun(execution, handle.runId);
-            const output = await this.consume(handle, execution.task.sessionId, parse, execution.rootNodeId);
-            await this.completeRound(execution, output);
+            this.projectRun(execution, handle.id);
+            const output = await this.consume(
+                handle, submission.tasks, execution.task.sessionId, execution.rootNodeId, submission.parse, streamedOutput,
+            );
+            await this.completeRound(execution, output, streamedOutput);
             await execution.finalize();
         } catch (error) {
             if (roundStarted) await this.failRound(execution);
@@ -96,20 +119,28 @@ export class ConversationRunCoordinator {
     }
 
     signal(sessionId: string, signal: Signal): boolean {
-        const handle = this.active.get(sessionId);
-        const processSignal = toProcessSignal(signal);
-        if (!handle || !processSignal) return false;
-        void handle.signal(processSignal).catch(() => {});
+        const handles = this.active.get(sessionId);
+        if (!handles?.length) return false;
+        if (signal.type === 'respond') {
+            for (const handle of handles) {
+                void handle.respond({ interactionId: signal.requestId, value: jsonValue(signal.response) }).catch(() => {});
+            }
+            return true;
+        }
+        if (signal.type !== 'inject') return false;
+        for (const handle of handles) {
+            void handle.signal({ type: 'inject', payload: { text: signal.text } }).catch(() => {});
+        }
         return true;
     }
 
     cancel(sessionId: string): void {
-        void this.active.get(sessionId)?.cancel().catch(() => {});
+        for (const handle of this.active.get(sessionId) ?? []) void handle.cancel().catch(() => {});
     }
 
     cancelAll(): void {
-        for (const handle of this.active.values()) {
-            void handle.cancel().catch(() => {});
+        for (const handles of this.active.values()) {
+            for (const handle of handles) void handle.cancel().catch(() => {});
         }
         this.active.clear();
     }
@@ -156,68 +187,100 @@ export class ConversationRunCoordinator {
         });
     }
 
-    private async submit(
+    private async directTask(
         execution: ConversationExecution,
-        request: import('@itookit/common').RunRequest,
-    ): Promise<RunHandle> {
-        const handle = await this.options.processHost.submit({
-            ...request,
-            ownerRoundId: execution.roundId,
-        });
+        snapshot: ContextSnapshot,
+    ): Promise<TaskHandle<ChatProgramOutput>> {
+        const session = await this.options.harness.openSession(execution.task.sessionId);
+        const tools = execution.config.capabilityPolicy?.toolIds ?? [];
+        const catalog = await this.options.resolveTools?.(execution.task.sessionId, tools)
+            ?? { definitions: [], externalIds: [] };
+        const spec = directTaskSpec(execution, snapshot, catalog);
+        const handle = await session.submit<typeof spec.input, ChatProgramOutput>(spec);
+        await this.bindCapabilities(handle, tools.length > 0);
         if (execution.task.abortController.signal.aborted) await handle.cancel();
         return handle;
+    }
+
+    private async bindCapabilities(
+        task: TaskHandle,
+        tools: boolean,
+    ): Promise<void> {
+        const llm = await task.createResource({
+            kind: 'llm', uri: 'llm://session', rights: ['execute'],
+        });
+        const tool = tools ? await task.createResource({
+            kind: 'tool', uri: 'tool://session', rights: ['execute'],
+        }) : undefined;
+        await task.signal({
+            type: 'capabilities',
+            payload: { llmHandleId: llm.handle.id, ...(tool ? { toolHandleId: tool.handle.id } : {}) },
+        });
+        await task.start();
     }
 
     private async startRound(
         execution: ConversationExecution,
         location: ConversationLocation,
-        runId: string,
+        taskId: string,
     ): Promise<void> {
         const existing = await execution.log.readRound(execution.roundId);
         if (existing) {
-            await execution.log.attachExecution(execution.roundId, { runId, role: 'primary' });
+            await execution.log.attachExecution(execution.roundId, { taskId, role: 'primary' });
             return;
         }
         const userMessage = createUserMessage(execution.task.input.text, execution.contextFiles);
         await execution.log.appendExpected(
             location.branchRef,
-            conversationRound(execution, location, userMessage, runId),
+            conversationRound(execution, location, userMessage, taskId),
             location.branchHead,
         );
     }
 
-    private projectRun(execution: ConversationExecution, runId: string): void {
+    private projectRun(execution: ConversationExecution, taskId: string): void {
         this.options.eventBus.emitGlobal({
-            type: 'execution_run_projected',
+            type: 'execution_task_projected',
             payload: {
                 sessionId: execution.task.sessionId,
-                runId,
+                taskId,
                 roundId: execution.roundId,
             },
         });
     }
 
     private async consume(
-        handle: RunHandle,
+        handle: TaskHandle,
+        eventTasks: TaskHandle[],
         sessionId: string,
-        parse: (value: unknown) => ChatProgramOutput,
         rootNodeId: string,
+        parse: (value: unknown) => ChatProgramOutput,
+        streamedOutput: { output: boolean },
     ): Promise<ChatProgramOutput> {
-        let output: ChatProgramOutput | undefined;
-        for await (const envelope of handle.events()) {
-            this.forwardAgentEvent(envelope, sessionId, rootNodeId);
-            if (envelope.event.type === 'run:completed') {
-                output = parse(envelope.event.output);
-            }
-            if (envelope.event.type === 'run:failed') {
-                throw new Error(envelope.event.error.message);
-            }
-        }
-        if (!output) throw new Error(`Direct run ${handle.runId} completed without chat output`);
-        return output;
+        const events = Promise.all(eventTasks.map(task => this.consumeEvents(task, sessionId, rootNodeId, streamedOutput)));
+        const exit = await handle.wait();
+        await events;
+        if (exit.status === 'failed') throw new Error(exit.error?.message ?? `Task failed: ${handle.id}`);
+        if (exit.status === 'cancelled') throw new Error(`Task cancelled: ${handle.id}`);
+        return parse(exit.output);
     }
 
-    private forwardAgentEvent(envelope: RunEventEnvelope, sessionId: string, rootNodeId: string): void {
+    private async consumeEvents(
+        handle: TaskHandle,
+        sessionId: string,
+        rootNodeId: string,
+        streamedOutput: { output: boolean },
+    ): Promise<void> {
+        for await (const envelope of handle.events()) {
+            this.forwardAgentEvent(envelope, sessionId, rootNodeId, streamedOutput);
+        }
+    }
+
+    private forwardAgentEvent(
+        envelope: EventEnvelope,
+        sessionId: string,
+        rootNodeId: string,
+        streamedOutput: { output: boolean },
+    ): void {
         const event = getAgentEvent(envelope);
         if (!event || event.type === 'finished' || event.type === 'error') return;
 
@@ -226,6 +289,7 @@ export class ConversationRunCoordinator {
         // We do NOT return early — the original event is still emitted so stream:content
         // (in immediateTypes) triggers an immediate flush of the queued message:updated.
         if (event.type === 'stream:content') {
+            streamedOutput.output = true;
             this.options.eventBus.emitSession(sessionId, {
                 type: 'message:updated',
                 payload: { messageId: rootNodeId, delta: event.delta, field: 'output' },
@@ -244,13 +308,14 @@ export class ConversationRunCoordinator {
     private async completeRound(
         execution: ConversationExecution,
         output: ChatProgramOutput,
+        streamedOutput: { output: boolean },
     ): Promise<void> {
         await execution.log.setAssistantInRound(execution.roundId, {
             assistantMessages: [output.message],
             agentId: execution.config.id,
             result: roundResult(output),
         });
-        projectOutput(this.options.eventBus, execution, output);
+        projectOutput(this.options.eventBus, execution, output, streamedOutput.output);
     }
 
     private async failRound(execution: ConversationExecution): Promise<void> {
@@ -276,11 +341,15 @@ function contextPlan(
     };
 }
 
-function directProcessSpec(execution: ConversationExecution, snapshot: ContextSnapshot) {
+function directTaskSpec(
+    execution: ConversationExecution,
+    snapshot: ContextSnapshot,
+    catalog: { definitions: ToolDefinition[]; externalIds: string[] },
+): TaskSpec<Record<string, unknown>> {
     const tools = execution.config.capabilityPolicy?.toolIds ?? [];
     return {
-        programKind: tools.length ? 'llm.agent' : 'llm.chat',
-        input: {
+        program: { kind: tools.length ? 'llm.agent' : 'llm.chat', version: '1' },
+        input: compact({
             sessionId: execution.task.sessionId,
             roundId: execution.roundId,
             messages: snapshot.canonicalMessages,
@@ -290,9 +359,13 @@ function directProcessSpec(execution: ConversationExecution, snapshot: ContextSn
             maxTokens: execution.config.constraints?.maxTokens,
             thinking: execution.config.enableThinking,
             reasoningEffort: execution.config.reasoningEffort,
+            stream: execution.config.stream,
             approval: 'external',
-        },
-        capabilities: tools,
+            tools: catalog.definitions,
+            externalToolIds: catalog.externalIds,
+        }),
+        labels: { roundId: execution.roundId, kind: tools.length ? 'agent' : 'chat' },
+        deferStart: true,
     };
 }
 
@@ -300,7 +373,7 @@ function conversationRound(
     execution: ConversationExecution,
     location: ConversationLocation,
     userMessage: ChatMessage,
-    runId: string,
+    taskId: string,
 ): import('@itookit/common').Round {
     const parents = location.branchHead ? [location.branchHead] : [];
     const temporary = execution.task.input.sendIntent?.retention.mode === 'temporary';
@@ -311,7 +384,7 @@ function conversationRound(
         exposure: temporary ? 'internal' : 'public',
         input: [userMessage],
         output: [],
-        executions: [{ runId, role: 'primary' }],
+        executions: [{ taskId, role: 'primary' }],
         status: 'running',
         createdAt: Date.now(),
         origin: 'user',
@@ -338,7 +411,7 @@ function roundResult(output: ChatProgramOutput) {
         assistantBlocks: [{ type: 'text' as const, content: output.message.content }],
         toolResults: [],
         usage: output.usage,
-        finishReason: output.finishReason,
+        finishReason: output.finishReason ?? undefined,
     };
 }
 
@@ -346,16 +419,22 @@ function projectOutput(
     eventBus: SessionEventBus,
     execution: ConversationExecution,
     output: ChatProgramOutput,
+    streamed: boolean,
 ): void {
     const content = typeof output.message.content === 'string'
         ? output.message.content
         : JSON.stringify(output.message.content ?? '');
     execution.state.updateNodeOutput(execution.rootNodeId, content);
     execution.state.updateNodeStatus(execution.rootNodeId, 'success');
-    eventBus.emitSession(execution.task.sessionId, {
-        type: 'message:updated',
-        payload: { messageId: execution.rootNodeId, field: 'output', delta: content },
-    });
+    // When the output was already streamed via message:updated deltas (StreamController
+    // appends), emitting the full content here would double-render it. The authoritative
+    // state write above still lands; only the UI delta is skipped.
+    if (!streamed) {
+        eventBus.emitSession(execution.task.sessionId, {
+            type: 'message:updated',
+            payload: { messageId: execution.rootNodeId, field: 'output', delta: content },
+        });
+    }
     eventBus.emitSession(execution.task.sessionId, {
         type: 'message:status',
         payload: { messageId: execution.rootNodeId, status: 'success' },
@@ -366,21 +445,17 @@ function projectOutput(
     });
 }
 
-function getAgentEvent(envelope: RunEventEnvelope): AgentEvent | undefined {
-    if (envelope.event.type !== 'process:event') return undefined;
-    const event = envelope.event.event;
-    return event.type === 'agent-event' ? event.event : undefined;
-}
-
-function parseProcessOutput(value: unknown): ChatProgramOutput {
-    return parseOutput(record(value).result);
-}
-
-function parseDagOutput(value: unknown): ChatProgramOutput {
-    const contents = collectArtifactContents(record(value).nodes);
+function getAgentEvent(envelope: EventEnvelope): AgentEvent | undefined {
+    if (envelope.type === 'agent.event') return envelope.payload as AgentEvent;
+    if (envelope.type !== 'task.interaction.requested') return undefined;
+    const request = record(envelope.payload);
     return {
-        message: { role: 'assistant', content: contents.join('\n\n') },
-        usage: {},
+        type: 'await_signal',
+        request: {
+            requestId: String(request.id ?? ''),
+            reason: request.kind === 'input' ? 'request_input' : 'hitl_confirm',
+            message: String(request.prompt ?? ''),
+        },
     };
 }
 
@@ -399,9 +474,15 @@ function parseOutput(value: unknown): ChatProgramOutput {
     };
 }
 
+function parseDagOutput(value: unknown): ChatProgramOutput {
+    const contents = collectArtifactContents(record(value).nodes);
+    return { message: { role: 'assistant', content: contents.join('\n\n') }, usage: {} };
+}
+
 function collectArtifactContents(value: unknown): string[] {
     if (!value || typeof value !== 'object') return [];
     if ('content' in value) return [stringify((value as { content: unknown }).content)];
+    if ('message' in value) return collectArtifactContents((value as { message: unknown }).message);
     return Object.values(value).flatMap(collectArtifactContents);
 }
 
@@ -413,8 +494,10 @@ function record(value: unknown): Record<string, unknown> {
     return value && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
-function toProcessSignal(signal: Signal): ProcessSignal | undefined {
-    if (signal.type === 'respond' || signal.type === 'inject') return signal;
-    if (signal.type === 'abort') return { type: 'cancel' };
-    return undefined;
+function compact(value: Record<string, unknown>): Record<string, unknown> {
+    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function jsonValue(value: unknown): JsonValue {
+    return JSON.parse(JSON.stringify(value ?? null)) as JsonValue;
 }

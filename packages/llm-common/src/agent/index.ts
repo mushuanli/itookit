@@ -10,5 +10,4 @@ export * from './session';
 export * from './context-types';
 export * from './flow';
 export * from './flow-definition';
-export * from './process';
 export * from './dag-plugin';

@@ -21,11 +21,11 @@
 | **S6b** @deprecated 清理 | ✅ | 删除 `CompletionAnalyzer` 文件 + `AutoContinueHandler` 类 + `executeSession()` 路径 + `orchestrator-interfaces.ts` + llm-harness 2 个死代码文件 + `autoContinue` 死配置管线 | — |
 | **S6c** 内核收敛 + 适配器清理 | ✅ | `LLMKernelAdapter` + `UIEventAdapter` 删除；`executeTask()` 切换为 `ILLMService.chatStream()` 直连；`AgentExecutor` + `BaseExecutor` 物理删除（llm-kernel）；`DependencyGraph` 删除（`resolveDependencyTree()` 替代）；`auto-continue.ts` 删除；`HarnessAdapter` 解耦（`IHarnessContext` 服务定位器 + llm-ui 3 文件迁移） | — |
 | **S7** 事件统一 | ✅ | ★ `SessionEvent` = canonical `AgentEvent` (15) + `MessageProjectionEvent` (3) + `SessionStructuralEvent` (8，含 regenerate) 替代 `OrchestratorEvent` (28)；`OrchestratorEvent` 类型已删除；`SessionEventBus` 直接接受 `SessionEvent`（无过渡期格式检测）；所有生产者（SessionManager、TaskRunner、HarnessAdapter、SessionActor）统一 emit `SessionEvent`；`HistoryView` / `SessionEventHandler` 旧事件 fallback 已清理；`EventBatchProcessor` 默认 chunkType/statusType 切换为 `message:updated`/`message:status`；`ClaudeCodeStrategy`（死代码）已删除；`HarnessStrategy` 已删除；`getHarnessAdapter()` 已删除 | — |
-| **S8** llm-kernel 消除 | ✅ | ★ `@itookit/llm-kernel` 包消除 — `NodeStatus`/`ExecutorConfig`/`ExecutorType` 内联至 `llm-engine/core/types.ts`；`setKernelDeviceManager`/`getKernelDeviceManager` 迁移至 `llm-engine/core/device-registry.ts`（新建）；`initializeKernel()` inline 至 `initializeLLMEngine()`；所有 7 处 import 路径更新（llm-engine ×4、app-shell ×2、test ×1）；6 个 `package.json` 依赖移除（llm-engine、app-shell、web-app、tauri-app、demo）；3 个 `vite.config` alias 移除（web-app、tauri-app、demo）；`tsup.config.ts` external 清理 | — |
+| **S8** llm-kernel 消除 | ✅ | ★ `@itookit/llm-kernel` 包消除 — `NodeStatus`/`ExecutorConfig`/`ExecutorType` 内联至 `llm-runtime/core/types.ts`；`setKernelDeviceManager`/`getKernelDeviceManager` 迁移至 `llm-runtime/core/device-registry.ts`（新建）；`initializeKernel()` inline 至 `initializeLLMEngine()`；所有 7 处 import 路径更新（llm-runtime ×4、app-shell ×2、test ×1）；6 个 `package.json` 依赖移除（llm-runtime、app-shell、web-app、tauri-app、demo）；3 个 `vite.config` alias 移除（web-app、tauri-app、demo）；`tsup.config.ts` external 清理 | — |
 | **S9** 清理收尾 | ✅ | ★ `@itookit/llm-kernel` 包物理删除（源码 + dist + package.json + 配置）；`HarnessAdapter` 类删除（~370 行，`execute()` 从未被调用）；`IHarnessContext` 删除（`harness-context.ts`，从未被初始化）；`useClaudeCode`/`maxRounds` 死字段移除（`ExecutionOverrides`）；llm-ui 3 文件清理 `getHarnessContext()` 调用；SlashCommandRouter 删除 `buildHarnessSlashCallbacks`（~90 行）；`buildHarnessCallbacks`/`injectIntoRunningHarness` 简化为空实现；6 个 CLAUDE.md 文档更新 | — |
 | **S10** AgentLoopExecutor → ILoop | ✅ | ★ `AgentLoopExecutor` while-true 循环 → `HarnessLoopExecutor`（AsyncGenerator ILoop, mode='harness'）；`harness-middleware.ts`（6 个 ILoopMiddleware 工厂，包装 BudgetController/ContextManager/ErrorRecoveryService/BackPressureValidator/HITLQueue/SkillService）；`ILoopMiddleware.onToolCalls` 钩子 + `ControlDirective.pause` action 统一 plan confirm / permission / HITL 暂停路径；loop-middleware 存根改为委托模式（接受可选 `harnessImpl`）；`HarnessMiddlewareSet` 允许外部注入；`app-shell/bootstrap.ts` 注册 `HarnessLoopExecutor` | — |
 | **S11** Resume + LiteSubAgentRouter ILoop | ✅ | ★ `LoopExecutor.resume()` — 抽取 `executeLoop(ctx, startRound, initialRounds)`，`run()` 和 `resume()` 共享；`resume()` 从 `log.fold()` 重建消息 → 计数已完成轮次 → 重入循环；`resumeDrive()` — 调用 `loop.resume(checkpoint)` + `driveGenerator()`；`HarnessLoopExecutor.resume()` — 存储 `lastCtx`，基础重建后委托 `run()`；TaskRunner checkpoint 检测 — `log.draft().restore()` → `resumeDrive()` : `drive()`；★ `LiteSubAgentRouter` 迁移至 ILoop — 用 `LoopExecutor` + 手动驱动替代 `UnifiedLoopStrategy`；`createInMemoryLog()` + `createToolServiceAdapter()` + ILLMService connection/model wrapper；`loopFactory` 可选注入 | — |
-| **S12** 外层架构 | ✅ | ★ `ISession` 接口 — `signal()` + `events()` 两个方法；`SessionManager implements ISession` — 51 方法门面降级为 Channel 原语 + CommandBus 命令；`DraftArea.setCurrent()` 接线 — `driveGenerator()` 在 `round:start` 处持久化 in-flight 轮次边界；canonical `AgentEvent` 补全 — 15→23 变体（`signal_resolved`、`log:ref_created/deleted/merged`、`budget:warning/exhausted`、`context:compressed`、`goal:progress`）；`ICommandBus` + `CommandBus` 实现（llm-engine 层）；`ILLMPlugin` + `ExtensionRegistry` + 3 个内置插件（session/vcs/history）；15 个 UI 文件迁移至 `commands.execute()` | — |
+| **S12** 外层架构 | ✅ | ★ `ISession` 接口 — `signal()` + `events()` 两个方法；`SessionManager implements ISession` — 51 方法门面降级为 Channel 原语 + CommandBus 命令；`DraftArea.setCurrent()` 接线 — `driveGenerator()` 在 `round:start` 处持久化 in-flight 轮次边界；canonical `AgentEvent` 补全 — 15→23 变体（`signal_resolved`、`log:ref_created/deleted/merged`、`budget:warning/exhausted`、`context:compressed`、`goal:progress`）；`ICommandBus` + `CommandBus` 实现（llm-runtime 层）；`ILLMPlugin` + `ExtensionRegistry` + 3 个内置插件（session/vcs/history）；15 个 UI 文件迁移至 `commands.execute()` | — |
 
 ### 全部完成（S1~S12）
 
@@ -58,7 +58,7 @@
 | 1 | **`ISession` 接口** | §4 Channel 原语 | ✅ `signal()` + `events()`；`SessionManager implements ISession` |
 | 2 | **`DraftArea.setCurrent()` 接线** | §2.1 / loop-driver | ✅ 接口声明 + `driveGenerator()` 在 `round:start` 处调用 |
 | 3 | **`ExtensionRegistry` + `IPlugin`** | §6 扩展系统 | ✅ `ILLMPlugin`/`ExtensionContext`/`IExtensionRegistry` 接口 + 实现 |
-| 4 | **`ICommandBus`**（llm-engine 层） | §6.2 / §6.3 | ✅ 接口 + `CommandBus` 实现；51 方法 → 60+ 命令 |
+| 4 | **`ICommandBus`**（llm-runtime 层） | §6.2 / §6.3 | ✅ 接口 + `CommandBus` 实现；51 方法 → 60+ 命令 |
 | 5 | **SessionManager 瘦身** | §6.3 | ✅ `SessionManager implements ISession`；15 个 UI 文件迁移至 `commands.execute()` |
 | 6 | **Dogfooding 强制执行** | §10 红线 2 | ✅ `processQueue()` 默认 mode 消灭后备路径；`LoopContext` 补全 connectionId/model/systemPrompt 等字段；chat/loop executor 消费新字段；`executeTask()` 及专属方法（~390 行）已物理删除 |
 | 7 | **canonical AgentEvent 补全** | §4 / 03-channel.md | ✅ 15→23 变体：`signal_resolved`、`log:ref_created/deleted/merged`、`budget:warning/exhausted`、`context:compressed`、`goal:progress` |
@@ -87,7 +87,7 @@
 
 ## 1. 动机：现状复杂度的病根
 
-对现有五包（device-llm / llm-kernel / llm-harness / llm-engine / llm-ui）的审查结论：
+对现有五包（device-llm / llm-kernel / llm-harness / llm-runtime / llm-ui）的审查结论：
 **每个功能都发明了新机制，而不是归约到原语**。具体病灶：
 
 | # | 病灶 | 表现 | 根因 |
@@ -621,7 +621,7 @@ export const vcsPlugin: IPlugin = {
 | **S6b** | @deprecated 清理：删除 `CompletionAnalyzer` + `AutoContinueHandler` + `executeSession()` + `orchestrator-interfaces.ts` + dead config pipeline | 病灶 3、4 | 4 文件删除 + ~265 行代码块删除；`autoContinue` 死配置管线清零 | ✅ |
 | **S6c** | 内核收敛 + 适配器清理：`LLMKernelAdapter`/`UIEventAdapter`/`AgentExecutor`/`BaseExecutor`/`DependencyGraph`/`auto-continue.ts` 删除；`executeTask()` → `ILLMService.chatStream()`；`HarnessAdapter` → `IHarnessContext` 解耦 | 病灶 1、7 | 6 文件删除 + 15 文件修改；llm-kernel 退化为最小外壳；LLM 调用全路径统一为 `ILLMService` | ✅ |
 | **S7** | `OrchestratorEvent` → `SessionEvent` 全面替换 | 病灶 4 | `OrchestratorEvent` 类型删除；全部生产者迁移至 `SessionEvent`；UI 旧 fallback 清理；`EventBatchProcessor` 升级；`ClaudeCodeStrategy`/`HarnessStrategy`/`getHarnessAdapter` 删除 | ✅ |
-| **S8** | `llm-core` 拆包 → llm-kernel 消除 | 病灶 7 | `@itookit/llm-kernel` 包物理删除；所有符号迁移至 llm-engine 或删除；6 个 package.json + 3 个 vite.config 清理 | ✅ |
+| **S8** | `llm-core` 拆包 → llm-kernel 消除 | 病灶 7 | `@itookit/llm-kernel` 包物理删除；所有符号迁移至 llm-runtime 或删除；6 个 package.json + 3 个 vite.config 清理 | ✅ |
 | **S10** | `AgentLoopExecutor` → ILoop 改造 + 中间件抽取 | 病灶 2、6 | `HarnessLoopExecutor`（AsyncGenerator ILoop, mode='harness'）；`harness-middleware.ts`（6 个 ILoopMiddleware 工厂）；`ILoopMiddleware.onToolCalls` + `ControlDirective.pause` 统一暂停路径；loop-middleware 委托模式；S1~S10 全七病灶消除 | ✅ |
 | **S11** | `resume()` 完整实现 + LiteSubAgentRouter ILoop 迁移 | 病灶 2（收尾） | `LoopExecutor.resume()` + `resumeDrive()`；TaskRunner checkpoint 检测；`LiteSubAgentRouter` 用 `LoopExecutor` 替代 `UnifiedLoopStrategy`；`UnifiedLoopStrategy` 零消费者 | ✅ |
 | **S12** | 外层架构：`ISession` 接口 + `ICommandBus` + SessionManager 降级 + AgentEvent 补全 | 外层契约 | `SessionManager implements ISession`（51→2 方法收缩）；`DraftArea.setCurrent()` 接线；AgentEvent 15→23 变体；`ICommandBus`/`CommandBus` + `ExtensionRegistry` + 3 内置插件；15 个 UI 文件迁移至 `commands.execute()` | ✅ |

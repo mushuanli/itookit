@@ -1,6 +1,6 @@
 // @file: tools/src/adapters/tool-device-driver.ts
 // ToolDeviceDriver — bridges Tool[] → IToolService + IDeviceDriver.
-// Migrated from llm-harness/src/drivers/tool-device-driver.ts
+// Platform-neutral Tool device driver used by Coreutils capability scopes.
 
 import { z } from 'zod/v4';
 import type {
@@ -96,13 +96,9 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
   }
 
   /**
-   * Inject a native shell for Node.js / Tauri environments.
+   * Inject a native shell implemented by the owning application.
    * When set, search tools (GrepTool, GlobTool) use rg/fd instead of manual FS walking,
    * and BashTool can run in Tauri where node:child_process is unavailable.
-   *
-   * @example (Node.js)
-   *   const shell = await createNodeNativeShell();
-   *   toolDriver.setNativeShell(shell);
    *
    * @example (Tauri)
    *   const shell = await TauriNativeShell.create();

@@ -1,9 +1,10 @@
 import type {
     ContextSnapshot,
-    ProcessHost,
     Signal,
     FlowNodeDefinition,
+    ToolDefinition,
 } from '@itookit/common';
+import type { Harness } from '@itookit/harness';
 import { ulid } from '../persistence/ulid';
 import type {
     ChatAttachment,
@@ -57,12 +58,19 @@ export class SessionRunCoordinator {
         private readonly agents: AgentResolver,
         private readonly attachments: AttachmentProcessor,
         private readonly callbacks: SessionRunCallbacks,
-        processHost: ProcessHost,
+        harness: Harness,
+        dagPlugins: import('@itookit/common').DagPluginCatalog,
+        resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
+            definitions: ToolDefinition[];
+            externalIds: string[];
+        }>,
     ) {
         this.runs = new ConversationRunCoordinator({
             engine,
             eventBus,
-            processHost,
+            harness,
+            dagPlugins,
+            resolveTools,
             loadArtifact: async () => null,
         });
     }

@@ -1,7 +1,7 @@
 // @file: common/interfaces/skills/fs-skill-types.ts
 // 文件系统 Skill 相关类型：SKILL.md frontmatter、目录信息、作用域条目。
 
-import type { CompactSection } from './skill-types';
+import type { CompactSection, SkillTaskProgramRef } from './skill-types';
 
 /**
  * SKILL.md YAML frontmatter 字段（kebab-case，与 YAML 键名一致）。
@@ -28,6 +28,8 @@ export interface SkillFrontmatter {
         role: string;
         model?: string;
     };
+    /** 多步 Skill 对应的 Durable TaskProgram。 */
+    'task-program'?: SkillTaskProgramRef;
 }
 
 /**

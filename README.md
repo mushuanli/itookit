@@ -155,7 +155,7 @@ packages/
 ├── device-llm/          # LLM 驱动：多 Provider / 流式 / MCP / Skill
 ├── llm-kernel/          # 执行内核：Executor + Orchestrator
 ├── llm-harness/         # 多轮 Agent 循环 + 内置工具 + TTY
-├── llm-engine/          # 会话管理 + VFS 持久化 + Mission 编排
+├── llm-runtime/          # 会话管理 + VFS 持久化 + Mission 编排
 ├── mdx/                 # CodeMirror 6 Markdown 编辑器（插件化架构）
 ├── llm-ui/              # Chat UI + Agent / Provider / Connection 编辑器
 ├── vfs-ui/              # 文件树 Shell（VFSUIShell）

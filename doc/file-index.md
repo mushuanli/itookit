@@ -35,9 +35,9 @@
 |---|---|
 | SkillDefinition 接口 | `common/src/interfaces/skills/skill-types.ts` |
 | ISkillService 接口 | `common/src/interfaces/skills/skill-service.ts` |
-| SkillDeviceDriver | `llm-harness/src/drivers/skill-device-driver.ts` |
+| SkillDeviceDriver | `coreutils/src/skill/skill-device-driver.ts` |
 | System Prompt 构建 | `llm-harness/src/executor/context-manager.ts` |
-| FS Skill 加载 | `llm-harness/src/skills/fs-skill-loader.ts` |
+| FS Skill 加载 | `coreutils/src/skill/fs-skill-loader.ts` |
 | LLMSkill 持久化 | `device-llm/src/device/llm-device-driver.ts` |
 | Skill 设置 UI | `llm-ui/src/editors/SkillSettingsEditor.ts` |
 | 同步桥接 | `app-shell/src/bootstrap.ts::syncSkillsToHarness()` |
@@ -53,37 +53,37 @@
 | Harness Middleware (6 个) | `llm-harness/src/executor/harness-middleware.ts` |
 | ContextManager | `llm-harness/src/executor/context-manager.ts` |
 | SubAgentRouter | `llm-harness/src/executor/sub-agent-router.ts` |
-| SessionActor 事件桥接 | `llm-engine/src/core/session-actor.ts` |
+| SessionActor 事件桥接 | `llm-runtime/src/core/session-actor.ts` |
 | HITL Queue | `llm-harness/src/services/hitl-queue.ts` |
-| Skill 内置工具 | `llm-harness/src/tools/load-skill.ts` |
+| Skill 内置工具 | `coreutils/src/tool/load-skill.ts` |
 
 ## Session / LLM Engine
 
 | 场景 | 文件 |
 |---|---|
-| SessionManager | `llm-engine/src/session/` |
-| TaskRunner | `llm-engine/src/session/task-runner.ts` |
-| AgentResolver | `llm-engine/src/session/agent-resolver.ts` |
-| ChatFile 持久化 | `llm-engine/src/persistence/chat-engine.ts` |
-| RoundLog (ILog) | `llm-engine/src/persistence/round-log.ts` |
-| Mission 编排 | `llm-engine/src/mission/` |
-| Session Graph | `llm-engine/src/session-graph/` |
+| SessionManager | `llm-runtime/src/session/` |
+| TaskRunner | `llm-runtime/src/session/task-runner.ts` |
+| AgentResolver | `llm-runtime/src/session/agent-resolver.ts` |
+| ChatFile 持久化 | `llm-runtime/src/persistence/chat-engine.ts` |
+| RoundLog (ILog) | `llm-runtime/src/persistence/round-log.ts` |
+| Mission 编排 | `llm-runtime/src/mission/` |
+| Session Graph | `llm-runtime/src/session-graph/` |
 
 ## TaskGraph / Plugin
 
 | 场景 | 文件 |
 |---|---|
-| TaskGraphReconciler | `llm-engine/src/task-graph/reconciler.ts` |
-| DependencyScheduler | `llm-engine/src/task-graph/dependency-scheduler.ts` |
-| Builtin Executors | `llm-engine/src/task-graph/builtins.ts` |
-| Task Catalog | `llm-engine/src/task-graph/catalog.ts` |
-| ContextAssembler | `llm-engine/src/core/context-assembler.ts` |
-| ExecutorRegistry | `llm-engine/src/core/executor-registry.ts` |
-| Loop Driver (drive/resume) | `llm-engine/src/core/loop-driver.ts` |
-| Middleware Pipeline | `llm-engine/src/core/middleware-pipeline.ts` |
-| CommandBus | `llm-engine/src/core/command-bus.ts` |
-| ExtensionRegistry | `llm-engine/src/core/extension-registry.ts` |
-| Session/Auth/History Plugins | `llm-engine/src/plugins/` |
+| TaskGraphReconciler | `llm-runtime/src/task-graph/reconciler.ts` |
+| DependencyScheduler | `llm-runtime/src/task-graph/dependency-scheduler.ts` |
+| Builtin Executors | `llm-runtime/src/task-graph/builtins.ts` |
+| Task Catalog | `llm-runtime/src/task-graph/catalog.ts` |
+| ContextAssembler | `llm-runtime/src/core/context-assembler.ts` |
+| ExecutorRegistry | `llm-runtime/src/core/executor-registry.ts` |
+| Loop Driver (drive/resume) | `llm-runtime/src/core/loop-driver.ts` |
+| Middleware Pipeline | `llm-runtime/src/core/middleware-pipeline.ts` |
+| CommandBus | `llm-runtime/src/core/command-bus.ts` |
+| ExtensionRegistry | `llm-runtime/src/core/extension-registry.ts` |
+| Session/Auth/History Plugins | `llm-runtime/src/plugins/` |
 | TaskGraph Workbench UI | `llm-ui/src/components/TaskGraphWorkbench.ts` |
 | TaskGraph Draft Controller | `llm-ui/src/components/task-graph/DraftController.ts` |
 | TaskGraph Canvas | `llm-ui/src/components/task-graph/TaskGraphCanvas.ts` |

@@ -89,6 +89,15 @@ export function connectEditorLifecycle(
     }
     if (!activeEditor.isDirty?.() && !hasUnsavedChanges) return;
 
+    // Chat sessions keep their conversation in the asset dir (RoundLog); the
+    // main .chat file only holds the manifest. A generic save would overwrite
+    // the v3 manifest with the editor's getText() snapshot — never persist it.
+    if (activeNode.id.toLowerCase().endsWith('.chat')) {
+      activeEditor.setDirty?.(false);
+      hasUnsavedChanges = false;
+      return;
+    }
+
     try {
       const state = vfsManager.store?.getState();
       const exists = state?.items.some(function check(n): boolean {

@@ -70,25 +70,11 @@ export const FileEditTool = buildTool({
   async call(input, context) {
     let content: string;
 
-    // ── VFS path (browser) ──
-    if (context.vfs) {
-      try {
-        content = await context.vfs.readFile(input.file_path);
-      } catch {
-        throw new Error(`File not found in VFS: ${input.file_path}`);
-      }
-    } else {
-      // ── Node.js path ──
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fs = await import('node:fs/promises' as any);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const nodePath = await import('node:path' as any);
-      const absPath = nodePath.resolve(context.cwd, input.file_path);
-      try {
-        content = await fs.readFile(absPath, 'utf-8');
-      } catch (err: unknown) {
-        throw new Error(`Error reading file: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    if (!context.vfs) throw new Error('FileEdit requires an application-provided VFS port');
+    try {
+      content = await context.vfs.readFile(input.file_path);
+    } catch (err: unknown) {
+      throw new Error(`Error reading file: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     const count = content.split(input.old_string).length - 1;
@@ -105,17 +91,7 @@ export const FileEditTool = buildTool({
       ? content.replaceAll(input.old_string, input.new_string)
       : content.replace(input.old_string, input.new_string);
 
-    // Write back
-    if (context.vfs) {
-      await context.vfs.writeFile(input.file_path, newContent);
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fs = await import('node:fs/promises' as any);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const nodePath = await import('node:path' as any);
-      const absPath = nodePath.resolve(context.cwd, input.file_path);
-      await fs.writeFile(absPath, newContent, 'utf-8');
-    }
+    await context.vfs.writeFile(input.file_path, newContent);
 
     const replacements = input.replace_all ? count : 1;
     return {

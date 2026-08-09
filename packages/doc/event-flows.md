@@ -1,11 +1,11 @@
 # 跨包事件流
 
-## Process → Conversation → UI
+## Task → Conversation → UI
 
 ```text
-ProcessProgram yields ProcessEvent
-→ Dispatcher emits RunEventEnvelope
-→ RunHandle.events()
+DurableTaskProgram returns actions
+→ Harness commits state and EventJournal atomically
+→ TaskHandle.events()
 → ConversationRunCoordinator
 → SessionEventBus
 → HistoryView / StreamController
@@ -14,13 +14,13 @@ ProcessProgram yields ProcessEvent
 ## HITL
 
 ```text
-AgentProgram returns waiting(human-signal)
-→ Dispatcher saves ProcessCheckpoint
-→ Run status = waiting
+DurableAgentProgram returns Interaction action
+→ Harness commits Task state and wait condition
+→ Task status = waiting
 → UI displays request
-→ RunHandle.signal(ProcessSignal)
-→ Dispatcher marks Process ready
-→ ProcessProgram resumes from serialized state
+→ TaskHandle.signal(InteractionResponse)
+→ Harness marks Task ready
+→ DurableAgentProgram resumes from serialized state
 ```
 
 授权或结构化选择不创建新 Round。需要进入长期上下文的自然语言输入由 Conversation 创建新 Round。
@@ -28,14 +28,14 @@ AgentProgram returns waiting(human-signal)
 ## TTY
 
 ```text
-shell tool output
-→ ProcessEvent
+shell Effect output
+→ EventEnvelope
 → SessionEvent projection
 → TtyController
 → read-only TtyPanel
 ```
 
-TTY 输入不能从组件直接写进程 stdin，必须通过 Harness 控制面或受控 ToolPort。
+TTY 输入不能从组件直接写进程 stdin，必须通过 Task signal 或受控 TTY capability。
 
 ## VFS
 

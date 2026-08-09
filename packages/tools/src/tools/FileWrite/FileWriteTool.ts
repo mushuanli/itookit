@@ -55,38 +55,13 @@ export const FileWriteTool = buildTool({
   async prompt() { return DESCRIPTION; },
 
   async call(input, context) {
-    // ── VFS path (browser) ──
-    if (context.vfs) {
-      const exists = await context.vfs.readFile(input.file_path).then(() => true).catch(() => false);
-      await context.vfs.writeFile(input.file_path, input.content);
-      const output: Output = {
-        filePath: input.file_path,
-        linesWritten: input.content.split('\n').length,
-        fileType: exists ? 'update' : 'create',
-      };
-      return { data: output };
-    }
-
-    // ── Node.js path ──
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fs = await import('node:fs/promises' as any);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const nodePath = await import('node:path' as any);
-    const absPath = nodePath.resolve(context.cwd, input.file_path);
-
-    // Ensure parent directory exists
-    await fs.mkdir(nodePath.dirname(absPath), { recursive: true });
-
-    // Check if file exists to determine create vs update
-    let fileType: 'create' | 'update' = 'create';
-    try { await fs.access(absPath); fileType = 'update'; } catch { /* doesn't exist */ }
-
-    await fs.writeFile(absPath, input.content, 'utf-8');
-
+    if (!context.vfs) throw new Error('FileWrite requires an application-provided VFS port');
+    const exists = await context.vfs.readFile(input.file_path).then(() => true).catch(() => false);
+    await context.vfs.writeFile(input.file_path, input.content);
     const output: Output = {
-      filePath: absPath,
+      filePath: input.file_path,
       linesWritten: input.content.split('\n').length,
-      fileType,
+      fileType: exists ? 'update' : 'create',
     };
     return { data: output };
   },

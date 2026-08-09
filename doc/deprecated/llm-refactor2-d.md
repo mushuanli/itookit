@@ -257,12 +257,12 @@ P5 ──依赖 P1──> 独立可选
 | 文件 | 角色 |
 |---|---|
 | `common/src/interfaces/agent/loop.ts` | ILog/Turn/DraftArea 接口定义 |
-| `llm-engine/src/persistence/chat-engine-log.ts` | 当前 ILog 实现（455 行），TurnLog 参照物 |
-| `llm-engine/src/persistence/chat-engine.ts` | ChatEngine（1690 行），含 branch_nums 死代码 |
-| `llm-engine/src/session/session-manager.ts` | SessionManager（1530 行），P2~P4 拆解目标 |
-| `llm-engine/src/session/task-runner.ts` | TaskRunner（759 行），P2 双写路径消除的核心 |
-| `llm-engine/src/session/session-state.ts` | SessionState（363 行），P3 投影化改造目标 |
-| `llm-engine/src/utils/converters.ts` | P0 #1 清理目标 |
+| `llm-runtime/src/persistence/chat-engine-log.ts` | 当前 ILog 实现（455 行），TurnLog 参照物 |
+| `llm-runtime/src/persistence/chat-engine.ts` | ChatEngine（1690 行），含 branch_nums 死代码 |
+| `llm-runtime/src/session/session-manager.ts` | SessionManager（1530 行），P2~P4 拆解目标 |
+| `llm-runtime/src/session/task-runner.ts` | TaskRunner（759 行），P2 双写路径消除的核心 |
+| `llm-runtime/src/session/session-state.ts` | SessionState（363 行），P3 投影化改造目标 |
+| `llm-runtime/src/utils/converters.ts` | P0 #1 清理目标 |
 
 ## 验证方式
 

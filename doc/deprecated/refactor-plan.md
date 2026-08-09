@@ -18,7 +18,7 @@
 | 6 | P2 | 4 个独立 EventBus 实现 | ~500 行 | 低 |
 | 7 | P2 | common 中 4 个死接口（ILogger/ISettingsWidget/IEntityService/IDocumentAnalyzer） | ~300 行 | 零 |
 | 8 | P2 | common 中大量单消费者接口应回归所属包 | ~800 行 | 零 |
-| 9 | P3 | llm-ui/app-settings 绕过 common 从 llm-engine 导入接口 | 3 文件 | 低 |
+| 9 | P3 | llm-ui/app-settings 绕过 common 从 llm-runtime 导入接口 | 3 文件 | 低 |
 | 10 | P3 | app-settings 上行依赖 llm-ui（业务层→UI层） | 1 文件 | 低 |
 | 11 | P3 | IAgentConfigService 未继承 IConnectionService，方法重复 | ~15 方法 | 低 |
 | 12 | P2 | LLMConnection 4 个 @deprecated 字段仍被代码读取 | ~6 处 | 中 |
@@ -62,7 +62,7 @@
 **验证命令**：
 ```bash
 pnpm --filter @itookit/llm-kernel build
-pnpm --filter @itookit/llm-engine build  # 下游确认不影响
+pnpm --filter @itookit/llm-runtime build  # 下游确认不影响
 ```
 
 #### 1B. 删除 device-llm 孤儿 SkillRegistry
@@ -111,7 +111,7 @@ pnpm --filter @itookit/device-llm build
 修改: packages/common/src/index.ts
   删除: ISettingsWidget, IEntityService, EntityChangeEvent, IDocumentAnalyzer
   删除: ILogger, LogLevel, LogLevelNames, LogEntry, LogFilter, LoggerStats, ModuleLog
-  保留: MarkdownAnalyzer（llm-engine/attachment-processor.ts 使用）
+  保留: MarkdownAnalyzer（llm-runtime/attachment-processor.ts 使用）
   保留: GCResult（确认是否有外部使用，若无则一并删除）
   保留: DocumentInfo, ReferenceExtractionResult, AnalysisContext（同上确认）
 ```
@@ -124,25 +124,25 @@ pnpm -r typecheck  # 全量类型检查
 
 #### 1D. 合并 HITLQueue（删除 engine 版 bug 版本）
 
-**验证**：llm-engine 版 HITLQueue 在 abort 时调用 `resolve('')` 而非 `reject()`，会导致 mission scheduler 误以为 HITL 通过。
+**验证**：llm-runtime 版 HITLQueue 在 abort 时调用 `resolve('')` 而非 `reject()`，会导致 mission scheduler 误以为 HITL 通过。
 
 **操作**：
 ```
-搜索: packages/llm-engine/src/services/hitl-queue.ts 的消费者
-  → llm-engine/src/mission/mission-scheduler.ts: import { HITLQueue }
+搜索: packages/llm-runtime/src/services/hitl-queue.ts 的消费者
+  → llm-runtime/src/mission/mission-scheduler.ts: import { HITLQueue }
 
-修改: packages/llm-engine/src/mission/mission-scheduler.ts
+修改: packages/llm-runtime/src/mission/mission-scheduler.ts
   import { HITLQueue } from '@itookit/llm-harness'
-  （llm-engine 已依赖 llm-harness，无需新增 dep）
+  （llm-runtime 已依赖 llm-harness，无需新增 dep）
 
-删除: packages/llm-engine/src/services/hitl-queue.ts
+删除: packages/llm-runtime/src/services/hitl-queue.ts
 
-修改: packages/llm-engine/src/index.ts（若导出了此类则删除该导出）
+修改: packages/llm-runtime/src/index.ts（若导出了此类则删除该导出）
 ```
 
 **验证命令**：
 ```bash
-pnpm --filter @itookit/llm-engine build
+pnpm --filter @itookit/llm-runtime build
 ```
 
 ---
@@ -153,23 +153,23 @@ pnpm --filter @itookit/llm-engine build
 
 #### 2A. 修复绕行导入（3 处）
 
-llm-ui 和 app-settings 通过 llm-engine 导入本应直接从 common 拿的接口：
+llm-ui 和 app-settings 通过 llm-runtime 导入本应直接从 common 拿的接口：
 
 ```
 修改: packages/llm-ui/src/shell/SlashCommandRouter.ts
-  - import type { IAgentConfigService } from '@itookit/llm-engine'
+  - import type { IAgentConfigService } from '@itookit/llm-runtime'
   + import type { IAgentConfigService } from '@itookit/common'
 
 修改: packages/llm-ui/src/shell/AgentProvider.ts
-  - import type { IAgentConfigService } from '@itookit/llm-engine'
+  - import type { IAgentConfigService } from '@itookit/llm-runtime'
   + import type { IAgentConfigService } from '@itookit/common'
 
 修改: packages/app-settings/src/editors/RecoverySettingsEditor.ts
-  - import { IAgentManagementService } from '@itookit/llm-engine'
+  - import { IAgentManagementService } from '@itookit/llm-runtime'
   + import { IAgentManagementService } from '@itookit/common'
 ```
 
-可选：如果 llm-engine 的 re-export shim（`services/agent-service.ts`）只是透传 common 类型，可删除该 shim 文件。
+可选：如果 llm-runtime 的 re-export shim（`services/agent-service.ts`）只是透传 common 类型，可删除该 shim 文件。
 
 **验证命令**：
 ```bash
@@ -249,7 +249,7 @@ export interface IAgentConfigService extends IConnectionService {
 }
 ```
 
-**影响**：`VFSAgentService`（llm-engine 实现者）和任何 `IAgentConfigService` 的 mock 需检查方法完整性。
+**影响**：`VFSAgentService`（llm-runtime 实现者）和任何 `IAgentConfigService` 的 mock 需检查方法完整性。
 
 **验证命令**：
 ```bash
@@ -420,7 +420,7 @@ pnpm -r typecheck
 #### 5B. 推荐方案：提取共享调度核心
 
 ```typescript
-// packages/llm-engine/src/scheduler/（新目录）
+// packages/llm-runtime/src/scheduler/（新目录）
 // dependency-resolver.ts ← 从 DependencyGraph + MissionScheduler 提取
 interface DependableTask {
     id: string;
@@ -448,20 +448,20 @@ interface ITaskScheduler<T extends DependableTask> {
 
 **操作**（保守方案）：
 ```
-修改: packages/llm-engine/src/scheduler/（新建，约 80 行）
+修改: packages/llm-runtime/src/scheduler/（新建，约 80 行）
   - dependency-resolver.ts: getReadyTasks(), topologicalSort()
 
-修改: packages/llm-engine/src/mission/mission-scheduler.ts
+修改: packages/llm-runtime/src/mission/mission-scheduler.ts
   - 导入 getReadyTasks() 替换内联实现
 
-修改: packages/llm-engine/src/session-graph/dependency-graph.ts
+修改: packages/llm-runtime/src/session-graph/dependency-graph.ts
   - 导入 topologicalSort() 替换内联实现
 ```
 
 **验证命令**：
 ```bash
-pnpm --filter @itookit/llm-engine build
-pnpm --filter @itookit/llm-engine test  # 若有 test 脚本
+pnpm --filter @itookit/llm-runtime build
+pnpm --filter @itookit/llm-runtime test  # 若有 test 脚本
 ```
 
 ---

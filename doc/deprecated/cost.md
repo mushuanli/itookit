@@ -326,7 +326,7 @@ cacheWritePricePerMillion?: number;
 cacheReadPricePerMillion?: number;
 ```
 
-`SessionTokenUsage` 新增字段（`packages/llm-engine/src/core/types.ts`）：
+`SessionTokenUsage` 新增字段（`packages/llm-runtime/src/core/types.ts`）：
 
 ```typescript
 cacheWriteTokens?: number;
@@ -383,9 +383,9 @@ agentService.writePricing(config) → 写入 VFS + 重载 provider 模型价格
 | `packages/device-llm/src/cost/cost-store.ts` | `CostStore` — cost.seq 读写封装，支持 `queryAll()` / `queryBySession()` / `queryBySessionProvider()` |
 | `packages/device-llm/src/device/llm-device-driver.ts` | 集成 pricing + cost store；ioctl 命令 + `queryCosts()` / `getPricingConfig()` 服务方法 |
 | `packages/device-llm/src/constants/llm-loader.ts` | `.llm` 格式增加 `pricing?` 字段 |
-| `packages/llm-engine/src/session/agent-resolver.ts` | `recordUsageCost` 增加 `sessionId`，写 cost.seq |
-| `packages/llm-engine/src/session/task-runner.ts` | 调用传入 `sessionId` |
-| `packages/llm-engine/src/services/vfs-agent-service.ts` | 委托 `recordCost()`、`writePricing()`、`queryCosts()`、`getPricingConfig()` |
+| `packages/llm-runtime/src/session/agent-resolver.ts` | `recordUsageCost` 增加 `sessionId`，写 cost.seq |
+| `packages/llm-runtime/src/session/task-runner.ts` | 调用传入 `sessionId` |
+| `packages/llm-runtime/src/services/vfs-agent-service.ts` | 委托 `recordCost()`、`writePricing()`、`queryCosts()`、`getPricingConfig()` |
 | `packages/llm-ui/src/editors/CostEditor.ts` | CostEditor — 仪表盘 + 定价配置 UI |
 | `packages/llm-ui/src/editors/llm-import.ts` | `.llm` 导入时写入 pricing.json |
 | `packages/app-settings/src/styles/_cost.css` | CostEditor 专用 `.cost-*` BEM 样式 |

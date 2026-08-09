@@ -1,67 +1,74 @@
 // @file: device-llm/utils/stream.ts
 
+export interface SSEEvent {
+    event?: string;
+    data: string;
+}
+
 /**
  * 解析 SSE 流
- * 
+ *
  * @param stream ReadableStream
  * @yields 每个 data 事件的内容
  */
 export async function* parseSSEStream(
     stream: ReadableStream<Uint8Array>
 ): AsyncGenerator<string> {
+    for await (const item of parseEventStream(stream)) {
+        yield item.data;
+    }
+}
+
+/**
+ * 解析语义化 SSE 流 — 保留 event 字段。
+ *
+ * OpenAI Responses API 每个事件含 `event:` 行（事件类型）+ `data:` 行（JSON 载荷），
+ * 无 `[DONE]` 终止符。与 Chat Completions 的纯 `data:` 行格式不同。
+ *
+ * @param stream ReadableStream
+ * @yields { event, data } — event 为 `event:` 值（如 response.output_text.delta），data 为 JSON 字符串
+ */
+export async function* parseEventStream(
+    stream: ReadableStream<Uint8Array>
+): AsyncGenerator<SSEEvent> {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
-    
     let buffer = '';
-    
+    let currentEvent: string | undefined;
+
     try {
         while (true) {
             const { done, value } = await reader.read();
-            
             if (done) break;
-            
+
             buffer += decoder.decode(value, { stream: true });
-            
-            // 按行分割
             const lines = buffer.split('\n');
-            
-            // 保留最后一个不完整的行
             buffer = lines.pop() || '';
-            
+
             for (const line of lines) {
                 const trimmed = line.trim();
-                
-                // 跳过空行和注释
-                if (!trimmed || trimmed.startsWith(':')) {
-                    continue;
-                }
-                
-                // 解析 data 行
-                if (trimmed.startsWith('data:')) {
+                if (!trimmed || trimmed.startsWith(':')) continue;
+
+                if (trimmed.startsWith('event:')) {
+                    currentEvent = trimmed.slice(6).trim();
+                } else if (trimmed.startsWith('data:')) {
                     const data = trimmed.slice(5).trim();
-                    
-                    // [DONE] 标记
-                    if (data === '[DONE]') {
-                        yield '[DONE]';
-                        continue;
-                    }
-                    
-                    yield data;
+                    if (!data || data === '[DONE]') continue;
+                    yield { event: currentEvent, data };
+                    currentEvent = undefined;
                 }
             }
         }
-        
-        // 处理剩余缓冲区
+
         if (buffer.trim()) {
             const trimmed = buffer.trim();
             if (trimmed.startsWith('data:')) {
                 const data = trimmed.slice(5).trim();
                 if (data && data !== '[DONE]') {
-                    yield data;
+                    yield { event: currentEvent, data };
                 }
             }
         }
-        
     } finally {
         reader.releaseLock();
     }

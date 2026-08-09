@@ -47,7 +47,7 @@
 │   ├── vfsdriver-fs/         (@itookit/vfsdriver-fs)        — alternative SQLite backend
 │   ├── device-llm/       (@itookit/device-llm)         — LLM API: OpenAI/Anthropic/Gemini, SSE, MCP
 │   ├── llm-kernel/       (@itookit/llm-kernel)         — Executor + Orchestrator engine, no UI
-│   ├── llm-engine/       (@itookit/llm-engine)         — session mgmt, VFS persistence (.chat files)
+│   ├── llm-runtime/       (@itookit/llm-runtime)         — session mgmt, VFS persistence (.chat files)
 │   ├── mdx/              (@itookit/mdxeditor)          — CodeMirror 6 markdown editor
 │   ├── llm-ui/           (@itookit/llm-ui)             — Chat & Agent UI components
 │   ├── vfs-ui/           (@itookit/vfs-ui)             — file-tree UI shell (VFSUIShell)
@@ -101,7 +101,7 @@ Single interface used by all UI packages (`packages/common/src/interfaces/ISessi
 
 Two main implementations:
 - **`VFSModuleEngine`** (`packages/vfslib/src/adapter-session/`) — standard file workspaces
-- **`LLMSessionEngine`** (`packages/llm-engine/src/persistence/`) — chat sessions as `.chat` files
+- **`LLMSessionEngine`** (`packages/llm-runtime/src/persistence/`) — chat sessions as `.chat` files
 
 Services needing direct VFS access extend **`BaseModuleService`** — provides `readJson`/`writeJson` (upsert), `ensureDirectory`, `engine: VFSModuleEngine`.
 
@@ -127,11 +127,11 @@ Adding a workspace = add entry to `WORKSPACES` in `apps/web-app/src/config/modul
 ```
 device-llm   →  LLMConnection / SSE streaming / MCP / multi-provider (OpenAI, Anthropic, Gemini)
 llm-kernel   →  Executor (Agent/HTTP/Tool/Script) + Orchestrator (Serial/Parallel/Router/Loop/DAG)
-llm-engine   →  SessionManager, LLMSessionEngine, VFSAgentService, PromptHistoryService
+llm-runtime   →  SessionManager, LLMSessionEngine, VFSAgentService, PromptHistoryService
 llm-ui       →  Chat UI components, Agent config editors
 ```
 
-Entry point: `initializeLLMEngine(options)` in `packages/llm-engine/src/index.ts`.
+Entry point: `initializeLLMEngine(options)` in `packages/llm-runtime/src/index.ts`.
 
 ---
 
@@ -223,12 +223,12 @@ vfslib        ← common
 vfsdrivers    ← common
 device-llm    ← common
 llm-kernel    ← common
-llm-engine    ← common, llm-kernel, vfslib
+llm-runtime    ← common, llm-kernel, vfslib
 mdx           ← common
 vfs-ui        ← common
-llm-ui        ← common, llm-engine, mdx
+llm-ui        ← common, llm-runtime, mdx
 memory-manager← common, mdx, vfs-ui, vfslib
-app-settings  ← common, device-llm, llm-engine, llm-ui, memory-manager
+app-settings  ← common, device-llm, llm-runtime, llm-ui, memory-manager
 app-shell     ← all of the above
 web-app (app) ← all packages
 ```

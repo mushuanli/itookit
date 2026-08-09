@@ -9,16 +9,16 @@
 | `executors/agent-executor.ts` | `llm-kernel/executors/agent-executor.ts` | 重写，使用新接口 |
 | `base/executor.ts` | `llm-kernel/core/types.ts` | 类型定义迁移 |
 
-### 4.2 需要移动到 llm-engine 的文件
+### 4.2 需要移动到 llm-runtime 的文件
 
 | 原文件 | 新位置 | 说明 |
 |--------|--------|------|
-| `services/VFSAgentService.ts` | `llm-engine/services/agent-service.ts` | 保持逻辑不变 |
-| `services/IAgentConfigService.ts` | `llm-engine/services/agent-service.ts` | 合并导出 |
-| `engine/LLMSessionEngine.ts` | `llm-engine/persistence/session-engine.ts` | 保持逻辑不变 |
-| `base/session/*` | `llm-engine/persistence/types.ts` | 类型迁移 |
-| `base/agent.ts` | `llm-engine/types/agent.ts` | Agent 定义 |
-| `base/config.ts` | `llm-engine/types/config.ts` | 配置定义 |
+| `services/VFSAgentService.ts` | `llm-runtime/services/agent-service.ts` | 保持逻辑不变 |
+| `services/IAgentConfigService.ts` | `llm-runtime/services/agent-service.ts` | 合并导出 |
+| `engine/LLMSessionEngine.ts` | `llm-runtime/persistence/session-engine.ts` | 保持逻辑不变 |
+| `base/session/*` | `llm-runtime/persistence/types.ts` | 类型迁移 |
+| `base/agent.ts` | `llm-runtime/types/agent.ts` | Agent 定义 |
+| `base/config.ts` | `llm-runtime/types/config.ts` | 配置定义 |
 
 ### 4.3 需要删除的文件
 
@@ -45,7 +45,7 @@
  * - 提供连接测试能力
  * 
  * 不包含：
- * - 执行逻辑 (→ @itookit/llm-engine)
+ * - 执行逻辑 (→ @itookit/llm-runtime)
  * - 会话管理 (→ @itookit/llm-conversation)
  * - 持久化 (→ @itookit/llm-conversation)
  * - Agent 定义 (→ @itookit/llm-conversation)
@@ -296,7 +296,7 @@ const driver = new LLMDriver({
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     llm-engine                          │
+│                     llm-runtime                          │
 │  (会话管理、持久化、UI 适配)                              │
 └─────────────────────┬───────────────────────────────────┘
                       │ 使用

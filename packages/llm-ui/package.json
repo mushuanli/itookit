@@ -66,6 +66,7 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
+    "@itookit/harness": "workspace:*",
     "@itookit/device-llm": "workspace:*",
     "@itookit/llm-conversation": "workspace:*",
     "@itookit/stdio": "workspace:*",

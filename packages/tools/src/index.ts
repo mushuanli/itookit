@@ -16,7 +16,6 @@ export type {
   INativeShell,
   NativeShellResult,
 } from './core/types';
-export { createNodeNativeShell } from './core/node-native-shell';
 
 // ── Tool imports (used for both exports and BUILTIN_TOOLS registry) ──
 import { FileReadTool } from './tools/FileRead/FileReadTool';

@@ -37,8 +37,9 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@itookit/harness": "workspace:*",
     "@itookit/common": "workspace:*",
-    "@itookit/llm-engine": "workspace:*",
+    "@itookit/llm-runtime": "workspace:*",
     "@itookit/stdio": "workspace:*",
     "yaml": "^2.8.2"
   },

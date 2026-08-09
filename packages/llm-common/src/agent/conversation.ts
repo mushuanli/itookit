@@ -1,13 +1,29 @@
-// Conversation log contracts. Runtime execution contracts live in process.ts.
+// Conversation log contracts. Runtime execution is owned by @itookit/harness.
 
 import type { ChatMessage, Attachment } from '../llm/message';
 import type { TokenUsage } from '../llm/completion';
-import type { ConversationRound } from './process';
 
 // ─── Conversation Round ──────────────────────────────────────────────
 
 /** ULID-based round ID. */
 export type RoundId = string;
+
+export interface ExecutionRef {
+    taskId: string;
+    role: 'primary' | 'background';
+}
+
+export interface ConversationRound {
+    id: RoundId;
+    sessionId: string;
+    historyParentIds: string[];
+    input: ChatMessage[];
+    output: ChatMessage[];
+    executions: ExecutionRef[];
+    status: 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled';
+    createdAt: number;
+    completedAt?: number;
+}
 
 export interface Round extends ConversationRound {
     exposure?: 'public' | 'internal' | 'artifact';

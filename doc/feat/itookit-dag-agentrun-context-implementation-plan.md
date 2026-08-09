@@ -137,4 +137,4 @@ Flow 启动后，会话层发布只读 `graphRunId` 投影事件。Workbench 加
 - Revision 不可变与 Run 选择 ChatInput；
 - Design/Run mode 只读边界；
 - 当前 branch/context 与 direct-agent 路径不回归；
-- common、llm-engine、llm-ui、llm-harness TypeScript 检查，相关 Vitest 与构建。
+- common、llm-runtime、llm-ui、llm-harness TypeScript 检查，相关 Vitest 与构建。

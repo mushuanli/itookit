@@ -359,7 +359,7 @@ export class RoundGraphService {
         const round = await this.readRound(roundId);
         if (!round) throw new RoundGraphError(`Round not found: ${roundId}`, 'NOT_FOUND');
         const executions = [...round.executions];
-        if (!executions.some(item => item.runId === execution.runId)) executions.push(execution);
+        if (!executions.some(item => item.taskId === execution.taskId)) executions.push(execution);
         await this.writeRound(roundId, { ...round, executions, status: 'running' });
         this.onEvent?.({ type: 'round:updated', roundId, changes: {} });
     }
