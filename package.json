@@ -14,6 +14,8 @@
     "tauri:dev": "pnpm --filter tauri-app tauri:dev",
     "tau": "pnpm --filter tauri-app tauri:dev",
     "tauri:build": "pnpm build:libs && pnpm --filter tauri-app tauri:build",
+    "cli": "node apps/cli/dist/cli.js",
+    "cli:build": "pnpm --filter @itookit/cli build",
     "clean": "pnpm -r clean && rm -rf node_modules",
     "typecheck": "pnpm -r typecheck"
   },
