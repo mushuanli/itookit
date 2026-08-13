@@ -4,9 +4,11 @@ import type {
     IToolService,
     ITTYDriver,
     SkillDefinition,
+    ToolVFSContext,
 } from '@itookit/common';
 import type { IDeviceDriver } from '@itookit/stdio';
 import { BUILTIN_TOOLS, ToolDeviceDriver } from '@itookit/tools';
+import type { INativeShell, Tool } from '@itookit/tools';
 import { LLMServiceAdapter } from '../llm/llm-service-adapter';
 import { SkillDeviceDriver } from '../skill/skill-device-driver';
 import { createLoadSkillHandler, loadSkillDefinition, loadSkillMeta } from '../tool/load-skill';
@@ -35,6 +37,12 @@ export interface CoreutilsRuntimeOptions {
     runMode?: 'harness' | 'kernel';
     skillSource?: SkillSource;
     skillToolHandlerFactory?: SkillToolHandlerFactory;
+    /** Platform-owned filesystem boundary inherited by every session scope. */
+    vfsContext?: ToolVFSContext;
+    /** Platform-owned process runner inherited by every session scope. */
+    nativeShell?: INativeShell;
+    /** Additional application tools registered in every isolated session scope. */
+    additionalTools?: Tool[];
 }
 
 export interface CoreutilsRuntime {
@@ -126,7 +134,12 @@ class CoreutilsSessionRegistry implements SessionCapabilityRegistry {
     }
 
     private async createScope(): Promise<CoreutilsScope> {
-        const toolDriver = new ToolDeviceDriver(BUILTIN_TOOLS);
+        const toolDriver = new ToolDeviceDriver([
+            ...BUILTIN_TOOLS,
+            ...(this.options.additionalTools ?? []),
+        ]);
+        if (this.options.vfsContext) toolDriver.setVFSContext(this.options.vfsContext);
+        if (this.options.nativeShell) toolDriver.setNativeShell(this.options.nativeShell);
         const skillDriver = new SkillDeviceDriver({
             registry: this.skillDefinitions,
             source: this.options.skillSource,

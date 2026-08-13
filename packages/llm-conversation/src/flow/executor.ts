@@ -72,6 +72,7 @@ export class DurableFlowExecutor {
             program: { kind: task.programKind, version: task.programVersion },
             input: jsonValue(input),
             dependsOn: dependencies.map(binding => ({ task: binding.taskId })),
+            retry: node.retry,
             priority: node.priority ?? task.priority,
             labels: { flowNodeId: node.id, plugin: node.plugin },
             deferStart: task.programKind === 'llm.agent' || task.programKind === 'llm.chat',

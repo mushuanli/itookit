@@ -103,7 +103,7 @@ function prepareCalls(
     state: DurableAgentState,
     actions: KernelAction[],
 ): Decision<DurableAgentState, DurableAgentOutput> {
-    const human = state.pendingCalls.find(call => toolName(call) === 'human_input');
+    const human = state.pendingCalls.find(call => ['human_input', 'AskUserQuestion'].includes(toolName(call)));
     if (human) return requestInteraction(state, human, true, actions);
     if (requiresApproval(state)) return requestInteraction(state, state.pendingCalls[0], false, actions);
     return requestTool(state, actions);
@@ -122,11 +122,23 @@ function requestInteraction(
         interaction: {
             id: call.id,
             kind: human ? 'input' : 'approval',
-            prompt: String(args.question ?? (human ? 'Please provide input.' : 'Authorize tool execution?')),
-            payload: jsonValue(human ? { options: args.options ?? null } : { tools: state.pendingCalls.map(toolName) }),
+            prompt: interactionPrompt(args, human),
+            payload: jsonValue(human
+                ? { questions: args.questions ?? null, options: args.options ?? null }
+                : { calls: state.pendingCalls.map(item => ({ tool: toolName(item), args: toolArguments(item) })) }),
         },
     });
     return { state, actions, next: { type: 'wait', on: { type: 'interaction', id: call.id } } };
+}
+
+function interactionPrompt(args: Record<string, unknown>, human: boolean): string {
+    if (typeof args.question === 'string') return args.question;
+    const questions = Array.isArray(args.questions) ? args.questions : [];
+    const first = questions[0];
+    if (first && typeof first === 'object' && typeof (first as { question?: unknown }).question === 'string') {
+        return (first as { question: string }).question;
+    }
+    return human ? 'Please provide input.' : 'Authorize tool execution?';
 }
 
 function handleInteraction(

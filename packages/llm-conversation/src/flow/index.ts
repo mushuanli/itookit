@@ -5,6 +5,7 @@ export { flowToDag } from './to-dag';
 export { DagPluginRegistry } from './plugin-registry';
 export { createBuiltinDagPluginRegistry } from './builtin-plugins';
 export { DurableFlowExecutor } from './executor';
+export { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from './programs';
 export type { FlowNodeBinder } from './to-dag';
 export {
     flowRevisionDigest,

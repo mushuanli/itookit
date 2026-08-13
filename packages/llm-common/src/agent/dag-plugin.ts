@@ -29,6 +29,7 @@ export interface DagNodeDefinition<Config = unknown> {
     priority?: number;
     capabilities?: string[];
     budget?: Record<string, number>;
+    retry?: { maxAttempts: number; backoffMs?: number };
 }
 
 export interface DagEdgeDefinition {
