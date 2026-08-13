@@ -1,7 +1,7 @@
 /**
  * @file mdx/factory.ts
  */
-import { IEditor, EditorOptions, EditorFactory } from '@itookit/common';
+import { IEditor, EditorOptions, EditorFactory } from '@itookit/ui-common';
 import { MDxEditor, MDxEditorConfig } from './editor/mdx-editor';
 import { globalPluginRegistry } from './core/plugin-registry';
 import type { MDxPlugin } from './core/types';

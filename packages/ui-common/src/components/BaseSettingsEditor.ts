@@ -1,8 +1,8 @@
-// @file common/components/BaseSettingsEditor.ts
+// @file ui-common/components/BaseSettingsEditor.ts
 /// <reference lib="dom" />
 
 import { IEditor, CollapseExpandResult, EditorOptions, UnifiedSearchResult, Heading, EditorEvent, EditorEventCallback } from '../interfaces/IEditor';
-import { t } from '../i18n';
+import { t } from '@itookit/common';
 
 /**
  * 定义宿主能力接口 (与 MemoryManager 的 EditorHostContext 保持结构兼容)

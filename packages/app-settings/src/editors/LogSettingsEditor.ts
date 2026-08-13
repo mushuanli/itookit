@@ -3,7 +3,7 @@
  * @description 日志管理设置页面
  */
 
-import { BaseSettingsEditor } from '@itookit/common';
+import { BaseSettingsEditor } from '@itookit/ui-common';
 import { SettingsService } from '../services/SettingsService';
 import { LogOverviewSection } from './log/LogOverviewSection';
 import { LogLevelConfigSection } from './log/LogLevelConfigSection';

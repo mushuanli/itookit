@@ -16,7 +16,7 @@
  * Hidden files (names starting with ".") are visible in the tree but their
  * content is replaced with a placeholder by SystemVFSEngine.readContent().
  */
-import { BaseSettingsEditor } from '@itookit/common';
+import { BaseSettingsEditor } from '@itookit/ui-common';
 import { createVFSUI, connectEditorLifecycle, VFSUIShell } from '@itookit/vfs-ui';
 import { defaultEditorFactory } from '@itookit/mdxeditor';
 import '@itookit/mdxeditor/style.css';

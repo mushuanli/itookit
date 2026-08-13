@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { FakeSidecarDb } from './fake-sidecar';
 import { createVFS } from '@itookit/stdio';
 import type { IVFSManager, IModuleFS } from '@itookit/stdio';
 
@@ -60,7 +61,12 @@ export async function setupLocalVFS(suite: string): Promise<LocalTestVFS> {
     // LocalFSBackend as rootBackend: dev/, etc/, module/ land inside rootDir.
     // The 'test' module's files are at rootDir/module/test/ (= moduleDir).
     // This is correct — VFS properly scopes each module's view.
-    const backend = await openLocalFSBackend({ rootDir, sidecarDir });
+    const backend = await openLocalFSBackend({
+        rootDir,
+        sidecarDir,
+        // In-memory sidecar: avoids the better-sqlite3 native module in tests.
+        createDb: async () => new FakeSidecarDb(),
+    });
     const { manager } = await createVFS({
         rootBackend: backend,
         modules: [{ name: 'test' }],

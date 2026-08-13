@@ -1,13 +1,11 @@
 // @file: llm-ui/editors/AgentConfigEditor.ts
 
 import {
-    IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback,
     generateUUID,
     buildRenamedFilename,
-    Heading,
-    UnifiedSearchResult,
-    CollapseExpandResult
+    Heading
 } from '@itookit/common';
+import { IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback, UnifiedSearchResult, CollapseExpandResult } from '@itookit/ui-common';
 import type { AgentType, AgentDefinition, IAgentManagementService, ModelTier, PromptPreset } from '@itookit/common';
 import { EventBus } from '@itookit/stdio';
 import { renderModelCapabilityBadges } from '../utils/modelBadges';

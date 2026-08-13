@@ -1,8 +1,12 @@
 // @file llm-ui/editors/MCPSettingsEditor.ts
 import {
-    BaseSettingsEditor, Toast, Modal, generateShortUUID,
-    t, MCP_TRANSPORT_ICONS, STATUS_META, ENTITY_ICONS,
+    generateShortUUID,
+    t,
+    MCP_TRANSPORT_ICONS,
+    STATUS_META,
+    ENTITY_ICONS
 } from '@itookit/common';
+import { BaseSettingsEditor, Toast, Modal } from '@itookit/ui-common';
 import type { MCPServer, IAgentManagementService } from '@itookit/common';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

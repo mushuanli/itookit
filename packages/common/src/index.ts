@@ -3,30 +3,7 @@
 // ── LLM: 已分离至 @itookit/llm-common；保持 re-export 向后兼容 ──
 export * from '@itookit/llm-common';
 
-// ── 编辑器 / UI / 导航契约 ──
-export {
-    IEditor,
-    type EditorOptions,
-    type EditorHostContext,
-    type EditorEvent,
-    type EditorEventMap,
-    type EditorEventCallback,
-    type SearchResultSource,
-    type UnifiedSearchResult,
-    type Heading,
-    type CollapseExpandResult
-} from './interfaces/IEditor';
-export { type EditorFactory } from './interfaces/IEditorFactory';
-export { type HoverPreviewData } from './interfaces/IHoverPreview';
-export { type NavigationRequest } from './interfaces/INavigation';
-export {
-    ISessionUI,
-    type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions, type FileCreationConfig,
-    type TagEditorOptions, type TagEditorInstance, type TagEditorFactory,
-    type SessionManagerEvent,
-    type SessionManagerCallback,
-    type SessionUIEventMap
-} from './interfaces/ISessionUI';
+// ── UI 契约已迁移至 @itookit/ui-common（IEditor/ISessionUI/EditorFactory 及 UI 组件）──
 
 // ── 日志 ──
 export {
@@ -60,12 +37,11 @@ export {
     parseMarkdown, formatJsonSummary
 } from './utils/MarkdownUtils';
 
-// ── 组件 ──
-export * from './components/BaseSettingsEditor';
-export * from './components/UIComponents';
-
 // ── 事件 ──
 export { NAVIGATION_EVENTS } from './events/navigation-events';
+export type { NavigationRequest } from './interfaces/INavigation';
+export type { HoverPreviewData } from './interfaces/IHoverPreview';
+export type { Heading } from './types/heading';
 
 // ── i18n ──
 export { t, setLocale, getLocale } from './i18n';

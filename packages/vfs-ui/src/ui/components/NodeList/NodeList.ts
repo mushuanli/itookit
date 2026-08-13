@@ -5,7 +5,7 @@
  */
 import { BaseComponent, BaseComponentDeps } from '../../core/BaseComponent';
 import type { VFSNodeUI, VFSUIState, SearchFilter } from '../../../contracts/types';
-import type { FileCreationConfig } from '@itookit/common';
+import type { FileCreationConfig } from '@itookit/ui-common';
 import { debounce, escapeHTML, ACTION_ICONS } from '@itookit/common';
 
 import { NodeListStateTransformer, NodeListState } from './NodeListState';

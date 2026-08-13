@@ -5,7 +5,7 @@
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import { AssetManagerUI } from './asset-manager.ui';
 import { AssetConfigOptions } from '../../services/asset-helper';
-import { Toast } from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
 
 export interface AssetManagerPluginOptions extends AssetConfigOptions { }
 

@@ -1,9 +1,10 @@
 // @mdx/editor/mdx-editor.ts
 import {
-    IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback,
-    UnifiedSearchResult, CollapseExpandResult, Heading,
-    extractSearchableText, extractSummary,
+    Heading,
+    extractSearchableText,
+    extractSummary
 } from '@itookit/common';
+import { IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback, UnifiedSearchResult, CollapseExpandResult } from '@itookit/ui-common';
 import { EventBus } from '../core/event-bus';
 import { CodeMirrorAdapter } from './codemirror-adapter';
 import { NavigationManager } from './navigation';

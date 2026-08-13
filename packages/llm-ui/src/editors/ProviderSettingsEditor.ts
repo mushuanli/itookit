@@ -11,11 +11,17 @@
 //
 // 注意：tier 配置（optimal/standard/fast 映射）属于 Connection 层，不在此处配置。
 
-import { Modal, Toast, BaseSettingsEditor, generateShortUUID } from '@itookit/common';
-import type {
-    IConnectionService, LLMProvider, LLMModel, ModelCategory,
-    LLMProviderImplementation, ConnectionMeta, AgentDefinition,
+import {generateShortUUID} from '@itookit/common';
+import { BaseSettingsEditor } from '@itookit/ui-common';
+import type { IConnectionService,
+    LLMProvider,
+    LLMModel,
+    ModelCategory,
+    LLMProviderImplementation,
+    ConnectionMeta,
+    AgentDefinition
 } from '@itookit/common';
+import { Modal, Toast } from '@itookit/ui-common';
 import { exportBundleToLLM, fromConnectionDef } from '@itookit/device-llm';
 import { runLLMImport } from './llm-import';
 

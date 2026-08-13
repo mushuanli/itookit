@@ -7,8 +7,12 @@ import type { IEditorEventBus } from '../domain/events';
 import type { BranchItem } from '../domain/types';
 import { EventCleanup, TimerManager } from './common';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
-import { escapeHTML, showConfirmDialog, Toast } from '@itookit/common';
-import type { DagPluginManifest, DagPluginPresentation } from '@itookit/common';
+import {escapeHTML} from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
+import type { DagPluginManifest,
+    DagPluginPresentation
+} from '@itookit/common';
+import { showConfirmDialog } from '@itookit/ui-common';
 
 export interface FloatingNavWorkspaceActions {
     onToggleDag: () => void;

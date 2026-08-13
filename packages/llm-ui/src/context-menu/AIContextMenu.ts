@@ -15,10 +15,9 @@
  */
 import type {
     IAgentConfigService,
-    AgentDefinition,
-    ContextMenuConfig,
-    MenuItem,
+    AgentDefinition
 } from '@itookit/common';
+import type { ContextMenuConfig, MenuItem } from '@itookit/ui-common';
 import type { IModuleFS } from '@itookit/stdio';
 import { escapeHTML, escapeAttr } from '@itookit/common';
 

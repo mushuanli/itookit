@@ -2,7 +2,7 @@
  * @file vfs-ui/services/FileTypeRegistry.ts
  * @desc Centralized file type registry implementing IFileTypePort.
  */
-import type { EditorFactory } from '@itookit/common';
+import type { EditorFactory } from '@itookit/ui-common';
 import type { IFileTypePort } from '../contracts/ports';
 import type { VFSNodeUI } from '../contracts/types';
 import { getExtension } from '../utils/helpers';

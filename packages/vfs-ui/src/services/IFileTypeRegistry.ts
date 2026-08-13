@@ -3,7 +3,8 @@
  * @description Defines interfaces for registering file types, icons, and editors.
  */
 
-import { EditorFactory, Heading } from '@itookit/common';
+import {Heading} from '@itookit/common';
+import { EditorFactory } from '@itookit/ui-common';
 import { VFSNodeUI, FileMetadata } from '../contracts/types';
 
 /**

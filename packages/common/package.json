@@ -1,7 +1,7 @@
 {
   "name": "@itookit/common",
   "version": "0.4.1",
-  "description": "Common utilities, types, and components for the itookit ecosystem.",
+  "description": "Common utilities and types for the itookit ecosystem (UI-free).",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -53,12 +53,10 @@
   },
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/common#readme",
   "dependencies": {
-    "@itookit/llm-common": "workspace:*",
-    "@itookit/stdio": "workspace:*"
+    "@itookit/llm-common": "workspace:*"
   },
   "devDependencies": {
     "@itookit/llm-common": "workspace:*",
-    "@itookit/stdio": "workspace:*",
     "cpx": "^1.5.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"

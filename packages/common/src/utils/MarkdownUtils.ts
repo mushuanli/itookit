@@ -3,7 +3,7 @@
  * @description 统一的 Markdown 解析工具库 - 零依赖纯函数
  */
 
-import { Heading } from '../interfaces/IEditor';
+import type { Heading } from '../types/heading';
 
 // ============================================================================
 // 类型定义

@@ -237,16 +237,14 @@ export async function calculateHash(buffer: ArrayBuffer): Promise<string> {
 }
 
 /**
- * Blob 转 Base64
+ * Blob → Base64 (data URI prefix stripped)
  */
 export async function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => {
             const result = reader.result as string;
-            // 移除 data URI 前缀
-            const base64 = result.split(',')[1];
-            resolve(base64);
+            resolve(result.split(',')[1]);
         };
         reader.onerror = reject;
         reader.readAsDataURL(blob);
@@ -254,9 +252,8 @@ export async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * ArrayBuffer 转 Base64
+ * ArrayBuffer → Base64
  */
-
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
     const bytes = new Uint8Array(buffer);
     let binary = '';
@@ -266,6 +263,9 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
     return btoa(binary);
 }
 
+/**
+ * Base64 → ArrayBuffer
+ */
 export function base64ToArrayBuffer(base64: string): ArrayBuffer {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -274,3 +274,4 @@ export function base64ToArrayBuffer(base64: string): ArrayBuffer {
     }
     return bytes.buffer;
 }
+

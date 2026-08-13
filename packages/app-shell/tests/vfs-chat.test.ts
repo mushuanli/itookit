@@ -20,6 +20,7 @@ import { createVFS } from '@itookit/stdio';
 import type { IModuleFS } from '@itookit/stdio';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { FakeSidecarDb } from './fake-sidecar';
 import { ChatEngine } from '@itookit/llm-conversation';
 import { FS_MODULE_CHAT } from '@itookit/stdio';
 
@@ -51,7 +52,11 @@ async function createFixture(): Promise<Fixture> {
     await fsp.mkdir(sidecarDir, { recursive: true });
 
     // LocalFSBackend for chats (auto-selects NodeFsOps + BetterSqliteSidecarDb)
-    const chatsBackend = await openLocalFSBackend({ rootDir: chatsDir, sidecarDir });
+    const chatsBackend = await openLocalFSBackend({
+        rootDir: chatsDir,
+        sidecarDir,
+        createDb: async () => new FakeSidecarDb(),
+    });
 
     const { manager: vfs } = await createVFS({
         // IndexedDB (fake) for system paths (/etc/, /dev/)

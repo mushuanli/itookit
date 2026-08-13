@@ -162,7 +162,7 @@ describe('File — move', () => {
         await vfs.fs.driver.createFile({ name: 'moveme.txt', parentPath: null, content: 'moving' });
 
         const node = await vfs.fs.driver.getNode('/moveme.txt');
-        await vfs.fs.driver.move([node!.id], '/sub');
+        await vfs.fs.driver.move([node!.path], '/sub');
 
         expect(await diskExists(vfs.moduleDir, 'moveme.txt')).toBe(false);
         expect(await diskExists(vfs.moduleDir, 'sub/moveme.txt')).toBe(true);
@@ -178,7 +178,7 @@ describe('File — delete', () => {
     it('delete removes file from disk', async () => {
         await vfs.fs.driver.createFile({ name: 'gone.txt', parentPath: null, content: 'bye' });
         const node = await vfs.fs.driver.getNode('/gone.txt');
-        await vfs.fs.driver.delete([node!.id]);
+        await vfs.fs.driver.delete([node!.path]);
 
         expect(await diskExists(vfs.moduleDir, 'gone.txt')).toBe(false);
         expect(await vfs.fs.driver.exists('/gone.txt')).toBe(false);
@@ -187,7 +187,7 @@ describe('File — delete', () => {
     it('deleted file disappears from getChildren', async () => {
         await vfs.fs.driver.createFile({ name: 'tmp.md', parentPath: null, content: '' });
         const node = await vfs.fs.driver.getNode('/tmp.md');
-        await vfs.fs.driver.delete([node!.id]);
+        await vfs.fs.driver.delete([node!.path]);
 
         const names = (await vfs.fs.driver.getChildren('/')).map(n => n.name);
         expect(names).not.toContain('tmp.md');

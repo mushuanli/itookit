@@ -1,5 +1,5 @@
 // @mdx/editor/search-manager.ts
-import { UnifiedSearchResult } from '@itookit/common';
+import { UnifiedSearchResult } from '@itookit/ui-common';
 import { CodeMirrorAdapter } from './codemirror-adapter';
 import { RegexCache } from '../utils/regex-cache';
 import type { MDxRenderer } from '../renderer/mdx-renderer';

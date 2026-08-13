@@ -1,6 +1,6 @@
 // @file: app-settings/editors/StorageSettingsEditor.ts
 
-import { BaseSettingsEditor } from '@itookit/common';
+import { BaseSettingsEditor } from '@itookit/ui-common';
 import { SettingsService } from '../services/SettingsService';
 import { StorageOverviewSection } from './storage/StorageOverviewSection';
 import { SyncSection } from './storage/SyncSection';

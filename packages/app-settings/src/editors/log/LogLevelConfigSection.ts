@@ -3,7 +3,8 @@
  * @description 日志级别配置面板
  */
 
-import { getLogger, LogLevel, LogLevelNames, escapeHTML, Toast } from '@itookit/common';
+import {getLogger, LogLevel, LogLevelNames, escapeHTML} from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
 
 interface ModuleLevelConfig {
     module: string;

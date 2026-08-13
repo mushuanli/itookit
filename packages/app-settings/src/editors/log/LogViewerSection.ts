@@ -9,10 +9,9 @@ import {
     LogLevelNames,
     LogEntry,
     LogFilter,
-    escapeHTML,
-    Toast,
-    Modal
+    escapeHTML
 } from '@itookit/common';
+import { Toast, Modal } from '@itookit/ui-common';
 
 export class LogViewerSection {
     private container: HTMLElement;

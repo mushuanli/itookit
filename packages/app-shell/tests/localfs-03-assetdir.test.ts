@@ -198,7 +198,7 @@ describe('AssetDir — owner delete cascades to assetdir on disk', () => {
         expect(await diskExists(vfs.moduleDir, '_deleteme.md')).toBe(true);
 
         const node = await vfs.fs.driver.getNode(ownerPath);
-        await vfs.fs.driver.delete([node!.id], { recursive: true });
+        await vfs.fs.driver.delete([node!.path], { recursive: true });
 
         expect(await diskExists(vfs.moduleDir, 'deleteme.md')).toBe(false);
         expect(await diskExists(vfs.moduleDir, '_deleteme.md')).toBe(false);

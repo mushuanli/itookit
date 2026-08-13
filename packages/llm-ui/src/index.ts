@@ -7,8 +7,10 @@ import {
     VFSAgentService,
     IChatEngine,
 } from '@itookit/llm-conversation';
-import { EditorFactory, EditorOptions, IEditor, formatDefaultFileTitle } from '@itookit/common';
+import {formatDefaultFileTitle} from '@itookit/common';
+import { IEditor } from '@itookit/ui-common';
 import type { ILLMService, ICommandBus } from '@itookit/common';
+import { EditorFactory, EditorOptions } from '@itookit/ui-common';
 import type { Harness } from '@itookit/harness';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
@@ -38,7 +40,7 @@ import { SkillSettingsEditor } from './editors/SkillSettingsEditor';
  * The factory must call editor.init() — editor-connector does not do it automatically.
  */
 export function createSkillsEditorFactory(agentService: IAgentManagementService): EditorFactory {
-    return async (container: HTMLElement, options: EditorOptions = {}): Promise<import('@itookit/common').IEditor> => {
+    return async (container: HTMLElement, options: EditorOptions = {}): Promise<import('@itookit/ui-common').IEditor> => {
         // createFormOnly already sets selectedId = options.nodeId (the skill ID).
         const editor = SkillSettingsEditor.createFormOnly(container, agentService, options);
         // The factory is responsible for calling init(). Pass initialContent as fallback.

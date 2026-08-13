@@ -87,7 +87,7 @@ export type SearchFilter = (item: VFSNodeUI, queryTokens: string[]) => boolean;
 
 // --- Component Configuration ---
 
-export type { TagEditorOptions, TagEditorFactory } from '@itookit/common';
+export type { TagEditorOptions, TagEditorFactory } from '@itookit/ui-common';
 
 interface RegularMenuItem {
   id: string;

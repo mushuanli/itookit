@@ -19,11 +19,12 @@ import { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createVFS } from '@itookit/stdio';
+import { createVFS, FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/stdio';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { FakeSidecarDb } from './fake-sidecar';
 import { ChatEngine, VFSAgentService } from '@itookit/llm-conversation';
 import { LLMDeviceDriver } from '@itookit/device-llm';
-import { IVFSManager } from '@itookit/stdio';
+import type { IVFSManager } from '@itookit/stdio';
 
 // ── Module list (mirrors tauri-app/src/config/modules.ts, minus settings/home) ─
 
@@ -83,7 +84,11 @@ beforeAll(async () => {
 
     // ── 2. Open all backends in parallel (same as main.ts) ────────────────────
     const open = (rootDir: string, sidecarDir: string) =>
-        openLocalFSBackend({ rootDir, sidecarDir }); // auto: NodeFsOps + BetterSqliteSidecarDb
+        openLocalFSBackend({
+            rootDir,
+            sidecarDir,
+            createDb: async () => new FakeSidecarDb(),
+        });
 
     const [rootBackend, homeBackend, ...moduleBackends] = await Promise.all([
         open(mindosDir, `${mindosDir}/_meta`),
@@ -184,9 +189,9 @@ describe('tauri-app bootstrap simulation', () => {
         expect(chatFiles.length).toBeGreaterThanOrEqual(3);
     });
 
-    it('etc module: LLM connection config is persisted on disk', async () => {
-        // etc module uses rootBackend → ~/.mindos/module/etc/
-        const etcPath = `${fix.mindosDir}/module/etc`;
+    it('etc rootfs: LLM connection config is persisted on disk', async () => {
+        // /etc is a rootfs built-in directory (v4.1), not a mounted module → ~/.mindos/etc/
+        const etcPath = `${fix.mindosDir}/etc`;
         const stat = await fsp.stat(etcPath).catch(() => null);
         expect(stat?.isDirectory()).toBe(true);
 

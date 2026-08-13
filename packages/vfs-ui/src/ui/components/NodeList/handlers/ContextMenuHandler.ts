@@ -2,8 +2,15 @@
  * @file vfs-ui/ui/components/NodeList/handlers/ContextMenuHandler.ts
  * @desc Context menu display and action dispatch via ICommandPort.
  */
-import type { IStatePort, ICommandPort } from '../../../../contracts/ports';
-import type { VFSNodeUI, MenuItem, ContextMenuConfig } from '../../../../contracts/types';
+import type {
+    IStatePort,
+    ICommandPort,
+} from '../../../../contracts/ports';
+import type {
+    VFSNodeUI,
+    ContextMenuConfig,
+    MenuItem,
+} from '../../../../contracts/types';
 import { createContextMenuHTML } from '../templates';
 import { escapeHTML } from '@itookit/common';
 

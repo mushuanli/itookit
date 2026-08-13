@@ -1,5 +1,5 @@
 // @file: app-settings/editors/AppearanceSettingsEditor.ts
-import { BaseSettingsEditor } from '@itookit/common';
+import { BaseSettingsEditor } from '@itookit/ui-common';
 import { CONFIG_MODULE } from '@itookit/stdio';
 import { SettingsService } from '../services/SettingsService';
 

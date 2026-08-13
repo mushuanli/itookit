@@ -5,12 +5,10 @@
  *       Uses Assembler for construction only.
  */
 import {
-  ISessionUI,
-  type SessionUIOptions,
-  type EditorFactory,
-  formatDefaultFileTitle,
-  generateShortUUID,
+    formatDefaultFileTitle,
+    generateShortUUID
 } from '@itookit/common';
+import { ISessionUI, type SessionUIOptions, type EditorFactory } from '@itookit/ui-common';
 import type { IModuleFS } from '@itookit/stdio';
 
 import type {

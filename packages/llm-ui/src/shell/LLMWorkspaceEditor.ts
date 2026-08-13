@@ -1,9 +1,6 @@
 // @file: llm-ui/shell/LLMWorkspaceEditor.ts
 
-import {
-    IEditor, EditorOptions, EditorHostContext, EditorEvent,
-    EditorEventMap, EditorEventCallback, CollapseExpandResult, Toast,
-} from '@itookit/common';
+import { IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventMap, EditorEventCallback, CollapseExpandResult, Toast } from '@itookit/ui-common';
 import { EventBus } from '@itookit/stdio';
 import type {
     ILLMService,

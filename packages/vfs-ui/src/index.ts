@@ -6,7 +6,7 @@ import './styles/index.css';
 
 import { VFSUIShell } from './shell/VFSUIShell';
 
-import type { SessionUIOptions, ISessionUI, EditorFactory } from '@itookit/common';
+import type { SessionUIOptions, ISessionUI, EditorFactory } from '@itookit/ui-common';
 import type { IModuleFS } from '@itookit/stdio';
 import type { VFSNodeUI, VFSUIState, UISettings } from './contracts/types';
 import { VFSService } from './services/VFSService';

@@ -5,7 +5,7 @@
 import { EditorView } from 'codemirror';
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MDxEditor } from '../../editor/mdx-editor';
-import { Toast } from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
 import {
     getUploadLimits,
     validateFile,

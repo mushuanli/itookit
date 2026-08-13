@@ -1,6 +1,6 @@
 // @file: app-settings/editors/storage/SyncSection.ts
 
-import { Toast, Modal } from '@itookit/common';
+import { Toast, Modal } from '@itookit/ui-common';
 import { syncService } from '../../services/SyncService';
 import { 
   AppSyncSettings,

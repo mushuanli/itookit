@@ -5,7 +5,7 @@
 import type { VFSUIState, VFSNodeUI } from './types';
 import type { CommandName, CommandPayload } from './commands';
 import type { PublicEventName, PublicEventPayload } from './events';
-import type { EditorFactory } from '@itookit/common';
+import type { EditorFactory } from '@itookit/ui-common';
 
 /**
  * Port for state reads + writes (Store boundary).

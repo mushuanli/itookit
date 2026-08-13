@@ -4,13 +4,11 @@
  * @desc Public API entry point for the VFS-UI library.
  */
 
-import { VFSUIShell } from './VFSUIShell';
-
-import type {
-    SessionUIOptions,
-    ISessionUI,
-    EditorFactory,
-} from '@itookit/common';
+import {
+    VFSUIShell,
+} from './VFSUIShell';
+import type { SessionUIOptions } from '@itookit/ui-common';
+import { ISessionUI, EditorFactory } from '@itookit/ui-common';
 import type { IModuleFS } from '@itookit/stdio';
 
 import type {

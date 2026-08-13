@@ -10,7 +10,8 @@ import type {
 } from '@itookit/common';
 import type { DurableFlowSnapshot } from '@itookit/llm-conversation';
 import type { TaskStatus } from '@itookit/harness';
-import { escapeHTML, showConfirmDialog, Toast } from '@itookit/common';
+import {escapeHTML} from '@itookit/common';
+import { showConfirmDialog, Toast } from '@itookit/ui-common';
 import { DagDraftController, createFlowEdge } from './dag/DagDraftController';
 import { SchemaForm } from './dag/SchemaForm';
 import { DagCanvas } from './dag/DagCanvas';

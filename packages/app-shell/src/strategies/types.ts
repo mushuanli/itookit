@@ -1,4 +1,4 @@
-import { EditorFactory } from '@itookit/common';
+import { EditorFactory } from '@itookit/ui-common';
 import type { IModuleFS } from '@itookit/stdio';
 
 export interface WorkspaceStrategy {

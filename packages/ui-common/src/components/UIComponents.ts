@@ -1,7 +1,7 @@
-// @file common/components/UIComponents.ts
+// @file ui-common/components/UIComponents.ts
 
 //import '../styles.css'; // 假设样式文件位置
-import {escapeHTML} from '../utils/utils';
+import { escapeHTML } from '@itookit/common';
 export interface ModalOptions {
     confirmText?: string;
     cancelText?: string;

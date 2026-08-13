@@ -3,11 +3,14 @@
 // Builds the SlashCommandCallbacks object used by SlashCommandPlugin.
 // Frequently modified: each new slash command or behavior change touches this file.
 
-import { Toast, showConfirmDialog, formatDefaultFileTitle } from '@itookit/common';
-import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
-import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
-import type { IEditorEventBus } from '../domain/events';
-import type { ICommandBus } from '@itookit/common';
+import {formatDefaultFileTitle} from '@itookit/common';
+import { showConfirmDialog } from '@itookit/ui-common';
+import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter'
+import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter'
+import type { IEditorEventBus } from '../domain/events'
+import type { ICommandBus
+} from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
 import type { SessionGroup } from '@itookit/llm-conversation';
 import type { IAgentConfigService } from '@itookit/common';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
@@ -16,7 +19,7 @@ import type { DOMCache } from '../components/common/DOMCache';
 import type { Command } from '../commands/Command';
 import type { SendMessageCommand } from '../commands/SendMessageCommand';
 import type { SwitchBranchByOffsetCommand } from '../commands/BranchCommands';
-import type { EditorHostContext } from '@itookit/common';
+import type { EditorHostContext } from '@itookit/ui-common';
 import type { IChatEngine } from '@itookit/llm-conversation';
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
 import { getAgentDisplayName, sanitizeFileName } from './AgentProvider';

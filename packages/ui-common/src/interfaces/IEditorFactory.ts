@@ -1,5 +1,5 @@
 /**
- * @file common/interfaces/IEditorFactory.ts
+ * @file ui-common/interfaces/IEditorFactory.ts
  * @description 定义了标准的编辑器工厂函数类型。
  */
 

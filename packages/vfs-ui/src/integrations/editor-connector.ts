@@ -3,13 +3,9 @@
  * @desc Connects VFS-UI with IEditor instances. Updated to work with new shell.
  */
 import type {
-  IEditor,
-  EditorFactory,
-  EditorOptions,
-  ISessionUI,
-  EditorHostContext,
-  NavigationRequest,
+    NavigationRequest
 } from '@itookit/common';
+import type { IEditor, EditorFactory, EditorOptions, ISessionUI, EditorHostContext } from '@itookit/ui-common';
 import type { IModuleFS } from '@itookit/stdio';
 
 import type { VFSNodeUI, VFSUIState } from '../contracts/types';

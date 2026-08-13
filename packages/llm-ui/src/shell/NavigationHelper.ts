@@ -16,7 +16,7 @@ import type { NavDataBuilder } from '../services/NavDataBuilder';
 import type { DOMCache } from '../components/common/DOMCache';
 import type { TimerManager } from '../components/common/TimerManager';
 import { FloatingNavPanel } from '../components/FloatingNavPanel';
-import { Toast } from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
 
 export interface NavigationDeps {
     domCache: DOMCache;

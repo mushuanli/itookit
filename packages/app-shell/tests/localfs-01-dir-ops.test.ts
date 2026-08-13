@@ -79,7 +79,7 @@ describe('Directory — list', () => {
         expect(sub?.children).toBeUndefined();  // lazy sentinel
 
         // Expand sub explicitly
-        const subChildren = await vfs.fs.driver.getChildren(sub!.id);
+        const subChildren = await vfs.fs.driver.getChildren(sub!.path);
         expect(subChildren.map(c => c.name)).toContain('child.txt');
     });
 
@@ -100,7 +100,7 @@ describe('Directory — delete', () => {
         await vfs.fs.driver.createDirectory({ name: 'empty', parentPath: null });
         const node = await vfs.fs.driver.getNode('/empty');
 
-        await vfs.fs.driver.delete([node!.id]);
+        await vfs.fs.driver.delete([node!.path]);
 
         expect(await diskExists(vfs.moduleDir, 'empty')).toBe(false);
         expect(await vfs.fs.driver.exists('/empty')).toBe(false);
@@ -112,7 +112,7 @@ describe('Directory — delete', () => {
         await vfs.fs.driver.createDirectory({ name: 'sub', parentPath: '/tree' });
 
         const node = await vfs.fs.driver.getNode('/tree');
-        await vfs.fs.driver.delete([node!.id], { recursive: true });
+        await vfs.fs.driver.delete([node!.path], { recursive: true });
 
         expect(await diskExists(vfs.moduleDir, 'tree')).toBe(false);
     });
@@ -147,7 +147,7 @@ describe('Directory — rename / move', () => {
         await vfs.fs.driver.createDirectory({ name: 'movable', parentPath: null });
 
         const node = await vfs.fs.driver.getNode('/movable');
-        await vfs.fs.driver.move([node!.id], '/target');
+        await vfs.fs.driver.move([node!.path], '/target');
 
         expect(await diskExists(vfs.moduleDir, 'movable')).toBe(false);
         expect(await diskExists(vfs.moduleDir, 'target/movable')).toBe(true);

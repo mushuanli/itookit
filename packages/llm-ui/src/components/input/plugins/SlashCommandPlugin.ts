@@ -6,7 +6,7 @@ import type { SkillInfo, SkillInvocation } from '../../../domain/types';
 import { parseSkillArgs } from '../SkillInvocationParser';
 import { injectStyle } from '../../../utils/styleInjector';
 import { insertBeforeWrapper } from '../../../utils/domInsertion';
-import { Toast } from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
 
 // ── Tool arg parser ──────────────────────────────────────────────────────────
 // Parses slash command args: positionals and --flag value pairs.

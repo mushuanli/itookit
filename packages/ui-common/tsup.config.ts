@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: []  // 工作区依赖 (@itookit/llm-common) 直接打包进 dist
+  external: ['@itookit/common', '@itookit/stdio'],
 });

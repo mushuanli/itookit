@@ -2,8 +2,13 @@
 // CRUD operations for SkillSettingsEditor — extracted for stability.
 // Infrequently modified: operation patterns are stable; only types change.
 
-import { Toast, Modal, generateShortUUID, t, SKILL_TYPE_META } from '@itookit/common';
-import type { LLMSkill, SkillType, IAgentManagementService } from '@itookit/common';
+import {generateShortUUID, t, SKILL_TYPE_META} from '@itookit/common';
+import { Modal } from '@itookit/ui-common';
+import type { LLMSkill,
+    SkillType,
+    IAgentManagementService
+} from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
 
 export interface SkillOperationsDeps {
     service: IAgentManagementService;

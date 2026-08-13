@@ -1,5 +1,5 @@
 /**
- * @file common/interfaces/ISessionUI.ts
+ * @file ui-common/interfaces/ISessionUI.ts
  * @description Defines the public interface that a session management module must implement.
  */
 

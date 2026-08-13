@@ -1,7 +1,7 @@
 // @file: llm-ui/commands/BatchCommands.ts
 
 import { Command } from './Command';
-import { Toast } from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
 import { extractExecutionOutput } from '../utils/textUtils';
 import type { SessionGroup } from '@itookit/llm-conversation';
 

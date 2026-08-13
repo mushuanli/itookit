@@ -6,7 +6,8 @@
  * 始终处于只读渲染模式，不提供编辑能力。
  */
 import { EventBus } from '@itookit/stdio';
-import type { IEditor, EditorEvent, EditorEventMap, EditorEventCallback, Heading, UnifiedSearchResult, CollapseExpandResult } from '@itookit/common';
+import type {Heading} from '@itookit/common';
+import type { IEditor, EditorEvent, EditorEventMap, EditorEventCallback, UnifiedSearchResult, CollapseExpandResult } from '@itookit/ui-common';
 
 // ── MIME 类型分组 ──────────────────────────────────────────────────────────────
 

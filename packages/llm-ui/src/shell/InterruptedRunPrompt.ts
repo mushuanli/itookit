@@ -1,4 +1,4 @@
-import { Toast } from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
 
 export function promptInterruptedRun(
     snapshot: { interruptedAssistantId?: string },

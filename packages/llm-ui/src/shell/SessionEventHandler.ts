@@ -2,7 +2,8 @@
 
 import type { SessionEvent, RegistryEvent } from '@itookit/llm-conversation';
 import type { ICommandBus } from '@itookit/common';
-import { Toast, t } from '@itookit/common';
+import {t} from '@itookit/common';
+import { Toast } from '@itookit/ui-common';
 import type { SessionGroup } from '@itookit/llm-conversation';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';

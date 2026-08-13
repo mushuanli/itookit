@@ -4,8 +4,16 @@
 // 此编辑器负责 Connection 层：绑定 Provider + 配置 apiKey + 自定义 tier 映射。
 // 模型目录由 Provider 统一管理，不在 Connection 中存储/编辑。
 
-import { Modal, Toast, BaseSettingsEditor, generateShortUUID, ENTITY_ICONS } from '@itookit/common';
-import type { IConnectionService, ConnectionMeta, LLMConnection, LLMProvider, ModelTier, ApiProtocol } from '@itookit/common';
+import {generateShortUUID, ENTITY_ICONS} from '@itookit/common';
+import { BaseSettingsEditor } from '@itookit/ui-common';
+import type { IConnectionService,
+    ConnectionMeta,
+    LLMConnection,
+    LLMProvider,
+    ModelTier,
+    ApiProtocol
+} from '@itookit/common';
+import { Modal, Toast } from '@itookit/ui-common';
 import { fromConnectionDef, serializeLLMConfig } from '@itookit/device-llm';
 import { runLLMImport } from './llm-import';
 import { renderModelCapabilityBadges } from '../utils/modelBadges';

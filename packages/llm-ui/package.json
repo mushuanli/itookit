@@ -71,7 +71,8 @@
     "@itookit/llm-conversation": "workspace:*",
     "@itookit/stdio": "workspace:*",
     "js-yaml": "^4.1.1",
-    "marked": "^16.4.2"
+    "marked": "^16.4.2",
+    "@itookit/ui-common": "workspace:*"
   },
   "peerDependencies": {
     "@itookit/mdxeditor": "workspace:*"
