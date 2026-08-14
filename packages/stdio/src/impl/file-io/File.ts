@@ -127,17 +127,14 @@ export class FileHandle implements IFile {
     }
 
     async move(destDirNodeId: string): Promise<void> {
-        const assetDirPath = await this._resolveAssetDirPath();
-        const ids = [this.nodeId];
-        if (assetDirPath) ids.push(assetDirPath);
-        await this.fs.driver.move(ids, destDirNodeId);
+        // engine.move already relocates the companion assetdir; passing it
+        // explicitly would double-move and throw after the first rename.
+        await this.fs.driver.move([this.nodeId], destDirNodeId);
     }
 
     async delete(): Promise<void> {
-        const assetDirPath = await this._resolveAssetDirPath();
-        const ids = [this.nodeId];
-        if (assetDirPath) ids.push(assetDirPath);
-        await this.fs.driver.delete(ids);
+        // engine.delete already cascades the companion assetdir.
+        await this.fs.driver.delete([this.nodeId]);
     }
 
     // ══ Low-level: raw main-file ═══════════════════════════════

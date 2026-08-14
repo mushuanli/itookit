@@ -16,6 +16,9 @@ import { nullDevice, zeroDevice, randomDevice } from './devices';
 
 export async function createVFS(options: VFSFactoryOptions): Promise<VFSInstance> {
     const engine = new VFSEngine(options.rootBackend);
+    if (options.filenamePattern) {
+        engine.setFilenamePattern(options.filenamePattern);
+    }
 
     // Register user plugins (before init)
     if (options.plugins) {

@@ -60,18 +60,6 @@ export interface VFSFactoryOptions {
     initialConfigs?: Record<string, Record<string, string>>;
 
     /**
-     * 符号链接解析最大深度
-     * @default 40
-     */
-    maxSymlinkDepth?: number;
-
-    /**
-     * 是否启用事件合并（事务内）
-     * @default true
-     */
-    coalesceTransactionEvents?: boolean;
-
-    /**
      * 文件名验证正则（默认禁止 . 和 _ 开头）
      * @default /^[^._][^/\\]*$/
      */

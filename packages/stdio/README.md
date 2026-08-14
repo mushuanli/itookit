@@ -3,6 +3,8 @@
 
 一套面向 AI 应用场景的虚拟文件系统接口规范。提供从底层存储后端到上层模块应用的完整抽象，支持多后端挂载、模块隔离、设备驱动、插件扩展和跨后端同步。
 
+> ⚠️ **本文档部分章节已过时（v4.1 之前的 ino 三层描述）**。当前 API 以 `packages/stdio/src/` 与 `packages/stdio/CLAUDE.md` 为准：存储后端为单一 path-based `IStorageBackend`（`stat/list/mkdir/delete/rename/read/write/updateMetadata/setTags` + 可选 `records?/search?/symlink?/transaction?`），已移除 `IInodeStore/IMetaStore/IContentStore` 三层、`runInTransaction` 与 `descriptor.features`。字段名亦已变更（`parentIdOrPath`→`parentPath`、`assetDirId`→`assetDirPath` 等）。
+
 ---
 
 ## 目录
@@ -525,60 +527,42 @@ function setupModule(fs: IModuleFS) {
 
 要接入 VFS，存储后端只需实现 `IStorageBackend` 接口：
 
-```typescript
-import type { IStorageBackend } from '@common/interfaces/fs/storage';
+    import type { IStorageBackend } from '@itookit/stdio';
 
-class MyBackend implements IStorageBackend {
-  readonly descriptor = {
-    type: 'my-backend',
-    displayName: 'My Custom Backend',
-    features: {
-      transactions: true,
-      partialRead: false,
-      partialWrite: false,
-      seqFiles: false,
-      refs: false,
-      watch: false,
-      localPersistent: true,
-      remote: false,
-      syncAdapter: false,
-    },
-  };
+    class MyBackend implements IStorageBackend {
+      readonly name = 'my-backend';
 
-  readonly inodes: IInodeStore = new MyInodeStore();
-  readonly meta: IMetaStore = new MyMetaStore();
-  readonly content: IContentStore = new MyContentStore();
+      async stat(path) { /* → FSNode | null */ }
+      async list(path) { /* → FSNode[] */ }
+      async mkdir(path) { /* → FSNode */ }
+      async delete(path, opts) { /* opts.recursive */ }
+      async rename(from, to) {}
 
-  async init() { /* 建表/建目录 */ }
-  async close() { /* 清理资源 */ }
-  async runInTransaction(mode, fn) { /* 事务包装 */ }
-}
-```
+      async read(path, opts) { /* opts.offset/opts.length → Uint8Array */ }
+      async write(path, content) { /* Uint8Array → FSNode */ }
 
-### 三层存储接口
+      async updateMetadata(path, metadata) {}
+      async setTags(path, tags) {}
+      async getAllTags() { /* → string[] */ }
 
-| 层 | 接口 | 职责 | 数据 |
-|----|------|------|------|
-| Layer 1 | `IInodeStore` | 节点结构（存在性、父子关系、类型） | `StorageInode` |
-| Layer 2 | `IMetaStore` | 描述信息（修改时间、标签、AI 元数据） | 含在 `StorageInode.metadata` 中 |
-| Layer 3 | `IContentStore` | 纯二进制内容 | `ArrayBuffer` |
+      // 可选能力（不支持则不定义）
+      records?: IRecordStore;
+      search?(query): Promise<FSNode[]>;
+      symlink?(linkPath, target): Promise<void>;
+      readlink?(path): Promise<string>;
+      transaction?<T>(fn: (tx: IStorageBackend) => Promise<T>): Promise<T>;
 
-三层在同一后端内部可以合并存储（如 SQLite 同一个表），也可以分开（如 inode 在 DynamoDB，content 在 S3）。接口分离是为了让后端实现有最大灵活度。
+      async init() {}
+      async close() {}
+    }
+
+### 存储模型
+
+v4.1 起为单一 path-based 接口：节点结构、内容、元数据、标签由后端内部统一存储（单一 object store 或表）。不再拆分 IInodeStore / IMetaStore / IContentStore 三层，亦无 runInTransaction / descriptor.features。
 
 ### 事务支持
 
-```typescript
-// 闭包式事务 API — 保证 commit/rollback 自动执行
-async runInTransaction<T>(
-  mode: 'readonly' | 'readwrite',
-  fn: (backend: IStorageBackend) => Promise<T>,
-): Promise<T>;
-
-// 不支持事务的后端可以提供透传实现：
-async runInTransaction(mode, fn) {
-  return fn(this); // 不做任何包装
-}
-```
+事务为闭包式 **transaction?<T>(fn: (tx: IStorageBackend) => Promise<T>)**。真正的隔离由后端自行实现；**MemoryBackend** / **IndexedDBBackend** 均为透传（fn(this)），文件级原子性不保证；SeqFile 记录级原子性由 **IRecordStore.transaction** 提供。
 
 ### 可选增强：IRecordStore
 

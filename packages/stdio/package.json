@@ -12,11 +12,6 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./backend": {
-      "types": "./src/impl/backend/index.ts",
-      "import": "./src/impl/backend/index.ts",
-      "default": "./src/impl/backend/index.ts"
-    },
     "./testing": {
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts",
@@ -33,11 +28,6 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.mjs",
         "require": "./dist/index.js"
-      },
-      "./backend": {
-        "types": "./dist/backend/index.d.ts",
-        "import": "./dist/backend/index.mjs",
-        "require": "./dist/backend/index.js"
       },
       "./testing": {
         "types": "./dist/testing/index.d.ts",
@@ -71,8 +61,6 @@
     "yaml": "^2.8.2"
   },
   "devDependencies": {
-    "@itookit/vfsdriver-indexeddb": "workspace:*",
-    "fake-indexeddb": "^6.0.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"

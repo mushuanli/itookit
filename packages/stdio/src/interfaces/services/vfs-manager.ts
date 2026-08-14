@@ -17,7 +17,6 @@
  * │   .mounts          │ 挂载管理                              │
  * │   .devices         │ 设备管理                              │
  * │   .plugins         │ 插件管理                              │
- * │   .sync            │ 同步服务（可选）                       │
  * │   .maintenance     │ 维护操作（gc/fsck/backup）             │
  * └────────────────────┴──────────────────────────────────────┘
  */
@@ -26,7 +25,6 @@ import type { FSNode, FSSearchQuery, FSSearchResult, FSModuleStats, FileContent 
 import type { IModuleFS } from './module-fs';
 import type { IStorageBackend } from '../storage/backend';
 import type { IMountRouter, MountPoint, MountOptions } from '../mount/mount';
-import type { ISyncService } from '../sync/sync';
 import type { IPluginManager } from '../plugin/plugin';
 import type { IDeviceManager, IDeviceDriver } from '../device/device';
 
@@ -91,20 +89,6 @@ export interface GlobalTagInfo {
     name: string;
     color?: string;
     refCount?: number;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 同步支持
-// ═══════════════════════════════════════════════════════════════
-
-export interface SyncableFileInfo {
-    /** 系统级全路径: /module/{moduleName}/relative/path */
-    path: string;
-    nodeId: string;
-    type: 'file' | 'directory';
-    modifiedAt: number;
-    moduleName: string;
-    mountId: string;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -294,12 +278,6 @@ export interface IVFSManager {
 
     /** 维护操作（gc/fsck/backup/export/import） */
     readonly maintenance: IMaintenanceService;
-
-    /**
-     * 同步服务（可选能力）
-     * VFS 实例未配置同步能力时返回 null。
-     */
-    readonly sync: ISyncService | null;
 
     // ==================== 模块管理 ====================
 

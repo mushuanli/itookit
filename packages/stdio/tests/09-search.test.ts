@@ -102,7 +102,7 @@ describe('Search (IndexedDB backend)', () => {
         await vfs.manager.mount('other');
         const otherFS = vfs.manager.getEngine('other');
         await otherFS.init();
-        await otherFS.createFile({ name: 'cross.txt', parentPath: null, content: 'cross-module' });
+        await otherFS.driver.createFile({ name: 'cross.txt', parentPath: null, content: 'cross-module' });
         await otherFS.tags!.addTag('/cross.txt', 'crosstest');
         const result = await vfs.manager.search({ tags: { any: ['crosstest'] } });
         expect(result.nodes.length).toBeGreaterThanOrEqual(1);

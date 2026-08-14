@@ -10,6 +10,7 @@ import type {
     FSNode,
     FSFileNode,
     FSDirectoryNode,
+    FSDeviceNode,
     FSSearchQuery,
     IRecordStore,
     IRecordTransaction,
@@ -18,13 +19,15 @@ import type {
     RecordQueryOptions,
     RecordQueryResult,
     RecordWalkOptions,
-} from '../../protocol';
+} from '../protocol';
+import { DEVICE_HANDLER_METADATA_KEY } from '../protocol';
 
 interface Entry {
     type: 'file' | 'directory';
     content: Uint8Array;
     createdAt: number;
     modifiedAt: number;
+    version: number;
     tags: string[];
     metadata: Record<string, unknown>;
     icon?: string;
@@ -37,6 +40,7 @@ const ROOT_ENTRY: Entry = Object.freeze({
     content: new Uint8Array(0),
     createdAt: Date.now(),
     modifiedAt: Date.now(),
+    version: 1,
     tags: [],
     metadata: {},
 });
@@ -98,6 +102,7 @@ export class MemoryBackend implements IStorageBackend {
             content: new Uint8Array(0),
             createdAt: Date.now(),
             modifiedAt: Date.now(),
+            version: 1,
             tags: [],
             metadata: {},
         };
@@ -155,10 +160,11 @@ export class MemoryBackend implements IStorageBackend {
         const p = normalize(path);
         const existing = this.data.get(p);
         const entry: Entry = {
-            type: 'file',
+            type: existing?.type ?? 'file',
             content: new Uint8Array(content),
             createdAt: existing?.createdAt ?? Date.now(),
             modifiedAt: Date.now(),
+            version: (existing?.version ?? 0) + 1,
             tags: existing?.tags ?? [],
             metadata: existing?.metadata ?? {},
             icon: existing?.icon,
@@ -199,10 +205,16 @@ export class MemoryBackend implements IStorageBackend {
         const results: FSNode[] = [];
         for (const [path, entry] of this.data) {
             const node = toFSNode(path, entry);
-            if (matchesSearch(node, query)) results.push(node);
+            if (matchesSearch(node, entry, query)) results.push(node);
         }
-        if (query.orderBy === 'modifiedAt') {
-            results.sort((a, b) => query.orderDirection === 'desc' ? b.modifiedAt - a.modifiedAt : a.modifiedAt - b.modifiedAt);
+        if (query.orderBy) {
+            const dir = query.orderDirection === 'desc' ? -1 : 1;
+            results.sort((a, b) => {
+                const av = searchOrderValue(a, query.orderBy!);
+                const bv = searchOrderValue(b, query.orderBy!);
+                if (av === bv) return 0;
+                return (av < bv ? -1 : 1) * dir;
+            });
         }
         const offset = query.offset ?? 0;
         const limit = query.limit ?? 50;
@@ -344,7 +356,7 @@ function toFSNode(path: string, entry: Entry): FSNode {
         path,
         createdAt: entry.createdAt,
         modifiedAt: entry.modifiedAt,
-        version: Math.floor(entry.modifiedAt),
+        version: entry.version,
         tags: entry.tags,
         metadata: entry.metadata,
         icon: entry.icon,
@@ -352,6 +364,11 @@ function toFSNode(path: string, entry: Entry): FSNode {
 
     if (entry.type === 'directory') {
         return { ...base, type: 'directory' } as FSDirectoryNode;
+    }
+
+    const deviceHandlerId = entry.metadata[DEVICE_HANDLER_METADATA_KEY];
+    if (typeof deviceHandlerId === 'string' && deviceHandlerId.length > 0) {
+        return { ...base, type: 'device', deviceHandlerId } as FSDeviceNode;
     }
 
     const fileBase = {
@@ -369,17 +386,35 @@ function toFSNode(path: string, entry: Entry): FSNode {
     return fileBase as FSFileNode;
 }
 
-function matchesSearch(node: FSNode, q: FSSearchQuery): boolean {
+function matchesSearch(node: FSNode, entry: Entry, q: FSSearchQuery): boolean {
     if (q.type) {
         const types = Array.isArray(q.type) ? q.type : [q.type];
         if (!types.includes(node.type)) return false;
     }
-    if (q.name?.contains && !node.name.toLowerCase().includes(q.name.contains.toLowerCase())) return false;
-    if (q.name?.exact && node.name !== q.name.exact) return false;
-    if (q.name?.startsWith && !node.name.startsWith(q.name.startsWith)) return false;
-    if (q.tags?.all && !q.tags.all.every(t => node.tags.includes(t))) return false;
-    if (q.tags?.any && !q.tags.any.some(t => node.tags.includes(t))) return false;
-    if (q.tags?.none && q.tags.none.some(t => node.tags.includes(t))) return false;
-    if (q.text && node.type === 'file') return false; // Memory backend can't full-text search content
+    if (q.name) {
+        const name = node.name.toLowerCase();
+        if (q.name.exact && name !== q.name.exact.toLowerCase()) return false;
+        if (q.name.contains && !name.includes(q.name.contains.toLowerCase())) return false;
+        if (q.name.startsWith && !name.startsWith(q.name.startsWith.toLowerCase())) return false;
+        if (q.name.endsWith && !name.endsWith(q.name.endsWith.toLowerCase())) return false;
+    }
+    if (q.tags) {
+        if (q.tags.all && !q.tags.all.every(t => node.tags.includes(t))) return false;
+        if (q.tags.any && !q.tags.any.some(t => node.tags.includes(t))) return false;
+        if (q.tags.none && q.tags.none.some(t => node.tags.includes(t))) return false;
+    }
+    if (q.metadata && !Object.entries(q.metadata).every(([k, v]) => Object.is(node.metadata[k], v))) return false;
+    if (q.modifiedAfter !== undefined && node.modifiedAt <= q.modifiedAfter) return false;
+    if (q.modifiedBefore !== undefined && node.modifiedAt >= q.modifiedBefore) return false;
+    if (q.text && node.type === 'file') {
+        const content = new TextDecoder().decode(entry.content).toLowerCase();
+        if (!content.includes(q.text.toLowerCase())) return false;
+    }
     return true;
+}
+
+function searchOrderValue(node: FSNode, orderBy: NonNullable<FSSearchQuery['orderBy']>): string | number {
+    if (orderBy === 'name') return node.name.toLowerCase();
+    if (orderBy === 'size') return node.type === 'file' ? node.size : 0;
+    return node[orderBy];
 }

@@ -1,6 +1,6 @@
 /**
- * @file packages/vfslib/src/testing/index.ts
- * @desc Testing utilities for vfslib
+ * @file packages/stdio/src/testing/index.ts
+ * @desc Testing utilities — the in-memory reference backend (also exported from the package root).
  */
 
-export { MemoryBackend } from '../impl/backend/memory-backend';
+export { MemoryBackend } from './memory-backend';

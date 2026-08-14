@@ -15,7 +15,6 @@
 | `device/device.ts` | `IDeviceDriver`, `IDeviceManager` | 设备抽象 |
 | `mount/mount.ts` | `IMountRouter`, `MountPoint` | 挂载路由 |
 | `plugin/plugin.ts` | `IPlugin`, `IPluginManager` | 插件系统 |
-| `sync/sync.ts` | `ISyncService` | 同步服务 |
 | `capabilities/*` | `IAssetOperations`, `ITagOperations`... | 能力子接口 |
 
 ## LLM 体系 (interfaces/llm/)

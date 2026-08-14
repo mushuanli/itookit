@@ -20,6 +20,7 @@ export {
     DEFAULT_SEARCH_LIMIT,
     FS_MODULE_CHAT,
     FS_MODULE_AGENTS,
+    DEVICE_HANDLER_METADATA_KEY,
 } from './interfaces/constants';
 
 // ── 核心类型 ──
@@ -95,6 +96,7 @@ export type {
     FSNodeCopiedPayload,
     FSNodeRenamedPayload,
     FSMountPayload,
+    FSModuleLifecyclePayload,
     FSErrorPayload,
     FSEventPayloadMap,
     FSEventEmitter,
@@ -158,18 +160,6 @@ export type {
     IMountRouter,
 } from './interfaces/mount/mount';
 
-// ── 同步 ──
-export type {
-    ChangeLogEntry,
-    SyncState,
-    SyncConflict,
-    ConflictResolution,
-    ConflictResolver,
-    SyncTarget,
-    SyncResult,
-    ISyncService,
-} from './interfaces/sync/sync';
-
 // ── 文件句柄 ──
 export type { AssetObj, IFile } from './interfaces/IFile';
 export type { IMDXFile } from './interfaces/IMDXFile';
@@ -189,7 +179,6 @@ export type {
     VFSManagerEvent,
     VFSManagerEventPayloadMap,
     GlobalTagInfo,
-    SyncableFileInfo,
     ModuleExportData,
     VFSSearchQuery,
     VFSSystemStats,

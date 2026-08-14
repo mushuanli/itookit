@@ -12,7 +12,7 @@
  * │ 场景            │ 行为                             │
  * ├─────────────────┼─────────────────────────────────┤
  * │ 单操作          │ 立即触发，nodes.length === 1     │
- * │ transaction 内  │ commit 时合并同类型事件为一次    │
+ * │ transaction 内  │ commit 时逐条重放(fromTransaction)│
  * │ transaction 回滚│ 不触发任何事件                   │
  * └─────────────────┴─────────────────────────────────┘
  */
@@ -28,6 +28,8 @@ export type FSEventType =
     | 'node:renamed'
     | 'mount:added'
     | 'mount:removed'
+    | 'module:mounted'
+    | 'module:unmounted'
     | 'error';
 
 export interface FSNodeCreatedPayload {
@@ -85,6 +87,10 @@ export interface FSMountPayload {
     label?: string;
 }
 
+export interface FSModuleLifecyclePayload {
+    moduleName: string;
+}
+
 export interface FSErrorPayload {
     code: string;
     message: string;
@@ -102,6 +108,8 @@ export interface FSEventPayloadMap {
     'node:renamed': FSNodeRenamedPayload;
     'mount:added': FSMountPayload;
     'mount:removed': FSMountPayload;
+    'module:mounted': FSModuleLifecyclePayload;
+    'module:unmounted': FSModuleLifecyclePayload;
     'error': FSErrorPayload;
 }
 

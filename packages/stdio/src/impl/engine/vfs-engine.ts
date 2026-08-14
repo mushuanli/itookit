@@ -19,11 +19,20 @@ import type {
     FSNode,
     FileContent,
     WriteOptions,
+    ReadOptions,
     DeleteOptions,
     IMountRouter,
 } from '../../protocol';
 
-import { FSError, FSAlreadyExistsError, FSCapabilityError, SYSTEM_DIRS } from '../../protocol';
+import {
+    FSError,
+    FSAlreadyExistsError,
+    FSCapabilityError,
+    FSConflictError,
+    SYSTEM_DIRS,
+    DEVICE_HANDLER_METADATA_KEY,
+    DEFAULT_FILENAME_PATTERN,
+} from '../../protocol';
 
 import { AccessController } from './access-controller';
 import { FSEventBus } from '../event/event-bus';
@@ -57,6 +66,7 @@ export class VFSEngine {
 
     private readonly backend: IStorageBackend;
     private _mountRouter: IMountRouter | null = null;
+    private filenamePattern: RegExp = DEFAULT_FILENAME_PATTERN;
     private initialized = false;
 
     private _inc(op: IOOperation): void { this.ioStats[op]++; }
@@ -76,14 +86,11 @@ export class VFSEngine {
 
     setMountRouter(router: IMountRouter): void { this._mountRouter = router; }
 
+    setFilenamePattern(pattern: RegExp): void { this.filenamePattern = pattern; }
+
     getBackendForPath(systemPath: string): IStorageBackend {
         if (!this._mountRouter) return this.backend;
         return this._mountRouter.resolve(systemPath).mount.backend;
-    }
-
-    getMountPathForPath(systemPath: string): string {
-        if (!this._mountRouter) return '/';
-        return this._mountRouter.resolve(systemPath).mount.mountPath;
     }
 
     /** Resolve backend + local path + mount path for a system path. */
@@ -201,13 +208,14 @@ export class VFSEngine {
         }
     }
 
-    async readContent(path: string): Promise<ArrayBuffer> {
+    async readContent(path: string, options?: ReadOptions): Promise<ArrayBuffer> {
         const { backend, localPath } = this.resolveStore(path);
         this._inc('stat'); const node = await backend.stat(localPath);
         if (!node) throw new FSError('ENOENT', 'not found', 'read', path);
         if (node.type === 'directory') throw new FSError('EISDIR', 'cannot read directory', 'read', path);
         try {
-            this._inc('read'); const data = await backend.read(localPath);
+            this._inc('read');
+            const data = await backend.read(localPath, { offset: options?.offset, length: options?.length });
             return (data as Uint8Array).buffer as ArrayBuffer;
         } catch {
             return new ArrayBuffer(0);
@@ -222,20 +230,44 @@ export class VFSEngine {
         options?: WriteOptions,
     ): Promise<void> {
         const { backend, localPath } = this.resolveStore(path);
+
+        if (options?.expectedVersion !== undefined) {
+            this._inc('stat'); const current = await backend.stat(localPath);
+            if (!current) throw new FSError('ENOENT', 'not found', 'write', path);
+            if (current.version !== options.expectedVersion) {
+                throw new FSConflictError(path, options.expectedVersion, current.version);
+            }
+        }
+
         const raw = toBuffer(content);
         let buf = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
 
         if (options?.mode === 'append') {
-            try {
-                this._inc('read'); const existing = await backend.read(localPath);
-                const merged = new Uint8Array(existing.byteLength + buf.byteLength);
-                merged.set(new Uint8Array(existing), 0);
-                merged.set(buf, existing.byteLength);
-                buf = merged;
-            } catch { /* file doesn't exist yet, just write */ }
+            const existing = await this.readExisting(backend, localPath);
+            const merged = new Uint8Array(existing.byteLength + buf.byteLength);
+            merged.set(existing, 0);
+            merged.set(buf, existing.byteLength);
+            buf = merged;
+        } else if (options?.offset !== undefined && options.offset > 0) {
+            const existing = await this.readExisting(backend, localPath);
+            const end = Math.max(existing.byteLength, options.offset + buf.byteLength);
+            const merged = new Uint8Array(end);
+            merged.set(existing, 0);
+            merged.set(buf, options.offset);
+            buf = merged;
         }
 
         this._inc('write'); await backend.write(localPath, buf);
+    }
+
+    /** Read existing content as bytes, returning empty when the file does not exist. */
+    private async readExisting(backend: IStorageBackend, localPath: string): Promise<Uint8Array> {
+        try {
+            this._inc('read');
+            return new Uint8Array(await backend.read(localPath));
+        } catch {
+            return new Uint8Array(0);
+        }
     }
 
     // ── Create ──
@@ -248,7 +280,7 @@ export class VFSEngine {
         metadata?: Record<string, unknown>,
         opts?: { overwrite?: boolean; recursive?: boolean; deviceHandlerId?: string },
     ): Promise<import('../../protocol').FSNode> {
-        validateFilename(name);
+        validateFilename(name, this.filenamePattern);
 
         // Ensure intermediate directories when recursive is requested
         if (opts?.recursive) {
@@ -272,6 +304,18 @@ export class VFSEngine {
         const raw = content ? toBuffer(content) : new Uint8Array(0);
         const buf = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
         this._inc('write'); const node = await backend.write(fullPath, buf);
+
+        if (type === 'device' && opts?.deviceHandlerId) {
+            const deviceMeta = {
+                ...(metadata ?? {}),
+                [DEVICE_HANDLER_METADATA_KEY]: opts.deviceHandlerId,
+            };
+            this._inc('metadata'); await backend.updateMetadata(fullPath, deviceMeta);
+            // Re-stat so the returned node reflects device type + handler id.
+            this._inc('stat'); const finalNode = await backend.stat(fullPath);
+            return this.mapToSystemNode(finalNode!, mountPath);
+        }
+
         if (metadata) { this._inc('metadata'); await backend.updateMetadata(fullPath, metadata); }
         return this.mapToSystemNode(node, mountPath);
     }
@@ -308,7 +352,7 @@ export class VFSEngine {
     // ── Rename / Move ──
 
     async rename(path: string, newName: string): Promise<void> {
-        validateFilename(newName);
+        validateFilename(newName, this.filenamePattern);
         const { backend, localPath } = this.resolveStore(path);
         const dir = P.dirname(localPath);
         const newPath = dir === '/' ? `/${newName}` : `${dir}/${newName}`;

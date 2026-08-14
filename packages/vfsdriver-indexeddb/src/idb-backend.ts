@@ -9,6 +9,7 @@ import type {
     FSNode,
     FSFileNode,
     FSDirectoryNode,
+    FSDeviceNode,
     IRecordStore,
     IRecordTransaction,
     FSSearchQuery,
@@ -18,6 +19,7 @@ import type {
     RecordValue,
     RecordWalkOptions,
 } from '@itookit/stdio';
+import { DEVICE_HANDLER_METADATA_KEY } from '@itookit/stdio';
 import { openDB, req, collectCursor, REQUIRED_STORES, DB_VERSION, STORE_NODES, STORE_TAGS } from './utils';
 import { IDBRecordStore, createRecordStore, ensureRecordIndexes } from './record-store';
 import { STORE_RECORDS } from './utils';
@@ -29,6 +31,7 @@ interface NodeEntry {
     size: number;
     createdAt: number;
     modifiedAt: number;
+    version: number;
     icon?: string;
     tags: string[];
     metadata: string; // JSON
@@ -133,7 +136,7 @@ export class IndexedDBBackend implements IStorageBackend {
         const entry: NodeEntry = {
             path, type: 'directory', content: new ArrayBuffer(0),
             size: 0, createdAt: Date.now(), modifiedAt: Date.now(),
-            tags: [], metadata: '{}',
+            version: 1, tags: [], metadata: '{}',
         };
         await this._putEntry(entry);
         return toFSNode(entry);
@@ -202,6 +205,7 @@ export class IndexedDBBackend implements IStorageBackend {
             size: content.byteLength,
             createdAt: existing?.createdAt ?? Date.now(),
             modifiedAt: Date.now(),
+            version: (existing?.version ?? 0) + 1,
             icon: existing?.icon,
             tags: existing?.tags ?? [],
             metadata: existing?.metadata ?? '{}',
@@ -369,6 +373,7 @@ export class IndexedDBBackend implements IStorageBackend {
                 size: 0,
                 createdAt: Date.now(),
                 modifiedAt: Date.now(),
+                version: 1,
                 tags: [],
                 metadata: '{}',
             };
@@ -641,20 +646,26 @@ function searchOrderValue(
 function toFSNode(entry: NodeEntry): FSNode {
     const name = entry.path === '/' ? '' : entry.path.split('/').pop()!;
     const parentPath = entry.path === '/' ? null : entry.path.substring(0, entry.path.lastIndexOf('/')) || '/';
+    const metadata = parseMetadata(entry.metadata);
     const base = {
         parentPath,
         name,
         path: entry.path,
         createdAt: entry.createdAt,
         modifiedAt: entry.modifiedAt,
-        version: Math.floor(entry.modifiedAt),
+        version: entry.version ?? 1,
         icon: entry.icon,
         tags: entry.tags,
-        metadata: JSON.parse(entry.metadata) as Record<string, unknown>,
+        metadata,
     };
 
     if (entry.type === 'directory') {
         return { ...base, type: 'directory' } as FSDirectoryNode;
+    }
+
+    const deviceHandlerId = metadata[DEVICE_HANDLER_METADATA_KEY];
+    if (typeof deviceHandlerId === 'string' && deviceHandlerId.length > 0) {
+        return { ...base, type: 'device', deviceHandlerId } as FSDeviceNode;
     }
 
     return {

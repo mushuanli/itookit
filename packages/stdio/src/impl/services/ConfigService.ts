@@ -139,6 +139,13 @@ export class ConfigService implements IConfigService {
 
     // ── Subscribe ──
 
+    /**
+     * 订阅某个 config 的键变更（进程内、高层事件）。
+     *
+     * 与 FSEventBus 的 node:updated 是不同粒度：此处是 "configName+key+old/new"
+     * 的配置语义事件；而底层文件写入还会额外触发文件级 node:updated（总线）。
+     * 二者互补，非替代。
+     */
     onChange(configName: string, handler: ChangeHandler): () => void {
         let set = this.listeners.get(configName);
         if (!set) {

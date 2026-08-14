@@ -12,26 +12,19 @@ import type {
     FSNode,
     FSSearchResult,
     FileContent,
-    FSModuleStats,
     ModuleInfo,
     ModuleMountOptions,
     VFSManagerEventType,
     VFSManagerEvent,
     VFSManagerEventPayloadMap,
     VFSSearchQuery,
-    VFSSystemStats,
     GlobalTagInfo,
-    ModuleExportData,
     IMountService,
     IMaintenanceService,
-    IStorageBackend,
     IPluginManager,
     IDeviceManager,
-    IMountRouter,
-    MountPoint,
-    MountOptions,
-    ISyncService,
     ISystemAccess,
+    FSEventType,
 } from '../../protocol';
 
 import {
@@ -41,23 +34,23 @@ import {
     ETC_DIR,
     type IDeviceDriver,
 } from '../../protocol';
-import { EventBus } from '../../eventbus';
+import type { EventMeta } from '../../eventbus';
 
 import { VFSEngine } from '../engine/vfs-engine';
 import { ModuleFS, type ModuleFSDeps } from './ModuleFS';
+import { MountService } from './MountService';
+import { MaintenanceService } from './MaintenanceService';
 import * as P from '../../utils/path';
 
 export class VFSManager implements IVFSManager {
     private readonly engine: VFSEngine;
     private readonly modules = new Map<string, ModuleInfo>();
     private readonly engines = new Map<string, IModuleFS>();
-    private readonly managerBus = new EventBus<VFSManagerEventPayloadMap>();
 
     readonly mounts: IMountService;
     readonly devices: IDeviceManager;
     readonly plugins: IPluginManager;
     readonly maintenance: IMaintenanceService;
-    readonly sync: ISyncService | null = null;
 
     private initialized = false;
 
@@ -94,7 +87,6 @@ export class VFSManager implements IVFSManager {
         }
         this.engines.clear();
         this.modules.clear();
-        this.managerBus.clear();
         await this.engine.dispose();
         this.initialized = false;
     }
@@ -113,6 +105,7 @@ export class VFSManager implements IVFSManager {
                 '/dev',
                 driver.handlerId,
                 'device',
+                undefined,
                 undefined,
                 { deviceHandlerId: driver.handlerId },
             );
@@ -147,8 +140,8 @@ export class VFSManager implements IVFSManager {
                 name,
                 'device',
                 undefined,
-                { deviceHandlerId: handlerId, metadata: nodeMetadata },
-                { recursive: true },
+                nodeMetadata,
+                { deviceHandlerId: handlerId, recursive: true },
             );
         } catch (e) {
             // 幂等：文件已存在时忽略
@@ -484,16 +477,60 @@ export class VFSManager implements IVFSManager {
         eventType: E,
         handler: (event: VFSManagerEvent<E>) => void,
     ): () => void {
-        return this.managerBus.on(eventType, (payload, meta) => {
-            handler({ type: eventType, payload, timestamp: meta.timestamp });
+        return this.engine.events.on(eventType as FSEventType, (payload, meta) => {
+            this.eachManagerEvent(meta, payload, (type, event) => {
+                if (type === eventType) handler(event as VFSManagerEvent<E>);
+            });
         });
     }
 
     onAny(
         handler: (type: string, event: VFSManagerEvent) => void,
     ): () => void {
-        return this.managerBus.onAny((payload, meta) =>
-            handler(meta.type, { type: meta.type as VFSManagerEventType, payload, timestamp: meta.timestamp } as VFSManagerEvent));
+        return this.engine.events.onAny((payload, meta) => {
+            if (!MANAGER_EVENT_TYPES.has(meta.type as VFSManagerEventType)) return;
+            this.eachManagerEvent(meta, payload, (type, event) => handler(type, event));
+        });
+    }
+
+    /**
+     * Expand one FSEvent into one or more VFSManager events.
+     * node:created/updated/deleted carry a batch of nodes; VFSManager exposes
+     * one event per node (moduleId comes from event meta). Other types pass through.
+     */
+    private eachManagerEvent(
+        meta: EventMeta,
+        payload: unknown,
+        emit: (type: VFSManagerEventType, event: VFSManagerEvent) => void,
+    ): void {
+        const type = meta.type as VFSManagerEventType;
+        const moduleId = (meta.moduleId as string | undefined) ?? '';
+
+        if (type === 'node:created' || type === 'node:updated') {
+            const nodes = (payload as { nodes?: Array<{ path: string }> }).nodes ?? [];
+            for (const n of nodes) {
+                emit(type, {
+                    type,
+                    payload: { nodeId: n.path, path: n.path, moduleId },
+                    timestamp: meta.timestamp,
+                } as VFSManagerEvent);
+            }
+            return;
+        }
+        if (type === 'node:deleted') {
+            const requested = (payload as { requestedPaths?: string[] }).requestedPaths ?? [];
+            emit(type, {
+                type,
+                payload: { nodeIds: requested, moduleId },
+                timestamp: meta.timestamp,
+            } as VFSManagerEvent);
+            return;
+        }
+        emit(type, {
+            type,
+            payload: payload as VFSManagerEventPayloadMap[VFSManagerEventType],
+            timestamp: meta.timestamp,
+        } as VFSManagerEvent);
     }
 
     // ══════════════════════════════════════════════════════════
@@ -514,358 +551,16 @@ export class VFSManager implements IVFSManager {
         type: E,
         payload: VFSManagerEventPayloadMap[E],
     ): void {
-        this.managerBus.emit(type, payload);
+        this.engine.events.emit(type as FSEventType, payload as never);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// MountService
-// ═══════════════════════════════════════════════════════════════
-
-class MountService implements IMountService {
-    readonly router: IMountRouter;
-
-    constructor(engine: VFSEngine) {
-        this.router = new InlineMountRouter(engine);
-    }
-
-    async mountBackend(
-        mountPath: string,
-        backend: IStorageBackend,
-        options?: MountOptions,
-    ): Promise<MountPoint> {
-        return this.router.mount(mountPath, backend, options);
-    }
-
-    async unmountBackend(mountPath: string, force?: boolean): Promise<void> {
-        await this.router.unmount(mountPath, force);
-    }
-
-    listMounts(): MountPoint[] {
-        return this.router.listMounts();
-    }
-
-    getMountForPath(absolutePath: string): MountPoint {
-        return this.router.resolve(absolutePath).mount;
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Inline Mount Router (single-backend default)
-// ═══════════════════════════════════════════════════════════════
-
-class InlineMountRouter implements IMountRouter {
-    private readonly mounts = new Map<string, MountPoint>();
-    private nextId = 1;
-
-    constructor(engine: VFSEngine) {
-        const backend = engine.getBackend();
-        this.mounts.set('/', {
-            mountId: 'mount_0',
-            mountPath: '/',
-            backend,
-            options: { label: 'Root' },
-            mountedAt: Date.now(),
-            capabilities: {
-                readonly: false,
-                search: true,
-                semanticSearch: false,
-                syncable: false,
-                assets: true,
-                tags: true,                deviceFiles: true,
-                seqFiles: !!backend.records,
-                references: true,
-                symlinks: true,
-                hardlinks: false,
-                partialRead: true,
-                partialWrite: true,
-                treeWalk: true,
-                streaming: false,
-                watch: false,
-                mount: true,
-            },
-        });
-    }
-
-    async mount(
-        mountPath: string,
-        backend: IStorageBackend,
-        options?: MountOptions,
-    ): Promise<MountPoint> {
-        const norm = P.normalize(mountPath);
-        if (this.mounts.has(norm)) {
-            throw new FSError('EEXIST', `mount already exists: ${norm}`, 'mount', norm);
-        }
-
-        await backend.init();
-
-        // Bootstrap root in the mounted backend if absent
-        const existingRoot = await backend.stat('/');
-        if (!existingRoot) {
-            await backend.mkdir('/');
-        }
-
-        const mp: MountPoint = {
-            mountId: `mount_${this.nextId++}`,
-            mountPath: norm,
-            backend,
-            options: options ?? {},
-            mountedAt: Date.now(),
-            capabilities: {
-                readonly: options?.readonly ?? false,
-                search: true,
-                semanticSearch: false,
-                syncable: options?.syncable ?? false,
-                assets: true,
-                tags: true,                deviceFiles: false,
-                seqFiles: !!backend.records,
-                references: true,
-                symlinks: true,
-                hardlinks: false,
-                partialRead: true,
-                partialWrite: true,
-                treeWalk: true,
-                streaming: false,
-                watch: false,
-                mount: false,
-            },
-        };
-        this.mounts.set(norm, mp);
-        return mp;
-    }
-
-    async unmount(mountPath: string, _force?: boolean): Promise<void> {
-        const norm = P.normalize(mountPath);
-        if (norm === '/') {
-            throw new FSError('EINVAL', 'cannot unmount root', 'unmount', '/');
-        }
-        const mp = this.mounts.get(norm);
-        if (!mp) {
-            throw new FSError('ENOENT', `mount not found: ${norm}`, 'unmount', norm);
-        }
-        await mp.backend.close();
-        this.mounts.delete(norm);
-    }
-
-    resolve(absolutePath: string): import('../../protocol').ResolvedMount {
-        const norm = P.normalize(absolutePath);
-        let bestMatch: MountPoint | null = null;
-        let bestLen = 0;
-
-        for (const [path, mp] of this.mounts) {
-            if (P.isUnder(norm, path) && path.length > bestLen) {
-                bestMatch = mp;
-                bestLen = path.length;
-            }
-        }
-
-        if (!bestMatch) bestMatch = this.mounts.get('/')!;
-
-        const relativePath = bestLen <= 1
-            ? norm.slice(1)
-            : P.relative(bestMatch.mountPath, norm);
-
-        return { mount: bestMatch, relativePath };
-    }
-
-    isCrossMount(srcPath: string, destPath: string): boolean {
-        return this.resolve(srcPath).mount.mountId !== this.resolve(destPath).mount.mountId;
-    }
-
-    listMounts(): MountPoint[] {
-        return Array.from(this.mounts.values());
-    }
-
-    getMount(mountId: string): MountPoint | null {
-        for (const mp of this.mounts.values()) {
-            if (mp.mountId === mountId) return mp;
-        }
-        return null;
-    }
-
-    getMountByPath(mountPath: string): MountPoint | null {
-        return this.mounts.get(P.normalize(mountPath)) ?? null;
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Inline Maintenance Service
-// ═══════════════════════════════════════════════════════════════
-
-class MaintenanceService implements IMaintenanceService {
-    constructor(private readonly manager: VFSManager) {}
-
-    async getSystemStats(): Promise<VFSSystemStats> {
-        const moduleStats: Record<string, FSModuleStats> = {};
-        let totalFiles = 0;
-        let totalSize = 0;
-
-        for (const modName of this.manager._modules.keys()) {
-            try {
-                const eng = this.manager.getEngine(modName);
-                const stats = await eng.driver.getStats?.();
-                if (stats) {
-                    moduleStats[modName] = stats;
-                    totalFiles += stats.fileCount;
-                    totalSize += stats.totalSize;
-                }
-            } catch {
-                continue;
-            }
-        }
-
-        return {
-            moduleCount: this.manager._modules.size,
-            modules: moduleStats,
-            totalFiles,
-            totalSize,
-            mountCount: this.manager.mounts.listMounts().length,
-            deviceCount: this.manager.devices.list().length,
-            pluginCount: this.manager.plugins.list().length,
-            storageBackend: this.manager._engine.getBackend().name,
-        };
-    }
-
-    async gc(): Promise<{ cleaned: number; freedBytes: number }> {
-        // Stub — a full implementation would scan orphaned content refs
-        return { cleaned: 0, freedBytes: 0 };
-    }
-
-    async fsck(): Promise<{
-        ok: boolean;
-        errors: Array<{ path: string; issue: string; severity: 'warning' | 'error' }>;
-    }> {
-        const errors: Array<{ path: string; issue: string; severity: 'warning' | 'error' }> = [];
-
-        for (const modName of this.manager._modules.keys()) {
-            try {
-                const eng = this.manager.getEngine(modName);
-                await eng.driver.walkTree?.((node) => {
-                    if (node.type === 'symlink' && !node.symlinkTarget) {
-                        errors.push({
-                            path: node.path,
-                            issue: 'symlink has no target',
-                            severity: 'error',
-                        });
-                    }
-                }, { includeHidden: true });
-            } catch (e) {
-                errors.push({
-                    path: `/module/${modName}`,
-                    issue: `scan failed: ${e}`,
-                    severity: 'error',
-                });
-            }
-        }
-
-        return { ok: errors.length === 0, errors };
-    }
-
-    async createBackup(): Promise<string> {
-        const backup: {
-            version: number;
-            createdAt: number;
-            modules: Record<string, ModuleExportData>;
-        } = {
-            version: 1,
-            createdAt: Date.now(),
-            modules: {} as Record<string, ModuleExportData>,
-        };
-
-        for (const modName of this.manager._modules.keys()) {
-            backup.modules[modName] = await this.exportModule(modName);
-        }
-
-        return JSON.stringify(backup);
-    }
-
-    async restoreBackup(jsonContent: string): Promise<void> {
-        const backup = JSON.parse(jsonContent);
-        if (backup.version !== 1) {
-            throw new FSError('EINVAL', `unsupported backup version: ${backup.version}`, 'restore');
-        }
-        for (const data of Object.values(backup.modules)) {
-            await this.importModule(data as ModuleExportData);
-        }
-    }
-
-    async exportModule(moduleName: string): Promise<ModuleExportData> {
-        const eng = this.manager.getEngine(moduleName);
-        const nodes: FSNode[] = [];
-        const contents: Record<string, string> = {};
-
-        await eng.driver.walkTree?.((node) => {
-            nodes.push(node);
-            if (node.type === 'file') {
-                eng.driver.readContent(node.path, { encoding: 'utf-8' })
-                    .then(c => {
-                        if (typeof c === 'string') contents[node.path] = c;
-                    })
-                    .catch(() => {});
-            }
-        }, { includeHidden: true });
-
-        // Await content reads — the above is fire-and-forget due to walkTree callback
-        // Better approach: collect promises
-        const contentPromises: Promise<void>[] = [];
-        for (const node of nodes) {
-            if (node.type === 'file') {
-                contentPromises.push(
-                    eng.driver.readContent(node.path, { encoding: 'utf-8' })
-                        .then(c => {
-                            if (typeof c === 'string') contents[node.path] = c;
-                        })
-                        .catch(() => {}),
-                );
-            }
-        }
-        await Promise.all(contentPromises);
-
-        return {
-            version: 1,
-            moduleName,
-            exportedAt: Date.now(),
-            nodes,
-            contents,
-        };
-    }
-
-    async importModule(data: ModuleExportData): Promise<void> {
-        await this.manager.mount(data.moduleName);
-        const eng = this.manager.getEngine(data.moduleName);
-
-        // Sort: directories first, by depth
-        const sorted = [...data.nodes].sort((a, b) => {
-            if (a.type === 'directory' && b.type !== 'directory') return -1;
-            if (a.type !== 'directory' && b.type === 'directory') return 1;
-            return P.depth(a.path) - P.depth(b.path);
-        });
-
-        for (const node of sorted) {
-            const parentPath = P.dirname(node.path);
-            try {
-                if (node.type === 'directory') {
-                    await eng.driver.createDirectory({
-                        name: node.name,
-                        parentPath,
-                        metadata: node.metadata ? { ...node.metadata } : undefined,
-                        recursive: true,
-                    });
-                } else if (node.type === 'file' || node.type === 'seqfile') {
-                    await eng.driver.createFile({
-                        name: node.name,
-                        parentPath,
-                        content: data.contents[node.path],
-                        metadata: node.metadata ? { ...node.metadata } : undefined,
-                        tags: node.tags ? [...node.tags] : undefined,
-                        type: node.type,
-                        recursive: true,
-                        overwrite: true,
-                    });
-                }
-            } catch (e) {
-                console.warn(`[importModule] Failed to create ${node.path}:`, e);
-            }
-        }
-    }
-}
+const MANAGER_EVENT_TYPES = new Set<VFSManagerEventType>([
+    'node:created',
+    'node:updated',
+    'node:deleted',
+    'module:mounted',
+    'module:unmounted',
+    'mount:added',
+    'mount:removed',
+]);

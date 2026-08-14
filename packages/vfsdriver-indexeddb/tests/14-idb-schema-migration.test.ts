@@ -5,7 +5,7 @@ import {
     STORE_NODES,
     STORE_RECORDS,
     STORE_TAGS,
-} from '@itookit/vfsdriver-indexeddb';
+} from '../src/index';
 
 const databases: string[] = [];
 

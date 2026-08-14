@@ -25,7 +25,6 @@ src/
 │   ├── device/        虚拟设备驱动接口
 │   ├── plugin/        插件/中间件系统接口
 │   ├── mount/         挂载系统接口
-│   ├── sync/          同步系统接口
 │   ├── services/      服务接口 (module-fs/vfs-manager/config-service/fs-driver/fs-meta-driver/factory)
 │   ├── IFile.ts       IFile / AssetObj
 │   ├── IMDXFile.ts    IMDXFile
@@ -33,14 +32,14 @@ src/
 ├── impl/              引擎实现层 — 各目录结构镜像 interfaces/ 下的领域划分
 │   ├── factory.ts     createVFS
 │   ├── engine/        VFSEngine, AccessController, DeviceRegistry, PluginPipeline
-│   ├── services/      ModuleFS, VFSManager, ConfigService, ScopedView, FSMetaDriverAdapter
+│   ├── services/      ModuleFS(薄外观), ModuleDriver(IFSDriver), ModuleContext, VFSManager, ConfigService, ScopedView, MountService, MaintenanceService
+│   ├── capabilities/  SeqFileOps, RefOps, AssetOps, TagOps (依赖 IEnginePort)
 │   ├── file-io/       FileHandle, MDXFileHandle
 │   ├── devices/       nullDevice, zeroDevice, randomDevice
-│   ├── backend/       MemoryBackend (测试/临时)
 │   ├── adapter-session/ BaseModuleService
-│   └── event/         FSEventBus, TransactionEventBuffer
+│   └── event/         FSEventBus
 ├── eventbus/          通用事件总线 (EventBus, EventBuffer)
-├── testing/           测试工具导出
+├── testing/           测试工具 + MemoryBackend (参考后端)
 └── utils/             path, validation, encoding, id, serialization, guess-mime-type
 ```
 
@@ -60,9 +59,9 @@ src/
 ## 引擎分层 (v4.1 path-based)
 
 ```
-IModuleFS (薄包装器)
-  ├── driver: IFSDriver    ← ModuleFS 自身 (self = this)
-  ├── meta: IFSMetaDriver  ← FSMetaDriverAdapter(assets, tags)
+IModuleFS (薄外观)
+  ├── driver: IFSDriver    ← ModuleDriver (依赖 ModuleContext)
+  ├── meta: IFSMetaDriver  ← 直接构造 { assets, tags, seq?, refs? }
   └── openFile(nodeId) → IFile
 ```
 
@@ -76,9 +75,9 @@ IModuleFS (薄包装器)
 
 ## 事件总线注意
 
-包内有**两个 EventBus**:
 - `EventBus`(eventbus/)——通用,LLM/UI 包也在用,从根导出。
-- `FSEventBus`(impl/event/)——VFS 专用,extends 通用,类型化为 FSEventPayloadMap。
+- `FSEventBus`(impl/event/)——VFS 唯一事件总线,extends EventBus,类型化为 FSEventPayloadMap。
+  VFSManager 直接订阅 FSEventBus(node:* 批量事件展开为单条 VFSManagerEvent),不再维护独立 managerBus。
 
 ## 测试
 

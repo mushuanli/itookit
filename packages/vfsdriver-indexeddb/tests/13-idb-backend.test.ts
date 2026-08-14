@@ -2,7 +2,7 @@
  * IndexedDB backend contract tests for the path-based storage model.
  */
 import { describe, expect, it } from 'vitest';
-import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
+import { IndexedDBBackend } from '../src/index';
 import { freshIDB } from './helpers';
 
 const encoder = new TextEncoder();

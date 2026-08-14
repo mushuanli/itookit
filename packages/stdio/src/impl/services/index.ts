@@ -7,4 +7,3 @@ export { ModuleFS } from './ModuleFS';
 export { VFSManager } from './VFSManager';
 export { ConfigService } from './ConfigService';
 export { ScopedView } from './ScopedView';
-export { FSMetaDriverAdapter } from './FSMetaDriverAdapter';

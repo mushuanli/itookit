@@ -2,7 +2,7 @@
  * ConfigService: get, set, delete, setBatch, getAll, onChange, type helpers.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { freshIDB } from './helpers';
+import { freshMem } from './helpers';
 import { createVFS } from '../src/impl/factory';
 import type { IVFSManager, IConfigService } from '@itookit/stdio';
 
@@ -14,7 +14,7 @@ interface ConfigVFS {
 
 async function setupConfig(): Promise<ConfigVFS> {
     const { manager, config } = await createVFS({
-        rootBackend: freshIDB('cfg'),
+        rootBackend: freshMem(),
         modules: [],
     });
     return {
@@ -24,7 +24,7 @@ async function setupConfig(): Promise<ConfigVFS> {
     };
 }
 
-describe('ConfigService (IndexedDB backend)', () => {
+describe('ConfigService (Memory backend)', () => {
     let cv: ConfigVFS;
     beforeEach(async () => { cv = await setupConfig(); });
     afterEach(async () => { await cv.dispose(); });
@@ -145,7 +145,7 @@ describe('ConfigService (IndexedDB backend)', () => {
 
     it('initialConfigs is seeded at createVFS time', async () => {
         const { manager, config } = await createVFS({
-            rootBackend: freshIDB('seed'),
+            rootBackend: freshMem(),
             initialConfigs: {
                 defaults: { language: 'zh-CN', version: '1.0' },
             },

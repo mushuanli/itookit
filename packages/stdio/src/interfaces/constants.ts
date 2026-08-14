@@ -40,3 +40,9 @@ export const FS_MODULE_CHAT = 'chats';
 
 /** Agent 模块名 */
 export const FS_MODULE_AGENTS = 'agents';
+
+/**
+ * Reserved metadata key storing a device node's driver handler id.
+ * Backends materialize FSDeviceNode by reading this key from node metadata.
+ */
+export const DEVICE_HANDLER_METADATA_KEY = '__vfs_device_handler';

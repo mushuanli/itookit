@@ -30,13 +30,12 @@ export { ModuleFS, type ModuleFSDeps } from './impl/services/ModuleFS';
 export { VFSManager } from './impl/services/VFSManager';
 export { ConfigService } from './impl/services/ConfigService';
 export { ScopedView } from './impl/services/ScopedView';
-export { FSMetaDriverAdapter } from './impl/services/FSMetaDriverAdapter';
 
 // ── 内置设备 ──
 export { nullDevice, zeroDevice, randomDevice } from './impl/devices';
 
-// ── 后端 ──
-export { MemoryBackend } from './impl/backend';
+// ── 后端（参考实现，位于 testing/） ──
+export { MemoryBackend } from './testing';
 
 // ── 会话适配器 ──
 export {

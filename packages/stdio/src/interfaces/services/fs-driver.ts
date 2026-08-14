@@ -119,8 +119,6 @@ export interface IFSDriver extends FSEventEmitter {
         path: string,
         options: ReadOptions & { encoding: 'binary' },
     ): Promise<ArrayBuffer>;
-    readContent(path: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
-    readContent(path: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
     readContent(path: string, options?: ReadOptions): Promise<FileContent>;
 
     /** 解析路径，确认节点存在 @returns 存在返回 path，不存在返回 null */
@@ -233,7 +231,11 @@ export interface IFSDriver extends FSEventEmitter {
 
     /**
      * 在事务中执行多个操作。
-     * commit 后合并触发事件，任一操作失败则全部回滚。
+     * 事件在 commit 后统一重放（带 fromTransaction 标记），rollback 时丢弃事件。
+     *
+     * 注意：文件级操作的数据原子性取决于后端 backend.transaction 是否提供隔离，
+     * 本层不伪造回滚（Memory/IndexedDB 后端为透传实现）。SeqFile 记录级原子性
+     * 由 meta.seq.transaction（IRecordStore.transaction）提供。
      *
      * @example
      * await driver.transaction(async (tx) => {

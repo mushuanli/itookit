@@ -7,7 +7,7 @@ import type { IEventEmitter, Handler, AnyHandler, Unsubscribe } from './types';
  * or discards (rollback) them as a unit. Idempotent after settlement.
  *
  * Implements IEventEmitter so it can act as a drop-in emit target (e.g. in
- * ModuleFS._emitTarget during a transaction). The on/once/onAny methods are
+ * ModuleContext._emitTarget during a transaction). The on/once/onAny methods are
  * no-ops (subscriptions go on the real bus, not the buffer).
  */
 export class EventBuffer<M extends object> implements IEventEmitter<M> {

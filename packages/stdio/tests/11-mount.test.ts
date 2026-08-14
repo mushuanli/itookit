@@ -7,14 +7,14 @@
  * - System-level readBySystemPath
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { freshIDB, freshMem, setupDualMountVFS, setupVFS, readText, type TestVFS } from './helpers';
+import { freshMem, setupDualMountVFS, setupVFS, readText, type TestVFS } from './helpers';
 import { createVFS } from '../src/impl/factory';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module lifecycle tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Module lifecycle (IndexedDB backend)', () => {
+describe('Module lifecycle (Memory backend)', () => {
     let vfs: TestVFS;
     beforeEach(async () => { vfs = await setupVFS(); });
     afterEach(async () => { await vfs.dispose(); });
@@ -64,8 +64,8 @@ describe('Module lifecycle (IndexedDB backend)', () => {
         const docsFS = vfs.manager.getEngine('docs');
         await docsFS.init();
 
-        await testFS.createFile({ name: 'secret.txt', parentPath: null, content: 'hidden' });
-        const children = await docsFS.getChildren('/');
+        await testFS.driver.createFile({ name: 'secret.txt', parentPath: null, content: 'hidden' });
+        const children = await docsFS.driver.getChildren('/');
         const names = children.map(c => c.name);
         expect(names).not.toContain('secret.txt');
     });
@@ -75,10 +75,10 @@ describe('Module lifecycle (IndexedDB backend)', () => {
 // Secondary backend mount tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Secondary backend mount (IDB root + Memory extra)', () => {
+describe('Secondary backend mount (Memory root + Memory extra)', () => {
     it('mounting MemoryBackend at /module/extra routes writes there', async () => {
         const { manager, dispose } = await setupDualMountVFS({
-            rootBackend: freshIDB('root'),
+            rootBackend: freshMem(),
             extraBackend: freshMem(),
             extraPath: '/module/extra',
         });
@@ -87,23 +87,23 @@ describe('Secondary backend mount (IDB root + Memory extra)', () => {
             const extraFS = manager.getEngine('extra');
             await extraFS.init();
 
-            await extraFS.createFile({ name: 'extra.txt', parentPath: null, content: 'in-extra' });
-            const text = await extraFS.readContent('/extra.txt', { encoding: 'utf-8' });
+            await extraFS.driver.createFile({ name: 'extra.txt', parentPath: null, content: 'in-extra' });
+            const text = await extraFS.driver.readContent('/extra.txt', { encoding: 'utf-8' });
             expect(text).toBe('in-extra');
 
             // File in extra module is not visible in test module
             const testFS = manager.getEngine('test');
-            expect(await testFS.exists('/extra.txt')).toBe(false);
+            expect(await testFS.driver.exists('/extra.txt')).toBe(false);
         } finally {
             await dispose();
         }
     });
 
     it('cross-module data stays isolated with different backends', async () => {
-        const rootIDB = freshIDB('isolate-root');
+        const rootMem = freshMem();
         const extraMem = freshMem();
         const { manager, dispose } = await setupDualMountVFS({
-            rootBackend: rootIDB,
+            rootBackend: rootMem,
             extraBackend: extraMem,
             extraPath: '/module/extra',
         });
@@ -114,11 +114,11 @@ describe('Secondary backend mount (IDB root + Memory extra)', () => {
             await testFS.init();
             await extraFS.init();
 
-            await testFS.createFile({ name: 'idb.txt', parentPath: null, content: 'idb-data' });
-            await extraFS.createFile({ name: 'mem.txt', parentPath: null, content: 'mem-data' });
+            await testFS.driver.createFile({ name: 'idb.txt', parentPath: null, content: 'idb-data' });
+            await extraFS.driver.createFile({ name: 'mem.txt', parentPath: null, content: 'mem-data' });
 
-            expect(await testFS.exists('/mem.txt')).toBe(false);
-            expect(await extraFS.exists('/idb.txt')).toBe(false);
+            expect(await testFS.driver.exists('/mem.txt')).toBe(false);
+            expect(await extraFS.driver.exists('/idb.txt')).toBe(false);
             expect(await readText(testFS, '/idb.txt')).toBe('idb-data');
             expect(await readText(extraFS, '/mem.txt')).toBe('mem-data');
         } finally {
@@ -137,11 +137,11 @@ describe('Secondary backend mount (IDB root + Memory extra)', () => {
     });
 
     it('mountBackend at sub-path routes writes to secondary', async () => {
-        const rootIDB = freshIDB('sub-root');
+        const rootMem = freshMem();
         const subMem = freshMem();
 
         const { manager } = await createVFS({
-            rootBackend: rootIDB,
+            rootBackend: rootMem,
             modules: [{ name: 'data' }],
         });
 
@@ -152,22 +152,22 @@ describe('Secondary backend mount (IDB root + Memory extra)', () => {
         await dataFS.init();
 
         // Writing to /attachments in data module goes to subMem
-        await dataFS.createDirectory({ name: 'attachments', parentPath: null, recursive: true });
-        await dataFS.createFile({ name: 'file.pdf', parentPath: '/attachments', content: 'pdf-bytes', recursive: true });
+        await dataFS.driver.createDirectory({ name: 'attachments', parentPath: null, recursive: true });
+        await dataFS.driver.createFile({ name: 'file.pdf', parentPath: '/attachments', content: 'pdf-bytes', recursive: true });
 
-        expect(await dataFS.exists('/attachments/file.pdf')).toBe(true);
+        expect(await dataFS.driver.exists('/attachments/file.pdf')).toBe(true);
         await manager.dispose();
     });
 
-    it('two IDB backends mounted in parallel stay independent', async () => {
-        const idb1 = freshIDB('idb1');
-        const idb2 = freshIDB('idb2');
+    it('two memory backends mounted in parallel stay independent', async () => {
+        const mem1 = freshMem();
+        const mem2 = freshMem();
 
         const { manager } = await createVFS({
-            rootBackend: idb1,
+            rootBackend: mem1,
             modules: [{ name: 'mod1' }],
         });
-        await manager.mounts.mountBackend('/module/mod2', idb2);
+        await manager.mounts.mountBackend('/module/mod2', mem2);
         await manager.mount('mod2');
 
         const fs1 = manager.getEngine('mod1');
@@ -175,13 +175,13 @@ describe('Secondary backend mount (IDB root + Memory extra)', () => {
         await fs1.init();
         await fs2.init();
 
-        await fs1.createFile({ name: 'from1.txt', parentPath: null, content: 'idb1' });
-        await fs2.createFile({ name: 'from2.txt', parentPath: null, content: 'idb2' });
+        await fs1.driver.createFile({ name: 'from1.txt', parentPath: null, content: 'idb1' });
+        await fs2.driver.createFile({ name: 'from2.txt', parentPath: null, content: 'idb2' });
 
         expect(await readText(fs1, '/from1.txt')).toBe('idb1');
         expect(await readText(fs2, '/from2.txt')).toBe('idb2');
-        expect(await fs1.exists('/from2.txt')).toBe(false);
-        expect(await fs2.exists('/from1.txt')).toBe(false);
+        expect(await fs1.driver.exists('/from2.txt')).toBe(false);
+        expect(await fs2.driver.exists('/from1.txt')).toBe(false);
 
         await manager.dispose();
     });

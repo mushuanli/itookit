@@ -1,13 +1,12 @@
 /**
- * Shared test helpers for vfslib integration tests.
+ * Shared test helpers for stdio integration tests.
  *
- * Each test suite gets a freshly initialised VFS backed by IndexedDB
- * (via fake-indexeddb). A unique dbName is generated per-backend so
- * parallel / sequential tests never share state.
+ * Each test suite uses stdio's built-in MemoryBackend — stdio has no
+ * dependency on any sibling package. Real driver backends (e.g. IndexedDB)
+ * are covered by their own packages.
  */
 
-import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
-import { MemoryBackend } from '../src/impl/backend/memory-backend';
+import { MemoryBackend } from '../src/testing/memory-backend';
 import { createVFS } from '../src/impl/factory';
 import type { IVFSManager, IModuleFS, IStorageBackend } from '@itookit/stdio';
 
@@ -15,14 +14,7 @@ import type { IVFSManager, IModuleFS, IStorageBackend } from '@itookit/stdio';
 // Backend factories
 // ─────────────────────────────────────────────────────────────────────────────
 
-let _dbSeq = 0;
-
-/** Create a fresh IndexedDB backend with a unique database name. */
-export function freshIDB(prefix = 'vfstest'): IndexedDBBackend {
-    return new IndexedDBBackend({ dbName: `${prefix}_${Date.now()}_${++_dbSeq}` });
-}
-
-/** Create a plain in-memory backend (instant, no IDB overhead). */
+/** Create a plain in-memory backend (instant, self-contained). */
 export function freshMem(): MemoryBackend {
     return new MemoryBackend();
 }
@@ -39,10 +31,10 @@ export interface TestVFS {
 
 /**
  * Bootstrap a full VFS with a 'test' module.
- * Uses IndexedDB by default; pass `backend` to override.
+ * Uses the built-in MemoryBackend by default; pass `backend` to override.
  */
 export async function setupVFS(backend?: IStorageBackend): Promise<TestVFS> {
-    const rootBackend = backend ?? freshIDB();
+    const rootBackend = backend ?? freshMem();
     const { manager } = await createVFS({
         rootBackend,
         modules: [{ name: 'test' }],
@@ -68,7 +60,7 @@ export async function setupDualMountVFS(opts?: {
     extraBackend?: IStorageBackend;
     extraPath?: string;
 }): Promise<{ manager: IVFSManager; dispose: () => Promise<void> }> {
-    const rootBackend = opts?.rootBackend ?? freshIDB('root');
+    const rootBackend = opts?.rootBackend ?? freshMem();
     const extraBackend = opts?.extraBackend ?? freshMem();
     const extraPath = opts?.extraPath ?? '/module/extra';
 

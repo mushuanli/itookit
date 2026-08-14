@@ -10,7 +10,3 @@ export function generateId(): string {
     const s = (++seq).toString(36).padStart(4, '0');
     return `${ts}-${s}`;
 }
-
-export function resetIdSequence(): void {
-    seq = 0;
-}
