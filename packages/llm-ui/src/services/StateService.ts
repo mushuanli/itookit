@@ -3,7 +3,7 @@
 import type {
     ConversationUIState,
     IChatEngine,
-} from '@itookit/llm-conversation';
+} from '@itookit/llm-session';
 import type { UIState } from '../domain/types';
 import { ErrorHandler } from '../utils/errorHandler';
 
@@ -20,7 +20,6 @@ export class StateService {
     async saveUIState(nodeId: string, state: UIState): Promise<void> {
         try {
             await this.engine.updateUIState(nodeId, toConversationState(state));
-            console.log('[StateService] UI state saved');
         } catch (e: unknown) {
             if (e instanceof Error && ErrorHandler.classifyError(e).userMessage === 'The requested resource was not found.') {
                 return; // node deleted, ignore

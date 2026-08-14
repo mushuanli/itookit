@@ -1,3 +1,4 @@
+import { assertEffectGrant } from '@itookit/harness';
 import type {
     AgentEvent,
     AssistantMessage,
@@ -11,7 +12,7 @@ import type {
 } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/harness';
 import { expandMessagesAttachments } from '@itookit/device-llm';
-import { assertCapabilityGrant, resolveCapability, type CapabilitySource } from '../ports/capabilities';
+import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 
 export interface LlmChatEffectRequest {
     resourceHandleId: string;
@@ -30,18 +31,17 @@ export class LlmChatEffectAdapter implements EffectAdapter<LlmChatEffectRequest,
         request: LlmChatEffectRequest,
         context: EffectExecutionContext,
     ): Promise<ChatCompletionResponse> {
-        assertCapabilityGrant(context, request.resourceHandleId, 'llm');
+        assertEffectGrant(context, request.resourceHandleId, 'llm');
         if (!request.connectionId.trim()) throw new Error('LLM connection id is required');
         const service = await resolveCapability(this.service, context);
         const params: ChatCompletionParams = { ...request.request, signal: context.abortSignal };
         const emit = makeEmitter(context);
 
-        if (request.request.stream === false) {
-            const response = await service.chat(request.connectionId, params);
-            await emitFinalContent(emit, response);
-            return response;
-        }
-        return streamChat(service, request.connectionId, params, emit);
+        const response = request.request.stream === false
+            ? await completeChat(service, request.connectionId, params, emit)
+            : await streamChat(service, request.connectionId, params, emit);
+        await chargeUsage(context, request.resourceHandleId, response.usage);
+        return response;
     }
 
     async reconcile(request: LlmChatEffectRequest): Promise<EffectReconcileResult<ChatCompletionResponse>> {
@@ -84,6 +84,29 @@ function makeEmitter(context: EffectExecutionContext): (event: AgentEvent) => Pr
 }
 
 /** 非流式（stream=false）：一次性把完整 thinking/content 写入事件日志，渲染统一归 effect 层。 */
+async function completeChat(
+    service: ILLMService,
+    connectionId: string,
+    params: ChatCompletionParams,
+    emit: (event: AgentEvent) => Promise<void>,
+): Promise<ChatCompletionResponse> {
+    const response = await service.chat(connectionId, params);
+    await emitFinalContent(emit, response);
+    return response;
+}
+
+/** 按 token 用量扣减 resource 预算；超出时由 harness 抛错使 effect 失败。 */
+async function chargeUsage(
+    context: EffectExecutionContext,
+    handleId: string,
+    usage: TokenUsage | undefined,
+): Promise<void> {
+    const tokens = usage?.total_tokens
+        ?? ((usage?.prompt_tokens ?? 0) + (usage?.completion_tokens ?? 0));
+    if (typeof tokens !== 'number' || tokens <= 0) return;
+    await context.chargeBudget?.(handleId, 'tokens', tokens);
+}
+
 async function emitFinalContent(
     emit: (event: AgentEvent) => Promise<void>,
     response: ChatCompletionResponse,

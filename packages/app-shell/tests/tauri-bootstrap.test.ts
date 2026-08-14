@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { createVFS, FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/stdio';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { FakeSidecarDb } from './fake-sidecar';
-import { ChatEngine, VFSAgentService } from '@itookit/llm-conversation';
+import { ChatEngine, VFSAgentService } from '@itookit/llm-session';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import type { IVFSManager } from '@itookit/stdio';
 

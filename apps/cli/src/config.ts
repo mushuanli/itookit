@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse } from 'yaml';
-import type { CompiledWorkflow, WorkflowConfigV1 } from './types';
+import { findCycles } from '@itookit/llm-flow';
+import type { CompiledWorkflow, RouteCondition, WorkflowConfigV1 } from './types';
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const TEMPLATE = /^\$\{tasks\.([^.}]+)\.outputs\.([^.}]+)\}$/;
@@ -88,18 +89,132 @@ function validateAgent(agent: WorkflowConfigV1['agents'][number], errors: string
         && (!Number.isInteger(agent.max_exchanges) || agent.max_exchanges < 1)) {
         errors.push(`agents.${agent.id}.max_exchanges must be a positive integer`);
     }
+    if (agent.temperature !== undefined
+        && (!Number.isFinite(agent.temperature) || agent.temperature < 0)) {
+        errors.push(`agents.${agent.id}.temperature must be a non-negative number`);
+    }
+    if (agent.max_tokens !== undefined
+        && (!Number.isInteger(agent.max_tokens) || agent.max_tokens < 1)) {
+        errors.push(`agents.${agent.id}.max_tokens must be a positive integer`);
+    }
+    if (agent.reasoning_effort !== undefined && !['low', 'medium', 'xhigh'].includes(agent.reasoning_effort)) {
+        errors.push(`agents.${agent.id}.reasoning_effort must be low, medium or xhigh`);
+    }
+    if (agent.approval !== undefined && !['none', 'external', 'all'].includes(agent.approval)) {
+        errors.push(`agents.${agent.id}.approval must be none, external or all`);
+    }
 }
 
 function validateTask(task: WorkflowConfigV1['tasks'][number], errors: string[]): void {
+    if (task.route !== undefined) {
+        validateRouteStructure(task, errors);
+        validateCommonTaskFields(task, errors);
+        return;
+    }
     requiredString(task.description, `tasks.${task.id}.description`, errors);
+    validateCommonTaskFields(task, errors);
     if (task.workspace_access && !['read', 'write'].includes(task.workspace_access)) {
         errors.push(`tasks.${task.id}.workspace_access must be read or write`);
     }
     if (task.outputs && Object.values(task.outputs).some(type => !['text', 'json', 'file'].includes(type))) {
         errors.push(`tasks.${task.id}.outputs contains an invalid type`);
     }
+}
+
+function validateCommonTaskFields(task: WorkflowConfigV1['tasks'][number], errors: string[]): void {
     parseDuration(task.timeout, `tasks.${task.id}.timeout`, errors);
+    if (task.priority !== undefined && (!Number.isInteger(task.priority) || task.priority < 0)) {
+        errors.push(`tasks.${task.id}.priority must be a non-negative integer`);
+    }
+    if (task.max_iterations !== undefined
+        && (!Number.isInteger(task.max_iterations) || task.max_iterations < 1)) {
+        errors.push(`tasks.${task.id}.max_iterations must be a positive integer`);
+    }
+    validateSpawn(task, errors);
+    validateSupervisor(task, errors);
+    validateBudget(task, errors);
     validateRetry(task, errors);
+}
+
+function validateSupervisor(task: WorkflowConfigV1['tasks'][number], errors: string[]): void {
+    if (task.supervisor === undefined) return;
+    const sup = task.supervisor;
+    if (!Array.isArray(sup.workers) || !sup.workers.length) {
+        errors.push(`tasks.${task.id}.supervisor.workers must be a non-empty array`);
+    }
+    if (sup.max_rounds !== undefined && (!Number.isInteger(sup.max_rounds) || sup.max_rounds < 1)) {
+        errors.push(`tasks.${task.id}.supervisor.max_rounds must be a positive integer`);
+    }
+}
+
+function validateSpawn(task: WorkflowConfigV1['tasks'][number], errors: string[]): void {
+    if (task.spawn === undefined) return;
+    const spawn = task.spawn;
+    if (!Array.isArray(spawn.tasks) || !spawn.tasks.length) {
+        errors.push(`tasks.${task.id}.spawn.tasks must be a non-empty array`);
+    }
+    for (const [index, subTask] of (spawn.tasks ?? []).entries()) {
+        if (!subTask.id || !subTask.agent) {
+            errors.push(`tasks.${task.id}.spawn.tasks[${index}] requires id and agent`);
+        }
+    }
+    for (const edge of spawn.edges ?? []) {
+        if (!edge.from || !edge.to) {
+            errors.push(`tasks.${task.id}.spawn.edges has an edge without from/to`);
+        }
+    }
+}
+
+function validateRouteStructure(task: WorkflowConfigV1['tasks'][number], errors: string[]): void {
+    const route = task.route!;
+    if (route.mode !== undefined && !['exclusive', 'multicast', 'fallback'].includes(route.mode)) {
+        errors.push(`tasks.${task.id}.route.mode must be exclusive, multicast or fallback`);
+    }
+    if (!Array.isArray(route.rules) || !route.rules.length) {
+        errors.push(`tasks.${task.id}.route.rules must be a non-empty array`);
+        return;
+    }
+    for (const [index, rule] of route.rules.entries()) {
+        validateRouteCondition(rule.when, `tasks.${task.id}.route.rules[${index}].when`, errors);
+        if (typeof rule.then !== 'string' || !rule.then.trim()) {
+            errors.push(`tasks.${task.id}.route.rules has a rule without then`);
+        }
+    }
+    if (route.default !== undefined && (typeof route.default !== 'string' || !route.default.trim())) {
+        errors.push(`tasks.${task.id}.route.default must be a non-empty string`);
+    }
+}
+
+function validateRouteCondition(condition: RouteCondition, label: string, errors: string[]): void {
+    if (typeof condition === 'string') {
+        if (!condition.trim()) errors.push(`${label} must not be empty`);
+        return;
+    }
+    if (!condition || typeof condition !== 'object' || Array.isArray(condition)) {
+        errors.push(`${label} must be a string or a condition object`);
+        return;
+    }
+    const keys = ['eq', 'neq', 'in', 'exists', 'and', 'or', 'not'].filter(key => key in condition);
+    if (!keys.length) errors.push(`${label} has no condition operator`);
+    for (const list of ['and', 'or'] as const) {
+        const sub = condition[list];
+        if (sub !== undefined && !Array.isArray(sub)) errors.push(`${label}.${list} must be an array`);
+        else (sub ?? []).forEach((item, index) => validateRouteCondition(item, `${label}.${list}[${index}]`, errors));
+    }
+    if (condition.not !== undefined) validateRouteCondition(condition.not, `${label}.not`, errors);
+}
+
+function validateBudget(task: WorkflowConfigV1['tasks'][number], errors: string[]): void {
+    if (task.budget === undefined) return;
+    if (!task.budget || typeof task.budget !== 'object' || Array.isArray(task.budget)) {
+        errors.push(`tasks.${task.id}.budget must be an object of positive limits`);
+        return;
+    }
+    for (const [dimension, limit] of Object.entries(task.budget)) {
+        if (!Number.isFinite(limit) || limit <= 0) {
+            errors.push(`tasks.${task.id}.budget.${dimension} must be a positive number`);
+        }
+    }
 }
 
 function validateReferences(config: WorkflowConfigV1, errors: string[]): void {
@@ -115,9 +230,43 @@ function validateReferences(config: WorkflowConfigV1, errors: string[]): void {
         if (!connections.has(agent.connection)) errors.push(`agent ${agent.id} references unknown connection ${agent.connection}`);
     }
     for (const task of config.tasks ?? []) {
-        if (!agents.has(task.agent)) errors.push(`task ${task.id} references unknown agent ${task.agent}`);
+        if (task.route !== undefined) {
+            for (const rule of task.route.rules ?? []) {
+                if (rule.then && !tasks.has(rule.then)) errors.push(`task ${task.id} route references unknown task ${rule.then}`);
+            }
+            if (task.route.default !== undefined && !tasks.has(task.route.default)) {
+                errors.push(`task ${task.id} route default references unknown task ${task.route.default}`);
+            }
+        } else if (task.spawn !== undefined) {
+            for (const subTask of task.spawn.tasks ?? []) {
+                if (subTask.agent && !agents.has(subTask.agent)) {
+                    errors.push(`task ${task.id} spawn references unknown agent ${subTask.agent}`);
+                }
+            }
+            for (const edge of task.spawn.edges ?? []) {
+                if (edge.from !== task.id && !tasks.has(edge.from)) {
+                    errors.push(`task ${task.id} spawn edge references unknown task ${edge.from}`);
+                }
+                if (edge.to && !tasks.has(edge.to) && !task.spawn.tasks.some(sub => sub.id === edge.to)) {
+                    errors.push(`task ${task.id} spawn edge references unknown task ${edge.to}`);
+                }
+            }
+        } else if (!agents.has(task.agent ?? '')) {
+            errors.push(`task ${task.id} references unknown agent ${task.agent}`);
+        }
+        if (task.compensate !== undefined && !tasks.has(task.compensate)) {
+            errors.push(`task ${task.id} compensates unknown task ${task.compensate}`);
+        }
+        for (const worker of task.supervisor?.workers ?? []) {
+            if (!tasks.has(worker)) errors.push(`task ${task.id} supervisor references unknown worker ${worker}`);
+        }
         for (const dependency of task.depends_on ?? []) {
-            if (!tasks.has(dependency)) errors.push(`task ${task.id} references unknown dependency ${dependency}`);
+            const depId = typeof dependency === 'string' ? dependency : dependency.task;
+            if (!tasks.has(depId)) errors.push(`task ${task.id} references unknown dependency ${depId}`);
+            if (typeof dependency !== 'string' && dependency.on_failure !== undefined
+                && !['fail', 'skip', 'continue'].includes(dependency.on_failure)) {
+                errors.push(`task ${task.id} dependency ${depId} has invalid on_failure`);
+            }
         }
         for (const [input, value] of Object.entries(task.inputs ?? {})) {
             if (typeof value !== 'string' || !value.startsWith('${tasks.')) continue;
@@ -176,7 +325,10 @@ function validateRetry(task: WorkflowConfigV1['tasks'][number], errors: string[]
 }
 
 function validateDag(config: WorkflowConfigV1, errors: string[]): void {
-    const edges = new Map((config.tasks ?? []).map(task => [task.id, new Set(task.depends_on ?? [])]));
+    const edges = new Map((config.tasks ?? []).map(task => [
+        task.id,
+        new Set((task.depends_on ?? []).map(dep => typeof dep === 'string' ? dep : dep.task)),
+    ]));
     for (const task of config.tasks ?? []) {
         for (const value of Object.values(task.inputs ?? {})) {
             if (typeof value === 'string') {
@@ -185,18 +337,12 @@ function validateDag(config: WorkflowConfigV1, errors: string[]): void {
             }
         }
     }
-    const visiting = new Set<string>();
-    const visited = new Set<string>();
-    const visit = (id: string): boolean => {
-        if (visiting.has(id)) return true;
-        if (visited.has(id)) return false;
-        visiting.add(id);
-        for (const dep of edges.get(id) ?? []) if (visit(dep)) return true;
-        visiting.delete(id);
-        visited.add(id);
-        return false;
-    };
-    if ([...edges.keys()].some(visit)) errors.push('tasks contain a dependency cycle');
+    const nodes = (config.tasks ?? []).map(task => ({ id: task.id }));
+    const graphEdges = [...edges.entries()].flatMap(([taskId, deps]) =>
+        [...deps].map(dep => ({ id: `${dep}->${taskId}`, from: dep, to: taskId })));
+    if (findCycles(nodes, graphEdges).backEdges.size > 0) {
+        errors.push('tasks contain a dependency cycle');
+    }
 }
 
 function validateIds(items: Array<{ id: string }>, label: string, errors: string[]): void {

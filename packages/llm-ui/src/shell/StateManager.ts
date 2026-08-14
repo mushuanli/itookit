@@ -1,16 +1,16 @@
 // @file: llm-ui/shell/StateManager.ts
 
 import type { UIState, CollapseStateMap } from '../domain/types';
-import type { IChatInputPresenter, IChatInputConfig } from '../domain/ports/IChatInputPresenter';
+import type { IChatInputPresenter, IChatInputConfig, ChatInputSettings } from '../domain/ports/IChatInputPresenter';
 import type { StateService } from '../services/StateService';
-import type { SessionManager } from '@itookit/llm-conversation';
+import type { SessionManager } from '@itookit/llm-session';
 import { createDebouncedSave, DebouncedFn } from '../utils/debounce';
 import { ErrorHandler } from '../utils/errorHandler';
 /**
  * 状态管理器
  *
- * ✅ 面向 IChatInputPresenter 接口，不依赖 ChatInput 实现
- * ✅ 支持新版 NavigationRequest.state 协议读取创建参数
+ * 面向 IChatInputPresenter 接口，不依赖 ChatInput 实现
+ * 支持新版 NavigationRequest.state 协议读取创建参数
  */
 export class StateManager {
     private collapseStatesCache: CollapseStateMap = {};
@@ -77,7 +77,7 @@ export class StateManager {
     }
 
     /**
-     * ✅ 改动：接受 IChatInputConfig 而非 ChatInput 实例
+     * 改动：接受 IChatInputConfig 而非 ChatInput 实例
      */
     async saveUIState(
         inputConfig?: IChatInputConfig,
@@ -114,7 +114,7 @@ export class StateManager {
     /**
      * 恢复输入状态 — 面向 IChatInputPresenter 接口
      * 
-     * ✅ 新增 onTitleRestore 回调，支持从创建参数恢复标题
+     * 新增 onTitleRestore 回调，支持从创建参数恢复标题
      */
     restoreInputState(
         chatInput: IChatInputPresenter,
@@ -122,7 +122,7 @@ export class StateManager {
             initialInputState?: { text?: string; agentId?: string };
             isNewSession?: boolean;
             savedState?: UIState | null;
-            sessionSettings?: any;
+            sessionSettings?: ChatInputSettings;
             onTitleRestore?: (title: string) => void;
         }
     ): void {
@@ -164,7 +164,6 @@ export class StateManager {
 
         // 兜底：保持现有 agentId，仅应用 settings
         if (!options.isNewSession && options.sessionSettings) {
-            console.log('[StateManager] restoreInputState applying sessionSettings:', JSON.stringify(options.sessionSettings));
             const current = chatInput.getConfig();
             chatInput.setConfig({
                 text: current.text,
@@ -177,7 +176,7 @@ export class StateManager {
     /**
      * 读取并清除 sessionStorage 中的创建参数
      * 
-     * ✅ 支持新版 NavigationRequest 协议的 title 字段
+     * 支持新版 NavigationRequest 协议的 title 字段
      */
     private getAndClearCreateParams(): { 
         agentId?: string; 

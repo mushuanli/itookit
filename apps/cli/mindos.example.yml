@@ -25,6 +25,12 @@ connections:
       standard: claude-sonnet-4-6
 
 agents:
+  # Optional per-agent LLM controls:
+  #   temperature: 0.7            # sampling temperature (>= 0)
+  #   max_tokens: 4096            # max completion tokens
+  #   thinking: true              # enable extended thinking
+  #   reasoning_effort: medium    # low | medium | xhigh
+  #   stream: false               # non-streaming LLM calls
   - id: analyst
     name: Analyst
     connection: default
@@ -40,6 +46,9 @@ agents:
     tools: [file_read, file_write, file_edit, glob_search, grep_search, bash]
 
 tasks:
+  # Optional per-task controls:
+  #   priority: 10                 # higher schedules first (>= 0)
+  #   budget: { tokens: 20000 }    # hard token limit per node (LLM usage)
   - id: analyze
     agent: analyst
     description: 分析与目标相关的代码，输出实施建议。

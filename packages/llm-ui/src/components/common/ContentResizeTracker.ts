@@ -5,7 +5,7 @@ import { TimerManager } from './TimerManager';
 /**
  * 内容高度变化追踪器
  *
- * ✅ 核心改动：
+ * 核心改动：
  * - 新增 suspend/resume 方法
  * - 流式期间完全静默，避免与 StreamController 冲突
  */

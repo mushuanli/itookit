@@ -1,3 +1,4 @@
+import { interactionApproved } from '@itookit/harness';
 import type {
     Decision,
     DurableTaskProgram,
@@ -59,7 +60,7 @@ function handleApproval(
     event: TaskInputEvent,
 ): Decision<ApprovedEffectState, unknown> {
     if (event.type !== 'interaction-resolved') return unexpected(state, event);
-    if (!isApproved(event.value)) {
+    if (!interactionApproved(event.value)) {
         return {
             state: { ...state },
             next: { type: 'fail', error: { message: 'Effect approval was denied', code: 'APPROVAL_DENIED' } },
@@ -70,13 +71,6 @@ function handleApproval(
         actions: [{ type: 'effect', effect: state.effect }],
         next: { type: 'wait', on: { type: 'effect', id: state.effect.id } },
     };
-}
-
-function isApproved(value: JsonValue): boolean {
-    if (value === true) return true;
-    if (typeof value === 'string') return ['yes', 'approved', 'allow'].includes(value.toLowerCase());
-    return typeof value === 'object' && value !== null && !Array.isArray(value)
-        && value['approved'] === true;
 }
 
 function validateInput(input: ApprovedEffectInput): void {

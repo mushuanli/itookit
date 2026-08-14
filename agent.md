@@ -47,7 +47,7 @@
 │   ├── vfsdriver-fs/         (@itookit/vfsdriver-fs)        — alternative SQLite backend
 │   ├── device-llm/       (@itookit/device-llm)         — LLM API: OpenAI/Anthropic/Gemini, SSE, MCP
 │   ├── llm-kernel/       (@itookit/llm-kernel)         — Executor + Orchestrator engine, no UI
-│   ├── llm-runtime/       (@itookit/llm-runtime)         — session mgmt, VFS persistence (.chat files)
+│   ├── llm-runtime/       (@itookit/llm-programs)         — session mgmt, VFS persistence (.chat files)
 │   ├── mdx/              (@itookit/mdxeditor)          — CodeMirror 6 markdown editor
 │   ├── llm-ui/           (@itookit/llm-ui)             — Chat & Agent UI components
 │   ├── vfs-ui/           (@itookit/vfs-ui)             — file-tree UI shell (VFSUIShell)

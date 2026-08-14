@@ -50,4 +50,52 @@ describe('validateWorkflow', () => {
         expect(() => validateWorkflow(value, false)).toThrow('retry.max_attempts');
         expect(() => validateWorkflow(value, false)).toThrow('undeclared output first.missing');
     });
+
+    it('rejects an invalid agent approval strategy', () => {
+        const value = workflow();
+        value.agents[0].approval = 'sometimes' as never;
+        expect(() => validateWorkflow(value, false)).toThrow('approval must be none, external or all');
+    });
+
+    it('rejects an invalid route mode', () => {
+        const value = workflow();
+        value.tasks.push({
+            id: 'router', route: { mode: 'parallel' as never, rules: [{ when: 'x', then: 'first' }] },
+            depends_on: [], inputs: { input: '${tasks.first.outputs.result}' },
+        });
+        expect(() => validateWorkflow(value, false)).toThrow('route.mode must be exclusive, multicast or fallback');
+    });
+
+    it('rejects an invalid on_failure value', () => {
+        const value = workflow();
+        value.tasks.push({
+            id: 'second', agent: 'agent', description: 'Second',
+            depends_on: [{ task: 'first', on_failure: 'retry' as never }], outputs: { result: 'text' },
+        });
+        expect(() => validateWorkflow(value, false)).toThrow('invalid on_failure');
+    });
+
+    it('rejects a route condition with no operator', () => {
+        const value = workflow();
+        value.tasks.push({
+            id: 'router', route: { rules: [{ when: {} as never, then: 'first' }] },
+            depends_on: [], inputs: { input: '${tasks.first.outputs.result}' },
+        });
+        expect(() => validateWorkflow(value, false)).toThrow('no condition operator');
+    });
+
+    it('accepts a composite route condition', () => {
+        const value = workflow();
+        value.tasks.push({
+            id: 'router',
+            route: {
+                rules: [{
+                    when: { and: [{ in: ['a', 'b'] }, { not: 'c' }] },
+                    then: 'first',
+                }],
+            },
+            depends_on: [], inputs: { input: '${tasks.first.outputs.result}' },
+        });
+        expect(validateWorkflow(value, false).tasks).toHaveLength(2);
+    });
 });

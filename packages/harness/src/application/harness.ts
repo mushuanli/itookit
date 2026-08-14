@@ -9,9 +9,7 @@ import {
     createId,
     SeqFileHarnessStore,
     type EffectClaim,
-    type PreparedSpawn,
     type TaskClaim,
-    type TaskCommitSideEffects,
 } from '../infrastructure/seqfile/store';
 import type {
     BudgetAccount,
@@ -47,10 +45,14 @@ import type {
     TaskSnapshot,
     WorkspaceAdapter,
     WorkspaceDiff,
-    WorkspaceExecutionContext,
     WorkspaceMergeResult,
     WorkspaceSnapshot,
 } from '../domain/types';
+import { assertDurableValue } from './durability';
+import { failureDecision, isTerminalStatus, mergeReport, nextDecision, shouldRetry, transition, validateDecision } from './decision';
+import { activeEffectIds, addEffect, addInteraction, effectControllerKey, effectFailure, executeEffectWithDeadline, isMissingPath, normalizeEffect, type RequiredEffect } from './effect-utils';
+import { assertWorkspace, assertWorkspaceSnapshots, readWorkspaceSnapshots, workspaceContext, workspaceSnapshot } from './workspace-utils';
+import { decisionSideEffects, prepareSpawns } from './actions';
 
 interface HarnessEvents { changed: { sessionId: string; taskId?: string }; }
 
@@ -627,6 +629,8 @@ export class Harness implements HarnessRegistration {
                     await this.store.appendEvent(binding, task.sessionId, task.id, event.type, event.payload);
                     this.notify(task.sessionId, task.id);
                 },
+                chargeBudget: (handleId: string, dimension: string, amount: number) =>
+                    this.chargeBudget(task.sessionId, handleId, dimension, amount),
             };
             const result = await executeEffectWithDeadline(adapter, effect, claim, context, controller);
             if ('result' in result) assertDurableValue(result.result, 'Effect result');
@@ -689,298 +693,4 @@ export class Harness implements HarnessRegistration {
     private notify(sessionId: string, taskId?: string): void {
         this.eventsBus.emit('changed', { sessionId, taskId });
     }
-}
-
-function workspaceContext(
-    sessionId: string,
-    resource: ResourceRecord,
-): WorkspaceExecutionContext {
-    return { sessionId, resource, abortSignal: new AbortController().signal };
-}
-
-function workspaceSnapshot(
-    sessionId: string,
-    resourceId: string,
-    adapter: import('../domain/types').ProgramRef,
-    payload: import('../domain/types').JsonValue,
-    parentIds: string[] = [],
-): WorkspaceSnapshot {
-    return {
-        id: createId('workspace-snapshot'), sessionId, resourceId,
-        adapter, parentIds, payload, createdAt: Date.now(),
-    };
-}
-
-async function readWorkspaceSnapshots(
-    store: SeqFileHarnessStore,
-    binding: ResolvedStorageBinding,
-    ids: string[],
-): Promise<WorkspaceSnapshot[]> {
-    return Promise.all(ids.map(id => store.getWorkspaceSnapshot(binding, id)));
-}
-
-function assertWorkspace(resource: ResourceRecord): void {
-    if (resource.kind !== 'workspace') {
-        throw new Error(`Resource is not a workspace: ${resource.id}`);
-    }
-}
-
-function assertWorkspaceSnapshots(
-    resource: ResourceRecord,
-    ...snapshots: WorkspaceSnapshot[]
-): void {
-    assertWorkspace(resource);
-    for (const snapshot of snapshots) {
-        if (snapshot.sessionId !== resource.sessionId || snapshot.resourceId !== resource.id) {
-            throw new Error(`Workspace snapshot does not belong to resource: ${snapshot.id}`);
-        }
-        const expected = snapshots[0].adapter;
-        if (snapshot.adapter.kind !== expected.kind || snapshot.adapter.version !== expected.version) {
-            throw new Error(`Workspace snapshot adapter mismatch: ${snapshot.id}`);
-        }
-    }
-}
-
-function decisionSideEffects(
-    actions: import('../domain/types').KernelAction[],
-    spawns: PreparedSpawn[],
-): TaskCommitSideEffects {
-    const shared: NonNullable<TaskCommitSideEffects['shared']> = [];
-    const events: NonNullable<TaskCommitSideEffects['events']> = [];
-    for (const action of actions) {
-        if (action.type === 'set-shared') shared.push({
-            type: 'set', key: action.key, value: action.value, expectedVersion: action.expectedVersion,
-        });
-        if (action.type === 'delete-shared') shared.push({
-            type: 'delete', key: action.key, expectedVersion: action.expectedVersion,
-        });
-        if (action.type === 'emit') events.push({ type: action.eventType, payload: action.payload });
-        if (action.type === 'request-interaction') events.push({
-            type: 'task.interaction.requested', payload: action.interaction,
-        });
-    }
-    return { shared, events, spawns };
-}
-
-function prepareSpawns(actions: import('../domain/types').KernelAction[]): PreparedSpawn[] {
-    return actions.filter(action => action.type === 'spawn').map(action => ({
-        id: createId('task'), spawnKey: action.spawnKey, spec: action.spec,
-    }));
-}
-
-async function nextDecision(program: DurableTaskProgram, task: TaskRecord): Promise<Decision> {
-    const event = task.pendingEvents[0];
-    if (task.state === undefined) return program.init(task.input);
-    if (!event) return { state: task.state, next: { type: 'continue' } };
-    return program.reduce(task.state as never, normalizeInputEvent(event));
-}
-
-function normalizeInputEvent(event: import('../domain/types').TaskInputEvent): import('../domain/types').TaskInputEvent {
-    if (event.type !== 'signal') return event;
-    if (event.signal.type === '__effect_result__') {
-        const payload = event.signal.payload as { effect: RequiredEffect; result: unknown };
-        return { type: 'effect-completed', effectId: payload.effect.id, result: payload.result };
-    }
-    if (event.signal.type === '__effect_error__') {
-        const payload = event.signal.payload as { effectId: string; error: import('../domain/types').SerializableError };
-        return { type: 'effect-failed', effectId: payload.effectId, error: payload.error };
-    }
-    return event;
-}
-
-function transition(task: TaskRecord, decision: Decision): TaskRecord {
-    if (decision.next.type === 'complete') return terminal(task, 'succeeded', decision.next.output);
-    if (decision.next.type === 'fail') {
-        return shouldRetry(task, decision)
-            ? retryTask(task, decision.next.error)
-            : terminal(task, 'failed', undefined, decision.next.error);
-    }
-    if (decision.next.type === 'wait') {
-        return { ...task, status: 'waiting', wait: decision.next.on, readyAt: undefined, currentAttempt: undefined };
-    }
-    return { ...task, status: 'ready', wait: undefined, readyAt: undefined, currentAttempt: undefined };
-}
-
-function shouldRetry(task: TaskRecord, decision: Decision): boolean {
-    return decision.next.type === 'fail' && decision.next.retryable === true
-        && task.attemptCount < task.retry.maxAttempts;
-}
-
-function retryTask(
-    task: TaskRecord,
-    error: import('../domain/types').SerializableError,
-): TaskRecord {
-    return {
-        ...task, status: 'ready', wait: undefined, exit: undefined, currentAttempt: undefined,
-        readyAt: Date.now() + (task.retry.backoffMs ?? 0), lastError: error,
-    };
-}
-
-function terminal(
-    task: TaskRecord,
-    status: 'succeeded' | 'failed',
-    output?: unknown,
-    error?: import('../domain/types').SerializableError,
-): TaskRecord {
-    const completedAt = Date.now();
-    return { ...task, status, output, wait: undefined, readyAt: undefined, currentAttempt: undefined,
-        exit: { taskId: task.id, status, output, error, completedAt } };
-}
-
-type RequiredEffect = EffectRequest & { id: string; timeoutMs: number };
-function normalizeEffect(effect: EffectRequest): RequiredEffect {
-    const normalized = { ...effect, id: effect.id ?? createId('effect'), timeoutMs: effect.timeoutMs ?? 30_000 };
-    if (!normalized.kind || !normalized.version || !normalized.idempotencyKey) {
-        throw new Error('Effect kind, version, and idempotencyKey are required');
-    }
-    if (!Number.isFinite(normalized.timeoutMs) || normalized.timeoutMs <= 0) {
-        throw new Error('Effect timeoutMs must be a positive finite number');
-    }
-    assertDurableValue(normalized.request, 'Effect request');
-    return normalized;
-}
-function addEffect(task: TaskRecord, effect: RequiredEffect): TaskRecord {
-    const persisted = { request: effect, status: 'pending' as const, attemptCount: 0, attempts: [] };
-    return { ...task, effects: { ...task.effects, [effect.id]: persisted } };
-}
-function addInteraction(
-    task: TaskRecord,
-    request: import('../domain/types').InteractionRequest<import('../domain/types').JsonValue>,
-): TaskRecord {
-    if (!request.id || !request.prompt) throw new Error('Interaction id and prompt are required');
-    if (task.interactions?.[request.id]) return task;
-    const interaction = { ...request, status: 'pending' as const, requestedAt: Date.now() };
-    return { ...task, interactions: { ...(task.interactions ?? {}), [request.id]: interaction } };
-}
-function failureDecision(state: unknown, error: unknown): Decision {
-    return { state, next: { type: 'fail', error: serializeError(error), retryable: true } };
-}
-function serializeError(error: unknown): import('../domain/types').SerializableError {
-    return error instanceof Error ? { message: error.message, stack: error.stack } : { message: String(error) };
-}
-
-async function executeEffectAdapter(
-    adapter: EffectAdapter,
-    effect: RequiredEffect,
-    claim: EffectClaim,
-    context: import('../domain/types').EffectExecutionContext,
-): Promise<import('../infrastructure/seqfile/store').EffectCompletion> {
-    const wasRecovered = claim.effect.attempts.some(attempt => attempt.outcome === 'lost');
-    if (wasRecovered && adapter.reconcile) {
-        const reconciled = await adapter.reconcile(effect.request, context);
-        if (reconciled.status === 'completed') return { result: reconciled.result };
-        if (reconciled.status === 'indeterminate') {
-            return { error: reconciled.error, indeterminate: true };
-        }
-    }
-    return { result: await adapter.execute(effect.request, context) };
-}
-
-async function executeEffectWithDeadline(
-    adapter: EffectAdapter,
-    effect: RequiredEffect,
-    claim: EffectClaim,
-    context: import('../domain/types').EffectExecutionContext,
-    controller: AbortController,
-): Promise<import('../infrastructure/seqfile/store').EffectCompletion> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const interrupted = new Promise<never>((_, reject) => {
-        context.abortSignal.addEventListener('abort', () => {
-            reject(abortError(context.abortSignal.reason));
-        }, { once: true });
-        timer = setTimeout(() => {
-            const error = new Error(`Effect timed out after ${effect.timeoutMs}ms`);
-            error.name = 'EffectTimeoutError';
-            controller.abort(error);
-            void adapter.cancel?.(effect.request, context).catch(() => {});
-        }, effect.timeoutMs);
-    });
-    try {
-        return await Promise.race([executeEffectAdapter(adapter, effect, claim, context), interrupted]);
-    } finally {
-        if (timer) clearTimeout(timer);
-    }
-}
-
-function abortError(reason: unknown): Error {
-    if (reason instanceof Error) return reason;
-    const error = new Error('Effect execution was cancelled');
-    error.name = 'AbortError';
-    return error;
-}
-
-function assertDurableValue(value: unknown, label: string): void {
-    inspectDurableValue(value, label, new Set(), false);
-}
-
-function validateDecision(decision: Decision): void {
-    if (decision.state !== undefined) assertDurableValue(decision.state, 'Task state');
-    if (decision.next.type === 'complete' && decision.next.output !== undefined) {
-        assertDurableValue(decision.next.output, 'Task output');
-    }
-    for (const action of decision.actions ?? []) validateAction(action);
-}
-
-function validateAction(action: import('../domain/types').KernelAction): void {
-    if (action.type === 'spawn' && action.spec.input !== undefined) {
-        assertDurableValue(action.spec.input, 'Spawn input');
-    }
-    if (action.type === 'set-shared') assertDurableValue(action.value, 'Shared state');
-    if (action.type === 'emit' && action.payload !== undefined) {
-        assertDurableValue(action.payload, 'Event payload');
-    }
-    if (action.type === 'request-interaction' && action.interaction.payload !== undefined) {
-        assertDurableValue(action.interaction.payload, 'Interaction payload');
-    }
-}
-
-function inspectDurableValue(value: unknown, path: string, seen: Set<object>, nested: boolean): void {
-    if (value === undefined && nested) return;
-    if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
-    if (typeof value === 'number' && Number.isFinite(value)) return;
-    if (typeof value !== 'object') throw new Error(`${path} is not JSON serializable`);
-    if (seen.has(value)) throw new Error(`${path} contains a circular reference`);
-    seen.add(value);
-    if (Array.isArray(value)) {
-        value.forEach((item, index) => inspectDurableValue(item, `${path}[${index}]`, seen, false));
-    } else {
-        const prototype = Object.getPrototypeOf(value);
-        if (prototype !== Object.prototype && prototype !== null) {
-            throw new Error(`${path} contains a non-JSON object`);
-        }
-        for (const [key, item] of Object.entries(value)) {
-            inspectDurableValue(item, `${path}.${key}`, seen, true);
-        }
-    }
-    seen.delete(value);
-}
-
-function effectFailure(error: unknown): import('../infrastructure/seqfile/store').EffectCompletion {
-    return { error: serializeError(error) };
-}
-
-function mergeReport(target: RecoveryReport, value: RecoveryReport): void {
-    target.recoveredTasks += value.recoveredTasks;
-    target.recoveredEffects += value.recoveredEffects;
-    target.expiredAttempts += value.expiredAttempts;
-    target.rebuiltIndexes += value.rebuiltIndexes;
-}
-
-function isTerminalStatus(status: TaskRecord['status']): boolean {
-    return status === 'succeeded' || status === 'failed' || status === 'cancelled';
-}
-
-function effectControllerKey(sessionId: string, taskId: string, effectId: string): string {
-    return `${sessionId}/${taskId}/${effectId}`;
-}
-
-function activeEffectIds(task: TaskRecord): Set<string> {
-    return new Set(Object.entries(task.effects)
-        .filter(([, effect]) => effect.status === 'pending' || effect.status === 'leased')
-        .map(([id]) => id));
-}
-
-function isMissingPath(error: unknown): boolean {
-    return typeof error === 'object' && error !== null && 'code' in error
-        && (error as { code?: unknown }).code === 'ENOENT';
 }

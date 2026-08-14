@@ -30,6 +30,8 @@ export interface DagNodeDefinition<Config = unknown> {
     capabilities?: string[];
     budget?: Record<string, number>;
     retry?: { maxAttempts: number; backoffMs?: number };
+    /** 本节点失败时执行的补偿节点 id（Saga 回滚）。 */
+    compensate?: string;
 }
 
 export interface DagEdgeDefinition {
@@ -38,6 +40,8 @@ export interface DagEdgeDefinition {
     to: string;
     output: string;
     input: string;
+    /** 依赖失败时的下游行为。 */
+    onFailure?: 'fail' | 'skip' | 'continue';
 }
 
 export interface DagRunSpec {
@@ -59,6 +63,7 @@ export interface DagTaskDependencyBinding {
     input: string;
     output?: string;
     edgeId?: string;
+    onFailure?: 'fail' | 'skip' | 'continue';
 }
 
 export interface DagTaskDefinition {

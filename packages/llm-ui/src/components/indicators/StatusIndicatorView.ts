@@ -1,6 +1,7 @@
 // @file: llm-ui/components/indicators/StatusIndicatorView.ts
 
 import type { IStatusPresenter } from '../../domain/ports/IStatusPresenter';
+import type { SessionSnapshot } from '@itookit/llm-session';
 import type { DOMCache } from '../common';
 
 interface StatusInfo {
@@ -56,7 +57,7 @@ export class StatusIndicatorView implements IStatusPresenter {
         this.onLoadingChange(info.loading);
     }
 
-    updateFromSnapshot(snapshot: any): void {
+    updateFromSnapshot(snapshot: SessionSnapshot): void {
         this.update(snapshot.status);
         if (snapshot.isRunning) this.onLoadingChange(true);
     }

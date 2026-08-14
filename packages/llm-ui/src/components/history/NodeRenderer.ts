@@ -1,7 +1,7 @@
 // @file: llm-ui/components/history/NodeRenderer.ts
 
 import { escapeHTML } from '@itookit/common';
-import { ExecutionNode } from '@itookit/llm-conversation';
+import { ExecutionNode } from '@itookit/llm-session';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { IconResolver } from '../../utils/iconResolver';
 
@@ -16,7 +16,7 @@ export class NodeRenderer {
     static create(node: ExecutionNode): RenderResult {
         const el = document.createElement('div');
 
-        // ✅ 使用共享 IconResolver
+        // 使用共享 IconResolver
         const icon = IconResolver.getIcon(node);
         const layoutClass = IconResolver.getLayoutClass(node);
 
@@ -52,7 +52,7 @@ export class NodeRenderer {
             ? `<div class="llm-ui-node__error-embed">⚠️ ${escapeHTML(node.data.error)}</div>`
             : '';
 
-        // ✅ 传入折叠状态
+        // 传入折叠状态
         const isCollapsed = false; // 由调用方在 appendNode 中设置
 
         el.innerHTML = `

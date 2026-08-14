@@ -1,6 +1,6 @@
 // @file: llm-ui/components/HistoryView.ts
 
-import type { SessionGroup, SessionEvent, ExecutionNode } from '@itookit/llm-conversation';
+import type { SessionGroup, SessionEventEnvelope, ExecutionNode } from '@itookit/llm-session';
 import type { IModuleFS } from '@itookit/stdio';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { CollapseStateMap, NodeActionCallback } from '../domain/types';
@@ -55,7 +55,7 @@ export class HistoryView implements IHistoryPresenter {
     // 基础设施
     private scrollController: ScrollController;
     private resizeTracker: ContentResizeTracker;
-    private eventProcessor: EventBatchProcessor<SessionEvent>;
+    private eventProcessor: EventBatchProcessor<SessionEventEnvelope>;
     private timers = new TimerManager();
 
     private newContentIndicator: HTMLElement | null = null;
@@ -123,7 +123,7 @@ export class HistoryView implements IHistoryPresenter {
         );
 
         // 使用泛化的 EventBatchProcessor
-        this.eventProcessor = new EventBatchProcessor<SessionEvent>(
+        this.eventProcessor = new EventBatchProcessor<SessionEventEnvelope>(
             (batched) => this.handleBatchedEvents(batched),
             (event) => this.processEventImmediate(event),
             {
@@ -284,7 +284,7 @@ export class HistoryView implements IHistoryPresenter {
         return this.collapse.findUnfoldedByViewport(direction);
     }
 
-    processEvent(event: SessionEvent): void {
+    processEvent(event: SessionEventEnvelope): void {
         if (event.type === 'finished' || event.type === 'message:appended') {
             this.onHistoryActivity?.('update');
         } else if (event.type === 'error') {
@@ -297,7 +297,7 @@ export class HistoryView implements IHistoryPresenter {
     // 内部事件处理
     // ================================================================
 
-    private handleBatchedEvents(batched: BatchedEvents<SessionEvent>): void {
+    private handleBatchedEvents(batched: BatchedEvents<SessionEventEnvelope>): void {
         // Enter streaming mode before rendering any content chunks
         if (batched.chunks.size > 0) {
             this.enterStreamingMode();
@@ -322,12 +322,10 @@ export class HistoryView implements IHistoryPresenter {
             this.ttyCtrl.handleMeta(nodeId, metaInfo);
         }
     }
-    private processEventImmediate(event: SessionEvent): void {
-        // During S7 transition, event types include both old OrchestratorEvent
-        // names (finished, error, regenerate_*, tool:*) and new SessionEvent names.
-        // Dispatch on the canonical session event discriminator.
-        const e = event as { type: string; payload?: any; [key: string]: any };
-        switch (e.type) {
+    private processEventImmediate(event: SessionEventEnvelope): void {
+        // SessionEventBus 已在边界把 canonical AgentEvent 平铺字段折叠进 payload，
+        // 此处统一按 event.type 收窄、从 event.payload 读取。
+        switch (event.type) {
             case 'finished':
                 this.exitStreamingMode();
                 this.renderer.editors.forEach(editor => editor.finalize().catch(err => console.error('[HistoryView] finalize failed:', err)));
@@ -339,14 +337,11 @@ export class HistoryView implements IHistoryPresenter {
 
             case 'error': {
                 this.exitStreamingMode();
-                // SessionEventBus 会把 canonical AgentEvent（扁平字段）重建为
-                // { type, payload } 包装（session-event-bus.ts），所以错误信息
-                // 从 payload.error 读取；保留 payload.message 与扁平字段 fallback，
-                // 兼容两种事件形态。
-                const err = e.payload?.error;
-                const msg = e.payload?.message ?? err?.message ?? 'Unknown error';
-                const code = e.payload?.code ?? err?.code;
-                const prefix = code === 401 ? '🔐 ' : code === 429 ? '⏳ ' : '';
+                // 归一化后错误信息在 payload.error（AgentEventError 形状），code 为字符串。
+                const err = event.payload.error;
+                const msg = err?.message ?? 'Unknown error';
+                const code = err?.code;
+                const prefix = code === '401' ? '🔐 ' : code === '429' ? '⏳ ' : '';
                 this.appendErrorBubble(new Error(`${prefix}${msg}`));
                 this.renderer.editors.forEach(editor => editor.finalize().catch(err => console.error('[HistoryView] finalize failed:', err)));
                 break;
@@ -361,58 +356,43 @@ export class HistoryView implements IHistoryPresenter {
                 break;
 
             // ── Claude Code Agent Loop 事件 ───────────────────────────────
-            case 'tool:queued': {
-                const toolNode = {
-                    id: e.payload.toolId,
-                    parentId: e.payload.nodeId,
-                    executorId: e.payload.name,
-                    executorType: 'tool' as const,
-                    name: e.payload.name,
-                    status: 'queued' as const,
-                    startTime: Date.now(),
-                    data: { input: '' },
-                };
-                this.renderer.appendNode(e.payload.nodeId, toolNode, false);
+            case 'tool:queued':
+                // 工具节点由 execution tree（message:appended）创建，此处仅更新状态。
+                this.stream.updateStatus(event.payload.call.toolId, 'queued');
                 break;
-            }
 
             case 'tool:input': {
-                const toolEl = this.renderer.getNode(e.payload.toolId);
+                const toolEl = this.renderer.getNode(event.payload.call.toolId);
                 if (toolEl) {
                     const inputPre = toolEl.querySelector('.llm-ui-node__input pre') as HTMLElement;
                     if (inputPre) {
-                        inputPre.textContent = (inputPre.textContent || '') + e.payload.chunk;
+                        inputPre.textContent = (inputPre.textContent || '') + event.payload.call.delta;
                     }
                 }
                 break;
             }
 
             case 'tool:running':
-                this.stream.updateStatus(e.payload.toolId, 'running');
+                this.stream.updateStatus(event.payload.call.toolId, 'running');
                 break;
 
             case 'tool:success':
-                this.stream.updateStatus(e.payload.toolId, 'success', e.payload.result);
+                this.stream.updateStatus(event.payload.call.toolId, 'success', event.payload.call.result);
                 break;
 
             case 'tool:error':
-                this.stream.updateStatus(e.payload.toolId, 'failed', e.payload.error);
+                this.stream.updateStatus(event.payload.call.toolId, 'failed', event.payload.call.error);
                 break;
 
-            case 'stream:thinking:start':
-            case 'stream:content:start':
             case 'round:start':
             case 'round:end':
                 break;
 
-            case 'stream:thinking:stop':
-                break;
-
             // ── LLM 2.0 canonical events (S7) ─────────────────────────────
             case 'message:appended': {
-                const { sessionGroup, isExecutionRoot, parentId: _parentId } = e.payload;
+                const { sessionGroup, isExecutionRoot, parentId: _parentId } = event.payload;
                 if (!sessionGroup) {
-                    console.warn('[HistoryView] message:appended missing sessionGroup', e.payload);
+                    console.warn('[HistoryView] message:appended missing sessionGroup', event.payload);
                     break;
                 }
                 if (isExecutionRoot) {
@@ -445,7 +425,7 @@ export class HistoryView implements IHistoryPresenter {
             }
 
             case 'message:status': {
-                const sp = e.payload;
+                const sp = event.payload;
                 this.stream.updateStatus(sp.messageId, sp.status, sp.result);
                 break;
             }
@@ -455,11 +435,11 @@ export class HistoryView implements IHistoryPresenter {
                 break;
 
             case 'messages:deleted':
-                this.removeMessages(e.payload.deletedIds, true);
+                this.removeMessages(event.payload.deletedIds, true);
                 break;
 
             case 'message:edited': {
-                const ep = e.payload;
+                const ep = event.payload;
                 const el2 = this.renderer.getSessionElement(ep.messageId);
                 if (el2) {
                     const preview = el2.querySelector('.llm-ui-header-preview');
@@ -471,7 +451,7 @@ export class HistoryView implements IHistoryPresenter {
             }
 
             case 'sibling:switched': {
-                const ssp = e.payload;
+                const ssp = event.payload;
                 const el3 = this.renderer.getSessionElement(ssp.messageId);
                 if (!el3) break;
                 const indicator = el3.querySelector('.llm-ui-branch-indicator');

@@ -2,7 +2,7 @@
 
 import { Command } from './Command';
 import type { ErrorSeverity } from '../utils/errorHandler';
-import type { SessionGroup } from '@itookit/llm-conversation';
+import type { SessionGroup, ExecutionNode } from '@itookit/llm-session';
 
 /**
  * 在 sessions 列表和执行树中查找 session
@@ -19,10 +19,10 @@ function findSession(sessions: SessionGroup[], nodeId: string): SessionGroup | u
         || sessions.find(s => s.role === 'user' && s.persistedNodeId === nodeId);
 }
 
-function findInTree(node: any, targetId: string): boolean {
+function findInTree(node: ExecutionNode | undefined, targetId: string): boolean {
     if (!node) return false;
     if (node.id === targetId) return true;
-    return node.children?.some((c: any) => findInTree(c, targetId)) ?? false;
+    return node.children?.some((c) => findInTree(c, targetId)) ?? false;
 }
 
 /**

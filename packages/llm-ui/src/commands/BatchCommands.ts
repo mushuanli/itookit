@@ -3,7 +3,7 @@
 import { Command } from './Command';
 import { Toast } from '@itookit/ui-common';
 import { extractExecutionOutput } from '../utils/textUtils';
-import type { SessionGroup } from '@itookit/llm-conversation';
+import type { SessionGroup } from '@itookit/llm-session';
 
 export class BatchDeleteCommand extends Command<{ ids: string[] }> {
     protected name = 'Batch Delete';

@@ -10,7 +10,7 @@ import type {
     DagPluginPresentation,
     ICommandBus,
 } from '@itookit/common';
-import type { SessionGroup } from '@itookit/llm-conversation';
+import type { SessionGroup } from '@itookit/llm-session';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { NavDataBuilder } from '../services/NavDataBuilder';
 import type { DOMCache } from '../components/common/DOMCache';

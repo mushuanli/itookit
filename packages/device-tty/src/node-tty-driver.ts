@@ -116,7 +116,7 @@ export class NodeTTYDriver implements ITTYDriver {
 
         const proc = _spawnFn(command, args, {
             cwd:   options.cwd ?? process.cwd(),
-            env:   { ...process.env, ...options.env },
+            env:   { ...safeEnvironment(), ...options.env },
             stdio: ['pipe', 'pipe', 'pipe'],
         });
 
@@ -130,4 +130,14 @@ export class NodeTTYDriver implements ITTYDriver {
 
         return session;
     }
+}
+
+/**
+ * Drop secret-bearing variables from the inherited process env before handing
+ * it to a child shell. TTY sessions run an arbitrary interactive command, so
+ * they must never receive the host's API keys/tokens/passwords by default.
+ */
+export function safeEnvironment(): NodeJS.ProcessEnv {
+    return Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+        !/(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|PRIVATE[_-]?KEY)/i.test(key)));
 }

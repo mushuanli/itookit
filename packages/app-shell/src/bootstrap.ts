@@ -24,8 +24,8 @@ import {
     ChatHarnessStorageResolver,
     createBuiltinDagPluginRegistry,
     chatFileParser,
-} from '@itookit/llm-conversation';
-import type { SessionManager } from '@itookit/llm-conversation';
+} from '@itookit/llm-session';
+import type { SessionManager } from '@itookit/llm-session';
 import { Workbench } from './core/Workbench';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { Harness } from '@itookit/harness';

@@ -1,6 +1,6 @@
 // @file: llm-ui/services/SessionService.ts
 
-import { IChatEngine, SessionSnapshot } from '@itookit/llm-conversation';
+import { IChatEngine, SessionSnapshot } from '@itookit/llm-session';
 import type { ICommandBus } from '@itookit/common';
 import { FSAlreadyExistsError } from '@itookit/stdio';
 import type { ChatInputSettings } from '../domain/ports/IChatInputPresenter';

@@ -49,7 +49,7 @@
 | 包 | 内部依赖 | 外部依赖 |
 |---|---|---|
 | `@itookit/llm-harness` | common, device-llm, device-tty, tools | 无 |
-| `@itookit/llm-runtime` | common, stdio | `yaml` |
+| `@itookit/llm-programs` | common, stdio | `yaml` |
 | `@itookit/app-settings` | common, device-llm, llm-runtime, memory-manager | `js-yaml` |
 
 > **变更**: app-settings 不再依赖 llm-ui（上行依赖已解耦）

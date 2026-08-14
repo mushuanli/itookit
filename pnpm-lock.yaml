@@ -71,12 +71,12 @@ importers:
       '@itookit/harness':
         specifier: workspace:*
         version: link:../../packages/harness
-      '@itookit/llm-conversation':
+      '@itookit/llm-flow':
         specifier: workspace:*
-        version: link:../../packages/llm-conversation
-      '@itookit/llm-runtime':
+        version: link:../../packages/llm-flow
+      '@itookit/llm-programs':
         specifier: workspace:*
-        version: link:../../packages/llm-runtime
+        version: link:../../packages/llm-programs
       '@itookit/stdio':
         specifier: workspace:*
         version: link:../../packages/stdio
@@ -154,9 +154,9 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../../packages/device-llm
-      '@itookit/llm-conversation':
+      '@itookit/llm-session':
         specifier: workspace:*
-        version: link:../../packages/llm-conversation
+        version: link:../../packages/llm-session
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../../packages/llm-ui
@@ -257,9 +257,9 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../../packages/device-llm
-      '@itookit/llm-conversation':
+      '@itookit/llm-session':
         specifier: workspace:*
-        version: link:../../packages/llm-conversation
+        version: link:../../packages/llm-session
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../../packages/llm-ui
@@ -358,9 +358,9 @@ importers:
       '@itookit/harness':
         specifier: workspace:*
         version: link:../harness
-      '@itookit/llm-conversation':
+      '@itookit/llm-session':
         specifier: workspace:*
-        version: link:../llm-conversation
+        version: link:../llm-session
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../llm-ui
@@ -584,7 +584,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  packages/llm-conversation:
+  packages/llm-flow:
     dependencies:
       '@itookit/common':
         specifier: workspace:*
@@ -592,9 +592,74 @@ importers:
       '@itookit/harness':
         specifier: workspace:*
         version: link:../harness
-      '@itookit/llm-runtime':
+      '@itookit/llm-programs':
         specifier: workspace:*
-        version: link:../llm-runtime
+        version: link:../llm-programs
+    devDependencies:
+      '@itookit/stdio':
+        specifier: workspace:*
+        version: link:../stdio
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.43
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
+
+  packages/llm-programs:
+    dependencies:
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      '@itookit/harness':
+        specifier: workspace:*
+        version: link:../harness
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.43
+      '@vitest/coverage-v8':
+        specifier: ^1.6.1
+        version: 1.6.1(vitest@1.6.1(@types/node@20.19.43)(jsdom@27.2.0))
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.4.21
+        version: 5.4.21(@types/node@20.19.43)
+      vite-plugin-checker:
+        specifier: ^0.11.0
+        version: 0.11.0(eslint@9.39.2(jiti@1.21.7))(optionator@0.9.4)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.43))
+      vite-plugin-dts:
+        specifier: ^3.9.1
+        version: 3.9.1(@types/node@20.19.43)(rollup@4.62.2)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.43))
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
+
+  packages/llm-session:
+    dependencies:
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      '@itookit/harness':
+        specifier: workspace:*
+        version: link:../harness
+      '@itookit/llm-flow':
+        specifier: workspace:*
+        version: link:../llm-flow
+      '@itookit/llm-programs':
+        specifier: workspace:*
+        version: link:../llm-programs
       '@itookit/stdio':
         specifier: workspace:*
         version: link:../stdio
@@ -604,7 +669,7 @@ importers:
     devDependencies:
       '@types/node':
         specifier: ^20.19.25
-        version: 20.19.25
+        version: 20.19.43
       rimraf:
         specifier: ^5.0.5
         version: 5.0.10
@@ -613,41 +678,41 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^1.6.1
-        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
+        version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
 
-  packages/llm-runtime:
+  packages/llm-settings-ui:
     dependencies:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/harness':
+      '@itookit/device-llm':
         specifier: workspace:*
-        version: link:../harness
+        version: link:../device-llm
+      '@itookit/stdio':
+        specifier: workspace:*
+        version: link:../stdio
+      '@itookit/ui-common':
+        specifier: workspace:*
+        version: link:../ui-common
+      js-yaml:
+        specifier: ^4.1.1
+        version: 4.3.0
     devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
       '@types/node':
         specifier: ^20.19.25
-        version: 20.19.25
-      '@vitest/coverage-v8':
-        specifier: ^1.6.1
-        version: 1.6.1(vitest@1.6.1(@types/node@20.19.25)(jsdom@27.2.0))
+        version: 20.19.43
       rimraf:
         specifier: ^5.0.5
         version: 5.0.10
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
-      vite:
-        specifier: ^5.4.21
-        version: 5.4.21(@types/node@20.19.25)
-      vite-plugin-checker:
-        specifier: ^0.11.0
-        version: 0.11.0(eslint@9.39.2(jiti@1.21.7))(optionator@0.9.4)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.25))
-      vite-plugin-dts:
-        specifier: ^3.9.1
-        version: 3.9.1(@types/node@20.19.25)(rollup@4.62.2)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.25))
       vitest:
         specifier: ^1.6.1
-        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
+        version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
 
   packages/llm-ui:
     dependencies:
@@ -660,9 +725,12 @@ importers:
       '@itookit/harness':
         specifier: workspace:*
         version: link:../harness
-      '@itookit/llm-conversation':
+      '@itookit/llm-session':
         specifier: workspace:*
-        version: link:../llm-conversation
+        version: link:../llm-session
+      '@itookit/llm-settings-ui':
+        specifier: workspace:*
+        version: link:../llm-settings-ui
       '@itookit/stdio':
         specifier: workspace:*
         version: link:../stdio
@@ -6027,6 +6095,25 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@vitest/coverage-v8@1.6.1(vitest@1.6.1(@types/node@20.19.43)(jsdom@27.2.0))':
+    dependencies:
+      '@ampproject/remapping': 2.3.0
+      '@bcoe/v8-coverage': 0.2.3
+      debug: 4.4.3
+      istanbul-lib-coverage: 3.2.2
+      istanbul-lib-report: 3.0.1
+      istanbul-lib-source-maps: 5.0.6
+      istanbul-reports: 3.2.0
+      magic-string: 0.30.21
+      magicast: 0.3.5
+      picocolors: 1.1.1
+      std-env: 3.10.0
+      strip-literal: 2.1.1
+      test-exclude: 6.0.0
+      vitest: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
+    transitivePeerDependencies:
+      - supports-color
+
   '@vitest/expect@1.6.1':
     dependencies:
       '@vitest/spy': 1.6.1
@@ -7445,7 +7532,6 @@ snapshots:
   js-yaml@4.3.0:
     dependencies:
       argparse: 2.0.1
-    optional: true
 
   js2xmlparser@4.0.2:
     dependencies:
@@ -8609,6 +8695,24 @@ snapshots:
       - supports-color
       - terser
 
+  vite-node@1.6.1(@types/node@20.19.43):
+    dependencies:
+      cac: 6.7.14
+      debug: 4.4.3
+      pathe: 1.1.2
+      picocolors: 1.1.1
+      vite: 5.4.21(@types/node@20.19.43)
+    transitivePeerDependencies:
+      - '@types/node'
+      - less
+      - lightningcss
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - supports-color
+      - terser
+
   vite-node@3.2.4(@types/node@20.19.25)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.2):
     dependencies:
       cac: 6.7.14
@@ -8682,6 +8786,22 @@ snapshots:
       tiny-invariant: 1.3.3
       tinyglobby: 0.2.15
       vite: 5.4.21(@types/node@20.19.25)
+      vscode-uri: 3.1.0
+    optionalDependencies:
+      eslint: 9.39.2(jiti@1.21.7)
+      optionator: 0.9.4
+      typescript: 5.9.3
+
+  vite-plugin-checker@0.11.0(eslint@9.39.2(jiti@1.21.7))(optionator@0.9.4)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.43)):
+    dependencies:
+      '@babel/code-frame': 7.27.1
+      chokidar: 4.0.3
+      npm-run-path: 6.0.0
+      picocolors: 1.1.1
+      picomatch: 4.0.5
+      tiny-invariant: 1.3.3
+      tinyglobby: 0.2.15
+      vite: 5.4.21(@types/node@20.19.43)
       vscode-uri: 3.1.0
     optionalDependencies:
       eslint: 9.39.2(jiti@1.21.7)
@@ -8809,6 +8929,41 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 20.19.25
+      jsdom: 27.2.0
+    transitivePeerDependencies:
+      - less
+      - lightningcss
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - supports-color
+      - terser
+
+  vitest@1.6.1(@types/node@20.19.43)(jsdom@27.2.0):
+    dependencies:
+      '@vitest/expect': 1.6.1
+      '@vitest/runner': 1.6.1
+      '@vitest/snapshot': 1.6.1
+      '@vitest/spy': 1.6.1
+      '@vitest/utils': 1.6.1
+      acorn-walk: 8.3.4
+      chai: 4.5.0
+      debug: 4.4.3
+      execa: 8.0.1
+      local-pkg: 0.5.1
+      magic-string: 0.30.21
+      pathe: 1.1.2
+      picocolors: 1.1.1
+      std-env: 3.10.0
+      strip-literal: 2.1.1
+      tinybench: 2.9.0
+      tinypool: 0.8.4
+      vite: 5.4.21(@types/node@20.19.43)
+      vite-node: 1.6.1(@types/node@20.19.43)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@types/node': 20.19.43
       jsdom: 27.2.0
     transitivePeerDependencies:
       - less

@@ -57,15 +57,3 @@ export function resolveCapability<T>(
 export function failedSkillLoad(skillId: string, error: string): SkillLoadResult {
     return { skillId, success: false, toolIds: [], error };
 }
-
-export function assertCapabilityGrant(
-    context: EffectExecutionContext,
-    handleId: string,
-    resourceKind: string,
-): void {
-    const grant = context.grants.find(item =>
-        item.handleId === handleId
-        && item.right === 'execute'
-        && item.resource.kind === resourceKind);
-    if (!grant) throw new Error(`${resourceKind.toUpperCase()} execute grant is required: ${handleId}`);
-}

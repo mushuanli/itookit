@@ -5,7 +5,7 @@ import type { ThemeMode } from './ThemeService';
 import type { FileTypeDefinition, CustomEditorResolver, VFSUIOptions } from '@itookit/vfs-ui';
 import type { CoreutilsRuntime, CoreutilsRuntimeOptions } from '@itookit/coreutils';
 import type { Harness } from '@itookit/harness';
-import type { DagPluginRegistry } from '@itookit/llm-conversation';
+import type { DagPluginRegistry } from '@itookit/llm-session';
 
 export interface AppHarnessRuntime extends CoreutilsRuntime {
     kernel: Harness;

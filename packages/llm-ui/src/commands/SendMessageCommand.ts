@@ -4,7 +4,7 @@ import { Command } from './Command';
 import { Toast } from '@itookit/ui-common';
 import { ErrorHandler } from '../utils/errorHandler';
 import type { ChatOverrides } from '../domain/types';
-import type { SessionGroup, SessionOrigin, HistoryPolicy } from '@itookit/llm-conversation';
+import type { SessionGroup, SessionOrigin, HistoryPolicy } from '@itookit/llm-session';
 import { createAgentSendIntent } from '@itookit/common';
 
 export interface SendMessageParams {

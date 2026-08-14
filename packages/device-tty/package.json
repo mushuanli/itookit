@@ -47,7 +47,8 @@
     "author": "lizlok@gmail.com",
     "license": "MIT",
     "dependencies": {
-        "@itookit/common": "workspace:*"
+        "@itookit/common": "workspace:*",
+        "node-pty": "^1.1.0"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",

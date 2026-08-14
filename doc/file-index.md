@@ -1,147 +1,125 @@
 # 文件索引 — 场景 → 关键文件
 
-## LLM Provider
+## Harness 执行内核（@itookit/harness）
 
 | 场景 | 文件 |
 |---|---|
-| 新增 Provider 定义 | `device-llm/src/constants/providers.ts` |
-| 注册 Provider 类 | `device-llm/src/providers/registry.ts` |
-| 新增 Provider 类 | `device-llm/src/providers/<name>.ts` |
-| LLM 调用核心 | `device-llm/src/core/driver.ts` |
-| Provider 基类 | `device-llm/src/providers/base.ts` |
-| Provider Settings UI | `llm-ui/src/editors/ProviderSettingsEditor.ts` |
-| Connection Settings UI | `llm-ui/src/editors/ConnectionSettingsEditor.ts` |
-| Agent 配置 UI | `llm-ui/src/editors/AgentConfigEditor.ts` |
-| Attachment 处理 | `device-llm/src/utils/attachment.ts` |
+| 内核实现（drain/submit/dispatchEffect/recover） | `harness/src/application/harness.ts` |
+| 领域类型（DurableTaskProgram/EffectAdapter/KernelAction/WaitSpec/TaskSpec） | `harness/src/domain/types.ts` |
+| 能力绑定（bindCapabilities） | `harness/src/application/capabilities.ts` |
+| effect 工具（assertEffectGrant/interactionApproved/normalizeEffect） | `harness/src/application/effect-utils.ts` |
+| 决策/durability/actions 工具 | `harness/src/application/{decision,durability,actions}.ts` |
+| seqfile 存储（session/task/effect/resource/budget） | `harness/src/infrastructure/seqfile/store.ts`、`store-helpers.ts` |
+| 注册表（Program/Effect/Storage/Workspace） | `harness/src/ports/registry.ts` |
 
-## Chat Input
+## LLM 任务单元（@itookit/llm-programs）
 
 | 场景 | 文件 |
 |---|---|
-| ChatInput 主组件 | `llm-ui/src/components/input/ChatInputView.ts` |
-| 模板 | `llm-ui/src/components/templates/ChatInputTemplates.ts` |
-| 样式 | `llm-ui/src/styles/llm-input.css` |
-| 附件管理 | `llm-ui/src/components/input/AttachmentManager.ts` |
-| Slash 命令弹窗 | `llm-ui/src/components/input/plugins/SlashCommandPlugin.ts` |
-| @提及弹窗 | `llm-ui/src/components/input/plugins/MentionPlugin.ts` |
-| Skill 命令解析 | `llm-ui/src/components/input/SkillInvocationParser.ts` |
-| Token 用量显示 | `llm-ui/src/components/input/plugins/TokenMeterPlugin.ts` |
-| 插件基类 | `llm-ui/src/components/input/plugins/InputPlugin.ts` |
-| Popup 面板 | `llm-ui/src/components/input/plugins/PopupPanel.ts` |
+| Agent 状态机（llm.agent） | `llm-programs/src/durable/agent-program.ts` |
+| Chat 状态机（llm.chat） | `llm-programs/src/durable/chat-program.ts` |
+| Plan 状态机（llm.plan） | `llm-programs/src/durable/plan-program.ts` |
+| program 辅助（llmEffect/extractNodeOutput/capabilitySignal） | `llm-programs/src/durable/program-helpers.ts` |
+| 依赖收集（collectDependency/dependenciesReady/dependencyWait） | `llm-programs/src/durable/dependency-collector.ts` |
+| TaskSpec 装配（buildLlmTaskInput） | `llm-programs/src/durable/task-spec.ts` |
+| 输入/输出类型（DurableAgentInput 等） | `llm-programs/src/durable/types.ts` |
+| 上下文装配（ContextAssembler） | `llm-programs/src/core/context-assembler.ts` |
+| provider 消息适配 | `llm-programs/src/core/provider-message-adapter.ts` |
 
-## Skill
-
-| 场景 | 文件 |
-|---|---|
-| SkillDefinition 接口 | `common/src/interfaces/skills/skill-types.ts` |
-| ISkillService 接口 | `common/src/interfaces/skills/skill-service.ts` |
-| SkillDeviceDriver | `coreutils/src/skill/skill-device-driver.ts` |
-| System Prompt 构建 | `llm-harness/src/executor/context-manager.ts` |
-| FS Skill 加载 | `coreutils/src/skill/fs-skill-loader.ts` |
-| LLMSkill 持久化 | `device-llm/src/device/llm-device-driver.ts` |
-| Skill 设置 UI | `llm-ui/src/editors/SkillSettingsEditor.ts` |
-| 同步桥接 | `app-shell/src/bootstrap.ts::syncSkillsToHarness()` |
-
-## Harness / Agent Loop
+## DAG 编排（@itookit/llm-flow）
 
 | 场景 | 文件 |
 |---|---|
-| createHarness 工厂 | `llm-harness/src/factory.ts` |
-| AgentLoopExecutor | `llm-harness/src/executor/agent-loop-executor.ts` |
-| HarnessLoopExecutor (ILoop) | `llm-harness/src/executor/harness-loop-executor.ts` |
-| HarnessAgentTaskExecutor | `llm-harness/src/executor/agent-task-executor.ts` |
-| Harness Middleware (6 个) | `llm-harness/src/executor/harness-middleware.ts` |
-| ContextManager | `llm-harness/src/executor/context-manager.ts` |
-| SubAgentRouter | `llm-harness/src/executor/sub-agent-router.ts` |
-| SessionActor 事件桥接 | `llm-runtime/src/core/session-actor.ts` |
-| HITL Queue | `llm-harness/src/services/hitl-queue.ts` |
-| Skill 内置工具 | `coreutils/src/tool/load-skill.ts` |
+| 动态图调度（DurableFlowExecutor） | `llm-flow/src/flow/executor.ts` |
+| 内置插件（transform/reduce/route/spawn/agent/human） | `llm-flow/src/flow/builtin-plugins.ts` |
+| Flow 程序（value/human/aggregate） | `llm-flow/src/flow/programs.ts` |
+| 纯操作（transform/reduce/route/spawn/表达式求值） | `llm-flow/src/flow/operations.ts` |
+| FlowDraft → DagRunSpec | `llm-flow/src/flow/to-dag.ts` |
+| Flow 校验 / 环检测（findCycles） | `llm-flow/src/flow/validation.ts`、`graph.ts` |
+| 插件注册表 | `llm-flow/src/flow/plugin-registry.ts` |
+| DAG 控制面命令（DagCommandService） | `llm-flow/src/flow/commands.ts` |
+| Flow 定义持久化（FlowDefinitionStore/FlowAssetStore） | `llm-flow/src/flow-definition-store.ts` |
 
-## Session / LLM Engine
-
-| 场景 | 文件 |
-|---|---|
-| SessionManager | `llm-runtime/src/session/` |
-| TaskRunner | `llm-runtime/src/session/task-runner.ts` |
-| AgentResolver | `llm-runtime/src/session/agent-resolver.ts` |
-| ChatFile 持久化 | `llm-runtime/src/persistence/chat-engine.ts` |
-| RoundLog (ILog) | `llm-runtime/src/persistence/round-log.ts` |
-| Mission 编排 | `llm-runtime/src/mission/` |
-| Session Graph | `llm-runtime/src/session-graph/` |
-
-## TaskGraph / Plugin
+## 会话语义 + 持久化（@itookit/llm-session）
 
 | 场景 | 文件 |
 |---|---|
-| TaskGraphReconciler | `llm-runtime/src/task-graph/reconciler.ts` |
-| DependencyScheduler | `llm-runtime/src/task-graph/dependency-scheduler.ts` |
-| Builtin Executors | `llm-runtime/src/task-graph/builtins.ts` |
-| Task Catalog | `llm-runtime/src/task-graph/catalog.ts` |
-| ContextAssembler | `llm-runtime/src/core/context-assembler.ts` |
-| ExecutorRegistry | `llm-runtime/src/core/executor-registry.ts` |
-| Loop Driver (drive/resume) | `llm-runtime/src/core/loop-driver.ts` |
-| Middleware Pipeline | `llm-runtime/src/core/middleware-pipeline.ts` |
-| CommandBus | `llm-runtime/src/core/command-bus.ts` |
-| ExtensionRegistry | `llm-runtime/src/core/extension-registry.ts` |
-| Session/Auth/History Plugins | `llm-runtime/src/plugins/` |
-| TaskGraph Workbench UI | `llm-ui/src/components/TaskGraphWorkbench.ts` |
-| TaskGraph Draft Controller | `llm-ui/src/components/task-graph/DraftController.ts` |
-| TaskGraph Canvas | `llm-ui/src/components/task-graph/TaskGraphCanvas.ts` |
+| SessionManager / SessionRegistry | `llm-session/src/session/session-manager.ts`、`session-registry.ts` |
+| SessionState（消息/分支状态机） | `llm-session/src/session/session-state.ts` |
+| RoundOperations / BranchService | `llm-session/src/session/round-operations.ts`、`branch-service.ts` |
+| ConversationRunCoordinator（Direct/Flow 分流） | `llm-session/src/session/conversation-run-coordinator.ts` |
+| SessionRunCoordinator（DAG 运行协调） | `llm-session/src/session/session-run-coordinator.ts` |
+| AgentResolver（connection/model 解析） | `llm-session/src/session/agent-resolver.ts` |
+| SessionEventBus | `llm-session/src/session/session-event-bus.ts` |
+| ChatEngine（IChatEngine 实现） | `llm-session/src/persistence/chat-engine.ts` |
+| RoundLog（round 增量日志 + 投影） | `llm-session/src/persistence/round-log.ts` |
+| RoundGraphService | `llm-session/src/persistence/round-graph-service.ts` |
+| IChatEngine / ConversationManifest / RoundManifest 类型 | `llm-session/src/persistence/types.ts`、`round-types.ts` |
+| 装配入口（initializeConversationSystem） | `llm-session/src/index.ts` |
+| 控制面（CommandBus/ExtensionRegistry/插件） | `llm-session/src/core/`、`plugins/` |
+| PromptHistoryService / VFSAgentService | `llm-session/src/services/` |
 
-## VFS
+## 能力实现（@itookit/coreutils）
 
 | 场景 | 文件 |
 |---|---|
-| IStorageBackend 接口 | `common/src/interfaces/fs/storage/backend.ts` |
-| createVFS 工厂 | `stdio/src/factory.ts` |
-| VFSEngine | `stdio/src/engine/` |
-| VFSManager | `stdio/src/services/` |
-| ModuleFS | `stdio/src/file-io/` |
-| IndexedDB 后端 | `vfsdriver-indexeddb/src/idb-backend.ts` |
+| 运行时装配（createCoreutilsRuntime） | `coreutils/src/runtime/create-coreutils-runtime.ts` |
+| LLM effect（llm.chat + token 预算扣减） | `coreutils/src/effects/llm-chat-effect.ts` |
+| 工具/技能/bash/tty effect | `coreutils/src/effects/{tool-call,skill-load,bash,tty}-effect.ts` |
+| ILLMService 适配（→ LLMDeviceDriver） | `coreutils/src/llm/llm-service-adapter.ts` |
+| Skill 设备驱动 / 技能加载 | `coreutils/src/skill/` |
+| 工具定义（human-input/shell-session/tty-write） | `coreutils/src/tool/`、`coreutils/src/tty/` |
+| Harness 插件注册 | `coreutils/src/plugin/coreutils-harness-plugin.ts` |
+
+## LLM 设备（@itookit/device-llm）
+
+| 场景 | 文件 |
+|---|---|
+| LLMDeviceDriver（IDeviceDriver + LLM_IOCTL） | `device-llm/src/device/llm-device-driver.ts` |
+| Provider 基类 + OpenAI/Responses/Anthropic/Gemini | `device-llm/src/providers/` |
+| MCP 客户端 | `device-llm/src/skills/mcp-client.ts` |
+| LLM 错误族 | `device-llm/src/errors.ts` |
+
+## VFS（@itookit/stdio）
+
+| 场景 | 文件 |
+|---|---|
+| 协议 barrel（接口/类型/常量） | `stdio/src/protocol.ts`、`interfaces/` |
+| createVFS 工厂 | `stdio/src/impl/factory.ts` |
+| VFSEngine / VFSManager / ModuleFS | `stdio/src/impl/engine/`、`impl/services/` |
+| 通用 IO（IIOStream + pipe） | `stdio/src/interfaces/`、`impl/file-io/` |
+| 事件总线（EventBus/FSEventBus） | `stdio/src/eventbus/`、`impl/event/` |
+| IndexedDB 后端 | `vfsdriver-indexeddb/src/` |
 | LocalFS 后端 | `vfsdriver-localfs/src/localfs-backend.ts` |
-| BaseModuleService | `stdio/src/adapter-session/BaseModuleService.ts` |
 
-## VFS UI
-
-| 场景 | 文件 |
-|---|---|
-| VFSUIShell | `vfs-ui/src/shell/` |
-| VFSService | `vfs-ui/src/services/VFSService.ts` |
-| 文件树 | `vfs-ui/src/ui/` |
-| 编辑器集成 | `vfs-ui/src/integrations/` |
-
-## App Shell / Boot
+## CLI（@itookit/cli）
 
 | 场景 | 文件 |
 |---|---|
-| initApp() | `app-shell/src/bootstrap.ts` |
-| Workspace 配置 | `apps/web-app/src/config/modules.ts` |
-| Workspace Strategy | `app-shell/src/strategies/` |
-| MemoryManager | `memory-manager/src/core/MemoryManager.ts` |
+| YAML 工作流加载/校验/编译 | `cli/src/config.ts` |
+| 运行时装配（harness+coreutils+flow） | `cli/src/runtime.ts` |
+| 命令入口（run/events/doctor） | `cli/src/commands.ts` |
+| 运行结果落盘（RunStore） | `cli/src/run-store.ts` |
+| 工作区授权 | `cli/src/workspace.ts` |
 
-## i18n / 图标
-
-| 场景 | 文件 |
-|---|---|
-| 中文 (source of truth) | `common/src/i18n/zh-CN.ts` |
-| 英文 | `common/src/i18n/en.ts` |
-| t() 运行时 | `common/src/i18n/index.ts` |
-| 图标常量 | `common/src/i18n/icons.ts` |
-
-## CSS / 主题
+## UI
 
 | 场景 | 文件 |
 |---|---|
-| 设计令牌 (变量) | `llm-ui/src/styles/variables.css` |
-| 基础重置 | `llm-ui/src/styles/base.css` |
-| 输入框 | `llm-ui/src/styles/llm-input.css` |
-| 聊天气泡 | `llm-ui/src/styles/chat-nodes.css` |
-| 工作区布局 | `llm-ui/src/styles/llm-workspace.css` |
+| ChatInput（发送/插件/i18n） | `llm-ui/src/components/input/` |
+| 流式历史 / Session 渲染 | `llm-ui/src/components/history/` |
+| 会话事件消费 | `llm-ui/src/shell/SessionEventHandler.ts` |
+| DagWorkbench（流程可视化） | `llm-ui/src/components/DagWorkbench.ts` |
+| VFSUIShell（文件树） | `vfs-ui/src/shell/` |
+| MDX 编辑器 | `packages/mdx/src/` |
+| 设置（Provider/Connection/Agent） | `llm-ui/src/editors/` |
 
-## 测试
+## 装配 / 入口
 
 | 场景 | 文件 |
 |---|---|
-| app-shell 测试配置 | `app-shell/vitest.config.ts` |
-| stdio 测试 | `stdio/tests/` |
-| vfs-ui 测试 | `vfs-ui/tests/` |
+| initApp 装配 | `app-shell/src/bootstrap.ts` |
+| App 类型（AppHarnessRuntime 等） | `app-shell/src/types.ts` |
+| 特权命令服务（plan 等） | `app-shell/src/harness/privileged-command-service.ts` |
+| web-app 入口 | `apps/web-app/src/` |
+| 工作区策略 | `app-shell/src/strategies/` |

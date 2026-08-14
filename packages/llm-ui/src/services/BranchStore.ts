@@ -8,8 +8,8 @@ import type { ErrorHandler } from '../utils/errorHandler';
 /**
  * Branch 数据的唯一真实来源
  *
- * ✅ 层级：Service（数据管理，不涉及 UI）
- * ✅ 性能：合并并发请求，脏检查避免无意义通知
+ * 层级：Service（数据管理，不涉及 UI）
+ * 性能：合并并发请求，脏检查避免无意义通知
  */
 export class BranchStore implements IBranchStore {
     private branches: BranchItem[] = [

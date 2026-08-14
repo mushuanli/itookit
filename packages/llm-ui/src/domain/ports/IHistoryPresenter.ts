@@ -1,6 +1,6 @@
 // @file: llm-ui/domain/ports/IHistoryPresenter.ts
 
-import type { SessionGroup, SessionEvent } from '@itookit/llm-conversation';
+import type { SessionGroup, SessionEventEnvelope } from '@itookit/llm-session';
 import type { ICollapseManager } from './ICollapseManager';
 import type { IStreamingController } from './IStreamingController';
 
@@ -34,7 +34,7 @@ export interface IHistoryPresenter extends ICollapseManager, IStreamingControlle
     getUnfoldedNavigationTarget(direction: 'prev' | 'next'): string | null | '__end__' | '__start__';
 
     // === 事件处理 ===
-    processEvent(event: SessionEvent): void;
+    processEvent(event: SessionEventEnvelope): void;
 
     // === 生命周期 ===
     destroy(): void;

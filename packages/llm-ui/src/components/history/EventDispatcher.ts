@@ -87,7 +87,6 @@ export class EventDispatcher {
         m.set('next-sibling', (ctx) => this.fireNodeAction('next-sibling', ctx.sessionId));
 
         m.set('create-branch', (ctx) => {
-            console.debug('[EventDispatcher] create-branch', { sessionId: ctx.sessionId, nodeId: ctx.nodeId, hasBus: !!this.bus });
             this.bus?.emit('branch:create', {
                 sourceNodeId: ctx.sessionId || ctx.nodeId,
             });
@@ -127,7 +126,7 @@ export class EventDispatcher {
         this.events.add(this.container, 'click', ((e: MouseEvent) => {
             const target = e.target as HTMLElement;
 
-            // ✅ 优先处理 agent 图标点击（导航到 Agent 编辑器）
+            // 优先处理 agent 图标点击（导航到 Agent 编辑器）
             const agentIcon = target.closest('.llm-ui-node__icon--clickable') as HTMLElement;
             if (agentIcon) {
                 const agentId = agentIcon.dataset.agentId;

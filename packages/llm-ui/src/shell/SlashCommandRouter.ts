@@ -11,7 +11,7 @@ import type { IEditorEventBus } from '../domain/events'
 import type { ICommandBus
 } from '@itookit/common';
 import { Toast } from '@itookit/ui-common';
-import type { SessionGroup } from '@itookit/llm-conversation';
+import type { SessionGroup } from '@itookit/llm-session';
 import type { IAgentConfigService } from '@itookit/common';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { BranchService } from '../services/BranchService';
@@ -20,7 +20,7 @@ import type { Command } from '../commands/Command';
 import type { SendMessageCommand } from '../commands/SendMessageCommand';
 import type { SwitchBranchByOffsetCommand } from '../commands/BranchCommands';
 import type { EditorHostContext } from '@itookit/ui-common';
-import type { IChatEngine } from '@itookit/llm-conversation';
+import type { IChatEngine } from '@itookit/llm-session';
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
 import { getAgentDisplayName, sanitizeFileName } from './AgentProvider';
 

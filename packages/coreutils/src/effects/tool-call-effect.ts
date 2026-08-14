@@ -1,7 +1,7 @@
+import { assertEffectGrant } from '@itookit/harness';
 import type { IToolService, ToolInvokeResult } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/harness';
 import {
-    assertCapabilityGrant,
     resolveCapability,
     type CapabilitySource,
 } from '../ports/capabilities';
@@ -21,7 +21,7 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
     constructor(private readonly service: CapabilitySource<IToolService>) {}
 
     async execute(request: ToolCallEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
-        assertCapabilityGrant(context, request.resourceHandleId, 'tool');
+        assertEffectGrant(context, request.resourceHandleId, 'tool');
         const service = await resolveCapability(this.service, context);
         return requireToolSuccess(await service.invoke({ ...request, signal: context.abortSignal }));
     }

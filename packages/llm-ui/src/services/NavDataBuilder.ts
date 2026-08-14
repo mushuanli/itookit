@@ -1,6 +1,6 @@
 // @file: llm-ui/services/NavDataBuilder.ts
 
-import { SessionGroup } from '@itookit/llm-conversation';
+import { SessionGroup, type BranchTreeNode } from '@itookit/llm-session';
 import type { ICommandBus } from '@itookit/common';
 import { ChatNavItem, NavPanelData } from '../domain/ports/INavigationPresenter';
 import { BranchItem, CollapseStateMap } from '../domain/types';
@@ -24,7 +24,7 @@ export class NavDataBuilder {
         let items: ChatNavItem[];
 
         try {
-            const branchTree = await this.commands.execute<any>('vcs.branch.tree');
+            const branchTree = await this.commands.execute<BranchTreeNode>('vcs.branch.tree');
             items = this.buildFromTree(sessions, collapseStates, branchTree);
         } catch (e) {
             console.warn('[NavDataBuilder] Branch tree unavailable, using flat list');
@@ -48,10 +48,10 @@ export class NavDataBuilder {
     private buildFromTree(
         sessions: SessionGroup[],
         collapseStates: CollapseStateMap,
-        branchTree: any
+        branchTree: BranchTreeNode
     ): ChatNavItem[] {
-        const nodeMap = new Map<string, any>();
-        const walk = (node: any) => {
+        const nodeMap = new Map<string, BranchTreeNode>();
+        const walk = (node: BranchTreeNode) => {
             nodeMap.set(node.id, node);
             node.children?.forEach(walk);
         };
@@ -105,10 +105,10 @@ export class NavDataBuilder {
         }));
     }
 
-    private extractChildBranches(treeNode: any): ChatNavItem['childBranches'] {
+    private extractChildBranches(treeNode: BranchTreeNode | undefined): ChatNavItem['childBranches'] {
         if (!treeNode?.children || treeNode.children.length <= 1) return undefined;
 
-        const branchMap = new Map<string, any>();
+        const branchMap = new Map<string, { name: string; headNodeId: string; isCurrent: boolean }>();
         for (const child of treeNode.children) {
             const branchName = child.memberOfBranches?.[0];
             if (branchName && !branchMap.has(branchName)) {

@@ -14,10 +14,10 @@
  * - 支持技能/工具系统
  * 
  * 不包含：
- * - 执行逻辑 (→ @itookit/llm-runtime)
- * - 会话管理 (→ @itookit/llm-conversation)
- * - 持久化 (→ @itookit/llm-conversation)
- * - Agent 定义 (→ @itookit/llm-conversation)
+ * - 执行逻辑 (→ @itookit/llm-programs)
+ * - 会话管理 (→ @itookit/llm-session)
+ * - 持久化 (→ @itookit/llm-session)
+ * - Agent 定义 (→ @itookit/llm-session)
  */
 
 // ============================================

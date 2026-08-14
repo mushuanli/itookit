@@ -21,7 +21,7 @@ import type { IModuleFS } from '@itookit/stdio';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { FakeSidecarDb } from './fake-sidecar';
-import { ChatEngine } from '@itookit/llm-conversation';
+import { ChatEngine } from '@itookit/llm-session';
 import { FS_MODULE_CHAT } from '@itookit/stdio';
 
 // ── Temp dir helpers ──────────────────────────────────────────────────────────

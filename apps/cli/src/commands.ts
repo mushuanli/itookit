@@ -378,6 +378,14 @@ async function finishRun(
         workflow.config.result.task,
         workflow.config.result.output,
     );
+    // result 任务失败或无输出（例如被 on_failure 容忍的失败仍指向该任务）→ run 失败。
+    if (selected === undefined || selected === null) {
+        manifest.status = 'failed';
+        manifest.error = `Result task ${workflow.config.result.task} produced no output`;
+        await store.save(manifest);
+        printError(options, manifest.error);
+        return 1;
+    }
     manifest.resultPath = await store.writeResult(manifest.id, selected);
     manifest.status = 'succeeded';
     await store.save(manifest);

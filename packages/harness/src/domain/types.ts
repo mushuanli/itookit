@@ -257,6 +257,12 @@ export interface EffectExecutionContext {
      * consumers (e.g. streaming LLM chunks to the UI).
      */
     emit?: (event: { type: string; payload?: unknown }) => Promise<void>;
+    /**
+     * Charge a resource budget for work performed by this effect. Injected by
+     * the kernel; effect adapters call it after a successful side effect (e.g.
+     * LLM token usage). Throws when the budget is exceeded.
+     */
+    chargeBudget?: (handleId: string, dimension: string, amount: number) => Promise<BudgetAccount[]>;
 }
 
 export interface EffectSessionState {
@@ -396,29 +402,53 @@ export interface RecoveryReport {
     rebuiltIndexes: number;
 }
 
-export interface SessionHandle {
-    readonly id: SessionId;
+/** Session 的 Task 生命周期面（提交/信号/交互/事件）。 */
+export interface SessionTaskApi {
     submit<I, O = unknown>(spec: TaskSpec<I>): Promise<TaskHandle<O>>;
     signal(taskId: TaskId, signal: TaskSignal): Promise<void>;
     respond<T extends JsonValue>(taskId: TaskId, response: InteractionResponse<T>): Promise<void>;
     events(options?: { after?: number }): AsyncIterable<EventEnvelope>;
+}
+
+/** Session 内共享状态面。 */
+export interface SessionSharedStateApi {
     getShared<T extends JsonValue = JsonValue>(key: string): Promise<SharedStateEntry<T> | undefined>;
     setShared<T extends JsonValue>(key: string, value: T, options?: SharedStateWriteOptions): Promise<SharedStateEntry<T>>;
     deleteShared(key: string, options?: SharedStateWriteOptions): Promise<boolean>;
     listShared(prefix?: string): Promise<SharedStateEntry[]>;
     sharedHistory<T extends JsonValue = JsonValue>(key: string): Promise<SharedStateRevision<T>[]>;
-    send<T extends JsonValue>(targetSessionId: SessionId, topic: string, payload: T): Promise<CrossSessionMessage<T>>;
+}
+
+/** Session 间消息面（outbox/inbox）。 */
+export interface SessionMessageApi {
+    sendToSession<T extends JsonValue>(targetSessionId: SessionId, topic: string, payload: T): Promise<CrossSessionMessage<T>>;
     inbox(options?: { after?: number }): Promise<CrossSessionMessage[]>;
+}
+
+/** Session 的 Context 分支/提交面。 */
+export interface SessionContextApi {
     commitContext<T extends JsonValue>(delta: T, options?: ContextCommitOptions): Promise<ContextCommit<T>>;
     getContextCommit<T extends JsonValue = JsonValue>(id: ContextCommitId): Promise<ContextCommit<T> | undefined>;
     getContextBranch(name?: string): Promise<ContextBranch>;
     contextHistory(head?: ContextCommitId): Promise<ContextCommit[]>;
+}
+
+/** Session 的资源/权限面。 */
+export interface SessionResourceApi {
     createResource(spec: ResourceSpec): Promise<ResourceGrant>;
     grantResource(parentHandleId: HandleId, holderTaskId: TaskId, rights: ResourceRight[]): Promise<ResourceHandle>;
     revokeResource(handleId: HandleId): Promise<number>;
     authorizeResource(handleId: HandleId, right: ResourceRight, holderTaskId?: TaskId): Promise<ResourceRecord>;
+}
+
+/** Session 的预算面。 */
+export interface SessionBudgetApi {
     setBudget(handleId: HandleId, dimension: string, hardLimit: number, expectedVersion?: number | null): Promise<BudgetAccount>;
     chargeBudget(handleId: HandleId, dimension: string, amount: number): Promise<BudgetAccount[]>;
+}
+
+/** Session 的工作区快照/合并面。 */
+export interface SessionWorkspaceApi {
     snapshotWorkspace(handleId: HandleId, adapter: ProgramRef): Promise<WorkspaceSnapshot>;
     diffWorkspace(handleId: HandleId, baseSnapshotId: string, targetSnapshotId: string): Promise<WorkspaceDiff>;
     mergeWorkspace(
@@ -427,9 +457,30 @@ export interface SessionHandle {
         leftSnapshotId: string,
         rightSnapshotId: string,
     ): Promise<WorkspaceMergeResult>;
+}
+
+/** Session 生命周期面。 */
+export interface SessionLifecycleApi {
     suspend(): Promise<void>;
     resume(): Promise<void>;
     close(options?: { cancelRunning?: boolean }): Promise<void>;
+}
+
+/**
+ * Session 句柄：按概念域拆分的窄接口组合（ISP）。
+ * 消费者可按需依赖 SessionTaskApi / SessionBudgetApi 等窄接口，
+ * 不必拿到整个 30 方法的宽句柄。
+ */
+export interface SessionHandle extends
+    SessionTaskApi,
+    SessionSharedStateApi,
+    SessionMessageApi,
+    SessionContextApi,
+    SessionResourceApi,
+    SessionBudgetApi,
+    SessionWorkspaceApi,
+    SessionLifecycleApi {
+    readonly id: SessionId;
 }
 
 export interface TaskHandle<O = unknown> {

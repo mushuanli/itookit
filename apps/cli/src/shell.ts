@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import type { ITTYDriver, ITTYSession, ITTYSpawnOptions } from '@itookit/common';
+import { NodeTTYDriver } from '@itookit/device-tty';
 import type { INativeShell, NativeShellResult } from '@itookit/tools';
 import type { CompiledWorkflow, SandboxConfig, WorkspaceGrant } from './types';
 
@@ -53,14 +55,50 @@ export class OciSandboxShell implements INativeShell {
     }
 }
 
+export interface ShellBinding {
+    shell: INativeShell;
+    /** Resolved container engine, present only in OCI mode. */
+    engine?: 'podman' | 'docker';
+}
+
 export async function createShell(
     workflow: CompiledWorkflow,
     grants: () => WorkspaceGrant[],
-): Promise<INativeShell> {
-    if ((workflow.config.sandbox?.mode ?? 'oci') === 'native') return new NodeNativeShell();
+): Promise<ShellBinding> {
+    if ((workflow.config.sandbox?.mode ?? 'oci') === 'native') return { shell: new NodeNativeShell() };
     const doctor = await sandboxDoctor(workflow.config.sandbox?.engine ?? 'auto');
     if (!doctor.available || !doctor.engine) throw new Error(doctor.message);
-    return new OciSandboxShell(doctor.engine, workflow, grants);
+    return { shell: new OciSandboxShell(doctor.engine, workflow, grants), engine: doctor.engine };
+}
+
+/**
+ * Runs persistent interactive TTY sessions inside the OCI sandbox by wrapping
+ * the host podman/docker binary in a long-lived `run -i` process. stdin/stdout
+ * are piped through the same NodeTTYDriver I/O machinery used in native mode,
+ * so the agent's shell_session/tty_write/tty_close tools keep working without
+ * escaping the container.
+ */
+export class OciTtyDriver implements ITTYDriver {
+    readonly supportsPty = false;
+    private readonly delegate = new NodeTTYDriver();
+
+    constructor(
+        private readonly engine: 'podman' | 'docker',
+        private readonly workflow: CompiledWorkflow,
+        private readonly grants: () => WorkspaceGrant[],
+    ) {}
+
+    spawn(command: string, args: string[] = [], options: ITTYSpawnOptions = {}): ITTYSession {
+        const { args: sandbox, image } = sandboxBaseArgs(this.workflow, this.grants(), options.cwd, true, options.env);
+        // The container working directory is expressed via --workdir; the host
+        // podman/docker process itself runs from the host CWD and a clean env.
+        // Agent-provided env is forwarded into the container via --env flags.
+        return this.delegate.spawn(this.engine, [...sandbox, image, command, ...args], {
+            ...options,
+            cwd: undefined,
+            env: undefined,
+        });
+    }
 }
 
 export async function sandboxDoctor(
@@ -74,17 +112,19 @@ export async function sandboxDoctor(
     return { available: false, message: `OCI sandbox unavailable: install ${candidates.join(' or ')}` };
 }
 
-function sandboxArgs(
+export function sandboxBaseArgs(
     workflow: CompiledWorkflow,
     grants: WorkspaceGrant[],
-    shellCommand: string,
-    cwd?: string,
-): string[] {
+    cwd: string | undefined,
+    interactive: boolean,
+    env?: Record<string, string>,
+): { args: string[]; image: string } {
     const sandbox = workflow.config.sandbox ?? {};
     const image = sandbox.image ?? 'mindos-sandbox:v1';
     const writable = workflow.config.tasks.some(task => task.workspace_access === 'write');
     const args = [
-        'run', '--rm', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+        'run', ...(interactive ? ['-i'] : []), '--rm', '--read-only', '--cap-drop=ALL',
+        '--security-opt=no-new-privileges',
         '--network', sandbox.network ?? 'none', '--pids-limit', String(sandbox.limits?.pids ?? 256),
         '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=256m',
         '--mount', bindMount(workflow.workspaceRoot, '/workspace', writable),
@@ -92,6 +132,10 @@ function sandboxArgs(
     ];
     if (sandbox.limits?.cpus) args.push('--cpus', String(sandbox.limits.cpus));
     if (sandbox.limits?.memory) args.push('--memory', sandbox.limits.memory);
+    for (const [key, value] of Object.entries(env ?? {})) {
+        if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) continue;
+        args.push('--env', `${key}=${value}`);
+    }
     const stateTarget = containerPath('/workspace', path.relative(workflow.workspaceRoot, workflow.stateDir));
     if (inside(workflow.workspaceRoot, workflow.stateDir)) {
         args.push('--tmpfs', `${stateTarget}:rw,noexec,nosuid,nodev,size=16m`);
@@ -99,8 +143,17 @@ function sandboxArgs(
     for (const grant of grants) {
         args.push('--mount', bindMount(grant.path, `/mnt/grants/${grant.id}`, grant.access === 'write'));
     }
-    args.push(image, '/bin/sh', '-c', shellCommand);
-    return args;
+    return { args, image };
+}
+
+function sandboxArgs(
+    workflow: CompiledWorkflow,
+    grants: WorkspaceGrant[],
+    shellCommand: string,
+    cwd?: string,
+): string[] {
+    const { args, image } = sandboxBaseArgs(workflow, grants, cwd, false);
+    return [...args, image, '/bin/sh', '-c', shellCommand];
 }
 
 function containerWorkingDirectory(root: string, grants: WorkspaceGrant[], cwd?: string): string {

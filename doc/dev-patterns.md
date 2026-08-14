@@ -17,7 +17,7 @@
 1. `packages/common/src/interfaces/llm/agent.ts` — 更新 `AgentDefinition` 接口（如需新字段）
 2. `packages/device-llm/src/constants/agents.ts` — `DEFAULT_AGENTS` 预设模板
 3. `packages/llm-ui/src/editors/AgentConfigEditor.ts` — 编辑器 UI
-4. `packages/llm-harness/src/executor/context-manager.ts` — AgentResolver.resolve()
+4. `packages/llm-session/src/session/agent-resolver.ts` — AgentResolver.resolve()
 
 ## 新增通用工具 (Built-in Tool)
 

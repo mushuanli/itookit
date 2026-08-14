@@ -1,5 +1,5 @@
 import type { Harness, TaskHandle } from '@itookit/harness';
-import { AgentResolver, type IAgentConfigService } from '@itookit/llm-conversation';
+import { AgentResolver, type IAgentConfigService } from '@itookit/llm-session';
 import type {
     ExecCommandRequest,
     IPrivilegedCommandService,

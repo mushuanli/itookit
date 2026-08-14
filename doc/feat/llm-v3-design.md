@@ -8,7 +8,7 @@ LLM v3 采用四个边界明确的包：
 
 | 包 | 唯一职责 |
 | --- | --- |
-| `@itookit/llm-runtime` | 定义“一项 LLM 工作如何向前运行” |
+| `@itookit/llm-programs` | 定义“一项 LLM 工作如何向前运行” |
 | `@itookit/llm-harness` | 管理 Process 生命周期、资源、调度和编排 |
 | `@itookit/llm-conversation` | 管理 Session、Round、分支、上下文提交和 Flow |
 | `@itookit/llm-ui` | 通过 Harness 控制面观察和控制 Run |
@@ -25,7 +25,7 @@ DAG 是 Harness 的一种可选编排方式，不是普通聊天的必经路径�
 flowchart TD
     UI["@itookit/llm-ui"] --> Conversation["@itookit/llm-conversation"]
     UI --> Control["HarnessControlPlane"]
-    Conversation --> Engine["@itookit/llm-runtime"]
+    Conversation --> Engine["@itookit/llm-programs"]
     Conversation --> Control
     Conversation --> Plugins["DagPluginCatalog"]
     Harness["@itookit/llm-harness"] --> Contracts["@itookit/common contracts"]

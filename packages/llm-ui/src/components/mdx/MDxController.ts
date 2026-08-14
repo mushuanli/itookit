@@ -16,7 +16,7 @@ export interface MDxControllerOptions {
 /**
  * MDxController — 实现 IStreamableEditor
  *
- * ✅ 核心改动：
+ * 核心改动：
  * - 移除所有滚动相关代码（不是它的职责）
  * - appendDelta() 仅内存追加
  * - flush() 执行渲染并返回高度变化
@@ -117,7 +117,7 @@ export class MDxController implements IStreamableEditor {
 
     /**
      * 追加增量内容（仅内存操作）
-     * ✅ 不触发渲染，不操作 DOM
+     * 不触发渲染，不操作 DOM
      */
     appendDelta(chunk: string): void {
         this.isStreaming = true;
@@ -127,8 +127,8 @@ export class MDxController implements IStreamableEditor {
 
     /**
      * 执行渲染，返回高度变化量
-     * ✅ 由 StreamController 调用
-     * ✅ 不操作滚动，不查找父容器
+     * 由 StreamController 调用
+     * 不操作滚动，不查找父容器
      */
     async flush(): Promise<number> {
         if (!this.pendingDelta || !this.editor || !this.isInitialized) {

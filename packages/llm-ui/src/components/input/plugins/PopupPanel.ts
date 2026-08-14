@@ -67,7 +67,7 @@ export class PopupPanel {
         this.panel = this.createPanel();
         this.listEl = this.panel.querySelector('.llm-popup__list')!;
 
-        // ✅ 改为挂载到 body，避免 overflow: hidden 裁剪
+        // 改为挂载到 body，避免 overflow: hidden 裁剪
         document.body.appendChild(this.panel);
     }
 
@@ -388,7 +388,7 @@ export class PopupPanel {
         const inputContainer = this.anchor.closest('.llm-input');
         const containerRect = inputContainer?.getBoundingClientRect() || anchorRect;
 
-        // ✅ 使用 fixed 定位（相对于 viewport）
+        // 使用 fixed 定位（相对于 viewport）
         this.panel.style.position = 'fixed';
         this.panel.style.bottom = `${window.innerHeight - containerRect.top + 4}px`;
         this.panel.style.left = `${containerRect.left}px`;

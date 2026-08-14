@@ -37,7 +37,7 @@ export class ScrollController {
     // 程序滚动标记
     private isProgrammaticScroll = false;
     private programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null;
-    private readonly PROGRAMMATIC_SCROLL_WINDOW = 300; // ✅ 缩短到 200ms
+    private readonly PROGRAMMATIC_SCROLL_WINDOW = 300; // 缩短到 200ms
 
     private callbacks: ScrollControllerCallbacks;
 
@@ -98,8 +98,8 @@ export class ScrollController {
     /**
      * 由 StreamRenderPipeline（流式）或 ContentResizeTracker（非流式）调用
      *
-     * ✅ 流式期间：Pipeline 已在 RAF 内调用，直接写入 scrollTop，无额外节流
-     * ✅ 非流式期间：保持原有节流逻辑
+     * 流式期间：Pipeline 已在 RAF 内调用，直接写入 scrollTop，无额外节流
+     * 非流式期间：保持原有节流逻辑
      */
     handleContentResize(): void {
         if (!this.shouldAutoScroll) return;

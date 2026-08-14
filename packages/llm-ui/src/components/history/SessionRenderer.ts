@@ -1,6 +1,6 @@
 // @file: llm-ui/components/history/SessionRenderer.ts
 
-import { SessionGroup, ExecutionNode } from '@itookit/llm-conversation';
+import { SessionGroup, ExecutionNode } from '@itookit/llm-session';
 import { MDxController } from '../mdx/MDxController';
 import { NodeRenderer } from './NodeRenderer';
 import { NodeTemplates } from '../templates/NodeTemplates';
@@ -93,7 +93,7 @@ export class SessionRenderer {
             this.container.appendChild(wrapper);
             this.mountUserEditor(wrapper, group);
         } else {
-            // ✅ 修复：动态提取图标
+            // 修复：动态提取图标
             const icon = group.executionRoot
                 ? IconResolver.getIcon(group.executionRoot)
                 : '🤖';

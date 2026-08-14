@@ -430,7 +430,7 @@ export class SlashCommandPlugin implements InputPlugin {
     /**
      * 执行命令
      * 
-     * ✅ 关键修改：先清空输入，再执行命令。
+     * 关键修改：先清空输入，再执行命令。
      * 命令（如 /reedit）可能在执行过程中通过 restoreInput 写入新内容，
      * 如果在执行后清空会覆盖掉命令写入的内容。
      * 
@@ -471,7 +471,7 @@ export class SlashCommandPlugin implements InputPlugin {
                 description: 'Create a new chat session (optional: /new <title>)',
                 icon: '➕',
                 group: 'Common',
-                // ✅ hasArgs 移除（默认 false）— 面板选中时直接执行，使用默认标题
+                // hasArgs 移除（默认 false）— 面板选中时直接执行，使用默认标题
                 // 用户仍可手动输入 `/new my-title` 按 Enter 来指定标题
                 execute: (args) => cb.onNew(args),
             },

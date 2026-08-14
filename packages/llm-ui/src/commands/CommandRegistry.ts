@@ -14,7 +14,7 @@ import { Toast } from '@itookit/ui-common';
 /**
  * 命令注册中心
  * 
- * ✅ 依赖 IEditorEventBus 接口而非具体实现
+ * 依赖 IEditorEventBus 接口而非具体实现
  */
 export class CommandRegistry {
     private unsubscribers: (() => void)[] = [];
@@ -28,7 +28,6 @@ export class CommandRegistry {
      * 注册所有命令并绑定到事件总线
      */
     initialize(): void {
-        console.debug('[CommandRegistry] initialize — binding branch commands');
         // 复杂命令保留独立类
         this.bindCommand('branch:create', new CreateBranchCommand(this.ctx));
         this.bindCommand('branch:switch', new SwitchBranchCommand(this.ctx));
@@ -38,7 +37,7 @@ export class CommandRegistry {
         this.bindCommand('batch:delete', new BatchDeleteCommand(this.ctx));
         this.bindCommand('batch:copy', new BatchCopyCommand(this.ctx));
 
-        // ✅ 简单操作直接内联，消除 6 个单独的文件/类
+        // 简单操作直接内联，消除 6 个单独的文件/类
         this.bindInline('nav:scrollTo', async ({ sessionId }) => {
             const el = this.ctx.historyView.getSessionElement(sessionId);
             if (!el) return;
@@ -91,7 +90,7 @@ export class CommandRegistry {
     ): void {
         this.unsubscribers.push(
             this.bus.on(event, (payload) => {
-                // ✅ 修复：从 ctx 中获取 errorHandler
+                // 修复：从 ctx 中获取 errorHandler
                 this.ctx.errorHandler.wrap(() => handler(payload), event, 'silent');
             })
         );

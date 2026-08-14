@@ -1,3 +1,7 @@
+> ⚠️ **本文档描述的是重构前的旧架构**（`llm-harness`/`TaskGraph`/`ILoop`/`memory-manager` 等命名已失效）。
+> 当前 LLM 分层见 [pkgstructure.md](./pkgstructure.md)：`llm-session → llm-flow → llm-programs → harness`。
+> 本文档保留作历史参考。
+
 # MetaMind — 技术文档
 
 > 认知加速与外部化操作系统（Externalized Cognitive Operating System）
@@ -123,7 +127,7 @@ MetaMind 是一个 **“认知加速与外部化操作系统”** 。它旨在�
 | `@itookit/stdio` | VFS 引擎核心 — POSIX 风格虚拟文件系统，支持 assetdir 隔离与多驱动挂载 |
 | `@itookit/device-llm` | LLM API 通信 — OpenAI/Anthropic/Gemini，SSE 流式，MCP 协议，Skill 存储 |
 | `@itookit/llm-harness` | **Agent 执行引擎** — 多轮 Agent 循环、HarnessLoopExecutor (ILoop)、HarnessAgentTaskExecutor (TaskExecutor)、六维预算、上下文压缩、错误恢复 |
-| `@itookit/llm-runtime` | **会话 + 执行引擎** — 会话管理、VFS 持久化（ChatEngine）、TaskGraph DAG 编排、ILoop 协程、Plugin 系统 |
+| `@itookit/llm-programs` | **会话 + 执行引擎** — 会话管理、VFS 持久化（ChatEngine）、TaskGraph DAG 编排、ILoop 协程、Plugin 系统 |
 | `@itookit/tools` | **内置工具** — file_read/write/edit、glob_search、grep_search、shell_exec 等 |
 | `@itookit/llm-ui` | Chat UI 组件 — 聊天历史、输入框（含 Slash / Mention / Skill 插件）、Agent 编辑器 |
 | `@itookit/memory-manager` | 顶层工作区容器 — VFSUIShell + 编辑器 + BackgroundBrain |

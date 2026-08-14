@@ -1,9 +1,10 @@
-import type {
-    Decision,
-    DurableTaskProgram,
-    JsonValue,
-    SerializableError,
-    TaskInputEvent,
+import {
+    interactionApproved,
+    type Decision,
+    type DurableTaskProgram,
+    type JsonValue,
+    type SerializableError,
+    type TaskInputEvent,
 } from '@itookit/harness';
 
 export interface ExecProgramInput {
@@ -73,7 +74,7 @@ function approve(
     event: TaskInputEvent,
 ): Decision<ExecProgramState, ExecProgramOutput> {
     if (event.type !== 'interaction-resolved') return unexpected(state, event);
-    if (!isApproved(event.value)) return denied(state);
+    if (!interactionApproved(event.value)) return denied(state);
     const handleId = state.processHandleId!;
     return {
         state: { ...state, phase: 'effect' },
@@ -125,11 +126,6 @@ function validate(input: ExecProgramInput): void {
     if (input.timeoutMs !== undefined && (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0)) {
         throw new Error('Command timeout must be a positive number');
     }
-}
-
-function isApproved(value: JsonValue): boolean {
-    if (value === true) return true;
-    return Boolean(value && typeof value === 'object' && !Array.isArray(value) && value.approved === true);
 }
 
 function denied(state: Readonly<ExecProgramState>): Decision<ExecProgramState, ExecProgramOutput> {

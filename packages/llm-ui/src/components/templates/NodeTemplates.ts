@@ -1,6 +1,6 @@
 // @file: llm-ui/components/templates/NodeTemplates.ts
 
-import { ExecutionNode, SessionGroup } from '@itookit/llm-conversation';
+import { ExecutionNode, SessionGroup } from '@itookit/llm-session';
 import { escapeHTML } from '@itookit/common';
 import { LayoutTemplates } from './LayoutTemplates';
 
@@ -155,7 +155,7 @@ export class NodeTemplates {
         const agentId = node.data.metaInfo?.agentId;
         const isClickable = node.executorType === 'agent' && agentId;
 
-        // ✅ 修复：添加 data-action="edit-agent" 使事件委托能捕获点击
+        // 修复：添加 data-action="edit-agent" 使事件委托能捕获点击
         const iconHtml = isClickable
             ? `<div class="llm-ui-node__icon llm-ui-node__icon--clickable" 
                     data-action="edit-agent" 

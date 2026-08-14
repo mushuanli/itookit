@@ -7,12 +7,12 @@ import { getPreviewText } from '../../utils/textUtils';
 /**
  * 流式输出控制器
  *
- * ✅ 核心职责：
+ * 核心职责：
  * 1. 收集 chunk，按节奏触发渲染
  * 2. 协调渲染和滚动的时序（两阶段状态机）
  * 3. 管理流式生命周期
  *
- * ✅ 架构改进：
+ * 架构改进：
  * - 合并了 StreamRenderPipeline 的职责
  * - 单一滚动决策点
  * - 渲染和滚动严格分帧
@@ -28,7 +28,7 @@ export class StreamController {
     private phase: 'idle' | 'waitScroll' = 'idle';
     private readonly FLUSH_INTERVAL = 80;
 
-    // ✅ 新增：追踪是否刚退出流式模式
+    // 新增：追踪是否刚退出流式模式
     // 用于 HistoryView 在流式结束后短暂保持某些行为
     private _recentlyExited = false;
     private recentlyExitedTimer: ReturnType<typeof setTimeout> | null = null;
@@ -43,7 +43,7 @@ export class StreamController {
         return this.isStreaming;
     }
 
-    // ✅ 新增 getter
+    // 新增 getter
     get recentlyExited(): boolean {
         return this._recentlyExited;
     }
@@ -71,7 +71,7 @@ export class StreamController {
         this.isStreaming = false;
         this.container.classList.remove('llm-ui-history--streaming');
 
-        // ✅ 标记为刚退出，一段时间后清除
+        // 标记为刚退出，一段时间后清除
         this._recentlyExited = true;
         this.recentlyExitedTimer = setTimeout(() => {
             this._recentlyExited = false;

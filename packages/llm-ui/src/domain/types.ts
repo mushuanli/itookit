@@ -1,6 +1,7 @@
 // @file: llm-ui/domain/types.ts
 
 import type { ModelTier, PromptPreset } from '@itookit/common';
+import type { SessionTokenUsage } from '@itookit/llm-session';
 
 export type { PromptPreset } from '@itookit/common';
 
@@ -156,22 +157,9 @@ export interface ChatOverrides {
 
 /**
  * UI 层 token 用量快照，由 TokenMeterPlugin 显示。
- *
- * 对应 llm-runtime 的 SessionTokenUsage，以 re-export 为主——
- * 但 UI 层使用此独立副本，避免直接依赖 llm-runtime。
+ * 直接复用 llm-session 的 SessionTokenUsage（llm-ui 本就依赖 llm-session，无需独立副本）。
  */
-export interface TokenStats {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens?: number;
-    costUsd: number;
-    /** 上下文窗口使用率 [0, 1] */
-    contextUsageRatio: number;
-    rounds: number;
-    durationMs: number;
-    /** true = 字符估算；false = API 精确值 */
-    isEstimated: boolean;
-}
+export type TokenStats = SessionTokenUsage;
 
 // ── File mention types ──────────────────────────────────────────────────────
 

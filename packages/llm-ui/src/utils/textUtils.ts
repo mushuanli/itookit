@@ -1,5 +1,7 @@
 // @file: llm-ui/utils/textUtils.ts
 
+import type { ExecutionNode } from '@itookit/llm-session';
+
 /**
  * 纯函数文本工具集
  * 消除 SessionRenderer、FloatingNavPanel 中的重复代码
@@ -28,7 +30,7 @@ export function truncateText(text: string, maxLen: number): string {
 /**
  * 递归提取执行树的输出内容
  */
-export function extractExecutionOutput(node: any): string {
+export function extractExecutionOutput(node: ExecutionNode): string {
     let output = node.data?.output || '';
     for (const child of node.children || []) {
         const childOutput = extractExecutionOutput(child);

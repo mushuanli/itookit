@@ -8,7 +8,7 @@ import type {
     DagPluginPresentation,
     FlowNodeDefinition,
 } from '@itookit/common';
-import type { DurableFlowSnapshot } from '@itookit/llm-conversation';
+import type { DurableFlowSnapshot } from '@itookit/llm-session';
 import type { TaskStatus } from '@itookit/harness';
 import {escapeHTML} from '@itookit/common';
 import { showConfirmDialog, Toast } from '@itookit/ui-common';

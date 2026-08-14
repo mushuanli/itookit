@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { EventEnvelope } from '@itookit/harness';
+import { extractNodeOutput } from '@itookit/llm-programs';
 import type { RunManifest, WorkspaceGrant } from './types';
 
 export class RunStore {
@@ -79,13 +80,8 @@ export class RunStore {
 
 export function selectFinalResult(output: unknown, taskId: string, outputName: string): unknown {
     const node = record(record(output).nodes)[taskId];
-    const value = record(node);
-    const artifact = record(record(value.outputs)[outputName]);
-    if ('content' in artifact) return artifact.content;
-    const message = record(value.message);
-    if ('content' in message) return message.content;
-    if (outputName in value) return value[outputName];
-    return node;
+    if (node === undefined) return undefined;
+    return extractNodeOutput(node, outputName);
 }
 
 function redact(value: unknown): unknown {

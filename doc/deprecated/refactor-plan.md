@@ -62,7 +62,7 @@
 **验证命令**：
 ```bash
 pnpm --filter @itookit/llm-kernel build
-pnpm --filter @itookit/llm-runtime build  # 下游确认不影响
+pnpm --filter @itookit/llm-programs build  # 下游确认不影响
 ```
 
 #### 1B. 删除 device-llm 孤儿 SkillRegistry
@@ -142,7 +142,7 @@ pnpm -r typecheck  # 全量类型检查
 
 **验证命令**：
 ```bash
-pnpm --filter @itookit/llm-runtime build
+pnpm --filter @itookit/llm-programs build
 ```
 
 ---
@@ -157,15 +157,15 @@ llm-ui 和 app-settings 通过 llm-runtime 导入本应直接从 common 拿的�
 
 ```
 修改: packages/llm-ui/src/shell/SlashCommandRouter.ts
-  - import type { IAgentConfigService } from '@itookit/llm-runtime'
+  - import type { IAgentConfigService } from '@itookit/llm-programs'
   + import type { IAgentConfigService } from '@itookit/common'
 
 修改: packages/llm-ui/src/shell/AgentProvider.ts
-  - import type { IAgentConfigService } from '@itookit/llm-runtime'
+  - import type { IAgentConfigService } from '@itookit/llm-programs'
   + import type { IAgentConfigService } from '@itookit/common'
 
 修改: packages/app-settings/src/editors/RecoverySettingsEditor.ts
-  - import { IAgentManagementService } from '@itookit/llm-runtime'
+  - import { IAgentManagementService } from '@itookit/llm-programs'
   + import { IAgentManagementService } from '@itookit/common'
 ```
 
@@ -460,8 +460,8 @@ interface ITaskScheduler<T extends DependableTask> {
 
 **验证命令**：
 ```bash
-pnpm --filter @itookit/llm-runtime build
-pnpm --filter @itookit/llm-runtime test  # 若有 test 脚本
+pnpm --filter @itookit/llm-programs build
+pnpm --filter @itookit/llm-programs test  # 若有 test 脚本
 ```
 
 ---

@@ -30,7 +30,7 @@
 | T17 Durable Interaction | ✅ 已完成 | 已实现 `input/approval` 请求、Task 内持久 InteractionRecord、`interaction` wait、Session/Task respond API、响应事件与恢复后继续执行。 |
 | T18 Harness 分层与公开扩展边界 | ✅ 已完成 | 已拆分 domain/application/ports/runtime/infrastructure/public；插件只能注册 Program、Effect、StorageResolver、Workspace，不访问存储内部。 |
 | T19 旧 Process Kernel 清理 | ✅ 已完成 | `packages/llm-harness`、旧 Process Kernel/Scheduler/Checkpoint、`ProcessProgram/ProcessHost/RunHandle` 公共协议及旧 LLM Process Program 已删除，生产引用扫描为零。 |
-| T20 Chat/Agent Durable Program 迁移 | ✅ 已完成 | `@itookit/llm-runtime` 提供 Durable Chat/Agent Program；LLM/Tool 通过授权 Effect 执行，HITL 使用 Interaction；Flow 编译为新 Harness `TaskSpec/dependsOn` DAG。 |
+| T20 Chat/Agent Durable Program 迁移 | ✅ 已完成 | `@itookit/llm-programs` 提供 Durable Chat/Agent Program；LLM/Tool 通过授权 Effect 执行，HITL 使用 Interaction；Flow 编译为新 Harness `TaskSpec/dependsOn` DAG。 |
 | T21 Coreutils 可靠性与平台边界加固 | 🟡 待验证 | 已实现 Session 级 Tool/Skill/TTY 隔离、Skill loaded shared-state 恢复、所有能力 ResourceHandle execute 授权、失败结果转 Effect failure、LLM finally 清理、TTY 所有权、Durable approval program、Web/Tauri 应用注入和 Tauri Shell timeout/cancel；待 Tauri 实机与真实进程崩溃验证。 |
 | T22 声明驱动模型与 Durable Skill 契约 | ✅ 已完成 | 已明确 Task/Attempt/Effect/Resource 状态边界；TaskHandle 可直接创建归属自身的 Resource；Skill manifest 可声明 `taskProgram` 并由 `createSkillTaskSpec` 编译为 deferred Durable Task；Program Decision 的 state/output/action payload 在提交前验证为 durable JSON。 |
 | T23 特权 Slash Command | ✅ 已完成 | `/plan`、`/exec` 通过应用端口创建 deferred Durable Task 并绑定最小 ResourceHandle；`/approve`、`/cancel`、`/resume` 操作当前附着 Task，当前特权 Task id 写入 Session shared state 以便编辑器重载后恢复附着。命令文本属于 UI，ExecProgram 属于 Coreutils，PlanProgram 属于 LLM Runtime，依赖由 App Shell 组装。 |
@@ -1871,7 +1871,7 @@ apps/tauri-app
   Tauri filesystem Skill source + HTTP/Shell adapters
   Tauri process timeout/cancel implementation
 
-@itookit/llm-runtime
+@itookit/llm-programs
   Durable Chat / Agent / Plan TaskProgram
   ContextAssembler + provider-neutral message policy
   depends only on common + Harness public contracts

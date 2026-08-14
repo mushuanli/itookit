@@ -3,7 +3,7 @@
 import type { BranchItem } from '../domain/types';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { ICommandBus } from '@itookit/common';
-import type { SessionGroup } from '@itookit/llm-conversation';
+import type { SessionGroup } from '@itookit/llm-session';
 
 export class BranchError extends Error {
     constructor(

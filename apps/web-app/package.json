@@ -24,7 +24,7 @@
     "@itookit/common": "workspace:*",
     "@itookit/coreutils": "workspace:*",
     "@itookit/device-llm": "workspace:*",
-    "@itookit/llm-conversation": "workspace:*",
+    "@itookit/llm-session": "workspace:*",
     "@itookit/llm-ui": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",

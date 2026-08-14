@@ -221,7 +221,7 @@ export class FloatingNavPanel implements INavigationPresenter {
     /**
      * 批量删除
      *
-     * ✅ 关键改动：不再自行 render
+     * 关键改动：不再自行 render
      * 只发出 intent，由事件链路回流后通过 update() 刷新
      */
     private async handleBatchDelete(): Promise<void> {

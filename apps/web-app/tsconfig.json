@@ -20,7 +20,7 @@
       "@itookit/vfs-ui": ["../../packages/vfs-ui/src/index.ts"],
       "@itookit/mdxeditor": ["../../packages/mdx/src/index.ts"],
       "@itookit/device-llm": ["../../packages/device-llm/src/index.ts"],
-      "@itookit/llm-conversation": ["../../packages/llm-conversation/src/index.ts"],
+      "@itookit/llm-session": ["../../packages/llm-session/src/index.ts"],
       "@itookit/llm-ui": ["../../packages/llm-ui/src/index.ts"],
       "@itookit/app-settings": ["../../packages/app-settings/src/index.ts"]
     }

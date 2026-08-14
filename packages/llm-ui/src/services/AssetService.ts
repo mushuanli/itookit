@@ -1,6 +1,6 @@
 // @file: llm-ui/services/AssetService.ts
 
-import { IChatEngine } from '@itookit/llm-conversation';
+import { IChatEngine } from '@itookit/llm-session';
 
 /**
  * 资源管理服务
@@ -34,7 +34,6 @@ export class AssetService {
                 const arrayBuffer = await file.arrayBuffer();
                 await this.createAsset(ownerNodeId, file.name, arrayBuffer);
 
-                console.log(`[AssetService] Asset saved: ${file.name}`);
 
                 const isImage = file.type.startsWith('image/');
                 const ref = isImage

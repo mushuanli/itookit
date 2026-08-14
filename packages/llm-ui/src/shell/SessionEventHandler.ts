@@ -1,10 +1,10 @@
 // @file: llm-ui/shell/SessionEventHandler.ts
 
-import type { SessionEvent, RegistryEvent } from '@itookit/llm-conversation';
+import type { SessionEventEnvelope, RegistryEvent } from '@itookit/llm-session';
 import type { ICommandBus } from '@itookit/common';
 import {t} from '@itookit/common';
 import { Toast } from '@itookit/ui-common';
-import type { SessionGroup } from '@itookit/llm-conversation';
+import type { SessionGroup } from '@itookit/llm-session';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
 import type { IBranchPresenter } from '../domain/ports/IBranchPresenter';
@@ -19,7 +19,7 @@ import type { IBranchStore } from '../domain/ports/IBranchStore';
 type SideEffect =
     | 'renderFull' | 'refreshBranch' | 'refreshNav'
     | 'flashIndicator' | 'scrollToBottom' | 'clearErrors'
-    | 'updateStatus' | 'notifyChange' | 'resetCollapse';
+    | 'notifyChange' | 'resetCollapse';
 
 /**
  * 集中声明式：事件 → 副作用映射
@@ -29,11 +29,11 @@ type SideEffect =
  */
 const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
     // 会话生命周期
-    finished: ['clearErrors', 'updateStatus', 'notifyChange', 'refreshNav'],
-    error: ['updateStatus'],
+    finished: ['clearErrors', 'notifyChange', 'refreshNav'],
+    error: [],
 
     // ── LLM 2.0 canonical / projection event names (S7) ──
-    'message:appended': ['clearErrors', 'updateStatus', 'notifyChange', 'scrollToBottom'],
+    'message:appended': ['clearErrors', 'notifyChange', 'scrollToBottom'],
     'messages:cleared': ['refreshNav', 'refreshBranch'],
     'messages:deleted': ['refreshNav', 'notifyChange'],
     'message:edited': ['refreshNav'],
@@ -95,7 +95,6 @@ export class SessionEventHandler {
             flashIndicator: () => this.deps.branchIndicator.flash(),
             scrollToBottom: () => this.deps.historyView.scrollToBottom(true),
             clearErrors:    () => this.deps.historyView.clearErrors(),
-            updateStatus:   () => {},  // 由 updateStatusFromEvent 处理
             notifyChange:   () => this.deps.onContentChanged(),
             resetCollapse:  () => this.deps.historyView.resetCollapseStates(),
         };
@@ -105,7 +104,7 @@ export class SessionEventHandler {
     // 会话事件入口
     // ================================================================
 
-    handleSessionEvent(event: SessionEvent): void {
+    handleSessionEvent(event: SessionEventEnvelope): void {
         // 1. 始终转发给 HistoryView 处理 DOM 级更新（流式内容、节点追加等）
         this.deps.historyView.processEvent(event);
 
@@ -129,27 +128,27 @@ export class SessionEventHandler {
     }
 
     /**
-     * 分支事件处理 — 需要事件 payload 的操作集中于此
+     * 分支事件处理 — 需要事件 payload 的操作集中于此。
+     * SessionEventBus 已在边界归一化为 { type, payload }，故直接按 event.type 收窄读取 event.payload。
      */
-    private handleBranchEvent(event: SessionEvent): void {
-        const e = event as { type: string; payload?: any; [key: string]: any };
-        switch (e.type) {
+    private handleBranchEvent(event: SessionEventEnvelope): void {
+        switch (event.type) {
             case 'branch:switched':
                 this.deps.commands.execute<SessionGroup[]>('session.get-sessions').then(sessions => {
                     this.deps.historyView.renderFull(sessions, {
-                        position: e.payload?.displayPosition === 'bottom' ? 'bottom' : 'top',
+                        position: event.payload.displayPosition === 'bottom' ? 'bottom' : 'top',
                     });
                 }).catch(() => {});
                 break;
             case 'messages:deleted':
-                this.deps.historyView.removeMessages(e.payload.deletedIds, true);
+                this.deps.historyView.removeMessages(event.payload.deletedIds, true);
                 break;
 
             case 'log:ref_renamed': {
-                const el2 = this.deps.historyView.getElement(e.payload.ref);
+                const el2 = this.deps.historyView.getElement(event.payload.ref);
                 if (el2) {
                     const nameEl2 = el2.querySelector('.llm-branch-name');
-                    if (nameEl2) nameEl2.textContent = e.payload.newName;
+                    if (nameEl2) nameEl2.textContent = event.payload.newName;
                 }
                 break;
             }
@@ -200,28 +199,23 @@ export class SessionEventHandler {
         }
     }
 
-    private updateStatusFromEvent(event: SessionEvent): void {
+    private updateStatusFromEvent(event: SessionEventEnvelope): void {
         if (event.type === 'finished') {
             this.deps.statusIndicator.update('completed');
-
-            // Support both old OrchestratorEvent { payload: { tokenUsage } }
-            // and new canonical AgentEventFinished { usage: TokenUsage }
-            // (both arrive as { type, payload } during transition via EventBus)
-            const p = (event as any).payload;
-            const tu = p?.tokenUsage ?? p?.usage ? {
-                inputTokens: p?.tokenUsage?.inputTokens ?? p?.usage?.inputTokens ?? 0,
-                outputTokens: p?.tokenUsage?.outputTokens ?? p?.usage?.outputTokens ?? 0,
-                cacheReadTokens: p?.tokenUsage?.cacheReadTokens ?? p?.usage?.cacheReadTokens,
-                costUsd: p?.tokenUsage?.costUsd ?? p?.usage?.costUsd ?? 0,
-                contextUsageRatio: p?.tokenUsage?.contextUsageRatio ?? p?.usage?.contextUsageRatio ?? 0,
-                rounds: p?.tokenUsage?.rounds ?? 0,
-                durationMs: p?.tokenUsage?.durationMs ?? 0,
-                isEstimated: p?.tokenUsage?.isEstimated ?? true,
-            } : null;
-
-            if (tu) {
-                this.deps.chatInput.updateTokenStats(tu);
-            }
+            // `finished` 事件携带原始 TokenUsage（prompt_tokens/completion_tokens），
+            // 映射为 TokenStats 的 input/output。cost/contextUsage/rounds/duration 需要
+            // 额外上下文（模型窗口、累计轮次），属独立功能，暂不在此计算。
+            const usage = event.payload.usage;
+            this.deps.chatInput.updateTokenStats({
+                inputTokens: usage.prompt_tokens ?? 0,
+                outputTokens: usage.completion_tokens ?? 0,
+                cacheReadTokens: typeof usage.cached_tokens === 'number' ? usage.cached_tokens : undefined,
+                costUsd: 0,
+                contextUsageRatio: 0,
+                rounds: 0,
+                durationMs: 0,
+                isEstimated: false,
+            });
         } else if (event.type === 'error') {
             this.deps.statusIndicator.update('failed');
         }

@@ -13,6 +13,10 @@ import { TokenMeterPlugin } from './plugins/TokenMeterPlugin';
 import { PopupPanel } from './plugins/PopupPanel';
 import type { PopupItem } from './plugins/PopupPanel';
 import { AttachmentManager } from './AttachmentManager';
+import { ToolOutputPanel } from './ToolOutputPanel';
+import { HelpPanel } from './HelpPanel';
+import { SkillPanel } from './SkillPanel';
+import { ConnectionTierController } from './ConnectionTierController';
 import { delegate } from '../../utils/domEvents';
 
 export interface ChatInputOptions {
@@ -104,9 +108,6 @@ export class ChatInput implements IChatInputPresenter {
     private stopBtn!: HTMLButtonElement;
     private attachBtn!: HTMLButtonElement;
     private settingsBtn!: HTMLButtonElement;
-    // Settings panel still has a native connection select for Settings-panel usage
-    private connectionSelect!: HTMLSelectElement;
-    private tierPillsContainer!: HTMLElement;
     private historySlider!: HTMLInputElement;
     private historyValue: HTMLSpanElement | null = null; // removed from new template
     private streamToggle!: HTMLInputElement;
@@ -126,18 +127,6 @@ export class ChatInput implements IChatInputPresenter {
     private agentIconEl!: HTMLSpanElement;
     private agentPopup: PopupPanel | null = null;
 
-    // ── Connection Quick Switch (popup via PopupPanel) ───────────────────────
-    private connQuickBtn!: HTMLButtonElement;
-    private connQuickLabel!: HTMLSpanElement;
-    private connQuickClear!: HTMLElement;
-    private connPopup: PopupPanel | null = null;
-
-    // ── Tier Quick Switch (popup via PopupPanel) ─────────────────────────────
-    private tierQuickBtn!: HTMLButtonElement;
-    private tierQuickLabel!: HTMLSpanElement;
-    private tierQuickClear!: HTMLElement;
-    private tierPopup: PopupPanel | null = null;
-
     // ── Prompt Picker (preset prompts dropdown, popup via PopupPanel) ────────
     private promptPickerWrapper!: HTMLElement;
     private promptPickerBtn!: HTMLButtonElement;
@@ -147,31 +136,23 @@ export class ChatInput implements IChatInputPresenter {
     private loading = false;
     private files: File[] = [];
     private settingsExpanded = false;
-    private connections: ConnectionOption[] = [];
     private currentAgentId: string = 'default';
 
-    private skillSection!: HTMLElement;
-    private skillsList!: HTMLElement;
+    private skillPanel!: SkillPanel;
+    private connectionTier!: ConnectionTierController;
 
     // ── Help panel ───────────────────────────────────────────────────────────
-    private helpBtn!: HTMLButtonElement; // lives inside more popup, bound lazily
-    private helpPanel!: HTMLElement;
-    private helpBody!: HTMLElement;
-    private helpVisible = false;
+    private helpPanel!: HelpPanel;
 
     // ── More menu ─────────────────────────────────────────────────────────────
     private moreBtn!: HTMLButtonElement;
     private morePopup: PopupPanel | null = null;
 
     // ── Tool output panel ─────────────────────────────────────────────────────
-    private toolOutputEl: HTMLElement | null = null;
+    private toolOutput: ToolOutputPanel;
 
     // ── Session profile ───────────────────────────────────────────────────────
     private systemPromptAppendInput!: HTMLTextAreaElement;
-
-    // ── Harness state ────────────────────────────────────────────────────────
-    private skills: SkillInfo[] = [];
-    private isLoadingSkills = false;
 
     // ── Plugin system ────────────────────────────────────────────────────────
     private plugins: InputPlugin[] = [];
@@ -204,6 +185,30 @@ export class ChatInput implements IChatInputPresenter {
         this.currentAgentId = this.config.agentId;
 
         this.render();
+
+        // 面板必须在 render()（写入模板 + bindElements）之后构造，DOM 才存在。
+        this.toolOutput = new ToolOutputPanel(container, () => this.textarea?.focus());
+        this.helpPanel = new HelpPanel(container, {
+            hasFiles: () => !!this.options.onRequestFiles,
+            onCloseSettings: () => this.toggleSettings(false),
+        });
+        this.skillPanel = new SkillPanel(container, {
+            onRequestSkills: this.options.onRequestSkills,
+            onLoadSkill: this.options.onLoadSkill,
+            onUnloadSkill: this.options.onUnloadSkill,
+        });
+        this.connectionTier = new ConnectionTierController(container, {
+            getAgents: () => this.agents,
+            getAgentId: () => this.config.agentId,
+            onNavigateSettings: (target) => this.options.onNavigateSettings?.(target),
+            onChange: () => {
+                this.config.settings.connectionId = this.connectionTier.getConnectionId();
+                this.config.settings.modelTier = this.connectionTier.getModelTier();
+                this.updateActiveBadges();
+                this.notifyConfigChange();
+            },
+        });
+
         this.bindEvents();
         this.initExecutors();
         this.syncUIFromConfig();
@@ -225,7 +230,6 @@ export class ChatInput implements IChatInputPresenter {
      * 注册插件（init 后、bindEvents 后调用）
      */
     registerPlugin(plugin: InputPlugin): void {
-        console.log(`[ChatInput] registerPlugin: ${plugin.id}, priority: ${plugin.priority ?? 100}`);
 
         this.plugins.push(plugin);
         this.plugins.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
@@ -286,9 +290,7 @@ export class ChatInput implements IChatInputPresenter {
         this.stopBtn.style.display = loading ? 'flex' : 'none';
         this.textarea.disabled = loading;
         this.agentPickerBtn.disabled = loading;
-        this.connQuickBtn.disabled = loading;
-        this.tierQuickBtn.disabled = loading;
-        this.connectionSelect.disabled = loading;
+        this.connectionTier.setLoading(loading);
         this.attachBtn.disabled = loading;
         this.settingsBtn.disabled = loading;
         if (this.moreBtn) this.moreBtn.disabled = loading;
@@ -350,8 +352,7 @@ export class ChatInput implements IChatInputPresenter {
             this.config.agentId = validatedId;
             this.currentAgentId = validatedId;
             this.config.settings.modelTier = 'auto';
-            this.updateTierPills('auto');
-            this.updateTierQuick();
+            this.connectionTier.setModelTier('auto');
             this.updateActiveBadges();
         }
 
@@ -369,42 +370,11 @@ export class ChatInput implements IChatInputPresenter {
      * Dismissed by the × button or when the user sends an agent message.
      */
     showToolOutput(cmd: string, output: string, success: boolean): void {
-        if (!this.toolOutputEl) {
-            this.toolOutputEl = document.createElement('div');
-            this.toolOutputEl.className = 'llm-input__tool-output';
-            // Insert above the field wrapper so it sits between executor selector and textarea.
-            const wrapper = this.container.querySelector('.llm-input__field-wrapper');
-            const parent = wrapper?.parentElement ?? this.container;
-            parent.insertBefore(this.toolOutputEl, wrapper ?? parent.firstChild);
-        }
-
-        const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const lines = output.split('\n').length;
-        const icon = success ? '✅' : '❌';
-
-        this.toolOutputEl.innerHTML = `
-            <div class="llm-input__tool-output-header">
-                <code class="llm-input__tool-output-cmd">$ ${esc(cmd)}</code>
-                <span class="llm-input__tool-output-meta">${icon} ${lines} line${lines !== 1 ? 's' : ''}</span>
-                <button class="llm-input__tool-output-close" type="button" title="Close">×</button>
-            </div>
-            <pre class="llm-input__tool-output-body">${esc(output)}</pre>`;
-
-        this.toolOutputEl.style.display = 'block';
-        this.toolOutputEl.querySelector('.llm-input__tool-output-close')?.addEventListener('click', () => {
-            this.clearToolOutput();
-        });
-
-        // Scroll output into view and refocus textarea for next command.
-        this.toolOutputEl.scrollIntoView?.({ block: 'nearest' });
-        this.textarea?.focus();
+        this.toolOutput.show(cmd, output, success);
     }
 
     clearToolOutput(): void {
-        if (this.toolOutputEl) {
-            this.toolOutputEl.style.display = 'none';
-            this.toolOutputEl.innerHTML = '';
-        }
+        this.toolOutput.clear();
     }
 
     destroy(): void {
@@ -414,15 +384,13 @@ export class ChatInput implements IChatInputPresenter {
         }
         this.agentPopup?.destroy();
         this.agentPopup = null;
-        this.connPopup?.destroy();
-        this.connPopup = null;
-        this.tierPopup?.destroy();
-        this.tierPopup = null;
+        this.connectionTier.destroy();
         this.promptPopup?.destroy();
         this.promptPopup = null;
         this.morePopup?.destroy();
         this.morePopup = null;
         this.attachmentMgr?.destroy();
+        this.helpPanel.destroy();
         this.container.innerHTML = '';
         this.files = [];
     }
@@ -442,7 +410,6 @@ export class ChatInput implements IChatInputPresenter {
     private render(): void {
         this.container.innerHTML = ChatInputTemplates.renderMain();
         this.bindElements();
-        this.updateConnectionOptions();
         this.updateHistoryDisplay();
 
         this.attachmentMgr = new AttachmentManager({
@@ -478,22 +445,10 @@ export class ChatInput implements IChatInputPresenter {
         this.agentNameEl = q('.llm-input__agent-name');
         this.agentMetaEl = q('.llm-input__agent-meta');
 
-        // Connection quick-switch elements
-        this.connQuickBtn = q('.llm-input__conn-quick');
-        this.connQuickLabel = q('.llm-input__conn-quick-label');
-        this.connQuickClear = q('.llm-input__conn-quick-clear');
-
-        // Tier quick-switch elements
-        this.tierQuickBtn = q('.llm-input__tier-quick');
-        this.tierQuickLabel = q('.llm-input__tier-quick-label');
-        this.tierQuickClear = q('.llm-input__tier-quick-clear');
-
         // Prompt picker elements (in toolbar)
         this.promptPickerWrapper = q('.llm-input__prompt-picker-wrapper');
         this.promptPickerBtn = q('.llm-input__prompt-picker');
 
-        this.connectionSelect = q('.llm-input__connection-select');
-        this.tierPillsContainer = q('.llm-input__tier-cards');
         this.historySlider = q('.llm-input__history-slider');
         this.historyValue = this.container.querySelector('.llm-input__history-value');
         this.streamToggle = q('.llm-input__stream-toggle');
@@ -505,16 +460,7 @@ export class ChatInput implements IChatInputPresenter {
         this.attachmentContainer = q('.llm-input__attachments');
         this.inputWrapper = q('.llm-input__field-wrapper');
 
-        // Skill controls
-        this.skillSection = q('.llm-input__skill-section');
-        this.skillsList = q('.llm-input__skills-list');
-
         // Help panel (button is inside the more popup — bound lazily in toggleMoreMenu)
-        this.helpPanel = q('.llm-input__help-panel');
-        this.helpBody = q('.llm-input__help-body');
-        // helpBtn is assigned in bindHelpEvents() after the popup renders
-        this.helpBtn = document.createElement('button'); // placeholder to avoid null checks
-
         // Session profile
         this.systemPromptAppendInput = this.container.querySelector('.llm-input__system-prompt-append') as HTMLTextAreaElement;
     }
@@ -538,7 +484,7 @@ export class ChatInput implements IChatInputPresenter {
             this.config.text = this.textarea.value;
             this.notifyConfigChange();
             // Close help when user starts typing
-            if (this.helpVisible && this.textarea.value.length > 0) this.hideHelp();
+            if (this.helpPanel.isVisible && this.textarea.value.length > 0) this.hideHelp();
 
             const cursorPos = this.textarea.selectionStart;
             for (const plugin of this.plugins) {
@@ -548,7 +494,7 @@ export class ChatInput implements IChatInputPresenter {
 
         this.textarea.addEventListener('keydown', (e) => {
             // Esc closes help panel before propagating to plugins
-            if (e.key === 'Escape' && this.helpVisible) {
+            if (e.key === 'Escape' && this.helpPanel.isVisible) {
                 e.preventDefault();
                 this.hideHelp();
                 return;
@@ -606,10 +552,9 @@ export class ChatInput implements IChatInputPresenter {
 
         this.bindSettingsEvents();
         this.attachmentMgr.bindDragEvents();
-        this.bindHelpEvents();
         this.bindOutsideClickHandler();
 
-        // ✅ 初始化插件系统（放在所有事件绑定之后）
+        // 初始化插件系统（放在所有事件绑定之后）
         this.initPluginSystem();
     }
 
@@ -617,48 +562,8 @@ export class ChatInput implements IChatInputPresenter {
         // Agent Picker combobox — popup handled by PopupPanel
         this.agentPickerBtn.addEventListener('click', () => this.toggleAgentPicker());
 
-        // Connection quick-switch — popup handled by PopupPanel
-        this.connQuickBtn.addEventListener('click', (e) => {
-            // ×-clear button sits inside the quick button — intercept it
-            if ((e.target as HTMLElement).closest('.llm-input__conn-quick-clear')) {
-                this.selectConnection('');
-                return;
-            }
-            this.toggleConnPicker();
-        });
-
-        // Tier quick-switch — popup handled by PopupPanel
-        this.tierQuickBtn.addEventListener('click', (e) => {
-            if ((e.target as HTMLElement).closest('.llm-input__tier-quick-clear')) {
-                this.selectTier('auto');
-                return;
-            }
-            this.toggleTierPicker();
-        });
-
         // Prompt picker — popup handled by PopupPanel
         this.promptPickerBtn?.addEventListener('click', () => this.togglePromptPicker());
-
-        // Settings panel connection select — keeps in sync with conn-quick and tier card model names
-        this.connectionSelect.addEventListener('change', () => {
-            this.config.settings.connectionId = this.connectionSelect.value || undefined;
-            this.updateConnQuick();
-            this.updateTierCardModels();
-            this.updateActiveBadges();
-            this.notifyConfigChange();
-        });
-
-        this.tierPillsContainer?.addEventListener('click', (e) => {
-            const pill = (e.target as HTMLElement).closest('.llm-input__tier-card') as HTMLElement | null;
-            if (!pill) return;
-            const tier = pill.dataset.tier as 'auto' | ModelTier;
-            if (!tier) return;
-            this.config.settings.modelTier = tier;
-            this.updateTierPills(tier);
-            this.updateTierQuick();
-            this.updateActiveBadges();
-            this.notifyConfigChange();
-        });
 
         this.historySlider.addEventListener('input', () => {
             this.config.settings.historyLength = parseInt(this.historySlider.value);
@@ -728,23 +633,6 @@ export class ChatInput implements IChatInputPresenter {
             const connId = connBadge.dataset.connectionId ?? this.config.settings.connectionId;
             if (connId) this.options.onNavigateSettings?.({ resourceId: 'connections', anchor: `conn:${connId}` });
         });
-
-        // Skill list delegation — toggle checkbox drives load/unload
-        this.skillSection?.addEventListener('change', (e) => {
-            const target = e.target as HTMLInputElement;
-            if (!target.matches('.llm-input__skill-btn')) return;
-            const skillId = target.dataset.skill;
-            if (!skillId) return;
-            if (target.checked) {
-                this.loadSkill(skillId);
-            } else {
-                this.unloadSkill(skillId);
-            }
-        });
-
-        // Skills refresh button (click, not change)
-        this.container.querySelector('.llm-input__skills-refresh')
-            ?.addEventListener('click', () => this.reloadSkills());
 
         // Session profile — system prompt append
         this.systemPromptAppendInput?.addEventListener('input', () => {
@@ -852,11 +740,7 @@ export class ChatInput implements IChatInputPresenter {
     private async loadConnections(): Promise<void> {
         if (!this.options.onRequestConnections) return;
         try {
-            this.connections = await this.options.onRequestConnections();
-            this.updateConnectionOptions();
-            this.updateConnQuick();
-            this.updateTierQuick();
-            this.updateTierCardModels();
+            this.connectionTier.setConnections(await this.options.onRequestConnections());
         } catch (e) {
             console.error('[ChatInput] Failed to load connections:', e);
         }
@@ -872,16 +756,11 @@ export class ChatInput implements IChatInputPresenter {
             this.adjustTextareaHeight();
         }
         if (this.agentPickerBtn) this.updateAgentTrigger();
-        if (this.connectionSelect && this.config.settings.connectionId) {
-            this.connectionSelect.value = this.config.settings.connectionId;
-        }
+        this.connectionTier.setConnectionId(this.config.settings.connectionId);
+        this.connectionTier.setModelTier(this.config.settings.modelTier ?? 'auto');
         if (this.flowIdInput) this.flowIdInput.value = this.config.settings.flowId ?? '';
         if (this.branchModeSelect) this.branchModeSelect.value = this.config.settings.branchMode ?? 'continue';
         if (this.retentionModeSelect) this.retentionModeSelect.value = this.config.settings.retentionMode ?? 'persistent';
-        if (this.connQuickBtn) this.updateConnQuick();
-        this.updateTierPills(this.config.settings.modelTier ?? 'auto');
-        if (this.tierQuickBtn) this.updateTierQuick();
-        this.updateTierCardModels();
         if (this.historySlider) {
             this.historySlider.value = (this.config.settings.historyLength ?? -1).toString();
             this.updateHistoryDisplay();
@@ -912,7 +791,7 @@ export class ChatInput implements IChatInputPresenter {
     private syncConfigFromUI(): void {
         this.config.text = this.textarea?.value || '';
         this.config.agentId = this.currentAgentId;
-        this.config.settings.connectionId = this.connectionSelect?.value || undefined;
+        this.config.settings.connectionId = this.connectionTier.getConnectionId();
         // modelTier is kept in-memory; pills don't have a native value to read
         this.config.settings.historyLength = parseInt(this.historySlider?.value || '-1');
         this.config.settings.streamMode = !(this.streamToggle?.checked ?? false);
@@ -942,8 +821,8 @@ export class ChatInput implements IChatInputPresenter {
                 this.settingsPanel.classList.remove('llm-input__settings-panel--entering');
             });
             // Lazily load skills when panel opens (skills always visible now)
-            if (this.skills.length === 0 && this.options.onRequestSkills) {
-                this.reloadSkills();
+            if (this.options.onRequestSkills) {
+                this.skillPanel.reload();
             }
         }
     }
@@ -951,13 +830,12 @@ export class ChatInput implements IChatInputPresenter {
     private clearSetting(type: 'connection' | 'tier' | 'history' | 'stream'): void {
         switch (type) {
             case 'connection':
-                this.connectionSelect.value = '';
+                this.connectionTier.setConnectionId(undefined);
                 this.config.settings.connectionId = undefined;
                 break;
             case 'tier':
                 this.config.settings.modelTier = 'auto';
-                this.updateTierPills('auto');
-                this.updateTierQuick();
+                this.connectionTier.setModelTier('auto');
                 break;
             case 'history':
                 this.historySlider.value = '-1';
@@ -1048,42 +926,15 @@ export class ChatInput implements IChatInputPresenter {
      * - @mention 分区：当 onRequestFiles 回调已注入时显示
      */
     showHelp(): void {
-        if (this.helpVisible) return;
-
-        const hasFiles = !!this.options.onRequestFiles;
-
-        this.helpBody.innerHTML = ChatInputTemplates.renderHelpContent(hasFiles);
-        this.helpPanel.style.display = 'block';
-        this.helpBtn.classList.add('active');
-        this.helpVisible = true;
-
-        // Close settings panel if open
-        this.toggleSettings(false);
+        this.helpPanel.show();
     }
 
     private hideHelp(): void {
-        if (!this.helpVisible) return;
-        this.helpPanel.style.display = 'none';
-        this.helpBtn.classList.remove('active');
-        this.helpVisible = false;
+        this.helpPanel.hide();
     }
 
     private toggleHelp(): void {
-        if (this.helpVisible) this.hideHelp();
-        else this.showHelp();
-    }
-
-    private bindHelpEvents(): void {
-        // Close button inside panel
-        this.helpPanel?.querySelector('.llm-input__help-close')
-            ?.addEventListener('click', () => this.hideHelp());
-
-        // Click outside help panel closes it (moreBtn not excluded since help is triggered via popup)
-        document.addEventListener('click', (e: MouseEvent) => {
-            if (this.helpVisible && !this.helpPanel.contains(e.target as Node)) {
-                this.hideHelp();
-            }
-        });
+        this.helpPanel.toggle();
     }
 
     // ── Skill management ─────────────────────────────────────────────────────
@@ -1095,64 +946,7 @@ export class ChatInput implements IChatInputPresenter {
      * 也可在用户点击 Refresh 按钮时由内部调用 onRequestSkills 回调。
      */
     refreshSkills(skills: SkillInfo[]): void {
-        this.skills = skills;
-        this.renderSkillsList();
-    }
-
-    private async reloadSkills(): Promise<void> {
-        if (!this.options.onRequestSkills || this.isLoadingSkills) return;
-        this.isLoadingSkills = true;
-        this.skillsList.innerHTML = '<span class="llm-input__skills-empty">Loading…</span>';
-        try {
-            const skills = await this.options.onRequestSkills();
-            this.refreshSkills(skills);
-        } catch {
-            this.skillsList.innerHTML = '<span class="llm-input__skills-empty">Failed to load skills</span>';
-        } finally {
-            this.isLoadingSkills = false;
-        }
-    }
-
-    private renderSkillsList(): void {
-        if (!this.skillsList) return;
-        if (this.skills.length === 0) {
-            this.skillsList.innerHTML = '<span class="llm-input__skills-empty">No skills available</span>';
-            return;
-        }
-        this.skillsList.innerHTML = this.skills
-            .map((s) => ChatInputTemplates.renderSkillItem(s))
-            .join('');
-    }
-
-    private async loadSkill(skillId: string): Promise<void> {
-        if (!this.options.onLoadSkill) return;
-        const btn = this.skillsList.querySelector(`[data-skill="${skillId}"]`) as HTMLButtonElement | null;
-        if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
-        try {
-            await this.options.onLoadSkill(skillId);
-            // Update local state and re-render
-            const skill = this.skills.find((s) => s.id === skillId);
-            if (skill) skill.loaded = true;
-            this.renderSkillsList();
-        } catch (e) {
-            console.error('[ChatInput] loadSkill failed:', e);
-            if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
-        }
-    }
-
-    private async unloadSkill(skillId: string): Promise<void> {
-        if (!this.options.onUnloadSkill) return;
-        const btn = this.skillsList.querySelector(`[data-skill="${skillId}"]`) as HTMLButtonElement | null;
-        if (btn) { btn.disabled = true; btn.textContent = 'Unloading…'; }
-        try {
-            await this.options.onUnloadSkill(skillId);
-            const skill = this.skills.find((s) => s.id === skillId);
-            if (skill) skill.loaded = false;
-            this.renderSkillsList();
-        } catch (e) {
-            console.error('[ChatInput] unloadSkill failed:', e);
-            if (btn) { btn.disabled = false; btn.textContent = 'Unload'; }
-        }
+        this.skillPanel.refresh(skills);
     }
 
     private updateActiveBadges(): void {
@@ -1166,7 +960,7 @@ export class ChatInput implements IChatInputPresenter {
         let hasActive = false;
 
         if (this.config.settings.connectionId) {
-            const conn = this.connections.find(c => c.id === this.config.settings.connectionId);
+            const conn = this.connectionTier.getConnections().find(c => c.id === this.config.settings.connectionId);
             const text = connBadge?.querySelector('.llm-input__badge-text');
             if (text) text.textContent = conn?.name || this.config.settings.connectionId;
             if (connBadge) {
@@ -1205,31 +999,6 @@ export class ChatInput implements IChatInputPresenter {
 
         activeContainer.style.display = hasActive ? 'flex' : 'none';
         this.settingsBtn.classList.toggle('has-overrides', hasActive);
-        this.updateConnQuick();
-    }
-
-    private updateTierPills(tier: 'auto' | ModelTier): void {
-        this.tierPillsContainer?.querySelectorAll('.llm-input__tier-card').forEach(card => {
-            card.classList.toggle('active', (card as HTMLElement).dataset.tier === tier);
-        });
-    }
-
-    /** Refresh the model-name subtitle on each tier card to match the currently selected connection. */
-    private updateTierCardModels(): void {
-        const tiers = this.resolveEffectiveTiers();
-
-        // 'auto' card shows the optimal model name (indicates what will actually be used)
-        const modelLabels: Record<string, string> = {
-            auto:     tiers.optimal ?? '',
-            optimal:  tiers.optimal ?? '',
-            standard: tiers.standard ?? '',
-            fast:     tiers.fast ?? '',
-        };
-
-        this.tierPillsContainer?.querySelectorAll('[data-tier-model]').forEach(el => {
-            const t = (el as HTMLElement).dataset.tierModel ?? '';
-            el.textContent = modelLabels[t] ?? '';
-        });
     }
 
     private notifyConfigChange(): void {
@@ -1256,13 +1025,6 @@ export class ChatInput implements IChatInputPresenter {
         this.updateAgentTrigger();
     }
 
-    private updateConnectionOptions(): void {
-        if (!this.connectionSelect) return;
-        this.connectionSelect.innerHTML = ChatInputTemplates.renderConnectionOptions(
-            this.connections, this.config.settings.connectionId
-        );
-    }
-
     // ── Agent Picker methods ──────────────────────────────────────────────────
 
     private getOrCreateAgentPopup(): PopupPanel {
@@ -1278,7 +1040,7 @@ export class ChatInput implements IChatInputPresenter {
     }
 
     private openAgentPicker(): void {
-        this.connPopup?.hide();
+        this.connectionTier.hidePopups();
         const popup = this.getOrCreateAgentPopup();
         popup.show(this.buildAgentItems(), {
             onSelect: (item) => this.selectAgent(item.id),
@@ -1311,7 +1073,7 @@ export class ChatInput implements IChatInputPresenter {
         this.config.agentId = id;
         this.currentAgentId = id;
         this.updateAgentTrigger();
-        this.updateTierCardModels();
+        this.connectionTier.refreshForAgentChange();
         this.options.onExecutorChange?.(id);
         this.notifyConfigChange();
     }
@@ -1366,7 +1128,7 @@ export class ChatInput implements IChatInputPresenter {
 
     private openPromptPicker(): void {
         this.agentPopup?.hide();
-        this.connPopup?.hide();
+        this.connectionTier.hidePopups();
         const popup = this.getOrCreatePromptPopup();
         popup.show(this.buildPromptItems(), {
             onSelect: (item) => this.selectPrompt(parseInt(item.id, 10)),
@@ -1400,190 +1162,4 @@ export class ChatInput implements IChatInputPresenter {
         this.textarea.focus();
     }
 
-    // ── Connection Quick-Switch methods ──────────────────────────────────────
-
-    private getOrCreateConnPopup(): PopupPanel {
-        if (!this.connPopup) {
-            this.connPopup = new PopupPanel(this.connQuickBtn, {
-                emptyText: 'No connections',
-                animated: true,
-                maxVisible: 30,
-            });
-        }
-        return this.connPopup;
-    }
-
-    private openConnPicker(): void {
-        this.agentPopup?.hide();
-        const popup = this.getOrCreateConnPopup();
-        popup.show(this.buildConnItems(), {
-            onSelect: (item) => {
-                if (item.id === '__manage') {
-                    this.options.onNavigateSettings?.({ resourceId: 'connections' });
-                    return;
-                }
-                this.selectConnection(item.id);
-            },
-        });
-    }
-
-    private toggleConnPicker(): void {
-        const popup = this.getOrCreateConnPopup();
-        if (popup.isVisible) popup.hide();
-        else this.openConnPicker();
-    }
-
-    /** Convert connections to PopupItem[] for the picker. */
-    private buildConnItems(): PopupItem[] {
-        const currentId = this.config.settings.connectionId ?? '';
-        const items: PopupItem[] = [
-            { id: '', label: 'Agent Default', icon: currentId === '' ? '✓' : '' },
-        ];
-
-        // Sort: has API key first, then no-key connections
-        const withKey    = this.connections.filter(c => c.hasApiKey);
-        const withoutKey = this.connections.filter(c => !c.hasApiKey);
-
-        for (const c of withKey) {
-            items.push({
-                id: c.id,
-                label: c.name,
-                description: c.provider,
-                icon: c.id === currentId ? '✓' : (c.hasTiers ? '⚡' : ''),
-            });
-        }
-        for (const c of withoutKey) {
-            items.push({
-                id: c.id,
-                label: c.name,
-                description: c.provider,
-                icon: c.id === currentId ? '✓' : '',
-                group: '⚠️ 需配置 API Key',
-            });
-        }
-
-        items.push(
-            { id: '__manage', label: '管理连接 →', icon: '⚙️', description: '配置 Provider 和模型层级' },
-        );
-        return items;
-    }
-
-    /** Select a connection from the quick-switch popup ('' = clear override). */
-    private selectConnection(id: string): void {
-        this.config.settings.connectionId = id || undefined;
-        if (this.connectionSelect) this.connectionSelect.value = id;
-        this.updateConnQuick();
-        this.updateTierCardModels();
-        this.updateActiveBadges();
-        this.notifyConfigChange();
-    }
-
-    /** Update the conn-quick button label and clear button visibility. */
-    private updateConnQuick(): void {
-        if (!this.connQuickLabel) return;
-        const id = this.config.settings.connectionId;
-        if (id) {
-            const conn = this.connections.find(c => c.id === id);
-            this.connQuickLabel.textContent = conn?.name ?? id;
-            this.connQuickClear.style.display = '';
-            this.connQuickBtn.classList.add('llm-input__conn-quick--active');
-        } else {
-            this.connQuickLabel.textContent = 'Default';
-            this.connQuickClear.style.display = 'none';
-            this.connQuickBtn.classList.remove('llm-input__conn-quick--active');
-        }
-    }
-
-    // ── Tier Quick-Switch methods ─────────────────────────────────────────────
-
-    private getOrCreateTierPopup(): PopupPanel {
-        if (!this.tierPopup) {
-            this.tierPopup = new PopupPanel(this.tierQuickBtn, {
-                emptyText: 'No tiers configured',
-                animated: true,
-            });
-        }
-        return this.tierPopup;
-    }
-
-    private openTierPicker(): void {
-        this.connPopup?.hide();
-        this.agentPopup?.hide();
-        const popup = this.getOrCreateTierPopup();
-        popup.show(this.buildTierItems(), {
-            onSelect: (item) => this.selectTier(item.id as 'auto' | ModelTier),
-        });
-    }
-
-    private toggleTierPicker(): void {
-        const popup = this.getOrCreateTierPopup();
-        if (popup.isVisible) popup.hide();
-        else this.openTierPicker();
-    }
-
-    /**
-     * Resolve the effective tier→modelName map for the current session.
-     * Priority: connection override → agent's default connection → first available connection.
-     */
-    private resolveEffectiveTiers(): Partial<Record<string, string>> {
-        const overrideId = this.config.settings.connectionId;
-        let conn = overrideId
-            ? this.connections.find(c => c.id === overrideId)
-            : undefined;
-
-        if (!conn) {
-            const agent = this.agents.find(a => a.id === this.config.agentId);
-            conn = agent?.connectionId
-                ? this.connections.find(c => c.id === agent.connectionId)
-                : this.connections[0];
-        }
-        return conn?.tiers ?? {};
-    }
-
-    /** Build tier popup items, resolving model names from the selected connection's tiers. */
-    private buildTierItems(): PopupItem[] {
-        const currentTier = this.config.settings.modelTier ?? 'auto';
-        const tierMap = this.resolveEffectiveTiers();
-
-        const items: PopupItem[] = [
-            { id: 'auto', label: 'Auto', description: tierMap.optimal || 'Use agent default', icon: currentTier === 'auto' ? '✓' : '' },
-            { id: 'optimal', label: '最优', description: tierMap.optimal, icon: currentTier === 'optimal' ? '✓' : '' },
-        ];
-        if (tierMap.standard) {
-            items.push({ id: 'standard', label: '标准', description: tierMap.standard, icon: currentTier === 'standard' ? '✓' : '' });
-        }
-        if (tierMap.fast) {
-            items.push({ id: 'fast', label: '快速', description: tierMap.fast, icon: currentTier === 'fast' ? '✓' : '' });
-        }
-        return items;
-    }
-
-    /** Select a tier from the quick-switch popup ('auto' = clear override). */
-    private selectTier(tier: 'auto' | ModelTier): void {
-        this.config.settings.modelTier = tier;
-        this.updateTierQuick();
-        this.updateTierPills(tier);
-        this.updateActiveBadges();
-        this.notifyConfigChange();
-    }
-
-    /** Update the tier-quick button label, active class, and clear button visibility. */
-    private updateTierQuick(): void {
-        if (!this.tierQuickLabel) return;
-        const tier = this.config.settings.modelTier ?? 'auto';
-        const TIER_LABELS: Record<string, string> = { optimal: '最优', standard: '标准', fast: '快速' };
-        if (tier === 'auto') {
-            const autoModel = this.resolveEffectiveTiers().optimal;
-            this.tierQuickLabel.textContent = autoModel ? `Auto (${autoModel})` : 'Auto';
-        } else {
-            this.tierQuickLabel.textContent = TIER_LABELS[tier] ?? tier;
-        }
-        if (tier !== 'auto') {
-            this.tierQuickClear.style.display = '';
-            this.tierQuickBtn.classList.add('llm-input__tier-quick--active');
-        } else {
-            this.tierQuickClear.style.display = 'none';
-            this.tierQuickBtn.classList.remove('llm-input__tier-quick--active');
-        }
-    }
 }

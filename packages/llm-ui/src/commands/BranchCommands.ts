@@ -11,7 +11,6 @@ export class CreateBranchCommand extends Command<{ sourceNodeId: string }> {
     protected readonly name = 'Create Branch';
 
     protected async execute({ sourceNodeId }: { sourceNodeId: string }): Promise<void> {
-        console.debug('[CreateBranchCommand] execute', { sourceNodeId });
         const branchName = await this.promptBranchName();
         if (branchName === null) return;
         await this.ctx.branchService.create(sourceNodeId, branchName);

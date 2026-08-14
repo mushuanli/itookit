@@ -1,6 +1,7 @@
+import { assertEffectGrant } from '@itookit/harness';
 import type { ISkillService, SkillLoadResult } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/harness';
-import { assertCapabilityGrant, resolveCapability, type CapabilitySource } from '../ports/capabilities';
+import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 
 export interface SkillLoadEffectRequest { resourceHandleId: string; skillId: string; }
 
@@ -17,7 +18,7 @@ export class SkillLoadEffectAdapter implements EffectAdapter<SkillLoadEffectRequ
     ) {}
 
     async execute(request: SkillLoadEffectRequest, context: EffectExecutionContext): Promise<SkillLoadResult> {
-        assertCapabilityGrant(context, request.resourceHandleId, 'skill');
+        assertEffectGrant(context, request.resourceHandleId, 'skill');
         if (!request.skillId.trim()) throw new Error('Skill id is required');
         const service = await resolveCapability(this.service, context);
         const result = await service.loadSkill(request.skillId);

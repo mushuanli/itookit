@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Harness, TaskHandle } from '@itookit/harness';
-import type { IAgentConfigService } from '@itookit/llm-conversation';
+import type { IAgentConfigService } from '@itookit/llm-session';
 import { PrivilegedCommandService } from '../src/harness/privileged-command-service';
 
 describe('PrivilegedCommandService', () => {

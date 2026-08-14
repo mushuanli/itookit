@@ -10,7 +10,7 @@ import type { EventEnvelope, Harness, InteractionRequest, JsonValue } from '@ito
 
 import {
     IChatEngine, IAgentConfigService, SessionManager, getSessionManager,
-} from '@itookit/llm-conversation';
+} from '@itookit/llm-session';
 
 // Domain — 只依赖接口和类型
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
@@ -62,7 +62,7 @@ import { LayoutTemplates } from '../components/templates/LayoutTemplates';
 
 import { HistoryPlugin } from '../components/input/plugins/HistoryPlugin';
 import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlugin';
-import { getPromptHistory } from '@itookit/llm-conversation';
+import { getPromptHistory } from '@itookit/llm-session';
 import { AssetManagerUI } from '@itookit/mdxeditor';
 
 const ACTIVE_PRIVILEGED_TASK_KEY = 'ui.privileged.active-task';
@@ -93,10 +93,10 @@ export interface LLMEditorOptions extends EditorOptions {
  *
  * 职责边界：
  * ┌──────────────────────────────────┐
- * │  ✅ 组装依赖图                    │
- * │  ✅ 路由事件到 Command/View       │
- * │  ✅ IEditor 接口实现              │
- * │  ✅ 生命周期管理                  │
+ * │  组装依赖图                       │
+ * │  路由事件到 Command/View          │
+ * │  IEditor 接口实现                 │
+ * │  生命周期管理                     │
  * ├──────────────────────────────────┤
  * │  ❌ 直接操作 DOM                  │
  * │  ❌ 业务逻辑计算                  │
@@ -723,7 +723,6 @@ export class LLMWorkspaceEditor implements IEditor {
                 () => this.sessionService.getSessionSettings(),
                 'Load session settings', 'warn'
             );
-        console.log('[Shell] loadSession VFS settings:', JSON.stringify(sessionSettings));
 
         this.stateManager.restoreInputState(this.chatInput, {
             initialInputState: effectiveInitialInputState,

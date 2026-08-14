@@ -458,7 +458,7 @@ describe('Harness durable kernel', () => {
 
     it('delivers cross-session messages through a durable outbox', async () => {
         const source = await harness.createSession({ id: 'session-one', storage: binding });
-        const pending = await source.send('session-two', 'context.updated', { revision: 1 });
+        const pending = await source.sendToSession('session-two', 'context.updated', { revision: 1 });
         expect(pending.status).toBe('pending');
 
         const target = await harness.createSession({

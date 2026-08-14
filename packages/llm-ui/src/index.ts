@@ -6,13 +6,13 @@ import { LLMWorkspaceEditor, LLMEditorOptions } from './shell/LLMWorkspaceEditor
 import {
     VFSAgentService,
     IChatEngine,
-} from '@itookit/llm-conversation';
+} from '@itookit/llm-session';
 import {formatDefaultFileTitle} from '@itookit/common';
 import { IEditor } from '@itookit/ui-common';
 import type { ILLMService, ICommandBus } from '@itookit/common';
 import { EditorFactory, EditorOptions } from '@itookit/ui-common';
 import type { Harness } from '@itookit/harness';
-import { AgentConfigEditor } from './editors/AgentConfigEditor';
+import { AgentConfigEditor } from '@itookit/llm-settings-ui';
 
 export type {
     IPrivilegedCommandService,
@@ -20,17 +20,17 @@ export type {
     ExecCommandRequest,
 } from './domain/ports/IPrivilegedCommandService';
 
-export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
-export { ProviderSettingsEditor } from './editors/ProviderSettingsEditor';
-export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
-export { SkillSettingsEditor } from './editors/SkillSettingsEditor';
-export { CostEditor } from './editors/CostEditor';
+export { ConnectionSettingsEditor } from '@itookit/llm-settings-ui';
+export { ProviderSettingsEditor } from '@itookit/llm-settings-ui';
+export { MCPSettingsEditor } from '@itookit/llm-settings-ui';
+export { SkillSettingsEditor } from '@itookit/llm-settings-ui';
+export { CostEditor } from '@itookit/llm-settings-ui';
 export { DagWorkbench } from './components/DagWorkbench';
 export type { DagWorkbenchOptions } from './components/DagWorkbench';
 
-import type { PromptHistoryService } from '@itookit/llm-conversation';
+import type { PromptHistoryService } from '@itookit/llm-session';
 import type { IAgentManagementService } from '@itookit/common';
-import { SkillSettingsEditor } from './editors/SkillSettingsEditor';
+import { SkillSettingsEditor } from '@itookit/llm-settings-ui';
 
 /**
  * EditorFactory for the Skills workspace.
@@ -78,7 +78,7 @@ export const createLLMFactory = (
     },
 ): EditorFactory => {
 
-    // ✅ 跟踪进行中的创建，按 nodeId 去重
+    // 跟踪进行中的创建，按 nodeId 去重
     // 防止外部框架在短时间内对同一 nodeId 重复调用 factory
     const pendingCreations = new Map<string, Promise<IEditor>>();
 
@@ -93,12 +93,10 @@ export const createLLMFactory = (
             const newNode = await engine.createFile(options.title || formatDefaultFileTitle(), null);
             effectiveNodeId = newNode.path;
             isNewSession = true;
-            console.log(`[LLMFactory] New file created: ${effectiveNodeId}`);
         }
 
-        // ✅ 去重：如果同一个 nodeId 正在创建中，等待并复用
+        // 去重：如果同一个 nodeId 正在创建中，等待并复用
         if (effectiveNodeId && pendingCreations.has(effectiveNodeId)) {
-            console.warn(`[LLMFactory] Duplicate creation for ${effectiveNodeId}, reusing pending instance`);
             try {
                 return await pendingCreations.get(effectiveNodeId)!;
             } catch {
@@ -119,19 +117,17 @@ export const createLLMFactory = (
             privilegedCommands: deps.privilegedCommands,
         };
 
-        // ✅ 将创建过程包装为 Promise，注册到 pendingCreations
+        // 将创建过程包装为 Promise，注册到 pendingCreations
         const createPromise = (async () => {
             try {
                 const editor = new LLMWorkspaceEditor(container, editorOptions);
                 await editor.init(container, options.initialContent);
-
-                console.log(`[LLMFactory] Editor created successfully, isNew: ${isNewSession}`);
                 return editor;
             } catch (e) {
                 console.error(`[LLMFactory] Editor creation failed for ${effectiveNodeId}:`, e);
                 throw e;
             } finally {
-                // ✅ 无论成功失败，都清理 pending 记录
+                // 无论成功失败，都清理 pending 记录
                 if (effectiveNodeId) {
                     pendingCreations.delete(effectiveNodeId);
                 }

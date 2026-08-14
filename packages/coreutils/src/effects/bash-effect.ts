@@ -1,6 +1,7 @@
+import { assertEffectGrant } from '@itookit/harness';
 import type { IToolService, ToolInvokeResult } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/harness';
-import { assertCapabilityGrant, resolveCapability, type CapabilitySource } from '../ports/capabilities';
+import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 import { requireToolSuccess } from './tool-call-effect';
 
 export interface BashEffectRequest {
@@ -17,7 +18,7 @@ export class BashEffectAdapter implements EffectAdapter<BashEffectRequest, ToolI
     constructor(private readonly service: CapabilitySource<IToolService>) {}
 
     async execute(request: BashEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
-        assertCapabilityGrant(context, request.resourceHandleId, 'process');
+        assertEffectGrant(context, request.resourceHandleId, 'process');
         if (!request.command.trim()) throw new Error('Process command is required');
         const service = await resolveCapability(this.service, context);
         return requireToolSuccess(await service.invoke({

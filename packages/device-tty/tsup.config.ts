@@ -6,7 +6,7 @@ export default defineConfig({
     dts: true,
     clean: true,
     sourcemap: true,
-    external: ['@itookit/common'],
+    external: ['@itookit/common', 'node-pty'],
     splitting: false,
     treeshake: true,
     platform: 'node',

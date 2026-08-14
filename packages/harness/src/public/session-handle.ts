@@ -68,7 +68,7 @@ export class DefaultSessionHandle implements SessionHandle {
         return this.kernel.sharedHistory(this.id, key);
     }
 
-    send<T extends JsonValue>(target: string, topic: string, payload: T): Promise<CrossSessionMessage<T>> {
+    sendToSession<T extends JsonValue>(target: string, topic: string, payload: T): Promise<CrossSessionMessage<T>> {
         return this.kernel.sendCrossSession(this.id, target, topic, payload);
     }
 

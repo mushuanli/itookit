@@ -1,6 +1,7 @@
+import { assertEffectGrant } from '@itookit/harness';
 import type { IToolService, ToolInvokeResult } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/harness';
-import { assertCapabilityGrant, resolveCapability, type CapabilitySource } from '../ports/capabilities';
+import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 import { requireToolSuccess } from './tool-call-effect';
 
 export type TtyEffectRequest =
@@ -62,7 +63,7 @@ export class TtyEffectAdapter implements EffectAdapter<TtyEffectRequest, ToolInv
 }
 
 function assertTtyGrant(handleId: string, context: EffectExecutionContext): void {
-    assertCapabilityGrant(context, handleId, 'tty');
+    assertEffectGrant(context, handleId, 'tty');
 }
 
 function ownershipKey(sessionId: string, handleId: string): string {

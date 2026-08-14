@@ -1,7 +1,7 @@
 // @file: llm-ui/commands/CommandContext.ts
 
 import type { ICommandBus, ISession } from '@itookit/common';
-import type { SessionGroup } from '@itookit/llm-conversation';
+import type { SessionGroup } from '@itookit/llm-session';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { IEditorEventBus } from '../domain/events';

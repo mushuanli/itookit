@@ -7,5 +7,5 @@ export default defineConfig({
     sourcemap: true,
     banner: { js: '#!/usr/bin/env node' },
     noExternal: [/^@itookit\//],
-    external: ['better-sqlite3'],
+    external: ['better-sqlite3', 'node-pty'],
 });
