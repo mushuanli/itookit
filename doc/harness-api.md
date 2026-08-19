@@ -14,6 +14,7 @@
 - [工具函数](#工具函数)
 - [错误模型](#错误模型)
 - [存储：SeqFileHarnessStore](#存储)
+- [源码结构：文件与路径](#源码结构文件与路径)
 
 ---
 
@@ -402,3 +403,97 @@ catch (e) {
 ## 存储
 
 `SeqFileHarnessStore` —— 基于 SeqFile（顺序日志 + snapshot）的持久化实现。所有 Task 状态/事件/effect/resource/budget 落盘，重启后 `Harness.recover()` 恢复（lease 过期任务重新入队）。对外通过 `SessionStorageResolver` 解析到具体 `IModuleFS` 后端（VFS/localFS/IndexedDB/内存）。
+
+---
+
+## 源码结构：文件与路径
+
+`@itookit/harness` 的公共 API 全部从 `packages/harness/src/index.ts` 根导出（`exports['.']` 指向 `src/index.ts`）。包内按 **六层** 组织，依赖单向向下：
+
+```
+packages/harness/src/
+├── index.ts                      根导出（唯一公共入口）
+├── domain/                       纯类型 + 错误模型（无逻辑）
+│   ├── types.ts                  SessionId/TaskId/JsonValue、SessionRecord/TaskRecord、
+│   │                             TaskSpec/TaskSnapshot/TaskAttempt、ProgramRef/StorageBindingRef、
+│   │                             Decision/WaitSpec/KernelAction/TaskInputEvent/RetryPolicy、
+│   │                             ResourceRecord/ResourceHandle/ResourceSpec/BudgetAccount、
+│   │                             SharedStateEntry/CrossSessionMessage/ContextCommit/ContextBranch、
+│   │                             SessionStorageResolver/WorkspaceAdapter 等全部核心类型
+│   ├── errors.ts                 HarnessErrorCode 枚举 + HarnessError 类 + harnessError() 工厂
+│   └── interaction.ts            InteractionKind/ApprovalDecision、InteractionRequest/Record/Response
+├── ports/                        内核向外的契约（注册面）
+│   ├── registry.ts               ProgramRegistry / EffectRegistry / StorageResolverRegistry / WorkspaceRegistry
+│   └── plugin.ts                 HarnessRegistration（内核能力面）+ HarnessPlugin（装配插件）
+├── application/                  内核编排（Harness 主类 + 决策引擎）
+│   ├── harness.ts                Harness 主类 + HarnessOptions（入口）
+│   ├── capabilities.ts           bindCapabilities() + CapabilityBinding（能力绑定统一入口）
+│   ├── decision.ts               状态机核心：transition()/shouldRetry()/retryTask()/validateDecision()
+│   │                             以及 normalizeInputEvent()/failureDecision()/terminal()/mergeReport()
+│   ├── actions.ts                decisionSideEffects()/prepareSpawns()（副作用与 spawn 展开）
+│   ├── effect-utils.ts           normalizeEffect()/addEffect()/addInteraction()/abortError()/
+│   │                             effectFailure()/serializeError()/assertEffectGrant()/interactionApproved()
+│   ├── durability.ts             assertDurableValue()/inspectDurableValue()（决策 payload 可持久化校验）
+│   └── workspace-utils.ts        workspaceContext()/workspaceSnapshot()/assertWorkspace()（快照/合并助手）
+├── public/                       对外句柄实现（组合窄接口）
+│   ├── session-handle.ts         DefaultSessionHandle（实现 SessionHandle 8 个窄接口）
+│   ├── task-handle.ts            DefaultTaskHandle<O>（实现 TaskHandle<O>）
+│   └── event-stream.ts           waitForChange()（事件流等待工具）
+├── runtime/                      调度运行时（内核内部，不导出）
+│   ├── durable-poller.ts         DurablePoller — ready 候选轮询（claimReady→execute→applyDecision）
+│   └── lease-heartbeat.ts        LeaseHeartbeat — 任务租约心跳续期
+└── infrastructure/seqfile/       SeqFile 持久化实现
+    ├── store.ts                  SeqFileHarnessStore（对外存储实现）+ TaskClaim/EffectClaim/
+    │                             EffectCompletion/PreparedSpawn/TaskCommitSideEffects
+    ├── store-helpers.ts          事务助手：assertClaim/claimTask/finishAttemptTx/writeTaskTx、
+    │                             effect 恢复、budget/resource/context/shared 读写 TX、key 构造
+    └── seqfile-core.ts           路径/键名函数 + ensureSessionLayout/ensureTaskLayout/ensureSeqFile
+```
+
+### SeqFile 持久化路径设定
+
+每个 Session 绑定一个存储根目录（`StorageBindingRef` → `ResolvedStorageBinding.rootPath`，对应一个 `IModuleFS` 目录），布局由 `ensureSessionLayout()` 建立：
+
+```
+<rootPath>/
+├── catalog.seq        会话目录（全局）：session/<id> → SessionRecord（含生命周期状态）
+├── session.seq        会话主记录（SESSION_KEY → 最新 SessionRecord）
+├── shared.seq         会话共享状态：value/<key>、head/<key>、history/<key>/
+├── context.seq        上下文提交：commit/<id>、branch/<name>（默认 main）
+├── messages.seq       跨会话消息：outbox/<id>、inbox/<id>
+├── events.seq         会话事件流（EventEnvelope，单调 sequence）
+├── graph.seq          Task 依赖图（dependsOn/waiter 关系）
+├── resources.seq      资源/句柄/预算：resource/<id>、handle/<id>、budget/<resourceId>/<dimension>
+├── index.seq          Task 索引（indexTask）
+└── tasks/<taskId>/
+    └── task.seq       Task 主日志：attempt/<id>、snapshot/<version>、wait/task/<target>/<waiter>、
+                       spawn/<parent>/<key>、workspace/snapshot/<id>、workspace/diff/<id>
+```
+
+**键命名规则**（`seqfile-core.ts` 导出的 `*Path()` / `*Key()` 函数）：
+
+| 函数 | 路径 / 键 | 用途 |
+|---|---|---|
+| `catalogPath(root)` | `catalog.seq` | 全局会话目录 |
+| `sessionPath(root)` | `session.seq` | 会话主记录 |
+| `sharedPath(root)` | `shared.seq` | 共享状态 |
+| `contextPath(root)` | `context.seq` | 上下文提交 |
+| `messagesPath(root)` | `messages.seq` | 跨会话消息 |
+| `eventsPath(root)` | `events.seq` | 会话事件流 |
+| `resourcesPath(root)` | `resources.seq` | 资源/句柄/预算 |
+| `indexPath(root)` | `index.seq` | Task 索引 |
+| `graphPath(root)` | `graph.seq` | Task 依赖图 |
+| `taskPath(root, id)` | `tasks/<id>/task.seq` | 单个 Task 主日志 |
+| `attemptKey(id)` | `attempt/<id>` | Task 尝试记录 |
+| `snapshotKey(version)` | `snapshot/<16 位补零版本>` | Task 状态快照 |
+| `taskWaitKey(targetId, waiterId)` | `wait/task/<target>/<waiter>` | 任务等待注册 |
+| `spawnMappingKey(parentId, key)` | `spawn/<parent>/<key>` | spawn 映射 |
+| `outboxKey(id)` / `inboxKey(id)` | `outbox/<id>` / `inbox/<id>` | 消息投递 |
+| `sharedKey(key)` / `sharedHeadKey(key)` | `value/<key>` / `head/<key>` | 共享值 + 头版本 |
+| `sharedHistoryPrefix(key)` | `history/<key>/` | 共享值版本历史 |
+| `contextCommitKey(id)` / `contextBranchKey(name)` | `commit/<id>` / `branch/<name>` | 上下文提交/分支 |
+| `resourceKey(id)` / `handleKey(id)` | `resource/<id>` / `handle/<id>` | 资源/句柄 |
+| `budgetKey(resourceId, dimension)` | `budget/<resourceId>/<dimension>` | 预算账户 |
+| `workspaceSnapshotKey(id)` / `workspaceDiffKey(id)` | `workspace/snapshot/<id>` / `workspace/diff/<id>` | 工作区快照/差异 |
+
+**约定**：存储根必须是支持事务性 SeqFile 的 `IModuleFS`（`requireTransactionalSeq` 校验，缺失时报错）；`createSession()` 将会话登记进全局 `catalog.seq`，`openSession()` 从 `session.seq` 读取主记录后按需恢复 `tasks/` 下的 Task。
