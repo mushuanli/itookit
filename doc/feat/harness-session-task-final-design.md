@@ -5,6 +5,8 @@
 > 状态：最终设计，已按当前实现校准  
 > 范围：定义通用、持久、可恢复、可扩展的 Harness Session/Task 内核，覆盖 LLM loop、动态 DAG、Bash、Skill、MCP、跨进程与跨 Session 协作。
 
+> **包名对照（2026-08-15 拆分后）**：本文写作时使用的 `llm-runtime` → 现为 `@itookit/llm-programs`；`llm-conversation` → 现为 `@itookit/llm-session`（会话）+ `@itookit/llm-flow`（DAG 编排）。T19 等处提到的 `llm-harness` 已删除，调度统一由 `@itookit/harness` 承担。
+
 ## 0. 实施任务与完成状态
 
 状态定义：`✅ 已完成` 表示代码已落地且相关测试/类型检查通过；`🟡 待验证` 表示代码已落地但尚未完成全部平台验证；`🚧 进行中` 表示仍在迁移或补齐；`⬜ 未开始` 表示属于后续阶段。

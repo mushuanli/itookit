@@ -2,18 +2,17 @@
 
 设置模块 — 全局配置、日志、存储、标签、数据恢复和系统 VFS 浏览。
 
-依赖：`@itookit/common`、`@itookit/device-llm`、`@itookit/llm-ui`、`@itookit/memory-manager`。
+依赖（peer）：`@itookit/common`、`@itookit/device-llm`、`@itookit/stdio`、`@itookit/ui-common`、`@itookit/vfs-ui`、`@itookit/mdxeditor`。LLM 设置编辑器（Provider/Connection/MCP/Skill/Cost/Agent）来自 `@itookit/llm-settings-ui`，经 `LLMUIEditors` 接口注入（避免上行依赖）。
 
 ## Architecture
 
 ```
 src/
-├── editors/           ← 13 个设置编辑器
+├── editors/           ← 8 个设置编辑器（本包自有）
 │   ├── system-fs/     ← SystemVFSEngine + SystemFSExploreEditor (跨模块只读 VFS 浏览)
-│   ├── Storage/Provider/Connection/Tag/Contact/MCP/Agent/Skill
+│   ├── Storage/Tag/Contact
 │   ├── Recovery/Log/About
-│   ├── Appearance     ← 浅色/深色/跟随系统 主题切换，写入 /ui/theme.json
-│   └── Cost           ← 费用仪表板 (provider/time 过滤, top sessions) + MODEL_PRICING 配置
+│   └── Appearance     ← 浅色/深色/跟随系统 主题切换，写入 /ui/theme.json
 ├── engine/            ← SettingsEngine + SkillsEngine (页面注册表)
 ├── factories/         ← settingsFactory (nodeId → editor 路由)
 ├── services/          ← SettingsService
@@ -24,8 +23,7 @@ src/
 
 - `settingsFactory` 按 `nodeId` 路由到对应 editor，末尾 fallback 为 placeholder
 - `SystemVFSEngine` 通过复合 ID (`__mod__<name>`, `__dev__|<id>`) 跨模块遍历 VFS
-- Provider/Connection/MCP/Skill editors 来自 `@itookit/llm-ui`
+- Provider/Connection/MCP/Skill/Cost/Agent editors 由 `@itookit/llm-settings-ui` 提供，经 `LLMUIEditors` 构造器接口注入 `settingsFactory`
 - `AppearanceSettingsEditor` 写入 `/ui/theme.json`，通过 `app:theme-change` 事件广播
-- `CostEditor` 显示费用仪表板和价格配置，MODEL_PRICING 为单一数据源
 
 [架构设计](./Architecture.md)

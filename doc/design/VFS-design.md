@@ -538,20 +538,19 @@ const file = fs.openFile(nodeId);
 |---|---|
 | `vfs-ui` | 全面迁移：`IFSEngine → IModuleFS`，`EngineAdapter/VFSService/MentionSource` 改用 `driver.*` |
 | `mdx` | `PluginContext.getSessionEngine()` → `IModuleFS`，`AssetResolverPlugin` 更新 |
-| `memory-manager` | 去除 `VFSModuleEngine`，改用 `vfs.getEngine(moduleName)` |
 | `app-shell/strategies` | `StandardWorkspaceStrategy` 直接返回 `IModuleFS` |
 | `llm-ui` | 类型注解迁移 `IFSEngine → IModuleFS` |
 | `common` | 新增 `IFSDriver` / `IFSMetaDriver` / `IFSDriverTransaction`，`IFSEngine` 标注 `@deprecated` |
 | `stdio` | 新增 `IModuleFS` + `IFSDriver` 双接口；`ModuleFS` 直接实现 `IFSDriver`（自引用）；`FSMetaDriverAdapter` |
 
-### 待迁移（用 @deprecated 保持功能）
+### 已迁移（v4.0+ 完成）
 
-| 包 | 原因 | 优先级 |
-|---|---|---|
-| `app-settings/SettingsEngine` | 已实现 IModuleFS（v4.0 去除旧委托桩） | ~~中~~ → ✅ |
-| `app-settings/SkillsEngine` | 已实现 IModuleFS（v4.0 去除旧委托桩） | ~~中~~ → ✅ |
-| `llm-runtime/ChatEngine` | `IChatEngine extends IFSEngine`，需专项设计 | 高 |
-| `vfs-ui/tests` | 测试 fixtures 引用 `EngineNode` | 低 |
+| 包 | 迁移状态 |
+|---|---|
+| `app-settings/SettingsEngine` | 已实现 IModuleFS（v4.0 去除旧委托桩） ✅ |
+| `app-settings/SkillsEngine` | 已实现 IModuleFS（v4.0 去除旧委托桩） ✅ |
+| `llm-session/ChatEngine` | `IChatEngine extends BaseModuleService`，基于 IModuleFS ✅ |
+| `vfs-ui/tests` | 测试 fixtures 迁移至 `FSNode`/`IModuleFS` ✅ |
 
 ---
 

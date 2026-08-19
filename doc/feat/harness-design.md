@@ -118,7 +118,7 @@ C4Context
 
   Person(user, "用户", "操作 UI / 触发任务")
   System_Boundary(app, "应用层") {
-    Container(llmconv, "llm-conversation", "会话语义 / DurableChatProgram", "提交任务、消费事件")
+    Container(llmconv, "llm-session / llm-flow", "会话语义 / DAG 编排", "提交任务、消费事件")
     Container(coreutils, "coreutils", "Effect 适配器", "llm.chat / tool.call / tty")
   }
   System_Boundary(harness, "@itookit/harness") {
@@ -272,7 +272,7 @@ flowchart LR
 
 ```mermaid
 sequenceDiagram
-  participant UI as 上层(llm-conversation)
+  participant UI as 上层(llm-session / llm-flow)
   participant H as Harness
   participant P as Program
   participant E as EffectAdapter
@@ -348,7 +348,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  subgraph llmconv["llm-conversation"]
+  subgraph llmconv["llm-session / llm-flow"]
     A[ConversationRunCoordinator] --> B[DurableChatProgram / DurableAgentProgram]
   end
   subgraph coreutils["coreutils"]
@@ -371,9 +371,9 @@ flowchart LR
   H --> I
 ```
 
-- **llm-conversation** 提交 `llm.chat` / `llm.agent` program 的 TaskSpec，harness 调度执行
+- **llm-session / llm-flow** 提交 `llm.chat` / `llm.agent` program 的 TaskSpec，harness 调度执行
 - **coreutils** 提供 `llm.chat` / `tool.call` / `tty` 等 EffectAdapter，经插件注册
-- **LLM 流式**：adapter 在 `execute` 期间 `context.emit` → harness 写 `agent.event` → UI 逐 token 渲染（见 `doc/feat/llm-v3-design.md`）
+- **LLM 流式**：adapter 在 `execute` 期间 `context.emit` → harness 写 `agent.event` → UI 逐 token 渲染（见 `doc/feat/harness-session-task-final-design.md` 与 `doc/architecture.md`）
 - **资源隔离**：每次任务 `createResource(llm://session)` + `bindCapabilities` 授权，effect 需持有 execute 权限
 
 ## 10. 测试

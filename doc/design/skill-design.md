@@ -1,6 +1,6 @@
 # Skill 系统设计
 
-> 版本: 3.2 | 包: `common` + `llm-harness` + `device-llm` + `app-shell`
+> 版本: 3.3 | 包: `llm-common` + `coreutils` + `device-llm` + `app-shell`
 
 ## 一、概述
 
@@ -19,7 +19,7 @@ Skill = Markdown 指令 + 可选工具 + 触发策略。核心设计理念：**�
 
 ## 二、核心类型
 
-> 定义在 `packages/common/src/interfaces/skills/skill-types.ts`
+> 定义在 `packages/llm-common/src/skills/skill-types.ts`
 
 ### 2.1 SkillDefinition
 
@@ -137,7 +137,7 @@ interface SkillMatchContext {
 
 ## 三、ISkillService 接口
 
-> 定义在 `packages/common/src/interfaces/skills/skill-service.ts`，由 `SkillDeviceDriver` 实现。
+> 定义在 `packages/llm-common/src/skills/skill-service.ts`，由 `SkillDeviceDriver` 实现。
 
 ```typescript
 interface ISkillService {
@@ -506,9 +506,9 @@ You are a specialized subagent: security-reviewer
 ### 11.1 包依赖
 
 ```
-common      → 所有接口和类型
-llm-harness → SkillDeviceDriver, ContextManager, 内置工具, 5 个 skills/ 模块
-device-llm  → LLMDeviceDriver (VFS 技能持久化)
+llm-common → Skill 类型与 ISkillService 接口
+coreutils  → SkillDeviceDriver, 内置 Skill 工具, skill 加载/匹配
+device-llm → LLMDeviceDriver (VFS 技能持久化)
 app-shell   → bootstrap.ts 装配 + 桥接
 llm-ui      → SkillInvocationParser (slash 命令解析)
 ```
@@ -595,22 +595,21 @@ globs:
 
 | 文件 | 内容 |
 |------|------|
-| `packages/common/src/interfaces/skills/skill-types.ts` | `SkillDefinition`, `SkillRouteLayer`, `CompactSection`, 所有辅助类型 |
-| `packages/common/src/interfaces/skills/skill-service.ts` | `ISkillService` 接口 |
-| `packages/common/src/interfaces/skills/fs-skill-types.ts` | `SkillFrontmatter`, `FSSkillDirectory`, `ScopeEntry` |
+| `packages/llm-common/src/skills/skill-types.ts` | `SkillDefinition`, `SkillRouteLayer`, `CompactSection`, 所有辅助类型 |
+| `packages/llm-common/src/skills/skill-service.ts` | `ISkillService` 接口 |
+| `packages/llm-common/src/skills/fs-skill-types.ts` | `SkillFrontmatter`, `FSSkillDirectory`, `ScopeEntry` |
 
 ### 运行时
 
 | 文件 | 内容 |
 |------|------|
 | `packages/coreutils/src/skill/skill-device-driver.ts` | `SkillDeviceDriver` — 实现 `ISkillService` + 四层路由 + 作用域 |
-| `packages/llm-harness/src/executor/context-manager.ts` | `ContextManager` — 系统 Prompt 构建 + 压缩保护 |
+| `packages/coreutils/src/effects/skill-load-effect.ts` | Skill 加载 Effect — Harness 侧执行 |
 | `packages/coreutils/src/tool/load-skill.ts` | `load_skill` 工具 — 拒绝 L1 action skills |
-| `packages/coreutils/src/skill/fs-skill-loader.ts` | 文件系统扫描 + 作用域继承链 |
+| `packages/coreutils/src/skill/skill-task.ts` | Skill 任务程序 — 系统 Prompt 构建 + 压缩保护 |
 | `packages/coreutils/src/skill/compact-extractor.ts` | Compact Instructions 提取 + 聚合 |
 | `packages/coreutils/src/skill/glob-matcher.ts` | Glob → RegExp 匹配器 |
-| `packages/llm-harness/src/skills/subagent-skill-bridge.ts` | 子代理委托提示生成 |
-| `packages/llm-harness/src/skills/correction-log.ts` | 修正日志读写 + prompt 注入 |
+| `packages/device-llm/src/device/skill-manager.ts` | VFS 技能同步 + SkillManager |
 | `packages/app-shell/src/bootstrap.ts` | `initApp()` + `syncSkillsToHarness()` + 初始 CWD 设置 |
 | `packages/llm-ui/src/components/input/SkillInvocationParser.ts` | Slash 命令解析，支持 L1 action skill |
 

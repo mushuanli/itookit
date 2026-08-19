@@ -10,6 +10,7 @@ Node-only，浏览器环境自动降级（spawn 抛出 clear error）。
 src/
 ├── index.ts              ← 公共 API
 ├── node-tty-driver.ts    ← NodeTTYDriver + NodeTTYSession (child_process.spawn)
+├── node-pty-driver.ts    ← NodePtyDriver + NodePtySession (node-pty)
 └── session-manager.ts    ← TTYSessionManager + collectOutput
 ```
 
@@ -17,5 +18,7 @@ src/
 
 ```typescript
 import { NodeTTYDriver } from '@itookit/device-tty';
-const harness = await createHarness({ llmDriver, ttyDriver: new NodeTTYDriver() });
+// 注入 coreutils 运行时（ITTYDriver 槽位）
+const runtime = await createCoreutilsRuntime({ llmDriver, ttyDriver: new NodeTTYDriver(), ... });
+// 或通过 app-shell bootstrap 装配，见 packages/app-shell/src/bootstrap.ts
 ```

@@ -5,7 +5,7 @@
 
 ## 1. 模块定位
 
-`packages/harness` 是**持久化的通用执行内核**——它不关心"执行什么"，只提供一套抽象让上层（coreutils / llm-runtime）注册"任意功能"的执行器。LLM、工具、技能、spawn、Bash、TTY 都通过同一套 `Effect` / `Task` 抽象接入。
+`packages/harness` 是**持久化的通用执行内核**——它不关心"执行什么"，只提供一套抽象让上层（coreutils / llm-programs）注册"任意功能"的执行器。LLM、工具、技能、spawn、Bash、TTY 都通过同一套 `Effect` / `Task` 抽象接入。
 
 **依赖**：仅 `@itookit/stdio`（`IModuleFS` / `EventBus`），不依赖任何 LLM / UI / 具体设备。
 
@@ -36,7 +36,7 @@ src/
 ```mermaid
 C4Context
     title Harness 执行引擎 - 系统上下文
-    Person(host, "编排层 Agent Runtime", "CLI / Tauri / llm-conversation")
+    Person(host, "编排层 Agent Runtime", "CLI / Tauri / llm-session")
     System(harness, "Harness 执行内核", "持久化 Task / Effect / Resource / Budget / Interaction 的执行引擎")
     SystemDb(vfs, "VFS (IModuleFS)", "seqfile 持久化后端（本地 / 内存 / IndexedDB）")
     System_Ext(llm, "LLM Provider", "OpenAI / Anthropic / Gemini")
@@ -53,7 +53,7 @@ C4Context
 C4Container
     title Harness 容器关系
     Container(coreutils, "coreutils", "LLM/Tool/Skill/Bash/TTY 的 EffectAdapter 实现")
-    Container(llmrt, "llm-runtime", "DurableTaskProgram（agent/chat/plan）")
+    Container(llmrt, "llm-programs", "DurableTaskProgram（agent/chat/plan）")
     Container(harness, "harness", "执行内核 + 持久化 + 恢复")
     Container(stdio, "stdio", "VFS / EventBus / seqfile 操作")
     Rel(coreutils, harness, "HarnessPlugin.use() 注册 EffectAdapter + Program")

@@ -12,7 +12,7 @@
 | llm-ui P5 | 38 处 `any` + `✅` 历史注释 | console 已清零；any/注释未做 |
 | harness | `harness.ts`(696) 未拆成 TaskScheduler/EffectDispatcher/ResourceManager 协调器 | 仅抽了 utils |
 | harness | `store.ts`(936) 未按聚合根拆 TaskStore/EffectStore/ResourceStore | 仅抽了 store-helpers |
-| doc | `doc/readme.md` 仍带历史标注未重写 | 未做 |
+| doc | `doc/readme.md` 已删除（旧架构），文档入口见 `CLAUDE.md` 项目文档表 | 已完成 |
 
 > 已完成（本会话）：llm-ui P4（TokenStats→SessionTokenUsage）、P5 console、P2 空 executor；以及此前 harness/upper-layers 的全部下沉项 + 预算扣减 + 包拆分重命名。
 
