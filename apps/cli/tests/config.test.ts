@@ -41,20 +41,28 @@ describe('validateWorkflow', () => {
         expect(() => validateWorkflow(value, false)).toThrow('unknown task missing');
     });
 
-    it('rejects undeclared outputs and invalid retries', () => {
+    it('rejects invalid retries', () => {
         const value = workflow();
         value.tasks.push({
             id: 'second', agent: 'agent', description: 'Second', outputs: { result: 'text' },
-            inputs: { source: '${tasks.first.outputs.missing}' }, retry: { max_attempts: 0 },
+            retry: { max_attempts: 0 },
         });
         expect(() => validateWorkflow(value, false)).toThrow('retry.max_attempts');
+    });
+
+    it('rejects undeclared outputs', () => {
+        const value = workflow();
+        value.tasks.push({
+            id: 'second', agent: 'agent', description: 'Second', outputs: { result: 'text' },
+            inputs: { source: '${tasks.first.outputs.missing}' },
+        });
         expect(() => validateWorkflow(value, false)).toThrow('undeclared output first.missing');
     });
 
     it('rejects an invalid agent approval strategy', () => {
         const value = workflow();
         value.agents[0].approval = 'sometimes' as never;
-        expect(() => validateWorkflow(value, false)).toThrow('approval must be none, external or all');
+        expect(() => validateWorkflow(value, false)).toThrow('approval');
     });
 
     it('rejects an invalid route mode', () => {
@@ -63,7 +71,7 @@ describe('validateWorkflow', () => {
             id: 'router', route: { mode: 'parallel' as never, rules: [{ when: 'x', then: 'first' }] },
             depends_on: [], inputs: { input: '${tasks.first.outputs.result}' },
         });
-        expect(() => validateWorkflow(value, false)).toThrow('route.mode must be exclusive, multicast or fallback');
+        expect(() => validateWorkflow(value, false)).toThrow('route.mode');
     });
 
     it('rejects an invalid on_failure value', () => {
@@ -72,7 +80,7 @@ describe('validateWorkflow', () => {
             id: 'second', agent: 'agent', description: 'Second',
             depends_on: [{ task: 'first', on_failure: 'retry' as never }], outputs: { result: 'text' },
         });
-        expect(() => validateWorkflow(value, false)).toThrow('invalid on_failure');
+        expect(() => validateWorkflow(value, false)).toThrow('depends_on');
     });
 
     it('rejects a route condition with no operator', () => {
@@ -97,5 +105,48 @@ describe('validateWorkflow', () => {
             depends_on: [], inputs: { input: '${tasks.first.outputs.result}' },
         });
         expect(validateWorkflow(value, false).tasks).toHaveLength(2);
+    });
+
+    it('rejects a route condition with multiple operators', () => {
+        const value = workflow();
+        value.tasks.push({
+            id: 'router',
+            route: { rules: [{ when: { eq: 'x', or: [{ eq: 'y' }] }, then: 'first' }] },
+            inputs: { input: '${tasks.first.outputs.result}' },
+        });
+        expect(() => validateWorkflow(value, false)).toThrow('exactly one');
+    });
+
+    it('rejects an explicit control kind without its configuration', () => {
+        const value = workflow();
+        value.tasks.push({ id: 'router', kind: 'route' } as never);
+        expect(() => validateWorkflow(value, false)).toThrow('requires route');
+    });
+
+    it('accepts a route condition with a field path', () => {
+        const value = workflow();
+        value.tasks.push({
+            id: 'router',
+            route: { rules: [{ when: { path: ['kind'], eq: 'search' }, then: 'first' }] },
+            depends_on: [], inputs: { input: '${tasks.first.outputs.result}' },
+        });
+        expect(validateWorkflow(value, false).tasks).toHaveLength(2);
+    });
+
+    it('rejects a task combining route and spawn (mutually exclusive kinds)', () => {
+        const value = workflow();
+        value.tasks.push({
+            id: 'router',
+            route: { rules: [{ when: 'x', then: 'first' }] },
+            spawn: { tasks: [{ id: 'w', agent: 'agent', description: 'w' }], edges: [] },
+            depends_on: [], inputs: { input: '${tasks.first.outputs.result}' },
+        } as never);
+        expect(() => validateWorkflow(value, false)).toThrow('cannot combine');
+    });
+
+    it('rejects unknown fields (strict schema)', () => {
+        const value = workflow() as WorkflowConfigV1 & { tasks: Array<Record<string, unknown>> };
+        (value.tasks[0] as Record<string, unknown>).typo_field = true;
+        expect(() => validateWorkflow(value, false)).toThrow('Unrecognized');
     });
 });

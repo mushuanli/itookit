@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { EventEnvelope } from '@itookit/harness';
 import { extractNodeOutput } from '@itookit/llm-programs';
@@ -75,6 +75,10 @@ export class RunStore {
 
     eventsPath(runId: string): string {
         return path.join(this.runDir(runId), 'events.jsonl');
+    }
+
+    async delete(runId: string): Promise<void> {
+        await rm(this.runDir(runId), { recursive: true, force: true });
     }
 }
 

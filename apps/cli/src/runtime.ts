@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { DagRunSpec, JsonValue, LLMConnection, LLMProvider, SerializableExpression, ToolDefinition } from '@itookit/common';
+import type { DagRunSpec, LLMConnection, LLMProvider, ToolDefinition } from '@itookit/common';
 import { createCoreutilsRuntime } from '@itookit/coreutils';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { NodePtyDriver } from '@itookit/device-tty';
@@ -10,11 +10,13 @@ import {
     type StorageBindingRef,
 } from '@itookit/harness';
 import {
+    compileWorkflow,
     createBuiltinDagPluginRegistry,
     DurableFlowExecutor,
     FlowAggregateProgram,
     FlowHumanProgram,
     FlowValueProgram,
+    type WorkflowTaskSpec,
 } from '@itookit/llm-flow';
 import { DurableAgentProgram, DurableChatProgram, DurablePlanProgram } from '@itookit/llm-programs';
 import { createVFS, FS_MODULE_CHAT, MemoryBackend, type IModuleFS } from '@itookit/stdio';
@@ -22,7 +24,7 @@ import { createBashTool } from '@itookit/tools';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { taskOutputReference } from './config';
 import { createShell, OciTtyDriver } from './shell';
-import type { AgentConfig, CompiledWorkflow, RouteCondition, RunManifest, TaskConfig } from './types';
+import type { AgentConfig, CompiledWorkflow, RunManifest, TaskConfig } from './types';
 import { createWorkspaceAccessTool, createWorkspacePort, WorkspaceGrantRegistry } from './workspace';
 import { NodeSqliteSidecarDb } from './sqlite-sidecar';
 
@@ -123,6 +125,7 @@ export async function createCliRuntime(
         grants,
         async dispose() {
             kernel.dispose();
+            await kernel.waitIdle();
             await core.dispose();
             await backend.close();
         },
@@ -144,170 +147,40 @@ async function initializeLlmQuietly(driver: LLMDeviceDriver): Promise<void> {
 
 export function compileDag(workflow: CompiledWorkflow): DagRunSpec {
     const agents = new Map(workflow.config.agents.map(agent => [agent.id, agent]));
-    // supervisor 的 worker 每次派发只执行一次，不随循环体重复。
-    const supervisorWorkers = new Set<string>();
-    for (const task of workflow.config.tasks) {
-        for (const worker of task.supervisor?.workers ?? []) supervisorWorkers.add(worker);
-    }
-    const nodes: DagRunSpec['nodes'] = [];
-    const extraEdges: DagRunSpec['edges'] = [];
-    for (const task of workflow.config.tasks) {
-        if (task.supervisor !== undefined) {
-            const sub = compileSupervisor(workflow, task, agents);
-            nodes.push(...sub.nodes);
-            extraEdges.push(...sub.edges);
-        } else if (task.route !== undefined) {
-            nodes.push(compileRouteTask(task));
-        } else if (task.spawn !== undefined) {
-            nodes.push(compileSpawnTask(workflow, task, agents));
-        } else {
-            nodes.push(compileTask(
-                workflow,
-                supervisorWorkers.has(task.id) ? { ...task, max_iterations: 1 } : task,
-                agents.get(task.agent!)!,
-            ));
-        }
-    }
-    const edges = [...compileEdges(workflow.config.tasks), ...extraEdges];
+    const agentFactory = (task: WorkflowTaskSpec, role?: 'agent' | 'supervisor' | 'worker'): DagRunSpec['nodes'][number] =>
+        compileTask(workflow, task as TaskConfig, agents.get((task as TaskConfig).agent!)!, role);
+    const { nodes, edges } = compileWorkflow(
+        workflow.config.tasks as WorkflowTaskSpec[],
+        agentFactory,
+        taskOutputReference,
+    );
     return { nodes, edges, maxNodes: nodes.length };
 }
 
-/** 把 supervisor 任务展开成「supervisor agent + route + worker 回边」循环子图。 */
-function compileSupervisor(
+function compileTask(
     workflow: CompiledWorkflow,
     task: TaskConfig,
-    agents: Map<string, AgentConfig>,
-): { nodes: DagRunSpec['nodes']; edges: DagRunSpec['edges'] } {
-    const sup = task.supervisor!;
-    const agent = agents.get(task.agent!)!;
-    const routerId = `${task.id}__router`;
-
-    // supervisor agent 节点（复用 compileTask，附加 supervisor 指令与循环上限）。
-    const lead = compileTask(workflow, { ...task, max_iterations: sup.max_rounds ?? 10 }, agent);
-    lead.config = {
-        ...(lead.config as Record<string, unknown>),
-        messages: [
-            {
-                role: 'system',
-                content: [
-                    agent.system_prompt,
-                    `You are a supervisor coordinating these workers: ${sup.workers.join(', ')}.`,
-                    'Each round, output EXACTLY one worker name to dispatch it, or output your final answer when done.',
-                    `Overall goal: ${workflow.config.goal}`,
-                ].filter(Boolean).join('\n\n'),
-            },
-            { role: 'user', content: task.description ?? task.id },
-        ],
-    };
-
-    const router: DagRunSpec['nodes'][number] = {
-        id: routerId,
-        name: 'Supervisor Router',
-        plugin: 'builtin.route',
-        pluginVersion: '1.0.0',
-        config: {
-            mode: 'exclusive',
-            rules: sup.workers.map(worker => ({
-                edgeId: supEdgeId(task.id, worker),
-                expression: { kind: 'eq', args: [{ kind: 'path', path: ['input'] }, { kind: 'literal', value: worker }] },
-            })),
-        },
-        inputs: {},
-        capabilities: [],
-    };
-
-    const edges: DagRunSpec['edges'] = [
-        { id: `${task.id}->${routerId}`, from: task.id, to: routerId, output: 'result', input: 'input' },
-        ...sup.workers.map(worker => ({
-            id: supEdgeId(task.id, worker),
-            from: routerId,
-            to: worker,
-            output: 'result',
-            input: 'input',
-        })),
-        // worker → supervisor 回边（重新决策，构成循环）。
-        ...sup.workers.map(worker => ({
-            id: `${worker}->${task.id}`,
-            from: worker,
-            to: task.id,
-            output: 'result',
-            input: 'input',
-        })),
-    ];
-
-    return { nodes: [lead, router], edges };
-}
-
-function supEdgeId(leadId: string, worker: string): string {
-    return `${leadId}->${worker}`;
-}
-
-function compileSpawnTask(
-    workflow: CompiledWorkflow,
-    task: TaskConfig,
-    agents: Map<string, AgentConfig>,
+    agent: AgentConfig,
+    role?: 'agent' | 'supervisor' | 'worker',
 ): DagRunSpec['nodes'][number] {
-    const spawn = task.spawn!;
-    const staticInputs = Object.fromEntries(Object.entries(task.inputs ?? {})
-        .filter(([, value]) => !taskOutputReference(value)));
-    return {
-        id: task.id,
-        name: task.description ?? task.id,
-        plugin: 'builtin.spawn',
-        pluginVersion: '1.0.0',
-        config: {
-            ...(task.description !== undefined ? { value: task.description } : {}),
-            outputName: 'result',
-            type: 'text',
-            spawn: {
-                nodes: spawn.tasks.map(subTask => compileTask(workflow, subTask, agents.get(subTask.agent!)!)),
-                edges: spawn.edges.map(edge => ({
-                    id: `${edge.from}->${edge.to}`,
-                    from: edge.from,
-                    to: edge.to,
-                    ...(edge.input !== undefined ? { input: edge.input } : {}),
-                    ...(edge.output !== undefined ? { output: edge.output } : {}),
-                })),
-            },
-        },
-        inputs: staticInputs,
-        capabilities: [],
-    };
-}
-
-function compileRouteTask(task: TaskConfig): DagRunSpec['nodes'][number] {
-    const route = task.route!;
-    const staticInputs = Object.fromEntries(Object.entries(task.inputs ?? {})
-        .filter(([, value]) => !taskOutputReference(value)));
-    return {
-        id: task.id,
-        name: 'Route',
-        plugin: 'builtin.route',
-        pluginVersion: '1.0.0',
-        config: {
-            mode: route.mode ?? 'exclusive',
-            rules: route.rules.map(rule => ({
-                edgeId: routeEdgeId(task.id, rule.then),
-                expression: compileRouteCondition(rule.when),
-            })),
-            ...(route.default !== undefined ? { defaultEdgeId: routeEdgeId(task.id, route.default) } : {}),
-        },
-        inputs: staticInputs,
-        capabilities: [],
-    };
-}
-
-function compileTask(workflow: CompiledWorkflow, task: TaskConfig, agent: AgentConfig): DagRunSpec['nodes'][number] {
     const connection = workflow.config.connections.find(item => item.id === agent.connection)!;
     const model = agent.model ?? connection.tiers[agent.model_tier ?? 'standard'];
     const staticInputs = Object.fromEntries(Object.entries(task.inputs ?? {})
         .filter(([, value]) => !taskOutputReference(value)));
-    const system = [
-        agent.system_prompt,
-        `Overall goal: ${workflow.config.goal}`,
-        `Workspace: ${workflow.workspaceRoot}`,
-        'Only access paths inside the workspace unless RequestWorkspaceAccess has been approved.',
-    ].filter(Boolean).join('\n\n');
+    // supervisor 节点注入协调指令；普通 agent 节点带 workspace 边界提示。
+    const system = role === 'supervisor'
+        ? [
+            agent.system_prompt,
+            `You are a supervisor coordinating these workers: ${task.supervisor?.workers.join(', ')}.`,
+            'Each round, output EXACTLY one worker name to dispatch it, or output your final answer when done.',
+            `Overall goal: ${workflow.config.goal}`,
+        ].filter(Boolean).join('\n\n')
+        : [
+            agent.system_prompt,
+            `Overall goal: ${workflow.config.goal}`,
+            `Workspace: ${workflow.workspaceRoot}`,
+            'Only access paths inside the workspace unless RequestWorkspaceAccess has been approved.',
+        ].filter(Boolean).join('\n\n');
     return {
         id: task.id,
         name: task.description ?? task.id,
@@ -340,73 +213,6 @@ function compileTask(workflow: CompiledWorkflow, task: TaskConfig, agent: AgentC
             ...(task.retry.backoff_ms !== undefined ? { backoffMs: task.retry.backoff_ms } : {}),
         } : undefined,
     };
-}
-
-function compileEdges(tasks: TaskConfig[]): DagRunSpec['edges'] {
-    const edges = new Map<string, DagRunSpec['edges'][number]>();
-    // route 分支目标 → route task 的映射，用于跳过目标 task 对 route 的 depends_on 依赖。
-    const routeTargets = new Map<string, string>();
-    for (const task of tasks) {
-        if (task.route === undefined) continue;
-        for (const rule of task.route.rules) {
-            routeTargets.set(rule.then, task.id);
-            addEdge(edges, task.id, rule.then, 'result', 'input', routeEdgeId(task.id, rule.then));
-        }
-        if (task.route.default !== undefined) {
-            routeTargets.set(task.route.default, task.id);
-            addEdge(edges, task.id, task.route.default, 'result', 'input', routeEdgeId(task.id, task.route.default));
-        }
-    }
-    for (const task of tasks) {
-        for (const [input, value] of Object.entries(task.inputs ?? {})) {
-            const ref = taskOutputReference(value);
-            if (ref) addEdge(edges, ref.taskId, task.id, ref.output, input);
-        }
-        for (const dependency of task.depends_on ?? []) {
-            const depId = typeof dependency === 'string' ? dependency : dependency.task;
-            const onFailure = typeof dependency === 'string' ? undefined : dependency.on_failure;
-            if (routeTargets.get(task.id) === depId) continue;
-            const alreadyMapped = [...edges.values()].some(edge => edge.from === depId && edge.to === task.id);
-            if (!alreadyMapped) addEdge(edges, depId, task.id, 'result', depId, undefined, onFailure);
-        }
-    }
-    return [...edges.values()];
-}
-
-function addEdge(
-    edges: Map<string, DagRunSpec['edges'][number]>,
-    from: string,
-    to: string,
-    output: string,
-    input: string,
-    id?: string,
-    onFailure?: 'fail' | 'skip' | 'continue',
-): void {
-    const edgeId = id ?? `${from}:${output}->${to}:${input}`;
-    edges.set(edgeId, { id: edgeId, from, to, output, input, ...(onFailure ? { onFailure } : {}) });
-}
-
-function routeEdgeId(from: string, to: string): string {
-    return `${from}->${to}`;
-}
-
-/** 把 YAML 的路由条件编译成可序列化表达式（以 route 节点的 input 为基准）。 */
-function compileRouteCondition(condition: RouteCondition): SerializableExpression {
-    const input = (): SerializableExpression => ({ kind: 'path', path: ['input'] });
-    if (typeof condition === 'string') {
-        return { kind: 'eq', args: [input(), { kind: 'literal', value: condition }] };
-    }
-    if (condition.eq !== undefined) return { kind: 'eq', args: [input(), { kind: 'literal', value: condition.eq as JsonValue }] };
-    if (condition.neq !== undefined) return { kind: 'neq', args: [input(), { kind: 'literal', value: condition.neq as JsonValue }] };
-    if (condition.in !== undefined) return { kind: 'in', args: [input()], value: condition.in as JsonValue };
-    if (condition.exists !== undefined) {
-        const exists: SerializableExpression = { kind: 'exists', args: [input()] };
-        return condition.exists ? exists : { kind: 'not', args: [exists] };
-    }
-    if (condition.and !== undefined) return { kind: 'and', args: condition.and.map(compileRouteCondition) };
-    if (condition.or !== undefined) return { kind: 'or', args: condition.or.map(compileRouteCondition) };
-    if (condition.not !== undefined) return { kind: 'not', args: [compileRouteCondition(condition.not)] };
-    throw new Error('Route condition has no operator');
 }
 
 function normalizeTools(tools: string[], access: TaskConfig['workspace_access']): string[] {

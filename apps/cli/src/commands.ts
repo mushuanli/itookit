@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import type { EventEnvelope, ExitRecord, JsonValue, TaskHandle } from '@itookit/harness';
@@ -19,6 +19,7 @@ export interface CommandOptions {
     approve?: boolean;
     deny?: boolean;
     value?: string;
+    offline?: boolean;
 }
 
 interface InterruptWatcher {
@@ -26,14 +27,38 @@ interface InterruptWatcher {
     dispose(): void;
 }
 
+const STALL_WARN_MS = 60_000;
+
 export async function validateCommand(options: CommandOptions): Promise<number> {
-    const loaded = await loadWorkflow(options.file ?? 'mindos.yml');
+    // --offline skips the environment check so configs can be validated without API keys set.
+    const loaded = await loadWorkflow(options.file ?? 'mindos.yml', !options.offline);
     print(options, { valid: true, name: loaded.workflow.config.name, tasks: loaded.workflow.config.tasks.length });
+    return 0;
+}
+
+/** 打印编译后的 DAG 结构（节点 + 边），不执行 —— 等价于 run --dry-run 的诉求。 */
+export async function graphCommand(options: CommandOptions): Promise<number> {
+    const loaded = await loadWorkflow(options.file ?? 'mindos.yml', !options.offline);
+    const dag = compileDag(loaded.workflow);
+    print(options, {
+        name: loaded.workflow.config.name,
+        nodes: dag.nodes.map(node => ({ id: node.id, plugin: node.plugin, name: node.name })),
+        edges: dag.edges.map(edge => ({
+            from: edge.from, to: edge.to, output: edge.output, input: edge.input,
+            ...(edge.onFailure ? { onFailure: edge.onFailure } : {}),
+        })),
+    });
     return 0;
 }
 
 export async function runCommand(options: CommandOptions): Promise<number> {
     const loaded = await loadWorkflow(options.file ?? 'mindos.yml');
+    return runLoaded(loaded, options);
+}
+
+type LoadedWorkflow = Awaited<ReturnType<typeof loadWorkflow>>;
+
+async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions): Promise<number> {
     if (options.sandbox) loaded.workflow.config.sandbox = { ...loaded.workflow.config.sandbox, mode: options.sandbox };
     const id = createRunId();
     const store = new RunStore(loaded.workflow.stateDir);
@@ -81,6 +106,53 @@ export async function runCommand(options: CommandOptions): Promise<number> {
     }
 }
 
+/** 用某个 run 的配置快照重跑整个 DAG（新 run id）。 */
+export async function rerunCommand(runId: string, options: CommandOptions): Promise<number> {
+    const store = new RunStore(resolveStateDir(options));
+    const manifest = await store.load(runId);
+    const loaded = await loadWorkflow(store.configSnapshot(runId), false);
+    loaded.workflow.workspaceRoot = manifest.workspaceRoot;
+    loaded.workflow.stateDir = store.stateDir;
+    return runLoaded(loaded, options);
+}
+
+/** 把某个 run 的配置快照复制为可编辑文件，供 fork 后修改再 run。 */
+export async function forkCommand(runId: string, options: CommandOptions): Promise<number> {
+    const store = new RunStore(resolveStateDir(options));
+    await store.load(runId);
+    const source = await readFile(store.configSnapshot(runId), 'utf8');
+    const target = path.join(store.stateDir, 'forks', `${runId}.yml`);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, source, 'utf8');
+    print(options, { type: 'run.forked', runId, configPath: target });
+    return 0;
+}
+
+/** 导出某次运行的配置快照。保留 fork 作为兼容别名。 */
+export const exportConfigCommand = forkCommand;
+
+/** 展示 run 的节点级 checkpoint 视图（状态 + 产物路径）。 */
+export async function checkpointsCommand(runId: string, options: CommandOptions): Promise<number> {
+    const store = new RunStore(resolveStateDir(options));
+    const manifest = await store.load(runId);
+    const checkpoints = Object.entries(manifest.taskStatuses)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([nodeId, status]) => ({
+            nodeId,
+            status,
+            startedAt: manifest.taskStartedAt?.[nodeId],
+            ...(status === 'succeeded'
+                ? { artifact: `artifacts/${nodeId.replace(/[^a-zA-Z0-9._-]/g, '_')}/result.json` }
+                : {}),
+        }));
+    print(options, { runId, status: manifest.status, error: manifest.error, checkpoints });
+    return 0;
+}
+
+
+/** 展示节点运行状态。保留 checkpoints 作为兼容别名；它不是可恢复的状态快照。 */
+export const tasksCommand = checkpointsCommand;
+
 export async function resumeCommand(runId: string, options: CommandOptions): Promise<number> {
     const store = new RunStore(resolveStateDir(options));
     const manifest = await store.load(runId);
@@ -118,7 +190,7 @@ export async function respondCommand(
     try {
         await runtime.kernel.respondInteraction(manifest.sessionId, pending.taskId, {
             interactionId: requestId,
-            value: responseValue(options),
+            value: resolveRespondValue(options),
         });
         manifest.pendingInteractions = manifest.pendingInteractions.filter(item => item !== pending);
         manifest.status = 'running';
@@ -128,6 +200,17 @@ export async function respondCommand(
     } finally {
         await runtime.dispose();
     }
+}
+
+export async function deleteCommand(runId: string, options: CommandOptions): Promise<number> {
+    const store = new RunStore(resolveStateDir(options));
+    const manifest = await store.load(runId);
+    if (!isTerminal(manifest.status)) {
+        throw new Error(`Run ${runId} is still ${manifest.status}; cancel it before deleting`);
+    }
+    await store.delete(runId);
+    print(options, { type: 'run.deleted', runId });
+    return 0;
 }
 
 export async function cancelCommand(runId: string, options: CommandOptions): Promise<number> {
@@ -188,15 +271,41 @@ async function monitor(
     if (!manifest.rootTaskId) throw new Error('Run root task is missing');
     const root = await runtime.kernel.openTask(manifest.rootTaskId);
     const interruption = watchInterrupt();
+    let lastSnapshot = '';
+    let stallSince = Date.now();
+    let stallWarned = false;
     try {
         while (true) {
             const result = await monitorIteration(workflow, manifest, store, runtime, options, root, interruption);
             if (result !== undefined) return result;
+            const snapshot = progressSnapshot(manifest);
+            if (snapshot === lastSnapshot) {
+                if (!stallWarned && Date.now() - stallSince > STALL_WARN_MS) {
+                    stallWarned = true;
+                    printStallDiagnostic(manifest, options);
+                }
+            } else {
+                lastSnapshot = snapshot;
+                stallSince = Date.now();
+                stallWarned = false;
+            }
             await delay(150);
         }
     } finally {
         interruption.dispose();
     }
+}
+
+function progressSnapshot(manifest: RunManifest): string {
+    return `${manifest.lastEventSequence}|${Object.entries(manifest.taskStatuses)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([id, status]) => `${id}:${status}`).join(',')}|${manifest.pendingInteractions.length}`;
+}
+
+function printStallDiagnostic(manifest: RunManifest, options: CommandOptions): void {
+    const statuses = Object.entries(manifest.taskStatuses)
+        .map(([id, status]) => `${id}:${status}`).join(' ') || '(none)';
+    printError(options, `No run progress for ${STALL_WARN_MS / 1000}s. Task statuses: ${statuses}`);
 }
 
 async function monitorIteration(
@@ -269,9 +378,27 @@ async function processInteractions(
     if (!manifest.pendingInteractions.length) return undefined;
     manifest.status = 'waiting';
     await store.save(manifest);
-    if (options.headless) return 3;
+    // --json implies headless: never block on an interactive stdin prompt under a machine-readable
+    // stream, or CI would hang. Surface the resume/respond commands instead.
+    if (options.headless || options.json) {
+        printInteractionHint(manifest, options);
+        return 3;
+    }
     await resolveInteractive(manifest, runtime, store);
     return undefined;
+}
+
+function printInteractionHint(manifest: RunManifest, options: CommandOptions): void {
+    const requestIds = manifest.pendingInteractions.map(item => item.interactionId);
+    const resume = `mindos resume ${manifest.id} --state-dir ${resolveStateDir(options)}`;
+    if (options.json) {
+        process.stderr.write(`${JSON.stringify({ type: 'run.waiting', runId: manifest.id, requestIds, resume })}\n`);
+        return;
+    }
+    process.stderr.write(
+        `等待人工输入 ${requestIds.join(', ')}。批准后继续：${resume}\n` +
+        requestIds.map(id => `  mindos respond ${manifest.id} ${id} --approve\n`).join(''),
+    );
 }
 
 async function collectEvents(
@@ -416,11 +543,14 @@ function renderEvent(manifest: RunManifest, event: EventEnvelope, options: Comma
     }
 }
 
-function responseValue(options: CommandOptions): JsonValue {
+export function resolveRespondValue(options: CommandOptions): JsonValue {
+    const modes = [options.approve, options.deny, options.value !== undefined].filter(Boolean);
+    if (modes.length !== 1) {
+        throw new Error('respond requires exactly one of --approve, --deny, or --value');
+    }
     if (options.approve) return true;
     if (options.deny) return false;
-    if (options.value === undefined) throw new Error('respond requires --approve, --deny, or --value');
-    try { return JSON.parse(options.value) as JsonValue; } catch { return options.value; }
+    try { return JSON.parse(options.value!) as JsonValue; } catch { return options.value!; }
 }
 
 function resolveStateDir(options: CommandOptions): string {

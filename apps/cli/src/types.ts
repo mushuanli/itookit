@@ -1,6 +1,28 @@
 export type RunStatus = 'created' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled';
 export type WorkspaceAccess = 'read' | 'write';
 
+// 图结构类型（route/spawn/supervisor/依赖引用）统一由 llm-flow 提供，保持单一来源。
+import type {
+    DependencyRef,
+    RouteCondition,
+    RouteConfig,
+    RouteRule,
+    SpawnConfig,
+    SpawnEdge,
+    SupervisorConfig,
+    WorkflowTaskSpec,
+} from '@itookit/llm-flow';
+export type {
+    DependencyRef,
+    RouteCondition,
+    RouteConfig,
+    RouteRule,
+    SpawnConfig,
+    SpawnEdge,
+    SupervisorConfig,
+    WorkflowTaskSpec,
+};
+
 export interface WorkflowConfigV1 {
     version: 1;
     name: string;
@@ -59,58 +81,10 @@ export interface AgentConfig {
 }
 
 /** 路由条件：字符串为相等匹配，对象支持 eq/neq/in/exists/and/or/not 组合。 */
-export type RouteCondition =
-    | string
-    | {
-        eq?: unknown;
-        neq?: unknown;
-        in?: unknown[];
-        exists?: boolean;
-        and?: RouteCondition[];
-        or?: RouteCondition[];
-        not?: RouteCondition;
-    };
-
-export interface RouteRule {
-    /** 路由条件；命中即激活 then 边。 */
-    when: RouteCondition;
-    /** 激活的目标 task id。 */
-    then: string;
-}
-
-export interface RouteConfig {
-    /** exclusive=命中即停，multicast=激活所有命中分支，fallback=排他+默认兜底。 */
-    mode?: 'exclusive' | 'multicast' | 'fallback';
-    rules: RouteRule[];
-    /** 无规则命中时的默认目标 task id。 */
-    default?: string;
-}
-
-export interface SpawnEdge {
-    from: string;
-    to: string;
-    input?: string;
-    output?: string;
-}
-
-export interface SpawnConfig {
-    /** 运行期动态派发的任务（编译为 agent 节点）。 */
-    tasks: TaskConfig[];
-    edges: SpawnEdge[];
-}
-
-export interface SupervisorConfig {
-    /** 可被派发的 worker task id 列表。 */
-    workers: string[];
-    /** 最大决策轮次（循环上限）。 */
-    max_rounds?: number;
-}
-
-/** 依赖引用：字符串或带失败语义的对象。 */
-export type DependencyRef = string | { task: string; on_failure?: 'fail' | 'skip' | 'continue' };
-
 export interface TaskConfig {
     id: string;
+    /** 显式任务类型；缺省时按 route/spawn/supervisor 字段推断。 */
+    kind?: 'agent' | 'route' | 'spawn' | 'supervisor';
     agent?: string;
     description?: string;
     route?: RouteConfig;
