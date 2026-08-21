@@ -746,6 +746,22 @@ export class SeqFileHarnessStore {
         return this.finishWithoutClaim(binding, taskId, 'cancelled', undefined, { message: reason ?? 'Cancelled' });
     }
 
+    /** 放弃当前 claim，把 running task 恢复到 ready（dispose 时避免 task 卡在租约内无法重新调度）。 */
+    async abandonClaim(binding: ResolvedStorageBinding, taskId: TaskId): Promise<void> {
+        await transaction(binding.fs, async tx => {
+            const current = await requireTaskTx(tx, binding.rootPath, taskId);
+            if (current.status !== 'running' || !current.currentAttempt) return;
+            const attempt = { ...current.currentAttempt, outcome: 'lost' as const, finishedAt: Date.now() };
+            const next: TaskRecord = {
+                ...current, status: 'ready' as const, currentAttempt: undefined, readyAt: undefined,
+                version: current.version + 1, updatedAt: Date.now(),
+            };
+            await writeTaskTx(tx, binding.rootPath, next);
+            await tx.setEntry(taskPath(binding.rootPath, taskId), attemptKey(attempt.id), encode(attempt));
+            await indexTask(tx, binding.rootPath, next);
+        });
+    }
+
     async events(binding: ResolvedStorageBinding, after = 0): Promise<EventEnvelope[]> {
         const values: EventEnvelope[] = [];
         await seq(binding.fs).walkEntries(eventsPath(binding.rootPath), entry => {

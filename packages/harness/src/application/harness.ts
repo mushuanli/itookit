@@ -108,6 +108,15 @@ export class Harness implements HarnessRegistration {
         for (const controller of this.effectControllers.values()) controller.abort();
         this.effectControllers.clear();
     }
+
+    /** 等待所有 in-flight 的 drain/execute 完成（dispose 后调用，避免上层过早关闭存储后端）。 */
+    async waitIdle(timeoutMs = 5000): Promise<void> {
+        const startedAt = Date.now();
+        while (this.active > 0 || this.draining.size > 0) {
+            if (Date.now() - startedAt >= timeoutMs) return;
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+    }
     registerProgram(program: DurableTaskProgram): void { this.programs.register(program); }
     registerEffect(adapter: EffectAdapter): void { this.effects.register(adapter); }
     registerStorageResolver(resolver: SessionStorageResolver): void { this.storageResolvers.register(resolver); }
@@ -511,12 +520,18 @@ export class Harness implements HarnessRegistration {
         try {
             const program = this.programs.resolve(claim.task.program.kind, claim.task.program.version);
             const decision = await nextDecision(program, claim.task);
-            if (this.disposed) return;
+            if (this.disposed) {
+                await this.store.abandonClaim(binding, claim.task.id);
+                return;
+            }
             const next = await this.applyDecision(binding, claim, decision);
             this.notify(next.sessionId, next.id);
             if (next.status === 'ready') this.queueDrain(next.sessionId);
         } catch (error) {
-            if (this.disposed) return;
+            if (this.disposed) {
+                await this.store.abandonClaim(binding, claim.task.id).catch(() => {});
+                return;
+            }
             const failed = failureDecision(claim.task.state, error);
             try {
                 const next = await this.applyDecision(binding, claim, failed);
