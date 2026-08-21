@@ -198,15 +198,34 @@ export class DurableFlowExecutor {
                 handles.map((handle, index) => ({ key: instanceKey(nodeId, index + 1), handle }))
                     .filter(({ key }) => !completed.has(key)));
             if (!pending.length) break;
-            const settled = await Promise.race(pending.map(async ({ key, handle }) => ({
-                key,
-                exit: await handle.wait(),
-            })));
+            // 事件驱动等待任一未完成节点：终态则继续调度；超时则检查是否进入 pending
+            // interaction，是则让出控制权，交由调用方 respond 后通过 resume 继续驱动。
+            const settled = await Promise.race(pending.map(async ({ key, handle }) => {
+                while (true) {
+                    try {
+                        const exit = await handle.wait({ timeoutMs: 100 });
+                        return { key, exit };
+                    } catch {
+                        const snapshot = await handle.status();
+                        if (Object.values(snapshot.task.interactions ?? {}).some(record => record.status === 'pending')) {
+                            return { key, interaction: true as const };
+                        }
+                    }
+                }
+            }));
+            if ('interaction' in settled) return this.finish(session, instances);
             completed.add(settled.key);
             if (settled.exit.status === 'failed') await compensateChain(settled.key);
             applyEffects(settled.exit.output);
         }
 
+        return this.finish(session, instances);
+    }
+
+    private async finish(
+        session: SessionHandle,
+        instances: Map<string, TaskHandle[]>,
+    ): Promise<FlowExecutionHandle> {
         const root = await this.aggregate(session, instances);
         return {
             root,

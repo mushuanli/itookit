@@ -13,3 +13,4 @@ export {
     validateFlowRevision,
 } from './validation';
 export type { ValidationIssue } from './validation';
+export * from './workflow';
