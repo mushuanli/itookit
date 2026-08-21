@@ -1,6 +1,6 @@
 # MindOS CLI
 
-MindOS CLI 在指定工作区中运行声明式多 Agent DAG。CLI 与 Tauri 共用 LLM、Tool、Harness 和持久化内核，不需要启动桌面 UI。CLI 要求 Node.js 22.13 或更高版本，并使用内置 `node:sqlite` 持久化运行状态，无需安装原生 SQLite npm 扩展。
+MindOS CLI 在指定工作区中运行声明式多 Agent workflow graph。无环数据依赖按 DAG 调度，并支持有界循环、条件路由、动态子图与 Supervisor。CLI 与 Tauri 共用 LLM、Tool、Harness 和持久化内核，不需要启动桌面 UI。CLI 要求 Node.js 22.13 或更高版本，并使用内置 `node:sqlite` 持久化运行状态，无需安装原生 SQLite npm 扩展。
 
 ## 使用
 
@@ -20,7 +20,42 @@ pnpm cli validate -f apps/cli/mindos.example.yml
 pnpm cli run -f mindos.yml --headless --json
 ```
 
-无头模式会把事件作为 JSONL 写到 stdout，适合 CI：
+最小配置可以使用简写形式：
+
+```yaml
+version: 1
+name: review
+goal: 分析代码并输出报告
+model: anthropic/claude-sonnet-4-5
+env:
+  api_key: ANTHROPIC_API_KEY
+tasks:
+  - id: inspect
+    prompt: 检查代码
+  - id: report
+    needs: inspect
+    prompt: 汇总检查结果
+result: report
+```
+
+`prompt`、`needs`、`uses` 和字符串形式的 `result` 会在校验前展开成完整配置。需要多 provider、多 agent 或模型分层时仍可使用 `providers`、`connections`、`agents` 完整写法。
+
+## 校验、图与运行管理
+
+```bash
+mindos validate -f mindos.yml --offline
+mindos graph -f mindos.yml --offline --json
+mindos runs --state-dir .mindos
+mindos status <run-id> --state-dir .mindos
+mindos tasks <run-id> --state-dir .mindos
+mindos rerun <run-id> --state-dir .mindos
+mindos export-config <run-id> --state-dir .mindos
+mindos delete <run-id> --state-dir .mindos
+```
+
+`tasks` 展示节点状态和已生成产物，不是可恢复的状态快照；`rerun` 使用原配置创建全新的完整运行；`export-config` 只导出配置快照。当前不提供 checkpoint replay 或 state fork。
+
+无头模式会把事件作为 JSONL 写到 stdout，适合 CI。`--json` 自动采用无头行为，遇到人工输入时返回退出码 `3`，不会读取交互式 stdin：
 
 ```bash
 mindos run --headless --json

@@ -25,6 +25,10 @@ SOLID / DRY / KISS / YAGNI / CoC / LoD — 函数≤30行，圈复杂度≤10
 | [事件流](./doc/event-flows.md) | Agent / VFS / HITL / TTY 事件消费链 |
 | [开发模式](./doc/dev-patterns.md) | 新增 Provider/Connection/Agent/Tool/i18n 流程 |
 | [文件索引](./doc/file-index.md) | 场景 → 关键文件快速定位 |
+| [Harness API](./doc/harness-api.md) | 执行内核 API + 源码结构/存储路径 |
+| [llm-programs API](./doc/llm-programs-api.md) | Durable Program 层 API + 文件结构 |
+| [llm-flow API](./doc/llm-flow-api.md) | DAG 编排层 API + 文件结构 |
+| [llm-session API](./doc/llm-session-api.md) | 会话语义/持久化 API + 文件结构/VFS 路径 |
 
 ## UI 约定
 

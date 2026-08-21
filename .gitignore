@@ -1,4 +1,5 @@
 node_modules/
+.pnpm-store/
 target/
 r2/
 r1/
