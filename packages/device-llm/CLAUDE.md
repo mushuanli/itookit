@@ -10,7 +10,7 @@ src/
 ├── core/          ← LLMDriver, LLMChain, testLLMConnection
 ├── cost/          ← CostStore（费用累加、按 session/provider/日期查询）
 ├── device/        ← LLMDeviceDriver (IDeviceDriver 实现, /dev/llm)
-├── providers/     ← OpenAI, Anthropic, Gemini（BaseProvider + resolveProtocol）
+├── providers/     ← OpenAI, Responses, Anthropic, Gemini（BaseProvider + resolveProtocol）
 ├── skills/        ← SkillRegistry, MCPClient
 ├── types/         ← LLMConnection, ChatMessage, TokenUsage, LLMHooks...
 └── utils/         ← SSE 流, 附件处理, NoopLLMLogger
@@ -39,7 +39,7 @@ LLMDeviceDriver 管理 VFS 存储路径：`/llm/.connections/` `/llm/.providers/
 ## Provider 创建 & 协议解析
 
 - `createProvider()` 四级分发：`config.protocol` > `definition.implementation` > registry 按名查找 > 兜底 OpenAIProvider
-- `resolveProtocol()` 从 URL / provider 名推断 API 协议（`'anthropic-messages' | 'openai-chat' | 'gemini-generate'`）
+- `resolveProtocol()` 从 URL / provider 名推断 API 协议（`'anthropic-messages' | 'openai-chat' | 'openai-responses' | 'gemini-generate'`）
 - Harness 模式（`runMode === 'harness'`）强制使用 `anthropic-messages` 协议
 - `BaseProvider.resolveEndpointUrl()` 防止 baseURL 已含完整路径时重复拼接 suffix
 
@@ -48,6 +48,20 @@ LLMDeviceDriver 管理 VFS 存储路径：`/llm/.connections/` `/llm/.providers/
 - 模型定义中新增 `thinkingMode` 字段（`'auto' | 'disabled' | 'enabled'`）
 - 优先级：模型级 `thinkingMode` > 调用方 `params.thinking`
 - `'auto'` 显式忽略 thinking 字段（解决代理模型报错）；`'disabled'` 发送 `{type: 'disabled'}`
+
+## Responses API（openai-responses）
+
+- `ResponsesProvider`（`providers/responses.ts`）实现 DeepSeek / OpenAI `/responses` 协议（input items + 语义化 SSE）
+- `reasoning.effort` 思考控制；`responses.defaultThinkingEnabled` 能力位（DeepSeek 默认开启思考，关闭需 `effort='none'`）
+- 端点路径 `responsesPath`（如 `/responses`），`createProvider()` 按协议优先级选择
+
+## 联网搜索（Server-side Web Search）
+
+- 能力位：`LLMProvider.capabilities.serverSideWebSearch`（内置 provider 在 `constants/providers.ts` 声明）
+- 三态决策 `resolveWebSearchStrategy`（`@itookit/common`）→ `WebSearchMode`
+- 内置工具注入：Responses 追加 `{type:'web_search'}`；Gemini 追加 `{googleSearch:{}}`
+- citations 提取：`responses.ts collectCitations` / `gemini.ts groundingMetadata` → 统一 `Citation[]`
+- 详见 [web-search.md](../../doc/web-search.md)
 
 ## Conventions
 

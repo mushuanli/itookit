@@ -47,6 +47,9 @@ llm-session ──▶ llm-flow ──▶ llm-programs ──▶ harness ──�
 | [VFS 设计](../doc/design/VFS-design.md) | VFS 详细设计 |
 | [开发模式](../doc/dev-patterns.md) | 新增 Provider/Connection/Agent/Tool/i18n 流程 |
 | [文件索引](../doc/file-index.md) | 场景 → 关键文件映射 |
+| [联网搜索](../doc/web-search.md) | 三态 WebSearchMode 决策 + citations[] 事件链 + Provider 适配 |
+
+> 上表为**活文档**（随代码更新）；`../doc/feat/` 为历史设计归档，不随代码更新。
 
 ## 常见任务速查
 
@@ -57,3 +60,4 @@ llm-session ──▶ llm-flow ──▶ llm-programs ──▶ harness ──�
 | 新增 i18n | [dev-patterns](../doc/dev-patterns.md) `#i18n` → `common/CLAUDE.md` |
 | 新增工具 | [dev-patterns](../doc/dev-patterns.md) `#tools` → `tools/CLAUDE.md` |
 | 理解 agent loop | [architecture.md](../doc/architecture.md) `#harness` |
+| 理解联网搜索 | [web-search.md](../doc/web-search.md) |

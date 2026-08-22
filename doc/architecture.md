@@ -120,6 +120,15 @@ llm-session ──▶ llm-flow ──▶ llm-programs ──▶ harness
 - **调度**：`SessionManager`/`ConversationRunCoordinator`（Direct Chat 走 llm.chat，Flow 走 `DurableFlowExecutor`）。
 - **控制面**：`CommandBus` + `ExtensionRegistry` + 插件（session/vcs/history）；`initializeConversationSystem` 装配入口。
 
+### 3.4 联网搜索（Server-side Web Search）
+
+统一三态决策 + `citations[]` 返回（详见 [web-search.md](./web-search.md)）：
+
+- **单一决策点** `resolveWebSearchStrategy`（llm-common 纯函数）→ `WebSearchMode`（`builtin | client-tool | disabled`）。
+- **下发**：`AgentResolver` 存 `ExecutorConfig.webSearchMode` → `ConversationRunCoordinator` 派生 `webSearch` 布尔（仅 builtin）+ 剥离客户端 WebSearchTool。
+- **执行**：provider 按 `ChatCompletionParams.webSearch` 注入内置工具（Responses `web_search` / Gemini `googleSearch`）。
+- **返回**：citations 经 `Chunk.citations` → `AgentEventCitations` → `message:citations` → UI 渲染。
+
 ## 4. 能力/引擎层
 
 | 包 | 职责 |

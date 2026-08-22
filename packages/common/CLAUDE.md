@@ -23,6 +23,7 @@ llm-common/src/agent/
 - `DagRunSpec.edges` 只表达节点依赖，执行时编译为 `TaskSpec.dependsOn`。
 - Task 使用 Harness Resource/Effect 契约，不得引用具体 Provider、Tool 或 VFS 实现。
 - UI 通过 `SessionHandle` 和 `TaskHandle` 控制 Task。
+- 联网搜索：`WebSearchMode` + `resolveWebSearchStrategy` 在 `llm-common/llm/connection.ts`；`Citation` 在 `llm-common/llm/completion.ts`。
 
 ## VFS 核心协议（@itookit/stdio）
 

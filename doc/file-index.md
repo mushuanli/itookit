@@ -77,6 +77,8 @@
 |---|---|
 | LLMDeviceDriver（IDeviceDriver + LLM_IOCTL） | `device-llm/src/device/llm-device-driver.ts` |
 | Provider 基类 + OpenAI/Responses/Anthropic/Gemini | `device-llm/src/providers/` |
+| Responses API（web_search/reasoning/citations） | `device-llm/src/providers/responses.ts` |
+| Gemini grounding citations | `device-llm/src/providers/gemini.ts` |
 | MCP 客户端 | `device-llm/src/skills/mcp-client.ts` |
 | LLM 错误族 | `device-llm/src/errors.ts` |
 
@@ -123,3 +125,17 @@
 | 特权命令服务（plan 等） | `app-shell/src/harness/privileged-command-service.ts` |
 | web-app 入口 | `apps/web-app/src/` |
 | 工作区策略 | `app-shell/src/strategies/` |
+
+## 联网搜索（跨层）
+
+| 场景 | 文件 |
+|---|---|
+| 三态策略纯函数（resolveWebSearchStrategy） | `llm-common/src/llm/connection.ts` |
+| 策略解析 | `llm-session/src/session/agent-resolver.ts` |
+| 派生 + 剥离客户端工具 + citations 投影 | `llm-session/src/session/conversation-run-coordinator.ts` |
+| citations 事件发射 + 流式聚合 | `coreutils/src/effects/llm-chat-effect.ts` |
+| citations 渲染 | `llm-ui/src/components/history/StreamController.ts`、`templates/NodeTemplates.ts` |
+| 联网搜索开关 | `llm-ui/src/components/input/ChatInputView.ts`、`templates/ChatInputTemplates.ts` |
+| CLI -p prompt 命令 | `apps/cli/src/commands.ts` |
+
+> 详见 [web-search.md](./web-search.md)

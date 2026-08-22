@@ -7,6 +7,19 @@
 3. 如需新 Provider 类（非 OpenAI 兼容）：`packages/device-llm/src/providers/` 新建类 → `extends BaseProvider`
 4. `packages/device-llm/src/index.ts` — 导出
 
+## 新增 Provider 内置联网搜索能力
+
+1. `packages/device-llm/src/constants/providers.ts` — provider 定义加 `capabilities.serverSideWebSearch: true`
+2. `packages/llm-common/src/llm/connection.ts` — `supportsServerSideSearch()` 确认协议支持
+3. provider 实现类注入内置工具并提取 `citations`（参考 `responses.ts` / `gemini.ts`）
+4. 详见 [web-search.md](./web-search.md)
+
+## 新增 API 协议（如 openai-responses）
+
+1. `llm-common` `ApiProtocol` 加枚举值
+2. `device-llm` `resolveProtocol()` 加 URL/provider 推断；`createProvider()` 加协议→Provider 类分发
+3. Provider 类实现该协议端点路径（如 `responsesPath`）
+
 ## 新增 Connection
 
 通过 Settings UI (`llm-ui/src/editors/ConnectionSettingsEditor.ts`) 操作，

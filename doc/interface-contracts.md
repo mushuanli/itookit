@@ -21,9 +21,12 @@
 |---|---|---|---|---|
 | `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `llm-common/llm/llm-service.ts` | `coreutils LLMServiceAdapter` | `llm-programs`（经 effect）、`llm-session` |
 | `ChatMessage` | `role/content/attachments?` | `llm-common/llm/` | device-llm | 全部 LLM 层 |
-| `ChatCompletionParams/Response/Chunk` | `messages/model/tools/stream`… | `llm-common/llm/completion.ts` | device-llm providers | `llm-programs`、`coreutils` |
+| `ChatCompletionParams/Response/Chunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | device-llm providers | `llm-programs`、`coreutils` |
+| `Citation` | `text/source/title/url`（联网搜索引用） | `llm-common/llm/completion.ts` | device-llm providers | `coreutils`、`llm-ui` |
 | `TokenUsage` | `prompt_tokens/completion_tokens/total_tokens` | `llm-common/llm/completion.ts` | device-llm | `llm-programs`、预算扣减 |
-| `LLMConnection/ConnectionMeta` | `id/provider/tier/model` | `llm-common/llm/connection.ts` | `device-llm` | `llm-session AgentResolver` |
+| `LLMConnection/ConnectionMeta` | `id/provider/tier/model/protocol` | `llm-common/llm/connection.ts` | `device-llm` | `llm-session AgentResolver` |
+| `WebSearchMode` | `'builtin'\|'client-tool'\|'disabled'` | `llm-common/llm/connection.ts` | `resolveWebSearchStrategy`（纯函数） | `llm-session` |
+| `LLMProvider.capabilities.serverSideWebSearch` | 服务端内置联网搜索能力（唯一事实源） | `llm-common/llm/connection.ts` | `constants/providers.ts` | `resolveWebSearchStrategy` |
 | `ToolCall` / `ToolDefinition` | `id/name/arguments` | `llm-common/llm/` | device-llm / `tools` | `llm-programs` |
 | `DagNode/DagEdge/DagRunSpec/DagNodeOutcome` | `id/plugin/config/outputs/effects` | `llm-common/agent/dag-plugin.ts` | `llm-flow` | `llm-session`、`cli` |
 | `FlowDraft/FlowRevision/FlowNodeDefinition` | `nodes/edges/layout` | `llm-common/agent/flow-definition.ts` | `llm-flow FlowDefinitionStore` | `llm-ui`、`llm-session` |

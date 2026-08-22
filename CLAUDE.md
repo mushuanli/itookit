@@ -29,6 +29,11 @@ SOLID / DRY / KISS / YAGNI / CoC / LoD — 函数≤30行，圈复杂度≤10
 | [llm-programs API](./doc/llm-programs-api.md) | Durable Program 层 API + 文件结构 |
 | [llm-flow API](./doc/llm-flow-api.md) | DAG 编排层 API + 文件结构 |
 | [llm-session API](./doc/llm-session-api.md) | 会话语义/持久化 API + 文件结构/VFS 路径 |
+| [联网搜索](./doc/web-search.md) | 三态 WebSearchMode 决策 + citations[] 事件链 + Provider 适配 |
+| [历史设计归档](./doc/feat/) | 已实现特性的设计/评审记录（**归档，不随代码更新**） |
+
+> 上表为**活文档**（随代码更新）。改代码时按此表定位对应文档即可，无需全量扫描。
+> `doc/feat/` 是历史设计归档，仅作决策记录参考，代码演进后不再同步。
 
 ## UI 约定
 
@@ -45,4 +50,5 @@ LLMProvider (云厂商) → LLMConnection (tier→model) → AgentDefinition (sy
 
 - 关键类型: `llm-common/src/agent/` + `llm-common/src/llm/`（common re-export）
 - Provider 实现: `device-llm/src/providers/`
+- 联网搜索: `resolveWebSearchStrategy` → `WebSearchMode`（详见 [联网搜索](./doc/web-search.md)）
 - 详见 [架构设计](./doc/architecture.md)

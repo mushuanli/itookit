@@ -12,6 +12,14 @@
 - 不访问 Harness Dispatcher、ProcessTable 等内部对象。
 - 不接收旧 ChatNode manifest，不增加兼容迁移路径。
 
+## 联网搜索
+
+- 三态 `ExecutorConfig.webSearchMode`（`WebSearchMode`）由 `AgentResolver.resolveWebSearch` 经 `resolveWebSearchStrategy` 解析。
+- `ConversationRunCoordinator.directTaskSpec` 派生 `webSearch` 布尔（仅 builtin）+ 按 mode 剥离客户端 WebSearchTool。
+- `applyOverrides` 中 `webSearchEnabled=false` → `webSearchMode='disabled'`。
+- citations 投影为 `message:citations`（投影后不重复发射原始 citations）。
+- 详见 [web-search.md](../../doc/web-search.md)。
+
 运行：
 
 ```bash

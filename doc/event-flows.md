@@ -37,6 +37,7 @@ LLM 流式与程序进度经 `agent.event` 透传（`KernelAction.emit` 或 effe
 | `round:start` / `round:end` | `DurableAgentProgram` | 轮次边界 |
 | `tool:running` / `tool:success` | `DurableAgentProgram` | 工具执行进度 |
 | `finished` | `DurableAgentProgram`（含 usage） | 任务完成、token 统计 |
+| `citations` | `LlmChatEffectAdapter`（终态 chunk） | 联网搜索引用（一次性，投影为 `message:citations`） |
 
 ```
 LlmChatEffectAdapter.execute（流式逐块）
@@ -65,12 +66,15 @@ DurableAgentProgram.request-interaction（approval/human）
 | `message:updated` | 流式追加文字、更新 thought |
 | `message:status` | 完成/失败/工具结果 |
 | `finished` | token 统计、停止 loading |
+| `message:citations` | 渲染联网搜索引用块 |
 | `branch:switched` / 再生事件 | 分支切换/再生 |
 
 ```
 ConversationRunCoordinator → RoundLog 投影 → SessionEventBus.emitSession()
   → llm-ui SessionEventHandler → HistoryView / StreamController
 ```
+
+> 联网搜索的 citations 事件链与三态决策详见 [web-search.md](./web-search.md)。
 
 ## 5. 跨会话同步（outbox/inbox）
 

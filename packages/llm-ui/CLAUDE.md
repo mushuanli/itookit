@@ -11,6 +11,12 @@
 - TTY 面板只展示运行输出；交互输入必须通过 Harness 控制面。
 - SessionState 是 Round 的 UI 投影，不是运行事实源。
 
+## 联网搜索 citations
+
+- `HistoryView` 订阅 `message:citations`（immediateType）→ `StreamController.updateCitations`。
+- `NodeTemplates.renderCitations` 渲染引用块（图标用 `ACTION_ICONS.search`，禁止硬编码 emoji）。
+- 详见 [web-search.md](../../doc/web-search.md)。
+
 运行：
 
 ```bash
