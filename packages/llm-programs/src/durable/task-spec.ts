@@ -20,6 +20,7 @@ export interface LlmTaskInputOptions {
     maxTokens?: number;
     thinking?: boolean;
     reasoningEffort?: DurableProgramInput['reasoningEffort'];
+    webSearch?: boolean;
     stream?: boolean;
     maxExchanges?: number;
     workingDirectory?: string;
@@ -41,6 +42,7 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         maxTokens: options.maxTokens,
         thinking: options.thinking,
         reasoningEffort: options.reasoningEffort,
+        webSearch: options.webSearch,
         stream: options.stream,
         maxExchanges: options.maxExchanges,
         workingDirectory: options.workingDirectory,

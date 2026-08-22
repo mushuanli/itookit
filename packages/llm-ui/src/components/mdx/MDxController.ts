@@ -27,6 +27,8 @@ export class MDxController implements IStreamableEditor {
     private container: HTMLElement;
     private currentContent: string = '';
     private pendingDelta: string = '';
+    /** 串行化渲染任务链：并发 setStreamingText 会互相覆盖并误清 pendingDelta。 */
+    private flushChain: Promise<void> = Promise.resolve();
     private isStreaming: boolean = false;
     private isReadOnly: boolean = true;
     private onChangeCallback?: (text: string) => void;
@@ -131,22 +133,28 @@ export class MDxController implements IStreamableEditor {
      * 不操作滚动，不查找父容器
      */
     async flush(): Promise<number> {
-        if (!this.pendingDelta || !this.editor || !this.isInitialized) {
+        if (!this.editor || !this.isInitialized) {
             return 0;
         }
-
-        const heightBefore = this.container.offsetHeight;
-
-        try {
-            await this.editor.setStreamingText(this.currentContent);
-            this.pendingDelta = '';
-        } catch (e) {
-            console.error('[MDxController] flush failed:', e);
-            return 0;
-        }
-
-        const heightAfter = this.container.offsetHeight;
-        return heightAfter - heightBefore;
+        const editor = this.editor;
+        // 串行化渲染：并发 setStreamingText 会互相覆盖，且 pendingDelta 会被误清。
+        const run = this.flushChain.then(async (): Promise<number> => {
+            if (!this.pendingDelta) return 0;
+            const snapshot = this.currentContent;
+            const renderedLen = this.pendingDelta.length;
+            const heightBefore = this.container.offsetHeight;
+            try {
+                await editor.setStreamingText(snapshot);
+            } catch (e) {
+                console.error('[MDxController] flush failed:', e);
+                return 0;
+            }
+            // 只清除本次已渲染的增量；await 期间新 appendDelta 的增量保留。
+            this.pendingDelta = this.pendingDelta.slice(renderedLen);
+            return this.container.offsetHeight - heightBefore;
+        });
+        this.flushChain = run.then(() => {}, () => {});
+        return run;
     }
 
     /**
@@ -157,17 +165,23 @@ export class MDxController implements IStreamableEditor {
         this.pendingDelta = '';
 
         if (!this.editor || !this.isInitialized) return;
+        const editor = this.editor;
 
-        try {
-            // 使用 finishStreamingText 做最终完整渲染
-            if (typeof (this.editor as any).finishStreamingText === 'function') {
-                await (this.editor as any).finishStreamingText(this.currentContent);
-            } else {
-                await this.editor.setStreamingText(this.currentContent);
+        // 排在未完成的 flush 之后做最终完整渲染，避免与流式渲染竞争。
+        const run = this.flushChain.then(async () => {
+            try {
+                // 使用 finishStreamingText 做最终完整渲染
+                if (typeof (editor as any).finishStreamingText === 'function') {
+                    await (editor as any).finishStreamingText(this.currentContent);
+                } else {
+                    await editor.setStreamingText(this.currentContent);
+                }
+            } catch (e) {
+                console.error('[MDxController] finalize failed:', e);
             }
-        } catch (e) {
-            console.error('[MDxController] finalize failed:', e);
-        }
+        });
+        this.flushChain = run.then(() => {}, () => {});
+        await run;
     }
 
     get content(): string {

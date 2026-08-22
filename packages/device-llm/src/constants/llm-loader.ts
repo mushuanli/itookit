@@ -46,6 +46,10 @@ export interface LLMProviderDef {
     isBuiltin?: boolean;
     enabled?: boolean;
     defaultTemperature?: number;
+    /** OpenAI Responses API 兼容路径（如 DeepSeek 的 "/responses"），可选 */
+    responsesPath?: string;
+    /** Responses API 推理行为配置（defaultThinkingEnabled 等），可选 */
+    responses?: { defaultThinkingEnabled?: boolean };
     models: LLMModelDef[];
 }
 
@@ -234,6 +238,8 @@ export function toLLMProvider(def: LLMProviderDef): LLMProvider {
         defaultTemperature: def.defaultTemperature,
         authMethod: def.authMethod,
         apiKey: def.apiKey,
+        responsesPath: def.responsesPath,
+        responses: def.responses,
         models: def.models.map(m => ({ ...m } as LLMModel)),
         capabilities: {
             thinking: def.supportsThinking,
@@ -318,6 +324,8 @@ export function fromLLMProvider(p: LLMProvider): LLMProviderDef {
         isBuiltin: p.isBuiltin,
         enabled: p.enabled,
         defaultTemperature: p.defaultTemperature,
+        responsesPath: p.responsesPath,
+        responses: p.responses,
         models: p.models.map(m => ({
             id: m.id,
             name: m.name,

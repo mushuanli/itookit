@@ -141,6 +141,8 @@ export class HistoryView implements IHistoryPresenter {
                     'sibling:switched',
                     'branch:switched',
                     'stream:content', 'stream:thinking',
+                    // 联网搜索结果引用（终态一次性）
+                    'message:citations',
                 ],
             }
         );
@@ -466,6 +468,14 @@ export class HistoryView implements IHistoryPresenter {
             case 'stream:content':
             case 'stream:thinking':
                 break;
+
+            case 'message:citations': {
+                const p = (event as any).payload as { messageId?: string; citations?: import('@itookit/common').Citation[] } | undefined;
+                if (p?.messageId && p?.citations?.length) {
+                    this.stream.updateCitations(p.messageId, p.citations);
+                }
+                break;
+            }
         }
     }
 

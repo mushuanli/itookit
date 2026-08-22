@@ -100,6 +100,7 @@ function agentTask(context: DagNodeContext) {
             thinking: config.thinking === true,
             reasoningEffort: optionalReasoning(config.reasoningEffort),
             stream: optionalBoolean(config.stream),
+            webSearch: optionalBoolean(config.webSearch),
             maxExchanges: optionalNumber(config.maxExchanges),
             workingDirectory: optionalString(config.workingDirectory),
             approval: optionalApproval(config.approval) ?? 'external',
@@ -148,7 +149,7 @@ function agentManifest(): DagPluginManifest {
         toolIds: { type: 'array', items: { type: 'string' } }, maxExchanges: { type: 'integer' },
         temperature: { type: 'number' }, maxTokens: { type: 'integer' },
         thinking: { type: 'boolean' }, reasoningEffort: enumSchema(['low', 'medium', 'xhigh']),
-        stream: { type: 'boolean' },
+        stream: { type: 'boolean' }, webSearch: { type: 'boolean' },
         approval: enumSchema(['none', 'external', 'all']),
     }, { prompt: '', connectionId: 'default', toolIds: [], approval: 'external' });
 }

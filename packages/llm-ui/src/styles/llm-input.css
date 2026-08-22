@@ -911,6 +911,45 @@
     color: var(--llm-color-primary);
 }
 
+.llm-input__btn--websearch {
+    position: relative;
+}
+
+/* 开启：主色浅底 + 主色图标 + 右上角主色实心点（状态醒目） */
+.llm-input__btn--websearch[data-active="true"] {
+    background-color: var(--llm-color-primary-bg);
+    color: var(--llm-color-primary);
+}
+.llm-input__btn--websearch[data-active="true"]::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--llm-color-primary);
+    box-shadow: 0 0 0 1px #fff;
+}
+
+/* 关闭：灰底 + 灰图标 + 右上角灰色空心点 */
+.llm-input__btn--websearch[data-active="false"] {
+    background-color: var(--llm-bg-tertiary);
+    color: var(--llm-text-secondary);
+    opacity: 0.8;
+}
+.llm-input__btn--websearch[data-active="false"]::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: transparent;
+    border: 2px solid var(--llm-text-secondary);
+}
+
 .llm-input__btn--settings.has-overrides::after {
     content: '';
     position: absolute;

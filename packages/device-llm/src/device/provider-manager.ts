@@ -64,7 +64,20 @@ export class ProviderManager {
     reloadProvidersFrom(fromVFS: LLMProvider[]): void {
         const merged = new Map(Object.entries(LLM_PROVIDERS).map(([k, v]) => [k, { ...v, id: k }]));
         for (const p of fromVFS) {
-            if ((p as any).__deleted) { merged.delete(p.id); } else { merged.set(p.id, p); }
+            if ((p as any).__deleted) { merged.delete(p.id); continue; }
+            const def = LLM_PROVIDERS[p.id];
+            // 内置 Provider：VFS 用户数据优先，但合并内置定义的结构性能力字段
+            // （capabilities.serverSideWebSearch / thinking 等），否则旧数据在
+            // 保存时丢过 capabilities 会导致内置联网搜索能力永久失效。
+            if (def && p.isBuiltin) {
+                merged.set(p.id, {
+                    ...def,
+                    ...p,
+                    capabilities: { ...(def.capabilities ?? {}), ...(p.capabilities ?? {}) },
+                });
+            } else {
+                merged.set(p.id, p);
+            }
         }
         // Apply pricing config to all model price fields
         for (const [id, provider] of merged) {

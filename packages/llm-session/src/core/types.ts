@@ -3,8 +3,10 @@
 import type {
     AgentDefinition,
     ChatAttachment,
+    Citation,
     ModelTier,
     SendIntent,
+    WebSearchMode,
 } from '@itookit/common';
 
 // ═══════════════════════════════════════════════════════════════
@@ -41,6 +43,13 @@ export interface ExecutorConfig {
     stream?: boolean;
     enableThinking?: boolean;
     reasoningEffort?: 'low' | 'medium' | 'xhigh';
+    /**
+     * 联网搜索策略三态（权威决策来自 resolveWebSearchStrategy）：
+     * - 'builtin'    ：走底层内置 server-side search（webSearch=true）
+     * - 'client-tool'：注入客户端统一 WebSearchTool
+     * - 'disabled'   ：禁用联网（内置与客户端均关闭）
+     */
+    webSearchMode?: WebSearchMode;
     connectionId?: string;
     systemPrompt?: string;
     /** Frozen AgentDefinition version used for reproducible AgentTasks. */
@@ -123,6 +132,12 @@ export interface ExecutionOverrides {
     reasoningEffort?: 'low' | 'medium' | 'xhigh';
     /** 强制开启/关闭 thinking（覆盖模型默认） */
     thinkingEnabled?: boolean;
+    /**
+     * 联网搜索总开关（覆盖 provider 自动决策）。
+     * false = 同时关闭内置 search 与客户端 WebSearchTool；
+     * true/undefined = 保持自动分流（内置优先，否则客户端工具）。
+     */
+    webSearchEnabled?: boolean;
     /** 追加到 Agent system prompt（本次请求生效） */
     systemPromptAppend?: string;
     /** Optional Flow/branch controls supplied by ChatInput. */
@@ -464,6 +479,13 @@ export type MessageProjectionEvent =
             messageId: string;
             status: NodeStatus;
             result?: unknown;
+        };
+    }
+    | {
+        type: 'message:citations';
+        payload: {
+            messageId: string;
+            citations: Citation[];
         };
     };
 

@@ -197,6 +197,7 @@ function compileTask(
             ...(agent.max_tokens !== undefined ? { maxTokens: agent.max_tokens } : {}),
             ...(agent.thinking !== undefined ? { thinking: agent.thinking } : {}),
             ...(agent.reasoning_effort !== undefined ? { reasoningEffort: agent.reasoning_effort } : {}),
+            ...(agent.web_search !== undefined ? { webSearch: agent.web_search } : {}),
             ...(agent.stream !== undefined ? { stream: agent.stream } : {}),
             maxExchanges: agent.max_exchanges ?? 50,
             workingDirectory: workflow.workspaceRoot,
@@ -245,6 +246,7 @@ async function configureLlm(driver: LLMDeviceDriver, workflow: CompiledWorkflow)
             implementation: source.implementation,
             baseURL: source.base_url,
             defaultPath: source.default_path,
+            responsesPath: source.responses_path,
             apiKey: process.env[source.api_key_env],
             enabled: true,
             models: source.models.map(model => ({
@@ -264,6 +266,7 @@ async function configureLlm(driver: LLMDeviceDriver, workflow: CompiledWorkflow)
             name: source.name ?? source.id,
             providerId: source.provider,
             tiers: source.tiers,
+            protocol: source.protocol,
             enabled: true,
         };
         await driver.saveConnection(connection);

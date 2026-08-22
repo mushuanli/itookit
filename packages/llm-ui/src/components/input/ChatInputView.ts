@@ -108,6 +108,7 @@ export class ChatInput implements IChatInputPresenter {
     private stopBtn!: HTMLButtonElement;
     private attachBtn!: HTMLButtonElement;
     private settingsBtn!: HTMLButtonElement;
+    private webSearchQuickBtn!: HTMLButtonElement;
     private historySlider!: HTMLInputElement;
     private historyValue: HTMLSpanElement | null = null; // removed from new template
     private streamToggle!: HTMLInputElement;
@@ -437,6 +438,7 @@ export class ChatInput implements IChatInputPresenter {
         this.stopBtn = q('.llm-input__btn--stop');
         this.attachBtn = q('.llm-input__btn--attach');
         this.settingsBtn = q('.llm-input__btn--settings');
+        this.webSearchQuickBtn = q('.llm-input__btn--websearch');
         this.moreBtn = q('.llm-input__btn--more');
 
         // Agent Picker combobox elements
@@ -466,6 +468,12 @@ export class ChatInput implements IChatInputPresenter {
     }
 
     private bindEvents(): void {
+        this.webSearchQuickBtn?.addEventListener('click', () => {
+            const next = !(this.config.settings.webSearchEnabled ?? true);
+            this.config.settings.webSearchEnabled = next;
+            this.syncWebSearchUI(next);
+            this.notifyConfigChange();
+        });
         this.flowIdInput?.addEventListener('input', () => { this.config.settings.flowId = this.flowIdInput.value.trim() || undefined; this.notifyConfigChange(); });
         this.branchModeSelect?.addEventListener('change', () => {
             this.config.settings.branchMode =
@@ -605,6 +613,13 @@ export class ChatInput implements IChatInputPresenter {
             this.notifyConfigChange();
         });
 
+        const webSearchToggle = this.container.querySelector('.llm-input__websearch-toggle') as HTMLInputElement | null;
+        webSearchToggle?.addEventListener('change', () => {
+            this.config.settings.webSearchEnabled = webSearchToggle?.checked;
+            this.syncWebSearchUI(webSearchToggle?.checked ?? true);
+            this.notifyConfigChange();
+        });
+
         this.container.querySelectorAll('.llm-input__preset-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const value = parseInt((e.currentTarget as HTMLElement).dataset.history || '-1');
@@ -707,6 +722,10 @@ export class ChatInput implements IChatInputPresenter {
         if (this.config.settings.thinkingEnabled !== undefined) {
             overrides.thinkingEnabled = this.config.settings.thinkingEnabled;
         }
+        // Web search toggle (undefined=auto → provider 自动决策，true=强制开，false=强制关)
+        if (this.config.settings.webSearchEnabled !== undefined) {
+            overrides.webSearchEnabled = this.config.settings.webSearchEnabled;
+        }
         // Session profile — system prompt append
         if (this.config.settings.systemPromptAppend) {
             overrides.systemPromptAppend = this.config.settings.systemPromptAppend;
@@ -782,6 +801,11 @@ export class ChatInput implements IChatInputPresenter {
         if (reasoningSelect && this.config.settings.reasoningEffort) {
             reasoningSelect.value = this.config.settings.reasoningEffort;
         }
+        const webSearchToggle = this.container.querySelector('.llm-input__websearch-toggle') as HTMLInputElement | null;
+        if (webSearchToggle) {
+            webSearchToggle.checked = this.config.settings.webSearchEnabled ?? true;
+        }
+        this.syncWebSearchUI(this.config.settings.webSearchEnabled ?? true);
         if (this.systemPromptAppendInput) {
             this.systemPromptAppendInput.value = this.config.settings.systemPromptAppend ?? '';
         }
@@ -796,6 +820,15 @@ export class ChatInput implements IChatInputPresenter {
         this.config.settings.historyLength = parseInt(this.historySlider?.value || '-1');
         this.config.settings.streamMode = !(this.streamToggle?.checked ?? false);
         this.config.settings.systemPromptAppend = this.systemPromptAppendInput?.value.trim() || undefined;
+    }
+
+    /** 同步联网搜索状态到工具栏快速开关（高亮）与设置面板 toggle。 */
+    private syncWebSearchUI(active: boolean): void {
+        if (this.webSearchQuickBtn) {
+            this.webSearchQuickBtn.dataset.active = active ? 'true' : 'false';
+        }
+        const panelToggle = this.container.querySelector('.llm-input__websearch-toggle') as HTMLInputElement | null;
+        if (panelToggle) panelToggle.checked = active;
     }
 
     private adjustTextareaHeight(): void {

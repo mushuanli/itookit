@@ -43,6 +43,8 @@ export interface ProviderConfig {
     implementation: 'openai-compatible' | 'anthropic' | 'gemini' | 'custom';
     base_url: string;
     default_path?: string;
+    /** OpenAI Responses API 端点路径（如 /responses），供 openai-responses 协议使用。 */
+    responses_path?: string;
     api_key_env: string;
     models: Array<{
         id: string;
@@ -59,6 +61,8 @@ export interface ConnectionConfig {
     id: string;
     name?: string;
     provider: string;
+    /** API 协议：openai-chat（默认）/ openai-responses / anthropic-messages / gemini-generate。 */
+    protocol?: 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-generate';
     tiers: Partial<Record<'optimal' | 'standard' | 'fast', string>>;
 }
 
@@ -76,6 +80,8 @@ export interface AgentConfig {
     thinking?: boolean;
     reasoning_effort?: 'low' | 'medium' | 'xhigh';
     stream?: boolean;
+    /** 走底层内置 server-side search（openai-responses / gemini-generate 协议下生效）。 */
+    web_search?: boolean;
     /** 工具审批策略：none=直接执行，external=有副作用的工具需批准，all=全部批准。 */
     approval?: 'none' | 'external' | 'all';
 }

@@ -251,6 +251,8 @@ export const en: LocaleStrings = {
     // ── Chat input — Thinking mode ───────────────────────────────────────────
     'thinking.label':            'Thinking',
     'thinking.tooltip':          'Enable/disable thinking mode',
+    'webSearch.label':           'Web Search',
+    'webSearch.tooltip':         'Enable web search (built-in when supported, else client tool)',
     'thinking.effort.label':     'Effort',
     'thinking.effort.auto':      'Auto',
     'thinking.effort.low':       'Low',

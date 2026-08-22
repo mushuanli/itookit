@@ -16,7 +16,7 @@ describe('LLMDriver Core', () => {
             connection: {
                 id: 'test',
                 name: 'test',
-                provider: 'openai',
+                providerId: 'openai',
                 apiKey: 'sk-test',
                 model: 'gpt-4',
                 baseURL: 'https://api.openai.com/v1'

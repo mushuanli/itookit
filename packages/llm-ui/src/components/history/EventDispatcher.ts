@@ -154,6 +154,16 @@ export class EventDispatcher {
                 return;
             }
 
+            // citations 面板 toggle：点击标签折叠/展开
+            const citationsLabel = target.closest('.llm-ui-citations__label') as HTMLElement;
+            if (citationsLabel) {
+                const citationsEl = citationsLabel.closest('.llm-ui-citations') as HTMLElement;
+                if (citationsEl) {
+                    citationsEl.classList.toggle('llm-ui-citations--collapsed');
+                }
+                return;
+            }
+
             // data-action 委托
             const actionEl = target.closest('[data-action]') as HTMLElement;
             if (!actionEl) return;

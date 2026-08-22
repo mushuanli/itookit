@@ -5,6 +5,7 @@ import type {
     ChatCompletionChunk,
     ChatCompletionParams,
     ChatCompletionResponse,
+    Citation,
     FinishReason,
     ILLMService,
     TokenUsage,
@@ -114,6 +115,7 @@ async function emitFinalContent(
     const message = response.choices[0]?.message;
     if (message?.thinking) await emit({ type: 'stream:thinking', delta: message.thinking });
     if (message?.content) await emit({ type: 'stream:content', delta: message.content });
+    if (response.citations?.length) await emit({ type: 'citations', citations: response.citations });
 }
 
 async function streamChat(
@@ -139,7 +141,9 @@ async function streamChat(
             aggregator.observe(chunk);
         }
         await batcher.flush();
-        return aggregator.build();
+        const response = aggregator.build();
+        if (response.citations?.length) await emit({ type: 'citations', citations: response.citations });
+        return response;
     } catch (error) {
         // Flush partial output so the UI shows what was generated before abort/failure.
         await batcher.flush();
@@ -150,6 +154,8 @@ async function streamChat(
 class DeltaBatcher {
     private pending: Array<{ type: 'stream:thinking' | 'stream:content'; delta: string }> = [];
     private timer: ReturnType<typeof setTimeout> | null = null;
+    /** 串行化 flush：并发 flush 会让增量 emit 交错、下游顺序错乱（内容被"洗牌"）。 */
+    private chain: Promise<void> = Promise.resolve();
 
     constructor(private readonly emit: (event: AgentEvent) => Promise<void>) {}
 
@@ -169,15 +175,22 @@ class DeltaBatcher {
         }
         const batch = this.pending;
         this.pending = [];
-        for (const item of batch) {
-            await this.emit({ type: item.type, delta: item.delta });
-        }
+        if (batch.length === 0) return this.chain;
+        // 每个批次串到前一批之后，保证 emit 顺序与增量到达顺序一致。
+        const next = this.chain.then(async () => {
+            for (const item of batch) {
+                await this.emit({ type: item.type, delta: item.delta });
+            }
+        });
+        this.chain = next.catch(() => {});
+        return next;
     }
 }
 
 class ResponseAggregator {
     private content = '';
     private thinking = '';
+    private citations?: Citation[];
     private readonly toolCallByIndex = new Map<number, ToolCall>();
     private usage?: TokenUsage;
     private finishFromUsage: FinishReason = null;
@@ -208,6 +221,7 @@ class ResponseAggregator {
         if (!this.id && chunk.id) this.id = chunk.id;
         if (!this.model && chunk.model) this.model = chunk.model;
         if (chunk.usage) this.usage = chunk.usage;
+        if (chunk.citations?.length) this.citations = chunk.citations;
         const reason = chunk.choices?.[0]?.finish_reason;
         if (!reason) return;
         // Anthropic: message_delta carries the real finish_reason + usage; message_stop
@@ -235,6 +249,7 @@ class ResponseAggregator {
                 finish_reason: this.finishFromUsage ?? this.lastFinishReason,
             }],
             ...(this.usage ? { usage: this.usage } : {}),
+            ...(this.citations?.length ? { citations: this.citations } : {}),
         };
     }
 }

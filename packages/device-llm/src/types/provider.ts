@@ -56,6 +56,13 @@ export interface LLMProviderConfig {
      */
     anthropicPath?: string;
 
+    /**
+     * OpenAI Responses API 兼容路径（相对于 apiBaseUrl）。
+     * 如 DeepSeek 的 "/responses"，完整 URL = apiBaseUrl + responsesPath。
+     * ResponsesProvider 在以 openai-responses 协议请求时使用此路径。
+     */
+    responsesPath?: string;
+
     /** API 协议类型；显式设置时优先于 implementation + URL 推断 */
     protocol?: ApiProtocol;
 
@@ -74,6 +81,15 @@ export interface LLMProviderConfig {
     
     /** 支持的特性 */
     capabilities?: ProviderCapabilities;
+
+    /**
+     * Responses API 推理行为配置（仅 openai-responses 协议生效）。
+     * defaultThinkingEnabled = 服务端默认开启思考（如 DeepSeek），用户显式关闭
+     * thinking 时需发送 reasoning.effort='none' 才能关闭。
+     */
+    responses?: {
+        defaultThinkingEnabled?: boolean;
+    };
     
     // ===== 请求配置 =====
     /** 额外 HTTP 头 */
@@ -116,8 +132,6 @@ export interface ProviderCapabilities {
     thinking?: boolean;
     /** 代码执行 */
     codeExecution?: boolean;
-    /** 网络搜索 */
-    webSearch?: boolean;
     /** Computer Use */
     computerUse?: boolean;
     /** MCP 协议 */
@@ -162,8 +176,8 @@ export interface LLMHooks {
  * LLMDriver 构造配置
  */
 export interface LLMClientConfig {
-    // ===== 方式 A: 传入连接对象（运行时可能被调用方注入 apiKey/model/provider 等解析字段） =====
-    connection?: LLMConnection & { apiKey?: string; model?: string; provider?: string; protocol?: string };
+    // ===== 方式 A: 传入连接对象（运行时可能被调用方注入 apiKey/model/protocol 等解析字段） =====
+    connection?: LLMConnection & { apiKey?: string; model?: string; protocol?: string };
     
     // ===== 方式 B: 直接传参 =====
     provider?: string;

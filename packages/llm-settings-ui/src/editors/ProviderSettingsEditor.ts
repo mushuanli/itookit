@@ -17,7 +17,6 @@ import type { IConnectionService,
     LLMProvider,
     LLMModel,
     ModelCategory,
-    LLMProviderImplementation,
     ConnectionMeta,
     AgentDefinition
 } from '@itookit/common';
@@ -40,6 +39,7 @@ const MODEL_CAP_CHIPS: ReadonlyArray<[string, keyof LLMModel, string]> = [
 export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionService> {
     private editModels: LLMModel[] = [];
     private _checkedIds = new Set<string>();
+    private currentProviderId?: string;
 
     async render() {
         const providers = this.service.getProviders();
@@ -153,26 +153,10 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
 
                 <div class="settings-connection-card__details">
                     <div class="settings-detail-item">
-                        <span class="settings-detail-item__label">实现</span>
-                        <span class="settings-detail-item__value">${p.implementation}</span>
-                    </div>
-                    <div class="settings-detail-item">
                         <span class="settings-detail-item__label">Base URL</span>
                         <span class="settings-detail-item__value" style="font-size:0.75rem;word-break:break-all">
                             ${p.baseURL || '—'}
                         </span>
-                    </div>
-                    ${p.anthropicPath ? `
-                    <div class="settings-detail-item">
-                        <span class="settings-detail-item__label">Anthropic 端点</span>
-                        <span class="settings-detail-item__value" style="font-size:0.75rem;word-break:break-all">
-                            ${p.baseURL}${p.anthropicPath}
-                        </span>
-                    </div>
-                    ` : ''}
-                    <div class="settings-detail-item">
-                        <span class="settings-detail-item__label">模型数量</span>
-                        <span class="settings-detail-item__value">${p.models.length} 个</span>
                     </div>
                     <div class="settings-detail-item">
                         <span class="settings-detail-item__label">API Key</span>
@@ -536,121 +520,103 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
 
         // Load full provider (with apiKey) when editing an existing one
         const fullProvider = provider ? (this.service.getFullProvider(provider.id) ?? provider) : null;
+        this.currentProviderId = provider?.id;
 
         this.editModels = fullProvider ? JSON.parse(JSON.stringify(fullProvider.models)) : [];
         const existingApiKey = fullProvider?.apiKey ?? '';
 
-        const implementations: LLMProviderImplementation[] = [
-            'openai-compatible', 'anthropic', 'gemini', 'custom',
-        ];
-
         const modalContent = `
-            <form id="provider-form" class="settings-form settings-form--wide">
-                <div class="settings-row">
-                    <!-- Left: basic config -->
-                    <div class="settings-col">
-                        <h4 class="settings-section-title">基础配置</h4>
-
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">Provider 名称 *</label>
-                            <input type="text" class="settings-form__input" name="name"
-                                   value="${provider?.name ?? ''}" required placeholder="如 My Proxy">
-                        </div>
-
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">图标</label>
-                            <input type="text" class="settings-form__input" name="icon"
-                                   value="${provider?.icon ?? ''}" placeholder="🛠️" style="max-width:80px">
-                        </div>
-
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">实现类型 *</label>
-                            <select class="settings-form__select" name="implementation">
-                                ${implementations.map(impl => `
-                                    <option value="${impl}" ${provider?.implementation === impl ? 'selected' : ''}>
-                                        ${impl}
-                                    </option>
-                                `).join('')}
-                            </select>
-                        </div>
-
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">API Key</label>
-                            <input type="password" class="settings-form__input" name="apiKey"
-                                   value="${existingApiKey}"
-                                   placeholder="sk-... （留空则不修改现有 Key）">
-                            <small class="settings-form__help">
-                                存储于 Provider 层，所有绑定此 Provider 的连接共享此 Key。
-                            </small>
-                        </div>
-
-                        <div class="settings-form__group">
-                            <button type="button" id="btn-test-provider"
-                                    class="settings-btn settings-btn--secondary settings-btn--sm" style="width:100%">
-                                🔍 测试 API Key
-                            </button>
-                            <div id="provider-test-result" style="display:none; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px;"></div>
-                        </div>
-
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">默认温度 (0-2)</label>
-                            <input type="number" class="settings-form__input" name="defaultTemperature"
-                                   value="${fullProvider?.defaultTemperature ?? provider?.defaultTemperature ?? ''}"
-                                   min="0" max="2" step="0.1" placeholder="未设置（由 Connection 决定）"
-                                   style="max-width:120px">
-                            <small class="settings-form__help">
-                                所有绑定此 Provider 的连接继承此温度。Connection 可覆盖。
-                            </small>
-                        </div>
-
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">Base URL *</label>
-                            <input type="text" class="settings-form__input" name="baseURL"
-                                   value="${fullProvider?.baseURL ?? provider?.baseURL ?? ''}" required placeholder="https://api.example.com">
-                            <small class="settings-form__help">
-                                Provider 根域地址，不含路径（如 https://api.deepseek.com）。
-                            </small>
-                        </div>
-
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">默认 API 路径</label>
-                            <input type="text" class="settings-form__input" name="defaultPath"
-                                   value="${(fullProvider?.defaultPath ?? provider?.defaultPath) ?? ''}"
-                                   placeholder="如 /v1/chat/completions（留空使用内置默认值）">
-                            <small class="settings-form__help">
-                                覆盖实现类内置路径：openai-compatible 默认 /v1/chat/completions，anthropic 默认 /v1/messages。
-                            </small>
-                        </div>
-
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">Anthropic Messages 端点路径</label>
-                            <input type="text" class="settings-form__input" name="anthropicPath"
-                                   value="${(fullProvider?.anthropicPath ?? provider?.anthropicPath) ?? ''}"
-                                   placeholder="如 /anthropic（填写后可使用 anthropic-messages 协议）">
-                            <small class="settings-form__help">
-                                部分厂商（如 DeepSeek）同时提供 Anthropic Messages API 格式端点，填写后连接可选用 anthropic-messages 协议（支持 thinking block）。
-                            </small>
-                        </div>
-
-                    </div>
-
-                    <!-- Right: model list -->
-                    <div class="settings-col settings-col--border">
-                        <h4 class="settings-section-title" style="display:flex;justify-content:space-between;align-items:center">
-                            模型列表
-                            <button type="button" id="btn-add-model" class="settings-btn settings-btn--xs settings-btn--primary">+ 新增</button>
-                        </h4>
-                        <div class="settings-model-list-container" id="model-list-container">
-                            ${this.renderModelListHTML()}
-                        </div>
-                        <small class="settings-form__help">Model ID 须与 API 实际返回的 ID 一致。</small>
-                    </div>
+            <form id="provider-form" class="settings-form">
+                <div class="settings-form__group">
+                    <label class="settings-form__label">Provider 名称 *</label>
+                    <input type="text" class="settings-form__input" name="name"
+                           value="${provider?.icon ? `${provider.icon} ${provider.name}` : (provider?.name ?? '')}"
+                           required placeholder="如 🐋 DeepSeek（emoji 作为图标）">
                 </div>
+
+                <div class="settings-form__group">
+                    <label class="settings-form__label">API Key</label>
+                    <input type="password" class="settings-form__input" name="apiKey"
+                           value="${existingApiKey}"
+                           placeholder="sk-... （留空则不修改现有 Key）">
+                    <small class="settings-form__help">所有绑定此 Provider 的连接共享此 Key。</small>
+                    <div style="margin-top:6px">
+                        <button type="button" id="btn-test-provider"
+                                class="settings-btn settings-btn--secondary settings-btn--sm" style="width:100%">
+                            🔍 测试 API Key
+                        </button>
+                    </div>
+                    <div id="provider-test-result" style="display:none; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px;"></div>
+                </div>
+
+                <div class="settings-form__group">
+                    <label class="settings-form__label">Base URL *</label>
+                    <input type="text" class="settings-form__input" name="baseURL"
+                           value="${fullProvider?.baseURL ?? provider?.baseURL ?? ''}" required placeholder="https://api.example.com">
+                    <small class="settings-form__help">Provider 根域地址，不含路径（如 https://api.deepseek.com）。</small>
+                </div>
+
+                <div class="settings-form__group" id="driver-table-group">
+                    <label class="settings-form__label">API 驱动（协议 → 端点路径）</label>
+                    <table class="settings-driver-table">
+                        <thead>
+                            <tr><th>驱动 / 协议</th><th>端点路径</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    OpenAI Chat Completions
+                                    <small>openai-chat</small>
+                                </td>
+                                <td><input type="text" class="settings-form__input" name="defaultPath"
+                                           value="${(fullProvider?.defaultPath ?? provider?.defaultPath) ?? ''}"
+                                           placeholder="如 /v1/chat/completions"></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    OpenAI Responses
+                                    <small>openai-responses · 联网搜索</small>
+                                </td>
+                                <td><input type="text" class="settings-form__input" name="responsesPath"
+                                           value="${(fullProvider?.responsesPath ?? provider?.responsesPath) ?? ''}"
+                                           placeholder="如 /responses"></td>
+                            </tr>
+                            <tr>
+                                    <td>
+                                        Anthropic Messages
+                                    <small>anthropic-messages · Claude CLI</small>
+                                </td>
+                                <td><input type="text" class="settings-form__input" name="anthropicPath"
+                                           value="${(fullProvider?.anthropicPath ?? provider?.anthropicPath) ?? ''}"
+                                           placeholder="如 /anthropic"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <small class="settings-form__help">连接在「API 协议」中选定后走对应端点；留空使用内置默认值。</small>
+                </div>
+
+                <div class="settings-form__group">
+                    <label class="settings-form__label">默认温度 (0-2)</label>
+                    <input type="number" class="settings-form__input" name="defaultTemperature"
+                           value="${fullProvider?.defaultTemperature ?? provider?.defaultTemperature ?? ''}"
+                           min="0" max="2" step="0.1" placeholder="未设置（由 Connection 决定）"
+                           style="max-width:120px">
+                    <small class="settings-form__help">所有绑定此 Provider 的连接继承此温度，可被 Connection 覆盖。</small>
+                </div>
+
+                <h4 class="settings-section-title" style="display:flex;justify-content:space-between;align-items:center">
+                    模型列表
+                    <button type="button" id="btn-add-model" class="settings-btn settings-btn--xs settings-btn--primary">+ 新增</button>
+                </h4>
+                <div class="settings-model-list-container" id="model-list-container">
+                    ${this.renderModelListHTML()}
+                </div>
+                <small class="settings-form__help">Model ID 须与 API 实际返回的 ID 一致。</small>
             </form>
         `;
 
         new Modal(isNew ? '添加 Provider' : `编辑 Provider — ${provider!.name}`, modalContent, {
-            width: '820px',
+            width: '620px',
             confirmText: '保存',
             onConfirm: async () => {
                 const form = document.getElementById('provider-form') as HTMLFormElement;
@@ -662,13 +628,23 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                 const data = Object.fromEntries(formData) as Record<string, string>;
 
                 const newApiKey = (data.apiKey as string || '').trim();
+                // 图标并入名称：以 emoji 开头的名称自动提取为 icon，其余为名称。
+                const rawName = (data.name as string || '').trim();
+                const emojiMatch = rawName.match(/^\p{Extended_Pictographic}/u);
+                const name = emojiMatch ? rawName.slice(emojiMatch[0].length).trim() : rawName;
+                const icon = emojiMatch ? emojiMatch[0] : (provider?.icon ?? undefined);
                 const updated: LLMProvider = {
+                    // 保留未在表单中展示的 Provider 字段（capabilities.serverSideWebSearch、
+                    // supportsThinking、requiresReferer、metadata 等），否则保存会静默丢失
+                    // 内置联网搜索能力，导致 resolveWebSearch 判定失败。
+                    ...(provider ?? {}),
                     id: provider?.id ?? `prov-${generateShortUUID()}`,
-                    name: data.name,
-                    icon: data.icon || undefined,
-                    implementation: data.implementation as LLMProviderImplementation,
+                    name,
+                    icon,
+                    implementation: provider?.implementation ?? 'openai-compatible',
                     baseURL: data.baseURL,
                     defaultPath: (data.defaultPath as string || '').trim() || undefined,
+                    responsesPath: (data.responsesPath as string || '').trim() || undefined,
                     anthropicPath: (data.anthropicPath as string || '').trim() || undefined,
                     // Keep existing apiKey if field was left empty
                     apiKey: newApiKey || existingApiKey || undefined,
@@ -740,6 +716,8 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         const listContainer = document.getElementById('model-list-container') as HTMLElement | null;
         const addModelBtn   = document.getElementById('btn-add-model') as HTMLButtonElement | null;
 
+        // ── API 驱动表格恒显（3 行字段独立，无同名冲突） ─────────────────
+
         const renderList = () => {
             if (!listContainer) return;
             listContainer.innerHTML = this.renderModelListHTML();
@@ -753,7 +731,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                 if (testBtn.disabled) return;
                 const form = document.getElementById('provider-form') as HTMLFormElement;
                 const apiKey  = ((form.querySelector('[name="apiKey"]')  as HTMLInputElement)?.value || '').trim();
-                const provId  = ((form.querySelector('[name="implementation"]') as HTMLSelectElement)?.value) || '';
+                const provId  = this.currentProviderId ?? 'custom';
                 const baseURL = ((form.querySelector('[name="baseURL"]') as HTMLInputElement)?.value || '').trim();
                 const models  = this.editModels;
                 const model   = models[0]?.id;

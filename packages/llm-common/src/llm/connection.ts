@@ -129,6 +129,13 @@ export interface LLMProvider {
      */
     anthropicPath?: string;
     /**
+     * 该 Provider 支持的 OpenAI Responses API 兼容路径（相对于 baseURL）。
+     * 如 DeepSeek 的 "/responses"，完整 URL = baseURL + responsesPath
+     * （DeepSeek Responses API 的 base_url 为 https://api.deepseek.com）。
+     * 填写后 Connection 可以选择 openai-responses 协议使用此端点。
+     */
+    responsesPath?: string;
+    /**
      * API Key — 认证凭据，存储于 Provider 层（而非 Connection 层）。
      * 仅在 LLMDeviceDriver 内部流通；对外 `getProviders()` 会剥离此字段。
      */
@@ -146,6 +153,22 @@ export interface LLMProvider {
         tools?: boolean;
         thinking?: boolean;
         streaming?: boolean;
+        /**
+         * 是否支持「服务端内置联网搜索」（server-side web search）。
+         * true = 可通过请求参数触发厂商内置检索（如 DeepSeek/OpenAI Responses 的
+         * `web_search` 工具、Gemini 的 `googleSearch`），结果经 `citations[]` 回传。
+         * false / undefined = 无内置检索，联网能力需靠客户端统一工具（WebSearchTool）
+         * 或 MCP server 实现。
+         */
+        serverSideWebSearch?: boolean;
+    };
+    /**
+     * Responses API 推理行为配置（仅 openai-responses 协议生效）。
+     * defaultThinkingEnabled = 服务端默认开启思考（如 DeepSeek），此时用户显式
+     * 关闭 thinking（params.thinking=false）需发送 reasoning.effort='none' 才能关闭。
+     */
+    responses?: {
+        defaultThinkingEnabled?: boolean;
     };
     /**
      * true = 内置 Provider（由 constants.ts 定义）。
@@ -262,6 +285,8 @@ export interface ConnectionMeta {
     temperature?: number;
     /** 本连接每日开销统计 */
     dailyCosts?: Record<string, DailyCost>;
+    /** API 协议类型；未设置时由 resolveProtocol() 自动推断 */
+    protocol?: ApiProtocol;
 }
 
 // ─── DefaultConnectionDef ────────────────────────────────────────────────────
@@ -379,6 +404,7 @@ export function toConnectionMeta(
         status: conn.status,
         temperature: conn.temperature ?? provider?.defaultTemperature,
         dailyCosts: conn.dailyCosts,
+        protocol: conn.protocol,
     };
 }
 
@@ -455,4 +481,43 @@ export function getNextLowerTier(
     if (current === 'optimal') return tiers.standard ? 'standard' : tiers.fast ? 'fast' : undefined;
     if (current === 'standard') return tiers.fast ? 'fast' : undefined;
     return undefined;
+}
+
+// ─── Web Search 策略（分层统一） ────────────────────────────────────────────────
+
+/**
+ * 联网搜索策略三态（判别联合，天然排除「内置+客户端」非法态）。
+ *
+ * - 'builtin'    ：走底层内置 server-side search，LLM 请求携带 `webSearch` 参数
+ *                  （DeepSeek/OpenAI Responses 的 `web_search` 工具、Gemini 的
+ *                  `googleSearch`），服务端执行并回传 `citations[]`。
+ * - 'client-tool'：注入客户端统一 WebSearchTool 供模型调用。
+ * - 'disabled'   ：禁用联网（内置与客户端均关闭）。
+ */
+export type WebSearchMode = 'builtin' | 'client-tool' | 'disabled';
+
+/**
+ * 根据 Provider 能力与用户总开关解析联网搜索策略。
+ *
+ * @param capabilities  当前 Provider 能力（LLMProvider.capabilities）
+ * @param enabled       用户是否启用联网搜索（总开关）
+ * @param protocol      连接 API 协议；某些 Provider 的内置 search 仅在特定协议下可用
+ *   （如 DeepSeek/OpenAI 的 `web_search` 内置工具在 `openai-responses` 协议下才生效，
+ *   Gemini 的 `googleSearch` 在 `gemini-generate` 协议下生效）。
+ * @returns 三态策略；enabled=false 时返回 'disabled'。
+ */
+export function resolveWebSearchStrategy(
+    capabilities?: { serverSideWebSearch?: boolean },
+    enabled = true,
+    protocol?: ApiProtocol,
+): WebSearchMode {
+    if (!enabled) return 'disabled';
+    const builtin = !!capabilities?.serverSideWebSearch && supportsServerSideSearch(protocol);
+    return builtin ? 'builtin' : 'client-tool';
+}
+
+/** 判断协议是否支持 server-side 内置检索。未指定协议时按 Provider 能力判定（向后兼容）。 */
+function supportsServerSideSearch(protocol?: ApiProtocol): boolean {
+    if (!protocol) return true;
+    return protocol === 'openai-responses' || protocol === 'gemini-generate';
 }

@@ -35,7 +35,6 @@ export class AnthropicProvider extends BaseProvider {
         jsonMode: true,
         thinking: true,
         codeExecution: false,
-        webSearch: false,
         computerUse: true,  // Anthropic 特有
         mcp: true,          // Anthropic 特有
         caching: true,

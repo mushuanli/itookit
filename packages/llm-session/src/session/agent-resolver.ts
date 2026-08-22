@@ -1,8 +1,8 @@
 // @file: llm-conversation/session/agent-resolver.ts
 
 import { ExecutorConfig } from '../core/types';
-import { resolveModelForTier, ModelTier } from '@itookit/common';
-import type { ConnectionMeta } from '@itookit/common';
+import { resolveModelForTier, ModelTier, resolveWebSearchStrategy } from '@itookit/common';
+import type { ConnectionMeta, WebSearchMode } from '@itookit/common';
 import { IAgentConfigService } from '../services/agent-service';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
 import { log } from '../utils/logger';
@@ -92,7 +92,7 @@ export class AgentResolver {
     /** Build ExecutorConfig from an AgentDefinition. */
     private async buildConfig(agentDef: import('@itookit/common').AgentDefinition): Promise<ExecutorConfig> {
         const connId = agentDef.modelPolicy?.connectionId ?? agentDef.config.connectionId;
-        console.log('[AgentResolver] buildConfig resolving agent', {
+        log.debug('buildConfig resolving agent', {
             agentId: agentDef.id,
             agentName: agentDef.name,
             modelPolicyConnId: agentDef.modelPolicy?.connectionId,
@@ -117,6 +117,8 @@ export class AgentResolver {
         const { enableThinking, reasoningEffort } =
             this.resolveThinkingConfig(connMeta, tier, modelId);
 
+        const webSearchMode = this.resolveWebSearch(connMeta);
+
         return {
             id: agentDef.id,
             name: agentDef.name,
@@ -125,6 +127,7 @@ export class AgentResolver {
             model: modelId,
             enableThinking: agentDef.modelPolicy?.thinking ?? enableThinking,
             reasoningEffort: agentDef.modelPolicy?.reasoningEffort ?? reasoningEffort,
+            webSearchMode,
             systemPrompt: agentDef.systemPrompt ?? agentDef.config.systemPrompt,
             icon: agentDef.icon,
             temperature: agentDef.modelPolicy?.temperature ?? agentDef.config.temperature,
@@ -190,7 +193,7 @@ export class AgentResolver {
             if (!connMeta?.model) return [];
             return [{ id: connMeta.model, name: connMeta.model, provider: connMeta.name }];
         } catch (e) {
-            console.error('[AgentResolver] getModelsForAgent failed:', e);
+            log.error('getModelsForAgent failed', { agentId, error: e });
             return [];
         }
     }
@@ -293,6 +296,19 @@ export class AgentResolver {
             enableThinking,
             reasoningEffort: cmData?.reasoningEffort as 'low' | 'medium' | 'xhigh' | undefined,
         };
+    }
+
+    /**
+     * 解析联网搜索策略三态：provider 支持内置 server-side search 且当前协议可用
+     * 则走底层（'builtin'），否则依赖客户端统一工具（'client-tool'）。
+     * 返回判别联合（非两个布尔），杜绝「内置+客户端」非法态。
+     */
+    private resolveWebSearch(
+        connMeta: ConnectionMeta,
+        enabled = true,
+    ): WebSearchMode {
+        const provider = this.agentService.getProvider(connMeta.providerId);
+        return resolveWebSearchStrategy(provider?.capabilities, enabled, connMeta.protocol);
     }
 
     private async getFallbackConfig(): Promise<ExecutorConfig> {

@@ -1,7 +1,7 @@
 // @file: llm-ui/components/templates/NodeTemplates.ts
 
 import { ExecutionNode, SessionGroup } from '@itookit/llm-session';
-import { escapeHTML } from '@itookit/common';
+import { escapeHTML, type Citation, ACTION_ICONS } from '@itookit/common';
 import { LayoutTemplates } from './LayoutTemplates';
 
 export class NodeTemplates {
@@ -219,6 +219,24 @@ export class NodeTemplates {
         <div class="llm-ui-thought${collapsedClass}" style="display: ${hasThought ? 'block' : 'none'}">
             <div class="llm-ui-thought__label">💭 Thinking</div>
             <div class="llm-ui-thought__content">${escapeHTML(thought)}</div>
+        </div>`;
+    }
+
+    /** 联网搜索结果引用块。 */
+    static renderCitations(citations: Citation[], collapsed = true): string {
+        if (!citations.length) return '';
+        const items = citations.map(c => `
+            <a class="llm-ui-citations__item" href="${escapeHTML(c.url ?? '#')}" target="_blank" rel="noopener">
+                <span class="llm-ui-citations__icon">${ACTION_ICONS.search}</span>
+                <span class="llm-ui-citations__text">
+                    <span class="llm-ui-citations__title">${escapeHTML(c.text || c.title || c.url || 'Web search')}</span>
+                    ${c.url ? `<span class="llm-ui-citations__url">${escapeHTML(c.url)}</span>` : ''}
+                </span>
+            </a>`).join('');
+        return `
+        <div class="llm-ui-citations${collapsed ? ' llm-ui-citations--collapsed' : ''}">
+            <div class="llm-ui-citations__label">${ACTION_ICONS.search} 搜索结果引用 (${citations.length})</div>
+            <div class="llm-ui-citations__list">${items}</div>
         </div>`;
     }
 }

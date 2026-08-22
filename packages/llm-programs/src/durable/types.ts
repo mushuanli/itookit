@@ -25,6 +25,8 @@ export interface DurableProgramInput {
     reasoningEffort?: 'low' | 'medium' | 'xhigh';
     /** stream !== false → LLM streams (default); false → non-streaming fallback. */
     stream?: boolean;
+    /** 走底层内置 server-side search（如 DeepSeek/OpenAI Responses 的 web_search、Gemini 的 googleSearch）。 */
+    webSearch?: boolean;
     dependencyBindings?: DurableDependencyBinding[];
 }
 

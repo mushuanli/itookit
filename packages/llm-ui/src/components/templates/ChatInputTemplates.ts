@@ -41,6 +41,7 @@ export const ChatInputTemplates = {
                     ${this.renderTierRow()}
                     ${this.renderContextSetting()}
                     ${this.renderThinkingSetting()}
+                    ${this.renderWebSearchSetting()}
                     ${this.renderAdvancedSection()}
                     ${this.renderSessionProfileSection()}
                     ${this.renderSkillsSetting()}
@@ -153,8 +154,7 @@ export const ChatInputTemplates = {
     /**
      * Thinking 模式 — toggle + 推理强度（同一行）
      */
-    renderThinkingSetting(): string {
-        return `
+    renderThinkingSetting(): string {        return `
             <div class="llm-input__setting-row llm-input__setting-row--inline">
                 <label class="llm-input__toggle" title="${t('thinking.tooltip')}">
                     <input type="checkbox" class="llm-input__thinking-toggle" checked>
@@ -170,6 +170,23 @@ export const ChatInputTemplates = {
                         <option value="xhigh">${t('thinking.effort.xhigh')}</option>
                     </select>
                 </span>
+            </div>
+        `;
+    },
+
+    /**
+     * 联网搜索 — toggle。provider 支持内置 server-side search 则走底层，
+     * 否则由客户端统一工具（WebSearchTool）实现。
+     */
+    renderWebSearchSetting(): string {
+        return `
+            <div class="llm-input__setting-row llm-input__setting-row--inline">
+                <label class="llm-input__toggle" title="${t('webSearch.tooltip')}">
+                    <input type="checkbox" class="llm-input__websearch-toggle" checked>
+                    <span class="llm-input__toggle-slider"></span>
+                </label>
+                <span>${ACTION_ICONS.search} ${t('webSearch.label')}</span>
+                <span class="llm-input__setting-spacer"></span>
             </div>
         `;
     },
@@ -279,6 +296,7 @@ export const ChatInputTemplates = {
                     <button class="llm-input__btn llm-input__btn--attach" title="${t('chatInput.add.menu')}">
                         ${this.addIcon()}
                     </button>
+                    ${this.renderWebSearchQuick()}
                     ${this.renderAgentPicker()}
                     ${this.renderConnQuick()}
                     ${this.renderTierQuick()}
@@ -299,6 +317,18 @@ export const ChatInputTemplates = {
                     </button>
                 </div>
             </div>
+        `;
+    },
+
+    /**
+     * 工具栏联网搜索快速开关 — 点击切换启用/禁用，开启时高亮。
+     */
+    renderWebSearchQuick(): string {
+        return `
+            <button class="llm-input__btn llm-input__btn--websearch" type="button"
+                    title="${t('webSearch.tooltip')}" data-active="true">
+                ${ACTION_ICONS.search}
+            </button>
         `;
     },
 

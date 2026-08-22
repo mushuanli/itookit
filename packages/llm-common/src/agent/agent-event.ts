@@ -9,6 +9,7 @@
 //   - await_signal is the ONLY pause mechanism (unifies HITL / plan-confirm / request_input)
 
 import type { TokenUsage } from '../llm/completion';
+import type { Citation } from '../llm/completion';
 
 // ─── Round lifecycle (authoritative) ──────────────────────────────────
 
@@ -50,6 +51,12 @@ export interface AgentEventStreamThinking {
 export interface AgentEventStreamContent {
     type: 'stream:content';
     delta: string;
+}
+
+/** 联网搜索结果引用（内置 web_search / grounding 检索），终态一次性携带。 */
+export interface AgentEventCitations {
+    type: 'citations';
+    citations: Citation[];
 }
 
 // ─── Tool lifecycle ──────────────────────────────────────────────────
@@ -192,6 +199,7 @@ export type AgentEvent =
     | AgentEventError
     | AgentEventStreamThinking
     | AgentEventStreamContent
+    | AgentEventCitations
     | AgentEventToolQueued
     | AgentEventToolRunning
     | AgentEventToolInput

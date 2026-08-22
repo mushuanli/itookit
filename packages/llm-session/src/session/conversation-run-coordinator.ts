@@ -298,6 +298,16 @@ export class ConversationRunCoordinator {
                 payload: { messageId: rootNodeId, delta: event.delta, field: 'thought' },
             });
         }
+        // 联网搜索结果引用（终态一次性）→ 关联到当前响应节点。
+        // 投影后即返回：原始 citations AgentEvent 无下游消费者（UI 只订阅
+        // message:citations），无需再发射，避免死事件。
+        if (event.type === 'citations') {
+            this.options.eventBus.emitSession(sessionId, {
+                type: 'message:citations',
+                payload: { messageId: rootNodeId, citations: event.citations },
+            });
+            return;
+        }
 
         this.options.eventBus.emitSession(sessionId, event);
     }
@@ -338,12 +348,20 @@ function contextPlan(
     };
 }
 
+/** 客户端统一联网搜索工具名（与 @itookit/tools 的 WEB_SEARCH_TOOL_NAME 一致）。 */
+const CLIENT_WEB_SEARCH_TOOL = 'WebSearch';
+
 function directTaskSpec(
     execution: ConversationExecution,
     snapshot: ContextSnapshot,
     catalog: { definitions: ToolDefinition[]; externalIds: string[] },
 ): TaskSpec<DurableAgentInput> {
     const tools = execution.config.capabilityPolicy?.toolIds ?? [];
+    // 客户端 WebSearchTool 注入开关：仅 'client-tool' 态注入；'builtin' 与 'disabled'
+    // 均剥离，避免重复检索。决策直接消费 webSearchMode（源自 resolveWebSearchStrategy）。
+    const definitions = execution.config.webSearchMode === 'client-tool'
+        ? catalog.definitions
+        : catalog.definitions.filter(tool => toolNameOf(tool) !== CLIENT_WEB_SEARCH_TOOL);
     return {
         program: { kind: tools.length ? 'llm.agent' : 'llm.chat', version: '1' },
         input: buildLlmTaskInput({
@@ -356,14 +374,20 @@ function directTaskSpec(
             maxTokens: execution.config.constraints?.maxTokens,
             thinking: execution.config.enableThinking,
             reasoningEffort: execution.config.reasoningEffort,
+            webSearch: execution.config.webSearchMode === 'builtin',
             stream: execution.config.stream,
             approval: 'external',
-            tools: catalog.definitions,
+            tools: definitions,
             externalToolIds: catalog.externalIds,
         }),
         labels: { roundId: execution.roundId, kind: tools.length ? 'agent' : 'chat' },
         deferStart: true,
     };
+}
+
+/** 从统一 ToolDefinition 中取工具名（function.name 或顶层 name）。 */
+function toolNameOf(tool: ToolDefinition): string {
+    return tool.function?.name ?? tool.name ?? '';
 }
 
 function conversationRound(

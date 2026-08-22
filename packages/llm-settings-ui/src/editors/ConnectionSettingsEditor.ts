@@ -563,19 +563,20 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     <label class="settings-form__label" style="display:flex;align-items:center;gap:6px">
                         API 协议
                         <span class="settings-help-icon"
-                              title="同一 Provider 可通过不同 URL 提供多种协议：&#10;• 自动推断 — 按 Provider 类型和 URL 自动判断&#10;• OpenAI Chat — /v1/chat/completions 标准格式&#10;• Anthropic Messages — /v1/messages 格式，支持 Claude CLI / thinking block&#10;• Gemini Generate — Google Gemini generateContent">?</span>
+                              title="同一 Provider 可通过不同 URL 提供多种协议：&#10;• 自动推断 — 按 Provider 类型和 URL 自动判断&#10;• OpenAI Chat — /v1/chat/completions 标准格式&#10;• OpenAI Responses — /responses 格式，DeepSeek 官方支持（input items + 语义化流式 + 联网搜索）&#10;• Anthropic Messages — /v1/messages 格式，支持 Claude CLI / thinking block&#10;• Gemini Generate — Google Gemini generateContent">?</span>
                     </label>
                     <select class="settings-form__select" name="protocol" style="max-width:260px">
                         <option value="" ${!connection?.protocol ? 'selected' : ''}>自动推断（按 Provider 类型）</option>
                         <option value="openai-chat"        ${connection?.protocol === 'openai-chat'        ? 'selected' : ''}>OpenAI Chat Completions</option>
-                        <option value="openai-responses"   ${connection?.protocol === 'openai-responses'   ? 'selected' : ''}>OpenAI Responses API</option>
+                        <option value="openai-responses"   ${connection?.protocol === 'openai-responses'   ? 'selected' : ''}>OpenAI Responses API（DeepSeek 模式）</option>
                         <option value="anthropic-messages" ${connection?.protocol === 'anthropic-messages' ? 'selected' : ''}>Anthropic Messages（Claude CLI 兼容）</option>
                         <option value="gemini-generate"    ${connection?.protocol === 'gemini-generate'    ? 'selected' : ''}>Gemini generateContent</option>
                     </select>
                     <small class="settings-form__help">
                         选择 <strong>Anthropic Messages</strong> 可让 DeepSeek / OpenRouter 等兼容厂商走
                         Claude Code Agent Loop（支持 thinking block 和工具循环）。
-                        <br/><strong>OpenAI Responses</strong> 走新一代 /responses 接口（input items + 语义化流式）。
+                        <br/><strong>OpenAI Responses（DeepSeek 模式）</strong> 走 DeepSeek 官方 /responses 接口
+                        （base_url <code>https://api.deepseek.com</code>，支持 reasoning.effort 思考控制与内置联网搜索工具）。
                     </small>
                 </div>
             </form>

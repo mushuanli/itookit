@@ -86,6 +86,7 @@ export function llmEffect(
         maxTokens: input.maxTokens,
         thinking: input.thinking,
         reasoningEffort: input.reasoningEffort,
+        webSearch: input.webSearch,
         tools,
         toolChoice: tools?.length ? 'auto' : 'none',
         // stream !== false → LLM adapter streams. false opts into non-streaming.

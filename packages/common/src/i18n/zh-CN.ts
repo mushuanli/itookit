@@ -263,6 +263,9 @@ export const zhCN = {
     // ── Chat input — Thinking mode ───────────────────────────────────────────
     'thinking.label':            '深度思考',
     'thinking.tooltip':          '启用/关闭深度思考模式',
+    // ── Chat input — Web search ───────────────────────────────────────────────
+    'webSearch.label':           '联网搜索',
+    'webSearch.tooltip':         '启用联网搜索（provider 支持内置则用内置，否则客户端工具）',
     'thinking.effort.label':     '思考强度',
     'thinking.effort.auto':      '自动',
     'thinking.effort.low':       '低',

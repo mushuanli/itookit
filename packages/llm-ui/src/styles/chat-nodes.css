@@ -458,6 +458,72 @@
     opacity: 0.6;
 }
 
+/* Web search citations block */
+.llm-ui-citations {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--llm-border-color);
+    background: var(--llm-bg-secondary);
+}
+.llm-ui-citations__label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--llm-text-muted);
+    margin-bottom: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+/* 折叠态：仅显示标签行，点击展开 */
+.llm-ui-citations--collapsed .llm-ui-citations__list { display: none; }
+.llm-ui-citations--collapsed .llm-ui-citations__label::after {
+    content: ' (click to expand)';
+    font-weight: normal;
+    opacity: 0.6;
+}
+.llm-ui-citations__list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.llm-ui-citations__item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    text-decoration: none;
+    color: var(--llm-text-primary);
+    background: var(--llm-bg-primary);
+    transition: background 0.15s ease;
+}
+.llm-ui-citations__item:hover {
+    background: var(--llm-bg-tertiary);
+}
+.llm-ui-citations__icon {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+}
+.llm-ui-citations__text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    font-size: 0.82rem;
+}
+.llm-ui-citations__title {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.llm-ui-citations__url {
+    color: var(--llm-text-muted);
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Output area */
 .llm-ui-node__output {
     padding: 0;

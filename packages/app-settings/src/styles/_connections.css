@@ -124,6 +124,60 @@
     padding-bottom: var(--st-space-xs);
 }
 
+/* 高级设置折叠区 */
+.settings-collapse {
+    margin-top: var(--st-space-md);
+    border: 1px solid var(--st-border-color, #e5e7eb);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.settings-collapse__summary {
+    cursor: pointer;
+    padding: var(--st-space-sm, 8px) var(--st-space-md, 14px);
+    font-size: 0.875rem;
+    color: var(--st-text-secondary, #666);
+    background: var(--st-bg-tertiary, #f3f4f6);
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    list-style: none;
+}
+.settings-collapse__summary::-webkit-details-marker { display: none; }
+.settings-collapse__body {
+    padding: var(--st-space-md, 14px);
+}
+.settings-collapse__body .settings-form__group:last-child { margin-bottom: 0; }
+
+/* API 驱动（协议 → 端点路径）表格 */
+.settings-driver-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 4px;
+}
+.settings-driver-table th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--st-text-secondary, #666);
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--st-border-color, #e5e7eb);
+    font-size: 0.75rem;
+}
+.settings-driver-table td {
+    padding: 6px 8px;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--st-bg-tertiary, #f3f4f6);
+}
+.settings-driver-table td:first-child { white-space: nowrap; }
+.settings-driver-table td small {
+    display: block;
+    color: var(--st-text-disabled, #9ca3af);
+    font-size: 0.7rem;
+    margin-top: 2px;
+}
+.settings-driver-table td input { width: 100%; }
+
 /* Model List Manager Styles */
 .settings-model-list-container {
     background: var(--st-bg-secondary);

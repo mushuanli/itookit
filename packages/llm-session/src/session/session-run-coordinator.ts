@@ -369,6 +369,11 @@ function applyOverrides(
     if (overrides.streamMode !== undefined) updated.stream = overrides.streamMode;
     if (overrides.reasoningEffort) updated.reasoningEffort = overrides.reasoningEffort;
     if (overrides.thinkingEnabled !== undefined) updated.enableThinking = overrides.thinkingEnabled;
+    // 联网搜索总开关：false → 'disabled'（同时关闭内置 search 与客户端 WebSearchTool）；
+    // true 保持 resolver 自动分流（'builtin' 优先，否则 'client-tool'），无需覆盖。
+    if (overrides.webSearchEnabled === false) {
+        updated.webSearchMode = 'disabled';
+    }
     if (overrides.systemPromptAppend) {
         updated.systemPrompt = [updated.systemPrompt, overrides.systemPromptAppend]
             .filter(Boolean).join('\n\n');

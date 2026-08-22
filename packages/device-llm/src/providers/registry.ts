@@ -126,8 +126,14 @@ export function createProvider(
             supportsThinking: config.supportsThinking ?? definition.supportsThinking,
             requiresReferer:  config.requiresReferer  ?? definition.requiresReferer,
             apiBaseUrl:       config.apiBaseUrl || definition.baseURL,
-            defaultPath:      config.defaultPath ?? definition.defaultPath,
+            // openai-responses 协议优先使用 provider 声明的 Responses API 路径
+            // （如 DeepSeek 的 "/responses"，完整 URL = baseURL + responsesPath）
+            defaultPath: config.defaultPath ?? (config.protocol === 'openai-responses'
+                ? definition.responsesPath
+                : definition.defaultPath),
             anthropicPath:    config.anthropicPath ?? definition.anthropicPath,
+            responsesPath:    config.responsesPath ?? definition.responsesPath,
+            responses:        config.responses ?? definition.responses,
         };
     }
 

@@ -23,6 +23,7 @@ const providerSchema = z.strictObject({
     implementation: z.enum(['openai-compatible', 'anthropic', 'gemini', 'custom']),
     base_url: z.string().min(1),
     default_path: z.string().optional(),
+    responses_path: z.string().optional(),
     api_key_env: z.string().min(1),
     models: z.array(modelSchema).min(1),
 });
@@ -31,6 +32,7 @@ const connectionSchema = z.strictObject({
     id: ID,
     name: z.string().optional(),
     provider: z.string(),
+    protocol: z.enum(['openai-chat', 'openai-responses', 'anthropic-messages', 'gemini-generate']).optional(),
     tiers: z.strictObject({
         optimal: z.string().optional(),
         standard: z.string().optional(),
@@ -51,6 +53,7 @@ const agentSchema = z.strictObject({
     max_tokens: z.number().int().positive().optional(),
     thinking: z.boolean().optional(),
     reasoning_effort: z.enum(['low', 'medium', 'xhigh']).optional(),
+    web_search: z.boolean().optional(),
     stream: z.boolean().optional(),
     approval: z.enum(['none', 'external', 'all']).optional(),
 });

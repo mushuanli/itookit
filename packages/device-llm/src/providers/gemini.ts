@@ -9,6 +9,7 @@ import {
     ChatMessage,
     ProviderCapabilities,
 } from '../types';
+import type { Citation } from '@itookit/common';
 import { parseSSEStream } from '../utils/stream';
 
 /**
@@ -36,7 +37,6 @@ export class GeminiProvider extends BaseProvider {
         jsonMode: true,
         thinking: true,         // Gemini 2.0+ 支持
         codeExecution: true,    // Gemini 特有
-        webSearch: true,        // Google Search grounding
         computerUse: false,
         mcp: false,
         caching: true,          // Context caching
@@ -514,7 +514,7 @@ export class GeminiProvider extends BaseProvider {
         let thinking = '';
         const toolCalls: any[] = [];
         let codeExecution: any = undefined;
-        const citations: any[] = [];
+        const citations: Citation[] = [];
 
         for (const part of parts) {
             // 文本内容
@@ -557,14 +557,16 @@ export class GeminiProvider extends BaseProvider {
             }
         }
 
-        // 提取 grounding 引用
+        // 提取 grounding 引用 → 统一 Citation 形状（与 Responses / 客户端工具对齐）
         if (response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
             for (const chunk of response.candidates[0].groundingMetadata.groundingChunks) {
                 if (chunk.web) {
+                    const title = chunk.web.title ?? chunk.web.uri ?? 'Web search';
                     citations.push({
-                        index: citations.length,
+                        text: title,
+                        title: chunk.web.title,
                         url: chunk.web.uri,
-                        title: chunk.web.title
+                        source: 'grounding',
                     });
                 }
             }

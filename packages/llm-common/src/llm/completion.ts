@@ -87,8 +87,16 @@ export interface TokenUsage {
 }
 
 export interface Citation {
+    /** 展示文本（查询词或标题）；无 text 时可用 title 兜底 */
     text: string;
+    /**
+     * 来源机制：内置 web_search → 'web_search'，Gemini grounding → 'grounding'，
+     * MCP server → 'mcp'，客户端 WebSearchTool → 'client_tool'。
+     * 保留 string 而非判别联合，避免新增来源时破坏既有实现。
+     */
     source?: string;
+    /** 引用标题（Gemini grounding 等场景）；text 缺省时用于展示 */
+    title?: string;
     page?: number;
     url?: string;
 }
@@ -145,4 +153,6 @@ export interface ChatCompletionChunk {
     }>;
     usage?: TokenUsage;
     system_fingerprint?: string;
+    /** 联网搜索结果引用（如内置 web_search / grounding 检索），通常只在终态 chunk 携带。 */
+    citations?: Citation[];
 }

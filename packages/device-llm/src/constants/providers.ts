@@ -251,6 +251,10 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         baseURL: 'https://generativelanguage.googleapis.com',
         icon: '💎',
         supportsThinking: true,
+        capabilities: {
+            thinking: true,
+            serverSideWebSearch: true,   // Gemini googleSearch grounding
+        },
         models: [
             { id: 'gemini-3.1-pro', name: MODEL_NAME_GEMINI_31_PRO, icon: '🌟' },
             { id: 'gemini-3.5-flash', name: MODEL_NAME_GEMINI_35_FLASH, icon: '⚡' },
@@ -263,8 +267,16 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         implementation: 'openai-compatible',
         baseURL: 'https://api.deepseek.com',
         anthropicPath: '/anthropic/v1/messages',
+        responsesPath: '/responses',
         icon: '🐋',
         supportsThinking: true,
+        capabilities: {
+            thinking: true,
+            serverSideWebSearch: true,   // DeepSeek Responses API 内置 web_search
+        },
+        responses: {
+            defaultThinkingEnabled: true, // DeepSeek Responses 默认开启思考，关闭需 effort='none'
+        },
         models: [
             { id: 'deepseek-v4-pro', name: MODEL_NAME_DEEPSEEK_V4_PRO, icon: '👑', supportsThinking: true },
             { id: 'deepseek-v4-flash', name: MODEL_NAME_DEEPSEEK_V4_FLASH, icon: '⚡' },

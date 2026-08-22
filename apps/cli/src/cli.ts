@@ -6,6 +6,7 @@ import {
     forkCommand,
     graphCommand,
     logsCommand,
+    promptCommand,
     rerunCommand,
     exportConfigCommand,
     tasksCommand,
@@ -25,6 +26,8 @@ interface ParsedArgs {
 
 async function main(argv: string[]): Promise<number> {
     const parsed = parseArgs(argv);
+    // -p / --prompt：直接运行一段 prompt（优先于 command 分发）
+    if (parsed.options.prompt) return promptCommand(parsed.options);
     switch (parsed.command) {
         case 'validate': return validateCommand(parsed.options);
         case 'run': return runCommand(parsed.options);
@@ -57,12 +60,23 @@ async function main(argv: string[]): Promise<number> {
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
-    const [command, ...rest] = argv;
+    // 支持 `mindos -p "x"`：参数首位是选项（-p）时无显式 command。
+    const isOptionFirst = !argv[0] || argv[0].startsWith('-');
+    const command = isOptionFirst ? undefined : argv[0];
+    const rest = isOptionFirst ? argv : argv.slice(1);
     const positional: string[] = [];
     const options: CommandOptions = {};
     for (let index = 0; index < rest.length; index++) {
         const arg = rest[index];
         if (arg === '-f' || arg === '--file') options.file = required(rest[++index], 'config path');
+        else if (arg === '-p' || arg === '--prompt') options.prompt = (options.prompt ? `${options.prompt} ` : '') + required(rest[++index], 'prompt');
+        else if (arg === '--model') options.model = required(rest[++index], 'model');
+        else if (arg === '--api-key-env') options.apiKeyEnv = required(rest[++index], 'api-key-env');
+        else if (arg === '--base-url') options.baseUrl = required(rest[++index], 'base-url');
+        else if (arg === '--protocol') options.protocol = required(rest[++index], 'protocol');
+        else if (arg === '--responses-path') options.responsesPath = required(rest[++index], 'responses-path');
+        else if (arg === '--no-tools') options.noTools = true;
+        else if (arg === '--verbose' || arg === '-v') options.verbose = true;
         else if (arg === '--state-dir') options.stateDir = required(rest[++index], 'state directory');
         else if (arg === '--headless') options.headless = true;
         else if (arg === '--json') options.json = true;
@@ -92,6 +106,7 @@ function help(): string {
     return `MindOS CLI\n\n` +
         `  mindos validate [-f mindos.yml] [--offline]\n` +
         `  mindos run [-f mindos.yml] [--headless] [--json] [--sandbox native|oci]\n` +
+        `  mindos -p "your prompt" [--model provider/model] [--api-key-env ENV] [--base-url URL] [--protocol openai-chat|openai-responses] [--no-tools]\n` +
         `  mindos graph [-f mindos.yml] [--offline]\n` +
         `  mindos runs [--state-dir .mindos]\n` +
         `  mindos status <run-id> [--state-dir .mindos] [--json]\n` +

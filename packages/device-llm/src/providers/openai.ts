@@ -31,7 +31,6 @@ export class OpenAIProvider extends BaseProvider {
         jsonMode: true,
         thinking: true,
         codeExecution: false,
-        webSearch: false,
         computerUse: false,
         mcp: false,
         caching: true,

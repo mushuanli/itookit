@@ -3,6 +3,8 @@
 import type { SessionRenderer } from './SessionRenderer';
 import type { ScrollController } from '../common/ScrollController';
 import { getPreviewText } from '../../utils/textUtils';
+import type { Citation } from '@itookit/common';
+import { NodeTemplates } from '../templates/NodeTemplates';
 
 /**
  * 流式输出控制器
@@ -116,6 +118,24 @@ export class StreamController {
                 this.dirtyNodes.add(nodeId);
             }
         }
+    }
+
+    updateCitations(nodeId: string, citations: Citation[]): void {
+        if (!citations.length) return;
+        const el = this.renderer.getNode(nodeId);
+        if (!el) return;
+        const body = el.querySelector('.llm-ui-node__body');
+        if (!body) return;
+        let sidecar = body.querySelector('.llm-ui-citations') as HTMLElement | null;
+        if (!sidecar) {
+            sidecar = document.createElement('div');
+            sidecar.className = 'llm-ui-citations';
+            // 插到 output 容器之前（thinking 之后），符合"引用在上、正文在下"。
+            const output = body.querySelector('.llm-ui-node__output');
+            if (output) body.insertBefore(sidecar, output);
+            else body.appendChild(sidecar);
+        }
+        sidecar.innerHTML = NodeTemplates.renderCitations(citations);
     }
 
     updateStatus(nodeId: string, status: string, result?: any): void {

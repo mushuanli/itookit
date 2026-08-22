@@ -7,8 +7,9 @@ import {
     ChatCompletionResponse,
     ChatCompletionChunk,
     ProviderCapabilities,
+    ToolChoice,
 } from '../types';
-import type { ChatMessage, ToolCall } from '@itookit/common';
+import type { ChatMessage, ToolCall, Citation } from '@itookit/common';
 import { parseEventStream } from '../utils/stream';
 
 /**
@@ -20,6 +21,12 @@ import { parseEventStream } from '../utils/stream';
  * - 响应用 `output[]` items（无 choices），文本在 output[].content[].text
  * - 工具 schema 扁平化（{type,name,description,parameters}，无 function 嵌套）
  * - 流式用语义化 SSE 事件（event: 行 + data: JSON，无 [DONE]）
+ *
+ * DeepSeek 模式（config.responses.defaultThinkingEnabled）额外兼容：
+ * - `reasoning.effort` 控制思考（none/minimal/low/medium/high/xhigh/max，默认开启）
+ * - `web_search` / `web_search_2025_08_26` 内置联网搜索工具（服务端执行）
+ * - `tool_choice` 支持 none/auto/required/指定工具
+ * - 不支持的参数被服务端静默忽略（无状态 API，previous_response_id 等不可用）
  *
  * 内部将外部统一的 ChatCompletionParams 双向转换为 Responses 格式。
  */
@@ -38,7 +45,6 @@ export class ResponsesProvider extends BaseProvider {
         jsonMode: true,
         thinking: true,
         codeExecution: false,
-        webSearch: true,
         computerUse: false,
         mcp: false,
         caching: true,
@@ -46,6 +52,7 @@ export class ResponsesProvider extends BaseProvider {
         streaming: true,
     };
 
+    /** 是否为 DeepSeek Responses API 模式（能力位 responses.defaultThinkingEnabled 控制 reasoning 兼容行为） */
     constructor(config: LLMProviderConfig) {
         super(config);
         if (!this.baseURL) {
@@ -55,6 +62,13 @@ export class ResponsesProvider extends BaseProvider {
 
     protected getProviderFormat(): 'openai' | 'anthropic' | 'gemini' {
         return 'openai';
+    }
+
+    /** DeepSeek / OpenAI 均使用 Bearer Token 认证 */
+    protected buildHeaders(): Record<string, string> {
+        const headers = super.buildHeaders();
+        headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+        return headers;
     }
 
     private resolveResponsesUrl(): string {
@@ -97,9 +111,16 @@ export class ResponsesProvider extends BaseProvider {
             const payload = this.safeJson(data);
             if (!payload) continue;
 
-            // 终态事件 — 刷新 usage 后结束（内容已逐 delta 发出，此处只补 usage/finish）
+            // 终态事件 — 刷新 usage / citations 后结束（内容已逐 delta 发出，此处补 usage/finish/citations）
             if (event === 'response.completed' || event === 'response.incomplete' || event === 'response.failed') {
-                if (payload.usage) aggregator.usage = this.normalizeUsage(payload.usage);
+                // DeepSeek 终态事件把完整 response 对象嵌套在 payload.response 下
+                // （usage / output 均在 response.*），OpenAI 兼容形状则在顶层。
+                const usage = payload.usage ?? payload.response?.usage;
+                if (usage) aggregator.usage = this.normalizeUsage(usage);
+                // 内置 web_search 结果在终态 response.output 中（web_search_call item）
+                const output = payload.output ?? payload.response?.output ?? [];
+                const citations = collectCitations(output);
+                if (citations.length) aggregator.citations = citations;
                 const final = aggregator.finalize(event === 'response.failed');
                 if (final) yield final;
                 break;
@@ -129,14 +150,60 @@ export class ResponsesProvider extends BaseProvider {
 
         if (params.tools && params.tools.length > 0) {
             body.tools = this.convertToolsToFlat(params.tools);
-            if (params.toolChoice) body.tool_choice = params.toolChoice;
+            if (params.toolChoice) body.tool_choice = this.convertToolChoice(params.toolChoice);
             if (params.parallelToolCalls !== undefined) body.parallel_tool_calls = params.parallelToolCalls;
+        }
+        // 内置联网搜索工具（DeepSeek / OpenAI Responses 服务端执行）
+        if (params.webSearch) {
+            body.tools = [...(body.tools ?? []), { type: 'web_search' }];
         }
         if (params.responseFormat) {
             body.text = this.convertResponseFormat(params.responseFormat);
         }
 
+        // reasoning.effort — 思考模式配置（DeepSeek Responses API 兼容）
+        const reasoning = this.resolveReasoning(params);
+        if (reasoning) body.reasoning = reasoning;
+
         return body;
+    }
+
+    /**
+     * 解析 reasoning 配置（DeepSeek Responses API 兼容）。
+     *
+     * DeepSeek effort 取值：none / minimal / low / medium / high / xhigh / max，
+     * 其中 `none` 关闭思考模式；本系统暴露的 low / medium / xhigh 均为支持值。
+     * 优先级：params.reasoningEffort > connection metadata.reasoningEffort > params.thinking。
+     * - thinking=false 且 defaultThinkingEnabled（服务端默认开启思考）→ effort='none'
+     * - metadata.thinkingMode='disabled'（模型级）→ effort='none'
+     * - 其余情况不传 reasoning → 使用模型默认思考行为（默认开启）
+     */
+    private resolveReasoning(params: ChatCompletionParams): { effort: string } | undefined {
+        const effort = params.reasoningEffort
+            ?? (this.config.metadata?.reasoningEffort as string | undefined);
+        if (effort) return { effort };
+        const thinkingMode = this.config.metadata?.thinkingMode as string | undefined;
+        // 服务端默认开启思考的厂商（如 DeepSeek）需显式 effort='none' 才能关闭；
+        // 默认关闭思考的厂商（OpenAI 等）无需传 reasoning。
+        if (this.config.responses?.defaultThinkingEnabled
+            && (params.thinking === false || thinkingMode === 'disabled')) {
+            return { effort: 'none' };
+        }
+        return undefined;
+    }
+
+    /** 统一 ToolChoice → Responses API tool_choice 格式。 */
+    private convertToolChoice(choice: ToolChoice): any {
+        if (typeof choice === 'string') return choice;
+        if (choice.type === 'function' && choice.function?.name) {
+            return { type: 'function', name: choice.function.name };
+        }
+        if (choice.type === 'tool' && choice.name) {
+            return { type: 'function', name: choice.name };
+        }
+        // Anthropic 风格 "any" → Responses 强制调用工具
+        if (choice.type === 'any') return 'required';
+        return choice;
     }
 
     /**
@@ -214,6 +281,10 @@ export class ResponsesProvider extends BaseProvider {
     /** 统一工具定义（嵌套 function）→ Responses 扁平 schema。 */
     private convertToolsToFlat(tools: any[]): any[] {
         return tools.map(tool => {
+            // 内置 web_search 工具（DeepSeek / OpenAI 服务端执行）直接透传
+            if (tool?.type === 'web_search' || tool?.type === 'web_search_2025_08_26') {
+                return { type: tool.type };
+            }
             const fn = tool.function ?? tool;
             const flat: Record<string, unknown> = {
                 type: tool.type ?? 'function',
@@ -242,6 +313,7 @@ export class ResponsesProvider extends BaseProvider {
         const text = collectText(output);
         const toolCalls = collectToolCalls(output);
         const thinking = collectReasoning(output);
+        const citations = collectCitations(output);
 
         return {
             id: response.id,
@@ -259,6 +331,7 @@ export class ResponsesProvider extends BaseProvider {
                 finish_reason: this.mapFinishReason(response.status),
             }],
             usage: response.usage ? this.normalizeUsage(response.usage) : undefined,
+            citations: citations.length ? citations : undefined,
         };
     }
 
@@ -295,6 +368,9 @@ export class ResponsesProvider extends BaseProvider {
         let finish: any = null;
 
         switch (event) {
+            case 'response.created':
+                agg.id = payload.id;
+                break;
             case 'response.output_text.delta':
                 agg.text += payload.delta ?? '';
                 delta.content = payload.delta;
@@ -322,7 +398,9 @@ export class ResponsesProvider extends BaseProvider {
                 }
                 break;
             case 'response.completed':
-                if (payload.usage) agg.usage = this.normalizeUsage(payload.usage);
+                if (payload.usage ?? payload.response?.usage) {
+                    agg.usage = this.normalizeUsage(payload.usage ?? payload.response?.usage);
+                }
                 finish = 'stop';
                 break;
             case 'response.incomplete':
@@ -365,6 +443,7 @@ class StreamAggregator {
     text = '';
     thinking = '';
     usage?: any;
+    citations?: Citation[];
     private toolArgs = new Map<string, string>();
 
     accumulateTool(itemId: string | undefined, delta: string): void {
@@ -380,7 +459,7 @@ class StreamAggregator {
     }
 
     finalize(failed: boolean): ChatCompletionChunk | undefined {
-        // 终态 chunk：内容已通过 output_text.delta 逐条发出，这里只补 usage 与 finish_reason。
+        // 终态 chunk：内容已通过 output_text.delta 逐条发出，这里补 usage / finish_reason / citations。
         return {
             id: this.id,
             object: 'chat.completion.chunk',
@@ -390,6 +469,7 @@ class StreamAggregator {
                 finish_reason: failed ? 'error' : 'stop',
             }],
             usage: this.usage,
+            ...(this.citations?.length ? { citations: this.citations } : {}),
         };
     }
 }
@@ -437,4 +517,51 @@ function collectReasoning(output: any[]): string | undefined {
         }
     }
     return parts.length ? parts.join('') : undefined;
+}
+
+/**
+ * 提取 web_search_call 输出 item → 统一 citations 承载。
+ *
+ * 与 Gemini 的 grounding 引用对齐：上层通过 `response.citations[]` 统一消费
+ * 联网搜索来源，无需区分厂商实现（内置工具 / grounding / MCP）。
+ */
+function collectCitations(output: any[]): Citation[] {
+    const citations: Citation[] = [];
+    for (const item of output) {
+        if (item.type !== 'web_search_call') continue;
+        const action = item.action ?? {};
+        citations.push({
+            text: citationText(item, action),
+            source: 'web_search',
+            url: item.url ?? action.url,
+        });
+    }
+    return citations;
+}
+
+/**
+ * citation 展示文本：优先真实查询词，否则动作友好标签。
+ *
+ * DeepSeek 的 `search` 动作把查询词放在 `action.queries`（复数数组），
+ * 且混有 `ws_call_id=...` 伪条目；OpenAI 兼容形状则是 `search_query` / `action.query`。
+ */
+function citationText(item: any, action: any): string {
+    const queries = Array.isArray(action.queries)
+        ? action.queries.filter((q: unknown) =>
+            typeof q === 'string' && q.trim() !== '' && !q.startsWith('ws_call_id='))
+        : [];
+    if (queries.length) return queries.join('；');
+    const single = item.search_query ?? action.query;
+    if (typeof single === 'string' && single.trim() !== '') return single;
+    return actionLabel(action.type as string);
+}
+
+/** web_search_call 动作 → 友好中文标签。 */
+function actionLabel(type: string): string {
+    switch (type) {
+        case 'search': return '搜索';
+        case 'open_page': return '打开链接';
+        case 'find_in_page': return '页内查找';
+        default: return '联网搜索';
+    }
 }

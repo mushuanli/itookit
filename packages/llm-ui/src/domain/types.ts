@@ -118,6 +118,8 @@ export interface ChatSessionSettings {
     reasoningEffort?: 'auto' | 'low' | 'medium' | 'xhigh';
     /** 强制开启/关闭 thinking，undefined=auto（跟随模型默认） */
     thinkingEnabled?: boolean;
+    /** 强制开启/关闭联网搜索，undefined=auto（provider 支持内置则用内置，否则客户端工具） */
+    webSearchEnabled?: boolean;
     /** 追加到 Agent system prompt 的会话级指令，发送时拼接在原 system prompt 后 */
     systemPromptAppend?: string;
 }
@@ -143,6 +145,8 @@ export interface ChatOverrides {
     reasoningEffort?: 'low' | 'medium' | 'xhigh';
     /** 强制开启/关闭 thinking（覆盖模型默认） */
     thinkingEnabled?: boolean;
+    /** 强制开启/关闭联网搜索（覆盖 provider 自动决策；走底层内置或客户端 WebSearchTool） */
+    webSearchEnabled?: boolean;
     /** 追加到 Agent system prompt（覆盖本次请求） */
     systemPromptAppend?: string;
     flowId?: string;

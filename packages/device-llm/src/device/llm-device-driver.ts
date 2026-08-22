@@ -859,7 +859,6 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             ?? (opts?.runMode !== 'kernel' && provider?.anthropicPath ? 'anthropic-messages' as const : undefined);
         const connForDriver = {
             ...conn,
-            provider: conn.providerId,
             apiKey,
             model: resolvedModel,
             protocol: effectiveProtocol,
@@ -868,7 +867,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             } : {}),
         };
 
-        const pkey = connForDriver.provider as string;
+        const pkey = connForDriver.providerId;
         const customProviderDefaults = provider && pkey ? { [pkey]: provider } : undefined;
 
         const baseLabel = sanitizeLabel((opts?.sessionLabel as string) ?? '');

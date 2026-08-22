@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { stringify as yamlStringify } from 'yaml';
 import type { EventEnvelope, ExitRecord, JsonValue, TaskHandle } from '@itookit/harness';
-import { loadWorkflow, parseDuration } from './config';
+import { loadWorkflow, parseDuration, validateWorkflow } from './config';
+import { expandWorkflow } from './expand';
 import { compileDag, createCliRuntime, cliStorage, type CliRuntime } from './runtime';
 import { RunStore, selectFinalResult } from './run-store';
 import { sandboxDoctor } from './shell';
@@ -20,6 +23,19 @@ export interface CommandOptions {
     deny?: boolean;
     value?: string;
     offline?: boolean;
+    /** -p / --prompt：直接运行一段 prompt（生成临时配置并执行）。 */
+    prompt?: string;
+    model?: string;
+    apiKeyEnv?: string;
+    baseUrl?: string;
+    /** --no-tools：-p 时不注入 WebSearch 工具。 */
+    noTools?: boolean;
+    /** --protocol：API 协议（openai-chat / openai-responses 等）。 */
+    protocol?: string;
+    /** --responses-path：OpenAI Responses API 端点路径（如 /responses）。 */
+    responsesPath?: string;
+    /** --verbose：输出全部事件（默认过滤高频 stream 增量与 task 生命周期）。 */
+    verbose?: boolean;
 }
 
 interface InterruptWatcher {
@@ -54,6 +70,78 @@ export async function graphCommand(options: CommandOptions): Promise<number> {
 export async function runCommand(options: CommandOptions): Promise<number> {
     const loaded = await loadWorkflow(options.file ?? 'mindos.yml');
     return runLoaded(loaded, options);
+}
+
+/**
+ * -p / --prompt：直接运行一段 prompt。
+ *
+ * 默认生成一个带 WebSearch 工具的代理（便于验证客户端联网搜索），使用
+ * deepseek/deepseek-v4-flash + DEEPSEEK_LLM_TOKEN。
+ * `--protocol openai-responses` 时改用 Responses API（内置 server-side web_search），
+ * 并自动关闭客户端 WebSearchTool 以避免重复检索。
+ */
+export async function promptCommand(options: CommandOptions): Promise<number> {
+    const prompt = (options.prompt ?? '').trim();
+    if (!prompt) throw new Error('prompt required (use -p "your prompt")');
+    const model = options.model ?? 'deepseek/deepseek-v4-flash';
+    const modelId = model.includes('/') ? model.split('/').at(-1)! : model;
+    const baseUrl = options.baseUrl ?? 'https://api.deepseek.com';
+    const apiKeyEnv = options.apiKeyEnv ?? 'DEEPSEEK_LLM_TOKEN';
+    const protocol = options.protocol === 'openai-responses' ? 'openai-responses' : 'openai-chat';
+    const responsesPath = options.responsesPath ?? (protocol === 'openai-responses' ? '/responses' : undefined);
+    const defaultPath = protocol === 'openai-responses' ? undefined : '/chat/completions';
+    // 内置 server-side search 时不注入客户端 WebSearchTool（避免重复检索）
+    const tools = options.noTools || protocol === 'openai-responses' ? [] : ['WebSearch'];
+    // 引导模型主动联网搜索。
+    // - openai-responses：web_search 是服务端内置工具（服务端执行、结果经 web_search_call 回传），
+    //   模型不能也不应显式“调用”它，只需正常回答并注明来源即可。
+    // - openai-chat：WebSearch 是客户端工具，需明确指示模型调用。
+    const searchInstruction = protocol === 'openai-responses'
+        ? '当需要当前、未知或实时信息时，请进行联网搜索，并基于搜索结果回答，附上来源。'
+        : '当需要当前、未知或实时信息时，必须调用 WebSearch 工具进行联网搜索，再基于搜索结果回答，并附上来源。';
+
+    const raw: Record<string, unknown> = {
+        version: 1,
+        name: 'prompt',
+        goal: 'quick prompt',
+        providers: [{
+            id: 'default',
+            implementation: 'openai-compatible',
+            base_url: baseUrl,
+            default_path: defaultPath,
+            responses_path: responsesPath,
+            api_key_env: apiKeyEnv,
+            models: [{ id: modelId, supports_tools: true }],
+        }],
+        connections: [{
+            id: 'default', provider: 'default', protocol, tiers: { standard: modelId },
+        }],
+        agents: [{
+            id: 'default', connection: 'default', tools,
+            web_search: protocol === 'openai-responses',
+            system_prompt: searchInstruction,
+        }],
+        tasks: [{ id: 'q', agent: 'default', description: prompt, outputs: { result: 'text' } }],
+        result: { task: 'q', output: 'result' },
+        workspace: { root: '.', state_dir: '.mindos-prompt' },
+        // prompt 直跑默认 native（无需容器）；需要隔离时用 --sandbox oci
+        sandbox: { mode: 'native' },
+    };
+    const config = validateWorkflow(expandWorkflow(raw), true);
+
+    const source = yamlStringify(raw);
+    const workspaceRoot = process.cwd();
+    const stateDir = path.resolve(workspaceRoot, '.mindos-prompt');
+    const workflow: CompiledWorkflow = {
+        config,
+        workspaceRoot,
+        stateDir,
+        maxDurationMs: undefined,
+    };
+    return runLoaded(
+        { workflow, source, hash: createHash('sha256').update(source).digest('hex') },
+        options,
+    );
 }
 
 type LoadedWorkflow = Awaited<ReturnType<typeof loadWorkflow>>;
@@ -530,6 +618,8 @@ async function runtimeFor(workflow: CompiledWorkflow, manifest: RunManifest, sto
 
 function renderEvent(manifest: RunManifest, event: EventEnvelope, options: CommandOptions): void {
     if (options.json || options.headless) {
+        // 默认过滤高频/低层事件（stream 增量、task 生命周期），--verbose 则全量输出
+        if (!options.verbose && isQuietEvent(event)) return;
         process.stdout.write(`${JSON.stringify({ version: 1, runId: manifest.id, ...event })}\n`);
         return;
     }
@@ -541,6 +631,19 @@ function renderEvent(manifest: RunManifest, event: EventEnvelope, options: Comma
     if (/^(task\.(created|succeeded|failed)|tool:|budget:)/.test(event.type)) {
         process.stdout.write(`[${event.sequence}] ${event.type}\n`);
     }
+}
+
+/** 判断是否默认过滤的"噪音"事件（运行状态 / stream 增量），`--verbose` 时保留。 */
+function isQuietEvent(event: EventEnvelope): boolean {
+    // task 生命周期事件
+    if (/^task\.(created|leased|waiting|modified|heartbeat|ready)$/.test(event.type)) return true;
+    if (event.type === 'agent.event') {
+        const t = (event.payload as { type?: string } | undefined)?.type;
+        // stream 增量 + 工具运行中状态，默认不写（看结果用）
+        if (t === 'stream:thinking' || t === 'stream:content' || t === 'stream:thinking:stop'
+            || t === 'tool:running') return true;
+    }
+    return false;
 }
 
 export function resolveRespondValue(options: CommandOptions): JsonValue {
