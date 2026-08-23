@@ -594,6 +594,44 @@ describe('RoundLog', () => {
     });
 });
 
+// ── Tool invocation projection ─────────────────────────────────────────────
+
+describe('roundToProjection (tool calls)', () => {
+    it('projects persisted tool_use blocks and tool results', () => {
+        const round = makeRound({
+            messages: [...makeUserPayload('Q1'), ...makeAssistantPayload('A1')],
+            result: {
+                assistantBlocks: [
+                    { type: 'text', content: 'A1' },
+                    { type: 'tool_use', toolUseId: 'call-1', name: 'read', input: { path: 'a.md' } },
+                ],
+                toolResults: [{ toolUseId: 'call-1', content: 'file content', isError: false }],
+                usage: { total_tokens: 10 },
+            },
+        });
+        const projection = roundToProjection(round, 'r1');
+        expect(projection.assistantMessage?.toolCalls).toEqual([
+            { toolId: 'call-1', name: 'read', input: { path: 'a.md' }, result: 'file content', isError: false },
+        ]);
+    });
+
+    it('builds tool children into the assistant execution tree', () => {
+        const state = new SessionState('node', 'session');
+        state.loadFromProjection(projection('r1', [], 1, {
+            userMessage: { content: 'Q1', persistedNodeId: 'r1' },
+            assistantMessage: {
+                content: 'A1',
+                status: 'success',
+                persistedNodeId: 'r1',
+                toolCalls: [{ toolId: 'call-1', name: 'read', result: 'x', isError: false }],
+            },
+        }));
+        const assistant = state.getSessions().find(group => group.role === 'assistant');
+        expect(assistant?.executionRoot?.children).toHaveLength(1);
+        expect(assistant?.executionRoot?.children?.[0].executorType).toBe('tool');
+    });
+});
+
 // ── SessionState projection tests ──────────────────────────────────────────
 
 describe('SessionState (round format)', () => {

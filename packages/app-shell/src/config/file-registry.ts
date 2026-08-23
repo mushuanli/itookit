@@ -1,6 +1,6 @@
 import * as TPL from './templates';
 
-export type EditorTypeKey = 'standard' | 'agent' | 'chat';
+export type EditorTypeKey = 'standard' | 'agent' | 'chat' | 'flow';
 
 export interface AppFileTypeConfig {
     id: string;
@@ -57,6 +57,24 @@ export const FILE_REGISTRY: Record<string, AppFileTypeConfig> = {
         defaultFileName: 'New Session.chat',
         defaultContent: TPL.TPL_CHAT,
         editorType: 'chat',
+    },
+    flow: {
+        id: 'flow',
+        label: 'Workflow',
+        extension: '.flow',
+        icon: '🔀',
+        defaultFileName: 'new-flow.flow',
+        defaultContent: JSON.stringify({
+            id: '',
+            draftVersion: 1,
+            name: 'New Workflow',
+            nodes: [],
+            edges: [],
+            layout: {},
+            parameters: [],
+            updatedAt: 0,
+        }),
+        editorType: 'flow',
     },
     mind: {
         id: 'mind',

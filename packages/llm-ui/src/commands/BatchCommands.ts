@@ -1,9 +1,11 @@
 // @file: llm-ui/commands/BatchCommands.ts
 
+
+import { SessionCommand, type SessionGroup } from '@itookit/llm-session';
 import { Command } from './Command';
 import { Toast } from '@itookit/ui-common';
 import { extractExecutionOutput } from '../utils/textUtils';
-import type { SessionGroup } from '@itookit/llm-session';
+
 
 export class BatchDeleteCommand extends Command<{ ids: string[] }> {
     protected name = 'Batch Delete';
@@ -11,14 +13,14 @@ export class BatchDeleteCommand extends Command<{ ids: string[] }> {
     protected async execute({ ids }: { ids: string[] }): Promise<void> {
         if (ids.length === 0) return;
 
-        const originalSessions = await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions');
+        const originalSessions = await this.ctx.commands.execute<SessionGroup[]>(SessionCommand.GetSessions);
 
         try {
             // 乐观更新 UI
             this.ctx.historyView.removeMessages(ids, true);
 
             // 数据层负责：删除节点 + 清理孤立 branch + 回传结果
-            const result = await this.ctx.commands.execute<any>('session.delete-messages', {
+            const result = await this.ctx.commands.execute<any>(SessionCommand.DeleteMessages, {
                 messageIds: ids,
                 options: {
                     deleteAssociatedResponses: true,
@@ -47,7 +49,7 @@ export class BatchCopyCommand extends Command<{ ids: string[] }> {
     protected async execute({ ids }: { ids: string[] }): Promise<void> {
         if (ids.length === 0) return;
 
-        const sessions = await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions');
+        const sessions = await this.ctx.commands.execute<SessionGroup[]>(SessionCommand.GetSessions);
         const sorted = ids.sort((a, b) => {
             const sA = sessions.find(s => s.id === a);
             const sB = sessions.find(s => s.id === b);

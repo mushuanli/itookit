@@ -4,12 +4,15 @@ import type {
     FlowDraft,
     FlowRevision,
     ICommandBus,
+    JsonValue,
     ToolDefinition,
 } from '@itookit/common';
 import type { Kernel, TaskSnapshot } from '@itookit/durable-kernel';
 import type { FlowDefinitionStore } from '../flow-definition-store';
 import { flowToDag } from './to-dag';
-import { validateFlowRevision } from './validation';
+import { hasValidationErrors, validateFlowRevision } from './validation';
+import { validateFlowParameters } from './parameters';
+import { FlowCommand } from './command-names';
 import { DurableFlowExecutor, type FlowExecutionHandle } from './executor';
 
 export interface DagCommandServiceOptions {
@@ -25,6 +28,8 @@ export interface DagCommandServiceOptions {
 export interface DurableFlowSnapshot {
     root: TaskSnapshot;
     nodes: Array<{ nodeId: string; snapshot: TaskSnapshot }>;
+    /** Per-node execution instance count (loop nodes exceed 1). */
+    iterations: Record<string, number>;
 }
 
 export class DagCommandService {
@@ -34,21 +39,33 @@ export class DagCommandService {
 
     register(bus: ICommandBus): void {
         registerDraftCommands(bus, this.options.flowStore, this.options.plugins);
-        bus.register('plugin.dag.presentations', async () =>
+        bus.register(FlowCommand.Presentations, async () =>
             loadPresentations(this.options.plugins));
-        bus.register('dag.run.start', async args => {
-            const input = args as { sessionId: string; flow: FlowRevision };
-            return this.start(input.sessionId, input.flow);
+        bus.register(FlowCommand.RunStart, async args => {
+            const input = args as { sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue> };
+            return this.start(input.sessionId, input.flow, input.parameters);
         });
-        bus.register('dag.run.get', async args => this.snapshot(String((args as { taskId: string }).taskId)));
-        bus.register('dag.run.cancel', async args => this.cancel(String((args as { taskId: string }).taskId)));
+        bus.register(FlowCommand.RunGet, async args => this.snapshot(String((args as { taskId: string }).taskId)));
+        bus.register(FlowCommand.RunCancel, async args => this.cancel(String((args as { taskId: string }).taskId)));
+        bus.register(FlowCommand.RunRespond, async args => {
+            const input = args as { taskId: string; requestId: string; value: unknown };
+            return this.respond(String(input.taskId), String(input.requestId), input.value);
+        });
     }
 
-    private async start(sessionId: string, flow: FlowRevision) {
+    private async start(
+        sessionId: string,
+        flow: FlowRevision,
+        parameters?: Record<string, JsonValue>,
+    ) {
         if (!sessionId) throw new Error('DAG run requires sessionId');
-        const issues = validateFlowRevision(flow, this.options.plugins);
-        if (issues.length) throw new Error(issues.map(issue => issue.message).join('; '));
-        const handle = await new DurableFlowExecutor(this.options).submit(sessionId, flowToDag(flow));
+        const issues = [
+            ...validateFlowRevision(flow, this.options.plugins),
+            ...validateFlowParameters(flow.parameters, parameters),
+        ];
+        if (hasValidationErrors(issues)) throw new Error(issues.map(issue => issue.message).join('; '));
+        const handle = await new DurableFlowExecutor(this.options)
+            .submit(sessionId, flowToDag(flow), parameters);
         this.handles.set(handle.root.id, handle);
         return { taskId: handle.root.id };
     }
@@ -60,7 +77,21 @@ export class DagCommandService {
             nodes: await Promise.all([...handle.nodes].map(async ([nodeId, task]) => ({
                 nodeId, snapshot: await task.status(),
             }))),
+            iterations: Object.fromEntries(handle.iterations),
         };
+    }
+
+    private async respond(taskId: string, requestId: string, value: unknown) {
+        const handle = this.requireHandle(taskId);
+        for (const task of handle.nodes.values()) {
+            const snapshot = await task.status();
+            const interaction = snapshot.task.interactions?.[requestId];
+            if (interaction?.status === 'pending') {
+                await task.respond({ interactionId: requestId, value: jsonValue(value) });
+                return { taskId, responded: true };
+            }
+        }
+        throw new Error(`No pending interaction ${requestId} for DAG task ${taskId}`);
     }
 
     private async cancel(taskId: string) {
@@ -91,25 +122,29 @@ function registerDraftCommands(
     store: FlowDefinitionStore,
     plugins: DagPluginCatalog,
 ): void {
-    bus.register('flow.draft.list', async () => store.listDrafts());
-    bus.register('flow.draft.create', async args => store.createDraft(args as { id: string; name: string }));
-    bus.register('flow.draft.load', async args => store.loadDraft(String((args as { id: string }).id)));
-    bus.register('flow.draft.save', async args => saveDraft(
+    bus.register(FlowCommand.DraftList, async () => store.listDrafts());
+    bus.register(FlowCommand.DraftCreate, async args => store.createDraft(args as { id: string; name: string }));
+    bus.register(FlowCommand.DraftAdopt, async args => {
+        const { nodeId, name } = args as { nodeId: string; name: string };
+        return store.adoptDraft(nodeId, name);
+    });
+    bus.register(FlowCommand.DraftLoad, async args => store.loadDraft(String((args as { id: string }).id)));
+    bus.register(FlowCommand.DraftSave, async args => saveDraft(
         store,
         plugins,
         args as { draft: FlowDraft; expectedDraftVersion: number },
     ));
-    bus.register('flow.draft.validate', async args => validateDraft(args as FlowDraft, plugins));
-    bus.register('flow.revision.create', async args => createRevision(
+    bus.register(FlowCommand.DraftValidate, async args => validateDraft(args as FlowDraft, plugins));
+    bus.register(FlowCommand.RevisionCreate, async args => createRevision(
         store,
         plugins,
         args as { draftId: string; expectedDraftVersion: number },
     ));
-    bus.register('flow.revision.get', async args => {
+    bus.register(FlowCommand.RevisionGet, async args => {
         const input = args as { id: string; revision?: number };
         return store.loadRevision(input.id, input.revision);
     });
-    bus.register('flow.revision.list', async args =>
+    bus.register(FlowCommand.RevisionList, async args =>
         store.listRevisions(String((args as { id: string }).id)),
     );
 }
@@ -134,7 +169,7 @@ function validateDraft(draft: FlowDraft, plugins: DagPluginCatalog) {
         digest: '',
     };
     const validationIssues = validateFlowRevision(revision, plugins);
-    return { valid: validationIssues.length === 0, validationIssues };
+    return { valid: !hasValidationErrors(validationIssues), validationIssues };
 }
 
 async function createRevision(
@@ -153,4 +188,8 @@ async function createRevision(
     }
     const revision = await store.createRevision(draft);
     return { revision, version: revision.revision, ...validation };
+}
+
+function jsonValue(value: unknown): import('@itookit/durable-kernel').JsonValue {
+    return JSON.parse(JSON.stringify(value ?? null));
 }

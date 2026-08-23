@@ -6,5 +6,7 @@ export * from './flow';
 export {
     FlowDefinitionStore,
     FlowDraftVersionConflictError,
-    type FlowAssetStore,
+    generateFlowId,
+    type FlowFileRef,
+    type FlowStore,
 } from './flow-definition-store';

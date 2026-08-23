@@ -5,7 +5,7 @@ import type {
     ExecutorOption, ConnectionOption,
     ChatOverrides, SkillInfo, FileSuggestion,
 } from '../../domain/types';
-import type { ModelTier } from '@itookit/common';
+import type { JsonValue, ModelTier } from '@itookit/common';
 import { ChatInputTemplates } from '../templates/ChatInputTemplates';
 import type { InputPlugin, InputPluginContext } from './plugins/InputPlugin';
 import { MentionPlugin } from './plugins/MentionPlugin';
@@ -734,6 +734,9 @@ export class ChatInput implements IChatInputPresenter {
         if (this.config.settings.flowRevision !== undefined) {
             overrides.flowRevision = this.config.settings.flowRevision;
         }
+        if (this.config.settings.flowParameters) {
+            overrides.flowParameters = this.config.settings.flowParameters;
+        }
         if (this.config.settings.branchMode === 'fork') overrides.branchMode = 'fork';
         if (this.config.settings.retentionMode === 'temporary') overrides.retentionMode = 'temporary';
 
@@ -748,9 +751,10 @@ export class ChatInput implements IChatInputPresenter {
         await this.loadConnections();
     }
 
-    selectFlow(flowId: string, revision: number): void {
+    selectFlow(flowId: string, revision: number, parameters?: Record<string, JsonValue>): void {
         this.config.settings.flowId = flowId;
         this.config.settings.flowRevision = revision;
+        this.config.settings.flowParameters = parameters;
         if (this.flowIdInput) this.flowIdInput.value = flowId;
         this.notifyConfigChange();
         this.focus();

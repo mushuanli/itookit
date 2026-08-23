@@ -1,6 +1,7 @@
 // @file: llm-ui/services/SessionService.ts
 
-import { IChatEngine, SessionSnapshot } from '@itookit/llm-session';
+
+import { SessionCommand, IChatEngine, SessionSnapshot } from '@itookit/llm-session';
 import type { ICommandBus } from '@itookit/common';
 import { FSAlreadyExistsError } from '@itookit/vfs-core';
 import type { ChatInputSettings } from '../domain/ports/IChatInputPresenter';
@@ -29,7 +30,7 @@ export class SessionService {
      */
     async ensureReady(nodeId: string, title: string): Promise<string> {
         const sessionId = await this.getOrCreateSessionId(nodeId, title);
-        await this.commands.execute('session.bind', { nodeId, sessionId });
+        await this.commands.execute(SessionCommand.Bind, { nodeId, sessionId });
         return sessionId;
     }
 
@@ -40,7 +41,7 @@ export class SessionService {
         const sessionId = knownSessionId ?? await this.getOrCreateSessionId(nodeId, defaultTitle);
 
         // 绑定会话并获取快照
-        const snapshot = await this.commands.execute<SessionSnapshot>('session.bind', { nodeId, sessionId });
+        const snapshot = await this.commands.execute<SessionSnapshot>(SessionCommand.Bind, { nodeId, sessionId });
 
         // 加载标题
         const title = await this.getSessionTitle(nodeId, defaultTitle);
@@ -110,7 +111,7 @@ export class SessionService {
      * 获取会话设置
      */
     async getSessionSettings(): Promise<ChatInputSettings> {
-        return await this.commands.execute<ChatInputSettings>('session.get-settings');
+        return await this.commands.execute<ChatInputSettings>(SessionCommand.GetSettings);
     }
 
     /**
@@ -122,6 +123,6 @@ export class SessionService {
      * regardless (the file already exists and will be updated in-place).
      */
     async saveSessionSettings(settings: ChatInputSettings): Promise<void> {
-        await this.commands.execute('session.save-settings', settings);
+        await this.commands.execute(SessionCommand.SaveSettings, settings);
     }
 }

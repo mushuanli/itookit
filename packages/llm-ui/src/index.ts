@@ -27,6 +27,8 @@ export { SkillSettingsEditor } from '@itookit/llm-settings-ui';
 export { CostEditor } from '@itookit/llm-settings-ui';
 export { DagWorkbench } from './components/DagWorkbench';
 export type { DagWorkbenchOptions } from './components/DagWorkbench';
+export { FlowsEditor, createFlowsEditorFactory } from './components/FlowsEditor';
+export type { FlowsEditorDeps } from './components/FlowsEditor';
 
 import type { PromptHistoryService } from '@itookit/llm-session';
 import type { IAgentManagementService } from '@itookit/common';

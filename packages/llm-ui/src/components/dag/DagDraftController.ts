@@ -190,23 +190,9 @@ function edgeError(draft: FlowDraft, edge: FlowEdgeDefinition): string | null {
     if (!from || !to) return 'Edge references an unknown node';
     if (draft.edges.some(item => edgeKey(item) === edgeKey(edge))) return 'Duplicate edge is not allowed';
     if (edge.kind === 'data' && (!edge.output || !edge.input)) return 'Data edge ports are required';
-    if (createsCycle(draft, edge)) return 'Edge would create a cycle';
+    // Back edges (loops) are allowed: the DAG executor re-enters loop nodes up
+    // to maxIterations. Only degenerate self-edges are rejected below.
     return null;
-}
-
-function createsCycle(draft: FlowDraft, candidate: FlowEdgeDefinition): boolean {
-    const adjacency = new Map<string, string[]>();
-    for (const edge of [...draft.edges, candidate]) {
-        adjacency.set(edge.from, [...(adjacency.get(edge.from) ?? []), edge.to]);
-    }
-    const seen = new Set<string>();
-    const visit = (id: string): boolean => {
-        if (id === candidate.from) return true;
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return (adjacency.get(id) ?? []).some(visit);
-    };
-    return visit(candidate.to);
 }
 
 function topologicalOrder(draft: FlowDraft): FlowNodeId[] {

@@ -1,6 +1,6 @@
 // @file: llm-ui/domain/types.ts
 
-import type { ModelTier, PromptPreset } from '@itookit/common';
+import type { JsonValue, ModelTier, PromptPreset } from '@itookit/common';
 import type { SessionTokenUsage } from '@itookit/llm-session';
 
 export type { PromptPreset } from '@itookit/common';
@@ -115,7 +115,7 @@ export interface ChatSessionSettings {
     temperature?: number;
     streamMode: boolean;
     /** 推理强度（仅支持 thinking 的模型生效），'auto' 表示使用连接默认 */
-    reasoningEffort?: 'auto' | 'low' | 'medium' | 'xhigh';
+    reasoningEffort?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh';
     /** 强制开启/关闭 thinking，undefined=auto（跟随模型默认） */
     thinkingEnabled?: boolean;
     /** 强制开启/关闭联网搜索，undefined=auto（provider 支持内置则用内置，否则客户端工具） */
@@ -142,7 +142,7 @@ export interface ChatOverrides {
     temperature?: number;
     streamMode?: boolean;
     /** 推理强度（仅支持 thinking 的模型生效） */
-    reasoningEffort?: 'low' | 'medium' | 'xhigh';
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     /** 强制开启/关闭 thinking（覆盖模型默认） */
     thinkingEnabled?: boolean;
     /** 强制开启/关闭联网搜索（覆盖 provider 自动决策；走底层内置或客户端 WebSearchTool） */
@@ -151,6 +151,8 @@ export interface ChatOverrides {
     systemPromptAppend?: string;
     flowId?: string;
     flowRevision?: number;
+    /** Workflow runtime parameters (matched against FlowRevision.parameters). */
+    flowParameters?: Record<string, JsonValue>;
     branchMode?: 'continue' | 'fork';
     baseRoundId?: string;
     newBranchName?: string;

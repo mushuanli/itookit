@@ -1,4 +1,4 @@
-import type { FlowId } from './flow-definition';
+import type { FlowId, JsonValue } from './flow-definition';
 
 export type FlowNodeId = string;
 
@@ -13,7 +13,7 @@ export interface SendIntent {
     };
     execution:
         | { kind: 'agent'; agentId: string }
-        | { kind: 'flow'; flowId: FlowId; revision?: number };
+        | { kind: 'flow'; flowId: FlowId; revision?: number; parameters?: Record<string, JsonValue> };
 }
 
 export function createAgentSendIntent(agentId: string): SendIntent {

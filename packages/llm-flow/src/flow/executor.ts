@@ -17,6 +17,7 @@ import {
     type TaskSpec,
 } from '@itookit/durable-kernel';
 import { findCycles } from './graph';
+import { resolveFlowParameters } from './parameters';
 
 export interface FlowExecutionHandle {
     root: TaskHandle<JsonValue>;
@@ -41,11 +42,21 @@ const MAX_LOOP_ITERATIONS = 100;
 export class DurableFlowExecutor {
     constructor(private readonly options: DurableFlowExecutorOptions) {}
 
-    async submit(sessionId: string, spec: DagRunSpec): Promise<FlowExecutionHandle> {
+    async submit(
+        sessionId: string,
+        spec: DagRunSpec,
+        parameters?: Record<string, CommonJsonValue>,
+    ): Promise<FlowExecutionHandle> {
         const session = await this.options.kernel.openSession(sessionId);
         const routeEdgeIds = collectRouteEdgeIds(spec);
         const { backEdges, loopNodes } = findCycles(spec.nodes, spec.edges);
-        const nodes = [...spec.nodes];
+        const nodes = parameters
+            ? spec.nodes.map(node => ({
+                ...node,
+                config: resolveFlowParameters(node.config, parameters) as DagNodeDefinition['config'],
+                inputs: resolveFlowParameters(node.inputs, parameters) as DagNodeDefinition['inputs'],
+            }))
+            : [...spec.nodes];
         const edges = [...spec.edges];
         const instances = new Map<string, TaskHandle[]>();
         const completed = new Set<string>();

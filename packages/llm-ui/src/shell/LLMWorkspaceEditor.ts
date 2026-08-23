@@ -10,6 +10,7 @@ import type { EventEnvelope, Kernel, InteractionRequest, JsonValue } from '@itoo
 
 import {
     IChatEngine, IAgentConfigService, SessionManager, getSessionManager,
+    type ConversationManifest, SessionCommand,
 } from '@itookit/llm-session';
 
 // Domain — 只依赖接口和类型
@@ -54,7 +55,7 @@ import { ErrorHandler } from '../utils/errorHandler';
 
 // Components — 仅在 init 中用于构造，之后通过接口引用
 import { HistoryView } from '../components/HistoryView';
-import { DagWorkbench } from '../components/DagWorkbench';
+
 import { ChatInput } from '../components/input/ChatInputView';
 import { BranchIndicatorView } from '../components/indicators/BranchIndicatorView';
 import { StatusIndicatorView } from '../components/indicators/StatusIndicatorView';
@@ -115,7 +116,6 @@ export class LLMWorkspaceEditor implements IEditor {
     // === 委托的子模块 ===
     private navigation!: NavigationHelper;
     private workspacePanes!: WorkspacePaneController;
-    private dagWorkbench!: DagWorkbench;
 
     // === Services ===
     private sessionManager: SessionManager;
@@ -274,29 +274,13 @@ export class LLMWorkspaceEditor implements IEditor {
         const historyEl = this.domCache.byId('llm-ui-history')!;
         const inputEl = this.domCache.byId('llm-ui-input')!;
         const historyToggle = this.domCache.byId('llm-btn-history-visibility') as HTMLButtonElement;
-        const runGraphEl = this.domCache.byId('llm-ui-run-graph')!;
-        const inspectorEl = this.domCache.byId('llm-ui-inspector')!;
-        const dagToggle = this.domCache.byId('llm-btn-dag') as HTMLButtonElement;
 
         this.workspacePanes = new WorkspacePaneController(
             this.container,
             historyEl,
             historyToggle,
             (visibility) => this.stateManager.setHistoryVisibility(visibility),
-            runGraphEl,
-            inspectorEl,
-            dagToggle,
         );
-
-        this.dagWorkbench = new DagWorkbench(runGraphEl, {
-            commands: this.commandBus,
-            onModeChange: mode => this.workspacePanes.setInspectorVisible(mode === 'run'),
-            onSelectFlow: (flowId, revision) => this.chatInput.selectFlow(flowId, revision),
-        });
-        void this.dagWorkbench.initialize().catch(error => {
-            console.warn('[DagWorkbench] initialization failed:', error);
-            this.dagWorkbench.render();
-        });
 
         const historyView = new HistoryView(historyEl, {
             onContentChange: (id: string, content: string, type: 'user' | 'node') =>
@@ -331,15 +315,6 @@ export class LLMWorkspaceEditor implements IEditor {
             branchStore: this.branchStore,
             navDataBuilder: this.navDataBuilder,
             timers: this.timers,
-            getWorkspaceState: () => ({
-                dagVisible: this.workspacePanes.isGraphVisible(),
-            }),
-            onToggleDag: () => this.toggleDagDesigner(),
-            onCreateNode: async descriptor => {
-                if (!this.workspacePanes.isGraphVisible()) this.workspacePanes.toggleGraph();
-                await this.dagWorkbench.addNode(descriptor);
-                this.navigation?.syncWorkspaceControls();
-            },
         });
 
         // BranchIndicator → IBranchPresenter
@@ -373,7 +348,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId, overrides) =>
                 this.sendCommand.run({ text, files, agentId, overrides }),
-            onStop: () => this.commandBus.execute('session.abort').catch(() => {}),
+            onStop: () => this.commandBus.execute(SessionCommand.Abort).catch(() => {}),
             initialAgents,
             initialConfig: {
                 text: savedUIState?.input_text || '',
@@ -506,7 +481,6 @@ export class LLMWorkspaceEditor implements IEditor {
         this.eventBinder = new EventBinder(this.container, {
             onToggleSidebar: () => this.hostContext?.toggleSidebar(),
             onToggleHistory: () => this.toggleHistoryView(),
-            onToggleDag: () => this.toggleDagDesigner(),
             onTitleChange: (title) => this.handleTitleChange(title),
             onOpenAssetManager: () => this.handleOpenAssetManager(),
             onToggleNavigator: () => this.navigation.toggleNavigator(this.container),
@@ -551,12 +525,6 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private toggleHistoryView(): void {
         this.workspacePanes.toggleHistory();
-        this.navigation?.syncWorkspaceControls();
-    }
-
-    private toggleDagDesigner(): void {
-        this.workspacePanes.toggleGraph();
-        this.navigation?.syncWorkspaceControls();
     }
 
     // ================================================================
@@ -579,13 +547,13 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private handleContentChange(id: string, content: string, _type: 'user' | 'node'): void {
-        this.commandBus.execute('session.update-draft', { messageId: id, newContent: content }).catch(() => {});
+        this.commandBus.execute(SessionCommand.UpdateDraft, { messageId: id, newContent: content }).catch(() => {});
         this.emit('change', undefined);
     }
 
     private async handleCommitEdit(id: string, content: string): Promise<void> {
         await this.errorHandler.wrap(async () => {
-            await this.commandBus.execute('session.commit-edit', { messageId: id, newContent: content, autoRerun: false });
+            await this.commandBus.execute(SessionCommand.CommitEdit, { messageId: id, newContent: content, autoRerun: false });
             this.emit('change', undefined);
         }, 'Commit edit', 'warn');
     }
@@ -703,7 +671,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // Check if this session was interrupted (VFS meta.status === 'running')
         promptInterruptedRun(snapshot, (interruptedAssistantId) => {
-            this.commandBus.execute('session.regenerate', { assistantId: interruptedAssistantId }).catch(() => {
+            this.commandBus.execute(SessionCommand.Regenerate, { assistantId: interruptedAssistantId }).catch(() => {
                 Toast.info('重新执行失败，请手动重试');
             });
         });
@@ -736,6 +704,17 @@ export class LLMWorkspaceEditor implements IEditor {
             },
         });
 
+        // 恢复 workflow 实例来源（manifest.flow）→ 恢复参数；新实例则立即运行一次。
+        let autoRunFlow: NonNullable<ConversationManifest['flow']> | undefined;
+        try {
+            const manifest = await this.options.chatEngine.getManifest(this.options.nodeId);
+            const flow = manifest?.flow;
+            if (flow) {
+                this.chatInput?.selectFlow(flow.flowId, flow.revision, flow.parameters);
+                if (emptySession) autoRunFlow = flow;
+            }
+        } catch { /* manifest 不可读时忽略 */ }
+
         this.sessionEventUnsub = this.sessionManager.onEvent(
             (event) => {
                 this.sessionEventHandler.handleSessionEvent(event);
@@ -743,6 +722,20 @@ export class LLMWorkspaceEditor implements IEditor {
         );
 
         this.statusIndicator.updateFromSnapshot(snapshot);
+
+        // 从 workflow 创建的新 session：立即运行一次（用 title 作为首条消息）。
+        if (autoRunFlow) {
+            void this.sendCommand.run({
+                text: title,
+                files: [],
+                agentId: 'default',
+                overrides: {
+                    flowId: autoRunFlow.flowId,
+                    flowRevision: autoRunFlow.revision,
+                    flowParameters: autoRunFlow.parameters,
+                },
+            });
+        }
     }
 
     // ================================================================
@@ -787,7 +780,7 @@ export class LLMWorkspaceEditor implements IEditor {
     public updateNodeId(newNodeId: string): void {
         this.options = { ...this.options, nodeId: newNodeId };
         this.stateManager.updateNodeId(newNodeId);
-        this.commandBus.execute('session.update-node', { newNodeId }).catch(() => {});
+        this.commandBus.execute(SessionCommand.UpdateNode, { newNodeId }).catch(() => {});
     }
 
     async waitUntilReady(): Promise<void> {
@@ -831,7 +824,7 @@ export class LLMWorkspaceEditor implements IEditor {
     getMode() { return 'edit' as const; }
     async switchToMode(): Promise<void> { }
     async getHeadings() { return []; }
-    async getSearchableText() { return this.commandBus.execute<string>('session.export').catch(() => ''); }
+    async getSearchableText() { return this.commandBus.execute<string>(SessionCommand.Export).catch(() => ''); }
     async getSummary() { return null; }
     async navigateTo(): Promise<void> { }
     async search() { return []; }
@@ -1027,7 +1020,6 @@ export class LLMWorkspaceEditor implements IEditor {
         this.branchIndicator?.destroy();
         this.statusIndicator?.destroy();
         this.historyView?.destroy();
-        this.dagWorkbench?.destroy();
         this.chatInput?.destroy();
 
         // 8. 服务
@@ -1036,7 +1028,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.bus?.destroy();
 
         // 9. 引擎解绑
-        this.commandBus.execute('session.unbind').catch(() => {});
+        this.commandBus.execute(SessionCommand.Unbind).catch(() => {});
 
         // 10. DOM 清理
         this.container.innerHTML = '';

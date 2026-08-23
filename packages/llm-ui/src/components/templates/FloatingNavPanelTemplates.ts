@@ -2,7 +2,7 @@
 
 import { escapeHTML } from '@itookit/common';
 import { BranchItem } from '../../domain/types';
-import { ChatNavItem, NavigatorWorkspaceState } from '../../domain/ports/INavigationPresenter';
+import { ChatNavItem } from '../../domain/ports/INavigationPresenter';
 
 export const FloatingNavPanelTemplates = {
     /**
@@ -17,7 +17,6 @@ export const FloatingNavPanelTemplates = {
         _viewMode: 'list' | 'tree', // 保留参数兼容，但不再使用
         listContent: string,
         branchDropdownHtml: string,
-        workspaceState: NavigatorWorkspaceState,
         contextEnabled: boolean,
     ): string => `
         <div class="llm-nav-panel__header">
@@ -27,11 +26,6 @@ export const FloatingNavPanelTemplates = {
                         data-action="toggle-context" aria-pressed="${contextEnabled}"
                         title="Toggle selected rounds, or all visible rounds, in LLM history">
                     <span aria-hidden="true">◉</span><span>LLM History</span>
-                </button>
-                <button class="llm-nav-panel__view-switch ${workspaceState.dagVisible ? 'is-active' : ''}"
-                        data-action="toggle-dag" aria-pressed="${workspaceState.dagVisible}"
-                        title="${workspaceState.dagVisible ? 'Close' : 'Open'} DAG Designer">
-                    <span aria-hidden="true">◇</span><span>DAG</span>
                 </button>
             </div>
             <span class="llm-nav-panel__counter">${currentUserIdx + 1} / ${totalUsers}</span>

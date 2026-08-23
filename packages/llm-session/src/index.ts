@@ -4,7 +4,7 @@ export { CONVERSATION_DEFAULTS } from './core/constants';
 export { CommandBus } from './core/command-bus';
 export { ExtensionRegistry } from './core/extension-registry';
 
-export { createSessionPlugin } from './plugins/session-plugin';
+export { createSessionPlugin, SessionCommand } from './plugins/session-plugin';
 export { createVcsPlugin } from './plugins/vcs-plugin';
 export { createHistoryPlugin } from './plugins/history-plugin';
 
@@ -24,6 +24,7 @@ export { AgentResolver, type AgentInfo, type ModelInfo } from './session/agent-r
 export { AttachmentProcessor } from './session/attachment-processor';
 
 export { ChatEngine } from './persistence/chat-engine';
+export { FlowEngine, FLOW_MODULE_NAME } from './persistence/flow-engine';
 export { RoundLog, roundToProjection, hasEffectiveAssistant } from './persistence/round-log';
 export { RoundGraphService, RoundGraphError } from './persistence/round-graph-service';
 export * from '@itookit/llm-flow';
@@ -76,7 +77,7 @@ import { ExtensionRegistry } from './core/extension-registry';
 import { createSessionPlugin } from './plugins/session-plugin';
 import { createVcsPlugin } from './plugins/vcs-plugin';
 import { createHistoryPlugin } from './plugins/history-plugin';
-import { FlowDefinitionStore } from '@itookit/llm-flow';
+import { FlowDefinitionStore, type FlowStore } from '@itookit/llm-flow';
 import { DagCommandService } from '@itookit/llm-flow';
 import { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from '@itookit/llm-flow';
 
@@ -84,6 +85,8 @@ export interface ConversationSystemOptions {
     agentService: IAgentConfigService;
     sessionEngine: IChatEngine;
     kernel: Kernel;
+    /** Standalone workflow storage (flows VFS module). */
+    flowStore: FlowStore;
     resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
         definitions: ToolDefinition[];
         externalIds: string[];
@@ -105,7 +108,12 @@ export async function initializeConversationSystem(
     const sessionManager = createSessionManager(
         options.sessionEngine,
         options.agentService,
-        { kernel: options.kernel, dagPlugins: options.dagPlugins, resolveTools: options.resolveTools },
+        {
+            kernel: options.kernel,
+            dagPlugins: options.dagPlugins,
+            flowStore: options.flowStore,
+            resolveTools: options.resolveTools,
+        },
     );
     return createControlPlane(options, sessionManager);
 }
@@ -142,8 +150,7 @@ function createDagCommands(
     commandBus: CommandBus,
 ): DagCommandService {
     const flowStore = new FlowDefinitionStore(
-        options.sessionEngine,
-        'llm-flows',
+        options.flowStore,
         options.dagPlugins,
     );
     const dag = new DagCommandService({

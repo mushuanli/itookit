@@ -12,9 +12,6 @@ export class WorkspacePaneController {
         private readonly historyPane: HTMLElement,
         private readonly historyToggle: HTMLButtonElement,
         private readonly onHistoryVisibilityChanged: (visibility: HistoryVisibility) => void,
-        private readonly runGraphPane?: HTMLElement,
-        private readonly inspectorPane?: HTMLElement,
-        private readonly dagToggle?: HTMLButtonElement,
     ) {}
 
     getHistoryVisibility(): HistoryVisibility {
@@ -59,29 +56,5 @@ export class WorkspacePaneController {
         if (!badge) return;
         badge.hidden = true;
         delete badge.dataset.kind;
-    }
-
-    isGraphVisible(): boolean { return this.runGraphPane ? !this.runGraphPane.hidden : false; }
-
-    setGraphVisible(visible: boolean): void {
-        if (!this.runGraphPane) return;
-        this.runGraphPane.hidden = !visible;
-        this.runGraphPane.setAttribute('aria-hidden', String(!visible));
-        if (!visible && this.inspectorPane) this.inspectorPane.hidden = true;
-        if (this.dagToggle) {
-            this.dagToggle.setAttribute('aria-pressed', String(visible));
-            this.dagToggle.setAttribute('aria-label', visible ? 'Close DAG designer' : 'Open DAG designer');
-            this.dagToggle.setAttribute('title', visible ? 'Close DAG designer' : 'Open DAG designer');
-        }
-    }
-
-    toggleGraph(): boolean {
-        const visible = !this.isGraphVisible();
-        this.setGraphVisible(visible);
-        return visible;
-    }
-
-    setInspectorVisible(visible: boolean): void {
-        if (this.inspectorPane) this.inspectorPane.hidden = !visible;
     }
 }

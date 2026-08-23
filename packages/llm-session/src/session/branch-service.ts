@@ -6,6 +6,7 @@ import { BranchTreeNode } from '../persistence/types';
 import { SessionRegistry } from './session-registry';
 import { log } from '../utils/logger';
 import { RoundLog, roundToProjection } from '../persistence/round-log';
+import { buildToolChildren } from '../persistence/projection';
 import type {
     PersistedRound,
     RoundManifest,
@@ -410,7 +411,7 @@ function assistantGroup(projection: RoundProjection): SessionGroup {
                 output: message.content,
                 thought: message.thinking ?? '',
             },
-            children: [],
+            children: buildToolChildren(projection),
         },
     };
 }

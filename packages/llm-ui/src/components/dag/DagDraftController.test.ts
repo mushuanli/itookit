@@ -20,11 +20,11 @@ function draft(): FlowDraft {
 }
 
 describe('DagDraftController', () => {
-    it('creates all seven built-in nodes from serializable manifests', () => {
+    it('creates all six built-in nodes from serializable manifests', () => {
         const controller = new DagDraftController(draft());
         manifests().forEach(item => controller.addNode(item));
         expect(controller.value.nodes.map(node => node.plugin.split('.').at(-1))).toEqual([
-            'agent', 'route', 'transform', 'reduce', 'human', 'subflow', 'spawn',
+            'agent', 'route', 'transform', 'reduce', 'human', 'spawn',
         ]);
         expect(controller.value.nodes.every(node => node.pluginVersion === '1.0.0')).toBe(true);
     });
@@ -45,7 +45,7 @@ describe('DagDraftController', () => {
         expect(controller.value.edges).toHaveLength(0);
     });
 
-    it('rejects cycles without interpreting opaque plugin config', () => {
+    it('allows back edges (loops) but rejects self-edges', () => {
         const controller = new DagDraftController(draft());
         const routeKind = manifests().find(item => item.kind === 'route')!;
         const transformKind = manifests().find(item => item.kind === 'transform')!;
@@ -61,7 +61,10 @@ describe('DagDraftController', () => {
                 defaultEdgeId: edge.id,
             },
         });
-        expect(() => controller.addEdge(createFlowEdge(target, route, 'control'))).toThrow(/cycle/);
+        // Back edges form a loop and are now legal (loop is a runtime feature).
+        expect(() => controller.addEdge(createFlowEdge(target, route, 'control'))).not.toThrow();
+        // Self-edges remain forbidden.
+        expect(() => controller.addEdge(createFlowEdge(target, target, 'control'))).toThrow(/Self edges/);
         controller.deleteEdge(edge.id as FlowEdgeId);
         expect(controller.value.nodes[0].config).toHaveProperty('defaultEdgeId', edge.id);
     });
@@ -98,7 +101,7 @@ describe('DagDraftController', () => {
 });
 
 function manifests(): DagPluginManifest[] {
-    return ['agent', 'route', 'transform', 'reduce', 'human', 'subflow', 'spawn']
+    return ['agent', 'route', 'transform', 'reduce', 'human', 'spawn']
         .map(kind => ({
             id: `builtin.${kind}`,
             version: '1.0.0',

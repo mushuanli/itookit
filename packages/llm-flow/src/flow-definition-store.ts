@@ -1,11 +1,28 @@
 import type { DagPluginCatalog, FlowDraft, FlowRevision } from '@itookit/common';
-import { flowRevisionDigest, validateFlowRevision } from './flow/validation';
+import { flowRevisionDigest, hasValidationErrors, validateFlowRevision } from './flow/validation';
 
-/** Flow 持久化所需的最小 asset 存储面（由会话层的 IChatEngine 适配提供）。 */
-export interface FlowAssetStore {
-    getAssets(ownerNodeId: string): Promise<Array<{ path?: string; name?: string }>>;
+/**
+ * Minimal storage face for workflow files. A workflow lives in a single `.flow`
+ * file (the mutable draft); immutable revisions are stored as assets under that
+ * file. Implemented by the session layer's FlowEngine (flows VFS module).
+ */
+export interface FlowFileRef {
+    nodeId: string;
+    name: string;
+}
+
+export interface FlowStore {
+    listFiles(): Promise<FlowFileRef[]>;
+    /** Resolve a single file by name (O(1)); null when absent. */
+    findFile(name: string): Promise<FlowFileRef | null>;
+    createFile(name: string, content: string): Promise<FlowFileRef>;
+    readFile(nodeId: string): Promise<string | null>;
+    writeFile(nodeId: string, content: string): Promise<void>;
+    renameFile(nodeId: string, newName: string): Promise<void>;
+    deleteFile(nodeId: string): Promise<void>;
     createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<unknown>;
     readAsset(ownerNodeId: string, filename: string): Promise<string | ArrayBuffer | null>;
+    listAssets(ownerNodeId: string): Promise<Array<{ path?: string; name?: string }>>;
 }
 
 export class FlowDraftVersionConflictError extends Error {
@@ -19,11 +36,12 @@ export class FlowDraftVersionConflictError extends Error {
     }
 }
 
-/** Immutable Flow revision persistence with an explicit latest pointer. */
+const FLOW_EXTENSION = '.flow';
+
+/** Workflow draft/revision persistence: one .flow file per flow + revision assets. */
 export class FlowDefinitionStore {
     constructor(
-        private readonly engine: FlowAssetStore,
-        private readonly nodeId: string,
+        private readonly store: FlowStore,
         private readonly plugins?: DagPluginCatalog,
     ) {}
 
@@ -31,8 +49,9 @@ export class FlowDefinitionStore {
     async createDraft(input: { id: string; name: string }): Promise<FlowDraft> {
         assertFlowId(input.id);
         if (!input.name.trim()) throw new Error('Flow name is required');
-        const existing = await this.loadDraft(input.id);
-        if (existing) throw new Error(`Flow draft already exists: ${input.id}`);
+        if (await this.resolveNodeId(input.id)) {
+            throw new Error(`Flow draft already exists: ${input.id}`);
+        }
         const draft: FlowDraft = {
             id: input.id as FlowDraft['id'],
             draftVersion: 1,
@@ -40,81 +59,93 @@ export class FlowDefinitionStore {
             nodes: [],
             edges: [],
             layout: {},
+            parameters: [],
             updatedAt: Date.now(),
         };
-        await this.write(this.draftName(input.id), draft);
+        await this.store.createFile(fileName(input.id), JSON.stringify(draft, null, 2));
         return draft;
     }
 
     async listDrafts(): Promise<FlowDraft[]> {
-        const assets = await this.engine.getAssets(this.nodeId).catch(() => []);
-        const ids = new Set<string>();
-        for (const asset of assets) {
-            for (const candidate of [asset.path, asset.name]) {
-                const match = candidate?.match(/(?:^|\/)definitions\/flows\/([^/]+)\/draft\.json$/);
-                if (match) ids.add(match[1]);
-            }
-        }
-        const drafts = await Promise.all([...ids].map(id => this.loadDraft(id)));
+        const files = (await this.store.listFiles())
+            .filter(file => file.name.toLowerCase().endsWith(FLOW_EXTENSION));
+        const drafts = await Promise.all(files.map(async file => {
+            const content = await this.store.readFile(file.nodeId);
+            return content ? parseFlowDraft(content) : null;
+        }));
         return drafts.filter((draft): draft is FlowDraft => Boolean(draft))
             .sort((left, right) => right.updatedAt - left.updatedAt);
     }
 
     async saveDraft(draft: FlowDraft, expectedDraftVersion: number): Promise<FlowDraft> {
-        const current = await this.read<FlowDraft>(this.draftName(String(draft.id)));
+        const nodeId = await this.resolveNodeId(String(draft.id));
+        if (!nodeId) throw new Error(`Flow draft not found: ${draft.id}`);
+        const current = parseFlowDraft(await this.store.readFile(nodeId));
         const actualVersion = current?.draftVersion ?? 0;
         if (actualVersion !== expectedDraftVersion) {
             throw new FlowDraftVersionConflictError(String(draft.id), expectedDraftVersion, actualVersion);
         }
         const saved = { ...draft, draftVersion: actualVersion + 1, updatedAt: Date.now() };
-        await this.write(this.draftName(String(draft.id)), saved);
+        await this.store.writeFile(nodeId, JSON.stringify(saved, null, 2));
         return saved;
     }
 
     async loadDraft(id: string): Promise<FlowDraft | null> {
-        return this.read<FlowDraft>(this.draftName(id));
+        const nodeId = await this.resolveNodeId(id);
+        if (!nodeId) return null;
+        const content = await this.store.readFile(nodeId);
+        return content ? parseFlowDraft(content) : null;
     }
 
     /** v3 immutable revision boundary with handler/port/cycle validation. */
     async saveRevision(revision: FlowRevision): Promise<FlowRevision> {
         const issues = validateFlowRevision(revision, this.plugins);
-        if (issues.length) {
+        if (hasValidationErrors(issues)) {
             throw new Error(`Invalid FlowRevision: ${issues.map(issue => issue.message).join('; ')}`);
         }
         const computed = flowRevisionDigest(revision);
-        if (revision.digest !== computed) throw new Error(`FlowRevision digest mismatch: expected ${computed}, got ${revision.digest}`);
-        const name = this.v3RevisionName(String(revision.id), revision.revision);
-        const existing = await this.read<FlowRevision>(name);
+        if (revision.digest !== computed) {
+            throw new Error(`FlowRevision digest mismatch: expected ${computed}, got ${revision.digest}`);
+        }
+        const nodeId = await this.resolveNodeId(String(revision.id));
+        if (!nodeId) throw new Error(`Flow not found: ${revision.id}`);
+        const name = revisionName(String(revision.id), revision.revision);
+        const existing = await this.readRevision(nodeId, name);
         if (existing) {
-            if (existing.digest !== revision.digest) throw new Error(`FlowRevision ${revision.id} r${revision.revision} is immutable`);
+            if (existing.digest !== revision.digest) {
+                throw new Error(`FlowRevision ${revision.id} r${revision.revision} is immutable`);
+            }
             return existing;
         }
-        await this.engine.createAsset(this.nodeId, name, JSON.stringify(revision, null, 2));
-        await this.engine.createAsset(this.nodeId, this.v3LatestName(String(revision.id)), JSON.stringify({ revision: revision.revision }));
+        await this.store.createAsset(nodeId, name, JSON.stringify(revision, null, 2));
+        await this.store.createAsset(nodeId, latestName(String(revision.id)), JSON.stringify({ revision: revision.revision }));
         return revision;
     }
 
     async loadRevision(id: string, revision?: number): Promise<FlowRevision | null> {
+        const nodeId = await this.resolveNodeId(id);
+        if (!nodeId) return null;
         let resolved = revision;
-        if (resolved === undefined) resolved = (await this.read<{ revision: number }>(this.v3LatestName(id)))?.revision;
-        return resolved === undefined ? null : this.read<FlowRevision>(this.v3RevisionName(id, resolved));
+        if (resolved === undefined) {
+            resolved = (await this.readAssetJson<{ revision: number }>(nodeId, latestName(id)))?.revision;
+        }
+        return resolved === undefined ? null : this.readRevision(nodeId, revisionName(id, resolved));
     }
 
     async listRevisions(id: string): Promise<FlowRevision[]> {
-        const assets = await this.engine.getAssets(this.nodeId).catch(() => []);
-        const prefix = `definitions/flows/${id}/revision-`;
+        const nodeId = await this.resolveNodeId(id);
+        if (!nodeId) return [];
+        const assets = await this.store.listAssets(nodeId);
         const revisions: FlowRevision[] = [];
         for (const asset of assets) {
-            const candidates = [asset.path, asset.name].filter((value): value is string => Boolean(value));
-            const candidate = candidates.find(value => value.startsWith(prefix))
-                ?? candidates.find(value => /(?:^|\/)revision-\d+\.json$/.test(value));
+            const candidate = [asset.path, asset.name].find((value): value is string => Boolean(value));
             if (!candidate) continue;
-            const match = candidate.match(/revision-(\d+)\.json$/);
+            const match = candidate.match(/(?:^|\/)revision-(\d+)\.json$/);
             if (!match) continue;
-            const loaded = await this.read<FlowRevision>(this.v3RevisionName(id, Number(match[1])));
+            const loaded = await this.readRevision(nodeId, revisionName(id, Number(match[1])));
             if (loaded && !revisions.some(item => item.revision === loaded.revision)) revisions.push(loaded);
         }
-        return revisions.sort((a, b) => a.revision - b.revision);
+        return revisions.sort((left, right) => left.revision - right.revision);
     }
 
     async createRevision(draft: FlowDraft): Promise<FlowRevision> {
@@ -125,41 +156,79 @@ export class FlowDefinitionStore {
             name: draft.name,
             nodes: structuredClone(draft.nodes),
             edges: structuredClone(draft.edges),
+            parameters: structuredClone(draft.parameters ?? []),
             createdAt: Date.now(),
         };
         return this.saveRevision({ ...withoutDigest, digest: flowRevisionDigest(withoutDigest) });
     }
 
-    private async read<T>(name: string): Promise<T | null> {
+    /**
+     * Adopt a pre-existing template file (e.g. created by the VFS "+" button)
+     * into a valid workflow: assigns a unique, filename-safe id and renames the
+     * file to `<id>.flow`, preserving any nodes/edges the template already had.
+     */
+    async adoptDraft(nodeId: string, name: string): Promise<FlowDraft> {
+        const existing = parseFlowDraft(await this.store.readFile(nodeId));
+        const id = generateFlowId(name || existing?.name || 'flow');
+        const draft: FlowDraft = {
+            id: id as FlowDraft['id'],
+            draftVersion: (existing?.draftVersion ?? 0) + 1,
+            name: name.trim() || existing?.name || id,
+            nodes: existing?.nodes ?? [],
+            edges: existing?.edges ?? [],
+            layout: existing?.layout ?? {},
+            parameters: existing?.parameters ?? [],
+            updatedAt: Date.now(),
+        };
+        await this.store.writeFile(nodeId, JSON.stringify(draft, null, 2));
+        await this.store.renameFile(nodeId, fileName(id));
+        return draft;
+    }
+
+    private async resolveNodeId(id: string): Promise<string | null> {
+        return (await this.store.findFile(fileName(id)))?.nodeId ?? null;
+    }
+
+    private async readRevision(nodeId: string, name: string): Promise<FlowRevision | null> {
+        return this.readAssetJson<FlowRevision>(nodeId, name);
+    }
+
+    private async readAssetJson<T>(nodeId: string, name: string): Promise<T | null> {
+        const content = await this.store.readAsset(nodeId, name);
+        if (content == null) return null;
+        const text = typeof content === 'string'
+            ? content
+            : new TextDecoder().decode(content);
         try {
-            const content = await this.engine.readAsset(this.nodeId, name);
-            const text = typeof content === 'string'
-                ? content
-                : content
-                    ? new TextDecoder().decode(content)
-                    : null;
-            return text ? JSON.parse(text) as T : null;
+            return JSON.parse(text) as T;
         } catch {
             return null;
         }
     }
+}
 
-    private async write(name: string, value: unknown): Promise<void> {
-        await this.engine.createAsset(this.nodeId, name, JSON.stringify(value, null, 2));
-    }
+function fileName(id: string): string {
+    assertFlowId(id);
+    return `${id}${FLOW_EXTENSION}`;
+}
 
-    private draftName(id: string): string {
-        assertFlowId(id);
-        return `definitions/flows/${id}/draft.json`;
-    }
-    private v3RevisionName(id: string, revision: number): string {
-        assertFlowId(id);
-        if (!Number.isInteger(revision) || revision < 1) throw new Error(`Invalid Flow revision: ${revision}`);
-        return `definitions/flows/${id}/revision-${revision}.json`;
-    }
-    private v3LatestName(id: string): string {
-        assertFlowId(id);
-        return `definitions/flows/${id}/latest.json`;
+function revisionName(id: string, revision: number): string {
+    assertFlowId(id);
+    if (!Number.isInteger(revision) || revision < 1) throw new Error(`Invalid Flow revision: ${revision}`);
+    return `revision-${revision}.json`;
+}
+
+function latestName(id: string): string {
+    assertFlowId(id);
+    return 'latest.json';
+}
+
+function parseFlowDraft(content: string | null): FlowDraft | null {
+    if (!content) return null;
+    try {
+        return JSON.parse(content) as FlowDraft;
+    } catch {
+        return null;
     }
 }
 
@@ -167,4 +236,16 @@ function assertFlowId(id: string): void {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id) || id.includes('..')) {
         throw new Error('Flow ID must use 1-128 letters, numbers, dots, underscores or hyphens');
     }
+}
+
+/** Derive an ASCII, filename-safe flow id from a display name + random suffix. */
+export function generateFlowId(name: string): string {
+    const slug = name.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'flow';
+    const value = globalThis.crypto?.randomUUID?.()
+        ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const suffix = value.replace(/[^a-z0-9-]/g, '').slice(0, 8);
+    return `${slug}-${suffix}`;
 }

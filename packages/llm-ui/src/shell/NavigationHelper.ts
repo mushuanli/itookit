@@ -2,15 +2,13 @@
 // Navigation + floating panel logic — extracted from LLMWorkspaceEditor.
 // Handles: viewport-aware session finding, scroll-to navigation, and the floating nav panel.
 
+
+import { SessionCommand, type SessionGroup } from '@itookit/llm-session';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
-import type { INavigationPresenter, NavPanelData, NavigatorWorkspaceState } from '../domain/ports/INavigationPresenter';
+import type { INavigationPresenter, NavPanelData } from '../domain/ports/INavigationPresenter';
 import type { IEditorEventBus } from '../domain/events';
-import type {
-    DagPluginManifest,
-    DagPluginPresentation,
-    ICommandBus,
-} from '@itookit/common';
-import type { SessionGroup } from '@itookit/llm-session';
+import type { ICommandBus } from '@itookit/common';
+
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { NavDataBuilder } from '../services/NavDataBuilder';
 import type { DOMCache } from '../components/common/DOMCache';
@@ -26,9 +24,6 @@ export interface NavigationDeps {
     branchStore: IBranchStore;
     navDataBuilder: NavDataBuilder;
     timers: TimerManager;
-    getWorkspaceState: () => NavigatorWorkspaceState;
-    onToggleDag: () => void;
-    onCreateNode: (descriptor: DagPluginManifest) => Promise<void>;
 }
 
 export class NavigationHelper {
@@ -85,7 +80,7 @@ export class NavigationHelper {
         const currentId = this.findCurrentVisibleSession();
         if (!currentId) return;
 
-        this.deps.commands.execute<SessionGroup[]>('session.get-sessions').then(sessions => {
+        this.deps.commands.execute<SessionGroup[]>(SessionCommand.GetSessions).then(sessions => {
             const idx = sessions.findIndex(s => s.id === currentId);
             const step = direction === 'prev' ? -1 : 1;
 
@@ -145,7 +140,7 @@ export class NavigationHelper {
     }
 
     private async buildNavData(): Promise<NavPanelData> {
-        const sessions = await this.deps.commands.execute<SessionGroup[]>('session.get-sessions');
+        const sessions = await this.deps.commands.execute<SessionGroup[]>(SessionCommand.GetSessions);
         return this.deps.navDataBuilder.build(
             sessions,
             this.deps.historyView.getCollapseStates(),
@@ -160,34 +155,22 @@ export class NavigationHelper {
                 container,
                 this.deps.bus as any,
                 {
-                    onToggleDag: this.deps.onToggleDag,
                     onSetContext: async (roundIds, mode) => {
-                        await this.deps.commands.execute('session.context.set', {
+                        await this.deps.commands.execute(SessionCommand.ContextSet, {
                             roundIds,
                             mode,
                             scope: 'subtree',
                         });
                     },
-                    listDagPlugins: () =>
-                        this.deps.commands.execute<DagPluginPresentation[]>(
-                            'plugin.dag.presentations',
-                        ),
-                    onCreateNode: this.deps.onCreateNode,
                 },
             );
         }
-
-        this.syncWorkspaceControls();
 
         if (!this.floatingNav.isVisible) {
             await this.pushNavDataImmediate();
         }
 
         this.floatingNav.toggle();
-    }
-
-    syncWorkspaceControls(): void {
-        this.floatingNav?.setWorkspaceState(this.deps.getWorkspaceState());
     }
 
     destroy(): void {

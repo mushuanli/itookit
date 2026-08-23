@@ -1,18 +1,46 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowDraft, FlowRevision } from '@itookit/common';
-import type { FlowAssetStore } from '../src/flow-definition-store';
+import type { FlowStore } from '../src/flow-definition-store';
 import { FlowDefinitionStore } from '../src/flow-definition-store';
 import { flowRevisionDigest } from '../src/flow/validation';
 
-function memoryEngine(): FlowAssetStore {
-    const assets = new Map<string, string>();
+interface MemoryFile { nodeId: string; name: string; content: string; }
+
+function memoryStore(): FlowStore {
+    const files = new Map<string, MemoryFile>();
+    const assets = new Map<string, Map<string, string>>();
     return {
-        createAsset: async (_nodeId: string, name: string, content: string | ArrayBuffer) => {
-            assets.set(name, typeof content === 'string' ? content : new TextDecoder().decode(content));
-            return name;
+        listFiles: async () => [...files.values()].map(file => ({ nodeId: file.nodeId, name: file.name })),
+        findFile: async name => {
+            const file = [...files.values()].find(item => item.name === name);
+            return file ? { nodeId: file.nodeId, name: file.name } : null;
         },
-        getAssets: async () => [...assets.keys()].map(path => ({ path, name: path })),
-        readAsset: async (_nodeId: string, name: string) => assets.get(name) ?? null,
+        createFile: async (name, content) => {
+            const nodeId = `/${name}`;
+            files.set(nodeId, { nodeId, name, content });
+            return { nodeId, name };
+        },
+        readFile: async nodeId => files.get(nodeId)?.content ?? null,
+        writeFile: async (nodeId, content) => {
+            const file = files.get(nodeId);
+            if (file) file.content = content;
+        },
+        renameFile: async (nodeId, newName) => {
+            const file = files.get(nodeId);
+            if (!file) return;
+            files.delete(nodeId);
+            file.nodeId = `/${newName}`;
+            file.name = newName;
+            files.set(file.nodeId, file);
+        },
+        deleteFile: async nodeId => { files.delete(nodeId); },
+        createAsset: async (nodeId, filename, content) => {
+            if (!assets.has(nodeId)) assets.set(nodeId, new Map());
+            assets.get(nodeId)!.set(filename, typeof content === 'string' ? content : new TextDecoder().decode(content));
+            return filename;
+        },
+        readAsset: async (nodeId, filename) => assets.get(nodeId)?.get(filename) ?? null,
+        listAssets: async nodeId => [...(assets.get(nodeId)?.keys() ?? [])].map(name => ({ name, path: name })),
     };
 }
 
@@ -30,7 +58,7 @@ function revision(number: number, name: string): FlowRevision {
 
 describe('FlowDefinitionStore', () => {
     it('creates, lists and saves drafts with engine-owned optimistic versions', async () => {
-        const store = new FlowDefinitionStore(memoryEngine(), 'llm-flows');
+        const store = new FlowDefinitionStore(memoryStore());
         const created = await store.createDraft({ id: 'draft', name: 'Draft' });
         expect(created.draftVersion).toBe(1);
         await expect(store.listDrafts()).resolves.toMatchObject([{ id: 'draft', name: 'Draft' }]);
@@ -48,7 +76,7 @@ describe('FlowDefinitionStore', () => {
     });
 
     it('publishes immutable revisions from a matching draft snapshot', async () => {
-        const store = new FlowDefinitionStore(memoryEngine(), 'llm-flows');
+        const store = new FlowDefinitionStore(memoryStore());
         const draft = await store.createDraft({ id: 'published', name: 'Published' });
         const first = await store.createRevision(draft);
         const changed: FlowDraft = { ...draft, draftVersion: 2, name: 'Published v2' };
@@ -61,7 +89,8 @@ describe('FlowDefinitionStore', () => {
     });
 
     it('loads immutable v3 revisions and the latest pointer', async () => {
-        const store = new FlowDefinitionStore(memoryEngine(), 'llm-flows');
+        const store = new FlowDefinitionStore(memoryStore());
+        await store.createDraft({ id: 'flow', name: 'Flow' });
         const first = revision(1, 'v1');
         const second = revision(2, 'v2');
         await store.saveRevision(first);

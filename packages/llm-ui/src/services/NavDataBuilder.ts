@@ -1,6 +1,7 @@
 // @file: llm-ui/services/NavDataBuilder.ts
 
-import { SessionGroup, type BranchTreeNode } from '@itookit/llm-session';
+
+import { SessionCommand, SessionGroup, type BranchTreeNode } from '@itookit/llm-session';
 import type { ICommandBus } from '@itookit/common';
 import { ChatNavItem, NavPanelData } from '../domain/ports/INavigationPresenter';
 import { BranchItem, CollapseStateMap } from '../domain/types';
@@ -35,7 +36,7 @@ export class NavDataBuilder {
         try {
             const roundIds = [...new Set(items.map(item => item.roundId).filter(Boolean))];
             const modes = await this.commands.execute<Record<string, 'include' | 'exclude' | 'summary'>>(
-                'session.context.get', { roundIds },
+                SessionCommand.ContextGet, { roundIds },
             );
             items.forEach(item => { item.contextMode = modes[item.roundId] ?? 'include'; });
         } catch {

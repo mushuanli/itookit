@@ -25,6 +25,7 @@ import type { RoundLogEvent } from './round-events';
 import { ulid } from './ulid';
 import { RoundGraphService } from './round-graph-service';
 import { ContextProfileStore } from './context-profile-store';
+import { toolCallsFromResult } from './projection';
 
 // ─── Fold cache ───────────────────────────────────────────────────────────
 
@@ -423,6 +424,7 @@ export function roundToProjection(round: PersistedRound, roundId: RoundId): Roun
             thinking: (assistantMsg as any).thinking as string | undefined,
             status: 'success',
             persistedNodeId: roundId,
+            toolCalls: toolCallsFromResult(round.result),
         } : undefined,
         createdAt: round.createdAt,
         origin: round.origin,

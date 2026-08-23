@@ -3,6 +3,8 @@
 // Builds the SlashCommandCallbacks object used by SlashCommandPlugin.
 // Frequently modified: each new slash command or behavior change touches this file.
 
+
+import { SessionCommand, type SessionGroup, type IChatEngine } from '@itookit/llm-session';
 import {formatDefaultFileTitle} from '@itookit/common';
 import { showConfirmDialog } from '@itookit/ui-common';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter'
@@ -11,7 +13,7 @@ import type { IEditorEventBus } from '../domain/events'
 import type { ICommandBus
 } from '@itookit/common';
 import { Toast } from '@itookit/ui-common';
-import type { SessionGroup } from '@itookit/llm-session';
+
 import type { IAgentConfigService } from '@itookit/common';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { BranchService } from '../services/BranchService';
@@ -20,7 +22,7 @@ import type { Command } from '../commands/Command';
 import type { SendMessageCommand } from '../commands/SendMessageCommand';
 import type { SwitchBranchByOffsetCommand } from '../commands/BranchCommands';
 import type { EditorHostContext } from '@itookit/ui-common';
-import type { IChatEngine } from '@itookit/llm-session';
+
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
 import { getAgentDisplayName, sanitizeFileName } from './AgentProvider';
 
@@ -92,7 +94,7 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
         },
 
         onRetry: () => {
-            deps.commands.execute<SessionGroup[]>('session.get-sessions').then(sessions => {
+            deps.commands.execute<SessionGroup[]>(SessionCommand.GetSessions).then(sessions => {
                 const lastAssistant = [...sessions].reverse()
                     .find(s => s.role === 'assistant');
                 if (lastAssistant) {
@@ -107,14 +109,14 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
         },
 
         onReedit: async () => {
-            const sessions = await deps.commands.execute<SessionGroup[]>('session.get-sessions');
+            const sessions = await deps.commands.execute<SessionGroup[]>(SessionCommand.GetSessions);
             const lastUser = [...sessions].reverse().find(s => s.role === 'user');
             if (!lastUser) {
                 Toast.info('No messages to reedit');
                 return;
             }
             const originalText = lastUser.content || '';
-            await deps.commands.execute('session.delete-message', {
+            await deps.commands.execute(SessionCommand.DeleteMessage, {
                 messageId: lastUser.id,
                 options: { deleteAssociatedResponses: true },
             });
@@ -122,7 +124,7 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
         },
 
         onDeleteLast: async () => {
-            const sessions = await deps.commands.execute<SessionGroup[]>('session.get-sessions');
+            const sessions = await deps.commands.execute<SessionGroup[]>(SessionCommand.GetSessions);
             if (sessions.length === 0) {
                 Toast.info('No messages to delete');
                 return;
@@ -144,7 +146,7 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
         },
 
         onClear: async () => {
-            const sessions = await deps.commands.execute<SessionGroup[]>('session.get-sessions');
+            const sessions = await deps.commands.execute<SessionGroup[]>(SessionCommand.GetSessions);
             if (sessions.length === 0) return;
 
             const confirmed = await showConfirmDialog(

@@ -10,7 +10,10 @@ export { findCycles, type GraphCycles, type GraphEdge, type GraphNode } from './
 export type { FlowNodeBinder } from './to-dag';
 export {
     flowRevisionDigest,
+    hasValidationErrors,
     validateFlowRevision,
 } from './validation';
 export type { ValidationIssue } from './validation';
+export { resolveFlowParameters, validateFlowParameters } from './parameters';
+export { FlowCommand } from './command-names';
 export * from './workflow';

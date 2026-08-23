@@ -19,9 +19,9 @@ import type {
 } from '../core/types';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
 import type { IChatEngine } from '../persistence/types';
-import { FlowDefinitionStore } from '@itookit/llm-flow';
+import { FlowDefinitionStore, type FlowStore } from '@itookit/llm-flow';
 import { RoundLog } from '../persistence/round-log';
-import { flowToDag } from '@itookit/llm-flow';
+import { flowToDag, hasValidationErrors, validateFlowParameters } from '@itookit/llm-flow';
 import { formatErrorMessage } from '../utils/error-formatter';
 import { log } from '../utils/logger';
 import { AgentResolver } from './agent-resolver';
@@ -60,6 +60,7 @@ export class SessionRunCoordinator {
         private readonly callbacks: SessionRunCallbacks,
         kernel: Kernel,
         dagPlugins: import('@itookit/common').DagPluginCatalog,
+        private readonly flowStore: FlowStore,
         resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
             definitions: ToolDefinition[];
             externalIds: string[];
@@ -142,10 +143,14 @@ export class SessionRunCoordinator {
         };
         const flow = task.input.sendIntent?.execution;
         if (flow?.kind !== 'flow') return this.runs.executeDirect(execution);
-        const revision = await new FlowDefinitionStore(this.engine, task.nodeId)
+        const revision = await new FlowDefinitionStore(this.flowStore)
             .loadRevision(flow.flowId, flow.revision);
         if (!revision) throw new Error(`Flow revision not found: ${flow.flowId}`);
-        return this.runs.executeDag(execution, snapshot =>
+        const parameterIssues = validateFlowParameters(revision.parameters, flow.parameters);
+        if (hasValidationErrors(parameterIssues)) {
+            throw new Error(parameterIssues.map(issue => issue.message).join('; '));
+        }
+        return this.runs.executeDag(execution, flow.parameters, snapshot =>
             flowToDag(revision, node => bindNode(node, snapshot, task, setup)),
         );
     }

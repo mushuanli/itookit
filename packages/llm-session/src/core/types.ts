@@ -42,7 +42,7 @@ export interface ExecutorConfig {
     temperature?: number;
     stream?: boolean;
     enableThinking?: boolean;
-    reasoningEffort?: 'low' | 'medium' | 'xhigh';
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     /**
      * 联网搜索策略三态（权威决策来自 resolveWebSearchStrategy）：
      * - 'builtin'    ：走底层内置 server-side search（webSearch=true）
@@ -129,7 +129,7 @@ export interface ExecutionOverrides {
     /** 流式输出开关 */
     streamMode?: boolean;
     /** 推理强度（仅支持 thinking 的模型生效） */
-    reasoningEffort?: 'low' | 'medium' | 'xhigh';
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     /** 强制开启/关闭 thinking（覆盖模型默认） */
     thinkingEnabled?: boolean;
     /**
@@ -486,6 +486,14 @@ export type MessageProjectionEvent =
         payload: {
             messageId: string;
             citations: Citation[];
+        };
+    }
+    | {
+        type: 'node:appended';
+        payload: {
+            /** Parent ExecutionNode id the new node is attached to. */
+            parentId: string;
+            node: ExecutionNode;
         };
     };
 

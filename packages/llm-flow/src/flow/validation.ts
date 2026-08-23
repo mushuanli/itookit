@@ -23,6 +23,7 @@ export function flowRevisionDigest(flow: Omit<FlowRevision, 'digest'>): string {
         name: flow.name,
         nodes: flow.nodes,
         edges: flow.edges,
+        parameters: flow.parameters,
     }));
 }
 
@@ -108,9 +109,21 @@ function validateAcyclic(
     edges: FlowEdgeDefinition[],
     issues: ValidationIssue[],
 ): void {
+    // Loops are a first-class runtime feature (DurableFlowExecutor re-enters
+    // loop nodes up to maxIterations). A cycle is therefore only a warning;
+    // callers gate publish/run on hasValidationErrors() below, not on warnings.
     if (findCycles(nodes, edges).backEdges.size > 0) {
-        issues.push({ code: 'cycle', message: 'Flow contains a cycle' });
+        issues.push({
+            code: 'loop',
+            severity: 'warning',
+            message: 'Flow contains a loop (iterates up to maxIterations)',
+        });
     }
+}
+
+/** True when any issue must block publish/run (warnings never block). */
+export function hasValidationErrors(issues: ValidationIssue[]): boolean {
+    return issues.some(issue => issue.severity !== 'warning');
 }
 
 function validateSchema(schema: JsonValue, value: JsonValue, path = '$'): string[] {

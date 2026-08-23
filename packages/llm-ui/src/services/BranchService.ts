@@ -1,9 +1,11 @@
 // @file: llm-ui/services/BranchService.ts
 
+
+import { SessionCommand, type SessionGroup } from '@itookit/llm-session';
 import type { BranchItem } from '../domain/types';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { ICommandBus } from '@itookit/common';
-import type { SessionGroup } from '@itookit/llm-session';
+
 
 export class BranchError extends Error {
     constructor(
@@ -111,7 +113,7 @@ export class BranchService {
     // ── Helpers ────────────────────────────────────────
 
     private async findBranchPoint(sourceNodeId: string): Promise<string> {
-        const sessions = await this.commands.execute<SessionGroup[]>('session.get-sessions');
+        const sessions = await this.commands.execute<SessionGroup[]>(SessionCommand.GetSessions);
         const idx = sessions.findIndex(s => s.id === sourceNodeId);
         if (idx === -1) return sourceNodeId;
         const session = sessions[idx];

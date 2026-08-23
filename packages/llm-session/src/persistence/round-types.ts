@@ -74,6 +74,15 @@ export interface BranchMeta {
  * `kind` distinguishes system/chat/merge rounds.
  * `userMessage` is optional because system and merge rounds have no user part.
  */
+/** A single tool invocation projected from a persisted Round result. */
+export interface ToolCallProjection {
+    toolId: string;
+    name: string;
+    input?: Record<string, unknown>;
+    result?: string;
+    isError?: boolean;
+}
+
 export interface RoundProjection {
     roundId: RoundId;
     historyParentIds: RoundId[];
@@ -92,6 +101,8 @@ export interface RoundProjection {
         thinking?: string;
         status: import('../core/types').NodeStatus;
         persistedNodeId: string;
+        /** Tool invocations executed before the final assistant message. */
+        toolCalls?: ToolCallProjection[];
     };
 
     createdAt: number;

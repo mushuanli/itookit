@@ -18,7 +18,7 @@ export interface AppKernelPlatform {
     configure?(kernel: AppKernelRuntime): void | Promise<void>;
 }
 
-export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills';
+export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills' | 'flows';
 
 export interface WorkspaceConfig {
     elementId: string;
@@ -67,6 +67,8 @@ export interface AppOptions {
     onProgress?: (msg: string) => void;
     /** LLM traffic logger (NoopLLMLogger for web, TauriLLMLogger for Tauri) */
     llmLogger?: import('@itookit/common').ILLMLogger;
+    /** Runtime transport for the local Codex app-server (Node/Tauri only). */
+    codexTransport?: import('@itookit/device-llm').CodexAppServerTransport;
     /** Platform capabilities implemented by the owning application. */
     kernelPlatform?: AppKernelPlatform;
 }

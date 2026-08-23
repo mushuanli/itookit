@@ -11,6 +11,7 @@ import { createSettingsModule, createSettingsFactory, type LLMUIEditors } from '
 import {
     createLLMFactory,
     createAgentEditorFactory,
+    createFlowsEditorFactory,
     VFSAgentService,
     createAIContextMenuConfig,
     MCPSettingsEditor,
@@ -21,6 +22,7 @@ import {
 import {
     initializeConversationSystem,
     ChatEngine,
+    FlowEngine,
     ChatKernelStorageResolver,
     createBuiltinDagPluginRegistry,
     chatFileParser,
@@ -36,7 +38,7 @@ import { createSkillsEditorFactory } from '@itookit/llm-ui';
 import { AppOptions, AppHandle, WorkspaceConfig, type AppKernelRuntime } from './types';
 import {
     StandardWorkspaceStrategy,
-    SettingsWorkspaceStrategy,
+    FactoryWorkspaceStrategy,
     ChatWorkspaceStrategy,
 } from './strategies/index';
 import { WorkspaceStrategy } from './strategies/types';
@@ -276,7 +278,8 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // ── 2. LLM device driver ───────────────────────────────────────────────────
 
     logStep('加载 LLM 驱动…');
-    const llmDriver = new LLMDeviceDriver(vfs, { llmLogger });
+    const llmDriver = new LLMDeviceDriver(vfs, { llmLogger, codexTransport: options.codexTransport });
+    if (options.codexTransport?.close) cleanupFns.push(() => options.codexTransport!.close!());
     let ts = performance.now();
     await llmDriver.init();
     console.log(`[Boot]   ↳ llmDriver.init: +${(performance.now() - ts).toFixed(0)}ms`);
@@ -293,6 +296,8 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const settingsModule = await createSettingsModule(vfs);
     const agentService   = new VFSAgentService(vfs, llmDriver);
     const chatEngine     = new ChatEngine(vfs);
+    const flowEngine     = new FlowEngine(vfs);
+    await flowEngine.init();
 
     // Durable Kernel with application-owned capability injection.
     ts = performance.now();
@@ -343,6 +348,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         agentService,
         sessionEngine: chatEngine,
         kernel:             kernel.kernel,
+        flowStore:          flowEngine,
         dagPlugins:          kernel.dagPlugins,
         resolveTools: async (sessionId, allowedIds) => {
             const tools = (await kernel.sessions.get(sessionId)).toolService;
@@ -387,20 +393,25 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const skillsEngine  = new SkillsEngine(agentService);
     const skillsFactory = createSkillsEditorFactory(agentService);
 
+    // Workflows workspace: standalone design surface over the flows VFS module.
+    const flowsFactory  = createFlowsEditorFactory({ commands: commandBus });
+
     // ── 4. Workspace strategies ────────────────────────────────────────────────
 
     const strategies: Record<string, WorkspaceStrategy> = {
         standard: new StandardWorkspaceStrategy(vfs),
         agent:    new StandardWorkspaceStrategy(vfs),
-        settings: new SettingsWorkspaceStrategy(settingsFactory, settingsModule.engine),
+        settings: new FactoryWorkspaceStrategy(settingsFactory, settingsModule.engine),
         chat:     new ChatWorkspaceStrategy(llmFactory, vfs),
-        skills:   new SettingsWorkspaceStrategy(skillsFactory, skillsEngine),  // reuse the same strategy pattern
+        skills:   new FactoryWorkspaceStrategy(skillsFactory, skillsEngine),  // reuse the same strategy pattern
+        flows:    new FactoryWorkspaceStrategy(flowsFactory, flowEngine.engine),
     };
 
     const editorFactoryMap: Record<EditorTypeKey, EditorFactory | undefined> = {
         standard: strategies.standard.getFactory(),
         agent:    agentFactory as EditorFactory,
         chat:     llmFactory as EditorFactory,
+        flow:     flowsFactory as EditorFactory,
     };
 
     // ── 5. File type resolver ──────────────────────────────────────────────────

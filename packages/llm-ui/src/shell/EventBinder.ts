@@ -5,7 +5,6 @@ import { EventCleanup } from '../components/common/EventCleanup';
 export interface EventBinderCallbacks {
     onToggleSidebar: () => void;
     onToggleHistory: () => void;
-    onToggleDag: () => void;
     onTitleChange: (title: string) => void;
     onOpenAssetManager: () => void;
     onToggleNavigator: () => void;
@@ -63,13 +62,6 @@ export class EventBinder {
         if (historyBtn) {
             this.events.add(historyBtn, 'click', () => {
                 this.callbacks.onToggleHistory();
-            });
-        }
-
-        const dagBtn = this.container.querySelector('#llm-btn-dag');
-        if (dagBtn) {
-            this.events.add(dagBtn, 'click', () => {
-                this.callbacks.onToggleDag();
             });
         }
     }

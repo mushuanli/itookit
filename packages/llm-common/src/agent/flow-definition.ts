@@ -72,7 +72,21 @@ export interface FlowDraft {
     nodes: FlowNodeDefinition[];
     edges: FlowEdgeDefinition[];
     layout: FlowLayout;
+    /** Declared runtime parameters (editable in the designer, frozen into revisions). */
+    parameters?: FlowParameter[];
     updatedAt: number;
+}
+
+/**
+ * A runtime parameter a workflow declares in its "signature". Node config/inputs
+ * reference it via the `${params.<name>}` template; each run supplies a value.
+ */
+export interface FlowParameter {
+    name: string;
+    type: 'string' | 'number' | 'boolean' | 'json';
+    required?: boolean;
+    default?: JsonValue;
+    description?: string;
 }
 
 export interface FlowRevision {
@@ -81,6 +95,8 @@ export interface FlowRevision {
     name: string;
     nodes: FlowNodeDefinition[];
     edges: FlowEdgeDefinition[];
+    /** Declared runtime parameters (the workflow's variable inputs). */
+    parameters?: FlowParameter[];
     createdAt: number;
     digest: string;
 }

@@ -122,6 +122,23 @@ export const WS_SKILLS: WorkspaceConfig = {
     aiEnabled:        false,
 };
 
+/** Workflows workspace — standalone FlowsEditor (design surface) backed by the flows VFS module. */
+export const WS_FLOWS: WorkspaceConfig = {
+    elementId:        'flows-workspace',
+    moduleName:       'flows',
+    slug:             'flows',
+    type:             'flows',   // handled by FactoryWorkspaceStrategy (flowsFactory + FlowEngine)
+    title:            'Workflows',
+    supportedFileTypes: ['flow'],
+    syncEnabled:      false,
+    // Editable sidebar: list / rename / delete .flow files. The FlowsEditor
+    // "New Flow" button creates a workflow with a valid id (vs. the VFS "+"
+    // button which creates a template file with an empty id).
+    readOnly:         false,
+    mentionAble:      false,
+    aiEnabled:        false,
+};
+
 export const WS_PRIVATE: WorkspaceConfig = {
     elementId: 'private-workspace',
     moduleName: 'private',

@@ -1,10 +1,12 @@
 // @file: llm-ui/shell/SessionEventHandler.ts
 
-import type { SessionEventEnvelope, RegistryEvent } from '@itookit/llm-session';
+
+
+import { SessionCommand, type SessionEventEnvelope, type RegistryEvent, type SessionGroup } from '@itookit/llm-session';
 import type { ICommandBus } from '@itookit/common';
 import {t} from '@itookit/common';
 import { Toast } from '@itookit/ui-common';
-import type { SessionGroup } from '@itookit/llm-session';
+
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
 import type { IBranchPresenter } from '../domain/ports/IBranchPresenter';
@@ -86,7 +88,7 @@ export class SessionEventHandler {
         // 一次性绑定，避免每次事件都创建闭包
         this.executors = {
             renderFull:     () => {
-                this.deps.commands.execute<SessionGroup[]>('session.get-sessions').then(sessions => {
+                this.deps.commands.execute<SessionGroup[]>(SessionCommand.GetSessions).then(sessions => {
                     this.deps.historyView.renderFull(sessions);
                 }).catch(() => {});
             },
@@ -134,7 +136,7 @@ export class SessionEventHandler {
     private handleBranchEvent(event: SessionEventEnvelope): void {
         switch (event.type) {
             case 'branch:switched':
-                this.deps.commands.execute<SessionGroup[]>('session.get-sessions').then(sessions => {
+                this.deps.commands.execute<SessionGroup[]>(SessionCommand.GetSessions).then(sessions => {
                     this.deps.historyView.renderFull(sessions, {
                         position: event.payload.displayPosition === 'bottom' ? 'bottom' : 'top',
                     });

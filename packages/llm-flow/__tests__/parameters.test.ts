@@ -1,0 +1,42 @@
+import { describe, expect, it } from 'vitest';
+import { resolveFlowParameters, validateFlowParameters } from '../src/flow/parameters';
+
+describe('resolveFlowParameters', () => {
+    it('keeps native type when a value is exactly one parameter reference', () => {
+        const params = { count: 3, ok: true, data: { a: 1 } };
+        expect(resolveFlowParameters('${params.count}', params)).toBe(3);
+        expect(resolveFlowParameters('${params.ok}', params)).toBe(true);
+        expect(resolveFlowParameters('${params.data}', params)).toEqual({ a: 1 });
+    });
+
+    it('substitutes substrings and recurses into objects/arrays', () => {
+        const params = { who: 'world', n: 2 };
+        expect(resolveFlowParameters('hello ${params.who}', params)).toBe('hello world');
+        expect(resolveFlowParameters(
+            { prompt: 'count=${params.n}', nested: ['x-${params.who}'] },
+            params,
+        )).toEqual({ prompt: 'count=2', nested: ['x-world'] });
+    });
+
+    it('leaves unknown references intact', () => {
+        expect(resolveFlowParameters('${params.missing}', {})).toBe('${params.missing}');
+    });
+});
+
+describe('validateFlowParameters', () => {
+    it('reports missing required and type mismatches', () => {
+        const issues = validateFlowParameters(
+            [{ name: 'q', type: 'string', required: true }, { name: 'n', type: 'number' }],
+            { n: 'not-a-number' },
+        );
+        expect(issues.map(i => i.code)).toEqual(['missing-parameter', 'invalid-parameter']);
+    });
+
+    it('accepts valid values', () => {
+        const issues = validateFlowParameters(
+            [{ name: 'q', type: 'string', required: true }, { name: 'n', type: 'number' }],
+            { q: 'hi', n: 5 },
+        );
+        expect(issues).toEqual([]);
+    });
+});

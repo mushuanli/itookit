@@ -18,7 +18,8 @@ import {
     SessionOrigin,
     HistoryPolicy,
 } from '../core/types';
-import type { DagPluginCatalog, SendIntent, ToolDefinition } from '@itookit/common';
+import type { DagPluginCatalog, JsonValue, SendIntent, ToolDefinition } from '@itookit/common';
+import type { FlowStore } from '@itookit/llm-flow';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
 import { CONVERSATION_DEFAULTS } from '../core/constants';
 import { IChatEngine, BranchTreeNode } from '../persistence/types';
@@ -67,6 +68,7 @@ export class SessionManager implements ISession, SessionQuery {
         options: {
             kernel: Kernel;
             dagPlugins: DagPluginCatalog;
+            flowStore: FlowStore;
             resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
                 definitions: ToolDefinition[];
                 externalIds: string[];
@@ -104,6 +106,7 @@ export class SessionManager implements ISession, SessionQuery {
             },
             options.kernel,
             options.dagPlugins,
+            options.flowStore,
             options.resolveTools,
         );
 
@@ -200,6 +203,23 @@ export class SessionManager implements ISession, SessionQuery {
         this.durableProjectionUnsubscribe = undefined;
         this.durableSession = undefined;
         this.registry.unbindSession();
+    }
+
+    /** Create a fresh session instance bound to a workflow run (records flow + parameters). */
+    async createSessionFromFlow(
+        flowId: string,
+        revision: number,
+        parameters: Record<string, JsonValue> | undefined,
+        title: string,
+    ): Promise<{ sessionId: string; nodeId: string }> {
+        const name = title.trim() || 'Workflow';
+        const engine = this.registry.engine;
+        const node = await engine.createFile(name, null);
+        const sessionId = await engine.initializeExistingFile(node.path, name);
+        await engine.updateManifest(node.path, {
+            flow: { flowId, revision, ...(parameters ? { parameters } : {}) },
+        });
+        return { sessionId, nodeId: node.path };
     }
 
     updateBoundNodeId(newNodeId: string): void {
@@ -512,6 +532,7 @@ export function createSessionManager(
     options: {
         kernel: Kernel;
         dagPlugins: DagPluginCatalog;
+        flowStore: FlowStore;
         resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
             definitions: ToolDefinition[];
             externalIds: string[];

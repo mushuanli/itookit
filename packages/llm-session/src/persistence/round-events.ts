@@ -6,7 +6,7 @@
 // dual-write pattern (engine + state + emit).
 
 import type { RoundId } from '@itookit/common';
-import type { RoundProjection } from './round-types';
+import type { RoundProjection, ToolCallProjection } from './round-types';
 import type { NodeStatus } from '../core/types';
 
 export type RoundLogEvent =
@@ -21,4 +21,6 @@ export interface RoundChangeSet {
     status?: NodeStatus;
     stale?: boolean;
     _deleted?: boolean;
+    /** Tool invocations to surface as assistant execution-tree children. */
+    toolCalls?: ToolCallProjection[];
 }

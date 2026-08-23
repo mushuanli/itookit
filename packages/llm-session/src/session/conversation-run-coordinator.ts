@@ -5,7 +5,9 @@ import type {
     ContextSnapshot,
     DagPluginCatalog,
     DagRunSpec,
+    RoundResult,
     Signal,
+    ToolCallInfo,
     ToolDefinition,
 } from '@itookit/common';
 import {
@@ -19,8 +21,10 @@ import {
 } from '@itookit/durable-kernel';
 import type {
     ChatAttachment,
+    ExecutionNode,
     ExecutionTask,
     ExecutorConfig,
+    NodeStatus,
 } from '../core/types';
 import {
     buildLlmTaskInput,
@@ -77,6 +81,7 @@ export class ConversationRunCoordinator {
 
     async executeDag(
         execution: ConversationExecution,
+        parameters: Record<string, JsonValue> | undefined,
         createSpec: (snapshot: ContextSnapshot) => DagRunSpec,
     ): Promise<void> {
         await this.execute(execution, async snapshot => {
@@ -85,7 +90,7 @@ export class ConversationRunCoordinator {
                 plugins: this.options.dagPlugins,
                 resolveTools: this.options.resolveTools,
             });
-            const submitted = await flow.submit(execution.task.sessionId, createSpec(snapshot));
+            const submitted = await flow.submit(execution.task.sessionId, createSpec(snapshot), parameters);
             return { root: submitted.root, tasks: [...submitted.nodes.values()], parse: parseDagOutput };
         });
     }
@@ -105,14 +110,15 @@ export class ConversationRunCoordinator {
         this.active.set(execution.task.sessionId, submission.tasks);
         let roundStarted = false;
         const streamedOutput = { output: false };
+        const toolCalls: CapturedToolCall[] = [];
         try {
             await this.startRound(execution, location, handle.id);
             roundStarted = true;
             this.projectRun(execution, handle.id);
             const output = await this.consume(
-                handle, submission.tasks, execution.task.sessionId, execution.rootNodeId, submission.parse, streamedOutput,
+                handle, submission.tasks, execution, submission.parse, streamedOutput, toolCalls,
             );
-            await this.completeRound(execution, output, streamedOutput);
+            await this.completeRound(execution, output, streamedOutput, toolCalls);
             await execution.finalize();
         } catch (error) {
             if (roundStarted) await this.failRound(execution);
@@ -248,12 +254,12 @@ export class ConversationRunCoordinator {
     private async consume(
         handle: TaskHandle,
         eventTasks: TaskHandle[],
-        sessionId: string,
-        rootNodeId: string,
+        execution: ConversationExecution,
         parse: (value: unknown) => ChatProgramOutput,
         streamedOutput: { output: boolean },
+        toolCalls: CapturedToolCall[],
     ): Promise<ChatProgramOutput> {
-        const events = Promise.all(eventTasks.map(task => this.consumeEvents(task, sessionId, rootNodeId, streamedOutput)));
+        const events = Promise.all(eventTasks.map(task => this.consumeEvents(task, execution, streamedOutput, toolCalls)));
         const exit = await handle.wait();
         await events;
         if (exit.status === 'failed') throw new Error(exit.error?.message ?? `Task failed: ${handle.id}`);
@@ -263,64 +269,112 @@ export class ConversationRunCoordinator {
 
     private async consumeEvents(
         handle: TaskHandle,
-        sessionId: string,
-        rootNodeId: string,
+        execution: ConversationExecution,
         streamedOutput: { output: boolean },
+        toolCalls: CapturedToolCall[],
     ): Promise<void> {
         for await (const envelope of handle.events()) {
-            this.forwardAgentEvent(envelope, sessionId, rootNodeId, streamedOutput);
+            this.forwardAgentEvent(envelope, execution, streamedOutput, toolCalls);
         }
     }
 
     private forwardAgentEvent(
         envelope: EventEnvelope,
+        execution: ConversationExecution,
+        streamedOutput: { output: boolean },
+        toolCalls: CapturedToolCall[],
+    ): void {
+        const event = getAgentEvent(envelope);
+        if (!event || event.type === 'finished' || event.type === 'error') return;
+        const sessionId = execution.task.sessionId;
+        const rootNodeId = execution.rootNodeId;
+
+        this.forwardStreamEvent(event, sessionId, rootNodeId, streamedOutput);
+        if (this.forwardCitationEvent(event, sessionId, rootNodeId)) return;
+        this.forwardToolEvent(event, execution, toolCalls);
+
+        this.options.eventBus.emitSession(sessionId, event);
+    }
+
+    /** Project stream:content / stream:thinking into message:updated deltas. */
+    private forwardStreamEvent(
+        event: AgentEvent,
         sessionId: string,
         rootNodeId: string,
         streamedOutput: { output: boolean },
     ): void {
-        const event = getAgentEvent(envelope);
-        if (!event || event.type === 'finished' || event.type === 'error') return;
-
-        // Convert stream events to message:updated for incremental rendering pipeline.
-        // These accumulate in EventBatchProcessor and drive StreamController → MDxController.
-        // We do NOT return early — the original event is still emitted so stream:content
-        // (in immediateTypes) triggers an immediate flush of the queued message:updated.
         if (event.type === 'stream:content') {
             streamedOutput.output = true;
             this.options.eventBus.emitSession(sessionId, {
                 type: 'message:updated',
                 payload: { messageId: rootNodeId, delta: event.delta, field: 'output' },
             });
-        }
-        if (event.type === 'stream:thinking') {
+        } else if (event.type === 'stream:thinking') {
             this.options.eventBus.emitSession(sessionId, {
                 type: 'message:updated',
                 payload: { messageId: rootNodeId, delta: event.delta, field: 'thought' },
             });
         }
-        // 联网搜索结果引用（终态一次性）→ 关联到当前响应节点。
-        // 投影后即返回：原始 citations AgentEvent 无下游消费者（UI 只订阅
-        // message:citations），无需再发射，避免死事件。
-        if (event.type === 'citations') {
-            this.options.eventBus.emitSession(sessionId, {
-                type: 'message:citations',
-                payload: { messageId: rootNodeId, citations: event.citations },
-            });
-            return;
-        }
+    }
 
-        this.options.eventBus.emitSession(sessionId, event);
+    /** Project citations (terminal, one-shot) and signal the caller to stop forwarding. */
+    private forwardCitationEvent(event: AgentEvent, sessionId: string, rootNodeId: string): boolean {
+        if (event.type !== 'citations') return false;
+        this.options.eventBus.emitSession(sessionId, {
+            type: 'message:citations',
+            payload: { messageId: rootNodeId, citations: event.citations },
+        });
+        return true;
+    }
+
+    /** Track tool lifecycle → visible execution-tree children + persisted result. */
+    private forwardToolEvent(
+        event: AgentEvent,
+        execution: ConversationExecution,
+        toolCalls: CapturedToolCall[],
+    ): void {
+        if (event.type === 'tool:queued' || event.type === 'tool:running') {
+            this.ensureToolNode(execution, event.call, event.type === 'tool:queued' ? 'queued' : 'running');
+            captureToolCall(toolCalls, event.call);
+        } else if (event.type === 'tool:success' || event.type === 'tool:error') {
+            recordToolResult(toolCalls, event.call);
+        }
+    }
+
+    private ensureToolNode(
+        execution: ConversationExecution,
+        call: ToolCallInfo,
+        status: NodeStatus,
+    ): void {
+        if (execution.state.hasNode(call.toolId)) return;
+        const node: ExecutionNode = {
+            id: call.toolId,
+            parentId: execution.rootNodeId,
+            executorType: 'tool',
+            executorId: call.name,
+            name: call.name,
+            status,
+            startTime: Date.now(),
+            data: { input: call.input, output: '' },
+            children: [],
+        };
+        execution.state.appendChildNode(execution.rootNodeId, node);
+        this.options.eventBus.emitSession(execution.task.sessionId, {
+            type: 'node:appended',
+            payload: { parentId: execution.rootNodeId, node },
+        });
     }
 
     private async completeRound(
         execution: ConversationExecution,
         output: ChatProgramOutput,
         streamedOutput: { output: boolean },
+        toolCalls: CapturedToolCall[],
     ): Promise<void> {
         await execution.log.setAssistantInRound(execution.roundId, {
             assistantMessages: [output.message],
             agentId: execution.config.id,
-            result: roundResult(output),
+            result: roundResult(output, toolCalls),
         });
         projectOutput(this.options.eventBus, execution, output, streamedOutput.output);
     }
@@ -427,10 +481,51 @@ function createUserMessage(text: string, files: ChatAttachment[]): ChatMessage {
     return message;
 }
 
-function roundResult(output: ChatProgramOutput) {
+interface CapturedToolCall {
+    toolId: string;
+    name: string;
+    input?: Record<string, unknown>;
+    result?: string;
+    isError?: boolean;
+}
+
+function captureToolCall(list: CapturedToolCall[], call: ToolCallInfo): void {
+    if (list.some(item => item.toolId === call.toolId)) return;
+    list.push({ toolId: call.toolId, name: call.name, input: call.input });
+}
+
+function recordToolResult(
+    list: CapturedToolCall[],
+    call: ToolCallInfo & { result?: string; error?: string },
+): void {
+    const isError = typeof call.error === 'string';
+    const content = isError ? call.error : (call.result ?? '');
+    const item = list.find(entry => entry.toolId === call.toolId);
+    if (!item) {
+        list.push({ toolId: call.toolId, name: call.name, input: call.input, result: content, isError });
+        return;
+    }
+    item.result = content;
+    item.isError = isError;
+}
+
+/** Persist tool invocations as assistantBlocks (tool_use) + toolResults. */
+function roundResult(output: ChatProgramOutput, toolCalls: CapturedToolCall[]): RoundResult {
     return {
-        assistantBlocks: [{ type: 'text' as const, content: output.message.content }],
-        toolResults: [],
+        assistantBlocks: [
+            { type: 'text' as const, content: output.message.content },
+            ...toolCalls.map(call => ({
+                type: 'tool_use' as const,
+                toolUseId: call.toolId,
+                name: call.name,
+                input: call.input,
+            })),
+        ],
+        toolResults: toolCalls.map(call => ({
+            toolUseId: call.toolId,
+            content: call.result ?? '',
+            isError: call.isError ?? false,
+        })),
         usage: output.usage,
         finishReason: output.finishReason ?? undefined,
     };

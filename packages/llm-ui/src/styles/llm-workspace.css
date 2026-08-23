@@ -39,19 +39,6 @@
     will-change: scroll-position;
 }
 
-.llm-ui-workspace__run-graph {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-}
-
-.llm-ui-workspace__inspector {
-    width: min(360px, 35vw);
-    overflow: auto;
-    border-left: 1px solid var(--llm-border-color);
-    background: var(--llm-bg-secondary);
-}
-
 .llm-ui-workspace--history-hidden .llm-ui-workspace__history {
     display: none;
 }

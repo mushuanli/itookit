@@ -6,6 +6,7 @@
 import type { RoundId } from '@itookit/common';
 import type { RoundProjection } from '../persistence/round-types';
 import type { RoundLogEvent } from '../persistence/round-events';
+import { buildToolChildren } from '../persistence/projection';
 import { NodeStatus } from '../core/types';
 import {
     SessionGroup,
@@ -155,6 +156,7 @@ export class SessionState {
                 thinking: changes.thinking,
                 status: changes.status ?? 'success',
                 persistedNodeId: round.roundId,
+                toolCalls: changes.toolCalls,
             };
             const assistant = this.roundProjectionToSessionGroups(round)
                 .find(group => group.role === 'assistant');
@@ -177,6 +179,9 @@ export class SessionState {
             }
             if (changes.status !== undefined) {
                 round.assistantMessage.status = changes.status;
+            }
+            if (changes.toolCalls !== undefined) {
+                round.assistantMessage.toolCalls = changes.toolCalls;
             }
         }
         if (changes.stale !== undefined) round.stale = changes.stale;
@@ -362,6 +367,29 @@ export class SessionState {
         }
     }
 
+    /** True when a node with the given id exists in any execution tree. */
+    hasNode(nodeId: string): boolean {
+        for (const session of this.getSessions()) {
+            if (session.executionRoot && this.findNodeInTree(session.executionRoot, nodeId)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Append a child node (e.g. a tool invocation) to an existing execution-tree
+     * node. Idempotent: a node with the same id is never added twice.
+     */
+    appendChildNode(parentId: string, node: ExecutionNode): void {
+        for (const session of this.getSessions()) {
+            if (!session.executionRoot) continue;
+            const parent = this.findNodeInTree(session.executionRoot, parentId);
+            if (!parent) continue;
+            if (!parent.children) parent.children = [];
+            if (!parent.children.some(child => child.id === node.id)) parent.children.push(node);
+            return;
+        }
+    }
+
     removeTransientMessages(messageIds: string[]): void {
         const idSet = new Set(messageIds);
         this.transientGroups = this.transientGroups.filter(s => !idSet.has(s.id));
@@ -488,7 +516,7 @@ export class SessionState {
                         thought: p.assistantMessage.thinking ?? '',
                         metaInfo: p.agentId ? { agentId: p.agentId } : undefined,
                     },
-                    children: [],
+                    children: buildToolChildren(p),
                 },
             });
         }

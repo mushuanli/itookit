@@ -1,5 +1,7 @@
 // @file: llm-ui/commands/WorkspaceCommands.ts
 
+
+import { SessionCommand } from '@itookit/llm-session';
 import { Command } from './Command';
 import { LLMPrintService, type PrintService } from '@itookit/mdxeditor';
 import type { ErrorSeverity } from '../utils/errorHandler';
@@ -13,7 +15,7 @@ export class CopyAllCommand extends Command {
     protected severity: ErrorSeverity = 'toast';
 
     protected async execute(): Promise<void> {
-        const md = await this.ctx.commands.execute<string>('session.export');
+        const md = await this.ctx.commands.execute<string>(SessionCommand.Export);
         await navigator.clipboard.writeText(md);
     }
 }
@@ -30,7 +32,7 @@ export class PrintCommand extends Command<{ title: string; engine: IModuleFS; no
     protected async execute({ title, engine, nodeId }: {
         title: string; engine: IModuleFS; nodeId?: string;
     }): Promise<void> {
-        const md = await this.ctx.commands.execute<string>('session.export');
+        const md = await this.ctx.commands.execute<string>(SessionCommand.Export);
         if (!this.printService) {
             this.printService = new LLMPrintService(engine, nodeId);
         }

@@ -148,7 +148,7 @@ function agentManifest(): DagPluginManifest {
         prompt: { type: 'string' }, connectionId: { type: 'string' }, model: { type: 'string' },
         toolIds: { type: 'array', items: { type: 'string' } }, maxExchanges: { type: 'integer' },
         temperature: { type: 'number' }, maxTokens: { type: 'integer' },
-        thinking: { type: 'boolean' }, reasoningEffort: enumSchema(['low', 'medium', 'xhigh']),
+        thinking: { type: 'boolean' }, reasoningEffort: enumSchema(['low', 'medium', 'high', 'xhigh']),
         stream: { type: 'boolean' }, webSearch: { type: 'boolean' },
         approval: enumSchema(['none', 'external', 'all']),
     }, { prompt: '', connectionId: 'default', toolIds: [], approval: 'external' });
@@ -163,7 +163,13 @@ function manifest(
 ): DagPluginManifest {
     return {
         id: `builtin.${kind}`, version: '1.0.0', kind, title, category,
-        configSchema: { type: 'object', properties }, defaultConfig,
+        configSchema: {
+            type: 'object',
+            // Loop bound shared by every node kind: any node on a cycle may carry
+            // maxIterations to cap re-entry (see DurableFlowExecutor.loopMaxIterations).
+            properties: { ...properties, maxIterations: { type: 'integer' } },
+        },
+        defaultConfig,
         inputs: [{ name: 'input', cardinality: 'many', required: false, order: 0 }],
         outputs: [{ name: 'result', required: false, order: 0 }],
     };

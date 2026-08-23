@@ -9,7 +9,8 @@ import type {
     FlowNodeDefinition,
 } from '@itookit/common';
 import type { DurableFlowSnapshot } from '@itookit/llm-session';
-import type { TaskStatus } from '@itookit/durable-kernel';
+import { FlowCommand } from '@itookit/llm-session';
+import type { TaskSnapshot, TaskStatus } from '@itookit/durable-kernel';
 import {escapeHTML} from '@itookit/common';
 import { showConfirmDialog, Toast } from '@itookit/ui-common';
 import { DagDraftController, createFlowEdge } from './dag/DagDraftController';
@@ -38,7 +39,7 @@ export class DagWorkbench {
 
     async initialize(): Promise<void> {
         this.catalogue = await this.options.commands.execute<DagPluginPresentation[]>(
-            'plugin.dag.presentations',
+            FlowCommand.Presentations,
         );
         this.render();
     }
@@ -51,7 +52,7 @@ export class DagWorkbench {
     }
 
     async loadDraft(id: string, selectedNodeId?: FlowNodeId): Promise<void> {
-        const draft = await this.options.commands.execute<FlowDraft | null>('flow.draft.load', { id });
+        const draft = await this.options.commands.execute<FlowDraft | null>(FlowCommand.DraftLoad, { id });
         if (!draft) throw new Error(`Flow draft not found: ${id}`);
         this.setDraft(draft, selectedNodeId);
     }
@@ -59,12 +60,8 @@ export class DagWorkbench {
     async addNode(
         descriptor: DagPluginManifest,
     ): Promise<FlowNodeDefinition | null> {
-        if (!this.controller) {
-            const draft = await this.chooseFlow();
-            if (!draft) return null;
-            this.setDraft(draft);
-        }
-        const node = this.controller!.addNode(descriptor);
+        if (!this.controller) return null;
+        const node = this.controller.addNode(descriptor);
         this.selectedNodeId = node.id;
         this.render();
         this.openNodeEditor(node.id);
@@ -72,7 +69,7 @@ export class DagWorkbench {
     }
 
     async openRun(taskId: string): Promise<void> {
-        this.run = await this.options.commands.execute<DurableFlowSnapshot>('dag.run.get', { taskId });
+        this.run = await this.options.commands.execute<DurableFlowSnapshot>(FlowCommand.RunGet, { taskId });
         this.setMode('run');
         this.scheduleRunRefresh(taskId);
     }
@@ -83,7 +80,7 @@ export class DagWorkbench {
 
     async cancel(): Promise<void> {
         if (!this.run) return;
-        await this.options.commands.execute('dag.run.cancel', { taskId: this.run.root.task.id });
+        await this.options.commands.execute(FlowCommand.RunCancel, { taskId: this.run.root.task.id });
     }
 
     destroy(): void {
@@ -115,7 +112,6 @@ export class DagWorkbench {
         return `<header class="dag-toolbar">
             <strong>Flow Design</strong>
             <span>${escapeHTML(draft?.name ?? 'No Flow selected')}</span>
-            <button data-action="open-flow">Open Flow</button>
             <select data-action="add-kind" ${draft ? '' : 'disabled'}><option value="">Add node…</option>${addOptions}</select>
             <button data-action="undo" ${draft ? '' : 'disabled'}>Undo</button>
             <button data-action="redo" ${draft ? '' : 'disabled'}>Redo</button>
@@ -131,7 +127,7 @@ export class DagWorkbench {
 
     private renderEmpty(): void {
         const canvas = this.root.querySelector('.dag-canvas');
-        if (canvas) canvas.innerHTML = '<p class="dag-empty">Choose a node from Chat Navigator to select or create a Flow.</p>';
+        if (canvas) canvas.innerHTML = '<p class="dag-empty">Create a workflow from the sidebar, or select one to start designing.</p>';
     }
 
     private renderCanvas(draft: FlowDraft): void {
@@ -184,7 +180,6 @@ export class DagWorkbench {
                 if (presentation) void this.addNode(presentation.manifest);
             });
         const actions: Record<string, () => void> = {
-            'open-flow': () => void this.openFlow(),
             undo: () => this.changeHistory('undo'),
             redo: () => this.changeHistory('redo'),
             layout: () => this.autoLayout(),
@@ -344,69 +339,11 @@ export class DagWorkbench {
         }
     }
 
-    private async chooseFlow(): Promise<FlowDraft | null> {
-        const drafts = await this.options.commands.execute<FlowDraft[]>('flow.draft.list');
-        const latest = await Promise.all(drafts.map(draft =>
-            this.options.commands.execute<FlowRevision | null>('flow.revision.get', {
-                id: draft.id,
-            }).catch(() => null),
-        ));
-        return new Promise(resolve => {
-            const dialog = this.createFlowDialog(drafts, latest);
-            dialog.addEventListener('close', () => {
-                void this.resolveFlowDialog(dialog, drafts).then(resolve);
-            }, { once: true });
-        });
-    }
-
-    private async openFlow(): Promise<void> {
-        const draft = await this.chooseFlow();
-        if (draft) this.setDraft(draft);
-    }
-
-    private createFlowDialog(
-        drafts: FlowDraft[],
-        latest: Array<FlowRevision | null>,
-    ): HTMLDialogElement {
-        const dialog = document.createElement('dialog');
-        dialog.className = 'dag-dialog';
-        dialog.innerHTML = `<form method="dialog"><h2>Select Flow</h2>
-            <label>Existing Flow<select name="flow"><option value="">Create new…</option>${drafts.map(draft =>
-                `<option value="${escapeHTML(String(draft.id))}">${escapeHTML(
-                    `${draft.name} · draft v${draft.draftVersion}${latest[drafts.indexOf(draft)] ? ` · latest r${latest[drafts.indexOf(draft)]!.revision}` : ''}`,
-                )}</option>`,
-            ).join('')}</select></label>
-            <label>New Flow ID<input name="id" placeholder="flow-id"></label>
-            <label>New Flow name<input name="name" placeholder="Flow name"></label>
-            <menu><button value="cancel">Cancel</button><button value="select">Continue</button></menu>
-        </form>`;
-        document.body.append(dialog);
-        dialog.showModal();
-        return dialog;
-    }
-
-    private async resolveFlowDialog(dialog: HTMLDialogElement, drafts: FlowDraft[]): Promise<FlowDraft | null> {
-        try {
-            if (dialog.returnValue !== 'select') return null;
-            const selected = dialog.querySelector<HTMLSelectElement>('[name="flow"]')!.value;
-            if (selected) return drafts.find(draft => String(draft.id) === selected) ?? null;
-            const id = dialog.querySelector<HTMLInputElement>('[name="id"]')!.value.trim();
-            const name = dialog.querySelector<HTMLInputElement>('[name="name"]')!.value.trim();
-            if (!id || !name) throw new Error('Flow ID and name are required');
-            return await this.options.commands.execute<FlowDraft>('flow.draft.create', { id, name });
-        } catch (error) {
-            Toast.error(error instanceof Error ? error.message : 'Unable to select Flow');
-            return null;
-        } finally {
-            dialog.remove();
-        }
-    }
-
     private async save(): Promise<FlowDraft | null> {
         if (!this.controller) return null;
         const draft = this.controller.value;
         try {
-            const result = await this.options.commands.execute<{ draft: FlowDraft }>('flow.draft.save', {
+            const result = await this.options.commands.execute<{ draft: FlowDraft }>(FlowCommand.DraftSave, {
                 draft,
                 expectedDraftVersion: draft.draftVersion,
             });
@@ -424,7 +361,7 @@ export class DagWorkbench {
         const saved = await this.save();
         if (!saved) return null;
         try {
-            const result = await this.options.commands.execute<{ revision: FlowRevision }>('flow.revision.create', {
+            const result = await this.options.commands.execute<{ revision: FlowRevision }>(FlowCommand.RevisionCreate, {
                 draftId: saved.id,
                 expectedDraftVersion: saved.draftVersion,
             });
@@ -447,7 +384,7 @@ export class DagWorkbench {
         const target = this.root.querySelector<HTMLElement>('.dag-validation');
         if (!target) return;
         try {
-            const result = await this.options.commands.execute<{ valid: boolean; validationIssues: Array<{ message: string }> }>('flow.draft.validate', draft);
+            const result = await this.options.commands.execute<{ valid: boolean; validationIssues: Array<{ message: string }> }>(FlowCommand.DraftValidate, draft);
             target.classList.toggle('has-errors', !result.valid);
             target.innerHTML = result.validationIssues.map(issue => `<span>${escapeHTML(issue.message)}</span>`).join('')
                 || '<span>Flow is valid</span>';
@@ -462,11 +399,54 @@ export class DagWorkbench {
         const run = snapshot.root.task;
         this.root.innerHTML = `<section class="dag-workbench" data-mode="run">
             <header class="dag-toolbar"><strong>DAG Run</strong><span>${escapeHTML(String(run.id))}</span><span data-status="${escapeHTML(run.status)}">${escapeHTML(run.status)}</span><button data-run-action="cancel">Cancel</button></header>
-            <div class="dag-run-nodes">${snapshot.nodes.map(({ nodeId, snapshot: node }) =>
-                `<article data-task-id="${escapeHTML(node.task.id)}"><strong>${escapeHTML(nodeId)}</strong><small>${escapeHTML(node.task.status)}</small><div>${escapeHTML(node.task.program.kind)}</div></article>`,
-            ).join('')}</div>
+            <div class="dag-run-nodes">${snapshot.nodes.map(({ nodeId, snapshot: node }) => {
+                const iterations = snapshot.iterations[nodeId] ?? 1;
+                const waiting = pendingInteraction(node);
+                return `<article data-task-id="${escapeHTML(node.task.id)}">
+                    <strong>${escapeHTML(nodeId)}</strong>
+                    <small>${escapeHTML(node.task.status)}${iterations > 1 ? ` · ×${iterations}` : ''}</small>
+                    <div>${escapeHTML(node.task.program.kind)}</div>
+                    ${waiting ? `<div class="dag-run-wait">${escapeHTML(waiting.prompt)}</div><button data-run-respond="${escapeHTML(nodeId)}" data-request-id="${escapeHTML(waiting.id)}">Respond</button>` : ''}
+                </article>`;
+            }).join('')}</div>
         </section>`;
         this.root.querySelector('[data-run-action="cancel"]')?.addEventListener('click', () => void this.cancel());
+        this.root.querySelectorAll<HTMLElement>('[data-run-respond]').forEach(button => {
+            button.addEventListener('click', () => {
+                const nodeId = button.dataset.runRespond!;
+                const requestId = button.dataset.requestId!;
+                const waiting = pendingInteraction(
+                    this.run?.nodes.find(item => item.nodeId === nodeId)?.snapshot,
+                );
+                this.openRespondDialog(nodeId, requestId, waiting?.prompt ?? 'Please respond.');
+            });
+        });
+    }
+
+    private openRespondDialog(nodeId: string, requestId: string, prompt: string): void {
+        const dialog = document.createElement('dialog');
+        dialog.className = 'dag-dialog';
+        dialog.innerHTML = `<form method="dialog"><h2>Respond to ${escapeHTML(nodeId)}</h2>
+            <p>${escapeHTML(prompt)}</p>
+            <label>Response<textarea name="value" rows="3"></textarea></label>
+            <menu><button value="cancel">Cancel</button><button value="respond">Respond</button></menu></form>`;
+        document.body.append(dialog);
+        dialog.showModal();
+        dialog.addEventListener('close', () => {
+            if (dialog.returnValue === 'respond') {
+                const value = dialog.querySelector<HTMLTextAreaElement>('[name="value"]')!.value;
+                void this.options.commands.execute(FlowCommand.RunRespond, {
+                    taskId: this.run?.root.task.id,
+                    requestId,
+                    value,
+                }).then(() => {
+                    if (this.run) void this.refreshRun(this.run.root.task.id);
+                }).catch(error => {
+                    Toast.error(error instanceof Error ? error.message : 'Respond failed');
+                });
+            }
+            dialog.remove();
+        }, { once: true });
     }
 
     private scheduleRunRefresh(taskId: string): void {
@@ -479,7 +459,7 @@ export class DagWorkbench {
 
     private async refreshRun(taskId: string): Promise<void> {
         try {
-            this.run = await this.options.commands.execute<DurableFlowSnapshot>('dag.run.get', {
+            this.run = await this.options.commands.execute<DurableFlowSnapshot>(FlowCommand.RunGet, {
                 taskId,
             });
             if (this.mode === 'run') this.render();
@@ -511,11 +491,37 @@ export class DagWorkbench {
             const output = source?.outputs[0]?.name;
             const input = target?.inputs[0]?.name;
             const kind = output && input ? 'data' : 'control';
-            this.controller?.addEdge(createFlowEdge(from, to, kind, { output, input }));
+            const edge = createFlowEdge(from, to, kind, { output, input });
+            this.controller?.addEdge(edge);
+            this.wireRouteBranch(from, to, edge.id);
             this.render();
         } catch (error) {
             Toast.error(error instanceof Error ? error.message : 'Unable to connect nodes');
         }
+    }
+
+    /** When wiring a route node, register the new edge id so the branch actually activates. */
+    private wireRouteBranch(from: FlowNodeDefinition, to: FlowNodeDefinition, edgeId: string): void {
+        if (from.plugin !== 'builtin.route') return;
+        const config: Record<string, unknown> = isRecord(from.config)
+            ? { ...from.config } as Record<string, unknown>
+            : {};
+        if (!config.defaultEdgeId) {
+            // First branch doubles as the fallback default.
+            config.defaultEdgeId = edgeId;
+        } else {
+            const rules = Array.isArray(config.rules) ? config.rules.filter(isRecord) : [];
+            if (!rules.some(rule => String(rule.edgeId) === edgeId)) {
+                rules.push({
+                    edgeId,
+                    // Seed an eq rule against the target node id; refine the JSON
+                    // expression for real routing conditions.
+                    expression: { kind: 'eq', args: [{ kind: 'path', path: ['input'] }, { kind: 'literal', value: to.id }] },
+                });
+            }
+            config.rules = rules;
+        }
+        this.controller?.updateNode({ ...from, config: config as unknown as FlowNodeDefinition['config'] });
     }
 
     private changeHistory(direction: 'undo' | 'redo'): void {
@@ -576,4 +582,20 @@ function pluginSummary(
 
 function isTerminalRun(status: TaskStatus): boolean {
     return ['succeeded', 'failed', 'cancelled'].includes(status);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function pendingInteraction(
+    snapshot: TaskSnapshot | undefined,
+): { id: string; prompt: string } | undefined {
+    if (!snapshot) return undefined;
+    for (const interaction of Object.values(snapshot.task.interactions ?? {})) {
+        if (interaction.status === 'pending') {
+            return { id: interaction.id, prompt: interaction.prompt };
+        }
+    }
+    return undefined;
 }

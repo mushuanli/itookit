@@ -1,24 +1,17 @@
 // @file: llm-ui/components/FloatingNavPanel.ts
 
-import type { INavigationPresenter, NavPanelData, ChatNavItem, NavigatorWorkspaceState } from '../domain/ports/INavigationPresenter';
+import type { INavigationPresenter, NavPanelData, ChatNavItem } from '../domain/ports/INavigationPresenter';
 import { formatTime } from '../utils/timeUtils';
 import { IconTemplates } from './templates/IconTemplates';
 import type { IEditorEventBus } from '../domain/events';
 import type { BranchItem } from '../domain/types';
 import { EventCleanup, TimerManager } from './common';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
-import {escapeHTML} from '@itookit/common';
 import { Toast } from '@itookit/ui-common';
-import type { DagPluginManifest,
-    DagPluginPresentation
-} from '@itookit/common';
 import { showConfirmDialog } from '@itookit/ui-common';
 
 export interface FloatingNavWorkspaceActions {
-    onToggleDag: () => void;
     onSetContext: (roundIds: string[], mode: 'include' | 'exclude') => Promise<void>;
-    listDagPlugins: () => Promise<DagPluginPresentation[]>;
-    onCreateNode: (descriptor: DagPluginManifest) => Promise<void>;
 }
 
 
@@ -42,7 +35,6 @@ export class FloatingNavPanel implements INavigationPresenter {
     private lastSelectedIndex = -1;
     private selectedIds = new Set<string>();
     private filterBranch: string | null = null;
-    private workspaceState: NavigatorWorkspaceState = { dagVisible: false };
 
     private bus: IEditorEventBus;
     private events = new EventCleanup();
@@ -85,11 +77,6 @@ export class FloatingNavPanel implements INavigationPresenter {
 
     toggle(): void {
         this._isVisible ? this.hide() : this.show();
-    }
-
-    setWorkspaceState(state: NavigatorWorkspaceState): void {
-        this.workspaceState = { ...state };
-        this.syncWorkspaceSwitches();
     }
 
     destroy(): void {
@@ -165,10 +152,6 @@ export class FloatingNavPanel implements INavigationPresenter {
 
             case 'toggle-context':
                 await this.toggleContextForSelectionOrAll();
-                break;
-
-            case 'toggle-dag':
-                this.workspaceActions?.onToggleDag();
                 break;
 
             case 'context-include':
@@ -424,33 +407,15 @@ export class FloatingNavPanel implements INavigationPresenter {
 
     private async openCreateMenu(anchor: HTMLElement, sourceNodeId: string): Promise<void> {
         this.panel?.querySelector('.llm-nav-create-menu')?.remove();
-        try {
-            const descriptors = await this.workspaceActions?.listDagPlugins() ?? [];
-            const menu = document.createElement('div');
-            menu.className = 'llm-nav-create-menu';
-            menu.innerHTML = `<strong>Conversation</strong>
-                <button data-create-branch>Create Branch</button>
-                <strong>Flow Node</strong>
-                ${descriptors.map((item, index) =>
-                    `<button data-plugin-index="${index}"><span>${escapeHTML(item.ui?.palette.icon ?? '◇')}</span><span>${escapeHTML(item.ui?.palette.label ?? item.manifest.title)}</span><small>${escapeHTML(item.ui?.palette.group ?? item.manifest.category)}</small></button>`,
-                ).join('') || '<small>No registered DAG plugins</small>'}`;
-            anchor.closest('.llm-nav-item__branch-actions')?.append(menu);
-            menu.querySelector('[data-create-branch]')?.addEventListener('click', () => {
-                this.bus.emit('branch:create', { sourceNodeId });
-                menu.remove();
-            });
-            menu.querySelectorAll<HTMLElement>('[data-plugin-index]').forEach(button => {
-                button.addEventListener('click', () => {
-                    const presentation = descriptors[Number(button.dataset.pluginIndex)];
-                    menu.remove();
-                    if (presentation) {
-                        void this.workspaceActions?.onCreateNode(presentation.manifest);
-                    }
-                });
-            });
-        } catch (error) {
-            Toast.error(error instanceof Error ? error.message : 'Unable to load DAG plugins');
-        }
+        const menu = document.createElement('div');
+        menu.className = 'llm-nav-create-menu';
+        menu.innerHTML = `<strong>Conversation</strong>
+            <button data-create-branch>Create Branch</button>`;
+        anchor.closest('.llm-nav-item__branch-actions')?.append(menu);
+        menu.querySelector('[data-create-branch]')?.addEventListener('click', () => {
+            this.bus.emit('branch:create', { sourceNodeId });
+            menu.remove();
+        });
     }
 
     // ================================================================
@@ -488,7 +453,7 @@ export class FloatingNavPanel implements INavigationPresenter {
         this.panel.innerHTML = FloatingNavPanelTemplates.renderPanel(
             currentUserIdx, totalUsers,
             hasSelection, isAllSelected, this.selectedIds.size,
-            'list', listContent, branchBarHtml, this.workspaceState,
+            'list', listContent, branchBarHtml,
             contextItems.some(item => item.contextMode !== 'exclude'),
         );
 
@@ -788,17 +753,6 @@ export class FloatingNavPanel implements INavigationPresenter {
         } catch (error) {
             Toast.error(error instanceof Error ? error.message : 'Failed to update LLM context');
         }
-    }
-
-    private syncWorkspaceSwitches(): void {
-        if (!this.panel) return;
-        const sync = (action: string, active: boolean, label: string): void => {
-            const button = this.panel?.querySelector<HTMLElement>(`[data-action="${action}"]`);
-            button?.classList.toggle('is-active', active);
-            button?.setAttribute('aria-pressed', String(active));
-            button?.setAttribute('title', `${active ? (label === 'DAG Designer' ? 'Close' : 'Hide') : (label === 'DAG Designer' ? 'Open' : 'Show')} ${label}`);
-        };
-        sync('toggle-dag', this.workspaceState.dagVisible, 'DAG Designer');
     }
 
     private updateHighlight(): void {

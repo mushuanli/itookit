@@ -133,10 +133,12 @@ export class HistoryView implements IHistoryPresenter {
                     'regenerate_started', 'regenerate_completed',
                     // Claude Code Agent Loop — 需要立即处理的事件
                     'tool:queued',
+                    'tool:running',
+                    'tool:input',
                     'stream:thinking:stop',
                     'tool:success', 'tool:error',
                     // LLM 2.0 canonical events (S7)
-                    'message:appended', 'message:status',
+                    'message:appended', 'message:status', 'node:appended',
                     'messages:cleared', 'messages:deleted',
                     'sibling:switched',
                     'branch:switched',
@@ -384,6 +386,11 @@ export class HistoryView implements IHistoryPresenter {
 
             case 'tool:error':
                 this.stream.updateStatus(event.payload.call.toolId, 'failed', event.payload.call.error);
+                break;
+
+            // Tool invocation nodes are created by the execution tree projection.
+            case 'node:appended':
+                this.renderer.appendNode(event.payload.parentId, event.payload.node, false);
                 break;
 
             case 'round:start':

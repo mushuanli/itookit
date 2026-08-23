@@ -1,5 +1,6 @@
 // @file: llm-ui/domain/ports/IChatInputPresenter.ts
 
+import type { JsonValue } from '@itookit/common';
 import type {
     ChatOverrides,
     ChatSessionSettings,
@@ -12,7 +13,7 @@ export type ChatInputSettings =
     & Partial<ChatSessionSettings>
     & Pick<
         ChatOverrides,
-        'branchMode' | 'retentionMode' | 'flowId' | 'flowRevision'
+        'branchMode' | 'retentionMode' | 'flowId' | 'flowRevision' | 'flowParameters'
     >
     & { modelId?: string };
 
@@ -34,8 +35,8 @@ export interface IChatInputPresenter {
     restoreInput(text: string, agentId?: string): void;
     focus(): void;
     refreshAgents(agents: ExecutorOption[], validateAgentId: (id: string) => string): boolean;
-    /** Select the immutable Flow revision used by the next send. */
-    selectFlow(flowId: string, revision: number): void;
+    /** Select the immutable Flow revision (and runtime parameters) used by the next send. */
+    selectFlow(flowId: string, revision: number, parameters?: Record<string, JsonValue>): void;
 
     /** 重新拉取连接列表（import/save connection 后由 Shell 调用）。 */
     refreshConnections(): Promise<void>;

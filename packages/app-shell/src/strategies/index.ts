@@ -15,7 +15,8 @@ export class StandardWorkspaceStrategy implements WorkspaceStrategy {
     }
 }
 
-export class SettingsWorkspaceStrategy implements WorkspaceStrategy {
+/** Generic strategy for workspaces backed by a fixed editor factory + engine (settings/skills/flows). */
+export class FactoryWorkspaceStrategy implements WorkspaceStrategy {
     constructor(
         private factory: EditorFactory,
         private engine: IModuleFS,

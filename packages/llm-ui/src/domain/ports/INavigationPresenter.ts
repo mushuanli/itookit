@@ -31,14 +31,9 @@ export interface NavPanelData {
     currentSessionId?: string;
 }
 
-export interface NavigatorWorkspaceState {
-    dagVisible: boolean;
-}
-
 export interface INavigationPresenter {
     readonly isVisible: boolean;
     toggle(): void;
     update(data: NavPanelData): void;
-    setWorkspaceState(state: NavigatorWorkspaceState): void;
     destroy(): void;
 }

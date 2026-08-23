@@ -11,6 +11,7 @@ import type { RoundManifest, PersistedRound, BranchMeta } from './round-types';
 import type { RoundLogEvent, RoundChangeSet } from './round-events';
 import { ulid } from './ulid';
 import { roundToProjection } from './round-log';
+import { toolCallsFromResult } from './projection';
 import type { IChatEngine } from './types';
 
 // ─── Error types ───────────────────────────────────────────────────────────
@@ -338,6 +339,7 @@ export class RoundGraphService {
                 ? (assistant as any).thinking
                 : '',
             agentId: update.agentId,
+            toolCalls: toolCallsFromResult(update.result),
         };
         this.onEvent?.({ type: 'round:updated', roundId, changes });
     }

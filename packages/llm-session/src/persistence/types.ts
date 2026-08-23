@@ -1,5 +1,6 @@
 import type {
     ChatSessionSettings,
+    JsonValue,
 } from '@itookit/common';
 import type {
     FSNode,
@@ -25,6 +26,12 @@ export interface ConversationManifest extends RoundManifest {
     createdAt: number;
     updatedAt: number;
     uiState?: ConversationUIState;
+    /** Workflow instance source: set when the session is created from a workflow run. */
+    flow?: {
+        flowId: string;
+        revision: number;
+        parameters?: Record<string, JsonValue>;
+    };
 }
 
 export interface BranchTreeNode {

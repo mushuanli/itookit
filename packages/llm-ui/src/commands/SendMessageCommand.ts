@@ -1,10 +1,12 @@
 // @file: llm-ui/commands/SendMessageCommand.ts
 
+
+import { SessionCommand, type SessionGroup, type SessionOrigin, type HistoryPolicy } from '@itookit/llm-session';
 import { Command } from './Command';
 import { Toast } from '@itookit/ui-common';
 import { ErrorHandler } from '../utils/errorHandler';
 import type { ChatOverrides } from '../domain/types';
-import type { SessionGroup, SessionOrigin, HistoryPolicy } from '@itookit/llm-session';
+
 import { createAgentSendIntent } from '@itookit/common';
 
 export interface SendMessageParams {
@@ -25,7 +27,7 @@ export class SendMessageCommand extends Command<SendMessageParams> {
 
         const savedText = text;
         const savedAgentId = agentId;
-        const sessionsBeforeSend = (await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions')).map(s => s.id);
+        const sessionsBeforeSend = (await this.ctx.commands.execute<SessionGroup[]>(SessionCommand.GetSessions)).map(s => s.id);
 
         this.ctx.chatInput.setLoading(true);
         this.ctx.historyView.scrollToBottom(true);
@@ -50,7 +52,7 @@ export class SendMessageCommand extends Command<SendMessageParams> {
                 return;
             }
 
-            await this.ctx.commands.execute('session.send', {
+            await this.ctx.commands.execute(SessionCommand.Send, {
                 text: finalText.trim(),
                 files,
                 agentId: agentId || 'default',
@@ -66,7 +68,12 @@ export class SendMessageCommand extends Command<SendMessageParams> {
                     },
                     retention: { mode: overrides?.retentionMode ?? 'persistent' },
                     execution: overrides?.flowId
-                        ? { kind: 'flow', flowId: overrides.flowId, revision: overrides.flowRevision }
+                        ? {
+                            kind: 'flow',
+                            flowId: overrides.flowId,
+                            revision: overrides.flowRevision,
+                            parameters: overrides.flowParameters,
+                        }
                         : { kind: 'agent', agentId: agentId || 'default' },
                 },
             });
@@ -85,14 +92,14 @@ export class SendMessageCommand extends Command<SendMessageParams> {
     }
 
     private async rollbackFailedSend(sessionsBeforeSend: string[]): Promise<void> {
-        const sessionsAfterFail = (await this.ctx.commands.execute<SessionGroup[]>('session.get-sessions')).map(s => s.id);
+        const sessionsAfterFail = (await this.ctx.commands.execute<SessionGroup[]>(SessionCommand.GetSessions)).map(s => s.id);
         const ghostIds = sessionsAfterFail.filter(id => !sessionsBeforeSend.includes(id));
 
         if (ghostIds.length > 0) {
             this.ctx.historyView.removeMessages(ghostIds, false);
             for (const id of ghostIds) {
                 try {
-                    this.ctx.commands.execute('session.delete-message', {
+                    this.ctx.commands.execute(SessionCommand.DeleteMessage, {
                         messageId: id,
                         options: { deleteAssociatedResponses: true },
                     });
