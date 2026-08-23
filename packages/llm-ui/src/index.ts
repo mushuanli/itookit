@@ -11,7 +11,7 @@ import {formatDefaultFileTitle} from '@itookit/common';
 import { IEditor } from '@itookit/ui-common';
 import type { ILLMService, ICommandBus } from '@itookit/common';
 import { EditorFactory, EditorOptions } from '@itookit/ui-common';
-import type { Kernel } from '@itookit/kernel';
+import type { Kernel } from '@itookit/durable-kernel';
 import { AgentConfigEditor } from '@itookit/llm-settings-ui';
 
 export type {

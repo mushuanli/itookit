@@ -1,7 +1,7 @@
 # 跨包接口契约
 
-业务共享协议定义在 `@itookit/common`；执行协议由 `@itookit/kernel` 提供，
-能力抽象由 `@itookit/coreutils` 提供，具体实现由 `app-shell` 注入。
+业务共享协议定义在 `@itookit/common`；执行协议由 `@itookit/durable-kernel` 提供，
+能力抽象由 `@itookit/kernel-adapters` 提供，具体实现由 `app-shell` 注入。
 
 ## LLM 执行
 
@@ -10,12 +10,12 @@
 | `DurableTaskProgram` | Kernel | llm-runtime、Conversation Flow |
 | `SessionHandle` | Conversation、UI | Kernel |
 | `TaskHandle` | Conversation、UI、CLI | Kernel |
-| `EffectAdapter` | Kernel | coreutils 插件及应用插件 |
-| `KernelPlugin` | App Shell | coreutils 与功能插件 |
+| `EffectAdapter` | Kernel | kernel-adapters 插件及应用插件 |
+| `KernelPlugin` | App Shell | kernel-adapters 与功能插件 |
 | `DagPluginCatalog` | Conversation、UI | `FlowPluginRegistry` |
-| `LLMCapability` | coreutils Effect | App-shell LLM adapter |
-| `ToolCapability` | coreutils Effect | Tool service |
-| `SkillCapability` | coreutils Effect | Browser/Tauri adapter |
+| `LLMCapability` | kernel-adapters Effect | App-shell LLM adapter |
+| `ToolCapability` | kernel-adapters Effect | Tool service |
+| `SkillCapability` | kernel-adapters Effect | Browser/Tauri adapter |
 
 ## Conversation
 

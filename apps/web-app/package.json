@@ -22,7 +22,7 @@
     "@itookit/app-shell": "workspace:*",
     "@itookit/app-settings": "workspace:*",
     "@itookit/common": "workspace:*",
-    "@itookit/coreutils": "workspace:*",
+    "@itookit/kernel-adapters": "workspace:*",
     "@itookit/device-llm": "workspace:*",
     "@itookit/llm-session": "workspace:*",
     "@itookit/llm-ui": "workspace:*",

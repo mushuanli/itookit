@@ -9,7 +9,7 @@ import type {
     FlowNodeDefinition,
 } from '@itookit/common';
 import type { DurableFlowSnapshot } from '@itookit/llm-session';
-import type { TaskStatus } from '@itookit/kernel';
+import type { TaskStatus } from '@itookit/durable-kernel';
 import {escapeHTML} from '@itookit/common';
 import { showConfirmDialog, Toast } from '@itookit/ui-common';
 import { DagDraftController, createFlowEdge } from './dag/DagDraftController';

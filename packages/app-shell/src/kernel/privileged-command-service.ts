@@ -1,4 +1,4 @@
-import type { Kernel, TaskHandle } from '@itookit/kernel';
+import type { Kernel, TaskHandle } from '@itookit/durable-kernel';
 import { AgentResolver, type IAgentConfigService } from '@itookit/llm-session';
 import type {
     ExecCommandRequest,
@@ -42,7 +42,7 @@ export class PrivilegedCommandService implements IPrivilegedCommandService {
     async exec(request: ExecCommandRequest): Promise<string> {
         const session = await this.kernel.openSession(request.sessionId);
         const task = await session.submit({
-            program: { kind: 'coreutils.exec', version: '1' },
+            program: { kind: 'kernel-adapters.exec', version: '1' },
             input: { command: request.command },
             labels: { command: 'exec' },
             deferStart: true,

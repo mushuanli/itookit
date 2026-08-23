@@ -36,7 +36,7 @@ C4Container
     System_Boundary(mindos, "MindOS") {
         Container(ui, "llm-ui", "DOM", "开关 + citations 渲染")
         Container(session, "llm-session", "TS", "三态决策 + 事件投影")
-        Container(effects, "coreutils", "TS", "参数下发 + citations 事件")
+        Container(effects, "kernel-adapters", "TS", "参数下发 + citations 事件")
         Container(driver, "device-llm", "TS", "内置 search 注入 + citations 提取")
         Container(contracts, "llm-common", "TS", "WebSearchMode 纯函数契约")
     }
@@ -68,7 +68,7 @@ C4Component
         Component(resolver, "AgentResolver", "TS", "存 ExecutorConfig.webSearchMode")
         Component(coord, "ConversationRunCoordinator", "TS", "派生 webSearch 布尔 + 剥离 WebSearch 工具")
     }
-    Container_Boundary(effects, "coreutils") {
+    Container_Boundary(effects, "kernel-adapters") {
         Component(effect, "LlmChatEffectAdapter", "TS", "转发 params.webSearch / 发射 citations")
     }
     Container_Boundary(driver, "device-llm") {
@@ -136,7 +136,7 @@ Provider.collectCitations
 | override（toggle 关闭 → disabled） | `llm-session/src/session/session-run-coordinator.ts` |
 | Responses API（web_search/reasoning/citations） | `device-llm/src/providers/responses.ts` |
 | Gemini grounding citations | `device-llm/src/providers/gemini.ts` |
-| citations 事件发射 + 流式聚合 | `coreutils/src/effects/llm-chat-effect.ts` |
+| citations 事件发射 + 流式聚合 | `kernel-adapters/src/effects/llm-chat-effect.ts` |
 | citations 渲染 | `llm-ui/src/components/{HistoryView,history/StreamController,templates/NodeTemplates}.ts` |
 | 联网搜索开关 | `llm-ui/src/components/input/ChatInputView.ts`、`templates/ChatInputTemplates.ts` |
 | CLI -p prompt 命令 | `apps/cli/src/{cli,commands,schema,types}.ts` |

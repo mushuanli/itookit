@@ -9,7 +9,7 @@ import type {
     JsonValue,
     KernelAction,
     TaskInputEvent,
-} from '@itookit/kernel';
+} from '@itookit/durable-kernel';
 import type {
     DurableCapabilitySignal,
     DurableDependencyBinding,

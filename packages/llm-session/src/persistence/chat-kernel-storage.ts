@@ -2,7 +2,7 @@ import type {
     ResolvedStorageBinding,
     SessionStorageResolver,
     StorageBindingRef,
-} from '@itookit/kernel';
+} from '@itookit/durable-kernel';
 import { FS_MODULE_CHAT } from '@itookit/vfs-core';
 import type { IChatEngine } from './types';
 

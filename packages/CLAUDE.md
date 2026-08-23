@@ -12,9 +12,9 @@
 ├──────────────┬──────────────┬──────────────────────┤
 │  llm-ui      │  vfs-ui      │  mdxeditor   ui-common │  UI 层
 ├──────────────┼──────────────┼──────────────────────┤
-│ llm-session  │  llm-flow    │ llm-tasks  kernel │  业务层
+│ llm-session  │  llm-flow    │ llm-tasks durable-kernel │  业务层
 ├──────────────┼──────────────┼──────────────────────┤
-│ coreutils    │  device-llm  │ device-tty    vfs-core  │  引擎/能力层
+│ kernel-adapters    │  device-llm  │ device-tty    vfs-core  │  引擎/能力层
 ├──────────────┼──────────────┼──────────────────────┤
 │ tools        │ vfsdriver-*  │ llm-common           │  工具/存储/契约
 ├──────────────┴──────────────┴──────────────────────┤
@@ -25,7 +25,7 @@
 LLM 依赖方向（单向，下层永不知上层）：
 
 ```
-llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ kernel ──▶ common
+llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ──▶ common
 （会话/持久化） （DAG 编排） （LLM 任务单元）  （执行内核）
 ```
 

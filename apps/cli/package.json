@@ -17,10 +17,10 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/coreutils": "workspace:*",
+    "@itookit/kernel-adapters": "workspace:*",
     "@itookit/device-llm": "workspace:*",
     "@itookit/device-tty": "workspace:*",
-    "@itookit/kernel": "workspace:*",
+    "@itookit/durable-kernel": "workspace:*",
     "@itookit/llm-flow": "workspace:*",
     "@itookit/llm-tasks": "workspace:*",
     "@itookit/vfs-core": "workspace:*",

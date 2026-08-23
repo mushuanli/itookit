@@ -7,7 +7,7 @@ import {
     extractCompactInstructions,
     type SkillScopeSnapshot,
     type SkillSource,
-} from '@itookit/coreutils';
+} from '@itookit/kernel-adapters';
 import { parse } from 'yaml';
 import type { TauriFsOps } from '../fs/tauri-fs-ops';
 

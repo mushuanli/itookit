@@ -34,6 +34,11 @@ describe('parseArgs', () => {
         expect(parseArgs(['run', '--json', '--headless']).options).toMatchObject({ json: true, headless: true });
     });
 
+    it('parses -b / --boot', () => {
+        expect(parseArgs(['run', '-b']).options).toMatchObject({ boot: true });
+        expect(parseArgs(['run', '--boot']).options).toMatchObject({ boot: true });
+    });
+
     it('rejects unknown options', () => {
         expect(() => parseArgs(['run', '--bogus'])).toThrow('Unknown option');
     });

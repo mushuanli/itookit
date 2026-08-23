@@ -63,7 +63,7 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/kernel": "workspace:*"
+    "@itookit/durable-kernel": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",

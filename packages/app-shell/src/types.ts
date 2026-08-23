@@ -3,18 +3,18 @@ import type { FileCreationConfig, EditorFactory, EditorOptions } from '@itookit/
 import type { IStorageBackend, IVFSManager, MountOptions, IModuleFS } from '@itookit/vfs-core';
 import type { ThemeMode } from './ThemeService';
 import type { FileTypeDefinition, CustomEditorResolver, VFSUIOptions } from '@itookit/vfs-ui';
-import type { CoreutilsRuntime, CoreutilsRuntimeOptions } from '@itookit/coreutils';
-import type { Kernel } from '@itookit/kernel';
+import type { KernelAdaptersRuntime, KernelAdaptersRuntimeOptions } from '@itookit/kernel-adapters';
+import type { Kernel } from '@itookit/durable-kernel';
 import type { DagPluginRegistry } from '@itookit/llm-session';
 
-export interface AppKernelRuntime extends CoreutilsRuntime {
+export interface AppKernelRuntime extends KernelAdaptersRuntime {
     kernel: Kernel;
     dagPlugins: DagPluginRegistry;
 }
 
 export interface AppKernelPlatform {
-    skillSource?: CoreutilsRuntimeOptions['skillSource'];
-    skillToolHandlerFactory?: CoreutilsRuntimeOptions['skillToolHandlerFactory'];
+    skillSource?: KernelAdaptersRuntimeOptions['skillSource'];
+    skillToolHandlerFactory?: KernelAdaptersRuntimeOptions['skillToolHandlerFactory'];
     configure?(kernel: AppKernelRuntime): void | Promise<void>;
 }
 

@@ -34,7 +34,7 @@ initApp
 ├── createVFS
 ├── LLMDeviceDriver
 ├── ChatEngine + VFSAgentService
-├── Kernel + CoreutilsKernelPlugin
+├── Kernel + KernelAdaptersPlugin
 │   ├── Effect adapters
 │   ├── resource grants
 │   └── durable poller

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TaskInputEvent } from '@itookit/kernel';
+import type { TaskInputEvent } from '@itookit/durable-kernel';
 import { dependencyOutput, type DurableDependencyBinding } from './program-helpers';
 
 describe('dependencyOutput', () => {

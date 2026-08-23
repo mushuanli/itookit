@@ -1,16 +1,16 @@
 # 文件索引 — 场景 → 关键文件
 
-## Kernel 执行内核（@itookit/kernel）
+## Kernel 执行内核（@itookit/durable-kernel）
 
 | 场景 | 文件 |
 |---|---|
-| 内核实现（drain/submit/dispatchEffect/recover） | `kernel/src/application/kernel.ts` |
-| 领域类型（DurableTaskProgram/EffectAdapter/KernelAction/WaitSpec/TaskSpec） | `kernel/src/domain/types.ts` |
-| 能力绑定（bindCapabilities） | `kernel/src/application/capabilities.ts` |
-| effect 工具（assertEffectGrant/interactionApproved/normalizeEffect） | `kernel/src/application/effect-utils.ts` |
-| 决策/durability/actions 工具 | `kernel/src/application/{decision,durability,actions}.ts` |
-| seqfile 存储（session/task/effect/resource/budget） | `kernel/src/infrastructure/seqfile/store.ts`、`store-helpers.ts` |
-| 注册表（Program/Effect/Storage/Workspace） | `kernel/src/ports/registry.ts` |
+| 内核实现（drain/submit/dispatchEffect/recover） | `durable-kernel/src/application/kernel.ts` |
+| 领域类型（DurableTaskProgram/EffectAdapter/KernelAction/WaitSpec/TaskSpec） | `durable-kernel/src/domain/types.ts` |
+| 能力绑定（bindCapabilities） | `durable-kernel/src/application/capabilities.ts` |
+| effect 工具（assertEffectGrant/interactionApproved/normalizeEffect） | `durable-kernel/src/application/effect-utils.ts` |
+| 决策/durability/actions 工具 | `durable-kernel/src/application/{decision,durability,actions}.ts` |
+| seqfile 存储（session/task/effect/resource/budget） | `durable-kernel/src/infrastructure/seqfile/store.ts`、`store-helpers.ts` |
+| 注册表（Program/Effect/Storage/Workspace） | `durable-kernel/src/ports/registry.ts` |
 
 ## LLM 任务单元（@itookit/llm-tasks）
 
@@ -59,17 +59,17 @@
 | 控制面（CommandBus/ExtensionRegistry/插件） | `llm-session/src/core/`、`plugins/` |
 | PromptHistoryService / VFSAgentService | `llm-session/src/services/` |
 
-## 能力实现（@itookit/coreutils）
+## 能力实现（@itookit/kernel-adapters）
 
 | 场景 | 文件 |
 |---|---|
-| 运行时装配（createCoreutilsRuntime） | `coreutils/src/runtime/create-coreutils-runtime.ts` |
-| LLM effect（llm.chat + token 预算扣减） | `coreutils/src/effects/llm-chat-effect.ts` |
-| 工具/技能/bash/tty effect | `coreutils/src/effects/{tool-call,skill-load,bash,tty}-effect.ts` |
-| ILLMService 适配（→ LLMDeviceDriver） | `coreutils/src/llm/llm-service-adapter.ts` |
-| Skill 设备驱动 / 技能加载 | `coreutils/src/skill/` |
-| 工具定义（human-input/shell-session/tty-write） | `coreutils/src/tool/`、`coreutils/src/tty/` |
-| Kernel 插件注册 | `coreutils/src/plugin/coreutils-kernel-plugin.ts` |
+| 运行时装配（createKernelAdaptersRuntime） | `kernel-adapters/src/runtime/create-kernel-adapters-runtime.ts` |
+| LLM effect（llm.chat + token 预算扣减） | `kernel-adapters/src/effects/llm-chat-effect.ts` |
+| 工具/技能/bash/tty effect | `kernel-adapters/src/effects/{tool-call,skill-load,bash,tty}-effect.ts` |
+| ILLMService 适配（→ LLMDeviceDriver） | `kernel-adapters/src/llm/llm-service-adapter.ts` |
+| Skill 设备驱动 / 技能加载 | `kernel-adapters/src/skill/` |
+| 工具定义（human-input/shell-session/tty-write） | `kernel-adapters/src/tool/`、`kernel-adapters/src/tty/` |
+| Kernel 插件注册 | `kernel-adapters/src/plugin/kernel-adapters-plugin.ts` |
 
 ## LLM 设备（@itookit/device-llm）
 
@@ -99,7 +99,7 @@
 | 场景 | 文件 |
 |---|---|
 | YAML 工作流加载/校验/编译 | `cli/src/config.ts` |
-| 运行时装配（kernel+coreutils+flow） | `cli/src/runtime.ts` |
+| 运行时装配（durable-kernel+kernel-adapters+flow） | `cli/src/runtime.ts` |
 | 命令入口（run/events/doctor） | `cli/src/commands.ts` |
 | 运行结果落盘（RunStore） | `cli/src/run-store.ts` |
 | 工作区授权 | `cli/src/workspace.ts` |
@@ -133,7 +133,7 @@
 | 三态策略纯函数（resolveWebSearchStrategy） | `llm-common/src/llm/connection.ts` |
 | 策略解析 | `llm-session/src/session/agent-resolver.ts` |
 | 派生 + 剥离客户端工具 + citations 投影 | `llm-session/src/session/conversation-run-coordinator.ts` |
-| citations 事件发射 + 流式聚合 | `coreutils/src/effects/llm-chat-effect.ts` |
+| citations 事件发射 + 流式聚合 | `kernel-adapters/src/effects/llm-chat-effect.ts` |
 | citations 渲染 | `llm-ui/src/components/history/StreamController.ts`、`templates/NodeTemplates.ts` |
 | 联网搜索开关 | `llm-ui/src/components/input/ChatInputView.ts`、`templates/ChatInputTemplates.ts` |
 | CLI -p prompt 命令 | `apps/cli/src/commands.ts` |

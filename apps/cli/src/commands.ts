@@ -4,9 +4,10 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stringify as yamlStringify } from 'yaml';
-import type { EventEnvelope, ExitRecord, JsonValue, TaskHandle } from '@itookit/kernel';
+import type { EventEnvelope, ExitRecord, JsonValue, TaskHandle } from '@itookit/durable-kernel';
 import { loadWorkflow, parseDuration, validateWorkflow } from './config';
 import { expandWorkflow } from './expand';
+import { resolveMindosRoot } from './mindos';
 import { compileDag, createCliRuntime, cliStorage, type CliRuntime } from './runtime';
 import { RunStore, selectFinalResult } from './run-store';
 import { sandboxDoctor } from './shell';
@@ -18,6 +19,8 @@ export interface CommandOptions {
     headless?: boolean;
     json?: boolean;
     sandbox?: 'native' | 'oci';
+    /** -b / --boot：从 mindos 配置（~/.config/mindos/settings.json）解析数据根并 mount，再继续运行。 */
+    boot?: boolean;
     follow?: boolean;
     approve?: boolean;
     deny?: boolean;
@@ -173,7 +176,7 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions): Promi
     await store.create(manifest, loaded.source);
     let runtime: CliRuntime | undefined;
     try {
-        runtime = await runtimeFor(loaded.workflow, manifest, store);
+        runtime = await runtimeFor(loaded.workflow, manifest, store, options);
         await runtime.kernel.createSession({ id, storage: cliStorage(id) });
         const flow = await runtime.executor.submit(id, compileDag(loaded.workflow));
         manifest.rootTaskId = flow.root.id;
@@ -252,7 +255,7 @@ export async function resumeCommand(runId: string, options: CommandOptions): Pro
     loaded.workflow.workspaceRoot = manifest.workspaceRoot;
     loaded.workflow.stateDir = store.stateDir;
     if (options.sandbox) loaded.workflow.config.sandbox = { ...loaded.workflow.config.sandbox, mode: options.sandbox };
-    const runtime = await runtimeFor(loaded.workflow, manifest, store);
+    const runtime = await runtimeFor(loaded.workflow, manifest, store, options);
     try {
         manifest.status = 'running';
         await store.save(manifest);
@@ -274,7 +277,7 @@ export async function respondCommand(
     const loaded = await loadWorkflow(store.configSnapshot(runId));
     loaded.workflow.workspaceRoot = manifest.workspaceRoot;
     loaded.workflow.stateDir = store.stateDir;
-    const runtime = await runtimeFor(loaded.workflow, manifest, store);
+    const runtime = await runtimeFor(loaded.workflow, manifest, store, options);
     try {
         await runtime.kernel.respondInteraction(manifest.sessionId, pending.taskId, {
             interactionId: requestId,
@@ -308,7 +311,7 @@ export async function cancelCommand(runId: string, options: CommandOptions): Pro
     const loaded = await loadWorkflow(store.configSnapshot(runId));
     loaded.workflow.workspaceRoot = manifest.workspaceRoot;
     loaded.workflow.stateDir = store.stateDir;
-    const runtime = await runtimeFor(loaded.workflow, manifest, store);
+    const runtime = await runtimeFor(loaded.workflow, manifest, store, options);
     try {
         for (const taskId of Object.values(manifest.nodeTaskIds)) {
             await (await runtime.kernel.openTask(taskId)).cancel('Cancelled by CLI').catch(() => {});
@@ -608,12 +611,19 @@ async function finishRun(
     return 0;
 }
 
-async function runtimeFor(workflow: CompiledWorkflow, manifest: RunManifest, store: RunStore): Promise<CliRuntime> {
+async function runtimeFor(
+    workflow: CompiledWorkflow,
+    manifest: RunManifest,
+    store: RunStore,
+    options: CommandOptions,
+): Promise<CliRuntime> {
     await stat(workflow.workspaceRoot);
+    const vfsRoot = options.boot ? resolveMindosRoot() : undefined;
+    if (vfsRoot) process.stderr.write(`[boot] mindos root: ${vfsRoot}\n`);
     return createCliRuntime(workflow, manifest, async grants => {
         manifest.grants = grants;
         await store.save(manifest);
-    });
+    }, vfsRoot);
 }
 
 function renderEvent(manifest: RunManifest, event: EventEnvelope, options: CommandOptions): void {

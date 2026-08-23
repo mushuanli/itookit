@@ -55,6 +55,16 @@ mindos delete <run-id> --state-dir .mindos
 
 `tasks` 展示节点状态和已生成产物，不是可恢复的状态快照；`rerun` 使用原配置创建全新的完整运行；`export-config` 只导出配置快照。当前不提供 checkpoint replay 或 state fork。
 
+### 从 mindos 启动（`-b` / `--boot`）
+
+`-b` / `--boot` 读取 `~/.config/mindos/settings.json`（与桌面 Tauri 共用），解析真实 mindos 数据根并 mount 为 VFS 根后再继续运行，用于调试或复杂场景下直接操作桌面数据：
+
+```bash
+mindos run -f mindos.yml -b
+```
+
+数据根优先级：`MINDOS_ROOT` 环境变量 → `settings.json#rootDir` → `~/.config/mindos/data`。此模式下 VFS（含 `chats` 模块与 kernel 会话存储）落在 mindos 数据根（sidecar 为 `<root>/_meta`），而 run 清单/事件仍写入 `--state-dir`。注意：`-b` 与桌面端共用 `_meta` sidecar，勿并发运行；`resume`/`respond`/`cancel` 需同样带 `-b` 才能定位到同一 mindos 根。
+
 无头模式会把事件作为 JSONL 写到 stdout，适合 CI。`--json` 自动采用无头行为，遇到人工输入时返回退出码 `3`，不会读取交互式 stdin：
 
 ```bash

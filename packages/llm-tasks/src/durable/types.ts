@@ -4,7 +4,7 @@ import type {
     ToolCall,
     ToolDefinition,
 } from '@itookit/common';
-import type { JsonValue } from '@itookit/kernel';
+import type { JsonValue } from '@itookit/durable-kernel';
 
 export interface DurableDependencyBinding {
     taskId: string;

@@ -15,7 +15,7 @@ import {
     type SessionHandle,
     type TaskHandle,
     type TaskSpec,
-} from '@itookit/kernel';
+} from '@itookit/durable-kernel';
 import { findCycles } from './graph';
 
 export interface FlowExecutionHandle {

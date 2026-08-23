@@ -187,7 +187,7 @@ type SessionState = LLMSessionState | MCPSessionState | SkillSessionState;
 // 不同宿主环境注入各自的实现：
 //   - 浏览器:    不注入 → shell skills 返回"不支持"提示
 //   - Tauri:     TauriShellRunner（@tauri-apps/plugin-shell）
-//   - Node.js:   NodeShellRunner（由 coreutils 提供）
+//   - Node.js:   NodeShellRunner（由 kernel-adapters 提供）
 //
 export interface IShellRunner {
     /** 执行 shell 命令，返回 stdout+stderr 合并输出 */

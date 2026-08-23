@@ -1,6 +1,6 @@
 # @itookit/llm-tasks
 
-基于 `@itookit/kernel` 的可持久、可恢复 LLM Task Program。
+基于 `@itookit/durable-kernel` 的可持久、可恢复 LLM Task Program。
 
 该包只负责一项 LLM 工作如何向前运行，提供：
 
@@ -10,7 +10,7 @@
 - Provider 消息适配
 
 Program 只产生 Kernel `Effect`、`Interaction` 与领域事件。LLM、Tool 等能力由
-`@itookit/coreutils` 注册，平台实现由 `apps/*` 注入。本包不负责 Session、DAG
+`@itookit/kernel-adapters` 注册，平台实现由 `apps/*` 注入。本包不负责 Session、DAG
 调度、Conversation 状态、UI 或平台装配。
 
 ```typescript

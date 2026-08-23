@@ -59,18 +59,18 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../../packages/common
-      '@itookit/coreutils':
-        specifier: workspace:*
-        version: link:../../packages/coreutils
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../../packages/device-llm
       '@itookit/device-tty':
         specifier: workspace:*
         version: link:../../packages/device-tty
-      '@itookit/kernel':
+      '@itookit/durable-kernel':
         specifier: workspace:*
-        version: link:../../packages/kernel
+        version: link:../../packages/durable-kernel
+      '@itookit/kernel-adapters':
+        specifier: workspace:*
+        version: link:../../packages/kernel-adapters
       '@itookit/llm-flow':
         specifier: workspace:*
         version: link:../../packages/llm-flow
@@ -148,12 +148,12 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../../packages/common
-      '@itookit/coreutils':
-        specifier: workspace:*
-        version: link:../../packages/coreutils
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../../packages/device-llm
+      '@itookit/kernel-adapters':
+        specifier: workspace:*
+        version: link:../../packages/kernel-adapters
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../../packages/llm-session
@@ -251,12 +251,12 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../../packages/common
-      '@itookit/coreutils':
-        specifier: workspace:*
-        version: link:../../packages/coreutils
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../../packages/device-llm
+      '@itookit/kernel-adapters':
+        specifier: workspace:*
+        version: link:../../packages/kernel-adapters
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../../packages/llm-session
@@ -349,15 +349,15 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/coreutils':
-        specifier: workspace:*
-        version: link:../coreutils
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
-      '@itookit/kernel':
+      '@itookit/durable-kernel':
         specifier: workspace:*
-        version: link:../kernel
+        version: link:../durable-kernel
+      '@itookit/kernel-adapters':
+        specifier: workspace:*
+        version: link:../kernel-adapters
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../llm-session
@@ -407,40 +407,6 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
-
-  packages/coreutils:
-    dependencies:
-      '@itookit/common':
-        specifier: workspace:*
-        version: link:../common
-      '@itookit/device-llm':
-        specifier: workspace:*
-        version: link:../device-llm
-      '@itookit/kernel':
-        specifier: workspace:*
-        version: link:../kernel
-      '@itookit/tools':
-        specifier: workspace:*
-        version: link:../tools
-      '@itookit/vfs-core':
-        specifier: workspace:*
-        version: link:../vfs-core
-    devDependencies:
-      '@types/node':
-        specifier: 20.19.25
-        version: 20.19.25
-      rimraf:
-        specifier: ^5.0.5
-        version: 5.0.10
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.25))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
 
   packages/demo:
     dependencies:
@@ -556,7 +522,7 @@ importers:
         specifier: ^3.2.1
         version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.25)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
 
-  packages/kernel:
+  packages/durable-kernel:
     dependencies:
       '@itookit/vfs-core':
         specifier: workspace:*
@@ -575,6 +541,40 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.13)(@types/node@25.2.3)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
 
+  packages/kernel-adapters:
+    dependencies:
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      '@itookit/device-llm':
+        specifier: workspace:*
+        version: link:../device-llm
+      '@itookit/durable-kernel':
+        specifier: workspace:*
+        version: link:../durable-kernel
+      '@itookit/tools':
+        specifier: workspace:*
+        version: link:../tools
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
+    devDependencies:
+      '@types/node':
+        specifier: 20.19.25
+        version: 20.19.25
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.25))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
+
   packages/llm-common:
     devDependencies:
       tsup:
@@ -589,9 +589,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/kernel':
+      '@itookit/durable-kernel':
         specifier: workspace:*
-        version: link:../kernel
+        version: link:../durable-kernel
       '@itookit/llm-tasks':
         specifier: workspace:*
         version: link:../llm-tasks
@@ -617,9 +617,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/kernel':
+      '@itookit/durable-kernel':
         specifier: workspace:*
-        version: link:../kernel
+        version: link:../durable-kernel
       '@itookit/llm-flow':
         specifier: workspace:*
         version: link:../llm-flow
@@ -685,9 +685,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/kernel':
+      '@itookit/durable-kernel':
         specifier: workspace:*
-        version: link:../kernel
+        version: link:../durable-kernel
     devDependencies:
       '@types/node':
         specifier: ^20.19.25
@@ -722,9 +722,9 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
-      '@itookit/kernel':
+      '@itookit/durable-kernel':
         specifier: workspace:*
-        version: link:../kernel
+        version: link:../durable-kernel
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../llm-session
@@ -3204,11 +3204,12 @@ packages:
 
   glob@10.5.0:
     resolution: {integrity: sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg==}
+    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
     hasBin: true
 
   glob@7.2.3:
     resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
-    deprecated: Glob versions prior to v9 are no longer supported
+    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
 
   globals@14.0.0:
     resolution: {integrity: sha512-oahGvuMGQlPw/ivIYBjVSrWAfWLBeku5tpPE2fOPLi+WHffIWbuh2tCjhyQhTBPMf5E9jDEH4FOmTYgYwbKwtQ==}

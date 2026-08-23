@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { DagRunSpec, LLMConnection, LLMProvider, ToolDefinition } from '@itookit/common';
-import { createCoreutilsRuntime } from '@itookit/coreutils';
+import { createKernelAdaptersRuntime } from '@itookit/kernel-adapters';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { NodePtyDriver } from '@itookit/device-tty';
 import {
@@ -8,7 +8,7 @@ import {
     type ResolvedStorageBinding,
     type SessionStorageResolver,
     type StorageBindingRef,
-} from '@itookit/kernel';
+} from '@itookit/durable-kernel';
 import {
     compileWorkflow,
     createBuiltinDagPluginRegistry,
@@ -66,11 +66,16 @@ export async function createCliRuntime(
     workflow: CompiledWorkflow,
     manifest: RunManifest,
     onGrantChange: (grants: RunManifest['grants']) => Promise<void>,
+    vfsRoot?: string,
 ): Promise<CliRuntime> {
-    const vfsRoot = path.join(workflow.stateDir, 'runtime', 'vfs');
+    // -b / --boot: mount the real mindos data root (tauri's root backend) instead
+    // of the per-run state dir. Sidecar uses <root>/_meta to match tauri's root
+    // backend, so metadata and records live in the shared mindos root.
+    const root = vfsRoot ?? path.join(workflow.stateDir, 'runtime', 'vfs');
+    const sidecarDir = vfsRoot ? path.join(vfsRoot, '_meta') : path.join(workflow.stateDir, 'runtime', 'meta');
     const backend = await openLocalFSBackend({
-        rootDir: vfsRoot,
-        sidecarDir: path.join(workflow.stateDir, 'runtime', 'meta'),
+        rootDir: root,
+        sidecarDir,
         createDb: NodeSqliteSidecarDb.open,
     });
     const { manager: vfs } = await createVFS({
@@ -95,7 +100,7 @@ export async function createCliRuntime(
     const ttyDriver = sandboxMode === 'native'
         ? new NodePtyDriver()
         : engine ? new OciTtyDriver(engine, workflow, () => grants.list()) : undefined;
-    const core = await createCoreutilsRuntime({
+    const core = await createKernelAdaptersRuntime({
         llmDriver,
         ttyDriver,
         runMode: 'kernel',
@@ -226,7 +231,7 @@ function normalizeTools(tools: string[], access: TaskConfig['workspace_access'])
 }
 
 async function resolveTools(
-    core: Awaited<ReturnType<typeof createCoreutilsRuntime>>,
+    core: Awaited<ReturnType<typeof createKernelAdaptersRuntime>>,
     sessionId: string,
     allowedIds: string[],
 ): Promise<{ definitions: ToolDefinition[]; externalIds: string[] }> {

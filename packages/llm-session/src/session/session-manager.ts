@@ -40,7 +40,7 @@ import { BranchService } from './branch-service';
 import { ContextProfileStore } from '../persistence/context-profile-store';
 import { ContextAssembler } from '@itookit/llm-tasks';
 import { RoundLog } from '../persistence/round-log';
-import type { Kernel, SessionHandle } from '@itookit/kernel';
+import type { Kernel, SessionHandle } from '@itookit/durable-kernel';
 import { chatKernelStorage } from '../persistence/chat-kernel-storage';
 import { DurableConversationProjection, RUNTIME_KEY } from '../persistence/durable-conversation-projection';
 

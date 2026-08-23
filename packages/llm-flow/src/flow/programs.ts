@@ -4,7 +4,7 @@ import type {
     DurableTaskProgram,
     JsonValue,
     TaskInputEvent,
-} from '@itookit/kernel';
+} from '@itookit/durable-kernel';
 import {
     collectDependency,
     dependenciesReady,

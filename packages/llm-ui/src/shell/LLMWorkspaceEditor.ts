@@ -6,7 +6,7 @@ import type {
     ILLMService,
     ICommandBus,
 } from '@itookit/common';
-import type { EventEnvelope, Kernel, InteractionRequest, JsonValue } from '@itookit/kernel';
+import type { EventEnvelope, Kernel, InteractionRequest, JsonValue } from '@itookit/durable-kernel';
 
 import {
     IChatEngine, IAgentConfigService, SessionManager, getSessionManager,

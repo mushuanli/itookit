@@ -65,7 +65,7 @@ export {
 export { DurableConversationProjection } from './persistence/durable-conversation-projection';
 export { formatErrorMessage } from './utils/error-formatter';
 import type { DagPluginCatalog, ToolDefinition } from '@itookit/common';
-import type { Kernel } from '@itookit/kernel';
+import type { Kernel } from '@itookit/durable-kernel';
 import { DurableAgentProgram, DurableChatProgram, DurablePlanProgram } from '@itookit/llm-tasks';
 import type { IAgentConfigService } from './services/agent-service';
 import type { IChatEngine } from './persistence/types';

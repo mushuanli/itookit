@@ -13,16 +13,16 @@
 | `IFSMetaDriver` | `putAsset/getAsset/setTags/watch` | `vfs-core/interfaces/services/` | `ModuleFS.meta` | `llm-session`、`mdxeditor` |
 | `IFile` | `read()/write()`（extends `IIOStream`） | `vfs-core/interfaces/IFile.ts` | `FileHandle`、`MDXFileHandle` | `mdxeditor`、`llm-session` |
 | `IIOStream` | `read()/write()/readStream?/close?` | `vfs-core/interfaces/` | 文件/设备句柄 | 文件↔LLM↔TTY 互拷 |
-| `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `coreutils`、`device-llm` |
+| `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `kernel-adapters`、`device-llm` |
 
 ## LLM 契约（@itookit/llm-common + @itookit/common）
 
 | 接口/类型 | 核心字段/方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
-| `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `llm-common/llm/llm-service.ts` | `coreutils LLMServiceAdapter` | `llm-tasks`（经 effect）、`llm-session` |
+| `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `llm-common/llm/llm-service.ts` | `kernel-adapters LLMServiceAdapter` | `llm-tasks`（经 effect）、`llm-session` |
 | `ChatMessage` | `role/content/attachments?` | `llm-common/llm/` | device-llm | 全部 LLM 层 |
-| `ChatCompletionParams/Response/Chunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | device-llm providers | `llm-tasks`、`coreutils` |
-| `Citation` | `text/source/title/url`（联网搜索引用） | `llm-common/llm/completion.ts` | device-llm providers | `coreutils`、`llm-ui` |
+| `ChatCompletionParams/Response/Chunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | device-llm providers | `llm-tasks`、`kernel-adapters` |
+| `Citation` | `text/source/title/url`（联网搜索引用） | `llm-common/llm/completion.ts` | device-llm providers | `kernel-adapters`、`llm-ui` |
 | `TokenUsage` | `prompt_tokens/completion_tokens/total_tokens` | `llm-common/llm/completion.ts` | device-llm | `llm-tasks`、预算扣减 |
 | `LLMConnection/ConnectionMeta` | `id/provider/tier/model/protocol` | `llm-common/llm/connection.ts` | `device-llm` | `llm-session AgentResolver` |
 | `WebSearchMode` | `'builtin'\|'client-tool'\|'disabled'` | `llm-common/llm/connection.ts` | `resolveWebSearchStrategy`（纯函数） | `llm-session` |
@@ -32,7 +32,7 @@
 | `FlowDraft/FlowRevision/FlowNodeDefinition` | `nodes/edges/layout` | `llm-common/agent/flow-definition.ts` | `llm-flow FlowDefinitionStore` | `llm-ui`、`llm-session` |
 | `SerializableExpression` | `kind: eq/neq/in/and/or/not/…` | `llm-common/agent/` | `llm-flow operations` | `cli` 编译路由条件 |
 
-## Kernel 执行内核（@itookit/kernel）
+## Kernel 执行内核（@itookit/durable-kernel）
 
 | 接口/类型 | 核心方法/字段 | 说明 |
 |---|---|---|
@@ -87,7 +87,7 @@
 | `CommandBus` / `ExtensionRegistry` / `ILLMPlugin` | 控制面命令与插件系统 |
 | `ConversationSystem` / `initializeConversationSystem` | 装配入口（session + flow + programs + kernel） |
 
-## 能力实现（@itookit/coreutils）
+## 能力实现（@itookit/kernel-adapters）
 
 | EffectAdapter | kind | 说明 |
 |---|---|---|

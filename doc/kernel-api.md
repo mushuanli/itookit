@@ -1,6 +1,6 @@
-# @itookit/kernel — API 参考
+# @itookit/durable-kernel — API 参考
 
-> 持久化执行内核：`DurableTaskProgram`（init/reduce 状态机）+ `EffectAdapter`（副作用）+ Task/Resource/Budget/Interaction 的调度与恢复。所有 API 从 `@itookit/kernel` 根导出。
+> 持久化执行内核：`DurableTaskProgram`（init/reduce 状态机）+ `EffectAdapter`（副作用）+ Task/Resource/Budget/Interaction 的调度与恢复。所有 API 从 `@itookit/durable-kernel` 根导出。
 
 ## 目录
 
@@ -408,10 +408,10 @@ catch (e) {
 
 ## 源码结构：文件与路径
 
-`@itookit/kernel` 的公共 API 全部从 `packages/kernel/src/index.ts` 根导出（`exports['.']` 指向 `src/index.ts`）。包内按 **六层** 组织，依赖单向向下：
+`@itookit/durable-kernel` 的公共 API 全部从 `packages/durable-kernel/src/index.ts` 根导出（`exports['.']` 指向 `src/index.ts`）。包内按 **六层** 组织，依赖单向向下：
 
 ```
-packages/kernel/src/
+packages/durable-kernel/src/
 ├── index.ts                      根导出（唯一公共入口）
 ├── domain/                       纯类型 + 错误模型（无逻辑）
 │   ├── types.ts                  SessionId/TaskId/JsonValue、SessionRecord/TaskRecord、

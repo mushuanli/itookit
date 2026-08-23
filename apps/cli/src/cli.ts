@@ -85,6 +85,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         else if (arg === '--deny') options.deny = true;
         else if (arg === '--value') options.value = required(rest[++index], 'response value');
         else if (arg === '--offline') options.offline = true;
+        else if (arg === '-b' || arg === '--boot') options.boot = true;
         else if (arg === '--sandbox') options.sandbox = sandbox(required(rest[++index], 'sandbox mode'));
         else if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`);
         else positional.push(arg);
@@ -121,6 +122,7 @@ function help(): string {
         `  mindos sandbox doctor\n\n` +
         `选项：\n` +
         `  --state-dir <dir>   运行状态目录（默认 .mindos，run 时由配置 workspace 决定）\n` +
+        `  -b, --boot          boot from mindos：读 ~/.config/mindos/settings.json 挂载真实 mindos 数据根\n` +
         `  --headless          无交互模式，事件作为 JSONL 写到 stdout（适合 CI）\n` +
         `  --json              JSON 输出；隐含 --headless（遇到人工输入时返回退出码 3 而非阻塞）\n` +
         `  --offline           校验/查看时不要求 API key 环境变量已存在\n`;

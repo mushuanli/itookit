@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Kernel, type SessionHandle } from '@itookit/kernel';
+import { Kernel, type SessionHandle } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend, type IModuleFS, type IVFSManager } from '@itookit/vfs-core';
 import { DurableConversationProjection } from '../src/persistence/durable-conversation-projection';
 import type { ConversationManifest, IChatEngine } from '../src/persistence/types';

@@ -231,7 +231,7 @@ export interface SkillToolBinding {
     definition: ToolDefinition;
     /**
      * 执行方式：
-     * - 'builtin':   由 coreutils 注册的内置工具处理（skill 只保存引用）
+     * - 'builtin':   由 kernel-adapters 注册的内置工具处理（skill 只保存引用）
      * - 'http':      HTTP 调用 skill 的 endpoint
      * - 'shell':     本地 Shell 命令，支持 {{argName}} 模板替换
      * - 'handler':   由 Skill 自身的 handler 函数处理（预留）

@@ -1,6 +1,6 @@
 # 架构设计 — 系统全貌
 
-> 基于当前代码（2026-02 重构后）：执行内核 `kernel`、LLM 任务单元 `llm-tasks`、DAG 编排 `llm-flow`、会话语义 `llm-session`。
+> 基于当前代码（2026-02 重构后）：执行内核 `durable-kernel`、LLM 任务单元 `llm-tasks`、DAG 编排 `llm-flow`、会话语义 `llm-session`。
 
 ## 1. 分层总览
 
@@ -14,9 +14,9 @@
 ├──────────────┼──────────────┼──────────────────────┤
 │ llm-session  │  llm-flow    │ llm-tasks         │  LLM 业务层
 ├──────────────┼──────────────┼──────────────────────┤
-│  kernel                     │                      │  执行内核
+│  durable-kernel             │                      │  执行内核
 ├──────────────┼──────────────┼──────────────────────┤
-│ coreutils    │  device-llm  │ device-tty   tools   │  能力/引擎层
+│ kernel-adapters    │  device-llm  │ device-tty   tools   │  能力/引擎层
 ├──────────────┴──────────────┴──────────────────────┤
 │  vfs-core (VFS)                  vfsdriver-*          │  存储层
 ├────────────────────────────────────────────────────┤
@@ -28,7 +28,7 @@
 
 ## 2. Kernel — 持久化执行内核
 
-`@itookit/kernel` 是唯一的执行引擎：一个 Task 一个持久化状态机。
+`@itookit/durable-kernel` 是唯一的执行引擎：一个 Task 一个持久化状态机。
 
 **核心抽象：**
 
@@ -67,7 +67,7 @@ SessionHandle.submit(TaskSpec) → store.createTask（依赖未满足则 blocked
 | `setBudget` / `chargeBudget` | 资源配额 |
 | `request-interaction` / `respondInteraction` | 阻塞等待外部输入 |
 
-> 命名说明：`kernel` 的 `package.json` 自述是 `"Durable Session/Task scheduling and resource kernel"`。它不止是 `scheduler`（调度），而是同时承担持久化、IPC、权限、配额、崩溃恢复的**执行内核（kernel）**。
+> 命名说明：`durable-kernel` 的 `package.json` 自述是 `"Durable Session/Task scheduling and resource kernel"`。它不止是 `scheduler`（调度），而是同时承担持久化、IPC、权限、配额、崩溃恢复的**执行内核（kernel）**。
 
 **两级同步机制：**
 
@@ -80,7 +80,7 @@ SessionHandle.submit(TaskSpec) → store.createTask（依赖未满足则 blocked
 ## 3. LLM 子系统（llm-tasks → llm-flow → llm-session）
 
 ```
-llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ kernel
+llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel
 （会话/持久化） （DAG 编排） （LLM 任务单元）  （执行内核）
 ```
 
@@ -133,7 +133,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ kernel
 
 | 包 | 职责 |
 |---|---|
-| `coreutils` | Kernel 能力适配器：`LlmChatEffectAdapter`（含预算扣减）、`ToolCallEffectAdapter`、`SkillLoadEffectAdapter`、`BashEffectAdapter`、`TtyEffectAdapter`；`LLMServiceAdapter`（ILLMService → LLMDeviceDriver）；`createCoreutilsRuntime` 装配。 |
+| `kernel-adapters` | Kernel 能力适配器：`LlmChatEffectAdapter`（含预算扣减）、`ToolCallEffectAdapter`、`SkillLoadEffectAdapter`、`BashEffectAdapter`、`TtyEffectAdapter`；`LLMServiceAdapter`（ILLMService → LLMDeviceDriver）；`createKernelAdaptersRuntime` 装配。 |
 | `device-llm` | LLM 设备驱动：`LLMDeviceDriver`（IDeviceDriver + `LLM_IOCTL`：CHAT/CHAT_SYNC/ABORT/连接管理/MCP）；providers：OpenAI/Responses/Anthropic/Gemini；`MCPClient`。 |
 | `device-tty` | TTY 驱动（node-pty 交互 shell）。 |
 | `tools` | 内置工具 `buildTool()` 工厂：FileRead/Write/Edit、Glob、Grep、Bash、Skill、Agent、AskUserQuestion 等。 |
@@ -152,7 +152,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ kernel
 
 - **`llm-ui`**：Chat UI（流式历史、Session 渲染、DagWorkbench 可视化）。
 - **`vfs-ui`**：文件树 UI；**`mdxeditor`**：CodeMirror MDX 编辑器；**`ui-common`**：共享 UI 契约。
-- **`app-shell`**：`initApp()` 装配 — createVFS → LLMDeviceDriver → Kernel → `createCoreutilsRuntime` → `initializeConversationSystem` → Workbench。
+- **`app-shell`**：`initApp()` 装配 — createVFS → LLMDeviceDriver → Kernel → `createKernelAdaptersRuntime` → `initializeConversationSystem` → Workbench。
 
 ## 7. 入口
 
@@ -163,7 +163,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ kernel
 ## 8. 核心数据流
 
 ```
-CLI:   YAML → config.ts 编译 → runtime.ts 装配(kernel+coreutils+flow)
+CLI:   YAML → config.ts 编译 → runtime.ts 装配(durable-kernel+kernel-adapters+flow)
        → DurableFlowExecutor.submit → 每节点 session.submit(TaskSpec)
        → bindCapabilities → start → drain 循环 → effect → 聚合 → selectFinalResult → result.txt
 

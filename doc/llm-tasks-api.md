@@ -2,7 +2,7 @@
 
 > 平台无关的 LLM Durable Program 层：把"一项 LLM 工作如何向前运行"表达为 Kernel `DurableTaskProgram`（init/reduce 状态机）。提供 `llm.chat` / `llm.agent` / `llm.plan` 三个程序、上下文组装与 Provider 消息适配。所有 API 从 `@itookit/llm-tasks` 根导出。
 
-**依赖方向**：`llm-tasks → kernel → common`（+ `llm-common` / `vfs-core` 类型）。不依赖 `llm-session`、`llm-flow`、UI、DOM 或具体设备；所有外部能力（LLM/Tool）经 Kernel Effect 使用。
+**依赖方向**：`llm-tasks → durable-kernel → common`（+ `llm-common` / `vfs-core` 类型）。不依赖 `llm-session`、`llm-flow`、UI、DOM 或具体设备；所有外部能力（LLM/Tool）经 Kernel Effect 使用。
 
 ## 目录
 

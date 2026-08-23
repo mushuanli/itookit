@@ -16,7 +16,7 @@ import {
     type JsonValue,
     type TaskHandle,
     type TaskSpec,
-} from '@itookit/kernel';
+} from '@itookit/durable-kernel';
 import type {
     ChatAttachment,
     ExecutionTask,

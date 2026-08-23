@@ -3,7 +3,7 @@ import type {
     SkillToolBinding,
     ToolHandler,
 } from '@itookit/common';
-import type { SkillToolHandlerFactory } from '@itookit/coreutils';
+import type { SkillToolHandlerFactory } from '@itookit/kernel-adapters';
 import type { TauriNativeShell } from '../shell/tauri-native-shell';
 
 export class TauriSkillToolHandlerFactory implements SkillToolHandlerFactory {

@@ -3,7 +3,7 @@ import type {
     DurableTaskProgram,
     JsonValue,
     TaskInputEvent,
-} from '@itookit/kernel';
+} from '@itookit/durable-kernel';
 import {
     CAPABILITY_SIGNAL,
     applyDependencyMessages,

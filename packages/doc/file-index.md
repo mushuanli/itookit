@@ -2,13 +2,13 @@
 
 | 场景 | 路径 |
 | --- | --- |
-| Session/Task 执行协议 | `packages/kernel/src/domain/`、`packages/kernel/src/public/` |
-| Kernel 插件协议 | `packages/kernel/src/ports/` |
+| Session/Task 执行协议 | `packages/durable-kernel/src/domain/`、`packages/durable-kernel/src/public/` |
+| Kernel 插件协议 | `packages/durable-kernel/src/ports/` |
 | DAG 插件协议 | `packages/llm-common/src/agent/dag-plugin.ts` |
 | Durable Chat/Agent Program | `packages/llm-runtime/src/durable/` |
-| Durable 调度与租约 | `packages/kernel/src/runtime/` |
-| SeqFile 持久化 | `packages/kernel/src/infrastructure/seqfile/` |
-| LLM/Tool/Skill/Bash/TTY Effect | `packages/coreutils/src/effects/` |
+| Durable 调度与租约 | `packages/durable-kernel/src/runtime/` |
+| SeqFile 持久化 | `packages/durable-kernel/src/infrastructure/seqfile/` |
+| LLM/Tool/Skill/Bash/TTY Effect | `packages/kernel-adapters/src/effects/` |
 | DAG 插件与编译器 | `packages/llm-conversation/src/flow/` |
 | Round 持久化 | `packages/llm-conversation/src/persistence/round-log.ts` |
 | Session 提交 | `packages/llm-conversation/src/session/session-run-coordinator.ts` |

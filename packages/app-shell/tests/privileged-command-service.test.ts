@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Kernel, TaskHandle } from '@itookit/kernel';
+import type { Kernel, TaskHandle } from '@itookit/durable-kernel';
 import type { IAgentConfigService } from '@itookit/llm-session';
 import { PrivilegedCommandService } from '../src/kernel/privileged-command-service';
 
@@ -29,7 +29,7 @@ describe('PrivilegedCommandService', () => {
         await service.exec({ sessionId: 'session-1', command: 'pnpm test' });
 
         expect(fixture.submit).toHaveBeenCalledWith(expect.objectContaining({
-            program: { kind: 'coreutils.exec', version: '1' },
+            program: { kind: 'kernel-adapters.exec', version: '1' },
             input: { command: 'pnpm test' },
             deferStart: true,
         }));

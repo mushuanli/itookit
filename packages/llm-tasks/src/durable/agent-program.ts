@@ -6,7 +6,7 @@ import {
     type JsonValue,
     type KernelAction,
     type TaskInputEvent,
-} from '@itookit/kernel';
+} from '@itookit/durable-kernel';
 import {
     CAPABILITY_SIGNAL,
     addUsage,

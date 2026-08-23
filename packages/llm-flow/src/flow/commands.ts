@@ -6,7 +6,7 @@ import type {
     ICommandBus,
     ToolDefinition,
 } from '@itookit/common';
-import type { Kernel, TaskSnapshot } from '@itookit/kernel';
+import type { Kernel, TaskSnapshot } from '@itookit/durable-kernel';
 import type { FlowDefinitionStore } from '../flow-definition-store';
 import { flowToDag } from './to-dag';
 import { validateFlowRevision } from './validation';

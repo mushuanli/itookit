@@ -3,7 +3,7 @@ import type { ChatCompletionResponse, DagRunSpec } from '@itookit/common';
 import {
     Kernel,
     type EffectAdapter,
-} from '@itookit/kernel';
+} from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend, type IModuleFS, type IVFSManager } from '@itookit/vfs-core';
 import { DurableAgentProgram } from '@itookit/llm-tasks';
 import { createBuiltinDagPluginRegistry } from '../src/flow/builtin-plugins';

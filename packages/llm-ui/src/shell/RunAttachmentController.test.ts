@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { EventEnvelope, TaskHandle } from '@itookit/kernel';
+import type { EventEnvelope, TaskHandle } from '@itookit/durable-kernel';
 import { RunAttachmentController, type TaskControlPlane } from './RunAttachmentController';
 
 describe('RunAttachmentController', () => {
@@ -88,9 +88,9 @@ function callbacks() {
 }
 
 function taskRecord(
-    interactions: import('@itookit/kernel').TaskRecord['interactions'],
-    status: import('@itookit/kernel').TaskStatus = 'waiting',
-): import('@itookit/kernel').TaskRecord {
+    interactions: import('@itookit/durable-kernel').TaskRecord['interactions'],
+    status: import('@itookit/durable-kernel').TaskStatus = 'waiting',
+): import('@itookit/durable-kernel').TaskRecord {
     return {
         id: 'task-1', sessionId: 'session-1', rootTaskId: 'task-1',
         program: { kind: 'test', version: '1' }, status, input: null,

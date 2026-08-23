@@ -40,9 +40,9 @@
 
 ## 新增 Kernel 工具 (需运行时引用)
 
-1. `packages/coreutils/src/tool/<name>.ts` — ToolMeta + ToolDefinition + ToolHandler
-2. `packages/coreutils/src/runtime/create-coreutils-runtime.ts` — 运行时注册
-3. 如需 Durable 执行，在 `packages/coreutils/src/effects/` 增加 EffectAdapter，并由 CoreutilsKernelPlugin 注册
+1. `packages/kernel-adapters/src/tool/<name>.ts` — ToolMeta + ToolDefinition + ToolHandler
+2. `packages/kernel-adapters/src/runtime/create-kernel-adapters-runtime.ts` — 运行时注册
+3. 如需 Durable 执行，在 `packages/kernel-adapters/src/effects/` 增加 EffectAdapter，并由 KernelAdaptersPlugin 注册
 
 ## 新增 i18n 文案
 

@@ -69,7 +69,7 @@ LLMDeviceDriver 管理 VFS 存储路径：`/llm/.connections/` `/llm/.providers/
 - `ConnectionMeta` 不含 apiKey，`LLMConnection` 含完整信息
 - 流式响应使用 `AsyncGenerator<ChatCompletionChunk>`
 - Provider 通过 `registerProvider('openai', OpenAIProvider)` 注册
-- 附件 blob 在 `@itookit/coreutils` 的 `LLMServiceAdapter` 中展开为 base64 后传递
+- 附件 blob 在 `@itookit/kernel-adapters` 的 `LLMServiceAdapter` 中展开为 base64 后传递
 - 定期清理过期模型 ID，仅保留最新版本
 - `CostStore` 依赖 `engine.meta.seq` 后端能力，不存在时静默跳过
 - 定价信息通过 `applyPricingToModel()` 应用，`/llm/pricing.json` 支持热更新

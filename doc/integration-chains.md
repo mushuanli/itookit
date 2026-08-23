@@ -28,7 +28,7 @@ ChatInput.send (llm-ui)
         → (无工具) session.submit(llm.chat)  |  (有工具) llm.agent
           → bindCapabilities(llm[/tool] handle)
           → kernel drain → DurableAgentProgram.reduce → llm.chat effect
-            → coreutils LlmChatEffectAdapter（assertEffectGrant + chargeBudget）
+            → kernel-adapters LlmChatEffectAdapter（assertEffectGrant + chargeBudget）
               → ILLMService.chatStream
                 → LLMServiceAdapter → LLMDeviceDriver.ioctl(CHAT)
                   → provider（OpenAI/Anthropic/Gemini）→ SSE 流式
@@ -41,9 +41,9 @@ ChatInput.send (llm-ui)
 | 会话 | `SessionManager.sendMessage()` | `llm-session/src/session/session-manager.ts` |
 | 编排 | `ConversationRunCoordinator`（Direct / Flow 分流） | `llm-session/src/session/conversation-run-coordinator.ts` |
 | 程序 | `DurableChatProgram` / `DurableAgentProgram` | `llm-tasks/src/durable/` |
-| 能力绑定 | `bindCapabilities` → capabilities signal | `kernel/src/application/capabilities.ts` |
-| Effect | `LlmChatEffectAdapter`（llm.chat） | `coreutils/src/effects/llm-chat-effect.ts` |
-| LLM | `ILLMService.chatStream` → provider | `coreutils/llm/llm-service-adapter.ts`、`device-llm/src/` |
+| 能力绑定 | `bindCapabilities` → capabilities signal | `durable-kernel/src/application/capabilities.ts` |
+| Effect | `LlmChatEffectAdapter`（llm.chat） | `kernel-adapters/src/effects/llm-chat-effect.ts` |
+| LLM | `ILLMService.chatStream` → provider | `kernel-adapters/llm/llm-service-adapter.ts`、`device-llm/src/` |
 
 ## 3. DAG Flow 链（CLI 工作流）
 
@@ -52,7 +52,7 @@ cli run (apps/cli)
   → config.ts: loadWorkflow（YAML → validate → 编译 tasks/edges/route 条件）
   → runtime.ts: createCliRuntime
       ├─ openLocalFSBackend → createVFS
-      ├─ createCoreutilsRuntime（kernel + effect adapters + tools + skills）
+      ├─ createKernelAdaptersRuntime（kernel + effect adapters + tools + skills）
       ├─ DurableFlowExecutor（createBuiltinDagPluginRegistry）
       └─ registerPrograms（llm-tasks 的 agent/chat/plan + llm-flow 的 flow.*）
   → DurableFlowExecutor.submit(sessionId, DagRunSpec)
@@ -66,7 +66,7 @@ cli run (apps/cli)
 | 步骤 | 组件 | 关键文件 |
 |---|---|---|
 | 配置 | `loadWorkflow`（编译 DagRunSpec） | `cli/src/config.ts` |
-| 装配 | `createCliRuntime`（kernel+coreutils+flow） | `cli/src/runtime.ts` |
+| 装配 | `createCliRuntime`（durable-kernel+kernel-adapters+flow） | `cli/src/runtime.ts` |
 | 调度 | `DurableFlowExecutor.submit` | `llm-flow/src/flow/executor.ts` |
 | 插件 | `createBuiltinDagPluginRegistry`（transform/reduce/route/spawn/agent/human） | `llm-flow/src/flow/builtin-plugins.ts` |
 | 结果 | `selectFinalResult` → `RunStore.writeResult` | `cli/src/run-store.ts` |
@@ -77,7 +77,7 @@ cli run (apps/cli)
 apps/web-app (entry)
   → initApp() (app-shell)
     → createVFS() → LLMDeviceDriver → new Kernel()
-      → createCoreutilsRuntime(kernel, driver…)（注册 effect/tool/skill）
+      → createKernelAdaptersRuntime(kernel, driver…)（注册 effect/tool/skill）
       → initializeConversationSystem({ agentService, sessionEngine, kernel, dagPlugins })
         ├─ registerPrograms（llm-tasks + llm-flow 的全部 durable programs）
         ├─ SessionManager / CommandBus / DagCommandService 装配
@@ -90,8 +90,8 @@ apps/web-app (entry)
 | 入口 | `apps/web-app/src/` |
 | 启动 | `app-shell/src/bootstrap.ts::initApp()` |
 | VFS | `vfs-core/src/impl/factory.ts::createVFS()` |
-| 内核 | `kernel/src/application/kernel.ts::new Kernel()` |
-| 能力 | `coreutils/src/runtime/create-coreutils-runtime.ts::createCoreutilsRuntime()` |
+| 内核 | `durable-kernel/src/application/kernel.ts::new Kernel()` |
+| 能力 | `kernel-adapters/src/runtime/create-kernel-adapters-runtime.ts::createKernelAdaptersRuntime()` |
 | LLM 系统 | `llm-session/src/index.ts::initializeConversationSystem()` |
 | 工作区策略 | `app-shell/src/strategies/` |
 
@@ -99,7 +99,7 @@ apps/web-app (entry)
 
 ```
 DurableAgentProgram.tool 调用（tool.call effect）
-  → coreutils ToolCallEffectAdapter（assertEffectGrant → resolveCapability）
+  → kernel-adapters ToolCallEffectAdapter（assertEffectGrant → resolveCapability）
     → tools 的 buildTool 实例（FileRead/Bash/…）
       → 经 vfs-core IDeviceDriver / VFS 访问实际资源
 TTY：TtyEffectAdapter → device-tty（node-pty）

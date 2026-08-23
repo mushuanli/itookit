@@ -1,6 +1,6 @@
 # Skill 系统设计
 
-> 版本: 3.3 | 包: `llm-common` + `coreutils` + `device-llm` + `app-shell`
+> 版本: 3.3 | 包: `llm-common` + `kernel-adapters` + `device-llm` + `app-shell`
 
 ## 一、概述
 
@@ -507,7 +507,7 @@ You are a specialized subagent: security-reviewer
 
 ```
 llm-common → Skill 类型与 ISkillService 接口
-coreutils  → SkillDeviceDriver, 内置 Skill 工具, skill 加载/匹配
+kernel-adapters  → SkillDeviceDriver, 内置 Skill 工具, skill 加载/匹配
 device-llm → LLMDeviceDriver (VFS 技能持久化)
 app-shell   → bootstrap.ts 装配 + 桥接
 llm-ui      → SkillInvocationParser (slash 命令解析)
@@ -603,12 +603,12 @@ globs:
 
 | 文件 | 内容 |
 |------|------|
-| `packages/coreutils/src/skill/skill-device-driver.ts` | `SkillDeviceDriver` — 实现 `ISkillService` + 四层路由 + 作用域 |
-| `packages/coreutils/src/effects/skill-load-effect.ts` | Skill 加载 Effect — Kernel 侧执行 |
-| `packages/coreutils/src/tool/load-skill.ts` | `load_skill` 工具 — 拒绝 L1 action skills |
-| `packages/coreutils/src/skill/skill-task.ts` | Skill 任务程序 — 系统 Prompt 构建 + 压缩保护 |
-| `packages/coreutils/src/skill/compact-extractor.ts` | Compact Instructions 提取 + 聚合 |
-| `packages/coreutils/src/skill/glob-matcher.ts` | Glob → RegExp 匹配器 |
+| `packages/kernel-adapters/src/skill/skill-device-driver.ts` | `SkillDeviceDriver` — 实现 `ISkillService` + 四层路由 + 作用域 |
+| `packages/kernel-adapters/src/effects/skill-load-effect.ts` | Skill 加载 Effect — Kernel 侧执行 |
+| `packages/kernel-adapters/src/tool/load-skill.ts` | `load_skill` 工具 — 拒绝 L1 action skills |
+| `packages/kernel-adapters/src/skill/skill-task.ts` | Skill 任务程序 — 系统 Prompt 构建 + 压缩保护 |
+| `packages/kernel-adapters/src/skill/compact-extractor.ts` | Compact Instructions 提取 + 聚合 |
+| `packages/kernel-adapters/src/skill/glob-matcher.ts` | Glob → RegExp 匹配器 |
 | `packages/device-llm/src/device/skill-manager.ts` | VFS 技能同步 + SkillManager |
 | `packages/app-shell/src/bootstrap.ts` | `initApp()` + `syncSkillsToKernel()` + 初始 CWD 设置 |
 | `packages/llm-ui/src/components/input/SkillInvocationParser.ts` | Slash 命令解析，支持 L1 action skill |

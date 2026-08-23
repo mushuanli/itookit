@@ -3,7 +3,7 @@ import type {
     SkillToolBinding,
     ToolHandler,
 } from '@itookit/common';
-import type { SkillToolHandlerFactory } from '@itookit/coreutils';
+import type { SkillToolHandlerFactory } from '@itookit/kernel-adapters';
 
 export class BrowserSkillToolHandlerFactory implements SkillToolHandlerFactory {
     create(skill: SkillDefinition, binding: SkillToolBinding): ToolHandler | undefined {

@@ -28,8 +28,8 @@ import {
 import type { SessionManager } from '@itookit/llm-session';
 import { Workbench } from './core/Workbench';
 import { LLMDeviceDriver } from '@itookit/device-llm';
-import { Kernel } from '@itookit/kernel';
-import { createCoreutilsRuntime } from '@itookit/coreutils';
+import { Kernel } from '@itookit/durable-kernel';
+import { createKernelAdaptersRuntime } from '@itookit/kernel-adapters';
 import { SkillsEngine } from '@itookit/app-settings';
 import { createSkillsEditorFactory } from '@itookit/llm-ui';
 
@@ -297,7 +297,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // Durable Kernel with application-owned capability injection.
     ts = performance.now();
     const vfsResourcePort = createVFSToolContext(vfs);
-    const coreutils = await createCoreutilsRuntime({
+    const kernelAdapters = await createKernelAdaptersRuntime({
         llmDriver,
         runMode: 'kernel',
         skillSource: options.kernelPlatform?.skillSource,
@@ -308,17 +308,17 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         maxConcurrent: 20,
     });
     kernelCore.registerStorageResolver(new ChatKernelStorageResolver(chatEngine));
-    await kernelCore.use(coreutils.plugin);
+    await kernelCore.use(kernelAdapters.plugin);
     await kernelCore.initialize();
     await kernelCore.recover();
-    const kernel: AppKernelRuntime = Object.assign(coreutils, {
+    const kernel: AppKernelRuntime = Object.assign(kernelAdapters, {
         kernel: kernelCore,
         dagPlugins: createBuiltinDagPluginRegistry(),
     });
     await options.kernelPlatform?.configure?.(kernel);
     cleanupFns.push(async () => {
         kernelCore.dispose();
-        await coreutils.dispose();
+        await kernelAdapters.dispose();
     });
     console.log(`[Boot]   ↳ createKernel: +${(performance.now() - ts).toFixed(0)}ms`);
 

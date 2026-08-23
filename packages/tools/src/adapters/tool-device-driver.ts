@@ -1,6 +1,6 @@
 // @file: tools/src/adapters/tool-device-driver.ts
 // ToolDeviceDriver — bridges Tool[] → IToolService + IDeviceDriver.
-// Platform-neutral Tool device driver used by Coreutils capability scopes.
+// Platform-neutral Tool device driver used by KernelAdapters capability scopes.
 
 import { z } from 'zod/v4';
 import type {

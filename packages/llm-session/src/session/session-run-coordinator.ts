@@ -4,7 +4,7 @@ import type {
     FlowNodeDefinition,
     ToolDefinition,
 } from '@itookit/common';
-import type { Kernel } from '@itookit/kernel';
+import type { Kernel } from '@itookit/durable-kernel';
 import { ulid } from '../persistence/ulid';
 import type {
     ChatAttachment,

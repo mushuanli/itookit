@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ['@itookit/common', '@itookit/kernel'],
+  external: ['@itookit/common', '@itookit/durable-kernel'],
 });

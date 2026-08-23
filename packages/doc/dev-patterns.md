@@ -7,8 +7,8 @@
 | 跨包协议 | `common` |
 | Provider 通信 | `device-llm` |
 | DurableTaskProgram、ContextPolicy | `llm-runtime` |
-| Session/Task 内核与 Durable 调度 | `kernel` |
-| LLM、Tool、Skill、Bash、TTY 能力适配 | `coreutils` |
+| Session/Task 内核与 Durable 调度 | `durable-kernel` |
+| LLM、Tool、Skill、Bash、TTY 能力适配 | `kernel-adapters` |
 | Session、Round、Flow 持久化 | `llm-conversation` |
 | 展示、编辑和 Task attach | `llm-ui` |
 | 具体实现装配 | `app-shell` |
@@ -25,10 +25,10 @@
 ## 依赖方向
 
 ```text
-common ← llm-runtime → kernel
-vfs-core ← kernel ← coreutils
+common ← llm-runtime → durable-kernel
+vfs-core ← durable-kernel ← kernel-adapters
 common ← llm-conversation → llm-runtime
-common ← llm-ui → llm-conversation → kernel
+common ← llm-ui → llm-conversation → durable-kernel
 app-shell → concrete packages
 ```
 

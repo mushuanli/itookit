@@ -2,7 +2,7 @@
 
 > 用户可见的会话语义 + 持久化：Session 生命周期、Round/Branch、ChatEngine（VFS 持久化）、RoundLog、SessionEventBus、UI projections、Durable Conversation。同时是上层装配入口：`initializeConversationSystem()` 统一注册 `llm.chat/agent/plan` 与 `flow.*` Programs 并装配 CommandBus/DAG。所有 API 从 `@itookit/llm-session` 根导出。
 
-**依赖方向**：`llm-session → llm-flow → llm-tasks → kernel`（本包 re-export `@itookit/llm-flow` 全部 API）。
+**依赖方向**：`llm-session → llm-flow → llm-tasks → durable-kernel`（本包 re-export `@itookit/llm-flow` 全部 API）。
 
 ## 目录
 
