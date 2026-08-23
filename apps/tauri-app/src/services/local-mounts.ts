@@ -15,7 +15,7 @@
  */
 
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
-import type { IVFSManager } from '@itookit/stdio';
+import type { IVFSManager } from '@itookit/vfs-core';
 import { TauriSqlSidecarDb } from '../db/tauri-sql-sidecar';
 import { TauriFsOps } from '../fs/tauri-fs-ops';
 

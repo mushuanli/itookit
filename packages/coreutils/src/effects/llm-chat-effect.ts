@@ -1,4 +1,4 @@
-import { assertEffectGrant } from '@itookit/harness';
+import { assertEffectGrant } from '@itookit/kernel';
 import type {
     AgentEvent,
     AssistantMessage,
@@ -11,7 +11,7 @@ import type {
     TokenUsage,
     ToolCall,
 } from '@itookit/common';
-import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/harness';
+import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/kernel';
 import { expandMessagesAttachments } from '@itookit/device-llm';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 
@@ -96,7 +96,7 @@ async function completeChat(
     return response;
 }
 
-/** 按 token 用量扣减 resource 预算；超出时由 harness 抛错使 effect 失败。 */
+/** 按 token 用量扣减 resource 预算；超出时由 kernel 抛错使 effect 失败。 */
 async function chargeUsage(
     context: EffectExecutionContext,
     handleId: string,

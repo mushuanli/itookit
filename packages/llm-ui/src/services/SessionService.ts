@@ -2,7 +2,7 @@
 
 import { IChatEngine, SessionSnapshot } from '@itookit/llm-session';
 import type { ICommandBus } from '@itookit/common';
-import { FSAlreadyExistsError } from '@itookit/stdio';
+import { FSAlreadyExistsError } from '@itookit/vfs-core';
 import type { ChatInputSettings } from '../domain/ports/IChatInputPresenter';
 
 export interface SessionLoadResult {

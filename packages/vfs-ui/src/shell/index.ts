@@ -9,7 +9,7 @@ import {
 } from './VFSUIShell';
 import type { SessionUIOptions } from '@itookit/ui-common';
 import { ISessionUI, EditorFactory } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 
 import type {
   VFSNodeUI,

@@ -6,7 +6,7 @@ import type {
     ICommandBus,
     ToolDefinition,
 } from '@itookit/common';
-import type { Harness, TaskSnapshot } from '@itookit/harness';
+import type { Kernel, TaskSnapshot } from '@itookit/kernel';
 import type { FlowDefinitionStore } from '../flow-definition-store';
 import { flowToDag } from './to-dag';
 import { validateFlowRevision } from './validation';
@@ -14,7 +14,7 @@ import { DurableFlowExecutor, type FlowExecutionHandle } from './executor';
 
 export interface DagCommandServiceOptions {
     flowStore: FlowDefinitionStore;
-    harness: Harness;
+    kernel: Kernel;
     plugins: DagPluginCatalog;
     resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
         definitions: ToolDefinition[];

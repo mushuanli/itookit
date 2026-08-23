@@ -9,7 +9,7 @@
 - Branch、merge、context fold 只在本包实现。
 - 普通 Chat 使用 Direct Scheduler，不能伪装成单节点 DAG。
 - DAG/Flow 依赖 `@itookit/llm-flow`（本包通过它编排，不直接持有动态图语义）。
-- 不访问 Harness Dispatcher、ProcessTable 等内部对象。
+- 不访问 Kernel Dispatcher、ProcessTable 等内部对象。
 - 不接收旧 ChatNode manifest，不增加兼容迁移路径。
 
 ## 联网搜索

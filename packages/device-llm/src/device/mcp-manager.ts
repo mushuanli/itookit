@@ -3,7 +3,7 @@
 // MCPManager — MCP server config storage and active connection lifecycle.
 
 import type { MCPServer } from '@itookit/common';
-import type { IVFSManager, IModuleFS } from '@itookit/stdio';
+import type { IVFSManager, IModuleFS } from '@itookit/vfs-core';
 import { MCPServerConnection } from '../skills/mcp-client';
 import type { MCPServerConfig } from '../types/provider';
 import { VFSHelpers } from './vfs-helpers';

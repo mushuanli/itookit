@@ -1,7 +1,7 @@
 // @file: app-settings/services/SyncService.ts
 
-import { CONFIG_MODULE } from '@itookit/stdio';
-import type { IVFSManager } from '@itookit/stdio';
+import { CONFIG_MODULE } from '@itookit/vfs-core';
+import type { IVFSManager } from '@itookit/vfs-core';
 import type { SyncConflict } from '../types/sync';
 import {
   AppSyncSettings,

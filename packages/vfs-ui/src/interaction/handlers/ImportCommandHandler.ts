@@ -6,8 +6,8 @@
 import type { CommandBus } from '../CommandBus';
 import type { IStatePort } from '../../contracts/ports';
 import type { VFSService } from '../../services/VFSService';
-import { deserialize, decodeContent } from '@itookit/stdio';
-import type { VFSExportManifest, VFSExportAsset } from '@itookit/stdio';
+import { deserialize, decodeContent } from '@itookit/vfs-core';
+import type { VFSExportManifest, VFSExportAsset } from '@itookit/vfs-core';
 
 export class ImportCommandHandler {
     private unsubs: (() => void)[] = [];

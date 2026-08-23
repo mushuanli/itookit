@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { IDeviceDriver } from '@itookit/stdio';
+import type { IDeviceDriver } from '@itookit/vfs-core';
 import { LLMServiceAdapter } from './llm-service-adapter';
 
 describe('LLMServiceAdapter lifecycle', () => {

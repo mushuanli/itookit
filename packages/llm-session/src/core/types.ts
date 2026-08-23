@@ -83,7 +83,7 @@ export type HistoryPolicy = 'include' | 'exclude';
  *
  * 通过 `finished` 事件 payload 传递给 UI，供 TokenMeterPlugin 展示。
  * - `isEstimated = true`：普通 kernel 路径，从内容字符数估算（÷4）
- * - `isEstimated = false`：harness 路径，来自 AgentUsageSnapshot，精确值
+ * - `isEstimated = false`：kernel 路径，来自 AgentUsageSnapshot，精确值
  */
 export interface SessionTokenUsage {
     /** 输入 token（含历史上下文） */
@@ -559,7 +559,7 @@ export type RegistryEvent =
     /**
      * 后台会话打开了 TTY 交互进程。
      *
-     * 当 harness 路径中非当前绑定会话（后台会话）的 shell_session 工具成功
+     * 当 kernel 路径中非当前绑定会话（后台会话）的 shell_session 工具成功
      * 启动进程时发出，供 UI 提示用户切换到该会话查看实时输出。
      */
     | { type: 'session_tty_active'; payload: { sessionId: string; command: string } }

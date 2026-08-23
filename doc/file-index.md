@@ -1,30 +1,30 @@
 # 文件索引 — 场景 → 关键文件
 
-## Harness 执行内核（@itookit/harness）
+## Kernel 执行内核（@itookit/kernel）
 
 | 场景 | 文件 |
 |---|---|
-| 内核实现（drain/submit/dispatchEffect/recover） | `harness/src/application/harness.ts` |
-| 领域类型（DurableTaskProgram/EffectAdapter/KernelAction/WaitSpec/TaskSpec） | `harness/src/domain/types.ts` |
-| 能力绑定（bindCapabilities） | `harness/src/application/capabilities.ts` |
-| effect 工具（assertEffectGrant/interactionApproved/normalizeEffect） | `harness/src/application/effect-utils.ts` |
-| 决策/durability/actions 工具 | `harness/src/application/{decision,durability,actions}.ts` |
-| seqfile 存储（session/task/effect/resource/budget） | `harness/src/infrastructure/seqfile/store.ts`、`store-helpers.ts` |
-| 注册表（Program/Effect/Storage/Workspace） | `harness/src/ports/registry.ts` |
+| 内核实现（drain/submit/dispatchEffect/recover） | `kernel/src/application/kernel.ts` |
+| 领域类型（DurableTaskProgram/EffectAdapter/KernelAction/WaitSpec/TaskSpec） | `kernel/src/domain/types.ts` |
+| 能力绑定（bindCapabilities） | `kernel/src/application/capabilities.ts` |
+| effect 工具（assertEffectGrant/interactionApproved/normalizeEffect） | `kernel/src/application/effect-utils.ts` |
+| 决策/durability/actions 工具 | `kernel/src/application/{decision,durability,actions}.ts` |
+| seqfile 存储（session/task/effect/resource/budget） | `kernel/src/infrastructure/seqfile/store.ts`、`store-helpers.ts` |
+| 注册表（Program/Effect/Storage/Workspace） | `kernel/src/ports/registry.ts` |
 
-## LLM 任务单元（@itookit/llm-programs）
+## LLM 任务单元（@itookit/llm-tasks）
 
 | 场景 | 文件 |
 |---|---|
-| Agent 状态机（llm.agent） | `llm-programs/src/durable/agent-program.ts` |
-| Chat 状态机（llm.chat） | `llm-programs/src/durable/chat-program.ts` |
-| Plan 状态机（llm.plan） | `llm-programs/src/durable/plan-program.ts` |
-| program 辅助（llmEffect/extractNodeOutput/capabilitySignal） | `llm-programs/src/durable/program-helpers.ts` |
-| 依赖收集（collectDependency/dependenciesReady/dependencyWait） | `llm-programs/src/durable/dependency-collector.ts` |
-| TaskSpec 装配（buildLlmTaskInput） | `llm-programs/src/durable/task-spec.ts` |
-| 输入/输出类型（DurableAgentInput 等） | `llm-programs/src/durable/types.ts` |
-| 上下文装配（ContextAssembler） | `llm-programs/src/core/context-assembler.ts` |
-| provider 消息适配 | `llm-programs/src/core/provider-message-adapter.ts` |
+| Agent 状态机（llm.agent） | `llm-tasks/src/durable/agent-program.ts` |
+| Chat 状态机（llm.chat） | `llm-tasks/src/durable/chat-program.ts` |
+| Plan 状态机（llm.plan） | `llm-tasks/src/durable/plan-program.ts` |
+| program 辅助（llmEffect/extractNodeOutput/capabilitySignal） | `llm-tasks/src/durable/program-helpers.ts` |
+| 依赖收集（collectDependency/dependenciesReady/dependencyWait） | `llm-tasks/src/durable/dependency-collector.ts` |
+| TaskSpec 装配（buildLlmTaskInput） | `llm-tasks/src/durable/task-spec.ts` |
+| 输入/输出类型（DurableAgentInput 等） | `llm-tasks/src/durable/types.ts` |
+| 上下文装配（ContextAssembler） | `llm-tasks/src/core/context-assembler.ts` |
+| provider 消息适配 | `llm-tasks/src/core/provider-message-adapter.ts` |
 
 ## DAG 编排（@itookit/llm-flow）
 
@@ -69,7 +69,7 @@
 | ILLMService 适配（→ LLMDeviceDriver） | `coreutils/src/llm/llm-service-adapter.ts` |
 | Skill 设备驱动 / 技能加载 | `coreutils/src/skill/` |
 | 工具定义（human-input/shell-session/tty-write） | `coreutils/src/tool/`、`coreutils/src/tty/` |
-| Harness 插件注册 | `coreutils/src/plugin/coreutils-harness-plugin.ts` |
+| Kernel 插件注册 | `coreutils/src/plugin/coreutils-kernel-plugin.ts` |
 
 ## LLM 设备（@itookit/device-llm）
 
@@ -82,15 +82,15 @@
 | MCP 客户端 | `device-llm/src/skills/mcp-client.ts` |
 | LLM 错误族 | `device-llm/src/errors.ts` |
 
-## VFS（@itookit/stdio）
+## VFS（@itookit/vfs-core）
 
 | 场景 | 文件 |
 |---|---|
-| 协议 barrel（接口/类型/常量） | `stdio/src/protocol.ts`、`interfaces/` |
-| createVFS 工厂 | `stdio/src/impl/factory.ts` |
-| VFSEngine / VFSManager / ModuleFS | `stdio/src/impl/engine/`、`impl/services/` |
-| 通用 IO（IIOStream + pipe） | `stdio/src/interfaces/`、`impl/file-io/` |
-| 事件总线（EventBus/FSEventBus） | `stdio/src/eventbus/`、`impl/event/` |
+| 协议 barrel（接口/类型/常量） | `vfs-core/src/protocol.ts`、`interfaces/` |
+| createVFS 工厂 | `vfs-core/src/impl/factory.ts` |
+| VFSEngine / VFSManager / ModuleFS | `vfs-core/src/impl/engine/`、`impl/services/` |
+| 通用 IO（IIOStream + pipe） | `vfs-core/src/interfaces/`、`impl/file-io/` |
+| 事件总线（EventBus/FSEventBus） | `vfs-core/src/eventbus/`、`impl/event/` |
 | IndexedDB 后端 | `vfsdriver-indexeddb/src/` |
 | LocalFS 后端 | `vfsdriver-localfs/src/localfs-backend.ts` |
 
@@ -99,7 +99,7 @@
 | 场景 | 文件 |
 |---|---|
 | YAML 工作流加载/校验/编译 | `cli/src/config.ts` |
-| 运行时装配（harness+coreutils+flow） | `cli/src/runtime.ts` |
+| 运行时装配（kernel+coreutils+flow） | `cli/src/runtime.ts` |
 | 命令入口（run/events/doctor） | `cli/src/commands.ts` |
 | 运行结果落盘（RunStore） | `cli/src/run-store.ts` |
 | 工作区授权 | `cli/src/workspace.ts` |
@@ -121,8 +121,8 @@
 | 场景 | 文件 |
 |---|---|
 | initApp 装配 | `app-shell/src/bootstrap.ts` |
-| App 类型（AppHarnessRuntime 等） | `app-shell/src/types.ts` |
-| 特权命令服务（plan 等） | `app-shell/src/harness/privileged-command-service.ts` |
+| App 类型（AppKernelRuntime 等） | `app-shell/src/types.ts` |
+| 特权命令服务（plan 等） | `app-shell/src/kernel/privileged-command-service.ts` |
 | web-app 入口 | `apps/web-app/src/` |
 | 工作区策略 | `app-shell/src/strategies/` |
 

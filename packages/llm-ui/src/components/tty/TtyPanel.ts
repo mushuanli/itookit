@@ -4,7 +4,7 @@
 //
 // Rendered inside `.llm-ui-node__tty-panels` of an agent message node.
 // Shows real-time stdout/stderr output. Process input must travel through the
-// Harness control plane instead of bypassing process lifecycle management.
+// Kernel control plane instead of bypassing process lifecycle management.
 
 import { escapeHTML } from '@itookit/common';
 

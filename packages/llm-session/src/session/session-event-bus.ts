@@ -1,6 +1,6 @@
 // @file: llm-conversation/session/session-event-bus.ts
 
-import { EventBus } from '@itookit/stdio';
+import { EventBus } from '@itookit/vfs-core';
 import { SessionEvent, SessionEventEnvelope, RegistryEvent } from '../core/types';
 import { log } from '../utils/logger';
 

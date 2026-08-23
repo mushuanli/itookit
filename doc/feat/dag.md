@@ -1,8 +1,8 @@
 # Session Round DAG 设计方案
 
 > 设计日期: 2026-07-19 | 分支: v4.2
-> 参考: [pkgstructure.md](../pkgstructure.md)（LLM 四层分层）、[harness-design.md](./harness-design.md)（Durable Task Program 调度内核）
-> 定位: 在现有 Round 结构之上，将线性链升级为真正的 DAG，同时支持 chat / harness 两种模式，并完善 round 级 history 排除机制
+> 参考: [pkgstructure.md](../pkgstructure.md)（LLM 四层分层）、[kernel-design.md](./kernel-design.md)（Durable Task Program 调度内核）
+> 定位: 在现有 Round 结构之上，将线性链升级为真正的 DAG，同时支持 chat / kernel 两种模式，并完善 round 级 history 排除机制
 
 ---
 
@@ -20,10 +20,10 @@
   - [3.2 RoundManifest 增强](#32-roundmanifest-增强)
   - [3.3 DAG 拓扑示例](#33-dag-拓扑示例)
 - [4. Chat 模式 DAG](#4-chat-模式-dag)
-- [5. Harness 模式 DAG](#5-harness-模式-dag)
+- [5. Kernel 模式 DAG](#5-kernel-模式-dag)
 - [6. DAG fold 策略](#6-dag-fold-策略)
   - [6.1 线性 fold（chat）](#61-线性-foldchat)
-  - [6.2 拓扑 fold（harness）](#62-拓扑-foldharness)
+  - [6.2 拓扑 fold（kernel）](#62-拓扑-foldkernel)
   - [6.3 合并节点处理](#63-合并节点处理)
 - [7. Round 级 History 排除](#7-round-级-history-排除)
   - [7.1 排除策略](#71-排除策略)
@@ -153,7 +153,7 @@ SlashCommandRouter (/btw)
 
 ## 2. DAG 设计目标
 
-| 目标 | chat 模式 | harness 模式 |
+| 目标 | chat 模式 | kernel 模式 |
 |------|----------|-------------|
 | 线性对话链 | ✅ 主要使用方式 | ✅ 默认链 |
 | 分支（fork） | ✅ 仅 regenerate/edit | ✅ 支持任意节点 fork |
@@ -305,19 +305,19 @@ chatExecutor (ILoop, mode='chat')
 
 ---
 
-## 5. Harness 模式 DAG
+## 5. Kernel 模式 DAG
 
-Harness 模式使用**完整 DAG**，支持分支、并行工具、合并：
+Kernel 模式使用**完整 DAG**，支持分支、并行工具、合并：
 
 ```
-Harness DAG 拓扑规则：
+Kernel DAG 拓扑规则：
   1. fork point:    一个 round 有多个 children（并行工具调用）
   2. merge point:   一个 round 有多个 parents（多分支汇总）
   3. isolated:      sub-agent 子树标记为 isolated，默认 exclude
   4. 环检测:        append 时检查不会形成环
 ```
 
-### 5.1 Harness 特有 round 类型
+### 5.1 Kernel 特有 round 类型
 
 | dagKind | 创建场景 | fold 行为 |
 |---------|---------|----------|
@@ -326,10 +326,10 @@ Harness DAG 拓扑规则：
 | `merge-point` | 多分支汇合 | 按 mergeStrategy 决定如何合并 |
 | `isolated` | sub-agent 弹出 | 默认 historyPolicy='exclude' |
 
-### 5.2 Harness 执行路径
+### 5.2 Kernel 执行路径
 
 ```
-HarnessLoopExecutor (ILoop, mode='harness')
+KernelLoopExecutor (ILoop, mode='kernel')
   └─ ctx.log.fold(ctx.ref) → DAG 拓扑 fold
        └─ beforeRound middleware (budget/compression/skills)
        └─ LLM call with streaming
@@ -370,7 +370,7 @@ HarnessLoopExecutor (ILoop, mode='harness')
 适用: chat 模式
 ```
 
-### 6.2 拓扑 fold（harness）
+### 6.2 拓扑 fold（kernel）
 
 ```
 算法: Kahn 拓扑排序
@@ -379,7 +379,7 @@ HarnessLoopExecutor (ILoop, mode='harness')
   3. 按拓扑序排列（parents 在 children 之前）
   4. 对每个 merge point，按 mergeStrategy 合并
 复杂度: O(V + E)
-适用: harness 模式
+适用: kernel 模式
 
 拓扑 fold 伪代码:
 
@@ -538,7 +538,7 @@ m.set('toggle-history', (ctx) => {
 │  🙈 排除上下文   │  ★ 新增: historyPolicy → 'exclude'
 │  📝 摘要化       │  ★ 新增: historyPolicy → 'summary'
 │─────────────────│
-│  🔀 从此处合并   │  ★ 新增 (仅 harness)
+│  🔀 从此处合并   │  ★ 新增 (仅 kernel)
 └─────────────────┘
 ```
 
@@ -591,7 +591,7 @@ renderDAGMiniMap(manifest: RoundManifest): string {
 
 ### 8.4 分支创建对话框
 
-现有 `DialogTemplates.renderBranchNameDialog()` 保持不变，但增加 merge 选项（仅 harness）：
+现有 `DialogTemplates.renderBranchNameDialog()` 保持不变，但增加 merge 选项（仅 kernel）：
 
 ```
 ┌──────────────────────────────┐
@@ -672,7 +672,7 @@ UI 操作 (右键菜单 → '排除上下文')
 | 2.1 | `round-log.ts` | 新增 `dagFold()` 方法（BFS + 拓扑排序） |
 | 2.2 | `round-log.ts` | `merge()` 增强——支持多 parent round |
 | 2.3 | `round-log.ts` | `append()` 增加环检测 |
-| 2.4 | `loop-executor.ts` | harness 路径切换到 `dagFold()` |
+| 2.4 | `loop-executor.ts` | kernel 路径切换到 `dagFold()` |
 | 2.5 | `loop-driver.ts` | 无需变更——`drive()` 与 fold 策略无关 |
 
 ### Phase 3 — UI DAG 可视化（低风险，渐进）
@@ -689,14 +689,14 @@ UI 操作 (右键菜单 → '排除上下文')
 
 - `parents: RoundId[]` 数组不变 — 已有 round 向后兼容
 - 现有单链 `fold()` 不删除 — chat 模式继续使用
-- `dagFold()` 仅 harness 模式调用 — 不影响现有 chat 行为
+- `dagFold()` 仅 kernel 模式调用 — 不影响现有 chat 行为
 - `historyPolicy` 默认 `undefined` = `'include'` — 老数据行为不变
 
 ---
 
-## 附录 A: Chat vs Harness DAG 差异速查
+## 附录 A: Chat vs Kernel DAG 差异速查
 
-| 维度 | chat | harness |
+| 维度 | chat | kernel |
 |------|------|---------|
 | 拓扑 | 线性链 (parents[0]) | 完整 DAG (BFS + 拓扑) |
 | 分支触发 | regenerate / edit+rerun | 任意点 fork |
@@ -715,6 +715,6 @@ UI 操作 (右键菜单 → '排除上下文')
 | `round-log.ts:209` | `historyPolicy === 'exclude'` → continue | 增加 `'summary'` case |
 | `round-log.ts` | 无 `setHistoryPolicy()` | 新增方法 + 事件 |
 | `round-types.ts` | `RoundManifest` 有 children | 新增 merges + excludedRounds |
-| `loop-executor.ts:112` | `log.fold(ref)` | harness 切 `dagFold()` |
+| `loop-executor.ts:112` | `log.fold(ref)` | kernel 切 `dagFold()` |
 | `SessionRenderer.ts:86` | `llm-ui-session--ephemeral` | 新增 `--summarized` `--dag-merge` |
 | `EventDispatcher.ts` | 无 history toggle | 新增 `toggle-history` action |

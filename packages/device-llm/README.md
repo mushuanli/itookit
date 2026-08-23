@@ -45,7 +45,7 @@
  * - 提供连接测试能力
  * 
  * 不包含：
- * - 执行逻辑 (→ @itookit/llm-programs)
+ * - 执行逻辑 (→ @itookit/llm-tasks)
  * - 会话管理 (→ @itookit/llm-conversation)
  * - 持久化 (→ @itookit/llm-conversation)
  * - Agent 定义 (→ @itookit/llm-conversation)

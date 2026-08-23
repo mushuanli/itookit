@@ -4,7 +4,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stringify as yamlStringify } from 'yaml';
-import type { EventEnvelope, ExitRecord, JsonValue, TaskHandle } from '@itookit/harness';
+import type { EventEnvelope, ExitRecord, JsonValue, TaskHandle } from '@itookit/kernel';
 import { loadWorkflow, parseDuration, validateWorkflow } from './config';
 import { expandWorkflow } from './expand';
 import { compileDag, createCliRuntime, cliStorage, type CliRuntime } from './runtime';

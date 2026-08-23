@@ -66,7 +66,7 @@ export class AgentResolver {
 
     /**
      * Resolve agent exactly — no fallback.
-     * Throws if agent or version is not found. Used by Harness where
+     * Throws if agent or version is not found. Used by Kernel where
      * silent fallback would mask configuration errors.
      */
     async resolveExact(agentId: string, version?: string): Promise<ExecutorConfig> {
@@ -75,7 +75,7 @@ export class AgentResolver {
         if (!agentDef) {
             throw new ConversationError(
                 ConversationErrorCode.AGENT_NOT_FOUND,
-                `Agent not found: ${agentId}. Harness requires exact agent resolution.`,
+                `Agent not found: ${agentId}. Kernel requires exact agent resolution.`,
             );
         }
 

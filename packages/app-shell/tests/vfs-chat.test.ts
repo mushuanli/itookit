@@ -16,13 +16,13 @@ import { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createVFS } from '@itookit/stdio';
-import type { IModuleFS } from '@itookit/stdio';
+import { createVFS } from '@itookit/vfs-core';
+import type { IModuleFS } from '@itookit/vfs-core';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { FakeSidecarDb } from './fake-sidecar';
 import { ChatEngine } from '@itookit/llm-session';
-import { FS_MODULE_CHAT } from '@itookit/stdio';
+import { FS_MODULE_CHAT } from '@itookit/vfs-core';
 
 // ── Temp dir helpers ──────────────────────────────────────────────────────────
 

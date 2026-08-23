@@ -8,10 +8,10 @@ export default defineConfig({
   sourcemap: true,
   external: [
     '@itookit/common',
-    '@itookit/harness',
-    '@itookit/llm-programs',
+    '@itookit/kernel',
+    '@itookit/llm-tasks',
     '@itookit/llm-flow',
-    '@itookit/stdio',
+    '@itookit/vfs-core',
     'yaml',
   ],
 });

@@ -15,7 +15,7 @@ import type {
 import type {
     IDeviceDriver,
     DeviceContext,
-} from '@itookit/stdio';
+} from '@itookit/vfs-core';
 import { LLM_IOCTL, expandMessagesAttachments } from '@itookit/device-llm';
 
 const BASE_CTX: DeviceContext = { nodeId: 'llm', name: 'llm' };
@@ -23,8 +23,8 @@ const BASE_CTX: DeviceContext = { nodeId: 'llm', name: 'llm' };
 export class LLMServiceAdapter implements ILLMService {
     constructor(
         private readonly driver: IDeviceDriver,
-        /** 运行模式；harness 下层自动选 anthropic-messages 协议。 */
-        private readonly runMode?: 'harness' | 'kernel',
+        /** 运行模式；kernel 下层自动选 anthropic-messages 协议。 */
+        private readonly runMode?: 'kernel' | 'kernel',
     ) {}
 
     async chat(connectionId: string, request: ChatCompletionParams): Promise<ChatCompletionResponse> {

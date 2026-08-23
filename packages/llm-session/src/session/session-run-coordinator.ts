@@ -4,7 +4,7 @@ import type {
     FlowNodeDefinition,
     ToolDefinition,
 } from '@itookit/common';
-import type { Harness } from '@itookit/harness';
+import type { Kernel } from '@itookit/kernel';
 import { ulid } from '../persistence/ulid';
 import type {
     ChatAttachment,
@@ -58,7 +58,7 @@ export class SessionRunCoordinator {
         private readonly agents: AgentResolver,
         private readonly attachments: AttachmentProcessor,
         private readonly callbacks: SessionRunCallbacks,
-        harness: Harness,
+        kernel: Kernel,
         dagPlugins: import('@itookit/common').DagPluginCatalog,
         resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
             definitions: ToolDefinition[];
@@ -68,7 +68,7 @@ export class SessionRunCoordinator {
         this.runs = new ConversationRunCoordinator({
             engine,
             eventBus,
-            harness,
+            kernel,
             dagPlugins,
             resolveTools,
             loadArtifact: async () => null,

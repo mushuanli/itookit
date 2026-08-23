@@ -15,7 +15,7 @@
       "@/*": ["src/*"],
       "@itookit/common": ["../../packages/common/src/index.ts"],
       "@itookit/common/*": ["../../packages/common/src/*"],
-      "@itookit/stdio": ["../../packages/stdio/src/index.ts"],
+      "@itookit/vfs-core": ["../../packages/vfs-core/src/index.ts"],
       "@itookit/vfsdriver-indexeddb": ["../../packages/vfsdriver-indexeddb/src/index.ts"],
       "@itookit/vfs-ui": ["../../packages/vfs-ui/src/index.ts"],
       "@itookit/mdxeditor": ["../../packages/mdx/src/index.ts"],

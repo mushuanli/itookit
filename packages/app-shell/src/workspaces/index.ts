@@ -12,7 +12,7 @@
  *   ];
  */
 
-import { FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/stdio';
+import { FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/vfs-core';
 import type { WorkspaceConfig } from '../types';
 
 export const WS_SETTINGS: WorkspaceConfig = {

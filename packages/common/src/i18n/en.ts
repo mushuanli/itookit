@@ -262,8 +262,8 @@ export const en: LocaleStrings = {
     'thinking.toggle.off':       'Enable thinking',
 
     // ── Chat input — Mode toggle ─────────────────────────────────────────────
-    'chatInput.harnessMode':         'Harness Mode',
-    'chatInput.harnessMode.tooltip': 'Enable multi-turn agent loop with tools',
+    'chatInput.kernelMode':         'Kernel Mode',
+    'chatInput.kernelMode.tooltip': 'Enable multi-turn agent loop with tools',
 
     // ── Chat input — OCR (image to text) ─────────────────────────────────────
     'chatInput.ocr':             'Extract Text',
@@ -291,12 +291,12 @@ export const en: LocaleStrings = {
     'hitl.inputPlaceholder':    'Enter your response\u2026',
     'hitl.submit':              'Respond',
 
-    // ── Harness status bar ────────────────────────────────────────────────────
-    'harness.statusBar.toolsLabel':  'Tools',
-    'harness.statusBar.done':        '{count} done',
-    'harness.statusBar.budgetWarn':  '{resource} {pct}%',
-    'harness.statusBar.compressed':  '\u2193 compressed ({layerName}, \u2212{savedTokens} tokens)',
-    'harness.statusBar.skillLoaded': '{skillId}',
+    // ── Kernel status bar ────────────────────────────────────────────────────
+    'kernel.statusBar.toolsLabel':  'Tools',
+    'kernel.statusBar.done':        '{count} done',
+    'kernel.statusBar.budgetWarn':  '{resource} {pct}%',
+    'kernel.statusBar.compressed':  '\u2193 compressed ({layerName}, \u2212{savedTokens} tokens)',
+    'kernel.statusBar.skillLoaded': '{skillId}',
 
     // ── Background session notifications ──────────────────────────────────────
     'session.ttyActive':             'Background session running interactive command: {command}',

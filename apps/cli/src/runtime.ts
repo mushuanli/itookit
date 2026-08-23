@@ -4,11 +4,11 @@ import { createCoreutilsRuntime } from '@itookit/coreutils';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { NodePtyDriver } from '@itookit/device-tty';
 import {
-    Harness,
+    Kernel,
     type ResolvedStorageBinding,
     type SessionStorageResolver,
     type StorageBindingRef,
-} from '@itookit/harness';
+} from '@itookit/kernel';
 import {
     compileWorkflow,
     createBuiltinDagPluginRegistry,
@@ -18,8 +18,8 @@ import {
     FlowValueProgram,
     type WorkflowTaskSpec,
 } from '@itookit/llm-flow';
-import { DurableAgentProgram, DurableChatProgram, DurablePlanProgram } from '@itookit/llm-programs';
-import { createVFS, FS_MODULE_CHAT, MemoryBackend, type IModuleFS } from '@itookit/stdio';
+import { DurableAgentProgram, DurableChatProgram, DurablePlanProgram } from '@itookit/llm-tasks';
+import { createVFS, FS_MODULE_CHAT, MemoryBackend, type IModuleFS } from '@itookit/vfs-core';
 import { createBashTool } from '@itookit/tools';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { taskOutputReference } from './config';
@@ -41,7 +41,7 @@ const TOOL_ALIASES: Record<string, string> = {
 };
 
 export interface CliRuntime {
-    kernel: Harness;
+    kernel: Kernel;
     executor: DurableFlowExecutor;
     grants: WorkspaceGrantRegistry;
     dispose(): Promise<void>;
@@ -54,7 +54,7 @@ class CliStorageResolver implements SessionStorageResolver {
     async resolve(reference: StorageBindingRef): Promise<ResolvedStorageBinding> {
         const locator = reference.locator as { runId?: unknown };
         if (typeof locator?.runId !== 'string' || !locator.runId) throw new Error('CLI storage requires runId');
-        return { fs: this.fs, rootPath: `/runs/${locator.runId}/.harness` };
+        return { fs: this.fs, rootPath: `/runs/${locator.runId}/.kernel` };
     }
 }
 
@@ -98,12 +98,12 @@ export async function createCliRuntime(
     const core = await createCoreutilsRuntime({
         llmDriver,
         ttyDriver,
-        runMode: 'harness',
+        runMode: 'kernel',
         vfsContext: createWorkspacePort(grants),
         nativeShell: shell,
         additionalTools: [createBashTool(shell), createWorkspaceAccessTool(grants)],
     });
-    const kernel = new Harness({
+    const kernel = new Kernel({
         catalog: { fs: vfs.getEngine(FS_MODULE_CHAT) },
         maxConcurrent: workflow.config.runtime?.max_concurrency ?? 4,
     });
@@ -115,7 +115,7 @@ export async function createCliRuntime(
 
     const plugins = createBuiltinDagPluginRegistry();
     const executor = new DurableFlowExecutor({
-        harness: kernel,
+        kernel: kernel,
         plugins,
         resolveTools: (sessionId, allowed) => resolveTools(core, sessionId, allowed),
     });
@@ -273,7 +273,7 @@ async function configureLlm(driver: LLMDeviceDriver, workflow: CompiledWorkflow)
     }
 }
 
-function registerPrograms(kernel: Harness): void {
+function registerPrograms(kernel: Kernel): void {
     const programs = [
         new DurableChatProgram(), new DurableAgentProgram(), new DurablePlanProgram(),
         new FlowValueProgram(), new FlowHumanProgram(), new FlowAggregateProgram(),

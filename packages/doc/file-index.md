@@ -2,12 +2,12 @@
 
 | 场景 | 路径 |
 | --- | --- |
-| Session/Task 执行协议 | `packages/harness/src/domain/`、`packages/harness/src/public/` |
-| Harness 插件协议 | `packages/harness/src/ports/` |
+| Session/Task 执行协议 | `packages/kernel/src/domain/`、`packages/kernel/src/public/` |
+| Kernel 插件协议 | `packages/kernel/src/ports/` |
 | DAG 插件协议 | `packages/llm-common/src/agent/dag-plugin.ts` |
 | Durable Chat/Agent Program | `packages/llm-runtime/src/durable/` |
-| Durable 调度与租约 | `packages/harness/src/runtime/` |
-| SeqFile 持久化 | `packages/harness/src/infrastructure/seqfile/` |
+| Durable 调度与租约 | `packages/kernel/src/runtime/` |
+| SeqFile 持久化 | `packages/kernel/src/infrastructure/seqfile/` |
 | LLM/Tool/Skill/Bash/TTY Effect | `packages/coreutils/src/effects/` |
 | DAG 插件与编译器 | `packages/llm-conversation/src/flow/` |
 | Round 持久化 | `packages/llm-conversation/src/persistence/round-log.ts` |

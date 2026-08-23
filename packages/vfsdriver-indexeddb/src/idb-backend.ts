@@ -18,8 +18,8 @@ import type {
     RecordQueryResult,
     RecordValue,
     RecordWalkOptions,
-} from '@itookit/stdio';
-import { DEVICE_HANDLER_METADATA_KEY } from '@itookit/stdio';
+} from '@itookit/vfs-core';
+import { DEVICE_HANDLER_METADATA_KEY } from '@itookit/vfs-core';
 import { openDB, req, collectCursor, REQUIRED_STORES, DB_VERSION, STORE_NODES, STORE_TAGS } from './utils';
 import { IDBRecordStore, createRecordStore, ensureRecordIndexes } from './record-store';
 import { STORE_RECORDS } from './utils';

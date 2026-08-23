@@ -2,7 +2,7 @@
 
 > 用户可见的会话语义 + 持久化：Session 生命周期、Round/Branch、ChatEngine（VFS 持久化）、RoundLog、SessionEventBus、UI projections、Durable Conversation。同时是上层装配入口：`initializeConversationSystem()` 统一注册 `llm.chat/agent/plan` 与 `flow.*` Programs 并装配 CommandBus/DAG。所有 API 从 `@itookit/llm-session` 根导出。
 
-**依赖方向**：`llm-session → llm-flow → llm-programs → harness`（本包 re-export `@itookit/llm-flow` 全部 API）。
+**依赖方向**：`llm-session → llm-flow → llm-tasks → kernel`（本包 re-export `@itookit/llm-flow` 全部 API）。
 
 ## 目录
 
@@ -14,7 +14,7 @@
 - [分支：BranchService](#分支branchservice)
 - [状态与事件：SessionState / SessionEventBus](#状态与事件)
 - [服务：VFSAgentService / PromptHistoryService / AgentResolver](#服务)
-- [Harness 存储桥接：ChatHarnessStorageResolver](#harness-存储桥接)
+- [Kernel 存储桥接：ChatKernelStorageResolver](#kernel-存储桥接)
 - [Durable Projection：DurableConversationProjection](#durable-projection)
 - [工具函数](#工具函数)
 - [源码结构：文件与路径](#源码结构文件与路径)
@@ -27,7 +27,7 @@
 interface ConversationSystemOptions {
     agentService: IAgentConfigService;
     sessionEngine: IChatEngine;
-    harness: Harness;
+    kernel: Kernel;
     resolveTools?(sessionId, allowedIds): Promise<{ definitions: ToolDefinition[]; externalIds: string[] }>;
     dagPlugins: DagPluginCatalog;
 }
@@ -87,7 +87,7 @@ class SessionManager implements ISession, SessionQuery {
 }
 ```
 
-**工厂**：`createSessionManager(engine, agentService, { harness, dagPlugins, resolveTools })`、`getSessionManager()`（单例读取）、`resetSessionManager()`。
+**工厂**：`createSessionManager(engine, agentService, { kernel, dagPlugins, resolveTools })`、`getSessionManager()`（单例读取）、`resetSessionManager()`。
 
 ---
 
@@ -250,21 +250,21 @@ class BranchService {
 
 ---
 
-## Harness 存储桥接
+## Kernel 存储桥接
 
 ```ts
 const CHAT_HARNESS_STORAGE_KIND = 'chat-asset';
 
-class ChatHarnessStorageResolver implements SessionStorageResolver {
+class ChatKernelStorageResolver implements SessionStorageResolver {
     readonly kind = CHAT_HARNESS_STORAGE_KIND;
     constructor(chat: IChatEngine);
     async resolve(reference: StorageBindingRef): Promise<ResolvedStorageBinding>;
 }
 
-function chatHarnessStorage(sessionId: string): StorageBindingRef;
+function chatKernelStorage(sessionId: string): StorageBindingRef;
 ```
 
-将 Harness Session 存储绑定到聊天会话的资产目录：`rootPath = <chat asset dir>/.harness`（fs 为 `FS_MODULE_CHAT` 引擎）。`chatHarnessStorage(sessionId)` 生成 `StorageBindingRef` 传给 `harness.createSession({ storage })`。
+将 Kernel Session 存储绑定到聊天会话的资产目录：`rootPath = <chat asset dir>/.kernel`（fs 为 `FS_MODULE_CHAT` 引擎）。`chatKernelStorage(sessionId)` 生成 `StorageBindingRef` 传给 `kernel.createSession({ storage })`。
 
 ---
 
@@ -274,7 +274,7 @@ function chatHarnessStorage(sessionId: string): StorageBindingRef;
 const RUNTIME_KEY = 'conversation/runtime';
 
 class DurableConversationProjection {
-    // 把 Harness 事件流投影为 Conversation UI 状态（Round 列表/状态）
+    // 把 Kernel 事件流投影为 Conversation UI 状态（Round 列表/状态）
 }
 ```
 
@@ -327,11 +327,11 @@ packages/llm-session/src/
 │   ├── round-graph-service.ts    RoundGraphService + RoundGraphError
 │   ├── round-types.ts            RoundManifest/PersistedRound/RoundProjection/BranchMeta
 │   ├── round-events.ts           RoundLogEvent/RoundChangeSet
-│   ├── chat-harness-storage.ts   ChatHarnessStorageResolver + chatHarnessStorage（chat-asset kind）
+│   ├── chat-kernel-storage.ts   ChatKernelStorageResolver + chatKernelStorage（chat-asset kind）
 │   ├── durable-conversation-projection.ts  DurableConversationProjection + RUNTIME_KEY
 │   ├── context-profile-store.ts  ContextProfileStore
 │   ├── vfs-utils.ts / ulid.ts    VFS 助手 / ULID
-│   └── (资产目录: 每会话 <assetDir>/.harness ← Harness 存储根)
+│   └── (资产目录: 每会话 <assetDir>/.kernel ← Kernel 存储根)
 ├── plugins/                      会话插件工厂
 │   ├── session-plugin.ts         createSessionPlugin
 │   ├── vcs-plugin.ts             createVcsPlugin
@@ -349,8 +349,8 @@ packages/llm-session/src/
 | 路径 / 常量 | 说明 |
 |---|---|
 | `FS_MODULE_CHAT = 'chats'` | 会话模块名 → `/module/chats`（`ChatEngine` 挂载点） |
-| `<chat asset dir>/.harness` | Harness Session 存储根（`ChatHarnessStorageResolver` 解析，含 `catalog.seq/session.seq/tasks/…`，见 `harness-api.md`） |
+| `<chat asset dir>/.kernel` | Kernel Session 存储根（`ChatKernelStorageResolver` 解析，含 `catalog.seq/session.seq/tasks/…`，见 `kernel-api.md`） |
 | `llm-flows/` | Flow 草稿/修订 asset 目录名（`FlowDefinitionStore` 构造参数，`initializeConversationSystem` 传入） |
 | `RUNTIME_KEY = 'conversation/runtime'` | Durable Conversation 运行时共享键 |
 
-**约定**：Round 只表达对话历史（`historyParentIds`）；Run 引用经 `executions` 附着到 Round；Branch/merge/context fold 只在本包实现；普通 Chat 用 Direct Scheduler，不伪装成单节点 DAG；不访问 Harness Dispatcher/ProcessTable 内部对象。
+**约定**：Round 只表达对话历史（`historyParentIds`）；Run 引用经 `executions` 附着到 Round；Branch/merge/context fold 只在本包实现；普通 Chat 用 Direct Scheduler，不伪装成单节点 DAG；不访问 Kernel Dispatcher/ProcessTable 内部对象。

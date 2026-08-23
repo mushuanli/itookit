@@ -5,7 +5,7 @@ import { SearchHighlighter } from './search-highlighter';
 import { MarkedAdapter } from './marked-adapter';
 import { StreamingDiffer } from './streaming-differ';
 import type { MDxPlugin } from '../core/types';
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 
 export interface MDxRendererConfig {
   searchMarkClass?: string;

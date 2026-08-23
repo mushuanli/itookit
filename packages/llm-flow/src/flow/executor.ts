@@ -10,12 +10,12 @@ import type {
 import {
     bindCapabilities,
     type CapabilityBinding,
-    type Harness,
+    type Kernel,
     type JsonValue,
     type SessionHandle,
     type TaskHandle,
     type TaskSpec,
-} from '@itookit/harness';
+} from '@itookit/kernel';
 import { findCycles } from './graph';
 
 export interface FlowExecutionHandle {
@@ -26,7 +26,7 @@ export interface FlowExecutionHandle {
 }
 
 export interface DurableFlowExecutorOptions {
-    harness: Harness;
+    kernel: Kernel;
     plugins: DagPluginCatalog;
     resolveTools?(sessionId: string, allowedIds: string[]): Promise<{
         definitions: ToolDefinition[];
@@ -42,7 +42,7 @@ export class DurableFlowExecutor {
     constructor(private readonly options: DurableFlowExecutorOptions) {}
 
     async submit(sessionId: string, spec: DagRunSpec): Promise<FlowExecutionHandle> {
-        const session = await this.options.harness.openSession(sessionId);
+        const session = await this.options.kernel.openSession(sessionId);
         const routeEdgeIds = collectRouteEdgeIds(spec);
         const { backEdges, loopNodes } = findCycles(spec.nodes, spec.edges);
         const nodes = [...spec.nodes];

@@ -1,4 +1,4 @@
-import type { JsonValue, SessionHandle } from '@itookit/harness';
+import type { JsonValue, SessionHandle } from '@itookit/kernel';
 import type { SessionRuntime } from '../core/types';
 import type { IChatEngine } from './types';
 

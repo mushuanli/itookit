@@ -11,7 +11,7 @@ import {formatDefaultFileTitle} from '@itookit/common';
 import { IEditor } from '@itookit/ui-common';
 import type { ILLMService, ICommandBus } from '@itookit/common';
 import { EditorFactory, EditorOptions } from '@itookit/ui-common';
-import type { Harness } from '@itookit/harness';
+import type { Kernel } from '@itookit/kernel';
 import { AgentConfigEditor } from '@itookit/llm-settings-ui';
 
 export type {
@@ -73,7 +73,7 @@ export const createLLMFactory = (
         chatEngine: IChatEngine;
         llmService?: ILLMService;
         commandBus?: ICommandBus;
-        harness?: Harness;
+        kernel?: Kernel;
         privilegedCommands?: import('./domain/ports/IPrivilegedCommandService').IPrivilegedCommandService;
     },
 ): EditorFactory => {
@@ -113,7 +113,7 @@ export const createLLMFactory = (
             isNewSession,
             llmService: deps.llmService,
             commandBus: deps.commandBus,
-            harness: deps.harness,
+            kernel: deps.kernel,
             privilegedCommands: deps.privilegedCommands,
         };
 

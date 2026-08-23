@@ -16,7 +16,7 @@ export default defineConfig({
             '@itookit/app-settings/style.css': path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
 
             '@itookit/common': path.resolve(__dirname, '../../packages/common/src/index.ts'),
-            '@itookit/stdio': path.resolve(__dirname, '../../packages/stdio/src/index.ts'),
+            '@itookit/vfs-core': path.resolve(__dirname, '../../packages/vfs-core/src/index.ts'),
             '@itookit/mdxeditor': path.resolve(__dirname, '../../packages/mdx/src/index.ts'),
             '@itookit/vfs-ui': path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
             '@itookit/device-llm': path.resolve(__dirname, '../../packages/device-llm/src/index.ts'),

@@ -19,7 +19,7 @@ export default defineConfig({
             '@itookit/llm-session': path.resolve(__dirname, '../../packages/llm-session/src/index.ts'),
             '@itookit/llm-ui':         path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
             '@itookit/app-settings':   path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
-            '@itookit/stdio':          path.resolve(__dirname, '../../packages/stdio/src/index.ts'),
+            '@itookit/vfs-core':          path.resolve(__dirname, '../../packages/vfs-core/src/index.ts'),
         },
     },
 

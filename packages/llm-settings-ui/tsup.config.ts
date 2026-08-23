@@ -10,6 +10,6 @@ export default defineConfig({
         '@itookit/common',
         '@itookit/ui-common',
         '@itookit/device-llm',
-        '@itookit/stdio',
+        '@itookit/vfs-core',
     ],
 });

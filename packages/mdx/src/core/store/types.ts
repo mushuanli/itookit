@@ -1,5 +1,5 @@
 // @mdx/core/store/types.ts
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 import { EngineMetadataStore } from './engine-metadata-store';
 import { MemoryStore } from './memory-store';
 

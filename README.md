@@ -96,7 +96,7 @@ Agent      ──  个性化定制（system prompt + tier 偏好）
 
 同一 Provider 可创建多个 Connection（如 `deepseek-reasoner` / `deepseek-chat`），灵活应对多模型混用场景。
 
-#### 5. 多轮 Agent 循环 — `packages/llm-harness`
+#### 5. 多轮 Agent 循环 — `packages/llm-kernel`
 
 - 工具调用（file_read / file_write / shell_exec / glob_search / grep_search）
 - 四层渐进式上下文压缩（history_snip → cache_prune → llm_summarize → sliding_window）
@@ -154,7 +154,7 @@ packages/
 ├── vfsdriver-localfs/   # LocalFS 存储后端（Tauri）
 ├── device-llm/          # LLM 驱动：多 Provider / 流式 / MCP / Skill
 ├── llm-kernel/          # 执行内核：Executor + Orchestrator
-├── llm-harness/         # 多轮 Agent 循环 + 内置工具 + TTY
+├── llm-kernel/         # 多轮 Agent 循环 + 内置工具 + TTY
 ├── llm-runtime/          # 会话管理 + VFS 持久化 + Mission 编排
 ├── mdx/                 # CodeMirror 6 Markdown 编辑器（插件化架构）
 ├── llm-ui/              # Chat UI + Agent / Provider / Connection 编辑器

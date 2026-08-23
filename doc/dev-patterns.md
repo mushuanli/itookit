@@ -38,11 +38,11 @@
 2. `packages/tools/src/tools/<Name>/<Name>Tool.ts` — `buildTool(def)` 实现
 3. `packages/tools/src/index.ts` — 在 `BUILTIN_TOOLS` 数组注册
 
-## 新增 Harness 工具 (需运行时引用)
+## 新增 Kernel 工具 (需运行时引用)
 
 1. `packages/coreutils/src/tool/<name>.ts` — ToolMeta + ToolDefinition + ToolHandler
 2. `packages/coreutils/src/runtime/create-coreutils-runtime.ts` — 运行时注册
-3. 如需 Durable 执行，在 `packages/coreutils/src/effects/` 增加 EffectAdapter，并由 CoreutilsHarnessPlugin 注册
+3. 如需 Durable 执行，在 `packages/coreutils/src/effects/` 增加 EffectAdapter，并由 CoreutilsKernelPlugin 注册
 
 ## 新增 i18n 文案
 

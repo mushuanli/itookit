@@ -1,4 +1,4 @@
-// Conversation log contracts. Runtime execution is owned by @itookit/harness.
+// Conversation log contracts. Runtime execution is owned by @itookit/kernel.
 
 import type { ChatMessage, Attachment } from '../llm/message';
 import type { TokenUsage } from '../llm/completion';

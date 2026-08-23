@@ -2,7 +2,7 @@
 // Thin wrapper around the shared EventBus from @itookit/common.
 // Preserves the existing public API (on/emit/clear) used by PluginManager and MDxEditor.
 
-import { EventBus as CoreEventBus } from '@itookit/stdio';
+import { EventBus as CoreEventBus } from '@itookit/vfs-core';
 
 export type EventCallback<T = unknown> = (payload: T) => void;
 

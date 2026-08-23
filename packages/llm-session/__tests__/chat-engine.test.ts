@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createVFS, MemoryBackend, FS_MODULE_CHAT, type IVFSManager } from '@itookit/stdio';
+import { createVFS, MemoryBackend, FS_MODULE_CHAT, type IVFSManager } from '@itookit/vfs-core';
 import { ChatEngine } from '../src/persistence/chat-engine';
 
 describe('ChatEngine.initializeExistingFile', () => {

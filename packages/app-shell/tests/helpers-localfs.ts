@@ -20,8 +20,8 @@ import { dirname, resolve, join } from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { FakeSidecarDb } from './fake-sidecar';
-import { createVFS } from '@itookit/stdio';
-import type { IVFSManager, IModuleFS } from '@itookit/stdio';
+import { createVFS } from '@itookit/vfs-core';
+import type { IVFSManager, IModuleFS } from '@itookit/vfs-core';
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 

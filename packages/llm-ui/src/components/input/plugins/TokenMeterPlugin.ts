@@ -59,7 +59,7 @@ function renderBar(ratio: number): { bar: string; colorClass: string } {
 
 export class TokenMeterPlugin implements InputPlugin {
     readonly id = 'token-meter';
-    readonly priority = 20; // above harness(10) won't conflict, just for ordering
+    readonly priority = 20; // above kernel(10) won't conflict, just for ordering
 
     private ctx: InputPluginContext | null = null;
     private strip: HTMLElement | null = null;

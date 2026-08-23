@@ -1,8 +1,8 @@
 export { createCoreutilsRuntime } from './runtime/create-coreutils-runtime';
 export type { CoreutilsRuntime, CoreutilsRuntimeOptions } from './runtime/create-coreutils-runtime';
 
-export { CoreutilsHarnessPlugin } from './plugin/coreutils-harness-plugin';
-export type { CoreutilsPluginOptions } from './plugin/coreutils-harness-plugin';
+export { CoreutilsKernelPlugin } from './plugin/coreutils-kernel-plugin';
+export type { CoreutilsPluginOptions } from './plugin/coreutils-kernel-plugin';
 
 export { LlmChatEffectAdapter } from './effects/llm-chat-effect';
 export { prepareLlmChatEffectRequest } from './effects/llm-chat-effect';

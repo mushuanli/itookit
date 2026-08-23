@@ -68,21 +68,21 @@ importers:
       '@itookit/device-tty':
         specifier: workspace:*
         version: link:../../packages/device-tty
-      '@itookit/harness':
+      '@itookit/kernel':
         specifier: workspace:*
-        version: link:../../packages/harness
+        version: link:../../packages/kernel
       '@itookit/llm-flow':
         specifier: workspace:*
         version: link:../../packages/llm-flow
-      '@itookit/llm-programs':
+      '@itookit/llm-tasks':
         specifier: workspace:*
-        version: link:../../packages/llm-programs
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../../packages/stdio
+        version: link:../../packages/llm-tasks
       '@itookit/tools':
         specifier: workspace:*
         version: link:../../packages/tools
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../../packages/vfs-core
       '@itookit/vfsdriver-localfs':
         specifier: workspace:*
         version: link:../../packages/vfsdriver-localfs
@@ -163,12 +163,12 @@ importers:
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../../packages/mdx
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../../packages/stdio
       '@itookit/tools':
         specifier: workspace:*
         version: link:../../packages/tools
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../../packages/vfs-core
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../../packages/vfs-ui
@@ -266,9 +266,9 @@ importers:
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../../packages/mdx
-      '@itookit/stdio':
+      '@itookit/vfs-core':
         specifier: workspace:*
-        version: link:../../packages/stdio
+        version: link:../../packages/vfs-core
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../../packages/vfs-ui
@@ -319,12 +319,12 @@ importers:
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../stdio
       '@itookit/ui-common':
         specifier: workspace:*
         version: link:../ui-common
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../vfs-ui
@@ -355,9 +355,9 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
-      '@itookit/harness':
+      '@itookit/kernel':
         specifier: workspace:*
-        version: link:../harness
+        version: link:../kernel
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../llm-session
@@ -367,12 +367,12 @@ importers:
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../stdio
       '@itookit/ui-common':
         specifier: workspace:*
         version: link:../ui-common
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../vfs-ui
@@ -416,15 +416,15 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
-      '@itookit/harness':
+      '@itookit/kernel':
         specifier: workspace:*
-        version: link:../harness
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../stdio
+        version: link:../kernel
       '@itookit/tools':
         specifier: workspace:*
         version: link:../tools
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
     devDependencies:
       '@types/node':
         specifier: 20.19.25
@@ -508,12 +508,12 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../stdio
       '@itookit/ui-common':
         specifier: workspace:*
         version: link:../ui-common
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
@@ -556,11 +556,11 @@ importers:
         specifier: ^3.2.1
         version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.25)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
 
-  packages/harness:
+  packages/kernel:
     dependencies:
-      '@itookit/stdio':
+      '@itookit/vfs-core':
         specifier: workspace:*
-        version: link:../stdio
+        version: link:../vfs-core
     devDependencies:
       rimraf:
         specifier: ^5.0.5
@@ -589,16 +589,16 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/harness':
+      '@itookit/kernel':
         specifier: workspace:*
-        version: link:../harness
-      '@itookit/llm-programs':
+        version: link:../kernel
+      '@itookit/llm-tasks':
         specifier: workspace:*
-        version: link:../llm-programs
+        version: link:../llm-tasks
     devDependencies:
-      '@itookit/stdio':
+      '@itookit/vfs-core':
         specifier: workspace:*
-        version: link:../stdio
+        version: link:../vfs-core
       '@types/node':
         specifier: ^20.19.25
         version: 20.19.43
@@ -612,14 +612,82 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
 
-  packages/llm-programs:
+  packages/llm-session:
     dependencies:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/harness':
+      '@itookit/kernel':
         specifier: workspace:*
-        version: link:../harness
+        version: link:../kernel
+      '@itookit/llm-flow':
+        specifier: workspace:*
+        version: link:../llm-flow
+      '@itookit/llm-tasks':
+        specifier: workspace:*
+        version: link:../llm-tasks
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
+      yaml:
+        specifier: ^2.8.2
+        version: 2.8.2
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.43
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
+
+  packages/llm-settings-ui:
+    dependencies:
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      '@itookit/device-llm':
+        specifier: workspace:*
+        version: link:../device-llm
+      '@itookit/ui-common':
+        specifier: workspace:*
+        version: link:../ui-common
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
+      js-yaml:
+        specifier: ^4.1.1
+        version: 4.3.0
+    devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.43
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
+
+  packages/llm-tasks:
+    dependencies:
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      '@itookit/kernel':
+        specifier: workspace:*
+        version: link:../kernel
     devDependencies:
       '@types/node':
         specifier: ^20.19.25
@@ -646,74 +714,6 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
 
-  packages/llm-session:
-    dependencies:
-      '@itookit/common':
-        specifier: workspace:*
-        version: link:../common
-      '@itookit/harness':
-        specifier: workspace:*
-        version: link:../harness
-      '@itookit/llm-flow':
-        specifier: workspace:*
-        version: link:../llm-flow
-      '@itookit/llm-programs':
-        specifier: workspace:*
-        version: link:../llm-programs
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../stdio
-      yaml:
-        specifier: ^2.8.2
-        version: 2.8.2
-    devDependencies:
-      '@types/node':
-        specifier: ^20.19.25
-        version: 20.19.43
-      rimraf:
-        specifier: ^5.0.5
-        version: 5.0.10
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^1.6.1
-        version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
-
-  packages/llm-settings-ui:
-    dependencies:
-      '@itookit/common':
-        specifier: workspace:*
-        version: link:../common
-      '@itookit/device-llm':
-        specifier: workspace:*
-        version: link:../device-llm
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../stdio
-      '@itookit/ui-common':
-        specifier: workspace:*
-        version: link:../ui-common
-      js-yaml:
-        specifier: ^4.1.1
-        version: 4.3.0
-    devDependencies:
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
-      '@types/node':
-        specifier: ^20.19.25
-        version: 20.19.43
-      rimraf:
-        specifier: ^5.0.5
-        version: 5.0.10
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^1.6.1
-        version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
-
   packages/llm-ui:
     dependencies:
       '@itookit/common':
@@ -722,21 +722,21 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
-      '@itookit/harness':
+      '@itookit/kernel':
         specifier: workspace:*
-        version: link:../harness
+        version: link:../kernel
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../llm-session
       '@itookit/llm-settings-ui':
         specifier: workspace:*
         version: link:../llm-settings-ui
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../stdio
       '@itookit/ui-common':
         specifier: workspace:*
         version: link:../ui-common
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
@@ -801,12 +801,12 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../stdio
       '@itookit/ui-common':
         specifier: workspace:*
         version: link:../ui-common
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
       codemirror:
         specifier: ^6.0.2
         version: 6.0.2
@@ -845,30 +845,14 @@ importers:
         specifier: ^3.9.1
         version: 3.9.1(@types/node@20.19.43)(rollup@4.62.2)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.43))
 
-  packages/stdio:
-    dependencies:
-      yaml:
-        specifier: ^2.8.2
-        version: 2.8.2
-    devDependencies:
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@25.2.3))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.2.3)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
-
   packages/tools:
     dependencies:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/stdio':
+      '@itookit/vfs-core':
         specifier: workspace:*
-        version: link:../stdio
+        version: link:../vfs-core
       zod:
         specifier: ^4.1.0
         version: 4.4.2
@@ -894,9 +878,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/stdio':
+      '@itookit/vfs-core':
         specifier: workspace:*
-        version: link:../stdio
+        version: link:../vfs-core
     devDependencies:
       tsup:
         specifier: ^8.5.1
@@ -905,17 +889,33 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/vfs-core:
+    dependencies:
+      yaml:
+        specifier: ^2.8.2
+        version: 2.8.2
+    devDependencies:
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@25.2.3))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.2.3)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
+
   packages/vfs-ui:
     dependencies:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/stdio':
-        specifier: workspace:*
-        version: link:../stdio
       '@itookit/ui-common':
         specifier: workspace:*
         version: link:../ui-common
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
       immer:
         specifier: ^10.2.0
         version: 10.2.0
@@ -944,9 +944,9 @@ importers:
 
   packages/vfsdriver-indexeddb:
     dependencies:
-      '@itookit/stdio':
+      '@itookit/vfs-core':
         specifier: workspace:*
-        version: link:../stdio
+        version: link:../vfs-core
     devDependencies:
       fake-indexeddb:
         specifier: ^6.0.0
@@ -963,9 +963,9 @@ importers:
 
   packages/vfsdriver-localfs:
     dependencies:
-      '@itookit/stdio':
+      '@itookit/vfs-core':
         specifier: workspace:*
-        version: link:../stdio
+        version: link:../vfs-core
       better-sqlite3:
         specifier: ^11.0.0
         version: 11.10.0
@@ -2983,6 +2983,7 @@ packages:
   eslint@9.39.2:
     resolution: {integrity: sha512-LEyamqS7W5HB3ujJyvi0HQK/dtVINZvd5mAAp9eT5S/ujByGjiZLCzPcHVzuXbpJDJF/cxwHlfceVUDZ2lnSTw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'

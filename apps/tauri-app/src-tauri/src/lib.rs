@@ -17,8 +17,8 @@ struct MindosSettings {
     home_dir: Option<PathBuf>,
 }
 
-fn read_settings(base: &PathBuf) -> MindosSettings {
-    let Ok(raw) = std::fs::read_to_string(base.join("settings.json")) else {
+fn read_settings(config_dir: &PathBuf) -> MindosSettings {
+    let Ok(raw) = std::fs::read_to_string(config_dir.join("settings.json")) else {
         return MindosSettings { root_dir: None, home_dir: None };
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
@@ -33,11 +33,12 @@ fn read_settings(base: &PathBuf) -> MindosSettings {
 // ── Path resolution ────────────────────────────────────────────────────────────
 
 struct AppPaths {
-    /// Discovery dir: MINDOS_ROOT env var or ~/.mindos. Where settings.json lives.
-    base_dir: PathBuf,
+    /// Config dir: $XDG_CONFIG_HOME/mindos or ~/.config/mindos. settings.json lives here.
+    /// Deliberately separate from the data root — ~/.mindos may hold unrelated
+    /// data, so it is never used as a default location.
+    config_dir: PathBuf,
     /// Resolved data root. All VFS modules live here (module/, _db/, _meta/).
-    /// Defaults to base_dir. Relative paths in settings.json are resolved
-    /// against base_dir, making the whole directory portable.
+    /// From MINDOS_ROOT env, settings.json#rootDir, or <config_dir>/data.
     root_dir: PathBuf,
     home_dir: PathBuf,
 }
@@ -46,23 +47,30 @@ struct AppPaths {
 struct ShellProcesses(Mutex<HashMap<String, u32>>);
 
 fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
-    let base_dir = std::env::var("MINDOS_ROOT")
+    // Config lives at $XDG_CONFIG_HOME/mindos/settings.json (default ~/.config/mindos),
+    // never inside the data root. This keeps unrelated ~/.mindos data untouched.
+    let config_dir = std::env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| system_home.join(".mindos"));
+        .unwrap_or_else(|| system_home.join(".config").join("mindos"));
 
-    let settings = read_settings(&base_dir);
+    let settings = read_settings(&config_dir);
 
-    // rootDir may be:
-    //   absent        → root_dir = base_dir (portable default)
-    //   relative ("." / "data") → resolved against base_dir (portable)
-    //   absolute ("/n/xdr/data") → used as-is (explicit, not portable)
-    let root_dir = settings.root_dir
-        .map(|rd| {
-            if rd.is_absolute() { rd } else { normalize_path(&base_dir.join(&rd)) }
+    // Data root resolution order:
+    //   MINDOS_ROOT env      → explicit override, used as-is
+    //   settings.json#rootDir → primary source; relative resolved against config_dir
+    //   default              → <config_dir>/data (never ~/.mindos)
+    let root_dir = std::env::var("MINDOS_ROOT")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            settings.root_dir.map(|rd| {
+                if rd.is_absolute() { rd } else { normalize_path(&config_dir.join(&rd)) }
+            })
         })
-        .unwrap_or_else(|| base_dir.clone());
+        .unwrap_or_else(|| config_dir.join("data"));
 
     let home_dir = resolve_home_from_cli()
         .or(settings.home_dir)
@@ -70,7 +78,7 @@ fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
         });
 
-    AppPaths { base_dir, root_dir, home_dir }
+    AppPaths { config_dir, root_dir, home_dir }
 }
 
 fn resolve_home_from_cli() -> Option<PathBuf> {
@@ -245,9 +253,9 @@ fn get_home_dir(paths: State<AppPaths>) -> String {
 }
 
 /// Resolved VFS root directory (base for all module data).
-/// Defaults to base_dir; can be overridden via settings.json#rootDir.
-/// Relative rootDir values are resolved against base_dir, making the
-/// whole directory portable across machines.
+/// From MINDOS_ROOT env, settings.json#rootDir, or <config_dir>/data.
+/// Relative rootDir values are resolved against the config dir
+/// (~/.config/mindos), keeping the data root portable.
 #[tauri::command]
 fn get_root_dir(paths: State<AppPaths>) -> String {
     paths.root_dir.to_string_lossy().into_owned()
@@ -458,7 +466,7 @@ pub fn run() {
             let system_home = app.path().home_dir().unwrap_or_else(|_| PathBuf::from("."));
             let paths = resolve_all_paths(&system_home);
 
-            let _ = std::fs::create_dir_all(&paths.base_dir);
+            let _ = std::fs::create_dir_all(&paths.config_dir);
             for sub in &["", "_meta", "_db", "meta", "module"] {
                 let _ = std::fs::create_dir_all(paths.root_dir.join(sub));
             }

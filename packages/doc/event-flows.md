@@ -4,7 +4,7 @@
 
 ```text
 DurableTaskProgram returns actions
-→ Harness commits state and EventJournal atomically
+→ Kernel commits state and EventJournal atomically
 → TaskHandle.events()
 → ConversationRunCoordinator
 → SessionEventBus
@@ -15,11 +15,11 @@ DurableTaskProgram returns actions
 
 ```text
 DurableAgentProgram returns Interaction action
-→ Harness commits Task state and wait condition
+→ Kernel commits Task state and wait condition
 → Task status = waiting
 → UI displays request
 → TaskHandle.signal(InteractionResponse)
-→ Harness marks Task ready
+→ Kernel marks Task ready
 → DurableAgentProgram resumes from serialized state
 ```
 

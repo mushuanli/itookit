@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Harness, type SessionHandle } from '@itookit/harness';
-import { createVFS, MemoryBackend, type IModuleFS, type IVFSManager } from '@itookit/stdio';
+import { Kernel, type SessionHandle } from '@itookit/kernel';
+import { createVFS, MemoryBackend, type IModuleFS, type IVFSManager } from '@itookit/vfs-core';
 import { DurableConversationProjection } from '../src/persistence/durable-conversation-projection';
 import type { ConversationManifest, IChatEngine } from '../src/persistence/types';
 
@@ -15,13 +15,13 @@ describe('DurableConversationProjection', () => {
         await manager.mount('test');
         fs = manager.getEngine('test');
         await fs.init();
-        const harness = new Harness({ catalog: { fs } });
-        harness.registerStorageResolver({
+        const kernel = new Kernel({ catalog: { fs } });
+        kernel.registerStorageResolver({
             kind: 'test',
-            async resolve() { return { fs, rootPath: '/sessions/one/.harness' }; },
+            async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; },
         });
-        await harness.initialize();
-        session = await harness.createSession({ id: 'session-one', storage: { kind: 'test', locator: null } });
+        await kernel.initialize();
+        session = await kernel.createSession({ id: 'session-one', storage: { kind: 'test', locator: null } });
         manifest = createManifest();
     });
 

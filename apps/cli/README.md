@@ -1,6 +1,6 @@
 # MindOS CLI
 
-MindOS CLI 在指定工作区中运行声明式多 Agent workflow graph。无环数据依赖按 DAG 调度，并支持有界循环、条件路由、动态子图与 Supervisor。CLI 与 Tauri 共用 LLM、Tool、Harness 和持久化内核，不需要启动桌面 UI。CLI 要求 Node.js 22.13 或更高版本，并使用内置 `node:sqlite` 持久化运行状态，无需安装原生 SQLite npm 扩展。
+MindOS CLI 在指定工作区中运行声明式多 Agent workflow graph。无环数据依赖按 DAG 调度，并支持有界循环、条件路由、动态子图与 Supervisor。CLI 与 Tauri 共用 LLM、Tool、Kernel 和持久化内核，不需要启动桌面 UI。CLI 要求 Node.js 22.13 或更高版本，并使用内置 `node:sqlite` 持久化运行状态，无需安装原生 SQLite npm 扩展。
 
 ## 使用
 

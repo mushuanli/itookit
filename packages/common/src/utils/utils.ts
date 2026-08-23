@@ -237,18 +237,13 @@ export async function calculateHash(buffer: ArrayBuffer): Promise<string> {
 }
 
 /**
- * Blob → Base64 (data URI prefix stripped)
+ * Blob → Base64 (data URI prefix stripped).
+ * Uses Blob.arrayBuffer() (universal: browser + Node 18+) instead of the
+ * browser-only FileReader, so this stays type-safe when shared code is
+ * typechecked in node-only contexts (device-tty / tools with lib:["ES2022"]).
  */
 export async function blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const result = reader.result as string;
-            resolve(result.split(',')[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-    });
+    return arrayBufferToBase64(await blob.arrayBuffer());
 }
 
 /**

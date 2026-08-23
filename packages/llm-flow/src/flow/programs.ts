@@ -4,12 +4,12 @@ import type {
     DurableTaskProgram,
     JsonValue,
     TaskInputEvent,
-} from '@itookit/harness';
+} from '@itookit/kernel';
 import {
     collectDependency,
     dependenciesReady,
     dependencyWait,
-} from '@itookit/llm-programs';
+} from '@itookit/llm-tasks';
 import { reduceOutcome, routeOutcome, spawnOutcome, transformOutcome } from './operations';
 
 export interface FlowDependencyBinding {

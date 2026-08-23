@@ -6,13 +6,13 @@ import type {
     NavigationRequest
 } from '@itookit/common';
 import type { IEditor, EditorFactory, EditorOptions, ISessionUI, EditorHostContext } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 
 import type { VFSNodeUI, VFSUIState } from '../contracts/types';
 import type { VFSService } from '../services/VFSService';
 import { parseFileInfo, extractTaskCounts } from '../utils/parser';
 import { MediaViewerEditor, isBinaryViewable } from '../editors/MediaViewerEditor';
-import { guessMimeType } from '@itookit/stdio';
+import { guessMimeType } from '@itookit/vfs-core';
 
 import type { PublicEventMap } from '../contracts/events';
 

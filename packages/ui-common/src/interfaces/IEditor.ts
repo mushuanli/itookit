@@ -4,7 +4,7 @@
  * @interface
  */
 
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 import type { NavigationRequest, Heading } from '@itookit/common';
 
 export type { Heading } from '@itookit/common';

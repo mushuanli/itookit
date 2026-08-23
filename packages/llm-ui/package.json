@@ -66,11 +66,11 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/harness": "workspace:*",
+    "@itookit/kernel": "workspace:*",
     "@itookit/device-llm": "workspace:*",
     "@itookit/llm-session": "workspace:*",
     "@itookit/llm-settings-ui": "workspace:*",
-    "@itookit/stdio": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
     "js-yaml": "^4.1.1",
     "marked": "^16.4.2",
     "@itookit/ui-common": "workspace:*"

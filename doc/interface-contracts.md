@@ -1,38 +1,38 @@
 # 跨包接口契约
 
-调用方只依赖接口，不依赖实现。契约层分三处：`@itookit/common`（通用）、`@itookit/llm-common`（LLM 领域）、`@itookit/stdio`（VFS 协议层）。
+调用方只依赖接口，不依赖实现。契约层分三处：`@itookit/common`（通用）、`@itookit/llm-common`（LLM 领域）、`@itookit/vfs-core`（VFS 协议层）。
 
-## VFS 体系（@itookit/stdio）
+## VFS 体系（@itookit/vfs-core）
 
 | 接口 | 核心方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
-| `IStorageBackend` | `stat/list/read/write/mkdir/delete/rename` | `stdio/interfaces/storage/` | `vfsdriver-indexeddb`、`vfsdriver-localfs` | `stdio (VFSEngine)` |
-| `IVFSManager` | `getEngine()/mountModule()/on()` | `stdio/interfaces/services/` | `stdio (VFSManager)` | `app-shell`、`llm-ui`、`llm-session` |
-| `IModuleFS` | `openFile()/driver/meta/capabilities` | `stdio/interfaces/services/` | `stdio (ModuleFS)` | `vfs-ui`、`mdxeditor`、`llm-ui` |
-| `IFSDriver` | `read/write/create/delete/getChildren/stat/search` | `stdio/interfaces/services/` | `ModuleFS.driver` | 编辑器、`llm-session` |
-| `IFSMetaDriver` | `putAsset/getAsset/setTags/watch` | `stdio/interfaces/services/` | `ModuleFS.meta` | `llm-session`、`mdxeditor` |
-| `IFile` | `read()/write()`（extends `IIOStream`） | `stdio/interfaces/IFile.ts` | `FileHandle`、`MDXFileHandle` | `mdxeditor`、`llm-session` |
-| `IIOStream` | `read()/write()/readStream?/close?` | `stdio/interfaces/` | 文件/设备句柄 | 文件↔LLM↔TTY 互拷 |
-| `IDeviceDriver` | `open()/ioctl()/close()` | `stdio/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `coreutils`、`device-llm` |
+| `IStorageBackend` | `stat/list/read/write/mkdir/delete/rename` | `vfs-core/interfaces/storage/` | `vfsdriver-indexeddb`、`vfsdriver-localfs` | `vfs-core (VFSEngine)` |
+| `IVFSManager` | `getEngine()/mountModule()/on()` | `vfs-core/interfaces/services/` | `vfs-core (VFSManager)` | `app-shell`、`llm-ui`、`llm-session` |
+| `IModuleFS` | `openFile()/driver/meta/capabilities` | `vfs-core/interfaces/services/` | `vfs-core (ModuleFS)` | `vfs-ui`、`mdxeditor`、`llm-ui` |
+| `IFSDriver` | `read/write/create/delete/getChildren/stat/search` | `vfs-core/interfaces/services/` | `ModuleFS.driver` | 编辑器、`llm-session` |
+| `IFSMetaDriver` | `putAsset/getAsset/setTags/watch` | `vfs-core/interfaces/services/` | `ModuleFS.meta` | `llm-session`、`mdxeditor` |
+| `IFile` | `read()/write()`（extends `IIOStream`） | `vfs-core/interfaces/IFile.ts` | `FileHandle`、`MDXFileHandle` | `mdxeditor`、`llm-session` |
+| `IIOStream` | `read()/write()/readStream?/close?` | `vfs-core/interfaces/` | 文件/设备句柄 | 文件↔LLM↔TTY 互拷 |
+| `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `coreutils`、`device-llm` |
 
 ## LLM 契约（@itookit/llm-common + @itookit/common）
 
 | 接口/类型 | 核心字段/方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
-| `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `llm-common/llm/llm-service.ts` | `coreutils LLMServiceAdapter` | `llm-programs`（经 effect）、`llm-session` |
+| `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `llm-common/llm/llm-service.ts` | `coreutils LLMServiceAdapter` | `llm-tasks`（经 effect）、`llm-session` |
 | `ChatMessage` | `role/content/attachments?` | `llm-common/llm/` | device-llm | 全部 LLM 层 |
-| `ChatCompletionParams/Response/Chunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | device-llm providers | `llm-programs`、`coreutils` |
+| `ChatCompletionParams/Response/Chunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | device-llm providers | `llm-tasks`、`coreutils` |
 | `Citation` | `text/source/title/url`（联网搜索引用） | `llm-common/llm/completion.ts` | device-llm providers | `coreutils`、`llm-ui` |
-| `TokenUsage` | `prompt_tokens/completion_tokens/total_tokens` | `llm-common/llm/completion.ts` | device-llm | `llm-programs`、预算扣减 |
+| `TokenUsage` | `prompt_tokens/completion_tokens/total_tokens` | `llm-common/llm/completion.ts` | device-llm | `llm-tasks`、预算扣减 |
 | `LLMConnection/ConnectionMeta` | `id/provider/tier/model/protocol` | `llm-common/llm/connection.ts` | `device-llm` | `llm-session AgentResolver` |
 | `WebSearchMode` | `'builtin'\|'client-tool'\|'disabled'` | `llm-common/llm/connection.ts` | `resolveWebSearchStrategy`（纯函数） | `llm-session` |
 | `LLMProvider.capabilities.serverSideWebSearch` | 服务端内置联网搜索能力（唯一事实源） | `llm-common/llm/connection.ts` | `constants/providers.ts` | `resolveWebSearchStrategy` |
-| `ToolCall` / `ToolDefinition` | `id/name/arguments` | `llm-common/llm/` | device-llm / `tools` | `llm-programs` |
+| `ToolCall` / `ToolDefinition` | `id/name/arguments` | `llm-common/llm/` | device-llm / `tools` | `llm-tasks` |
 | `DagNode/DagEdge/DagRunSpec/DagNodeOutcome` | `id/plugin/config/outputs/effects` | `llm-common/agent/dag-plugin.ts` | `llm-flow` | `llm-session`、`cli` |
 | `FlowDraft/FlowRevision/FlowNodeDefinition` | `nodes/edges/layout` | `llm-common/agent/flow-definition.ts` | `llm-flow FlowDefinitionStore` | `llm-ui`、`llm-session` |
 | `SerializableExpression` | `kind: eq/neq/in/and/or/not/…` | `llm-common/agent/` | `llm-flow operations` | `cli` 编译路由条件 |
 
-## Harness 执行内核（@itookit/harness）
+## Kernel 执行内核（@itookit/kernel）
 
 | 接口/类型 | 核心方法/字段 | 说明 |
 |---|---|---|
@@ -50,7 +50,7 @@
 | `assertEffectGrant` / `interactionApproved` | — | effect 授权断言 / 审批判定 |
 | `TaskHandle.bindCapabilities` | — | 上层能力绑定统一入口 |
 
-## LLM 任务单元（@itookit/llm-programs）
+## LLM 任务单元（@itookit/llm-tasks）
 
 | 接口/类型 | 说明 |
 |---|---|
@@ -85,7 +85,7 @@
 | `SessionManager` / `SessionRegistry` / `SessionState` | 会话生命周期与状态 |
 | `IAgentConfigService` | Agent/Connection 配置服务（供 AgentResolver 解析） |
 | `CommandBus` / `ExtensionRegistry` / `ILLMPlugin` | 控制面命令与插件系统 |
-| `ConversationSystem` / `initializeConversationSystem` | 装配入口（session + flow + programs + harness） |
+| `ConversationSystem` / `initializeConversationSystem` | 装配入口（session + flow + programs + kernel） |
 
 ## 能力实现（@itookit/coreutils）
 

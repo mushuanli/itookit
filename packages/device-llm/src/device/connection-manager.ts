@@ -3,7 +3,7 @@
 // ConnectionManager — CRUD for LLMConnection with VFS persistence.
 
 import type { LLMConnection, ConnectionMeta } from '@itookit/common';
-import type { IVFSManager, IModuleFS } from '@itookit/stdio';
+import type { IVFSManager, IModuleFS } from '@itookit/vfs-core';
 import { toConnectionMeta, aggregateProviderCosts } from '@itookit/common';
 import { DEFAULT_CONNECTIONS, CONST_CONFIG_VERSION } from '../constants';
 import { VFSHelpers } from './vfs-helpers';

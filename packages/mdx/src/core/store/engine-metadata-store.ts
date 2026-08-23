@@ -1,5 +1,5 @@
 // @mdx/core/store/engine-metadata-store.ts
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 import type { ScopedPersistenceStore } from './types';
 
 type PluginDataRecord = Record<string, unknown>;

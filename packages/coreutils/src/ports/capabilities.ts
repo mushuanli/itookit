@@ -6,7 +6,7 @@ import type {
     SkillToolBinding,
     ToolHandler,
 } from '@itookit/common';
-import type { EffectExecutionContext } from '@itookit/harness';
+import type { EffectExecutionContext } from '@itookit/kernel';
 
 export type CapabilityResolver<T> = (
     context: EffectExecutionContext,

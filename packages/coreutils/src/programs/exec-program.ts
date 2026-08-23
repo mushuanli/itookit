@@ -5,7 +5,7 @@ import {
     type JsonValue,
     type SerializableError,
     type TaskInputEvent,
-} from '@itookit/harness';
+} from '@itookit/kernel';
 
 export interface ExecProgramInput {
     command: string;

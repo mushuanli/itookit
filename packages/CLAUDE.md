@@ -12,9 +12,9 @@
 ├──────────────┬──────────────┬──────────────────────┤
 │  llm-ui      │  vfs-ui      │  mdxeditor   ui-common │  UI 层
 ├──────────────┼──────────────┼──────────────────────┤
-│ llm-session  │  llm-flow    │ llm-programs  harness │  业务层
+│ llm-session  │  llm-flow    │ llm-tasks  kernel │  业务层
 ├──────────────┼──────────────┼──────────────────────┤
-│ coreutils    │  device-llm  │ device-tty    stdio  │  引擎/能力层
+│ coreutils    │  device-llm  │ device-tty    vfs-core  │  引擎/能力层
 ├──────────────┼──────────────┼──────────────────────┤
 │ tools        │ vfsdriver-*  │ llm-common           │  工具/存储/契约
 ├──────────────┴──────────────┴──────────────────────┤
@@ -25,7 +25,7 @@
 LLM 依赖方向（单向，下层永不知上层）：
 
 ```
-llm-session ──▶ llm-flow ──▶ llm-programs ──▶ harness ──▶ common
+llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ kernel ──▶ common
 （会话/持久化） （DAG 编排） （LLM 任务单元）  （执行内核）
 ```
 
@@ -59,5 +59,5 @@ llm-session ──▶ llm-flow ──▶ llm-programs ──▶ harness ──�
 | 修改 ChatInput UI | [file-index](../doc/file-index.md) `#chat-input` |
 | 新增 i18n | [dev-patterns](../doc/dev-patterns.md) `#i18n` → `common/CLAUDE.md` |
 | 新增工具 | [dev-patterns](../doc/dev-patterns.md) `#tools` → `tools/CLAUDE.md` |
-| 理解 agent loop | [architecture.md](../doc/architecture.md) `#harness` |
+| 理解 agent loop | [architecture.md](../doc/architecture.md) `#kernel` |
 | 理解联网搜索 | [web-search.md](../doc/web-search.md) |

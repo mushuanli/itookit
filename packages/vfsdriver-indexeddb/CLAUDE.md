@@ -28,7 +28,7 @@ src/
 
 ```typescript
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
-import { createVFS } from '@itookit/stdio';
+import { createVFS } from '@itookit/vfs-core';
 
 const backend = new IndexedDBBackend({ dbName: 'my-app-vfs' });
 const { manager } = await createVFS({ rootBackend: backend, modules: [...] });

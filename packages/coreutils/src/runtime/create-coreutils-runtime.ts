@@ -6,7 +6,7 @@ import type {
     SkillDefinition,
     ToolVFSContext,
 } from '@itookit/common';
-import type { IDeviceDriver } from '@itookit/stdio';
+import type { IDeviceDriver } from '@itookit/vfs-core';
 import { BUILTIN_TOOLS, ToolDeviceDriver } from '@itookit/tools';
 import type { INativeShell, Tool } from '@itookit/tools';
 import { LLMServiceAdapter } from '../llm/llm-service-adapter';
@@ -16,7 +16,7 @@ import { createShellSessionHandler, shellSessionDefinition, shellSessionMeta } f
 import { createTtyCloseHandler, ttyCloseDefinition, ttyCloseMeta } from '../tty/tty-close';
 import { createTtyWriteHandler, ttyWriteDefinition, ttyWriteMeta } from '../tty/tty-write';
 import { TTYSessionManager } from '../tty/session-manager';
-import { CoreutilsHarnessPlugin } from '../plugin/coreutils-harness-plugin';
+import { CoreutilsKernelPlugin } from '../plugin/coreutils-kernel-plugin';
 import { LlmChatEffectAdapter } from '../effects/llm-chat-effect';
 import { ToolCallEffectAdapter } from '../effects/tool-call-effect';
 import { BashEffectAdapter } from '../effects/bash-effect';
@@ -34,7 +34,7 @@ import { ExecProgram } from '../programs/exec-program';
 export interface CoreutilsRuntimeOptions {
     llmDriver: IDeviceDriver;
     ttyDriver?: ITTYDriver;
-    runMode?: 'harness' | 'kernel';
+    runMode?: 'kernel' | 'kernel';
     skillSource?: SkillSource;
     skillToolHandlerFactory?: SkillToolHandlerFactory;
     /** Platform-owned filesystem boundary inherited by every session scope. */
@@ -52,13 +52,13 @@ export interface CoreutilsRuntime {
     toolDriver: ToolDeviceDriver;
     skillDriver: SkillDeviceDriver;
     sessions: SessionCapabilityRegistry;
-    plugin: CoreutilsHarnessPlugin;
+    plugin: CoreutilsKernelPlugin;
     disposeSession(sessionId: string): Promise<void>;
     dispose(): Promise<void>;
 }
 
 export async function createCoreutilsRuntime(options: CoreutilsRuntimeOptions): Promise<CoreutilsRuntime> {
-    const llmService = new LLMServiceAdapter(options.llmDriver, options.runMode ?? 'harness');
+    const llmService = new LLMServiceAdapter(options.llmDriver, options.runMode ?? 'kernel');
     const registry = new CoreutilsSessionRegistry(options);
     const legacy = await registry.getLegacyScope();
     const effects = createEffects(llmService, registry, Boolean(options.ttyDriver));
@@ -69,7 +69,7 @@ export async function createCoreutilsRuntime(options: CoreutilsRuntimeOptions): 
         toolDriver: legacy.toolDriver,
         skillDriver: legacy.skillDriver,
         sessions: registry,
-        plugin: new CoreutilsHarnessPlugin({
+        plugin: new CoreutilsKernelPlugin({
             effects,
             programs: [new ApprovedEffectProgram(), new ExecProgram()],
             onSessionClosed: sessionId => registry.disposeSession(sessionId),
@@ -105,7 +105,7 @@ class CoreutilsSessionRegistry implements SessionCapabilityRegistry {
     }
 
     async getForContext(
-        context: import('@itookit/harness').EffectExecutionContext,
+        context: import('@itookit/kernel').EffectExecutionContext,
     ): Promise<CoreutilsScope> {
         const scope = await this.get(context.sessionId);
         if (this.hydrated.has(context.sessionId)) return scope;
@@ -174,12 +174,12 @@ function createEffects(
     llm: ILLMService,
     registry: CoreutilsSessionRegistry,
     ttyEnabled: boolean,
-): import('@itookit/harness').EffectAdapter[] {
-    const tools = async (context: import('@itookit/harness').EffectExecutionContext) =>
+): import('@itookit/kernel').EffectAdapter[] {
+    const tools = async (context: import('@itookit/kernel').EffectExecutionContext) =>
         (await registry.getForContext(context)).toolService;
-    const skills = async (context: import('@itookit/harness').EffectExecutionContext) =>
+    const skills = async (context: import('@itookit/kernel').EffectExecutionContext) =>
         (await registry.getForContext(context)).skillService;
-    const effects: import('@itookit/harness').EffectAdapter[] = [
+    const effects: import('@itookit/kernel').EffectAdapter[] = [
         new LlmChatEffectAdapter(llm),
         new ToolCallEffectAdapter(tools),
         new BashEffectAdapter(tools),
@@ -191,7 +191,7 @@ function createEffects(
 
 async function persistLoadedSkill(
     result: import('@itookit/common').SkillLoadResult,
-    context: import('@itookit/harness').EffectExecutionContext,
+    context: import('@itookit/kernel').EffectExecutionContext,
 ): Promise<void> {
     if (!context.sessionState) return;
     const key = 'coreutils.skills.loaded';

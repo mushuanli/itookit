@@ -9,8 +9,8 @@ export default defineConfig({
     external: [
         '@itookit/common',
         '@itookit/device-llm',
-        '@itookit/harness',
-        '@itookit/stdio',
+        '@itookit/kernel',
+        '@itookit/vfs-core',
         '@itookit/tools',
     ],
 });

@@ -15,7 +15,7 @@ import type {
 import type {
     IDeviceDriver,
     DeviceContext,
-} from '@itookit/stdio';
+} from '@itookit/vfs-core';
 import { aggregateCompactInstructions } from './compact-extractor';
 import { matchGlob } from './glob-matcher';
 import type { SkillSource, SkillToolHandlerFactory } from '../ports/capabilities';

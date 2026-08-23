@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SkillDefinition } from '@itookit/common';
-import { Harness, type DurableTaskProgram } from '@itookit/harness';
-import { createVFS, MemoryBackend } from '@itookit/stdio';
+import { Kernel, type DurableTaskProgram } from '@itookit/kernel';
+import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { createSkillTaskSpec } from './skill-task';
 
 describe('createSkillTaskSpec', () => {
@@ -31,21 +31,21 @@ describe('createSkillTaskSpec', () => {
         await manager.mount('test');
         const fs = manager.getEngine('test');
         await fs.init();
-        const harness = new Harness({ catalog: { fs } });
+        const kernel = new Kernel({ catalog: { fs } });
         try {
-            harness.registerStorageResolver({
-                kind: 'test', resolve: async () => ({ fs, rootPath: '/skill/.harness' }),
+            kernel.registerStorageResolver({
+                kind: 'test', resolve: async () => ({ fs, rootPath: '/skill/.kernel' }),
             });
-            harness.registerProgram(skillProgram());
-            await harness.initialize();
-            const session = await harness.createSession({ id: 'skill-session', storage: { kind: 'test', locator: null } });
+            kernel.registerProgram(skillProgram());
+            await kernel.initialize();
+            const session = await kernel.createSession({ id: 'skill-session', storage: { kind: 'test', locator: null } });
             const spec = createSkillTaskSpec(skill({ kind: 'skill.review', version: '2' }), { path: 'a.ts' });
             const task = await session.submit(spec);
             expect((await task.status()).task.status).toBe('created');
             await task.start();
             await expect(task.wait({ timeoutMs: 2_000 })).resolves.toMatchObject({ output: 'a.ts' });
         } finally {
-            harness.dispose();
+            kernel.dispose();
             await manager.dispose();
         }
     });

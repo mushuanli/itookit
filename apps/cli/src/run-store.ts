@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { EventEnvelope } from '@itookit/harness';
-import { extractNodeOutput } from '@itookit/llm-programs';
+import type { EventEnvelope } from '@itookit/kernel';
+import { extractNodeOutput } from '@itookit/llm-tasks';
 import type { RunManifest, WorkspaceGrant } from './types';
 
 export class RunStore {

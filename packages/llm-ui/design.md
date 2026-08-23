@@ -1127,9 +1127,9 @@ import { createLLMFactory, createAgentEditorFactory, createSkillsEditorFactory }
 // 会话工作区编辑器(vfs-ui 选中 chat 节点时创建)
 const llmFactory = createLLMFactory(agentService, {
     chatEngine: engine,
-    llmService?: harness.llmService,     // 可选:注入后启用 OCR 等工具型调用
+    llmService?: kernel.llmService,     // 可选:注入后启用 OCR 等工具型调用
     commandBus?: commandBus,             // initializeConversationSystem 返回
-    controlPlane?: harness.kernel,       // 可选:附加执行运行(RunHandle)
+    controlPlane?: kernel.kernel,       // 可选:附加执行运行(RunHandle)
 });
 const editor = await llmFactory(container, {
     title: 'New Chat',
@@ -1167,7 +1167,7 @@ isDirty / setDirty / focus / setTitle / setReadOnly / getMode
 on(event, cb) / updateNodeId / markAsDeleted
 collapseBlocks / expandBlocks / toggleBlocks
 getSearchableText / getSummary / pruneAssets
-injectIntoRunningHarness(message)          — 运行中注入用户消息
+injectIntoRunningKernel(message)          — 运行中注入用户消息
 ```
 
 ---

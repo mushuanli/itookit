@@ -7,7 +7,7 @@ import {
 } from '@itookit/common';
 import { IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback, UnifiedSearchResult, CollapseExpandResult } from '@itookit/ui-common';
 import type { AgentType, AgentDefinition, IAgentManagementService, ModelTier, PromptPreset } from '@itookit/common';
-import { EventBus } from '@itookit/stdio';
+import { EventBus } from '@itookit/vfs-core';
 import { renderModelCapabilityBadges } from '../utils/modelBadges';
 
 /**

@@ -3,7 +3,7 @@
 // SkillManager — SkillDefinition CRUD, HTTP/Shell/MCP invocation.
 
 import type { LLMSkill } from '@itookit/common';
-import type { IVFSManager, IModuleFS } from '@itookit/stdio';
+import type { IVFSManager, IModuleFS } from '@itookit/vfs-core';
 import yaml from 'js-yaml';
 import { VFSHelpers } from './vfs-helpers';
 import type { MCPManager } from './mcp-manager';
@@ -132,7 +132,7 @@ export class SkillManager {
         if (!this.shellRunner) {
             return (
                 `Shell skills require a native execution environment.\n` +
-                `Inject an IShellRunner when constructing LLMDeviceDriver, or use the harness path.`
+                `Inject an IShellRunner when constructing LLMDeviceDriver, or use the kernel path.`
             );
         }
         return this.shellRunner.run(command, args);

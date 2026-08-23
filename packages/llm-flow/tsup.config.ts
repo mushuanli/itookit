@@ -8,7 +8,7 @@ export default defineConfig({
     sourcemap: true,
     external: [
         '@itookit/common',
-        '@itookit/harness',
-        '@itookit/llm-programs',
+        '@itookit/kernel',
+        '@itookit/llm-tasks',
     ],
 });

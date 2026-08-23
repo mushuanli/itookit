@@ -1,6 +1,6 @@
 // @file: app-settings/editors/AppearanceSettingsEditor.ts
 import { BaseSettingsEditor } from '@itookit/ui-common';
-import { CONFIG_MODULE } from '@itookit/stdio';
+import { CONFIG_MODULE } from '@itookit/vfs-core';
 import { SettingsService } from '../services/SettingsService';
 
 type ThemeMode = 'light' | 'dark' | 'system';

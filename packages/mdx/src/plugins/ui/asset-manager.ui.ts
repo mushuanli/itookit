@@ -3,7 +3,7 @@
  * @desc 独立的资源管理器 UI 类，不绑定 MDxPlugin 上下文
  */
 import { Toast } from '@itookit/ui-common';
-import { guessMimeType, type IModuleFS, type FSNode, type FSFileNode } from '@itookit/stdio';
+import { guessMimeType, type IModuleFS, type FSNode, type FSFileNode } from '@itookit/vfs-core';
 import type { MDxEditor } from '../../editor/mdx-editor';
 import {
     isAssetVisible,

@@ -1,7 +1,7 @@
 // @file: llm-ui/components/HistoryView.ts
 
 import type { SessionGroup, SessionEventEnvelope, ExecutionNode } from '@itookit/llm-session';
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { CollapseStateMap, NodeActionCallback } from '../domain/types';
 import type { IEditorEventBus } from '../domain/events';

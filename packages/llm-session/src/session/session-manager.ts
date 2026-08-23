@@ -38,17 +38,17 @@ import { SessionQuery } from './session-query';
 import { RoundOperations } from './round-operations';
 import { BranchService } from './branch-service';
 import { ContextProfileStore } from '../persistence/context-profile-store';
-import { ContextAssembler } from '@itookit/llm-programs';
+import { ContextAssembler } from '@itookit/llm-tasks';
 import { RoundLog } from '../persistence/round-log';
-import type { Harness, SessionHandle } from '@itookit/harness';
-import { chatHarnessStorage } from '../persistence/chat-harness-storage';
+import type { Kernel, SessionHandle } from '@itookit/kernel';
+import { chatKernelStorage } from '../persistence/chat-kernel-storage';
 import { DurableConversationProjection, RUNTIME_KEY } from '../persistence/durable-conversation-projection';
 
 /**
  * 会话管理器 — llm-conversation 对外的唯一入口
  *
  * 门面模式：组合 SessionRegistry + RoundOperations + BranchService，
- * Conversation session facade backed by Round persistence and Harness runs.
+ * Conversation session facade backed by Round persistence and Kernel runs.
  */
 export class SessionManager implements ISession, SessionQuery {
     private registry: SessionRegistry;
@@ -56,7 +56,7 @@ export class SessionManager implements ISession, SessionQuery {
     private branchService: BranchService;
     private runs: SessionRunCoordinator;
     private agentResolver: AgentResolver;
-    private readonly harness: Harness;
+    private readonly kernel: Kernel;
     private readonly durableProjection: DurableConversationProjection;
     private durableSession?: SessionHandle;
     private durableProjectionUnsubscribe?: () => void;
@@ -65,7 +65,7 @@ export class SessionManager implements ISession, SessionQuery {
         engine: IChatEngine,
         agentService: IAgentConfigService,
         options: {
-            harness: Harness;
+            kernel: Kernel;
             dagPlugins: DagPluginCatalog;
             resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
                 definitions: ToolDefinition[];
@@ -77,8 +77,8 @@ export class SessionManager implements ISession, SessionQuery {
         this.agentResolver = new AgentResolver(agentService);
         const attachments = new AttachmentProcessor(engine);
 
-        if (!options?.harness) throw new Error('SessionManager requires Harness');
-        this.harness = options.harness;
+        if (!options?.kernel) throw new Error('SessionManager requires Kernel');
+        this.kernel = options.kernel;
         this.durableProjection = new DurableConversationProjection(engine);
         this.runs = new SessionRunCoordinator(
             engine,
@@ -102,7 +102,7 @@ export class SessionManager implements ISession, SessionQuery {
                     return { state, runtime };
                 },
             },
-            options.harness,
+            options.kernel,
             options.dagPlugins,
             options.resolveTools,
         );
@@ -187,8 +187,8 @@ export class SessionManager implements ISession, SessionQuery {
     // ================================================================
 
     async bindSession(nodeId: string, sessionId: string): Promise<SessionSnapshot> {
-        this.durableSession = await this.harness.createSession({
-            id: sessionId, storage: chatHarnessStorage(sessionId),
+        this.durableSession = await this.kernel.createSession({
+            id: sessionId, storage: chatKernelStorage(sessionId),
         });
         const snapshot = await this.registry.bindSession(nodeId, sessionId);
         await this.bindDurableProjection(nodeId, sessionId);
@@ -510,7 +510,7 @@ export function createSessionManager(
     engine: IChatEngine,
     agentService: IAgentConfigService,
     options: {
-        harness: Harness;
+        kernel: Kernel;
         dagPlugins: DagPluginCatalog;
         resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
             definitions: ToolDefinition[];

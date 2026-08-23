@@ -57,7 +57,7 @@ export interface SlashCommandRouterDeps {
 
 /**
  * Build the complete SlashCommandCallbacks object.
- * Handles: Common, Refine, Context, View, Tools, Branch, Settings, Help, and Harness commands.
+ * Handles: Common, Refine, Context, View, Tools, Branch, Settings, Help, and Kernel commands.
  */
 export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandCallbacks {
     return {

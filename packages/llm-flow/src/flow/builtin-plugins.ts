@@ -4,7 +4,7 @@ import type {
     DagPluginManifest,
     JsonValue,
 } from '@itookit/common';
-import { buildLlmTaskInput, type LlmTaskInputOptions } from '@itookit/llm-programs';
+import { buildLlmTaskInput, type LlmTaskInputOptions } from '@itookit/llm-tasks';
 import { DagPluginRegistry } from './plugin-registry';
 
 export function createBuiltinDagPluginRegistry(): DagPluginRegistry {

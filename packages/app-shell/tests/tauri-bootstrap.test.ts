@@ -19,12 +19,12 @@ import { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createVFS, FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/stdio';
+import { createVFS, FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/vfs-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { FakeSidecarDb } from './fake-sidecar';
 import { ChatEngine, VFSAgentService } from '@itookit/llm-session';
 import { LLMDeviceDriver } from '@itookit/device-llm';
-import type { IVFSManager } from '@itookit/stdio';
+import type { IVFSManager } from '@itookit/vfs-core';
 
 // ── Module list (mirrors tauri-app/src/config/modules.ts, minus settings/home) ─
 

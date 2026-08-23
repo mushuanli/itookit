@@ -5,8 +5,8 @@ import type { SkillDefinition,
     ToolVFSContext
 } from '@itookit/common';
 import { EditorFactory } from '@itookit/ui-common';
-import type { IVFSManager, FSNode } from '@itookit/stdio';
-import { createVFS, FS_MODULE_CHAT } from '@itookit/stdio';
+import type { IVFSManager, FSNode } from '@itookit/vfs-core';
+import { createVFS, FS_MODULE_CHAT } from '@itookit/vfs-core';
 import { createSettingsModule, createSettingsFactory, type LLMUIEditors } from '@itookit/app-settings';
 import {
     createLLMFactory,
@@ -21,19 +21,19 @@ import {
 import {
     initializeConversationSystem,
     ChatEngine,
-    ChatHarnessStorageResolver,
+    ChatKernelStorageResolver,
     createBuiltinDagPluginRegistry,
     chatFileParser,
 } from '@itookit/llm-session';
 import type { SessionManager } from '@itookit/llm-session';
 import { Workbench } from './core/Workbench';
 import { LLMDeviceDriver } from '@itookit/device-llm';
-import { Harness } from '@itookit/harness';
+import { Kernel } from '@itookit/kernel';
 import { createCoreutilsRuntime } from '@itookit/coreutils';
 import { SkillsEngine } from '@itookit/app-settings';
 import { createSkillsEditorFactory } from '@itookit/llm-ui';
 
-import { AppOptions, AppHandle, WorkspaceConfig, type AppHarnessRuntime } from './types';
+import { AppOptions, AppHandle, WorkspaceConfig, type AppKernelRuntime } from './types';
 import {
     StandardWorkspaceStrategy,
     SettingsWorkspaceStrategy,
@@ -42,7 +42,7 @@ import {
 import { WorkspaceStrategy } from './strategies/types';
 import { FILE_REGISTRY, EditorTypeKey } from './config/file-registry';
 import { themeService, ThemeMode } from './ThemeService';
-import { PrivilegedCommandService } from './harness/privileged-command-service';
+import { PrivilegedCommandService } from './kernel/privileged-command-service';
 
 /** Resolves when an actual editor mounts inside the container (not just placeholder). */
 function waitForEditorMount(container: HTMLElement): Promise<void> {
@@ -112,7 +112,7 @@ function setupHitlVfsBridge(sessionManager: SessionManager, manager: Workbench):
 
 // ── VFS ToolContext adapter ────────────────────────────────────────────────────
 //
-// Provides ToolVFSContext so harness file tools (file_read, file_write,
+// Provides ToolVFSContext so kernel file tools (file_read, file_write,
 // glob_search, grep_search) can access the virtual filesystem (IndexedDB)
 // in browser environments instead of the unavailable node:fs/promises.
 //
@@ -187,22 +187,22 @@ function createVFSToolContext(vfsManager: IVFSManager): ToolVFSContext {
 
 // ── Skill sync ─────────────────────────────────────────────────────────────────
 // LLMSkill is a type alias for SkillDefinition, so persisted skills can be
-// registered directly with the harness.
+// registered directly with the kernel.
 
-async function syncSkillsToHarness(
+async function syncSkillsToKernel(
     llmDriver: LLMDeviceDriver,
-    harness: AppHarnessRuntime,
+    kernel: AppKernelRuntime,
 ): Promise<void> {
     const skills = await llmDriver.getSkills() as SkillDefinition[];
-    const harnessIds = new Set(harness.skillService.getSkillNames());
+    const kernelIds = new Set(kernel.skillService.getSkillNames());
 
     for (const s of skills) {
-        await harness.skillService.saveSkill(s);
-        harnessIds.delete(s.id);
+        await kernel.skillService.saveSkill(s);
+        kernelIds.delete(s.id);
     }
 
-    for (const id of harnessIds) {
-        await harness.skillService.deleteSkill(id);
+    for (const id of kernelIds) {
+        await kernel.skillService.deleteSkill(id);
     }
 }
 
@@ -294,46 +294,46 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const agentService   = new VFSAgentService(vfs, llmDriver);
     const chatEngine     = new ChatEngine(vfs);
 
-    // Durable Harness with application-owned capability injection.
+    // Durable Kernel with application-owned capability injection.
     ts = performance.now();
     const vfsResourcePort = createVFSToolContext(vfs);
     const coreutils = await createCoreutilsRuntime({
         llmDriver,
-        runMode: 'harness',
-        skillSource: options.harnessPlatform?.skillSource,
-        skillToolHandlerFactory: options.harnessPlatform?.skillToolHandlerFactory,
+        runMode: 'kernel',
+        skillSource: options.kernelPlatform?.skillSource,
+        skillToolHandlerFactory: options.kernelPlatform?.skillToolHandlerFactory,
     });
-    const kernel = new Harness({
+    const kernelCore = new Kernel({
         catalog: { fs: vfs.getEngine(FS_MODULE_CHAT) },
         maxConcurrent: 20,
     });
-    kernel.registerStorageResolver(new ChatHarnessStorageResolver(chatEngine));
-    await kernel.use(coreutils.plugin);
-    await kernel.initialize();
-    await kernel.recover();
-    const harness: AppHarnessRuntime = Object.assign(coreutils, {
-        kernel,
+    kernelCore.registerStorageResolver(new ChatKernelStorageResolver(chatEngine));
+    await kernelCore.use(coreutils.plugin);
+    await kernelCore.initialize();
+    await kernelCore.recover();
+    const kernel: AppKernelRuntime = Object.assign(coreutils, {
+        kernel: kernelCore,
         dagPlugins: createBuiltinDagPluginRegistry(),
     });
-    await options.harnessPlatform?.configure?.(harness);
+    await options.kernelPlatform?.configure?.(kernel);
     cleanupFns.push(async () => {
-        kernel.dispose();
+        kernelCore.dispose();
         await coreutils.dispose();
     });
-    console.log(`[Boot]   ↳ createHarness: +${(performance.now() - ts).toFixed(0)}ms`);
+    console.log(`[Boot]   ↳ createKernel: +${(performance.now() - ts).toFixed(0)}ms`);
 
     // Inject VFS context so file tools work with the virtual filesystem in browser.
     // When node:fs is unavailable, tools fall back to ctx.vfs (ToolVFSContext).
-    harness.toolDriver.setVFSContext(vfsResourcePort);
+    kernel.toolDriver.setVFSContext(vfsResourcePort);
 
-    // Bridge: sync VFS LLMSkills → harness SkillDefinition so /skills, /skill <id>,
+    // Bridge: sync VFS LLMSkills → kernel SkillDefinition so /skills, /skill <id>,
     // and the skill picker panel all show the user's configured skills.
     ts = performance.now();
-    await syncSkillsToHarness(llmDriver, harness);
-    console.log(`[Boot]   ↳ syncSkillsToHarness: +${(performance.now() - ts).toFixed(0)}ms`);
+    await syncSkillsToKernel(llmDriver, kernel);
+    console.log(`[Boot]   ↳ syncSkillsToKernel: +${(performance.now() - ts).toFixed(0)}ms`);
     // Keep skills in sync when the user adds / edits / deletes skills in Settings.
     cleanupFns.push(
-        llmDriver.onChange(() => { syncSkillsToHarness(llmDriver, harness).catch(() => {}); })
+        llmDriver.onChange(() => { syncSkillsToKernel(llmDriver, kernel).catch(() => {}); })
     );
 
     logIO('core services');
@@ -342,10 +342,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const { sessionManager, commandBus } = await initializeConversationSystem({
         agentService,
         sessionEngine: chatEngine,
-        harness:             harness.kernel,
-        dagPlugins:          harness.dagPlugins,
+        kernel:             kernel.kernel,
+        dagPlugins:          kernel.dagPlugins,
         resolveTools: async (sessionId, allowedIds) => {
-            const tools = (await harness.sessions.get(sessionId)).toolService;
+            const tools = (await kernel.sessions.get(sessionId)).toolService;
             const allowed = new Set(allowedIds);
             return {
                 definitions: tools.getToolDefinitions().filter(definition => {
@@ -365,21 +365,21 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     };
     const settingsFactory = createSettingsFactory(settingsModule.service, agentService, llmDriver, llmUiEditors);
     // Pass llmService only when the vision connection is actually configured —
-    // this is the single place that knows both the harness and the connection list.
+    // this is the single place that knows both the kernel and the connection list.
     const connections = await agentService.getConnections();
     const visionConnExists = connections.some(c => c.id === 'conn-volcengine-vision');
-    const privilegedCommands = new PrivilegedCommandService(harness.kernel, agentService);
+    const privilegedCommands = new PrivilegedCommandService(kernel.kernel, agentService);
     const llmFactory = createLLMFactory(
         agentService,
         visionConnExists
             ? {
                 chatEngine,
-                llmService: harness.llmService,
+                llmService: kernel.llmService,
                 commandBus,
-                harness: harness.kernel,
+                kernel: kernel.kernel,
                 privilegedCommands,
             }
-            : { chatEngine, commandBus, harness: harness.kernel, privilegedCommands },
+            : { chatEngine, commandBus, kernel: kernel.kernel, privilegedCommands },
     );
     const agentFactory    = createAgentEditorFactory(agentService);
 

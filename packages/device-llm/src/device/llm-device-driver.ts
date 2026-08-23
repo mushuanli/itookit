@@ -20,7 +20,7 @@ import type {
 } from '@itookit/common';
 import type {
     IDeviceDriver, DeviceContext, IVFSManager, FileContent, IModuleFS,
-} from '@itookit/stdio';
+} from '@itookit/vfs-core';
 
 import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';
@@ -145,8 +145,8 @@ export interface LLMDeviceOpenOptions {
     connectionId: string;
     systemPrompt?: string;
     completionDefaults?: Record<string, unknown>;
-    /** 调用方的运行模式；harness 强制走 anthropic-messages 协议。 */
-    runMode?: 'harness' | 'kernel';
+    /** 调用方的运行模式；kernel 强制走 anthropic-messages 协议。 */
+    runMode?: 'kernel' | 'kernel';
     /** 日志文件名标签（如聊天文件名），将转义后用于 /var/log/llm/{label}.json */
     sessionLabel?: string;
 }
@@ -855,7 +855,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
         const effectiveProtocol =
             conn.protocol
-            ?? (opts?.runMode === 'harness' && provider?.anthropicPath ? 'anthropic-messages' as const : undefined)
+            ?? (opts?.runMode === 'kernel' && provider?.anthropicPath ? 'anthropic-messages' as const : undefined)
             ?? (opts?.runMode !== 'kernel' && provider?.anthropicPath ? 'anthropic-messages' as const : undefined);
         const connForDriver = {
             ...conn,

@@ -12,11 +12,11 @@ import {
     bindCapabilities,
     type CapabilityBinding,
     type EventEnvelope,
-    type Harness,
+    type Kernel,
     type JsonValue,
     type TaskHandle,
     type TaskSpec,
-} from '@itookit/harness';
+} from '@itookit/kernel';
 import type {
     ChatAttachment,
     ExecutionTask,
@@ -27,7 +27,7 @@ import {
     ContextAssembler,
     type DurableAgentInput,
     type DurableChatOutput as ChatProgramOutput,
-} from '@itookit/llm-programs';
+} from '@itookit/llm-tasks';
 import type { IChatEngine } from '../persistence/types';
 import { ContextProfileStore } from '../persistence/context-profile-store';
 import { RoundLog } from '../persistence/round-log';
@@ -49,7 +49,7 @@ export interface ConversationExecution {
 export interface ConversationRunCoordinatorOptions {
     engine: IChatEngine;
     eventBus: SessionEventBus;
-    harness: Harness;
+    kernel: Kernel;
     dagPlugins: DagPluginCatalog;
     resolveTools?(sessionId: string, allowedIds: string[]): Promise<{
         definitions: ToolDefinition[];
@@ -81,7 +81,7 @@ export class ConversationRunCoordinator {
     ): Promise<void> {
         await this.execute(execution, async snapshot => {
             const flow = new DurableFlowExecutor({
-                harness: this.options.harness,
+                kernel: this.options.kernel,
                 plugins: this.options.dagPlugins,
                 resolveTools: this.options.resolveTools,
             });
@@ -195,7 +195,7 @@ export class ConversationRunCoordinator {
         execution: ConversationExecution,
         snapshot: ContextSnapshot,
     ): Promise<TaskHandle<ChatProgramOutput>> {
-        const session = await this.options.harness.openSession(execution.task.sessionId);
+        const session = await this.options.kernel.openSession(execution.task.sessionId);
         const tools = execution.config.capabilityPolicy?.toolIds ?? [];
         const catalog = await this.options.resolveTools?.(execution.task.sessionId, tools)
             ?? { definitions: [], externalIds: [] };

@@ -1,8 +1,8 @@
 # @itookit/llm-flow — API 参考
 
-> DAG 编排层：把 `llm-programs` 的 LLM 任务单元连成动态图（route/loop/spawn/compensate/on_failure/budget），并持久化 Flow 定义。提供 `DurableFlowExecutor`（动态图调度）、`DagCommandService`（命令面）、内置 Flow Programs 与插件。所有 API 从 `@itookit/llm-flow` 根导出。
+> DAG 编排层：把 `llm-tasks` 的 LLM 任务单元连成动态图（route/loop/spawn/compensate/on_failure/budget），并持久化 Flow 定义。提供 `DurableFlowExecutor`（动态图调度）、`DagCommandService`（命令面）、内置 Flow Programs 与插件。所有 API 从 `@itookit/llm-flow` 根导出。
 
-**依赖方向**：`llm-flow → harness + llm-programs`（`llm-session` 依赖本包）。不持有会话语义（Round/Branch 属于 `llm-session`）；能力经 Harness Effect 使用。
+**依赖方向**：`llm-flow → kernel + llm-tasks`（`llm-session` 依赖本包）。不持有会话语义（Round/Branch 属于 `llm-session`）；能力经 Kernel Effect 使用。
 
 ## 目录
 
@@ -32,7 +32,7 @@ class DurableFlowExecutor {
 
 ```ts
 interface DurableFlowExecutorOptions {
-    harness: Harness;                            // 执行内核
+    kernel: Kernel;                            // 执行内核
     plugins: DagPluginCatalog;                   // 插件目录（节点类型 → Manifest）
     resolveTools?(sessionId, allowedIds): Promise<{
         definitions: ToolDefinition[];
@@ -84,12 +84,12 @@ interface FlowExecutionHandle {
 
 ```ts
 class DagCommandService {
-    constructor(options: DagCommandServiceOptions);   // flowStore + harness + plugins + resolveTools
+    constructor(options: DagCommandServiceOptions);   // flowStore + kernel + plugins + resolveTools
     register(bus: ICommandBus): void;                 // 注册全部 DAG 命令
 }
 ```
 
-**`DagCommandServiceOptions`**：`{ flowStore: FlowDefinitionStore; harness: Harness; plugins: DagPluginCatalog; resolveTools? }`。
+**`DagCommandServiceOptions`**：`{ flowStore: FlowDefinitionStore; kernel: Kernel; plugins: DagPluginCatalog; resolveTools? }`。
 
 **`DurableFlowSnapshot`**：运行快照类型（命令面查询用）。
 

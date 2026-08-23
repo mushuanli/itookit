@@ -8,7 +8,7 @@ export default defineConfig(
     rootDir: __dirname,
     external: [
       '@itookit/common',
-      '@itookit/stdio',
+      '@itookit/vfs-core',
       '@itookit/device-llm',
       '@itookit/llm-session',
       '@itookit/mdxeditor',
@@ -17,7 +17,7 @@ export default defineConfig(
     ],
     globals: {
       '@itookit/common': 'ItookitCommon',
-      '@itookit/stdio': 'ItookitStdio',
+      '@itookit/vfs-core': 'ItookitStdio',
       '@itookit/device-llm': 'LLMDriver',
       '@itookit/llm-session': 'LLMConversation',
       '@itookit/mdxeditor': 'MDxEditor',

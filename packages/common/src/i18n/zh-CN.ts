@@ -275,8 +275,8 @@ export const zhCN = {
     'thinking.toggle.off':       '开启思考',
 
     // ── Chat input — Mode toggle ─────────────────────────────────────────────
-    'chatInput.harnessMode':         'Harness 模式',
-    'chatInput.harnessMode.tooltip': '启用多轮 Agent 循环与工具调用',
+    'chatInput.kernelMode':         'Kernel 模式',
+    'chatInput.kernelMode.tooltip': '启用多轮 Agent 循环与工具调用',
 
     // ── Chat input — OCR (image to text) ─────────────────────────────────────
     'chatInput.ocr':             '提取文字',
@@ -304,12 +304,12 @@ export const zhCN = {
     'hitl.inputPlaceholder':    '输入你的回答\u2026',
     'hitl.submit':              '回应',
 
-    // ── Harness status bar ────────────────────────────────────────────────────
-    'harness.statusBar.toolsLabel':  'Tools',
-    'harness.statusBar.done':        '{count} done',
-    'harness.statusBar.budgetWarn':  '{resource} {pct}%',
-    'harness.statusBar.compressed':  '\u2193 compressed ({layerName}, \u2212{savedTokens} tokens)',
-    'harness.statusBar.skillLoaded': '{skillId}',
+    // ── Kernel status bar ────────────────────────────────────────────────────
+    'kernel.statusBar.toolsLabel':  'Tools',
+    'kernel.statusBar.done':        '{count} done',
+    'kernel.statusBar.budgetWarn':  '{resource} {pct}%',
+    'kernel.statusBar.compressed':  '\u2193 compressed ({layerName}, \u2212{savedTokens} tokens)',
+    'kernel.statusBar.skillLoaded': '{skillId}',
 
     // ── Background session notifications ──────────────────────────────────────
     'session.ttyActive':             '后台会话正在运行交互命令: {command}',

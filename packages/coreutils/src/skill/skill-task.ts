@@ -1,5 +1,5 @@
 import type { SkillDefinition } from '@itookit/common';
-import type { JsonValue, RetryPolicy, TaskSpec } from '@itookit/harness';
+import type { JsonValue, RetryPolicy, TaskSpec } from '@itookit/kernel';
 
 export interface SkillTaskInput<T extends JsonValue = JsonValue> {
     skillId: string;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ILLMService } from '@itookit/common';
-import type { EffectExecutionContext } from '@itookit/harness';
+import type { EffectExecutionContext } from '@itookit/kernel';
 import { LlmChatEffectAdapter } from './llm-chat-effect';
 
 describe('LlmChatEffectAdapter streaming', () => {

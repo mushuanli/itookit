@@ -1,8 +1,8 @@
 # 核心事件流
 
-> 事件层分两套：**Harness 持久化事件**（落盘，经 `eventList`/`TaskHandle.events()` 轮询消费）与 **业务流式事件**（`agent.event` payload，流式渲染）。
+> 事件层分两套：**Kernel 持久化事件**（落盘，经 `eventList`/`TaskHandle.events()` 轮询消费）与 **业务流式事件**（`agent.event` payload，流式渲染）。
 
-## 1. Harness 持久化事件（EventEnvelope）
+## 1. Kernel 持久化事件（EventEnvelope）
 
 所有 Task/Effect 生命周期事件写进会话事件日志（seqfile），消费方按 `sequence > after` 轮询（`session.events(after)` / `TaskHandle.events(after)`），或订阅 `onChanged` 通知。
 
@@ -22,7 +22,7 @@
 | `agent.event` | 业务层流式事件透传（见下） |
 
 ```
-Harness store.appendEvent → 事件日志 → TaskHandle.events(after) 轮询
+Kernel store.appendEvent → 事件日志 → TaskHandle.events(after) 轮询
                                         → cli RunStore.appendEvent（events.jsonl）
                                         → llm-ui 流式渲染
 ```
@@ -90,7 +90,7 @@ session A: sendCrossSession(source, target, topic, payload)
 ## 6. VFS 事件
 
 ```
-FSEventBus（stdio/impl/event/）：
+FSEventBus（vfs-core/impl/event/）：
   node:created / node:updated / node:deleted（payload {nodeIds, moduleId}）
   module:mounted / module:unmounted
   → vfs-ui（VFSUIShell 刷新树）
@@ -103,5 +103,5 @@ FSEventBus（stdio/impl/event/）：
 |---|---|---|
 | `cli`（RunStore） | `session.events(after)` | events.jsonl 落盘 + 运行渲染 |
 | `llm-ui` | `TaskHandle.events()` / SessionEventBus | 流式聊天渲染、DagWorkbench |
-| `app-shell` | VFS FSEventBus / harness onChanged | 树刷新、skill 同步 |
-| harness 内部 | 事件日志 | drain 推进、recover 恢复 |
+| `app-shell` | VFS FSEventBus / kernel onChanged | 树刷新、skill 同步 |
+| kernel 内部 | 事件日志 | drain 推进、recover 恢复 |

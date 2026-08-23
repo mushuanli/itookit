@@ -9,9 +9,9 @@ LLMSkill (VFS 持久化, device-llm)
   ├─ 管理者: LLMDeviceDriver (通过 ioctl CRUD)
   └─ 变更通知: llmDriver.onChange()
 
-        ↓ syncSkillsToHarness() 转换 ↓
+        ↓ syncSkillsToKernel() 转换 ↓
 
-SkillDefinition (运行时内存, llm-harness)
+SkillDefinition (运行时内存, llm-kernel)
   ├─ 位置: SkillDeviceDriver 内存 Map
   ├─ 内容: id, name, type, enabled, instructions, tools[], triggerPatterns...
   ├─ 管理者: SkillDeviceDriver (loadSkill / unloadSkill)

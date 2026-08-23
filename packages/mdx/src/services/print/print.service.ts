@@ -1,7 +1,7 @@
 // @file: mdx/core/print.service.ts
 
 import { MDxRenderer } from '../../renderer/mdx-renderer';
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 
 // ✅ 从常量文件导入样式
 import { PRINT_STYLES } from './print.styles';

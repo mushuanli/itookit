@@ -5,7 +5,7 @@
  * System file filtering (. prefix, __ prefix, _ asset dirs) is handled
  * automatically by shouldFilterNode() inside each provider's filterResults().
  */
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 import { FileMentionSource } from './FileMentionSource';
 import { DirectoryMentionSource } from './DirectoryMentionSource';
 

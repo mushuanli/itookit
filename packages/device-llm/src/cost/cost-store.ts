@@ -3,7 +3,7 @@
 // key = `{sessionId}|{providerId}|{date}`，同 key 每次请求累加。
 // 一个 session 切换 provider 产生独立记录（不同 key）。
 
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 import type { CostRecord } from '@itookit/common';
 import { COST_SEQ_PATH } from '../constants/pricing';
 

@@ -23,8 +23,8 @@ import type {
     FSEvent,
     IAssetOperations,
     ITagOperations,
-} from '@itookit/stdio';
-import { FSCapabilityError } from '@itookit/stdio';
+} from '@itookit/vfs-core';
+import { FSCapabilityError } from '@itookit/vfs-core';
 import { SettingsService } from '../services/SettingsService';
 
 // UI 定义：ID -> 元数据

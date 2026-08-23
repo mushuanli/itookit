@@ -2,7 +2,7 @@
 //
 // VFSHelpers — low-level VFS read/write utilities shared across manager classes.
 
-import type { IModuleFS, CreateFileOptions } from '@itookit/stdio';
+import type { IModuleFS, CreateFileOptions } from '@itookit/vfs-core';
 import yaml from 'js-yaml';
 
 export class VFSHelpers {

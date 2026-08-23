@@ -5,7 +5,7 @@
  * 用于替代文本编辑器来预览图片、视频、音频、PDF 等二进制文件。
  * 始终处于只读渲染模式，不提供编辑能力。
  */
-import { EventBus } from '@itookit/stdio';
+import { EventBus } from '@itookit/vfs-core';
 import type {Heading} from '@itookit/common';
 import type { IEditor, EditorEvent, EditorEventMap, EditorEventCallback, UnifiedSearchResult, CollapseExpandResult } from '@itookit/ui-common';
 

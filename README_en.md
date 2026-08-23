@@ -96,7 +96,7 @@ Agent      ── Functional customization (system prompt + tier preference)
 
 A single Provider can have multiple Connections (e.g., `deepseek-reasoner` / `deepseek-chat`), enabling flexible multi-model setups.
 
-#### 5. Multi-turn Agent Loop — `packages/llm-harness`
+#### 5. Multi-turn Agent Loop — `packages/llm-kernel`
 
 - Tool calling (file_read / file_write / shell_exec / glob_search / grep_search)
 - Four-layer progressive context compression (history_snip → cache_prune → llm_summarize → sliding_window)
@@ -154,7 +154,7 @@ packages/
 ├── vfsdriver-localfs/   # LocalFS backend (Tauri)
 ├── device-llm/          # LLM driver: multi-Provider / streaming / MCP / Skills
 ├── llm-kernel/          # Execution kernel: Executor + Orchestrator
-├── llm-harness/         # Multi-turn Agent loop + built-in tools + TTY
+├── llm-kernel/         # Multi-turn Agent loop + built-in tools + TTY
 ├── llm-runtime/          # Session management + VFS persistence + Mission orchestration
 ├── mdx/                 # CodeMirror 6 Markdown editor (plugin architecture)
 ├── llm-ui/              # Chat UI + Agent / Provider / Connection editors

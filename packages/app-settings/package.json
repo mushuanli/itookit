@@ -35,7 +35,7 @@
     "@itookit/common": "workspace:*",
     "@itookit/device-llm": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/stdio": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
     "@itookit/ui-common": "workspace:*"
   },
@@ -43,7 +43,7 @@
     "@itookit/common": "workspace:*",
     "@itookit/device-llm": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/stdio": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
     "@types/node": "^20.19.25",
     "typescript": "^5.9.3",

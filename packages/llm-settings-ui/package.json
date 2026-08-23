@@ -40,7 +40,7 @@
     "@itookit/common": "workspace:*",
     "@itookit/ui-common": "workspace:*",
     "@itookit/device-llm": "workspace:*",
-    "@itookit/stdio": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {

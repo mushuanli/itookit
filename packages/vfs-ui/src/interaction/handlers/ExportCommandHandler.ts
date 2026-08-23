@@ -4,8 +4,8 @@
  */
 import type { CommandBus } from '../CommandBus';
 import type { VFSService } from '../../services/VFSService';
-import type { IModuleFS } from '@itookit/stdio';
-import { serialize } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
+import { serialize } from '@itookit/vfs-core';
 
 export class ExportCommandHandler {
     private unsubs: (() => void)[] = [];

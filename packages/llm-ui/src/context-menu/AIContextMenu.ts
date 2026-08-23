@@ -18,7 +18,7 @@ import type {
     AgentDefinition
 } from '@itookit/common';
 import type { ContextMenuConfig, MenuItem } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 import { escapeHTML, escapeAttr } from '@itookit/common';
 
 // Matches the shape of VFSNodeUI exposed via the ContextMenuBuilder callback.

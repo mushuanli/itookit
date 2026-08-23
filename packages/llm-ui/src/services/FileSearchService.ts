@@ -1,6 +1,6 @@
 // @file: llm-ui/services/FileSearchService.ts
 
-import { guessMimeType } from '@itookit/stdio';
+import { guessMimeType } from '@itookit/vfs-core';
 import type { IChatEngine } from '@itookit/llm-session';
 import type { FileSuggestion } from '../domain/types';
 

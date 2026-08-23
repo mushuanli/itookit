@@ -1,5 +1,5 @@
 import YAML from 'yaml';
-import { BaseModuleService } from '@itookit/stdio';
+import { BaseModuleService } from '@itookit/vfs-core';
 import {
     buildRenamedFilename,
     generateUUID,
@@ -9,7 +9,7 @@ import {
     guessMimeType,
     type FSNode,
     type IVFSManager,
-} from '@itookit/stdio';
+} from '@itookit/vfs-core';
 import {
     DEFAULT_SESSION_SETTINGS,
     type ChatSessionSettings,

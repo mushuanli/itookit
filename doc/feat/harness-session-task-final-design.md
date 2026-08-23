@@ -1,11 +1,11 @@
-# Harness Session / Task 最终设计方案
+# Kernel Session / Task 最终设计方案
 
 > 版本：3.0
 > 日期：2026-08-09  
 > 状态：最终设计，已按当前实现校准  
-> 范围：定义通用、持久、可恢复、可扩展的 Harness Session/Task 内核，覆盖 LLM loop、动态 DAG、Bash、Skill、MCP、跨进程与跨 Session 协作。
+> 范围：定义通用、持久、可恢复、可扩展的 Kernel Session/Task 内核，覆盖 LLM loop、动态 DAG、Bash、Skill、MCP、跨进程与跨 Session 协作。
 
-> **包名对照（2026-08-15 拆分后）**：本文写作时使用的 `llm-runtime` → 现为 `@itookit/llm-programs`；`llm-conversation` → 现为 `@itookit/llm-session`（会话）+ `@itookit/llm-flow`（DAG 编排）。T19 等处提到的 `llm-harness` 已删除，调度统一由 `@itookit/harness` 承担。
+> **包名对照（2026-08-15 拆分后）**：本文写作时使用的 `llm-runtime` → 现为 `@itookit/llm-tasks`；`llm-conversation` → 现为 `@itookit/llm-session`（会话）+ `@itookit/llm-flow`（DAG 编排）。T19 等处提到的 `llm-kernel` 已删除，调度统一由 `@itookit/kernel` 承担。
 
 ## 0. 实施任务与完成状态
 
@@ -14,10 +14,10 @@
 | 实施 Task | 状态 | 当前结果 / 完成条件 |
 |---|---|---|
 | T01 stdio 事务型 SeqFile 契约 | ✅ 已完成 | 已增加跨 SeqFile transaction、CAS、increment、append、稳定 prefix scan 和 `transactionalSeqFiles` capability；stdio typecheck 通过。 |
-| T02 Memory RecordStore | ✅ 已完成 | 已实现 copy-on-write 原子提交与回滚，作为 Harness 单元测试后端。 |
+| T02 Memory RecordStore | ✅ 已完成 | 已实现 copy-on-write 原子提交与回滚，作为 Kernel 单元测试后端。 |
 | T03 IndexedDB RecordStore | ✅ 已完成 | 使用单个 `readwrite` transaction；接口与工程类型检查通过。通用事务语义由 stdio 的 17 项 SeqFile 测试覆盖。 |
 | T04 LocalFS/Tauri RecordStore | 🟡 待验证 | records schema、事务接口和 backend adapter 已接入；adapter 事务测试及两个平台 TypeScript 检查通过，仍需原生 SQLite 并发、重启与 Tauri 实机验证。 |
-| T05 `@itookit/harness` 新包与依赖边界 | ✅ 已完成 | 核心包已建立，唯一生产依赖为 `@itookit/stdio`；核心 typecheck 通过。 |
+| T05 `@itookit/kernel` 新包与依赖边界 | ✅ 已完成 | 核心包已建立，唯一生产依赖为 `@itookit/vfs-core`；核心 typecheck 通过。 |
 | T06 Session/Catalog/StorageResolver | ✅ 已完成 | 已实现 `catalog.seq`、`StorageBindingRef`、resolver registry、Session create/open/list 与 Chat assetdir resolver。 |
 | T07 Durable Task 状态机与目录事实源 | ✅ 已完成 | 已实现 Task create/claim/commit/signal/cancel、Effect/Signal/Interaction wait、Attempt lease/fencing、完整 Attempt 记录、逐版本 Task snapshot、EventJournal 和过期 Attempt 恢复；运行状态与历史均以 `task.seq` 为事实源。 |
 | T08 Durable Effect | ✅ 已完成 | 已实现开放 EffectRegistry、Effect Attempt lease/heartbeat/fencing、事务外执行、结果先持久化再唤醒、崩溃后 reconcile/indeterminate、取消持久化与 adapter cleanup；deadline 会主动结束等待并调用 adapter cancel，Effect 请求/结果拒绝非 JSON 对象。 |
@@ -25,14 +25,14 @@
 | T10 ResourceHandle/Grant | ✅ 已完成 | 已实现 ResourceRecord、Handle 权限子集授权、父链校验、级联 revoke、generation fencing、Effect 执行前 grant 检查及资源祖先 Budget。 |
 | T11 Session 生命周期 | ✅ 已完成 | create/open/suspend/resume/close、关闭时批量取消及 Session/Catalog 状态同步已实现；生命周期行为测试通过。 |
 | T12 Coreutils 能力包迁移 | ✅ 已完成 | 已建立 `@itookit/coreutils`，只保留抽象端口、平台无关公共实现、Session-scoped runtime 和 Durable Effect/Program；Node/Browser/Tauri 的文件系统、网络和 Shell 实现由 `apps/*` 注入。 |
-| T13 Conversation/UI/App 一次性切换 | ✅ 已完成 | App Shell 直接装配 `Harness + CoreutilsRuntime`；Conversation 使用 `SessionHandle/TaskHandle`；UI 使用 `TaskHandle/EventEnvelope/Interaction`，生产代码不再依赖旧 ControlPlane。 |
+| T13 Conversation/UI/App 一次性切换 | ✅ 已完成 | App Shell 直接装配 `Kernel + CoreutilsRuntime`；Conversation 使用 `SessionHandle/TaskHandle`；UI 使用 `TaskHandle/EventEnvelope/Interaction`，生产代码不再依赖旧 ControlPlane。 |
 | T14 Context/CrossSession/Budget/Workspace | ✅ 已完成 | Durable core v1 已实现 ContextCommit DAG/branch CAS、Session shared history、跨 Session outbox/inbox、祖先 Budget，以及开放 WorkspaceAdapter 的持久 snapshot/diff/merge 与合并父链。 |
-| T15 全仓验证与故障注入 | 🟡 待验证 | stdio、Harness、Conversation projection、LocalFS adapter 测试，相关包类型检查/构建及 Web/Tauri Vite 构建通过；跨实例唯一 claim、notifier 丢包轮询和过期 Attempt replay 已覆盖。仍需真实进程 kill、原生 SQLite/IndexedDB 并发重启及 Tauri 实机验证。 |
+| T15 全仓验证与故障注入 | 🟡 待验证 | stdio、Kernel、Conversation projection、LocalFS adapter 测试，相关包类型检查/构建及 Web/Tauri Vite 构建通过；跨实例唯一 claim、notifier 丢包轮询和过期 Attempt replay 已覆盖。仍需真实进程 kill、原生 SQLite/IndexedDB 并发重启及 Tauri 实机验证。 |
 | T16 Retry/Lease 长运行增强 | ✅ 已完成 | 已实现显式 retryable failure 与 reducer exception 的自动 retry、持久 `readyAt/lastError`、固定 backoff、Attempt 失败历史、运行中 lease heartbeat、过期 commit 拒绝、worker dispose 后 lease recovery，以及 retry budget 耗尽终止。 |
 | T17 Durable Interaction | ✅ 已完成 | 已实现 `input/approval` 请求、Task 内持久 InteractionRecord、`interaction` wait、Session/Task respond API、响应事件与恢复后继续执行。 |
-| T18 Harness 分层与公开扩展边界 | ✅ 已完成 | 已拆分 domain/application/ports/runtime/infrastructure/public；插件只能注册 Program、Effect、StorageResolver、Workspace，不访问存储内部。 |
-| T19 旧 Process Kernel 清理 | ✅ 已完成 | `packages/llm-harness`、旧 Process Kernel/Scheduler/Checkpoint、`ProcessProgram/ProcessHost/RunHandle` 公共协议及旧 LLM Process Program 已删除，生产引用扫描为零。 |
-| T20 Chat/Agent Durable Program 迁移 | ✅ 已完成 | `@itookit/llm-programs` 提供 Durable Chat/Agent Program；LLM/Tool 通过授权 Effect 执行，HITL 使用 Interaction；Flow 编译为新 Harness `TaskSpec/dependsOn` DAG。 |
+| T18 Kernel 分层与公开扩展边界 | ✅ 已完成 | 已拆分 domain/application/ports/runtime/infrastructure/public；插件只能注册 Program、Effect、StorageResolver、Workspace，不访问存储内部。 |
+| T19 旧 Process Kernel 清理 | ✅ 已完成 | `packages/llm-kernel`、旧 Process Kernel/Scheduler/Checkpoint、`ProcessProgram/ProcessHost/RunHandle` 公共协议及旧 LLM Process Program 已删除，生产引用扫描为零。 |
+| T20 Chat/Agent Durable Program 迁移 | ✅ 已完成 | `@itookit/llm-tasks` 提供 Durable Chat/Agent Program；LLM/Tool 通过授权 Effect 执行，HITL 使用 Interaction；Flow 编译为新 Kernel `TaskSpec/dependsOn` DAG。 |
 | T21 Coreutils 可靠性与平台边界加固 | 🟡 待验证 | 已实现 Session 级 Tool/Skill/TTY 隔离、Skill loaded shared-state 恢复、所有能力 ResourceHandle execute 授权、失败结果转 Effect failure、LLM finally 清理、TTY 所有权、Durable approval program、Web/Tauri 应用注入和 Tauri Shell timeout/cancel；待 Tauri 实机与真实进程崩溃验证。 |
 | T22 声明驱动模型与 Durable Skill 契约 | ✅ 已完成 | 已明确 Task/Attempt/Effect/Resource 状态边界；TaskHandle 可直接创建归属自身的 Resource；Skill manifest 可声明 `taskProgram` 并由 `createSkillTaskSpec` 编译为 deferred Durable Task；Program Decision 的 state/output/action payload 在提交前验证为 durable JSON。 |
 | T23 特权 Slash Command | ✅ 已完成 | `/plan`、`/exec` 通过应用端口创建 deferred Durable Task 并绑定最小 ResourceHandle；`/approve`、`/cancel`、`/resume` 操作当前附着 Task，当前特权 Task id 写入 Session shared state 以便编辑器重载后恢复附着。命令文本属于 UI，ExecProgram 属于 Coreutils，PlanProgram 属于 LLM Runtime，依赖由 App Shell 组装。 |
@@ -68,13 +68,13 @@ created -> blocked -> ready -> running -> waiting -> ready
 |---|---|
 | stdio 事务型 SeqFile | 17 项测试通过 |
 | Coreutils capability runtime | 20 项测试通过，覆盖 Effect 注册、Session Skill 隔离与恢复、streaming LLM、scope 释放、Durable approval、审批后 Exec，以及 Skill manifest→Durable TaskSpec 编译和真实 Task 执行 |
-| Harness Durable Kernel | 35 项测试通过，覆盖悬挂 Effect deadline/cancel、非 JSON Effect、非 durable Decision 拒绝，以及 TaskHandle 创建归属资源后启动 deferred Task |
+| Kernel Durable Kernel | 35 项测试通过，覆盖悬挂 Effect deadline/cancel、非 JSON Effect、非 durable Decision 拒绝，以及 TaskHandle 创建归属资源后启动 deferred Task |
 | LLM Runtime | 10 项测试通过，覆盖 ContextAssembler、ProviderMessageAdapter 与 Durable Plan 生成/审批；Durable Agent 的 Effect/DAG 集成由 Conversation 测试覆盖 |
 | Conversation / Durable Flow | 42 项完整测试通过，其中 Durable 测试覆盖 manifest 版本历史、DAG fan-in 聚合及 Agent 节点授权 LLM Effect |
 | LocalFS RecordStore adapter | 2 项事务测试通过 |
-| TypeScript | `common`、`harness`、`coreutils`、`llm-runtime`、`llm-conversation`、`llm-ui`、Web、Tauri 检查通过 |
+| TypeScript | `common`、`kernel`、`coreutils`、`llm-runtime`、`llm-conversation`、`llm-ui`、Web、Tauri 检查通过 |
 | Tauri Rust | `cargo check` 通过；Shell command 支持 request id、timeout 和 abort kill，仍待实机交互验证 |
-| Build | `stdio`、`harness`、`coreutils`、`llm-runtime`、`llm-conversation`、`llm-ui`、LocalFS、IndexedDB、Web 和 Tauri Vite build 通过 |
+| Build | `stdio`、`kernel`、`coreutils`、`llm-runtime`、`llm-conversation`、`llm-ui`、LocalFS、IndexedDB、Web 和 Tauri Vite build 通过 |
 
 这里的“通过”不替代原生 SQLite、浏览器 IndexedDB 和 Tauri 实机上的并发、崩溃恢复测试。当前 Node 25 环境缺少 `better-sqlite3` 对应原生 binding，因此 LocalFS 全量原生测试不能运行；该项仍记录为仓库验证债务。
 
@@ -84,20 +84,20 @@ created -> blocked -> ready -> running -> waiting -> ready
 
 | 状态范围 | 权威存储 | 历史/恢复信息 | 一致性语义 |
 |---|---|---|---|
-| 全局目录状态 | `/.config/harness/catalog.seq` | Session 路由和 Task→Session 路由；可由各 Session 事实源修复 | 只做全局定位，不保存 Task 私有状态或 Session 业务共享值 |
-| Session 生命周期 | `.harness/session.seq` | `events.seq` 保存 create/status change 事实 | Session 本地事务提交；Catalog 是跨存储可修复投影 |
-| Session 内共享状态 | `.harness/shared.seq` | 当前值、单调 version、不可变 `history/<key>/<version>`，删除也保留 tombstone revision | API 支持 CAS；Task 的 `set-shared/delete-shared` 与 Task Decision 在同一事务提交 |
-| Coreutils Session 能力状态 | `.harness/shared.seq` 的 `coreutils.skills.loaded`；每个 Session 独立 Runtime scope | Skill loaded id 集合使用 CAS 更新，scope 重建时重放注册；Tool/Skill/TTY 内存对象不跨 Session 共享 | Session close 触发插件 lifecycle dispose；TTY 进程句柄不可持久化，worker 丢失后 Effect 进入 `indeterminate` |
-| Session 上下文共享 | `.harness/context.seq` | 不可变 ContextCommit DAG、多父 merge、命名 branch head/version | branch head 使用 CAS；并发写不会静默覆盖 |
-| Session 间协作状态 | 各自 `.harness/messages.seq` | source outbox 的 pending/delivered、target inbox 去重副本及双方 EventJournal | 不直接共享可变内存或数据库行；使用 at-least-once relay + inbox idempotency |
+| 全局目录状态 | `/.config/kernel/catalog.seq` | Session 路由和 Task→Session 路由；可由各 Session 事实源修复 | 只做全局定位，不保存 Task 私有状态或 Session 业务共享值 |
+| Session 生命周期 | `.kernel/session.seq` | `events.seq` 保存 create/status change 事实 | Session 本地事务提交；Catalog 是跨存储可修复投影 |
+| Session 内共享状态 | `.kernel/shared.seq` | 当前值、单调 version、不可变 `history/<key>/<version>`，删除也保留 tombstone revision | API 支持 CAS；Task 的 `set-shared/delete-shared` 与 Task Decision 在同一事务提交 |
+| Coreutils Session 能力状态 | `.kernel/shared.seq` 的 `coreutils.skills.loaded`；每个 Session 独立 Runtime scope | Skill loaded id 集合使用 CAS 更新，scope 重建时重放注册；Tool/Skill/TTY 内存对象不跨 Session 共享 | Session close 触发插件 lifecycle dispose；TTY 进程句柄不可持久化，worker 丢失后 Effect 进入 `indeterminate` |
+| Session 上下文共享 | `.kernel/context.seq` | 不可变 ContextCommit DAG、多父 merge、命名 branch head/version | branch head 使用 CAS；并发写不会静默覆盖 |
+| Session 间协作状态 | 各自 `.kernel/messages.seq` | source outbox 的 pending/delivered、target inbox 去重副本及双方 EventJournal | 不直接共享可变内存或数据库行；使用 at-least-once relay + inbox idempotency |
 | Task 私有状态 | `tasks/<task-id>/task.seq` 的 `record` | 每个 version 的不可变 `snapshot/<version>` | input/state/status/wait/pendingEvents/effects/output/exit/currentAttempt 一起提交；Decision 的 state/output/action payload 提交前拒绝函数、Promise、循环引用和其他非 JSON 值 |
 | Task 运行状态 | 同一 `TaskRecord` | `attempt/<attempt-id>` 保存 started/finalized attempt；`events.seq` 保存 leased/waiting/retry/terminal/lost 等事实 | claim 由事务串行化；commit 校验 version + lease epoch + lease token + lease deadline；heartbeat 续租不改变逻辑 version |
 | Task Interaction 状态 | `TaskRecord.interactions` | 请求、响应值、requestedAt/resolvedAt 和 `task.interaction.requested` 事件 | 请求先随 Decision 持久化再等待；respond 原子写响应、pending event 并唤醒 Task；重启不丢审批/输入 |
 | Task Effect 运行状态 | `TaskRecord.effects` | 每个 Effect 保存逻辑状态、所有物理 EffectAttempt、当前 lease、结果/错误 | 长操作 heartbeat 续租；恢复时先 reconcile；不可确认副作用进入 `indeterminate`；Task cancel 原子标记 Effect cancelled 后 abort/cancel adapter |
 | Task→Session 共享写 | `shared.seq` + Task `task.seq` | SharedState revision + Task snapshot +同 sequence EventJournal | 当前已支持 `set-shared/delete-shared` 原子 side effect；ContextCommit 仍通过独立 Session API 提交 |
-| Resource/Grant/Budget | `.harness/resources.seq` | Resource/Handle/Budget 当前记录与 create/grant/revoke/configure/consume 事件 | grant 不提权、父链授权、generation/revoke fencing、祖先 Budget 原子扣减 |
-| Workspace 协作 | `.harness/resources.seq` 的 workspace snapshot/diff entries | snapshot 不可变、merge snapshot 保存左右 parentIds、操作写入事件 | Harness 只保存逻辑快照和 lineage；内容捕获、diff、merge 由仅按 kind/version 注册的 adapter 实现 |
-| Conversation 投影 | Conversation manifest/runtime projection | 版本历史与 unread recovery | 它是 Harness Event/Task 状态的 durable projection，不替代 Harness 事实源 |
+| Resource/Grant/Budget | `.kernel/resources.seq` | Resource/Handle/Budget 当前记录与 create/grant/revoke/configure/consume 事件 | grant 不提权、父链授权、generation/revoke fencing、祖先 Budget 原子扣减 |
+| Workspace 协作 | `.kernel/resources.seq` 的 workspace snapshot/diff entries | snapshot 不可变、merge snapshot 保存左右 parentIds、操作写入事件 | Kernel 只保存逻辑快照和 lineage；内容捕获、diff、merge 由仅按 kind/version 注册的 adapter 实现 |
+| Conversation 投影 | Conversation manifest/runtime projection | 版本历史与 unread recovery | 它是 Kernel Event/Task 状态的 durable projection，不替代 Kernel 事实源 |
 
 当前明确不保存或不允许的隐式状态：
 
@@ -111,20 +111,20 @@ created -> blocked -> ready -> running -> waiting -> ready
 
 ### 0.5 SQLite、SeqFile 与目录位置澄清
 
-Harness 只依赖 `@itookit/stdio`，因此其稳定契约是逻辑 SeqFile 路径，而不是直接打开某个 SQLite 文件：
+Kernel 只依赖 `@itookit/vfs-core`，因此其稳定契约是逻辑 SeqFile 路径，而不是直接打开某个 SQLite 文件：
 
 ```text
 chat module
-  /.config/harness/catalog.seq                 # 全局目录
-  <assetdir>/.harness/session.seq              # Session 本地状态
-  <assetdir>/.harness/tasks/<task-id>/task.seq # Task 状态与历史
+  /.config/kernel/catalog.seq                 # 全局目录
+  <assetdir>/.kernel/session.seq              # Session 本地状态
+  <assetdir>/.kernel/tasks/<task-id>/task.seq # Task 状态与历史
 ```
 
-在 LocalFS/Tauri 部署中，SeqFile record 由 stdio backend 的 SQLite sidecar 事务承载；当前物理文件名是 backend 管理的 `index.db`，不是 Harness 自行创建的 `local.db`。在 Web 中同一逻辑结构由 IndexedDB 承载，在测试中由 Memory RecordStore 承载。这样既满足全局/Session 逻辑隔离，又保持 Harness 不依赖 SQLite、IndexedDB 或平台插件。若产品必须让每个 `.harness/local.db` 成为可复制物理单元，应新增 stdio storage resolver/backend 配置，而不在 Harness 内引入数据库驱动。
+在 LocalFS/Tauri 部署中，SeqFile record 由 stdio backend 的 SQLite sidecar 事务承载；当前物理文件名是 backend 管理的 `index.db`，不是 Kernel 自行创建的 `local.db`。在 Web 中同一逻辑结构由 IndexedDB 承载，在测试中由 Memory RecordStore 承载。这样既满足全局/Session 逻辑隔离，又保持 Kernel 不依赖 SQLite、IndexedDB 或平台插件。若产品必须让每个 `.kernel/local.db` 成为可复制物理单元，应新增 stdio storage resolver/backend 配置，而不在 Kernel 内引入数据库驱动。
 
 ## 1. 结论
 
-Harness 应实现为一个 **Agent 专用的轻量 Durable Kernel**，而不是把 Linux 名词逐一照搬。
+Kernel 应实现为一个 **Agent 专用的轻量 Durable Kernel**，而不是把 Linux 名词逐一照搬。
 
 最终模型只有五个核心运行时抽象：
 
@@ -146,13 +146,13 @@ Harness 应实现为一个 **Agent 专用的轻量 Durable Kernel**，而不是�
 6. Skill 是可版本化能力包，可包含 `TaskProgram + Resource bundle + EffectAdapter`；加载/短调用是 Effect，复杂 Skill 作为 Task 执行，不能成为黑盒 Effect。
 7. Session context、Task private state、Task event trace、long-term memory 分开保存。
 8. Session 内同步由 `SessionStore` 保证；跨 Session 协作统一经过 `CrossSessionBus`，不直接访问对方数据库。
-9. Harness 持久化统一使用 `@itookit/stdio` 的事务型 SeqFile；Web 使用 IndexedDB，LocalFS/Tauri 可在后端内部使用 SQLite sidecar。
+9. Kernel 持久化统一使用 `@itookit/vfs-core` 的事务型 SeqFile；Web 使用 IndexedDB，LocalFS/Tauri 可在后端内部使用 SQLite sidecar。
 10. Task 目录是事实源，Session `index.seq` 是可重建调度投影；通知只是低延迟 hint，不进入 TaskProgram 业务语义。
 
 ### 1.1 声明驱动状态机的准确理解
 
-Harness 不是“所有内容都写成配置”的纯声明式系统，而是**声明驱动的持久状态机**：
-`DurableTaskProgram.init/reduce` 执行确定性计算并返回 `Decision`，Harness 只提交
+Kernel 不是“所有内容都写成配置”的纯声明式系统，而是**声明驱动的持久状态机**：
+`DurableTaskProgram.init/reduce` 执行确定性计算并返回 `Decision`，Kernel 只提交
 Decision 中显式声明的 state、action、wait 和终态。
 
 ```text
@@ -171,7 +171,7 @@ Session（命名空间、共享状态、资源目录、Task 集合）
 | 状态平面 | 归属与写入方式 |
 |---|---|
 | Task 业务状态 | `TaskRecord.state`；仅由 Program Decision 推进 |
-| Task/Effect 物理执行状态 | `TaskAttempt/EffectAttempt`；由 Harness lease、heartbeat、fencing 和 recovery 管理 |
+| Task/Effect 物理执行状态 | `TaskAttempt/EffectAttempt`；由 Kernel lease、heartbeat、fencing 和 recovery 管理 |
 | Session 共享状态 | `shared.seq`；优先由 `set-shared/delete-shared` action 与 Task Decision 原子提交 |
 | Context 历史 | 不可变 `ContextCommit` DAG 与 branch CAS |
 | Resource 外部状态 | 由 URI 对应的 adapter/Effect 操作；ResourceHandle 只证明调用者拥有相应 right |
@@ -237,31 +237,31 @@ Decision 持久字段，但仍禁止 Program 直接调用 Provider SDK、`fetch`
 
 ```mermaid
 C4Context
-    title Harness System Context
+    title Kernel System Context
     Person(client, "User / Host Application", "提交任务、发送输入、观察事件")
-    System(harness, "Harness Runtime", "持久 Session、Task 调度、Effect、资源与事件流")
+    System(kernel, "Kernel Runtime", "持久 Session、Task 调度、Effect、资源与事件流")
     System_Ext(llm, "LLM Providers", "模型推理、流式响应")
     System_Ext(mcp, "MCP Servers", "工具、资源与远程长任务")
-    System_Ext(remote, "Remote Agents / A2A", "跨 Harness Agent 协作")
+    System_Ext(remote, "Remote Agents / A2A", "跨 Kernel Agent 协作")
 
-    Rel(client, harness, "Session/Task API, event streams")
-    Rel(harness, llm, "LLM effects")
-    Rel(harness, mcp, "MCP effects / remote tasks")
-    Rel(harness, remote, "A2A messages / artifacts")
+    Rel(client, kernel, "Session/Task API, event streams")
+    Rel(kernel, llm, "LLM effects")
+    Rel(kernel, mcp, "MCP effects / remote tasks")
+    Rel(kernel, remote, "A2A messages / artifacts")
 ```
 
-Harness 对外只暴露稳定的 Session、Task、Event 和 Resource 接口；provider session id、HTTP connection、进程 PID 和具体后端路径均为内部实现信息。
+Kernel 对外只暴露稳定的 Session、Task、Event 和 Resource 接口；provider session id、HTTP connection、进程 PID 和具体后端路径均为内部实现信息。
 
 ---
 
-## 5. C4 Level 2：Harness 容器
+## 5. C4 Level 2：Kernel 容器
 
 ```mermaid
 C4Container
-    title Harness Runtime Containers
+    title Kernel Runtime Containers
     Person(client, "Host Application", "CLI、UI、API server")
 
-    System_Boundary(harness_boundary, "Harness Runtime") {
+    System_Boundary(kernel_boundary, "Kernel Runtime") {
         Container(api, "Public API", "TypeScript/Python/RPC", "SessionHandle、TaskHandle、EventStream")
         Container(kernel, "Kernel", "State Machine", "Session、Task、wait、DAG、lease、budget、capability")
         Container(worker, "Workers", "Process / Thread", "执行 deterministic reducer")
@@ -332,7 +332,7 @@ C4Container
     Rel(bus, catalog, "routes by endpoint")
 ```
 
-事务型 SeqFile 是 Harness 唯一存储语义。IndexedDB、LocalFS sidecar SQLite 或未来其他数据库只是 stdio backend 的实现差异，上层语义不变。
+事务型 SeqFile 是 Kernel 唯一存储语义。IndexedDB、LocalFS sidecar SQLite 或未来其他数据库只是 stdio backend 的实现差异，上层语义不变。
 
 ---
 
@@ -490,7 +490,7 @@ interface TaskAttempt {
 ## 9. Public API
 
 ```ts
-interface Harness {
+interface Kernel {
   createSession(spec?: CreateSessionSpec): Promise<SessionHandle>;
   openSession(id: SessionId): Promise<SessionHandle>;
   listSessions(query?: SessionQuery): AsyncIterable<SessionSummary>;
@@ -498,7 +498,7 @@ interface Harness {
   openTask<O = unknown>(id: TaskId): Promise<TaskHandle<O>>;
   inspectTask(id: TaskId): Promise<TaskSnapshot>;
   recover(): Promise<RecoveryReport>;
-  use(plugin: HarnessPlugin): Promise<void>;
+  use(plugin: KernelPlugin): Promise<void>;
 }
 
 interface SessionHandle {
@@ -696,13 +696,13 @@ interface EffectRegistry {
   resolve(kind: string, version: string): EffectAdapter<unknown, unknown>;
 }
 
-interface HarnessPlugin {
+interface KernelPlugin {
   readonly id: string;
   readonly version: string;
-  install(registration: HarnessRegistration): void | Promise<void>;
+  install(registration: KernelRegistration): void | Promise<void>;
 }
 
-interface HarnessRegistration {
+interface KernelRegistration {
   registerProgram(program: DurableTaskProgram): void;
   registerEffect(adapter: EffectAdapter): void;
   registerStorageResolver(resolver: SessionStorageResolver): void;
@@ -1139,7 +1139,7 @@ Resource 属于 Session 命名空间；Task“拥有资源”的准确含义是 
 
 ### 17.5 Workspace Adapter
 
-当前 Workspace 能力由开放 adapter registry 扩展，Harness 不读取宿主文件系统，也不硬编码 Git 或某种 diff 格式：
+当前 Workspace 能力由开放 adapter registry 扩展，Kernel 不读取宿主文件系统，也不硬编码 Git 或某种 diff 格式：
 
 ```ts
 interface WorkspaceAdapter {
@@ -1304,7 +1304,7 @@ sequenceDiagram
 ## 20. Store 抽象与部署模式
 
 ```ts
-interface HarnessStores {
+interface KernelStores {
   directory: SessionDirectory;
   sessions: SessionStoreProvider;
   messages: CrossSessionBus;
@@ -1340,13 +1340,13 @@ interface Notifier {
 }
 ```
 
-### 20.1 事务型 SeqFile（唯一 Harness 存储语义）
+### 20.1 事务型 SeqFile（唯一 Kernel 存储语义）
 
 ```text
-/module/chats/.config/harness/
+/module/chats/.config/kernel/
   catalog.seq
 
-_<session>.chat/.harness/
+_<session>.chat/.kernel/
   session.seq
   shared.seq
   context.seq
@@ -1365,14 +1365,14 @@ _<session>.chat/.harness/
 ### 20.2 平台部署
 
 ```text
-Harness / SessionStore
+Kernel / SessionStore
   -> stdio transactional SeqFile
        -> IndexedDB records transaction (Web)
        -> LocalFS sidecar transaction (Node/Tauri)
        -> Memory copy-on-write transaction (test)
 ```
 
-Harness 不 import `better-sqlite3`、Tauri SQL 或 IndexedDB API。平台后端必须声明 `transactionalSeqFiles` capability，并提供可串行化事务、CAS、原子 increment/append 和稳定前缀扫描；不支持时 Harness 初始化立即失败。
+Kernel 不 import `better-sqlite3`、Tauri SQL 或 IndexedDB API。平台后端必须声明 `transactionalSeqFiles` capability，并提供可串行化事务、CAS、原子 increment/append 和稳定前缀扫描；不支持时 Kernel 初始化立即失败。
 
 ### 20.3 多主机
 
@@ -1829,13 +1829,13 @@ Task/Event/Effect schema 应保持稳定，以支持 Agent Lightning 类训练�
 ### MCP
 
 - MCP tools/resources 映射为 Effect/Resource adapters。
-- MCP protocol session 不等同于 Harness Session。
+- MCP protocol session 不等同于 Kernel Session。
 - MCP long-running task 映射为受监管 child Task。
 
 ### A2A
 
 - A2A TaskId 保存在 remote task metadata。
-- 本地始终生成 Harness TaskId。
+- 本地始终生成 Kernel TaskId。
 - Message、Artifact 和 Task state 通过 adapter 转换。
 
 ### OpenTelemetry
@@ -1848,22 +1848,22 @@ Task/Event/Effect schema 应保持稳定，以支持 Agent Lightning 类训练�
 ## 26. 建议模块边界
 
 ```text
-@itookit/harness (唯一生产依赖 @itookit/stdio)
+@itookit/kernel (唯一生产依赖 @itookit/vfs-core)
   src/domain/          # 纯协议与状态模型：Session/Task/Effect/Interaction/Resource
-  src/application/     # 用例编排：Harness；不包含 provider 逻辑
-  src/ports/           # Registry 与 HarnessPlugin/HarnessRegistration
+  src/application/     # 用例编排：Kernel；不包含 provider 逻辑
+  src/ports/           # Registry 与 KernelPlugin/KernelRegistration
   src/runtime/         # poller、Task/Effect lease heartbeat
   src/infrastructure/  # stdio SeqFile store；唯一持久化实现入口
   src/public/          # SessionHandle、TaskHandle、EventStream
   src/index.ts         # 稳定公开出口
 
-@itookit/stdio
+@itookit/vfs-core
   transactional SeqFile and backend capability
 
 @itookit/coreutils
   LLM / Tool / Skill / Bash / TTY capability ports
   platform-neutral Session-scoped runtime
-  CoreutilsHarnessPlugin + approved-effect / exec DurableTaskProgram
+  CoreutilsKernelPlugin + approved-effect / exec DurableTaskProgram
   llm.chat / tool.call / process.exec / tty.command / skill.load EffectAdapter
 
 apps/web-app
@@ -1873,13 +1873,13 @@ apps/tauri-app
   Tauri filesystem Skill source + HTTP/Shell adapters
   Tauri process timeout/cancel implementation
 
-@itookit/llm-programs
+@itookit/llm-tasks
   Durable Chat / Agent / Plan TaskProgram
   ContextAssembler + provider-neutral message policy
-  depends only on common + Harness public contracts
+  depends only on common + Kernel public contracts
 
 @itookit/llm-conversation
-  ChatHarnessStorageResolver / Round and Conversation projection
+  ChatKernelStorageResolver / Round and Conversation projection
   Flow manifest registry + TaskSpec/dependsOn DAG compiler
 
 @itookit/llm-ui
@@ -1891,7 +1891,7 @@ apps/tauri-app
   resolves Agent configuration, submits Task, binds ResourceHandle, starts Task
 ```
 
-旧的根目录 `harness.ts/types.ts/store.ts/registry.ts` 兼容 re-export 已在确认无引用后删除，内部测试也直接使用分层入口。Kernel 不能 import provider SDK 或平台数据库 API；provider adapter 不能直接修改 SeqFile 内核状态。插件仅持有 `HarnessRegistration`，因此无法越过公开端口修改 Store。
+旧的根目录 `kernel.ts/types.ts/store.ts/registry.ts` 兼容 re-export 已在确认无引用后删除，内部测试也直接使用分层入口。Kernel 不能 import provider SDK 或平台数据库 API；provider adapter 不能直接修改 SeqFile 内核状态。插件仅持有 `KernelRegistration`，因此无法越过公开端口修改 Store。
 
 ### 26.1 特权命令归属与语义
 
@@ -1899,11 +1899,11 @@ apps/tauri-app
 |---|---|---|
 | `/plan <goal>` | 创建 `llm.plan@1` Task，绑定 `llm` execute handle；LLM 结果写入 Task state，并创建持久 approval Interaction | 语法在 `llm-ui`；Program 在 `llm-runtime`；提交在 `app-shell` |
 | `/exec <command>` | 创建 `coreutils.exec@1` Task，绑定 `process` execute handle；批准前绝不产生 `process.exec` Effect | 语法在 `llm-ui`；Program/Effect 在 `coreutils`；提交在 `app-shell` |
-| `/approve` | 查找当前附着 Task 最新的 pending approval，并调用 `TaskHandle.respond()` | `llm-ui` Task 控制适配；状态和校验属于 Harness |
-| `/cancel` | 调用当前附着 Task 的 `TaskHandle.cancel()`，终止状态持久化 | `llm-ui` Task 控制适配；取消语义属于 Harness |
-| `/resume` | `created` Task 调用 `start()`；明确等待 `resume` Signal 的 Task 发送 Signal；Effect/Interaction 等待不会被错误唤醒 | `llm-ui` Task 控制适配；调度语义属于 Harness |
+| `/approve` | 查找当前附着 Task 最新的 pending approval，并调用 `TaskHandle.respond()` | `llm-ui` Task 控制适配；状态和校验属于 Kernel |
+| `/cancel` | 调用当前附着 Task 的 `TaskHandle.cancel()`，终止状态持久化 | `llm-ui` Task 控制适配；取消语义属于 Kernel |
+| `/resume` | `created` Task 调用 `start()`；明确等待 `resume` Signal 的 Task 发送 Signal；Effect/Interaction 等待不会被错误唤醒 | `llm-ui` Task 控制适配；调度语义属于 Kernel |
 
-斜杠命令不是 Skill：它们是用户到控制面的特权语法。Skill 可以编译为 Task 或 Effect，但不能覆盖 Harness 的授权、审批、取消和恢复规则。`/exec` 也不再使用旧的“直接 Tool 调用”路径，因此刷新或进程重启后仍可从 Task/Interaction/Effect 事实恢复。
+斜杠命令不是 Skill：它们是用户到控制面的特权语法。Skill 可以编译为 Task 或 Effect，但不能覆盖 Kernel 的授权、审批、取消和恢复规则。`/exec` 也不再使用旧的“直接 Tool 调用”路径，因此刷新或进程重启后仍可从 Task/Interaction/Effect 事实恢复。
 
 当前附着的特权 Task id 保存在 Session shared key `ui.privileged.active-task`；它只是可恢复的 UI 选择指针，不复制 Task 状态。Task 的 state、Interaction、Effect、Attempt 和 ExitRecord 仍以 `tasks/<task-id>/task.seq` 为唯一事实源。
 
@@ -1911,31 +1911,31 @@ apps/tauri-app
 
 | 模块 | 当前用途 | 现在能否删除 | 清理条件 |
 |---|---|---|---|
-| `packages/harness` | 新 Durable Session/Task 唯一核心 | 否 | 长期保留 |
-| `packages/stdio` 的 transactional SeqFile | Harness 唯一存储契约 | 否 | 长期保留；具体 backend 可替换 |
-| `packages/llm-harness` | 旧 Process Kernel、RunHandle、DAG 调度 | 是，已删除 | 生产引用已清零；调度统一由 `packages/harness` 承担 |
+| `packages/kernel` | 新 Durable Session/Task 唯一核心 | 否 | 长期保留 |
+| `packages/vfs-core` 的 transactional SeqFile | Kernel 唯一存储契约 | 否 | 长期保留；具体 backend 可替换 |
+| `packages/llm-kernel` | 旧 Process Kernel、RunHandle、DAG 调度 | 是，已删除 | 生产引用已清零；调度统一由 `packages/kernel` 承担 |
 | `packages/coreutils` | 能力抽象、平台无关公共实现、Session-scoped runtime 与 Durable Effect/Program | 否 | 长期保留；具体平台实现归属 `apps/*` |
 | `packages/llm-runtime` | Durable Chat/Agent Program、上下文组装、Provider 消息策略 | 否 | 长期保留；不包含 Session、Flow、Scheduler 或平台实现 |
-| `packages/llm-common` 的旧 Process 公共协议 | 旧 `ProcessProgram/ProcessHost/RunHandle` | 是，已删除 | 新公共执行协议只来自 `@itookit/harness` |
+| `packages/llm-common` 的旧 Process 公共协议 | 旧 `ProcessProgram/ProcessHost/RunHandle` | 是，已删除 | 新公共执行协议只来自 `@itookit/kernel` |
 | `packages/llm-conversation` coordinator | Round/Flow 到 Durable Task 的业务编排 | 否 | 保留 Conversation 业务，不拥有第二套调度状态机 |
 | `packages/llm-ui/RunAttachmentController` | Task 控制面适配 | 否 | 已重写为 `TaskHandle/EventEnvelope/InteractionRequest` |
-| `packages/harness/src` 根兼容 re-export | 已无引用 | 是，已清理 | 公开包入口继续由 `src/index.ts` 提供 |
+| `packages/kernel/src` 根兼容 re-export | 已无引用 | 是，已清理 | 公开包入口继续由 `src/index.ts` 提供 |
 
-因此，“有了新 Harness”不等于其他模块已经无用。可清理的是迁移完成后的**重复状态机、重复 checkpoint、重复 Run/Process 身份和仅服务旧内核的投影**；Bash、TTY、LLM、Skill、Tool、MCP 等能力本身仍需保留，只改变接入方向。
+因此，“有了新 Kernel”不等于其他模块已经无用。可清理的是迁移完成后的**重复状态机、重复 checkpoint、重复 Run/Process 身份和仅服务旧内核的投影**；Bash、TTY、LLM、Skill、Tool、MCP 等能力本身仍需保留，只改变接入方向。
 
 ### 26.3 删除门禁
 
 旧模块删除门禁及当前结果：
 
-1. `rg` 不再发现生产代码引用 `HarnessKernel/ProcessHost/ProcessProgram/RunHandle`：已满足；
-2. App Shell 直接注入 `Harness`，Conversation 和 UI 只持有 `SessionHandle/TaskHandle`：已满足；
+1. `rg` 不再发现生产代码引用 `KernelKernel/ProcessHost/ProcessProgram/RunHandle`：已满足；
+2. App Shell 直接注入 `Kernel`，Conversation 和 UI 只持有 `SessionHandle/TaskHandle`：已满足；
 3. Chat、Agent、DAG、Bash/TTY、LLM 审批有 Durable Program/Effect/Interaction 测试：代码路径已覆盖，真实平台长进程仍按 T21 验证；
 4. 浏览器、Tauri、LocalFS/SQLite 和 IndexedDB 恢复测试通过；
 5. 删除后相关包 typecheck/test 与 Web/Tauri build 通过：已满足。
 
 ---
 
-## 27. 已完成的 Harness 迁移
+## 27. 已完成的 Kernel 迁移
 
 | 旧抽象 | 当前抽象 | 迁移结果 |
 |---|---|---|
@@ -1955,7 +1955,7 @@ apps/tauri-app
 
 ```text
 app-shell/bootstrap
-  -> Harness + CoreutilsHarnessPlugin
+  -> Kernel + CoreutilsKernelPlugin
   -> llm-conversation SessionHandle / TaskSpec
   -> llm-runtime DurableChatProgram / DurableAgentProgram
   -> TaskHandle / EventStream / Interaction
@@ -1964,7 +1964,7 @@ app-shell/bootstrap
 
 迁移已按由内向外的顺序完成：能力注册、Durable Program、Conversation 编排、UI
 控制面和 App Shell 装配均已切换到新 API。旧 kernel、scheduler、checkpoint、
-`ProcessProgram/ProcessHost/RunHandle` 公共协议及 `packages/llm-harness` 已删除，
+`ProcessProgram/ProcessHost/RunHandle` 公共协议及 `packages/llm-kernel` 已删除，
 不再保留 compatibility adapter 或双写路径。
 
 ---
@@ -2060,7 +2060,7 @@ DAG = between Tasks
 Cross-session = messages, not DAG edges
 Task sharing = refs and grants, not private state
 
-Harness storage = transactional SeqFile
+Kernel storage = transactional SeqFile
 Web backend = IndexedDB record transaction
 Local/Tauri backend = LocalFS sidecar transaction
 Task directories = source of truth
@@ -2078,7 +2078,7 @@ Distributed storage = replace stdio RecordStore backend
 - Linux clone 展示复制与共享 fd/fs 语义的区别：[clone(2)](https://man7.org/linux/man-pages/man2/clone.2.html)
 - cgroup v2 的 weight、limit、protection、allocation 启发层级预算：[Linux cgroup v2](https://docs.kernel.org/admin-guide/cgroup-v2.html)
 - IndexedDB transaction 为 Web 提供跨标签页原子 record 更新：[IndexedDB API](https://developer.mozilla.org/docs/Web/API/IndexedDB_API)
-- SQLite WAL 可作为 LocalFS/Tauri sidecar 的内部事务实现，但不进入 Harness 契约：[SQLite WAL](https://www.sqlite.org/wal.html)
+- SQLite WAL 可作为 LocalFS/Tauri sidecar 的内部事务实现，但不进入 Kernel 契约：[SQLite WAL](https://www.sqlite.org/wal.html)
 - Temporal Event History/Activity 模型验证了 command/effect 与非确定性调用隔离：[Temporal Event History](https://docs.temporal.io/workflow-execution/event)
 - LangGraph 区分 thread checkpoint 与 cross-thread store：[LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
 - Anthropic Agent SDK 的 session/subagent/team 分层：[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)

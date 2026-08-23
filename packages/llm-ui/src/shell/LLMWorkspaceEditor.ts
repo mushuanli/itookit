@@ -1,12 +1,12 @@
 // @file: llm-ui/shell/LLMWorkspaceEditor.ts
 
 import { IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventMap, EditorEventCallback, CollapseExpandResult, Toast } from '@itookit/ui-common';
-import { EventBus } from '@itookit/stdio';
+import { EventBus } from '@itookit/vfs-core';
 import type {
     ILLMService,
     ICommandBus,
 } from '@itookit/common';
-import type { EventEnvelope, Harness, InteractionRequest, JsonValue } from '@itookit/harness';
+import type { EventEnvelope, Kernel, InteractionRequest, JsonValue } from '@itookit/kernel';
 
 import {
     IChatEngine, IAgentConfigService, SessionManager, getSessionManager,
@@ -82,8 +82,8 @@ export interface LLMEditorOptions extends EditorOptions {
      * 所有高层操作通过 commands.execute('session.*') / 'vcs.*' 调用。
      */
     commandBus?: ICommandBus;
-    /** Durable Harness used to attach to Tasks. */
-    harness?: Harness;
+    /** Durable Kernel used to attach to Tasks. */
+    kernel?: Kernel;
     /** Application service for durable privileged slash commands. */
     privilegedCommands?: IPrivilegedCommandService;
 }
@@ -454,8 +454,8 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private initRunAttachment(): void {
-        if (!this.options.harness) return;
-        this.runAttachment = new RunAttachmentController(this.options.harness, {
+        if (!this.options.kernel) return;
+        this.runAttachment = new RunAttachmentController(this.options.kernel, {
             onEvent: event => this.handleRunEvent(event),
             onWaiting: condition => this.handleRunWaiting(condition),
             onError: error => Toast.error(error.message),
@@ -909,7 +909,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     // ── Q3: Mid-execution user injection ─────────────────────────────────────
 
-    injectIntoRunningHarness(message: string): boolean {
+    injectIntoRunningKernel(message: string): boolean {
         if (!this.runAttachment?.activeTaskId) return false;
         void this.runAttachment.signal({ type: 'inject', payload: { text: message } })
             .catch(error => Toast.error(error instanceof Error ? error.message : String(error)));
@@ -931,35 +931,35 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private async attachPrivilegedTask(taskId: string, message: string): Promise<void> {
-        if (!this.runAttachment) throw new Error('Harness task attachment is unavailable');
-        const session = await this.options.harness!.openSession(this.requireSessionId());
+        if (!this.runAttachment) throw new Error('Kernel task attachment is unavailable');
+        const session = await this.options.kernel!.openSession(this.requireSessionId());
         await session.setShared(ACTIVE_PRIVILEGED_TASK_KEY, { taskId });
         await this.runAttachment.attach(taskId);
         Toast.info(message);
     }
 
     private async restorePrivilegedTaskAttachment(): Promise<void> {
-        if (!this.runAttachment || !this.options.harness || !this.currentSessionId) return;
-        const session = await this.options.harness.openSession(this.currentSessionId);
+        if (!this.runAttachment || !this.options.kernel || !this.currentSessionId) return;
+        const session = await this.options.kernel.openSession(this.currentSessionId);
         const entry = await session.getShared(ACTIVE_PRIVILEGED_TASK_KEY);
         const taskId = sharedTaskId(entry?.value);
         if (taskId) await this.runAttachment.attach(taskId);
     }
 
     private async cancelAttachedTask(): Promise<void> {
-        if (!this.runAttachment) throw new Error('Harness task attachment is unavailable');
+        if (!this.runAttachment) throw new Error('Kernel task attachment is unavailable');
         await this.runAttachment.cancel();
         Toast.info('Task cancelled');
     }
 
     private async resumeAttachedTask(): Promise<void> {
-        if (!this.runAttachment) throw new Error('Harness task attachment is unavailable');
+        if (!this.runAttachment) throw new Error('Kernel task attachment is unavailable');
         await this.runAttachment.resume();
         Toast.info('Task resumed');
     }
 
     private async approveAttachedTask(note: string): Promise<void> {
-        if (!this.runAttachment) throw new Error('Harness task attachment is unavailable');
+        if (!this.runAttachment) throw new Error('Kernel task attachment is unavailable');
         await this.runAttachment.approve(note);
         Toast.info('Task approved');
     }

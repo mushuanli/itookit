@@ -30,11 +30,11 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/stdio": "workspace:*"
+    "@itookit/vfs-core": "workspace:*"
   },
   "devDependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/stdio": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
   },

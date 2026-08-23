@@ -5,7 +5,7 @@ export { WS_SETTINGS, WS_CHAT, WS_AGENTS, WS_MINDS, WS_ANKI, WS_PROJECTS, WS_EMA
 export type {
     AppOptions,
     AppHandle,
-    AppHarnessPlatform,
+    AppKernelPlatform,
     WorkspaceConfig,
     WorkspaceType,
     AdditionalMount,

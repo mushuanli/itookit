@@ -2,11 +2,12 @@
  * @file apps/tauri-app/src/main.ts
  *
  * Tauri-specific bootstrap:
- *  1. Resolve homeDir via Tauri command; derive rootDir = homeDir/.mindos
+ *  1. Resolve homeDir + rootDir via Tauri commands
+ *       rootDir = resolved data root (settings.json#rootDir or <config>/data)
  *  2. Build backends:
- *       rootBackend  = LocalFSBackend at ~/.mindos/        (all shared modules)
+ *       rootBackend  = LocalFSBackend at <rootDir>/        (all shared modules)
  *       homeBackend  = LocalFSBackend at <homeDir>         (local filesystem)
- *       meta sidecar = ~/.mindos/meta/<path-derived-name>  (home + dynamic mounts)
+ *       meta sidecar = <rootDir>/meta/<path-derived-name>  (home + dynamic mounts)
  *  3. Hand off to app-shell (all common logic lives there)
  *  4. Wire tauri-only features: loading overlay, dynamic local mounts
  */
@@ -19,8 +20,8 @@ import { TauriSqlSidecarDb } from './db/tauri-sql-sidecar';
 import { TauriFsOps } from './fs/tauri-fs-ops';
 import { TauriLLMLogger } from './log/tauri-llm-logger';
 import { TauriNativeShell } from './shell/tauri-native-shell';
-import { TauriSkillToolHandlerFactory } from './harness/tauri-skill-tools';
-import { TauriSkillSource } from './harness/tauri-skill-source';
+import { TauriSkillToolHandlerFactory } from './kernel/tauri-skill-tools';
+import { TauriSkillSource } from './kernel/tauri-skill-source';
 
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
@@ -92,9 +93,8 @@ async function getHomeDir(): Promise<string> {
 
 /**
  * Returns the resolved VFS root directory.
- * Defaults to ~/.mindos; configurable via MINDOS_ROOT env var or
- * settings.json#rootDir (relative paths are resolved against base_dir,
- * making the directory portable across machines).
+ * Config lives at ~/.config/mindos/settings.json; the data root comes from
+ * settings.json#rootDir, the MINDOS_ROOT env var, or ~/.config/mindos/data.
  */
 async function getRootDir(): Promise<string> {
     try {
@@ -104,7 +104,7 @@ async function getRootDir(): Promise<string> {
         // Fallback for plain Vite dev (no Tauri context)
         const home = (globalThis as { process?: { env?: { HOME?: string } } })
             .process?.env?.HOME ?? '.';
-        return `${home}/.mindos`;
+        return `${home}/.config/mindos/data`;
     }
 }
 
@@ -163,7 +163,7 @@ async function bootstrap(): Promise<void> {
 
     // 1. Resolve paths
     //    homeDir   = working project directory (CWD or --home arg)
-    //    rootDir = ~/.mindos — always the real user home, never the working dir
+    //    rootDir   = resolved data root (settings.json#rootDir, never ~/.mindos)
     const [homeDir, rootDir] = await Promise.all([getHomeDir(), getRootDir()]);
     log(`路径解析 (home=${homeDir})`);
 
@@ -177,12 +177,12 @@ async function bootstrap(): Promise<void> {
 
     // 2. Build backends
     //
-    //  rootBackend          : ~/.mindos/  — system paths only (/etc/, /dev/)
-    //                         SQLite: ~/.mindos/_meta/
-    //  per-module backends  : ~/.mindos/module/<name>/  — one SQLite each
-    //                         SQLite: ~/.mindos/_db/<name>/
+    //  rootBackend          : <rootDir>/  — system paths only (/etc/, /dev/)
+    //                         SQLite: <rootDir>/_meta/
+    //  per-module backends  : <rootDir>/module/<name>/  — one SQLite each
+    //                         SQLite: <rootDir>/_db/<name>/
     //  homeBackend          : <homeDir>  — transparent local FS
-    //                         SQLite: ~/.mindos/meta/<path-derived>/
+    //                         SQLite: <rootDir>/meta/<path-derived>/
     //
     // Each module gets its own SQLite to eliminate cross-module DB locking.
 
@@ -228,12 +228,12 @@ async function bootstrap(): Promise<void> {
         routeAliases: { home: 'home-workspace' },
         onProgress: showLoading,
         llmLogger: new TauriLLMLogger(rootDir),
-        harnessPlatform: {
+        kernelPlatform: {
             skillSource: new TauriSkillSource(new TauriFsOps(), homeDir),
             skillToolHandlerFactory: new TauriSkillToolHandlerFactory(nativeShell),
-            async configure(harness) {
-                harness.toolDriver.setNativeShell(nativeShell);
-                await harness.skillService.setCwd(homeDir);
+            async configure(kernel) {
+                kernel.toolDriver.setNativeShell(nativeShell);
+                await kernel.skillService.setCwd(homeDir);
             },
         },
     });

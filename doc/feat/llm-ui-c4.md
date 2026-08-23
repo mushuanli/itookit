@@ -10,11 +10,11 @@
 | llm-ui P2 | `SessionEventHandler` 的 `as any` + 事件流三路收敛 | 空 executor 已删；边界类型未修 |
 | llm-ui P3 | 拆 `editors/`(~4000 行) 为独立包 | 未做 |
 | llm-ui P5 | 38 处 `any` + `✅` 历史注释 | console 已清零；any/注释未做 |
-| harness | `harness.ts`(696) 未拆成 TaskScheduler/EffectDispatcher/ResourceManager 协调器 | 仅抽了 utils |
-| harness | `store.ts`(936) 未按聚合根拆 TaskStore/EffectStore/ResourceStore | 仅抽了 store-helpers |
+| kernel | `kernel.ts`(696) 未拆成 TaskScheduler/EffectDispatcher/ResourceManager 协调器 | 仅抽了 utils |
+| kernel | `store.ts`(936) 未按聚合根拆 TaskStore/EffectStore/ResourceStore | 仅抽了 store-helpers |
 | doc | `doc/readme.md` 已删除（旧架构），文档入口见 `CLAUDE.md` 项目文档表 | 已完成 |
 
-> 已完成（本会话）：llm-ui P4（TokenStats→SessionTokenUsage）、P5 console、P2 空 executor；以及此前 harness/upper-layers 的全部下沉项 + 预算扣减 + 包拆分重命名。
+> 已完成（本会话）：llm-ui P4（TokenStats→SessionTokenUsage）、P5 console、P2 空 executor；以及此前 kernel/upper-layers 的全部下沉项 + 预算扣减 + 包拆分重命名。
 
 ---
 
@@ -27,21 +27,21 @@ C4Context
     System(ui, "llm-ui", "Conversation 展示 + Run 控制（不直接控制 Engine）")
     System(session, "llm-session", "会话语义 + 持久化 + 编排")
     System(flow, "llm-flow", "DAG 编排")
-    System(programs, "llm-programs", "LLM 任务单元")
-    System(harness, "harness", "执行内核（TaskHandle / EventEnvelope）")
+    System(programs, "llm-tasks", "LLM 任务单元")
+    System(kernel, "kernel", "执行内核（TaskHandle / EventEnvelope）")
     System(shell, "app-shell", "装配 + 注入依赖")
     System_Ext(editor, "ui-common / mdxeditor", "Editor 契约 + Asset 管理")
     Rel(user, ui, "输入 / 触发 Run / 浏览分支 / 配置")
     Rel(ui, session, "SessionEvent / IChatEngine / SessionManager")
-    Rel(ui, harness, "TaskHandle attach / events / signal / cancel")
-    Rel(shell, ui, "createLLMFactory 注入 agentService/harness/chatEngine")
+    Rel(ui, kernel, "TaskHandle attach / events / signal / cancel")
+    Rel(shell, ui, "createLLMFactory 注入 agentService/kernel/chatEngine")
     Rel(ui, editor, "实现 IEditor 契约")
     Rel(session, flow, "编排 DAG")
     Rel(flow, programs, "agent 节点委托")
-    Rel(programs, harness, "提交 TaskSpec")
+    Rel(programs, kernel, "提交 TaskSpec")
 ```
 
-**边界（正确）**：llm-ui 只依赖 `presenter` 接口 + `llm-session` 公开句柄 + `harness` 的 `TaskHandle`，不 import DAG Runtime 内部。
+**边界（正确）**：llm-ui 只依赖 `presenter` 接口 + `llm-session` 公开句柄 + `kernel` 的 `TaskHandle`，不 import DAG Runtime 内部。
 
 ---
 
@@ -151,4 +151,4 @@ C4Component
 4. **P1 收尾**：LLMWorkspaceEditor 精简为纯装配。
 5. **P3**：`editors/` → `llm-settings-ui` 包。
 6. **P5 收尾**：`✅` 历史注释 + 剩余 `any`。
-7. **harness 深拆**：harness.ts 协调器化、store.ts 聚合根化（另一条线，独立推进）。
+7. **kernel 深拆**：kernel.ts 协调器化、store.ts 聚合根化（另一条线，独立推进）。

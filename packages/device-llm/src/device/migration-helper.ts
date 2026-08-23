@@ -2,7 +2,7 @@
 //
 // MigrationHelper — one-time data migrations for LLM config paths.
 
-import type { IVFSManager, IModuleFS } from '@itookit/stdio';
+import type { IVFSManager, IModuleFS } from '@itookit/vfs-core';
 import { VFSHelpers } from './vfs-helpers';
 
 // ─── 存储路径（需与 llm-device-driver.ts 同步）─────────────────────────────────

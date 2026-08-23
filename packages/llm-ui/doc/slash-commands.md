@@ -6,7 +6,7 @@ ChatInputView
 → SlashCommandRouter
 → IPrivilegedCommandService (仅特权命令)
 → App Shell composition
-→ Harness SessionHandle / TaskHandle
+→ Kernel SessionHandle / TaskHandle
 ```
 
 `SlashCommandPlugin` 只负责解析和分发。普通会话修改走 Conversation CommandBus；特权命令通过抽象端口提交或控制 Durable Task，不直接依赖具体 Program、Effect 或平台实现。

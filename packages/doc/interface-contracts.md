@@ -1,17 +1,17 @@
 # 跨包接口契约
 
-业务共享协议定义在 `@itookit/common`；执行协议由 `@itookit/harness` 提供，
+业务共享协议定义在 `@itookit/common`；执行协议由 `@itookit/kernel` 提供，
 能力抽象由 `@itookit/coreutils` 提供，具体实现由 `app-shell` 注入。
 
 ## LLM 执行
 
 | 接口 | 消费者 | 实现者 |
 | --- | --- | --- |
-| `DurableTaskProgram` | Harness | llm-runtime、Conversation Flow |
-| `SessionHandle` | Conversation、UI | Harness |
-| `TaskHandle` | Conversation、UI、CLI | Harness |
-| `EffectAdapter` | Harness | coreutils 插件及应用插件 |
-| `HarnessPlugin` | App Shell | coreutils 与功能插件 |
+| `DurableTaskProgram` | Kernel | llm-runtime、Conversation Flow |
+| `SessionHandle` | Conversation、UI | Kernel |
+| `TaskHandle` | Conversation、UI、CLI | Kernel |
+| `EffectAdapter` | Kernel | coreutils 插件及应用插件 |
+| `KernelPlugin` | App Shell | coreutils 与功能插件 |
 | `DagPluginCatalog` | Conversation、UI | `FlowPluginRegistry` |
 | `LLMCapability` | coreutils Effect | App-shell LLM adapter |
 | `ToolCapability` | coreutils Effect | Tool service |

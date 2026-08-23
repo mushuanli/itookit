@@ -18,10 +18,10 @@ VFS（Virtual File System）为 itookit 提供 POSIX 风格的虚拟文件系统
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  接口层 (stdio/src)                                │
+│  接口层 (vfs-core/src)                                │
 │  IModuleFS / IVFSManager / IStorageBackend / 事件/错误/选项   │
 ├──────────────────────────────────────────────────────────────┤
-│  服务层 (stdio/services)                                     │
+│  服务层 (vfs-core/services)                                     │
 │  VFSManager     ── 模块生命周期 + 跨模块协调                  │
 │  ModuleFS       ── chroot 隔离 + 能力子接口 (assets/tags...)   │
 │  FSDriverAdapter    ── IFSDriver 实现 (直通 ModuleFS) (v3.3)  │
@@ -29,7 +29,7 @@ VFS（Virtual File System）为 itookit 提供 POSIX 风格的虚拟文件系统
 │  ConfigService ── 配置读写（seqfile/JSON 双模）               │
 │  ScopedView    ── 虚拟路径 ↔ 真实路径映射                     │
 ├──────────────────────────────────────────────────────────────┤
-│  引擎层 (stdio/engine)                                       │
+│  引擎层 (vfs-core/engine)                                       │
 │  VFSEngine        ── 系统级 CRUD + 挂载路由                   │
 │  PathResolver     ── 逐段路径解析 + symlink 展开              │
 │  AccessController ── 权限检查（隐藏文件/跨模块/只读区）       │
@@ -38,15 +38,15 @@ VFS（Virtual File System）为 itookit 提供 POSIX 风格的虚拟文件系统
 │  tree-ops         ── 递归删除/复制                            │
 │  node-mapper      ── InodeRecord + MetaRecord → FSNode        │
 ├──────────────────────────────────────────────────────────────┤
-│  事件层 (stdio/event)                                        │
+│  事件层 (vfs-core/event)                                        │
 │  EventBus / TransactionEventBuffer                            │
 ├──────────────────────────────────────────────────────────────┤
-│  文件对象层 (stdio/file-io)                                  │
+│  文件对象层 (vfs-core/file-io)                                  │
 │  FileHandle       ── IFile（IFSDriver + IFSMetaDriver）       │
 │  MDXFileHandle    ── IMDXFile extends IFile                   │
 │  ChatFileHandle   ── IChatFile extends IFile                  │
 ├──────────────────────────────────────────────────────────────┤
-│  存储后端层 (stdio/src/storage)                    │
+│  存储后端层 (vfs-core/src/storage)                    │
 │  IStorageBackend ── IInodeStore / IMetaStore / IContentStore   │
 │  可选增强: IRecordStore / IHighLevelStore / ISyncableStore    │
 └──────────────────────────────────────────────────────────────┘
@@ -54,7 +54,7 @@ VFS（Virtual File System）为 itookit 提供 POSIX 风格的虚拟文件系统
 
 ---
 
-## 接口层 (stdio/src)
+## 接口层 (vfs-core/src)
 
 接口层定义所有跨包类型，**零运行时依赖**，位于 `packages/common/src/interfaces/fs/`。
 
@@ -541,7 +541,7 @@ const file = fs.openFile(nodeId);
 | `app-shell/strategies` | `StandardWorkspaceStrategy` 直接返回 `IModuleFS` |
 | `llm-ui` | 类型注解迁移 `IFSEngine → IModuleFS` |
 | `common` | 新增 `IFSDriver` / `IFSMetaDriver` / `IFSDriverTransaction`，`IFSEngine` 标注 `@deprecated` |
-| `stdio` | 新增 `IModuleFS` + `IFSDriver` 双接口；`ModuleFS` 直接实现 `IFSDriver`（自引用）；`FSMetaDriverAdapter` |
+| `vfs-core` | 新增 `IModuleFS` + `IFSDriver` 双接口；`ModuleFS` 直接实现 `IFSDriver`（自引用）；`FSMetaDriverAdapter` |
 
 ### 已迁移（v4.0+ 完成）
 
@@ -802,7 +802,7 @@ moduleFS.transaction(async (tx) => {
 ## 工厂函数 (createVFS)
 
 ```ts
-// packages/stdio/src/factory.ts
+// packages/vfs-core/src/factory.ts
 async function createVFS(options: VFSFactoryOptions): Promise<VFSInstance> {
     const engine = new VFSEngine(options.rootBackend);
     // 1. 注册插件

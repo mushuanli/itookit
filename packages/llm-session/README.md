@@ -8,8 +8,8 @@ import { initializeConversationSystem } from '@itookit/llm-conversation';
 const conversation = await initializeConversationSystem({
   agentService,
   sessionEngine,
-  processHost: harness.kernel,
-  dagPlugins: harness.dagPlugins,
+  processHost: kernel.kernel,
+  dagPlugins: kernel.dagPlugins,
 });
 ```
 

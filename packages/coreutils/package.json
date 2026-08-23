@@ -1,7 +1,7 @@
 {
   "name": "@itookit/coreutils",
   "version": "0.1.0",
-  "description": "Harness capability adapters for LLM, tools, skills, Bash, and TTY",
+  "description": "Kernel capability adapters for LLM, tools, skills, Bash, and TTY",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -36,8 +36,8 @@
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/device-llm": "workspace:*",
-    "@itookit/harness": "workspace:*",
-    "@itookit/stdio": "workspace:*",
+    "@itookit/kernel": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
     "@itookit/tools": "workspace:*"
   },
   "devDependencies": {

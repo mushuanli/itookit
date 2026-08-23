@@ -3,11 +3,11 @@ import type {
     DurableTaskProgram,
     EffectAdapter,
     EffectExecutionContext,
-    HarnessRegistration,
+    KernelRegistration,
     JsonValue,
     SharedStateEntry,
-} from '@itookit/harness';
-import type { IDeviceDriver } from '@itookit/stdio';
+} from '@itookit/kernel';
+import type { IDeviceDriver } from '@itookit/vfs-core';
 import type { ITTYDriver, SkillDefinition } from '@itookit/common';
 import { createCoreutilsRuntime } from './create-coreutils-runtime';
 import { ApprovedEffectProgram } from '../programs/approved-effect-program';
@@ -112,7 +112,7 @@ describe('createCoreutilsRuntime', () => {
 function registration(
     effects: EffectAdapter[],
     programs: DurableTaskProgram[] = [],
-): HarnessRegistration {
+): KernelRegistration {
     return {
         registerEffect(effect) { effects.push(effect); },
         registerProgram(program) { programs.push(program); },

@@ -1,10 +1,10 @@
-# @itookit/harness 设计文档
+# @itookit/kernel 设计文档
 
 > Durable Session/Task 调度与资源内核 —— 平台无关的可恢复任务执行引擎。
 
 ## 1. 定位与职责
 
-**harness** 是 LLM 子系统底层的高可靠任务执行内核，提供：
+**kernel** 是 LLM 子系统底层的高可靠任务执行内核，提供：
 
 - **Durable Task Program**：任务以状态机（`init` / `reduce`）表达，所有中间状态可持久化，进程崩溃后可恢复续跑。
 - **Effect 执行**：任务通过 side-effect 访问外部能力（LLM、Tool、TTY 等），effect 结果持久化，支持重试 / reconcile。
@@ -12,9 +12,9 @@
 - **资源权限**：Resource / Handle / Grant 体系，任务需持有权限才能执行 effect。
 - **事件流**：session 级事件日志，UI / 上层经 `TaskHandle.events()` 轮询消费（含 effect 期间增量推送）。
 
-**依赖**：仅 `@itookit/stdio`（`IModuleFS`）。不依赖任何 LLM / UI / 具体设备实现。
+**依赖**：仅 `@itookit/vfs-core`（`IModuleFS`）。不依赖任何 LLM / UI / 具体设备实现。
 
-**设计定位**：harness 是一个 **Agent 专用的轻量 Durable Kernel** —— 只保留最小必要抽象，不照搬 Linux 进程/文件系统等通用 OS 名词，也不耦合任何厂商或工具类型。
+**设计定位**：kernel 是一个 **Agent 专用的轻量 Durable Kernel** —— 只保留最小必要抽象，不照搬 Linux 进程/文件系统等通用 OS 名词，也不耦合任何厂商或工具类型。
 
 ## 2. 核心抽象模型（设计裁决）
 
@@ -51,12 +51,12 @@ flowchart LR
 6. **Skill 是可版本化的 TaskProgram + Resource bundle** —— 复杂 Skill 作为子 Task 执行，而不是一个黑盒 Effect。
 7. **Session context、Task private state、Task event trace、long-term memory 分开保存** —— 各自独立生命周期。
 8. **Session 内同步由 SessionStore 保证** —— 跨 Session 协作统一经 CrossSessionBus，不直接访问对方数据库。
-9. **持久化统一使用 `@itookit/stdio` 事务型 SeqFile** —— Web 用 IndexedDB，LocalFS/Tauri 可在后端内部用 SQLite sidecar。
+9. **持久化统一使用 `@itookit/vfs-core` 事务型 SeqFile** —— Web 用 IndexedDB，LocalFS/Tauri 可在后端内部用 SQLite sidecar。
 10. **Task 目录是事实源** —— Session index.seq 是可重建调度投影；通知只是低延迟 hint，不进入 TaskProgram 业务语义。
 
 ### 2.2 推荐理解模型（架构评审采纳）
 
-> Harness 是「**声明驱动的持久状态机**」：TaskProgram 用 `Decision` + `KernelAction` 声明下一步（`domain/types.ts:223`），但 reducer 本身仍是普通 TS 代码（非强制纯声明式）。
+> Kernel 是「**声明驱动的持久状态机**」：TaskProgram 用 `Decision` + `KernelAction` 声明下一步（`domain/types.ts:223`），但 reducer 本身仍是普通 TS 代码（非强制纯声明式）。
 
 ```mermaid
 flowchart TD
@@ -102,7 +102,7 @@ flowchart TD
 | ⑥ Skill 分类 | Skill 是**可版本化能力包**（manifest/instructions/assets/required capabilities + 可选 TaskProgram/EffectAdapter），不简单归为 Task 或 Effect。具体动作分类：load/单次调用 → Effect；多步/循环/等待/确认 → 子 Task；定义/脚本 → Resource | 🟡 仅实现 `skill.load` Effect（coreutils `SkillLoadEffectAdapter`）；`skill.invoke` Durable Program 未实现 |
 | ⑦ 状态分域存储 | Task 私有状态（`TaskRecord.state`）、Session 共享（shared.seq）、上下文（ContextCommit）、事件（EventJournal）、资源外部状态分开保存 | ✅ |
 | ⑧ SessionStore / CrossSessionBus | Session 内同步由事务保证；跨 Session 经 `sendCrossSession` + outbox/inbox，不直接访问对方数据库 | ✅ |
-| ⑨ SeqFile + 后端可替换 | 统一用 `@itookit/stdio` 事务型 SeqFile；`SessionStorageResolver` 抽象，Web IndexedDB / LocalFS SQLite 后端可替换 | ✅ |
+| ⑨ SeqFile + 后端可替换 | 统一用 `@itookit/vfs-core` 事务型 SeqFile；`SessionStorageResolver` 抽象，Web IndexedDB / LocalFS SQLite 后端可替换 | ✅ |
 | ⑩ Task 目录事实源 | Task 目录是事实源，`ready/` index.seq 是可重建调度投影；`notify` 仅唤醒轮询，不进业务语义 | ✅ |
 
 **已知差距（架构评审确认）**：
@@ -114,16 +114,16 @@ flowchart TD
 
 ```mermaid
 C4Context
-  title Harness 依赖与集成
+  title Kernel 依赖与集成
 
   Person(user, "用户", "操作 UI / 触发任务")
   System_Boundary(app, "应用层") {
     Container(llmconv, "llm-session / llm-flow", "会话语义 / DAG 编排", "提交任务、消费事件")
     Container(coreutils, "coreutils", "Effect 适配器", "llm.chat / tool.call / tty")
   }
-  System_Boundary(harness, "@itookit/harness") {
-    Container(kernel, "Harness", "调度内核 / 事件总线", "claimReady→execute→applyDecision")
-    Container(store, "SeqFileHarnessStore", "持久化存储", "Task / Effect / Session / Event 落盘")
+  System_Boundary(kernel, "@itookit/kernel") {
+    Container(kernel, "Kernel", "调度内核 / 事件总线", "claimReady→execute→applyDecision")
+    Container(store, "SeqFileKernelStore", "持久化存储", "Task / Effect / Session / Event 落盘")
     Container(registry, "Registry", "Program / Effect / Storage / Workspace 注册表", "kind@version 解析")
   }
   ContainerDb(fs, "IModuleFS", "VFS 文件系统", "seqfile 事务存储")
@@ -137,14 +137,14 @@ C4Context
 
 ```mermaid
 C4Component
-  title Harness 内部组件
+  title Kernel 内部组件
 
-  Container_Boundary(h, "@itookit/harness") {
+  Container_Boundary(h, "@itookit/kernel") {
     Component(reg, "Registry", "Program/Effect/Storage/WorkspaceRegistry", "kind@version 注册解析")
-    Component(kernel, "Harness", "调度循环", "drain → claimReady → execute → applyDecision")
+    Component(kernel, "Kernel", "调度循环", "drain → claimReady → execute → applyDecision")
     Component(poller, "DurablePoller", "会话轮询", "定时唤醒调度")
     Component(heartbeat, "LeaseHeartbeat", "租约心跳", "任务/effect 租约续期")
-    Component(store, "SeqFileHarnessStore", "持久化", "事务 appendEvent / commitTask / completeEffect")
+    Component(store, "SeqFileKernelStore", "持久化", "事务 appendEvent / commitTask / completeEffect")
     Component(sess, "DefaultSessionHandle", "会话句柄", "submit/signal/shared/context/resource")
     Component(task, "DefaultTaskHandle", "任务句柄", "wait/events/cancel/attempts")
     Component(evstream, "eventStream", "事件流", "轮询 eventList + waitForChange")
@@ -164,23 +164,23 @@ C4Component
 ## 4. 目录结构
 
 ```
-packages/harness/src/
+packages/kernel/src/
 ├── index.ts                     # 统一导出
 ├── domain/
 │   ├── types.ts                 # 核心类型：TaskSpec/Decision/Effect/Resource/Handle/Workspace
 │   └── interaction.ts           # 交互（HITL/审批）协议
 ├── application/
-│   └── harness.ts               # Harness 调度内核（核心实现）
+│   └── kernel.ts               # Kernel 调度内核（核心实现）
 ├── ports/
 │   ├── registry.ts              # Program/Effect/Storage/Workspace 注册表
-│   └── plugin.ts                # HarnessPlugin + HarnessRegistration 插件端口
+│   └── plugin.ts                # KernelPlugin + KernelRegistration 插件端口
 ├── public/
 │   ├── session-handle.ts        # DefaultSessionHandle
 │   ├── task-handle.ts           # DefaultTaskHandle
 │   └── event-stream.ts          # 事件轮询生成器
 ├── infrastructure/
 │   └── seqfile/
-│       └── store.ts             # SeqFileHarnessStore 持久化
+│       └── store.ts             # SeqFileKernelStore 持久化
 └── runtime/
     ├── durable-poller.ts        # 会话级轮询调度
     └── lease-heartbeat.ts       # 租约心跳
@@ -273,7 +273,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
   participant UI as 上层(llm-session / llm-flow)
-  participant H as Harness
+  participant H as Kernel
   participant P as Program
   participant E as EffectAdapter
   participant S as SeqFileStore
@@ -315,7 +315,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  P[Program] -- emit action --> K[Harness.applyDecision]
+  P[Program] -- emit action --> K[Kernel.applyDecision]
   E[EffectAdapter] -- context.emit --> S[Store.appendEvent]
   K -- decisionSideEffects --> S
   S --> ES[eventStream 轮询 eventList]
@@ -355,9 +355,9 @@ flowchart LR
     C[LlmChatEffectAdapter] --> D[execute 方法]
     E[ToolCallEffectAdapter]
   end
-  subgraph harness["harness"]
-    F[Harness 调度内核]
-    G[SeqFileHarnessStore]
+  subgraph kernel["kernel"]
+    F[Kernel 调度内核]
+    G[SeqFileKernelStore]
   end
   subgraph ui["UI层"]
     H[事件日志]
@@ -371,17 +371,17 @@ flowchart LR
   H --> I
 ```
 
-- **llm-session / llm-flow** 提交 `llm.chat` / `llm.agent` program 的 TaskSpec，harness 调度执行
+- **llm-session / llm-flow** 提交 `llm.chat` / `llm.agent` program 的 TaskSpec，kernel 调度执行
 - **coreutils** 提供 `llm.chat` / `tool.call` / `tty` 等 EffectAdapter，经插件注册
-- **LLM 流式**：adapter 在 `execute` 期间 `context.emit` → harness 写 `agent.event` → UI 逐 token 渲染（见 `doc/feat/harness-session-task-final-design.md` 与 `doc/architecture.md`）
+- **LLM 流式**：adapter 在 `execute` 期间 `context.emit` → kernel 写 `agent.event` → UI 逐 token 渲染（见 `doc/feat/kernel-session-task-final-design.md` 与 `doc/architecture.md`）
 - **资源隔离**：每次任务 `createResource(llm://session)` + `bindCapabilities` 授权，effect 需持有 execute 权限
 
 ## 10. 测试
 
 ```bash
-pnpm --filter @itookit/harness test       # vitest
-pnpm --filter @itookit/harness typecheck
+pnpm --filter @itookit/kernel test       # vitest
+pnpm --filter @itookit/kernel typecheck
 ```
 
-- `harness.test.ts`：34+ 用例，MemoryBackend + 真 Harness —— 任务持久化/恢复、effect 租约、流式 emit 事件消费、依赖/共享状态/工作区/交互等
-- 存储事务（`seqfile`）由 `@itookit/stdio` / vfsdriver 后端测试覆盖
+- `kernel.test.ts`：34+ 用例，MemoryBackend + 真 Kernel —— 任务持久化/恢复、effect 租约、流式 emit 事件消费、依赖/共享状态/工作区/交互等
+- 存储事务（`seqfile`）由 `@itookit/vfs-core` / vfsdriver 后端测试覆盖

@@ -9,7 +9,7 @@ import {
     generateShortUUID
 } from '@itookit/common';
 import { ISessionUI, type SessionUIOptions, type EditorFactory } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 
 import type {
   VFSNodeUI,

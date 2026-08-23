@@ -37,8 +37,8 @@ import type {
     ListOptions,
     FSEventType,
     FSEvent,
-} from '@itookit/stdio';
-import { FSCapabilityError } from '@itookit/stdio';
+} from '@itookit/vfs-core';
+import { FSCapabilityError } from '@itookit/vfs-core';
 
 // ── System FS internal types ─────────────────────────────────────────────────
 
@@ -162,7 +162,7 @@ export class SystemVFSEngine implements IModuleFS {
     readonly moduleId = 'system';
     readonly capabilities: FSCapabilities = READONLY_CAPS;
     readonly driver: IFSDriver;
-    readonly meta: import('@itookit/stdio').IFSMetaDriver = {
+    readonly meta: import('@itookit/vfs-core').IFSMetaDriver = {
         assets: noopAssets,
         tags: noopTags,
     };

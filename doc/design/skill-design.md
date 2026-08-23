@@ -13,7 +13,7 @@ Skill = Markdown 指令 + 可选工具 + 触发策略。核心设计理念：**�
 | `LLMSkill` | VFS `__config:/llm/.skills/<id>.yaml` | `LLMDeviceDriver` | 全局（始终可见） |
 | `SkillDefinition` | 运行时内存 (`SkillDeviceDriver`) + 文件系统 `_agent/skills/` | `SkillDeviceDriver` | 由 `scopeLevel` 决定 |
 
-**桥接**: `llmSkillToSkillDef()` + `syncSkillsToHarness()` 在启动和 `llmDriver.onChange()` 时将 VFS 技能同步为 `SkillDefinition`。
+**桥接**: `llmSkillToSkillDef()` + `syncSkillsToKernel()` 在启动和 `llmDriver.onChange()` 时将 VFS 技能同步为 `SkillDefinition`。
 
 ---
 
@@ -519,8 +519,8 @@ llm-ui      → SkillInvocationParser (slash 命令解析)
 initApp()
   ├─ createVFS()                   → VFS 文件系统
   ├─ LLMDeviceDriver.init()        → 加载 LLMSkill[] from VFS
-  ├─ createHarness()               → SkillDeviceDriver (空 registry)
-  ├─ syncSkillsToHarness()         → VFS → harness (LLMSkill → SkillDefinition)
+  ├─ createKernel()               → SkillDeviceDriver (空 registry)
+  ├─ syncSkillsToKernel()         → VFS → kernel (LLMSkill → SkillDefinition)
   ├─ skillService.setCwd(cwd)      → 扫描 _agent/skills/ (project root → CWD)
   │   ├─ findProjectRoot(cwd)
   │   ├─ buildScopeEntries(root, cwd)
@@ -555,7 +555,7 @@ ContextManager.buildSystemPrompt()
 
 ### 11.5 VFS Skill 同步保护
 
-`syncSkillsToHarness()` 删除 VFS 中被移除的 Skill 时：
+`syncSkillsToKernel()` 删除 VFS 中被移除的 Skill 时：
 - 检查 `source === 'filesystem'` → 跳过（文件系统 Skill 不受 VFS 同步影响）
 - `source === 'vfs'` 或 undefined → 正常删除
 
@@ -604,13 +604,13 @@ globs:
 | 文件 | 内容 |
 |------|------|
 | `packages/coreutils/src/skill/skill-device-driver.ts` | `SkillDeviceDriver` — 实现 `ISkillService` + 四层路由 + 作用域 |
-| `packages/coreutils/src/effects/skill-load-effect.ts` | Skill 加载 Effect — Harness 侧执行 |
+| `packages/coreutils/src/effects/skill-load-effect.ts` | Skill 加载 Effect — Kernel 侧执行 |
 | `packages/coreutils/src/tool/load-skill.ts` | `load_skill` 工具 — 拒绝 L1 action skills |
 | `packages/coreutils/src/skill/skill-task.ts` | Skill 任务程序 — 系统 Prompt 构建 + 压缩保护 |
 | `packages/coreutils/src/skill/compact-extractor.ts` | Compact Instructions 提取 + 聚合 |
 | `packages/coreutils/src/skill/glob-matcher.ts` | Glob → RegExp 匹配器 |
 | `packages/device-llm/src/device/skill-manager.ts` | VFS 技能同步 + SkillManager |
-| `packages/app-shell/src/bootstrap.ts` | `initApp()` + `syncSkillsToHarness()` + 初始 CWD 设置 |
+| `packages/app-shell/src/bootstrap.ts` | `initApp()` + `syncSkillsToKernel()` + 初始 CWD 设置 |
 | `packages/llm-ui/src/components/input/SkillInvocationParser.ts` | Slash 命令解析，支持 L1 action skill |
 
 ### 持久化

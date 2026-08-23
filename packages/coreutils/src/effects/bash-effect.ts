@@ -1,6 +1,6 @@
-import { assertEffectGrant } from '@itookit/harness';
+import { assertEffectGrant } from '@itookit/kernel';
 import type { IToolService, ToolInvokeResult } from '@itookit/common';
-import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/harness';
+import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/kernel';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 import { requireToolSuccess } from './tool-call-effect';
 

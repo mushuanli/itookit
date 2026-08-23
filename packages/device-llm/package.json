@@ -60,7 +60,7 @@
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/device-llm#readme",
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/stdio": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
     "js-yaml": "^4.1.1",
     "@itookit/ui-common": "workspace:*"
   },

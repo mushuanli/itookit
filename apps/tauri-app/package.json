@@ -22,7 +22,7 @@
         "@itookit/mdxeditor":         "workspace:*",
         "@itookit/tools":              "workspace:*",
         "@itookit/vfs-ui":            "workspace:*",
-        "@itookit/stdio":             "workspace:*",
+        "@itookit/vfs-core":             "workspace:*",
         "@itookit/vfsdriver-indexeddb":   "workspace:*",
         "@itookit/vfsdriver-localfs":     "workspace:*",
         "@tauri-apps/api":            "^2.0.0",

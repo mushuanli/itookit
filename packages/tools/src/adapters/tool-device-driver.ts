@@ -16,7 +16,7 @@ import type {
 import type {
   DeviceContext,
   IDeviceDriver,
-} from '@itookit/stdio';
+} from '@itookit/vfs-core';
 import type { Tool } from '../core/Tool';
 import type { INativeShell } from '../core/types';
 

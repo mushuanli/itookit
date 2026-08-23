@@ -29,20 +29,20 @@ export interface ChatInputOptions {
     /** 获取所有可用连接列表，供 Connection 覆盖下拉使用。 */
     onRequestConnections?: () => Promise<ConnectionOption[]>;
 
-    // ── Harness callbacks ────────────────────────────────────────────────────
+    // ── Kernel callbacks ────────────────────────────────────────────────────
 
     /**
      * 获取可用 Skill 列表（含 loaded 状态）。
      *
-     * 仅在 harness 模式可用时由 Shell 注入。
+     * 仅在 kernel 模式可用时由 Shell 注入。
      * ChatInput 在设置面板打开时调用此函数刷新列表。
      */
     onRequestSkills?: () => Promise<SkillInfo[]>;
 
     /**
-     * 加载 Skill 到当前 harness 会话。
+     * 加载 Skill 到当前 kernel 会话。
      *
-     * 调用后 harness 的 IToolService 会注册该 Skill 的工具，
+     * 调用后 kernel 的 IToolService 会注册该 Skill 的工具，
      * system prompt 会追加 Skill 的使用指令。
      *
      * @returns 新加载的工具 ID 列表
@@ -975,7 +975,7 @@ export class ChatInput implements IChatInputPresenter {
     /**
      * 刷新 Skill 列表（由 Shell 注入 skills 数据或内部主动拉取）。
      *
-     * Shell 在 harness 可用时调用此方法传入最新 skill 列表；
+     * Shell 在 kernel 可用时调用此方法传入最新 skill 列表；
      * 也可在用户点击 Refresh 按钮时由内部调用 onRequestSkills 回调。
      */
     refreshSkills(skills: SkillInfo[]): void {

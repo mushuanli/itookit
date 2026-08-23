@@ -53,4 +53,4 @@ export {
     ENTITY_ICONS, AGENT_ICON_PALETTE, getFileIcon,
 } from './i18n/icons';
 
-// ── EventBus: 已移入 @itookit/stdio；消费方从 stdio 导入 ──
+// ── EventBus: 已移入 @itookit/vfs-core；消费方从 vfs-core 导入 ──

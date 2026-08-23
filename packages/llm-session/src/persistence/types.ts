@@ -4,7 +4,7 @@ import type {
 import type {
     FSNode,
     IVFSManager,
-} from '@itookit/stdio';
+} from '@itookit/vfs-core';
 import type { RoundManifest } from './round-types';
 
 export type { ChatSessionSettings } from '@itookit/common';

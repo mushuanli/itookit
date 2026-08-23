@@ -2,7 +2,7 @@
 // pricing.json 加载工具 + 路径常量。
 // 类型来自 @itookit/common；此文件只负责 VFS IO 和模型字段覆盖。
 
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 import type { LLMModel, ModelPricingConfig, ModelPricingEntry } from '@itookit/common';
 import { lookupPricingEntry, extractPrices } from '@itookit/common';
 import { MODEL_PRICING } from './providers';

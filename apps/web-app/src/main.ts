@@ -1,7 +1,7 @@
 import { initApp } from '@itookit/app-shell';
 import { openIndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { WORKSPACES } from './config/modules';
-import { BrowserSkillToolHandlerFactory } from './harness/browser-skill-tools';
+import { BrowserSkillToolHandlerFactory } from './kernel/browser-skill-tools';
 
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
@@ -21,7 +21,7 @@ async function main() {
         workspaces: WORKSPACES,
         defaultSlug: 'chat',
         routeAliases: { home: 'llm-workspace' },
-        harnessPlatform: {
+        kernelPlatform: {
             skillToolHandlerFactory: new BrowserSkillToolHandlerFactory(),
         },
     });

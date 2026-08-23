@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChatCompletionResponse, DagRunSpec } from '@itookit/common';
 import {
-    Harness,
+    Kernel,
     type EffectAdapter,
-} from '@itookit/harness';
-import { createVFS, MemoryBackend, type IModuleFS, type IVFSManager } from '@itookit/stdio';
-import { DurableAgentProgram } from '@itookit/llm-programs';
+} from '@itookit/kernel';
+import { createVFS, MemoryBackend, type IModuleFS, type IVFSManager } from '@itookit/vfs-core';
+import { DurableAgentProgram } from '@itookit/llm-tasks';
 import { createBuiltinDagPluginRegistry } from '../src/flow/builtin-plugins';
 import { DurableFlowExecutor, upstreamOf } from '../src/flow/executor';
 import { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from '../src/flow/programs';
@@ -13,28 +13,28 @@ import { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from '../src
 describe('DurableFlowExecutor', () => {
     let manager: IVFSManager;
     let fs: IModuleFS;
-    let harness: Harness;
+    let kernel: Kernel;
 
     beforeEach(async () => {
         ({ manager } = await createVFS({ rootBackend: new MemoryBackend(), modules: [{ name: 'test' }] }));
         await manager.mount('test');
         fs = manager.getEngine('test');
         await fs.init();
-        harness = new Harness({ catalog: { fs }, pollMs: 5 });
-        harness.registerStorageResolver({
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({
             kind: 'test',
-            async resolve() { return { fs, rootPath: '/sessions/one/.harness' }; },
+            async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; },
         });
-        registerPrograms(harness);
-        harness.registerEffect(llmEffect());
-        await harness.initialize();
-        await harness.createSession({ id: 'session-one', storage: { kind: 'test', locator: null } });
+        registerPrograms(kernel);
+        kernel.registerEffect(llmEffect());
+        await kernel.initialize();
+        await kernel.createSession({ id: 'session-one', storage: { kind: 'test', locator: null } });
     });
 
-    afterEach(async () => { harness.dispose(); await manager.dispose(); });
+    afterEach(async () => { kernel.dispose(); await manager.dispose(); });
 
     it('persists fan-in DAG nodes and aggregates every output', async () => {
-        const execution = await executor(harness).submit('session-one', valueFlow());
+        const execution = await executor(kernel).submit('session-one', valueFlow());
         const exit = await execution.root.wait({ timeoutMs: 2_000 });
         const nodes = (exit.output as { nodes: Record<string, unknown> }).nodes;
 
@@ -45,7 +45,7 @@ describe('DurableFlowExecutor', () => {
     });
 
     it('runs an Agent node through a granted durable LLM Effect', async () => {
-        const execution = await executor(harness).submit('session-one', agentFlow());
+        const execution = await executor(kernel).submit('session-one', agentFlow());
         const exit = await execution.root.wait({ timeoutMs: 2_000 });
 
         expect(exit.status).toBe('succeeded');
@@ -54,7 +54,7 @@ describe('DurableFlowExecutor', () => {
     });
 
     it('routes to the active branch and skips the disabled branch', async () => {
-        const execution = await executor(harness).submit('session-one', routeFlow('go-right'));
+        const execution = await executor(kernel).submit('session-one', routeFlow('go-right'));
         const exit = await execution.root.wait({ timeoutMs: 2_000 });
         const nodes = (exit.output as { nodes: Record<string, unknown> }).nodes;
 
@@ -65,7 +65,7 @@ describe('DurableFlowExecutor', () => {
     });
 
     it('activates the fallback branch when no rule matches', async () => {
-        const execution = await executor(harness).submit('session-one', routeFlow('unknown'));
+        const execution = await executor(kernel).submit('session-one', routeFlow('unknown'));
         const exit = await execution.root.wait({ timeoutMs: 2_000 });
         const nodes = (exit.output as { nodes: Record<string, unknown> }).nodes;
 
@@ -75,7 +75,7 @@ describe('DurableFlowExecutor', () => {
     });
 
     it('re-executes loop body nodes up to their iteration limit', async () => {
-        const execution = await executor(harness).submit('session-one', loopFlow(3));
+        const execution = await executor(kernel).submit('session-one', loopFlow(3));
         const exit = await execution.root.wait({ timeoutMs: 3_000 });
 
         expect(exit.status).toBe('succeeded');
@@ -85,7 +85,7 @@ describe('DurableFlowExecutor', () => {
     });
 
     it('dynamically spawns nodes via a patch-graph effect', async () => {
-        const execution = await executor(harness).submit('session-one', spawnFlow());
+        const execution = await executor(kernel).submit('session-one', spawnFlow());
         const exit = await execution.root.wait({ timeoutMs: 3_000 });
         const nodes = (exit.output as { nodes: Record<string, unknown> }).nodes;
 
@@ -96,15 +96,15 @@ describe('DurableFlowExecutor', () => {
     });
 });
 
-function registerPrograms(harness: Harness): void {
-    harness.registerProgram(new DurableAgentProgram());
-    harness.registerProgram(new FlowValueProgram());
-    harness.registerProgram(new FlowHumanProgram());
-    harness.registerProgram(new FlowAggregateProgram());
+function registerPrograms(kernel: Kernel): void {
+    kernel.registerProgram(new DurableAgentProgram());
+    kernel.registerProgram(new FlowValueProgram());
+    kernel.registerProgram(new FlowHumanProgram());
+    kernel.registerProgram(new FlowAggregateProgram());
 }
 
-function executor(harness: Harness): DurableFlowExecutor {
-    return new DurableFlowExecutor({ harness, plugins: createBuiltinDagPluginRegistry() });
+function executor(kernel: Kernel): DurableFlowExecutor {
+    return new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry() });
 }
 
 function llmEffect(): EffectAdapter<Record<string, unknown>, ChatCompletionResponse> {

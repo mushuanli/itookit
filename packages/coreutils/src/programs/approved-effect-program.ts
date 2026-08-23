@@ -1,4 +1,4 @@
-import { interactionApproved } from '@itookit/harness';
+import { interactionApproved } from '@itookit/kernel';
 import type {
     Decision,
     DurableTaskProgram,
@@ -6,7 +6,7 @@ import type {
     JsonValue,
     SerializableError,
     TaskInputEvent,
-} from '@itookit/harness';
+} from '@itookit/kernel';
 
 export interface ApprovedEffectInput {
     effect: EffectRequest & { id: string };

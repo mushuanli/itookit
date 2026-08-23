@@ -4,7 +4,7 @@ import type {
     JsonValue,
     TaskHandle,
     TaskSignal,
-} from '@itookit/harness';
+} from '@itookit/kernel';
 
 export interface TaskControlPlane {
     openTask(id: string): Promise<TaskHandle>;
@@ -102,7 +102,7 @@ export class RunAttachmentController {
     }
 }
 
-function acceptsSignal(wait: import('@itookit/harness').WaitSpec | undefined, type: string): boolean {
+function acceptsSignal(wait: import('@itookit/kernel').WaitSpec | undefined, type: string): boolean {
     if (!wait) return false;
     if (wait.type === 'signal') return wait.id === undefined || wait.id === type;
     if (wait.type === 'any' || wait.type === 'all' || wait.type === 'quorum') {

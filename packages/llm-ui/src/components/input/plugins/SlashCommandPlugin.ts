@@ -163,13 +163,13 @@ export interface SlashCommandCallbacks {
     // Help
     onHelp: () => void;
 
-    // ── Harness: Skills ──────────────────────────────────────────────────────
+    // ── Kernel: Skills ──────────────────────────────────────────────────────
 
     /**
      * 加载指定 Skill（如 `/skill docker`）。
      *
      * Load a Skill contribution for the next Agent process.
-     * 仅在 harness 模式可用时有效，否则为 undefined。
+     * 仅在 kernel 模式可用时有效，否则为 undefined。
      */
     onSkill?: (skillId: string) => Promise<void>;
 
@@ -194,15 +194,15 @@ export interface SlashCommandCallbacks {
      */
     onSkillInvoke?: (invocation: SkillInvocation) => Promise<void>;
 
-    // ── Harness: Tools ───────────────────────────────────────────────────────
+    // ── Kernel: Tools ───────────────────────────────────────────────────────
 
     /**
-     * 显示当前 harness 会话已注册的工具列表。
+     * 显示当前 kernel 会话已注册的工具列表。
      */
     onTools?: () => void;
 
     /**
-     * 直接调用 harness 工具（绕过 LLM，立即执行，结果用 Modal 展示）。
+     * 直接调用 kernel 工具（绕过 LLM，立即执行，结果用 Modal 展示）。
      *
      * 由 `/read` `/grep` `/glob` 等只读 slash 命令触发。
      * 文件：   /read src/index.ts --offset 1 --limit 50
@@ -210,7 +210,7 @@ export interface SlashCommandCallbacks {
      * 文件搜：/glob "**\/*.test.ts"
      */
     /**
-     * 直接调用 harness 工具。
+     * 直接调用 kernel 工具。
      * @param displayCmd  用于 UI 显示的原始命令字符串（如 "/read src/index.ts"）
      */
     onToolInvoke?: (toolId: string, args: Record<string, unknown>, displayCmd: string) => Promise<void>;
@@ -814,7 +814,7 @@ export class SlashCommandPlugin implements InputPlugin {
             privilegedCommand('exec', 'Execute a shell command after approval', '⬛', cb.onExec, '<command>'),
 
             // ── Direct read-only Tool Invocation (bypasses LLM) ─────────────
-            // Available when onToolInvoke is injected (harness with toolService).
+            // Available when onToolInvoke is injected (kernel with toolService).
             // Result shown in a Modal — no LLM round-trip.
 
             ...(cb.onToolInvoke ? [
@@ -884,7 +884,7 @@ export class SlashCommandPlugin implements InputPlugin {
     /**
      * Agent Mode 未启用时显示引导提示。
      *
-     * 告诉用户如何开启 harness 模式，而不是静默失败。
+     * 告诉用户如何开启 kernel 模式，而不是静默失败。
      */
     private showAgentModeHint(command: string): void {
         const hint = document.createElement('div');
@@ -967,13 +967,13 @@ function privilegedCommand(
     return {
         name,
         label: `/${name}`,
-        description: execute ? description : `${description} — Harness unavailable`,
+        description: execute ? description : `${description} — Kernel unavailable`,
         icon,
         group: 'Task Control',
         hasArgs: Boolean(placeholder),
         argsPlaceholder: placeholder,
         execute: async args => {
-            if (!execute) throw new Error(`/${name} requires Harness privileged commands`);
+            if (!execute) throw new Error(`/${name} requires Kernel privileged commands`);
             if (placeholder?.startsWith('<') && !args.trim()) {
                 throw new Error(`Usage: /${name} ${placeholder}`);
             }

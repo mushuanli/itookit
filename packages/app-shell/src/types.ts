@@ -1,21 +1,21 @@
 import type {NavigationRequest} from '@itookit/common';
 import type { FileCreationConfig, EditorFactory, EditorOptions } from '@itookit/ui-common';
-import type { IStorageBackend, IVFSManager, MountOptions, IModuleFS } from '@itookit/stdio';
+import type { IStorageBackend, IVFSManager, MountOptions, IModuleFS } from '@itookit/vfs-core';
 import type { ThemeMode } from './ThemeService';
 import type { FileTypeDefinition, CustomEditorResolver, VFSUIOptions } from '@itookit/vfs-ui';
 import type { CoreutilsRuntime, CoreutilsRuntimeOptions } from '@itookit/coreutils';
-import type { Harness } from '@itookit/harness';
+import type { Kernel } from '@itookit/kernel';
 import type { DagPluginRegistry } from '@itookit/llm-session';
 
-export interface AppHarnessRuntime extends CoreutilsRuntime {
-    kernel: Harness;
+export interface AppKernelRuntime extends CoreutilsRuntime {
+    kernel: Kernel;
     dagPlugins: DagPluginRegistry;
 }
 
-export interface AppHarnessPlatform {
+export interface AppKernelPlatform {
     skillSource?: CoreutilsRuntimeOptions['skillSource'];
     skillToolHandlerFactory?: CoreutilsRuntimeOptions['skillToolHandlerFactory'];
-    configure?(harness: AppHarnessRuntime): void | Promise<void>;
+    configure?(kernel: AppKernelRuntime): void | Promise<void>;
 }
 
 export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills';
@@ -68,7 +68,7 @@ export interface AppOptions {
     /** LLM traffic logger (NoopLLMLogger for web, TauriLLMLogger for Tauri) */
     llmLogger?: import('@itookit/common').ILLMLogger;
     /** Platform capabilities implemented by the owning application. */
-    harnessPlatform?: AppHarnessPlatform;
+    kernelPlatform?: AppKernelPlatform;
 }
 
 export interface AppHandle {

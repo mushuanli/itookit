@@ -1,15 +1,15 @@
 # @itookit/coreutils
 
-Harness 外部能力公共包。提供 LLM、Tool、Skill load、Bash、TTY 的抽象端口、平台无关公共实现和 Durable Effect 适配器。
+Kernel 外部能力公共包。提供 LLM、Tool、Skill load、Bash、TTY 的抽象端口、平台无关公共实现和 Durable Effect 适配器。
 
-`@itookit/harness` 只负责调度、状态和资源管理；本包通过 `HarnessPlugin` 注册外部能力。
+`@itookit/kernel` 只负责调度、状态和资源管理；本包通过 `KernelPlugin` 注册外部能力。
 
 ## 目录
 
 ```text
 src/
   effects/  Durable Effect adapters
-  plugin/   CoreutilsHarnessPlugin
+  plugin/   CoreutilsKernelPlugin
   ports/    application-injected capability contracts
   programs/ Durable Interaction programs
   runtime/  session-scoped capability assembly
@@ -25,11 +25,11 @@ src/
 
 ```ts
 const coreutils = await createCoreutilsRuntime({ llmDriver, ttyDriver });
-const harness = new Harness({ catalog });
-await harness.use(coreutils.plugin);
+const kernel = new Kernel({ catalog });
+await kernel.use(coreutils.plugin);
 ```
 
-插件按可用服务注册 `llm.chat`、`tool.call`、`process.exec`、`tty.command`、`skill.load`，并注册 `coreutils.approved-effect` Durable Program。能力状态按 Harness Session 隔离；Skill 加载集合写入 Session shared state；TTY 操作必须持有对应 `ResourceHandle(execute)`。无法确认外部副作用的 Bash/TTY 恢复会进入 `indeterminate`，不会盲目重复执行。
+插件按可用服务注册 `llm.chat`、`tool.call`、`process.exec`、`tty.command`、`skill.load`，并注册 `coreutils.approved-effect` Durable Program。能力状态按 Kernel Session 隔离；Skill 加载集合写入 Session shared state；TTY 操作必须持有对应 `ResourceHandle(execute)`。无法确认外部副作用的 Bash/TTY 恢复会进入 `indeterminate`，不会盲目重复执行。
 
 ## Skill 执行边界
 

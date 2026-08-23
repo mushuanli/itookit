@@ -11,7 +11,7 @@
 // === Re-export 外部依赖类型（隔离层） ===
 import type {
     IModuleFS,
-} from '@itookit/stdio';
+} from '@itookit/vfs-core';
 
 
 // === MDx 内部类型 ===

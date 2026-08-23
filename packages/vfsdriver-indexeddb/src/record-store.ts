@@ -21,7 +21,7 @@ import type {
     RecordQueryOptions,
     RecordQueryResult,
     RecordWalkOptions,
-} from '@itookit/stdio';
+} from '@itookit/vfs-core';
 import { req, collectCursor, deleteCursor, STORE_RECORDS } from './utils';
 
 interface RecordRow {

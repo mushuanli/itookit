@@ -1,6 +1,6 @@
 # llm-flow 开发说明
 
-本包是 DAG 编排层：把 `llm-programs` 的 LLM 任务单元连成动态图（route/loop/spawn/compensate/on_failure/budget），并持久化 Flow 定义。
+本包是 DAG 编排层：把 `llm-tasks` 的 LLM 任务单元连成动态图（route/loop/spawn/compensate/on_failure/budget），并持久化 Flow 定义。
 
 ## 目录
 
@@ -23,7 +23,7 @@ src/
 ## 约束
 
 - 只编排 DAG，不持有会话语义（Round/Branch/ChatEngine 属于 llm-session）。
-- 不依赖 llm-session、UI、DOM 或具体设备；能力通过 harness Effect 使用。
+- 不依赖 llm-session、UI、DOM 或具体设备；能力通过 kernel Effect 使用。
 - FlowDefinitionStore 只依赖最小 `FlowAssetStore` 接口，由会话层的 `IChatEngine` 适配。
 
 运行：

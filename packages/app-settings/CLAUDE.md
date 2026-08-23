@@ -2,7 +2,7 @@
 
 设置模块 — 全局配置、日志、存储、标签、数据恢复和系统 VFS 浏览。
 
-依赖（peer）：`@itookit/common`、`@itookit/device-llm`、`@itookit/stdio`、`@itookit/ui-common`、`@itookit/vfs-ui`、`@itookit/mdxeditor`。LLM 设置编辑器（Provider/Connection/MCP/Skill/Cost/Agent）来自 `@itookit/llm-settings-ui`，经 `LLMUIEditors` 接口注入（避免上行依赖）。
+依赖（peer）：`@itookit/common`、`@itookit/device-llm`、`@itookit/vfs-core`、`@itookit/ui-common`、`@itookit/vfs-ui`、`@itookit/mdxeditor`。LLM 设置编辑器（Provider/Connection/MCP/Skill/Cost/Agent）来自 `@itookit/llm-settings-ui`，经 `LLMUIEditors` 接口注入（避免上行依赖）。
 
 ## Architecture
 

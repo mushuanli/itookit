@@ -18,4 +18,4 @@ LLMWorkspaceEditor
 - 特权 Slash Command 只依赖 `IPrivilegedCommandService`；Program 与平台能力由 App Shell 注入。
 - `DagWorkbench` 从 `DagPluginCatalog` 加载 Manifest 与 UI Contribution。
 - UI 不加载插件 Runtime，不识别具体节点执行类型。
-- TTY 输出按文本写入 DOM；输入必须经 Harness signal/tool 控制面。
+- TTY 输出按文本写入 DOM；输入必须经 Kernel signal/tool 控制面。

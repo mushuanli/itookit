@@ -40,7 +40,7 @@ LLMDeviceDriver 管理 VFS 存储路径：`/llm/.connections/` `/llm/.providers/
 
 - `createProvider()` 四级分发：`config.protocol` > `definition.implementation` > registry 按名查找 > 兜底 OpenAIProvider
 - `resolveProtocol()` 从 URL / provider 名推断 API 协议（`'anthropic-messages' | 'openai-chat' | 'openai-responses' | 'gemini-generate'`）
-- Harness 模式（`runMode === 'harness'`）强制使用 `anthropic-messages` 协议
+- Kernel 模式（`runMode === 'kernel'`）强制使用 `anthropic-messages` 协议
 - `BaseProvider.resolveEndpointUrl()` 防止 baseURL 已含完整路径时重复拼接 suffix
 
 ## 思考模式

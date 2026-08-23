@@ -9,7 +9,7 @@ import { defaultEditorFactory, MentionPlugin } from '@itookit/mdxeditor';
 import type { WorkbenchConfig } from '../types';
 import {NavigationRequest} from '@itookit/common';
 import { EditorOptions, IEditor, EditorHostContext } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/stdio';
+import type { IModuleFS } from '@itookit/vfs-core';
 
 export class Workbench {
     private vfsUI: VFSUIShell;

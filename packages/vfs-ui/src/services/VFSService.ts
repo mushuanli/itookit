@@ -2,7 +2,7 @@
  * @file vfs-ui/services/VFSService.ts
  * @desc Data mutation service implementing IDataOperationPort.
  */
-import type { IModuleFS, FSNode } from '@itookit/stdio';
+import type { IModuleFS, FSNode } from '@itookit/vfs-core';
 import { formatDefaultFileTitle } from '@itookit/common';
 import type { IDataOperationPort } from '../contracts/ports';
 
