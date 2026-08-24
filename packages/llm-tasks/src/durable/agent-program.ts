@@ -92,6 +92,16 @@ function handleLlm(state: DurableAgentState, event: TaskInputEvent): Decision<Du
     const calls = toolCalls(value);
     const actions = responseEvents(state.input, state.exchanges);
     if (!calls.length) return complete(state, message, value.choices[0].finish_reason, actions);
+    // Subtask delegation: a subtask tool call declares sub-task payloads and
+    // completes the node without executing the tool (fan-out happens upstream).
+    const subtaskCall = state.input.subtaskTool
+        ? calls.find(call => toolName(call) === state.input.subtaskTool)
+        : undefined;
+    if (subtaskCall) {
+        const args = toolArguments(subtaskCall);
+        const payload = Array.isArray(args.items) ? args.items : [];
+        return complete(state, { ...message, content: JSON.stringify(payload) }, 'stop', actions);
+    }
     state.pendingCalls = calls;
     state.callIndex = 0;
     return prepareCalls(state, actions);

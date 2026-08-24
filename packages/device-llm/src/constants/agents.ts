@@ -10,8 +10,6 @@ export type { AgentType, AgentConfig, AgentDefinition, InitialAgentDef };
 
 /** Agent 文件存储根目录 */
 export const AGENT_DEFAULT_DIR = '/default';
-/** Provider 专属 Agent 存储目录 */
-export const LLM_AGENT_TARGET_DIR = '/default/providers';
 
 const DEV_SYSTEM_PROMPT =
     "You are a helpful sinior developer assistant. Follow common development principles " +
@@ -127,7 +125,7 @@ const DEV_PROMPTLIST: PromptPreset[] = [
  * connectionId 留空（''）的在 syncDefaultAgents 时会被填入真实的默认连接 ID。
  */
 export const DEFAULT_AGENTS: InitialAgentDef[] = [
-    // ── 系统级 Agent ───────────────────────────────────────────────────────────
+    // ── 默认 ───────────────────────────────────────────────────────────────────
     {
         id: 'default',
         name: '默认',
@@ -141,23 +139,8 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
             systemPrompt: 'You are a helpful assistant.',
         },
     },
-    {
-        id: 'tmp-id',
-        name: '临时',
-        type: 'agent',
-        icon: '⚡️',
-        description: '一次性问答，保留 4 次对话历史',
-        initialTags: ['default'],
-        initPath: AGENT_DEFAULT_DIR,
-        config: {
-            connectionId: '',
-            systemPrompt: "You are a helpful assistant. Answer the user's current prompt concisely and accurately, without referring to any past conversation history.",
-            maxHistoryLength: 4,
-        },
-        interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
-    },
 
-    // ── 编程大师系列 ────────────────────────────────────────────────────────────
+    // ── 编程大师 ────────────────────────────────────────────────────────────────
     {
         id: 'dev-id',
         name: '编程大师',
@@ -178,8 +161,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '编程大师（Gemini）：遵循 SOLID / DRY / KISS / YAGNI / CoC / LoD 开发原则',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
-        defaultPrompts: DEV_PROMPTLIST,
-        config: { connectionId: 'conn-gemini', modelTier: 'optimal', systemPrompt: DEV_SYSTEM_PROMPT },
+        config: { connectionId: 'conn-gemini', modelTier: 'optimal', systemPromptId: 'dev-id' },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
     {
@@ -190,11 +172,11 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '编程大师（DeepSeek）：遵循 SOLID / DRY / KISS / YAGNI / CoC / LoD 开发原则',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
-        defaultPrompts: DEV_PROMPTLIST,
-        config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPrompt: DEV_SYSTEM_PROMPT },
+        config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPromptId: 'dev-id' },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
-    // ── 费曼大师系列 ────────────────────────────────────────────────────────────
+
+    // ── 费曼大师 ────────────────────────────────────────────────────────────────
     {
         id: 'learn-id',
         name: '费曼大师',
@@ -215,8 +197,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '你是一位体现理查德·费曼简化复杂概念理念的杰出教师。',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
-        defaultPrompts: FEYNMAN_PROMPTLIST,
-        config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPrompt: FEYNMAN_SYSTEM_PROMPT },
+        config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPromptId: 'learn-id' },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
     {
@@ -227,65 +208,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '你是一位体现理查德·费曼简化复杂概念理念的杰出教师。',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
-        defaultPrompts: FEYNMAN_PROMPTLIST,
-        config: { connectionId: 'default', modelTier: 'optimal', systemPrompt: FEYNMAN_SYSTEM_PROMPT },
-        interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
-    },
-
-    // ── Provider 专属 Agent ────────────────────────────────────────────────────
-    {
-        id: 'deepseek',
-        name: 'DeepSeek',
-        type: 'agent',
-        icon: '🌊',
-        description: '使用 DeepSeek 模型的智能体',
-        initialTags: ['default', 'deepseek'],
-        initPath: LLM_AGENT_TARGET_DIR,
-        config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPrompt: 'You are a helpful assistant powered by DeepSeek.', maxHistoryLength: -1 },
-        interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
-    },
-    {
-        id: 'claude',
-        name: 'Claude',
-        type: 'agent',
-        icon: '📚',
-        description: '使用 Claude 模型的智能体',
-        initialTags: ['default', 'claude'],
-        initPath: LLM_AGENT_TARGET_DIR,
-        config: { connectionId: 'conn-anthropic', modelTier: 'optimal', systemPrompt: 'You are a helpful, harmless, and honest assistant.', maxHistoryLength: 20 },
-        interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
-    },
-    {
-        id: 'gemini',
-        name: 'Gemini',
-        type: 'agent',
-        icon: '💎',
-        description: '使用 Gemini 模型的智能体',
-        initialTags: ['default', 'gemini'],
-        initPath: LLM_AGENT_TARGET_DIR,
-        config: { connectionId: 'conn-gemini', modelTier: 'optimal', systemPrompt: 'You are a helpful assistant powered by Google Gemini.', maxHistoryLength: -1 },
-        interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
-    },
-    {
-        id: 'openrouter',
-        name: 'OpenRouter',
-        type: 'agent',
-        icon: '🔀',
-        description: '使用 OpenRouter 自动选择最佳模型的智能体',
-        initialTags: ['default', 'router'],
-        initPath: LLM_AGENT_TARGET_DIR,
-        config: { connectionId: 'conn-openrouter', modelTier: 'optimal', systemPrompt: 'You are a helpful assistant, routed through OpenRouter.', maxHistoryLength: -1 },
-        interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
-    },
-    {
-        id: 'cloudapi',
-        name: 'CloudAPI',
-        type: 'agent',
-        icon: '☁️',
-        description: '使用 CloudAPI 模型的智能体',
-        initialTags: ['default', 'cloudapi'],
-        initPath: LLM_AGENT_TARGET_DIR,
-        config: { connectionId: 'conn-cloudapi', modelTier: 'optimal', systemPrompt: 'You are a helpful assistant, routed through CloudAPI.', maxHistoryLength: -1 },
+        config: { connectionId: 'default', modelTier: 'optimal', systemPromptId: 'learn-id' },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
 ];

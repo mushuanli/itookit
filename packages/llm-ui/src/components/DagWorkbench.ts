@@ -7,6 +7,7 @@ import type {
     DagPluginManifest,
     DagPluginPresentation,
     FlowNodeDefinition,
+    JsonValue,
 } from '@itookit/common';
 import type { DurableFlowSnapshot } from '@itookit/llm-session';
 import { FlowCommand } from '@itookit/llm-session';
@@ -16,11 +17,14 @@ import { showConfirmDialog, Toast } from '@itookit/ui-common';
 import { DagDraftController, createFlowEdge } from './dag/DagDraftController';
 import { SchemaForm } from './dag/SchemaForm';
 import { DagCanvas } from './dag/DagCanvas';
+import { openFlowSettings } from './dag/FlowSettingsDialog';
 
 export interface DagWorkbenchOptions {
     commands: ICommandBus;
     onModeChange?: (mode: 'design' | 'run') => void;
     onSelectFlow?: (flowId: string, revision: number) => void;
+    /** Global LLM connections available to bind flow-level connection slots to. */
+    listConnections?: () => Promise<Array<{ id: string; name: string }>>;
 }
 
 export class DagWorkbench {
@@ -119,6 +123,7 @@ export class DagWorkbench {
             <button data-action="zoom-out" ${draft ? '' : 'disabled'}>−</button>
             <button data-action="zoom-in" ${draft ? '' : 'disabled'}>＋</button>
             <button data-action="fit" ${draft ? '' : 'disabled'}>Fit</button>
+            <button data-action="settings" ${draft ? '' : 'disabled'}>Settings</button>
             <button data-action="save" ${draft ? '' : 'disabled'}>Save</button>
             <button data-action="publish" ${draft ? '' : 'disabled'}>Publish</button>
             <button data-action="run" ${draft ? '' : 'disabled'}>Run</button>
@@ -132,12 +137,13 @@ export class DagWorkbench {
 
     private renderCanvas(draft: FlowDraft): void {
         const root = this.root.querySelector<HTMLElement>('.dag-canvas')!;
+        const manifests = new Map(this.catalogue.map(item => [item.manifest.id, item.manifest]));
         this.canvas = new DagCanvas(root, {
             onSelectNode: id => this.selectNode(id),
             onMoveNode: (id, position) => this.moveNode(id, position),
             onConnect: (from, to) => this.connectNodes(from, to),
         });
-        this.canvas.render(draft, this.selectedNodeId);
+        this.canvas.render(draft, this.selectedNodeId, manifests);
     }
 
     private renderInspector(draft: FlowDraft): void {
@@ -186,6 +192,7 @@ export class DagWorkbench {
             'zoom-out': () => this.zoom(-0.1),
             'zoom-in': () => this.zoom(0.1),
             fit: () => this.fitCanvas(),
+            settings: () => void this.openFlowSettings(),
             save: () => void this.save(),
             publish: () => void this.publish(),
             run: () => void this.prepareRun(),
@@ -268,9 +275,12 @@ export class DagWorkbench {
         if (!node || !presentation) return;
         const dialog = this.createNodeDialog(node);
         const formRoot = dialog.querySelector<HTMLElement>('[data-config-form]')!;
+        const schema = this.controller
+            ? withConnectionEnum(presentation.manifest.configSchema, this.controller.value, node.config)
+            : presentation.manifest.configSchema;
         const schemaForm = new SchemaForm(
             formRoot,
-            presentation.manifest.configSchema,
+            schema,
             node.config,
             presentation.ui?.inspector.layout,
         );
@@ -547,6 +557,23 @@ export class DagWorkbench {
         this.canvas?.fit();
     }
 
+    private async openFlowSettings(): Promise<void> {
+        const controller = this.controller;
+        if (!controller) return;
+        const draft = controller.value;
+        const availableConnections = await (this.options.listConnections?.() ?? Promise.resolve([]));
+        const result = await openFlowSettings({
+            connections: draft.connections ?? [],
+            defaultConnection: draft.defaultConnection,
+            parameters: draft.parameters ?? [],
+            availableConnections,
+        });
+        if (!result) return;
+        controller.updateFlowSettings(result);
+        this.render();
+        void this.refreshValidation(controller.value);
+    }
+
     private findDescriptor(node: FlowNodeDefinition): DagPluginManifest | undefined {
         return this.findPresentation(node)?.manifest;
     }
@@ -586,6 +613,29 @@ function isTerminalRun(status: TaskStatus): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Turn `config.connectionId` into a dropdown of the flow's connection slots (+ inherit). */
+function withConnectionEnum(
+    schema: JsonValue,
+    flow: FlowDraft,
+    nodeConfig: FlowNodeDefinition['config'],
+): JsonValue {
+    if (!isRecord(schema)) return schema;
+    const properties = isRecord(schema.properties) ? schema.properties : {};
+    const connectionField = isRecord(properties.connectionId) ? properties.connectionId : undefined;
+    if (!connectionField) return schema;
+    const aliases = (flow.connections ?? []).map(connection => connection.name);
+    const current = isRecord(nodeConfig) ? nodeConfig.connectionId : undefined;
+    const enumValues: JsonValue[] = ['', ...aliases];
+    if (typeof current === 'string' && current && !aliases.includes(current)) enumValues.push(current);
+    return {
+        ...schema,
+        properties: {
+            ...properties,
+            connectionId: { ...connectionField, enum: enumValues },
+        },
+    } as JsonValue;
 }
 
 function pendingInteraction(

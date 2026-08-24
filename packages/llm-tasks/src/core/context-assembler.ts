@@ -57,7 +57,7 @@ export class ContextAssembler {
         plan: ContextPlan,
         taskRunId: string,
         agent: { id: string; version: string },
-        systemPrompt?: string,
+        systemPrompt?: string[],
         skillsPrompt?: string,
         options: { persist?: boolean } = {},
     ): Promise<AssemblyResult> {
@@ -104,7 +104,11 @@ export class ContextAssembler {
             memoryBlocks.push({ kind: 'memory', ...memory });
         }
 
-        if (systemPrompt) blocks.push({ kind: 'system', source: 'agent', content: systemPrompt });
+        if (systemPrompt?.length) {
+            for (const content of systemPrompt) {
+                if (content) blocks.push({ kind: 'system', source: 'agent', content });
+            }
+        }
         if (skillsPrompt) blocks.push({ kind: 'system', source: 'skill', content: skillsPrompt });
         blocks.push(...historyBlocks, ...memoryBlocks, ...inputBlocks);
 

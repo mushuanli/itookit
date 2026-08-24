@@ -113,7 +113,7 @@ function renderControl(schema: JsonSchema, value: JsonValue, path: string): stri
     const encodedPath = escapeHTML(path);
     if (schema.enum) {
         return `<select data-schema-path="${encodedPath}">${schema.enum.map(item =>
-            `<option value="${escapeHTML(JSON.stringify(item))}" ${same(item, value) ? 'selected' : ''}>${escapeHTML(String(item))}</option>`,
+            `<option value="${escapeHTML(JSON.stringify(item))}" ${same(item, value) ? 'selected' : ''}>${escapeHTML(enumLabel(item))}</option>`,
         ).join('')}</select>`;
     }
     if (schema.type === 'boolean') {
@@ -200,4 +200,9 @@ function isRecord(value: unknown): value is Record<string, JsonValue> {
 
 function same(left: JsonValue, right: JsonValue): boolean {
     return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Empty-string enum entries read as "(inherit)" in dropdowns. */
+function enumLabel(item: JsonValue): string {
+    return item === '' ? '(inherit)' : String(item);
 }

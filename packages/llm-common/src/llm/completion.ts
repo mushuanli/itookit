@@ -34,7 +34,7 @@ export interface ChatCompletionParams {
     // Extended thinking (Claude / o-series)
     thinking?: boolean;
     thinkingBudget?: number;
-    reasoningEffort?: 'low' | 'medium' | 'xhigh';
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
 
     // Tools
     tools?: ToolDefinition[];

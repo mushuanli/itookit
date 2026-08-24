@@ -89,6 +89,11 @@ export class AgentResolver {
         return this.buildConfig(agentDef);
     }
 
+    /** Resolve a System Prompt library entry by id. */
+    async getSystemPrompt(id: string): Promise<import('@itookit/common').SystemPromptDefinition | null> {
+        return this.agentService.getSystemPrompt(id);
+    }
+
     /** Build ExecutorConfig from an AgentDefinition. */
     private async buildConfig(agentDef: import('@itookit/common').AgentDefinition): Promise<ExecutorConfig> {
         const connId = agentDef.modelPolicy?.connectionId ?? agentDef.config.connectionId;
@@ -119,6 +124,18 @@ export class AgentResolver {
 
         const webSearchMode = this.resolveWebSearch(connMeta);
 
+        // Resolve system prompt: prefer a shared System Prompt library entry
+        // (systemPromptId) over the inline config.systemPrompt.
+        let systemPromptSegments: string[] = [];
+        if (agentDef.config.systemPromptId) {
+            const sp = await this.agentService.getSystemPrompt(agentDef.config.systemPromptId);
+            if (sp?.content?.length) systemPromptSegments = [...sp.content];
+        }
+        if (!systemPromptSegments.length) {
+            systemPromptSegments = [agentDef.systemPrompt ?? agentDef.config.systemPrompt]
+                .filter((s): s is string => Boolean(s));
+        }
+
         return {
             id: agentDef.id,
             name: agentDef.name,
@@ -128,7 +145,7 @@ export class AgentResolver {
             enableThinking: agentDef.modelPolicy?.thinking ?? enableThinking,
             reasoningEffort: agentDef.modelPolicy?.reasoningEffort ?? reasoningEffort,
             webSearchMode,
-            systemPrompt: agentDef.systemPrompt ?? agentDef.config.systemPrompt,
+            systemPrompt: systemPromptSegments,
             icon: agentDef.icon,
             temperature: agentDef.modelPolicy?.temperature ?? agentDef.config.temperature,
             agentVersion: agentDef.version ?? await this.hashDefinition(agentDef),
@@ -278,7 +295,7 @@ export class AgentResolver {
         connMeta: ConnectionMeta,
         tier: ModelTier,
         modelId: string,
-    ): { enableThinking: boolean; reasoningEffort: 'low' | 'medium' | 'xhigh' | undefined } {
+    ): { enableThinking: boolean; reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh' | undefined } {
         const pid = connMeta.providerId;
         const cmData = connMeta.metadata as Record<string, unknown> | undefined;
         const tierThinking = cmData?.tierThinking as Record<string, boolean> | undefined;
@@ -294,7 +311,7 @@ export class AgentResolver {
 
         return {
             enableThinking,
-            reasoningEffort: cmData?.reasoningEffort as 'low' | 'medium' | 'xhigh' | undefined,
+            reasoningEffort: cmData?.reasoningEffort as 'low' | 'medium' | 'high' | 'xhigh' | undefined,
         };
     }
 

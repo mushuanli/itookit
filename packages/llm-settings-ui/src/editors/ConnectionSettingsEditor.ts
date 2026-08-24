@@ -551,6 +551,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                         <option value="">未设置（默认 xhigh）</option>
                         <option value="low"    ${connection?.metadata?.reasoningEffort === 'low'    ? 'selected' : ''}>Low — 短思考</option>
                         <option value="medium" ${connection?.metadata?.reasoningEffort === 'medium' ? 'selected' : ''}>Medium — 中等思考</option>
+                        <option value="high"   ${connection?.metadata?.reasoningEffort === 'high'   ? 'selected' : ''}>High — 深度思考</option>
                         <option value="xhigh"  ${connection?.metadata?.reasoningEffort === 'xhigh'  ? 'selected' : ''}>xHigh — 最深思考</option>
                     </select>
                     <small class="settings-form__help">

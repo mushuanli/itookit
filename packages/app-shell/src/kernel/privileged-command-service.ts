@@ -1,10 +1,11 @@
 import type { Kernel, TaskHandle } from '@itookit/durable-kernel';
-import { AgentResolver, type IAgentConfigService } from '@itookit/llm-session';
-import type {
-    ExecCommandRequest,
-    IPrivilegedCommandService,
-    PlanCommandRequest,
-} from '@itookit/llm-ui';
+import {
+    AgentResolver,
+    type IAgentConfigService,
+    type IPrivilegedCommandService,
+    type PlanCommandRequest,
+    type ExecCommandRequest,
+} from '@itookit/llm-session';
 
 export class PrivilegedCommandService implements IPrivilegedCommandService {
     private readonly agents: AgentResolver;

@@ -65,7 +65,7 @@ export class DagCommandService {
         ];
         if (hasValidationErrors(issues)) throw new Error(issues.map(issue => issue.message).join('; '));
         const handle = await new DurableFlowExecutor(this.options)
-            .submit(sessionId, flowToDag(flow), parameters);
+            .submit(sessionId, await flowToDag(flow), parameters);
         this.handles.set(handle.root.id, handle);
         return { taskId: handle.root.id };
     }
@@ -165,6 +165,8 @@ function validateDraft(draft: FlowDraft, plugins: DagPluginCatalog) {
         name: draft.name,
         nodes: draft.nodes,
         edges: draft.edges,
+        connections: draft.connections,
+        defaultConnection: draft.defaultConnection,
         createdAt: draft.updatedAt,
         digest: '',
     };

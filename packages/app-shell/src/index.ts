@@ -10,6 +10,11 @@ export type {
     WorkspaceType,
     AdditionalMount,
     WorkbenchConfig,
+    AppUI,
+    ChatEditorDeps,
+    FlowEditorDeps,
+    AIContextMenuDeps,
+    AIContextMenuNode,
 } from './types';
 export { FILE_REGISTRY } from './config/file-registry';
 export type { AppFileTypeConfig, EditorTypeKey } from './config/file-registry';

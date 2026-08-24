@@ -15,6 +15,10 @@ export type RouteCondition =
         neq?: unknown;
         in?: unknown[];
         exists?: boolean;
+        gt?: unknown;
+        gte?: unknown;
+        lt?: unknown;
+        lte?: unknown;
         and?: RouteCondition[];
         or?: RouteCondition[];
         not?: RouteCondition;
@@ -37,6 +41,10 @@ export function compileRouteCondition(condition: RouteCondition): SerializableEx
     if (condition.eq !== undefined) return { kind: 'eq', args: [selector(), { kind: 'literal', value: condition.eq as JsonValue }] };
     if (condition.neq !== undefined) return { kind: 'neq', args: [selector(), { kind: 'literal', value: condition.neq as JsonValue }] };
     if (condition.in !== undefined) return { kind: 'in', args: [selector()], value: condition.in as JsonValue };
+    if (condition.gt !== undefined) return { kind: 'gt', args: [selector(), { kind: 'literal', value: condition.gt as JsonValue }] };
+    if (condition.gte !== undefined) return { kind: 'gte', args: [selector(), { kind: 'literal', value: condition.gte as JsonValue }] };
+    if (condition.lt !== undefined) return { kind: 'lt', args: [selector(), { kind: 'literal', value: condition.lt as JsonValue }] };
+    if (condition.lte !== undefined) return { kind: 'lte', args: [selector(), { kind: 'literal', value: condition.lte as JsonValue }] };
     if (condition.exists !== undefined) {
         const exists: SerializableExpression = { kind: 'exists', args: [selector()] };
         return condition.exists ? exists : { kind: 'not', args: [exists] };

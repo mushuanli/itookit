@@ -76,7 +76,12 @@ export type {
     LLMHooks,
     ProviderCapabilities,
     MCPConfig,
-    MCPServerConfig
+    MCPServerConfig,
+    CodexCLIConfig,
+    CodexCommandRunner,
+    CodexCommandResult,
+    CodexAppServerTransport,
+    CodexRPCMessage
 } from './types/provider';
 
 // 请求/响应
@@ -101,6 +106,9 @@ export { OpenAIProvider } from './providers/openai';
 export { ResponsesProvider } from './providers/responses';
 export { AnthropicProvider } from './providers/anthropic';
 export { GeminiProvider } from './providers/gemini';
+export { CodexProvider } from './providers/codex';
+export { AsyncEventHub, rejectPending } from './runtime/async-event-hub';
+export { JsonRpcLineTransport } from './runtime/json-rpc-transport';
 
 export {
     registerProvider,

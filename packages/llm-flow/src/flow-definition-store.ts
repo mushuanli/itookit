@@ -1,4 +1,4 @@
-import type { DagPluginCatalog, FlowDraft, FlowRevision } from '@itookit/common';
+import type { DagPluginCatalog, FlowConnection, FlowDraft, FlowRevision } from '@itookit/common';
 import { flowRevisionDigest, hasValidationErrors, validateFlowRevision } from './flow/validation';
 
 /**
@@ -60,6 +60,7 @@ export class FlowDefinitionStore {
             edges: [],
             layout: {},
             parameters: [],
+            connections: [],
             updatedAt: Date.now(),
         };
         await this.store.createFile(fileName(input.id), JSON.stringify(draft, null, 2));
@@ -157,6 +158,7 @@ export class FlowDefinitionStore {
             nodes: structuredClone(draft.nodes),
             edges: structuredClone(draft.edges),
             parameters: structuredClone(draft.parameters ?? []),
+            ...cloneConnections(draft),
             createdAt: Date.now(),
         };
         return this.saveRevision({ ...withoutDigest, digest: flowRevisionDigest(withoutDigest) });
@@ -178,6 +180,7 @@ export class FlowDefinitionStore {
             edges: existing?.edges ?? [],
             layout: existing?.layout ?? {},
             parameters: existing?.parameters ?? [],
+            ...cloneConnections(existing ?? {}),
             updatedAt: Date.now(),
         };
         await this.store.writeFile(nodeId, JSON.stringify(draft, null, 2));
@@ -210,6 +213,17 @@ export class FlowDefinitionStore {
 function fileName(id: string): string {
     assertFlowId(id);
     return `${id}${FLOW_EXTENSION}`;
+}
+
+/** Deep-copy a draft's connection slots so draft/revision copies stay in sync. */
+function cloneConnections(source: Pick<FlowDraft, 'connections' | 'defaultConnection'>): {
+    connections: FlowConnection[];
+    defaultConnection?: string;
+} {
+    return {
+        connections: structuredClone(source.connections ?? []),
+        defaultConnection: source.defaultConnection,
+    };
 }
 
 function revisionName(id: string, revision: number): string {

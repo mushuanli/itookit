@@ -22,7 +22,7 @@ export interface DurableProgramInput {
     temperature?: number;
     maxTokens?: number;
     thinking?: boolean;
-    reasoningEffort?: 'low' | 'medium' | 'xhigh';
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     /** stream !== false → LLM streams (default); false → non-streaming fallback. */
     stream?: boolean;
     /** 走底层内置 server-side search（如 DeepSeek/OpenAI Responses 的 web_search、Gemini 的 googleSearch）。 */
@@ -36,6 +36,8 @@ export interface DurableAgentInput extends DurableProgramInput {
     approval?: 'none' | 'external' | 'all';
     tools?: ToolDefinition[];
     externalToolIds?: string[];
+    /** Tool name that, when called, declares sub-task payloads (completes the node). */
+    subtaskTool?: string;
 }
 
 export interface DurableCapabilitySignal {

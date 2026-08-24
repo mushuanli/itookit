@@ -25,6 +25,7 @@ export { AttachmentProcessor } from './session/attachment-processor';
 
 export { ChatEngine } from './persistence/chat-engine';
 export { FlowEngine, FLOW_MODULE_NAME } from './persistence/flow-engine';
+export { seedDefaultFlows, essayReviewDraft, ESSAY_REVIEW_FLOW_ID } from './persistence/default-flows';
 export { RoundLog, roundToProjection, hasEffectiveAssistant } from './persistence/round-log';
 export { RoundGraphService, RoundGraphError } from './persistence/round-graph-service';
 export * from '@itookit/llm-flow';
@@ -56,6 +57,11 @@ export type {
     MCPServer,
 } from './services/agent-service';
 export { VFSAgentService } from './services/vfs-agent-service';
+export type {
+    IPrivilegedCommandService,
+    PlanCommandRequest,
+    ExecCommandRequest,
+} from './services/privileged-command';
 
 export { chatFileParser } from './utils/parsers';
 export {

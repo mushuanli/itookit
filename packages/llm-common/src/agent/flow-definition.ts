@@ -1,4 +1,5 @@
 import type { FlowNodeId } from './flow';
+import type { LlmNodeConfig } from '../llm/node-config';
 
 export type Brand<T, Name extends string> = T & { readonly __brand: Name };
 export type FlowId = Brand<string, 'FlowId'>;
@@ -31,7 +32,7 @@ export interface OutputPortSpec {
 }
 
 export interface SerializableExpression {
-    kind: 'literal' | 'path' | 'not' | 'and' | 'or' | 'eq' | 'neq' | 'in' | 'exists';
+    kind: 'literal' | 'path' | 'param' | 'not' | 'and' | 'or' | 'eq' | 'neq' | 'in' | 'exists' | 'gt' | 'gte' | 'lt' | 'lte';
     value?: JsonValue;
     path?: string[];
     args?: SerializableExpression[];
@@ -74,6 +75,14 @@ export interface FlowDraft {
     layout: FlowLayout;
     /** Declared runtime parameters (editable in the designer, frozen into revisions). */
     parameters?: FlowParameter[];
+    /** Named connection slots; nodes reference a slot by name (default = defaultConnection). */
+    connections?: FlowConnection[];
+    /** Connection slot name used when a node does not specify one. */
+    defaultConnection?: string;
+    /** Flow-level system prompt segments (default base for nodes without agentId). */
+    systemPrompt?: string[];
+    /** Flow-level tool ids (union with node toolIds). */
+    toolIds?: string[];
     updatedAt: number;
 }
 
@@ -89,6 +98,35 @@ export interface FlowParameter {
     description?: string;
 }
 
+/**
+ * A named connection slot a workflow defines (e.g. `default`, `economy`,
+ * `premium`). Each slot binds a global LLMConnection.id; nodes reference the
+ * slot by `name` in their `config.connectionId`. The workflow-level
+ * `defaultConnection` is used when a node does not name one.
+ */
+export interface FlowConnection {
+    name: string;
+    connectionId: string;
+    description?: string;
+}
+
+/** Sub-task fan-out declaration: the agent calls `tool` and each returned payload instantiates `template`. */
+export interface SubtaskDecl {
+    tool: string;
+    template: FlowNodeDefinition;
+    max?: number;
+}
+
+/**
+ * Config of a `builtin.agent` node: a unified LlmNodeConfig (references to
+ * system prompt / tools / skills / connection + inline additions) plus a
+ * `agentId` shortcut that inherits one Agent's whole reference set at once.
+ */
+export interface FlowAgentNodeConfig extends Partial<LlmNodeConfig> {
+    agentId?: string;
+    subtasks?: SubtaskDecl;
+}
+
 export interface FlowRevision {
     id: FlowId;
     revision: number;
@@ -97,6 +135,14 @@ export interface FlowRevision {
     edges: FlowEdgeDefinition[];
     /** Declared runtime parameters (the workflow's variable inputs). */
     parameters?: FlowParameter[];
+    /** Named connection slots (frozen into the revision). */
+    connections?: FlowConnection[];
+    /** Connection slot name used when a node does not specify one. */
+    defaultConnection?: string;
+    /** Flow-level system prompt segments (frozen into the revision). */
+    systemPrompt?: string[];
+    /** Flow-level tool ids (frozen into the revision). */
+    toolIds?: string[];
     createdAt: number;
     digest: string;
 }

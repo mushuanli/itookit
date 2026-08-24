@@ -17,9 +17,15 @@ export function resolveFlowParameters(
     if (typeof value === 'string') {
         const trimmed = value.trim();
         const whole = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(trimmed);
-        if (whole && whole[1] in parameters) return parameters[whole[1]];
-        return value.replace(/\$\{params\.([A-Za-z0-9_.-]+)\}/g, (_match, name: string) =>
-            name in parameters ? stringifyParameter(parameters[name]) : `\${params.${name}}`);
+        if (whole) {
+            const resolved = resolveParamPath(parameters, whole[1]);
+            if (resolved !== undefined) return resolved;
+            return value;
+        }
+        return value.replace(/\$\{params\.([A-Za-z0-9_.-]+)\}/g, (_match, path: string) => {
+            const resolved = resolveParamPath(parameters, path);
+            return resolved !== undefined ? stringifyParameter(resolved) : `\${params.${path}}`;
+        });
     }
     if (Array.isArray(value)) return value.map(item => resolveFlowParameters(item, parameters));
     if (isRecord(value)) {
@@ -27,6 +33,19 @@ export function resolveFlowParameters(
             [key, resolveFlowParameters(item, parameters)]));
     }
     return value;
+}
+
+/** Resolve a dotted parameter path (e.g. `profile.pass_score`) against the flat/nested map. */
+function resolveParamPath(parameters: Record<string, JsonValue>, path: string): JsonValue | undefined {
+    // Fast path: a top-level key literally named with dots.
+    if (path in parameters) return parameters[path];
+    const parts = path.split('.');
+    let current: JsonValue = parameters;
+    for (const part of parts) {
+        if (!isRecord(current) || !(part in current)) return undefined;
+        current = current[part];
+    }
+    return current;
 }
 
 /** Validate provided values against a workflow's declared parameter schema. */

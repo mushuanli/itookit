@@ -150,8 +150,8 @@ export class SessionRunCoordinator {
         if (hasValidationErrors(parameterIssues)) {
             throw new Error(parameterIssues.map(issue => issue.message).join('; '));
         }
-        return this.runs.executeDag(execution, flow.parameters, snapshot =>
-            flowToDag(revision, node => bindNode(node, snapshot, task, setup)),
+        return this.runs.executeDag(execution, flow.parameters, async snapshot =>
+            flowToDag(revision, node => bindNode(node, snapshot, task, setup, this.agents), setup.config.connectionId ?? 'default'),
         );
     }
 
@@ -289,31 +289,77 @@ export class SessionRunCoordinator {
     }
 }
 
-function bindNode(
+async function bindNode(
     node: FlowNodeDefinition,
     snapshot: ContextSnapshot,
     task: ExecutionTask,
     setup: ExecutionSetup,
+    agents: AgentResolver,
 ) {
     if (node.plugin !== 'builtin.agent') {
         return { inputs: { ...node.inputs, prompt: task.input.text } };
     }
+    const config = record(node.config);
+    // Resolve node-level agent reference (optional): overrides session agent defaults.
+    const agentId = typeof config.agentId === 'string' && config.agentId.trim() ? config.agentId : '';
+    let effective = setup.config;
+    if (agentId) {
+        try {
+            effective = await agents.resolveExact(agentId);
+        } catch (error) {
+            log.warn('Flow node agentId resolution failed, falling back to session agent', { agentId, error });
+        }
+    }
+    // Resolve System Prompt library reference + inline node prompt as leading
+    // system messages (referenced content first, node increment after).
+    const systemPromptId = typeof config.systemPromptId === 'string' && config.systemPromptId.trim()
+        ? config.systemPromptId
+        : '';
+    const referencedPrompt: string[] = [];
+    if (systemPromptId) {
+        try {
+            const sp = await agents.getSystemPrompt(systemPromptId);
+            if (sp?.content?.length) referencedPrompt.push(...sp.content);
+        } catch (error) {
+            log.warn('Flow node systemPromptId resolution failed', { systemPromptId, error });
+        }
+    }
+    const nodePrompt = typeof config.prompt === 'string' && config.prompt.trim()
+        ? config.prompt
+        : '';
+    // Node-level history policy: inherit (default) keeps the session history;
+    // none/upstream isolate the node from the session history (upstream node
+    // outputs are appended later via applyDependencyMessages).
+    const historyPolicy = config.historyPolicy === 'none' || config.historyPolicy === 'upstream'
+        ? config.historyPolicy
+        : 'inherit';
+    const systemMessages = [
+        ...referencedPrompt.map(content => ({ role: 'system' as const, content })),
+        ...(nodePrompt ? [{ role: 'system' as const, content: nodePrompt }] : []),
+    ];
+    const baseMessages = historyPolicy === 'inherit'
+        ? snapshot.canonicalMessages
+        : (task.input.text ? [{ role: 'user' as const, content: task.input.text }] : []);
+    const messages = [...systemMessages, ...baseMessages];
+    // Tools: union of node-declared capabilities and the effective agent's toolIds.
+    const toolIds = [...new Set([...(node.capabilities ?? []), ...(effective.capabilityPolicy?.toolIds ?? [])])];
     return {
         config: {
-            ...record(node.config),
-            prompt: task.input.text,
-            messages: snapshot.canonicalMessages,
+            ...config,
+            messages,
             sessionId: task.sessionId,
             roundId: `${setup.roundId}:${node.id}`,
-            connectionId: setup.config.connectionId ?? 'default',
-            model: setup.config.model,
-            temperature: setup.config.temperature,
-            maxTokens: setup.config.constraints?.maxTokens,
-            thinking: setup.config.enableThinking,
-            reasoningEffort: setup.config.reasoningEffort,
-            toolIds: setup.config.capabilityPolicy?.toolIds ?? [],
+            // Only override connection when the node references an agent; otherwise
+            // keep the node's flow-slot connectionId for resolveNodeConnection.
+            ...(agentId ? { connectionId: effective.connectionId } : {}),
+            model: effective.model,
+            temperature: effective.temperature,
+            maxTokens: effective.constraints?.maxTokens,
+            thinking: effective.enableThinking,
+            reasoningEffort: effective.reasoningEffort,
+            toolIds,
         } as never,
-        capabilities: setup.config.capabilityPolicy?.toolIds ?? [],
+        capabilities: toolIds,
     };
 }
 
@@ -380,8 +426,7 @@ function applyOverrides(
         updated.webSearchMode = 'disabled';
     }
     if (overrides.systemPromptAppend) {
-        updated.systemPrompt = [updated.systemPrompt, overrides.systemPromptAppend]
-            .filter(Boolean).join('\n\n');
+        updated.systemPrompt = [...(updated.systemPrompt ?? []), overrides.systemPromptAppend];
     }
     return updated;
 }

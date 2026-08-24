@@ -5,6 +5,8 @@ import type {
     FlowEdgeDefinition,
     FlowEdgeId,
     FlowNodeDefinition,
+    FlowConnection,
+    FlowParameter,
 } from '@itookit/common';
 
 export interface DeleteNodeResult {
@@ -112,6 +114,18 @@ export class DagDraftController {
         this.change(draft => {
             const viewport = draft.layout.viewport ?? { x: 0, y: 0, zoom: 1 };
             draft.layout.viewport = { ...viewport, zoom: Math.min(2, Math.max(0.4, zoom)) };
+        });
+    }
+
+    updateFlowSettings(settings: {
+        connections?: FlowConnection[];
+        defaultConnection?: string;
+        parameters?: FlowParameter[];
+    }): void {
+        this.change(draft => {
+            if (settings.connections) draft.connections = clone(settings.connections);
+            if (settings.defaultConnection !== undefined) draft.defaultConnection = settings.defaultConnection;
+            if (settings.parameters) draft.parameters = clone(settings.parameters);
         });
     }
 

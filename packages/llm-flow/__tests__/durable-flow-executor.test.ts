@@ -238,3 +238,87 @@ describe('upstreamOf', () => {
         expect(upstreamOf(edges, 'c')).toEqual(['b', 'a']);
     });
 });
+
+describe('conditional loop exit', () => {
+    let manager: IVFSManager;
+    let fs: IModuleFS;
+    let kernel: Kernel;
+
+    async function setup(score: number): Promise<void> {
+        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(), modules: [{ name: 'test' }] }));
+        await manager.mount('test');
+        fs = manager.getEngine('test');
+        await fs.init();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel);
+        kernel.registerEffect(scoringEffect(score));
+        await kernel.initialize();
+        await kernel.createSession({ id: 'session-one', storage: { kind: 'test', locator: null } });
+    }
+
+    afterEach(async () => { kernel.dispose(); await manager.dispose(); });
+
+    it('exits the rewrite loop once the verdict score reaches the threshold', async () => {
+        await setup(55);
+        const execution = await executor(kernel).submit('session-one', conditionalLoopFlow());
+        const exit = await execution.root.wait({ timeoutMs: 3000 });
+        expect(exit.status).toBe('succeeded');
+        expect(execution.iterations.get('verdict')).toBe(1);
+        expect(execution.iterations.get('rewrite')).toBeUndefined();
+    });
+
+    it('keeps rewriting until maxIterations when the score stays below the threshold', async () => {
+        await setup(53);
+        const execution = await executor(kernel).submit('session-one', conditionalLoopFlow());
+        const exit = await execution.root.wait({ timeoutMs: 3000 });
+        expect(exit.status).toBe('succeeded');
+        expect(execution.iterations.get('verdict')).toBe(2);
+        expect(execution.iterations.get('rewrite')).toBe(2);
+    });
+});
+
+function scoringEffect(score: number): EffectAdapter<Record<string, unknown>, ChatCompletionResponse> {
+    return {
+        kind: 'llm.chat', version: '1',
+        async execute() {
+            return {
+                choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ score }) }, finish_reason: 'stop' }],
+                usage: { total_tokens: 1 },
+            };
+        },
+    };
+}
+
+function conditionalLoopFlow(): DagRunSpec {
+    const agent = (id: string): DagRunSpec['nodes'][number] => ({
+        id, name: id, plugin: 'builtin.agent', pluginVersion: '1.0.0',
+        config: { sessionId: 'session-one', roundId: `round-${id}`, connectionId: 'default', messages: [{ role: 'user', content: 'go' }], approval: 'none', maxIterations: 2 },
+        inputs: {}, capabilities: [],
+    });
+    return {
+        nodes: [
+            agent('verdict'),
+            {
+                id: 'decide', name: 'decide', plugin: 'builtin.route', pluginVersion: '1.0.0',
+                config: {
+                    mode: 'exclusive',
+                    rules: [
+                        { edgeId: 'decide->report', expression: { kind: 'gte', args: [{ kind: 'path', path: ['input', 'score'] }, { kind: 'literal', value: 54 }] } },
+                    ],
+                    defaultEdgeId: 'decide->rewrite',
+                },
+                inputs: {},
+            },
+            agent('rewrite'),
+            agent('report'),
+        ],
+        edges: [
+            { id: 'verdict->decide', from: 'verdict', to: 'decide', output: 'result', input: 'input' },
+            { id: 'verdict->report', from: 'verdict', to: 'report', output: 'result', input: 'input' },
+            { id: 'decide->report', from: 'decide', to: 'report', output: 'result', input: 'input' },
+            { id: 'decide->rewrite', from: 'decide', to: 'rewrite', output: 'result', input: 'input' },
+            { id: 'rewrite->verdict', from: 'rewrite', to: 'verdict', output: 'result', input: 'input' },
+        ],
+    };
+}

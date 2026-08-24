@@ -15,5 +15,6 @@ export {
 } from './validation';
 export type { ValidationIssue } from './validation';
 export { resolveFlowParameters, validateFlowParameters } from './parameters';
+export { resolveConnectionId, resolveNodeConnection } from './connections';
 export { FlowCommand } from './command-names';
 export * from './workflow';

@@ -4,6 +4,7 @@
 import type { LLMConnection, ConnectionMeta, LLMProvider, DefaultConnectionDef, ConnectionTestResult, ModelTier } from './connection';
 import type { RestorableItem } from '../types';
 import type { SkillDefinition } from '../skills/skill-types';
+import type { SystemPromptDefinition, PromptPreset } from './node-config';
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,8 @@ export interface AgentConfig {
      */
     modelName?: string;
     systemPrompt?: string;
+    /** Reference a System Prompt library entry (shared by multiple agents). */
+    systemPromptId?: string;
     maxHistoryLength?: number;
     temperature?: number;
     mcpServers?: string[];
@@ -35,14 +38,9 @@ export interface AgentInterfaceDef {
 /**
  * 预设 Prompt 条目（name → prompt）。
  * 用于 Agent 配置中预定义的快捷提示词，可在输入框下拉选择填入。
+ * Re-exported from node-config (part of the unified system-prompt model).
  */
-export interface PromptPreset {
-    /** 显示名称 */
-    name: string;
-    /** 提示词内容 */
-    prompt: string;
-}
-
+export type { PromptPreset } from './node-config';
 export interface AgentDefinition {
     id: string;
     /** Version identifier. Phase 3: derived from SHA-256 of canonical JSON. */
@@ -76,6 +74,8 @@ export interface AgentDefinition {
     /** Tool & MCP capability declarations. */
     capabilityPolicy?: {
         toolIds: string[];
+        /** Static skill references (complements trigger-based progressive disclosure). */
+        skillIds?: string[];
         mcpProfileIds: string[];
     };
 
@@ -178,8 +178,8 @@ export interface IConnectionService extends IConnectionReader {
     saveProvider(provider: LLMProvider): Promise<void>;
     /** 删除用户自定义 Provider（内置 Provider 不可删除） */
     deleteProvider(id: string): Promise<void>;
-    /** 测试连接参数是否可用（实际发起 HTTP 请求） */
-    testConnection(params: { provider: string; apiKey: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult>;
+    /** 测试连接参数是否可用（实际发起 HTTP 请求；本地 provider 无需 apiKey） */
+    testConnection(params: { provider: string; apiKey?: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult>;
 }
 
 // ─── ILLMManagementService ───────────────────────────────────────────────────
@@ -253,6 +253,14 @@ export interface IAgentConfigService extends IConnectionReader {
     listAgents(): AgentDefinition[];
     /** 同步查找单个 agent（从内存缓存读取） */
     findAgent(id: string): AgentDefinition | undefined;
+    /** Resolve a System Prompt library entry by id. */
+    getSystemPrompt(id: string): Promise<SystemPromptDefinition | null>;
+    /** List all System Prompt library entries. */
+    listSystemPrompts(): Promise<SystemPromptDefinition[]>;
+    /** Upsert a System Prompt library entry. */
+    saveSystemPrompt(prompt: SystemPromptDefinition): Promise<void>;
+    /** Delete a System Prompt library entry by id. */
+    deleteSystemPrompt(id: string): Promise<void>;
 }
 
 // ─── IAgentManagementService ──────────────────────────────────────────────────

@@ -47,9 +47,10 @@ export function reduceOutcome(
 export function routeOutcome(
     config: Record<string, unknown>,
     inputs: Record<string, unknown>,
+    parameters?: Record<string, JsonValue>,
 ): DagNodeOutcome {
     const rules = Array.isArray(config.rules) ? config.rules.filter(isRecord) : [];
-    const selected = selectEdges(rules, config, inputs);
+    const selected = selectEdges(rules, config, inputs, parameters);
     const defaultEdgeId = typeof config.defaultEdgeId === 'string' ? config.defaultEdgeId : '';
     // 待决定边 = 所有规则边 + 默认边；未选中的一律禁用（含默认边，当规则命中时）。
     const candidates = [...rules.map(rule => String(rule.edgeId ?? '')), defaultEdgeId].filter(Boolean);
@@ -80,11 +81,12 @@ function selectEdges(
     rules: Record<string, unknown>[],
     config: Record<string, unknown>,
     inputs: Record<string, unknown>,
+    parameters?: Record<string, JsonValue>,
 ): string[] {
     const selected: string[] = [];
     for (const rule of rules.sort(compareRule)) {
         const expression = rule.expression ?? record(rule.condition).expression;
-        if (!evaluate(expression as SerializableExpression, inputs)) continue;
+        if (!evaluate(expression as SerializableExpression, inputs, parameters)) continue;
         selected.push(String(rule.edgeId));
         if (config.mode !== 'multicast') break;
     }
@@ -92,26 +94,54 @@ function selectEdges(
     return selected;
 }
 
-function evaluate(expression: SerializableExpression | undefined, value: unknown): boolean {
+function evaluate(
+    expression: SerializableExpression | undefined,
+    value: unknown,
+    parameters?: Record<string, JsonValue>,
+): boolean {
     if (!expression) return false;
     if (expression.kind === 'literal') return Boolean(expression.value);
-    if (expression.kind === 'exists') return resolve(expression.args?.[0], value) !== undefined;
-    if (expression.kind === 'not') return !evaluate(expression.args?.[0], value);
-    if (expression.kind === 'and') return (expression.args ?? []).every(item => evaluate(item, value));
-    if (expression.kind === 'or') return (expression.args ?? []).some(item => evaluate(item, value));
-    if (expression.kind === 'eq') return resolve(expression.args?.[0], value) === resolve(expression.args?.[1], value);
-    if (expression.kind === 'neq') return resolve(expression.args?.[0], value) !== resolve(expression.args?.[1], value);
+    if (expression.kind === 'exists') return resolve(expression.args?.[0], value, parameters) !== undefined;
+    if (expression.kind === 'not') return !evaluate(expression.args?.[0], value, parameters);
+    if (expression.kind === 'and') return (expression.args ?? []).every(item => evaluate(item, value, parameters));
+    if (expression.kind === 'or') return (expression.args ?? []).some(item => evaluate(item, value, parameters));
+    if (expression.kind === 'eq') return resolve(expression.args?.[0], value, parameters) === resolve(expression.args?.[1], value, parameters);
+    if (expression.kind === 'neq') return resolve(expression.args?.[0], value, parameters) !== resolve(expression.args?.[1], value, parameters);
+    if (expression.kind === 'gt') return compare(resolve(expression.args?.[0], value, parameters), resolve(expression.args?.[1], value, parameters)) > 0;
+    if (expression.kind === 'gte') return compare(resolve(expression.args?.[0], value, parameters), resolve(expression.args?.[1], value, parameters)) >= 0;
+    if (expression.kind === 'lt') return compare(resolve(expression.args?.[0], value, parameters), resolve(expression.args?.[1], value, parameters)) < 0;
+    if (expression.kind === 'lte') return compare(resolve(expression.args?.[0], value, parameters), resolve(expression.args?.[1], value, parameters)) <= 0;
     if (expression.kind === 'in') {
         return Array.isArray(expression.value)
-            && expression.value.includes(resolve(expression.args?.[0], value) as JsonValue);
+            && expression.value.includes(resolve(expression.args?.[0], value, parameters) as JsonValue);
     }
-    return resolve(expression, value) !== undefined;
+    return resolve(expression, value, parameters) !== undefined;
 }
 
-function resolve(expression: SerializableExpression | undefined, value: unknown): unknown {
+function resolve(
+    expression: SerializableExpression | undefined,
+    value: unknown,
+    parameters?: Record<string, JsonValue>,
+): unknown {
     if (!expression) return undefined;
     if (expression.kind === 'literal') return expression.value;
-    return expression.kind === 'path' ? pick(value, expression.path ?? []) : evaluate(expression, value);
+    if (expression.kind === 'param') return pickParam(parameters, expression.path ?? []);
+    return expression.kind === 'path' ? pick(value, expression.path ?? []) : evaluate(expression, value, parameters);
+}
+
+function compare(left: unknown, right: unknown): number {
+    if (typeof left === 'number' && typeof right === 'number') return left - right;
+    return String(left).localeCompare(String(right));
+}
+
+function pickParam(parameters: Record<string, JsonValue> | undefined, path: string[]): unknown {
+    if (!parameters) return undefined;
+    let current: JsonValue = parameters;
+    for (const part of path) {
+        if (!isRecord(current) || !(part in current)) return undefined;
+        current = current[part];
+    }
+    return current;
 }
 
 function firstInput(inputs: Record<string, unknown>): unknown {
@@ -124,7 +154,14 @@ function artifactContent(value: unknown): unknown {
 
 function pick(value: unknown, path: string[]): unknown {
     let current = value;
-    for (const part of path) current = record(current)[part];
+    for (const part of path) {
+        // Upstream agent nodes emit JSON text; parse it at any nesting level so
+        // `path: ['input','score']` can read a field from a `{"score":55}` string.
+        if (typeof current === 'string' && current.trim().startsWith('{')) {
+            try { current = JSON.parse(current); } catch { /* keep the raw string */ }
+        }
+        current = record(current)[part];
+    }
     return artifactContent(current);
 }
 

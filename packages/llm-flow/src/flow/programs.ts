@@ -24,6 +24,8 @@ export interface FlowValueInput {
     config: Record<string, JsonValue>;
     inputs: Record<string, JsonValue>;
     dependencies: FlowDependencyBinding[];
+    /** Flow runtime parameters — made available to route expressions via `param` kind. */
+    parameters?: Record<string, JsonValue>;
 }
 
 interface FlowValueState extends FlowValueInput {
@@ -124,10 +126,12 @@ export class FlowAggregateProgram implements DurableTaskProgram<FlowAggregateSta
 
 function completeValue(state: FlowValueState): Decision<FlowValueState, DagNodeOutcome> {
     const inputs = { ...state.inputs, ...state.dependencyOutputs };
+    if (state.operation === 'route') {
+        return { state, next: { type: 'complete', output: routeOutcome(state.config, inputs, state.parameters) } };
+    }
     const operation = state.operation === 'transform'
         ? transformOutcome
         : state.operation === 'reduce' ? reduceOutcome
-        : state.operation === 'route' ? routeOutcome
         : spawnOutcome;
     return { state, next: { type: 'complete', output: operation(state.config, inputs) } };
 }

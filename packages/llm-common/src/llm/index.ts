@@ -6,5 +6,6 @@ export * from './connection';
 export * from './message';
 export * from './completion';
 export * from './agent';
+export * from './node-config';
 export * from './llm-service';
 export * from './pricing';

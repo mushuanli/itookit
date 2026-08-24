@@ -82,7 +82,7 @@ export class ConversationRunCoordinator {
     async executeDag(
         execution: ConversationExecution,
         parameters: Record<string, JsonValue> | undefined,
-        createSpec: (snapshot: ContextSnapshot) => DagRunSpec,
+        createSpec: (snapshot: ContextSnapshot) => DagRunSpec | Promise<DagRunSpec>,
     ): Promise<void> {
         await this.execute(execution, async snapshot => {
             const flow = new DurableFlowExecutor({
@@ -90,7 +90,7 @@ export class ConversationRunCoordinator {
                 plugins: this.options.dagPlugins,
                 resolveTools: this.options.resolveTools,
             });
-            const submitted = await flow.submit(execution.task.sessionId, createSpec(snapshot), parameters);
+            const submitted = await flow.submit(execution.task.sessionId, await createSpec(snapshot), parameters);
             return { root: submitted.root, tasks: [...submitted.nodes.values()], parse: parseDagOutput };
         });
     }

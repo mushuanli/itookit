@@ -337,6 +337,25 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         ],
     },
 
+    codex: {
+        id: 'codex', isBuiltin: true,
+        name: 'Codex (Local)',
+        implementation: 'custom',
+        baseURL: '',
+        icon: '⌨️',
+        supportsThinking: true,
+        capabilities: {
+            vision: true,
+            audioInput: true,
+            tools: true,
+            thinking: true,
+            streaming: true,
+        },
+        models: [
+            { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', icon: '💻', supportsThinking: true, supportsVision: true, supportsTools: true, supportsStructuredOutput: true },
+        ],
+    },
+
     volcengine: {
         id: 'volcengine', isBuiltin: true,
         name: 'Volcengine (火山方舟)',

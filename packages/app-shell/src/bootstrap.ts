@@ -7,25 +7,17 @@ import type { SkillDefinition,
 import { EditorFactory } from '@itookit/ui-common';
 import type { IVFSManager, FSNode } from '@itookit/vfs-core';
 import { createVFS, FS_MODULE_CHAT } from '@itookit/vfs-core';
-import { createSettingsModule, createSettingsFactory, type LLMUIEditors } from '@itookit/app-settings';
-import {
-    createLLMFactory,
-    createAgentEditorFactory,
-    createFlowsEditorFactory,
-    VFSAgentService,
-    createAIContextMenuConfig,
-    MCPSettingsEditor,
-    ConnectionSettingsEditor,
-    ProviderSettingsEditor,
-    CostEditor,
-} from '@itookit/llm-ui';
+import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
 import {
     initializeConversationSystem,
     ChatEngine,
     FlowEngine,
+    FlowDefinitionStore,
+    seedDefaultFlows,
     ChatKernelStorageResolver,
     createBuiltinDagPluginRegistry,
     chatFileParser,
+    VFSAgentService,
 } from '@itookit/llm-session';
 import type { SessionManager } from '@itookit/llm-session';
 import { Workbench } from './core/Workbench';
@@ -33,7 +25,6 @@ import { LLMDeviceDriver } from '@itookit/device-llm';
 import { Kernel } from '@itookit/durable-kernel';
 import { createKernelAdaptersRuntime } from '@itookit/kernel-adapters';
 import { SkillsEngine } from '@itookit/app-settings';
-import { createSkillsEditorFactory } from '@itookit/llm-ui';
 
 import { AppOptions, AppHandle, WorkspaceConfig, type AppKernelRuntime } from './types';
 import {
@@ -363,19 +354,21 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         },
     });
 
-    const llmUiEditors: LLMUIEditors = {
-        ProviderSettingsEditor,
-        ConnectionSettingsEditor,
-        MCPSettingsEditor,
-        CostEditor,
-    };
-    const settingsFactory = createSettingsFactory(settingsModule.service, agentService, llmDriver, llmUiEditors);
+    // Seed the default essay-review workflow so users have a runnable example.
+    await seedDefaultFlows(new FlowDefinitionStore(flowEngine, kernel.dagPlugins));
+
+    const settingsFactory = createSettingsFactory(
+        settingsModule.service,
+        agentService,
+        llmDriver,
+        options.ui.llmUiEditors,
+    );
     // Pass llmService only when the vision connection is actually configured —
     // this is the single place that knows both the kernel and the connection list.
     const connections = await agentService.getConnections();
     const visionConnExists = connections.some(c => c.id === 'conn-volcengine-vision');
     const privilegedCommands = new PrivilegedCommandService(kernel.kernel, agentService);
-    const llmFactory = createLLMFactory(
+    const llmFactory = options.ui.createChatEditor(
         agentService,
         visionConnExists
             ? {
@@ -387,14 +380,20 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             }
             : { chatEngine, commandBus, kernel: kernel.kernel, privilegedCommands },
     );
-    const agentFactory    = createAgentEditorFactory(agentService);
+    const agentFactory = options.ui.createAgentEditor(agentService);
 
     // Skills workspace: VFSUIShell list (SkillsEngine) + form editor (SkillSettingsEditor)
     const skillsEngine  = new SkillsEngine(agentService);
-    const skillsFactory = createSkillsEditorFactory(agentService);
+    const skillsFactory = options.ui.createSkillEditor(agentService);
 
     // Workflows workspace: standalone design surface over the flows VFS module.
-    const flowsFactory  = createFlowsEditorFactory({ commands: commandBus });
+    const flowsFactory = options.ui.createFlowEditor({
+        commands: commandBus,
+        listConnections: async () => {
+            const available = await agentService.getConnections();
+            return available.map(connection => ({ id: connection.id, name: connection.name }));
+        },
+    });
 
     // ── 4. Workspace strategies ────────────────────────────────────────────────
 
@@ -504,7 +503,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         const primaryDef = supportedFileTypes?.[0] ? FILE_REGISTRY[supportedFileTypes[0]] : undefined;
 
         const aiContextMenu = (strategyType === 'chat' && !uiPassThrough.readOnly)
-            ? createAIContextMenuConfig<VFSNodeUI>({
+            ? options.ui.createAIContextMenu<VFSNodeUI>({
                 agentService,
                 engine: strategy.getEngine(moduleName),
             })

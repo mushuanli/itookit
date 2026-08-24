@@ -98,6 +98,18 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         },
     },
 
+    // ── Local Codex app-server ────────────────────────────────────────────
+    {
+        id: 'conn-codex',
+        name: 'Codex (Local)',
+        providerId: 'codex',
+        tiers: {
+            optimal: 'gpt-5.6-sol',
+            standard: 'gpt-5.6-sol',
+            fast: 'gpt-5.6-sol',
+        },
+    },
+
     // ── Volcengine — 图片 OCR / 视觉理解 ─────────────────────────────────
     {
         id: 'conn-volcengine-vision',

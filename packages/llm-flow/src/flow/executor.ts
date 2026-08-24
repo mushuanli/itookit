@@ -146,7 +146,7 @@ export class DurableFlowExecutor {
                 inputs: node.inputs,
                 dependencies,
             });
-            const handle = await session.submit(await this.taskSpec(sessionId, node, task, dependencies));
+            const handle = await session.submit(await this.taskSpec(sessionId, node, task, dependencies, parameters));
             if (!instances.has(node.id)) instances.set(node.id, []);
             instances.get(node.id)!.push(handle);
             await this.bindCapabilities(session, handle, task.programKind, node.capabilities ?? [], node.budget);
@@ -176,12 +176,53 @@ export class DurableFlowExecutor {
                 if (effect.type === 'activate-edge') {
                     edgeState.set(String(effect.edgeId), 'active');
                     const activated = edges.find(edge => edge.id === String(effect.edgeId));
-                    if (activated) dispatchOrder.push(activated.to);
+                    // Only record dispatch order for back-edge sources (supervisor
+                    // workers); an ordinary loop's exit branch must not re-arm the
+                    // loop head through dispatchOrder.
+                    if (activated && isBackEdgeSource(activated.to, backEdges, edges)) {
+                        dispatchOrder.push(activated.to);
+                    }
                 } else if (effect.type === 'disable-edge') {
                     edgeState.set(String(effect.edgeId), 'inactive');
                 } else if (effect.type === 'patch-graph') {
                     applyPatch(effect.patch);
                 }
+            }
+        };
+
+        // Subtask fan-out: a completed agent node that declares `subtasks`
+        // parses its output as a JSON payload array and spawns one template
+        // instance per payload (parallel, isolated history).
+        const applySubtasks = (key: string, output: unknown): void => {
+            const nodeId = key.split('#')[0];
+            const node = nodes.find(n => String(n.id) === nodeId);
+            if (!node) return;
+            const config = isRecord(node.config) ? node.config : {};
+            const subtasks = isRecord(config.subtasks) ? config.subtasks : undefined;
+            if (!subtasks) return;
+            const template = subtasks.template;
+            if (!template || !isRecord(template)) return;
+            const payloads = parseSubtaskPayloads(output);
+            const max = typeof subtasks.max === 'number' && subtasks.max > 0 ? subtasks.max : payloads.length;
+            for (let i = 0; i < payloads.slice(0, max).length; i++) {
+                const subId = `${nodeId}~sub${i}`;
+                if (nodes.some(n => String(n.id) === subId)) continue;
+                const subNode: DagNodeDefinition = {
+                    id: subId,
+                    name: `${node.name} · 子任务${i + 1}`,
+                    plugin: typeof template.plugin === 'string' ? template.plugin : node.plugin,
+                    pluginVersion: typeof template.pluginVersion === 'string' ? template.pluginVersion : node.pluginVersion,
+                    config: jsonValue(isRecord(template.config) ? template.config : {}),
+                    inputs: {
+                        ...(isRecord(template.inputs) ? template.inputs : {}),
+                        payload: jsonValue(payloads[i]),
+                    },
+                    capabilities: Array.isArray(template.capabilities) ? template.capabilities.map(String) : [],
+                };
+                nodes.push(subNode);
+                const edgeId = `${nodeId}->${subId}`;
+                edges.push({ id: edgeId, from: nodeId, to: subId, output: 'result', input: 'input' });
+                edgeState.set(edgeId, 'active');
             }
         };
 
@@ -224,20 +265,22 @@ export class DurableFlowExecutor {
                     }
                 }
             }));
-            if ('interaction' in settled) return this.finish(session, instances);
+            if ('interaction' in settled) return this.finish(session, instances, nodes);
             completed.add(settled.key);
             if (settled.exit.status === 'failed') await compensateChain(settled.key);
             applyEffects(settled.exit.output);
+            applySubtasks(settled.key, settled.exit.output);
         }
 
-        return this.finish(session, instances);
+        return this.finish(session, instances, nodes);
     }
 
     private async finish(
         session: SessionHandle,
         instances: Map<string, TaskHandle[]>,
+        nodes: DagNodeDefinition[],
     ): Promise<FlowExecutionHandle> {
-        const root = await this.aggregate(session, instances);
+        const root = await this.aggregate(session, instances, nodes);
         return {
             root,
             nodes: new Map([...instances.entries()].map(([id, handles]) => [id, handles[handles.length - 1]])),
@@ -250,13 +293,21 @@ export class DurableFlowExecutor {
         node: DagNodeDefinition,
         task: import('@itookit/common').DagTaskDefinition,
         dependencies: import('@itookit/common').DagTaskDependencyBinding[],
+        parameters?: Record<string, CommonJsonValue>,
     ): Promise<TaskSpec<unknown>> {
         const allowed = node.capabilities ?? [];
         const catalog = await this.options.resolveTools?.(sessionId, allowed)
             ?? { definitions: [], externalIds: [] };
+        const subtaskTool = subtaskToolName(node.config);
         const input = task.programKind === 'llm.agent'
-            ? { ...record(task.input), tools: catalog.definitions, externalToolIds: catalog.externalIds }
-            : task.input;
+            ? {
+                ...record(task.input),
+                tools: [...catalog.definitions, ...(subtaskTool ? [subtaskToolDef(subtaskTool)] : [])],
+                externalToolIds: catalog.externalIds,
+            }
+            : task.programKind === 'flow.value'
+                ? { ...record(task.input), parameters }
+                : task.input;
         return {
             program: { kind: task.programKind, version: task.programVersion },
             input: jsonValue(input),
@@ -294,11 +345,20 @@ export class DurableFlowExecutor {
     private async aggregate(
         session: SessionHandle,
         instances: Map<string, TaskHandle[]>,
+        nodes: DagNodeDefinition[],
     ): Promise<TaskHandle<JsonValue>> {
-        const dependencies = [...instances.entries()].map(([nodeId, handles]) => ({
-            taskId: handles[handles.length - 1].id,
-            nodeId,
-        }));
+        // Nodes with persistOutput === false keep feeding downstream nodes via
+        // dependencies but are excluded from the flow-root aggregation that
+        // becomes the conversation history.
+        const suppressed = new Set(nodes
+            .filter(node => isRecord(node.config) && node.config.persistOutput === false)
+            .map(node => String(node.id)));
+        const dependencies = [...instances.entries()]
+            .filter(([nodeId]) => !suppressed.has(nodeId))
+            .map(([nodeId, handles]) => ({
+                taskId: handles[handles.length - 1].id,
+                nodeId,
+            }));
         return session.submit({
             program: { kind: 'flow.aggregate', version: '1' },
             input: { dependencies },
@@ -313,6 +373,18 @@ export class DurableFlowExecutor {
 
 function instanceKey(nodeId: string, iteration: number): string {
     return `${nodeId}#${iteration}`;
+}
+
+/** True when `nodeId` is the source of a back edge (a loop re-entry worker). */
+function isBackEdgeSource(
+    nodeId: string,
+    backEdges: Set<string>,
+    edges: DagEdgeDefinition[],
+): boolean {
+    for (const edgeId of backEdges) {
+        if (edges.find(edge => edge.id === edgeId)?.from === nodeId) return true;
+    }
+    return false;
 }
 
 /** 收集 route 节点声明的出边 id（含默认边；这些边默认 pending，等 route 决定激活/禁用）。 */
@@ -360,6 +432,44 @@ function graphEffects(output: unknown): GraphEffect[] {
 
 function jsonValue(value: unknown): JsonValue {
     return JSON.parse(JSON.stringify(value ?? null)) as JsonValue;
+}
+
+/** Parse an agent node's output content as a JSON array of subtask payloads. */
+function parseSubtaskPayloads(output: unknown): unknown[] {
+    const message = (output as { message?: { content?: unknown } } | undefined)?.message;
+    const content = message?.content;
+    if (typeof content !== 'string') return [];
+    try {
+        const parsed = JSON.parse(content);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+/** Read the declared subtask tool name from a node's config. */
+function subtaskToolName(config: unknown): string | undefined {
+    if (!isRecord(config)) return undefined;
+    const subtasks = isRecord(config.subtasks) ? config.subtasks : undefined;
+    return typeof subtasks?.tool === 'string' && subtasks.tool ? subtasks.tool : undefined;
+}
+
+/** ToolDefinition for the declarative subtask tool (call = declare sub-tasks). */
+function subtaskToolDef(name: string): ToolDefinition {
+    return {
+        type: 'function',
+        function: {
+            name,
+            description: 'Declare a list of sub-tasks to execute in parallel',
+            parameters: {
+                type: 'object',
+                properties: {
+                    items: { type: 'array', items: { type: 'object' } },
+                },
+                required: ['items'],
+            },
+        },
+    };
 }
 
 function record(value: unknown): Record<string, CommonJsonValue> {

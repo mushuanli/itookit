@@ -1,11 +1,19 @@
-import type {NavigationRequest} from '@itookit/common';
-import type { FileCreationConfig, EditorFactory, EditorOptions } from '@itookit/ui-common';
+import type {NavigationRequest, ICommandBus, ILLMService} from '@itookit/common';
+import type { FileCreationConfig, EditorFactory, EditorOptions, ContextMenuConfig } from '@itookit/ui-common';
 import type { IStorageBackend, IVFSManager, MountOptions, IModuleFS } from '@itookit/vfs-core';
 import type { ThemeMode } from './ThemeService';
 import type { FileTypeDefinition, CustomEditorResolver, VFSUIOptions } from '@itookit/vfs-ui';
 import type { KernelAdaptersRuntime, KernelAdaptersRuntimeOptions } from '@itookit/kernel-adapters';
 import type { Kernel } from '@itookit/durable-kernel';
-import type { DagPluginRegistry } from '@itookit/llm-session';
+import type {
+    DagPluginRegistry,
+    IChatEngine,
+    VFSAgentService,
+    IAgentManagementService,
+    IAgentConfigService,
+    IPrivilegedCommandService,
+} from '@itookit/llm-session';
+import type { LLMUIEditors } from '@itookit/app-settings';
 
 export interface AppKernelRuntime extends KernelAdaptersRuntime {
     kernel: Kernel;
@@ -53,6 +61,50 @@ export interface AdditionalMount {
     options?: MountOptions;
 }
 
+// ── UI 装配契约 ──────────────────────────────────────────────────────────
+//
+// app-shell 不直接依赖 @itookit/llm-ui：编辑器工厂 / AI 右键菜单 / LLM 设置
+// 编辑器均通过 AppOptions.ui 由 apps 入口注入。契约类型定义在 app-shell
+// （装配层，已依赖全部所需类型），llm-ui 的实现靠结构类型在入口处兼容。
+
+export interface ChatEditorDeps {
+    chatEngine: IChatEngine;
+    llmService?: ILLMService;
+    commandBus?: ICommandBus;
+    kernel?: Kernel;
+    privilegedCommands?: IPrivilegedCommandService;
+}
+
+export interface FlowEditorDeps {
+    commands: ICommandBus;
+    /** Optional override for the run action (defaults to create-session + navigate). */
+    onRunFlow?: (flowId: string, revision: number) => void;
+    /** Global LLM connections available to bind flow-level connection slots to. */
+    listConnections?: () => Promise<Array<{ id: string; name: string }>>;
+}
+
+export interface AIContextMenuDeps {
+    agentService: IAgentConfigService;
+    engine: IModuleFS;
+    filesOnly?: boolean;
+}
+
+/** Structural subset of a VFS node the AI context menu needs (mirrors llm-ui's NodeItem). */
+export interface AIContextMenuNode {
+    id: string;
+    type: 'file' | 'directory';
+    metadata: { title: string; custom: Record<string, unknown> };
+}
+
+export interface AppUI {
+    createChatEditor(agentService: VFSAgentService, deps: ChatEditorDeps): EditorFactory;
+    createAgentEditor(agentService: VFSAgentService): EditorFactory;
+    createFlowEditor(deps: FlowEditorDeps): EditorFactory;
+    createSkillEditor(agentService: IAgentManagementService): EditorFactory;
+    createAIContextMenu<TNode extends AIContextMenuNode>(deps: AIContextMenuDeps): ContextMenuConfig<TNode>;
+    llmUiEditors: LLMUIEditors;
+}
+
 export interface AppOptions {
     /** Primary storage backend (IndexedDB, LocalFS, InMemory, etc.) */
     backend: IStorageBackend;
@@ -71,6 +123,8 @@ export interface AppOptions {
     codexTransport?: import('@itookit/device-llm').CodexAppServerTransport;
     /** Platform capabilities implemented by the owning application. */
     kernelPlatform?: AppKernelPlatform;
+    /** UI implementations (editor factories, AI menu, LLM settings editors) injected by the entry app. */
+    ui: AppUI;
 }
 
 export interface AppHandle {

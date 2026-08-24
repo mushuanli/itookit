@@ -12,6 +12,7 @@ import type {
     ILLMManagementService, ConnectionMeta, LLMConnection,
     AgentDefinition, MCPServer, LLMSkill, LLMProvider,
     InitialAgentDef, DefaultConnectionDef, ConnectionTestResult,
+    SystemPromptDefinition,
 } from '@itookit/common';
 
 import { IAgentManagementService } from './agent-service';
@@ -32,6 +33,8 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     private _duplicatePaths = new Map<string, string[]>(); // agentId → duplicate paths (cleaned on scan)
     private _syncTimer: ReturnType<typeof setTimeout> | null = null;
     private _eventUnsubscribers: Array<() => void> = [];
+    private _systemPromptCache = new Map<string, SystemPromptDefinition>();
+    private _systemPromptListLoaded = false;
 
     constructor(
         vfs: IVFSManager,
@@ -107,6 +110,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             if (versionData && versionData.version >= configVersion) return;
             log.info('Syncing default agents');
             await this.syncDefaultAgents();
+            await this.syncDefaultSystemPrompts();
             await this.writeJson(VERSION_FILE, { version: configVersion, updatedAt: Date.now() });
         } catch (e) {
             log.error('Failed to ensure defaults', { error: e });
@@ -142,6 +146,29 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         log.info('Default agents synced', { created });
     }
 
+    /** Seed each default agent's system prompt + quick-prompt presets as a System Prompt library entry. */
+    private async syncDefaultSystemPrompts(): Promise<void> {
+        for (const def of this.llmService.getDefaultAgents()) {
+            // Variants reference a shared entry via config.systemPromptId (no inline
+            // systemPrompt), so they are skipped — dedupes the shared prompt/presets.
+            if (!def.config.systemPrompt) continue;
+            const entry: SystemPromptDefinition = {
+                id: def.id,
+                name: def.name,
+                description: def.description,
+                content: [def.config.systemPrompt].filter((s): s is string => Boolean(s)),
+                ...(def.defaultPrompts?.length ? { presets: def.defaultPrompts } : {}),
+            };
+            const path = `/system-prompts/${def.id}.sp`;
+            try {
+                if (await this.readJson(path)) continue;
+                await this.writeJson(path, entry);
+            } catch (error) {
+                log.error('Failed to sync default system prompt', { id: def.id, error });
+            }
+        }
+    }
+
     // ─── IAgentConfigService — reads ────────────────────────────────────────────────
 
     listAgents(): AgentDefinition[] {
@@ -150,6 +177,48 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     findAgent(id: string): AgentDefinition | undefined {
         return this._agents.find(a => a.id === id);
+    }
+
+    /** Resolve a System Prompt library entry (stored as /system-prompts/{id}.sp), in-memory cached. */
+    async getSystemPrompt(id: string): Promise<SystemPromptDefinition | null> {
+        if (!id) return null;
+        const cached = this._systemPromptCache.get(id);
+        if (cached) return cached;
+        const loaded = await this.readJson<SystemPromptDefinition>(`/system-prompts/${id}.sp`);
+        if (loaded) this._systemPromptCache.set(id, loaded);
+        return loaded;
+    }
+
+    async listSystemPrompts(): Promise<SystemPromptDefinition[]> {
+        if (this._systemPromptListLoaded) return [...this._systemPromptCache.values()];
+        try {
+            const result = await this.engine.driver.search({ name: { contains: '.sp' }, type: 'file' });
+            const prompts = await Promise.all(Array.from(result.nodes).map(async node => {
+                if (!node.name.endsWith('.sp')) return null;
+                const content = await this.engine.driver.readContent(node.path);
+                if (!content) return null;
+                const str = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
+                return JSON.parse(str) as SystemPromptDefinition;
+            }));
+            const valid = prompts.filter((p): p is SystemPromptDefinition => Boolean(p?.id));
+            for (const p of valid) this._systemPromptCache.set(p.id, p);
+            this._systemPromptListLoaded = true;
+            return valid;
+        } catch {
+            return [];
+        }
+    }
+
+    async saveSystemPrompt(prompt: SystemPromptDefinition): Promise<void> {
+        if (!prompt?.id?.trim()) throw new Error('System prompt requires an id');
+        await this.writeJson(`/system-prompts/${prompt.id}.sp`, prompt);
+        this._systemPromptCache.set(prompt.id, prompt);
+    }
+
+    async deleteSystemPrompt(id: string): Promise<void> {
+        if (!id?.trim()) return;
+        await this.engine.driver.delete([`/system-prompts/${id}.sp`]);
+        this._systemPromptCache.delete(id);
     }
 
     listConnections(): ConnectionMeta[] {
@@ -298,7 +367,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     getFullProvider(id: string): LLMProvider | undefined { return this.llmService.getFullProvider(id); }
     async saveProvider(provider: LLMProvider): Promise<void> { return this.llmService.saveProvider(provider); }
     async deleteProvider(id: string): Promise<void> { return this.llmService.deleteProvider(id); }
-    async testConnection(params: { provider: string; apiKey: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult> { return this.llmService.testConnection(params); }
+    async testConnection(params: { provider: string; apiKey?: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult> { return this.llmService.testConnection(params); }
 
     async getConnections(): Promise<ConnectionMeta[]> { return this.llmService.getConnections(); }
     async getFullConnection(id: string): Promise<LLMConnection | null> { return this.llmService.getFullConnection(id); }

@@ -220,7 +220,7 @@ export interface LLMConnection {
     metadata?: {
         isSystemDefault?: boolean;
         thinkingBudget?: number;
-        reasoningEffort?: 'low' | 'medium' | 'xhigh';
+        reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
         mcpServers?: string[];
         caching?: boolean;
         headers?: Record<string, string>;

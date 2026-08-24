@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 #[cfg(unix)]
@@ -45,6 +46,15 @@ struct AppPaths {
 
 #[derive(Default)]
 struct ShellProcesses(Mutex<HashMap<String, u32>>);
+
+struct CodexProcess {
+    child: Child,
+    stdin: ChildStdin,
+    lines: Receiver<String>,
+}
+
+#[derive(Default)]
+struct CodexAppServer(Mutex<Option<CodexProcess>>);
 
 fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
     // Config lives at $XDG_CONFIG_HOME/mindos/settings.json (default ~/.config/mindos),
@@ -419,6 +429,57 @@ fn shell_cancel(request_id: String, processes: State<ShellProcesses>) -> Result<
     Ok(())
 }
 
+/// Start one persistent Codex app-server for the webview.
+#[tauri::command]
+fn codex_start(cwd: String, paths: State<AppPaths>, server: State<CodexAppServer>) -> Result<(), String> {
+    let path = PathBuf::from(&cwd);
+    if !is_allowed(&path, &paths) { return Err(format!("cwd not allowed: {cwd}")); }
+    let mut slot = server.0.lock().map_err(|_| "codex process lock poisoned")?;
+    if slot.is_some() { return Ok(()); }
+    let mut child = Command::new("codex")
+        .args(["app-server", "--listen", "stdio://"])
+        .current_dir(&cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
+        .spawn().map_err(|e| format!("codex app-server failed: {e}"))?;
+    let stdin = child.stdin.take().ok_or("codex stdin unavailable")?;
+    let stdout = child.stdout.take().ok_or("codex stdout unavailable")?;
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() { break; }
+        }
+    });
+    *slot = Some(CodexProcess { child, stdin, lines: rx });
+    Ok(())
+}
+
+#[tauri::command]
+fn codex_send(message: String, server: State<CodexAppServer>) -> Result<(), String> {
+    let mut slot = server.0.lock().map_err(|_| "codex process lock poisoned")?;
+    let process = slot.as_mut().ok_or("codex app-server is not running")?;
+    writeln!(process.stdin, "{message}").and_then(|_| process.stdin.flush())
+        .map_err(|e| format!("codex write failed: {e}"))
+}
+
+#[tauri::command]
+fn codex_poll(server: State<CodexAppServer>) -> Result<Vec<String>, String> {
+    let slot = server.0.lock().map_err(|_| "codex process lock poisoned")?;
+    let process = slot.as_ref().ok_or("codex app-server is not running")?;
+    let mut lines = Vec::new();
+    while lines.len() < 100 {
+        match process.lines.try_recv() { Ok(line) => lines.push(line), Err(_) => break }
+    }
+    Ok(lines)
+}
+
+#[tauri::command]
+fn codex_stop(server: State<CodexAppServer>) -> Result<(), String> {
+    if let Some(mut process) = server.0.lock().map_err(|_| "codex process lock poisoned")?.take() {
+        let _ = process.child.kill();
+        let _ = process.child.wait();
+    }
+    Ok(())
+}
+
 fn read_pipe<T: Read + Send + 'static>(pipe: Option<T>) -> std::thread::JoinHandle<String> {
     std::thread::spawn(move || {
         let mut output = String::new();
@@ -486,6 +547,7 @@ pub fn run() {
 
             app.manage(paths);
             app.manage(ShellProcesses::default());
+            app.manage(CodexAppServer::default());
 
             #[cfg(debug_assertions)]
             if let Some(window) = app.get_webview_window("main") {
@@ -516,6 +578,10 @@ pub fn run() {
             search_fd,
             shell_exec,
             shell_cancel,
+            codex_start,
+            codex_send,
+            codex_poll,
+            codex_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

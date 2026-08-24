@@ -1,16 +1,7 @@
-export interface PlanCommandRequest {
-    sessionId: string;
-    agentId: string;
-    goal: string;
-}
-
-export interface ExecCommandRequest {
-    sessionId: string;
-    command: string;
-}
-
-/** Application port for durable privileged commands. */
-export interface IPrivilegedCommandService {
-    plan(request: PlanCommandRequest): Promise<string>;
-    exec(request: ExecCommandRequest): Promise<string>;
-}
+// Re-exported from the session layer so the port has a single owner below the
+// UI layer. Kept here for backward compatibility with existing imports.
+export type {
+    IPrivilegedCommandService,
+    PlanCommandRequest,
+    ExecCommandRequest,
+} from '@itookit/llm-session';

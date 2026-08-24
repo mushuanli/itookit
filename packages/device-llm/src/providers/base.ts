@@ -48,6 +48,11 @@ export abstract class BaseProvider {
      */
     abstract stream(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk>;
 
+    /**
+     * 释放 Provider 持有的资源（子进程、常驻传输等）。默认空实现。
+     */
+    async dispose(): Promise<void> {}
+
     // ============== 能力检查 (新增) ==============
 
     /**

@@ -104,6 +104,50 @@ export interface LLMProviderConfig {
     // ===== MCP 配置 (新增) =====
     
     mcp?: MCPConfig;
+
+    /** Codex CLI provider options (provider = "codex"). */
+    codex?: CodexCLIConfig;
+}
+
+export interface CodexCommandResult {
+    stdout: string;
+    stderr?: string;
+}
+
+/** Injectable command runner keeps the provider testable and host-runtime agnostic. */
+export interface CodexCommandRunner {
+    run(command: string, args: string[], options?: { signal?: AbortSignal; cwd?: string }): Promise<CodexCommandResult>;
+    /** Stream stdout chunks. Implementations should reject if the process exits unsuccessfully. */
+    stream?(command: string, args: string[], options?: { signal?: AbortSignal; cwd?: string }): AsyncIterable<string>;
+}
+
+export interface CodexCLIConfig {
+    /** Preferred app-server transport. When omitted, a local stdio app-server is started lazily. */
+    transport?: CodexAppServerTransport;
+    /** Use the legacy one-shot exec adapter instead of app-server. */
+    mode?: 'app-server' | 'exec';
+    /** CLI executable. Defaults to `codex`. */
+    command?: string;
+    /** Working directory passed to the CLI process. */
+    cwd?: string;
+    /** Extra arguments inserted before the prompt. */
+    args?: string[];
+    /** Override process execution (primarily for embedded runtimes/tests). */
+    runner?: CodexCommandRunner;
+}
+
+export interface CodexRPCMessage {
+    method: string;
+    params?: any;
+    id?: string | number;
+}
+
+/** Runtime-neutral Codex app-server JSON-RPC transport. */
+export interface CodexAppServerTransport {
+    request<T = any>(method: string, params?: any): Promise<T>;
+    events(): AsyncIterable<CodexRPCMessage>;
+    respond(id: string | number, result: any): Promise<void>;
+    close?(): Promise<void>;
 }
 
 /**
@@ -213,6 +257,9 @@ export interface LLMClientConfig {
     
     /** MCP 配置 */
     mcp?: MCPConfig;
+
+    /** Local Codex CLI configuration (used when provider is `codex`). */
+    codex?: CodexCLIConfig;
     
     /** 默认音频配置 */
     audio?: {

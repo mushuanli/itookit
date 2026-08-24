@@ -5,6 +5,7 @@ import { OpenAIProvider } from './openai';
 import { ResponsesProvider } from './responses';
 import { AnthropicProvider } from './anthropic';
 import { GeminiProvider } from './gemini';
+import { CodexProvider } from './codex';
 import { LLMProviderConfig } from '../types';
 import type { LLMProvider } from '@itookit/common';
 import { LLM_PROVIDERS } from '../constants';
@@ -32,6 +33,9 @@ function registerBuiltinProviders(): void {
     providerRegistry.set('ollama', OpenAIProvider);
     providerRegistry.set('custom', OpenAIProvider);
     providerRegistry.set('volcengine', OpenAIProvider);
+
+    // Local Codex CLI
+    providerRegistry.set('codex', CodexProvider);
 
     // Anthropic
     providerRegistry.set('anthropic', AnthropicProvider);
@@ -85,8 +89,8 @@ export function resolveProtocol(
  *
  * 分发优先级：
  *   1. `config.protocol` 显式指定（ApiProtocol）
- *   2. Provider 定义中的 `implementation` 字段
- *   3. providerRegistry 按名查找
+ *   2. providerRegistry 按名查找（内置/本地 provider 的权威实现类）
+ *   3. Provider 定义中的 `implementation` 字段（未注册的 provider 才走这里）
  *   4. 兜底 OpenAIProvider
  */
 export function createProvider(
@@ -110,7 +114,14 @@ export function createProvider(
         }
     }
 
-    // 3. 按 Provider 定义的 implementation 字段分发
+    // 3. 注册表按名查找。内置/本地 provider 的实现类由注册表决定，用户保存的
+    //    definition 只贡献配置、不改变实现类 —— 例如 codex 始终解析为
+    //    CodexProvider，即使用户定义被误标为 openai-compatible。
+    if (!ProviderClass) {
+        ProviderClass = providerRegistry.get(provider);
+    }
+
+    // 4. 按 Provider 定义的 implementation 字段分发（未注册的 provider 才走这里）
     if (!ProviderClass && definition) {
         switch (definition.implementation) {
             case 'openai-compatible': ProviderClass = OpenAIProvider;    break;
@@ -135,11 +146,6 @@ export function createProvider(
             responsesPath:    config.responsesPath ?? definition.responsesPath,
             responses:        config.responses ?? definition.responses,
         };
-    }
-
-    // 4. 回退到注册表
-    if (!ProviderClass) {
-        ProviderClass = providerRegistry.get(provider);
     }
 
     // 5. 最终回退到 OpenAI Compatible

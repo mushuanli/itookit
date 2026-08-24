@@ -86,6 +86,7 @@ function agentTask(context: DagNodeContext) {
     const messages = Array.isArray(config.messages)
         ? config.messages
         : [{ role: 'user', content: prompt }];
+    const subtasks = record(config.subtasks);
     return {
         programKind: 'llm.agent',
         programVersion: '1',
@@ -104,6 +105,7 @@ function agentTask(context: DagNodeContext) {
             maxExchanges: optionalNumber(config.maxExchanges),
             workingDirectory: optionalString(config.workingDirectory),
             approval: optionalApproval(config.approval) ?? 'external',
+            subtaskTool: optionalString(subtasks.tool),
             dependencyBindings: context.dependencies,
         }),
     };
@@ -145,13 +147,22 @@ function humanManifest(): DagPluginManifest {
 
 function agentManifest(): DagPluginManifest {
     return manifest('agent', 'Agent', 'Execution', {
-        prompt: { type: 'string' }, connectionId: { type: 'string' }, model: { type: 'string' },
-        toolIds: { type: 'array', items: { type: 'string' } }, maxExchanges: { type: 'integer' },
+        // References to configuration entities (edit once, applies everywhere)
+        agentId: { type: 'string' }, systemPromptId: { type: 'string' },
+        connectionId: { type: 'string' },
+        toolIds: { type: 'array', items: { type: 'string' } },
+        skillIds: { type: 'array', items: { type: 'string' } },
+        // Inline task instruction + model
+        prompt: { type: 'string' }, model: { type: 'string' },
         temperature: { type: 'number' }, maxTokens: { type: 'integer' },
         thinking: { type: 'boolean' }, reasoningEffort: enumSchema(['low', 'medium', 'high', 'xhigh']),
         stream: { type: 'boolean' }, webSearch: { type: 'boolean' },
+        // Execution policy
+        maxExchanges: { type: 'integer' },
         approval: enumSchema(['none', 'external', 'all']),
-    }, { prompt: '', connectionId: 'default', toolIds: [], approval: 'external' });
+        historyPolicy: enumSchema(['inherit', 'none', 'upstream']),
+        persistOutput: { type: 'boolean' },
+    }, { prompt: '', connectionId: 'default', toolIds: [], approval: 'external', historyPolicy: 'inherit' });
 }
 
 function manifest(

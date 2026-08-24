@@ -51,7 +51,7 @@ export interface ExecutorConfig {
      */
     webSearchMode?: WebSearchMode;
     connectionId?: string;
-    systemPrompt?: string;
+    systemPrompt?: string[];
     /** Frozen AgentDefinition version used for reproducible AgentTasks. */
     agentVersion?: string;
     capabilityPolicy?: AgentDefinition['capabilityPolicy'];

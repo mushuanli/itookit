@@ -39,14 +39,14 @@ export class LLMDriver {
         if (!provider) {
             throw new Error('LLMDriver requires provider (either directly or via connection)');
         }
-        if (!apiKey) {
+        if (!apiKey && provider !== 'codex') {
             throw new Error('LLMDriver requires apiKey (either directly or via connection)');
         }
         
         // 3. 构建 Provider 配置
         const providerConfig: LLMProviderConfig = {
             provider,
-            apiKey,
+            apiKey: apiKey || '',
             apiBaseUrl,
             model,
             protocol: config.connection?.protocol,
@@ -55,6 +55,7 @@ export class LLMDriver {
             headers: config.headers,
             metadata: config.connection?.metadata,
             hooks: config.hooks,
+            codex: config.codex,
         };
         
         // 4. 保存配置
@@ -100,6 +101,13 @@ export class LLMDriver {
     }
 
     /**
+     * 释放 Provider 持有的资源（如 Codex app-server 子进程）。
+     */
+    async dispose(): Promise<void> {
+        await this.provider.dispose();
+    }
+
+    /**
      * 推断当前 provider 的格式标识，用于 attachment 展开
      */
     private get providerFormat(): 'openai' | 'anthropic' | 'gemini' | undefined {
@@ -135,7 +143,8 @@ export class LLMDriver {
 
         // ── 自动展开 attachments ──
         const hasAttachments = finalParams.messages.some(m => m.attachments && m.attachments.length > 0);
-        if (hasAttachments) {
+        // Codex consumes original local image paths through `codex exec --image`.
+        if (hasAttachments && this.providerName !== 'codex') {
             try {
                 finalParams.messages = await expandMessagesAttachments(
                     finalParams.messages,

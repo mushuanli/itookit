@@ -13,6 +13,8 @@ export interface FlowsEditorDeps {
     commands: ICommandBus;
     /** Optional override for the run action (defaults to create-session + navigate). */
     onRunFlow?: (flowId: string, revision: number) => void;
+    /** Global LLM connections available to bind flow-level connection slots to. */
+    listConnections?: () => Promise<Array<{ id: string; name: string }>>;
 }
 
 export class FlowsEditor extends IEditor {
@@ -32,6 +34,7 @@ export class FlowsEditor extends IEditor {
         this.workbench = new DagWorkbench(container, {
             commands: this.deps.commands,
             onSelectFlow: (flowId, revision) => void this.handleRunFlow(flowId, revision),
+            listConnections: this.deps.listConnections,
         });
         await this.workbench.initialize();
         // Open the sidebar-selected .flow file if any; otherwise stay on the empty

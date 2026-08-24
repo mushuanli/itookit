@@ -12,14 +12,27 @@
  *  4. Wire tauri-only features: loading overlay, dynamic local mounts
  */
 
-import { initApp, createWsMount } from '@itookit/app-shell';
+import { initApp, createWsMount, type AppUI } from '@itookit/app-shell';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import {
+    createLLMFactory,
+    createAgentEditorFactory,
+    createFlowsEditorFactory,
+    createSkillsEditorFactory,
+    createAIContextMenuConfig,
+    ProviderSettingsEditor,
+    ConnectionSettingsEditor,
+    MCPSettingsEditor,
+    CostEditor,
+    SystemPromptSettingsEditor,
+} from '@itookit/llm-ui';
 import { WORKSPACES } from './config/modules';
 import { LocalMountService, MountEntry, MOUNT_EVENTS } from './services/local-mounts';
 import { TauriSqlSidecarDb } from './db/tauri-sql-sidecar';
 import { TauriFsOps } from './fs/tauri-fs-ops';
 import { TauriLLMLogger } from './log/tauri-llm-logger';
 import { TauriNativeShell } from './shell/tauri-native-shell';
+import { TauriCodexTransport } from './shell/tauri-codex-transport';
 import { TauriSkillToolHandlerFactory } from './kernel/tauri-skill-tools';
 import { TauriSkillSource } from './kernel/tauri-skill-source';
 
@@ -217,6 +230,24 @@ async function bootstrap(): Promise<void> {
 
     // 3. Hand off to app-shell
     const nativeShell = await TauriNativeShell.create();
+    const codexTransport = await TauriCodexTransport.create(homeDir).catch(error => {
+        console.warn('[Boot] Codex app-server unavailable:', error);
+        return undefined;
+    });
+    const ui: AppUI = {
+        createChatEditor: createLLMFactory,
+        createAgentEditor: createAgentEditorFactory,
+        createFlowEditor: createFlowsEditorFactory,
+        createSkillEditor: createSkillsEditorFactory,
+        createAIContextMenu: createAIContextMenuConfig,
+        llmUiEditors: {
+            ProviderSettingsEditor,
+            ConnectionSettingsEditor,
+            MCPSettingsEditor,
+            CostEditor,
+            SystemPromptSettingsEditor,
+        },
+    };
     const app = await initApp({
         backend: rootBackend,
         additionalMounts: [
@@ -228,6 +259,7 @@ async function bootstrap(): Promise<void> {
         routeAliases: { home: 'home-workspace' },
         onProgress: showLoading,
         llmLogger: new TauriLLMLogger(rootDir),
+        codexTransport,
         kernelPlatform: {
             skillSource: new TauriSkillSource(new TauriFsOps(), homeDir),
             skillToolHandlerFactory: new TauriSkillToolHandlerFactory(nativeShell),
@@ -236,6 +268,7 @@ async function bootstrap(): Promise<void> {
                 await kernel.skillService.setCwd(homeDir);
             },
         },
+        ui,
     });
     log('App 初始化完成');
 

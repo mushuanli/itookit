@@ -1,5 +1,17 @@
-import { initApp } from '@itookit/app-shell';
+import { initApp, type AppUI } from '@itookit/app-shell';
 import { openIndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
+import {
+    createLLMFactory,
+    createAgentEditorFactory,
+    createFlowsEditorFactory,
+    createSkillsEditorFactory,
+    createAIContextMenuConfig,
+    ProviderSettingsEditor,
+    ConnectionSettingsEditor,
+    MCPSettingsEditor,
+    CostEditor,
+    SystemPromptSettingsEditor,
+} from '@itookit/llm-ui';
 import { WORKSPACES } from './config/modules';
 import { BrowserSkillToolHandlerFactory } from './kernel/browser-skill-tools';
 
@@ -16,6 +28,20 @@ if ('serviceWorker' in navigator) {
 
 async function main() {
     const backend = await openIndexedDBBackend({ dbName: 'MindOS-v3' });
+    const ui: AppUI = {
+        createChatEditor: createLLMFactory,
+        createAgentEditor: createAgentEditorFactory,
+        createFlowEditor: createFlowsEditorFactory,
+        createSkillEditor: createSkillsEditorFactory,
+        createAIContextMenu: createAIContextMenuConfig,
+        llmUiEditors: {
+            ProviderSettingsEditor,
+            ConnectionSettingsEditor,
+            MCPSettingsEditor,
+            CostEditor,
+            SystemPromptSettingsEditor,
+        },
+    };
     await initApp({
         backend,
         workspaces: WORKSPACES,
@@ -24,6 +50,7 @@ async function main() {
         kernelPlatform: {
             skillToolHandlerFactory: new BrowserSkillToolHandlerFactory(),
         },
+        ui,
     });
 }
 

@@ -1,6 +1,7 @@
 import type {
     DagPluginCatalog,
     FlowRevision,
+    FlowConnection,
     JsonValue,
     FlowEdgeDefinition,
     FlowNodeDefinition,
@@ -24,6 +25,8 @@ export function flowRevisionDigest(flow: Omit<FlowRevision, 'digest'>): string {
         nodes: flow.nodes,
         edges: flow.edges,
         parameters: flow.parameters,
+        connections: flow.connections,
+        defaultConnection: flow.defaultConnection,
     }));
 }
 
@@ -35,6 +38,7 @@ export function validateFlowRevision(
     const nodes = validateNodes(flow.nodes, plugins, issues);
     validateEdges(flow.edges, nodes, plugins, issues);
     validateAcyclic(flow.nodes, flow.edges, issues);
+    validateConnections(flow.connections, flow.defaultConnection, issues);
     return deduplicate(issues);
 }
 
@@ -126,10 +130,36 @@ export function hasValidationErrors(issues: ValidationIssue[]): boolean {
     return issues.some(issue => issue.severity !== 'warning');
 }
 
+function validateConnections(
+    connections: FlowConnection[] | undefined,
+    defaultConnection: string | undefined,
+    issues: ValidationIssue[],
+): void {
+    const seen = new Set<string>();
+    for (const connection of connections ?? []) {
+        if (!connection.name?.trim()) {
+            issues.push({ code: 'invalid-connection', message: 'Connection slot requires a name' });
+            continue;
+        }
+        if (seen.has(connection.name)) {
+            issues.push({ code: 'duplicate-connection', message: `Duplicate connection slot: ${connection.name}` });
+        }
+        seen.add(connection.name);
+        if (!connection.connectionId?.trim()) {
+            issues.push({ code: 'invalid-connection', message: `Connection ${connection.name} requires a connectionId` });
+        }
+    }
+    if (defaultConnection && !seen.has(defaultConnection)) {
+        issues.push({ code: 'invalid-default-connection', message: `defaultConnection ${defaultConnection} is not a defined connection slot` });
+    }
+}
+
 function validateSchema(schema: JsonValue, value: JsonValue, path = '$'): string[] {
     if (!isRecord(schema)) return [];
     const errors: string[] = [];
-    if (typeof schema.type === 'string' && !matchesType(schema.type, value)) {
+    // A whole `${params.name}` placeholder is resolved at run time to the
+    // parameter's native type, so skip static type checking for it here.
+    if (typeof schema.type === 'string' && !isParameterTemplate(value) && !matchesType(schema.type, value)) {
         errors.push(`${path} must be ${schema.type}`);
     }
     if (Array.isArray(schema.required) && isRecord(value)) {
@@ -152,6 +182,11 @@ function matchesType(type: string, value: JsonValue): boolean {
     if (type === 'integer') return typeof value === 'number' && Number.isInteger(value);
     if (type === 'number') return typeof value === 'number';
     return typeof value === type;
+}
+
+/** True when the value is exactly one `${params.path}` template placeholder. */
+function isParameterTemplate(value: JsonValue): boolean {
+    return typeof value === 'string' && /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.test(value.trim());
 }
 
 function canonicalJson(value: unknown): string {

@@ -22,6 +22,7 @@ export interface LLMUIEditors {
     ConnectionSettingsEditor: new (container: HTMLElement, service: IConnectionService, options: EditorOptions) => IEditor;
     MCPSettingsEditor: new (container: HTMLElement, service: IAgentManagementService, options: EditorOptions) => IEditor;
     CostEditor: new (container: HTMLElement, service: IAgentManagementService, options: EditorOptions) => IEditor;
+    SystemPromptSettingsEditor: new (container: HTMLElement, service: IAgentManagementService, options: EditorOptions) => IEditor;
 }
 
 /**
@@ -61,6 +62,7 @@ export const createSettingsFactory = (
             case 'connections': editor = new llmUiEditors.ConnectionSettingsEditor(container, connectionService, options); break;
             case 'mcp-servers': editor = new llmUiEditors.MCPSettingsEditor(container, agentService, options); break;
             case 'cost':        editor = new llmUiEditors.CostEditor(container, agentService, options); break;
+            case 'system-prompts': editor = new llmUiEditors.SystemPromptSettingsEditor(container, agentService, options); break;
             case 'recovery':    editor = new RecoverySettingsEditor(container, agentService, options); break;
             case 'log':         editor = new LogSettingsEditor(container, settingsService, options); break;
             case 'about':       editor = new AboutSettingsEditor(container, settingsService, options); break;

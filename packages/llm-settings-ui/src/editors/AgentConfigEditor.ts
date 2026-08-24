@@ -141,6 +141,9 @@ export class AgentConfigEditor implements IEditor {
         // Connections excluded because their Provider has no API key
         const noKeyConns = allConns.filter(c => c.enabled !== false && !c.hasApiKey);
 
+        // System Prompt library entries (for the select + edit link)
+        const systemPrompts = await this.service.listSystemPrompts().catch(() => []);
+
         // Detect if the saved connectionId is now invalid (provider lost its key)
         const savedConnId = config.connectionId;
         const savedConnInvalid = !!(savedConnId && !connections.find(c => c.id === savedConnId));
@@ -316,13 +319,21 @@ export class AgentConfigEditor implements IEditor {
 
                         <div class="agent-form-row">
                             <label class="agent-form-label">
-                                System Prompt <small>定义 Agent 的行为和角色</small>
+                                System Prompt <small>从 System Prompt 库选择，或手动编辑</small>
                             </label>
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                                <select id="system-prompt-preset" style="flex:1;">
+                                    <option value="">自定义（手动编辑）</option>
+                                    ${systemPrompts.map(sp => `<option value="${this.escapeHtml(sp.id)}">${this.escapeHtml(sp.name || sp.id)}</option>`).join('')}
+                                </select>
+                                <a href="#/settings/system-prompts" class="agent-form-edit-link"
+                                   title="编辑 System Prompt 库">编辑库</a>
+                            </div>
                             <textarea class="agent-form-textarea" 
                                       name="systemPrompt" 
                                       placeholder="You are a helpful assistant...">${this.escapeHtml(config.systemPrompt || '')}</textarea>
                             <p class="agent-form-help">
-                                提示：好的 System Prompt 应该清晰定义 Agent 的角色、能力边界和输出格式
+                                提示：可从库中选择复用片段；手动编辑则写入当前 Agent
                             </p>
                         </div>
 
@@ -407,14 +418,11 @@ export class AgentConfigEditor implements IEditor {
                     </div>
                     <div class="agent-section__body">
                         <p class="agent-form-help" style="margin-bottom:12px;">
-                            预定义常用提示词。输入框可通过下拉框快速选择填入，支持调整顺序。
+                            快捷 Prompt 现在作为 System Prompt 库的一部分（presets）管理。请在 System Prompt 库中编辑。
                         </p>
                         <div class="agent-prompt-list" id="prompt-list">
                             ${(agent.defaultPrompts || []).map((p, i) => this.renderPromptRow(p, i)).join('')}
                         </div>
-                        <button type="button" class="agent-prompt-add" id="prompt-add">
-                            ＋ 添加 Prompt
-                        </button>
                     </div>
                 </div>
 
@@ -506,6 +514,28 @@ export class AgentConfigEditor implements IEditor {
             el.addEventListener('input', handleChange);
             el.addEventListener('change', handleChange);
         });
+
+        // System Prompt 库下拉框：选中条目 → 填入其 content 到 textarea + presets 到快捷 prompt 列表
+        const presetSelect = this.container.querySelector('#system-prompt-preset') as HTMLSelectElement | null;
+        const systemPromptTextarea = this.container.querySelector('textarea[name="systemPrompt"]') as HTMLTextAreaElement | null;
+        if (presetSelect && systemPromptTextarea) {
+            presetSelect.addEventListener('change', () => {
+                const id = presetSelect.value;
+                if (!id) return;
+                void this.service.getSystemPrompt(id).then(sp => {
+                    if (!sp) return;
+                    if (sp.content?.length) {
+                        systemPromptTextarea.value = sp.content.join('\n\n');
+                    }
+                    // 同步快捷 prompt（presets）到 agent.defaultPrompts 列表
+                    if (this.content) {
+                        this.content.defaultPrompts = sp.presets ?? [];
+                        this.rerenderPromptList();
+                    }
+                    handleChange();
+                });
+            });
+        }
 
         // 名称输入框 → 同步重命名 VFS 文件（复用 engine.rename + node:renamed 事件链）
         const nameInput = this.container.querySelector('.agent-header__name-input') as HTMLInputElement;

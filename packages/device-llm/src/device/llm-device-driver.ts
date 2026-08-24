@@ -24,8 +24,10 @@ import type {
 
 import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';
+import type { CodexAppServerTransport, CodexCLIConfig, CodexCommandRunner } from '../types/provider';
 import { CONST_CONFIG_VERSION, DEFAULT_AGENTS, DEFAULT_CONNECTIONS } from '../constants';
 import { CostStore } from '../cost/cost-store';
+import { SystemPromptStore } from './system-prompt-store';
 import type { MCPToolInfo } from '../skills/mcp-client';
 
 import { VFSHelpers } from './vfs-helpers';
@@ -203,6 +205,11 @@ export interface LLMDeviceDriverOptions {
      */
     shellRunner?: IShellRunner;
 
+    /** Runner for the local `codex exec` provider. */
+    codexRunner?: CodexCommandRunner;
+    /** Preferred persistent Codex app-server transport. */
+    codexTransport?: CodexAppServerTransport;
+
     /**
      * LLM 流量日志记录器（可选）。
      * Web 环境注入 NoopLLMLogger，Tauri 环境注入 FileLogger。
@@ -228,6 +235,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     private engine!: ReturnType<IVFSManager['getEngine']>;
     private readonly shellRunner: IShellRunner | undefined;
+    private readonly codexRunner: CodexCommandRunner | undefined;
+    private readonly codexTransport: CodexAppServerTransport | undefined;
     private readonly llmLogger: import('@itookit/common').ILLMLogger | undefined;
 
     // ── Managers (initialised in init()) ──
@@ -251,6 +260,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     constructor(private readonly vfs: IVFSManager, options?: LLMDeviceDriverOptions) {
         this.shellRunner = options?.shellRunner;
+        this.codexRunner = options?.codexRunner;
+        this.codexTransport = options?.codexTransport;
         this.llmLogger = options?.llmLogger;
     }
 
@@ -301,6 +312,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         this.costManager = new CostManager(costStore);
         _log('initCostStore');
 
+        // System prompt seqfile: /llm/systemprompt (key = agent id), seeded from DEFAULT_AGENTS.
+        const systemPromptStore = new SystemPromptStore(this.engine);
+        await systemPromptStore.ensureFile();
+        await systemPromptStore.seedDefaults();
+        _log('initSystemPromptStore');
+
         // Sync default providers, then merge into cache
         await this.providerManager.syncDefaultProviders(preProviders);
         _log('syncDefaultProviders');
@@ -330,10 +347,13 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         if (this._syncTimer) { clearTimeout(this._syncTimer); this._syncTimer = null; }
         this._listeners.clear();
 
-        // Abort all LLM sessions
-        for (const s of this.sessions.values()) {
-            if (s.kind === 'llm') s.abortController?.abort();
-        }
+        // Abort and release all LLM sessions (Codex app-server subprocesses etc.)
+        await Promise.all([...this.sessions.values()]
+            .filter((s): s is LLMSessionState => s.kind === 'llm')
+            .map(async s => {
+                s.abortController?.abort();
+                await s.driver.dispose();
+            }));
 
         // Disconnect all active MCP connections
         await this.mcpManager.disconnectAll();
@@ -416,6 +436,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         if (!session) return;
         if (session.kind === 'llm') {
             session.abortController?.abort();
+            await session.driver.dispose();
         }
         this.sessions.delete(ctx.sessionId!);
     }
@@ -497,7 +518,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 return;
 
             case LLM_IOCTL.TEST_CONNECTION_PARAMS:
-                return testLLMConnection(arg as Parameters<typeof testLLMConnection>[0]) as Promise<ConnectionTestResult>;
+                return this.testConnection(arg as Parameters<LLMDeviceDriver['testConnection']>[0]);
 
             case LLM_IOCTL.LIST_MCP_SERVERS:
                 return this.mcpManager.getMCPServers();
@@ -811,8 +832,17 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         await this.providerManager.deleteProvider(id, systemFS);
     }
 
-    async testConnection(params: { provider: string; apiKey: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult> {
-        return testLLMConnection(params);
+    async testConnection(params: { provider: string; apiKey?: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult> {
+        return testLLMConnection({ ...params, codex: this.resolveCodexConfig() });
+    }
+
+    /** Derive the Codex CLI config shared by connection tests and driver creation. */
+    private resolveCodexConfig(): CodexCLIConfig | undefined {
+        return this.codexTransport
+            ? { transport: this.codexTransport }
+            : this.codexRunner
+                ? { mode: 'exec', runner: this.codexRunner }
+                : undefined;
     }
 
     // ─── Session management ───────────────────────────────────────────────────
@@ -838,7 +868,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             throw new Error(`LLMDeviceDriver: provider '${conn.providerId}' is disabled`);
         }
         const apiKey = provider?.apiKey?.trim();
-        if (!apiKey) {
+        if (!apiKey && pid !== 'codex') {
             throw new Error(
                 `LLMDeviceDriver: provider '${conn.providerId}' has no API key configured`
             );
@@ -875,6 +905,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         const driver = new LLMDriver({
             connection: connForDriver,
             customProviderDefaults,
+            codex: this.resolveCodexConfig(),
             hooks: {
                 onResponseHeaders: (headers, status) => {
                     this.llmLogger?.logResponse(sessionId, { status, headers });

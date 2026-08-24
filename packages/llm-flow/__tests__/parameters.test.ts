@@ -21,6 +21,17 @@ describe('resolveFlowParameters', () => {
     it('leaves unknown references intact', () => {
         expect(resolveFlowParameters('${params.missing}', {})).toBe('${params.missing}');
     });
+
+    it('resolves nested dotted parameter paths', () => {
+        const params = { profile: { pass_score: 54, min_chars: 500 }, revision: { max_rounds: 2 } };
+        expect(resolveFlowParameters('${params.profile.pass_score}', params)).toBe(54);
+        expect(resolveFlowParameters('${params.revision.max_rounds}', params)).toBe(2);
+        expect(resolveFlowParameters('score>=${params.profile.pass_score}', params)).toBe('score>=54');
+    });
+
+    it('falls back to a literal dotted top-level key', () => {
+        expect(resolveFlowParameters('${params.profile.pass_score}', { 'profile.pass_score': 60 })).toBe(60);
+    });
 });
 
 describe('validateFlowParameters', () => {

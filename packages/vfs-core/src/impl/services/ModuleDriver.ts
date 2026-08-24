@@ -46,6 +46,9 @@ export class ModuleDriver implements IFSDriver {
     /** Injected by ModuleFS so the plugin pipeline can expose asset/metadata helpers. */
     assets?: IAssetOperations;
 
+    /** Read-through content cache (invalidated on write/delete/rename). */
+    private readonly _readCache = new Map<string, ArrayBuffer>();
+
     constructor(private readonly ctx: ModuleContext) {
         this.moduleId = ctx.moduleId;
         this.capabilities = ctx.capabilities;
@@ -160,7 +163,12 @@ export class ModuleDriver implements IFSDriver {
                 return options?.encoding === 'binary' ? toBuffer(text) : text;
             }
         }
-        const data = await this.ctx.engine.readContent(realPath, options);
+        // Read-through cache: hit returns the cached FileContent; writes invalidate.
+        let data = this._readCache.get(realPath);
+        if (data === undefined) {
+            data = await this.ctx.engine.readContent(realPath, options);
+            this._readCache.set(realPath, data);
+        }
         if (options?.encoding === 'utf-8') return toString(data);
         return data;
     }
@@ -253,6 +261,7 @@ export class ModuleDriver implements IFSDriver {
             this.ctx.access.checkAccess(this.ctx.caller, realPath, 'write');
             this.ctx.assertWritable(realPath);
             await this.ctx.engine.writeContent(realPath, a.content, a.options);
+            this._readCache.delete(realPath);
             const eventPath = node ? this.ctx.toVirtualNode(node).path : path;
             this.ctx.emit('node:updated', {
                 nodes: [{ path: eventPath, changedFields: ['content'] }],
@@ -309,6 +318,7 @@ export class ModuleDriver implements IFSDriver {
                 this.ctx.access.checkAccess(this.ctx.caller, realPath, 'delete');
                 this.ctx.assertWritable(realPath);
                 await this.ctx.engine.delete(realPath, a.options);
+                this._readCache.delete(realPath);
             }
             this.ctx.emit('node:deleted', { requestedPaths: a.paths, allDeletedPaths: a.paths });
         });

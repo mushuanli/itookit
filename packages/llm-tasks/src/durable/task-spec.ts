@@ -27,6 +27,7 @@ export interface LlmTaskInputOptions {
     approval?: DurableAgentInput['approval'];
     tools?: ToolDefinition[];
     externalToolIds?: string[];
+    subtaskTool?: string;
     dependencyBindings?: DurableDependencyBinding[];
 }
 
@@ -49,6 +50,7 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         approval: options.approval ?? 'external',
         tools: options.tools,
         externalToolIds: options.externalToolIds,
+        subtaskTool: options.subtaskTool,
         dependencyBindings: options.dependencyBindings,
     });
 }

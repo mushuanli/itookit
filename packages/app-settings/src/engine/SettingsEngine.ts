@@ -36,6 +36,7 @@ export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
     'connections': { name: 'LLM 连接',      icon: '🔗' },
     'mcp-servers': { name: 'MCP Servers',   icon: '🔌' },
     'cost':        { name: '费用统计',      icon: '💰' },
+    'system-prompts': { name: 'System Prompts', icon: '📝' },
     'recovery':    { name: '系统恢复',      icon: '🚑' },
     'log':         { name: '系统日志',      icon: '📋' },
     'about':       { name: 'About',         icon: 'ℹ️' },

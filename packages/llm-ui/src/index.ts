@@ -25,6 +25,7 @@ export { ProviderSettingsEditor } from '@itookit/llm-settings-ui';
 export { MCPSettingsEditor } from '@itookit/llm-settings-ui';
 export { SkillSettingsEditor } from '@itookit/llm-settings-ui';
 export { CostEditor } from '@itookit/llm-settings-ui';
+export { SystemPromptSettingsEditor } from '@itookit/llm-settings-ui';
 export { DagWorkbench } from './components/DagWorkbench';
 export type { DagWorkbenchOptions } from './components/DagWorkbench';
 export { FlowsEditor, createFlowsEditorFactory } from './components/FlowsEditor';

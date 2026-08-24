@@ -8,6 +8,7 @@ export { ProviderSettingsEditor } from './editors/ProviderSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 export { SkillSettingsEditor } from './editors/SkillSettingsEditor';
 export { CostEditor } from './editors/CostEditor';
+export { SystemPromptSettingsEditor } from './editors/SystemPromptSettingsEditor';
 export {
     detectConflicts,
     showConflictModal,

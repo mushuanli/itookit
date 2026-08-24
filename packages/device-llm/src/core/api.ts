@@ -13,18 +13,19 @@ export type { ConnectionTestResult };
  */
 export async function testLLMConnection(config: {
     provider: string;
-    apiKey: string;
+    apiKey?: string;
     baseURL?: string;
     model?: string;
     timeout?: number;
+    codex?: import('../types/provider').CodexCLIConfig;
 }): Promise<ConnectionTestResult> {
-    const { provider, apiKey, baseURL, model, timeout = 15000 } = config;
+    const { provider, apiKey, baseURL, model, timeout = 15000, codex } = config;
     
     // 1. 参数校验
     if (!provider) {
         return { success: false, message: 'Provider is required' };
     }
-    if (!apiKey) {
+    if (!apiKey && provider !== 'codex') {
         return { success: false, message: 'API Key is required' };
     }
     
@@ -45,7 +46,8 @@ export async function testLLMConnection(config: {
             apiBaseUrl: baseURL,
             model: testModel,
             timeout,
-            maxRetries: 1 // 测试时不重试
+            maxRetries: 1, // 测试时不重试
+            codex,
         });
         
         // 4. 发送测试请求
@@ -112,7 +114,7 @@ export async function testMultipleConnections(
     configs: Array<{
         id: string;
         provider: string;
-        apiKey: string;
+        apiKey?: string;
         baseURL?: string;
         model?: string;
     }>
