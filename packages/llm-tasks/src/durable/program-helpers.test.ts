@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskInputEvent } from '@itookit/durable-kernel';
-import { dependencyOutput, type DurableDependencyBinding } from './program-helpers';
+import { applyDependencyMessages, dependencyOutput, type DurableDependencyBinding } from './program-helpers';
+import { collectDependency } from './dependency-collector';
 
 describe('dependencyOutput', () => {
     it('extracts message.content from an agent envelope instead of the whole output', () => {
@@ -49,6 +50,41 @@ describe('dependencyOutput', () => {
 
     it('returns undefined for non task-exited events', () => {
         expect(dependencyOutput({ type: 'started' }, [])).toBeUndefined();
+    });
+});
+
+describe('applyDependencyMessages', () => {
+    it('can keep scheduling dependencies without injecting their output', () => {
+        const messages = [{ role: 'system' as const, content: 'isolated child' }];
+        expect(applyDependencyMessages({
+            sessionId: 's', roundId: 'r', connectionId: 'default', messages,
+            includeDependencyOutputs: false,
+        }, { parent: 'secret parent output' })).toEqual(messages);
+    });
+
+    it('includes every output supplied by the dependency collector', () => {
+        expect(applyDependencyMessages({
+            sessionId: 's', roundId: 'r', connectionId: 'default',
+            messages: [{ role: 'user', content: 'task' }],
+        }, {
+            upstream: 'visible result',
+        })).toEqual([
+            { role: 'user', content: 'task' },
+            { role: 'user', content: 'upstream: visible result' },
+        ]);
+    });
+});
+
+describe('collectDependency', () => {
+    it('resolves a control dependency without exposing its output', () => {
+        const outputs = {};
+        const resolved: string[] = [];
+        collectDependency([
+            { taskId: 'upstream', input: 'control', injectOutput: false },
+        ], outputs, resolved, exited('internal result'));
+
+        expect(resolved).toEqual(['upstream']);
+        expect(outputs).toEqual({});
     });
 });
 

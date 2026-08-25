@@ -11,6 +11,7 @@ export interface DurableDependencyBinding {
     input: string;
     output?: string;
     edgeId?: string;
+    injectOutput?: boolean;
 }
 
 export interface DurableProgramInput {
@@ -21,6 +22,7 @@ export interface DurableProgramInput {
     model?: string;
     temperature?: number;
     maxTokens?: number;
+    timeoutMs?: number;
     thinking?: boolean;
     reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     /** stream !== false → LLM streams (default); false → non-streaming fallback. */
@@ -28,6 +30,8 @@ export interface DurableProgramInput {
     /** 走底层内置 server-side search（如 DeepSeek/OpenAI Responses 的 web_search、Gemini 的 googleSearch）。 */
     webSearch?: boolean;
     dependencyBindings?: DurableDependencyBinding[];
+    /** False keeps scheduling dependencies but does not append their outputs to messages. */
+    includeDependencyOutputs?: boolean;
 }
 
 export interface DurableAgentInput extends DurableProgramInput {

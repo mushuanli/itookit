@@ -40,6 +40,8 @@ export interface DagEdgeDefinition {
     to: string;
     output: string;
     input: string;
+    /** Control edges order execution without contributing model input. */
+    kind?: 'control' | 'data';
     /** 依赖失败时的下游行为。 */
     onFailure?: 'fail' | 'skip' | 'continue';
 }
@@ -63,6 +65,8 @@ export interface DagTaskDependencyBinding {
     input: string;
     output?: string;
     edgeId?: string;
+    /** False keeps the dependency for scheduling but does not expose its output. */
+    injectOutput?: boolean;
     onFailure?: 'fail' | 'skip' | 'continue';
 }
 
@@ -141,6 +145,7 @@ export interface GraphPatch {
         to: string;
         input?: string;
         output?: string;
+        kind?: 'control' | 'data';
     }>;
 }
 

@@ -18,6 +18,7 @@ export interface LlmTaskInputOptions {
     model?: string;
     temperature?: number;
     maxTokens?: number;
+    timeoutMs?: number;
     thinking?: boolean;
     reasoningEffort?: DurableProgramInput['reasoningEffort'];
     webSearch?: boolean;
@@ -29,6 +30,7 @@ export interface LlmTaskInputOptions {
     externalToolIds?: string[];
     subtaskTool?: string;
     dependencyBindings?: DurableDependencyBinding[];
+    includeDependencyOutputs?: boolean;
 }
 
 /** 装配 llm.agent / llm.chat 的 program input（去掉 undefined 字段，补 connectionId/approval 默认）。 */
@@ -41,6 +43,7 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         model: options.model,
         temperature: options.temperature,
         maxTokens: options.maxTokens,
+        timeoutMs: options.timeoutMs,
         thinking: options.thinking,
         reasoningEffort: options.reasoningEffort,
         webSearch: options.webSearch,
@@ -52,6 +55,7 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         externalToolIds: options.externalToolIds,
         subtaskTool: options.subtaskTool,
         dependencyBindings: options.dependencyBindings,
+        includeDependencyOutputs: options.includeDependencyOutputs,
     });
 }
 

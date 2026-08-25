@@ -79,7 +79,7 @@ export class AgentResolver {
             );
         }
 
-        if (!version || !agentDef.version || agentDef.version !== version) {
+        if (version && (!agentDef.version || agentDef.version !== version)) {
             throw new ConversationError(
                 ConversationErrorCode.AGENT_NOT_FOUND,
                 `Agent version mismatch: requested ${version ?? '(missing)'}, found ${agentDef.version ?? '(unversioned)'}`,
@@ -92,6 +92,13 @@ export class AgentResolver {
     /** Resolve a System Prompt library entry by id. */
     async getSystemPrompt(id: string): Promise<import('@itookit/common').SystemPromptDefinition | null> {
         return this.agentService.getSystemPrompt(id);
+    }
+
+    /** Resolve enabled static Skills in declaration order. */
+    async getSkills(ids: string[]): Promise<import('@itookit/common').LLMSkill[]> {
+        if (!ids.length) return [];
+        const byId = new Map((await this.agentService.getSkills()).map(skill => [skill.id, skill]));
+        return ids.map(id => byId.get(id)).filter((skill): skill is import('@itookit/common').LLMSkill => Boolean(skill?.enabled));
     }
 
     /** Build ExecutorConfig from an AgentDefinition. */

@@ -226,15 +226,17 @@ class MermaidManager {
           try {
             await window.mermaid.run({ nodes: document.querySelectorAll(`[${uniqueAttr}="${node.getAttribute(uniqueAttr)}"]`) });
           } catch (err) {
-            // 标记失败元素，防止后续反复重试；显示简洁错误提示
+            // 标记失败元素，防止后续反复重试；展示具体错误而非笼统提示
             const el = node as HTMLElement;
             el.setAttribute('data-mermaid-error', 'true');
+            const message = extractMermaidError(err);
             const wrapper = el.closest('pre') ?? el;
             const errEl = document.createElement('div');
             errEl.className = 'mermaid-error';
-            errEl.style.cssText = 'color:var(--color-error,#c0392b);font-size:0.8em;padding:4px 8px;';
-            errEl.textContent = '⚠ Mermaid render failed';
+            errEl.style.cssText = 'color:var(--color-error,#c0392b);font-size:0.8em;padding:4px 8px;white-space:pre-wrap;';
+            errEl.textContent = message ? `⚠ ${message}` : '⚠ Mermaid render failed';
             wrapper.parentNode?.insertBefore(errEl, wrapper.nextSibling);
+            if (message) console.warn('[mermaid] render error:', err);
           }
         }
 
@@ -263,6 +265,19 @@ class MermaidManager {
       this.colorSchemeListener = null;
     }
   }
+}
+
+/**
+ * 从 mermaid 抛出的错误中提取具体错误信息。
+ * mermaid 11 的语法错误对象形如 `{ str, hash, message }`（isDetailedError）
+ * 或普通 `Error`（取 `message`）。str/message 通常是 jison 生成的解析错误，
+ * 包含行号与期望的 token。
+ */
+function extractMermaidError(err: unknown): string {
+  if (!err) return '';
+  const e = err as { message?: unknown; str?: unknown };
+  const raw = e.message ?? e.str;
+  return typeof raw === 'string' ? raw.trim() : '';
 }
 
 /**
@@ -309,6 +324,9 @@ export class MermaidPlugin implements MDxPlugin {
     return {
       startOnLoad: false,
       theme,
+      // 禁止 mermaid 渲染内置的 "Syntax error in text" 错误图，
+      // 让解析失败直接抛出，从而展示真正的错误信息。
+      suppressErrorRendering: true,
       ...this.options.mermaidConfig,
     };
   }

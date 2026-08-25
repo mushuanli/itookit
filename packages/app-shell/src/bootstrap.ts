@@ -393,6 +393,15 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             const available = await agentService.getConnections();
             return available.map(connection => ({ id: connection.id, name: connection.name }));
         },
+        listAgents: async () => (await agentService.getAgents()).map(agent => ({ id: agent.id, name: agent.name, description: agent.description })),
+        listSystemPrompts: async () => (await agentService.listSystemPrompts()).map(prompt => ({ id: prompt.id, name: prompt.name, description: prompt.description })),
+        listTools: async () => kernel.toolDriver.getService().getToolDefinitions().map(definition => {
+            const id = definition.function?.name ?? definition.name ?? '';
+            const rawDescription = definition.function?.description ?? definition.description;
+            const description = typeof rawDescription === 'string' ? rawDescription : undefined;
+            return { id, name: id, ...(description ? { description } : {}) };
+        }).filter(tool => Boolean(tool.id)),
+        listSkills: async () => (await agentService.getSkills()).map(skill => ({ id: skill.id, name: skill.name, description: skill.description })),
     });
 
     // ── 4. Workspace strategies ────────────────────────────────────────────────

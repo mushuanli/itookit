@@ -4,7 +4,9 @@ import type {
     DagPluginManifest,
     JsonValue,
 } from '@itookit/common';
+import { DELEGATION_DEFAULTS } from '@itookit/common';
 import { buildLlmTaskInput, type LlmTaskInputOptions } from '@itookit/llm-tasks';
+import { delegationSchema } from './delegation-schema';
 import { DagPluginRegistry } from './plugin-registry';
 
 export function createBuiltinDagPluginRegistry(): DagPluginRegistry {
@@ -82,10 +84,12 @@ function agentPlugin(): DagPlugin {
 
 function agentTask(context: DagNodeContext) {
     const config = record(context.config);
-    const prompt = string(config.prompt, inputText(context.inputs));
+    const prompt = string(config.instruction, string(config.prompt, inputText(context.inputs)));
     const messages = Array.isArray(config.messages)
         ? config.messages
         : [{ role: 'user', content: prompt }];
+    const delegation = record(config.delegation);
+    const hasDelegation = isRecord(config.delegation);
     const subtasks = record(config.subtasks);
     return {
         programKind: 'llm.agent',
@@ -95,9 +99,10 @@ function agentTask(context: DagNodeContext) {
             roundId: string(config.roundId, context.nodeRunId),
             messages,
             connectionId: string(config.connectionId, 'default'),
-            model: optionalString(config.model),
+            model: optionalString(config.modelName) ?? optionalString(config.model),
             temperature: optionalNumber(config.temperature),
             maxTokens: optionalNumber(config.maxTokens),
+            timeoutMs: optionalNumber(config.timeoutMs),
             thinking: config.thinking === true,
             reasoningEffort: optionalReasoning(config.reasoningEffort),
             stream: optionalBoolean(config.stream),
@@ -105,7 +110,14 @@ function agentTask(context: DagNodeContext) {
             maxExchanges: optionalNumber(config.maxExchanges),
             workingDirectory: optionalString(config.workingDirectory),
             approval: optionalApproval(config.approval) ?? 'external',
-            subtaskTool: optionalString(subtasks.tool),
+            subtaskTool: hasDelegation
+                ? delegation.enabled === true
+                    ? optionalString(delegation.toolName) ?? DELEGATION_DEFAULTS.toolName
+                    : undefined
+                : optionalString(subtasks.tool),
+            // This belongs to the current node. Child context policy is resolved
+            // into the child template by the session binder.
+            includeDependencyOutputs: optionalBoolean(config.includeDependencyOutputs),
             dependencyBindings: context.dependencies,
         }),
     };
@@ -135,7 +147,14 @@ function routeManifest(): DagPluginManifest {
 function spawnManifest(): DagPluginManifest {
     return manifest('spawn', 'Spawn', 'Control', {
         value: {}, outputName: { type: 'string' }, type: enumSchema(['text', 'json']),
-        spawn: { type: 'object' },
+        spawn: {
+            type: 'object', title: 'Static graph patch', description: 'Deterministically add the declared nodes and edges. History belongs to spawned Agent nodes, not this control node.',
+            properties: {
+                idempotencyKey: { type: 'string', title: 'Idempotency key' },
+                nodes: { type: 'array', title: 'Node templates', items: { type: 'object' } },
+                edges: { type: 'array', title: 'Template connections', items: { type: 'object' } },
+            },
+        },
     }, { outputName: 'result', type: 'text', spawn: {} });
 }
 
@@ -153,16 +172,23 @@ function agentManifest(): DagPluginManifest {
         toolIds: { type: 'array', items: { type: 'string' } },
         skillIds: { type: 'array', items: { type: 'string' } },
         // Inline task instruction + model
-        prompt: { type: 'string' }, model: { type: 'string' },
+        instruction: { type: 'string' }, systemPrompt: { type: 'array', items: { type: 'string' } }, modelName: { type: 'string' },
         temperature: { type: 'number' }, maxTokens: { type: 'integer' },
         thinking: { type: 'boolean' }, reasoningEffort: enumSchema(['low', 'medium', 'high', 'xhigh']),
         stream: { type: 'boolean' }, webSearch: { type: 'boolean' },
         // Execution policy
         maxExchanges: { type: 'integer' },
+        timeoutMs: { type: 'integer' },
         approval: enumSchema(['none', 'external', 'all']),
         historyPolicy: enumSchema(['inherit', 'none', 'upstream']),
+        systemPromptPolicy: enumSchema(['inherit', 'replace', 'none']),
         persistOutput: { type: 'boolean' },
-    }, { prompt: '', connectionId: 'default', toolIds: [], approval: 'external', historyPolicy: 'inherit' });
+        workingDirectory: { type: 'string' },
+        delegation: delegationSchema(),
+        subtasks: { type: 'object', title: 'Legacy subtasks JSON', description: 'Backward compatibility only; migrate to Delegation.' },
+    // Inheritable values stay absent. Runtime fallbacks supply default connection,
+    // approval and history only after Flow/Agent layers have had a chance to apply.
+    }, {});
 }
 
 function manifest(
@@ -190,23 +216,36 @@ function defaultUI(manifest: DagPluginManifest) {
     return {
         palette: { label: manifest.title, group: manifest.category },
         node: { summarize: (config: unknown) => JSON.stringify(config) },
-        inspector: {},
+        inspector: manifest.id === 'builtin.agent' ? {
+            layout: {
+                sections: [
+                    { id: 'identity', title: 'Identity & task', fields: ['agentId', 'systemPromptId', 'systemPromptPolicy', 'instruction', 'systemPrompt'] },
+                    { id: 'model', title: 'Model', fields: ['connectionId', 'modelName', 'temperature', 'maxTokens', 'thinking', 'reasoningEffort', 'stream', 'webSearch'] },
+                    { id: 'capabilities', title: 'Capabilities', fields: ['toolIds', 'skillIds'] },
+                    { id: 'context', title: 'Context & output', fields: ['historyPolicy', 'persistOutput'] },
+                    { id: 'execution', title: 'Execution', fields: ['approval', 'maxExchanges', 'timeoutMs', 'maxIterations', 'workingDirectory', 'delegation', 'subtasks'] },
+                ],
+            },
+        } : {},
     };
 }
 
-function enumSchema(values: string[]): JsonValue { return { type: 'string', enum: values }; }
+function enumSchema(values: string[]): Record<string, JsonValue> { return { type: 'string', enum: values }; }
 function inputText(inputs: Record<string, unknown>): string {
     return Object.values(inputs).map(value => JSON.stringify(value)).join('\n');
 }
 function record(value: unknown): Record<string, unknown> {
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 function string(value: unknown, fallback: string): string { return typeof value === 'string' ? value : fallback; }
 function optionalString(value: unknown): string | undefined { return typeof value === 'string' ? value : undefined; }
 function optionalNumber(value: unknown): number | undefined { return typeof value === 'number' ? value : undefined; }
 function optionalBoolean(value: unknown): boolean | undefined { return typeof value === 'boolean' ? value : undefined; }
 function optionalReasoning(value: unknown): LlmTaskInputOptions['reasoningEffort'] {
-    return value === 'low' || value === 'medium' || value === 'xhigh' ? value : undefined;
+    return value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' ? value : undefined;
 }
 function optionalApproval(value: unknown): LlmTaskInputOptions['approval'] {
     return value === 'none' || value === 'external' || value === 'all' ? value : undefined;

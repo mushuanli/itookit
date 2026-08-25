@@ -58,6 +58,7 @@ export interface FlowNodeDefinition {
     priority?: number;
     capabilities?: string[];
     budget?: Record<string, number>;
+    retry?: { maxAttempts: number; backoffMs?: number };
 }
 
 export interface FlowLayout {
@@ -83,6 +84,8 @@ export interface FlowDraft {
     systemPrompt?: string[];
     /** Flow-level tool ids (union with node toolIds). */
     toolIds?: string[];
+    /** Defaults inherited by builtin.agent nodes before agent/node overrides. */
+    defaults?: FlowDefaults;
     updatedAt: number;
 }
 
@@ -110,11 +113,49 @@ export interface FlowConnection {
     description?: string;
 }
 
-/** Sub-task fan-out declaration: the agent calls `tool` and each returned payload instantiates `template`. */
+/** Legacy sub-task fan-out declaration. Prefer DelegationConfig. */
 export interface SubtaskDecl {
     tool: string;
     template: FlowNodeDefinition;
     max?: number;
+}
+
+export type DelegationContextSource = 'session' | 'parent' | 'upstream' | 'isolated';
+
+/** Structured dynamic delegation for an LLM Agent node. */
+export interface DelegationConfig {
+    enabled: boolean;
+    /** Defaults to DELEGATION_DEFAULTS.toolName. */
+    toolName?: string;
+    toolDescription?: string;
+    template?: Partial<LlmNodeConfig> & {
+        agentId?: string;
+        /** Canonical child task instruction. */
+        instruction?: string;
+        /** @deprecated Use instruction. */
+        prompt?: string;
+        contextSource?: DelegationContextSource;
+        includeParentSystemPrompt?: boolean;
+        includeToolResults?: boolean;
+    };
+    fanout?: {
+        maxTasks?: number;
+        maxConcurrency?: number;
+        maxDepth?: number;
+        order?: 'parallel' | 'sequential';
+    };
+    join?: { mode?: 'all' | 'none' };
+    failure?: {
+        policy?: 'fail-fast' | 'continue' | 'retry';
+        maxAttempts?: number;
+        backoffMs?: number;
+    };
+    budget?: {
+        /** Per LLM request output-token limit, not a cumulative token budget. */
+        maxTokens?: number;
+        /** Per LLM request timeout. */
+        timeoutMs?: number;
+    };
 }
 
 /**
@@ -124,7 +165,20 @@ export interface SubtaskDecl {
  */
 export interface FlowAgentNodeConfig extends Partial<LlmNodeConfig> {
     agentId?: string;
+    /** Canonical task instruction, appended as the final system segment. */
+    instruction?: string;
+    /** @deprecated Use instruction. */
+    prompt?: string;
+    /** @deprecated Use modelName. */
+    model?: string;
+    delegation?: DelegationConfig;
+    /** @deprecated Backward-compatible alias for delegation. */
     subtasks?: SubtaskDecl;
+}
+
+/** Flow-wide defaults for builtin.agent nodes. Connection ids are slot names. */
+export interface FlowDefaults extends Partial<LlmNodeConfig> {
+    agentId?: string;
 }
 
 export interface FlowRevision {
@@ -143,6 +197,8 @@ export interface FlowRevision {
     systemPrompt?: string[];
     /** Flow-level tool ids (frozen into the revision). */
     toolIds?: string[];
+    /** Defaults inherited by builtin.agent nodes. */
+    defaults?: FlowDefaults;
     createdAt: number;
     digest: string;
 }

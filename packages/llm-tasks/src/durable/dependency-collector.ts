@@ -15,10 +15,14 @@ export function collectDependency(
     event: TaskInputEvent,
     defaultOutput?: string,
 ): void {
+    if (event.type !== 'task-exited') return;
+    const binding = bindings.find(item => item.taskId === event.taskId);
+    if (!binding || resolvedIds.includes(binding.taskId)) return;
+    resolvedIds.push(binding.taskId);
+    if (binding.injectOutput === false) return;
     const dependency = dependencyOutput(event, bindings, defaultOutput);
-    if (dependency && !resolvedIds.includes(dependency.taskId)) {
+    if (dependency) {
         mergeDependencyOutput(outputs, dependency.key, dependency.value);
-        resolvedIds.push(dependency.taskId);
     }
 }
 

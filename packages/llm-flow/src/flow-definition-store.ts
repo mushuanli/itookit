@@ -159,6 +159,9 @@ export class FlowDefinitionStore {
             edges: structuredClone(draft.edges),
             parameters: structuredClone(draft.parameters ?? []),
             ...cloneConnections(draft),
+            ...(draft.systemPrompt ? { systemPrompt: structuredClone(draft.systemPrompt) } : {}),
+            ...(draft.toolIds ? { toolIds: structuredClone(draft.toolIds) } : {}),
+            ...(draft.defaults ? { defaults: structuredClone(draft.defaults) } : {}),
             createdAt: Date.now(),
         };
         return this.saveRevision({ ...withoutDigest, digest: flowRevisionDigest(withoutDigest) });
@@ -181,6 +184,9 @@ export class FlowDefinitionStore {
             layout: existing?.layout ?? {},
             parameters: existing?.parameters ?? [],
             ...cloneConnections(existing ?? {}),
+            ...(existing?.systemPrompt ? { systemPrompt: structuredClone(existing.systemPrompt) } : {}),
+            ...(existing?.toolIds ? { toolIds: structuredClone(existing.toolIds) } : {}),
+            ...(existing?.defaults ? { defaults: structuredClone(existing.defaults) } : {}),
             updatedAt: Date.now(),
         };
         await this.store.writeFile(nodeId, JSON.stringify(draft, null, 2));

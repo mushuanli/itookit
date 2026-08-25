@@ -1,0 +1,94 @@
+/* @file: mdx/styles/plugin-zoom.css
+ * 灯箱放大插件样式（Mermaid / SVG 图表）
+ * Block: mdx-zoom
+ */
+
+/* 打开灯箱时锁定页面滚动 */
+body.mdx-zoom--open {
+  overflow: hidden;
+}
+
+.mdx-zoom__overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.78);
+  flex-direction: column;
+}
+
+.mdx-zoom__overlay--open {
+  display: flex;
+}
+
+/* 顶部工具栏 */
+.mdx-zoom__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: rgba(24, 24, 27, 0.9);
+  color: #e4e4e7;
+  flex: none;
+}
+
+.mdx-zoom__btn {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e4e4e7;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mdx-zoom__btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.mdx-zoom__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mdx-zoom__lock[aria-pressed="true"] {
+  border-color: rgba(96, 165, 250, 0.8);
+  background: rgba(59, 130, 246, 0.28);
+}
+
+.mdx-zoom__ratio {
+  margin: 0 8px;
+  font-size: 13px;
+  min-width: 48px;
+  text-align: center;
+  color: #d4d4d8;
+}
+
+/* 舞台：接收滚轮缩放与拖拽平移 */
+.mdx-zoom__stage {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  cursor: grab;
+  touch-action: none;
+}
+
+.mdx-zoom__stage:active {
+  cursor: grabbing;
+}
+
+.mdx-zoom__inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.mdx-zoom__inner svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #ffffff;
+}

@@ -18,6 +18,15 @@ import {
 } from '@itookit/durable-kernel';
 import { findCycles } from './graph';
 import { resolveFlowParameters } from './parameters';
+import {
+    delegationPlan,
+    materializeDelegation,
+    subtaskToolDef,
+    subtaskToolDescription,
+    subtaskToolName,
+    type DelegationGroup,
+    type EdgeState,
+} from './delegation-runtime';
 
 export interface FlowExecutionHandle {
     root: TaskHandle<JsonValue>;
@@ -34,8 +43,6 @@ export interface DurableFlowExecutorOptions {
         externalIds: string[];
     }>;
 }
-
-type EdgeState = 'active' | 'inactive' | 'pending';
 
 const MAX_LOOP_ITERATIONS = 100;
 
@@ -59,6 +66,9 @@ export class DurableFlowExecutor {
             : [...spec.nodes];
         const edges = [...spec.edges];
         const instances = new Map<string, TaskHandle[]>();
+        const delegationDepth = new Map(nodes.map(node => [String(node.id), 0]));
+        const delegationGroups = new Map<string, DelegationGroup>();
+        const delegationGroupByChild = new Map<string, string>();
         const completed = new Set<string>();
         const skipped = new Set<string>();
         // 已派发的节点（按派发顺序），用于 supervisor 的「每轮只等本轮派发的 worker」。
@@ -137,6 +147,7 @@ export class DurableFlowExecutor {
                 output: edge.output,
                 edgeId: edge.id,
                 onFailure: edge.onFailure,
+                injectOutput: edge.kind !== 'control',
             }));
             const runtime = await this.options.plugins.loadRuntime(node.plugin, node.pluginVersion);
             const task = runtime.createTask({
@@ -165,6 +176,7 @@ export class DurableFlowExecutor {
                         to: edge.to,
                         output: edge.output ?? 'result',
                         input: edge.input ?? 'input',
+                        kind: edge.kind,
                     });
                     edgeState.set(id, 'active');
                 }
@@ -190,46 +202,44 @@ export class DurableFlowExecutor {
             }
         };
 
-        // Subtask fan-out: a completed agent node that declares `subtasks`
-        // parses its output as a JSON payload array and spawns one template
-        // instance per payload (parallel, isolated history).
-        const applySubtasks = (key: string, output: unknown): void => {
-            const nodeId = key.split('#')[0];
+        // Dynamic delegation: parse the declaration once, then materialize a
+        // bounded child group with explicit runtime metadata and control edges.
+        const applyDelegation = (key: string, output: unknown): void => {
+            const { nodeId, iteration: parentIteration } = parseInstanceKey(key);
             const node = nodes.find(n => String(n.id) === nodeId);
             if (!node) return;
-            const config = isRecord(node.config) ? node.config : {};
-            const subtasks = isRecord(config.subtasks) ? config.subtasks : undefined;
-            if (!subtasks) return;
-            const template = subtasks.template;
-            if (!template || !isRecord(template)) return;
-            const payloads = parseSubtaskPayloads(output);
-            const max = typeof subtasks.max === 'number' && subtasks.max > 0 ? subtasks.max : payloads.length;
-            for (let i = 0; i < payloads.slice(0, max).length; i++) {
-                const subId = `${nodeId}~sub${i}`;
-                if (nodes.some(n => String(n.id) === subId)) continue;
-                const subNode: DagNodeDefinition = {
-                    id: subId,
-                    name: `${node.name} · 子任务${i + 1}`,
-                    plugin: typeof template.plugin === 'string' ? template.plugin : node.plugin,
-                    pluginVersion: typeof template.pluginVersion === 'string' ? template.pluginVersion : node.pluginVersion,
-                    config: jsonValue(isRecord(template.config) ? template.config : {}),
-                    inputs: {
-                        ...(isRecord(template.inputs) ? template.inputs : {}),
-                        payload: jsonValue(payloads[i]),
-                    },
-                    capabilities: Array.isArray(template.capabilities) ? template.capabilities.map(String) : [],
-                };
-                nodes.push(subNode);
-                const edgeId = `${nodeId}->${subId}`;
-                edges.push({ id: edgeId, from: nodeId, to: subId, output: 'result', input: 'input' });
-                edgeState.set(edgeId, 'active');
+            const depth = delegationDepth.get(nodeId) ?? 0;
+            const plan = delegationPlan(node, key, parentIteration, depth, output);
+            if (!plan) return;
+            materializeDelegation(node, plan, {
+                nodes, edges, edgeState, depths: delegationDepth,
+                groups: delegationGroups, groupByChild: delegationGroupByChild,
+            });
+        };
+
+        const failDelegationGroup = async (key: string, message?: string): Promise<void> => {
+            const { nodeId } = parseInstanceKey(key);
+            const groupId = delegationGroupByChild.get(nodeId);
+            const group = groupId ? delegationGroups.get(groupId) : undefined;
+            if (!group || group.policy === 'continue') return;
+            const cancellations: Promise<void>[] = [];
+            for (const childId of group.children) {
+                if (childId === nodeId) continue;
+                skipped.add(childId);
+                for (const [index, handle] of (instances.get(childId) ?? []).entries()) {
+                    if (!completed.has(instanceKey(childId, index + 1))) {
+                        cancellations.push(handle.cancel(`Delegation sibling failed: ${nodeId}`));
+                    }
+                }
             }
+            await Promise.allSettled(cancellations);
+            throw new Error(message ?? `Delegated task failed: ${nodeId}`);
         };
 
         // Saga 补偿链：节点失败时，先补偿失败节点自身，再沿依赖链反向补偿
         // 所有已成功的上游节点（最后成功的先补偿），对应 Compensate B → Compensate A。
         const compensateChain = async (key: string): Promise<void> => {
-            const failedNodeId = key.split('#')[0];
+            const failedNodeId = parseInstanceKey(key).nodeId;
             const failedNode = nodes.find(item => item.id === failedNodeId);
             const compensations: string[] = [];
             if (failedNode?.compensate) compensations.push(failedNode.compensate);
@@ -267,9 +277,12 @@ export class DurableFlowExecutor {
             }));
             if ('interaction' in settled) return this.finish(session, instances, nodes);
             completed.add(settled.key);
-            if (settled.exit.status === 'failed') await compensateChain(settled.key);
+            if (settled.exit.status === 'failed') {
+                await compensateChain(settled.key);
+                await failDelegationGroup(settled.key, settled.exit.error?.message);
+            }
             applyEffects(settled.exit.output);
-            applySubtasks(settled.key, settled.exit.output);
+            applyDelegation(settled.key, settled.exit.output);
         }
 
         return this.finish(session, instances, nodes);
@@ -299,10 +312,11 @@ export class DurableFlowExecutor {
         const catalog = await this.options.resolveTools?.(sessionId, allowed)
             ?? { definitions: [], externalIds: [] };
         const subtaskTool = subtaskToolName(node.config);
+        const subtaskDescription = subtaskToolDescription(node.config);
         const input = task.programKind === 'llm.agent'
             ? {
                 ...record(task.input),
-                tools: [...catalog.definitions, ...(subtaskTool ? [subtaskToolDef(subtaskTool)] : [])],
+                tools: [...catalog.definitions, ...(subtaskTool ? [subtaskToolDef(subtaskTool, subtaskDescription)] : [])],
                 externalToolIds: catalog.externalIds,
             }
             : task.programKind === 'flow.value'
@@ -371,9 +385,21 @@ export class DurableFlowExecutor {
     }
 }
 
+
 function instanceKey(nodeId: string, iteration: number): string {
     return `${nodeId}#${iteration}`;
 }
+
+function parseInstanceKey(key: string): { nodeId: string; iteration: number } {
+    const separator = key.lastIndexOf('#');
+    if (separator < 0) return { nodeId: key, iteration: 1 };
+    const iteration = Number(key.slice(separator + 1));
+    return {
+        nodeId: key.slice(0, separator),
+        iteration: Number.isInteger(iteration) && iteration > 0 ? iteration : 1,
+    };
+}
+
 
 /** True when `nodeId` is the source of a back edge (a loop re-entry worker). */
 function isBackEdgeSource(
@@ -432,44 +458,6 @@ function graphEffects(output: unknown): GraphEffect[] {
 
 function jsonValue(value: unknown): JsonValue {
     return JSON.parse(JSON.stringify(value ?? null)) as JsonValue;
-}
-
-/** Parse an agent node's output content as a JSON array of subtask payloads. */
-function parseSubtaskPayloads(output: unknown): unknown[] {
-    const message = (output as { message?: { content?: unknown } } | undefined)?.message;
-    const content = message?.content;
-    if (typeof content !== 'string') return [];
-    try {
-        const parsed = JSON.parse(content);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        return [];
-    }
-}
-
-/** Read the declared subtask tool name from a node's config. */
-function subtaskToolName(config: unknown): string | undefined {
-    if (!isRecord(config)) return undefined;
-    const subtasks = isRecord(config.subtasks) ? config.subtasks : undefined;
-    return typeof subtasks?.tool === 'string' && subtasks.tool ? subtasks.tool : undefined;
-}
-
-/** ToolDefinition for the declarative subtask tool (call = declare sub-tasks). */
-function subtaskToolDef(name: string): ToolDefinition {
-    return {
-        type: 'function',
-        function: {
-            name,
-            description: 'Declare a list of sub-tasks to execute in parallel',
-            parameters: {
-                type: 'object',
-                properties: {
-                    items: { type: 'array', items: { type: 'object' } },
-                },
-                required: ['items'],
-            },
-        },
-    };
 }
 
 function record(value: unknown): Record<string, CommonJsonValue> {

@@ -18,6 +18,7 @@ import { DagDraftController, createFlowEdge } from './dag/DagDraftController';
 import { SchemaForm } from './dag/SchemaForm';
 import { DagCanvas } from './dag/DagCanvas';
 import { openFlowSettings } from './dag/FlowSettingsDialog';
+import type { EntityOption } from './dag/FlowSettingsDialog';
 
 export interface DagWorkbenchOptions {
     commands: ICommandBus;
@@ -25,6 +26,10 @@ export interface DagWorkbenchOptions {
     onSelectFlow?: (flowId: string, revision: number) => void;
     /** Global LLM connections available to bind flow-level connection slots to. */
     listConnections?: () => Promise<Array<{ id: string; name: string }>>;
+    listAgents?: () => Promise<EntityOption[]>;
+    listSystemPrompts?: () => Promise<EntityOption[]>;
+    listTools?: () => Promise<EntityOption[]>;
+    listSkills?: () => Promise<EntityOption[]>;
 }
 
 export class DagWorkbench {
@@ -33,6 +38,7 @@ export class DagWorkbench {
     private run: DurableFlowSnapshot | null = null;
     private catalogue: DagPluginPresentation[] = [];
     private selectedNodeId?: FlowNodeId;
+    private selectedEdgeId?: string;
     private canvas?: DagCanvas;
     private runRefreshTimer?: ReturnType<typeof setTimeout>;
 
@@ -52,6 +58,7 @@ export class DagWorkbench {
         this.stopRunRefresh();
         this.controller = new DagDraftController(draft);
         this.selectedNodeId = selectedNodeId;
+        this.selectedEdgeId = undefined;
         this.setMode('design');
     }
 
@@ -67,8 +74,8 @@ export class DagWorkbench {
         if (!this.controller) return null;
         const node = this.controller.addNode(descriptor);
         this.selectedNodeId = node.id;
+        this.selectedEdgeId = undefined;
         this.render();
-        this.openNodeEditor(node.id);
         return node;
     }
 
@@ -140,31 +147,147 @@ export class DagWorkbench {
         const manifests = new Map(this.catalogue.map(item => [item.manifest.id, item.manifest]));
         this.canvas = new DagCanvas(root, {
             onSelectNode: id => this.selectNode(id),
+            onSelectEdge: id => this.selectEdge(id),
+            onSelectCanvas: () => this.selectCanvas(),
             onMoveNode: (id, position) => this.moveNode(id, position),
             onConnect: (from, to) => this.connectNodes(from, to),
+            onEditNode: id => void this.openNodeEditor(id),
         });
-        this.canvas.render(draft, this.selectedNodeId, manifests);
+        this.canvas.render(draft, this.selectedNodeId, manifests, this.selectedEdgeId);
     }
 
-    private renderInspector(draft: FlowDraft): void {
+    private async renderInspector(draft: FlowDraft): Promise<void> {
         const inspector = this.root.querySelector<HTMLElement>('.dag-inspector')!;
+        const edge = draft.edges.find(item => String(item.id) === this.selectedEdgeId);
+        if (edge) {
+            this.renderInlineEdgeEditor(inspector, draft, edge);
+            return;
+        }
         const node = draft.nodes.find(item => item.id === this.selectedNodeId);
         if (!node) {
-            inspector.innerHTML = this.renderEdgeList(draft);
+            inspector.innerHTML = this.renderFlowOverview(draft) + this.renderEdgeList(draft);
+            inspector.querySelector('[data-inspector-settings]')?.addEventListener('click', () => void this.openFlowSettings());
             this.bindEdgeActions(inspector);
             return;
         }
-        const summary = pluginSummary(this.findPresentation(node), node.config);
-        inspector.innerHTML = `<h3>${escapeHTML(node.name)}</h3>
+        const presentation = this.findPresentation(node);
+        if (!presentation) return;
+        const formValue = node.plugin === 'builtin.agent' ? canonicalAgentConfig(node.config) : node.config;
+        inspector.innerHTML = `<h3 style="margin-bottom:.25rem">Edit node</h3>
             <small>${escapeHTML(node.plugin)} · ${escapeHTML(node.id)}</small>
-            ${summary ? `<p>${escapeHTML(summary)}</p>` : ''}
+            <label class="dag-schema-field"><span>Name</span><input data-inline-node-name value="${escapeHTML(node.name)}"></label>
+            <div data-inline-config><p style="color:var(--llm-text-secondary,#9ca3af)">Loading configuration…</p></div>
             <div class="dag-inspector__actions">
-                <button data-node-action="edit">Edit</button>
+                <button data-node-action="save" class="is-primary">Save node</button>
                 <button data-node-action="duplicate">Duplicate</button>
                 <button data-node-action="delete">Delete</button>
-            </div>${this.renderEdgeList(draft, node.id)}`;
-        this.bindNodeActions(inspector, node.id);
-        this.bindEdgeActions(inspector);
+            </div>
+            <details><summary>Advanced scheduling</summary>
+                <label>Static inputs<textarea data-inline-inputs rows="4">${escapeHTML(JSON.stringify(node.inputs, null, 2))}</textarea></label>
+                <label>Legacy capabilities<textarea data-inline-capabilities rows="3">${escapeHTML(JSON.stringify(node.capabilities ?? [], null, 2))}</textarea></label>
+                <label>Budget<textarea data-inline-budget rows="3">${escapeHTML(JSON.stringify(node.budget ?? {}, null, 2))}</textarea></label>
+                <label>Retry policy<textarea data-inline-retry rows="3">${escapeHTML(JSON.stringify(node.retry ?? {}, null, 2))}</textarea></label>
+                <label>Priority<input data-inline-priority type="number" value="${node.priority ?? 0}"></label>
+            </details>`;
+        let schema = withConnectionEnum(presentation.manifest.configSchema, draft, formValue);
+        if (node.plugin === 'builtin.agent') {
+            const [agents, prompts, tools, skills] = await Promise.all([
+                this.options.listAgents?.() ?? Promise.resolve([]),
+                this.options.listSystemPrompts?.() ?? Promise.resolve([]),
+                this.options.listTools?.() ?? Promise.resolve([]),
+                this.options.listSkills?.() ?? Promise.resolve([]),
+            ]);
+            if (this.selectedNodeId !== node.id || !inspector.isConnected) return;
+            schema = withAgentEntityEnums(schema, formValue, { agents, prompts, tools, skills });
+        }
+        const formRoot = inspector.querySelector<HTMLElement>('[data-inline-config]')!;
+        const schemaForm = new SchemaForm(formRoot, schema, formValue, presentation.ui?.inspector.layout);
+        schemaForm.render();
+        if (node.plugin === 'builtin.spawn') enhanceSpawnForm(formRoot);
+        inspector.querySelector('[data-node-action="save"]')?.addEventListener('click', () => {
+            try {
+                const config = schemaForm.read();
+                if (config.errors.length || config.value === undefined) throw new Error(config.errors.join('; '));
+                const read = (selector: string) => inspector.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!.value;
+                this.controller?.updateNode({
+                    ...node,
+                    name: read('[data-inline-node-name]').trim() || node.name,
+                    config: node.plugin === 'builtin.agent' ? canonicalAgentConfig(config.value) : config.value,
+                    inputs: JSON.parse(read('[data-inline-inputs]')),
+                    capabilities: JSON.parse(read('[data-inline-capabilities]')),
+                    budget: JSON.parse(read('[data-inline-budget]')),
+                    retry: JSON.parse(read('[data-inline-retry]')),
+                    priority: Number(read('[data-inline-priority]')),
+                });
+                this.render();
+                Toast.success('Node updated');
+            } catch (error) {
+                Toast.error(error instanceof Error ? error.message : 'Invalid node settings');
+            }
+        });
+        inspector.querySelector('[data-node-action="duplicate"]')?.addEventListener('click', () => {
+            this.selectedNodeId = this.controller?.duplicateNode(node.id).id;
+            this.render();
+        });
+        inspector.querySelector('[data-node-action="delete"]')?.addEventListener('click', () => void this.confirmDeleteNode(node.id));
+    }
+
+    private renderInlineEdgeEditor(
+        inspector: HTMLElement,
+        draft: FlowDraft,
+        edge: FlowEdgeDefinition,
+    ): void {
+        const from = draft.nodes.find(node => node.id === edge.from);
+        const to = draft.nodes.find(node => node.id === edge.to);
+        const source = from && this.findDescriptor(from);
+        const target = to && this.findDescriptor(to);
+        inspector.innerHTML = `<h3 style="margin-bottom:.25rem">Edit connection</h3>
+            <small>${escapeHTML(from?.name ?? edge.from)} → ${escapeHTML(to?.name ?? edge.to)}</small>
+            <label>Kind<select data-edge-kind><option value="data" ${edge.kind === 'data' ? 'selected' : ''}>Data</option><option value="control" ${edge.kind === 'control' ? 'selected' : ''}>Control</option></select></label>
+            <label>Source output<select data-edge-output>${portOptions(source?.outputs, edge.output)}</select></label>
+            <label>Target input<select data-edge-input>${portOptions(target?.inputs, edge.input)}</select></label>
+            <p style="color:var(--llm-text-secondary,#9ca3af);font-size:.8rem">Data connections carry a named output into a named input. Control connections only determine execution order.</p>
+            <div class="dag-inspector__actions">
+                <button data-edge-save class="is-primary">Save connection</button>
+                <button data-edge-delete>Delete</button>
+            </div>`;
+        inspector.querySelector('[data-edge-save]')?.addEventListener('click', () => {
+            const kind = inspector.querySelector<HTMLSelectElement>('[data-edge-kind]')!.value as FlowEdgeDefinition['kind'];
+            const output = inspector.querySelector<HTMLSelectElement>('[data-edge-output]')!.value;
+            const input = inspector.querySelector<HTMLSelectElement>('[data-edge-input]')!.value;
+            try {
+                this.controller?.updateEdge({ ...edge, kind, output: kind === 'data' ? output : undefined, input: kind === 'data' ? input : undefined });
+                this.render();
+                Toast.success('Connection updated');
+            } catch (error) { Toast.error(error instanceof Error ? error.message : 'Invalid connection'); }
+        });
+        inspector.querySelector('[data-edge-delete]')?.addEventListener('click', () => {
+            this.controller?.deleteEdge(edge.id);
+            this.selectedEdgeId = undefined;
+            this.render();
+        });
+    }
+
+    private renderFlowOverview(draft: FlowDraft): string {
+        const defaults = isRecord(draft.defaults) ? draft.defaults : {};
+        const parameterRequired = (draft.parameters ?? []).filter(parameter => parameter.required && parameter.default === undefined).length;
+        const defaultLabels = [
+            typeof defaults.agentId === 'string' && defaults.agentId ? `Agent: ${defaults.agentId}` : 'Session Agent',
+            typeof defaults.systemPromptId === 'string' && defaults.systemPromptId ? `Prompt: ${defaults.systemPromptId}` : '',
+            `${Array.isArray(defaults.toolIds) ? defaults.toolIds.length : 0} tools`,
+            `${Array.isArray(defaults.skillIds) ? defaults.skillIds.length : 0} skills`,
+        ].filter(Boolean);
+        return `<section class="dag-inspector__overview">
+            <h3 style="margin-bottom:.25rem">${escapeHTML(draft.name)}</h3>
+            <small>${draft.nodes.length} nodes · ${draft.edges.length} edges</small>
+            <h4>Flow defaults</h4>
+            <p>${defaultLabels.map(label => `<span class="dag-badge">${escapeHTML(label)}</span>`).join(' ')}</p>
+            <h4>Run inputs</h4>
+            <p>${draft.parameters?.length ?? 0} parameters${parameterRequired ? ` · ${parameterRequired} required` : ''}</p>
+            <h4>Connections</h4>
+            <p>${draft.connections?.length ?? 0} slots · default: ${escapeHTML(draft.defaultConnection ?? draft.connections?.[0]?.name ?? 'Session')}</p>
+            <button data-inspector-settings><i class="fas fa-sliders-h"></i> Edit Flow settings</button>
+        </section>`;
     }
 
     private renderEdgeList(draft: FlowDraft, nodeId?: FlowNodeId): string {
@@ -202,18 +325,9 @@ export class DagWorkbench {
         }
     }
 
-    private bindNodeActions(root: HTMLElement, nodeId: FlowNodeId): void {
-        root.querySelector('[data-node-action="edit"]')?.addEventListener('click', () => this.openNodeEditor(nodeId));
-        root.querySelector('[data-node-action="duplicate"]')?.addEventListener('click', () => {
-            this.selectedNodeId = this.controller?.duplicateNode(nodeId).id;
-            this.render();
-        });
-        root.querySelector('[data-node-action="delete"]')?.addEventListener('click', () => void this.confirmDeleteNode(nodeId));
-    }
-
     private bindEdgeActions(root: HTMLElement): void {
         root.querySelectorAll<HTMLElement>('[data-edit-edge]').forEach(button => {
-            button.addEventListener('click', () => this.openEdgeEditor(button.dataset.editEdge!));
+            button.addEventListener('click', () => this.selectEdge(button.dataset.editEdge!));
         });
         root.querySelectorAll<HTMLElement>('[data-delete-edge]').forEach(button => {
             button.addEventListener('click', () => {
@@ -221,42 +335,6 @@ export class DagWorkbench {
                 this.render();
             });
         });
-    }
-
-    private openEdgeEditor(edgeId: string): void {
-        const edge = this.controller?.value.edges.find(item => String(item.id) === edgeId);
-        if (!edge) return;
-        const dialog = document.createElement('dialog');
-        dialog.className = 'dag-dialog';
-        dialog.innerHTML = `<form method="dialog"><h2>Edit edge</h2>
-            <label>Kind<select name="kind"><option ${edge.kind === 'control' ? 'selected' : ''}>control</option><option ${edge.kind === 'data' ? 'selected' : ''}>data</option></select></label>
-            <label>Output <input name="output" value="${escapeHTML(edge.output ?? '')}"></label>
-            <label>Input <input name="input" value="${escapeHTML(edge.input ?? '')}"></label>
-            <p data-dialog-error class="dag-dialog__error"></p>
-            <menu><button value="cancel">Cancel</button><button value="save">Save edge</button></menu></form>`;
-        document.body.append(dialog);
-        dialog.showModal();
-        dialog.addEventListener('close', () => this.saveEdgeDialog(dialog, edge), { once: true });
-    }
-
-    private saveEdgeDialog(dialog: HTMLDialogElement, edge: FlowEdgeDefinition): void {
-        try {
-            if (dialog.returnValue !== 'save') return;
-            const value = (name: string) =>
-                dialog.querySelector<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`)!.value;
-            const kind = value('kind') as FlowEdgeDefinition['kind'];
-            this.controller?.updateEdge({
-                ...edge,
-                kind,
-                output: kind === 'data' ? value('output') : undefined,
-                input: kind === 'data' ? value('input') : undefined,
-            });
-            this.render();
-        } catch (error) {
-            Toast.error(error instanceof Error ? error.message : 'Invalid edge');
-        } finally {
-            dialog.remove();
-        }
     }
 
     private async confirmDeleteNode(nodeId: FlowNodeId): Promise<void> {
@@ -269,22 +347,33 @@ export class DagWorkbench {
         this.render();
     }
 
-    private openNodeEditor(nodeId: FlowNodeId): void {
+    private async openNodeEditor(nodeId: FlowNodeId): Promise<void> {
         const node = this.controller?.value.nodes.find(item => item.id === nodeId);
         const presentation = node && this.findPresentation(node);
         if (!node || !presentation) return;
         const dialog = this.createNodeDialog(node);
         const formRoot = dialog.querySelector<HTMLElement>('[data-config-form]')!;
-        const schema = this.controller
-            ? withConnectionEnum(presentation.manifest.configSchema, this.controller.value, node.config)
+        const formValue = node.plugin === 'builtin.agent' ? canonicalAgentConfig(node.config) : node.config;
+        let schema = this.controller
+            ? withConnectionEnum(presentation.manifest.configSchema, this.controller.value, formValue)
             : presentation.manifest.configSchema;
+        if (node.plugin === 'builtin.agent') {
+            const [agents, prompts, tools, skills] = await Promise.all([
+                this.options.listAgents?.() ?? Promise.resolve([]),
+                this.options.listSystemPrompts?.() ?? Promise.resolve([]),
+                this.options.listTools?.() ?? Promise.resolve([]),
+                this.options.listSkills?.() ?? Promise.resolve([]),
+            ]);
+            schema = withAgentEntityEnums(schema, formValue, { agents, prompts, tools, skills });
+        }
         const schemaForm = new SchemaForm(
             formRoot,
             schema,
-            node.config,
+            formValue,
             presentation.ui?.inspector.layout,
         );
         schemaForm.render();
+        if (node.plugin === 'builtin.spawn') enhanceSpawnForm(formRoot);
         this.bindNodeDialog(dialog, node, schemaForm);
     }
 
@@ -336,7 +425,7 @@ export class DagWorkbench {
             return {
                 ...node,
                 name: field('name').trim(),
-                config: config.value,
+                config: node.plugin === 'builtin.agent' ? canonicalAgentConfig(config.value) : config.value,
                 inputs: JSON.parse(field('inputs')),
                 capabilities: JSON.parse(field('capabilities')),
                 budget: JSON.parse(field('budget')),
@@ -486,6 +575,20 @@ export class DagWorkbench {
 
     private selectNode(id: FlowNodeId): void {
         this.selectedNodeId = id;
+        this.selectedEdgeId = undefined;
+        this.render();
+    }
+
+    private selectEdge(id: string): void {
+        this.selectedNodeId = undefined;
+        this.selectedEdgeId = id;
+        this.render();
+    }
+
+    private selectCanvas(): void {
+        if (!this.selectedNodeId && !this.selectedEdgeId) return;
+        this.selectedNodeId = undefined;
+        this.selectedEdgeId = undefined;
         this.render();
     }
 
@@ -561,12 +664,23 @@ export class DagWorkbench {
         const controller = this.controller;
         if (!controller) return;
         const draft = controller.value;
-        const availableConnections = await (this.options.listConnections?.() ?? Promise.resolve([]));
+        const [availableConnections, agents, systemPrompts, tools, skills] = await Promise.all([
+            this.options.listConnections?.() ?? Promise.resolve([]),
+            this.options.listAgents?.() ?? Promise.resolve([]),
+            this.options.listSystemPrompts?.() ?? Promise.resolve([]),
+            this.options.listTools?.() ?? Promise.resolve([]),
+            this.options.listSkills?.() ?? Promise.resolve([]),
+        ]);
         const result = await openFlowSettings({
             connections: draft.connections ?? [],
             defaultConnection: draft.defaultConnection,
             parameters: draft.parameters ?? [],
             availableConnections,
+            defaults: draft.defaults,
+            agents,
+            systemPrompts,
+            tools,
+            skills,
         });
         if (!result) return;
         controller.updateFlowSettings(result);
@@ -596,23 +710,30 @@ function paletteLabel(presentation: DagPluginPresentation): string {
     return presentation.ui?.palette.label ?? presentation.manifest.title;
 }
 
-function pluginSummary(
-    presentation: DagPluginPresentation | undefined,
-    config: FlowNodeDefinition['config'],
-): string {
-    try {
-        return presentation?.ui?.node.summarize(config) ?? '';
-    } catch {
-        return '';
-    }
-}
-
 function isTerminalRun(status: TaskStatus): boolean {
     return ['succeeded', 'failed', 'cancelled'].includes(status);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Normalize legacy Agent fields when the user next edits the node. */
+function canonicalAgentConfig(value: JsonValue): JsonValue {
+    if (!isRecord(value)) return value;
+    const result = structuredClone(value) as Record<string, JsonValue>;
+    if (typeof result.instruction !== 'string' && typeof result.prompt === 'string') {
+        result.instruction = result.prompt;
+    }
+    delete result.prompt;
+    if (isRecord(result.delegation) && isRecord(result.delegation.template)) {
+        const template = result.delegation.template;
+        if (typeof template.instruction !== 'string' && typeof template.prompt === 'string') {
+            template.instruction = template.prompt;
+        }
+        delete template.prompt;
+    }
+    return result;
 }
 
 /** Turn `config.connectionId` into a dropdown of the flow's connection slots (+ inherit). */
@@ -627,7 +748,7 @@ function withConnectionEnum(
     if (!connectionField) return schema;
     const aliases = (flow.connections ?? []).map(connection => connection.name);
     const current = isRecord(nodeConfig) ? nodeConfig.connectionId : undefined;
-    const enumValues: JsonValue[] = ['', ...aliases];
+    const enumValues: JsonValue[] = [...aliases];
     if (typeof current === 'string' && current && !aliases.includes(current)) enumValues.push(current);
     return {
         ...schema,
@@ -636,6 +757,97 @@ function withConnectionEnum(
             connectionId: { ...connectionField, enum: enumValues },
         },
     } as JsonValue;
+}
+
+function withAgentEntityEnums(
+    schema: JsonValue,
+    config: FlowNodeDefinition['config'],
+    entities: { agents: EntityOption[]; prompts: EntityOption[]; tools: EntityOption[]; skills: EntityOption[] },
+): JsonValue {
+    if (!isRecord(schema) || !isRecord(schema.properties)) return schema;
+    const properties = { ...schema.properties } as Record<string, JsonValue>;
+    const current = isRecord(config) ? config : {};
+    if (!isRecord(current.subtasks)) delete properties.subtasks;
+    const decorateRef = (key: string, values: EntityOption[], title: string, description: string) => {
+        const original = isRecord(properties[key]) ? properties[key] : {};
+        const currentId = typeof current[key] === 'string' ? current[key] : '';
+        const ids = values.map(item => item.id);
+        if (currentId && !ids.includes(currentId)) ids.unshift(currentId);
+        properties[key] = {
+            ...original,
+            title,
+            description,
+            enum: ids,
+        } as JsonValue;
+    };
+    const decorateMany = (key: string, values: EntityOption[], title: string, description: string) => {
+        const original = isRecord(properties[key]) ? properties[key] : {};
+        const ids = values.map(item => item.id);
+        for (const id of Array.isArray(current[key]) ? current[key].map(String) : []) {
+            if (!ids.includes(id)) ids.unshift(id);
+        }
+        properties[key] = {
+            ...original,
+            title,
+            description,
+            items: { type: 'string', enum: ids },
+        } as JsonValue;
+    };
+    decorateRef('agentId', entities.agents, 'Agent', '可选；继承该 Agent 的模型、身份和能力，节点显式值优先。');
+    decorateRef('systemPromptId', entities.prompts, 'System Prompt', '引用提示词库；按策略追加或替换默认提示词。');
+    decorateMany('toolIds', entities.tools, 'Tools', '与 Flow、Agent 和节点 capabilities 的工具取并集。');
+    decorateMany('skillIds', entities.skills, 'Skills', '在该节点静态加载的 Skills。');
+    // Reuse the same entity catalogs inside the structured delegation template.
+    const delegationField = isRecord(properties.delegation) ? properties.delegation : undefined;
+    const delegationProperties = delegationField && isRecord(delegationField.properties)
+        ? { ...delegationField.properties } as Record<string, JsonValue>
+        : undefined;
+    const templateField = delegationProperties && isRecord(delegationProperties.template)
+        ? delegationProperties.template
+        : undefined;
+    const templateProperties = templateField && isRecord(templateField.properties)
+        ? { ...templateField.properties } as Record<string, JsonValue>
+        : undefined;
+    if (delegationProperties && templateField && templateProperties) {
+        const delegationCurrent = isRecord(current.delegation) ? current.delegation : {};
+        const templateCurrent = isRecord(delegationCurrent.template) ? delegationCurrent.template : {};
+        const ref = (key: string, values: EntityOption[]) => {
+            if (!isRecord(templateProperties[key])) return;
+            const ids = values.map(item => item.id);
+            const selected = typeof templateCurrent[key] === 'string' ? templateCurrent[key] : '';
+            if (selected && !ids.includes(selected)) ids.unshift(selected);
+            templateProperties[key] = { ...templateProperties[key], enum: ids } as JsonValue;
+        };
+        const many = (key: string, values: EntityOption[]) => {
+            if (!isRecord(templateProperties[key])) return;
+            const ids = values.map(item => item.id);
+            for (const id of Array.isArray(templateCurrent[key]) ? templateCurrent[key].map(String) : []) {
+                if (!ids.includes(id)) ids.unshift(id);
+            }
+            templateProperties[key] = { ...templateProperties[key], items: { type: 'string', enum: ids } } as JsonValue;
+        };
+        ref('agentId', entities.agents);
+        ref('systemPromptId', entities.prompts);
+        many('toolIds', entities.tools);
+        many('skillIds', entities.skills);
+        if (isRecord(properties.connectionId) && Array.isArray(properties.connectionId.enum) && isRecord(templateProperties.connectionId)) {
+            templateProperties.connectionId = { ...templateProperties.connectionId, enum: properties.connectionId.enum } as JsonValue;
+        }
+        delegationProperties.template = { ...templateField, properties: templateProperties } as JsonValue;
+        properties.delegation = { ...delegationField, properties: delegationProperties } as JsonValue;
+    }
+    const labels: Record<string, [string, string]> = {
+        instruction: ['节点任务指令', '作为节点本地 system 指令追加。可使用 ${params.name}。'],
+        historyPolicy: ['对话上下文', 'inherit=会话历史，upstream=仅上游，none=隔离。'],
+        systemPromptPolicy: ['System Prompt 策略', 'inherit=继承并追加，replace=仅节点，none=完全禁用。'],
+        persistOutput: ['输出写入会话', '关闭时仍传递给下游，但不进入最终会话历史。'],
+        connectionId: ['Connection Slot', '留空时继承 Flow 默认连接。'],
+    };
+    for (const [key, [title, description]] of Object.entries(labels)) {
+        if (!isRecord(properties[key])) continue;
+        properties[key] = { ...properties[key], title, description } as JsonValue;
+    }
+    return { ...schema, properties } as JsonValue;
 }
 
 function pendingInteraction(
@@ -648,4 +860,50 @@ function pendingInteraction(
         }
     }
     return undefined;
+}
+
+function portOptions(
+    ports: Array<{ name: string }> | undefined,
+    selected: string | undefined,
+): string {
+    const names = (ports ?? []).map(port => port.name);
+    if (selected && !names.includes(selected)) names.unshift(selected);
+    if (!names.length) names.push(selected || 'result');
+    return names.map(name => `<option value="${escapeHTML(name)}" ${name === selected ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('');
+}
+
+function enhanceSpawnForm(root: HTMLElement): void {
+    const nodes = root.querySelector<HTMLTextAreaElement>('[data-schema-path="$.spawn.nodes"]');
+    const edges = root.querySelector<HTMLTextAreaElement>('[data-schema-path="$.spawn.edges"]');
+    if (!nodes || !edges) return;
+    const toolbar = document.createElement('div');
+    toolbar.className = 'dag-spawn-actions';
+    toolbar.innerHTML = `<button type="button" data-add-spawn-agent><i class="fas fa-plus"></i> Add Agent template</button><button type="button" data-add-spawn-edge><i class="fas fa-link"></i> Add connection template</button>`;
+    nodes.closest('.dag-schema-object')?.querySelector(':scope > summary')?.insertAdjacentElement('afterend', toolbar);
+    toolbar.querySelector('[data-add-spawn-agent]')?.addEventListener('click', () => {
+        const current = parseJsonArray(nodes.value);
+        if (!current) return;
+        const id = `spawned-${current.length + 1}`;
+        current.push({
+            id, name: `Spawned Agent ${current.length + 1}`, plugin: 'builtin.agent', pluginVersion: '1.0.0',
+            config: { instruction: '', historyPolicy: 'upstream', approval: 'external' }, inputs: {}, capabilities: [],
+        });
+        nodes.value = JSON.stringify(current, null, 2);
+    });
+    toolbar.querySelector('[data-add-spawn-edge]')?.addEventListener('click', () => {
+        const current = parseJsonArray(edges.value);
+        if (!current) return;
+        current.push({ id: `spawn-edge-${current.length + 1}`, from: '', to: '', output: 'result', input: 'input' });
+        edges.value = JSON.stringify(current, null, 2);
+    });
+}
+
+function parseJsonArray(value: string): Array<Record<string, unknown>> | null {
+    try {
+        const parsed = JSON.parse(value || '[]');
+        return Array.isArray(parsed) ? parsed.filter(isRecord) : [];
+    } catch {
+        Toast.error('Fix the current JSON before adding a template');
+        return null;
+    }
 }

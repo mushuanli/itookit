@@ -94,6 +94,51 @@ describe('DurableFlowExecutor', () => {
         expect(JSON.stringify(nodes.spawned)).toContain('SPAWNED');
         expect(execution.iterations.get('spawned')).toBe(1);
     });
+
+    it('fans out bounded structured delegation payloads', async () => {
+        const execution = await executor(kernel).submit('session-one', delegationFlow());
+        const exit = await execution.root.wait({ timeoutMs: 3_000 });
+        const nodes = (exit.output as { nodes: Record<string, unknown> }).nodes;
+
+        expect(exit.status).toBe('succeeded');
+        expect(Object.keys(nodes)).toContain('parent:delegate:1:0');
+        expect(Object.keys(nodes)).toContain('parent:delegate:1:1');
+        expect(Object.keys(nodes)).not.toContain('parent:delegate:1:2');
+        expect(JSON.stringify(nodes['parent:delegate:1:0'])).toContain('durable answer');
+    });
+
+    it('keeps parent upstream data when the child template is isolated', async () => {
+        const flow = delegationFlow();
+        flow.nodes.unshift(valueNode('source', 'delegate now'));
+        (flow.nodes.find(node => node.id === 'parent')!.config as Record<string, unknown>).messages = [
+            { role: 'system', content: 'Use the upstream request' },
+        ];
+        flow.edges.push({
+            id: 'source-parent', from: 'source', to: 'parent', output: 'result', input: 'request', kind: 'data',
+        });
+
+        const execution = await executor(kernel).submit('session-one', flow);
+        expect(execution.nodes.has('parent:delegate:1:0')).toBe(true);
+    });
+
+    it('fails the flow and cancels the delegation group on fail-fast', async () => {
+        const flow = delegationFlow();
+        const delegation = (flow.nodes[0].config as Record<string, any>).delegation;
+        delegation.resolvedTemplate.config.messages = [{ role: 'system', content: 'fail child' }];
+        delegation.failure = { policy: 'fail-fast' };
+
+        await expect(executor(kernel).submit('session-one', flow)).rejects.toThrow('child failed');
+    });
+
+    it('can exclude delegated outputs from the Flow result', async () => {
+        const flow = delegationFlow();
+        (flow.nodes[0].config as Record<string, any>).delegation.join = { mode: 'none' };
+        const execution = await executor(kernel).submit('session-one', flow);
+        const exit = await execution.root.wait({ timeoutMs: 3_000 });
+        const nodes = (exit.output as { nodes: Record<string, unknown> }).nodes;
+
+        expect(Object.keys(nodes)).toEqual(['parent']);
+    });
 });
 
 function registerPrograms(kernel: Kernel): void {
@@ -110,7 +155,30 @@ function executor(kernel: Kernel): DurableFlowExecutor {
 function llmEffect(): EffectAdapter<Record<string, unknown>, ChatCompletionResponse> {
     return {
         kind: 'llm.chat', version: '1',
-        async execute() {
+        async execute(request) {
+            const inner = request.request && typeof request.request === 'object'
+                ? request.request as Record<string, unknown>
+                : request;
+            const messages = Array.isArray(inner.messages) ? inner.messages : [];
+            if (messages.some(message => JSON.stringify(message).includes('delegate now'))) {
+                return {
+                    choices: [{
+                        index: 0,
+                        message: {
+                            role: 'assistant', content: '',
+                            tool_calls: [{
+                                id: 'delegate-one', type: 'function',
+                                function: { name: 'delegate_tasks', arguments: JSON.stringify({ items: [{ id: 1 }, { id: 2 }, { id: 3 }] }) },
+                            }],
+                        },
+                        finish_reason: 'tool_calls',
+                    }],
+                    usage: { total_tokens: 2 },
+                };
+            }
+            if (messages.some(message => JSON.stringify(message).includes('fail child'))) {
+                throw new Error('child failed');
+            }
             return {
                 choices: [{
                     index: 0,
@@ -120,6 +188,33 @@ function llmEffect(): EffectAdapter<Record<string, unknown>, ChatCompletionRespo
                 usage: { total_tokens: 2 },
             };
         },
+    };
+}
+
+function delegationFlow(): DagRunSpec {
+    return {
+        nodes: [{
+            id: 'parent', name: 'parent', plugin: 'builtin.agent', pluginVersion: '1.0.0',
+            config: {
+                sessionId: 'session-one', roundId: 'round-parent', connectionId: 'default', approval: 'none',
+                messages: [{ role: 'user', content: 'delegate now' }],
+                delegation: {
+                    enabled: true,
+                    toolName: 'delegate_tasks',
+                    resolvedTemplate: {
+                        plugin: 'builtin.agent', pluginVersion: '1.0.0', capabilities: [],
+                        config: {
+                            sessionId: 'session-one', roundId: 'round-child', connectionId: 'default', approval: 'none',
+                            messages: [{ role: 'system', content: 'Handle one payload' }],
+                        },
+                    },
+                    fanout: { maxTasks: 2, maxConcurrency: 1, maxDepth: 1, order: 'sequential' },
+                    failure: { policy: 'continue' },
+                },
+            },
+            inputs: {}, capabilities: [],
+        }],
+        edges: [],
     };
 }
 

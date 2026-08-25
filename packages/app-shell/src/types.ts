@@ -81,6 +81,10 @@ export interface FlowEditorDeps {
     onRunFlow?: (flowId: string, revision: number) => void;
     /** Global LLM connections available to bind flow-level connection slots to. */
     listConnections?: () => Promise<Array<{ id: string; name: string }>>;
+    listAgents?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
+    listSystemPrompts?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
+    listTools?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
+    listSkills?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
 }
 
 export interface AIContextMenuDeps {

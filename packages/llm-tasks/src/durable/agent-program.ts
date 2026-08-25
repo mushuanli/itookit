@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolCall, ToolInvokeResult } from '@itookit/common';
+import { DEFAULT_AGENT_MAX_EXCHANGES, type ChatMessage, type ToolCall, type ToolInvokeResult } from '@itookit/common';
 import {
     interactionApproved,
     type Decision,
@@ -29,8 +29,6 @@ import type {
     DurableAgentOutput,
     DurableAgentState,
 } from './types';
-
-const DEFAULT_MAX_EXCHANGES = 50;
 
 export class DurableAgentProgram implements DurableTaskProgram<DurableAgentState, DurableAgentInput, DurableAgentOutput> {
     readonly manifest = { kind: 'llm.agent', version: '1' };
@@ -68,7 +66,7 @@ function collect(state: DurableAgentState, event: TaskInputEvent): Decision<Dura
 }
 
 function requestLlm(state: DurableAgentState): Decision<DurableAgentState, DurableAgentOutput> {
-    if (state.exchanges >= (state.input.maxExchanges ?? DEFAULT_MAX_EXCHANGES)) {
+    if (state.exchanges >= (state.input.maxExchanges ?? DEFAULT_AGENT_MAX_EXCHANGES)) {
         return fail(state, 'Agent exchange budget exhausted', 'BUDGET_EXHAUSTED');
     }
     state.exchanges++;

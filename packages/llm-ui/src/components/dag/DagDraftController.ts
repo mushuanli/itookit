@@ -7,6 +7,7 @@ import type {
     FlowNodeDefinition,
     FlowConnection,
     FlowParameter,
+    FlowDefaults,
 } from '@itookit/common';
 
 export interface DeleteNodeResult {
@@ -121,11 +122,13 @@ export class DagDraftController {
         connections?: FlowConnection[];
         defaultConnection?: string;
         parameters?: FlowParameter[];
+        defaults?: FlowDefaults;
     }): void {
         this.change(draft => {
             if (settings.connections) draft.connections = clone(settings.connections);
-            if (settings.defaultConnection !== undefined) draft.defaultConnection = settings.defaultConnection;
+            if ('defaultConnection' in settings) draft.defaultConnection = settings.defaultConnection;
             if (settings.parameters) draft.parameters = clone(settings.parameters);
+            if (settings.defaults !== undefined) draft.defaults = clone(settings.defaults);
         });
     }
 

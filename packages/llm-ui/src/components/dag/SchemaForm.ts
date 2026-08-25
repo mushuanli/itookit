@@ -9,6 +9,9 @@ interface JsonSchema {
     required?: string[];
     properties?: Record<string, JsonSchema>;
     items?: JsonSchema;
+    unsetLabel?: string;
+    /** Non-standard UI hint: keep these properties behind one Advanced disclosure. */
+    advancedProperties?: string[];
 }
 
 export class SchemaForm {
@@ -28,7 +31,10 @@ export class SchemaForm {
         let value = structuredClone(this.value);
         for (const field of this.root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-schema-path]')) {
             try {
-                value = setPath(value, field.dataset.schemaPath!, readField(field));
+                const fieldValue = readField(field);
+                value = fieldValue === undefined
+                    ? deletePath(value, field.dataset.schemaPath!)
+                    : setPath(value, field.dataset.schemaPath!, fieldValue);
             } catch (error) {
                 errors.push(error instanceof Error ? error.message : 'Invalid field value');
             }
@@ -78,18 +84,31 @@ export function validateSchema(schema: JsonSchema, value: JsonValue, path = '$')
     return errors;
 }
 
-function renderSchema(schema: JsonSchema, value: JsonValue, path: string, root = false): string {
+function renderSchema(schema: JsonSchema, value: JsonValue, path: string, root = false, optional = false, present = true): string {
     if (schema.type === 'object' && root) return renderProperties(schema, value, path);
     const label = escapeHTML(schema.title ?? path.split('.').pop() ?? path);
     const description = schema.description ? `<small>${escapeHTML(schema.description)}</small>` : '';
-    return `<label class="dag-schema-field"><span>${label}</span>${description}${renderControl(schema, value, path)}</label>`;
+    if (schema.type === 'object' && schema.properties) {
+        const expanded = present && isRecord(value) && Object.keys(value).length > 0;
+        return `<details class="dag-schema-object" ${expanded ? 'open' : ''}><summary>${label}</summary>${description}${renderProperties(schema, present ? value : {}, path)}</details>`;
+    }
+    return `<label class="dag-schema-field"><span>${label}${optional ? ' <small>（继承可用）</small>' : ''}</span>${description}${renderControl(schema, value, path, optional, present)}</label>`;
 }
 
 function renderProperties(schema: JsonSchema, value: JsonValue, path: string): string {
     const record = isRecord(value) ? value : {};
-    return Object.keys(schema.properties ?? {})
+    const advanced = new Set(schema.advancedProperties ?? []);
+    const basic = Object.keys(schema.properties ?? {})
+        .filter(key => !advanced.has(key))
         .map(key => renderProperty(schema, record, key, path))
         .join('');
+    const advancedBody = [...advanced]
+        .filter(key => Boolean(schema.properties?.[key]))
+        .map(key => renderProperty(schema, record, key, path))
+        .join('');
+    if (!advancedBody) return basic;
+    const configured = [...advanced].some(key => key in record);
+    return `${basic}<details class="dag-schema-advanced"><summary>Advanced${configured ? ' · configured' : ''}</summary>${advancedBody}</details>`;
 }
 
 function renderProperty(
@@ -106,34 +125,50 @@ function renderProperty(
         fieldSchema,
         (value[key] ?? defaultValue(child)) as JsonValue,
         `${path}.${key}`,
+        false,
+        !schema.required?.includes(key),
+        key in value,
     );
 }
 
-function renderControl(schema: JsonSchema, value: JsonValue, path: string): string {
+function renderControl(schema: JsonSchema, value: JsonValue, path: string, optional = false, present = true): string {
     const encodedPath = escapeHTML(path);
+    if (schema.type === 'array' && schema.items?.enum) {
+        const selected = new Set(Array.isArray(value) ? value.map(item => JSON.stringify(item)) : []);
+        return `<select data-schema-path="${encodedPath}" data-schema-type="multi" multiple size="${Math.min(8, Math.max(3, schema.items.enum.length))}">${schema.items.enum.map(item => {
+            const encoded = JSON.stringify(item);
+            return `<option value="${escapeHTML(encoded)}" ${selected.has(encoded) ? 'selected' : ''}>${escapeHTML(enumLabel(item))}</option>`;
+        }).join('')}</select>`;
+    }
     if (schema.enum) {
-        return `<select data-schema-path="${encodedPath}">${schema.enum.map(item =>
+        return `<select data-schema-path="${encodedPath}" ${optional ? 'data-schema-optional="true"' : ''}>${optional ? `<option value="">${escapeHTML(schema.unsetLabel ?? '(inherit)')}</option>` : ''}${schema.enum.map(item =>
             `<option value="${escapeHTML(JSON.stringify(item))}" ${same(item, value) ? 'selected' : ''}>${escapeHTML(enumLabel(item))}</option>`,
         ).join('')}</select>`;
     }
     if (schema.type === 'boolean') {
+        if (optional) return `<select data-schema-path="${encodedPath}" data-schema-type="optional-boolean" data-schema-optional="true"><option value="" ${!present ? 'selected' : ''}>(inherit)</option><option value="true" ${present && value === true ? 'selected' : ''}>On</option><option value="false" ${present && value === false ? 'selected' : ''}>Off</option></select>`;
         return `<input data-schema-path="${encodedPath}" data-schema-type="boolean" type="checkbox" ${value ? 'checked' : ''}>`;
     }
     if (schema.type === 'number' || schema.type === 'integer') {
-        return `<input data-schema-path="${encodedPath}" data-schema-type="${schema.type}" type="number" value="${escapeHTML(String(value ?? 0))}">`;
+        return `<input data-schema-path="${encodedPath}" data-schema-type="${schema.type}" ${optional ? 'data-schema-optional="true"' : ''} type="number" value="${present ? escapeHTML(String(value ?? 0)) : ''}" placeholder="${optional ? escapeHTML(schema.unsetLabel ?? 'inherit') : ''}">`;
     }
     if (schema.type === 'object' || schema.type === 'array' || !schema.type) {
-        return `<textarea data-schema-path="${encodedPath}" data-schema-type="json" rows="5">${escapeHTML(JSON.stringify(value ?? defaultValue(schema), null, 2))}</textarea>`;
+        return `<textarea data-schema-path="${encodedPath}" data-schema-type="json" ${optional ? 'data-schema-optional="true"' : ''} rows="5" placeholder="${optional ? '(inherit)' : ''}">${present ? escapeHTML(JSON.stringify(value ?? defaultValue(schema), null, 2)) : ''}</textarea>`;
     }
-    return `<input data-schema-path="${encodedPath}" type="text" value="${escapeHTML(String(value ?? ''))}">`;
+    return `<input data-schema-path="${encodedPath}" ${optional ? 'data-schema-optional="true"' : ''} type="text" value="${present ? escapeHTML(String(value ?? '')) : ''}" placeholder="${optional ? escapeHTML(schema.unsetLabel ?? 'inherit') : ''}">`;
 }
 
-function readField(field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement): JsonValue {
+function readField(field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement): JsonValue | undefined {
+    if (field.dataset.schemaOptional === 'true' && field.value === '') return undefined;
+    if (field.dataset.schemaType === 'optional-boolean') return field.value === 'true';
     if (field instanceof HTMLInputElement && field.dataset.schemaType === 'boolean') return field.checked;
     if (field.dataset.schemaType === 'number' || field.dataset.schemaType === 'integer') {
         const value = Number(field.value);
         if (!Number.isFinite(value)) throw new Error(`${field.dataset.schemaPath} must be a number`);
         return value;
+    }
+    if (field.dataset.schemaType === 'multi' && field instanceof HTMLSelectElement) {
+        return [...field.selectedOptions].map(option => JSON.parse(option.value) as JsonValue);
     }
     if (field.dataset.schemaType === 'json' || field instanceof HTMLSelectElement) {
         try {
@@ -143,6 +178,19 @@ function readField(field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaEle
         }
     }
     return field.value;
+}
+
+function deletePath(root: JsonValue, path: string): JsonValue {
+    if (path === '$') return root;
+    const result = isRecord(root) ? structuredClone(root) : {};
+    const parts = path.replace(/^\$\./, '').split('.');
+    let current: Record<string, JsonValue> | undefined = result;
+    parts.forEach((part, index) => {
+        if (!current) return;
+        if (index === parts.length - 1) delete current[part];
+        else current = isRecord(current[part]) ? current[part] as Record<string, JsonValue> : undefined;
+    });
+    return result;
 }
 
 function setPath(root: JsonValue, path: string, value: JsonValue): JsonValue {

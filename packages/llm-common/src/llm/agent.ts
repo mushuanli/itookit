@@ -261,6 +261,8 @@ export interface IAgentConfigService extends IConnectionReader {
     saveSystemPrompt(prompt: SystemPromptDefinition): Promise<void>;
     /** Delete a System Prompt library entry by id. */
     deleteSystemPrompt(id: string): Promise<void>;
+    /** List Skills so static skillIds can be resolved for Agent/Flow execution. */
+    getSkills(): Promise<LLMSkill[]>;
 }
 
 // ─── IAgentManagementService ──────────────────────────────────────────────────

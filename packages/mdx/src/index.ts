@@ -76,6 +76,9 @@ export type { TablePluginOptions } from './plugins/interactions/table.plugin';
 export { CodeBlockControlsPlugin } from './plugins/interactions/codeblock-controls.plugin';
 export type { CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
 
+export { ZoomPlugin } from './plugins/interactions/zoom.plugin';
+export type { ZoomPluginOptions } from './plugins/interactions/zoom.plugin';
+
 export { ToolbarPlugin } from './plugins/ui/toolbar.plugin';
 export type { ToolbarPluginOptions } from './plugins/ui/toolbar.plugin';
 

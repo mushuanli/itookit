@@ -6,7 +6,7 @@ import type {
     FlowEdgeDefinition,
     FlowNodeDefinition,
 } from '@itookit/common';
-import { simpleHash } from '@itookit/common';
+import { DELEGATION_LIMITS, simpleHash } from '@itookit/common';
 import { findCycles } from './graph';
 
 export interface ValidationIssue {
@@ -27,6 +27,9 @@ export function flowRevisionDigest(flow: Omit<FlowRevision, 'digest'>): string {
         parameters: flow.parameters,
         connections: flow.connections,
         defaultConnection: flow.defaultConnection,
+        systemPrompt: flow.systemPrompt,
+        toolIds: flow.toolIds,
+        defaults: flow.defaults,
     }));
 }
 
@@ -39,7 +42,16 @@ export function validateFlowRevision(
     validateEdges(flow.edges, nodes, plugins, issues);
     validateAcyclic(flow.nodes, flow.edges, issues);
     validateConnections(flow.connections, flow.defaultConnection, issues);
+    validateConnectionReferences(flow, issues);
     return deduplicate(issues);
+}
+
+function validateConnectionReferences(flow: FlowRevision, issues: ValidationIssue[]): void {
+    const slots = new Set((flow.connections ?? []).map(connection => connection.name));
+    const value = flow.defaults?.connectionId;
+    if (typeof value === 'string' && value && !slots.has(value)) {
+        issues.push({ code: 'unknown-connection-slot', message: `Flow defaults references unknown connection slot: ${value}` });
+    }
 }
 
 function validateNodes(
@@ -60,8 +72,82 @@ function validateNodes(
                 add(issues, 'invalid-config', `${node.id}: ${error}`, node.id);
             }
         }
+        validateDelegation(node, issues);
+        validateSpawnPatch(node, issues);
+        validateHarnessLimits(node, issues);
     }
     return nodes;
+}
+
+function validateHarnessLimits(node: FlowNodeDefinition, issues: ValidationIssue[]): void {
+    if (node.retry && (!Number.isInteger(node.retry.maxAttempts) || node.retry.maxAttempts < 1
+        || node.retry.maxAttempts > DELEGATION_LIMITS.retryAttempts)) {
+        add(issues, 'invalid-retry', `${node.id}: retry.maxAttempts must be an integer between 1 and ${DELEGATION_LIMITS.retryAttempts}`, String(node.id));
+    }
+    for (const [dimension, limit] of Object.entries(node.budget ?? {})) {
+        if (!Number.isFinite(limit) || limit < 0) add(issues, 'invalid-budget', `${node.id}: budget ${dimension} must be a non-negative number`, String(node.id));
+    }
+}
+
+function validateDelegation(node: FlowNodeDefinition, issues: ValidationIssue[]): void {
+    if (node.plugin !== 'builtin.agent' || !isRecord(node.config)) return;
+    const delegation = isRecord(node.config.delegation) ? node.config.delegation : undefined;
+    if (!delegation) return;
+    if (delegation.enabled !== true) {
+        if (Object.keys(delegation).some(key => key !== 'enabled')) {
+            issues.push({ code: 'delegation-disabled', severity: 'warning', nodeId: String(node.id), message: `${node.id}: delegation is configured but not enabled` });
+        }
+        return;
+    }
+    if (typeof delegation.toolName === 'string' && delegation.toolName && !/^[A-Za-z_][A-Za-z0-9_-]{0,63}$/.test(delegation.toolName)) {
+        add(issues, 'invalid-delegation-tool', `${node.id}: delegation tool name is invalid`, String(node.id));
+    }
+    const fanout = isRecord(delegation.fanout) ? delegation.fanout : {};
+    const limits: Array<[string, unknown, number]> = [
+        ['maxTasks', fanout.maxTasks, DELEGATION_LIMITS.maxTasks],
+        ['maxConcurrency', fanout.maxConcurrency, DELEGATION_LIMITS.maxConcurrency],
+        ['maxDepth', fanout.maxDepth, DELEGATION_LIMITS.maxDepth],
+    ];
+    for (const [name, value, upper] of limits) {
+        if (value !== undefined && (!Number.isInteger(value) || Number(value) < 1 || Number(value) > upper)) {
+            add(issues, 'invalid-delegation-limit', `${node.id}: ${name} must be an integer between 1 and ${upper}`, String(node.id));
+        }
+    }
+    if (typeof fanout.maxConcurrency === 'number' && typeof fanout.maxTasks === 'number' && fanout.maxConcurrency > fanout.maxTasks) {
+        issues.push({ code: 'delegation-concurrency', severity: 'warning', nodeId: String(node.id), message: `${node.id}: maxConcurrency exceeds maxTasks` });
+    }
+    const failure = isRecord(delegation.failure) ? delegation.failure : {};
+    if (failure.maxAttempts !== undefined && (!Number.isInteger(failure.maxAttempts)
+        || Number(failure.maxAttempts) < 1 || Number(failure.maxAttempts) > DELEGATION_LIMITS.retryAttempts)) {
+        add(issues, 'invalid-delegation-retry', `${node.id}: failure.maxAttempts must be an integer between 1 and ${DELEGATION_LIMITS.retryAttempts}`, String(node.id));
+    }
+    const budget = isRecord(delegation.budget) ? delegation.budget : {};
+    for (const field of ['maxTokens', 'timeoutMs']) {
+        const value = budget[field];
+        if (value !== undefined && (!Number.isInteger(value) || Number(value) < 1)) {
+            add(issues, 'invalid-delegation-request-limit', `${node.id}: budget.${field} must be a positive integer`, String(node.id));
+        }
+    }
+    if ('maxCostUsd' in budget) {
+        issues.push({
+            code: 'unsupported-delegation-cost', severity: 'warning', nodeId: String(node.id),
+            message: `${node.id}: budget.maxCostUsd is no longer supported because no runtime cost meter is available`,
+        });
+    }
+}
+
+function validateSpawnPatch(node: FlowNodeDefinition, issues: ValidationIssue[]): void {
+    if (node.plugin !== 'builtin.spawn' || !isRecord(node.config)) return;
+    const spawn = isRecord(node.config.spawn) ? node.config.spawn : undefined;
+    if (!spawn) return;
+    const templates = Array.isArray(spawn.nodes) ? spawn.nodes.filter(isRecord) : [];
+    const ids = new Set(templates.map(template => String(template.id ?? '')).filter(Boolean));
+    if (ids.size !== templates.length) add(issues, 'invalid-spawn-nodes', `${node.id}: spawned node ids must be present and unique`, String(node.id));
+    for (const edge of Array.isArray(spawn.edges) ? spawn.edges.filter(isRecord) : []) {
+        if (!ids.has(String(edge.from ?? '')) || !ids.has(String(edge.to ?? ''))) {
+            add(issues, 'invalid-spawn-edge', `${node.id}: spawned edge references an unknown template node`, String(node.id));
+        }
+    }
 }
 
 function validateEdges(

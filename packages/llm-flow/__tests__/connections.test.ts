@@ -68,6 +68,33 @@ describe('flowToDag connection resolution', () => {
         const spec = await flowToDag(revision([agentNode('a')]));
         expect((spec.nodes[0].config as Record<string, unknown>).connectionId).toBe('conn-default');
     });
+
+    it('applies Flow defaults while preserving explicit node overrides', async () => {
+        const flow = revision([{
+            ...agentNode('a'),
+            config: {
+                temperature: 0.2,
+                systemPrompt: ['node prompt'],
+                toolIds: ['node-tool', 'shared-tool'],
+                skillIds: ['node-skill'],
+            },
+        }]);
+        flow.systemPrompt = ['legacy flow prompt'];
+        flow.toolIds = ['legacy-tool'];
+        flow.defaults = {
+            connectionId: 'premium',
+            temperature: 0.8,
+            systemPrompt: ['flow prompt'],
+            toolIds: ['shared-tool', 'flow-tool'],
+            skillIds: ['flow-skill'],
+        };
+        const config = (await flowToDag(flow)).nodes[0].config as Record<string, unknown>;
+        expect(config.connectionId).toBe('conn-pro');
+        expect(config.temperature).toBe(0.2);
+        expect(config.systemPrompt).toEqual(['legacy flow prompt', 'flow prompt', 'node prompt']);
+        expect(config.toolIds).toEqual(['legacy-tool', 'shared-tool', 'flow-tool', 'node-tool']);
+        expect(config.skillIds).toEqual(['flow-skill', 'node-skill']);
+    });
 });
 
 describe('validateFlowRevision connections', () => {

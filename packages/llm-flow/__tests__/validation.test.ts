@@ -9,7 +9,7 @@ function revision(maxIterations: unknown): FlowRevision {
         name: 'Agent',
         plugin: 'builtin.agent',
         pluginVersion: '1.0.0',
-        config: { prompt: 'hi', approval: 'external', maxIterations },
+        config: { instruction: 'hi', approval: 'external', maxIterations },
         inputs: {},
     };
     return {
@@ -40,5 +40,46 @@ describe('validateFlowRevision schema checks', () => {
         expect(issues.some(issue =>
             issue.code === 'invalid-config' && issue.message.includes('maxIterations must be integer'),
         )).toBe(true);
+    });
+
+    it('accepts a bounded structured delegation', () => {
+        const flow = revision(1);
+        flow.nodes[0].config = {
+            instruction: 'delegate',
+            delegation: {
+                enabled: true,
+                toolName: 'delegate_tasks',
+                template: { contextSource: 'parent', instruction: 'Do one item' },
+                fanout: { maxTasks: 8, maxConcurrency: 4, maxDepth: 1, order: 'parallel' },
+                failure: { policy: 'continue' },
+            },
+        };
+        expect(validateFlowRevision(flow, plugins)).toEqual([]);
+    });
+
+    it('rejects unsafe delegation limits', () => {
+        const flow = revision(1);
+        flow.nodes[0].config = {
+            delegation: { enabled: true, toolName: 'bad tool name', fanout: { maxTasks: 1000, maxDepth: 20 } },
+        };
+        const issues = validateFlowRevision(flow, plugins);
+        expect(issues.some(issue => issue.code === 'invalid-delegation-tool')).toBe(true);
+        expect(issues.filter(issue => issue.code === 'invalid-delegation-limit')).toHaveLength(2);
+    });
+
+    it('rejects invalid request limits and warns about legacy cost configuration', () => {
+        const flow = revision(1);
+        flow.nodes[0].config = {
+            delegation: {
+                enabled: true,
+                failure: { policy: 'retry', maxAttempts: 99 },
+                budget: { maxTokens: 0, timeoutMs: -1, maxCostUsd: 1 },
+            },
+        };
+        const issues = validateFlowRevision(flow, plugins);
+
+        expect(issues.some(issue => issue.code === 'invalid-delegation-retry')).toBe(true);
+        expect(issues.filter(issue => issue.code === 'invalid-delegation-request-limit')).toHaveLength(2);
+        expect(issues.some(issue => issue.code === 'unsupported-delegation-cost' && issue.severity === 'warning')).toBe(true);
     });
 });

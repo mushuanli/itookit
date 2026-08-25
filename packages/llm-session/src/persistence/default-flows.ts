@@ -20,13 +20,13 @@ const parameters: FlowParameter[] = [
     { name: 'max_rounds', type: 'number', default: 2, description: '最多自动改写轮次' },
 ];
 
-function agentNode(id: string, name: string, prompt: string, extra: Record<string, unknown> = {}): FlowNodeDefinition {
+function agentNode(id: string, name: string, instruction: string, extra: Record<string, unknown> = {}): FlowNodeDefinition {
     return {
         id,
         name,
         plugin: 'builtin.agent',
         pluginVersion: '1.0.0',
-        config: { prompt, approval: 'external', maxExchanges: 1, ...extra },
+        config: { instruction, approval: 'external', maxExchanges: 1, ...extra },
         inputs: {},
         capabilities: [],
     };

@@ -15,6 +15,10 @@ export interface FlowsEditorDeps {
     onRunFlow?: (flowId: string, revision: number) => void;
     /** Global LLM connections available to bind flow-level connection slots to. */
     listConnections?: () => Promise<Array<{ id: string; name: string }>>;
+    listAgents?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
+    listSystemPrompts?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
+    listTools?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
+    listSkills?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
 }
 
 export class FlowsEditor extends IEditor {
@@ -35,6 +39,10 @@ export class FlowsEditor extends IEditor {
             commands: this.deps.commands,
             onSelectFlow: (flowId, revision) => void this.handleRunFlow(flowId, revision),
             listConnections: this.deps.listConnections,
+            listAgents: this.deps.listAgents,
+            listSystemPrompts: this.deps.listSystemPrompts,
+            listTools: this.deps.listTools,
+            listSkills: this.deps.listSkills,
         });
         await this.workbench.initialize();
         // Open the sidebar-selected .flow file if any; otherwise stay on the empty

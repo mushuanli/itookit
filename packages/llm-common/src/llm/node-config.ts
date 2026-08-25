@@ -7,6 +7,8 @@ import type { ModelTier } from './connection';
 
 /** How an LLM node assembles its conversation history. */
 export type HistoryPolicy = 'inherit' | 'none' | 'upstream';
+/** How inherited and node-local system prompts are composed. */
+export type SystemPromptPolicy = 'inherit' | 'replace' | 'none';
 
 /** A quick prompt preset (shortcut shown in the chat input dropdown). */
 export interface PromptPreset {
@@ -61,14 +63,20 @@ export interface LlmNodeConfig {
     thinking?: boolean;
     reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     maxTokens?: number;
+    stream?: boolean;
+    webSearch?: boolean;
 
     // ── Execution policy ──
     maxExchanges?: number;
+    /** Per LLM request timeout. */
+    timeoutMs?: number;
     approval?: 'none' | 'external' | 'all';
     historyPolicy?: HistoryPolicy;
+    systemPromptPolicy?: SystemPromptPolicy;
     persistOutput?: boolean;
     recordToolCalls?: boolean;
     recordThinking?: boolean;
+    workingDirectory?: string;
 
     // ── Memory (long-lived Agents only) ──
     memoryPolicy?: MemoryPolicy;

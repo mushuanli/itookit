@@ -167,6 +167,9 @@ function validateDraft(draft: FlowDraft, plugins: DagPluginCatalog) {
         edges: draft.edges,
         connections: draft.connections,
         defaultConnection: draft.defaultConnection,
+        systemPrompt: draft.systemPrompt,
+        toolIds: draft.toolIds,
+        defaults: draft.defaults,
         createdAt: draft.updatedAt,
         digest: '',
     };

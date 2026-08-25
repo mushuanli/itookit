@@ -5,6 +5,7 @@ import type {
     TokenUsage,
     ToolCall,
 } from '@itookit/common';
+import { DEFAULT_EFFECT_TIMEOUT_MS } from '@itookit/common';
 import type {
     JsonValue,
     KernelAction,
@@ -100,7 +101,7 @@ export function llmEffect(
             version: '1',
             request: { resourceHandleId: handleId, connectionId: input.connectionId, request },
             idempotencyKey: `${input.roundId}:llm:${messages.length}`,
-            timeoutMs: 300_000,
+            timeoutMs: input.timeoutMs ?? DEFAULT_EFFECT_TIMEOUT_MS,
             grants: [{ handleId, right: 'execute' }],
         },
     };
@@ -125,7 +126,7 @@ export function toolEffect(
                 ...(cwd ? { cwd } : {}),
             },
             idempotencyKey: `${roundId}:tool:${call.id}`,
-            timeoutMs: 300_000,
+            timeoutMs: DEFAULT_EFFECT_TIMEOUT_MS,
             grants: [{ handleId, right: 'execute' }],
         },
     };
@@ -193,6 +194,7 @@ export function applyDependencyMessages(
     input: DurableProgramInput,
     outputs: Record<string, JsonValue>,
 ): ChatMessage[] {
+    if (input.includeDependencyOutputs === false) return structuredClone(input.messages);
     if (!Object.keys(outputs).length) return structuredClone(input.messages);
     const content = Object.entries(outputs).map(([key, value]) => `${key}: ${stringify(value)}`).join('\n');
     return [...structuredClone(input.messages), { role: 'user', content }];

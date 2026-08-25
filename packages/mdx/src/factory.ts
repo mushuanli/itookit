@@ -25,6 +25,7 @@ import { MemoryPlugin } from './plugins/cloze/memory.plugin';
 import { TablePlugin } from './plugins/interactions/table.plugin';
 import { TaskListPlugin } from './plugins/interactions/task-list.plugin';
 import { CodeBlockControlsPlugin } from './plugins/interactions/codeblock-controls.plugin';
+import { ZoomPlugin } from './plugins/interactions/zoom.plugin';
 import { ClipboardPlugin } from './plugins/interactions/clipboard.plugin';
 import { UploadPlugin } from './plugins/interactions/upload.plugin';
 import { SourceSyncPlugin } from './plugins/interactions/source-jump.plugin';
@@ -55,6 +56,7 @@ const PLUGIN_DEFINITIONS: Array<[string, new (...args: any[]) => MDxPlugin, { pr
   ['autocomplete:tag',         TagPlugin,              { priority: 53 }],
   ['autocomplete:mention',     MentionPlugin,          { priority: 54 }],
   ['interaction:clipboard',    ClipboardPlugin,        { priority: 55 }],
+  ['interaction:zoom',         ZoomPlugin,             { priority: 56 }],
   ['interaction:upload',       UploadPlugin,           { priority: 60 }],
   ['interaction:source-sync',  SourceSyncPlugin,       { priority: 60 }],
   ['plantuml',                 PlantUMLPlugin,         { priority: 70 }],
@@ -101,6 +103,7 @@ const DEFAULT_PLUGINS: string[] = [
   'svg',
   'codeblock-controls',
   'task-list',
+  'interaction:zoom',
 ];
 
 // === 工具函数 ===

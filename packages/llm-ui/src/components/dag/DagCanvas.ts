@@ -3,8 +3,11 @@ import { escapeHTML } from '@itookit/common';
 
 export interface DagCanvasOptions {
     onSelectNode: (nodeId: FlowNodeId) => void;
+    onSelectEdge?: (edgeId: string) => void;
+    onSelectCanvas?: () => void;
     onMoveNode: (nodeId: FlowNodeId, position: { x: number; y: number }) => void;
     onConnect: (from: FlowNodeDefinition, to: FlowNodeDefinition) => void;
+    onEditNode?: (nodeId: FlowNodeId) => void;
 }
 
 export class DagCanvas {
@@ -19,6 +22,7 @@ export class DagCanvas {
         draft: FlowDraft,
         selectedId?: FlowNodeId,
         manifests?: ReadonlyMap<string, DagPluginManifest>,
+        selectedEdgeId?: string,
     ): void {
         const positions = draft.layout.nodes ?? {};
         const zoom = draft.layout.viewport?.zoom ?? 1;
@@ -28,7 +32,9 @@ export class DagCanvas {
                 const from = positions[edge.from] ?? { x: 40, y: 40 };
                 const to = positions[edge.to] ?? { x: 40, y: 40 };
                 const marker = edge.kind === 'control' ? 'dag-arrow-control' : 'dag-arrow-data';
-                return `<path data-edge-id="${escapeHTML(String(edge.id))}" d="${edgePath(from, to)}" class="is-${edge.kind}" marker-end="url(#${marker})"></path>`;
+                const id = escapeHTML(String(edge.id));
+                const path = edgePath(from, to);
+                return `<path data-edge-id="${id}" d="${path}" class="dag-edge-hit"></path><path data-edge-id="${id}" d="${path}" class="is-${edge.kind}${String(edge.id) === selectedEdgeId ? ' is-selected' : ''}" marker-end="url(#${marker})"></path>`;
             }).join('')}</svg>
             ${draft.nodes.map(node => renderNode(node, positions[node.id], node.id === selectedId, manifests?.get(node.plugin))).join('')}
         </div>`;
@@ -43,10 +49,32 @@ export class DagCanvas {
     }
 
     private bind(draft: FlowDraft): void {
+        this.root.addEventListener('click', event => {
+            const target = event.target as HTMLElement;
+            if (target.closest('[data-flow-node], [data-edge-id]')) return;
+            this.pendingSource = null;
+            this.root.classList.remove('is-connecting');
+            this.options.onSelectCanvas?.();
+        });
+        this.root.querySelectorAll<SVGPathElement>('[data-edge-id]').forEach(path => {
+            path.addEventListener('click', event => {
+                event.stopPropagation();
+                this.pendingSource = null;
+                this.root.classList.remove('is-connecting');
+                this.options.onSelectEdge?.(path.dataset.edgeId!);
+            });
+        });
         this.root.querySelectorAll<HTMLElement>('[data-flow-node]').forEach(element => {
             const nodeId = element.dataset.flowNode as FlowNodeId;
             element.addEventListener('click', event => this.handleNodeClick(event, draft, nodeId));
+            element.addEventListener('dblclick', event => {
+                event.stopPropagation();
+                this.options.onEditNode?.(nodeId);
+            });
             element.addEventListener('pointerdown', event => this.startDrag(event, nodeId, element));
+            element.querySelector<HTMLElement>('[data-port="output"]')?.addEventListener('pointerdown', event => {
+                this.beginConnectionDrag(event, draft, nodeId);
+            });
         });
     }
 
@@ -56,32 +84,62 @@ export class DagCanvas {
         if (!node) return;
         if ((event.target as HTMLElement).closest('[data-port="output"]')) {
             this.pendingSource = nodeId;
+            this.root.classList.add('is-connecting');
             return;
         }
         if ((event.target as HTMLElement).closest('[data-port="input"]') && this.pendingSource) {
             const source = draft.nodes.find(item => item.id === this.pendingSource);
             this.pendingSource = null;
+            this.root.classList.remove('is-connecting');
             if (source) this.options.onConnect(source, node);
             return;
         }
         this.options.onSelectNode(nodeId);
     }
 
+    private beginConnectionDrag(event: PointerEvent, draft: FlowDraft, sourceId: FlowNodeId): void {
+        event.stopPropagation();
+        this.pendingSource = sourceId;
+        this.root.classList.add('is-connecting');
+        const finish = (next: PointerEvent) => {
+            document.removeEventListener('pointerup', finish);
+            const input = (next.target as HTMLElement | null)?.closest<HTMLElement>('[data-flow-node] [data-port="input"]');
+            if (!input) return; // Keep click-to-connect mode active as a fallback.
+            const targetElement = input.closest<HTMLElement>('[data-flow-node]');
+            const source = draft.nodes.find(node => node.id === sourceId);
+            const target = draft.nodes.find(node => node.id === targetElement?.dataset.flowNode);
+            this.pendingSource = null;
+            this.root.classList.remove('is-connecting');
+            if (source && target) this.options.onConnect(source, target);
+        };
+        document.addEventListener('pointerup', finish);
+    }
+
     private startDrag(event: PointerEvent, nodeId: FlowNodeId, element: HTMLElement): void {
         if ((event.target as HTMLElement).closest('[data-port]')) return;
         const start = { x: event.clientX, y: event.clientY };
+        let moved = false;
         const position = {
             x: Number.parseFloat(element.style.left) || 0,
             y: Number.parseFloat(element.style.top) || 0,
         };
         element.setPointerCapture(event.pointerId);
         const move = (next: PointerEvent) => {
-            element.style.left = `${position.x + next.clientX - start.x}px`;
-            element.style.top = `${position.y + next.clientY - start.y}px`;
+            const deltaX = next.clientX - start.x;
+            const deltaY = next.clientY - start.y;
+            if (!moved && Math.hypot(deltaX, deltaY) < 4) return;
+            moved = true;
+            element.classList.add('is-dragging');
+            element.style.left = `${position.x + deltaX}px`;
+            element.style.top = `${position.y + deltaY}px`;
         };
         element.addEventListener('pointermove', move);
         element.addEventListener('pointerup', next => {
             element.removeEventListener('pointermove', move);
+            element.classList.remove('is-dragging');
+            // A click must not rebuild the canvas before the browser dispatches
+            // its click event; only commit an actual drag.
+            if (!moved) return;
             this.options.onMoveNode(nodeId, {
                 x: position.x + next.clientX - start.x,
                 y: position.y + next.clientY - start.y,
@@ -120,10 +178,13 @@ function nodeBadges(node: FlowNodeDefinition): string {
     const history = config.historyPolicy === 'none' || config.historyPolicy === 'upstream'
         ? config.historyPolicy : 'inherit';
     badges.push(`<span class="dag-badge dag-badge--history dag-badge--history-${history}" title="History policy">H:${history}</span>`);
+    if (config.systemPromptPolicy === 'replace' || config.systemPromptPolicy === 'none') {
+        badges.push(`<span class="dag-badge" title="System Prompt policy">SP:${config.systemPromptPolicy}</span>`);
+    }
     if (config.persistOutput === true) {
         badges.push(`<span class="dag-badge dag-badge--persist" title="Persist output">P</span>`);
     }
-    if (config.subtasks) {
+    if ((isRecord(config.delegation) && config.delegation.enabled === true) || config.subtasks) {
         badges.push(`<span class="dag-badge dag-badge--subtask" title="Subtask fan-out">子任务</span>`);
     }
     return badges.length ? `<div class="dag-node__badges">${badges.join('')}</div>` : '';
