@@ -30,6 +30,7 @@ export function flowRevisionDigest(flow: Omit<FlowRevision, 'digest'>): string {
         systemPrompt: flow.systemPrompt,
         toolIds: flow.toolIds,
         defaults: flow.defaults,
+        runPolicy: flow.runPolicy,
     }));
 }
 
@@ -39,11 +40,37 @@ export function validateFlowRevision(
 ): ValidationIssue[] {
     const issues: ValidationIssue[] = [];
     const nodes = validateNodes(flow.nodes, plugins, issues);
+    validateCompensations(flow.nodes, nodes, issues);
     validateEdges(flow.edges, nodes, plugins, issues);
     validateAcyclic(flow.nodes, flow.edges, issues);
     validateConnections(flow.connections, flow.defaultConnection, issues);
     validateConnectionReferences(flow, issues);
+    validateRunPolicy(flow, issues);
     return deduplicate(issues);
+}
+
+function validateCompensations(
+    definitions: FlowNodeDefinition[],
+    nodes: Map<string, FlowNodeDefinition>,
+    issues: ValidationIssue[],
+): void {
+    for (const node of definitions) {
+        if (!node.compensate) continue;
+        if (node.compensate === node.id || !nodes.has(String(node.compensate))) {
+            add(issues, 'invalid-compensation', `${node.id}: compensation node must reference another existing node`, String(node.id));
+        }
+    }
+}
+
+function validateRunPolicy(flow: FlowRevision, issues: ValidationIssue[]): void {
+    const policy = flow.runPolicy;
+    if (!policy) return;
+    for (const field of ['maxNodes', 'maxConcurrency', 'timeoutMs', 'maxTokens'] as const) {
+        const value = policy[field];
+        if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+            issues.push({ code: 'invalid-run-policy', message: `Flow runPolicy.${field} must be a positive integer` });
+        }
+    }
 }
 
 function validateConnectionReferences(flow: FlowRevision, issues: ValidationIssue[]): void {
@@ -116,6 +143,20 @@ function validateDelegation(node: FlowNodeDefinition, issues: ValidationIssue[])
     if (typeof fanout.maxConcurrency === 'number' && typeof fanout.maxTasks === 'number' && fanout.maxConcurrency > fanout.maxTasks) {
         issues.push({ code: 'delegation-concurrency', severity: 'warning', nodeId: String(node.id), message: `${node.id}: maxConcurrency exceeds maxTasks` });
     }
+    const execution = isRecord(delegation.execution) ? delegation.execution : {};
+    const wait = isRecord(delegation.wait) ? delegation.wait : {};
+    if (wait.quorum !== undefined && (!Number.isInteger(wait.quorum) || Number(wait.quorum) < 1)) {
+        add(issues, 'invalid-delegation-quorum', `${node.id}: wait.quorum must be a positive integer`, String(node.id));
+    }
+    if (wait.mode === 'quorum' && typeof fanout.maxTasks === 'number' && typeof wait.quorum === 'number' && wait.quorum > fanout.maxTasks) {
+        add(issues, 'invalid-delegation-quorum', `${node.id}: wait.quorum cannot exceed fanout.maxTasks`, String(node.id));
+    }
+    if (wait.timeoutMs !== undefined && (!Number.isInteger(wait.timeoutMs) || Number(wait.timeoutMs) < 1)) {
+        add(issues, 'invalid-delegation-timeout', `${node.id}: wait.timeoutMs must be a positive integer`, String(node.id));
+    }
+    if (execution.mode === 'detached' && wait.timeoutMs === undefined) {
+        add(issues, 'unbounded-detached-delegation', `${node.id}: detached delegation requires wait.timeoutMs so background work remains bounded`, String(node.id));
+    }
     const failure = isRecord(delegation.failure) ? delegation.failure : {};
     if (failure.maxAttempts !== undefined && (!Number.isInteger(failure.maxAttempts)
         || Number(failure.maxAttempts) < 1 || Number(failure.maxAttempts) > DELEGATION_LIMITS.retryAttempts)) {
@@ -142,9 +183,13 @@ function validateSpawnPatch(node: FlowNodeDefinition, issues: ValidationIssue[])
     if (!spawn) return;
     const templates = Array.isArray(spawn.nodes) ? spawn.nodes.filter(isRecord) : [];
     const ids = new Set(templates.map(template => String(template.id ?? '')).filter(Boolean));
+    const validEndpoint = (value: unknown): boolean => {
+        const endpoint = String(value ?? '');
+        return ids.has(endpoint) || endpoint === '$parent' || endpoint.startsWith('$upstream:');
+    };
     if (ids.size !== templates.length) add(issues, 'invalid-spawn-nodes', `${node.id}: spawned node ids must be present and unique`, String(node.id));
     for (const edge of Array.isArray(spawn.edges) ? spawn.edges.filter(isRecord) : []) {
-        if (!ids.has(String(edge.from ?? '')) || !ids.has(String(edge.to ?? ''))) {
+        if (!validEndpoint(edge.from) || !validEndpoint(edge.to)) {
             add(issues, 'invalid-spawn-edge', `${node.id}: spawned edge references an unknown template node`, String(node.id));
         }
     }

@@ -5,9 +5,10 @@ import type {
     FlowRevision,
     ICommandBus,
     JsonValue,
+    FlowRunGoal,
     ToolDefinition,
 } from '@itookit/common';
-import type { Kernel, TaskSnapshot } from '@itookit/durable-kernel';
+import type { Kernel, TaskRecord, TaskSnapshot } from '@itookit/durable-kernel';
 import type { FlowDefinitionStore } from '../flow-definition-store';
 import { flowToDag } from './to-dag';
 import { hasValidationErrors, validateFlowRevision } from './validation';
@@ -30,6 +31,10 @@ export interface DurableFlowSnapshot {
     nodes: Array<{ nodeId: string; snapshot: TaskSnapshot }>;
     /** Per-node execution instance count (loop nodes exceed 1). */
     iterations: Record<string, number>;
+    taskTree: TaskRecord[];
+    detachedNodes: string[];
+    goal?: FlowRunGoal;
+    usage: FlowExecutionHandle['usage'];
 }
 
 export class DagCommandService {
@@ -42,8 +47,8 @@ export class DagCommandService {
         bus.register(FlowCommand.Presentations, async () =>
             loadPresentations(this.options.plugins));
         bus.register(FlowCommand.RunStart, async args => {
-            const input = args as { sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue> };
-            return this.start(input.sessionId, input.flow, input.parameters);
+            const input = args as { sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue>; goal?: FlowRunGoal };
+            return this.start(input.sessionId, input.flow, input.parameters, input.goal);
         });
         bus.register(FlowCommand.RunGet, async args => this.snapshot(String((args as { taskId: string }).taskId)));
         bus.register(FlowCommand.RunCancel, async args => this.cancel(String((args as { taskId: string }).taskId)));
@@ -51,12 +56,34 @@ export class DagCommandService {
             const input = args as { taskId: string; requestId: string; value: unknown };
             return this.respond(String(input.taskId), String(input.requestId), input.value);
         });
+        bus.register(FlowCommand.RunSignal, async args => {
+            const input = args as { taskId: string; nodeId?: string; targetTaskId?: string; signal: { type: string; payload?: unknown } };
+            return this.signal(input);
+        });
+        bus.register(FlowCommand.RunTaskCancel, async args => {
+            const input = args as { taskId: string; targetTaskId: string; reason?: string };
+            const handle = this.requireHandle(String(input.taskId));
+            if (!handle.taskIds.has(input.targetTaskId)) throw new Error(`Task is outside this run: ${input.targetTaskId}`);
+            const session = await this.options.kernel.openSession(handle.sessionId);
+            await (await session.attachTask(input.targetTaskId)).cancel(input.reason ?? 'Cancelled from DAG run console');
+            return { taskId: input.taskId, targetTaskId: input.targetTaskId, cancelled: true };
+        });
+        bus.register(FlowCommand.RunGoalUpdate, async args => {
+            const input = args as { taskId: string; goal: Partial<FlowRunGoal> };
+            const handle = this.requireHandle(String(input.taskId));
+            handle.goal = { ...(handle.goal ?? { objective: '' }), ...input.goal };
+            const session = await this.options.kernel.openSession(handle.sessionId);
+            if (handle.goal.status === 'paused') await session.suspend();
+            if (handle.goal.status === 'active') await session.resume();
+            return { taskId: input.taskId, goal: handle.goal };
+        });
     }
 
     private async start(
         sessionId: string,
         flow: FlowRevision,
         parameters?: Record<string, JsonValue>,
+        goal?: FlowRunGoal,
     ) {
         if (!sessionId) throw new Error('DAG run requires sessionId');
         const issues = [
@@ -64,21 +91,43 @@ export class DagCommandService {
             ...validateFlowParameters(flow.parameters, parameters),
         ];
         if (hasValidationErrors(issues)) throw new Error(issues.map(issue => issue.message).join('; '));
+        const compiled = await flowToDag(flow, undefined, undefined, (id, revision) =>
+            this.options.flowStore.loadRevision(id, revision));
         const handle = await new DurableFlowExecutor(this.options)
-            .submit(sessionId, await flowToDag(flow), parameters);
+            .submit(sessionId, { ...compiled, ...(goal ? { goal } : {}) }, parameters);
         this.handles.set(handle.root.id, handle);
         return { taskId: handle.root.id };
     }
 
     private async snapshot(taskId: string): Promise<DurableFlowSnapshot> {
         const handle = this.requireHandle(taskId);
+        const session = await this.options.kernel.openSession(handle.sessionId);
         return {
             root: await handle.root.status(),
             nodes: await Promise.all([...handle.nodes].map(async ([nodeId, task]) => ({
                 nodeId, snapshot: await task.status(),
             }))),
             iterations: Object.fromEntries(handle.iterations),
+            taskTree: (await session.listTasks()).filter(task => handle.taskIds.has(task.id)),
+            detachedNodes: [...handle.detachedNodes],
+            goal: handle.goal,
+            usage: handle.usage,
         };
+    }
+
+    private async signal(input: {
+        taskId: string;
+        nodeId?: string;
+        targetTaskId?: string;
+        signal: { type: string; payload?: unknown };
+    }) {
+        const handle = this.requireHandle(String(input.taskId));
+        const target = input.targetTaskId
+            ? await (await this.options.kernel.openSession(handle.sessionId)).attachTask(input.targetTaskId)
+            : input.nodeId ? handle.nodes.get(input.nodeId) : undefined;
+        if (!target) throw new Error('A valid nodeId or targetTaskId is required');
+        await target.signal(input.signal);
+        return { taskId: input.taskId, targetTaskId: target.id, signalled: true };
     }
 
     private async respond(taskId: string, requestId: string, value: unknown) {
@@ -170,6 +219,8 @@ function validateDraft(draft: FlowDraft, plugins: DagPluginCatalog) {
         systemPrompt: draft.systemPrompt,
         toolIds: draft.toolIds,
         defaults: draft.defaults,
+        parameters: draft.parameters,
+        runPolicy: draft.runPolicy,
         createdAt: draft.updatedAt,
         digest: '',
     };

@@ -61,7 +61,10 @@ function collect(state: DurableAgentState, event: TaskInputEvent): Decision<Dura
     if (!state.capabilities || !dependenciesReady(state.input.dependencyBindings ?? [], state.resolvedDependencyIds)) {
         return { state, next: waitForInput(state) };
     }
-    state.messages = applyDependencyMessages(state.input, state.dependencyOutputs);
+    state.messages = compactMessages(
+        applyDependencyMessages(state.input, state.dependencyOutputs),
+        state.input.contextCompaction,
+    );
     return requestLlm(state);
 }
 
@@ -89,7 +92,11 @@ function handleLlm(state: DurableAgentState, event: TaskInputEvent): Decision<Du
     state.usage = addUsage(state.usage, value.usage);
     const calls = toolCalls(value);
     const actions = responseEvents(state.input, state.exchanges);
-    if (!calls.length) return complete(state, message, value.choices[0].finish_reason, actions);
+    if (!calls.length) {
+        const issue = outputValidationIssue(state.input, message.content);
+        if (issue) return handleInvalidOutput(state, issue, actions);
+        return complete(state, message, value.choices[0].finish_reason, actions);
+    }
     // Subtask delegation: a subtask tool call declares sub-task payloads and
     // completes the node without executing the tool (fan-out happens upstream).
     const subtaskCall = state.input.subtaskTool
@@ -207,12 +214,101 @@ function complete(
     };
 }
 
+function handleInvalidOutput(
+    state: DurableAgentState,
+    issue: string,
+    actions: KernelAction[],
+): Decision<DurableAgentState, DurableAgentOutput> {
+    const policy = state.input.outputValidation;
+    if (policy?.onInvalid === 'continue') {
+        return complete(state, state.messages[state.messages.length - 1], 'stop', actions);
+    }
+    const retries = Math.max(0, Math.floor(policy?.retries ?? (policy?.onInvalid === 'repair' ? 1 : 0)));
+    if (policy?.onInvalid === 'repair' && state.outputValidationAttempts < retries) {
+        state.outputValidationAttempts++;
+        state.messages.push({
+            role: 'user',
+            content: `The previous response did not satisfy the required output contract: ${issue}. Return only a corrected response.`,
+        });
+        return withActions(requestLlm(state), actions);
+    }
+    return {
+        state,
+        actions,
+        next: { type: 'fail', error: { message: `Invalid structured output: ${issue}`, code: 'INVALID_OUTPUT' } },
+    };
+}
+
+function outputValidationIssue(input: DurableAgentInput, content: unknown): string | undefined {
+    const format = input.responseFormat;
+    if (!format || format.type === 'text') return undefined;
+    if (typeof content !== 'string') return 'response content must be text for structured output';
+    let value: unknown;
+    try { value = JSON.parse(content); }
+    catch { return 'response is not valid JSON'; }
+    if (format.type === 'json_object') {
+        return isRecord(value) ? undefined : 'response must be a JSON object';
+    }
+    return validateSchemaValue(value, format.json_schema.schema, '$');
+}
+
+function validateSchemaValue(value: unknown, schema: Record<string, unknown>, path: string): string | undefined {
+    const type = schema.type;
+    if (typeof type === 'string' && !matchesType(value, type)) return `${path} must be ${type}`;
+    if (Array.isArray(schema.enum) && !schema.enum.some(item => JSON.stringify(item) === JSON.stringify(value))) {
+        return `${path} is not one of the allowed values`;
+    }
+    if (isRecord(value)) {
+        const required = Array.isArray(schema.required) ? schema.required.map(String) : [];
+        for (const key of required) if (!(key in value)) return `${path}.${key} is required`;
+        const properties = isRecord(schema.properties) ? schema.properties : {};
+        for (const [key, child] of Object.entries(properties)) {
+            if (key in value && isRecord(child)) {
+                const issue = validateSchemaValue(value[key], child, `${path}.${key}`);
+                if (issue) return issue;
+            }
+        }
+    }
+    if (Array.isArray(value) && isRecord(schema.items)) {
+        for (let index = 0; index < value.length; index++) {
+            const issue = validateSchemaValue(value[index], schema.items, `${path}[${index}]`);
+            if (issue) return issue;
+        }
+    }
+    return undefined;
+}
+
+function matchesType(value: unknown, type: string): boolean {
+    if (type === 'object') return isRecord(value);
+    if (type === 'array') return Array.isArray(value);
+    if (type === 'null') return value === null;
+    if (type === 'integer') return Number.isInteger(value);
+    if (type === 'number') return typeof value === 'number' && Number.isFinite(value);
+    return typeof value === type;
+}
+
 function initialState(input: DurableAgentInput): DurableAgentState {
     return {
         input: clone(input), phase: 'collecting', messages: [], dependencyOutputs: {},
         resolvedDependencyIds: [],
-        usage: {}, exchanges: 0, pendingCalls: [], callIndex: 0,
+        usage: {}, exchanges: 0, pendingCalls: [], callIndex: 0, outputValidationAttempts: 0,
     };
+}
+
+function compactMessages(
+    messages: ChatMessage[],
+    policy: DurableAgentInput['contextCompaction'],
+): ChatMessage[] {
+    if (!policy || messages.length <= policy.maxMessages) return messages;
+    const maxMessages = Math.max(2, Math.floor(policy.maxMessages));
+    const keepRecent = Math.min(maxMessages - 1, Math.max(1, Math.floor(policy.keepRecent ?? Math.ceil(maxMessages / 2))));
+    const system = messages.filter(message => message.role === 'system');
+    const recent = messages.slice(-keepRecent);
+    const selected = [...system.slice(0, Math.max(0, maxMessages - keepRecent - 1)), ...recent];
+    const omitted = Math.max(0, messages.length - selected.length);
+    return omitted > 0
+        ? [{ role: 'system', content: `[Context compacted: ${omitted} earlier messages omitted; durable dependency outputs remain available.]` }, ...selected]
+        : selected;
 }
 
 function waitForInput(state: DurableAgentState): Decision<DurableAgentState, DurableAgentOutput>['next'] {
@@ -267,6 +363,9 @@ function fail(
 function callInfo(call: ToolCall) { return { toolId: call.id, name: toolName(call), input: toolArguments(call) }; }
 function clone<T>(value: T): T { return structuredClone(value); }
 function jsonValue(value: unknown): JsonValue { return JSON.parse(JSON.stringify(value ?? null)) as JsonValue; }
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 function validate(input: DurableAgentInput): void {
     if (!input.sessionId || !input.roundId || !input.connectionId) {

@@ -123,12 +123,14 @@ export class DagDraftController {
         defaultConnection?: string;
         parameters?: FlowParameter[];
         defaults?: FlowDefaults;
+        runPolicy?: import('@itookit/common').FlowRunPolicy;
     }): void {
         this.change(draft => {
             if (settings.connections) draft.connections = clone(settings.connections);
             if ('defaultConnection' in settings) draft.defaultConnection = settings.defaultConnection;
             if (settings.parameters) draft.parameters = clone(settings.parameters);
             if (settings.defaults !== undefined) draft.defaults = clone(settings.defaults);
+            if (settings.runPolicy !== undefined) draft.runPolicy = clone(settings.runPolicy);
         });
     }
 

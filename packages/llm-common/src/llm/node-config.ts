@@ -4,6 +4,7 @@
 // skills, connection) by id, so editing an entity updates every referrer.
 
 import type { ModelTier } from './connection';
+import type { ResponseFormat } from './completion';
 
 /** How an LLM node assembles its conversation history. */
 export type HistoryPolicy = 'inherit' | 'none' | 'upstream';
@@ -33,6 +34,20 @@ export interface MemoryPolicy {
     readScopes: string[];
     writeScopes: string[];
     retrievalLimit?: number;
+}
+
+/** Runtime handling when a model response does not satisfy responseFormat. */
+export interface OutputValidationPolicy {
+    /** Additional repair requests after the first invalid response. */
+    retries?: number;
+    onInvalid?: 'fail' | 'repair' | 'continue';
+}
+
+export interface ContextCompactionPolicy {
+    /** Start compacting when assembled context exceeds this message count. */
+    maxMessages: number;
+    /** Preserve this many most-recent messages verbatim. */
+    keepRecent?: number;
 }
 
 /**
@@ -65,6 +80,10 @@ export interface LlmNodeConfig {
     maxTokens?: number;
     stream?: boolean;
     webSearch?: boolean;
+    /** Provider-independent structured response contract. */
+    responseFormat?: ResponseFormat;
+    outputValidation?: OutputValidationPolicy;
+    contextCompaction?: ContextCompactionPolicy;
 
     // ── Execution policy ──
     maxExchanges?: number;

@@ -18,6 +18,7 @@ import type {
     SharedStateEntry,
     SharedStateRevision,
     SharedStateWriteOptions,
+    TaskBoardItem,
     TaskHandle,
     TaskSignal,
     TaskSpec,
@@ -32,6 +33,14 @@ export class DefaultSessionHandle implements SessionHandle {
 
     submit<I, O = unknown>(spec: TaskSpec<I>): Promise<TaskHandle<O>> {
         return this.kernel.submit<I, O>(this.id, spec);
+    }
+
+    attachTask<O = unknown>(taskId: string): Promise<TaskHandle<O>> {
+        return this.kernel.attachTask<O>(this.id, taskId);
+    }
+
+    listTasks(): Promise<import('../domain/types').TaskRecord[]> {
+        return this.kernel.listSessionTasks(this.id);
     }
 
     signal(taskId: string, signal: TaskSignal): Promise<void> {
@@ -66,6 +75,75 @@ export class DefaultSessionHandle implements SessionHandle {
 
     sharedHistory<T extends JsonValue>(key: string): Promise<SharedStateRevision<T>[]> {
         return this.kernel.sharedHistory(this.id, key);
+    }
+
+    async listTaskBoard(): Promise<TaskBoardItem[]> {
+        const entries = await this.listShared('task-board/');
+        return entries.map(entry => entry.value as unknown as TaskBoardItem)
+            .sort((left, right) => left.createdAt - right.createdAt);
+    }
+
+    async createTaskBoardItem(
+        input: Pick<TaskBoardItem, 'title' | 'description' | 'dependencies'> & { id?: string },
+    ): Promise<TaskBoardItem> {
+        const now = Date.now();
+        const id = input.id ?? `${now}-${Math.random().toString(36).slice(2, 10)}`;
+        const item: TaskBoardItem = {
+            id, title: input.title, status: 'open', createdAt: now, updatedAt: now,
+            ...(input.description ? { description: input.description } : {}),
+            ...(input.dependencies?.length ? { dependencies: [...input.dependencies] } : {}),
+        };
+        await this.setShared(`task-board/${id}`, item as unknown as JsonValue, { expectedVersion: null });
+        return item;
+    }
+
+    async claimTaskBoardItem(id: string, assigneeTaskId: string, options?: { leaseMs?: number }): Promise<TaskBoardItem> {
+        const key = `task-board/${id}`;
+        const entry = await this.getShared(key);
+        if (!entry) throw new Error(`Task board item not found: ${id}`);
+        const current = entry.value as unknown as TaskBoardItem;
+        const expired = current.status === 'claimed' && current.leaseUntil !== undefined && current.leaseUntil <= Date.now();
+        if (current.status !== 'open' && !expired) throw new Error(`Task board item ${id} is already ${current.status}`);
+        const dependencies = new Set(current.dependencies ?? []);
+        const items = await this.listTaskBoard();
+        if ([...dependencies].some(dependency => items.find(item => item.id === dependency)?.status !== 'completed')) {
+            throw new Error(`Task board item ${id} has incomplete dependencies`);
+        }
+        const now = Date.now();
+        const leaseMs = positiveLease(options?.leaseMs);
+        const next = { ...current, status: 'claimed' as const, assigneeTaskId, leaseUntil: now + leaseMs, updatedAt: now };
+        await this.setShared(key, next as unknown as JsonValue, { expectedVersion: entry.version, taskId: assigneeTaskId });
+        return next;
+    }
+
+    async renewTaskBoardLease(id: string, assigneeTaskId: string, leaseMs?: number): Promise<TaskBoardItem> {
+        const key = `task-board/${id}`;
+        const entry = await this.getShared(key);
+        if (!entry) throw new Error(`Task board item not found: ${id}`);
+        const current = entry.value as unknown as TaskBoardItem;
+        if (current.status !== 'claimed' || current.assigneeTaskId !== assigneeTaskId) {
+            throw new Error(`Task board item ${id} is not claimed by ${assigneeTaskId}`);
+        }
+        const next = { ...current, leaseUntil: Date.now() + positiveLease(leaseMs), updatedAt: Date.now() };
+        await this.setShared(key, next as unknown as JsonValue, { expectedVersion: entry.version, taskId: assigneeTaskId });
+        return next;
+    }
+
+    async completeTaskBoardItem(id: string, result?: JsonValue, failed = false): Promise<TaskBoardItem> {
+        const key = `task-board/${id}`;
+        const entry = await this.getShared(key);
+        if (!entry) throw new Error(`Task board item not found: ${id}`);
+        const current = entry.value as unknown as TaskBoardItem;
+        if (current.status !== 'claimed') throw new Error(`Task board item ${id} is not claimed`);
+        if (current.leaseUntil !== undefined && current.leaseUntil <= Date.now()) {
+            throw new Error(`Task board item ${id} claim lease expired`);
+        }
+        const next: TaskBoardItem = {
+            ...current, status: failed ? 'failed' : 'completed', updatedAt: Date.now(),
+            ...(result !== undefined ? { result } : {}),
+        };
+        await this.setShared(key, next as unknown as JsonValue, { expectedVersion: entry.version, taskId: current.assigneeTaskId });
+        return next;
     }
 
     sendToSession<T extends JsonValue>(target: string, topic: string, payload: T): Promise<CrossSessionMessage<T>> {
@@ -135,4 +213,8 @@ export class DefaultSessionHandle implements SessionHandle {
     close(options?: { cancelRunning?: boolean }): Promise<void> {
         return this.kernel.closeSession(this.id, options?.cancelRunning ?? false);
     }
+}
+
+function positiveLease(value: number | undefined): number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 300_000;
 }

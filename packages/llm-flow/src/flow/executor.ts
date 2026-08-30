@@ -16,6 +16,16 @@ import {
     type TaskHandle,
     type TaskSpec,
 } from '@itookit/durable-kernel';
+import type { FlowWorkspacePolicy, HarnessHookEvent, HarnessHookRunner } from '@itookit/common';
+
+export interface FlowWorkspaceLease {
+    directory: string;
+    finish(status: 'succeeded' | 'failed' | 'cancelled'): Promise<void>;
+}
+
+export interface FlowWorkspaceManager {
+    prepare(sessionId: string, policy: FlowWorkspacePolicy): Promise<FlowWorkspaceLease>;
+}
 import { findCycles } from './graph';
 import { resolveFlowParameters } from './parameters';
 import {
@@ -29,10 +39,15 @@ import {
 } from './delegation-runtime';
 
 export interface FlowExecutionHandle {
+    sessionId: string;
     root: TaskHandle<JsonValue>;
     nodes: Map<string, TaskHandle>;
     /** 每个节点实际执行的实例数（Loop 节点会大于 1）。 */
     iterations: Map<string, number>;
+    goal?: import('@itookit/common').FlowRunGoal;
+    detachedNodes: Set<string>;
+    taskIds: Set<string>;
+    usage: { tokens: number; startedAt: number; elapsedMs: number };
 }
 
 export interface DurableFlowExecutorOptions {
@@ -42,6 +57,9 @@ export interface DurableFlowExecutorOptions {
         definitions: ToolDefinition[];
         externalIds: string[];
     }>;
+    /** Trusted host hooks. Flow documents can trigger events but cannot install code. */
+    hooks?: HarnessHookRunner;
+    workspaceManager?: FlowWorkspaceManager;
 }
 
 const MAX_LOOP_ITERATIONS = 100;
@@ -55,15 +73,28 @@ export class DurableFlowExecutor {
         parameters?: Record<string, CommonJsonValue>,
     ): Promise<FlowExecutionHandle> {
         const session = await this.options.kernel.openSession(sessionId);
+        await this.emitHook('run.started', sessionId, { nodeCount: spec.nodes.length });
+        const workspacePolicy = spec.runPolicy?.workspace;
+        const workspace = workspacePolicy && workspacePolicy.mode !== 'shared'
+            ? await this.prepareWorkspace(sessionId, workspacePolicy)
+            : undefined;
+        const maxNodes = positiveInteger(spec.maxNodes ?? spec.runPolicy?.maxNodes) ?? 1_000;
+        const maxConcurrency = positiveInteger(spec.maxConcurrency ?? spec.runPolicy?.maxConcurrency) ?? Number.MAX_SAFE_INTEGER;
+        const timeoutMs = positiveInteger(spec.timeoutMs ?? spec.runPolicy?.timeoutMs);
+        const maxTokens = positiveInteger(spec.maxTokens ?? spec.runPolicy?.maxTokens);
+        const startedAt = Date.now();
         const routeEdgeIds = collectRouteEdgeIds(spec);
         const { backEdges, loopNodes } = findCycles(spec.nodes, spec.edges);
-        const nodes = parameters
+        const nodes = (parameters
             ? spec.nodes.map(node => ({
                 ...node,
                 config: resolveFlowParameters(node.config, parameters) as DagNodeDefinition['config'],
                 inputs: resolveFlowParameters(node.inputs, parameters) as DagNodeDefinition['inputs'],
             }))
-            : [...spec.nodes];
+            : [...spec.nodes]).map(node => workspace && node.plugin === 'builtin.agent'
+                ? { ...node, config: { ...record(node.config), workingDirectory: record(node.config).workingDirectory ?? workspace.directory } }
+                : node);
+        if (nodes.length > maxNodes) throw new Error(`Flow node limit exceeded: ${nodes.length}/${maxNodes}`);
         const edges = [...spec.edges];
         const instances = new Map<string, TaskHandle[]>();
         const delegationDepth = new Map(nodes.map(node => [String(node.id), 0]));
@@ -71,6 +102,10 @@ export class DurableFlowExecutor {
         const delegationGroupByChild = new Map<string, string>();
         const completed = new Set<string>();
         const skipped = new Set<string>();
+        const detachedNodes = new Set<string>();
+        const appliedPatches = new Set<string>();
+        let consumedTokens = 0;
+        const completionOrder: string[] = [];
         // 已派发的节点（按派发顺序），用于 supervisor 的「每轮只等本轮派发的 worker」。
         const dispatchOrder: string[] = [];
         const edgeState = new Map<string, EdgeState>(
@@ -157,6 +192,7 @@ export class DurableFlowExecutor {
                 inputs: node.inputs,
                 dependencies,
             });
+            await this.emitHook('task.started', sessionId, { nodeId: node.id, iteration });
             const handle = await session.submit(await this.taskSpec(sessionId, node, task, dependencies, parameters));
             if (!instances.has(node.id)) instances.set(node.id, []);
             instances.get(node.id)!.push(handle);
@@ -164,6 +200,17 @@ export class DurableFlowExecutor {
         };
 
         const applyPatch = (patch: import('@itookit/common').GraphPatch): void => {
+            if (appliedPatches.has(patch.idempotencyKey)) return;
+            const additions = patch.nodes.filter(node => !nodes.some(existing => existing.id === node.id));
+            if (nodes.length + additions.length > maxNodes) {
+                throw new Error(`Flow node limit exceeded by patch ${patch.idempotencyKey}: ${nodes.length + additions.length}/${maxNodes}`);
+            }
+            const known = new Set([...nodes.map(node => node.id), ...patch.nodes.map(node => node.id)]);
+            for (const edge of patch.edges) {
+                if (!known.has(edge.from) || !known.has(edge.to)) {
+                    throw new Error(`Graph patch ${patch.idempotencyKey} has an unresolved edge ${edge.from}->${edge.to}`);
+                }
+            }
             for (const node of patch.nodes) {
                 if (!nodes.some(existing => existing.id === node.id)) nodes.push(node);
             }
@@ -177,10 +224,12 @@ export class DurableFlowExecutor {
                         output: edge.output ?? 'result',
                         input: edge.input ?? 'input',
                         kind: edge.kind,
+                        onFailure: edge.onFailure,
                     });
                     edgeState.set(id, 'active');
                 }
             }
+            appliedPatches.add(patch.idempotencyKey);
         };
 
         const applyEffects = (output: unknown): void => {
@@ -204,17 +253,80 @@ export class DurableFlowExecutor {
 
         // Dynamic delegation: parse the declaration once, then materialize a
         // bounded child group with explicit runtime metadata and control edges.
-        const applyDelegation = (key: string, output: unknown): void => {
+        const applyDelegation = async (key: string, output: unknown): Promise<void> => {
             const { nodeId, iteration: parentIteration } = parseInstanceKey(key);
             const node = nodes.find(n => String(n.id) === nodeId);
             if (!node) return;
             const depth = delegationDepth.get(nodeId) ?? 0;
             const plan = delegationPlan(node, key, parentIteration, depth, output);
             if (!plan) return;
+            if (plan.detached && !plan.waitTimeoutMs) {
+                throw new Error(`Detached delegation requires wait.timeoutMs: ${plan.groupId}`);
+            }
+            const additions = plan.payloads.filter((_, index) =>
+                !nodes.some(existing => existing.id === `${plan.parentId}:delegate:${plan.parentIteration}:${index}`));
+            if (nodes.length + additions.length > maxNodes) {
+                throw new Error(`Flow node limit exceeded by delegation ${plan.groupId}: ${nodes.length + additions.length}/${maxNodes}`);
+            }
             materializeDelegation(node, plan, {
                 nodes, edges, edgeState, depths: delegationDepth,
                 groups: delegationGroups, groupByChild: delegationGroupByChild,
             });
+            await this.emitHook('agent.spawned', sessionId, { parentNodeId: node.id, groupId: plan.groupId, count: plan.payloads.length });
+            const group = delegationGroups.get(plan.groupId);
+            if (group?.detached) {
+                if (workspace && workspacePolicy?.cleanup !== 'keep') {
+                    throw new Error('Detached delegation requires workspace.cleanup=keep when using an isolated workspace');
+                }
+                for (const child of group.children) detachedNodes.add(child);
+                if (group.deadline) {
+                    const delay = Math.max(0, group.deadline - Date.now());
+                    const timer = setTimeout(() => {
+                        void cancelGroup(group, instances, completed, skipped, `Detached delegation timeout: ${plan.groupId}`);
+                    }, delay);
+                    (timer as unknown as { unref?: () => void }).unref?.();
+                }
+            }
+        };
+
+        const settleDelegationGroup = async (key: string, succeeded: boolean): Promise<void> => {
+            const { nodeId } = parseInstanceKey(key);
+            const groupId = delegationGroupByChild.get(nodeId);
+            const group = groupId ? delegationGroups.get(groupId) : undefined;
+            if (!group) return;
+            group.completed.add(nodeId);
+            if (succeeded) group.succeeded.add(nodeId);
+            const satisfied = group.waitMode === 'all'
+                ? group.completed.size >= group.children.size
+                : group.waitMode === 'any'
+                    ? group.completed.size >= 1
+                    : group.succeeded.size >= group.quorum;
+            if (!satisfied && group.completed.size >= group.children.size
+                && (group.waitMode === 'first-success' || group.waitMode === 'quorum')) {
+                throw new Error(`Delegation ${group.waitMode} condition could not be satisfied`);
+            }
+            if (!satisfied || group.waitMode === 'all') return;
+            const cancellations: Promise<void>[] = [];
+            for (const childId of group.children) {
+                if (group.completed.has(childId)) continue;
+                skipped.add(childId);
+                for (const handle of instances.get(childId) ?? []) {
+                    cancellations.push(handle.cancel(`Delegation ${group.waitMode} condition satisfied`));
+                }
+            }
+            await Promise.allSettled(cancellations);
+        };
+
+        const enforceDeadlines = async (): Promise<void> => {
+            if (timeoutMs && Date.now() - startedAt >= timeoutMs) {
+                await cancelPending(instances, completed, 'Flow timeout exceeded');
+                throw new Error(`Flow timeout exceeded after ${timeoutMs}ms`);
+            }
+            for (const [groupId, group] of delegationGroups) {
+                if (group.detached || !group.deadline || Date.now() < group.deadline) continue;
+                await cancelGroup(group, instances, completed, skipped, `Delegation timeout: ${groupId}`);
+                throw new Error(`Delegation group timed out: ${groupId}`);
+            }
         };
 
         const failDelegationGroup = async (key: string, message?: string): Promise<void> => {
@@ -255,49 +367,98 @@ export class DurableFlowExecutor {
         };
 
         while (true) {
-            for (const node of readyNodes()) await submitNode(node);
+            await enforceDeadlines();
+            const activeCount = [...instances.entries()].reduce((count, [nodeId, handles]) =>
+                count + (detachedNodes.has(nodeId) ? 0 : handles.filter((_, index) =>
+                    !completed.has(instanceKey(nodeId, index + 1))).length), 0);
+            const capacity = Math.max(0, maxConcurrency - activeCount);
+            for (const node of readyNodes().slice(0, capacity)) await submitNode(node);
             const pending = [...instances.entries()].flatMap(([nodeId, handles]) =>
+                detachedNodes.has(nodeId) ? [] :
                 handles.map((handle, index) => ({ key: instanceKey(nodeId, index + 1), handle }))
                     .filter(({ key }) => !completed.has(key)));
-            if (!pending.length) break;
+            if (!pending.length) {
+                if (readyNodes().length) continue;
+                break;
+            }
             // 事件驱动等待任一未完成节点：终态则继续调度；超时则检查是否进入 pending
             // interaction，是则让出控制权，交由调用方 respond 后通过 resume 继续驱动。
             const settled = await Promise.race(pending.map(async ({ key, handle }) => {
-                while (true) {
-                    try {
-                        const exit = await handle.wait({ timeoutMs: 100 });
-                        return { key, exit };
-                    } catch {
-                        const snapshot = await handle.status();
-                        if (Object.values(snapshot.task.interactions ?? {}).some(record => record.status === 'pending')) {
-                            return { key, interaction: true as const };
-                        }
+                try {
+                    const exit = await handle.wait({ timeoutMs: 100 });
+                    return { key, exit };
+                } catch {
+                    const snapshot = await handle.status();
+                    if (Object.values(snapshot.task.interactions ?? {}).some(record => record.status === 'pending')) {
+                        return { key, interaction: true as const };
                     }
+                    return { key, tick: true as const };
                 }
             }));
-            if ('interaction' in settled) return this.finish(session, instances, nodes);
+            if ('interaction' in settled) return this.finish(session, instances, nodes, detachedNodes, spec.goal, {
+                tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
+            }, delegationGroups, completionOrder);
+            if ('tick' in settled) continue;
             completed.add(settled.key);
+            completionOrder.push(parseInstanceKey(settled.key).nodeId);
+            consumedTokens += outputTokens(settled.exit.output);
+            if (maxTokens && consumedTokens > maxTokens) {
+                await cancelPending(instances, completed, 'Flow token budget exceeded');
+                throw new Error(`Flow token budget exceeded: ${consumedTokens}/${maxTokens}`);
+            }
+            await settleDelegationGroup(settled.key, settled.exit.status === 'succeeded');
+            await this.emitHook(settled.exit.status === 'failed' ? 'task.failed' : 'task.completed', sessionId, {
+                nodeId: parseInstanceKey(settled.key).nodeId,
+                taskId: pending.find(item => item.key === settled.key)?.handle.id,
+                status: settled.exit.status,
+            });
+            if (delegationGroupByChild.has(parseInstanceKey(settled.key).nodeId)) {
+                await this.emitHook('agent.stopped', sessionId, {
+                    nodeId: parseInstanceKey(settled.key).nodeId,
+                    status: settled.exit.status,
+                });
+            }
             if (settled.exit.status === 'failed') {
                 await compensateChain(settled.key);
                 await failDelegationGroup(settled.key, settled.exit.error?.message);
             }
             applyEffects(settled.exit.output);
-            applyDelegation(settled.key, settled.exit.output);
+            await applyDelegation(settled.key, settled.exit.output);
         }
 
-        return this.finish(session, instances, nodes);
+        const result = await this.finish(session, instances, nodes, detachedNodes, spec.goal, {
+            tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
+        }, delegationGroups, completionOrder);
+        if (workspace) {
+            void result.root.wait().then(exit => workspace.finish(exit.status === 'succeeded' ? 'succeeded' : exit.status === 'cancelled' ? 'cancelled' : 'failed'))
+                .catch(() => workspace.finish('failed'));
+        }
+        void result.root.wait().then(exit => this.emitHook('run.completed', sessionId, {
+            taskId: result.root.id, status: exit.status,
+        })).catch(() => undefined);
+        return result;
     }
 
     private async finish(
         session: SessionHandle,
         instances: Map<string, TaskHandle[]>,
         nodes: DagNodeDefinition[],
+        detachedNodes: Set<string> = new Set(),
+        goal?: import('@itookit/common').FlowRunGoal,
+        usage: FlowExecutionHandle['usage'] = { tokens: 0, startedAt: Date.now(), elapsedMs: 0 },
+        delegationGroups: Map<string, DelegationGroup> = new Map(),
+        completionOrder: string[] = [],
     ): Promise<FlowExecutionHandle> {
-        const root = await this.aggregate(session, instances, nodes);
+        const root = await this.aggregate(session, instances, nodes, detachedNodes, delegationGroups, completionOrder);
         return {
+            sessionId: session.id,
             root,
             nodes: new Map([...instances.entries()].map(([id, handles]) => [id, handles[handles.length - 1]])),
             iterations: new Map([...instances.entries()].map(([id, handles]) => [id, handles.length])),
+            goal,
+            detachedNodes,
+            taskIds: new Set([...instances.values()].flatMap(handles => handles.map(handle => handle.id)).concat(root.id)),
+            usage,
         };
     }
 
@@ -356,10 +517,41 @@ export class DurableFlowExecutor {
         });
     }
 
+    private async emitHook(
+        event: HarnessHookEvent,
+        sessionId: string,
+        payload: Record<string, unknown>,
+    ): Promise<void> {
+        if (!this.options.hooks) return;
+        const hook = this.options.hooks;
+        if (!hook.descriptor.trusted || !hook.descriptor.contentHash || !hook.descriptor.source) {
+            throw new Error(`Harness hook is not trusted: ${hook.descriptor.source || 'unknown source'}`);
+        }
+        const result = await withTimeout(
+            hook.emit({ event, sessionId, payload: jsonValue(payload) }),
+            positiveInteger(hook.descriptor.timeoutMs) ?? 5_000,
+            `Harness hook timed out: ${event}`,
+        );
+        if (result?.message && result.message.length > (positiveInteger(hook.descriptor.maxMessageLength) ?? 4_096)) {
+            throw new Error(`Harness hook output is too large: ${event}`);
+        }
+        if (result?.action === 'deny') throw new Error(result.message ?? `Harness hook denied ${event}`);
+    }
+
+    private async prepareWorkspace(sessionId: string, policy: FlowWorkspacePolicy): Promise<FlowWorkspaceLease> {
+        if (!this.options.workspaceManager) {
+            throw new Error(`Flow workspace mode ${policy.mode} requires a configured workspace manager`);
+        }
+        return this.options.workspaceManager.prepare(sessionId, policy);
+    }
+
     private async aggregate(
         session: SessionHandle,
         instances: Map<string, TaskHandle[]>,
         nodes: DagNodeDefinition[],
+        detachedNodes: Set<string>,
+        delegationGroups: Map<string, DelegationGroup>,
+        completionOrder: string[],
     ): Promise<TaskHandle<JsonValue>> {
         // Nodes with persistOutput === false keep feeding downstream nodes via
         // dependencies but are excluded from the flow-root aggregation that
@@ -367,12 +559,12 @@ export class DurableFlowExecutor {
         const suppressed = new Set(nodes
             .filter(node => isRecord(node.config) && node.config.persistOutput === false)
             .map(node => String(node.id)));
-        const dependencies = [...instances.entries()]
-            .filter(([nodeId]) => !suppressed.has(nodeId))
+        const dependencies = orderDelegationResults([...instances.entries()]
+            .filter(([nodeId]) => !suppressed.has(nodeId) && !detachedNodes.has(nodeId))
             .map(([nodeId, handles]) => ({
                 taskId: handles[handles.length - 1].id,
                 nodeId,
-            }));
+            })), delegationGroups, completionOrder);
         return session.submit({
             program: { kind: 'flow.aggregate', version: '1' },
             input: { dependencies },
@@ -468,4 +660,74 @@ function record(value: unknown): Record<string, CommonJsonValue> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function positiveInteger(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function outputTokens(output: unknown): number {
+    if (!isRecord(output) || !isRecord(output.usage)) return 0;
+    const total = output.usage.totalTokens ?? output.usage.total_tokens;
+    return typeof total === 'number' && Number.isFinite(total) && total > 0 ? total : 0;
+}
+
+async function cancelPending(
+    instances: Map<string, TaskHandle[]>,
+    completed: Set<string>,
+    reason: string,
+): Promise<void> {
+    const cancellations: Promise<void>[] = [];
+    for (const [nodeId, handles] of instances) {
+        for (const [index, handle] of handles.entries()) {
+            if (!completed.has(instanceKey(nodeId, index + 1))) cancellations.push(handle.cancel(reason));
+        }
+    }
+    await Promise.allSettled(cancellations);
+}
+
+async function cancelGroup(
+    group: DelegationGroup,
+    instances: Map<string, TaskHandle[]>,
+    completed: Set<string>,
+    skipped: Set<string>,
+    reason: string,
+): Promise<void> {
+    const cancellations: Promise<void>[] = [];
+    for (const childId of group.children) {
+        skipped.add(childId);
+        for (const [index, handle] of (instances.get(childId) ?? []).entries()) {
+            if (!completed.has(instanceKey(childId, index + 1))) cancellations.push(handle.cancel(reason));
+        }
+    }
+    await Promise.allSettled(cancellations);
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs); }),
+        ]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
+}
+
+function orderDelegationResults<T extends { nodeId: string }>(
+    values: T[],
+    groups: Map<string, DelegationGroup>,
+    completionOrder: string[],
+): T[] {
+    const result = [...values];
+    const rank = new Map(completionOrder.map((nodeId, index) => [nodeId, index]));
+    for (const group of groups.values()) {
+        if (group.resultOrder !== 'completion') continue;
+        const positions = result.map((value, index) => group.children.has(value.nodeId) ? index : -1).filter(index => index >= 0);
+        const ordered = positions.map(index => result[index])
+            .sort((left, right) => (rank.get(left.nodeId) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.nodeId) ?? Number.MAX_SAFE_INTEGER));
+        positions.forEach((position, index) => { result[position] = ordered[index]; });
+    }
+    return result;
 }

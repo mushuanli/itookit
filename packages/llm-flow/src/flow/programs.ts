@@ -20,7 +20,8 @@ export interface FlowDependencyBinding {
 }
 
 export interface FlowValueInput {
-    operation: 'transform' | 'reduce' | 'route';
+    operation: 'transform' | 'reduce' | 'route' | 'spawn';
+    nodeId?: string;
     config: Record<string, JsonValue>;
     inputs: Record<string, JsonValue>;
     dependencies: FlowDependencyBinding[];
@@ -133,7 +134,10 @@ function completeValue(state: FlowValueState): Decision<FlowValueState, DagNodeO
         ? transformOutcome
         : state.operation === 'reduce' ? reduceOutcome
         : spawnOutcome;
-    return { state, next: { type: 'complete', output: operation(state.config, inputs) } };
+    const output = state.operation === 'spawn'
+        ? spawnOutcome(state.config, inputs, state.nodeId)
+        : operation(state.config, inputs);
+    return { state, next: { type: 'complete', output } };
 }
 
 function requestHuman(state: FlowHumanState): Decision<FlowHumanState, DagNodeOutcome> {

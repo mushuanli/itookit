@@ -13,23 +13,35 @@ export function transformOutcome(
 export function spawnOutcome(
     config: Record<string, unknown>,
     inputs: Record<string, unknown>,
+    parentId?: string,
 ): DagNodeOutcome {
     const base = transformOutcome(config, inputs);
     const spawn = record(config.spawn);
     const patch = {
-        idempotencyKey: string(spawn.idempotencyKey, 'spawn'),
+        idempotencyKey: string(spawn.idempotencyKey, parentId ? `spawn:${parentId}` : 'spawn'),
         nodes: Array.isArray(spawn.nodes) ? spawn.nodes.filter(isRecord) : [],
         edges: Array.isArray(spawn.edges)
             ? spawn.edges.filter(isRecord).map(edge => ({
                 ...(edge.id !== undefined ? { id: String(edge.id) } : {}),
-                from: String(edge.from ?? ''),
-                to: String(edge.to ?? ''),
+                from: resolveSpawnEndpoint(edge.from, parentId),
+                to: resolveSpawnEndpoint(edge.to, parentId),
                 ...(edge.input !== undefined ? { input: String(edge.input) } : {}),
                 ...(edge.output !== undefined ? { output: String(edge.output) } : {}),
+                ...(edge.kind === 'control' || edge.kind === 'data' ? { kind: edge.kind } : {}),
+                ...(edge.onFailure === 'fail' || edge.onFailure === 'skip' || edge.onFailure === 'continue'
+                    ? { onFailure: edge.onFailure }
+                    : {}),
             }))
             : [],
     };
     return { ...base, effects: [{ type: 'patch-graph' as const, patch: patch as never }] };
+}
+
+function resolveSpawnEndpoint(value: unknown, parentId?: string): string {
+    const endpoint = String(value ?? '');
+    if (endpoint === '$parent') return parentId ?? endpoint;
+    if (endpoint.startsWith('$upstream:')) return endpoint.slice('$upstream:'.length);
+    return endpoint;
 }
 
 export function reduceOutcome(

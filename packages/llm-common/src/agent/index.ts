@@ -12,3 +12,4 @@ export * from './flow';
 export * from './flow-definition';
 export * from './dag-plugin';
 export * from './delegation-defaults';
+export * from './harness-hook';

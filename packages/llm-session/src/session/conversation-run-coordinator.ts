@@ -3,6 +3,7 @@ import type {
     Artifact,
     ChatMessage,
     ContextSnapshot,
+    ContextPlan,
     DagPluginCatalog,
     DagRunSpec,
     RoundResult,
@@ -31,6 +32,7 @@ import {
     ContextAssembler,
     type DurableAgentInput,
     type DurableChatOutput as ChatProgramOutput,
+    type RetrievedMemoryEntry,
 } from '@itookit/llm-tasks';
 import type { IChatEngine } from '../persistence/types';
 import { ContextProfileStore } from '../persistence/context-profile-store';
@@ -60,6 +62,10 @@ export interface ConversationRunCoordinatorOptions {
         externalIds: string[];
     }>;
     loadArtifact(id: string): Promise<Artifact | null>;
+    retrieveMemory?: (
+        plan: ContextPlan,
+        agent: { id: string; version: string },
+    ) => Promise<RetrievedMemoryEntry[]>;
 }
 
 interface ConversationLocation {
@@ -194,6 +200,7 @@ export class ConversationRunCoordinator {
             profileStore: new ContextProfileStore(this.options.engine, execution.task.nodeId),
             readRound: roundId => execution.log.readRound(roundId),
             loadArtifact: id => this.options.loadArtifact(id),
+            retrieveMemory: this.options.retrieveMemory,
         });
     }
 

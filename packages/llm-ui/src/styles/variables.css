@@ -106,3 +106,46 @@
         --llm-settings-bg: #252525;
     }
 }
+
+/* The app theme is explicit and must override the operating-system preference. */
+:root[data-theme="light"] {
+    color-scheme: light;
+    --llm-color-primary-light: #dbeafe;
+    --llm-color-primary-bg: #eff6ff;
+    --llm-color-success-bg: #d1fae5;
+    --llm-color-error-bg: #fee2e2;
+    --llm-color-error-border: #fecaca;
+    --llm-color-warning-bg: #fef3c7;
+    --llm-bg-primary: #ffffff;
+    --llm-bg-secondary: #f9fafb;
+    --llm-bg-tertiary: #f3f4f6;
+    --llm-bg-hover: #e5e7eb;
+    --llm-text-primary: #333333;
+    --llm-text-secondary: #666666;
+    --llm-text-muted: #9ca3af;
+    --llm-text-placeholder: #9ca3af;
+    --llm-border-color: #e5e7eb;
+    --llm-border-light: #f3f4f6;
+    --llm-settings-bg: #f8fafc;
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --llm-color-primary-light: #1e3a5f;
+    --llm-color-primary-bg: #172554;
+    --llm-color-success-bg: #143c2b;
+    --llm-color-error-bg: #451a1a;
+    --llm-color-error-border: #7f1d1d;
+    --llm-color-warning-bg: #422006;
+    --llm-bg-primary: #0d1117;
+    --llm-bg-secondary: #161b22;
+    --llm-bg-tertiary: #1e2530;
+    --llm-bg-hover: #30363d;
+    --llm-text-primary: #c9d1d9;
+    --llm-text-secondary: #8b949e;
+    --llm-text-muted: #6e7681;
+    --llm-text-placeholder: #6b7280;
+    --llm-border-color: #30363d;
+    --llm-border-light: #21262d;
+    --llm-settings-bg: #252525;
+}

@@ -139,6 +139,34 @@ describe('DurableFlowExecutor', () => {
 
         expect(Object.keys(nodes)).toEqual(['parent']);
     });
+
+    it('enforces run node limits before applying a dynamic patch', async () => {
+        await expect(executor(kernel).submit('session-one', { ...spawnFlow(), maxNodes: 1 }))
+            .rejects.toThrow('node limit');
+    });
+
+    it('resolves $parent dependencies in spawned graph patches', async () => {
+        const flow = spawnFlow();
+        const spawn = (flow.nodes[0].config as Record<string, any>).spawn;
+        spawn.edges = [{ id: 'source-spawned', from: '$parent', to: 'spawned', kind: 'control' }];
+        const execution = await executor(kernel).submit('session-one', flow);
+        expect((await execution.root.wait({ timeoutMs: 2_000 })).status).toBe('succeeded');
+        expect(execution.nodes.has('spawned')).toBe(true);
+    });
+
+    it('repairs invalid structured output and records token usage', async () => {
+        const flow = agentFlow();
+        (flow.nodes[0].config as Record<string, unknown>).messages = [{ role: 'user', content: 'structured response' }];
+        (flow.nodes[0].config as Record<string, unknown>).responseFormat = {
+            type: 'json_schema', json_schema: { name: 'answer', schema: { type: 'object', required: ['answer'], properties: { answer: { type: 'string' } } } },
+        };
+        (flow.nodes[0].config as Record<string, unknown>).outputValidation = { onInvalid: 'repair', retries: 1 };
+        const execution = await executor(kernel).submit('session-one', flow);
+        const exit = await execution.root.wait({ timeoutMs: 2_000 });
+        expect(exit.status).toBe('succeeded');
+        expect(JSON.stringify(exit.output)).toContain('corrected');
+        expect(execution.usage.tokens).toBe(4);
+    });
 });
 
 function registerPrograms(kernel: Kernel): void {
@@ -178,6 +206,13 @@ function llmEffect(): EffectAdapter<Record<string, unknown>, ChatCompletionRespo
             }
             if (messages.some(message => JSON.stringify(message).includes('fail child'))) {
                 throw new Error('child failed');
+            }
+            if (messages.some(message => JSON.stringify(message).includes('structured response'))) {
+                const repairing = messages.some(message => JSON.stringify(message).includes('did not satisfy'));
+                return {
+                    choices: [{ index: 0, message: { role: 'assistant', content: repairing ? '{"answer":"corrected"}' : 'not-json' }, finish_reason: 'stop' }],
+                    usage: { total_tokens: 2 },
+                };
             }
             return {
                 choices: [{

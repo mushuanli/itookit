@@ -11,11 +11,23 @@ import type { MDxPlugin, PluginContext } from '../../core/types';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 
+export type ClipboardPasteMode = 'smart' | 'plain' | 'rich';
+
 export interface ClipboardPluginOptions {
     /** 是否启用 HTML 到 Markdown 转换 */
     enableHtmlToMarkdown?: boolean;
     /** 是否处理粘贴的图片 */
     enableImagePaste?: boolean;
+    /**
+     * 默认粘贴模式：
+     * - smart: 仅将具有明确富文本语义的 HTML 转为 Markdown
+     * - plain: 始终使用 text/plain
+     * - rich: 只要存在 HTML 就转为 Markdown
+     * @default 'smart'
+     */
+    pasteMode?: ClipboardPasteMode;
+    /** 是否启用 Cmd/Ctrl+Shift+V 原始粘贴 */
+    enablePlainPasteShortcut?: boolean;
     /** 自定义 Turndown 配置 */
     turndownOptions?: TurndownService.Options;
 }
@@ -26,11 +38,14 @@ export class ClipboardPlugin implements MDxPlugin {
     //private _context!: PluginContext;
     private options: Required<ClipboardPluginOptions>;
     private turndownService: TurndownService;
+    private plainPasteRequestedAt = 0;
 
     constructor(options: ClipboardPluginOptions = {}) {
         this.options = {
             enableHtmlToMarkdown: options.enableHtmlToMarkdown ?? true,
             enableImagePaste: options.enableImagePaste ?? true,
+            pasteMode: options.pasteMode ?? 'smart',
+            enablePlainPasteShortcut: options.enablePlainPasteShortcut ?? true,
             turndownOptions: options.turndownOptions ?? {},
         };
 
@@ -71,6 +86,14 @@ export class ClipboardPlugin implements MDxPlugin {
         //this._context = context;
 
         const extension = EditorView.domEventHandlers({
+            keydown: (event) => {
+                if (this.isPlainPasteShortcut(event)) {
+                    // paste 事件本身不包含可靠的组合键信息，因此在 keydown
+                    // 记录一次性意图，并让浏览器继续执行原生 paste。
+                    this.plainPasteRequestedAt = Date.now();
+                }
+                return false;
+            },
             paste: (event, view) => {
                 return this.handlePaste(event, view);
             },
@@ -82,6 +105,8 @@ export class ClipboardPlugin implements MDxPlugin {
     private handlePaste(event: ClipboardEvent, view: EditorView): boolean {
         const clipboardData = event.clipboardData;
         if (!clipboardData) return false;
+
+        const forcePlain = this.consumePlainPasteRequest();
 
         // 优先级 1: 处理文件（图片等）
         if (this.options.enableImagePaste) {
@@ -99,47 +124,69 @@ export class ClipboardPlugin implements MDxPlugin {
             }
         }
 
-        // 优先级 2: 处理 HTML 内容
-        if (this.options.enableHtmlToMarkdown) {
-            const htmlContent = clipboardData.getData('text/html');
-            const plainText = clipboardData.getData('text/plain');
+        // 优先级 2: 原始粘贴。返回 false，由 CodeMirror 使用 text/plain
+        // 完成原生粘贴，可同时保留多光标等默认行为。
+        if (forcePlain || !this.options.enableHtmlToMarkdown || this.options.pasteMode === 'plain') {
+            return false;
+        }
 
-            // If plain text matches HTML text content, the HTML is just a plain-text
-            // wrapper (e.g. pasting markdown from a text editor). Skip conversion to
-            // avoid Turndown escaping markdown special characters like *, #, _, [, etc.
-            const isPlainWrapper = htmlContent && plainText && (() => {
-                const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
-                return (doc.body.textContent ?? '').trim() === plainText.trim();
-            })();
-
-            if (htmlContent && !isPlainWrapper && this.isRichContent(htmlContent)) {
+        // 优先级 3: 剪贴板明确声明为 Markdown 时直接插入，不经过 Turndown。
+        if (this.options.pasteMode === 'smart') {
+            const markdownContent = clipboardData.getData('text/markdown') ||
+                clipboardData.getData('application/x-itookit-markdown');
+            if (markdownContent) {
                 event.preventDefault();
-
-                const markdown = this.convertHtmlToMarkdown(htmlContent);
-                this.insertText(view, markdown);
-
+                this.insertText(view, markdownContent);
                 return true;
             }
         }
 
-        // 优先级 3: 使用默认纯文本粘贴
+        // 优先级 4: 富文本转换。
+        const htmlContent = clipboardData.getData('text/html');
+        if (htmlContent && (
+            this.options.pasteMode === 'rich' || this.hasSemanticRichContent(htmlContent)
+        )) {
+            event.preventDefault();
+
+            const markdown = this.convertHtmlToMarkdown(htmlContent);
+            this.insertText(view, markdown);
+
+            return true;
+        }
+
+        // 优先级 5: 使用默认纯文本粘贴
         return false;
+    }
+
+    private isPlainPasteShortcut(event: KeyboardEvent): boolean {
+        return this.options.enablePlainPasteShortcut &&
+            event.key.toLowerCase() === 'v' &&
+            event.shiftKey &&
+            (event.metaKey || event.ctrlKey);
+    }
+
+    private consumePlainPasteRequest(): boolean {
+        const requestedAt = this.plainPasteRequestedAt;
+        this.plainPasteRequestedAt = 0;
+
+        // 避免快捷键未触发 paste 时影响之后通过菜单发起的粘贴。
+        return requestedAt > 0 && Date.now() - requestedAt < 1000;
     }
 
     /**
      * 判断 HTML 是否为"有意义的"富文本
      * 过滤掉只包含纯文本的简单 HTML 包装
      */
-    private isRichContent(html: string): boolean {
+    private hasSemanticRichContent(html: string): boolean {
         // 创建临时 DOM 解析
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
         const body = doc.body;
 
-        // 检查是否包含格式化标签
+        // 只检查会改变 Markdown 语义的标签。p/div/span/br 等普通包装
+        // 直接使用 text/plain，避免把 Markdown 源码再次转义。
         const richTags = [
             'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-            'p', 'br',
             'strong', 'b', 'em', 'i', 'u', 's', 'del',
             'a', 'img',
             'ul', 'ol', 'li',
@@ -154,12 +201,7 @@ export class ClipboardPlugin implements MDxPlugin {
             }
         }
 
-        // 检查是否有多个段落（换行）
-        const textContent = body.textContent || '';
-        const hasMultipleLines = textContent.includes('\n') ||
-            body.querySelectorAll('div, span').length > 1;
-
-        return hasMultipleLines;
+        return false;
     }
 
     /**
@@ -224,11 +266,10 @@ export class ClipboardPlugin implements MDxPlugin {
      * 插入文本到编辑器
      */
     private insertText(view: EditorView, text: string): void {
-        const { from, to } = view.state.selection.main;
-
         view.dispatch({
-            changes: { from, to, insert: text },
-            selection: { anchor: from + text.length },
+            ...view.state.replaceSelection(text),
+            userEvent: 'input.paste',
+            scrollIntoView: true,
         });
     }
 

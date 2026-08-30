@@ -64,6 +64,7 @@ export class SessionRunCoordinator {
             definitions: ToolDefinition[];
             externalIds: string[];
         }>,
+        retrieveMemory?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['retrieveMemory'],
     ) {
         this.runs = new ConversationRunCoordinator({
             engine,
@@ -71,6 +72,7 @@ export class SessionRunCoordinator {
             kernel,
             dagPlugins,
             resolveTools,
+            retrieveMemory,
             loadArtifact: async () => null,
         });
     }
@@ -142,15 +144,20 @@ export class SessionRunCoordinator {
         };
         const flow = task.input.sendIntent?.execution;
         if (flow?.kind !== 'flow') return this.runs.executeDirect(execution);
-        const revision = await new FlowDefinitionStore(this.flowStore)
-            .loadRevision(flow.flowId, flow.revision);
+        const definitions = new FlowDefinitionStore(this.flowStore);
+        const revision = await definitions.loadRevision(flow.flowId, flow.revision);
         if (!revision) throw new Error(`Flow revision not found: ${flow.flowId}`);
         const parameterIssues = validateFlowParameters(revision.parameters, flow.parameters);
         if (hasValidationErrors(parameterIssues)) {
             throw new Error(parameterIssues.map(issue => issue.message).join('; '));
         }
         return this.runs.executeDag(execution, flow.parameters, async snapshot =>
-            flowToDag(revision, (node, defaults) => bindFlowNode(node, defaults, snapshot, task, setup, this.agents), setup.config.connectionId ?? 'default'),
+            flowToDag(
+                revision,
+                (node, defaults) => bindFlowNode(node, defaults, snapshot, task, setup, this.agents),
+                setup.config.connectionId ?? 'default',
+                (id, childRevision) => definitions.loadRevision(id, childRevision),
+            ),
         );
     }
 

@@ -21,9 +21,21 @@ function builtinPlugins(): DagPlugin[] {
         valuePlugin('builtin.reduce', reduceManifest(), 'reduce'),
         valuePlugin('builtin.route', routeManifest(), 'route'),
         valuePlugin('builtin.spawn', spawnManifest(), 'spawn'),
+        compositePlugin(),
         humanPlugin(),
         agentPlugin(),
     ];
+}
+
+function compositePlugin(): DagPlugin {
+    const manifest = compositeManifest();
+    return {
+        manifest,
+        runtime: async () => ({
+            createTask() { throw new Error('builtin.flow must be expanded before DAG execution'); },
+        }),
+        ui: async () => defaultUI(manifest),
+    };
 }
 
 function valuePlugin(
@@ -40,6 +52,7 @@ function valuePlugin(
                 programVersion: '1',
                 input: {
                     operation,
+                    nodeId: context.nodeRunId,
                     config: jsonRecord(context.config),
                     inputs: jsonRecord(context.inputs),
                     dependencies: context.dependencies,
@@ -107,6 +120,9 @@ function agentTask(context: DagNodeContext) {
             reasoningEffort: optionalReasoning(config.reasoningEffort),
             stream: optionalBoolean(config.stream),
             webSearch: optionalBoolean(config.webSearch),
+            responseFormat: responseFormat(config.responseFormat),
+            outputValidation: outputValidation(config.outputValidation),
+            contextCompaction: contextCompaction(config.contextCompaction),
             maxExchanges: optionalNumber(config.maxExchanges),
             workingDirectory: optionalString(config.workingDirectory),
             approval: optionalApproval(config.approval) ?? 'external',
@@ -152,7 +168,7 @@ function spawnManifest(): DagPluginManifest {
             properties: {
                 idempotencyKey: { type: 'string', title: 'Idempotency key' },
                 nodes: { type: 'array', title: 'Node templates', items: { type: 'object' } },
-                edges: { type: 'array', title: 'Template connections', items: { type: 'object' } },
+                edges: { type: 'array', title: 'Template connections', description: 'Endpoints may use $parent or $upstream:<nodeId>. Independent nodes run concurrently.', items: { type: 'object' } },
             },
         },
     }, { outputName: 'result', type: 'text', spawn: {} });
@@ -162,6 +178,14 @@ function humanManifest(): DagPluginManifest {
     return manifest('human', 'Human Input', 'Execution', {
         requestId: { type: 'string' }, prompt: { type: 'string' }, schema: {},
     }, { requestId: 'approval', prompt: 'Please review and respond.' });
+}
+
+function compositeManifest(): DagPluginManifest {
+    return manifest('flow', 'Flow', 'Composition', {
+        flowId: { type: 'string', title: 'Flow' },
+        revision: { type: 'integer', title: 'Revision' },
+        parameters: { type: 'object', title: 'Parameter bindings' },
+    }, { flowId: '', parameters: {} });
 }
 
 function agentManifest(): DagPluginManifest {
@@ -176,6 +200,27 @@ function agentManifest(): DagPluginManifest {
         temperature: { type: 'number' }, maxTokens: { type: 'integer' },
         thinking: { type: 'boolean' }, reasoningEffort: enumSchema(['low', 'medium', 'high', 'xhigh']),
         stream: { type: 'boolean' }, webSearch: { type: 'boolean' },
+        responseFormat: {
+            type: 'object', title: 'Structured response', advancedProperties: ['json_schema'],
+            properties: {
+                type: enumSchema(['text', 'json_object', 'json_schema']),
+                json_schema: { type: 'object' },
+            },
+        },
+        outputValidation: {
+            type: 'object', title: 'Output validation',
+            properties: {
+                retries: { type: 'integer' },
+                onInvalid: enumSchema(['fail', 'repair', 'continue']),
+            },
+        },
+        contextCompaction: {
+            type: 'object', title: 'Context compaction',
+            properties: {
+                maxMessages: { type: 'integer', minimum: 2 },
+                keepRecent: { type: 'integer', minimum: 1 },
+            },
+        },
         // Execution policy
         maxExchanges: { type: 'integer' },
         timeoutMs: { type: 'integer' },
@@ -220,9 +265,9 @@ function defaultUI(manifest: DagPluginManifest) {
             layout: {
                 sections: [
                     { id: 'identity', title: 'Identity & task', fields: ['agentId', 'systemPromptId', 'systemPromptPolicy', 'instruction', 'systemPrompt'] },
-                    { id: 'model', title: 'Model', fields: ['connectionId', 'modelName', 'temperature', 'maxTokens', 'thinking', 'reasoningEffort', 'stream', 'webSearch'] },
+                    { id: 'model', title: 'Model', fields: ['connectionId', 'modelName', 'temperature', 'maxTokens', 'thinking', 'reasoningEffort', 'stream', 'webSearch', 'responseFormat', 'outputValidation'] },
                     { id: 'capabilities', title: 'Capabilities', fields: ['toolIds', 'skillIds'] },
-                    { id: 'context', title: 'Context & output', fields: ['historyPolicy', 'persistOutput'] },
+                    { id: 'context', title: 'Context & output', fields: ['historyPolicy', 'persistOutput', 'contextCompaction'] },
                     { id: 'execution', title: 'Execution', fields: ['approval', 'maxExchanges', 'timeoutMs', 'maxIterations', 'workingDirectory', 'delegation', 'subtasks'] },
                 ],
             },
@@ -249,6 +294,35 @@ function optionalReasoning(value: unknown): LlmTaskInputOptions['reasoningEffort
 }
 function optionalApproval(value: unknown): LlmTaskInputOptions['approval'] {
     return value === 'none' || value === 'external' || value === 'all' ? value : undefined;
+}
+function responseFormat(value: unknown): LlmTaskInputOptions['responseFormat'] {
+    if (!isRecord(value)) return undefined;
+    if (value.type === 'text' || value.type === 'json_object') return { type: value.type };
+    if (value.type !== 'json_schema' || !isRecord(value.json_schema)) return undefined;
+    const schema = value.json_schema;
+    if (!isRecord(schema.schema)) return undefined;
+    return {
+        type: 'json_schema',
+        json_schema: {
+            name: typeof schema.name === 'string' && schema.name ? schema.name : 'flow_output',
+            schema: schema.schema,
+            ...(schema.strict === true ? { strict: true } : {}),
+        },
+    };
+}
+function outputValidation(value: unknown): LlmTaskInputOptions['outputValidation'] {
+    if (!isRecord(value)) return undefined;
+    const retries = optionalNumber(value.retries);
+    const onInvalid = value.onInvalid === 'repair' || value.onInvalid === 'continue' || value.onInvalid === 'fail'
+        ? value.onInvalid : undefined;
+    return retries === undefined && onInvalid === undefined ? undefined : { retries, onInvalid };
+}
+function contextCompaction(value: unknown): LlmTaskInputOptions['contextCompaction'] {
+    if (!isRecord(value) || typeof value.maxMessages !== 'number') return undefined;
+    return {
+        maxMessages: Math.max(2, Math.floor(value.maxMessages)),
+        ...(typeof value.keepRecent === 'number' ? { keepRecent: Math.max(1, Math.floor(value.keepRecent)) } : {}),
+    };
 }
 function jsonValue(value: unknown): JsonValue { return JSON.parse(JSON.stringify(value ?? null)) as JsonValue; }
 function jsonRecord(value: unknown): Record<string, JsonValue> { return jsonValue(record(value)) as Record<string, JsonValue>; }

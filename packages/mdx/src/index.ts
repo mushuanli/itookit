@@ -79,6 +79,9 @@ export type { CodeBlockControlsPluginOptions } from './plugins/interactions/code
 export { ZoomPlugin } from './plugins/interactions/zoom.plugin';
 export type { ZoomPluginOptions } from './plugins/interactions/zoom.plugin';
 
+export { ClipboardPlugin } from './plugins/interactions/clipboard.plugin';
+export type { ClipboardPluginOptions, ClipboardPasteMode } from './plugins/interactions/clipboard.plugin';
+
 export { ToolbarPlugin } from './plugins/ui/toolbar.plugin';
 export type { ToolbarPluginOptions } from './plugins/ui/toolbar.plugin';
 
@@ -95,4 +98,3 @@ export type { TagPluginOptions } from './plugins/autocomplete/tag.plugin';
 
 export { MentionPlugin } from './plugins/autocomplete/mention.plugin';
 export type { MentionPluginOptions, MentionProvider, MentionItem } from './plugins/autocomplete/mention.plugin';
-

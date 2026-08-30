@@ -23,6 +23,9 @@ export interface LlmTaskInputOptions {
     reasoningEffort?: DurableProgramInput['reasoningEffort'];
     webSearch?: boolean;
     stream?: boolean;
+    responseFormat?: DurableProgramInput['responseFormat'];
+    outputValidation?: DurableProgramInput['outputValidation'];
+    contextCompaction?: DurableProgramInput['contextCompaction'];
     maxExchanges?: number;
     workingDirectory?: string;
     approval?: DurableAgentInput['approval'];
@@ -48,6 +51,9 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         reasoningEffort: options.reasoningEffort,
         webSearch: options.webSearch,
         stream: options.stream,
+        responseFormat: options.responseFormat,
+        outputValidation: options.outputValidation,
+        contextCompaction: options.contextCompaction,
         maxExchanges: options.maxExchanges,
         workingDirectory: options.workingDirectory,
         approval: options.approval ?? 'external',

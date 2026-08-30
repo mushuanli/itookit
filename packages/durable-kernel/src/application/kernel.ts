@@ -161,6 +161,16 @@ export class Kernel implements KernelRegistration {
         return handle.status();
     }
 
+    async attachTask<O = unknown>(sessionId: SessionId, taskId: TaskId): Promise<TaskHandle<O>> {
+        const task = await this.store.readTask(await this.binding(sessionId), taskId);
+        if (task.sessionId !== sessionId) throw new Error(`Task ${taskId} does not belong to session ${sessionId}`);
+        return new DefaultTaskHandle<O>(this, sessionId, taskId);
+    }
+
+    async listSessionTasks(sessionId: SessionId): Promise<TaskRecord[]> {
+        return this.store.listTasks(await this.binding(sessionId));
+    }
+
     async recover(): Promise<RecoveryReport> {
         const total: RecoveryReport = {
             recoveredTasks: 0, recoveredEffects: 0, expiredAttempts: 0, rebuiltIndexes: 0,
@@ -227,6 +237,11 @@ export class Kernel implements KernelRegistration {
         this.notify(sessionId, taskId);
         this.queueDrain(sessionId);
         await this.cancelTaskEffects(task, activeEffects);
+        const children = (await this.store.listTasks(binding))
+            .filter(candidate => candidate.parentTaskId === taskId && !isTerminalStatus(candidate.status));
+        for (const child of children) {
+            await this.cancel(sessionId, child.id, reason ?? `Parent task ${taskId} cancelled`);
+        }
     }
 
     async eventList(sessionId: string, after: number): Promise<EventEnvelope[]> {

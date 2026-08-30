@@ -1,5 +1,7 @@
 import type {
     ChatMessage,
+    OutputValidationPolicy,
+    ResponseFormat,
     TokenUsage,
     ToolCall,
     ToolDefinition,
@@ -29,6 +31,9 @@ export interface DurableProgramInput {
     stream?: boolean;
     /** 走底层内置 server-side search（如 DeepSeek/OpenAI Responses 的 web_search、Gemini 的 googleSearch）。 */
     webSearch?: boolean;
+    responseFormat?: ResponseFormat;
+    outputValidation?: OutputValidationPolicy;
+    contextCompaction?: import('@itookit/common').ContextCompactionPolicy;
     dependencyBindings?: DurableDependencyBinding[];
     /** False keeps scheduling dependencies but does not append their outputs to messages. */
     includeDependencyOutputs?: boolean;
@@ -70,4 +75,5 @@ export interface DurableAgentState {
     exchanges: number;
     pendingCalls: ToolCall[];
     callIndex: number;
+    outputValidationAttempts: number;
 }

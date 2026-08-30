@@ -487,6 +487,218 @@ interface DelegationConfig {
 
 当前没有运行时 USD 扣费器，因此不暴露 `maxCostUsd`。接入定价快照与 `chargeBudget(..., 'usd', amount)` 后才能重新提供费用上限。
 
+### 7.8 外部 Harness 对照与后续编排设计
+
+#### 7.8.1 结论：保留 DAG，补齐 TaskGroup 控制面
+
+Codex 与 Claude Code 的共同模式不是为每种并行行为增加一种新节点，而是把能力分层：
+
+1. `spawn` 创建有稳定身份的子任务；
+2. dependency / DAG 决定任务何时可运行；
+3. `await` / join 决定调用方何时继续；
+4. task handle 提供 status、follow-up、cancel、retry 和 transcript；
+5. team/task board 仅用于需要多个自治 Agent 协作的高阶场景。
+
+Codex 支持并行 subagent、等待汇总、检查子线程、向运行中子任务追加指令及停止任务，并允许为自定义子 Agent 设置独立模型、指令和权限。Claude Code 将普通 subagent、后台任务、Agent Teams 和 Dynamic Workflows 分开：独立任务并行，团队任务通过共享任务列表和依赖协调，大规模任务由可恢复脚本编排。
+
+参考：
+
+- [OpenAI Codex Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)
+- [OpenAI Codex Long-running work](https://learn.chatgpt.com/docs/long-running-work)
+- [OpenAI Codex Hooks](https://learn.chatgpt.com/docs/hooks)
+- [OpenAI Codex Worktrees](https://learn.chatgpt.com/docs/environments/git-worktrees)
+- [Claude Code parallel agents](https://code.claude.com/docs/en/agents)
+- [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams)
+- [Claude Code Dynamic Workflows](https://code.claude.com/docs/en/workflows)
+- [Claude Code Worktrees](https://code.claude.com/docs/en/worktrees)
+
+因此，**DAG 继续作为唯一的执行 IR**。固定依赖、fan-out、fan-in、路由和循环仍用 nodes/edges 表达；不再创建第二套 JavaScript workflow runtime。动态 Agent 委派在 DAG 之上增加 TaskGroup/handle 控制面，必要时把高级编排编译为 DAG/Kernel wait，而不是绕过 DAG 调度。
+
+#### 7.8.2 当前能力基线与实际缺口
+
+当前 Durable Kernel 已具备不少必要原语，不能把“UI 没入口”误判为“底层未实现”：
+
+| 能力 | 当前基线 | 仍需补齐 |
+|---|---|---|
+| 持久子任务 | Kernel `spawnKey` 提供幂等 child spawn；Task identity 在恢复后保持稳定 | Flow `builtin.spawn` 与 delegation 应统一返回可观察的 group/task handles |
+| 动态等待 | Kernel `WaitSpec` 已支持 `task` / `child` / `any` / `all` / `quorum` | Flow 目前仅暴露静态入边和 delegation `join=all/none`，Agent 无 `await_tasks` 工具 |
+| 任务控制 | `TaskHandle` 已有 `status/wait/signal/start/respond/cancel/events/history/attempts` | DagWorkbench 缺少 task tree、单任务 follow-up、retry、transcript 和阻塞原因展示 |
+| 持久通讯 | Kernel 已有 cross-session outbox/inbox | 未向 Agent 暴露受限 mailbox；没有共享 task board、claim/lease 产品层 |
+| 并发 | DAG 无入边节点会并发进入 ready；Kernel 有 worker 全局并发上限；delegation 有组内上限 | 缺 Flow 独立 `maxConcurrency`/pool；`DagRunSpec.maxNodes` 已声明但尚未执行 |
+| 生命周期 | Kernel 支持 session suspend/resume、task cancel 和交互恢复 | 缺 Goal 实体、可编辑完成条件、pause/resume 进度 UI 和后台通知 |
+| 工作区 | Kernel 有 workspace snapshot/diff/merge 抽象 | 缺 Git worktree adapter、节点隔离策略、自动合并与冲突处理 UI |
+| 结构化输出 | Provider 层支持 `responseFormat/json_schema` | `LlmNodeConfig`、Agent Inspector 和 edge contract 尚未暴露 output schema/validation |
+| Memory/Context | 已声明 `memoryPolicy`，ContextAssembler 支持可选 memory retrieval | 会话装配尚未注入实际 `retrieveMemory`；缺长任务自动 compaction 生命周期 |
+| 扩展点 | 已有 plugin、tool、skill、MCP 和 provider hooks | 缺统一 Harness lifecycle hooks（task/tool/subagent/compact/run）及 hook trust 管理 |
+
+#### 7.8.3 Spawn 依赖边界
+
+`builtin.spawn` 可以定义同一 graph patch 内 spawned nodes 的依赖边；固定已知依赖继续直接画在主 DAG 中。动态 patch 只允许以下依赖目标：
+
+```ts
+type SpawnDependencyTarget =
+    | { type: 'spawned'; node: string }      // 同批动态节点
+    | { type: 'parent' }                     // 发起 spawn 的节点
+    | { type: 'upstream'; port: string };    // 预声明的上游输入
+```
+
+禁止动态任务随意引用任意全局节点或尚未创建的未来节点。Graph patch 应在应用前校验：
+
+- node/edge id 唯一且 idempotency key 生效；
+- edge 完整保留 `kind` 与 `onFailure`；
+- 不存在悬空引用、非法端口和动态新增环；
+- patch 后总节点数不超过 Flow 限制。
+
+无依赖 spawned nodes 可以并发执行；一个节点有多个入边时，DAG fan-in 天然表示静态 `wait all`，不需要额外 Wait 节点。只有运行时 task handle、`any`、`first-success`、`quorum` 或 timeout 等动态等待才进入 TaskGroup/`await_tasks` API。
+
+#### 7.8.4 分离等待、结果与后台生命周期
+
+当前 `join.mode` 同时承载“是否收集结果”和“是否等待”的名称，但实际 `all/none` 都等待已启动 child。后续规范化为三个互不耦合的策略：
+
+```ts
+interface TaskGroupPolicy {
+    execution: {
+        mode: 'structured' | 'detached';
+    };
+    wait: {
+        mode: 'all' | 'any' | 'first-success' | 'quorum';
+        quorum?: number;
+        timeoutMs?: number;
+    };
+    result: {
+        mode: 'collect' | 'discard';
+        order?: 'declared' | 'completion';
+    };
+}
+```
+
+默认 `structured + all + collect`：父任务/Flow 结束前等待 children，父级取消向下传播。`detached` 必须显式选择，并同时声明 owner session、失败可见位置、结果持久化位置、预算和取消策略，避免 orphan task 与失控费用。
+
+Agent 侧统一提供受权限和配额约束的工具：
+
+```ts
+spawn_tasks(input): Promise<{ groupId: string; taskIds: string[] }>;
+list_tasks(input): Promise<TaskSummary[]>;
+await_tasks(input: {
+    taskIds: string[];
+    mode: 'all' | 'any' | 'first-success' | 'quorum';
+    quorum?: number;
+    timeoutMs?: number;
+}): Promise<TaskGroupResult>;
+send_task(input: { taskId: string; message: string }): Promise<void>;
+cancel_task(input: { taskId: string; reason?: string }): Promise<void>;
+```
+
+#### 7.8.5 运行界面与人体工程要求
+
+Design 模式继续显示 node/edge/Flow Inspector；Run 模式增加真正的执行树，而不是只有根任务状态和整体取消：
+
+```text
+Supervisor                    running
+├─ research-api               completed   42s
+├─ inspect-tests              blocked     waits: research-api
+├─ implement                  running     2m
+└─ verify                     pending
+```
+
+每个 task 至少显示：
+
+- resolved Agent/model/system prompt/tools/skills/permissions；
+- 输入、输出、依赖、阻塞原因和 retry attempt；
+- token、elapsed time、预算和后续 cost meter；
+- tool calls、interaction/approval、事件与独立 transcript；
+- `Open / Send follow-up / Cancel / Retry` 操作。
+
+Flow 级运行策略补充：
+
+```ts
+interface FlowRunPolicy {
+    maxNodes: number;
+    maxConcurrency: number;
+    timeoutMs?: number;
+    maxTokens?: number;
+    workspace?: {
+        mode: 'shared' | 'read-only' | 'worktree';
+        merge?: 'manual' | 'auto-if-clean' | 'discard';
+        cleanup?: 'on-success' | 'always' | 'keep';
+    };
+}
+```
+
+#### 7.8.6 结构化输出、Hooks 与 Goal
+
+多 Agent DAG 不应依赖自然语言猜测上下游格式。`LlmNodeConfig` 后续增加：
+
+```ts
+interface StructuredOutputPolicy {
+    responseFormat?: {
+        type: 'text' | 'json_object' | 'json_schema';
+        schema?: JsonValue;
+    };
+    outputValidation?: {
+        retries?: number;
+        onInvalid?: 'fail' | 'repair' | 'continue';
+    };
+}
+```
+
+data edge 校验 source output schema 与 target input schema；运行时无效输出按策略 fail/repair/continue，并记录原始响应与校验错误。
+
+Harness hooks 采用小而稳定的事件集合：
+
+```text
+run.started / run.completed
+task.started / task.completed
+agent.spawned / agent.stopped
+tool.before / tool.after
+approval.requested
+context.beforeCompact / context.afterCompact
+```
+
+Hook 可以注入上下文、审计、验证或阻止危险工具，但必须具备来源展示、内容 hash 信任、最小权限、timeout、输出上限和禁用入口；不能成为绕过 approval/sandbox 的脚本后门。
+
+Goal 属于 Run 控制面，不属于单个 Agent node：
+
+```ts
+interface FlowRunGoal {
+    objective: string;
+    constraints: string[];
+    acceptanceCriteria: string[];
+    status: 'active' | 'paused' | 'completed' | 'blocked';
+}
+```
+
+Goal 支持进度摘要、追加约束、pause/resume 和完成标准验证，但不会扩大原 Flow 的工具、文件、网络或审批权限。
+
+#### 7.8.7 同步优先级与明确不做
+
+| 优先级 | 同步内容 | 说明 |
+|---|---|---|
+| **P0** | task handles/TaskGroup、`await_tasks`、task tree、单任务 steer/cancel/retry、Flow limits、structured output | 多数已有 Kernel/Provider 原语，优先完成协议接线与 UI |
+| **P1** | worktree adapter、Goal、Harness hooks、memory retrieval/自动 compaction、预算统计 | 解决长任务可靠性、隔离和可治理性 |
+| **P2** | Composite Flow、受限 Agent mailbox、共享 task board、claim/lease、调度/通知 | 仅在明确建设自治 Agent Teams/自动化产品时引入 |
+
+明确不做：
+
+1. 不新增与 DAG 并列的第二套 workflow runtime；脚本或模板只能编译到 DAG/Kernel 原语。
+2. 不默认 detached child；不允许无 owner、无预算、无取消传播的后台任务。
+3. 不允许跨 session DAG edge；跨 session 只通过 durable message/artifact 交换。
+4. 不把共享 task board 作为普通 Flow 的必要组件；固定依赖仍由 DAG 表达。
+5. 不把 Goal、worktree、hooks 等 Run/平台策略继续堆进 `builtin.agent` config。
+
+#### 7.8.8 当前实现状态
+
+当前已落地部分均走统一 DAG/Kernel 路径：
+
+- Delegation 已拆分 `execution / wait / result / failure / budget`，支持 `all / any / first-success / quorum`、结构化取消、显式深度、并发和超时边界；detached 必须配置 deadline。
+- 动态 spawn edge 支持 `$parent` 与 `$upstream:<nodeId>` 锚点，保留 `kind / onFailure`；无依赖节点由 DAG scheduler 自然并发。
+- Flow Run 已实现 `maxNodes / maxConcurrency / timeoutMs / maxTokens`、Goal、task tree、单任务 signal/cancel、时间与 token 统计。
+- Agent 已接入 `responseFormat + outputValidation`（fail/repair/continue）、可配置上下文压缩；Session ContextAssembler 已开放 memory retrieval 注入点。
+- Harness hook 使用可信来源、content hash、timeout 和输出上限的 host boundary；Flow 文档不能自行安装 hook 代码。
+- Kernel Session 已支持任务恢复/列举、父子取消传播、跨 Session durable mailbox，以及带 CAS claim/renew/expiry lease 的可选 task board。
+- worktree 使用 argv-safe Git manager；没有配置 workspace manager 时非 shared 模式 fail closed。
+- `builtin.flow` Composite 在执行前递归展开并 namespace 到同一 DAG，带循环检测、参数绑定和入口/出口边重写，不引入嵌套 runtime。
+
 ---
 
 ## 8. 数据迁移与兼容
@@ -506,6 +718,9 @@ interface DelegationConfig {
 | **P2 运行时（配置统一）** | 固定五层继承；`bindFlowNode` 分阶段 resolve 引用；Node 显式值优先；System Prompt 与 History 解耦 | llm-session / llm-tasks | typecheck + test |
 | **P3 三能力** | 节点级 `historyPolicy` / `persistOutput` / `delegation`（结构化 payload + history 隔离） | llm-flow / llm-tasks | test |
 | **P4 UI/seed** | Flow defaults + 参数运行表单 + builtin.agent 专用 inspector + 实体选择器；default-flows 改「引用 + 节点增量」 | llm-ui / llm-session | typecheck + UI test |
+| **P5 TaskGroup 控制面** | task handles；spawn/list/await/send/cancel tools；wait/result/execution 分离；Flow maxNodes/maxConcurrency；动态 patch 校验 | durable-kernel / llm-flow / llm-tasks | 幂等 spawn、any/all/quorum、取消传播、限制测试 |
+| **P6 运行可观察性与隔离** | Run task tree；单任务 steer/retry/transcript；structured output；worktree adapter；token/time/cost 统计 | llm-ui / llm-flow / durable-kernel | UI interaction + schema contract + workspace integration |
+| **P7 长任务与扩展** | Goal；Harness hooks；memory retrieval/compaction；Composite Flow；按需 Agent task board/mailbox | llm-session / llm-flow / app-shell | 恢复、信任边界、长期运行与组合 Flow 测试 |
 
 ---
 
@@ -523,4 +738,4 @@ interface DelegationConfig {
 
 **待确认**：
 
-8. **统一大 Node（Composite）**：本次只做「数据模型统一（LlmNodeConfig）」，**不合并 Agent/Flow 执行路径**（不引入嵌套 flow）。若后续确需「flow 作为节点复用/嵌套」，再评估 Composite 执行统一（叶子→单次 LLM，复合→递归 DAG）。
+8. **统一大 Node（Composite）**：采用“编译期展开”而不是嵌套 runtime。`builtin.flow` 引用不可变 Flow revision，展开后与父 Flow 共用同一个 DAG scheduler、limits、task tree 与取消域。

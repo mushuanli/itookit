@@ -4,6 +4,8 @@ import type {
     JsonValue,
     OutputPortSpec,
     FlowEdgeId,
+    FlowRunGoal,
+    FlowRunPolicy,
 } from './flow-definition';
 
 export interface DagPluginManifest<Config = unknown> {
@@ -50,6 +52,11 @@ export interface DagRunSpec {
     nodes: DagNodeDefinition[];
     edges: DagEdgeDefinition[];
     maxNodes?: number;
+    maxConcurrency?: number;
+    timeoutMs?: number;
+    maxTokens?: number;
+    runPolicy?: FlowRunPolicy;
+    goal?: FlowRunGoal;
 }
 
 export interface DagNodeContext<Config = unknown> {
@@ -146,6 +153,7 @@ export interface GraphPatch {
         input?: string;
         output?: string;
         kind?: 'control' | 'data';
+        onFailure?: 'fail' | 'skip' | 'continue';
     }>;
 }
 

@@ -13,6 +13,13 @@ export type DelegationFailurePolicy = 'fail-fast' | 'continue' | 'retry';
 export interface DelegationGroup {
     policy: DelegationFailurePolicy;
     children: Set<string>;
+    completed: Set<string>;
+    succeeded: Set<string>;
+    waitMode: 'all' | 'any' | 'first-success' | 'quorum';
+    quorum: number;
+    detached: boolean;
+    deadline?: number;
+    resultOrder: 'declared' | 'completion';
 }
 
 export interface DelegationPlan {
@@ -26,6 +33,11 @@ export interface DelegationPlan {
     failurePolicy: DelegationFailurePolicy;
     failure: Record<string, unknown>;
     includeResults: boolean;
+    resultOrder: DelegationGroup['resultOrder'];
+    waitMode: DelegationGroup['waitMode'];
+    quorum: number;
+    detached: boolean;
+    waitTimeoutMs?: number;
     budget: Record<string, unknown>;
 }
 
@@ -56,17 +68,30 @@ export function delegationPlan(
     const failure = isRecord(runtime.delegation.failure) ? runtime.delegation.failure : {};
     const failurePolicy = delegationFailurePolicy(failure);
     const join = isRecord(runtime.delegation.join) ? runtime.delegation.join : {};
+    const wait = isRecord(runtime.delegation.wait) ? runtime.delegation.wait : {};
+    const result = isRecord(runtime.delegation.result) ? runtime.delegation.result : {};
+    const execution = isRecord(runtime.delegation.execution) ? runtime.delegation.execution : {};
+    const waitMode = wait.mode === 'any' || wait.mode === 'first-success' || wait.mode === 'quorum'
+        ? wait.mode : 'all';
+    const payloads = parseSubtaskPayloads(output).slice(0, fanout.maxTasks);
     return {
         groupId: key,
         parentId: String(node.id),
         parentIteration,
         template: templateValue,
-        payloads: parseSubtaskPayloads(output).slice(0, fanout.maxTasks),
+        payloads,
         depth,
         concurrency: fanout.concurrency,
         failurePolicy,
         failure,
-        includeResults: join.mode !== 'none',
+        includeResults: result.mode ? result.mode !== 'discard' : join.mode !== 'none',
+        resultOrder: result.order === 'completion' ? 'completion' : 'declared',
+        waitMode,
+        quorum: waitMode === 'quorum'
+            ? Math.min(payloads.length, positiveInteger(wait.quorum) ?? payloads.length)
+            : waitMode === 'all' ? payloads.length : 1,
+        detached: execution.mode === 'detached',
+        waitTimeoutMs: positiveInteger(wait.timeoutMs),
         budget: isRecord(runtime.delegation.budget) ? runtime.delegation.budget : {},
     };
 }
@@ -77,7 +102,17 @@ export function materializeDelegation(
     plan: DelegationPlan,
     state: DelegationRuntimeState,
 ): void {
-    const group: DelegationGroup = { policy: plan.failurePolicy, children: new Set() };
+    const group: DelegationGroup = {
+        policy: plan.failurePolicy,
+        children: new Set(),
+        completed: new Set(),
+        succeeded: new Set(),
+        waitMode: plan.waitMode,
+        quorum: plan.quorum,
+        detached: plan.detached,
+        resultOrder: plan.resultOrder,
+        ...(plan.waitTimeoutMs ? { deadline: Date.now() + plan.waitTimeoutMs } : {}),
+    };
     state.groups.set(plan.groupId, group);
     const createdIds: string[] = [];
     plan.payloads.forEach((payload, index) => {

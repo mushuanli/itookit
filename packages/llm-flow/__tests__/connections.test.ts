@@ -95,6 +95,31 @@ describe('flowToDag connection resolution', () => {
         expect(config.toolIds).toEqual(['legacy-tool', 'shared-tool', 'flow-tool', 'node-tool']);
         expect(config.skillIds).toEqual(['flow-skill', 'node-skill']);
     });
+
+    it('expands Composite Flow nodes into one namespaced DAG', async () => {
+        const value = (id: string, content: unknown): FlowNodeDefinition => ({
+            id: id as FlowNodeId, name: id, plugin: 'builtin.transform', pluginVersion: '1.0.0',
+            config: { value: content, outputName: 'result', type: 'json' }, inputs: {},
+        });
+        const child = revision([value('first', '${params.value}'), value('last', 'last')]);
+        child.id = 'child' as FlowId;
+        child.edges = [{ id: 'inner' as never, from: 'first' as never, to: 'last' as never, output: 'result', input: 'input' }];
+        const parent = revision([
+            value('source', 'source'),
+            { ...value('composite', null), plugin: 'builtin.flow', config: { flowId: 'child', revision: 1, parameters: { value: 42 } } },
+            value('sink', 'sink'),
+        ]);
+        parent.edges = [
+            { id: 'into' as never, from: 'source' as never, to: 'composite' as never, output: 'result', input: 'input' },
+            { id: 'out' as never, from: 'composite' as never, to: 'sink' as never, output: 'result', input: 'input' },
+        ];
+
+        const spec = await flowToDag(parent, undefined, undefined, async id => id === 'child' ? child : null);
+        expect(spec.nodes.map(node => node.id)).toEqual(['source', 'sink', 'composite/first', 'composite/last']);
+        expect((spec.nodes.find(node => node.id === 'composite/first')!.config as Record<string, unknown>).value).toBe(42);
+        expect(spec.edges.some(edge => edge.from === 'source' && edge.to === 'composite/first')).toBe(true);
+        expect(spec.edges.some(edge => edge.from === 'composite/last' && edge.to === 'sink')).toBe(true);
+    });
 });
 
 describe('validateFlowRevision connections', () => {

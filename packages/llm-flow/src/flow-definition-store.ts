@@ -162,6 +162,7 @@ export class FlowDefinitionStore {
             ...(draft.systemPrompt ? { systemPrompt: structuredClone(draft.systemPrompt) } : {}),
             ...(draft.toolIds ? { toolIds: structuredClone(draft.toolIds) } : {}),
             ...(draft.defaults ? { defaults: structuredClone(draft.defaults) } : {}),
+            ...(draft.runPolicy ? { runPolicy: structuredClone(draft.runPolicy) } : {}),
             createdAt: Date.now(),
         };
         return this.saveRevision({ ...withoutDigest, digest: flowRevisionDigest(withoutDigest) });
@@ -187,6 +188,7 @@ export class FlowDefinitionStore {
             ...(existing?.systemPrompt ? { systemPrompt: structuredClone(existing.systemPrompt) } : {}),
             ...(existing?.toolIds ? { toolIds: structuredClone(existing.toolIds) } : {}),
             ...(existing?.defaults ? { defaults: structuredClone(existing.defaults) } : {}),
+            ...(existing?.runPolicy ? { runPolicy: structuredClone(existing.runPolicy) } : {}),
             updatedAt: Date.now(),
         };
         await this.store.writeFile(nodeId, JSON.stringify(draft, null, 2));

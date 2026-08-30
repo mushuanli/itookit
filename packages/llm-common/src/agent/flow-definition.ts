@@ -46,6 +46,7 @@ export interface FlowEdgeDefinition {
     order?: number;
     output?: string;
     input?: string;
+    onFailure?: 'fail' | 'skip' | 'continue';
 }
 
 export interface FlowNodeDefinition {
@@ -59,6 +60,8 @@ export interface FlowNodeDefinition {
     capabilities?: string[];
     budget?: Record<string, number>;
     retry?: { maxAttempts: number; backoffMs?: number };
+    /** Saga compensation node invoked when this node fails. */
+    compensate?: FlowNodeId;
 }
 
 export interface FlowLayout {
@@ -86,6 +89,8 @@ export interface FlowDraft {
     toolIds?: string[];
     /** Defaults inherited by builtin.agent nodes before agent/node overrides. */
     defaults?: FlowDefaults;
+    /** Runtime safety, concurrency and workspace defaults. */
+    runPolicy?: FlowRunPolicy;
     updatedAt: number;
 }
 
@@ -145,6 +150,19 @@ export interface DelegationConfig {
         order?: 'parallel' | 'sequential';
     };
     join?: { mode?: 'all' | 'none' };
+    /** Structured child lifetime. Defaults to structured. */
+    execution?: { mode?: 'structured' | 'detached' };
+    /** Dynamic wait semantics. Static all-of dependencies remain DAG edges. */
+    wait?: {
+        mode?: 'all' | 'any' | 'first-success' | 'quorum';
+        quorum?: number;
+        timeoutMs?: number;
+    };
+    /** Whether and in which order child results enter the Flow aggregate. */
+    result?: {
+        mode?: 'collect' | 'discard';
+        order?: 'declared' | 'completion';
+    };
     failure?: {
         policy?: 'fail-fast' | 'continue' | 'retry';
         maxAttempts?: number;
@@ -181,6 +199,29 @@ export interface FlowDefaults extends Partial<LlmNodeConfig> {
     agentId?: string;
 }
 
+export interface FlowWorkspacePolicy {
+    mode: 'shared' | 'read-only' | 'worktree';
+    base?: 'current' | 'head' | string;
+    merge?: 'manual' | 'auto-if-clean' | 'discard';
+    cleanup?: 'on-success' | 'always' | 'keep';
+}
+
+export interface FlowRunPolicy {
+    maxNodes?: number;
+    maxConcurrency?: number;
+    timeoutMs?: number;
+    /** Cumulative token ceiling across completed LLM nodes. */
+    maxTokens?: number;
+    workspace?: FlowWorkspacePolicy;
+}
+
+export interface FlowRunGoal {
+    objective: string;
+    constraints?: string[];
+    acceptanceCriteria?: string[];
+    status?: 'active' | 'paused' | 'completed' | 'blocked';
+}
+
 export interface FlowRevision {
     id: FlowId;
     revision: number;
@@ -199,6 +240,8 @@ export interface FlowRevision {
     toolIds?: string[];
     /** Defaults inherited by builtin.agent nodes. */
     defaults?: FlowDefaults;
+    /** Frozen runtime safety, concurrency and workspace defaults. */
+    runPolicy?: FlowRunPolicy;
     createdAt: number;
     digest: string;
 }

@@ -405,6 +405,10 @@ export interface RecoveryReport {
 /** Session 的 Task 生命周期面（提交/信号/交互/事件）。 */
 export interface SessionTaskApi {
     submit<I, O = unknown>(spec: TaskSpec<I>): Promise<TaskHandle<O>>;
+    /** Attach to a durable task after a process restart or UI reconnect. */
+    attachTask<O = unknown>(taskId: TaskId): Promise<TaskHandle<O>>;
+    /** Inspect the complete session task tree, including terminal tasks. */
+    listTasks(): Promise<TaskRecord[]>;
     signal(taskId: TaskId, signal: TaskSignal): Promise<void>;
     respond<T extends JsonValue>(taskId: TaskId, response: InteractionResponse<T>): Promise<void>;
     events(options?: { after?: number }): AsyncIterable<EventEnvelope>;
@@ -417,6 +421,28 @@ export interface SessionSharedStateApi {
     deleteShared(key: string, options?: SharedStateWriteOptions): Promise<boolean>;
     listShared(prefix?: string): Promise<SharedStateEntry[]>;
     sharedHistory<T extends JsonValue = JsonValue>(key: string): Promise<SharedStateRevision<T>[]>;
+}
+
+export interface TaskBoardItem {
+    id: string;
+    title: string;
+    description?: string;
+    status: 'open' | 'claimed' | 'completed' | 'failed';
+    dependencies?: string[];
+    assigneeTaskId?: TaskId;
+    leaseUntil?: number;
+    result?: JsonValue;
+    createdAt: number;
+    updatedAt: number;
+}
+
+/** Durable, CAS-protected coordination board for multi-agent runs. */
+export interface SessionTaskBoardApi {
+    listTaskBoard(): Promise<TaskBoardItem[]>;
+    createTaskBoardItem(input: Pick<TaskBoardItem, 'title' | 'description' | 'dependencies'> & { id?: string }): Promise<TaskBoardItem>;
+    claimTaskBoardItem(id: string, assigneeTaskId: TaskId, options?: { leaseMs?: number }): Promise<TaskBoardItem>;
+    renewTaskBoardLease(id: string, assigneeTaskId: TaskId, leaseMs?: number): Promise<TaskBoardItem>;
+    completeTaskBoardItem(id: string, result?: JsonValue, failed?: boolean): Promise<TaskBoardItem>;
 }
 
 /** Session 间消息面（outbox/inbox）。 */
@@ -474,6 +500,7 @@ export interface SessionLifecycleApi {
 export interface SessionHandle extends
     SessionTaskApi,
     SessionSharedStateApi,
+    SessionTaskBoardApi,
     SessionMessageApi,
     SessionContextApi,
     SessionResourceApi,

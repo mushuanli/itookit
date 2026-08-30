@@ -154,6 +154,7 @@ const editor = await createMDxEditor(container, {
 | **Title Bar** | `core:titlebar` | 顶部标题栏，包含标题、模式切换、保存、打印及 AI 按钮。 | **已启用**<br>模式切换: 关闭 | `enableToggleEditMode`: boolean<br>`title`: string<br>`onSidebarToggle`: function |
 | **Toolbar** | `ui:toolbar` | 编辑器工具栏容器，用于放置格式化按钮。 | **已启用** | `className`: string (自定义样式类) |
 | **Formatting** | `ui:formatting` | 提供加粗、斜体、列表、链接等基础 Markdown 格式化按钮和命令。 | **已启用**<br>功能: All | `enabledFormats`: string[] (如 `['bold', 'italic']`)<br>`customIcons`: object (自定义图标) |
+| **Clipboard** | `interaction:clipboard` | 智能粘贴：富文本转 Markdown；`Cmd/Ctrl+Shift+V` 原始粘贴。 | **已启用**<br>模式: smart | `pasteMode`: `'smart'\|'plain'\|'rich'`<br>`enablePlainPasteShortcut`: boolean |
 | **Source Sync** | `interaction:source-sync` | **双击**渲染内容可跳转至编辑模式对应的源码位置。 | **已启用** | 无配置项 (依赖 DOM 结构查找) |
 | **Table** | `interaction:table` | 增强表格功能，支持点击表头**排序**和表头下方输入框**筛选**。 | **已启用**<br>排序: 开启<br>筛选: 关闭 | `enableSorting`: boolean<br>`enableFiltering`: boolean (开启筛选行) |
 | **Foldable** | `folder` | 支持折叠块语法 `::> 标题`，可包含复选框。 | **已启用**<br>默认: 展开 | `defaultOpen`: boolean<br>`enableTaskCheckbox`: boolean (标题是否支持任务框) |

@@ -9,16 +9,37 @@ export function delegationSchema(): JsonValue {
         type: 'object',
         title: 'Dynamic delegation',
         description: 'Let this Agent create a bounded set of child Agent tasks.',
-        advancedProperties: ['toolDescription', 'fanout', 'join', 'failure', 'budget'],
+        advancedProperties: ['toolDescription', 'fanout', 'execution', 'wait', 'result', 'join', 'failure', 'budget'],
         properties: {
             enabled: { type: 'boolean', title: 'Enable delegation' },
             toolName: { type: 'string', title: 'Tool name', unsetLabel: `${DELEGATION_DEFAULTS.toolName} (default)` },
             toolDescription: { type: 'string', title: 'Tool description' },
             template: childTemplateSchema(),
             fanout: fanoutSchema(),
+            execution: {
+                type: 'object', title: 'Child lifetime',
+                properties: {
+                    mode: { ...enumSchema(['structured', 'detached']), title: 'Lifetime', unsetLabel: 'structured (default)' },
+                },
+            },
+            wait: {
+                type: 'object', title: 'Wait policy',
+                properties: {
+                    mode: { ...enumSchema(['all', 'any', 'first-success', 'quorum']), title: 'Wait mode', unsetLabel: 'all (default)' },
+                    quorum: { type: 'integer', title: 'Required successes' },
+                    timeoutMs: { type: 'integer', title: 'Group timeout (ms)' },
+                },
+            },
+            result: {
+                type: 'object', title: 'Result policy',
+                properties: {
+                    mode: { ...enumSchema(['collect', 'discard']), title: 'Results', unsetLabel: 'collect (default)' },
+                    order: { ...enumSchema(['declared', 'completion']), title: 'Result order', unsetLabel: 'declared (default)' },
+                },
+            },
             join: {
                 type: 'object',
-                title: 'Result aggregation',
+                title: 'Legacy result aggregation',
                 description: 'all includes child outputs in the Flow result; none excludes them. The Flow still waits for started children.',
                 properties: {
                     mode: { ...enumSchema(['all', 'none']), title: 'Include child outputs', unsetLabel: `${DELEGATION_DEFAULTS.resultMode} (default)` },

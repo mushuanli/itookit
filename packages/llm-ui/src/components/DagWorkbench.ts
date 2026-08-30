@@ -187,6 +187,7 @@ export class DagWorkbench {
                 <label>Legacy capabilities<textarea data-inline-capabilities rows="3">${escapeHTML(JSON.stringify(node.capabilities ?? [], null, 2))}</textarea></label>
                 <label>Budget<textarea data-inline-budget rows="3">${escapeHTML(JSON.stringify(node.budget ?? {}, null, 2))}</textarea></label>
                 <label>Retry policy<textarea data-inline-retry rows="3">${escapeHTML(JSON.stringify(node.retry ?? {}, null, 2))}</textarea></label>
+                <label>Compensation node<select data-inline-compensate><option value="">None</option>${draft.nodes.filter(item => item.id !== node.id).map(item => `<option value="${escapeHTML(item.id)}" ${item.id === node.compensate ? 'selected' : ''}>${escapeHTML(item.name)}</option>`).join('')}</select></label>
                 <label>Priority<input data-inline-priority type="number" value="${node.priority ?? 0}"></label>
             </details>`;
         let schema = withConnectionEnum(presentation.manifest.configSchema, draft, formValue);
@@ -199,6 +200,9 @@ export class DagWorkbench {
             ]);
             if (this.selectedNodeId !== node.id || !inspector.isConnected) return;
             schema = withAgentEntityEnums(schema, formValue, { agents, prompts, tools, skills });
+        } else if (node.plugin === 'builtin.flow') {
+            const flows = await this.options.commands.execute<FlowDraft[]>(FlowCommand.DraftList);
+            schema = withCompositeFlowEnum(schema, formValue, flows);
         }
         const formRoot = inspector.querySelector<HTMLElement>('[data-inline-config]')!;
         const schemaForm = new SchemaForm(formRoot, schema, formValue, presentation.ui?.inspector.layout);
@@ -217,6 +221,7 @@ export class DagWorkbench {
                     capabilities: JSON.parse(read('[data-inline-capabilities]')),
                     budget: JSON.parse(read('[data-inline-budget]')),
                     retry: JSON.parse(read('[data-inline-retry]')),
+                    compensate: (read('[data-inline-compensate]') || undefined) as FlowNodeDefinition['compensate'],
                     priority: Number(read('[data-inline-priority]')),
                 });
                 this.render();
@@ -246,6 +251,7 @@ export class DagWorkbench {
             <label>Kind<select data-edge-kind><option value="data" ${edge.kind === 'data' ? 'selected' : ''}>Data</option><option value="control" ${edge.kind === 'control' ? 'selected' : ''}>Control</option></select></label>
             <label>Source output<select data-edge-output>${portOptions(source?.outputs, edge.output)}</select></label>
             <label>Target input<select data-edge-input>${portOptions(target?.inputs, edge.input)}</select></label>
+            <label>When upstream fails<select data-edge-on-failure><option value="fail" ${!edge.onFailure || edge.onFailure === 'fail' ? 'selected' : ''}>Fail downstream</option><option value="skip" ${edge.onFailure === 'skip' ? 'selected' : ''}>Skip downstream</option><option value="continue" ${edge.onFailure === 'continue' ? 'selected' : ''}>Continue with failure result</option></select></label>
             <p style="color:var(--llm-text-secondary,#9ca3af);font-size:.8rem">Data connections carry a named output into a named input. Control connections only determine execution order.</p>
             <div class="dag-inspector__actions">
                 <button data-edge-save class="is-primary">Save connection</button>
@@ -255,8 +261,9 @@ export class DagWorkbench {
             const kind = inspector.querySelector<HTMLSelectElement>('[data-edge-kind]')!.value as FlowEdgeDefinition['kind'];
             const output = inspector.querySelector<HTMLSelectElement>('[data-edge-output]')!.value;
             const input = inspector.querySelector<HTMLSelectElement>('[data-edge-input]')!.value;
+            const onFailure = inspector.querySelector<HTMLSelectElement>('[data-edge-on-failure]')!.value as NonNullable<FlowEdgeDefinition['onFailure']>;
             try {
-                this.controller?.updateEdge({ ...edge, kind, output: kind === 'data' ? output : undefined, input: kind === 'data' ? input : undefined });
+                this.controller?.updateEdge({ ...edge, kind, output: kind === 'data' ? output : undefined, input: kind === 'data' ? input : undefined, onFailure });
                 this.render();
                 Toast.success('Connection updated');
             } catch (error) { Toast.error(error instanceof Error ? error.message : 'Invalid connection'); }
@@ -365,6 +372,9 @@ export class DagWorkbench {
                 this.options.listSkills?.() ?? Promise.resolve([]),
             ]);
             schema = withAgentEntityEnums(schema, formValue, { agents, prompts, tools, skills });
+        } else if (node.plugin === 'builtin.flow') {
+            const flows = await this.options.commands.execute<FlowDraft[]>(FlowCommand.DraftList);
+            schema = withCompositeFlowEnum(schema, formValue, flows);
         }
         const schemaForm = new SchemaForm(
             formRoot,
@@ -496,20 +506,30 @@ export class DagWorkbench {
         const snapshot = this.run;
         if (!snapshot) return this.renderDesign();
         const run = snapshot.root.task;
+        const nodeSnapshots = new Map(snapshot.nodes.map(item => [item.snapshot.task.id, item.snapshot]));
         this.root.innerHTML = `<section class="dag-workbench" data-mode="run">
-            <header class="dag-toolbar"><strong>DAG Run</strong><span>${escapeHTML(String(run.id))}</span><span data-status="${escapeHTML(run.status)}">${escapeHTML(run.status)}</span><button data-run-action="cancel">Cancel</button></header>
-            <div class="dag-run-nodes">${snapshot.nodes.map(({ nodeId, snapshot: node }) => {
+            <header class="dag-toolbar"><strong>DAG Run</strong><span>${escapeHTML(String(run.id))}</span><span data-status="${escapeHTML(run.status)}">${escapeHTML(run.status)}</span><small>${snapshot.usage.tokens} tokens · ${(snapshot.usage.elapsedMs / 1000).toFixed(1)}s</small><button data-run-action="goal">Goal</button><button data-run-action="cancel">Cancel run</button></header>
+            ${snapshot.goal ? `<section class="dag-run-goal"><strong>${escapeHTML(snapshot.goal.objective || 'Run goal')}</strong><span>${escapeHTML(snapshot.goal.status ?? 'active')}</span>${snapshot.goal.acceptanceCriteria?.length ? `<small>${snapshot.goal.acceptanceCriteria.map(escapeHTML).join(' · ')}</small>` : ''}</section>` : ''}
+            <div class="dag-run-nodes">${snapshot.taskTree.map(task => {
+                const nodeId = task.labels?.flowNodeId ?? (task.id === run.id ? 'Result' : task.program.kind);
                 const iterations = snapshot.iterations[nodeId] ?? 1;
-                const waiting = pendingInteraction(node);
-                return `<article data-task-id="${escapeHTML(node.task.id)}">
-                    <strong>${escapeHTML(nodeId)}</strong>
-                    <small>${escapeHTML(node.task.status)}${iterations > 1 ? ` · ×${iterations}` : ''}</small>
-                    <div>${escapeHTML(node.task.program.kind)}</div>
+                const waiting = pendingInteraction(nodeSnapshots.get(task.id));
+                const detached = snapshot.detachedNodes.includes(nodeId);
+                return `<article data-task-id="${escapeHTML(task.id)}">
+                    <header><strong>${escapeHTML(nodeId)}</strong><small>${escapeHTML(task.status)}${iterations > 1 ? ` · ×${iterations}` : ''}${detached ? ' · detached' : ''}</small></header>
+                    <div>${escapeHTML(task.program.kind)} · attempt ${task.attemptCount}</div>
+                    ${task.parentTaskId ? `<small>parent: ${escapeHTML(task.parentTaskId)}</small>` : ''}
+                    ${task.lastError?.message ? `<div class="dag-run-error">${escapeHTML(task.lastError.message)}</div>` : ''}
                     ${waiting ? `<div class="dag-run-wait">${escapeHTML(waiting.prompt)}</div><button data-run-respond="${escapeHTML(nodeId)}" data-request-id="${escapeHTML(waiting.id)}">Respond</button>` : ''}
+                    ${task.id !== run.id && !isTerminalRun(task.status) ? `<menu><button data-run-signal="${escapeHTML(task.id)}">Inject</button><button data-run-cancel-task="${escapeHTML(task.id)}">Cancel</button></menu>` : ''}
+                    <details><summary>Runtime details</summary><pre>${escapeHTML(JSON.stringify({ wait: task.wait, output: task.output, effects: Object.keys(task.effects ?? {}) }, null, 2))}</pre></details>
                 </article>`;
             }).join('')}</div>
         </section>`;
         this.root.querySelector('[data-run-action="cancel"]')?.addEventListener('click', () => void this.cancel());
+        this.root.querySelector('[data-run-action="goal"]')?.addEventListener('click', () => this.openGoalDialog());
+        this.root.querySelectorAll<HTMLElement>('[data-run-signal]').forEach(button => button.addEventListener('click', () => this.openSignalDialog(button.dataset.runSignal!)));
+        this.root.querySelectorAll<HTMLElement>('[data-run-cancel-task]').forEach(button => button.addEventListener('click', () => void this.cancelRunTask(button.dataset.runCancelTask!)));
         this.root.querySelectorAll<HTMLElement>('[data-run-respond]').forEach(button => {
             button.addEventListener('click', () => {
                 const nodeId = button.dataset.runRespond!;
@@ -520,6 +540,37 @@ export class DagWorkbench {
                 this.openRespondDialog(nodeId, requestId, waiting?.prompt ?? 'Please respond.');
             });
         });
+    }
+
+    private openGoalDialog(): void {
+        if (!this.run) return;
+        const dialog = document.createElement('dialog');
+        dialog.className = 'dag-dialog';
+        dialog.innerHTML = `<form method="dialog"><h2>Run goal</h2><label>Objective<textarea name="objective" rows="3">${escapeHTML(this.run.goal?.objective ?? '')}</textarea></label><label>Status<select name="status">${['active', 'paused', 'completed', 'blocked'].map(status => `<option ${status === (this.run?.goal?.status ?? 'active') ? 'selected' : ''}>${status}</option>`).join('')}</select></label><menu><button value="cancel">Cancel</button><button value="save">Save</button></menu></form>`;
+        document.body.append(dialog); dialog.showModal();
+        dialog.addEventListener('close', () => {
+            if (dialog.returnValue === 'save' && this.run) {
+                const objective = dialog.querySelector<HTMLTextAreaElement>('[name="objective"]')!.value.trim();
+                const status = dialog.querySelector<HTMLSelectElement>('[name="status"]')!.value;
+                void this.options.commands.execute(FlowCommand.RunGoalUpdate, { taskId: this.run.root.task.id, goal: { objective, status } })
+                    .then(() => this.refreshRun(this.run!.root.task.id));
+            }
+            dialog.remove();
+        }, { once: true });
+    }
+
+    private openSignalDialog(targetTaskId: string): void {
+        const value = window.prompt('Inject a message or control payload into this task:');
+        if (value === null || !this.run) return;
+        void this.options.commands.execute(FlowCommand.RunSignal, {
+            taskId: this.run.root.task.id, targetTaskId, signal: { type: 'inject', payload: value },
+        }).then(() => this.refreshRun(this.run!.root.task.id));
+    }
+
+    private async cancelRunTask(targetTaskId: string): Promise<void> {
+        if (!this.run) return;
+        await this.options.commands.execute(FlowCommand.RunTaskCancel, { taskId: this.run.root.task.id, targetTaskId });
+        await this.refreshRun(this.run.root.task.id);
     }
 
     private openRespondDialog(nodeId: string, requestId: string, prompt: string): void {
@@ -677,6 +728,7 @@ export class DagWorkbench {
             parameters: draft.parameters ?? [],
             availableConnections,
             defaults: draft.defaults,
+            runPolicy: draft.runPolicy,
             agents,
             systemPrompts,
             tools,
@@ -848,6 +900,24 @@ function withAgentEntityEnums(
         properties[key] = { ...properties[key], title, description } as JsonValue;
     }
     return { ...schema, properties } as JsonValue;
+}
+
+function withCompositeFlowEnum(schema: JsonValue, config: JsonValue, flows: FlowDraft[]): JsonValue {
+    if (!isRecord(schema) || !isRecord(schema.properties) || !isRecord(schema.properties.flowId)) return schema;
+    const selected = isRecord(config) && typeof config.flowId === 'string' ? config.flowId : '';
+    const ids = flows.map(flow => String(flow.id));
+    if (selected && !ids.includes(selected)) ids.unshift(selected);
+    return {
+        ...schema,
+        properties: {
+            ...schema.properties,
+            flowId: {
+                ...schema.properties.flowId,
+                enum: ids,
+                description: '复用已发布 Flow；运行前展开为同一个 DAG，不创建第二套调度器。',
+            },
+        },
+    } as JsonValue;
 }
 
 function pendingInteraction(

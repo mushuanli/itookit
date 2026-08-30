@@ -48,6 +48,27 @@ describe('Kernel durable kernel', () => {
         expect(await fs.driver.exists('/sessions/one/.kernel/tasks')).toBe(true);
     });
 
+    it('supports durable task-board claims and task-tree recovery', async () => {
+        kernel.registerProgram(manualProgram());
+        const session = await kernel.createSession({ id: 'session-one', storage: binding });
+        const parent = await session.submit({ program: { kind: 'test.manual', version: '1' }, input: 'parent' });
+        const child = await session.submit({ program: { kind: 'test.manual', version: '1' }, input: 'child', parent: parent.id });
+        const prerequisite = await session.createTaskBoardItem({ id: 'prepare', title: 'Prepare' });
+        const work = await session.createTaskBoardItem({ id: 'work', title: 'Work', dependencies: [prerequisite.id] });
+
+        await expect(session.claimTaskBoardItem(work.id, child.id)).rejects.toThrow('incomplete dependencies');
+        const claimedPrepare = await session.claimTaskBoardItem(prerequisite.id, parent.id);
+        await session.completeTaskBoardItem(claimedPrepare.id, { ok: true });
+        const claimedWork = await session.claimTaskBoardItem(work.id, child.id, { leaseMs: 1_000 });
+        expect(claimedWork.assigneeTaskId).toBe(child.id);
+        expect((await session.renewTaskBoardLease(work.id, child.id, 2_000)).leaseUntil).toBeGreaterThan(claimedWork.leaseUntil!);
+        expect((await session.attachTask(child.id)).id).toBe(child.id);
+        expect((await session.listTasks()).map(task => task.id)).toEqual(expect.arrayContaining([parent.id, child.id]));
+
+        await parent.cancel('stop tree');
+        expect((await child.status()).task.status).toBe('cancelled');
+    });
+
     it('rejects non-durable Task state before committing it', async () => {
         kernel.registerProgram(nonDurableStateProgram());
         const session = await kernel.createSession({ id: 'session-one', storage: binding });

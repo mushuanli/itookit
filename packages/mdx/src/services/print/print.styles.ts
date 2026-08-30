@@ -394,11 +394,31 @@ export const PRINT_STYLES = `
 
     .mdx-print pre,
     .mdx-print blockquote,
-    .mdx-print table,
     .mdx-print img,
     .mdx-print-message {
         page-break-inside: avoid;
         break-inside: avoid;
+    }
+
+    /* 表格容器：打印时取消横向滚动，允许正常分页 */
+    .mdx-print .mdx-table-container {
+        overflow: visible !important;
+    }
+
+    /* 长表格允许断页，但单行不在中间被切断 */
+    .mdx-print table {
+        break-inside: auto;
+        page-break-inside: auto;
+    }
+
+    .mdx-print tr {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+
+    /* 跨页时表头重复 */
+    .mdx-print thead {
+        display: table-header-group;
     }
 
     .mdx-print p,

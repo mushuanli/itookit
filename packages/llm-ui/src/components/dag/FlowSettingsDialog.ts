@@ -2,7 +2,7 @@
 // Flow-level settings modal: named connection slots (bound to global LLM
 // connections + one default) and declared runtime parameters with defaults.
 
-import type { FlowConnection, FlowDefaults, FlowParameter, JsonValue } from '@itookit/common';
+import type { FlowConnection, FlowDefaults, FlowParameter, FlowRunPolicy, JsonValue } from '@itookit/common';
 import { escapeHTML } from '@itookit/common';
 
 export interface FlowSettingsOptions {
@@ -12,6 +12,7 @@ export interface FlowSettingsOptions {
     /** Global LLM connections available to bind a slot to. */
     availableConnections: Array<{ id: string; name: string }>;
     defaults?: FlowDefaults;
+    runPolicy?: FlowRunPolicy;
     agents?: EntityOption[];
     systemPrompts?: EntityOption[];
     tools?: EntityOption[];
@@ -25,6 +26,7 @@ export interface FlowSettingsResult {
     defaultConnection?: string;
     parameters: FlowParameter[];
     defaults?: FlowDefaults;
+    runPolicy?: FlowRunPolicy;
 }
 
 const PARAM_TYPES: FlowParameter['type'][] = ['string', 'number', 'boolean', 'json'];
@@ -37,6 +39,7 @@ export function openFlowSettings(options: FlowSettingsOptions): Promise<FlowSett
         dialog.innerHTML = `<form method="dialog">
             <h2>Flow settings</h2>
             ${defaultsSection(options)}
+            ${runPolicySection(options.runPolicy)}
             <fieldset>
                 <legend>Connections</legend>
                 <div data-connections>${options.connections.map(connection => connectionRow(connection, options.availableConnections, options.defaultConnection)).join('')}</div>
@@ -66,6 +69,24 @@ export function openFlowSettings(options: FlowSettingsOptions): Promise<FlowSett
             }
         }, { once: true });
     });
+}
+
+function runPolicySection(policy: FlowRunPolicy = {}): string {
+    const workspace: Partial<NonNullable<FlowRunPolicy['workspace']>> = policy.workspace ?? {};
+    return `<fieldset class="dag-settings__run-policy">
+        <legend>Run limits & workspace</legend>
+        <p class="dag-settings__hint">为动态 spawn、并行执行和长任务设置安全边界。留空表示使用运行时默认值。</p>
+        <div class="dag-settings__grid">
+            <label>Max nodes<input data-run-max-nodes type="number" min="1" value="${policy.maxNodes ?? ''}" placeholder="1000"></label>
+            <label>Max concurrency<input data-run-max-concurrency type="number" min="1" value="${policy.maxConcurrency ?? ''}" placeholder="Unlimited"></label>
+            <label>Run timeout (ms)<input data-run-timeout type="number" min="1" value="${policy.timeoutMs ?? ''}" placeholder="Unlimited"></label>
+            <label>Token budget<input data-run-max-tokens type="number" min="1" value="${policy.maxTokens ?? ''}" placeholder="Unlimited"></label>
+            <label>Workspace mode${optionSelect('run-workspace-mode', workspace.mode, ['shared', 'read-only', 'worktree'])}</label>
+            <label>Merge policy${optionSelect('run-workspace-merge', workspace.merge, ['manual', 'auto-if-clean', 'discard'])}</label>
+            <label>Cleanup${optionSelect('run-workspace-cleanup', workspace.cleanup, ['on-success', 'always', 'keep'])}</label>
+            <label>Base revision<input data-run-workspace-base value="${escapeHTML(workspace.base ?? '')}" placeholder="current / head / revision"></label>
+        </div>
+    </fieldset>`;
 }
 
 function defaultsSection(options: FlowSettingsOptions): string {
@@ -231,7 +252,26 @@ function readSettings(dialog: HTMLDialogElement): FlowSettingsResult {
         throw new Error('Parameter names must be unique');
     }
     const defaults = readDefaults(dialog);
-    return { connections, defaultConnection, parameters, defaults };
+    const runPolicy = readRunPolicy(dialog);
+    return { connections, defaultConnection, parameters, defaults, runPolicy };
+}
+
+function readRunPolicy(dialog: HTMLDialogElement): FlowRunPolicy {
+    const value = (selector: string) => dialog.querySelector<HTMLInputElement | HTMLSelectElement>(selector)?.value.trim() ?? '';
+    const number = (selector: string) => { const raw = value(selector); return raw ? Number(raw) : undefined; };
+    const policy: FlowRunPolicy = {};
+    const maxNodes = number('[data-run-max-nodes]'); if (maxNodes !== undefined) policy.maxNodes = maxNodes;
+    const maxConcurrency = number('[data-run-max-concurrency]'); if (maxConcurrency !== undefined) policy.maxConcurrency = maxConcurrency;
+    const timeoutMs = number('[data-run-timeout]'); if (timeoutMs !== undefined) policy.timeoutMs = timeoutMs;
+    const maxTokens = number('[data-run-max-tokens]'); if (maxTokens !== undefined) policy.maxTokens = maxTokens;
+    const mode = value('[data-run-workspace-mode]') as 'shared' | 'read-only' | 'worktree' | '';
+    const merge = value('[data-run-workspace-merge]') as 'manual' | 'auto-if-clean' | 'discard' | '';
+    const cleanup = value('[data-run-workspace-cleanup]') as 'on-success' | 'always' | 'keep' | '';
+    const base = value('[data-run-workspace-base]');
+    if (mode || merge || cleanup || base) policy.workspace = {
+        ...(mode ? { mode } : { mode: 'shared' }), ...(merge ? { merge } : {}), ...(cleanup ? { cleanup } : {}), ...(base ? { base } : {}),
+    };
+    return policy;
 }
 
 function readDefaults(dialog: HTMLDialogElement): FlowDefaults {

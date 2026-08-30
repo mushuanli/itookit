@@ -17,4 +17,7 @@ export const FlowCommand = {
     RunGet: 'dag.run.get',
     RunCancel: 'dag.run.cancel',
     RunRespond: 'dag.run.respond',
+    RunSignal: 'dag.run.signal',
+    RunTaskCancel: 'dag.run.task.cancel',
+    RunGoalUpdate: 'dag.run.goal.update',
 } as const;

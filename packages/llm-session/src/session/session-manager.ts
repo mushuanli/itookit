@@ -73,6 +73,7 @@ export class SessionManager implements ISession, SessionQuery {
                 definitions: ToolDefinition[];
                 externalIds: string[];
             }>;
+            retrieveMemory?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['retrieveMemory'];
         }
     ) {
         this.registry = new SessionRegistry(engine);
@@ -108,6 +109,7 @@ export class SessionManager implements ISession, SessionQuery {
             options.dagPlugins,
             options.flowStore,
             options.resolveTools,
+            options.retrieveMemory,
         );
 
         this.roundOps = new RoundOperations(this.registry, this.runs);
