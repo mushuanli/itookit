@@ -461,6 +461,13 @@ export const PRINT_STYLES = `
         display: none !important;
     }
 
+    /* cloze 卡片：隐藏 NEW、冷却和危险等仅用于交互的状态标记 */
+    .mdx-print .mdx-cloze::before,
+    .mdx-print .mdx-cloze::after {
+        content: none !important;
+        display: none !important;
+    }
+
     /* cloze 卡片：停用打印时的脉冲动画 */
     .mdx-print .mdx-cloze.is-due,
     .mdx-print .mdx-cloze.is-danger {

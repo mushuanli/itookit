@@ -68,4 +68,11 @@
   .mdx-cloze.hidden .mdx-cloze__placeholder {
     display: none;
   }
+
+  /* 状态标记只服务于交互，不进入打印内容 */
+  .mdx-cloze::before,
+  .mdx-cloze::after {
+    content: none !important;
+    display: none !important;
+  }
 }

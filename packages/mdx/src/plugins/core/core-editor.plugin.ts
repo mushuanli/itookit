@@ -49,6 +49,12 @@ export interface CoreEditorPluginOptions {
   enableLineNumbers?: boolean;
 
   /**
+   * 是否启用长行自动换行（仅影响显示，不修改 Markdown 内容）
+   * @default true
+   */
+  enableLineWrapping?: boolean;
+
+  /**
    * 是否启用历史记录（撤销/重做）
    * @default true
    */
@@ -128,6 +134,7 @@ export class CoreEditorPlugin implements MDxPlugin {
   constructor(options: CoreEditorPluginOptions = {}) {
     this.options = {
       enableLineNumbers: options.enableLineNumbers ?? false,
+      enableLineWrapping: options.enableLineWrapping ?? true,
       enableHistory: options.enableHistory ?? true,
       enableFolding: options.enableFolding ?? true,
       enableAutocompletion: options.enableAutocompletion ?? true,
@@ -154,6 +161,11 @@ export class CoreEditorPlugin implements MDxPlugin {
     // 行号显示
     if (this.options.enableLineNumbers) {
       extensions.push(lineNumbers(), highlightActiveLineGutter());
+    }
+
+    // 长行仅在视图中软换行，不向 Markdown 文档插入换行符
+    if (this.options.enableLineWrapping) {
+      extensions.push(EditorView.lineWrapping);
     }
 
     // 特殊字符高亮（空格、制表符等）

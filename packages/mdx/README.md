@@ -150,7 +150,7 @@ const editor = await createMDxEditor(container, {
 
 | 模块/插件名称 | 注册名称 (Name) | 功能说明 | 默认状态 (Default) | 常用选项 (Common Options) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Core Editor** | `editor:core` | 提供基础编辑能力 (CodeMirror 6)，包括行号、折叠、撤销重做等。 | **已启用**<br>行号: 关闭<br>折叠: 开启 | `enableLineNumbers`: boolean (行号)<br>`enableHistory`: boolean (历史记录)<br>`enableAutocompletion`: boolean (自动补全) |
+| **Core Editor** | `editor:core` | 提供基础编辑能力 (CodeMirror 6)，包括行号、软换行、折叠、撤销重做等。 | **已启用**<br>行号: 关闭<br>自动换行: 开启<br>折叠: 开启 | `enableLineNumbers`: boolean (行号)<br>`enableLineWrapping`: boolean (长行自动换行)<br>`enableHistory`: boolean (历史记录)<br>`enableAutocompletion`: boolean (自动补全) |
 | **Title Bar** | `core:titlebar` | 顶部标题栏，包含标题、模式切换、保存、打印及 AI 按钮。 | **已启用**<br>模式切换: 关闭 | `enableToggleEditMode`: boolean<br>`title`: string<br>`onSidebarToggle`: function |
 | **Toolbar** | `ui:toolbar` | 编辑器工具栏容器，用于放置格式化按钮。 | **已启用** | `className`: string (自定义样式类) |
 | **Formatting** | `ui:formatting` | 提供加粗、斜体、列表、链接等基础 Markdown 格式化按钮和命令。 | **已启用**<br>功能: All | `enabledFormats`: string[] (如 `['bold', 'italic']`)<br>`customIcons`: object (自定义图标) |
@@ -184,6 +184,7 @@ createMDxEditor(container, {
   defaultPluginOptions: {
     'editor:core': {
       enableLineNumbers: true, // 开启行号
+      enableLineWrapping: true, // 长行仅在视图中自动换行
       enableFolding: true
     },
     'interaction:table': {
