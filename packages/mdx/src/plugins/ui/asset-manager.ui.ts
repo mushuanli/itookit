@@ -25,6 +25,7 @@ export class AssetManagerUI {
     private statsEl!: HTMLElement;
     private cleanBtn!: HTMLElement;
     private currentAssetDirPath: string = '';
+    private escHandler: ((event: KeyboardEvent) => void) | null = null;
 
     constructor(
         private engine: IModuleFS,
@@ -54,13 +55,15 @@ export class AssetManagerUI {
             this.overlay.parentNode.removeChild(this.overlay);
         }
         this.overlay = null;
-        this.objectUrls.forEach(url => URL.revokeObjectURL(url));
-        this.objectUrls = [];
+        this.revokeObjectUrls();
+        if (this.escHandler) document.removeEventListener('keydown', this.escHandler);
+        this.escHandler = null;
     }
 
     private async refreshAssetList(): Promise<void> {
         if (!this.listContainer) return;
 
+        this.revokeObjectUrls();
         this.listContainer.innerHTML = '<div class="mdx-empty-state">加载中...</div>';
 
         let files: FSNode[] = [];
@@ -112,41 +115,33 @@ export class AssetManagerUI {
     private extractReferencedFilenames(content: string): Set<string> {
         const filenames = new Set<string>();
 
-        // 1. 匹配 @asset/path/filename
-        const assetRegex = /@asset\/([^\s)"']+)/g;
+        // 1. 匹配裸 @asset/path/filename（Markdown 链接由下一步完整解析）
+        const assetRegex = /(?<!<)@asset\/([^\s)"'>]+)/g;
         let match;
         while ((match = assetRegex.exec(content)) !== null) {
-            const filename = extractFilenameFromPath(match[1]);
-            if (filename) filenames.add(filename);
+            this.addReferencedPath(`@asset/${match[1]}`, filenames);
         }
 
         // 2. 匹配 Markdown 链接语法 [text](path)
-        // 改进：支持嵌套路径，排除绝对URL和特殊协议
-        const linkRegex = /\]\(\s*([^)\s]+)\s*(?:"[^"]*")?\s*\)/g;
+        // 支持普通 destination 以及含空格的 <destination>。
+        const linkRegex = /\]\(\s*(?:<([^>]+)>|([^\s)]+))(?:\s+"[^"]*")?\s*\)/g;
         while ((match = linkRegex.exec(content)) !== null) {
-            const path = match[1];
-
-            // 排除不需要处理的路径
-            if (this.shouldSkipPath(path)) continue;
-
-            // 提取文件名
-            const filename = extractFilenameFromPath(path);
-            if (filename && !filename.startsWith('#')) {
-                filenames.add(filename);
-            }
+            this.addReferencedPath(match[1] || match[2], filenames);
         }
 
         // 3. 匹配 HTML src/href 属性
         const htmlAttrRegex = /(?:src|href)=["']([^"']+)["']/g;
         while ((match = htmlAttrRegex.exec(content)) !== null) {
-            const path = match[1];
-            if (this.shouldSkipPath(path)) continue;
-
-            const filename = extractFilenameFromPath(path);
-            if (filename) filenames.add(filename);
+            this.addReferencedPath(match[1], filenames);
         }
 
         return filenames;
+    }
+
+    private addReferencedPath(path: string, filenames: Set<string>): void {
+        if (this.shouldSkipPath(path)) return;
+        const filename = extractFilenameFromPath(path);
+        if (filename && !filename.startsWith('#')) filenames.add(filename);
     }
 
     /**
@@ -229,29 +224,38 @@ export class AssetManagerUI {
         thumb.src = item.url || this.getFileIcon(item.node.name);
         thumb.alt = item.node.name;
 
-        // 信息区
-        const info = document.createElement('div');
-        info.className = 'mdx-asset-info';
-
-        const dateStr = new Date(item.node.createdAt).toLocaleDateString();
-        const sizeStr = this.formatFileSize((item.node as FSFileNode).size || 0);
-
-        info.innerHTML = `
-            <div class="mdx-asset-name" title="${item.node.name}">${item.node.name}</div>
-            <div class="mdx-asset-meta">
-                <span class="mdx-asset-badge ${item.isUsed ? 'used' : 'unused'}">
-                    ${item.isUsed ? '已引用' : '未引用'}
-                </span>
-                <span>${sizeStr}</span>
-                <span>${dateStr}</span>
-            </div>
-        `;
-
         // 操作按钮
         const actions = this.createActionButtons(item);
 
-        li.append(thumb, info, actions);
+        li.append(thumb, this.createAssetInfo(item), actions);
         return li;
+    }
+
+    private createAssetInfo(item: AssetDisplayItem): HTMLDivElement {
+        const info = document.createElement('div');
+        info.className = 'mdx-asset-info';
+
+        const name = document.createElement('div');
+        name.className = 'mdx-asset-name';
+        name.title = item.node.name;
+        name.textContent = item.node.name;
+
+        const meta = document.createElement('div');
+        meta.className = 'mdx-asset-meta';
+        const badge = document.createElement('span');
+        badge.className = `mdx-asset-badge ${item.isUsed ? 'used' : 'unused'}`;
+        badge.textContent = item.isUsed ? '已引用' : '未引用';
+        const size = this.formatFileSize((item.node as FSFileNode).size || 0);
+        const date = new Date(item.node.createdAt).toLocaleDateString();
+        meta.append(badge, this.createTextSpan(size), this.createTextSpan(date));
+        info.append(name, meta);
+        return info;
+    }
+
+    private createTextSpan(text: string): HTMLSpanElement {
+        const span = document.createElement('span');
+        span.textContent = text;
+        return span;
     }
 
     private createActionButtons(item: AssetDisplayItem): HTMLDivElement {
@@ -261,9 +265,11 @@ export class AssetManagerUI {
         // 插入按钮
         const insertBtn = this.createButton('插入', 'primary', () => {
             const path = generateAssetPath(item.node.name);
+            const destination = /[\s()]/.test(path) ? `<${path}>` : path;
+            const label = item.node.name.replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
             const text = this.isPreviewableImage(item.node.name)
-                ? `![${item.node.name}](${path})`
-                : `[${item.node.name}](${path})`;
+                ? `![${label}](${destination})`
+                : `[${label}](${destination})`;
             this.insertText(text);
             this.close();
         });
@@ -304,6 +310,7 @@ export class AssetManagerUI {
         onClick: () => void
     ): HTMLButtonElement {
         const btn = document.createElement('button');
+        btn.type = 'button';
         btn.className = `mdx-btn mdx-btn--${type}`;
         btn.textContent = text;
         btn.onclick = onClick;
@@ -382,11 +389,11 @@ export class AssetManagerUI {
         modal.innerHTML = `
             <div class="mdx-asset-header">
                 <h3>附件管理</h3>
-                <button class="mdx-asset-close" aria-label="关闭">&times;</button>
+                <button type="button" class="mdx-asset-close" aria-label="关闭">&times;</button>
             </div>
             <div class="mdx-asset-toolbar">
                 <span class="mdx-stats"></span>
-                <button class="mdx-btn mdx-btn--danger mdx-clean-btn" style="display:none"></button>
+                <button type="button" class="mdx-btn mdx-btn--danger mdx-clean-btn" style="display:none"></button>
             </div>
             <ul class="mdx-asset-list"></ul>
         `;
@@ -406,13 +413,17 @@ export class AssetManagerUI {
         });
 
         // ESC 关闭
-        const escHandler = (e: KeyboardEvent) => {
+        this.escHandler = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
                 this.close();
-                document.removeEventListener('keydown', escHandler);
             }
         };
-        document.addEventListener('keydown', escHandler);
+        document.addEventListener('keydown', this.escHandler);
+    }
+
+    private revokeObjectUrls(): void {
+        this.objectUrls.forEach(url => URL.revokeObjectURL(url));
+        this.objectUrls = [];
     }
 
     private isPreviewableImage(name: string): boolean {

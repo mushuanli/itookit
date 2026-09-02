@@ -1,6 +1,6 @@
 /**
  * @file mdx/plugins/interactions/upload.plugin.ts
- * @desc 处理文件粘贴/拖拽上传，以及 Titlebar 主动上传。支持文件过滤、大小限制和自定义路径策略。
+ * @desc 处理文件粘贴/拖拽上传，以及 Toolbar 主动上传。支持文件过滤、大小限制和自定义路径策略。
  */
 import { EditorView } from 'codemirror';
 import type { MDxPlugin, PluginContext } from '../../core/types';
@@ -34,7 +34,7 @@ export class UploadPlugin implements MDxPlugin {
         // 1. 初始化隐藏的 Input 元素 (用于点击按钮上传)
         this.initHiddenInput();
 
-        // 2. 注册 Titlebar 按钮
+        // 2. 注册 Toolbar 按钮
         context.registerToolbarButton?.({
             id: 'upload-action',
             title: '上传附件', // 鼠标悬停提示
@@ -241,7 +241,9 @@ export class UploadPlugin implements MDxPlugin {
         // e.g. "  1 Miss Jade.jpg" → "1_Miss_Jade_2026-06-14T00-37-32-355Z.jpg"
         const dotIndex = originalName.lastIndexOf('.');
         const base = dotIndex >= 0 ? originalName.slice(0, dotIndex) : originalName;
-        const ext = dotIndex >= 0 ? originalName.slice(dotIndex) : '';
+        const ext = dotIndex >= 0
+            ? originalName.slice(dotIndex).replace(/[^a-zA-Z0-9.]/g, '_')
+            : '';
         const safeBase = base
             .replace(/[^a-zA-Z0-9._-]/g, '_') // replace illegal chars
             .replace(/^[_.\s]+/, '');           // strip leading _ and . (reserved prefixes)
@@ -251,9 +253,10 @@ export class UploadPlugin implements MDxPlugin {
     }
 
     private generateMarkdown(file: File, path: string): string {
-        if (file.type.startsWith('image/')) return `![${file.name}](${path})`;
-        if (file.type === 'application/pdf') return `![${file.name}](${path})`; // 通常渲染器会特殊处理 PDF
-        return `[${file.name}](${path})`; // 其他文件作为下载链接
+        const label = file.name.replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
+        if (file.type.startsWith('image/')) return `![${label}](${path})`;
+        if (file.type === 'application/pdf') return `![${label}](${path})`; // 通常渲染器会特殊处理 PDF
+        return `[${label}](${path})`; // 其他文件作为下载链接
     }
 
     destroy(): void {

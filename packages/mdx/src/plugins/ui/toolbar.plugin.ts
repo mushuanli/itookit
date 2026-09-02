@@ -43,7 +43,7 @@ export class ToolbarPlugin implements MDxPlugin {
   /**
    * [优化] 构建工具栏 - 使用 DocumentFragment 和事件委托
    */
-  private buildToolbar(_context: PluginContext, payload: {
+  private buildToolbar(context: PluginContext, payload: {
     editor: MDxEditor,
     pluginManager: PluginManager
   }): void {
@@ -82,20 +82,7 @@ export class ToolbarPlugin implements MDxPlugin {
     const mainGroup = document.createElement('div');
     mainGroup.className = `${this.options.className}__main`;
 
-    // [优化] 使用事件委托处理按钮点击
-    mainGroup.addEventListener('click', (e) => {
-      const target = (e.target as HTMLElement).closest('button');
-      if (!target) return;
-
-      const commandName = target.getAttribute('data-command');
-      if (commandName) {
-        const command = pluginManager.getCommand(commandName);
-        const view = editor.getEditorView();
-        if (command && view) {
-          command(view);
-        }
-      }
-    });
+    this.bindButtonGroup(mainGroup, mainButtons, context, editor, pluginManager);
 
     toolbarContainer.appendChild(mainGroup);
 
@@ -112,20 +99,7 @@ export class ToolbarPlugin implements MDxPlugin {
       const modeSwitcherGroup = document.createElement('div');
       modeSwitcherGroup.className = `${this.options.className}__mode-switcher`;
 
-      // 事件委托
-      modeSwitcherGroup.addEventListener('click', (e) => {
-        const target = (e.target as HTMLElement).closest('button');
-        if (!target) return;
-
-        const commandName = target.getAttribute('data-command');
-        if (commandName) {
-          const command = pluginManager.getCommand(commandName);
-          const view = editor.getEditorView();
-          if (command && view) {
-            command(view);
-          }
-        }
-      });
+      this.bindButtonGroup(modeSwitcherGroup, modeSwitcherButtons, context, editor, pluginManager);
 
       toolbarContainer.appendChild(modeSwitcherGroup);
 
@@ -149,9 +123,11 @@ export class ToolbarPlugin implements MDxPlugin {
     }
 
     const button = document.createElement('button');
+    button.type = 'button';
     button.className = `${this.options.className}__button`;
     button.title = config.title || config.id;
-    button.setAttribute('data-command', config.command || config.id);
+    button.setAttribute('data-button-id', config.id);
+    if (config.command) button.setAttribute('data-command', config.command);
 
     if (typeof config.icon === 'string') {
       button.innerHTML = config.icon;
@@ -160,6 +136,43 @@ export class ToolbarPlugin implements MDxPlugin {
     }
 
     return button;
+  }
+
+  private bindButtonGroup(
+    group: HTMLElement,
+    configs: ToolbarButtonConfig[],
+    context: PluginContext,
+    editor: MDxEditor,
+    pluginManager: PluginManager,
+  ): void {
+    group.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button');
+      if (button) void this.runButton(button, configs, context, editor, pluginManager);
+    });
+  }
+
+  private async runButton(
+    button: HTMLButtonElement,
+    configs: ToolbarButtonConfig[],
+    context: PluginContext,
+    editor: MDxEditor,
+    pluginManager: PluginManager,
+  ): Promise<void> {
+    const id = button.dataset.buttonId;
+    const config = configs.find(item => item.type !== 'separator' && item.id === id);
+    if (!config || config.type === 'separator') return;
+
+    try {
+      if (config.onClick) {
+        await config.onClick({ editor, context, pluginManager });
+        return;
+      }
+      const command = config.command && pluginManager.getCommand(config.command);
+      const view = editor.getEditorView();
+      if (command && view) await command(view);
+    } catch (error) {
+      console.error(`[ToolbarPlugin] Button "${config.id}" failed:`, error);
+    }
   }
 
   destroy(): void {

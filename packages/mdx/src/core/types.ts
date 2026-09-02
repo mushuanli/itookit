@@ -40,7 +40,7 @@ export type ToolbarButtonConfig =
         title?: string;
         icon: string | HTMLElement;
         command?: string;
-        onClick?: (context: any) => void;
+        onClick?: (context: any) => void | Promise<void>;
         location?: 'main' | 'mode-switcher';
     }
     | {
@@ -57,7 +57,7 @@ export interface TitleBarButtonConfig {
     title?: string;
     icon: string | HTMLElement;
     command?: string;
-    onClick?: (context: any) => void;
+    onClick?: (context: any) => void | Promise<void>;
     location?: 'left' | 'right';
 }
 

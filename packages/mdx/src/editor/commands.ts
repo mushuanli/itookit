@@ -328,8 +328,9 @@ export async function applyCodeBlock(view: EditorView): Promise<boolean> {
 /**
  * 应用链接
  */
-export function applyLink(view: EditorView): boolean {
-  const url = prompt('请输入链接 URL:', 'https://');
+export async function applyLink(view: EditorView): Promise<boolean> {
+  let url: string | null | Promise<string | null> = prompt('请输入链接 URL:', 'https://');
+  url = await Promise.resolve(url);
   if (!url) return false;
 
   const { state } = view;
@@ -350,8 +351,9 @@ export function applyLink(view: EditorView): boolean {
 /**
  * 插入图片
  */
-export function insertImage(view: EditorView): boolean {
-  const url = prompt('请输入图片 URL:', 'https://');
+export async function insertImage(view: EditorView): Promise<boolean> {
+  let url: string | null | Promise<string | null> = prompt('请输入图片 URL:', 'https://');
+  url = await Promise.resolve(url);
   if (!url) return false;
 
   const { state } = view;

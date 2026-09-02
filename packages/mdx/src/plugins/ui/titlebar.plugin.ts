@@ -257,6 +257,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
 
     buttons.forEach(btnConfig => {
       const button = document.createElement('button');
+      button.type = 'button';
       button.className = 'mdx-editor-titlebar__button';
       button.title = btnConfig.title || btnConfig.id;
       button.setAttribute('data-button-id', btnConfig.id);
@@ -267,14 +268,16 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         button.appendChild(btnConfig.icon.cloneNode(true));
       }
 
-      button.onclick = () => {
-        if (btnConfig.onClick) {
-          btnConfig.onClick({ editor, context, pluginManager });
-        } else if (btnConfig.command) {
-          const command = pluginManager.getCommand(btnConfig.command);
-          if (command) {
-            command(editor);
+      button.onclick = async () => {
+        try {
+          if (btnConfig.onClick) {
+            await btnConfig.onClick({ editor, context, pluginManager });
+          } else if (btnConfig.command) {
+            const command = pluginManager.getCommand(btnConfig.command);
+            if (command) await command(editor);
           }
+        } catch (error) {
+          console.error(`[TitleBarPlugin] Button "${btnConfig.id}" failed:`, error);
         }
       };
 
