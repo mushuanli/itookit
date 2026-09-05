@@ -11,11 +11,13 @@ import { makeVFSNodeUI } from './helpers/fixtures';
 
 let store: VFSStore;
 
+const asPath = (id: string): string => id.startsWith('/') ? id : `/${id}`;
+
 const file = (id: string, parentPath: string | null = null, overrides: Partial<VFSNodeUI> = {}): VFSNodeUI =>
-    makeVFSNodeUI({ id, metadata: { ...makeVFSNodeUI().metadata, parentPath, path: `/${id}`, title: id }, ...overrides });
+    makeVFSNodeUI({ id, metadata: { ...makeVFSNodeUI().metadata, parentPath, path: asPath(id), title: id }, ...overrides });
 
 const dir = (id: string, parentPath: string | null = null, children: VFSNodeUI[] = []): VFSNodeUI =>
-    makeVFSNodeUI({ id, type: 'directory', content: undefined, metadata: { ...makeVFSNodeUI().metadata, parentPath, path: `/${id}`, title: id }, children });
+    makeVFSNodeUI({ id, type: 'directory', content: undefined, metadata: { ...makeVFSNodeUI().metadata, parentPath, path: asPath(id), title: id }, children });
 
 beforeEach(() => {
     store = new VFSStore();
@@ -115,6 +117,43 @@ describe('ITEM_DELETE_SUCCESS', () => {
         store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: [file('a'), file('b'), file('c')], tags: new Map() } });
         store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: ['a', 'c'] } });
         expect(store.getState().items.map(i => i.id)).toEqual(['b']);
+    });
+});
+
+// ── ITEM_RENAME_SUCCESS ─────────────────────────────────────────────────────
+
+describe('ITEM_RENAME_SUCCESS', () => {
+    it('remaps descendant paths and active UI state when a directory is renamed', () => {
+        const child = file('/old/child.prj', '/old', {
+            metadata: {
+                ...makeVFSNodeUI().metadata,
+                title: 'child',
+                path: '/old/child.prj',
+                parentPath: '/old',
+            },
+        });
+        const oldDir = dir('/old', null, [child]);
+        const newDir = dir('/new');
+        store = new VFSStore({
+            items: [oldDir],
+            activeId: child.id,
+            selectedItemIds: new Set([child.id]),
+            expandedFolderIds: new Set([oldDir.id]),
+        });
+
+        store.dispatch({
+            type: 'ITEM_RENAME_SUCCESS',
+            payload: { oldId: oldDir.id, newItem: newDir },
+        });
+
+        const state = store.getState();
+        const renamedChild = state.items[0].children?.[0];
+        expect(renamedChild?.id).toBe('/new/child.prj');
+        expect(renamedChild?.metadata.path).toBe('/new/child.prj');
+        expect(renamedChild?.metadata.parentPath).toBe('/new');
+        expect(state.activeId).toBe('/new/child.prj');
+        expect(state.selectedItemIds.has('/new/child.prj')).toBe(true);
+        expect(state.expandedFolderIds.has('/new')).toBe(true);
     });
 });
 

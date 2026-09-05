@@ -36,6 +36,17 @@ export const getExtension = (filename: string): string => {
   return i > 0 ? filename.slice(i).toLowerCase() : '';
 };
 
+export const replacePathPrefix = (
+  path: string,
+  oldPrefix: string,
+  newPrefix: string,
+): string => {
+  if (path === oldPrefix) return newPrefix;
+  return path.startsWith(`${oldPrefix}/`)
+    ? `${newPrefix}${path.slice(oldPrefix.length)}`
+    : path;
+};
+
 export const formatRelativeTime = (timestamp?: string): string => {
   if (!timestamp) return '';
   try {

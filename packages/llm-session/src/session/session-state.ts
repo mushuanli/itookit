@@ -31,7 +31,7 @@ export class SessionState {
     private childrenByParent = new Map<RoundId, RoundId[]>();
 
     constructor(
-        private readonly _nodeId: string,
+        private _nodeId: string,
         private readonly _sessionId: string,
     ) {}
 
@@ -41,6 +41,10 @@ export class SessionState {
 
     get nodeId(): string { return this._nodeId; }
     get sessionId(): string { return this._sessionId; }
+
+    updateNodeId(newNodeId: string): void {
+        this._nodeId = newNodeId;
+    }
 
     getSessions(): SessionGroup[] {
         return [
@@ -560,4 +564,3 @@ function extractRoundId(id: string): string {
     const match = /^round-(.+)-(user|assistant)$/.exec(id);
     return match ? match[1] : id;
 }
-

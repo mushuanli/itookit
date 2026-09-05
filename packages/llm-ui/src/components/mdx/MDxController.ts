@@ -90,6 +90,10 @@ export class MDxController implements IStreamableEditor {
                 }
             }) as MDxEditor;
 
+            if (this.options.nodeId) {
+                this.editor.updateNodeId(this.options.nodeId);
+            }
+
             this.editor.on('change', () => {
                 if (!this.isStreaming) {
                     const text = this.editor!.getText();
@@ -190,6 +194,18 @@ export class MDxController implements IStreamableEditor {
 
     get hasPending(): boolean {
         return this.pendingDelta.length > 0;
+    }
+
+    updateNodeId(newNodeId: string): void {
+        const oldNodeId = this.options.nodeId;
+        const ownerFollowsNode = !this.options.ownerNodeId
+            || this.options.ownerNodeId === oldNodeId;
+        this.options = {
+            ...this.options,
+            nodeId: newNodeId,
+            ownerNodeId: ownerFollowsNode ? newNodeId : this.options.ownerNodeId,
+        };
+        this.editor?.updateNodeId(newNodeId);
     }
 
     // ================================================================

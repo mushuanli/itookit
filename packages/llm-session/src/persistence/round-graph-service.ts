@@ -31,8 +31,12 @@ export class RoundGraphService {
 
     constructor(
         private readonly engine: IChatEngine,
-        private readonly nodeId: string,
+        private nodeId: string,
     ) {}
+
+    updateNodeId(newNodeId: string): void {
+        this.nodeId = newNodeId;
+    }
 
     setEventListener(fn: (event: RoundLogEvent) => void): void {
         this.onEvent = fn;

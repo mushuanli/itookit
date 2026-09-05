@@ -4,6 +4,7 @@
  */
 import type { CommandBus } from '../CommandBus';
 import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
+import { buildRenamedFilename } from '@itookit/common';
 import { findNodeById } from '../../utils/helpers';
 
 export interface FileCommandOptions {
@@ -53,12 +54,11 @@ export class FileCommandHandler {
       this.commandBus.on('file:rename', async ({ itemId, newTitle }) => {
         try {
           const item = findNodeById(this.store.getState().items, itemId);
-          let finalName = newTitle.trim();
-
-          if (item?.type === 'file' && !/\.[a-zA-Z0-9]{1,10}$/.test(finalName)) {
-            const origExt = item.metadata.custom?._extension || '';
-            if (origExt) finalName += origExt;
-          }
+          const requestedTitle = newTitle.trim();
+          const originalName = item?.metadata.custom?._originalName as string | undefined;
+          const finalName = item?.type === 'file' && originalName
+            ? buildRenamedFilename(requestedTitle, originalName).filename
+            : requestedTitle;
 
           await this.service.renameItem(itemId, finalName);
         } catch (e: any) {

@@ -24,8 +24,6 @@ export class EngineAdapter {
 
     private engineUnsubscribe: (() => void) | null = null;
     private loadingFolderIds = new Set<string>();
-    /** Paths dispatched via ITEM_RENAME_SUCCESS — skip the redundant node:updated echo. */
-    private suppressedUpdatePaths = new Set<string>();
 
     constructor(
         private readonly engine: IModuleFS,
@@ -204,10 +202,6 @@ export class EngineAdapter {
                     }
                     data.nodes?.forEach(n => {
                         if (!n.path) return;
-                        if (this.suppressedUpdatePaths.delete(n.path)) {
-                            adapterDEBUG.received('node:updated[rename-suppress]', { path: n.path });
-                            return;
-                        }
                         this.queues.update.add(n.path);
                         adapterDEBUG.queued('update', n.path, this.queues.update.size);
                     });
@@ -231,8 +225,6 @@ export class EngineAdapter {
                                 adapterDEBUG.nodeResult(n.newPath, node);
                                 if (!node || shouldFilterNode(node)) continue;
                                 const newItem = mapFSNodeToUIItem(node, this.iconResolver, undefined, this.showFileExtensions);
-                                // Suppress the node:updated echo VFSlib emits after rename
-                                this.suppressedUpdatePaths.add(n.newPath);
                                 adapterDEBUG.dispatch('ITEM_RENAME_SUCCESS', `${n.oldPath} → ${newItem.id}`);
                                 this.store.dispatch({
                                     type: 'ITEM_RENAME_SUCCESS',
@@ -321,6 +313,5 @@ export class EngineAdapter {
     destroy(): void {
         this.engineUnsubscribe?.();
         Object.values(this.timers).forEach(t => t && clearTimeout(t));
-        this.suppressedUpdatePaths.clear();
     }
 }

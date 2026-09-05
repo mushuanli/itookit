@@ -778,9 +778,32 @@ export class LLMWorkspaceEditor implements IEditor {
 
     /** Update the VFS nodeId when the backing file is renamed. */
     public updateNodeId(newNodeId: string): void {
-        this.options = { ...this.options, nodeId: newNodeId };
+        const oldNodeId = this.options.nodeId;
+        if (!newNodeId || newNodeId === oldNodeId) return;
+        const ownerFollowsNode = !!this.options.ownerNodeId
+            && this.options.ownerNodeId === oldNodeId;
+        this.options = {
+            ...this.options,
+            nodeId: newNodeId,
+            ownerNodeId: ownerFollowsNode ? newNodeId : this.options.ownerNodeId,
+        };
         this.stateManager.updateNodeId(newNodeId);
+        this.historyView?.updateNodeId(newNodeId);
         this.commandBus.execute(SessionCommand.UpdateNode, { newNodeId }).catch(() => {});
+        void this.syncRenamedManifest(newNodeId);
+    }
+
+    private async syncRenamedManifest(newNodeId: string): Promise<void> {
+        try {
+            const manifest = await this.options.chatEngine.getManifest(newNodeId);
+            if (this.currentTitle && manifest.title !== this.currentTitle) {
+                await this.options.chatEngine.updateManifest(newNodeId, {
+                    title: this.currentTitle,
+                });
+            }
+        } catch (error) {
+            console.warn('[LLMWorkspaceEditor] Failed to sync renamed session:', error);
+        }
     }
 
     async waitUntilReady(): Promise<void> {

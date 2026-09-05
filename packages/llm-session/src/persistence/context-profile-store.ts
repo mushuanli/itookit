@@ -22,8 +22,12 @@ export class ContextProfileStore {
     private static readonly writeTails = new Map<string, Promise<void>>();
     constructor(
         private readonly engine: IChatEngine,
-        private readonly nodeId: string,
+        private nodeId: string,
     ) {}
+
+    updateNodeId(newNodeId: string): void {
+        this.nodeId = newNodeId;
+    }
 
     /** Create an initial empty profile for a new branch. */
     async createProfile(): Promise<BranchContextProfile> {

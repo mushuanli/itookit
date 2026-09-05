@@ -8,6 +8,7 @@ import {
     FS_MODULE_CHAT,
     guessMimeType,
     type FSNode,
+    type FSNodeRenamedPayload,
     type IVFSManager,
 } from '@itookit/vfs-core';
 import {
@@ -24,12 +25,23 @@ const SETTINGS_ASSET = 'settings.yaml';
 export class ChatEngine extends BaseModuleService implements IChatEngine {
     private readonly sessionFiles = new Map<string, string>();
     private readonly settingsTails = new Map<string, Promise<void>>();
+    private renameUnsubscribe: (() => void) | null = null;
 
     constructor(vfs: IVFSManager) {
         super(FS_MODULE_CHAT, { description: 'Chat Sessions' }, vfs);
     }
 
-    protected async onLoad(): Promise<void> {}
+    protected async onLoad(): Promise<void> {
+        this.renameUnsubscribe = this.engine.driver.on('node:renamed', event => {
+            void this.syncRenamedNodes(event.payload);
+        });
+    }
+
+    override async dispose(): Promise<void> {
+        this.renameUnsubscribe?.();
+        this.renameUnsubscribe = null;
+        await super.dispose();
+    }
 
     async createSession(title: string): Promise<string> {
         const file = await this.createFile(title, null);
@@ -186,12 +198,42 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
             ? node.name
             : `${node.name}${CHAT_EXTENSION}`;
         const { filename, title } = buildRenamedFilename(newName, sourceName);
-        await this.engine.driver.rename(id, filename);
+        const oldTitle = typeof node.metadata?.title === 'string'
+            ? node.metadata.title
+            : null;
+        if (oldTitle !== null) {
+            await this.engine.driver.updateMetadata(id, { title });
+        }
+        try {
+            await this.engine.driver.rename(id, filename);
+        } catch (error) {
+            if (oldTitle !== null) {
+                await this.engine.driver.updateMetadata(id, { title: oldTitle }).catch(() => {});
+            }
+            throw error;
+        }
         const newPath = replaceBasename(id, filename);
         const manifest = await this.getManifest(newPath);
         await this.writeManifest(newPath, { ...manifest, title });
         await this.engine.driver.updateMetadata(newPath, { title });
         this.sessionFiles.set(manifest.id, newPath);
+    }
+
+    private async syncRenamedNodes(payload: FSNodeRenamedPayload): Promise<void> {
+        const chatFiles = payload.nodes.filter(node => node.newName.endsWith(CHAT_EXTENSION));
+        await Promise.all(chatFiles.map(async node => {
+            try {
+                const { title } = buildRenamedFilename(node.newName, node.oldName);
+                const manifest = await this.getManifest(node.newPath);
+                if (manifest.title !== title) {
+                    await this.writeManifest(node.newPath, { ...manifest, title });
+                }
+                await this.engine.driver.updateMetadata(node.newPath, { title });
+                this.sessionFiles.set(manifest.id, node.newPath);
+            } catch (error) {
+                console.warn('[ChatEngine] Failed to sync renamed session:', error);
+            }
+        }));
     }
 
     async delete(ids: string[]): Promise<void> {

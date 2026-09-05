@@ -167,6 +167,57 @@ describe('node:created event', () => {
     });
 });
 
+// ── node:renamed → ITEM_RENAME_SUCCESS ─────────────────────────────────────
+
+describe('node:renamed event', () => {
+    it('atomically updates title, path, selection, and activeId', async () => {
+        const oldPath = '/old-name.prj';
+        const newPath = '/new-name.prj';
+        const oldItem = makeVFSNodeUI({
+            id: oldPath,
+            metadata: { ...makeVFSNodeUI().metadata, title: 'old-name', path: oldPath },
+        });
+        store.dispatch({
+            type: 'STATE_LOAD_SUCCESS',
+            payload: { items: [oldItem], tags: new Map() },
+        });
+        store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: oldPath } });
+        store.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids: [oldPath] } });
+        engine.nodes.set(newPath, makeEngineNode({
+            name: 'new-name.prj',
+            path: newPath,
+            metadata: { title: 'new-name' },
+        }));
+
+        engine.emit('node:renamed', {
+            nodes: [{
+                oldPath,
+                newPath,
+                oldName: 'old-name.prj',
+                newName: 'new-name.prj',
+            }],
+        });
+        await sleep(10);
+
+        const state = store.getState();
+        expect(state.items[0].id).toBe(newPath);
+        expect(state.items[0].metadata.title).toBe('new-name');
+        expect(state.activeId).toBe(newPath);
+        expect(state.selectedItemIds.has(newPath)).toBe(true);
+        expect(state.selectedItemIds.has(oldPath)).toBe(false);
+
+        engine.nodes.set(newPath, makeEngineNode({
+            name: 'new-name.prj',
+            path: newPath,
+            metadata: { title: 'updated-after-rename' },
+        }));
+        engine.emit('node:updated', updatedPayload([{ nodeId: newPath, path: newPath }]));
+        await sleep(AFTER_UPDATE);
+
+        expect(store.getState().items[0].metadata.title).toBe('updated-after-rename');
+    });
+});
+
 // ── node:deleted → ITEM_DELETE_SUCCESS ──────────────────────────────────────
 
 describe('node:deleted event', () => {

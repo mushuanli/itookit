@@ -102,7 +102,8 @@
 | Port 接口 | 关键方法 | 实现 |
 |---|---|---|
 | `IChatInputPresenter` | `setLoading()/setConfig()/getConfig()/focus()` | `ChatInput` |
-| `IHistoryPresenter` | `appendNode()/updateNode()/clear()` | `HistoryView` |
+| `IHistoryPresenter` | `renderFull()/processEvent()/updateNodeId()` | `HistoryView` |
+| `IEditor` | `setText()/setTitle()/updateNodeId?()` | `MDxEditor`、`LLMWorkspaceEditor` 等 |
 | `IStreamingController` | `appendChunk()/finish()` | `StreamController` |
 | `ICollapseManager` | `fold()/unfold()/foldAll()` | `CollapseController` |
 | `INavigationPresenter` | `navigateTo()/highlightNode()` | `NavigationHelper` |

@@ -82,6 +82,54 @@ describe('FileCommandHandler — command → engine wiring', () => {
         expect(engine.driver.delete).toHaveBeenCalledWith(['id-1', 'id-2']);
     });
 
+    it('file:rename preserves the file type and updates its stored title', async () => {
+        const oldPath = '/old-name.prj';
+        const oldItem = makeVFSNodeUI({
+            id: oldPath,
+            metadata: {
+                ...makeVFSNodeUI().metadata,
+                title: 'old-name',
+                path: oldPath,
+                custom: { _originalName: 'old-name.prj', _extension: '.prj' },
+            },
+        });
+        store.dispatch({
+            type: 'STATE_LOAD_SUCCESS',
+            payload: { items: [oldItem], tags: new Map() },
+        });
+        engine.nodes.set(oldPath, makeEngineNode({
+            name: 'old-name.prj',
+            path: oldPath,
+            metadata: { title: 'old-name' },
+        }));
+        engine.driver.rename = vi.fn(async () => {});
+        engine.driver.updateMetadata = vi.fn(async () => {});
+
+        commandBus.execute('file:rename', { itemId: oldPath, newTitle: 'new-name' });
+        await sleep(10);
+
+        expect(engine.driver.updateMetadata).toHaveBeenCalledWith(oldPath, { title: 'new-name' });
+        expect(engine.driver.rename).toHaveBeenCalledWith(oldPath, 'new-name.prj');
+        expect(vi.mocked(engine.driver.updateMetadata).mock.invocationCallOrder[0])
+            .toBeLessThan(vi.mocked(engine.driver.rename).mock.invocationCallOrder[0]);
+    });
+
+    it('file:rename rolls the title back when the path rename fails', async () => {
+        const oldPath = '/old-name.prj';
+        engine.nodes.set(oldPath, makeEngineNode({
+            name: 'old-name.prj',
+            path: oldPath,
+            metadata: { title: 'old-name' },
+        }));
+        engine.driver.rename = vi.fn(async () => { throw new Error('rename failed'); });
+        engine.driver.updateMetadata = vi.fn(async () => {});
+
+        await expect(service.renameItem(oldPath, 'new-name.prj')).rejects.toThrow('rename failed');
+
+        expect(engine.driver.updateMetadata).toHaveBeenNthCalledWith(1, oldPath, { title: 'new-name' });
+        expect(engine.driver.updateMetadata).toHaveBeenNthCalledWith(2, oldPath, { title: 'old-name' });
+    });
+
     it('file:create fires the same engine that EngineAdapter is subscribed to', async () => {
         // This is the critical wiring test:
         // VFSService.engine === EngineAdapter.engine → same event source

@@ -155,6 +155,19 @@ describe('RoundLog', () => {
     // ── Basic CRUD ────────────────────────────────────────────────────────
 
     describe('append & fold', () => {
+        it('writes through the renamed owner path after updateNodeId', async () => {
+            const renamedNodeId = 'renamed-session.chat';
+            log.updateNodeId(renamedNodeId);
+
+            const roundId = await log.append('main', makeRound({
+                messages: makeUserPayload('After rename'),
+            }));
+
+            expect(await engine.readAsset(renamedNodeId, `round-${roundId}.json`))
+                .not.toBeNull();
+            expect(await engine.readAsset(nodeId, `round-${roundId}.json`)).toBeNull();
+        });
+
         it('rejects a stale expected branch head before writing', async () => {
             const round = makeRound({ id: 'new', messages: makeUserPayload('Hello') });
             await expect(log.appendExpected('main', round, null)).rejects.toMatchObject({ code: 'HEAD_CONFLICT' });

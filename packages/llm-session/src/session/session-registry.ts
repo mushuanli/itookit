@@ -76,6 +76,9 @@ export class SessionRegistry {
             this._boundSessionId = sessionId;
             this._activeSessionId = sessionId;
             const runtime = this.sessions.get(sessionId);
+            const state = this.states.get(sessionId);
+            if (runtime) runtime.nodeId = nodeId;
+            state?.updateNodeId(nodeId);
             if (runtime && runtime.unreadCount > 0) {
                 runtime.unreadCount = 0;
                 this._eventBus.emitGlobal({
@@ -115,6 +118,7 @@ export class SessionRegistry {
         if (this._boundSessionId) {
             const runtime = this.sessions.get(this._boundSessionId);
             if (runtime) runtime.nodeId = newNodeId;
+            this.states.get(this._boundSessionId)?.updateNodeId(newNodeId);
         }
     }
 

@@ -18,6 +18,18 @@ vfs-ui (VFSUIShell)
 | 4. 模块 | `ModuleFS`（chroot 到 module 目录） | `vfs-core/src/impl/services/` |
 | 5. 存储 | `IStorageBackend`（IndexedDB / LocalFS） | `vfsdriver-*/src/` |
 
+重命名使用路径型节点 ID，因此必须同步整条运行链：
+
+```
+node:renamed
+  → VFSStore 原子迁移节点、后代路径和 active/selected/expanded 状态
+  → editor-connector.setTitle() + updateNodeId()
+  → LLMWorkspaceEditor
+      ├─ StateManager / HistoryView 内嵌 MDX owner
+      ├─ SessionRegistry / active task
+      └─ RoundLog / manifest 路径缓存
+```
+
 ## 2. LLM Chat 链（Direct 会话）
 
 ```

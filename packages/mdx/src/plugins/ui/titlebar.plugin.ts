@@ -6,6 +6,33 @@ import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MDxEditor } from '../../editor/mdx-editor';
 import type { PluginManager } from '../../core/plugin-manager';
 import { buildRenamedFilename } from '@itookit/common';
+import type { IModuleFS } from '@itookit/vfs-core';
+
+const replaceBasename = (path: string, filename: string): string => {
+  const slash = path.lastIndexOf('/');
+  return slash >= 0 ? `${path.slice(0, slash + 1)}${filename}` : path;
+};
+
+const renameWithStoredTitle = async (
+  engine: IModuleFS,
+  nodeId: string,
+  filename: string,
+  title: string,
+): Promise<void> => {
+  const node = await engine.driver.getNode(nodeId);
+  const oldTitle = typeof node?.metadata?.title === 'string'
+    ? node.metadata.title
+    : null;
+  if (oldTitle !== null) await engine.driver.updateMetadata(nodeId, { title });
+  try {
+    await engine.driver.rename(nodeId, filename);
+  } catch (error) {
+    if (oldTitle !== null) {
+      await engine.driver.updateMetadata(nodeId, { title: oldTitle }).catch(() => { });
+    }
+    throw error;
+  }
+};
 
 /**
  * 标题栏插件配置选项
@@ -215,7 +242,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         this.titleEl!.value = this.currentTitle;
         return;
       }
-      const { filename: finalName } = buildRenamedFilename(
+      const { filename: finalName, title } = buildRenamedFilename(
         newTitle,
         this.currentTitle + this.fileExt,
       );
@@ -226,8 +253,10 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         return;
       }
       try {
-        await engine.driver.rename(nodeId, finalName);
-        this.currentTitle = newTitle;
+        await renameWithStoredTitle(engine, nodeId, finalName, title);
+        editor.updateNodeId(replaceBasename(nodeId, finalName));
+        this.currentTitle = title;
+        this.titleEl!.value = title;
       } catch {
         this.titleEl!.value = this.currentTitle;
       }

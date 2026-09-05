@@ -174,6 +174,9 @@ export abstract class IEditor {
     abstract setTitle(newTitle: string): void;
     abstract setReadOnly(isReadOnly: boolean): void;
 
+    /** Sync the backing VFS path after a path-based node ID changes. */
+    updateNodeId?: (newNodeId: string) => void;
+
     // --- 【优化】脏检查接口 ---
     /**
      * 检查编辑器内容是否自上次保存或加载以来被用户修改过。

@@ -107,6 +107,14 @@ export class SessionRunCoordinator {
         this.active.clear();
     }
 
+    updateNodeId(sessionId: string, newNodeId: string): void {
+        this.logs.get(sessionId)?.updateNodeId(newNodeId);
+        const task = this.active.get(sessionId);
+        if (!task) return;
+        task.nodeId = newNodeId;
+        task.input.nodeId = newNodeId;
+    }
+
     private async execute(task: ExecutionTask, runtime: SessionRuntime): Promise<void> {
         const context = this.callbacks.getSessionContext(task.sessionId);
         if (!context) return this.finishMissingContext(task, runtime);

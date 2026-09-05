@@ -5,7 +5,7 @@
 import { produce, enableMapSet } from 'immer';
 import type { IStatePort } from '../contracts/ports';
 import type { VFSUIState, VFSNodeUI, TagInfo, UISettings } from '../contracts/types';
-import { findNodeById, traverseNodes, ensureSet, ensureMap } from '../utils/helpers';
+import { findNodeById, traverseNodes, ensureSet, ensureMap, replacePathPrefix } from '../utils/helpers';
 
 enableMapSet();
 
@@ -29,6 +29,31 @@ const rebuildTagsMap = (items: VFSNodeUI[]): Map<string, TagInfo> => {
   });
   return map;
 };
+
+const remapNodePaths = (
+  node: VFSNodeUI,
+  oldPrefix: string,
+  newPrefix: string,
+): VFSNodeUI => ({
+  ...node,
+  id: replacePathPrefix(node.id, oldPrefix, newPrefix),
+  metadata: {
+    ...node.metadata,
+    path: replacePathPrefix(node.metadata.path, oldPrefix, newPrefix),
+    parentPath: node.metadata.parentPath
+      ? replacePathPrefix(node.metadata.parentPath, oldPrefix, newPrefix)
+      : node.metadata.parentPath,
+  },
+  children: node.children?.map(child => remapNodePaths(child, oldPrefix, newPrefix)),
+});
+
+const remapIds = (
+  ids: Set<string>,
+  oldPrefix: string,
+  newPrefix: string,
+): Set<string> => new Set(
+  [...ids].map(id => replacePathPrefix(id, oldPrefix, newPrefix)),
+);
 
 const createInitialState = (initial: Partial<VFSUIState> = {}): VFSUIState => ({
   items: initial.items || [],
@@ -290,7 +315,10 @@ export class VFSStore implements IStatePort {
     const replace = (items: VFSNodeUI[]): boolean => {
       for (let i = 0; i < items.length; i++) {
         if (items[i].id === oldId) {
-          items[i] = { ...newItem, children: items[i].children };
+          const children = items[i].children?.map(child =>
+            remapNodePaths(child, oldId, newItem.id)
+          );
+          items[i] = { ...newItem, children };
           return true;
         }
         if (items[i].children && replace(items[i].children!)) return true;
@@ -299,15 +327,13 @@ export class VFSStore implements IStatePort {
     };
     replace(draft.items);
 
-    if (draft.activeId === oldId) draft.activeId = newItem.id;
-    if (draft.selectedItemIds.has(oldId)) {
-      draft.selectedItemIds.delete(oldId);
-      draft.selectedItemIds.add(newItem.id);
+    if (draft.activeId) {
+      draft.activeId = replacePathPrefix(draft.activeId, oldId, newItem.id);
     }
-    if (draft.expandedFolderIds.has(oldId)) {
-      draft.expandedFolderIds.delete(oldId);
-      draft.expandedFolderIds.add(newItem.id);
-    }
+    draft.selectedItemIds = remapIds(draft.selectedItemIds, oldId, newItem.id);
+    draft.expandedFolderIds = remapIds(draft.expandedFolderIds, oldId, newItem.id);
+    draft.expandedOutlineIds = remapIds(draft.expandedOutlineIds, oldId, newItem.id);
+    draft.expandedOutlineH1Ids = remapIds(draft.expandedOutlineH1Ids, oldId, newItem.id);
     draft.tags = rebuildTagsMap(draft.items);
   }
 

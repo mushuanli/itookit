@@ -224,7 +224,7 @@ export class MDxEditor extends IEditor {
 
     async switchToMode(mode: 'edit' | 'render'): Promise<void> {
         if (this.modeManager.getMode() === mode) return;
-        if (this.modeManager.getMode() === 'edit' && mode === 'render' && this.isDirty()) {
+        if (this.isDirty()) {
             await this.save();
         }
         await this.modeManager.switchTo(mode, this._container!, () => this.renderContent());
@@ -344,6 +344,20 @@ export class MDxEditor extends IEditor {
         this.renderer.getPluginManager().emit('setTitle', { title: newTitle });
     }
 
+    updateNodeId = (newNodeId: string): void => {
+        const oldNodeId = this.config.nodeId;
+        if (!newNodeId || newNodeId === oldNodeId) return;
+
+        const ownerFollowsNode = !this.config.ownerNodeId
+            || this.config.ownerNodeId === oldNodeId;
+        this.renderer.getPluginManager().setNodeId(newNodeId);
+        this.config.nodeId = newNodeId;
+        if (ownerFollowsNode) this.config.ownerNodeId = newNodeId;
+
+        this.printService?.destroy?.();
+        this.printService = null;
+    };
+
     async pruneAssets(): Promise<number | null> {
         const cmd = this.renderer.getPluginManager().getCommand('pruneAssets');
         if (!cmd) return null;
@@ -372,6 +386,7 @@ export class MDxEditor extends IEditor {
         if (this.isDestroying) return;
         this.isDestroying = true;
 
+        this.renderer.getPluginManager().emit('beforeDestroy', undefined);
         this.navigationManager.destroy();
         this.modeManager.destroy();
 

@@ -3,7 +3,7 @@
  * Verifies hidden files and asset-dir paths are correctly identified.
  */
 import { describe, it, expect } from 'vitest';
-import { isHiddenFile, shouldFilterNode } from '../src/utils/helpers';
+import { isHiddenFile, replacePathPrefix, shouldFilterNode } from '../src/utils/helpers';
 
 // ── isHiddenFile ─────────────────────────────────────────────────────────────
 
@@ -25,6 +25,15 @@ describe('isHiddenFile', () => {
 
     it('does NOT filter single-underscore prefix (that is asset dir, handled by shouldFilterNode)', () => {
         expect(isHiddenFile('_my-session.chat')).toBe(false);
+    });
+});
+
+describe('replacePathPrefix', () => {
+    it('remaps a node and its descendants without touching sibling prefixes', () => {
+        expect(replacePathPrefix('/old', '/old', '/new')).toBe('/new');
+        expect(replacePathPrefix('/old/child.prj', '/old', '/new')).toBe('/new/child.prj');
+        expect(replacePathPrefix('/old-copy/child.prj', '/old', '/new'))
+            .toBe('/old-copy/child.prj');
     });
 });
 

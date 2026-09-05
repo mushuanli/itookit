@@ -46,6 +46,15 @@ export class SessionRenderer {
 
     get editors(): Map<string, MDxController> { return this.editorMap; }
 
+    updateNodeId(newNodeId: string): void {
+        const oldNodeId = this.context.nodeId;
+        const ownerFollowsNode = !this.context.ownerNodeId
+            || this.context.ownerNodeId === oldNodeId;
+        this.context.nodeId = newNodeId;
+        if (ownerFollowsNode) this.context.ownerNodeId = newNodeId;
+        this.editorMap.forEach(editor => editor.updateNodeId(newNodeId));
+    }
+
     getNode(nodeId: string): HTMLElement | null {
         return this.nodeMap.get(nodeId) || null;
     }

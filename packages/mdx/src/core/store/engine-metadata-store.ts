@@ -30,6 +30,10 @@ export class EngineMetadataStore implements ScopedPersistenceStore {
         return `_mdx_plugin_${this.pluginNamespace}`;
     }
 
+    updateNodeId(newNodeId: string): void {
+        this.nodeId = newNodeId;
+    }
+
     async get(key: string): Promise<unknown> {
         if (this.isDestroyed) return undefined;
 

@@ -196,6 +196,7 @@ export class SessionManager implements ISession, SessionQuery {
             id: sessionId, storage: chatKernelStorage(sessionId),
         });
         const snapshot = await this.registry.bindSession(nodeId, sessionId);
+        this.runs.updateNodeId(sessionId, nodeId);
         await this.bindDurableProjection(nodeId, sessionId);
         return snapshot;
     }
@@ -225,7 +226,9 @@ export class SessionManager implements ISession, SessionQuery {
     }
 
     updateBoundNodeId(newNodeId: string): void {
+        const sessionId = this.registry.boundSessionId;
         this.registry.updateBoundNodeId(newNodeId);
+        if (sessionId) this.runs.updateNodeId(sessionId, newNodeId);
         this.queueDurableProjection(newNodeId);
     }
 

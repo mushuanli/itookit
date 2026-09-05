@@ -209,6 +209,10 @@ export class HistoryView implements IHistoryPresenter {
         this.container.querySelectorAll('.llm-ui-session--system').forEach(el => el.remove());
     }
 
+    updateNodeId(newNodeId: string): void {
+        this.renderer.updateNodeId(newNodeId);
+    }
+
     removeMessages(ids: string[], animated: boolean): string[] {
         for (const id of ids) {
             this.edit.cleanup(id);

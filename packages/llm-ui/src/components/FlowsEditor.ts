@@ -27,7 +27,7 @@ export class FlowsEditor extends IEditor {
 
     constructor(
         private readonly deps: FlowsEditorDeps,
-        private readonly initialNodeId?: string,
+        private initialNodeId?: string,
     ) {
         super();
     }
@@ -103,6 +103,7 @@ export class FlowsEditor extends IEditor {
     // ── IEditor no-op surface (workflows are not text documents) ──────────
     getText(): string { return ''; }
     setText(_markdown: string): void {}
+    updateNodeId = (newNodeId: string): void => { this.initialNodeId = newNodeId; };
     focus(): void {}
     getMode(): 'edit' | 'render' { return 'edit'; }
     async switchToMode(_mode: 'edit' | 'render'): Promise<void> {}

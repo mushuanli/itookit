@@ -11,6 +11,7 @@ import type { IModuleFS } from '@itookit/vfs-core';
 import type { VFSNodeUI, VFSUIState } from '../contracts/types';
 import type { VFSService } from '../services/VFSService';
 import { parseFileInfo, extractTaskCounts } from '../utils/parser';
+import { findNodeById, replacePathPrefix } from '../utils/helpers';
 import { MediaViewerEditor, isBinaryViewable } from '../editors/MediaViewerEditor';
 import { guessMimeType } from '@itookit/vfs-core';
 
@@ -289,10 +290,18 @@ export function connectEditorLifecycle(
   const unsubRename = vfsManager.on(
     'fileRenamed',
     ({ oldId, newId, item }: PublicEventMap['fileRenamed']) => {
-      if (activeEditor && activeNode?.id === oldId) {
-        activeNode = item;
-        (activeEditor as any).updateNodeId?.(newId);
-      }
+      if (!activeEditor || !activeNode) return;
+      const renamedNodeId = replacePathPrefix(activeNode.id, oldId, newId);
+      if (renamedNodeId === activeNode.id) return;
+
+      const stateItem = vfsManager.store
+        ? findNodeById(vfsManager.store.getState().items, renamedNodeId)
+        : undefined;
+      activeNode = stateItem ?? (activeNode.id === oldId
+        ? item
+        : { ...activeNode, id: renamedNodeId });
+      activeEditor.setTitle(activeNode.metadata.title);
+      activeEditor.updateNodeId?.(renamedNodeId);
     }
   );
 

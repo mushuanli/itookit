@@ -3,7 +3,7 @@
  * @desc Data mutation service implementing IDataOperationPort.
  */
 import type { IModuleFS, FSNode } from '@itookit/vfs-core';
-import { formatDefaultFileTitle } from '@itookit/common';
+import { buildRenamedFilename, formatDefaultFileTitle } from '@itookit/common';
 import type { IDataOperationPort } from '../contracts/ports';
 
 export interface VFSServiceDependencies {
@@ -116,8 +116,27 @@ export class VFSService implements IDataOperationPort {
     });
   };
 
-  renameItem = (nodeId: string, newTitle: string): Promise<void> =>
-    this.engine.driver.rename(nodeId, newTitle);
+  renameItem = async (nodeId: string, newName: string): Promise<void> => {
+    const node = await this.engine.driver.getNode(nodeId);
+    const oldTitle = typeof node?.metadata?.title === 'string'
+      ? node.metadata.title
+      : null;
+    const title = node
+      ? buildRenamedFilename(newName, node.name).title
+      : newName;
+
+    if (oldTitle !== null) {
+      await this.engine.driver.updateMetadata(nodeId, { title });
+    }
+    try {
+      await this.engine.driver.rename(nodeId, newName);
+    } catch (error) {
+      if (oldTitle !== null) {
+        await this.engine.driver.updateMetadata(nodeId, { title: oldTitle }).catch(() => { });
+      }
+      throw error;
+    }
+  };
 
   deleteItems = (nodeIds: string[]): Promise<void> =>
     this.engine.driver.delete(nodeIds);

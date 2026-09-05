@@ -85,4 +85,56 @@ describe('ChatEngine.initializeExistingFile', () => {
         const manifest = await engine.getManifest('/corrupt.chat');
         expect(manifest.schemaVersion).toBe(3);
     });
+
+    it('publishes the new title with the rename event', async () => {
+        await vfs.write(FS_MODULE_CHAT, '/old.chat', '{}');
+        await engine.initializeExistingFile('/old.chat', 'Old');
+
+        const observedTitle = new Promise<string | undefined>(resolve => {
+            const unsubscribe = engine.engine.driver.on('node:renamed', () => {
+                void engine.engine.driver.getNode('/new.chat').then(node => {
+                    unsubscribe();
+                    resolve(node?.metadata?.title as string | undefined);
+                });
+            });
+        });
+
+        await engine.rename('/old.chat', 'new');
+
+        expect(await observedTitle).toBe('new');
+        expect((await engine.getManifest('/new.chat')).title).toBe('new');
+        expect(await engine.getSessionNodeId(
+            await engine.getSessionIdFromNodeId('/new.chat') as string,
+        )).toBe('/new.chat');
+    });
+
+    it('rolls metadata title back when rename fails', async () => {
+        await vfs.write(FS_MODULE_CHAT, '/old.chat', '{}');
+        await vfs.write(FS_MODULE_CHAT, '/taken.chat', '{}');
+        await engine.initializeExistingFile('/old.chat', 'Old');
+
+        await expect(engine.rename('/old.chat', 'taken')).rejects.toThrow();
+
+        const node = await engine.engine.driver.getNode('/old.chat');
+        expect(node?.metadata?.title).toBe('Old');
+    });
+
+    it('repairs manifest and session lookup after an external driver rename', async () => {
+        await vfs.write(FS_MODULE_CHAT, '/old.chat', '{}');
+        const sessionId = await engine.initializeExistingFile('/old.chat', 'Old');
+        const synchronized = new Promise<void>(resolve => {
+            const unsubscribe = engine.engine.driver.on('node:updated', event => {
+                const renamed = event.payload.nodes?.some(node => node.path === '/external.chat');
+                if (event.payload.reason !== 'metadata' || !renamed) return;
+                unsubscribe();
+                resolve();
+            });
+        });
+
+        await engine.engine.driver.rename('/old.chat', 'external.chat');
+        await synchronized;
+
+        expect((await engine.getManifest('/external.chat')).title).toBe('external');
+        expect(await engine.getSessionNodeId(sessionId)).toBe('/external.chat');
+    });
 });

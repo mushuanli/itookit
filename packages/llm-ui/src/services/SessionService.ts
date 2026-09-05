@@ -93,6 +93,10 @@ export class SessionService {
     private async getSessionTitle(nodeId: string, defaultTitle: string): Promise<string> {
         try {
             const manifest = await this.engine.getManifest(nodeId);
+            if (defaultTitle && manifest.title !== defaultTitle) {
+                await this.engine.updateManifest(nodeId, { title: defaultTitle });
+                return defaultTitle;
+            }
             return manifest.title || defaultTitle;
         } catch (e) {
             console.warn('[SessionService] Failed to load manifest:', e);

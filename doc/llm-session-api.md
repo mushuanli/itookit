@@ -149,6 +149,10 @@ class ChatEngine extends BaseModuleService implements IChatEngine {
 
 **`IChatEngine`**（`persistence/types.ts`）：上述契约接口 + `readonly vfs: IVFSManager` + `dispose()`。
 
+会话文件重命名时，`ChatEngine` 在发布 `node:renamed` 前同步标题元数据；
+`SessionManager.updateBoundNodeId()` 同步 registry、`SessionState`、活动 task 和缓存
+`RoundLog`，确保生成中及后续 round 持久化都使用新路径。
+
 ---
 
 ## Round

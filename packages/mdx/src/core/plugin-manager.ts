@@ -71,7 +71,7 @@ export class PluginManager {
     if (this.ownerNodeId === this.currentNodeId) this.ownerNodeId = null;
     this.currentNodeId = nodeId;
     if (!this.ownerNodeId) this.ownerNodeId = nodeId;
-    this.storeCache.clear();
+    this.storeCache.forEach(store => store.updateNodeId?.(nodeId));
   }
 
   setSessionEngine(engine: IModuleFS): void {

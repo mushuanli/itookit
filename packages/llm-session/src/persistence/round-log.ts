@@ -119,6 +119,11 @@ export class RoundLog implements ILog {
         this._refs = new RoundRefStore(this.graph);
     }
 
+    updateNodeId(newNodeId: string): void {
+        this.graph.updateNodeId(newNodeId);
+        this.profileStore.updateNodeId(newNodeId);
+    }
+
     // ── ILog implementation ───────────────────────────────────────────────
 
     async append(ref: Ref, round: Round): Promise<RoundId> {
