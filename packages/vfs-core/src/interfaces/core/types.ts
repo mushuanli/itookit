@@ -28,6 +28,8 @@ export type FSNodeType = FSNodeBaseType | FSNodeExtendedType;
  * 同时为已知的 AI 相关字段提供类型提示。
  */
 export interface FSNodeMetadata extends Record<string, unknown> {
+    /** The directory and its descendants have a fixed storage layout. Structural moves/deletes require explicit unpinning. */
+    vfsFixedLayout?: boolean;
     /** AI Agent ID */
     ai_defaultAgent?: string;
     /** System prompt */

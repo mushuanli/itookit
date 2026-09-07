@@ -11,25 +11,17 @@ import type {
     TaskRecord,
 } from '../domain/types';
 import { assertDurableValue } from './durability';
-import { type RequiredEffect, serializeError } from './effect-utils';
+import { serializeError } from './effect-utils';
 
 export async function nextDecision(program: DurableTaskProgram, task: TaskRecord): Promise<Decision> {
     const event = task.pendingEvents[0];
-    if (task.state === undefined) return program.init(task.input);
-    if (!event) return { state: task.state, next: { type: 'continue' } };
-    return program.reduce(task.state as never, normalizeInputEvent(event));
+    if (!(task.initialized ?? task.state !== undefined)) return program.init(structuredClone(task.input));
+    if (!event) return program.reduce(structuredClone(task.state) as never, { type: 'step' });
+    return program.reduce(structuredClone(task.state) as never, normalizeInputEvent(structuredClone(event)));
 }
 
 export function normalizeInputEvent(event: TaskInputEvent): TaskInputEvent {
-    if (event.type !== 'signal') return event;
-    if (event.signal.type === '__effect_result__') {
-        const payload = event.signal.payload as { effect: RequiredEffect; result: unknown };
-        return { type: 'effect-completed', effectId: payload.effect.id, result: payload.result };
-    }
-    if (event.signal.type === '__effect_error__') {
-        const payload = event.signal.payload as { effectId: string; error: SerializableError };
-        return { type: 'effect-failed', effectId: payload.effectId, error: payload.error };
-    }
+    // Business signals cannot forge broker result events.
     return event;
 }
 
@@ -48,7 +40,7 @@ export function transition(task: TaskRecord, decision: Decision): TaskRecord {
 
 export function shouldRetry(task: TaskRecord, decision: Decision): boolean {
     return decision.next.type === 'fail' && decision.next.retryable === true
-        && task.attemptCount < task.retry.maxAttempts;
+        && (task.stepAttemptCount ?? task.attemptCount) < task.retry.maxAttempts;
 }
 
 export function retryTask(
@@ -85,6 +77,9 @@ export function validateDecision(decision: Decision): void {
 }
 
 export function validateAction(action: KernelAction): void {
+    if (action.type === 'resource') assertDurableValue(action.command, 'Resource command');
+    if (action.type === 'send-message') assertDurableValue(action.message.payload, 'Message payload');
+    if (action.type === 'cache-publish') assertDurableValue(action.request.value, 'Cache value');
     if (action.type === 'spawn' && action.spec.input !== undefined) {
         assertDurableValue(action.spec.input, 'Spawn input');
     }

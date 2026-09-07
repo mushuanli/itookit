@@ -2,7 +2,7 @@
  * @file tauri-bootstrap.test.ts
  *
  * Simulates apps/tauri-app/src/main.ts bootstrap (VFS + service layer)
- * in pure Node.js — no Tauri runtime, no DOM, no browser APIs.
+ * in Node.js with real SQLite sidecars — no Tauri runtime or browser APIs.
  *
  * Mirrors the production backend layout exactly:
  *   rootBackend         ~/.mindos/           SQLite: ~/.mindos/_meta/
@@ -21,8 +21,8 @@ import { join } from 'node:path';
 
 import { createVFS, FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/vfs-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
-import { FakeSidecarDb } from './fake-sidecar';
-import { ChatEngine, VFSAgentService } from '@itookit/llm-session';
+import { Kernel } from '@itookit/durable-kernel';
+import { ChatEngine, VFSAgentService, ChatKernelStorageResolver, chatKernelStorage } from '@itookit/llm-session';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import type { IVFSManager } from '@itookit/vfs-core';
 
@@ -87,7 +87,6 @@ beforeAll(async () => {
         openLocalFSBackend({
             rootDir,
             sidecarDir,
-            createDb: async () => new FakeSidecarDb(),
         });
 
     const [rootBackend, homeBackend, ...moduleBackends] = await Promise.all([
@@ -204,6 +203,44 @@ describe('tauri-app bootstrap simulation', () => {
         const connFiles = await fsp.readdir(connDir);
         console.log('[bootstrap] connection files:', connFiles);
         expect(connFiles.length).toBeGreaterThan(0);
+    });
+
+    it('restores every runnable Task from the chat module and retains explicit pause', async () => {
+        const chatId = await fix.sessionEngine.createSession('Durable recovery');
+        const fs = fix.vfs.getEngine(FS_MODULE_CHAT);
+        const makeKernel = (maxConcurrent: number) => {
+            const kernel = new Kernel({ catalog: { fs }, maxConcurrent });
+            kernel.registerStorageResolver(new ChatKernelStorageResolver(fix.sessionEngine));
+            kernel.registerProgram({
+                manifest: { kind: 'bootstrap-recovery', version: '1' },
+                init(input) { return { state: null, next: { type: 'complete', output: input } }; },
+                reduce() { throw new Error('unexpected'); },
+            });
+            return kernel;
+        };
+        const first = makeKernel(0), replacement = makeKernel(2);
+        try {
+            await first.initialize();
+            const session = await first.createSession({ id: chatId, storage: chatKernelStorage(chatId) });
+            const tasks = await Promise.all(['a', 'b', 'paused'].map(input => session.spawn({
+                program: { kind: 'bootstrap-recovery', version: '1' }, input,
+            })));
+            await tasks[2].pause({ requestId: 'pause' });
+            first.dispose(); await first.waitIdle();
+            await replacement.initialize();
+            expect((await replacement.recoverSession(chatId, { takeover: true })).rebuiltIndexes).toBe(3);
+            const restored = await replacement.openSession(chatId);
+            for (let i = 0; i < 2; i++) {
+                expect((await (await restored.attachTask(tasks[i].id)).wait({ timeoutMs: 2000 })).output).toBe(['a', 'b'][i]);
+            }
+            const paused = await restored.attachTask(tasks[2].id);
+            expect((await paused.status()).task.control?.mode).toBe('pause');
+            await paused.resume({ requestId: 'resume' });
+            expect((await paused.wait({ timeoutMs: 2000 })).output).toBe('paused');
+        } finally {
+            first.dispose(); replacement.dispose();
+            await Promise.all([first.waitIdle(), replacement.waitIdle()]);
+        }
     });
 
     it('home module: can write and read a file', async () => {

@@ -361,9 +361,6 @@ importers:
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../llm-session
-      '@itookit/llm-ui':
-        specifier: workspace:*
-        version: link:../llm-ui
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx

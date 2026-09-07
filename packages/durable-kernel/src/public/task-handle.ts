@@ -13,13 +13,33 @@ import type {
     TaskSnapshot,
 } from '../domain/types';
 import { eventStream, waitForChange } from './event-stream';
+import { taskStat, taskStats } from '../domain/status';
 
 export class DefaultTaskHandle<O> implements TaskHandle<O> {
+    get resources() { return this.kernel.resourceApi(this.sessionId, this.id); }
+    get cache(): import('../domain/cache').CacheApi {
+        return { create: spec => this.createCache(spec), list: () => this.listCaches(), read: request => this.readCache(request),
+            publish: request => this.publishCache(request), invalidate: (id, generation) => this.invalidateCache(id, generation),
+            renew: (id, generation, ttl) => this.renewCache(id, generation, ttl) };
+    }
+    send(request: import('../domain/types').TaskMessageRequest) { return this.sendMessage(request); }
+    async stat() { return taskStat(await this.kernel.task(this.sessionId, this.id)); }
+    async stats() { return taskStats(await this.kernel.task(this.sessionId, this.id)); }
+    watch(options?: { after?: number }) { return this.events(options); }
     constructor(
         private readonly kernel: Kernel,
         private readonly sessionId: string,
         readonly id: string,
     ) {}
+
+    resolveEffect(request: import('../domain/types').EffectResolution) { return this.kernel.resolveEffect(this.sessionId, this.id, request); }
+    sendMessage(request: import('../domain/types').TaskMessageRequest) { return this.kernel.sendTaskMessage(this.sessionId, this.id, request); }
+    createCache(spec: import('../domain/cache').CacheSpec) { return this.kernel.createCache(this.sessionId, this.id, spec); }
+    renewCache(handleId: string, expectedGeneration: number, ttlMs: number) { return this.kernel.renewCache(this.sessionId, this.id, handleId, expectedGeneration, ttlMs); }
+    listCaches() { return this.kernel.listCaches(this.sessionId, this.id); }
+    readCache(request: import('../domain/cache').CacheRead) { return this.kernel.readCache(this.sessionId, this.id, request); }
+    publishCache(request: import('../domain/cache').CachePublish) { return this.kernel.publishCache(this.sessionId, this.id, request); }
+    invalidateCache(handleId: string, expectedGeneration: number) { return this.kernel.invalidateCache(this.sessionId, this.id, handleId, expectedGeneration); }
 
     async status(): Promise<TaskSnapshot> {
         return { task: await this.kernel.task(this.sessionId, this.id) };
@@ -42,6 +62,10 @@ export class DefaultTaskHandle<O> implements TaskHandle<O> {
     signal(signal: TaskSignal): Promise<void> {
         return this.kernel.signal(this.sessionId, this.id, signal);
     }
+
+    pause(options: import('../domain/types').TaskControlOptions) { return this.kernel.controlTask(this.sessionId, this.id, 'pause', options); }
+    interrupt(options: import('../domain/types').TaskControlOptions) { return this.kernel.controlTask(this.sessionId, this.id, 'interrupt', options); }
+    resume(options: import('../domain/types').TaskControlOptions & { signal?: TaskSignal }) { return this.kernel.controlTask(this.sessionId, this.id, 'run', options); }
 
     start(): Promise<void> {
         return this.kernel.startTask(this.sessionId, this.id);

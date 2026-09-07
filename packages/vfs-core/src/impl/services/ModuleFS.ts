@@ -53,9 +53,9 @@ export class ModuleFS implements IModuleFS {
         this._driver.assets = this.assets;
         this.tags = new TagOps(this.ctx);
 
-        const backend = this.ctx.backend;
-        const seq = backend.records ? new SeqFileOps(this.ctx, backend.records) : undefined;
-        const refs = backend.records ? new RefOps(this.ctx, backend.records) : undefined;
+        const records = this.ctx.records;
+        const seq = records ? new SeqFileOps(this.ctx, records) : undefined;
+        const refs = records ? new RefOps(this.ctx, records) : undefined;
         this.meta = {
             assets: this.assets,
             tags: this.tags,
@@ -74,6 +74,11 @@ export class ModuleFS implements IModuleFS {
         if (this.ctx.initialized) return;
         if (!this.ctx.isCustomRoot) {
             await this.ctx.engine.ensureModuleDir(this.moduleId);
+        }
+        const backend = this.ctx.backend;
+        if (backend.prepareRecordPaths) {
+            const { mountPath } = this.ctx.engine.recordLocation(this.ctx.toRealPath('/'), backend);
+            await backend.prepareRecordPaths(mountPath);
         }
         this.ctx.initialized = true;
     }

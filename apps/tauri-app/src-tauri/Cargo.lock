@@ -3948,11 +3948,13 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sqlx",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-sql",
+ "tokio",
 ]
 
 [[package]]

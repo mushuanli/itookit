@@ -12,6 +12,7 @@ import type {
     WorkspaceAdapter,
 } from './domain/types';
 
+const helperKernels: Kernel[] = [];
 const binding: StorageBindingRef = { kind: 'test', locator: { rootPath: '/sessions/one/.kernel' } };
 
 describe('Kernel durable kernel', () => {
@@ -24,7 +25,7 @@ describe('Kernel durable kernel', () => {
         await manager.mount('test');
         fs = manager.getEngine('test');
         await fs.init();
-        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel = new Kernel({ catalog: { fs }, pollMs: 0 });
         kernel.registerStorageResolver({
             kind: 'test',
             async resolve(reference) {
@@ -34,7 +35,12 @@ describe('Kernel durable kernel', () => {
         await kernel.initialize();
     });
 
-    afterEach(async () => { kernel.dispose(); await manager.dispose(); });
+    afterEach(async () => {
+        const all = [kernel, ...helperKernels.splice(0)];
+        for (const k of all) k.dispose();
+        await Promise.all(all.map(k => k.waitIdle()));
+        await manager.dispose();
+    });
 
     it('persists and completes a task', async () => {
         kernel.registerProgram(echoProgram());
@@ -58,10 +64,10 @@ describe('Kernel durable kernel', () => {
 
         await expect(session.claimTaskBoardItem(work.id, child.id)).rejects.toThrow('incomplete dependencies');
         const claimedPrepare = await session.claimTaskBoardItem(prerequisite.id, parent.id);
-        await session.completeTaskBoardItem(claimedPrepare.id, { ok: true });
+        await session.completeTaskBoardItem(claimedPrepare.id, claimedPrepare.leaseToken!, { ok: true });
         const claimedWork = await session.claimTaskBoardItem(work.id, child.id, { leaseMs: 1_000 });
         expect(claimedWork.assigneeTaskId).toBe(child.id);
-        expect((await session.renewTaskBoardLease(work.id, child.id, 2_000)).leaseUntil).toBeGreaterThan(claimedWork.leaseUntil!);
+        expect((await session.renewTaskBoardLease(work.id, child.id, claimedWork.leaseToken!, 2_000)).leaseUntil).toBeGreaterThan(claimedWork.leaseUntil!);
         expect((await session.attachTask(child.id)).id).toBe(child.id);
         expect((await session.listTasks()).map(task => task.id)).toEqual(expect.arrayContaining([parent.id, child.id]));
 
@@ -208,7 +214,7 @@ describe('Kernel durable kernel', () => {
     it('renews a long-running effect lease without occupying a task worker', async () => {
         let release!: () => void;
         const barrier = new Promise<void>(resolve => { release = resolve; });
-        const first = await configuredKernel(fs, { leaseMs: 30, pollMs: 5 });
+        const first = await configuredKernel(fs, { leaseMs: 30, pollMs: 0 });
         first.registerProgram(recoverableEffectProgram());
         first.registerEffect(delayedEffect(barrier));
         const session = await first.createSession({ id: 'session-one', storage: binding });
@@ -525,7 +531,7 @@ describe('Kernel durable kernel', () => {
     it('discovers durable ready work without sharing in-memory notifications', async () => {
         const creator = await configuredKernel(fs, { maxConcurrent: 0 });
         const session = await creator.createSession({ id: 'session-one', storage: binding });
-        const worker = await configuredKernel(fs, { pollMs: 5 });
+        const worker = await configuredKernel(fs, { pollMs: 0 });
         worker.registerProgram(echoProgram());
         await worker.openSession(session.id);
 
@@ -575,7 +581,7 @@ describe('Kernel durable kernel', () => {
     it('renews a live attempt lease while a reducer is running', async () => {
         let release!: () => void;
         const barrier = new Promise<void>(resolve => { release = resolve; });
-        const first = await configuredKernel(fs, { leaseMs: 30, pollMs: 5 });
+        const first = await configuredKernel(fs, { leaseMs: 30, pollMs: 0 });
         first.registerProgram(delayedProgram(barrier));
         const session = await first.createSession({ id: 'session-one', storage: binding });
         const task = await session.submit({ program: { kind: 'test.delayed', version: '1' }, input: 'alive' });
@@ -952,6 +958,7 @@ async function configuredKernel(
     options: { maxConcurrent?: number; leaseMs?: number; pollMs?: number } = {},
 ): Promise<Kernel> {
     const value = new Kernel({ catalog: { fs }, ...options });
+    helperKernels.push(value);
     value.registerStorageResolver({
         kind: 'test',
         async resolve(reference) {

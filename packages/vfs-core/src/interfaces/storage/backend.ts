@@ -55,6 +55,10 @@ export interface IStorageBackend {
 
     /** SeqFile K-V 记录存储 */
     records?: IRecordStore;
+    /** New backends use local paths for records, just like stat/rename. Omitted preserves legacy system paths. */
+    readonly recordPaths?: 'backend';
+    /** Upgrade legacy record keys before exposing a mounted module. Must be atomic and idempotent. */
+    prepareRecordPaths?(systemMountPath: string): Promise<void>;
 
     /** 全文/标签搜索 */
     search?(query: FSSearchQuery): Promise<FSNode[]>;

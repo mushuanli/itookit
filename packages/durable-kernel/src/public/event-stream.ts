@@ -14,7 +14,15 @@ export async function* eventStream(
             cursor = event.sequence;
             if (!taskId || event.taskId === taskId) yield event;
         }
-        if (taskId && await isTerminal(kernel, sessionId, taskId)) return;
+        if (taskId && await isTerminal(kernel, sessionId, taskId)) {
+            // Terminal state and journal are committed together. Read the tail
+            // after observing terminal so a concurrent final commit is not lost.
+            for (const event of await kernel.eventList(sessionId, cursor)) {
+                cursor = event.sequence;
+                if (event.taskId === taskId) yield event;
+            }
+            return;
+        }
         await waitForChange(kernel, sessionId, taskId, 250);
     }
 }
@@ -33,7 +41,7 @@ export function waitForChange(
     return new Promise(resolve => {
         const timeout = setTimeout(done, timeoutMs);
         const off = kernel.onChanged(event => {
-            if (event.sessionId === sessionId && (!taskId || event.taskId === taskId)) done();
+            if (event.sessionId === sessionId && (!taskId || !event.taskId || event.taskId === taskId)) done();
         });
         function done(): void { clearTimeout(timeout); off(); resolve(); }
     });

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use std::os::unix::process::CommandExt;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_fs::FsExt;
+mod sidecar;
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
@@ -548,6 +549,7 @@ pub fn run() {
             app.manage(paths);
             app.manage(ShellProcesses::default());
             app.manage(CodexAppServer::default());
+            app.manage(sidecar::SidecarTransactions::default());
 
             #[cfg(debug_assertions)]
             if let Some(window) = app.get_webview_window("main") {
@@ -559,6 +561,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            sidecar::sidecar_begin,
+            sidecar::sidecar_execute,
+            sidecar::sidecar_select,
+            sidecar::sidecar_finish,
             get_home_dir,
             get_root_dir,
             get_app_data_dir,

@@ -34,6 +34,7 @@ export function seqKey(field: string): string {
 }
 
 class SeqTransaction implements ISeqFileTransaction {
+    readonly changed = new Set<string>();
     constructor(
         private readonly fs: EnginePort,
         private readonly records: IRecordTransaction,
@@ -48,10 +49,12 @@ class SeqTransaction implements ISeqFileTransaction {
 
     async setEntry(path: string, key: string, value: string): Promise<void> {
         await this.records.setRecordField(this.path(path), seqField(key), value);
+        this.changed.add(this.path(path));
     }
 
     async deleteEntry(path: string, key: string): Promise<void> {
         await this.records.deleteRecordField(this.path(path), seqField(key));
+        this.changed.add(this.path(path));
     }
 
     async compareAndSet(
@@ -118,7 +121,9 @@ export class SeqFileOps implements ISeqFileOperations {
     }
 
     async setEntry(path: string, key: string, value: string): Promise<void> {
-        await this.records.setRecordField(await this.path(path), seqField(key), value);
+        const realPath = await this.path(path);
+        await this.records.setRecordField(realPath, seqField(key), value);
+        this.emitCommitted([realPath]);
     }
 
     async setEntries(path: string, entries: Record<string, string>): Promise<void> {
@@ -131,7 +136,9 @@ export class SeqFileOps implements ISeqFileOperations {
     }
 
     async deleteEntry(path: string, key: string): Promise<void> {
-        await this.records.deleteRecordField(await this.path(path), seqField(key));
+        const realPath = await this.path(path);
+        await this.records.deleteRecordField(realPath, seqField(key));
+        this.emitCommitted([realPath]);
     }
 
     async hasEntry(path: string, key: string): Promise<boolean> {
@@ -178,10 +185,22 @@ export class SeqFileOps implements ISeqFileOperations {
         await this.records.deleteRecordIndex(await this.path(path), seqField(field));
     }
 
+    private emitCommitted(paths: string[]): void {
+        if (paths.length) this.fs.emit('seq:committed', { paths: paths.map(path => this.fs.toVirtualPath(path)) });
+    }
+
     async transaction<T>(operation: (tx: ISeqFileTransaction) => Promise<T>): Promise<T> {
         if (!this.records.transaction) {
             throw new FSCapabilityError('transactionalSeqFiles', this.fs.moduleId);
         }
-        return this.records.transaction(records => operation(new SeqTransaction(this.fs, records)));
+        let changed: string[] = [];
+        const result = await this.records.transaction(async records => {
+            const tx = new SeqTransaction(this.fs, records);
+            const value = await operation(tx);
+            changed = [...tx.changed];
+            return value;
+        });
+        this.emitCommitted(changed);
+        return result;
     }
 }

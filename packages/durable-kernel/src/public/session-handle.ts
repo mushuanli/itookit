@@ -29,6 +29,11 @@ import type {
 import { eventStream } from './event-stream';
 
 export class DefaultSessionHandle implements SessionHandle {
+    get resources() { return this.kernel.resourceApi(this.id); }
+    recover(options?: import('../domain/types').RecoveryOptions) { return this.kernel.recoverSession(this.id, options); }
+    spawn<I, O = unknown>(spec: TaskSpec<I>) { return this.submit<I, O>(spec); }
+    stat() { return this.kernel.sessionStat(this.id); }
+    watch(options?: { after?: number }) { return this.events(options); }
     constructor(private readonly kernel: Kernel, readonly id: string) {}
 
     submit<I, O = unknown>(spec: TaskSpec<I>): Promise<TaskHandle<O>> {
@@ -98,6 +103,8 @@ export class DefaultSessionHandle implements SessionHandle {
     }
 
     async claimTaskBoardItem(id: string, assigneeTaskId: string, options?: { leaseMs?: number }): Promise<TaskBoardItem> {
+        const assignee = await this.kernel.task(this.id, assigneeTaskId);
+        if (assignee.exit) throw new Error('Task board assignee is terminal');
         const key = `task-board/${id}`;
         const entry = await this.getShared(key);
         if (!entry) throw new Error(`Task board item not found: ${id}`);
@@ -111,17 +118,19 @@ export class DefaultSessionHandle implements SessionHandle {
         }
         const now = Date.now();
         const leaseMs = positiveLease(options?.leaseMs);
-        const next = { ...current, status: 'claimed' as const, assigneeTaskId, leaseUntil: now + leaseMs, updatedAt: now };
+        const leaseToken = globalThis.crypto?.randomUUID?.()
+            ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+        const next = { ...current, status: 'claimed' as const, assigneeTaskId, leaseToken, leaseUntil: now + leaseMs, updatedAt: now };
         await this.setShared(key, next as unknown as JsonValue, { expectedVersion: entry.version, taskId: assigneeTaskId });
         return next;
     }
 
-    async renewTaskBoardLease(id: string, assigneeTaskId: string, leaseMs?: number): Promise<TaskBoardItem> {
+    async renewTaskBoardLease(id: string, assigneeTaskId: string, leaseToken: string, leaseMs?: number): Promise<TaskBoardItem> {
         const key = `task-board/${id}`;
         const entry = await this.getShared(key);
         if (!entry) throw new Error(`Task board item not found: ${id}`);
         const current = entry.value as unknown as TaskBoardItem;
-        if (current.status !== 'claimed' || current.assigneeTaskId !== assigneeTaskId) {
+        if (current.status !== 'claimed' || current.assigneeTaskId !== assigneeTaskId || current.leaseToken !== leaseToken || (current.leaseUntil ?? 0) <= Date.now()) {
             throw new Error(`Task board item ${id} is not claimed by ${assigneeTaskId}`);
         }
         const next = { ...current, leaseUntil: Date.now() + positiveLease(leaseMs), updatedAt: Date.now() };
@@ -129,12 +138,12 @@ export class DefaultSessionHandle implements SessionHandle {
         return next;
     }
 
-    async completeTaskBoardItem(id: string, result?: JsonValue, failed = false): Promise<TaskBoardItem> {
+    async completeTaskBoardItem(id: string, leaseToken: string, result?: JsonValue, failed = false): Promise<TaskBoardItem> {
         const key = `task-board/${id}`;
         const entry = await this.getShared(key);
         if (!entry) throw new Error(`Task board item not found: ${id}`);
         const current = entry.value as unknown as TaskBoardItem;
-        if (current.status !== 'claimed') throw new Error(`Task board item ${id} is not claimed`);
+        if (current.status !== 'claimed' || !leaseToken || current.leaseToken !== leaseToken) throw new Error(`Task board item ${id} is not claimed`);
         if (current.leaseUntil !== undefined && current.leaseUntil <= Date.now()) {
             throw new Error(`Task board item ${id} claim lease expired`);
         }
@@ -146,9 +155,11 @@ export class DefaultSessionHandle implements SessionHandle {
         return next;
     }
 
-    sendToSession<T extends JsonValue>(target: string, topic: string, payload: T): Promise<CrossSessionMessage<T>> {
-        return this.kernel.sendCrossSession(this.id, target, topic, payload);
+    sendToSession<T extends JsonValue>(target: string, topic: string, payload: T, options?: { expiresAt?: number }): Promise<CrossSessionMessage<T>> {
+        return this.kernel.sendCrossSession(this.id, target, topic, payload, options);
     }
+
+    outbox(): Promise<CrossSessionMessage[]> { return this.kernel.outbox(this.id); }
 
     inbox(options?: { after?: number }): Promise<CrossSessionMessage[]> {
         return this.kernel.inbox(this.id, options?.after ?? 0);
@@ -216,5 +227,5 @@ export class DefaultSessionHandle implements SessionHandle {
 }
 
 function positiveLease(value: number | undefined): number {
-    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 300_000;
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.max(1, Math.floor(value)) : 300_000;
 }

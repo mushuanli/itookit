@@ -7,6 +7,7 @@ import type {
 
 export interface KernelRegistration {
     registerProgram(program: DurableTaskProgram): void;
+    registerResourceAdapter(adapter: import('../domain/resource-api').ManagedResourceAdapter): void;
     registerEffect(adapter: EffectAdapter): void;
     registerStorageResolver(resolver: SessionStorageResolver): void;
     registerWorkspace(adapter: WorkspaceAdapter): void;

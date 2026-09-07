@@ -17,7 +17,11 @@ export function encode(value: unknown): string {
 
 export function decode<T = any>(value: string): T { return JSON.parse(value) as T; }
 
-export function createId(prefix: string): string { return `${prefix}_${globalThis.crypto.randomUUID()}`; }
+export function createId(prefix: string): string {
+    const uuid = globalThis.crypto?.randomUUID?.()
+        ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    return `${prefix}_${uuid}`;
+}
 
 // ── 路径 / 键名 ───────────────────────────────────────────────────────────────
 
@@ -30,7 +34,11 @@ export function resourcesPath(root: string): string { return join(root, 'resourc
 export function eventsPath(root: string): string { return join(root, 'events.seq'); }
 export function indexPath(root: string): string { return join(root, 'index.seq'); }
 export function graphPath(root: string): string { return join(root, 'graph.seq'); }
-export function taskPath(root: string, id: string): string { return join(root, 'tasks', id, 'task.seq'); }
+/** Logical IDs used in paths must be a single segment. UUID is not required. */
+export function validateId(id: string): void {
+    if (!id || id === '.' || id === '..' || /[/\\\u0000-\u001f]/.test(id)) throw new Error(`Invalid object ID: ${id}`);
+}
+export function taskPath(root: string, id: string): string { validateId(id); return join(root, 'tasks', id, 'task.seq'); }
 export function attemptKey(id: string): string { return `attempt/${id}`; }
 export function snapshotKey(version: number): string { return `snapshot/${String(version).padStart(16, '0')}`; }
 export function taskWaitKey(targetId: string, waiterId: string): string {
@@ -59,6 +67,7 @@ export function workspaceDiffKey(id: string): string { return `workspace/diff/${
 export async function ensureSessionLayout(binding: ResolvedStorageBinding): Promise<void> {
     requireTransactionalSeq(binding.fs);
     await ensureTree(binding.fs, binding.rootPath);
+    await binding.fs.driver.updateMetadata(binding.rootPath, { vfsFixedLayout: true });
     for (const file of ['session.seq', 'shared.seq', 'context.seq', 'messages.seq', 'events.seq', 'graph.seq', 'resources.seq', 'index.seq']) {
         await ensureSeqFile(binding.fs, join(binding.rootPath, file));
     }
@@ -66,6 +75,7 @@ export async function ensureSessionLayout(binding: ResolvedStorageBinding): Prom
 }
 
 export async function ensureTaskLayout(binding: ResolvedStorageBinding, taskId: string): Promise<void> {
+    validateId(taskId);
     const root = join(binding.rootPath, 'tasks', taskId);
     await ensureTree(binding.fs, root);
     await ensureTree(binding.fs, join(root, 'artifacts'));
@@ -112,9 +122,10 @@ export async function appendEventTx(
     taskId: string | undefined,
     type: string,
     payload?: unknown,
+    identity?: { effectId: string; attemptId: string },
 ): Promise<number> {
     const sequence = await tx.increment(eventsPath(root), 'next-sequence');
-    const event: EventEnvelope = { sequence, sessionId, taskId, type, payload, occurredAt: Date.now() };
+    const event: EventEnvelope = { schemaVersion: 1, ...identity, sequence, sessionId, taskId, type, payload, occurredAt: Date.now() };
     await tx.setEntry(eventsPath(root), `event/${String(sequence).padStart(16, '0')}`, encode(event));
     return sequence;
 }

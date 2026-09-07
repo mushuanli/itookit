@@ -1,3 +1,8 @@
+import { enqueueMessageTx, deliverMessageTx, consumeMessageTx } from './mailbox-store';
+import { executeResourceTx, type PreparedResourceCommand } from './managed-resources';
+import { createCacheTx, readCacheTx, publishCacheTx, invalidateCacheTx, renewCacheTx, manageCacheTx, listCachesTx } from './cache-store';
+import { refreshWaiters, recoverWaitGraphTx, hasCancelledAncestorTx } from './store-helpers';
+import { assertDurableValue } from '../../application/durability';
 
 import type {
     BudgetAccount,
@@ -28,7 +33,7 @@ import type {
     WorkspaceDiff,
     WorkspaceSnapshot,
 } from '../../domain/types';
-import { advanceDependants,allHandlesTx,appendEventTx,applySharedMutations,applySpawnsTx,assertBudgetCapacity,assertBudgetVersion,assertClaim,assertContextHead,assertRightsSubset,assertSharedVersion,attemptKey,authorizeHandleTx,budgetAccount,budgetKey,cancelActiveEffects,catalogPath,claimMatches,claimTask,collectContextHistory,contextBranchKey,contextCommitKey,contextPath,createId,decode,deletedRevision,dependencySatisfied,descendantHandleIds,effectAttempt,effectClaimMatches,encode,ensureSeqFile,ensureSessionLayout,ensureTaskLayout,ensureTree,eventsPath,finishAttemptTx,finishEffect,graphPath,handleKey,inboxKey,indexPath,indexTask,isTerminal,join,messagesPath,nextSharedVersion,outboxKey,readBudgetTx,readContextBranchTx,readMessages,readSharedTx,readTaskTx,readyCandidates,recoverEffect,registerTaskWaitTx,replaceEffectAttempt,requireContextParents,requireHandleTx,requireResourceTx,requireSessionTx,requireTaskTx,requireTransactionalSeq,resourceBudgetsTx,resourceKey,resourcesPath,seq,sessionPath,sharedEntry,sharedHistoryPrefix,sharedKey,sharedPath,taskFromSpec,taskPath,terminalDependency,transaction,uniqueRights,unregisterTaskWaitTx,validateSharedKey,wakeFromPendingEvents,wakeTaskWaiters,workspaceDiffKey,workspaceSnapshotKey,writeContextBranchTx,writeSharedHistory,writeSharedRevision,writeTaskTx } from './store-helpers';
+import { advanceDependants,allHandlesTx,appendEventTx,applySharedMutations,applySpawnsTx,assertBudgetCapacity,assertBudgetVersion,assertClaim,assertContextHead,assertRightsSubset,assertSharedVersion,attemptKey,authorizeHandleTx,budgetAccount,budgetKey,cancelActiveEffects,catalogPath,claimMatches,claimTask,collectContextHistory,contextBranchKey,contextCommitKey,contextPath,createId,decode,deletedRevision,dependencySatisfied,descendantHandleIds,effectAttempt,effectClaimMatches,encode,ensureSeqFile,ensureSessionLayout,ensureTaskLayout,ensureTree,eventsPath,finishAttemptTx,finishEffect,graphPath,handleKey,indexPath,indexTask,isTerminal,join,messagesPath,nextSharedVersion,outboxKey,readBudgetTx,readContextBranchTx,readMessages,readSharedTx,readTaskTx,readyCandidates,recoverEffect,registerTaskWaitTx,replaceEffectAttempt,requireContextParents,requireHandleTx,requireResourceTx,requireSessionTx,requireTaskTx,requireTransactionalSeq,resourceBudgetsTx,resourceKey,resourcesPath,seq,sessionPath,sharedEntry,sharedHistoryPrefix,sharedKey,sharedPath,taskFromSpec,taskPath,terminalDependency,transaction,uniqueRights,unregisterTaskWaitTx,validateSharedKey,wakeFromPendingEvents,wakeTaskWaiters,workspaceDiffKey,workspaceSnapshotKey,writeContextBranchTx,writeSharedHistory,writeSharedRevision,writeTaskTx } from './store-helpers';
 import { KernelErrorCode, kernelError } from '../../domain/errors';
 
 const SESSION_KEY = 'record';
@@ -40,9 +45,13 @@ export interface EffectCompletion {
     result?: unknown;
     error?: import('../../domain/types').SerializableError;
     indeterminate?: boolean;
+    retryable?: boolean;
 }
 export interface PreparedSpawn { id: TaskId; spawnKey: string; spec: TaskSpec; }
 export interface TaskCommitSideEffects {
+    resources?: PreparedResourceCommand[];
+    messages?: import('../../domain/types').TaskMessageRequest[];
+    cache?: Array<Extract<import('../../domain/types').KernelAction, { type: 'cache-read' | 'cache-publish' | 'cache-create' | 'cache-invalidate' | 'cache-renew' }>>;
     shared?: Array<
         { type: 'set'; key: string; value: import('../../domain/types').JsonValue; expectedVersion?: number | null }
         | { type: 'delete'; key: string; expectedVersion?: number | null }
@@ -58,8 +67,28 @@ export class SeqFileKernelStore {
         private readonly resolveStorage: (reference: StorageBindingRef) => Promise<ResolvedStorageBinding>,
     ) {}
 
+    async createCache(binding: ResolvedStorageBinding, taskId: string, spec: import('../../domain/cache').CacheSpec) {
+        return transaction(binding.fs, tx => createCacheTx(tx, binding.rootPath, taskId, spec));
+    }
+    async readCache(binding: ResolvedStorageBinding, taskId: string, request: import('../../domain/cache').CacheRead) {
+        return transaction(binding.fs, tx => readCacheTx(tx, binding.rootPath, taskId, request));
+    }
+    async publishCache(binding: ResolvedStorageBinding, taskId: string, request: import('../../domain/cache').CachePublish) {
+        return transaction(binding.fs, tx => publishCacheTx(tx, binding.rootPath, taskId, request));
+    }
+    async invalidateCache(binding: ResolvedStorageBinding, taskId: string, handleId: string, expectedGeneration: number) {
+        return transaction(binding.fs, tx => invalidateCacheTx(tx, binding.rootPath, taskId, handleId, expectedGeneration));
+    }
+    async renewCache(binding: ResolvedStorageBinding, taskId: string, handleId: string, expectedGeneration: number, ttlMs: number) {
+        return transaction(binding.fs, tx => renewCacheTx(tx, binding.rootPath, taskId, handleId, expectedGeneration, ttlMs));
+    }
+    async listCaches(binding: ResolvedStorageBinding, taskId: string) {
+        return transaction(binding.fs, tx => listCachesTx(tx, binding.rootPath, taskId));
+    }
+
     async initialize(): Promise<void> {
         await ensureTree(this.catalog.fs, this.catalog.rootPath);
+        await this.catalog.fs.driver.updateMetadata(this.catalog.rootPath, { vfsFixedLayout: true });
         await ensureSeqFile(this.catalog.fs, catalogPath(this.catalog.rootPath));
         requireTransactionalSeq(this.catalog.fs);
     }
@@ -67,27 +96,45 @@ export class SeqFileKernelStore {
     async createSession(id: SessionId, storage: StorageBindingRef): Promise<SessionRecord> {
         const binding = await this.resolveStorage(storage);
         await ensureSessionLayout(binding);
-        const existing = await this.readCatalog(id);
-        if (existing) return this.readSession(binding);
         const now = Date.now();
-        const record: SessionRecord = {
-            id, status: 'open', storage, nextEventSeq: 1, version: 0,
-            createdAt: now, updatedAt: now,
-        };
-        await transaction(binding.fs, async tx => {
-            await tx.setEntry(sessionPath(binding.rootPath), SESSION_KEY, encode(record));
-            await appendEventTx(tx, binding.rootPath, id, undefined, 'session.created', record);
+        const intent: SessionRecord = { id, status: 'open', storage, nextEventSeq: 1, version: 0,
+            createdAt: now, updatedAt: now, registrationPending: true };
+        await transaction(this.catalog.fs, async tx => {
+            const key = `session/${id}`;
+            const raw = await tx.getEntry(catalogPath(this.catalog.rootPath), key);
+            if (raw) {
+                if (encode(decode<SessionRecord>(raw).storage) !== encode(storage)) throw new Error('Session storage binding conflict');
+            } else await tx.setEntry(catalogPath(this.catalog.rootPath), key, encode(intent));
         });
-        await transaction(this.catalog.fs, tx => tx.setEntry(
-            catalogPath(this.catalog.rootPath), `session/${id}`, encode(record),
-        ));
+        const record = await transaction(binding.fs, async tx => {
+            const raw = await tx.getEntry(sessionPath(binding.rootPath), SESSION_KEY);
+            if (raw) {
+                const current = decode<SessionRecord>(raw);
+                if (current.id !== id || encode(current.storage) !== encode(storage)) throw new Error('Session storage already belongs to another session');
+                return current;
+            }
+            const created = { ...intent, registrationPending: false };
+            await tx.setEntry(sessionPath(binding.rootPath), SESSION_KEY, encode(created));
+            await appendEventTx(tx, binding.rootPath, id, undefined, 'session.created', created);
+            return created;
+        });
+        await transaction(this.catalog.fs, tx => tx.setEntry(catalogPath(this.catalog.rootPath), `session/${id}`, encode(record)));
         return record;
+    }
+
+    /** Resolve existing storage without opening/scheduling the Session or changing metadata. */
+    async inspectSessionBinding(id: SessionId): Promise<ResolvedStorageBinding> {
+        const catalog = await this.readCatalog(id);
+        if (!catalog) throw kernelError(KernelErrorCode.SESSION_NOT_FOUND, `Session not found: ${id}`);
+        return this.resolveStorage(catalog.storage);
     }
 
     async openSession(id: SessionId): Promise<{ record: SessionRecord; binding: ResolvedStorageBinding }> {
         const catalog = await this.readCatalog(id);
-        if (!catalog) throw new Error(`Session not found: ${id}`);
+        if (!catalog) throw kernelError(KernelErrorCode.SESSION_NOT_FOUND, `Session not found: ${id}`);
         const binding = await this.resolveStorage(catalog.storage);
+        await binding.fs.driver.updateMetadata(binding.rootPath, { vfsFixedLayout: true });
+        if (catalog.registrationPending) await this.createSession(id, catalog.storage);
         return { record: await this.readSession(binding), binding };
     }
 
@@ -103,14 +150,43 @@ export class SeqFileKernelStore {
     async setSessionStatus(
         binding: ResolvedStorageBinding,
         status: SessionRecord['status'],
+        closeMode?: 'drain' | 'cancel',
     ): Promise<SessionRecord> {
         const record = await transaction(binding.fs, async tx => {
             const value = await tx.getEntry(sessionPath(binding.rootPath), SESSION_KEY);
             if (!value) throw new Error(`Session record missing at ${binding.rootPath}`);
             const current = decode<SessionRecord>(value);
-            const next = { ...current, status, version: current.version + 1, updatedAt: Date.now() };
+            const allowed: Record<SessionRecord['status'], SessionRecord['status'][]> = {
+                open: ['open', 'suspended', 'suspending', 'closing'], suspending: ['suspending', 'suspended', 'closing'], suspended: ['suspended', 'open', 'closing'],
+                closing: ['closing', 'closed'], closed: ['closed', 'archived'], archived: ['archived'],
+            };
+            if (!allowed[current.status].includes(status)) throw new Error(`Invalid session transition: ${current.status} -> ${status}`);
+            if (status === 'closed') {
+                let active = false;
+                await tx.walkEntries(indexPath(binding.rootPath), row => { if (!isTerminal(decode<{ status: TaskRecord['status'] }>(row.value).status)) active = true; return true; }, { keyPrefix: 'task/' });
+                if (active) throw new Error('Session still has unfinished tasks');
+            }
+            let nextStatus = status;
+            if (status === 'open' || status === 'suspended' || (status === 'closing' && closeMode === 'drain')) {
+                const ids: string[] = [];
+                await tx.walkEntries(indexPath(binding.rootPath), row => { ids.push(row.key.slice(5)); return true; }, { keyPrefix: 'task/' });
+                for (const id of ids) {
+                    const task = await requireTaskTx(tx, binding.rootPath, id);
+                    if (status === 'suspended' && Object.values(task.effects).some(e => e.status === 'leased' || e.status === 'indeterminate')) nextStatus = 'suspending';
+                    if (isTerminal(task.status)) continue;
+                    const held = status === 'suspended';
+                    if (held && task.currentAttempt) await finishAttemptTx(tx, binding.rootPath, task, 'ready');
+                    const nextTask: TaskRecord = { ...task, sessionPaused: held,
+                        status: held && task.status === 'running' ? 'ready' : task.status,
+                        currentAttempt: held ? undefined : task.currentAttempt,
+                        stepAttemptCount: held && task.status === 'running' ? Math.max(0, (task.stepAttemptCount ?? 1) - 1) : task.stepAttemptCount,
+                        version: task.version + 1, updatedAt: Date.now() };
+                    await writeTaskTx(tx, binding.rootPath, nextTask); await indexTask(tx, binding.rootPath, nextTask);
+                }
+            }
+            const next = { ...current, status: nextStatus, closeMode: closeMode ?? current.closeMode, version: current.version + 1, updatedAt: Date.now() };
             await tx.setEntry(sessionPath(binding.rootPath), SESSION_KEY, encode(next));
-            await appendEventTx(tx, binding.rootPath, current.id, undefined, `session.${status}`, next);
+            await appendEventTx(tx, binding.rootPath, current.id, undefined, `session.${nextStatus}`, next);
             return next;
         });
         await transaction(this.catalog.fs, tx => tx.setEntry(
@@ -136,9 +212,12 @@ export class SeqFileKernelStore {
         key: string,
         value: T,
         options: SharedStateWriteOptions = {},
+        effectClaim?: EffectClaim,
     ): Promise<SharedStateEntry<T>> {
         validateSharedKey(key);
+        assertDurableValue(value, 'Shared state');
         return transaction(binding.fs, async tx => {
+            if (effectClaim) await this.assertEffectClaimTx(tx, binding, effectClaim);
             const current = await readSharedTx<T>(tx, binding.rootPath, key);
             assertSharedVersion(key, current?.version, options.expectedVersion);
             const version = await nextSharedVersion(tx, binding.rootPath, key);
@@ -202,9 +281,9 @@ export class SeqFileKernelStore {
         });
     }
 
-    async pendingOutbox(binding: ResolvedStorageBinding): Promise<CrossSessionMessage[]> {
+    async pendingOutbox(binding: ResolvedStorageBinding, dueAt?: number): Promise<CrossSessionMessage[]> {
         const messages = await this.outbox(binding);
-        return messages.filter(message => message.status === 'pending');
+        return messages.filter(message => message.status === 'pending' && (dueAt === undefined || (message.nextAttemptAt ?? 0) <= dueAt || (message.expiresAt ?? Infinity) <= dueAt));
     }
 
     async outbox(binding: ResolvedStorageBinding): Promise<CrossSessionMessage[]> {
@@ -216,28 +295,50 @@ export class SeqFileKernelStore {
     }
 
     async deliverMessage(binding: ResolvedStorageBinding, message: CrossSessionMessage): Promise<boolean> {
+        return transaction(binding.fs, tx => deliverMessageTx(tx, binding.rootPath, message));
+    }
+
+    async sendTaskMessage(binding: ResolvedStorageBinding, taskId: string, request: import('../../domain/types').TaskMessageRequest) {
         return transaction(binding.fs, async tx => {
-            if (await tx.getEntry(messagesPath(binding.rootPath), inboxKey(message.id))) return false;
-            const delivered = { ...message, status: 'delivered' as const, deliveredAt: Date.now() };
-            await tx.setEntry(messagesPath(binding.rootPath), inboxKey(message.id), encode(delivered));
-            await appendEventTx(tx, binding.rootPath, message.targetSessionId, undefined,
-                'session.message.received', delivered);
-            return true;
+            const sender = await requireTaskTx(tx, binding.rootPath, taskId);
+            if (isTerminal(sender.status)) throw new Error('Task is terminal');
+            return enqueueMessageTx(tx, binding.rootPath, sender, request);
         });
     }
 
-    async markMessageDelivered(binding: ResolvedStorageBinding, messageId: string): Promise<CrossSessionMessage> {
+    async messageReceipt(binding: ResolvedStorageBinding, messageId: string): Promise<CrossSessionMessage> {
+        const value = await seq(binding.fs).getEntry(messagesPath(binding.rootPath), `inbox/${messageId}`);
+        if (!value) throw new Error('Message delivery receipt missing');
+        return decode(value);
+    }
+
+    async markMessageDelivered(binding: ResolvedStorageBinding, messageId: string, receipt?: CrossSessionMessage): Promise<CrossSessionMessage> {
         return transaction(binding.fs, async tx => {
             const key = outboxKey(messageId);
             const value = await tx.getEntry(messagesPath(binding.rootPath), key);
             if (!value) throw new Error(`Outbox message not found: ${messageId}`);
             const current = decode<CrossSessionMessage>(value);
-            if (current.status === 'delivered') return current;
-            const delivered = { ...current, status: 'delivered' as const, deliveredAt: Date.now() };
-            await tx.setEntry(messagesPath(binding.rootPath), key, encode(delivered));
-            await appendEventTx(tx, binding.rootPath, current.sourceSessionId, undefined,
-                'session.message.delivered', delivered);
-            return delivered;
+            if (current.status !== 'pending') return current;
+            const next: CrossSessionMessage = { ...current, status: receipt?.status ?? 'delivered',
+                deliveredAt: receipt?.status === 'rejected' ? undefined : receipt?.deliveredAt ?? Date.now(),
+                rejectedAt: receipt?.rejectedAt, rejection: receipt?.rejection, nextAttemptAt: undefined };
+            await tx.setEntry(messagesPath(binding.rootPath), key, encode(next));
+            await appendEventTx(tx, binding.rootPath, current.sourceSessionId, current.sourceTaskId,
+                `session.message.${next.status}`, next);
+            return next;
+        });
+    }
+
+    async recordMessageRetry(binding: ResolvedStorageBinding, messageId: string, error: unknown): Promise<void> {
+        await transaction(binding.fs, async tx => {
+            const key = outboxKey(messageId), value = await tx.getEntry(messagesPath(binding.rootPath), key);
+            if (!value) return;
+            const message = decode<CrossSessionMessage>(value);
+            if (message.status !== 'pending') return;
+            const deliveryAttempts = (message.deliveryAttempts ?? 0) + 1;
+            await tx.setEntry(messagesPath(binding.rootPath), key, encode({ ...message, deliveryAttempts,
+                nextAttemptAt: Date.now() + Math.min(30_000, 250 * 2 ** Math.min(deliveryAttempts - 1, 7)),
+                lastDeliveryError: error instanceof Error ? error.message : String(error) }));
         });
     }
 
@@ -381,9 +482,11 @@ export class SeqFileKernelStore {
         handleId: string,
         dimension: string,
         amount: number,
+        effectClaim?: EffectClaim,
     ): Promise<BudgetAccount[]> {
         if (!Number.isFinite(amount) || amount <= 0) throw new Error('Budget charge must be positive');
         return transaction(binding.fs, async tx => {
+            if (effectClaim) await this.assertEffectClaimTx(tx, binding, effectClaim);
             const handle = await requireHandleTx(tx, binding.rootPath, handleId);
             const resource = await authorizeHandleTx(tx, binding.rootPath, handle, 'write');
             const budgets = await resourceBudgetsTx(tx, binding.rootPath, resource, dimension);
@@ -442,17 +545,37 @@ export class SeqFileKernelStore {
     }
 
     async createTask(binding: ResolvedStorageBinding, sessionId: SessionId, spec: TaskSpec): Promise<TaskRecord> {
+        if (spec.input !== undefined) assertDurableValue(spec.input, 'Task input');
         const id = createId('task');
         await ensureTaskLayout(binding, id);
         const now = Date.now();
         let task = taskFromSpec(id, sessionId, spec, now);
         await transaction(binding.fs, async tx => {
+            const session = await requireSessionTx(tx, binding.rootPath);
+            if (spec.requestId) {
+                const key = `submission/${encodeURIComponent(spec.requestId)}`;
+                const raw = await tx.getEntry(sessionPath(binding.rootPath), key);
+                if (raw) {
+                    const previous = decode<{ id: string; fingerprint: string }>(raw);
+                    if (previous.fingerprint !== encode(spec)) throw new Error('Task submission conflict');
+                    task = await requireTaskTx(tx, binding.rootPath, previous.id);
+                    return;
+                }
+                await tx.setEntry(sessionPath(binding.rootPath), key, encode({ id, fingerprint: encode(spec) }));
+            }
+            if (session.status !== 'open' && session.status !== 'suspended' && session.status !== 'suspending') throw new Error(`Session is ${session.status}`);
+            if (spec.parent) {
+                const parent = await requireTaskTx(tx, binding.rootPath, spec.parent);
+                if (isTerminal(parent.status) || (parent.control && parent.control.mode !== 'run')) throw new Error('Parent is not accepting children');
+                task.rootTaskId = parent.rootTaskId;
+            }
             let unresolvedDeps = task.unresolvedDeps;
             let failedDependency: { id: string; status: 'failed' | 'cancelled' } | undefined;
             const pendingEvents = [...task.pendingEvents];
             for (const dependency of spec.dependsOn ?? []) {
                 const source = await readTaskTx(tx, binding.rootPath, dependency.task);
-                if (!source || !isTerminal(source.status)) continue;
+                if (!source) throw new Error(`Dependency not found: ${dependency.task}`);
+                if (!isTerminal(source.status)) continue;
                 if (dependencySatisfied(source, dependency.condition) || dependency.onFailure === 'continue') {
                     unresolvedDeps--;
                     if (source.exit) pendingEvents.push({ type: 'task-exited', taskId: source.id, exit: source.exit });
@@ -482,7 +605,7 @@ export class SeqFileKernelStore {
             await appendEventTx(tx, binding.rootPath, sessionId, id, 'task.created', task);
         });
         await transaction(this.catalog.fs, tx => tx.setEntry(
-            catalogPath(this.catalog.rootPath), `task/${id}`, sessionId,
+            catalogPath(this.catalog.rootPath), `task/${task.id}`, sessionId,
         ));
         return task;
     }
@@ -524,13 +647,37 @@ export class SeqFileKernelStore {
         leaseMs: number,
     ): Promise<TaskClaim | undefined> {
         return transaction(binding.fs, async tx => {
+            const session = await requireSessionTx(tx, binding.rootPath);
+            if (session.status !== 'open' && !(session.status === 'closing' && session.closeMode === 'drain')) return undefined;
             const candidates = await readyCandidates(tx, binding.rootPath);
             for (const taskId of candidates) {
                 const task = await readTaskTx(tx, binding.rootPath, taskId);
-                if (!task || task.status !== 'ready' || (task.readyAt ?? 0) > Date.now()) continue;
+                if (!task || task.status !== 'ready' || task.sessionPaused || task.controlHolds?.length || (task.control && task.control.mode !== 'run') || (task.readyAt ?? 0) > Date.now()) continue;
+                if (await hasCancelledAncestorTx(tx, binding.rootPath, task)) continue;
                 return claimTask(tx, binding.rootPath, task, workerId, leaseMs);
             }
             return undefined;
+        });
+    }
+
+    async blockUnavailableProgram(binding: ResolvedStorageBinding, claim: TaskClaim): Promise<void> {
+        await transaction(binding.fs, async tx => {
+            const task = await requireTaskTx(tx, binding.rootPath, claim.task.id);
+            assertClaim(task, claim);
+            const next: TaskRecord = { ...task, status: 'waiting', blockedReason: 'program-unavailable', currentAttempt: undefined,
+                stepAttemptCount: Math.max(0, (task.stepAttemptCount ?? 1) - 1), version: task.version + 1, updatedAt: Date.now() };
+            await finishAttemptTx(tx, binding.rootPath, task, 'waiting');
+            await writeTaskTx(tx, binding.rootPath, next); await indexTask(tx, binding.rootPath, next);
+            await appendEventTx(tx, binding.rootPath, task.sessionId, task.id, 'task.program.unavailable', task.program);
+        });
+    }
+
+    async unblockProgram(binding: ResolvedStorageBinding, taskId: string): Promise<void> {
+        await transaction(binding.fs, async tx => {
+            const task = await requireTaskTx(tx, binding.rootPath, taskId);
+            if (task.status !== 'waiting' || task.blockedReason !== 'program-unavailable') return;
+            const next: TaskRecord = { ...task, status: 'ready', blockedReason: undefined, version: task.version + 1, updatedAt: Date.now() };
+            await writeTaskTx(tx, binding.rootPath, next); await indexTask(tx, binding.rootPath, next);
         });
     }
 
@@ -541,7 +688,7 @@ export class SeqFileKernelStore {
     ): Promise<boolean> {
         return transaction(binding.fs, async tx => {
             const task = await requireTaskTx(tx, binding.rootPath, claim.task.id);
-            if (!claimMatches(task, claim) || task.currentAttempt!.leaseUntil <= Date.now()) return false;
+            if (!claimMatches(task, claim) || task.currentAttempt!.leaseUntil <= Date.now() || await hasCancelledAncestorTx(tx, binding.rootPath, task)) return false;
             const attempt = { ...task.currentAttempt!, leaseUntil: Date.now() + leaseMs };
             const next = { ...task, currentAttempt: attempt, updatedAt: Date.now() };
             await tx.setEntry(taskPath(binding.rootPath, task.id), TASK_KEY, encode(next));
@@ -563,7 +710,35 @@ export class SeqFileKernelStore {
         await transaction(binding.fs, async tx => {
             const current = await requireTaskTx(tx, binding.rootPath, next.id);
             assertClaim(current, claim);
-            committed = { ...next, version: current.version + 1, updatedAt: Date.now() };
+            if (await hasCancelledAncestorTx(tx, binding.rootPath, current)) throw new Error('Task ancestor cancelled');
+            // Mailbox/effect arrivals append while a reducer owns its business state.
+            // Preserve the authoritative tail and existing effect/interaction revisions.
+            const retrying = sideEffects.attemptOutcome === 'failed' && next.status === 'ready';
+            committed = { ...next,
+                pendingEvents: [...next.pendingEvents, ...current.pendingEvents.slice(claim.task.pendingEvents.length)],
+                effects: { ...next.effects, ...current.effects },
+                interactions: { ...next.interactions, ...current.interactions },
+                stepNumber: (current.stepNumber ?? 0) + (retrying ? 0 : 1),
+                stepAttemptCount: retrying ? current.stepAttemptCount : 0,
+                stateRevision: (current.stateRevision ?? 0) + (retrying ? 0 : 1),
+                version: current.version + 1, updatedAt: Date.now() };
+            if (committed.status === 'ready' && !retrying && committed.pendingEvents.length === 0) {
+                committed.pendingEvents = [{ type: 'step' }];
+            }
+            for (const action of sideEffects.cache ?? []) {
+                if (action.type === 'cache-publish') await publishCacheTx(tx, binding.rootPath, committed.id, action.request);
+                else if (action.type === 'cache-read') {
+                    const receipt = await readCacheTx(tx, binding.rootPath, committed.id, action.request);
+                    committed.pendingEvents.push({ type: 'cache-result', receipt });
+                } else {
+                    const receipt = await manageCacheTx(tx, binding.rootPath, committed.id, action);
+                    committed.pendingEvents.push({ type: 'cache-managed', receipt });
+                }
+            }
+            if (isTerminal(committed.status)) {
+                committed.effects = cancelActiveEffects(committed.effects, Date.now());
+                committed.interactions = Object.fromEntries(Object.entries(committed.interactions).map(([id, interaction]) => [id, interaction.status === 'pending' ? { ...interaction, status: 'cancelled' as const } : interaction]));
+            }
             spawned = await applySpawnsTx(tx, binding.rootPath, committed, sideEffects.spawns ?? []);
             committed = await registerTaskWaitTx(tx, binding.rootPath, committed);
             await finishAttemptTx(
@@ -571,10 +746,20 @@ export class SeqFileKernelStore {
             );
             await writeTaskTx(tx, binding.rootPath, committed);
             await indexTask(tx, binding.rootPath, committed);
-            await appendEventTx(tx, binding.rootPath, next.sessionId, next.id, eventType, payload);
+            await appendEventTx(tx, binding.rootPath, next.sessionId, next.id,
+                eventType === 'task.retry.scheduled' ? eventType : `task.${committed.status}`, payload);
             await applySharedMutations(tx, binding.rootPath, next, sideEffects.shared ?? []);
             for (const event of sideEffects.events ?? []) {
                 await appendEventTx(tx, binding.rootPath, next.sessionId, next.id, event.type, event.payload);
+            }
+            const selected = claim.task.pendingEvents[0];
+            if (!retrying && (claim.task.initialized ?? claim.task.state !== undefined) && selected?.type === 'message') {
+                await consumeMessageTx(tx, binding.rootPath, committed, selected.message.id);
+            }
+            for (const message of sideEffects.messages ?? []) await enqueueMessageTx(tx, binding.rootPath, committed, message);
+            for (const resource of sideEffects.resources ?? []) {
+                if (resource.authority.fs !== binding.fs || resource.actorRoot !== binding.rootPath || resource.actor.taskId !== committed.id || resource.actor.sessionId !== committed.sessionId) throw new Error('Resource Decision transaction mismatch');
+                await executeResourceTx(tx, resource);
             }
             if (isTerminal(committed.status)) {
                 await advanceDependants(tx, binding.rootPath, committed);
@@ -582,7 +767,7 @@ export class SeqFileKernelStore {
             }
         });
         if (spawned.length > 0) await this.routeSpawnedTasks(spawned);
-        return committed;
+        return this.readTask(binding, committed.id);
     }
 
     private async routeSpawnedTasks(tasks: TaskRecord[]): Promise<void> {
@@ -593,11 +778,90 @@ export class SeqFileKernelStore {
         });
     }
 
+    async controlTask(
+        binding: ResolvedStorageBinding, taskId: string, mode: import('../../domain/types').TaskControl['mode'],
+        options: import('../../domain/types').TaskControlOptions & { signal?: TaskSignal },
+    ): Promise<import('../../domain/types').TaskControl> {
+        if (!options.requestId) throw new Error('Control requestId is required');
+        if (options.signal?.payload !== undefined) assertDurableValue(options.signal.payload, 'Signal payload');
+        return transaction(binding.fs, async tx => {
+            const task = await requireTaskTx(tx, binding.rootPath, taskId);
+            const key = `control/${encodeURIComponent(options.requestId)}`;
+            const fingerprint = encode({ mode, ...options });
+            const previous = await tx.getEntry(taskPath(binding.rootPath, taskId), key);
+            if (previous) {
+                const receipt = decode<{ fingerprint: string; control: import('../../domain/types').TaskControl }>(previous);
+                if (receipt.fingerprint !== fingerprint) throw new Error('Control request conflict');
+                return task.control?.requestId === options.requestId ? task.control : receipt.control;
+            }
+            if (isTerminal(task.status)) throw new Error('Task is terminal');
+            if (options.expectedEpoch !== undefined && options.expectedEpoch !== (task.control?.epoch ?? 0)) throw new Error('Control epoch conflict');
+            if (mode === 'run' && task.control && !task.control.acknowledged) throw new Error('Control not settled');
+            const ids: string[] = [taskId];
+            const all: TaskRecord[] = [];
+            await tx.walkEntries(indexPath(binding.rootPath), row => { ids.push(row.key.slice(5)); return true; }, { keyPrefix: 'task/' });
+            for (const id of new Set(ids)) { const value = await readTaskTx(tx, binding.rootPath, id); if (value) all.push(value); }
+            const selected = new Set([taskId]);
+            for (let changed = true; changed;) {
+                changed = false;
+                for (const child of all) if (child.parentTaskId && selected.has(child.parentTaskId) && !selected.has(child.id)) { selected.add(child.id); changed = true; }
+            }
+            let rootControl!: import('../../domain/types').TaskControl;
+            for (const current of all) {
+                if (!selected.has(current.id) || isTerminal(current.status)) continue;
+                const holds = new Set(current.controlHolds ?? []);
+                if (current.id !== taskId) { if (mode === 'run') holds.delete(taskId); else holds.add(taskId); }
+                const control: import('../../domain/types').TaskControl = {
+                    epoch: (current.control?.epoch ?? 0) + 1, mode: current.id === taskId ? mode : current.control?.mode ?? 'run', requestId: current.id === taskId ? options.requestId : current.control?.requestId ?? options.requestId,
+                    reason: options.reason,
+                    acknowledged: mode === 'run' || !Object.values(current.effects).some(e => e.status === 'leased' || e.status === 'indeterminate'),
+                };
+                const next: TaskRecord = { ...current, control, controlHolds: [...holds],
+                    stepAttemptCount: current.status === 'running' ? Math.max(0, (current.stepAttemptCount ?? 1) - 1) : current.stepAttemptCount,
+                    status: current.status === 'running' ? 'ready' : current.status,
+                    currentAttempt: undefined, version: current.version + 1, updatedAt: Date.now() };
+                if (current.currentAttempt) await finishAttemptTx(tx, binding.rootPath, current, 'ready');
+                if (mode === 'run' && current.id === taskId && options.signal) {
+                    next.pendingEvents = [{ type: 'signal', sequence: next.version, signal: options.signal }, ...next.pendingEvents];
+                    if (next.status === 'waiting') { await unregisterTaskWaitTx(tx, binding.rootPath, next); next.status = 'ready'; next.wait = undefined; }
+                }
+                await writeTaskTx(tx, binding.rootPath, next); await indexTask(tx, binding.rootPath, next);
+                await appendEventTx(tx, binding.rootPath, current.sessionId, current.id, `task.control.${mode}`, control);
+                if (current.id === taskId) rootControl = control;
+            }
+            if (mode !== 'run' && all.some(t => selected.has(t.id) && Object.values(t.effects).some(e => e.status === 'leased' || e.status === 'indeterminate'))) {
+                rootControl.acknowledged = false;
+                const root = await requireTaskTx(tx, binding.rootPath, taskId);
+                await writeTaskTx(tx, binding.rootPath, { ...root, control: rootControl });
+            }
+            await tx.setEntry(taskPath(binding.rootPath, taskId), key, encode({ fingerprint, control: rootControl }));
+            return rootControl;
+        });
+    }
+
+    private async acknowledgeControl(binding: ResolvedStorageBinding, id: string): Promise<void> {
+        await transaction(binding.fs, async tx => {
+            const task = await requireTaskTx(tx, binding.rootPath, id);
+            if (!task.control || task.control.acknowledged) return;
+            const descendants: TaskRecord[] = [];
+            await tx.walkEntries(indexPath(binding.rootPath), async row => {
+                const t = await requireTaskTx(tx, binding.rootPath, row.key.slice(5));
+                if (t.id === id || t.controlHolds?.includes(id)) descendants.push(t);
+                return true;
+            }, { keyPrefix: 'task/' });
+            if (descendants.some(t => Object.values(t.effects).some(e => e.status === 'leased' || e.status === 'indeterminate'))) return;
+            const next = { ...task, control: { ...task.control, acknowledged: true }, version: task.version + 1 };
+            await writeTaskTx(tx, binding.rootPath, next);
+            await appendEventTx(tx, binding.rootPath, task.sessionId, id, 'task.control.acknowledged', next.control);
+        });
+    }
+
     async signalTask(
         binding: ResolvedStorageBinding,
         taskId: TaskId,
         signal: TaskSignal,
     ): Promise<TaskRecord> {
+        if (signal.payload !== undefined) assertDurableValue(signal.payload, 'Signal payload');
         return transaction(binding.fs, async tx => {
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
             if (isTerminal(task.status)) return task;
@@ -641,9 +905,14 @@ export class SeqFileKernelStore {
     ): Promise<TaskRecord> {
         return transaction(binding.fs, async tx => {
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
+            if (isTerminal(task.status)) throw new Error('Task is terminal');
+            assertDurableValue(response.value, 'Interaction response');
             const interaction = task.interactions?.[response.interactionId];
             if (!interaction) throw new Error(`Interaction not found: ${response.interactionId}`);
-            if (interaction.status !== 'pending') return task;
+            if (interaction.status !== 'pending') {
+                if (interaction.status === 'resolved' && encode(interaction.response) === encode(response.value)) return task;
+                throw new Error('Interaction response conflict');
+            }
             const event = {
                 type: 'interaction-resolved' as const,
                 interactionId: response.interactionId,
@@ -675,7 +944,10 @@ export class SeqFileKernelStore {
         return transaction(binding.fs, async tx => {
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
             const current = task.effects[effectId];
-            if (!current || current.status !== 'pending') return undefined;
+            const session = await requireSessionTx(tx, binding.rootPath);
+            if (!current || current.status !== 'pending' || (current.readyAt ?? 0) > Date.now() || isTerminal(task.status) || task.sessionPaused || task.controlHolds?.length || (task.control && task.control.mode !== 'run')
+                || (session.status !== 'open' && !(session.status === 'closing' && session.closeMode === 'drain'))) return undefined;
+            if (await hasCancelledAncestorTx(tx, binding.rootPath, task)) return undefined;
             const attempt = effectAttempt(workerId, leaseMs);
             const effect: PersistedEffect = { ...current, status: 'leased',
                 attemptCount: (current.attemptCount ?? 0) + 1,
@@ -696,7 +968,7 @@ export class SeqFileKernelStore {
         return transaction(binding.fs, async tx => {
             const task = await requireTaskTx(tx, binding.rootPath, claim.taskId);
             const effect = task.effects[claim.effectId];
-            if (!effectClaimMatches(effect, claim) || effect.currentAttempt!.leaseUntil <= Date.now()) return false;
+            if (!effectClaimMatches(effect, claim) || effect.currentAttempt!.leaseUntil <= Date.now() || await hasCancelledAncestorTx(tx, binding.rootPath, task)) return false;
             const attempt = { ...effect.currentAttempt!, leaseUntil: Date.now() + leaseMs };
             const nextEffect = replaceEffectAttempt(effect, attempt);
             const next = { ...task, effects: { ...task.effects, [claim.effectId]: nextEffect } };
@@ -723,6 +995,15 @@ export class SeqFileKernelStore {
                 || effect.currentAttempt.leaseUntil <= Date.now()) {
                 throw kernelError(KernelErrorCode.STALE_EFFECT_CLAIM, `Stale effect claim: ${effectId}`);
             }
+            if (outcome.error && outcome.retryable && effect.attemptCount < (effect.request.retry?.maxAttempts ?? 1)
+                && (effect.deadlineAt ?? Infinity) > Date.now()) {
+                const finished = finishEffect(effect, outcome);
+                const pending = { ...finished, status: 'pending' as const, readyAt: Date.now() + (effect.request.retry?.backoffMs ?? 0) };
+                const next = { ...task, effects: { ...task.effects, [effectId]: pending }, version: task.version + 1, updatedAt: Date.now() };
+                await writeTaskTx(tx, binding.rootPath, next);
+                await appendEventTx(tx, binding.rootPath, task.sessionId, taskId, 'effect.retry.scheduled', { effectId, readyAt: pending.readyAt });
+                return next;
+            }
             const event = outcome.error
                 ? { type: 'effect-failed' as const, effectId, error: outcome.error }
                 : { type: 'effect-completed' as const, effectId, result: outcome.result };
@@ -733,7 +1014,8 @@ export class SeqFileKernelStore {
                 version: task.version + 1,
                 updatedAt: Date.now(),
             };
-            next = wakeFromPendingEvents(next);
+            if (outcome.indeterminate) next.pendingEvents = task.pendingEvents;
+            else next = wakeFromPendingEvents(next);
             if (next.status === 'ready') await unregisterTaskWaitTx(tx, binding.rootPath, task);
             await writeTaskTx(tx, binding.rootPath, next);
             await indexTask(tx, binding.rootPath, next);
@@ -742,16 +1024,63 @@ export class SeqFileKernelStore {
         });
     }
 
+    private async assertEffectClaimTx(tx: import('@itookit/vfs-core').ISeqFileTransaction, binding: ResolvedStorageBinding, claim: EffectClaim): Promise<void> {
+        const task = await requireTaskTx(tx, binding.rootPath, claim.taskId);
+        const effect = task.effects[claim.effectId];
+        if (!effectClaimMatches(effect, claim) || (effect.currentAttempt?.leaseUntil ?? 0) <= Date.now() || await hasCancelledAncestorTx(tx, binding.rootPath, task)) throw new Error('Stale effect claim');
+    }
+
+    async resolveEffect(binding: ResolvedStorageBinding, taskId: string, request: import('../../domain/types').EffectResolution): Promise<void> {
+        if (!request.requestId) throw new Error('Resolution requestId is required');
+        if (request.outcome.type === 'completed') assertDurableValue(request.outcome.result, 'Effect result');
+        await transaction(binding.fs, async tx => {
+            const task = await requireTaskTx(tx, binding.rootPath, taskId);
+            const key = `effect-resolution/${encodeURIComponent(request.requestId)}`, fingerprint = encode(request);
+            const previous = await tx.getEntry(taskPath(binding.rootPath, taskId), key);
+            if (previous) { if (previous !== fingerprint) throw new Error('Effect resolution conflict'); return; }
+            if (isTerminal(task.status)) throw new Error('Task is terminal');
+            const effect = task.effects[request.effectId];
+            if (effect?.status !== 'indeterminate') throw new Error('Effect is not indeterminate');
+            const next: TaskRecord = { ...task, effects: { ...task.effects }, pendingEvents: task.pendingEvents.filter(event => !(event.type === 'effect-failed' && event.effectId === request.effectId)), version: task.version + 1, updatedAt: Date.now() };
+            if (request.outcome.type === 'retry') {
+                if ((effect.deadlineAt ?? Infinity) <= Date.now()) throw new Error('Effect deadline expired; create a new logical operation');
+                next.effects[request.effectId] = { ...effect, status: 'pending', replayAuthorized: true, error: undefined };
+            } else {
+                const completed = request.outcome.type === 'completed';
+                next.effects[request.effectId] = { ...effect, status: completed ? 'succeeded' : 'failed',
+                    result: request.outcome.type === 'completed' ? request.outcome.result : undefined,
+                    error: request.outcome.type === 'failed' ? request.outcome.error : undefined };
+                next.pendingEvents.push(request.outcome.type === 'completed'
+                    ? { type: 'effect-completed', effectId: request.effectId, result: request.outcome.result }
+                    : { type: 'effect-failed', effectId: request.effectId, error: request.outcome.error });
+            }
+            const woken = wakeFromPendingEvents(next);
+            if (woken.status === 'ready') await unregisterTaskWaitTx(tx, binding.rootPath, task);
+            await writeTaskTx(tx, binding.rootPath, woken); await indexTask(tx, binding.rootPath, woken);
+            await tx.setEntry(taskPath(binding.rootPath, taskId), key, fingerprint);
+            await appendEventTx(tx, binding.rootPath, task.sessionId, taskId, 'effect.resolved', request);
+        });
+    }
+
+    async confirmEffectCleanup(binding: ResolvedStorageBinding, taskId: string, effectId: string): Promise<void> {
+        await transaction(binding.fs, async tx => {
+            const task = await requireTaskTx(tx, binding.rootPath, taskId), effect = task.effects[effectId];
+            if (!effect?.cleanupPending) return;
+            await writeTaskTx(tx, binding.rootPath, { ...task, effects: { ...task.effects, [effectId]: { ...effect, cleanupPending: false } }, version: task.version + 1 });
+        });
+    }
+
     async cancelTask(binding: ResolvedStorageBinding, taskId: TaskId, reason?: string): Promise<TaskRecord> {
         return this.finishWithoutClaim(binding, taskId, 'cancelled', undefined, { message: reason ?? 'Cancelled' });
     }
 
     /** 放弃当前 claim，把 running task 恢复到 ready（dispose 时避免 task 卡在租约内无法重新调度）。 */
-    async abandonClaim(binding: ResolvedStorageBinding, taskId: TaskId): Promise<void> {
+    async abandonClaim(binding: ResolvedStorageBinding, claim: TaskClaim): Promise<void> {
         await transaction(binding.fs, async tx => {
+            const taskId = claim.task.id;
             const current = await requireTaskTx(tx, binding.rootPath, taskId);
-            if (current.status !== 'running' || !current.currentAttempt) return;
-            const attempt = { ...current.currentAttempt, outcome: 'lost' as const, finishedAt: Date.now() };
+            if (!claimMatches(current, claim)) return;
+            const attempt = { ...current.currentAttempt!, outcome: 'lost' as const, finishedAt: Date.now() };
             const next: TaskRecord = {
                 ...current, status: 'ready' as const, currentAttempt: undefined, readyAt: undefined,
                 version: current.version + 1, updatedAt: Date.now(),
@@ -785,10 +1114,13 @@ export class SeqFileKernelStore {
         taskId: TaskId | undefined,
         type: string,
         payload?: unknown,
+        effectClaim?: EffectClaim,
     ): Promise<number> {
-        return transaction(binding.fs, async tx =>
-            appendEventTx(tx, binding.rootPath, sessionId, taskId, type, payload),
-        );
+        if (payload !== undefined) assertDurableValue(payload, 'Event payload');
+        return transaction(binding.fs, async tx => {
+            if (effectClaim) await this.assertEffectClaimTx(tx, binding, effectClaim);
+            return appendEventTx(tx, binding.rootPath, sessionId, taskId, type, payload, effectClaim ? { effectId: effectClaim.effectId, attemptId: effectClaim.effect.currentAttempt!.id } : undefined);
+        });
     }
 
     async pendingEffects(binding: ResolvedStorageBinding): Promise<Array<{ task: TaskRecord; effectId: string }>> {
@@ -801,20 +1133,53 @@ export class SeqFileKernelStore {
         return pending;
     }
 
-    async recover(binding: ResolvedStorageBinding): Promise<RecoveryReport> {
+    async sweep(binding: ResolvedStorageBinding): Promise<void> {
+        await transaction(binding.fs, tx => refreshWaiters(tx, binding.rootPath));
+        for (const task of await this.listTasks(binding)) {
+            if (task.parentTaskId && !isTerminal(task.status) && (await this.readTask(binding, task.parentTaskId)).status === 'cancelled') {
+                await this.cancelTask(binding, task.id, 'Parent cancelled');
+                continue;
+            }
+            await this.recoverExpiredEffects(binding, task);
+            await this.acknowledgeControl(binding, task.id);
+            if (task.status === 'running' && task.currentAttempt && task.currentAttempt.leaseUntil <= Date.now()) {
+                await this.requeueExpired(binding, task);
+            }
+        }
+    }
+
+    async recover(binding: ResolvedStorageBinding, options: import('../../domain/types').RecoveryOptions = {}): Promise<RecoveryReport> {
         let recoveredTasks = 0;
         let recoveredEffects = 0;
         let expiredAttempts = 0;
-        const tasks = await this.listTaskIds(binding);
+        let tasks = await this.listTaskIds(binding);
         const session = await this.readSession(binding);
-        await this.rebuildIndexes(binding, tasks);
+        tasks = await this.rebuildIndexes(binding, tasks);
+        if (options.takeover) await transaction(binding.fs, async tx => {
+            for (const id of tasks) {
+                const task = await readTaskTx(tx, binding.rootPath, id);
+                if (!task) continue;
+                let changed = false;
+                if (task.currentAttempt) {
+                    task.currentAttempt = { ...task.currentAttempt, leaseUntil: 0, leaseToken: createId('fence') };
+                    changed = true;
+                }
+                for (const [id, effect] of Object.entries(task.effects)) {
+                    if (effect.status !== 'leased' || !effect.currentAttempt) continue;
+                    task.effects[id] = { ...effect, currentAttempt: { ...effect.currentAttempt, leaseUntil: 0, leaseToken: createId('fence') } };
+                    changed = true;
+                }
+                if (changed) await writeTaskTx(tx, binding.rootPath, { ...task, version: task.version + 1, updatedAt: Date.now() });
+            }
+        });
+        await transaction(binding.fs, tx => recoverWaitGraphTx(tx, binding.rootPath, tasks));
         await this.repairCatalog(session, tasks);
         for (const taskId of tasks) {
             const task = await this.readTask(binding, taskId);
             recoveredEffects += await this.recoverExpiredEffects(binding, task);
             if (task.status !== 'running' || !task.currentAttempt || task.currentAttempt.leaseUntil > Date.now()) continue;
             expiredAttempts++;
-            await this.requeueExpired(binding, task);
+            await this.requeueExpired(binding, task, options.takeover);
             recoveredTasks++;
         }
         return { recoveredTasks, recoveredEffects, expiredAttempts, rebuiltIndexes: tasks.length };
@@ -845,18 +1210,22 @@ export class SeqFileKernelStore {
         return recovered;
     }
 
-    private async rebuildIndexes(binding: ResolvedStorageBinding, taskIds: string[]): Promise<void> {
-        await transaction(binding.fs, async tx => {
+    private async rebuildIndexes(binding: ResolvedStorageBinding, taskIds: string[]): Promise<string[]> {
+        return transaction(binding.fs, async tx => {
             const staleKeys: string[] = [];
+            const ids = new Set(taskIds);
             await tx.walkEntries(indexPath(binding.rootPath), entry => {
+                if (entry.key.startsWith('task/')) ids.add(entry.key.slice(5));
                 staleKeys.push(entry.key);
                 return true;
             });
             for (const key of staleKeys) await tx.deleteEntry(indexPath(binding.rootPath), key);
-            for (const taskId of taskIds) {
+            const existing: string[] = [];
+            for (const taskId of ids) {
                 const task = await readTaskTx(tx, binding.rootPath, taskId);
-                if (task) await indexTask(tx, binding.rootPath, task);
+                if (task) { await indexTask(tx, binding.rootPath, task); existing.push(taskId); }
             }
+            return existing;
         });
     }
 
@@ -883,6 +1252,7 @@ export class SeqFileKernelStore {
             const next: TaskRecord = {
                 ...task, status, output, wait: undefined, currentAttempt: undefined,
                 effects: cancelActiveEffects(task.effects, completedAt),
+                interactions: Object.fromEntries(Object.entries(task.interactions).map(([id, interaction]) => [id, interaction.status === 'pending' ? { ...interaction, status: 'cancelled' as const } : interaction])),
                 exit: { taskId, status, output, error, completedAt },
                 version: task.version + 1, updatedAt: completedAt,
             };
@@ -920,7 +1290,7 @@ export class SeqFileKernelStore {
         return ids.sort();
     }
 
-    private async requeueExpired(binding: ResolvedStorageBinding, task: TaskRecord): Promise<void> {
+    private async requeueExpired(binding: ResolvedStorageBinding, task: TaskRecord, restart = false): Promise<void> {
         await transaction(binding.fs, async tx => {
             const current = await requireTaskTx(tx, binding.rootPath, task.id);
             if (current.status !== 'running' || current.currentAttempt?.leaseUntil !== task.currentAttempt?.leaseUntil) return;
@@ -929,7 +1299,7 @@ export class SeqFileKernelStore {
             const now = Date.now();
             const attempt = { ...active, outcome: 'lost' as const, finishedAt: now };
             const error = { message: `Task attempt lease expired: ${active.id}` };
-            const exhausted = current.attemptCount >= current.retry.maxAttempts;
+            const exhausted = !restart && (current.stepAttemptCount ?? current.attemptCount) >= current.retry.maxAttempts;
             const next: TaskRecord = exhausted
                 ? { ...current, status: 'failed', currentAttempt: undefined, lastError: error,
                     exit: { taskId: task.id, status: 'failed', error, completedAt: now },

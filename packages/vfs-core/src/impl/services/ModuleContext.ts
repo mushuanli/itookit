@@ -27,6 +27,7 @@ import { DeviceRegistry } from '../engine/device-registry';
 import { isPath } from '../../utils/validation';
 import { seqKey, stringifyRecordValue, SEQ_FIELD_PREFIX } from '../capabilities/SeqFileOps';
 import type { EnginePort } from '../capabilities/EnginePort';
+import { mapRecordPaths } from '../capabilities/PathMappedRecordStore';
 import type { IEventEmitter } from '../../eventbus';
 
 export interface ModuleFSDeps {
@@ -55,6 +56,7 @@ export class ModuleContext implements EnginePort {
     readonly mountId: string;
     readonly caller: CallerIdentity;
     readonly moduleBackend: IStorageBackend;
+    readonly records?: IRecordStore;
     readonly systemAccess?: ISystemAccess;
     readonly isCustomRoot: boolean;
     readonly plugins: PluginPipeline;
@@ -77,6 +79,9 @@ export class ModuleContext implements EnginePort {
         this.caller = { moduleId: deps.moduleId, isSystem: deps.isSystem ?? false };
         this.systemAccess = deps.systemAccess;
         this.moduleBackend = deps.engine.getBackendForPath('/module/' + deps.moduleId);
+        const records = this.moduleBackend.records;
+        this.records = records && this.moduleBackend.recordPaths === 'backend'
+            ? mapRecordPaths(records, path => this.engine.recordLocation(path, this.moduleBackend).localPath) : records;
         this.capabilities = detectCapabilities(this.moduleBackend, { deviceFiles: true });
     }
 

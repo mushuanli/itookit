@@ -8,35 +8,16 @@
  *   - meta_tags references meta_ext(path) ON DELETE CASCADE
  *   - Only stores non-derivable metadata (tags, icon, device_handler, etc.)
  *
- * IMPORTANT: @tauri-apps/plugin-sql's execute() / select() uses rusqlite
- * underneath, which only accepts ONE statement per call.
+ * Transactions use a Rust-owned SQLx transaction; plugin-sql calls alone do not
+ * preserve connection affinity across statements.
  */
 
 import Database from '@tauri-apps/plugin-sql';
-import { SCHEMA_VERSION } from '@itookit/vfsdriver-localfs';
+import { invoke } from '@tauri-apps/api/core';
+import { PATH_DATA_EXISTS, movePathStatements, migrateRecordStatements, SCHEMA_VERSION } from '@itookit/vfsdriver-localfs';
 import type { ISidecarDb, MetaExtRow } from '@itookit/vfsdriver-localfs';
 
-// ── Async mutex ───────────────────────────────────────────────────────────────
-// @tauri-apps/plugin-sql uses sqlx connection pools; we serialize write operations
-// so BEGIN IMMEDIATE never races against another active write on the same file.
-
-class AsyncMutex {
-    private locked = false;
-    private queue: Array<() => void> = [];
-
-    acquire(): Promise<void> {
-        if (!this.locked) { this.locked = true; return Promise.resolve(); }
-        return new Promise(resolve => this.queue.push(resolve));
-    }
-
-    release(): void {
-        if (this.queue.length > 0) {
-            this.queue.shift()!();
-        } else {
-            this.locked = false;
-        }
-    }
-}
+type SidecarConnection = Pick<Database, 'execute' | 'select' | 'close'>;
 
 // ── Path-based DDL — one statement per execute() ──────────────────────────────
 
@@ -79,14 +60,13 @@ const DDL_STATEMENTS = [
 ];
 
 export class TauriSqlSidecarDb implements ISidecarDb {
-    private readonly txMutex = new AsyncMutex();
-    private constructor(private readonly db: Database) {}
+    private constructor(private readonly db: SidecarConnection, private readonly databaseUrl?: string) {}
 
     // ── Factory ────────────────────────────────────────────────────────────────
 
     static async open(dbPath: string): Promise<TauriSqlSidecarDb> {
         const db = await Database.load(`sqlite:${dbPath}`);
-        const instance = new TauriSqlSidecarDb(db);
+        const instance = new TauriSqlSidecarDb(db, `sqlite:${dbPath}`);
         await instance.migrateSchema();
         await instance.initSchema();
         return instance;
@@ -250,27 +230,47 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         }
     }
 
+    async assertPathDataVacant(path: string): Promise<void> {
+        const rows = await this.db.select<unknown[]>(PATH_DATA_EXISTS, [path, path, path, path, path, path]);
+        if (rows.length) throw new Error(`Destination has durable data: ${path}`);
+    }
+
+    async migrateRecordPaths(prefix: string): Promise<void> {
+        const sql = migrateRecordStatements(prefix);
+        if ((await this.db.select<unknown[]>(sql.conflict, sql.values)).length) throw new Error('Conflicting legacy and backend-local record paths');
+        await this.db.execute(sql.update, sql.values);
+    }
+
+    async movePathData(from: string, to: string): Promise<void> {
+        for (const { sql, values } of movePathStatements(from, to)) await this.db.execute(sql, values);
+    }
+
     // ── transaction ────────────────────────────────────────────────────────────
 
-    async begin(): Promise<void> {
-        await this.txMutex.acquire();
+    async transaction<T>(operation: (db: ISidecarDb) => Promise<T>): Promise<T> {
+        if (!this.databaseUrl) throw new Error('Nested sidecar transactions are not supported');
+        const transactionId = await invoke<number>('sidecar_begin', { database: this.databaseUrl });
+        const scoped = new TauriSqlSidecarDb({
+            execute: (query, values) => invoke('sidecar_execute', { transactionId, query, values: values ?? [] }),
+            select: (query, values) => invoke('sidecar_select', { transactionId, query, values: values ?? [] }),
+            close: async () => { throw new Error('Cannot close a transaction-scoped sidecar'); },
+        });
         try {
-            await this.db.execute('BEGIN IMMEDIATE');
-        } catch (e) {
-            this.txMutex.release();
-            throw e;
+            const result = await operation(scoped);
+            await invoke('sidecar_finish', { transactionId, commit: true });
+            return result;
+        } catch (error) {
+            try { await invoke('sidecar_finish', { transactionId, commit: false }); }
+            catch (rollbackError) {
+                throw new AggregateError([error, rollbackError], 'Sidecar transaction failed and rollback failed', { cause: error });
+            }
+            throw error;
         }
     }
 
-    async commit(): Promise<void> {
-        await this.db.execute('COMMIT');
-        this.txMutex.release();
-    }
-
-    async rollback(): Promise<void> {
-        await this.db.execute('ROLLBACK');
-        this.txMutex.release();
-    }
+    async begin(): Promise<void> { throw new Error('Use transaction(callback) for Tauri sidecar transactions'); }
+    async commit(): Promise<void> { throw new Error('Use transaction(callback) for Tauri sidecar transactions'); }
+    async rollback(): Promise<void> { throw new Error('Use transaction(callback) for Tauri sidecar transactions'); }
 
     // ── lifecycle ──────────────────────────────────────────────────────────────
 

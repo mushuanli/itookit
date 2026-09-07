@@ -35,6 +35,8 @@ export class EffectRegistry {
         this.values.set(key, adapter);
     }
 
+    has(kind: string, version: string): boolean { return this.values.has(versioned(kind, version)); }
+
     resolve(kind: string, version: string): EffectAdapter {
         const key = versioned(kind, version);
         const adapter = this.values.get(key);

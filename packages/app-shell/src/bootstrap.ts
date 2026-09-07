@@ -306,14 +306,16 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     kernelCore.registerStorageResolver(new ChatKernelStorageResolver(chatEngine));
     await kernelCore.use(kernelAdapters.plugin);
     await kernelCore.initialize();
-    await kernelCore.recover();
     const kernel: AppKernelRuntime = Object.assign(kernelAdapters, {
         kernel: kernelCore,
         dagPlugins: createBuiltinDagPluginRegistry(),
     });
     await options.kernelPlatform?.configure?.(kernel);
+    // The application owns the only execution instance; register capabilities before takeover.
+    await kernelCore.recover({ takeover: true });
     cleanupFns.push(async () => {
         kernelCore.dispose();
+        await kernelCore.waitIdle();
         await kernelAdapters.dispose();
     });
     console.log(`[Boot]   ↳ createKernel: +${(performance.now() - ts).toFixed(0)}ms`);

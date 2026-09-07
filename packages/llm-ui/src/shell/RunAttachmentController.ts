@@ -6,8 +6,10 @@ import type {
     TaskSignal,
 } from '@itookit/durable-kernel';
 
+export type AttachedTask = Pick<TaskHandle, 'id' | 'events' | 'signal' | 'start' | 'cancel' | 'status' | 'respond' | 'pause' | 'interrupt' | 'resume'>;
+
 export interface TaskControlPlane {
-    openTask(id: string): Promise<TaskHandle>;
+    openTask(id: string): Promise<AttachedTask>;
 }
 
 export interface RunAttachmentCallbacks {
@@ -18,7 +20,7 @@ export interface RunAttachmentCallbacks {
 }
 
 export class RunAttachmentController {
-    private handle?: TaskHandle;
+    private handle?: AttachedTask;
     private iterator?: AsyncIterator<EventEnvelope>;
     private generation = 0;
 
@@ -55,6 +57,10 @@ export class RunAttachmentController {
     async resume(): Promise<void> {
         const handle = this.requireHandle();
         const { task } = await handle.status();
+        if (task.control && task.control.mode !== 'run') {
+            await handle.resume({ requestId: globalThis.crypto.randomUUID(), expectedEpoch: task.control.epoch });
+            return;
+        }
         if (task.status === 'created') return handle.start();
         if (task.status === 'ready' || task.status === 'running') return;
         if (task.status === 'waiting' && acceptsSignal(task.wait, 'resume')) {
@@ -62,6 +68,18 @@ export class RunAttachmentController {
         }
         if (task.status === 'waiting') throw new Error('Task is waiting for an effect or approval');
         throw new Error(`Task cannot be resumed from ${task.status}`);
+    }
+
+    async pause(): Promise<void> {
+        const handle = this.requireHandle();
+        const { task } = await handle.status();
+        await handle.pause({ requestId: globalThis.crypto.randomUUID(), expectedEpoch: task.control?.epoch ?? 0 });
+    }
+
+    async interrupt(reason?: string): Promise<void> {
+        const handle = this.requireHandle();
+        const { task } = await handle.status();
+        await handle.interrupt({ requestId: globalThis.crypto.randomUUID(), expectedEpoch: task.control?.epoch ?? 0, reason });
     }
 
     async approve(note = ''): Promise<void> {
@@ -96,7 +114,7 @@ export class RunAttachmentController {
         }
     }
 
-    private requireHandle(): TaskHandle {
+    private requireHandle(): AttachedTask {
         if (!this.handle) throw new Error('No task is attached');
         return this.handle;
     }

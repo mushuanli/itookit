@@ -22,7 +22,7 @@ export function decisionSideEffects(
             type: 'task.interaction.requested', payload: action.interaction,
         });
     }
-    return { shared, events, spawns };
+    return { shared, events, spawns, messages: actions.filter(action => action.type === 'send-message').map(action => action.message), cache: actions.filter(action => action.type === 'cache-read' || action.type === 'cache-publish' || action.type === 'cache-create' || action.type === 'cache-invalidate' || action.type === 'cache-renew') };
 }
 
 export function prepareSpawns(actions: KernelAction[]): PreparedSpawn[] {

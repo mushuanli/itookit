@@ -11,26 +11,33 @@ import type {
     SerializableError,
     TaskRecord,
 } from '../domain/types';
-import { createId, type EffectClaim, type EffectCompletion } from '../infrastructure/seqfile/store';
+import { type EffectClaim, type EffectCompletion } from '../infrastructure/seqfile/store';
 import { assertDurableValue } from './durability';
 import { KernelErrorCode, kernelError } from '../domain/errors';
 
 export type RequiredEffect = EffectRequest & { id: string; timeoutMs: number };
 
 export function normalizeEffect(effect: EffectRequest): RequiredEffect {
-    const normalized = { ...effect, id: effect.id ?? createId('effect'), timeoutMs: effect.timeoutMs ?? 30_000 };
+    const normalized = { ...effect, id: effect.id ?? `effect_${encodeURIComponent(effect.idempotencyKey)}`, timeoutMs: effect.timeoutMs ?? 30_000 };
     if (!normalized.kind || !normalized.version || !normalized.idempotencyKey) {
         throw new Error('Effect kind, version, and idempotencyKey are required');
     }
     if (!Number.isFinite(normalized.timeoutMs) || normalized.timeoutMs <= 0) {
         throw new Error('Effect timeoutMs must be a positive finite number');
     }
+    if (effect.retry && (!Number.isInteger(effect.retry.maxAttempts) || effect.retry.maxAttempts < 1 || !Number.isFinite(effect.retry.backoffMs ?? 0) || (effect.retry.backoffMs ?? 0) < 0)) throw new Error('Invalid Effect retry policy');
     assertDurableValue(normalized.request, 'Effect request');
     return normalized;
 }
 
 export function addEffect(task: TaskRecord, effect: RequiredEffect): TaskRecord {
-    const persisted = { request: effect, status: 'pending' as const, attemptCount: 0, attempts: [] };
+    const existing = task.effects[effect.id] ?? Object.values(task.effects)
+        .find(item => item.request.idempotencyKey === effect.idempotencyKey);
+    if (existing) {
+        if (canonical(existing.request) !== canonical(effect)) throw new Error(`Effect identity conflict: ${effect.id}`);
+        return task;
+    }
+    const persisted = { request: effect, status: 'pending' as const, deadlineAt: Date.now() + effect.timeoutMs, attemptCount: 0, attempts: [] };
     return { ...task, effects: { ...task.effects, [effect.id]: persisted } };
 }
 
@@ -51,14 +58,22 @@ export async function executeEffectAdapter(
     context: EffectExecutionContext,
 ): Promise<EffectCompletion> {
     const wasRecovered = claim.effect.attempts.some(attempt => attempt.outcome === 'lost');
-    if (wasRecovered && adapter.reconcile) {
+    if (wasRecovered && !claim.effect.replayAuthorized && adapter.reconcile) {
         const reconciled = await adapter.reconcile(effect.request, context);
         if (reconciled.status === 'completed') return { result: reconciled.result };
         if (reconciled.status === 'indeterminate') {
             return { error: reconciled.error, indeterminate: true };
         }
+    } else if (wasRecovered && !claim.effect.replayAuthorized && adapter.recoveryPolicy !== 'idempotent-retry') {
+        return { error: { message: 'Effect outcome is unknown; reconciliation is required' }, indeterminate: true };
     }
+    if ((claim.effect.deadlineAt ?? Infinity) <= Date.now()) return { error: { message: 'Effect deadline expired' }, indeterminate: wasRecovered };
     return { result: await adapter.execute(effect.request, context) };
+}
+
+function canonical(value: unknown): string {
+    return JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+        ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
 }
 
 export async function executeEffectWithDeadline(
@@ -78,7 +93,7 @@ export async function executeEffectWithDeadline(
             error.name = 'EffectTimeoutError';
             controller.abort(error);
             void adapter.cancel?.(effect.request, context).catch(() => {});
-        }, effect.timeoutMs);
+        }, Math.max(1, Math.min(effect.timeoutMs, (claim.effect.deadlineAt ?? Infinity) - Date.now())));
     });
     try {
         return await Promise.race([executeEffectAdapter(adapter, effect, claim, context), interrupted]);

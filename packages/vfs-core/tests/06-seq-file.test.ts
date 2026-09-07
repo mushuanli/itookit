@@ -16,6 +16,31 @@ describe('SeqFile operations (IndexedDB backend)', () => {
         return `/${name}`;
     }
 
+    it('notifies once after commit, never for reads or rolled-back mutations', async () => {
+        const one = await mkSeq('one.seq'), two = await mkSeq('two.seq');
+        const events: string[][] = [];
+        const off = vfs.fs.on('seq:committed', event => events.push(event.payload.paths));
+        const seq = vfs.fs.meta.seq!;
+        await seq.transaction!(async tx => {
+            await tx.setEntry(one, 'state', 'ready');
+            await tx.setEntry(two, 'state', 'waiting');
+            await tx.setEntry(one, 'version', '2');
+            expect(events).toEqual([]);
+        });
+        expect(events).toEqual([[one, two]]);
+        await expect(seq.transaction!(async tx => {
+            await tx.deleteEntry(one, 'state');
+            throw new Error('rollback');
+        })).rejects.toThrow('rollback');
+        await seq.transaction!(tx => tx.getEntry(one, 'state'));
+        expect(events).toHaveLength(1);
+        expect(await seq.getEntry(one, 'state')).toBe('ready');
+        await seq.setEntry(one, 'state', 'done');
+        await seq.deleteEntry(two, 'state');
+        expect(events).toEqual([[one, two], [one], [two]]);
+        off();
+    });
+
     it('capabilities.seqFiles is true', () => {
         expect(vfs.fs.capabilities.seqFiles).toBe(true);
         expect(vfs.fs.meta.seq).toBeDefined();

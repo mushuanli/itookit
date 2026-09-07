@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { EventEnvelope, TaskHandle } from '@itookit/durable-kernel';
-import { RunAttachmentController, type TaskControlPlane } from './RunAttachmentController';
+import type { EventEnvelope } from '@itookit/durable-kernel';
+import { RunAttachmentController, type TaskControlPlane, type AttachedTask } from './RunAttachmentController';
 
 describe('RunAttachmentController', () => {
     it('replays task events and exposes interaction requests', async () => {
@@ -20,8 +20,8 @@ describe('RunAttachmentController', () => {
     });
 
     it('does not let a stale attach replace the current task', async () => {
-        const slow = deferred<TaskHandle>();
-        const fast = deferred<TaskHandle>();
+        const slow = deferred<AttachedTask>();
+        const fast = deferred<AttachedTask>();
         const plane: TaskControlPlane = {
             openTask: taskId => taskId === 'slow' ? slow.promise : fast.promise,
         };
@@ -68,18 +68,30 @@ describe('RunAttachmentController', () => {
 
         expect(task.start).toHaveBeenCalledOnce();
     });
+
+    it('resumes a durably paused task through the control API', async () => {
+        const task = handle('task-1');
+        vi.mocked(task.status).mockResolvedValue({ task: { ...taskRecord({}, 'ready'), control: {
+            epoch: 3, requestId: 'pause', mode: 'pause', acknowledged: true,
+        } } });
+        const controller = new RunAttachmentController(controlPlane(task), callbacks());
+        await controller.attach('task-1');
+        await controller.resume();
+        expect(task.resume).toHaveBeenCalledWith({ requestId: expect.any(String), expectedEpoch: 3 });
+        expect(task.signal).not.toHaveBeenCalled();
+    });
 });
 
-function controlPlane(task: TaskHandle): TaskControlPlane {
+function controlPlane(task: AttachedTask): TaskControlPlane {
     return { openTask: vi.fn(async () => task) };
 }
 
-function handle(id: string, events: EventEnvelope[] = []): TaskHandle {
+function handle(id: string, events: EventEnvelope[] = []): AttachedTask {
     return {
         id,
         events: () => stream(events),
-        signal: vi.fn(), start: vi.fn(), cancel: vi.fn(), status: vi.fn(), wait: vi.fn(), poll: vi.fn(),
-        respond: vi.fn(), createResource: vi.fn(), history: vi.fn(), attempts: vi.fn(),
+        signal: vi.fn(), start: vi.fn(), cancel: vi.fn(), status: vi.fn(),
+        respond: vi.fn(), pause: vi.fn(), interrupt: vi.fn(), resume: vi.fn(),
     };
 }
 

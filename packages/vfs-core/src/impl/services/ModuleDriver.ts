@@ -157,8 +157,8 @@ export class ModuleDriver implements IFSDriver {
     async readContent(path: string, options?: ReadOptions): Promise<FileContent> {
         const { realPath } = await this.ctx.resolveNode(path);
         this.ctx.access.checkAccess(this.ctx.caller, realPath, 'read');
-        if (this.ctx.moduleBackend.records) {
-            const text = await this.ctx.serializeSeqFile(realPath, this.ctx.moduleBackend.records);
+        if (this.ctx.records) {
+            const text = await this.ctx.serializeSeqFile(realPath, this.ctx.records);
             if (text !== null) {
                 return options?.encoding === 'binary' ? toBuffer(text) : text;
             }

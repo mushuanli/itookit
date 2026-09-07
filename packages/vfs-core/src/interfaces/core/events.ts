@@ -20,6 +20,7 @@
 import type { FSNodeType } from './types';
 
 export type FSEventType =
+    | 'seq:committed'
     | 'node:created'
     | 'node:updated'
     | 'node:deleted'
@@ -100,6 +101,8 @@ export interface FSErrorPayload {
 }
 
 export interface FSEventPayloadMap {
+    /** Record paths changed by a successful SeqFile commit; never emitted on rollback. */
+    'seq:committed': { paths: string[] };
     'node:created': FSNodeCreatedPayload;
     'node:updated': FSNodeUpdatedPayload;
     'node:deleted': FSNodeDeletedPayload;

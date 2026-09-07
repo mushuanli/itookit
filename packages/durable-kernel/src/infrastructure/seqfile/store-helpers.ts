@@ -80,7 +80,7 @@ export async function claimTask(
         leaseEpoch: task.attemptCount + 1, leaseUntil: Date.now() + leaseMs, startedAt: Date.now(),
     };
     const next = { ...task, status: 'running' as const, currentAttempt: attempt, readyAt: undefined,
-        attemptCount: task.attemptCount + 1, version: task.version + 1, updatedAt: Date.now() };
+        attemptCount: task.attemptCount + 1, stepAttemptCount: (task.stepAttemptCount ?? 0) + 1, version: task.version + 1, updatedAt: Date.now() };
     await writeTaskTx(tx, root, next);
     await tx.setEntry(taskPath(root, task.id), attemptKey(attempt.id), encode(attempt));
     await indexTask(tx, root, next);
@@ -99,7 +99,8 @@ export function claimMatches(current: TaskRecord, claim: TaskClaim): boolean {
     return current.status === 'running' && !!attempt
         && attempt.leaseToken === claim.attempt.leaseToken
         && attempt.leaseEpoch === claim.attempt.leaseEpoch
-        && current.version === claim.task.version;
+        && (current.control?.epoch ?? 0) === (claim.task.control?.epoch ?? 0)
+        && (current.stateRevision ?? 0) === (claim.task.stateRevision ?? 0);
 }
 
 export async function indexTask(tx: ISeqFileTransaction, root: string, task: TaskRecord): Promise<void> {
@@ -177,7 +178,7 @@ export function finishEffect(
         : outcome.error ? 'failed' as const : 'completed' as const;
     const attempt = { ...effect.currentAttempt!, outcome: attemptOutcome,
         finishedAt: Date.now() };
-    return { ...replaceEffectAttempt(effect, attempt), status, currentAttempt: undefined, ...outcome };
+    return { ...replaceEffectAttempt(effect, attempt), status, currentAttempt: undefined, error: outcome.error, result: outcome.result, ...outcome };
 }
 
 export function recoverEffect(
@@ -188,7 +189,7 @@ export function recoverEffect(
     if (effect?.status !== 'leased' || !effect.currentAttempt
         || effect.currentAttempt.leaseUntil > Date.now()) return effects;
     const lost = { ...effect.currentAttempt, outcome: 'lost' as const, finishedAt: Date.now() };
-    const next = { ...replaceEffectAttempt(effect, lost), status: 'pending' as const, currentAttempt: undefined };
+    const next = { ...replaceEffectAttempt(effect, lost), status: 'pending' as const, replayAuthorized: false, currentAttempt: undefined };
     return { ...effects, [effectId]: next };
 }
 
@@ -240,7 +241,8 @@ export async function resolveInitialDependencies(
     const pendingEvents = [...task.pendingEvents];
     for (const dependency of dependencies) {
         const source = await readTaskTx(tx, root, dependency.task);
-        if (!source || !isTerminal(source.status)) continue;
+        if (!source) throw new Error(`Dependency not found: ${dependency.task}`);
+        if (!isTerminal(source.status)) continue;
         if (!dependencySatisfied(source, dependency.condition) && dependency.onFailure !== 'continue') {
             const status = dependency.onFailure === 'skip' ? 'cancelled' : 'failed';
             return terminalDependency(task, status, source.id);
@@ -267,12 +269,14 @@ export async function writeDependencyEdges(
 
 export function taskFromSpec(id: string, sessionId: string, spec: TaskSpec, now: number): TaskRecord {
     const retry = normalizeRetry(spec.retry);
+    const dependencies = spec.dependsOn ?? [];
+    if (new Set(dependencies.map(dep => dep.task)).size !== dependencies.length) throw new Error('Duplicate task dependency');
     return {
         id, sessionId, parentTaskId: spec.parent, rootTaskId: spec.parent ?? id,
         spawnKey: spec.spawnKey, program: spec.program,
         status: spec.deferStart ? 'created' : spec.dependsOn?.length ? 'blocked' : 'ready',
-        input: spec.input, pendingEvents: [], unresolvedDeps: spec.dependsOn?.length ?? 0,
-        priority: spec.priority ?? 0, retry, attemptCount: 0,
+        input: spec.input, pendingEvents: [], dependencies, unresolvedDeps: spec.dependsOn?.length ?? 0,
+        priority: spec.priority ?? 0, retry, attemptCount: 0, stepNumber: 0, stepAttemptCount: 0, stateRevision: 0, initialized: false,
         effects: {}, interactions: {}, labels: spec.labels, version: 0, createdAt: now, updatedAt: now,
     };
 }
@@ -302,7 +306,7 @@ export function cancelActiveEffects(
             ? { ...effect.currentAttempt, finishedAt, outcome: 'cancelled' as const }
             : undefined;
         const attempts = current ? replaceAttempt(effect.attempts ?? [], current) : effect.attempts;
-        return [id, { ...effect, status: 'cancelled' as const, attempts, currentAttempt: undefined }];
+        return [id, { ...effect, status: 'cancelled' as const, cleanupPending: true, attempts, currentAttempt: undefined }];
     }));
 }
 
@@ -567,6 +571,7 @@ export async function writeSharedHistory(
     const version = String(revision.version).padStart(16, '0');
     await tx.setEntry(sharedPath(root), sharedHeadKey(revision.key), String(revision.version));
     await tx.setEntry(sharedPath(root), `${sharedHistoryPrefix(revision.key)}${version}`, encode(revision));
+    await refreshWaiters(tx, root, revision.key);
 }
 
 export function deletedRevision(key: string, version: number, taskId?: TaskId): SharedStateRevision {
@@ -629,11 +634,13 @@ export async function registerTaskWaitTx(
     validateWaitSpec(wait);
     validateInteractionWaits(task, wait);
     task = await hydrateTaskWaitEventsTx(tx, root, { ...task, wait });
+    task = await hydrateVersionWaits(tx, root, task);
     if (pendingSatisfiesWait(task)) {
         await unregisterTaskWaitTx(tx, root, task);
         return { ...task, status: 'ready', wait: undefined };
     }
     await registerTaskTargetsTx(tx, root, task);
+    for (const key of sharedWaitKeys(task)) await tx.setEntry(graphPath(root), key, task.id);
     return task;
 }
 
@@ -662,6 +669,7 @@ export async function unregisterTaskWaitTx(tx: ISeqFileTransaction, root: string
     for (const targetId of waitTaskIds(task.wait)) {
         await tx.deleteEntry(graphPath(root), taskWaitKey(targetId, task.id));
     }
+    for (const key of sharedWaitKeys(task)) await tx.deleteEntry(graphPath(root), key);
 }
 
 export async function wakeTaskWaiters(
@@ -709,6 +717,12 @@ export function waitSatisfied(
     wait: import('../../domain/types').WaitSpec,
     events: import('../../domain/types').TaskInputEvent[],
 ): boolean {
+    if (wait.type === 'resource') return events.some(event => event.type === 'resource-result' && event.receipt.id === wait.requestId && event.receipt.scope === wait.scope);
+    if (wait.type === 'message') return events.some(event => event.type === 'message' && (!wait.topic || event.message.topic === wait.topic) && (!wait.correlationId || event.message.correlationId === wait.correlationId));
+    if (wait.type === 'cache-management') return events.some(event => event.type === 'cache-managed' && event.receipt.operationId === wait.operationId);
+    if (wait.type === 'cache') return events.some(event => event.type === 'cache-result' && event.receipt.operationId === wait.operationId);
+    if (wait.type === 'shared-version') return events.some(event => event.type === 'shared-changed' && event.revision.key === wait.key && event.revision.version > wait.afterVersion);
+    if (wait.type === 'timer') return events.some(event => event.type === 'timer-fired' && event.id === wait.id && event.at === wait.at);
     if (wait.type === 'signal') return events.some(event => event.type === 'signal' && (!wait.id || event.signal.type === wait.id));
     if (wait.type === 'effect') return events.some(event => (event.type === 'effect-completed' || event.type === 'effect-failed') && (!wait.id || event.effectId === wait.id));
     if (wait.type === 'task') return events.some(event => event.type === 'task-exited' && event.taskId === wait.id);
@@ -723,9 +737,12 @@ export function waitSatisfied(
 }
 
 export function validateWaitSpec(wait: import('../../domain/types').WaitSpec): void {
+    if (wait.type === 'resource' && (!wait.scope || !wait.requestId)) throw new Error('Invalid resource wait');
+    if (wait.type === 'shared-version' && (!wait.key || !Number.isInteger(wait.afterVersion) || wait.afterVersion < 0)) throw new Error('Invalid shared version wait');
+    if (wait.type === 'timer' && (!wait.id || !Number.isFinite(wait.at))) throw new Error('Invalid timer wait');
     if (wait.type !== 'any' && wait.type !== 'all' && wait.type !== 'quorum') return;
     if (wait.waits.length === 0) throw new Error(`${wait.type} wait requires at least one condition`);
-    if (wait.type === 'quorum' && (wait.required < 1 || wait.required > wait.waits.length)) {
+    if (wait.type === 'quorum' && (!Number.isInteger(wait.required) || wait.required < 1 || wait.required > wait.waits.length)) {
         throw new Error('Quorum wait has invalid required count');
     }
     for (const item of wait.waits) validateWaitSpec(item);
@@ -800,14 +817,22 @@ export async function advanceDependant(
     completed: TaskRecord,
     edge: { dependentId: string; dependency: import('../../domain/types').TaskDependency },
 ): Promise<void> {
-    const task = await requireTaskTx(tx, root, edge.dependentId);
+    const task = await readTaskTx(tx, root, edge.dependentId);
+    if (!task) {
+        await tx.deleteEntry(graphPath(root), `edge/${completed.id}/${edge.dependentId}`);
+        return;
+    }
     if (task.status !== 'blocked' && task.status !== 'created') return;
+    if (hasTaskExit(task, completed.id)) return;
     const failed = completed.status !== 'succeeded' && edge.dependency.condition !== 'terminal';
     if (failed && edge.dependency.onFailure !== 'continue') {
         const status = edge.dependency.onFailure === 'skip' ? 'cancelled' as const : 'failed' as const;
         const next = terminalDependency(task, status, completed.id);
         await writeTaskTx(tx, root, next);
         await indexTask(tx, root, next);
+        await appendEventTx(tx, root, next.sessionId, next.id, `task.${status}`, next.exit);
+        await advanceDependants(tx, root, next);
+        await wakeTaskWaiters(tx, root, next);
         return;
     }
     const unresolvedDeps = Math.max(0, task.unresolvedDeps - 1);
@@ -832,4 +857,105 @@ export function terminalDependency(
     const error = { message: `Dependency ${dependencyId} did not succeed` };
     return { ...task, status, exit: { taskId: task.id, status, error, completedAt },
         version: task.version + 1, updatedAt: completedAt };
+}
+
+export function waitLeaves(wait: import('../../domain/types').WaitSpec): import('../../domain/types').WaitAtom[] {
+    return wait.type === 'any' || wait.type === 'all' || wait.type === 'quorum'
+        ? wait.waits.flatMap(waitLeaves) : [wait];
+}
+
+/** Capture immutable revisions inside the writer/register transaction. */
+export async function hydrateVersionWaits(tx: ISeqFileTransaction, root: string, task: TaskRecord): Promise<TaskRecord> {
+    if (!task.wait) return task;
+    const pendingEvents = [...task.pendingEvents];
+    for (const leaf of waitLeaves(task.wait)) {
+        if (waitSatisfied(leaf, pendingEvents)) continue;
+        if (leaf.type === 'timer' && leaf.at <= Date.now()) {
+            pendingEvents.push({ type: 'timer-fired', id: leaf.id, at: leaf.at });
+        }
+        if (leaf.type === 'shared-version') {
+            const head = await tx.getEntry(sharedPath(root), sharedHeadKey(leaf.key));
+            if (Number(head ?? 0) <= leaf.afterVersion) continue;
+            const revision = await tx.getEntry(sharedPath(root), `${sharedHistoryPrefix(leaf.key)}${String(head).padStart(16, '0')}`);
+            if (revision) pendingEvents.push({ type: 'shared-changed', revision: decode(revision) });
+        }
+    }
+    return { ...task, pendingEvents };
+}
+
+function sharedWaitKeys(task: TaskRecord): string[] {
+    if (!task.wait) return [];
+    return [...new Set(waitLeaves(task.wait).flatMap(leaf => leaf.type === 'shared-version'
+        ? [`wait/shared/${encodeURIComponent(leaf.key)}/${task.id}`] : []))];
+}
+
+/** Writer path visits only subscribers; sweep also reconciles task exits and timers. */
+export async function refreshWaiters(tx: ISeqFileTransaction, root: string, sharedKey?: string): Promise<void> {
+    const ids: string[] = [];
+    if (sharedKey !== undefined) {
+        await tx.walkEntries(graphPath(root), row => { ids.push(row.value); return true; },
+            { keyPrefix: `wait/shared/${encodeURIComponent(sharedKey)}/` });
+    } else {
+        await tx.walkEntries(indexPath(root), row => {
+            if (decode<{ status: string }>(row.value).status === 'waiting') ids.push(row.key.slice(5));
+            return true;
+        }, { keyPrefix: 'task/' });
+    }
+    for (const id of ids) {
+        const task = await readTaskTx(tx, root, id);
+        if (!task || task.status !== 'waiting' || !task.wait) continue;
+        const hydrated = await hydrateVersionWaits(tx, root, sharedKey === undefined ? await hydrateTaskWaitEventsTx(tx, root, task) : task);
+        if (hydrated.pendingEvents.length === task.pendingEvents.length) continue;
+        const next = wakeFromPendingEvents({ ...hydrated, version: task.version + 1, updatedAt: Date.now() });
+        if (next.status === 'ready') await unregisterTaskWaitTx(tx, root, task);
+        await writeTaskTx(tx, root, next);
+        await indexTask(tx, root, next);
+        await appendEventTx(tx, root, task.sessionId, id, next.status === 'ready' ? 'task.wait.satisfied' : 'task.wait.progress');
+    }
+}
+
+/** Cancellation of any ancestor is a persistent dispatch barrier. */
+export async function hasCancelledAncestorTx(tx: ISeqFileTransaction, root: string, task: TaskRecord): Promise<boolean> {
+    const seen = new Set([task.id]);
+    let parentId = task.parentTaskId;
+    while (parentId) {
+        if (seen.has(parentId)) throw new Error('Task parent cycle');
+        seen.add(parentId);
+        const parent = await requireTaskTx(tx, root, parentId);
+        if (parent.status === 'cancelled') return true;
+        parentId = parent.parentTaskId;
+    }
+    return false;
+}
+
+/** Rebuild projections from task records without discarding legacy dependency edges. */
+export async function recoverWaitGraphTx(tx: ISeqFileTransaction, root: string, ids: string[]): Promise<void> {
+    // Include tasks created after the caller enumerated directories/indexes.
+    const allIds = new Set(ids);
+    await tx.walkEntries(indexPath(root), row => { allIds.add(row.key.slice(5)); return true; }, { keyPrefix: 'task/' });
+    const keys: string[] = [];
+    await tx.walkEntries(graphPath(root), row => { keys.push(row.key); return true; }, { keyPrefix: 'wait/' });
+    for (const key of keys) await tx.deleteEntry(graphPath(root), key);
+    for (const id of allIds) {
+        const task = await readTaskTx(tx, root, id);
+        if (!task) continue;
+        if (task.dependencies) await writeDependencyEdges(tx, root, id, task.dependencies);
+        if (task.status === 'waiting') {
+            const next = await registerTaskWaitTx(tx, root, task);
+            if (encode(next) !== encode(task)) {
+                next.version = task.version + 1; next.updatedAt = Date.now();
+                await writeTaskTx(tx, root, next);
+                await indexTask(tx, root, next);
+                await appendEventTx(tx, root, task.sessionId, id,
+                    next.status === 'ready' ? 'task.wait.satisfied' : 'task.wait.progress');
+            }
+        }
+    }
+    for (const id of allIds) {
+        const task = await readTaskTx(tx, root, id);
+        if (task && isTerminal(task.status)) {
+            await advanceDependants(tx, root, task);
+            await wakeTaskWaiters(tx, root, task);
+        }
+    }
 }

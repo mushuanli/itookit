@@ -1,3 +1,5 @@
+import type { CacheSpec, CacheRead, CachePublish, CacheNamespace, CacheEntry, CacheReceipt, CacheManagementAction, CacheManagementReceipt } from './cache';
+export * from './cache';
 import type { IModuleFS } from '@itookit/vfs-core';
 import type { InteractionRecord, InteractionRequest, InteractionResponse } from './interaction';
 
@@ -12,7 +14,7 @@ export type ContextCommitId = string;
 export type ResourceId = string;
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
-export type SessionStatus = 'open' | 'suspended' | 'closing' | 'closed' | 'archived';
+export type SessionStatus = 'open' | 'suspending' | 'suspended' | 'closing' | 'closed' | 'archived';
 export type TaskStatus = 'created' | 'blocked' | 'ready' | 'running' | 'waiting'
     | 'succeeded' | 'failed' | 'cancelled';
 
@@ -24,9 +26,14 @@ export interface SessionStorageResolver {
     resolve(reference: StorageBindingRef): Promise<ResolvedStorageBinding>;
 }
 
+/** takeover requires the caller to have stopped the previous execution instance. */
+export interface RecoveryOptions { takeover?: boolean; }
+
 export interface SessionRecord {
     id: SessionId;
     status: SessionStatus;
+    closeMode?: 'drain' | 'cancel';
+    registrationPending?: boolean;
     storage: StorageBindingRef;
     nextEventSeq: number;
     version: number;
@@ -59,12 +66,35 @@ export interface SharedStateRevision<T extends JsonValue = JsonValue> {
 export interface CrossSessionMessage<T extends JsonValue = JsonValue> {
     id: string;
     sourceSessionId: SessionId;
+    sourceTaskId?: TaskId;
+    targetTaskId?: TaskId;
+    correlationId?: string;
+    requestFingerprint?: string;
+    deliverySequence?: number;
+    consumedAt?: number;
     targetSessionId: SessionId;
     topic: string;
     payload: T;
-    status: 'pending' | 'delivered';
+    status: 'pending' | 'delivered' | 'rejected';
+    rejectedAt?: number;
+    rejection?: { code: 'target-closed' | 'target-terminal' | 'expired'; message: string };
+    /** Absolute delivery deadline; omitted means retry missing targets indefinitely. */
+    expiresAt?: number;
+    deliveryAttempts?: number;
+    nextAttemptAt?: number;
+    lastDeliveryError?: string;
     createdAt: number;
     deliveredAt?: number;
+}
+
+export interface TaskMessageRequest {
+    expiresAt?: number;
+    idempotencyKey: string;
+    targetSessionId: SessionId;
+    targetTaskId: TaskId;
+    topic: string;
+    correlationId?: string;
+    payload: JsonValue;
 }
 
 export interface ContextCommit<T extends JsonValue = JsonValue> {
@@ -102,6 +132,8 @@ export interface TaskDependency {
 }
 
 export interface TaskSpec<I = unknown> {
+    /** Session-scoped durable submission key. Reusing it with another spec is rejected. */
+    requestId?: string;
     program: ProgramRef;
     input: I;
     parent?: TaskId;
@@ -143,10 +175,20 @@ export interface PersistedEffect {
     request: EffectRequest;
     status: 'pending' | 'leased' | 'succeeded' | 'failed' | 'cancelled' | 'indeterminate';
     attemptCount: number;
+    cleanupPending?: boolean;
+    deadlineAt?: number;
+    readyAt?: number;
+    replayAuthorized?: boolean;
     attempts: EffectAttempt[];
     currentAttempt?: EffectAttempt;
     result?: unknown;
     error?: SerializableError;
+}
+
+export interface EffectResolution {
+    requestId: string;
+    effectId: string;
+    outcome: { type: 'completed'; result: JsonValue } | { type: 'retry' } | { type: 'failed'; error: SerializableError };
 }
 
 export interface EffectAttempt {
@@ -171,9 +213,20 @@ export interface TaskRecord<S = unknown> {
     state?: S;
     pendingEvents: TaskInputEvent[];
     unresolvedDeps: number;
+    /** Authority for rebuilding dependency indexes; absent on legacy records. */
+    dependencies?: TaskDependency[];
     priority: number;
     retry: RetryPolicy;
     attemptCount: number;
+    /** Successful reducer steps and per-step attempts are independent of lease epochs. */
+    stepNumber?: number;
+    stepAttemptCount?: number;
+    stateRevision?: number;
+    initialized?: boolean;
+    blockedReason?: 'program-unavailable';
+    control?: TaskControl;
+    sessionPaused?: boolean;
+    controlHolds?: string[];
     readyAt?: number;
     lastError?: SerializableError;
     currentAttempt?: TaskAttempt;
@@ -188,9 +241,25 @@ export interface TaskRecord<S = unknown> {
     updatedAt: number;
 }
 
+export interface TaskControl {
+    epoch: number;
+    mode: 'run' | 'pause' | 'interrupt';
+    requestId: string;
+    reason?: string;
+    acknowledged: boolean;
+}
+export interface TaskControlOptions { requestId: string; expectedEpoch?: number; reason?: string; }
+
 export type TaskSignal = { type: string; payload?: unknown };
 export type TaskInputEvent =
+    | { type: 'resource-result'; receipt: import('./resource-api').ResourceRequestSnapshot }
     | { type: 'started' }
+    | { type: 'step' }
+    | { type: 'message'; message: CrossSessionMessage }
+    | { type: 'cache-result'; receipt: CacheReceipt }
+    | { type: 'cache-managed'; receipt: CacheManagementReceipt }
+    | { type: 'shared-changed'; revision: SharedStateRevision }
+    | { type: 'timer-fired'; id: string; at: number }
     | { type: 'effect-completed'; effectId: EffectId; result: unknown }
     | { type: 'effect-failed'; effectId: EffectId; error: SerializableError }
     | { type: 'task-exited'; taskId: TaskId; exit: ExitRecord }
@@ -198,11 +267,17 @@ export type TaskInputEvent =
     | { type: 'signal'; sequence: number; signal: TaskSignal };
 
 export type WaitAtom =
+    | { type: 'resource'; scope: string; requestId: string }
+    | { type: 'message'; topic?: string; correlationId?: string }
+    | { type: 'cache'; operationId: string }
+    | { type: 'cache-management'; operationId: string }
     | { type: 'signal'; id?: string }
     | { type: 'effect'; id?: string }
     | { type: 'task'; id: TaskId }
     | { type: 'child'; spawnKey: string }
-    | { type: 'interaction'; id: string };
+    | { type: 'interaction'; id: string }
+    | { type: 'shared-version'; key: string; afterVersion: number }
+    | { type: 'timer'; id: string; at: number };
 
 export type WaitSpec = WaitAtom
     | { type: 'any'; waits: WaitSpec[] }
@@ -221,6 +296,11 @@ export interface EffectRequest<Req = unknown> {
 }
 
 export type KernelAction =
+    | { type: 'resource'; command: import('./resource-api').ResourceCommand }
+    | CacheManagementAction
+    | { type: 'send-message'; message: TaskMessageRequest }
+    | { type: 'cache-read'; request: CacheRead }
+    | { type: 'cache-publish'; request: CachePublish }
     | { type: 'effect'; effect: EffectRequest }
     | { type: 'spawn'; spawnKey: string; spec: TaskSpec }
     | { type: 'request-interaction'; interaction: InteractionRequest<JsonValue> }
@@ -248,6 +328,7 @@ export interface EffectExecutionContext {
     sessionId: SessionId;
     taskId: TaskId;
     effectId: EffectId;
+    idempotencyKey?: string;
     abortSignal: AbortSignal;
     grants: AuthorizedEffectGrant[];
     sessionState?: EffectSessionState;
@@ -282,6 +363,7 @@ export interface AuthorizedEffectGrant {
 export interface EffectAdapter<Req = unknown, Res = unknown> {
     readonly kind: string;
     readonly version: string;
+    readonly recoveryPolicy?: 'idempotent-retry' | 'manual';
     execute(request: Req, context: EffectExecutionContext): Promise<Res>;
     reconcile?(request: Req, context: EffectExecutionContext): Promise<EffectReconcileResult<Res>>;
     cancel?(request: Req, context: EffectExecutionContext): Promise<void>;
@@ -293,6 +375,9 @@ export type EffectReconcileResult<Res = unknown> =
     | { status: 'indeterminate'; error: SerializableError };
 
 export interface EventEnvelope {
+    schemaVersion?: number;
+    effectId?: EffectId;
+    attemptId?: string;
     sequence: number;
     sessionId: SessionId;
     taskId?: TaskId;
@@ -306,6 +391,7 @@ export interface ResourceRecord {
     id: ResourceId;
     sessionId: SessionId;
     kind: string;
+    /** Adapter-owned locator. Use a durable logical URI when physical files may move. */
     uri: string;
     generation: number;
     parentResourceId?: ResourceId;
@@ -384,6 +470,7 @@ export interface WorkspaceExecutionContext {
 export interface WorkspaceAdapter {
     readonly kind: string;
     readonly version: string;
+    /** Resolve logical URIs on every call; a path URI intentionally follows path semantics. */
     snapshot(uri: string, context: WorkspaceExecutionContext): Promise<JsonValue>;
     diff(base: JsonValue, target: JsonValue, context: WorkspaceExecutionContext): Promise<JsonValue>;
     merge(
@@ -431,6 +518,7 @@ export interface TaskBoardItem {
     dependencies?: string[];
     assigneeTaskId?: TaskId;
     leaseUntil?: number;
+    leaseToken?: string;
     result?: JsonValue;
     createdAt: number;
     updatedAt: number;
@@ -441,14 +529,15 @@ export interface SessionTaskBoardApi {
     listTaskBoard(): Promise<TaskBoardItem[]>;
     createTaskBoardItem(input: Pick<TaskBoardItem, 'title' | 'description' | 'dependencies'> & { id?: string }): Promise<TaskBoardItem>;
     claimTaskBoardItem(id: string, assigneeTaskId: TaskId, options?: { leaseMs?: number }): Promise<TaskBoardItem>;
-    renewTaskBoardLease(id: string, assigneeTaskId: TaskId, leaseMs?: number): Promise<TaskBoardItem>;
-    completeTaskBoardItem(id: string, result?: JsonValue, failed?: boolean): Promise<TaskBoardItem>;
+    renewTaskBoardLease(id: string, assigneeTaskId: TaskId, leaseToken: string, leaseMs?: number): Promise<TaskBoardItem>;
+    completeTaskBoardItem(id: string, leaseToken: string, result?: JsonValue, failed?: boolean): Promise<TaskBoardItem>;
 }
 
 /** Session 间消息面（outbox/inbox）。 */
 export interface SessionMessageApi {
-    sendToSession<T extends JsonValue>(targetSessionId: SessionId, topic: string, payload: T): Promise<CrossSessionMessage<T>>;
+    sendToSession<T extends JsonValue>(targetSessionId: SessionId, topic: string, payload: T, options?: { expiresAt?: number }): Promise<CrossSessionMessage<T>>;
     inbox(options?: { after?: number }): Promise<CrossSessionMessage[]>;
+    outbox(): Promise<CrossSessionMessage[]>;
 }
 
 /** Session 的 Context 分支/提交面。 */
@@ -508,19 +597,41 @@ export interface SessionHandle extends
     SessionWorkspaceApi,
     SessionLifecycleApi {
     readonly id: SessionId;
+    readonly resources: import('./resource-api').ResourceApi;
+    recover(options?: RecoveryOptions): Promise<RecoveryReport>;
+    spawn<I, O = unknown>(spec: TaskSpec<I>): Promise<TaskHandle<O>>;
+    stat(): Promise<import('./status').SessionStat>;
+    watch(options?: { after?: number }): AsyncIterable<EventEnvelope>;
 }
 
 export interface TaskHandle<O = unknown> {
     readonly id: TaskId;
+    readonly resources: import('./resource-api').ResourceApi;
+    readonly cache: import('./cache').CacheApi;
+    send(request: TaskMessageRequest): Promise<CrossSessionMessage>;
+    stat(): Promise<import('./status').TaskStat>;
+    stats(): Promise<import('./status').TaskStats>;
+    watch(options?: { after?: number }): AsyncIterable<EventEnvelope>;
     status(): Promise<TaskSnapshot>;
     wait(options?: { timeoutMs?: number }): Promise<ExitRecord<O>>;
     poll(): Promise<ExitRecord<O> | undefined>;
     signal(signal: TaskSignal): Promise<void>;
     start(): Promise<void>;
+    pause(options: TaskControlOptions): Promise<TaskControl>;
+    interrupt(options: TaskControlOptions): Promise<TaskControl>;
+    resume(options: TaskControlOptions & { signal?: TaskSignal }): Promise<TaskControl>;
     respond<T extends JsonValue>(response: InteractionResponse<T>): Promise<void>;
     createResource(spec: TaskResourceSpec): Promise<ResourceGrant>;
     cancel(reason?: string): Promise<void>;
     events(options?: { after?: number }): AsyncIterable<EventEnvelope>;
     history(options?: { afterVersion?: number }): Promise<TaskRecord[]>;
     attempts(): Promise<TaskAttempt[]>;
+    resolveEffect(request: EffectResolution): Promise<void>;
+    sendMessage(request: TaskMessageRequest): Promise<CrossSessionMessage>;
+    createCache(spec: CacheSpec): Promise<{ namespace: CacheNamespace; handle: ResourceHandle }>;
+    listCaches(): Promise<Array<{ namespace: CacheNamespace; handleId: string }>>;
+    readCache(request: CacheRead): Promise<CacheReceipt>;
+    publishCache(request: CachePublish): Promise<CacheEntry>;
+    invalidateCache(handleId: string, expectedGeneration: number): Promise<CacheNamespace>;
+    renewCache(handleId: string, expectedGeneration: number, ttlMs: number): Promise<CacheNamespace>;
 }

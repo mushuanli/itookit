@@ -1,10 +1,13 @@
-import { EventBus, type IModuleFS } from '@itookit/vfs-core';
+import { EventBus, pathUtils, type IModuleFS } from '@itookit/vfs-core';
 import { EffectRegistry, ProgramRegistry, StorageResolverRegistry, WorkspaceRegistry } from '../ports/registry';
 import type { KernelPlugin, KernelRegistration } from '../ports/plugin';
 import { DurablePoller } from '../runtime/durable-poller';
 import { LeaseHeartbeat } from '../runtime/lease-heartbeat';
 import { DefaultSessionHandle } from '../public/session-handle';
 import { DefaultTaskHandle } from '../public/task-handle';
+import { resourceApi } from '../public/resources';
+import { sessionStat } from '../domain/status';
+import { ManagedResourceStore } from '../infrastructure/seqfile/managed-resources';
 import {
     createId,
     SeqFileKernelStore,
@@ -60,51 +63,119 @@ export interface KernelOptions {
     catalog: { fs: IModuleFS; rootPath?: string };
     workerId?: string;
     maxConcurrent?: number;
+    maxConcurrentEffects?: number;
     leaseMs?: number;
+    /** Optional compatibility polling; default 0 uses commits and deadline timers. */
     pollMs?: number;
 }
 
 export class Kernel implements KernelRegistration {
+    private readonly resourcePoller: DurablePoller<string>;
+    private readonly managedResources: ManagedResourceStore;
+    get resources() { return resourceApi(this.managedResources, {}); }
+    resourceApi(sessionId: string, taskId?: string) { return resourceApi(this.managedResources, { sessionId, taskId }); }
+    async sessionStat(sessionId: string) {
+        const session = await this.store.sessionRecord(await this.binding(sessionId));
+        return sessionStat(session, session.status === 'closing' && !await this.managedResources.canClose(sessionId));
+    }
     readonly programs = new ProgramRegistry();
     readonly effects = new EffectRegistry();
     readonly storageResolvers = new StorageResolverRegistry();
     readonly workspaces = new WorkspaceRegistry();
     private readonly eventsBus = new EventBus<KernelEvents>();
     private readonly sessions = new Map<SessionId, ResolvedStorageBinding>();
+    private readonly catalogFs: IModuleFS;
+    private catalogListener?: () => void;
+    private readonly storageListeners = new Map<SessionId, () => void>();
+    private readonly requestedDrains = new Set<SessionId>();
     private readonly draining = new Set<SessionId>();
     private readonly store: SeqFileKernelStore;
     private readonly workerId: string;
     private readonly maxConcurrent: number;
+    private readonly maxConcurrentEffects: number;
     private readonly leaseMs: number;
     private readonly poller: DurablePoller<SessionId>;
     private readonly heartbeats = new Set<LeaseHeartbeat>();
     private readonly effectControllers = new Map<string, AbortController>();
     private readonly plugins = new Map<string, KernelPlugin>();
     private disposed = false;
+    private initialized = false;
     private active = 0;
+    private activeEffects = 0;
+    private readonly reducerControllers = new Map<string, { sessionId: string; taskId: string; controller: AbortController }>();
 
     constructor(options: KernelOptions) {
         this.workerId = options.workerId ?? createId('worker');
         this.maxConcurrent = options.maxConcurrent ?? 4;
+        this.maxConcurrentEffects = options.maxConcurrentEffects ?? 4;
         this.leaseMs = options.leaseMs ?? 30_000;
-        const pollMs = options.pollMs ?? 250;
+        const pollMs = options.pollMs ?? 0;
+        if (!Number.isInteger(this.maxConcurrent) || this.maxConcurrent < 0) throw new Error('Kernel maxConcurrent must be non-negative');
+        if (!Number.isInteger(this.maxConcurrentEffects) || this.maxConcurrentEffects < 0) throw new Error('Kernel maxConcurrentEffects must be non-negative');
         if (this.leaseMs <= 0) throw new Error('Kernel leaseMs must be positive');
         if (pollMs < 0) throw new Error('Kernel pollMs must be non-negative');
         const catalog = { fs: options.catalog.fs, rootPath: options.catalog.rootPath ?? '/.config/kernel' };
+        this.catalogFs = catalog.fs;
         this.store = new SeqFileKernelStore(catalog, reference => this.resolveStorage(reference));
+        this.managedResources = new ManagedResourceStore(catalog, id => this.binding(id),
+            async () => (await this.store.listSessions()).map(session => session.id),
+            id => this.store.inspectSessionBinding(id));
+        this.resourcePoller = new DurablePoller({
+            intervalMs: 0,
+            poll: async scope => { await this.managedResources.sweep(scope); return true; },
+            nextDelay: async scope => {
+                const at = await this.managedResources.nextDeadline(scope);
+                return at === undefined ? undefined : Math.max(0, at - Date.now());
+            },
+            onError: (_scope, error) => this.handlePollError(error),
+        });
         this.poller = new DurablePoller({
             intervalMs: pollMs,
             poll: sessionId => this.poll(sessionId),
+            nextDelay: sessionId => this.nextWakeDelay(sessionId),
             onError: (_sessionId, error) => this.handlePollError(error),
         });
     }
 
-    async initialize(): Promise<void> { await this.store.initialize(); }
+    async resolveEffect(sessionId: string, taskId: string, request: import('../domain/types').EffectResolution): Promise<void> {
+        await this.store.resolveEffect(await this.binding(sessionId), taskId, request);
+        this.notify(sessionId, taskId); this.queueDrain(sessionId);
+    }
+
+    async sendTaskMessage(sessionId: string, taskId: string, request: import('../domain/types').TaskMessageRequest) {
+        const message = await this.store.sendTaskMessage(await this.binding(sessionId), taskId, request);
+        this.notify(sessionId); this.queueDrain(sessionId);
+        return message;
+    }
+
+    async createCache(sessionId: string, taskId: string, spec: import('../domain/cache').CacheSpec) { return this.store.createCache(await this.binding(sessionId), taskId, spec); }
+    async readCache(sessionId: string, taskId: string, request: import('../domain/cache').CacheRead) { return this.store.readCache(await this.binding(sessionId), taskId, request); }
+    async publishCache(sessionId: string, taskId: string, request: import('../domain/cache').CachePublish) { return this.store.publishCache(await this.binding(sessionId), taskId, request); }
+    async invalidateCache(sessionId: string, taskId: string, handleId: string, expectedGeneration: number) { return this.store.invalidateCache(await this.binding(sessionId), taskId, handleId, expectedGeneration); }
+    async renewCache(sessionId: string, taskId: string, handleId: string, expectedGeneration: number, ttlMs: number) { return this.store.renewCache(await this.binding(sessionId), taskId, handleId, expectedGeneration, ttlMs); }
+    async listCaches(sessionId: string, taskId: string) { return this.store.listCaches(await this.binding(sessionId), taskId); }
+
+    async initialize(): Promise<void> {
+        await this.store.initialize(); await this.managedResources.initialize();
+        this.initialized = true;
+        this.catalogListener?.();
+        this.catalogListener = this.catalogFs.on('seq:committed', () => {
+            this.resourcePoller.start('kernel');
+            for (const id of this.sessions.keys()) this.schedulePoll(id);
+        });
+        this.resourcePoller.start('kernel');
+    }
     dispose(): void {
         this.disposed = true;
         this.poller.dispose();
+        this.resourcePoller.dispose();
+        this.managedResources.dispose();
+        this.catalogListener?.();
+        for (const off of this.storageListeners.values()) off();
+        this.storageListeners.clear();
         for (const heartbeat of this.heartbeats) heartbeat.stop();
         this.heartbeats.clear();
+        for (const { controller } of this.reducerControllers.values()) controller.abort(new Error('Worker disposed'));
         for (const controller of this.effectControllers.values()) controller.abort();
         this.effectControllers.clear();
     }
@@ -112,13 +183,19 @@ export class Kernel implements KernelRegistration {
     /** 等待所有 in-flight 的 drain/execute 完成（dispose 后调用，避免上层过早关闭存储后端）。 */
     async waitIdle(timeoutMs = 5000): Promise<void> {
         const startedAt = Date.now();
-        while (this.active > 0 || this.draining.size > 0) {
+        while (this.active > 0 || this.activeEffects > 0 || this.draining.size > 0 || !this.poller.isIdle || !this.resourcePoller.isIdle || !this.managedResources.isIdle) {
             if (Date.now() - startedAt >= timeoutMs) return;
             await new Promise(resolve => setTimeout(resolve, 10));
         }
     }
-    registerProgram(program: DurableTaskProgram): void { this.programs.register(program); }
-    registerEffect(adapter: EffectAdapter): void { this.effects.register(adapter); }
+    registerProgram(program: DurableTaskProgram): void { this.programs.register(program); for (const id of this.sessions.keys()) this.schedulePoll(id); }
+    registerResourceAdapter(adapter: import('../domain/resource-api').ManagedResourceAdapter): void {
+        this.managedResources.registerAdapter(adapter);
+        if (!this.initialized) return;
+        this.resourcePoller.start('kernel');
+        for (const id of this.sessions.keys()) this.resourcePoller.start(`session:${id}`);
+    }
+    registerEffect(adapter: EffectAdapter): void { this.effects.register(adapter); for (const id of this.sessions.keys()) this.schedulePoll(id); }
     registerStorageResolver(resolver: SessionStorageResolver): void { this.storageResolvers.register(resolver); }
     registerWorkspace(adapter: WorkspaceAdapter): void { this.workspaces.register(adapter); }
 
@@ -133,14 +210,14 @@ export class Kernel implements KernelRegistration {
         const id = spec.id ?? createId('session');
         await this.store.createSession(id, spec.storage);
         const binding = await this.resolveStorage(spec.storage);
-        this.sessions.set(id, binding);
+        this.rememberBinding(id, binding);
         this.schedulePoll(id);
         return new DefaultSessionHandle(this, id);
     }
 
     async openSession(id: SessionId): Promise<SessionHandle> {
         const opened = await this.store.openSession(id);
-        this.sessions.set(id, opened.binding);
+        this.rememberBinding(id, opened.binding);
         this.queueDrain(id);
         this.schedulePoll(id);
         return new DefaultSessionHandle(this, id);
@@ -171,17 +248,37 @@ export class Kernel implements KernelRegistration {
         return this.store.listTasks(await this.binding(sessionId));
     }
 
-    async recover(): Promise<RecoveryReport> {
+    /** Restore durable state without clearing explicit Task/Session pause controls. */
+    async recoverSession(sessionId: SessionId, options: import('../domain/types').RecoveryOptions = {}): Promise<RecoveryReport> {
+        if (options.takeover && (this.active || this.activeEffects || this.draining.size || !this.poller.isIdle))
+            throw new Error('Takeover recovery requires an idle Kernel before opening sessions');
+        const opened = await this.store.openSession(sessionId);
+        const report = await this.store.recover(opened.binding, options);
+        await this.managedResources.recover('kernel', options.takeover);
+        await this.managedResources.recover(`session:${sessionId}`, options.takeover);
+        this.rememberBinding(sessionId, opened.binding);
+        await this.poll(sessionId);
+        this.schedulePoll(sessionId);
+        return report;
+    }
+
+    async recover(options: import('../domain/types').RecoveryOptions = {}): Promise<RecoveryReport> {
         const total: RecoveryReport = {
             recoveredTasks: 0, recoveredEffects: 0, expiredAttempts: 0, rebuiltIndexes: 0,
         };
+        if (options.takeover && (this.active || this.activeEffects || this.draining.size || !this.poller.isIdle))
+            throw new Error('Takeover recovery requires an idle Kernel before opening sessions');
+        const restored: Array<{ id: string; binding: ResolvedStorageBinding }> = [];
         for (const session of await this.store.listSessions()) {
             const opened = await this.store.openSession(session.id);
-            this.sessions.set(session.id, opened.binding);
-            mergeReport(total, await this.store.recover(opened.binding));
-            await this.dispatchPendingEffects(opened.binding);
-            this.queueDrain(session.id);
-            this.schedulePoll(session.id);
+            mergeReport(total, await this.store.recover(opened.binding, options));
+            restored.push({ id: session.id, binding: opened.binding });
+        }
+        await this.managedResources.recover('kernel', options.takeover);
+        for (const { id } of restored) await this.managedResources.recover(`session:${id}`, options.takeover);
+        for (const { id, binding } of restored) {
+            this.rememberBinding(id, binding);
+            this.schedulePoll(id);
         }
         await this.relayPendingMessages();
         return total;
@@ -213,6 +310,14 @@ export class Kernel implements KernelRegistration {
         this.queueDrain(sessionId);
     }
 
+    async controlTask(sessionId: string, taskId: string, mode: import('../domain/types').TaskControl['mode'],
+        options: import('../domain/types').TaskControlOptions & { signal?: TaskSignal }): Promise<import('../domain/types').TaskControl> {
+        const control = await this.store.controlTask(await this.binding(sessionId), taskId, mode, options);
+        await this.abortFencedReducers(sessionId);
+        this.notify(sessionId, taskId); this.queueDrain(sessionId);
+        return control;
+    }
+
     async startTask(sessionId: string, taskId: string): Promise<void> {
         await this.store.startTask(await this.binding(sessionId), taskId);
         this.notify(sessionId, taskId);
@@ -234,6 +339,7 @@ export class Kernel implements KernelRegistration {
         const current = await this.store.readTask(binding, taskId);
         const activeEffects = activeEffectIds(current);
         const task = await this.store.cancelTask(binding, taskId, reason);
+        await this.abortFencedReducers(sessionId);
         this.notify(sessionId, taskId);
         this.queueDrain(sessionId);
         await this.cancelTaskEffects(task, activeEffects);
@@ -281,16 +387,22 @@ export class Kernel implements KernelRegistration {
         targetSessionId: string,
         topic: string,
         payload: T,
+        options?: { expiresAt?: number },
     ): Promise<CrossSessionMessage<T>> {
         if (!topic) throw new Error('Cross-session message topic is required');
+        if (options?.expiresAt !== undefined && !Number.isFinite(options.expiresAt)) throw new Error('Invalid message deadline');
         const message: CrossSessionMessage<T> = {
             id: createId('message'), sourceSessionId, targetSessionId, topic, payload,
-            status: 'pending', createdAt: Date.now(),
+            status: 'pending', createdAt: Date.now(), expiresAt: options?.expiresAt,
         };
         const source = await this.binding(sourceSessionId);
         await this.store.createOutboxMessage(source, message);
         try { return await this.relayMessage(source, message) as CrossSessionMessage<T>; }
         catch { return message; }
+    }
+
+    async outbox(sessionId: string): Promise<CrossSessionMessage[]> {
+        return this.store.outbox(await this.binding(sessionId));
     }
 
     async inbox(sessionId: string, after = 0): Promise<CrossSessionMessage[]> {
@@ -424,7 +536,7 @@ export class Kernel implements KernelRegistration {
         for (const session of await this.store.listSessions()) {
             const source = await this.binding(session.id);
             for (const message of await this.store.pendingOutbox(source)) {
-                try { await this.relayMessage(source, message); delivered++; } catch { /* Retry on recovery. */ }
+                try { if ((await this.relayMessage(source, message)).status === 'delivered') delivered++; } catch { /* Retry on recovery. */ }
             }
         }
         return delivered;
@@ -434,36 +546,56 @@ export class Kernel implements KernelRegistration {
         source: ResolvedStorageBinding,
         message: CrossSessionMessage,
     ): Promise<CrossSessionMessage> {
-        const target = await this.binding(message.targetSessionId);
-        await this.store.deliverMessage(target, message);
-        const delivered = await this.store.markMessageDelivered(source, message.id);
+        let receipt: CrossSessionMessage;
+        try {
+            const target = await this.binding(message.targetSessionId);
+            await this.store.deliverMessage(target, message);
+            receipt = await this.store.messageReceipt(target, message.id);
+        } catch (error) {
+            // A missing target may still be created later. The caller can bound retries.
+            if (message.expiresAt !== undefined && message.expiresAt <= Date.now()
+                && error instanceof Error && 'code' in error && error.code === 'SESSION_NOT_FOUND') {
+                receipt = { ...message, status: 'rejected', rejectedAt: Date.now(),
+                    rejection: { code: 'expired', message: 'Message delivery deadline expired' } };
+            } else {
+                await this.store.recordMessageRetry(source, message.id, error);
+                throw error;
+            }
+        }
+        const delivered = await this.store.markMessageDelivered(source, message.id, receipt);
         this.notify(message.targetSessionId);
         this.notify(message.sourceSessionId);
         return delivered;
     }
 
     async setSessionStatus(sessionId: string, status: SessionRecord['status']): Promise<void> {
-        const binding = await this.binding(sessionId);
-        await this.store.setSessionStatus(binding, status);
+        await this.store.setSessionStatus(await this.binding(sessionId), status);
+        await this.abortFencedReducers(sessionId);
         this.notify(sessionId);
-        if (status === 'open') {
-            this.queueDrain(sessionId);
-            this.schedulePoll(sessionId);
-        }
+        if (status === 'open') { this.queueDrain(sessionId); this.schedulePoll(sessionId); }
     }
 
     async closeSession(sessionId: string, cancelRunning: boolean): Promise<void> {
         const binding = await this.binding(sessionId);
-        await this.store.setSessionStatus(binding, 'closing');
+        await this.store.setSessionStatus(binding, 'closing', cancelRunning ? 'cancel' : 'drain');
         if (cancelRunning) {
             const tasks = await this.store.listTasks(binding);
             for (const task of tasks) {
                 if (!isTerminalStatus(task.status)) await this.cancel(sessionId, task.id, 'Session closed');
             }
         }
+        await this.finishSessionClose(sessionId, binding);
+        this.queueDrain(sessionId); this.schedulePoll(sessionId);
+    }
+
+    private async finishSessionClose(sessionId: string, binding: ResolvedStorageBinding): Promise<void> {
+        if ((await this.store.sessionRecord(binding)).status !== 'closing') return;
+        const tasks = await this.store.listTasks(binding);
+        if (tasks.some(t => !isTerminalStatus(t.status) || Object.values(t.effects).some(e => e.cleanupPending))) return;
+        if (!await this.managedResources.canClose(sessionId)) return;
+        if ((await this.store.pendingOutbox(binding)).length) return;
         await this.store.setSessionStatus(binding, 'closed');
         this.stopPoll(sessionId);
-        this.sessions.delete(sessionId);
         await Promise.all([...this.plugins.values()].map(plugin => plugin.onSessionClosed?.(sessionId)));
         this.notify(sessionId);
     }
@@ -476,18 +608,35 @@ export class Kernel implements KernelRegistration {
         return this.storageResolvers.resolve(reference.kind).resolve(reference);
     }
 
+    private rememberBinding(sessionId: string, binding: ResolvedStorageBinding): void {
+        this.storageListeners.get(sessionId)?.();
+        this.sessions.set(sessionId, binding);
+        this.resourcePoller.start(`session:${sessionId}`);
+        let root = pathUtils.normalize(binding.rootPath);
+        const modulePrefix = `/module/${binding.fs.moduleId}/`;
+        if (root.startsWith(modulePrefix)) root = root.slice(modulePrefix.length - 1);
+        this.storageListeners.set(sessionId, binding.fs.on('seq:committed', event => {
+            if (this.disposed || !event.payload.paths.some(path => pathUtils.isUnder(path, root))) return;
+            this.notify(sessionId);
+            this.queueDrain(sessionId);
+            this.resourcePoller.start(`session:${sessionId}`);
+            for (const id of this.sessions.keys()) this.schedulePoll(id);
+        }));
+    }
+
     private async binding(sessionId: string): Promise<ResolvedStorageBinding> {
         const cached = this.sessions.get(sessionId);
         if (cached) return cached;
         const opened = await this.store.openSession(sessionId);
-        this.sessions.set(sessionId, opened.binding);
+        this.rememberBinding(sessionId, opened.binding);
         return opened.binding;
     }
 
     private queueDrain(sessionId: string): void {
-        if (this.disposed || this.draining.has(sessionId)) return;
+        if (this.disposed) return;
+        if (this.draining.has(sessionId)) { this.requestedDrains.add(sessionId); return; }
         this.draining.add(sessionId);
-        queueMicrotask(() => void this.drain(sessionId));
+        queueMicrotask(() => void this.drain(sessionId).catch(error => { if (!this.disposed) this.handlePollError(error); }));
     }
 
     private schedulePoll(sessionId: string): void {
@@ -497,13 +646,64 @@ export class Kernel implements KernelRegistration {
     private stopPoll(sessionId: string): void { this.poller.stop(sessionId); }
 
     private async poll(sessionId: string): Promise<boolean> {
+        await this.managedResources.sweep('kernel');
+        await this.managedResources.sweep(`session:${sessionId}`);
         const binding = await this.binding(sessionId);
-        const status = (await this.store.sessionRecord(binding)).status;
-        if (status === 'open') {
+        const session = await this.store.sessionRecord(binding);
+        const status = session.status;
+        await this.store.sweep(binding);
+        await this.abortFencedReducers(sessionId);
+        for (const message of await this.store.pendingOutbox(binding, Date.now())) {
+            try { await this.relayMessage(binding, message); } catch { /* Persisted outbox is retried by polling. */ }
+        }
+        for (const task of await this.store.listTasks(binding)) {
+            if (task.blockedReason === 'program-unavailable' && this.programs.has(task.program.kind, task.program.version)) await this.store.unblockProgram(binding, task.id);
+            if (session.status === 'closing' && session.closeMode === 'cancel' && !isTerminalStatus(task.status)) {
+                await this.store.cancelTask(binding, task.id, 'Session closed');
+            }
+            const pending = new Set(Object.entries(task.effects).filter(([, e]) => e.cleanupPending).map(([id]) => id));
+            if (pending.size) { try { await this.cancelTaskEffects(task, pending); } catch { /* Cleanup intent remains durable. */ } }
+        }
+        if (status === 'open' || (status === 'closing' && session.closeMode === 'drain')) {
             this.queueDrain(sessionId);
             await this.dispatchPendingEffects(binding);
         }
-        return status !== 'closed' && status !== 'archived';
+        if (status === 'suspending' && !(await this.store.listTasks(binding)).some(task => Object.values(task.effects).some(e => e.status === 'leased' || e.status === 'indeterminate'))) {
+            await this.store.setSessionStatus(binding, 'suspended'); this.notify(sessionId);
+        }
+        if (status === 'closing') await this.finishSessionClose(sessionId, binding);
+        const latest = (await this.store.sessionRecord(binding)).status;
+        return latest !== 'closed' && latest !== 'archived';
+    }
+
+    private async nextWakeDelay(sessionId: string): Promise<number | undefined> {
+        const binding = await this.binding(sessionId), now = Date.now();
+        let at = Infinity;
+        const future = (value?: number) => { if (value !== undefined && value > now) at = Math.min(at, value); };
+        const visit = (wait: import('../domain/types').WaitSpec, task: TaskRecord) => {
+            if (wait.type === 'timer') {
+                if (!task.pendingEvents.some(e => e.type === 'timer-fired' && e.id === wait.id)) at = Math.min(at, wait.at);
+            } else if ('waits' in wait) for (const child of wait.waits) visit(child, task);
+        };
+        for (const task of await this.store.listTasks(binding)) {
+            if (task.status === 'waiting' && task.wait) visit(task.wait, task);
+            if (task.status === 'ready') future(task.readyAt);
+            if (task.status === 'running' && task.currentAttempt) at = Math.min(at, task.currentAttempt.leaseUntil);
+            for (const effect of Object.values(task.effects)) {
+                if (effect.status === 'leased' && effect.currentAttempt) at = Math.min(at, effect.currentAttempt.leaseUntil);
+                if (effect.status === 'pending') future(effect.readyAt);
+                if (effect.cleanupPending) at = Math.min(at, now + 1000);
+            }
+        }
+        for (const message of await this.store.pendingOutbox(binding)) {
+            at = Math.min(at, message.nextAttemptAt ?? now);
+            if (message.expiresAt !== undefined) at = Math.min(at, message.expiresAt);
+        }
+        for (const scope of ['kernel', `session:${sessionId}`]) {
+            const deadline = await this.managedResources.nextDeadline(scope);
+            if (deadline !== undefined) at = Math.min(at, deadline);
+        }
+        return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
     }
 
     private handlePollError(error: unknown): boolean {
@@ -515,38 +715,50 @@ export class Kernel implements KernelRegistration {
     private async drain(sessionId: string): Promise<void> {
         try {
             const binding = await this.binding(sessionId);
-            if ((await this.store.sessionRecord(binding)).status !== 'open') return;
+            const session = await this.store.sessionRecord(binding);
+            if (session.status !== 'open' && !(session.status === 'closing' && session.closeMode === 'drain')) return;
             while (this.active < this.maxConcurrent) {
                 const claim = await this.store.claimReady(binding, this.workerId, this.leaseMs);
                 if (!claim) break;
                 this.active++;
                 void this.execute(binding, claim).finally(() => {
                     this.active--;
-                    this.queueDrain(sessionId);
+                    for (const id of this.sessions.keys()) this.queueDrain(id);
                 });
             }
         } finally {
             this.draining.delete(sessionId);
+            if (this.requestedDrains.delete(sessionId)) this.queueDrain(sessionId);
+        }
+    }
+
+    private async abortFencedReducers(sessionId: string): Promise<void> {
+        for (const [token, active] of this.reducerControllers) {
+            if (active.sessionId !== sessionId) continue;
+            const task = await this.store.readTask(await this.binding(sessionId), active.taskId);
+            if (task.currentAttempt?.leaseToken !== token) active.controller.abort(new Error('Reducer claim invalidated'));
         }
     }
 
     private async execute(binding: ResolvedStorageBinding, claim: TaskClaim): Promise<void> {
-        const stopHeartbeat = this.startLeaseHeartbeat(binding, claim);
+        const controller = new AbortController();
+        this.reducerControllers.set(claim.attempt.leaseToken, { sessionId: claim.task.sessionId, taskId: claim.task.id, controller });
+        const stopHeartbeat = this.startLeaseHeartbeat(binding, claim, controller);
         try {
-            const program = this.programs.resolve(claim.task.program.kind, claim.task.program.version);
-            const decision = await nextDecision(program, claim.task);
-            if (this.disposed) {
-                await this.store.abandonClaim(binding, claim.task.id);
-                return;
+            if (!this.programs.has(claim.task.program.kind, claim.task.program.version)) {
+                await this.store.blockUnavailableProgram(binding, claim); return;
             }
+            const program = this.programs.resolve(claim.task.program.kind, claim.task.program.version);
+            const interrupted = new Promise<never>((_, reject) => {
+                controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+            });
+            const decision = await Promise.race([nextDecision(program, claim.task), interrupted]);
+            if (this.disposed) return;
             const next = await this.applyDecision(binding, claim, decision);
             this.notify(next.sessionId, next.id);
             if (next.status === 'ready') this.queueDrain(next.sessionId);
         } catch (error) {
-            if (this.disposed) {
-                await this.store.abandonClaim(binding, claim.task.id).catch(() => {});
-                return;
-            }
+            if (this.disposed || controller.signal.aborted) return;
             const failed = failureDecision(claim.task.state, error);
             try {
                 const next = await this.applyDecision(binding, claim, failed);
@@ -555,15 +767,18 @@ export class Kernel implements KernelRegistration {
             this.notify(claim.task.sessionId, claim.task.id);
         } finally {
             stopHeartbeat();
+            this.reducerControllers.delete(claim.attempt.leaseToken);
         }
     }
 
-    private startLeaseHeartbeat(binding: ResolvedStorageBinding, claim: TaskClaim): () => void {
+    private startLeaseHeartbeat(binding: ResolvedStorageBinding, claim: TaskClaim, controller: AbortController): () => void {
         const heartbeat = new LeaseHeartbeat({
             intervalMs: Math.max(1, Math.floor(this.leaseMs / 3)),
-            renew: () => this.disposed
-                ? Promise.resolve(false)
-                : this.store.renewLease(binding, claim, this.leaseMs),
+            renew: async () => {
+                const valid = !this.disposed && await this.store.renewLease(binding, claim, this.leaseMs);
+                if (!valid) controller.abort(new Error('Reducer lease lost'));
+                return valid;
+            },
             onError: error => console.error('Kernel lease heartbeat failed', error),
         });
         const stop = (): void => {
@@ -582,12 +797,13 @@ export class Kernel implements KernelRegistration {
     ): Promise<TaskRecord> {
         validateDecision(decision);
         const retrying = shouldRetry(claim.task, decision);
-        const pendingEvents = claim.task.state === undefined || retrying
+        const pendingEvents = !(claim.task.initialized ?? claim.task.state !== undefined) || retrying
             ? claim.task.pendingEvents
             : claim.task.pendingEvents.slice(1);
         const state = retrying ? claim.task.state : decision.state;
-        let next: TaskRecord = { ...claim.task, state, pendingEvents };
-        const actions = decision.actions ?? [];
+        let next: TaskRecord = { ...claim.task, state, pendingEvents,
+            initialized: retrying ? claim.task.initialized : true };
+        const actions = decision.next.type === 'fail' ? [] : decision.actions ?? [];
         for (const action of actions) {
             if (action.type === 'request-interaction') next = addInteraction(next, action.interaction);
         }
@@ -598,18 +814,20 @@ export class Kernel implements KernelRegistration {
         for (const effect of effects) next = addEffect(next, effect);
         next = transition(next, decision);
         const sideEffects = decisionSideEffects(actions, spawns);
+        sideEffects.resources = await Promise.all(actions.filter(action => action.type === 'resource')
+            .map(action => this.managedResources.prepare({ sessionId: claim.task.sessionId, taskId: claim.task.id }, action.command)));
         if (retrying) sideEffects.attemptOutcome = 'failed';
         const eventType = retrying ? 'task.retry.scheduled' : `task.${next.status}`;
         const payload = retrying ? { error: next.lastError, readyAt: next.readyAt } : undefined;
         const committed = await this.store.commitTask(binding, claim, next, eventType, payload, sideEffects);
-        for (const effect of effects) void this.dispatchEffect(binding, committed, effect.id);
+        for (const effect of effects) void this.dispatchEffect(binding, committed, effect.id).catch(error => this.handlePollError(error));
         if (decision.next.type === 'continue' || spawns.length > 0) this.queueDrain(next.sessionId);
         return committed;
     }
 
     private async dispatchPendingEffects(binding: ResolvedStorageBinding): Promise<void> {
         for (const pending of await this.store.pendingEffects(binding)) {
-            void this.dispatchEffect(binding, pending.task, pending.effectId);
+            void this.dispatchEffect(binding, pending.task, pending.effectId).catch(error => this.handlePollError(error));
         }
     }
 
@@ -618,9 +836,14 @@ export class Kernel implements KernelRegistration {
         task: TaskRecord,
         effectId: string,
     ): Promise<void> {
-        const claim = await this.store.claimEffect(binding, task.id, effectId, this.workerId, this.leaseMs);
-        if (!claim) return;
-        await this.executeEffect(binding, task, claim);
+        const requested = task.effects[effectId]?.request;
+        if (!requested || !this.effects.has(requested.kind, requested.version)) return;
+        if (this.disposed || this.activeEffects >= this.maxConcurrentEffects) return;
+        this.activeEffects++;
+        try {
+            const claim = await this.store.claimEffect(binding, task.id, effectId, this.workerId, this.leaseMs);
+            if (claim) await this.executeEffect(binding, task, claim);
+        } finally { this.activeEffects--; for (const id of this.sessions.keys()) this.schedulePoll(id); }
     }
 
     private async executeEffect(
@@ -632,7 +855,7 @@ export class Kernel implements KernelRegistration {
         const controller = new AbortController();
         const controllerKey = effectControllerKey(task.sessionId, task.id, effect.id);
         this.effectControllers.set(controllerKey, controller);
-        const stopHeartbeat = this.startEffectHeartbeat(binding, claim);
+        const stopHeartbeat = this.startEffectHeartbeat(binding, claim, controller);
         try {
             const grants: import('../domain/types').AuthorizedEffectGrant[] = [];
             for (const grant of effect.grants ?? []) {
@@ -643,7 +866,7 @@ export class Kernel implements KernelRegistration {
             }
             const adapter = this.effects.resolve(effect.kind, effect.version);
             const context = {
-                sessionId: task.sessionId, taskId: task.id, effectId: effect.id,
+                sessionId: task.sessionId, taskId: task.id, effectId: effect.id, idempotencyKey: effect.idempotencyKey,
                 abortSignal: controller.signal, grants,
                 sessionState: {
                     get: <T extends import('../domain/types').JsonValue>(key: string) =>
@@ -652,15 +875,15 @@ export class Kernel implements KernelRegistration {
                         key: string, value: T, expectedVersion?: number | null,
                     ) => this.store.setShared(binding, key, value, {
                         taskId: task.id, expectedVersion,
-                    }),
+                    }, claim),
                 },
                 emit: async (event: { type: string; payload?: unknown }): Promise<void> => {
                     if (this.disposed) return;
-                    await this.store.appendEvent(binding, task.sessionId, task.id, event.type, event.payload);
+                    await this.store.appendEvent(binding, task.sessionId, task.id, event.type, event.payload, claim);
                     this.notify(task.sessionId, task.id);
                 },
                 chargeBudget: (handleId: string, dimension: string, amount: number) =>
-                    this.chargeBudget(task.sessionId, handleId, dimension, amount),
+                    this.store.chargeBudget(binding, handleId, dimension, amount, claim),
             };
             const result = await executeEffectWithDeadline(adapter, effect, claim, context, controller);
             if ('result' in result) assertDurableValue(result.result, 'Effect result');
@@ -671,7 +894,8 @@ export class Kernel implements KernelRegistration {
             if (this.disposed) return;
             try {
                 await this.store.completeEffect(binding, task.id, effect.id,
-                    claim.effect.currentAttempt!.leaseToken, effectFailure(error));
+                    claim.effect.currentAttempt!.leaseToken, { ...effectFailure(error),
+                        retryable: this.effects.resolve(effect.kind, effect.version).recoveryPolicy === 'idempotent-retry' });
             } catch { /* Effect lease was recovered by another worker. */ }
         } finally {
             stopHeartbeat();
@@ -685,7 +909,10 @@ export class Kernel implements KernelRegistration {
         const effects = Object.entries(task.effects)
             .filter(([id, effect]) => active.has(id) && effect.status === 'cancelled')
             .map(([, effect]) => effect);
-        const results = await Promise.allSettled(effects.map(effect => this.cancelEffect(task, effect.request)));
+        const results = await Promise.allSettled(effects.map(async effect => {
+            await this.cancelEffect(task, effect.request);
+            await this.store.confirmEffectCleanup(await this.binding(task.sessionId), task.id, effect.request.id!);
+        }));
         const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
         if (errors.length > 0) throw new AggregateError(errors, `Failed to cancel effects for task ${task.id}`);
     }
@@ -696,7 +923,10 @@ export class Kernel implements KernelRegistration {
         const controller = this.effectControllers.get(key);
         controller?.abort();
         const adapter = this.effects.resolve(effect.kind, effect.version);
-        if (!adapter.cancel) return;
+        if (!adapter.cancel) {
+            if ((task.effects[effect.id]?.attemptCount ?? 0) > 0) throw new Error(`Effect cleanup requires adapter confirmation: ${effect.id}`);
+            return;
+        }
         await adapter.cancel(effect.request, {
             sessionId: task.sessionId, taskId: task.id, effectId: effect.id,
             abortSignal: controller?.signal ?? AbortSignal.abort(),
@@ -706,12 +936,14 @@ export class Kernel implements KernelRegistration {
         });
     }
 
-    private startEffectHeartbeat(binding: ResolvedStorageBinding, claim: EffectClaim): () => void {
+    private startEffectHeartbeat(binding: ResolvedStorageBinding, claim: EffectClaim, controller: AbortController): () => void {
         const heartbeat = new LeaseHeartbeat({
             intervalMs: Math.max(1, Math.floor(this.leaseMs / 3)),
-            renew: () => this.disposed
-                ? Promise.resolve(false)
-                : this.store.renewEffectLease(binding, claim, this.leaseMs),
+            renew: async () => {
+                const valid = !this.disposed && await this.store.renewEffectLease(binding, claim, this.leaseMs);
+                if (!valid) controller.abort(new Error('Effect lease lost'));
+                return valid;
+            },
             onError: error => console.error('Kernel effect heartbeat failed', error),
         });
         const stop = (): void => { heartbeat.stop(); this.heartbeats.delete(heartbeat); };
