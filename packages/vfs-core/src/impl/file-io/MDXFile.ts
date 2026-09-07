@@ -10,7 +10,7 @@
  *
  * read() returns MDX text directly (no transformation over readRaw).
  */
-import type { IModuleFS, IMDXFile } from '../../protocol';
+import type { IFileSystem, IMDXFile } from '../../protocol';
 import { guessMimeType } from '../../utils';
 import { FileHandle } from './File';
 
@@ -20,7 +20,7 @@ export class MDXFileHandle extends FileHandle implements IMDXFile {
     /** Blob URLs keyed by asset name — reused across renders, revoked on destroy(). */
     private readonly _blobUrls = new Map<string, string>();
 
-    constructor(fs: IModuleFS, nodeId: string) {
+    constructor(fs: IFileSystem, nodeId: string) {
         super(fs, nodeId);
     }
 
@@ -86,6 +86,6 @@ export class MDXFileHandle extends FileHandle implements IMDXFile {
     }
 }
 
-export function createMDXFile(fs: IModuleFS, nodeId: string): IMDXFile {
+export function createMDXFile(fs: IFileSystem, nodeId: string): IMDXFile {
     return new MDXFileHandle(fs, nodeId);
 }

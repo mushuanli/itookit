@@ -166,9 +166,9 @@ export interface ListOptions extends VisibilityOptions {
 export interface TreeWalkOptions extends VisibilityOptions {
     /** 遍历顺序 @default 'depth-first' */
     order?: 'breadth-first' | 'depth-first';
-    /** 最大深度，-1 无限制 @default -1 */
+    /** 最大深度，rootPath 自身深度为 0；-1 无限制 @default -1 */
     maxDepth?: number;
-    /** 起始目录 @default 模块根目录 */
+    /** 起始目录（包含该节点） @default 视图根目录 */
     rootPath?: string;
     /** 类型过滤 */
     typeFilter?: FSNodeType | FSNodeType[];

@@ -2,7 +2,7 @@
  * @file packages/vfs-core/src/impl/capabilities/EnginePort.ts
  * @desc 能力类依赖的最小引擎端口（状态 + 路径 + 事件）。
  *
- * 由 ModuleContext 实现。能力类只依赖此接口，可单测、可替换。
+ * 由 DirectoryContext 实现。能力类只依赖此接口，可单测、可替换。
  */
 
 import type {
@@ -14,7 +14,7 @@ import type {
 import type { VFSEngine } from '../engine/vfs-engine';
 
 export interface EnginePort {
-    readonly moduleId: string;
+    readonly viewId: string;
     readonly engine: VFSEngine;
     readonly backend: IStorageBackend;
     toRealPath(path: string): string;

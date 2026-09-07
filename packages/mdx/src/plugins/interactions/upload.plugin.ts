@@ -132,7 +132,7 @@ export class UploadPlugin implements MDxPlugin {
      * 核心处理逻辑：校验 -> 上传 -> 替换 Markdown
      */
     private async processFiles(fileList: FileList | File[], view: EditorView): Promise<void> {
-        const engine = this.context.getModuleFS?.();
+        const engine = this.context.getFileSystem?.();
         // ✅ 获取 ownerNodeId (由 EditorOptions 传入，或默认为 nodeId)
         const ownerNodeId = this.context.getOwnerNodeId?.();
 
@@ -181,7 +181,7 @@ export class UploadPlugin implements MDxPlugin {
                 // 2.3 ✅ 调用 Engine 创建资产
                 // 注意：VFSCore 会根据 arrayBuffer 自动标记 isBinary: true
                 // MiddlewareRegistry 会根据此标记跳过 PlainTextMiddleware
-                // v3.3: IModuleFS.meta.assets.putAsset replaces deprecated IFSEngine.createAsset
+                // v3.3: IFileSystem.meta.assets.putAsset replaces deprecated IFSEngine.createAsset
                 const assetNode = await engine.meta.assets.putAsset(ownerNodeId, safeName, arrayBuffer);
 
                 // 2.4 生成 @asset/ 路径 Markdown

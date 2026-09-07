@@ -1,3 +1,4 @@
+import { editorResourceId } from '@itookit/ui-common';
 // @file app-settings/factories/settingsFactory.ts
 import type {IConnectionService} from '@itookit/common';
 import type { EditorOptions } from '@itookit/ui-common';
@@ -49,7 +50,7 @@ export const createSettingsFactory = (
     llmUiEditors: LLMUIEditors,
 ): EditorFactory => {
     return async (container: HTMLElement, options: EditorOptions) => {
-        const nodeId = resolveSettingsSlug(options.nodeId || '');
+        const nodeId = resolveSettingsSlug(editorResourceId(options) || '');
         await settingsService.init();
 
         let editor: IEditor | null = null;

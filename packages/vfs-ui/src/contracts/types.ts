@@ -35,7 +35,7 @@ export interface VFSNodeUI {
     lastModified: string;
     parentPath: string | null;
     path: string;
-    moduleId?: string;
+    viewId?: string;
     custom: Record<string, any> & Partial<FileMetadata>;
   };
   content?: {

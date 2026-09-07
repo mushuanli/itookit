@@ -1,7 +1,7 @@
+import { workspaceFiles, writeWorkspaceFile, type WorkspaceFileSource } from './workspace-files';
 // @file: app-settings/services/SyncService.ts
 
-import { CONFIG_MODULE } from '@itookit/vfs-core';
-import type { IVFSManager } from '@itookit/vfs-core';
+import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import type { SyncConflict } from '../types/sync';
 import {
   AppSyncSettings,
@@ -38,7 +38,9 @@ const SYNC_CONFIG_PATH = '/sync_config.json';
  * 同步服务 - UI 层与 SyncPlugin 的桥接层
  */
 export class SyncService {
+  private configFiles!: IFileSystem;
   private vfs: IVFSManager | null = null;
+  private workspaces: readonly WorkspaceFileSource[] = [];
   private plugin: ISyncPlugin | null = null;
 
   // 使用应用层配置类型
@@ -65,8 +67,10 @@ export class SyncService {
   /**
    * 初始化服务
    */
-  async init(vfs: IVFSManager): Promise<void> {
+  async init(vfs: IVFSManager, workspaces: readonly WorkspaceFileSource[]): Promise<void> {
+    this.workspaces = workspaces;
     this.vfs = vfs;
+    this.configFiles = await vfs.openFileSystem('/etc');
     // SyncPlugin not yet available in vfslib — always null until implemented
     this.plugin = null;
 
@@ -124,7 +128,7 @@ export class SyncService {
     if (!this.vfs) return;
 
     try {
-      const content = await this.vfs.read(CONFIG_MODULE, SYNC_CONFIG_PATH);
+      const content = await this.configFiles.driver.readContent(SYNC_CONFIG_PATH);
       const json = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
       this.settings = JSON.parse(json);
       if (this.plugin && this.settings) {
@@ -163,7 +167,7 @@ export class SyncService {
 
     // 1. 持久化到 VFS
     // vfs.write has upsert semantics (creates file and intermediate dirs if needed)
-    await this.vfs.write(CONFIG_MODULE, SYNC_CONFIG_PATH, JSON.stringify(settings, null, 2));
+    await writeWorkspaceFile(this.configFiles, SYNC_CONFIG_PATH, JSON.stringify(settings, null, 2));
 
     // 2. ✅ 使用 applyConfigToPlugin 代替直接调用
     await this.applyConfigToPlugin(settings);
@@ -303,7 +307,8 @@ export class SyncService {
     if (!this.vfs) return;
 
     // 监听 VFS 事件总线中的同步相关事件
-    const unsub = this.vfs.onAny((type: string, event: any) => {
+    const subscriptions = this.workspaces.map(source => source.fs.onAny?.((event) => {
+      const type = event.type;
       // 处理自定义同步事件（Plugin 通过 EventBus 发送）
       const typeStr = String(type);
 
@@ -311,8 +316,8 @@ export class SyncService {
         this.handlePluginEvent(typeStr, event);
       }
 
-    });
-    this.unsubscribers.push(unsub);
+    }));
+    this.unsubscribers.push(...subscriptions.filter((off): off is () => void => Boolean(off)));
   }
 
   // ==================== 同步操作 ====================
@@ -391,10 +396,10 @@ export class SyncService {
   private async indexLocalFiles(): Promise<FileMeta[]> {
     if (!this.vfs) return [];
     const files: FileMeta[] = [];
-    const modules = this.vfs.getAllModules().filter(m => !m.isSystem);
+    const modules = this.workspaces.filter(source => source.syncEnabled);
 
     for (const mod of modules) {
-      const engine = this.vfs.getEngine(mod.name);
+      const engine = workspaceFiles(this.workspaces, mod.name);
       try {
         await engine.driver.walkTree?.(async (node) => {
           if (node.type !== 'file') return;
@@ -424,7 +429,7 @@ export class SyncService {
     if (!this.vfs) return;
     try {
       const parts = systemPath.split('/').filter(Boolean);
-      const content = await this.vfs.read(parts[0], '/' + parts.slice(1).join('/'));
+      const content = await workspaceFiles(this.workspaces, parts[0]).driver.readContent('/' + parts.slice(1).join('/'));
       const formData = new FormData();
       formData.append(systemPath, new Blob([this.toArrayBuffer(content)]));
       await fetch(`${serverUrl}/api/sync/upload`, { method: 'POST', headers, body: formData });
@@ -450,17 +455,17 @@ export class SyncService {
       const parts = meta.path.split('/').filter(Boolean);
       const moduleName = parts[0];
       const innerParts = parts.slice(1);
-      if (!this.vfs.getModule(moduleName)) return;
+      if (!this.workspaces.some(source => source.name === moduleName && source.syncEnabled)) throw new Error('Sync source unavailable');
 
       // Asset file: second-to-last segment is an assetdir (starts with '_')
       if (innerParts.length >= 2 && innerParts[innerParts.length - 2].startsWith('_')) {
         const assetName = innerParts[innerParts.length - 1];
         const ownerName = innerParts[innerParts.length - 2].slice(1); // strip '_'
         const ownerPath = '/' + [...innerParts.slice(0, -2), ownerName].join('/');
-        const engine = this.vfs.getEngine(moduleName);
+        const engine = workspaceFiles(this.workspaces, moduleName);
         await engine.meta.assets?.putAsset(ownerPath, assetName, buf);
       } else {
-        await this.vfs.write(moduleName, '/' + innerParts.join('/'), buf);
+        await writeWorkspaceFile(workspaceFiles(this.workspaces, moduleName), '/' + innerParts.join('/'), buf);
       }
     } catch (e) {
       this.log('warn', `下载失败: ${meta.path}`);
@@ -658,7 +663,7 @@ export class SyncService {
    */
   private mapToPluginConfig(uiConfig: AppSyncSettings): any {
     return {
-      moduleId: 'root',
+      viewId: 'root',
       peerId: this.getOrCreatePeerId(),
       serverUrl: uiConfig.serverUrl,
       auth: {

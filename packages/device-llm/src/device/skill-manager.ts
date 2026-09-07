@@ -3,7 +3,7 @@
 // SkillManager — SkillDefinition CRUD, HTTP/Shell/MCP invocation.
 
 import type { LLMSkill } from '@itookit/common';
-import type { IVFSManager, IModuleFS } from '@itookit/vfs-core';
+import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import yaml from 'js-yaml';
 import { VFSHelpers } from './vfs-helpers';
 import type { MCPManager } from './mcp-manager';
@@ -38,7 +38,7 @@ export class SkillManager {
 
     // ─── Mutations ─────────────────────────────────────────────────────────
 
-    async saveSkill(skill: LLMSkill, systemFS?: IModuleFS): Promise<void> {
+    async saveSkill(skill: LLMSkill, systemFS?: IFileSystem): Promise<void> {
         skill = { ...skill, modifiedAt: Date.now() };
         await this.writeSkillToDisk(skill, systemFS);
         const idx = this._skills.findIndex(s => s.id === skill.id);
@@ -50,7 +50,7 @@ export class SkillManager {
         this.onChanged();
     }
 
-    async deleteSkill(id: string, systemFS?: IModuleFS): Promise<void> {
+    async deleteSkill(id: string, systemFS?: IFileSystem): Promise<void> {
         await this.deleteSkillFromDisk(id, systemFS);
         this._skills = this._skills.filter(s => s.id !== id);
         await this.vfs.removeDeviceNode(`/dev/llm/skills/${id}`);
@@ -93,8 +93,8 @@ export class SkillManager {
         return raw;
     }
 
-    private async writeSkillToDisk(skill: LLMSkill, systemFS?: IModuleFS): Promise<void> {
-        const fs = systemFS ?? this.helpers.getEngine();
+    private async writeSkillToDisk(skill: LLMSkill, systemFS?: IFileSystem): Promise<void> {
+        const fs = systemFS ?? this.helpers.getFileSystem();
         await this.helpers.engineUpsert(
             `${SKILLS_DIR}/${skill.id}.yaml`,
             yaml.dump(skill, { lineWidth: -1, noRefs: true }),
@@ -105,8 +105,8 @@ export class SkillManager {
         if (oldId) await fs.driver.delete([oldId]);
     }
 
-    private async deleteSkillFromDisk(id: string, systemFS?: IModuleFS): Promise<void> {
-        const fs = systemFS ?? this.helpers.getEngine();
+    private async deleteSkillFromDisk(id: string, systemFS?: IFileSystem): Promise<void> {
+        const fs = systemFS ?? this.helpers.getFileSystem();
         for (const ext of ['.yaml', '.json']) {
             const nodeId = await fs.driver.resolvePath(`${SKILLS_DIR}/${id}${ext}`);
             if (nodeId) { await fs.driver.delete([nodeId]); break; }

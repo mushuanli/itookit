@@ -19,6 +19,27 @@ interface Snapshot {
 }
 
 export class FakeSidecarDb implements ISidecarDb {
+    async assertPathDataVacant(path: string): Promise<void> {
+        const under = (p: string) => p === path || p.startsWith(path + '/');
+        if ([...this.meta.keys()].some(under) || [...this.records.keys()].some(key => under(key.split('\u0000')[0]))) throw new Error('Destination path data exists');
+    }
+
+    async movePathData(from: string, to: string): Promise<void> {
+        await this.assertPathDataVacant(to);
+        const under = (p: string) => p === from || p.startsWith(from + '/');
+        for (const [path, value] of [...this.meta]) if (under(path)) {
+            const next = to + path.slice(from.length);
+            this.meta.set(next, { ...value, path: next }); this.meta.delete(path);
+        }
+        for (const [path, value] of [...this.tags]) if (under(path)) {
+            this.tags.set(to + path.slice(from.length), value); this.tags.delete(path);
+        }
+        for (const [key, value] of [...this.records]) {
+            const path = key.split('\u0000')[0];
+            if (under(path)) { this.records.set(to + key.slice(from.length), value); this.records.delete(key); }
+        }
+    }
+
     private meta: MetaMap = new Map();
     private tags: TagMap = new Map();
     private records: RecordMap = new Map();

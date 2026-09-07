@@ -4,7 +4,7 @@ import {
     Kernel,
     type EffectAdapter,
 } from '@itookit/durable-kernel';
-import { createVFS, MemoryBackend, type IModuleFS, type IVFSManager } from '@itookit/vfs-core';
+import { createVFS, MemoryBackend, type IFileSystem, type IVFSManager } from '@itookit/vfs-core';
 import { DurableAgentProgram } from '@itookit/llm-tasks';
 import { createBuiltinDagPluginRegistry } from '../src/flow/builtin-plugins';
 import { DurableFlowExecutor, upstreamOf } from '../src/flow/executor';
@@ -12,14 +12,12 @@ import { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from '../src
 
 describe('DurableFlowExecutor', () => {
     let manager: IVFSManager;
-    let fs: IModuleFS;
+    let fs: IFileSystem;
     let kernel: Kernel;
 
     beforeEach(async () => {
-        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(), modules: [{ name: 'test' }] }));
-        await manager.mount('test');
-        fs = manager.getEngine('test');
-        await fs.init();
+        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
+        fs = await manager.openFileSystem('/data/test');
         kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
         kernel.registerStorageResolver({
             kind: 'test',
@@ -371,14 +369,12 @@ describe('upstreamOf', () => {
 
 describe('conditional loop exit', () => {
     let manager: IVFSManager;
-    let fs: IModuleFS;
+    let fs: IFileSystem;
     let kernel: Kernel;
 
     async function setup(score: number): Promise<void> {
-        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(), modules: [{ name: 'test' }] }));
-        await manager.mount('test');
-        fs = manager.getEngine('test');
-        await fs.init();
+        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
+        fs = await manager.openFileSystem('/data/test');
         kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
         kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
         registerPrograms(kernel);

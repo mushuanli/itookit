@@ -3,7 +3,7 @@
 import { guessMimeType } from '@itookit/vfs-core';
 import type { Attachment } from '@itookit/common';
 import { ChatAttachment } from '../core/types';
-import { IChatEngine } from '../persistence/types';
+import { ISessionRepository } from '../persistence/types';
 import { MarkdownAnalyzer } from './MarkdownAnalyzer';
 
 /**
@@ -13,7 +13,7 @@ import { MarkdownAnalyzer } from './MarkdownAnalyzer';
 export class AttachmentProcessor {
     private markdownAnalyzer = new MarkdownAnalyzer();
 
-    constructor(private engine: IChatEngine) { }
+    constructor(private engine: ISessionRepository) { }
 
     /**
      * 从消息文本和输入文件中解析所有附件

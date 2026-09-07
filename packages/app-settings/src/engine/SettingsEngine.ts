@@ -1,20 +1,20 @@
 /**
  * @file app-settings/engine/SettingsEngine.ts
- * @desc Custom IModuleFS implementation — maps settings pages to virtual file nodes.
+ * @desc Custom IFileSystem implementation — maps settings pages to virtual file nodes.
  *       Read-only flat list; write operations throw "not supported".
  *
- * v3.3: Refactored from IFSEngine → IModuleFS.
+ * v3.3: Refactored from IFSEngine → IFileSystem.
  *       Settings pages appear as file-type FSNode entries in a flat directory.
  */
 import type {
-    IModuleFS,
+    IFileSystem,
     IFSDriver,
     IFSMetaDriver,
     FSNode,
     FSFileNode,
     FSSearchResult,
     FSCapabilities,
-    FSModuleStats,
+    FileSystemStats,
     FileContent,
     ReadOptions,
     ListOptions,
@@ -56,7 +56,7 @@ function toFSNode(id: string, config: (typeof SETTINGS_PAGES)[string]): FSFileNo
         createdAt: now,
         modifiedAt: now,
         version: 0,
-        moduleId: 'settings_ui',
+        viewId: 'settings_ui',
         tags: [],
         metadata: { title: config.name, description: '' },
     };
@@ -99,8 +99,10 @@ const noopAssets: IAssetOperations = {
 // SettingsEngine
 // ═══════════════════════════════════════════════════════════════
 
-export class SettingsEngine implements IModuleFS {
-    readonly moduleId = 'settings_root';
+export class SettingsEngine implements IFileSystem {
+    readonly revision = 0;
+    async capabilitiesAt(_path: string) { return this.capabilities; }
+    readonly viewId = 'settings_root';
     readonly capabilities: FSCapabilities = READONLY_CAPS;
     readonly driver: IFSDriver;
     readonly meta: IFSMetaDriver = {
@@ -136,7 +138,7 @@ export class SettingsEngine implements IModuleFS {
 // ═══════════════════════════════════════════════════════════════
 
 class SettingsDriver implements IFSDriver {
-    readonly moduleId = 'settings_root';
+    readonly viewId = 'settings_root';
     readonly capabilities: FSCapabilities = READONLY_CAPS;
 
     constructor(private readonly engine: SettingsEngine) {}
@@ -194,7 +196,7 @@ class SettingsDriver implements IFSDriver {
         return { nodes: nodes, total: nodes.length, hasMore: false };
     }
 
-    async getStats(): Promise<FSModuleStats> {
+    async getStats(): Promise<FileSystemStats> {
         const count = Object.keys(SETTINGS_PAGES).length;
         return { fileCount: count, directoryCount: 1, totalSize: 0, lastModifiedAt: Date.now() };
     }
@@ -223,12 +225,12 @@ class SettingsDriver implements IFSDriver {
     }
 
     // ── Links (unsupported) ───────────────────────────
-    async symlink(): Promise<FSNode> { throw new FSCapabilityError('symlinks', this.moduleId); }
-    async readlink(): Promise<string> { throw new FSCapabilityError('symlinks', this.moduleId); }
-    async hardlink(): Promise<FSNode> { throw new FSCapabilityError('hardlinks', this.moduleId); }
+    async symlink(): Promise<FSNode> { throw new FSCapabilityError('symlinks', this.viewId); }
+    async readlink(): Promise<string> { throw new FSCapabilityError('symlinks', this.viewId); }
+    async hardlink(): Promise<FSNode> { throw new FSCapabilityError('hardlinks', this.viewId); }
 
     // ── Transaction (unsupported) ────────────────────
     async transaction<T>(): Promise<T> {
-        throw new FSCapabilityError('transaction', this.moduleId);
+        throw new FSCapabilityError('transaction', this.viewId);
     }
 }

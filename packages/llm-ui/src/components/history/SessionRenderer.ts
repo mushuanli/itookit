@@ -5,16 +5,15 @@ import { MDxController } from '../mdx/MDxController';
 import { NodeRenderer } from './NodeRenderer';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { LayoutTemplates } from '../templates/LayoutTemplates';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import { t } from '@itookit/common';
 import { TimerManager } from '../common';
 import { getPreviewText } from '../../utils/textUtils';
 import { IconResolver } from '../../utils/iconResolver';
 
 export interface RendererContext {
-    nodeId?: string;
-    ownerNodeId?: string;
-    moduleFS?: IModuleFS;
+    fs?: IFileSystem;
+    assets?: IFileSystem;
 }
 
 /**
@@ -46,14 +45,7 @@ export class SessionRenderer {
 
     get editors(): Map<string, MDxController> { return this.editorMap; }
 
-    updateNodeId(newNodeId: string): void {
-        const oldNodeId = this.context.nodeId;
-        const ownerFollowsNode = !this.context.ownerNodeId
-            || this.context.ownerNodeId === oldNodeId;
-        this.context.nodeId = newNodeId;
-        if (ownerFollowsNode) this.context.ownerNodeId = newNodeId;
-        this.editorMap.forEach(editor => editor.updateNodeId(newNodeId));
-    }
+
 
     getNode(nodeId: string): HTMLElement | null {
         return this.nodeMap.get(nodeId) || null;
@@ -176,9 +168,10 @@ export class SessionRenderer {
                 const previewEl = wrapper.querySelector('.llm-ui-header-preview');
                 if (previewEl) previewEl.textContent = getPreviewText(text);
             },
-            nodeId: this.context.nodeId,
-            ownerNodeId: this.context.ownerNodeId,
-            moduleFS: this.context.moduleFS,
+
+
+            fs: this.context.fs,
+            assets: this.context.assets,
         });
         this.editorMap.set(group.id, controller);
     }
@@ -200,9 +193,10 @@ export class SessionRenderer {
                     this.onContentChange?.(effectiveId, text, 'node');
                 }
             },
-            nodeId: this.context.nodeId,
-            ownerNodeId: this.context.ownerNodeId,
-            moduleFS: this.context.moduleFS,
+
+
+            fs: this.context.fs,
+            assets: this.context.assets,
         });
         this.editorMap.set(node.id, controller);
 

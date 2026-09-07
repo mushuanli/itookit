@@ -1,38 +1,33 @@
 // @file: llm-ui/services/AssetService.ts
 
-import { IChatEngine } from '@itookit/llm-session';
+import { FSError, type IFileSystem } from '@itookit/vfs-core';
 
 /**
  * 资源管理服务
  * 职责：附件的上传、获取、管理
  */
 export class AssetService {
-    constructor(private engine: IChatEngine) { }
+    constructor(private readonly assets?: IFileSystem) { }
 
     /**
      * 创建资源
      */
-    async createAsset(ownerNodeId: string, fileName: string, data: ArrayBuffer): Promise<void> {
-        await this.engine.createAsset(ownerNodeId, fileName, data);
-    }
-
-    /**
-     * 获取资源目录 ID
-     */
-    async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
-        return await this.engine.getAssetDirectoryId(ownerNodeId);
+    async createAsset(fileName: string, data: ArrayBuffer): Promise<void> {
+        if (!this.assets) throw new Error('Session attachments unavailable');
+        if (!fileName || /[\/\\\0]/.test(fileName) || fileName === '.' || fileName === '..') throw new FSError('EINVAL', 'Invalid attachment name');
+        await this.assets.driver.createFile({ name: fileName, parentPath: '/', content: data, overwrite: true });
     }
 
     /**
      * 批量上传文件并返回 Markdown 引用
      */
-    async uploadFiles(ownerNodeId: string, files: File[]): Promise<string[]> {
+    async uploadFiles(files: File[]): Promise<string[]> {
         const refs: string[] = [];
 
         for (const file of files) {
             try {
                 const arrayBuffer = await file.arrayBuffer();
-                await this.createAsset(ownerNodeId, file.name, arrayBuffer);
+                await this.createAsset(file.name, arrayBuffer);
 
 
                 const isImage = file.type.startsWith('image/');

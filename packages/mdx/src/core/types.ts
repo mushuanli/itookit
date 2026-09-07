@@ -10,7 +10,7 @@
 
 // === Re-export 外部依赖类型（隔离层） ===
 import type {
-    IModuleFS,
+    IFileSystem,
 } from '@itookit/vfs-core';
 
 
@@ -86,7 +86,8 @@ export interface PluginContext {
     getScopedStore(): ScopedPersistenceStore;
 
     // 引擎访问
-    getModuleFS?(): IModuleFS | null;
+    getFileSystem?(): IFileSystem | null;
+    getAssetFileSystem?(): IFileSystem | null;
     getCurrentNodeId(): string | null;
     getOwnerNodeId?(): string | null;
 

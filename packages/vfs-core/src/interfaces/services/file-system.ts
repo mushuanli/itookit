@@ -1,0 +1,31 @@
+import type { FSCapabilities } from '../core/types';
+import type { FSEventEmitter } from '../core/events';
+import type { IFSDriver } from './fs-driver';
+import type { IFSMetaDriver } from './fs-meta-driver';
+import type { IFile } from '../IFile';
+
+/** File operations without module identity or access to a global manager. */
+export type IFileSystemDriver = IFSDriver;
+
+/** A file consumer owns neither the backing store nor the mount table. */
+export interface IFileSystem extends FSEventEmitter {
+    readonly viewId: string;
+    readonly revision: number;
+    /** Conservative capabilities; use capabilitiesAt for heterogeneous views. */
+    readonly capabilities: FSCapabilities;
+    readonly driver: IFileSystemDriver;
+    readonly meta: IFSMetaDriver;
+    openFile(path: string): IFile;
+    capabilitiesAt(path: string): Promise<FSCapabilities>;
+}
+
+export interface FileSystemContext {
+    readonly fs: IFileSystem;
+    readonly cwd: string;
+    readonly sessionId?: string;
+}
+
+export interface FileSystemContextOwner {
+    readonly context: FileSystemContext;
+    release(): Promise<void>;
+}

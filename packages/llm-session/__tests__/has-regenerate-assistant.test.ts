@@ -23,7 +23,7 @@ function makeRound(id: string, messages: ChatMessage[]): PersistedRound {
 
 describe('hasRegenerateAssistant', () => {
     it('forks a branch when the persisted Round has an assistant but the projection lags (not synced)', () => {
-        const state = new SessionState('node', 'session');
+        const state = new SessionState('session');
         // Projection only knows the user message — RoundLog round:updated events
         // are not wired into state, so a completed assistant is invisible there.
         state.loadFromProjection(roundToProjection(
@@ -39,7 +39,7 @@ describe('hasRegenerateAssistant', () => {
     });
 
     it('fills the current round when neither projection nor disk has an assistant', () => {
-        const state = new SessionState('node', 'session');
+        const state = new SessionState('session');
         const userOnly = makeRound('r1', [{ role: 'user', content: 'Q1' }]);
         state.loadFromProjection(roundToProjection(userOnly, 'r1'));
 
@@ -47,7 +47,7 @@ describe('hasRegenerateAssistant', () => {
     });
 
     it('forks a branch when the projection already has an assistant', () => {
-        const state = new SessionState('node', 'session');
+        const state = new SessionState('session');
         const withAssistant = makeRound('r1', [
             { role: 'user', content: 'Q1' },
             { role: 'assistant', content: 'A1' },
@@ -58,7 +58,7 @@ describe('hasRegenerateAssistant', () => {
     });
 
     it('finds the user round when given a session-group assistant id (round-X-assistant)', () => {
-        const state = new SessionState('node', 'session');
+        const state = new SessionState('session');
         const withAssistant = makeRound('r1', [
             { role: 'user', content: 'Q1' },
             { role: 'assistant', content: 'A1' },
@@ -71,7 +71,7 @@ describe('hasRegenerateAssistant', () => {
     });
 
     it('drops transient groups not in the head chain (stale branch bubbles)', () => {
-        const state = new SessionState('node', 'session');
+        const state = new SessionState('session');
         // Projection round on the new head chain.
         state.loadFromProjection(roundToProjection(makeRound('new', [{ role: 'user', content: 'Q2' }]), 'new'));
         // Transient assistant from the previous branch — must be removed on switch.

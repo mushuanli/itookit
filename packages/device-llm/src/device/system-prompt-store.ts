@@ -2,7 +2,7 @@
 // /llm/systemprompt seqfile: key = agent id, value = SystemPromptDefinition
 // (system segments + quick-prompt presets). Seeded from DEFAULT_AGENTS on init.
 
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { SystemPromptDefinition } from '@itookit/common';
 import { DEFAULT_AGENTS } from '../constants/agents';
 
@@ -11,7 +11,7 @@ const SYSTEM_PROMPT_NAME = 'systemprompt';
 const SYSTEM_PROMPT_PARENT = '/llm';
 
 export class SystemPromptStore {
-    constructor(private readonly engine: IModuleFS) {}
+    constructor(private readonly engine: IFileSystem) {}
 
     /** Ensure /llm/systemprompt seqfile exists (init-time, mirrors CostStore). */
     async ensureFile(): Promise<void> {

@@ -1,10 +1,11 @@
+import { parseDirectoryCommand } from './directory-command';
 // @file: llm-ui/shell/SlashCommandRouter.ts
 // Slash command callbacks — extracted from LLMWorkspaceEditor.
 // Builds the SlashCommandCallbacks object used by SlashCommandPlugin.
 // Frequently modified: each new slash command or behavior change touches this file.
 
 
-import { SessionCommand, type SessionGroup, type IChatEngine } from '@itookit/llm-session';
+import { SessionCommand, type SessionGroup, type ISessionRepository } from '@itookit/llm-session';
 import {formatDefaultFileTitle} from '@itookit/common';
 import { showConfirmDialog } from '@itookit/ui-common';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter'
@@ -47,7 +48,7 @@ export interface SlashCommandRouterDeps {
     sendCommand: SendMessageCommand;
     switchBranchByOffsetCommand: SwitchBranchByOffsetCommand;
     agentService: IAgentConfigService;
-    _sessionEngine: IChatEngine; // for executeSkillInvocation route
+    _sessionEngine: ISessionRepository; // for executeSkillInvocation route
     // Delegates back to Shell for methods that touch Shell state
     handleCopy: () => Promise<void>;
     handlePrint: () => Promise<void>;
@@ -172,6 +173,14 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
             });
         },
 
+        onAddDirectory: deps.hostContext?.directoryCommands ? async raw => {
+            const { directory, access } = parseDirectoryCommand(raw);
+            Toast.success(await deps.hostContext!.directoryCommands!.addDirectory(directory, access));
+        } : undefined,
+        onSetHome: deps.hostContext?.directoryCommands ? async raw => {
+            const { directory } = parseDirectoryCommand(raw, false);
+            Toast.success(await deps.hostContext!.directoryCommands!.setHome(directory));
+        } : undefined,
         onPlan: deps.privilegedCommands?.plan,
         onCancelTask: deps.privilegedCommands?.cancel,
         onResumeTask: deps.privilegedCommands?.resume,

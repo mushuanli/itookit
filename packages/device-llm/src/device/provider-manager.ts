@@ -3,7 +3,7 @@
 // ProviderManager — manages LLMProvider catalog (built-in + user custom).
 
 import type { LLMProvider } from '@itookit/common';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import { LLM_PROVIDERS, MODEL_PRICING } from '../constants';
 import { loadPricingConfig, writePricingConfig, applyPricingToModel } from '../constants/pricing';
 import type { ModelPricingConfig } from '../constants/pricing';
@@ -17,7 +17,7 @@ export class ProviderManager {
     private _pricingConfig!: ModelPricingConfig;
 
     constructor(
-        private readonly engine: IModuleFS,
+        private readonly engine: IFileSystem,
         private readonly helpers: VFSHelpers,
         private readonly onChanged: () => void,
     ) {}
@@ -89,13 +89,13 @@ export class ProviderManager {
         this._providers = merged;
     }
 
-    async saveProvider(provider: LLMProvider, systemFS?: IModuleFS): Promise<void> {
+    async saveProvider(provider: LLMProvider, systemFS?: IFileSystem): Promise<void> {
         await this.writeProviderToDisk(provider, systemFS);
         this._providers.set(provider.id, provider);
         this.onChanged();
     }
 
-    async deleteProvider(id: string, systemFS?: IModuleFS): Promise<void> {
+    async deleteProvider(id: string, systemFS?: IFileSystem): Promise<void> {
         const provider = this._providers.get(id);
         if (provider?.isBuiltin) {
             // Mark as deleted in VFS rather than removing the file, so
@@ -148,7 +148,7 @@ export class ProviderManager {
         return this._providers;
     }
 
-    private async writeProviderToDisk(provider: LLMProvider, systemFS?: IModuleFS): Promise<void> {
+    private async writeProviderToDisk(provider: LLMProvider, systemFS?: IFileSystem): Promise<void> {
         await this.helpers.engineUpsert(
             `${PROVIDERS_DIR}/${provider.id}.json`,
             JSON.stringify(provider, null, 2),
@@ -156,7 +156,7 @@ export class ProviderManager {
         );
     }
 
-    private async deleteProviderFromDisk(id: string, systemFS?: IModuleFS): Promise<void> {
+    private async deleteProviderFromDisk(id: string, systemFS?: IFileSystem): Promise<void> {
         const fs = systemFS ?? this.engine;
         const nodeId = await fs.driver.resolvePath(`${PROVIDERS_DIR}/${id}.json`);
         if (nodeId) await fs.driver.delete([nodeId]);

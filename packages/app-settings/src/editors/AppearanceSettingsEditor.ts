@@ -1,6 +1,6 @@
+import { writeWorkspaceFile } from '../services/workspace-files';
 // @file: app-settings/editors/AppearanceSettingsEditor.ts
 import { BaseSettingsEditor } from '@itookit/ui-common';
-import { CONFIG_MODULE } from '@itookit/vfs-core';
 import { SettingsService } from '../services/SettingsService';
 
 type ThemeMode = 'light' | 'dark' | 'system';
@@ -70,7 +70,7 @@ export class AppearanceSettingsEditor extends BaseSettingsEditor<SettingsService
 
     private async loadMode(): Promise<ThemeMode> {
         try {
-            const raw = await this.service.vfs.read(CONFIG_MODULE, THEME_PATH);
+            const raw = await this.service.configFiles.driver.readContent(THEME_PATH);
             const json = JSON.parse(typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer));
             const m = json?.mode;
             return m === 'light' || m === 'dark' || m === 'system' ? m : 'system';
@@ -80,6 +80,6 @@ export class AppearanceSettingsEditor extends BaseSettingsEditor<SettingsService
     }
 
     private async saveMode(mode: ThemeMode): Promise<void> {
-        await this.service.vfs.write(CONFIG_MODULE, THEME_PATH, JSON.stringify({ mode }, null, 2));
+        await writeWorkspaceFile(this.service.configFiles, THEME_PATH, JSON.stringify({ mode }, null, 2));
     }
 }

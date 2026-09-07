@@ -501,6 +501,8 @@ export const ChatInputTemplates = {
                 <p class="llm-input__help-section-desc">Type <kbd>/</kbd> to open the command picker.</p>
                 <table class="llm-input__help-table">
                     <tr><th colspan="2" class="llm-input__help-group">Chat</th></tr>
+                    <tr><td><kbd>/add-dir</kbd> &lt;dir&gt; [r|w]</td><td>挂载目录，默认读写；r 只读，w 读写</td></tr>
+                    <tr><td><kbd>/set-home</kbd> &lt;dir&gt;</td><td>设置默认目录，不自动挂载</td></tr>
                     <tr><td><kbd>/new</kbd> [title]</td><td>Start a new chat</td></tr>
                     <tr><td><kbd>/retry</kbd></td><td>Regenerate last response</td></tr>
                     <tr><td><kbd>/continue</kbd></td><td>Continue generation</td></tr>

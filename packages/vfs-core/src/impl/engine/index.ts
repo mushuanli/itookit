@@ -4,6 +4,5 @@
  */
 
 export { VFSEngine } from './vfs-engine';
-export { AccessController, type CallerIdentity, SYSTEM_CALLER } from './access-controller';
 export { PluginPipeline } from './plugin-pipeline';
 export { DeviceRegistry } from './device-registry';

@@ -1,6 +1,6 @@
 import type { JsonValue, SessionHandle } from '@itookit/durable-kernel';
 import type { SessionRuntime } from '../core/types';
-import type { IChatEngine } from './types';
+import type { ISessionRepository } from './types';
 
 const MANIFEST_KEY = 'conversation/manifest';
 export const RUNTIME_KEY = 'conversation/runtime';
@@ -8,19 +8,19 @@ export const RUNTIME_KEY = 'conversation/runtime';
 export class DurableConversationProjection {
     private readonly tails = new Map<string, Promise<void>>();
 
-    constructor(private readonly engine: IChatEngine) {}
+    constructor(private readonly engine: ISessionRepository) {}
 
-    sync(handle: SessionHandle, nodeId: string, runtime?: SessionRuntime): Promise<void> {
+    sync(handle: SessionHandle, sessionId: string, runtime?: SessionRuntime): Promise<void> {
         const previous = this.tails.get(handle.id) ?? Promise.resolve();
-        const current = previous.catch(() => {}).then(() => this.syncNow(handle, nodeId, runtime));
+        const current = previous.catch(() => {}).then(() => this.syncNow(handle, sessionId, runtime));
         this.tails.set(handle.id, current);
         return current.finally(() => {
             if (this.tails.get(handle.id) === current) this.tails.delete(handle.id);
         });
     }
 
-    private async syncNow(handle: SessionHandle, nodeId: string, runtime?: SessionRuntime): Promise<void> {
-        const manifest = await this.engine.getManifest(nodeId);
+    private async syncNow(handle: SessionHandle, sessionId: string, runtime?: SessionRuntime): Promise<void> {
+        const manifest = await this.engine.getManifest(sessionId);
         await syncValue(handle, MANIFEST_KEY, manifest as unknown as JsonValue);
         if (runtime) await syncValue(handle, RUNTIME_KEY, runtimeValue(runtime));
     }
@@ -36,7 +36,6 @@ async function syncValue(handle: SessionHandle, key: string, input: JsonValue): 
 function runtimeValue(runtime: SessionRuntime): JsonValue {
     return {
         sessionId: runtime.sessionId,
-        nodeId: runtime.nodeId,
         status: runtime.status,
         unreadCount: runtime.unreadCount,
         lastActiveTime: runtime.lastActiveTime,

@@ -1,5 +1,5 @@
 // @mdx/core/store/types.ts
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import { EngineMetadataStore } from './engine-metadata-store';
 import { MemoryStore } from './memory-store';
 
@@ -14,7 +14,7 @@ export interface ScopedPersistenceStore {
 export interface StoreFactoryConfig {
     pluginName: string;
     instanceId: string;
-    moduleFS: IModuleFS | null;
+    fs: IFileSystem | null;
     nodeId: string | null;
 }
 
@@ -23,11 +23,11 @@ export interface StoreFactoryConfig {
  * Engine Metadata → Memory
  */
 export function createStore(config: StoreFactoryConfig): ScopedPersistenceStore {
-    const { pluginName, moduleFS, nodeId } = config;
+    const { pluginName, fs, nodeId } = config;
 
     // 1. 优先：Engine 元数据存储
-    if (moduleFS && nodeId) {
-        return new EngineMetadataStore(moduleFS, nodeId, pluginName);
+    if (fs && nodeId) {
+        return new EngineMetadataStore(fs, nodeId, pluginName);
     }
 
     // 2. 兜底：内存存储

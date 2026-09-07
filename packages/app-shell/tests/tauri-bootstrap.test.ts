@@ -6,7 +6,7 @@
  *
  * Mirrors the production backend layout exactly:
  *   rootBackend         ~/.mindos/           SQLite: ~/.mindos/_meta/
- *   module/<name>       ~/.mindos/module/     SQLite: ~/.mindos/_db/<name>/
+ *   module/<name>       ~/.mindos/home/admin/     SQLite: ~/.mindos/_db/<name>/
  *   homeBackend         <homeDir>/            SQLite: ~/.mindos/meta/<path>/
  *
  * If a test fails here it is a VFS/engine bug.
@@ -19,18 +19,18 @@ import { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createVFS, FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/vfs-core';
+import { createVFS } from '@itookit/vfs-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { Kernel } from '@itookit/durable-kernel';
-import { ChatEngine, VFSAgentService, ChatKernelStorageResolver, chatKernelStorage } from '@itookit/llm-session';
+import { SessionRepository, VFSAgentService, SessionDirectoryStorageResolver, sessionDirectoryStorage } from '@itookit/llm-session';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import type { IVFSManager } from '@itookit/vfs-core';
 
 // ── Module list (mirrors tauri-app/src/config/modules.ts, minus settings/home) ─
 
 const MODULE_CONFIGS = [
-    { name: FS_MODULE_CHAT,    syncEnabled: true,  isSystem: false },
-    { name: FS_MODULE_AGENTS,  syncEnabled: true,  isSystem: true  },
+    { name: 'chats',    syncEnabled: true,  isSystem: false },
+    { name: 'agents',  syncEnabled: true,  isSystem: true  },
     { name: 'anki',            syncEnabled: true,  isSystem: false },
     { name: 'prompts',         syncEnabled: true,  isSystem: false },
     { name: 'projects',        syncEnabled: true,  isSystem: false },
@@ -49,7 +49,7 @@ interface BootstrapFixture {
     vfs:       IVFSManager;
     llmDriver: LLMDeviceDriver;
     agentService:  VFSAgentService;
-    sessionEngine: ChatEngine;
+    sessionEngine: SessionRepository;
     dispose(): Promise<void>;
 }
 
@@ -72,13 +72,13 @@ beforeAll(async () => {
         `${mindosDir}/_meta`,
         `${mindosDir}/_db`,
         `${mindosDir}/meta`,
-        `${mindosDir}/module`,
+        `${mindosDir}/home/admin`,
         homeDir,
     ]) {
         await fsp.mkdir(dir, { recursive: true });
     }
     for (const name of MODULE_NAMES) {
-        await fsp.mkdir(`${mindosDir}/module/${name}`, { recursive: true });
+        await fsp.mkdir(`${mindosDir}/home/admin/${name}`, { recursive: true });
         await fsp.mkdir(`${mindosDir}/_db/${name}`,    { recursive: true });
     }
 
@@ -93,7 +93,7 @@ beforeAll(async () => {
         open(mindosDir, `${mindosDir}/_meta`),
         open(homeDir,   pathToMetaDir(mindosDir, homeDir)),
         ...MODULE_NAMES.map(name =>
-            open(`${mindosDir}/module/${name}`, `${mindosDir}/_db/${name}`)
+            open(`${mindosDir}/home/admin/${name}`, `${mindosDir}/_db/${name}`)
         ),
     ]);
 
@@ -101,12 +101,8 @@ beforeAll(async () => {
     const { manager: vfs } = await createVFS({
         rootBackend,
         additionalMounts: [
-            ...MODULE_NAMES.map((name, i) => ({ path: `/module/${name}`, backend: moduleBackends[i] })),
-            { path: '/module/home', backend: homeBackend },
-        ],
-        modules: [
-            ...MODULE_CONFIGS.map(m => ({ name: m.name, options: { syncEnabled: m.syncEnabled, isSystem: m.isSystem } })),
-            { name: 'home', options: { syncEnabled: false } },
+            ...MODULE_NAMES.map((name, i) => ({ path: `/home/admin/${name}`, backend: moduleBackends[i] })),
+            { path: '/home/admin/home', backend: homeBackend },
         ],
     });
 
@@ -118,8 +114,8 @@ beforeAll(async () => {
     vfs.devices.freeze();
 
     // ── 5. Core services ───────────────────────────────────────────────────────
-    const agentService   = new VFSAgentService(vfs, llmDriver);
-    const sessionEngine  = new ChatEngine(vfs);
+    const agentService   = new VFSAgentService(await vfs.openFileSystem('/home/admin/agents'), llmDriver);
+    const sessionEngine  = new SessionRepository(await vfs.openFileSystem('/'));
     await agentService.init();
     await sessionEngine.init();
 
@@ -141,7 +137,7 @@ describe('tauri-app bootstrap simulation', () => {
 
     it('VFS mounts: each module directory is accessible', async () => {
         for (const name of MODULE_NAMES) {
-            const modulePath = `${fix.mindosDir}/module/${name}`;
+            const modulePath = `${fix.mindosDir}/home/admin/${name}`;
             const stat = await fsp.stat(modulePath);
             expect(stat.isDirectory()).toBe(true);
         }
@@ -160,19 +156,13 @@ describe('tauri-app bootstrap simulation', () => {
         expect(agents.length).toBeGreaterThan(0);
     });
 
-    it('ChatEngine: createSession writes .chat file to disk', async () => {
-        const sessionId = await fix.sessionEngine.createSession('Bootstrap Test Chat');
-        expect(sessionId).toBeTruthy();
-
-        const chatsDir = `${fix.mindosDir}/module/${FS_MODULE_CHAT}`;
-        const entries  = await fsp.readdir(chatsDir);
-        const chatFile = entries.find(e => e.endsWith('.chat'));
-
-        console.log('[bootstrap] chat file:', chatFile, 'sessionId:', sessionId);
-        expect(chatFile).toBeDefined();
+    it('Session creation persists the Session record in the data store', async () => {
+        const id = await fix.sessionEngine.createSession('Hello');
+        expect((await fix.sessionEngine.getManifest(id)).id).toBe(id);
+        expect((await fsp.stat(`${fix.mindosDir}/var/lib/sessions/${id}/session.seq`)).isFile()).toBe(true);
     });
 
-    it('ChatEngine: multiple concurrent createSession calls succeed', async () => {
+    it('SessionRepository: multiple concurrent createSession calls succeed', async () => {
         const results = await Promise.all([
             fix.sessionEngine.createSession('Concurrent A'),
             fix.sessionEngine.createSession('Concurrent B'),
@@ -182,10 +172,7 @@ describe('tauri-app bootstrap simulation', () => {
         expect(results.every(id => !!id)).toBe(true);
         expect(new Set(results).size).toBe(3);   // all unique IDs
 
-        const entries = await fsp.readdir(`${fix.mindosDir}/module/${FS_MODULE_CHAT}`);
-        const chatFiles = entries.filter(e => e.endsWith('.chat'));
-        console.log('[bootstrap] chat files after concurrent creates:', chatFiles.length);
-        expect(chatFiles.length).toBeGreaterThanOrEqual(3);
+        expect((await fix.sessionEngine.list()).map(session => session.id)).toEqual(expect.arrayContaining(results));
     });
 
     it('etc rootfs: LLM connection config is persisted on disk', async () => {
@@ -207,10 +194,10 @@ describe('tauri-app bootstrap simulation', () => {
 
     it('restores every runnable Task from the chat module and retains explicit pause', async () => {
         const chatId = await fix.sessionEngine.createSession('Durable recovery');
-        const fs = fix.vfs.getEngine(FS_MODULE_CHAT);
+        const fs = await fix.vfs.openFileSystem('/');
         const makeKernel = (maxConcurrent: number) => {
             const kernel = new Kernel({ catalog: { fs }, maxConcurrent });
-            kernel.registerStorageResolver(new ChatKernelStorageResolver(fix.sessionEngine));
+            kernel.registerStorageResolver(new SessionDirectoryStorageResolver(fs));
             kernel.registerProgram({
                 manifest: { kind: 'bootstrap-recovery', version: '1' },
                 init(input) { return { state: null, next: { type: 'complete', output: input } }; },
@@ -221,7 +208,7 @@ describe('tauri-app bootstrap simulation', () => {
         const first = makeKernel(0), replacement = makeKernel(2);
         try {
             await first.initialize();
-            const session = await first.createSession({ id: chatId, storage: chatKernelStorage(chatId) });
+            const session = await first.createSession({ id: chatId, storage: sessionDirectoryStorage(chatId) });
             const tasks = await Promise.all(['a', 'b', 'paused'].map(input => session.spawn({
                 program: { kind: 'bootstrap-recovery', version: '1' }, input,
             })));
@@ -244,13 +231,25 @@ describe('tauri-app bootstrap simulation', () => {
     });
 
     it('home module: can write and read a file', async () => {
-        const homeDir = `${fix.mindosDir}/module/home`;  // mounted on homeDir temp path
+        const homeDir = `${fix.mindosDir}/home/admin/home`;  // mounted on homeDir temp path
         // Write through VFS
         const content = new TextEncoder().encode('hello from home');
-        await fix.vfs.write('home', '/test.md', content);
+        await (await fix.vfs.openFileSystem('/home/admin/home')).driver.createFile({ name: 'test.md', parentPath: '/', content });
 
         // Verify on real disk (homeDir is the temp home path)
         const onDisk = await fsp.readFile(join(fix.homeDir, 'test.md'));
         expect(new TextDecoder().decode(onDisk)).toBe('hello from home');
     });
+});
+
+it('reads nested workspace content through the admin home view', async () => {
+    const chats = await fix.vfs.openFileSystem('/home/admin/chats');
+    await chats.driver.createFile({ name: 'nested-read.txt', parentPath: '/', content: 'visible' });
+    await chats.driver.createFile({ name: 'nested-events.seq', parentPath: '/', type: 'seqfile' });
+    await chats.meta.seq!.setEntry('/nested-events.seq', 'event', 'visible-record');
+    const home = await fix.vfs.openFileSystem('/home/admin');
+    expect(await home.driver.readContent('/chats/nested-read.txt', { encoding: 'utf-8' })).toBe('visible');
+    await chats.driver.writeContent('/nested-read.txt', 'updated');
+    expect(await home.driver.readContent('/chats/nested-read.txt', { encoding: 'utf-8' })).toBe('updated');
+    expect(await home.driver.readContent('/chats/nested-events.seq', { encoding: 'utf-8' })).toBe('event=visible-record');
 });

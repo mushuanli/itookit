@@ -73,13 +73,14 @@ export class IndexedDBBackend implements IStorageBackend {
 
     async init(): Promise<void> {
         if (this.db) return;
-        this.db = await this.openCompatibleDatabase();
-        if (!needsSchemaRepair(this.db)) return;
-
-        const nextVersion = this.db.version + 1;
-        this.db.close();
-        this.db = null;
-        this.db = await openDB(this.dbName, nextVersion, ensureSchema);
+        this.db = await openDB(this.dbName, DB_VERSION, (db, tx, oldVersion) => {
+            if (oldVersion !== 0) throw new Error('Filesystem database version incompatible');
+            ensureSchema(db, tx);
+        });
+        if (needsSchemaRepair(this.db)) {
+            this.db.close(); this.db = null;
+            throw new Error('Filesystem database schema incompatible');
+        }
     }
 
     async close(): Promise<void> {
@@ -90,15 +91,6 @@ export class IndexedDBBackend implements IStorageBackend {
     private _db(): IDBDatabase {
         if (!this.db) throw new Error('IndexedDBBackend not initialized');
         return this.db;
-    }
-
-    private async openCompatibleDatabase(): Promise<IDBDatabase> {
-        try {
-            return await openDB(this.dbName, DB_VERSION, ensureSchema);
-        } catch (error) {
-            if (!isVersionError(error)) throw error;
-            return openDB(this.dbName, undefined, ensureSchema);
-        }
     }
 
     // ══ Structure ════════════════════════════════════════════════
@@ -551,10 +543,6 @@ function needsSchemaRepair(db: IDBDatabase): boolean {
         const store = db.transaction(storeName, 'readonly').objectStore(storeName);
         return indexes.some(index => !store.indexNames.contains(index));
     });
-}
-
-function isVersionError(error: unknown): boolean {
-    return error instanceof Error && error.name === 'VersionError';
 }
 
 function matchesSearch(entry: NodeEntry, query: FSSearchQuery): boolean {

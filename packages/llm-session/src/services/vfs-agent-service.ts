@@ -3,10 +3,9 @@
 // Agent VFS 持久化服务。
 // 连接 / MCP / Skill 管理全部委托给注入的 ILLMManagementService（由 LLMDeviceDriver 实现）。
 
-import { BaseModuleService } from '@itookit/vfs-core';
-import type { IVFSManager, VFSManagerEvent } from '@itookit/vfs-core';
+import { FileBackedService } from '../utils/file-backed-service';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { FSNode, FSSearchQuery } from '@itookit/vfs-core';
-import { FS_MODULE_AGENTS } from '@itookit/vfs-core';
 import type { RestorableItem } from '@itookit/common';
 import type {
     ILLMManagementService, ConnectionMeta, LLMConnection,
@@ -27,7 +26,7 @@ const VERSION_FILE = '/.defaults_version.json';
 
 // ─── VFSAgentService ──────────────────────────────────────────────────────────
 
-export class VFSAgentService extends BaseModuleService implements IAgentManagementService {
+export class VFSAgentService extends FileBackedService implements IAgentManagementService {
     private _agents: AgentDefinition[] = [];
     private _agentNodeIds = new Map<string, string>(); // agentId → VFS node ID
     private _duplicatePaths = new Map<string, string[]>(); // agentId → duplicate paths (cleaned on scan)
@@ -37,13 +36,13 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     private _systemPromptListLoaded = false;
 
     constructor(
-        vfs: IVFSManager,
+        fs: IFileSystem,
         private readonly llmService: ILLMManagementService,
     ) {
-        super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration', isSystem: true }, vfs);
+        super(fs);
     }
 
-    // ─── BaseModuleService lifecycle ─────────────────────────────────────────
+    // ─── FileBackedService lifecycle ─────────────────────────────────────────
 
     protected async onLoad(): Promise<void> {
         await this.ensureDefaults();
@@ -64,21 +63,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             }, 300);
         };
 
-        const relevant = (path: string, moduleId: string): boolean => {
-            if (moduleId !== this.moduleName) return false;
-            return path.endsWith('.agent');
-        };
-
         this._eventUnsubscribers.push(
-            this.vfs.on('node:created', (e: VFSManagerEvent<'node:created'>) => {
-                if (relevant(e.payload.path, e.payload.moduleId)) debounce();
-            }),
-            this.vfs.on('node:updated', (e: VFSManagerEvent<'node:updated'>) => {
-                if (relevant(e.payload.path, e.payload.moduleId)) debounce();
-            }),
-            this.vfs.on('node:deleted', (e: VFSManagerEvent<'node:deleted'>) => {
-                if (e.payload.moduleId === this.moduleName) debounce();
-            }),
+            this.engine.on('node:created', () => debounce()),
+            this.engine.on('node:updated', () => debounce()),
+            this.engine.on('node:deleted', () => debounce()),
+            this.engine.on('node:renamed', () => debounce()),
         );
     }
 

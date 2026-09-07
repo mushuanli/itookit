@@ -1,5 +1,5 @@
 // @file: llm-runtime/__tests__/round-log.test.ts
-// Integration tests for RoundLog with an in-memory IChatEngine mock.
+// Integration tests for RoundLog with an in-memory ISessionRepository mock.
 //
 // Covers:
 //   - RoundLog CRUD: append, fold, readRound, writeRound
@@ -8,15 +8,15 @@
 //   - Event emission: round:appended, round:updated, round:deleted
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { IChatEngine, FSNode } from '../src/persistence/types';
+import type { ISessionRepository, FSNode } from '../src/persistence/types';
 import type { RoundManifest, PersistedRound, RoundProjection } from '../src/persistence/round-types';
 import type { RoundLogEvent } from '../src/persistence/round-events';
 import { RoundLog, roundToProjection } from '../src/persistence/round-log';
 import { SessionState } from '../src/session/session-state';
 
-// ── In-memory IChatEngine mock ──────────────────────────────────────────────
+// ── In-memory ISessionRepository mock ──────────────────────────────────────────────
 
-class InMemoryChatEngine implements Partial<IChatEngine> {
+class InMemorySessionRepository implements Partial<ISessionRepository> {
     private manifest: Record<string, unknown> = {};
     /** ownerNodeId → Map<assetName, content> */
     private assets: Map<string, Map<string, string>> = new Map();
@@ -30,9 +30,9 @@ class InMemoryChatEngine implements Partial<IChatEngine> {
         return persisted ? JSON.parse(persisted) : { ...this.manifest };
     }
 
-    async updateManifest(nodeId: string, updates: Record<string, unknown>): Promise<void> {
-        const current = await this.getManifest(nodeId) as Record<string, unknown>;
-        this.files.set(nodeId, JSON.stringify({ ...current, ...updates }));
+    async updateManifest(sessionId: string, updates: Record<string, unknown>): Promise<void> {
+        const current = await this.getManifest(sessionId) as Record<string, unknown>;
+        this.files.set(sessionId, JSON.stringify({ ...current, ...updates }));
     }
 
     setManifest(m: Record<string, unknown>): void {
@@ -41,12 +41,12 @@ class InMemoryChatEngine implements Partial<IChatEngine> {
 
     // ── Asset directory ─────────────────────────────────────────────────
 
-    async getAssetDirectoryId(nodeId: string): Promise<string | null> {
-        return `_${nodeId}`;
+    async getAssetDirectoryId(sessionId: string): Promise<string | null> {
+        return `_${sessionId}`;
     }
 
     /** ownerNodeId is the .chat file id; name is relative asset filename */
-    async createAsset(ownerNodeId: string, name: string, content: string): Promise<FSNode> {
+    async writeDocument(ownerNodeId: string, name: string, content: string): Promise<FSNode> {
         if (!this.assets.has(ownerNodeId)) this.assets.set(ownerNodeId, new Map());
         this.assets.get(ownerNodeId)!.set(name, content);
         const path = `_${ownerNodeId}/${name}`;
@@ -61,8 +61,8 @@ class InMemoryChatEngine implements Partial<IChatEngine> {
         } as unknown as FSNode));
     }
 
-    async readAsset(nodeId: string, name: string): Promise<string | null> {
-        return this.assets.get(nodeId)?.get(name) ?? null;
+    async readDocument(sessionId: string, name: string): Promise<string | null> {
+        return this.assets.get(sessionId)?.get(name) ?? null;
     }
 
     // ── Content ──────────────────────────────────────────────────────────
@@ -126,14 +126,13 @@ function makeAssistantPayload(text: string): ChatMessage[] {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('RoundLog', () => {
-    let engine: InMemoryChatEngine;
+    let engine: InMemorySessionRepository;
     let log: RoundLog;
     let events: RoundLogEvent[];
-    const nodeId = 'test-session.chat';
     const sessionId = 'test-session-id';
 
     beforeEach(() => {
-        engine = new InMemoryChatEngine();
+        engine = new InMemorySessionRepository();
         engine.setManifest({
             schemaVersion: 3,
             id: sessionId,
@@ -148,26 +147,13 @@ describe('RoundLog', () => {
             children: {},
         });
         events = [];
-        log = new RoundLog(engine as unknown as IChatEngine, nodeId, sessionId);
+        log = new RoundLog(engine as unknown as ISessionRepository, sessionId);
         log.setEventListener((e) => events.push(e));
     });
 
     // ── Basic CRUD ────────────────────────────────────────────────────────
 
     describe('append & fold', () => {
-        it('writes through the renamed owner path after updateNodeId', async () => {
-            const renamedNodeId = 'renamed-session.chat';
-            log.updateNodeId(renamedNodeId);
-
-            const roundId = await log.append('main', makeRound({
-                messages: makeUserPayload('After rename'),
-            }));
-
-            expect(await engine.readAsset(renamedNodeId, `round-${roundId}.json`))
-                .not.toBeNull();
-            expect(await engine.readAsset(nodeId, `round-${roundId}.json`)).toBeNull();
-        });
-
         it('rejects a stale expected branch head before writing', async () => {
             const round = makeRound({ id: 'new', messages: makeUserPayload('Hello') });
             await expect(log.appendExpected('main', round, null)).rejects.toMatchObject({ code: 'HEAD_CONFLICT' });
@@ -265,7 +251,7 @@ describe('RoundLog', () => {
             expect(messages[2]).toEqual({ role: 'assistant', content: 'A2' });
 
             // Verify SessionState cascade
-            const state = new SessionState(nodeId, sessionId);
+            const state = new SessionState(sessionId);
             for (const tId of [t1Id, t2Id, t3Id, t4Id]) {
                 const t = await log.readRound(tId);
                 if (t && !t._deleted) state.loadFromProjection(roundToProjection(t, tId));
@@ -566,7 +552,7 @@ describe('RoundLog', () => {
     describe('manifest management', () => {
         it('should bootstrap manifest on first access', async () => {
             engine.setManifest({}); // empty manifest
-            const freshLog = new RoundLog(engine as unknown as IChatEngine, nodeId, sessionId);
+            const freshLog = new RoundLog(engine as unknown as ISessionRepository, sessionId);
 
             const manifest = await freshLog.loadManifest();
             // RoundManifest has no format field;
@@ -629,7 +615,7 @@ describe('roundToProjection (tool calls)', () => {
     });
 
     it('builds tool children into the assistant execution tree', () => {
-        const state = new SessionState('node', 'session');
+        const state = new SessionState('session');
         state.loadFromProjection(projection('r1', [], 1, {
             userMessage: { content: 'Q1', persistedNodeId: 'r1' },
             assistantMessage: {
@@ -649,7 +635,7 @@ describe('roundToProjection (tool calls)', () => {
 
 describe('SessionState (round format)', () => {
     it('should cascade delete children via collectCascadeRoundIds', () => {
-        const state = new SessionState('node', 'session');
+        const state = new SessionState('session');
 
         const p1: RoundProjection = projection('t1', [], 1, {
             userMessage: { content: 'Q1', persistedNodeId: 't1' },
@@ -674,7 +660,7 @@ describe('SessionState (round format)', () => {
     });
 
     it('should apply round:appended event', () => {
-        const state = new SessionState('node', 'session');
+        const state = new SessionState('session');
 
         const events = state.apply({
             type: 'round:appended',

@@ -1,3 +1,4 @@
+import { editorFilePath } from '@itookit/ui-common';
 // @mdx/editor/mdx-editor.ts
 import {
     Heading,
@@ -47,16 +48,16 @@ export class MDxEditor extends IEditor {
     constructor(config: MDxEditorConfig = {}) {
         super();
         this.config = config;
-        this.config.ownerNodeId = config.ownerNodeId ?? config.nodeId;
 
         // 初始化核心组件
         this.eventBus = new EventBus(['change']);
         this.cmAdapter = new CodeMirrorAdapter();
         this.renderer = new MDxRenderer({
             searchMarkClass: config.searchMarkClass,
-            nodeId: config.nodeId,
-            ownerNodeId: this.config.ownerNodeId,
-            moduleFS: config.moduleFS,
+            nodeId: editorFilePath(config),
+            ownerNodeId: editorFilePath(config),
+            fs: config.files?.fs,
+            assets: config.assets,
         });
         this.renderer.setEditorInstance(this);
 
@@ -345,14 +346,10 @@ export class MDxEditor extends IEditor {
     }
 
     updateNodeId = (newNodeId: string): void => {
-        const oldNodeId = this.config.nodeId;
-        if (!newNodeId || newNodeId === oldNodeId) return;
-
-        const ownerFollowsNode = !this.config.ownerNodeId
-            || this.config.ownerNodeId === oldNodeId;
+        if (!newNodeId || newNodeId === editorFilePath(this.config)) return;
+        if (this.config.target?.kind !== 'file') throw new Error('Only file editors can change paths');
         this.renderer.getPluginManager().setNodeId(newNodeId);
-        this.config.nodeId = newNodeId;
-        if (ownerFollowsNode) this.config.ownerNodeId = newNodeId;
+        this.config.target = { ...this.config.target, path: newNodeId };
 
         this.printService?.destroy?.();
         this.printService = null;
@@ -375,7 +372,7 @@ export class MDxEditor extends IEditor {
 
     private getPrintService(): PrintService {
         if (!this.printService) {
-            this.printService = new DefaultPrintService(this.config.moduleFS, this.config.nodeId);
+            this.printService = new DefaultPrintService(this.config.files?.fs, editorFilePath(this.config), this.config.assets);
         }
         return this.printService;
     }

@@ -23,7 +23,7 @@ export class FileMentionSource extends BaseMentionSource {
         title: node.name,
         type: 'file',
         path: node.path,
-        module: node.moduleId,
+        module: node.viewId,
       }));
     } catch (e) {
       console.error('[FileMentionSource] Error:', e);
@@ -35,7 +35,7 @@ export class FileMentionSource extends BaseMentionSource {
     const parent =
       node.path.substring(0, node.path.lastIndexOf('/')) || '/';
     const ctx = parent === '/' ? '' : ` ${parent}`;
-    const mod = node.moduleId ? `[${node.moduleId}]` : '';
+    const mod = node.viewId ? `[${node.viewId}]` : '';
     return `${node.icon || '📄'} ${node.name} (${mod}${ctx})`;
   }
 
@@ -60,8 +60,8 @@ export class FileMentionSource extends BaseMentionSource {
           .replace(/[\r\n]+/g, ' ')
           .replace(/([#*`])/g, '') + (text.length > 150 ? '...' : '');
       const date = new Date(node.modifiedAt).toLocaleDateString();
-      const badge = node.moduleId
-        ? `<span style="background:#eee;padding:2px 4px;border-radius:3px;font-size:0.8em;margin-right:5px;">${node.moduleId}</span>`
+      const badge = node.viewId
+        ? `<span style="background:#eee;padding:2px 4px;border-radius:3px;font-size:0.8em;margin-right:5px;">${node.viewId}</span>`
         : '';
 
       return {
@@ -95,7 +95,7 @@ export class FileMentionSource extends BaseMentionSource {
         title: node.name,
         content,
         tags: node.tags,
-        module: node.moduleId,
+        module: node.viewId,
         path: node.path,
         createdAt: new Date(node.createdAt),
         modifiedAt: new Date(node.modifiedAt),

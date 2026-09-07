@@ -2,7 +2,7 @@
  * @file packages/vfs-core/src/interfaces/capabilities/asset-ops.ts
  * @desc AssetDir 操作子接口
  *
- * 通过 IModuleFS.assets 访问（当 capabilities.assets === true）。
+ * 通过 IFileSystem.assets 访问（当 capabilities.assets === true）。
  *
  * 命名约定：文件 "report.md" → assetdir "_report.md/"
  *

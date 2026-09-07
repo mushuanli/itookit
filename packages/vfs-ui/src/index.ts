@@ -7,7 +7,7 @@ import './styles/index.css';
 import { VFSUIShell } from './shell/VFSUIShell';
 
 import type { SessionUIOptions, ISessionUI, EditorFactory } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { VFSNodeUI, VFSUIState, UISettings } from './contracts/types';
 import { VFSService } from './services/VFSService';
 
@@ -23,7 +23,10 @@ export type VFSUIOptions = SessionUIOptions<VFSNodeUI> & {
     defaultUiSettings?: Partial<UISettings>;
     // [新增]
     fileTypes?: FileTypeDefinition[];
-    defaultEditorFactory: EditorFactory;
+    defaultEditorFactory?: EditorFactory;
+  directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
+  activateDirectories?: boolean;
+  primaryAction?: { label: string; run(): Promise<void> };
     customEditorResolver?: CustomEditorResolver;
 
     /**
@@ -43,7 +46,7 @@ export type VFSUIOptions = SessionUIOptions<VFSNodeUI> & {
 /**
  * 创建 VFSUI 实例 (通用引擎模式)
  */
-export const createVFSUI = (options: VFSUIOptions, engine: IModuleFS): ISessionUI<VFSNodeUI, VFSService> =>
+export const createVFSUI = (options: VFSUIOptions, engine: IFileSystem): ISessionUI<VFSNodeUI, VFSService> =>
     new VFSUIShell(options, engine);
 
 export { VFSService, VFSUIShell };

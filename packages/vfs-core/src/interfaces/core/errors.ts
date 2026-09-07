@@ -23,7 +23,6 @@ export type FSErrorCode =
     | 'EIO'
     | 'EPLUGIN'
     | 'ENOTRECORD'
-    | 'ENOMODULE'
     | 'ECAPABILITY'
     | 'ECONFLICT'
     | 'EBUSY'
@@ -87,19 +86,12 @@ export class FSReservedNameError extends FSError {
 }
 
 export class FSCapabilityError extends FSError {
-    constructor(capability: string, moduleId?: string) {
+    constructor(capability: string, viewId?: string) {
         super(
             'ECAPABILITY',
-            `capability '${capability}' not supported${moduleId ? ` by module '${moduleId}'` : ''}`,
+            `capability '${capability}' not supported${viewId ? ` by view '${viewId}'` : ''}`,
         );
         this.name = 'FSCapabilityError';
-    }
-}
-
-export class FSModuleNotFoundError extends FSError {
-    constructor(moduleName: string) {
-        super('ENOMODULE', `module '${moduleName}' is not mounted`);
-        this.name = 'FSModuleNotFoundError';
     }
 }
 

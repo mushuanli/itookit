@@ -1,3 +1,4 @@
+import { editorResourceId } from '@itookit/ui-common';
 // @file: llm-ui/components/FlowsEditor.ts
 // Standalone workflow workspace editor: a thin IEditor shell around DagWorkbench.
 // Workflows are first-class resources (flows VFS module); running one creates a
@@ -82,13 +83,13 @@ export class FlowsEditor extends IEditor {
         const values = parameters.length ? await promptFlowParameters(parameters) : {};
         if (!values) return;
         try {
-            const created = await this.deps.commands.execute<{ nodeId: string }>(SessionCommand.CreateFromFlow, {
+            const created = await this.deps.commands.execute<{ sessionId: string }>(SessionCommand.CreateFromFlow, {
                 flowId, revision, parameters: values, title: flow?.name ?? 'Workflow',
             });
             this.container?.dispatchEvent(new CustomEvent(NAVIGATION_EVENTS.NAVIGATE, {
                 bubbles: true,
                 composed: true,
-                detail: { target: 'chat', resourceId: created.nodeId },
+                detail: { target: 'chat', resourceId: created.sessionId },
             }));
         } catch (error) {
             console.error('[FlowsEditor] Failed to create workflow session', error);
@@ -129,7 +130,7 @@ function flowIdFromNodeId(nodeId: string | undefined): string | null {
 
 export function createFlowsEditorFactory(deps: FlowsEditorDeps): EditorFactory {
     return async (container: HTMLElement, options?: EditorOptions) => {
-        const editor = new FlowsEditor(deps, options?.nodeId);
+        const editor = new FlowsEditor(deps, options ? editorResourceId(options) : undefined);
         await editor.init(container);
         return editor;
     };

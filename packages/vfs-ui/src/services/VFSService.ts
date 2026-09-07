@@ -2,12 +2,12 @@
  * @file vfs-ui/services/VFSService.ts
  * @desc Data mutation service implementing IDataOperationPort.
  */
-import type { IModuleFS, FSNode } from '@itookit/vfs-core';
+import type { IFileSystem, FSNode } from '@itookit/vfs-core';
 import { buildRenamedFilename, formatDefaultFileTitle } from '@itookit/common';
 import type { IDataOperationPort } from '../contracts/ports';
 
 export interface VFSServiceDependencies {
-  engine: IModuleFS;
+  engine: IFileSystem;
   newFileContent?: string;
   defaultExtension?: string;
 }
@@ -26,7 +26,7 @@ export interface CreateMultipleFilesOptions {
 const EXT_REGEX = /\.[a-zA-Z0-9]{1,10}$/;
 
 export class VFSService implements IDataOperationPort {
-  private readonly engine: IModuleFS;
+  private readonly engine: IFileSystem;
   private readonly newFileContent: string;
   private readonly defaultExtension: string;
 
@@ -35,7 +35,7 @@ export class VFSService implements IDataOperationPort {
     newFileContent = '',
     defaultExtension = '.md',
   }: VFSServiceDependencies) {
-    if (!engine) throw new Error('VFSService requires an IModuleFS.');
+    if (!engine) throw new Error('VFSService requires an IFileSystem.');
     this.engine = engine;
     this.newFileContent = newFileContent;
     this.defaultExtension = defaultExtension.startsWith('.')

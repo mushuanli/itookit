@@ -10,6 +10,9 @@ use std::os::unix::process::CommandExt;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_fs::FsExt;
 mod sidecar;
+mod directory_boundary;
+mod scoped_fs;
+mod scoped_directory;
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
@@ -529,14 +532,13 @@ pub fn run() {
             let paths = resolve_all_paths(&system_home);
 
             let _ = std::fs::create_dir_all(&paths.config_dir);
-            for sub in &["", "_meta", "_db", "meta", "module"] {
+            for sub in &["", "_meta", "_db", "meta", "home/admin", "var/lib", "etc", "run"] {
                 let _ = std::fs::create_dir_all(paths.root_dir.join(sub));
             }
             for module in &[
                 "etc", "chats", "agents", "anki",
                 "prompts", "projects", "emails", "private",
             ] {
-                let _ = std::fs::create_dir_all(paths.root_dir.join("module").join(module));
                 let _ = std::fs::create_dir_all(paths.root_dir.join("_db").join(module));
             }
 
@@ -547,6 +549,7 @@ pub fn run() {
             let _ = app.fs_scope().allow_directory(&paths.root_dir, true);
 
             app.manage(paths);
+            app.manage(scoped_fs::DirectoryScopes::default());
             app.manage(ShellProcesses::default());
             app.manage(CodexAppServer::default());
             app.manage(sidecar::SidecarTransactions::default());
@@ -561,6 +564,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            scoped_fs::directory_open,
+            scoped_fs::directory_close,
+            scoped_fs::directory_io,
             sidecar::sidecar_begin,
             sidecar::sidecar_execute,
             sidecar::sidecar_select,

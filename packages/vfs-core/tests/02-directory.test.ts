@@ -110,7 +110,8 @@ describe('Directory operations (IndexedDB backend)', () => {
         await fs.driver.walkTree!((node) => { visited.push(node.path); }, { maxDepth: 1 });
 
         expect(visited).toContain('/deep');
-        expect(visited).toContain('/deep/l2');
+        expect(visited).toContain('/');
+        expect(visited).not.toContain('/deep/l2');
         expect(visited).not.toContain('/deep/l2/l3');
     });
 

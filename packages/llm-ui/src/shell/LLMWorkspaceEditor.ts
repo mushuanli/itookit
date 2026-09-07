@@ -9,7 +9,7 @@ import type {
 import type { EventEnvelope, Kernel, InteractionRequest, JsonValue } from '@itookit/durable-kernel';
 
 import {
-    IChatEngine, IAgentConfigService, SessionManager, getSessionManager,
+    ISessionRepository, IAgentConfigService, SessionManager, getSessionManager,
     type ConversationManifest, SessionCommand,
 } from '@itookit/llm-session';
 
@@ -69,7 +69,8 @@ import { AssetManagerUI } from '@itookit/mdxeditor';
 const ACTIVE_PRIVILEGED_TASK_KEY = 'ui.privileged.active-task';
 
 export interface LLMEditorOptions extends EditorOptions {
-    chatEngine: IChatEngine;
+    sessionId: string;
+    sessionRepository: ISessionRepository;
     agentService: IAgentConfigService;
     initialInputState?: { text?: string; agentId?: string };
     isNewSession?: boolean;
@@ -128,6 +129,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private branchStore!: IBranchStore;
     private branchService!: BranchService;
     private navDataBuilder!: NavDataBuilder;
+    private assetManager?: AssetManagerUI;
     private fileSearchService!: FileSearchService;
     private ocrService!: OcrService;
     private runAttachment?: RunAttachmentController;
@@ -168,8 +170,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private options: LLMEditorOptions;
 
-    private get engine(): IChatEngine {
-        return this.options.chatEngine;
+    private get engine(): ISessionRepository {
+        return this.options.sessionRepository;
     }
 
     private get hostContext(): EditorHostContext | undefined {
@@ -200,10 +202,9 @@ export class LLMWorkspaceEditor implements IEditor {
             this.initInfrastructure();
             this.initServices();
 
-            // Ensure VFS session structure exists before ChatInput renders,
-            // so settings can be read/written directly to {assetDir}/settings.yaml.
+            // Bind the existing Session before rendering its settings.
             this.currentSessionId = await this.sessionService.ensureReady(
-                this.options.nodeId!, this.currentTitle
+                this.options.sessionId!, this.options.target?.kind === 'session' ? this.options.target.branch : undefined
             );
 
             const preloadedSettings = await this.initComponents();
@@ -256,15 +257,16 @@ export class LLMWorkspaceEditor implements IEditor {
     private initServices(): void {
         this.sessionService = new SessionService(this.engine, this.commandBus);
         this.stateService = new StateService(this.engine);
-        this.assetService = new AssetService(this.engine);
+        this.assetService = new AssetService(this.options.assets);
         this.stateManager = new StateManager(
-            this.stateService, this.sessionManager, this.options.nodeId!,
-            (id) => validateAgentId(this.agentService, id)
+            this.stateService, this.sessionManager, this.options.sessionId!,
+            (id) => validateAgentId(this.agentService, id),
+            this.options.target?.kind === 'session' ? this.options.target.branch : undefined
         );
         this.branchStore = new BranchStore(this.commandBus, this.errorHandler);
         this.branchService = new BranchService(this.commandBus, this.branchStore);
         this.navDataBuilder = new NavDataBuilder(this.commandBus);
-        this.fileSearchService = new FileSearchService(this.engine);
+        this.fileSearchService = new FileSearchService(this.options.files?.fs);
         if (this.options.llmService) {
             this.ocrService = new OcrService(this.options.llmService);
         }
@@ -290,9 +292,8 @@ export class LLMWorkspaceEditor implements IEditor {
             onCommitEdit: (id: string, content: string) =>
                 this.handleCommitEdit(id, content),
             bus: this.bus,
-            nodeId: this.options.nodeId,
-            ownerNodeId: this.options.ownerNodeId || this.options.nodeId,
-            moduleFS: this.options.moduleFS,
+            fs: this.options.files?.fs,
+            assets: this.options.assets,
             initialCollapseStates: this.stateManager.getCollapseStates(),
             onScroll: () => this.navigation.updateActiveSessionHighlight(),
             onNavigateSettings: () => {
@@ -468,8 +469,7 @@ export class LLMWorkspaceEditor implements IEditor {
             chatInput: this.chatInput,
             bus: this.bus,
             errorHandler: this.errorHandler,
-            getNodeId: () => this.options.nodeId!,
-            getOwnerNodeId: () => this.options.ownerNodeId || this.options.nodeId!,
+            getSessionId: () => this.options.sessionId,
         };
     }
 
@@ -573,9 +573,9 @@ export class LLMWorkspaceEditor implements IEditor {
     private async handleTitleChange(title: string): Promise<void> {
         this.currentTitle = title;
         this.emit('change', undefined);
-        if (this.options.nodeId) {
+        if (this.options.sessionId) {
             await this.errorHandler.wrap(
-                () => this.sessionService.renameSession(this.options.nodeId!, title),
+                () => this.sessionService.renameSession(this.options.sessionId!, title),
                 'Rename session', 'warn'
             );
         }
@@ -600,29 +600,28 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private async handlePrint(): Promise<void> {
-        if (!this.options.moduleFS) {
+        if (!this.options.files?.fs) {
             Toast.error('File system is unavailable for printing');
             return;
         }
         await new PrintCommand(this.buildCommandContext()).run({
             title: this.currentTitle,
-            engine: this.options.moduleFS,
-            nodeId: this.options.nodeId,
+            engine: this.options.files?.fs,
+            assets: this.options.assets,
         });
     }
 
     private async handleOpenAssetManager(): Promise<void> {
         await this.errorHandler.wrap(async () => {
-            const ownerNodeId = this.options.ownerNodeId || this.options.nodeId;
-            if (!this.options.moduleFS || !ownerNodeId) {
-                throw new Error('Module filesystem not connected');
+            const ownerNodeId = this.options.sessionId;
+            if (!this.options.files?.fs || !ownerNodeId) {
+                throw new Error('Session file context is unavailable');
             }
 
-            const assetDirPath = await this.assetService.getAssetDirectoryId(ownerNodeId);
-            if (!assetDirPath) { Toast.info('No attachments found'); return; }
-
-            const ui = new AssetManagerUI(this.options.moduleFS, null, {});
-            await ui.show(assetDirPath);
+            if (!this.options.assets) throw new Error('Session attachments unavailable');
+            this.assetManager?.close();
+            this.assetManager = new AssetManagerUI(this.options.assets, null, {});
+            await this.assetManager.show('/');
         }, 'Open Asset Manager');
     }
 
@@ -630,25 +629,8 @@ export class LLMWorkspaceEditor implements IEditor {
     // 会话加载
     // ================================================================
 
-    private async readParentDirAIDefaults(): Promise<{ agentId?: string; text?: string } | undefined> {
-        const nodeId = this.options.nodeId;
-        if (!nodeId) return undefined;
-        try {
-            const node = await this.engine.getNode(nodeId);
-            if (!node?.parentPath) return undefined;
-            const parent = await this.engine.getNode(node.parentPath);
-            if (!parent?.metadata) return undefined;
-            const agentId = parent.metadata.ai_defaultAgent as string | undefined;
-            const text    = parent.metadata.ai_initialPrompt as string | undefined;
-            if (!agentId && !text) return undefined;
-            return { agentId, text };
-        } catch {
-            return undefined;
-        }
-    }
-
     private async loadSession(preloadedSettings?: Awaited<ReturnType<SessionService['getSessionSettings']>>): Promise<void> {
-        if (!this.options.nodeId) throw new Error('nodeId is required');
+        if (!this.options.sessionId) throw new Error('Session identity is required');
 
         this.sessionEventUnsub?.();
         this.sessionEventUnsub = null;
@@ -656,7 +638,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.refreshAgents();
 
         const { sessionId, snapshot, title } = await this.sessionService.loadSession(
-            this.options.nodeId, this.currentTitle, this.currentSessionId ?? undefined
+            this.options.sessionId!, this.currentTitle
         );
 
         if (snapshot.sessions.length > 0) {
@@ -682,8 +664,7 @@ export class LLMWorkspaceEditor implements IEditor {
         const savedUIState = await this.stateManager.loadUIState();
 
         const emptySession = snapshot.sessions.length === 0;
-        const effectiveInitialInputState = this.options.initialInputState
-            ?? (emptySession ? await this.readParentDirAIDefaults() : undefined);
+        const effectiveInitialInputState = this.options.initialInputState;
 
         const sessionSettings = preloadedSettings !== undefined
             ? preloadedSettings
@@ -707,7 +688,7 @@ export class LLMWorkspaceEditor implements IEditor {
         // 恢复 workflow 实例来源（manifest.flow）→ 恢复参数；新实例则立即运行一次。
         let autoRunFlow: NonNullable<ConversationManifest['flow']> | undefined;
         try {
-            const manifest = await this.options.chatEngine.getManifest(this.options.nodeId);
+            const manifest = await this.options.sessionRepository.getManifest(this.options.sessionId);
             const flow = manifest?.flow;
             if (flow) {
                 this.chatInput?.selectFlow(flow.flowId, flow.revision, flow.parameters);
@@ -717,6 +698,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.sessionEventUnsub = this.sessionManager.onEvent(
             (event) => {
+                if (event.type === 'branch:switched') void this.stateManager.switchDraftBranch(event.payload.branchName).catch(error => console.error('Branch draft switch failed', error));
                 this.sessionEventHandler.handleSessionEvent(event);
             }
         );
@@ -775,36 +757,6 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     public markAsDeleted(): void { this.isBeingDeleted = true; }
-
-    /** Update the VFS nodeId when the backing file is renamed. */
-    public updateNodeId(newNodeId: string): void {
-        const oldNodeId = this.options.nodeId;
-        if (!newNodeId || newNodeId === oldNodeId) return;
-        const ownerFollowsNode = !!this.options.ownerNodeId
-            && this.options.ownerNodeId === oldNodeId;
-        this.options = {
-            ...this.options,
-            nodeId: newNodeId,
-            ownerNodeId: ownerFollowsNode ? newNodeId : this.options.ownerNodeId,
-        };
-        this.stateManager.updateNodeId(newNodeId);
-        this.historyView?.updateNodeId(newNodeId);
-        this.commandBus.execute(SessionCommand.UpdateNode, { newNodeId }).catch(() => {});
-        void this.syncRenamedManifest(newNodeId);
-    }
-
-    private async syncRenamedManifest(newNodeId: string): Promise<void> {
-        try {
-            const manifest = await this.options.chatEngine.getManifest(newNodeId);
-            if (this.currentTitle && manifest.title !== this.currentTitle) {
-                await this.options.chatEngine.updateManifest(newNodeId, {
-                    title: this.currentTitle,
-                });
-            }
-        } catch (error) {
-            console.warn('[LLMWorkspaceEditor] Failed to sync renamed session:', error);
-        }
-    }
 
     async waitUntilReady(): Promise<void> {
         return this.initPromise ?? Promise.resolve();
@@ -1000,7 +952,11 @@ export class LLMWorkspaceEditor implements IEditor {
     async destroy(): Promise<void> {
 
         // 1. 状态持久化（先于组件销毁）
+        this.assetManager?.close();
+        this.sessionEventUnsub?.();
+        this.sessionEventUnsub = null;
         this.stateManager?.cleanup();
+        await this.stateManager?.waitForDrafts();
 
         if (this.initComplete && !this.isBeingDeleted && !this.sessionManager.isGenerating()) {
             await this.stateManager?.saveUIState(
@@ -1009,8 +965,7 @@ export class LLMWorkspaceEditor implements IEditor {
             ).catch(() => { });
         }
 
-        // 2. 外部事件解绑
-        this.sessionEventUnsub?.();
+        // 2. 外部事件解绑（Session 事件已在等待草稿前解除）
         this.globalEventUnsub?.();
         this.agentServiceUnsub?.();
         this.sessionEventUnsub = null;

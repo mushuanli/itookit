@@ -21,9 +21,10 @@ import { createVFSUI, connectEditorLifecycle, VFSUIShell } from '@itookit/vfs-ui
 import { defaultEditorFactory } from '@itookit/mdxeditor';
 import '@itookit/mdxeditor/style.css';
 import { SettingsService } from '../services/SettingsService';
-import { SystemVFSEngine } from './system-fs/SystemVFSEngine';
+import { createSystemFileInspector } from './system-fs/system-file-inspector';
 
 export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
+    private inspector?: Awaited<ReturnType<typeof createSystemFileInspector>>;
     private vfsUI?: VFSUIShell;
     private lifecycleUnsub?: () => void;
     private isStructureInitialized = false;
@@ -42,9 +43,7 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
                     <div>
                         <h2 class="settings-page__title">System FS Explorer</h2>
                         <p class="settings-page__description">
-                            Read-only debug view of all VFS modules and their files.
-                            Hidden files (<code>.</code> prefix) are visible but their
-                            content is not shown.
+                            Read-only view of configured workspace files and device descriptions.
                         </p>
                     </div>
                     <span class="sfe-badge">debug / read-only</span>
@@ -56,7 +55,8 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
         const mount = this.container.querySelector('#sfe-mount') as HTMLElement;
 
         // ── Engine: cross-module read-only VFS view ───────────────────────────
-        const engine = new SystemVFSEngine(this.service.vfs);
+        this.inspector = await createSystemFileInspector(this.service.workspaces, this.service.vfs.devices.list().map(id => this.service.vfs.devices.get(id)));
+        const engine = this.inspector.fs;
 
         // ── Layout DOM ──────────────────────────────────────────────────────
         const layoutEl = document.createElement('div');
@@ -76,7 +76,7 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
         this.vfsUI = createVFSUI(
             {
                 readOnly: true,
-                title: 'VFS Modules',
+                title: 'Files',
                 searchPlaceholder: 'Search files…',
                 initialSidebarCollapsed: false,
                 sessionListContainer: sidebarEl,
@@ -103,6 +103,8 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
         this.vfsUI = undefined;
         this.lifecycleUnsub = undefined;
         this.isStructureInitialized = false;
+        await this.inspector?.dispose();
+        this.inspector = undefined;
         await super.destroy();
     }
 }

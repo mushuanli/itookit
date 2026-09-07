@@ -1,4 +1,4 @@
-import { EventBus, pathUtils, type IModuleFS } from '@itookit/vfs-core';
+import { EventBus, pathUtils, type IFileSystem } from '@itookit/vfs-core';
 import { EffectRegistry, ProgramRegistry, StorageResolverRegistry, WorkspaceRegistry } from '../ports/registry';
 import type { KernelPlugin, KernelRegistration } from '../ports/plugin';
 import { DurablePoller } from '../runtime/durable-poller';
@@ -60,7 +60,7 @@ import { decisionSideEffects, prepareSpawns } from './actions';
 interface KernelEvents { changed: { sessionId: string; taskId?: string }; }
 
 export interface KernelOptions {
-    catalog: { fs: IModuleFS; rootPath?: string };
+    catalog: { fs: IFileSystem; rootPath?: string };
     workerId?: string;
     maxConcurrent?: number;
     maxConcurrentEffects?: number;
@@ -84,7 +84,7 @@ export class Kernel implements KernelRegistration {
     readonly workspaces = new WorkspaceRegistry();
     private readonly eventsBus = new EventBus<KernelEvents>();
     private readonly sessions = new Map<SessionId, ResolvedStorageBinding>();
-    private readonly catalogFs: IModuleFS;
+    private readonly catalogFs: IFileSystem;
     private catalogListener?: () => void;
     private readonly storageListeners = new Map<SessionId, () => void>();
     private readonly requestedDrains = new Set<SessionId>();
@@ -612,9 +612,7 @@ export class Kernel implements KernelRegistration {
         this.storageListeners.get(sessionId)?.();
         this.sessions.set(sessionId, binding);
         this.resourcePoller.start(`session:${sessionId}`);
-        let root = pathUtils.normalize(binding.rootPath);
-        const modulePrefix = `/module/${binding.fs.moduleId}/`;
-        if (root.startsWith(modulePrefix)) root = root.slice(modulePrefix.length - 1);
+        const root = pathUtils.normalize(binding.rootPath);
         this.storageListeners.set(sessionId, binding.fs.on('seq:committed', event => {
             if (this.disposed || !event.payload.paths.some(path => pathUtils.isUnder(path, root))) return;
             this.notify(sessionId);

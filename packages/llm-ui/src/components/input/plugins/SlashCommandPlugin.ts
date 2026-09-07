@@ -220,6 +220,8 @@ export interface SlashCommandCallbacks {
     onCancelTask?: () => Promise<void>;
     onResumeTask?: () => Promise<void>;
     onApproveTask?: (note: string) => Promise<void>;
+    onAddDirectory?: (args: string) => Promise<void>;
+    onSetHome?: (args: string) => Promise<void>;
     onExec?: (command: string) => Promise<void>;
 
     // ── By the way ────────────────────────────────────────────────────────────
@@ -420,7 +422,7 @@ export class SlashCommandPlugin implements InputPlugin {
             // Insert "/skillname " with cursor right after the space
             // so the user can immediately start typing args / @file refs
             this.ctx.setText(`/${command.name} `);
-            this.ctx.focus();
+            this.ctx?.focus();
             this.ctx.setCursorPosition(command.name.length + 2);
         } else {
             this.executeCommand(command, '');
@@ -451,7 +453,7 @@ export class SlashCommandPlugin implements InputPlugin {
             Toast.error(e instanceof Error ? e.message : `/${command.name} failed`);
         }
 
-        this.ctx.focus();
+        this.ctx?.focus();
     }
 
     private closePanel(): void {
@@ -807,6 +809,8 @@ export class SlashCommandPlugin implements InputPlugin {
             },
 
             // ── Durable Task Control ─────────────────────────────────────────
+            directoryCommand('add-dir', '挂载目录，默认读写；r 只读 / w 读写', '📁', cb.onAddDirectory, '<dir> [r|w]'),
+            directoryCommand('set-home', '设置默认目录（不自动挂载）', '🏠', cb.onSetHome, '<dir>'),
             privilegedCommand('plan', 'Create a durable plan task', '🗺️', cb.onPlan, '<goal>'),
             privilegedCommand('cancel', 'Cancel the attached task', '⏹️', cb.onCancelTask),
             privilegedCommand('resume', 'Resume the attached task', '▶️', cb.onResumeTask),
@@ -980,4 +984,9 @@ function privilegedCommand(
             await execute(args.trim());
         },
     };
+}
+
+function directoryCommand(name: string, description: string, icon: string, execute: ((args: string) => Promise<void>) | undefined, placeholder: string): SlashCommandDef {
+    return { name, label: `/${name}`, description, icon, group: 'Files', hasArgs: true, argsPlaceholder: placeholder,
+        execute: async args => { if (!execute) throw new Error('此编辑器未提供目录挂载功能'); await execute(args.trim()); } };
 }

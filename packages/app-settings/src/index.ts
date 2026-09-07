@@ -1,3 +1,5 @@
+import type { WorkspaceFileSource } from './services/workspace-files';
+export type { WorkspaceFileSource } from './services/workspace-files';
 // @file: app-settings/index.ts
 import './styles/styles.css';
 import type { IVFSManager } from '@itookit/vfs-core';
@@ -19,8 +21,8 @@ export { SkillsEngine } from './engine/SkillsEngine';
  *       vfsCore.devices,  // IDeviceManager，供 ConnectionSettingsEditor 使用
  *   );
  */
-export async function createSettingsModule(vfs: IVFSManager) {
-    const service = new SettingsService(vfs);
+export async function createSettingsModule(vfs: IVFSManager, workspaces: readonly WorkspaceFileSource[]) {
+    const service = new SettingsService(vfs, undefined, workspaces);
     await service.init();
     const engine = new SettingsEngine(service);
     return { service, engine };

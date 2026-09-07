@@ -1,3 +1,4 @@
+import { editorFilePath } from '../interfaces/IEditor';
 // @file ui-common/components/BaseSettingsEditor.ts
 /// <reference lib="dom" />
 
@@ -86,8 +87,8 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
      * refreshes its list display. Safe to call without engine — no-ops silently.
      */
     protected async syncMetadata(changes: Record<string, unknown>): Promise<void> {
-        const engine = this.options.moduleFS;
-        const nodeId = this.options.nodeId;
+        const engine = this.options.files?.fs;
+        const nodeId = editorFilePath(this.options);
         if (!engine || !nodeId) return;
         await engine.driver.updateMetadata(nodeId, changes);
     }
@@ -97,8 +98,8 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
      * Safe to call without engine — no-ops silently.
      */
     protected async syncName(newName: string): Promise<void> {
-        const engine = this.options.moduleFS;
-        const nodeId = this.options.nodeId;
+        const engine = this.options.files?.fs;
+        const nodeId = editorFilePath(this.options);
         if (!engine || !nodeId || !newName) return;
         await engine.driver.rename(nodeId, newName);
     }

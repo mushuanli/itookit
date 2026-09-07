@@ -23,7 +23,7 @@ export const makeEngineNode = (overrides: Partial<EngineNode> = {}): EngineNode 
     modifiedAt: 1000000,
     tags: [],
     metadata: {},
-    moduleId: 'chat',
+    viewId: 'chat',
     ...overrides,
 });
 
@@ -44,7 +44,7 @@ export const makeVFSNodeUI = (overrides: Partial<VFSNodeUI> = {}): VFSNodeUI => 
         lastModified: new Date(1000000).toISOString(),
         parentPath: null,
         path: '/test.chat',
-        moduleId: 'chat',
+        viewId: 'chat',
         custom: { _originalName: 'test.chat', _extension: '.chat' },
     },
     content: { format: 'text/markdown', summary: '', searchableText: '', data: '' },
@@ -54,7 +54,7 @@ export const makeVFSNodeUI = (overrides: Partial<VFSNodeUI> = {}): VFSNodeUI => 
 // ── MockSessionEngine ────────────────────────────────────────────────────────
 
 /**
- * Minimal IModuleFS mock that:
+ * Minimal IFileSystem mock that:
  * - Exposes driver.on() for EngineAdapter.connectEngineEvents()
  * - Returns nodes from an internal map via driver.getNode() (by id or path fallback)
  * - Returns [] for driver.getChildren()

@@ -1,6 +1,6 @@
 /**
  * @file packages/vfs-core/src/impl/capabilities/AssetOps.ts
- * @desc AssetDir 能力实现。依赖 EnginePort 而非 ModuleFS 具体类。
+ * @desc AssetDir 能力实现。依赖 EnginePort 而非 DirectoryFS 具体类。
  */
 
 import type { IAssetOperations, FSNode, FileContent } from '../../protocol';

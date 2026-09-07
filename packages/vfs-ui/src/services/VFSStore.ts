@@ -382,7 +382,7 @@ export class VFSStore implements IStatePort {
   private handleSessionSelect(draft: VFSUIState, sessionId: string | null): void {
     if (sessionId) {
       const item = findNodeById(draft.items, sessionId);
-      if (item?.type === 'file') {
+      if (item) {
         const oldId = draft.activeId;
         draft.activeId = sessionId;
         draft.creatingItem = null;

@@ -3,7 +3,7 @@
  * @desc A generic tag autocomplete source that works with any IFSEngine.
  */
 import { IAutocompleteSource, type Suggestion } from './autocomplete-source';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 
 interface TagData {
     name: string;
@@ -12,7 +12,7 @@ interface TagData {
 }
 
 export class EngineTagSource extends IAutocompleteSource {
-    constructor(private engine: IModuleFS) {
+    constructor(private engine: IFileSystem) {
         super();
     }
 

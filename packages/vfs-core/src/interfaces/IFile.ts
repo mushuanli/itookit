@@ -10,7 +10,7 @@
  *    files inside the companion assetdir. All internal files, attachments, and config
  *    files use the same uniform API (no readInternal/putAsset distinction).
  *
- * Create via IModuleFS.openFile(nodeId) or a format-specific file factory.
+ * Create via IFileSystem.openFile(path) or a format-specific file factory.
  */
 import type { FSNode } from './core/types';
 import type { FSEventType, FSEvent } from './core/events';
@@ -45,7 +45,7 @@ export interface AssetObj {
 
 export interface IFile extends IIOStream {
     // ========== Identity ==========
-    readonly nodeId: string;
+    readonly path: string;
     getName(): Promise<string>;
     getPath(): Promise<string>;
     getNode(): Promise<FSNode>;

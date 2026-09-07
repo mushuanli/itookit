@@ -42,7 +42,7 @@ export class AssetManagerPlugin implements MDxPlugin {
     }
 
     private async openAssetManager(context: PluginContext, editor: any): Promise<void> {
-        const engine = context.getModuleFS?.();
+        const engine = context.getFileSystem?.();
         const ownerNodeId = context.getOwnerNodeId?.();
 
         if (!engine) {
@@ -54,7 +54,7 @@ export class AssetManagerPlugin implements MDxPlugin {
             return;
         }
 
-        // v3.3: IModuleFS.meta.assets.getAssetDirPath replaces deprecated getAssetDirId
+        // v3.3: IFileSystem.meta.assets.getAssetDirPath replaces deprecated getAssetDirId
         const assetDirPath = await engine.meta.assets.getAssetDirPath(ownerNodeId);
 
         if (!assetDirPath) {

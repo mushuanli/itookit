@@ -29,8 +29,6 @@ export type FSEventType =
     | 'node:renamed'
     | 'mount:added'
     | 'mount:removed'
-    | 'module:mounted'
-    | 'module:unmounted'
     | 'error';
 
 export interface FSNodeCreatedPayload {
@@ -88,10 +86,6 @@ export interface FSMountPayload {
     label?: string;
 }
 
-export interface FSModuleLifecyclePayload {
-    moduleName: string;
-}
-
 export interface FSErrorPayload {
     code: string;
     message: string;
@@ -111,8 +105,6 @@ export interface FSEventPayloadMap {
     'node:renamed': FSNodeRenamedPayload;
     'mount:added': FSMountPayload;
     'mount:removed': FSMountPayload;
-    'module:mounted': FSModuleLifecyclePayload;
-    'module:unmounted': FSModuleLifecyclePayload;
     'error': FSErrorPayload;
 }
 
@@ -120,12 +112,13 @@ export interface FSEvent<T extends FSEventType = FSEventType> {
     readonly type: T;
     readonly payload: FSEventPayloadMap[T];
     readonly timestamp: number;
-    /** 事件来源模块 */
-    readonly moduleId?: string;
     /** 是否来自事务提交 */
     readonly fromTransaction?: boolean;
     /** 来源挂载点 ID */
     readonly mountId?: string;
+    /** Identity of the composed file view, when emitted through a view. */
+    readonly viewId?: string;
+    readonly revision?: number;
 }
 
 /**

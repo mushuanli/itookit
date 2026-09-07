@@ -1,6 +1,6 @@
 /**
  * @file packages/vfs-core/src/impl/capabilities/SeqFileOps.ts
- * @desc SeqFile K-V 能力实现。依赖 EnginePort 而非 ModuleFS 具体类。
+ * @desc SeqFile K-V 能力实现。依赖 EnginePort 而非 DirectoryFS 具体类。
  */
 
 import type {
@@ -128,7 +128,7 @@ export class SeqFileOps implements ISeqFileOperations {
 
     async setEntries(path: string, entries: Record<string, string>): Promise<void> {
         if (!this.records.transaction) {
-            throw new FSCapabilityError('transactionalSeqFiles', this.fs.moduleId);
+            throw new FSCapabilityError('transactionalSeqFiles', this.fs.viewId);
         }
         await this.transaction(async tx => {
             for (const [key, value] of Object.entries(entries)) await tx.setEntry(path, key, value);
@@ -191,7 +191,7 @@ export class SeqFileOps implements ISeqFileOperations {
 
     async transaction<T>(operation: (tx: ISeqFileTransaction) => Promise<T>): Promise<T> {
         if (!this.records.transaction) {
-            throw new FSCapabilityError('transactionalSeqFiles', this.fs.moduleId);
+            throw new FSCapabilityError('transactionalSeqFiles', this.fs.viewId);
         }
         let changed: string[] = [];
         const result = await this.records.transaction(async records => {

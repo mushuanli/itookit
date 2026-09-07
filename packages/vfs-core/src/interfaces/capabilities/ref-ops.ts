@@ -2,7 +2,7 @@
  * @file packages/vfs-core/src/interfaces/capabilities/ref-ops.ts
  * @desc 双向引用操作子接口
  *
- * 通过 IModuleFS.refs 访问（当 capabilities.references === true）。
+ * 通过 IFileSystem.refs 访问（当 capabilities.references === true）。
  */
 
 import type { RefType, Reference } from '../core/types';

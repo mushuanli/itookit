@@ -1,6 +1,6 @@
 /**
  * @file packages/vfs-core/src/impl/capabilities/RefOps.ts
- * @desc 双向引用能力实现。依赖 EnginePort 而非 ModuleFS 具体类。
+ * @desc 双向引用能力实现。依赖 EnginePort 而非 DirectoryFS 具体类。
  */
 
 import type {
@@ -18,8 +18,7 @@ const OUT_REF_PREFIX = '__vfs_ref_out__:';
 const IN_REF_PREFIX = '__vfs_ref_in__:';
 
 interface RefInput {
-    targetPath?: string;
-    targetIdOrPath?: string;
+    targetPath: string;
     refType: RefType;
     extra?: Record<string, unknown>;
 }
@@ -117,7 +116,7 @@ export class RefOps implements IRefOperations {
             ref => this.removeRef(sourcePath, ref.targetPath, ref.refType),
         ));
         for (const ref of refs) {
-            const targetPath = ref.targetPath ?? ref.targetIdOrPath;
+            const targetPath = ref.targetPath;
             if (!targetPath) throw new FSError('EINVAL', 'reference target path is required', 'syncOutgoing');
             await this.addRef(sourcePath, targetPath, ref.refType, ref.extra);
         }

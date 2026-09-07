@@ -6,7 +6,7 @@ import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MDxEditor } from '../../editor/mdx-editor';
 import type { PluginManager } from '../../core/plugin-manager';
 import { buildRenamedFilename } from '@itookit/common';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 
 const replaceBasename = (path: string, filename: string): string => {
   const slash = path.lastIndexOf('/');
@@ -14,7 +14,7 @@ const replaceBasename = (path: string, filename: string): string => {
 };
 
 const renameWithStoredTitle = async (
-  engine: IModuleFS,
+  engine: IFileSystem,
   nodeId: string,
   filename: string,
   title: string,
@@ -246,7 +246,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         newTitle,
         this.currentTitle + this.fileExt,
       );
-      const engine = context.getModuleFS?.();
+      const engine = context.getFileSystem?.();
       const nodeId = context.getCurrentNodeId();
       if (!engine || !nodeId) {
         this.titleEl!.value = this.currentTitle;

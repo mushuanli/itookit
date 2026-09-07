@@ -5,7 +5,7 @@
  * System file filtering (. prefix, __ prefix, _ asset dirs) is handled
  * automatically by shouldFilterNode() inside each provider's filterResults().
  */
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import { FileMentionSource } from './FileMentionSource';
 import { DirectoryMentionSource } from './DirectoryMentionSource';
 
@@ -17,7 +17,7 @@ import { DirectoryMentionSource } from './DirectoryMentionSource';
  *                  undefined = default (global). Empty array disables cross-module search.
  */
 export function createVFSMentionProviders(
-  engine: IModuleFS,
+  engine: IFileSystem,
   scope?: string[]
 ) {
   if (scope !== undefined && scope.length === 0) return [];

@@ -49,3 +49,14 @@
     font-size: 1rem;
     user-select: none;
 }
+.session-editor-mount { flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.session-detail { flex: 1; min-height: 0; overflow: auto; padding: 20px; color: var(--text-primary, #222); }
+.session-detail__entry { display: block; width: 100%; padding: 12px; text-align: left; background: transparent; color: inherit; border: 0; border-bottom: 1px solid var(--mm-border-color, #eee); cursor: pointer; }
+.session-detail details { padding: 10px 0; }
+.session-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-mount-dialog { width: min(560px, 90vw); max-height: 85vh; overflow: auto; padding: 24px; border: 1px solid var(--mm-border-color, #ddd); border-radius: 12px; color: var(--text-primary, #222); background: var(--background-primary, #fff); }
+.session-mount-dialog::backdrop { background: #0005; }
+.session-mount-dialog input:not([type=checkbox]) { display: block; box-sizing: border-box; width: 100%; padding: 10px; margin: 8px 0; }
+.session-mount-dialog button, .session-mount-dialog select { padding: 8px; margin: 5px 4px 5px 0; }
+.session-mount-dialog label { margin-left: 10px; }
+.session-mount-dialog [role=status] { white-space: pre-wrap; }

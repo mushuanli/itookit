@@ -1,6 +1,6 @@
 import * as TPL from './templates';
 
-export type EditorTypeKey = 'standard' | 'agent' | 'chat' | 'flow';
+export type EditorTypeKey = 'standard' | 'agent' | 'flow';
 
 export interface AppFileTypeConfig {
     id: string;
@@ -48,15 +48,6 @@ export const FILE_REGISTRY: Record<string, AppFileTypeConfig> = {
                 return content;
             }
         },
-    },
-    chat: {
-        id: 'chat',
-        label: 'Chat',
-        extension: '.chat',
-        icon: '💬',
-        defaultFileName: 'New Session.chat',
-        defaultContent: TPL.TPL_CHAT,
-        editorType: 'chat',
     },
     flow: {
         id: 'flow',

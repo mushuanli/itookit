@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { IChatEngine } from '../src/persistence/types';
+import type { ISessionRepository } from '../src/persistence/types';
 import { ContextProfileStore } from '../src/persistence/context-profile-store';
 
-function memoryEngine(): IChatEngine {
+function memoryEngine(): ISessionRepository {
     const assets = new Map<string, string>();
     return {
-        createAsset: async (_nodeId: string, name: string, content: string | ArrayBuffer) => {
+        writeDocument: async (_nodeId: string, name: string, content: string | ArrayBuffer) => {
             assets.set(name, typeof content === 'string' ? content : new TextDecoder().decode(content));
             return name;
         },
-        readAsset: async (_nodeId: string, name: string) => assets.get(name) ?? null,
-    } as unknown as IChatEngine;
+        readDocument: async (_nodeId: string, name: string) => assets.get(name) ?? null,
+    } as unknown as ISessionRepository;
 }
 
 describe('ContextProfileStore', () => {

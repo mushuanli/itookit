@@ -9,7 +9,7 @@ import {
     generateShortUUID
 } from '@itookit/common';
 import { ISessionUI, type SessionUIOptions, type EditorFactory } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 
 import type {
   VFSNodeUI,
@@ -44,7 +44,10 @@ export interface VFSUIShellOptions extends SessionUIOptions<VFSNodeUI> {
   defaultUiSettings?: Partial<UISettings>;
   defaultExtension?: string;
   fileTypes?: FileTypeDefinition[];
-  defaultEditorFactory: EditorFactory;
+  defaultEditorFactory?: EditorFactory;
+  directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
+  activateDirectories?: boolean;
+  primaryAction?: { label: string; run(): Promise<void> };
   customEditorResolver?: CustomEditorResolver;
   searchFilter?: SearchFilter;
   scopeId?: string;
@@ -86,7 +89,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
 
   constructor(
     private readonly options: VFSUIShellOptions,
-    private readonly engine: IModuleFS
+    private readonly engine: IFileSystem
   ) {
     super();
 
@@ -150,15 +153,8 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
     // 1. Load root-level data from engine
     await this.engineAdapter.loadData();
 
-    if (!this.options.readOnly) {
-      // 2. Start listening to engine events
-      this.engineAdapter.connectEngineEvents();
-
-      // 3. Restore directory expansion from persisted state
-      await this.engineAdapter.restoreExpansion(
-        this.statePort.getState().expandedFolderIds
-      );
-    }
+    this.engineAdapter.connectEngineEvents();
+    await this.engineAdapter.restoreExpansion(this.statePort.getState().expandedFolderIds);
 
     // 4. Create default file if the tree is empty
     await this.ensureDefaultFile();
@@ -180,7 +176,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
         // VFSService appends the correct suffix (e.g. ".chat").
         await this.vfsService.createFile({
           title: formatDefaultFileTitle(),
-          content: startup.startupContent ?? (startup.startupFileName?.endsWith('.chat') ? '' : '# Welcome\n\nSelect a file to start.'),
+          content: startup.startupContent ?? '# Welcome\n\nSelect a file to start.',
           parentPath: null,
         });
       } catch (e) {
@@ -218,11 +214,26 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
 
   private findFirstFile(items: VFSNodeUI[]): VFSNodeUI | null {
     for (const item of items) {
-      if (item.type === 'file') return item;
+      if (item.type === 'file' || this.options.activateDirectories) return item;
       const f = item.children && this.findFirstFile(item.children);
       if (f) return f;
     }
     return null;
+  }
+
+  async refresh(): Promise<void> {
+    const expanded = new Set(this.statePort.getState().expandedFolderIds);
+    await this.engineAdapter.loadData();
+    await this.engineAdapter.restoreExpansion(expanded);
+  }
+
+  async selectPath(path: string): Promise<void> {
+    const parts = path.split('/').filter(Boolean);
+    for (let index = 1; index < parts.length; index++) {
+      const parent = '/' + parts.slice(0, index).join('/');
+      await this.engineAdapter.expandDirectory(parent);
+    }
+    this.commandPort.execute('nav:selectSession', { sessionId: path });
   }
 
   getActiveSession(): VFSNodeUI | undefined {
@@ -319,6 +330,9 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
         this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
       fileCreation: this.options.fileCreation,
       title: this.options.title,
+      activateDirectories: this.options.activateDirectories,
+      directoryAction: this.options.directoryAction,
+      primaryAction: this.options.primaryAction,
       searchFilter: this.options.searchFilter,
       instanceId: this.instanceId,
       engine: this.engine,

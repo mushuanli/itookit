@@ -2,8 +2,7 @@
 // Manages light / dark / system theme preference.
 // Persists to etc:/ui/theme.json via VFS; applies data-theme on <html>.
 
-import type { IVFSManager } from '@itookit/vfs-core';
-import { CONFIG_MODULE } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -14,7 +13,7 @@ export class ThemeService {
     private mode: ThemeMode = 'system';
     private mq: MediaQueryList;
     private mqListener: () => void;
-    private vfs: IVFSManager | null = null;
+    private vfs: IFileSystem | null = null;
 
     constructor() {
         this.mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -25,7 +24,7 @@ export class ThemeService {
     }
 
     /** Call after VFS is ready. Loads persisted preference and applies theme. */
-    async init(vfs: IVFSManager): Promise<void> {
+    async init(vfs: IFileSystem): Promise<void> {
         this.vfs = vfs;
         this.mode = await this.loadMode();
         this.applyTheme();
@@ -69,7 +68,7 @@ export class ThemeService {
     private async loadMode(): Promise<ThemeMode> {
         if (!this.vfs) return 'system';
         try {
-            const raw = await this.vfs.read(CONFIG_MODULE, THEME_PATH);
+            const raw = await this.vfs.driver.readContent(THEME_PATH);
             const json = JSON.parse(typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer));
             const m = json?.mode;
             return m === 'light' || m === 'dark' || m === 'system' ? m : 'system';
@@ -80,7 +79,9 @@ export class ThemeService {
 
     private async saveMode(mode: ThemeMode): Promise<void> {
         if (!this.vfs) return;
-        await this.vfs.write(CONFIG_MODULE, THEME_PATH, JSON.stringify({ mode }, null, 2));
+        const content = JSON.stringify({ mode }, null, 2);
+        if (await this.vfs.driver.exists(THEME_PATH)) await this.vfs.driver.writeContent(THEME_PATH, content);
+        else await this.vfs.driver.createFile({ name: 'theme.json', parentPath: '/ui', content, recursive: true });
     }
 
     destroy(): void {

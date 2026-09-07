@@ -1,16 +1,15 @@
+import { workspaceFiles, writeWorkspaceFile, type WorkspaceFileSource } from './workspace-files';
+import { exportFileSystem, importFileSystem } from '@itookit/vfs-core';
 /**
  * @file: app-settings/services/SettingsService.ts
  */
-import { FS_MODULE_AGENTS } from '@itookit/vfs-core';
-import { CONFIG_MODULE } from '@itookit/vfs-core';
-import type { IVFSManager, VFSManagerEvent } from '@itookit/vfs-core';
+import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { FSNotFoundError } from '@itookit/vfs-core';
 import type { SyncMode } from '../types/sync';
 import { SettingsState, Contact, Tag } from '../types/types';
 import { SnapshotService } from './SnapshotService';
 
 // UI display: modules not shown to users in workspace picker
-const SYSTEM_MODULES = ['etc', '__vfs_meta__', 'settings_ui', FS_MODULE_AGENTS];
 
 
 const FILES = {
@@ -64,6 +63,7 @@ type ChangeListener = () => void;
  * 3. 协调 VFS 配置模块的挂载
  */
 export class SettingsService {
+    configFiles!: IFileSystem;
     public readonly vfs: IVFSManager;
     private dbName: string;
 
@@ -87,7 +87,7 @@ export class SettingsService {
 
     public readonly snapshot: SnapshotService;
 
-    constructor(vfs: IVFSManager, dbName: string = 'MindOS-v2') {
+    constructor(vfs: IVFSManager, dbName: string = 'MindOS-v2', readonly workspaces: readonly WorkspaceFileSource[] = []) {
         this.vfs = vfs;
         this.dbName = dbName;
         this.snapshot = new SnapshotService(vfs, dbName);
@@ -100,8 +100,7 @@ export class SettingsService {
     async init(): Promise<void> {
         if (this.initialized) return;
 
-        // /etc is a rootfs built-in directory — no mount() needed.
-        // getEngine('etc') returns a special ModuleFS with root at /etc/.
+        this.configFiles = await this.vfs.openFileSystem('/etc');
 
         // 1. 加载数据
         await Promise.all([
@@ -147,18 +146,9 @@ export class SettingsService {
             }, 2000);
         };
 
-        const relevant = (moduleId: string) => moduleId === CONFIG_MODULE;
-
-        this.eventUnsubscribers.push(
-            this.vfs.on('node:created', (e: VFSManagerEvent<'node:created'>) => {
-                if (relevant(e.payload.moduleId)) debounce();
-            }),
-            this.vfs.on('node:updated', (e: VFSManagerEvent<'node:updated'>) => {
-                if (relevant(e.payload.moduleId)) debounce();
-            }),
-            this.vfs.on('node:deleted', (e: VFSManagerEvent<'node:deleted'>) => {
-                if (relevant(e.payload.moduleId)) debounce();
-            }),
+        for (const source of this.workspaces) this.eventUnsubscribers.push(
+            source.fs.on('node:created', debounce), source.fs.on('node:updated', debounce),
+            source.fs.on('node:deleted', debounce), source.fs.on('node:renamed', debounce),
         );
     }
 
@@ -169,7 +159,7 @@ export class SettingsService {
     private async loadEntity<K extends keyof Pick<SettingsState, 'tags' | 'contacts'>>(key: K): Promise<void> {
         const path = FILES[key];
         try {
-            const content = await this.vfs.read(CONFIG_MODULE, path);
+            const content = await this.configFiles.driver.readContent(path);
             const jsonStr = typeof content === 'string' 
                 ? content 
                 : new TextDecoder().decode(content as ArrayBuffer);
@@ -186,7 +176,7 @@ export class SettingsService {
     private async saveEntity<K extends keyof Pick<SettingsState, 'tags' | 'contacts'>>(key: K): Promise<void> {
         const path = FILES[key];
         const content = JSON.stringify(this.state[key], null, 2);
-        await this.vfs.write(CONFIG_MODULE, path, content);
+        await writeWorkspaceFile(this.configFiles, path, content);
         if (key !== 'tags') this.notify();
     }
 
@@ -221,7 +211,7 @@ export class SettingsService {
         try {
             let configTags: Tag[] = [];
             try {
-                const content = await this.vfs.read(CONFIG_MODULE, FILES.tags);
+                const content = await this.configFiles.driver.readContent(FILES.tags);
                 const jsonStr = typeof content === 'string' 
                     ? content 
                     : new TextDecoder().decode(content as ArrayBuffer);
@@ -230,7 +220,15 @@ export class SettingsService {
                 // ignore if file not exists
             }
 
-            const vfsTags = await this.vfs.getAllTags();
+            const counts = new Map<string, { name: string; color?: string; refCount: number }>();
+            for (const source of this.workspaces) for (const tag of await source.fs.meta.tags.getAllTags()) {
+                let count = 0;
+                await source.fs.meta.tags.walkByTag(tag.name, () => { count++; return true; });
+                const previous = counts.get(tag.name);
+                counts.set(tag.name, { name: tag.name, color: tag.color ?? previous?.color,
+                    refCount: (previous?.refCount ?? 0) + count });
+            }
+            const vfsTags = [...counts.values()];
 
             const mergedTags: Tag[] = vfsTags.map((vTag) => {
                 const configTag = configTags.find((ct) => ct.name === vTag.name);
@@ -260,7 +258,6 @@ export class SettingsService {
 
     async saveTag(tag: Tag): Promise<void> {
         // 更新 VFS 的标签定义
-        await this.vfs.updateTagDefinition(tag.name, { color: tag.color });
         this.updateOrAdd(this.state.tags, tag);
         await this.saveEntity('tags');
     }
@@ -272,14 +269,11 @@ export class SettingsService {
         // 注意：VFS 可能没有直接的 deleteTagDefinition
         // 需要通过 TagManager 或者从所有节点移除该标签
         try {
-            const tagNodes = await this.vfs.findByTag(tag.name);
-            await Promise.all(tagNodes.map(async nodeId => {
-                const nodeWithModule = await this.vfs.getNodeById(nodeId);
-                if (nodeWithModule) {
-                    const engine = this.vfs.getEngine(nodeWithModule.moduleName);
-                    await engine.meta.tags?.removeTag(nodeId, tag.name);
-                }
-            }));
+            for (const source of this.workspaces) {
+                const paths: string[] = [];
+                await source.fs.meta.tags.walkByTag(tag.name, path => { paths.push(path); return true; });
+                for (const path of paths) await source.fs.meta.tags.removeTag(path, tag.name);
+            }
         } catch (e) {
             console.warn('Failed to cleanup tag from nodes', e);
         }
@@ -303,7 +297,7 @@ export class SettingsService {
 
     async loadSyncConfig(): Promise<void> {
         try {
-            const content = await this.vfs.read(CONFIG_MODULE, FILES.sync);
+            const content = await this.configFiles.driver.readContent(FILES.sync);
             const jsonStr = typeof content === 'string' 
                 ? content 
                 : new TextDecoder().decode(content as ArrayBuffer);
@@ -316,7 +310,7 @@ export class SettingsService {
 
     async saveSyncConfig(config: SyncConfig): Promise<void> {
         this.syncConfig = config;
-        await this.vfs.write(CONFIG_MODULE, FILES.sync, JSON.stringify(config, null, 2));
+        await writeWorkspaceFile(this.configFiles, FILES.sync, JSON.stringify(config, null, 2));
     }
 
     async testConnection(url: string, _user: string, token: string): Promise<boolean> {
@@ -426,7 +420,7 @@ export class SettingsService {
 
     private async indexAllLocalFiles(): Promise<FileMeta[]> {
         const files: FileMeta[] = [];
-        const modules = this.vfs.getAllModules().filter(m => !m.isSystem);
+        const modules = this.workspaces.filter(source => source.syncEnabled);
 
         for (const mod of modules) {
             try {
@@ -439,7 +433,7 @@ export class SettingsService {
     }
 
     private async traverseModuleFiles(moduleName: string, list: FileMeta[]): Promise<void> {
-        const engine = this.vfs.getEngine(moduleName);
+        const engine = workspaceFiles(this.workspaces, moduleName);
 
         await engine.driver.walkTree?.(async (node) => {
             if (node.type !== 'file') return;
@@ -463,7 +457,7 @@ export class SettingsService {
             const moduleName = parts[0];
             const innerPath = '/' + parts.slice(1).join('/');
 
-            const content = await this.vfs.read(moduleName, innerPath);
+            const content = await workspaceFiles(this.workspaces, moduleName).driver.readContent(innerPath);
             const blob = new Blob([this.toArrayBuffer(content)]);
 
             const formData = new FormData();
@@ -497,18 +491,18 @@ export class SettingsService {
             const moduleName = parts[0];
             const innerParts = parts.slice(1);
 
-            if (!this.vfs.getModule(moduleName)) return;
+            if (!this.workspaces.some(source => source.name === moduleName && source.syncEnabled)) throw new Error('Sync source unavailable');
 
             // Asset file: second-to-last segment is an assetdir (starts with '_')
             if (innerParts.length >= 2 && innerParts[innerParts.length - 2].startsWith('_')) {
                 const assetName = innerParts[innerParts.length - 1];
                 const ownerName = innerParts[innerParts.length - 2].slice(1); // strip '_'
                 const ownerPath = '/' + [...innerParts.slice(0, -2), ownerName].join('/');
-                const engine = this.vfs.getEngine(moduleName);
+                const engine = workspaceFiles(this.workspaces, moduleName);
                 await engine.meta.assets?.putAsset(ownerPath, assetName, arrayBuffer);
             } else {
                 const userPath = '/' + innerParts.join('/');
-                await this.vfs.write(moduleName, userPath, arrayBuffer);
+                await writeWorkspaceFile(workspaceFiles(this.workspaces, moduleName), userPath, arrayBuffer);
             }
         } catch (e) {
             console.error(`Failed to download ${meta.path}`, e);
@@ -539,11 +533,11 @@ export class SettingsService {
         moduleNames: string[]
     ): Promise<any> {
         const exportData: any = {
-            version: 2,
+            version: 3,
             timestamp: Date.now(),
             type: 'mixed_backup',
             settings: {},
-            modules: [],
+            workspaces: [],
         };
 
         if (settingsKeys.includes('tags')) {
@@ -554,12 +548,7 @@ export class SettingsService {
         }
 
         for (const name of moduleNames) {
-            try {
-                const moduleDump = await this.vfs.maintenance.exportModule(name);
-                exportData.modules.push(moduleDump);
-            } catch (e) {
-                console.warn(`Failed to export module ${name}`, e);
-            }
+            exportData.workspaces.push({ name, archive: await exportFileSystem(workspaceFiles(this.workspaces, name)) });
         }
         return exportData;
     }
@@ -567,52 +556,29 @@ export class SettingsService {
     async importMixedData(
         data: any,
         settingsKeys: (keyof SettingsState)[],
-        moduleNames: string[],
+        workspaceNames: string[],
         _options: { overwrite?: boolean; mergeTags?: boolean } = {}
     ): Promise<void> {
-        const tasks: Promise<void>[] = [];
-
-        // Resolve value from either new format (data.settings[k]) or legacy format (data[k])
-        const resolveField = (key: string): any[] | undefined => {
-            const fromSettings = data.settings?.[key];
-            const fromRoot = data[key];
-            const val = Array.isArray(fromSettings) ? fromSettings : (Array.isArray(fromRoot) ? fromRoot : undefined);
-            return val;
-        };
-
-        // 1. 恢复配置
-        const tagsData = settingsKeys.includes('tags') ? resolveField('tags') : undefined;
-        if (tagsData) {
-            this.state.tags = tagsData;
-            tasks.push(this.saveEntity('tags'));
+        if (data?.version !== 3 || data.type !== 'mixed_backup' || !Array.isArray(data.workspaces)) throw new Error('Unsupported backup; convert it before importing');
+        const selected = data.workspaces.filter((entry: any) => workspaceNames.includes(entry.name));
+        const seen = new Set<string>();
+        for (const entry of selected) {
+            if (seen.has(entry.name)) throw new Error(`Duplicate backup workspace: ${entry.name}`);
+            seen.add(entry.name);
+            workspaceFiles(this.workspaces, entry.name);
         }
-
-        const contactsData = settingsKeys.includes('contacts') ? resolveField('contacts') : undefined;
-        if (contactsData) {
-            this.state.contacts = contactsData;
-            tasks.push(this.saveEntity('contacts'));
+        for (const name of workspaceNames) if (!seen.has(name)) throw new Error(`Backup workspace missing: ${name}`);
+        // Cross-source restore is not atomic. Propagate failures so the UI never
+        // reports success for a partial restore. Settings are saved afterwards.
+        for (const entry of selected) await importFileSystem(workspaceFiles(this.workspaces, entry.name), entry.archive);
+        if (settingsKeys.includes('tags') && Array.isArray(data.settings?.tags)) {
+            this.state.tags = data.settings.tags;
+            await this.saveEntity('tags');
         }
-
-        // 2. 恢复模块
-        const allModulesList = data.modules || [];
-        if (Array.isArray(allModulesList)) {
-            const selectedModulesData = allModulesList.filter((m: any) =>
-                m.moduleName && moduleNames.includes(m.moduleName)
-            );
-
-            for (const modData of selectedModulesData) {
-                try {
-                    await this.vfs.maintenance.importModule(modData);
-                } catch (e) {
-                    console.error(`Failed to import module ${modData?.module?.name}`, e);
-                }
-            }
+        if (settingsKeys.includes('contacts') && Array.isArray(data.settings?.contacts)) {
+            this.state.contacts = data.settings.contacts;
+            await this.saveEntity('contacts');
         }
-
-        if (tasks.length > 0) {
-            await Promise.all(tasks);
-        }
-
         await this.syncTags();
         this.notify();
     }
@@ -633,16 +599,6 @@ export class SettingsService {
     // =========================================================
     // 系统级操作
     // =========================================================
-
-    async createFullBackup(): Promise<string> {
-        return this.vfs.maintenance.createBackup();
-    }
-
-    async restoreFullBackup(jsonContent: string): Promise<void> {
-        await this.vfs.maintenance.restoreBackup(jsonContent);
-        this.initialized = false;
-        await this.init();
-    }
 
     async factoryReset(): Promise<void> {
         // 关闭 VFS
@@ -705,10 +661,7 @@ export class SettingsService {
     }
 
     getAvailableWorkspaces(): Array<{ name: string; description?: string }> {
-        return this.vfs
-            .getAllModules()
-            .filter((m) => !SYSTEM_MODULES.includes(m.name))
-            .map((m) => ({ name: m.name, description: m.description }));
+        return this.workspaces.map(source => ({ name: source.name, description: source.description }));
     }
 
     /**

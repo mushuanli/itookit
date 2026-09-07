@@ -26,11 +26,9 @@ describe('createSkillTaskSpec', () => {
 
     it('runs the compiled Skill as a real Durable Task', async () => {
         const { manager } = await createVFS({
-            rootBackend: new MemoryBackend(), modules: [{ name: 'test' }],
+            rootBackend: new MemoryBackend(),
         });
-        await manager.mount('test');
-        const fs = manager.getEngine('test');
-        await fs.init();
+        const fs = await manager.openFileSystem('/data/test');
         const kernel = new Kernel({ catalog: { fs } });
         try {
             kernel.registerStorageResolver({

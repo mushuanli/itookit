@@ -8,25 +8,25 @@ import {
   type HoverPreviewData,
 } from './autocomplete-source';
 import {
-  type IModuleFS,
+  type IFileSystem,
   type FSNode,
 } from '@itookit/vfs-core';
 import { shouldFilterNode } from '../utils/helpers';
 
 export interface MentionSourceDependencies {
-  engine: IModuleFS;
+  engine: IFileSystem;
   scope?: boolean | string[];
 }
 
 export abstract class BaseMentionSource extends IMentionSource {
-  protected readonly engine: IModuleFS;
+  protected readonly engine: IFileSystem;
   protected readonly searchScope: string[] | undefined;
 
   constructor({ engine, scope = true }: MentionSourceDependencies) {
     super();
     if (!engine)
       throw new Error(
-        `${this.constructor.name} requires an IModuleFS instance.`
+        `${this.constructor.name} requires an IFileSystem instance.`
       );
     this.engine = engine;
     this.searchScope = Array.isArray(scope) ? scope : scope ? ['*'] : undefined;

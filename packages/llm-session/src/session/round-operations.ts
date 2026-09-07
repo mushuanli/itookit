@@ -51,7 +51,7 @@ export class RoundOperations {
         historyPolicy?: HistoryPolicy,
         sendIntent?: SendIntent,
     ): Promise<string> {
-        const { sessionId, nodeId, runtime, state } = this.registry.ensureBound();
+        const { sessionId, runtime, state } = this.registry.ensureBound();
 
         const lastSession = state.getLastSession();
         if (lastSession && lastSession.role === 'user') {
@@ -66,7 +66,7 @@ export class RoundOperations {
         });
 
         return this.runs.submit(
-            { sessionId, nodeId, text, files, agentId, overrides, origin, historyPolicy, sendIntent },
+            { sessionId, text, files, agentId, overrides, origin, historyPolicy, sendIntent },
             runtime
         );
     }
@@ -82,15 +82,15 @@ export class RoundOperations {
         mode: 'include' | 'exclude',
         scope: 'node' | 'subtree' = 'subtree',
     ): Promise<{ profileId: string; revision: number }> {
-        const { sessionId, nodeId } = this.registry.ensureBound();
-        const log = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const { sessionId } = this.registry.ensureBound();
+        const log = new RoundLog(this.registry.engine, sessionId);
         const manifest = await log.loadManifest();
         return log.setRoundContextRules(manifest.currentBranch, roundIds, mode, scope);
     }
 
     async getContextModes(roundIds: string[]): Promise<Record<string, 'include' | 'exclude' | 'summary'>> {
-        const { sessionId, nodeId } = this.registry.ensureBound();
-        const log = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const { sessionId } = this.registry.ensureBound();
+        const log = new RoundLog(this.registry.engine, sessionId);
         const manifest = await log.loadManifest();
         return log.getRoundContextModes(manifest.currentBranch, roundIds);
     }
@@ -184,7 +184,7 @@ export class RoundOperations {
             overrides?: ExecutionOverrides;
         }
     ): Promise<RegenerateResult> {
-        const { sessionId, nodeId, state, runtime } = this.registry.ensureBound();
+        const { sessionId, state, runtime } = this.registry.ensureBound();
         const eventBus = this.registry.eventBus;
 
         if (!userMessage.persistedNodeId) {
@@ -199,7 +199,7 @@ export class RoundOperations {
         // RoundLog branch: fork a new ref pointing to the parent of the user
         // round (i.e. above the user+assistant pair). This way fold() walking
         // the new branch skips the old assistant entirely.
-        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const roundLog = new RoundLog(this.registry.engine, sessionId);
         const userRound = await roundLog.readRound(userRoundId);
         if (!userRound) throw new ConversationError(ConversationErrorCode.SESSION_INVALID, 'User Round not found');
 
@@ -234,9 +234,9 @@ export class RoundOperations {
             branchCreated = true;
         }
 
-        await this.registry.reloadSessionData(nodeId, sessionId, state);
+        await this.registry.reloadSessionData(sessionId, state);
 
-        const branchInfo = await this.getSiblingInfo(nodeId, sessionId, targetRoundId);
+        const branchInfo = await this.getSiblingInfo(sessionId, targetRoundId);
 
         if (branchCreated) {
             eventBus.emitSession(sessionId, {
@@ -268,7 +268,6 @@ export class RoundOperations {
         await this.runs.submit(
             {
                 sessionId,
-                nodeId,
                 text: userMessage.content || '',
                 files: userMessage.files || [],
                 agentId,
@@ -294,18 +293,18 @@ export class RoundOperations {
     // ================================================================
 
     async deleteMessage(messageId: string, options?: DeleteOptions): Promise<DeleteResult> {
-        const { sessionId, nodeId, state } = this.registry.ensureBound();
+        const { sessionId, state } = this.registry.ensureBound();
         const idsToDelete = RoundOperations.collectDeletableIds(
             state, messageId, options?.deleteAssociatedResponses ?? true
         );
-        return this.executeDelete(nodeId, sessionId, state, idsToDelete, options);
+        return this.executeDelete(sessionId, state, idsToDelete, options);
     }
 
     async deleteMessages(messageIds: string[], options?: DeleteOptions): Promise<DeleteResult> {
         if (messageIds.length === 0) return { deletedIds: [], deletedBranches: [] };
         if (messageIds.length === 1) return this.deleteMessage(messageIds[0], options);
 
-        const { sessionId, nodeId, state } = this.registry.ensureBound();
+        const { sessionId, state } = this.registry.ensureBound();
         const allIds = new Set<string>();
 
         for (const id of messageIds) {
@@ -314,11 +313,11 @@ export class RoundOperations {
             ).forEach(x => allIds.add(x));
         }
 
-        return this.executeDelete(nodeId, sessionId, state, Array.from(allIds), options);
+        return this.executeDelete(sessionId, state, Array.from(allIds), options);
     }
 
     private async executeDelete(
-        nodeId: string,
+
         sessionId: string,
         state: SessionState,
         idsToDelete: string[],
@@ -330,7 +329,7 @@ export class RoundOperations {
 
         // RoundLog: soft-delete rounds or clear assistant only.
         // Assistant messages just clear the payload (keep user); user messages delete the entire round.
-        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const roundLog = new RoundLog(this.registry.engine, sessionId);
         for (const id of idsToDelete) {
             const session = state.findSessionById(id);
             const roundId = session?.persistedNodeId;
@@ -442,7 +441,7 @@ export class RoundOperations {
         newContent: string,
         autoRerun: boolean = false
     ): Promise<void> {
-        const { sessionId, state, runtime, nodeId } = this.registry.ensureBound();
+        const { sessionId, state, runtime } = this.registry.ensureBound();
         this.registry.ensureNotGenerating('commit edit');
         const eventBus = this.registry.eventBus;
 
@@ -471,7 +470,7 @@ export class RoundOperations {
         let editParentRoundId: string | undefined;
 
         if (autoRerun && userRoundId) {
-            const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+            const roundLog = new RoundLog(this.registry.engine, sessionId);
             newPersistedNodeId = ulid();
             const replacement = await roundLog.createBranchForReplacement(
                 userRoundId,
@@ -481,7 +480,7 @@ export class RoundOperations {
             editParentRoundId = replacement.commonHeadId;
         }
 
-        await this.registry.reloadSessionData(nodeId, sessionId, state);
+        await this.registry.reloadSessionData(sessionId, state);
 
         eventBus.emitSession(sessionId, {
             type: 'message:edited',
@@ -493,8 +492,8 @@ export class RoundOperations {
         });
 
         if (autoRerun && newPersistedNodeId) {
-            const branchInfo = await this.getSiblingInfo(nodeId, sessionId, newPersistedNodeId);
-            const roundLog2 = new RoundLog(this.registry.engine, nodeId, sessionId);
+            const branchInfo = await this.getSiblingInfo(sessionId, newPersistedNodeId);
+            const roundLog2 = new RoundLog(this.registry.engine, sessionId);
             const m2 = await roundLog2.loadManifest();
             const branchName = m2.currentBranch;
 
@@ -523,7 +522,6 @@ export class RoundOperations {
             await this.runs.submit(
                 {
                     sessionId,
-                    nodeId,
                     text: newContent,
                     files: session.files || [],
                     agentId: resolvedAgentId,
@@ -555,11 +553,11 @@ export class RoundOperations {
     }
 
     private async getSiblingInfo(
-        nodeId: string,
+
         sessionId: string,
         roundId: string,
     ): Promise<BranchInfo> {
-        const log = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const log = new RoundLog(this.registry.engine, sessionId);
         const siblings = await log.getSiblingRoundIds(roundId);
         const index = siblings.indexOf(roundId);
         if (index < 0) return { siblingIndex: 0, siblingCount: 1 };

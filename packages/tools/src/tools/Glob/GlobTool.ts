@@ -153,7 +153,7 @@ export const GlobTool = buildTool({
     const searchDir = path ?? context.cwd;
 
     // ── 1. fd (fastest — Node.js or Tauri with fd available) ──
-    if (context.shell?.capabilities.fd) {
+    if (!context.vfs && context.shell?.capabilities.fd) {
       try {
         return { data: await globWithFd({ pattern, path }, context, limit) };
       } catch {
@@ -165,7 +165,7 @@ export const GlobTool = buildTool({
     if (context.vfs) {
       const start = Date.now();
       const regex = globToRegex(pattern);
-      const allFiles = await context.vfs.listFiles(searchDir).catch(() => [] as string[]);
+      const allFiles = await context.vfs.listFiles(searchDir);
       const matched = allFiles.filter((f) => regex.test(f)).slice(0, limit);
       return {
         data: {

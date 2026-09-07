@@ -2,18 +2,18 @@
 //
 // VFSHelpers — low-level VFS read/write utilities shared across manager classes.
 
-import type { IModuleFS, CreateFileOptions } from '@itookit/vfs-core';
+import type { IFileSystem, CreateFileOptions } from '@itookit/vfs-core';
 import yaml from 'js-yaml';
 
 export class VFSHelpers {
-    constructor(private readonly engine: IModuleFS) {}
+    constructor(private readonly engine: IFileSystem) {}
 
     /** Expose the underlying engine for callers that need raw driver access */
-    getEngine(): IModuleFS {
+    getFileSystem(): IFileSystem {
         return this.engine;
     }
 
-    async readJson<T>(path: string, systemFS?: IModuleFS): Promise<T | null> {
+    async readJson<T>(path: string, systemFS?: IFileSystem): Promise<T | null> {
         try {
             const fs = systemFS ?? this.engine;
             const nodeId = await fs.driver.resolvePath(path);
@@ -24,11 +24,11 @@ export class VFSHelpers {
         } catch { return null; }
     }
 
-    writeJson(path: string, data: unknown, systemFS?: IModuleFS): Promise<void> {
+    writeJson(path: string, data: unknown, systemFS?: IFileSystem): Promise<void> {
         return this.engineUpsert(path, JSON.stringify(data, null, 2), systemFS);
     }
 
-    async engineUpsert(path: string, content: string, systemFS?: IModuleFS): Promise<void> {
+    async engineUpsert(path: string, content: string, systemFS?: IFileSystem): Promise<void> {
         const fs = systemFS ?? this.engine;
         const nodeId = await fs.driver.resolvePath(path);
         if (nodeId) {
@@ -46,7 +46,7 @@ export class VFSHelpers {
     }
 
     /** Load all YAML (preferred) and JSON (legacy) files from a VFS directory. */
-    async loadJsonFilesFromDir<T>(dirPath: string, systemFS?: IModuleFS): Promise<T[]> {
+    async loadJsonFilesFromDir<T>(dirPath: string, systemFS?: IFileSystem): Promise<T[]> {
         const items: T[] = [];
         const t0 = performance.now();
         try {

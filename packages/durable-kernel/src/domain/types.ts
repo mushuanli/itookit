@@ -1,6 +1,6 @@
 import type { CacheSpec, CacheRead, CachePublish, CacheNamespace, CacheEntry, CacheReceipt, CacheManagementAction, CacheManagementReceipt } from './cache';
 export * from './cache';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { InteractionRecord, InteractionRequest, InteractionResponse } from './interaction';
 
 export * from './interaction';
@@ -20,7 +20,7 @@ export type TaskStatus = 'created' | 'blocked' | 'ready' | 'running' | 'waiting'
 
 export interface ProgramRef { kind: string; version: string; }
 export interface StorageBindingRef { kind: string; locator: JsonValue; }
-export interface ResolvedStorageBinding { fs: IModuleFS; rootPath: string; }
+export interface ResolvedStorageBinding { fs: IFileSystem; rootPath: string; }
 export interface SessionStorageResolver {
     readonly kind: string;
     resolve(reference: StorageBindingRef): Promise<ResolvedStorageBinding>;

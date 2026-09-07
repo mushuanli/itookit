@@ -9,7 +9,7 @@ import {
     RegistryEvent,
 } from '../core/types';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
-import { IChatEngine } from '../persistence/types';
+import { ISessionRepository } from '../persistence/types';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
 import { RoundLog, roundToProjection } from '../persistence/round-log';
@@ -20,7 +20,6 @@ import { log } from '../utils/logger';
  */
 export interface BoundContext {
     sessionId: string;
-    nodeId: string;
     state: SessionState;
     runtime: SessionRuntime;
 }
@@ -40,15 +39,14 @@ export class SessionRegistry {
 
     // === 当前视图绑定 ===
     private _boundSessionId: string | null = null;
-    private _boundNodeId: string | null = null;
     private bindingVersion = 0;
     private eventUnsubscribe: (() => void) | null = null;
 
     // === 内部组件 ===
     private _eventBus: SessionEventBus;
-    private _engine: IChatEngine;
+    private _engine: ISessionRepository;
 
-    constructor(engine: IChatEngine) {
+    constructor(engine: ISessionRepository) {
         this._engine = engine;
         this._eventBus = new SessionEventBus();
     }
@@ -56,29 +54,24 @@ export class SessionRegistry {
     // === 访问器（供 RoundOperations / BranchService 使用）===
 
     get eventBus(): SessionEventBus { return this._eventBus; }
-    get engine(): IChatEngine { return this._engine; }
+    get engine(): ISessionRepository { return this._engine; }
     get boundSessionId(): string | null { return this._boundSessionId; }
-    get boundNodeId(): string | null { return this._boundNodeId; }
     get activeSessionId(): string | null { return this._activeSessionId; }
 
     // ── 会话绑定 ───────────────────────────────────────────────────────
 
-    async bindSession(nodeId: string, sessionId: string): Promise<SessionSnapshot> {
+    async bindSession(sessionId: string): Promise<SessionSnapshot> {
         const currentVersion = ++this.bindingVersion;
         this.unbindSession();
         this.bindingVersion = currentVersion;
         try {
-            await this.ensureRegistered(nodeId, sessionId);
+            await this.ensureRegistered(sessionId);
             if (this.bindingVersion !== currentVersion) {
                 throw new ConversationError(ConversationErrorCode.ABORTED, 'Bind cancelled');
             }
-            this._boundNodeId = nodeId;
             this._boundSessionId = sessionId;
             this._activeSessionId = sessionId;
             const runtime = this.sessions.get(sessionId);
-            const state = this.states.get(sessionId);
-            if (runtime) runtime.nodeId = nodeId;
-            state?.updateNodeId(nodeId);
             if (runtime && runtime.unreadCount > 0) {
                 runtime.unreadCount = 0;
                 this._eventBus.emitGlobal({
@@ -88,7 +81,7 @@ export class SessionRegistry {
             }
             return this.getSnapshot();
         } catch (e) {
-            log.error('Failed to bind session', { sessionId, nodeId, error: e });
+            log.error('Failed to bind session', { sessionId, error: e });
             throw ConversationError.from(e);
         }
     }
@@ -109,24 +102,16 @@ export class SessionRegistry {
         }
 
         this._boundSessionId = null;
-        this._boundNodeId = null;
     }
 
-    /** Update the bound nodeId after the backing VFS file is renamed. */
-    updateBoundNodeId(newNodeId: string): void {
-        this._boundNodeId = newNodeId;
-        if (this._boundSessionId) {
-            const runtime = this.sessions.get(this._boundSessionId);
-            if (runtime) runtime.nodeId = newNodeId;
-            this.states.get(this._boundSessionId)?.updateNodeId(newNodeId);
-        }
-    }
+    /** Update the bound sessionId after the backing VFS file is renamed. */
+
 
     // ── 状态查询
 
     getSnapshot(): SessionSnapshot {
-        if (!this._boundSessionId || !this._boundNodeId) {
-            return { sessionId: '', nodeId: '', sessions: [], status: 'idle', isRunning: false };
+        if (!this._boundSessionId) {
+            return { sessionId: '', sessions: [], status: 'idle', isRunning: false };
         }
         const state = this.states.get(this._boundSessionId);
         const runtime = this.sessions.get(this._boundSessionId);
@@ -145,7 +130,6 @@ export class SessionRegistry {
 
         return {
             sessionId: this._boundSessionId,
-            nodeId: this._boundNodeId,
             sessions,
             status,
             isRunning: status === 'running' || status === 'queued',
@@ -159,7 +143,6 @@ export class SessionRegistry {
     }
 
     getCurrentSessionId(): string | null { return this._boundSessionId; }
-    getCurrentNodeId(): string | null { return this._boundNodeId; }
 
     getStatus(): SessionStatus | 'unbound' {
         if (!this._boundSessionId) return 'unbound';
@@ -265,7 +248,7 @@ export class SessionRegistry {
     // ================================================================
 
     ensureBound(): BoundContext {
-        if (!this._boundSessionId || !this._boundNodeId) {
+        if (!this._boundSessionId) {
             throw new ConversationError(ConversationErrorCode.SESSION_INVALID, 'No session bound');
         }
 
@@ -278,7 +261,6 @@ export class SessionRegistry {
 
         return {
             sessionId: this._boundSessionId,
-            nodeId: this._boundNodeId,
             state,
             runtime,
         };
@@ -289,33 +271,32 @@ export class SessionRegistry {
     // ================================================================
 
     async reloadSessionData(
-        nodeId: string,
         sessionId: string,
         state: SessionState
     ): Promise<void> {
-        await this.diffAndApply(nodeId, sessionId, state);
+        await this.diffAndApply(sessionId, state);
     }
 
     // ================================================================
     // 内部：会话注册
     // ================================================================
 
-    private async ensureRegistered(nodeId: string, sessionId: string): Promise<void> {
+    private async ensureRegistered(sessionId: string): Promise<void> {
         if (this.sessions.has(sessionId)) {
             const existing = this.sessions.get(sessionId)!;
+            const state = this.states.get(sessionId);
             existing.lastActiveTime = Date.now();
             this._eventBus.ensureSession(sessionId);
-            const state = this.states.get(sessionId);
             if (state && (existing.status === 'completed' || existing.status === 'failed')) {
-                await this.reloadSessionData(nodeId, sessionId, state);
+                await this.reloadSessionData(sessionId, state);
             }
             return;
         }
 
-        await this._engine.validateManifest(nodeId, sessionId);
-        const runtime: SessionRuntime = { sessionId, nodeId, status: 'idle', lastActiveTime: Date.now(), unreadCount: 0 };
-        const state = new SessionState(nodeId, sessionId);
-        await this.populateState(state, nodeId, sessionId);
+        await this._engine.getManifest(sessionId);
+        const runtime: SessionRuntime = { sessionId, status: 'idle', lastActiveTime: Date.now(), unreadCount: 0 };
+        const state = new SessionState(sessionId);
+        await this.populateState(state, sessionId);
 
         this.sessions.set(sessionId, runtime);
         this.states.set(sessionId, state);
@@ -388,14 +369,13 @@ export class SessionRegistry {
 
     private async populateState(
         state: SessionState,
-        nodeId: string,
         sessionId: string
     ): Promise<void> {
-        await this.populateFromRoundLog(state, nodeId, sessionId);
+        await this.populateFromRoundLog(state, sessionId);
     }
 
-    private async collectHeadChain(nodeId: string, sessionId: string): Promise<{ chain: string[]; log: RoundLog }> {
-        const log = new RoundLog(this._engine, nodeId, sessionId);
+    private async collectHeadChain(sessionId: string): Promise<{ chain: string[]; log: RoundLog }> {
+        const log = new RoundLog(this._engine, sessionId);
         const manifest = await log.loadManifest();
         const headId = manifest.currentHead;
         if (!headId) return { chain: [], log };
@@ -414,10 +394,9 @@ export class SessionRegistry {
 
     private async populateFromRoundLog(
         state: SessionState,
-        nodeId: string,
         sessionId: string,
     ): Promise<void> {
-        const { chain, log } = await this.collectHeadChain(nodeId, sessionId);
+        const { chain, log } = await this.collectHeadChain(sessionId);
         if (chain.length === 0) return;
 
         const rounds = await Promise.all(chain.map(id => log.readRound(id)));
@@ -428,11 +407,10 @@ export class SessionRegistry {
     }
 
     private async diffAndApply(
-        nodeId: string,
         sessionId: string,
         state: SessionState,
     ): Promise<void> {
-        const { chain } = await this.collectHeadChain(nodeId, sessionId);
+        const { chain } = await this.collectHeadChain(sessionId);
         if (chain.length === 0) {
             // No head chain (e.g. after a regenerate whose new round is not yet
             // persisted, so currentHead points at a not-yet-existing round).
@@ -476,7 +454,7 @@ export class SessionRegistry {
             });
         }
 
-        const log = new RoundLog(this._engine, nodeId, sessionId);
+        const log = new RoundLog(this._engine, sessionId);
         const rounds = await Promise.all(chain.map(id => log.readRound(id)));
         for (const t of rounds) {
             if (!t || t._deleted) continue;

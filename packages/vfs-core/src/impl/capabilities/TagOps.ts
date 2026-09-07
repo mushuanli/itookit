@@ -1,6 +1,6 @@
 /**
  * @file packages/vfs-core/src/impl/capabilities/TagOps.ts
- * @desc 标签能力实现。依赖 EnginePort 而非 ModuleFS 具体类。
+ * @desc 标签能力实现。依赖 EnginePort 而非 DirectoryFS 具体类。
  */
 
 import type { ITagOperations, TagDefinition } from '../../protocol';
@@ -16,21 +16,21 @@ export class TagOps implements ITagOperations {
 
     async setTags(path: string, tags: string[]): Promise<void> {
         const { realPath } = await this.fs.resolveNode(path);
-        await this.fs.backend.setTags(realPath, tags);
+        await this.fs.engine.setTags(realPath, tags);
         this.emitTagUpdate(path);
     }
 
     async addTag(path: string, tag: string): Promise<void> {
         const { node, realPath } = await this.fs.resolveNode(path);
         const newTags = [...new Set([...node.tags, tag])];
-        await this.fs.backend.setTags(realPath, newTags);
+        await this.fs.engine.setTags(realPath, newTags);
         this.emitTagUpdate(path);
     }
 
     async removeTag(path: string, tag: string): Promise<void> {
         const { node, realPath } = await this.fs.resolveNode(path);
         const newTags = node.tags.filter(t => t !== tag);
-        await this.fs.backend.setTags(realPath, newTags);
+        await this.fs.engine.setTags(realPath, newTags);
         this.emitTagUpdate(path);
     }
 

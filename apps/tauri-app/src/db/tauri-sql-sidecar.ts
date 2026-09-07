@@ -14,7 +14,7 @@
 
 import Database from '@tauri-apps/plugin-sql';
 import { invoke } from '@tauri-apps/api/core';
-import { PATH_DATA_EXISTS, movePathStatements, migrateRecordStatements, SCHEMA_VERSION } from '@itookit/vfsdriver-localfs';
+import { PATH_DATA_EXISTS, movePathStatements, SCHEMA_VERSION } from '@itookit/vfsdriver-localfs';
 import type { ISidecarDb, MetaExtRow } from '@itookit/vfsdriver-localfs';
 
 type SidecarConnection = Pick<Database, 'execute' | 'select' | 'close'>;
@@ -67,25 +67,19 @@ export class TauriSqlSidecarDb implements ISidecarDb {
     static async open(dbPath: string): Promise<TauriSqlSidecarDb> {
         const db = await Database.load(`sqlite:${dbPath}`);
         const instance = new TauriSqlSidecarDb(db, `sqlite:${dbPath}`);
-        await instance.migrateSchema();
+        await instance.assertSchemaVersion();
         await instance.initSchema();
         return instance;
     }
 
     // ── Schema migration ───────────────────────────────────────────────────────
 
-    private async migrateSchema(): Promise<void> {
-        // Detect legacy ino-based schema (path_ino table existed in pre-v4.1)
-        const tables = await this.db.select<Array<{ name: string }>>(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='path_ino'",
-        );
-        if (tables.length === 0) return; // already on path-based schema
-
-        // Drop legacy tables — data was corrupted by the path↔ino mismatch anyway
-        await this.db.execute('DROP TABLE IF EXISTS meta_tags');
-        await this.db.execute('DROP TABLE IF EXISTS meta_ext');
-        await this.db.execute('DROP TABLE IF EXISTS path_ino');
-        await this.db.execute('DROP TABLE IF EXISTS counters');
+    private async assertSchemaVersion(): Promise<void> {
+        const tables = await this.db.select<Array<{ name: string }>>("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+        if (!tables.length) return;
+        const versions = tables.some(table => table.name === '_schema_version')
+            ? await this.db.select<Array<{ version: number }>>('SELECT version FROM _schema_version') : [];
+        if (versions.length !== 1 || versions[0].version !== SCHEMA_VERSION) { await this.db.close(); throw new Error('Filesystem database version incompatible'); }
     }
 
     // ── Schema ─────────────────────────────────────────────────────────────────
@@ -235,11 +229,7 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         if (rows.length) throw new Error(`Destination has durable data: ${path}`);
     }
 
-    async migrateRecordPaths(prefix: string): Promise<void> {
-        const sql = migrateRecordStatements(prefix);
-        if ((await this.db.select<unknown[]>(sql.conflict, sql.values)).length) throw new Error('Conflicting legacy and backend-local record paths');
-        await this.db.execute(sql.update, sql.values);
-    }
+
 
     async movePathData(from: string, to: string): Promise<void> {
         for (const { sql, values } of movePathStatements(from, to)) await this.db.execute(sql, values);

@@ -89,7 +89,7 @@ describe('Reference operations (IndexedDB backend)', () => {
         expect(mentions[0].refType).toBe('mention');
     });
 
-    it('syncOutgoing replaces all outgoing refs atomically', async () => {
+    it('syncOutgoing replaces all outgoing refs', async () => {
         const src = await mkFile('so1.md');
         const t1 = await mkFile('so2.md');
         const t2 = await mkFile('so3.md');
@@ -97,7 +97,7 @@ describe('Reference operations (IndexedDB backend)', () => {
         await vfs.fs.meta.refs!.addRef(src, t1, 'mention');
         await vfs.fs.meta.refs!.addRef(src, t2, 'mention');
         await vfs.fs.meta.refs!.syncOutgoing(src, [
-            { targetIdOrPath: t3, refType: 'mention' },
+            { targetPath: t3, refType: 'mention' },
         ]);
         const out = await collectOutgoing(src);
         expect(out).toHaveLength(1);

@@ -2,7 +2,7 @@
 // Round DAG persistence types — used by RoundLog.
 //
 // Design: each Round is stored as round-<roundId>.json inside the session's
-// asset directory. The session manifest (RoundManifest) holds the DAG index.
+// Session history record store. The session manifest (RoundManifest) holds the DAG index.
 
 import type { Round, RoundId, Ref } from '@itookit/common';
 import type { ContextProfileId } from '@itookit/common';

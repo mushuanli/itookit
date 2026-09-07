@@ -9,11 +9,11 @@ export const STORE_TAGS = 'tags';
 
 export const ALL_STORES = [STORE_NODES, STORE_RECORDS, STORE_TAGS] as const;
 export const REQUIRED_STORES = [STORE_NODES, STORE_TAGS, STORE_RECORDS] as readonly string[];
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 // ── IDB Promise Wrappers ────────────────────────────────────────────
 
-export type UpgradeHandler = (db: IDBDatabase, transaction: IDBTransaction) => void;
+export type UpgradeHandler = (db: IDBDatabase, transaction: IDBTransaction, oldVersion: number) => void;
 
 export function openDB(
     name: string,
@@ -24,12 +24,13 @@ export function openDB(
         const request = version === undefined
             ? indexedDB.open(name)
             : indexedDB.open(name, version);
-        request.onupgradeneeded = () => {
+        request.onupgradeneeded = (event) => {
             if (!request.transaction) {
                 reject(new Error('IndexedDB upgrade transaction is unavailable'));
                 return;
             }
-            upgrade(request.result, request.transaction);
+            try { upgrade(request.result, request.transaction, event.oldVersion); }
+            catch (error) { request.transaction.abort(); reject(error); }
         };
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(

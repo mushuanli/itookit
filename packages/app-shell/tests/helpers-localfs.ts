@@ -21,7 +21,7 @@ import { promises as fsp } from 'node:fs';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { FakeSidecarDb } from './fake-sidecar';
 import { createVFS } from '@itookit/vfs-core';
-import type { IVFSManager, IModuleFS } from '@itookit/vfs-core';
+import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ export interface LocalTestVFS {
     /** SQLite + staging + vfs-internal, outside rootDir. */
     sidecarDir: string;
     manager:    IVFSManager;
-    fs:         IModuleFS;
+    fs:         IFileSystem;
     dispose():  Promise<void>;
 }
 
@@ -69,11 +69,9 @@ export async function setupLocalVFS(suite: string): Promise<LocalTestVFS> {
     });
     const { manager } = await createVFS({
         rootBackend: backend,
-        modules: [{ name: 'test' }],
     });
 
-    const fs = manager.getEngine('test');
-    await fs.init();
+    const fs = await manager.openFileSystem('/module/test');
 
     return { rootDir, moduleDir, sidecarDir, manager, fs,
              dispose: () => manager.dispose() };

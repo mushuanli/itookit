@@ -6,7 +6,7 @@ import type {
     NavigationRequest
 } from '@itookit/common';
 import type { IEditor, EditorFactory, EditorOptions, ISessionUI, EditorHostContext } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem, FileSystemContext } from '@itookit/vfs-core';
 
 import type { VFSNodeUI, VFSUIState } from '../contracts/types';
 import type { VFSService } from '../services/VFSService';
@@ -20,6 +20,7 @@ import type { PublicEventMap } from '../contracts/events';
 export interface ConnectOptions {
   onEditorCreated?: (editor: IEditor | null) => void;
   saveDebounceMs?: number;
+  files?: FileSystemContext;
   [key: string]: any;
 }
 
@@ -37,12 +38,13 @@ type VFSManager = ISessionUI<VFSNodeUI, VFSService> & {
  */
 export function connectEditorLifecycle(
   vfsManager: VFSManager,
-  engine: IModuleFS,
+  engine: IFileSystem,
   editorContainer: HTMLElement,
   defaultEditorFactory?: EditorFactory,
   options: ConnectOptions = {}
 ): () => void {
-  const { onEditorCreated, saveDebounceMs = 500, ...factoryExtraOptions } = options;
+  const { onEditorCreated, saveDebounceMs = 500, files = { fs: engine, cwd: '/' }, ...factoryExtraOptions } = options;
+  if (files.fs !== engine) throw new Error('Editor file context differs from its file tree');
 
   let activeEditor: IEditor | null = null;
   let activeNode: VFSNodeUI | null = null;
@@ -85,15 +87,6 @@ export function connectEditorLifecycle(
       saveTimer = null;
     }
     if (!activeEditor.isDirty?.() && !hasUnsavedChanges) return;
-
-    // Chat sessions keep their conversation in the asset dir (RoundLog); the
-    // main .chat file only holds the manifest. A generic save would overwrite
-    // the v3 manifest with the editor's getText() snapshot — never persist it.
-    if (activeNode.id.toLowerCase().endsWith('.chat')) {
-      activeEditor.setDirty?.(false);
-      hasUnsavedChanges = false;
-      return;
-    }
 
     try {
       const state = vfsManager.store?.getState();
@@ -221,10 +214,10 @@ export function connectEditorLifecycle(
         const editorOptions: EditorOptions = {
           initialContent: initialContent || '',
           title: item.metadata.title,
-          nodeId: item.id,
+          target: { kind: 'file', path: item.id },
           language: item.metadata.custom?._extension || '',
           ...factoryExtraOptions,
-          moduleFS: engine,
+          files,
           hostContext: createHostContext(),
         };
 

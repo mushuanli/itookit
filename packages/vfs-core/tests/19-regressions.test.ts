@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { setupVFS, readText, type TestVFS } from './helpers';
-import { FSConflictError, type IDeviceDriver } from '@itookit/vfs-core';
+import { type IDeviceDriver } from '@itookit/vfs-core';
 
 describe('Regression fixes', () => {
     let vfs: TestVFS;
@@ -25,7 +25,8 @@ describe('Regression fixes', () => {
             };
             await vfs.manager.registerDevice(driver);
 
-            const node = await vfs.fs.driver.getNode('/dev/testdev');
+            const dev = await vfs.manager.openFileSystem('/dev');
+            const node = (await dev.driver.getChildren('/')).find(node => node.name === 'testdev');
             expect(node?.type).toBe('device');
             expect((node as { deviceHandlerId?: string }).deviceHandlerId).toBe('testdev');
         });
@@ -40,7 +41,7 @@ describe('Regression fixes', () => {
             };
             await vfs.manager.registerDevice(driver);
 
-            const handle = await vfs.fs.openDevice!('/dev/testdev2');
+            const handle = await vfs.manager.openDevice('/dev/testdev2');
             expect(await handle.read()).toBe('ctx-none');
             expect(await handle.ioctl('ping', 42)).toEqual({ cmd: 'ping', arg: 42 });
         });
@@ -56,7 +57,7 @@ describe('Regression fixes', () => {
 
             await expect(
                 vfs.fs.driver.writeContent('/ver.txt', 'v3', { expectedVersion: 1 }),
-            ).rejects.toBeInstanceOf(FSConflictError);
+            ).rejects.toMatchObject({ code: 'ECONFLICT' });
         });
     });
 
@@ -98,12 +99,12 @@ describe('Regression fixes', () => {
         });
     });
 
-    describe('VFSManager node event forwarding', () => {
-        it('forwards node:created/updated/deleted to manager bus', async () => {
+    describe('File view event forwarding', () => {
+        it('forwards node:created/updated/deleted to the owning view', async () => {
             const seen: string[] = [];
-            const off = vfs.manager.on('node:created', (e) => seen.push('created:' + e.payload.moduleId));
-            const off2 = vfs.manager.on('node:updated', (e) => seen.push('updated:' + e.payload.moduleId));
-            const off3 = vfs.manager.on('node:deleted', (e) => seen.push('deleted:' + e.payload.moduleId));
+            const off = vfs.fs.on('node:created', () => seen.push('created'));
+            const off2 = vfs.fs.on('node:updated', () => seen.push('updated'));
+            const off3 = vfs.fs.on('node:deleted', () => seen.push('deleted'));
 
             const node = await vfs.fs.driver.createFile({ name: 'evt.txt', parentPath: null, content: 'x' });
             await vfs.fs.driver.writeContent(node.path, 'y');
@@ -111,9 +112,9 @@ describe('Regression fixes', () => {
 
             off(); off2(); off3();
 
-            expect(seen).toContain('created:test');
-            expect(seen).toContain('updated:test');
-            expect(seen).toContain('deleted:test');
+            expect(seen).toContain('created');
+            expect(seen).toContain('updated');
+            expect(seen).toContain('deleted');
         });
     });
 });

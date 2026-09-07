@@ -34,7 +34,6 @@ import {
     DEFAULT_FILENAME_PATTERN,
 } from '../../protocol';
 
-import { AccessController } from './access-controller';
 import { FSEventBus } from '../event/event-bus';
 import { PluginPipeline } from './plugin-pipeline';
 import { DeviceRegistry } from './device-registry';
@@ -50,7 +49,6 @@ const IO_OPERATIONS = [
 type IOOperation = typeof IO_OPERATIONS[number];
 
 export class VFSEngine {
-    readonly access: AccessController;
     readonly events: FSEventBus;
     readonly plugins: PluginPipeline;
     readonly devices: DeviceRegistry;
@@ -75,7 +73,6 @@ export class VFSEngine {
         backend: IStorageBackend,
     ) {
         this.backend = backend;
-        this.access = new AccessController();
         this.events = new FSEventBus();
         this.plugins = new PluginPipeline();
         this.devices = new DeviceRegistry();
@@ -124,20 +121,34 @@ export class VFSEngine {
 
     async initialize(): Promise<void> {
         if (this.initialized) return;
-        await this.backend.init();
-        await this.bootstrap();
-        await this.plugins.initAll();
-        await this.devices.initAll();
-        this.initialized = true;
+        try {
+            await this.backend.init();
+            await this.bootstrap();
+            await this.plugins.initAll();
+            await this.devices.initAll();
+            this.initialized = true;
+        } catch (error) {
+            const cleanup = await this.releaseResources();
+            if (cleanup.length) throw new AggregateError([error, ...cleanup], 'Filesystem initialization and cleanup failed');
+            throw error;
+        }
     }
 
     async dispose(): Promise<void> {
         if (!this.initialized) return;
-        await this.plugins.disposeAll();
-        await this.devices.disposeAll();
-        this.events.clear();
-        await this.backend.close();
         this.initialized = false;
+        const failures = await this.releaseResources();
+        if (failures.length) throw new AggregateError(failures, 'Filesystem cleanup failed');
+    }
+
+    private async releaseResources(): Promise<unknown[]> {
+        const failures: unknown[] = [];
+        // Plugins/devices may still need the backend while shutting down.
+        for (const close of [() => this.plugins.disposeAll(), () => this.devices.disposeAll(), () => this.backend.close()]) {
+            try { await close(); } catch (error) { failures.push(error); }
+        }
+        this.events.clear();
+        return failures;
     }
 
     private async bootstrap(): Promise<void> {
@@ -181,26 +192,9 @@ export class VFSEngine {
 
     /** Stat that returns null on not found */
     async tryStat(path: string): Promise<import('../../protocol').FSNode | null> {
-        const { backend, localPath } = this.resolveStore(path);
-        return backend.stat(localPath === '/' ? '/' : localPath);
-    }
-
-    // ── Module Directory Management ──
-
-    async ensureModuleDir(moduleName: string): Promise<void> {
-        const path = `/module/${moduleName}`;
-        const { backend, localPath } = this.resolveStore(path);
-        this._inc('stat'); const existing = await backend.stat(localPath);
-        if (existing) return;
-        this._inc('mkdir'); await backend.mkdir(localPath);
-    }
-
-    async removeModuleDir(moduleName: string): Promise<void> {
-        const path = `/module/${moduleName}`;
-        const { backend, localPath } = this.resolveStore(path);
-        this._inc('stat'); const existing = await backend.stat(localPath);
-        if (!existing) return;
-        this._inc('delete'); await backend.delete(localPath, { recursive: true });
+        const { backend, localPath, mountPath } = this.resolveStore(path);
+        const node = await backend.stat(localPath);
+        return node ? this.mapToSystemNode(node, mountPath) : null;
     }
 
     // ── Read ──
@@ -431,6 +425,11 @@ export class VFSEngine {
 
     // ── Metadata ──
 
+    async setTags(path: string, tags: string[]): Promise<void> {
+        const { backend, localPath } = this.resolveStore(path);
+        await backend.setTags(localPath, tags);
+    }
+
     async updateMetadata(path: string, metadata: Record<string, unknown>): Promise<void> {
         const { backend, localPath } = this.resolveStore(path);
         this._inc('metadata'); await backend.updateMetadata(localPath, metadata);
@@ -522,7 +521,7 @@ export class VFSEngine {
     // ── System /etc Operations ──
 
     /**
-     * 以系统身份写入任意路径（绕过 AccessController）。
+     * 以系统身份写入任意路径（仅宿主可用）。
      * 由 ISystemAccess 实现调用，调用方负责传入已拼接的完整路径。
      */
     async writeEtcFile(path: string, content: string): Promise<void> {
@@ -533,7 +532,7 @@ export class VFSEngine {
     }
 
     /**
-     * 以系统身份读取任意路径（绕过 AccessController）。
+     * 以系统身份读取任意路径（仅宿主可用）。
      */
     async readEtcFile(path: string): Promise<string> {
         const { backend, localPath } = this.resolveStore(path);
@@ -559,15 +558,15 @@ export class VFSEngine {
     // ── Ensure Directory Path (recursive mkdir) ──
 
     async ensureDirectoryPath(systemPath: string): Promise<void> {
-        const { backend } = this.resolveStore(systemPath);
         const parts = systemPath.split('/').filter(Boolean);
         let current = '';
         for (const seg of parts) {
             current += '/' + seg;
-            this._inc('stat'); const exists = await backend.stat(current);
+            const { backend, localPath } = this.resolveStore(current);
+            this._inc('stat'); const exists = await backend.stat(localPath);
             if (!exists) {
-                this._inc('mkdir'); await backend.mkdir(current);
-            }
+                this._inc('mkdir'); await backend.mkdir(localPath);
+            } else if (exists.type !== 'directory') throw new FSError('ENOTDIR', 'Not a directory', 'mkdir', current);
         }
     }
 

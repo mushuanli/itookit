@@ -1,3 +1,4 @@
+export { createSessionDataProjection } from './persistence/session-projection';
 export * from './core/types';
 export * from './core/errors';
 export { CONVERSATION_DEFAULTS } from './core/constants';
@@ -23,7 +24,7 @@ export { SessionEventBus } from './session/session-event-bus';
 export { AgentResolver, type AgentInfo, type ModelInfo } from './session/agent-resolver';
 export { AttachmentProcessor } from './session/attachment-processor';
 
-export { ChatEngine } from './persistence/chat-engine';
+export { SessionRepository } from './persistence/session-repository';
 export { FlowEngine, FLOW_MODULE_NAME } from './persistence/flow-engine';
 export { seedDefaultFlows, essayReviewDraft, ESSAY_REVIEW_FLOW_ID } from './persistence/default-flows';
 export { RoundLog, roundToProjection, hasEffectiveAssistant } from './persistence/round-log';
@@ -38,7 +39,7 @@ export type {
 } from './persistence/round-types';
 export type { RoundLogEvent, RoundChangeSet } from './persistence/round-events';
 export type {
-    IChatEngine,
+    ISessionRepository,
     ConversationManifest,
     ConversationUIState,
     BranchTreeNode,
@@ -63,19 +64,18 @@ export type {
     ExecCommandRequest,
 } from './services/privileged-command';
 
-export { chatFileParser } from './utils/parsers';
 export {
-    CHAT_HARNESS_STORAGE_KIND,
-    ChatKernelStorageResolver,
-    chatKernelStorage,
-} from './persistence/chat-kernel-storage';
+    SESSION_DIRECTORY_STORAGE_KIND,
+    SessionDirectoryStorageResolver,
+    sessionDirectoryStorage,
+} from './persistence/session-directory-storage';
 export { DurableConversationProjection } from './persistence/durable-conversation-projection';
 export { formatErrorMessage } from './utils/error-formatter';
 import type { DagPluginCatalog, ToolDefinition } from '@itookit/common';
 import type { Kernel } from '@itookit/durable-kernel';
 import { DurableAgentProgram, DurableChatProgram, DurablePlanProgram } from '@itookit/llm-tasks';
 import type { IAgentConfigService } from './services/agent-service';
-import type { IChatEngine } from './persistence/types';
+import type { ISessionRepository } from './persistence/types';
 import { SessionManager, createSessionManager } from './session/session-manager';
 import { initializePromptHistory } from './services/prompt-history-service';
 import { CommandBus } from './core/command-bus';
@@ -89,7 +89,8 @@ import { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from '@itook
 
 export interface ConversationSystemOptions {
     agentService: IAgentConfigService;
-    sessionEngine: IChatEngine;
+    sessionEngine: ISessionRepository;
+    promptHistoryFiles: import('@itookit/vfs-core').IFileSystem;
     kernel: Kernel;
     /** Standalone workflow storage (flows VFS module). */
     flowStore: FlowStore;
@@ -127,7 +128,7 @@ export async function initializeConversationSystem(
 async function initializeServices(options: ConversationSystemOptions): Promise<void> {
     await options.agentService.init();
     await options.sessionEngine.init();
-    await initializePromptHistory(options.sessionEngine.vfs).catch(error => {
+    await initializePromptHistory(options.promptHistoryFiles).catch(error => {
         console.warn('[Conversation] Prompt history initialization failed:', error);
     });
 }

@@ -2,7 +2,7 @@
  * @file packages/vfs-core/src/interfaces/capabilities/watch.ts
  * @desc 文件监听子接口
  *
- * 通过 IModuleFS.watcher 访问（当 capabilities.watch === true）。
+ * 通过 IFileSystem.watcher 访问（当 capabilities.watch === true）。
  */
 
 export interface FileChangeEvent {

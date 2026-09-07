@@ -1,9 +1,9 @@
 /**
  * @file app-settings/engine/SkillsEngine.ts
- * @desc Custom IModuleFS implementation — maps LLMSkill objects to virtual file nodes.
+ * @desc Custom IFileSystem implementation — maps LLMSkill objects to virtual file nodes.
  *       Read-write via IAgentManagementService. Flat list, no directories.
  *
- * v3.3: Refactored from IFSEngine → IModuleFS.
+ * v3.3: Refactored from IFSEngine → IFileSystem.
  *
  * Event payloads match EngineAdapter expectations:
  *   node:created → { nodes: [{nodeId, parentId, path, type}] }
@@ -13,13 +13,13 @@
  *   node:moved   → empty nodes list (triggers EngineAdapter.loadData() full refresh)
  */
 import type {
-    IModuleFS,
+    IFileSystem,
     IFSDriver,
     FSCapabilities,
     FSNode,
     FSFileNode,
     FSSearchResult,
-    FSModuleStats,
+    FileSystemStats,
     FileContent,
     ReadOptions,
     ListOptions,
@@ -101,8 +101,10 @@ const noopAssets: IAssetOperations = {
 // SkillsEngine
 // ═══════════════════════════════════════════════════════════════
 
-export class SkillsEngine implements IModuleFS {
-    readonly moduleId = 'skills';
+export class SkillsEngine implements IFileSystem {
+    readonly revision = 0;
+    async capabilitiesAt(_path: string) { return this.capabilities; }
+    readonly viewId = 'skills';
     readonly capabilities: FSCapabilities = SKILLS_CAPS;
     readonly driver: IFSDriver;
     readonly meta: import('@itookit/vfs-core').IFSMetaDriver;
@@ -156,7 +158,7 @@ export class SkillsEngine implements IModuleFS {
 // ═══════════════════════════════════════════════════════════════
 
 class SkillsDriver implements IFSDriver {
-    readonly moduleId = 'skills';
+    readonly viewId = 'skills';
     readonly capabilities: FSCapabilities = SKILLS_CAPS;
     private readonly events = new EventBus<FSEventPayloadMap>();
     private suppressEvents = false;
@@ -170,7 +172,7 @@ class SkillsDriver implements IFSDriver {
                 type: event,
                 payload,
                 timestamp: meta.timestamp,
-                moduleId: this.moduleId,
+                viewId: this.viewId,
             });
         });
     }
@@ -237,7 +239,7 @@ class SkillsDriver implements IFSDriver {
         return { nodes: nodes, total: nodes.length, hasMore: false };
     }
 
-    async getStats(): Promise<FSModuleStats> {
+    async getStats(): Promise<FileSystemStats> {
         const skills = await this.service.getSkills();
         return { fileCount: skills.length, directoryCount: 1, totalSize: 0, lastModifiedAt: Date.now() };
     }
@@ -416,13 +418,13 @@ class SkillsDriver implements IFSDriver {
     }
 
     // ── Links (unsupported) ───────────────────────────
-    async symlink(): Promise<FSNode> { throw new FSCapabilityError('symlinks', this.moduleId); }
-    async readlink(): Promise<string> { throw new FSCapabilityError('symlinks', this.moduleId); }
-    async hardlink(): Promise<FSNode> { throw new FSCapabilityError('hardlinks', this.moduleId); }
+    async symlink(): Promise<FSNode> { throw new FSCapabilityError('symlinks', this.viewId); }
+    async readlink(): Promise<string> { throw new FSCapabilityError('symlinks', this.viewId); }
+    async hardlink(): Promise<FSNode> { throw new FSCapabilityError('hardlinks', this.viewId); }
 
     // ── Transaction (unsupported) ────────────────────
     async transaction<T>(): Promise<T> {
-        throw new FSCapabilityError('transaction', this.moduleId);
+        throw new FSCapabilityError('transaction', this.viewId);
     }
 }
 
@@ -441,7 +443,7 @@ function toFSNode(s: LLMSkill): FSFileNode {
         createdAt: s.createdAt ?? Date.now(),
         modifiedAt: s.modifiedAt ?? Date.now(),
         version: 0,
-        moduleId: 'skills',
+        viewId: 'skills',
         tags: s.enabled ? [] : ['disabled'],
         metadata: {
             title: s.name,

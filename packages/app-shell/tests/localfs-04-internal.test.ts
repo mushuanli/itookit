@@ -1,18 +1,4 @@
-/**
- * LocalFS integration — Internal paths (__config/)
- *
- * Key behaviors verified:
- *   - __config/ is NOT created in moduleDir (user's directory stays clean)
- *   - Content stored in sidecarDir/vfs-internal/module/test/__config/
- *     (rel path in DB includes full path from VFS root when using rootBackend)
- *   - __config/ not visible in normal getChildren
- *   - Still fully readable/writable via VFS API
- *
- * After running, inspect:
- *   tests/test_vfsroot/internal/<NNN>/module/test/   ← user files only
- *   tests/test_sidecar/internal/<NNN>/vfs-internal/  ← internal content here
- */
-
+/** LocalFS preserves literal directory names; UI listing flags do not relocate data. */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import {
@@ -23,32 +9,31 @@ const SUITE = 'internal';
 
 // ── Storage location ───────────────────────────────────────────────────────────
 
-describe('Internal paths (__config/) — storage location', () => {
+describe('Literal paths (__config/) — storage location', () => {
     let vfs: LocalTestVFS;
     beforeEach(async () => { vfs = await setupLocalVFS(SUITE); });
     afterEach(async  () => { await vfs.dispose(); });
 
-    it('__config/ directory is NOT created in moduleDir', async () => {
+    it('__config/ directory is created in the source directory', async () => {
         await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
-        expect(await diskExists(vfs.moduleDir, '__config')).toBe(false);
+        expect(await diskExists(vfs.moduleDir, '__config')).toBe(true);
     });
 
-    it('file inside __config/ is NOT in moduleDir', async () => {
+    it('file inside __config/ stays in the source directory', async () => {
         await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
         await vfs.fs.driver.createFile({
             name: 'history.yaml', parentPath: '/__config', content: 'entries: []',
         });
-        expect(await diskExists(vfs.moduleDir, '__config/history.yaml')).toBe(false);
+        expect(await diskExists(vfs.moduleDir, '__config/history.yaml')).toBe(true);
     });
 
-    it('file inside __config/ content goes to sidecarDir/vfs-internal/', async () => {
+    it('file content is never redirected to metadata storage', async () => {
         await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
         await vfs.fs.driver.createFile({
             name: 'history.yaml', parentPath: '/__config', content: 'entries: []',
         });
-        // rootBackend: DB rel = 'module/test/__config/history.yaml' → sidecar mirrors it
         const internalBase = join(vfs.sidecarDir, 'vfs-internal');
-        expect(await diskExists(internalBase, 'module/test/__config/history.yaml')).toBe(true);
+        expect(await diskExists(internalBase, 'module/test/__config/history.yaml')).toBe(false);
     });
 });
 
@@ -101,25 +86,25 @@ describe('Internal paths (__config/) — visibility', () => {
         expect(names).not.toContain('__config');
     });
 
-    it('moduleDir stays clean — only user files appear there', async () => {
+    it('all literal user directories remain on disk', async () => {
         await vfs.fs.driver.createFile({ name: 'user.md', parentPath: null, content: 'u' });
         await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
         await vfs.fs.driver.createFile({ name: 'cfg.json', parentPath: '/__config', content: '{}' });
 
         const diskEntries = await diskList(vfs.moduleDir);
         expect(diskEntries).toContain('user.md');
-        expect(diskEntries).not.toContain('__config');
+        expect(diskEntries).toContain('__config');
     });
 });
 
 // ── Contrast: single _ vs double __ ───────────────────────────────────────────
 
-describe('Single _ (assetdir) vs __ (internal) on disk', () => {
+describe('Asset directories and double-underscore directories on disk', () => {
     let vfs: LocalTestVFS;
     beforeEach(async () => { vfs = await setupLocalVFS(SUITE); });
     afterEach(async  () => { await vfs.dispose(); });
 
-    it('_name/ (assetdir) is real on disk; __name/ is not', async () => {
+    it('both asset directories and double-underscore directories are real', async () => {
         await vfs.fs.driver.createFile({ name: 'doc.md', parentPath: null, content: '# Doc' });
         await vfs.fs.meta.assets!.putAsset('/doc.md', 'img.png', 'image');
         await vfs.fs.driver.createDirectory({ name: '__config', parentPath: null });
@@ -127,6 +112,6 @@ describe('Single _ (assetdir) vs __ (internal) on disk', () => {
         const diskEntries = await diskList(vfs.moduleDir);
         expect(diskEntries).toContain('doc.md');
         expect(diskEntries).toContain('_doc.md');      // assetdir: REAL directory
-        expect(diskEntries).not.toContain('__config'); // internal: NOT in moduleDir
+        expect(diskEntries).toContain('__config'); // literal user directory
     });
 });

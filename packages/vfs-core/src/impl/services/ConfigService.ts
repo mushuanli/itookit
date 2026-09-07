@@ -10,7 +10,7 @@ import type {
     IConfigService,
     ConfigFileDescriptor,
     ConfigChangeEvent,
-    IModuleFS,
+    IFileSystem,
 } from '../../protocol';
 
 import { FSNotFoundError } from '../../protocol';
@@ -21,9 +21,9 @@ export class ConfigService implements IConfigService {
     private readonly listeners = new Map<string, Set<ChangeHandler>>();
     private readonly cache = new Map<string, Map<string, string>>();
 
-    constructor(private readonly getFS: () => IModuleFS) {}
+    constructor(private readonly getFS: () => IFileSystem) {}
 
-    private get fs(): IModuleFS {
+    private get fs(): IFileSystem {
         return this.getFS();
     }
 

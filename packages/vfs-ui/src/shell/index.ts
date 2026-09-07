@@ -9,7 +9,7 @@ import {
 } from './VFSUIShell';
 import type { SessionUIOptions } from '@itookit/ui-common';
 import { ISessionUI, EditorFactory } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 
 import type {
   VFSNodeUI,
@@ -37,7 +37,7 @@ export type VFSUIOptions = SessionUIOptions<VFSNodeUI> & {
  */
 export const createVFSUI = (
     options: VFSUIOptions,
-    engine: IModuleFS
+    engine: IFileSystem
 ): ISessionUI<VFSNodeUI, VFSService> => new VFSUIShell(options, engine);
 
 export { VFSUIShell, VFSService };

@@ -1,7 +1,7 @@
 // @file: mdx/core/print.service.ts
 
 import { MDxRenderer } from '../../renderer/mdx-renderer';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 
 // ✅ 从常量文件导入样式
 import { PRINT_STYLES } from './print.styles';
@@ -76,11 +76,11 @@ export interface PrintService {
  */
 export class DefaultPrintService implements PrintService {
     private renderer: MDxRenderer | null = null;
-    private moduleFS?: IModuleFS;
+    private fs?: IFileSystem;
     private nodeId?: string;
 
-    constructor(moduleFS?: IModuleFS, nodeId?: string) {
-        this.moduleFS = moduleFS;
+    constructor(fs?: IFileSystem, nodeId?: string, private readonly assets?: IFileSystem) {
+        this.fs = fs;
         this.nodeId = nodeId;
     }
 
@@ -90,8 +90,9 @@ export class DefaultPrintService implements PrintService {
     private getRenderer(): MDxRenderer {
         if (!this.renderer) {
             this.renderer = new MDxRenderer({
-                moduleFS: this.moduleFS,
+                fs: this.fs,
                 nodeId: this.nodeId,
+                assets: this.assets,
             });
         }
         return this.renderer;

@@ -2,7 +2,7 @@
  * @file packages/vfs-core/src/interfaces/capabilities/tag-ops.ts
  * @desc 标签操作子接口
  *
- * 通过 IModuleFS.tags 访问（当 capabilities.tags === true）。
+ * 通过 IFileSystem.tags 访问（当 capabilities.tags === true）。
  */
 
 export interface TagDefinition {

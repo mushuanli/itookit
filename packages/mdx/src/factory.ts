@@ -1,3 +1,5 @@
+import { editorFilePath } from '@itookit/ui-common';
+import { normalizeEditorOptions } from '@itookit/ui-common';
 /**
  * @file mdx/factory.ts
  */
@@ -164,9 +166,9 @@ function resolvePluginInstance(
 function bridgeSaveCallback(config: MDxEditorFactoryConfig): ((content: string) => Promise<void>) | undefined {
   if (config.onSave) return config.onSave;
 
-  if (config.hostContext && config.nodeId) {
+  if (config.hostContext?.saveContent && editorFilePath(config)) {
     return async (content: string) => {
-      await config.hostContext!.saveContent(config.nodeId!, content);
+      await config.hostContext!.saveContent!(editorFilePath(config)!, content);
     };
   }
 
@@ -203,7 +205,7 @@ export async function createMDxEditor(
   bridgeTitleBarOptions(config);
 
   // 3. 创建编辑器
-  const editor = new MDxEditor(config as MDxEditorConfig);
+  const editor = new MDxEditor(normalizeEditorOptions(config) as MDxEditorConfig);
 
   // 4. 核心插件（强制加载）
   editor.use(new CoreEditorPlugin(defaultOpts['editor:core'] || {}));

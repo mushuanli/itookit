@@ -5,7 +5,7 @@
  * 使用方式：
  *   import { createVFS, VFSManager, VFSEngine } from '@itookit/vfs-core';
  *   import { MemoryBackend } from '@itookit/vfs-core';
- *   import type { IVFSManager, IModuleFS, FSNode } from '@itookit/vfs-core';
+ *   import type { IVFSManager, IFileSystem, FSNode } from '@itookit/vfs-core';
  *   import { EventBus } from '@itookit/vfs-core';
  */
 
@@ -17,32 +17,25 @@ export * from './eventbus';
 
 // ── 工厂 ──
 export { createVFS } from './impl/factory';
+export { copyFileSystemTree } from './impl/services/copy-tree';
+export { FileSystemView, createFileSystemView, normalizeVirtualPath } from './impl/services/FileSystemView';
+export type { FileSystemMount, FileSystemViewOptions } from './impl/services/FileSystemView';
 
 // ── 引擎核心 ──
 export { VFSEngine } from './impl/engine/vfs-engine';
 export { FSEventBus, TransactionEventBuffer } from './impl/event/event-bus';
 export { PluginPipeline } from './impl/engine/plugin-pipeline';
 export { DeviceRegistry } from './impl/engine/device-registry';
-export { AccessController, SYSTEM_CALLER, type CallerIdentity } from './impl/engine/access-controller';
 
 // ── 服务层实现 ──
-export { ModuleFS, type ModuleFSDeps } from './impl/services/ModuleFS';
 export { VFSManager } from './impl/services/VFSManager';
 export { ConfigService } from './impl/services/ConfigService';
-export { ScopedView } from './impl/services/ScopedView';
 
 // ── 内置设备 ──
 export { nullDevice, zeroDevice, randomDevice } from './impl/devices';
 
 // ── 后端（参考实现，位于 testing/） ──
 export { MemoryBackend } from './testing';
-
-// ── 会话适配器 ──
-export {
-    BaseModuleService,
-    type ChangeListener,
-    type ModuleServiceOptions,
-} from './impl/adapter-session/BaseModuleService';
 
 // ── File handles ──
 export { FileHandle, createFile, MDXFileHandle, createMDXFile } from './impl/file-io';
@@ -75,3 +68,6 @@ export type {
     VFSEncodedContent,
     SerializeDeps,
 } from './utils/serialization';
+export { createFileSystemSource, type FileSystemSourceOwner } from './impl/services/FileSystemSource';
+
+export { exportFileSystem, importFileSystem, type FileSystemArchive } from './impl/services/file-system-archive';

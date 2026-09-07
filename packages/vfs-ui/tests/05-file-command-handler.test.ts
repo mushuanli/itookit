@@ -9,7 +9,7 @@
  *    events and the UI will silently stop refreshing.
  *
  * B) VFSModuleEngine-style event bridge: tests an engine mock whose on()
- *    simulates the real subscription + moduleId-filter chain (the layer our
+ *    simulates the real subscription + viewId-filter chain (the layer our
  *    existing 03-engine-adapter tests bypass entirely). This would have caught
  *    the original `in` vs `.has()` bug on a Set.
  */
@@ -152,20 +152,20 @@ describe('FileCommandHandler — command → engine wiring', () => {
     });
 });
 
-// ── B. VFSModuleEngine-style bridge: moduleId filter simulation ───────────────
+// ── B. VFSModuleEngine-style bridge: viewId filter simulation ───────────────
 
 /**
  * Simulates the real VFSModuleEngine.on() / ModuleFS.on() behavior:
- * - Subscriptions are stored with a moduleId filter
- * - Only events with matching moduleId reach the subscriber
+ * - Subscriptions are stored with a viewId filter
+ * - Only events with matching viewId reach the subscriber
  *
  * This would have caught Bug 1 (the `in` vs `.has()` issue) if it had existed.
  * Before fix: on() returned () => {} regardless of event — filter logic never ran.
- * After fix: on() subscribes and the filter correctly matches by moduleId.
+ * After fix: on() subscribes and the filter correctly matches by viewId.
  */
 class FilteredEventEngine {
     private subscriptions = new Map<string, Array<{
-        moduleId: string;
+        viewId: string;
         cb: (e: EngineEvent) => void;
     }>>();
 
@@ -174,7 +174,7 @@ class FilteredEventEngine {
     driver = {
         on: (event: EngineEventType, callback: (e: EngineEvent) => void): (() => void) => {
             if (!this.subscriptions.has(event)) this.subscriptions.set(event, []);
-            const entry = { moduleId: 'chat', cb: callback };
+            const entry = { viewId: 'chat', cb: callback };
             this.subscriptions.get(event)!.push(entry);
             return () => {
                 const list = this.subscriptions.get(event) ?? [];
@@ -195,20 +195,20 @@ class FilteredEventEngine {
     };
 
     /**
-     * Simulates ModuleFS._emit() — only reaches subscribers whose moduleId matches.
-     * WRONG moduleId → event is filtered out (never reaches EngineAdapter).
+     * Simulates ModuleFS._emit() — only reaches subscribers whose viewId matches.
+     * WRONG viewId → event is filtered out (never reaches EngineAdapter).
      */
-    fireWithModuleId(type: EngineEventType, payload: unknown, moduleId: string): void {
+    fireWithViewId(type: EngineEventType, payload: unknown, viewId: string): void {
         const list = this.subscriptions.get(type) ?? [];
         list.forEach(sub => {
-            if (sub.moduleId === moduleId) {
+            if (sub.viewId === viewId) {
                 sub.cb({ type, payload });
             }
         });
     }
 }
 
-describe('Event filter: only matching moduleId reaches EngineAdapter', () => {
+describe('Event filter: only matching viewId reaches EngineAdapter', () => {
     let filteredEngine: FilteredEventEngine;
     let store: VFSStore;
     let adapter: EngineAdapter;
@@ -224,37 +224,37 @@ describe('Event filter: only matching moduleId reaches EngineAdapter', () => {
         adapter.destroy();
     });
 
-    it('event with matching moduleId reaches EngineAdapter and updates store', async () => {
+    it('event with matching viewId reaches EngineAdapter and updates store', async () => {
         const node = makeEngineNode({ id: 'f1', path: '/f1.chat' });
         filteredEngine.nodes.set('f1', node);
 
-        // Fire with CORRECT moduleId (same as what was used in on())
-        filteredEngine.fireWithModuleId(
+        // Fire with CORRECT viewId (same as what was used in on())
+        filteredEngine.fireWithViewId(
             'node:created',
             createdPayload([{ nodeId: 'f1', path: '/f1.chat' }]),
-            'chat' // matching moduleId
+            'chat' // matching viewId
         );
 
         await sleep(120);
         expect(store.getState().items.some(i => i.id === '/f1.chat')).toBe(true);
     });
 
-    it('event with WRONG moduleId is filtered out — store not updated', async () => {
+    it('event with WRONG viewId is filtered out — store not updated', async () => {
         const node = makeEngineNode({ id: 'f2', path: '/f2.chat' });
         filteredEngine.nodes.set('f2', node);
 
-        // Fire with WRONG moduleId → filter rejects it
-        filteredEngine.fireWithModuleId(
+        // Fire with WRONG viewId → filter rejects it
+        filteredEngine.fireWithViewId(
             'node:created',
             createdPayload([{ nodeId: 'f2', path: '/f2.chat' }]),
-            'wrong-module' // NON-matching moduleId
+            'wrong-module' // NON-matching viewId
         );
 
         await sleep(120);
         expect(store.getState().items.some(i => i.id === 'f2')).toBe(false);
     });
 
-    it('delete event with correct moduleId removes item from store', async () => {
+    it('delete event with correct viewId removes item from store', async () => {
         // Pre-load an item
         store.dispatch({
             type: 'STATE_LOAD_SUCCESS',
@@ -265,7 +265,7 @@ describe('Event filter: only matching moduleId reaches EngineAdapter', () => {
         });
         expect(store.getState().items).toHaveLength(1);
 
-        filteredEngine.fireWithModuleId(
+        filteredEngine.fireWithViewId(
             'node:deleted',
             deletedPayload(['del-1']),
             'chat'
@@ -280,7 +280,7 @@ describe('Event filter: only matching moduleId reaches EngineAdapter', () => {
 
 describe('concurrent create + update events for same node', () => {
     it('node appears in store even when create and update fire together', async () => {
-        // This simulates ChatEngine.createFile() which fires:
+        // This simulates SessionRepository.createFile() which fires:
         // 1. node:created (from engine.createFile)
         // 2. node:updated (from writeContent + updateMetadata)
         const engine = new MockSessionEngine();
@@ -291,7 +291,7 @@ describe('concurrent create + update events for same node', () => {
         const node = makeEngineNode({ id: 'chat-1', path: '/chat.chat' });
         engine.nodes.set('chat-1', node);
 
-        // Fire both in rapid succession (as ChatEngine.createFile does)
+        // Fire both in rapid succession (as SessionRepository.createFile does)
         engine.emit('node:created', createdPayload([{ nodeId: 'chat-1', path: '/chat.chat' }]));
         engine.emit('node:updated', { nodes: [{ nodeId: 'chat-1', path: '/chat.chat' }] });
 
@@ -324,7 +324,7 @@ describe('concurrent create + update events for same node', () => {
         });
         engine.nodes.set('root-node', rootNode);
 
-        // Fire all three node:created events (as ChatEngine.createSessionStructure does)
+        // Fire all three node:created events (as SessionRepository.createSessionStructure does)
         engine.emit('node:created', createdPayload([{ nodeId: 'chat-1', path: '/session.chat' }]));
         engine.emit('node:created', createdPayload([{ nodeId: 'asset-dir', path: '/_session.chat', type: 'directory' }]));
         engine.emit('node:created', createdPayload([{ nodeId: 'root-node', path: '/_session.chat/000_00000_s.chat' }]));

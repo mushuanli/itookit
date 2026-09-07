@@ -29,6 +29,9 @@ interface NodeListOptions extends BaseComponentDeps {
   searchFilter?: SearchFilter;
   instanceId: string;
   engine?: any;
+  directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
+  activateDirectories?: boolean;
+  primaryAction?: { label: string; run(): Promise<void> };
 }
 
 export class NodeList extends BaseComponent<NodeListState> {
@@ -50,16 +53,31 @@ export class NodeList extends BaseComponent<NodeListState> {
   private readonly renderer: NodeListRenderer;
 
   private readonly fileCreation?: FileCreationConfig;
+  private readonly directoryAction?: NodeListOptions['directoryAction'];
+  private readonly activateDirectories: boolean;
 
   constructor(options: NodeListOptions) {
     super(options);
     this.fileCreation = options.fileCreation;
+    this.directoryAction = options.directoryAction;
+    this.activateDirectories = options.activateDirectories ?? false;
 
     this.stateTransformer = new NodeListStateTransformer(
       options.searchFilter
     );
 
     this.buildInitialHTML(options);
+    if (options.primaryAction) {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'vfs-node-list__new-btn'; button.textContent = options.primaryAction.label;
+      button.onclick = async () => {
+        button.disabled = true;
+        try { await options.primaryAction!.run(); }
+        catch (error) { this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error } }); }
+        finally { button.disabled = false; }
+      };
+      this.container.querySelector('.vfs-node-list__title-bar')!.appendChild(button);
+    }
 
     this.bodyEl = this.container.querySelector('.vfs-node-list__body')!;
     this.searchEl = this.container.querySelector('.vfs-node-list__search')!;
@@ -252,7 +270,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     }
 
     if (result.shouldNavigate) {
-      if (itemType === 'file') {
+      if (itemType === 'file' || this.activateDirectories) {
         this.commandBus.execute('nav:selectSession', { sessionId: itemId });
       } else if (itemType === 'directory') {
         this.commandBus.execute('nav:selectSession', { sessionId: null });
@@ -395,6 +413,18 @@ export class NodeList extends BaseComponent<NodeListState> {
       });
     }
 
+    if (this.directoryAction) {
+      const action = this.directoryAction;
+      for (const row of this.bodyEl.querySelectorAll<HTMLElement>('[data-item-type="directory"]')) {
+        const path = row.dataset.itemId!;
+        if (!action.visible(path) || row.querySelector(':scope > .vfs-node-item__main-row > .vfs-directory-action')) continue;
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'vfs-directory-action'; button.textContent = action.label;
+        button.onclick = event => { event.stopPropagation(); button.disabled = true;
+          void action.run(path).catch(error => { console.error('Directory action failed', error); })
+            .finally(() => { button.disabled = false; }); };
+        row.querySelector(':scope > .vfs-node-item__main-row')?.append(button);
+      }
+    }
     const creatorInput = this.bodyEl.querySelector<HTMLInputElement>(
       '.vfs-node-list__item-creator-input'
     );

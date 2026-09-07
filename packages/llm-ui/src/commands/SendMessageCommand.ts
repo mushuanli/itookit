@@ -22,8 +22,8 @@ export class SendMessageCommand extends Command<SendMessageParams> {
     protected name = 'Send Message';
 
     protected async execute({ text, files, agentId, overrides, origin, historyPolicy }: SendMessageParams): Promise<void> {
-        const ownerNodeId = this.ctx.getOwnerNodeId();
-        if (!ownerNodeId) throw new Error('No session loaded');
+        const sessionId = this.ctx.getSessionId();
+        if (!sessionId) throw new Error('No session loaded');
 
         const savedText = text;
         const savedAgentId = agentId;
@@ -37,7 +37,7 @@ export class SendMessageCommand extends Command<SendMessageParams> {
 
             if (files.length > 0) {
                 try {
-                    const refs = await this.ctx.assetService.uploadFiles(ownerNodeId, files);
+                    const refs = await this.ctx.assetService.uploadFiles(files);
                     finalText += '\n\n' + refs.join('\n\n');
                 } catch (uploadErr: any) {
                     Toast.error(uploadErr.message || 'Failed to upload files');

@@ -2,7 +2,7 @@
 // pricing.json 加载工具 + 路径常量。
 // 类型来自 @itookit/common；此文件只负责 VFS IO 和模型字段覆盖。
 
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { LLMModel, ModelPricingConfig, ModelPricingEntry } from '@itookit/common';
 import { lookupPricingEntry, extractPrices } from '@itookit/common';
 import { MODEL_PRICING } from './providers';
@@ -15,7 +15,7 @@ export const COST_SEQ_PATH     = '/llm/cost.seq';
  * 文件不存在时写入内置默认值（MODEL_PRICING）再返回。
  * 解析失败时 console.warn 并返回内置默认值。
  */
-export async function loadPricingConfig(engine: IModuleFS): Promise<ModelPricingConfig> {
+export async function loadPricingConfig(engine: IFileSystem): Promise<ModelPricingConfig> {
     const defaultConfig: ModelPricingConfig = { model_pricing: MODEL_PRICING };
 
     try {
@@ -37,7 +37,7 @@ export async function loadPricingConfig(engine: IModuleFS): Promise<ModelPricing
 
 /** 写入 pricing.json（供首次初始化和 .llm 导入时使用） */
 export async function writePricingConfig(
-    engine: IModuleFS,
+    engine: IFileSystem,
     config: ModelPricingConfig,
 ): Promise<void> {
     const content = JSON.stringify(config, null, 2);

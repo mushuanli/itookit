@@ -22,7 +22,7 @@ import type { DagPluginCatalog, JsonValue, SendIntent, ToolDefinition } from '@i
 import type { FlowStore } from '@itookit/llm-flow';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
 import { CONVERSATION_DEFAULTS } from '../core/constants';
-import { IChatEngine, BranchTreeNode } from '../persistence/types';
+import { ISessionRepository, BranchTreeNode } from '../persistence/types';
 import type { IAgentConfigService } from '../services/agent-service';
 import type { ISession, Signal, AgentEvent } from '@itookit/common';
 import { SessionRunCoordinator } from './session-run-coordinator';
@@ -42,7 +42,7 @@ import { ContextProfileStore } from '../persistence/context-profile-store';
 import { ContextAssembler } from '@itookit/llm-tasks';
 import { RoundLog } from '../persistence/round-log';
 import type { Kernel, SessionHandle } from '@itookit/durable-kernel';
-import { chatKernelStorage } from '../persistence/chat-kernel-storage';
+import { sessionDirectoryStorage } from '../persistence/session-directory-storage';
 import { DurableConversationProjection, RUNTIME_KEY } from '../persistence/durable-conversation-projection';
 
 /**
@@ -63,7 +63,7 @@ export class SessionManager implements ISession, SessionQuery {
     private durableProjectionUnsubscribe?: () => void;
 
     constructor(
-        engine: IChatEngine,
+        engine: ISessionRepository,
         agentService: IAgentConfigService,
         options: {
             kernel: Kernel;
@@ -191,13 +191,12 @@ export class SessionManager implements ISession, SessionQuery {
     // 会话绑定 → SessionRegistry
     // ================================================================
 
-    async bindSession(nodeId: string, sessionId: string): Promise<SessionSnapshot> {
+    async bindSession(sessionId: string): Promise<SessionSnapshot> {
         this.durableSession = await this.kernel.createSession({
-            id: sessionId, storage: chatKernelStorage(sessionId),
+            id: sessionId, storage: sessionDirectoryStorage(sessionId),
         });
-        const snapshot = await this.registry.bindSession(nodeId, sessionId);
-        this.runs.updateNodeId(sessionId, nodeId);
-        await this.bindDurableProjection(nodeId, sessionId);
+        const snapshot = await this.registry.bindSession(sessionId);
+        await this.bindDurableProjection(sessionId);
         return snapshot;
     }
 
@@ -214,48 +213,41 @@ export class SessionManager implements ISession, SessionQuery {
         revision: number,
         parameters: Record<string, JsonValue> | undefined,
         title: string,
-    ): Promise<{ sessionId: string; nodeId: string }> {
+    ): Promise<{ sessionId: string }> {
         const name = title.trim() || 'Workflow';
         const engine = this.registry.engine;
-        const node = await engine.createFile(name, null);
-        const sessionId = await engine.initializeExistingFile(node.path, name);
-        await engine.updateManifest(node.path, {
+        const sessionId = await engine.createSession(name);
+        await engine.updateManifest(sessionId, {
             flow: { flowId, revision, ...(parameters ? { parameters } : {}) },
         });
-        return { sessionId, nodeId: node.path };
+        return { sessionId };
     }
 
-    updateBoundNodeId(newNodeId: string): void {
-        const sessionId = this.registry.boundSessionId;
-        this.registry.updateBoundNodeId(newNodeId);
-        if (sessionId) this.runs.updateNodeId(sessionId, newNodeId);
-        this.queueDurableProjection(newNodeId);
-    }
 
-    private async bindDurableProjection(nodeId: string, sessionId: string): Promise<void> {
+
+    private async bindDurableProjection(sessionId: string): Promise<void> {
         if (!this.durableProjection || !this.durableSession) return;
         await this.restoreDurableRuntime(sessionId);
         await this.durableProjection.sync(
-            this.durableSession, nodeId, this.registry.getSessionRuntime(sessionId),
+            this.durableSession, sessionId, this.registry.getSessionRuntime(sessionId),
         );
         this.durableProjectionUnsubscribe?.();
         this.durableProjectionUnsubscribe = this.registry.eventBus.onSession(sessionId, () => {
-            this.queueDurableProjection(this.registry.getCurrentNodeId() ?? nodeId);
+            this.queueDurableProjection(sessionId);
         });
     }
 
-    private queueDurableProjection(nodeId: string): void {
+    private queueDurableProjection(sessionId: string): void {
         if (!this.durableProjection || !this.durableSession) return;
         const runtime = this.registry.getSessionRuntime(this.durableSession.id);
-        this.durableProjection.sync(this.durableSession, nodeId, runtime).catch(error => {
-            log.warn('Durable conversation projection failed', { nodeId, error });
+        this.durableProjection.sync(this.durableSession, sessionId, runtime).catch(error => {
+            log.warn('Durable conversation projection failed', { sessionId, error });
         });
     }
 
     private queueDurableProjectionForSession(sessionId: string): void {
         if (this.durableSession?.id !== sessionId) return;
-        const nodeId = this.registry.getSessionRuntime(sessionId)?.nodeId;
-        if (nodeId) this.queueDurableProjection(nodeId);
+        if (this.registry.getSessionRuntime(sessionId)) this.queueDurableProjection(sessionId);
     }
 
     private async restoreDurableRuntime(sessionId: string): Promise<void> {
@@ -273,7 +265,6 @@ export class SessionManager implements ISession, SessionQuery {
     getSnapshot(): SessionSnapshot { return this.registry.getSnapshot(); }
     getSessions(): SessionGroup[] { return this.registry.getSessions(); }
     getCurrentSessionId(): string | null { return this.registry.getCurrentSessionId(); }
-    getCurrentNodeId(): string | null { return this.registry.getCurrentNodeId(); }
     getStatus(): SessionStatus | 'unbound' { return this.registry.getStatus(); }
     isGenerating(): boolean { return this.registry.isGenerating(); }
     getAllSessions(): SessionRuntime[] { return this.registry.getAllSessions(); }
@@ -323,8 +314,8 @@ export class SessionManager implements ISession, SessionQuery {
     }
 
     async previewContext(agentId: string, pendingText = '') {
-        const { sessionId, nodeId } = this.registry.ensureBound();
-        const log = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const { sessionId } = this.registry.ensureBound();
+        const log = new RoundLog(this.registry.engine, sessionId);
         const manifest = await log.loadManifest();
         const branchRef = manifest.currentBranch || 'main';
         const profile = manifest.branchMeta[branchRef]?.contextProfile ?? { id: '', revision: 0 };
@@ -332,7 +323,7 @@ export class SessionManager implements ISession, SessionQuery {
         const version = agent.agentVersion ?? 'unversioned';
         const assembler = new ContextAssembler({
             log,
-            profileStore: new ContextProfileStore(this.registry.engine, nodeId),
+            profileStore: new ContextProfileStore(this.registry.engine, sessionId),
             readRound: roundId => log.readRound(roundId),
             loadArtifact: async () => null,
         });
@@ -532,7 +523,7 @@ export class SessionManager implements ISession, SessionQuery {
 let sessionManagerInstance: SessionManager | null = null;
 
 export function createSessionManager(
-    engine: IChatEngine,
+    engine: ISessionRepository,
     agentService: IAgentConfigService,
     options: {
         kernel: Kernel;

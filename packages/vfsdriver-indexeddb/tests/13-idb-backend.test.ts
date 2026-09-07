@@ -108,43 +108,9 @@ describe('IndexedDBBackend path model', () => {
         await backend.close();
     });
 
-    it('adds missing stores without deleting existing nodes', async () => {
-        const dbName = uniqueName('missing-stores');
-        await createNodesOnlyDatabase(dbName);
-        const backend = new IndexedDBBackend({ dbName });
-        await backend.init();
 
-        expect(await backend.stat('/existing')).not.toBeNull();
-        await backend.records.setRecordField('/existing', 'key', 'value');
-        expect(await backend.records.getRecordField('/existing', 'key')).toBe('value');
-        await backend.close();
-    });
 });
 
 function uniqueName(prefix: string): string {
     return `${prefix}-${Date.now()}-${Math.random()}`;
-}
-
-function createNodesOnlyDatabase(name: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(name, 1);
-        request.onupgradeneeded = () => {
-            const nodes = request.result.createObjectStore('nodes', { keyPath: 'path' });
-            nodes.put({
-                path: '/existing',
-                type: 'directory',
-                content: new ArrayBuffer(0),
-                size: 0,
-                createdAt: 1,
-                modifiedAt: 1,
-                tags: [],
-                metadata: '{}',
-            });
-        };
-        request.onsuccess = () => {
-            request.result.close();
-            resolve();
-        };
-        request.onerror = () => reject(request.error);
-    });
 }

@@ -45,6 +45,5 @@ export interface CommandContext {
     errorHandler: ErrorHandler;
 
     // 上下文
-    getNodeId: () => string;
-    getOwnerNodeId: () => string;
+    getSessionId: () => string;
 }

@@ -19,11 +19,11 @@ export class DirectoryMentionSource extends BaseMentionSource {
       });
       return this.filterResults(Array.from(result.nodes)).map(node => ({
         id: node.path,
-        label: `${node.icon || '📁'} ${node.name} (${node.moduleId ? `[${node.moduleId}] ` : ''}${node.path})`,
+        label: `${node.icon || '📁'} ${node.name} (${node.viewId ? `[${node.viewId}] ` : ''}${node.path})`,
         title: node.name,
         type: 'directory',
         path: node.path,
-        module: node.moduleId,
+        module: node.viewId,
       }));
     } catch (e) {
       console.error('[DirectoryMentionSource] Error:', e);

@@ -4,7 +4,7 @@ export type Unsubscribe = () => void;
 
 /**
  * Message attributes — extensible per-domain metadata attached to every event.
- * Consumers can carry moduleId, mountId, nodeId, fromTransaction, channel key, etc.
+ * Consumers can carry viewId, mountId, nodeId, fromTransaction, channel key, etc.
  */
 export interface EventMeta {
   readonly type: string;

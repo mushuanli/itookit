@@ -118,11 +118,12 @@ describe('Event emission (IndexedDB backend)', () => {
         expect(events.some(e => e.payload.reason === 'tags')).toBe(true);
     });
 
-    it('moduleId is set on events', async () => {
+    it('view identity is set on events', async () => {
         const { fs } = vfs;
         const { events, unsub } = capture<FSEvent<'node:created'>>(cb => fs.on('node:created', cb));
         await fs.driver.createFile({ name: 'mid.txt', parentPath: null, content: '' });
         unsub();
-        expect(events[0].moduleId).toBe('test');
+        expect(events[0].viewId).toBe(fs.viewId);
+        expect(events[0].revision).toBe(fs.revision);
     });
 });

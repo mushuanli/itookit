@@ -24,7 +24,7 @@ export interface DeviceContext {
     /**
      * 系统 /etc 访问接口。
      * 设备驱动可通过此接口以系统身份读写 /etc 路径（含隐藏文件）。
-     * 仅在通过 IModuleFS.openDevice() 打开设备时注入。
+     * 仅在通过 IFileSystem.openDevice() 打开设备时注入。
      */
     systemAccess?: import('../system-access').ISystemAccess;
 }
@@ -81,7 +81,7 @@ export interface IDeviceManager {
 /**
  * 从已有的驱动实例和上下文创建 IDeviceHandle。
  *
- * 供无法访问 IModuleFS（VFS 路径）的调用方使用：
+ * 供无法访问 IFileSystem（VFS 路径）的调用方使用：
  *   const sessionId = await driver.open!(baseCtx, options);
  *   const handle = createDeviceHandle(driver, { ...baseCtx, sessionId });
  *   await handle.write(data);
@@ -110,7 +110,7 @@ export function createDeviceHandle(
 /**
  * 打开设备文件后返回的句柄。
  *
- * 通过 `IModuleFS.openDevice(path, opts)` 获取：
+ * 通过 `IFileSystem.openDevice(path, opts)` 获取：
  *   const dev = await engine.openDevice('/dev/llm', { connectionId: 'default' });
  *   await dev.write(prompt);
  *   for await (const chunk of dev.readStream()) { ... }

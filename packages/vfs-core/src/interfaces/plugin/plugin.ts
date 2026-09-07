@@ -50,7 +50,7 @@ export interface OperationContext {
     readonly operation: FSOperationType;
 
     /** 模块 ID */
-    readonly moduleId: string;
+    readonly viewId: string;
 
     /** 操作目标节点（已存在的操作有值） */
     readonly node?: Readonly<FSNode>;
@@ -93,7 +93,7 @@ export interface OperationContext {
      * 获取资产目录操作（受限 API）
      *
      * 允许插件在钩子中操作 assetdir 内的状态，
-     * 但不暴露完整的 IModuleFS。
+     * 但不暴露完整的 IFileSystem。
      */
     getAssetDir?(ownerIdOrPath: string): Promise<string | null>;
     putAsset?(ownerIdOrPath: string, assetName: string, content: FileContent): Promise<void>;

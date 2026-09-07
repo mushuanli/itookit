@@ -5,7 +5,7 @@ import { SessionCommand } from '@itookit/llm-session';
 import { Command } from './Command';
 import { LLMPrintService, type PrintService } from '@itookit/mdxeditor';
 import type { ErrorSeverity } from '../utils/errorHandler';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 
 /**
  * 复制整个会话为 Markdown
@@ -23,23 +23,23 @@ export class CopyAllCommand extends Command {
 /**
  * 打印会话
  */
-export class PrintCommand extends Command<{ title: string; engine: IModuleFS; nodeId?: string }> {
+export class PrintCommand extends Command<{ title: string; engine: IFileSystem; assets?: IFileSystem }> {
     protected readonly name = 'Print';
     protected severity: ErrorSeverity = 'warn';
 
     private printService: PrintService | null = null;
 
-    protected async execute({ title, engine, nodeId }: {
-        title: string; engine: IModuleFS; nodeId?: string;
+    protected async execute({ title, engine, assets }: {
+        title: string; engine: IFileSystem; assets?: IFileSystem;
     }): Promise<void> {
         const md = await this.ctx.commands.execute<string>(SessionCommand.Export);
         if (!this.printService) {
-            this.printService = new LLMPrintService(engine, nodeId);
+            this.printService = new LLMPrintService(engine, undefined, assets);
         }
-        await this.printService.print(md, {
+        try { await this.printService.print(md, {
             title: title || 'Chat Conversation',
             showHeader: true,
             headerMeta: { date: new Date().toLocaleString() },
-        });
+        }); } finally { this.printService.destroy?.(); this.printService = null; }
     }
 }

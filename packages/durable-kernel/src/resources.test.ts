@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createVFS, MemoryBackend, type IModuleFS, type IVFSManager } from '@itookit/vfs-core';
+import { createVFS, MemoryBackend, type IFileSystem, type IVFSManager } from '@itookit/vfs-core';
 import { Kernel } from './application/kernel';
 import { createHarness, defineTask } from './core';
 import { ManagedResourceStore, executeResourceTx } from './infrastructure/seqfile/managed-resources';
@@ -8,7 +8,7 @@ import type { DurableTaskProgram, SessionHandle } from './domain/types';
 import type { ResourceClaim, ManagedGrant, ManagedResourceAdapter, ResourceCleanup, ManagedResource } from './domain/resource-api';
 
 describe('simple durable resource facade', () => {
-    let fs: IModuleFS, manager: IVFSManager, kernel: Kernel, s1: SessionHandle, s2: SessionHandle;
+    let fs: IFileSystem, manager: IVFSManager, kernel: Kernel, s1: SessionHandle, s2: SessionHandle;
     const kernels: Kernel[] = [];
     const spec = { program: { kind: 'idle', version: '1' }, input: null, deferStart: true };
     function worker(concurrency = 0) {
@@ -17,8 +17,8 @@ describe('simple durable resource facade', () => {
         kernels.push(k); return k;
     }
     beforeEach(async () => {
-        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(), modules: [{ name: 'test' }] }));
-        await manager.mount('test'); fs = manager.getEngine('test'); await fs.init();
+        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
+        fs = await manager.openFileSystem('/data/test');
         kernel = worker(); await kernel.initialize();
         s1 = await kernel.createSession({ id: 's1', storage: { kind: 'local', locator: '/s1' } });
         s2 = await kernel.createSession({ id: 's2', storage: { kind: 'local', locator: '/s2' } });
@@ -512,7 +512,7 @@ describe('simple durable resource facade', () => {
     it('rejects cross-module sharing before registering a handle', async () => {
         const pool = await result(kernel.resources.create({ requestId: 'pool', kind: 'pool', name: 'pool', capacity: 1 }));
         // Even a wrapper with the same apparent module id cannot prove transaction identity.
-        const alternate = Object.create(fs) as IModuleFS;
+        const alternate = Object.create(fs) as IFileSystem;
         kernel.registerStorageResolver({ kind: 'other', async resolve() { return { fs: alternate, rootPath: '/other' }; } });
         const other = await kernel.createSession({ id: 'other', storage: { kind: 'other', locator: null } });
         const task = await other.spawn(spec);

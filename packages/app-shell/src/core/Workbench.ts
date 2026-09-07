@@ -9,29 +9,21 @@ import { defaultEditorFactory, MentionPlugin } from '@itookit/mdxeditor';
 import type { WorkbenchConfig } from '../types';
 import {NavigationRequest} from '@itookit/common';
 import { EditorOptions, IEditor, EditorHostContext } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 
 export class Workbench {
     private vfsUI: VFSUIShell;
-    private engine: IModuleFS;
+    private engine: IFileSystem;
     private lifecycleUnsubscribe: () => void;
     private baseEditorFactory: (container: HTMLElement, options: EditorOptions) => Promise<IEditor>;
     private hasStarted = false;
 
     constructor(private config: WorkbenchConfig) {
-        if (config.customEngine) {
-            this.engine = config.customEngine;
-        } else if (config.vfs && config.moduleName) {
-            this.engine = config.vfs.getEngine(config.moduleName);
-        } else {
-            throw new Error(
-                "Workbench requires either 'customEngine' or both 'vfs' and 'moduleName' in config"
-            );
-        }
+        this.engine = config.files.fs;
 
         this.baseEditorFactory = config.editorFactory ?? defaultEditorFactory;
 
-        const scopeId = config.scopeId || config.moduleName || 'default';
+        const scopeId = config.scopeId || this.engine.viewId;
 
         this.vfsUI = createVFSUI(
             {
@@ -75,7 +67,7 @@ export class Workbench {
             this.enhancedEditorFactory,
             {
                 hostContext: sharedHostContext,
-                moduleFS: this.engine,
+                files: config.files,
                 ...config.editorConfig
             }
         );
@@ -115,7 +107,7 @@ export class Workbench {
                 ...(editorConfig?.defaultPluginOptions || {}),
                 ...(runtimeOptions?.defaultPluginOptions || {}),
             },
-            moduleFS: this.engine
+            files: this.config.files,
         };
 
         return this.baseEditorFactory(container, mergedOptions);
@@ -141,11 +133,10 @@ export class Workbench {
     }
 
     public async start(initialResourceId?: string): Promise<void> {
-        await this.engine.init();
         await this.vfsUI.start();
 
         if (initialResourceId) {
-            const currentId = this.getActiveSessionId();
+            const currentId = this.getActiveFilePath();
             if (currentId !== initialResourceId) {
                 await this.openFileInternal(initialResourceId);
             }
@@ -160,7 +151,7 @@ export class Workbench {
             return;
         }
 
-        const currentId = this.getActiveSessionId();
+        const currentId = this.getActiveFilePath();
         if (currentId === nodeId) {
             return;
         }
@@ -187,7 +178,7 @@ export class Workbench {
 
         await new Promise(resolve => setTimeout(resolve, 50));
 
-        const currentId = this.getActiveSessionId();
+        const currentId = this.getActiveFilePath();
         if (currentId !== newNode.path) {
             await this.openFileInternal(newNode.path);
         }
@@ -206,7 +197,9 @@ export class Workbench {
         this.vfsUI.setNodeWaitingInput(nodeId, waiting);
     }
 
-    public getActiveSessionId(): string | null {
+    /** @deprecated This is a file path, not a durable Session ID. */
+
+    public getActiveFilePath(): string | null {
         const session = this.vfsUI.getActiveSession();
         return session?.id ?? null;
     }

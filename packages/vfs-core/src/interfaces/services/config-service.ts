@@ -3,7 +3,7 @@
  * @desc 配置服务接口
  *
  * 从 IVFSManager 剥离，遵循 SRP。
- * 内部依赖 IModuleFS 的 __config 模块实现存储，
+ * 内部依赖 IFileSystem 的 __config 模块实现存储，
  * 但消费方不需要知道底层是 seqfile 还是 JSON。
  */
 

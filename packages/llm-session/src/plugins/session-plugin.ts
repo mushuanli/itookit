@@ -11,11 +11,9 @@ export const SessionCommand = {
     Bind: 'session.bind',
     Unbind: 'session.unbind',
     CreateFromFlow: 'session.create-from-flow',
-    UpdateNode: 'session.update-node',
     GetSnapshot: 'session.get-snapshot',
     GetSessions: 'session.get-sessions',
     GetCurrentId: 'session.get-current-id',
-    GetCurrentNode: 'session.get-current-node',
     GetStatus: 'session.get-status',
     IsGenerating: 'session.is-generating',
     HasUnsaved: 'session.has-unsaved',
@@ -52,8 +50,8 @@ export function createSessionPlugin(sessionManager: SessionManager): ILLMPlugin 
             const sm = sessionManager;
 
             ctx.commands.register(SessionCommand.Bind, async (args) => {
-                const { nodeId, sessionId } = args as { nodeId: string; sessionId: string };
-                return sm.bindSession(nodeId, sessionId);
+                const { sessionId } = args as { sessionId: string };
+                return sm.bindSession(sessionId);
             });
             ctx.commands.register(SessionCommand.Unbind, async () => sm.unbindSession());
             ctx.commands.register(SessionCommand.CreateFromFlow, async (args) => {
@@ -70,15 +68,10 @@ export function createSessionPlugin(sessionManager: SessionManager): ILLMPlugin 
                     title ?? 'Workflow',
                 );
             });
-            ctx.commands.register(SessionCommand.UpdateNode, async (args) => {
-                const { newNodeId } = args as { newNodeId: string };
-                return sm.updateBoundNodeId(newNodeId);
-            });
 
             ctx.commands.register(SessionCommand.GetSnapshot, async () => sm.getSnapshot());
             ctx.commands.register(SessionCommand.GetSessions, async () => sm.getSessions());
             ctx.commands.register(SessionCommand.GetCurrentId, async () => sm.getCurrentSessionId());
-            ctx.commands.register(SessionCommand.GetCurrentNode, async () => sm.getCurrentNodeId());
             ctx.commands.register(SessionCommand.GetStatus, async () => sm.getStatus());
             ctx.commands.register(SessionCommand.IsGenerating, async () => sm.isGenerating());
             ctx.commands.register(SessionCommand.HasUnsaved, async () => sm.hasUnsavedChanges());

@@ -2,8 +2,8 @@
 // Grep content search tool.
 //
 // Execution priority:
-//   1. context.shell?.capabilities.ripgrep → rg --json  (10-100x faster)
-//   2. context.vfs                          → VFS parallel reads (browser)
+//   1. context.vfs                          → authorized file view
+//   2. context.shell?.capabilities.ripgrep → rg --json (without a VFS context)
 //   3. fallback                             → Node.js manual directory walk
 
 import { z } from 'zod/v4';
@@ -133,11 +133,11 @@ async function grepVFS(
   const start = Date.now();
   const searchDir = input.path ?? context.cwd;
 
-  const allFiles = await context.vfs.listFiles(searchDir).catch(() => [] as string[]);
+  const allFiles = await context.vfs.listFiles(searchDir);
   const candidates = fileRegex ? allFiles.filter((f) => fileRegex.test(f)) : allFiles;
 
   const texts = await Promise.all(
-    candidates.map((p) => context.vfs.readFile(p).catch(() => null)),
+    candidates.map((p) => context.vfs.readFile(p)),
   );
 
   const matches: Match[] = [];
@@ -241,7 +241,7 @@ export const GrepTool = buildTool({
     const { pattern, glob, path } = input;
 
     // ── 1. ripgrep (fastest — Node.js or Tauri with rg available) ──
-    if (context.shell?.capabilities.ripgrep) {
+    if (!context.vfs && context.shell?.capabilities.ripgrep) {
       try {
         return { data: await grepWithRipgrep({ pattern, glob, path }, context, limit) };
       } catch {

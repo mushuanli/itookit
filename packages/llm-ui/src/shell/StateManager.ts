@@ -19,13 +19,18 @@ export class StateManager {
     private debouncedInputStateSave: DebouncedFn;
     private chatInputGetter: (() => IChatInputPresenter | undefined) | null = null;
     private errorHandler: ErrorHandler;
+    private branch = 'main';
+    private draftTail: Promise<void> = Promise.resolve();
+    private draftGeneration = 0;
 
     constructor(
         private stateService: StateService,
         private sessionManager: SessionManager,
-        private nodeId: string,
-        private readonly validateAgentFn: (id: string) => string
+        private sessionId: string,
+        private readonly validateAgentFn: (id: string) => string,
+        initialBranch = 'main'
     ) {
+        this.branch = initialBranch;
         this.errorHandler = new ErrorHandler({
             module: 'StateManager',
             defaultSeverity: 'silent',
@@ -50,9 +55,23 @@ export class StateManager {
         this.chatInputGetter = getter;
     }
 
-    updateNodeId(newNodeId: string): void {
-        this.nodeId = newNodeId;
+
+    switchDraftBranch(branch: string): Promise<void> {
+        const generation = ++this.draftGeneration;
+        this.chatInputGetter?.()?.setLoading(true);
+        const operation = this.draftTail.then(async () => {
+            if (branch === this.branch) return;
+            const input = this.chatInputGetter?.();
+            await this.saveUIState(input?.getConfig());
+            this.branch = branch;
+            const state = await this.loadUIState();
+            input?.restoreInput(state?.input_text ?? '', state?.input_agent_id);
+        });
+        this.draftTail = operation.catch(() => {});
+        return operation.finally(() => { if (generation === this.draftGeneration) this.chatInputGetter?.()?.setLoading(false); });
     }
+
+    async waitForDrafts(): Promise<void> { await this.draftTail; }
 
     getCollapseStates(): CollapseStateMap { return this.collapseStatesCache; }
 
@@ -83,7 +102,7 @@ export class StateManager {
         inputConfig?: IChatInputConfig,
         isBeingDeleted: boolean = false
     ): Promise<void> {
-        if (isBeingDeleted || !this.nodeId) return;
+        if (isBeingDeleted || !this.sessionId) return;
 
         const payload: UIState = {
             collapse_states: this.collapseStatesCache,
@@ -93,14 +112,14 @@ export class StateManager {
         };
 
         await this.errorHandler.wrap(
-            () => this.stateService.saveUIState(this.nodeId, payload),
+            () => this.stateService.saveUIState(this.sessionId, payload, this.branch),
             'Save UI state', 'silent'
         );
     }
 
     async loadUIState(): Promise<UIState | null> {
         const result = await this.errorHandler.wrapWithFallback(
-            () => this.stateService.loadUIState(this.nodeId),
+            () => this.stateService.loadUIState(this.sessionId, this.branch),
             null, 'Load UI state', 'silent'
         );
 

@@ -1,3 +1,4 @@
+import { editorResourceId } from '@itookit/ui-common';
 // @file llm-ui/editors/SkillSettingsEditor.ts
 import {t} from '@itookit/common';
 import { BaseSettingsEditor } from '@itookit/ui-common';
@@ -44,7 +45,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     ): SkillSettingsEditor {
         const editor = new SkillSettingsEditor(container, service, options ?? {});
         editor._formOnly = true;
-        if (options?.nodeId) editor.selectedId = options.nodeId;
+        if (options && editorResourceId(options)) editor.selectedId = editorResourceId(options) ?? null;
         return editor;
     }
 

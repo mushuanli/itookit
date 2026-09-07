@@ -1,5 +1,5 @@
 // @mdx/core/store/engine-metadata-store.ts
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { ScopedPersistenceStore } from './types';
 
 type PluginDataRecord = Record<string, unknown>;
@@ -9,10 +9,10 @@ function isPluginData(value: unknown): value is PluginDataRecord {
 }
 
 /**
- * 基于 IModuleFS 元数据的持久化存储
+ * 基于 IFileSystem 元数据的持久化存储
  * 特性：防抖批量写入、并发安全、销毁保护
  *
- * v3.3: 依赖 IModuleFS（不再依赖 IFSEngine）
+ * v3.3: 依赖 IFileSystem（不再依赖 IFSEngine）
  */
 export class EngineMetadataStore implements ScopedPersistenceStore {
     private pendingUpdates = new Map<string, unknown>();
@@ -21,7 +21,7 @@ export class EngineMetadataStore implements ScopedPersistenceStore {
     private isDestroyed = false;
 
     constructor(
-        private engine: IModuleFS,
+        private engine: IFileSystem,
         private nodeId: string,
         private pluginNamespace: string
     ) { }

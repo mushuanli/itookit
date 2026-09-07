@@ -19,7 +19,7 @@ import type {
     ConnectionTestResult, InitialAgentDef,
 } from '@itookit/common';
 import type {
-    IDeviceDriver, DeviceContext, IVFSManager, FileContent, IModuleFS,
+    IDeviceDriver, DeviceContext, IVFSManager, FileContent, IFileSystem,
 } from '@itookit/vfs-core';
 
 import { LLMDriver } from '../core/driver';
@@ -31,7 +31,6 @@ import { SystemPromptStore } from './system-prompt-store';
 import type { MCPToolInfo } from '../skills/mcp-client';
 
 import { VFSHelpers } from './vfs-helpers';
-import { MigrationHelper } from './migration-helper';
 import { CostManager } from './cost-manager';
 import { ProviderManager } from './provider-manager';
 import { ConnectionManager } from './connection-manager';
@@ -39,7 +38,6 @@ import { MCPManager } from './mcp-manager';
 import { SkillManager } from './skill-manager';
 
 // ─── 存储路径 ────────────────────────────────────────────────────────────────
-const STORAGE_MODULE   = 'etc';                // /etc directory (rootfs built-in)
 const CONNECTIONS_DIR  = '/llm/.connections';       // LLM 连接（新路径）
 const PROVIDERS_DIR    = '/llm/.providers';         // Provider 配置（用户自定义 + 内置覆盖）
 const MCP_DIR          = '/llm/.mcp';               // MCP 服务器配置（新路径）
@@ -233,7 +231,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     private _syncTimer: ReturnType<typeof setTimeout> | null = null;
     private _eventUnsubs: Array<() => void> = [];
 
-    private engine!: ReturnType<IVFSManager['getEngine']>;
+    private engine!: import('@itookit/vfs-core').IFileSystem;
     private readonly shellRunner: IShellRunner | undefined;
     private readonly codexRunner: CodexCommandRunner | undefined;
     private readonly codexTransport: CodexAppServerTransport | undefined;
@@ -241,7 +239,6 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     // ── Managers (initialised in init()) ──
     private vfsHelpers!: VFSHelpers;
-    private migrationHelper!: MigrationHelper;
     private costManager!: CostManager;
     private providerManager!: ProviderManager;
     private connectionManager!: ConnectionManager;
@@ -252,9 +249,9 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
      * Resolve the system access for /etc hidden-file operations.
      * Prefers ctx.systemAccess (injected by openDevice) over the local engine.
      */
-    private getSystemFS(_ctx?: DeviceContext): IModuleFS {
+    private getSystemFS(_ctx?: DeviceContext): IFileSystem {
         // ctx.systemAccess is ISystemAccess but for internal consumers that need
-        // IModuleFS, fall back to the local etc engine (which writes to /etc/).
+        // IFileSystem, fall back to the local etc engine (which writes to /etc/).
         return this.engine;
     }
 
@@ -277,23 +274,15 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         };
 
         // /etc is a rootfs built-in directory — no mount() needed.
-        // getEngine('etc') returns a special ModuleFS with root at /etc/.
-        this.engine = this.vfs.getEngine(STORAGE_MODULE);
-        _log('getEngine');
+        this.engine = await this.vfs.openFileSystem('/etc');
+        _log('openConfigFiles');
 
         // Initialise helpers first (no async deps)
         this.vfsHelpers = new VFSHelpers(this.engine);
-        this.migrationHelper = new MigrationHelper(this.engine, this.vfs, this.vfsHelpers);
         this.providerManager = new ProviderManager(this.engine, this.vfsHelpers, () => this.notify());
         this.connectionManager = new ConnectionManager(this.vfsHelpers, this.vfs, this.providerManager, () => this.notify());
         this.mcpManager = new MCPManager(this.vfsHelpers, this.vfs, () => this.notify());
         this.skillManager = new SkillManager(this.vfsHelpers, this.vfs, this.mcpManager, this.shellRunner, () => this.notify());
-
-        // Migrate data from old paths if needed
-        await this.migrationHelper.migrateConnectionsIfNeeded();
-        _log('migrateConnections');
-        await this.migrationHelper.migrateMCPIfNeeded();
-        _log('migrateMCP');
 
         // Pre-load all data directories in parallel
         const [preProviders, preConnections, preMcps, preSkills] = await Promise.all([
@@ -709,12 +698,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return this.connectionManager.getFullConnection(id);
     }
 
-    async saveConnection(conn: LLMConnection, systemFS?: IModuleFS): Promise<void> {
+    async saveConnection(conn: LLMConnection, systemFS?: IFileSystem): Promise<void> {
         this.cancelPendingSync();
         await this.connectionManager.saveConnection(conn, systemFS);
     }
 
-    async deleteConnection(id: string, systemFS?: IModuleFS): Promise<void> {
+    async deleteConnection(id: string, systemFS?: IFileSystem): Promise<void> {
         this.cancelPendingSync();
         await this.connectionManager.deleteConnection(id, systemFS);
     }
@@ -738,12 +727,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return this.mcpManager.getMCPServers();
     }
 
-    async saveMCPServer(server: MCPServer, systemFS?: IModuleFS): Promise<void> {
+    async saveMCPServer(server: MCPServer, systemFS?: IFileSystem): Promise<void> {
         this.cancelPendingSync();
         await this.mcpManager.saveMCPServer(server, systemFS);
     }
 
-    async deleteMCPServer(id: string, systemFS?: IModuleFS): Promise<void> {
+    async deleteMCPServer(id: string, systemFS?: IFileSystem): Promise<void> {
         this.cancelPendingSync();
         await this.mcpManager.deleteMCPServer(id, systemFS);
     }
@@ -754,12 +743,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return this.skillManager.getSkills();
     }
 
-    async saveSkill(skill: LLMSkill, systemFS?: IModuleFS): Promise<void> {
+    async saveSkill(skill: LLMSkill, systemFS?: IFileSystem): Promise<void> {
         this.cancelPendingSync();
         await this.skillManager.saveSkill(skill, systemFS);
     }
 
-    async deleteSkill(id: string, systemFS?: IModuleFS): Promise<void> {
+    async deleteSkill(id: string, systemFS?: IFileSystem): Promise<void> {
         this.cancelPendingSync();
         await this.skillManager.deleteSkill(id, systemFS);
     }
@@ -822,12 +811,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return this.providerManager.getFullProvider(id);
     }
 
-    async saveProvider(provider: LLMProvider, systemFS?: IModuleFS): Promise<void> {
+    async saveProvider(provider: LLMProvider, systemFS?: IFileSystem): Promise<void> {
         this.cancelPendingSync();
         await this.providerManager.saveProvider(provider, systemFS);
     }
 
-    async deleteProvider(id: string, systemFS?: IModuleFS): Promise<void> {
+    async deleteProvider(id: string, systemFS?: IFileSystem): Promise<void> {
         this.cancelPendingSync();
         await this.providerManager.deleteProvider(id, systemFS);
     }

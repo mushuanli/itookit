@@ -19,8 +19,8 @@ describe('createKernelAdaptersRuntime', () => {
         const programs: DurableTaskProgram[] = [];
         runtime.plugin.install(registration(effects, programs));
 
-        expect(runtime.toolService.getToolMeta('load_skill')).toBeDefined();
-        expect(runtime.toolService.getToolMeta('human_input')).toBeUndefined();
+        expect(runtime.toolCatalog.getToolMeta('load_skill')).toBeDefined();
+        expect(runtime.toolCatalog.getToolMeta('human_input')).toBeUndefined();
         expect(effects.map(effect => effect.kind)).toEqual([
             'llm.chat', 'tool.call', 'process.exec', 'skill.load',
         ]);
@@ -31,9 +31,19 @@ describe('createKernelAdaptersRuntime', () => {
         await runtime.dispose();
     });
 
+    it('has no global execution service and denies file IO without a Session grant', async () => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        expect('toolService' in runtime).toBe(false);
+        expect('toolDriver' in runtime).toBe(false);
+        const scope = await runtime.sessions.get('unconfigured');
+        const result = await scope.toolService.invoke({ toolId: 'Read', args: { file_path: '/etc/passwd' } });
+        expect(result.success).toBe(false);
+        await runtime.dispose();
+    });
+
     it('isolates loaded Skill state between durable sessions', async () => {
         const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
-        await runtime.skillService.saveSkill(skillDefinition());
+        await runtime.skillCatalog.saveSkill(skillDefinition());
         const first = await runtime.sessions.get('session-a');
         const second = await runtime.sessions.get('session-b');
 
@@ -54,6 +64,39 @@ describe('createKernelAdaptersRuntime', () => {
 
         expect(recreated).not.toBe(first);
         await runtime.dispose();
+    });
+
+    it('acquires independent file contexts, retries failed acquisition, and releases each once', async () => {
+        const calls: string[] = [], released: string[] = [];
+        let fail = true;
+        const runtime = await createKernelAdaptersRuntime({
+            llmDriver: {} as IDeviceDriver,
+            fileContextForSession: async id => {
+                calls.push(id);
+                if (id === 'retry' && fail) { fail = false; throw new Error('Unavailable source'); }
+                return { cwd: '/workspace', vfs: {
+                    readFile: async () => id, writeFile: async () => {}, listFiles: async () => [],
+                }, release: async () => { released.push(id); } };
+            },
+        });
+        expect(calls).toEqual([]);
+        const [a, duplicate, b] = await Promise.all([runtime.sessions.get('a'), runtime.sessions.get('a'), runtime.sessions.get('legacy')]);
+        expect(a).toBe(duplicate);
+        expect(a).not.toBe(b);
+        expect(calls).toEqual(['a', 'legacy']);
+        const readA = await a.toolService.invoke({ toolId: 'Read', args: { file_path: '/workspace/same.md' } });
+        const readB = await b.toolService.invoke({ toolId: 'Read', args: { file_path: '/workspace/same.md' } });
+        expect(readA.success).toBe(true);
+        expect(readA.output).toContain('a');
+        expect(readB.success).toBe(true);
+        expect(readB.output).toContain('legacy');
+        await expect(runtime.sessions.get('retry')).rejects.toThrow('Unavailable source');
+        await runtime.sessions.get('retry');
+        await runtime.disposeSession('a');
+        await runtime.disposeSession('a');
+        await runtime.dispose();
+        expect(released.sort()).toEqual(['a', 'legacy', 'retry']);
+        await expect(runtime.sessions.get('after-close')).rejects.toThrow('closed');
     });
 
     it('waits for approval before dispatching a protected effect', async () => {
@@ -77,7 +120,7 @@ describe('createKernelAdaptersRuntime', () => {
 
     it('restores loaded Skills from durable session shared state', async () => {
         const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
-        await runtime.skillService.saveSkill(skillDefinition());
+        await runtime.skillCatalog.saveSkill(skillDefinition());
         const effects: EffectAdapter[] = [];
         runtime.plugin.install(registration(effects));
         const state = sessionState();
@@ -98,11 +141,14 @@ describe('createKernelAdaptersRuntime', () => {
 
     it('registers TTY tools and effect only when a TTY driver is configured', async () => {
         const tty = { supportsPty: false, spawn() { throw new Error('unused'); } } as ITTYDriver;
-        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver, ttyDriver: tty });
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver, fileContextForSession: async () => ({
+            vfs: { readFile: async () => '', writeFile: async () => {}, listFiles: async () => [] },
+            cwd: '/', ttyDriver: tty, release: async () => {},
+        }) });
         const effects: EffectAdapter[] = [];
         runtime.plugin.install(registration(effects));
 
-        expect(runtime.toolService.getToolMeta('shell_session')).toBeDefined();
+        expect((await runtime.sessions.get('tty-session')).toolService.getToolMeta('shell_session')).toBeDefined();
         expect(effects.map(effect => effect.kind)).toContain('tty.command');
 
         await runtime.dispose();

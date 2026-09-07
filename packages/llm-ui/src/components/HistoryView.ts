@@ -1,7 +1,7 @@
 // @file: llm-ui/components/HistoryView.ts
 
 import type { SessionGroup, SessionEventEnvelope, ExecutionNode } from '@itookit/llm-session';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { CollapseStateMap, NodeActionCallback } from '../domain/types';
 import type { IEditorEventBus } from '../domain/events';
@@ -24,9 +24,8 @@ export interface HistoryViewOptions {
     onNodeAction?: NodeActionCallback;
     onCommitEdit?: (id: string, content: string) => void;
     bus?: IEditorEventBus;
-    nodeId?: string;
-    ownerNodeId?: string;
-    moduleFS?: IModuleFS;
+    fs?: IFileSystem;
+    assets?: IFileSystem;
     initialCollapseStates?: CollapseStateMap;
     onScroll?: () => void;
     /** 点击错误气泡中的"配置连接"按钮时触发（通常导航到 settings/connections） */
@@ -69,9 +68,10 @@ export class HistoryView implements IHistoryPresenter {
         this.onHistoryActivity = options.onHistoryActivity;
 
         const ctx: RendererContext = {
-            nodeId: options.nodeId,
-            ownerNodeId: options.ownerNodeId,
-            moduleFS: options.moduleFS,
+
+
+            fs: options.fs,
+            assets: options.assets,
         };
 
         this.renderer = new SessionRenderer(container, ctx, options.onContentChange);
@@ -209,9 +209,7 @@ export class HistoryView implements IHistoryPresenter {
         this.container.querySelectorAll('.llm-ui-session--system').forEach(el => el.remove());
     }
 
-    updateNodeId(newNodeId: string): void {
-        this.renderer.updateNodeId(newNodeId);
-    }
+
 
     removeMessages(ids: string[], animated: boolean): string[] {
         for (const id of ids) {

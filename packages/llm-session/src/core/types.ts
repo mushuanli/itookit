@@ -302,7 +302,6 @@ export type RegenerateTrigger = 'from_assistant' | 'from_user' | 'from_edit';
 
 export interface SessionSnapshot {
     sessionId: string;
-    nodeId: string;
     sessions: SessionGroup[];
     status: SessionStatus;
     isRunning: boolean;
@@ -328,8 +327,6 @@ export interface SessionRuntime {
     /** 会话 ID */
     sessionId: string;
 
-    /** VFS 节点 ID */
-    nodeId: string;
 
     /** 当前状态 */
     status: SessionStatus;
@@ -352,7 +349,6 @@ export interface SessionRuntime {
  */
 export interface TaskInput {
     sessionId: string;
-    nodeId: string;
     text: string;
     files: ChatAttachment[];
     agentId: string;
@@ -394,7 +390,6 @@ export interface BranchInfo {
 export interface ExecutionTask {
     id: string;
     sessionId: string;
-    nodeId: string;
     input: TaskInput;
     priority: number;
     createdAt: number;

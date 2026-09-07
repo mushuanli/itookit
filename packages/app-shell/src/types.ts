@@ -1,13 +1,13 @@
 import type {NavigationRequest, ICommandBus, ILLMService} from '@itookit/common';
 import type { FileCreationConfig, EditorFactory, EditorOptions, ContextMenuConfig } from '@itookit/ui-common';
-import type { IStorageBackend, IVFSManager, MountOptions, IModuleFS } from '@itookit/vfs-core';
+import type { IStorageBackend, IVFSManager, MountOptions, IFileSystem } from '@itookit/vfs-core';
 import type { ThemeMode } from './ThemeService';
 import type { FileTypeDefinition, CustomEditorResolver, VFSUIOptions } from '@itookit/vfs-ui';
 import type { KernelAdaptersRuntime, KernelAdaptersRuntimeOptions } from '@itookit/kernel-adapters';
 import type { Kernel } from '@itookit/durable-kernel';
 import type {
     DagPluginRegistry,
-    IChatEngine,
+    ISessionRepository,
     VFSAgentService,
     IAgentManagementService,
     IAgentConfigService,
@@ -21,6 +21,7 @@ export interface AppKernelRuntime extends KernelAdaptersRuntime {
 }
 
 export interface AppKernelPlatform {
+    configureSession?: KernelAdaptersRuntimeOptions['configureSession'];
     skillSource?: KernelAdaptersRuntimeOptions['skillSource'];
     skillToolHandlerFactory?: KernelAdaptersRuntimeOptions['skillToolHandlerFactory'];
     configure?(kernel: AppKernelRuntime): void | Promise<void>;
@@ -29,8 +30,10 @@ export interface AppKernelPlatform {
 export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills' | 'flows';
 
 export interface WorkspaceConfig {
+    /** Explicit application file context. workspaceName selects the default user directory. */
+    files?: import('@itookit/vfs-core').FileSystemContext;
     elementId: string;
-    moduleName: string;
+    workspaceName: string;
     /** URL hash segment, e.g. 'chat', 'files', 'agents' */
     slug: string;
     type?: WorkspaceType;
@@ -68,7 +71,7 @@ export interface AdditionalMount {
 // （装配层，已依赖全部所需类型），llm-ui 的实现靠结构类型在入口处兼容。
 
 export interface ChatEditorDeps {
-    chatEngine: IChatEngine;
+    sessionRepository: ISessionRepository;
     llmService?: ILLMService;
     commandBus?: ICommandBus;
     kernel?: Kernel;
@@ -89,7 +92,7 @@ export interface FlowEditorDeps {
 
 export interface AIContextMenuDeps {
     agentService: IAgentConfigService;
-    engine: IModuleFS;
+    engine: IFileSystem;
     filesOnly?: boolean;
 }
 
@@ -110,9 +113,12 @@ export interface AppUI {
 }
 
 export interface AppOptions {
+    directorySourceProvider?: import('./files/directory-mounts').DirectorySourceProvider;
+    /** Host registration/configuration of durable Session file grants. */
+    configureSessionFiles?(files: import('./files/session-files').SessionFilesService): Promise<void> | void;
     /** Primary storage backend (IndexedDB, LocalFS, InMemory, etc.) */
     backend: IStorageBackend;
-    /** Extra backend mounts, e.g. tauri home dir at /module/home */
+    /** Extra backend mounts owned by the host; applications receive file contexts */
     additionalMounts?: AdditionalMount[];
     workspaces: WorkspaceConfig[];
     /** URL slug to navigate to on startup. Defaults to first workspace. */
@@ -137,25 +143,26 @@ export interface AppHandle {
     setTheme(mode: ThemeMode): Promise<void>;
     /** Register a dynamically created workspace (e.g. a local mount tab). */
     addWorkspace(config: WorkspaceConfig): void;
+    removeWorkspace(elementId: string): Promise<void>;
     /** Unsubscribe all global event listeners and release resources. */
     destroy(): Promise<void>;
+    /** Host-owned resources close with the application, in reverse registration order. */
+    onDestroy(cleanup: () => void | Promise<void>, phase?: 'consumers' | 'sources'): void;
     vfs: IVFSManager;
+    sessionFiles: import('./files/session-files').SessionFilesService;
 }
 
 // ── Workbench config ────────────────────────────────────────────────────
 
 export interface WorkbenchConfig {
+    /** Preferred input: an already authorized file context. The host owns its lifetime. */
+    files: import('@itookit/vfs-core').FileSystemContext;
     /** VFS 侧边栏挂载容器（消费方负责创建 DOM） */
     sidebarContainer: HTMLElement;
     /** 编辑器挂载容器（消费方负责创建 DOM） */
     editorContainer: HTMLElement;
     /** Scope ID 用于多实例隔离 (localStorage key, modal ID 等) */
     scopeId?: string;
-    /** VFS 实例 (与 moduleName 配合使用) */
-    vfs?: IVFSManager;
-    /** 自定义引擎实例 */
-    customEngine?: IModuleFS;
-    moduleName?: string;
     editorFactory?: EditorFactory;
     editorConfig?: Partial<EditorOptions> & {
         mentionScope?: string[];

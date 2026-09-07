@@ -1,6 +1,6 @@
 // @file: llm-conversation/src/utils/vfs-entity-store.ts
 
-import { BaseModuleService } from '@itookit/vfs-core';
+import { FileBackedService } from './file-backed-service';
 import { log } from './logger';
 
 /**
@@ -31,8 +31,8 @@ export interface Identifiable {
  */
 export class VFSEntityStore<T extends Identifiable> {
     constructor(
-        private service: BaseModuleService,
-        private engine: BaseModuleService['engine'],
+        private service: FileBackedService,
+        private engine: FileBackedService['engine'],
         private config: EntityStoreConfig
     ) { }
 

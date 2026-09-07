@@ -1,5 +1,5 @@
 /**
- * @file VFS + ChatEngine integration test (pure Node.js, no Tauri)
+ * @file VFS + SessionRepository integration test (pure Node.js, no Tauri)
  *
  * Verifies that chat file creation works end-to-end through the real
  * LocalFSBackend stack (NodeFsOps + BetterSqliteSidecarDb), isolating
@@ -7,7 +7,7 @@
  *
  * Layout mirrors tauri-app production:
  *   rootBackend  = IndexedDBBackend (fake-indexeddb) → /etc/, /dev/
- *   chats module = LocalFSBackend   (real Node.js fs) → /module/chats/
+ *   chats module = LocalFSBackend   (real Node.js fs) → /home/admin/chats/
  */
 
 import 'fake-indexeddb/auto';
@@ -17,12 +17,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createVFS } from '@itookit/vfs-core';
-import type { IModuleFS } from '@itookit/vfs-core';
-import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
+import type { IFileSystem } from '@itookit/vfs-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { FakeSidecarDb } from './fake-sidecar';
-import { ChatEngine } from '@itookit/llm-session';
-import { FS_MODULE_CHAT } from '@itookit/vfs-core';
+import { SessionRepository } from '@itookit/llm-session';
 
 // ── Temp dir helpers ──────────────────────────────────────────────────────────
 
@@ -38,9 +36,9 @@ interface Fixture {
     chatsDir: string;
     sidecarDir: string;
     tempBase: string;
-    engine: ChatEngine;
+    engine: SessionRepository;
     /** File tree view — use this for loadTree / getChildren */
-    treeEngine: IModuleFS;
+    treeEngine: IFileSystem;
     dispose(): Promise<void>;
 }
 
@@ -60,17 +58,14 @@ async function createFixture(): Promise<Fixture> {
 
     const { manager: vfs } = await createVFS({
         // IndexedDB (fake) for system paths (/etc/, /dev/)
-        rootBackend: new IndexedDBBackend({ dbName: `test-root-${Date.now()}` }),
-        additionalMounts: [{ path: `/module/${FS_MODULE_CHAT}`, backend: chatsBackend }],
-        modules: [{ name: FS_MODULE_CHAT }],
+        rootBackend: chatsBackend,
     });
 
-    const engine = new ChatEngine(vfs);
+    const engine = new SessionRepository(await vfs.openFileSystem('/'));
     await engine.init();
 
-    // IModuleFS for file-tree operations (loadTree, getChildren)
-    const treeEngine = vfs.getEngine(FS_MODULE_CHAT);
-    await treeEngine.init();
+    // IFileSystem for file-tree operations (loadTree, getChildren)
+    const treeEngine = await vfs.openFileSystem('/home/admin/chats');
 
     return {
         chatsDir,
@@ -85,83 +80,22 @@ async function createFixture(): Promise<Fixture> {
     };
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-describe('ChatEngine + LocalFSBackend', () => {
+describe('Session repository on LocalFS', () => {
     let fix: Fixture;
-
     beforeEach(async () => { fix = await createFixture(); });
-    afterEach(async ()  => { await fix.dispose(); });
-
-    it('createSession writes a .chat file to disk', async () => {
-        const sessionId = await fix.engine.createSession('Hello World');
-
-        expect(sessionId).toBeTruthy();
-
-        // Verify the .chat file exists on the real filesystem
-        const entries = await fsp.readdir(fix.chatsDir);
-        const chatFile = entries.find(e => e.endsWith('.chat'));
-        expect(chatFile).toBeDefined();
-
-        console.log('[vfs-chat] created file:', chatFile, 'sessionId:', sessionId);
+    afterEach(async () => { await fix.dispose(); });
+    it('persists Session metadata, history and binary attachments', async () => {
+        const id = await fix.engine.createSession('Session');
+        await fix.engine.writeDocument(id, 'round-one.json', '{"content":"hello"}');
+        await fix.engine.writeAttachment(id, 'image.bin', new Uint8Array([0, 255]).buffer);
+        expect((await fix.engine.getManifest(id)).title).toBe('Session');
+        expect(await fix.engine.readDocument(id, 'round-one.json')).toBe('{"content":"hello"}');
+        expect(new Uint8Array(await (await fix.engine.readSessionAsset(id, 'image.bin'))!.arrayBuffer())).toEqual(new Uint8Array([0, 255]));
     });
-
-    it('created .chat file contains a canonical conversation manifest', async () => {
-        const sessionId = await fix.engine.createSession('Manifest Test');
-
-        const entries = await fsp.readdir(fix.chatsDir);
-        const chatFile = entries.find(e => e.endsWith('.chat'))!;
-        const raw = await fsp.readFile(join(fix.chatsDir, chatFile), 'utf-8');
-        const manifest = JSON.parse(raw);
-
-        expect(manifest).toMatchObject({
-            schemaVersion: 3,
-            id: sessionId,
-            rootRoundId: null,
-            branches: expect.any(Object),
-            children: expect.any(Object),
-        });
-        console.log('[vfs-chat] manifest keys:', Object.keys(manifest));
-    });
-
-    it('getChildren returns a .chat node after createSession', async () => {
-        await fix.engine.createSession('Tree Test');
-
-        // VFSModuleEngine.getChildren('/') lists .chat files visible to the UI.
-        // Note: node.id is the VFS inode ID, not the session UUID from createSession.
-        const nodes = await fix.treeEngine.driver.getChildren('/');
-        expect(nodes.length).toBeGreaterThan(0);
-
-        const chatNode = nodes.find(n => 'name' in n && (n as { name: string }).name.endsWith('.chat'));
-        expect(chatNode).toBeDefined();
-
-        console.log('[vfs-chat] getChildren entries:', nodes.length, '→', (chatNode as { name: string })?.name);
-    });
-
-    it('createSession writes the settings asset to disk', async () => {
-        await fix.engine.createSession('With Settings');
-
-        // Asset dir should exist: _<title>.chat/
-        const entries = await fsp.readdir(fix.chatsDir);
-        const assetDir = entries.find(e => e.startsWith('_') && e.endsWith('.chat'));
-        expect(assetDir).toBeDefined();
-
-        const assetFiles = await fsp.readdir(join(fix.chatsDir, assetDir!));
-        expect(assetFiles.length).toBeGreaterThan(0);
-
-        console.log('[vfs-chat] asset dir:', assetDir, 'files:', assetFiles);
-    });
-
-    it('multiple sessions coexist without conflict', async () => {
-        const ids = await Promise.all([
-            fix.engine.createSession('Session A'),
-            fix.engine.createSession('Session B'),
-            fix.engine.createSession('Session C'),
-        ]);
-
-        expect(new Set(ids).size).toBe(3);   // all unique IDs
-
-        const tree = await fix.treeEngine.driver.getChildren('/');
-        expect(tree.length).toBeGreaterThanOrEqual(3);
+    it('lists independent Sessions after title changes', async () => {
+        const ids = await Promise.all([fix.engine.createSession('A'), fix.engine.createSession('B')]);
+        await fix.engine.updateManifest(ids[0], { title: 'Renamed' });
+        expect((await fix.engine.list()).map(session => session.id)).toEqual(expect.arrayContaining(ids));
+        expect((await fix.engine.getManifest(ids[0])).title).toBe('Renamed');
     });
 });

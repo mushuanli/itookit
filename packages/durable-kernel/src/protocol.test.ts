@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createVFS, MemoryBackend, type IVFSManager, type IModuleFS } from '@itookit/vfs-core';
+import { createVFS, MemoryBackend, type IVFSManager, type IFileSystem } from '@itookit/vfs-core';
 import { Kernel } from './application/kernel';
 import { SeqFileKernelStore } from './infrastructure/seqfile/store';
 import { addEffect, executeEffectAdapter } from './application/effect-utils';
@@ -8,12 +8,12 @@ import { waitForChange } from './public/event-stream';
 import type { ResolvedStorageBinding, TaskRecord, DurableTaskProgram } from './domain/types';
 
 describe('durable harness protocols', () => {
-    let manager: IVFSManager, fs: IModuleFS, binding: ResolvedStorageBinding;
+    let manager: IVFSManager, fs: IFileSystem, binding: ResolvedStorageBinding;
     let store: SeqFileKernelStore, kernel: Kernel;
     const spec = { program: { kind: 'test', version: '1' }, input: null };
     beforeEach(async () => {
-        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(), modules: [{ name: 'test' }] }));
-        await manager.mount('test'); fs = manager.getEngine('test'); await fs.init();
+        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
+        fs = await manager.openFileSystem('/data/test');
         binding = { fs, rootPath: '/session' };
         store = new SeqFileKernelStore({ fs, rootPath: '/catalog' }, async () => binding);
         await store.initialize(); await store.createSession('s', { kind: 'test', locator: null });
@@ -158,12 +158,12 @@ describe('durable harness protocols', () => {
     });
 
     it('protects the kernel layout from rename, ancestor moves and deletion', async () => {
-        await expect(fs.driver.rename('/session', 'renamed')).rejects.toThrow('Fixed storage layout');
+        await expect(fs.driver.rename('/session', 'renamed')).rejects.toMatchObject({ code: 'EBUSY' });
         const task = await store.createTask(binding, 's', spec);
-        await expect(fs.driver.rename(`/session/tasks/${task.id}`, 'changed')).rejects.toThrow('Fixed storage layout');
-        await expect(fs.driver.delete(['/session'], { recursive: true })).rejects.toThrow('Fixed storage layout');
+        await expect(fs.driver.rename(`/session/tasks/${task.id}`, 'changed')).rejects.toMatchObject({ code: 'EBUSY' });
+        await expect(fs.driver.delete(['/session'], { recursive: true })).rejects.toMatchObject({ code: 'EBUSY' });
         await fs.driver.createDirectory({ name: 'outside', parentPath: null });
-        await expect(fs.driver.move(['/outside'], '/session/tasks')).rejects.toThrow('Fixed storage layout');
+        await expect(fs.driver.move(['/outside'], '/session/tasks')).rejects.toMatchObject({ code: 'EBUSY' });
         expect((await store.readTask(binding, task.id)).id).toBe(task.id);
     });
 

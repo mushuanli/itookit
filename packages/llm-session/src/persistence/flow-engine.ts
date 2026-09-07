@@ -1,19 +1,19 @@
 // @file: llm-session/src/persistence/flow-engine.ts
 // FlowEngine — the standalone "flows" VFS module backing workflow storage.
 // Each workflow is one .flow file (mutable draft); immutable revisions are
-// assets under that file. Mirrors ChatEngine's VFS CRUD + asset conventions.
+// assets under that file. Mirrors SessionRepository's VFS CRUD + asset conventions.
 
-import { BaseModuleService } from '@itookit/vfs-core';
-import type { IVFSManager } from '@itookit/vfs-core';
+import { FileBackedService } from '../utils/file-backed-service';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { FlowFileRef, FlowStore } from '@itookit/llm-flow';
 
 export const FLOW_MODULE_NAME = 'flows';
 const FLOW_EXTENSION = '.flow';
 const FLOW_ROOT = '/';
 
-export class FlowEngine extends BaseModuleService implements FlowStore {
-    constructor(vfs: IVFSManager) {
-        super(FLOW_MODULE_NAME, { description: 'Workflows' }, vfs);
+export class FlowEngine extends FileBackedService implements FlowStore {
+    constructor(fs: IFileSystem) {
+        super(fs);
     }
 
     protected async onLoad(): Promise<void> {}

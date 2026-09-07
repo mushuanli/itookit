@@ -54,7 +54,7 @@ interface FSNodeBase {
     readonly version: number;
     readonly tags: readonly string[];
     readonly metadata: Readonly<FSNodeMetadata>;
-    readonly moduleId?: string;
+    readonly viewId?: string;
     readonly icon?: string;
     readonly mimeType?: string;
 }
@@ -204,6 +204,8 @@ export interface FSSearchResult {
  * 新增能力只需添加字段，已有实现默认 false（OCP）。
  */
 export interface FSCapabilities {
+    /** True only when file mutations can actually be rolled back atomically. */
+    readonly atomicFileTransactions?: boolean;
     readonly readonly: boolean;
     readonly search: boolean;
     readonly semanticSearch: boolean;
@@ -228,7 +230,7 @@ export interface FSCapabilities {
 // 统计
 // ═══════════════════════════════════════════════════════════════
 
-export interface FSModuleStats {
+export interface FileSystemStats {
     readonly fileCount: number;
     readonly directoryCount: number;
     readonly totalSize: number;

@@ -16,7 +16,7 @@ import type {
     TaskInput,
 } from '../core/types';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
-import type { IChatEngine } from '../persistence/types';
+import type { ISessionRepository } from '../persistence/types';
 import { FlowDefinitionStore, type FlowStore } from '@itookit/llm-flow';
 import { RoundLog } from '../persistence/round-log';
 import { flowToDag, hasValidationErrors, validateFlowParameters } from '@itookit/llm-flow';
@@ -52,7 +52,7 @@ export class SessionRunCoordinator {
     private readonly runs: ConversationRunCoordinator;
 
     constructor(
-        private readonly engine: IChatEngine,
+        private readonly engine: ISessionRepository,
         private readonly eventBus: SessionEventBus,
         private readonly agents: AgentResolver,
         private readonly attachments: AttachmentProcessor,
@@ -105,14 +105,6 @@ export class SessionRunCoordinator {
         for (const task of this.active.values()) task.abortController.abort();
         this.runs.cancelAll();
         this.active.clear();
-    }
-
-    updateNodeId(sessionId: string, newNodeId: string): void {
-        this.logs.get(sessionId)?.updateNodeId(newNodeId);
-        const task = this.active.get(sessionId);
-        if (!task) return;
-        task.nodeId = newNodeId;
-        task.input.nodeId = newNodeId;
     }
 
     private async execute(task: ExecutionTask, runtime: SessionRuntime): Promise<void> {
@@ -171,7 +163,7 @@ export class SessionRunCoordinator {
 
     private async createTask(input: TaskInput): Promise<ExecutionTask> {
         const roundLog = this.logs.get(input.sessionId)
-            ?? new RoundLog(this.engine, input.nodeId, input.sessionId);
+            ?? new RoundLog(this.engine, input.sessionId);
         this.logs.set(input.sessionId, roundLog);
         const manifest = await roundLog.loadManifest();
         const agent = await this.agents.resolveForChat(input.agentId);
@@ -182,7 +174,6 @@ export class SessionRunCoordinator {
         return {
             id: `run-request-${ulid()}`,
             sessionId: input.sessionId,
-            nodeId: input.nodeId,
             input,
             priority: 0,
             createdAt: Date.now(),
@@ -276,7 +267,7 @@ export class SessionRunCoordinator {
     private async getLog(task: ExecutionTask): Promise<RoundLog> {
         const cached = this.logs.get(task.sessionId);
         if (cached) return cached;
-        const created = new RoundLog(this.engine, task.nodeId, task.sessionId);
+        const created = new RoundLog(this.engine, task.sessionId);
         this.logs.set(task.sessionId, created);
         return created;
     }

@@ -2,7 +2,6 @@ import { DEFAULT_AGENTS } from '@itookit/device-llm';
 
 export const TPL_AGENT = JSON.stringify(DEFAULT_AGENTS, null, 2);
 
-export const TPL_CHAT = '';
 
 export const TPL_ANKI = `### 挖空填词 (Cloze)
 

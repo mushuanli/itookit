@@ -21,7 +21,6 @@ export interface IHistoryPresenter extends ICollapseManager, IStreamingControlle
     renderWelcome(): void;
     renderError(error: Error): void;
     clearErrors(): void;
-    updateNodeId(newNodeId: string): void;
 
     // === 消息操作 ===
     removeMessages(ids: string[], animated: boolean): string[];

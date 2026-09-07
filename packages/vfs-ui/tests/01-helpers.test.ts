@@ -82,11 +82,11 @@ describe('shouldFilterNode', () => {
         expect(shouldFilterNode({ name: 'my-folder', path: '/my-folder' })).toBe(false);
     });
 
-    it('filters when moduleId is hidden', () => {
-        expect(shouldFilterNode({ name: 'file.md', path: '/file.md', moduleId: '.hidden-module' })).toBe(true);
+    it('filters when viewId is hidden', () => {
+        expect(shouldFilterNode({ name: 'file.md', path: '/file.md', viewId: '.hidden-module' })).toBe(true);
     });
 
-    it('does NOT filter when moduleId is a normal module name', () => {
-        expect(shouldFilterNode({ name: 'file.md', path: '/file.md', moduleId: 'workspace' })).toBe(false);
+    it('does NOT filter when viewId is a normal module name', () => {
+        expect(shouldFilterNode({ name: 'file.md', path: '/file.md', viewId: 'workspace' })).toBe(false);
     });
 });

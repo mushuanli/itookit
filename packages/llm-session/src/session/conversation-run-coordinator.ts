@@ -34,7 +34,7 @@ import {
     type DurableChatOutput as ChatProgramOutput,
     type RetrievedMemoryEntry,
 } from '@itookit/llm-tasks';
-import type { IChatEngine } from '../persistence/types';
+import type { ISessionRepository } from '../persistence/types';
 import { ContextProfileStore } from '../persistence/context-profile-store';
 import { RoundLog } from '../persistence/round-log';
 import { SessionEventBus } from './session-event-bus';
@@ -53,7 +53,7 @@ export interface ConversationExecution {
 }
 
 export interface ConversationRunCoordinatorOptions {
-    engine: IChatEngine;
+    engine: ISessionRepository;
     eventBus: SessionEventBus;
     kernel: Kernel;
     dagPlugins: DagPluginCatalog;
@@ -197,7 +197,7 @@ export class ConversationRunCoordinator {
     ): ContextAssembler {
         return new ContextAssembler({
             log: execution.log,
-            profileStore: new ContextProfileStore(this.options.engine, execution.task.nodeId),
+            profileStore: new ContextProfileStore(this.options.engine, execution.task.sessionId),
             readRound: roundId => execution.log.readRound(roundId),
             loadArtifact: id => this.options.loadArtifact(id),
             retrieveMemory: this.options.retrieveMemory,

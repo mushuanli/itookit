@@ -5,13 +5,14 @@ import { SearchHighlighter } from './search-highlighter';
 import { MarkedAdapter } from './marked-adapter';
 import { StreamingDiffer } from './streaming-differ';
 import type { MDxPlugin } from '../core/types';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 
 export interface MDxRendererConfig {
   searchMarkClass?: string;
   nodeId?: string;
   ownerNodeId?: string;
-  moduleFS?: IModuleFS;
+  fs?: IFileSystem;
+  assets?: IFileSystem;
 }
 
 export interface RenderOptions {
@@ -53,11 +54,11 @@ export class MDxRenderer {
     this.markedAdapter = new MarkedAdapter();
     this.streamingDiffer = new StreamingDiffer();
 
-    const engine = config.moduleFS;
+    const engine = config.fs;
     const nodeId = config.nodeId;
     const ownerNodeId = config.ownerNodeId ?? config.nodeId;
 
-    this.pluginManager.setContext(nodeId, ownerNodeId, engine);
+    this.pluginManager.setContext(nodeId, ownerNodeId, engine, config.assets);
 
   }
 

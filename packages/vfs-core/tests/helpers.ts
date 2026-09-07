@@ -8,7 +8,7 @@
 
 import { MemoryBackend } from '../src/testing/memory-backend';
 import { createVFS } from '../src/impl/factory';
-import type { IVFSManager, IModuleFS, IStorageBackend } from '@itookit/vfs-core';
+import type { IVFSManager, IFileSystem, IStorageBackend } from '@itookit/vfs-core';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Backend factories
@@ -25,7 +25,7 @@ export function freshMem(): MemoryBackend {
 
 export interface TestVFS {
     manager: IVFSManager;
-    fs: IModuleFS;          // 'test' module FS
+    fs: IFileSystem;          // 'test' module FS
     dispose: () => Promise<void>;
 }
 
@@ -37,11 +37,8 @@ export async function setupVFS(backend?: IStorageBackend): Promise<TestVFS> {
     const rootBackend = backend ?? freshMem();
     const { manager } = await createVFS({
         rootBackend,
-        modules: [{ name: 'test' }],
     });
-    await manager.mount('test');
-    const fs = manager.getEngine('test');
-    await fs.init();
+    const fs = await manager.openFileSystem('/data/test');
     return {
         manager,
         fs,
@@ -62,11 +59,10 @@ export async function setupDualMountVFS(opts?: {
 }): Promise<{ manager: IVFSManager; dispose: () => Promise<void> }> {
     const rootBackend = opts?.rootBackend ?? freshMem();
     const extraBackend = opts?.extraBackend ?? freshMem();
-    const extraPath = opts?.extraPath ?? '/module/extra';
+    const extraPath = opts?.extraPath ?? '/data/extra';
 
     const { manager } = await createVFS({
         rootBackend,
-        modules: [{ name: 'test' }, { name: 'extra' }],
     });
 
     await manager.mounts.mountBackend(extraPath, extraBackend);
@@ -82,20 +78,20 @@ export async function setupDualMountVFS(opts?: {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Assert a path exists and return its node. */
-export async function expectNode(fs: IModuleFS, path: string) {
+export async function expectNode(fs: IFileSystem, path: string) {
     const node = await fs.driver.getNode(path);
     if (!node) throw new Error(`Expected node at '${path}' but it does not exist`);
     return node;
 }
 
 /** Assert a path does not exist. */
-export async function expectMissing(fs: IModuleFS, path: string) {
+export async function expectMissing(fs: IFileSystem, path: string) {
     const exists = await fs.driver.exists(path);
     if (exists) throw new Error(`Expected '${path}' to be absent but it exists`);
 }
 
 /** Read text content from a path. */
-export async function readText(fs: IModuleFS, path: string): Promise<string> {
+export async function readText(fs: IFileSystem, path: string): Promise<string> {
     const content = await fs.driver.readContent(path, { encoding: 'utf-8' });
     return content as string;
 }

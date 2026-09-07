@@ -3,14 +3,11 @@
  * @desc 全局常量
  */
 
-/** @deprecated Use ETC_DIR constant or '/etc' literal instead. etc is no longer a mountable module. */
-export const CONFIG_MODULE = 'etc';
-
 /** 系统配置目录路径（rootfs 内置，始终存在，不可卸载） */
 export const ETC_DIR = '/etc';
 
 /** 系统保留目录 */
-export const SYSTEM_DIRS = ['etc', 'dev', 'module'] as const;
+export const SYSTEM_DIRS = ['etc', 'dev'] as const;
 
 /** AssetDir 名称前缀（单下划线，如 _note.md/） */
 export const ASSET_DIR_PREFIX = '_';
@@ -28,18 +25,12 @@ export const DEFAULT_MAX_SYMLINK_DEPTH = 40;
  * 默认文件名校验正则
  * - 单 `_` 前缀（assetdir）：禁止用户创建，由系统代码直接写入 inode
  * - 双 `__` 前缀（模块内部配置目录 __config/）：允许，但默认不列出
- * - `.` 前缀（隐藏文件）：由 AccessController 检查权限，此处不拦截
+ * - `.` 前缀（隐藏文件）：由文件视图检查访问范围，此处不拦截
  */
 export const DEFAULT_FILENAME_PATTERN = /^(?!_(?!_))[^/\\][^/\\]*$/;
 
 /** 默认搜索返回数量 */
 export const DEFAULT_SEARCH_LIMIT = 50;
-
-/** 聊天模块名 */
-export const FS_MODULE_CHAT = 'chats';
-
-/** Agent 模块名 */
-export const FS_MODULE_AGENTS = 'agents';
 
 /**
  * Reserved metadata key storing a device node's driver handler id.

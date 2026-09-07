@@ -19,7 +19,7 @@ import type {
     ContextRule,
     RoundResult,
 } from '@itookit/common';
-import type { IChatEngine } from './types';
+import type { ISessionRepository } from './types';
 import type { RoundManifest, PersistedRound, RoundProjection } from './round-types';
 import type { RoundLogEvent } from './round-events';
 import { ulid } from './ulid';
@@ -109,20 +109,16 @@ export class RoundLog implements ILog {
     }
 
     constructor(
-        engine: IChatEngine,
-        nodeId: string,
+        engine: ISessionRepository,
         sessionId: string,
     ) {
         this.sessionId = sessionId;
-        this.graph = new RoundGraphService(engine, nodeId);
-        this.profileStore = new ContextProfileStore(engine, nodeId);
+        this.graph = new RoundGraphService(engine, sessionId);
+        this.profileStore = new ContextProfileStore(engine, sessionId);
         this._refs = new RoundRefStore(this.graph);
     }
 
-    updateNodeId(newNodeId: string): void {
-        this.graph.updateNodeId(newNodeId);
-        this.profileStore.updateNodeId(newNodeId);
-    }
+
 
     // ── ILog implementation ───────────────────────────────────────────────
 

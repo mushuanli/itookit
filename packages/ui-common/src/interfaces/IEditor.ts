@@ -4,8 +4,28 @@
  * @interface
  */
 
-import type { IModuleFS } from '@itookit/vfs-core';
 import type { NavigationRequest, Heading } from '@itookit/common';
+import type { FileSystemContext } from '@itookit/vfs-core';
+
+export type EditorTarget =
+    | { kind: 'file'; path: string; namespaceId?: string; sessionId?: string }
+    | { kind: 'session'; sessionId: string; branch?: string }
+    | { kind: 'entity'; entityType: 'agent' | 'skill' | 'flow'; id: string };
+
+/** Validate an explicitly supplied target against its granted file context. */
+export function normalizeEditorOptions(options: EditorOptions): EditorOptions {
+    const fs = options.files?.fs;
+    if (options.target?.kind === 'file' && options.target.namespaceId && fs && options.target.namespaceId !== fs.viewId) throw new Error('Editor namespace does not match its file context');
+    if (options.target && 'sessionId' in options.target && options.target.sessionId && options.files?.sessionId && options.target.sessionId !== options.files.sessionId) throw new Error('Editor Session does not match its file context');
+    return options;
+}
+export function editorFilePath(options: EditorOptions): string | undefined {
+    return options.target?.kind === 'file' ? options.target.path : undefined;
+}
+export function editorResourceId(options: EditorOptions): string | undefined {
+    const target = options.target;
+    return target?.kind === 'file' ? target.path : target?.kind === 'session' ? target.sessionId : target?.id;
+}
 
 export type { Heading } from '@itookit/common';
 
@@ -47,17 +67,25 @@ export interface EditorHostContext {
     toggleSidebar: (collapsed?: boolean) => void;
 
     /** 手动触发保存 (用于编辑器内部的 Save 按钮) */
-    saveContent: (nodeId: string, content: string) => Promise<void>;
+    saveContent?: (nodeId: string, content: string) => Promise<void>;
 
     /** 
      * [通用] 请求导航到系统内的任意资源
      */
     navigate: (request: NavigationRequest) => Promise<void>;
-    // 未来可扩展: openFile, showNotification 等
+    /** Explicit human commands; never exposed as model-callable tools. */
+    directoryCommands?: {
+        addDirectory(directory?: string, access?: 'ro' | 'rw'): Promise<string>;
+        setHome(directory?: string): Promise<string>;
+    };
 }
 
-// ✨ [重构] 提升 moduleFS 和 nodeId 为核心配置
+// ✨ [重构] 提升 fs 和 nodeId 为核心配置
 export interface EditorOptions {
+    target?: EditorTarget;
+    files?: FileSystemContext;
+    /** Explicit attachment directory; independent of a document owner. */
+    assets?: import('@itookit/vfs-core').IFileSystem;
     /** 初始 Markdown 内容 */
     initialContent?: string;
 
@@ -70,27 +98,6 @@ export interface EditorOptions {
     /** 编辑器界面语言 */
     language?: string;
 
-    /** 
-     * 当前编辑器绑定的节点/文件 ID 
-     * 结合 moduleFS 使用，用于定位存储位置、元数据和上下文。
-     */
-    nodeId?: string;
-
-    /**
-     * [新增] 资产归属节点 ID
-     * 用于确定图片/附件上传到哪里，以及 @asset/ 路径解析的上下文。
-     * - 如果编辑器作为独立页面，通常 ownerNodeId === nodeId。
-     * - 如果编辑器是某个大表单的子控件（如评论区、卡片描述），ownerNodeId 可能是父级 ID。
-     * - 如果未提供，默认回退使用 nodeId。
-     */
-    ownerNodeId?: string;
-
-    /**
-     * 当前资源所属的模块文件系统。
-     * 提供文件系统操作、元数据读写、资源搜索等核心能力。
-     * 这是编辑器与数据层交互的统一接口。
-     */
-    moduleFS?: IModuleFS;
 
     /** 是否只读 */
     readOnly?: boolean;

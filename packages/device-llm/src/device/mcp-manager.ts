@@ -3,7 +3,7 @@
 // MCPManager — MCP server config storage and active connection lifecycle.
 
 import type { MCPServer } from '@itookit/common';
-import type { IVFSManager, IModuleFS } from '@itookit/vfs-core';
+import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { MCPServerConnection } from '../skills/mcp-client';
 import type { MCPServerConfig } from '../types/provider';
 import { VFSHelpers } from './vfs-helpers';
@@ -40,7 +40,7 @@ export class MCPManager {
 
     // ─── Mutations ─────────────────────────────────────────────────────────
 
-    async saveMCPServer(server: MCPServer, systemFS?: IModuleFS): Promise<void> {
+    async saveMCPServer(server: MCPServer, systemFS?: IFileSystem): Promise<void> {
         await this.writeMCPToDisk(server, systemFS);
         const idx = this._mcpServers.findIndex(s => s.id === server.id);
         if (idx >= 0) { this._mcpServers[idx] = server; } else { this._mcpServers.push(server); }
@@ -51,7 +51,7 @@ export class MCPManager {
         this.onChanged();
     }
 
-    async deleteMCPServer(id: string, systemFS?: IModuleFS): Promise<void> {
+    async deleteMCPServer(id: string, systemFS?: IFileSystem): Promise<void> {
         await this.deleteMCPFromDisk(id, systemFS);
         this._mcpServers = this._mcpServers.filter(s => s.id !== id);
         const conn = this._activeMCPConns.get(id);
@@ -119,7 +119,7 @@ export class MCPManager {
         return this.helpers.loadJsonFilesFromDir<MCPServer>(MCP_DIR);
     }
 
-    private async writeMCPToDisk(server: MCPServer, systemFS?: IModuleFS): Promise<void> {
+    private async writeMCPToDisk(server: MCPServer, systemFS?: IFileSystem): Promise<void> {
         await this.helpers.engineUpsert(
             `${MCP_DIR}/${server.id}.json`,
             JSON.stringify(server, null, 2),
@@ -127,8 +127,8 @@ export class MCPManager {
         );
     }
 
-    private async deleteMCPFromDisk(id: string, systemFS?: IModuleFS): Promise<void> {
-        const fs = systemFS ?? this.helpers.getEngine();
+    private async deleteMCPFromDisk(id: string, systemFS?: IFileSystem): Promise<void> {
+        const fs = systemFS ?? this.helpers.getFileSystem();
         const nodeId = await fs.driver.resolvePath(`${MCP_DIR}/${id}.json`);
         if (nodeId) await fs.driver.delete([nodeId]);
     }

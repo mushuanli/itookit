@@ -1,9 +1,9 @@
 /**
  * @file packages/vfs-core/src/interfaces/services/fs-driver.ts
- * @desc 模块作用域文件系统驱动接口
+ * @desc 文件视图的操作接口
  *
  * IFSDriver 是 IFile 的底层依赖，已内部完成：
- *   - chroot 隔离（路径 '/' = '/module/<moduleId>/'）
+ *   - 在所属文件视图内解析绝对路径
  *   - 路径解析、权限控制、事件发射
  *
  * 搜索语义：search() 不返回 assetdir 内部节点；
@@ -20,7 +20,7 @@ import type {
     FSSearchQuery,
     FSSearchResult,
     FSCapabilities,
-    FSModuleStats,
+    FileSystemStats,
     FileContent,
 } from '../core/types';
 import type {
@@ -83,7 +83,6 @@ export interface IFSDriverTransaction {
 
 export interface IFSDriver extends FSEventEmitter {
     /** 当前模块 ID */
-    readonly moduleId: string;
 
     /** 能力声明 */
     readonly capabilities: FSCapabilities;
@@ -137,7 +136,7 @@ export interface IFSDriver extends FSEventEmitter {
     search(query: FSSearchQuery): Promise<FSSearchResult>;
 
     /** 模块统计信息 */
-    getStats?(): Promise<FSModuleStats>;
+    getStats?(): Promise<FileSystemStats>;
 
     // ── 写入 ────────────────────────────────────────────────────
 

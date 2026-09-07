@@ -32,25 +32,27 @@ import { ApprovedEffectProgram } from '../programs/approved-effect-program';
 import { ExecProgram } from '../programs/exec-program';
 
 export interface KernelAdaptersRuntimeOptions {
+    /** Acquired independently for each real Session, before any tool can run. */
+    fileContextForSession?: (sessionId: string) => Promise<{
+        vfs: ToolVFSContext;
+        cwd: string;
+        release(): Promise<void>;
+        nativeShell?: INativeShell;
+        ttyDriver?: ITTYDriver;
+    }>;
     llmDriver: IDeviceDriver;
-    ttyDriver?: ITTYDriver;
-    runMode?: 'kernel' | 'kernel';
+    configureSession?: (sessionId: string, scope: SessionCapabilityScope & { toolDriver: ToolDeviceDriver }) => Promise<void> | void;
+    runMode?: 'kernel';
     skillSource?: SkillSource;
     skillToolHandlerFactory?: SkillToolHandlerFactory;
-    /** Platform-owned filesystem boundary inherited by every session scope. */
-    vfsContext?: ToolVFSContext;
-    /** Platform-owned process runner inherited by every session scope. */
-    nativeShell?: INativeShell;
     /** Additional application tools registered in every isolated session scope. */
     additionalTools?: Tool[];
 }
 
 export interface KernelAdaptersRuntime {
     llmService: ILLMService;
-    toolService: IToolService;
-    skillService: ISkillService;
-    toolDriver: ToolDeviceDriver;
-    skillDriver: SkillDeviceDriver;
+    toolCatalog: Pick<IToolService, 'getToolDefinitions' | 'getToolMeta'>;
+    skillCatalog: Pick<ISkillService, 'getSkillNames' | 'saveSkill' | 'deleteSkill'>;
     sessions: SessionCapabilityRegistry;
     plugin: KernelAdaptersPlugin;
     disposeSession(sessionId: string): Promise<void>;
@@ -59,15 +61,25 @@ export interface KernelAdaptersRuntime {
 
 export async function createKernelAdaptersRuntime(options: KernelAdaptersRuntimeOptions): Promise<KernelAdaptersRuntime> {
     const llmService = new LLMServiceAdapter(options.llmDriver, options.runMode ?? 'kernel');
-    const registry = new KernelAdaptersSessionRegistry(options);
-    const legacy = await registry.getLegacyScope();
-    const effects = createEffects(llmService, registry, Boolean(options.ttyDriver));
+    const definitions = new Map<string, SkillDefinition>();
+    const registry = new KernelAdaptersSessionRegistry(options, definitions);
+    // Metadata only: no executable tool/skill service escapes through the catalog.
+    const catalogSkills = new SkillDeviceDriver({ registry: definitions });
+    const catalogTools = new ToolDeviceDriver([...BUILTIN_TOOLS, ...(options.additionalTools ?? [])]);
+    registerCoreTools(catalogTools, catalogSkills);
+    await catalogTools.init();
+    const effects = createEffects(llmService, registry, Boolean(options.fileContextForSession));
     return {
         llmService,
-        toolService: legacy.toolService,
-        skillService: legacy.skillService,
-        toolDriver: legacy.toolDriver,
-        skillDriver: legacy.skillDriver,
+        toolCatalog: {
+            getToolDefinitions: () => catalogTools.getToolDefinitions(),
+            getToolMeta: id => catalogTools.getToolMeta(id),
+        },
+        skillCatalog: {
+            getSkillNames: () => catalogSkills.getSkillNames(),
+            saveSkill: skill => catalogSkills.saveSkill(skill),
+            deleteSkill: id => registry.deleteSkill(id, catalogSkills),
+        },
         sessions: registry,
         plugin: new KernelAdaptersPlugin({
             effects,
@@ -75,7 +87,7 @@ export async function createKernelAdaptersRuntime(options: KernelAdaptersRuntime
             onSessionClosed: sessionId => registry.disposeSession(sessionId),
         }),
         disposeSession: sessionId => registry.disposeSession(sessionId),
-        dispose: () => registry.dispose(),
+        dispose: async () => { await registry.dispose(); await catalogTools.dispose(); await catalogSkills.dispose(); },
     };
 }
 
@@ -86,22 +98,29 @@ interface KernelAdaptersScope extends SessionCapabilityScope {
 }
 
 class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
+    private closed = false;
+    private readonly closing = new Map<string, Promise<void>>();
     private readonly scopes = new Map<string, Promise<KernelAdaptersScope>>();
-    private readonly skillDefinitions = new Map<string, SkillDefinition>();
     private readonly hydrated = new Set<string>();
 
-    constructor(private readonly options: KernelAdaptersRuntimeOptions) {}
+    constructor(private readonly options: KernelAdaptersRuntimeOptions,
+        private readonly skillDefinitions: Map<string, SkillDefinition>) {}
 
     get(sessionId: string): Promise<KernelAdaptersScope> {
+        if (this.closed) return Promise.reject(new Error('Session capability registry is closed'));
+        if (this.closing.has(sessionId)) return Promise.reject(new Error('Session capability scope is closing'));
         const current = this.scopes.get(sessionId);
         if (current) return current;
-        const created = this.createScope();
+        const created = this.createScope(sessionId);
         this.scopes.set(sessionId, created);
+        void created.catch(() => { if (this.scopes.get(sessionId) === created) this.scopes.delete(sessionId); });
         return created;
     }
 
-    getLegacyScope(): Promise<KernelAdaptersScope> {
-        return this.get('legacy');
+    async deleteSkill(id: string, catalog: SkillDeviceDriver): Promise<void> {
+        if (this.closed) throw new Error('Session capability registry is closed');
+        for (const pending of this.scopes.values()) await (await pending).skillService.deleteSkill(id);
+        await catalog.deleteSkill(id);
     }
 
     async getForContext(
@@ -120,35 +139,65 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
     }
 
     async disposeSession(sessionId: string): Promise<void> {
+        const pending = this.closing.get(sessionId);
+        if (pending) return pending;
         const scope = this.scopes.get(sessionId);
         this.scopes.delete(sessionId);
         this.hydrated.delete(sessionId);
-        if (scope) await (await scope).dispose();
+        if (!scope) return;
+        const close = scope.then(value => value.dispose(), () => {});
+        this.closing.set(sessionId, close);
+        try { await close; } finally { this.closing.delete(sessionId); }
     }
 
     async dispose(): Promise<void> {
+        this.closed = true;
         const scopes = [...this.scopes.values()];
         this.scopes.clear();
         this.hydrated.clear();
-        await Promise.all(scopes.map(async scope => (await scope).dispose()));
+        const results = await Promise.allSettled([...this.closing.values(), ...scopes.map(async scope => {
+            const value = await scope.catch(() => undefined);
+            await value?.dispose();
+        })]);
+        const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map(r => r.reason);
+        if (errors.length) throw new AggregateError(errors, 'Failed to close Session capabilities');
     }
 
-    private async createScope(): Promise<KernelAdaptersScope> {
+    private async createScope(sessionId: string): Promise<KernelAdaptersScope> {
+        const files = this.options.fileContextForSession
+            ? await this.options.fileContextForSession(sessionId) : undefined;
         const toolDriver = new ToolDeviceDriver([
             ...BUILTIN_TOOLS,
             ...(this.options.additionalTools ?? []),
         ]);
-        if (this.options.vfsContext) toolDriver.setVFSContext(this.options.vfsContext);
-        if (this.options.nativeShell) toolDriver.setNativeShell(this.options.nativeShell);
+        if (files) toolDriver.setFileContext(files.vfs, files.cwd);
+        else toolDriver.setFileContext({
+            readFile: async () => { throw new Error('Session has no file capability'); },
+            writeFile: async () => { throw new Error('Session has no file capability'); },
+            listFiles: async () => { throw new Error('Session has no file capability'); },
+        }, '/');
+        const nativeShell = files?.nativeShell;
+        if (nativeShell) toolDriver.setNativeShell(nativeShell);
         const skillDriver = new SkillDeviceDriver({
             registry: this.skillDefinitions,
             source: this.options.skillSource,
             toolHandlerFactory: this.options.skillToolHandlerFactory,
         });
         skillDriver.setToolService(toolDriver.getService());
-        const ttySessions = registerCoreTools(toolDriver, skillDriver.getService(), this.options.ttyDriver);
-        await toolDriver.init();
-        return createScope(toolDriver, skillDriver, ttySessions);
+        const ttySessions = registerCoreTools(toolDriver, skillDriver.getService(), files?.ttyDriver);
+        try { await toolDriver.init(); }
+        catch (error) { await files?.release(); await toolDriver.dispose(); await skillDriver.dispose(); throw error; }
+        const scope = createScope(toolDriver, skillDriver, ttySessions);
+        const dispose = scope.dispose.bind(scope);
+        let disposed = false;
+        scope.dispose = async () => {
+            if (disposed) return;
+            disposed = true;
+            try { await dispose(); } finally { await files?.release(); }
+        };
+        try { await this.options.configureSession?.(sessionId, scope); }
+        catch (error) { await scope.dispose(); throw error; }
+        return scope;
     }
 }
 

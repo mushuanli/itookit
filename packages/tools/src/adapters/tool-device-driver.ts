@@ -73,6 +73,12 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
 
   private registry = new Map<string, RegisteredTool>();
   private vfsContext: ToolVFSContext | undefined = undefined;
+  private fileCwd: string | undefined;
+
+  setFileContext(ctx: ToolVFSContext, cwd: string): void {
+    this.vfsContext = ctx;
+    this.fileCwd = cwd;
+  }
   private shellContext: INativeShell | undefined = undefined;
 
   /**
@@ -88,11 +94,6 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
       const definition = toolDefinitionFromTool(tool);
       this.registry.set(tool.name, { meta, definition, tool });
     }
-  }
-
-  /** Inject a VFS context for browser environments. */
-  setVFSContext(ctx: ToolVFSContext): void {
-    this.vfsContext = ctx;
   }
 
   /**
@@ -174,7 +175,7 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
       };
     }
 
-    const cwd = request.cwd ?? (typeof process !== 'undefined' ? process.cwd() : '/');
+    const cwd = request.cwd ?? this.fileCwd ?? (typeof process !== 'undefined' ? process.cwd() : '/');
     const timeoutMs = request.timeoutMs ?? entry.meta.timeoutMs;
     const t0 = Date.now();
 

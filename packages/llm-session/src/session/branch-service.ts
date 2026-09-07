@@ -30,7 +30,7 @@ export class BranchService {
     // ================================================================
 
     async switchToSibling(messageId: string, siblingIndex: number): Promise<void> {
-        const { sessionId, nodeId, state } = this.registry.ensureBound();
+        const { sessionId, state } = this.registry.ensureBound();
         this.registry.ensureNotGenerating('switch sibling');
 
         const session = state.findSessionById(messageId);
@@ -38,7 +38,7 @@ export class BranchService {
             throw new ConversationError(ConversationErrorCode.SESSION_INVALID, 'Message not found');
         }
 
-        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const roundLog = new RoundLog(this.registry.engine, sessionId);
         const siblingIds = await roundLog.getSiblingRoundIds(session.persistedNodeId);
         if (siblingIndex < 0 || siblingIndex >= siblingIds.length) {
             throw new ConversationError(ConversationErrorCode.SESSION_INVALID, 'Invalid sibling index');
@@ -51,7 +51,7 @@ export class BranchService {
         manifest.currentHead = manifest.branches[targetBranch];
         await roundLog.saveManifest(manifest);
 
-        await this.registry.reloadSessionData(nodeId, sessionId, state);
+        await this.registry.reloadSessionData(sessionId, state);
 
         this.registry.eventBus.emitSession(sessionId, {
             type: 'sibling:switched',
@@ -87,12 +87,12 @@ export class BranchService {
     }
 
     async getSiblings(messageId: string): Promise<SessionGroup[]> {
-        const { sessionId, nodeId, state } = this.registry.ensureBound();
+        const { sessionId, state } = this.registry.ensureBound();
         const session = state.findSessionById(messageId);
         if (!session?.persistedNodeId) return session ? [session] : [];
 
         try {
-            const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+            const roundLog = new RoundLog(this.registry.engine, sessionId);
             const ids = await roundLog.getSiblingRoundIds(session.persistedNodeId);
             const count = ids.length;
             const result: SessionGroup[] = [];
@@ -128,7 +128,7 @@ export class BranchService {
         branchNodeId: string,
         options?: { name?: string; copyContent?: boolean }
     ): Promise<string> {
-        const { sessionId, nodeId, state } = this.registry.ensureBound();
+        const { sessionId, state } = this.registry.ensureBound();
         this.registry.ensureNotGenerating('create branch');
         const eventBus = this.registry.eventBus;
 
@@ -140,14 +140,14 @@ export class BranchService {
             );
         }
 
-        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const roundLog = new RoundLog(this.registry.engine, sessionId);
         const forked = await roundLog.forkUserRound(session.persistedNodeId, {
             branchName: options?.name,
             createdFrom: 'manual',
         });
         const newNodeId = forked.newRoundId;
 
-        await this.registry.reloadSessionData(nodeId, sessionId, state);
+        await this.registry.reloadSessionData(sessionId, state);
 
         eventBus.emitSession(sessionId, {
             type: 'branch:switched',
@@ -175,12 +175,11 @@ export class BranchService {
     }
 
     async switchBranch(branchName: string): Promise<void> {
-        const { sessionId, nodeId, state } = this.registry.ensureBound();
-        this.registry.ensureNotGenerating('switch branch');
+        const { sessionId, state } = this.registry.ensureBound();
         const eventBus = this.registry.eventBus;
-        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const roundLog = new RoundLog(this.registry.engine, sessionId);
         const manifest = await roundLog.loadManifest();
-        if (!manifest.branches[branchName]) {
+        if (!Object.prototype.hasOwnProperty.call(manifest.branches, branchName)) {
             throw new ConversationError(
                 ConversationErrorCode.SESSION_INVALID,
                 `Branch not found: ${branchName}`
@@ -189,14 +188,15 @@ export class BranchService {
 
         const currentBranch = manifest.currentBranch;
         if (currentBranch === branchName) return;
+        this.registry.ensureNotGenerating('switch branch');
 
         const fromBranch = currentBranch;
         const previousHead = manifest.branches[fromBranch] ?? '';
-        const newHead = manifest.branches[branchName] ?? '';
+        const newHead = manifest.branches[branchName] ?? null;
         manifest.currentBranch = branchName;
         manifest.currentHead = newHead;
         await roundLog.saveManifest(manifest);
-        await this.registry.reloadSessionData(nodeId, sessionId, state);
+        await this.registry.reloadSessionData(sessionId, state);
 
         eventBus.emitSession(sessionId, {
             type: 'branch:switched',
@@ -213,13 +213,13 @@ export class BranchService {
             type: 'log:ref_moved',
             ref: branchName,
             previousHead,
-            newHead,
+            newHead: newHead ?? '',
         });
     }
 
     async getBranchTree(): Promise<BranchTreeNode> {
-        const { sessionId, nodeId } = this.registry.ensureBound();
-        const log = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const { sessionId } = this.registry.ensureBound();
+        const log = new RoundLog(this.registry.engine, sessionId);
         const manifest = await log.loadManifest();
         const rootId = manifest.rootRoundId;
         if (!rootId) return emptyBranchTree();
@@ -229,8 +229,8 @@ export class BranchService {
     }
 
     async renameBranch(oldName: string, newName: string): Promise<void> {
-        const { sessionId, nodeId } = this.registry.ensureBound();
-        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const { sessionId } = this.registry.ensureBound();
+        const roundLog = new RoundLog(this.registry.engine, sessionId);
 
         const manifest = await roundLog.loadManifest();
         if (manifest.branches[oldName] === undefined) {
@@ -252,10 +252,10 @@ export class BranchService {
     }
 
     async deleteBranch(branchName: string): Promise<void> {
-        const { sessionId, nodeId, state } = this.registry.ensureBound();
+        const { sessionId, state } = this.registry.ensureBound();
         this.registry.ensureNotGenerating('delete branch');
         const eventBus = this.registry.eventBus;
-        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const roundLog = new RoundLog(this.registry.engine, sessionId);
         const manifest = await roundLog.loadManifest();
         if (Object.keys(manifest.branches).length <= 1) {
             throw new ConversationError(
@@ -267,7 +267,7 @@ export class BranchService {
             throw new ConversationError(ConversationErrorCode.SESSION_INVALID, `Branch not found: ${branchName}`);
         }
         await roundLog.refs().delete(branchName);
-        await this.registry.reloadSessionData(nodeId, sessionId, state);
+        await this.registry.reloadSessionData(sessionId, state);
         eventBus.emitSession(sessionId, {
             type: 'log:ref_deleted',
             ref: branchName,
@@ -279,8 +279,8 @@ export class BranchService {
         headNodeId: string;
         isCurrent: boolean;
     }>> {
-        const { nodeId, sessionId } = this.registry.ensureBound();
-        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const { sessionId } = this.registry.ensureBound();
+        const roundLog = new RoundLog(this.registry.engine, sessionId);
         const manifest = await roundLog.loadManifest();
 
         return Object.entries(manifest.branches).map(([name, headNodeId]) => ({
@@ -291,8 +291,8 @@ export class BranchService {
     }
 
     async getBranchMessages(branchHeadNodeId: string): Promise<SessionGroup[]> {
-        const { sessionId, nodeId } = this.registry.ensureBound();
-        const roundLog = new RoundLog(this.registry.engine, nodeId, sessionId);
+        const { sessionId } = this.registry.ensureBound();
+        const roundLog = new RoundLog(this.registry.engine, sessionId);
         const rounds = await collectRoundChain(roundLog, branchHeadNodeId);
         return rounds.flatMap(round => projectionGroups(roundToProjection(round, round.id)));
     }

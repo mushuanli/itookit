@@ -1,9 +1,8 @@
 // @file: llm-conversation/services/prompt-history-service.ts
 
 import YAML from 'yaml';
-import { BaseModuleService } from '@itookit/vfs-core';
-import type { IVFSManager } from '@itookit/vfs-core';
-import { FS_MODULE_CHAT } from '@itookit/vfs-core';
+import { FileBackedService } from '../utils/file-backed-service';
+import type { IFileSystem } from '@itookit/vfs-core';
 import { log } from '../utils/logger';
 
 // ============================================
@@ -52,7 +51,6 @@ interface PromptHistoryFile {
 // ============================================
 
 /** prompt 历史属于 chat 功能，存放在 chat 模块内 */
-const MODULE_NAME = FS_MODULE_CHAT;
 
 /** __config/ 是模块标准内部目录，文件名无需 _ 前缀 */
 const HISTORY_FILE = '/__config/history.yaml';
@@ -64,7 +62,7 @@ const MIN_PROMPT_LENGTH = 2;
 /**
  * Prompt History 服务
  *
- * 继承 BaseModuleService，数据存储在 chats:/_history.yaml
+ * 继承 FileBackedService，数据存储在 chats:/_history.yaml
  *
  * 职责：
  * - 记录用户输入的 prompt（全局，跨会话）
@@ -78,19 +76,19 @@ const MIN_PROMPT_LENGTH = 2;
  * - 容量限制：超出时淘汰最旧条目
  * - 降级安全：初始化失败不影响主流程
  */
-export class PromptHistoryService extends BaseModuleService {
+export class PromptHistoryService extends FileBackedService {
     private entries: PromptHistoryEntry[] = [];
     private maxEntries = DEFAULT_MAX_ENTRIES;
     private loaded = false;
     private dirty = false;
     private writeTimer: ReturnType<typeof setTimeout> | null = null;
 
-    constructor(vfs: IVFSManager) {
-        super(MODULE_NAME, {}, vfs);
+    constructor(fs: IFileSystem) {
+        super(fs);
     }
 
     protected async onLoad(): Promise<void> {
-        // BaseModuleService.init() 会调用此方法
+        // FileBackedService.init() 会调用此方法
         // 此时 engine 已就绪，但不急于加载数据（懒加载）
         log.debug('PromptHistoryService module ready');
     }
@@ -242,7 +240,7 @@ export class PromptHistoryService extends BaseModuleService {
                 lineWidth: 0,
             });
 
-            // 使用 BaseModuleService 的 writeJson 等效逻辑
+            // 使用 FileBackedService 的 writeJson 等效逻辑
             // 但写 YAML 而非 JSON
             await this.writeYaml(HISTORY_FILE, yamlContent);
             this.dirty = false;
@@ -314,11 +312,11 @@ export class PromptHistoryService extends BaseModuleService {
 
     /**
      * 读取 YAML 文件
-     * 复用 BaseModuleService 的 VFS 读取能力
+     * 复用 FileBackedService 的 VFS 读取能力
      */
     private async readYaml<T>(path: string): Promise<T | null> {
         try {
-            const content = await this.vfs.read(this.moduleName, path);
+            const content = await this.engine.driver.readContent(path);
             const str = typeof content === 'string'
                 ? content
                 : new TextDecoder().decode(content as ArrayBuffer);
@@ -336,7 +334,7 @@ export class PromptHistoryService extends BaseModuleService {
 
     /**
      * 写入 YAML 文件
-     * 复用 BaseModuleService 的 VFS 写入能力
+     * 复用 FileBackedService 的 VFS 写入能力
      */
     private async writeYaml(path: string, yamlContent: string): Promise<void> {
         const existingId = await this.engine.driver.resolvePath(path);
@@ -379,10 +377,10 @@ export function getPromptHistory(): PromptHistoryService | undefined {
  * 初始化 PromptHistoryService
  * Called by initializeConversationSystem.
  */
-export async function initializePromptHistory(vfs: IVFSManager): Promise<PromptHistoryService> {
+export async function initializePromptHistory(fs: IFileSystem): Promise<PromptHistoryService> {
     if (historyInstance) return historyInstance;
 
-    historyInstance = new PromptHistoryService(vfs);
+    historyInstance = new PromptHistoryService(fs);
     await historyInstance.init();
     return historyInstance;
 }

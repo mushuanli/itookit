@@ -1,24 +1,25 @@
 // @file: llm-ui/services/FileSearchService.ts
 
 import { guessMimeType } from '@itookit/vfs-core';
-import type { IChatEngine } from '@itookit/llm-session';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { FileSuggestion } from '../domain/types';
 
 const guessMimeTypeFromName = guessMimeType;
 
 export class FileSearchService {
-    constructor(private engine: IChatEngine) {}
+    constructor(private fs?: IFileSystem) {}
 
     /** Search session-scoped files for @mention suggestions. */
     async search(query: string): Promise<FileSuggestion[]> {
         try {
-            const results = await this.engine.search({
+            if (!this.fs) return [];
+            const results = await this.fs.driver.search({
                 text: query || undefined,
                 type: 'file',
                 limit: 20,
             });
 
-            return results
+            return results.nodes
                 .filter((n) => n.type === 'file')
                 .map((n) => ({
                     name: n.name,

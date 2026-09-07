@@ -1,7 +1,7 @@
 // vcs-plugin — VCS commands backed by Log.refs() operations.
 //
 // Branch management: create / switch / rename / delete / list / tree / messages.
-// All operations delegate to SessionManager which wraps the ChatEngine.
+// All operations delegate to SessionManager which wraps the SessionRepository.
 
 import type { ILLMPlugin, ExtensionContext } from '@itookit/common';
 import type { SessionManager } from '../session/session-manager';

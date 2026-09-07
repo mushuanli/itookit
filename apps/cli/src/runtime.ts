@@ -19,7 +19,7 @@ import {
     type WorkflowTaskSpec,
 } from '@itookit/llm-flow';
 import { DurableAgentProgram, DurableChatProgram, DurablePlanProgram } from '@itookit/llm-tasks';
-import { createVFS, FS_MODULE_CHAT, MemoryBackend, type IModuleFS } from '@itookit/vfs-core';
+import { createVFS, MemoryBackend, type IFileSystem } from '@itookit/vfs-core';
 import { createBashTool } from '@itookit/tools';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { taskOutputReference } from './config';
@@ -49,12 +49,13 @@ export interface CliRuntime {
 
 class CliStorageResolver implements SessionStorageResolver {
     readonly kind = STORAGE_KIND;
-    constructor(private readonly fs: IModuleFS) {}
-
+    constructor(private readonly fs: IFileSystem) {}
     async resolve(reference: StorageBindingRef): Promise<ResolvedStorageBinding> {
         const locator = reference.locator as { runId?: unknown };
-        if (typeof locator?.runId !== 'string' || !locator.runId) throw new Error('CLI storage requires runId');
-        return { fs: this.fs, rootPath: `/runs/${locator.runId}/.kernel` };
+        if (reference.kind !== this.kind || typeof locator?.runId !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(locator.runId)) {
+            throw new Error('CLI storage requires a valid runId');
+        }
+        return { fs: this.fs, rootPath: `/var/lib/sessions/${locator.runId}/kernel` };
     }
 }
 
@@ -67,6 +68,7 @@ export async function createCliRuntime(
     manifest: RunManifest,
     onGrantChange: (grants: RunManifest['grants']) => Promise<void>,
     vfsRoot?: string,
+    mode: 'execute' | 'control' = 'execute',
 ): Promise<CliRuntime> {
     // -b / --boot: mount the real mindos data root (tauri's root backend) instead
     // of the per-run state dir. Sidecar uses <root>/_meta to match tauri's root
@@ -80,8 +82,7 @@ export async function createCliRuntime(
     });
     const { manager: vfs } = await createVFS({
         rootBackend: backend,
-        additionalMounts: [{ path: '/etc', backend: new MemoryBackend() }],
-        modules: [{ name: FS_MODULE_CHAT }],
+        additionalMounts: [{ path: '/etc', backend: new MemoryBackend() }, { path: '/run', backend: new MemoryBackend() }],
     });
     const llmDriver = new LLMDeviceDriver(vfs);
     await initializeLlmQuietly(llmDriver);
@@ -102,17 +103,20 @@ export async function createCliRuntime(
         : engine ? new OciTtyDriver(engine, workflow, () => grants.list()) : undefined;
     const core = await createKernelAdaptersRuntime({
         llmDriver,
-        ttyDriver,
         runMode: 'kernel',
-        vfsContext: createWorkspacePort(grants),
-        nativeShell: shell,
+        fileContextForSession: async () => ({
+            vfs: createWorkspacePort(grants), cwd: workflow.workspaceRoot, nativeShell: shell, ttyDriver,
+            release: async () => {}, // The run owns the shared grant registry and shell.
+        }),
         additionalTools: [createBashTool(shell), createWorkspaceAccessTool(grants)],
     });
+    const systemFS = await vfs.openFileSystem('/');
     const kernel = new Kernel({
-        catalog: { fs: vfs.getEngine(FS_MODULE_CHAT) },
-        maxConcurrent: workflow.config.runtime?.max_concurrency ?? 4,
+        catalog: { fs: systemFS, rootPath: '/var/lib/kernel' },
+        maxConcurrent: mode === 'control' ? 0 : workflow.config.runtime?.max_concurrency ?? 4,
+        maxConcurrentEffects: mode === 'control' ? 0 : undefined,
     });
-    kernel.registerStorageResolver(new CliStorageResolver(vfs.getEngine(FS_MODULE_CHAT)));
+    kernel.registerStorageResolver(new CliStorageResolver(systemFS));
     await kernel.use(core.plugin);
     registerPrograms(kernel);
     await kernel.initialize();
@@ -132,7 +136,7 @@ export async function createCliRuntime(
             kernel.dispose();
             await kernel.waitIdle();
             await core.dispose();
-            await backend.close();
+            await vfs.dispose();
         },
     };
 }
@@ -159,7 +163,7 @@ export function compileDag(workflow: CompiledWorkflow): DagRunSpec {
         agentFactory,
         taskOutputReference,
     );
-    return { nodes, edges, maxNodes: nodes.length };
+    return { nodes, edges };
 }
 
 function compileTask(

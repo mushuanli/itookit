@@ -12,7 +12,7 @@ import type { RoundLogEvent, RoundChangeSet } from './round-events';
 import { ulid } from './ulid';
 import { roundToProjection } from './round-log';
 import { toolCallsFromResult } from './projection';
-import type { IChatEngine } from './types';
+import type { ISessionRepository } from './types';
 
 // ─── Error types ───────────────────────────────────────────────────────────
 
@@ -30,13 +30,10 @@ export class RoundGraphService {
     private onEvent?: (event: RoundLogEvent) => void;
 
     constructor(
-        private readonly engine: IChatEngine,
-        private nodeId: string,
+        private readonly engine: ISessionRepository,
+        private readonly sessionId: string,
     ) {}
 
-    updateNodeId(newNodeId: string): void {
-        this.nodeId = newNodeId;
-    }
 
     setEventListener(fn: (event: RoundLogEvent) => void): void {
         this.onEvent = fn;
@@ -46,7 +43,7 @@ export class RoundGraphService {
 
     /** Load manifest — returns empty structure for new sessions (no phantom root). */
     async loadManifest(): Promise<RoundManifest> {
-        const raw = await this.engine.getManifest(this.nodeId) as unknown as Record<string, unknown>;
+        const raw = await this.engine.getManifest(this.sessionId) as unknown as Record<string, unknown>;
         if (raw?.children && 'rootRoundId' in raw) {
             return {
                 schemaVersion: 3,
@@ -71,7 +68,7 @@ export class RoundGraphService {
     }
 
     async saveManifest(manifest: RoundManifest): Promise<void> {
-        await this.engine.updateManifest(this.nodeId, manifest);
+        await this.engine.updateManifest(this.sessionId, manifest);
     }
 
     // ── Append with validation ─────────────────────────────────────────────
@@ -136,7 +133,7 @@ export class RoundGraphService {
     }
 
     private async withWrite<T>(operation: () => Promise<T>): Promise<T> {
-        const key = this.nodeId;
+        const key = this.sessionId;
         const previous = RoundGraphService.writeTails.get(key) ?? Promise.resolve();
         let release!: () => void;
         const current = new Promise<void>(resolve => { release = resolve; });
@@ -183,7 +180,7 @@ export class RoundGraphService {
 
     async readRound(roundId: RoundId): Promise<PersistedRound | null> {
         try {
-            const content = await this.engine.readAsset(this.nodeId, `round-${roundId}.json`);
+            const content = await this.engine.readDocument(this.sessionId, `round-${roundId}.json`);
             if (!content) return null;
             const text = typeof content === 'string'
                 ? content
@@ -194,7 +191,7 @@ export class RoundGraphService {
     }
 
     private async writeRound(roundId: RoundId, round: PersistedRound): Promise<void> {
-        await this.engine.createAsset(this.nodeId, `round-${roundId}.json`, JSON.stringify(round, null, 2));
+        await this.engine.writeDocument(this.sessionId, `round-${roundId}.json`, JSON.stringify(round, null, 2));
     }
 
     // ── Fork — create sibling Round on a new branch ────────────────────────

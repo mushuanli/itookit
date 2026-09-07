@@ -88,12 +88,13 @@ class InlineMountRouter implements IMountRouter {
             throw new FSError('EEXIST', 'mount already exists: ' + norm, 'mount', norm);
         }
 
-        await backend.init();
-
-        // Bootstrap root in the mounted backend if absent
-        const existingRoot = await backend.stat('/');
-        if (!existingRoot) {
-            await backend.mkdir('/');
+        try {
+            await backend.init();
+            if (!await backend.stat('/')) await backend.mkdir('/');
+        } catch (error) {
+            try { await backend.close(); }
+            catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Mount initialization and cleanup failed'); }
+            throw error;
         }
 
         const mp: MountPoint = {

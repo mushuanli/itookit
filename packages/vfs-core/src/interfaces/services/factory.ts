@@ -5,7 +5,7 @@
  * 面向不同运行环境提供统一的 VFS 实例创建方式。
  */
 
-import type { IVFSManager, ModuleMountOptions } from './vfs-manager';
+import type { IVFSManager } from './vfs-manager';
 import type { IConfigService } from './config-service';
 import type { IStorageBackend } from '../storage/backend';
 import type { IDeviceDriver } from '../device/device';
@@ -44,15 +44,6 @@ export interface VFSFactoryOptions {
 
     /** 内置插件 */
     plugins?: IPlugin[];
-
-    /**
-     * 初始化时挂载的模块列表
-     * __config 模块始终自动挂载。
-     */
-    modules?: Array<{
-        name: string;
-        options?: ModuleMountOptions;
-    }>;
 
     /**
      * 初始配置（仅首次创建时写入，已有数据不覆盖）

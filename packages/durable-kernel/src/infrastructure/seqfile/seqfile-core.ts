@@ -2,7 +2,7 @@
 // SeqFile 基础设施原语：目录/文件布局、路径/键名、编码、事务、事件追加。
 // 供 store.ts 与 store-helpers.ts 复用，消除单一巨型辅助文件。
 
-import type { IModuleFS, ISeqFileOperations, ISeqFileTransaction } from '@itookit/vfs-core';
+import type { IFileSystem, ISeqFileOperations, ISeqFileTransaction } from '@itookit/vfs-core';
 import type { EventEnvelope, ResolvedStorageBinding } from '../../domain/types';
 
 export function join(...parts: string[]): string {
@@ -82,7 +82,7 @@ export async function ensureTaskLayout(binding: ResolvedStorageBinding, taskId: 
     await ensureSeqFile(binding.fs, join(root, 'task.seq'));
 }
 
-export async function ensureTree(fs: IModuleFS, path: string): Promise<void> {
+export async function ensureTree(fs: IFileSystem, path: string): Promise<void> {
     let current = '';
     for (const part of path.split('/').filter(Boolean)) {
         const parent = current || null;
@@ -91,7 +91,7 @@ export async function ensureTree(fs: IModuleFS, path: string): Promise<void> {
     }
 }
 
-export async function ensureSeqFile(fs: IModuleFS, path: string): Promise<void> {
+export async function ensureSeqFile(fs: IFileSystem, path: string): Promise<void> {
     if (await fs.driver.exists(path)) return;
     const parts = path.split('/').filter(Boolean);
     const name = parts.pop();
@@ -100,18 +100,18 @@ export async function ensureSeqFile(fs: IModuleFS, path: string): Promise<void> 
     await fs.driver.createFile({ name, parentPath, type: 'seqfile', content: '' });
 }
 
-export function requireTransactionalSeq(fs: IModuleFS): ISeqFileOperations {
+export function requireTransactionalSeq(fs: IFileSystem): ISeqFileOperations {
     const operations = fs.meta.seq;
-    if (!operations?.transaction) throw new Error(`Module ${fs.moduleId} lacks transactional SeqFile support`);
+    if (!operations?.transaction) throw new Error(`Filesystem ${fs.viewId} lacks transactional SeqFile support`);
     return operations;
 }
 
-export function seq(fs: IModuleFS): ISeqFileOperations {
-    if (!fs.meta.seq) throw new Error(`Module ${fs.moduleId} lacks SeqFile support`);
+export function seq(fs: IFileSystem): ISeqFileOperations {
+    if (!fs.meta.seq) throw new Error(`Filesystem ${fs.viewId} lacks SeqFile support`);
     return fs.meta.seq;
 }
 
-export function transaction<T>(fs: IModuleFS, operation: (tx: ISeqFileTransaction) => Promise<T>): Promise<T> {
+export function transaction<T>(fs: IFileSystem, operation: (tx: ISeqFileTransaction) => Promise<T>): Promise<T> {
     return requireTransactionalSeq(fs).transaction!(operation);
 }
 

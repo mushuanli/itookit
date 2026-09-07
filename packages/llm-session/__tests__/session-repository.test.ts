@@ -1,0 +1,70 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createVFS, MemoryBackend, type IVFSManager, type IFileSystem } from '@itookit/vfs-core';
+import { SessionRepository } from '../src/persistence/session-repository';
+import { createSessionDataProjection } from '../src/persistence/session-projection';
+
+let manager: IVFSManager, fs: IFileSystem, repository: SessionRepository;
+beforeEach(async () => {
+    ({ manager } = await createVFS({ rootBackend: new MemoryBackend() }));
+    fs = await manager.openFileSystem('/'); repository = new SessionRepository(fs); await repository.init();
+});
+afterEach(async () => { await repository.dispose(); await manager.dispose(); });
+
+describe('Session data repository', () => {
+    it('creates independent Sessions whose identities survive a title change', async () => {
+        const ids = await Promise.all([repository.createSession('Same'), repository.createSession('Same')]);
+        expect(new Set(ids).size).toBe(2);
+        await repository.updateManifest(ids[0], { title: 'Renamed' });
+        expect((await repository.getManifest(ids[0])).title).toBe('Renamed');
+        expect((await repository.list()).map(session => session.id)).toEqual(expect.arrayContaining(ids));
+        expect(await fs.driver.exists(`/var/lib/sessions/${ids[0]}/session.seq`)).toBe(true);
+        expect(await fs.driver.exists('/home/admin/chats')).toBe(false);
+    });
+    it('stores history in records and reads changes through its filesystem projection', async () => {
+        const id = await repository.createSession('History');
+        const projection = await createSessionDataProjection(repository, id);
+        try {
+            await repository.writeDocument(id, 'round-one.json', '{"text":"first"}');
+            expect(await projection.fs.driver.readContent('/history/round-one.json', { encoding: 'utf-8' })).toBe('{"text":"first"}');
+            await repository.writeDocument(id, 'round-one.json', '{"text":"updated"}');
+            expect(await projection.fs.driver.readContent('/history/round-one.json', { encoding: 'utf-8' })).toBe('{"text":"updated"}');
+            await expect(projection.fs.driver.writeContent('/history/round-one.json', '{}')).rejects.toMatchObject({ code: 'EROFS' });
+            expect(await fs.driver.exists(`/var/lib/sessions/${id}/conversation`)).toBe(false);
+        } finally { await projection.dispose(); }
+    });
+    it('projects binary attachments independently from document companion directories', async () => {
+        const id = await repository.createSession('Assets');
+        await repository.writeAttachment(id, 'image.bin', new Uint8Array([0, 255, 128]).buffer);
+        const assets = await repository.openAttachments(id);
+        try { expect(new Uint8Array(await assets.driver.readContent('/image.bin', { encoding: 'binary' }))).toEqual(new Uint8Array([0, 255, 128])); }
+        finally { await assets.dispose(); }
+        await expect(repository.writeAttachment(id, '../escape', new ArrayBuffer(0))).rejects.toMatchObject({ code: 'EINVAL' });
+    });
+    it('reopens history/settings and merges concurrent independent settings updates', async () => {
+        const id = await repository.createSession('Restart');
+        await repository.updateUIState(id, { branchDrafts: { main: { inputText: 'draft' } } });
+        const second = new SessionRepository(fs);
+        await second.init();
+        try {
+            await Promise.all([repository.updateUIState(id, { historyVisibility: 'hidden' }), second.updateUIState(id, { scrollPosition: 42 })]);
+            expect(await second.getUIState(id)).toMatchObject({ branchDrafts: { main: { inputText: 'draft' } }, historyVisibility: 'hidden', scrollPosition: 42 });
+        } finally { await second.dispose(); }
+    });
+    it('merges independent branch drafts and preserves clearing a draft', async () => {
+        const id = await repository.createSession('Drafts');
+        await Promise.all([
+            repository.updateUIState(id, { branchDrafts: { main: { inputText: 'main draft' } } }),
+            repository.updateUIState(id, { branchDrafts: { experiment: { inputText: 'branch draft' } } }),
+        ]);
+        await repository.updateUIState(id, { branchDrafts: { main: { inputText: '' } } });
+        expect((await repository.getUIState(id))?.branchDrafts).toEqual({ main: { inputText: '' }, experiment: { inputText: 'branch draft' } });
+    });
+    it('rejects unknown identities and incompatible storage without creating data', async () => {
+        await expect(repository.getManifest('missing')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(repository.getManifest('/old.chat')).rejects.toThrow('identity');
+        const id = await repository.createSession('Bad version');
+        await fs.meta.seq!.setEntry(`/var/lib/sessions/${id}/session.seq`, 'session', JSON.stringify({ id, storageVersion: 0 }));
+        await expect(repository.getManifest(id)).rejects.toThrow('incompatible');
+        expect(await fs.driver.exists('/var/lib/sessions/missing')).toBe(false);
+    });
+});

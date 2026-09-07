@@ -154,9 +154,10 @@ export class MigrationSection {
       reader.onload = async (ev: any) => {
         try {
           const json = JSON.parse(ev.target.result);
+          if (json.version !== 3 || json.type !== 'mixed_backup') throw new Error('备份版本不兼容');
           this.showImportSelectionModal(json);
         } catch (err) {
-          Toast.error('无法解析 JSON 文件，请检查文件格式');
+          Toast.error(err instanceof Error ? err.message : '无法解析备份文件');
         }
       };
       reader.readAsText(file);
@@ -171,9 +172,9 @@ export class MigrationSection {
     });
 
     let availableModules: any[] = [];
-    if (json.modules && Array.isArray(json.modules)) {
-      availableModules = json.modules.filter((mod: any) => {
-        const name = mod.moduleName || '';
+    if (json.workspaces && Array.isArray(json.workspaces)) {
+      availableModules = json.workspaces.filter((mod: any) => {
+        const name = mod.name || '';
         return name && !['__vfs_meta__', 'etc'].includes(name);
       });
     }
@@ -184,7 +185,7 @@ export class MigrationSection {
     }
 
     const modulesHtml = availableModules.map(mod => {
-      const name = mod.moduleName || 'Unknown';
+      const name = mod.name || 'Unknown';
       return `
         <label class="settings-checkbox-row">
           <input type="checkbox" name="import-modules" value="${name}">

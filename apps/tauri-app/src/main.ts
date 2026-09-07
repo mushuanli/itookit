@@ -1,3 +1,5 @@
+import { TauriSessionDirectories } from './services/session-directories';
+import { createFileSystemSource } from '@itookit/vfs-core';
 /**
  * @file apps/tauri-app/src/main.ts
  *
@@ -12,7 +14,7 @@
  *  4. Wire tauri-only features: loading overlay, dynamic local mounts
  */
 
-import { initApp, createWsMount, type AppUI } from '@itookit/app-shell';
+import { initApp, createWsMount, workspaceRoot, type AppUI } from '@itookit/app-shell';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import {
     createLLMFactory,
@@ -31,9 +33,6 @@ import { LocalMountService, MountEntry, MOUNT_EVENTS } from './services/local-mo
 import { TauriSqlSidecarDb } from './db/tauri-sql-sidecar';
 import { TauriFsOps } from './fs/tauri-fs-ops';
 import { TauriLLMLogger } from './log/tauri-llm-logger';
-import { TauriNativeShell } from './shell/tauri-native-shell';
-import { TauriCodexTransport } from './shell/tauri-codex-transport';
-import { TauriSkillToolHandlerFactory } from './kernel/tauri-skill-tools';
 import { TauriSkillSource } from './kernel/tauri-skill-source';
 
 import '@itookit/vfs-ui/style.css';
@@ -192,7 +191,7 @@ async function bootstrap(): Promise<void> {
     //
     //  rootBackend          : <rootDir>/  — system paths only (/etc/, /dev/)
     //                         SQLite: <rootDir>/_meta/
-    //  per-module backends  : <rootDir>/module/<name>/  — one SQLite each
+    //  workspace backends   : <rootDir>/home/admin/<name>/  — one SQLite each
     //                         SQLite: <rootDir>/_db/<name>/
     //  homeBackend          : <homeDir>  — transparent local FS
     //                         SQLite: <rootDir>/meta/<path-derived>/
@@ -207,33 +206,48 @@ async function bootstrap(): Promise<void> {
         });
 
     // Collect module names that need their own backend (skip settings/home)
-    const moduleNames = WORKSPACES
-        .filter(ws => ws.type !== 'settings' && ws.moduleName !== 'home')
-        .map(ws => ws.moduleName);
+    const workspaceNames = WORKSPACES
+        .filter(ws => ws.type !== 'settings' && ws.workspaceName !== 'home')
+        .map(ws => ws.workspaceName);
 
-    console.log(`[Boot] 创建 ${moduleNames.length + 2} 个文件系统后端 (${moduleNames.concat('root', 'home').join(', ')})`);
+    console.log(`[Boot] 创建 ${workspaceNames.length + 2} 个文件系统后端 (${workspaceNames.concat('root', 'home').join(', ')})`);
+
 
     // Open all backends in parallel — different SQLite files, no contention
-    const [rootBackend, homeBackend, ...moduleBackends] = await Promise.all([
+    const opened = await Promise.allSettled([
         openBackend(rootDir, `${rootDir}/_meta`),
         openBackend(homeDir, pathToMetaDir(rootDir, homeDir)),
-        ...moduleNames.map(name =>
-            openBackend(`${rootDir}/module/${name}`, `${rootDir}/_db/${name}`)
+        ...workspaceNames.map(name =>
+            openBackend(`${rootDir}${workspaceRoot(name)}`, `${rootDir}/_db/${name}`)
         ),
     ]);
-    log(`文件系统初始化 (${moduleNames.length + 2} backends)`);
+    const failures = opened.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+    if (failures.length) {
+        const closed = await Promise.allSettled(opened.flatMap(result => result.status === 'fulfilled' ? [result.value.close()] : []));
+        throw new AggregateError([...failures, ...closed.flatMap(result => result.status === 'rejected' ? [result.reason] : [])], 'Filesystem sources could not be opened');
+    }
+    const [rootBackend, homeBackend, ...workspaceBackends] = opened.map(result => {
+        if (result.status === 'rejected') throw result.reason;
+        return result.value;
+    });
+    const startupCleanup: Array<() => void | Promise<void>> = [
+        ...[rootBackend, homeBackend, ...workspaceBackends].map(backend => () => backend.close()),
+    ];
+    try {
+    log(`文件系统初始化 (${workspaceNames.length + 2} backends)`);
 
-    const moduleAdditionalMounts = moduleNames.map((name, i) => ({
-        path: `/module/${name}`,
-        backend: moduleBackends[i],
+    // The host owns this source independently of the MindOS root.
+    const homeSource = await createFileSystemSource({ backend: homeBackend, viewId: 'host-home' });
+    startupCleanup.push(() => homeSource.dispose());
+
+    const workspaceMounts = workspaceNames.map((name, i) => ({
+        path: workspaceRoot(name),
+        backend: workspaceBackends[i],
     }));
 
     // 3. Hand off to app-shell
-    const nativeShell = await TauriNativeShell.create();
-    const codexTransport = await TauriCodexTransport.create(homeDir).catch(error => {
-        console.warn('[Boot] Codex app-server unavailable:', error);
-        return undefined;
-    });
+    // Session processes require a runner that enforces the mount grants.
+    // Do not inject unrestricted host shell or Codex app-server access.
     const ui: AppUI = {
         createChatEditor: createLLMFactory,
         createAgentEditor: createAgentEditorFactory,
@@ -251,29 +265,30 @@ async function bootstrap(): Promise<void> {
     const app = await initApp({
         backend: rootBackend,
         additionalMounts: [
-            ...moduleAdditionalMounts,
-            { path: '/module/home', backend: homeBackend },
+            ...workspaceMounts,
         ],
-        workspaces: WORKSPACES,
+        workspaces: WORKSPACES.map(ws => ws.workspaceName === 'home' ? { ...ws, files: { fs: homeSource.fs, cwd: '/' } } : ws),
         defaultSlug: 'files',
         routeAliases: { home: 'home-workspace' },
         onProgress: showLoading,
         llmLogger: new TauriLLMLogger(rootDir),
-        codexTransport,
+        directorySourceProvider: new TauriSessionDirectories(rootDir),
         kernelPlatform: {
             skillSource: new TauriSkillSource(new TauriFsOps(), homeDir),
-            skillToolHandlerFactory: new TauriSkillToolHandlerFactory(nativeShell),
-            async configure(kernel) {
-                kernel.toolDriver.setNativeShell(nativeShell);
-                await kernel.skillService.setCwd(homeDir);
+            async configureSession(_sessionId, scope) {
+                await scope.skillService.setCwd(homeDir);
             },
         },
         ui,
     });
+    startupCleanup.push(() => app.destroy());
+    app.onDestroy(() => homeSource.dispose(), 'sources');
     log('App 初始化完成');
 
     // 4. Local mount service (tauri-only dynamic mounts)
-    const localMounts = new LocalMountService(app.vfs, rootDir);
+    const localRegistry = await app.vfs.openFileSystem('/var/lib/kernel/local-sources');
+    const localMounts = new LocalMountService(localRegistry, rootDir, id => app.removeWorkspace(id + '-workspace'));
+    app.onDestroy(() => localMounts.dispose(), 'sources');
 
     // Add mount button
     document.getElementById('btn-add-mount')!.addEventListener('click', async () => {
@@ -288,7 +303,7 @@ async function bootstrap(): Promise<void> {
     document.addEventListener(MOUNT_EVENTS.ADDED, (e) => {
         const entry = (e as CustomEvent<MountEntry>).detail;
         injectMountWorkspace(entry);
-        app.addWorkspace(createWsMount(entry.id, entry.label));
+        app.addWorkspace(createWsMount(entry.id, entry.label, localMounts.contextFor(entry.id)));
     });
 
     // React to mount removed
@@ -321,6 +336,10 @@ async function bootstrap(): Promise<void> {
 
     hideLoading();
     console.log(`[Boot] 总启动耗时: ${(performance.now() - t0).toFixed(0)}ms`);
+    } catch (error) {
+        for (const close of startupCleanup.reverse()) { try { await close(); } catch (cleanupError) { console.error('[Boot] Source cleanup failed', cleanupError); } }
+        throw error;
+    }
 }
 
 bootstrap().catch(err => {

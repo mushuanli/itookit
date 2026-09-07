@@ -277,7 +277,7 @@ export async function respondCommand(
     const loaded = await loadWorkflow(store.configSnapshot(runId));
     loaded.workflow.workspaceRoot = manifest.workspaceRoot;
     loaded.workflow.stateDir = store.stateDir;
-    const runtime = await runtimeFor(loaded.workflow, manifest, store, options);
+    const runtime = await runtimeFor(loaded.workflow, manifest, store, options, 'control');
     try {
         await runtime.kernel.respondInteraction(manifest.sessionId, pending.taskId, {
             interactionId: requestId,
@@ -616,6 +616,7 @@ async function runtimeFor(
     manifest: RunManifest,
     store: RunStore,
     options: CommandOptions,
+    mode: 'execute' | 'control' = 'execute',
 ): Promise<CliRuntime> {
     await stat(workflow.workspaceRoot);
     const vfsRoot = options.boot ? resolveMindosRoot() : undefined;
@@ -623,7 +624,7 @@ async function runtimeFor(
     return createCliRuntime(workflow, manifest, async grants => {
         manifest.grants = grants;
         await store.save(manifest);
-    }, vfsRoot);
+    }, vfsRoot, mode);
 }
 
 function renderEvent(manifest: RunManifest, event: EventEnvelope, options: CommandOptions): void {

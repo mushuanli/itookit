@@ -1,6 +1,6 @@
 /**
  * @file packages/vfs-core/src/interfaces/system-access.ts
- * @desc 系统级 /etc 访问接口 — 替代原有的 systemFS: IModuleFS 注入
+ * @desc 系统级 /etc 访问接口 — 替代原有的 systemFS: IFileSystem 注入
  *
  * 设备驱动通过 DeviceContext.systemAccess 获取此接口，
  * 以系统身份读写 /etc 下的配置（含隐藏文件），无需经过模块文件系统。

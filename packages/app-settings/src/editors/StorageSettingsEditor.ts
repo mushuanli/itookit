@@ -55,7 +55,7 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
     const dangerEl = this.container.querySelector('#section-danger') as HTMLElement;
 
     // Wire VFS into syncService singleton so httpSync can read/write files
-    await syncService.init(this.service.vfs);
+    await syncService.init(this.service.vfs, this.service.workspaces);
 
     const overviewSection = new StorageOverviewSection(overviewEl);
     const syncSection = new SyncSection(syncEl);

@@ -13,13 +13,13 @@ const isAssetDirSegment = (segment: string): boolean =>
 
 export const shouldFilterNode = (node: {
   name: string;
-  moduleId?: string;
+  viewId?: string;
   path?: string;
   metadata?: Record<string, unknown>;
 }): boolean => {
   if (node.metadata?.['_showAll']) return false;
   return (
-    (!!node.moduleId && isHiddenFile(node.moduleId)) ||
+    (!!node.viewId && isHiddenFile(node.viewId)) ||
     node.path?.split('/').some(s => isHiddenFile(s) || isAssetDirSegment(s)) ||
     isHiddenFile(node.name) ||
     isAssetDirSegment(node.name)

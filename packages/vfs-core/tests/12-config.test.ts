@@ -15,7 +15,6 @@ interface ConfigVFS {
 async function setupConfig(): Promise<ConfigVFS> {
     const { manager, config } = await createVFS({
         rootBackend: freshMem(),
-        modules: [],
     });
     return {
         manager,

@@ -1,16 +1,15 @@
 // @file llm-ui/views/mdx/MDxController.ts
 import { createMDxEditor, MDxEditor } from '@itookit/mdxeditor';
 import type { CollapseExpandResult } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { IStreamableEditor } from '../../domain/ports/IStreamableEditor';
 
 export interface MDxControllerOptions {
     readOnly?: boolean;
     onChange?: (text: string) => void;
     streaming?: boolean;
-    nodeId?: string;
-    ownerNodeId?: string;
-    moduleFS?: IModuleFS;
+    fs?: IFileSystem;
+    assets?: IFileSystem;
 }
 
 /**
@@ -68,9 +67,8 @@ export class MDxController implements IStreamableEditor {
             this.editor = await createMDxEditor(this.container, {
                 initialContent: this.currentContent,
                 initialMode: this.isReadOnly ? 'render' : 'edit',
-                nodeId: this.options.nodeId,
-                ownerNodeId: this.options.ownerNodeId,
-                moduleFS: this.options.moduleFS,
+                assets: this.options.assets,
+                files: this.options.fs ? { fs: this.options.fs, cwd: '/' } : undefined,
                 plugins: [
                     'editor:core',
                     'ui:formatting',
@@ -89,10 +87,6 @@ export class MDxController implements IStreamableEditor {
                     }
                 }
             }) as MDxEditor;
-
-            if (this.options.nodeId) {
-                this.editor.updateNodeId(this.options.nodeId);
-            }
 
             this.editor.on('change', () => {
                 if (!this.isStreaming) {
@@ -194,18 +188,6 @@ export class MDxController implements IStreamableEditor {
 
     get hasPending(): boolean {
         return this.pendingDelta.length > 0;
-    }
-
-    updateNodeId(newNodeId: string): void {
-        const oldNodeId = this.options.nodeId;
-        const ownerFollowsNode = !this.options.ownerNodeId
-            || this.options.ownerNodeId === oldNodeId;
-        this.options = {
-            ...this.options,
-            nodeId: newNodeId,
-            ownerNodeId: ownerFollowsNode ? newNodeId : this.options.ownerNodeId,
-        };
-        this.editor?.updateNodeId(newNodeId);
     }
 
     // ================================================================

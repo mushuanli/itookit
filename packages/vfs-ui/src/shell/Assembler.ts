@@ -5,7 +5,7 @@
  *       职责：创建实例、注入依赖、连接生命周期。
  *       不承担任何业务逻辑或公共 API。
  */
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { IStatePort, ICommandPort, IEventPort, IFileTypePort } from '../contracts/ports';
 
 import { VFSStore } from '../services/VFSStore';
@@ -54,10 +54,10 @@ const DEFAULT_SETTINGS = {
 
 export function assemble(
     options: VFSUIShellOptions,
-    engine: IModuleFS
+    engine: IFileSystem
 ): AssembledParts {
     // --- Services ---
-    const scopeId = options.scopeId || engine.moduleId || 'default';
+    const scopeId = options.scopeId || engine.viewId || 'default';
     const persistence = new StatePersistence(scopeId);
     const persisted = persistence.load();
 
@@ -70,12 +70,12 @@ export function assemble(
             ...persisted.uiSettings,
             ...options.initialState?.uiSettings,
         },
-        isSidebarCollapsed: options.initialSidebarCollapsed,
+        isSidebarCollapsed: options.initialSidebarCollapsed ?? persisted.isSidebarCollapsed ?? options.initialState?.isSidebarCollapsed ?? false,
         readOnly: options.readOnly || false,
     });
 
     const registry = new FileTypeRegistry(
-        options.defaultEditorFactory,
+        options.defaultEditorFactory ?? (async () => { throw new Error('No editor connected'); }),
         options.customEditorResolver
     );
     options.fileTypes?.forEach(def => registry.register(def));
@@ -122,9 +122,7 @@ export function assemble(
     ];
 
     // --- Lifecycle ---
-    if (!options.readOnly) {
-        persistence.connectAutoSave(store);
-    }
+    persistence.connectAutoSave(store);
 
     return {
         store,

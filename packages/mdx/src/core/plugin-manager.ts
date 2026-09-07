@@ -11,7 +11,7 @@ import type {
   MDxPlugin, PluginContext,
   ToolbarButtonConfig, TitleBarButtonConfig,
 } from './types';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 
 /**
  * 插件管理器（精简版）
@@ -36,7 +36,8 @@ export class PluginManager {
   private commandRegistry = new CommandRegistry();
 
   // 上下文信息
-  private moduleFS: IModuleFS | null = null;
+  private fs: IFileSystem | null = null;
+  private assets: IFileSystem | null = null;
   private currentNodeId: string | null = null;
 
   private ownerNodeId: string | null = null;
@@ -60,9 +61,10 @@ export class PluginManager {
 
   // === 上下文配置 ===
 
-  setContext(nodeId?: string, ownerNodeId?: string, engine?: IModuleFS): void {
+  setContext(nodeId?: string, ownerNodeId?: string, engine?: IFileSystem, assets?: IFileSystem): void {
     if (nodeId) this.currentNodeId = nodeId;
-    if (engine) this.moduleFS = engine;
+    if (engine) this.fs = engine;
+    this.assets = assets ?? null;
     this.ownerNodeId = ownerNodeId || nodeId || null;
     this.storeCache.clear();
   }
@@ -74,8 +76,8 @@ export class PluginManager {
     this.storeCache.forEach(store => store.updateNodeId?.(nodeId));
   }
 
-  setSessionEngine(engine: IModuleFS): void {
-    this.moduleFS = engine;
+  setFileSystem(engine: IFileSystem): void {
+    this.fs = engine;
     this.storeCache.clear();
   }
 
@@ -181,7 +183,8 @@ export class PluginManager {
       getScopedStore: () => this.getOrCreateStore(plugin.name),
 
       // 引擎访问
-      getModuleFS: () => this.moduleFS,
+      getFileSystem: () => this.fs,
+      getAssetFileSystem: () => this.assets,
       getCurrentNodeId: () => this.currentNodeId,
       getOwnerNodeId: () => this.ownerNodeId,
 
@@ -206,7 +209,7 @@ export class PluginManager {
     const store = createStore({
       pluginName,
       instanceId: this.instanceId,
-      moduleFS: this.moduleFS,
+      fs: this.fs,
       nodeId: this.currentNodeId,
     });
 

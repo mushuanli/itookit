@@ -1,3 +1,4 @@
+import { normalizeEditorOptions } from '@itookit/ui-common';
 // @file: llm-ui/index.ts
 
 import './styles/index.css';
@@ -5,9 +6,8 @@ import './styles/index.css';
 import { LLMWorkspaceEditor, LLMEditorOptions } from './shell/LLMWorkspaceEditor';
 import {
     VFSAgentService,
-    IChatEngine,
+    ISessionRepository,
 } from '@itookit/llm-session';
-import {formatDefaultFileTitle} from '@itookit/common';
 import { IEditor } from '@itookit/ui-common';
 import type { ILLMService, ICommandBus } from '@itookit/common';
 import { EditorFactory, EditorOptions } from '@itookit/ui-common';
@@ -39,12 +39,12 @@ import { SkillSettingsEditor } from '@itookit/llm-settings-ui';
  * EditorFactory for the Skills workspace.
  *
  * VFSUIShell calls factory(container, options) when a skill node is selected.
- * options.nodeId = skill ID; options.initialContent = skill name (for summary display).
+ * options.target = entity skill ID; options.initialContent = skill name (for summary display).
  * The factory must call editor.init() — editor-connector does not do it automatically.
  */
 export function createSkillsEditorFactory(agentService: IAgentManagementService): EditorFactory {
     return async (container: HTMLElement, options: EditorOptions = {}): Promise<import('@itookit/ui-common').IEditor> => {
-        // createFormOnly already sets selectedId = options.nodeId (the skill ID).
+        // createFormOnly already sets selectedId from options.target (the skill ID).
         const editor = SkillSettingsEditor.createFormOnly(container, agentService, options);
         // The factory is responsible for calling init(). Pass initialContent as fallback.
         await editor.init(container, options.initialContent ?? '');
@@ -63,17 +63,17 @@ export interface LLMFactoryOptions {
  * 
  * @example 动态创建带初始状态的会话
  * ```ts
- * const factory = createLLMFactory(agentService, { chatEngine });
+ * const factory = createLLMFactory(agentService, { sessionRepository });
  * const editor = await factory(container, {
  *     title: 'New Chat',
- *     moduleFS: chatModuleFS
+ *     fs: chatModuleFS
  * });
  * ```
  */
 export const createLLMFactory = (
     agentService: VFSAgentService,
     deps: {
-        chatEngine: IChatEngine;
+        sessionRepository: ISessionRepository;
         llmService?: ILLMService;
         commandBus?: ICommandBus;
         kernel?: Kernel;
@@ -81,38 +81,35 @@ export const createLLMFactory = (
     },
 ): EditorFactory => {
 
-    // 跟踪进行中的创建，按 nodeId 去重
-    // 防止外部框架在短时间内对同一 nodeId 重复调用 factory
-    const pendingCreations = new Map<string, Promise<IEditor>>();
+    // 跟踪进行中的创建，按 sessionId 去重
+    // 防止外部框架在短时间内对同一 sessionId 重复调用 factory
+    const pendingByContainer = new WeakMap<HTMLElement, Map<string, Promise<IEditor>>>();
 
     return async (container: HTMLElement, options: EditorOptions) => {
-        let effectiveNodeId = options.nodeId;
-        const engine = deps.chatEngine;
+        options = normalizeEditorOptions(options);
+        let pendingCreations = pendingByContainer.get(container);
+        if (!pendingCreations) { pendingCreations = new Map(); pendingByContainer.set(container, pendingCreations); }
+        if (options.target?.kind !== 'session') throw new Error('Chat editor requires a Session target');
+        const sessionId = options.target.sessionId;
+        const engine = deps.sessionRepository;
+        await engine.getManifest(sessionId);
+        const isNewSession = false;
 
-        let isNewSession = false;
-
-        if (!effectiveNodeId && engine) {
-            // 如果没有 nodeId，创建新文件
-            const newNode = await engine.createFile(options.title || formatDefaultFileTitle(), null);
-            effectiveNodeId = newNode.path;
-            isNewSession = true;
-        }
-
-        // 去重：如果同一个 nodeId 正在创建中，等待并复用
-        if (effectiveNodeId && pendingCreations.has(effectiveNodeId)) {
+        // 去重：如果同一个 sessionId 正在创建中，等待并复用
+        if (sessionId && pendingCreations.has(sessionId)) {
             try {
-                return await pendingCreations.get(effectiveNodeId)!;
+                return await pendingCreations.get(sessionId)!;
             } catch {
                 // 前一次创建失败了，继续创建新的
-                pendingCreations.delete(effectiveNodeId);
+                pendingCreations.delete(sessionId);
             }
         }
 
         const editorOptions: LLMEditorOptions = {
             ...options,
             agentService,
-            nodeId: effectiveNodeId,
-            chatEngine: engine,
+            sessionId,
+            sessionRepository: engine,
             isNewSession,
             llmService: deps.llmService,
             commandBus: deps.commandBus,
@@ -127,18 +124,18 @@ export const createLLMFactory = (
                 await editor.init(container, options.initialContent);
                 return editor;
             } catch (e) {
-                console.error(`[LLMFactory] Editor creation failed for ${effectiveNodeId}:`, e);
+                console.error(`[LLMFactory] Editor creation failed for ${sessionId}:`, e);
                 throw e;
             } finally {
                 // 无论成功失败，都清理 pending 记录
-                if (effectiveNodeId) {
-                    pendingCreations.delete(effectiveNodeId);
+                if (sessionId) {
+                    pendingCreations.delete(sessionId);
                 }
             }
         })();
 
-        if (effectiveNodeId) {
-            pendingCreations.set(effectiveNodeId, createPromise);
+        if (sessionId) {
+            pendingCreations.set(sessionId, createPromise);
         }
 
         return createPromise;

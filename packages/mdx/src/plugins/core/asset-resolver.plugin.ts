@@ -30,11 +30,13 @@ export class AssetResolverPlugin implements MDxPlugin {
     }
 
     private async resolveAssets(root: HTMLElement, context: PluginContext): Promise<void> {
-        const moduleFS = context.getModuleFS?.();
+        const fs = context.getFileSystem?.();
         const ownerNodeId = context.getOwnerNodeId?.();
-        if (!moduleFS || !ownerNodeId) return;
-
-        const fileIO = createMDXFile(moduleFS, ownerNodeId);
+        const assets = context.getAssetFileSystem?.();
+        if (!assets && (!fs || !ownerNodeId)) return;
+        const read = (name: string) => assets
+            ? assets.driver.readContent('/' + name, { encoding: 'binary' })
+            : createMDXFile(fs!, ownerNodeId!).asset(name).read();
 
         const elements = root.querySelectorAll<HTMLElement>('[src], [href]');
         const resolvePromises: Promise<void>[] = [];
@@ -49,7 +51,7 @@ export class AssetResolverPlugin implements MDxPlugin {
             const name = rawUrl.slice('@asset/'.length);
 
             resolvePromises.push(
-                fileIO.asset(name).read().then((data) => {
+                read(name).then((data) => {
                     if (!data) return;
                     const mimeType = guessMimeType(name);
                     const blobUrl = URL.createObjectURL(new Blob([data], { type: mimeType }));
@@ -74,11 +76,11 @@ export class AssetResolverPlugin implements MDxPlugin {
      * 清理当前文档中未引用的资产
      */
     private async pruneUnusedAssets(context: PluginContext): Promise<number> {
-        const moduleFS = context.getModuleFS?.();
+        const fs = context.getFileSystem?.();
         const ownerNodeId = context.getOwnerNodeId?.();
-        if (!moduleFS || !ownerNodeId) return 0;
+        if (!fs || !ownerNodeId) return 0;
 
-        const fileIO = createMDXFile(moduleFS, ownerNodeId);
+        const fileIO = createMDXFile(fs, ownerNodeId);
         return fileIO.pruneUnusedAssets();
     }
 

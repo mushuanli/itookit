@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createVFS, MemoryBackend, type IModuleFS, type IVFSManager } from '@itookit/vfs-core';
+import { createVFS, MemoryBackend, type IFileSystem, type IVFSManager } from '@itookit/vfs-core';
 import { Kernel } from './application/kernel';
 import type {
     DurableTaskProgram,
@@ -17,14 +17,12 @@ const binding: StorageBindingRef = { kind: 'test', locator: { rootPath: '/sessio
 
 describe('Kernel durable kernel', () => {
     let manager: IVFSManager;
-    let fs: IModuleFS;
+    let fs: IFileSystem;
     let kernel: Kernel;
 
     beforeEach(async () => {
-        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(), modules: [{ name: 'test' }] }));
-        await manager.mount('test');
-        fs = manager.getEngine('test');
-        await fs.init();
+        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
+        fs = await manager.openFileSystem('/data/test');
         kernel = new Kernel({ catalog: { fs }, pollMs: 0 });
         kernel.registerStorageResolver({
             kind: 'test',
@@ -954,7 +952,7 @@ function reconcilingEffect(): EffectAdapter<string, string> {
 }
 
 async function configuredKernel(
-    fs: IModuleFS,
+    fs: IFileSystem,
     options: { maxConcurrent?: number; leaseMs?: number; pollMs?: number } = {},
 ): Promise<Kernel> {
     const value = new Kernel({ catalog: { fs }, ...options });

@@ -3,7 +3,7 @@
 // ConnectionManager — CRUD for LLMConnection with VFS persistence.
 
 import type { LLMConnection, ConnectionMeta } from '@itookit/common';
-import type { IVFSManager, IModuleFS } from '@itookit/vfs-core';
+import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { toConnectionMeta, aggregateProviderCosts } from '@itookit/common';
 import { DEFAULT_CONNECTIONS, CONST_CONFIG_VERSION } from '../constants';
 import { VFSHelpers } from './vfs-helpers';
@@ -63,7 +63,7 @@ export class ConnectionManager {
 
     // ─── Mutations ─────────────────────────────────────────────────────────
 
-    async saveConnection(conn: LLMConnection, systemFS?: IModuleFS): Promise<void> {
+    async saveConnection(conn: LLMConnection, systemFS?: IFileSystem): Promise<void> {
         await this.writeToDisk(conn, systemFS);
         const idx = this._connections.findIndex(c => c.id === conn.id);
         if (idx >= 0) { this._connections[idx] = conn; } else { this._connections.push(conn); }
@@ -79,7 +79,7 @@ export class ConnectionManager {
         }
     }
 
-    async deleteConnection(id: string, systemFS?: IModuleFS): Promise<void> {
+    async deleteConnection(id: string, systemFS?: IFileSystem): Promise<void> {
         if (id === 'default') throw new Error('Cannot delete the default connection');
         await this.deleteFromDisk(id, systemFS);
         this._connections = this._connections.filter(c => c.id !== id);
@@ -147,12 +147,12 @@ export class ConnectionManager {
         return result;
     }
 
-    private async loadAll(systemFS?: IModuleFS): Promise<LLMConnection[]> {
+    private async loadAll(systemFS?: IFileSystem): Promise<LLMConnection[]> {
         const raw = await this.helpers.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR, systemFS);
         return raw.map(c => this.normalizeConn(c));
     }
 
-    private async writeToDisk(conn: LLMConnection, systemFS?: IModuleFS): Promise<void> {
+    private async writeToDisk(conn: LLMConnection, systemFS?: IFileSystem): Promise<void> {
         await this.helpers.engineUpsert(
             `${CONNECTIONS_DIR}/${conn.id}.json`,
             JSON.stringify(conn, null, 2),
@@ -160,8 +160,8 @@ export class ConnectionManager {
         );
     }
 
-    private async deleteFromDisk(id: string, systemFS?: IModuleFS): Promise<void> {
-        const fs = systemFS ?? this.helpers.getEngine();
+    private async deleteFromDisk(id: string, systemFS?: IFileSystem): Promise<void> {
+        const fs = systemFS ?? this.helpers.getFileSystem();
         const nodeId = await fs.driver.resolvePath(`${CONNECTIONS_DIR}/${id}.json`);
         if (nodeId) await fs.driver.delete([nodeId]);
     }
@@ -189,7 +189,7 @@ export class ConnectionManager {
     }
 
     /** Aggregate all connection dailyCosts for a provider and persist */
-    private async aggregateAndSaveProviderCosts(providerId: string, systemFS?: IModuleFS): Promise<void> {
+    private async aggregateAndSaveProviderCosts(providerId: string, systemFS?: IFileSystem): Promise<void> {
         const provider = this.providerManager.getFullProviderMap().get(providerId);
         if (!provider) return;
         const pid = providerId;

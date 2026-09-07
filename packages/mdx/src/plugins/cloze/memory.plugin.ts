@@ -153,7 +153,7 @@ export class MemoryPlugin implements MDxPlugin {
     this.syncedContexts.add(context);
   }
 
-  /** Sync from the plugin-scoped store backed by IModuleFS metadata or memory. */
+  /** Sync from the plugin-scoped store backed by IFileSystem metadata or memory. */
   private async syncWithStore(context: PluginContext): Promise<void> {
     const cache = this.getCache(context);
     cache.clear();

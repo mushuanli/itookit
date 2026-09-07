@@ -3,7 +3,7 @@
 // key = `{sessionId}|{providerId}|{date}`，同 key 每次请求累加。
 // 一个 session 切换 provider 产生独立记录（不同 key）。
 
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import type { CostRecord } from '@itookit/common';
 import { COST_SEQ_PATH } from '../constants/pricing';
 
@@ -11,7 +11,7 @@ const SEQ_FILE_NAME = 'cost.seq';
 const SEQ_PARENT    = '/llm';
 
 export class CostStore {
-    constructor(private readonly engine: IModuleFS) {}
+    constructor(private readonly engine: IFileSystem) {}
 
     /** 确保 cost.seq 文件存在（init 时调用） */
     async ensureFile(): Promise<void> {

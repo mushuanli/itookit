@@ -8,7 +8,6 @@ import type {
     VFSInstance,
 } from '../protocol';
 
-import { CONFIG_MODULE } from '../protocol';
 import { VFSEngine } from './engine/vfs-engine';
 import { VFSManager } from './services/VFSManager';
 import { ConfigService } from './services/ConfigService';
@@ -32,44 +31,46 @@ export async function createVFS(options: VFSFactoryOptions): Promise<VFSInstance
     // Wire the mount router into the engine so all path-based operations
     // route to the correct backend (e.g. LocalFSBackend for /module/home).
     engine.setMountRouter(manager.mounts.router);
-    await manager.initialize();
+    try {
+        await manager.initialize();
 
-    // Register built-in devices → creates /dev/null, /dev/zero, /dev/random
-    await manager.registerDevice(nullDevice);
-    await manager.registerDevice(zeroDevice);
-    await manager.registerDevice(randomDevice);
+        // Register built-in devices → creates /dev/null, /dev/zero, /dev/random
+        await manager.registerDevice(nullDevice);
+        await manager.registerDevice(zeroDevice);
+        await manager.registerDevice(randomDevice);
 
-    // Register user devices → creates /dev/<handlerId> for each
-    if (options.devices) {
-        for (const device of options.devices) {
-            await manager.registerDevice(device);
-        }
-    }
-
-    // Mount additional backends
-    if (options.additionalMounts) {
-        for (const am of options.additionalMounts) {
-            await manager.mounts.mountBackend(am.path, am.backend, am.options);
-        }
-    }
-
-    // Mount modules
-    if (options.modules) {
-        await manager.mountAll(options.modules);
-    }
-
-    // Create config service
-    const config = new ConfigService(() => manager.getEngine(CONFIG_MODULE));
-
-    // Write initial configs (only if not already present)
-    if (options.initialConfigs) {
-        for (const [configName, entries] of Object.entries(options.initialConfigs)) {
-            const existing = await config.getAll(configName);
-            if (Object.keys(existing).length === 0) {
-                await config.setBatch(configName, entries);
+        // Register user devices → creates /dev/<handlerId> for each
+        if (options.devices) {
+            for (const device of options.devices) {
+                await manager.registerDevice(device);
             }
         }
-    }
 
-    return { manager, config };
+        // Mount additional backends
+        if (options.additionalMounts) {
+            for (const am of options.additionalMounts) {
+                await manager.mounts.mountBackend(am.path, am.backend, am.options);
+            }
+        }
+
+        // Create config service
+        const configFiles = await manager.openFileSystem('/etc');
+        const config = new ConfigService(() => configFiles);
+
+        // Write initial configs (only if not already present)
+        if (options.initialConfigs) {
+            for (const [configName, entries] of Object.entries(options.initialConfigs)) {
+                const existing = await config.getAll(configName);
+                if (Object.keys(existing).length === 0) {
+                    await config.setBatch(configName, entries);
+                }
+            }
+        }
+
+        return { manager, config };
+    } catch (error) {
+        try { await manager.dispose(); }
+        catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Filesystem startup and cleanup failed'); }
+        throw error;
+    }
 }

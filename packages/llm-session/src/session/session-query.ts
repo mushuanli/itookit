@@ -10,7 +10,6 @@ export interface SessionQuery {
     getSnapshot(): SessionSnapshot;
     getSessions(): SessionGroup[];
     getCurrentSessionId(): string | null;
-    getCurrentNodeId(): string | null;
     getStatus(): SessionStatus | 'unbound';
     isGenerating(): boolean;
     getAllSessions(): SessionRuntime[];

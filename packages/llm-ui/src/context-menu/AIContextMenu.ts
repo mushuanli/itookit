@@ -18,7 +18,7 @@ import type {
     AgentDefinition
 } from '@itookit/common';
 import type { ContextMenuConfig, MenuItem } from '@itookit/ui-common';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import { escapeHTML, escapeAttr } from '@itookit/common';
 
 // Matches the shape of VFSNodeUI exposed via the ContextMenuBuilder callback.
@@ -36,7 +36,7 @@ export interface AIContextMenuOptions {
     /** Agent service used to load the list of available agents. */
     agentService: IAgentConfigService;
     /** Session engine used to persist metadata changes. */
-    engine: IModuleFS;
+    engine: IFileSystem;
     /**
      * When true, AI items are hidden for file nodes (show only on directories).
      * Directories are the primary target: ai_defaultAgent and ai_initialPrompt
@@ -103,7 +103,7 @@ export function createAIContextMenuConfig<TNode extends NodeItem>(
 async function showAgentDialog(
     node: NodeItem,
     agentService: IAgentConfigService,
-    engine: IModuleFS,
+    engine: IFileSystem,
     currentAgentId: string | undefined
 ): Promise<void> {
     let agents: AgentDefinition[] = [];
@@ -195,7 +195,7 @@ async function showAgentDialog(
 
 function showInitialPromptDialog(
     node: NodeItem,
-    engine: IModuleFS,
+    engine: IFileSystem,
     currentPrompt: string | undefined
 ): void {
     const overlay = createOverlay();
@@ -253,7 +253,7 @@ function showInitialPromptDialog(
 
 function showSystemPromptDialog(
     node: NodeItem,
-    engine: IModuleFS,
+    engine: IFileSystem,
     currentPrompt: string | undefined
 ): void {
     const overlay = createOverlay();

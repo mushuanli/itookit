@@ -1,3 +1,4 @@
+import { editorResourceId } from '@itookit/ui-common';
 // @file: llm-ui/editors/AgentConfigEditor.ts
 
 import {
@@ -456,8 +457,8 @@ export class AgentConfigEditor implements IEditor {
 
         // Non-critical: write resolved connection label to FSNode metadata for vfs-ui display.
         // Must run AFTER innerHTML is set so a failure here never breaks rendering.
-        const engine = this.options.moduleFS;
-        const nodeId = this.options.nodeId;
+        const engine = this.options.files?.fs;
+        const nodeId = editorResourceId(this.options);
         if (engine?.driver && nodeId && selectedConn) {
             const connGroup = grouped.find(g => g.conns.some(c => c.id === selectedConn!.id));
             if (connGroup) {
@@ -539,8 +540,8 @@ export class AgentConfigEditor implements IEditor {
 
         // 名称输入框 → 同步重命名 VFS 文件（复用 engine.rename + node:renamed 事件链）
         const nameInput = this.container.querySelector('.agent-header__name-input') as HTMLInputElement;
-        const engine = this.options.moduleFS;
-        const nodeId = this.options.nodeId;
+        const engine = this.options.files?.fs;
+        const nodeId = editorResourceId(this.options);
         if (nameInput && engine && nodeId) {
             const ext = (this.options.language as string) || '';
             const doRename = async () => {
@@ -610,8 +611,8 @@ export class AgentConfigEditor implements IEditor {
             connSelect.addEventListener('change', async () => {
                 if (this.content?.config) this.content.config.connectionId = connSelect.value;
                 // Update connection label in FSNode metadata for vfs-ui list display
-                const engine = this.options.moduleFS;
-                const nodeId = this.options.nodeId;
+                const engine = this.options.files?.fs;
+                const nodeId = editorResourceId(this.options);
                 if (engine?.driver && nodeId && connSelect.value) {
                     const selectedOpt = connSelect.options[connSelect.selectedIndex];
                     const groupLabel = (selectedOpt?.closest('optgroup') as HTMLOptGroupElement | null)?.label ?? '';

@@ -12,12 +12,11 @@
  *   ];
  */
 
-import { FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/vfs-core';
 import type { WorkspaceConfig } from '../types';
 
 export const WS_SETTINGS: WorkspaceConfig = {
     elementId: 'settings-workspace',
-    moduleName: 'settings_root',
+    workspaceName: 'settings_root',
     slug: 'settings',
     type: 'settings',
     title: 'Settings',
@@ -30,11 +29,11 @@ export const WS_SETTINGS: WorkspaceConfig = {
 
 export const WS_CHAT: WorkspaceConfig = {
     elementId: 'llm-workspace',
-    moduleName: FS_MODULE_CHAT,
+    workspaceName: 'chats',
     slug: 'chat',
     type: 'chat',
     title: 'AI Sessions',
-    supportedFileTypes: ['chat'],
+    supportedFileTypes: [],
     syncEnabled: true,
     mentionScope: ['*'],
     mentionAble: true,
@@ -44,7 +43,7 @@ export const WS_CHAT: WorkspaceConfig = {
 
 export const WS_AGENTS: WorkspaceConfig = {
     elementId: 'agent-workspace',
-    moduleName: FS_MODULE_AGENTS,
+    workspaceName: 'agents',
     slug: 'agents',
     type: 'agent',
     title: 'Agents',
@@ -60,7 +59,7 @@ export const WS_AGENTS: WorkspaceConfig = {
 
 export const WS_MINDS: WorkspaceConfig = {
     elementId: 'minds-workspace',
-    moduleName: 'minds',
+    workspaceName: 'minds',
     slug: 'minds',
     type: 'standard',
     title: 'Minds',
@@ -72,7 +71,7 @@ export const WS_MINDS: WorkspaceConfig = {
 
 export const WS_ANKI: WorkspaceConfig = {
     elementId: 'anki-workspace',
-    moduleName: 'anki',
+    workspaceName: 'anki',
     slug: 'anki',
     type: 'standard',
     title: 'Anki Memory Cards',
@@ -86,7 +85,7 @@ export const WS_ANKI: WorkspaceConfig = {
 
 export const WS_PROJECTS: WorkspaceConfig = {
     elementId: 'project-workspace',
-    moduleName: 'projects',
+    workspaceName: 'projects',
     slug: 'projects',
     type: 'standard',
     title: 'Projects',
@@ -98,7 +97,7 @@ export const WS_PROJECTS: WorkspaceConfig = {
 
 export const WS_EMAILS: WorkspaceConfig = {
     elementId: 'email-workspace',
-    moduleName: 'emails',
+    workspaceName: 'emails',
     slug: 'emails',
     type: 'standard',
     title: 'Email Drafts',
@@ -111,7 +110,7 @@ export const WS_EMAILS: WorkspaceConfig = {
 /** Skills workspace — VFSUIShell list backed by SkillsEngine + SkillSettingsEditor (form-only). */
 export const WS_SKILLS: WorkspaceConfig = {
     elementId:        'skills-workspace',
-    moduleName:       'skills',
+    workspaceName:       'skills',
     slug:             'skills',
     type:             'skills',   // handled by SkillsWorkspaceStrategy in bootstrap.ts
     title:            'Skills',
@@ -125,7 +124,7 @@ export const WS_SKILLS: WorkspaceConfig = {
 /** Workflows workspace — standalone FlowsEditor (design surface) backed by the flows VFS module. */
 export const WS_FLOWS: WorkspaceConfig = {
     elementId:        'flows-workspace',
-    moduleName:       'flows',
+    workspaceName:       'flows',
     slug:             'flows',
     type:             'flows',   // handled by FactoryWorkspaceStrategy (flowsFactory + FlowEngine)
     title:            'Workflows',
@@ -141,7 +140,7 @@ export const WS_FLOWS: WorkspaceConfig = {
 
 export const WS_PRIVATE: WorkspaceConfig = {
     elementId: 'private-workspace',
-    moduleName: 'private',
+    workspaceName: 'private',
     slug: 'private',
     type: 'standard',
     title: 'Private Notes',
@@ -159,7 +158,7 @@ export const WS_PRIVATE: WorkspaceConfig = {
  */
 export const WS_HOME: WorkspaceConfig = {
     elementId: 'home-workspace',
-    moduleName: 'home',
+    workspaceName: 'home',
     slug: 'files',
     type: 'standard',
     title: 'Files',
@@ -175,10 +174,11 @@ export const WS_HOME: WorkspaceConfig = {
  * Each mount gets a unique id (e.g. 'mnt_1234567890') and its own VFS module.
  * Backend wiring is the caller's responsibility.
  */
-export function createWsMount(id: string, label: string): WorkspaceConfig {
+export function createWsMount(id: string, label: string, files: import('@itookit/vfs-core').FileSystemContext): WorkspaceConfig {
     return {
+        files,
         elementId: `${id}-workspace`,
-        moduleName: id,
+        workspaceName: id,
         slug: id,
         type: 'standard',
         title: label,

@@ -3,13 +3,13 @@
  * @desc VFS 协议层统一导出(接口/类型/常量/错误)
  *
  * 使用方式：
- *   import type { IModuleFS, FSNode, FSFileNode } from '@itookit/vfs-core';
+ *   import type { IFileSystem, FSNode, FSFileNode } from '@itookit/vfs-core';
  *   import { FSError, FSNotFoundError } from '@itookit/vfs-core';
  */
 
 // ── 常量 ──
+export type { IFileSystem, IFileSystemDriver, FileSystemContext, FileSystemContextOwner } from './interfaces/services/file-system';
 export {
-    CONFIG_MODULE,
     ETC_DIR,
     SYSTEM_DIRS,
     ASSET_DIR_PREFIX,
@@ -18,8 +18,6 @@ export {
     DEFAULT_MAX_SYMLINK_DEPTH,
     DEFAULT_FILENAME_PATTERN,
     DEFAULT_SEARCH_LIMIT,
-    FS_MODULE_CHAT,
-    FS_MODULE_AGENTS,
     DEVICE_HANDLER_METADATA_KEY,
 } from './interfaces/constants';
 
@@ -42,7 +40,7 @@ export type {
     FSSearchQuery,
     FSSearchResult,
     FSCapabilities,
-    FSModuleStats,
+    FileSystemStats,
 } from './interfaces/core/types';
 
 // re-export SeqFileEntry from canonical location
@@ -57,7 +55,6 @@ export {
     FSReadOnlyError,
     FSReservedNameError,
     FSCapabilityError,
-    FSModuleNotFoundError,
     FSConflictError,
     FSInvalidPathError,
     FSSymlinkLoopError,
@@ -96,7 +93,6 @@ export type {
     FSNodeCopiedPayload,
     FSNodeRenamedPayload,
     FSMountPayload,
-    FSModuleLifecyclePayload,
     FSErrorPayload,
     FSEventPayloadMap,
     FSEventEmitter,
@@ -169,21 +165,10 @@ export type { IFSDriverTransaction, IFSDriver } from './interfaces/services/fs-d
 export type { IFSMetaDriver } from './interfaces/services/fs-meta-driver';
 
 // ── 模块文件系统 ──
-export type { IModuleFS } from './interfaces/services/module-fs';
 
 // ── VFS 管理器 ──
 export type {
-    ModuleInfo,
-    ModuleMountOptions,
-    VFSManagerEventType,
-    VFSManagerEvent,
-    VFSManagerEventPayloadMap,
-    GlobalTagInfo,
-    ModuleExportData,
-    VFSSearchQuery,
-    VFSSystemStats,
     IMountService,
-    IMaintenanceService,
     IVFSManager,
 } from './interfaces/services/vfs-manager';
 

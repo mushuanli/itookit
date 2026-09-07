@@ -4,6 +4,10 @@
 export {
     IEditor,
     type EditorOptions,
+    type EditorTarget,
+    normalizeEditorOptions,
+    editorFilePath,
+    editorResourceId,
     type EditorHostContext,
     type EditorEvent,
     type EditorEventMap,

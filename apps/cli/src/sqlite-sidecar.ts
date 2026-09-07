@@ -1,5 +1,5 @@
 import type { ISidecarDb, MetaExtRow } from '@itookit/vfsdriver-localfs';
-import { DDL } from '@itookit/vfsdriver-localfs';
+import { DDL, SCHEMA_VERSION } from '@itookit/vfsdriver-localfs';
 
 interface StatementSync {
     get(...values: unknown[]): unknown;
@@ -23,6 +23,11 @@ export class NodeSqliteSidecarDb implements ISidecarDb {
         const moduleName = 'node:sqlite';
         const sqlite = await import(moduleName) as unknown as { DatabaseSync: DatabaseSyncConstructor };
         const db = new sqlite.DatabaseSync(filePath);
+        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string }>;
+        if (tables.length) {
+            const versions = tables.some(table => table.name === '_schema_version') ? db.prepare('SELECT version FROM _schema_version').all() as Array<{ version: number }> : [];
+            if (versions.length !== 1 || versions[0].version !== SCHEMA_VERSION) { db.close(); throw new Error('Filesystem database version incompatible'); }
+        }
         db.exec(DDL);
         return new NodeSqliteSidecarDb(db);
     }

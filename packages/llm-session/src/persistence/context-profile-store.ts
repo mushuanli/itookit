@@ -15,19 +15,16 @@ import type {
     ContextProfileId,
     ContextRule,
 } from '@itookit/common';
-import type { IChatEngine } from './types';
+import type { ISessionRepository } from './types';
 import { ulid } from './ulid';
 
 export class ContextProfileStore {
     private static readonly writeTails = new Map<string, Promise<void>>();
     constructor(
-        private readonly engine: IChatEngine,
-        private nodeId: string,
+        private readonly engine: ISessionRepository,
+        private readonly sessionId: string,
     ) {}
 
-    updateNodeId(newNodeId: string): void {
-        this.nodeId = newNodeId;
-    }
 
     /** Create an initial empty profile for a new branch. */
     async createProfile(): Promise<BranchContextProfile> {
@@ -44,8 +41,8 @@ export class ContextProfileStore {
     /** Read a specific profile revision. */
     async getProfile(id: ContextProfileId, revision: number): Promise<BranchContextProfile | null> {
         try {
-            const content = await this.engine.readAsset(
-                this.nodeId,
+            const content = await this.engine.readDocument(
+                this.sessionId,
                 this.profileName(id, revision),
             );
             const text = typeof content === 'string'
@@ -100,8 +97,8 @@ export class ContextProfileStore {
     }
 
     private async writeProfile(profile: BranchContextProfile): Promise<void> {
-        await this.engine.createAsset(
-            this.nodeId,
+        await this.engine.writeDocument(
+            this.sessionId,
             this.profileName(profile.id, profile.revision),
             JSON.stringify(profile, null, 2),
         );
@@ -112,7 +109,7 @@ export class ContextProfileStore {
     }
 
     private async withWrite<T>(operation: () => Promise<T>): Promise<T> {
-        const key = this.nodeId;
+        const key = this.sessionId;
         const previous = ContextProfileStore.writeTails.get(key) ?? Promise.resolve();
         let release!: () => void;
         const current = new Promise<void>(resolve => { release = resolve; });

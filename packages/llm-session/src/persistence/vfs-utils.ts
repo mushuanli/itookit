@@ -1,5 +1,5 @@
 // @file: llm-conversation/src/persistence/vfs-utils.ts
-// Shared VFS traversal utilities used by ChatEngine.
+// Shared VFS traversal utilities used by SessionRepository.
 
 import type { FSNode } from '@itookit/vfs-core';
 

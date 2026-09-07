@@ -1,21 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Kernel, type SessionHandle } from '@itookit/durable-kernel';
-import { createVFS, MemoryBackend, type IModuleFS, type IVFSManager } from '@itookit/vfs-core';
+import { createVFS, MemoryBackend, type IFileSystem, type IVFSManager } from '@itookit/vfs-core';
 import { DurableConversationProjection } from '../src/persistence/durable-conversation-projection';
-import type { ConversationManifest, IChatEngine } from '../src/persistence/types';
+import type { ConversationManifest, ISessionRepository } from '../src/persistence/types';
 
 describe('DurableConversationProjection', () => {
     let manager: IVFSManager;
-    let fs: IModuleFS;
+    let kernel: Kernel;
+    let fs: IFileSystem;
     let session: SessionHandle;
     let manifest: ConversationManifest;
 
     beforeEach(async () => {
-        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(), modules: [{ name: 'test' }] }));
-        await manager.mount('test');
-        fs = manager.getEngine('test');
-        await fs.init();
-        const kernel = new Kernel({ catalog: { fs } });
+        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
+        fs = await manager.openFileSystem('/module/test');
+        kernel = new Kernel({ catalog: { fs } });
         kernel.registerStorageResolver({
             kind: 'test',
             async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; },
@@ -25,10 +24,10 @@ describe('DurableConversationProjection', () => {
         manifest = createManifest();
     });
 
-    afterEach(async () => { await manager.dispose(); });
+    afterEach(async () => { await kernel.dispose(); await manager.dispose(); });
 
     it('persists only changed conversation manifest revisions', async () => {
-        const engine = { getManifest: async () => manifest } as unknown as IChatEngine;
+        const engine = { getManifest: async () => manifest } as unknown as ISessionRepository;
         const projection = new DurableConversationProjection(engine);
         await projection.sync(session, '/chat/session.chat');
         await projection.sync(session, '/chat/session.chat');

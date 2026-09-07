@@ -2,7 +2,7 @@
 
 import type {
     ConversationUIState,
-    IChatEngine,
+    ISessionRepository,
 } from '@itookit/llm-session';
 import type { UIState } from '../domain/types';
 import { ErrorHandler } from '../utils/errorHandler';
@@ -12,14 +12,14 @@ import { ErrorHandler } from '../utils/errorHandler';
  * 职责：UI 状态的保存和加载
  */
 export class StateService {
-    constructor(private engine: IChatEngine) { }
+    constructor(private engine: ISessionRepository) { }
 
     /**
      * 保存 UI 状态
      */
-    async saveUIState(nodeId: string, state: UIState): Promise<void> {
+    async saveUIState(sessionId: string, state: UIState, branch = 'main'): Promise<void> {
         try {
-            await this.engine.updateUIState(nodeId, toConversationState(state));
+            await this.engine.updateUIState(sessionId, toConversationState(state, branch));
         } catch (e: unknown) {
             if (e instanceof Error && ErrorHandler.classifyError(e).userMessage === 'The requested resource was not found.') {
                 return; // node deleted, ignore
@@ -32,10 +32,10 @@ export class StateService {
     /**
      * 加载 UI 状态
      */
-    async loadUIState(nodeId: string): Promise<UIState | null> {
+    async loadUIState(sessionId: string, branch = 'main'): Promise<UIState | null> {
         try {
-            const state = await this.engine.getUIState(nodeId);
-            return state ? fromConversationState(state) : null;
+            const state = await this.engine.getUIState(sessionId);
+            return state ? fromConversationState(state, branch) : null;
         } catch (e) {
             console.warn('[StateService] Failed to load UI state:', e);
             return null;
@@ -43,20 +43,19 @@ export class StateService {
     }
 }
 
-function toConversationState(state: UIState): ConversationUIState {
+function toConversationState(state: UIState, branch: string): ConversationUIState {
     return {
         collapseStates: state.collapse_states,
         historyVisibility: state.history_visibility,
-        inputText: state.input_text,
-        inputAgentId: state.input_agent_id,
+        ...(state.input_text !== undefined ? { branchDrafts: { [branch]: { inputText: state.input_text, inputAgentId: state.input_agent_id } } } : {}),
     };
 }
 
-function fromConversationState(state: ConversationUIState): UIState {
+function fromConversationState(state: ConversationUIState, branch: string): UIState {
     return {
         collapse_states: state.collapseStates ?? {},
         history_visibility: state.historyVisibility,
-        input_text: state.inputText,
-        input_agent_id: state.inputAgentId,
+        input_text: state.branchDrafts?.[branch]?.inputText,
+        input_agent_id: state.branchDrafts?.[branch]?.inputAgentId,
     };
 }

@@ -1,3 +1,4 @@
+import { createFileSystemView } from '../src';
 /**
  * Search: name/text/type/tag/metadata filters, pagination.
  */
@@ -98,13 +99,17 @@ describe('Search (IndexedDB backend)', () => {
         expect(paged.nodes.length).toBe(Math.max(0, all.nodes.length - 1));
     });
 
-    it('cross-module search via VFSManager', async () => {
-        await vfs.manager.mount('other');
-        const otherFS = vfs.manager.getEngine('other');
-        await otherFS.init();
+    it('search combines explicitly selected file views', async () => {
+        const otherFS = await vfs.manager.openFileSystem('/data/other');
         await otherFS.driver.createFile({ name: 'cross.txt', parentPath: null, content: 'cross-module' });
-        await otherFS.tags!.addTag('/cross.txt', 'crosstest');
-        const result = await vfs.manager.search({ tags: { any: ['crosstest'] } });
-        expect(result.nodes.length).toBeGreaterThanOrEqual(1);
+        await otherFS.meta.tags.addTag('/cross.txt', 'crosstest');
+        const combined = createFileSystemView({ viewId: 'search', mounts: [
+            { mountId: 'test', at: '/test', fs: vfs.fs, access: 'ro' },
+            { mountId: 'other', at: '/other', fs: otherFS, access: 'ro' },
+        ] });
+        try {
+            const result = await combined.driver.search({ tags: { any: ['crosstest'] } });
+            expect(result.nodes.map(node => node.path)).toContain('/other/cross.txt');
+        } finally { await combined.dispose(); }
     });
 });

@@ -4,7 +4,7 @@
  */
 import type { CommandBus } from '../CommandBus';
 import type { VFSService } from '../../services/VFSService';
-import type { IModuleFS } from '@itookit/vfs-core';
+import type { IFileSystem } from '@itookit/vfs-core';
 import { serialize } from '@itookit/vfs-core';
 
 export class ExportCommandHandler {
@@ -13,7 +13,7 @@ export class ExportCommandHandler {
     constructor(
         private readonly commandBus: CommandBus,
         private readonly service: VFSService,
-        private readonly engine: IModuleFS,
+        private readonly engine: IFileSystem,
     ) {
         this.register();
     }

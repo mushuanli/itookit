@@ -259,6 +259,7 @@ function mockServer(respond: (description: string, request?: MockRequest) => str
         let body = '';
         request.on('data', chunk => { body += chunk; });
         request.on('end', () => {
+            if (!body.trim()) { response.writeHead(400); response.end('Request body required'); return; }
             const parsed = JSON.parse(body) as MockRequest;
             requests.push(parsed);
             respondSse(response, respond(firstUser(parsed), parsed));
