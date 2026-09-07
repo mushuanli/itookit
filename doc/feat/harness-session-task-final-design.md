@@ -2,12 +2,31 @@
 
 > 版本：3.0
 > 日期：2026-08-09  
-> 状态：最终设计，已按当前实现校准  
+> 状态：历史 v1 设计及实施记录；完备 harness 协议尚未实现和验收
 > 范围：定义通用、持久、可恢复、可扩展的 Kernel Session/Task 内核，覆盖 LLM loop、动态 DAG、Bash、Skill、MCP、跨进程与跨 Session 协作。
+
+> **2026-09-05 设计修订**：面向“随时中断/继续、Task/进程通信、共享状态等待和跨 Session 数据协作”的目标规范见 [Durable Harness Session / Task 协议](../design/durable-harness-protocol.md)。该文明确控制屏障、mailbox 消费、版本等待和持续恢复；与本文生命周期、重试或通信描述冲突时，以新协议为目标设计。下表的历史完成标记不代表新协议已落地，也不替代 [当前审查](durable-kernel-review.md) 中的正确性验收。
 
 > **包名对照（2026-08-15 拆分后）**：本文写作时使用的 `llm-runtime` → 现为 `@itookit/llm-tasks`；`llm-conversation` → 现为 `@itookit/llm-session`（会话）+ `@itookit/llm-flow`（DAG 编排）。T19 等处提到的 `llm-kernel` 已删除，调度统一由 `@itookit/kernel` 承担。
 
 ## 0. 实施任务与完成状态
+
+### 2026-09-05 完备性校准
+
+本轮实现及验收更新见 [Durable Harness 实施记录](durable-harness-implementation.md)。下表记录设计审查时的缺口，部分已修复；判断当前能力时应结合实施记录，不能把全部新协议视为已完成。
+
+| 范围 | 当前判定 | 目标协议验收条件 |
+|---|---|---|
+| T07/T09 Task、依赖、Wait | 部分实现，待修正和扩展 | mailbox 与 claim 不冲突、内部 step 推进、统一终态传播、共享版本与 timer 等待 |
+| T08 Effect | 部分实现，待修正和扩展 | 逻辑身份去重、未知结果默认阻塞、显式重放能力、持续恢复与 cleanup |
+| T11 生命周期 | 协议需升级 | pause/interrupt/cancel/recover 分离；Session 关闭和子任务传播可恢复 |
+| T14 跨 Session/共享/Budget | 基础原语已有，协议未闭合 | 持久消费和回复、owner-managed 共享资源、版本订阅、预算预留/结算 |
+| T16 Retry/Lease | 需修正语义 | 每个逻辑 step 的重试预算与正常执行量子分离；周期 sweeper；所有写入 fencing |
+| T17 Interaction | 基础请求响应已有，需补齐 | schema、期限、响应冲突、取消和终态联动 |
+| 新协议整体 | 设计基线，未实现/未验收 | 新协议 §15 故障与行为矩阵通过 |
+| Cache 控制 | 新增目标协议，未实现/未验收 | [Cache 协议](../design/durable-harness-cache.md)：Task 管理、显式选择、scope/retention/usage 分离、恢复读固定与淘汰隔离 |
+
+以下 T01–T23 表为历史实施记录，受上述校准约束。当前包名为 `@itookit/durable-kernel`；2026-09-05 本地原有测试为 36 项通过，不代表新增协议或故障反例已通过。
 
 状态定义：`✅ 已完成` 表示代码已落地且相关测试/类型检查通过；`🟡 待验证` 表示代码已落地但尚未完成全部平台验证；`🚧 进行中` 表示仍在迁移或补齐；`⬜ 未开始` 表示属于后续阶段。
 
@@ -80,7 +99,7 @@ created -> blocked -> ready -> running -> waiting -> ready
 
 ### 0.4 当前状态是否正确、完整持久化
 
-结论：**v1 内核的权威运行状态、共享状态和恢复历史均已持久化，不依赖 Promise、EventEmitter 或进程内对象；跨 Session 可变共享和外部 workspace 内容落盘策略仍属于明确边界。**
+范围说明：下表列举 v1 已有的持久化落点，不证明并发输入、取消、外部副作用和故障后的最终推进均正确。完备性结论以本节顶部校准和新协议验收矩阵为准；跨 Session 可变共享采用新协议定义的显式所有者资源，不是隐式全局 KV。
 
 | 状态范围 | 权威存储 | 历史/恢复信息 | 一致性语义 |
 |---|---|---|---|
@@ -932,6 +951,8 @@ stateDiagram-v2
 
 ### 14.1 Session 生命周期
 
+以下是历史 v1 状态模型。目标协议增加 suspending 与控制确认、明确 drain/cancel 关闭策略；见 [新协议 §12](../design/durable-harness-protocol.md#12-监管session-与-taskgroup)。
+
 ```mermaid
 stateDiagram-v2
     [*] --> open
@@ -947,6 +968,8 @@ Session suspended 时停止新 Task claim，但 durable messages、signals 和 t
 
 ### 14.2 Retry 与 Lease
 
+以下是历史 v1 计数约定，不能作为长 loop 的目标语义。目标设计按逻辑 step 计算 `maxStepAttempts`，正常成功步骤不消耗后续步骤的重试预算；见 [新协议 §6](../design/durable-harness-protocol.md#6-reducer-提交内部推进与重试)。
+
 - `maxAttempts` 表示包含首次执行在内的总 Attempt 上限，必须是正整数。
 - `backoffMs` 是非负固定间隔；重试时持久化 `readyAt`，因此重启不会绕过等待。
 - 显式 `retryable: true` failure 与 reducer exception 使用同一机制；失败 Attempt 记为 `failed`。
@@ -957,6 +980,8 @@ Session suspended 时停止新 Task claim，但 durable messages、signals 和 t
 ---
 
 ## 15. Wait 与 Signal
+
+目标设计将控制 API 与普通 signal 分离，并补齐 mailbox、版本等待、timer/deadline 与持久证据；见 [新协议 §8–10](../design/durable-harness-protocol.md#8-链路二持久通信与消费)。本节 signal 示例不是当前源码的精确导出，也不表示发送 pause/resume 名称即可完成控制。
 
 当前 v1 已实现的类型为：
 
@@ -1063,6 +1088,8 @@ ContextAssembler 从 commit、summary、retrieval memory 和 Task input 中按�
 
 ## 17. Resource 与 Capability
 
+1.1 目标修订以 [资源表、分配与 Linux 对齐](../design/durable-harness-resources.md) 为准：Resource/Grant/Binding/Use/Allocation/Usage 分离，Session 内与跨 Session 表具有明确 authority。下列 ResourceHandle 示例描述已有基础；不能将其视为已实现容量分配、export/import 或完整预算结算。
+
 ### 17.1 不把所有资源变成 Stream
 
 `IIOStream` 只表达顺序 read/write/close：stdin、stdout、stderr、pipe、token/event stream。
@@ -1101,9 +1128,10 @@ interface ResourceHandle {
 }
 ```
 
-Resource 属于 Session 命名空间；Task“拥有资源”的准确含义是 Task 持有该 Resource
-的 Handle。`TaskHandle.createResource()` 自动把初始 Handle 的 `holderTaskId` 绑定为
-当前 Task，避免调用方手工填写其他 Task 身份。
+当前 Resource 属于 Session 命名空间，Task 持有其 Handle。`TaskHandle.createResource()`
+自动把初始 Handle 的 `holderTaskId` 绑定为当前 Task。1.1 目标另外显式区分 ownerRef、
+creatorRef 与 grantee：持有 Handle 不等于生命周期所有者，也不等于容量已分配；
+Session-owned 资源不能依赖创建 Task 一直存在。
 
 不存在默认资源继承。Task 不得通过 TaskId 读取另一 Task 的资源；共享必须调用
 `SessionHandle.grantResource(parentHandleId, targetTaskId, rights)` 派生降权 Handle，
@@ -1112,16 +1140,17 @@ Resource 属于 Session 命名空间；Task“拥有资源”的准确含义是 
 
 ### 17.3 标准 I/O 槽位
 
-建议 Task HandleTable 预留：
+1.1 目标采用类型化 binding 名称：
 
 ```text
-0 = input mailbox
-1 = semantic event stream
-2 = diagnostic stream
-3+ = explicitly granted handles
+inbox       = input mailbox
+events      = semantic event stream
+diagnostics = diagnostic stream
+<name>      = explicitly granted resource binding
 ```
 
-槽位可适配到 `IIOStream`，但内核仍保存结构化 Event/Message。
+CLI adapter 可按资源类型映射到 fd 0/1/2，Kernel 不强制将结构化 inbox/EventJournal
+当成字节流。binding 指向 grant，必要时引用有状态 use；同资源不自动共享游标。
 
 ### 17.4 Budget Tree
 
@@ -1135,7 +1164,9 @@ Resource 属于 Session 命名空间；Task“拥有资源”的准确含义是 
 - workspace/artifact bytes；
 - 网络请求数。
 
-预算支持 weight、hard limit、reservation 和 usage ledger。取消释放 reservation，但不回滚已消费资源。
+目标预算支持 weight、hard limit、reservation 和 usage ledger，但 weight 不代表容量保证。
+取消在确认未消费/已停止后释放可回收 reservation，不回滚已消费资源；结果未知则保留
+预留或未结算事实。累计成本、存量/并发占用、速率分别建账，完整规则见资源协议。
 
 ### 17.5 Workspace Adapter
 
@@ -1232,6 +1263,8 @@ budget.reserved / consumed / released / exceeded
 ---
 
 ## 19. Session 内与跨 Session 通信
+
+本节基础 outbox/inbox 设计由 [新协议 §8、§11](../design/durable-harness-protocol.md#11-session-间共享数据) 补齐：区分 delivered 与 consumed、定义消费/回复事务、单流顺序、背压及 owner-managed SharedResource。不承诺跨 Session 原子事务。
 
 ### 19.1 通信矩阵
 
@@ -1386,6 +1419,8 @@ Kernel 不 import `better-sqlite3`、Tauri SQL 或 IndexedDB API。平台后端�
 ---
 
 ## 21. 事务型 SeqFile 配置与职责
+
+本节保留原始布局设计；新增控制、消息和 cache 记录及当前权威/索引边界以 [持久存储与文件组织](../design/durable-harness-storage.md) 为准，实际能力与未完成项见 [实施记录](durable-harness-implementation.md)。
 
 ```ts
 interface ITransactionalSeqFileOperations extends ISeqFileOperations {

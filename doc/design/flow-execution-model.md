@@ -553,6 +553,8 @@ type SpawnDependencyTarget =
 
 #### 7.8.4 分离等待、结果与后台生命周期
 
+> 2026-09-05：下列 TaskGroup 策略的内核生命周期、持久传播和暂停确认以 [Durable Harness 协议 §12](durable-harness-protocol.md#12-监管session-与-taskgroup) 为目标规范。该协议仍待实现；Flow 应编译到其 Task/Wait/control 原语，不维护另一套执行事实。
+
 当前 `join.mode` 同时承载“是否收集结果”和“是否等待”的名称，但实际 `all/none` 都等待已启动 child。后续规范化为三个互不耦合的策略：
 
 ```ts
