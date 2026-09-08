@@ -1,5 +1,2 @@
-/** Single-user application layout, relative to the MindOS filesystem. */
-export function workspaceRoot(name: string): string {
-    if (!/^[a-zA-Z0-9_-]+$/.test(name)) throw new Error('Invalid workspace identity');
-    return `/home/admin/${name}`;
-}
+/** Compatibility re-export. Implementation lives in @itookit/app-core. */
+export { workspaceRoot } from '@itookit/app-core';

@@ -1,38 +1,19 @@
-import { DirectoryMountService } from './files/directory-mounts';
+import { createApplicationRuntime, PrivilegedCommandService, workspaceRoot, type WorkspaceController } from '@itookit/app-core';
+import { createSessionSkillControls } from '@itookit/kernel-adapters';
 import { SessionWorkbench } from './core/SessionWorkbench';
-import type { WorkspaceController } from './core/WorkspaceController';
-import { workspaceRoot } from './files/workspace-paths';
-import { SessionFilesService } from './files/session-files';
-import { createSessionAttachmentMounts } from './files/session-attachments';
 import { FileTypeDefinition, type VFSNodeUI } from '@itookit/vfs-ui';
-import {NavigationRequest, NAVIGATION_EVENTS, formatDefaultFileTitle} from '@itookit/common';
+import {NavigationRequest, NAVIGATION_EVENTS, formatDefaultFileTitle, traceBoot} from '@itookit/common';
 import { MenuItem } from '@itookit/ui-common';
-import type { SkillDefinition } from '@itookit/common';
 import { EditorFactory } from '@itookit/ui-common';
-import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
-import {
-    initializeConversationSystem,
-    SessionRepository,
-    FlowEngine,
-    FlowDefinitionStore,
-    seedDefaultFlows,
-    SessionDirectoryStorageResolver,
-    createBuiltinDagPluginRegistry,
-    VFSAgentService,
-} from '@itookit/llm-session';
 import type { SessionManager } from '@itookit/llm-session';
 import { Workbench } from './core/Workbench';
-import { LLMDeviceDriver } from '@itookit/device-llm';
-import { Kernel } from '@itookit/durable-kernel';
-import { createKernelAdaptersRuntime } from '@itookit/kernel-adapters';
 import { SkillsEngine } from '@itookit/app-settings';
 
-import { AppOptions, AppHandle, WorkspaceConfig, type AppKernelRuntime } from './types';
+import { AppOptions, AppHandle, WorkspaceConfig } from './types';
 import { defaultEditorFactory } from '@itookit/mdxeditor';
 import { FILE_REGISTRY, EditorTypeKey } from './config/file-registry';
 import { themeService, ThemeMode } from './ThemeService';
-import { PrivilegedCommandService } from './kernel/privileged-command-service';
 
 /** Resolves when an actual editor mounts inside the container (not just placeholder). */
 function waitForEditorMount(container: HTMLElement): Promise<void> {
@@ -100,29 +81,8 @@ function setupHitlVfsBridge(sessionManager: SessionManager, manager: WorkspaceCo
     });
 }
 
-// ── Skill sync ─────────────────────────────────────────────────────────────────
-// LLMSkill is a type alias for SkillDefinition, so persisted skills can be
-// registered directly with the kernel.
-
-async function syncSkillsToKernel(
-    llmDriver: LLMDeviceDriver,
-    kernel: AppKernelRuntime,
-): Promise<void> {
-    const skills = await llmDriver.getSkills() as SkillDefinition[];
-    const kernelIds = new Set(kernel.skillCatalog.getSkillNames());
-
-    for (const s of skills) {
-        await kernel.skillCatalog.saveSkill(s);
-        kernelIds.delete(s.id);
-    }
-
-    for (const id of kernelIds) {
-        await kernel.skillCatalog.deleteSkill(id);
-    }
-}
-
 export async function initApp(options: AppOptions): Promise<AppHandle> {
-    const { backend, additionalMounts, defaultSlug, routeAliases = {}, onProgress, llmLogger } = options;
+    const { defaultSlug, routeAliases = {}, onProgress } = options;
     const t0 = performance.now();
     let t = t0;
     const cleanupFns: Array<() => void | Promise<void>> = [];
@@ -157,152 +117,23 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     const resolvedDefault = defaultSlug ?? workspaces[0]?.slug ?? '';
 
-    // ── 1. VFS ─────────────────────────────────────────────────────────────────
-
-    logStep('初始化文件系统…');
-    const { manager: vfs } = await createVFS({
-        rootBackend: backend,
-        additionalMounts: [...(additionalMounts ?? []), { path: '/run', backend: new MemoryBackend() }],
-    });
-
-    sourceCleanupFns.push(() => vfs.dispose());
-
-    // Helper to dump VFS I/O counters (for identifying redundant reads/writes)
-    const logIO = (label: string) => {
-        try {
-            const s = (vfs as any)._engine?.ioStats;
-            if (s) console.log(`[Boot]   ↳ IO after ${label}: stat=${s.stat} list=${s.list} read=${s.read} write=${s.write} mkdir=${s.mkdir} delete=${s.delete} rename=${s.rename}`);
-            (vfs as any)._engine?.resetIOStats();
-        } catch { /* ignore */ }
-    };
-    logIO('createVFS');
-
-    // Init theme from VFS before anything renders
+    if (!options.runtime && !options.backend) throw new Error('AppOptions.backend or AppOptions.runtime is required');
+    const ownsRuntime = !options.runtime;
+    const runtime = options.runtime ?? await createApplicationRuntime({ ...options, backend: options.backend! });
+    if (ownsRuntime) cleanupFns.push(() => runtime.dispose());
+    const { vfs, llmDriver, agentService, sessionRepository, flowEngine, sessionFiles, directoryMounts,
+        kernel, sessionManager, commandBus } = runtime;
+    const kernelCore = kernel.kernel;
     await themeService.init(await vfs.openFileSystem('/etc'));
     cleanupFns.push(() => themeService.destroy());
-
-    // ── 2. LLM device driver ───────────────────────────────────────────────────
-
-    logStep('加载 LLM 驱动…');
-    const llmDriver = new LLMDeviceDriver(vfs, { llmLogger, codexTransport: options.codexTransport });
-    if (options.codexTransport?.close) cleanupFns.push(() => options.codexTransport!.close!());
-    let ts = performance.now();
-    await llmDriver.init();
-    console.log(`[Boot]   ↳ llmDriver.init: +${(performance.now() - ts).toFixed(0)}ms`);
-    vfs.devices.register(llmDriver);
-    ts = performance.now();
-    await llmDriver.createDeviceNodes();
-    console.log(`[Boot]   ↳ createDeviceNodes: +${(performance.now() - ts).toFixed(0)}ms`);
-    vfs.devices.freeze();
-    logIO('LLM driver');
-
-
-    for (const path of ['/home/admin/chats', '/home/admin/notes', '/home/admin/projects', '/home/admin/.config']) await vfs.openFileSystem(path);
-
-    // ── 3. Core services ───────────────────────────────────────────────────────
-
-    logStep('初始化核心服务…');
+    logStep('初始化界面服务…');
     const settingsSources = await Promise.all(workspaces.filter(workspace => !['settings', 'skills'].includes(workspace.type ?? '')).map(async workspace => ({
         name: workspace.workspaceName, description: workspace.title,
         fs: workspace.files?.fs ?? await vfs.openFileSystem(workspaceRoot(workspace.workspaceName)),
         syncEnabled: workspace.syncEnabled && !workspace.isSystem,
     })));
-    const settingsModule = await createSettingsModule(vfs, settingsSources);
-    const agentService   = new VFSAgentService(await vfs.openFileSystem(workspaceRoot('agents')), llmDriver);
-    const sessionRepository     = new SessionRepository(await vfs.openFileSystem('/'));
-    const flowEngine     = new FlowEngine(await vfs.openFileSystem(workspaceRoot('flows')));
-    await flowEngine.init();
-
-    // Durable Kernel with application-owned capability injection.
-    ts = performance.now();
-    const systemFS = await vfs.openFileSystem('/');
-    const systemMounts = createSessionAttachmentMounts(sessionRepository);
-    cleanupFns.push(() => systemMounts.dispose());
-    const sessionFiles = new SessionFilesService(await vfs.openFileSystem('/'), id => systemMounts.forSession(id));
-    await sessionFiles.initialize();
-    sessionFiles.registerSource('admin-home', await vfs.openFileSystem('/home/admin'));
-    await options.configureSessionFiles?.(sessionFiles);
-    if (options.directorySourceProvider) cleanupFns.push(() => options.directorySourceProvider!.dispose());
-    cleanupFns.push(() => sessionFiles.dispose());
-    let mountChanged: (id: string) => Promise<void> = async () => {};
-    let mountGuard: (id: string) => Promise<void> = async () => {};
-    const directoryMounts = new DirectoryMountService(systemFS, sessionFiles, options.directorySourceProvider,
-        id => mountGuard(id), id => mountChanged(id));
-    cleanupFns.push(() => directoryMounts.dispose());
-    await directoryMounts.init();
-    const kernelAdapters = await createKernelAdaptersRuntime({
-        llmDriver,
-        runMode: 'kernel',
-        fileContextForSession: id => sessionFiles.acquire(id),
-        configureSession: options.kernelPlatform?.configureSession,
-        skillSource: options.kernelPlatform?.skillSource,
-        skillToolHandlerFactory: options.kernelPlatform?.skillToolHandlerFactory,
-    });
-    cleanupFns.push(() => kernelAdapters.dispose());
-    const kernelCore = new Kernel({
-        catalog: { fs: systemFS, rootPath: '/var/lib/kernel' },
-        maxConcurrent: 20,
-    });
-    cleanupFns.push(async () => { kernelCore.dispose(); await kernelCore.waitIdle(); });
-    kernelCore.registerStorageResolver(new SessionDirectoryStorageResolver(systemFS));
-    await kernelCore.use(kernelAdapters.plugin);
-    await kernelCore.initialize();
-    mountChanged = id => kernelAdapters.disposeSession(id);
-    mountGuard = async id => {
-        let exists = false;
-        for await (const session of kernelCore.listSessions()) if (session.id === id) { exists = true; break; }
-        if (exists && (await kernelCore.listSessionTasks(id)).some(task => !['succeeded', 'failed', 'cancelled'].includes(task.status))) {
-            throw new Error('会话仍有未结束的 Task，请先结束或取消任务再修改挂载');
-        }
-    };
-    const kernel: AppKernelRuntime = Object.assign(kernelAdapters, {
-        kernel: kernelCore,
-        dagPlugins: createBuiltinDagPluginRegistry(),
-    });
-    await options.kernelPlatform?.configure?.(kernel);
-    // The application owns the only execution instance; register capabilities before takeover.
-    await kernelCore.recover({ takeover: true });
-    console.log(`[Boot]   ↳ createKernel: +${(performance.now() - ts).toFixed(0)}ms`);
-
-    // Inject VFS context so file tools work with the virtual filesystem in browser.
-    // When node:fs is unavailable, tools fall back to ctx.vfs (ToolVFSContext).
-    // File contexts are installed independently in each Session scope before recovery.
-
-    // Bridge: sync VFS LLMSkills → kernel SkillDefinition so /skills, /skill <id>,
-    // and the skill picker panel all show the user's configured skills.
-    ts = performance.now();
-    await syncSkillsToKernel(llmDriver, kernel);
-    console.log(`[Boot]   ↳ syncSkillsToKernel: +${(performance.now() - ts).toFixed(0)}ms`);
-    // Keep skills in sync when the user adds / edits / deletes skills in Settings.
-    cleanupFns.push(
-        llmDriver.onChange(() => { syncSkillsToKernel(llmDriver, kernel).catch(() => {}); })
-    );
-
-    logIO('core services');
-
-    logStep('初始化 LLM 引擎…');
-    const { sessionManager, commandBus } = await initializeConversationSystem({
-        agentService,
-        sessionEngine: sessionRepository,
-        promptHistoryFiles: await vfs.openFileSystem('/home/admin/.config/mindos/prompt-history'),
-        kernel:             kernel.kernel,
-        flowStore:          flowEngine,
-        dagPlugins:          kernel.dagPlugins,
-        resolveTools: async (sessionId, allowedIds) => {
-            const tools = (await kernel.sessions.get(sessionId)).toolService;
-            const allowed = new Set(allowedIds);
-            return {
-                definitions: tools.getToolDefinitions().filter(definition => {
-                    const name = definition.function?.name ?? definition.name;
-                    return Boolean(name && allowed.has(name));
-                }),
-                externalIds: allowedIds.filter(id => tools.getToolMeta(id)?.sideEffect === 'external'),
-            };
-        },
-    });
-
-    // Seed the default essay-review workflow so users have a runnable example.
-    await seedDefaultFlows(new FlowDefinitionStore(flowEngine, kernel.dagPlugins));
+    const settingsModule = await traceBoot('createSettingsModule', () => createSettingsModule(vfs, settingsSources));
+    cleanupFns.push(() => settingsModule.service.dispose());
 
     const settingsFactory = createSettingsFactory(
         settingsModule.service,
@@ -315,6 +146,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const connections = await agentService.getConnections();
     const visionConnExists = connections.some(c => c.id === 'conn-volcengine-vision');
     const privilegedCommands = new PrivilegedCommandService(kernel.kernel, agentService);
+    const sessionSkills = createSessionSkillControls(kernel.kernel, kernel.sessions);
     const llmFactory = options.ui.createChatEditor(
         agentService,
         visionConnExists
@@ -323,9 +155,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 llmService: kernel.llmService,
                 commandBus,
                 kernel: kernel.kernel,
-                privilegedCommands,
+                privilegedCommands, sessionSkills,
             }
-            : { sessionRepository, commandBus, kernel: kernel.kernel, privilegedCommands },
+            : { sessionRepository, commandBus, kernel: kernel.kernel, privilegedCommands, sessionSkills },
     );
     const agentFactory = options.ui.createAgentEditor(agentService);
 
@@ -455,7 +287,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         if (!files) throw new Error(`Workspace files not configured: ${elementId}`);
 
         if (strategyType === 'chat') {
-            const sessionWorkspace = new SessionWorkbench(sidebarEl, editorEl, sessionRepository, sessionFiles, factory, id => updateHistory(elementId, id, 'replace'), { toggleSidebar: collapsed => { sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')); }, navigate: handleNavigationRequest }, kernelCore, defaultEditorFactory, directoryMounts);
+            const sessionWorkspace = new SessionWorkbench(sidebarEl, editorEl, sessionRepository, sessionFiles, factory, (id, mode = 'replace') => updateHistory(elementId, id, mode), { toggleSidebar: collapsed => { sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')); }, navigate: handleNavigationRequest }, kernelCore, defaultEditorFactory, directoryMounts);
             cleanupFns.push(() => sessionWorkspace.destroy());
             await sessionWorkspace.start(); managerCache.set(elementId, sessionWorkspace);
             cleanupFns.push(setupHitlVfsBridge(sessionManager, sessionWorkspace));
@@ -729,6 +561,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     return {
         vfs,
         sessionFiles,
+        runtime,
 
         async navigate(slug: string, resourceId?: string): Promise<void> {
             const wsId = resolveTarget(slug);

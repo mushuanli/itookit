@@ -6,13 +6,16 @@ const element = () => ({ replaceChildren: vi.fn(), append: vi.fn(), setAttribute
 function setup() {
     vi.stubGlobal('document', { createElement: () => element() });
     const release = vi.fn(async () => {}), dispose = vi.fn(async () => {});
-    const repository = { getManifest: vi.fn(async (id: string) => ({ id, title: 'Session' })), list: vi.fn(async () => []),
-        openAttachments: vi.fn(async () => ({ dispose })), subscribe: () => () => {} };
+    const manifest = { currentBranch: 'main' };
+    const listeners: Array<() => void> = [];
+    const repository = { getManifest: vi.fn(async (id: string) => ({ id, title: 'Session', ...manifest })), list: vi.fn(async () => []),
+        openAttachments: vi.fn(async () => ({ dispose })), subscribe: (listener: () => void) => { listeners.push(listener); return () => {}; } };
     const files = { subscribe: () => () => {}, inspect: vi.fn(async () => ({ revision: 1 })), acquireFiles: vi.fn(async () => ({ context: { fs: { capabilities: {} }, sessionId: 's' }, release })) };
-    const destroy = vi.fn(async () => {}), factory = vi.fn(async () => ({ destroy }));
+    const destroy = vi.fn(async () => {}), factory = vi.fn(async (...args: any[]) => { manifest.currentBranch = args[1].target.branch ?? 'main'; return { destroy }; });
+    const onSelect = vi.fn();
     const sidebar = element();
-    const workbench = new SessionWorkbench(sidebar as any, element() as any, repository as any, files as any, factory as any, () => {}, undefined, { onChanged: () => () => {} } as any, factory as any);
-    return { sidebar, workbench, repository, files, factory, release, dispose, destroy };
+    const workbench = new SessionWorkbench(sidebar as any, element() as any, repository as any, files as any, factory as any, onSelect, undefined, { onChanged: () => () => {} } as any, factory as any);
+    return { sidebar, workbench, repository, files, factory, release, dispose, destroy, onSelect, manifest, changed: () => listeners.forEach(listener => listener()) };
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('Session workbench lifecycle', () => {
@@ -21,6 +24,28 @@ describe('Session workbench lifecycle', () => {
         expect(createVFSUI).toHaveBeenCalledWith(expect.objectContaining({ activateDirectories: true, readOnly: true, primaryAction: expect.objectContaining({ label: '＋ 新建会话' }) }), expect.anything());
         await f.workbench.destroy();
     });
+    it('records branch changes and restores explicit branch routes without navigation loops', async () => {
+        const f = setup(); await f.workbench.start();
+        await f.workbench.openResource('s');
+        expect(f.workbench.getActiveResourceId()).toBe('s?branch=main');
+        f.onSelect.mockClear();
+        f.manifest.currentBranch = 'review/中文 & notes'; f.changed();
+        const route = 's?branch=' + encodeURIComponent(f.manifest.currentBranch);
+        await vi.waitFor(() => expect(f.onSelect).toHaveBeenCalledWith(route, 'push'));
+        expect(f.factory).toHaveBeenCalledOnce();
+        await f.workbench.openResource('s?branch=main');
+        expect(f.factory.mock.calls.at(-1)?.[1].target.branch).toBe('main');
+        expect(f.workbench.getActiveResourceId()).toBe('s?branch=main');
+        await f.workbench.openResource(route);
+        expect(f.factory.mock.calls.at(-1)?.[1].target.branch).toBe('review/中文 & notes');
+        expect(f.factory).toHaveBeenCalledTimes(3);
+        await f.workbench.openResource('s');
+        await f.workbench.openResource(route);
+        expect(f.factory).toHaveBeenCalledTimes(3);
+        expect(f.onSelect.mock.calls.filter(([, mode]) => mode === 'push')).toHaveLength(1);
+        await f.workbench.destroy();
+    });
+
     it('does not acquire files or create an editor for an unknown Session', async () => {
         const f = setup(); f.repository.getManifest.mockRejectedValueOnce(new Error('Session missing'));
         await expect(f.workbench.openResource('missing')).rejects.toThrow('missing');

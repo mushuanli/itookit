@@ -7,6 +7,7 @@ import { createVFSUI, type VFSUIShell } from '@itookit/vfs-ui';
 import { createFileSystemView, type FileSystemContextOwner, type FileSystemView, type FileSystemSourceOwner } from '@itookit/vfs-core';
 import type { SessionFilesService } from '../files/session-files';
 import { createSessionBrowser, resolveBrowserTarget, taskSummary } from '../files/session-browser';
+import { parseSessionRoute, sessionRoute } from '../files/session-route';
 import type { WorkspaceController } from './WorkspaceController';
 
 /** vfs-ui owns the sidebar; this host owns business views and their file leases. */
@@ -19,6 +20,7 @@ export class SessionWorkbench implements WorkspaceController {
     private browser?: FileSystemSourceOwner;
     private sidebarUI?: VFSUIShell;
     private active: string | null = null;
+    private activeBranch?: string;
     private selectionSync?: string;
     private closed = false;
     private tail: Promise<void> = Promise.resolve();
@@ -29,7 +31,7 @@ export class SessionWorkbench implements WorkspaceController {
     private readonly waiting = new Set<string>();
     constructor(private readonly sidebar: HTMLElement, private readonly container: HTMLElement,
         private readonly repository: ISessionRepository, private readonly files: SessionFilesService,
-        private readonly factory: EditorFactory, private readonly onSelect: (id: string) => void,
+        private readonly factory: EditorFactory, private readonly onSelect: (id: string, mode?: 'push' | 'replace') => void,
         private readonly hostContext: EditorHostContext | undefined, private readonly kernel: Kernel,
         private readonly fileFactory: EditorFactory, private readonly directoryMounts?: DirectoryMountService) {}
     async start(): Promise<void> {
@@ -40,7 +42,8 @@ export class SessionWorkbench implements WorkspaceController {
             primaryAction: { label: '＋ 新建会话', run: async () => { await this.createResource(); } },
         }, this.browser.fs) as VFSUIShell;
         this.unsubscribers.push(this.sidebarUI.on('sessionSelected', ({ item }) => {
-            if (item && item.id !== this.selectionSync) void this.openResource(item.id).catch(error => this.report(error));
+            // Expanding ancestors during selectPath can emit intermediate selections too.
+            if (item && !this.selectionSync) void this.openResource(item.id).catch(error => this.report(error));
         }), this.sidebarUI.on('sidebarStateChanged', ({ isCollapsed }) => this.sidebar.classList.toggle('is-collapsed', isCollapsed)),
         this.repository.subscribe(() => this.refresh()), this.files.subscribe(() => this.refresh()), this.kernel.onChanged(() => this.refresh()));
         await this.sidebarUI.start();
@@ -53,6 +56,7 @@ export class SessionWorkbench implements WorkspaceController {
             this.refreshQueued = false;
             if (this.closed) return;
             await this.sidebarUI?.refresh();
+            await this.syncBranchRoute();
             for (const id of this.waiting) this.sidebarUI?.setNodeWaitingInput('/' + id, true);
             if (this.active?.startsWith('/')) {
                 const target = resolveBrowserTarget(this.active);
@@ -75,12 +79,14 @@ export class SessionWorkbench implements WorkspaceController {
         }
     }
     openResource(resourceId: string, options: { reload?: boolean; branch?: string } = {}): Promise<void> {
-        const path = resourceId.startsWith('/') ? resourceId : '/' + resourceId;
+        const route = parseSessionRoute(resourceId);
+        const path = route.path;
+        const branch = options.branch ?? route.branch;
         const target = resolveBrowserTarget(path);
         const id = target.kind === 'session' ? target.sessionId : path;
         const operation = this.tail.then(async () => {
             if (this.closed) throw new Error('Session workspace closed');
-            if (id === this.active && !options.reload) return;
+            if (id === this.active && !options.reload && (branch === undefined || branch === this.activeBranch)) return;
             const manifest = await this.repository.getManifest(target.sessionId);
             await this.closeEditor();
             if (target.kind === 'session' || target.kind === 'files') {
@@ -97,7 +103,7 @@ export class SessionWorkbench implements WorkspaceController {
                         await this.showDirectory(path);
                     } else if (target.kind === 'session') {
                         assets = createFileSystemView({ viewId: `editor-attachments:${target.sessionId}`, mounts: [{ mountId: 'attachments', at: '/', root: '/attachments', fs: context.context.fs, access: 'rw' }] });
-                        editor = await this.factory(mount, { target: { kind: 'session', sessionId: target.sessionId, branch: options.branch }, files: context.context, assets, title: manifest.title,
+                        editor = await this.factory(mount, { target: { kind: 'session', sessionId: target.sessionId, branch: branch ?? 'main' }, files: context.context, assets, title: manifest.title,
                             hostContext: { ...this.hostContext!, directoryCommands: this.directoryMounts ? {
                                 addDirectory: async (directory, access) => {
                                     if (!directory) { await this.manageMounts(target.sessionId); return '挂载管理已关闭'; }
@@ -137,11 +143,24 @@ export class SessionWorkbench implements WorkspaceController {
             } else if (target.kind === 'tasks') await this.showDirectory(path);
             else await this.showTask(path);
             if (this.closed) throw new Error('Session workspace closed');
-            this.active = id; this.onSelect(id);
+            this.active = id;
+            this.activeBranch = target.kind === 'session' ? branch ?? 'main' : undefined;
+            this.onSelect(this.getActiveResourceId()!);
             this.selectionSync = path;
             try { await this.sidebarUI?.selectPath(path); } finally { this.selectionSync = undefined; }
         });
         this.tail = operation.catch(() => {}); return operation;
+    }
+    private async syncBranchRoute(): Promise<void> {
+        const id = this.active, branch = this.activeBranch;
+        if (!id || branch === undefined || !this.editor) return;
+        const manifest = await this.repository.getManifest(id);
+        if (this.closed || this.active !== id || this.activeBranch !== branch || !this.editor) return;
+        const current = manifest.currentBranch ?? 'main';
+        if (current !== branch) {
+            this.activeBranch = current;
+            this.onSelect(sessionRoute(id, current), 'push');
+        }
     }
     private async reloadAfterMount(sessionId: string): Promise<void> {
         if (this.closed) return;
@@ -167,12 +186,13 @@ export class SessionWorkbench implements WorkspaceController {
     }
     private async showDirectory(path: string): Promise<void> {
         if (!this.browser) throw new Error('Session browser not started');
+        const target = resolveBrowserTarget(path);
+        if (target.kind === 'tasks') return this.showTasks(target.sessionId);
         const generation = ++this.taskRefresh;
         const nodes = await this.browser.fs.driver.getChildren(path);
         if (this.closed || generation !== this.taskRefresh) return;
         const panel = document.createElement('div'); panel.className = 'session-detail';
         const heading = document.createElement('h2'); heading.textContent = path.endsWith('/tasks') ? 'Tasks' : 'Files'; panel.append(heading);
-        const target = resolveBrowserTarget(path);
         if (target.kind === 'files' && target.path === '/' && this.directoryMounts) {
             const button = document.createElement('button'); button.textContent = '挂载目录 / 管理挂载';
             button.onclick = () => { void this.manageMounts(target.sessionId).catch(error => this.report(error)); }; panel.append(button);
@@ -186,23 +206,84 @@ export class SessionWorkbench implements WorkspaceController {
         if (!nodes.length) { const empty = document.createElement('p'); empty.textContent = '暂无内容'; panel.append(empty); }
         if (!this.closed) this.container.replaceChildren(panel);
     }
+    private async showTasks(sessionId: string): Promise<void> {
+        const generation = ++this.taskRefresh;
+        let exists = false;
+        for await (const session of this.kernel.listSessions()) if (session.id === sessionId) { exists = true; break; }
+        let page = exists ? await this.kernel.listSessionTaskPage(sessionId) : { items: [], throughIndex: 0, nextAfterIndex: undefined };
+        if (this.closed || generation !== this.taskRefresh) return;
+        const panel = document.createElement('div'); panel.className = 'session-detail';
+        const heading = document.createElement('h2'); heading.textContent = 'Tasks'; panel.append(heading);
+        const entries = document.createElement('div'); panel.append(entries);
+        const more = document.createElement('button'); more.type = 'button'; more.textContent = '加载更多任务'; panel.append(more);
+        const append = () => {
+            for (const task of page.items) {
+                const button = document.createElement('button'); button.type = 'button'; button.className = 'session-detail__entry';
+                button.textContent = `${task.program.kind} · ${task.status} · ${task.id}`;
+                button.onclick = () => { void this.openResource(`/${sessionId}/tasks/${task.id}`).catch(error => this.report(error)); }; entries.append(button);
+            }
+            more.hidden = page.nextAfterIndex === undefined;
+        };
+        append();
+        if (!page.items.length) { const empty = document.createElement('p'); empty.textContent = '暂无内容'; entries.append(empty); }
+        more.onclick = () => {
+            if (more.disabled || page.nextAfterIndex === undefined) return;
+            more.disabled = true;
+            void this.kernel.listSessionTaskPage(sessionId, { afterIndex: page.nextAfterIndex, throughIndex: page.throughIndex }).then(next => {
+                if (this.closed || generation !== this.taskRefresh) return;
+                page = next; append();
+            }).catch(error => this.report(error)).finally(() => { more.disabled = false; });
+        };
+        this.container.replaceChildren(panel);
+    }
     private async showTask(path: string): Promise<void> {
         const target = resolveBrowserTarget(path); if (target.kind !== 'task') return;
         const generation = ++this.taskRefresh;
         const task = await this.kernel.task(target.sessionId, target.taskId);
-        const [history, events] = await Promise.all([this.kernel.taskHistory(target.sessionId, target.taskId), this.kernel.eventList(target.sessionId, 0)]);
+        let [page, eventPage] = await Promise.all([this.kernel.taskHistoryPage(target.sessionId, target.taskId), this.kernel.taskEventPage(target.sessionId, target.taskId)]);
+        const history = [...page.items];
+        const events = [...eventPage.items];
         if (this.closed || generation !== this.taskRefresh) return;
         const panel = document.createElement('div'); panel.className = 'session-detail';
         const heading = document.createElement('h2'); heading.textContent = `${task.program.kind} · ${task.status}`; panel.append(heading);
         const description = document.createElement('p'); description.textContent = task.id; panel.append(description);
-        const records: Array<{ time: number; title: string; value: unknown }> = history.map(record => ({ time: record.updatedAt, title: `版本 ${record.version} · ${record.status}`, value: taskSummary(record) }));
-        for (const event of events) if (event.taskId === target.taskId) records.push({ time: event.occurredAt, title: event.type, value: { sequence: event.sequence, type: event.type, occurredAt: event.occurredAt } });
-        for (const record of records.sort((a, b) => a.time - b.time)) {
-            const detail = document.createElement('details'); const summary = document.createElement('summary');
-            summary.textContent = `${new Date(record.time).toLocaleString()} · ${record.title}`;
-            const body = document.createElement('pre'); body.textContent = JSON.stringify(record.value, null, 2);
-            detail.append(summary, body); panel.append(detail);
-        }
+        const entries = document.createElement('div'); panel.append(entries);
+        const more = document.createElement('button'); more.type = 'button'; more.textContent = '加载更多版本'; panel.append(more);
+        const moreEvents = document.createElement('button'); moreEvents.type = 'button'; moreEvents.textContent = '加载更多事件'; panel.append(moreEvents);
+        const render = () => {
+            entries.replaceChildren();
+            more.hidden = page.nextAfterVersion === undefined;
+            moreEvents.hidden = eventPage.nextAfterIndex === undefined;
+            const records: Array<{ time: number; title: string; value: unknown }> = history.map(record => ({ time: record.updatedAt, title: `版本 ${record.version} · ${record.status}`, value: taskSummary(record) }));
+            for (const event of events) if (event.taskId === target.taskId) records.push({ time: event.occurredAt, title: event.type, value: { sequence: event.sequence, type: event.type, occurredAt: event.occurredAt } });
+            for (const record of records.sort((a, b) => a.time - b.time)) {
+                const detail = document.createElement('details'); const summary = document.createElement('summary');
+                summary.textContent = `${new Date(record.time).toLocaleString()} · ${record.title}`;
+                const body = document.createElement('pre'); body.textContent = JSON.stringify(record.value, null, 2);
+                detail.append(summary, body); entries.append(detail);
+            }
+        };
+        more.onclick = () => {
+            if (more.disabled || page.nextAfterVersion === undefined) return;
+            more.disabled = true;
+            void this.kernel.taskHistoryPage(target.sessionId, target.taskId, {
+                afterVersion: page.nextAfterVersion, throughVersion: page.throughVersion,
+            }).then(next => {
+                if (this.closed || generation !== this.taskRefresh) return;
+                page = next; history.push(...next.items); render();
+            }).catch(error => this.report(error)).finally(() => { more.disabled = false; });
+        };
+        moreEvents.onclick = () => {
+            if (moreEvents.disabled || eventPage.nextAfterIndex === undefined) return;
+            moreEvents.disabled = true;
+            void this.kernel.taskEventPage(target.sessionId, target.taskId, {
+                afterIndex: eventPage.nextAfterIndex, throughIndex: eventPage.throughIndex,
+            }).then(next => {
+                if (this.closed || generation !== this.taskRefresh) return;
+                eventPage = next; events.push(...next.items); render();
+            }).catch(error => this.report(error)).finally(() => { moreEvents.disabled = false; });
+        };
+        render();
         this.container.replaceChildren(panel);
     }
     async createResource(options: { title?: string } = {}): Promise<string> {
@@ -210,7 +291,9 @@ export class SessionWorkbench implements WorkspaceController {
         const id = await this.repository.createSession(options.title || '新会话');
         await this.sidebarUI?.refresh(); await this.openResource(id); return id;
     }
-    getActiveResourceId(): string | null { return this.active; }
+    getActiveResourceId(): string | null {
+        return this.active && this.activeBranch !== undefined ? sessionRoute(this.active, this.activeBranch) : this.active;
+    }
     setWaitingInput(id: string, waiting: boolean): void {
         waiting ? this.waiting.add(id) : this.waiting.delete(id); this.sidebarUI?.setNodeWaitingInput('/' + id, waiting);
     }
@@ -219,6 +302,7 @@ export class SessionWorkbench implements WorkspaceController {
         this.previewCleanup?.(); this.previewCleanup = undefined;
         const editor = this.editor, assets = this.assets, context = this.context;
         this.editor = undefined; this.assets = undefined; this.context = undefined; this.active = null;
+        this.activeBranch = undefined;
         try { await editor?.destroy(); } finally { await Promise.all([assets?.dispose(), context?.release()]); }
     }
     async destroy(): Promise<void> {

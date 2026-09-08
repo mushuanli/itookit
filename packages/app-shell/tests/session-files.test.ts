@@ -27,6 +27,18 @@ async function setup() {
 const mount = (root: string, access: 'ro' | 'rw' = 'rw') => [{ mountId: 'work', at: '/workspace', sourceId: 'home', root, access }];
 
 describe('Session file contexts', () => {
+    it('rejects invalid or exhausted revisions without publishing a draining record', async () => {
+        const { service, store } = await setup();
+        const current = { revision: Number.MAX_SAFE_INTEGER, state: 'active', mounts: mount('/a'), cwd: '/workspace' };
+        await store.driver.createFile({ name: 'session.seq', parentPath: '/var/lib/sessions/a', type: 'seqfile', recursive: true });
+        await store.meta.seq!.setEntry('/var/lib/sessions/a/session.seq', 'files', JSON.stringify(current));
+        for (const revision of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER]) {
+            await expect(service.configure('a', { mounts: mount('/b'), cwd: '/workspace' }, revision)).rejects.toMatchObject({ code: 'EINVAL' });
+            await expect(service.disable('a', revision)).rejects.toMatchObject({ code: 'EINVAL' });
+            expect(await service.inspect('a')).toEqual(current);
+        }
+    });
+
     it('routes exact paths independently, persists revisions, and has no basename fallback', async () => {
         const { service, make } = await setup();
         await service.configure('a', { mounts: mount('/a'), cwd: '/workspace' }, 0);
@@ -69,17 +81,22 @@ describe('Session file contexts', () => {
         const { service, root } = await setup();
         for (const [parentPath, name, content] of [
             ['/etc/public', 'app.json', 'public'], ['/etc/llm', 'secret.json', 'credential'],
-            ['/var/lib/sessions/a/conversation', 'manifest.json', 'own'],
-            ['/var/lib/sessions/b/conversation', 'manifest.json', 'other'],
             ['/var/lib/kernel', 'ipc.seq', 'private'],
         ]) await root.driver.createFile({ parentPath, name, content, recursive: true });
+        for (const id of ['a', 'b']) {
+            await root.driver.createFile({ parentPath: `/var/lib/sessions/${id}`, name: 'history.seq', type: 'seqfile', recursive: true });
+            await root.meta.seq!.setEntry(`/var/lib/sessions/${id}/history.seq`, 'private', 'history');
+        }
         const owner = await service.acquireFiles('a', '/');
         const fs = owner.context.fs;
         expect((await fs.driver.getChildren('/')).map(n => n.name).sort()).toEqual(['attachments']);
         await expect(fs.driver.readContent('/etc/public/app.json')).rejects.toMatchObject({ code: 'ENOENT' });
-        await expect(fs.driver.readContent('/var/lib/sessions/a/conversation/manifest.json')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(fs.driver.readContent('/var/lib/sessions/a/history.seq')).rejects.toMatchObject({ code: 'ENOENT' });
         await expect(fs.driver.readContent('/etc/llm/secret.json')).rejects.toMatchObject({ code: 'ENOENT' });
-        await expect(fs.driver.readContent('/var/lib/sessions/b/conversation/manifest.json')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(fs.driver.readContent('/var/lib/sessions/b/history.seq')).rejects.toMatchObject({ code: 'ENOENT' });
+        for (const id of ['a', 'b']) {
+            await expect(fs.meta.seq!.getEntry(`/var/lib/sessions/${id}/history.seq`, 'private')).rejects.toMatchObject({ code: 'ENOENT' });
+        }
         expect((await fs.driver.search({ text: 'credential' })).nodes).toEqual([]);
         await expect(service.configure('a', { mounts: [{ ...mount('/a')[0], at: '//etc/public' }], cwd: '/workspace' }, 0)).rejects.toMatchObject({ code: 'EACCES' });
         await owner.release();

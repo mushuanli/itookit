@@ -62,7 +62,7 @@ export class TauriSessionDirectories {
             metadata.root = metadata.root.replace(/\\/g, '/').replace(/\/$/, '') || '/';
             const backend = await openLocalFSBackend({ rootDir: data.root, sidecarDir: metadata.root,
                 createFs: () => new ScopedFsOps(scopes), createDb: p => TauriSqlSidecarDb.open(p) });
-            try { return { owner: await createFileSystemSource({ backend, viewId: `host-directory:${key}` }), scopes }; }
+            try { return { owner: await createFileSystemSource({ tags: false, backend, viewId: `host-directory:${key}` }), scopes }; }
             catch (error) { await backend.close(); throw error; }
         } catch (error) { await Promise.allSettled(scopes.map(s => invoke('directory_close', { id: s.id }))); throw error; }
     }

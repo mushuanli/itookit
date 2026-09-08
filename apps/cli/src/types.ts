@@ -124,6 +124,8 @@ export interface WorkspaceGrant {
     id: string;
     path: string;
     access: WorkspaceAccess;
+    /** Virtual Session mount point when this grant is projected into OCI. */
+    mountAt?: string;
     createdAt: number;
 }
 

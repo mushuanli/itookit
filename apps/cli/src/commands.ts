@@ -1,3 +1,4 @@
+import { acquireRunSchedulerLock } from './run-scheduler-lock';
 import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
@@ -7,8 +8,11 @@ import { stringify as yamlStringify } from 'yaml';
 import type { EventEnvelope, ExitRecord, JsonValue, TaskHandle } from '@itookit/durable-kernel';
 import { loadWorkflow, parseDuration, validateWorkflow } from './config';
 import { expandWorkflow } from './expand';
-import { resolveMindosRoot } from './mindos';
+import { resolveProfileRoot } from './mindos';
 import { compileDag, createCliRuntime, cliStorage, type CliRuntime } from './runtime';
+import { compileRunDefinition } from './run-definition';
+import { createRunDefinitionFromFlow, toDagRunSpec, type RunDefinition } from '@itookit/app-core';
+import { loadFlowDefinition } from './flow-config';
 import { RunStore, selectFinalResult } from './run-store';
 import { sandboxDoctor } from './shell';
 import type { CompiledWorkflow, PendingInteraction, RunManifest } from './types';
@@ -19,8 +23,12 @@ export interface CommandOptions {
     headless?: boolean;
     json?: boolean;
     sandbox?: 'native' | 'oci';
-    /** -b / --boot：从 mindos 配置（~/.config/mindos/settings.json）解析数据根并 mount，再继续运行。 */
-    boot?: boolean;
+    /** Profile selector: desktop (default) or an explicit data root path. */
+    profile?: string;
+    /** Map a host directory to /workspace and use it as the Session cwd. */
+    setHome?: string;
+    /** Map additional host directories into the Session runtime context. */
+    addDir?: string[];
     follow?: boolean;
     approve?: boolean;
     deny?: boolean;
@@ -39,6 +47,8 @@ export interface CommandOptions {
     responsesPath?: string;
     /** --verbose：输出全部事件（默认过滤高频 stream 增量与 task 生命周期）。 */
     verbose?: boolean;
+    /** -d / --http: start the browser-accessible MindOS UI on [ip:]port. */
+    http?: string;
 }
 
 interface InterruptWatcher {
@@ -71,8 +81,39 @@ export async function graphCommand(options: CommandOptions): Promise<number> {
 }
 
 export async function runCommand(options: CommandOptions): Promise<number> {
-    const loaded = await loadWorkflow(options.file ?? 'mindos.yml');
+    const file = options.file ?? 'mindos.yml';
+    if (file.toLowerCase().endsWith('.flow')) return runFlowCommand(file, options);
+    const loaded = await loadWorkflow(file);
     return runLoaded(loaded, options);
+}
+
+async function runFlowCommand(file: string, options: CommandOptions): Promise<number> {
+    const flow = await loadFlowDefinition(file);
+    const workspaceRoot = path.resolve(options.setHome ?? process.cwd());
+    const resultTask = String(flow.nodes.at(-1)?.id ?? '');
+    if (!resultTask) throw new Error('.flow has no nodes to use as the result task');
+    const definition = await createRunDefinitionFromFlow(flow, {
+        workspaceRoot,
+        result: { task: resultTask, output: 'result' },
+    });
+    const stateDir = resolveStateDir(options, workspaceRoot);
+    const workflow: CompiledWorkflow = {
+        config: {
+            version: 1,
+            name: flow.name,
+            goal: flow.name,
+            providers: [],
+            connections: [],
+            agents: [],
+            tasks: [],
+            result: { task: resultTask, output: 'result' },
+            sandbox: { mode: 'native' },
+        },
+        workspaceRoot,
+        stateDir,
+    };
+    const loaded = { workflow, source: JSON.stringify(flow), hash: definition.digest };
+    return runLoaded(loaded, options, { definition, useProfileConfig: true });
 }
 
 /**
@@ -134,7 +175,7 @@ export async function promptCommand(options: CommandOptions): Promise<number> {
 
     const source = yamlStringify(raw);
     const workspaceRoot = process.cwd();
-    const stateDir = path.resolve(workspaceRoot, '.mindos-prompt');
+    const stateDir = resolveStateDir(options, workspaceRoot);
     const workflow: CompiledWorkflow = {
         config,
         workspaceRoot,
@@ -149,10 +190,14 @@ export async function promptCommand(options: CommandOptions): Promise<number> {
 
 type LoadedWorkflow = Awaited<ReturnType<typeof loadWorkflow>>;
 
-async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions): Promise<number> {
+async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions, override?: {
+    definition: RunDefinition;
+    useProfileConfig?: boolean;
+}): Promise<number> {
     if (options.sandbox) loaded.workflow.config.sandbox = { ...loaded.workflow.config.sandbox, mode: options.sandbox };
     const id = createRunId();
-    const store = new RunStore(loaded.workflow.stateDir);
+    const store = new RunStore(resolveStateDir(options, loaded.workflow.workspaceRoot));
+    loaded.workflow.stateDir = store.stateDir;
     const now = Date.now();
     const manifest: RunManifest = {
         version: 1,
@@ -174,11 +219,13 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions): Promi
         updatedAt: now,
     };
     await store.create(manifest, loaded.source);
+    const releaseScheduler = await acquireRunSchedulerLock(store.runDir(id));
     let runtime: CliRuntime | undefined;
     try {
-        runtime = await runtimeFor(loaded.workflow, manifest, store, options);
+        runtime = await runtimeFor(loaded.workflow, manifest, store, options, 'execute', override?.useProfileConfig);
         await runtime.kernel.createSession({ id, storage: cliStorage(id) });
-        const flow = await runtime.executor.submit(id, compileDag(loaded.workflow));
+        const definition = override?.definition ?? compileRunDefinition(loaded.workflow, loaded.hash);
+        const flow = await runtime.executor.submit(id, toDagRunSpec(definition));
         manifest.rootTaskId = flow.root.id;
         manifest.nodeTaskIds = Object.fromEntries([...flow.nodes].map(([nodeId, handle]) => [nodeId, handle.id]));
         manifest.status = 'running';
@@ -193,7 +240,7 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions): Promi
         printError(options, manifest.error);
         return 1;
     } finally {
-        await runtime?.dispose();
+        try { await runtime?.dispose(); } finally { releaseScheduler(); }
     }
 }
 
@@ -246,6 +293,12 @@ export const tasksCommand = checkpointsCommand;
 
 export async function resumeCommand(runId: string, options: CommandOptions): Promise<number> {
     const store = new RunStore(resolveStateDir(options));
+    const releaseScheduler = await acquireRunSchedulerLock(store.runDir(runId));
+    try { return await resumeLocked(runId, options, store); }
+    finally { releaseScheduler(); }
+}
+
+async function resumeLocked(runId: string, options: CommandOptions, store: RunStore): Promise<number> {
     const manifest = await store.load(runId);
     if (isTerminal(manifest.status)) {
         print(options, manifest);
@@ -257,6 +310,7 @@ export async function resumeCommand(runId: string, options: CommandOptions): Pro
     if (options.sandbox) loaded.workflow.config.sandbox = { ...loaded.workflow.config.sandbox, mode: options.sandbox };
     const runtime = await runtimeFor(loaded.workflow, manifest, store, options);
     try {
+        if (manifest.rootTaskId) await runtime.executor.resume(manifest.sessionId, manifest.rootTaskId);
         manifest.status = 'running';
         await store.save(manifest);
         return await monitor(loaded.workflow, manifest, store, runtime, options);
@@ -295,13 +349,16 @@ export async function respondCommand(
 
 export async function deleteCommand(runId: string, options: CommandOptions): Promise<number> {
     const store = new RunStore(resolveStateDir(options));
-    const manifest = await store.load(runId);
-    if (!isTerminal(manifest.status)) {
-        throw new Error(`Run ${runId} is still ${manifest.status}; cancel it before deleting`);
-    }
-    await store.delete(runId);
-    print(options, { type: 'run.deleted', runId });
-    return 0;
+    const releaseScheduler = await acquireRunSchedulerLock(store.runDir(runId));
+    try {
+        const manifest = await store.load(runId);
+        if (!isTerminal(manifest.status)) {
+            throw new Error(`Run ${runId} is still ${manifest.status}; cancel it before deleting`);
+        }
+        await store.delete(runId);
+        print(options, { type: 'run.deleted', runId });
+        return 0;
+    } finally { releaseScheduler(); }
 }
 
 export async function cancelCommand(runId: string, options: CommandOptions): Promise<number> {
@@ -472,6 +529,10 @@ async function processInteractions(
     // --json implies headless: never block on an interactive stdin prompt under a machine-readable
     // stream, or CI would hang. Surface the resume/respond commands instead.
     if (options.headless || options.json) {
+        // Persist the scheduler checkpoint before the headless process exits, so
+        // resume/respond reattaches to the same Task instances instead of resubmitting nodes.
+        try { await runtime.waitForCheckpoint(Object.values(manifest.nodeTaskIds)); }
+        catch (error) { printError(options, errorMessage(error)); return 1; }
         printInteractionHint(manifest, options);
         return 3;
     }
@@ -530,11 +591,14 @@ async function refreshTaskStatuses(
     manifest: RunManifest,
     runtime: CliRuntime,
 ): Promise<void> {
-    for (const [nodeId, taskId] of Object.entries(manifest.nodeTaskIds)) {
-        const task = (await runtime.kernel.inspectTask(taskId)).task;
+    const tasks = await runtime.kernel.listSessionTasks(manifest.sessionId);
+    for (const task of tasks) {
+        const nodeId = task.labels?.flowNodeId;
+        if (!nodeId) continue;
+        manifest.nodeTaskIds[nodeId] = task.id;
         manifest.taskStatuses[nodeId] = task.status;
         if (task.attemptCount > 0) (manifest.taskStartedAt ??= {})[nodeId] ??= Date.now();
-        await enforceTaskTimeout(workflow, manifest, runtime, nodeId, taskId, task.status);
+        await enforceTaskTimeout(workflow, manifest, runtime, nodeId, task.id, task.status);
     }
 }
 
@@ -617,14 +681,15 @@ async function runtimeFor(
     store: RunStore,
     options: CommandOptions,
     mode: 'execute' | 'control' = 'execute',
+    useProfileConfig = false,
 ): Promise<CliRuntime> {
     await stat(workflow.workspaceRoot);
-    const vfsRoot = options.boot ? resolveMindosRoot() : undefined;
-    if (vfsRoot) process.stderr.write(`[boot] mindos root: ${vfsRoot}\n`);
+    const vfsRoot = options.stateDir ? path.resolve(options.stateDir) : resolveProfileRoot(options.profile);
+    process.stderr.write(`[profile] mindos root: ${vfsRoot}\n`);
     return createCliRuntime(workflow, manifest, async grants => {
         manifest.grants = grants;
         await store.save(manifest);
-    }, vfsRoot, mode);
+    }, vfsRoot, mode, { setHome: options.setHome, addDir: options.addDir, useProfileConfig });
 }
 
 function renderEvent(manifest: RunManifest, event: EventEnvelope, options: CommandOptions): void {
@@ -667,8 +732,9 @@ export function resolveRespondValue(options: CommandOptions): JsonValue {
     try { return JSON.parse(options.value!) as JsonValue; } catch { return options.value!; }
 }
 
-function resolveStateDir(options: CommandOptions): string {
-    return path.resolve(options.stateDir ?? '.mindos');
+function resolveStateDir(options: CommandOptions, _workspaceRoot?: string): string {
+    if (options.stateDir) return path.resolve(options.stateDir);
+    return path.join(resolveProfileRoot(options.profile), 'var', 'lib', 'cli-runs');
 }
 
 function createRunId(): string {

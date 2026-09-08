@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { listenForTest } from './listen';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,29 +16,46 @@ afterEach(async () => {
 });
 
 describe('HITL run → respond → resume', () => {
-    it('pauses for human input, then resumes after respond', async () => {
+    it.each([{ downstream: false, process: false }, { downstream: true, process: false },
+        { downstream: true, process: true, repeated: false },
+        { downstream: true, process: true, repeated: true }])('pauses and resumes: %j', async mode => {
+        const { downstream } = mode;
+        hitlCalls = 0;
+        repeatQuestion = Boolean(mode.repeated);
         const server = createServer((_request, response) => respondHitl(response));
         const port = await startServer(server);
 
         const workspace = await mkdtemp(path.join(tmpdir(), 'mindos-hitl-'));
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
-        await writeFile(configPath, hitlConfig(port), 'utf8');
+        await writeFile(configPath, hitlConfig(port, downstream), 'utf8');
 
         // 1) run 在 AskUserQuestion 处暂停（headless 返回退出码 3）。
-        expect(await runCommand({ file: configPath, headless: true, json: true })).toBe(3);
+        expect(mode.process ? await childCli(['run', '-f', configPath, '--state-dir', path.join(workspace, '.mindos'), '--headless', '--json'])
+            : await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true })).toBe(3);
 
         const stateDir = path.join(workspace, '.mindos');
         const runId = await latestRun(stateDir);
         const manifest = await readManifest(stateDir, runId);
         expect(manifest.status).toBe('waiting');
+        const rootTaskId = manifest.rootTaskId;
         const requestId = (manifest.pendingInteractions as Array<{ interactionId: string }>)[0].interactionId;
 
         // 2) respond 批准后，resume 继续执行到完成。
-        expect(await respondCommand(runId, requestId, { stateDir, approve: true, json: true })).toBe(0);
-        expect(await resumeCommand(runId, { stateDir, headless: true, json: true })).toBe(0);
+        expect(mode.process ? await childCli(['respond', runId, requestId, '--state-dir', stateDir, '--approve', '--json'])
+            : await respondCommand(runId, requestId, { stateDir, approve: true, json: true })).toBe(0);
+        expect(mode.process ? await childCli(['resume', runId, '--state-dir', stateDir, '--headless', '--json'])
+            : await resumeCommand(runId, { stateDir, headless: true, json: true })).toBe(mode.repeated ? 3 : 0);
+        if (mode.repeated) {
+            const waiting = await readManifest(stateDir, runId);
+            expect(waiting).toMatchObject({ status: 'waiting', rootTaskId });
+            const nextId = (waiting.pendingInteractions as Array<{ interactionId: string }>)[0].interactionId;
+            expect(await childCli(['respond', runId, nextId, '--state-dir', stateDir, '--approve', '--json'])).toBe(0);
+            expect(await childCli(['resume', runId, '--state-dir', stateDir, '--headless', '--json'])).toBe(0);
+        }
 
-        expect(await readManifest(stateDir, runId)).toMatchObject({ status: 'succeeded' });
+        expect(await readManifest(stateDir, runId)).toMatchObject({ status: 'succeeded', rootTaskId });
+        expect(hitlCalls).toBe(mode.repeated ? 4 : downstream ? 3 : 2);
         expect(await readFile(path.join(stateDir, 'runs', runId, 'result.txt'), 'utf8')).toBe('done');
     }, 20_000);
 });
@@ -44,7 +64,8 @@ describe('HITL run → respond → resume', () => {
 
 function respondHitl(response: import('node:http').ServerResponse): void {
     // 第一次调用返回 AskUserQuestion tool_use；后续调用返回最终文本。
-    if (hitlCalls++ === 0) {
+    const call = hitlCalls++;
+    if (call === 0 || (repeatQuestion && call === 2)) {
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(JSON.stringify({
             id: 'mock', object: 'chat.completion', created: 1, model: 'mock-model',
@@ -54,7 +75,7 @@ function respondHitl(response: import('node:http').ServerResponse): void {
                     role: 'assistant',
                     content: null,
                     tool_calls: [{
-                        id: 'call_1', type: 'function',
+                        id: `call_${call + 1}`, type: 'function',
                         function: {
                             name: 'AskUserQuestion',
                             arguments: JSON.stringify({
@@ -85,13 +106,11 @@ function respondHitl(response: import('node:http').ServerResponse): void {
 }
 
 let hitlCalls = 0;
+let repeatQuestion = false;
 
 async function startServer(server: ReturnType<typeof createServer>): Promise<number> {
     servers.push(server);
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('Mock server did not bind');
-    return address.port;
+    return listenForTest(server);
 }
 
 async function latestRun(stateDir: string): Promise<string> {
@@ -104,7 +123,7 @@ async function readManifest(stateDir: string, runId: string): Promise<Record<str
     return JSON.parse(await readFile(path.join(stateDir, 'runs', runId, 'run.json'), 'utf8'));
 }
 
-function hitlConfig(port: number): string {
+function hitlConfig(port: number, downstream = false): string {
     return `version: 1
 name: hitl
 goal: Ask then finish
@@ -134,10 +153,28 @@ tasks:
     description: 询问后完成
     outputs:
       result: text
-result:
-  task: ask
+${downstream ? `  - id: after
+    agent: worker
+    description: Finish after the answer
+    depends_on: [ask]
+    outputs: {result: text}
+` : ''}result:
+  task: ${downstream ? 'after' : 'ask'}
   output: result
 sandbox:
   mode: native
 `;
+}
+
+/** Each command must exit before the next process opens the same durable state. */
+async function childCli(args: string[]): Promise<number> {
+    const cwd = fileURLToPath(new URL('../', import.meta.url));
+    return new Promise((resolve, reject) => {
+        execFile(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args],
+            { cwd, timeout: 15_000, maxBuffer: 2_000_000 }, (error, _stdout, stderr) => {
+                if (!error) return resolve(0);
+                if (error.code === 3 && !error.killed) return resolve(3);
+                reject(new Error(`Child CLI failed: ${error.message}\n${stderr}`));
+            });
+    });
 }

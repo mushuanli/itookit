@@ -2,7 +2,7 @@
 // Tauri implementation of INativeShell.
 //
 // Routes exec() calls through Rust Tauri commands instead of node:child_process.
-// Supported commands: rg, fd, sh (maps to shell_exec).
+// Supported commands: rg, fd, sh/bash (maps to Bash through shell_exec).
 // All other commands throw — keep the surface minimal.
 //
 // Usage in main.ts bootstrap:
@@ -40,7 +40,7 @@ export class TauriNativeShell implements INativeShell {
     args: string[],
     opts?: { cwd?: string; timeoutMs?: number; signal?: AbortSignal },
   ): Promise<NativeShellResult> {
-    // Abort via signal is best-effort in Tauri IPC (no kill API without plugin-shell).
+    // Skip execution when the caller has already cancelled.
     if (opts?.signal?.aborted) {
       return { stdout: '', stderr: 'Aborted', code: null };
     }
@@ -72,20 +72,21 @@ export class TauriNativeShell implements INativeShell {
         return { stdout, stderr: '', code: 0 };
       }
 
-      case 'sh': {
+      case 'sh':
+      case 'bash': {
         const shellCmd = args[1] ?? args[0] ?? '';
         const cwd = opts?.cwd ?? '.';
         const requestId = crypto.randomUUID();
-        const cancel = () => { void invoke('shell_cancel', { requestId }); };
+        const cancel = () => { void invoke('shell_cancel', { requestId }).catch(() => {}); };
         opts?.signal?.addEventListener('abort', cancel, { once: true });
         try {
-          const [stdout, code] = await invoke<[string, number]>('shell_exec', {
+          const [stdout, stderr, code] = await invoke<[string, string, number]>('shell_exec', {
             command: shellCmd,
             cwd,
             timeoutMs: opts?.timeoutMs ?? 30_000,
             requestId,
           });
-          return { stdout, stderr: '', code };
+          return { stdout, stderr, code };
         } finally {
           opts?.signal?.removeEventListener('abort', cancel);
         }

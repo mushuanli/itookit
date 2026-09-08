@@ -37,7 +37,7 @@ export class OciSandboxShell implements INativeShell {
     constructor(
         private readonly engine: 'podman' | 'docker',
         private readonly workflow: CompiledWorkflow,
-        private readonly grants: () => WorkspaceGrant[],
+        private readonly grants: () => Promise<WorkspaceGrant[]> | WorkspaceGrant[],
     ) {}
 
     async exec(
@@ -46,7 +46,7 @@ export class OciSandboxShell implements INativeShell {
         options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal } = {},
     ): Promise<NativeShellResult> {
         const shellCommand = command === 'sh' && args[0] === '-c' ? args[1] : quote([command, ...args]);
-        const runArgs = sandboxArgs(this.workflow, this.grants(), shellCommand, options.cwd);
+        const runArgs = sandboxArgs(this.workflow, await this.grants(), shellCommand, options.cwd);
         return runProcess(this.engine, runArgs, {
             timeoutMs: options.timeoutMs,
             signal: options.signal,
@@ -63,7 +63,7 @@ export interface ShellBinding {
 
 export async function createShell(
     workflow: CompiledWorkflow,
-    grants: () => WorkspaceGrant[],
+    grants: () => Promise<WorkspaceGrant[]> | WorkspaceGrant[],
 ): Promise<ShellBinding> {
     if ((workflow.config.sandbox?.mode ?? 'oci') === 'native') return { shell: new NodeNativeShell() };
     const doctor = await sandboxDoctor(workflow.config.sandbox?.engine ?? 'auto');
@@ -85,11 +85,11 @@ export class OciTtyDriver implements ITTYDriver {
     constructor(
         private readonly engine: 'podman' | 'docker',
         private readonly workflow: CompiledWorkflow,
-        private readonly grants: () => WorkspaceGrant[],
+        private readonly grants: WorkspaceGrant[],
     ) {}
 
     spawn(command: string, args: string[] = [], options: ITTYSpawnOptions = {}): ITTYSession {
-        const { args: sandbox, image } = sandboxBaseArgs(this.workflow, this.grants(), options.cwd, true, options.env);
+        const { args: sandbox, image } = sandboxBaseArgs(this.workflow, this.grants, options.cwd, true, options.env);
         // The container working directory is expressed via --workdir; the host
         // podman/docker process itself runs from the host CWD and a clean env.
         // Agent-provided env is forwarded into the container via --env flags.
@@ -122,13 +122,16 @@ export function sandboxBaseArgs(
     const sandbox = workflow.config.sandbox ?? {};
     const image = sandbox.image ?? 'mindos-sandbox:v1';
     const writable = workflow.config.tasks.some(task => task.workspace_access === 'write');
+    const workspaceGrant = grants.find(grant => grant.mountAt === '/workspace');
+    const workspaceRoot = workspaceGrant?.path ?? workflow.workspaceRoot;
+    const workspaceWritable = workspaceGrant ? workspaceGrant.access === 'write' : writable;
     const args = [
         'run', ...(interactive ? ['-i'] : []), '--rm', '--read-only', '--cap-drop=ALL',
         '--security-opt=no-new-privileges',
         '--network', sandbox.network ?? 'none', '--pids-limit', String(sandbox.limits?.pids ?? 256),
         '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=256m',
-        '--mount', bindMount(workflow.workspaceRoot, '/workspace', writable),
-        '--workdir', containerWorkingDirectory(workflow.workspaceRoot, grants, cwd),
+        '--mount', bindMount(workspaceRoot, '/workspace', workspaceWritable),
+        '--workdir', containerWorkingDirectory(workspaceRoot, grants, cwd),
     ];
     if (sandbox.limits?.cpus) args.push('--cpus', String(sandbox.limits.cpus));
     if (sandbox.limits?.memory) args.push('--memory', sandbox.limits.memory);
@@ -141,7 +144,9 @@ export function sandboxBaseArgs(
         args.push('--tmpfs', `${stateTarget}:rw,noexec,nosuid,nodev,size=16m`);
     }
     for (const grant of grants) {
-        args.push('--mount', bindMount(grant.path, `/mnt/grants/${grant.id}`, grant.access === 'write'));
+        if (grant.mountAt === '/workspace') continue;
+        const target = grant.mountAt ?? `/mnt/grants/${grant.id}`;
+        args.push('--mount', bindMount(grant.path, target, grant.access === 'write'));
     }
     return { args, image };
 }

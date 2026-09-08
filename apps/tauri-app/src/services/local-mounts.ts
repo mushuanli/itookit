@@ -87,7 +87,7 @@ export class LocalMountService {
     private async open(entry: MountEntry): Promise<FileSystemSourceOwner> {
         const backend = await openLocalFSBackend({ rootDir: entry.localPath, sidecarDir: entry.sidecarPath,
             createDb: dbPath => TauriSqlSidecarDb.open(dbPath), createFs: () => new TauriFsOps() });
-        try { return await createFileSystemSource({ backend, viewId: entry.id }); }
+        try { return await createFileSystemSource({ tags: false, backend, viewId: entry.id }); }
         catch (error) { await backend.close(); throw error; }
     }
 

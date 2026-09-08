@@ -1,4 +1,5 @@
 import { initApp, type AppUI } from '@itookit/app-shell';
+import { createApplicationRuntime } from '@itookit/app-core';
 import { openIndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import {
     createLLMFactory,
@@ -42,16 +43,25 @@ async function main() {
             SystemPromptSettingsEditor,
         },
     };
-    await initApp({
+    const runtime = await createApplicationRuntime({
         backend,
-        workspaces: WORKSPACES,
-        defaultSlug: 'chat',
-        routeAliases: { home: 'llm-workspace' },
+        ownerKind: 'web',
         kernelPlatform: {
             skillToolHandlerFactory: new BrowserSkillToolHandlerFactory(),
         },
-        ui,
     });
+    try {
+        await initApp({
+            runtime,
+            workspaces: WORKSPACES,
+            defaultSlug: 'chat',
+            routeAliases: { home: 'llm-workspace' },
+            ui,
+        });
+    } catch (error) {
+        await runtime.dispose();
+        throw error;
+    }
 }
 
 main().catch(err => console.error('[Bootstrap] Fatal:', err));

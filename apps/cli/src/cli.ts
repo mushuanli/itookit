@@ -1,3 +1,4 @@
+import { createHttpMindOSRuntime, startHttpServer } from './http-server';
 import {
     cancelCommand,
     checkpointsCommand,
@@ -26,6 +27,12 @@ interface ParsedArgs {
 
 async function main(argv: string[]): Promise<number> {
     const parsed = parseArgs(argv);
+    // -d / --http: run as the headless HTTP host for the Tauri UI.
+    if (parsed.options.http) {
+        const runtime = await createHttpMindOSRuntime(parsed.options);
+        await startHttpServer(parsed.options.http, parsed.options, runtime);
+        return 0;
+    }
     // -p / --prompt：直接运行一段 prompt（优先于 command 分发）
     if (parsed.options.prompt) return promptCommand(parsed.options);
     switch (parsed.command) {
@@ -77,7 +84,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         else if (arg === '--responses-path') options.responsesPath = required(rest[++index], 'responses-path');
         else if (arg === '--no-tools') options.noTools = true;
         else if (arg === '--verbose' || arg === '-v') options.verbose = true;
+        else if (arg === '-d' || arg === '--http') options.http = required(rest[++index], '[ip:]port');
         else if (arg === '--state-dir') options.stateDir = required(rest[++index], 'state directory');
+        else if (arg === '--profile') options.profile = required(rest[++index], 'profile');
+        else if (arg === '--set-home') options.setHome = required(rest[++index], 'home directory');
+        else if (arg === '--add-dir') options.addDir = [...(options.addDir ?? []), required(rest[++index], 'directory')];
         else if (arg === '--headless') options.headless = true;
         else if (arg === '--json') options.json = true;
         else if (arg === '--follow') options.follow = true;
@@ -85,7 +96,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
         else if (arg === '--deny') options.deny = true;
         else if (arg === '--value') options.value = required(rest[++index], 'response value');
         else if (arg === '--offline') options.offline = true;
-        else if (arg === '-b' || arg === '--boot') options.boot = true;
         else if (arg === '--sandbox') options.sandbox = sandbox(required(rest[++index], 'sandbox mode'));
         else if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`);
         else positional.push(arg);
@@ -121,8 +131,11 @@ function help(): string {
         `  mindos export-config <run-id> [--state-dir .mindos]\n` +
         `  mindos sandbox doctor\n\n` +
         `选项：\n` +
-        `  --state-dir <dir>   运行状态目录（默认 .mindos，run 时由配置 workspace 决定）\n` +
-        `  -b, --boot          boot from mindos：读 ~/.config/mindos/settings.json 挂载真实 mindos 数据根\n` +
+        `  --profile <name>    desktop（默认，共享 ~/.config/mindos）或显式数据根路径\n` +
+        `  -d, --http <addr>   启动 HTTP 版 MindOS UI（[ip:]port，默认 127.0.0.1）\n` +
+        `  --state-dir <dir>   运行状态目录；默认 <dataRoot>/var/lib/cli-runs\n` +
+        `  --set-home <dir>    将宿主目录挂载到 /workspace 并作为 Session 工作目录（默认 rw）\n` +
+        `  --add-dir <dir>     追加宿主目录到 Session 上下文；可重复，默认只读，支持 <dir>:rw\n` +
         `  --headless          无交互模式，事件作为 JSONL 写到 stdout（适合 CI）\n` +
         `  --json              JSON 输出；隐含 --headless（遇到人工输入时返回退出码 3 而非阻塞）\n` +
         `  --offline           校验/查看时不要求 API key 环境变量已存在\n`;

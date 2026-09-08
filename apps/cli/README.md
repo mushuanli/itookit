@@ -1,6 +1,8 @@
 # MindOS CLI
 
-MindOS CLI 在指定工作区中运行声明式多 Agent workflow graph。无环数据依赖按 DAG 调度，并支持有界循环、条件路由、动态子图与 Supervisor。CLI 与 Tauri 共用 LLM、Tool、Kernel 和持久化内核，不需要启动桌面 UI。CLI 要求 Node.js 22.13 或更高版本，并使用内置 `node:sqlite` 持久化运行状态，无需安装原生 SQLite npm 扩展。
+MindOS CLI 在指定工作区中运行声明式多 Agent workflow graph。无环数据依赖按 DAG 调度，并支持有界循环、条件路由、动态子图与 Supervisor。CLI 与 Tauri 共用 `@itookit/app-core` 的 `createKernelRuntime` 组合，以及 LLM、Tool、Kernel 和持久化内核，不需要启动桌面 UI。CLI 要求 Node.js 22.13 或更高版本，并使用内置 `node:sqlite` 持久化运行状态，无需安装原生 SQLite npm 扩展。
+
+无显示服务器的最小 DAG、Bash 子 harness 验收及平台边界见 [最小系统运行说明](../../doc/minimal-system.md)，公开配置见 [minimal-dag.yml](examples/minimal-dag.yml)。
 
 ## 使用
 
@@ -40,6 +42,27 @@ result: report
 
 `prompt`、`needs`、`uses` 和字符串形式的 `result` 会在校验前展开成完整配置。需要多 provider、多 agent 或模型分层时仍可使用 `providers`、`connections`、`agents` 完整写法。
 
+## `.flow` 输入
+
+除 YAML 外，`run` 也接受 `.flow` 文件：
+
+```bash
+mindos --profile desktop run -f workflow.flow
+```
+
+`.flow` 支持：
+
+- draft 文件（`draftVersion`）自动转为临时 revision；
+- revision 文件（`revision` + `digest`）；
+- inline 节点配置；
+- 从 desktop profile 读取 Provider / Connection / Skill。
+
+当前限制：
+
+- `.flow` 中的 `agentId` / `systemPromptId` / `skillIds` 引用解析仍待补 headless binder；
+- `.flow` 默认使用最后一个节点 + `result` 输出作为最终结果；
+- 参数 `--param` 尚未实现。
+
 ## 校验、图与运行管理
 
 ```bash
@@ -55,15 +78,42 @@ mindos delete <run-id> --state-dir .mindos
 
 `tasks` 展示节点状态和已生成产物，不是可恢复的状态快照；`rerun` 使用原配置创建全新的完整运行；`export-config` 只导出配置快照。当前不提供 checkpoint replay 或 state fork。
 
-### 从 mindos 启动（`-b` / `--boot`）
+### Profile 与本地目录挂载
 
-`-b` / `--boot` 读取 `~/.config/mindos/settings.json`（与桌面 Tauri 共用），解析真实 mindos 数据根并 mount 为 VFS 根后再继续运行，用于调试或复杂场景下直接操作桌面数据：
+CLI 默认连接桌面 profile：
 
-```bash
-mindos run -f mindos.yml -b
+```text
+$XDG_CONFIG_HOME/mindos/mindos.json
+或
+~/.config/mindos/mindos.json
 ```
 
-数据根优先级：`MINDOS_ROOT` 环境变量 → `settings.json#rootDir` → `~/.config/mindos/data`。此模式下 VFS（含 `chats` 模块与 kernel 会话存储）落在 mindos 数据根（sidecar 为 `<root>/_meta`），而 run 清单/事件仍写入 `--state-dir`。注意：`-b` 与桌面端共用 `_meta` sidecar，勿并发运行；`resume`/`respond`/`cancel` 需同样带 `-b` 才能定位到同一 mindos 根。
+数据根解析顺序：
+
+```text
+MINDOS_ROOT
+  → mindos.json#rootDir
+  → <configDir>/data
+```
+
+使用 `--profile` 切换：
+
+```bash
+mindos --profile desktop run -f mindos.yml       # 默认，共享桌面数据根
+mindos --profile /path/to/profile run -f mindos.yml
+```
+
+CLI 不再直接以 Node fs 访问工作目录，而是通过 Session 挂载：
+
+```bash
+mindos --set-home /path/to/project run -f mindos.yml
+mindos --add-dir /path/to/lib:ro run -f mindos.yml
+mindos --add-dir /path/to/cache:rw run -f mindos.yml
+```
+
+- `--set-home <dir>`：挂载到 `/workspace`，作为 Session 工作目录，默认 `rw`。
+- `--add-dir <dir>[:ro|rw]`：追加宿主目录，默认 `ro`；可重复。
+- workflow YAML 本身仍从宿主路径读取，它属于 CLI 输入，不是 Agent 可见文件。
 
 无头模式会把事件作为 JSONL 写到 stdout，适合 CI。`--json` 自动采用无头行为，遇到人工输入时返回退出码 `3`，不会读取交互式 stdin：
 
@@ -74,6 +124,46 @@ mindos respond <run-id> <request-id> --approve
 ```
 
 退出码 `0` 表示成功，`1` 表示运行失败，`2` 表示配置或命令错误，`3` 表示等待人工输入。
+
+## HTTP 模式（`-d` / `--http`）
+
+CLI 可以作为 HTTP 主机，直接提供 Tauri UI：
+
+```bash
+mindos -d 127.0.0.1:8080
+mindos -d 0.0.0.0:8080
+mindos -d 8080
+```
+
+规则：
+
+- 默认绑定 `127.0.0.1`；
+- 端口为 `0` 时由系统分配；
+- 静态资源优先使用 `apps/tauri-app/dist`，不存在时回退 `apps/web-app/dist`；
+- 页面注入 Tauri IPC shim，将 `window.__TAURI_INTERNALS__.invoke` 转发到 CLI HTTP API；
+- 启动时先完成 MindOS runtime 初始化，再监听 HTTP；
+- 数据根来自 `--profile desktop` 或显式 `--profile <path>`；
+- `--set-home <dir>` 指定 HTTP 模式下暴露给 UI 的宿主 home 目录；
+- `GET /api/status` 返回 runtime 是否 ready、profile、workspace 和 Session 数；
+- 浏览器端注入 `window.__MINDOS_MODE__ = 'remote'`，不再执行本地 `initApp()`；
+- `GET /api/sessions` / `GET /api/runs` 提供 remote UI 数据。
+
+当前 HTTP 模式支持：
+
+- `get_home_dir` / `get_root_dir`
+- `fs_*`
+- `directory_open` / `directory_io` / `directory_close`
+- `plugin:sql|*`
+- `sidecar_begin` / `sidecar_execute` / `sidecar_select` / `sidecar_finish`
+- `plugin:dialog|*` 返回不可用/空结果
+
+暂不支持：
+
+- `session_shell_exec` / `shell_exec`
+- `codex_*`
+- 原生 ripgrep / fd
+
+这些命令在 HTTP 模式下返回明确错误。
 
 ## 文件与进程权限
 

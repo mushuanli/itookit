@@ -22,6 +22,9 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "dependencies": {
+    "@itookit/app-core": "workspace:*"
+  },
   "peerDependencies": {
     "@itookit/app-settings": "workspace:*",
     "@itookit/common": "workspace:*",

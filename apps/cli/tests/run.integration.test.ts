@@ -1,5 +1,6 @@
+import { listenForTest } from './listen';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -13,6 +14,24 @@ afterEach(async () => {
 });
 
 describe('CLI run', () => {
+    it('injects workspace project and automatic Skill rules into model requests', async () => {
+        const { server, requests } = mockServer(() => 'done');
+        const port = await startServer(server);
+        const workspace = await mkdtemp(path.join(tmpdir(), 'mindos-context-'));
+        await mkdir(path.join(workspace, '_agent/skills/review'), { recursive: true });
+        await writeFile(path.join(workspace, '_agent/AGENT.md'), 'Project rule: verify public interfaces.');
+        await writeFile(path.join(workspace, '_agent/skills/review/SKILL.md'),
+            '---\nname: Review\ndescription: Review changes\n---\nSkill rule: record validation evidence.');
+        const configPath = path.join(workspace, 'mindos.yml');
+        process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
+        await writeFile(configPath, config(port));
+        expect(await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true })).toBe(0);
+        expect(requests).toHaveLength(1);
+        const system = requests[0].messages?.filter(message => message.role === 'system').map(message => message.content).join('\n');
+        expect(system).toContain('Project rule: verify public interfaces.');
+        expect(system).toContain('Skill rule: record validation evidence.');
+    }, 15_000);
+
     it('runs a durable DAG and persists its final result', async () => {
         const server = createServer((_request, response) => {
             respondSse(response, 'done');
@@ -23,7 +42,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, config(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(0);
 
         const runId = await latestRun(workspace);
@@ -43,7 +62,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, config(port, { budget: 1 }), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(1);
         expect(await readManifest(workspace, await latestRun(workspace))).toMatchObject({ status: 'failed' });
     }, 15_000);
@@ -56,7 +75,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, ragConfig(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(0);
 
         const runId = await latestRun(workspace);
@@ -84,7 +103,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, parallelRagConfig(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(0);
 
         const runId = await latestRun(workspace);
@@ -115,7 +134,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, routeConfig(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(0);
 
         const runId = await latestRun(workspace);
@@ -135,7 +154,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, routeConditionConfig(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(0);
 
         // classify 输出 'lookup'，命中 in 条件，search_task 被执行。
@@ -150,7 +169,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, loopConfig(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(0);
 
         const runId = await latestRun(workspace);
@@ -170,7 +189,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, spawnConfig(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(0);
 
         const runId = await latestRun(workspace);
@@ -186,7 +205,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, onFailureConfig(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(0);
 
         const runId = await latestRun(workspace);
@@ -204,7 +223,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, compensateConfig(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(1);
 
         // deploy 失败（预算超限），补偿任务 rollback 被执行。
@@ -219,7 +238,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, compensateChainConfig(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(1);
 
         // task_c 失败，反向补偿 B 和 A（都已成功）。
@@ -235,7 +254,7 @@ describe('CLI run', () => {
         const configPath = path.join(workspace, 'mindos.yml');
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, supervisorConfig(port), 'utf8');
-        const code = await runCommand({ file: configPath, headless: true, json: true });
+        const code = await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true });
         expect(code).toBe(0);
 
         const runId = await latestRun(workspace);
@@ -373,10 +392,7 @@ function supervisorResponse(description: string, request?: MockRequest): string 
 
 async function startServer(server: ReturnType<typeof createServer>): Promise<number> {
     servers.push(server);
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('Mock server did not bind');
-    return address.port;
+    return listenForTest(server);
 }
 
 function runDir(workspace: string, runId: string): string {

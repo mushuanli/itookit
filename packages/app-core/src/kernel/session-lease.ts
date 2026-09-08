@@ -1,0 +1,131 @@
+import type { IFileSystem } from '@itookit/vfs-core';
+
+export type SessionOwnerKind = 'cli' | 'tauri' | 'web';
+
+export interface SessionLeaseOwner {
+    id: string;
+    kind: SessionOwnerKind;
+}
+
+export interface SessionLeaseRecord {
+    sessionId: string;
+    ownerId: string;
+    ownerKind: SessionOwnerKind;
+    fencingToken: number;
+    leaseUntil: number;
+    heartbeatAt: number;
+}
+
+export interface SessionLeaseOptions {
+    /** Profile-relative seqfile used for all Session leases. */
+    path?: string;
+    /** Default lease duration. */
+    ttlMs?: number;
+    /** Injectable clock for tests. */
+    now?: () => number;
+}
+
+const DEFAULT_PATH = '/var/lib/kernel/session-leases.seq';
+const DEFAULT_TTL_MS = 60_000;
+
+/** Single-owner-per-Session lease stored in the shared MindOS SeqFile. */
+export class SessionLeaseStore {
+    private readonly path: string;
+    private readonly ttlMs: number;
+    private readonly now: () => number;
+
+    constructor(private readonly fs: IFileSystem, options: SessionLeaseOptions = {}) {
+        this.path = options.path ?? DEFAULT_PATH;
+        this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
+        this.now = options.now ?? Date.now;
+    }
+
+    async init(): Promise<void> {
+        if (!this.fs.meta.seq?.transaction) throw new Error('Session leases require transactional SeqFiles');
+        if (!await this.fs.driver.exists(this.path)) {
+            await this.fs.driver.createFile({ name: 'session-leases.seq', parentPath: '/var/lib/kernel', type: 'seqfile', recursive: true });
+        }
+    }
+
+    async inspect(sessionId: string): Promise<SessionLeaseRecord | null> {
+        await this.init();
+        const raw = await this.fs.meta.seq!.getEntry(this.path, key(sessionId));
+        return raw ? parse(raw) : null;
+    }
+
+    async acquire(sessionId: string, owner: SessionLeaseOwner): Promise<SessionLeaseRecord | null> {
+        await this.init();
+        const seq = this.fs.meta.seq!;
+        if (!seq.transaction) throw new Error('Session leases require transactional SeqFiles');
+        return seq.transaction(async tx => {
+            const raw = await tx.getEntry(this.path, key(sessionId));
+            const current = raw ? parse(raw) : null;
+            const now = this.now();
+            if (current && current.ownerId !== owner.id && current.leaseUntil > now) return null;
+            const record: SessionLeaseRecord = {
+                sessionId,
+                ownerId: owner.id,
+                ownerKind: owner.kind,
+                fencingToken: (current?.fencingToken ?? 0) + 1,
+                leaseUntil: now + this.ttlMs,
+                heartbeatAt: now,
+            };
+            const changed = await tx.compareAndSet(this.path, key(sessionId), {
+                expected: raw,
+                value: JSON.stringify(record),
+            });
+            return changed ? record : null;
+        });
+    }
+
+    async renew(lease: SessionLeaseRecord): Promise<SessionLeaseRecord | null> {
+        await this.init();
+        const seq = this.fs.meta.seq!;
+        if (!seq.transaction) throw new Error('Session leases require transactional SeqFiles');
+        return seq.transaction(async tx => {
+            const raw = await tx.getEntry(this.path, key(lease.sessionId));
+            const current = raw ? parse(raw) : null;
+            if (!current || current.ownerId !== lease.ownerId || current.fencingToken !== lease.fencingToken) return null;
+            const now = this.now();
+            if (current.leaseUntil <= now) return null;
+            const next = { ...current, leaseUntil: now + this.ttlMs, heartbeatAt: now };
+            const changed = await tx.compareAndSet(this.path, key(lease.sessionId), {
+                expected: raw,
+                value: JSON.stringify(next),
+            });
+            return changed ? next : null;
+        });
+    }
+
+    async release(lease: SessionLeaseRecord): Promise<boolean> {
+        await this.init();
+        const seq = this.fs.meta.seq!;
+        if (!seq.transaction) throw new Error('Session leases require transactional SeqFiles');
+        return seq.transaction(async tx => {
+            const raw = await tx.getEntry(this.path, key(lease.sessionId));
+            const current = raw ? parse(raw) : null;
+            const now = this.now();
+            if (!current || current.ownerId !== lease.ownerId || current.fencingToken !== lease.fencingToken
+                || current.leaseUntil <= now) return false;
+            return tx.compareAndSet(this.path, key(lease.sessionId), {
+                expected: raw,
+                value: JSON.stringify({ ...current, leaseUntil: 0, heartbeatAt: now }),
+            });
+        });
+    }
+}
+
+function key(sessionId: string): string {
+    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) throw new Error('Invalid Session lease identity');
+    return `lease/${sessionId}`;
+}
+
+function parse(raw: string): SessionLeaseRecord {
+    const value = JSON.parse(raw) as SessionLeaseRecord;
+    if (!value || typeof value.sessionId !== 'string' || typeof value.ownerId !== 'string'
+        || !['cli', 'tauri', 'web'].includes(value.ownerKind)
+        || !Number.isSafeInteger(value.fencingToken) || !Number.isFinite(value.leaseUntil)) {
+        throw new Error('Invalid Session lease record');
+    }
+    return value;
+}

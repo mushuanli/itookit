@@ -16,12 +16,19 @@ async function setup() {
     files.registerSource('home', home); await files.configure(a, { mounts: [{ mountId: 'work', sourceId: 'home', at: '/workspace', root: '/project', access: 'rw' }], cwd: '/workspace' }, 0);
     const task = { id: 't', sessionId: a, program: { kind: 'test' }, status: 'succeeded', version: 2, createdAt: 1, updatedAt: 2, input: 'hello', output: 'done', currentAttempt: { leaseToken: 'private-token' } };
     const kernel = { async *listSessions() { yield { id: a }; }, listSessionTasks: vi.fn(async () => [task]),
+        listSessionTaskPage: vi.fn(async () => ({ items: [task], throughIndex: 2, nextAfterIndex: 1 })),
         task: vi.fn(async (sid: string, tid: string) => { if (sid !== a || tid !== 't') throw new Error('Task unavailable'); return task; }),
         taskHistory: vi.fn(async () => [{ ...task, status: 'created', version: 1 }, task]) };
     const browser = await createSessionBrowser({ repository, files, kernel: kernel as any }); cleanup.push(() => browser.dispose());
     return { a, b, files, repository, browser, kernel };
 }
 describe('Session browser projection', () => {
+    it('previews one Task page and exposes the explicit paginated-list entry', async () => {
+        const f = await setup();
+        expect((await f.browser.fs.driver.getChildren(`/${f.a}/tasks`)).map(node => node.name)).toEqual(['t', '@more']);
+        expect(resolveBrowserTarget(`/${f.a}/tasks/@more`)).toEqual({ kind: 'tasks', sessionId: f.a });
+        expect(f.kernel.listSessionTasks).not.toHaveBeenCalled();
+    });
     it('exposes only tasks/files beneath stable Session directories', async () => {
         const f = await setup();
         expect((await f.browser.fs.driver.getChildren('/' + f.a)).map(n => n.name).sort()).toEqual(['files', 'tasks']);

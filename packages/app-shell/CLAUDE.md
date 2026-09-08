@@ -1,6 +1,7 @@
 # CLAUDE.md — @itookit/app-shell
 
-应用启动引导 + 路由 + 策略装配。`initApp()` 是唯一顶层初始化函数。
+应用启动引导 + UI 路由 + 策略装配。`initApp()` 是唯一顶层初始化函数。
+平台无关的 Session/Kernel 组合位于 `@itookit/app-core`；app-shell 依赖它并只保留 UI/路由/编辑器装配。
 
 peerDependencies: 所有 `@itookit/*` 包
 

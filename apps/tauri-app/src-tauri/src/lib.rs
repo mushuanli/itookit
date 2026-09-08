@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use tauri::{AppHandle, Manager, State};
@@ -17,13 +17,13 @@ mod scoped_directory;
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 struct MindosSettings {
-    /// Raw value from settings.json#rootDir — may be relative or absolute.
+    /// Raw value from mindos.json#rootDir — may be relative or absolute.
     root_dir: Option<PathBuf>,
     home_dir: Option<PathBuf>,
 }
 
 fn read_settings(config_dir: &PathBuf) -> MindosSettings {
-    let Ok(raw) = std::fs::read_to_string(config_dir.join("settings.json")) else {
+    let Ok(raw) = std::fs::read_to_string(config_dir.join("mindos.json")) else {
         return MindosSettings { root_dir: None, home_dir: None };
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
@@ -38,18 +38,18 @@ fn read_settings(config_dir: &PathBuf) -> MindosSettings {
 // ── Path resolution ────────────────────────────────────────────────────────────
 
 struct AppPaths {
-    /// Config dir: $XDG_CONFIG_HOME/mindos or ~/.config/mindos. settings.json lives here.
+    /// Config dir: $XDG_CONFIG_HOME/mindos or ~/.config/mindos. mindos.json lives here.
     /// Deliberately separate from the data root — ~/.mindos may hold unrelated
     /// data, so it is never used as a default location.
     config_dir: PathBuf,
     /// Resolved data root. All VFS modules live here (module/, _db/, _meta/).
-    /// From MINDOS_ROOT env, settings.json#rootDir, or <config_dir>/data.
+    /// From MINDOS_ROOT env, mindos.json#rootDir, or <config_dir>/data.
     root_dir: PathBuf,
     home_dir: PathBuf,
 }
 
 #[derive(Default)]
-struct ShellProcesses(Mutex<HashMap<String, u32>>);
+struct ShellProcesses(Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>);
 
 struct CodexProcess {
     child: Child,
@@ -61,7 +61,7 @@ struct CodexProcess {
 struct CodexAppServer(Mutex<Option<CodexProcess>>);
 
 fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
-    // Config lives at $XDG_CONFIG_HOME/mindos/settings.json (default ~/.config/mindos),
+    // Config lives at $XDG_CONFIG_HOME/mindos/mindos.json (default ~/.config/mindos),
     // never inside the data root. This keeps unrelated ~/.mindos data untouched.
     let config_dir = std::env::var("XDG_CONFIG_HOME")
         .ok()
@@ -73,7 +73,7 @@ fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
 
     // Data root resolution order:
     //   MINDOS_ROOT env      → explicit override, used as-is
-    //   settings.json#rootDir → primary source; relative resolved against config_dir
+    //   mindos.json#rootDir → primary source; relative resolved against config_dir
     //   default              → <config_dir>/data (never ~/.mindos)
     let root_dir = std::env::var("MINDOS_ROOT")
         .ok()
@@ -267,7 +267,7 @@ fn get_home_dir(paths: State<AppPaths>) -> String {
 }
 
 /// Resolved VFS root directory (base for all module data).
-/// From MINDOS_ROOT env, settings.json#rootDir, or <config_dir>/data.
+/// From MINDOS_ROOT env, mindos.json#rootDir, or <config_dir>/data.
 /// Relative rootDir values are resolved against the config dir
 /// (~/.config/mindos), keeping the data root portable.
 #[tauri::command]
@@ -390,46 +390,60 @@ fn search_fd(
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// Execute an arbitrary shell command via sh -c.
-/// Only allowed when dir passes is_allowed(); command content is NOT filtered here —
-/// the TS BLOCKED_PATTERNS check in BashTool.validateInput() is the safety gate.
+mod bash_process;
+mod session_bash;
+
+/// Execute Bash after validating the host working directory.
+/// This host command alone does not enforce Session mount grants.
 #[tauri::command]
-fn shell_exec(
+async fn shell_exec(
     command: String,
     cwd:     String,
     timeout_ms: Option<u64>,
     request_id: String,
-    state:   State<AppPaths>,
-    processes: State<ShellProcesses>,
-) -> Result<(String, i32), String> {
+    state:   State<'_, AppPaths>,
+    processes: State<'_, ShellProcesses>,
+) -> Result<(String, String, i32), String> {
     let p = PathBuf::from(&cwd);
     if !is_allowed(&p, &state) { return Err(format!("cwd not allowed: {cwd}")); }
 
-    let mut command_builder = Command::new("sh");
-    command_builder
-        .arg("-c").arg(&command)
-        .current_dir(&cwd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    command_builder.process_group(0);
-    let mut child = command_builder.spawn().map_err(|e| format!("sh exec failed: {e}"))?;
-    let pid = child.id();
-    processes.0.lock().map_err(|_| "shell process lock poisoned")?
-        .insert(request_id.clone(), pid);
-    let stdout = read_pipe(child.stdout.take());
-    let stderr = read_pipe(child.stderr.take());
-    let status = wait_for_shell(&mut child, timeout_ms.unwrap_or(30_000), pid);
-    processes.0.lock().map_err(|_| "shell process lock poisoned")?.remove(&request_id);
-    let output = stdout.join().unwrap_or_default() + &stderr.join().unwrap_or_default();
-    Ok((output, status?.code().unwrap_or(-1)))
+    run_shell(bash_process::command(&command, &cwd), timeout_ms.unwrap_or(30_000), request_id, processes.0.clone()).await
+}
+
+#[tauri::command]
+async fn session_shell_exec(command: String, cwd: String, timeout_ms: Option<u64>, request_id: String,
+    mounts: Vec<(String, String, bool)>, directories: State<'_, scoped_fs::DirectoryScopes>,
+    processes: State<'_, ShellProcesses>) -> Result<(String, String, i32), String> {
+    let grants = {
+        let scopes = directories.0.lock().map_err(|_| "directory lock poisoned")?;
+        mounts.into_iter().map(|(id, target, writable)| {
+            let source = scopes.get(&id).ok_or("Session directory handle closed")?;
+            Ok(session_bash::Mount { source: source.to_string_lossy().into_owned(), target, writable })
+        }).collect::<Result<Vec<_>, String>>()?
+    };
+    run_shell(session_bash::command(&command, &cwd, &grants)?, timeout_ms.unwrap_or(30_000), request_id, processes.0.clone()).await
+}
+
+async fn run_shell(command: Command, timeout_ms: u64, request_id: String,
+    registry: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>) -> Result<(String, String, i32), String> {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    {
+        let mut entries = registry.lock().map_err(|_| "shell process lock poisoned")?;
+        if entries.contains_key(&request_id) { return Err("Duplicate shell requestId".into()); }
+        entries.insert(request_id.clone(), cancelled.clone());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = bash_process::execute_command(command, timeout_ms, &cancelled);
+        registry.lock().map_err(|_| "shell process lock poisoned")?.remove(&request_id);
+        result
+    }).await.map_err(|e| format!("Bash worker failed: {e}"))?
 }
 
 #[tauri::command]
 fn shell_cancel(request_id: String, processes: State<ShellProcesses>) -> Result<(), String> {
-    let pid = processes.0.lock().map_err(|_| "shell process lock poisoned")?
-        .get(&request_id).copied();
-    if let Some(pid) = pid { terminate_process_group(pid); }
+    if let Some(cancelled) = processes.0.lock().map_err(|_| "shell process lock poisoned")?.get(&request_id) {
+        cancelled.store(true, Ordering::SeqCst);
+    }
     Ok(())
 }
 
@@ -482,36 +496,6 @@ fn codex_stop(server: State<CodexAppServer>) -> Result<(), String> {
         let _ = process.child.wait();
     }
     Ok(())
-}
-
-fn read_pipe<T: Read + Send + 'static>(pipe: Option<T>) -> std::thread::JoinHandle<String> {
-    std::thread::spawn(move || {
-        let mut output = String::new();
-        if let Some(mut value) = pipe { let _ = value.read_to_string(&mut output); }
-        output
-    })
-}
-
-fn wait_for_shell(
-    child: &mut std::process::Child,
-    timeout_ms: u64,
-    pid: u32,
-) -> Result<std::process::ExitStatus, String> {
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    loop {
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? { return Ok(status); }
-        if Instant::now() >= deadline {
-            terminate_process_group(pid);
-            std::thread::sleep(Duration::from_millis(100));
-            let _ = child.kill();
-            return child.wait().map_err(|e| e.to_string());
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-}
-
-fn terminate_process_group(pid: u32) {
-    let _ = Command::new("kill").arg("-TERM").arg(format!("-{pid}")).status();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -589,6 +573,7 @@ pub fn run() {
             search_ripgrep,
             search_fd,
             shell_exec,
+            session_shell_exec,
             shell_cancel,
             codex_start,
             codex_send,

@@ -7,6 +7,7 @@ import type { WorkspaceAccess, WorkspaceGrant } from './types';
 
 export class WorkspaceGrantRegistry {
     private readonly values = new Map<string, WorkspaceGrant>();
+    private onGrant?: (grant: WorkspaceGrant) => Promise<void>;
 
     constructor(
         readonly workspaceRoot: string,
@@ -21,6 +22,11 @@ export class WorkspaceGrantRegistry {
         return [...this.values.values()];
     }
 
+    /** Bridge an approved Agent grant into the Session VFS mount namespace. */
+    setOnGrant(handler: (grant: WorkspaceGrant) => Promise<void>): void {
+        this.onGrant = handler;
+    }
+
     async grant(requestedPath: string, access: WorkspaceAccess): Promise<WorkspaceGrant> {
         const resolved = await realpath(path.resolve(this.workspaceRoot, requestedPath));
         const info = await stat(resolved);
@@ -31,7 +37,13 @@ export class WorkspaceGrantRegistry {
         const id = `grant-${this.values.size + 1}`;
         const grant: WorkspaceGrant = { id, path: directory, access, createdAt: Date.now() };
         this.values.set(id, grant);
-        await this.onChange?.(this.list());
+        try {
+            await this.onGrant?.(grant);
+            await this.onChange?.(this.list());
+        } catch (error) {
+            this.values.delete(id);
+            throw error;
+        }
         return grant;
     }
 

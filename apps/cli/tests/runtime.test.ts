@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compileDag } from '../src/runtime';
+import { compileRunDefinition } from '../src/run-definition';
 import type { CompiledWorkflow } from '../src/types';
 
 describe('compileDag', () => {
@@ -32,5 +33,31 @@ describe('compileDag', () => {
         expect(dag.nodes[0].capabilities).toEqual(['Read', 'AskUserQuestion', 'RequestWorkspaceAccess']);
         expect(dag.nodes[1].capabilities).toEqual(['Read', 'Bash', 'AskUserQuestion', 'RequestWorkspaceAccess']);
         expect(dag.nodes[1].retry).toEqual({ maxAttempts: 3, backoffMs: 10 });
+    });
+});
+
+describe('compileRunDefinition', () => {
+    it('wraps the compiled graph with environment and policy', () => {
+        const workflow: CompiledWorkflow = {
+            workspaceRoot: '/work', stateDir: '/work/.mindos',
+            config: {
+                version: 1, name: 'test', goal: 'goal',
+                providers: [{
+                    id: 'p', implementation: 'openai-compatible', base_url: 'http://localhost',
+                    api_key_env: 'KEY', models: [{ id: 'm' }],
+                }],
+                connections: [{ id: 'c', provider: 'p', tiers: { standard: 'm' } }],
+                agents: [{ id: 'a', connection: 'c', tools: ['file_read'] }],
+                tasks: [{ id: 'one', agent: 'a', description: 'one', outputs: { result: 'text' } }],
+                result: { task: 'one', output: 'result' },
+            },
+        };
+        const definition = compileRunDefinition(workflow, 'digest');
+        expect(definition).toMatchObject({
+            id: 'test', source: 'yaml', digest: 'digest',
+            environment: { providers: [{ id: 'p', baseUrl: 'http://localhost' }], connections: [{ id: 'c' }] },
+            policy: { result: { task: 'one', output: 'result' }, workspaceRoot: '/work' },
+        });
+        expect(definition.graph.nodes).toHaveLength(1);
     });
 });

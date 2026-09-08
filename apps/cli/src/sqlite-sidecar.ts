@@ -49,7 +49,7 @@ export class NodeSqliteSidecarDb implements ISidecarDb {
     }
 
     async deleteMetaExt(itemPath: string): Promise<void> {
-        this.db.prepare('DELETE FROM meta_ext WHERE path = ?').run(itemPath);
+        this.db.prepare("DELETE FROM meta_ext WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'").run(itemPath, itemPath, itemPath);
     }
 
     async syncTags(itemPath: string, tags: string[] | undefined): Promise<void> {
@@ -61,6 +61,10 @@ export class NodeSqliteSidecarDb implements ISidecarDb {
     async getAllDistinctTags(): Promise<string[]> {
         return (this.db.prepare('SELECT DISTINCT tag FROM meta_tags ORDER BY tag').all() as Array<{ tag: string }>)
             .map(row => row.tag);
+    }
+
+    async listTagEntries(): Promise<Array<{ path: string; tag: string }>> {
+        return this.db.prepare('SELECT path, tag FROM meta_tags ORDER BY path, tag').all() as Array<{ path: string; tag: string }>;
     }
 
     async queryByTag(tag: string): Promise<string[]> {

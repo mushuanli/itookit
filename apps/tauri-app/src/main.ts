@@ -1,11 +1,12 @@
 import { TauriSessionDirectories } from './services/session-directories';
+import { createTauriSessionProcesses } from './shell/session-bash';
 import { createFileSystemSource } from '@itookit/vfs-core';
 /**
  * @file apps/tauri-app/src/main.ts
  *
  * Tauri-specific bootstrap:
  *  1. Resolve homeDir + rootDir via Tauri commands
- *       rootDir = resolved data root (settings.json#rootDir or <config>/data)
+ *       rootDir = resolved data root (mindos.json#rootDir or <config>/data)
  *  2. Build backends:
  *       rootBackend  = LocalFSBackend at <rootDir>/        (all shared modules)
  *       homeBackend  = LocalFSBackend at <homeDir>         (local filesystem)
@@ -15,6 +16,7 @@ import { createFileSystemSource } from '@itookit/vfs-core';
  */
 
 import { initApp, createWsMount, workspaceRoot, type AppUI } from '@itookit/app-shell';
+import { createApplicationRuntime } from '@itookit/app-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import {
     createLLMFactory,
@@ -105,8 +107,8 @@ async function getHomeDir(): Promise<string> {
 
 /**
  * Returns the resolved VFS root directory.
- * Config lives at ~/.config/mindos/settings.json; the data root comes from
- * settings.json#rootDir, the MINDOS_ROOT env var, or ~/.config/mindos/data.
+ * Config lives at ~/.config/mindos/mindos.json; the data root comes from
+ * mindos.json#rootDir, the MINDOS_ROOT env var, or ~/.config/mindos/data.
  */
 async function getRootDir(): Promise<string> {
     try {
@@ -175,9 +177,10 @@ async function bootstrap(): Promise<void> {
 
     // 1. Resolve paths
     //    homeDir   = working project directory (CWD or --home arg)
-    //    rootDir   = resolved data root (settings.json#rootDir, never ~/.mindos)
+    //    rootDir   = resolved data root (mindos.json#rootDir, never ~/.mindos)
     const [homeDir, rootDir] = await Promise.all([getHomeDir(), getRootDir()]);
     log(`路径解析 (home=${homeDir})`);
+    console.log(`[Boot] 本地文件工作区 home=${homeDir}; 系统数据 root=${rootDir}`);
 
     const dirName = homeDir.split('/').filter(Boolean).pop() ?? homeDir;
     const navLabel = document.getElementById('nav-home-label');
@@ -237,7 +240,7 @@ async function bootstrap(): Promise<void> {
     log(`文件系统初始化 (${workspaceNames.length + 2} backends)`);
 
     // The host owns this source independently of the MindOS root.
-    const homeSource = await createFileSystemSource({ backend: homeBackend, viewId: 'host-home' });
+    const homeSource = await createFileSystemSource({ tags: false, backend: homeBackend, viewId: 'host-home' });
     startupCleanup.push(() => homeSource.dispose());
 
     const workspaceMounts = workspaceNames.map((name, i) => ({
@@ -246,8 +249,7 @@ async function bootstrap(): Promise<void> {
     }));
 
     // 3. Hand off to app-shell
-    // Session processes require a runner that enforces the mount grants.
-    // Do not inject unrestricted host shell or Codex app-server access.
+    // Session Bash runs through the platform directory-grant namespace.
     const ui: AppUI = {
         createChatEditor: createLLMFactory,
         createAgentEditor: createAgentEditorFactory,
@@ -262,26 +264,29 @@ async function bootstrap(): Promise<void> {
             SystemPromptSettingsEditor,
         },
     };
-    const app = await initApp({
+    const runtime = await createApplicationRuntime({
         backend: rootBackend,
-        additionalMounts: [
-            ...workspaceMounts,
-        ],
-        workspaces: WORKSPACES.map(ws => ws.workspaceName === 'home' ? { ...ws, files: { fs: homeSource.fs, cwd: '/' } } : ws),
-        defaultSlug: 'files',
-        routeAliases: { home: 'home-workspace' },
+        additionalMounts: [...workspaceMounts],
+        ownerKind: 'tauri',
         onProgress: showLoading,
         llmLogger: new TauriLLMLogger(rootDir),
         directorySourceProvider: new TauriSessionDirectories(rootDir),
         kernelPlatform: {
-            skillSource: new TauriSkillSource(new TauriFsOps(), homeDir),
-            async configureSession(_sessionId, scope) {
-                await scope.skillService.setCwd(homeDir);
-            },
+            createSessionProcesses: createTauriSessionProcesses(rootDir),
+            skillSourceForSession: files => new TauriSkillSource(files.vfs, files.cwd),
         },
+    });
+    startupCleanup.push(() => runtime.dispose());
+    const app = await initApp({
+        runtime,
+        workspaces: WORKSPACES.map(ws => ws.workspaceName === 'home' ? { ...ws, files: { fs: homeSource.fs, cwd: '/' } } : ws),
+        defaultSlug: 'files',
+        routeAliases: { home: 'home-workspace' },
+        onProgress: showLoading,
         ui,
     });
     startupCleanup.push(() => app.destroy());
+    app.onDestroy(() => runtime.dispose(), 'sources');
     app.onDestroy(() => homeSource.dispose(), 'sources');
     log('App 初始化完成');
 
@@ -342,10 +347,67 @@ async function bootstrap(): Promise<void> {
     }
 }
 
-bootstrap().catch(err => {
-    console.error('[Bootstrap] Fatal:', err);
-    showError(err instanceof Error ? err.message : String(err));
-});
+async function bootstrapRemote(): Promise<void> {
+    const api = (window as { __MINDOS_API__?: string }).__MINDOS_API__ ?? '/api';
+    const read = async <T>(path: string): Promise<T> => {
+        const response = await fetch(`${api}${path}`);
+        if (!response.ok) throw new Error(`${path}: ${response.status}`);
+        return response.json() as Promise<T>;
+    };
+    const render = async (): Promise<void> => {
+        const [status, sessions, runs] = await Promise.all([
+            read<{ ready: boolean; profile: string; workspace: string; sessions: number }>('/status'),
+            read<Array<{ id: string; title: string; origin?: string; updatedAt: number }>>('/sessions'),
+            read<Array<{ runId: string; sessionId: string; title: string; origin?: string; status: string; updatedAt: number }>>('/runs'),
+        ]);
+        const label = document.getElementById('nav-home-label');
+        if (label) label.textContent = status.profile.split('/').filter(Boolean).pop() ?? 'remote';
+        document.querySelectorAll('.workspace-view').forEach(view => view.classList.remove('active'));
+        const target = document.getElementById('llm-workspace');
+        if (!target) return;
+        target.classList.add('active');
+        target.innerHTML = `
+            <div style="padding:24px;max-width:980px;font-family:var(--font-primary,sans-serif)">
+                <div style="padding:12px 16px;border-radius:10px;background:#eef2ff;color:#3730a3;margin-bottom:20px">
+                    Remote mode · CLI runtime ready=${String(status.ready)} · profile=${status.profile}
+                </div>
+                <h2 style="margin:0 0 12px">AI Sessions (${sessions.length})</h2>
+                <div style="display:grid;gap:8px;margin-bottom:28px">
+                    ${sessions.length ? sessions.map(session => `
+                        <div style="padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#fff">
+                            <div style="font-weight:600">${escapeHtml(session.title)}</div>
+                            <div style="font-size:12px;color:#6b7280">${session.id} · origin=${session.origin ?? 'unknown'} · ${new Date(session.updatedAt).toLocaleString()}</div>
+                        </div>`).join('') : '<div style="color:#6b7280">No sessions yet.</div>'}
+                </div>
+                <h2 style="margin:0 0 12px">Runs (${runs.length})</h2>
+                <div style="display:grid;gap:8px">
+                    ${runs.length ? runs.map(run => `
+                        <div style="padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#fff">
+                            <div style="font-weight:600">${escapeHtml(run.title)}</div>
+                            <div style="font-size:12px;color:#6b7280">${run.runId} · ${run.status} · origin=${run.origin ?? 'unknown'} · ${new Date(run.updatedAt).toLocaleString()}</div>
+                        </div>`).join('') : '<div style="color:#6b7280">No runs yet.</div>'}
+                </div>
+            </div>`;
+    };
+    await render();
+    setInterval(() => { void render().catch(error => console.error('[Remote] refresh failed', error)); }, 5_000);
+}
+
+function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+}
+
+if ((window as { __MINDOS_MODE__?: string }).__MINDOS_MODE__ === 'remote') {
+    bootstrapRemote().catch(err => {
+        console.error('[Remote Bootstrap] Fatal:', err);
+        showError(err instanceof Error ? err.message : String(err));
+    });
+} else {
+    bootstrap().catch(err => {
+        console.error('[Bootstrap] Fatal:', err);
+        showError(err instanceof Error ? err.message : String(err));
+    });
+}
 
 window.addEventListener('unhandledrejection', (e) => {
     console.error('[Unhandled rejection]', e.reason);

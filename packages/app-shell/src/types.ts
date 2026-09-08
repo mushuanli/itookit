@@ -1,9 +1,10 @@
 import type {NavigationRequest, ICommandBus, ILLMService} from '@itookit/common';
+import type { ApplicationRuntime } from '@itookit/app-core';
 import type { FileCreationConfig, EditorFactory, EditorOptions, ContextMenuConfig } from '@itookit/ui-common';
 import type { IStorageBackend, IVFSManager, MountOptions, IFileSystem } from '@itookit/vfs-core';
 import type { ThemeMode } from './ThemeService';
 import type { FileTypeDefinition, CustomEditorResolver, VFSUIOptions } from '@itookit/vfs-ui';
-import type { KernelAdaptersRuntime, KernelAdaptersRuntimeOptions } from '@itookit/kernel-adapters';
+import type { KernelAdaptersRuntime } from '@itookit/kernel-adapters';
 import type { Kernel } from '@itookit/durable-kernel';
 import type {
     DagPluginRegistry,
@@ -20,12 +21,7 @@ export interface AppKernelRuntime extends KernelAdaptersRuntime {
     dagPlugins: DagPluginRegistry;
 }
 
-export interface AppKernelPlatform {
-    configureSession?: KernelAdaptersRuntimeOptions['configureSession'];
-    skillSource?: KernelAdaptersRuntimeOptions['skillSource'];
-    skillToolHandlerFactory?: KernelAdaptersRuntimeOptions['skillToolHandlerFactory'];
-    configure?(kernel: AppKernelRuntime): void | Promise<void>;
-}
+export type AppKernelPlatform = import('@itookit/app-core').ApplicationKernelPlatform;
 
 export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills' | 'flows';
 
@@ -76,6 +72,7 @@ export interface ChatEditorDeps {
     commandBus?: ICommandBus;
     kernel?: Kernel;
     privilegedCommands?: IPrivilegedCommandService;
+    sessionSkills?: import('@itookit/common').SessionSkillControls;
 }
 
 export interface FlowEditorDeps {
@@ -116,8 +113,10 @@ export interface AppOptions {
     directorySourceProvider?: import('./files/directory-mounts').DirectorySourceProvider;
     /** Host registration/configuration of durable Session file grants. */
     configureSessionFiles?(files: import('./files/session-files').SessionFilesService): Promise<void> | void;
-    /** Primary storage backend (IndexedDB, LocalFS, InMemory, etc.) */
-    backend: IStorageBackend;
+    /** Primary storage backend (IndexedDB, LocalFS, InMemory, etc.). Required for local mode. */
+    backend?: IStorageBackend;
+    /** Pre-created runtime. When supplied, app-shell only mounts UI and never creates a local runtime. */
+    runtime?: ApplicationRuntime;
     /** Extra backend mounts owned by the host; applications receive file contexts */
     additionalMounts?: AdditionalMount[];
     workspaces: WorkspaceConfig[];
@@ -150,6 +149,7 @@ export interface AppHandle {
     onDestroy(cleanup: () => void | Promise<void>, phase?: 'consumers' | 'sources'): void;
     vfs: IVFSManager;
     sessionFiles: import('./files/session-files').SessionFilesService;
+    runtime: ApplicationRuntime;
 }
 
 // ── Workbench config ────────────────────────────────────────────────────

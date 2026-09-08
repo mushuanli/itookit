@@ -133,7 +133,7 @@ export class TauriSqlSidecarDb implements ISidecarDb {
     }
 
     async deleteMetaExt(path: string): Promise<void> {
-        await this.db.execute('DELETE FROM meta_ext WHERE path = ?', [path]);
+        await this.db.execute("DELETE FROM meta_ext WHERE path = ? OR substr(path, 1, length(?) + 1) = ? || '/'", [path, path, path]);
     }
 
     // ── tags ───────────────────────────────────────────────────────────────────
@@ -160,6 +160,10 @@ export class TauriSqlSidecarDb implements ISidecarDb {
             'SELECT DISTINCT tag FROM meta_tags ORDER BY tag',
         );
         return rows.map(r => r.tag);
+    }
+
+    async listTagEntries(): Promise<Array<{ path: string; tag: string }>> {
+        return this.db.select<Array<{ path: string; tag: string }>>('SELECT path, tag FROM meta_tags ORDER BY path, tag');
     }
 
     async queryByTag(tag: string): Promise<string[]> {

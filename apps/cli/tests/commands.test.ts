@@ -1,3 +1,4 @@
+import { listenForTest } from './listen';
 import { createServer } from 'node:http';
 import { mkdtemp, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -34,9 +35,11 @@ describe('parseArgs', () => {
         expect(parseArgs(['run', '--json', '--headless']).options).toMatchObject({ json: true, headless: true });
     });
 
-    it('parses -b / --boot', () => {
-        expect(parseArgs(['run', '-b']).options).toMatchObject({ boot: true });
-        expect(parseArgs(['run', '--boot']).options).toMatchObject({ boot: true });
+    it('parses --profile, --set-home and repeated --add-dir', () => {
+        expect(parseArgs(['run', '--profile', '/tmp/mindos-data']).options).toMatchObject({ profile: '/tmp/mindos-data' });
+        expect(parseArgs(['run', '--set-home', '/project']).options).toMatchObject({ setHome: '/project' });
+        expect(parseArgs(['run', '--add-dir', '/lib:ro', '--add-dir', '/cache:rw']).options)
+            .toMatchObject({ addDir: ['/lib:ro', '/cache:rw'] });
     });
 
     it('rejects unknown options', () => {
@@ -108,7 +111,7 @@ describe('run lifecycle commands', () => {
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, runConfig(port), 'utf8');
 
-        expect(await runCommand({ file: configPath, headless: true, json: true })).toBe(0);
+        expect(await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true })).toBe(0);
         const stateDir = path.join(workspace, '.mindos');
         const runId = await latestRun(stateDir);
 
@@ -144,10 +147,7 @@ function chunk(content: string, finishReason: string | null, usage?: Record<stri
 
 async function startServer(server: ReturnType<typeof createServer>): Promise<number> {
     servers.push(server);
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('Mock server did not bind');
-    return address.port;
+    return listenForTest(server);
 }
 
 async function latestRun(stateDir: string): Promise<string> {

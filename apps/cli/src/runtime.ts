@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { DagRunSpec, LLMConnection, LLMProvider, ToolDefinition } from '@itookit/common';
-import { createKernelAdaptersRuntime } from '@itookit/kernel-adapters';
+import { parse } from 'yaml';
+import { SessionFileSkillSource, resolveSessionSkillContext } from '@itookit/kernel-adapters';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { NodePtyDriver } from '@itookit/device-tty';
 import {
@@ -11,21 +12,28 @@ import {
 } from '@itookit/durable-kernel';
 import {
     compileWorkflow,
-    createBuiltinDagPluginRegistry,
     DurableFlowExecutor,
-    FlowAggregateProgram,
-    FlowHumanProgram,
-    FlowValueProgram,
     type WorkflowTaskSpec,
 } from '@itookit/llm-flow';
-import { DurableAgentProgram, DurableChatProgram, DurablePlanProgram } from '@itookit/llm-tasks';
+import {
+    acquireSessionProcessContext,
+    createKernelRuntime,
+    createSessionAttachmentMounts,
+    DirectoryMountService,
+    SessionFilesService,
+    SessionLeaseStore,
+    syncSkillsToKernel,
+    type HeadlessKernelRuntime,
+} from '@itookit/app-core';
+import { SessionRepository } from '@itookit/llm-session';
 import { createVFS, MemoryBackend, type IFileSystem } from '@itookit/vfs-core';
 import { createBashTool } from '@itookit/tools';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { taskOutputReference } from './config';
+import { CliDirectorySourceProvider } from './directories';
 import { createShell, OciTtyDriver } from './shell';
-import type { AgentConfig, CompiledWorkflow, RunManifest, TaskConfig } from './types';
-import { createWorkspaceAccessTool, createWorkspacePort, WorkspaceGrantRegistry } from './workspace';
+import type { AgentConfig, CompiledWorkflow, RunManifest, TaskConfig, WorkspaceGrant } from './types';
+import { createWorkspaceAccessTool, WorkspaceGrantRegistry } from './workspace';
 import { NodeSqliteSidecarDb } from './sqlite-sidecar';
 
 const STORAGE_KIND = 'cli-run';
@@ -44,6 +52,7 @@ export interface CliRuntime {
     kernel: Kernel;
     executor: DurableFlowExecutor;
     grants: WorkspaceGrantRegistry;
+    waitForCheckpoint(taskIds: string[]): Promise<void>;
     dispose(): Promise<void>;
 }
 
@@ -63,16 +72,23 @@ export function cliStorage(runId: string): StorageBindingRef {
     return { kind: STORAGE_KIND, locator: { runId } };
 }
 
+export interface CliRuntimeOptions {
+    /** Explicit session home; defaults to the workflow workspace root. */
+    setHome?: string;
+    /** Extra host directories mounted read-only by default. */
+    addDir?: string[];
+    /** Read providers/connections/skills from the shared profile instead of YAML. */
+    useProfileConfig?: boolean;
+}
+
 export async function createCliRuntime(
     workflow: CompiledWorkflow,
     manifest: RunManifest,
     onGrantChange: (grants: RunManifest['grants']) => Promise<void>,
     vfsRoot?: string,
     mode: 'execute' | 'control' = 'execute',
+    hostOptions: CliRuntimeOptions = {},
 ): Promise<CliRuntime> {
-    // -b / --boot: mount the real mindos data root (tauri's root backend) instead
-    // of the per-run state dir. Sidecar uses <root>/_meta to match tauri's root
-    // backend, so metadata and records live in the shared mindos root.
     const root = vfsRoot ?? path.join(workflow.stateDir, 'runtime', 'vfs');
     const sidecarDir = vfsRoot ? path.join(vfsRoot, '_meta') : path.join(workflow.stateDir, 'runtime', 'meta');
     const backend = await openLocalFSBackend({
@@ -80,65 +96,128 @@ export async function createCliRuntime(
         sidecarDir,
         createDb: NodeSqliteSidecarDb.open,
     });
-    const { manager: vfs } = await createVFS({
-        rootBackend: backend,
-        additionalMounts: [{ path: '/etc', backend: new MemoryBackend() }, { path: '/run', backend: new MemoryBackend() }],
-    });
+    const additionalMounts = [{ path: '/run', backend: new MemoryBackend() }];
+    if (!hostOptions.useProfileConfig) additionalMounts.unshift({ path: '/etc', backend: new MemoryBackend() });
+    const { manager: vfs } = await createVFS({ rootBackend: backend, additionalMounts });
     const llmDriver = new LLMDeviceDriver(vfs);
     await initializeLlmQuietly(llmDriver);
-    await configureLlm(llmDriver, workflow);
+    if (!hostOptions.useProfileConfig) await configureLlm(llmDriver, workflow);
 
+    const systemFS = await vfs.openFileSystem('/');
+    const leases = new SessionLeaseStore(systemFS);
+    const lease = await leases.acquire(manifest.sessionId, { id: `cli-${process.pid}-${crypto.randomUUID()}`, kind: 'cli' });
+    if (!lease) {
+        const current = await leases.inspect(manifest.sessionId);
+        throw new Error(`Session ${manifest.sessionId} is owned by ${current?.ownerKind ?? 'another host'}; only read-only commands are allowed`);
+    }
+    const leaseHeartbeat = setInterval(() => { void leases.renew(lease).catch(() => {}); }, 10_000);
+    leaseHeartbeat.unref?.();
+
+    const sessionRepository = new SessionRepository(systemFS);
+    await sessionRepository.init();
+    await sessionRepository.ensureSession(manifest.sessionId, `CLI: ${workflow.config.name}`, 'cli');
+    const systemMounts = createSessionAttachmentMounts(sessionRepository);
+    const sessionFiles = new SessionFilesService(systemFS, id => systemMounts.forSession(id));
+    await sessionFiles.initialize();
+    const directorySource = new CliDirectorySourceProvider(root);
+    const directoryMounts = new DirectoryMountService(systemFS, sessionFiles, directorySource);
+    await directoryMounts.init();
+
+    const sessionWorkspaceRoot = path.resolve(hostOptions.setHome ?? workflow.workspaceRoot);
     const grants = new WorkspaceGrantRegistry(
-        workflow.workspaceRoot,
+        sessionWorkspaceRoot,
         workflow.stateDir,
         manifest.grants,
         onGrantChange,
     );
-    const { shell, engine } = await createShell(workflow, () => grants.list());
+    grants.setOnGrant(async grant => {
+        await directoryMounts.addDirectory(manifest.sessionId, grant.path, grant.access === 'write' ? 'rw' : 'ro');
+    });
+
+    // Session mounts are the single source for both file tools and platform exec mounts.
+    for (const grant of manifest.grants) {
+        await directoryMounts.addDirectory(manifest.sessionId, grant.path, grant.access === 'write' ? 'rw' : 'ro');
+    }
+    await directoryMounts.addDirectory(manifest.sessionId, sessionWorkspaceRoot, 'rw', '/workspace', true);
+    for (const raw of hostOptions.addDir ?? []) {
+        const { directory, access } = parseAddDirectory(raw);
+        await directoryMounts.addDirectory(manifest.sessionId, directory, access);
+    }
+
+    const executionMounts = async (): Promise<WorkspaceGrant[]> => {
+        const mounts = await directoryMounts.processMounts(manifest.sessionId);
+        return mounts.map((mount, index) => ({
+            id: mount.at.replace(/[^a-zA-Z0-9_-]/g, '_') || `mount-${index}`,
+            path: mount.directory,
+            access: mount.access === 'ro' ? 'read' : 'write',
+            mountAt: mount.at,
+            createdAt: 0,
+        }));
+    };
+    const { shell, engine } = await createShell(workflow, executionMounts);
     const sandboxMode = workflow.config.sandbox?.mode ?? 'oci';
+    const ttyMounts = await executionMounts();
     // Native TTY uses a real PTY (node-pty); OCI TTY is wrapped in `engine run -i`
     // so the persistent session stays inside the sandbox instead of escaping it.
     const ttyDriver = sandboxMode === 'native'
         ? new NodePtyDriver()
-        : engine ? new OciTtyDriver(engine, workflow, () => grants.list()) : undefined;
-    const core = await createKernelAdaptersRuntime({
+        : engine ? new OciTtyDriver(engine, workflow, ttyMounts) : undefined;
+
+    const core = await createKernelRuntime({
+        systemFS,
         llmDriver,
-        runMode: 'kernel',
-        fileContextForSession: async () => ({
-            vfs: createWorkspacePort(grants), cwd: workflow.workspaceRoot, nativeShell: shell, ttyDriver,
-            release: async () => {}, // The run owns the shared grant registry and shell.
-        }),
-        additionalTools: [createBashTool(shell), createWorkspaceAccessTool(grants)],
-    });
-    const systemFS = await vfs.openFileSystem('/');
-    const kernel = new Kernel({
-        catalog: { fs: systemFS, rootPath: '/var/lib/kernel' },
+        storageResolver: new CliStorageResolver(systemFS),
         maxConcurrent: mode === 'control' ? 0 : workflow.config.runtime?.max_concurrency ?? 4,
         maxConcurrentEffects: mode === 'control' ? 0 : undefined,
+        skillSourceForSession: files => new SessionFileSkillSource(files.vfs, files.cwd, parse),
+        fileContextForSession: id => acquireSessionProcessContext(
+            sessionFiles,
+            id,
+            async () => ({ nativeShell: shell, ttyDriver, release: async () => {} }),
+            () => directoryMounts.processMounts(id),
+        ),
+        additionalTools: [createBashTool(shell), createWorkspaceAccessTool(grants)],
+        beforeRecover: async runtime => { await syncSkillsToKernel(llmDriver, runtime); },
+        recover: true,
     });
-    kernel.registerStorageResolver(new CliStorageResolver(systemFS));
-    await kernel.use(core.plugin);
-    registerPrograms(kernel);
-    await kernel.initialize();
-    await kernel.recover();
+    const { kernel } = core;
 
-    const plugins = createBuiltinDagPluginRegistry();
     const executor = new DurableFlowExecutor({
-        kernel: kernel,
-        plugins,
+        kernel,
+        plugins: core.dagPlugins,
+        resolveNewRunContext: sessionId => resolveSessionSkillContext(kernel, core.sessions, sessionId, workflow.config.goal),
         resolveTools: (sessionId, allowed) => resolveTools(core, sessionId, allowed),
     });
     return {
         kernel,
         executor,
         grants,
+        waitForCheckpoint: taskIds => {
+            if (!manifest.rootTaskId) throw new Error('Run root task is missing');
+            return executor.waitForCheckpoint(manifest.sessionId, manifest.rootTaskId, taskIds);
+        },
         async dispose() {
             kernel.dispose();
+            await executor.waitIdle();
             await kernel.waitIdle();
             await core.dispose();
+            await directoryMounts.dispose();
+            await sessionFiles.dispose();
+            await systemMounts.dispose();
+            await sessionRepository.dispose();
+            await directorySource.dispose();
+            clearInterval(leaseHeartbeat);
+            await leases.release(lease).catch(() => false);
             await vfs.dispose();
         },
     };
+}
+
+function parseAddDirectory(raw: string): { directory: string; access: 'ro' | 'rw' } {
+    const match = /^(.*?)(?::(ro|rw))?$/.exec(raw.trim());
+    const directory = match?.[1]?.trim();
+    if (!directory) throw new Error('--add-dir requires a directory path');
+    return { directory, access: match?.[2] === 'rw' ? 'rw' : 'ro' };
 }
 
 async function initializeLlmQuietly(driver: LLMDeviceDriver): Promise<void> {
@@ -235,7 +314,7 @@ function normalizeTools(tools: string[], access: TaskConfig['workspace_access'])
 }
 
 async function resolveTools(
-    core: Awaited<ReturnType<typeof createKernelAdaptersRuntime>>,
+    core: HeadlessKernelRuntime,
     sessionId: string,
     allowedIds: string[],
 ): Promise<{ definitions: ToolDefinition[]; externalIds: string[] }> {
@@ -279,15 +358,5 @@ async function configureLlm(driver: LLMDeviceDriver, workflow: CompiledWorkflow)
             enabled: true,
         };
         await driver.saveConnection(connection);
-    }
-}
-
-function registerPrograms(kernel: Kernel): void {
-    const programs = [
-        new DurableChatProgram(), new DurableAgentProgram(), new DurablePlanProgram(),
-        new FlowValueProgram(), new FlowHumanProgram(), new FlowAggregateProgram(),
-    ];
-    for (const program of programs) {
-        if (!kernel.programs.has(program.manifest.kind, program.manifest.version)) kernel.registerProgram(program);
     }
 }
