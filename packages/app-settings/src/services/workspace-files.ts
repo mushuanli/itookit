@@ -6,6 +6,11 @@ export interface WorkspaceFileSource {
     readonly description?: string;
     readonly fs: IFileSystem;
     readonly syncEnabled: boolean;
+    /**
+     * Explicit override for callers that cannot mark the filesystem as external.
+     * False excludes the source from tag recording/counting; defaults to true.
+     */
+    readonly internal?: boolean;
 }
 export function workspaceFiles(sources: readonly WorkspaceFileSource[], name: string): IFileSystem {
     const source = sources.find(source => source.name === name);

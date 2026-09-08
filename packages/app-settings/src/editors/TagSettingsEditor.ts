@@ -18,16 +18,10 @@ export class TagSettingsEditor extends BaseSettingsEditor<SettingsService> {
         this.refreshData();
     }
 
-    // 私有辅助方法：调用 service 同步
+    // Reads definitions and tag indexes only; never traverses workspace files.
     private refreshData() {
-        // syncTags 是异步的，完成后如果数据变动会触发 onChange -> render
-        // 即使没有变动，调用 render 也是安全的，但 syncTags 内部有 diff 检查
-        this.service.syncTags().then(() => {
-            // 如果 syncTags 认为没有数据变更（JSON 层面），它不会 notify。
-            // 但如果仅仅是 refCount 变了（VFS 层面），Service 内部合并逻辑会发现 state.tags 变了，
-            // 从而触发 notify。
-            // 为了双重保险（比如 UI 可能有其他临时状态），我们可以手动 render，
-            // 但标准做法是依赖 Service 的 notify。
+        void this.service.syncTags().catch(error => {
+            Toast.error(`标签加载失败: ${error instanceof Error ? error.message : String(error)}`);
         });
     }
 
@@ -176,7 +170,7 @@ export class TagSettingsEditor extends BaseSettingsEditor<SettingsService> {
                 const newTag: Tag = {
                     // 对于新标签，ID 为名称（保持一致性），对于旧标签，ID 不变
                     id: tag?.id || formData.get('name') as string, 
-                    name: formData.get('name') as string,
+                    name: tag?.name ?? formData.get('name') as string,
                     color: formData.get('color') as string,
                     description: formData.get('description') as string,
                     count: tag?.count || 0
@@ -191,7 +185,7 @@ export class TagSettingsEditor extends BaseSettingsEditor<SettingsService> {
     private deleteTag(tag: Tag) {
         const count = tag.count || 0;
         const msg = count > 0
-            ? `标签 "${tag.name}" 被引用了 ${count} 次。\n\n注意：此操作仅删除标签定义，不会从文件中移除标签，但可能会影响颜色显示和自动补全。确定继续吗？`
+            ? `标签 "${tag.name}" 被引用了 ${count} 次。\n\n注意：此操作会移除 MindOS 文件中的该标签及其定义，不会删除文件。确定继续吗？`
             : `确定要删除标签 "${tag.name}" 吗？`;
 
         Modal.confirm('确认删除', msg, async () => {

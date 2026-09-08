@@ -15,8 +15,9 @@ describe('independent file system views', () => {
         await backend.init();
         await backend.write('/host.md', new Uint8Array());
         await backend.setTags('/host.md', ['legacy']);
-        const owner = await createFileSystemSource({ backend, viewId: 'host', tags: false });
+        const owner = await createFileSystemSource({ backend, viewId: 'host' });
         cleanup.push(() => owner.dispose());
+        expect(owner.fs.external).toBe(true);
         expect(owner.fs.capabilities.tags).toBe(false);
         expect((await owner.fs.capabilitiesAt('/host.md')).tags).toBe(false);
         expect((await owner.fs.driver.getNode('/host.md'))?.tags).toEqual([]);

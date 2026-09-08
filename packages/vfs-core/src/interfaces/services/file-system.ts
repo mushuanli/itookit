@@ -15,6 +15,12 @@ export interface IFileSystem extends FSEventEmitter {
     readonly capabilities: FSCapabilities;
     readonly driver: IFileSystemDriver;
     readonly meta: IFSMetaDriver;
+    /**
+     * True when this view was opened from a host-owned external directory.
+     * Such views never contribute tags to settings, even if their backend
+     * happens to report tag capability.
+     */
+    readonly external?: boolean;
     openFile(path: string): IFile;
     capabilitiesAt(path: string): Promise<FSCapabilities>;
 }

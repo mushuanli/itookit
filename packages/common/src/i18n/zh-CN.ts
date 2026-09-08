@@ -5,6 +5,24 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'flow.workspace.persistenceFailed': '清理状态保存失败',
+    'flow.workspace.pending': '工作区清理中',
+    'flow.workspace.succeeded': '工作区清理完成',
+    'flow.workspace.failed': '工作区清理失败',
+    'flow.retry.title': '重新执行此任务',
+    'flow.retry.hint': '创建新的任务执行，暂不重算下游。',
+    'flow.retry.source': '重试来源',
+    'flow.run.controlFailed': 'Run 控制操作失败',
+    'flow.retry.failed': '任务重试失败',
+    'flow.transcript.more': '加载更多记录',
+    'flow.transcript.exportText': '导出纯文本',
+    'flow.transcript.title': '任务记录',
+    'flow.transcript.export': '导出 JSON',
+    'flow.transcript.close': '关闭',
+    'flow.transcript.failed': '读取任务记录失败',
+    'flow.transcript.input': '输入',
+    'flow.transcript.interactions': '交互与审批',
+    'flow.transcript.output': '输出',
 
     // ── Skill type labels ───────────────────────────────────────────────────
     'skillType.prompt':         'Prompt',
@@ -143,6 +161,12 @@ export const zhCN = {
     'skill.trigger.globsLabel':          'Glob 自动挂载',
     'skill.trigger.globsHint':           '每行一个，文件打开时自动加载此 skill',
     'skill.trigger.correctionLogLabel':  '修正日志路径',
+    'skill.support.correctionEnabled': '加载修正日志',
+    'skill.support.correctionRoot': '修正日志的项目目录',
+    'skill.support.root': '参考文件与模板的目录',
+    'skill.support.references': '参考文件（每行一个相对路径）',
+    'skill.support.template': '模板相对路径',
+    'skill.support.hint': '目录使用会话中的路径，例如 /workspace；加载技能时读取文件，目录须已挂载到会话。',
     'skill.trigger.correctionLogHint':   '相对项目根，如 docs/corrections.md',
 
     'skill.hint.prompt':         '此内容将注入到 LLM 的 system prompt。适合编写操作规范、代码风格约定、领域知识等。',

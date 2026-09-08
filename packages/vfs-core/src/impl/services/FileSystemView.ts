@@ -19,6 +19,8 @@ export interface FileSystemViewOptions {
     revision?: number;
     /** Host files can explicitly disable MindOS tag metadata. */
     tags?: boolean;
+    /** Host-owned external directories never expose or persist tag metadata. */
+    external?: boolean;
     mounts: readonly FileSystemMount[];
     /** Optional host-defined visible subtrees (ancestors are visible directories). */
     readablePaths?: readonly string[];
@@ -39,6 +41,7 @@ export function normalizeVirtualPath(path: string): string {
 export class FileSystemView implements IFileSystem {
     readonly viewId: string;
     readonly revision: number;
+    readonly external: boolean;
     readonly capabilities: FSCapabilities;
     readonly driver: IFileSystemDriver;
     readonly meta: IFSMetaDriver;
@@ -53,6 +56,7 @@ export class FileSystemView implements IFileSystem {
     constructor(options: FileSystemViewOptions) {
         this.viewId = options.viewId;
         this.revision = options.revision ?? 1;
+        this.external = options.external === true;
         if (!this.viewId || !Number.isSafeInteger(this.revision) || this.revision < 0) throw new FSError('EINVAL', 'Invalid view identity or revision');
         this.readablePaths = options.readablePaths?.map(normalizeVirtualPath);
         this.mounts = options.mounts.map(m => ({ ...m, at: normalizeVirtualPath(m.at), root: normalizeVirtualPath(m.root ?? '/') }));
@@ -76,7 +80,7 @@ export class FileSystemView implements IFileSystem {
         this.capabilities = Object.fromEntries(Object.keys(first ?? {}).map(key => [key,
             this.mounts.length > 0 && this.mounts.every(m => Boolean((m.fs.capabilities as any)[key])),
         ])) as unknown as FSCapabilities;
-        this.capabilities = Object.freeze({ ...this.capabilities, tags: options.tags !== false && this.mounts.some(m => m.fs.capabilities.tags), readonly: this.mounts.every(m => m.access === 'ro' || m.fs.capabilities.readonly), symlinks: false, hardlinks: false, deviceFiles: false, watch: false, semanticSearch: false, search: true, mount: true });
+        this.capabilities = Object.freeze({ ...this.capabilities, tags: !this.external && options.tags !== false && this.mounts.some(m => m.fs.capabilities.tags), readonly: this.mounts.every(m => m.access === 'ro' || m.fs.capabilities.readonly), symlinks: false, hardlinks: false, deviceFiles: false, watch: false, semanticSearch: false, search: true, mount: true });
         this.driver = this.makeDriver();
         this.initializeFacade();
         this.meta = {

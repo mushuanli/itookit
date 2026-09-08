@@ -4,6 +4,24 @@
 import type { LocaleStrings } from './zh-CN';
 
 export const en: LocaleStrings = {
+    'flow.workspace.persistenceFailed': 'Failed to save cleanup status',
+    'flow.workspace.pending': 'Workspace cleanup pending',
+    'flow.workspace.succeeded': 'Workspace cleanup completed',
+    'flow.workspace.failed': 'Workspace cleanup failed',
+    'flow.retry.title': 'Retry this task',
+    'flow.retry.hint': 'Creates a new task attempt; downstream tasks are not recomputed yet.',
+    'flow.retry.source': 'Retry of',
+    'flow.run.controlFailed': 'Run control failed',
+    'flow.retry.failed': 'Task retry failed',
+    'flow.transcript.more': 'Load more exchanges',
+    'flow.transcript.exportText': 'Export text',
+    'flow.transcript.title': 'Task transcript',
+    'flow.transcript.export': 'Export JSON',
+    'flow.transcript.close': 'Close',
+    'flow.transcript.failed': 'Failed to load transcript',
+    'flow.transcript.input': 'Input',
+    'flow.transcript.interactions': 'Interactions and approvals',
+    'flow.transcript.output': 'Output',
 
     'skillType.prompt':          'Prompt',
     'skillType.shell':           'Shell',
@@ -132,6 +150,12 @@ export const en: LocaleStrings = {
     'skill.trigger.globsLabel':          'Glob Auto-mount',
     'skill.trigger.globsHint':           'One per line — skill loads when matching file opens',
     'skill.trigger.correctionLogLabel':  'Correction Log Path',
+    'skill.support.correctionEnabled': 'Load correction log',
+    'skill.support.correctionRoot': 'Correction log project directory',
+    'skill.support.root': 'Reference and template directory',
+    'skill.support.references': 'Reference files (one relative path per line)',
+    'skill.support.template': 'Template relative path',
+    'skill.support.hint': 'Use Session paths such as /workspace. Files are read when the skill loads, and their directories must already be mounted in the Session.',
     'skill.trigger.correctionLogHint':   'Relative to project root, e.g. docs/corrections.md',
 
     'skill.hint.prompt':         'This content is injected into the LLM system prompt. Good for coding conventions, domain knowledge, etc.',

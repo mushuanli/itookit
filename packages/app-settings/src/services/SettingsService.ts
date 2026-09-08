@@ -5,6 +5,8 @@ import { exportFileSystem, importFileSystem } from '@itookit/vfs-core';
  */
 import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { FSNotFoundError } from '@itookit/vfs-core';
+import { LabelStore, TAG_STORE_PATH } from './LabelStore';
+import { traceBoot } from '@itookit/common';
 import type { SyncMode } from '../types/sync';
 import { SettingsState, Contact, Tag } from '../types/types';
 import { SnapshotService } from './SnapshotService';
@@ -13,7 +15,7 @@ import { SnapshotService } from './SnapshotService';
 
 
 const FILES = {
-    tags: '/tags.json',
+    tags: TAG_STORE_PATH,
     contacts: '/contacts.json',
     sync: '/sync_config.json',
 };
@@ -84,6 +86,8 @@ export class SettingsService {
     private initialized = false;
     private syncTimer: ReturnType<typeof setTimeout> | null = null;
     private eventUnsubscribers: Array<() => void> = [];
+    private tagRefresh?: Promise<void>;
+    private tagStore!: LabelStore;
 
     public readonly snapshot: SnapshotService;
 
@@ -101,12 +105,13 @@ export class SettingsService {
         if (this.initialized) return;
 
         this.configFiles = await this.vfs.openFileSystem('/etc');
+        this.tagStore = new LabelStore(this.configFiles);
 
         // 1. 加载数据
         await Promise.all([
-            this.loadEntity('contacts'),
-            this.syncTags(),
-            this.loadSyncConfig(),
+            traceBoot('settings.contacts', () => this.loadEntity('contacts')),
+            traceBoot('settings.tagDefinitions', async () => { this.state.tags = await this.tagStore.list(); }),
+            traceBoot('settings.syncConfig', () => this.loadSyncConfig()),
         ]);
 
         // 2. 启动 VFS 事件监听
@@ -129,14 +134,12 @@ export class SettingsService {
     }
 
     /**
-     * 监听 VFS 事件以保持 Tag 计数同步
+     * 监听文件变更以触发已启用的自动同步；不自动统计标签
      */
     private bindVFSEvents(): void {
         const debounce = () => {
             if (this.syncTimer) clearTimeout(this.syncTimer);
             this.syncTimer = setTimeout(() => {
-                this.syncTags().then(() => this.notify());
-
                 if (this.syncConfig.autoSync &&
                     this.syncStatus.state !== 'syncing' &&
                     this.syncConfig.serverUrl) {
@@ -207,59 +210,64 @@ export class SettingsService {
         return [...this.state.tags];
     }
 
-    public async syncTags(): Promise<void> {
+    public syncTags(): Promise<void> {
+        // Opening/focusing the tag editor requests fresh counts. Startup and
+        // ordinary file changes must not launch a workspace traversal.
+        return this.tagRefresh ??= this.refreshTags().finally(() => { this.tagRefresh = undefined; });
+    }
+
+    /** MindOS-managed sources only: external directories never contribute tag counts. */
+    private tagSources(): readonly WorkspaceFileSource[] {
+        return this.workspaces.filter(source =>
+            source.internal !== false && source.fs.external !== true && source.fs.capabilities.tags);
+    }
+
+    private async refreshTags(): Promise<void> {
         try {
-            let configTags: Tag[] = [];
-            try {
-                const content = await this.configFiles.driver.readContent(FILES.tags);
-                const jsonStr = typeof content === 'string' 
-                    ? content 
-                    : new TextDecoder().decode(content as ArrayBuffer);
-                configTags = JSON.parse(jsonStr);
-            } catch (e) {
-                // ignore if file not exists
-            }
+            const configTags = await this.tagStore.list();
 
             const counts = new Map<string, { name: string; color?: string; refCount: number }>();
-            for (const source of this.workspaces) for (const tag of await source.fs.meta.tags.getAllTags()) {
-                let count = 0;
-                await source.fs.meta.tags.walkByTag(tag.name, () => { count++; return true; });
-                const previous = counts.get(tag.name);
-                counts.set(tag.name, { name: tag.name, color: tag.color ?? previous?.color,
-                    refCount: (previous?.refCount ?? 0) + count });
+            for (const source of this.tagSources()) {
+                const tags = await traceBoot(`settings.tags[${source.name}].getAllTags`, () => source.fs.meta.tags.getAllTags());
+                console.log(`[Boot] settings.tags[${source.name}]: ${tags.length} tags`);
+                for (const tag of tags) {
+                    const count = tag.refCount ?? 0;
+                    const previous = counts.get(tag.name);
+                    counts.set(tag.name, { name: tag.name, color: tag.color ?? previous?.color,
+                        refCount: (previous?.refCount ?? 0) + count });
+                }
             }
             const vfsTags = [...counts.values()];
 
-            const mergedTags: Tag[] = vfsTags.map((vTag) => {
-                const configTag = configTags.find((ct) => ct.name === vTag.name);
-                return {
-                    id: vTag.name,
-                    name: vTag.name,
-                    color: vTag.color || configTag?.color || '#3b82f6',
-                    description: configTag?.description || '',
-                    count: vTag.refCount || 0,
-                };
-            });
+            const merged = new Map(configTags.map(tag => [tag.name, { ...tag, count: 0 }]));
+            for (const tag of vfsTags) {
+                const definition = merged.get(tag.name);
+                merged.set(tag.name, {
+                    id: definition?.id ?? tag.name, name: tag.name,
+                    color: definition?.color ?? tag.color ?? '#3b82f6',
+                    description: definition?.description ?? '', count: tag.refCount,
+                });
+            }
+            const mergedTags: Tag[] = [...merged.values()];
 
             const oldStateStr = JSON.stringify(this.state.tags);
             this.state.tags = mergedTags;
             const newStateStr = JSON.stringify(this.state.tags);
 
             if (oldStateStr !== newStateStr) {
-                this.saveEntity('tags').catch((err) =>
-                    console.error('Failed to save merged tags', err)
-                );
                 if (this.initialized) this.notify();
             }
         } catch (e) {
-            console.error('[SettingsService] Failed to sync tags:', e);
+            console.error('[SettingsService] Failed to query tag indexes:', e);
+            throw e;
         }
     }
 
     async saveTag(tag: Tag): Promise<void> {
         // 更新 VFS 的标签定义
+        await this.tagStore.save(tag);
         this.updateOrAdd(this.state.tags, tag);
-        await this.saveEntity('tags');
+        this.notify();
     }
 
     async deleteTag(tagId: string): Promise<void> {
@@ -269,17 +277,18 @@ export class SettingsService {
         // 注意：VFS 可能没有直接的 deleteTagDefinition
         // 需要通过 TagManager 或者从所有节点移除该标签
         try {
-            for (const source of this.workspaces) {
+            for (const source of this.tagSources()) {
                 const paths: string[] = [];
                 await source.fs.meta.tags.walkByTag(tag.name, path => { paths.push(path); return true; });
                 for (const path of paths) await source.fs.meta.tags.removeTag(path, tag.name);
             }
         } catch (e) {
-            console.warn('Failed to cleanup tag from nodes', e);
+            console.error('Failed to remove tag associations', e);
+            throw e;
         }
 
+        await this.tagStore.delete(tagId);
         this.state.tags = this.state.tags.filter((t) => t.id !== tagId);
-        await this.saveEntity('tags');
         this.notify();
     }
 
@@ -573,7 +582,7 @@ export class SettingsService {
         for (const entry of selected) await importFileSystem(workspaceFiles(this.workspaces, entry.name), entry.archive);
         if (settingsKeys.includes('tags') && Array.isArray(data.settings?.tags)) {
             this.state.tags = data.settings.tags;
-            await this.saveEntity('tags');
+            await this.tagStore.replaceAll(data.settings.tags);
         }
         if (settingsKeys.includes('contacts') && Array.isArray(data.settings?.contacts)) {
             this.state.contacts = data.settings.contacts;
@@ -684,4 +693,3 @@ export class SettingsService {
         this.initialized = false;
     }
 }
-

@@ -3,7 +3,7 @@ import type { WorkspaceFileSource } from '../../services/workspace-files';
 
 /** Reuse the normal view protocol; the inspector has no alternate ID/path parser. */
 export async function createSystemFileInspector(sources: readonly WorkspaceFileSource[], devices: readonly IDeviceDriver[]) {
-    const descriptions = await createFileSystemSource({ backend: new MemoryBackend(), viewId: 'device-descriptions' });
+    const descriptions = await createFileSystemSource({ backend: new MemoryBackend(), viewId: 'device-descriptions', internal: true });
     try {
         for (const device of devices) {
             if (!/^[a-zA-Z0-9_-]+$/.test(device.handlerId)) continue;

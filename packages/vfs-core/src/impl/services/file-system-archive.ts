@@ -52,7 +52,7 @@ export async function importFileSystem(fs: IFileSystem, archive: FileSystemArchi
         seen.add(path);
     }
     if (archive.entries.find(entry => entry.node.path === '/')?.node.type !== 'directory') throw new FSError('EINVAL', 'Archive root missing');
-    const staging = await createFileSystemSource({ backend: new MemoryBackend(), viewId: 'archive-staging' });
+    const staging = await createFileSystemSource({ backend: new MemoryBackend(), viewId: 'archive-staging', internal: true });
     try {
         const ordered = [...archive.entries].sort((a, b) => a.node.path.split('/').length - b.node.path.split('/').length);
         for (const entry of ordered) {
