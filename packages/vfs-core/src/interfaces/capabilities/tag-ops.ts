@@ -8,11 +8,15 @@
 export interface TagDefinition {
     name: string;
     color?: string;
+    refCount?: number;
 }
 
 export interface ITagOperations {
     /** 获取本模块所有标签定义 */
     getAllTags(): Promise<TagDefinition[]>;
+
+    /** Indexed associations within this view, with view-relative paths. */
+    listTagEntries?(): Promise<Array<{ path: string; tag: string }>>;
 
     /** 设置节点标签（全量替换，空数组清除） */
     setTags(path: string, tags: string[]): Promise<void>;

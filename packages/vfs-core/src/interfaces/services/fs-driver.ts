@@ -46,7 +46,7 @@ import type { FSEventEmitter } from '../core/events';
  * 事务操作接口
  *
  * 与 IFSDriver 核心写入方法签名一致。
- * 事务内的事件在 commit 后合并触发；任一操作失败则全部回滚。
+ * 事务内的事件在 commit 后重放；数据回滚能力由具体 backend 决定。
  */
 export interface IFSDriverTransaction {
     getNode(path: string): Promise<FSNode | null>;
@@ -82,8 +82,6 @@ export interface IFSDriverTransaction {
 // ═══════════════════════════════════════════════════════════════
 
 export interface IFSDriver extends FSEventEmitter {
-    /** 当前模块 ID */
-
     /** 能力声明 */
     readonly capabilities: FSCapabilities;
 
@@ -130,26 +128,26 @@ export interface IFSDriver extends FSEventEmitter {
     walkTree?(callback: TreeWalkCallback, options?: TreeWalkOptions): Promise<number>;
 
     /**
-     * 搜索模块内节点。
+     * 搜索当前视图内节点。
      * assetdir 内部节点不出现在结果中，命中时映射为宿主文件节点。
      */
     search(query: FSSearchQuery): Promise<FSSearchResult>;
 
-    /** 模块统计信息 */
+    /** 视图统计信息 */
     getStats?(): Promise<FileSystemStats>;
 
     // ── 写入 ────────────────────────────────────────────────────
 
     /**
      * 创建文件
-     * @throws FSReservedNameError 文件名以 . 或 _ 开头
+     * @throws FSReservedNameError 文件名不符合当前名称规则
      * @emits node:created
      */
     createFile(options: CreateFileOptions): Promise<FSNode>;
 
     /**
      * 创建目录
-     * @throws FSReservedNameError 目录名以 . 或 _ 开头
+     * @throws FSReservedNameError 目录名不符合当前名称规则
      * @emits node:created
      */
     createDirectory(options: CreateDirectoryOptions): Promise<FSNode>;

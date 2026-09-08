@@ -199,6 +199,10 @@ export class MemoryBackend implements IStorageBackend {
         return [...seen];
     }
 
+    async listTagEntries(): Promise<Array<{ path: string; tag: string }>> {
+        return [...this.data.entries()].flatMap(([path, entry]) => [...new Set(entry.tags)].map(tag => ({ path, tag })));
+    }
+
     // ── Search ──
 
     async search(query: FSSearchQuery): Promise<FSNode[]> {

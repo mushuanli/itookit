@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { freshMem, setupDualMountVFS, setupVFS, readText, type TestVFS } from './helpers';
 import { createVFS } from '../src/impl/factory';
+import type { VFSEngine } from '../src';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module lifecycle tests
@@ -158,3 +159,27 @@ describe('Mount point capabilities', () => {
         }
     });
 });
+
+describe('same-backend mount shadowing', () => {
+    it('returns indexed tags only from the mount that owns the resolved path', async () => {
+        const backend = freshMem();
+        const { manager } = await createVFS({ rootBackend: backend });
+        try {
+            await backend.write('/nested/hidden.md', new Uint8Array());
+            await backend.setTags('/nested/hidden.md', ['hidden']);
+            await manager.mounts.mountBackend('/nested', backend);
+
+            const engine = (manager as unknown as { _engine: VFSEngine })._engine;
+            expect(await engine.listTagEntries('/')).toEqual([
+                { path: '/nested/nested/hidden.md', tag: 'hidden' },
+            ]);
+
+            await engine.writeContent('/nested/visible.md', 'visible');
+            expect(new TextDecoder().decode(await backend.read('/visible.md'))).toBe('visible');
+            expect(await backend.stat('/nested/visible.md')).toBeNull();
+        } finally {
+            await manager.dispose();
+        }
+    });
+});
+

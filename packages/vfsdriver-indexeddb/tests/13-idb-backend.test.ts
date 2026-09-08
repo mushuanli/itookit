@@ -1,12 +1,34 @@
 /**
  * IndexedDB backend contract tests for the path-based storage model.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { IndexedDBBackend } from '../src/index';
 import { freshIDB } from './helpers';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+
+describe('tag association index', () => {
+    it('keeps associations in sync with tag updates, subtree renames and deletion', async () => {
+        const backend = freshIDB('tag-index');
+        await backend.init();
+        try {
+            await backend.write('/folder/file.md', encoder.encode('content'));
+            await backend.write('/folder-other/keep.md', encoder.encode('keep'));
+            await backend.setTags('/folder/file.md', ['work', 'work']);
+            await backend.setTags('/folder-other/keep.md', ['keep']);
+            await backend.rename('/folder', '/moved');
+            expect(await backend.listTagEntries()).toEqual(expect.arrayContaining([
+                { path: '/moved/file.md', tag: 'work' }, { path: '/folder-other/keep.md', tag: 'keep' },
+            ]));
+            expect((await backend.listTagEntries()).length).toBe(2);
+            await backend.setTags('/moved/file.md', ['done']);
+            expect(await backend.getAllTags()).not.toContain('work');
+            await backend.delete('/moved', { recursive: true });
+            expect(await backend.listTagEntries()).toEqual([{ path: '/folder-other/keep.md', tag: 'keep' }]);
+        } finally { await backend.close(); }
+    });
+});
 
 describe('IndexedDBBackend lifecycle', () => {
     it('initializes idempotently and closes safely', async () => {
@@ -80,6 +102,115 @@ describe('IndexedDBBackend records', () => {
         await backend.close();
     });
 });
+
+describe('IndexedDBBackend rename records', () => {
+    it('migrates file records with the file', async () => {
+        const backend = freshIDB('rename-file-records');
+        await backend.init();
+        try {
+            await backend.write('/old.seq', encoder.encode('old'));
+            await backend.records.setRecordField('/old.seq', 'state', 'ready');
+            await backend.rename('/old.seq', '/new.seq');
+
+            expect(await backend.stat('/old.seq')).toBeNull();
+            expect((await backend.stat('/new.seq'))?.path).toBe('/new.seq');
+            expect(await backend.records.getRecordField('/new.seq', 'state')).toBe('ready');
+            expect(await backend.records.getRecordField('/old.seq', 'state')).toBeUndefined();
+        } finally { await backend.close(); }
+    });
+
+    it('migrates subtree records without touching prefix siblings', async () => {
+        const backend = freshIDB('rename-subtree-records');
+        await backend.init();
+        try {
+            await backend.write('/folder/data.seq', encoder.encode('data'));
+            await backend.write('/folder-other/keep.seq', encoder.encode('keep'));
+            await backend.records.setRecordField('/folder/data.seq', 'state', 'ready');
+            await backend.records.setRecordField('/folder-other/keep.seq', 'state', 'sibling');
+
+            await backend.rename('/folder', '/moved');
+
+            expect(await backend.records.getRecordField('/moved/data.seq', 'state')).toBe('ready');
+            expect(await backend.records.getRecordField('/folder/data.seq', 'state')).toBeUndefined();
+            expect(await backend.records.getRecordField('/folder-other/keep.seq', 'state')).toBe('sibling');
+            expect(await backend.stat('/moved/data.seq')).not.toBeNull();
+            expect(await backend.stat('/folder/data.seq')).toBeNull();
+        } finally { await backend.close(); }
+    });
+
+    it('refuses to overwrite durable destination records', async () => {
+        const backend = freshIDB('rename-record-conflict');
+        await backend.init();
+        try {
+            await backend.write('/source.seq', encoder.encode('source'));
+            await backend.records.setRecordField('/source.seq', 'state', 'source');
+            await backend.records.setRecordField('/dest.seq', 'state', 'dest');
+
+            await expect(backend.rename('/source.seq', '/dest.seq'))
+                .rejects.toThrow(/destination.*records/i);
+
+            expect(await backend.stat('/source.seq')).not.toBeNull();
+            expect(await backend.stat('/dest.seq')).toBeNull();
+            expect(await backend.records.getRecordField('/source.seq', 'state')).toBe('source');
+            expect(await backend.records.getRecordField('/dest.seq', 'state')).toBe('dest');
+        } finally { await backend.close(); }
+    });
+
+    it('refuses to merge an existing destination subtree', async () => {
+        const backend = freshIDB('rename-node-conflict');
+        await backend.init();
+        try {
+            await backend.write('/source/child.seq', encoder.encode('source'));
+            await backend.records.setRecordField('/source/child.seq', 'state', 'source');
+            await backend.write('/dest/child.seq', encoder.encode('dest'));
+
+            await expect(backend.rename('/source', '/dest'))
+                .rejects.toThrow(/destination exists/i);
+
+            expect(await backend.stat('/source/child.seq')).not.toBeNull();
+            expect(await backend.records.getRecordField('/source/child.seq', 'state')).toBe('source');
+            expect(await backend.stat('/dest/child.seq')).not.toBeNull();
+        } finally { await backend.close(); }
+    });
+
+    it('rolls back all node, tag and record moves when a later write fails', async () => {
+        const backend = freshIDB('rename-rollback');
+        await backend.init();
+        try {
+            await backend.write('/source/a.seq', encoder.encode('a'));
+            await backend.write('/source/b.seq', encoder.encode('b'));
+            await backend.setTags('/source/a.seq', ['durable']);
+            await backend.records.setRecordField('/source/a.seq', 'state', 'a');
+            await backend.records.setRecordField('/source/b.seq', 'state', 'b');
+
+            const originalAdd = IDBObjectStore.prototype.add;
+            let nodeAdds = 0;
+            const spy = vi.spyOn(IDBObjectStore.prototype, 'add').mockImplementation(function (
+                this: IDBObjectStore,
+                ...args: any[]
+            ) {
+                if (this.name === 'nodes' && ++nodeAdds === 2) throw new Error('injected node add failure');
+                return (originalAdd as any).apply(this, args);
+            });
+
+            try {
+                await expect(backend.rename('/source', '/moved')).rejects.toThrow('injected node add failure');
+            } finally {
+                spy.mockRestore();
+            }
+
+            expect(await backend.stat('/source')).not.toBeNull();
+            expect(await backend.stat('/source/a.seq')).not.toBeNull();
+            expect(await backend.stat('/source/b.seq')).not.toBeNull();
+            expect(await backend.stat('/moved')).toBeNull();
+            expect(await backend.listTagEntries()).toEqual([{ path: '/source/a.seq', tag: 'durable' }]);
+            expect(await backend.records.getRecordField('/source/a.seq', 'state')).toBe('a');
+            expect(await backend.records.getRecordField('/source/b.seq', 'state')).toBe('b');
+            expect(await backend.records.getRecordField('/moved/a.seq', 'state')).toBeUndefined();
+        } finally { await backend.close(); }
+    });
+});
+
 
 describe('IndexedDBBackend path model', () => {
     it('creates intermediate directories and protects file path segments', async () => {

@@ -2,7 +2,7 @@
  * @file packages/vfs-core/src/impl/services/config-service.ts
  * @desc IConfigService 实现
  *
- * 配置文件存储在 __config 模块中。
+ * 配置文件存储在宿主注入的文件来源中（工厂使用 /etc）。
  * 当后端支持 IRecordStore 时使用 seqfile，否则退化为 JSON 文件。
  */
 

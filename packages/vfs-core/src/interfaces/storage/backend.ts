@@ -51,6 +51,9 @@ export interface IStorageBackend {
     /** 获取所有已使用的标签 */
     getAllTags(): Promise<string[]>;
 
+    /** Indexed associations only; must not traverse files or read content. */
+    listTagEntries?(): Promise<Array<{ path: string; tag: string }>>;
+
     // ── 选配能力（不支持的后端返回 undefined） ──
 
     /** SeqFile K-V 记录存储 */

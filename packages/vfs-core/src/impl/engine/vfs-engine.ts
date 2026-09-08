@@ -100,8 +100,10 @@ export class VFSEngine {
     /** Resolve backend + local path + mount path for a system path. */
     private resolveStore(systemPath: string): { backend: IStorageBackend; localPath: string; mountPath: string } {
         if (!this._mountRouter) return { backend: this.backend, localPath: systemPath, mountPath: '/' };
+        // Always translate through the resolved mount, even when a sub-mount aliases
+        // the root backend. The old backend-identity shortcut made /nested/... bypass
+        // its mount and read/write the root-local path instead.
         const { mount, relativePath } = this._mountRouter.resolve(systemPath);
-        if (mount.backend === this.backend) return { backend: this.backend, localPath: systemPath, mountPath: '/' };
         return { backend: mount.backend, localPath: relativePath ? '/' + relativePath : '/', mountPath: mount.mountPath };
     }
 
@@ -424,6 +426,27 @@ export class VFSEngine {
     }
 
     // ── Metadata ──
+
+    async listTagEntries(root: string): Promise<Array<{ path: string; tag: string }>> {
+        const mounts = this._mountRouter?.listMounts().map(m => ({ backend: m.backend, mountPath: m.mountPath }))
+            ?? [{ backend: this.backend, mountPath: '/' }];
+        const entries: Array<{ path: string; tag: string }> = [];
+        for (const mount of mounts) {
+            if (!P.isUnder(root, mount.mountPath) && !P.isUnder(mount.mountPath, root)) continue;
+            if (!mount.backend.listTagEntries) throw new FSCapabilityError('indexed tags', mount.mountPath);
+            for (const entry of await mount.backend.listTagEntries()) {
+                const path = this.mapToSystemPath(entry.path, mount.mountPath);
+                if (!P.isUnder(path, root)) continue;
+                const owner = this.resolveStore(path);
+                // Backend identity is not enough: the same backend may be mounted
+                // more than once, and only the longest-prefix mount owns `path`.
+                if (owner.backend === mount.backend && owner.mountPath === mount.mountPath) {
+                    entries.push({ path, tag: entry.tag });
+                }
+            }
+        }
+        return entries;
+    }
 
     async setTags(path: string, tags: string[]): Promise<void> {
         const { backend, localPath } = this.resolveStore(path);

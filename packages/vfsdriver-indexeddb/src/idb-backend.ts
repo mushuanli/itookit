@@ -37,6 +37,12 @@ interface NodeEntry {
     metadata: string; // JSON
 }
 
+interface RecordRow {
+    path: string;
+    field: string;
+    value: RecordValue;
+}
+
 export interface IndexedDBBackendOptions {
     dbName?: string;
 }
@@ -154,24 +160,66 @@ export class IndexedDBBackend implements IStorageBackend {
     }
 
     async rename(fromPath: string, toPath: string): Promise<void> {
+        if (fromPath === toPath) return;
         const entry = await this._getEntry(fromPath);
         if (!entry) return;
+        if (toPath.startsWith(fromPath + '/') || fromPath.startsWith(toPath + '/')) {
+            throw new Error('Cannot rename overlapping subtrees');
+        }
         const fromPrefix = fromPath + '/';
         const toPrefix = toPath + '/';
         const db = this._db();
-        const tx = db.transaction(STORE_NODES, 'readwrite');
-        const nodes = tx.objectStore(STORE_NODES);
+        const tx = db.transaction([STORE_NODES, STORE_TAGS, STORE_RECORDS], 'readwrite');
+        const completed = waitForTransaction(tx);
+        try {
+            const nodes = tx.objectStore(STORE_NODES);
+            const tags = tx.objectStore(STORE_TAGS);
+            const records = tx.objectStore(STORE_RECORDS);
 
-        const all = await collectCursor<NodeEntry>(nodes.openCursor(), c => c.value);
-        for (const e of all) {
-            if (e.path === fromPath) {
-                nodes.delete(fromPath);
-                await req(nodes.add({ ...entry, path: toPath, modifiedAt: Date.now() }));
-            } else if (e.path.startsWith(fromPrefix)) {
-                const newChildPath = toPrefix + e.path.slice(fromPrefix.length);
-                nodes.delete(e.path);
-                await req(nodes.add({ ...e, path: newChildPath, modifiedAt: Date.now() }));
+            const allNodes = await collectCursor<NodeEntry>(nodes.openCursor(), c => c.value);
+            const allTags = await collectCursor<{ id: number; path: string; tag: string }>(tags.openCursor(), c => c.value);
+            const allRecords = await collectCursor<RecordRow>(records.openCursor(), c => c.value as RecordRow);
+
+            const isSourcePath = (path: string) => path === fromPath || path.startsWith(fromPrefix);
+            const mappedPath = (path: string) => path === fromPath ? toPath : toPrefix + path.slice(fromPrefix.length);
+            const sourceNodes = allNodes.filter(e => isSourcePath(e.path));
+            const sourcePaths = new Set(sourceNodes.map(e => e.path));
+
+            // Match LocalFS: refuse to merge an existing destination subtree,
+            // including durable records/tags that have no node row.
+            for (const e of allNodes) {
+                if (!sourcePaths.has(e.path) && (e.path === toPath || e.path.startsWith(toPrefix))) {
+                    throw new Error(`Rename destination exists: ${e.path}`);
+                }
             }
+            for (const ref of allTags) {
+                if (!isSourcePath(ref.path) && (ref.path === toPath || ref.path.startsWith(toPrefix))) {
+                    throw new Error(`Rename destination has tag associations: ${ref.path}`);
+                }
+            }
+            for (const row of allRecords) {
+                if (!isSourcePath(row.path) && (row.path === toPath || row.path.startsWith(toPrefix))) {
+                    throw new Error(`Rename destination has durable records: ${row.path}`);
+                }
+            }
+
+            for (const e of sourceNodes) {
+                nodes.delete(e.path);
+                await req(nodes.add({ ...e, path: mappedPath(e.path), modifiedAt: Date.now() }));
+            }
+            for (const ref of allTags) {
+                if (isSourcePath(ref.path)) await req(tags.put({ ...ref, path: mappedPath(ref.path) }));
+            }
+            for (const row of allRecords) {
+                if (!isSourcePath(row.path)) continue;
+                records.delete([row.path, row.field]);
+                await req(records.add({ ...row, path: mappedPath(row.path) }));
+            }
+            await completed;
+        } catch (error) {
+            try { tx.abort(); } catch { /* already finished */ }
+            await completed.catch(() => undefined);
+            throw error;
         }
     }
 
@@ -218,12 +266,29 @@ export class IndexedDBBackend implements IStorageBackend {
     }
 
     async setTags(path: string, tags: string[]): Promise<void> {
-        const entry = await this._getEntry(path);
-        if (!entry) return;
-        entry.tags = tags;
-        entry.modifiedAt = Date.now();
-        await this._putEntry(entry);
-        await this._syncTags(path, tags);
+        const tx = this._db().transaction([STORE_NODES, STORE_TAGS], 'readwrite');
+        const completed = waitForTransaction(tx);
+        try {
+            const nodes = tx.objectStore(STORE_NODES);
+            const entry = await req(nodes.get(path)) as NodeEntry | undefined;
+            if (entry) {
+                entry.tags = [...new Set(tags)];
+                entry.modifiedAt = Date.now();
+                await req(nodes.put(entry));
+                await this._deleteTagRefs(tx, path);
+                for (const tag of entry.tags) await req(tx.objectStore(STORE_TAGS).add({ path, tag }));
+            }
+            await completed;
+        } catch (error) {
+            try { tx.abort(); } catch { /* already finished */ }
+            await completed.catch(() => undefined);
+            throw error;
+        }
+    }
+
+    async listTagEntries(): Promise<Array<{ path: string; tag: string }>> {
+        const tx = this._db().transaction(STORE_TAGS, 'readonly');
+        return collectCursor<{ path: string; tag: string }>(tx.objectStore(STORE_TAGS).openCursor(), c => ({ path: c.value.path, tag: c.value.tag }));
     }
 
     async getAllTags(): Promise<string[]> {
@@ -383,16 +448,6 @@ export class IndexedDBBackend implements IStorageBackend {
         const db = this._db();
         const tx = db.transaction(STORE_NODES, 'readwrite');
         await req(tx.objectStore(STORE_NODES).put(entry));
-    }
-
-    private async _syncTags(path: string, tags: string[]): Promise<void> {
-        const db = this._db();
-        const tx = db.transaction(STORE_TAGS, 'readwrite');
-        const store = tx.objectStore(STORE_TAGS);
-        const idx = store.index('path');
-        const existing = await collectCursor<{ id: number }>(idx.openCursor(IDBKeyRange.only(path)), c => c.value);
-        for (const e of existing) store.delete(e.id);
-        for (const tag of tags) await req(store.add({ path, tag }));
     }
 
     private async _deleteTagRefs(tx: IDBTransaction, path: string): Promise<void> {

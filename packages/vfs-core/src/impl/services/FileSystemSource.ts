@@ -17,12 +17,13 @@ export async function createFileSystemSource(options: {
     backend: IStorageBackend;
     viewId: string;
     access?: 'ro' | 'rw';
+    tags?: boolean;
 }): Promise<FileSystemSourceOwner> {
     const { manager } = await createVFS({ rootBackend: new MemoryBackend(),
         additionalMounts: [{ path: '/source', backend: options.backend }] });
     try {
         const directory = await manager.openFileSystem('/source');
-        const fs = createFileSystemView({ viewId: options.viewId,
+        const fs = createFileSystemView({ viewId: options.viewId, tags: options.tags,
             mounts: [{ mountId: 'source', at: '/', fs: directory, access: options.access ?? 'rw' }] });
         let closing: Promise<void> | undefined;
         return { fs, dispose: () => closing ??= (async () => { await fs.dispose(); await manager.dispose(); })() };

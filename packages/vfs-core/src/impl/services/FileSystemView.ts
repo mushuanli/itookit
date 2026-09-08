@@ -17,6 +17,8 @@ export interface FileSystemMount {
 export interface FileSystemViewOptions {
     viewId: string;
     revision?: number;
+    /** Host files can explicitly disable MindOS tag metadata. */
+    tags?: boolean;
     mounts: readonly FileSystemMount[];
     /** Optional host-defined visible subtrees (ancestors are visible directories). */
     readablePaths?: readonly string[];
@@ -74,7 +76,7 @@ export class FileSystemView implements IFileSystem {
         this.capabilities = Object.fromEntries(Object.keys(first ?? {}).map(key => [key,
             this.mounts.length > 0 && this.mounts.every(m => Boolean((m.fs.capabilities as any)[key])),
         ])) as unknown as FSCapabilities;
-        this.capabilities = Object.freeze({ ...this.capabilities, readonly: this.mounts.every(m => m.access === 'ro' || m.fs.capabilities.readonly), symlinks: false, hardlinks: false, deviceFiles: false, watch: false, semanticSearch: false, search: true, mount: true });
+        this.capabilities = Object.freeze({ ...this.capabilities, tags: options.tags !== false && this.mounts.some(m => m.fs.capabilities.tags), readonly: this.mounts.every(m => m.access === 'ro' || m.fs.capabilities.readonly), symlinks: false, hardlinks: false, deviceFiles: false, watch: false, semanticSearch: false, search: true, mount: true });
         this.driver = this.makeDriver();
         this.initializeFacade();
         this.meta = {
@@ -90,7 +92,7 @@ export class FileSystemView implements IFileSystem {
             const m = this.find(normalizeVirtualPath(path));
             if (!m) return this.capabilities;
             const caps = await m.fs.capabilitiesAt(this.sourcePath(m, path));
-            return { ...caps, symlinks: false, hardlinks: false, deviceFiles: false, watch: false, readonly: m.access === 'ro' || caps.readonly };
+            return { ...caps, tags: this.capabilities.tags && caps.tags, symlinks: false, hardlinks: false, deviceFiles: false, watch: false, readonly: m.access === 'ro' || caps.readonly };
         });
     }
 
@@ -125,7 +127,7 @@ export class FileSystemView implements IFileSystem {
         const { viewId: _viewId, ...value } = node;
         const path = this.virtualPath(m, node.path);
         if (!this.readable(path)) return { path, parentPath: path === '/' ? null : P.dirname(path), name: P.basename(path), type: 'directory', createdAt: 0, modifiedAt: 0, version: this.revision, tags: [], metadata: {} };
-        return { ...value, path, name: P.basename(path), parentPath: path === '/' ? null : P.dirname(path),
+        return { ...value, tags: this.capabilities.tags && m.fs.capabilities.tags ? value.tags : [], path, name: P.basename(path), parentPath: path === '/' ? null : P.dirname(path),
             ...('assetDirPath' in node && node.assetDirPath ? { assetDirPath: this.virtualPath(m, node.assetDirPath) } : {}),
         } as FSNode;
     }
@@ -290,22 +292,38 @@ export class FileSystemView implements IFileSystem {
         return node ? this.node(m, node) : null;
     }
 
+    private async indexedTags(): Promise<Array<{ path: string; tag: string }>> {
+        if (!this.capabilities.tags) return [];
+        const entries: Array<{ path: string; tag: string }> = [];
+        for (const mount of this.mounts) {
+            if (!mount.fs.capabilities.tags) continue;
+            if (!mount.fs.meta.tags.listTagEntries) throw new FSCapabilityError('indexed tags');
+            for (const entry of await mount.fs.meta.tags.listTagEntries()) {
+                if (!P.isUnder(entry.path, mount.root)) continue;
+                const path = P.join(mount.at, P.relative(mount.root, entry.path));
+                if (this.readable(path) && this.find(path) === mount) entries.push({ path, tag: entry.tag });
+            }
+        }
+        return entries;
+    }
+
     private makeMeta(group: 'assets' | 'tags' | 'seq' | 'refs'): any {
         return new Proxy({}, { get: (_, method: string) => (...args: any[]) => this.operation(async () => {
+            if (group === 'tags' && method === 'listTagEntries') return this.indexedTags();
             if (group === 'tags' && method === 'getAllTags') {
-                const tags = new Set<string>();
-                await this.walk(n => { for (const tag of n.tags) tags.add(tag); });
-                return [...tags].map(name => ({ name }));
+                const counts = new Map<string, number>();
+                for (const { tag } of await this.indexedTags()) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+                return [...counts].map(([name, refCount]) => ({ name, refCount }));
             }
             if (group === 'tags' && method === 'walkByTag') {
-                const matches: string[] = [];
-                await this.walk(n => { if (n.tags.includes(args[0])) matches.push(n.path); });
+                const matches = (await this.indexedTags()).filter(entry => entry.tag === args[0]).map(entry => entry.path).sort();
                 let processed = 0;
                 for (const path of matches.slice(args[2]?.offset ?? 0, args[2]?.limit === undefined ? undefined : (args[2]?.offset ?? 0) + args[2].limit)) {
                     processed++; if (await args[1](path) === false) break;
                 }
                 return { total: matches.length, processed };
             }
+            if (group === 'tags' && !this.capabilities.tags) throw new FSCapabilityError('tags');
             if (group === 'seq' && method === 'transaction') {
                 if (this.mounts.length !== 1) throw new FSCapabilityError('Use seqTransaction(scopePath, fn) for multiple mounts');
                 return this.seqTransaction(this.mounts[0].at, args[0]);
@@ -315,6 +333,7 @@ export class FileSystemView implements IFileSystem {
         }) });
     }
     private async metaCall(group: string, method: string, input: any[], api?: object, expected?: Binding): Promise<any> {
+        if (group === 'tags' && !this.capabilities.tags) throw new FSCapabilityError('tags');
         const allowed: Record<string, readonly string[]> = {
             assets: ['getAssetDirPath', 'ensureAssetDir', 'putAsset', 'getAsset', 'deleteAsset', 'listAssets', 'removeAssetDir', 'hasAssetDir', 'validateAssetDir', 'repairAssetDir'],
             tags: ['setTags', 'addTag', 'removeTag'],

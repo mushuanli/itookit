@@ -10,6 +10,41 @@ function view(...args: Parameters<typeof createFileSystemView>): FileSystemView 
 }
 
 describe('independent file system views', () => {
+    it('disables tag reads and writes for external host sources', async () => {
+        const backend = new MemoryBackend();
+        await backend.init();
+        await backend.write('/host.md', new Uint8Array());
+        await backend.setTags('/host.md', ['legacy']);
+        const owner = await createFileSystemSource({ backend, viewId: 'host', tags: false });
+        cleanup.push(() => owner.dispose());
+        expect(owner.fs.capabilities.tags).toBe(false);
+        expect((await owner.fs.capabilitiesAt('/host.md')).tags).toBe(false);
+        expect((await owner.fs.driver.getNode('/host.md'))?.tags).toEqual([]);
+        expect(await owner.fs.meta.tags.getAllTags()).toEqual([]);
+        await expect(owner.fs.meta.tags.setTags('/host.md', ['new'])).rejects.toThrow();
+    });
+    it('queries the tag index of a whole-source view without traversing files', async () => {
+        const fs = await source();
+        await fs.driver.createFile({ name: 'tagged.md', content: 'test' });
+        await fs.meta.tags.setTags('/tagged.md', ['work']);
+        const app = view({ viewId: 'root', mounts: [{ mountId: 'root', at: '/', fs, access: 'ro' }] });
+        const children = vi.spyOn(fs.driver, 'getChildren').mockRejectedValue(new Error('Must not scan'));
+        expect(await app.meta.tags.getAllTags()).toContainEqual({ name: 'work', refCount: 1 });
+        const paths: string[] = [];
+        await app.meta.tags.walkByTag('work', path => { paths.push(path); return true; });
+        expect(paths).toEqual(['/tagged.md']);
+        expect(children).not.toHaveBeenCalled();
+    });
+
+    it('does not expose source-wide tags through a restricted subdirectory view', async () => {
+        const fs = await source();
+        await fs.driver.createDirectory({ name: 'visible' });
+        await fs.driver.createFile({ name: 'secret.md', content: 'hidden' });
+        await fs.meta.tags.setTags('/secret.md', ['secret']);
+        const app = view({ viewId: 'restricted', mounts: [{ mountId: 'subdir', at: '/', root: '/visible', fs, access: 'ro' }] });
+        expect(await app.meta.tags.getAllTags()).toEqual([]);
+    });
+
     it('owns explicit directory views and revokes derived handles when the host closes', async () => {
         const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
         cleanup.push(() => manager.dispose());

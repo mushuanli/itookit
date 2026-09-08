@@ -2,7 +2,7 @@
  * @file packages/vfs-core/src/interfaces/capabilities/seq-file.ts
  * @desc SeqFile 操作子接口
  *
- * 通过 IFileSystem.seq 访问（当 capabilities.seqFiles === true）。
+ * 通过 IFileSystem.meta.seq 访问（当 capabilities.seqFiles === true）。
  *
  * SeqFileEntry 是唯一定义位置，core/types.ts re-export。
  */
