@@ -41,6 +41,10 @@ export class DefaultTaskHandle<O> implements TaskHandle<O> {
     publishCache(request: import('../domain/cache').CachePublish) { return this.kernel.publishCache(this.sessionId, this.id, request); }
     invalidateCache(handleId: string, expectedGeneration: number) { return this.kernel.invalidateCache(this.sessionId, this.id, handleId, expectedGeneration); }
 
+    retry(options: { requestId: string }): Promise<TaskHandle<O>> {
+        return this.kernel.retryTask<O>(this.sessionId, this.id, options);
+    }
+
     async status(): Promise<TaskSnapshot> {
         return { task: await this.kernel.task(this.sessionId, this.id) };
     }
@@ -67,8 +71,8 @@ export class DefaultTaskHandle<O> implements TaskHandle<O> {
     interrupt(options: import('../domain/types').TaskControlOptions) { return this.kernel.controlTask(this.sessionId, this.id, 'interrupt', options); }
     resume(options: import('../domain/types').TaskControlOptions & { signal?: TaskSignal }) { return this.kernel.controlTask(this.sessionId, this.id, 'run', options); }
 
-    start(): Promise<void> {
-        return this.kernel.startTask(this.sessionId, this.id);
+    start(options?: import('../domain/types').TaskStartOptions): Promise<void> {
+        return this.kernel.startTask(this.sessionId, this.id, options);
     }
 
     respond<T extends JsonValue>(response: InteractionResponse<T>): Promise<void> {

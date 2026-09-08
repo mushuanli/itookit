@@ -2,7 +2,7 @@ import type { ISeqFileTransaction } from '@itookit/vfs-core';
 import type { CrossSessionMessage, TaskMessageRequest, TaskRecord } from '../../domain/types';
 import { assertDurableValue } from '../../application/durability';
 import { appendEventTx, decode, encode, inboxKey, messagesPath, outboxKey } from './seqfile-core';
-import { indexTask, isTerminal, requireSessionTx, requireTaskTx, unregisterTaskWaitTx, wakeFromPendingEvents, writeTaskTx } from './store-helpers';
+import { hasCancelledAncestorTx, indexTask, isTerminal, requireSessionTx, requireTaskTx, unregisterTaskWaitTx, wakeFromPendingEvents, writeTaskTx } from './store-helpers';
 
 export async function enqueueMessageTx(tx: ISeqFileTransaction, root: string, sender: TaskRecord, request: TaskMessageRequest): Promise<CrossSessionMessage> {
     if (!request.idempotencyKey || !request.topic || !request.targetTaskId || !request.targetSessionId) throw new Error('Message identity, topic and target are required');
@@ -16,6 +16,7 @@ export async function enqueueMessageTx(tx: ISeqFileTransaction, root: string, se
         if (old.requestFingerprint !== fingerprint) throw new Error('Message identity conflict');
         return old;
     }
+    if (await hasCancelledAncestorTx(tx, root, sender)) throw new Error('Task ancestor cancelled');
     const message: CrossSessionMessage = {
         id, sourceSessionId: sender.sessionId, sourceTaskId: sender.id,
         targetSessionId: request.targetSessionId, targetTaskId: request.targetTaskId,
@@ -50,6 +51,7 @@ export async function deliverMessageTx(tx: ISeqFileTransaction, root: string, me
     if (message.targetTaskId) {
         const task = await requireTaskTx(tx, root, message.targetTaskId);
         if (isTerminal(task.status)) return rejectMessageTx(tx, root, message, 'target-terminal', 'Message target task is terminal');
+        if (await hasCancelledAncestorTx(tx, root, task)) return rejectMessageTx(tx, root, message, 'target-ancestor-cancelled', 'Message target task ancestor is cancelled');
         let next: TaskRecord = { ...task, pendingEvents: [...task.pendingEvents, { type: 'message', message: delivered }],
             version: task.version + 1, updatedAt: Date.now() };
         next = wakeFromPendingEvents(next);

@@ -1,8 +1,9 @@
 import { enqueueMessageTx, deliverMessageTx, consumeMessageTx } from './mailbox-store';
 import { executeResourceTx, type PreparedResourceCommand } from './managed-resources';
 import { createCacheTx, readCacheTx, publishCacheTx, invalidateCacheTx, renewCacheTx, manageCacheTx, listCachesTx } from './cache-store';
-import { refreshWaiters, recoverWaitGraphTx, hasCancelledAncestorTx } from './store-helpers';
+import { refreshWaiters, recoverWaitGraphTx, hasCancelledAncestorTx, validateRetrySourceTx } from './store-helpers';
 import { assertDurableValue } from '../../application/durability';
+import { snapshotKey, ensureTaskEventIndexTx, taskEventCountKey, taskEventKey } from './seqfile-core';
 
 import type {
     BudgetAccount,
@@ -115,6 +116,7 @@ export class SeqFileKernelStore {
             }
             const created = { ...intent, registrationPending: false };
             await tx.setEntry(sessionPath(binding.rootPath), SESSION_KEY, encode(created));
+            await tx.setEntry(indexPath(binding.rootPath), 'task-order-version', '1');
             await appendEventTx(tx, binding.rootPath, id, undefined, 'session.created', created);
             return created;
         });
@@ -386,9 +388,18 @@ export class SeqFileKernelStore {
         resource: ResourceRecord,
         handle: ResourceHandle,
         parentHandleId?: string,
+        request?: { id: string; fingerprint: string },
     ): Promise<{ resource: ResourceRecord; handle: ResourceHandle }> {
         return transaction(binding.fs, async tx => {
             await requireTaskTx(tx, binding.rootPath, handle.holderTaskId);
+            const key = request ? `create/${encodeURIComponent(handle.holderTaskId)}/${encodeURIComponent(request.id)}` : undefined;
+            const saved = key ? await tx.getEntry(resourcesPath(binding.rootPath), key) : undefined;
+            if (saved) {
+                const previous = decode<{ fingerprint: string; resourceId: string; handleId: string }>(saved);
+                if (previous.fingerprint !== request!.fingerprint) throw new Error('Resource creation conflict');
+                return { resource: await requireResourceTx(tx, binding.rootPath, previous.resourceId),
+                    handle: await requireHandleTx(tx, binding.rootPath, previous.handleId) };
+            }
             if (resource.parentResourceId) {
                 if (!parentHandleId) throw new Error('Child resource requires parent handle');
                 const parent = await requireHandleTx(tx, binding.rootPath, parentHandleId);
@@ -399,6 +410,9 @@ export class SeqFileKernelStore {
             await tx.setEntry(resourcesPath(binding.rootPath), handleKey(handle.id), encode(handle));
             await appendEventTx(tx, binding.rootPath, resource.sessionId, handle.holderTaskId,
                 'resource.created', { resourceId: resource.id, handleId: handle.id, kind: resource.kind });
+            if (key) await tx.setEntry(resourcesPath(binding.rootPath), key, encode({
+                fingerprint: request!.fingerprint, resourceId: resource.id, handleId: handle.id,
+            }));
             return { resource, handle };
         });
     }
@@ -540,6 +554,33 @@ export class SeqFileKernelStore {
         return result;
     }
 
+    async listTaskPage(binding: ResolvedStorageBinding, query: import('../../domain/types').TaskListQuery = {}): Promise<import('../../domain/types').TaskListPage> {
+        const after = query.afterIndex ?? 0, limit = query.limit ?? 100;
+        if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('Invalid Task list page');
+        return transaction(binding.fs, async tx => {
+            const session = await requireSessionTx(tx, binding.rootPath), path = indexPath(binding.rootPath);
+            const version = await tx.getEntry(path, 'task-order-version');
+            if (version !== '1') {
+                if (version !== null) throw new Error('Unsupported Task list index version');
+                const ids: string[] = [];
+                await tx.walkEntries(path, row => { ids.push(row.key.slice('task/'.length)); return true; }, { keyPrefix: 'task/' });
+                for (const id of ids.sort()) await indexTask(tx, binding.rootPath, await requireTaskTx(tx, binding.rootPath, id));
+                await tx.setEntry(path, 'task-order-version', '1');
+            }
+            const count = Number(await tx.getEntry(path, 'task-count') ?? 0), through = query.throughIndex ?? count;
+            if (!Number.isSafeInteger(count) || count < 0 || !Number.isSafeInteger(through) || through < 0 || through > count) throw new Error('Invalid Task list upper bound');
+            const end = Math.min(through, after + limit), items: TaskRecord[] = [];
+            for (let index = after + 1; index <= end; index++) {
+                const id = await tx.getEntry(path, `task-order/${String(index).padStart(16, '0')}`);
+                if (!id) throw new Error('Task list index is missing');
+                const task = await requireTaskTx(tx, binding.rootPath, id);
+                if (task.sessionId !== session.id) throw new Error('Task list index scope mismatch');
+                items.push(task);
+            }
+            return { items, throughIndex: through, ...(end < through ? { nextAfterIndex: end } : {}) };
+        });
+    }
+
     async prepareTaskDirectory(binding: ResolvedStorageBinding, taskId: TaskId): Promise<void> {
         await ensureTaskLayout(binding, taskId);
     }
@@ -564,9 +605,11 @@ export class SeqFileKernelStore {
                 await tx.setEntry(sessionPath(binding.rootPath), key, encode({ id, fingerprint: encode(spec) }));
             }
             if (session.status !== 'open' && session.status !== 'suspended' && session.status !== 'suspending') throw new Error(`Session is ${session.status}`);
+            await validateRetrySourceTx(tx, binding.rootPath, spec.retryOfTaskId);
             if (spec.parent) {
                 const parent = await requireTaskTx(tx, binding.rootPath, spec.parent);
                 if (isTerminal(parent.status) || (parent.control && parent.control.mode !== 'run')) throw new Error('Parent is not accepting children');
+                if (await hasCancelledAncestorTx(tx, binding.rootPath, parent)) throw new Error('Task ancestor cancelled');
                 task.rootTaskId = parent.rootTaskId;
             }
             let unresolvedDeps = task.unresolvedDeps;
@@ -620,6 +663,20 @@ export class SeqFileKernelStore {
         const value = await seq(binding.fs).getEntry(taskPath(binding.rootPath, taskId), TASK_KEY);
         if (!value) throw new Error(`Task not found: ${taskId}`);
         return decode(value);
+    }
+
+    async taskHistoryPage(binding: ResolvedStorageBinding, taskId: TaskId, query: import('../../domain/types').TaskHistoryQuery = {}): Promise<import('../../domain/types').TaskHistoryPage> {
+        const after = query.afterVersion ?? -1, limit = query.limit ?? 100;
+        if (!Number.isSafeInteger(after) || after < -1 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('Invalid Task history page');
+        const current = await this.readTask(binding, taskId);
+        const through = query.throughVersion ?? current.version;
+        if (!Number.isSafeInteger(through) || through < 0 || through > current.version) throw new Error('Invalid Task history upper bound');
+        const end = Math.min(through, after + limit);
+        const keys: string[] = [];
+        for (let version = after + 1; version <= end; version++) keys.push(snapshotKey(version));
+        const rows = keys.length ? await seq(binding.fs).getEntries(taskPath(binding.rootPath, taskId), keys) : {};
+        return { items: keys.flatMap(key => rows[key] ? [decode<TaskRecord>(rows[key])] : []),
+            throughVersion: through, ...(end < through ? { nextAfterVersion: end } : {}) };
     }
 
     async taskHistory(binding: ResolvedStorageBinding, taskId: TaskId, afterVersion = -1): Promise<TaskRecord[]> {
@@ -796,6 +853,7 @@ export class SeqFileKernelStore {
             }
             if (isTerminal(task.status)) throw new Error('Task is terminal');
             if (options.expectedEpoch !== undefined && options.expectedEpoch !== (task.control?.epoch ?? 0)) throw new Error('Control epoch conflict');
+            if (await hasCancelledAncestorTx(tx, binding.rootPath, task)) throw new Error('Task ancestor cancelled');
             if (mode === 'run' && task.control && !task.control.acknowledged) throw new Error('Control not settled');
             const ids: string[] = [taskId];
             const all: TaskRecord[] = [];
@@ -865,6 +923,7 @@ export class SeqFileKernelStore {
         return transaction(binding.fs, async tx => {
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
             if (isTerminal(task.status)) return task;
+            if (await hasCancelledAncestorTx(tx, binding.rootPath, task)) throw new Error('Task ancestor cancelled');
             const sequence = task.pendingEvents.length + task.version + 1;
             let next: TaskRecord = {
                 ...task,
@@ -881,16 +940,30 @@ export class SeqFileKernelStore {
         });
     }
 
-    async startTask(binding: ResolvedStorageBinding, taskId: TaskId): Promise<TaskRecord> {
+    async startTask(binding: ResolvedStorageBinding, taskId: TaskId, options: import('../../domain/types').TaskStartOptions = {}): Promise<TaskRecord> {
+        if (options.signal) assertDurableValue(options.signal, 'Start signal');
         return transaction(binding.fs, async tx => {
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
-            if (task.status !== 'created') return task;
+            const key = 'start-signal';
+            const saved = await tx.getEntry(taskPath(binding.rootPath, taskId), key);
+            if (options.signal && saved && saved !== encode(options.signal)) throw new Error('Task start signal conflict');
+            if (task.status !== 'created') {
+                if (options.signal && !saved) throw new Error('Task was not started with this signal');
+                return task;
+            }
+            if (await hasCancelledAncestorTx(tx, binding.rootPath, task)) throw new Error('Task ancestor cancelled');
             const next: TaskRecord = {
                 ...task,
+                pendingEvents: options.signal ? [...task.pendingEvents, { type: 'signal',
+                    sequence: task.pendingEvents.length + task.version + 1, signal: options.signal }] : task.pendingEvents,
                 status: task.unresolvedDeps > 0 ? 'blocked' : 'ready',
                 version: task.version + 1,
                 updatedAt: Date.now(),
             };
+            if (options.signal) {
+                await tx.setEntry(taskPath(binding.rootPath, taskId), key, encode(options.signal));
+                await appendEventTx(tx, binding.rootPath, task.sessionId, taskId, 'task.signal', options.signal);
+            }
             await writeTaskTx(tx, binding.rootPath, next);
             await indexTask(tx, binding.rootPath, next);
             await appendEventTx(tx, binding.rootPath, task.sessionId, taskId, 'task.started');
@@ -905,7 +978,6 @@ export class SeqFileKernelStore {
     ): Promise<TaskRecord> {
         return transaction(binding.fs, async tx => {
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
-            if (isTerminal(task.status)) throw new Error('Task is terminal');
             assertDurableValue(response.value, 'Interaction response');
             const interaction = task.interactions?.[response.interactionId];
             if (!interaction) throw new Error(`Interaction not found: ${response.interactionId}`);
@@ -913,6 +985,8 @@ export class SeqFileKernelStore {
                 if (interaction.status === 'resolved' && encode(interaction.response) === encode(response.value)) return task;
                 throw new Error('Interaction response conflict');
             }
+            if (isTerminal(task.status)) throw new Error('Task is terminal');
+            if (await hasCancelledAncestorTx(tx, binding.rootPath, task)) throw new Error('Task ancestor cancelled');
             const event = {
                 type: 'interaction-resolved' as const,
                 interactionId: response.interactionId,
@@ -992,7 +1066,8 @@ export class SeqFileKernelStore {
                 return task;
             }
             if (effect.status !== 'leased' || effect.currentAttempt?.leaseToken !== leaseToken
-                || effect.currentAttempt.leaseUntil <= Date.now()) {
+                || effect.currentAttempt.leaseUntil <= Date.now()
+                || await hasCancelledAncestorTx(tx, binding.rootPath, task)) {
                 throw kernelError(KernelErrorCode.STALE_EFFECT_CLAIM, `Stale effect claim: ${effectId}`);
             }
             if (outcome.error && outcome.retryable && effect.attemptCount < (effect.request.retry?.maxAttempts ?? 1)
@@ -1039,6 +1114,7 @@ export class SeqFileKernelStore {
             const previous = await tx.getEntry(taskPath(binding.rootPath, taskId), key);
             if (previous) { if (previous !== fingerprint) throw new Error('Effect resolution conflict'); return; }
             if (isTerminal(task.status)) throw new Error('Task is terminal');
+            if (await hasCancelledAncestorTx(tx, binding.rootPath, task)) throw new Error('Task ancestor cancelled');
             const effect = task.effects[request.effectId];
             if (effect?.status !== 'indeterminate') throw new Error('Effect is not indeterminate');
             const next: TaskRecord = { ...task, effects: { ...task.effects }, pendingEvents: task.pendingEvents.filter(event => !(event.type === 'effect-failed' && event.effectId === request.effectId)), version: task.version + 1, updatedAt: Date.now() };
@@ -1091,6 +1167,36 @@ export class SeqFileKernelStore {
         });
     }
 
+    async taskEventPage(binding: ResolvedStorageBinding, taskId: TaskId, query: import('../../domain/types').TaskEventQuery = {}): Promise<import('../../domain/types').TaskEventPage> {
+        const after = query.afterIndex ?? 0, limit = query.limit ?? 100;
+        if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('Invalid Task event page');
+        return transaction(binding.fs, async tx => {
+            const task = await requireTaskTx(tx, binding.rootPath, taskId);
+            await ensureTaskEventIndexTx(tx, binding.rootPath);
+            const path = eventsPath(binding.rootPath);
+            const count = Number(await tx.getEntry(path, taskEventCountKey(taskId)) ?? 0);
+            if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid Task event count');
+            const through = query.throughIndex ?? count;
+            if (!Number.isSafeInteger(through) || through < 0 || through > count) throw new Error('Invalid Task event upper bound');
+            const end = Math.min(through, after + limit), keys: string[] = [];
+            for (let index = after + 1; index <= end; index++) keys.push(taskEventKey(taskId, index));
+            const refs = Object.fromEntries(await Promise.all(keys.map(async key => [key, await tx.getEntry(path, key)] as const)));
+            const eventKeys = keys.map(key => {
+                const sequence = Number(refs[key]);
+                if (!Number.isSafeInteger(sequence) || sequence < 1) throw new Error('Invalid Task event index');
+                return `event/${String(sequence).padStart(16, '0')}`;
+            });
+            const rows = Object.fromEntries(await Promise.all(eventKeys.map(async key => [key, await tx.getEntry(path, key)] as const)));
+            const items = eventKeys.map(key => {
+                if (!rows[key]) throw new Error('Task event is missing');
+                const event = decode<EventEnvelope>(rows[key]);
+                if (event.taskId !== taskId || event.sessionId !== task.sessionId) throw new Error('Task event index scope mismatch');
+                return event;
+            });
+            return { items, throughIndex: through, ...(end < through ? { nextAfterIndex: end } : {}) };
+        });
+    }
+
     async events(binding: ResolvedStorageBinding, after = 0): Promise<EventEnvelope[]> {
         const values: EventEnvelope[] = [];
         await seq(binding.fs).walkEntries(eventsPath(binding.rootPath), entry => {
@@ -1136,10 +1242,7 @@ export class SeqFileKernelStore {
     async sweep(binding: ResolvedStorageBinding): Promise<void> {
         await transaction(binding.fs, tx => refreshWaiters(tx, binding.rootPath));
         for (const task of await this.listTasks(binding)) {
-            if (task.parentTaskId && !isTerminal(task.status) && (await this.readTask(binding, task.parentTaskId)).status === 'cancelled') {
-                await this.cancelTask(binding, task.id, 'Parent cancelled');
-                continue;
-            }
+            if (await this.cancelFromAncestor(binding, task)) continue;
             await this.recoverExpiredEffects(binding, task);
             await this.acknowledgeControl(binding, task.id);
             if (task.status === 'running' && task.currentAttempt && task.currentAttempt.leaseUntil <= Date.now()) {
@@ -1176,6 +1279,7 @@ export class SeqFileKernelStore {
         await this.repairCatalog(session, tasks);
         for (const taskId of tasks) {
             const task = await this.readTask(binding, taskId);
+            if (await this.cancelFromAncestor(binding, task)) continue;
             recoveredEffects += await this.recoverExpiredEffects(binding, task);
             if (task.status !== 'running' || !task.currentAttempt || task.currentAttempt.leaseUntil > Date.now()) continue;
             expiredAttempts++;
@@ -1238,16 +1342,25 @@ export class SeqFileKernelStore {
         });
     }
 
+    private async cancelFromAncestor(binding: ResolvedStorageBinding, task: TaskRecord): Promise<boolean> {
+        if (!task.parentTaskId || isTerminal(task.status)) return false;
+        const current = await this.finishWithoutClaim(binding, task.id, 'cancelled', undefined,
+            { message: 'Ancestor cancelled' }, true);
+        return current.status === 'cancelled';
+    }
+
     private async finishWithoutClaim(
         binding: ResolvedStorageBinding,
         taskId: TaskId,
         status: 'cancelled' | 'failed',
         output?: unknown,
         error?: { message: string },
+        requireCancelledAncestor = false,
     ): Promise<TaskRecord> {
         return transaction(binding.fs, async tx => {
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
             if (isTerminal(task.status)) return task;
+            if (requireCancelledAncestor && !await hasCancelledAncestorTx(tx, binding.rootPath, task)) return task;
             const completedAt = Date.now();
             const next: TaskRecord = {
                 ...task, status, output, wait: undefined, currentAttempt: undefined,

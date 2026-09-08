@@ -77,7 +77,7 @@ export interface CrossSessionMessage<T extends JsonValue = JsonValue> {
     payload: T;
     status: 'pending' | 'delivered' | 'rejected';
     rejectedAt?: number;
-    rejection?: { code: 'target-closed' | 'target-terminal' | 'expired'; message: string };
+    rejection?: { code: 'target-closed' | 'target-terminal' | 'target-ancestor-cancelled' | 'expired'; message: string };
     /** Absolute delivery deadline; omitted means retry missing targets indefinitely. */
     expiresAt?: number;
     deliveryAttempts?: number;
@@ -132,6 +132,8 @@ export interface TaskDependency {
 }
 
 export interface TaskSpec<I = unknown> {
+    /** Provenance for a fresh manual retry; the source Task must be terminal. */
+    retryOfTaskId?: TaskId;
     /** Session-scoped durable submission key. Reusing it with another spec is rejected. */
     requestId?: string;
     program: ProgramRef;
@@ -202,6 +204,7 @@ export interface EffectAttempt {
 }
 
 export interface TaskRecord<S = unknown> {
+    retryOfTaskId?: TaskId;
     id: TaskId;
     sessionId: SessionId;
     parentTaskId?: TaskId;
@@ -251,6 +254,7 @@ export interface TaskControl {
 export interface TaskControlOptions { requestId: string; expectedEpoch?: number; reason?: string; }
 
 export type TaskSignal = { type: string; payload?: unknown };
+export interface TaskStartOptions { signal?: TaskSignal; }
 export type TaskInputEvent =
     | { type: 'resource-result'; receipt: import('./resource-api').ResourceRequestSnapshot }
     | { type: 'started' }
@@ -410,6 +414,8 @@ export interface ResourceHandle {
 }
 
 export interface ResourceSpec {
+    /** Owner-task-scoped idempotency key for capability creation. */
+    requestId?: string;
     kind: string;
     uri: string;
     ownerTaskId: TaskId;
@@ -616,7 +622,7 @@ export interface TaskHandle<O = unknown> {
     wait(options?: { timeoutMs?: number }): Promise<ExitRecord<O>>;
     poll(): Promise<ExitRecord<O> | undefined>;
     signal(signal: TaskSignal): Promise<void>;
-    start(): Promise<void>;
+    start(options?: TaskStartOptions): Promise<void>;
     pause(options: TaskControlOptions): Promise<TaskControl>;
     interrupt(options: TaskControlOptions): Promise<TaskControl>;
     resume(options: TaskControlOptions & { signal?: TaskSignal }): Promise<TaskControl>;
@@ -626,6 +632,8 @@ export interface TaskHandle<O = unknown> {
     events(options?: { after?: number }): AsyncIterable<EventEnvelope>;
     history(options?: { afterVersion?: number }): Promise<TaskRecord[]>;
     attempts(): Promise<TaskAttempt[]>;
+    /** Create an idempotent, deferred fresh root Task; resources must be granted again. */
+    retry(options: { requestId: string }): Promise<TaskHandle<O>>;
     resolveEffect(request: EffectResolution): Promise<void>;
     sendMessage(request: TaskMessageRequest): Promise<CrossSessionMessage>;
     createCache(spec: CacheSpec): Promise<{ namespace: CacheNamespace; handle: ResourceHandle }>;
@@ -635,3 +643,21 @@ export interface TaskHandle<O = unknown> {
     invalidateCache(handleId: string, expectedGeneration: number): Promise<CacheNamespace>;
     renewCache(handleId: string, expectedGeneration: number, ttlMs: number): Promise<CacheNamespace>;
 }
+/** A bounded range of immutable Task versions, pinned to the first page's upper bound. */
+export interface TaskHistoryQuery {
+    afterVersion?: number;
+    throughVersion?: number;
+    limit?: number;
+}
+export interface TaskHistoryPage {
+    items: TaskRecord[];
+    throughVersion: number;
+    nextAfterVersion?: number;
+}
+
+/** Index cursors are Task-local ordinals, distinct from Session event sequence numbers. */
+export interface TaskEventQuery { afterIndex?: number; throughIndex?: number; limit?: number; }
+export interface TaskEventPage { items: EventEnvelope[]; throughIndex: number; nextAfterIndex?: number; }
+export interface TaskListQuery { afterIndex?: number; throughIndex?: number; limit?: number; }
+/** Membership is pinned by throughIndex; each page reads current Task status. */
+export interface TaskListPage { items: TaskRecord[]; throughIndex: number; nextAfterIndex?: number; }

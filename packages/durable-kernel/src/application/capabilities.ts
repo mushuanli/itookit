@@ -24,6 +24,7 @@ export async function bindCapabilities(
     const payload: Record<string, string> = {};
     for (const binding of bindings) {
         const grant = await task.createResource({
+            requestId: `capability:${binding.signalKey}`,
             kind: binding.kind,
             uri: binding.uri,
             rights: binding.rights,
@@ -32,6 +33,5 @@ export async function bindCapabilities(
         await onHandle?.(binding, grant.handle.id);
     }
     const signal: TaskSignal = { type: 'capabilities', payload };
-    await task.signal(signal);
-    await task.start();
+    await task.start({ signal });
 }

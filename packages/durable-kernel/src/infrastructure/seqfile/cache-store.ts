@@ -14,6 +14,17 @@ function required(value: string, name: string): void {
     if (typeof value !== 'string' || !value || value.length > 512) throw new Error(`Invalid cache ${name}`);
 }
 
+function expiresAt(ttlMs: number, now: number): number {
+    const expires = now + ttlMs;
+    if (!Number.isFinite(ttlMs) || ttlMs <= 0 || !Number.isFinite(expires) || expires > Number.MAX_SAFE_INTEGER) throw new Error('Invalid cache TTL');
+    return expires;
+}
+
+function nextGeneration(generation: number): number {
+    if (!Number.isSafeInteger(generation) || generation < 1 || generation === Number.MAX_SAFE_INTEGER) throw new Error('Cache generation exhausted or invalid');
+    return generation + 1;
+}
+
 async function liveTask(tx: ISeqFileTransaction, root: string, taskId: string) {
     const task = await requireTaskTx(tx, root, taskId);
     if (isTerminal(task.status)) throw new Error('Task is terminal');
@@ -29,7 +40,7 @@ export async function createCacheTx(tx: ISeqFileTransaction, root: string, taskI
     if (spec.usage && !['reusable', 'single-use'].includes(spec.usage)) throw new Error('Unsupported cache usage');
     const maxEntries = spec.maxEntries ?? 256, maxBytes = spec.maxBytes ?? 4 * 1024 * 1024;
     if (!Number.isInteger(maxEntries) || maxEntries < 1 || maxEntries > 4096 || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 64 * 1024 * 1024) throw new Error('Cache quota is invalid');
-    if (spec.ttlMs !== undefined && (!Number.isFinite(spec.ttlMs) || spec.ttlMs <= 0)) throw new Error('Invalid cache TTL');
+    if (spec.ttlMs !== undefined) expiresAt(spec.ttlMs, Date.now());
     const id = createId('cache');
     const namespace: CacheNamespace = { id, ownerTaskId: taskId, stepNumber: task.stepNumber ?? 0,
         name: spec.name, scope: spec.scope ?? 'task', usage: spec.usage ?? 'reusable', generation: 1,
@@ -108,7 +119,7 @@ export async function publishCacheTx(tx: ISeqFileTransaction, root: string, task
     const now = Date.now();
     const entry: CacheEntry = { key: request.key, fingerprint: request.fingerprint, generation: namespace.generation,
         version, value: request.value, createdAt: now,
-        expiresAt: namespace.ttlMs === undefined ? undefined : now + namespace.ttlMs };
+        expiresAt: namespace.ttlMs === undefined ? undefined : expiresAt(namespace.ttlMs, now) };
     const rows: Array<{ key: string; entry: CacheEntry }> = [];
     await tx.walkEntries(path, row => { if (row.key !== key) rows.push({ key: row.key, entry: decode(row.value) }); return true; }, { keyPrefix: entryPrefix(namespace.id) });
     const bytes = (value: unknown) => new TextEncoder().encode(encode(value)).byteLength;
@@ -133,11 +144,19 @@ export async function readCacheTx(tx: ISeqFileTransaction, root: string, taskId:
     const old = await previous<CacheReceipt>(tx, root, taskId, request.operationId, operation);
     if (old) return old;
     if (request.maxAgeMs !== undefined && (!Number.isFinite(request.maxAgeMs) || request.maxAgeMs < 0)) throw new Error('Invalid cache max age');
+    if (request.mode !== undefined && !['prefer-cache', 'cache-only', 'refresh', 'bypass'].includes(request.mode)) throw new Error('Invalid cache mode');
+    if (!Array.isArray(request.sources)) throw new Error('Invalid cache sources');
+    const namespaces: CacheNamespace[] = [];
+    for (const source of request.sources) {
+        if (!source || typeof source !== 'object') throw new Error('Invalid cache source');
+        required(source.handleId, 'handleId'); required(source.key, 'key'); required(source.fingerprint, 'fingerprint');
+        if (source.expectedVersion !== undefined && (!Number.isSafeInteger(source.expectedVersion) || source.expectedVersion < 1)) throw new Error('Invalid cache expected version');
+        namespaces.push(await authorized(tx, root, taskId, source.handleId, 'read'));
+    }
     let result: CacheReceipt = { operationId: request.operationId, status: 'miss', observedAt: Date.now() };
     if (request.mode === 'bypass' || request.mode === 'refresh') result.status = 'bypass';
-    else for (const source of request.sources) {
-        required(source.key, 'key'); required(source.fingerprint, 'fingerprint');
-        const namespace = await authorized(tx, root, taskId, source.handleId, 'read');
+    else for (const [index, source] of request.sources.entries()) {
+        const namespace = namespaces[index];
         const key = entryKey(namespace.id, source.key), raw = await tx.getEntry(resourcesPath(root), key);
         if (!raw) continue;
         const entry = decode<CacheEntry>(raw), now = Date.now();
@@ -160,7 +179,7 @@ export async function invalidateCacheTx(tx: ISeqFileTransaction, root: string, t
     await liveTask(tx, root, taskId);
     const current = await authorized(tx, root, taskId, handleId, 'admin');
     if (current.generation !== expectedGeneration) throw new Error('Cache generation conflict');
-    const next = { ...current, generation: current.generation + 1 };
+    const next = { ...current, generation: nextGeneration(current.generation) };
     await tx.setEntry(resourcesPath(root), namespaceKey(current.id), encode(next));
     return next;
 }
@@ -168,15 +187,15 @@ export async function invalidateCacheTx(tx: ISeqFileTransaction, root: string, t
 /** Renew live entries only. Expired values and consumed single-use entries are never resurrected. */
 export async function renewCacheTx(tx: ISeqFileTransaction, root: string, taskId: string, handleId: string, expectedGeneration: number, ttlMs: number): Promise<CacheNamespace> {
     const task = await liveTask(tx, root, taskId);
-    if (!Number.isFinite(ttlMs) || ttlMs <= 0) throw new Error('Invalid cache TTL');
+    const now = Date.now(), deadline = expiresAt(ttlMs, now);
     const current = await authorized(tx, root, taskId, handleId, 'admin');
     if (current.generation !== expectedGeneration) throw new Error('Cache generation conflict');
-    const next = { ...current, ttlMs, generation: current.generation + 1 }, now = Date.now();
+    const next = { ...current, ttlMs, generation: nextGeneration(current.generation) };
     const entries: Array<{ key: string; value: CacheEntry }> = [];
     await tx.walkEntries(resourcesPath(root), row => { entries.push({ key: row.key, value: decode(row.value) }); return true; }, { keyPrefix: entryPrefix(current.id) });
     for (const entry of entries) {
         if (entry.value.generation !== current.generation || (entry.value.expiresAt ?? Infinity) <= now || entry.value.consumedBy) continue;
-        await tx.setEntry(resourcesPath(root), entry.key, encode({ ...entry.value, generation: next.generation, expiresAt: now + ttlMs }));
+        await tx.setEntry(resourcesPath(root), entry.key, encode({ ...entry.value, generation: next.generation, expiresAt: deadline }));
     }
     await tx.setEntry(resourcesPath(root), namespaceKey(current.id), encode(next));
     await appendEventTx(tx, root, task.sessionId, taskId, 'cache.renewed', { namespaceId: current.id, generation: next.generation, ttlMs });

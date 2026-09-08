@@ -104,6 +104,12 @@ export function claimMatches(current: TaskRecord, claim: TaskClaim): boolean {
 }
 
 export async function indexTask(tx: ISeqFileTransaction, root: string, task: TaskRecord): Promise<void> {
+    if (!await tx.getEntry(indexPath(root), `task-ordinal/${task.id}`)) {
+        const ordinal = await tx.increment(indexPath(root), 'task-count');
+        if (!Number.isSafeInteger(ordinal) || ordinal < 1) throw new Error('Task list index exhausted');
+        await tx.setEntry(indexPath(root), `task-ordinal/${task.id}`, String(ordinal));
+        await tx.setEntry(indexPath(root), `task-order/${String(ordinal).padStart(16, '0')}`, task.id);
+    }
     await tx.setEntry(indexPath(root), `task/${task.id}`, encode({ status: task.status, updatedAt: task.updatedAt }));
     const readyKey = `ready/${task.id}`;
     if (task.status === 'ready') {
@@ -219,6 +225,7 @@ export async function createSpawnTaskTx(
     parent: TaskRecord,
     spec: TaskSpec,
 ): Promise<TaskRecord> {
+    await validateRetrySourceTx(tx, root, spec.retryOfTaskId);
     let task = taskFromSpec(id, parent.sessionId, spec, Date.now());
     task = { ...task, rootTaskId: parent.rootTaskId };
     task = await resolveInitialDependencies(tx, root, task, spec.dependsOn ?? []);
@@ -272,7 +279,7 @@ export function taskFromSpec(id: string, sessionId: string, spec: TaskSpec, now:
     const dependencies = spec.dependsOn ?? [];
     if (new Set(dependencies.map(dep => dep.task)).size !== dependencies.length) throw new Error('Duplicate task dependency');
     return {
-        id, sessionId, parentTaskId: spec.parent, rootTaskId: spec.parent ?? id,
+        id, sessionId, retryOfTaskId: spec.retryOfTaskId, parentTaskId: spec.parent, rootTaskId: spec.parent ?? id,
         spawnKey: spec.spawnKey, program: spec.program,
         status: spec.deferStart ? 'created' : spec.dependsOn?.length ? 'blocked' : 'ready',
         input: spec.input, pendingEvents: [], dependencies, unresolvedDeps: spec.dependsOn?.length ?? 0,
@@ -958,4 +965,11 @@ export async function recoverWaitGraphTx(tx: ISeqFileTransaction, root: string, 
             await wakeTaskWaiters(tx, root, task);
         }
     }
+}
+
+export async function validateRetrySourceTx(tx: ISeqFileTransaction, root: string, taskId: TaskId | undefined): Promise<void> {
+    if (taskId === undefined) return;
+    if (typeof taskId !== 'string' || !taskId.trim()) throw new Error('Invalid retry source Task');
+    const original = await requireTaskTx(tx, root, taskId);
+    if (!isTerminal(original.status)) throw new Error('Manual retry requires a terminal Task');
 }

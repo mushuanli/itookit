@@ -125,7 +125,29 @@ export async function appendEventTx(
     identity?: { effectId: string; attemptId: string },
 ): Promise<number> {
     const sequence = await tx.increment(eventsPath(root), 'next-sequence');
+    if (sequence === 1) await tx.setEntry(eventsPath(root), 'task-event-index-version', '1');
     const event: EventEnvelope = { schemaVersion: 1, ...identity, sequence, sessionId, taskId, type, payload, occurredAt: Date.now() };
     await tx.setEntry(eventsPath(root), `event/${String(sequence).padStart(16, '0')}`, encode(event));
+    if (taskId && await tx.getEntry(eventsPath(root), 'task-event-index-version') === '1') await indexTaskEventTx(tx, root, event);
     return sequence;
+}
+
+export function taskEventCountKey(taskId: string): string { return `task-event-count/${encodeURIComponent(taskId)}`; }
+export function taskEventKey(taskId: string, index: number): string { return `task-event/${encodeURIComponent(taskId)}/${String(index).padStart(16, '0')}`; }
+export async function indexTaskEventTx(tx: ISeqFileTransaction, root: string, event: EventEnvelope): Promise<void> {
+    if (!event.taskId) return;
+    const index = await tx.increment(eventsPath(root), taskEventCountKey(event.taskId));
+    if (!Number.isSafeInteger(index) || index < 1) throw new Error('Task event index exhausted');
+    await tx.setEntry(eventsPath(root), taskEventKey(event.taskId, index), String(event.sequence));
+}
+
+/** Older stores lack the derived Task index; build it once atomically from authoritative events. */
+export async function ensureTaskEventIndexTx(tx: ISeqFileTransaction, root: string): Promise<void> {
+    const version = await tx.getEntry(eventsPath(root), 'task-event-index-version');
+    if (version === '1') return;
+    if (version !== null) throw new Error('Unsupported Task event index version');
+    const events: EventEnvelope[] = [];
+    await tx.walkEntries(eventsPath(root), row => { events.push(decode<EventEnvelope>(row.value)); return true; }, { keyPrefix: 'event/' });
+    for (const event of events.sort((a, b) => a.sequence - b.sequence)) await indexTaskEventTx(tx, root, event);
+    await tx.setEntry(eventsPath(root), 'task-event-index-version', '1');
 }

@@ -3,6 +3,7 @@ import { EffectRegistry, ProgramRegistry, StorageResolverRegistry, WorkspaceRegi
 import type { KernelPlugin, KernelRegistration } from '../ports/plugin';
 import { DurablePoller } from '../runtime/durable-poller';
 import { LeaseHeartbeat } from '../runtime/lease-heartbeat';
+import { EffectCleanupRunner } from '../runtime/effect-cleanup';
 import { DefaultSessionHandle } from '../public/session-handle';
 import { DefaultTaskHandle } from '../public/task-handle';
 import { resourceApi } from '../public/resources';
@@ -65,6 +66,8 @@ export interface KernelOptions {
     maxConcurrent?: number;
     maxConcurrentEffects?: number;
     leaseMs?: number;
+    /** Maximum wait for Effect cleanup confirmation; default 30 seconds. */
+    effectCleanupTimeoutMs?: number;
     /** Optional compatibility polling; default 0 uses commits and deadline timers. */
     pollMs?: number;
 }
@@ -94,6 +97,7 @@ export class Kernel implements KernelRegistration {
     private readonly maxConcurrent: number;
     private readonly maxConcurrentEffects: number;
     private readonly leaseMs: number;
+    private readonly effectCleanup: EffectCleanupRunner;
     private readonly poller: DurablePoller<SessionId>;
     private readonly heartbeats = new Set<LeaseHeartbeat>();
     private readonly effectControllers = new Map<string, AbortController>();
@@ -109,11 +113,12 @@ export class Kernel implements KernelRegistration {
         this.maxConcurrent = options.maxConcurrent ?? 4;
         this.maxConcurrentEffects = options.maxConcurrentEffects ?? 4;
         this.leaseMs = options.leaseMs ?? 30_000;
+        this.effectCleanup = new EffectCleanupRunner(options.effectCleanupTimeoutMs ?? 30_000);
         const pollMs = options.pollMs ?? 0;
-        if (!Number.isInteger(this.maxConcurrent) || this.maxConcurrent < 0) throw new Error('Kernel maxConcurrent must be non-negative');
-        if (!Number.isInteger(this.maxConcurrentEffects) || this.maxConcurrentEffects < 0) throw new Error('Kernel maxConcurrentEffects must be non-negative');
-        if (this.leaseMs <= 0) throw new Error('Kernel leaseMs must be positive');
-        if (pollMs < 0) throw new Error('Kernel pollMs must be non-negative');
+        if (!Number.isSafeInteger(this.maxConcurrent) || this.maxConcurrent < 0) throw new Error('Kernel maxConcurrent must be a non-negative safe integer');
+        if (!Number.isSafeInteger(this.maxConcurrentEffects) || this.maxConcurrentEffects < 0) throw new Error('Kernel maxConcurrentEffects must be a non-negative safe integer');
+        if (!Number.isSafeInteger(this.leaseMs) || this.leaseMs <= 0 || this.leaseMs > Number.MAX_SAFE_INTEGER - Date.now()) throw new Error('Kernel leaseMs must be a positive safe duration');
+        if (!Number.isSafeInteger(pollMs) || pollMs < 0) throw new Error('Kernel pollMs must be a non-negative safe integer');
         const catalog = { fs: options.catalog.fs, rootPath: options.catalog.rootPath ?? '/.config/kernel' };
         this.catalogFs = catalog.fs;
         this.store = new SeqFileKernelStore(catalog, reference => this.resolveStorage(reference));
@@ -165,6 +170,8 @@ export class Kernel implements KernelRegistration {
         });
         this.resourcePoller.start('kernel');
     }
+    get isDisposed(): boolean { return this.disposed; }
+
     dispose(): void {
         this.disposed = true;
         this.poller.dispose();
@@ -292,12 +299,27 @@ export class Kernel implements KernelRegistration {
         return new DefaultTaskHandle<O>(this, sessionId, task.id);
     }
 
+    async retryTask<O = unknown>(sessionId: string, taskId: string, options: { requestId: string }): Promise<TaskHandle<O>> {
+        if (typeof options.requestId !== 'string' || !options.requestId.trim()) throw new Error('Manual retry requires requestId');
+        const original = await this.task(sessionId, taskId);
+        return this.submit(sessionId, {
+            requestId: `retry:${JSON.stringify([taskId, options.requestId])}`,
+            retryOfTaskId: taskId, program: original.program, input: original.input,
+            dependsOn: original.dependencies, retry: original.retry, priority: original.priority,
+            labels: original.labels, deferStart: true,
+        });
+    }
+
     async task(sessionId: string, taskId: string): Promise<TaskRecord> {
         return this.store.readTask(await this.binding(sessionId), taskId);
     }
 
     async taskHistory(sessionId: string, taskId: string, afterVersion = -1): Promise<TaskRecord[]> {
         return this.store.taskHistory(await this.binding(sessionId), taskId, afterVersion);
+    }
+
+    async taskHistoryPage(sessionId: string, taskId: string, query: import('../domain/types').TaskHistoryQuery = {}): Promise<import('../domain/types').TaskHistoryPage> {
+        return this.store.taskHistoryPage(await this.binding(sessionId), taskId, query);
     }
 
     async taskAttempts(sessionId: string, taskId: string): Promise<import('../domain/types').TaskAttempt[]> {
@@ -318,8 +340,8 @@ export class Kernel implements KernelRegistration {
         return control;
     }
 
-    async startTask(sessionId: string, taskId: string): Promise<void> {
-        await this.store.startTask(await this.binding(sessionId), taskId);
+    async startTask(sessionId: string, taskId: string, options?: import('../domain/types').TaskStartOptions): Promise<void> {
+        await this.store.startTask(await this.binding(sessionId), taskId, options);
         this.notify(sessionId, taskId);
         this.queueDrain(sessionId);
     }
@@ -352,6 +374,14 @@ export class Kernel implements KernelRegistration {
 
     async eventList(sessionId: string, after: number): Promise<EventEnvelope[]> {
         return this.store.events(await this.binding(sessionId), after);
+    }
+
+    async taskEventPage(sessionId: string, taskId: string, query: import('../domain/types').TaskEventQuery = {}): Promise<import('../domain/types').TaskEventPage> {
+        return this.store.taskEventPage(await this.binding(sessionId), taskId, query);
+    }
+
+    async listSessionTaskPage(sessionId: string, query: import('../domain/types').TaskListQuery = {}): Promise<import('../domain/types').TaskListPage> {
+        return this.store.listTaskPage(await this.binding(sessionId), query);
     }
 
     async getShared<T extends import('../domain/types').JsonValue>(sessionId: string, key: string): Promise<SharedStateEntry<T> | undefined> {
@@ -434,6 +464,7 @@ export class Kernel implements KernelRegistration {
     }
 
     async createResource(sessionId: string, spec: ResourceSpec): Promise<ResourceGrant> {
+        if (spec.requestId !== undefined && (typeof spec.requestId !== 'string' || !spec.requestId.trim())) throw new Error('Invalid resource requestId');
         const resource: ResourceRecord = {
             id: createId('resource'), sessionId, kind: spec.kind, uri: spec.uri,
             generation: 1, parentResourceId: spec.parentResourceId,
@@ -443,7 +474,11 @@ export class Kernel implements KernelRegistration {
             id: createId('handle'), resourceId: resource.id, holderTaskId: spec.ownerTaskId,
             rights: spec.rights ?? ['read', 'write', 'execute', 'grant', 'admin'], generation: 1,
         };
-        return this.store.createResource(await this.binding(sessionId), resource, handle, spec.parentHandleId);
+        return this.store.createResource(await this.binding(sessionId), resource, handle, spec.parentHandleId,
+            spec.requestId === undefined ? undefined : { id: spec.requestId, fingerprint: JSON.stringify({
+                kind: spec.kind, uri: spec.uri, rights: handle.rights, parentResourceId: spec.parentResourceId,
+                parentHandleId: spec.parentHandleId, metadata: spec.metadata,
+            }) });
     }
 
     async grantResource(
@@ -771,7 +806,7 @@ export class Kernel implements KernelRegistration {
 
     private startLeaseHeartbeat(binding: ResolvedStorageBinding, claim: TaskClaim, controller: AbortController): () => void {
         const heartbeat = new LeaseHeartbeat({
-            intervalMs: Math.max(1, Math.floor(this.leaseMs / 3)),
+            intervalMs: Math.min(2147483647, Math.max(1, Math.floor(this.leaseMs / 3))),
             renew: async () => {
                 const valid = !this.disposed && await this.store.renewLease(binding, claim, this.leaseMs);
                 if (!valid) controller.abort(new Error('Reducer lease lost'));
@@ -908,7 +943,8 @@ export class Kernel implements KernelRegistration {
             .filter(([id, effect]) => active.has(id) && effect.status === 'cancelled')
             .map(([, effect]) => effect);
         const results = await Promise.allSettled(effects.map(async effect => {
-            await this.cancelEffect(task, effect.request);
+            await this.effectCleanup.run(effectControllerKey(task.sessionId, task.id, effect.request.id!),
+                () => this.cancelEffect(task, effect.request));
             await this.store.confirmEffectCleanup(await this.binding(task.sessionId), task.id, effect.request.id!);
         }));
         const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
@@ -936,7 +972,7 @@ export class Kernel implements KernelRegistration {
 
     private startEffectHeartbeat(binding: ResolvedStorageBinding, claim: EffectClaim, controller: AbortController): () => void {
         const heartbeat = new LeaseHeartbeat({
-            intervalMs: Math.max(1, Math.floor(this.leaseMs / 3)),
+            intervalMs: Math.min(2147483647, Math.max(1, Math.floor(this.leaseMs / 3))),
             renew: async () => {
                 const valid = !this.disposed && await this.store.renewEffectLease(binding, claim, this.leaseMs);
                 if (!valid) controller.abort(new Error('Effect lease lost'));
