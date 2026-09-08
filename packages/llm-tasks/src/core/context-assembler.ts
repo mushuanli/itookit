@@ -59,7 +59,7 @@ export class ContextAssembler {
         agent: { id: string; version: string },
         systemPrompt?: string[],
         skillsPrompt?: string,
-        options: { persist?: boolean } = {},
+        options: { persist?: boolean; projectInstructions?: string; skillInstructions?: string; skillIndex?: string } = {},
     ): Promise<AssemblyResult> {
         let blocks: ContextBlock[] = [];
         const historyBlocks: ContextBlock[] = [];
@@ -109,6 +109,9 @@ export class ContextAssembler {
                 if (content) blocks.push({ kind: 'system', source: 'agent', content });
             }
         }
+        if (options.projectInstructions) blocks.push({ kind: 'system', source: 'project', content: options.projectInstructions });
+        if (options.skillInstructions) blocks.push({ kind: 'system', source: 'session-skill', content: options.skillInstructions });
+        if (options.skillIndex) blocks.push({ kind: 'system', source: 'skill-index', content: options.skillIndex });
         if (skillsPrompt) blocks.push({ kind: 'system', source: 'skill', content: skillsPrompt });
         blocks.push(...historyBlocks, ...memoryBlocks, ...inputBlocks);
 
@@ -199,8 +202,9 @@ export class ContextAssembler {
         if (!tokenBudget || tokenBudget < 1) return blocks;
         const kept = [...blocks];
         while (kept.length > 1 && this.estimateTokens(await this.flattenBlocks(kept)) > tokenBudget) {
-            // Preserve policy/system blocks and the final pending-user block.
-            const index = kept.findIndex((block, i) => block.kind !== 'system' && i !== kept.length - 1);
+            // Discard discovery metadata first; preserve policy and the final pending user.
+            const discovery = kept.findIndex(block => block.kind === 'system' && block.source === 'skill-index');
+            const index = discovery >= 0 ? discovery : kept.findIndex((block, i) => block.kind !== 'system' && i !== kept.length - 1);
             if (index < 0) break;
             kept.splice(index, 1);
         }
@@ -231,8 +235,8 @@ export class ContextAssembler {
     private explain(blocks: ContextBlock[], tokenCount: number): ContextExplanation {
         const included = blocks.filter(block => block.kind !== 'summary').map(block => ({
             source: block.kind === 'round' ? `round:${block.roundId}` : block.kind === 'artifact' ? `artifact:${block.artifactId}` : block.kind,
-            reason: 'selected by branch/context policy', priority: block.kind === 'system' ? 100 : 50,
-            required: block.kind === 'system', tokenCount: Math.ceil(JSON.stringify(block).length / 4),
+            reason: 'selected by branch/context policy', priority: block.kind === 'system' ? (block.source === 'skill-index' ? 30 : 100) : 50,
+            required: block.kind === 'system' && block.source !== 'skill-index', tokenCount: Math.ceil(JSON.stringify(block).length / 4),
         }));
         const summarized = blocks.filter(block => block.kind === 'summary').map(block => ({
             source: `round:${block.sourceRoundIds.join(',')}`, reason: 'summary rule', priority: 40, required: false,

@@ -44,6 +44,8 @@ export interface DurableAgentInput extends DurableProgramInput {
     workingDirectory?: string;
     approval?: 'none' | 'external' | 'all';
     tools?: ToolDefinition[];
+    /** Explicit capability IDs; dynamically loaded definitions must belong to this set. */
+    allowedToolIds?: string[];
     externalToolIds?: string[];
     /** Tool name that, when called, declares sub-task payloads (completes the node). */
     subtaskTool?: string;
@@ -65,6 +67,8 @@ export interface DurableAgentOutput extends DurableChatOutput {
 }
 
 export interface DurableAgentState {
+    /** Successful Skill-load snapshots, independent of prunable tool messages. */
+    skillContexts?: Array<NonNullable<import('@itookit/common').ToolInvokeResult['skillContext']>>;
     input: DurableAgentInput;
     phase: 'collecting' | 'llm' | 'approval' | 'tool' | 'human';
     messages: ChatMessage[];
@@ -75,5 +79,14 @@ export interface DurableAgentState {
     exchanges: number;
     pendingCalls: ToolCall[];
     callIndex: number;
+    /**
+     * Canonical approval keys for the current assistant batch:
+     * roundId, exchange, call id, tool name and args fingerprint.
+     */
+    approvedCallKeys?: string[];
+    /** 2 = exchange-scoped approval interaction IDs; missing = legacy call.id protocol. */
+    approvalProtocol?: number;
+    /** Persisted interaction ID the reducer is waiting for in approval phase. */
+    pendingApprovalInteractionId?: string;
     outputValidationAttempts: number;
 }

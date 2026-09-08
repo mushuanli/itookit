@@ -30,6 +30,7 @@ export interface LlmTaskInputOptions {
     workingDirectory?: string;
     approval?: DurableAgentInput['approval'];
     tools?: ToolDefinition[];
+    allowedToolIds?: string[];
     externalToolIds?: string[];
     subtaskTool?: string;
     dependencyBindings?: DurableDependencyBinding[];
@@ -58,6 +59,7 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         workingDirectory: options.workingDirectory,
         approval: options.approval ?? 'external',
         tools: options.tools,
+        allowedToolIds: options.allowedToolIds,
         externalToolIds: options.externalToolIds,
         subtaskTool: options.subtaskTool,
         dependencyBindings: options.dependencyBindings,

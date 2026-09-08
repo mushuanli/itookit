@@ -21,9 +21,11 @@ import {
     toolArguments,
     toolCalls,
     toolEffect,
+    toolEffectId,
     toolName,
 } from './program-helpers';
 import { collectDependency, dependenciesReady, dependencyWait } from './dependency-collector';
+import { compactMessages, validateContextCompaction } from './context-compaction';
 import type {
     DurableAgentInput,
     DurableAgentOutput,
@@ -35,6 +37,7 @@ export class DurableAgentProgram implements DurableTaskProgram<DurableAgentState
 
     init(input: DurableAgentInput): Decision<DurableAgentState, DurableAgentOutput> {
         validate(input);
+        validateContextCompaction(input.contextCompaction);
         return {
             state: initialState(input),
             next: { type: 'wait', on: { type: 'signal', id: CAPABILITY_SIGNAL } },
@@ -61,10 +64,7 @@ function collect(state: DurableAgentState, event: TaskInputEvent): Decision<Dura
     if (!state.capabilities || !dependenciesReady(state.input.dependencyBindings ?? [], state.resolvedDependencyIds)) {
         return { state, next: waitForInput(state) };
     }
-    state.messages = compactMessages(
-        applyDependencyMessages(state.input, state.dependencyOutputs),
-        state.input.contextCompaction,
-    );
+    state.messages = applyDependencyMessages(state.input, state.dependencyOutputs);
     return requestLlm(state);
 }
 
@@ -73,14 +73,19 @@ function requestLlm(state: DurableAgentState): Decision<DurableAgentState, Durab
         return fail(state, 'Agent exchange budget exhausted', 'BUDGET_EXHAUSTED');
     }
     state.exchanges++;
+    state.messages = compactMessages(state.messages, state.input.contextCompaction);
+    const effectId = `llm-exchange-${state.exchanges}`;
+    const skillMessages: ChatMessage[] = (state.skillContexts ?? [])
+        .filter(skill => skill.compactInstructions.trim())
+        .map(skill => ({ role: 'system', content: `Skill ${skill.skillId} — critical rules:\n${skill.compactInstructions}` }));
     state.phase = 'llm';
     return {
         state,
         actions: [
             emit(roundEvent('round:start', state.input, state.exchanges)),
-            llmEffect(state.input, state.messages, state.capabilities!.llmHandleId, state.input.tools),
+            llmEffect(state.input, [...skillMessages, ...state.messages], state.capabilities!.llmHandleId, effectiveTools(state), effectId),
         ],
-        next: { type: 'wait', on: { type: 'effect', id: `llm-${state.messages.length}` } },
+        next: { type: 'wait', on: { type: 'effect', id: effectId } },
     };
 }
 
@@ -91,6 +96,8 @@ function handleLlm(state: DurableAgentState, event: TaskInputEvent): Decision<Du
     state.messages.push(message);
     state.usage = addUsage(state.usage, value.usage);
     const calls = toolCalls(value);
+    const invalidCalls = validateToolCalls(calls);
+    if (invalidCalls) return fail(state, invalidCalls, 'INVALID_TOOL_CALLS');
     const actions = responseEvents(state.input, state.exchanges);
     if (!calls.length) {
         const issue = outputValidationIssue(state.input, message.content);
@@ -109,6 +116,9 @@ function handleLlm(state: DurableAgentState, event: TaskInputEvent): Decision<Du
     }
     state.pendingCalls = calls;
     state.callIndex = 0;
+    state.approvedCallKeys = [];
+    state.approvalProtocol = 2;
+    state.pendingApprovalInteractionId = undefined;
     return prepareCalls(state, actions);
 }
 
@@ -118,7 +128,19 @@ function prepareCalls(
 ): Decision<DurableAgentState, DurableAgentOutput> {
     const human = state.pendingCalls.find(call => isHumanTool(toolName(call)));
     if (human) return requestInteraction(state, human, true, actions);
-    if (requiresApproval(state)) return requestInteraction(state, state.pendingCalls[0], false, actions);
+    return dispatchNextCall(state, actions);
+}
+
+/** Re-evaluate approval against the latest tool metadata before every tool Effect. */
+function dispatchNextCall(
+    state: DurableAgentState,
+    actions: KernelAction[],
+): Decision<DurableAgentState, DurableAgentOutput> {
+    const call = state.pendingCalls[state.callIndex];
+    if (!call) return fail(state, 'Pending tool call is missing');
+    if (requiresApproval(state, call) && !isCallApproved(state, call)) {
+        return requestInteraction(state, call, false, actions);
+    }
     return requestTool(state, actions);
 }
 
@@ -130,18 +152,21 @@ function requestInteraction(
 ): Decision<DurableAgentState, DurableAgentOutput> {
     state.phase = human ? 'human' : 'approval';
     const args = toolArguments(call);
+    const interactionId = human ? call.id : approvalInteractionId(state, call);
+    state.approvalProtocol = 2;
+    state.pendingApprovalInteractionId = interactionId;
     actions.push({
         type: 'request-interaction',
         interaction: {
-            id: call.id,
+            id: interactionId,
             kind: human ? 'input' : 'approval',
             prompt: interactionPrompt(args, human),
             payload: jsonValue(human
                 ? { questions: args.questions ?? null, options: args.options ?? null }
-                : { calls: state.pendingCalls.map(item => ({ tool: toolName(item), args: toolArguments(item) })) }),
+                : { callId: call.id, calls: [{ tool: toolName(call), args }] }),
         },
     });
-    return { state, actions, next: { type: 'wait', on: { type: 'interaction', id: call.id } } };
+    return { state, actions, next: { type: 'wait', on: { type: 'interaction', id: interactionId } } };
 }
 
 function interactionPrompt(args: Record<string, unknown>, human: boolean): string {
@@ -159,17 +184,35 @@ function handleInteraction(
     event: TaskInputEvent,
 ): Decision<DurableAgentState, DurableAgentOutput> {
     if (event.type !== 'interaction-resolved') return fail(state, `Expected interaction, received ${event.type}`);
-    if (state.phase === 'approval' && !interactionApproved(event.value)) {
-        appendRejected(state, 'Tool execution was not authorized');
-        state.phase = 'collecting';
-        return requestLlm(state);
+    if (state.phase === 'approval') {
+        const call = state.pendingCalls[state.callIndex];
+        if (!call) return fail(state, 'Pending tool call is missing');
+        // Legacy tasks persisted call.id as the approval interaction ID and may
+        // predate approvalProtocol/approvedCallKeys. Only that exact call ID is
+        // accepted, then the state is migrated to the current protocol.
+        const legacy = state.approvalProtocol !== 2 && state.approvedCallKeys === undefined;
+        const expectedInteractionId = legacy
+            ? call.id
+            : state.pendingApprovalInteractionId ?? approvalInteractionId(state, call);
+        if (event.interactionId !== expectedInteractionId) {
+            return fail(state, `Unexpected approval interaction: ${event.interactionId}`);
+        }
+        state.approvalProtocol = 2;
+        state.pendingApprovalInteractionId = undefined;
+        if (!interactionApproved(event.value)) {
+            appendRejected(state, 'Tool execution was not authorized');
+            state.phase = 'collecting';
+            return requestLlm(state);
+        }
+        state.approvedCallKeys = [...new Set([...(state.approvedCallKeys ?? []), approvalKey(state, call)])];
+        return dispatchNextCall(state, []);
     }
     if (state.phase === 'human') {
         appendHumanResponse(state, event.value);
         state.phase = 'collecting';
         return requestLlm(state);
     }
-    return requestTool(state, []);
+    return fail(state, `Unexpected interaction phase: ${state.phase}`);
 }
 
 function requestTool(
@@ -181,8 +224,8 @@ function requestTool(
     if (!call || !handle) return fail(state, 'Tool resource handle is required');
     state.phase = 'tool';
     actions.push(emit({ type: 'tool:running', call: callInfo(call) }));
-    actions.push(toolEffect(state.input.roundId, call, handle, state.input.workingDirectory));
-    return { state, actions, next: { type: 'wait', on: { type: 'effect', id: `tool-${call.id}` } } };
+    actions.push(toolEffect(state.input.roundId, state.exchanges, call, handle, state.input.workingDirectory));
+    return { state, actions, next: { type: 'wait', on: { type: 'effect', id: toolEffectId(state.exchanges, call) } } };
 }
 
 function handleTool(state: DurableAgentState, event: TaskInputEvent): Decision<DurableAgentState, DurableAgentOutput> {
@@ -191,11 +234,18 @@ function handleTool(state: DurableAgentState, event: TaskInputEvent): Decision<D
     if (event.type === 'effect-failed') return { state, next: { type: 'fail', error: event.error } };
     if (event.type !== 'effect-completed') return fail(state, `Expected Tool Effect, received ${event.type}`);
     const result = event.result as ToolInvokeResult;
+    if (result.success && result.skillContext) {
+        state.skillContexts = (state.skillContexts ?? []).filter(skill => skill.skillId !== result.skillContext!.skillId);
+        state.skillContexts.push(result.skillContext);
+    }
     state.messages.push({ role: 'tool', tool_call_id: call.id, content: result.output });
     const actions = [emit({ type: 'tool:success', call: { ...callInfo(call), result: result.output } })];
     state.callIndex++;
-    if (state.callIndex < state.pendingCalls.length) return requestTool(state, actions);
+    if (state.callIndex < state.pendingCalls.length) return dispatchNextCall(state, actions);
     state.pendingCalls = [];
+    state.approvedCallKeys = [];
+    state.approvalProtocol = 2;
+    state.pendingApprovalInteractionId = undefined;
     state.phase = 'collecting';
     return withActions(requestLlm(state), actions);
 }
@@ -291,24 +341,8 @@ function initialState(input: DurableAgentInput): DurableAgentState {
     return {
         input: clone(input), phase: 'collecting', messages: [], dependencyOutputs: {},
         resolvedDependencyIds: [],
-        usage: {}, exchanges: 0, pendingCalls: [], callIndex: 0, outputValidationAttempts: 0,
+        usage: {}, exchanges: 0, pendingCalls: [], callIndex: 0, approvedCallKeys: [], approvalProtocol: 2, pendingApprovalInteractionId: undefined, outputValidationAttempts: 0,
     };
-}
-
-function compactMessages(
-    messages: ChatMessage[],
-    policy: DurableAgentInput['contextCompaction'],
-): ChatMessage[] {
-    if (!policy || messages.length <= policy.maxMessages) return messages;
-    const maxMessages = Math.max(2, Math.floor(policy.maxMessages));
-    const keepRecent = Math.min(maxMessages - 1, Math.max(1, Math.floor(policy.keepRecent ?? Math.ceil(maxMessages / 2))));
-    const system = messages.filter(message => message.role === 'system');
-    const recent = messages.slice(-keepRecent);
-    const selected = [...system.slice(0, Math.max(0, maxMessages - keepRecent - 1)), ...recent];
-    const omitted = Math.max(0, messages.length - selected.length);
-    return omitted > 0
-        ? [{ role: 'system', content: `[Context compacted: ${omitted} earlier messages omitted; durable dependency outputs remain available.]` }, ...selected]
-        : selected;
 }
 
 function waitForInput(state: DurableAgentState): Decision<DurableAgentState, DurableAgentOutput>['next'] {
@@ -317,18 +351,70 @@ function waitForInput(state: DurableAgentState): Decision<DurableAgentState, Dur
     return bindings.length ? dependencyWait(bindings) : { type: 'continue' };
 }
 
-function requiresApproval(state: DurableAgentState): boolean {
+function requiresApproval(state: DurableAgentState, call: ToolCall): boolean {
     if (state.input.approval === 'all') return true;
+    if (state.input.approval !== 'external') return false;
     const external = new Set(state.input.externalToolIds ?? []);
-    return state.input.approval === 'external'
-        && state.pendingCalls.some(call => external.has(toolName(call)));
+    for (const tool of loadedTools(state)) {
+        if (tool.external) external.add(tool.definition.function?.name ?? tool.definition.name ?? tool.toolId);
+    }
+    return external.has(toolName(call));
+}
+
+function isCallApproved(state: DurableAgentState, call: ToolCall): boolean {
+    return (state.approvedCallKeys ?? []).includes(approvalKey(state, call));
+}
+
+function approvalInteractionId(state: DurableAgentState, call: ToolCall): string {
+    return `approval:${state.exchanges}:${call.id}`;
+}
+
+function approvalKey(state: DurableAgentState, call: ToolCall): string {
+    return JSON.stringify([state.input.roundId, state.exchanges, call.id, toolName(call), canonicalJson(toolArguments(call))]);
+}
+
+function canonicalJson(value: unknown): string {
+    return JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+        ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right)))
+        : item);
+}
+
+function validateToolCalls(calls: ToolCall[]): string | undefined {
+    const ids = new Set<string>();
+    for (const call of calls) {
+        const id = typeof call?.id === 'string' ? call.id.trim() : '';
+        if (!id) return 'Tool call id is required';
+        if (ids.has(id)) return `Duplicate tool call id: ${id}`;
+        ids.add(id);
+        if (!toolName(call).trim()) return 'Tool name is required';
+    }
+    return undefined;
+}
+
+function loadedTools(state: DurableAgentState) {
+    const allowed = new Set(state.input.allowedToolIds ?? []);
+    return (state.skillContexts ?? []).flatMap(skill => skill.tools ?? []).filter(tool => allowed.has(tool.toolId));
+}
+
+function effectiveTools(state: DurableAgentState) {
+    const definitions = new Map((state.input.tools ?? []).map(tool => [tool.function?.name ?? tool.name, tool]));
+    for (const tool of loadedTools(state)) {
+        const name = tool.definition.function?.name ?? tool.definition.name;
+        // The original node definitions take precedence over dynamic bindings.
+        if (name && !definitions.has(name)) definitions.set(name, tool.definition);
+    }
+    return [...definitions.values()];
 }
 
 function appendRejected(state: DurableAgentState, reason: string): void {
-    state.messages.push(...state.pendingCalls.map(call => ({
+    state.messages.push(...state.pendingCalls.slice(state.callIndex).map(call => ({
         role: 'tool' as const, tool_call_id: call.id, content: reason,
     })));
     state.pendingCalls = [];
+    state.callIndex = 0;
+    state.approvedCallKeys = [];
+    state.approvalProtocol = 2;
+    state.pendingApprovalInteractionId = undefined;
 }
 
 function appendHumanResponse(state: DurableAgentState, value: JsonValue): void {
@@ -339,6 +425,10 @@ function appendHumanResponse(state: DurableAgentState, value: JsonValue): void {
         content: call.id === human?.id ? String(value ?? '') : 'Skipped while waiting for human input',
     })));
     state.pendingCalls = [];
+    state.callIndex = 0;
+    state.approvedCallKeys = [];
+    state.approvalProtocol = 2;
+    state.pendingApprovalInteractionId = undefined;
 }
 
 function isHumanTool(name: string): boolean {

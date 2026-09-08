@@ -79,6 +79,7 @@ export function llmEffect(
     messages: ChatMessage[],
     handleId: string,
     tools?: import('@itookit/common').ToolDefinition[],
+    effectId?: string,
 ): KernelAction {
     const request = compact({
         messages,
@@ -97,19 +98,24 @@ export function llmEffect(
     return {
         type: 'effect',
         effect: {
-            id: `llm-${messages.length}`,
+            id: effectId ?? `llm-${messages.length}`,
             kind: 'llm.chat',
             version: '1',
             request: { resourceHandleId: handleId, connectionId: input.connectionId, request },
-            idempotencyKey: `${input.roundId}:llm:${messages.length}`,
+            idempotencyKey: effectId ? `${input.roundId}:${effectId}` : `${input.roundId}:llm:${messages.length}`,
             timeoutMs: input.timeoutMs ?? DEFAULT_EFFECT_TIMEOUT_MS,
             grants: [{ handleId, right: 'execute' }],
         },
     };
 }
 
+export function toolEffectId(exchange: number, call: ToolCall): string {
+    return `tool-${exchange}-${call.id}`;
+}
+
 export function toolEffect(
     roundId: string,
+    exchange: number,
     call: ToolCall,
     handleId: string,
     cwd?: string,
@@ -117,7 +123,7 @@ export function toolEffect(
     return {
         type: 'effect',
         effect: {
-            id: `tool-${call.id}`,
+            id: toolEffectId(exchange, call),
             kind: 'tool.call',
             version: '1',
             request: {
@@ -126,7 +132,7 @@ export function toolEffect(
                 args: toolArguments(call),
                 ...(cwd ? { cwd } : {}),
             },
-            idempotencyKey: `${roundId}:tool:${call.id}`,
+            idempotencyKey: `${roundId}:${exchange}:tool:${call.id}`,
             timeoutMs: DEFAULT_EFFECT_TIMEOUT_MS,
             grants: [{ handleId, right: 'execute' }],
         },

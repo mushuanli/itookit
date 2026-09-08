@@ -45,6 +45,18 @@ async function fixture(options: { profile?: BranchContextProfile; artifact?: Art
 }
 
 describe('ContextAssembler', () => {
+    it('drops Skill discovery metadata before history while retaining loaded rules', async () => {
+        const { assembler, plan } = await fixture({ tokenBudget: 100 });
+        const result = await assembler.assemble(plan, 'run', { id: 'agent', version: '1' }, ['identity'], undefined,
+            { skillInstructions: 'critical rule', skillIndex: 'index'.repeat(1000) });
+        expect(result.messages.map(message => message.content)).toContain('old question');
+        expect(result.messages.map(message => message.content)).toContain('critical rule');
+        expect(result.snapshot.blocks.some(block => block.kind === 'system' && block.source === 'skill-index')).toBe(false);
+        const roomy = await assembler.assemble({ ...plan, tokenBudget: 10000 }, 'run2', { id: 'agent', version: '1' }, [], undefined,
+            { skillIndex: 'available metadata' });
+        expect(roomy.snapshot.explanation?.included.some(item => item.priority === 30 && !item.required)).toBe(true);
+    });
+
     it('applies profile rules, memory and returns the persisted digest', async () => {
         const profile: BranchContextProfile = {
             id: 'p1', revision: 1, createdAt: 1, rules: { r1: { mode: 'exclude' } },
