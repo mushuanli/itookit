@@ -48,3 +48,14 @@ export { ExecProgram } from './programs/exec-program';
 export type { ExecProgramInput, ExecProgramOutput } from './programs/exec-program';
 
 export { BUILTIN_TOOLS, ToolDeviceDriver } from '@itookit/tools';
+
+export { buildSkillPromptContext } from './skill/prompt-context';
+export { rememberLoadedSkill, forgetLoadedSkill } from './skill/loaded-state';
+export { SkillUnloadEffectAdapter, type SkillUnloadResult } from './effects/skill-unload-effect';
+
+export { createSessionSkillControls } from './skill/session-skill-controls';
+
+export { runSessionSkillOperation } from './skill/operation-queue';
+
+export { SessionFileSkillSource } from './skill/session-file-source';
+export { resolveSessionSkillContext } from './skill/session-prompt-context';

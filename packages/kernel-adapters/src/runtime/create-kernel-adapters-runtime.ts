@@ -1,3 +1,8 @@
+import { coordinateSkillEffect, runSessionSkillOperation, invalidateSessionSkillOperations, reopenSessionSkillOperations, closeSessionSkillOperations } from '../skill/operation-queue';
+import { parseLoadedSkillIds } from '../skill/loaded-state';
+import { createUnloadSkillHandler, unloadSkillDefinition, unloadSkillMeta } from '../tool/unload-skill';
+import { SkillUnloadEffectAdapter } from '../effects/skill-unload-effect';
+import { rememberLoadedSkill } from '../skill/loaded-state';
 import type {
     ILLMService,
     ISkillService,
@@ -44,6 +49,8 @@ export interface KernelAdaptersRuntimeOptions {
     configureSession?: (sessionId: string, scope: SessionCapabilityScope & { toolDriver: ToolDeviceDriver }) => Promise<void> | void;
     runMode?: 'kernel';
     skillSource?: SkillSource;
+    /** Create a source using only the acquired Session file view. */
+    skillSourceForSession?: (files: { vfs: ToolVFSContext; cwd: string }) => SkillSource;
     skillToolHandlerFactory?: SkillToolHandlerFactory;
     /** Additional application tools registered in every isolated session scope. */
     additionalTools?: Tool[];
@@ -102,6 +109,7 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
     private readonly closing = new Map<string, Promise<void>>();
     private readonly scopes = new Map<string, Promise<KernelAdaptersScope>>();
     private readonly hydrated = new Set<string>();
+    private readonly hydrating = new Map<string, Promise<KernelAdaptersScope>>();
 
     constructor(private readonly options: KernelAdaptersRuntimeOptions,
         private readonly skillDefinitions: Map<string, SkillDefinition>) {}
@@ -126,35 +134,58 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
     async getForContext(
         context: import('@itookit/durable-kernel').EffectExecutionContext,
     ): Promise<KernelAdaptersScope> {
-        const scope = await this.get(context.sessionId);
-        if (this.hydrated.has(context.sessionId)) return scope;
         const saved = await context.sessionState?.get('kernel-adapters.skills.loaded');
-        const ids = Array.isArray(saved?.value) ? saved.value.filter(value => typeof value === 'string') : [];
-        for (const id of ids) {
+        return this.restore(context.sessionId, saved?.value);
+    }
+
+    restore(sessionId: string, loadedSkillIds: unknown): Promise<KernelAdaptersScope> {
+        const pending = this.hydrating.get(sessionId);
+        if (pending) return pending;
+        const restored = this.restoreScope(sessionId, loadedSkillIds);
+        this.hydrating.set(sessionId, restored);
+        void restored.finally(() => {
+            if (this.hydrating.get(sessionId) === restored) this.hydrating.delete(sessionId);
+        }).catch(() => undefined);
+        return restored;
+    }
+
+    private async restoreScope(sessionId: string, value: unknown): Promise<KernelAdaptersScope> {
+        const opening = this.get(sessionId);
+        const identity = this.scopes.get(sessionId);
+        const scope = await opening;
+        if (this.closed || this.scopes.get(sessionId) !== identity) throw new Error('Session scope changed during Skill restoration');
+        if (this.hydrated.has(sessionId)) return scope;
+        for (const id of parseLoadedSkillIds(value)) {
+            if (scope.skillService.getSkill(id)?.disableModelInvocation) throw new Error(`Skill cannot be restored for model invocation: ${id}`);
             const result = await scope.skillService.loadSkill(id);
             if (!result.success) throw new Error(result.error ?? `Failed to restore Skill: ${id}`);
         }
-        this.hydrated.add(context.sessionId);
+        if (this.closed || this.scopes.get(sessionId) !== identity) throw new Error('Session scope changed during Skill restoration');
+        this.hydrated.add(sessionId);
         return scope;
     }
 
     async disposeSession(sessionId: string): Promise<void> {
         const pending = this.closing.get(sessionId);
         if (pending) return pending;
+        invalidateSessionSkillOperations(this, sessionId);
         const scope = this.scopes.get(sessionId);
         this.scopes.delete(sessionId);
         this.hydrated.delete(sessionId);
-        if (!scope) return;
+        this.hydrating.delete(sessionId);
+        if (!scope) { reopenSessionSkillOperations(this, sessionId); return; }
         const close = scope.then(value => value.dispose(), () => {});
         this.closing.set(sessionId, close);
-        try { await close; } finally { this.closing.delete(sessionId); }
+        try { await close; } finally { this.closing.delete(sessionId); reopenSessionSkillOperations(this, sessionId); }
     }
 
     async dispose(): Promise<void> {
         this.closed = true;
+        closeSessionSkillOperations(this);
         const scopes = [...this.scopes.values()];
         this.scopes.clear();
         this.hydrated.clear();
+        this.hydrating.clear();
         const results = await Promise.allSettled([...this.closing.values(), ...scopes.map(async scope => {
             const value = await scope.catch(() => undefined);
             await value?.dispose();
@@ -178,14 +209,22 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
         }, '/');
         const nativeShell = files?.nativeShell;
         if (nativeShell) toolDriver.setNativeShell(nativeShell);
+        let source: SkillSource | undefined;
+        try { source = files && this.options.skillSourceForSession
+            ? this.options.skillSourceForSession(files) : this.options.skillSource; }
+        catch (error) { await files?.release(); await toolDriver.dispose(); throw error; }
         const skillDriver = new SkillDeviceDriver({
             registry: this.skillDefinitions,
-            source: this.options.skillSource,
+            source,
+            readFile: files ? path => files.vfs.readFile(path) : undefined,
             toolHandlerFactory: this.options.skillToolHandlerFactory,
         });
         skillDriver.setToolService(toolDriver.getService());
         const ttySessions = registerCoreTools(toolDriver, skillDriver.getService(), files?.ttyDriver);
-        try { await toolDriver.init(); }
+        try {
+            await toolDriver.init();
+            if (files && this.options.skillSourceForSession) await skillDriver.getService().setCwd(files.cwd);
+        }
         catch (error) { await files?.release(); await toolDriver.dispose(); await skillDriver.dispose(); throw error; }
         const scope = createScope(toolDriver, skillDriver, ttySessions);
         const dispose = scope.dispose.bind(scope);
@@ -230,36 +269,45 @@ function createEffects(
         (await registry.getForContext(context)).skillService;
     const effects: import('@itookit/durable-kernel').EffectAdapter[] = [
         new LlmChatEffectAdapter(llm),
-        new ToolCallEffectAdapter(tools),
-        new BashEffectAdapter(tools),
+        new ToolCallEffectAdapter(async (context, request) => {
+            const scope = await registry.get(context.sessionId);
+            const meta = scope.toolService.getToolMeta(request.toolId);
+            if (meta?.skillUnloaderArgKey) return scope.toolService;
+            if (meta?.skillLoaderArgKey) return tools(context);
+            return runSessionSkillOperation(registry, context.sessionId, () => tools(context));
+        }, async (skillId, context) => {
+            const service = await skills(context);
+            const skill = service.getLoadedSkills().find(item => item.id === skillId);
+            if (!skill || skill.disableModelInvocation) return;
+            const toolService = await tools(context);
+            const definitions = toolService.getToolDefinitions();
+            const boundTools = skill.tools.flatMap(binding => {
+                const meta = toolService.getToolMeta(binding.toolId);
+                const name = binding.definition.function?.name ?? binding.definition.name ?? binding.toolId;
+                const definition = definitions.find(item => (item.function?.name ?? item.name) === name);
+                return meta?.enabled && definition
+                    ? [{ toolId: binding.toolId, definition: structuredClone(definition), external: meta.sideEffect === 'external' }]
+                    : [];
+            });
+            const snapshot = { skillId, compactInstructions: skill.compact?.rawContent ?? '', tools: boundTools };
+            await persistLoadedSkill({ skillId, success: true, toolIds: [] }, context);
+            return snapshot;
+        }),
+        new BashEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, () => tools(context))),
         new SkillLoadEffectAdapter(skills, persistLoadedSkill),
+        new SkillUnloadEffectAdapter(async context => (await registry.get(context.sessionId)).skillService),
     ];
-    if (ttyEnabled) effects.push(new TtyEffectAdapter(tools));
-    return effects;
+    if (ttyEnabled) effects.push(new TtyEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, () => tools(context))));
+    return effects.map(effect => coordinateSkillEffect(effect, registry));
 }
 
 async function persistLoadedSkill(
     result: import('@itookit/common').SkillLoadResult,
     context: import('@itookit/durable-kernel').EffectExecutionContext,
 ): Promise<void> {
-    if (!context.sessionState) return;
-    const key = 'kernel-adapters.skills.loaded';
-    for (let attempt = 0; attempt < 3; attempt++) {
-        const saved = await context.sessionState.get(key);
-        const current = stringArray(saved?.value);
-        if (current.includes(result.skillId)) return;
-        try {
-            await context.sessionState.set(key, [...current, result.skillId], saved?.version ?? null);
-            return;
-        } catch (error) {
-            if (attempt === 2) throw error;
-        }
-    }
+    await rememberLoadedSkill(result.skillId, context.sessionState);
 }
 
-function stringArray(value: unknown): string[] {
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
 
 function registerCoreTools(
     tools: ToolDeviceDriver,
@@ -267,6 +315,7 @@ function registerCoreTools(
     tty?: ITTYDriver,
 ): TTYSessionManager | undefined {
     tools.registerTool(loadSkillMeta, loadSkillDefinition, createLoadSkillHandler(skills));
+    tools.registerTool(unloadSkillMeta, unloadSkillDefinition, createUnloadSkillHandler(skills));
     if (!tty) return undefined;
     const sessions = new TTYSessionManager();
     tools.registerTool(shellSessionMeta, shellSessionDefinition, createShellSessionHandler(tty, sessions));

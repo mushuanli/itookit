@@ -18,12 +18,14 @@ import type {
 } from '@itookit/vfs-core';
 import { aggregateCompactInstructions } from './compact-extractor';
 import { matchGlob } from './glob-matcher';
+import { skillSupportPrompt } from './support-files';
 import type { SkillSource, SkillToolHandlerFactory } from '../ports/capabilities';
 
 export interface SkillDeviceDriverOptions {
     registry?: Map<string, SkillDefinition>;
     source?: SkillSource;
     toolHandlerFactory?: SkillToolHandlerFactory;
+    readFile?: (path: string) => Promise<string>;
 }
 
 export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
@@ -34,6 +36,8 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     readonly sessionable = false;
 
     private readonly registry: Map<string, SkillDefinition>;
+    private readonly activationRevisions = new Map<string, number>();
+    private readonly fileSystemLoadIntent = new Set<string>();
     private loaded = new Set<string>();
     private changeListeners: Array<() => void> = [];
     private toolService: IToolService | null = null;
@@ -42,7 +46,9 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     /** skillId → 当前挂载该 skill 的文件路径集合（L4 glob 联动） */
     private globMounted = new Map<string, Set<string>>();
     private cwd: string = '';
-    private fsSkillIds = new Set<string>();
+    private readonly fileSystemSkills = new Map<string, SkillDefinition>();
+    private scopeRevision = 0;
+    private closed = false;
     private registeredTools = new Map<string, Set<string>>();
     /** _agent/AGENT.md 内容（项目级永久指令，始终注入系统 Prompt） */
     private agentMdContent: string = '';
@@ -57,7 +63,15 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     }
 
     async init(): Promise<void> {}
-    async dispose(): Promise<void> {}
+    async dispose(): Promise<void> {
+        this.closed = true;
+        this.fileSystemLoadIntent.clear();
+        this.scopeRevision++;
+        for (const id of [...this.loaded]) this.deactivateSkill(id);
+        this.fileSystemSkills.clear();
+        this.agentMdContent = '';
+        this.changeListeners = [];
+    }
 
     // ── IDeviceDriver ──
 
@@ -76,19 +90,20 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     // ── ISkillService — 基础 CRUD ──
 
     listSkills(): SkillDefinition[] {
-        return [...this.registry.values()];
+        return [...new Map([...this.registry, ...this.fileSystemSkills]).values()];
     }
 
     getSkill(id: string): SkillDefinition | undefined {
-        return this.registry.get(id);
+        return this.fileSystemSkills.get(id) ?? this.registry.get(id);
     }
 
     getSkillNames(): string[] {
-        return [...this.registry.keys()];
+        return this.listSkills().map(skill => skill.id);
     }
 
     async loadSkill(id: string): Promise<SkillLoadResult> {
-        const skill = this.registry.get(id);
+        if (this.closed) return { skillId: id, success: false, toolIds: [], error: 'Skill service is closed' };
+        const skill = this.getSkill(id);
         if (!skill) {
             return { skillId: id, success: false, toolIds: [], error: `Skill not found: ${id}` };
         }
@@ -96,26 +111,43 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
             return { skillId: id, success: false, toolIds: [], error: `Skill is disabled: ${id}` };
         }
 
+        if (!this.isSkillInScope(skill)) {
+            return { skillId: id, success: false, toolIds: [], error: `Skill is outside the current scope: ${id}` };
+        }
+
+        const revision = this.scopeRevision;
+        const activationRevision = this.activationRevisions.get(id);
+        let supporting: string;
+        try { supporting = await skillSupportPrompt(skill, this.options.readFile); }
+        catch (error) { return { skillId: id, success: false, toolIds: [], error: error instanceof Error ? error.message : String(error) }; }
+        if (this.closed || revision !== this.scopeRevision || activationRevision !== this.activationRevisions.get(id) || this.getSkill(id) !== skill || !this.isSkillInScope(skill)) {
+            return { skillId: id, success: false, toolIds: [], error: 'Skill scope changed during loading' };
+        }
         this.loaded.add(id);
+        if (this.fileSystemSkills.has(id)) this.fileSystemLoadIntent.add(id);
         const toolIds = skill.tools.map((t) => t.toolId);
 
         for (const binding of skill.tools) this.registerDynamicTool(skill, binding);
 
-        return { skillId: id, success: true, toolIds };
+        return { skillId: id, success: true, toolIds,
+            instructions: [skill.instructions, supporting].filter(Boolean).join('\n\n'),
+            compactInstructions: aggregateCompactInstructions([skill]),
+        };
     }
 
     async unloadSkill(id: string): Promise<void> {
+        this.fileSystemLoadIntent.delete(id);
         this.deactivateSkill(id);
     }
 
     getLoadedSkills(): SkillDefinition[] {
         return [...this.loaded]
-            .map((id) => this.registry.get(id))
-            .filter((s): s is SkillDefinition => s !== undefined);
+            .map((id) => this.getSkill(id))
+            .filter((s): s is SkillDefinition => s !== undefined && s.enabled && this.isSkillInScope(s));
     }
 
     getUnloadedSkills(): SkillDefinition[] {
-        return this.listSkills().filter((s) => !this.loaded.has(s.id) && s.enabled);
+        return this.getScopedSkills().filter((s) => !this.loaded.has(s.id) && s.enabled);
     }
 
     autoDetectSkills(prompt: string): string[] {
@@ -133,7 +165,7 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
      * VFS 同步调用时应先检查来源。
      */
     async deleteSkill(id: string): Promise<void> {
-        const skill = this.registry.get(id);
+        const skill = this.getSkill(id);
         if (skill?.source === 'filesystem') return; // 文件系统 skill 不被 VFS 同步删除
         this.registry.delete(id);
         this.deactivateSkill(id);
@@ -201,14 +233,16 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
             if (this.loaded.has(skill.id)) continue;
 
             // 1. triggerPatterns (regex, backward compat)
-            if (skill.triggerPatterns.some((p) => new RegExp(p, 'i').test(userMessage))) {
+            if (skill.triggerPatterns.some((pattern) => {
+                try { return new RegExp(pattern, 'i').test(userMessage); } catch { return false; }
+            })) {
                 matched.add(skill.id);
                 continue;
             }
 
             // 2. Keyword overlap: ≥2 words from description appear in message
             const descWords = skill.description.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
-            const overlap = descWords.filter((w) => msgWords.includes(w));
+            const overlap = [...new Set(descWords)].filter((w) => msgWords.includes(w));
             if (overlap.length >= 2) {
                 matched.add(skill.id);
                 continue;
@@ -226,8 +260,9 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     }
 
     mountByGlob(filePath: string): void {
+        if (this.closed) return;
         for (const skill of this.getScopedSkills()) {
-            if (!skill.enabled || !skill.globs?.length) continue;
+            if (!skill.enabled || skill.disableModelInvocation || !skill.globs?.length) continue;
             if (matchGlob(filePath, skill.globs)) {
                 if (!this.globMounted.has(skill.id)) {
                     this.globMounted.set(skill.id, new Set());
@@ -253,23 +288,26 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
         scopeLevel: SkillScopeLevel,
         scopeRoot: string
     ): Promise<SkillLoadResult[]> {
+        if (this.closed) throw new Error('Skill service is closed');
         const loader = this.options.source?.loadDirectory;
         if (!loader) return [];
+        const revision = this.scopeRevision;
         const skills = await loader(dirPath, scopeLevel, scopeRoot);
+        if (revision !== this.scopeRevision) return [];
         return this.replaceFileSystemSkills(skills, false);
     }
 
     // ── ISkillService — Compact Instructions ──
 
     parseCompactInstructions(skillId: string): ParsedCompactInstructions {
-        const skill = this.registry.get(skillId);
+        const skill = this.getSkill(skillId);
         if (!skill?.compact) return { redLines: [], fullText: '' };
         const { redLines, rawContent } = skill.compact;
         return { redLines, fullText: rawContent };
     }
 
     getCompactInstructions(): string {
-        return aggregateCompactInstructions(this.listSkills());
+        return aggregateCompactInstructions(this.getLoadedSkills().filter(skill => !skill.disableModelInvocation));
     }
 
     // ── ISkillService — 作用域管理 ──
@@ -279,7 +317,12 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     }
 
     async setCwd(cwd: string): Promise<void> {
+        if (cwd !== this.cwd) this.fileSystemLoadIntent.clear();
         this.cwd = cwd;
+        for (const id of [...this.loaded]) {
+            const skill = this.getSkill(id);
+            if (!skill || !this.isSkillInScope(skill)) this.deactivateSkill(id);
+        }
         await this.refreshScopedSkills();
     }
 
@@ -288,10 +331,28 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     }
 
     async refreshScopedSkills(): Promise<SkillLoadResult[]> {
+        if (this.closed) throw new Error('Skill service is closed');
         if (!this.options.source) return [];
+        const revision = ++this.scopeRevision;
+        this.agentMdContent = '';
+        this.replaceFileSystemSkills([], true);
         const snapshot = await this.options.source.loadScope(this.cwd);
+        if (revision !== this.scopeRevision) return [];
         this.agentMdContent = snapshot.agentInstructions;
-        return this.replaceFileSystemSkills(snapshot.skills, true);
+        const results = this.replaceFileSystemSkills(snapshot.skills, true);
+        for (const id of [...this.fileSystemLoadIntent]) {
+            if (revision !== this.scopeRevision) return [];
+            const skill = this.fileSystemSkills.get(id);
+            if (!skill?.enabled || skill.disableModelInvocation || !this.isSkillInScope(skill)) {
+                this.fileSystemLoadIntent.delete(id);
+                continue;
+            }
+            const result = await this.loadSkill(id);
+            if (revision !== this.scopeRevision) return [];
+            const index = results.findIndex(item => item.skillId === id);
+            if (index >= 0) results[index] = result;
+        }
+        return results;
     }
 
     // ── 私有工具 ──
@@ -304,13 +365,15 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
         // VFS skills and skills without scope are always visible
         if (!level || level === 'vfs' || level === 'global-fs') return true;
 
-        const scopeRoot = skill.scopeRoot ?? '';
+        if (!skill.scopeRoot || !this.cwd) return false;
+        const scopeRoot = skill.scopeRoot.replace(/\/+$/, '') || '/';
+        const cwd = this.cwd.replace(/\/+$/, '') || '/';
         if (level === 'local-fs') {
-            return this.cwd === scopeRoot;
+            return cwd === scopeRoot;
         }
 
         // parent-fs: scopeRoot must be an ancestor of cwd
-        return this.cwd === scopeRoot || this.cwd.startsWith(scopeRoot + '/');
+        return cwd === scopeRoot || cwd.startsWith(scopeRoot === '/' ? '/' : scopeRoot + '/');
     }
 
     private registerDynamicTool(skill: SkillDefinition, binding: SkillToolBinding): void {
@@ -325,6 +388,7 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     }
 
     private deactivateSkill(id: string): void {
+        this.activationRevisions.set(id, (this.activationRevisions.get(id) ?? 0) + 1);
         this.loaded.delete(id);
         this.globMounted.delete(id);
         for (const toolId of this.registeredTools.get(id) ?? []) {
@@ -335,15 +399,12 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
 
     private replaceFileSystemSkills(skills: SkillDefinition[], replace: boolean): SkillLoadResult[] {
         if (replace) {
-            for (const id of this.fsSkillIds) {
-                this.registry.delete(id);
-                this.deactivateSkill(id);
-            }
-            this.fsSkillIds.clear();
+            for (const id of this.fileSystemSkills.keys()) this.deactivateSkill(id);
+            this.fileSystemSkills.clear();
         }
         for (const skill of skills) {
-            this.registry.set(skill.id, skill);
-            this.fsSkillIds.add(skill.id);
+            this.deactivateSkill(skill.id);
+            this.fileSystemSkills.set(skill.id, skill);
         }
         if (skills.length > 0 || replace) this.notifyChange();
         return skills.map(skill => ({ skillId: skill.id, success: true, toolIds: [] }));

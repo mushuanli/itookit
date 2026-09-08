@@ -41,6 +41,8 @@ export interface SessionCapabilityScope {
 
 export interface SessionCapabilityRegistry {
     get(sessionId: string): Promise<SessionCapabilityScope>;
+    /** Restore persisted loaded identities once per live scope, before building prompts or Effects. */
+    restore(sessionId: string, loadedSkillIds: unknown): Promise<SessionCapabilityScope>;
     disposeSession(sessionId: string): Promise<void>;
     dispose(): Promise<void>;
 }

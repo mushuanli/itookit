@@ -21,6 +21,9 @@ export class SkillLoadEffectAdapter implements EffectAdapter<SkillLoadEffectRequ
         assertEffectGrant(context, request.resourceHandleId, 'skill');
         if (!request.skillId.trim()) throw new Error('Skill id is required');
         const service = await resolveCapability(this.service, context);
+        if (service.getSkill(request.skillId)?.disableModelInvocation) {
+            throw new Error(`Skill "${request.skillId}" cannot be loaded by the model`);
+        }
         const result = await service.loadSkill(request.skillId);
         if (!result.success) throw new Error(result.error ?? `Skill failed to load: ${request.skillId}`);
         await this.onLoaded?.(result, context);

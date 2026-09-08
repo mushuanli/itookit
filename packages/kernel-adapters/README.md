@@ -29,7 +29,7 @@ const kernel = new Kernel({ catalog });
 await kernel.use(kernelAdapters.plugin);
 ```
 
-插件按可用服务注册 `llm.chat`、`tool.call`、`process.exec`、`tty.command`、`skill.load`，并注册 `kernel-adapters.approved-effect` Durable Program。能力状态按 Kernel Session 隔离；Skill 加载集合写入 Session shared state；TTY 操作必须持有对应 `ResourceHandle(execute)`。无法确认外部副作用的 Bash/TTY 恢复会进入 `indeterminate`，不会盲目重复执行。
+插件按可用服务注册 `llm.chat`、`tool.call`、`process.exec`、`tty.command`、`skill.load`、`skill.unload`，并注册 `kernel-adapters.approved-effect` Durable Program。能力状态按 Kernel Session 隔离；Skill 加载集合写入 Session shared state；TTY 操作必须持有对应 `ResourceHandle(execute)`。无法确认外部副作用的 Bash/TTY 恢复会进入 `indeterminate`，不会盲目重复执行。
 
 ## Skill 执行边界
 
@@ -51,3 +51,5 @@ await task.start();
 
 `createSkillTaskSpec` 默认设置 `deferStart=true`，便于在调度前绑定 ResourceHandle。
 TaskProgram 由 Skill 插件注册；KernelAdapters 不执行或解释 Skill 私有状态机。
+
+`skill.unload@1` 使用与加载相同的 `{ resourceHandleId, skillId }` 请求，要求 Skill execute grant 和 Session shared state。先以 CAS 删除加载身份，再卸载当前作用域；可重试中断的清理，旧定义缺失不会阻止删除身份。服务层 `unloadSkill` 只修改活动作用域，需要持久语义的调用方应提交该 Effect。

@@ -15,8 +15,7 @@ export const loadSkillMeta: ToolMeta = {
     type: 'builtin',
     enabled: true,
     tags: ['skill', 'meta'],
-    // Tells the executor to call markSkillLoaded(args['skill_id']) on success,
-    // without hardcoding the tool name 'load_skill' in the executor.
+    // The durable tool adapter uses this metadata to persist the loaded Skill ID.
     skillLoaderArgKey: 'skill_id',
 };
 
@@ -52,6 +51,10 @@ export function createLoadSkillHandler(skillService: ISkillService): ToolHandler
 
         const result = await skillService.loadSkill(skillId);
         if (!result.success) throw new Error(result.error ?? `Failed to load Skill: ${skillId}`);
-        return `Skill "${skillId}" loaded. New tools available: ${result.toolIds.join(', ')}`;
+        return [
+            `Skill "${skillId}" loaded. Bound tool IDs: ${result.toolIds.join(', ') || '(none)'}`,
+            result.instructions ?? skill?.instructions ?? '',
+            result.compactInstructions ? `Critical rules:\n${result.compactInstructions}` : '',
+        ].filter(Boolean).join('\n\n');
     };
 }

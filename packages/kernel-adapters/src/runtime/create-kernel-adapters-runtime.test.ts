@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { runSessionSkillOperation } from '../skill/operation-queue';
+import { createSessionSkillControls } from '../skill/session-skill-controls';
+import { describe, expect, it, vi } from 'vitest';
 import type {
     DurableTaskProgram,
     EffectAdapter,
@@ -10,9 +12,25 @@ import type {
 import type { IDeviceDriver } from '@itookit/vfs-core';
 import type { ITTYDriver, SkillDefinition } from '@itookit/common';
 import { createKernelAdaptersRuntime } from './create-kernel-adapters-runtime';
+import { buildSkillPromptContext } from '../skill/prompt-context';
 import { ApprovedEffectProgram } from '../programs/approved-effect-program';
 
 describe('createKernelAdaptersRuntime', () => {
+    it('releases acquired views when the Session skill scan fails', async () => {
+        let released = 0;
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            fileContextForSession: async () => ({ cwd: '/workspace', vfs: {
+                readFile: async () => '', writeFile: async () => {}, listFiles: async () => [],
+            }, release: async () => { released++; } }),
+            skillSourceForSession: () => ({ loadScope: async () => { throw new Error('view revoked'); } }),
+        });
+        try {
+            await expect(runtime.sessions.get('one')).rejects.toThrow('view revoked');
+            expect(released).toBe(1);
+        } finally { await runtime.dispose(); }
+        expect(released).toBe(1);
+    });
+
     it('assembles services and registers durable capability effects', async () => {
         const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
         const effects: EffectAdapter[] = [];
@@ -22,7 +40,7 @@ describe('createKernelAdaptersRuntime', () => {
         expect(runtime.toolCatalog.getToolMeta('load_skill')).toBeDefined();
         expect(runtime.toolCatalog.getToolMeta('human_input')).toBeUndefined();
         expect(effects.map(effect => effect.kind)).toEqual([
-            'llm.chat', 'tool.call', 'process.exec', 'skill.load',
+            'llm.chat', 'tool.call', 'process.exec', 'skill.load', 'skill.unload',
         ]);
         expect(programs.map(program => program.manifest.kind)).toEqual([
             'kernel-adapters.approved-effect', 'kernel-adapters.exec',
@@ -118,6 +136,82 @@ describe('createKernelAdaptersRuntime', () => {
         expect(approved.next).toEqual({ type: 'wait', on: { type: 'effect', id: 'llm' } });
     });
 
+    it('shares restoration and rejects an old restoration after its scope is disposed', async () => {
+        let waiting = true, entered!: () => void, finish!: (value: string) => void;
+        const started = new Promise<void>(resolve => { entered = resolve; });
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            fileContextForSession: async () => ({ cwd: '/workspace', release: async () => {}, vfs: {
+                writeFile: async () => {}, listFiles: async () => [], readFile: async () => {
+                    if (!waiting) return 'fresh';
+                    entered(); return new Promise<string>(resolve => { finish = resolve; });
+                },
+            } }),
+        });
+        try {
+            await runtime.skillCatalog.saveSkill({ ...skillDefinition(), fsRoot: '/workspace', referencePaths: ['ref.md'] });
+            const old = runtime.sessions.restore('session-a', ['review']);
+            expect(runtime.sessions.restore('session-a', ['review'])).toBe(old);
+            const rejected = expect(old).rejects.toThrow('changed');
+            await started;
+            await runtime.disposeSession('session-a');
+            waiting = false;
+            const current = await runtime.sessions.restore('session-a', ['review']);
+            finish('late');
+            await rejected;
+            expect(current.skillService.getLoadedSkills().map(skill => skill.id)).toEqual(['review']);
+            expect(await runtime.sessions.restore('session-a', ['review'])).toBe(current);
+        } finally { await runtime.dispose(); }
+    });
+
+    it('restores loaded identities before prompt assembly and preserves explicit unload in the live scope', async () => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        await runtime.skillCatalog.saveSkill(skillDefinition());
+        const effects: EffectAdapter[] = [];
+        runtime.plugin.install(registration(effects));
+        const state = sessionState();
+        await effects.find(effect => effect.kind === 'skill.load')!.execute(
+            { resourceHandleId: 'skill-handle', skillId: 'review' }, context(state));
+        await runtime.disposeSession('session-a');
+        const saved = await state.get('kernel-adapters.skills.loaded');
+        const scope = await runtime.sessions.restore('session-a', saved?.value);
+        expect((await buildSkillPromptContext(scope.skillService)).skillInstructions).toContain('Skill review:');
+        await scope.skillService.unloadSkill('review');
+        await runtime.sessions.restore('session-a', saved?.value);
+        expect(scope.skillService.getLoadedSkills()).toEqual([]);
+        await runtime.dispose();
+    });
+
+    it('rejects corrupt identities and model-disabled definitions during restoration', async () => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        try {
+            await runtime.skillCatalog.saveSkill({ ...skillDefinition(), disableModelInvocation: true });
+            await expect(runtime.sessions.restore('session-a', ['review'])).rejects.toThrow('cannot be restored');
+            expect((await runtime.sessions.get('session-a')).skillService.getLoadedSkills()).toEqual([]);
+            await expect(runtime.sessions.restore('session-a', ['review', 42])).rejects.toThrow('Invalid loaded');
+        } finally { await runtime.dispose(); }
+    });
+
+    it('durably unloads a Skill and does not restore it after scope reconstruction', async () => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        try {
+            await runtime.skillCatalog.saveSkill(skillDefinition());
+            const effects: EffectAdapter[] = [];
+            runtime.plugin.install(registration(effects));
+            const state = sessionState(), ctx = context(state);
+            await effects.find(effect => effect.kind === 'skill.load')!.execute({ resourceHandleId: 'skill-handle', skillId: 'review' }, ctx);
+            const unload = effects.find(effect => effect.kind === 'skill.unload')!;
+            await unload.execute({ resourceHandleId: 'skill-handle', skillId: 'review' }, ctx);
+            expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+            await runtime.disposeSession('session-a');
+            const restored = await runtime.sessions.restore('session-a', (await state.get('kernel-adapters.skills.loaded'))?.value);
+            expect(restored.skillService.getLoadedSkills()).toEqual([]);
+            // Cleanup remains possible after a saved definition has been removed from the catalog.
+            await state.set('kernel-adapters.skills.loaded', ['missing'], (await state.get('kernel-adapters.skills.loaded'))!.version);
+            await unload.execute({ resourceHandleId: 'skill-handle', skillId: 'missing' }, ctx);
+            expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        } finally { await runtime.dispose(); }
+    });
+
     it('restores loaded Skills from durable session shared state', async () => {
         const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
         await runtime.skillCatalog.saveSkill(skillDefinition());
@@ -137,6 +231,160 @@ describe('createKernelAdaptersRuntime', () => {
         const restored = await runtime.sessions.get('session-a');
         expect(restored.skillService.getLoadedSkills().map(value => value.id)).toEqual(['review']);
         await runtime.dispose();
+    });
+
+    it('returns Skill instructions through the tool Effect and restores its loaded state', async () => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        await runtime.skillCatalog.saveSkill({ ...skillDefinition(), instructions: 'Inspect authorization before writes.',
+            compact: { marker: 'Compact Instructions', redLines: ['Keep access checks.'], rawContent: 'Keep access checks.' } });
+        const effects: EffectAdapter[] = [];
+        runtime.plugin.install(registration(effects));
+        const effectContext = context(sessionState());
+        const tool = effects.find(effect => effect.kind === 'tool.call')!;
+        const result = await tool.execute({ resourceHandleId: 'tool-handle', toolId: 'load_skill',
+            args: { skill_id: 'review' } }, effectContext) as { output: string };
+        expect(result.output).toContain('Inspect authorization before writes.');
+        expect(result.output).toContain('Keep access checks.');
+        expect(result).toMatchObject({ skillContext: { skillId: 'review', compactInstructions: 'Keep access checks.' } });
+        await runtime.disposeSession('session-a');
+        await tool.execute({ resourceHandleId: 'tool-handle', toolId: 'missing', args: {} }, effectContext).catch(() => undefined);
+        expect((await runtime.sessions.get('session-a')).skillService.getLoadedSkills().map(s => s.id)).toEqual(['review']);
+        await runtime.skillCatalog.saveSkill({ ...skillDefinition(), instructions: 'Updated instructions.' });
+        expect(result.output).toContain('Inspect authorization before writes.');
+        expect(result).toMatchObject({ skillContext: { compactInstructions: 'Keep access checks.' } });
+        await runtime.dispose();
+    });
+
+    it('snapshots only registered enabled bindings from the loaded Skill', async () => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            skillToolHandlerFactory: { create: () => async () => 'published' } });
+        await runtime.skillCatalog.saveSkill({ ...skillDefinition(), tools: [
+            { toolId: 'publish', executionType: 'http', definition: { name: 'publish', description: 'Publish review' } },
+            { toolId: 'absent', executionType: 'builtin', definition: { name: 'absent' } },
+        ] });
+        const effects: EffectAdapter[] = [];
+        runtime.plugin.install(registration(effects));
+        const tool = effects.find(effect => effect.kind === 'tool.call')!;
+        const result = await tool.execute({ resourceHandleId: 'tool-handle', toolId: 'load_skill',
+            args: { skill_id: 'review' } }, context(sessionState())) as import('@itookit/common').ToolInvokeResult;
+        expect(result.skillContext?.tools).toEqual([
+            { toolId: 'publish', definition: { name: 'publish', description: 'Publish review' }, external: true },
+        ]);
+        await runtime.dispose();
+    });
+
+    it('unloads through the tool Effect durably and can forget a deleted definition after reconstruction', async () => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        await runtime.skillCatalog.saveSkill(skillDefinition());
+        const effects: EffectAdapter[] = []; runtime.plugin.install(registration(effects));
+        const tool = effects.find(effect => effect.kind === 'tool.call')!;
+        const state = sessionState(), ctx = context(state);
+        const request = { resourceHandleId: 'tool-handle', args: { skill_id: 'review' } };
+        await tool.execute({ ...request, toolId: 'load_skill' }, ctx);
+        expect(runtime.toolCatalog.getToolDefinitions().some(tool => (tool.name ?? tool.function?.name) === 'unload_skill')).toBe(true);
+        await tool.execute({ ...request, toolId: 'unload_skill' }, ctx);
+        expect((await runtime.sessions.get('session-a')).skillService.getLoadedSkills()).toEqual([]);
+        expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        await runtime.disposeSession('session-a');
+        await tool.execute({ ...request, toolId: 'missing' }, ctx).catch(() => undefined);
+        expect((await runtime.sessions.get('session-a')).skillService.getLoadedSkills()).toEqual([]);
+        await tool.execute({ ...request, toolId: 'load_skill' }, ctx);
+        await runtime.skillCatalog.deleteSkill('review');
+        await runtime.disposeSession('session-a');
+        await tool.execute({ ...request, toolId: 'unload_skill' }, ctx);
+        expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        await runtime.dispose();
+    });
+
+    it('keeps a Skill live when durable tool unload persistence fails', async () => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        await runtime.skillCatalog.saveSkill(skillDefinition());
+        const effects: EffectAdapter[] = []; runtime.plugin.install(registration(effects));
+        const tool = effects.find(effect => effect.kind === 'tool.call')!;
+        const state = sessionState(), ctx = context(state);
+        const request = { resourceHandleId: 'tool-handle', args: { skill_id: 'review' } };
+        await tool.execute({ ...request, toolId: 'load_skill' }, ctx);
+        state.set = async () => { throw new Error('storage unavailable'); };
+        await expect(tool.execute({ ...request, toolId: 'unload_skill' }, ctx)).rejects.toThrow('storage unavailable');
+        expect((await runtime.sessions.get('session-a')).skillService.getLoadedSkills().map(skill => skill.id)).toEqual(['review']);
+        await runtime.dispose();
+    });
+
+    it.each(['tool.call', 'skill.load'])('orders UI unload after a pending %s load and its persisted identity', async kind => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        await runtime.skillCatalog.saveSkill(skillDefinition());
+        const state = sessionState(), ctx = context(state);
+        const controls = createSessionSkillControls({ openSession: async () => ({
+            getShared: state.get, setShared: (key: string, value: JsonValue, options: { expectedVersion?: number | null }) => state.set(key, value, options.expectedVersion),
+        }) } as never, runtime.sessions);
+        const scope = await runtime.sessions.restore('session-a', []);
+        const original = scope.skillService.loadSkill.bind(scope.skillService);
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const loading = vi.spyOn(scope.skillService, 'loadSkill').mockImplementation(async id => { await gate; return original(id); });
+        const effects: EffectAdapter[] = []; runtime.plugin.install(registration(effects));
+        const adapter = effects.find(effect => effect.kind === kind)!;
+        const load = adapter.execute(kind === 'tool.call'
+            ? { resourceHandleId: 'tool-handle', toolId: 'load_skill', args: { skill_id: 'review' } }
+            : { resourceHandleId: 'skill-handle', skillId: 'review' }, ctx);
+        await vi.waitFor(() => expect(loading).toHaveBeenCalled());
+        const unload = controls.unload('session-a', 'review');
+        release(); await load; await unload;
+        expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        expect(scope.skillService.getLoadedSkills()).toEqual([]);
+        await runtime.disposeSession('session-a');
+        expect((await runtime.sessions.restore('session-a', (await state.get('kernel-adapters.skills.loaded'))?.value)).skillService.getLoadedSkills()).toEqual([]);
+        await runtime.dispose();
+    });
+
+    it('invalidates queued UI operations on scope disposal without resurrecting the old Session scope', async () => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        const state = sessionState();
+        await state.set('kernel-adapters.skills.loaded', ['review'], null);
+        const controls = createSessionSkillControls({ openSession: async () => ({
+            getShared: state.get, setShared: (key: string, value: JsonValue, options: { expectedVersion?: number | null }) => state.set(key, value, options.expectedVersion),
+        }) } as never, runtime.sessions);
+        await runtime.sessions.get('session-a');
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        let started = false;
+        const active = runSessionSkillOperation(runtime.sessions, 'session-a', () => { started = true; return gate; });
+        await vi.waitFor(() => expect(started).toBe(true));
+        const queued = controls.unload('session-a', 'review');
+        const rejected = expect(queued).rejects.toThrow('scope changed');
+        await runtime.disposeSession('session-a');
+        const get = vi.spyOn(runtime.sessions, 'get');
+        release(); await active; await rejected;
+        expect(get).not.toHaveBeenCalled();
+        expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual(['review']);
+        await controls.unload('session-a', 'review');
+        expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        await runtime.dispose();
+        await expect(controls.list('session-a')).rejects.toThrow('closed');
+    });
+
+    it('delivers declared supporting files through the Session capability and fails without it', async () => {
+        const readFile = async (path: string) => {
+            const content = new Map([['/workspace/skills/review/ref.md', 'Reference material'],
+                ['/workspace/skills/review/template.md', 'Output format'], ['/workspace/corrections.md', 'Past correction']]).get(path);
+            if (!content) throw new Error('Not authorized');
+            return content;
+        };
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            fileContextForSession: async () => ({ cwd: '/workspace', vfs: { readFile, writeFile: async () => {}, listFiles: async () => [] }, release: async () => {} }) });
+        const definition = { ...skillDefinition(), fsRoot: '/workspace/skills/review', scopeRoot: '/workspace',
+            referencePaths: ['ref.md'], templatePath: 'template.md', correctionLog: { enabled: true, path: 'corrections.md' } };
+        await runtime.skillCatalog.saveSkill(definition);
+        const effects: EffectAdapter[] = []; runtime.plugin.install(registration(effects));
+        const result = await effects.find(effect => effect.kind === 'tool.call')!.execute({
+            resourceHandleId: 'tool-handle', toolId: 'load_skill', args: { skill_id: 'review' },
+        }, context(sessionState())) as import('@itookit/common').ToolInvokeResult;
+        for (const content of ['Reference material', 'Output format', 'Past correction']) expect(result.output).toContain(content);
+        await runtime.dispose();
+        const unbound = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        await unbound.skillCatalog.saveSkill(definition);
+        expect((await (await unbound.sessions.get('s')).skillService.loadSkill('review')).success).toBe(false);
+        await unbound.dispose();
     });
 
     it('registers TTY tools and effect only when a TTY driver is configured', async () => {
