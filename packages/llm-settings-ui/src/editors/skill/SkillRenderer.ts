@@ -5,6 +5,8 @@
 import { t, SKILL_TYPE_META, ENTITY_ICONS } from '@itookit/common';
 import type { LLMSkill, SkillType, MCPServer } from '@itookit/common';
 
+const escapeSupportValue = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 // ─── Badge helpers (top-level, shared) ────────────────────────────────────
 
 export function typeBadge(type: SkillType) {
@@ -245,9 +247,21 @@ export function renderDetail(
                         <span style="color:var(--st-text-tertiary);font-size:.8em">${t('skill.trigger.correctionLogHint')}</span>
                     </label>
                     <input class="settings-input" name="correctionLog"
-                           value="${skill.correctionLog || ''}"
+                           value="${escapeSupportValue(skill.correctionLog?.path ?? '')}"
                            placeholder="docs/agent-corrections.md"
                            style="font-family:monospace;font-size:.875rem">
+                    <label><input type="checkbox" name="correctionEnabled" ${skill.correctionLog?.enabled ? 'checked' : ''}> ${t('skill.support.correctionEnabled')}</label>
+                    <label>${t('skill.support.correctionRoot')}</label>
+                    <input class="settings-input" name="correctionRoot" value="${escapeSupportValue(skill.correctionLog?.root ?? '')}" placeholder="/workspace">
+                </div>
+                <div class="settings-form-group">
+                    <label>${t('skill.support.root')}</label>
+                    <input class="settings-input" name="fsRoot" value="${escapeSupportValue(skill.fsRoot ?? '')}" placeholder="/workspace/_agent/skills/review">
+                    <p>${t('skill.support.hint')}</p>
+                    <label>${t('skill.support.references')}</label>
+                    <textarea class="settings-textarea" name="referencePaths" rows="3">${escapeSupportValue((skill.referencePaths ?? []).join('\n'))}</textarea>
+                    <label>${t('skill.support.template')}</label>
+                    <input class="settings-input" name="templatePath" value="${escapeSupportValue(skill.templatePath ?? '')}" placeholder="template.md">
                 </div>
             </div>
 

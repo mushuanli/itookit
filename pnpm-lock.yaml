@@ -720,6 +720,9 @@ importers:
       '@types/node':
         specifier: ^20.19.25
         version: 20.19.43
+      jsdom:
+        specifier: ^27.2.0
+        version: 27.2.0
       rimraf:
         specifier: ^5.0.5
         version: 5.0.10

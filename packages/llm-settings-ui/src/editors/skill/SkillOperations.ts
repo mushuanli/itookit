@@ -9,6 +9,7 @@ import type { LLMSkill,
     IAgentManagementService
 } from '@itookit/common';
 import { Toast } from '@itookit/ui-common';
+import { readSkillSupportFields } from './SkillSupportFields';
 
 export interface SkillOperationsDeps {
     service: IAgentManagementService;
@@ -103,10 +104,7 @@ export async function saveCurrent(deps: SkillOperationsDeps): Promise<void> {
         autoLoad:     deps.chk('autoLoad'),
         priority:     parseInt(deps.val('priority') || '50', 10),
         globs:        globs.length > 0 ? globs : undefined,
-        correctionLog: deps.val('correctionLog').trim() ? {
-            path: deps.val('correctionLog').trim(),
-            enabled: true,
-        } : undefined,
+        ...readSkillSupportFields(deps.val, deps.chk),
         disableModelInvocation: deps.chk('disableModelInvocation') || undefined,
         modifiedAt:   Date.now(),
     };

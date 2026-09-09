@@ -4,6 +4,7 @@ import {t} from '@itookit/common';
 import { BaseSettingsEditor } from '@itookit/ui-common';
 import type { LLMSkill, SkillType, IAgentManagementService } from '@itookit/common';
 import yaml from 'js-yaml';
+import { readSkillSupportFields } from './skill/SkillSupportFields';
 
 // Render helpers
 import {
@@ -28,6 +29,7 @@ import {
 
 export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
     selectedId: string | null = null;
+    private renderedSkill?: LLMSkill;
     /** True while a batch import is in progress — suppresses onChange-triggered renders. */
     _importing = false;
     /** IDs checked for multi-select batch actions. */
@@ -64,7 +66,8 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     // ── IEditor: getText() — returns skill YAML for auto-save ──
 
     getText(): string {
-        if (!this._formOnly || !this.selectedId) return '';
+        // Without a rendered snapshot there is no current skill to save safely.
+        if (!this._formOnly || !this.selectedId || !this.renderedSkill) return '';
         const type = this.val('type') as SkillType;
         let parameters: Record<string, unknown> | undefined;
         const rawParams = this.val('parameters').trim();
@@ -78,6 +81,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
         const globs = this.val('globs').split('\n').map(s => s.trim()).filter(Boolean);
         const skill: LLMSkill = {
+            ...this.renderedSkill,
             id:           this.selectedId,
             name:         this.val('header-name') || this.selectedId,
             icon:         this.val('header-icon') || undefined,
@@ -96,12 +100,9 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             autoLoad:     this.chk('autoLoad'),
             priority:     parseInt(this.val('priority') || '50', 10),
             globs:        globs.length > 0 ? globs : undefined,
-            tools:             [],
-            triggerPatterns:   [],
-            correctionLog: this.val('correctionLog').trim() ? {
-                path: this.val('correctionLog').trim(),
-                enabled: true,
-            } : undefined,
+            tools:             this.renderedSkill?.tools ?? [],
+            triggerPatterns:   this.renderedSkill?.triggerPatterns ?? [],
+            ...readSkillSupportFields(name => this.val(name), name => this.chk(name)),
             disableModelInvocation: this.chk('disableModelInvocation') || undefined,
             modifiedAt:   Date.now(),
         };
@@ -162,6 +163,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         }
 
         const selected = skills.find(s => s.id === this.selectedId) ?? null;
+        this.captureRenderedSkill(selected);
 
         this.container.innerHTML = `
             <div class="settings-split${this.selectedId ? ' has-detail' : ''}">
@@ -334,6 +336,11 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         return (this.container.querySelector(`[name="${name}"]`) as HTMLInputElement | null)?.checked ?? false;
     }
 
+    /** Store a snapshot of the skill currently rendered so getText() can preserve hidden fields. */
+    private captureRenderedSkill(skill: LLMSkill | null | undefined): void {
+        this.renderedSkill = skill ? structuredClone(skill) : undefined;
+    }
+
     // ─── Form-only mode ────────────────────────────────────────────────────
 
     private async _renderFormOnly() {
@@ -343,6 +350,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         ]);
 
         const skill = this.selectedId ? skills.find((s) => s.id === this.selectedId) : null;
+        this.captureRenderedSkill(skill);
 
         if (!skill) {
             this.container.innerHTML = renderEmptyState();
