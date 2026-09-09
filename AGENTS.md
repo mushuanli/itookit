@@ -56,6 +56,7 @@ pnpm --filter @itookit/<pkg> typecheck
 | [最小系统](./doc/minimal-system.md) | 两节点 YAML 与运行说明 |
 | [TODO 与进度](./doc/todo.md) | 目标、已完成范围与待办（活文档） |
 | [设计文档](./doc/design/) | 当前设计规范（VFS / harness / flow / skill / session 浏览） |
+| [Durable 证据映射](./doc/design/durable-harness-evidence.md) | 五篇 Durable 设计的目标 → 实现 → 持久记录 → 故障证据 |
 | [历史设计归档](./doc/feat/) | 已实现特性的设计/评审记录（**归档，不随代码更新**） |
 | [已归档文档](./doc/deprecated/) | 一次性评审记录与已被取代的方案（**归档，不随代码更新**） |
 
