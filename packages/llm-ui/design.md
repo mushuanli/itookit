@@ -2,7 +2,7 @@
 
 > 本文档是架构设计的权威参考。所有功能开发、接口修改、代码审查必须遵循此文档中的规则。
 >
-> 本文档已按代码现状同步(2026-08),`design2.md` 已并入本文件。
+> 与代码不一致时以 `src/` 为准;接口清单见 `src/domain/ports/`,公共 API 见 `src/index.ts`。
 
 ---
 
@@ -20,7 +20,7 @@ LLM 对话工作区编辑器 — 支持多分支对话、流式输出、会话�
 - **TTY 面板** — 运行输出展示
 - **Skills 工作区** — Skill 列表 + 表单编辑器
 
-**会话绑定**:一个 VFS 节点 = 一个会话 = 一个 `LLMWorkspaceEditor` 实例。vfs-ui 选中 chat 节点时,由 app-shell 注入的 `EditorFactory` 创建编辑器并绑定到该 `nodeId`。llm-ui 不负责会话选择,是纯显示/交互层。
+**会话绑定**:一个会话 = 一个 `LLMWorkspaceEditor` 实例。vfs-ui 选中 chat 节点时,由 app-shell 注入的 `EditorFactory` 创建编辑器,会话身份来自 `EditorOptions.target.sessionId`(`{ kind: 'session' }`)。llm-ui 不负责会话选择,是纯显示/交互层。
 
 ---
 
@@ -45,7 +45,7 @@ LLM 对话工作区编辑器 — 支持多分支对话、流式输出、会话�
 | 引擎事件处理 | switch/case / 声明表 | **声明表** | 新增事件只改数据,不改逻辑 |
 | View 交互 | 直接引用 / 接口 | **接口(ports)** | 允许替换实现,Command 可独立测试 |
 | 状态持久化 | 即时保存 / 防抖 | **防抖(2s/1s)** | 避免高频写入,生成中跳过 |
-| 会话控制 | 直接调 SessionManager / CommandBus | **ICommandBus(`session.*`)** | 会话事实源收敛到 `llm-conversation`,UI 不直接操作引擎 |
+| 会话控制 | 直接调 SessionManager / CommandBus | **ICommandBus(`session.*`)** | 会话事实源收敛到 `llm-session`,UI 不直接操作引擎 |
 | 会话管理器 | 每实例 / 全局单例 | **全局单例 `getSessionManager()`** | 跨实例共享会话注册表;`getCurrentSessionId()` 过滤事件 |
 
 ---
@@ -55,7 +55,7 @@ LLM 对话工作区编辑器 — 支持多分支对话、流式输出、会话�
 ### 2.1 层级定义
 
 ```
-Layer 0  infrastructure/   基础设施    零业务知识(物理位置: components/common/)
+Layer 0  components/common/ 基础设施    零业务知识(物理位置)
 Layer 1  domain/           契约层      纯类型 + 接口
 Layer 2  services/         服务层      数据操作
 Layer 3  commands/         命令层      操作编排
@@ -67,9 +67,9 @@ Layer 5  shell/            壳层        组装 + 路由
 
 被依赖方 →
 
-| 依赖方 ↓ | infrastructure | domain | services | commands | components | shell |
+| 依赖方 ↓ | components/common | domain | services | commands | components | shell |
 |----------|:-:|:-:|:-:|:-:|:-:|:-:|
-| **infrastructure** | — | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **components/common** | — | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **domain** | ❌ | — | ❌ | ❌ | ❌ | ❌ |
 | **services** | ✅ | ✅ types | — | ❌ | ❌ | ❌ |
 | **commands** | ✅ | ✅ ports+types | ✅ | — | ❌ | ❌ |
@@ -90,7 +90,7 @@ llm-ui/
 ├── domain/                           # Layer 1 — 契约层
 │   ├── types.ts                      #   SessionGroup, CollapseStateMap, NodeAction...
 │   ├── events.ts                     #   EditorBusEvents, IEditorEventBus
-│   └── ports/                        #   9 个接口(见 §3)
+│   └── ports/                        #   10 个接口(见 §3)
 │       ├── IHistoryPresenter.ts
 │       ├── IChatInputPresenter.ts
 │       ├── IStatusPresenter.ts
@@ -100,14 +100,15 @@ llm-ui/
 │       ├── IStreamableEditor.ts
 │       ├── ICollapseManager.ts
 │       ├── IStreamingController.ts
+│       ├── IPrivilegedCommandService.ts
 │       └── index.ts
 │
 ├── services/                         # Layer 2
-│   ├── SessionService.ts             #   会话生命周期(nodeId ↔ sessionId 绑定、加载、重命名)
+│   ├── SessionService.ts             #   会话生命周期(sessionId 绑定、加载、重命名、设置)
 │   ├── StateService.ts               #   UI 状态持久化
 │   ├── AssetService.ts               #   附件管理
 │   ├── BranchStore.ts                #   分支数据源(唯一真相)
-│   ├── BranchService.ts              #   分支操作(session.branch.* )
+│   ├── BranchService.ts              #   分支操作(vcs.branch.*)
 │   ├── NavDataBuilder.ts             #   导航面板数据构建
 │   ├── FileSearchService.ts          #   @mention 文件搜索
 │   ├── OcrService.ts                 #   图片 OCR(一次性 llmService 注入时启用)
@@ -136,12 +137,11 @@ llm-ui/
 │   ├── history/                      #   对话历史 UI
 │   │   ├── HistoryView.ts            #   Facade (implements IHistoryPresenter)
 │   │   ├── SessionRenderer.ts        #   DOM 渲染 + MDxController 管理
-│   │   ├── StreamController.ts       #   ⭐ 流式输出控制(含原 StreamRenderPipeline 职责)
+│   │   ├── StreamController.ts       #   ⭐ 流式输出控制(两阶段状态机,见 §10.2)
 │   │   ├── CollapseController.ts     #   折叠状态控制
 │   │   ├── EditController.ts         #   编辑模式控制
 │   │   ├── EventDispatcher.ts        #   点击事件委托
 │   │   ├── NodeRenderer.ts           #   节点 DOM 工厂
-│   │   └── index.ts
 │   ├── input/                        #   聊天输入
 │   │   ├── ChatInputView.ts          #   implements IChatInputPresenter
 │   │   ├── AttachmentManager.ts      #   附件管理
@@ -162,8 +162,11 @@ llm-ui/
 │   │   ├── DagCanvas.ts              #   画布
 │   │   ├── DagDraftController.ts     #   草稿控制
 │   │   ├── SchemaForm.ts             #   表单
-│   │   └── index.ts
+│   │   ├── FlowSettingsDialog.ts     #   Flow 设置对话框
+│   │   └── TaskTranscriptDialog.ts   #   Task 记录对话框
 │   ├── DagWorkbench.ts               #   implements DAG 入口(不 import DAG Runtime)
+│   ├── FlowsEditor.ts                #   Flow 列表编辑器 + createFlowsEditorFactory
+│   ├── FlowParameterForm.ts          #   Flow 参数表单
 │   ├── FloatingNavPanel.ts           #   implements INavigationPresenter
 │   ├── mdx/                          #   Markdown 编辑器封装
 │   │   └── MDxController.ts          #   implements IStreamableEditor
@@ -179,7 +182,6 @@ llm-ui/
 │       ├── BranchIndicatorTemplates.ts
 │       ├── FloatingNavPanelTemplates.ts
 │       ├── IconTemplates.ts
-│       └── index.ts
 │
 ├── shell/                            # Layer 5 — Composition Root
 │   ├── LLMWorkspaceEditor.ts         #   implements IEditor(主组装入口)
@@ -189,32 +191,19 @@ llm-ui/
 │   ├── EventBinder.ts                #   DOM 事件 + 快捷键绑定
 │   ├── WorkspacePaneController.ts    #   history/run-graph/inspector 面板切换
 │   ├── NavigationHelper.ts           #   导航面板(浮动导航)
-│   ├── RunAttachmentController.ts    #   通过 RunHandle attach 执行运行
+│   ├── RunAttachmentController.ts    #   经 TaskControlPlane 附着并控制运行
 │   ├── AgentProvider.ts              #   Agent/Connection 选项构建(buildExecutorOptions)
 │   ├── SlashCommandRouter.ts         #   slash 命令路由
+│   ├── directory-command.ts          #   /add-dir、/set-home 参数解析
 │   └── InterruptedRunPrompt.ts       #   中断运行恢复提示
-│
-├── editors/                          #   独立编辑器(继承 IEditor,挂载于对应节点类型)
-│   ├── AgentConfigEditor.ts          #   .agent 节点
-│   ├── ConnectionSettingsEditor.ts
-│   ├── ProviderSettingsEditor.ts
-│   ├── MCPSettingsEditor.ts
-│   ├── CostEditor.ts
-│   ├── SkillSettingsEditor.ts        #   skill 表单
-│   ├── skill/                        #   Skill 导入/操作/渲染
-│   │   ├── SkillImporter.ts
-│   │   ├── SkillOperations.ts
-│   │   └── SkillRenderer.ts
-│   └── llm-import.ts
 │
 ├── context-menu/                     #   AI 右键菜单扩展
 │   └── AIContextMenu.ts
 │
 ├── utils/                            #   工具函数(可被任意层引用)
 │   ├── textUtils.ts / timeUtils.ts / debounce.ts / domEvents.ts / domInsertion.ts
-│   ├── iconResolver.ts / modelBadges.ts / imageDownscale.ts
-│   ├── errorHandler.ts / styleInjector.ts
-│   └── index.ts
+│   ├── iconResolver.ts / imageDownscale.ts
+│   └── errorHandler.ts / styleInjector.ts
 │
 └── styles/                           #   CSS(BEM 命名)
     ├── variables.css / base.css / index.css
@@ -223,17 +212,19 @@ llm-ui/
     ├── dag.css / floating-nav.css / tty-panel.css / ai-context-menu.css
 ```
 
+LLM 设置类编辑器（AgentConfig / Connection / Provider / MCP / Cost / SystemPrompt / Skill 表单）不在本包，已迁至 `@itookit/llm-settings-ui`，由 `src/index.ts` 再导出。
+
 ### 2.4 基础设施层说明
 
-`infrastructure/` 目录已更名为 **`components/common/`**(物理位置)。它虽位于 `components/` 下,但依赖方向**等同 Layer 0**,禁止 import 任何业务层:
+`components/common/` 是基础设施层(Layer 0)的物理位置。它虽位于 `components/` 下,但依赖方向**等同 Layer 0**,禁止 import 任何业务层:
 
 ```
 components/common/  →  禁止 import domain/ services/ commands/ 其他 components/ shell/
 ```
 
-现有关类:TimerManager、EventCleanup、DOMCache、ScrollController、ContentResizeTracker、EventBatchProcessor。
+现有类:TimerManager、EventCleanup、DOMCache、ScrollController、ContentResizeTracker、EventBatchProcessor。
 
-**原 `StreamRenderPipeline` 已不存在**,职责并入 `components/history/StreamController.ts`(两阶段状态机,见 §10.2)。
+流式渲染管线为 `components/history/StreamController.ts`(两阶段状态机,见 §10.2)。
 
 ---
 
@@ -381,7 +372,7 @@ interface IEditorEventBus {
 | `IBranchStore` | `BranchStore`(services 层) |
 | `IStreamableEditor` | `MDxController` |
 | `IEditorEventBus` | `EditorEventBus`(shell 层) |
-| `IEditor`(外部 @itookit/common) | `LLMWorkspaceEditor` + 各 editors/* |
+| `IEditor`(外部 `@itookit/ui-common`) | `LLMWorkspaceEditor` + `@itookit/llm-settings-ui` 的编辑器 |
 
 ---
 
@@ -438,7 +429,7 @@ llm-ui 有两套事件:
 | 事件流 | 定义位置 | 用途 |
 |---|---|---|
 | **内部 EventBus**(实例级) | `domain/events.ts` `EditorBusEvents` | 组件 ↔ Command ↔ Shell 的 UI 内部通信 |
-| **引擎 SessionEvent**(canonical) | `llm-conversation` `core/types.ts` | 会话/分支/消息事实源,经 `SessionEventHandler` 消费 |
+| **引擎 SessionEvent**(canonical) | `llm-session` `core/types.ts` | 会话/分支/消息事实源,经 `SessionEventHandler` 消费 |
 
 ### 5.1 内部 EventBus 事件目录
 
@@ -461,10 +452,10 @@ llm-ui 有两套事件:
 
 ### 5.2 canonical SessionEvent(引擎事实源)
 
-由 `llm-conversation` 定义,经 `sessionManager.onEvent()` 到达 `SessionEventHandler.handleSessionEvent()`:
+由 `llm-session` 定义,经 `sessionManager.onEvent()` 到达 `SessionEventHandler.handleSessionEvent()`:
 
 ```
-消息投影:      message:appended / message:updated / message:status
+消息投影:      message:appended / message:updated / message:status / message:citations
 结构性变更:    messages:cleared / messages:deleted / message:edited
 分支切换:      sibling:switched / branch:switched
 重新生成:      regenerate_started / regenerate_completed
@@ -476,9 +467,9 @@ llm-ui 有两套事件:
 
 ```typescript
 const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
-    finished:              ['clearErrors', 'updateStatus', 'notifyChange', 'refreshNav'],
-    error:                 ['updateStatus'],
-    'message:appended':    ['clearErrors', 'updateStatus', 'notifyChange', 'scrollToBottom'],
+    finished:              ['clearErrors', 'notifyChange', 'refreshNav'],
+    error:                 [],
+    'message:appended':    ['clearErrors', 'notifyChange', 'scrollToBottom'],
     'messages:cleared':    ['refreshNav', 'refreshBranch'],
     'messages:deleted':    ['refreshNav', 'notifyChange'],
     'message:edited':      ['refreshNav'],
@@ -520,8 +511,8 @@ Step 5: 更新本文档 §5.3
 
 ```
 session_registered / session_unregistered / session_status_changed / session_unread_updated
-background_task_completed / execution_run_projected / session_tty_active
-session_hitl_active / session_hitl_resolved
+background_task_completed / execution_task_projected / session_tty_active
+session_hitl_active
 ```
 
 TTY/HITL 事件仅在后**台**会话(非当前)时 Toast 通知,可带 `onNavigateToSession` 跳转。
@@ -559,14 +550,13 @@ interface CommandContext {
     chatInput: IChatInputPresenter;        // 不可 downcast
     bus: IEditorEventBus;
     errorHandler: ErrorHandler;
-    getNodeId: () => string;
-    getOwnerNodeId: () => string;
+    getSessionId: () => string;
 }
 ```
 
 ```
 规则 1: 只通过 this.ctx 访问依赖,不自行 import 实现类
-规则 2: 会话数据操作通过 ctx.commands.execute('session.*'),不直接调 SessionManager
+规则 2: 会话数据操作通过 ctx.commands.execute('session.*' / 'vcs.*'),不直接调 SessionManager
 规则 3: ctx.historyView / ctx.chatInput 是接口,不可 downcast
 规则 4: 需要新依赖时,先扩展 port 接口,再修改 CommandContext
 规则 5: 不在 Command 中持有可变状态(除非是执行过程中的临时状态)
@@ -598,7 +588,7 @@ interface CommandContext {
 
 ```typescript
 export class MyComponent implements IMyPresenter {
-    // 使用 infrastructure/ 管理资源
+    // 使用 components/common/ 管理资源
     private timers = new TimerManager();
     private events = new EventCleanup();
 
@@ -626,7 +616,7 @@ export class MyComponent implements IMyPresenter {
 ```
 HistoryView (Facade)
 ├── SessionRenderer    持有 DOM 引用 + MDxController 映射
-├── StreamController   流式输出(两阶段状态机,继承原 StreamRenderPipeline 职责)
+├── StreamController   流式输出(两阶段状态机,见 §10.2)
 ├── CollapseController 折叠状态控制
 ├── EditController     编辑模式控制
 └── EventDispatcher    点击事件委托(路由到对应控制器)
@@ -663,7 +653,7 @@ export class MyTemplates {
 ```typescript
 export class MyService {
     constructor(
-        private engine: IChatEngine,        // 或注入 ICommandBus
+        private sessionRepository: ISessionRepository,   // 或注入 ICommandBus
         private commands: ICommandBus,
     ) {}
 
@@ -678,15 +668,16 @@ export class MyService {
 ### 8.2 SessionService 会话绑定契约
 
 ```
-nodeId → SessionService.ensureReady(nodeId, title)
-  → getOrCreateSessionId(读 manifest;无则 initializeExistingFile,幂等)
-  → commands.execute('session.bind', { nodeId, sessionId })
+sessionId → SessionService.ensureReady(sessionId, branch?)
+  → engine.getManifest(sessionId)
+  → commands.execute(SessionCommand.Bind, { sessionId })
+  → commands.execute('vcs.branch.switch', { branchName: branch ?? 'main' })
   → 返回 sessionId,供 ChatInput 渲染前读写 settings
 
 约束:
-- sessionId 由 VFS manifest 决定,llm-ui 不自行编号
+- sessionId 由 VFS manifest / EditorOptions.target.sessionId 决定,llm-ui 不自行编号
 - ensureReady 必须在 ChatInput 渲染前完成
-- loadSession 传入已知 sessionId 可跳过重复解析
+- loadSession(sessionId, defaultTitle) 复用 SessionCommand.Bind 并返回 SessionSnapshot
 ```
 
 ### 8.3 BranchStore 使用契约
@@ -714,7 +705,7 @@ BranchStore 是分支数据的唯一真实来源(Single Source of Truth)。
     → Shell 路由到 SendMessageCommand.run()
       → AssetService.uploadFiles()            [如有附件]
       → ctx.commands.execute('session.send', ...)
-        → llm-conversation / Engine 处理
+        → llm-session / Engine 处理
           → message:appended 事件
             → SessionEventHandler.handleSessionEvent()
               → HistoryView.processEvent()     [渲染用户气泡]
@@ -734,7 +725,7 @@ BranchStore 是分支数据的唯一真实来源(Single Source of Truth)。
 用户点击分支 → BranchIndicatorView
   → bus.emit('branch:switch', { branchName })
     → CommandRegistry → SwitchBranchCommand.run()
-      → ctx.commands.execute('session.branch.*')
+      → ctx.commands.execute('vcs.branch.*')
         → branch:switched 事件
           → SessionEventHandler.handleBranchEvent()
             → HistoryView.renderFull(sessions, { position })   [重渲染]
@@ -751,7 +742,7 @@ BranchStore 是分支数据的唯一真实来源(Single Source of Truth)。
       → StateManager.scheduleUIStateSave()   [防抖 2s]
       → StateManager.scheduleInputStateSave() [防抖 1s]
         → guard: sessionManager.isGenerating() ? 跳过 : 继续
-          → StateService.saveUIState(nodeId, payload)
+          → StateService.saveUIState(sessionId, payload)
 
 恢复流程(loadSession 时):
   Shell.loadSession()
@@ -785,10 +776,10 @@ BranchStore 是分支数据的唯一真实来源(Single Source of Truth)。
 
 ```
 loadSession(preloadedSettings)
-  → sessionService.loadSession(nodeId, title, currentSessionId?)
-    → commands.execute('session.bind', { nodeId, sessionId }) → SessionSnapshot
+  → sessionService.loadSession(sessionId, currentTitle)
+    → commands.execute(SessionCommand.Bind, { sessionId }) → SessionSnapshot
   → snapshot.sessions.length > 0 ? historyView.renderFull : renderWelcome
-  → promptInterruptedRun(snapshot)           [VFS meta.status === 'running']
+  → promptInterruptedRun(snapshot)           [snapshot.interruptedAssistantId]
   → restoreInputState(chatInput, ...)
   → sessionManager.onEvent(SessionEvent)      [会话事件订阅]
   → statusIndicator.updateFromSnapshot(snapshot)
@@ -835,21 +826,20 @@ StreamController 配置:
 
 约束:
   - immediateTypes 中的事件绕过缓冲,但先 flush 队列保证顺序
-  - chunk 合并按 nodeId 分组,同一节点的多个 chunk 合并为一次渲染
+  - chunk 合并按 messageId 分组,同一消息的多个 chunk 合并为一次渲染
   - status 合并取最后值(后覆盖前)
 ```
 
 **ScrollController 配置**
 
 ```
-SCROLL_THRESHOLD = 150px     — 距底部多少像素视为"在底部"
-SCROLL_THROTTLE = 100ms      — 非流式滚动节流
-STREAMING_SCROLL_INTERVAL = 120ms  — 流式滚动节流
-程序滚动标记窗口 = 150ms     — 此期间 scroll 事件不更新用户状态
+SCROLL_THRESHOLD = 150px              — 距底部多少像素视为"在底部"
+PROGRAMMATIC_SCROLL_WINDOW = 300ms    — 程序滚动标记窗口(此期间 scroll 事件不更新用户状态)
+scrollLockUntil = +100ms              — 程序滚动后的用户状态判定锁
 
 约束:
-  - 流式期间用户上滚 → 停止自动滚动,直到用户滚回底部
-  - forceScrollToBottom 仅用于用户明确操作(点击按钮)
+  - 流式期间用户上滚 → shouldAutoScroll=false,停止自动滚动,直到用户滚回底部
+  - forceScrollToBottom() 重置 shouldAutoScroll/isUserScrolledUp
   - 程序触发的滚动不得改变 _isUserScrolledUp 状态
 ```
 
@@ -872,7 +862,7 @@ Guard: sessionManager.isGenerating() 时跳过保存
 约束:
   - destroy 时同步保存一次(不等防抖)
   - isBeingDeleted 时跳过保存
-  - NodeNotFound 错误静默处理
+  - 资源不存在(not found)错误静默处理(`StateService`)
 ```
 
 ### 10.3 DOM 操作约束
@@ -988,7 +978,7 @@ Guard: sessionManager.isGenerating() 时跳过保存
        el?.classList.add('llm-ui-session--pinned');
        break;
    }
-3. infrastructure/EventBatchProcessor.ts — 需要立即处理则加 immediateTypes
+3. components/common/EventBatchProcessor.ts — 需要立即处理则加 immediateTypes
 影响范围:1-3 个文件,不修改任何接口
 ```
 
@@ -1001,9 +991,9 @@ Guard: sessionManager.isGenerating() 时跳过保存
 | **修改数据格式** | `domain/types.ts` → `services/` 适配 → 完成(组件/命令通过接口隔离,无需修改) |
 | **替换 UI 框架** | 实现 `domain/ports/` 接口 → `shell/` 构造时注入新实现 → 完成 |
 | **添加新快捷键** | `shell/EventBinder.ts` → `bindGlobalShortcuts()` 添加映射 |
-| **新增会话命令** | `llm-conversation` 注册 `session.*` → UI 侧通过 `ctx.commands.execute()` 调用 |
+| **新增会话命令** | `llm-session` 注册 `session.*` → UI 侧通过 `ctx.commands.execute()` 调用 |
 | **新增聊天输入插件** | 实现 `InputPlugin` 接口 → `ChatInput.registerPlugin()` |
-| **新增技能表单编辑器** | `editors/` 下继承 IEditor → bootstrap 注册 editorFactory |
+| **新增技能表单编辑器** | `@itookit/llm-settings-ui` 继承 IEditor → bootstrap 注册 editorFactory |
 
 ---
 
@@ -1083,7 +1073,7 @@ data 属性: kebab-case
 ```typescript
 // 1. 外部包(按字母序)
 import { Toast } from '@itookit/common';
-import { SessionManager } from '@itookit/llm-conversation';
+import { SessionManager } from '@itookit/llm-session';
 
 // 2. domain 层(类型优先)
 import type { CollapseStateMap, BranchItem } from '../domain/types';
@@ -1101,7 +1091,7 @@ import { SessionRenderer } from './SessionRenderer';
 ```typescript
 // ✅ 正确:通过 ErrorHandler
 await this.errorHandler.wrap(
-    () => this.sessionService.loadSession(nodeId, title),
+    () => this.sessionService.loadSession(sessionId, title),
     'Load session', 'warn'
 );
 
@@ -1124,19 +1114,21 @@ export class MyCommand extends Command<Params> {
 ```typescript
 import { createLLMFactory, createAgentEditorFactory, createSkillsEditorFactory } from '@itookit/llm-ui';
 
-// 会话工作区编辑器(vfs-ui 选中 chat 节点时创建)
+// 会话工作区编辑器(vfs-ui 选中 session 目标时创建)
 const llmFactory = createLLMFactory(agentService, {
-    chatEngine: engine,
-    llmService?: kernel.llmService,     // 可选:注入后启用 OCR 等工具型调用
+    sessionRepository,                   // 必填:ISessionRepository
+    llmService?: llmService,             // 可选:注入后启用 OCR 等工具型调用
     commandBus?: commandBus,             // initializeConversationSystem 返回
-    controlPlane?: kernel.kernel,       // 可选:附加执行运行(RunHandle)
+    kernel?: kernel,                     // 可选:附加执行运行(TaskHandle)
+    privilegedCommands?: privilegedCommands,
+    sessionSkills?: sessionSkills,
 });
 const editor = await llmFactory(container, {
     title: 'New Chat',
-    nodeId: '/path/to/node',             // 缺省时自动 createFile
+    target: { kind: 'session', sessionId },   // 会话身份必须由 target 提供
 });
 
-// Agent 配置编辑器(.agent 节点)
+// Agent 配置编辑器(entity: agent)
 const agentFactory = createAgentEditorFactory(agentService);
 
 // Skills 工作区(列表 + 表单)
@@ -1146,20 +1138,24 @@ const skillsFactory = createSkillsEditorFactory(agentService);
 ### 15.2 独立编辑器导出
 
 ```typescript
-export {
-    ConnectionSettingsEditor, ProviderSettingsEditor,
-    MCPSettingsEditor, SkillSettingsEditor, CostEditor,
-    DagWorkbench,
-} from '@itookit/llm-ui';
-
+// 本包实现
+export { DagWorkbench, FlowsEditor, createFlowsEditorFactory } from '@itookit/llm-ui';
 export { createAIContextMenuConfig } from '@itookit/llm-ui';   // AI 右键菜单
 export { VFSAgentService } from '@itookit/llm-ui';
-export type { LLMEditorOptions } from '@itookit/llm-ui';
+export type { LLMEditorOptions, DagWorkbenchOptions, FlowsEditorDeps } from '@itookit/llm-ui';
+export type { IPrivilegedCommandService } from '@itookit/llm-ui';
+
+// 自 @itookit/llm-settings-ui 再导出
+export {
+    ConnectionSettingsEditor, ProviderSettingsEditor, MCPSettingsEditor,
+    SkillSettingsEditor, CostEditor, SystemPromptSettingsEditor,
+    AgentConfigEditor,
+} from '@itookit/llm-ui';
 ```
 
 ### 15.3 IEditor 契约实现
 
-`LLMWorkspaceEditor` implements `IEditor`(来自 @itookit/common)。关键方法:
+`LLMWorkspaceEditor` implements `IEditor`(来自 `@itookit/ui-common`)。关键方法:
 
 ```
 init / destroy / waitUntilReady / getText / setText / setTextAsync
@@ -1185,7 +1181,7 @@ Phase 2: 基础设施
 
 Phase 3: 数据层
   3. initServices()          Session / State / Asset / StateManager / BranchStore / BranchService / NavDataBuilder / FileSearch / Ocr
-  4. ensureReady(nodeId)     ⭐ 创建/绑定会话(必须在 ChatInput 渲染前)
+  4. ensureReady(sessionId)  ⭐ 绑定会话(必须在 ChatInput 渲染前)
 
 Phase 4: UI 层
   5. initComponents()        WorkspacePaneController / DagWorkbench / HistoryView / NavigationHelper / BranchIndicator / StatusIndicator / ChatInput / plugins
@@ -1268,7 +1264,7 @@ Phase 9: DOM 清理
 
 | 层级 | 覆盖要求 | 测试类型 | 关注点 |
 |------|---------|---------|--------|
-| infrastructure | ≥ 90% | 单元测试 | 边界条件、并发、资源释放 |
+| components/common | ≥ 90% | 单元测试 | 边界条件、并发、资源释放 |
 | domain | 100%(纯类型) | 编译检查 | 类型正确性 |
 | services | ≥ 80% | 单元 + Mock | 错误处理、边界、并发 |
 | commands | ≥ 85% | 单元 + Mock 接口 | 正常流程、错误回滚、边界 |
@@ -1304,7 +1300,7 @@ pnpm --filter @itookit/llm-ui exec vitest run
 - [ ] 新功能 / Bug 修复 / 重构 / 性能优化 / 接口变更
 
 ### 影响层级
-- [ ] infrastructure / domain / services / commands / components / shell
+- [ ] components/common / domain / services / commands / components / shell
 
 ### 接口变更
 - 无 / 非破坏性 / 破坏性(需说明迁移方式)
@@ -1328,7 +1324,7 @@ pnpm --filter @itookit/llm-ui exec vitest run
 | **Presenter** | Port 接口的 UI 实现(HistoryView implements IHistoryPresenter) |
 | **Facade** | 对外暴露简化 API 的类(HistoryView 是 5 个子控制器的 Facade) |
 | **Side Effect** | 引擎事件触发的响应动作(renderFull, refreshBranch 等) |
-| **canonical 事件** | `llm-conversation` 定义的会话事实源事件(`message:appended` 等) |
+| **canonical 事件** | `llm-session` 定义的会话事实源事件(`message:appended` 等) |
 | **Optimistic Update** | 先更新 UI 再等服务端确认,失败时回滚 |
 | **Guard** | 防抖函数的前置条件检查(如 isGenerating) |
 
@@ -1342,6 +1338,6 @@ pnpm --filter @itookit/llm-ui exec vitest run
 添加新持久化字段      → domain/types.ts UIState + StateManager 读写
 添加新工具栏按钮      → templates/ + EventBinder + Shell 路由
 添加新快捷键          → EventBinder.bindGlobalShortcuts()
-添加新会话命令        → llm-conversation 注册 session.* + UI 侧 ctx.commands.execute()
+添加新会话命令        → llm-session 注册 session.* + UI 侧 ctx.commands.execute()
 添加新输入插件        → InputPlugin 接口 + ChatInput.registerPlugin()
 ```

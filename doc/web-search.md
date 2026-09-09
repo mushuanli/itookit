@@ -4,7 +4,7 @@
 
 ## 1. 三态决策（WebSearchMode）
 
-权威决策点只有一个：`resolveWebSearchStrategy`（`llm-common/src/llm/connection.ts`，纯函数、带单测）。下游只做**派生**，不再重推。
+权威决策点只有一个：`resolveWebSearchStrategy`（`llm-common/src/llm/connection.ts`，纯函数；单测见 `packages/device-llm/tests/web-search-strategy.spec.ts`）。下游只做**派生**，不再重推。
 
 ```ts
 export type WebSearchMode = 'builtin' | 'client-tool' | 'disabled';
@@ -121,7 +121,7 @@ Provider.collectCitations
 |---|---|---|---|
 | DeepSeek / OpenAI | `openai-responses` | 请求 tools 追加 `{type:'web_search'}` | `web_search_call` output item |
 | Gemini | `gemini-generate` | 请求 tools 追加 `{googleSearch:{}}` | `candidates[].groundingMetadata` |
-| Anthropic | `anthropic-messages` | 无内置参数，挂载 web_search MCP server | `tool_result` |
+| Anthropic | `anthropic-messages` | 无内置能力：Provider 未声明 `capabilities.serverSideWebSearch`，协议也不在支持列表内 → 落 `client-tool`，注入客户端 WebSearchTool | 无服务端 citations（检索结果由客户端工具返回） |
 
 上层统一读 `response.citations[]`，不区分厂商实现。
 

@@ -1,5 +1,7 @@
 # Linux IPC 对照与 Harness 存储完备性审查
 
+> ⚠️ 历史归档：本文记录当时的方案与审查结论，**不随代码更新**，不作为当前实现依据。当前文档见 `../`。
+
 日期：2026-09-05。范围：当前 durable-kernel 源码、[目标协议](../design/durable-harness-protocol.md)、[Cache 协议](../design/durable-harness-cache.md) 与 [逻辑布局](../design/durable-harness-storage.md)。本文是设计审查与演进建议，不表示新增能力已经实现。
 
 后续处理：1.1 修订已在主协议补齐 endpoint/业务流/WaitSet 目标记录，在存储设计固定记录归属，并新增 [资源表与 Linux 对齐协议](../design/durable-harness-resources.md)。以下保留审查时的代码缺口；设计修订不等于实现缺口已经关闭。

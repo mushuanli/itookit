@@ -19,4 +19,4 @@ import { DurableChatProgram } from '@itookit/llm-tasks';
 kernel.registerProgram(new DurableChatProgram());
 ```
 
-完整边界见 [Kernel Session / Task 最终设计](../../doc/feat/kernel-session-task-final-design.md)。
+完整边界见 [Kernel Session / Task 最终设计](../../doc/feat/harness-session-task-final-design.md)。

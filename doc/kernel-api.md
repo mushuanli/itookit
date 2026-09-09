@@ -23,38 +23,118 @@
 执行内核主类，通过 `new Kernel(options)` 创建，`await kernel.initialize()` 后可用。
 
 ```ts
-class Kernel {
+class Kernel implements KernelRegistration {
     constructor(options: KernelOptions);
     initialize(): Promise<void>;
     dispose(): void;
+    /** 等待所有 in-flight drain/execute 完成（dispose 后调用），默认超时 5000ms */
+    waitIdle(timeoutMs?: number): Promise<void>;
+    get isDisposed(): boolean;
 
     // 注册（装配期调用）
     registerProgram(program: DurableTaskProgram): void;
     registerEffect(adapter: EffectAdapter): void;
     registerStorageResolver(resolver: SessionStorageResolver): void;
     registerWorkspace(adapter: WorkspaceAdapter): void;
+    /** 注册托管资源适配器，并唤醒 kernel/各 session 的资源扫描 */
+    registerResourceAdapter(adapter: ManagedResourceAdapter): void;
     use(plugin: KernelPlugin): Promise<void>;
+
+    // 注册表与资源面（只读属性）
+    readonly programs: ProgramRegistry;
+    readonly effects: EffectRegistry;
+    readonly storageResolvers: StorageResolverRegistry;
+    readonly workspaces: WorkspaceRegistry;
+    get resources(): ResourceApi;                            // kernel 作用域
+    resourceApi(sessionId: string, taskId?: string): ResourceApi;   // 指定作用域
 
     // 会话
     createSession(spec: { id?: string; storage: StorageBindingRef }): Promise<SessionHandle>;
     openSession(id: SessionId): Promise<SessionHandle>;
     listSessions(): AsyncIterable<SessionRecord>;
+    sessionStat(sessionId: string): Promise<SessionStat>;
+    setSessionStatus(sessionId: string, status: SessionRecord['status']): Promise<void>;
+    closeSession(sessionId: string, cancelRunning: boolean): Promise<void>;
     /** 删除会话的 Kernel 存储 + catalog 记录；有运行中 Task/待清理资源时拒绝 */
     removeSession(id: SessionId, options?: { force?: boolean }): Promise<boolean>;
 
-    // 任务（全局）
+    // 任务（全局 / 按会话）
     openTask<O>(id: TaskId): Promise<TaskHandle<O>>;
     inspectTask(id: TaskId): Promise<TaskSnapshot>;
+    attachTask<O>(sessionId: SessionId, taskId: TaskId): Promise<TaskHandle<O>>;
+    listSessionTasks(sessionId: SessionId): Promise<TaskRecord[]>;
+    listSessionTaskPage(sessionId: SessionId, query?: TaskListQuery): Promise<TaskListPage>;
+    submit<I, O>(sessionId: string, spec: TaskSpec<I>): Promise<TaskHandle<O>>;
+    retryTask<O>(sessionId: string, taskId: string, options: { requestId: string }): Promise<TaskHandle<O>>;
+    task(sessionId: string, taskId: string): Promise<TaskRecord>;
+    taskHistory(sessionId: string, taskId: string, afterVersion?: number): Promise<TaskRecord[]>;
+    taskHistoryPage(sessionId: string, taskId: string, query?: TaskHistoryQuery): Promise<TaskHistoryPage>;
+    taskAttempts(sessionId: string, taskId: string): Promise<TaskAttempt[]>;
+    signal(sessionId: string, taskId: string, signal: TaskSignal): Promise<void>;
+    controlTask(sessionId: string, taskId: string, mode: TaskControl['mode'],
+        options: TaskControlOptions & { signal?: TaskSignal }): Promise<TaskControl>;
+    startTask(sessionId: string, taskId: string, options?: TaskStartOptions): Promise<void>;
+    respondInteraction<T>(sessionId: string, taskId: string, response: InteractionResponse<T>): Promise<void>;
+    cancel(sessionId: string, taskId: string, reason?: string): Promise<void>;
+    resolveEffect(sessionId: string, taskId: string, request: EffectResolution): Promise<void>;
+    sendTaskMessage(sessionId: string, taskId: string, request: TaskMessageRequest): Promise<CrossSessionMessage>;
+
+    // 事件
+    eventList(sessionId: string, after: number): Promise<EventEnvelope[]>;
+    taskEventPage(sessionId: string, taskId: string, query?: TaskEventQuery): Promise<TaskEventPage>;
+    onChanged(listener: (e: { sessionId: string; taskId?: string; reason: KernelChangeReason }) => void): () => void;
+
+    // 共享状态
+    getShared<T>(sessionId, key): Promise<SharedStateEntry<T> | undefined>;
+    setShared<T>(sessionId, key, value, options?): Promise<SharedStateEntry<T>>;
+    deleteShared(sessionId, key, options?): Promise<boolean>;
+    listShared(sessionId, prefix?): Promise<SharedStateEntry[]>;
+    sharedHistory<T>(sessionId, key): Promise<SharedStateRevision<T>[]>;
+
+    // 跨会话消息
+    sendCrossSession<T>(sourceSessionId, targetSessionId, topic, payload, options?: { expiresAt?: number }): Promise<CrossSessionMessage<T>>;
+    outbox(sessionId: string): Promise<CrossSessionMessage[]>;
+    inbox(sessionId: string, after?: number): Promise<CrossSessionMessage[]>;
+    relayPendingMessages(): Promise<number>;
+
+    // Context
+    commitContext<T>(sessionId, delta, options?): Promise<ContextCommit<T>>;
+    getContextCommit<T>(sessionId, id): Promise<ContextCommit<T> | undefined>;
+    getContextBranch(sessionId, name?): Promise<ContextBranch>;
+    contextHistory(sessionId, head?): Promise<ContextCommit[]>;
+
+    // 资源 / 权限
+    createResource(sessionId, spec: ResourceSpec): Promise<ResourceGrant>;
+    grantResource(sessionId, parentHandleId, holderTaskId, rights): Promise<ResourceHandle>;
+    revokeResource(sessionId, handleId): Promise<number>;
+    authorizeResource(sessionId, handleId, right, holderTaskId?): Promise<ResourceRecord>;
+
+    // 预算
+    setBudget(sessionId, handleId, dimension, hardLimit, expectedVersion?): Promise<BudgetAccount>;
+    chargeBudget(sessionId, handleId, dimension, amount): Promise<BudgetAccount[]>;
+
+    // 工作区
+    snapshotWorkspace(sessionId, handleId, adapterRef: ProgramRef): Promise<WorkspaceSnapshot>;
+    diffWorkspace(sessionId, handleId, baseId, targetId): Promise<WorkspaceDiff>;
+    mergeWorkspace(sessionId, handleId, baseId, leftId, rightId): Promise<WorkspaceMergeResult>;
+
+    // Cache（namespace/entry 落在 resources.seq，operation 收据落在 task.seq）
+    createCache(sessionId, taskId, spec: CacheSpec): Promise<{ namespace: CacheNamespace; handle: ResourceHandle }>;
+    readCache(sessionId, taskId, request: CacheRead): Promise<CacheReceipt>;
+    publishCache(sessionId, taskId, request: CachePublish): Promise<CacheEntry>;
+    invalidateCache(sessionId, taskId, handleId, expectedGeneration): Promise<CacheNamespace>;
+    renewCache(sessionId, taskId, handleId, expectedGeneration, ttlMs): Promise<CacheNamespace>;
+    listCaches(sessionId, taskId): Promise<Array<{ namespace: CacheNamespace; handleId: string }>>;
 
     // 恢复
-    recover(): Promise<RecoveryReport>;
-
-    // 事件监听
-    onChanged(listener: (e: { sessionId: string; taskId?: string }) => void): () => void;
+    recover(options?: RecoveryOptions): Promise<RecoveryReport>;
+    recoverSession(sessionId: SessionId, options?: RecoveryOptions): Promise<RecoveryReport>;
 }
 ```
 
-**`KernelOptions`**：`catalog`（目录 fs）、`maxConcurrent` / `maxConcurrentEffects`（并发上限，均默认 4）、`leaseMs`（租约时长，默认 30s）、`effectCleanupTimeoutMs`（Effect 清理等待上限，默认 30s，整数范围 1–2147483647ms）、`pollMs`（兼容轮询间隔，默认 0，使用提交通知与期限定时器）、`workerId`（可选）。
+**`KernelOptions`**：`catalog`（目录 fs，`rootPath` 默认 `/.config/kernel`）、`maxConcurrent` / `maxConcurrentEffects`（并发上限，均默认 4）、`leaseMs`（租约时长，默认 30s）、`effectCleanupTimeoutMs`（Effect 清理等待上限，默认 30s，整数范围 1–2147483647ms）、`pollMs`（兼容轮询间隔，默认 0，使用提交通知与期限定时器）、`workerId`（可选）。
+
+**`KernelChangeReason = 'structure' | 'content'`**：`onChanged` 通知的成因。`structure` 表示 Task/Session 被创建、删除或状态变化（列表视图需重读）；`content` 表示 Task 内容推进（流式增量、日志、共享状态、context 提交）而列表成员未变，每秒可能触发多次，消费者不应据此重渲染。
 
 **`bindCapabilities(task, bindings, onHandle?)`**：为 Task 创建类型化资源句柄（llm/tool/...），逐项回调 `onHandle`（用于 setBudget），发 `capabilities` signal 后 `start()`。这是上层能力绑定的统一入口。
 
@@ -62,14 +142,19 @@ class Kernel {
 
 ## 句柄
 
-### SessionHandle（组合 8 个窄接口）
+### SessionHandle（组合 9 个窄接口）
 
 ```ts
 interface SessionHandle extends
-    SessionTaskApi, SessionSharedStateApi, SessionMessageApi,
-    SessionContextApi, SessionResourceApi, SessionBudgetApi,
-    SessionWorkspaceApi, SessionLifecycleApi {
+    SessionTaskApi, SessionSharedStateApi, SessionTaskBoardApi,
+    SessionMessageApi, SessionContextApi, SessionResourceApi,
+    SessionBudgetApi, SessionWorkspaceApi, SessionLifecycleApi {
     readonly id: SessionId;
+    readonly resources: ResourceApi;                     // 会话作用域托管资源面
+    recover(options?: RecoveryOptions): Promise<RecoveryReport>;
+    spawn<I, O>(spec: TaskSpec<I>): Promise<TaskHandle<O>>;   // submit() 的别名
+    stat(): Promise<SessionStat>;
+    watch(options?: { after?: number }): AsyncIterable<EventEnvelope>;   // events() 的别名
 }
 ```
 
@@ -78,6 +163,8 @@ interface SessionHandle extends
 | 方法 | 说明 |
 |---|---|
 | `submit<I,O>(spec: TaskSpec<I>): Promise<TaskHandle<O>>` | 提交任务 |
+| `attachTask<O>(taskId): Promise<TaskHandle<O>>` | 重启/重连后挂载已有 Task |
+| `listTasks(): Promise<TaskRecord[]>` | 读取完整 Task 树（含终态） |
 | `signal(taskId, signal): Promise<void>` | 发信号 |
 | `respond<T>(taskId, response): Promise<void>` | 回应交互（HITL） |
 | `events(options?): AsyncIterable<EventEnvelope>` | 按序消费会话事件 |
@@ -92,12 +179,25 @@ interface SessionHandle extends
 | `listShared(prefix?)` | 列出 |
 | `sharedHistory<T>(key)` | 版本历史 |
 
+**`SessionTaskBoardApi`** — 持久化协调板（多 Agent 抢占 + CAS）
+
+| 方法 | 说明 |
+|---|---|
+| `listTaskBoard(): Promise<TaskBoardItem[]>` | 读取全部看板项（按 createdAt 排序） |
+| `createTaskBoardItem(input): Promise<TaskBoardItem>` | 创建看板项（`title`/`description`/`dependencies`/可选 `id`） |
+| `claimTaskBoardItem(id, assigneeTaskId, options?)` | 抢占（`leaseMs` 默认 300000，过期可重抢，依赖未完成则拒绝） |
+| `renewTaskBoardLease(id, assigneeTaskId, leaseToken, leaseMs?)` | 续租 |
+| `completeTaskBoardItem(id, leaseToken, result?, failed?)` | 完成/失败 |
+
+`TaskBoardItem`：`{ id; title; description?; status: 'open'|'claimed'|'completed'|'failed'; dependencies?: string[]; assigneeTaskId?; leaseUntil?; leaseToken?; result?; createdAt; updatedAt }`。
+
 **`SessionMessageApi`** — 跨会话消息（outbox/inbox）
 
 | 方法 | 说明 |
 |---|---|
-| `sendToSession<T>(targetSessionId, topic, payload)` | 发消息到另一会话 |
+| `sendToSession<T>(targetSessionId, topic, payload, options?)` | 发消息到另一会话（可带 `expiresAt`） |
 | `inbox(options?)` | 读取收件箱 |
+| `outbox(): Promise<CrossSessionMessage[]>` | 读取本会话发件箱 |
 
 **`SessionContextApi`** — Context 分支/提交
 
@@ -139,17 +239,36 @@ interface SessionHandle extends
 ```ts
 interface TaskHandle<O = unknown> {
     readonly id: TaskId;
+    readonly resources: ResourceApi;                       // Task 作用域托管资源面
+    readonly cache: CacheApi;                              // 缓存面（create/list/read/publish/invalidate/renew）
+    send(request: TaskMessageRequest): Promise<CrossSessionMessage>;
+    stat(): Promise<TaskStat>;
+    stats(): Promise<TaskStats>;
+    watch(options?: { after?: number }): AsyncIterable<EventEnvelope>;   // events() 的别名
     status(): Promise<TaskSnapshot>;
     wait(options?: { timeoutMs?: number }): Promise<ExitRecord<O>>;   // 阻塞等待终态
     poll(): Promise<ExitRecord<O> | undefined>;                        // 非阻塞
     signal(signal: TaskSignal): Promise<void>;
-    start(): Promise<void>;
+    start(options?: TaskStartOptions): Promise<void>;
+    pause(options: TaskControlOptions): Promise<TaskControl>;
+    interrupt(options: TaskControlOptions): Promise<TaskControl>;
+    resume(options: TaskControlOptions & { signal?: TaskSignal }): Promise<TaskControl>;
     respond<T>(response: InteractionResponse<T>): Promise<void>;
     createResource(spec: TaskResourceSpec): Promise<ResourceGrant>;
     cancel(reason?: string): Promise<void>;
     events(options?: { after?: number }): AsyncIterable<EventEnvelope>;
     history(options?: { afterVersion?: number }): Promise<TaskRecord[]>;
     attempts(): Promise<TaskAttempt[]>;
+    /** 幂等创建延迟启动的新 root Task；资源需重新授权 */
+    retry(options: { requestId: string }): Promise<TaskHandle<O>>;
+    resolveEffect(request: EffectResolution): Promise<void>;
+    sendMessage(request: TaskMessageRequest): Promise<CrossSessionMessage>;
+    createCache(spec: CacheSpec): Promise<{ namespace: CacheNamespace; handle: ResourceHandle }>;
+    listCaches(): Promise<Array<{ namespace: CacheNamespace; handleId: string }>>;
+    readCache(request: CacheRead): Promise<CacheReceipt>;
+    publishCache(request: CachePublish): Promise<CacheEntry>;
+    invalidateCache(handleId: string, expectedGeneration: number): Promise<CacheNamespace>;
+    renewCache(handleId: string, expectedGeneration: number, ttlMs: number): Promise<CacheNamespace>;
 }
 ```
 
@@ -191,6 +310,11 @@ interface Decision<S, O> {
 
 ```ts
 type KernelAction =
+    | { type: 'resource'; command: ResourceCommand }
+    | CacheManagementAction                     // cache-create / cache-invalidate / cache-renew
+    | { type: 'send-message'; message: TaskMessageRequest }
+    | { type: 'cache-read'; request: CacheRead }
+    | { type: 'cache-publish'; request: CachePublish }
     | { type: 'effect'; effect: EffectRequest }
     | { type: 'spawn'; spawnKey: string; spec: TaskSpec }
     | { type: 'request-interaction'; interaction: InteractionRequest<JsonValue> }
@@ -199,17 +323,25 @@ type KernelAction =
     | { type: 'emit'; eventType: string; payload?: unknown };
 ```
 
+`CacheManagementAction`（`domain/cache.ts`）：`{ type: 'cache-create'; operationId; spec }` / `{ type: 'cache-invalidate'; operationId; handleId; expectedGeneration }` / `{ type: 'cache-renew'; operationId; handleId; expectedGeneration; ttlMs }`。
+
 ### WaitSpec
 
 等待条件（原子 + 组合）：
 
 ```ts
 type WaitAtom =
+    | { type: 'resource'; scope: string; requestId: string }
+    | { type: 'message'; topic?: string; correlationId?: string }
+    | { type: 'cache'; operationId: string }
+    | { type: 'cache-management'; operationId: string }
     | { type: 'signal'; id?: string }
     | { type: 'effect'; id?: string }
     | { type: 'task'; id: TaskId }
     | { type: 'child'; spawnKey: string }
-    | { type: 'interaction'; id: string };
+    | { type: 'interaction'; id: string }
+    | { type: 'shared-version'; key: string; afterVersion: number }
+    | { type: 'timer'; id: string; at: number };
 
 type WaitSpec = WaitAtom
     | { type: 'any'; waits: WaitSpec[] }
@@ -223,7 +355,14 @@ type WaitSpec = WaitAtom
 
 ```ts
 type TaskInputEvent =
+    | { type: 'resource-result'; receipt: ResourceRequestSnapshot }
     | { type: 'started' }
+    | { type: 'step' }
+    | { type: 'message'; message: CrossSessionMessage }
+    | { type: 'cache-result'; receipt: CacheReceipt }
+    | { type: 'cache-managed'; receipt: CacheManagementReceipt }
+    | { type: 'shared-changed'; revision: SharedStateRevision }
+    | { type: 'timer-fired'; id: string; at: number }
     | { type: 'effect-completed'; effectId: EffectId; result: unknown }
     | { type: 'effect-failed'; effectId: EffectId; error: SerializableError }
     | { type: 'task-exited'; taskId: TaskId; exit: ExitRecord }
@@ -237,6 +376,8 @@ type TaskInputEvent =
 
 ```ts
 interface TaskSpec<I = unknown> {
+    retryOfTaskId?: TaskId;               // 人工重试来源（必须已终态）
+    requestId?: string;                   // 会话内持久化提交键，复用时规格必须一致
     program: ProgramRef;                  // { kind, version }
     input: I;
     parent?: TaskId;
@@ -261,11 +402,15 @@ interface TaskSpec<I = unknown> {
 interface EffectAdapter<Req = unknown, Res = unknown> {
     readonly kind: string;
     readonly version: string;
+    /** 'idempotent-retry' → Effect 失败可自动重试；默认按 'manual' 处理 */
+    readonly recoveryPolicy?: 'idempotent-retry' | 'manual';
     execute(request: Req, context: EffectExecutionContext): Promise<Res>;
     reconcile?(request: Req, context: EffectExecutionContext): Promise<EffectReconcileResult<Res>>;  // worker 丢失后
     cancel?(request: Req, context: EffectExecutionContext): Promise<void>;
 }
 ```
+
+`EffectReconcileResult<Res>`：`{ status: 'completed'; result: Res } | { status: 'retry' } | { status: 'indeterminate'; error: SerializableError }`。
 
 ### EffectRequest<Req>
 
@@ -289,6 +434,7 @@ interface EffectExecutionContext {
     sessionId: SessionId;
     taskId: TaskId;
     effectId: EffectId;
+    idempotencyKey?: string;
     abortSignal: AbortSignal;
     grants: AuthorizedEffectGrant[];
     sessionState?: EffectSessionState;
@@ -329,10 +475,18 @@ interface BudgetAccount {            // 预算账户
 ## 会话数据
 
 ```ts
-interface SharedStateEntry<T> { key; value: T; version; updatedAt; taskId?; }
+interface SharedStateEntry<T> { key; value: T; version; updatedAt; updatedByTaskId?: TaskId; }
 interface SharedStateWriteOptions { taskId?; expectedVersion?: number | null; }
+interface SharedStateRevision<T> { key; version; value?: T; deleted: boolean; updatedAt; updatedByTaskId?: TaskId; }
 
-interface CrossSessionMessage<T> { id; sourceSessionId; targetSessionId; topic; payload: T; status; createdAt; }
+interface CrossSessionMessage<T> {
+    id; sourceSessionId; sourceTaskId?; targetSessionId; targetTaskId?;
+    correlationId?; requestFingerprint?; deliverySequence?; consumedAt?;
+    topic; payload: T; status: 'pending' | 'delivered' | 'rejected';
+    rejectedAt?; rejection?: { code: 'target-closed' | 'target-terminal' | 'target-ancestor-cancelled' | 'expired'; message };
+    expiresAt?; deliveryAttempts?; nextAttemptAt?; lastDeliveryError?;
+    createdAt; deliveredAt?;
+}
 
 interface ContextCommit<T> { id; sessionId; parentIds: string[]; delta: T; authorTaskId?; createdAt; }
 interface ContextBranch { name; version; head?; updatedAt; }
@@ -347,10 +501,13 @@ interface ContextCommitOptions { branch?: string; expectedHead?: string | null; 
 type TaskSignal = { type: string; payload?: unknown };
 
 interface EventEnvelope {
+    schemaVersion?: number;      // 当前为 1
+    effectId?: EffectId;         // 由 Effect 内部 emit 的事件带来源标识
+    attemptId?: string;
     sequence: number;       // 会话内单调递增
     sessionId: SessionId;
     taskId?: TaskId;
-    type: string;           // e.g. 'task.created' | 'effect.succeeded' | 'budget.consumed' | 'agent.event'
+    type: string;           // e.g. 'task.created' | 'effect.resolved' | 'budget.consumed' | 'agent.event'
     payload?: unknown;
     occurredAt: number;
 }
@@ -358,7 +515,16 @@ interface EventEnvelope {
 interface ExitRecord<O = unknown> { taskId; status: 'succeeded'|'failed'|'cancelled'; output?: O; error?: SerializableError; completedAt; }
 ```
 
-**常用事件名**：`session.created/closing/closed`、`task.created/started/leased/failed/attempt.lost`、`effect.leased/succeeded/failed/attempt.lost`、`budget.configured/consumed`、`task.interaction.requested/resolved`、`session.shared.set/deleted`、`session.message.queued/delivered/received`、`agent.event`（业务流式透传）。
+**常用事件名**（`store.ts`/`store-helpers.ts`/`cache-store.ts`/`mailbox-store.ts`/`managed-resources.ts` 落盘）：
+
+- 会话：`session.created`、`session.open/suspending/suspended/closing/closed/archived`（`setSessionStatus` 按状态派生）。
+- Task：`task.created`、`task.spawned`、`task.started`、`task.signal`、`task.blocked/ready/running/waiting/succeeded/failed/cancelled`（提交与完成时按状态派生）、`task.retry.scheduled`、`task.program.unavailable`、`task.attempt.lost`、`task.control.run/pause/interrupt`、`task.control.acknowledged`、`task.wait.progress`、`task.wait.satisfied`。
+- Effect / 交互：`effect.leased`、`effect.pending/succeeded/failed/cancelled/indeterminate`、`effect.retry.scheduled`、`effect.resolved`、`effect.attempt.lost`、`task.interaction.requested`、`task.interaction.resolved`。
+- 资源 / 预算：`resource.created`、`resource.granted`、`resource.revoked`、`resource.requested`、`resource.resolved`、`budget.configured`、`budget.consumed`。
+- 共享状态 / Context / 工作区：`session.shared.set`、`session.shared.deleted`、`session.context.committed`、`workspace.snapshot.created`、`workspace.diff.created`。
+- 消息：`session.message.queued`、`session.message.received`、`session.message.rejected`、`message.consumed`。
+- Cache：`cache.created`、`cache.published`、`cache.read`、`cache.renewed`。
+- 业务流式透传：`agent.event`。
 
 ---
 
@@ -404,7 +570,7 @@ catch (e) {
 
 ## 存储
 
-`SeqFileKernelStore` —— 基于 SeqFile（顺序日志 + snapshot）的持久化实现。所有 Task 状态/事件/effect/resource/budget 落盘，重启后 `Kernel.recover()` 恢复（lease 过期任务重新入队）。对外通过 `SessionStorageResolver` 解析到具体 `IModuleFS` 后端（VFS/localFS/IndexedDB/内存）。
+`SeqFileKernelStore` —— 基于 SeqFile（顺序日志 + snapshot）的持久化实现。所有 Session/Task 状态、事件、effect、resource/budget、cache、托管资源与跨会话消息落盘，重启后 `Kernel.recover()` 恢复（lease 过期任务重新入队）。对外通过 `SessionStorageResolver` 解析到具体 `IFileSystem` 后端（VFS/localFS/IndexedDB/内存）。
 
 ---
 
@@ -415,6 +581,7 @@ catch (e) {
 ```
 packages/durable-kernel/src/
 ├── index.ts                      根导出（唯一公共入口）
+├── core.ts                       精简入口：createHarness() + Harness/Session/Task 窄接口
 ├── domain/                       纯类型 + 错误模型（无逻辑）
 │   ├── types.ts                  SessionId/TaskId/JsonValue、SessionRecord/TaskRecord、
 │   │                             TaskSpec/TaskSnapshot/TaskAttempt、ProgramRef/StorageBindingRef、
@@ -423,12 +590,17 @@ packages/durable-kernel/src/
 │   │                             SharedStateEntry/CrossSessionMessage/ContextCommit/ContextBranch、
 │   │                             SessionStorageResolver/WorkspaceAdapter 等全部核心类型
 │   ├── errors.ts                 KernelErrorCode 枚举 + KernelError 类 + kernelError() 工厂
-│   └── interaction.ts            InteractionKind/ApprovalDecision、InteractionRequest/Record/Response
+│   ├── interaction.ts            InteractionKind/ApprovalDecision、InteractionRequest/Record/Response
+│   ├── cache.ts                  CacheApi/CacheSpec/CacheRead/CachePublish/CacheEntry/
+│   │                             CacheNamespace/CacheManagementAction/CacheManagementReceipt
+│   ├── resource-api.ts           ResourceApi/ManagedResource/ManagedHandle/ResourceClaim/
+│   │                             ResourceCommand/ManagedResourceAdapter/ResourceCleanup 等托管资源契约
+│   └── status.ts                 taskStat()/taskStats()/sessionStat()/closedSessionStat() + TaskStat/TaskStats/SessionStat
 ├── ports/                        内核向外的契约（注册面）
 │   ├── registry.ts               ProgramRegistry / EffectRegistry / StorageResolverRegistry / WorkspaceRegistry
 │   └── plugin.ts                 KernelRegistration（内核能力面）+ KernelPlugin（装配插件）
 ├── application/                  内核编排（Kernel 主类 + 决策引擎）
-│   ├── kernel.ts                Kernel 主类 + KernelOptions（入口）
+│   ├── kernel.ts                Kernel 主类 + KernelOptions/KernelChangeReason（入口）
 │   ├── capabilities.ts           bindCapabilities() + CapabilityBinding（能力绑定统一入口）
 │   ├── decision.ts               状态机核心：transition()/shouldRetry()/retryTask()/validateDecision()
 │   │                             以及 normalizeInputEvent()/failureDecision()/terminal()/mergeReport()
@@ -438,23 +610,30 @@ packages/durable-kernel/src/
 │   ├── durability.ts             assertDurableValue()/inspectDurableValue()（决策 payload 可持久化校验）
 │   └── workspace-utils.ts        workspaceContext()/workspaceSnapshot()/assertWorkspace()（快照/合并助手）
 ├── public/                       对外句柄实现（组合窄接口）
-│   ├── session-handle.ts         DefaultSessionHandle（实现 SessionHandle 8 个窄接口）
+│   ├── session-handle.ts         DefaultSessionHandle（实现 SessionHandle 9 个窄接口）
 │   ├── task-handle.ts            DefaultTaskHandle<O>（实现 TaskHandle<O>）
-│   └── event-stream.ts           waitForChange()（事件流等待工具）
+│   ├── event-stream.ts           eventStream()/waitForChange()（事件流工具）
+│   ├── program.ts                defineTask() + TaskStepEvent（单步纯函数声明式程序）
+│   └── resources.ts              resourceApi() + resourceResult()（资源面工厂）
 ├── runtime/                      调度运行时（内核内部，不导出）
 │   ├── durable-poller.ts         DurablePoller — ready 候选轮询（claimReady→execute→applyDecision）
-│   └── lease-heartbeat.ts        LeaseHeartbeat — 任务租约心跳续期
+│   ├── lease-heartbeat.ts        LeaseHeartbeat — 任务/Effect 租约心跳续期
+│   └── effect-cleanup.ts         EffectCleanupRunner — Effect 清理等待与超时
 └── infrastructure/seqfile/       SeqFile 持久化实现
     ├── store.ts                  SeqFileKernelStore（对外存储实现）+ TaskClaim/EffectClaim/
     │                             EffectCompletion/PreparedSpawn/TaskCommitSideEffects
     ├── store-helpers.ts          事务助手：assertClaim/claimTask/finishAttemptTx/writeTaskTx、
     │                             effect 恢复、budget/resource/context/shared 读写 TX、key 构造
-    └── seqfile-core.ts           路径/键名函数 + ensureSessionLayout/ensureTaskLayout/ensureSeqFile
+    ├── seqfile-core.ts           路径/键名函数 + ensureSessionLayout/ensureTaskLayout/ensureSeqFile
+    ├── cache-store.ts            Cache TX：createCacheTx/manageCacheTx/publishCacheTx/readCacheTx/
+    │                             invalidateCacheTx/renewCacheTx/listCachesTx
+    ├── mailbox-store.ts          Task 消息 TX：enqueueMessageTx/deliverMessageTx/consumeMessageTx
+    └── managed-resources.ts      ManagedResourceStore + executeResourceTx/sweepResourceTx（托管资源扫描）
 ```
 
 ### SeqFile 持久化路径设定
 
-每个 Session 绑定一个存储根目录（`StorageBindingRef` → `ResolvedStorageBinding.rootPath`，对应一个 `IModuleFS` 目录），布局由 `ensureSessionLayout()` 建立：
+每个 Session 绑定一个存储根目录（`StorageBindingRef` → `ResolvedStorageBinding.rootPath`，对应一个 `IFileSystem` 目录），布局由 `ensureSessionLayout()` 建立：
 
 ```
 <rootPath>/
@@ -463,14 +642,21 @@ packages/durable-kernel/src/
 ├── shared.seq         会话共享状态：value/<key>、head/<key>、history/<key>/
 ├── context.seq        上下文提交：commit/<id>、branch/<name>（默认 main）
 ├── messages.seq       跨会话消息：outbox/<id>、inbox/<id>
-├── events.seq         会话事件流（EventEnvelope，单调 sequence）
+├── events.seq         会话事件流（EventEnvelope，单调 sequence）：event/<16位序号>、next-sequence、
+│                      task-event-count/<taskId>、task-event/<taskId>/<16位序号>、task-event-index-version
 ├── graph.seq          Task 依赖图（dependsOn/waiter 关系）
-├── resources.seq      资源/句柄/预算：resource/<id>、handle/<id>、budget/<resourceId>/<dimension>
+├── resources.seq      资源/句柄/预算/缓存：resource/<id>、handle/<id>、budget/<resourceId>/<dimension>、
+│                      managed/request/<…>、managed/access/<…>、managed/claim/<id>、managed/cleanup/<id>、
+│                      cache/namespace/<id>、cache/entry/<namespaceId>/<key>、cache/version/<namespaceId>/<key>
 ├── index.seq          Task 索引（indexTask）
 └── tasks/<taskId>/
+    ├── artifacts/     Task 产物目录（ensureTaskLayout 建立，供能力/工具落盘）
     └── task.seq       Task 主日志：attempt/<id>、snapshot/<version>、wait/task/<target>/<waiter>、
-                       spawn/<parent>/<key>、workspace/snapshot/<id>、workspace/diff/<id>
+                       spawn/<parent>/<key>、workspace/snapshot/<id>、workspace/diff/<id>、
+                       cache-operation/<operationId>
 ```
+
+**约定补充**：托管资源（`managed/*`）按作用域落在对应存储根的 `resources.seq`——kernel 作用域落在 `catalog` 根，`session:<id>` 作用域落在该 Session 根；Cache 的 operation 收据（`cache-operation/<operationId>`）落在发起 Task 的 `task.seq`，与 namespace/entry 分离。
 
 **键命名规则**（`seqfile-core.ts` 导出的 `*Path()` / `*Key()` 函数）：
 
@@ -496,9 +682,10 @@ packages/durable-kernel/src/
 | `contextCommitKey(id)` / `contextBranchKey(name)` | `commit/<id>` / `branch/<name>` | 上下文提交/分支 |
 | `resourceKey(id)` / `handleKey(id)` | `resource/<id>` / `handle/<id>` | 资源/句柄 |
 | `budgetKey(resourceId, dimension)` | `budget/<resourceId>/<dimension>` | 预算账户 |
+| `taskEventCountKey(taskId)` / `taskEventKey(taskId, index)` | `task-event-count/<taskId>` / `task-event/<taskId>/<16 位补零序号>` | Task 事件索引（events.seq） |
 | `workspaceSnapshotKey(id)` / `workspaceDiffKey(id)` | `workspace/snapshot/<id>` / `workspace/diff/<id>` | 工作区快照/差异 |
 
-**约定**：存储根必须是支持事务性 SeqFile 的 `IModuleFS`（`requireTransactionalSeq` 校验，缺失时报错）；`createSession()` 将会话登记进全局 `catalog.seq`，`openSession()` 从 `session.seq` 读取主记录后按需恢复 `tasks/` 下的 Task。
+**约定**：存储根必须是支持事务性 SeqFile 的 `IFileSystem`（`requireTransactionalSeq` 校验，缺失时报错）；`createSession()` 将会话登记进全局 `catalog.seq`，`openSession()` 从 `session.seq` 读取主记录后按需恢复 `tasks/` 下的 Task。
 
 **会话删除**：`removeSession(id)` 只负责 Kernel 拥有的部分，顺序固定为：停止轮询与资源扫描 → 取消 fenced reducer → 通知插件 `onSessionClosed` → 解除存储根 `vfsFixedLayout` 固定布局保护 → 删除存储根子树 → **清除该 Session 全部 SeqFile 记录**（`session/shared/context/messages/events/graph/resources/index.seq` 以及每个 `tasks/<id>/task.seq`；记录独立于文件存在，删文件不会清理它们）→ 最后在同一事务删除 `catalog.seq` 的 `session/<id>` 与所有指向它的 `task/<taskId>`。存在非终态 Task 或 `cleanupPending` 的 Effect 时抛 `CONFLICT`（`force: true` 才强制），因此**关闭失败不会连带销毁数据**；会话不存在时返回 `false`（幂等）。
 

@@ -1,6 +1,6 @@
 # 目标、进度与后续任务
 
-更新：2026-09-08。本文是本轮工作的接续入口；以当前代码和可复现测试为准。**整体目标未完成，完整桌面最小系统尚未验收通过。** 下文“已完成”只指列明的实现与验证范围。
+更新：2026-09-09。本文是本轮工作的接续入口；以当前代码和可复现测试为准。**整体目标未完成，完整桌面最小系统尚未验收通过。** 下文“已完成”只指列明的实现与验证范围。
 
 ## 1. 目标与优先级
 
@@ -33,15 +33,15 @@
 | D07 | 人工交互检查点与 CLI 跨进程恢复 | 保存实例、完成集合、边/循环/委派状态和配置等；独立 `run`、`respond`、`resume` 进程通过，含连续两次暂停；不是任意崩溃点恢复 |
 | D08 | 恢复入口及时返回及退出等待 | `resume` 装配后返回句柄，模型等待中可取消；`waitIdle()` 等待后台调度，CLI 在关闭存储/释放锁前等待退出 |
 | D09 | CLI 同一 Run 调度互斥与删除保护 | 独立 SQLite 锁覆盖 run/resume/delete；争用拒绝，正常退出/SIGKILL 后可重新获取；终态但仍清理时拒绝删除。仅覆盖本机 CLI 入口 |
-| D10 | Run 重连成员、Task transcript、单任务重试等 | 成员持久登记、面板/导出和单任务重试已有实现；完整图级 retry 与物理分页仍待完成 |
+| D10 | Run 重连成员、Task transcript、单任务重试等 | 成员持久登记、面板/导出和单任务重试已有实现；Task 列表/历史/事件已物理分页（`listTaskPage`/`taskHistoryPage`/`taskEventPage`），transcript 版本化读取走物理分页；完整图级 retry、transcript 字节预算与真实平台文件导出验收仍待完成 |
 | D11 | 人工暂停 Run 的最终统计持久化 | 最终 metadata 保存 token/耗时；重建 Kernel 后重连一致；旧记录没有自动回填 |
 | D12 | Tauri Session Bash 工厂及 Web 接口 | `createSessionProcesses` 注入 Session nativeShell；Tauri 使用独立 `session_shell_exec` 和目录句柄映射；Web 无工厂时无本机 shell |
 | D13 | 真实 Bash 执行、进程组取消/超时 | 保留 stdout/stderr/exit code，支持嵌套 Bash；Linux Bubblewrap 映射只读仓库与可写工作目录；无隔离能力时拒绝，不回退宿主 shell |
 | D14 | Bash 清理失败处理与输出上限 | 取消失败仍尝试后续清理，重复 release 共享 Promise，保留初始化/清理错误；原生每个流保留最多 1 MiB 原始字节并继续排空管道 |
 | D15 | 外层 Kernel → Bash → 真实子 CLI → 两节点 DAG | 集成测试验证依赖传值、子 Run/result 落盘、外层 Task/Effect succeeded，外层存储重开记录一致。桥接调用真实 Rust 模块，但未经过真实 Tauri IPC |
 | D16 | Tauri 编译与无显示服务器 CLI 验收 | GDK 已安装，Rust check/build 和前端构建已通过；没有 X11 不影响编译，Xvfb 下窗口与基础页面已验证；完整交互未验收 |
-| D17 | Session 本地 memory provider | 持久保存、按授权 scope 检索与宿主写入；默认 app-shell 注入。不是跨 Session memory、向量检索或模型写入工具 |
-| D18 | 设计与代码阶段性核对 | `doc/design` 当前 16 个 Markdown 文件；审计记录包含跨包实现与历史验证。仍需最终逐项闭合，不能用文档数量代替验收 |
+| D17 | Session 本地 memory provider | 持久保存、按授权 scope 检索与宿主写入；由 `packages/app-core/src/runtime/create-application-runtime.ts` 装配时默认注入。不是跨 Session memory、向量检索或模型写入工具 |
+| D18 | 设计与代码阶段性核对 | `doc/design` 当前 13 个 Markdown 文件（另有 4 份已移入 `doc/deprecated/`）；审计记录包含跨包实现与历史验证。仍需最终逐项闭合，不能用文档数量代替验收 |
 
 ## 3. 需要完成的任务
 
@@ -64,8 +64,9 @@
 - [ ] **P1-03 工作区/后台委派恢复**：恢复隔离工作区租约、最终化和崩溃清理；恢复 detached 委派计时器。当前 isolated workspace resume 明确拒绝。
 - [ ] **P1-04 图级 retry 与运行控制**：在已有单 Task retry 基础上实现下游重算、成员/预算/工作区/结果收敛，核对统一任务工具目标与 UI 控制语义。
 - [ ] **P1-05 Durable 五篇文档的完整映射**：逐条建立目标 → API → 持久记录 → 故障测试证据；完成仍有效的遗漏和真实外部 Effect 清理验收。
-- [ ] **P1-06 Transcript 存储分页与导出**：现有展示/逻辑分页之外，完成物理读取分页、字节预算及真实平台文件导出验收。
-- [ ] **P1-07 Schema/输出策略**：结构兼容推导、responseFormat 绑定、端口错误策略及相应动态节点验证；不能把当前受支持子集称为完整实现。
+- [ ] **P1-06 Transcript 存储分页与导出**：物理读取分页已落地（`packages/durable-kernel/src/infrastructure/seqfile/store.ts` 的 Task 列表/历史/事件分页 + `packages/llm-flow/src/flow/transcript.ts` 的版本化读取）；仍需完成字节预算及真实平台文件导出验收。
+- [ ] **P1-07 Schema/输出策略**：responseFormat 绑定与端口错误策略已实现（`packages/llm-flow/src/flow/builtin-plugins.ts`、`packages/llm-flow/src/flow/port-contract.ts`，校验期与运行期都校验）；结构兼容推导仍未实现（端口只做 `id@version` 精确匹配、无隐式转换），动态节点验证及相应受支持子集仍需闭合，不能把当前受支持子集称为完整实现。
+- [ ] **P1-08 kernel-adapters 两处 Effect 回滚缺陷**：`packages/kernel-adapters/src/effects/skill-load-effect.ts` 与 `packages/kernel-adapters/src/effects/tool-call-effect.ts` 在持久登记失败时未恢复内存中的已加载 Skill，`packages/kernel-adapters/src/runtime/create-kernel-adapters-runtime.ts` 的创建失败清理也会被 `release` 异常中断并覆盖原始错误；复现步骤与修复建议见 [kernel-adapters 核验](deprecated/kernel-adapters-package-review.md)。
 
 ### P2：保留但后移的扩展与全量设计闭合
 
@@ -73,7 +74,7 @@
 - [ ] **P2-02 跨 Session memory**：共享命名空间、显式读写授权、并发一致性与可审计来源；确保不同 Session 不因同名 namespace 自动互读。
 - [ ] **P2-03 Memory 模型写入与管理**：模型工具、编辑 UI、长期保留/压缩策略；语义/向量检索按有效设计实施，不能用当前词项匹配替代。
 - [ ] **P2-04 VFS/C4 完整验收**：按当前挂载与访问边界设计完成浏览、编辑、工具、附件、撤销和平台故障场景；旧方案已被取代的步骤不重做。
-- [ ] **P2-05 最终文档同步审计**：逐项复核全部 16 篇设计及相关 API 文档；消除过时的“当前”状态、保留历史证据与验证限制，最后才能标记原始目标完成。
+- [ ] **P2-05 最终文档同步审计**：逐项复核全部 13 篇设计及相关 API 文档；消除过时的“当前”状态、保留历史证据与验证限制，最后才能标记原始目标完成。
 
 ## 4. Memory 的“Session 间共享”含义
 
@@ -85,7 +86,7 @@
 
 - 工作目录：`/home/li/share/prj/x1`；主要技术栈 TypeScript/pnpm、Rust/Tauri、LocalFS/SQLite。
 - 工作树包含大量既有未提交修改和新增文件；不要重置、覆盖或擅自提交。开始工作先检查当前文件，历史对话和日志只作为定位线索。
-- 遵守根与相关包的 `CLAUDE.md`；中文交流，新注释使用英文。没有用户明确要求时不启动子代理。
+- 遵守根与相关包的 `AGENTS.md`；中文交流，新注释使用英文。没有用户明确要求时不启动子代理。
 - GDK 缺失问题已解除，先前 `gdk-3.0` 检测为 3.24.52；曾通过完整 Rust 开发编译和前端构建，不等于发布安装包或 GUI 通过。
 - 当前没有物理 X11 桌面，但已发现 Xvfb 并完成真实 Tauri 窗口启动/基础页面渲染检查；可继续用虚拟显示推进 GUI 验收。测试模型主要为本地固定 HTTP/SSE 响应，不代表外部模型服务已验收。
 - 沙箱可能禁止本地监听或真实子进程；出现权限失败应通过正常 escalation 重跑，不能把受限环境失败当成产品缺陷，也不能把未执行视为通过。
@@ -137,10 +138,12 @@ rustc --edition=2021 --test apps/tauri-app/src-tauri/src/bash_process.rs -o /tmp
 
 ## 7. 设计文档索引与完成判定
 
-当前主线：[实施审计](design/implementation-audit.md)、[Flow 执行模型](design/flow-execution-model.md)、[Skill 设计](design/skill-design.md)、[Session 挂载访问边界](design/vfs-session-mount-access.md)。
+当前主线：[实施审计](deprecated/implementation-audit.md)、[Flow 执行模型](design/flow-execution-model.md)、[Skill 设计](design/skill-design.md)、[Session 挂载访问边界](design/vfs-session-mount-access.md)。
 
 Durable 五篇：[Core](design/durable-harness-core.md)、[Protocol](design/durable-harness-protocol.md)、[Storage](design/durable-harness-storage.md)、[Resources](design/durable-harness-resources.md)、[Cache](design/durable-harness-cache.md)。
 
-其他 VFS 文档：[总设计](design/VFS-design.md)、[消费方迁移](design/vfs-consumer-migration.md)、[实现状态](design/vfs-implementation-status.md)、[C4 核验](design/vfs-c4-review.md)、[Session 浏览](design/vfs-session-browser.md)、[Session FS](design/vfs-session-fs.md)、[命名空间重构](design/vfs-namespace-refactor.md)。历史方案与现行要求冲突时，先按明确的替代决策核对。
+其他 VFS 文档：[总设计](design/VFS-design.md)、[消费方迁移](deprecated/vfs-consumer-migration.md)、[实现状态](design/vfs-implementation-status.md)、[C4 核验](design/vfs-c4-review.md)、[Session 浏览](design/vfs-session-browser.md)、[Session FS](deprecated/vfs-session-fs.md)、[命名空间重构](deprecated/vfs-namespace-refactor.md)。历史方案与现行要求冲突时，先按明确的替代决策核对。
+
+标签存储：[标签存储与查询](design/label-storage.md)。
 
 完成判定：每项有效要求都必须有当前代码/实际运行/测试证据；明确区分实现完成、模拟测试、跨进程验证、真实 GUI/IPC。最小系统优先级不缩小原始目标，不能因某个测试组全绿就标记整体完成。

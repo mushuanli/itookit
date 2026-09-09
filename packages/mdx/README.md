@@ -209,4 +209,4 @@ createMDxEditor(container, {
 
 ## 📜 许可证
 
-本项目基于 [MIT](LICENSE) 许可证。
+本项目基于 MIT 许可证。

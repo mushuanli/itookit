@@ -1,6 +1,6 @@
 # @itookit/llm-flow — API 参考
 
-> DAG 编排层：把 `llm-tasks` 的 LLM 任务单元连成动态图（route/loop/spawn/compensate/on_failure/budget），并持久化 Flow 定义。提供 `DurableFlowExecutor`（动态图调度）、`DagCommandService`（命令面）、内置 Flow Programs 与插件。所有 API 从 `@itookit/llm-flow` 根导出。
+> DAG 编排层：把 `llm-tasks` 的 LLM 任务单元连成动态图（route/loop/spawn/compensate/on_failure/budget），并持久化 Flow 定义。提供 `DurableFlowExecutor`（动态图调度）、`DagCommandService`（命令面）、内置 Flow Programs 与插件。公共 API 从 `@itookit/llm-flow` 根导出；`flow/operations.ts` 的纯操作、`flow/programs.ts` 的输入类型（`FlowDependencyBinding` / `FlowValueInput` / `FlowHumanInput` / `FlowAggregateInput`）与 `flow/executor.ts` 的 `upstreamOf` 未从根导出，需按源码路径导入。
 
 **依赖方向**：`llm-flow → durable-kernel + llm-tasks`（`llm-session` 依赖本包）。不持有会话语义（Round/Branch 属于 `llm-session`）；能力经 Kernel Effect 使用。
 
@@ -24,7 +24,10 @@
 ```ts
 class DurableFlowExecutor {
     constructor(options: DurableFlowExecutorOptions);
-    async submit(sessionId: string, spec: DagRunSpec): Promise<FlowExecutionHandle>;
+    async submit(sessionId: string, spec: DagRunSpec, parameters?: Record<string, JsonValue>): Promise<FlowExecutionHandle>;
+    async resume(sessionId: string, rootTaskId: string): Promise<FlowExecutionHandle>;
+    async waitForCheckpoint(sessionId: string, rootTaskId: string, taskIds: string[], timeoutMs?: number): Promise<void>;
+    async waitIdle(): Promise<void>;
 }
 ```
 
@@ -35,11 +38,15 @@ interface DurableFlowExecutorOptions {
     kernel: Kernel;                            // 执行内核
     plugins: DagPluginCatalog;                   // 插件目录（节点类型 → Manifest）
     sessionContext?: { projectInstructions: string; skillInstructions: string; skillIndex: string };
+    /** 仅新 Run 解析一次；恢复始终使用其持久化快照 */
+    resolveNewRunContext?(sessionId: string): Promise<NonNullable<DurableFlowExecutorOptions['sessionContext']>>;
     bindPatchNode?(sessionId: string, node: DagNodeDefinition, defaults?: Record<string, unknown>): Promise<Partial<Pick<DagNodeDefinition, 'config' | 'inputs'>>>;
     resolveTools?(sessionId, allowedIds): Promise<{
         definitions: ToolDefinition[];
         externalIds: string[];
     }>;
+    hooks?: HarnessHookRunner;                   // 可信宿主钩子
+    workspaceManager?: FlowWorkspaceManager;     // 宿主工作区管理器
 }
 ```
 
@@ -55,23 +62,23 @@ interface FlowExecutionHandle {
 }
 ```
 
-**其他导出**：`upstreamOf(edges, nodeId): string[]` —— 取某节点的上游边。
+**辅助函数**：`upstreamOf(edges, nodeId): string[]` —— 取某节点的上游边（`flow/executor.ts`，未从包根导出）。
 
 ---
 
 ## Flow Programs
 
-三个内置 Program（注册为 `flow.*@1`），节点类型为 value / human / aggregate：
+三个内置 Program 注册为 `flow.value@1` / `flow.human@1` / `flow.aggregate@1`（kind 为 `flow.value` / `flow.human` / `flow.aggregate`，version `1`）。它们是 **Program kind**，不是 Flow 节点类型；Flow 节点类型（plugin id）为 `builtin.transform` / `builtin.reduce` / `builtin.route` / `builtin.spawn` / `builtin.flow` / `builtin.human` / `builtin.agent`，其中前四种映射到 `flow.value@1`，`builtin.human` 映射到 `flow.human@1`，`builtin.agent` 映射到 `llm.agent@1`，`builtin.flow` 是 composite，在执行前展开子 Flow 而不产生 Program；`flow.aggregate@1` 由执行器创建 Run 根任务时使用。
 
 | Program | manifest | 输入 | 输出 |
 |---|---|---|---|
-| `FlowValueProgram` | `flow.value@1` | `FlowValueInput`（含 `op` 纯操作 + 依赖） | `DagNodeOutcome` |
+| `FlowValueProgram` | `flow.value@1` | `FlowValueInput`（`operation` 纯操作 + 依赖） | `DagNodeOutcome` |
 | `FlowHumanProgram` | `flow.human@1` | `FlowHumanInput`（HITL 交互） | `DagNodeOutcome` |
 | `FlowAggregateProgram` | `flow.aggregate@1` | `FlowAggregateInput`（聚合策略） | `JsonValue` |
 
-**`FlowDependencyBinding`**：`{ taskId: string; output?: string; … }` —— 节点对上游输出的引用。
+**`FlowDependencyBinding`**：`{ taskId: string; input: string; output?: string; edgeId?: string }` —— 节点对上游输出的引用（`flow/programs.ts`，输入类型未从包根导出）。
 
-**纯操作**（`operations.ts`，供 `FlowValueProgram` 使用）：
+**纯操作**（`flow/operations.ts`，供 `FlowValueProgram` 内部使用，未从包根导出）：
 
 | 函数 | 语义 |
 |---|---|
@@ -93,7 +100,7 @@ class DagCommandService {
 }
 ```
 
-**`DagCommandServiceOptions`**：`{ flowStore: FlowDefinitionStore; kernel: Kernel; plugins: DagPluginCatalog; resolveTools?; resolveSessionContext?; bindNode? }`。`bindNode(sessionId, node, defaults?)` 用于静态/Composite 编译及动态 patch 身份解析；动态节点传入产生节点所属 Flow 的 defaults。编译结果 `DagRunSpec.nodeDefaults` 保存按节点划分的默认身份层，Composite 展开保留子 Flow 的作用域；执行器提交时冻结它，并由动态 patch/委派后代沿用。默认配置不扩大动态节点的原能力声明。`DagRunSpec.nodeConnections` 同样按节点保存连接别名、默认槽位与宿主回退连接，供动态 patch 和委派子节点在提交前解析，Composite 保留子 Flow 的作用域。动态绑定在整批发布前完成，仅采用 config/inputs，并保留原工具能力、预算及委派调度策略；递归保留 resolvedTemplate 的身份内容，将每级模板能力限定为原声明，缺省为空。`resolveSessionContext(sessionId, userMessage)` 返回项目规则、已加载 Skill 规则及 Skill 索引；独立入口传空 userMessage，由执行器冻结并提供给每个 Agent 实例。
+**`DagCommandServiceOptions`**：`{ flowStore: FlowDefinitionStore; kernel: Kernel; plugins: DagPluginCatalog; resolveTools?; resolveSessionContext?; bindNode?; workspaceManager? }`。`bindNode(sessionId, node, defaults?)` 用于静态/Composite 编译及动态 patch 身份解析；动态节点传入产生节点所属 Flow 的 defaults。编译结果 `DagRunSpec.nodeDefaults` 保存按节点划分的默认身份层，Composite 展开保留子 Flow 的作用域；执行器提交时冻结它，并由动态 patch/委派后代沿用。默认配置不扩大动态节点的原能力声明。`DagRunSpec.nodeConnections` 同样按节点保存连接别名、默认槽位与宿主回退连接，供动态 patch 和委派子节点在提交前解析，Composite 保留子 Flow 的作用域。动态绑定在整批发布前完成，仅采用 config/inputs，并保留原工具能力、预算及委派调度策略；递归保留 resolvedTemplate 的身份内容，将每级模板能力限定为原声明，缺省为空。`resolveSessionContext(sessionId, userMessage)` 返回项目规则、已加载 Skill 规则及 Skill 索引；独立入口传空 userMessage，由执行器冻结并提供给每个 Agent 实例。
 
 **`DurableFlowSnapshot`**：运行快照类型（命令面查询用）。
 
@@ -103,25 +110,38 @@ class DagCommandService {
 
 ```ts
 class FlowDefinitionStore {
-    constructor(engine: FlowAssetStore, flowDirName: string, plugins: DagPluginCatalog);
+    constructor(store: FlowStore, plugins?: DagPluginCatalog);
     async createDraft(input: { id: string; name: string }): Promise<FlowDraft>;
     async listDrafts(): Promise<FlowDraft[]>;
     async loadDraft(id: string): Promise<FlowDraft | null>;
     async saveDraft(draft: FlowDraft, expectedDraftVersion: number): Promise<FlowDraft>;
+    async createRevision(draft: FlowDraft): Promise<FlowRevision>;
     async saveRevision(revision: FlowRevision): Promise<FlowRevision>;
+    async loadRevision(id: string, revision?: number): Promise<FlowRevision | null>;
+    async listRevisions(id: string): Promise<FlowRevision[]>;
+    async adoptDraft(nodeId: string, name: string): Promise<FlowDraft>;
     // …
 }
 ```
 
-**`FlowAssetStore`**（最小存储接口，由 `IChatEngine` 适配）：
+**`FlowStore`**（最小存储接口，由 `llm-session` 的 `FlowEngine` 实现）：
 
 ```ts
-interface FlowAssetStore {
-    getAssets(ownerNodeId: string): Promise<Array<{ path?: string; name?: string }>>;
+interface FlowStore {
+    listFiles(): Promise<FlowFileRef[]>;
+    findFile(name: string): Promise<FlowFileRef | null>;
+    createFile(name: string, content: string): Promise<FlowFileRef>;
+    readFile(nodeId: string): Promise<string | null>;
+    writeFile(nodeId: string, content: string): Promise<void>;
+    renameFile(nodeId: string, newName: string): Promise<void>;
+    deleteFile(nodeId: string): Promise<void>;
     createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<unknown>;
     readAsset(ownerNodeId: string, filename: string): Promise<string | ArrayBuffer | null>;
+    listAssets(ownerNodeId: string): Promise<Array<{ path?: string; name?: string }>>;
 }
 ```
+
+**`FlowFileRef`**：`{ nodeId: string; name: string }`。**`generateFlowId(name)`**：由显示名派生 ASCII、文件名安全的 Flow id（根导出）。
 
 **`FlowDraftVersionConflictError`**：草稿版本冲突（CAS 失败）抛错。
 
@@ -130,8 +150,19 @@ interface FlowAssetStore {
 ## DAG 编译
 
 ```ts
-type FlowNodeBinder = (…args) => …;                 // Flow 节点 → TaskSpec 绑定器
-flowToDag(flow: FlowDraft, binders): DagRunSpec;     // FlowDraft → DagRunSpec
+type FlowNodeBinder = (
+    node: FlowNodeDefinition,
+    flowDefaults?: FlowNodeDefinition['config'],
+) => Partial<Pick<FlowNodeDefinition, 'config' | 'inputs' | 'capabilities' | 'budget'>>
+    | Promise<Partial<Pick<FlowNodeDefinition, 'config' | 'inputs' | 'capabilities' | 'budget'>>>;
+
+flowToDag(
+    flow: FlowRevision,
+    bind?: FlowNodeBinder,
+    fallbackConnectionId?: string,
+    resolveComposite?: (id: string, revision?: number) => Promise<FlowRevision | null>,
+    compositeStack?: string[],
+): Promise<DagRunSpec>;
 findCycles(nodes: GraphNode[], edges: GraphEdge[]): GraphCycles;   // 通用环检测
 ```
 
@@ -142,8 +173,14 @@ findCycles(nodes: GraphNode[], edges: GraphEdge[]): GraphCycles;   // 通用环�
 ## 校验
 
 ```ts
-interface ValidationIssue { … }                     // 校验问题（severity/message/path）
-validateFlowRevision(flow: FlowRevision): ValidationIssue[];   // 结构 + 环 + 引用校验
+interface ValidationIssue {
+    code: string;
+    message: string;
+    nodeId?: string;
+    edgeId?: string;
+    severity?: 'error' | 'warning';
+}
+validateFlowRevision(flow: FlowRevision, plugins?: DagPluginCatalog): ValidationIssue[];   // 结构 + 环 + 引用校验
 flowRevisionDigest(flow: Omit<FlowRevision, 'digest'>): string; // 修订摘要（内容寻址）
 ```
 
@@ -153,10 +190,10 @@ flowRevisionDigest(flow: Omit<FlowRevision, 'digest'>): string; // 修订摘要�
 
 ```ts
 class DagPluginRegistry implements DagPluginCatalog { … }       // 插件注册表
-createBuiltinDagPluginRegistry(): DagPluginRegistry;            // 内置插件（transform/reduce/route/spawn/agent/human）
+createBuiltinDagPluginRegistry(): DagPluginRegistry;            // 内置插件
 ```
 
-内置插件集：`transform`、`reduce`、`route`、`spawn`、`agent`、`human`（节点类型 → Manifest/UI Contribution）。
+内置插件集共 7 个，id 一律为 `builtin.<kind>`、version `1.0.0`：`builtin.transform`、`builtin.reduce`、`builtin.route`、`builtin.spawn`、`builtin.flow`（composite，展开子 Flow）、`builtin.human`、`builtin.agent`（节点类型 → Manifest/UI Contribution）。
 
 ---
 
@@ -166,29 +203,29 @@ createBuiltinDagPluginRegistry(): DagPluginRegistry;            // 内置插件�
 
 ```
 packages/llm-flow/src/
-├── index.ts                   根导出（flow/* + FlowDefinitionStore）
-├── flow-definition-store.ts   FlowDefinitionStore + FlowAssetStore + FlowDraftVersionConflictError
+├── index.ts                   根导出（flow/* + FlowDefinitionStore/FlowStore/FlowFileRef/generateFlowId）
+├── flow-definition-store.ts   FlowDefinitionStore + FlowStore + FlowFileRef + FlowDraftVersionConflictError + generateFlowId
 └── flow/
     ├── index.ts               flow 层 barrel
-    ├── executor.ts            DurableFlowExecutor + DurableFlowExecutorOptions/FlowExecutionHandle/upstreamOf
+    ├── executor.ts            DurableFlowExecutor + DurableFlowExecutorOptions/FlowExecutionHandle + upstreamOf（未根导出）
     ├── commands.ts            DagCommandService + DagCommandServiceOptions/DurableFlowSnapshot
     ├── programs.ts            FlowValueProgram/FlowHumanProgram/FlowAggregateProgram + 输入类型
-    ├── operations.ts          transformOutcome/spawnOutcome/reduceOutcome/routeOutcome（纯操作）
+    ├── operations.ts          transformOutcome/spawnOutcome/reduceOutcome/routeOutcome（纯操作，未根导出）
     ├── to-dag.ts              flowToDag + FlowNodeBinder
     ├── validation.ts          validateFlowRevision/flowRevisionDigest + ValidationIssue
     ├── graph.ts               findCycles + GraphNode/GraphEdge/GraphCycles
     ├── plugin-registry.ts     DagPluginRegistry
     ├── builtin-plugins.ts     createBuiltinDagPluginRegistry（内置插件集）
-    └── (无持久化路径常量 — Flow 草稿/修订经 FlowAssetStore 落到会话资产目录，见 llm-session)
+    └── (无持久化路径常量 — Flow 草稿/修订经 FlowStore 落到 llm-session 的 flows 模块)
 ```
 
-**约定**：只编排 DAG，不持有 Round/Branch/ChatEngine 语义；不依赖 `llm-session`、UI、DOM 或具体设备；`FlowDefinitionStore` 只依赖最小 `FlowAssetStore` 接口（由 `IChatEngine` 适配），Flow 修订以 JSON asset 形式持久化在会话资产目录（默认 `llm-flows/`，见 `llm-session` 的 `initializeConversationSystem`）。
+**约定**：只编排 DAG，不持有 Round/Branch/SessionRepository 语义；不依赖 `llm-session`、UI、DOM 或具体设备；`FlowDefinitionStore` 只依赖最小 `FlowStore` 接口（由 `llm-session` 的 `FlowEngine` 适配），每个 Flow 是一个 `.flow` 文件（可变草稿），修订以 asset 形式存放在该文件下（`revision-<n>.json` / `latest.json`）。flows 模块与应用装配路径见 `llm-session-api.md` 的 VFS 路径设定。
 
 ## 持久任务 Transcript
 
 `FlowCommand.RunTranscript`（`dag.run.transcript`）接受 `{ sessionId, taskId, targetTaskId }`，taskId 是 Run 根聚合任务 ID。返回 `FlowTaskTranscript`，包含任务 input/output、status/version、完整持久 Effect 交换与 interaction 记录；也可直接调用 `readFlowTaskTranscript(kernel, sessionId, runTaskId, taskId)`。以根任务 input.runTasks 验证归属，无需原 DagCommandService 句柄，拒绝其他 Run 的任务。runTasks 包含全部循环实例、未汇总及 detached 节点。支持可选 `query: { version?, offset?, limit? }`：默认每页 100 条 Effect、最多 500 条，返回 totalEffects 与可选 nextOffset。后续页携带首屏 version 固定历史快照；未提供 version 的非零 offset 拒绝。这是结构化记录；DagWorkbench 的任务记录对话框按交换分段展示并支持 JSON 和 UTF-8 纯文本文件导出，加载更多会合并同一版本的交换，全部加载完才启用导出。底层仍整任务读取，输入/输出/interaction 不分页，尚无字节上限。纯文本导出包含快照身份与 version，以及完整输入、交换、交互和输出。
 
-`dag.run.get({ taskId, sessionId? })` 支持从保存的 Run 根记录重新连接；没有内存句柄时必须提供 sessionId，返回 `attachedFromStorage: true`。依靠 input.run（v1 目标/用量）与 input.runTasks 恢复任务树、最新节点、实例计数及 detached 标记。目标更新使用 Session shared 状态持久保存，读取优先于初始目标。`DagWorkbench.openRun(taskId, sessionId?)` 可打开这类记录。调度循环及 workspace 收尾没有恢复，旧根记录缺少 v1 元数据时拒绝猜测重建。
+`dag.run.get({ taskId, sessionId? })` 支持从保存的 Run 根记录重新连接；没有内存句柄时必须提供 sessionId，返回 `attachedFromStorage: true`。依靠 input.run（v1 目标/用量）与 input.runTasks 恢复任务树、最新节点、实例计数及 detached 标记。目标更新使用 Session shared 状态持久保存，读取优先于初始目标。`DagWorkbench.openRun(taskId, sessionId?)` 可打开这类记录。若需要继续调度，用 `DurableFlowExecutor.resume(sessionId, rootTaskId)` 从 `flow.run.<rootTaskId>.scheduler` 检查点恢复（检查点缺失或版本不支持时抛错；隔离 workspace 的恢复需要租约重建，同样抛错），`waitForCheckpoint(sessionId, rootTaskId, taskIds, timeoutMs?)` 可等待检查点已包含指定任务。旧根记录缺少 v1 元数据时拒绝猜测重建。
 
 `prepareFlowTaskRetry(session, rootTaskId, sourceTaskId, requestId)` 返回已登记 Run 成员的 deferred 新 Task，要求非空请求 ID 和当前 Run 的终态源任务。成员含 nodeId/iteration/retryOfTaskId/budget，保存在 `flow.run.<rootTaskId>.retries`；RunGet、重连及 transcript 合并读取。此 API 不授权或启动，不重写旧根输出，也不重算下游，`retryFlowTask` 与 `FlowCommand.RunTaskRetry`（`dag.run.task.retry`）则继续按原 input 白名单和成员预算授权/启动，命令接受 `{ sessionId, taskId, targetTaskId, requestId }`，返回新的 targetTaskId 与 retryOfTaskId。旧根输出不改写，新的 Task 结果进入成员查询/transcript；UI 已提供终态任务重试入口与来源标记，进行中禁重，失败复用请求身份；根结束后仍刷新活动成员。RunCancel 包括所有持久成员。下游重算与图级结果收敛尚未完成。
 

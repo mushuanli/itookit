@@ -6,16 +6,16 @@
 
 ```
 vfs-ui (VFSUIShell)
-  → IModuleFS (VFSManager.getEngine())
-     → ModuleFS.driver (IFSDriver) → VFSEngine → IStorageBackend
+  → IFileSystem (vfs.openFileSystem(rootPath))
+     → FileSystemView.driver (IFSDriver) → VFSEngine → IStorageBackend
 ```
 
 | 步骤 | 组件 | 关键文件 |
 |---|---|---|
-| 1. 创建 | `createVFS({ rootBackend, modules })` | `vfs-core/src/impl/factory.ts` |
+| 1. 创建 | `createVFS({ rootBackend, additionalMounts, devices, plugins })` | `vfs-core/src/impl/factory.ts` |
 | 2. 引擎 | `VFSEngine` — 路径解析、系统节点映射 | `vfs-core/src/impl/engine/` |
-| 3. 管理器 | `VFSManager` — module lifecycle | `vfs-core/src/impl/services/` |
-| 4. 模块 | `ModuleFS`（chroot 到 module 目录） | `vfs-core/src/impl/services/` |
+| 3. 管理器 | `VFSManager` — 挂载/设备/插件 | `vfs-core/src/impl/services/` |
+| 4. 文件视图 | `FileSystemView`（组合多个挂载点，按路径归一化） | `vfs-core/src/impl/services/` |
 | 5. 存储 | `IStorageBackend`（IndexedDB / LocalFS） | `vfsdriver-*/src/` |
 
 重命名使用路径型节点 ID，因此必须同步整条运行链：
@@ -61,14 +61,15 @@ ChatInput.send (llm-ui)
 
 ```
 cli run (apps/cli)
-  → config.ts: loadWorkflow（YAML → validate → 编译 tasks/edges/route 条件）
+  → config.ts: loadWorkflow（YAML → validate）
+  → run-definition.ts: compileRunDefinition → runtime.ts compileDag（编译 tasks/edges/route 条件）
+    → toDagRunSpec（RunDefinition → DagRunSpec）
   → runtime.ts: createCliRuntime
       ├─ openLocalFSBackend → createVFS
-      ├─ createKernelAdaptersRuntime（kernel + effect adapters + tools + skills）
-      ├─ DurableFlowExecutor（createBuiltinDagPluginRegistry）
-      └─ registerPrograms（llm-tasks 的 agent/chat/plan + llm-flow 的 flow.*）
+      ├─ createKernelRuntime（createKernelAdaptersRuntime + new Kernel + registerDurablePrograms）
+      └─ DurableFlowExecutor（core.dagPlugins = createBuiltinDagPluginRegistry）
   → DurableFlowExecutor.submit(sessionId, DagRunSpec)
-      → 就绪节点逐个 session.submit(TaskSpec) → bindCapabilities → start
+      → 就绪节点逐个 session.submit(TaskSpec) → bindFlowTaskCapabilities → start
       → kernel drain → 节点 program（llm.agent / flow.value / flow.human …）
       → 数据边经 extractNodeOutput 注入下游
       → route/loop/spawn/compensate/on_failure 动态调度
@@ -77,8 +78,9 @@ cli run (apps/cli)
 
 | 步骤 | 组件 | 关键文件 |
 |---|---|---|
-| 配置 | `loadWorkflow`（编译 DagRunSpec） | `cli/src/config.ts` |
-| 装配 | `createCliRuntime`（durable-kernel+kernel-adapters+flow） | `cli/src/runtime.ts` |
+| 配置 | `loadWorkflow`（YAML → validate） | `cli/src/config.ts` |
+| 编译 | `compileRunDefinition` → `compileDag` → `toDagRunSpec` | `cli/src/run-definition.ts`、`cli/src/runtime.ts`、`app-core/src/run/run-definition.ts` |
+| 装配 | `createCliRuntime`（vfs + `createKernelRuntime` + flow） | `cli/src/runtime.ts` |
 | 调度 | `DurableFlowExecutor.submit` | `llm-flow/src/flow/executor.ts` |
 | 插件 | `createBuiltinDagPluginRegistry`（transform/reduce/route/spawn/agent/human） | `llm-flow/src/flow/builtin-plugins.ts` |
 | 结果 | `selectFinalResult` → `RunStore.writeResult` | `cli/src/run-store.ts` |
@@ -87,25 +89,28 @@ cli run (apps/cli)
 
 ```
 apps/web-app (entry)
-  → initApp() (app-shell)
-    → createVFS() → LLMDeviceDriver → new Kernel()
-      → createKernelAdaptersRuntime(kernel, driver…)（注册 effect/tool/skill）
-      → initializeConversationSystem({ agentService, sessionEngine, kernel, dagPlugins })
-        ├─ registerPrograms（llm-tasks + llm-flow 的全部 durable programs）
-        ├─ SessionManager / CommandBus / DagCommandService 装配
-        └─ 插件激活（session / vcs / history）
-    → WorkspaceStrategy（standard/settings/agent/chat/skills）→ Workbench
+  → createApplicationRuntime() (app-core)
+    → createVFS() → LLMDeviceDriver → createKernelRuntime()
+      → createKernelAdaptersRuntime（注册 effect/tool/skill）
+      → new Kernel() + registerDurablePrograms（llm-tasks 的 agent/chat/plan + llm-flow 的 flow.*）
+    → initializeConversationSystem({ agentService, sessionEngine, promptHistoryFiles, kernel, flowStore, dagPlugins })
+      ├─ SessionManager / CommandBus / DagCommandService 装配
+      └─ 插件激活（session / vcs / history）
+  → initApp(runtime) (app-shell)
+    → WorkspaceConfig（standard/settings/agent/chat/skills/flows）→ Workbench / SessionWorkbench
 ```
 
 | 步骤 | 关键文件 |
 |---|---|
-| 入口 | `apps/web-app/src/` |
+| 入口 | `apps/web-app/src/main.ts` |
+| 运行时装配 | `app-core/src/runtime/create-application-runtime.ts::createApplicationRuntime()` |
+| 内核装配 | `app-core/src/runtime/create-kernel-runtime.ts::createKernelRuntime()` |
 | 启动 | `app-shell/src/bootstrap.ts::initApp()` |
 | VFS | `vfs-core/src/impl/factory.ts::createVFS()` |
 | 内核 | `durable-kernel/src/application/kernel.ts::new Kernel()` |
 | 能力 | `kernel-adapters/src/runtime/create-kernel-adapters-runtime.ts::createKernelAdaptersRuntime()` |
 | LLM 系统 | `llm-session/src/index.ts::initializeConversationSystem()` |
-| 工作区策略 | `app-shell/src/strategies/` |
+| 工作区 | `app-shell/src/workspaces/`（`WorkspaceConfig`）+ `bootstrap.ts` 的 factories map |
 
 ## 5. TTY / 工具链（能力注入）
 

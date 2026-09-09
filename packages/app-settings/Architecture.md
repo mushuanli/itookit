@@ -1,28 +1,34 @@
-## Architecture 
+## Architecture
 
 ```
 src/
 ├── index.ts               ← createSettingsModule() + 导出
 ├── services/
-│   ├── SettingsService.ts  ← 设置 CRUD (VFS ConfigService 持久化)
+│   ├── SettingsService.ts  ← 设置 CRUD (VFS 文件持久化 + 标签/快照/同步)
 │   ├── SnapshotService.ts  ← 配置快照 (备份/恢复)
-│   └── SyncService.ts      ← 配置同步
+│   ├── SyncService.ts      ← 配置同步
+│   ├── LabelStore.ts       ← 全局标签存储 (/tags.seq)
+│   └── workspace-files.ts  ← WorkspaceFileSource / writeWorkspaceFile
 ├── engine/
-│   ├── SettingsEngine.ts   ← ISessionEngine 适配器 (设置页)
-│   ├── SkillsEngine.ts     ← ISessionEngine 适配器 (Skill 列表)
-│   └── SystemVFSEngine.ts  ← 原始 VFS 浏览器引擎
-├── editors/                ← Settings 编辑器 (实现 ISettingsWidget)
+│   ├── SettingsEngine.ts   ← IFileSystem 实现 (SETTINGS_PAGES → 只读虚拟节点)
+│   └── SkillsEngine.ts     ← IFileSystem 实现 (LLMSkill → 可写虚拟节点)
+├── editors/                ← 设置编辑器 (继承 BaseSettingsEditor)
 │   ├── AboutSettingsEditor.ts
+│   ├── AppearanceSettingsEditor.ts  ← 浅色/深色/跟随系统, 写入 /ui/theme.json
 │   ├── ContactSettingsEditor.ts
-│   ├── LogSettingsEditor.ts        ← 日志级别 + 查看器
-│   ├── RecoverySettingsEditor.ts   ← 数据恢复
-│   ├── StorageSettingsEditor.ts    ← 存储概览/迁移/快照/同步/危险区
-│   ├── TagSettingsEditor.ts        ← 全局标签管理
-│   └── SystemFSExploreEditor.ts    ← 原始 VFS 浏览 (调试)
+│   ├── LogSettingsEditor.ts         ← 日志级别 + 查看器 (log/ 子模块)
+│   ├── RecoverySettingsEditor.ts    ← 数据恢复
+│   ├── StorageSettingsEditor.ts     ← 存储概览/迁移/快照/同步/危险区 (storage/ 子模块)
+│   ├── TagSettingsEditor.ts         ← 全局标签管理
+│   ├── SystemFSExploreEditor.ts     ← 跨模块只读 VFS 浏览 (system-fs/ 组装视图)
+│   ├── log/                         ← LogLevelConfigSection / LogOverviewSection / LogViewerSection
+│   ├── storage/                     ← StorageOverview / Migration / Snapshot / Sync / DangerZone Section
+│   └── system-fs/                   ← system-file-inspector.ts
 ├── factories/
 │   └── settingsFactory.ts  ← createSettingsFactory()
 ├── types/
-│   └── types.ts           ← SyncMeta, SyncJob, SnapshotMeta...
+│   ├── types.ts            ← SettingsState, Contact, Tag...
+│   └── sync.ts             ← SyncMode
 └── styles/
 ```
 
@@ -31,22 +37,25 @@ src/
 ### createSettingsModule()
 
 ```typescript
-const { service, engine } = await createSettingsModule(vfs: IVFSManager);
+const { service, engine } = await createSettingsModule(vfs, workspaces);
+// vfs: IVFSManager
+// workspaces: readonly WorkspaceFileSource[]
 // service: SettingsService
-// engine: SettingsEngine (ISessionEngine)
+// engine: SettingsEngine (IFileSystem)
 ```
 
 ### SettingsEngine
 
-将 `SettingsService` 适配为 `ISessionEngine`，使设置页面可以通过 `VFSUIShell` 展示。
+把 `SETTINGS_PAGES` 的每个分类映射为一个只读虚拟文件节点（`IFileSystem` 实现，`viewId: 'settings_ui'`，`path` = 分类 slug），使设置页面可以通过 `VFSUIShell` 展示；写操作被拒绝（`createFile`/`rename`/`move`/`delete` 抛错，`writeContent` 仅告警）。
 
 ### SkillsEngine
 
-将 `IAgentManagementService.getSkills()` 返回的技能列表适配为 `ISessionEngine`，技能显示规则：
+把 `IAgentManagementService.getSkills()` 返回的技能列表映射为可写虚拟文件节点（`IFileSystem` 实现，`viewId: 'skills'`，`path` = `/{skillId}`），技能节点规则：
 - `node.name` = Skill 名称
-- `node.content` = `"{id}  {typeIcon}"` (summary)
-- `node.metadata.tags` = `['disabled']` (禁用时)
+- `node.tags` = `['disabled']` (禁用时)
 - `node.metadata.hasUnreadUpdate` = `enabled` (绿点)
+- `node.metadata.skillType` = Skill 类型
+- `readContent()` 返回 Skill id；`writeContent()` 接收 YAML 并 `saveSkill()`
 
 ### Settings 编辑器一览
 
@@ -56,21 +65,28 @@ const { service, engine } = await createSettingsModule(vfs: IVFSManager);
 | `LogSettingsEditor` | 日志级别配置、概览统计、日志查看器 |
 | `RecoverySettingsEditor` | 从备份/快照恢复数据 |
 | `TagSettingsEditor` | 全局标签颜色/名称管理 |
-| `SystemFSExploreEditor` | 原始 VFS 树浏览 (含隐藏文件/资产目录，调试用) |
+| `ContactSettingsEditor` | 联系人管理 |
+| `AppearanceSettingsEditor` | 主题切换 (写入 `/ui/theme.json`) |
+| `SystemFSExploreEditor` | 跨模块只读 VFS 浏览 (含 `/dev` 与 `/workspaces/<name>`，调试用) |
 | `AboutSettingsEditor` | 版本信息 |
+
+LLM 设置编辑器（Provider / Connection / MCP / Cost / SystemPrompt）来自 `@itookit/llm-settings-ui`，经 `LLMUIEditors` 接口注入。
 
 ### createSettingsFactory()
 
 ```typescript
 const factory = createSettingsFactory(
-    service: SettingsService,
-    agentService: IAgentConfigService,
-    llmDriver: IDeviceDriver,
+    settingsService: SettingsService,
+    agentService: IAgentManagementService,
+    connectionService: IConnectionService,
+    llmUiEditors: LLMUIEditors,
 ): EditorFactory;
 ```
 
 ## Conventions
 
-- Settings 数据持久化通过 `ConfigService`（底层写入 VFS `__config/` 目录）
-- `ISettingsWidget` 继承 `HTMLElement` — 每个编辑器是一个 Web Component
-- `StorageSettingsEditor` 的子 section 各实现独立的 `ISettingsWidget`：`StorageOverviewSection`, `MigrationSection`, `SnapshotSection`, `SyncSection`, `DangerZoneSection`
+- 设置数据持久化在 VFS `/etc` 视图（`SettingsService.init()` 中 `vfs.openFileSystem('/etc')`）：标签 `/tags.seq`、联系人 `/contacts.json`、同步配置 `/sync_config.json`
+- 编辑器继承 `BaseSettingsEditor`（`@itookit/ui-common`），实现 `IEditor`
+- `StorageSettingsEditor` 的子 section 各自独立：`StorageOverviewSection`, `MigrationSection`, `SnapshotSection`, `SyncSection`, `DangerZoneSection`
+- `AppearanceSettingsEditor` 写 `/ui/theme.json`，通过 `app:theme-change` 事件广播
+- `SystemFSExploreEditor` 经 `createSystemFileInspector()` 组装只读视图：`/dev` 挂载设备描述，`/workspaces/<name>` 挂载各工作区文件系统

@@ -1,5 +1,7 @@
 # 单进程通知与 Session 恢复
 
+> ⚠️ 历史归档：本文记录当时的方案与审查结论，**不随代码更新**，不作为当前实现依据。当前文档见 `../`。
+
 当前应用按一个执行实例使用 chat module。ChatKernelStorageResolver 已把各 session 的持久状态定位到 chat asset 目录中的 .kernel，catalog 也位于 chat module。工作文件所在目录不参与 session 身份判定。
 
 ## 通知与调度

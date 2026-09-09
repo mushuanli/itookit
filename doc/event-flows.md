@@ -8,21 +8,21 @@
 
 | 事件 | 触发 |
 |---|---|
-| `session.created` / `session.closed` | 会话创建/关闭 |
+| `session.created` | 会话创建 |
 | `task.created` / `task.started` / `task.leased` | 任务提交/启动/领取 |
 | `task.signal` / `task.spawned` | capabilities 等信号 / patch-graph 子任务 |
 | `task.failed` / `task.attempt.lost` | 任务失败 / worker 丢失重试 |
-| `effect.leased` / `effect.succeeded` / `effect.failed` / `effect.attempt.lost` | effect 领取/成功/失败/重试 |
+| `effect.leased` / `effect.resolved` / `effect.attempt.lost` | effect 领取/完成或失败/重试 |
 | `budget.configured` / `budget.consumed` | 预算设置/扣减 |
 | `session.shared.set` / `session.shared.deleted` | 会话内共享状态（task 间） |
 | `session.context.committed` | context commit（分支） |
-| `session.message.queued` / `session.message.delivered` / `session.message.received` | 跨会话同步（outbox/inbox 消息队列） |
+| `session.message.queued` / `session.message.received` / `session.message.rejected` | 跨会话同步（outbox/inbox 消息队列） |
 | `workspace.snapshot.created` / `workspace.diff.created` | 工作区快照/diff |
 | `task.interaction.requested` / `task.interaction.resolved` | HITL 交互请求/解决 |
 | `agent.event` | 业务层流式事件透传（见下） |
 
 ```
-Kernel store.appendEvent → 事件日志 → TaskHandle.events(after) 轮询
+Kernel store.appendEvent → 事件日志 → kernel.eventList(sessionId, after) / TaskHandle.events(after) 轮询
                                         → cli RunStore.appendEvent（events.jsonl）
                                         → llm-ui 流式渲染
 ```
@@ -81,8 +81,8 @@ ConversationRunCoordinator → RoundLog 投影 → SessionEventBus.emitSession()
 ```
 session A: sendCrossSession(source, target, topic, payload)
   → store.createOutboxMessage → 事件 session.message.queued
-  → relayMessage → 投递到 target 的 inbox → session.message.delivered
-  → target: session.inbox(after) 读取 → session.message.received
+  → relayMessage → 投递到 target 的 inbox → 事件 session.message.received（拒绝时 session.message.rejected）
+  → target: session.inbox(after) 读取
 ```
 
 用于会话间的消息传递（与 session 内 `setShared/getShared` 互补：前者跨会话、后者会话内 task 间）。
@@ -90,11 +90,12 @@ session A: sendCrossSession(source, target, topic, payload)
 ## 6. VFS 事件
 
 ```
-FSEventBus（vfs-core/impl/event/）：
-  node:created / node:updated / node:deleted（payload {nodeIds, moduleId}）
-  module:mounted / module:unmounted
-  → vfs-ui（VFSUIShell 刷新树）
-  → app-shell（skill 变更同步）
+FSEventBus（vfs-core/src/impl/event/event-bus.ts）：
+  node:created / node:updated / node:deleted / node:renamed / node:moved / node:copied
+    （payload 统一为数组：{nodes:[…]}；node:deleted 为 {requestedPaths, allDeletedPaths}）
+  mount:added / mount:removed（payload {mountPath, mountId, label?}）
+  → vfs-ui（EngineAdapter 订阅 driver 事件 → VFSUIShell 刷新树）
+  → app-settings SettingsService 防抖重载 → app-shell SkillsEngine（skill 变更同步）
 ```
 
 ## 7. 消费方一览

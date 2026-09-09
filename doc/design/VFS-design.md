@@ -1,6 +1,6 @@
 # VFS 虚拟文件系统设计
 
-2026-09-08 按当前源码同步。本文描述通用 VFS 实现；Session 数据组织、权限配置与平台装配以 [C4 规范](vfs-c4-review.md)、[挂载规范](vfs-session-mount-access.md) 为准。旧模块注册、inode 三层 Store、ChatFileHandle 和兼容迁移均已删除，不是当前接口或待实施方案。
+2026-09-09 按当前源码同步。本文描述通用 VFS 实现；Session 数据组织、权限配置与平台装配以 [C4 规范](vfs-c4-review.md)、[挂载规范](vfs-session-mount-access.md) 为准。旧模块注册、inode 三层 Store、ChatFileHandle 和兼容迁移均已删除，不是当前接口或待实施方案。
 
 ## 1. 分层与所有权
 
@@ -31,6 +31,8 @@ interface IFileSystem extends FSEventEmitter {
   readonly capabilities: FSCapabilities;
   readonly driver: IFSDriver;
   readonly meta: IFSMetaDriver;
+  /** 宿主外部目录打开的视图：不暴露也不持久化标签元数据 */
+  readonly external?: boolean;
   openFile(path: string): IFile;
   capabilitiesAt(path: string): Promise<FSCapabilities>;
 }
@@ -84,7 +86,7 @@ await view.dispose();
 await source.dispose();
 ```
 
-`FileSystemMount` 包含 mountId、at、fs、可选 root 和 ro/rw。来源必须已经由宿主授权；构造视图不负责选择或授权任意本地路径。
+`FileSystemMount` 包含 mountId、at、fs、可选 root 和 ro/rw。来源必须已经由宿主授权；构造视图不负责选择或授权任意本地路径。`createFileSystemView` 的选项除 viewId、可选 revision 与 mounts 外，还有可选 `tags`、`external`（宿主外部目录默认不暴露也不持久化标签元数据）和 `readablePaths`。
 
 `FileSystemView` 的实际规则：
 
@@ -106,9 +108,9 @@ await source.dispose();
 
 `createVFS()` 的顺序：创建引擎 → 注册插件 → 创建 manager 并初始化根 → 注册 null/zero/random 和自定义设备 → 挂额外 backend → 从 `/etc` 创建 ConfigService → 写入缺省初始配置。失败时清理 manager；返回 `{ manager, config }`。
 
-VFS 基础系统保留目录为 `/etc`、`/dev`。`/var/lib/kernel`、`/var/lib/sessions`、`/home/admin` 和易失 `/run` 由平台/应用启动装配，不能把完整 MindOS 布局归因于 VFS 工厂。
+VFS 基础系统保留目录为 `/etc`、`/dev`。`/var/lib/kernel`、`/var/lib/sessions`（含跨 Session 的 `folders.seq` 文件夹索引）、`/home/admin` 和易失 `/run` 由平台/应用启动装配，不能把完整 MindOS 布局归因于 VFS 工厂。
 
-Session 默认只暴露 `/attachments`，显式授权后增加 `/workspace` 等根下一层挂载。history、credentials、Kernel 记录不投影到用户文件上下文。Session 配置 CAS、draining/recovery-required 和任务执行期间禁止重配由 app-shell 的 SessionFilesService 管理，详见 C4 规范。
+Session 默认只暴露 `/attachments`，显式授权后增加 `/workspace` 等根下一层挂载。history、credentials、Kernel 记录不投影到用户文件上下文。Session 配置 CAS、draining 状态下重启后的拒绝访问和任务执行期间禁止重配由 `app-core` 的 SessionFilesService 管理（`packages/app-core/src/files/session-files.ts`，app-shell 仅 re-export），详见 C4 规范。
 
 ## 5. Path-based 存储后端
 
@@ -162,7 +164,7 @@ await seq.transaction(async tx => {
 
 [IFSMetaDriver](../../packages/vfs-core/src/interfaces/services/fs-meta-driver.ts) 聚合 assets/tags、可选 seq/refs/watcher。空附件/标签返回空值；能力不支持、越权、来源失效不能被包装成“没有数据”。
 
-普通文档伴生目录为 `_report.md/`，首次 putAsset 按需创建；rename/move 默认跟随，delete 按 assetDirStrategy 处理。内部状态通过 metadata 标记，不能把所有下划线目录都当作任意可访问的附件。`IFile` 支持 read/write、readRaw/writeRaw、put/get/list/delete/pruneAssets、内部文件及 rename/copy/move/delete。
+普通文档伴生目录为 `_report.md/`，首次 putAsset 按需创建；rename/move 默认跟随，delete 按 assetDirStrategy 处理。内部状态通过 metadata 标记，不能把所有下划线目录都当作任意可访问的附件。`IFile` 只有 read/write、readRaw/writeRaw、rename/copy/move/delete 以及 `asset()`/`listAssets()`/`hasAssetDir()`；putAsset/getAsset/getAssetDirPath/ensureAssetDir/listAssets/deleteAsset/removeAssetDir 属于 `IFSMetaDriver.assets`（`capabilities/asset-ops.ts`），不在文件句柄上。
 
 Session 上传使用该 Session 的 `attachments/`，Round/history 存在业务记录中。普通文档 IMDXFile 附件模型继续使用，但不再存在 ChatFileHandle 或 `.chat` 文件身份。
 
@@ -194,6 +196,6 @@ ConfigService 使用注入的 `/etc` 来源，有 records 时用 `.seq`，否则
 
 当前测试位于 `packages/vfs-core/tests`：01–12 覆盖 CRUD、目录、assets/tags/refs/seq、链接、事务、搜索、事件、挂载和配置；18–22 覆盖 pipe、回归、组合视图、复制、归档与生命周期。IndexedDB 和 LocalFS 测试位于各自包，平台 Session 装配测试在 app-shell。
 
-重点验收不止“能读写”：包括路径逃逸、只读写入、旧句柄撤销、来源关闭、records 坐标、事务回滚、搜索和事件信息泄漏、挂载覆盖及应用退出顺序。最新执行结果记录在 [核验清单](implementation-audit.md)，历史结果见 [实现状态](vfs-implementation-status.md)。
+重点验收不止“能读写”：包括路径逃逸、只读写入、旧句柄撤销、来源关闭、records 坐标、事务回滚、搜索和事件信息泄漏、挂载覆盖及应用退出顺序。最新执行结果记录在 [核验清单](../deprecated/implementation-audit.md)，历史结果见 [实现状态](vfs-implementation-status.md)。
 
 仍需独立验收或扩展的能力：完整原生进程隔离、真实 GUI/Tauri 全机编译、多宿主同时改挂载/历史、完整 Session/Kernel 系统备份及业务 GC。当前 watcher 类型保留，但 DirectoryFS 和组合视图未提供 OS 文件 watcher。普通文件跨操作原子事务也不能以现有透传实现宣称完成。

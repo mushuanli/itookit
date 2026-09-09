@@ -15,7 +15,7 @@
 - `query({ kind, scope?, sessionId?, taskId?, state?, limit?, cursor? })` 查询 resources/claims/requests/grants/cleanups，逐页重验授权，返回 items/nextCursor。这是 live keyset 查询，不是历史快照；存储扫描效率需另行核验。
 - managed schema 当前写入 2，兼容读取 1/2；包含 resource/access/handle/claim/request/cleanup 等记录。第 3–4 节的 account/use/allocation/export/import authority 表不是这些记录的同名别称，完整协议仍待实施。
 
-`resources.test.ts` 已有物理清理、未知回执、替换 worker、撤权后重授权、销毁、查询及旧 schema 测试；当前重跑结果见 [核验清单](implementation-audit.md)。不要用这些测试证明全部 1.1 目标或真实跨进程设备隔离已完成。
+`resources.test.ts` 已有物理清理、未知回执、替换 worker、撤权后重授权、销毁、查询及旧 schema 测试；当前重跑结果见 [核验清单](../deprecated/implementation-audit.md)。不要用这些测试证明全部 1.1 目标或真实跨进程设备隔离已完成。
 
 ## 1. 正确对齐 Linux，保留 Harness 的语义
 

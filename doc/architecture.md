@@ -1,6 +1,6 @@
 # 架构设计 — 系统全貌
 
-> 基于当前代码（2026-02 重构后）：执行内核 `durable-kernel`、LLM 任务单元 `llm-tasks`、DAG 编排 `llm-flow`、会话语义 `llm-session`。
+> 基于当前代码（2026-09-08 重构后）：执行内核 `durable-kernel`、LLM 任务单元 `llm-tasks`、DAG 编排 `llm-flow`、会话语义 `llm-session`。
 
 ## 1. 分层总览
 
@@ -24,7 +24,7 @@
 └────────────────────────────────────────────────────┘
 ```
 
-依赖铁律：**上层可依赖下层，下层永不知上层**。跨层通过接口注入（`app-shell/bootstrap.ts` 装配）。
+依赖铁律：**上层可依赖下层，下层永不知上层**。跨层通过接口注入：装配下沉在 `app-core/src/runtime/create-application-runtime.ts`（`createApplicationRuntime()`），`app-shell/src/bootstrap.ts` 只是调用方。
 
 ## 2. Kernel — 持久化执行内核
 
@@ -80,7 +80,7 @@ SessionHandle.submit(TaskSpec) → store.createTask（依赖未满足则 blocked
 ## 3. LLM 子系统（llm-tasks → llm-flow → llm-session）
 
 ```
-llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel
+llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ──▶ vfs-core
 （会话/持久化） （DAG 编排） （LLM 任务单元）  （执行内核）
 ```
 
@@ -106,7 +106,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel
 | on_failure | `fail/skip/continue` 下游行为 |
 | Budget | 节点级 `budget.tokens` → `setBudget` + effect 扣减 |
 
-内置插件：`transform`/`reduce`/`route`/`spawn`/`agent`/`human`；Flow 程序：`FlowValueProgram`（transform/reduce/route/spawn）、`FlowHumanProgram`、`FlowAggregateProgram`（汇聚为 `{nodes}` 输出）。
+内置插件（7 个）：`builtin.transform`/`builtin.reduce`/`builtin.route`/`builtin.spawn`/`builtin.flow`（复合 Flow，执行前展开）/`builtin.human`/`builtin.agent`；Flow 程序：`FlowValueProgram`（transform/reduce/route/spawn）、`FlowHumanProgram`、`FlowAggregateProgram`（汇聚为 `{nodes}` 输出）。
 
 > **llm-flow 不替代 llm-tasks，而是编排它。** agent 节点（`builtin-plugins.ts agentTask()`）不重新实现 LLM 逻辑，而是生成 `llm.agent` 的 spec（`buildLlmTaskInput`）交给 llm-tasks 的 `DurableAgentProgram` 跑。llm-flow 自己的程序只有图原语（`flow.value/human/aggregate`）。llm-tasks 之所以独立存在：它同时被 **llm-session 的 Direct Chat**（不走 DAG，直接用 `llm.chat`/`llm.agent`）和 **llm-flow 的 agent 节点**共享——若并进 llm-flow，纯对话也要拖入 route/loop/spawn 等图语义。
 
@@ -116,7 +116,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel
 
 - **Round**：只表达对话历史（`historyParentIds`），Run 通过 `executions` 附着。
 - **Branch / merge / context fold**：会话分支语义。
-- **持久化**：`ChatEngine`（IChatEngine 门面，VFS 资产）、`RoundLog`（round 增量日志 + 投影）、`RoundGraphService`。
+- **持久化**：`SessionRepository`（会话资产门面，VFS 存储）、`FlowEngine`（`FlowStore` 实现，Flow 定义/修订）、`RoundLog`（round 增量日志 + 投影）、`RoundGraphService`。
 - **调度**：`SessionManager`/`ConversationRunCoordinator`（Direct Chat 走 llm.chat，Flow 走 `DurableFlowExecutor`）。
 - **控制面**：`CommandBus` + `ExtensionRegistry` + 插件（session/vcs/history）；`initializeConversationSystem` 装配入口。
 
@@ -142,8 +142,8 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel
 
 ## 5. VFS 子系统（@itookit/vfs-core）
 
-- **协议层**：`IModuleFS`/`IFSDriver`/`IVFSManager`/`IStorageBackend`/`FSNode`/`IDeviceDriver`。
-- **引擎层**：`VFSEngine`/`ModuleFS`/`VFSManager`/`createVFS`（唯一初始化入口）。
+- **协议层**：`IFileSystem`/`IFileSystemDriver`/`IFSDriver`/`IVFSManager`/`IStorageBackend`/`FSNode`/`IDeviceDriver`（`vfs-core/src/protocol.ts`）。
+- **引擎层**：`VFSEngine`/`VFSManager`/`FileSystemView`/`createVFS`（唯一初始化入口）。
 - **存储后端**：`vfsdriver-indexeddb`（浏览器）、`vfsdriver-localfs`（SQLite+本地 FS）。
 - **通用 IO**：`IIOStream` + `pipe`（文件↔LLM↔TTY 流互拷）。
 - **事件总线**：通用 `EventBus`（LLM/UI 共用）+ VFS `FSEventBus`。
@@ -153,7 +153,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel
 - **`llm-ui`**：Chat UI（流式历史、Session 渲染、DagWorkbench 可视化）。
 - **`vfs-ui`**：文件树 UI；**`mdxeditor`**：CodeMirror MDX 编辑器；**`ui-common`**：共享 UI 契约。
 - **`app-core`**：无 UI 应用核心 — MindOS profile、RunDefinition、共享 Session 文件/目录服务，以及 `createApplicationRuntime()`（VFS/LLM/Kernel/Session/Flow 统一装配）；Web/Tauri/CLI 共用。详见 [Runtime 架构](runtime-architecture.md)。
-- **`app-shell`**：Web/Tauri UI shell — `initApp()` 调用 app-core，再装配 `initializeConversationSystem`、路由、Workbench/编辑器。
+- **`app-shell`**：Web/Tauri UI shell — `initApp()` 调用 app-core `createApplicationRuntime()`（其中已完成 `initializeConversationSystem` 装配），再装配设置模块、路由、Workbench/编辑器。
 
 ## 7. 入口
 

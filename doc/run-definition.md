@@ -21,7 +21,7 @@ mindos.yml ──┐
 - `RunDefinition → DagRunSpec` 已通过 `toDagRunSpec()` 实现，CLI `run` 已走该路径；
 - CLI `run -f xxx.flow` 已支持 inline `.flow` 节点和 desktop profile LLM 配置；
 - `RunCatalog` 只读投影已提供；
-- `.flow` 的 `agentId` / `systemPromptId` / `skillIds` 引用解析与 Tauri Runs 视图仍待接线。
+- `.flow` 的 `agentId` / `systemPromptId` / `skillIds` 引用解析已由 `packages/llm-session/src/session/flow-node-binder.ts`（`bindFlowNode` / `bindStandaloneFlowNode`）实现，并被 `packages/llm-session/src/session/session-run-coordinator.ts` 与 `DagCommandService` 使用；CLI `.flow` 入口（`apps/cli/src/commands.ts` 调用 `createRunDefinitionFromFlow()` 时未传 `bind`）与 Tauri Runs 视图仍待接线。
 
 ## 字段
 
@@ -32,7 +32,13 @@ interface RunDefinition {
   revision: number;
   digest: string;
   source: 'yaml' | 'flow';
-  graph: { nodes: DagNodeDefinition[]; edges: DagEdgeDefinition[] };
+  graph: {
+    nodes: DagNodeDefinition[];
+    edges: DagEdgeDefinition[];
+    nodeDefaults?: Record<string, Record<string, JsonValue>>;
+    nodeConnections?: Record<string, Record<string, JsonValue>>;
+    maxNodes?: number;
+  };
   parameters?: FlowParameter[];
   environment: {
     providers?: RunProviderConfig[];
@@ -59,7 +65,7 @@ interface RunDefinition {
 |---|---|
 | `--profile <name>` | 选择数据根，不属于 RunDefinition |
 | `--set-home <dir>` | `policy.workspaceRoot`，并生成 `/workspace` Session mount |
-| `--add-dir <dir>[:ro\|rw]` | `policy.additionalDirectories` |
+| `--add-dir <dir>[:ro\|rw]` | 尚未映射：CLI 只把目录作为宿主挂载交给 `CliRuntimeOptions.addDir` → `DirectoryMountService`，从不写入 `policy.additionalDirectories` |
 | `-f mindos.yml` | `source: 'yaml'`，编译 YAML 后填充 graph/environment |
 | `.flow` 输入 | `source: 'flow'`，从 `FlowRevision` 编译 |
 

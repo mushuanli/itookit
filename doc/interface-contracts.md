@@ -7,10 +7,10 @@
 | 接口 | 核心方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
 | `IStorageBackend` | `stat/list/read/write/mkdir/delete/rename` | `vfs-core/interfaces/storage/` | `vfsdriver-indexeddb`、`vfsdriver-localfs` | `vfs-core (VFSEngine)` |
-| `IVFSManager` | `getEngine()/mountModule()/on()` | `vfs-core/interfaces/services/` | `vfs-core (VFSManager)` | `app-shell`、`llm-ui`、`llm-session` |
-| `IModuleFS` | `openFile()/driver/meta/capabilities` | `vfs-core/interfaces/services/` | `vfs-core (ModuleFS)` | `vfs-ui`、`mdxeditor`、`llm-ui` |
-| `IFSDriver` | `read/write/create/delete/getChildren/stat/search` | `vfs-core/interfaces/services/` | `ModuleFS.driver` | 编辑器、`llm-session` |
-| `IFSMetaDriver` | `putAsset/getAsset/setTags/watch` | `vfs-core/interfaces/services/` | `ModuleFS.meta` | `llm-session`、`mdxeditor` |
+| `IVFSManager` | `openFileSystem()/mounts/devices/plugins` | `vfs-core/interfaces/services/vfs-manager.ts` | `vfs-core (VFSManager)` | `app-core`、`app-shell`、`device-llm` |
+| `IFileSystem` | `openFile()/driver/meta/capabilities/capabilitiesAt()` | `vfs-core/interfaces/services/file-system.ts` | `vfs-core (FileSystemView)` | `vfs-ui`、`llm-ui`、`llm-session`、`app-core` |
+| `IFSDriver` | `getNode/getChildren/readContent/writeContent/createFile/createDirectory/rename/move/delete/search` | `vfs-core/interfaces/services/fs-driver.ts` | `FileSystemView.driver` | `vfs-ui`、`mdxeditor`、`llm-session` |
+| `IFSMetaDriver` | `assets/tags/seq/refs/watcher` | `vfs-core/interfaces/services/fs-meta-driver.ts` | `FileSystemView.meta` | `llm-session`、`mdxeditor` |
 | `IFile` | `read()/write()`（extends `IIOStream`） | `vfs-core/interfaces/IFile.ts` | `FileHandle`、`MDXFileHandle` | `mdxeditor`、`llm-session` |
 | `IIOStream` | `read()/write()/readStream?/close?` | `vfs-core/interfaces/` | 文件/设备句柄 | 文件↔LLM↔TTY 互拷 |
 | `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `kernel-adapters`、`device-llm` |
@@ -21,14 +21,14 @@
 |---|---|---|---|---|
 | `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `llm-common/llm/llm-service.ts` | `kernel-adapters LLMServiceAdapter` | `llm-tasks`（经 effect）、`llm-session` |
 | `ChatMessage` | `role/content/attachments?` | `llm-common/llm/` | device-llm | 全部 LLM 层 |
-| `ChatCompletionParams/Response/Chunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | device-llm providers | `llm-tasks`、`kernel-adapters` |
+| `ChatCompletionParams/ChatCompletionResponse/ChatCompletionChunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | device-llm providers | `llm-tasks`、`kernel-adapters` |
 | `Citation` | `text/source/title/url`（联网搜索引用） | `llm-common/llm/completion.ts` | device-llm providers | `kernel-adapters`、`llm-ui` |
 | `TokenUsage` | `prompt_tokens/completion_tokens/total_tokens` | `llm-common/llm/completion.ts` | device-llm | `llm-tasks`、预算扣减 |
-| `LLMConnection/ConnectionMeta` | `id/provider/tier/model/protocol` | `llm-common/llm/connection.ts` | `device-llm` | `llm-session AgentResolver` |
+| `LLMConnection/ConnectionMeta` | `id/name/providerId/tiers/model/protocol` | `llm-common/llm/connection.ts` | `device-llm` | `llm-session AgentResolver` |
 | `WebSearchMode` | `'builtin'\|'client-tool'\|'disabled'` | `llm-common/llm/connection.ts` | `resolveWebSearchStrategy`（纯函数） | `llm-session` |
-| `LLMProvider.capabilities.serverSideWebSearch` | 服务端内置联网搜索能力（唯一事实源） | `llm-common/llm/connection.ts` | `constants/providers.ts` | `resolveWebSearchStrategy` |
+| `LLMProvider.capabilities.serverSideWebSearch` | 服务端内置联网搜索能力（唯一事实源） | `llm-common/llm/connection.ts` | `device-llm/src/constants/providers.ts` | `resolveWebSearchStrategy` |
 | `ToolCall` / `ToolDefinition` | `id/name/arguments` | `llm-common/llm/` | device-llm / `tools` | `llm-tasks` |
-| `DagNode/DagEdge/DagRunSpec/DagNodeOutcome` | `id/plugin/config/outputs/effects` | `llm-common/agent/dag-plugin.ts` | `llm-flow` | `llm-session`、`cli` |
+| `DagNodeDefinition/DagEdgeDefinition/DagRunSpec/DagNodeOutcome` | `id/plugin/config/outputs/effects` | `llm-common/agent/dag-plugin.ts` | `llm-flow` | `llm-session`、`cli` |
 | `FlowDraft/FlowRevision/FlowNodeDefinition` | `nodes/edges/layout` | `llm-common/agent/flow-definition.ts` | `llm-flow FlowDefinitionStore` | `llm-ui`、`llm-session` |
 | `SerializableExpression` | `kind: eq/neq/in/and/or/not/…` | `llm-common/agent/` | `llm-flow operations` | `cli` 编译路由条件 |
 
@@ -41,14 +41,14 @@
 | `Decision<S,O>` | `state + actions + next`（`complete/fail/wait/continue`） | 程序推进的返回结构 |
 | `KernelAction` | `effect/spawn/request-interaction/set-shared/delete-shared/emit` | 程序声明的副作用 |
 | `WaitSpec` | `signal/effect/task/interaction/all/any/quorum/child` | 等待条件 |
-| `TaskHandle<I,O>` | `wait()/poll()/signal()/start()/respond()/createResource()/cancel()/events()` | 任务句柄 |
-| `SessionHandle` | `submit()/signal()/respondInteraction()/createResource()/setBudget()/chargeBudget()/commitContext()/events()` | 会话句柄 |
+| `TaskHandle<O>` | `wait()/poll()/signal()/start()/respond()/createResource()/cancel()/events()` | 任务句柄 |
+| `SessionHandle` | `submit()/signal()/respond()/createResource()/setBudget()/chargeBudget()/commitContext()/events()` | 会话句柄 |
 | `TaskSpec<I>` | `program/input/dependsOn/retry/deferStart` | 提交任务的规格 |
 | `TaskInputEvent` | `signal/task-exited/effect-completed/effect-failed/interaction-resolved` | 程序收到的输入事件 |
 | `EffectExecutionContext` | `grants/abortSignal/emit()/chargeBudget()/sessionState` | effect 执行上下文 |
 | `CapabilityBinding` / `bindCapabilities` | `kind/uri/rights/signalKey` | 能力绑定（createResource+signal+start） |
 | `assertEffectGrant` / `interactionApproved` | — | effect 授权断言 / 审批判定 |
-| `TaskHandle.bindCapabilities` | — | 上层能力绑定统一入口 |
+| `bindCapabilities(task, bindings)` | — | 上层能力绑定统一入口（独立函数，非 `TaskHandle` 方法） |
 
 ## LLM 任务单元（@itookit/llm-tasks）
 
@@ -71,7 +71,7 @@
 | `DagPlugin` / `DagPluginRegistry` / `DagPluginCatalog` | 插件契约与注册表 |
 | `DurableFlowExecutor` | 动态图调度（route/loop/spawn/compensate/on_failure/budget） |
 | `FlowValueProgram` / `FlowHumanProgram` / `FlowAggregateProgram` | flow 内置 durable programs（`flow.value/human/aggregate`） |
-| `FlowDefinitionStore` / `FlowAssetStore` | Flow 定义持久化（依赖最小 asset 存储面） |
+| `FlowDefinitionStore` / `FlowStore` | Flow 定义持久化（依赖最小 asset 存储面） |
 | `DagCommandService` | DAG 控制面命令（run/snapshot/…） |
 | `findCycles` | 环检测（回边 + 环上节点） |
 
@@ -79,7 +79,7 @@
 
 | 接口/类型 | 说明 |
 |---|---|
-| `IChatEngine` | 会话持久化门面（VFS 资产/消息/会话清单），由 ChatEngine 实现 |
+| `ISessionRepository` | 会话持久化门面（VFS 资产/消息/会话清单），由 SessionRepository 实现 |
 | `ConversationManifest` / `ConversationUIState` / `BranchTreeNode` | 会话清单/UI 状态/分支树 |
 | `RoundManifest` / `RoundProjection` / `BranchMeta` | Round 持久化投影 |
 | `SessionManager` / `SessionRegistry` / `SessionState` | 会话生命周期与状态 |
@@ -94,17 +94,18 @@
 | `LlmChatEffectAdapter` | `llm.chat` | LLM 对话（流式/非流式 + token 预算扣减） |
 | `ToolCallEffectAdapter` | `tool.call` | 工具调用 |
 | `SkillLoadEffectAdapter` | `skill.load` | Skill 加载 |
-| `BashEffectAdapter` | `bash` | Shell 命令 |
-| `TtyEffectAdapter` | `tty` | TTY 会话 |
+| `SkillUnloadEffectAdapter` | `skill.unload` | Skill 卸载 |
+| `BashEffectAdapter` | `process.exec` | Shell 命令 |
+| `TtyEffectAdapter` | `tty.command` | TTY 会话 |
 
 ## UI 体系（Ports/Adapters）
 
 | Port 接口 | 关键方法 | 实现 |
 |---|---|---|
-| `IChatInputPresenter` | `setLoading()/setConfig()/getConfig()/focus()` | `ChatInput` |
-| `IHistoryPresenter` | `renderFull()/processEvent()/updateNodeId()` | `HistoryView` |
-| `IEditor` | `setText()/setTitle()/updateNodeId?()` | `MDxEditor`、`LLMWorkspaceEditor` 等 |
-| `IStreamingController` | `appendChunk()/finish()` | `StreamController` |
-| `ICollapseManager` | `fold()/unfold()/foldAll()` | `CollapseController` |
-| `INavigationPresenter` | `navigateTo()/highlightNode()` | `NavigationHelper` |
-| `IStatusPresenter` | `showStatus()/clearStatus()` | `StatusIndicatorView` |
+| `IChatInputPresenter` | `setLoading()/setConfig()/getConfig()/restoreInput()/focus()` | `ChatInput` |
+| `IHistoryPresenter` | `renderFull()/processEvent()/scrollToBottom()/getSessionElement()` | `HistoryView` |
+| `IEditor`（抽象类） | `init()/destroy()/getText()/setText()/setTitle()/updateNodeId?()` | `MDxEditor`、`FlowsEditor`、`LLMWorkspaceEditor` |
+| `IStreamingController` | `enterStreamingMode()/exitStreamingMode()` | `HistoryView`（经 `StreamController`） |
+| `ICollapseManager` | `toggleSessionCollapse()/setAllCollapsed()/toggleAllFold()` | `HistoryView`（经 `CollapseController`） |
+| `INavigationPresenter` | `toggle()/update()` | `FloatingNavPanel` |
+| `IStatusPresenter` | `update()/updateFromSnapshot()/updateBackground()` | `StatusIndicatorView` |

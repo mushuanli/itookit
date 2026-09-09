@@ -1,10 +1,10 @@
 # VFS 与 Session：最终结构、C4 和接口审查
 
-日期：2026-09-08。本文件是当前重构规范；旧设计文档仅保留历史背景。实现证据见 [验证状态](vfs-implementation-status.md)。
+日期：2026-09-09。本文件是当前重构规范；旧设计文档仅保留历史背景。实现证据见 [验证状态](vfs-implementation-status.md)。
 
 ## 1. 结论和数据组织
 
-采用单用户 `admin`。`[mindos]` 表示应用打开的文件系统根，不是内层目录名。Session 是业务实体，history 和 attachments 都属于 Session；SessionFS 是运行时组合视图，不是第二份数据。通用映射器属于 `vfs-core`，Session 仓库属于 `llm-session`，持久挂载配置及来源组装属于 `app-shell`。
+采用单用户 `admin`。`[mindos]` 表示应用打开的文件系统根，不是内层目录名。Session 是业务实体，history 和 attachments 都属于 Session；SessionFS 是运行时组合视图，不是第二份数据。通用映射器属于 `vfs-core`，Session 仓库属于 `llm-session`，持久挂载配置及来源组装属于 `app-core`（`packages/app-core/src/files/session-files.ts`、`packages/app-core/src/files/directory-mounts.ts`）；`app-shell` 只做装配与兼容 re-export。
 
 ```text
 [mindos]/
@@ -13,11 +13,13 @@
     kernel/                       全局 catalog、跨 Session IPC、资源账本
       local-sources/             宿主授权来源登记
         session-directories.json  Session 目录来源与默认目录偏好
-    sessions/<sessionId>/
-      session.seq                 session 元信息、settings、files 挂载配置
-      history.seq                 history DAG 索引、Round、context profile 记录
-      attachments/                二进制和用户上传内容
-      kernel/                     该 Session 的 task/journal/mailbox/执行记录
+    sessions/
+      folders.seq                 Session 文件夹索引（跨 Session）
+      <sessionId>/
+        session.seq               session 元信息、settings、files 挂载配置
+        history.seq               history DAG 索引、Round、context profile 记录
+        attachments/              二进制和用户上传内容
+        kernel/                   该 Session 的 task/journal/mailbox/执行记录
   run/                            内存来源，端点及可重建状态
   dev/                            宿主设备入口
   home/admin/
@@ -27,7 +29,7 @@
     .config/<app>/                用户级应用配置
 ```
 
-`session.seq/history.seq` 是逻辑记录文件。IndexedDB 使用记录表，LocalFS 使用对应 sidecar SQLite；不能把空的物理 `.seq` 文件单独复制当成完整备份。LocalFS 的 `_meta/_db/meta` 是后端索引侧车，不是 Session 可见目录。
+`session.seq/history.seq` 是逻辑记录文件，`/var/lib/sessions/folders.seq` 同样承载文件夹记录（`packages/llm-session/src/persistence/session-repository.ts`）。IndexedDB 使用记录表，LocalFS 使用对应 sidecar SQLite；不能把空的物理 `.seq` 文件单独复制当成完整备份。LocalFS 的 `_meta/_db/meta` 是后端索引侧车，不是 Session 可见目录。
 
 没有 `conversation/`、`/etc/mindos`、`/var/lib/mindos` 或预留的 `/var/lib/files`。可靠恢复所需的任务和 IPC 数据留在 `/var/lib`；移入 `/run` 会丢失重启恢复能力。
 
@@ -39,7 +41,7 @@ Session 用户文件视图默认只有：
 
 显式挂载默认目录后增加 `/workspace`，其他目录使用所选挂载名称；没有自动 `/home/admin` 授权，也没有系统或 history 文件投影。历史经 Repository/Kernel 业务接口访问。应用宿主可使用通用映射器组合其他来源，但 Session 的用户挂载限根下一层并禁止保留名称。其他 Session 的文件须先取得受限上下文再由宿主注册并授权；知道 sessionId 不构成授权。
 
-[挂载实现规范](vfs-session-mount-access.md) 声明 UI、slash、配置和平台接口。来源支持 IndexedDB、子目录、其他受限视图及 Tauri 授权宿主目录；通用能力属于 vfs-core，Session 策略仍由 app-shell 管理。
+[挂载实现规范](vfs-session-mount-access.md) 声明 UI、slash、配置和平台接口。来源支持 IndexedDB、子目录、其他受限视图及 Tauri 授权宿主目录；通用能力属于 vfs-core，Session 策略由 `app-core/files` 管理（`app-shell` 仅装配与 re-export）。
 
 ## 2. C4：系统上下文
 
@@ -65,7 +67,7 @@ C4Component
     Component(ui, "文件应用", "vfs-ui / mdx", "只持有 FileSystemContext")
     Component(chatui, "会话应用", "llm-ui", "只按 sessionId 打开会话和资产")
     Component(conversations, "SessionRepository", "llm-session", "Session manifest、Round、设置与附件")
-    Component(bindings, "SessionFilesService", "集成层", "持久挂载配置、revision 和视图生命周期")
+    Component(bindings, "SessionFilesService", "app-core", "持久挂载配置、revision 和视图生命周期")
     Component(views, "FileSystemView", "vfs-core", "组合来源、路径解析、只读约束、合成目录")
     Component(sources, "来源适配器", "vfs-core / vfsdriver", "打开已有 backend，提供目录文件能力")
     Component(kernel, "Kernel", "durable-kernel", "任务、恢复、IPC、资源账本")
@@ -154,14 +156,14 @@ stateDiagram-v2
   Active --> Draining: configure/disable + expectedRevision CAS
   Draining --> Active: 排空旧视图后发布新 revision
   Draining --> Disabled: 排空旧视图后提交禁用
-  Draining --> RecoveryRequired: 发布前进程退出
-  RecoveryRequired --> Draining: 宿主明确重新 configure
   Disabled --> Draining: 明确重新配置
 ```
 
+记录状态只有 `'active' | 'draining' | 'disabled'`（`FilesRecord.state`）。崩溃在 draining 阶段时记录保持 `draining`，重启后访问报 `EBUSY`，只有宿主显式 `configure` 才恢复。
+
 ## 8. 实际接口与调用方式
 
-以下对应已实现接口，不再列出未实现的伪类型。完整定义见 [文件接口](../../packages/vfs-core/src/interfaces/services/file-system.ts)、[视图](../../packages/vfs-core/src/impl/services/FileSystemView.ts)、[Session 仓库](../../packages/llm-session/src/persistence/types.ts)、[挂载服务](../../packages/app-shell/src/files/session-files.ts)、[编辑器](../../packages/ui-common/src/interfaces/IEditor.ts)。
+以下对应已实现接口，不再列出未实现的伪类型。完整定义见 [文件接口](../../packages/vfs-core/src/interfaces/services/file-system.ts)、[视图](../../packages/vfs-core/src/impl/services/FileSystemView.ts)、[Session 仓库](../../packages/llm-session/src/persistence/types.ts)、[挂载服务](../../packages/app-core/src/files/session-files.ts)、[编辑器](../../packages/ui-common/src/interfaces/IEditor.ts)。
 
 ```ts
 interface FileSystemContext {
@@ -223,7 +225,7 @@ await commands.execute(SessionCommand.Bind, { sessionId });
 // CreateFromFlow 返回 { sessionId }，导航直接使用该 ID。
 ```
 
-`SessionManifest` 的现有业务类型名仍是 `ConversationManifest`，包含 history DAG 投影；存储时拆成 session 元信息和 history 索引。拆存不是拆所有权。元信息和 history 索引更新使用记录事务；UI patch 在事务内合并。Round 图的写入顺序沿用先记录后索引，以及单宿主写入串行化，不宣称跨进程 history 编辑具备全图原子性。
+Session manifest 的现有业务类型名仍是 `ConversationManifest`，包含 history DAG 投影；存储时拆成 session 元信息和 history 索引。拆存不是拆所有权。元信息和 history 索引更新使用记录事务；UI patch 在事务内合并。Round 图的写入顺序沿用先记录后索引，以及单宿主写入串行化，不宣称跨进程 history 编辑具备全图原子性。
 
 `FileSystemView` 对应用只以 `IFileSystem` 暴露；宿主持有生命周期方法。`release` 只关闭本次上下文，不关闭共享来源；视图 `dispose` 排空在途 IO 并撤销旧句柄，不删除存储。工具和编辑器均持有固定 revision，重配后旧上下文失效，重新 acquire 才能继续。宿主阻止未结束 Task 期间变更挂载。
 
@@ -232,7 +234,8 @@ await commands.execute(SessionCommand.Bind, { sessionId });
 | 包/调用链 | 当前入口及改动 |
 | --- | --- |
 | vfs-core | 删除 IModuleFS、ModuleFS、模块注册、getEngine、BaseModuleService 和 manager 便捷 IO；DirectoryFS 为内部来源适配；公共身份为 viewId；FileSystemStats 取代 FSModuleStats，删除模块生命周期事件及 ENOMODULE；文件句柄只保留 path |
-| app-shell | SessionWorkbench 从 repository 列会话，按 sessionId 打开；文件 Workbench 注入 FileSystemContext，WorkspaceConfig.workspaceName 取代 moduleName；SessionFilesService 将 files 配置存入该 Session 的 session.seq |
+| app-core | `files/session-files.ts` 持有 SessionFilesService，将 files 配置存入该 Session 的 session.seq；`files/directory-mounts.ts` 持有 DirectoryMountService 与宿主来源登记；`files/session-browser.ts` 提供可写浏览投影与删除链路；`files/session-process-context.ts` 把显式挂载交给平台进程工厂 |
+| app-shell | SessionWorkbench 从 repository 列会话，按 sessionId 打开；文件 Workbench 注入 FileSystemContext，WorkspaceConfig.workspaceName 取代 moduleName；`files/*` 仅保留兼容 re-export |
 | ui-common | 删除 EditorOptions.nodeId/ownerNodeId；目标通过 EditorTarget 表达；saveContent 为可选宿主能力，Session 不走普通文件保存 |
 | llm-ui | 工厂只接受 Session target，未知 ID 报错；上传、历史渲染、资产管理和打印注入 Session 附件；搜索使用当前 Session 文件上下文 |
 | llm-session | SessionRepository 取代 ChatEngine；绑定、运行状态和 TaskInput 删除重复文件 nodeId；删除 chatFileParser 和隐式文件初始化；Round/Profile 写 history 记录 |
@@ -254,7 +257,7 @@ await commands.execute(SessionCommand.Bind, { sessionId });
 - 跨 Session 共享的是能力对象。撤销源视图后，派生视图旧句柄也失败；普通窗口关闭不取消后台 Task。
 - 关闭应用先释放编辑器、Session scope、Kernel 等消费者，再关闭独立来源与根 backend。异步创建失败和迟到编辑器均释放附件及上下文。
 - 备份是显式选择的工作区归档，保留二进制、记录和附属元数据；不是全系统 Session/Kernel 快照。跨来源 restore 不是原子操作，失败必须报告。
-- SessionFS 不是 OS sandbox。Tauri 受限 Session 不再注入无约束 shell/原生 skill handler/Codex app-server；未来进程执行需等价授权的 runner。单宿主拥有挂载变更权，不宣称跨进程多写协调。
-- 本轮不提供自动 Session 数据 GC 或直接目录删除接口。关闭、禁用挂载都保留历史。未来删除必须协调后台任务与共享引用，不能把文件树删除直接接到 Session 数据根。
+- SessionFS 不是 OS sandbox。Tauri 受限 Session 不再注入无约束 shell、原生 skill handler 或 Codex app-server；进程执行走等价授权的 Bubblewrap runner（`apps/tauri-app/src-tauri/src/session_bash.rs`、`apps/tauri-app/src/shell/session-bash.ts`），除固定提供的运行库/系统资源外只绑定显式挂载，cwd 必须在授权挂载内，且不隔离网络。单宿主拥有挂载变更权，不宣称跨进程多写协调。
+- 删除只经业务生命周期：`SessionLifecycleService` 关闭 Kernel Session 并确认 `closed` 后才移除 Kernel 存储与仓库记录，失败保留全部数据；本轮不提供自动 Session 数据 GC。关闭、禁用挂载都保留历史，未来回收必须协调后台任务与共享引用，不能把文件树删除直接接到 Session 数据根。
 
 此设计只保留文件视图、Session 仓库和宿主组装三层。新增 backend 实现来源接口；新增应用拿文件上下文；新增 Session map 使用现有挂载记录。无需独立 namespace/binding/grant/export 四套可变主记录，也无需预留无当前用途的 /var/lib/files。

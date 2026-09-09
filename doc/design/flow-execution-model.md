@@ -363,20 +363,24 @@ sequenceDiagram
 <article class="dag-node">
   <strong>name</strong>
   <small class="dag-node__kind">Agent</small>
-  <!-- 新增策略徽标行 -->
+  <!-- builtin.agent 节点的策略徽标行 -->
   <div class="dag-node__badges">
-    <span class="dag-badge dag-badge--subtask" title="Delegation">↳ 委派</span>   <!-- delegation.enabled 时 -->
-    <span class="dag-badge dag-badge--history-inherit" title="继承历史">H:inherit</span>
-    <span class="dag-badge dag-badge--persist" title="输出入历史">P</span>       <!-- persistOutput=true -->
+    <span class="dag-badge dag-badge--agent" title="引用 Agent">research-agent</span>   <!-- config.agentId 非空时 -->
+    <span class="dag-badge dag-badge--history dag-badge--history-inherit" title="History policy">H:inherit</span>
+    <span class="dag-badge" title="System Prompt policy">SP:replace</span>           <!-- systemPromptPolicy 为 replace/none 时 -->
+    <span class="dag-badge dag-badge--persist" title="Persist output">P</span>       <!-- persistOutput=true -->
+    <span class="dag-badge dag-badge--subtask" title="Subtask fan-out">子任务</span>   <!-- delegation.enabled 或旧 subtasks 时 -->
   </div>
   <small class="dag-node__ports">In … · Out …</small>
 </article>
 ```
 
-徽标规则：
-- **delegation**：节点 `delegation.enabled=true` 时显示「委派」徽标；运行时实例在执行树中显示父实例与序号，不以节点 id 字符串推断层级。
-- **history 继承状态**：`H:inherit` / `H:none` / `H:upstream` 三态徽标，颜色区分（inherit 灰 / none 橙 / upstream 蓝）。
-- **persistOutput**：`P` 徽标，标识该节点输出会进入会话历史。
+徽标规则（仅 `builtin.agent` 节点渲染，实现见 `llm-ui/src/components/dag/DagCanvas.ts` 的 `nodeBadges`）：
+- **agent 引用**：`config.agentId` 非空时显示该 id（title="引用 Agent"）。
+- **history 继承状态**：`H:inherit` / `H:none` / `H:upstream` 三态徽标，颜色区分（inherit 灰 / none 橙 / upstream 蓝）；未配置或非法值按 inherit 显示。
+- **System Prompt 策略**：`SP:replace` / `SP:none` 徽标，仅在非 inherit 时出现。
+- **persistOutput**：`P` 徽标（title="Persist output"），标识该节点输出会进入会话历史。
+- **delegation**：节点 `delegation.enabled=true`（或旧 `subtasks`）时显示「子任务」徽标（title="Subtask fan-out"）；运行时实例在执行树中显示父实例与序号，不以节点 id 字符串推断层级。
 
 ### 7.2 Flow 默认设置
 
@@ -458,11 +462,11 @@ interface DelegationConfig {
     enabled: boolean;
     toolName?: string;                     // default: delegate_tasks
     toolDescription?: string;
-    template: {
+    template?: Partial<LlmNodeConfig> & {
         agentId?: string;
         systemPromptId?: string;
-        instruction?: string;
-        contextSource: DelegationContextSource;
+        instruction?: string;              // prompt? 为 deprecated 兼容字段
+        contextSource?: DelegationContextSource;
         includeParentSystemPrompt?: boolean;
         includeToolResults?: boolean;
         connectionId?: string;
@@ -472,9 +476,12 @@ interface DelegationConfig {
         approval?: 'none' | 'external' | 'all';
         workingDirectory?: string;
     };
-    fanout: { maxTasks: number; maxConcurrency: number; maxDepth: number; order: 'parallel' | 'sequential' };
-    join: { mode: 'all' | 'none' };
-    failure: { policy: 'fail-fast' | 'continue' | 'retry'; maxAttempts?: number; backoffMs?: number };
+    fanout?: { maxTasks?: number; maxConcurrency?: number; maxDepth?: number; order?: 'parallel' | 'sequential' };
+    join?: { mode?: 'all' | 'none' };
+    execution?: { mode?: 'structured' | 'detached' };
+    wait?: { mode?: 'all' | 'any' | 'first-success' | 'quorum'; quorum?: number; timeoutMs?: number };
+    result?: { mode?: 'collect' | 'discard'; order?: 'declared' | 'completion' };
+    failure?: { policy?: 'fail-fast' | 'continue' | 'retry'; maxAttempts?: number; backoffMs?: number };
     budget?: { maxTokens?: number; timeoutMs?: number }; // 每次 LLM request 的限制
 }
 ```
@@ -531,7 +538,7 @@ Codex 支持并行 subagent、等待汇总、检查子线程、向运行中子�
 | Memory/Context | ConversationSystemOptions → createSessionManager → SessionManager 已传递 retrieveMemory 注入点，检索接收当前 Session 与复制的 memoryPolicy；Agent 每次模型请求前按配置裁剪历史并保护系统指令、当前用户请求和完整工具组 | 已装配 Session 内持久 memory provider；跨 Session 共享、模型记忆工具、语义摘要及长期运行恢复仍待完成 |
 | 扩展点 | Harness hooks 已有 host trust/hash/timeout/output boundary，Flow 发出生命周期事件 | 完整事件接线与信任管理 UI 仍需核验 |
 
-源码依据：`llm-flow/src/flow/executor.ts`、`delegation-runtime.ts`、`builtin-plugins.ts`，`llm-ui/src/components/DagWorkbench.ts`，`llm-session/src/session/session-manager.ts`，`llm-tasks/src/durable/agent-program.ts`。本次重跑 llm-flow 全套 62 项测试；这些测试不替代上述尚待验收的 UI、恢复与平台能力。
+源码依据：`llm-flow/src/flow/executor.ts`、`delegation-runtime.ts`、`builtin-plugins.ts`，`llm-ui/src/components/DagWorkbench.ts`，`llm-session/src/session/session-manager.ts`，`llm-tasks/src/durable/agent-program.ts`。`cd packages/llm-flow && npx vitest run` 实测全套 132 项通过（计数随代码演进，以实际测试输出为准）；这些测试不替代上述尚待验收的 UI、恢复与平台能力。
 
 #### 7.8.3 Spawn 依赖边界
 
@@ -621,12 +628,13 @@ Flow 级运行策略补充：
 
 ```ts
 interface FlowRunPolicy {
-    maxNodes: number;
-    maxConcurrency: number;
+    maxNodes?: number;
+    maxConcurrency?: number;
     timeoutMs?: number;
-    maxTokens?: number;
+    maxTokens?: number;                    // 已完成 LLM 节点的累计 token 上限
     workspace?: {
         mode: 'shared' | 'read-only' | 'worktree';
+        base?: 'current' | 'head' | string;
         merge?: 'manual' | 'auto-if-clean' | 'discard';
         cleanup?: 'on-success' | 'always' | 'keep';
     };
@@ -662,7 +670,7 @@ Harness hooks 采用小而稳定的事件集合：
 
 ```text
 run.started / run.completed
-task.started / task.completed
+task.started / task.completed / task.failed
 agent.spawned / agent.stopped
 tool.before / tool.after
 approval.requested
@@ -676,9 +684,9 @@ Goal 属于 Run 控制面，不属于单个 Agent node：
 ```ts
 interface FlowRunGoal {
     objective: string;
-    constraints: string[];
-    acceptanceCriteria: string[];
-    status: 'active' | 'paused' | 'completed' | 'blocked';
+    constraints?: string[];
+    acceptanceCriteria?: string[];
+    status?: 'active' | 'paused' | 'completed' | 'blocked';
 }
 ```
 

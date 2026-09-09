@@ -17,7 +17,7 @@
 - invalidate 增加 generation；renew 增加 generation 并仅延长当前代仍存活、未消费的 entry，不能复活过期或已消费值。TTL 必须为正有限值且绝对期限不超过安全整数上界；generation 耗尽时拒绝变更。
 - Task 的 `cache-create/cache-invalidate/cache-renew` action 有 operationId 持久回执；宿主 `CacheApi.create/invalidate/renew` 本身没有 operationId 参数。list 返回当前获授权列表，尚无分页。
 
-跨 Session owner、provider cache、artifact 大值、完整 retention/GC 与容量账本仍待实施。当前 namespace 的 `ownerTaskId` 记录创建者，Session scope 授权不要求该 Task 本体仍存在。基础回归见 [protocol.test.ts](../../packages/durable-kernel/src/protocol.test.ts)；独立进程竞争与提交前/后 SIGKILL 回执原子性见 [LocalFS IPC 测试](../../packages/vfsdriver-localfs/tests/20-kernel-ipc.test.ts)，覆盖根后端和非根挂载、失效后的原回执重放；本轮 durable-kernel 全套 113 项通过，不能替代上述扩展的验收。
+跨 Session owner、provider cache、artifact 大值、完整 retention/GC 与容量账本仍待实施。当前 namespace 的 `ownerTaskId` 记录创建者，Session scope 授权不要求该 Task 本体仍存在。基础回归见 [protocol.test.ts](../../packages/durable-kernel/src/protocol.test.ts)；独立进程竞争与提交前/后 SIGKILL 回执原子性见 [LocalFS IPC 测试](../../packages/vfsdriver-localfs/tests/20-kernel-ipc.test.ts)，覆盖根后端和非根挂载、失效后的原回执重放；本轮 `npx vitest run` 实测 durable-kernel 全套 180 项通过（其中 protocol.test.ts 104 项）、20-kernel-ipc 28 项通过，不能替代上述扩展的验收。测试计数随代码演进，以实际测试输出为准。
 
 ## 1. 设计裁决
 

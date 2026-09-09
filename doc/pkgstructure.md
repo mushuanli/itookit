@@ -6,7 +6,7 @@ pnpm monorepo. Packages under `packages/`, apps under `apps/`（`apps/web-app` =
 ### LLM 子系统分层（单向依赖）
 
 ```
-llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ──▶ common
+llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ──▶ vfs-core
 （会话/持久化） （DAG 编排） （LLM 任务单元）  （执行内核）
 ```
 
@@ -14,12 +14,12 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 
 | Package | Role |
 |---|---|
-| `@itookit/common` | 共享接口、类型、i18n、工具。零运行时依赖，跨包契约之源。 |
-| `@itookit/llm-common` | LLM 领域共享接口/类型：DagNode/DagEdge/DagRunSpec、FlowDraft/FlowRevision、SerializableExpression、TokenUsage、Tool 定义等纯契约。 |
+| `@itookit/common` | 共享接口、类型、i18n、工具。跨包契约之源，运行时依赖仅 `@itookit/llm-common`（re-export LLM 契约）。 |
+| `@itookit/llm-common` | LLM 领域共享接口/类型：DagNodeDefinition/DagEdgeDefinition/DagRunSpec、FlowDraft/FlowRevision、SerializableExpression、TokenUsage、Tool 定义等纯契约。零依赖。 |
 | `@itookit/durable-kernel` | 持久化执行内核：`DurableTaskProgram`（init/reduce 状态机）、`EffectAdapter`、Task/Resource/Budget/Interaction 调度与恢复。 |
-| `@itookit/llm-tasks` | 平台无关的 LLM Durable Program 层：`llm.agent`/`llm.chat`/`llm.plan` 状态机、依赖收集（DependencyCollector）、`extractNodeOutput`、`buildLlmTaskInput`、ContextAssembler。 |
+| `@itookit/llm-tasks` | 平台无关的 LLM Durable Program 层：`llm.agent`/`llm.chat`/`llm.plan` 状态机、依赖收集（`collectDependency`/`dependenciesReady`/`dependencyWait`）、`extractNodeOutput`、`buildLlmTaskInput`、ContextAssembler。 |
 | `@itookit/llm-flow` | DAG 编排：`DurableFlowExecutor`（route/loop/spawn/compensate/on_failure/budget）、内置插件、Flow programs、环检测（`findCycles`）、FlowDefinitionStore。 |
-| `@itookit/llm-session` | 用户可见的会话语义 + 持久化：SessionManager、Round/Branch、ChatEngine、RoundLog、SessionEventBus、UI projections。依赖 llm-flow。 |
+| `@itookit/llm-session` | 用户可见的会话语义 + 持久化：SessionManager、Round/Branch、SessionRepository（会话资产）、FlowEngine（Flow 定义存储）、RoundLog、SessionEventBus、UI projections。依赖 llm-flow。 |
 | `@itookit/kernel-adapters` | Kernel 能力适配器：bash/llm-chat/tool-call/tty/skill-load 等 EffectAdapter、Exec/ApprovedEffect 程序、运行时装配。 |
 | `@itookit/device-llm` | LLM 设备驱动：OpenAI/Anthropic/Gemini 通信、SSE 流式、MCP、Skill/Connection 存储。 |
 | `@itookit/device-tty` | TTY 设备驱动：node-pty 交互 shell 会话。 |
@@ -28,12 +28,13 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | `@itookit/vfsdriver-indexeddb` | IndexedDB 存储后端（浏览器）。 |
 | `@itookit/vfsdriver-localfs` | SQLite + 本地 FS 后端（Node/Electron）。 |
 | `@itookit/llm-ui` | Chat UI：聊天界面、流式历史视图、会话编排可视化。 |
+| `@itookit/llm-settings-ui` | LLM 设置 UI：Agent/Provider/Connection/MCP/Skill/Cost/SystemPrompt 编辑器 + 配置导入导出（`llm-import`）。 |
 | `@itookit/vfs-ui` | 文件树 UI：目录导航、标签、内容大纲。 |
 | `@itookit/mdxeditor` | 基于 CodeMirror 6 的 MDX 编辑器（目录 `packages/mdx`）。 |
 | `@itookit/ui-common` | 共享 UI 组件、契约、浏览器工具。 |
 | `@itookit/app-settings` | 设置模块：SettingsEngine、SkillsEngine。 |
-| `@itookit/app-core` | 无 UI 应用核心：MindOS profile、RunDefinition、共享 Session 文件/目录服务、Kernel/Adapter/Flow 组合（`createKernelRuntime`）。Web/Tauri/CLI 共用。 |
-| `@itookit/app-shell` | Web/Tauri UI shell：`initApp()`、workspace 策略、路由、Workbench/编辑器装配；依赖 app-core。 |
+| `@itookit/app-core` | 无 UI 应用核心：MindOS profile、RunDefinition、共享 Session 文件/目录服务，以及统一装配 `createApplicationRuntime`（VFS/LLM/Session/Flow）与 headless `createKernelRuntime`（durable-kernel + kernel-adapters + Flow programs）。Web/Tauri/CLI 共用。 |
+| `@itookit/app-shell` | Web/Tauri UI shell：`initApp()`（调用 app-core `createApplicationRuntime`）、workspace 策略、路由、Workbench/编辑器装配；依赖 app-core。 |
 | `@itookit/demo` | 演示/示例。 |
 
 ### App 清单

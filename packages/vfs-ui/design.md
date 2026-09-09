@@ -1,12 +1,10 @@
 
 
-```markdown
 # VFS-UI Architecture Design Document
 
-> **Version**: 2.0  
-> **Last Updated**: 2025-01  
 > **Status**: Active  
-> **Scope**: This document governs all development within the `vfs-ui/` package.
+> **Scope**: This document governs all development within the `vfs-ui/` package.  
+> Directory layout and commands are authoritative in [AGENTS.md](./AGENTS.md); component/API details in [doc/components.md](./doc/components.md).
 
 ---
 
@@ -18,14 +16,6 @@
 4. [Directory Structure](#4-directory-structure)
 5. [Data Flow](#5-data-flow)
 6. [Command System](#6-command-system)
-7. [Event System](#7-event-system)
-8. [State Management](#8-state-management)
-9. [Component Development Guide](#9-component-development-guide)
-10. [Adding New Features](#10-adding-new-features)
-11. [Interface Modification Rules](#11-interface-modification-rules)
-12. [Testing Strategy](#12-testing-strategy)
-13. [Anti-Patterns & Constraints](#13-anti-patterns--constraints)
-14. [Decision Log](#14-decision-log)
 
 ---
 
@@ -80,7 +70,7 @@ command/event schemas live here.
 **Rules**:
 - ❌ MUST NOT import from any other `vfs-ui/` directory
 - ❌ MUST NOT import from `@itookit/common` except shared primitive types
-  (`Heading`, `TaskCounts`, `EditorFactory`)
+  (`Heading`, `TaskCounts`) and `EditorFactory` from `@itookit/ui-common`
 - ✅ MAY be imported by ALL other layers
 - ✅ Changes here are **breaking** — require review of all consumers
 
@@ -91,7 +81,7 @@ command/event schemas live here.
 | `types.ts` | `VFSNodeUI`, `VFSUIState`, `UISettings`, `TagInfo`, `MenuItem`, etc. |
 | `commands.ts` | `CommandMap` — all typed internal commands |
 | `events.ts` | `PublicEventMap` — all typed outbound events |
-| `ports.ts` | `IStatePort`, `ICommandPort`, `IEventPort`, `IDataOperationPort`, `IFileTypePort` |
+| `ports.ts` | `IStatePort`, `ICommandPort`, `IEventPort`, `IDataOperationPort`, `IFileTypePort`, `IDataSyncPort` |
 
 ### Layer 2: Services (`services/`)
 
@@ -110,8 +100,9 @@ command/event schemas live here.
 | `VFSStore.ts` | `IStatePort` | Immutable state container (Immer-based) |
 | `VFSService.ts` | `IDataOperationPort` | Engine mutation wrapper |
 | `FileTypeRegistry.ts` | `IFileTypePort` | File type → icon/editor/parser resolution |
+| `IFileTypeRegistry.ts` | — | File-type registry contract types |
 | `NodeMapper.ts` | (pure functions) | `EngineNode` → `VFSNodeUI` transformation |
-| `EngineAdapter.ts` | — | Engine events → Store dispatches (bridge) |
+| `EngineAdapter.ts` | — | Engine events → Store dispatches (bridge: `loadData()` / `connectEngineEvents()`) |
 | `StatePersistence.ts` | — | localStorage save/restore of UI state |
 
 ### Layer 3: Interaction (`interaction/`)
@@ -131,12 +122,13 @@ command/event schemas live here.
 |------|-----------------|
 | `CommandBus.ts` | Implements `ICommandPort` |
 | `EventBus.ts` | Implements `IEventPort` |
-| `handlers/FileCommandHandler.ts` | `file:create`, `file:delete`, `file:rename`, `file:move`, `file:updateTags` |
+| `handlers/FileCommandHandler.ts` | `file:create`, `file:duplicate`, `file:delete`, `file:rename`, `file:move`, `file:updateTags` |
 | `handlers/NavigationCommandHandler.ts` | `nav:selectSession`, `nav:toggleFolder`, `nav:navigateToHeading` |
 | `handlers/UICommandHandler.ts` | `ui:toggleSidebar`, `ui:updateSettings`, `ui:startCreating`, `ui:cancelCreating`, `ui:updateSearch`, `ui:toggleOutline`, `ui:toggleOutlineH1` |
 | `handlers/SelectionCommandHandler.ts` | `selection:update`, `selection:clear`, `selection:selectAll` |
 | `handlers/BulkCommandHandler.ts` | `bulk:delete`, `bulk:move`, `move:start`, `move:end` |
 | `handlers/ImportCommandHandler.ts` | `file:import` |
+| `handlers/ExportCommandHandler.ts` | `file:export` |
 | `handlers/CustomMenuCommandHandler.ts` | `custom:menuAction` → forwards to `EventBus` |
 
 ### Layer 4: Presentation (`ui/`) + Shell (`shell/`)
@@ -172,6 +164,7 @@ ui                  ✅       ✅      ❌         ❌         —    ❌
 shell               ✅       ✅      ✅         ✅        ✅     —
 mention             ✅†      ✅      ❌         ❌        ❌    ❌
 integrations        ✅       ✅      ❌         ❌        ❌    ❌
+editors             ❌       ❌      ❌         ❌        ❌    ❌
 
 * interaction → services: ONLY via port interfaces (constructor injection)
 † mention → contracts: ONLY types.ts (not commands/events/ports)
@@ -185,7 +178,8 @@ Before merging any PR, verify:
 2. `ui/` files have NO `import` from `services/` or `interaction/`
 3. `interaction/` files have NO `import` from `ui/` or `shell/`
 4. Only `shell/Assembler.ts` uses `new` for service/handler classes
-5. `VFSUIShell.ts` field types are all `I*Port` interfaces (except `VFSService`)
+5. `VFSUIShell.ts` field types are all `I*Port` interfaces (except `VFSService`, `EngineAdapter`, `StatePersistence`)
+6. `editors/MediaViewerEditor.ts` imports only `@itookit/vfs-core` / `@itookit/common` / `@itookit/ui-common`
 
 ---
 
@@ -202,7 +196,8 @@ vfs-ui/
 ├── services/                           # Layer 2: Data
 │   ├── VFSStore.ts                     # IStatePort implementation
 │   ├── VFSService.ts                   # IDataOperationPort implementation
-│   ├── FileTypeRegistry.ts            # IFileTypePort implementation
+│   ├── FileTypeRegistry.ts             # IFileTypePort implementation
+│   ├── IFileTypeRegistry.ts            # File-type registry contract
 │   ├── NodeMapper.ts                   # Pure mapping functions
 │   ├── EngineAdapter.ts                # Engine ↔ Store bridge
 │   └── StatePersistence.ts             # UI state persistence
@@ -210,6 +205,8 @@ vfs-ui/
 ├── interaction/                        # Layer 3: Commands
 │   ├── CommandBus.ts                   # ICommandPort implementation
 │   ├── EventBus.ts                     # IEventPort implementation
+│   ├── Coordinator.ts                  # Legacy channel pub/sub (unused by runtime paths)
+│   ├── index.ts
 │   └── handlers/
 │       ├── FileCommandHandler.ts
 │       ├── NavigationCommandHandler.ts
@@ -217,6 +214,7 @@ vfs-ui/
 │       ├── SelectionCommandHandler.ts
 │       ├── BulkCommandHandler.ts
 │       ├── ImportCommandHandler.ts
+│       ├── ExportCommandHandler.ts
 │       └── CustomMenuCommandHandler.ts
 │
 ├── ui/                                 # Layer 4a: Presentation
@@ -255,20 +253,30 @@ vfs-ui/
 │   └── index.ts                        # Package entry point
 │
 ├── integrations/
-│   └── editor-connector.ts            # Editor lifecycle bridge
+│   └── editor-connector.ts             # Editor lifecycle bridge
 │
 ├── mention/                            # Independent module
 │   ├── BaseMentionSource.ts
 │   ├── FileMentionSource.ts
 │   ├── DirectoryMentionSource.ts
-│   └── EngineTagSource.ts
+│   ├── EngineTagSource.ts
+│   ├── autocomplete-source.ts
+│   └── createVFSMentionProviders.ts
+│
+├── editors/                            # Standalone editors
+│   └── MediaViewerEditor.ts            # Image/video/audio/PDF preview (read-only IEditor)
 │
 ├── utils/                              # Pure utilities (zero internal deps)
 │   ├── helpers.ts
-│   └── parser.ts
+│   ├── parser.ts
+│   ├── delete-guard.ts
+│   ├── delete-error.ts
+│   └── adapter-debug.ts
 │
 ├── styles/
-│   └── index.css
+│   ├── index.css
+│   ├── main.css
+│   └── TagEditorComponent.css
 │
 └── index.ts                            # Re-exports from shell/index.ts
 ```
@@ -296,10 +304,10 @@ Command Handler (e.g., FileCommandHandler)
     ├──→ VFSService.createFile()          [async engine mutation]
     │         │
     │         ▼
-    │    ISessionEngine                    [external, fires events]
+    │    IFileSystem (@itookit/vfs-core)   [external, fires events]
     │         │
     │         ▼
-    │    EngineAdapter.handleEvent()       [engine event listener]
+    │    EngineAdapter.connectEngineEvents() [engine event listener]
     │         │
     │         ▼
     └──→ Store.dispatch({ type, payload }) [state mutation]
@@ -329,7 +337,7 @@ VFSUIShell.connectStoreToPublicEvents()
 EventBus.emit('sessionSelected', { item })
     │
     ▼
-External Consumer (via vfsManager.on('sessionSelected', callback))
+External Consumer (via shell.on('sessionSelected', callback))
 ```
 
 ### Key Invariant
@@ -351,7 +359,7 @@ export interface CommandMap {
   // ... existing commands ...
 
   // NEW: Add your command here
-  'file:duplicate': { itemId: string; newTitle?: string };
+  'file:moveToRoot': { itemIds: string[] };
 }
 ```
 
@@ -363,14 +371,8 @@ private register(): void {
   this.unsubs.push(
     // ... existing handlers ...
 
-    this.commandBus.on('file:duplicate', async ({ itemId, newTitle }) => {
-      const node = await this.service.findItemById(itemId);
-      if (!node) return;
-      await this.service.createFile({
-        title: newTitle || `${node.name} (copy)`,
-        parentId: node.parentId,
-        content: await this.engine.readContent(itemId),
-      });
+    this.commandBus.on('file:moveToRoot', async ({ itemIds }) => {
+      await this.service.moveItems({ itemIds, targetId: null });
     }),
   );
 }

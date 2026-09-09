@@ -47,9 +47,10 @@ Resource 统一的是 create/open/share/stat/close 与授权入口。`mailbox.se
 
 ## 4. 简明状态、控制与统计
 
-建议公共 `TaskStat` 以五个执行阶段展示，作为现有状态的兼容投影，首步不改旧 enum：
+当前实现见 [domain/status.ts](../../packages/durable-kernel/src/domain/status.ts)：`taskStat()` 返回 `id/revision/phase/control/blockedBy/exit/activeOperations`，其中 `phase` 是按状态与阻塞原因推导出的字面量值，不是具名 `TaskPhase` 类型；`taskStats()` 返回 `observedRevision/completedSteps/attempts/pendingInputs/operations/createdAt/updatedAt`。下面五个执行阶段与 `progress` 是兼容投影的目标形态（提案），当前尚无具名 `TaskPhase` 类型和 `progress` 字段：
 
 ```ts
+// 目标形态（提案）
 type TaskPhase = 'created' | 'ready' | 'running' | 'waiting' | 'done';
 type TaskStat = {
   phase: TaskPhase;
@@ -64,7 +65,7 @@ created/ready/running 保留对应阶段；blocked/waiting/paused/finalizing 映
 
 Session 视图使用 open/paused/closing/closed，附 control acknowledged 和 blockers；suspending 显示 paused 请求未确认，archived 显示 closed 与归档属性。这是 UI/API 视图，内部状态转移不被静默重写。
 
-统计使用 `stats()`：完成步数、失败尝试、pending 消息、在途调用、运行时间等为可重建/可延迟投影，附 observedRevision。预算已消费量、预留量、占用许可是权威账务，不能用近似统计做准入判断。业务 state、运行状态、控制意图、统计分别展示，不使用一个含糊的 status 承担全部含义。
+统计使用 `stats()`：完成步数、失败尝试、pending 输入、Effect 记录数和 `createdAt/updatedAt` 时间戳为可重建/可延迟投影，附 observedRevision；当前没有运行时长投影。在途外部操作由 `stat().activeOperations` 给出，`stats().operations` 是 Effect 记录总数。预算已消费量、预留量、占用许可是权威账务，不能用近似统计做准入判断。业务 state、运行状态、控制意图、统计分别展示，不使用一个含糊的 status 承担全部含义。
 
 ## 5. 简明资源表：本 Session 与 Session 间
 
@@ -76,17 +77,20 @@ Session 视图使用 open/paused/closing/closed，附 control acknowledged 和 b
 | Task 使用表 | 使用方 Session 的 `resources.seq` | 仍在使用方 Session，指向 kernel root 的本体 |
 | 容量占用/消费 | 本体所在 authority 的记录 | kernel root 的唯一记录；使用方不维护第二份余额 |
 
-表的最小内容：
+表的最小内容（当前键布局，见 [managed-resources.ts](../../packages/durable-kernel/src/infrastructure/seqfile/managed-resources.ts)）：
 
 ```text
-resource/<id>                 kind, owner, incarnation, state, version, policy, dataRef
-handle/<id>                   resourceRef, holder(session/task), rights, bindingName, state
-claim/<id>                    resourceRef, holder, quantity, state, token, expiresAt  # 池类型
-request/<id>                  caller, fingerprint, pending/result, deadline, receipt
-usage/<id>                    logicalOperationId, amount, settlement               # 计费类型
+managed/schema                         表格式版本（当前 '2'）
+managed/sequence                       单调递增序号，用于 pending 请求排序
+managed/resource/<encodeURIComponent(id)>   ref, kind, name, owner/scope, state, version, capacity, value, physical
+managed/handle/<id>                    ref, sessionId, taskId, rights, name, closed, grantEpochs
+managed/claim/<id>                     ref, handleId, quantity, token, state, epoch, cleanupId  # 池类型
+managed/request/<encodeURIComponent([subject, id])>  actor/fingerprint/command, pending/result, sequence, error
+managed/access/<encodeURIComponent([id,sessionId])>  grant rights/epochs/revision/state
+managed/cleanup/<id>                   物理回收操作 epoch/status/attempts/receipt
 ```
 
-这些是 facade 的最小逻辑视图和候选实现分组，不要求将现有 handle/allocation/receipt keys 改名。池才需要 claim；只读 artifact 不需要先分配一个 GPU 式许可；无预算资源不必创建空账户树。有多个额度维度时在 owner 事务内共同校验。
+容量占用由未释放 `claim.quantity` 记账；代码尚无 `usage/<id>` 一类的计费/消费账本，消费结算仍是目标设计。这些是 facade 的最小逻辑视图和候选实现分组，不要求将现有 handle/claim/request/cleanup 键改名。池才需要 claim；只读 artifact 不需要先分配一个 GPU 式许可；无预算资源不必创建空账户树。有多个额度维度时在 owner 事务内共同校验。
 
 Session A 授权 B 后，A/B 的多个 Task 可以显式 open 同一资源；Task 不自动继承其他 Task 的全部 handles。申请与占用、释放与等待唤醒可以跨这些逻辑 SeqFiles 在同一后端事务提交。跨 Session 不等于跨数据库，不必为这个部署强制搭建网络 owner 服务。
 
@@ -110,6 +114,8 @@ Session A 授权 B 后，A/B 的多个 Task 可以显式 open 同一资源；Tas
 | `resources.stat(ref)` / `resources.list({holder})` | 查询权限、占用、版本和等待；鉴权后返回 |
 
 `create/share/open/acquire/release/close` 的统一返回值为 durable Request：包含 id/status，提供 `poll()`、`wait()`、`cancel()`。`wait()` 只是当前客户端等回执；调用方断线后，内核继续处理请求。相同 requestId 重连查询或重试，不创建第二次分配；`wait()` 的本地超时不自动取消远端申请。
+
+当前 [task-handle.ts](../../packages/durable-kernel/src/public/task-handle.ts) 已实现 `stat()/stats()/watch()`、`pause/interrupt/resume(TaskControlOptions)`（含 requestId/expectedEpoch/reason）和 `retry({requestId})`；`cancel(reason?)` 不接 requestId，是即时取消而非持久请求。资源侧已实现 `ResourceApi` 的 create/share/revoke/destroy/open/acquire/release/close/read/write/stat/list/query，命名以 [resource-api.ts](../../packages/durable-kernel/src/domain/resource-api.ts) 为准；本节其余 `{requestId}` 控制面与 `scope.resources.*` 分组仍是提案。
 
 ```ts
 // 宿主辅助：result(command) 等待命令登记，再等待其持久结果。
@@ -158,7 +164,7 @@ function step(state, event) {
 
 ## 8. SeqFile 与普通文件各做什么
 
-当前 [SeqFile 接口](../../packages/vfs-core/src/interfaces/capabilities/seq-file.ts) 提供 get/set/CAS/increment/append 和同后端跨 SeqFile 事务，它本质上是带有序键的记录空间，不是普通 JSONL 日志。Kernel 要求真实 transactionalSeqFiles；整体文件覆盖式 fallback 不满足多进程恢复要求。
+当前 [SeqFile 接口](../../packages/vfs-core/src/interfaces/capabilities/seq-file.ts) 的 `ISeqFileOperations` 提供 getEntry/getEntries/setEntry/setEntries/deleteEntry/hasEntry/walkEntries 和可选的 `transaction`；CAS/increment/append 只在事务内的 `ISeqFileTransaction` 上，事务可跨同一后端的多个 SeqFile。它本质上是带有序键的记录空间，不是普通 JSONL 日志。Kernel 要求真实 transactionalSeqFiles；整体文件覆盖式 fallback 不满足多进程恢复要求。
 
 | 存储 | 放什么 | 不放什么 |
 |---|---|---|

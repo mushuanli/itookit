@@ -1,5 +1,7 @@
 # Durable Harness 实施记录与使用方式
 
+> ⚠️ 历史归档：本文记录当时的方案与审查结论，**不随代码更新**，不作为当前实现依据。当前文档见 `../`。
+
 日期：2026-09-05。对应 [主协议](../design/durable-harness-protocol.md) 和 [Cache 协议](../design/durable-harness-cache.md)。本记录描述当前代码行为；设计文档中的未来扩展不能作为已有 API 使用。
 
 当前 Session/Task 文件组织、通信与等待的记录位置、cache receipt 和可重建索引边界见 [持久存储与文件组织](../design/durable-harness-storage.md)。

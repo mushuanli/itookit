@@ -1,6 +1,6 @@
 # Session 挂载与访问边界
 
-状态：已实现，2026-09-08。本文替代“完整 SessionFS 加隐藏目录”和“打开时自动挂载 admin-home”的旧行为。平台能力及验证限制见第 5、7 节。
+状态：已实现，2026-09-09。本文替代“完整 SessionFS 加隐藏目录”和“打开时自动挂载 admin-home”的旧行为。平台能力及验证限制见第 5、7 节。
 
 ## 1. 核心契约
 
@@ -9,7 +9,7 @@ Session 可访问的用户文件 = 自有 attachments + 用户明确授予的挂
 - 来源注册只意味着宿主能够连接该来源，不授予任何 Session 访问权。
 - 未挂载目录不能通过列目录、绝对路径、搜索、编辑器、附件引用或后台 Task 访问。
 - vfs-ui、文件编辑器、文件工具使用同一份受限文件上下文；侧栏不是授权过滤器。
-- /etc、/var、/dev、/run、history、session.json 不进入用户文件上下文。Session 历史与 Task 信息继续由 repository/Kernel 业务接口提供。可信运行时需要的系统投影不通过用户文件工具公开。
+- 挂载点不能占用 `attachments`、`etc`、`var`、`dev`、`run`、`history`、`session` 等保留名称；这些路径不进入用户文件上下文。Session 历史与 Task 信息继续由 repository/Kernel 业务接口提供。可信运行时需要的系统投影不通过用户文件工具公开。
 - 挂载对整个 Session 生效，包含各 history branch；branch 是对话状态，不能隐式更改授权。
 
 附件沿用唯一的 `/attachments` 命名，不添加 `/attachment` 别名。
@@ -43,11 +43,11 @@ files 是 Browser 前缀。Agent 和编辑器使用 `/workspace/src/a.ts`，不�
 
 默认 cwd 为 `/`；根只能列目录，不能凭空创建未授权的顶层路径。挂载时可勾选“设为工作目录”，之后 cwd 必须落在有效挂载内；移除当前工作目录时回到 `/`，不会自动改用另一来源。
 
-Session 持久布局保持 `/var/lib/sessions/<id>/{session.seq,history.seq,attachments/,...}`。用户挂载是映射，不复制到 Session 目录，卸载不删除来源。上传附件则是复制进当前 Session，不能因此获得对原附件所在目录的访问权。
+Session 持久布局保持 `/var/lib/sessions/<id>/{session.seq,history.seq,attachments/,...}`，跨 Session 的文件夹索引在 `/var/lib/sessions/folders.seq`。用户挂载是映射，不复制到 Session 目录，卸载不删除来源。上传附件则是复制进当前 Session，不能因此获得对原附件所在目录的访问权。
 
 ## 3. UI
 
-files 行提供一个“＋”动作，点击 files 主视图顶部也提供“挂载目录”和“管理挂载”。两处复用 app-shell 的同一挂载控制器，不写两套业务逻辑。vfs-ui 仅提供通用条目动作扩展点。
+files 行提供一个“＋”动作，点击 files 主视图顶部也提供“挂载目录”和“管理挂载”。两处复用同一个挂载弹窗（`packages/app-shell/src/files/mount-dialog.ts`）与宿主控制器 `DirectoryMountService`（`packages/app-core/src/files/directory-mounts.ts`），不写两套业务逻辑。vfs-ui 仅提供通用条目动作扩展点。
 
 新 Session 的 files 主视图显示 attachments 和说明：“尚未挂载工作目录，此会话仅能访问附件。”
 
@@ -93,12 +93,17 @@ interface FilesRecord {
 }
 
 interface SessionFilesService {
+  initialize(): Promise<void>;             // 要求 transactional SeqFiles
+  registerSource(sourceId: string, source: IFileSystem): void;
   inspect(sessionId: string): Promise<FilesRecord | null>;
   configure(sessionId: string,
-    next: { mounts: SessionMountRecord[]; cwd: string },
+    config: { mounts: SessionMountRecord[]; cwd: string },
     expectedRevision: number): Promise<FilesRecord>;
+  disable(sessionId: string, expectedRevision: number): Promise<FilesRecord>;
+  acquire(sessionId: string): Promise<{ vfs: ToolVFSContext; cwd: string; release(): Promise<void> }>;
   acquireFiles(sessionId: string, cwd?: string): Promise<FileSystemContextOwner>;
   subscribe(listener: () => void): () => void;
+  dispose(): Promise<void>;
 }
 ```
 
@@ -121,6 +126,11 @@ addDirectory(sessionId: string, directory: string,
 remove(sessionId: string, mountId: string): Promise<void>;
 update(sessionId: string, mountId: string, access: 'ro' | 'rw', asCwd: boolean): Promise<void>;
 reconnect(sessionId: string, mountId: string): Promise<void>;
+listDirectories(path?: string): Promise<string[]>;
+describe(mount: SessionMountRecord): string;
+get canSelectHost(): boolean;
+chooseDirectory(): Promise<string | null>;
+processMounts(sessionId: string): Promise<SessionProcessMount[]>;
 // EditorHostContext 注入，仅供用户 slash 命令。
 directoryCommands?: {
   addDirectory(directory?: string, access?: 'ro' | 'rw'): Promise<string>;
@@ -150,9 +160,10 @@ directoryAction?: {
 | 层 | 改动 |
 | --- | --- |
 | app-shell SessionWorkbench | 删除自动 admin-home → /workspace；加入挂载动作与管理 UI |
-| app-shell SessionFilesService | 附件加显式挂载组成唯一用户文件上下文；cwd、只读、revision 与撤销统一校验 |
-| app-shell session-attachments | 删除 system-mounts 旧入口；只组装当前 Session 附件 |
-| app-shell SessionBrowser | files 直接代理受限上下文，删除目录黑名单，不再代理完整系统视图 |
+| app-core SessionFilesService | 附件加显式挂载组成唯一用户文件上下文；cwd、只读、revision 与撤销统一校验（`packages/app-core/src/files/session-files.ts`） |
+| app-core DirectoryMountService | 宿主来源登记、默认目录与挂载增删改（`packages/app-core/src/files/directory-mounts.ts`） |
+| app-core session-attachments | 删除 system-mounts 旧入口；只组装当前 Session 附件 |
+| app-core SessionBrowser | files 直接代理受限上下文，删除目录黑名单，不再代理完整系统视图 |
 | vfs-ui | 通用条目动作钩子；files 的“＋”与挂载状态由宿主提供 |
 | llm-ui | 文件搜索、上传、引用、当前目录提示使用同一授权上下文；挂载变化后重新绑定或明确失效 |
 | kernel-adapters / device 工具 / TTY | 文件工具不允许回退宿主 fs；进程访问边界必须与 Session 授权一致 |
@@ -180,7 +191,7 @@ flowchart LR
 
 进程执行是必要的独立检查点：VFS 只能约束经过 VFS 的操作。原生 shell/PTY 若仍可直接读宿主文件，则仅修改 cwd、过滤路径或限制文件工具不能实现本方案。提供 process 能力的平台必须通过 OS 沙箱/容器/受控执行器实施等价文件范围；无法实施的平台不得向受限 Session 提供无约束宿主 shell。运行程序所需的运行库等系统资源由执行器固定提供，与用户数据挂载分开，不借此授权其他用户数据。
 
-Tauri 已移除向 Session 注入无约束 native shell、原生 skill tool handler 和本地 Codex app-server 传输。当前没有等价目录授权的进程执行器，因此这些能力不能在受限 Session 中使用。CLI 的独立原生/OCI 执行策略不由本次 UI 挂载功能修改。
+Tauri 已移除向 Session 注入无约束 native shell、原生 skill tool handler 和本地 Codex app-server 传输；进程执行改由 Bubblewrap runner 实施：`apps/tauri-app/src-tauri/src/session_bash.rs` 按显式 Session 挂载生成 `bwrap` 命令（`--ro-bind`/`--bind`、`--unshare-pid/--unshare-ipc/--unshare-uts`、`--die-with-parent`），cwd 必须落在授权挂载内，宿主环境变量被清空；`apps/tauri-app/src/shell/session-bash.ts` 经 `directory_open`/`directory_close` 取得目录句柄并接线到 `SessionProcessFactory`（`packages/app-core/src/files/session-process-context.ts`）。该 runner 不隔离网络，也不是完整 OS 沙箱。CLI 的独立原生/OCI 执行策略不由本次 UI 挂载功能修改。
 
 Tauri 文件 IO 使用原生 directory_open/close/io，保存规范化目录根，每次拒绝 parent traversal 和符号链接，关闭 scope 后 IO 失败；元数据位于独立 sidecar，用户内容保持原路径，包括 __tests__。这不等于 OS 进程沙箱，也不宣称能抵抗外部宿主进程在路径检查和 IO 之间恶意换链的竞态。
 
@@ -205,6 +216,6 @@ MindOS 的目标更明确：空 Session 不附加用户目录；每个挂载是�
 4. 两个 Session 选择同名挂载点不会串来源；注册来源不会让其他 Session 自动获得访问。
 5. 默认目录设置不改变已有 Session，创建 Session 不隐式挂载。
 6. 卸载不删文件，旧句柄失效；重新连接不会扩大根目录或权限。
-7. 文件工具与受限进程执行分别验证访问边界；未完成进程侧验证不能宣称实现完整隔离。
+7. 文件工具与受限进程执行分别验证访问边界；Bubblewrap runner 已覆盖只读/可写授权与保留路径拒绝，但未完成真实 GUI 与网络隔离验收，不能宣称完整隔离。
 
-本轮自动验证包含目录命令拦截、默认目录不授权、只读、撤销、失效来源恢复、实际 DOM 挂载与分支保留，以及原生路径边界。完整 Tauri cargo check 被环境缺少 glib-2.0 开发库阻塞；独立编译实际 Rust 路径与 IO 模块的测试已通过。尚无真实 GUI 人工验收。
+本轮自动验证包含目录命令拦截、默认目录不授权、只读、撤销、失效来源恢复、实际 DOM 挂载与分支保留、原生路径边界，以及 Bubblewrap runner 的只读/可写授权与越界拒绝单元测试（`cargo test --lib`）。完整 Tauri cargo check 被环境缺少 glib-2.0 开发库阻塞；独立编译实际 Rust 路径与 IO 模块的测试已通过。尚无真实 GUI 人工验收。

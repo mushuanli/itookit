@@ -1,13 +1,13 @@
 # VFS / Session 重构实现与验证
 
-日期：2026-09-08。当前规范见 [C4、目录与接口](vfs-c4-review.md)。这是当前工作区实现状态，不代表已发布版本。
+日期：2026-09-09。当前规范见 [C4、目录与接口](vfs-c4-review.md)。这是当前工作区实现状态，不代表已发布版本。
 
 ## 已完成
 
 - 系统根与 `/home/admin` 用户目录分离；`/run` 为内存来源；移除旧模块注册、隐式系统映射、全局工具文件上下文和 manager 便捷 IO。
 - `SessionRepository` 按 Session ID 创建、查询和持久化。元信息、设置及挂载配置在 `session.seq`，Round/history/profile 在 `history.seq`，附件在同一 Session 的 `attachments/`。没有 `conversation/` 或 `.chat` 身份依赖。
 - Session 用户文件视图默认仅 `/attachments/`；显式挂载后才增加工作目录。历史与系统数据经业务服务读取，不进入普通文件上下文。文件工具和搜索使用当前 Session 上下文。跨 Session 只读映射与来源撤销已有集成测试；编辑器附件子视图也随 Session 撤销，上传不能绕过文件上下文。
-- `SessionWorkbench` 使用 vfs-ui 与只读 SessionBrowser 投影。Session 默认 main 聊天，直属仅 tasks/files；Task 查询执行历史，映射文件通过所属 Session 上下文打开和保存。files 直接代理实际受限上下文，不依赖隐藏系统目录。分支草稿独立保存，旧手写侧栏已删除。接口与 C4 见 [Session 浏览实现](vfs-session-browser.md)。
+- `SessionWorkbench` 使用 vfs-ui 与可写 SessionBrowser 投影（`createSessionBrowser` 以 `access: 'rw'` 创建，实现位于 `packages/app-core/src/files/session-browser.ts`）。Session 默认 main 聊天，直属仅 tasks/files；Task 查询执行历史，映射文件通过所属 Session 上下文打开和保存。投影支持 Session/文件夹 CRUD 与 `/files` 下的文件 CRUD；files 直接代理实际受限上下文，不依赖隐藏系统目录。分支草稿独立保存，旧手写侧栏已删除。接口与 C4 见 [Session 浏览实现](vfs-session-browser.md)。
 - 公开 `EditorOptions.nodeId/ownerNodeId` 已移除；文件、Session、实体通过 `EditorTarget` 区分。历史、上传、资产管理和打印使用明确的 Session 附件来源。
 - `SessionManager.bindSession`、Session runtime/TaskInput 仅保留真实 Session ID；Flow 创建会话返回 `{ sessionId }`。消息和 DAG 的节点 ID 保留其业务含义。
 - 文件元数据、records、搜索、事件和附件均经过视图边界；backend records 使用 backend-local 坐标。内部模块字段统一为 viewId。
@@ -21,37 +21,38 @@
 
 ## 验证
 
-下表汇总工作区最近一次已记录的验证，不表示所有包在同一提交或同一批次重跑。最近跨包回归重跑 durable-kernel 134 项、llm-flow 120 项、llm-session 61 项、app-shell 114 项（30 项跳过）及 CLI 49 项，均通过。vfs-core 等未在该批次重跑。其余测试日志与批次见 [核验清单](implementation-audit.md)。DOM 测试覆盖 vfs-ui 到宿主路由、映射保存、挂载管理与分支保留，不代替原生 GUI 验收。
+下表为 2026-09-09 在工作区的实测结果：各包用 `pnpm --filter <pkg> test`（llm-ui 无 test 脚本，用 `exec vitest run`），Rust 用 `cargo test --lib`，类型检查用各应用 `typecheck`。跨包批次不同步，计数随代码漂移，以对应命令的实际输出为准。其余历史批次见 [核验清单](../deprecated/implementation-audit.md)。DOM 测试覆盖 vfs-ui 到宿主路由、映射保存、挂载管理与分支保留，不代替原生 GUI 验收。
+
 | 检查 | 结果 |
 | --- | --- |
-| vfs-core | 167 通过 |
-| durable-kernel | 140 通过 |
-| llm-flow | 124 通过 |
-| kernel-adapters | 81 通过 |
-| llm-session | 65 通过 |
-| app-shell | 全套 117 通过，30 跳过 |
-| vfsdriver-indexeddb | 9 通过 |
-| vfsdriver-localfs | 41 通过，含独立 OS 进程与 SIGKILL 恢复 |
-| vfs-ui | 80 通过，含真实 DOM 导航 |
-| llm-ui | 全套 14 通过；追加分支恢复测试后定向 2 通过（共 15 个测试） |
-| MDX SaveManager | 2 通过 |
-| CLI 全套 | 49 通过，含 HITL、resume、动态 spawn |
+| vfs-core | 172 通过 |
+| app-core | 8 通过 |
+| durable-kernel | 180 通过 |
+| llm-flow | 132 通过 |
+| kernel-adapters | 82 通过 |
+| llm-session | 85 通过 |
+| app-shell | 154 通过，30 跳过 |
+| vfs-ui | 88 通过，含真实 DOM 导航 |
+| llm-ui | 15 通过 |
+| vfsdriver-indexeddb | 15 通过 |
+| vfsdriver-localfs | 54 通过，含独立 OS 进程与 SIGKILL 恢复 |
+| CLI 全套 | 71 项中 70 通过；1 项失败（supervisor 循环分派），以实际输出为准 |
+| mdxeditor | 本工作区未安装 vitest，未执行 |
 | Web / Tauri / CLI TypeScript | 通过 |
-| Rust 目录边界与 IO 模块 | 3 通过；实际模块通过独立 Cargo harness 编译 |
+| Rust 单元测试 | 12 通过（directory_boundary、scoped_directory、session_bash、bash_process、sidecar）；完整 Tauri cargo check 仍受 glib-2.0 缺失阻塞 |
 | Mermaid | 总体、浏览、挂载共 9 张设计图解析通过 |
-| 旧公开符号扫描、git diff --check | 通过 |
 
-较早批次日志：`/tmp/mount-app-final2.log`、`/tmp/mount-localfs.log`、`/tmp/mount-llmui-final.log`、`/tmp/mount-rust-core2.log`；此前其他包证据保留在 `/tmp/refactor-suite.log` 等回归日志。跳过测试没有计入通过数。
+跳过测试没有计入通过数。历史回归日志是临时文件，不作为当前依据。
 
 ## 明确边界
 
 - 未执行真实 GUI 人工验收。完整 Tauri cargo check 下载依赖后被环境缺少 glib-2.0 开发库阻塞，不能以独立 Rust 模块测试替代整机编译验收。
-- SessionFS 是文件能力边界，不是操作系统 sandbox；原生 IO 的路径检查也不是抵抗外部宿主恶意换链的完整 OS 沙箱。Tauri 不再向受限 Session 注入 native shell、原生 skill handler 或本地 Codex app-server，等价目录授权的进程 runner 尚未实现。
+- SessionFS 是文件能力边界，不是操作系统 sandbox；原生 IO 的路径检查也不是抵抗外部宿主恶意换链的完整 OS 沙箱。Tauri 受限 Session 不再注入无约束宿主 shell、原生 skill handler 或本地 Codex app-server；进程执行改由 Bubblewrap runner 实施（`apps/tauri-app/src-tauri/src/session_bash.rs`、`apps/tauri-app/src/shell/session-bash.ts`，经 `packages/app-core/src/files/session-process-context.ts` 与 `apps/tauri-app/src/main.ts` 接线）：除固定的运行库/系统资源外只绑定显式 Session 挂载，只读挂载用 `--ro-bind`、可写挂载用 `--bind`，cwd 必须落在授权挂载内，不继承宿主环境变量。它不隔离网络，也不是完整 OS 沙箱。
 - Web 当前支持应用内目录挂载；Tauri 另支持宿主目录。Web File System Access provider 和 CLI slash UI 不属于本次实现。
 - Session 挂载配置由单宿主协调；没有宣称多宿主同时修改 history 和挂载的完整 fencing 协议。
 - 工作区归档不是完整 Session/Kernel 系统快照，跨来源 restore 不具备全局事务原子性。
-- 本轮不暴露 Session 原始目录删除或自动 GC；关闭编辑器、禁用文件视图都保留 Session 历史与后台任务。后续数据回收须由业务生命周期协调。
+- Session 原始目录删除只经业务生命周期：`SessionLifecycleService`（`packages/app-core/src/files/session-lifecycle.ts`）按 `closeSession(id, true)` → 等待 `sessionStat(id).phase === 'closed'` → `removeSession(id)` → `repository.deleteSession(id)` 执行，任一步失败都保留全部数据并报 `EBUSY`；`session-browser.ts` 对 Session 与文件夹递归复用该链路，不把文件树删除直接接到数据根。本轮仍不提供自动 Session 数据 GC；关闭编辑器、禁用文件视图都保留 Session 历史与后台任务。后续数据回收须由业务生命周期协调。
 
 上述边界没有通过保留旧接口来补偿。旧数据版本不兼容应报错，由用户重建数据，不能自动回到旧布局。
 
-Session 浏览当前边界：Task 列表、版本及事件已有存储分页，界面提供继续加载；旧存储首次建索引仍可能全量扫描。URL 已编码 branch，路由回放传递指定分支；文件树不提供 CRUD。详见浏览实现文档。最新 app-shell/Flow/Session 验证日志为 `/tmp/design-retry-ui-tests.log`、`/tmp/design-goal-authority-tests.log`、`/tmp/design-delegation-context-tests.log`；此前 VFS 边界核验日志为 `/tmp/design-current-app-tests.log`、`/tmp/design-skill-unload-tests.log`、`/tmp/design-c4-boundary-tests.log`、`/tmp/design-c4-vfs-tests.log`、`/tmp/design-c4-types.log`。
+Session 浏览当前边界：Task 列表、版本及事件已有存储分页，界面提供继续加载；旧存储首次建索引仍可能全量扫描。URL 已编码 branch，路由回放传递指定分支；文件树提供 Session/文件夹 CRUD 与 `/files` 文件 CRUD。详见浏览实现文档。历史验证日志为临时文件，不作为当前依据；验证以各包测试命令的实际输出为准。

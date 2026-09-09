@@ -1,5 +1,7 @@
 # Managed resource 清理、撤权与销毁
 
+> ⚠️ 历史归档：本文记录当时的方案与审查结论，**不随代码更新**，不作为当前实现依据。当前文档见 `../`。
+
 更新时间：2026-09-07
 
 本实现沿用单执行实例、chat module 持久事务域；所有外部 adapter 调用都发生在事务之外。legacy resource/grant API 与 managed resource 表分别保持自己的语义。

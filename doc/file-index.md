@@ -38,7 +38,7 @@
 | Flow 校验 / 环检测（findCycles） | `llm-flow/src/flow/validation.ts`、`graph.ts` |
 | 插件注册表 | `llm-flow/src/flow/plugin-registry.ts` |
 | DAG 控制面命令（DagCommandService） | `llm-flow/src/flow/commands.ts` |
-| Flow 定义持久化（FlowDefinitionStore/FlowAssetStore） | `llm-flow/src/flow-definition-store.ts` |
+| Flow 定义持久化（FlowDefinitionStore/FlowStore） | `llm-flow/src/flow-definition-store.ts` |
 
 ## 会话语义 + 持久化（@itookit/llm-session）
 
@@ -51,10 +51,11 @@
 | SessionRunCoordinator（DAG 运行协调） | `llm-session/src/session/session-run-coordinator.ts` |
 | AgentResolver（connection/model 解析） | `llm-session/src/session/agent-resolver.ts` |
 | SessionEventBus | `llm-session/src/session/session-event-bus.ts` |
-| ChatEngine（IChatEngine 实现） | `llm-session/src/persistence/chat-engine.ts` |
+| SessionRepository（ISessionRepository 实现，会话资产） | `llm-session/src/persistence/session-repository.ts` |
+| FlowEngine（FlowStore 实现，Flow 定义/修订） | `llm-session/src/persistence/flow-engine.ts` |
 | RoundLog（round 增量日志 + 投影） | `llm-session/src/persistence/round-log.ts` |
 | RoundGraphService | `llm-session/src/persistence/round-graph-service.ts` |
-| IChatEngine / ConversationManifest / RoundManifest 类型 | `llm-session/src/persistence/types.ts`、`round-types.ts` |
+| ISessionRepository / ConversationManifest / RoundManifest 类型 | `llm-session/src/persistence/types.ts`、`round-types.ts` |
 | 装配入口（initializeConversationSystem） | `llm-session/src/index.ts` |
 | 控制面（CommandBus/ExtensionRegistry/插件） | `llm-session/src/core/`、`plugins/` |
 | PromptHistoryService / VFSAgentService | `llm-session/src/services/` |
@@ -88,7 +89,7 @@
 |---|---|
 | 协议 barrel（接口/类型/常量） | `vfs-core/src/protocol.ts`、`interfaces/` |
 | createVFS 工厂 | `vfs-core/src/impl/factory.ts` |
-| VFSEngine / VFSManager / ModuleFS | `vfs-core/src/impl/engine/`、`impl/services/` |
+| VFSEngine / VFSManager / FileSystemView | `vfs-core/src/impl/engine/`、`impl/services/` |
 | 通用 IO（IIOStream + pipe） | `vfs-core/src/interfaces/`、`impl/file-io/` |
 | 事件总线（EventBus/FSEventBus） | `vfs-core/src/eventbus/`、`impl/event/` |
 | IndexedDB 后端 | `vfsdriver-indexeddb/src/` |
@@ -100,7 +101,7 @@
 |---|---|
 | YAML 工作流加载/校验/编译 | `cli/src/config.ts` |
 | 运行时装配（durable-kernel+kernel-adapters+flow） | `cli/src/runtime.ts` |
-| 命令入口（run/events/doctor） | `cli/src/commands.ts` |
+| 命令入口（run/graph/runs/status/logs/resume/respond/cancel/rerun/fork 等） | `cli/src/cli.ts`、`cli/src/commands.ts` |
 | 运行结果落盘（RunStore） | `cli/src/run-store.ts` |
 | 工作区授权 | `cli/src/workspace.ts` |
 
@@ -114,7 +115,7 @@
 | DagWorkbench（流程可视化） | `llm-ui/src/components/DagWorkbench.ts` |
 | VFSUIShell（文件树） | `vfs-ui/src/shell/` |
 | MDX 编辑器 | `packages/mdx/src/` |
-| 设置（Provider/Connection/Agent） | `llm-ui/src/editors/` |
+| 设置（Provider/Connection/Agent/MCP/Skill/Cost） | `packages/llm-settings-ui/src/editors/` |
 
 ## 装配 / 入口
 
@@ -124,7 +125,7 @@
 | App 类型（AppKernelRuntime 等） | `app-shell/src/types.ts` |
 | 特权命令服务（plan 等） | `app-shell/src/kernel/privileged-command-service.ts` |
 | web-app 入口 | `apps/web-app/src/` |
-| 工作区策略 | `app-shell/src/strategies/` |
+| 工作区挂载配置（WS_*/createWsMount、文件注册表） | `app-shell/src/workspaces/`、`app-shell/src/config/` |
 
 ## 联网搜索（跨层）
 
@@ -134,8 +135,8 @@
 | 策略解析 | `llm-session/src/session/agent-resolver.ts` |
 | 派生 + 剥离客户端工具 + citations 投影 | `llm-session/src/session/conversation-run-coordinator.ts` |
 | citations 事件发射 + 流式聚合 | `kernel-adapters/src/effects/llm-chat-effect.ts` |
-| citations 渲染 | `llm-ui/src/components/history/StreamController.ts`、`templates/NodeTemplates.ts` |
-| 联网搜索开关 | `llm-ui/src/components/input/ChatInputView.ts`、`templates/ChatInputTemplates.ts` |
+| citations 渲染 | `llm-ui/src/components/history/StreamController.ts`、`components/templates/NodeTemplates.ts` |
+| 联网搜索开关 | `llm-ui/src/components/input/ChatInputView.ts`、`components/templates/ChatInputTemplates.ts` |
 | CLI -p prompt 命令 | `apps/cli/src/commands.ts` |
 
 > 详见 [web-search.md](./web-search.md)

@@ -1,6 +1,6 @@
 # @itookit/llm-session — API 参考
 
-> 用户可见的会话语义 + 持久化：Session 生命周期、Round/Branch、ChatEngine（VFS 持久化）、RoundLog、SessionEventBus、UI projections、Durable Conversation。同时是上层装配入口：`initializeConversationSystem()` 统一注册 `llm.chat/agent/plan` 与 `flow.*` Programs 并装配 CommandBus/DAG。所有 API 从 `@itookit/llm-session` 根导出。
+> 用户可见的会话语义 + 持久化：Session 生命周期、Round/Branch、SessionRepository（会话目录持久化）、RoundLog、SessionEventBus、UI projections、Durable Conversation。同时是上层装配入口：`initializeConversationSystem()` 统一注册 `llm.chat/agent/plan` 与 `flow.*` Programs 并装配 CommandBus/DAG。公共 API 从 `@itookit/llm-session` 根导出；少数内部工具（`RUNTIME_KEY`、`ulid`/`extractTimestamp`、`log`、`ContextProfileStore`、`VFSEntityStore`、`initializePromptHistory`/`resetPromptHistory`、`SessionFolder` 类型）仅按源码路径可用。
 
 **依赖方向**：`llm-session → llm-flow → llm-tasks → durable-kernel`（本包 re-export `@itookit/llm-flow` 全部 API）。
 
@@ -9,12 +9,12 @@
 - [装配入口：initializeConversationSystem](#装配入口)
 - [会话管理：SessionManager](#会话管理sessionmanager)
 - [会话核心：CommandBus / ExtensionRegistry / 插件](#会话核心)
-- [持久化：ChatEngine（IChatEngine）](#持久化chatengine)
+- [持久化：SessionRepository（ISessionRepository）](#持久化sessionrepository)
 - [Round：RoundLog / RoundGraphService / RoundOperations](#round)
 - [分支：BranchService](#分支branchservice)
 - [状态与事件：SessionState / SessionEventBus](#状态与事件)
 - [服务：VFSAgentService / PromptHistoryService / AgentResolver](#服务)
-- [Kernel 存储桥接：ChatKernelStorageResolver](#kernel-存储桥接)
+- [Kernel 存储桥接：SessionDirectoryStorageResolver](#kernel-存储桥接)
 - [Durable Projection：DurableConversationProjection](#durable-projection)
 - [工具函数](#工具函数)
 - [源码结构：文件与路径](#源码结构文件与路径)
@@ -26,9 +26,15 @@
 ```ts
 interface ConversationSystemOptions {
     agentService: IAgentConfigService;
-    sessionEngine: IChatEngine;
+    sessionEngine: ISessionRepository;
+    promptHistoryFiles: IFileSystem;              // prompt 历史的文件系统
     kernel: Kernel;
+    flowStore: FlowStore;                        // 独立 flows 模块的工作流存储
+    resolveSessionContext?(sessionId: string, userMessage: string): Promise<{
+        projectInstructions: string; skillInstructions: string; skillIndex: string;
+    }>;
     resolveTools?(sessionId, allowedIds): Promise<{ definitions: ToolDefinition[]; externalIds: string[] }>;
+    retrieveMemory?: ConversationRunCoordinatorOptions['retrieveMemory'];
     dagPlugins: DagPluginCatalog;
 }
 
@@ -41,7 +47,7 @@ interface ConversationSystem {
 async function initializeConversationSystem(options: ConversationSystemOptions): Promise<ConversationSystem>;
 ```
 
-装配流程：初始化 services（agentService/sessionEngine/prompt-history）→ 注册 Programs（`llm.chat/agent/plan` + `flow.value/human/aggregate`）→ 创建 SessionManager → 装配 CommandBus + DagCommandService → 激活插件（session/vcs/history）。
+装配流程：初始化 services（`agentService.init()` / `sessionEngine.init()` / `initializePromptHistory(promptHistoryFiles)`）→ `registerDurablePrograms(kernel)` 注册 Programs（`llm.chat/agent/plan` + `flow.value/human/aggregate`）→ 创建 SessionManager → 用 `new FlowDefinitionStore(flowStore, dagPlugins)` 装配 CommandBus + DagCommandService → 激活插件（session/vcs/history）。
 
 ---
 
@@ -54,11 +60,10 @@ class SessionManager implements ISession, SessionQuery {
     signal(s: Signal): void;
     events(): AsyncIterable<AgentEvent>;
 
-    // 会话绑定（UI 节点 ↔ 会话）
-    async bindSession(nodeId: string, sessionId: string): Promise<SessionSnapshot>;
+    // 会话绑定（会话 id ↔ 运行时）
+    async bindSession(sessionId: string): Promise<SessionSnapshot>;
     unbindSession(): void;
     getCurrentSessionId(): string | null;
-    getCurrentNodeId(): string | null;
     getSnapshot(): SessionSnapshot;
     getSessions(): SessionGroup[];
     getStatus(): SessionStatus | 'unbound';
@@ -87,7 +92,7 @@ class SessionManager implements ISession, SessionQuery {
 }
 ```
 
-**工厂**：`createSessionManager(engine, agentService, { kernel, dagPlugins, resolveTools })`、`getSessionManager()`（单例读取）、`resetSessionManager()`。
+**工厂**：`createSessionManager(engine, agentService, { kernel, dagPlugins, flowStore, resolveSessionContext?, resolveTools?, retrieveMemory? })`、`getSessionManager()`（单例读取）、`resetSessionManager()`。
 
 ---
 
@@ -111,47 +116,50 @@ class SessionManager implements ISession, SessionQuery {
 
 ---
 
-## 持久化：ChatEngine
+## 持久化：SessionRepository
 
-`ChatEngine extends BaseModuleService implements IChatEngine` —— 会话在 VFS 的持久化实现。模块名 `FS_MODULE_CHAT = 'chats'`（挂载于 `/module/chats`）。
+`SessionRepository implements ISessionRepository`（`persistence/session-repository.ts`）—— 会话身份、历史文档与附件的唯一事实源。构造参数为根文件系统（`IFileSystem`）；存储布局与一致性约定见[会话数据仓库：SessionRepository](#会话数据仓库sessionrepository)。
 
 ```ts
-class ChatEngine extends BaseModuleService implements IChatEngine {
-    constructor(vfs: IVFSManager);
+class SessionRepository implements ISessionRepository {
+    constructor(fs: IFileSystem);
     init(): Promise<void>;
+    dispose(): Promise<void>;
+    subscribe(listener: () => void): () => void;
 
     // 会话生命周期
-    createSession(title: string): Promise<string>;              // 返回 sessionId
-    initializeExistingFile(nodeId: string, title: string): Promise<string>;
+    createSession(title: string, folder?: string | null): Promise<string>;   // 返回 sessionId
+    ensureSession(id: string, title: string, origin?: SessionOrigin, folder?: string | null): Promise<string>;
 
-    // 会话 ↔ 节点映射
-    getSessionIdFromNodeId(nodeId: string): Promise<string | null>;
-    getSessionNodeId(sessionId: string): Promise<string | null>;
+    // Manifest / 列表 / 删除
+    getManifest(sessionId: string): Promise<ConversationManifest>;
+    list(): Promise<ConversationManifest[]>;
+    deleteSession(sessionId: string): Promise<void>;
 
-    // Manifest / UI 状态
-    getManifest(nodeId: string): Promise<ConversationManifest>;
-    updateManifest(nodeId: string, updates: Partial<ConversationManifest>): Promise<void>;
-    validateManifest(nodeId: string, sessionId: string): Promise<boolean>;
-    getUIState(nodeId: string): Promise<ConversationUIState | null>;
-    updateUIState(nodeId: string, state: ConversationUIState): Promise<void>;
+    // 文件夹
+    listFolders(): Promise<SessionFolder[]>;
+    createFolder(path: string): Promise<SessionFolder>;
+    deleteFolder(path: string, recursive?: boolean): Promise<void>;
+    renameFolder(from: string, to: string): Promise<void>;
 
-    // 设置与资产
+    // Manifest / UI 状态 / 设置
+    updateManifest(sessionId: string, patch: Partial<ConversationManifest>): Promise<void>;
+    getUIState(sessionId: string): Promise<ConversationUIState | null>;
+    updateUIState(sessionId: string, patch: Partial<ConversationUIState>): Promise<void>;
     getSessionSettings(sessionId: string): Promise<ChatSessionSettings>;
-    saveSessionSettings(sessionId: string, settings: ChatSessionSettings): Promise<void>;
-    readSessionAsset(sessionId: string, assetPath: string): Promise<Blob | null>;
+    saveSessionSettings(sessionId: string, patch: Partial<ChatSessionSettings>): Promise<void>;
 
-    // 文件/目录（VFS 通用）
-    createFile(...); createDirectory(name, parentId): Promise<FSNode>;
-    rename(id, newName): Promise<void>; delete(ids): Promise<void>;
-    getNode(id): Promise<FSNode | null>; readContent(id): Promise<string | ArrayBuffer>;
+    // 历史文档与附件
+    readDocument(sessionId: string, name: string): Promise<string | null>;
+    writeDocument(sessionId: string, name: string, content: string): Promise<void>;
+    listHistory(sessionId: string): Promise<string[]>;
+    writeAttachment(sessionId: string, name: string, content: ArrayBuffer): Promise<void>;
+    openAttachments(sessionId: string): Promise<FileSystemView>;
+    readSessionAsset(sessionId: string, name: string): Promise<Blob | null>;
 }
 ```
 
-**`IChatEngine`**（`persistence/types.ts`）：上述契约接口 + `readonly vfs: IVFSManager` + `dispose()`。
-
-会话文件重命名时，`ChatEngine` 在发布 `node:renamed` 前同步标题元数据；
-`SessionManager.updateBoundNodeId()` 同步 registry、`SessionState`、活动 task 和缓存
-`RoundLog`，确保生成中及后续 round 持久化都使用新路径。
+**`ISessionRepository`**（`persistence/types.ts`）：上述契约接口。会话身份即 `<id>` 目录，不存在 UI 节点 ↔ 会话的映射 API；会话标题是 manifest 的 `title` 字段，经 `updateManifest()` 修改。
 
 ---
 
@@ -213,7 +221,7 @@ class BranchService {
     constructor(registry: SessionRegistry);
     async switchToSibling(messageId: string, siblingIndex: number): Promise<void>;
     async getSiblings(messageId: string): Promise<SessionGroup[]>;
-    async createBranch(messageId?: string, branchName?: string): Promise<…>;
+    async createBranch(branchNodeId: string, options?: { name?: string; copyContent?: boolean }): Promise<string>;
     async switchBranch(branchName: string): Promise<void>;
     async getBranchTree(): Promise<BranchTreeNode>;
     async renameBranch(oldName: string, newName: string): Promise<void>;
@@ -235,7 +243,7 @@ class BranchService {
 
 ### SessionRegistry
 
-`class SessionRegistry` —— 会话运行时注册表（状态机：open/suspended/…）。`BoundContext`：绑定上下文类型。
+`class SessionRegistry` —— 会话运行时注册表（状态取 `SessionStatus`：`idle` / `queued` / `running` / `completed` / `failed` / `aborted`）。`BoundContext`：绑定上下文类型。
 
 ---
 
@@ -243,12 +251,12 @@ class BranchService {
 
 | 类 | 职责 | 关键 API |
 |---|---|---|
-| `VFSAgentService extends BaseModuleService implements IAgentManagementService` | Agent 配置的 VFS 持久化 | CRUD（实现 `IAgentManagementService` / `IAgentConfigService` / `IConnectionService`） |
-| `PromptHistoryService extends BaseModuleService` | prompt 历史（VFS） | `getPromptHistory()` 单例、`initializePromptHistory(vfs)`、`resetPromptHistory()` |
+| `VFSAgentService extends FileBackedService implements IAgentManagementService` | Agent 配置的 VFS 持久化 | CRUD（实现 `IAgentManagementService` / `IAgentConfigService` / `IConnectionService`） |
+| `PromptHistoryService extends FileBackedService` | prompt 历史（注入的文件系统） | `getPromptHistory()` 单例、`initializePromptHistory(fs)`、`resetPromptHistory()` |
 | `AgentResolver` | Agent → 模型/连接解析 | `AgentInfo` / `ModelInfo` 类型 |
 | `AttachmentProcessor` | 附件处理（文件 → 内联） | — |
-| `ContextProfileStore` | 上下文画像（VFS） | — |
-| `VFSEntityStore<T>` | 通用 VFS 实体存储 | `EntityStoreConfig` / `Identifiable` |
+| `ContextProfileStore`（`persistence/context-profile-store.ts`） | 上下文画像（VFS） | — |
+| `VFSEntityStore<T>`（`utils/vfs-entity-store.ts`） | 通用 VFS 实体存储 | `EntityStoreConfig` / `Identifiable` |
 
 **服务接口**（`services/agent-service.ts`）：`IAgentConfigService`、`IAgentManagementService`、`IConnectionService`、`MCPServer` 等。
 
@@ -257,18 +265,18 @@ class BranchService {
 ## Kernel 存储桥接
 
 ```ts
-const CHAT_HARNESS_STORAGE_KIND = 'chat-asset';
+const SESSION_DIRECTORY_STORAGE_KIND = 'session-directory';
 
-class ChatKernelStorageResolver implements SessionStorageResolver {
-    readonly kind = CHAT_HARNESS_STORAGE_KIND;
-    constructor(chat: IChatEngine);
+class SessionDirectoryStorageResolver implements SessionStorageResolver {
+    readonly kind = SESSION_DIRECTORY_STORAGE_KIND;
+    constructor(fs: IFileSystem);
     async resolve(reference: StorageBindingRef): Promise<ResolvedStorageBinding>;
 }
 
-function chatKernelStorage(sessionId: string): StorageBindingRef;
+function sessionDirectoryStorage(sessionId: string): StorageBindingRef;
 ```
 
-将 Kernel Session 存储绑定到聊天会话的资产目录：`rootPath = <chat asset dir>/.kernel`（fs 为 `FS_MODULE_CHAT` 引擎）。`chatKernelStorage(sessionId)` 生成 `StorageBindingRef` 传给 `kernel.createSession({ storage })`。
+将 Kernel Session 存储绑定到会话目录：`rootPath = /var/lib/sessions/<id>/kernel`（`sessionExecutionRoot()`，`persistence/session-storage-layout.ts`）。`sessionDirectoryStorage(sessionId)` 生成 `StorageBindingRef` 传给 `kernel.createSession({ storage })`（`SessionManager.bindSession()` 即以此绑定）。
 
 ---
 
@@ -311,12 +319,11 @@ class DurableConversationProjection {
 
 | 函数 | 用途 |
 |---|---|
-| `chatFileParser(content)` | 聊天文件解析（markdown → 会话结构） |
-| `formatErrorMessage(error)` | 统一错误格式化 |
-| `ulid()` / `extractTimestamp(id)` | ULID 生成 / 时间戳提取 |
-| `log` | 模块日志器（`llm-conversation` scope） |
+| `formatErrorMessage(error)` | 统一错误格式化（`utils/error-formatter.ts`，根导出） |
+| `ulid()` / `extractTimestamp(id)` | ULID 生成 / 时间戳提取（`persistence/ulid.ts`，仅按源码路径导入） |
+| `log` | 模块日志器（`utils/logger.ts`，scope `llm-conversation`，仅按源码路径导入） |
 
-**常量**：`CONVERSATION_DEFAULTS`（`core/constants.ts`）、`RUNTIME_KEY`、`CHAT_HARNESS_STORAGE_KIND`。
+**常量**：`CONVERSATION_DEFAULTS`（`core/constants.ts`，根导出）、`RUNTIME_KEY`（`persistence/durable-conversation-projection.ts`，仅按源码路径导入）、`SESSION_DIRECTORY_STORAGE_KIND`（根导出）。
 
 **错误**：`ConversationError` + `ConversationErrorCode`（`core/errors.ts`）。
 
@@ -337,7 +344,7 @@ packages/llm-session/src/
 │   └── errors.ts                 ConversationError + ConversationErrorCode
 ├── session/                      会话运行时（内存态 + 编排）
 │   ├── session-manager.ts        SessionManager + createSessionManager/getSessionManager/resetSessionManager
-│   ├── session-registry.ts       SessionRegistry + BoundContext（状态机）
+│   ├── session-registry.ts       SessionRegistry + BoundContext（运行时状态）
 │   ├── session-state.ts          SessionState + HistoryMessage（UI 投影）
 │   ├── session-event-bus.ts      SessionEventBus
 │   ├── session-query.ts          SessionQuery 接口
@@ -345,44 +352,52 @@ packages/llm-session/src/
 │   ├── branch-service.ts         BranchService
 │   ├── agent-resolver.ts         AgentResolver + AgentInfo/ModelInfo
 │   ├── attachment-processor.ts   AttachmentProcessor
+│   ├── flow-node-binder.ts       bindStandaloneFlowNode（独立 Flow 节点绑定）
+│   ├── session-memory-provider.ts  SessionMemoryProvider + MemoryWrite
+│   ├── MarkdownAnalyzer.ts       Markdown 结构分析（DocumentInfo 等）
 │   ├── conversation-run-coordinator.ts  ConversationRunCoordinator（执行协调）
 │   └── session-run-coordinator.ts      SessionRunCoordinator + SessionRunCallbacks
-├── persistence/                  会话 VFS 持久化
-│   ├── chat-engine.ts            ChatEngine（FS_MODULE_CHAT='chats'，/module/chats）
-│   ├── types.ts                  IChatEngine/ConversationManifest/ConversationUIState/BranchTreeNode
+├── persistence/                  会话与 Flow 持久化
+│   ├── session-repository.ts     SessionRepository（ISessionRepository 实现）
+│   ├── types.ts                  ISessionRepository/ConversationManifest/ConversationUIState/BranchTreeNode
+│   ├── session-storage-layout.ts SESSION_STORAGE_ROOT/sessionStorageRoot/sessionExecutionRoot
+│   ├── session-directory-storage.ts  SessionDirectoryStorageResolver + sessionDirectoryStorage
+│   ├── session-projection.ts     createSessionDataProjection（会话记录的只读文件投影）
+│   ├── flow-engine.ts            FlowEngine + FLOW_MODULE_NAME（flows 模块，实现 FlowStore）
+│   ├── default-flows.ts          seedDefaultFlows/essayReviewDraft/ESSAY_REVIEW_FLOW_ID
 │   ├── round-log.ts              RoundLog + roundToProjection/hasEffectiveAssistant
 │   ├── round-graph-service.ts    RoundGraphService + RoundGraphError
 │   ├── round-types.ts            RoundManifest/PersistedRound/RoundProjection/BranchMeta
 │   ├── round-events.ts           RoundLogEvent/RoundChangeSet
-│   ├── chat-kernel-storage.ts   ChatKernelStorageResolver + chatKernelStorage（chat-asset kind）
+│   ├── projection.ts             toolCallsFromResult/buildToolChildren（Round → UI 投影助手）
 │   ├── durable-conversation-projection.ts  DurableConversationProjection + RUNTIME_KEY
 │   ├── context-profile-store.ts  ContextProfileStore
-│   ├── vfs-utils.ts / ulid.ts    VFS 助手 / ULID
-│   └── (资产目录: 每会话 <assetDir>/.kernel ← Kernel 存储根)
+│   └── vfs-utils.ts / ulid.ts    VFS 助手 / ULID
 ├── plugins/                      会话插件工厂
 │   ├── session-plugin.ts         createSessionPlugin
 │   ├── vcs-plugin.ts             createVcsPlugin
 │   └── history-plugin.ts         createHistoryPlugin
-├── services/                    业务服务（VFS 持久化）
+├── services/                    业务服务（注入文件系统持久化）
 │   ├── agent-service.ts          IAgentConfigService/IAgentManagementService/IConnectionService 接口
 │   ├── vfs-agent-service.ts      VFSAgentService（Agent 配置 CRUD）
-│   ├── prompt-history-service.ts PromptHistoryService + getPromptHistory/initializePromptHistory
-│   └── (VFS 路径: /module/chats 下按会话资产目录组织；prompt 历史经 BaseModuleService 存储)
-└── utils/                        error-formatter / parsers / logger / vfs-entity-store
+│   ├── privileged-command.ts     IPrivilegedCommandService/PlanCommandRequest/ExecCommandRequest
+│   └── prompt-history-service.ts PromptHistoryService + getPromptHistory/initializePromptHistory
+└── utils/                        error-formatter / file-backed-service / logger / vfs-entity-store
 ```
 
 ### VFS 路径设定
 
 | 路径 / 常量 | 说明 |
 |---|---|
-| `FS_MODULE_CHAT = 'chats'` | 会话模块名 → `/module/chats`（`ChatEngine` 挂载点） |
-| `<chat asset dir>/.kernel` | Kernel Session 存储根（`ChatKernelStorageResolver` 解析，含 `catalog.seq/session.seq/tasks/…`，见 `kernel-api.md`） |
-| `llm-flows/` | Flow 草稿/修订 asset 目录名（`FlowDefinitionStore` 构造参数，`initializeConversationSystem` 传入） |
+| `/var/lib/sessions` | 会话存储根（`SESSION_STORAGE_ROOT`，`persistence/session-storage-layout.ts`），`SessionRepository` 在其下按 `<id>/` 组织 |
+| `/var/lib/sessions/<id>/kernel` | Kernel Session 存储根（`sessionExecutionRoot()`，由 `SessionDirectoryStorageResolver` 解析，含 `catalog.seq/session.seq/tasks/…`，见 `kernel-api.md`） |
+| `FLOW_MODULE_NAME = 'flows'` | 独立 flows 模块名（`persistence/flow-engine.ts`）；应用装配于 `/home/admin/flows`（`app-core/src/runtime/create-application-runtime.ts:106`），每个 Flow 一个 `.flow` 文件 |
+| `/home/admin/.config/mindos/prompt-history` | prompt 历史文件系统（经 `initializeConversationSystem({ promptHistoryFiles })` 传入，`create-application-runtime.ts:192`） |
 | `RUNTIME_KEY = 'conversation/runtime'` | Durable Conversation 运行时共享键 |
 
 **约定**：Round 只表达对话历史（`historyParentIds`）；Run 引用经 `executions` 附着到 Round；Branch/merge/context fold 只在本包实现；普通 Chat 用 Direct Scheduler，不伪装成单节点 DAG；不访问 Kernel Dispatcher/ProcessTable 内部对象。
 
-记忆检索注入：`initializeConversationSystem({ retrieveMemory, ... })` 将回调传递到 SessionManager。回调签名为 `(plan, agent, { sessionId, policy }) => Promise<RetrievedMemoryEntry[]>`；policy 是当前 Agent memoryPolicy 的独立副本，缺少策略时为 undefined。结果经 ContextAssembler 进入 Task 输入快照。app-shell 默认装配 SessionMemoryProvider。
+记忆检索注入：`initializeConversationSystem({ retrieveMemory, ... })` 将回调传递到 SessionManager。回调签名为 `(plan, agent, { sessionId, policy }) => Promise<RetrievedMemoryEntry[]>`；policy 是当前 Agent memoryPolicy 的独立副本，缺少策略时为 undefined。结果经 ContextAssembler 进入 Task 输入快照。app-core 默认装配 SessionMemoryProvider（`create-application-runtime.ts` 以 `new SessionMemoryProvider(kernel.kernel).retrieve` 注入）。
 
 `SessionMemoryProvider(kernel)` 提供 `upsert(sessionId, policy, { entryId, scope, content })`、`remove(sessionId, policy, scope, entryId)` 和可直接注入的 `retrieve` 回调。存储在目标 Kernel Session shared，按 namespace/scope 精确隔离，写入校验 writeScopes、检索校验 readScopes。检索默认 10 项（0 禁用），使用词项包含匹配及更新时间排序，返回内容和 SHA-256 摘要。返回 entryId 是 JSON 编码的 `[scope, entryId]`，修改/删除使用原始 entryId。当前存储按 scope 整组加载，未提供跨 Session 共享、向量检索或模型写入工具；调用方必须提供可信的 Agent 策略。
 

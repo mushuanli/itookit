@@ -1,6 +1,6 @@
 # Session 浏览投影：vfs-ui、映射文件与 Task 历史
 
-状态：已实现，2026-09-08。本文声明当前源码契约，补充 [VFS 总体设计](vfs-c4-review.md)。旧 `.chat + assetdir` 入口与 SessionWorkbench 手写侧栏已移除，不做旧数据兼容。
+状态：已实现，2026-09-09。本文声明当前源码契约，补充 [VFS 总体设计](vfs-c4-review.md)。旧 `.chat + assetdir` 入口与 SessionWorkbench 手写侧栏已移除，不做旧数据兼容。
 
 挂载的授权、UI、slash 与平台边界见 [Session 挂载与访问边界](vfs-session-mount-access.md)，已同步实现。
 
@@ -73,10 +73,11 @@ Task 展示选择明确字段；不序列化 currentAttempt、租约、资源令
 
 ## 3. 已实现接口与改动
 
-`packages/app-shell/src/files/session-browser.ts`：
+`packages/app-core/src/files/session-browser.ts`（`packages/app-shell/src/files/session-browser.ts` 只是兼容 re-export）：
 
 ```ts
 type BrowserTarget =
+  | { kind: 'folder'; path: string }
   | { kind: 'session'; sessionId: string }
   | { kind: 'tasks'; sessionId: string }
   | { kind: 'task'; sessionId: string; taskId: string }
@@ -86,24 +87,26 @@ interface SessionBrowserDependencies {
   repository: ISessionRepository;
   files: SessionFilesService;
   kernel: Kernel;
+  /** 缺省时由 repository 与 kernel 构造 */
+  lifecycle?: SessionLifecycleService;
 }
 function resolveBrowserTarget(path: string): BrowserTarget;
 function createSessionBrowser(deps: SessionBrowserDependencies): Promise<FileSystemSourceOwner>;
 ```
 
+文件夹路径段用 `folder:` 前缀加 `encodeURIComponent` 编码（`FOLDER_SEGMENT_PREFIX`），因此 Session 根可以出现在文件夹之下，`kind: 'folder'` 表示文件夹容器自身（`/` 也是 folder 目标）。
+
 files 的目录/文件身份通过 SessionFS.driver.getNode 查询，不能按扩展名判断业务目标。`FileSystemSourceOwner` 复用 vfs-core 的 `{ fs, dispose() }` 生命周期。内部 BrowserBackend 实现 IStorageBackend：Session/文件夹 mutation 映射到 repository，`/files` mutation 映射到当前 Session 文件上下文。
 
 Task 展示 DTO 由 `taskSummary(TaskRecord)` 选择以下字段：id、sessionId、parentTaskId、program、status、version、createdAt、updatedAt、input、output、error（来自 lastError）。Task 详情和浏览文件内容导出均使用 Kernel.task 的当前摘要，不再读取全量历史版本。事件使用 Kernel.taskEventPage 的 Task 索引有限快照，不读取其他 Task 的事件。新 Session 尚无 Kernel 记录时 tasks 返回空列表。
 
-vfs-ui 的 `VFSUIOptions` / `VFSUIShellOptions` 调整：
+vfs-ui 的 `VFSUIOptions` / `VFSUIShellOptions` 调整（两者共有以下字段）：
 
 ```ts
-interface BrowserUIOptions {
-  defaultEditorFactory?: EditorFactory; // 仅列表模式可省略
-  activateDirectories?: boolean;       // 默认 false；投影开启
-  primaryAction?: { label: string; run(): Promise<void> };
-  directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
-}
+defaultEditorFactory?: EditorFactory; // 仅列表模式可省略
+activateDirectories?: boolean;       // 默认 false；投影开启
+primaryAction?: { label: string; run(): Promise<void> };
+directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
 // VFSUIShell 新增
 refresh(): Promise<void>;               // 重载并恢复已展开目录
 selectPath(path: string): Promise<void>; // 展开祖先后选择条目

@@ -1,5 +1,7 @@
 # Session Round DAG 设计方案
 
+> ⚠️ 历史归档：本文记录当时的方案与审查结论，**不随代码更新**，不作为当前实现依据。当前文档见 `../`。
+
 > 设计日期: 2026-07-19 | 分支: v4.2
 > 参考: [pkgstructure.md](../pkgstructure.md)（LLM 四层分层）、[kernel-design.md](./kernel-design.md)（Durable Task Program 调度内核）
 > 定位: 在现有 Round 结构之上，将线性链升级为真正的 DAG，同时支持 chat / kernel 两种模式，并完善 round 级 history 排除机制
