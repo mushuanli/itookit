@@ -44,6 +44,10 @@ export async function flowToDag(
     }));
     const base: DagRunSpec = {
         nodes,
+        nodeDefaults: Object.fromEntries(nodes.map(node => [node.id, cloneJson(flowAgentDefaults(flow))])),
+        nodeConnections: Object.fromEntries(nodes.map(node => [node.id, cloneJson({
+            connections: flow.connections, defaultConnection: flow.defaultConnection, fallbackConnectionId,
+        })])),
         edges: flow.edges.map(edge => ({
             id: String(edge.id),
             from: String(edge.from),
@@ -74,6 +78,8 @@ async function expandCompositeNodes(
     const composites = spec.nodes.filter(node => node.plugin === 'builtin.flow');
     if (!composites.length) return spec;
     if (!resolveComposite) throw new Error('Composite Flow nodes require a Flow revision resolver');
+    const nodeDefaults = { ...spec.nodeDefaults };
+    const nodeConnections = { ...spec.nodeConnections };
     const replacement = new Map<string, { entries: string[]; exits: string[] }>();
     const expandedNodes = spec.nodes.filter(node => node.plugin !== 'builtin.flow');
     const expandedEdges = spec.edges.filter(edge =>
@@ -92,6 +98,12 @@ async function expandCompositeNodes(
         const child = await flowToDag(flow, bind, fallbackConnectionId, resolveComposite, [...compositeStack, reference]);
         if (!child.nodes.length) throw new Error(`Composite Flow is empty: ${flowId}`);
         const prefix = `${composite.id}/`;
+        delete nodeDefaults[composite.id];
+        delete nodeConnections[composite.id];
+        for (const [id, scope] of Object.entries(child.nodeConnections ?? {})) nodeConnections[`${prefix}${id}`] = scope;
+        for (const [id, defaults] of Object.entries(child.nodeDefaults ?? {})) {
+            nodeDefaults[`${prefix}${id}`] = parametersForDefaults(defaults, config.parameters);
+        }
         const childIds = new Set(child.nodes.map(node => node.id));
         const incoming = new Set(child.edges.map(edge => edge.to));
         const outgoing = new Set(child.edges.map(edge => edge.from));
@@ -124,7 +136,7 @@ async function expandCompositeNodes(
             expandedEdges.push({ ...edge, id: `${edge.id}:${source}->${target}`, from: source, to: target });
         }
     }
-    return { ...spec, nodes: expandedNodes, edges: expandedEdges };
+    return { ...spec, nodeDefaults, nodeConnections, nodes: expandedNodes, edges: expandedEdges };
 }
 
 /** Apply Flow defaults before the session/agent binder applies its higher layers. */
@@ -143,7 +155,7 @@ function flowAgentDefaults(flow: FlowRevision): Record<string, unknown> {
     };
 }
 
-function mergeAgentConfig(defaultsValue: Record<string, unknown>, nodeConfig: FlowNodeDefinition['config']): Record<string, unknown> {
+export function mergeAgentConfig(defaultsValue: Record<string, unknown>, nodeConfig: FlowNodeDefinition['config']): Record<string, unknown> {
     const defaults = defaultsValue;
     const node = isRecord(nodeConfig) ? nodeConfig : {};
     const defaultPrompt = Array.isArray(defaults.systemPrompt) ? defaults.systemPrompt : [];
@@ -153,7 +165,8 @@ function mergeAgentConfig(defaultsValue: Record<string, unknown>, nodeConfig: Fl
     return {
         ...defaults,
         ...node,
-        systemPrompt: [...defaultPrompt, ...nodePrompt],
+        systemPrompt: (node.systemPromptPolicy ?? defaults.systemPromptPolicy) === 'none' ? []
+            : (node.systemPromptPolicy ?? defaults.systemPromptPolicy) === 'replace' ? nodePrompt : [...defaultPrompt, ...nodePrompt],
         toolIds: [...new Set([...defaultTools, ...nodeTools].map(String))],
         skillIds: [...new Set([
             ...(Array.isArray(defaults.skillIds) ? defaults.skillIds : []),
@@ -168,4 +181,8 @@ function cloneJson<T>(value: T): T {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parametersForDefaults(defaults: Record<string, unknown>, parameters: unknown): Record<string, unknown> {
+    return isRecord(parameters) ? resolveFlowParameters(defaults, parameters as Record<string, import('@itookit/common').JsonValue>) as Record<string, unknown> : defaults;
 }

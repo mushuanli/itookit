@@ -1,3 +1,5 @@
+import { FlowSchemaRegistry } from './schema-registry';
+import type { JsonSchemaRef, JsonValue } from '@itookit/common';
 import type {
     DagPlugin,
     DagPluginCatalog,
@@ -7,6 +9,11 @@ import type {
 } from '@itookit/common';
 
 export class DagPluginRegistry implements DagPluginCatalog {
+    private readonly schemas = new FlowSchemaRegistry();
+
+    registerSchema(ref: JsonSchemaRef, schema: JsonValue): void { this.schemas.register(ref, schema); }
+    getSchema(ref: JsonSchemaRef): JsonValue | undefined { return this.schemas.get(ref); }
+
     private readonly plugins = new Map<string, DagPlugin>();
     private readonly versions = new Map<string, string[]>();
 
@@ -14,7 +21,8 @@ export class DagPluginRegistry implements DagPluginCatalog {
         validateManifest(plugin.manifest);
         const key = pluginKey(plugin.manifest.id, plugin.manifest.version);
         if (this.plugins.has(key)) throw new Error(`DAG plugin already registered: ${key}`);
-        this.plugins.set(key, plugin);
+        this.plugins.set(key, { manifest: structuredClone(plugin.manifest),
+            runtime: plugin.runtime.bind(plugin), ui: plugin.ui?.bind(plugin) });
         const versions = this.versions.get(plugin.manifest.id) ?? [];
         this.versions.set(plugin.manifest.id, sortVersions([...versions, plugin.manifest.version]));
     }

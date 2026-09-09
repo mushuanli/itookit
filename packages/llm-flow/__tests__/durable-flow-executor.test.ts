@@ -1,4 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { prepareFlowTaskRetry } from '../src/flow/run-members';
+import { restoreFlowHandle } from '../src/flow/restore-handle';
+import { readFlowTaskTranscript } from '../src/flow/transcript';
+import { flowToDag } from '../src/flow/to-dag';
+import { DagCommandService } from '../src/flow/commands';
+import { FlowCommand } from '../src/flow/command-names';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatCompletionResponse, DagRunSpec } from '@itookit/common';
 import {
     Kernel,
@@ -14,6 +20,7 @@ describe('DurableFlowExecutor', () => {
     let manager: IVFSManager;
     let fs: IFileSystem;
     let kernel: Kernel;
+    let model: ReturnType<typeof llmEffect>;
 
     beforeEach(async () => {
         ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
@@ -24,12 +31,323 @@ describe('DurableFlowExecutor', () => {
             async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; },
         });
         registerPrograms(kernel);
-        kernel.registerEffect(llmEffect());
+        model = llmEffect();
+        kernel.registerEffect(model);
         await kernel.initialize();
         await kernel.createSession({ id: 'session-one', storage: { kind: 'test', locator: null } });
     });
 
     afterEach(async () => { kernel.dispose(); await manager.dispose(); });
+
+    it.each([false, true])('returns a resumed handle while downstream is pending (cancel: %s)', async cancel => {
+        const flow = agentFlow();
+        flow.nodes.unshift({ ...valueNode('answer', null), plugin: 'builtin.human',
+            config: { requestId: 'answer', prompt: 'Continue' } });
+        flow.edges.push({ id: 'answer-agent', from: 'answer', to: 'agent', input: 'input', output: 'response' });
+        const initialExecutor = executor(kernel);
+        const original = await initialExecutor.submit('session-one', flow);
+        kernel.dispose();
+        await initialExecutor.waitIdle();
+        await kernel.waitIdle();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel);
+        let release!: () => void;
+        const blocked = new Promise<void>(resolve => { release = resolve; });
+        const execute = vi.fn(async (...args: Parameters<typeof model.execute>) => {
+            await blocked;
+            return model.execute(...args);
+        });
+        kernel.registerEffect({ ...model, execute });
+        await kernel.initialize();
+        await kernel.recover({ takeover: true });
+        const session = await kernel.openSession('session-one');
+        await (await session.attachTask(original.nodes.get('answer')!.id)).respond({ interactionId: 'answer', value: 'yes' });
+        let resumed: Awaited<ReturnType<DurableFlowExecutor['resume']>> | undefined;
+        const resolveNewRunContext = vi.fn(async () => { throw new Error('Resume must not rebuild context'); });
+        const resumedExecutor = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), resolveNewRunContext });
+        const pending = resumedExecutor.resume('session-one', original.root.id).then(handle => { resumed = handle; });
+        let idle = false;
+        try {
+            await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+            await vi.waitFor(() => expect(resumed?.root.id).toBe(original.root.id), { timeout: 500 });
+            expect(await resumed!.root.poll()).toBeUndefined();
+            void resumedExecutor.waitIdle().then(() => { idle = true; });
+            await new Promise(resolve => setTimeout(resolve, 25));
+            expect(idle).toBe(false);
+            if (cancel) {
+                await resumed!.root.cancel('Cancelled after resume');
+                await vi.waitFor(async () => expect((await resumed!.nodes.get('agent')!.status()).task.status).toBe('cancelled'));
+            }
+        } finally { release(); await pending; await resumedExecutor.waitIdle(); }
+        expect(idle).toBe(true);
+        expect(resolveNewRunContext).not.toHaveBeenCalled();
+        expect((await resumed!.root.wait({ timeoutMs: 2000 })).status).toBe(cancel ? 'cancelled' : 'succeeded');
+        if (!cancel) {
+            expect(resumed!.usage.tokens).toBe(2);
+            kernel.dispose();
+            await kernel.waitIdle();
+            kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+            kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+            await kernel.initialize();
+            const reattached = await restoreFlowHandle(await kernel.openSession('session-one'), original.root.id);
+            expect(reattached.usage).toEqual(resumed!.usage);
+        }
+    });
+
+    it.each([true, false])('validates registered edge content before downstream execution (valid: %s)', async valid => {
+        const plugins = createBuiltinDagPluginRegistry();
+        const ref = { id: 'report', version: '1' };
+        plugins.registerSchema(ref, { type: 'object', required: ['count'], additionalProperties: false,
+            properties: { count: { type: 'integer' } } });
+        const manifest = plugins.getManifest('builtin.transform', '1.0.0')!;
+        const runtime = await plugins.loadRuntime('builtin.transform', '1.0.0');
+        plugins.register({ manifest: { ...manifest, id: 'typed',
+            inputs: manifest.inputs.map(port => ({ ...port, schema: ref })),
+            outputs: manifest.outputs.map(port => ({ ...port, schema: ref })) }, runtime: async () => runtime });
+        const source = { ...valueNode('source', null), plugin: 'typed', config: { outputName: 'result', type: 'json', value: { count: valid ? 2 : 'wrong' } } };
+        const target = { ...valueNode('target', null), plugin: 'typed' };
+        const submission = new DurableFlowExecutor({ kernel, plugins }).submit('session-one', { nodes: [source, target],
+            edges: [{ id: 'typed-edge', from: 'source', to: 'target', input: 'input', output: 'result' }] });
+        if (valid) {
+            const run = await submission;
+            expect((await run.root.wait({ timeoutMs: 2000 })).status).toBe('succeeded');
+            expect((await run.nodes.get('target')!.status()).task.output).toMatchObject({ outputs: { result: { content: { count: 2 } } } });
+        } else {
+            await expect(submission).rejects.toThrow('Invalid data on edge typed-edge: $.count: expected integer');
+            expect((await kernel.listSessionTasks('session-one')).some(task => task.labels?.flowNodeId === 'target')).toBe(false);
+        }
+    });
+
+    it('freezes the run graph and schema before asynchronous host hooks can mutate them', async () => {
+        const plugins = createBuiltinDagPluginRegistry();
+        const schema = { type: 'string' };
+        vi.spyOn(plugins, 'getSchema').mockImplementation(() => schema);
+        const manifest = plugins.getManifest('builtin.transform', '1.0.0')!;
+        const runtime = await plugins.loadRuntime('builtin.transform', '1.0.0');
+        plugins.register({ manifest: { ...manifest, id: 'typed',
+            inputs: manifest.inputs.map(port => ({ ...port, schema: { id: 'value' } })),
+            outputs: manifest.outputs.map(port => ({ ...port, schema: { id: 'value' } })) }, runtime: async () => runtime });
+        const flow: DagRunSpec = { nodes: [{ ...valueNode('source', 'original'), plugin: 'typed' },
+            { ...valueNode('target', null), plugin: 'typed' }],
+            edges: [{ id: 'edge', from: 'source', to: 'target', input: 'input', output: 'result' }] };
+        const run = await new DurableFlowExecutor({ kernel, plugins,
+            hooks: { descriptor: { trusted: true, source: 'test', contentHash: 'test' }, emit: async event => {
+                if (event.event !== 'run.started') return;
+                schema.type = 'number';
+                (flow.nodes[0].config as any).value = 123;
+                flow.edges.length = 0;
+            } } }).submit('session-one', flow);
+        expect((await run.root.wait({ timeoutMs: 2000 })).status).toBe('succeeded');
+        expect((await run.nodes.get('target')!.status()).task.output).toMatchObject({ outputs: { result: { content: 'original' } } });
+    });
+
+    it('rejects oversized initial graphs before acquiring workspaces or running hooks', async () => {
+        const prepare = vi.fn(), emit = vi.fn();
+        const run = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            workspaceManager: { prepare }, hooks: { descriptor: { trusted: true, source: 'test', contentHash: 'test' }, emit } });
+        await expect(run.submit('session-one', { ...valueFlow(), maxNodes: 1,
+            runPolicy: { workspace: { mode: 'worktree' } } } as DagRunSpec)).rejects.toThrow('node limit');
+        expect(prepare).not.toHaveBeenCalled();
+        expect(emit).not.toHaveBeenCalled();
+        expect(await kernel.listSessionTasks('session-one')).toEqual([]);
+    });
+
+    it.each([false, true])('cleans up submitted tasks and workspace on scheduler failure (cleanup error: %s)', async cleanupFails => {
+        const finish = vi.fn(async () => { if (cleanupFails) throw new Error('cleanup failed'); });
+        const run = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            workspaceManager: { prepare: async () => ({ directory: '/isolated', finish }) },
+            hooks: { descriptor: { trusted: true, source: 'test', contentHash: 'test' },
+                emit: async event => { if (event.event === 'task.started' && (event.payload as { nodeId?: string })?.nodeId === 'right') throw new Error('hook failed'); } },
+        });
+        let failure: unknown;
+        try { await run.submit('session-one', { ...valueFlow(), runPolicy: { workspace: { mode: 'worktree' } } } as DagRunSpec); }
+        catch (error) { failure = error; }
+        expect(finish).toHaveBeenCalledTimes(1);
+        expect(finish).toHaveBeenCalledWith('failed');
+        if (cleanupFails) {
+            expect(failure).toBeInstanceOf(AggregateError);
+            expect((failure as AggregateError).errors.map(error => error.message)).toEqual(['hook failed', 'cleanup failed']);
+        } else expect((failure as Error).message).toBe('hook failed');
+        const tasks = await kernel.listSessionTasks('session-one');
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].status).toBe('cancelled');
+    });
+
+    it('exposes post-run workspace cleanup failure without invoking cleanup twice', async () => {
+        const finish = vi.fn(async () => { throw new Error('cleanup failed'); });
+        const run = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            workspaceManager: { prepare: async () => ({ directory: '/isolated', finish }) },
+        });
+        const execution = await run.submit('session-one', { ...valueFlow(), runPolicy: { workspace: { mode: 'worktree' } } } as DagRunSpec);
+        await expect(execution.workspaceCompletion).rejects.toThrow('cleanup failed');
+        expect(finish).toHaveBeenCalledTimes(1);
+        expect(finish).toHaveBeenCalledWith('succeeded');
+        expect((await execution.root.wait()).status).toBe('succeeded');
+    });
+
+    it('reattaches pending and failed workspace finalization independently of the successful root', async () => {
+        let reject!: (error: Error) => void;
+        const cleanup = new Promise<void>((_, fail) => { reject = fail; });
+        const execution = await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            workspaceManager: { prepare: async () => ({ directory: '/isolated', finish: () => cleanup }) },
+        }).submit('session-one', { ...valueFlow(), runPolicy: { workspace: { mode: 'worktree' } } } as DagRunSpec);
+        await execution.root.wait({ timeoutMs: 2000 });
+        const handlers = new Map<string, (args: unknown) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        const args = { taskId: execution.root.id, sessionId: 'session-one' };
+        expect(await handlers.get(FlowCommand.RunGet)!(args)).toMatchObject({ workspaceFinalization: { status: 'pending' } });
+        reject(new Error('unable to remove worktree'));
+        await expect(execution.workspaceCompletion).rejects.toThrow('unable to remove worktree');
+        expect(await handlers.get(FlowCommand.RunGet)!(args)).toMatchObject({
+            root: { task: { status: 'succeeded' } }, workspaceFinalization: { status: 'failed', message: 'unable to remove worktree' },
+        });
+    });
+
+    it.each(['inherit', 'replace', 'none'])('snapshots Session context for standalone runs with %s prompt policy', async policy => {
+        const handlers = new Map<string, (args: unknown) => Promise<any>>();
+        const resolveSessionContext = vi.fn(async () => ({ projectInstructions: 'project rules', skillInstructions: 'loaded rules', skillIndex: 'available metadata' }));
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never, resolveSessionContext })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        const flow = { ...agentFlow(), id: 'flow', name: 'Flow', revision: 1, createdAt: 1, digest: '', systemPrompt: ['flow rules'] };
+        flow.nodes[0].config = { instruction: 'review', systemPrompt: ['node rules'], systemPromptPolicy: policy, approval: 'none' };
+        const result = await handlers.get(FlowCommand.RunStart)!({ sessionId: 'session-one', flow });
+        expect(result.taskId).toBeTruthy();
+        expect(resolveSessionContext).toHaveBeenCalledWith('session-one', '');
+        const task = (await kernel.listSessionTasks('session-one')).find(task => task.program.kind === 'llm.agent')!;
+        const content = (task.input as { messages: Array<{ content: string }> }).messages.map(message => message.content);
+        expect(content).toEqual(policy === 'none' ? ['review'] : [
+            'project rules', 'loaded rules', 'available metadata', ...(policy === 'inherit' ? ['flow rules'] : []), 'node rules', 'review',
+        ]);
+        expect(task.input).toMatchObject({ allowedToolIds: [] });
+    });
+
+    it.each(['inherit', 'none'])('applies a frozen run context to dynamically patched Agent nodes (%s)', async policy => {
+        const sessionContext = { projectInstructions: 'original project', skillInstructions: 'loaded rules', skillIndex: 'index' };
+        const flow = spawnFlow();
+        const config = flow.nodes[0].config as any;
+        config.spawn.nodes = [{ id: 'spawned', name: 'child', plugin: 'builtin.agent', pluginVersion: '1.0.0',
+            config: { instruction: 'child request', systemPromptPolicy: policy, approval: 'none' }, inputs: {}, capabilities: [] }];
+        const resolveNewRunContext = vi.fn(async () => sessionContext);
+        const execution = await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), resolveNewRunContext,
+            hooks: { descriptor: { source: 'test', trusted: true, contentHash: 'test' },
+                emit: async () => { sessionContext.projectInstructions = 'late edit'; } },
+        }).submit('session-one', flow);
+        expect(resolveNewRunContext).toHaveBeenCalledOnce();
+        expect(resolveNewRunContext).toHaveBeenCalledWith('session-one');
+        const task = (await execution.nodes.get('spawned')!.status()).task;
+        const messages = (task.input as { messages: Array<{ role: string; content: string }> }).messages;
+        expect(messages.map(message => message.content)).toEqual(policy === 'none'
+            ? ['child request'] : ['original project', 'loaded rules', 'index', 'child request']);
+        expect(task.input).toMatchObject({ allowedToolIds: [] });
+    });
+
+    it('binds dynamic identities before submission without expanding declared grants', async () => {
+        const flow = spawnFlow();
+        (flow.nodes[0].config as any).spawn.nodes = [{ id: 'spawned', name: 'child', plugin: 'builtin.agent', pluginVersion: '1.0.0',
+            config: { agentId: 'reviewer', approval: 'none' }, inputs: {}, capabilities: [], budget: { tokens: 10 } }];
+        const bindPatchNode = vi.fn(async (_sessionId, node) => {
+            await Promise.resolve();
+            node.capabilities.push('mutated-tool');
+            return { config: { messages: [{ role: 'system', content: 'identity rules' }, { role: 'user', content: 'review' }],
+                modelName: 'identity-model', approval: 'none', toolIds: ['identity-tool'],
+                delegation: { enabled: true, template: { capabilities: ['identity-tool'] } } },
+                capabilities: ['identity-tool'], budget: { tokens: 999 } };
+        });
+        const execution = await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), bindPatchNode })
+            .submit('session-one', flow);
+        const input = (await execution.nodes.get('spawned')!.status()).task.input;
+        expect(bindPatchNode).toHaveBeenCalledTimes(1);
+        expect(input).toMatchObject({ model: 'identity-model', allowedToolIds: [], tools: [],
+            messages: [{ role: 'system', content: 'identity rules' }, { role: 'user', content: 'review' }] });
+    });
+
+    it('executes a dynamically bound delegation identity with the declared child grants', async () => {
+        const flow = spawnFlow();
+        flow.nodeConnections = { source: { connections: [{ name: 'child-slot', connectionId: 'delegated-connection' }] } };
+        const parent = delegationFlow().nodes[0];
+        (parent.config as any).delegation.template = { agentId: 'child-agent', capabilities: [] };
+        delete (parent.config as any).delegation.resolvedTemplate;
+        (flow.nodes[0].config as any).spawn.nodes = [parent];
+        (flow.nodes[0].config as any).spawn.edges = [];
+        const bindPatchNode = vi.fn(async (_sessionId, node) => ({ config: { ...node.config,
+            delegation: { ...node.config.delegation, fanout: { maxTasks: 3 }, resolvedTemplate: {
+                plugin: 'builtin.agent', pluginVersion: '1.0.0', capabilities: ['extra-tool'],
+                config: { approval: 'none', modelName: 'child-model', connectionId: 'child-slot', toolIds: ['extra-tool'],
+                    messages: [{ role: 'system', content: 'resolved child identity' }] },
+            } },
+        } }));
+        const execution = await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), bindPatchNode })
+            .submit('session-one', flow);
+        const input = (await execution.nodes.get('parent:delegate:1:0')!.status()).task.input;
+        expect(input).toMatchObject({ model: 'child-model', connectionId: 'delegated-connection', allowedToolIds: [], tools: [] });
+        expect(JSON.stringify(input)).toContain('resolved child identity');
+        expect(execution.nodes.has('parent:delegate:1:2')).toBe(false);
+    });
+
+    it.each(['inherit', 'none'].flatMap(policy => [undefined, 'premium', 'global-id'].map(connectionId => ({ policy, connectionId }))))
+    ('inherits Composite defaults and connections in dynamic Agent nodes ($policy, $connectionId)', async ({ policy, connectionId }) => {
+        const child = { ...spawnFlow(), id: 'child', name: 'Child', revision: 1, createdAt: 1, digest: '',
+            systemPrompt: ['child rules'], toolIds: ['ungranted'],
+            connections: [{ name: 'normal', connectionId: 'child-default' }, { name: 'premium', connectionId: 'child-premium' }],
+            defaultConnection: 'normal' } as any;
+        child.nodes[0].config.spawn.nodes = [{ id: 'spawned', name: 'child agent', plugin: 'builtin.agent', pluginVersion: '1.0.0',
+            config: { systemPromptPolicy: policy, instruction: 'review', approval: 'none', connectionId }, inputs: {}, capabilities: [] }];
+        child.nodes[0].config.spawn.edges[0].from = '$parent';
+        const outer = { ...child, id: 'outer', systemPrompt: ['outer rules'], connections: [{ name: 'premium', connectionId: 'outer-premium' }], edges: [], nodes: [{ id: 'nested', name: 'Nested',
+            plugin: 'builtin.flow', pluginVersion: '1.0.0', config: { flowId: 'child' }, inputs: {} }] };
+        const spec = await flowToDag(outer, undefined, undefined, async () => child);
+        expect(spec.nodeDefaults?.['nested/source'].systemPrompt).toEqual(['child rules']);
+        expect(spec.nodeDefaults).not.toHaveProperty('nested');
+        const execution = await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            hooks: { descriptor: { trusted: true, source: 'test', contentHash: 'test' }, emit: async () => {
+                spec.nodeDefaults!['nested/source'].systemPrompt = ['late edit'];
+            } },
+        }).submit('session-one', spec);
+        const input = (await execution.nodes.get('spawned')!.status()).task.input as any;
+        expect(input.messages.map((message: any) => message.content)).toEqual(policy === 'none' ? ['review'] : ['child rules', 'review']);
+        expect(input.allowedToolIds).toEqual([]);
+        expect(input.connectionId).toBe(connectionId === 'premium' ? 'child-premium' : connectionId ?? 'child-default');
+    });
+
+    it('does not submit any patch nodes when a later identity binding fails', async () => {
+        const flow = spawnFlow();
+        const spawn = (flow.nodes[0].config as any).spawn;
+        spawn.nodes.push({ ...spawn.nodes[0], id: 'second' });
+        const bindPatchNode = vi.fn(async (_sessionId, node) => {
+            if (node.id === 'second') throw new Error('identity unavailable');
+            return {};
+        });
+        await expect(new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), bindPatchNode })
+            .submit('session-one', flow)).rejects.toThrow('identity unavailable');
+        const tasks = await kernel.listSessionTasks('session-one');
+        expect(tasks.some(task => ['spawned', 'second'].includes(String(task.labels?.flowNodeId)))).toBe(false);
+        expect(bindPatchNode).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not duplicate Session context already present in bound Agent messages', async () => {
+        const flow = agentFlow();
+        (flow.nodes[0].config as any).messages.unshift({ role: 'system', content: 'project rules' });
+        const execution = await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            sessionContext: { projectInstructions: 'project rules', skillInstructions: '', skillIndex: '' },
+        }).submit('session-one', flow);
+        const input = (await execution.nodes.get('agent')!.status()).task.input as { messages: Array<{ content: string }> };
+        expect(input.messages.map(message => message.content)).toEqual(['project rules', 'hello']);
+    });
+
+    it('applies host identity binding before standalone node submission', async () => {
+        const handlers = new Map<string, (args: unknown) => Promise<any>>();
+        const bindNode = vi.fn(async (_sessionId, node, defaults) => ({ config: { ...defaults, ...node.config,
+            messages: [{ role: 'system', content: 'resolved identity' }, { role: 'user', content: 'task' }], modelName: 'bound-model' } }));
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never, bindNode })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        const flow = { ...agentFlow(), id: 'flow', name: 'Flow', revision: 1, createdAt: 1, digest: '', systemPrompt: ['flow rules'] };
+        await handlers.get(FlowCommand.RunStart)!({ sessionId: 'session-one', flow });
+        expect(bindNode).toHaveBeenCalledWith('session-one', expect.objectContaining({ id: 'agent' }), expect.objectContaining({ systemPrompt: ['flow rules'] }));
+        const task = (await kernel.listSessionTasks('session-one')).find(task => task.program.kind === 'llm.agent')!;
+        expect(task.input).toMatchObject({ model: 'bound-model', messages: [{ role: 'system', content: 'resolved identity' }, { role: 'user', content: 'task' }] });
+    });
 
     it('persists fan-in DAG nodes and aggregates every output', async () => {
         const execution = await executor(kernel).submit('session-one', valueFlow());
@@ -49,6 +367,76 @@ describe('DurableFlowExecutor', () => {
         expect(exit.status).toBe('succeeded');
         expect(JSON.stringify(exit.output)).toContain('durable answer');
         expect((await execution.nodes.get('agent')!.status()).task.effects).not.toEqual({});
+    });
+
+    it('fails the run when a required Agent node fails', async () => {
+        const flow = agentFlow();
+        (flow.nodes[0].config as Record<string, unknown>).messages = [{ role: 'user', content: 'fail child' }];
+        const execution = await executor(kernel).submit('session-one', flow);
+        const exit = await execution.root.wait({ timeoutMs: 2_000 });
+
+        expect(exit.status).toBe('failed');
+        expect(exit.error?.message).toContain('child failed');
+    });
+
+    it('fails the run when a persistOutput:false node fails', async () => {
+        const flow = agentFlow();
+        (flow.nodes[0].config as Record<string, unknown>).messages = [{ role: 'user', content: 'fail child' }];
+        (flow.nodes[0].config as Record<string, unknown>).persistOutput = false;
+        const execution = await executor(kernel).submit('session-one', flow);
+        const exit = await execution.root.wait({ timeoutMs: 2_000 });
+
+        expect(exit.status).toBe('failed');
+        expect(exit.error?.message).toContain('child failed');
+    });
+
+    it('tolerates a failed node when its outgoing edge explicitly continues', async () => {
+        const flow = agentFlow();
+        (flow.nodes[0].config as Record<string, unknown>).messages = [{ role: 'user', content: 'fail child' }];
+        flow.nodes.push(valueNode('after', 'AFTER'));
+        flow.edges.push({ id: 'agent-after', from: 'agent', to: 'after', input: 'input', output: 'result', onFailure: 'continue' });
+
+        const execution = await executor(kernel).submit('session-one', flow);
+        const exit = await execution.root.wait({ timeoutMs: 2_000 });
+
+        expect(exit.status).toBe('succeeded');
+        expect((exit.output as { failures?: Record<string, string> }).failures?.agent).toContain('child failed');
+        expect(JSON.stringify(exit.output)).toContain('AFTER');
+    });
+
+    it('persists the scheduler checkpoint immediately after a node task is submitted', async () => {
+        const flow = agentFlow();
+        flow.nodes.unshift({ ...valueNode('answer', null), plugin: 'builtin.human',
+            config: { requestId: 'answer', prompt: 'Continue' } });
+        flow.edges.push({ id: 'answer-agent', from: 'answer', to: 'agent', input: 'input', output: 'response' });
+
+        let release!: () => void;
+        const blocked = new Promise<void>(resolve => { release = resolve; });
+        const originalExecute = model.execute;
+        model.execute = vi.fn(async (...args: Parameters<typeof model.execute>) => {
+            await blocked;
+            return originalExecute(...args);
+        });
+        const submit = vi.spyOn(kernel, 'submit');
+        try {
+            const run = executor(kernel);
+            const original = await run.submit('session-one', flow);
+            const session = await kernel.openSession('session-one');
+            await (await session.attachTask(original.nodes.get('answer')!.id))
+                .respond({ interactionId: 'answer', value: 'yes' });
+            await vi.waitFor(() => expect(original.nodes.has('agent')).toBe(true));
+            await run.waitForCheckpoint('session-one', original.root.id, [original.nodes.get('agent')!.id], 1_000);
+            const agentSpec = submit.mock.calls
+                .map(([, spec]) => spec as { labels?: Record<string, string>; requestId?: string })
+                .find(spec => spec.labels?.flowNodeId === 'agent');
+            expect(agentSpec?.requestId).toBe(`flow:${original.root.id}:agent#1`);
+            release();
+            expect((await original.root.wait({ timeoutMs: 2_000 })).status).toBe('succeeded');
+        } finally {
+            release();
+            model.execute = originalExecute;
+            submit.mockRestore();
+        }
     });
 
     it('routes to the active branch and skips the disabled branch', async () => {
@@ -82,6 +470,288 @@ describe('DurableFlowExecutor', () => {
         expect(Object.keys((exit.output as { nodes: Record<string, unknown> }).nodes)).toEqual(['entry', 'body']);
     });
 
+    it('does not dispatch the next loop iteration before the previous one completes', async () => {
+        const entry = { ...valueNode('entry', 'A'), config: { ...valueNode('entry', 'A').config, maxIterations: 3 } };
+        const body = { id: 'body', name: 'body', plugin: 'builtin.human', pluginVersion: '1.0.0',
+            config: { requestId: 'body', prompt: 'Continue' }, inputs: {}, capabilities: [] };
+        const execution = await executor(kernel).submit('session-one', {
+            nodes: [entry, body],
+            edges: [
+                { id: 'entry-body', from: 'entry', to: 'body', output: 'result', input: 'input' },
+                { id: 'body-entry', from: 'body', to: 'entry', output: 'result', input: 'input' },
+            ],
+        });
+
+        const bodyTasks = async () => (await kernel.listSessionTasks('session-one'))
+            .filter(task => task.labels?.flowNodeId === 'body');
+        await vi.waitFor(async () => expect(await bodyTasks()).toHaveLength(1));
+        await new Promise(resolve => setTimeout(resolve, 50));
+        expect(await bodyTasks()).toHaveLength(1);
+        expect(execution.iterations.get('body')).toBe(1);
+
+        const session = await kernel.openSession('session-one');
+        const respondBody = async () => {
+            let pending: Awaited<ReturnType<typeof kernel.listSessionTasks>>[number] | undefined;
+            await vi.waitFor(async () => {
+                pending = (await bodyTasks()).find(task => task.interactions?.body?.status === 'pending');
+                expect(pending).toBeDefined();
+            });
+            await (await session.attachTask(pending!.id)).respond({ interactionId: 'body', value: 'continue' });
+        };
+        await respondBody();
+        await vi.waitFor(async () => expect(await bodyTasks()).toHaveLength(2));
+        await respondBody();
+        await vi.waitFor(async () => expect(await bodyTasks()).toHaveLength(3));
+        await respondBody();
+        expect((await execution.root.wait({ timeoutMs: 3_000 })).status).toBe('succeeded');
+        expect(execution.iterations.get('body')).toBe(3);
+    });
+
+    it('runs repeated compacted model exchanges as distinct durable Effects', async () => {
+        const requests: any[][] = [];
+        model.execute = async (raw: any) => {
+            requests.push(raw.request.messages);
+            const iteration = requests.length;
+            return { choices: [{ index: 0, finish_reason: iteration < 5 ? 'tool_calls' : 'stop',
+                message: iteration < 5 ? { role: 'assistant', content: null,
+                    tool_calls: [{ id: `inspect-${iteration}`, type: 'function', function: { name: 'inspect', arguments: '{}' } }] }
+                    : { role: 'assistant', content: 'finished after five distinct requests' } }] };
+        };
+        kernel.registerEffect({ kind: 'tool.call', version: '1', async execute() {
+            return { toolId: 'inspect', success: true, output: 'inspected', durationMs: 1 };
+        } });
+        const flow = agentFlow();
+        flow.nodes[0].capabilities = ['inspect'];
+        Object.assign(flow.nodes[0].config as object, {
+            contextCompaction: { maxMessages: 4, keepRecent: 1 },
+            messages: [{ role: 'system', content: 'Preserve this policy' }, { role: 'user', content: 'Inspect repeatedly' }],
+        });
+        const execution = await executor(kernel).submit('session-one', flow);
+        expect((await execution.root.wait({ timeoutMs: 3_000 })).status).toBe('succeeded');
+        expect(requests.map(messages => messages.length)).toEqual([2, 4, 4, 4, 4]);
+        expect(requests.every(messages => messages[0].content === 'Preserve this policy')).toBe(true);
+        const snapshot = await execution.nodes.get('agent')!.status();
+        const effects = Object.values(snapshot.task.effects).filter(effect => effect.request.kind === 'llm.chat');
+        expect(effects).toHaveLength(5);
+        expect(effects.every(effect => effect.status === 'succeeded')).toBe(true);
+        expect(new Set(effects.map(effect => effect.request.idempotencyKey)).size).toBe(5);
+        kernel.dispose();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        await kernel.initialize();
+        const handlers = new Map<string, (args: unknown) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        const transcript = await handlers.get(FlowCommand.RunTranscript)!({ sessionId: 'session-one', taskId: execution.root.id,
+            targetTaskId: execution.nodes.get('agent')!.id });
+        expect(transcript.effects.filter((effect: any) => effect.request.kind === 'llm.chat')).toHaveLength(5);
+        expect(JSON.stringify(transcript.effects)).toContain('inspect-1');
+        expect(JSON.stringify(transcript.effects)).toContain('finished after five distinct requests');
+        const taskId = execution.nodes.get('agent')!.id;
+        const history = await (await (await kernel.openSession('session-one')).attachTask(taskId)).history();
+        const early = history.find(task => Object.keys(task.effects).length >= 2 && Object.keys(task.effects).length < 5)!;
+        let page = await readFlowTaskTranscript(kernel, 'session-one', execution.root.id, taskId, { version: early.version, limit: 1 });
+        const collected = [...page.effects];
+        while (page.nextOffset !== undefined) {
+            page = await readFlowTaskTranscript(kernel, 'session-one', execution.root.id, taskId,
+                { version: page.version, offset: page.nextOffset, limit: 1 });
+            collected.push(...page.effects);
+        }
+        expect(collected.map(effect => effect.effectId)).toEqual(Object.keys(early.effects).sort());
+        expect(JSON.stringify(collected)).not.toContain('finished after five distinct requests');
+        expect(page.version).toBe(early.version);
+        await expect(readFlowTaskTranscript(kernel, 'session-one', execution.root.id, taskId, { offset: 1 }))
+            .rejects.toThrow('Invalid transcript page');
+    });
+
+    it('executes a command retry with fresh capabilities, preserved budgets and persistent membership', async () => {
+        const flow = agentFlow(); flow.nodes[0].budget = { tokens: 3 };
+        const execution = await executor(kernel).submit('session-one', flow);
+        await execution.root.wait({ timeoutMs: 2000 });
+        const rootBefore = (await execution.root.status()).task.output;
+        const source = execution.nodes.get('agent')!.id;
+        const handlers = new Map<string, (args: unknown) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        const budget = vi.spyOn(kernel, 'setBudget');
+        const args = { sessionId: 'session-one', taskId: execution.root.id, targetTaskId: source, requestId: 'retry-one' };
+        const [first, same] = await Promise.all([handlers.get(FlowCommand.RunTaskRetry)!(args), handlers.get(FlowCommand.RunTaskRetry)!(args)]);
+        expect(first.targetTaskId).toBe(same.targetTaskId);
+        const task = await (await kernel.openSession('session-one')).attachTask(first.targetTaskId);
+        expect((await task.wait({ timeoutMs: 2000 })).status).toBe('succeeded');
+        expect(budget).toHaveBeenCalledWith('session-one', expect.any(String), 'tokens', 3, undefined);
+        const record = (await task.status()).task;
+        expect(record).toMatchObject({ retryOfTaskId: source, input: { allowedToolIds: [] } });
+        const events = (await kernel.taskEventPage('session-one', task.id)).items;
+        expect(events.filter(event => event.type === 'resource.created')).toHaveLength(1);
+        expect(events.filter(event => event.type === 'task.started')).toHaveLength(1);
+        const snapshot = await handlers.get(FlowCommand.RunGet)!({ taskId: execution.root.id });
+        expect(snapshot.taskTree.some((item: any) => item.id === task.id)).toBe(true);
+        expect((await execution.root.status()).task.output).toEqual(rootBefore);
+        expect((await readFlowTaskTranscript(kernel, 'session-one', execution.root.id, task.id)).effects).not.toHaveLength(0);
+        expect((await handlers.get(FlowCommand.RunTaskRetry)!(args)).targetTaskId).toBe(task.id);
+    });
+
+    it('targets pending interactions across concurrent retries without selecting an ambiguous request', async () => {
+        const session = await kernel.openSession('session-one');
+        const submission = executor(kernel).submit('session-one', { nodes: [{ ...valueNode('human', null),
+            plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Choose' } }], edges: [] });
+        let source = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one')).find(task => task.interactions?.answer?.status === 'pending');
+            expect(task).toBeDefined(); source = task!.id;
+        });
+        await (await session.attachTask(source)).respond({ interactionId: 'answer', value: 'initial' });
+        const execution = await submission;
+        await execution.root.wait({ timeoutMs: 2000 });
+        const handlers = new Map<string, (args: unknown) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        await handlers.get(FlowCommand.RunGet)!({ taskId: execution.root.id, sessionId: 'session-one' });
+        const retries = await Promise.all(['one', 'two'].map(request => prepareFlowTaskRetry(session, execution.root.id, source, request)));
+        await Promise.all(retries.map(task => task.start()));
+        await vi.waitFor(async () => {
+            for (const task of retries) expect((await task.status()).task.interactions?.answer?.status).toBe('pending');
+        });
+        const args = { taskId: execution.root.id, requestId: 'answer', value: 'first' };
+        await expect(handlers.get(FlowCommand.RunRespond)!(args)).rejects.toThrow('Ambiguous interaction');
+        await expect(handlers.get(FlowCommand.RunRespond)!({ ...args, targetTaskId: 'outside' })).rejects.toThrow('outside this run');
+        await handlers.get(FlowCommand.RunRespond)!({ ...args, targetTaskId: retries[0].id });
+        expect((await retries[0].wait({ timeoutMs: 2000 })).status).toBe('succeeded');
+        await expect(handlers.get(FlowCommand.RunRespond)!({ ...args, targetTaskId: retries[0].id })).resolves.toMatchObject({ responded: true });
+        await expect(handlers.get(FlowCommand.RunRespond)!({ ...args, targetTaskId: retries[0].id, value: 'different' })).rejects.toThrow('conflict');
+        expect((await retries[1].status()).task.interactions?.answer?.status).toBe('pending');
+        await handlers.get(FlowCommand.RunRespond)!(args);
+        expect((await retries[1].wait({ timeoutMs: 2000 })).status).toBe('succeeded');
+    });
+
+    it.each(['target', 'node', 'cancel'])('refreshes persisted retry membership before %s control', async operation => {
+        const execution = await executor(kernel).submit('session-one', valueFlow());
+        await execution.root.wait({ timeoutMs: 2000 });
+        const handlers = new Map<string, (args: unknown) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        await handlers.get(FlowCommand.RunGet)!({ taskId: execution.root.id, sessionId: 'session-one' });
+        const session = await kernel.openSession('session-one');
+        const retry = await prepareFlowTaskRetry(session, execution.root.id, execution.nodes.get('left')!.id, 'control');
+        const args = { taskId: execution.root.id, targetTaskId: retry.id };
+        const command = operation === 'cancel' ? FlowCommand.RunTaskCancel : FlowCommand.RunSignal;
+        if (operation === 'cancel') {
+            await handlers.get(command)!(args);
+            expect((await retry.status()).task.status).toBe('cancelled');
+        } else {
+            const target = operation === 'node' ? { taskId: execution.root.id, nodeId: 'left' } : args;
+            expect(await handlers.get(command)!({ ...target, signal: { type: 'inject', payload: 'new task' } }))
+                .toMatchObject({ targetTaskId: retry.id, signalled: true });
+            expect((await kernel.taskEventPage('session-one', retry.id)).items.some(event => event.type === 'task.signal')).toBe(true);
+        }
+        await expect(handlers.get(command)!({ ...args, targetTaskId: 'outside', signal: { type: 'inject' } }))
+            .rejects.toThrow('outside this run');
+    });
+
+    it('cancels all concurrent retry members even when the cached latest node is older', async () => {
+        const execution = await executor(kernel).submit('session-one', valueFlow());
+        await execution.root.wait({ timeoutMs: 2000 });
+        const handlers = new Map<string, (args: unknown) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        await handlers.get(FlowCommand.RunGet)!({ taskId: execution.root.id, sessionId: 'session-one' });
+        const session = await kernel.openSession('session-one');
+        const retries = await Promise.all(['one', 'two'].map(request => prepareFlowTaskRetry(session, execution.root.id,
+            execution.nodes.get('left')!.id, request)));
+        await handlers.get(FlowCommand.RunCancel)!({ taskId: execution.root.id });
+        for (const retry of retries) expect((await retry.status()).task.status).toBe('cancelled');
+    });
+
+    it('persists concurrent manual retry membership before execution and preserves node budgets', async () => {
+        const flow = valueFlow(); flow.nodes[0].budget = { tokens: 7 };
+        const execution = await executor(kernel).submit('session-one', flow);
+        await execution.root.wait({ timeoutMs: 2000 });
+        const session = await kernel.openSession('session-one'), source = execution.nodes.get('left')!.id;
+        const [first, duplicate, second] = await Promise.all(['one', 'one', 'two'].map(request =>
+            prepareFlowTaskRetry(session, execution.root.id, source, request)));
+        expect(first.id).toBe(duplicate.id); expect(second.id).not.toBe(first.id);
+        expect((await first.status()).task.status).toBe('created');
+        const saved = (await session.getShared(`flow.run.${execution.root.id}.retries`))!.value as any[];
+        expect(saved).toHaveLength(2);
+        expect(saved.map(entry => entry.iteration).sort()).toEqual([2, 3]);
+        expect(saved.every(entry => entry.retryOfTaskId === source && entry.budget.tokens === 7)).toBe(true);
+        const restored = await restoreFlowHandle(session, execution.root.id);
+        expect(restored.iterations.get('left')).toBe(3);
+        expect(restored.taskIds.has(first.id)).toBe(true);
+        expect((await readFlowTaskTranscript(kernel, 'session-one', execution.root.id, first.id)).taskId).toBe(first.id);
+        await expect(prepareFlowTaskRetry(session, execution.root.id, source, '')).rejects.toThrow('requestId');
+        await expect(prepareFlowTaskRetry(session, execution.root.id, execution.root.id, 'root')).rejects.toThrow('outside this run');
+    });
+
+    it('reattaches persisted Run nodes, iterations, usage and updated goals in a new service', async () => {
+        const handlers = new Map<string, (args: unknown) => Promise<any>>();
+        const register = () => new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        register();
+        const flow = { ...loopFlow(3), id: 'flow', name: 'Flow', revision: 1, createdAt: 1, digest: '' };
+        const { taskId } = await handlers.get(FlowCommand.RunStart)!({ sessionId: 'session-one', flow, goal: { objective: 'original' } });
+        const before = await handlers.get(FlowCommand.RunGet)!({ taskId });
+        await handlers.get(FlowCommand.RunGoalUpdate)!({ taskId, goal: { objective: 'updated' } });
+        kernel.dispose();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        await kernel.initialize();
+        register();
+        const restored = await handlers.get(FlowCommand.RunGet)!({ taskId, sessionId: 'session-one' });
+        expect(restored.attachedFromStorage).toBe(true);
+        expect(restored.goal.objective).toBe('updated');
+        expect(restored.iterations).toEqual(before.iterations);
+        expect(restored.nodes.map((node: any) => [node.nodeId, node.snapshot.task.id]))
+            .toEqual(before.nodes.map((node: any) => [node.nodeId, node.snapshot.task.id]));
+        expect(restored.taskTree.map((task: any) => task.id).sort()).toEqual(before.taskTree.map((task: any) => task.id).sort());
+        expect(restored.usage).toEqual(before.usage);
+        const attachedGet = handlers.get(FlowCommand.RunGet)!;
+        register();
+        await handlers.get(FlowCommand.RunGet)!({ taskId, sessionId: 'session-one' });
+        await handlers.get(FlowCommand.RunGoalUpdate)!({ taskId, goal: { objective: 'updated by another service' } });
+        expect((await attachedGet({ taskId })).goal.objective).toBe('updated by another service');
+        await expect(handlers.get(FlowCommand.RunGet)!({ taskId, sessionId: 'wrong' })).rejects.toThrow('Session mismatch');
+    });
+
+    it('rejects signals addressed to a task outside the selected Run', async () => {
+        const handlers = new Map<string, (args: unknown) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        const flow = { ...valueFlow(), id: 'flow', name: 'Flow', revision: 1, createdAt: 1, digest: '' };
+        const run = await handlers.get(FlowCommand.RunStart)!({ sessionId: 'session-one', flow });
+        const other = await executor(kernel).submit('session-one', valueFlow());
+        const target = other.nodes.get('left')!;
+        const before = (await target.status()).task.pendingEvents;
+        await expect(handlers.get(FlowCommand.RunSignal)!({ taskId: run.taskId, targetTaskId: target.id,
+            signal: { type: 'steer', payload: 'wrong run' } })).rejects.toThrow('outside this run');
+        expect((await target.status()).task.pendingEvents).toEqual(before);
+    });
+
+    it.each([0, -1, 501, NaN])('rejects invalid transcript page limits before reading tasks (%s)', async limit => {
+        await expect(readFlowTaskTranscript(kernel, 'missing', 'missing', 'missing', { limit }))
+            .rejects.toThrow('Invalid transcript page');
+    });
+
+    it('includes suppressed loop instances in transcript membership and rejects unrelated tasks', async () => {
+        const flow = loopFlow(3);
+        (flow.nodes[0].config as any).persistOutput = false;
+        const execution = await executor(kernel).submit('session-one', flow);
+        await execution.root.wait({ timeoutMs: 3_000 });
+        const root = (await execution.root.status()).task;
+        const runTasks = (root.input as any).runTasks as Array<{ nodeId: string; taskId: string }>;
+        const entries = runTasks.filter(task => task.nodeId === 'entry');
+        expect(entries).toHaveLength(3);
+        for (const entry of entries) {
+            expect((await readFlowTaskTranscript(kernel, 'session-one', root.id, entry.taskId)).taskId).toBe(entry.taskId);
+        }
+        const unrelated = await executor(kernel).submit('session-one', valueFlow());
+        await expect(readFlowTaskTranscript(kernel, 'session-one', root.id, unrelated.nodes.get('left')!.id))
+            .rejects.toThrow('outside this run');
+        await expect(readFlowTaskTranscript(kernel, 'session-one', entries[0].taskId, entries[0].taskId))
+            .rejects.toThrow('Not a Flow run');
+    });
+
     it('dynamically spawns nodes via a patch-graph effect', async () => {
         const execution = await executor(kernel).submit('session-one', spawnFlow());
         const exit = await execution.root.wait({ timeoutMs: 3_000 });
@@ -94,7 +764,11 @@ describe('DurableFlowExecutor', () => {
     });
 
     it('fans out bounded structured delegation payloads', async () => {
-        const execution = await executor(kernel).submit('session-one', delegationFlow());
+        const execution = await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            sessionContext: { projectInstructions: 'delegation project rules', skillInstructions: '', skillIndex: '' },
+        }).submit('session-one', delegationFlow());
+        const childInput = (await execution.nodes.get('parent:delegate:1:0')!.status()).task.input as { messages: Array<{ content: string }> };
+        expect(childInput.messages.map(message => message.content)).toContain('delegation project rules');
         const exit = await execution.root.wait({ timeoutMs: 3_000 });
         const nodes = (exit.output as { nodes: Record<string, unknown> }).nodes;
 
@@ -150,6 +824,59 @@ describe('DurableFlowExecutor', () => {
         const execution = await executor(kernel).submit('session-one', flow);
         expect((await execution.root.wait({ timeoutMs: 2_000 })).status).toBe('succeeded');
         expect(execution.nodes.has('spawned')).toBe(true);
+    });
+
+    it.each([
+        ['duplicate nodes', (spawn: any) => spawn.nodes.push({ ...spawn.nodes[0] }), 'node id'],
+        ['existing node identity', (spawn: any) => spawn.nodes[0].id = 'source', 'node id'],
+        ['duplicate edges', (spawn: any) => spawn.edges.push({ ...spawn.edges[0] }), 'edge id'],
+        ['dynamic cycle', (spawn: any) => spawn.edges.push({ id: 'cycle', from: 'spawned', to: 'spawned', kind: 'control' }), 'cycle'],
+        ['unknown endpoint', (spawn: any) => spawn.edges[0].from = 'missing', 'scope'],
+        ['existing target', (spawn: any) => spawn.edges[0].to = 'source', 'scope'],
+        ['unknown output', (spawn: any) => spawn.edges[0].output = 'missing', 'output'],
+        ['unknown input', (spawn: any) => spawn.edges[0].input = 'missing', 'input'],
+    ])('rejects %s before creating spawned tasks', async (_name, mutate, error) => {
+        const flow = spawnFlow();
+        mutate((flow.nodes[0].config as any).spawn);
+        await expect(executor(kernel).submit('session-one', flow)).rejects.toThrow(error);
+        const tasks = await (await kernel.openSession('session-one')).listTasks();
+        expect(tasks).toHaveLength(1);
+    });
+
+    it('rejects references to unrelated global nodes', async () => {
+        const flow = spawnFlow();
+        flow.nodes.push({ ...flow.nodes[0], id: 'unrelated', plugin: 'builtin.transform', config: { value: 'other' } });
+        (flow.nodes[0].config as any).spawn.edges[0].from = '$upstream:unrelated';
+        await expect(executor(kernel).submit('session-one', flow)).rejects.toThrow('scope');
+    });
+
+    it('allows declared upstream dependencies in a spawned patch', async () => {
+        const flow = spawnFlow();
+        flow.nodes.push({ ...flow.nodes[0], id: 'upstream', plugin: 'builtin.transform', config: { value: 'upstream' } });
+        flow.edges.push({ id: 'upstream-source', from: 'upstream', to: 'source', kind: 'control' });
+        (flow.nodes[0].config as any).spawn.edges[0].from = '$upstream:upstream';
+        const execution = await executor(kernel).submit('session-one', flow);
+        expect((await execution.root.wait({ timeoutMs: 2_000 })).status).toBe('succeeded');
+        expect(execution.nodes.has('spawned')).toBe(true);
+    });
+
+    it.each([false, true])('checks patch identity on replay (conflict=%s)', async conflict => {
+        const flow = spawnFlow();
+        const first = (flow.nodes[0].config as any).spawn;
+        first.idempotencyKey = 'shared-patch';
+        first.edges = [];
+        const second = JSON.parse(JSON.stringify(flow.nodes[0]));
+        second.id = 'second';
+        if (conflict) second.config.spawn.nodes[0].config.value = 'DIFFERENT';
+        flow.nodes.push(second);
+        flow.edges.push({ id: 'source-second', from: 'source', to: 'second', kind: 'control' });
+        const run = executor(kernel).submit('session-one', flow);
+        if (conflict) await expect(run).rejects.toThrow('idempotency conflict');
+        else {
+            const execution = await run;
+            expect((await execution.root.wait({ timeoutMs: 2_000 })).status).toBe('succeeded');
+            expect(execution.iterations.get('spawned')).toBe(1);
+        }
     });
 
     it('repairs invalid structured output and records token usage', async () => {
@@ -357,6 +1084,25 @@ function spawnFlow(): DagRunSpec {
     };
 }
 
+describe('FlowAggregateProgram legacy state recovery', () => {
+    it('hydrates missing failures/resolved before reducing a legacy v1 state', () => {
+        const program = new FlowAggregateProgram();
+        const legacy = JSON.parse(JSON.stringify({
+            awaitingSchedule: false,
+            dependencies: [{ taskId: 'task-1', nodeId: 'node-1' }],
+            outputs: {},
+        }));
+        const decision = program.reduce(legacy as never, {
+            type: 'task-exited', taskId: 'task-1',
+            exit: { taskId: 'task-1', status: 'succeeded', output: { ok: true }, completedAt: 1 },
+        } as never);
+        expect(decision.next).toMatchObject({
+            type: 'complete',
+            output: { nodes: { 'node-1': { ok: true } } },
+        });
+    });
+});
+
 describe('upstreamOf', () => {
     it('returns ancestors nearest-first (reverse compensation order)', () => {
         const edges = [
@@ -371,6 +1117,7 @@ describe('conditional loop exit', () => {
     let manager: IVFSManager;
     let fs: IFileSystem;
     let kernel: Kernel;
+    let model: ReturnType<typeof llmEffect>;
 
     async function setup(score: number): Promise<void> {
         ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));

@@ -15,9 +15,11 @@ export const FlowCommand = {
     Presentations: 'plugin.dag.presentations',
     RunStart: 'dag.run.start',
     RunGet: 'dag.run.get',
+    RunTranscript: 'dag.run.transcript',
     RunCancel: 'dag.run.cancel',
     RunRespond: 'dag.run.respond',
     RunSignal: 'dag.run.signal',
     RunTaskCancel: 'dag.run.task.cancel',
+    RunTaskRetry: 'dag.run.task.retry',
     RunGoalUpdate: 'dag.run.goal.update',
 } as const;

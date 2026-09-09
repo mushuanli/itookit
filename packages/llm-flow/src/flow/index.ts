@@ -8,6 +8,7 @@ export { createBuiltinDagPluginRegistry } from './builtin-plugins';
 export { DurableFlowExecutor } from './executor';
 export type { DurableFlowExecutorOptions, FlowExecutionHandle, FlowWorkspaceLease, FlowWorkspaceManager } from './executor';
 export { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from './programs';
+export { registerDurablePrograms } from './register-programs';
 export { findCycles, type GraphCycles, type GraphEdge, type GraphNode } from './graph';
 export type { FlowNodeBinder } from './to-dag';
 export {
@@ -20,3 +21,11 @@ export { resolveFlowParameters, validateFlowParameters } from './parameters';
 export { resolveConnectionId, resolveNodeConnection } from './connections';
 export { FlowCommand } from './command-names';
 export * from './workflow';
+
+export { readFlowTaskTranscript, type FlowTaskTranscript, type FlowTranscriptQuery } from './transcript';
+
+export { prepareFlowTaskRetry, type FlowRunMember } from './run-members';
+
+export { retryFlowTask } from './retry-task';
+
+export { FlowSchemaRegistry, flowSchemaIssue } from './schema-registry';

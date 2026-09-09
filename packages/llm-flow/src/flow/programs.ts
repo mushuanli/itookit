@@ -95,33 +95,67 @@ export class FlowHumanProgram implements DurableTaskProgram<FlowHumanState, Flow
 }
 
 export interface FlowAggregateInput {
-    dependencies: Array<{ taskId: string; nodeId: string }>;
+    awaitingSchedule?: boolean;
+    dependencies: Array<{ taskId: string; nodeId: string; tolerated?: boolean; collectOutput?: boolean }>;
 }
 
 interface FlowAggregateState extends FlowAggregateInput {
     outputs: Record<string, JsonValue>;
+    failures: Record<string, JsonValue>;
+    resolved: string[];
 }
 
 export class FlowAggregateProgram implements DurableTaskProgram<FlowAggregateState, FlowAggregateInput, JsonValue> {
     readonly manifest = { kind: 'flow.aggregate', version: '1' };
 
     init(input: FlowAggregateInput): Decision<FlowAggregateState, JsonValue> {
-        const state = { ...clone(input), outputs: {} };
+        const state = { ...clone(input), outputs: {}, failures: {}, resolved: [] };
+        if (input.awaitingSchedule) return { state, next: { type: 'wait', on: { type: 'signal' } } };
         return input.dependencies.length
             ? { state, next: dependencyWait(input.dependencies) }
             : { state, next: { type: 'complete', output: { nodes: {} } } };
     }
 
     reduce(state: Readonly<FlowAggregateState>, event: TaskInputEvent): Decision<FlowAggregateState, JsonValue> {
-        const next = clone(state) as FlowAggregateState;
+        // Older flow.aggregate@1 states predate `failures`/`resolved`; hydrate
+        // them so recovery from an existing Task record remains compatible.
+        const hydrated = clone(state) as Partial<FlowAggregateState>;
+        hydrated.outputs = hydrated.outputs ?? {};
+        hydrated.failures = hydrated.failures ?? {};
+        hydrated.dependencies = hydrated.dependencies ?? [];
+        hydrated.resolved = hydrated.resolved ?? hydrated.dependencies
+            .filter(item => item.nodeId in hydrated.outputs!)
+            .map(item => item.taskId);
+        const next = hydrated as FlowAggregateState;
+        if (next.awaitingSchedule) {
+            if (event.type === 'signal' && event.signal.type === 'flow.schedule.failed') {
+                return { state: next, next: { type: 'fail', error: { message: String(event.signal.payload) } } };
+            }
+            if (event.type !== 'signal' || event.signal.type !== 'flow.schedule.completed') {
+                return { state: next, next: { type: 'wait', on: { type: 'signal' } } };
+            }
+            next.dependencies = (event.signal.payload as unknown as FlowAggregateInput).dependencies;
+            next.awaitingSchedule = false;
+        }
         if (event.type === 'task-exited') {
             const dependency = next.dependencies.find(item => item.taskId === event.taskId);
-            if (dependency) next.outputs[dependency.nodeId] = jsonValue(event.exit.output);
+            if (dependency) {
+                if (event.exit.status === 'failed' && dependency.tolerated !== true) {
+                    const reason = event.exit.error?.message ?? `${event.taskId} exited with failed`;
+                    return { state: next, next: { type: 'fail', error: { message: `Flow node ${dependency.nodeId} failed: ${reason}` } } };
+                }
+                if (!next.resolved.includes(dependency.taskId)) next.resolved.push(dependency.taskId);
+                if (dependency.collectOutput !== false) next.outputs[dependency.nodeId] = jsonValue(event.exit.output);
+                if (event.exit.status === 'failed') {
+                    next.failures[dependency.nodeId] = jsonValue(event.exit.error?.message ?? event.exit.status);
+                }
+            }
         }
-        const ready = next.dependencies.every(item => item.nodeId in next.outputs);
-        return ready
-            ? { state: next, next: { type: 'complete', output: { nodes: next.outputs } } }
-            : { state: next, next: dependencyWait(next.dependencies) };
+        const ready = next.dependencies.every(item => next.resolved.includes(item.taskId));
+        if (!ready) return { state: next, next: dependencyWait(next.dependencies) };
+        const output: Record<string, JsonValue> = { nodes: next.outputs };
+        if (Object.keys(next.failures).length > 0) output.failures = next.failures;
+        return { state: next, next: { type: 'complete', output } };
     }
 }
 

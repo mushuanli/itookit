@@ -1,3 +1,7 @@
+import type { SchedulerCheckpoint } from './scheduler-checkpoint';
+import { restoreFlowHandle } from './restore-handle';
+import { beginWorkspaceFinalization, type WorkspaceFinalization } from './workspace-finalization';
+import { createRunCatalog } from './run-catalog';
 import type {
     DagEdgeDefinition,
     DagNodeDefinition,
@@ -8,8 +12,6 @@ import type {
     ToolDefinition,
 } from '@itookit/common';
 import {
-    bindCapabilities,
-    type CapabilityBinding,
     type Kernel,
     type JsonValue,
     type SessionHandle,
@@ -27,6 +29,12 @@ export interface FlowWorkspaceManager {
     prepare(sessionId: string, policy: FlowWorkspacePolicy): Promise<FlowWorkspaceLease>;
 }
 import { findCycles } from './graph';
+import { dataEdgeSchemaIssue, validateDataEdgeValue } from './port-contract';
+import { patchIdentityConfig } from './patch-identity';
+import { mergeAgentConfig } from './to-dag';
+import { resolveNodeConnection } from './connections';
+import { bindFlowTaskCapabilities } from './task-capabilities';
+import { graphPatchFingerprint, validateGraphPatch } from './graph-patch';
 import { resolveFlowParameters } from './parameters';
 import {
     delegationPlan,
@@ -39,6 +47,8 @@ import {
 } from './delegation-runtime';
 
 export interface FlowExecutionHandle {
+    /** Reattached records only; no scheduler continuation was restored. */
+    attachedFromStorage?: boolean;
     sessionId: string;
     root: TaskHandle<JsonValue>;
     nodes: Map<string, TaskHandle>;
@@ -47,12 +57,21 @@ export interface FlowExecutionHandle {
     goal?: import('@itookit/common').FlowRunGoal;
     detachedNodes: Set<string>;
     taskIds: Set<string>;
+    /** Host workspace finalization; rejection is observable without an unhandled background promise. */
+    workspaceCompletion?: Promise<void>;
+    workspaceFinalization?: WorkspaceFinalization;
     usage: { tokens: number; startedAt: number; elapsedMs: number };
 }
 
 export interface DurableFlowExecutorOptions {
     kernel: Kernel;
     plugins: DagPluginCatalog;
+    /** Trusted run snapshot applied to every Agent instance, including dynamically added nodes. */
+    sessionContext?: { projectInstructions: string; skillInstructions: string; skillIndex: string };
+    /** Resolve once for a new run only; resume always uses its persisted snapshot. */
+    resolveNewRunContext?(sessionId: string): Promise<NonNullable<DurableFlowExecutorOptions['sessionContext']>>;
+    /** Resolve runtime identities without granting capabilities or changing graph structure. */
+    bindPatchNode?(sessionId: string, node: DagNodeDefinition, defaults?: Record<string, unknown>): Promise<Partial<Pick<DagNodeDefinition, 'config' | 'inputs'>>>;
     resolveTools?(sessionId: string, allowedIds: string[]): Promise<{
         definitions: ToolDefinition[];
         externalIds: string[];
@@ -65,378 +84,560 @@ export interface DurableFlowExecutorOptions {
 const MAX_LOOP_ITERATIONS = 100;
 
 export class DurableFlowExecutor {
+    private readonly active = new Set<Promise<unknown>>();
+
+    /** Drain scheduler continuations before the host closes their storage. */
+    async waitIdle(): Promise<void> {
+        while (this.active.size) await Promise.allSettled([...this.active]);
+    }
+
+    /** Wait until the persisted scheduler checkpoint contains the supplied Task identities. */
+    async waitForCheckpoint(sessionId: string, rootTaskId: string, taskIds: string[], timeoutMs = 5_000): Promise<void> {
+        const session = await this.options.kernel.openSession(sessionId);
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const saved = await session.getShared(`flow.run.${rootTaskId}.scheduler`);
+            const checkpoint = saved?.value as SchedulerCheckpoint | undefined;
+            const ids = new Set<string>((checkpoint?.instances ?? []).flatMap(([, handles]) => handles));
+            if (taskIds.every(id => ids.has(id))) return;
+            await new Promise(resolve => setTimeout(resolve, 25));
+        }
+        throw new Error(`Flow scheduler checkpoint did not include tasks: ${taskIds.join(', ')}`);
+    }
+
+    private track(work: Promise<FlowExecutionHandle>): Promise<FlowExecutionHandle> {
+        this.active.add(work);
+        void work.then(() => this.active.delete(work), () => this.active.delete(work));
+        return work;
+    }
+
     constructor(private readonly options: DurableFlowExecutorOptions) {}
 
-    async submit(
+    submit(sessionId: string, spec: DagRunSpec, parameters?: Record<string, CommonJsonValue>): Promise<FlowExecutionHandle> {
+        return new Promise((resolve, reject) => {
+            void this.track(this.execute(sessionId, spec, parameters, resolve)).then(resolve, reject);
+        });
+    }
+
+    async resume(sessionId: string, rootTaskId: string): Promise<FlowExecutionHandle> {
+        const session = await this.options.kernel.openSession(sessionId);
+        const handle = await restoreFlowHandle(session, rootTaskId);
+        if (await handle.root.poll()) return handle;
+        const root = (await handle.root.status()).task;
+        if (!record(root.state ?? root.input).awaitingSchedule) return handle;
+        const saved = await session.getShared(`flow.run.${rootTaskId}.scheduler`);
+        if (!saved) throw new Error('Flow scheduler checkpoint is missing');
+        const checkpoint = saved.value as unknown as SchedulerCheckpoint;
+        if (checkpoint.version !== 1) throw new Error('Unsupported Flow scheduler checkpoint');
+        if (checkpoint.spec.runPolicy?.workspace && checkpoint.spec.runPolicy.workspace.mode !== 'shared') {
+            throw new Error('Resuming an isolated Flow workspace requires lease restoration');
+        }
+        handle.attachedFromStorage = false;
+        return new Promise((resolve, reject) => {
+            void this.track(this.execute(sessionId, checkpoint.spec, checkpoint.parameters, resolve,
+                { checkpoint, handle })).then(resolve, reject);
+        });
+    }
+
+    private async execute(
         sessionId: string,
         spec: DagRunSpec,
-        parameters?: Record<string, CommonJsonValue>,
+        parameters: Record<string, CommonJsonValue> | undefined,
+        publish: (handle: FlowExecutionHandle) => void,
+        restored?: { checkpoint: SchedulerCheckpoint; handle: FlowExecutionHandle },
     ): Promise<FlowExecutionHandle> {
+        const saved = restored?.checkpoint;
+        spec = structuredClone(spec);
+        parameters = structuredClone(parameters);
+        const plugins = createRunCatalog(this.options.plugins, spec.nodes);
+        const sessionContext = structuredClone(saved ? saved.sessionContext
+            : this.options.resolveNewRunContext ? await this.options.resolveNewRunContext(sessionId) : this.options.sessionContext);
+        const nodeDefaults = new Map(Object.entries(structuredClone(spec.nodeDefaults ?? {}))
+            .map(([id, defaults]) => [id, parameters ? resolveFlowParameters(defaults, parameters) as Record<string, unknown> : defaults]));
+        const nodeConnections = new Map(Object.entries(structuredClone(spec.nodeConnections ?? {})));
+        const declaredNodes = new Map(spec.nodes.map(node => [node.id, node]));
+        for (const edge of spec.edges) {
+            const source = declaredNodes.get(edge.from), target = declaredNodes.get(edge.to);
+            if (!source || !target) throw new Error(`Flow edge ${edge.id} references an unknown node`);
+            const issue = dataEdgeSchemaIssue(edge, source, target, plugins);
+            if (issue) throw new Error(`Flow edge ${edge.id}: ${issue}`);
+        }
+        const maxNodes = positiveInteger(spec.maxNodes ?? spec.runPolicy?.maxNodes) ?? 1_000;
+        if (spec.nodes.length > maxNodes) throw new Error(`Flow node limit exceeded: ${spec.nodes.length}/${maxNodes}`);
         const session = await this.options.kernel.openSession(sessionId);
-        await this.emitHook('run.started', sessionId, { nodeCount: spec.nodes.length });
+        if (!restored) await this.emitHook('run.started', sessionId, { nodeCount: spec.nodes.length });
         const workspacePolicy = spec.runPolicy?.workspace;
         const workspace = workspacePolicy && workspacePolicy.mode !== 'shared'
             ? await this.prepareWorkspace(sessionId, workspacePolicy)
             : undefined;
-        const maxNodes = positiveInteger(spec.maxNodes ?? spec.runPolicy?.maxNodes) ?? 1_000;
-        const maxConcurrency = positiveInteger(spec.maxConcurrency ?? spec.runPolicy?.maxConcurrency) ?? Number.MAX_SAFE_INTEGER;
-        const timeoutMs = positiveInteger(spec.timeoutMs ?? spec.runPolicy?.timeoutMs);
-        const maxTokens = positiveInteger(spec.maxTokens ?? spec.runPolicy?.maxTokens);
-        const startedAt = Date.now();
-        const routeEdgeIds = collectRouteEdgeIds(spec);
-        const { backEdges, loopNodes } = findCycles(spec.nodes, spec.edges);
-        const nodes = (parameters
-            ? spec.nodes.map(node => ({
-                ...node,
-                config: resolveFlowParameters(node.config, parameters) as DagNodeDefinition['config'],
-                inputs: resolveFlowParameters(node.inputs, parameters) as DagNodeDefinition['inputs'],
-            }))
-            : [...spec.nodes]).map(node => workspace && node.plugin === 'builtin.agent'
-                ? { ...node, config: { ...record(node.config), workingDirectory: record(node.config).workingDirectory ?? workspace.directory } }
-                : node);
-        if (nodes.length > maxNodes) throw new Error(`Flow node limit exceeded: ${nodes.length}/${maxNodes}`);
-        const edges = [...spec.edges];
         const instances = new Map<string, TaskHandle[]>();
-        const delegationDepth = new Map(nodes.map(node => [String(node.id), 0]));
-        const delegationGroups = new Map<string, DelegationGroup>();
-        const delegationGroupByChild = new Map<string, string>();
-        const completed = new Set<string>();
-        const skipped = new Set<string>();
-        const detachedNodes = new Set<string>();
-        const appliedPatches = new Set<string>();
-        let consumedTokens = 0;
-        const completionOrder: string[] = [];
-        // 已派发的节点（按派发顺序），用于 supervisor 的「每轮只等本轮派发的 worker」。
-        const dispatchOrder: string[] = [];
-        const edgeState = new Map<string, EdgeState>(
-            edges.map(edge => [edge.id, routeEdgeIds.has(edge.id) ? 'pending' : 'active']),
-        );
+        let published = restored?.handle;
+        if (saved) for (const [id, taskIds] of saved.instances) {
+            instances.set(id, await Promise.all(taskIds.map(taskId => session.attachTask(taskId))));
+        }
+        const completed = new Set<string>(saved?.completed);
+        try {
+            const maxConcurrency = positiveInteger(spec.maxConcurrency ?? spec.runPolicy?.maxConcurrency) ?? Number.MAX_SAFE_INTEGER;
+            const timeoutMs = positiveInteger(spec.timeoutMs ?? spec.runPolicy?.timeoutMs);
+            const maxTokens = positiveInteger(spec.maxTokens ?? spec.runPolicy?.maxTokens);
+            const startedAt = saved?.startedAt ?? Date.now();
+            const routeEdgeIds = collectRouteEdgeIds(spec);
+            const { backEdges, loopNodes } = findCycles(spec.nodes, spec.edges);
+            const nodes = saved?.nodes ?? (parameters
+                ? spec.nodes.map(node => ({
+                    ...node,
+                    config: resolveFlowParameters(node.config, parameters) as DagNodeDefinition['config'],
+                    inputs: resolveFlowParameters(node.inputs, parameters) as DagNodeDefinition['inputs'],
+                }))
+                : [...spec.nodes]).map(node => workspace && node.plugin === 'builtin.agent'
+                    ? { ...node, config: { ...record(node.config), workingDirectory: record(node.config).workingDirectory ?? workspace.directory } }
+                    : node);
+            const edges = saved?.edges ?? [...spec.edges];
+            const delegationDepth = new Map(saved?.delegationDepth ?? nodes.map(node => [String(node.id), 0] as [string, number]));
+            const delegationGroups = new Map<string, DelegationGroup>(saved?.delegationGroups.map(([id, group]) =>
+                [id, { ...group, children: new Set(group.children), completed: new Set(group.completed), succeeded: new Set(group.succeeded) }]));
+            const delegationGroupByChild = new Map<string, string>(saved?.delegationGroupByChild);
+            const skipped = new Set<string>(saved?.skipped);
+            const detachedNodes = new Set<string>(saved?.detachedNodes);
+            const appliedPatches = new Map<string, string>(saved?.appliedPatches);
+            let consumedTokens = saved?.consumedTokens ?? 0;
+            const completionOrder: string[] = saved?.completionOrder ?? [];
+            // 已派发的节点（按派发顺序），用于 supervisor 的「每轮只等本轮派发的 worker」。
+            const dispatchOrder: string[] = saved?.dispatchOrder ?? [];
+            const edgeState = new Map<string, EdgeState>(
+                saved?.edgeState ?? edges.map(edge => [edge.id, routeEdgeIds.has(edge.id) ? 'pending' : 'active']),
+            );
 
-        const latestHandle = (nodeId: string): TaskHandle => {
-            const handles = instances.get(nodeId);
-            if (!handles?.length) throw new Error(`Flow node has no instance: ${nodeId}`);
-            return handles[handles.length - 1];
-        };
-        const latestDone = (nodeId: string): boolean => {
-            const handles = instances.get(nodeId);
-            if (!handles?.length) return false;
-            return completed.has(instanceKey(nodeId, handles.length));
-        };
-        // 环上的节点共享同一个迭代上限（任一环上节点声明即可），非环节点单次执行。
-        const loopMaxIterations = (): number => {
-            for (const id of loopNodes) {
-                const config = nodes.find(n => n.id === id)?.config;
-                if (isRecord(config) && typeof config.maxIterations === 'number' && config.maxIterations > 0) {
-                    return config.maxIterations;
-                }
+            if (saved) {
+                for (const [id, value] of saved.nodeDefaults) nodeDefaults.set(id, value);
+                for (const [id, value] of saved.nodeConnections) nodeConnections.set(id, value);
             }
-            return MAX_LOOP_ITERATIONS;
-        };
-        const maxIterations = (node: DagNodeDefinition): number => {
-            const config = isRecord(node.config) ? node.config : {};
-            if (typeof config.maxIterations === 'number' && config.maxIterations > 0) return config.maxIterations;
-            return loopNodes.has(node.id) ? loopMaxIterations() : 1;
-        };
+            const saveCheckpoint = async (): Promise<void> => {
+                if (!published) return;
+                const checkpoint: SchedulerCheckpoint = {
+                    version: 1, spec, parameters, sessionContext,
+                    instances: [...instances].map(([id, handles]) => [id, handles.map(handle => handle.id)]),
+                    completed: [...completed], nodes, edges, edgeState: [...edgeState],
+                    delegationDepth: [...delegationDepth], delegationGroupByChild: [...delegationGroupByChild],
+                    delegationGroups: [...delegationGroups].map(([id, group]) => [id, { ...group,
+                        children: [...group.children], completed: [...group.completed], succeeded: [...group.succeeded] }]),
+                    skipped: [...skipped], detachedNodes: [...detachedNodes], appliedPatches: [...appliedPatches],
+                    nodeDefaults: [...nodeDefaults], nodeConnections: [...nodeConnections],
+                    consumedTokens, startedAt, completionOrder, dispatchOrder,
+                };
+                await session.setShared(`flow.run.${published.root.id}.scheduler`, jsonValue(checkpoint));
+            };
 
-        const readyNodes = (): DagNodeDefinition[] => nodes.filter(node => {
-            const iteration = (instances.get(node.id)?.length ?? 0) + 1;
-            if (iteration > maxIterations(node) || skipped.has(node.id)) return false;
-            const incoming = incomingOf(edges, node.id);
-            if (!incoming.length) return true;
-            const active = incoming.filter(e => !backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'active');
-            const pending = incoming.filter(e => !backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'pending');
-            const backActive = incoming.filter(e => backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'active');
-            const backPending = incoming.filter(e => backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'pending');
-
-            if (!active.length && !pending.length && !backActive.length && !backPending.length) {
-                // 环上节点不永久 skip（Loop 中 route 边会重新激活）；非环节点才标记跳过。
-                if (!loopNodes.has(node.id)) skipped.add(node.id);
-                return false;
-            }
-            // 回边在首次迭代时不阻塞（循环体入口先执行一次），之后才等待前置。
-            if (pending.length || (iteration > 1 && backPending.length)) return false;
-            const activeReady = active.every(e => latestDone(e.from) || skipped.has(e.from));
-            // 回边在首次迭代时不阻塞；无回边约束时恒为 true。
-            // 有派发记录（supervisor）时按「上一轮派发的 worker」串行等待；
-            // 否则（普通 Loop）等所有回边完成。
-            let backReady = true;
-            if (iteration > 1 && backActive.length > 0) {
-                backReady = dispatchOrder.length > 0
-                    ? (dispatchOrder.length < iteration - 1 ? false : latestDone(dispatchOrder[iteration - 2]))
-                    : backActive.every(e => latestDone(e.from));
-            }
-            return activeReady && backReady;
-        });
-
-        const submitNode = async (node: DagNodeDefinition): Promise<void> => {
-            const iteration = (instances.get(node.id)?.length ?? 0) + 1;
-            const incoming = incomingOf(edges, node.id)
-                .filter(edge => (edgeState.get(edge.id) ?? 'active') === 'active')
-                .filter(edge => !backEdges.has(edge.id) || iteration > 1)
-                // 回边只绑定已完成的 worker（supervisor 每次只等刚派发的那个）。
-                .filter(edge => !backEdges.has(edge.id) || latestDone(edge.from))
-                .filter(edge => instances.has(edge.from) && !skipped.has(edge.from));
-            const dependencies = incoming.map(edge => ({
-                taskId: latestHandle(edge.from).id,
-                input: edge.input,
-                output: edge.output,
-                edgeId: edge.id,
-                onFailure: edge.onFailure,
-                injectOutput: edge.kind !== 'control',
-            }));
-            const runtime = await this.options.plugins.loadRuntime(node.plugin, node.pluginVersion);
-            const task = runtime.createTask({
-                sessionId,
-                nodeRunId: iteration === 1 ? node.id : `${node.id}#${iteration}`,
-                config: node.config,
-                inputs: node.inputs,
-                dependencies,
-            });
-            await this.emitHook('task.started', sessionId, { nodeId: node.id, iteration });
-            const handle = await session.submit(await this.taskSpec(sessionId, node, task, dependencies, parameters));
-            if (!instances.has(node.id)) instances.set(node.id, []);
-            instances.get(node.id)!.push(handle);
-            await this.bindCapabilities(session, handle, task.programKind, node.capabilities ?? [], node.budget);
-        };
-
-        const applyPatch = (patch: import('@itookit/common').GraphPatch): void => {
-            if (appliedPatches.has(patch.idempotencyKey)) return;
-            const additions = patch.nodes.filter(node => !nodes.some(existing => existing.id === node.id));
-            if (nodes.length + additions.length > maxNodes) {
-                throw new Error(`Flow node limit exceeded by patch ${patch.idempotencyKey}: ${nodes.length + additions.length}/${maxNodes}`);
-            }
-            const known = new Set([...nodes.map(node => node.id), ...patch.nodes.map(node => node.id)]);
-            for (const edge of patch.edges) {
-                if (!known.has(edge.from) || !known.has(edge.to)) {
-                    throw new Error(`Graph patch ${patch.idempotencyKey} has an unresolved edge ${edge.from}->${edge.to}`);
-                }
-            }
-            for (const node of patch.nodes) {
-                if (!nodes.some(existing => existing.id === node.id)) nodes.push(node);
-            }
-            for (const edge of patch.edges) {
-                const id = edge.id ?? `${edge.from}->${edge.to}`;
-                if (!edges.some(existing => existing.id === id)) {
-                    edges.push({
-                        id,
-                        from: edge.from,
-                        to: edge.to,
-                        output: edge.output ?? 'result',
-                        input: edge.input ?? 'input',
-                        kind: edge.kind,
-                        onFailure: edge.onFailure,
-                    });
-                    edgeState.set(id, 'active');
-                }
-            }
-            appliedPatches.add(patch.idempotencyKey);
-        };
-
-        const applyEffects = (output: unknown): void => {
-            for (const effect of graphEffects(output)) {
-                if (effect.type === 'activate-edge') {
-                    edgeState.set(String(effect.edgeId), 'active');
-                    const activated = edges.find(edge => edge.id === String(effect.edgeId));
-                    // Only record dispatch order for back-edge sources (supervisor
-                    // workers); an ordinary loop's exit branch must not re-arm the
-                    // loop head through dispatchOrder.
-                    if (activated && isBackEdgeSource(activated.to, backEdges, edges)) {
-                        dispatchOrder.push(activated.to);
-                    }
-                } else if (effect.type === 'disable-edge') {
-                    edgeState.set(String(effect.edgeId), 'inactive');
-                } else if (effect.type === 'patch-graph') {
-                    applyPatch(effect.patch);
-                }
-            }
-        };
-
-        // Dynamic delegation: parse the declaration once, then materialize a
-        // bounded child group with explicit runtime metadata and control edges.
-        const applyDelegation = async (key: string, output: unknown): Promise<void> => {
-            const { nodeId, iteration: parentIteration } = parseInstanceKey(key);
-            const node = nodes.find(n => String(n.id) === nodeId);
-            if (!node) return;
-            const depth = delegationDepth.get(nodeId) ?? 0;
-            const plan = delegationPlan(node, key, parentIteration, depth, output);
-            if (!plan) return;
-            if (plan.detached && !plan.waitTimeoutMs) {
-                throw new Error(`Detached delegation requires wait.timeoutMs: ${plan.groupId}`);
-            }
-            const additions = plan.payloads.filter((_, index) =>
-                !nodes.some(existing => existing.id === `${plan.parentId}:delegate:${plan.parentIteration}:${index}`));
-            if (nodes.length + additions.length > maxNodes) {
-                throw new Error(`Flow node limit exceeded by delegation ${plan.groupId}: ${nodes.length + additions.length}/${maxNodes}`);
-            }
-            materializeDelegation(node, plan, {
-                nodes, edges, edgeState, depths: delegationDepth,
-                groups: delegationGroups, groupByChild: delegationGroupByChild,
-            });
-            await this.emitHook('agent.spawned', sessionId, { parentNodeId: node.id, groupId: plan.groupId, count: plan.payloads.length });
-            const group = delegationGroups.get(plan.groupId);
-            if (group?.detached) {
-                if (workspace && workspacePolicy?.cleanup !== 'keep') {
-                    throw new Error('Detached delegation requires workspace.cleanup=keep when using an isolated workspace');
-                }
-                for (const child of group.children) detachedNodes.add(child);
-                if (group.deadline) {
-                    const delay = Math.max(0, group.deadline - Date.now());
-                    const timer = setTimeout(() => {
-                        void cancelGroup(group, instances, completed, skipped, `Detached delegation timeout: ${plan.groupId}`);
-                    }, delay);
-                    (timer as unknown as { unref?: () => void }).unref?.();
-                }
-            }
-        };
-
-        const settleDelegationGroup = async (key: string, succeeded: boolean): Promise<void> => {
-            const { nodeId } = parseInstanceKey(key);
-            const groupId = delegationGroupByChild.get(nodeId);
-            const group = groupId ? delegationGroups.get(groupId) : undefined;
-            if (!group) return;
-            group.completed.add(nodeId);
-            if (succeeded) group.succeeded.add(nodeId);
-            const satisfied = group.waitMode === 'all'
-                ? group.completed.size >= group.children.size
-                : group.waitMode === 'any'
-                    ? group.completed.size >= 1
-                    : group.succeeded.size >= group.quorum;
-            if (!satisfied && group.completed.size >= group.children.size
-                && (group.waitMode === 'first-success' || group.waitMode === 'quorum')) {
-                throw new Error(`Delegation ${group.waitMode} condition could not be satisfied`);
-            }
-            if (!satisfied || group.waitMode === 'all') return;
-            const cancellations: Promise<void>[] = [];
-            for (const childId of group.children) {
-                if (group.completed.has(childId)) continue;
-                skipped.add(childId);
-                for (const handle of instances.get(childId) ?? []) {
-                    cancellations.push(handle.cancel(`Delegation ${group.waitMode} condition satisfied`));
-                }
-            }
-            await Promise.allSettled(cancellations);
-        };
-
-        const enforceDeadlines = async (): Promise<void> => {
-            if (timeoutMs && Date.now() - startedAt >= timeoutMs) {
-                await cancelPending(instances, completed, 'Flow timeout exceeded');
-                throw new Error(`Flow timeout exceeded after ${timeoutMs}ms`);
-            }
-            for (const [groupId, group] of delegationGroups) {
-                if (group.detached || !group.deadline || Date.now() < group.deadline) continue;
-                await cancelGroup(group, instances, completed, skipped, `Delegation timeout: ${groupId}`);
-                throw new Error(`Delegation group timed out: ${groupId}`);
-            }
-        };
-
-        const failDelegationGroup = async (key: string, message?: string): Promise<void> => {
-            const { nodeId } = parseInstanceKey(key);
-            const groupId = delegationGroupByChild.get(nodeId);
-            const group = groupId ? delegationGroups.get(groupId) : undefined;
-            if (!group || group.policy === 'continue') return;
-            const cancellations: Promise<void>[] = [];
-            for (const childId of group.children) {
-                if (childId === nodeId) continue;
-                skipped.add(childId);
-                for (const [index, handle] of (instances.get(childId) ?? []).entries()) {
-                    if (!completed.has(instanceKey(childId, index + 1))) {
-                        cancellations.push(handle.cancel(`Delegation sibling failed: ${nodeId}`));
+            const latestDone = (nodeId: string): boolean => {
+                const handles = instances.get(nodeId);
+                if (!handles?.length) return false;
+                return completed.has(instanceKey(nodeId, handles.length));
+            };
+            const handleAt = (nodeId: string, iteration: number): TaskHandle => {
+                const handle = instances.get(nodeId)?.[iteration - 1];
+                if (!handle) throw new Error(`Flow node has no instance ${iteration}: ${nodeId}`);
+                return handle;
+            };
+            const doneAt = (nodeId: string, iteration: number): boolean =>
+                completed.has(instanceKey(nodeId, iteration));
+            // 环上的节点共享同一个迭代上限（任一环上节点声明即可），非环节点单次执行。
+            const loopMaxIterations = (): number => {
+                for (const id of loopNodes) {
+                    const config = nodes.find(n => n.id === id)?.config;
+                    if (isRecord(config) && typeof config.maxIterations === 'number' && config.maxIterations > 0) {
+                        return config.maxIterations;
                     }
                 }
-            }
-            await Promise.allSettled(cancellations);
-            throw new Error(message ?? `Delegated task failed: ${nodeId}`);
-        };
+                return MAX_LOOP_ITERATIONS;
+            };
+            const maxIterations = (node: DagNodeDefinition): number => {
+                const config = isRecord(node.config) ? node.config : {};
+                if (typeof config.maxIterations === 'number' && config.maxIterations > 0) return config.maxIterations;
+                return loopNodes.has(node.id) ? loopMaxIterations() : 1;
+            };
 
-        // Saga 补偿链：节点失败时，先补偿失败节点自身，再沿依赖链反向补偿
-        // 所有已成功的上游节点（最后成功的先补偿），对应 Compensate B → Compensate A。
-        const compensateChain = async (key: string): Promise<void> => {
-            const failedNodeId = parseInstanceKey(key).nodeId;
-            const failedNode = nodes.find(item => item.id === failedNodeId);
-            const compensations: string[] = [];
-            if (failedNode?.compensate) compensations.push(failedNode.compensate);
-            for (const upstreamId of upstreamOf(edges, failedNodeId)) {
-                const upstream = nodes.find(item => item.id === upstreamId);
-                if (upstream?.compensate) compensations.push(upstream.compensate);
-            }
-            for (const compensateId of compensations) {
-                const compensation = nodes.find(item => item.id === compensateId);
-                if (!compensation || instances.has(compensateId)) continue;
-                await submitNode(compensation);
-            }
-        };
+            const readyNodes = (): DagNodeDefinition[] => nodes.filter(node => {
+                const iteration = (instances.get(node.id)?.length ?? 0) + 1;
+                if (iteration > maxIterations(node) || skipped.has(node.id)) return false;
+                // Loop 节点的每一轮都必须等自身上一轮结束，避免 Human 未回应时提前创建后续实例。
+                if (iteration > 1 && !doneAt(node.id, iteration - 1)) return false;
+                const incoming = incomingOf(edges, node.id);
+                if (!incoming.length) return true;
+                const active = incoming.filter(e => !backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'active');
+                const pending = incoming.filter(e => !backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'pending');
+                const backActive = incoming.filter(e => backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'active');
+                const backPending = incoming.filter(e => backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'pending');
 
-        while (true) {
-            await enforceDeadlines();
-            const activeCount = [...instances.entries()].reduce((count, [nodeId, handles]) =>
-                count + (detachedNodes.has(nodeId) ? 0 : handles.filter((_, index) =>
-                    !completed.has(instanceKey(nodeId, index + 1))).length), 0);
-            const capacity = Math.max(0, maxConcurrency - activeCount);
-            for (const node of readyNodes().slice(0, capacity)) await submitNode(node);
-            const pending = [...instances.entries()].flatMap(([nodeId, handles]) =>
-                detachedNodes.has(nodeId) ? [] :
-                handles.map((handle, index) => ({ key: instanceKey(nodeId, index + 1), handle }))
-                    .filter(({ key }) => !completed.has(key)));
-            if (!pending.length) {
-                if (readyNodes().length) continue;
-                break;
-            }
-            // 事件驱动等待任一未完成节点：终态则继续调度；超时则检查是否进入 pending
-            // interaction，是则让出控制权，交由调用方 respond 后通过 resume 继续驱动。
-            const settled = await Promise.race(pending.map(async ({ key, handle }) => {
-                try {
-                    const exit = await handle.wait({ timeoutMs: 100 });
-                    return { key, exit };
-                } catch {
-                    const snapshot = await handle.status();
-                    if (Object.values(snapshot.task.interactions ?? {}).some(record => record.status === 'pending')) {
-                        return { key, interaction: true as const };
-                    }
-                    return { key, tick: true as const };
+                if (!active.length && !pending.length && !backActive.length && !backPending.length) {
+                    // 环上节点不永久 skip（Loop 中 route 边会重新激活）；非环节点才标记跳过。
+                    if (!loopNodes.has(node.id)) skipped.add(node.id);
+                    return false;
                 }
-            }));
-            if ('interaction' in settled) return this.finish(session, instances, nodes, detachedNodes, spec.goal, {
-                tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
-            }, delegationGroups, completionOrder);
-            if ('tick' in settled) continue;
-            completed.add(settled.key);
-            completionOrder.push(parseInstanceKey(settled.key).nodeId);
-            consumedTokens += outputTokens(settled.exit.output);
-            if (maxTokens && consumedTokens > maxTokens) {
-                await cancelPending(instances, completed, 'Flow token budget exceeded');
-                throw new Error(`Flow token budget exceeded: ${consumedTokens}/${maxTokens}`);
-            }
-            await settleDelegationGroup(settled.key, settled.exit.status === 'succeeded');
-            await this.emitHook(settled.exit.status === 'failed' ? 'task.failed' : 'task.completed', sessionId, {
-                nodeId: parseInstanceKey(settled.key).nodeId,
-                taskId: pending.find(item => item.key === settled.key)?.handle.id,
-                status: settled.exit.status,
+                // 回边在首次迭代时不阻塞（循环体入口先执行一次），之后才等待前置。
+                if (pending.length || (iteration > 1 && backPending.length)) return false;
+                const activeReady = active.every(e => {
+                    if (skipped.has(e.from)) return true;
+                    // 环内前向边必须绑定同一轮上游；环外/外部输入仍等最新已完成实例。
+                    return loopNodes.has(node.id) && loopNodes.has(e.from)
+                        ? doneAt(e.from, iteration)
+                        : latestDone(e.from);
+                });
+                // 回边在首次迭代时不阻塞；无回边约束时恒为 true。
+                // 有派发记录（supervisor）时按「上一轮派发的 worker」串行等待；
+                // 否则（普通 Loop）严格等待上一轮回边来源。
+                let backReady = true;
+                if (iteration > 1 && backActive.length > 0) {
+                    backReady = dispatchOrder.length > 0
+                        ? (dispatchOrder.length < iteration - 1 ? false : latestDone(dispatchOrder[iteration - 2]))
+                        : backActive.every(e => doneAt(e.from, iteration - 1));
+                }
+                return activeReady && backReady;
             });
-            if (delegationGroupByChild.has(parseInstanceKey(settled.key).nodeId)) {
-                await this.emitHook('agent.stopped', sessionId, {
+
+            const submitNode = async (node: DagNodeDefinition): Promise<void> => {
+                const iteration = (instances.get(node.id)?.length ?? 0) + 1;
+                const incoming = incomingOf(edges, node.id)
+                    .filter(edge => (edgeState.get(edge.id) ?? 'active') === 'active')
+                    .filter(edge => !backEdges.has(edge.id) || iteration > 1)
+                    // 回边只绑定上一轮 worker；环内前向边绑定同一轮上游。
+                    .filter(edge => !backEdges.has(edge.id) || doneAt(edge.from, iteration - 1))
+                    .filter(edge => instances.has(edge.from) && !skipped.has(edge.from));
+                const upstreamHandle = (edge: DagEdgeDefinition): TaskHandle => {
+                    const upstreamIteration = backEdges.has(edge.id)
+                        ? iteration - 1
+                        : loopNodes.has(node.id) && loopNodes.has(edge.from)
+                            ? iteration
+                            : instances.get(edge.from)?.length ?? 1;
+                    return handleAt(edge.from, upstreamIteration);
+                };
+                for (const edge of incoming) {
+                    const upstream = (await upstreamHandle(edge).status()).task;
+                    if (upstream.status === 'succeeded') validateDataEdgeValue(edge, node, plugins, upstream.output);
+                }
+                const dependencies = incoming.map(edge => ({
+                    taskId: upstreamHandle(edge).id,
+                    input: edge.input,
+                    output: edge.output,
+                    edgeId: edge.id,
+                    onFailure: edge.onFailure,
+                    injectOutput: edge.kind !== 'control',
+                }));
+                const runtime = await plugins.loadRuntime(node.plugin, node.pluginVersion);
+                const task = runtime.createTask({
+                    sessionId,
+                    nodeRunId: iteration === 1 ? node.id : `${node.id}#${iteration}`,
+                    config: node.plugin === 'builtin.agent' && sessionContext
+                        ? { ...record(node.config), sessionContext } : node.config,
+                    inputs: node.inputs,
+                    dependencies,
+                });
+                await this.emitHook('task.started', sessionId, { nodeId: node.id, iteration });
+                const requestId = published
+                    ? `flow:${published.root.id}:${node.id}#${iteration}`
+                    : undefined;
+                const handle = await session.submit(await this.taskSpec(sessionId, node, task, dependencies, parameters, requestId));
+                if (!instances.has(node.id)) instances.set(node.id, []);
+                instances.get(node.id)!.push(handle);
+                if (published) {
+                    published.nodes.set(node.id, handle);
+                    published.iterations.set(node.id, iteration);
+                    published.taskIds.add(handle.id);
+                    await session.setShared(`flow.run.${published.root.id}.members`, jsonValue(runMembers(instances, nodes, detachedNodes)));
+                }
+                await bindFlowTaskCapabilities(session, handle, task.programKind, node.capabilities ?? [], node.budget);
+                if (published) await saveCheckpoint();
+            };
+
+            const applyPatch = async (patch: import('@itookit/common').GraphPatch, parentId: string): Promise<void> => {
+                const fingerprint = graphPatchFingerprint(patch);
+                const previous = appliedPatches.get(patch.idempotencyKey);
+                if (previous !== undefined) {
+                    if (previous !== fingerprint) throw new Error(`Graph patch ${patch.idempotencyKey}: idempotency conflict`);
+                    return;
+                }
+                const additions = validateGraphPatch(patch, nodes, edges, parentId, plugins);
+                if (nodes.length + patch.nodes.length > maxNodes) {
+                    throw new Error(`Flow node limit exceeded by patch ${patch.idempotencyKey}: ${nodes.length + patch.nodes.length}/${maxNodes}`);
+                }
+                const boundNodes: DagNodeDefinition[] = [];
+                for (const node of patch.nodes) {
+                    const defaults = node.plugin === 'builtin.agent' ? nodeDefaults.get(parentId) : undefined;
+                    const bound = this.options.bindPatchNode
+                        ? await this.options.bindPatchNode(sessionId, structuredClone(node), structuredClone(defaults))
+                        : defaults ? { config: mergeAgentConfig(defaults, record(node.config) as never) } : undefined;
+                    const config = bound?.config === undefined ? node.config
+                        : patchIdentityConfig(node.config, bound.config, node.capabilities ?? []);
+                    const connection = nodeConnections.get(parentId);
+                    const resolvedConfig = structuredClone(config);
+                    if (connection) resolveNodeConnection(resolvedConfig as CommonJsonValue,
+                        connection.connections, connection.defaultConnection, connection.fallbackConnectionId);
+                    boundNodes.push({ ...node, config: resolvedConfig, inputs: bound?.inputs ?? node.inputs });
+                }
+                validateGraphPatch({ ...patch, nodes: boundNodes }, nodes, edges, parentId, plugins);
+                nodes.push(...boundNodes);
+                const defaults = nodeDefaults.get(parentId);
+                if (defaults) for (const node of boundNodes) nodeDefaults.set(node.id, defaults);
+                const connection = nodeConnections.get(parentId);
+                if (connection) for (const node of boundNodes) nodeConnections.set(node.id, connection);
+                edges.push(...additions);
+                for (const edge of additions) edgeState.set(edge.id, 'active');
+                appliedPatches.set(patch.idempotencyKey, fingerprint);
+            };
+
+            const applyEffects = async (output: unknown, parentId: string): Promise<void> => {
+                for (const effect of graphEffects(output)) {
+                    if (effect.type === 'activate-edge') {
+                        edgeState.set(String(effect.edgeId), 'active');
+                        const activated = edges.find(edge => edge.id === String(effect.edgeId));
+                        // Only record dispatch order for back-edge sources (supervisor
+                        // workers); an ordinary loop's exit branch must not re-arm the
+                        // loop head through dispatchOrder.
+                        if (activated && isBackEdgeSource(activated.to, backEdges, edges)) {
+                            dispatchOrder.push(activated.to);
+                        }
+                    } else if (effect.type === 'disable-edge') {
+                        edgeState.set(String(effect.edgeId), 'inactive');
+                    } else if (effect.type === 'patch-graph') {
+                        await applyPatch(effect.patch, parentId);
+                    }
+                }
+            };
+
+            // Dynamic delegation: parse the declaration once, then materialize a
+            // bounded child group with explicit runtime metadata and control edges.
+            const applyDelegation = async (key: string, output: unknown): Promise<void> => {
+                const { nodeId, iteration: parentIteration } = parseInstanceKey(key);
+                const node = nodes.find(n => String(n.id) === nodeId);
+                if (!node) return;
+                const depth = delegationDepth.get(nodeId) ?? 0;
+                const plan = delegationPlan(node, key, parentIteration, depth, output);
+                if (!plan) return;
+                if (plan.detached && !plan.waitTimeoutMs) {
+                    throw new Error(`Detached delegation requires wait.timeoutMs: ${plan.groupId}`);
+                }
+                const additions = plan.payloads.filter((_, index) =>
+                    !nodes.some(existing => existing.id === `${plan.parentId}:delegate:${plan.parentIteration}:${index}`));
+                if (nodes.length + additions.length > maxNodes) {
+                    throw new Error(`Flow node limit exceeded by delegation ${plan.groupId}: ${nodes.length + additions.length}/${maxNodes}`);
+                }
+                materializeDelegation(node, plan, {
+                    nodes, edges, edgeState, depths: delegationDepth,
+                    groups: delegationGroups, groupByChild: delegationGroupByChild,
+                });
+                await this.emitHook('agent.spawned', sessionId, { parentNodeId: node.id, groupId: plan.groupId, count: plan.payloads.length });
+                const group = delegationGroups.get(plan.groupId);
+                const defaults = nodeDefaults.get(node.id);
+                if (defaults && group) for (const child of group.children) nodeDefaults.set(child, defaults);
+                const connection = nodeConnections.get(node.id);
+                if (connection && group) for (const child of nodes.filter(item => group.children.has(item.id))) {
+                    nodeConnections.set(child.id, connection);
+                    resolveNodeConnection(child.config as CommonJsonValue,
+                        connection.connections, connection.defaultConnection, connection.fallbackConnectionId);
+                }
+                if (group?.detached) {
+                    if (workspace && workspacePolicy?.cleanup !== 'keep') {
+                        throw new Error('Detached delegation requires workspace.cleanup=keep when using an isolated workspace');
+                    }
+                    for (const child of group.children) detachedNodes.add(child);
+                    if (group.deadline) {
+                        const delay = Math.max(0, group.deadline - Date.now());
+                        const timer = setTimeout(() => {
+                            void cancelGroup(group, instances, completed, skipped, `Detached delegation timeout: ${plan.groupId}`);
+                        }, delay);
+                        (timer as unknown as { unref?: () => void }).unref?.();
+                    }
+                }
+            };
+
+            const settleDelegationGroup = async (key: string, succeeded: boolean): Promise<void> => {
+                const { nodeId } = parseInstanceKey(key);
+                const groupId = delegationGroupByChild.get(nodeId);
+                const group = groupId ? delegationGroups.get(groupId) : undefined;
+                if (!group) return;
+                group.completed.add(nodeId);
+                if (succeeded) group.succeeded.add(nodeId);
+                const satisfied = group.waitMode === 'all'
+                    ? group.completed.size >= group.children.size
+                    : group.waitMode === 'any'
+                        ? group.completed.size >= 1
+                        : group.succeeded.size >= group.quorum;
+                if (!satisfied && group.completed.size >= group.children.size
+                    && (group.waitMode === 'first-success' || group.waitMode === 'quorum')) {
+                    throw new Error(`Delegation ${group.waitMode} condition could not be satisfied`);
+                }
+                if (!satisfied || group.waitMode === 'all') return;
+                const cancellations: Promise<void>[] = [];
+                for (const childId of group.children) {
+                    if (group.completed.has(childId)) continue;
+                    skipped.add(childId);
+                    for (const handle of instances.get(childId) ?? []) {
+                        cancellations.push(handle.cancel(`Delegation ${group.waitMode} condition satisfied`));
+                    }
+                }
+                await Promise.allSettled(cancellations);
+            };
+
+            const enforceDeadlines = async (): Promise<void> => {
+                if (timeoutMs && Date.now() - startedAt >= timeoutMs) {
+                    await cancelPending(instances, completed, 'Flow timeout exceeded');
+                    throw new Error(`Flow timeout exceeded after ${timeoutMs}ms`);
+                }
+                for (const [groupId, group] of delegationGroups) {
+                    if (group.detached || !group.deadline || Date.now() < group.deadline) continue;
+                    await cancelGroup(group, instances, completed, skipped, `Delegation timeout: ${groupId}`);
+                    throw new Error(`Delegation group timed out: ${groupId}`);
+                }
+            };
+
+            const failDelegationGroup = async (key: string, message?: string): Promise<void> => {
+                const { nodeId } = parseInstanceKey(key);
+                const groupId = delegationGroupByChild.get(nodeId);
+                const group = groupId ? delegationGroups.get(groupId) : undefined;
+                if (!group || group.policy === 'continue') return;
+                const cancellations: Promise<void>[] = [];
+                for (const childId of group.children) {
+                    if (childId === nodeId) continue;
+                    skipped.add(childId);
+                    for (const [index, handle] of (instances.get(childId) ?? []).entries()) {
+                        if (!completed.has(instanceKey(childId, index + 1))) {
+                            cancellations.push(handle.cancel(`Delegation sibling failed: ${nodeId}`));
+                        }
+                    }
+                }
+                await Promise.allSettled(cancellations);
+                throw new Error(message ?? `Delegated task failed: ${nodeId}`);
+            };
+
+            // Saga 补偿链：节点失败时，先补偿失败节点自身，再沿依赖链反向补偿
+            // 所有已成功的上游节点（最后成功的先补偿），对应 Compensate B → Compensate A。
+            const compensateChain = async (key: string): Promise<void> => {
+                const failedNodeId = parseInstanceKey(key).nodeId;
+                const failedNode = nodes.find(item => item.id === failedNodeId);
+                const compensations: string[] = [];
+                if (failedNode?.compensate) compensations.push(failedNode.compensate);
+                for (const upstreamId of upstreamOf(edges, failedNodeId)) {
+                    const upstream = nodes.find(item => item.id === upstreamId);
+                    if (upstream?.compensate) compensations.push(upstream.compensate);
+                }
+                for (const compensateId of compensations) {
+                    const compensation = nodes.find(item => item.id === compensateId);
+                    if (!compensation || instances.has(compensateId)) continue;
+                    await submitNode(compensation);
+                }
+            };
+
+            // A node failure is explicitly tolerated when an outgoing edge says
+            // onFailure=continue, or when it belongs to a continue delegation group.
+            const toleratedFailureNodes = (): Set<string> => {
+                const tolerated = new Set<string>();
+                for (const node of nodes) {
+                    if (edges.some(edge => edge.from === node.id && edge.onFailure === 'continue')) {
+                        tolerated.add(String(node.id));
+                    }
+                }
+                for (const group of delegationGroups.values()) {
+                    // continue 组保留兄弟失败；any/first-success/quorum 组会主动取消
+                    // 未获胜兄弟，这些终态也不应让整个 Run 失败。
+                    if (group.policy !== 'continue' && group.waitMode === 'all') continue;
+                    for (const child of group.children) tolerated.add(child);
+                }
+                return tolerated;
+            };
+
+            if (restored && published) publish(published);
+            while (true) {
+                if (published && this.options.kernel.isDisposed) return published;
+                if (published && (await published.root.status()).task.status === 'cancelled') {
+                    throw new Error('Flow run cancelled');
+                }
+                await enforceDeadlines();
+                const activeCount = [...instances.entries()].reduce((count, [nodeId, handles]) =>
+                    count + (detachedNodes.has(nodeId) ? 0 : handles.filter((_, index) =>
+                        !completed.has(instanceKey(nodeId, index + 1))).length), 0);
+                const capacity = Math.max(0, maxConcurrency - activeCount);
+                for (const node of readyNodes().slice(0, capacity)) await submitNode(node);
+                const pending = [...instances.entries()].flatMap(([nodeId, handles]) =>
+                    detachedNodes.has(nodeId) ? [] :
+                    handles.map((handle, index) => ({ key: instanceKey(nodeId, index + 1), handle }))
+                        .filter(({ key }) => !completed.has(key)));
+                if (!pending.length) {
+                    if (readyNodes().length) continue;
+                    break;
+                }
+                // Publish a waiting Run while keeping the scheduler alive for the response.
+                const settled = await Promise.race(pending.map(async ({ key, handle }) => {
+                    try {
+                        const exit = await handle.wait({ timeoutMs: 100 });
+                        return { key, exit };
+                    } catch {
+                        const snapshot = await handle.status();
+                        if (Object.values(snapshot.task.interactions ?? {}).some(record => record.status === 'pending')) {
+                            return { key, interaction: true as const };
+                        }
+                        return { key, tick: true as const };
+                    }
+                }));
+                if (published && this.options.kernel.isDisposed) return published;
+                if ('interaction' in settled) {
+                    if (!published) {
+                        published = await this.finish(session, instances, nodes, detachedNodes, spec.goal, {
+                            tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
+                        }, delegationGroups, completionOrder, undefined, true, toleratedFailureNodes());
+                        await saveCheckpoint();
+                        publish(published);
+                    }
+                    await saveCheckpoint();
+                    publish(published);
+                    continue;
+                }
+                if ('tick' in settled) continue;
+                completed.add(settled.key);
+                completionOrder.push(parseInstanceKey(settled.key).nodeId);
+                consumedTokens += outputTokens(settled.exit.output);
+                if (maxTokens && consumedTokens > maxTokens) {
+                    await cancelPending(instances, completed, 'Flow token budget exceeded');
+                    throw new Error(`Flow token budget exceeded: ${consumedTokens}/${maxTokens}`);
+                }
+                await settleDelegationGroup(settled.key, settled.exit.status === 'succeeded');
+                await this.emitHook(settled.exit.status === 'failed' ? 'task.failed' : 'task.completed', sessionId, {
                     nodeId: parseInstanceKey(settled.key).nodeId,
+                    taskId: pending.find(item => item.key === settled.key)?.handle.id,
                     status: settled.exit.status,
                 });
+                if (delegationGroupByChild.has(parseInstanceKey(settled.key).nodeId)) {
+                    await this.emitHook('agent.stopped', sessionId, {
+                        nodeId: parseInstanceKey(settled.key).nodeId,
+                        status: settled.exit.status,
+                    });
+                }
+                if (settled.exit.status === 'failed') {
+                    await compensateChain(settled.key);
+                    await failDelegationGroup(settled.key, settled.exit.error?.message);
+                }
+                await applyEffects(settled.exit.output, parseInstanceKey(settled.key).nodeId);
+                await applyDelegation(settled.key, settled.exit.output);
+                await saveCheckpoint();
             }
-            if (settled.exit.status === 'failed') {
-                await compensateChain(settled.key);
-                await failDelegationGroup(settled.key, settled.exit.error?.message);
-            }
-            applyEffects(settled.exit.output);
-            await applyDelegation(settled.key, settled.exit.output);
-        }
 
-        const result = await this.finish(session, instances, nodes, detachedNodes, spec.goal, {
-            tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
-        }, delegationGroups, completionOrder);
-        if (workspace) {
-            void result.root.wait().then(exit => workspace.finish(exit.status === 'succeeded' ? 'succeeded' : exit.status === 'cancelled' ? 'cancelled' : 'failed'))
-                .catch(() => workspace.finish('failed'));
+            const result = await this.finish(session, instances, nodes, detachedNodes, spec.goal, {
+                tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
+            }, delegationGroups, completionOrder, published, false, toleratedFailureNodes());
+            if (workspace) {
+                const finalization = await beginWorkspaceFinalization(session, result.root, workspace);
+                result.workspaceCompletion = finalization.completion;
+                result.workspaceFinalization = finalization.state;
+            }
+            void result.root.wait().then(exit => this.emitHook('run.completed', sessionId, {
+                taskId: result.root.id, status: exit.status,
+            })).catch(() => undefined);
+            return result;
+        } catch (error) {
+            if (published && !this.options.kernel.isDisposed) await published.root.signal({ type: 'flow.schedule.failed', payload: String(error) });
+            await cancelPending(instances, completed, 'Flow submission failed');
+            try { await workspace?.finish('failed'); }
+            catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Flow failed and workspace cleanup failed'); }
+            throw error;
         }
-        void result.root.wait().then(exit => this.emitHook('run.completed', sessionId, {
-            taskId: result.root.id, status: exit.status,
-        })).catch(() => undefined);
-        return result;
     }
 
     private async finish(
@@ -448,8 +649,12 @@ export class DurableFlowExecutor {
         usage: FlowExecutionHandle['usage'] = { tokens: 0, startedAt: Date.now(), elapsedMs: 0 },
         delegationGroups: Map<string, DelegationGroup> = new Map(),
         completionOrder: string[] = [],
+        existing?: FlowExecutionHandle,
+        awaitingSchedule = false,
+        toleratedFailures: Set<string> = new Set(),
     ): Promise<FlowExecutionHandle> {
-        const root = await this.aggregate(session, instances, nodes, detachedNodes, delegationGroups, completionOrder);
+        const root = await this.aggregate(session, instances, nodes, detachedNodes, delegationGroups, completionOrder, { goal, usage }, existing?.root, awaitingSchedule, toleratedFailures);
+        if (existing) { existing.usage = usage; return existing; }
         return {
             sessionId: session.id,
             root,
@@ -468,6 +673,7 @@ export class DurableFlowExecutor {
         task: import('@itookit/common').DagTaskDefinition,
         dependencies: import('@itookit/common').DagTaskDependencyBinding[],
         parameters?: Record<string, CommonJsonValue>,
+        requestId?: string,
     ): Promise<TaskSpec<unknown>> {
         const allowed = node.capabilities ?? [];
         const catalog = await this.options.resolveTools?.(sessionId, allowed)
@@ -479,11 +685,13 @@ export class DurableFlowExecutor {
                 ...record(task.input),
                 tools: [...catalog.definitions, ...(subtaskTool ? [subtaskToolDef(subtaskTool, subtaskDescription)] : [])],
                 externalToolIds: catalog.externalIds,
+                allowedToolIds: allowed,
             }
             : task.programKind === 'flow.value'
                 ? { ...record(task.input), parameters }
                 : task.input;
         return {
+            ...(requestId ? { requestId } : {}),
             program: { kind: task.programKind, version: task.programVersion },
             input: jsonValue(input),
             dependsOn: dependencies.map(binding => ({
@@ -495,26 +703,6 @@ export class DurableFlowExecutor {
             labels: { flowNodeId: node.id, plugin: node.plugin },
             deferStart: task.programKind === 'llm.agent' || task.programKind === 'llm.chat',
         };
-    }
-
-    private async bindCapabilities(
-        session: SessionHandle,
-        task: TaskHandle,
-        programKind: string,
-        toolIds: string[],
-        budget?: Record<string, number>,
-    ): Promise<void> {
-        if (programKind !== 'llm.agent' && programKind !== 'llm.chat') return;
-        await bindCapabilities(task, [
-            { kind: 'llm', uri: 'llm://flow', rights: ['execute', 'admin'], signalKey: 'llmHandleId' },
-            ...(toolIds.length ? [{ kind: 'tool', uri: 'tool://flow', rights: ['execute'], signalKey: 'toolHandleId' } satisfies CapabilityBinding] : []),
-        ] satisfies CapabilityBinding[], async (binding, handleId) => {
-            if (binding.kind === 'llm') {
-                for (const [dimension, limit] of Object.entries(budget ?? {})) {
-                    await session.setBudget(handleId, dimension, limit);
-                }
-            }
-        });
     }
 
     private async emitHook(
@@ -552,26 +740,38 @@ export class DurableFlowExecutor {
         detachedNodes: Set<string>,
         delegationGroups: Map<string, DelegationGroup>,
         completionOrder: string[],
+        run: { goal?: import('@itookit/common').FlowRunGoal; usage: FlowExecutionHandle['usage'] },
+        existing?: TaskHandle<JsonValue>,
+        awaitingSchedule = false,
+        toleratedFailures: Set<string> = new Set(),
     ): Promise<TaskHandle<JsonValue>> {
         // Nodes with persistOutput === false keep feeding downstream nodes via
-        // dependencies but are excluded from the flow-root aggregation that
-        // becomes the conversation history.
+        // dependencies but are excluded from the flow-root output map. They must
+        // still participate in run success/failure judgment.
         const suppressed = new Set(nodes
             .filter(node => isRecord(node.config) && node.config.persistOutput === false)
             .map(node => String(node.id)));
         const dependencies = orderDelegationResults([...instances.entries()]
-            .filter(([nodeId]) => !suppressed.has(nodeId) && !detachedNodes.has(nodeId))
+            .filter(([nodeId]) => !detachedNodes.has(nodeId))
             .map(([nodeId, handles]) => ({
                 taskId: handles[handles.length - 1].id,
                 nodeId,
+                tolerated: toleratedFailures.has(nodeId),
+                collectOutput: !suppressed.has(nodeId),
             })), delegationGroups, completionOrder);
+        const input = { dependencies, awaitingSchedule, run: jsonValue({ version: 1, goal: run.goal ?? null, usage: run.usage }),
+            runTasks: runMembers(instances, nodes, detachedNodes) };
+        if (existing) {
+            await session.setShared(`flow.run.${existing.id}.members`, jsonValue(input.runTasks));
+            await session.setShared(`flow.run.${existing.id}.metadata`, input.run);
+            await existing.signal({ type: 'flow.schedule.completed', payload: jsonValue(input) });
+            return existing;
+        }
         return session.submit({
-            program: { kind: 'flow.aggregate', version: '1' },
-            input: { dependencies },
-            // 汇聚节点在任一依赖结束（成功或失败）后即可聚合；run 的成败由 result 任务的
-            // 输出决定（见 selectFinalResult / finishRun）。这样 on_failure: continue 容忍
-            // 的失败不会让整个 run 失败。
-            dependsOn: dependencies.map(item => ({ task: item.taskId, condition: 'terminal' })),
+            program: { kind: 'flow.aggregate', version: '1' }, input,
+            // 汇聚节点在任一依赖终态后聚合；非容忍 failed 依赖由 FlowAggregateProgram
+            // 使根失败，显式 on_failure: continue 或委派策略容忍的失败继续完成并记录。
+            dependsOn: awaitingSchedule ? [] : dependencies.map(item => ({ task: item.taskId, condition: 'terminal' })),
             labels: { kind: 'flow-root' },
         });
     }
@@ -730,4 +930,11 @@ function orderDelegationResults<T extends { nodeId: string }>(
         positions.forEach((position, index) => { result[position] = ordered[index]; });
     }
     return result;
+}
+
+function runMembers(instances: Map<string, TaskHandle[]>, nodes: DagNodeDefinition[], detached: Set<string>) {
+    return [...instances.entries()].flatMap(([nodeId, handles]) => handles.map((handle, index) => ({
+        nodeId, taskId: handle.id, iteration: index + 1, detached: detached.has(nodeId),
+        budget: jsonValue(nodes.find(node => node.id === nodeId)?.budget ?? {}),
+    })));
 }

@@ -8,6 +8,7 @@ import type {
 } from '@itookit/common';
 import { DELEGATION_LIMITS, simpleHash } from '@itookit/common';
 import { findCycles } from './graph';
+import { dataEdgeSchemaIssue } from './port-contract';
 
 export interface ValidationIssue {
     code: string;
@@ -237,6 +238,8 @@ function validatePorts(
     if (target && !target.inputs.some(port => port.name === edge.input)) {
         edgeIssue(issues, 'unknown-input', edge, `Unknown input ${edge.input}`);
     }
+    const schemaIssue = plugins && dataEdgeSchemaIssue(edge, from, to, plugins);
+    if (schemaIssue) edgeIssue(issues, 'incompatible-port-schema', edge, schemaIssue);
 }
 
 function validateAcyclic(

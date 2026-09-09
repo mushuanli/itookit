@@ -98,9 +98,17 @@ function agentPlugin(): DagPlugin {
 function agentTask(context: DagNodeContext) {
     const config = record(context.config);
     const prompt = string(config.instruction, string(config.prompt, inputText(context.inputs)));
-    const messages = Array.isArray(config.messages)
-        ? config.messages
-        : [{ role: 'user', content: prompt }];
+    const policy = config.systemPromptPolicy;
+    const sessionContext = record(config.sessionContext);
+    const project = policy === 'none' ? [] : ['projectInstructions', 'skillInstructions', 'skillIndex']
+        .flatMap(key => typeof sessionContext[key] === 'string' && sessionContext[key]
+            ? [{ role: 'system' as const, content: sessionContext[key] as string }] : []);
+    const system = policy === 'none' || !Array.isArray(config.systemPrompt) ? []
+        : config.systemPrompt.filter((value): value is string => typeof value === 'string' && Boolean(value))
+            .map(content => ({ role: 'system' as const, content }));
+    const base = Array.isArray(config.messages) ? config.messages : [...system, { role: 'user', content: prompt }];
+    const inherited = project.filter(item => !base.some(message => message.role === 'system' && message.content === item.content));
+    const messages = [...inherited, ...base.filter(message => policy !== 'none' || message.role !== 'system')];
     const delegation = record(config.delegation);
     const hasDelegation = isRecord(config.delegation);
     const subtasks = record(config.subtasks);
