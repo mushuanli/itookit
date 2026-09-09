@@ -192,6 +192,9 @@ export async function createCliRuntime(
         plugins: core.dagPlugins,
         resolveNewRunContext: sessionId => resolveSessionSkillContext(kernel, core.sessions, sessionId, workflow.config.goal),
         resolveTools: (sessionId, allowed) => resolveTools(core, sessionId, allowed),
+        // A crashed host keeps the Run's scheduler lease until the TTL expires; tests
+        // shorten it the same way they shorten the Session lease.
+        schedulerLeaseTtlMs: Number(process.env.MINDOS_SCHEDULER_LEASE_TTL_MS) || undefined,
     });
     return {
         kernel,

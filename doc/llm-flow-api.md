@@ -64,6 +64,14 @@ interface FlowExecutionHandle {
 
 **辅助函数**：`upstreamOf(edges, nodeId): string[]` —— 取某节点的上游边（`flow/executor.ts`，未从包根导出）。
 
+**隔离工作区租约**（`FlowWorkspaceManager`）：`prepare(sessionId, policy)` 创建隔离工作区并返回
+`FlowWorkspaceLease`；可选 `restore(sessionId, policy, record)` 让新宿主重新挂载崩溃前的工作区。
+`FlowWorkspaceLease.record` 是 JSON 可序列化的租约描述，执行器写入 Session shared
+`flow.run.<rootTaskId>.workspace-lease`，因此 `resume` 不会新建第二个工作区，并会补跑中断的
+finalization（`workspaceFinalizationKey` 仍为 `flow.run.<rootTaskId>.workspace`）。
+`GitWorktreeFlowWorkspaceManager` 是参考实现：record 保存 `{version, directory, branch}`，
+restore 校验目录归属与存在性，finish 对「工作区已被上一宿主移除」幂等。
+
 ---
 
 ## Flow Programs

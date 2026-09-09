@@ -18,9 +18,11 @@ import { afterEach, expect, it } from 'vitest';
 import { listenForTest } from './listen';
 import { resumeCommand } from '../src/commands';
 
-// A killed CLI cannot release its Session lease; shorten the TTL so recovery can
-// take over within the test instead of waiting the production 60s.
+// A killed CLI cannot release its Session lease or the Run's scheduler lease; shorten
+// both TTLs so recovery can take over within the test instead of waiting the
+// production 60s / 30s.
 process.env.MINDOS_SESSION_LEASE_TTL_MS = '1500';
+process.env.MINDOS_SCHEDULER_LEASE_TTL_MS = '1500';
 
 const CLI = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 const CLI_CWD = fileURLToPath(new URL('../', import.meta.url));
@@ -35,7 +37,7 @@ afterEach(async () => {
     delete process.env.MINDOS_TEST_API_KEY;
 });
 
-/** Wait for the killed owner's Session lease to expire before resuming. */
+/** Wait for the killed owner's Session and scheduler leases to expire before resuming. */
 const settleLease = () => new Promise(resolve => setTimeout(resolve, 1800));
 
 type KillPoint = { request: number; when: 'before-reply' | 'after-reply' };

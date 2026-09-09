@@ -30,3 +30,11 @@ export { retryFlowTask } from './retry-task';
 
 export { FlowSchemaRegistry, flowSchemaIssue } from './schema-registry';
 export { schemaCompatibilityIssue } from './schema-compat';
+
+export {
+    acquireSchedulerLease,
+    isSchedulerOwnershipLost,
+    schedulerOwnerKey,
+    SchedulerOwnershipLostError,
+} from './scheduler-lease';
+export type { SchedulerLease, SchedulerLeaseOptions, SchedulerLeaseRecord } from './scheduler-lease';

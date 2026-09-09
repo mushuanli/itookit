@@ -1,4 +1,5 @@
 import { prepareFlowTaskRetry, readFlowRunMembers } from '../src/flow/run-members';
+import { workspaceFinalizationKey } from '../src/flow/workspace-finalization';
 import { restoreFlowHandle } from '../src/flow/restore-handle';
 import { readFlowTaskTranscript } from '../src/flow/transcript';
 import { flowToDag } from '../src/flow/to-dag';
@@ -13,7 +14,7 @@ import {
 import { createVFS, MemoryBackend, type IFileSystem, type IVFSManager } from '@itookit/vfs-core';
 import { DurableAgentProgram } from '@itookit/llm-tasks';
 import { createBuiltinDagPluginRegistry } from '../src/flow/builtin-plugins';
-import { DurableFlowExecutor, upstreamOf } from '../src/flow/executor';
+import { DurableFlowExecutor, upstreamOf, workspaceLeaseKey } from '../src/flow/executor';
 import { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from '../src/flow/programs';
 
 describe('DurableFlowExecutor', () => {
@@ -232,6 +233,88 @@ describe('DurableFlowExecutor', () => {
         expect(await handlers.get(FlowCommand.RunGet)!(args)).toMatchObject({
             root: { task: { status: 'succeeded' } }, workspaceFinalization: { status: 'failed', message: 'unable to remove worktree' },
         });
+    });
+
+    it('restores an isolated workspace lease instead of preparing a second one', async () => {
+        const prepared: string[] = [], restored: string[] = [];
+        const manager = {
+            prepare: async (sessionId: string) => {
+                prepared.push(sessionId);
+                return { directory: '/isolated', record: { version: 1, directory: '/isolated' },
+                    finish: async () => undefined };
+            },
+            restore: async (_sessionId: string, _policy: unknown, record: unknown) => {
+                restored.push(JSON.stringify(record));
+                return { directory: '/isolated', record: record as never, finish: async () => undefined };
+            },
+        };
+        const flow = { nodes: [{ ...valueNode('human', null), plugin: 'builtin.human',
+            config: { requestId: 'answer', prompt: 'Choose' } }], edges: [] };
+        const first = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            workspaceManager: manager });
+        const submission = first.submit('session-one', { ...flow, runPolicy: { workspace: { mode: 'worktree' } } } as DagRunSpec);
+        let nodeTaskId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer?.status === 'pending');
+            expect(task).toBeDefined();
+            nodeTaskId = task!.id;
+        });
+        const execution = await submission;
+        // The lease record is persisted with the Run, so a new host can re-attach it.
+        const session = await kernel.openSession('session-one');
+        expect((await session.getShared(workspaceLeaseKey(execution.root.id)))?.value)
+            .toEqual({ version: 1, directory: '/isolated' });
+        kernel.dispose();
+        // Graceful shutdown releases the scheduler lease, so the new host can take over.
+        await first.waitIdle();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel);
+        await kernel.initialize();
+
+        const resumed = await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            workspaceManager: manager }).resume('session-one', execution.root.id);
+        expect(prepared).toEqual(['session-one']);
+        expect(restored).toEqual([JSON.stringify({ version: 1, directory: '/isolated' })]);
+        await (await kernel.openSession('session-one')).attachTask(nodeTaskId)
+            .then(task => task.respond({ interactionId: 'answer', value: 'done' }));
+        expect((await resumed.root.wait({ timeoutMs: 2_000 })).status).toBe('succeeded');
+    });
+
+    it('completes a workspace finalization left pending by a crashed host', async () => {
+        const finishes: string[] = [];
+        const manager = {
+            prepare: async () => ({ directory: '/isolated', record: { version: 1, directory: '/isolated' },
+                finish: async (status: string) => { finishes.push(status); } }),
+            restore: async (_sessionId: string, _policy: unknown, record: unknown) => ({
+                directory: '/isolated', record: record as never,
+                finish: async (status: string) => { finishes.push(`restored:${status}`); },
+            }),
+        };
+        const first = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            workspaceManager: manager });
+        const execution = await first.submit('session-one', { ...valueFlow(), runPolicy: { workspace: { mode: 'worktree' } } } as DagRunSpec);
+        await execution.root.wait({ timeoutMs: 2_000 });
+        await execution.workspaceCompletion;
+        expect(finishes).toEqual(['succeeded']);
+
+        // Simulate a crash between cleanup and persisting its status.
+        const session = await kernel.openSession('session-one');
+        await session.setShared(workspaceFinalizationKey(execution.root.id), { status: 'pending' });
+        kernel.dispose();
+        await first.waitIdle();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel);
+        await kernel.initialize();
+
+        await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            workspaceManager: manager }).resume('session-one', execution.root.id);
+        expect(finishes).toEqual(['succeeded', 'restored:succeeded']);
+        const saved = await (await kernel.openSession('session-one'))
+            .getShared(workspaceFinalizationKey(execution.root.id));
+        expect(saved?.value).toMatchObject({ status: 'succeeded' });
     });
 
     it.each(['inherit', 'replace', 'none'])('snapshots Session context for standalone runs with %s prompt policy', async policy => {
@@ -654,8 +737,49 @@ describe('DurableFlowExecutor', () => {
         expect((await retries[1].wait({ timeoutMs: 2000 })).status).toBe('succeeded');
     });
 
+    it('re-arms a detached delegation deadline after the scheduling host restarts', async () => {
+        const first = executor(kernel);
+        const submission = first.submit('session-one', { nodes: [{ ...valueNode('child', null),
+            plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Keep waiting' } }], edges: [] });
+        let childTaskId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer?.status === 'pending');
+            expect(task).toBeDefined();
+            childTaskId = task!.id;
+        });
+        const execution = await submission;
+
+        // Persist a detached group whose deadline timer lives in the (about to die) host.
+        const session = await kernel.openSession('session-one');
+        const key = `flow.run.${execution.root.id}.scheduler`;
+        const saved = await session.getShared(key);
+        const checkpoint = saved!.value as any;
+        await session.setShared(key, {
+            ...checkpoint,
+            detachedNodes: ['child'],
+            delegationGroups: [['group-1', { policy: 'continue', children: ['child'], completed: [], succeeded: [],
+                waitMode: 'all', quorum: 1, detached: true, deadline: Date.now() + 60, resultOrder: 'declared' }]],
+            delegationGroupByChild: [['child', 'group-1']],
+        }, { expectedVersion: saved!.version });
+        kernel.dispose();
+        await first.waitIdle();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel);
+        await kernel.initialize();
+
+        await executor(kernel).resume('session-one', execution.root.id);
+        // The restored scheduler must cancel the straggler when the persisted deadline passes.
+        await vi.waitFor(async () => {
+            expect((await kernel.listSessionTasks('session-one')).find(task => task.id === childTaskId)?.status)
+                .toBe('cancelled');
+        }, { timeout: 2_000 });
+    });
+
     it('reuses a submitted node Task when the scheduler checkpoint missed the instance', async () => {
-        const execution = await executor(kernel).submit('session-one', { nodes: [{ ...valueNode('human', null),
+        const first = executor(kernel);
+        const execution = await first.submit('session-one', { nodes: [{ ...valueNode('human', null),
             plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Choose' } }], edges: [] });
         const session = await kernel.openSession('session-one');
         let nodeTaskId = '';
@@ -676,6 +800,7 @@ describe('DurableFlowExecutor', () => {
         // checkpoint has no record of the submitted instance.
         await session.setShared(key, { ...checkpoint, instances: [] }, { expectedVersion: saved!.version });
         kernel.dispose();
+        await first.waitIdle();
         kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
         kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
         registerPrograms(kernel);
@@ -692,6 +817,39 @@ describe('DurableFlowExecutor', () => {
             .filter(task => task.labels?.kind !== 'flow-root');
         expect(nodes.map(task => task.id)).toEqual([nodeTaskId]);
         expect(resumed.nodes.get('human')!.id).toBe(nodeTaskId);
+    });
+
+    it('refuses a second scheduler while the owner lease is live and fences the old owner', async () => {
+        const humanFlow: DagRunSpec = { nodes: [{ ...valueNode('human', null),
+            plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Choose' } }], edges: [] };
+        const first = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            schedulerOwnerId: 'host-a', schedulerLeaseTtlMs: 60_000 });
+        const submission = first.submit('session-one', humanFlow);
+        let nodeTaskId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer?.status === 'pending');
+            expect(task).toBeDefined();
+            nodeTaskId = task!.id;
+        });
+        const execution = await submission;
+
+        // A different host must not override a live owner.
+        const second = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            schedulerOwnerId: 'host-b', schedulerLeaseTtlMs: 60_000 });
+        await expect(second.resume('session-one', execution.root.id)).rejects.toThrow(/scheduled by host-a/);
+
+        // The same identity may resume (host restart): its higher epoch fences the old loop,
+        // which stops without failing the Run, and the new scheduler continues it.
+        const sameHost = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
+            schedulerOwnerId: 'host-a', schedulerLeaseTtlMs: 60_000 });
+        const resumed = await sameHost.resume('session-one', execution.root.id);
+        await (await kernel.openSession('session-one')).attachTask(nodeTaskId)
+            .then(task => task.respond({ interactionId: 'answer', value: 'done' }));
+        expect((await resumed.root.wait({ timeoutMs: 2_000 })).status).toBe('succeeded');
+        const owner = (await (await kernel.openSession('session-one'))
+            .getShared(`flow.run.${execution.root.id}.scheduler-owner`))?.value as { ownerId: string; epoch: number };
+        expect(owner).toMatchObject({ ownerId: 'host-a', epoch: 2 });
     });
 
     it.each(['target', 'node', 'cancel'])('refreshes persisted retry membership before %s control', async operation => {
