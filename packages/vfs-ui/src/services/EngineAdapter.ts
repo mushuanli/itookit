@@ -190,10 +190,6 @@ export class EngineAdapter {
                 }
                 case 'node:updated': {
                     const data = payload as { nodes?: Array<{ path: string }>; reason?: string };
-                    if (data.reason === 'metadata') {
-                        adapterDEBUG.received('node:updated[metadata-skip]', payload);
-                        break;
-                    }
                     data.nodes?.forEach(n => {
                         if (!n.path) return;
                         this.queues.update.add(n.path);

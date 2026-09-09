@@ -83,10 +83,10 @@ export class FileCommandHandler {
           const raw = await this.options.readContent?.(itemId);
           if (raw === undefined) return;
 
-          const transformer = typeof raw === 'string'
-            ? this.options.getDuplicateTransformer?.(ext)
-            : undefined;
-          const content = transformer ? await transformer(raw as string) : raw;
+          const transformer = this.options.getDuplicateTransformer?.(ext);
+          const content = transformer
+            ? await transformer(typeof raw === 'string' ? raw : new TextDecoder().decode(raw))
+            : raw;
 
           await this.service.createFile({
             title: `${item.metadata.title} (copy)${ext}`,

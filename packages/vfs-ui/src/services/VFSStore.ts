@@ -403,7 +403,10 @@ export class VFSStore implements IStatePort {
   private updateNode(items: VFSNodeUI[], id: string, updates: VFSNodeUI): boolean {
     for (let i = 0; i < items.length; i++) {
       if (items[i].id === id) {
-        items[i] = updates;
+        const current = items[i];
+        // Property updates from the engine omit children; preserve the already
+        // loaded subtree unless the event explicitly supplies a replacement.
+        items[i] = { ...current, ...updates, children: updates.children ?? current.children };
         return true;
       }
       if (items[i].children && this.updateNode(items[i].children!, id, updates))

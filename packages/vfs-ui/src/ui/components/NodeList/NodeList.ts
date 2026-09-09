@@ -125,7 +125,8 @@ export class NodeList extends BaseComponent<NodeListState> {
         showTagEditor: opts => this.tagEditorPopover.show(opts),
         findItemById: id => this.findItemById(id),
       },
-      this.fileCreation?.label ?? 'File'
+      this.fileCreation?.label ?? 'File',
+      options.engine?.capabilities.tags !== false,
     );
 
     this.settingsPopover = new SettingsPopover(this.commandBus, this.mainContainerEl);

@@ -172,6 +172,26 @@ describe('ITEMS_BATCH_UPDATE_SUCCESS', () => {
 
         expect(store.getState().items[0].icon).toBe('🔥');
     });
+
+    it('preserves loaded directory children when an engine update omits them', () => {
+        const folder = dir('a', null, [file('child', 'a')]);
+        store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: [folder], tags: new Map() } });
+
+        const updated = makeVFSNodeUI({
+            id: 'a',
+            type: 'directory',
+            content: undefined,
+            metadata: { ...folder.metadata, title: 'Updated folder' },
+        });
+        store.dispatch({
+            type: 'ITEMS_BATCH_UPDATE_SUCCESS',
+            payload: { updates: [{ itemId: 'a', data: updated }] },
+        });
+
+        const node = store.getState().items[0];
+        expect(node.metadata.title).toBe('Updated folder');
+        expect(node.children?.map(child => child.id)).toEqual(['child']);
+    });
 });
 
 // ── Subscriber notification ───────────────────────────────────────────────────

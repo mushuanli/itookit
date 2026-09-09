@@ -311,6 +311,26 @@ describe('node:updated event', () => {
         expect(store.getState().items[0].icon).toBe('🔥');
     });
 
+    it('updates display metadata when node:updated reason is metadata', async () => {
+        const path = '/agent.agent';
+        store.dispatch({
+            type: 'STATE_LOAD_SUCCESS',
+            payload: {
+                items: [makeVFSNodeUI({
+                    id: path,
+                    metadata: { ...makeVFSNodeUI().metadata, title: 'Old title', path },
+                })],
+                tags: new Map(),
+            },
+        });
+        engine.nodes.set('agent', makeEngineNode({ id: 'agent', path, metadata: { title: 'New title' } }));
+
+        engine.emit('node:updated', { nodes: [{ path }], reason: 'metadata' });
+        await sleep(AFTER_UPDATE);
+
+        expect(store.getState().items[0].metadata.title).toBe('New title');
+    });
+
     it('REMOVES item from store when updated node becomes a filtered (hidden) node', async () => {
         const path = '/.hidden';
         // Pre-load a regular file

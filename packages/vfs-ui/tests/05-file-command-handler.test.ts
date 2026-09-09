@@ -82,6 +82,67 @@ describe('FileCommandHandler — command → engine wiring', () => {
         expect(engine.driver.delete).toHaveBeenCalledWith(['id-1', 'id-2']);
     });
 
+    it('file:duplicate decodes text content before applying a registered transformer', async () => {
+        const bus = new CommandBus();
+        const raw = JSON.stringify({ id: 'agent-1', name: 'Agent' });
+        const transformer = vi.fn((content: string) => content.replace('"agent-1"', '""'));
+        const local = new FileCommandHandler(bus, store, service, {
+            readContent: async () => new TextEncoder().encode(raw).buffer,
+            getDuplicateTransformer: extension => extension === '.agent' ? transformer : undefined,
+        });
+        try {
+            const item = makeVFSNodeUI({
+                id: '/agent.agent',
+                metadata: {
+                    ...makeVFSNodeUI().metadata,
+                    title: 'Agent',
+                    path: '/agent.agent',
+                    custom: { _originalName: 'agent.agent', _extension: '.agent' },
+                },
+            });
+            store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: [item], tags: new Map() } });
+
+            bus.execute('file:duplicate', { itemId: '/agent.agent' });
+            await sleep(10);
+
+            expect(transformer).toHaveBeenCalledWith(raw);
+            const call = vi.mocked(engine.driver.createFile).mock.calls.at(-1)![0] as { name: string; content?: string | ArrayBuffer };
+            expect(call.name).toBe('Agent (copy).agent');
+            expect(call.content).toBe(JSON.stringify({ id: '', name: 'Agent' }));
+        } finally {
+            local.destroy();
+        }
+    });
+
+    it('file:duplicate keeps raw bytes when no text transformer is registered', async () => {
+        const bus = new CommandBus();
+        const bytes = new TextEncoder().encode('binary payload').buffer;
+        const local = new FileCommandHandler(bus, store, service, {
+            readContent: async () => bytes,
+            getDuplicateTransformer: () => undefined,
+        });
+        try {
+            const item = makeVFSNodeUI({
+                id: '/image.bin',
+                metadata: {
+                    ...makeVFSNodeUI().metadata,
+                    title: 'image',
+                    path: '/image.bin',
+                    custom: { _originalName: 'image.bin', _extension: '.bin' },
+                },
+            });
+            store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: [item], tags: new Map() } });
+
+            bus.execute('file:duplicate', { itemId: '/image.bin' });
+            await sleep(10);
+
+            const call = vi.mocked(engine.driver.createFile).mock.calls.at(-1)![0] as { content?: string | ArrayBuffer };
+            expect(call.content).toBe(bytes);
+        } finally {
+            local.destroy();
+        }
+    });
+
     it('file:rename preserves the file type and updates its stored title', async () => {
         const oldPath = '/old-name.prj';
         const oldItem = makeVFSNodeUI({

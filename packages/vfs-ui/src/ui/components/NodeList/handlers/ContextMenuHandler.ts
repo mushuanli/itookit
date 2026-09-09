@@ -33,7 +33,8 @@ export class ContextMenuHandler {
     private readonly commandBus: ICommandPort,
     private readonly contextMenuConfig: ContextMenuConfig | undefined,
     private readonly callbacks: ContextMenuCallbacks,
-    private readonly createFileLabel: string = 'File'
+    private readonly createFileLabel: string = 'File',
+    private readonly tagsEnabled: boolean = true,
   ) {}
 
   show(event: MouseEvent, itemEl: HTMLElement): void {
@@ -63,6 +64,7 @@ export class ContextMenuHandler {
       menuItems = this.buildContextMenuItems(contextItem);
     }
 
+    if (!this.tagsEnabled) menuItems = menuItems?.filter(item => item.type === 'separator' || !['edit-tags', 'bulk-edit-tags'].includes(item.id));
     if (!menuItems?.length) return;
     this.createMenu(menuItems, event.clientX, event.clientY, contextItem);
   }
