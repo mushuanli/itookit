@@ -534,7 +534,7 @@ Codex 支持并行 subagent、等待汇总、检查子线程、向运行中子�
 | 并发 | Flow maxNodes/maxConcurrency/timeoutMs/maxTokens 已接入 executor；节点上限覆盖初始图、patch 和 delegation | 恢复后的 Flow 调度状态及预算连续性仍需验收 |
 | 生命周期 | Kernel Session suspend/resume；Flow Goal 与运行 UI | Goal 完成条件验证、后台通知与恢复仍需验收 |
 | 工作区 | Git worktree manager；未配置 manager 时非 shared 模式拒绝执行 | 三端装配、自动合并与冲突处理 UI 仍需核验 |
-| 结构化输出 | Agent responseFormat/outputValidation、Inspector；data edge 端口 schema 引用在发布/直接执行/动态 patch 校验 | 已提供受限 schema 注册表和 data edge 内容校验；结构兼容推导及 responseFormat 到端口契约的自动绑定仍待补齐 |
+| 结构化输出 | Agent responseFormat/outputValidation、Inspector；data edge 端口 schema 引用在发布/直接执行/动态 patch 校验 | 已提供受限 schema 注册表、data edge 内容校验与同 id 跨版本的子类型推导；responseFormat 到端口契约的自动绑定仍待补齐 |
 | Memory/Context | ConversationSystemOptions → createSessionManager → SessionManager 已传递 retrieveMemory 注入点，检索接收当前 Session 与复制的 memoryPolicy；Agent 每次模型请求前按配置裁剪历史并保护系统指令、当前用户请求和完整工具组 | 已装配 Session 内持久 memory provider；跨 Session 共享、模型记忆工具、语义摘要及长期运行恢复仍待完成 |
 | 扩展点 | Harness hooks 已有 host trust/hash/timeout/output boundary，Flow 发出生命周期事件 | 完整事件接线与信任管理 UI 仍需核验 |
 
@@ -660,11 +660,13 @@ interface StructuredOutputPolicy {
 
 data edge 校验 source output schema 与 target input schema；运行时无效输出按策略 fail/repair/continue，并记录原始响应与校验错误。
 
-当前端口契约（2026-09-08）：InputPortSpec/OutputPortSpec.schema 是 `{ id, version? }` 引用，不是内嵌 JSON Schema。目标无 schema 时不施加类型限制；目标有 schema 时，来源必须声明完全相同的 id/version（未指定版本也必须一致），不隐式转换版本或猜测结构兼容性。Flow 发布校验返回 incompatible-port-schema；直接 DurableFlowExecutor.submit 在打开 Session、创建 Task 或准备 worktree 前拒绝；动态 graph patch 在发布任何节点前使用同一规则。control edge 不传数据，因此跳过。实现见 `llm-flow/src/flow/port-contract.ts`。
+当前端口契约（2026-09-10）：InputPortSpec/OutputPortSpec.schema 是 `{ id, version? }` 引用，不是内嵌 JSON Schema。目标无 schema 时不施加类型限制；目标有 schema 时，来源与目标 **id 必须相同**，不同 id 一律拒绝（语义不同，不做隐式转换）。同一 id 下 version 相同即精确匹配；version 不同（含一侧未指定版本）要求两侧引用都已注册，并对注册的结构做**子类型推导**：来源输出的每个合法值都必须满足目标输入 schema，推导失败返回 `Schema mismatch …: <原因>`。Flow 发布校验返回 incompatible-port-schema；直接 DurableFlowExecutor.submit 在打开 Session、创建 Task 或准备 worktree 前拒绝；动态 graph patch 在发布任何节点前使用同一规则。control edge 不传数据，因此跳过。实现见 `llm-flow/src/flow/port-contract.ts` 与 `llm-flow/src/flow/schema-compat.ts`。
 
-当前内容校验：`DagPluginRegistry.registerSchema({ id, version? }, schema)` 注册不可覆盖的结构定义；`getSchema` 返回副本，未指定版本不解析到最新版。目标端口有 schema 的 data edge 在发布、直接执行和动态 patch 时要求相同且已注册的引用。执行器在下游 Task 创建前，以与依赖消费相同的 `extractNodeOutput` 提取成功上游产物并校验；无效数据使 submit 失败并执行已有失败清理，不会启动下游，也不会改写已成功的上游记录。control edge 不校验；上游失败继续走既有 onFailure 语义。
+子类型推导的受支持子集（与注册表一致，超出即拒绝）：boolean schema（`false` 是任何 schema 的子类型，`true` 只对 `true` 成立）、type（`integer ⊆ number`，其余类型必须相同；来源未声明 type 而目标声明了则拒绝）、enum（来源取值必须全部落在目标 enum 内）、object（目标的每个 `required` 键在来源中也必须 required 且有可推导的属性 schema；目标 `additionalProperties: false` 时来源不得再允许额外属性；`additionalProperties` 为 schema 时同样递归推导）、array（目标声明 `items` 时来源也必须声明且递归推导）。`oneOf`/`anyOf`/`$ref`/数值边界等不在子集内，注册阶段即被拒绝。运行时内容校验仍是权威判断，子类型推导只用于在提交前拒绝明显不兼容的图。
 
-注册表支持 boolean schema，以及 type（object/array/string/number/integer/boolean/null）、properties、required、items、additionalProperties、enum、title、description。嵌套定义同样验证；未知关键字、无效定义明确拒绝，未声称支持完整 JSON Schema、引用解析或隐式 JSON 文本解析。结构子类型推导、Agent responseFormat 自动编译成端口引用、无消费边输出的契约验证、运行定义持久冻结以及端口错误的 repair/continue 策略仍待补齐。
+当前内容校验：`DagPluginRegistry.registerSchema({ id, version? }, schema)` 注册不可覆盖的结构定义；`getSchema` 返回副本，未指定版本不解析到最新版。目标端口有 schema 的 data edge 在发布、直接执行和动态 patch 时要求 id 相同、引用已注册，跨版本时结构可推导。执行器在下游 Task 创建前，以与依赖消费相同的 `extractNodeOutput` 提取成功上游产物并校验；无效数据使 submit 失败并执行已有失败清理，不会启动下游，也不会改写已成功的上游记录。control edge 不校验；上游失败继续走既有 onFailure 语义。
+
+注册表支持 boolean schema，以及 type（object/array/string/number/integer/boolean/null）、properties、required、items、additionalProperties、enum、title、description。嵌套定义同样验证；未知关键字、无效定义明确拒绝，未声称支持完整 JSON Schema、引用解析或隐式 JSON 文本解析。Agent responseFormat 自动编译成端口引用、无消费边输出的契约验证、运行定义持久冻结以及端口错误的 repair/continue 策略仍待补齐。
 
 Harness hooks 采用小而稳定的事件集合：
 

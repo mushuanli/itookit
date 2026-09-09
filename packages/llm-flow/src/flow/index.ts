@@ -29,3 +29,4 @@ export { prepareFlowTaskRetry, type FlowRunMember } from './run-members';
 export { retryFlowTask } from './retry-task';
 
 export { FlowSchemaRegistry, flowSchemaIssue } from './schema-registry';
+export { schemaCompatibilityIssue } from './schema-compat';
