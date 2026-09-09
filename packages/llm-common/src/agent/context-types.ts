@@ -55,7 +55,7 @@ export type ContextBlock =
     | { kind: 'summary'; sourceRoundIds: RoundId[]; artifactId: string }
     | { kind: 'artifact'; artifactId: string; label: string }
     | { kind: 'memory'; entryId: string; namespaceId: string; contentHash: string; content?: string }
-    | { kind: 'system'; source: 'agent' | 'skill' | 'runtime'; content: string };
+    | { kind: 'system'; source: 'agent' | 'skill' | 'runtime' | 'project' | 'session-skill' | 'skill-index'; content: string };
 
 // ─── ContextSnapshot (frozen output) ───────────────────────────────────────
 

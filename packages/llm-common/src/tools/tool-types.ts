@@ -50,6 +50,8 @@ export interface ToolMeta {
      * 这样工具本身无需耦合执行器，执行器无需硬编码工具名。
      */
     skillLoaderArgKey?: string;
+    /** Persist removal before invoking a live-scope Skill unloader. */
+    skillUnloaderArgKey?: string;
 }
 
 /**
@@ -84,6 +86,12 @@ export interface ToolInvokeResult {
     error?: string;
     /** 额外元数据 */
     metadata?: Record<string, unknown>;
+    /** Trusted adapter snapshot after a successful Skill load; retained across context pruning. */
+    skillContext?: {
+        skillId: string;
+        compactInstructions: string;
+        tools?: Array<{ toolId: string; definition: import('../llm/message').ToolDefinition; external: boolean }>;
+    };
 }
 
 /**

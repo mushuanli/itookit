@@ -516,6 +516,12 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // ── 8. Event bindings ──────────────────────────────────────────────────────
 
+    // Navigation listeners are global and outlive workspace managers. Keep them
+    // on an AbortController so destroy() and startup failure can unregister them.
+    const navigationAbort = new AbortController();
+    cleanupFns.push(() => navigationAbort.abort());
+    const navigationSignal = navigationAbort.signal;
+
     document.querySelectorAll('.app-nav-btn[data-target]').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -525,13 +531,13 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             const lastId = managerCache.get(targetId)?.getActiveResourceId() ?? null;
             updateHistory(targetId, lastId, 'push');
             performNavigation(targetId, lastId ?? undefined);
-        });
+        }, { signal: navigationSignal });
     });
 
     document.addEventListener(NAVIGATION_EVENTS.NAVIGATE, (e) => {
         const req = (e as CustomEvent).detail as NavigationRequest;
         if (req?.target) handleNavigationRequest(req);
-    });
+    }, { signal: navigationSignal });
 
     window.addEventListener('popstate', (e) => {
         const state = e.state as { workspaceId: string; resourceId?: string } | null;
@@ -543,7 +549,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             const resource = parts[1] ? decodeURIComponent(parts[1]) : undefined;
             performNavigation(resolveTarget(slug), resource === 'new' ? undefined : resource);
         }
-    });
+    }, { signal: navigationSignal });
 
     // ── 9. Initial navigation ──────────────────────────────────────────────────
 

@@ -2,8 +2,10 @@ import type {
     ArtifactDraft,
     InputPortSpec,
     JsonValue,
+    JsonSchemaRef,
     OutputPortSpec,
     FlowEdgeId,
+    FlowConnection,
     FlowRunGoal,
     FlowRunPolicy,
 } from './flow-definition';
@@ -49,6 +51,10 @@ export interface DagEdgeDefinition {
 }
 
 export interface DagRunSpec {
+    /** Compiler-owned identity defaults by node; dynamic descendants inherit their parent's scope. */
+    nodeDefaults?: Record<string, Record<string, unknown>>;
+    /** Connection aliases for dynamic descendants, scoped by their compiled source node. */
+    nodeConnections?: Record<string, { connections?: FlowConnection[]; defaultConnection?: string; fallbackConnectionId?: string }>;
     nodes: DagNodeDefinition[];
     edges: DagEdgeDefinition[];
     maxNodes?: number;
@@ -132,6 +138,7 @@ export interface DagPlugin<Config = unknown> {
 }
 
 export interface DagPluginCatalog {
+    getSchema?(ref: JsonSchemaRef): JsonValue | undefined;
     listManifests(): DagPluginManifest[];
     getManifest(id: string, version?: string): DagPluginManifest | undefined;
     loadRuntime(id: string, version?: string): Promise<DagRuntimeContribution>;

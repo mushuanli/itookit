@@ -41,7 +41,6 @@ import { SkillManager } from './skill-manager';
 const CONNECTIONS_DIR  = '/llm/.connections';       // LLM 连接（新路径）
 const PROVIDERS_DIR    = '/llm/.providers';         // Provider 配置（用户自定义 + 内置覆盖）
 const MCP_DIR          = '/llm/.mcp';               // MCP 服务器配置（新路径）
-const SKILLS_DIR       = '/llm/.skills';            // Skill 配置
 
 // ─── ioctl 命令 ───────────────────────────────────────────────────────────────
 
@@ -289,7 +288,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             this.vfsHelpers.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR),
             this.vfsHelpers.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR),
             this.vfsHelpers.loadJsonFilesFromDir<MCPServer>(MCP_DIR),
-            this.vfsHelpers.loadJsonFilesFromDir<LLMSkill>(SKILLS_DIR),
+            this.skillManager.loadAllSkills(),
         ]);
         _log('preloadDirs');
 

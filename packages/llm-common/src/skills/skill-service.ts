@@ -13,8 +13,8 @@ import type {
 /**
  * Skill 设备服务接口。
  *
- * 由 device-skills 的 SkillDeviceDriver 实现。
- * llm-agent 通过此接口管理 Skill 的生命周期。
+ * 由 kernel-adapters 的 SkillDeviceDriver 实现。
+ * 每个 Session 独立管理 Skill 的加载状态。
  */
 export interface ISkillService {
     /** 获取所有已注册的 Skill 定义 */
@@ -66,7 +66,7 @@ export interface ISkillService {
 
     /**
      * 返回四层路由分类（L1 silent / L2 index / L3 dynamicMount / L4 spatial）。
-     * ContextManager 据此构建 P2/P3/P4 系统 Prompt。
+     * 由上下文组装消费；接口本身不触发 Prompt 注入。
      */
     getRouteLayers(): SkillRouteLayer;
 
@@ -105,8 +105,8 @@ export interface ISkillService {
     parseCompactInstructions(skillId: string): ParsedCompactInstructions;
 
     /**
-     * 聚合所有已启用 skill 的 compact instructions。
-     * 用于注入 L3 压缩提示词。
+     * 聚合当前作用域内已加载、启用且允许模型调用的压缩规则。
+     * 调用方负责将结果接入压缩提示词。
      */
     getCompactInstructions(): string;
 
@@ -115,7 +115,7 @@ export interface ISkillService {
     /**
      * 设置当前工作目录，触发作用域重建。
      *
-     * 流程：findProjectRoot → buildScopeEntries → refreshScopedSkills
+     * 通过宿主 SkillSource 刷新；迟到的旧扫描不会覆盖新作用域。
      */
     setCwd(cwd: string): Promise<void>;
 
@@ -131,8 +131,16 @@ export interface ISkillService {
 
     /**
      * 返回当前项目的 _agent/AGENT.md 内容。
-     * 注入到系统 Prompt P0.5 层（预算豁免，始终包含）。
+     * 由调用方决定如何注入当前上下文。
      * 无 AGENT.md 或浏览器环境时返回空字符串。
      */
     getAgentMdContent(): string;
+}
+
+/** Host-owned controls for persisted Skill selections in a single Session. */
+export interface SessionSkillControls {
+    list(sessionId: string): ReturnType<SessionSkillControls['listLoaded']>;
+    load(sessionId: string, skillId: string): Promise<string[]>;
+    listLoaded(sessionId: string): Promise<Array<{ id: string; name: string; description: string; loaded: boolean; enabled: boolean; toolCount: number }>>;
+    unload(sessionId: string, skillId: string): Promise<void>;
 }

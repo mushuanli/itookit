@@ -41,6 +41,8 @@ export interface CompactSection {
  * AI 犯错时写入日志，加载 Skill 时注入历史修正记录。
  */
 export interface SkillCorrectionLog {
+    /** Explicit virtual project root supplied by the source; otherwise use the Skill scope root. */
+    root?: string;
     /** 日志文件路径（相对项目根，例: "docs/agent-corrections.md"） */
     path: string;
     /** 是否启用 */
@@ -214,6 +216,8 @@ export interface SkillDefinition {
 
     /** Subagent 角色标识（与 buildSubagentSystemPrompt 配合使用） */
     subagentRole?: string;
+    /** Default model for a delegated child explicitly selecting this Skill. */
+    subagentModel?: string;
 
     /** 多步 Skill 的 Durable TaskProgram；未设置时 Skill 仅提供指令和工具。 */
     taskProgram?: SkillTaskProgramRef;
@@ -259,6 +263,10 @@ export interface SkillLoadResult {
     success: boolean;
     /** 新增的工具 ID 列表 */
     toolIds: string[];
+    /** Instructions captured at load time for durable consumers. */
+    instructions?: string;
+    /** Critical rules captured with the loaded instructions. */
+    compactInstructions?: string;
     /** 错误信息（仅 success=false 时） */
     error?: string;
 }

@@ -44,9 +44,9 @@ export interface OutputValidationPolicy {
 }
 
 export interface ContextCompactionPolicy {
-    /** Start compacting when assembled context exceeds this message count. */
+    /** Prune before each model exchange above this count; policy/user messages and tool groups may exceed it. */
     maxMessages: number;
-    /** Preserve this many most-recent messages verbatim. */
+    /** Preserve at least this many recent messages, capped at maxMessages, expanding to complete tool groups. */
     keepRecent?: number;
 }
 

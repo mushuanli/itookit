@@ -2,7 +2,7 @@
 //
 // SkillManager — SkillDefinition CRUD, HTTP/Shell/MCP invocation.
 
-import type { LLMSkill } from '@itookit/common';
+import type { LLMSkill, SkillToolBinding } from '@itookit/common';
 import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import yaml from 'js-yaml';
 import { VFSHelpers } from './vfs-helpers';
@@ -10,6 +10,47 @@ import type { MCPManager } from './mcp-manager';
 import type { IShellRunner } from './llm-device-driver';
 
 const SKILLS_DIR = '/llm/.skills';
+const SKILL_TYPES = new Set(['builtin', 'http', 'shell', 'prompt', 'mcp', 'custom']);
+const TOOL_EXECUTION_TYPES = new Set(['builtin', 'http', 'shell', 'handler']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Validate a tool binding before it can be registered by the Skill loader. */
+export function isSkillToolBinding(value: unknown): value is SkillToolBinding {
+    if (!isRecord(value)) return false;
+    if (typeof value.toolId !== 'string' || value.toolId.trim().length === 0) return false;
+    if (!isRecord(value.definition)) return false;
+
+    const functionDef = value.definition.function;
+    if (functionDef !== undefined && !isRecord(functionDef)) return false;
+    const name = typeof value.definition.name === 'string' ? value.definition.name.trim() : '';
+    const functionName = functionDef && typeof functionDef.name === 'string' ? functionDef.name.trim() : '';
+    if (!name && !functionName) return false;
+
+    if (value.executionType !== undefined
+        && (typeof value.executionType !== 'string' || !TOOL_EXECUTION_TYPES.has(value.executionType))) {
+        return false;
+    }
+    return true;
+}
+
+/** Validate a parsed Skill before it enters the catalog. */
+export function isSkillDefinition(value: unknown): value is LLMSkill {
+    if (!isRecord(value)) return false;
+    return typeof value.id === 'string' && value.id.trim().length > 0
+        && typeof value.name === 'string'
+        && typeof value.description === 'string'
+        && typeof value.type === 'string' && SKILL_TYPES.has(value.type)
+        && typeof value.enabled === 'boolean'
+        && typeof value.instructions === 'string'
+        && Array.isArray(value.tools)
+        && value.tools.every(isSkillToolBinding)
+        && Array.isArray(value.triggerPatterns)
+        && typeof value.autoLoad === 'boolean'
+        && typeof value.priority === 'number' && Number.isFinite(value.priority);
+}
 
 export class SkillManager {
     private _skills: LLMSkill[] = [];
@@ -39,13 +80,19 @@ export class SkillManager {
     // ─── Mutations ─────────────────────────────────────────────────────────
 
     async saveSkill(skill: LLMSkill, systemFS?: IFileSystem): Promise<void> {
-        skill = { ...skill, modifiedAt: Date.now() };
-        await this.writeSkillToDisk(skill, systemFS);
-        const idx = this._skills.findIndex(s => s.id === skill.id);
-        if (idx >= 0) { this._skills[idx] = skill; } else { this._skills.push(skill); }
-        await this.vfs.createDeviceNode('llm', `/dev/llm/skills/${skill.id}`, {
+        const candidate: unknown = skill;
+        if (!isSkillDefinition(candidate)) {
+            const id = isRecord(candidate) && typeof candidate.id === 'string' ? candidate.id : '<unknown>';
+            throw new Error(`Invalid skill definition: ${id}`);
+        }
+
+        const next = { ...candidate, modifiedAt: Date.now() };
+        await this.writeSkillToDisk(next, systemFS);
+        const idx = this._skills.findIndex(s => s.id === next.id);
+        if (idx >= 0) { this._skills[idx] = next; } else { this._skills.push(next); }
+        await this.vfs.createDeviceNode('llm', `/dev/llm/skills/${next.id}`, {
             resourceType: 'skill',
-            resourceId: skill.id,
+            resourceId: next.id,
         });
         this.onChanged();
     }
@@ -60,10 +107,14 @@ export class SkillManager {
     // ─── Init helpers ──────────────────────────────────────────────────────
 
     setSkills(skills: LLMSkill[]): void {
-        this._skills = skills;
+        this._skills = skills.filter(isSkillDefinition);
     }
 
     // ─── VFS reload ────────────────────────────────────────────────────────
+
+    async loadAllSkills(): Promise<LLMSkill[]> {
+        return this.helpers.loadYamlFilesFromDir<LLMSkill>(SKILLS_DIR, undefined, isSkillDefinition);
+    }
 
     async reload(): Promise<void> {
         this._skills = await this.loadAllSkills();
@@ -88,29 +139,18 @@ export class SkillManager {
 
     // ─── Private helpers ───────────────────────────────────────────────────
 
-    private async loadAllSkills(): Promise<LLMSkill[]> {
-        const raw = await this.helpers.loadJsonFilesFromDir<any>(SKILLS_DIR);
-        return raw;
-    }
-
     private async writeSkillToDisk(skill: LLMSkill, systemFS?: IFileSystem): Promise<void> {
-        const fs = systemFS ?? this.helpers.getFileSystem();
         await this.helpers.engineUpsert(
             `${SKILLS_DIR}/${skill.id}.yaml`,
             yaml.dump(skill, { lineWidth: -1, noRefs: true }),
             systemFS,
         );
-        // Remove legacy .json file if present (one-time migration on first save).
-        const oldId = await fs.driver.resolvePath(`${SKILLS_DIR}/${skill.id}.json`);
-        if (oldId) await fs.driver.delete([oldId]);
     }
 
     private async deleteSkillFromDisk(id: string, systemFS?: IFileSystem): Promise<void> {
         const fs = systemFS ?? this.helpers.getFileSystem();
-        for (const ext of ['.yaml', '.json']) {
-            const nodeId = await fs.driver.resolvePath(`${SKILLS_DIR}/${id}${ext}`);
-            if (nodeId) { await fs.driver.delete([nodeId]); break; }
-        }
+        const nodeId = await fs.driver.resolvePath(`${SKILLS_DIR}/${id}.yaml`);
+        if (nodeId) await fs.driver.delete([nodeId]);
     }
 
     private async invokeHttpSkill(skill: LLMSkill, args: Record<string, unknown>): Promise<unknown> {
@@ -148,4 +188,3 @@ export class SkillManager {
         return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
     }
 }
-

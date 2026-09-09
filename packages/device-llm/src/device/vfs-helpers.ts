@@ -5,6 +5,8 @@
 import type { IFileSystem, CreateFileOptions } from '@itookit/vfs-core';
 import yaml from 'js-yaml';
 
+type ConfigValidator<T> = (value: unknown, path: string) => value is T;
+
 export class VFSHelpers {
     constructor(private readonly engine: IFileSystem) {}
 
@@ -45,8 +47,17 @@ export class VFSHelpers {
         }
     }
 
-    /** Load all YAML (preferred) and JSON (legacy) files from a VFS directory. */
-    async loadJsonFilesFromDir<T>(dirPath: string, systemFS?: IFileSystem): Promise<T[]> {
+    /** Load supported YAML/JSON configuration files from a VFS directory. */
+    async loadJsonFilesFromDir<T>(dirPath: string, systemFS?: IFileSystem, validate?: ConfigValidator<T>): Promise<T[]> {
+        return this.loadFilesFromDir(dirPath, ['.yaml', '.yml', '.json'], systemFS, validate);
+    }
+
+    /** Canonical YAML collections do not probe older configuration formats. */
+    async loadYamlFilesFromDir<T>(dirPath: string, systemFS?: IFileSystem, validate?: ConfigValidator<T>): Promise<T[]> {
+        return this.loadFilesFromDir(dirPath, ['.yaml'], systemFS, validate);
+    }
+
+    private async loadFilesFromDir<T>(dirPath: string, extensions: string[], systemFS?: IFileSystem, validate?: ConfigValidator<T>): Promise<T[]> {
         const items: T[] = [];
         const t0 = performance.now();
         try {
@@ -57,6 +68,7 @@ export class VFSHelpers {
             console.log(`[Boot]       loadDir ${dirPath}: ${children.length} entries`);
             for (const child of children) {
                 if (child.type !== 'file') continue;
+                if (!extensions.some(extension => child.name.endsWith(extension))) continue;
                 const isYaml = child.name.endsWith('.yaml') || child.name.endsWith('.yml');
                 const isJson = child.name.endsWith('.json');
                 if (!isYaml && !isJson) continue;
@@ -64,11 +76,19 @@ export class VFSHelpers {
                     const raw = await fs.driver.readContent(child.path);
                     const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
                     const parsed = isYaml
-                        ? yaml.load(text) as T
-                        : JSON.parse(text) as T;
-                    items.push(parsed);
+                        ? yaml.load(text)
+                        : JSON.parse(text);
+                    if (parsed === null || parsed === undefined) {
+                        console.warn(`[VFSHelpers] loadDir skip empty ${child.path}`);
+                        continue;
+                    }
+                    if (validate && !validate(parsed, child.path)) {
+                        console.warn(`[VFSHelpers] loadDir skip invalid ${child.path}`);
+                        continue;
+                    }
+                    items.push(parsed as T);
                 } catch (e) {
-                    console.warn(`[VFSHelpers] loadDir skip ${child.name}:`, e instanceof Error ? e.message : e);
+                    console.warn(`[VFSHelpers] loadDir skip ${child.path}:`, e instanceof Error ? e.message : e);
                 }
             }
             console.log(`[Boot]       loadDir ${dirPath}: ${items.length} loaded in ${(performance.now() - t0).toFixed(0)}ms`);
