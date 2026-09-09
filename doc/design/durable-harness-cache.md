@@ -6,6 +6,19 @@
 
 本文补充 [Session / Task 协议](durable-harness-protocol.md)，回答 cache 是否一次性、是否限于本 Task、Task 能否管理及选择 cache，以及这些选择如何影响中断恢复。当前已实现核心能力，不能视为完整实现本文协议。namespace、entry 与 Task receipt 的存放位置及删除约束见 [持久存储与文件组织](durable-harness-storage.md)。
 
+## 当前实现基线（2026-09-08）
+
+当前接口以 [domain/cache.ts](../../packages/durable-kernel/src/domain/cache.ts) 为准，事务实现见 [cache-store.ts](../../packages/durable-kernel/src/infrastructure/seqfile/cache-store.ts)。以下编号章节仍描述完整目标。
+
+- `CacheSpec` 支持 `step/task/session`、`reusable/single-use`、可选 `ttlMs` 和 namespace 容量；默认 task/reusable、256 entries、4 MiB。没有独立 retention 字段、聚合 Task/Session 容量预留或 pin。
+- `CacheRead` 使用 `operationId`、有序 `sources: { handleId, key, fingerprint, expectedVersion? }[]`、顶层 `maxAgeMs` 和四种 mode。新操作先校验并授权全部显式来源，再选择首个命中；`refresh/bypass` 也校验来源，返回 bypass。`cache-only` 未命中返回 miss，由调用方决定后续行为；没有 `allowStale` 或隐式写入目标。
+- read 将小 JSON 值复制到 Task receipt，与 single-use 领取同事务提交。相同 operationId/请求重放原结果，不重新读取 cache 或再次检查 handle；仍要求调用 Task/Session 的生命周期允许操作。请求内容不一致报冲突。无效来源、模式和版本不会写 receipt 或消耗 single-use 值。
+- publish 使用 `expectedGeneration` 和可选 `expectedVersion`；null 要求本代没有现存 entry，省略则不做版本 CAS。每 key 的独立发布序号跨容量淘汰保留，避免旧版本身份复用。容量回收按发布时间保留较新项，不是 LRU；receipt 与版本序号不计入 entry 容量。
+- invalidate 增加 generation；renew 增加 generation 并仅延长当前代仍存活、未消费的 entry，不能复活过期或已消费值。TTL 必须为正有限值且绝对期限不超过安全整数上界；generation 耗尽时拒绝变更。
+- Task 的 `cache-create/cache-invalidate/cache-renew` action 有 operationId 持久回执；宿主 `CacheApi.create/invalidate/renew` 本身没有 operationId 参数。list 返回当前获授权列表，尚无分页。
+
+跨 Session owner、provider cache、artifact 大值、完整 retention/GC 与容量账本仍待实施。当前 namespace 的 `ownerTaskId` 记录创建者，Session scope 授权不要求该 Task 本体仍存在。基础回归见 [protocol.test.ts](../../packages/durable-kernel/src/protocol.test.ts)；独立进程竞争与提交前/后 SIGKILL 回执原子性见 [LocalFS IPC 测试](../../packages/vfsdriver-localfs/tests/20-kernel-ipc.test.ts)，覆盖根后端和非根挂载、失效后的原回执重放；本轮 durable-kernel 全套 113 项通过，不能替代上述扩展的验收。
+
 ## 1. 设计裁决
 
 **Cache 是可丢弃的派生数据资源；作用域、保留期限和使用次数独立配置。Task 可以管理获授权的 cache，并显式选择读写目标。恢复事实不依赖 cache 一定存在。**

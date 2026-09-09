@@ -64,14 +64,56 @@ export function workspaceDiffKey(id: string): string { return `workspace/diff/${
 
 // ── 布局 / 事务 ───────────────────────────────────────────────────────────────
 
+/** Every SeqFile a Session root owns (their records are stored separately). */
+export function sessionSeqFiles(root: string): string[] {
+    return ['session.seq', 'shared.seq', 'context.seq', 'messages.seq', 'events.seq', 'graph.seq', 'resources.seq', 'index.seq']
+        .map(file => join(root, file));
+}
+
+/**
+ * Drop every record of the given SeqFiles. Deleting files never touches these
+ * records, and leftovers would resurrect a removed Session under a reused identity.
+ */
+export async function clearSeqRecords(fs: IFileSystem, paths: string[]): Promise<void> {
+    if (!paths.length) return;
+    await transaction(fs, async tx => {
+        for (const path of paths) {
+            const keys: string[] = [];
+            await tx.walkEntries(path, entry => { keys.push(entry.key); return true; });
+            for (const key of keys) await tx.deleteEntry(path, key);
+        }
+    });
+}
+
+/** Session seq files plus every Task seq file, from the tree and from the index records. */
+export async function sessionRecordPaths(binding: ResolvedStorageBinding, taskIds: string[] = []): Promise<string[]> {
+    const ids = new Set([...taskIds, ...await taskIdsFromIndex(binding.fs, binding.rootPath)]);
+    return [...sessionSeqFiles(binding.rootPath), ...[...ids].map(id => taskPath(binding.rootPath, id))];
+}
+
+async function taskIdsFromIndex(fs: IFileSystem, root: string): Promise<string[]> {
+    // Records are read through a transaction: the non-transactional SeqFile API
+    // resolves the file first and would fail once the storage tree is gone.
+    return transaction(fs, async tx => {
+        const ids: string[] = [];
+        await tx.walkEntries(indexPath(root), entry => {
+            ids.push(entry.key.slice('task/'.length));
+            return true;
+        }, { keyPrefix: 'task/' });
+        return ids;
+    });
+}
+
 export async function ensureSessionLayout(binding: ResolvedStorageBinding): Promise<void> {
     requireTransactionalSeq(binding.fs);
+    // A missing session file means this storage was removed; records may have
+    // survived an interrupted removal, so this identity must start from empty.
+    const fresh = !await binding.fs.driver.exists(join(binding.rootPath, 'session.seq'));
     await ensureTree(binding.fs, binding.rootPath);
     await binding.fs.driver.updateMetadata(binding.rootPath, { vfsFixedLayout: true });
-    for (const file of ['session.seq', 'shared.seq', 'context.seq', 'messages.seq', 'events.seq', 'graph.seq', 'resources.seq', 'index.seq']) {
-        await ensureSeqFile(binding.fs, join(binding.rootPath, file));
-    }
+    for (const file of sessionSeqFiles(binding.rootPath)) await ensureSeqFile(binding.fs, file);
     await ensureTree(binding.fs, join(binding.rootPath, 'tasks'));
+    if (fresh) await clearSeqRecords(binding.fs, await sessionRecordPaths(binding));
 }
 
 export async function ensureTaskLayout(binding: ResolvedStorageBinding, taskId: string): Promise<void> {

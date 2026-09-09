@@ -575,3 +575,6 @@
 @media (max-width: 720px) {
     .dag-settings__grid { grid-template-columns: 1fr; }
 }
+
+.dag-transcript { width: min(900px, 90vw); }
+.dag-transcript pre { max-height: 65vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

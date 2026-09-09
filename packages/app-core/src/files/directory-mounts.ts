@@ -1,5 +1,6 @@
 import { normalizeVirtualPath, type IFileSystem } from '@itookit/vfs-core';
 import type { SessionFilesService, SessionMountRecord } from './session-files';
+import { randomUUID } from '@itookit/common';
 
 export interface DirectorySourceProvider {
     selectDirectory(): Promise<string | null>;
@@ -115,7 +116,7 @@ export class DirectoryMountService {
         const name = source.label.split(/[\\/]/).filter(Boolean).pop()?.replace(/[^a-zA-Z0-9_-]/g, '-') || 'directory';
         const at = normalizeVirtualPath(requestedAt ?? same?.at ?? '/' + name);
         if (mounts.some(m => m.at === at && m.mountId !== same?.mountId)) throw new Error(`挂载点已存在：${at}，请在挂载界面选择其他名称`);
-        const mount: SessionMountRecord = { mountId: same?.mountId ?? crypto.randomUUID(), at, sourceId: source.sourceId, root: source.root, access };
+        const mount: SessionMountRecord = { mountId: same?.mountId ?? randomUUID(), at, sourceId: source.sourceId, root: source.root, access };
         await this.files.configure(sessionId, { mounts: [...mounts.filter(m => m.mountId !== same?.mountId), mount], cwd: asCwd ? at : record?.cwd ?? '/' }, record?.revision ?? 0);
         await this.afterChange(sessionId);
         return `已挂载 ${source.label} → ${at}（${access === 'ro' ? '只读' : '可读写'}）`;
@@ -133,7 +134,7 @@ export class DirectoryMountService {
         const hostPath = path.startsWith('host:') ? path.slice(5) : path;
         let id = Object.entries(this.preferences.external).find(([, p]) => p === hostPath)?.[0];
         if (!id) {
-            id = `directory-${crypto.randomUUID()}`;
+            id = `directory-${randomUUID()}`;
             await this.connect(id, hostPath);
             this.preferences.external[id] = hostPath;
             try { await this.persist(); } catch (error) { delete this.preferences.external[id]; throw error; }

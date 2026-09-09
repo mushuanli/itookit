@@ -138,6 +138,23 @@ describe('Kernel durable kernel', () => {
         expect(streamed.every(envelope => envelope.taskId === task.id)).toBe(true);
     });
 
+    it('tags streamed content changes as content so listings can skip re-rendering', async () => {
+        kernel.registerProgram(streamingEffectProgram());
+        kernel.registerEffect(streamingEffect());
+        const reasons: string[] = [];
+        const off = kernel.onChanged(event => reasons.push(`${event.taskId ? 'task' : 'session'}:${event.reason}`));
+        const session = await kernel.createSession({ id: 'session-one', storage: binding });
+        const task = await session.submit<string, string>({
+            program: { kind: 'test.streaming-effect', version: '1' }, input: 'hello',
+        });
+        expect((await task.wait({ timeoutMs: 2_000 })).output).toBe('HELLO');
+        off();
+
+        expect(reasons).toContain('task:structure');
+        expect(reasons).toContain('task:content');
+        expect(reasons.filter(reason => reason === 'task:content').length).toBeGreaterThanOrEqual(3);
+    });
+
     it('installs provider capabilities through the public plugin port', async () => {
         const plugin = {
             id: 'test.provider', version: '1',

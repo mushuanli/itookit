@@ -238,7 +238,7 @@ await commands.execute(SessionCommand.Bind, { sessionId });
 | llm-session | SessionRepository 取代 ChatEngine；绑定、运行状态和 TaskInput 删除重复文件 nodeId；删除 chatFileParser 和隐式文件初始化；Round/Profile 写 history 记录 |
 | vfs-ui / mdx | 删除 .chat 保存特判、模块路径猜测；文档使用 target.path；Session 嵌入 Markdown 使用当前 Session 上下文派生的 /attachments 子视图，上传/预览/管理均随撤销失效；文件文档仍可使用伴生附件 |
 | llm-flow / llm-settings-ui / app-settings | Flow 创建会话返回 sessionId；实体编辑器消费显式 target；配置、同步和备份使用注入的文件来源 |
-| device-llm | 系统配置从 /etc 受限来源注入；凭据通过专用服务；无旧配置迁移探测 |
+| device-llm | 系统配置从 /etc 受限来源注入；凭据通过专用服务；无旧配置迁移探测。Skill 统一 `.yaml`，启动/reload 不加载旧 `.json/.yml`，保存不删除旧格式文件；Provider/Connection/MCP 继续使用各自当前 JSON 格式 |
 | durable-kernel / kernel-adapters | catalog 和 Session kernel 目录分离；每 Session 创建文件及执行能力；删除全局文件工具 scope 和 Node FS fallback |
 | Web | IndexedDB 固定新 schema；/run 使用内存；Session 恢复与编辑器文件列表无关 |
 | Tauri | /home/admin 物理目录；外部目录通过独立来源；卸载先关闭工作区再关闭 backend；失败清理已打开来源 |
@@ -250,7 +250,7 @@ await commands.execute(SessionCommand.Bind, { sessionId });
 
 - 精确路径解析覆盖内容、metadata、records、refs、assets、搜索、遍历和事件；禁止 basename 回退、越界路径、覆盖保留挂载和跨来源假事务。
 - 系统根由可信宿主持有；普通 Session 文件视图只含附件与用户授权来源。原始凭据、history 及全局账本不进入用户文件工具。
-- configure 使用 expectedRevision CAS：写 draining → 排空旧视图 → 发布 active。崩溃后的 draining 保持禁用，明确重新 configure 才恢复；不会根据空 mounts 推断授权。
+- configure/disable 在写入前拒绝非法或耗尽的安全整数 revision；configure 使用 expectedRevision CAS：写 draining → 排空旧视图 → 发布 active。崩溃后的 draining 保持禁用，明确重新 configure 才恢复；不会根据空 mounts 推断授权。
 - 跨 Session 共享的是能力对象。撤销源视图后，派生视图旧句柄也失败；普通窗口关闭不取消后台 Task。
 - 关闭应用先释放编辑器、Session scope、Kernel 等消费者，再关闭独立来源与根 backend。异步创建失败和迟到编辑器均释放附件及上下文。
 - 备份是显式选择的工作区归档，保留二进制、记录和附属元数据；不是全系统 Session/Kernel 快照。跨来源 restore 不是原子操作，失败必须报告。

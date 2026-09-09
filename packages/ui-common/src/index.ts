@@ -30,3 +30,6 @@ export {
 // ── UI components ──
 export * from './components/BaseSettingsEditor';
 export * from './components/UIComponents';
+
+// ── Browser utilities ──
+export { copyText } from './utils/clipboard';

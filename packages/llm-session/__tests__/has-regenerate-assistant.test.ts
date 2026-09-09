@@ -70,8 +70,7 @@ describe('hasRegenerateAssistant', () => {
         expect(userRound?.userMessage?.content).toBe('Q1');
     });
 
-    it('drops transient groups not in the head chain (stale branch bubbles)', () => {
-        const state = new SessionState('session');
+    it('drops transient groups not in the head chain (stale branch bubbles)', () => {        const state = new SessionState('session');
         // Projection round on the new head chain.
         state.loadFromProjection(roundToProjection(makeRound('new', [{ role: 'user', content: 'Q2' }]), 'new'));
         // Transient assistant from the previous branch — must be removed on switch.
@@ -95,5 +94,58 @@ describe('hasRegenerateAssistant', () => {
 
         expect(removed).toEqual(['round-old-assistant']);
         expect(state.getSessions().some(s => s.id === 'round-old-assistant')).toBe(false);
+    });
+});
+
+describe('findUserRoundForAssistant guards', () => {
+    it('accepts a non-chat round that carries a user message', () => {
+        const state = new SessionState('session');
+        // input[0] is a system message, so the round is projected as kind 'system'
+        // even though it does carry the user prompt.
+        const round: PersistedRound = {
+            id: 'r1',
+            sessionId: 'test-session-id',
+            historyParentIds: [],
+            input: [{ role: 'system', content: 'policy' }, { role: 'user', content: 'Q1' }],
+            output: [{ role: 'assistant', content: 'A1' }],
+            executions: [],
+            status: 'completed',
+            createdAt: Date.now(),
+            completedAt: Date.now(),
+            origin: 'user',
+        };
+        state.loadFromProjection(roundToProjection(round, 'r1'));
+
+        expect(state.findUserRoundForAssistant('round-r1-assistant')?.userMessage?.content).toBe('Q1');
+    });
+
+    it('explains a message whose round is not projected', () => {
+        const state = new SessionState('session');
+
+        const reason = state.describeRegenerateFailure('round-missing-assistant');
+
+        expect(reason).toContain('absent from the session projection');
+        expect(reason).toContain('missing');
+    });
+
+    it('explains the parent chain of a projected round without a user message', () => {
+        const state = new SessionState('session');
+        const round: PersistedRound = {
+            id: 'r1',
+            sessionId: 'test-session-id',
+            historyParentIds: [],
+            input: [],
+            output: [{ role: 'assistant', content: 'A1' }],
+            executions: [],
+            status: 'completed',
+            createdAt: Date.now(),
+            completedAt: Date.now(),
+            origin: 'merge',
+        };
+        state.loadFromProjection(roundToProjection(round, 'r1'));
+
+        const reason = state.describeRegenerateFailure('round-r1-assistant');
+
+        expect(reason).toContain('r1[kind=merge,no-user]');
     });
 });

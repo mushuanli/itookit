@@ -3,6 +3,7 @@ import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { createFileSystemSource, type FileSystemContext, type FileSystemSourceOwner, type IFileSystem } from '@itookit/vfs-core';
 import { TauriSqlSidecarDb } from '../db/tauri-sql-sidecar';
 import { TauriFsOps } from '../fs/tauri-fs-ops';
+import { randomUUID } from '@itookit/common';
 
 export interface MountEntry {
     id: string;
@@ -23,7 +24,7 @@ export class LocalMountService {
 
     mount(localPath: string, label: string): Promise<MountEntry> {
         return this.serial(async () => {
-            const id = `mnt_${crypto.randomUUID()}`;
+            const id = `mnt_${randomUUID()}`;
             const entry = { id, localPath, label, mountedAt: Date.now(), sidecarPath: `${this.rootDir}/meta/sources/${id}` };
             const source = await this.open(entry);
             this.registry.set(id, entry);

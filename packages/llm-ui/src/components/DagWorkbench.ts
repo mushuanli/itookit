@@ -12,11 +12,12 @@ import type {
 import type { DurableFlowSnapshot } from '@itookit/llm-session';
 import { FlowCommand } from '@itookit/llm-session';
 import type { TaskSnapshot, TaskStatus } from '@itookit/durable-kernel';
-import {escapeHTML} from '@itookit/common';
+import {escapeHTML, randomUUID, t} from '@itookit/common';
 import { showConfirmDialog, Toast } from '@itookit/ui-common';
 import { DagDraftController, createFlowEdge } from './dag/DagDraftController';
 import { SchemaForm } from './dag/SchemaForm';
 import { DagCanvas } from './dag/DagCanvas';
+import { openTaskTranscript } from './dag/TaskTranscriptDialog';
 import { openFlowSettings } from './dag/FlowSettingsDialog';
 import type { EntityOption } from './dag/FlowSettingsDialog';
 
@@ -40,6 +41,9 @@ export class DagWorkbench {
     private selectedNodeId?: FlowNodeId;
     private selectedEdgeId?: string;
     private canvas?: DagCanvas;
+    private readonly retryRequests = new Map<string, { id: string; pending: boolean }>();
+    private viewRequest = 0;
+    private refreshRequest = 0;
     private runRefreshTimer?: ReturnType<typeof setTimeout>;
 
     constructor(
@@ -48,13 +52,15 @@ export class DagWorkbench {
     ) {}
 
     async initialize(): Promise<void> {
+        const request = this.viewRequest;
         this.catalogue = await this.options.commands.execute<DagPluginPresentation[]>(
             FlowCommand.Presentations,
         );
-        this.render();
+        if (request === this.viewRequest) this.render();
     }
 
     setDraft(draft: FlowDraft, selectedNodeId?: FlowNodeId): void {
+        this.viewRequest++;
         this.stopRunRefresh();
         this.controller = new DagDraftController(draft);
         this.selectedNodeId = selectedNodeId;
@@ -63,7 +69,11 @@ export class DagWorkbench {
     }
 
     async loadDraft(id: string, selectedNodeId?: FlowNodeId): Promise<void> {
-        const draft = await this.options.commands.execute<FlowDraft | null>(FlowCommand.DraftLoad, { id });
+        const request = ++this.viewRequest;
+        this.stopRunRefresh();
+        const draft = await this.options.commands.execute<FlowDraft | null>(FlowCommand.DraftLoad, { id })
+            .catch(error => { if (request === this.viewRequest) throw error; return null; });
+        if (request !== this.viewRequest) return;
         if (!draft) throw new Error(`Flow draft not found: ${id}`);
         this.setDraft(draft, selectedNodeId);
     }
@@ -79,8 +89,13 @@ export class DagWorkbench {
         return node;
     }
 
-    async openRun(taskId: string): Promise<void> {
-        this.run = await this.options.commands.execute<DurableFlowSnapshot>(FlowCommand.RunGet, { taskId });
+    async openRun(taskId: string, sessionId?: string): Promise<void> {
+        const request = ++this.viewRequest;
+        this.stopRunRefresh();
+        const run = await this.options.commands.execute<DurableFlowSnapshot>(FlowCommand.RunGet, { taskId, sessionId })
+            .catch(error => { if (request === this.viewRequest) throw error; return undefined; });
+        if (request !== this.viewRequest || !run) return;
+        this.run = run;
         this.setMode('run');
         this.scheduleRunRefresh(taskId);
     }
@@ -95,6 +110,7 @@ export class DagWorkbench {
     }
 
     destroy(): void {
+        this.viewRequest++;
         this.stopRunRefresh();
         this.root.innerHTML = '';
     }
@@ -506,77 +522,94 @@ export class DagWorkbench {
         const snapshot = this.run;
         if (!snapshot) return this.renderDesign();
         const run = snapshot.root.task;
-        const nodeSnapshots = new Map(snapshot.nodes.map(item => [item.snapshot.task.id, item.snapshot]));
         this.root.innerHTML = `<section class="dag-workbench" data-mode="run">
             <header class="dag-toolbar"><strong>DAG Run</strong><span>${escapeHTML(String(run.id))}</span><span data-status="${escapeHTML(run.status)}">${escapeHTML(run.status)}</span><small>${snapshot.usage.tokens} tokens · ${(snapshot.usage.elapsedMs / 1000).toFixed(1)}s</small><button data-run-action="goal">Goal</button><button data-run-action="cancel">Cancel run</button></header>
+            ${snapshot.workspaceFinalization ? `<section class="dag-run-workspace" data-workspace-status="${escapeHTML(snapshot.workspaceFinalization.status)}">${escapeHTML(t(`flow.workspace.${snapshot.workspaceFinalization.status}`))}${snapshot.workspaceFinalization.message ? `<span role="alert">${escapeHTML(snapshot.workspaceFinalization.message)}</span>` : ''}${snapshot.workspaceFinalization.persistenceError ? `<span role="alert">${escapeHTML(t('flow.workspace.persistenceFailed'))}: ${escapeHTML(snapshot.workspaceFinalization.persistenceError)}</span>` : ''}</section>` : ''}
             ${snapshot.goal ? `<section class="dag-run-goal"><strong>${escapeHTML(snapshot.goal.objective || 'Run goal')}</strong><span>${escapeHTML(snapshot.goal.status ?? 'active')}</span>${snapshot.goal.acceptanceCriteria?.length ? `<small>${snapshot.goal.acceptanceCriteria.map(escapeHTML).join(' · ')}</small>` : ''}</section>` : ''}
             <div class="dag-run-nodes">${snapshot.taskTree.map(task => {
                 const nodeId = task.labels?.flowNodeId ?? (task.id === run.id ? 'Result' : task.program.kind);
                 const iterations = snapshot.iterations[nodeId] ?? 1;
-                const waiting = pendingInteraction(nodeSnapshots.get(task.id));
+                const waiting = pendingInteraction({ task });
                 const detached = snapshot.detachedNodes.includes(nodeId);
                 return `<article data-task-id="${escapeHTML(task.id)}">
                     <header><strong>${escapeHTML(nodeId)}</strong><small>${escapeHTML(task.status)}${iterations > 1 ? ` · ×${iterations}` : ''}${detached ? ' · detached' : ''}</small></header>
                     <div>${escapeHTML(task.program.kind)} · attempt ${task.attemptCount}</div>
+                    ${task.retryOfTaskId ? `<small>${escapeHTML(t('flow.retry.source'))}: ${escapeHTML(task.retryOfTaskId)}</small>` : ''}
                     ${task.parentTaskId ? `<small>parent: ${escapeHTML(task.parentTaskId)}</small>` : ''}
                     ${task.lastError?.message ? `<div class="dag-run-error">${escapeHTML(task.lastError.message)}</div>` : ''}
-                    ${waiting ? `<div class="dag-run-wait">${escapeHTML(waiting.prompt)}</div><button data-run-respond="${escapeHTML(nodeId)}" data-request-id="${escapeHTML(waiting.id)}">Respond</button>` : ''}
+                    ${waiting ? `<div class="dag-run-wait">${escapeHTML(waiting.prompt)}</div><button data-run-respond="${escapeHTML(task.id)}" data-request-id="${escapeHTML(waiting.id)}">Respond</button>` : ''}
                     ${task.id !== run.id && !isTerminalRun(task.status) ? `<menu><button data-run-signal="${escapeHTML(task.id)}">Inject</button><button data-run-cancel-task="${escapeHTML(task.id)}">Cancel</button></menu>` : ''}
+                    ${task.id !== run.id && isTerminalRun(task.status) ? `<button data-run-retry="${escapeHTML(task.id)}" ${this.retryRequests.get(task.id)?.pending ? 'disabled' : ''}>${escapeHTML(t('flow.retry.title'))}</button><small>${escapeHTML(t('flow.retry.hint'))}</small>` : ''}
+                    <button data-run-transcript="${escapeHTML(task.id)}">${escapeHTML(t('flow.transcript.title'))}</button>
                     <details><summary>Runtime details</summary><pre>${escapeHTML(JSON.stringify({ wait: task.wait, output: task.output, effects: Object.keys(task.effects ?? {}) }, null, 2))}</pre></details>
                 </article>`;
             }).join('')}</div>
         </section>`;
         this.root.querySelector('[data-run-action="cancel"]')?.addEventListener('click', () => void this.cancel());
         this.root.querySelector('[data-run-action="goal"]')?.addEventListener('click', () => this.openGoalDialog());
+        this.root.querySelectorAll<HTMLElement>('[data-run-retry]').forEach(button => button.addEventListener('click', () =>
+            void this.retryRunTask(button.dataset.runRetry!)));
+        this.root.querySelectorAll<HTMLElement>('[data-run-transcript]').forEach(button => button.addEventListener('click', () =>
+            openTaskTranscript(this.options.commands, run.sessionId, run.id, button.dataset.runTranscript!)));
         this.root.querySelectorAll<HTMLElement>('[data-run-signal]').forEach(button => button.addEventListener('click', () => this.openSignalDialog(button.dataset.runSignal!)));
         this.root.querySelectorAll<HTMLElement>('[data-run-cancel-task]').forEach(button => button.addEventListener('click', () => void this.cancelRunTask(button.dataset.runCancelTask!)));
         this.root.querySelectorAll<HTMLElement>('[data-run-respond]').forEach(button => {
             button.addEventListener('click', () => {
-                const nodeId = button.dataset.runRespond!;
+                const targetTaskId = button.dataset.runRespond!;
                 const requestId = button.dataset.requestId!;
-                const waiting = pendingInteraction(
-                    this.run?.nodes.find(item => item.nodeId === nodeId)?.snapshot,
-                );
-                this.openRespondDialog(nodeId, requestId, waiting?.prompt ?? 'Please respond.');
+                const task = snapshot.taskTree.find(item => item.id === targetTaskId)!;
+                this.openRespondDialog(targetTaskId, requestId, pendingInteraction({ task })?.prompt ?? 'Please respond.');
             });
         });
     }
 
     private openGoalDialog(): void {
-        if (!this.run) return;
+        const run = this.run;
+        if (!run) return;
         const dialog = document.createElement('dialog');
         dialog.className = 'dag-dialog';
-        dialog.innerHTML = `<form method="dialog"><h2>Run goal</h2><label>Objective<textarea name="objective" rows="3">${escapeHTML(this.run.goal?.objective ?? '')}</textarea></label><label>Status<select name="status">${['active', 'paused', 'completed', 'blocked'].map(status => `<option ${status === (this.run?.goal?.status ?? 'active') ? 'selected' : ''}>${status}</option>`).join('')}</select></label><menu><button value="cancel">Cancel</button><button value="save">Save</button></menu></form>`;
+        dialog.innerHTML = `<form method="dialog"><h2>Run goal</h2><label>Objective<textarea name="objective" rows="3">${escapeHTML(run.goal?.objective ?? '')}</textarea></label><label>Status<select name="status">${['active', 'paused', 'completed', 'blocked'].map(status => `<option ${status === (run.goal?.status ?? 'active') ? 'selected' : ''}>${status}</option>`).join('')}</select></label><menu><button value="cancel">Cancel</button><button value="save">Save</button></menu></form>`;
         document.body.append(dialog); dialog.showModal();
         dialog.addEventListener('close', () => {
-            if (dialog.returnValue === 'save' && this.run) {
+            if (dialog.returnValue === 'save') {
                 const objective = dialog.querySelector<HTMLTextAreaElement>('[name="objective"]')!.value.trim();
                 const status = dialog.querySelector<HTMLSelectElement>('[name="status"]')!.value;
-                void this.options.commands.execute(FlowCommand.RunGoalUpdate, { taskId: this.run.root.task.id, goal: { objective, status } })
-                    .then(() => this.refreshRun(this.run!.root.task.id));
+                void this.options.commands.execute(FlowCommand.RunGoalUpdate, { taskId: run.root.task.id, goal: { objective, status } })
+                    .then(() => this.refreshRun(run.root.task.id))
+                    .catch(error => Toast.error(error instanceof Error ? error.message : t('flow.run.controlFailed')));
             }
             dialog.remove();
         }, { once: true });
     }
 
     private openSignalDialog(targetTaskId: string): void {
+        const run = this.run;
+        if (!run) return;
         const value = window.prompt('Inject a message or control payload into this task:');
-        if (value === null || !this.run) return;
+        if (value === null) return;
         void this.options.commands.execute(FlowCommand.RunSignal, {
-            taskId: this.run.root.task.id, targetTaskId, signal: { type: 'inject', payload: value },
-        }).then(() => this.refreshRun(this.run!.root.task.id));
+            taskId: run.root.task.id, targetTaskId, signal: { type: 'inject', payload: value },
+        }).then(() => this.refreshRun(run.root.task.id))
+            .catch(error => Toast.error(error instanceof Error ? error.message : t('flow.run.controlFailed')));
     }
 
     private async cancelRunTask(targetTaskId: string): Promise<void> {
-        if (!this.run) return;
-        await this.options.commands.execute(FlowCommand.RunTaskCancel, { taskId: this.run.root.task.id, targetTaskId });
-        await this.refreshRun(this.run.root.task.id);
+        const run = this.run;
+        if (!run) return;
+        try {
+            await this.options.commands.execute(FlowCommand.RunTaskCancel, { taskId: run.root.task.id, targetTaskId });
+            await this.refreshRun(run.root.task.id);
+        } catch (error) {
+            Toast.error(error instanceof Error ? error.message : t('flow.run.controlFailed'));
+        }
     }
 
-    private openRespondDialog(nodeId: string, requestId: string, prompt: string): void {
+    private openRespondDialog(targetTaskId: string, requestId: string, prompt: string): void {
+        const rootId = this.run?.root.task.id;
+        if (!rootId) return;
         const dialog = document.createElement('dialog');
         dialog.className = 'dag-dialog';
-        dialog.innerHTML = `<form method="dialog"><h2>Respond to ${escapeHTML(nodeId)}</h2>
+        dialog.innerHTML = `<form method="dialog"><h2>Respond to ${escapeHTML(targetTaskId)}</h2>
             <p>${escapeHTML(prompt)}</p>
             <label>Response<textarea name="value" rows="3"></textarea></label>
             <menu><button value="cancel">Cancel</button><button value="respond">Respond</button></menu></form>`;
@@ -586,11 +619,11 @@ export class DagWorkbench {
             if (dialog.returnValue === 'respond') {
                 const value = dialog.querySelector<HTMLTextAreaElement>('[name="value"]')!.value;
                 void this.options.commands.execute(FlowCommand.RunRespond, {
-                    taskId: this.run?.root.task.id,
+                    taskId: rootId, targetTaskId,
                     requestId,
                     value,
                 }).then(() => {
-                    if (this.run) void this.refreshRun(this.run.root.task.id);
+                    void this.refreshRun(rootId);
                 }).catch(error => {
                     Toast.error(error instanceof Error ? error.message : 'Respond failed');
                 });
@@ -599,23 +632,49 @@ export class DagWorkbench {
         }, { once: true });
     }
 
+    private async retryRunTask(targetTaskId: string): Promise<void> {
+        const run = this.run?.root.task;
+        if (!run || this.retryRequests.get(targetTaskId)?.pending) return;
+        const request = this.retryRequests.get(targetTaskId) ?? { id: randomUUID(), pending: false };
+        request.pending = true;
+        this.retryRequests.set(targetTaskId, request);
+        const view = this.viewRequest;
+        this.render();
+        try {
+            await this.options.commands.execute(FlowCommand.RunTaskRetry, {
+                sessionId: run.sessionId, taskId: run.id, targetTaskId, requestId: request.id,
+            });
+            this.retryRequests.delete(targetTaskId);
+            if (view === this.viewRequest) await this.refreshRun(run.id);
+        } catch (error) {
+            if (view === this.viewRequest) Toast.error(error instanceof Error ? error.message : t('flow.retry.failed'));
+        } finally {
+            request.pending = false;
+            if (view === this.viewRequest) this.render();
+        }
+    }
+
     private scheduleRunRefresh(taskId: string): void {
         this.stopRunRefresh();
-        if (!this.run || isTerminalRun(this.run.root.task.status)) return;
+        if (!this.run || (this.run.workspaceFinalization?.status !== 'pending' && isTerminalRun(this.run.root.task.status) && this.run.taskTree.every(task => isTerminalRun(task.status)))) return;
         this.runRefreshTimer = setTimeout(() => {
             void this.refreshRun(taskId);
         }, 1000);
     }
 
     private async refreshRun(taskId: string): Promise<void> {
+        if (this.mode !== 'run' || this.run?.root.task.id !== taskId) return;
+        const request = this.viewRequest, refresh = ++this.refreshRequest;
         try {
-            this.run = await this.options.commands.execute<DurableFlowSnapshot>(FlowCommand.RunGet, {
-                taskId,
+            const run = await this.options.commands.execute<DurableFlowSnapshot>(FlowCommand.RunGet, {
+                taskId, sessionId: this.run?.root.task.sessionId,
             });
-            if (this.mode === 'run') this.render();
+            if (request !== this.viewRequest || refresh !== this.refreshRequest || this.run?.root.task.id !== taskId) return;
+            this.run = run;
+            this.render();
             this.scheduleRunRefresh(taskId);
         } catch {
-            this.stopRunRefresh();
+            if (request === this.viewRequest && refresh === this.refreshRequest) this.stopRunRefresh();
         }
     }
 

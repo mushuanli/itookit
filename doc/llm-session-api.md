@@ -272,6 +272,29 @@ function chatKernelStorage(sessionId: string): StorageBindingRef;
 
 ---
 
+## 会话数据仓库：SessionRepository
+
+`SessionRepository implements ISessionRepository`（`persistence/session-repository.ts`）——会话身份、历史文档与附件的唯一事实源。
+
+**存储布局**（`/var/lib/sessions` 下，与 Kernel 的 `session-directory` 存储根 `<id>/kernel` 同级）：
+
+| 路径 | 内容 |
+|---|---|
+| `<id>/session.seq` | `session` 记录（身份/标题/所属文件夹/uiState）+ `settings` |
+| `<id>/history.seq` | `index`（RoundManifest v3：branches/branchMeta/currentBranch/currentHead/children）+ `document/*` |
+| `<id>/attachments/` | 会话附件（二进制） |
+| `folders.seq` | 文件夹表（单条 `folders` 记录） |
+
+**一致性约定**：
+
+- **删除顺序**：`deleteSession()` 先做物理删除（目录），成功后才清除 SeqFile 记录。SeqFile 记录独立于文件存在（删文件不清理记录），若先清记录而物理删除失败（Kernel 固定布局 `vfsFixedLayout`、宿主权限），会话将不可恢复地消失。
+- **Kernel 存储先删**：`<id>/kernel` 属于 Kernel，仓库不触碰。调用方须先 `kernel.removeSession(id)`（解除固定布局并删除该子树），再调 `deleteSession()`。应用层统一走 `SessionLifecycleService`（`@itookit/app-core`）：close → 等待 `closed` → `removeSession` → `deleteSession`，任一步失败都保留数据。
+- **文件夹读写**：`createFolder/deleteFolder/renameFolder` 的读-改-写在同一 `fs.meta.seq.transaction` 内完成；`renameFolder` 把文件夹表与所有受影响会话的归属更新提交在同一事务里。
+- **归属校验**：新建会话或修改 `folder` 时目标文件夹必须已存在，否则抛 `ENOENT`（避免产生任何列表都看不到的"幽灵会话"）。
+- **全新 seq 文件先清空**：`ensureSession()` 重建缺失的 seq 文件时会清掉同名遗留记录，防止复用身份时复活已删除会话。
+
+---
+
 ## Durable Projection
 
 ```ts
@@ -358,3 +381,9 @@ packages/llm-session/src/
 | `RUNTIME_KEY = 'conversation/runtime'` | Durable Conversation 运行时共享键 |
 
 **约定**：Round 只表达对话历史（`historyParentIds`）；Run 引用经 `executions` 附着到 Round；Branch/merge/context fold 只在本包实现；普通 Chat 用 Direct Scheduler，不伪装成单节点 DAG；不访问 Kernel Dispatcher/ProcessTable 内部对象。
+
+记忆检索注入：`initializeConversationSystem({ retrieveMemory, ... })` 将回调传递到 SessionManager。回调签名为 `(plan, agent, { sessionId, policy }) => Promise<RetrievedMemoryEntry[]>`；policy 是当前 Agent memoryPolicy 的独立副本，缺少策略时为 undefined。结果经 ContextAssembler 进入 Task 输入快照。app-shell 默认装配 SessionMemoryProvider。
+
+`SessionMemoryProvider(kernel)` 提供 `upsert(sessionId, policy, { entryId, scope, content })`、`remove(sessionId, policy, scope, entryId)` 和可直接注入的 `retrieve` 回调。存储在目标 Kernel Session shared，按 namespace/scope 精确隔离，写入校验 writeScopes、检索校验 readScopes。检索默认 10 项（0 禁用），使用词项包含匹配及更新时间排序，返回内容和 SHA-256 摘要。返回 entryId 是 JSON 编码的 `[scope, entryId]`，修改/删除使用原始 entryId。当前存储按 scope 整组加载，未提供跨 Session 共享、向量检索或模型写入工具；调用方必须提供可信的 Agent 策略。
+
+记忆继承边界：executeDirect 保持 memory 检索；executeDag 在组装上下文时禁用 provider，避免父 Agent 的长期记忆进入临时 Flow 的编译快照。需要给 Flow 的信息应作为显式输入传递。

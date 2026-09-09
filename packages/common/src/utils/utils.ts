@@ -2,6 +2,8 @@
  * @file common/utils/utils.ts
  */
 
+import { sha256Hex } from './digest';
+
 export function simpleHash(str: string): string {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -230,10 +232,7 @@ export function timeAgo(date: Date | number): string {
 
 
 export async function calculateHash(buffer: ArrayBuffer): Promise<string> {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-    return Array.from(new Uint8Array(hashBuffer))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
+    return sha256Hex(buffer);
 }
 
 /**

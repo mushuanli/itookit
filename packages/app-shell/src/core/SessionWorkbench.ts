@@ -6,9 +6,14 @@ import type { Kernel } from '@itookit/durable-kernel';
 import { createVFSUI, type VFSUIShell } from '@itookit/vfs-ui';
 import { createFileSystemView, type FileSystemContextOwner, type FileSystemView, type FileSystemSourceOwner } from '@itookit/vfs-core';
 import type { SessionFilesService } from '../files/session-files';
-import { createSessionBrowser, resolveBrowserTarget, taskSummary } from '../files/session-browser';
+import { createSessionBrowser, exportSessionBundle, resolveBrowserTarget, taskSummary, taskKeyEvent } from '../files/session-browser';
 import { parseSessionRoute, sessionRoute } from '../files/session-route';
 import type { WorkspaceController } from './WorkspaceController';
+
+/** Sidebar refresh tracing — enable with localStorage['vfs:debug']='1' (same flag as vfs-ui). */
+function debugEnabled(): boolean {
+    try { return typeof localStorage !== 'undefined' && localStorage.getItem('vfs:debug') === '1'; } catch { return false; }
+}
 
 /** vfs-ui owns the sidebar; this host owns business views and their file leases. */
 export class SessionWorkbench implements WorkspaceController {
@@ -28,7 +33,13 @@ export class SessionWorkbench implements WorkspaceController {
     private unsubscribers: Array<() => void> = [];
     private taskRefresh = 0;
     private refreshQueued = false;
+    private refreshTimer?: ReturnType<typeof setTimeout>;
+    private readonly refreshSources = new Set<string>();
+    private kernelChanges: Record<string, number> = {};
+    private refreshCount = 0;
+    private lastRefreshAt = 0;
     private readonly waiting = new Set<string>();
+    private readonly resettingTasks = new Set<string>();
     constructor(private readonly sidebar: HTMLElement, private readonly container: HTMLElement,
         private readonly repository: ISessionRepository, private readonly files: SessionFilesService,
         private readonly factory: EditorFactory, private readonly onSelect: (id: string, mode?: 'push' | 'replace') => void,
@@ -37,21 +48,84 @@ export class SessionWorkbench implements WorkspaceController {
     async start(): Promise<void> {
         this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel });
         this.sidebarUI = createVFSUI({ sessionListContainer: this.sidebar, title: '会话', scopeId: 'session-browser:v1:admin',
-            readOnly: true, activateDirectories: true, defaultUiSettings: { sortBy: 'lastModified' },
-            directoryAction: this.directoryMounts ? { label: '＋ 挂载目录', visible: path => /^\/[^/]+\/files$/.test(path), run: path => this.manageMounts(resolveBrowserTarget(path).sessionId) } : undefined,
-            primaryAction: { label: '＋ 新建会话', run: async () => { await this.createResource(); } },
+            readOnly: false, activateDirectories: true, defaultUiSettings: { sortBy: 'lastModified' },
+            exportDirectories: true,
+            exportItem: item => this.exportSessionItem(item),
+            fileCreation: { label: '会话' },
+            contextMenu: {
+                items: (item, defaults) => {
+                    const target = resolveBrowserTarget(item.id);
+                    if (target.kind !== 'task') return defaults;
+                    return [{ id: 'reset-task', label: '强制复位任务（停止执行，保留记录）',
+                        onClick: () => { void this.resetTask(item.id).catch(error => this.report(error)); } }];
+                },
+            },
         }, this.browser.fs) as VFSUIShell;
         this.unsubscribers.push(this.sidebarUI.on('sessionSelected', ({ item }) => {
             // Expanding ancestors during selectPath can emit intermediate selections too.
             if (item && !this.selectionSync) void this.openResource(item.id).catch(error => this.report(error));
         }), this.sidebarUI.on('sidebarStateChanged', ({ isCollapsed }) => this.sidebar.classList.toggle('is-collapsed', isCollapsed)),
-        this.repository.subscribe(() => this.refresh()), this.files.subscribe(() => this.refresh()), this.kernel.onChanged(() => this.refresh()));
+        this.repository.subscribe(() => this.scheduleRefresh('repository')), this.files.subscribe(() => this.scheduleRefresh('files')),
+        // Task content (stream deltas, logs, shared state) notifies many times per
+        // second while a run streams. The sidebar only lists Sessions and Tasks, so
+        // re-render on structural changes only — never per output chunk.
+        this.kernel.onChanged(event => {
+            this.noteKernelChange(event.reason);
+            if (event.reason !== 'content') this.scheduleRefresh('kernel:' + event.reason);
+        }));
         await this.sidebarUI.start();
         if (!this.active) this.message('选择一个会话，或新建会话');
+    }
+    private async resetTask(path: string): Promise<void> {
+        const target = resolveBrowserTarget(path);
+        if (this.closed || target.kind !== 'task') return;
+        const key = `${target.sessionId}/${target.taskId}`;
+        if (this.resettingTasks.has(key)) return;
+        this.resettingTasks.add(key);
+        try {
+            // Kernel cancellation fences execution, cancels pending interactions and
+            // propagates to children. Never rewrite checkpoints or erase DAG/history.
+            await this.kernel.cancel(target.sessionId, target.taskId, '用户强制复位任务：停止执行，保留历史与 DAG');
+            const task = await this.kernel.task(target.sessionId, target.taskId);
+            if (Object.values(task.effects).some(effect => effect.cleanupPending)) {
+                throw new Error('任务已停止调度，但运行资源仍待清理；执行记录已保留');
+            }
+            this.scheduleRefresh('task-reset');
+        } finally {
+            this.resettingTasks.delete(key);
+        }
+    }
+    /** Diagnostic counter — enabled with localStorage['vfs:debug']='1'. */
+    private noteKernelChange(reason: string): void {
+        if (!debugEnabled()) return;
+        this.kernelChanges[reason] = (this.kernelChanges[reason] ?? 0) + 1;
+    }
+    /**
+     * Coalesce a burst of structural changes (Task created → started → finished)
+     * into one sidebar re-render. Content changes never reach here.
+     */
+    private scheduleRefresh(source: string): void {
+        if (this.closed) return;
+        this.refreshSources.add(source);
+        if (this.refreshTimer) return;
+        this.refreshTimer = setTimeout(() => {
+            this.refreshTimer = undefined;
+            this.refresh();
+        }, 120);
     }
     private refresh(): void {
         if (this.closed || this.refreshQueued) return;
         this.refreshQueued = true;
+        if (debugEnabled()) {
+            const now = performance.now();
+            console.debug(
+                `[SessionWorkbench] refresh #${++this.refreshCount} (${[...this.refreshSources].join(', ') || 'explicit'})`
+                + ` +${Math.round(now - this.lastRefreshAt)}ms kernel=${JSON.stringify(this.kernelChanges)}`,
+            );
+            this.lastRefreshAt = now;
+            this.refreshSources.clear();
+            this.kernelChanges = {};
+        }
         this.refreshTail = this.refreshTail.catch(() => {}).then(async () => {
             this.refreshQueued = false;
             if (this.closed) return;
@@ -61,7 +135,7 @@ export class SessionWorkbench implements WorkspaceController {
             if (this.active?.startsWith('/')) {
                 const target = resolveBrowserTarget(this.active);
                 if (target.kind === 'task') await this.showTask(this.active);
-                else if (target.kind === 'tasks' || (target.kind === 'files' && !this.editor && !this.previewCleanup)) await this.showDirectory(this.active);
+                else if (target.kind === 'folder' || target.kind === 'tasks' || (target.kind === 'files' && !this.editor && !this.previewCleanup)) await this.showDirectory(this.active);
             }
         }).catch(error => this.report(error));
     }
@@ -87,6 +161,16 @@ export class SessionWorkbench implements WorkspaceController {
         const operation = this.tail.then(async () => {
             if (this.closed) throw new Error('Session workspace closed');
             if (id === this.active && !options.reload && (branch === undefined || branch === this.activeBranch)) return;
+            if (target.kind === 'folder') {
+                await this.closeEditor();
+                this.active = id;
+                this.activeBranch = undefined;
+                await this.showDirectory(path);
+                this.onSelect(id);
+                this.selectionSync = path;
+                try { await this.sidebarUI?.selectPath(path); } finally { this.selectionSync = undefined; }
+                return;
+            }
             const manifest = await this.repository.getManifest(target.sessionId);
             await this.closeEditor();
             if (target.kind === 'session' || target.kind === 'files') {
@@ -192,7 +276,11 @@ export class SessionWorkbench implements WorkspaceController {
         const nodes = await this.browser.fs.driver.getChildren(path);
         if (this.closed || generation !== this.taskRefresh) return;
         const panel = document.createElement('div'); panel.className = 'session-detail';
-        const heading = document.createElement('h2'); heading.textContent = path.endsWith('/tasks') ? 'Tasks' : 'Files'; panel.append(heading);
+        const heading = document.createElement('h2');
+        heading.textContent = target.kind === 'folder'
+            ? (path === '/' ? '会话' : decodeURIComponent(path.split('/').pop()!.replace(/^folder:/, '')))
+            : path.endsWith('/tasks') ? 'Tasks' : 'Files';
+        panel.append(heading);
         if (target.kind === 'files' && target.path === '/' && this.directoryMounts) {
             const button = document.createElement('button'); button.textContent = '挂载目录 / 管理挂载';
             button.onclick = () => { void this.manageMounts(target.sessionId).catch(error => this.report(error)); }; panel.append(button);
@@ -240,38 +328,30 @@ export class SessionWorkbench implements WorkspaceController {
         const target = resolveBrowserTarget(path); if (target.kind !== 'task') return;
         const generation = ++this.taskRefresh;
         const task = await this.kernel.task(target.sessionId, target.taskId);
-        let [page, eventPage] = await Promise.all([this.kernel.taskHistoryPage(target.sessionId, target.taskId), this.kernel.taskEventPage(target.sessionId, target.taskId)]);
-        const history = [...page.items];
-        const events = [...eventPage.items];
+        let eventPage = await this.kernel.taskEventPage(target.sessionId, target.taskId);
+        const projectEvents = (items: typeof eventPage.items) => items
+            .filter(event => event.taskId === target.taskId).map(taskKeyEvent).filter(event => event !== undefined);
+        const events = projectEvents(eventPage.items);
         if (this.closed || generation !== this.taskRefresh) return;
         const panel = document.createElement('div'); panel.className = 'session-detail';
         const heading = document.createElement('h2'); heading.textContent = `${task.program.kind} · ${task.status}`; panel.append(heading);
         const description = document.createElement('p'); description.textContent = task.id; panel.append(description);
+        const result = document.createElement('pre'); result.textContent = JSON.stringify(taskSummary(task), null, 2); panel.append(result);
         const entries = document.createElement('div'); panel.append(entries);
-        const more = document.createElement('button'); more.type = 'button'; more.textContent = '加载更多版本'; panel.append(more);
-        const moreEvents = document.createElement('button'); moreEvents.type = 'button'; moreEvents.textContent = '加载更多事件'; panel.append(moreEvents);
+        const moreEvents = document.createElement('button'); moreEvents.type = 'button'; moreEvents.textContent = '继续查找关键事件'; panel.append(moreEvents);
         const render = () => {
             entries.replaceChildren();
-            more.hidden = page.nextAfterVersion === undefined;
             moreEvents.hidden = eventPage.nextAfterIndex === undefined;
-            const records: Array<{ time: number; title: string; value: unknown }> = history.map(record => ({ time: record.updatedAt, title: `版本 ${record.version} · ${record.status}`, value: taskSummary(record) }));
-            for (const event of events) if (event.taskId === target.taskId) records.push({ time: event.occurredAt, title: event.type, value: { sequence: event.sequence, type: event.type, occurredAt: event.occurredAt } });
+            const records = events.map(event => ({ time: event.occurredAt, title: event.type, value: event }));
+            if (!records.length) {
+                const empty = document.createElement('p'); empty.textContent = '已读取范围内无关键事件'; entries.append(empty);
+            }
             for (const record of records.sort((a, b) => a.time - b.time)) {
                 const detail = document.createElement('details'); const summary = document.createElement('summary');
                 summary.textContent = `${new Date(record.time).toLocaleString()} · ${record.title}`;
                 const body = document.createElement('pre'); body.textContent = JSON.stringify(record.value, null, 2);
                 detail.append(summary, body); entries.append(detail);
             }
-        };
-        more.onclick = () => {
-            if (more.disabled || page.nextAfterVersion === undefined) return;
-            more.disabled = true;
-            void this.kernel.taskHistoryPage(target.sessionId, target.taskId, {
-                afterVersion: page.nextAfterVersion, throughVersion: page.throughVersion,
-            }).then(next => {
-                if (this.closed || generation !== this.taskRefresh) return;
-                page = next; history.push(...next.items); render();
-            }).catch(error => this.report(error)).finally(() => { more.disabled = false; });
         };
         moreEvents.onclick = () => {
             if (moreEvents.disabled || eventPage.nextAfterIndex === undefined) return;
@@ -280,12 +360,18 @@ export class SessionWorkbench implements WorkspaceController {
                 afterIndex: eventPage.nextAfterIndex, throughIndex: eventPage.throughIndex,
             }).then(next => {
                 if (this.closed || generation !== this.taskRefresh) return;
-                eventPage = next; events.push(...next.items); render();
+                eventPage = next; events.push(...projectEvents(next.items)); render();
             }).catch(error => this.report(error)).finally(() => { moreEvents.disabled = false; });
         };
         render();
         this.container.replaceChildren(panel);
     }
+    private async exportSessionItem(item: { path: string; type: string }): Promise<{ name: string; content: string; mimeType: string } | null> {
+        const target = resolveBrowserTarget(item.path);
+        if (target.kind !== 'session') return null;
+        return exportSessionBundle(this.repository, target.sessionId);
+    }
+
     async createResource(options: { title?: string } = {}): Promise<string> {
         if (this.closed) throw new Error('Session workspace closed');
         const id = await this.repository.createSession(options.title || '新会话');
@@ -307,6 +393,7 @@ export class SessionWorkbench implements WorkspaceController {
     }
     async destroy(): Promise<void> {
         this.closed = true; this.dialogs.abort(); this.unsubscribers.splice(0).forEach(unsubscribe => unsubscribe());
+        if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = undefined; }
         await Promise.all([this.tail, this.refreshTail]); await this.closeEditor(); this.sidebarUI?.destroy();
         await this.browser?.dispose(); this.container.replaceChildren();
     }

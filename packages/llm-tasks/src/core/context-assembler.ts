@@ -9,7 +9,7 @@ import type {
     ContextExplanation,
     RoundId,
 } from '@itookit/common';
-import { generateUUID, type ILog } from '@itookit/common';
+import { generateUUID, sha256Hex, type ILog } from '@itookit/common';
 import { ProviderMessageAdapter, type ProviderKind } from './provider-message-adapter';
 
 export interface RetrievedMemoryEntry {
@@ -115,9 +115,15 @@ export class ContextAssembler {
         if (skillsPrompt) blocks.push({ kind: 'system', source: 'skill', content: skillsPrompt });
         blocks.push(...historyBlocks, ...memoryBlocks, ...inputBlocks);
 
-        // The pending message is a block so it can never be separated from final validation.
-        blocks.push({ kind: 'round', roundId: '' as RoundId, messages: [plan.pendingUserMessage] });
-        blocks = await this.fitTokenBudget(blocks, plan.tokenBudget);
+        // The pending message is a block that is appended last and exempt from
+        // trimming, so a tight budget can never drop the question being asked.
+        // De-duplication happens after trimming, against the context that survived.
+        const pending: ContextBlock | null = plan.pendingUserMessage
+            ? { kind: 'round', roundId: '' as RoundId, messages: [plan.pendingUserMessage] }
+            : null;
+        if (pending) blocks.push(pending);
+        blocks = await this.fitTokenBudget(blocks, plan.tokenBudget, pending);
+        if (pending) blocks = this.dropDuplicatedPending(blocks, plan, pending);
 
         let canonicalMessages = await this.flattenBlocks(blocks);
         canonicalMessages = (this.deps.providerAdapter ?? new ProviderMessageAdapter()).validate(
@@ -177,6 +183,20 @@ export class ContextAssembler {
         return result;
     }
 
+    /**
+     * A regenerate/resend Round already carries this prompt. Drop the appended copy
+     * only when that Round survived trimming with the same user message; an excluded,
+     * summarized or trimmed-away Round must keep the copy.
+     */
+    private dropDuplicatedPending(blocks: ContextBlock[], plan: ContextPlan, pending: ContextBlock): ContextBlock[] {
+        const prompt = plan.pendingUserMessage;
+        if (!prompt || !plan.pendingRoundId) return blocks;
+        const carried = blocks.some(block => block !== pending && block.kind === 'round'
+            && block.roundId === plan.pendingRoundId
+            && block.messages.some(message => sameUserMessage(message, prompt)));
+        return carried ? blocks.filter(block => block !== pending) : blocks;
+    }
+
     private async flattenBlocks(blocks: ContextBlock[]): Promise<ChatMessage[]> {
         const messages: ChatMessage[] = [];
         for (const block of blocks) {
@@ -198,13 +218,14 @@ export class ContextAssembler {
         return messages;
     }
 
-    private async fitTokenBudget(blocks: ContextBlock[], tokenBudget?: number): Promise<ContextBlock[]> {
+    private async fitTokenBudget(blocks: ContextBlock[], tokenBudget?: number, keep?: ContextBlock | null): Promise<ContextBlock[]> {
         if (!tokenBudget || tokenBudget < 1) return blocks;
         const kept = [...blocks];
         while (kept.length > 1 && this.estimateTokens(await this.flattenBlocks(kept)) > tokenBudget) {
             // Discard discovery metadata first; preserve policy and the final pending user.
             const discovery = kept.findIndex(block => block.kind === 'system' && block.source === 'skill-index');
-            const index = discovery >= 0 ? discovery : kept.findIndex((block, i) => block.kind !== 'system' && i !== kept.length - 1);
+            const index = discovery >= 0 ? discovery
+                : kept.findIndex((block, i) => block.kind !== 'system' && i !== kept.length - 1 && block !== keep);
             if (index < 0) break;
             kept.splice(index, 1);
         }
@@ -226,10 +247,7 @@ export class ContextAssembler {
     }
 
     private estimateTokens(messages: ChatMessage[]): number {
-        return Math.ceil(messages.reduce((chars, message) => {
-            const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
-            return chars + content.length;
-        }, 0) / 4);
+        return Math.ceil(messages.reduce((chars, message) => chars + messageText(message).length, 0) / 4);
     }
 
     private explain(blocks: ContextBlock[], tokenCount: number): ContextExplanation {
@@ -246,7 +264,14 @@ export class ContextAssembler {
     }
 
     private async sha256(input: string): Promise<string> {
-        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-        return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+        return sha256Hex(input);
     }
+}
+
+function messageText(message: ChatMessage): string {
+    return typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+}
+
+function sameUserMessage(candidate: ChatMessage, pending: ChatMessage): boolean {
+    return candidate.role === 'user' && messageText(candidate) === messageText(pending);
 }

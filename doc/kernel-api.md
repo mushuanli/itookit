@@ -39,6 +39,8 @@ class Kernel {
     createSession(spec: { id?: string; storage: StorageBindingRef }): Promise<SessionHandle>;
     openSession(id: SessionId): Promise<SessionHandle>;
     listSessions(): AsyncIterable<SessionRecord>;
+    /** 删除会话的 Kernel 存储 + catalog 记录；有运行中 Task/待清理资源时拒绝 */
+    removeSession(id: SessionId, options?: { force?: boolean }): Promise<boolean>;
 
     // 任务（全局）
     openTask<O>(id: TaskId): Promise<TaskHandle<O>>;
@@ -52,7 +54,7 @@ class Kernel {
 }
 ```
 
-**`KernelOptions`**：`catalog`（目录 fs）、`maxConcurrent`（并发上限，默认 4）、`leaseMs`（租约时长，默认 30s）、`pollMs`（轮询间隔，默认 250ms）、`workerId`（可选）。
+**`KernelOptions`**：`catalog`（目录 fs）、`maxConcurrent` / `maxConcurrentEffects`（并发上限，均默认 4）、`leaseMs`（租约时长，默认 30s）、`effectCleanupTimeoutMs`（Effect 清理等待上限，默认 30s，整数范围 1–2147483647ms）、`pollMs`（兼容轮询间隔，默认 0，使用提交通知与期限定时器）、`workerId`（可选）。
 
 **`bindCapabilities(task, bindings, onHandle?)`**：为 Task 创建类型化资源句柄（llm/tool/...），逐项回调 `onHandle`（用于 setBudget），发 `capabilities` signal 后 `start()`。这是上层能力绑定的统一入口。
 
@@ -497,3 +499,29 @@ packages/durable-kernel/src/
 | `workspaceSnapshotKey(id)` / `workspaceDiffKey(id)` | `workspace/snapshot/<id>` / `workspace/diff/<id>` | 工作区快照/差异 |
 
 **约定**：存储根必须是支持事务性 SeqFile 的 `IModuleFS`（`requireTransactionalSeq` 校验，缺失时报错）；`createSession()` 将会话登记进全局 `catalog.seq`，`openSession()` 从 `session.seq` 读取主记录后按需恢复 `tasks/` 下的 Task。
+
+**会话删除**：`removeSession(id)` 只负责 Kernel 拥有的部分，顺序固定为：停止轮询与资源扫描 → 取消 fenced reducer → 通知插件 `onSessionClosed` → 解除存储根 `vfsFixedLayout` 固定布局保护 → 删除存储根子树 → **清除该 Session 全部 SeqFile 记录**（`session/shared/context/messages/events/graph/resources/index.seq` 以及每个 `tasks/<id>/task.seq`；记录独立于文件存在，删文件不会清理它们）→ 最后在同一事务删除 `catalog.seq` 的 `session/<id>` 与所有指向它的 `task/<taskId>`。存在非终态 Task 或 `cleanupPending` 的 Effect 时抛 `CONFLICT`（`force: true` 才强制），因此**关闭失败不会连带销毁数据**；会话不存在时返回 `false`（幂等）。
+
+catalog 记录最后删除，使中断的删除**可安全重试**（绑定在收尾前始终可解析）；此外 `ensureSessionLayout` 在发现 `session.seq` 缺失时会先清空同名遗留记录，因此即使删除在"删文件"与"清记录"之间被中断，用同一 ID 重建也不会复活旧的 closed 状态或 shared 数据。Kernel 之外的会话记录（如 llm-session 的 history/session seq）由宿主在 `removeSession` 成功后自行删除，顺序不可颠倒。
+
+**重启后恢复未完成的删除**：`removeSession` 通过 `catalog` 直接解析绑定（`inspectSessionBinding`），不走 `openSession()`——后者会在已被删除的存储根上写 `vfsFixedLayout` metadata 并抛 `ENOENT`，导致重启后无法继续清理。`closeSession` 与 `sessionStat` 同样对"存储已不存在"的会话幂等：前者视为无需关闭（也不再尝试 `closed → closing` 状态迁移），后者报告 `closed`。因此应用层 `SessionLifecycleService` 在进程重启后仍能走完 close → remove → 记录删除的完整链路。
+
+## 人工重试
+
+`TaskHandle.retry({ requestId })` 或 `Kernel.retryTask(sessionId, taskId, { requestId })` 创建带 retryOfTaskId 的新 root Task。来源必须已终态，非空请求身份在同一来源内幂等；旧终态和历史保持不变。新任务复制原 program/input/dependencies/retry/priority/labels，默认 deferStart=true，未复制 checkpoint、Effect、interaction 或资源授权；宿主须重新授权并调用 start。失败依赖按原提交策略传播。TaskSpec 也支持 retryOfTaskId，普通提交及结构化 spawn 的存储事务均校验来源终态；Kernel 重建后，相同来源和请求身份仍返回原重试任务。此接口不自动替换 Flow 图节点或继续原图。
+
+`TaskHandle.createResource` / `SessionHandle.createResource` 的 spec 可传非空 requestId，以拥有者 Task 为作用域幂等创建能力资源。同键不同规格报错；重放返回当前资源/句柄（包括撤销标记），不会重新授权。没有 requestId 时仍每次创建。该能力为恢复授权装配提供基础，尚不代表整个 bindCapabilities/start 流程事务化。
+
+`TaskHandle.start(options?: { signal?: TaskSignal })` 支持原子初始信号：同事务登记信号及启动，重复相同信号不重投，不同信号冲突。bindCapabilities 使用 `capability:<signalKey>` 资源 requestId，准备资源与回调后调用 start({ signal })。资源准备回调可能重试执行，需自行保持幂等；资源创建与启动仍是分阶段操作。
+
+`TaskHandle.respond` 对已 resolved 的同 interactionId/同编码回应值幂等返回，包括 Task 已成功、失败或取消的情况；异值冲突，不变更终态 Task/version/事件。终态上尚未解决的交互仍拒绝新回应，不能用 respond 重新启动 Task。
+
+Effect 完成提交在存储事务中校验 lease 及祖先取消状态。祖先已取消、后代清理尚未传播时，旧 Effect 结果不能写入、唤醒任务或安排自动重试；已经保存的最终 Effect 结果仍按原记录幂等返回。
+
+人工 `resolveEffect` 的新裁决同样受祖先取消屏障约束，包括确认成功、确认失败及重试；取消前已保存的相同请求仍可幂等重放，不同内容报冲突。
+
+祖先取消尚未传播到目标时，创建新后代、首次 start、signal、新控制请求及尚未解决的交互回应也会拒绝。已有提交、启动、控制和交互回执保持原有幂等重放；取消不允许通过这些入口恢复业务执行。
+
+Task 消息发送拒绝取消祖先下的新入队请求，原消息身份可重放已保存的入队回执。接收方祖先已取消时，消息保存为 rejected，原因码为 `target-ancestor-cancelled`；同 Session 和跨 Session 投递一致。既有投递或拒绝回执仍幂等，不重复唤醒目标。
+
+存储层 sweep/recover 在恢复后代 lease 前检查完整祖先链；已有祖先取消时，事务内将后代取消并登记 Effect 清理。该传播不依赖父任务先被扫描，重复恢复不追加取消事件；物理清理由后续清理流程执行。

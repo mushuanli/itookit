@@ -6,6 +6,8 @@ import type { CommandBus } from '../CommandBus';
 import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
 import { buildRenamedFilename } from '@itookit/common';
 import { findNodeById } from '../../utils/helpers';
+import { describeDeleteError } from '../../utils/delete-error';
+import { partitionDeletable, READ_ONLY_DELETE_MESSAGE } from '../../utils/delete-guard';
 
 export interface FileCommandOptions {
   newFileContent?: string;
@@ -48,7 +50,18 @@ export class FileCommandHandler {
       }),
 
       this.commandBus.on('file:delete', async ({ itemIds }) => {
-        await this.service.deleteItems(itemIds);
+        const { deletable, blocked } = partitionDeletable(this.store.getState().items, itemIds);
+        if (!deletable.length) {
+          alert(READ_ONLY_DELETE_MESSAGE);
+          return;
+        }
+        if (blocked.length) console.warn('[FileCommandHandler] Skipped read-only entries:', blocked);
+        try {
+          await this.service.deleteItems(deletable);
+        } catch (error) {
+          console.error('[FileCommandHandler] Delete failed:', error);
+          alert(`删除失败: ${describeDeleteError(error)}`);
+        }
       }),
 
       this.commandBus.on('file:rename', async ({ itemId, newTitle }) => {

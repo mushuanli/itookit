@@ -67,31 +67,35 @@ export class SkillPanel {
 
     private async load(skillId: string): Promise<void> {
         if (!this.deps.onLoadSkill) return;
-        const btn = this.list.querySelector(`[data-skill="${skillId}"]`) as HTMLButtonElement | null;
+        const btn = Array.from(this.list.querySelectorAll<HTMLInputElement>('[data-skill]')).find(item => item.dataset.skill === skillId);
         if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
         try {
             await this.deps.onLoadSkill(skillId);
             const skill = this.skills.find(s => s.id === skillId);
             if (skill) skill.loaded = true;
-            this.render();
+            await this.reload();
         } catch (e) {
             console.error('[SkillPanel] load failed:', e);
-            if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
+            if (btn) { btn.disabled = false; btn.checked = false; }
+            const notice = document.createElement('span'); notice.setAttribute('role', 'alert');
+            notice.textContent = e instanceof Error ? e.message : String(e); this.list.append(notice);
         }
     }
 
     private async unload(skillId: string): Promise<void> {
         if (!this.deps.onUnloadSkill) return;
-        const btn = this.list.querySelector(`[data-skill="${skillId}"]`) as HTMLButtonElement | null;
+        const btn = Array.from(this.list.querySelectorAll<HTMLInputElement>('[data-skill]')).find(item => item.dataset.skill === skillId);
         if (btn) { btn.disabled = true; btn.textContent = 'Unloading…'; }
         try {
             await this.deps.onUnloadSkill(skillId);
             const skill = this.skills.find(s => s.id === skillId);
             if (skill) skill.loaded = false;
-            this.render();
+            await this.reload();
         } catch (e) {
             console.error('[SkillPanel] unload failed:', e);
-            if (btn) { btn.disabled = false; btn.textContent = 'Unload'; }
+            if (btn) { btn.disabled = false; btn.checked = true; }
+            const notice = document.createElement('span'); notice.setAttribute('role', 'alert');
+            notice.textContent = e instanceof Error ? e.message : String(e); this.list.append(notice);
         }
     }
 }

@@ -232,7 +232,7 @@ export const ChatInputTemplates = {
     /**
      * 渲染单个 Skill 条目 — toggle switch 样式
      */
-    renderSkillItem(skill: { id: string; name: string; description: string; loaded: boolean; toolCount: number; icon?: string }): string {
+    renderSkillItem(skill: { id: string; name: string; description: string; loaded: boolean; enabled?: boolean; toolCount: number; icon?: string }): string {
         const icon = skill.icon ? escapeHTML(skill.icon) : '⚡';
         const checked = skill.loaded ? 'checked' : '';
         const btnClass = skill.loaded ? 'llm-input__skill-btn--unload' : 'llm-input__skill-btn--load';
@@ -243,7 +243,7 @@ export const ChatInputTemplates = {
                  data-skill-id="${escapeHTML(skill.id)}">
                 <label class="llm-input__toggle llm-input__skill-toggle" title="${skill.loaded ? 'Disable skill' : 'Enable skill'}">
                     <input type="checkbox" class="llm-input__skill-btn ${btnClass}"
-                           data-skill="${escapeHTML(skill.id)}" ${checked}>
+                           data-skill="${escapeHTML(skill.id)}" ${checked} ${!skill.loaded && skill.enabled === false ? 'disabled' : ''}>
                     <span class="llm-input__toggle-slider"></span>
                 </label>
                 <span class="llm-input__skill-icon">${icon}</span>

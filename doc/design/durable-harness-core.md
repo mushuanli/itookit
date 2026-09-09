@@ -1,6 +1,6 @@
 # Durable Harness 简化核心提案
 
-日期：2026-09-05。状态：针对 1.1 的收敛设计，窄入口、单 step 适配、状态视图及同后端 pool/shared 资源已实现；本文保留原 API 草案，准确可用 API 和限制见 [实施记录第 7 节](../feat/durable-harness-implementation.md#7-简化核心重构实际-api-与边界)。不覆盖旧数据格式或自动废止既有正确性约束。
+日期：2026-09-05。状态：针对 1.1 的收敛设计，窄入口、单 step 适配、状态视图及同后端 pool/shared 资源已实现；本文保留原 API 草案，当前新增 revoke/destroy/query、grant epochs 与 physical cleanup 见 [资源实现基线](durable-harness-resources.md#当前实现基线2026-09-08)；早期 API 和限制见 [实施记录第 7 节](../feat/durable-harness-implementation.md#7-简化核心重构实际-api-与边界)。不覆盖旧数据格式或自动废止既有正确性约束。
 
 ## 1. 审查结论
 

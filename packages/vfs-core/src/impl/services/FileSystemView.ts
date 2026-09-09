@@ -163,11 +163,16 @@ export class FileSystemView implements IFileSystem {
     private async invoke(_m: Binding, api: object, method: string, args: any[]) {
         const fn = (api as Methods)[method];
         if (typeof fn !== 'function') throw new FSCapabilityError(method);
-        // Provider errors must not expose its backing paths in a view error.
+        // Provider errors must not expose its backing paths in a view error, so the
+        // message stays generic. The original error rides along as `cause` — without
+        // it a read-only or capability failure is indistinguishable from a real I/O fault.
         try { return await fn.apply(api, args); }
         catch (error) {
-            if (error instanceof FSError) throw new FSError(error.code, `Source operation failed: ${method}`, method);
-            throw new FSError('EIO', `Source operation failed: ${method}`, method);
+            if (error instanceof FSError) {
+                throw new FSError(error.code, `Source operation failed: ${method}`, method, undefined, error);
+            }
+            throw new FSError('EIO', `Source operation failed: ${method}`, method, undefined,
+                error instanceof Error ? error : undefined);
         }
     }
 

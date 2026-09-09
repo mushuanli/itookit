@@ -8,7 +8,7 @@
 ┌────────────────────────────────────────────────────┐
 │  apps/{web-app(mind-os), cli, tauri-app}   入口   │
 ├────────────────────────────────────────────────────┤
-│  app-shell                      引导 + 路由 + 装配  │
+│  app-shell（Web/Tauri UI shell） │ app-core（无 UI 组合） │
 ├──────────────┬──────────────┬──────────────────────┤
 │  llm-ui      │  vfs-ui      │  mdxeditor           │  UI 层
 ├──────────────┼──────────────┼──────────────────────┤
@@ -152,12 +152,13 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel
 
 - **`llm-ui`**：Chat UI（流式历史、Session 渲染、DagWorkbench 可视化）。
 - **`vfs-ui`**：文件树 UI；**`mdxeditor`**：CodeMirror MDX 编辑器；**`ui-common`**：共享 UI 契约。
-- **`app-shell`**：`initApp()` 装配 — createVFS → LLMDeviceDriver → Kernel → `createKernelAdaptersRuntime` → `initializeConversationSystem` → Workbench。
+- **`app-core`**：无 UI 应用核心 — MindOS profile、RunDefinition、共享 Session 文件/目录服务，以及 `createApplicationRuntime()`（VFS/LLM/Kernel/Session/Flow 统一装配）；Web/Tauri/CLI 共用。详见 [Runtime 架构](runtime-architecture.md)。
+- **`app-shell`**：Web/Tauri UI shell — `initApp()` 调用 app-core，再装配 `initializeConversationSystem`、路由、Workbench/编辑器。
 
 ## 7. 入口
 
 - **`mind-os`（apps/web-app）**：浏览器 SPA（IndexedDB 后端）。
-- **`@itookit/cli`（apps/cli）**：YAML 工作流 → 编译 DagRunSpec → `DurableFlowExecutor` 运行 → 结果落盘（`RunStore`）。
+- **`@itookit/cli`（apps/cli）**：MindOS profile + Session VFS 挂载 → YAML/.flow 编译为 RunDefinition/DagRunSpec → `app-core/createKernelRuntime` 装配 Kernel/Flow → 运行 → 结果落盘（RunStore 投影）。
 - **`tauri-app`**：桌面壳；**`sync-server`**：diff 同步服务。
 
 ## 8. 核心数据流

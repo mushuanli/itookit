@@ -27,6 +27,8 @@ export {
     calculateHash
 } from './utils/utils';
 export { buildRenamedFilename, formatDefaultFileTitle } from './utils/filename';
+export { sha256Hex, sha256HexSync, sha256Bytes, type DigestInput } from './utils/digest';
+export { randomUUID } from './utils/random';
 export {
     type TaskCounts,
     type MarkdownMetadata,

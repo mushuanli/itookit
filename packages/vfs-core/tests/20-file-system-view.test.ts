@@ -217,3 +217,19 @@ describe('independent file system views', () => {
         await expect(restricted.meta.assets.getAsset('/state.seq', 'secret')).rejects.toMatchObject({ code: 'EACCES' });
     });
 });
+
+describe('view error causes', () => {
+    it('keeps the provider error as cause so read-only failures stay diagnosable', async () => {
+        const fs = await source();
+        await fs.driver.createFile({ name: 'note.md', content: 'x' });
+        // Nested views mirror the real chain: session-browser view → session files view.
+        const inner = view({ viewId: 'inner', mounts: [{ mountId: 'root', at: '/', fs, access: 'ro' }] });
+        const app = view({ viewId: 'outer', mounts: [{ mountId: 'root', at: '/', fs: inner, access: 'rw' }] });
+
+        const failure = await app.driver.delete(['/note.md']).catch(error => error as { code?: string; cause?: { code?: string; message?: string } });
+
+        expect(failure.code).toBe('EROFS');
+        expect(failure.cause?.code).toBe('EROFS');
+        expect(failure.cause?.message).toContain('Read-only mount');
+    });
+});

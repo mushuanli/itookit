@@ -104,6 +104,9 @@ export function createSessionPlugin(sessionManager: SessionManager): ILLMPlugin 
                     historyPolicy?: unknown;
                     sendIntent?: unknown;
                 };
+                if (!agentId) {
+                    console.warn('[SessionPlugin] SessionCommand.Send arrived without agentId — the empty id cannot resolve and will fall back to the default agent');
+                }
                 return sm.sendMessage(text, files as any, agentId ?? '', overrides as any, origin as any, historyPolicy as any, sendIntent as any);
             });
             ctx.commands.register(SessionCommand.Abort, async () => sm.abort());

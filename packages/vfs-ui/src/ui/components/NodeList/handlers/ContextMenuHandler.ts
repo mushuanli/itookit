@@ -13,6 +13,7 @@ import type {
 } from '../../../../contracts/types';
 import { createContextMenuHTML } from '../templates';
 import { escapeHTML } from '@itookit/common';
+import { isItemReadOnly } from '../../../../utils/helpers';
 
 export interface ContextMenuCallbacks {
   showTagEditor: (options: {
@@ -293,7 +294,10 @@ export class ContextMenuHandler {
       }
     );
 
-    return items;
+    // Read-only entries (Task history) cannot be renamed, moved or deleted.
+    return isItemReadOnly(item)
+      ? items.filter(entry => !('id' in entry) || !['rename', 'moveTo', 'delete'].includes(String(entry.id)))
+      : items;
   }
 
   private getBulkContextMenuItems(count: number): MenuItem[] {

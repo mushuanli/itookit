@@ -1,622 +1,158 @@
 # Skill 系统设计
 
-> 版本: 3.3 | 包: `llm-common` + `kernel-adapters` + `device-llm` + `app-shell`
+2026-09-08 按当前源码同步。Skill 是指令、工具绑定、触发/作用域元数据，以及可选 Durable TaskProgram 引用。定义存储、Session 加载状态、工具执行和上下文组装分别管理。本文末尾列出仍需完成的设计接线，不能把接口存在当作产品链路已经实现。
 
-## 一、概述
+## 1. 类型与持久化
 
-Skill = Markdown 指令 + 可选工具 + 触发策略。核心设计理念：**将大模型视为拥有有限工作记忆的处理器——通过 YAML 建立索引，通过四层路由控制上下文，通过作用域实现目录级隔离。**
+类型定义在 [skill-types.ts](../../packages/llm-common/src/skills/skill-types.ts)，服务在 [skill-service.ts](../../packages/llm-common/src/skills/skill-service.ts)。`LLMSkill` 是 `SkillDefinition` 的别名，启动同步直接传递定义，不再调用 llmSkillToSkillDef 转换。
 
-### 两大存储体系
+| 来源 | 存储与读取 | 运行时归属 |
+| --- | --- | --- |
+| 配置 Skill | 注入 `/etc` 文件来源中的 `/llm/.skills/<id>.yaml`，即系统 `/etc/llm/.skills/<id>.yaml` | LLMDeviceDriver/SkillManager 持久化，共享只读用途的 catalog 定义 |
+| 文件系统 Skill | 宿主 SkillSource 扫描 `_agent/skills/<name>/SKILL.md` | 当前 Session 的本地定义覆盖层，不写回共享 catalog |
+| 加载状态 | Session capability service 的 loaded/glob 状态；成功 skill.load 的 ID 存入 Session shared state | 每个 Session 独立；恢复按保存 ID 重新加载 |
 
-| 体系 | 存储 | 管理器 | 作用域 |
-|------|------|--------|--------|
-| `LLMSkill` | VFS `__config:/llm/.skills/<id>.yaml` | `LLMDeviceDriver` | 全局（始终可见） |
-| `SkillDefinition` | 运行时内存 (`SkillDeviceDriver`) + 文件系统 `_agent/skills/` | `SkillDeviceDriver` | 由 `scopeLevel` 决定 |
+配置 Skill 的启动加载、reload、保存和删除统一使用 `.yaml`。不加载 `.json/.yml`，保存时不探测或删除旧格式文件；旧文件留在来源中，不参与 catalog。Provider/Connection/MCP 的 JSON 是各自当前格式，不受 Skill 格式约束影响。
 
-**桥接**: `llmSkillToSkillDef()` + `syncSkillsToKernel()` 在启动和 `llmDriver.onChange()` 时将 VFS 技能同步为 `SkillDefinition`。
+`SkillDefinition` 必填字段为 id/name/description/type/enabled/instructions/tools/triggerPatterns/autoLoad/priority。可选字段包括 endpoint/method/headers/parameters、command、MCP 引用、triggerStrategy、source、scopeLevel/scopeRoot、disableModelInvocation、globs、compact、correctionLog、referencePaths、templatePath、fsRoot、supportsSubagent/subagentRole/subagentModel、taskProgram。
 
----
+SkillType 为 builtin/http/shell/prompt/mcp/custom。类型和参数描述不自动授予执行权：动态工具还需 `SkillToolHandlerFactory` 和 Session ToolService，真正执行走授权 effect。Tauri 受限 Session 当前没有注入原生 shell skill handler。
 
-## 二、核心类型
+## 2. Catalog 与 Session 服务
 
-> 定义在 `packages/llm-common/src/skills/skill-types.ts`
+`app-shell/bootstrap.ts` 在启动和 LLMDeviceDriver.onChange 时调用 syncSkillsToKernel，保存配置 Skill 并删除已移除的 catalog 项。`createKernelAdaptersRuntime()` 提供元数据 catalog；执行工具和技能通过 SessionCapabilityRegistry 按 sessionId 获取。
 
-### 2.1 SkillDefinition
+每个 Session 的 `SkillDeviceDriver` 使用共享 catalog 定义，并拥有独立的文件系统覆盖层、loaded、globMounted、动态工具和 agentInstructions。文件系统同名技能只覆盖本 Session 的查找；刷新、退出和 dispose 不修改其他 Session 或共享 catalog。目录来源返回的定义保存在本地覆盖层，避免 A 的扫描覆盖 B。
 
-```typescript
-interface SkillDefinition {
-    // ── 必填 ──
-    id: string;
-    name: string;
-    description: string;
-    type: SkillType;          // 'builtin' | 'http' | 'shell' | 'prompt' | 'mcp' | 'custom'
-    enabled: boolean;
-    instructions: string;     // 注入到 system prompt 的 Markdown
-    tools: SkillToolBinding[];
-    triggerPatterns: string[];
-    autoLoad: boolean;
-    priority: number;
+服务主要接口：
 
-    // ── 可选 (原有) ──
-    icon?: string;
-    endpoint?: string;
-    method?: 'GET' | 'POST' | 'PUT';
-    headers?: Record<string, string>;
-    parameters?: Record<string, unknown>;
-    metadata?: Record<string, unknown>;
-    createdAt?: number;
-    modifiedAt?: number;
+| 类别 | 方法 |
+| --- | --- |
+| 定义管理 | listSkills/getSkill/getSkillNames、saveSkill/deleteSkill、onChange |
+| 加载 | loadSkill/unloadSkill、getLoadedSkills/getUnloadedSkills |
+| 路由 | getRouteLayers、semanticMatchSkills/autoDetectSkills |
+| 空间联动 | mountByGlob/unmountByGlob |
+| 来源 | registerFromDirectory(dirPath, scopeLevel, scopeRoot)、setCwd、refreshScopedSkills、getScopedSkills |
+| 指令辅助 | parseCompactInstructions、getCompactInstructions、getAgentMdContent |
 
-    // ── 新增 (全部可选，向后兼容) ──
+定义枚举是宿主管理接口，可包含当前不可见定义；模型上下文应使用 scoped/route 接口。loadSkill 拒绝不存在、disabled、越出当前目录作用域或已关闭服务的技能。getLoadedSkills/getUnloadedSkills 过滤当前作用域及 enabled 状态。
 
-    /** 触发策略 */
-    triggerStrategy?: 'reference' | 'action';
+工具 load_skill 和持久 skill.load effect 都拒绝 disableModelInvocation。宿主显式调用 loadSkill 可用于用户手动触发，仍需满足 enabled 和目录作用域。加载不会自动扩大工具权限；builtin 绑定复用已注册工具，其他绑定须有 factory 才能注册。成功结果附 instructions 和 compactInstructions 的本次加载快照。load_skill 将正文与关键规则作为工具输出交给下一次模型调用，持久 Effect 记录及 Agent messages 保留该返回值；不能只返回“已加载”而遗漏指令。
 
-    /** 存储来源 */
-    source?: 'vfs' | 'filesystem';
+## 3. 作用域与刷新
 
-    /** 作用域层级 */
-    scopeLevel?: 'vfs' | 'global-fs' | 'parent-fs' | 'local-fs';
+| scopeLevel | 可见性 |
+| --- | --- |
+| 缺省 / vfs / global-fs | 在该服务中始终可见 |
+| parent-fs | cwd 等于 scopeRoot，或是其子目录 |
+| local-fs | cwd 精确等于 scopeRoot |
 
-    /** 作用域根目录 (CWD 变更时判断可见性) */
-    scopeRoot?: string;
+这些是 Skill 指令可见性规则，不替代 Session 文件能力或 OS sandbox。SkillSource 是可信宿主端口；不能把任意 Agent 输入直接变成宿主扫描目录。
 
-    /** 禁止模型自动调用 (L1 静默层) */
-    disableModelInvocation?: boolean;
+setCwd 后撤销离开作用域的已加载工具，再刷新来源。刷新首先清空旧文件系统覆盖及 agentInstructions，避免扫描失败期间继续使用旧目录指令。每次扫描有本地 revision；迟到的旧扫描结果被丢弃，不能覆盖新 cwd。dispose 同样使在途扫描失效，并清理本服务注册的工具。
 
-    /** Glob 模式列表 (L4 空间联动) */
-    globs?: string[];
+TauriSkillSource 通过注入的 Session ToolVFSContext 读取 `_agent/AGENT.md` 和沿途 `_agent/skills/*/SKILL.md`，不使用 Tauri 原生文件 API。项目根是该作用域创建时的 Session 虚拟 cwd，构建 projectRoot → cwd 的目录链；项目根标 global-fs，中间层标 parent-fs，末级标 local-fs。cwd 在项目根外返回空定义，清理原项目作用域。不存在自动向上查找项目根的 findProjectRoot/buildScopeEntries 公共实现。Web/CLI 未配置 SkillSource 时不扫描宿主文件系统。
 
-    /** 压缩保护指令 */
-    compact?: CompactSection | null;
+Tauri 通过 skillSourceForSession 为每个已获取文件视图的 Session 创建独立来源，初始化时 setCwd(files.cwd)。宿主目录到虚拟路径的映射由既有 Session 挂载层处理，Skill 定义及 supporting files 全部使用虚拟路径。挂载变更调用 disposeSession，下一次获取能力时从新视图/cwd 重建来源。添加目录本身不会自动选择项目根，扫描位置取决于已保存的 Session cwd；每次新会话运行组装项目上下文前 refreshScopedSkills，重读项目规则和技能；没有运行中实时 watch。缺失目录/AGENT.md 按空处理，授权或其他 IO 错误终止初始化并释放视图。
 
-    /** 修正日志配置 */
-    correctionLog?: SkillCorrectionLog;
+同 cwd 刷新保留先前显式加载的文件技能意图：撤销旧定义与工具，扫描后重新校验并读取 supporting files、注册新工具。定义被删除、禁用或禁止模型调用时不重新加载；支持文件读取失败保持未激活，并由宿主在新 Task 提交前报告。显式 unload 会清除意图并使进行中的加载失效；切换 cwd 清除自动重载意图。已返回的指令/Effect/Task 快照不改写。新运行的上下文构建器会消费已加载正文及支持文件；glob 文件关联仍无编辑器自动恢复接线。
 
-    /** 参考文档路径 */
-    referencePaths?: string[];
+## 4. 四层路由
 
-    /** 输出模板路径 */
-    templatePath?: string;
+`getRouteLayers()` 按 scoped、enabled 定义分类：
 
-    /** 文件系统根目录 */
-    fsRoot?: string;
+| 层 | 条件 | 预期上下文 |
+| --- | --- | --- |
+| L1 silent | disableModelInvocation | 不自动注入，不允许模型加载 |
+| L2 index | 未加载的普通 Skill | 仅 id/name/description 的可用索引 |
+| L3 dynamicMount | 已加载，未关联 glob 文件 | 按需完整指令 |
+| L4 spatial | 已加载且有 glob 文件关联 | 与文件生命周期关联的指令 |
 
-    /** Subagent 委托 */
-    supportsSubagent?: boolean;
-    subagentRole?: string;
-}
+语义匹配实际是启发式：先 triggerPatterns 正则（无效表达式跳过），再英文式分词的 description/message 至少两个不同词重叠，再 openFiles glob。它不是 embedding 检索，也不代表稳定的中文语义召回。自动匹配和 glob 挂载跳过 disableModelInvocation。
+
+Glob matcher 支持 `*`、`**`、`?`、`{a,b}`。mountByGlob 记录 skillId 对应文件集合并标记 loaded；关闭最后一个匹配文件时卸载并清理所注册工具。当前方法属于服务能力，编辑器 open/close 自动接线尚未完成。
+
+旧文档中的 ContextManager/P0–P4、固定 4000 token 门控和 applyL3LLMSummarize 已不在当前执行链。当前 ContextAssembler 接受 skillsPrompt；FlowNodeBinder 显式解析 capabilityPolicy/节点 skillIds，排除 disabled/disableModelInvocation 定义，将已选技能正文、Compact Instructions 和工具 ID 合并到节点配置。关键规则以独立 system 消息进入 Task input，沿用逐轮裁剪的 system 保护；systemPromptPolicy=none 仍不注入任何系统提示。app-shell 的 resolveSessionContext 调用 buildSkillPromptContext：刷新来源后将 L2 序列化为仅 id/name/description 的索引，将 L3/L4 已加载定义的正文、支持文件和关键规则合入 session-skill 块；L1 不注入。ContextAssembler 持久保存 project/session-skill/skill-index 系统来源，直接聊天及聊天内 Flow 消费同一快照。未加载正文不进入索引，构建失败不提交新 Task，工具白名单不因此扩大。L2 索引默认最多 8192 UTF-8 字节（包含提示头和 JSON），按 priority/id 排序保留完整元数据条目并报告 omitted 数量；过大条目跳过，仍可容纳后续较小条目。buildSkillPromptContext.indexByteLimit 可调整，0 禁用，非法值在读取/加载前拒绝。ContextAssembler 总预算不足时先丢弃 skill-index，再裁剪历史；规则仍受保护。字节上限不是模型 token 精确上限，逐轮 Agent 裁剪仍保留已进入 Task 的 system 消息；新运行将当前用户消息传入匹配器，按 priority/id 顺序加载启用且非静默、非 action 的候选：autoLoad=true 或启发式匹配命中。成功后用 Session shared CAS 合并 loaded ID，持久化失败卸载本次候选并终止提交；此前成功保存的候选仍保留。自动与显式 Effect 加载共用 rememberLoadedSkill。运行中索引更新及 L4 编辑器事件仍须接线；load_skill 的正文已通过持久工具输出进入下一次调用。成功加载的 Effect 还快照该 Skill 已注册且 enabled 的工具定义及 external 分类，Agent 下一轮只合并 allowedToolIds 声明范围内的定义，保留原节点同名定义的优先级。Flow 从节点 capabilities 传递此范围，直接聊天从 capabilityPolicy.toolIds 传递并遵守 WebSearch 开关。未提供 allowedToolIds 的旧 Task 不扩展工具列表。动态外部工具沿用 approval=external 的审批；快照不授予执行权限，真正调用仍经过 Session 工具服务与资源授权。
+
+## 5. 文件格式与已解析字段
+
+```text
+_agent/skills/review/
+  SKILL.md
+  reference.md
+  template.md
+  examples/
 ```
-
-### 2.2 Skill 类型 (SkillType)
-
-| 类型 | 执行方式 | Prompt 注入 |
-|------|---------|------------|
-| `prompt` | 直接注入 `instructions`，无工具 | P3 自动注入（无需 `load_skill`） |
-| `shell` | `spawn('sh', ['-c', command])` + `{{arg}}` 模板 | P4 渐进式 → `load_skill` → 工具注册 |
-| `http` | `fetch(endpoint, { body })` | P4 渐进式 → `load_skill` |
-| `mcp` | MCP 协议 | P4 渐进式 → `load_skill` |
-| `builtin` | 引用已注册工具 | P4 渐进式 → `load_skill` |
-| `custom` | 用户自定义 | P4 渐进式 → `load_skill` |
-
-### 2.3 辅助类型
-
-```typescript
-interface CompactSection {
-    marker: string;        // 区域标题
-    redLines: string[];    // [红线] 前缀的关键规则
-    rawContent: string;    // 原始 Markdown
-}
-
-interface SkillCorrectionLog {
-    path: string;          // 例: "docs/agent-corrections.md"
-    enabled: boolean;
-}
-
-interface SkillGlobPattern {
-    pattern: string;       // 例: "src/controllers/*.ts"
-    autoMount: boolean;    // 默认 true
-    autoUnmount: boolean;  // 默认 true
-}
-
-interface SkillRouteLayer {
-    silent: SkillDefinition[];        // L1: action skills
-    index: SkillDefinition[];         // L2: unloaded reference
-    dynamicMount: SkillDefinition[];  // L3: loaded reference
-    spatial: SkillDefinition[];       // L4: glob-mounted
-}
-
-interface SkillMatchContext {
-    openFiles?: string[];
-    cwd?: string;
-    recentUserMessages?: string[];
-}
-```
-
----
-
-## 三、ISkillService 接口
-
-> 定义在 `packages/llm-common/src/skills/skill-service.ts`，由 `SkillDeviceDriver` 实现。
-
-```typescript
-interface ISkillService {
-    // ── 生命周期 ──
-    listSkills(): SkillDefinition[];
-    getSkill(id: string): SkillDefinition | undefined;
-    getSkillNames(): string[];
-    loadSkill(id: string): Promise<SkillLoadResult>;
-    unloadSkill(id: string): Promise<void>;
-    getLoadedSkills(): SkillDefinition[];
-    getUnloadedSkills(): SkillDefinition[];
-    autoDetectSkills(prompt: string): string[];
-
-    // ── CRUD ──
-    saveSkill(skill: SkillDefinition): Promise<void>;
-    deleteSkill(id: string): Promise<void>;
-    onChange(listener: () => void): () => void;
-
-    // ── 四层路由 ──
-    getRouteLayers(): SkillRouteLayer;
-    semanticMatchSkills(userMessage: string, context?: SkillMatchContext): string[];
-    mountByGlob(filePath: string): void;
-    unmountByGlob(filePath: string): void;
-    registerFromDirectory(dirPath: string): Promise<SkillLoadResult[]>;
-
-    // ── Compact Instructions ──
-    parseCompactInstructions(skillId: string): ParsedCompactInstructions;
-    getCompactInstructions(): string;
-
-    // ── 作用域管理 ──
-    setCwd(cwd: string): Promise<void>;
-    getScopedSkills(): SkillDefinition[];
-    refreshScopedSkills(): Promise<SkillLoadResult[]>;
-}
-```
-
----
-
-## 四、触发策略：两大 Skill 类型
-
-### 类型 A：参考型技能 (Reference Skill)
-
-自动按需加载。通过语义匹配、globs、triggerPatterns 触发。
-
-```yaml
-# _agent/skills/rest-api/SKILL.md
----
-name: rest-api-guidelines
-description: REST API 设计规范
-trigger-strategy: reference
-globs: ["src/controllers/*.ts", "src/api/*.ts"]
----
-# REST API 设计规范
-...
-```
-
-- ✅ 进入 L2 索引层（id + description，~50-100 token）
-- ✅ 语义匹配命中后自动加载到 L3（完整 instructions）
-- ✅ globs 匹配文件打开时挂载到 L4（空间联动）
-
-### 类型 B：行动型技能 (Action Skill)
-
-纯手动命令触发——连 description 都不进入主上下文。
-
-```yaml
-# _agent/skills/deploy/SKILL.md
----
-name: deploy-staging
-description: 部署到 Staging 环境
-trigger-strategy: action
-disable-model-invocation: true
----
-# 部署步骤
-1. 确认分支...
-```
-
-- ❌ 不进入系统 Prompt（L1 静默层，0 token）
-- ❌ LLM 无法通过 `load_skill` 加载
-- ✅ 用户通过 `/sk-deploy-staging` 显式调用
-
----
-
-## 五、四层路由拦截机制
-
-各层级对 Token 消耗的影响：
-
-```
-┌──────────────────────────────────────────────┐
-│ L1 静默层                                      │
-│ action + disableModelInvocation               │
-│ 完全不进入 Prompt → 0 Tokens                    │
-├──────────────────────────────────────────────┤
-│ L2 索引层                                      │
-│ unloaded reference skills                    │
-│ 仅 id + description → ~50-100 Tokens/skill    │
-├──────────────────────────────────────────────┤
-│ L3 动态挂载层                                   │
-│ loaded reference skills (load_skill / 语义)    │
-│ 完整 instructions → 按需                       │
-├──────────────────────────────────────────────┤
-│ L4 空间联动层                                   │
-│ glob-mounted skills                          │
-│ 完整 instructions + 动态回收                    │
-└──────────────────────────────────────────────┘
-```
-
-### System Prompt 构建 (ContextManager)
-
-```
-P0: Agent systemPrompt / core identity       ← 始终通过
-P1: 环境信息 (OS / CWD / Time / Node)          ← 始终通过
-P2: L3 动态挂载层 — loaded skills 完整 instructions
-P3: L4 空间联动层 — glob-mounted skills 完整 instructions
-P4: L2 索引层 — unloaded reference skills id+description
-    预算门控: systemPromptBudgetTokens = 4000
-    P0 始终通过，其余按 length/4 估算超出则丢弃
-```
-
-### 路由实现 (`getRouteLayers()`)
-
-```typescript
-// 位于 SkillDeviceDriver
-getRouteLayers(): SkillRouteLayer {
-    const all = this.getScopedSkills(); // 仅当前作用域可见
-
-    for (const s of all) {
-        if (s.disableModelInvocation) → silent    // L1
-        else if (isGlobMounted && isLoaded) → spatial // L4
-        else if (isLoaded) → dynamicMount           // L3
-        else → index                                 // L2
-    }
-}
-```
-
-### 语义匹配 (semanticMatchSkills)
-
-优先级顺序：
-1. **triggerPatterns** — regex 匹配（向后兼容）
-2. **关键词重叠** — description 中 ≥2 个关键词命中 → 匹配
-3. **Globs** — `openFiles` 中任意文件匹配 `skill.globs` → 匹配
-
----
-
-## 六、作用域系统
-
-### 6.1 作用域层级 (SkillScopeLevel)
-
-```
-vfs        全局 VFS 技能              → 始终可见
-global-fs  项目根 _agent/skills/      → 始终可见
-parent-fs  祖先目录 _agent/skills/    → 子目录继承
-local-fs   当前目录 _agent/skills/    → 本级独有
-```
-
-### 6.2 继承规则
-
-```
-/project/                          项目根          _agent/skills/ → global-fs
-├── src/                           src 目录        _agent/skills/ → parent-fs
-│   └── controllers/
-│       ├── _agent/skills/         controllers/    _agent/skills/ → parent-fs
-│       └── api/
-│           └── _agent/skills/     api/            _agent/skills/ → local-fs
-│
-│   CWD = /project/src/controllers/api/ 时可见:
-│     VFS (始终) + global-fs (始终) + controllers (parent-fs) + api (local-fs)
-│
-│   CWD = /project/src/ 时可见:
-│     VFS (始终) + global-fs (始终) + src (parent-fs)
-│     ❌ controllers 的 skills 不可见 (不在祖先链)
-│     ❌ api 的 local-fs 不可见 (local 不向上传递)
-```
-
-### 6.3 可见性判断
-
-```typescript
-// SkillDeviceDriver.isSkillInScope()
-function isSkillInScope(skill: SkillDefinition): boolean {
-    const level = skill.scopeLevel;
-    if (!level || level === 'vfs' || level === 'global-fs') return true;
-
-    if (level === 'local-fs') {
-        // 仅当 CWD 精确匹配 scopeRoot 时可见
-        return cwd === scopeRoot;
-    }
-
-    // parent-fs: scopeRoot 是 CWD 的祖先
-    return cwd.startsWith(scopeRoot + '/') || cwd === scopeRoot;
-}
-```
-
-### 6.4 CWD 变更流程
-
-```
-ContextManager.initSession(cwd)
-  → skillService.setCwd(cwd)
-    → findProjectRoot(cwd)        // 向上查找含 _agent/ 的根目录
-    → buildScopeEntries(root,cwd) // 构建项目根→祖先→CWD 继承链
-    → refreshScopedSkills()
-      → 卸载失效 scopeRoots 的 skills
-      → 扫描新 scopeRoots 的 _agent/skills/
-      → 按 scopeLevel 标记 skill
-      → notifyChange() → ContextManager 重建 system prompt
-```
-
----
-
-## 七、文件系统 Skill 格式
-
-### 7.1 目录结构
-
-```
-_agent/skills/<skill-name>/
-├── SKILL.md           # 必需 — YAML frontmatter + Markdown instructions
-├── template.md        # 可选 — 输出模板 (填空题比让 LLM 生成更省 Token)
-├── reference.md       # 可选 — 按需加载的背景知识
-└── examples/
-    └── good-spec.md   # 可选 — 优秀示例 (少样本学习)
-```
-
-### 7.2 SKILL.md 格式
 
 ```markdown
 ---
-name: rest-api-guidelines
-description: 当创建、修改 REST API 时触发
+name: review
+description: Review API changes
 trigger-strategy: reference
-globs: ["src/controllers/*.ts"]
 disable-model-invocation: false
+globs: ["src/**/*.ts"]
 references: ["reference.md"]
 template: template.md
-correction-log: docs/agent-corrections.md
 priority: 30
+task-program:
+  kind: skill.review
+  version: "1"
 ---
+# Review instructions
+Check the changed API.
 
-# REST API 设计规范
-(长篇指导原则，允许在压缩时被丢弃)
-
-## Compact Instructions (压缩保留区)
-- [红线] 所有 API 路径必须以 `/api/v{version}/` 开头
-- [红线] 错误响应必须包含 `error_code` 字段
-- [红线] 不得在 URL 中暴露内部 ID
+## Compact Instructions
+- [红线] Preserve the authorization boundary.
 ```
 
-### 7.3 正向映射
+Tauri 解析器读取 name/description、trigger-strategy、disable-model-invocation、globs、references、template、priority、subagent.role/model 和合法 task-program。name 规范化为小写 ID；正文提取 Compact Instructions 后存入 instructions。reference 对应 autoLoad=true，action 对应 false；是否静默仍以 disable-model-invocation 为准，单独设置 action 不自动禁用模型调用。
 
-| YAML key | SkillDefinition 字段 |
-|----------|---------------------|
-| `name` | `id`, `name` |
-| `description` | `description` |
-| `trigger-strategy` | `triggerStrategy`, `autoLoad` (reference → true) |
-| `disable-model-invocation` | `disableModelInvocation` |
-| `globs` | `globs` |
-| `references` | `referencePaths` |
-| `template` | `templatePath` |
-| `correction-log` | `correctionLog.path` |
-| `priority` | `priority` |
-| `subagent.role` | `subagentRole`, `supportsSubagent` (true) |
+type 当前固定为 prompt、tools/triggerPatterns 为空。scopeLevel/scopeRoot/fsRoot/source 由来源填充。Tauri 解析器保存 correction-log 的 path、enabled=true 和固定 projectRoot，避免嵌套 Skill 错把局部作用域当项目根；subagent.model 保存为 subagentModel，已接入显式 Flow 委派子模板的模型默认值。reference/template 在显式加载 Skill 时通过 Session 文件能力读取，不能把宿主绝对 fsRoot 自动当作可访问的 Session 虚拟路径。
 
-解析时自动提取：
-- `## Compact Instructions` → `compact.redLines` + `compact.rawContent`
-- `scopeLevel` + `scopeRoot` → 由扫描目录的 `buildScopeEntries()` 填入
+## 6. 压缩保护、修正日志与委派
 
----
+compact-extractor 从 `## Compact Instructions` 到下一个二级标题提取 rawContent，解析 `[红线]` 列表，并返回不含该区块的 body。getCompactInstructions 只汇总当前作用域内、已加载、enabled 且允许模型调用的 Skill，避免未选中或静默技能借压缩规则进入上下文。
 
-## 八、Compact Instructions (压缩保护)
+成功的 load_skill 工具 Effect 由可信 adapter 从当前 Session 已加载、允许模型调用的定义提取 `compact.rawContent`，写入结果的 `skillContext`。Durable Agent 将其保存为按 Skill ID 替换的状态快照，每轮在裁剪后的 messages 前注入关键规则；普通工具返回的同名字段由 adapter 剥除。规则不依赖旧 tool message 继续存在，checkpoint 重放沿用保存内容；同一 Skill 再次加载可以更新快照。此路径不做语义摘要，也不自动将所有 catalog 规则注入。
 
-长时间对话后系统进行"历史压缩"释放 Token，为防止关键规则被丢弃，引入保护区块。
+Flow 与直接聊天初始化选定 Skill 的关键规则已进入 system 消息。直接聊天经 AgentResolver 获取 capabilityPolicy.skillIds 中的配置定义，排除 disabled/disableModelInvocation，将正文和关键规则作为 ContextAssembler 的 skill 来源块写入持久 Task input；空选择不读取 catalog，读取失败在提交 Task 前终止。初始化预算保护规则系统块、允许先移除 skill-index；逐轮裁剪保留已进入 Task 的 system 消息，预算是软上限。初始化工具激活与独立 skill.load effect 的统一上下文接线仍待完成。app-shell 通过 resolveSessionContext 从同一 Session SkillService 的 getAgentMdContent 获取项目规则；ContextAssembler 保存为 project/system 块，直接聊天和聊天内 Flow 的 Task input 均消费该快照。FlowNodeBinder 在重建节点身份消息时保留 project/session-skill/skill-index 块，systemPromptPolicy=none 显式跳过。规则系统块沿用预算及逐轮裁剪保护，没有另建旧 P0.5 路由器；独立 DAG 命令入口也经同一 resolveSessionContext 获取快照，由执行器在 submit 开始时复制该快照，并在每个 Agent 实例创建时注入，覆盖静态、Composite 展开、graph patch 和委派子节点；没有新用户消息时仅使用空消息匹配及 autoLoad 规则。聊天内 Flow 同样从 ContextSnapshot 提取这三个来源交给执行器；已存在的相同系统消息不重复注入，none 不注入，子节点能力仍取自己的声明。独立入口通过宿主 bindNode 调用 bindStandaloneFlowNode，复用 AgentResolver 和现有身份/模型/Skill/委派模板绑定；不创建聊天历史，节点输入或已有 messages 作为任务正文。静态及 Composite 展开节点、预声明委派模板已解析；独立入口与聊天内 Flow 的运行中 graph patch 节点也调用宿主身份绑定器。执行器先验证原始整批 patch，再异步解析全部新增节点、复验并发布；失败时不提交本批新增节点。动态绑定继承产生节点所属 Flow 的默认身份层：编译产物按节点保存默认配置，Composite 展开后保留子 Flow 作用域，执行器冻结并传给 patch/委派后代；保留新增节点原 capabilities、budget 和委派调度策略，工具目录仍只取原 capabilities，避免身份定义扩权；动态节点内委派模板的 resolvedTemplate 已保留解析后的身份消息与模型，并递归限定各级 capabilities/toolIds 为原模板声明，未声明能力时为空。身份解析不能新增 delegation 或旧 subtasks 委派。解析失败沿用现有绑定器的日志与回退语义，未实现严格版本固定。关键规则已进入某 Task 后的快照保留，不等于授予相应工具后续执行权限，也不等于完整 Skill 版本冻结。
 
-### 标记格式
+SkillDeviceDriver.loadSkill 在激活前读取声明的 referencePaths、templatePath 和 enabled correctionLog，并把带来源标题的内容附到 SkillLoadResult.instructions。runtime 只注入当前 Session 的 readFile 能力；缺少能力、文件不可读、路径非法或内容超限均明确加载失败。references/template 相对 fsRoot，correctionLog 相对其显式 root（缺省 scopeRoot）；所有根必须是当前 Session 的虚拟绝对路径。禁止绝对引用、协议、反斜杠、控制字符及 ./.. 段，先校验全部路径再读取。最多 20 个文件、单文件 64 KiB、合计 256 KiB（UTF-8），大小检查发生在读取后，不宣称物理 IO 预先限流。
 
-```markdown
-## Compact Instructions (压缩保留区)
-- [红线] 必须捕获所有数据库连接异常
-- [红线] 不得修改 `migrations/` 目录的历史文件
-```
+读取期间 cwd/来源 revision 变化或服务关闭会阻止激活，防止迟到内容安装旧工具。load_skill 已将这些内容经工具输出交给下一轮模型，并随 Effect 结果持久保存；它们作为普通指令随历史参与裁剪，只有单独的 Compact Instructions 走关键规则持久保护。没有自动追加修正日志或新的文件授权。Tauri 来源现已使用同一 Session 视图，未挂载的宿主路径仍不可直接读取。
 
-### 提取逻辑
+supportsSubagent/subagentRole 仍不自动触发委派，没有 getDelegationHint/buildSubagentSystemPrompt 自动委派链。Flow 子模板显式 skillIds 中 enabled、允许模型调用且 supportsSubagent 的 Skill 可用 subagentModel 提供模型默认值；优先级为子节点显式模型 > 引用 Agent 模型 > 选定 Skill 子模型 > Flow/Session 默认模型。父节点、仅由外层继承的 Skill 不采用这个子模型；多个选定 Skill 的模型冲突且没有更高优先级模型时拒绝编译。现有 Flow 委派组负责执行与权限约束；parent 上下文缺省不继承工具交换时，同时移除工具调用与结果、保留 assistant 正文，避免子任务收到悬空调用。这不是 load_skill 自动创建 TaskGroup。持久多步 Skill 已有 `createSkillTaskSpec(skill, args)`：要求 taskProgram.kind/version，返回默认 deferStart 的 Kernel TaskSpec，输入为 `{ skillId, arguments }`，标签含 skillId。宿主还须注册对应 Program 并授予所需资源。它不会解析任意 Markdown 为可恢复程序。
 
-`compact-extractor.ts` → `extractCompactInstructions()`:
-1. 搜索 `## Compact Instructions` 标题
-2. 提取到下一个 `##` 或文件结尾
-3. 解析 `[红线]` 前缀行为 `redLines`
-4. 返回分离的 `body`（不含 compact section）和 `compact` 区块
+## 7. UI 与执行入口
 
-### 压缩时注入
+SkillSettingsEditor 提供支持文件的路径输入：Session 虚拟 fsRoot、逐行 referencePaths、templatePath，以及 correctionLog 的项目根、路径和独立启用开关。手动保存和表单 YAML 自动保存使用同一解析函数；自动保存保留未显示的工具绑定、触发规则及其他定义字段。输入路径不代表创建挂载或授予权限；当前是文本配置入口，没有文件浏览选择器。
 
-`ContextManager.applyL3LLMSummarize()`:
-```
-"Summarize this conversation. Preserve: ...\n\n"
-+ "Critical rules that MUST be preserved:\n"
-+ skillService.getCompactInstructions()
-```
+SlashCommandPlugin 为 enabled 配置 Skill 提供 `/sk-<id>`。SkillInvocationParser 解析 --key value、Markdown 文件引用、@file、glob 和自由文本；提供 buildActionSkillMessage/buildSkillPrompt 等辅助函数。解析器不是执行器，不能据此声称所有 reference 调用都会走 load_skill 或所有工具类型都已支持。
 
----
+Skill 上下文组装前，宿主读取 Kernel Session shared 的 kernel-adapters.skills.loaded，并经 sessions.restore 恢复当前来源定义；Effect 路径使用同一恢复入口。每个活动作用域只恢复一次，并发请求共享恢复过程；销毁/重建阻止旧结果发布。非字符串或空 ID 等损坏记录拒绝，当前禁止模型调用的定义也拒绝；缺失、禁用、越界和支持文件错误继续走 loadSkill 校验。活动作用域内显式 unload 不因每轮读取旧记录而重载，服务层 unloadSkill 仍只修改活动作用域；需要跨重建保留卸载结果时使用 skill.unload Effect。
 
-## 九、修正日志系统 (Correction Log)
+skill.load effect 验证 skill ResourceHandle grant，按实际 sessionId 解析 service，加载成功后保存 ID。tool.call 经带 skillLoaderArgKey 的工具成功加载后也保存同一记录；失败不登记加载。新 Session service 恢复这些 ID 时再次执行加载检查。Session 加载表保存的是身份；每次 Effect 结果另含本次指令快照。已有工具结果不会因后续 Skill 编辑而改变；重新加载及 Session 重建仍读取当前定义，完整版本固定语义仍需实施和验收。
 
-AI 犯错时的自适应进化机制。
+`skill.unload@1` 要求 skill ResourceHandle execute grant 和 Session shared state，先 CAS 移除目标 loaded ID，再调用当前作用域 unloadSkill。已删除或变为静默的定义仍可清理，因为该 Effect 不先恢复 loaded 列表。持久写入失败不卸载；写入成功后本地清理失败可重试，重复删除不新增 shared revision。作用域重建不再按旧 ID 恢复它。卸载不删除历史 Task/Effect 指令，也不设置永久禁用：之后显式加载或新运行自动匹配仍可重新加载。通用 Agent 工具 `unload_skill` 已注册到 KernelAdapters 工具目录，通过 tool.call 的 tool execute grant 执行；可信工具 metadata 的 skillUnloaderArgKey 指定 ID 参数，Effect 在调用活动作用域卸载处理器前 CAS 删除持久身份，存储失败不卸载。此工具绕过旧加载列表恢复，可清理已经删除的定义；直接调用非 durable 工具服务只卸载活动状态。工具可见性/调用仍受原 Task 工具白名单约束，注册目录不扩大授权。已有 Task 的历史指令和工具定义快照不被改写。聊天输入区的 Skill 面板已接入 SessionSkillControls：显示当前 Session 的持久或活动已加载技能，也保留定义已删除的加载 ID；取消勾选先写 Session shared，再清理当前作用域，成功重新读取列表，失败恢复勾选并显示错误。宿主 UI 控制直接使用 Session shared state，不伪装为 Agent Effect；不新增模型权限，也不删除技能定义。面板同时列出当前作用域已知的可用技能，勾选经 SessionSkillControls.load 加载并持久保存；disabled、disableModelInvocation 和 triggerStrategy=action 的未加载项禁用勾选，已加载项仍可卸载。新加载保存失败会撤销本次活动加载；之前已加载的项不会因此被卸载。同一运行时的 SessionCapabilityRegistry 共享按 Session 的操作队列，UI 的列表/加载/卸载、skill.load/unload Effect、带 Skill loader/unloader metadata 的 tool.call 执行及 reconcile、新运行的自动加载/上下文组装均接入。普通工具只在恢复 Skill 状态时排队，执行本身不占队列；不同 Session 独立。失败释放队列。该队列为当前宿主进程内协调，不是跨进程持久锁；直接调用原始 SkillService 或独立自行装配的 Effect 不自动加入。
 
-### 日志格式 (`docs/agent-corrections.md`)
+## 8. 剩余有效任务与验证
 
-```markdown
-## [2026-05-01] Correction
-- **Mistake:** 忽略了事务边界
-- **Correction:** 先检查事务状态再执行写操作
-- **Rule:** 所有写操作必须包裹在事务中
-```
+- 完成运行中索引更新、L4 编辑器事件及新运行的 L2 索引与 L3/L4 已加载正文已接入 ContextAssembler。
+- 补齐初始化技能的工具激活、独立 skill.load effect；直接聊天与聊天内 Flow 已注入项目规则和所选技能关键规则，load_skill 工具路径已保存并重注入关键规则快照。
+- 完成运行中项目文件 watch、L4 文件关联恢复和 Web/CLI 项目来源装配；新会话运行前刷新、Tauri 来源、支持文件读取与挂载变更已使用 Session 文件上下文。继续拒绝未隔离的原生执行。
+- 完成 Skill 自动委派到统一 TaskGroup 的编译接线，以及可复核的技能版本恢复语义。
 
-### 配置
+本次修补覆盖 Session 文件系统定义隔离、跨目录加载拒绝、压缩规则过滤、glob 禁用标记、迟到扫描与 dispose，以及 skill.load 禁止模型调用标记。测试在 `kernel-adapters/src/skill/skill-device-driver.test.ts`、`effects/effect-adapters.test.ts`，运行结果见 [核验清单](implementation-audit.md)。原有 skill-task 测试验证 TaskSpec 编译与真实 Kernel 执行。
 
-```yaml
-# SKILL.md frontmatter
-correction-log: docs/agent-corrections.md
-```
+持久 loaded ID 更新与作用域恢复使用同一严格解析：兼容缺失/null 为空列表，其余值必须为非空白字符串数组。加载和卸载遇到损坏记录均报错，不过滤后覆盖原数据。工具卸载在无 execute grant、被禁用、ID 无效或缺少 Session shared state 时不写记录、不调用本地卸载；持久删除后本地清理失败可重试，不再次写入已删除的 ID。
 
-### Prompt 注入
+队列包装器在 tool.call 执行/reconcile 查询可信 metadata 前验证 tool execute grant，防止未授权调用先打开 Session 文件/技能作用域。排队的 Skill 变更在开始执行前再次检查 abortSignal，取消后不执行原 Effect；后续操作仍可继续。
 
-`injectCorrectionsToPrompt()` 在当前 scope 的 skill 加载后，向 system prompt 插入：
-```
-[Correction Log] Prior mistakes and corrected behavior for <skill-name>:
-See docs/agent-corrections.md for the full history.
-Apply these rules consistently.
-```
+Session 作用域销毁会立即使旧 Skill 队列失效；等待项开始时检查所属队列，不能在关闭后重新获取作用域或修改持久记录。关闭过程中拒绝新 Skill 操作，关闭完成后新调用使用新队列。运行时整体销毁永久关闭该 registry 的操作队列。已进入执行的操作不由此机制回滚，继续依赖取消信号、SkillDriver 的作用域/激活版本校验和持久写入边界；此机制不代表已经开始的 I/O 与关闭原子化。
 
----
 
-## 十、Subagent 协同
+### Tauri 与 CLI 共用文件来源
 
-标记 `supportsSubagent: true` 的 skill 可委托给子代理执行，避免主会话被高消耗任务污染。
+`kernel-adapters/skill/session-file-source.ts` 的 SessionFileSkillSource 统一处理 `_agent/skills`、项目 AGENT.md、frontmatter 和支持文件路径；仅通过授权 ToolVFSContext 访问，YAML parser 由宿主注入。TauriSkillSource 现在是薄封装；CLI createCliRuntime 也通过 skillSourceForSession 装配该类，工作区 Skill 可以由持久 skill.load Effect 加载并登记身份。
 
-### 配置
-
-```yaml
-# SKILL.md frontmatter
-subagent:
-  role: security-reviewer
-  model: claude-sonnet-4-6
-```
-
-### 委托提示
-
-```typescript
-// getDelegationHint() → 在 loadSkill 结果中注入
-"[Subagent Available] This skill can delegate to a `security-reviewer` subagent.
- For computationally intensive tasks, prefer delegate_task."
-```
-
-### 子代理 System Prompt
-
-`buildSubagentSystemPrompt()`:
-```
-You are a specialized subagent: security-reviewer
-
-## Instructions
-<skill.instructions>
-
-## Critical Rules
-- [红线] ...
-```
-
----
-
-## 十一、架构集成
-
-### 11.1 包依赖
-
-```
-llm-common → Skill 类型与 ISkillService 接口
-kernel-adapters  → SkillDeviceDriver, 内置 Skill 工具, skill 加载/匹配
-device-llm → LLMDeviceDriver (VFS 技能持久化)
-app-shell   → bootstrap.ts 装配 + 桥接
-llm-ui      → SkillInvocationParser (slash 命令解析)
-```
-
-### 11.2 启动流程
-
-```
-initApp()
-  ├─ createVFS()                   → VFS 文件系统
-  ├─ LLMDeviceDriver.init()        → 加载 LLMSkill[] from VFS
-  ├─ createKernel()               → SkillDeviceDriver (空 registry)
-  ├─ syncSkillsToKernel()         → VFS → kernel (LLMSkill → SkillDefinition)
-  ├─ skillService.setCwd(cwd)      → 扫描 _agent/skills/ (project root → CWD)
-  │   ├─ findProjectRoot(cwd)
-  │   ├─ buildScopeEntries(root, cwd)
-  │   └─ refreshScopedSkills()
-  └─ llmDriver.onChange()          → 后续 VFS 变更自动同步
-```
-
-### 11.3 请求路径
-
-```
-用户请求 → ContextManager.autoDetectAndLoadSkills()
-  ├─ 跳过 L1 (disableModelInvocation)
-  ├─ autoLoad == true → markSkillLoaded
-  └─ semanticMatchSkills() → markSkillLoaded
-
-ContextManager.buildSystemPrompt()
-  └─ skillService.getRouteLayers()
-      └─ getScopedSkills()             ← 仅当前作用域
-          ├─ L1 → silent (不输出)
-          ├─ L3 → P2 (完整 instructions)
-          ├─ L4 → P3 (完整 + spatial label)
-          └─ L2 → P4 (id + description)
-```
-
-### 11.4 Slash 命令调用
-
-```
-/用户输入 → SkillInvocationParser.parseSkillArgs()
-  ├─ L1 action skill: 直接注入 instructions 到用户消息
-  └─ L2-L4 reference skill: 通过 load_skill 工具加载
-```
-
-### 11.5 VFS Skill 同步保护
-
-`syncSkillsToKernel()` 删除 VFS 中被移除的 Skill 时：
-- 检查 `source === 'filesystem'` → 跳过（文件系统 Skill 不受 VFS 同步影响）
-- `source === 'vfs'` 或 undefined → 正常删除
-
----
-
-## 十二、Glob 空间联动 (L4)
-
-### 语法
-
-支持：`*` (单级), `**` (多级), `?` (单字符), `{a,b}` (枚举)
-
-```yaml
-globs:
-  - "src/controllers/*.ts"       # 单级匹配
-  - "src/**/*.handler.ts"        # 递归匹配
-  - "src/api/{v1,v2}/*.ts"       # 枚举
-```
-
-### 生命周期
-
-```
-文件打开 → mountByGlob(filePath)
-  └─ matchGlob(filePath, skill.globs)
-      └─ matched → globMounted.set(skill.id, new Set([filePath]))
-                   loaded.add(skill.id)
-
-文件关闭 → unmountByGlob(filePath)
-  └─ globMounted.delete(filePath)
-      └─ 若该 skill 无更多匹配文件 → loaded.delete(skill.id)
-```
-
----
-
-## 十三、关键文件索引
-
-### 接口 & 类型
-
-| 文件 | 内容 |
-|------|------|
-| `packages/llm-common/src/skills/skill-types.ts` | `SkillDefinition`, `SkillRouteLayer`, `CompactSection`, 所有辅助类型 |
-| `packages/llm-common/src/skills/skill-service.ts` | `ISkillService` 接口 |
-| `packages/llm-common/src/skills/fs-skill-types.ts` | `SkillFrontmatter`, `FSSkillDirectory`, `ScopeEntry` |
-
-### 运行时
-
-| 文件 | 内容 |
-|------|------|
-| `packages/kernel-adapters/src/skill/skill-device-driver.ts` | `SkillDeviceDriver` — 实现 `ISkillService` + 四层路由 + 作用域 |
-| `packages/kernel-adapters/src/effects/skill-load-effect.ts` | Skill 加载 Effect — Kernel 侧执行 |
-| `packages/kernel-adapters/src/tool/load-skill.ts` | `load_skill` 工具 — 拒绝 L1 action skills |
-| `packages/kernel-adapters/src/skill/skill-task.ts` | Skill 任务程序 — 系统 Prompt 构建 + 压缩保护 |
-| `packages/kernel-adapters/src/skill/compact-extractor.ts` | Compact Instructions 提取 + 聚合 |
-| `packages/kernel-adapters/src/skill/glob-matcher.ts` | Glob → RegExp 匹配器 |
-| `packages/device-llm/src/device/skill-manager.ts` | VFS 技能同步 + SkillManager |
-| `packages/app-shell/src/bootstrap.ts` | `initApp()` + `syncSkillsToKernel()` + 初始 CWD 设置 |
-| `packages/llm-ui/src/components/input/SkillInvocationParser.ts` | Slash 命令解析，支持 L1 action skill |
-
-### 持久化
-
-| 文件 | 内容 |
-|------|------|
-| `packages/device-llm/src/device/llm-device-driver.ts` | `LLMDeviceDriver` — VFS 技能 CRUD |
-| `packages/app-settings/src/engine/SkillsEngine.ts` | Skills 设置 UI Engine |
-| `packages/llm-ui/src/editors/SkillSettingsEditor.ts` | Skill 编辑器 UI |
+这统一了发现与加载来源，不表示 CLI 已与桌面端完全统一新运行上下文、自动匹配、加载状态重建或 UI 生命周期；这些装配仍需继续核验。

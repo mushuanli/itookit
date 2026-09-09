@@ -102,4 +102,47 @@ describe('ContextAssembler', () => {
         expect(result.snapshot.blocks.filter(block => block.kind === 'round')).toHaveLength(1);
         expect(result.messages.at(-1)).toMatchObject({ role: 'user', content: 'pending question' });
     });
+
+    it('keeps the pending prompt when the owning Round is trimmed by the budget', async () => {
+        const { assembler, plan } = await fixture({ tokenBudget: 12 });
+        plan.pendingRoundId = 'r2';
+        plan.pendingUserMessage = { role: 'user', content: 'newer question' };
+        const result = await assembler.assemble(plan, 'run-1', { id: 'agent', version: 'v1' }, ['system']);
+        expect(result.messages.map(message => message.content)).toContain('newer question');
+        expect(result.messages.filter(message => message.content === 'newer question')).toHaveLength(1);
+    });
+
+    it('drops the pending copy only when the owning Round reaches the context', async () => {
+        const { assembler, plan } = await fixture();
+        plan.pendingRoundId = 'r2';
+        plan.pendingUserMessage = { role: 'user', content: 'newer question' };
+        const result = await assembler.assemble(plan, 'run-1', { id: 'agent', version: 'v1' });
+        expect(result.messages.filter(message => message.content === 'newer question')).toHaveLength(1);
+    });
+
+    it('keeps the pending prompt when the owning Round is excluded from context', async () => {
+        const profile: BranchContextProfile = { id: 'p1', revision: 1, createdAt: 1, rules: { r2: { mode: 'exclude' } } };
+        const { assembler, plan } = await fixture({ profile });
+        plan.pendingRoundId = 'r2';
+        plan.pendingUserMessage = { role: 'user', content: 'newer question' };
+        const result = await assembler.assemble(plan, 'run-1', { id: 'agent', version: 'v1' }, ['system']);
+        expect(result.messages.filter(message => message.content === 'newer question')).toHaveLength(1);
+        expect(result.messages.at(-1)).toMatchObject({ role: 'user', content: 'newer question' });
+    });
+
+    it('keeps the pending prompt when the owning Round is summarized', async () => {
+        const content = 'summary text';
+        const artifact: Artifact = {
+            id: 'sum1', nodeRunId: 'r2', outputName: 'summary', type: 'summary',
+            content, contentHash: await hash(content), createdAt: 1,
+        };
+        const profile: BranchContextProfile = {
+            id: 'p1', revision: 1, createdAt: 1, rules: { r2: { mode: 'summary', artifactId: 'sum1' } },
+        };
+        const { assembler, plan } = await fixture({ profile, artifact });
+        plan.pendingRoundId = 'r2';
+        plan.pendingUserMessage = { role: 'user', content: 'newer question' };
+        const result = await assembler.assemble(plan, 'run-1', { id: 'agent', version: 'v1' }, ['system']);
+        expect(result.messages.some(message => message.content === 'newer question')).toBe(true);
+    });
 });

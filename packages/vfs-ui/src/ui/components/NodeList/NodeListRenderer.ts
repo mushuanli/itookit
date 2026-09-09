@@ -9,6 +9,7 @@ import { BaseNodeItem } from './items/BaseNodeItem';
 import { FileItem, FileItemProps } from './items/FileItem';
 import { DirectoryItem, DirectoryItemProps } from './items/DirectoryItem';
 import { createItemInputHTML } from './templates';
+import { isItemReadOnly } from '../../../utils/helpers';
 
 export interface RenderContext {
   confirmDeleteId: string | null;
@@ -84,10 +85,10 @@ export class NodeListRenderer {
       if (!itemInstance) {
         if (item.type === 'file') {
           const props = this.getFileItemProps(item, state, context.confirmDeleteId);
-          itemInstance = new FileItem(item, state.readOnly, props);
+          itemInstance = new FileItem(item, state.readOnly || isItemReadOnly(item), props);
         } else {
           const props = this.getDirectoryItemProps(item, state);
-          itemInstance = new DirectoryItem(item, state.readOnly, props);
+          itemInstance = new DirectoryItem(item, state.readOnly || isItemReadOnly(item), props);
         }
       } else {
         itemInstance.updateItem(item);

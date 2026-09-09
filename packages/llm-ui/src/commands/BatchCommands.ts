@@ -3,7 +3,7 @@
 
 import { SessionCommand, type SessionGroup } from '@itookit/llm-session';
 import { Command } from './Command';
-import { Toast } from '@itookit/ui-common';
+import { copyText, Toast } from '@itookit/ui-common';
 import { extractExecutionOutput } from '../utils/textUtils';
 
 
@@ -70,7 +70,7 @@ export class BatchCopyCommand extends Command<{ ids: string[] }> {
             })
             .filter(Boolean);
 
-        await navigator.clipboard.writeText(content.join('\n\n---\n\n'));
-        Toast.success(`Copied ${ids.length} messages`);
+        if (await copyText(content.join('\n\n---\n\n'))) Toast.success(`Copied ${ids.length} messages`);
+        else Toast.error('Copy failed');
     }
 }

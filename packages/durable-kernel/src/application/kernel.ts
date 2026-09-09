@@ -1,4 +1,4 @@
-import { EventBus, pathUtils, type IFileSystem } from '@itookit/vfs-core';
+import { EventBus, FSError, pathUtils, type IFileSystem } from '@itookit/vfs-core';
 import { EffectRegistry, ProgramRegistry, StorageResolverRegistry, WorkspaceRegistry } from '../ports/registry';
 import type { KernelPlugin, KernelRegistration } from '../ports/plugin';
 import { DurablePoller } from '../runtime/durable-poller';
@@ -7,7 +7,7 @@ import { EffectCleanupRunner } from '../runtime/effect-cleanup';
 import { DefaultSessionHandle } from '../public/session-handle';
 import { DefaultTaskHandle } from '../public/task-handle';
 import { resourceApi } from '../public/resources';
-import { sessionStat } from '../domain/status';
+import { closedSessionStat, sessionStat } from '../domain/status';
 import { ManagedResourceStore } from '../infrastructure/seqfile/managed-resources';
 import {
     createId,
@@ -53,12 +53,24 @@ import type {
     WorkspaceSnapshot,
 } from '../domain/types';
 import { assertDurableValue } from './durability';
+import { KernelError, KernelErrorCode, kernelError } from '../domain/errors';
 import { failureDecision, isTerminalStatus, mergeReport, nextDecision, shouldRetry, transition, validateDecision } from './decision';
 import { activeEffectIds, addEffect, addInteraction, effectControllerKey, effectFailure, executeEffectWithDeadline, isMissingPath, normalizeEffect, type RequiredEffect } from './effect-utils';
 import { assertWorkspace, assertWorkspaceSnapshots, readWorkspaceSnapshots, workspaceContext, workspaceSnapshot } from './workspace-utils';
 import { decisionSideEffects, prepareSpawns } from './actions';
 
-interface KernelEvents { changed: { sessionId: string; taskId?: string }; }
+/**
+ * Why a `changed` notification fired.
+ *
+ * - `structure`: a Task/Session was created, removed, or changed status — views
+ *   that list them (sidebars, task trees) must re-read.
+ * - `content`: a Task's content moved (stream deltas, logs, shared state, context
+ *   commits) without changing what those listings show. Fires many times per
+ *   second while a run streams, so consumers must not re-render on it.
+ */
+export type KernelChangeReason = 'structure' | 'content';
+
+interface KernelEvents { changed: { sessionId: string; taskId?: string; reason: KernelChangeReason }; }
 
 export interface KernelOptions {
     catalog: { fs: IFileSystem; rootPath?: string };
@@ -78,8 +90,17 @@ export class Kernel implements KernelRegistration {
     get resources() { return resourceApi(this.managedResources, {}); }
     resourceApi(sessionId: string, taskId?: string) { return resourceApi(this.managedResources, { sessionId, taskId }); }
     async sessionStat(sessionId: string) {
-        const session = await this.store.sessionRecord(await this.binding(sessionId));
-        return sessionStat(session, session.status === 'closing' && !await this.managedResources.canClose(sessionId));
+        try {
+            const binding = await this.binding(sessionId);
+            const session = await this.store.sessionRecord(binding);
+            // An interrupted removal leaves records without storage; the Session
+            // cannot be open, so report it closed instead of blocking cleanup.
+            if (session.status !== 'closed' && !await binding.fs.driver.exists(binding.rootPath)) return closedSessionStat(sessionId);
+            return sessionStat(session, session.status === 'closing' && !await this.managedResources.canClose(sessionId));
+        } catch (error) {
+            if (isMissingStorage(error)) return closedSessionStat(sessionId);
+            throw error;
+        }
     }
     readonly programs = new ProgramRegistry();
     readonly effects = new EffectRegistry();
@@ -149,7 +170,7 @@ export class Kernel implements KernelRegistration {
 
     async sendTaskMessage(sessionId: string, taskId: string, request: import('../domain/types').TaskMessageRequest) {
         const message = await this.store.sendTaskMessage(await this.binding(sessionId), taskId, request);
-        this.notify(sessionId); this.queueDrain(sessionId);
+        this.notify(sessionId, undefined, 'content'); this.queueDrain(sessionId);
         return message;
     }
 
@@ -392,13 +413,13 @@ export class Kernel implements KernelRegistration {
         sessionId: string, key: string, value: T, options?: SharedStateWriteOptions,
     ): Promise<SharedStateEntry<T>> {
         const entry = await this.store.setShared(await this.binding(sessionId), key, value, options);
-        this.notify(sessionId, options?.taskId);
+        this.notify(sessionId, options?.taskId, 'content');
         return entry;
     }
 
     async deleteShared(sessionId: string, key: string, options?: SharedStateWriteOptions): Promise<boolean> {
         const deleted = await this.store.deleteShared(await this.binding(sessionId), key, options);
-        if (deleted) this.notify(sessionId, options?.taskId);
+        if (deleted) this.notify(sessionId, options?.taskId, 'content');
         return deleted;
     }
 
@@ -447,7 +468,7 @@ export class Kernel implements KernelRegistration {
             authorTaskId: options.taskId, createdAt: Date.now(),
         };
         const result = await this.store.commitContext(await this.binding(sessionId), commit, options);
-        this.notify(sessionId, options.taskId);
+        this.notify(sessionId, options.taskId, 'content');
         return result;
     }
 
@@ -611,7 +632,17 @@ export class Kernel implements KernelRegistration {
     }
 
     async closeSession(sessionId: string, cancelRunning: boolean): Promise<void> {
-        const binding = await this.binding(sessionId);
+        let binding: ResolvedStorageBinding;
+        try {
+            binding = await this.binding(sessionId);
+        } catch (error) {
+            if (isMissingStorage(error)) return;
+            throw error;
+        }
+        // Closing is idempotent: a Session whose storage an interrupted removal
+        // already deleted has nothing to close, and its stale record must not
+        // block the cleanup that follows.
+        if (!await binding.fs.driver.exists(binding.rootPath)) return;
         await this.store.setSessionStatus(binding, 'closing', cancelRunning ? 'cancel' : 'drain');
         if (cancelRunning) {
             const tasks = await this.store.listTasks(binding);
@@ -621,6 +652,40 @@ export class Kernel implements KernelRegistration {
         }
         await this.finishSessionClose(sessionId, binding);
         this.queueDrain(sessionId); this.schedulePoll(sessionId);
+    }
+
+    /**
+     * Delete a Session's Kernel storage and catalog record. Refuses while Tasks are
+     * live or resource cleanup is pending, so a failed close never destroys state;
+     * the host must close the Session first and keep its own records until this
+     * resolves.
+     */
+    async removeSession(sessionId: SessionId, options: { force?: boolean } = {}): Promise<boolean> {
+        let binding: ResolvedStorageBinding;
+        try {
+            // Resolve straight from the catalog: openSession() would pin metadata on
+            // a storage root that an interrupted removal already deleted.
+            binding = await this.store.inspectSessionBinding(sessionId);
+        } catch (error) {
+            if (isMissingStorage(error)) return false;
+            throw error;
+        }
+        const tasks = await this.store.listTasks(binding);
+        const busy = tasks.some(task => !isTerminalStatus(task.status)
+            || Object.values(task.effects).some(effect => effect.cleanupPending));
+        if (busy && !options.force) {
+            throw kernelError(KernelErrorCode.CONFLICT, `Session ${sessionId} still has running Tasks or pending resource cleanup`);
+        }
+        this.stopPoll(sessionId);
+        this.resourcePoller.stop(`session:${sessionId}`);
+        await this.abortFencedReducers(sessionId);
+        await Promise.all([...this.plugins.values()].map(plugin => plugin.onSessionClosed?.(sessionId)));
+        await this.store.removeSession(sessionId, binding);
+        this.storageListeners.get(sessionId)?.();
+        this.storageListeners.delete(sessionId);
+        this.sessions.delete(sessionId);
+        this.notify(sessionId);
+        return true;
     }
 
     private async finishSessionClose(sessionId: string, binding: ResolvedStorageBinding): Promise<void> {
@@ -740,7 +805,8 @@ export class Kernel implements KernelRegistration {
     }
 
     private handlePollError(error: unknown): boolean {
-        if (isMissingPath(error)) return false;
+        // A removed Session can still have an in-flight poll tick; that is not an error.
+        if (isMissingPath(error) || isMissingStorage(error)) return false;
         console.error('Kernel poll failed', error);
         return true;
     }
@@ -913,7 +979,7 @@ export class Kernel implements KernelRegistration {
                 emit: async (event: { type: string; payload?: unknown }): Promise<void> => {
                     if (this.disposed) return;
                     await this.store.appendEvent(binding, task.sessionId, task.id, event.type, event.payload, claim);
-                    this.notify(task.sessionId, task.id);
+                    this.notify(task.sessionId, task.id, 'content');
                 },
                 chargeBudget: (handleId: string, dimension: string, amount: number) =>
                     this.store.chargeBudget(binding, handleId, dimension, amount, claim),
@@ -986,7 +1052,17 @@ export class Kernel implements KernelRegistration {
         return stop;
     }
 
-    private notify(sessionId: string, taskId?: string): void {
-        this.eventsBus.emit('changed', { sessionId, taskId });
+    private notify(sessionId: string, taskId?: string, reason: KernelChangeReason = 'structure'): void {
+        this.eventsBus.emit('changed', { sessionId, taskId, reason });
     }
+}
+
+/**
+ * True when a Session has no Kernel storage left: the catalog entry is gone or
+ * the storage root was deleted by an interrupted removal. Callers must stay
+ * usable in that state so cleanup can be resumed after a restart.
+ */
+function isMissingStorage(error: unknown): boolean {
+    return (error instanceof KernelError && error.code === KernelErrorCode.SESSION_NOT_FOUND)
+        || (error instanceof FSError && error.code === 'ENOENT');
 }

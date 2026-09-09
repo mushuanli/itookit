@@ -32,7 +32,8 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | `@itookit/mdxeditor` | 基于 CodeMirror 6 的 MDX 编辑器（目录 `packages/mdx`）。 |
 | `@itookit/ui-common` | 共享 UI 组件、契约、浏览器工具。 |
 | `@itookit/app-settings` | 设置模块：SettingsEngine、SkillsEngine。 |
-| `@itookit/app-shell` | Bootstrap 装配：`initApp()`、workspace 策略、路由、kernel/VFS/LLM 组装。 |
+| `@itookit/app-core` | 无 UI 应用核心：MindOS profile、RunDefinition、共享 Session 文件/目录服务、Kernel/Adapter/Flow 组合（`createKernelRuntime`）。Web/Tauri/CLI 共用。 |
+| `@itookit/app-shell` | Web/Tauri UI shell：`initApp()`、workspace 策略、路由、Workbench/编辑器装配；依赖 app-core。 |
 | `@itookit/demo` | 演示/示例。 |
 
 ### App 清单

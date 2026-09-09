@@ -9,8 +9,13 @@ export { createUnavailableDirectory } from './files/unavailable-directory';
 export { workspaceRoot } from './files/workspace-paths';
 export { acquireSessionProcessContext } from './files/session-process-context';
 export type { SessionProcessFactory, SessionProcessMount } from './files/session-process-context';
-export { createSessionBrowser, resolveBrowserTarget, taskSummary } from './files/session-browser';
+export { createSessionBrowser, resolveBrowserTarget, taskSummary, taskKeyEvent } from './files/session-browser';
 export type { BrowserTarget, SessionBrowserDependencies } from './files/session-browser';
+export { SessionLifecycleService } from './files/session-lifecycle';
+export type { SessionLifecycleDependencies, SessionLifecycleOptions } from './files/session-lifecycle';
+export { exportSessionBundle, importSessionBundle, isSessionBundle, parseSessionBundle,
+    SESSION_BUNDLE_FORMAT, SESSION_BUNDLE_VERSION } from './files/session-bundle';
+export type { SessionBundle, SessionBundleManifest, SessionAttachmentBundle, SessionExport } from './files/session-bundle';
 export { PrivilegedCommandService } from './kernel/privileged-command-service';
 export type { WorkspaceController } from './core/WorkspaceController';
 export { createKernelRuntime } from './runtime/create-kernel-runtime';

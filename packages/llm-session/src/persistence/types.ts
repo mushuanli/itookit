@@ -22,6 +22,8 @@ export interface ConversationManifest extends RoundManifest {
     origin?: SessionOrigin;
     createdAt: number;
     updatedAt: number;
+    /** Virtual sidebar folder path, normalized as /A/B; null/undefined means root. */
+    folder?: string | null;
     uiState?: ConversationUIState;
     /** Workflow instance source: set when the session is created from a workflow run. */
     flow?: {
@@ -43,16 +45,29 @@ export interface BranchTreeNode {
     children: BranchTreeNode[];
 }
 
+export interface SessionFolder {
+    path: string;
+    name: string;
+    parentPath: string | null;
+    updatedAt: number;
+}
+
 /** Domain storage. History and attachments belong to the Session identity. */
 export interface ISessionRepository {
     init(): Promise<void>;
     dispose(): Promise<void>;
     subscribe(listener: () => void): () => void;
-    createSession(title: string): Promise<string>;
+    createSession(title: string, folder?: string | null): Promise<string>;
     /** Idempotently create a Session with a host-supplied durable identity. */
-    ensureSession(id: string, title: string, origin?: SessionOrigin): Promise<string>;
+    ensureSession(id: string, title: string, origin?: SessionOrigin, folder?: string | null): Promise<string>;
     getManifest(sessionId: string): Promise<ConversationManifest>;
     list(): Promise<ConversationManifest[]>;
+    /** Delete a Session and its owned storage. */
+    deleteSession(sessionId: string): Promise<void>;
+    listFolders(): Promise<SessionFolder[]>;
+    createFolder(path: string): Promise<SessionFolder>;
+    deleteFolder(path: string, recursive?: boolean): Promise<void>;
+    renameFolder(from: string, to: string): Promise<void>;
     updateManifest(sessionId: string, patch: Partial<ConversationManifest>): Promise<void>;
     getUIState(sessionId: string): Promise<ConversationUIState | null>;
     updateUIState(sessionId: string, patch: Partial<ConversationUIState>): Promise<void>;

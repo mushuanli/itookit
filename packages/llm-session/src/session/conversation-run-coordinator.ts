@@ -455,7 +455,10 @@ function contextPlan(
         branchRef: location.branchRef,
         branchHead: location.branchHead,
         profile,
+        // The assembler de-duplicates this against the Round that owns it, so a
+        // Round excluded by context policy can never drop the prompt entirely.
         pendingUserMessage: { role: 'user' as const, content: execution.task.input.text },
+        pendingRoundId: execution.roundId,
         explicitInputs: [],
         tokenBudget: execution.config.defaultContextPolicy?.tokenBudget,
     };

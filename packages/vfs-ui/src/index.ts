@@ -27,6 +27,8 @@ export type VFSUIOptions = SessionUIOptions<VFSNodeUI> & {
   directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
   activateDirectories?: boolean;
   primaryAction?: { label: string; run(): Promise<void> };
+  exportDirectories?: boolean;
+  exportItem?: import('./interaction/handlers/ExportCommandHandler').ExportCommandOptions['exportItem'];
     customEditorResolver?: CustomEditorResolver;
 
     /**

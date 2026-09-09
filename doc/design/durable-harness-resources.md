@@ -1,8 +1,21 @@
 # Durable Harness 资源表、分配与 Linux 对齐
 
-版本：目标协议 1.1 · 日期：2026-09-05 · 状态：设计修订，新增表与分配 API 尚未实现。
+版本：目标协议 1.1 · 日期：2026-09-08 · 状态：下述编号章节保留完整目标；当前同后端 managed pool/shared、撤权、物理清理及查询已实现，不能再概括为“分配 API 未实现”。
 
 本文与 [主协议](durable-harness-protocol.md)、[Cache 协议](durable-harness-cache.md)、[存储设计](durable-harness-storage.md) 共同定义目标契约。资源所有权、授权、分配及回收以本文为准；当前代码能力仍以 [实施记录](../feat/durable-harness-implementation.md) 为准。
+
+## 当前实现基线（2026-09-08）
+
+当前实现以 [resource-api.ts](../../packages/durable-kernel/src/domain/resource-api.ts)、[public/resources.ts](../../packages/durable-kernel/src/public/resources.ts)、[managed-resources.ts](../../packages/durable-kernel/src/infrastructure/seqfile/managed-resources.ts) 为准，历史 feat 记录不是最新 API 清单。
+
+- ResourceRef 当前是 `{ id, scope }`，kind 为 pool/shared；scope 为 kernel 或 session:<id>。authority 与使用方须共享同一事务型 IFileSystem，未提供跨 backend broker。
+- `create/share/open/acquire/release/close/read/write` 返回持久请求；`revoke(ref, { requestId, toSessionId, rights?, expectedRevision })` 支持按权限撤销，旧 handle 的 grantEpochs 防止重新 share 后复活。
+- `destroy(ref, { requestId, expectedVersion })` 进入 closing，等待占用及物理销毁确认后 tombstone。resource version、grant revision/epochs、claim epoch 和清理 operationId 分别承担自己的并发/幂等职责。
+- 可选 physical 绑定 `{ kind, version, externalId }`；宿主 registerResourceAdapter 提供 cleanup/destroy。claim 保持 held/cleanup-pending/released；unknown、超时或不匹配回执不释放容量，重启继续同一清理操作。仍需真实设备适配器和平台故障验收，逻辑 receipt 不能独自证明外部设备已停止。
+- `query({ kind, scope?, sessionId?, taskId?, state?, limit?, cursor? })` 查询 resources/claims/requests/grants/cleanups，逐页重验授权，返回 items/nextCursor。这是 live keyset 查询，不是历史快照；存储扫描效率需另行核验。
+- managed schema 当前写入 2，兼容读取 1/2；包含 resource/access/handle/claim/request/cleanup 等记录。第 3–4 节的 account/use/allocation/export/import authority 表不是这些记录的同名别称，完整协议仍待实施。
+
+`resources.test.ts` 已有物理清理、未知回执、替换 worker、撤权后重授权、销毁、查询及旧 schema 测试；当前重跑结果见 [核验清单](implementation-audit.md)。不要用这些测试证明全部 1.1 目标或真实跨进程设备隔离已完成。
 
 ## 1. 正确对齐 Linux，保留 Harness 的语义
 
@@ -190,3 +203,7 @@ authority 是持久逻辑服务，不是创建资源的进程。首次创建固�
 | stream/消息/receipt 保留期与 GC 竞争 | 未消费输入和 pin 不丢失，过期观察游标明确 resync |
 
 完整支持须通过真实后端多进程竞争、kill/restart 和 adapter fencing 验收。本文修复设计，不将这些验收或新增 API 标记为已完成。
+
+### 能力资源创建回执
+
+低层 `ResourceSpec`/`TaskResourceSpec` 增加可选 requestId，按 owner Task 隔离。Kernel 以 kind/uri/rights/parentResourceId/parentHandleId/metadata 生成规格指纹，资源、句柄、resource.created 事件和创建回执在同一 resources.seq 事务写入。相同 Task/requestId 和规格重放读取当前资源/句柄，不再创建或追加事件；不同规格冲突。已有撤销状态保留，重放不重新授权。未提供 requestId 的调用沿用每次创建新资源的语义。此处是 LLM/tool 等能力资源入口，不替代 managed pool/shared API 的既有请求协议。

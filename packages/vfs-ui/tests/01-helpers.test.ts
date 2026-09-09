@@ -3,7 +3,8 @@
  * Verifies hidden files and asset-dir paths are correctly identified.
  */
 import { describe, it, expect } from 'vitest';
-import { isHiddenFile, replacePathPrefix, shouldFilterNode } from '../src/utils/helpers';
+import { isHiddenFile, isItemReadOnly, replacePathPrefix, shouldFilterNode } from '../src/utils/helpers';
+import { partitionDeletable } from '../src/utils/delete-guard';
 
 // ── isHiddenFile ─────────────────────────────────────────────────────────────
 
@@ -88,5 +89,27 @@ describe('shouldFilterNode', () => {
 
     it('does NOT filter when viewId is a normal module name', () => {
         expect(shouldFilterNode({ name: 'file.md', path: '/file.md', viewId: 'workspace' })).toBe(false);
+    });
+});
+
+describe('per-item read-only marker', () => {
+    it('detects the backend read-only marker', () => {
+        const marked = { metadata: { custom: { _readOnly: true } } };
+        const plain = { metadata: { custom: {} } };
+        expect(isItemReadOnly(marked)).toBe(true);
+        expect(isItemReadOnly(plain)).toBe(false);
+        expect(isItemReadOnly({})).toBe(false);
+    });
+
+    it('splits delete requests into deletable and blocked entries', () => {
+        const items = [
+            { id: '/a/tasks/t', metadata: { custom: { _readOnly: true } } },
+            { id: '/a/note.md', metadata: { custom: {} } },
+        ] as never;
+
+        expect(partitionDeletable(items, ['/a/tasks/t', '/a/note.md']))
+            .toEqual({ deletable: ['/a/note.md'], blocked: ['/a/tasks/t'] });
+        expect(partitionDeletable(items, ['/a/tasks/t']))
+            .toEqual({ deletable: [], blocked: ['/a/tasks/t'] });
     });
 });

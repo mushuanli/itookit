@@ -1,4 +1,4 @@
-import type { ContextPlan, MemoryPolicy } from '@itookit/common';
+import { sha256Hex, type ContextPlan, type MemoryPolicy } from '@itookit/common';
 import type { Kernel, SessionHandle } from '@itookit/durable-kernel';
 import type { RetrievedMemoryEntry } from '@itookit/llm-tasks';
 
@@ -39,7 +39,8 @@ export class SessionMemoryProvider {
         const session = await this.kernel.openSession(context.sessionId);
         const groups = await Promise.all([...new Set(policy.readScopes)].map(async scope =>
             readEntries((await session.getShared(memoryKey(policy.namespaceId, scope)))?.value, policy.namespaceId, scope)));
-        const text = typeof plan.pendingUserMessage.content === 'string' ? plan.pendingUserMessage.content : '';
+        const pending = plan.pendingUserMessage?.content;
+        const text = typeof pending === 'string' ? pending : '';
         const terms = [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])];
         const score = (entry: StoredMemory) => terms.filter(term => entry.content.toLowerCase().includes(term)).length;
         return groups.flat().sort((a, b) => score(b) - score(a) || b.updatedAt - a.updatedAt
@@ -92,6 +93,5 @@ function requireId(id: string): void {
 }
 
 async function hashContent(content: string): Promise<string> {
-    const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
-    return [...new Uint8Array(bytes)].map(value => value.toString(16).padStart(2, '0')).join('');
+    return sha256Hex(content);
 }

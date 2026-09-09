@@ -6,6 +6,7 @@ import {
     type PlanCommandRequest,
     type ExecCommandRequest,
 } from '@itookit/llm-session';
+import { randomUUID } from '@itookit/common';
 
 export class PrivilegedCommandService implements IPrivilegedCommandService {
     private readonly agents: AgentResolver;
@@ -65,5 +66,5 @@ async function bindCapability(
 }
 
 function createRunId(prefix: string): string {
-    return `${prefix}-${crypto.randomUUID()}`;
+    return `${prefix}-${randomUUID()}`;
 }

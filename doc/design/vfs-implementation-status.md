@@ -21,15 +21,15 @@
 
 ## 验证
 
-本轮重跑 app-shell、vfs-ui、llm-ui、LocalFS 和三端类型检查，并独立编译测试实际 Rust 路径/目录 IO 模块；其他包列出此前回归证据。DOM 集成覆盖真实 vfs-ui 到宿主路由、映射保存、挂载管理与分支保留。
+下表汇总工作区最近一次已记录的验证，不表示所有包在同一提交或同一批次重跑。最近跨包回归重跑 durable-kernel 134 项、llm-flow 120 项、llm-session 61 项、app-shell 114 项（30 项跳过）及 CLI 49 项，均通过。vfs-core 等未在该批次重跑。其余测试日志与批次见 [核验清单](implementation-audit.md)。DOM 测试覆盖 vfs-ui 到宿主路由、映射保存、挂载管理与分支保留，不代替原生 GUI 验收。
 | 检查 | 结果 |
 | --- | --- |
 | vfs-core | 167 通过 |
-| durable-kernel | 107 通过 |
-| llm-flow | 50 通过 |
-| kernel-adapters | 22 通过 |
-| llm-session | 50 通过 |
-| app-shell | 85 通过，30 跳过 |
+| durable-kernel | 140 通过 |
+| llm-flow | 124 通过 |
+| kernel-adapters | 81 通过 |
+| llm-session | 65 通过 |
+| app-shell | 全套 117 通过，30 跳过 |
 | vfsdriver-indexeddb | 9 通过 |
 | vfsdriver-localfs | 41 通过，含独立 OS 进程与 SIGKILL 恢复 |
 | vfs-ui | 80 通过，含真实 DOM 导航 |
@@ -41,7 +41,7 @@
 | Mermaid | 总体、浏览、挂载共 9 张设计图解析通过 |
 | 旧公开符号扫描、git diff --check | 通过 |
 
-本轮日志：`/tmp/mount-app-final2.log`、`/tmp/mount-localfs.log`、`/tmp/mount-llmui-final.log`、`/tmp/mount-rust-core2.log`；此前其他包证据保留在 `/tmp/refactor-suite.log` 等回归日志。跳过测试没有计入通过数。
+较早批次日志：`/tmp/mount-app-final2.log`、`/tmp/mount-localfs.log`、`/tmp/mount-llmui-final.log`、`/tmp/mount-rust-core2.log`；此前其他包证据保留在 `/tmp/refactor-suite.log` 等回归日志。跳过测试没有计入通过数。
 
 ## 明确边界
 
@@ -54,4 +54,4 @@
 
 上述边界没有通过保留旧接口来补偿。旧数据版本不兼容应报错，由用户重建数据，不能自动回到旧布局。
 
-Session 浏览当前边界：Task 历史使用全量有限快照，未提供存储层分页；URL 不编码 branch，文件树不提供 CRUD。详见浏览实现文档。
+Session 浏览当前边界：Task 列表、版本及事件已有存储分页，界面提供继续加载；旧存储首次建索引仍可能全量扫描。URL 已编码 branch，路由回放传递指定分支；文件树不提供 CRUD。详见浏览实现文档。最新 app-shell/Flow/Session 验证日志为 `/tmp/design-retry-ui-tests.log`、`/tmp/design-goal-authority-tests.log`、`/tmp/design-delegation-context-tests.log`；此前 VFS 边界核验日志为 `/tmp/design-current-app-tests.log`、`/tmp/design-skill-unload-tests.log`、`/tmp/design-c4-boundary-tests.log`、`/tmp/design-c4-vfs-tests.log`、`/tmp/design-c4-types.log`。

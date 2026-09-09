@@ -476,6 +476,79 @@ describe('durable harness protocols', () => {
         expect((await store.readTask(binding, task.id)).id).toBe(task.id);
     });
 
+    it('removes Session storage and catalog entries only when nothing is live', async () => {
+        kernel.registerProgram({ manifest: spec.program,
+            init: () => ({ state: null, actions: [{ type: 'request-interaction', interaction: { id: 'never', kind: 'input', prompt: 'Answer' } }],
+                next: { type: 'wait', on: { type: 'interaction', id: 'never' } } }),
+            reduce: () => ({ state: null, next: { type: 'complete', output: 'done' } }),
+        });
+        const task = await (await kernel.openSession('s')).submit(spec);
+        await vi.waitFor(async () => expect((await task.status()).task.interactions?.never?.status).toBe('pending'));
+
+        // A live Task must keep the Session: removal refuses instead of destroying state.
+        await expect(kernel.removeSession('s')).rejects.toMatchObject({ code: 'CONFLICT' });
+        expect(await fs.driver.exists('/session')).toBe(true);
+
+        await task.cancel();
+        await task.wait({ timeoutMs: 1000 });
+        await kernel.closeSession('s', true);
+        expect(await kernel.removeSession('s')).toBe(true);
+        expect(await fs.driver.exists('/session')).toBe(false);
+        const ids: string[] = []; for await (const record of kernel.listSessions()) ids.push(record.id);
+        expect(ids).not.toContain('s');
+        expect(await fs.meta.seq!.getEntry('/catalog/catalog.seq', `task/${task.id}`)).toBeNull();
+        expect(await kernel.removeSession('s')).toBe(false);
+    });
+
+    it('does not resurrect records when a removed Session identity is reused', async () => {
+        const session = await kernel.openSession('s');
+        await session.setShared('topic', { value: 'old' });
+        await kernel.closeSession('s', true);
+        expect(await kernel.removeSession('s')).toBe(true);
+        expect(await fs.driver.exists('/session')).toBe(false);
+
+        const recreated = await kernel.createSession({ id: 's', storage: { kind: 'test', locator: null } });
+        expect((await kernel.sessionStat('s')).phase).toBe('open');
+        expect(await recreated.getShared('topic')).toBeUndefined();
+        expect(await fs.meta.seq!.getEntry('/session/session.seq', 'record')).toContain('"status":"open"');
+    });
+
+    it('repeats an interrupted removal safely and starts the reused identity empty', async () => {
+        const session = await kernel.openSession('s');
+        await session.setShared('keep', 'stale');
+        // Simulate a crash after the storage tree was deleted, before cleanup ran.
+        await fs.driver.updateMetadata('/session', { vfsFixedLayout: false });
+        await fs.driver.delete(['/session'], { recursive: true });
+
+        expect(await kernel.removeSession('s')).toBe(true);
+        expect(await fs.meta.seq!.getEntry('/catalog/catalog.seq', 'session/s')).toBeNull();
+        const recreated = await kernel.createSession({ id: 's', storage: { kind: 'test', locator: null } });
+        expect((await kernel.sessionStat('s')).phase).toBe('open');
+        expect(await recreated.getShared('keep')).toBeUndefined();
+    });
+
+    it('resumes an interrupted removal after a Kernel restart', async () => {
+        await (await kernel.openSession('s')).setShared('stale', 'value');
+        await kernel.closeSession('s', true);
+        // Interrupted removal: storage tree gone, records and catalog entry remain.
+        await fs.driver.updateMetadata('/session', { vfsFixedLayout: false });
+        await fs.driver.delete(['/session'], { recursive: true });
+        kernel.dispose(); await kernel.waitIdle();
+
+        // A restart has no cached binding, so cleanup must work from the catalog.
+        kernel = new Kernel({ catalog: { fs, rootPath: '/catalog' }, pollMs: 0 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return binding; } });
+        await kernel.initialize();
+        expect((await kernel.sessionStat('s')).phase).toBe('closed');
+        await kernel.closeSession('s', true);
+        expect(await kernel.removeSession('s')).toBe(true);
+        expect(await fs.meta.seq!.getEntry('/catalog/catalog.seq', 'session/s')).toBeNull();
+
+        const recreated = await kernel.createSession({ id: 's', storage: { kind: 'test', locator: null } });
+        expect((await kernel.sessionStat('s')).phase).toBe('open');
+        expect(await recreated.getShared('stale')).toBeUndefined();
+    });
+
     it('persists terminal delivery rejection and exposes it in outbox', async () => {
         const sender = await store.createTask(binding, 's', spec);
         const target = await store.createTask(binding, 's', { ...spec, deferStart: true });

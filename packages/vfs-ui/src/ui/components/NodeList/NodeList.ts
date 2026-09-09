@@ -32,6 +32,7 @@ interface NodeListOptions extends BaseComponentDeps {
   directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
   activateDirectories?: boolean;
   primaryAction?: { label: string; run(): Promise<void> };
+  exportDirectories?: boolean;
 }
 
 export class NodeList extends BaseComponent<NodeListState> {
@@ -55,12 +56,14 @@ export class NodeList extends BaseComponent<NodeListState> {
   private readonly fileCreation?: FileCreationConfig;
   private readonly directoryAction?: NodeListOptions['directoryAction'];
   private readonly activateDirectories: boolean;
+  private readonly exportDirectories: boolean;
 
   constructor(options: NodeListOptions) {
     super(options);
     this.fileCreation = options.fileCreation;
     this.directoryAction = options.directoryAction;
     this.activateDirectories = options.activateDirectories ?? false;
+    this.exportDirectories = options.exportDirectories ?? false;
 
     this.stateTransformer = new NodeListStateTransformer(
       options.searchFilter
@@ -207,7 +210,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     } else if (action === 'export') {
       const selectedFileIds = [...this.state.selectedItemIds].filter(id => {
         const item = this.findItemById(id);
-        return item?.type === 'file';
+        return item?.type === 'file' || (this.exportDirectories && item?.type === 'directory');
       });
       if (selectedFileIds.length) {
         this.commandBus.execute('file:export', { itemIds: selectedFileIds });
@@ -403,6 +406,9 @@ export class NodeList extends BaseComponent<NodeListState> {
       isReadOnly: this.state.readOnly,
     });
 
+    // renderItems rebuilds the DOM; keep the scroll position so a background
+    // refresh does not visibly jump the list.
+    const scrollTop = this.bodyEl.scrollTop;
     if (this.state.status === 'loading') {
       this.bodyEl.innerHTML = '<div class="vfs-node-list__placeholder">正在加载...</div>';
     } else if (this.state.status === 'error') {
@@ -413,6 +419,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         findItemById: id => this.findItemById(id),
       });
     }
+    if (scrollTop) this.bodyEl.scrollTop = scrollTop;
 
     if (this.directoryAction) {
       const action = this.directoryAction;

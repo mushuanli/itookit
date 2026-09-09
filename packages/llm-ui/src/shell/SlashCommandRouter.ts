@@ -348,6 +348,15 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
         // ── Settings ────────────────────────────────────────
 
         onSwitchAgent: (agentId: string) => {
+            // /agent takes a raw id, so a typo or a display name silently poisons the
+            // next send (resolveForChat falls back to a config without agentVersion).
+            if (!deps.agentService.findAgent(agentId)) {
+                const known = deps.agentService.listAgents().map(agent => agent.id);
+                console.warn(
+                    `[SlashCommand] /agent '${agentId}' is not a known agent id — sends will fail until a valid id is selected. `
+                    + `Known ids: ${known.length ? known.join(', ') : '(none loaded)'}`,
+                );
+            }
             deps.chatInput.setConfig({ agentId });
             deps.bus.emit('state:inputChanged', {});
         },

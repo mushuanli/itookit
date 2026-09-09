@@ -34,7 +34,7 @@ import type {
     WorkspaceDiff,
     WorkspaceSnapshot,
 } from '../../domain/types';
-import { advanceDependants,allHandlesTx,appendEventTx,applySharedMutations,applySpawnsTx,assertBudgetCapacity,assertBudgetVersion,assertClaim,assertContextHead,assertRightsSubset,assertSharedVersion,attemptKey,authorizeHandleTx,budgetAccount,budgetKey,cancelActiveEffects,catalogPath,claimMatches,claimTask,collectContextHistory,contextBranchKey,contextCommitKey,contextPath,createId,decode,deletedRevision,dependencySatisfied,descendantHandleIds,effectAttempt,effectClaimMatches,encode,ensureSeqFile,ensureSessionLayout,ensureTaskLayout,ensureTree,eventsPath,finishAttemptTx,finishEffect,graphPath,handleKey,indexPath,indexTask,isTerminal,join,messagesPath,nextSharedVersion,outboxKey,readBudgetTx,readContextBranchTx,readMessages,readSharedTx,readTaskTx,readyCandidates,recoverEffect,registerTaskWaitTx,replaceEffectAttempt,requireContextParents,requireHandleTx,requireResourceTx,requireSessionTx,requireTaskTx,requireTransactionalSeq,resourceBudgetsTx,resourceKey,resourcesPath,seq,sessionPath,sharedEntry,sharedHistoryPrefix,sharedKey,sharedPath,taskFromSpec,taskPath,terminalDependency,transaction,uniqueRights,unregisterTaskWaitTx,validateSharedKey,wakeFromPendingEvents,wakeTaskWaiters,workspaceDiffKey,workspaceSnapshotKey,writeContextBranchTx,writeSharedHistory,writeSharedRevision,writeTaskTx } from './store-helpers';
+import { advanceDependants,allHandlesTx,appendEventTx,applySharedMutations,applySpawnsTx,assertBudgetCapacity,assertBudgetVersion,assertClaim,assertContextHead,assertRightsSubset,assertSharedVersion,attemptKey,authorizeHandleTx,budgetAccount,budgetKey,cancelActiveEffects,catalogPath,claimMatches,claimTask,clearSeqRecords,collectContextHistory,contextBranchKey,contextCommitKey,contextPath,createId,decode,deletedRevision,dependencySatisfied,descendantHandleIds,effectAttempt,effectClaimMatches,encode,ensureSeqFile,ensureSessionLayout,ensureTaskLayout,ensureTree,eventsPath,finishAttemptTx,finishEffect,graphPath,handleKey,indexPath,indexTask,isTerminal,join,messagesPath,nextSharedVersion,outboxKey,readBudgetTx,readContextBranchTx,readMessages,readSharedTx,readTaskTx,readyCandidates,recoverEffect,registerTaskWaitTx,replaceEffectAttempt,requireContextParents,requireHandleTx,requireResourceTx,requireSessionTx,requireTaskTx,requireTransactionalSeq,resourceBudgetsTx,resourceKey,resourcesPath,seq,sessionPath,sessionRecordPaths,sharedEntry,sharedHistoryPrefix,sharedKey,sharedPath,taskFromSpec,taskPath,terminalDependency,transaction,uniqueRights,unregisterTaskWaitTx,validateSharedKey,wakeFromPendingEvents,wakeTaskWaiters,workspaceDiffKey,workspaceSnapshotKey,writeContextBranchTx,writeSharedHistory,writeSharedRevision,writeTaskTx } from './store-helpers';
 import { KernelErrorCode, kernelError } from '../../domain/errors';
 
 const SESSION_KEY = 'record';
@@ -147,6 +147,32 @@ export class SeqFileKernelStore {
             return true;
         }, { keyPrefix: 'session/' });
         return entries.sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+
+    /**
+     * Remove Kernel-owned Session storage and every catalog reference to it.
+     *
+     * Order matters for retry safety: release the fixed-layout pin, delete the
+     * storage tree, clear the SeqFile records (they live outside the files), and
+     * only then drop the catalog entry. An interrupted removal is therefore
+     * repeatable — the catalog entry still resolves the binding until the end.
+     */
+    async removeSession(id: SessionId, binding: ResolvedStorageBinding): Promise<void> {
+        const taskIds = await this.listTaskIds(binding);
+        if (await binding.fs.driver.exists(binding.rootPath)) {
+            await binding.fs.driver.updateMetadata(binding.rootPath, { vfsFixedLayout: false });
+            await binding.fs.driver.delete([binding.rootPath], { recursive: true });
+        }
+        await clearSeqRecords(binding.fs, await sessionRecordPaths(binding, taskIds));
+        await transaction(this.catalog.fs, async tx => {
+            await tx.deleteEntry(catalogPath(this.catalog.rootPath), `session/${id}`);
+            const stale: string[] = [];
+            await tx.walkEntries(catalogPath(this.catalog.rootPath), entry => {
+                if (entry.value === id) stale.push(entry.key);
+                return true;
+            }, { keyPrefix: 'task/' });
+            for (const key of stale) await tx.deleteEntry(catalogPath(this.catalog.rootPath), key);
+        });
     }
 
     async setSessionStatus(
@@ -1393,11 +1419,16 @@ export class SeqFileKernelStore {
 
     private async listTaskIds(binding: ResolvedStorageBinding): Promise<string[]> {
         const root = join(binding.rootPath, 'tasks');
+        // A removed storage tree has no Tasks; callers must stay usable for retries.
+        if (!await binding.fs.driver.exists(root)) return [];
         const children = await binding.fs.driver.getChildren(root);
         const ids: string[] = [];
         for (const child of children) {
             if (child.type !== 'directory') continue;
-            const value = await seq(binding.fs).getEntry(taskPath(binding.rootPath, child.name), TASK_KEY);
+            const path = taskPath(binding.rootPath, child.name);
+            // A crash can leave a Task directory without its seq file.
+            if (!await binding.fs.driver.exists(path)) continue;
+            const value = await seq(binding.fs).getEntry(path, TASK_KEY);
             if (value) ids.push(child.name);
         }
         return ids.sort();

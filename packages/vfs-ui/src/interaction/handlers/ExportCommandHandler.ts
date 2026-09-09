@@ -7,6 +7,11 @@ import type { VFSService } from '../../services/VFSService';
 import type { IFileSystem } from '@itookit/vfs-core';
 import { serialize } from '@itookit/vfs-core';
 
+export interface ExportItemResult { name: string; content: BlobPart; mimeType?: string; }
+export interface ExportCommandOptions {
+    exportItem?: (item: { path: string; type: string; metadata?: Record<string, unknown> }) => Promise<ExportItemResult | null>;
+}
+
 export class ExportCommandHandler {
     private unsubs: (() => void)[] = [];
 
@@ -14,6 +19,7 @@ export class ExportCommandHandler {
         private readonly commandBus: CommandBus,
         private readonly service: VFSService,
         private readonly engine: IFileSystem,
+        private readonly options: ExportCommandOptions = {},
     ) {
         this.register();
     }
@@ -33,7 +39,16 @@ export class ExportCommandHandler {
         for (const id of itemIds) {
             try {
                 const node = await this.service.findItemById(id);
-                if (!node || node.type !== 'file') continue;
+                if (!node) continue;
+                if (node.type === 'directory') {
+                    const custom = await this.options.exportItem?.(node);
+                    if (custom) {
+                        this.download(new Blob([custom.content], { type: custom.mimeType ?? 'application/octet-stream' }), custom.name);
+                        exported++;
+                    }
+                    continue;
+                }
+                if (node.type !== 'file') continue;
 
                 const hasAssets = await this.engine.meta.assets
                     .hasAssetDir(id)

@@ -90,6 +90,53 @@ describe('Session data repository', () => {
         expect(manifest.currentBranch).toBe('main');
     });
 
+    it('stores Session folders and deletes Sessions/folders recursively', async () => {
+        await repository.createFolder('/Work');
+        await repository.createFolder('/Work/Projects');
+        const id = await repository.createSession('Grouped', '/Work/Projects');
+        expect((await repository.getManifest(id)).folder).toBe('/Work/Projects');
+        expect((await repository.listFolders()).map(folder => folder.path)).toEqual(['/Work', '/Work/Projects']);
+
+        await repository.deleteFolder('/Work', true);
+        expect(await repository.listFolders()).toEqual([]);
+        await expect(repository.getManifest(id)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('keeps every folder created concurrently', async () => {
+        await Promise.all([repository.createFolder('/a'), repository.createFolder('/b')]);
+        await repository.createFolder('/a/inner');
+        expect((await repository.listFolders()).map(folder => folder.path)).toEqual(['/a', '/a/inner', '/b']);
+    });
+
+    it('refuses to place a Session or rename it into a missing folder', async () => {
+        await expect(repository.createSession('Orphan', '/Work')).rejects.toMatchObject({ code: 'ENOENT' });
+        const id = await repository.createSession('Rooted');
+        await expect(repository.updateManifest(id, { folder: '/Work' })).rejects.toMatchObject({ code: 'ENOENT' });
+        expect((await repository.getManifest(id)).folder ?? null).toBeNull();
+        const dirs = (await fs.driver.getChildren('/var/lib/sessions')).filter(node => node.type === 'directory');
+        expect(dirs.map(node => node.name)).toEqual([id]);
+    });
+
+    it('does not resurrect records left behind by a deleted Session identity', async () => {
+        const id = 'reused-identity';
+        await repository.ensureSession(id, 'Original');
+        await repository.writeDocument(id, 'round-r1.json', '{"id":"r1"}');
+        // A crash between the physical delete and the record cleanup leaves records.
+        await fs.driver.delete([`/var/lib/sessions/${id}`], { recursive: true });
+        await repository.ensureSession(id, 'Reused');
+        expect((await repository.getManifest(id)).title).toBe('Reused');
+        expect(await repository.readDocument(id, 'round-r1.json')).toBeNull();
+    });
+
+    it('moves folder records and Session ownership together on rename', async () => {
+        await repository.createFolder('/Work');
+        await repository.createFolder('/Work/Projects');
+        const id = await repository.createSession('Grouped', '/Work/Projects');
+        await repository.renameFolder('/Work', '/Archive');
+        expect((await repository.listFolders()).map(folder => folder.path)).toEqual(['/Archive', '/Archive/Projects']);
+        expect((await repository.getManifest(id)).folder).toBe('/Archive/Projects');
+    });
+
     it('rejects unknown identities and incompatible storage without creating data', async () => {
         await expect(repository.getManifest('missing')).rejects.toMatchObject({ code: 'ENOENT' });
         await expect(repository.getManifest('/old.chat')).rejects.toThrow('identity');

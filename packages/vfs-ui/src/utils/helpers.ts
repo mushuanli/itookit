@@ -105,3 +105,11 @@ export const ensureMap = <K, V>(
   value: Map<K, V> | [K, V][] | null | undefined
 ): Map<K, V> =>
   value instanceof Map ? value : new Map(Array.isArray(value) ? value : []);
+
+/**
+ * Per-item read-only marker published by a source backend (e.g. Task history
+ * entries, which the backend refuses to delete). Distinct from the view-wide
+ * `state.readOnly`.
+ */
+export const isItemReadOnly = (item: { metadata?: { custom?: Record<string, unknown> } }): boolean =>
+  item.metadata?.custom?._readOnly === true;

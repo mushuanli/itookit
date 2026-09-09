@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { AppKernelPlatform } from '@itookit/app-shell';
+import { randomUUID } from '@itookit/common';
 
 type Factory = NonNullable<AppKernelPlatform['createSessionProcesses']>;
 
@@ -34,7 +35,7 @@ function scopedProcesses(files: Parameters<Factory>[1], grants: Array<[string, s
             await files.vfs.listFiles(cwd);
             if (closed) throw new Error('Session process scope closed');
             options?.signal?.throwIfAborted();
-            const requestId = crypto.randomUUID();
+            const requestId = randomUUID();
             const cancel = () => { void invoke('shell_cancel', { requestId }).catch(() => {}); };
             options?.signal?.addEventListener('abort', cancel, { once: true });
             const result = invoke<[string, string, number]>('session_shell_exec', {

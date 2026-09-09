@@ -172,7 +172,11 @@ export class SessionRunCoordinator {
         const manifest = await roundLog.loadManifest();
         const agent = await this.agents.resolveForChat(input.agentId);
         if (!agent.agentVersion) {
-            throw new Error(`Agent version is required: ${agent.id}`);
+            throw new Error(
+                `Agent version is required: ${agent.id} — requested agentId='${input.agentId}' `
+                + 'resolved to the fallback config (unknown/empty agent id, or resolution failed). '
+                + 'See the [AgentResolver] warning in the console.',
+            );
         }
         const branchRef = manifest.currentBranch || 'main';
         return {

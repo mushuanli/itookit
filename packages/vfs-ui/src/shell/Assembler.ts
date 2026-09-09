@@ -117,7 +117,7 @@ export function assemble(
             service,
             () => engineAdapter.loadData()
         ),
-        new ExportCommandHandler(commandBus, service, engine),
+        new ExportCommandHandler(commandBus, service, engine, { exportItem: options.exportItem }),
         new CustomMenuCommandHandler(commandBus, eventBus),
     ];
 

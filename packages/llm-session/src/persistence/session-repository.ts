@@ -1,7 +1,12 @@
 import { generateUUID } from '@itookit/common';
-import { createFileSystemView, FSError, type IFileSystem } from '@itookit/vfs-core';
-import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionOrigin } from './types';
+import { createFileSystemView, FSError, type IFileSystem, type ISeqFileTransaction } from '@itookit/vfs-core';
+import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin } from './types';
 import { sessionStorageRoot } from './session-storage-layout';
+
+const FOLDERS_PATH = '/var/lib/sessions/folders.seq';
+const FOLDERS_KEY = 'folders';
+
+interface SessionPaths { root: string; session: string; history: string }
 
 /** Session identity, history and attachments. No document path is a Session identity. */
 export class SessionRepository implements ISessionRepository {
@@ -20,53 +25,80 @@ export class SessionRepository implements ISessionRepository {
         if (!name || name.includes('/') || name.includes('\\') || name.includes('\0') || name === '.' || name === '..') throw new FSError('EINVAL', 'Invalid Session data name');
         return name;
     }
-    private paths(id: string) { const root = this.root(id); return { root, session: `${root}/session.seq`, history: `${root}/history.seq` }; }
-    async createSession(title: string): Promise<string> {
-        return this.ensureSession(generateUUID(), title);
+    private paths(id: string): SessionPaths { const root = this.root(id); return { root, session: `${root}/session.seq`, history: `${root}/history.seq` }; }
+    async createSession(title: string, folder: string | null = null): Promise<string> {
+        return this.ensureSession(generateUUID(), title, 'tauri', folder);
     }
     /** Idempotently create a Session with a host-supplied durable identity. */
-    async ensureSession(id: string, title: string, origin: SessionOrigin = 'tauri'): Promise<string> {
+    async ensureSession(id: string, title: string, origin: SessionOrigin = 'tauri', folder: string | null = null): Promise<string> {
         if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new FSError('EINVAL', 'Invalid Session identity');
         const p = this.paths(id);
+        const normalizedFolder = normalizeFolderPath(folder);
         const now = Date.now();
-        let repaired = false;
-
-        for (const [path, name] of [[p.session, 'session.seq'], [p.history, 'history.seq']] as const) {
-            if (!await this.fs.driver.exists(path)) {
-                await this.fs.driver.createFile({ name, parentPath: p.root, type: 'seqfile', recursive: true });
+        const existed = await this.fs.driver.exists(p.session);
+        let repaired = await this.ensureSessionFiles(p);
+        await this.ensureFolderRecord();
+        try {
+            if (await this.fs.meta.seq!.transaction!(tx => this.initializeSessionTx(tx, p, { id, title, origin, folder: normalizedFolder, now }))) {
                 repaired = true;
             }
+        } catch (error) {
+            // Only this call's own empty directory is removed; an existing Session
+            // that merely failed to validate is left untouched.
+            if (!existed) await this.fs.driver.delete([p.root], { recursive: true }).catch(() => undefined);
+            throw error;
         }
-        const attachments = `${p.root}/attachments`;
-        if (!await this.fs.driver.exists(attachments)) {
+        if (repaired) this.notify();
+        return id;
+    }
+    /** Create missing seq files; a fresh file must start empty (records outlive files). */
+    private async ensureSessionFiles(p: SessionPaths): Promise<boolean> {
+        let repaired = false;
+        for (const [path, name] of [[p.session, 'session.seq'], [p.history, 'history.seq']] as const) {
+            if (await this.fs.driver.exists(path)) continue;
+            await this.fs.driver.createFile({ name, parentPath: p.root, type: 'seqfile', recursive: true });
+            await this.clearEntries([path]);
+            repaired = true;
+        }
+        if (!await this.fs.driver.exists(`${p.root}/attachments`)) {
             await this.fs.driver.createDirectory({ name: 'attachments', parentPath: p.root });
             repaired = true;
         }
-
-        await this.fs.meta.seq!.transaction!(async tx => {
-            const rawSession = await tx.getEntry(p.session, 'session');
-            if (rawSession) {
-                const session = JSON.parse(rawSession);
-                if (session.storageVersion !== 1 || session.id !== id) throw new Error('Session storage version incompatible');
-            } else {
-                await tx.setEntry(p.session, 'session', JSON.stringify({ storageVersion: 1, id, title, origin, createdAt: now, updatedAt: now, revision: 0 }));
-                repaired = true;
+        return repaired;
+    }
+    /** Returns whether anything had to be repaired (session, settings or history). */
+    private async initializeSessionTx(tx: ISeqFileTransaction, p: SessionPaths, init: {
+        id: string; title: string; origin: SessionOrigin; folder: string | null; now: number;
+    }): Promise<boolean> {
+        let repaired = false;
+        const rawSession = await tx.getEntry(p.session, 'session');
+        if (rawSession) {
+            const session = JSON.parse(rawSession);
+            if (session.storageVersion !== 1 || session.id !== init.id) throw new Error('Session storage version incompatible');
+        } else {
+            // A new Session must land in an existing folder; otherwise it would be
+            // invisible in every listing without any way to reach it.
+            if (init.folder && !(await this.readFolderEntries(tx)).some(item => item.path === init.folder)) {
+                throw new FSError('ENOENT', 'Session folder not found');
             }
-            if (!await tx.getEntry(p.session, 'settings')) {
-                await tx.setEntry(p.session, 'settings', JSON.stringify(DEFAULT_SESSION_SETTINGS));
-                repaired = true;
-            }
-            const rawHistory = await tx.getEntry(p.history, 'index');
-            if (rawHistory) {
-                const history = JSON.parse(rawHistory);
-                if (history?.schemaVersion !== 3) throw new Error('Session history version incompatible');
-            } else {
-                await tx.setEntry(p.history, 'index', JSON.stringify({ schemaVersion: 3, rootRoundId: null, branches: { main: null }, branchMeta: {}, currentBranch: 'main', currentHead: null, children: {} }));
-                repaired = true;
-            }
-        });
-        if (repaired) this.notify();
-        return id;
+            const record = { storageVersion: 1, id: init.id, title: init.title, origin: init.origin, folder: init.folder,
+                createdAt: init.now, updatedAt: init.now, revision: 0 };
+            await tx.setEntry(p.session, 'session', JSON.stringify(record));
+            repaired = true;
+        }
+        if (!await tx.getEntry(p.session, 'settings')) {
+            await tx.setEntry(p.session, 'settings', JSON.stringify(DEFAULT_SESSION_SETTINGS));
+            repaired = true;
+        }
+        const rawHistory = await tx.getEntry(p.history, 'index');
+        if (rawHistory) {
+            const history = JSON.parse(rawHistory);
+            if (history?.schemaVersion !== 3) throw new Error('Session history version incompatible');
+        } else {
+            await tx.setEntry(p.history, 'index', JSON.stringify({ schemaVersion: 3, rootRoundId: null, branches: { main: null }, branchMeta: {}, currentBranch: 'main', currentHead: null, children: {} }));
+            repaired = true;
+        }
+        return repaired;
     }
     async getManifest(id: string): Promise<ConversationManifest> {
         const p = this.paths(id);
@@ -98,23 +130,109 @@ export class SessionRepository implements ISessionRepository {
         }
         return result.sort((a, b) => b.updatedAt - a.updatedAt);
     }
+    async deleteSession(id: string): Promise<void> {
+        const root = this.root(id);
+        const p = this.paths(id);
+        await this.getManifest(id);
+        // Physical storage goes first. Clearing records before a delete that can
+        // still fail (fixed Kernel layout, host permissions) loses the Session
+        // while leaving its directory behind, which is unrecoverable.
+        if (await this.fs.driver.exists(root)) await this.fs.driver.delete([root], { recursive: true });
+        // Deleting files does not purge SeqFile records, and stale records would
+        // resurrect the Session if its identity is ever reused.
+        await this.clearEntries([p.session, p.history]);
+        this.notify();
+    }
+    async listFolders(): Promise<SessionFolder[]> {
+        return (await this.readFolders()).sort((a, b) => a.path.localeCompare(b.path));
+    }
+    async createFolder(path: string): Promise<SessionFolder> {
+        const normalized = normalizeFolderPath(path);
+        if (!normalized) throw new FSError('EINVAL', 'Invalid Session folder path');
+        const folder = await this.mutateFolders(folders => {
+            const existing = folders.find(item => item.path === normalized);
+            if (existing) return { folders, result: existing };
+            const parentPath = folderParent(normalized);
+            if (parentPath && !folders.some(item => item.path === parentPath)) throw new FSError('ENOENT', 'Parent Session folder not found');
+            const created: SessionFolder = { path: normalized, name: normalized.slice(normalized.lastIndexOf('/') + 1), parentPath, updatedAt: Date.now() };
+            return { folders: [...folders, created], result: created };
+        });
+        this.notify();
+        return folder;
+    }
+    async deleteFolder(path: string, recursive = false): Promise<void> {
+        const normalized = normalizeFolderPath(path);
+        if (!normalized) throw new FSError('EINVAL', 'Invalid Session folder path');
+        const folders = await this.readFolders();
+        if (!folders.some(folder => folder.path === normalized)) throw new FSError('ENOENT', 'Session folder not found');
+        const sessions = (await this.list()).filter(session => session.folder === normalized || session.folder?.startsWith(`${normalized}/`));
+        const hasChildren = folders.some(folder => folder.parentPath === normalized);
+        if ((hasChildren || sessions.length) && !recursive) throw new FSError('ENOTEMPTY', 'Session folder is not empty');
+        if (recursive) for (const session of sessions) await this.deleteSession(session.id);
+        await this.mutateFolders(current => ({
+            folders: current.filter(folder => folder.path !== normalized && !folder.path.startsWith(`${normalized}/`)),
+            result: undefined,
+        }));
+        this.notify();
+    }
+    async renameFolder(from: string, to: string): Promise<void> {
+        const source = normalizeFolderPath(from), target = normalizeFolderPath(to);
+        if (!source || !target) throw new FSError('EINVAL', 'Invalid Session folder path');
+        const folders = await this.readFolders();
+        if (!folders.some(folder => folder.path === source)) throw new FSError('ENOENT', 'Session folder not found');
+        if (folders.some(folder => folder.path === target)) throw new FSError('EEXIST', 'Session folder already exists');
+        if (target.startsWith(`${source}/`)) throw new FSError('EINVAL', 'Cannot move a Session folder into itself');
+        const parentPath = folderParent(target);
+        if (parentPath && !folders.some(folder => folder.path === parentPath)) throw new FSError('ENOENT', 'Parent Session folder not found');
+        const now = Date.now();
+        const owned = (await this.list()).filter(session => session.folder === source || session.folder?.startsWith(`${source}/`));
+        await this.ensureFolderRecord();
+        // Folder records and every affected Session ownership change commit together,
+        // so a failure can never leave Sessions pointing at a folder that is gone.
+        await this.fs.meta.seq!.transaction!(async tx => {
+            const current = await this.readFolderEntries(tx);
+            if (!current.some(folder => folder.path === source)) throw new FSError('ENOENT', 'Session folder not found');
+            if (current.some(folder => folder.path === target)) throw new FSError('EEXIST', 'Session folder already exists');
+            await tx.setEntry(FOLDERS_PATH, FOLDERS_KEY, JSON.stringify(current.map(folder => {
+                if (folder.path === source) return { ...folder, path: target, name: target.slice(target.lastIndexOf('/') + 1), parentPath, updatedAt: now };
+                if (folder.path.startsWith(`${source}/`)) {
+                    const path = target + folder.path.slice(source.length);
+                    return { ...folder, path, parentPath: folderParent(path), updatedAt: now };
+                }
+                return folder;
+            })));
+            for (const session of owned) {
+                const folder = session.folder === source ? target : target + (session.folder ?? '').slice(source.length);
+                await this.writeManifestTx(tx, this.paths(session.id), { folder });
+            }
+        });
+        this.notify();
+    }
     async updateManifest(id: string, patch: Partial<ConversationManifest>): Promise<void> {
         const p = this.paths(id);
         if (patch.id && patch.id !== id) throw new FSError('EINVAL', 'Session identity cannot change');
-        await this.fs.meta.seq!.transaction!(async tx => {
-            const raw = await tx.getEntry(p.session, 'session');
-            if (!raw) throw new FSError('ENOENT', 'Session not found');
-            const current = JSON.parse(raw);
-            if (current.storageVersion !== 1) throw new Error('Session storage version incompatible');
-            const { id: _id, title, summary, origin, uiState, flow, createdAt: _created, updatedAt: _updated, ...historyPatch } = patch;
-            const next = { ...current, ...(title !== undefined ? { title } : {}), ...(summary !== undefined ? { summary } : {}), ...(origin !== undefined ? { origin } : {}),
-                ...(uiState ? { uiState: { ...current.uiState, ...uiState, ...(uiState.branchDrafts ? { branchDrafts: { ...current.uiState?.branchDrafts, ...uiState.branchDrafts } } : {}) } } : {}), ...(flow ? { flow } : {}), updatedAt: Date.now(), revision: current.revision + 1 };
-            const index = JSON.parse(await tx.getEntry(p.history, 'index') ?? 'null');
-            if (index?.schemaVersion !== 3) throw new Error('Session history version incompatible');
-            await tx.setEntry(p.session, 'session', JSON.stringify(next));
-            await tx.setEntry(p.history, 'index', JSON.stringify({ ...index, ...historyPatch, schemaVersion: 3 }));
-        });
+        if (patch.folder !== undefined) await this.ensureFolderRecord();
+        await this.fs.meta.seq!.transaction!(tx => this.writeManifestTx(tx, p, patch));
         this.notify();
+    }
+    private async writeManifestTx(tx: ISeqFileTransaction, p: SessionPaths, patch: Partial<ConversationManifest>): Promise<void> {
+        const raw = await tx.getEntry(p.session, 'session');
+        if (!raw) throw new FSError('ENOENT', 'Session not found');
+        const current = JSON.parse(raw);
+        if (current.storageVersion !== 1) throw new Error('Session storage version incompatible');
+        const { id: _id, title, summary, origin, folder, uiState, flow, createdAt: _created, updatedAt: _updated, ...historyPatch } = patch;
+        const normalizedFolder = folder === undefined ? undefined : normalizeFolderPath(folder);
+        if (normalizedFolder && normalizedFolder !== current.folder
+            && !(await this.readFolderEntries(tx)).some(item => item.path === normalizedFolder)) {
+            throw new FSError('ENOENT', 'Session folder not found');
+        }
+        const next = { ...current, ...(title !== undefined ? { title } : {}), ...(summary !== undefined ? { summary } : {}), ...(origin !== undefined ? { origin } : {}),
+            ...(normalizedFolder !== undefined ? { folder: normalizedFolder } : {}),
+            ...(uiState ? { uiState: { ...current.uiState, ...uiState, ...(uiState.branchDrafts ? { branchDrafts: { ...current.uiState?.branchDrafts, ...uiState.branchDrafts } } : {}) } } : {}), ...(flow ? { flow } : {}), updatedAt: Date.now(), revision: current.revision + 1 };
+        const index = JSON.parse(await tx.getEntry(p.history, 'index') ?? 'null');
+        if (index?.schemaVersion !== 3) throw new Error('Session history version incompatible');
+        await tx.setEntry(p.session, 'session', JSON.stringify(next));
+        await tx.setEntry(p.history, 'index', JSON.stringify({ ...index, ...historyPatch, schemaVersion: 3 }));
     }
     async getUIState(id: string): Promise<ConversationUIState | null> { return (await this.getManifest(id)).uiState ?? null; }
     async updateUIState(id: string, updates: Partial<ConversationUIState>): Promise<void> { await this.updateManifest(id, { uiState: updates }); }
@@ -158,4 +276,58 @@ export class SessionRepository implements ISessionRepository {
         try { const path = '/' + this.name(name.replace(/^@asset\//, '')); return await view.driver.exists(path) ? new Blob([await view.driver.readContent(path, { encoding: 'binary' })]) : null; }
         finally { await view.dispose(); }
     }
+    private async readFolders(): Promise<SessionFolder[]> {
+        if (!await this.fs.driver.exists(FOLDERS_PATH)) return [];
+        return this.readFolderEntries(this.fs.meta.seq!);
+    }
+    /** Drop every record of the given seq files (records outlive deleted files). */
+    private async clearEntries(paths: string[]): Promise<void> {
+        await this.fs.meta.seq!.transaction!(async tx => {
+            for (const path of paths) {
+                const keys: string[] = [];
+                await tx.walkEntries(path, entry => { keys.push(entry.key); return true; });
+                for (const key of keys) await tx.deleteEntry(path, key);
+            }
+        });
+    }
+    /** Read-modify-write the folder record inside one transaction (no lost updates). */
+    private async mutateFolders<T>(mutate: (folders: SessionFolder[]) => { folders: SessionFolder[]; result: T }): Promise<T> {
+        await this.ensureFolderRecord();
+        return this.fs.meta.seq!.transaction!(async tx => {
+            const { folders, result } = mutate(await this.readFolderEntries(tx));
+            await tx.setEntry(FOLDERS_PATH, FOLDERS_KEY, JSON.stringify(folders));
+            return result;
+        });
+    }
+    private async readFolderEntries(tx: Pick<ISeqFileTransaction, 'getEntry'>): Promise<SessionFolder[]> {
+        const raw = await tx.getEntry(FOLDERS_PATH, FOLDERS_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) throw new FSError('EIO', 'Invalid Session folder record');
+        return parsed as SessionFolder[];
+    }
+    private async ensureFolderRecord(): Promise<void> {
+        if (await this.fs.driver.exists(FOLDERS_PATH)) return;
+        try {
+            await this.fs.driver.createFile({ name: 'folders.seq', parentPath: '/var/lib/sessions', type: 'seqfile', recursive: true });
+        } catch (error) {
+            if (!(error instanceof FSError && error.code === 'EEXIST')) throw error;
+        }
+    }
+}
+
+function normalizeFolderPath(value: string | null | undefined): string | null {
+    if (value === null || value === undefined) return null;
+    const trimmed = String(value).trim();
+    if (!trimmed || trimmed === '/') return null;
+    const parts = trimmed.split('/').filter(Boolean);
+    if (!parts.length || parts.some(part => part === '.' || part === '..' || part.includes('\\') || part.includes('\0'))) {
+        throw new FSError('EINVAL', 'Invalid Session folder path');
+    }
+    return '/' + parts.join('/');
+}
+
+function folderParent(path: string): string | null {
+    const index = path.lastIndexOf('/');
+    return index <= 0 ? null : path.slice(0, index);
 }

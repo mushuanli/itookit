@@ -463,3 +463,50 @@ describe('loadData', () => {
         expect(store.getState().status).toBe('error');
     });
 });
+
+// ── silent loadData (background refresh) ─────────────────────────────────────
+
+describe('silent loadData', () => {
+    function seedTree(): void {
+        engine.children.set('/', [makeDirectoryNode({ id: '/session', name: 'session', path: '/session' })]);
+        engine.children.set('/session', [makeDirectoryNode({ id: '/session/tasks', name: 'tasks', path: '/session/tasks' })]);
+        engine.children.set('/session/tasks', [makeEngineNode({ id: '/session/tasks/t1', name: 't1', path: '/session/tasks/t1' })]);
+    }
+
+    it('keeps the expanded tree and skips the loading placeholder', async () => {
+        seedTree();
+        await adapter.loadData();
+        await adapter.expandDirectory('/session');
+        await adapter.expandDirectory('/session/tasks');
+
+        expect(store.getState().items[0].children?.[0].children).toHaveLength(1);
+
+        const actions: string[] = [];
+        const originalDispatch = store.dispatch.bind(store);
+        (store as unknown as { dispatch: (action: { type: string }) => void }).dispatch = action => {
+            actions.push(action.type);
+            originalDispatch(action as never);
+        };
+
+        await adapter.loadData({ silent: true });
+
+        expect(actions).not.toContain('ITEMS_LOAD_START');
+        expect(store.getState().status).toBe('success');
+        // Expanded branches are re-read, not dropped.
+        expect(store.getState().items[0].children?.[0].children).toHaveLength(1);
+    });
+
+    it('still shows the loading state on a non-silent load', async () => {
+        seedTree();
+        const actions: string[] = [];
+        const originalDispatch = store.dispatch.bind(store);
+        (store as unknown as { dispatch: (action: { type: string }) => void }).dispatch = action => {
+            actions.push(action.type);
+            originalDispatch(action as never);
+        };
+
+        await adapter.loadData();
+
+        expect(actions[0]).toBe('ITEMS_LOAD_START');
+    });
+});

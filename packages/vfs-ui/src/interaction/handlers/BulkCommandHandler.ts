@@ -5,6 +5,8 @@
  */
 import type { CommandBus } from '../CommandBus';
 import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
+import { describeDeleteError } from '../../utils/delete-error';
+import { partitionDeletable, READ_ONLY_DELETE_MESSAGE } from '../../utils/delete-guard';
 
 export class BulkCommandHandler {
     private unsubs: (() => void)[] = [];
@@ -24,7 +26,18 @@ export class BulkCommandHandler {
                 let result: boolean | Promise<boolean> = confirm(`确定要删除 ${itemIds.length} 个项目吗?`);
                 result = await Promise.resolve(result);
                 if (result) {
-                    await this.service.deleteItems(itemIds);
+                    const { deletable, blocked } = partitionDeletable(this.store.getState().items, itemIds);
+                    if (!deletable.length) {
+                        alert(READ_ONLY_DELETE_MESSAGE);
+                        return;
+                    }
+                    if (blocked.length) console.warn('[BulkCommandHandler] Skipped read-only entries:', blocked);
+                    try {
+                        await this.service.deleteItems(deletable);
+                    } catch (error) {
+                        console.error('[BulkCommandHandler] Delete failed:', error);
+                        alert(`删除失败: ${describeDeleteError(error)}`);
+                    }
                 }
             }),
 

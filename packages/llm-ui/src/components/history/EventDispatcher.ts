@@ -1,7 +1,7 @@
 // @file: llm-ui/components/history/EventDispatcher.ts
 
 import { EventCleanup, TimerManager } from '../common';
-import { showConfirmDialog } from '@itookit/ui-common';
+import { copyText, showConfirmDialog } from '@itookit/ui-common';
 import type { SessionRenderer } from './SessionRenderer';
 import type { StreamController } from './StreamController';
 import type { CollapseController } from './CollapseController';
@@ -269,7 +269,7 @@ export class EventDispatcher {
 
     private async handleCopy(content: string, btn: HTMLElement): Promise<void> {
         try {
-            await navigator.clipboard.writeText(content);
+            await copyText(content);
             const orig = btn.innerHTML;
             btn.innerHTML = '✓';
             this.timers.setTimeout(() => { btn.innerHTML = orig; }, 1500);

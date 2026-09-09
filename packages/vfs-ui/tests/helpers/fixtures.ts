@@ -63,6 +63,8 @@ export class MockSessionEngine {
     private handlers = new Map<string, Array<(e: EngineEvent) => void>>();
     /** Pre-populated node map for driver.getNode() responses. Keyed by id or path. */
     readonly nodes = new Map<string, EngineNode>();
+    /** Optional children per directory path for driver.getChildren(). */
+    readonly children = new Map<string, EngineNode[]>();
 
     driver = {
         on: (event: EngineEventType, callback: (e: EngineEvent) => void): (() => void) => {
@@ -75,8 +77,8 @@ export class MockSessionEngine {
             };
         },
 
-        getChildren: async (_parentPath: string): Promise<EngineNode[]> => {
-            return [];
+        getChildren: async (parentPath: string): Promise<EngineNode[]> => {
+            return this.children.get(parentPath) ?? [];
         },
 
         getNode: async (idOrPath: string): Promise<EngineNode | null> => {

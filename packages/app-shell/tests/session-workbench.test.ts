@@ -14,14 +14,18 @@ function setup() {
     const destroy = vi.fn(async () => {}), factory = vi.fn(async (...args: any[]) => { manifest.currentBranch = args[1].target.branch ?? 'main'; return { destroy }; });
     const onSelect = vi.fn();
     const sidebar = element();
-    const workbench = new SessionWorkbench(sidebar as any, element() as any, repository as any, files as any, factory as any, onSelect, undefined, { onChanged: () => () => {} } as any, factory as any);
-    return { sidebar, workbench, repository, files, factory, release, dispose, destroy, onSelect, manifest, changed: () => listeners.forEach(listener => listener()) };
+    const kernel = { onChanged: () => () => {}, cancel: vi.fn(async () => {}), task: vi.fn(async () => ({ effects: {} })) };
+    const workbench = new SessionWorkbench(sidebar as any, element() as any, repository as any, files as any, factory as any, onSelect, undefined, kernel as any, factory as any);
+    return { kernel, sidebar, workbench, repository, files, factory, release, dispose, destroy, onSelect, manifest, changed: () => listeners.forEach(listener => listener()) };
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('Session workbench lifecycle', () => {
     it('uses vfs-ui for the Session sidebar with directory activation', async () => {
         const f = setup(); await f.workbench.start();
-        expect(createVFSUI).toHaveBeenCalledWith(expect.objectContaining({ activateDirectories: true, readOnly: true, primaryAction: expect.objectContaining({ label: '＋ 新建会话' }) }), expect.anything());
+        expect(createVFSUI).toHaveBeenCalledWith(expect.objectContaining({ activateDirectories: true, readOnly: false, exportDirectories: true, fileCreation: expect.objectContaining({ label: '会话' }) }), expect.anything());
+        const options = (createVFSUI as any).mock.calls[0][0];
+        expect(options.primaryAction).toBeUndefined();
+        expect(typeof options.exportItem).toBe('function');
         await f.workbench.destroy();
     });
     it('records branch changes and restores explicit branch routes without navigation loops', async () => {
@@ -67,4 +71,31 @@ describe('Session workbench lifecycle', () => {
         expect(f.destroy).toHaveBeenCalledOnce(); expect(f.release).toHaveBeenCalledOnce();
         expect(f.workbench.getActiveResourceId()).toBeNull();
     });
+});
+
+it('offers reset only on tasks and cancels through Kernel without deleting history', async () => {
+    const f = setup(); await f.workbench.start();
+    const options = vi.mocked(createVFSUI).mock.calls.at(-1)![0];
+    const defaults = [{ id: 'export', label: 'export' }];
+    expect(options.contextMenu!.items!({ id: '/s/files/note.md' } as any, defaults)).toEqual(defaults);
+    const menu = options.contextMenu!.items!({ id: '/s/tasks/t' } as any, defaults);
+    expect(menu).toHaveLength(1);
+    const reset = menu[0] as { onClick: (item: any) => void };
+    reset.onClick({}); reset.onClick({});
+    await vi.waitFor(() => expect(f.kernel.task).toHaveBeenCalledWith('s', 't'));
+    expect(f.kernel.cancel).toHaveBeenCalledTimes(1);
+    expect(f.kernel.cancel).toHaveBeenCalledWith('s', 't', expect.stringContaining('强制复位'));
+    expect(f.factory).not.toHaveBeenCalled();
+    await f.workbench.destroy();
+});
+
+it('keeps cleanup failures visible and permits retrying reset', async () => {
+    const f = setup();
+    f.kernel.task.mockResolvedValueOnce({ effects: { shell: { cleanupPending: true } } } as any);
+    await expect((f.workbench as any).resetTask('/s/tasks/t')).rejects.toThrow('仍待清理');
+    f.kernel.cancel.mockRejectedValueOnce(new Error('process could not be stopped'));
+    await expect((f.workbench as any).resetTask('/s/tasks/t')).rejects.toThrow('process could not be stopped');
+    await (f.workbench as any).resetTask('/s/tasks/t');
+    expect(f.kernel.cancel).toHaveBeenCalledTimes(3);
+    await f.workbench.destroy();
 });

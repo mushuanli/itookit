@@ -36,10 +36,14 @@ export class EngineAdapter {
         return (name: string, isDir: boolean) => this.fileTypePort.getIcon(name, isDir);
     }
 
-    async loadData(): Promise<void> {
-        adapterDEBUG.loadData('explicit call');
+    async loadData(options: { silent?: boolean } = {}): Promise<void> {
+        adapterDEBUG.loadData(options.silent ? 'explicit call (silent)' : 'explicit call');
+        const previousItems = this.store.getState().items;
+        // A silent reload keeps the current list on screen (no "loading" placeholder)
+        // and re-reads expanded branches, so the tree neither flashes nor collapses.
+        const silent = options.silent === true && previousItems.length > 0;
         try {
-            this.store.dispatch({ type: 'ITEMS_LOAD_START' });
+            if (!silent) this.store.dispatch({ type: 'ITEMS_LOAD_START' });
             const rootChildren = await this.engine.driver.getChildren('/') as FSNode[];
             const uiItems = mapFSNodesToUIItems(
                 rootChildren,
@@ -47,6 +51,7 @@ export class EngineAdapter {
                 undefined,
                 this.showFileExtensions
             );
+            if (silent) await this.reloadOpenChildren(uiItems, previousItems);
             const tags = this.buildTagsMap(uiItems);
             adapterDEBUG.dispatch('STATE_LOAD_SUCCESS', `${uiItems.length} items`);
             this.store.dispatch({
@@ -57,6 +62,36 @@ export class EngineAdapter {
             console.error('[EngineAdapter] Failed to load data:', error);
             this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error } });
         }
+    }
+
+    /**
+     * Re-read the children of every directory that was open before a silent reload.
+     * Reuses the previous tree to decide which nodes are open (the store only keeps
+     * the deepest expanded id, not the whole path), and fetches children fresh so
+     * Task labels do not go stale.
+     */
+    private async reloadOpenChildren(next: VFSNodeUI[], previous: VFSNodeUI[]): Promise<void> {
+        const openBefore = new Set<string>();
+        const collect = (items: VFSNodeUI[]) => {
+            for (const item of items) {
+                if (item.type === 'directory' && item.children !== undefined) openBefore.add(item.id);
+                if (item.children?.length) collect(item.children);
+            }
+        };
+        collect(previous);
+
+        const walk = async (items: VFSNodeUI[]): Promise<void> => {
+            for (const item of items) {
+                if (item.type !== 'directory' || !openBefore.has(item.id)) continue;
+                const children = await this.engine.driver.getChildren(item.id) as FSNode[];
+                const uiChildren = children.map(node =>
+                    mapFSNodeToUIItem(node, this.iconResolver, undefined, this.showFileExtensions)
+                );
+                item.children = uiChildren;
+                await walk(uiChildren);
+            }
+        };
+        await walk(next);
     }
 
     /**

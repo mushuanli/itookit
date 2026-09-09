@@ -173,7 +173,7 @@ class DeltaBatcher {
             clearTimeout(this.timer);
             this.timer = null;
         }
-        const batch = this.pending;
+        const batch = mergeConsecutive(this.pending);
         this.pending = [];
         if (batch.length === 0) return this.chain;
         // 每个批次串到前一批之后，保证 emit 顺序与增量到达顺序一致。
@@ -185,6 +185,25 @@ class DeltaBatcher {
         this.chain = next.catch(() => {});
         return next;
     }
+}
+
+/**
+ * Collapse runs of same-type deltas into one delta.
+ *
+ * Every provider chunk would otherwise become its own journal event (hundreds per
+ * response), bloating task storage and the transcript view. Only *consecutive*
+ * same-type deltas are merged, so thinking/content interleaving stays ordered.
+ */
+function mergeConsecutive(
+    batch: Array<{ type: 'stream:thinking' | 'stream:content'; delta: string }>,
+): Array<{ type: 'stream:thinking' | 'stream:content'; delta: string }> {
+    const merged: Array<{ type: 'stream:thinking' | 'stream:content'; delta: string }> = [];
+    for (const item of batch) {
+        const last = merged[merged.length - 1];
+        if (last && last.type === item.type) last.delta += item.delta;
+        else merged.push({ ...item });
+    }
+    return merged;
 }
 
 class ResponseAggregator {

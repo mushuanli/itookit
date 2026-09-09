@@ -26,6 +26,10 @@ export function sessionStat(session: SessionRecord, resourceBlocked = false) {
         acknowledged: session.status !== 'suspending', archived: session.status === 'archived',
         blockedBy: resourceBlocked ? 'resource-claims' : undefined } as const;
 }
+/** Stat for a Session whose storage is gone: an interrupted removal, or a stale catalog entry. */
+export function closedSessionStat(sessionId: string) {
+    return { id: sessionId, phase: 'closed', acknowledged: true, archived: false, blockedBy: undefined } as const;
+}
 export type TaskStat = ReturnType<typeof taskStat>;
 export type TaskStats = ReturnType<typeof taskStats>;
 export type SessionStat = ReturnType<typeof sessionStat>;

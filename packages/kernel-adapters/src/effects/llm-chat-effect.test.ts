@@ -26,8 +26,32 @@ describe('LlmChatEffectAdapter streaming', () => {
 
         const emitted = emit.mock.calls.map(([event]) => (event as { payload: unknown }).payload);
         expect(emitted).toContainEqual({ type: 'stream:thinking', delta: 'Hmm ' });
-        expect(emitted).toContainEqual({ type: 'stream:content', delta: 'Hello' });
-        expect(emitted).toContainEqual({ type: 'stream:content', delta: ' world' });
+        // Consecutive content deltas in one batch collapse into a single event so the
+        // journal does not grow by one entry per provider chunk.
+        expect(emitted).toContainEqual({ type: 'stream:content', delta: 'Hello world' });
+    });
+
+    it('keeps interleaved thinking and content deltas ordered', async () => {
+        const emit = vi.fn(async () => undefined);
+        const service = streamService(async function* () {
+            yield { choices: [{ index: 0, delta: { thinking: 'a' }, finish_reason: null }] };
+            yield { choices: [{ index: 0, delta: { content: 'b' }, finish_reason: null }] };
+            yield { choices: [{ index: 0, delta: { thinking: 'c' }, finish_reason: null }] };
+            yield { choices: [{ index: 0, delta: { content: 'd' }, finish_reason: 'stop' }] };
+        });
+        const adapter = new LlmChatEffectAdapter(service);
+
+        await adapter.execute({
+            resourceHandleId: 'llm-handle', connectionId: 'conn', request: { messages: [] },
+        }, context(emit));
+
+        const emitted = emit.mock.calls.map(([event]) => (event as { payload: unknown }).payload);
+        expect(emitted).toEqual([
+            { type: 'stream:thinking', delta: 'a' },
+            { type: 'stream:content', delta: 'b' },
+            { type: 'stream:thinking', delta: 'c' },
+            { type: 'stream:content', delta: 'd' },
+        ]);
     });
 
     it('merges tool_calls by index and keeps the real tool_use finish reason', async () => {

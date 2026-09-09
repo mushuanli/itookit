@@ -78,6 +78,7 @@ export const createLLMFactory = (
         commandBus?: ICommandBus;
         kernel?: Kernel;
         privilegedCommands?: import('./domain/ports/IPrivilegedCommandService').IPrivilegedCommandService;
+        sessionSkills?: import('@itookit/common').SessionSkillControls;
     },
 ): EditorFactory => {
 
@@ -115,6 +116,7 @@ export const createLLMFactory = (
             commandBus: deps.commandBus,
             kernel: deps.kernel,
             privilegedCommands: deps.privilegedCommands,
+            sessionSkills: deps.sessionSkills,
         };
 
         // 将创建过程包装为 Promise，注册到 pendingCreations

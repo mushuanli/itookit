@@ -516,20 +516,22 @@ Codex 支持并行 subagent、等待汇总、检查子线程、向运行中子�
 
 #### 7.8.2 当前能力基线与实际缺口
 
-当前 Durable Kernel 已具备不少必要原语，不能把“UI 没入口”误判为“底层未实现”：
+2026-09-08 按当前源码核对。设计目标与现有实现分开记录，不能把旧缺口清单当成当前状态：
 
-| 能力 | 当前基线 | 仍需补齐 |
+| 能力 | 当前实现 | 仍需补齐或验收 |
 |---|---|---|
-| 持久子任务 | Kernel `spawnKey` 提供幂等 child spawn；Task identity 在恢复后保持稳定 | Flow `builtin.spawn` 与 delegation 应统一返回可观察的 group/task handles |
-| 动态等待 | Kernel `WaitSpec` 已支持 `task` / `child` / `any` / `all` / `quorum` | Flow 目前仅暴露静态入边和 delegation `join=all/none`，Agent 无 `await_tasks` 工具 |
-| 任务控制 | `TaskHandle` 已有 `status/wait/signal/start/respond/cancel/events/history/attempts` | DagWorkbench 缺少 task tree、单任务 follow-up、retry、transcript 和阻塞原因展示 |
-| 持久通讯 | Kernel 已有 cross-session outbox/inbox | 未向 Agent 暴露受限 mailbox；没有共享 task board、claim/lease 产品层 |
-| 并发 | DAG 无入边节点会并发进入 ready；Kernel 有 worker 全局并发上限；delegation 有组内上限 | 缺 Flow 独立 `maxConcurrency`/pool；`DagRunSpec.maxNodes` 已声明但尚未执行 |
-| 生命周期 | Kernel 支持 session suspend/resume、task cancel 和交互恢复 | 缺 Goal 实体、可编辑完成条件、pause/resume 进度 UI 和后台通知 |
-| 工作区 | Kernel 有 workspace snapshot/diff/merge 抽象 | 缺 Git worktree adapter、节点隔离策略、自动合并与冲突处理 UI |
-| 结构化输出 | Provider 层支持 `responseFormat/json_schema` | `LlmNodeConfig`、Agent Inspector 和 edge contract 尚未暴露 output schema/validation |
-| Memory/Context | 已声明 `memoryPolicy`，ContextAssembler 支持可选 memory retrieval | 会话装配尚未注入实际 `retrieveMemory`；缺长任务自动 compaction 生命周期 |
-| 扩展点 | 已有 plugin、tool、skill、MCP 和 provider hooks | 缺统一 Harness lifecycle hooks（task/tool/subagent/compact/run）及 hook trust 管理 |
+| 持久子任务 | Kernel 幂等 child spawn；Flow delegation 暴露 group 与 task IDs | builtin.spawn 的统一 Agent task handle 工具面仍需核验 |
+| 动态等待 | Kernel task/child/any/all/quorum；Flow delegation all/any/first-success/quorum | 通用 `await_tasks` Agent 工具仍需补齐 |
+| 任务控制 | Task pause/interrupt/resume/cancel；DagWorkbench task tree、signal/cancel | 单任务 retry 与独立持久 transcript 查询/交换分页/面板展示/JSON 和纯文本导出已接入；pending interaction 后同进程调度延续已修复，并以单次/连续人工回应后的下游输出验证；重试下游重算、transcript 底层存储分页和完整阻塞诊断仍需补齐 |
+| 持久通讯 | Kernel cross-session outbox/inbox 与带 token 的 TaskBoard claim/renew/complete | 受限 Agent mailbox/task board 产品接线仍需核验 |
+| 并发 | Flow maxNodes/maxConcurrency/timeoutMs/maxTokens 已接入 executor；节点上限覆盖初始图、patch 和 delegation | 恢复后的 Flow 调度状态及预算连续性仍需验收 |
+| 生命周期 | Kernel Session suspend/resume；Flow Goal 与运行 UI | Goal 完成条件验证、后台通知与恢复仍需验收 |
+| 工作区 | Git worktree manager；未配置 manager 时非 shared 模式拒绝执行 | 三端装配、自动合并与冲突处理 UI 仍需核验 |
+| 结构化输出 | Agent responseFormat/outputValidation、Inspector；data edge 端口 schema 引用在发布/直接执行/动态 patch 校验 | 已提供受限 schema 注册表和 data edge 内容校验；结构兼容推导及 responseFormat 到端口契约的自动绑定仍待补齐 |
+| Memory/Context | ConversationSystemOptions → createSessionManager → SessionManager 已传递 retrieveMemory 注入点，检索接收当前 Session 与复制的 memoryPolicy；Agent 每次模型请求前按配置裁剪历史并保护系统指令、当前用户请求和完整工具组 | 已装配 Session 内持久 memory provider；跨 Session 共享、模型记忆工具、语义摘要及长期运行恢复仍待完成 |
+| 扩展点 | Harness hooks 已有 host trust/hash/timeout/output boundary，Flow 发出生命周期事件 | 完整事件接线与信任管理 UI 仍需核验 |
+
+源码依据：`llm-flow/src/flow/executor.ts`、`delegation-runtime.ts`、`builtin-plugins.ts`，`llm-ui/src/components/DagWorkbench.ts`，`llm-session/src/session/session-manager.ts`，`llm-tasks/src/durable/agent-program.ts`。本次重跑 llm-flow 全套 62 项测试；这些测试不替代上述尚待验收的 UI、恢复与平台能力。
 
 #### 7.8.3 Spawn 依赖边界
 
@@ -542,12 +544,16 @@ type SpawnDependencyTarget =
     | { type: 'upstream'; port: string };    // 预声明的上游输入
 ```
 
-禁止动态任务随意引用任意全局节点或尚未创建的未来节点。Graph patch 应在应用前校验：
+禁止动态任务随意引用任意全局节点或尚未创建的未来节点。Graph patch 在应用前校验（`llm-flow/src/flow/graph-patch.ts`）：
 
 - node/edge id 唯一且 idempotency key 生效；
 - edge 完整保留 `kind` 与 `onFailure`；
 - 不存在悬空引用、非法端口和动态新增环；
 - patch 后总节点数不超过 Flow 限制。
+
+边的目标必须是本批新节点，来源可以是本批节点、parent 或 parent 的直接入边节点；不允许 patch 修改既有节点的依赖。未指定端口时使用 result/input，control edge 不检查数据端口。校验完成后才发布节点和边，失败时不创建 patch 子任务，并取消本次运行剩余任务、释放已准备的 workspace。相同 idempotency key 和内容在当前 executor 内跳过，同键不同内容拒绝；跨进程恢复仍待补齐。
+
+运行失败清理（2026-09-08）：初始节点超限在打开 Session、触发 hook 和准备工作目录前拒绝；取得 workspace 后的编译、调度、hook、委派、超时及 graph effect 异常均进入统一失败路径，尝试取消尚未完成的已提交实例，并调用 workspace.finish(failed)。清理也失败时抛 AggregateError 保留两项原因。正常返回后的 workspace 清理只执行一次，FlowExecutionHandle.workspaceCompletion 提供可等待的结果，清理失败不改写已成功的根 Task；Run 查询和面板已接入 workspaceFinalization（pending/succeeded/failed），错误单独展示，不改写根任务结果。执行器先将 pending 写入 Session shared `flow.run.<rootTaskId>.workspace`，清理结束后保存结果；新命令服务可从记录读取。pending 时根任务已结束也继续刷新。DagCommandServiceOptions 可注入 workspaceManager，实际平台管理器装配仍按宿主能力提供。保存最终状态也失败时 workspaceCompletion 拒绝并保留错误；旧持久记录可能停在 pending，不伪报完成。宿主崩溃后的清理续跑/状态恢复仍待实现。取消使用 Promise.allSettled，不能把单个取消失败当作已确认停止。这些是存活进程的清理保证，尚不是崩溃后的租约回收或 Flow 调度恢复。
 
 无依赖 spawned nodes 可以并发执行；一个节点有多个入边时，DAG fan-in 天然表示静态 `wait all`，不需要额外 Wait 节点。只有运行时 task handle、`any`、`first-success`、`quorum` 或 timeout 等动态等待才进入 TaskGroup/`await_tasks` API。
 
@@ -555,7 +561,7 @@ type SpawnDependencyTarget =
 
 > 2026-09-05：下列 TaskGroup 策略的内核生命周期、持久传播和暂停确认以 [Durable Harness 协议 §12](durable-harness-protocol.md#12-监管session-与-taskgroup) 为目标规范。该协议仍待实现；Flow 应编译到其 Task/Wait/control 原语，不维护另一套执行事实。
 
-当前 `join.mode` 同时承载“是否收集结果”和“是否等待”的名称，但实际 `all/none` 都等待已启动 child。后续规范化为三个互不耦合的策略：
+旧 `join.mode` 同时承载“是否收集结果”和“是否等待”，兼容字段的 `all/none` 都等待已启动 child。当前 delegation 已拆分 execution/wait/result；下面展示策略模型，准确字段以 `llm-common` 类型和 `delegation-runtime.ts` 为准：
 
 ```ts
 interface TaskGroupPolicy {
@@ -629,7 +635,7 @@ interface FlowRunPolicy {
 
 #### 7.8.6 结构化输出、Hooks 与 Goal
 
-多 Agent DAG 不应依赖自然语言猜测上下游格式。`LlmNodeConfig` 后续增加：
+多 Agent DAG 不应依赖自然语言猜测上下游格式。`LlmNodeConfig` 已接入结构化输出。下面保留概念模型；当前 responseFormat 的 schema 使用 `json_schema: { name, schema, strict? }`，并非顶层 `schema`：
 
 ```ts
 interface StructuredOutputPolicy {
@@ -645,6 +651,12 @@ interface StructuredOutputPolicy {
 ```
 
 data edge 校验 source output schema 与 target input schema；运行时无效输出按策略 fail/repair/continue，并记录原始响应与校验错误。
+
+当前端口契约（2026-09-08）：InputPortSpec/OutputPortSpec.schema 是 `{ id, version? }` 引用，不是内嵌 JSON Schema。目标无 schema 时不施加类型限制；目标有 schema 时，来源必须声明完全相同的 id/version（未指定版本也必须一致），不隐式转换版本或猜测结构兼容性。Flow 发布校验返回 incompatible-port-schema；直接 DurableFlowExecutor.submit 在打开 Session、创建 Task 或准备 worktree 前拒绝；动态 graph patch 在发布任何节点前使用同一规则。control edge 不传数据，因此跳过。实现见 `llm-flow/src/flow/port-contract.ts`。
+
+当前内容校验：`DagPluginRegistry.registerSchema({ id, version? }, schema)` 注册不可覆盖的结构定义；`getSchema` 返回副本，未指定版本不解析到最新版。目标端口有 schema 的 data edge 在发布、直接执行和动态 patch 时要求相同且已注册的引用。执行器在下游 Task 创建前，以与依赖消费相同的 `extractNodeOutput` 提取成功上游产物并校验；无效数据使 submit 失败并执行已有失败清理，不会启动下游，也不会改写已成功的上游记录。control edge 不校验；上游失败继续走既有 onFailure 语义。
+
+注册表支持 boolean schema，以及 type（object/array/string/number/integer/boolean/null）、properties、required、items、additionalProperties、enum、title、description。嵌套定义同样验证；未知关键字、无效定义明确拒绝，未声称支持完整 JSON Schema、引用解析或隐式 JSON 文本解析。结构子类型推导、Agent responseFormat 自动编译成端口引用、无消费边输出的契约验证、运行定义持久冻结以及端口错误的 repair/continue 策略仍待补齐。
 
 Harness hooks 采用小而稳定的事件集合：
 
@@ -695,11 +707,13 @@ Goal 支持进度摘要、追加约束、pause/resume 和完成标准验证，�
 - Delegation 已拆分 `execution / wait / result / failure / budget`，支持 `all / any / first-success / quorum`、结构化取消、显式深度、并发和超时边界；detached 必须配置 deadline。
 - 动态 spawn edge 支持 `$parent` 与 `$upstream:<nodeId>` 锚点，保留 `kind / onFailure`；无依赖节点由 DAG scheduler 自然并发。
 - Flow Run 已实现 `maxNodes / maxConcurrency / timeoutMs / maxTokens`、Goal、task tree、单任务 signal/cancel、时间与 token 统计。
-- Agent 已接入 `responseFormat + outputValidation`（fail/repair/continue）、可配置上下文压缩；Session ContextAssembler 已开放 memory retrieval 注入点。
+- Agent 已接入 `responseFormat + outputValidation`（fail/repair/continue）、可配置的逐轮历史裁剪；Session ContextAssembler 已开放 memory retrieval 注入点。
 - Harness hook 使用可信来源、content hash、timeout 和输出上限的 host boundary；Flow 文档不能自行安装 hook 代码。
 - Kernel Session 已支持任务恢复/列举、父子取消传播、跨 Session durable mailbox，以及带 CAS claim/renew/expiry lease 的可选 task board。
 - worktree 使用 argv-safe Git manager；没有配置 workspace manager 时非 shared 模式 fail closed。
 - `builtin.flow` Composite 在执行前递归展开并 namespace 到同一 DAG，带循环检测、参数绑定和入口/出口边重写，不引入嵌套 runtime。
+
+上下文裁剪的当前语义（2026-09-08）：`maxMessages` 是触发阈值，`keepRecent` 是保留最近消息的数量（不超过阈值）。始终保留全部 system 消息和最后一条 user 消息；若保留窗口落在 tool 结果中，会扩展到对应 assistant 调用及整组结果，按原顺序返回。因此必要消息可能超过阈值，不宣称严格 token 上限。该步骤在每次模型请求前运行，结果进入持久 Task state；它不生成语义摘要，也不删除历史 Effect 记录。Agent 的模型 Effect 使用持久 exchange 序号，而非裁剪后的消息数作为操作身份，防止多轮压缩造成幂等 key 冲突。已覆盖 checkpoint 序列化重放和真实 Kernel 连续五轮工具执行。成功 load_skill 的 adapter 另附关键规则快照，Agent 在持久状态中独立保存并于每轮重注入，不依赖旧 tool 输出留存。Flow 初始化选定 Skill 的正文与关键规则均已作为 system 消息注入；直接聊天初始化及聊天内 Flow 的 AGENT.md 项目块已接入；独立 DAG RunStart 已从宿主 Session context resolver 获取项目/加载技能/索引快照，执行器冻结该快照，在静态、Composite 展开、动态 patch 和委派的每个 Agent 实例创建时写入输入；聊天内 Flow 同样提供项目/Skill 来源，相同既有系统消息去重；无预组装 messages 时也消费合并后的 systemPrompt，并遵守 inherit/replace/none。独立 skill.load、独立 DAG 的静态/Composite 节点与预声明委派模板已通过宿主 bindNode 复用会话身份绑定逻辑；运行中 graph patch 节点已在整批发布前经宿主异步解析身份，绑定失败不提交本批新增节点，原工具能力、预算和委派调度策略保持不变；内部委派模板已保留解析身份并递归限制为原模板能力声明。动态节点通过编译时 nodeDefaults 继承产生节点所属 Flow 的默认身份层，Composite 子 Flow 保留自身作用域；默认配置在提交时冻结，详见 [Skill 设计](skill-design.md#6-压缩保护修正日志与委派)。
 
 ---
 
@@ -730,7 +744,7 @@ Goal 支持进度摘要、追加约束、pause/resume 和完成标准验证，�
 
 **已决策**（本轮评审确定）：
 
-1. **memoryPolicy**：仅 Agent 长期形态持有，flow 临时节点不继承（靠显式文本传参，不靠隐式记忆）。
+1. **memoryPolicy**：仅 Agent 长期形态持有，flow 临时节点不继承（靠显式文本传参，不靠隐式记忆）。ConversationRunCoordinator.executeDag 在上下文组装阶段禁用 retrieveMemory，因此交给 createSpec/动态绑定器的快照不含父 Agent 的检索记忆；直聊路径继续按策略检索。
 2. **delegation 通讯模型**：父 Agent 通过声明工具返回结构化 `items[]`；每项成为 child payload。child 上下文由 `contextSource` 明确选择，输出是否进入 Flow 结果由 `join.mode` 决定，不隐式写回已经结束的父 Agent。
 3. **systemPrompt / tools 引用模型**：systemPrompt、tool、skill、connection 均为「配置实体 + id 引用」，Agent 与 Flow 节点用 `LlmNodeConfig` 引用；`systemPromptId` 引用 SystemPrompt 库（settings 管理），`toolIds` 直接引用 tool（不引入 ToolSet 层）。
 4. **systemPrompt 数组化**：`systemPrompt: string[]`（引用 resolve 结果 ⊕ 内联增量），底层多 system 消息，不拼字符串。
@@ -741,3 +755,67 @@ Goal 支持进度摘要、追加约束、pause/resume 和完成标准验证，�
 **待确认**：
 
 8. **统一大 Node（Composite）**：采用“编译期展开”而不是嵌套 runtime。`builtin.flow` 引用不可变 Flow revision，展开后与父 Flow 共用同一个 DAG scheduler、limits、task tree 与取消域。
+
+### 动态节点连接作用域
+
+编译产物 `DagRunSpec.nodeConnections` 按节点保存所属 Flow 的 connections/defaultConnection 和宿主 fallbackConnectionId。Composite 展开保留子 Flow 的连接表，执行器提交时复制；patch 和委派后代继承产生节点的作用域。动态 patch 在身份绑定后、整批发布前解析连接，委派子节点在生成后、提交 Task 前解析，规则与静态节点一致：别名映射为全局连接 ID，显式全局 ID 透传，缺省取所属 Flow 默认槽位再回退宿主连接。该元数据用于连接解析，不授予工具权限；还不构成完整调度恢复或外部配置版本冻结。
+
+### 独立任务 Transcript
+
+`dag.run.transcript({ sessionId, taskId, targetTaskId })` 从持久 Run 根任务的 runTasks 清单校验目标归属，再返回目标任务的输入、输出、状态/version、Effect 请求/结果/错误和 interaction 记录。清单包含循环全部实例、persistOutput=false 节点和 detached 节点；根任务自身也可查询。LLM/工具交换从持久 Effect 读取，不用已压缩的 Agent 消息窗口替代，因此可查询压缩前的模型响应；Effect 数组顺序不承诺跨事件的全局时间线。重新建立 Kernel/命令服务后无需原执行句柄即可查询已有 Run 根任务。DagWorkbench 每个任务提供独立对话框，按交换分段显示记录并支持 JSON 和纯文本导出；内容写入 textContent，关闭后忽略迟到的异步结果，面板轮询不替换对话框。当前支持按 Effect 分页（默认 100、上限 500），后续页必须带首屏 version 与 nextOffset，使用精确历史快照保证翻页一致性；UI 提供加载更多，读完全部页才启用完整 JSON/纯文本导出。纯文本头包含 Session/Run/Task、节点、状态、version 和交换总数，后续分段保留完整输入、每条 Effect、interaction 和输出。输入/输出/interaction 仍完整返回，单条 Effect 大小没有字节上限，底层仍读取完整任务快照，未实现存储读取与内存按页受限，也不表示运行中调度恢复已实现；根聚合任务仍在调度后段生成，尚未生成根任务的执行不适用此查询。旧根任务没有 runTasks 清单时不猜测子任务归属。Run signal 的显式 targetTaskId 同样限定在当前句柄的 taskIds 内。
+
+### Run 记录重新连接
+
+根聚合任务 input.run 保存 version=1、初始 goal 和调度结束时的 usage 摘要，input.runTasks 保存全部任务实例。`dag.run.get({ taskId, sessionId? })` 在没有内存句柄时要求 sessionId，读取持久根记录并 attach 清单内任务，恢复 latest-node/iterations/taskTree/detachedNodes 与目标/用量视图；返回 attachedFromStorage=true 明确表示只重新连接记录。DagWorkbench.openRun 可传 Session ID，后续刷新沿用该 Session。打开 Run、选择/加载草稿和销毁面板会使旧请求失效；轮询另按请求序号丢弃迟到响应，旧查询失败不能停止新 Run 的刷新。查询只读取所属 Run 的任务，不再扫描整个 Session 任务表。
+
+目标更新通过 Session shared key `flow.run.<rootTaskId>.goal` 做版本条件写入，重新连接和每次 RunGet 均优先读取更新后的目标，已连接服务也能看到其他服务实例的持久更新。目标记录写入与 Session suspend/resume 是分开的操作，后者失败仍需调用方处理；本批未实现跨操作事务。用量保持原调度摘要语义，不宣称包括后续 detached 子任务成本。根任务尚未生成、缺少 v1 根元数据的记录不支持重新连接；route/loop/patch/委派调度状态和工作目录收尾仍未恢复。
+
+### 委派上下文的工具交换
+
+`contextSource=parent` 的子模板仅在 includeToolResults=true 时继承父消息中的工具交换。缺省或 false 时，同时移除 tool 结果与 assistant.tool_calls，保留 assistant 原有非空正文，仅含调用而正文为空的 assistant 消息不传给子节点，避免留下没有对应结果的调用。该处理生成子消息副本，不修改父消息；不是对任意损坏历史的完整协议修复器。
+
+### 手工重试成员准备
+
+`prepareFlowTaskRetry(session, rootTaskId, sourceTaskId, requestId)` 先验证源任务属于 Run，再通过 Kernel 人工重试创建 deferred 新任务，使用 Session shared `flow.run.<rootTaskId>.retries` 条件写入节点、实例序号、retryOfTaskId 和预算。原始 runTasks 现在保存每节点预算；重试成员继承该声明。并发同请求复用任务/成员，不同请求按 CAS 结果分配新序号。成员登记失败不启动任务，再次提交同一请求可恢复登记；Task 创建与成员登记仍不是单事务。
+
+RunGet 每次合并原始清单和重试成员，记录重连与 transcript 使用同一范围。最新节点可指向尚在 created 的重试，根聚合 Task 的既有结果不被改写。`dag.run.task.retry({ sessionId, taskId, targetTaskId, requestId })` 已调用准备 API、恢复节点预算并授权/启动新任务，返回新 targetTaskId。LLM 使用原 input.allowedToolIds 与已保存模型/工具输入，资源创建和原子启动按既有回执重放；非 LLM 任务直接 start。重复请求返回同一任务，旧根输出保持不变，新结果通过成员任务/transcript 查询。DagWorkbench 已为非根终态任务提供重试按钮与来源标记，响应失败时复用原请求 ID，进行中的请求禁用重复点击；根已结束但成员仍运行时继续刷新。RunCancel 重新读取成员并等待全部成员取消尝试，包括同节点的并发重试。当前仍没有下游重算、重试输出触发的新 patch/委派调度、隔离 workspace 重建或新根结果收敛，不能宣称完整图重试恢复。
+
+并发重试的人工交互按具体 Task 匹配：`dag.run.respond` 接受可选 `targetTaskId`，先刷新持久成员清单并校验目标属于当前 Run；省略目标时，仅在所有成员中恰有一个同名 pending 请求时回应，多于一个则报歧义。Run 面板逐 Task 展示等待请求，回应窗口固定打开时的根 Task 与目标 Task，切换 Run 不改变提交目标。指定 targetTaskId 时支持已 resolved 交互同值重放，终态 Task 也可返回已保存结果；不同值拒绝。省略目标仍只搜索 pending 请求，不猜测已完成回应的目标。
+
+Run 控制会在信号注入和单任务取消前刷新持久成员清单，允许控制其他调用方刚登记的重试任务；按 nodeId 注入信号选择当前最大 iteration 对应的任务，按 targetTaskId 则校验 Run 成员身份。Goal 编辑窗口固定打开时的 Run，信号和取消回调也固定发起时的 Run，异步完成不会刷新切换后的其他 Run；失败通过错误提示呈现。Goal 状态对 Session suspend/resume 的影响及其与目标持久化非原子的边界保持不变。
+
+单次运行定义隔离：DurableFlowExecutor.submit 在首次异步操作前复制 DagRunSpec 和 parameters；初始节点的插件清单及其端口 schema 同时缓存，后续动态节点的定义在首次读取时缓存，包含未找到的引用。修改调用方原始对象或宿主之后返回的同名 schema 不影响已缓存定义。DagPluginRegistry 注册时复制清单并保留 runtime/UI 方法的调用接收者。此隔离不等于将定义持久化，也不冻结宿主 runtime 实现代码；跨进程恢复仍需额外持久定义机制。
+
+工作区收尾的 status 表示清理本身的结果，和状态记录保存结果分开。清理成功但最终 shared 写入失败时，活动句柄保留 succeeded 并附加 persistenceError，workspaceCompletion 拒绝；UI 同时显示清理结果和保存错误。清理与保存同时失败以 AggregateError 保留两个原因，不重复调用 workspace.finish。此时重连只能读取最后成功写入的状态（可能仍为 pending），活动句柄的保存错误尚无可靠持久副本。
+
+记忆检索宿主接口：ConversationSystemOptions.retrieveMemory 经会话工厂传递，调用参数为 `(plan, agent, { sessionId, policy })`，policy 来自本次解析的 Agent 配置并复制后提供，避免 provider 修改配置。返回的记忆沿用 ContextAssembler 的预算和持久 Task 输入快照流程。原有只使用前两个参数的回调仍兼容。默认宿主现已装配 SessionMemoryProvider；跨 Session 共享记忆的授权及存储策略仍未实现。
+
+持久记忆当前实现：SessionMemoryProvider 使用 Session shared key `memory.entries.<JSON([namespaceId, scope])>` 存储条目数组。宿主 upsert/remove 按 memoryPolicy.writeScopes 精确授权，检索仅打开 readScopes；namespaceId 不隐含跨 Session 访问。写入使用 expectedVersion CAS 合并（最多 3 次），条目含 entryId/content/SHA-256 contentHash/scope/updatedAt；损坏记录拒绝读写。默认检索限制 10，0 禁用，按查询词项的包含匹配数、更新时间、scope/ID 排序；返回 entryId 编码为 `[scope, entryId]`，避免多个 scope 的同名条目混淆。app-shell 默认注入此检索器，结果进入既有上下文快照与预算流程。查询无匹配时仍可返回最近条目；这不是向量/语义检索，scope 整组读取也不是存储分页。写 API 面向可信宿主策略，不直接暴露给模型；模型写入工具、记忆编辑 UI、跨 Session 共享和长期保留/压缩策略仍待完成。
+
+## 人工交互期间的调度延续
+
+DurableFlowExecutor 遇到 pending interaction 时返回等待中的同一 Run，并保留当前进程的调度循环。根 flow.aggregate 以 awaitingSchedule 等待最终调度信号，不再仅因当时已提交的人工节点结束就提前成功。回应后继续处理依赖、后续交互及动态调度，最终发出 flow.schedule.completed；后台调度异常通过 flow.schedule.failed 使等待根失败。新成员写入 flow.run.<rootId>.members，Run 查询、transcript 与重新连接共用该成员清单。取消 Run 会使调度退出并取消未结束节点。
+
+当前证据为 app-shell minimal-skill-dag 的真实 LocalFS/Run 命令组合测试：单次回应、连续两次回应后下游均执行，根身份不变，重新连接可读取最终成员。调度状态仍在进程内，Kernel 销毁后停止驱动；完整运行中重启恢复保持待办。Skill 成功路径使用固定模型响应，尚非真实模型或完整 GUI 验收。
+
+
+### 人工交互边界的调度检查点
+
+当前 executor 在发布等待人工回应的 Run 前保存 `flow.run.<rootTaskId>.scheduler`（version 1）。`resume(sessionId, rootTaskId)` 复用已存在的任务实例，恢复节点/边、循环派发、委派组、预算及配置状态，再继续提交下游。CLI resume 已使用此入口；只有结果重连的 `restoreFlowHandle` 仍不启动调度。
+
+CLI 回归验证正常暂停→关闭存储→respond→resume，覆盖有/无下游节点与根任务 ID 不变；另有各命令独立进程的单次和连续两次暂停恢复测试，验证磁盘状态能跨进程继续执行。检查点不是每次 Task 提交的原子日志，不能保证任意 crash 点无重复提交；多个恢复者排他、隔离工作区租约及后台委派定时器恢复仍未完成。隔离工作区恢复当前明确拒绝。
+
+
+恢复入口在状态装配完成后立即返回活动句柄，后台调度继续运行，调用方可开始监视与取消。若根任务尚未初始化，恢复判断使用其 input 中的 awaitingSchedule。等待模型响应时返回句柄、取消根任务后取消下游均有回归测试；测试接管已停止 Kernel 的租约，不代表生产环境应强制夺取有效租约。
+
+
+CLI 的 run/resume 入口通过每个 Run 的独立 SQLite 写锁互斥，锁从创建运行时之前持有到运行时清理完成；争用立即报错，进程终止由 SQLite/操作系统释放。已验证正常退出和 SIGKILL 后重新获取。该机制限定本机 CLI 入口，不是通用 executor 的多机 fencing；不改变检查点与任务提交尚非原子的限制。
+
+
+宿主关闭运行时应先停止 Kernel，再等待 `DurableFlowExecutor.waitIdle()` 与 Kernel 活动工作结束，最后关闭工具和存储。CLI 已按此顺序装配，调度进程锁在存储关闭之后释放。waitIdle 跟踪后台调度协程，不负责强制终止任意宿主回调。
+
+
+CLI delete 同样先获取 Run 调度锁，再检查终态和删除目录。即使 cancel 已写入 cancelled，只要旧调度器还持锁清理，delete 就拒绝执行；锁释放后才能删除。这防止 CLI 删除流程提前移除仍被使用的存储及锁文件。
+
+
+人工暂停的根任务在最终调度汇总时，另存版本化 `flow.run.<rootTaskId>.metadata`；重连优先使用其最终 token/耗时统计，避免显示首次暂停时的旧 input 数据。旧 Run 没有该记录时仍回退 input，不自动回填历史用量。

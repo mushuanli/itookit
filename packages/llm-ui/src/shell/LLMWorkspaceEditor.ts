@@ -88,6 +88,7 @@ export interface LLMEditorOptions extends EditorOptions {
     kernel?: Kernel;
     /** Application service for durable privileged slash commands. */
     privilegedCommands?: IPrivilegedCommandService;
+    sessionSkills?: import('@itookit/common').SessionSkillControls;
 }
 
 /**
@@ -347,6 +348,11 @@ export class LLMWorkspaceEditor implements IEditor {
         }
 
         this.chatInput = new ChatInput(inputEl, {
+            ...(this.options.sessionSkills ? {
+                onRequestSkills: () => this.options.sessionSkills!.list(this.options.sessionId),
+                onLoadSkill: (id: string) => this.options.sessionSkills!.load(this.options.sessionId, id),
+                onUnloadSkill: (id: string) => this.options.sessionSkills!.unload(this.options.sessionId, id),
+            } : {}),
             onSend: (text, files, agentId, overrides) =>
                 this.sendCommand.run({ text, files, agentId, overrides }),
             onStop: () => this.commandBus.execute(SessionCommand.Abort).catch(() => {}),

@@ -204,7 +204,12 @@ export class SessionRegistry {
 
         if (session.role === 'assistant') {
             const userRound = state.findUserRoundForAssistant(messageId);
-            if (!userRound?.userMessage) return { allowed: false, reason: 'No user message found' };
+            if (!userRound?.userMessage) {
+                const reason = state.describeRegenerateFailure(messageId);
+                log.warn('Regenerate rejected', { messageId, reason });
+                console.warn(`[SessionRegistry] ${reason}`);
+                return { allowed: false, reason };
+            }
             return { allowed: true };
         }
 

@@ -34,8 +34,8 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
             ? { items: [{ ...task, version: 2, output: 'later version' }], throughVersion: 2, nextAfterVersion: undefined }
             : { items: [task], throughVersion: 2, nextAfterVersion: 1 }),
         taskEventPage: vi.fn(async (_session: string, _task: string, query?: { afterIndex: number; throughIndex: number }) => query
-            ? { items: [{ taskId: task.id, sequence: 5, occurredAt: 3, type: 'later-event' }], throughIndex: 2, nextAfterIndex: undefined }
-            : { items: [{ taskId: task.id, sequence: 2, occurredAt: 2, type: 'first-event' }], throughIndex: 2, nextAfterIndex: 1 }),
+            ? { items: [{ taskId: task.id, sequence: 5, occurredAt: 3, type: 'effect.failed', payload: { message: 'provider failed' } }], throughIndex: 2, nextAfterIndex: undefined }
+            : { items: [{ taskId: task.id, sequence: 2, occurredAt: 2, type: 'agent.event', payload: { type: 'stream:content', delta: 'hidden delta' } }], throughIndex: 2, nextAfterIndex: 1 }),
         eventList: vi.fn(async () => []) };
     const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
     const chat = vi.fn(async () => ({ destroy: vi.fn() }));
@@ -56,15 +56,13 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
         expect(main.textContent).toContain('task-one');
         await workbench.openResource(`/${id}/tasks/task-one`);
         expect(main.textContent).toContain('task output');
-        const more = [...main.querySelectorAll('button')].find(button => button.textContent === '加载更多版本')!;
-        more.click(); more.click();
-        await vi.waitFor(() => expect(main.textContent).toContain('later version'));
-        expect(kernel.taskHistoryPage).toHaveBeenLastCalledWith(id, 'task-one', { afterVersion: 1, throughVersion: 2 });
-        expect(kernel.taskHistoryPage).toHaveBeenCalledTimes(2);
-        expect(more.hidden).toBe(true);
-        const moreEvents = [...main.querySelectorAll('button')].find(button => button.textContent === '加载更多事件')!;
+        expect(kernel.taskHistoryPage).not.toHaveBeenCalled();
+        expect(main.textContent).not.toContain('agent.event');
+        expect(main.textContent).not.toContain('hidden delta');
+        expect(main.textContent?.match(/task output/g)).toHaveLength(1);
+        const moreEvents = [...main.querySelectorAll('button')].find(button => button.textContent === '继续查找关键事件')!;
         moreEvents.click(); moreEvents.click();
-        await vi.waitFor(() => expect(main.textContent).toContain('later-event'));
+        await vi.waitFor(() => expect(main.textContent).toContain('provider failed'));
         expect(kernel.taskEventPage).toHaveBeenLastCalledWith(id, 'task-one', { afterIndex: 1, throughIndex: 2 });
         expect(kernel.taskEventPage).toHaveBeenCalledTimes(2);
         expect(kernel.eventList).not.toHaveBeenCalled();

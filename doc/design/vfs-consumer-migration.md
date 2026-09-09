@@ -3,7 +3,7 @@
 > 2026-09-07 最终决策：旧数据和旧表结构直接作废，无迁移/兼容入口；Session 数据是 session.seq、history.seq、attachments、kernel，运行时投影 /history 和 /attachments。下文历史迁移提案不再执行。
 > 历史方案：本文保留演进依据，不再作为当前接口规范。最新目标、旧入口删除范围与验收以 [C4 设计审查](vfs-c4-review.md) 为准；其中单用户每 Session 一条挂载配置取代独立 namespace/binding/grant/export 四套主记录，不再保留 moduleFS/customEngine 源码兼容入口。实际实现状态见 [实现进度](vfs-implementation-status.md)。
 
-状态：迁移目标与验收清单；部分已实现。日期：2026-09-07。实际可调用接口及测试结果见 [实现进度与接口](vfs-implementation-status.md)。
+状态：历史方案，已由上述最终决策取代；下文的旧迁移步骤和接口草案不作为当前待办。2026-09-08 核对：当前实现及未完成验收见 [实现进度](vfs-implementation-status.md)，当前接口见 [C4 设计审查](vfs-c4-review.md)。
 
 本文补充 [VFS 重构方案](vfs-namespace-refactor.md)，规定 app-shell、llm-ui 及相关依赖的迁移。沿用单用户 admin、MindOS 根、持久 Session 数据归 `/var/lib/sessions/<id>`、全局状态归 `/var/lib/kernel` 的决策。系统目录全量读写范围仍是待确认项，本文按受控投影设计。
 

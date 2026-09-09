@@ -6,6 +6,7 @@ import { Command } from './Command';
 import { LLMPrintService, type PrintService } from '@itookit/mdxeditor';
 import type { ErrorSeverity } from '../utils/errorHandler';
 import type { IFileSystem } from '@itookit/vfs-core';
+import { copyText } from '@itookit/ui-common';
 
 /**
  * 复制整个会话为 Markdown
@@ -16,7 +17,7 @@ export class CopyAllCommand extends Command {
 
     protected async execute(): Promise<void> {
         const md = await this.ctx.commands.execute<string>(SessionCommand.Export);
-        await navigator.clipboard.writeText(md);
+        await copyText(md);
     }
 }
 

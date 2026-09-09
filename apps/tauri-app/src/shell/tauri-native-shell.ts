@@ -13,6 +13,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { INativeShell, NativeShellResult } from '@itookit/tools';
+import { randomUUID } from '@itookit/common';
 
 interface NativeCapabilities {
   ripgrep: boolean;
@@ -76,7 +77,7 @@ export class TauriNativeShell implements INativeShell {
       case 'bash': {
         const shellCmd = args[1] ?? args[0] ?? '';
         const cwd = opts?.cwd ?? '.';
-        const requestId = crypto.randomUUID();
+        const requestId = randomUUID();
         const cancel = () => { void invoke('shell_cancel', { requestId }).catch(() => {}); };
         opts?.signal?.addEventListener('abort', cancel, { once: true });
         try {

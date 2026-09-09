@@ -8,6 +8,31 @@
 
 本文定义支持长时间、可交互、可跨进程恢复 harness 的目标协议。它补充并修订 [原 Session/Task 设计](../feat/harness-session-task-final-design.md)，不代表当前 `packages/durable-kernel` 已具备这些行为。生命周期、重试、mailbox、共享等待和跨 Session 协作发生冲突时，以本文为目标设计；源码是当前已实现 API 的依据。
 
+## 当前控制与恢复基线（2026-09-08）
+
+接口以 [domain/types.ts](../../packages/durable-kernel/src/domain/types.ts)、[Kernel](../../packages/durable-kernel/src/application/kernel.ts) 和 [SeqFile store](../../packages/durable-kernel/src/infrastructure/seqfile/store.ts) 为准。后续编号章节仍是完整目标约束，不是当前字段列表。
+
+- TaskStatus 当前没有 `paused/finalizing`，暂停由 `control.mode=run/pause/interrupt`、epoch 和 acknowledged 独立表达；取消走单独的终态操作。TaskControlOptions 有 requestId、可选 expectedEpoch/reason，不能把目标表中的 actorRef、propagation cursor 等字段当作已实现接口。
+- Kernel 默认 `pollMs=0`，由提交唤醒和截止期定时器驱动；正 pollMs 是可选周期检查。nextWakeDelay 检查持久 timer、readyAt、Task/Effect lease、outbox 重试和资源期限。当前每次仍枚举 Task 来求期限，并非所有调度扫描都已有游标分页。
+- reducer 与 Effect 并发槽分开，默认各 4，可设 0 暂停对应派发。并发数、pollMs 为非负安全整数；leaseMs 为可表示绝对期限的正安全整数。长期限定时器受平台上限约束，续租间隔也不超过 2147483647 ms，避免溢出为高频循环。
+- recover/recoverSession 默认保留有效租约并安排到期检查；显式 `{ takeover: true }` 会更换旧 lease token 并令其过期，仅允许空闲 Kernel 发起。该选项是宿主接管决策，不代表 Kernel 已证明其他进程死亡。用户 pause/interrupt 和 Session suspend 意图不因恢复清除。自然到期的 lost Attempt 计入该 step 的重试预算，默认 maxAttempts=1 不会自动再执行；需要自动重试时显式配置预算。takeover 路径允许接管重启，不等同于自然到期策略。
+- WaitSpec 当前支持 signal/effect/task/child/interaction/shared-version/timer/message/cache/resource 及 any/all/quorum；完整 Endpoint、业务 stream、通用 deadline WaitSet、跨 authority transport 和迁移器仍不是这些类型的现成功能。Shared revision 和选定输入已有持久恢复路径。
+- 观察查询现在包含 listSessionTaskPage、taskHistoryPage、taskEventPage，浏览主视图已经接入；分页上界、Task 当前状态与不可变版本的差别、旧派生索引补建成本见 [浏览设计](vfs-session-browser.md)。eventList、部分 mailbox/恢复扫描仍全量，不能据此宣称 §13 的所有分页已完成。
+
+自动故障场景见 [protocol.test.ts](../../packages/durable-kernel/src/protocol.test.ts)。独立 OS 进程/LocalFS SQLite 验证见 [20-kernel-ipc.test.ts](../../packages/vfsdriver-localfs/tests/20-kernel-ipc.test.ts)：两种挂载模式下覆盖 SIGKILL 后显式接管、带重试预算的自然到期恢复、多文件事务回滚、等待唤醒竞争、资源清理、single-use Cache 回执及父取消落盘后后代清理前的崩溃恢复。当前该文件共 28 项通过。无周期轮询的到期恢复依赖已登记的期限；这不证明完全空闲 worker 能收到另一个进程任意时刻的新提交，跨进程 notifier/主动唤醒或可选 pollMs 仍属宿主部署条件。现有场景不等于全部 §15 kill 矩阵、跨主机时钟或 GUI 人工验收。
+
+### 初始信号与启动
+
+`TaskHandle.start({ signal? })` / `Kernel.startTask(..., { signal? })` 将初始信号、Task 从 created 转为 ready/blocked、相应事件及 start-signal 指纹放在同一事务。相同信号重放不重复追加；不同信号冲突，已无信号启动的 Task 不允许借 start 补投初始信号。普通 signal 接口仍供后续业务信号使用。该原子性不包括此前资源创建或宿主准备回调。
+
+bindCapabilities 已使用按 signalKey 稳定命名的资源创建回执，并通过原子 start 交付能力信号；准备回调失败时任务仍未启动，重试复用资源。回调本身须可重试，仍可能重复执行；不把任意宿主副作用包装成事务保证。
+
+### 人工重试当前接口
+
+`TaskHandle.retry({ requestId })` / `Kernel.retryTask(sessionId, taskId, { requestId })` 创建新的 root Task，并保存 retryOfTaskId。普通提交和结构化 spawn 均在创建事务中校验来源已终态，失败不发布新任务；重复 requestId 对同一来源幂等返回已创建的重试任务，Kernel 重建后仍读取原提交映射。复制 program/input/dependencies/retry/priority/labels，使用 deferStart=true；旧任务状态、checkpoint、Effect、interaction 和资源授权不复制也不修改。新任务需宿主重新授予资源后 start；失败依赖仍按普通提交策略传播，deferStart 不屏蔽依赖终结规则。自动 Attempt 重试维持原 Task ID 的语义不变。
+
+当前尚未把该入口装配为 Flow Run 单节点重试：重试任务的授权、依赖重绑定、Run 成员清单与后续结果收敛必须单独完成，不能把底层新 Task 创建等同于整张图恢复执行。
+
 ## 1. 范围与架构裁决
 
 保留 Session、Task、Attempt、Effect、Resource、EventJournal。Kernel 是声明驱动的持久状态机：Program 根据持久 input/state 和已选择的输入返回 Decision，内核负责校验及原子提交。TypeScript reducer 可以表达业务计算，但外部 I/O 必须通过持久 action/Effect；不恢复 Promise、闭包、generator 或任意机器指令位置。
@@ -380,6 +405,10 @@ Kernel runtime 必须提供持续运行的、有配额的 lease sweeper、timer 
 
 恢复流程：发现 Session→读取权威状态→恢复传播及 timer→检查过期 Task/Effect leases→重建索引→调度允许执行的工作。尚未过期的 lease 登记下一次检查时间；paused/suspended 不因恢复而自动运行。
 
+当前 SeqFileKernelStore 的 sweep 与 recover 均在逐任务 lease 恢复前检查完整祖先链，并在同一事务内检查取消事实及提交后代取消、交互取消与 Effect cleanupPending。不依赖直接父任务先被扫描；重复恢复不重复提交取消事件。protocol.test 覆盖三层任务和过期 Effect：sweep 强制按后代优先顺序扫描，recover 验证显式恢复也传播取消，两者均验证单次取消收敛和重复执行的记录/事件不变。这里验证持久存储入口，不代表已经执行物理清理或完成全部 OS kill 场景。
+
+Kernel 恢复轮询继续处理取消 Effect 的 cleanupPending。已派发 Effect 的适配器缺失、不提供 cancel 或 cancel 抛错时，清理标记保留；只有 cancel 成功返回才调用 confirmEffectCleanup 清除标记。20-kernel-ipc 的 root/module 两种挂载测试在 SIGKILL 后依次覆盖这三种失败、再次进程重启后成功清理、再次重启后不重复调用，且 Task 始终 cancelled。适配器使用测试实现，证据限于调用与持久确认链，不代表实际设备停止；cancel 永久挂起时的等待上限见下文，真实进程/设备隔离仍需验收。
+
 Session 创建采用持久 registration intent：catalog 先以唯一 sessionId/storage binding 登记 creating；再幂等创建 Session record；最后标记 active。恢复器重试 creating。Task submit 使用 scope 内 clientRequestId 幂等创建；提交后返回丢失可查询原身份。相同 ID 不同 storage/spec 必须报冲突，不能覆盖已有数据。
 
 共享同一事务型存储的多 worker 使用一致的 lease 时间来源。跨主机部署需要 authority store 时间或明确的时钟误差约束；不能直接把任意客户端时钟当全局租约事实。长轮询/notifier 用于延迟优化，最终推进由持久队列保证。
@@ -413,7 +442,7 @@ Interaction 请求绑定 schema、权限、deadline 和可选输入版本；resp
 | 外部 Effect 成功、结果提交前 kill | reconcile 或幂等重放；不支持时 indeterminate |
 | 旧 worker 在新 claim 后返回/abandon/emit | 旧 token 写入全部拒绝 |
 | A→B→C 多级依赖失败及旁路 waiter | 全部按策略收敛，不永久 blocked，不漏终态事件 |
-| 父取消后、child cleanup 前 kill | 持久屏障阻止新工作，传播恢复并可查询残留 |
+| 父取消后、child cleanup 前 kill | 持久屏障阻止新工作，传播恢复并可查询残留；20-kernel-ipc 在两种挂载模式下已验证父取消提交后 SIGKILL、有效旧 Effect lease 拒绝、后代取消与 cleanupPending 恢复及再次重启幂等；不代表真实外部设备已停止 |
 | inbox 提交后、outbox ack 前 kill | 重投返回同 receipt，收方消费提交只一次 |
 | 请求消费与回复登记之间 kill | 事务全成或全不成，不丢回复责任 |
 | shared 更新与 wait 注册交错 | 已满足立即绑定证据，否则后续更新原子唤醒 |
@@ -438,3 +467,39 @@ Task 通过授权 handle 和显式 sources/writeTarget 选择、创建、读取�
 完整表、Linux 对齐、预算守恒和生命周期见 [资源表与分配协议](durable-harness-resources.md)。Session 内以 resource/handle/binding/account/allocation/usage 分别保存资源、授权、Task 引用、额度、预留/占用和消费；跨 Session 由唯一 authority 保存 export 及实际分配，消费 Session 保存 import、请求和回执。
 
 grant 不等于 allocation，Task lease 不等于资源占用 lease；pause/interrupt 不自动释放资源，取消不退款未知外部成本。容量变化与申请解析在 authority 事务内提交；跨 authority 只承诺幂等消息与补偿，不承诺分布式原子提交。任何尚未具备上述能力的实现必须在 manifest/API 中明确拒绝，而不能将本地 grant 冒充跨 Session 分配成功。
+
+## 祖先取消与迟到 Effect 完成
+
+取消清理等待由 KernelOptions.effectCleanupTimeoutMs 限定，默认 30000ms，必须为 1–2147483647 的整数。超时作为清理失败返回，不清除 cleanupPending，恢复轮询可继续处理后续工作。同一 Kernel 的任务清理路径按 Session/Task/Effect 合并尚未结束的 cancel 调用，避免每次超时再启动一个重叠调用；原调用结束后可按持久标记重试。等待超时不会强制终止适配器的外部操作，也不构成跨进程清理锁；适配器仍须幂等。运行时测试覆盖超时合并、其他 Effect 完成、失败后重试及非法配置；LocalFS IPC 两种挂载模式增加挂起 cancel 的恢复返回/保留标记验证。
+
+Task 消息在收发事务中检查祖先取消：发送方祖先已取消时拒绝入队新消息；接收方祖先已取消时保存 `target-ancestor-cancelled` 拒绝回执，不向目标 pendingEvents 添加业务消息。同 Session 直接投递与跨 Session relay 共用此检查。已有发送回执、已投递或已拒绝的接收回执优先按消息身份重放，不重复写入事件；取消不会追溯撤回此前成功投递。六项 protocol 测试覆盖两种投递路径的新消息/原回执，以及发送方取消后新发送/原入队回执，验证目标记录与重复操作后的事件、inbox/outbox 保持不变。
+
+后代的外部任务入口也读取事务中的祖先取消屏障：createTask 拒绝在取消祖先下创建新后代，created Task 的 start、signal、新 pause/run/interrupt 控制以及 pending interaction 的回应均拒绝推进。已有任务提交、启动信号、控制和已 resolved 交互回执保持原有幂等重放；目标自身终态的行为仍按终态控制矩阵处理。九项 protocol 参数化测试覆盖七种新操作的拒绝，以及交互首次回应/已保存回应重放，比较目标记录与事件不变。此处不声称所有消息接收、恢复扫描和外部清理入口已完成全量审计。
+
+SeqFileKernelStore.completeEffect 在同一事务内校验 lease 身份、有效期及全部祖先的持久取消状态。祖先已取消而后代清理尚未传播时，仍持有旧 lease 的 Effect 不能提交成功、失败、不确定结果或安排自动重试；拒绝时不改变后代 TaskRecord、pendingEvents 或事件记录。已经 settled 的 Effect 保持原有幂等返回，不覆盖已保存结果。
+
+当前证据：protocol.test 的四种结果参数化测试构造三层任务，只取消祖先，保留后代 leased Effect，验证完成提交被拒绝且记录与事件逐值不变。这是事务边界测试，不代替 OS 进程 kill、外部副作用撤销或完整取消传播验收。
+
+人工 resolveEffect 也在同一事务中拒绝祖先已取消时的新裁决，覆盖确认成功、确认失败和授权重试。已保存的相同 requestId/内容先重放原回执，不受后来取消影响；同 requestId 不同内容仍冲突。另六项参数化测试分别覆盖三种裁决的取消后新请求和取消前已保存请求，比较操作前后的 TaskRecord 与事件，验证拒绝及重放均无额外写入。
+
+## 已保存交互回应的终态重放
+
+TaskHandle.respond 对已 resolved 的 interaction 先比较持久回应：同 interactionId、相同编码值直接返回原 Task，不追加事件或增加 version，即使 Task 已 succeeded/failed/cancelled；不同值报冲突。终态上尚未 resolved 的交互仍不能被新回应推进。Kernel 重建后同样读取持久回应，无需原进程的请求缓存。此行为满足终态不恢复为非终态，并允许回应成功但调用方未收到结果时重试。
+
+当前证据：protocol.test 的三种终态参数化测试在 Kernel 重建后重放同值、拒绝异值，并逐值比较 TaskRecord 与 Task event page。这里验证交互入口，不以此代替全部终态控制入口和外部 Effect 生命周期的核验。
+
+## 终态 Task 控制入口核验矩阵
+
+以下为当前实现已验证的目标 Task 行为，均覆盖 succeeded/failed/cancelled；实现位于 SeqFileKernelStore，公开入口由 TaskHandle/Kernel 转发。
+
+| 入口 | 终态行为 | 验证证据 |
+| --- | --- | --- |
+| start() | 不改变 Task | protocol.test 终态生命周期参数化测试 |
+| start({signal}) | 已有相同启动信号回执时重放；未以该信号启动则拒绝 | 同上（取消的 deferred Task 覆盖无回执分支） |
+| signal | 忽略新的任务输入，不追加 task.signal | 同上，完整 TaskRecord 和事件页比较 |
+| cancel | 目标 Task 已终态则不改写目标记录 | 同上；子任务传播/外部清理需另行核验 |
+| pause/resume/interrupt 新 requestId | 拒绝终态控制请求 | 同上 |
+| pause/resume 已有 requestId | 相同内容返回原控制回执，不改变目标；同键异内容冲突 | 同上 |
+| respond 已 resolved | 同值重放、异值冲突，终态不变 | 已保存交互回应的三种终态/Kernel 重建测试 |
+
+本矩阵证明所列控制操作对目标 Task 的状态、version、记录和事件不产生新写入，不将其扩大为对子任务、后台 worker 通知、资源或外部进程停止的完整保证。Effect 终结、旧 claim 提交、恢复扫描等入口仍需按各自协议证据核验。

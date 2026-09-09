@@ -116,6 +116,13 @@ class ContextAssembler {
 
 **`RetrievedMemoryEntry`**：`{ content: string; … }` —— 单条记忆片段（LLM 上下文注入用）。
 
+**关键语义（ContextPlan → ContextSnapshot）**：
+
+- **本次用户输入必留**：`plan.pendingUserMessage` 由调用方恒提供，作为最后一个 ContextBlock 追加且不参与预算裁剪——预算再紧也不会丢掉正在问的问题。
+- **去重在裁剪之后**：`pendingRoundId` 指向该提示所属 Round；只有当该 Round 经上下文规则（include/exclude/summary）与预算裁剪后**仍在上下文中**且已携带同内容 user 消息时，才丢弃追加的副本。被排除、被摘要或被裁掉的 Round 一律保留副本。
+- **裁剪顺序**：先丢 `skill-index` 发现元数据，再按顺序丢非 system 块；system 策略块与 pending 块不丢。
+- 每轮排除/摘要由 branch profile 的 `rules` 与 Round 自身 `defaultContextMode` 决定。
+
 ---
 
 ## ProviderMessageAdapter

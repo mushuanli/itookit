@@ -3,7 +3,7 @@
 > 2026-09-07 最终决策：旧数据和旧表结构直接作废，无迁移/兼容入口；Session 数据是 session.seq、history.seq、attachments、kernel，运行时投影 /history 和 /attachments。下文历史迁移提案不再执行。
 > 历史方案：本文保留演进依据，不再作为当前接口规范。最新目标、旧入口删除范围与验收以 [C4 设计审查](vfs-c4-review.md) 为准；其中单用户每 Session 一条挂载配置取代独立 namespace/binding/grant/export 四套主记录，不再保留 moduleFS/customEngine 源码兼容入口。实际实现状态见 [实现进度](vfs-implementation-status.md)。
 
-状态：目标设计；基础接口和部分运行时接入已实现，整体迁移尚未完成。日期：2026-09-07。
+状态：历史方案，已由上述最终决策取代；下文的旧迁移步骤和接口草案不作为当前待办。2026-09-08 核对：当前实现及未完成验收见 [实现进度](vfs-implementation-status.md)，当前接口见 [C4 设计审查](vfs-c4-review.md)。
 
 实际接口、验证结果与剩余差异见 [实现进度与接口](vfs-implementation-status.md)。下文第 11 节仍是目标契约，不能将其中全部声明视为当前可调用 API。
 

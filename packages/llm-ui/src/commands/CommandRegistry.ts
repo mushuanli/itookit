@@ -9,7 +9,7 @@ import {
     RenameBranchCommand, DeleteBranchCommand,
 } from './BranchCommands';
 import { BatchDeleteCommand, BatchCopyCommand } from './BatchCommands';
-import { Toast } from '@itookit/ui-common';
+import { copyText, Toast } from '@itookit/ui-common';
 
 /**
  * 命令注册中心
@@ -64,8 +64,8 @@ export class CommandRegistry {
             const sessions = this.ctx.getSessions();
             const session = sessions.find(s => s.id === sessionId);
             if (!session) return;
-            await navigator.clipboard.writeText(session.content || '');
-            Toast.success('Copied to clipboard');
+            if (await copyText(session.content || '')) Toast.success('Copied to clipboard');
+            else Toast.error('Copy failed');
         });
     }
 

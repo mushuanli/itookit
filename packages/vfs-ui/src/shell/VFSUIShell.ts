@@ -48,6 +48,10 @@ export interface VFSUIShellOptions extends SessionUIOptions<VFSNodeUI> {
   directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
   activateDirectories?: boolean;
   primaryAction?: { label: string; run(): Promise<void> };
+  /** Include directories in the export button selection (default false). */
+  exportDirectories?: boolean;
+  /** Custom export payload for directories that have no direct file content. */
+  exportItem?: import('../interaction/handlers/ExportCommandHandler').ExportCommandOptions['exportItem'];
   customEditorResolver?: CustomEditorResolver;
   searchFilter?: SearchFilter;
   scopeId?: string;
@@ -223,7 +227,8 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
 
   async refresh(): Promise<void> {
     const expanded = new Set(this.statePort.getState().expandedFolderIds);
-    await this.engineAdapter.loadData();
+    // Silent: a background refresh must not blank the list or collapse the tree.
+    await this.engineAdapter.loadData({ silent: true });
     await this.engineAdapter.restoreExpansion(expanded);
   }
 
@@ -333,6 +338,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
       activateDirectories: this.options.activateDirectories,
       directoryAction: this.options.directoryAction,
       primaryAction: this.options.primaryAction,
+      exportDirectories: this.options.exportDirectories,
       searchFilter: this.options.searchFilter,
       instanceId: this.instanceId,
       engine: this.engine,

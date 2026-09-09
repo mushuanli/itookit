@@ -37,7 +37,16 @@ export interface ContextPlan {
     branchHead: RoundId | null;
     profile: { id: ContextProfileId; revision: number };
 
-    pendingUserMessage: ChatMessage;
+    /**
+     * The prompt being sent now. Always supplied by the caller; the assembler drops
+     * the pending copy itself when the Round that owns it (`pendingRoundId`) is
+     * actually included in context and already carries the same user message.
+     * Deciding this in the caller from "the Round exists" loses the prompt whenever
+     * that Round is excluded or summarized by the branch context policy.
+     */
+    pendingUserMessage?: ChatMessage;
+    /** Round owning `pendingUserMessage`; its inclusion decides the de-duplication. */
+    pendingRoundId?: RoundId;
     explicitInputs: InputBinding[];
     tokenBudget?: number;
 }

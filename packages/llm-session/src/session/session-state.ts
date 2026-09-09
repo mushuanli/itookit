@@ -244,7 +244,7 @@ export class SessionState {
 
     /**
      * Find the user-containing round before an assistant round.
-     * Walks the parents chain until it finds a chat round with a userMessage.
+     * Walks the parents chain until it finds a round carrying a userMessage.
      *
      * Accepts either a raw RoundId ("abc123") or a session group id
      * ("round-abc123-assistant"), matching how both callers (canRegenerate /
@@ -254,11 +254,38 @@ export class SessionState {
         const roundId = extractRoundId(assistantId);
         let current = this.roundById.get(roundId);
         while (current) {
-            if (current.kind === 'chat' && current.userMessage) return current;
+            // A round that carries a user message is a valid source even when its
+            // structural kind is not 'chat' (input[0] may be a system message).
+            if (current.userMessage) return current;
             if (current.historyParentIds.length === 0) return undefined;
             current = this.roundById.get(current.historyParentIds[0]);
         }
         return undefined;
+    }
+
+    /** Diagnostic detail for an assistant message that cannot be regenerated. */
+    describeRegenerateFailure(assistantId: RoundId): string {
+        const roundId = extractRoundId(assistantId);
+        const round = this.roundById.get(roundId);
+        if (!round) {
+            return `No user message found (round '${roundId}' is absent from the session projection — `
+                + 'the bubble belongs to a run that never persisted, or the branch moved on)';
+        }
+
+        const chain: string[] = [];
+        let current: RoundProjection | undefined = round;
+        while (current) {
+            chain.push(`${current.roundId}[kind=${current.kind}${current.userMessage ? ',has-user' : ',no-user'}]`);
+            if (current.historyParentIds.length === 0) break;
+            const parentId = current.historyParentIds[0];
+            const parent = this.roundById.get(parentId);
+            if (!parent) {
+                chain.push(`missing-parent:${parentId}`);
+                break;
+            }
+            current = parent;
+        }
+        return `No user message found (chain: ${chain.join(' -> ')})`;
     }
 
     /** Get child round IDs via the reverse index (O(1)). */

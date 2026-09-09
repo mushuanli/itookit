@@ -5,6 +5,7 @@ import type {
     TaskHandle,
     TaskSignal,
 } from '@itookit/durable-kernel';
+import { randomUUID } from '@itookit/common';
 
 export type AttachedTask = Pick<TaskHandle, 'id' | 'events' | 'signal' | 'start' | 'cancel' | 'status' | 'respond' | 'pause' | 'interrupt' | 'resume'>;
 
@@ -58,7 +59,7 @@ export class RunAttachmentController {
         const handle = this.requireHandle();
         const { task } = await handle.status();
         if (task.control && task.control.mode !== 'run') {
-            await handle.resume({ requestId: globalThis.crypto.randomUUID(), expectedEpoch: task.control.epoch });
+            await handle.resume({ requestId: randomUUID(), expectedEpoch: task.control.epoch });
             return;
         }
         if (task.status === 'created') return handle.start();
@@ -73,13 +74,13 @@ export class RunAttachmentController {
     async pause(): Promise<void> {
         const handle = this.requireHandle();
         const { task } = await handle.status();
-        await handle.pause({ requestId: globalThis.crypto.randomUUID(), expectedEpoch: task.control?.epoch ?? 0 });
+        await handle.pause({ requestId: randomUUID(), expectedEpoch: task.control?.epoch ?? 0 });
     }
 
     async interrupt(reason?: string): Promise<void> {
         const handle = this.requireHandle();
         const { task } = await handle.status();
-        await handle.interrupt({ requestId: globalThis.crypto.randomUUID(), expectedEpoch: task.control?.epoch ?? 0, reason });
+        await handle.interrupt({ requestId: randomUUID(), expectedEpoch: task.control?.epoch ?? 0, reason });
     }
 
     async approve(note = ''): Promise<void> {

@@ -1,6 +1,6 @@
 # Durable Harness 持久存储与文件组织
 
-日期：2026-09-05。状态：第 2–4 节记录当前逻辑布局与边界，第 5 节固定 1.1 目标布局；新增记录、恢复、迁移和 GC 尚未全部实现。
+日期：2026-09-08。状态：第 2–4 节记录当前逻辑布局与边界，第 5 节固定 1.1 目标布局；新增记录、恢复、迁移和 GC 尚未全部实现。
 
 ## 1. 哪些机制必须固定
 
@@ -20,7 +20,7 @@
 
 ## 2. 当前逻辑目录
 
-路径由 StorageBinding resolver 决定，Session 不必放在固定的 `sessions/` 父目录。以下为两个逻辑根，不能理解为每个 Task 对应一个独立数据库。
+路径由 StorageBinding resolver 决定，Session 不必放在固定的 `sessions/` 父目录。以下为两个逻辑根，不能理解为每个 Task 对应一个独立数据库。MindOS 当前 catalogRoot 为 `/var/lib/kernel`，sessionRoot 为 `/var/lib/sessions/<sessionId>/kernel`；外层业务 `session.seq/history.seq/attachments` 属于 SessionRepository，不能与本节 Kernel 内层 `session.seq` 混淆。
 
 ```text
 <catalogRoot>/
@@ -42,7 +42,7 @@
       artifacts/               # 已预留目录；通用大内容管理尚未实现
 ```
 
-这些是 `IModuleFS` / SeqFile 的逻辑路径，不承诺是磁盘上可直接读取的逐行 JSON 文件。事务依赖同一支持事务的后端；不同存储绑定之间不自动获得分布式原子性。
+这些是 `IFileSystem` / SeqFile 的逻辑路径，不承诺是磁盘上可直接读取的逐行 JSON 文件。事务依赖同一支持事务的后端；不同存储绑定之间不自动获得分布式原子性。
 
 ### 2.1 Session 文件内容
 
@@ -56,16 +56,16 @@
 | `messages.seq` | `outbox/<id>`、`inbox/<id>`、`delivery-sequence` | 投递责任、去重、到达次序与消费确认；不是通知缓存 |
 | `resources.seq` | `resource/<id>`、`handle/<id>`、`budget/<id>/<dimension>`、`workspace/snapshot/<id>`、`workspace/diff/<id>` | 资源归属、授权链、账务及 workspace 元数据 |
 | `resources.seq` | `cache/namespace/<id>`、`cache/entry/<id>/<key>` | cache 定义、generation、值、版本、TTL 与 consumedBy；不同字段的保留义务不同 |
-| `events.seq` | `next-sequence`、`event/<sequence>` | 已提交事件及观察顺序；不能假定只靠事件可以重放重建全部状态 |
+| `events.seq` | `next-sequence`、`event/<sequence>`、`task-event-index-version`、`task-event-count/<encodedTaskId>`、`task-event/<encodedTaskId>/<ordinal>` | 事件及 Task 分页派生索引；引用值为 Session sequence，与事件同事务提交。缺失索引的旧日志首次查询原子补建，索引版本为 1；不能假定只靠事件可以重放全部状态 |
 | `graph.seq` | `edge/<from>/<to>`、`spawn/<parent>/<spawnKey>` | 依赖关系与 spawn 去重身份；当前不能将整个文件视为可重建索引 |
 | `graph.seq` | `wait/task/<target>/<waiter>` | Task 等待的反向索引，逻辑上可从等待记录派生；当前恢复不等于已实现完整 graph 重建 |
-| `index.seq` | `task/<id>`、`ready/<id>` | 可重建投影；是否可 claim 仍须校验 Task 控制、状态和 lease |
+| `index.seq` | `task/<id>`、`ready/<id>`、`task-order-version`、`task-count`、`task-ordinal/<id>`、`task-order/<ordinal>` | Task 列表分页序号在首次索引时分配、状态更新不改变；序号索引版本 1，缺失时首次查询补建。可重建投影；是否可 claim 仍须校验 Task 控制、状态和 lease |
 
 TaskBoard 当前保存在 `shared.seq` 的 `task-board/<id>` 共享键下，没有单独的 `taskboard.seq`。跨 Session 可变共享资源的完整 owner 服务仍是目标设计，不能把一个共同路径视为已经实现访问协议。
 
 Catalog 的 `session/<id>` 保存绑定及注册意图，不能丢弃尚未完成的注册责任；`task/<id>` 是 Task 到 Session 的路由投影。不要把 Catalog 整体当成可随意清空的缓存。
 
-简化核心新增 `resources.seq` 的 `managed/*` 命名空间，独立于旧 resource/handle/budget keys：`managed/schema=1`；resource 保存 pool/shared 本体，access 保存对目标 Session 的授权，handle 保存使用方 Task 引用，claim 保存唯一容量占用，request 保存幂等命令、排队次序和结果，sequence 分配请求顺序。kernel scope 本体/claim 在 catalogRoot 的 resources.seq；Session scope 在所属 Session；Task handles 在消费 Session。业务 key 段使用 URI 编码。权威与消费 root 必须属于同一个 IModuleFS 实例，未知 managed schema 拒绝解释。准确 API 见 [本次实施记录](../feat/durable-harness-implementation.md#7-简化核心重构实际-api-与边界)，不能据此假定第 5 节的全部目标已实现。
+简化核心新增 `resources.seq` 的 `managed/*` 命名空间，独立于旧 resource/handle/budget keys：`managed/schema=2`；resource 保存 pool/shared 本体，access 保存对目标 Session 的授权，handle 保存使用方 Task 引用，claim 保存唯一容量占用，request 保存幂等命令、排队次序和结果，sequence 分配请求顺序。kernel scope 本体/claim 在 catalogRoot 的 resources.seq；Session scope 在所属 Session；Task handles 在消费 Session。业务 key 段使用 URI 编码。权威与消费 root 必须属于同一个 IFileSystem 实例，当前读取 schema 1/2，写入时升级标记为 2；旧 rights 数组按 revision 0/空 epochs 解释，旧 handles 通过兼容字段读取，未知 schema 拒绝解释。schema 2 增加 grant revision/epochs、physical binding、claim cleanup 状态及 cleanup receipt；这与旧 VFS 目录/schema 迁移是不同层。撤权、销毁、清理与查询的当前 API 见 [资源实现基线](durable-harness-resources.md#当前实现基线2026-09-08)。早期 API 见 [本次实施记录](../feat/durable-harness-implementation.md#7-简化核心重构实际-api-与边界)，不能据此假定第 5 节的全部目标已实现。
 
 ### 2.2 Task 文件内容
 
@@ -158,3 +158,11 @@ ID 段使用不透明稳定 ID；业务 name/key 段使用 URI 编码；有序�
 业务私有数据应有明确选择：小型可变进度放 Task state；大内容放持久 artifact；可重建数据放 cache；工作目录和文件变更通过 workspace resource 管理。`artifacts/` 是预留位置，不是对所有 backend 强制的物理存储路径。跨 Session artifact 的访问与保留由 owner/grant/pin 协议决定。
 
 完整性验收应覆盖对象的创建、使用、暂停、所有者消失、恢复、关闭和删除全过程；新增 namespace 本身不等于完成协议。
+
+### 能力资源创建幂等键
+
+Session 的 resources.seq 保存 `create/<encoded ownerTaskId>/<encoded requestId>`，值为 fingerprint/resourceId/handleId。该回执与对应 resource/handle 键及创建事件同事务发布。重放检查规格指纹，返回当前记录以保留撤销状态；不会从回执恢复旧授权。未声明 requestId 不写该回执。
+
+### 初始启动信号回执
+
+任务记录文件中的 `start-signal` 键保存可选初始信号的编码指纹，与 Task 启动状态、pending signal、task.signal/task.started 事件同事务提交。后续相同信号 start 是 no-op，不同信号拒绝；只有普通无信号启动的任务没有此键。该键不替代后续 signal 的事件记录。

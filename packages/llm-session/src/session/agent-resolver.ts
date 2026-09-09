@@ -1,7 +1,7 @@
 // @file: llm-conversation/session/agent-resolver.ts
 
 import { ExecutorConfig } from '../core/types';
-import { resolveModelForTier, ModelTier, resolveWebSearchStrategy } from '@itookit/common';
+import { resolveModelForTier, ModelTier, resolveWebSearchStrategy, sha256Hex } from '@itookit/common';
 import type { ConnectionMeta, WebSearchMode } from '@itookit/common';
 import { IAgentConfigService } from '../services/agent-service';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
@@ -19,6 +19,16 @@ export interface ModelInfo {
     id: string;
     name: string;
     provider?: string;
+}
+
+/** Why an agentId could not be turned into a usable ExecutorConfig. */
+interface AgentResolutionFailure {
+    reason: 'not-found' | 'error';
+    detail?: string;
+}
+
+function describeError(error: unknown): string {
+    return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
 /**
@@ -41,27 +51,50 @@ export class AgentResolver {
 
     /**
      * Resolve agent for chat — uses Default Agent fallback on missing agent.
+     *
+     * The fallback config carries no agentVersion, so any caller that requires a
+     * frozen agent identity (SessionRunCoordinator.createTask) fails with
+     * "Agent version is required: default". Always log WHY the fallback fired —
+     * the module logger is an in-memory ring buffer and is invisible in the app console.
      */
     async resolveForChat(agentId: string): Promise<ExecutorConfig> {
         let config: ExecutorConfig | null = null;
+        let failure: AgentResolutionFailure | null = null;
 
         try {
             const agentDef = await this.agentService.getAgentConfig(agentId);
 
             if (agentDef) {
                 config = await this.buildConfig(agentDef);
+            } else {
+                failure = { reason: 'not-found' };
             }
         } catch (e) {
             if (e instanceof ConversationError) throw e;
+            failure = { reason: 'error', detail: describeError(e) };
             log.error('Failed to resolve agent', { agentId, error: e });
         }
 
         if (!config) {
-            log.warn('Agent not found, using fallback', { agentId });
+            this.reportFallback(agentId, failure);
             config = await this.getFallbackConfig();
         }
 
         return config;
+    }
+
+    /** Explain an unusable agentId: unknown/empty id, or an exception during resolution. */
+    private reportFallback(agentId: string, failure: AgentResolutionFailure | null): void {
+        const requested = agentId ? `'${agentId}'` : "'' (empty agentId)";
+        const reason = failure?.reason === 'error'
+            ? `resolution threw ${failure.detail}`
+            : 'no agent with that id';
+        const known = this.agentService.listAgents().map(agent => agent.id);
+        console.warn(
+            `[AgentResolver] agentId ${requested} unusable (${reason}) — using fallback config. `
+            + `Known agents: ${known.length ? known.join(', ') : '(none loaded)'}`,
+        );
+        log.warn('Agent not found, using fallback', { agentId, failure });
     }
 
     /**
@@ -168,8 +201,8 @@ export class AgentResolver {
             version: undefined,
             modifiedAt: undefined,
         });
-        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
-        return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+        // sha256Hex falls back to pure JS where crypto.subtle is missing (WebKitGTK/Tauri).
+        return sha256Hex(canonical);
     }
 
     private canonicalize(value: unknown): string {
@@ -340,6 +373,7 @@ export class AgentResolver {
 
         if (!connMeta) {
             log.error('CRITICAL: No connections available');
+            console.error('[AgentResolver] No LLM connection available — fallback config has no model or agentVersion');
             return { id: 'default', name: 'Error: No Connection', type: 'agent', model: '' } as ExecutorConfig;
         }
 
@@ -348,6 +382,10 @@ export class AgentResolver {
         log.info('Using fallback configuration', {
             connectionId: connMeta.id, connectionName: connMeta.name, modelId,
         });
+        console.warn(
+            `[AgentResolver] Fallback config has no agentVersion (connection='${connMeta.id}', model='${modelId}'). `
+            + 'Sends that require a frozen agent identity will fail with "Agent version is required: default".',
+        );
 
         return {
             id: 'default', name: 'Default Assistant', type: 'agent',

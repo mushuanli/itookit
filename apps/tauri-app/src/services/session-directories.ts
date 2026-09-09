@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { createFileSystemSource, type FileSystemSourceOwner, type IFileSystem } from '@itookit/vfs-core';
+import { sha256Hex } from '@itookit/common';
 import { openLocalFSBackend, type IFsOps, type StatResult, type DirEntry } from '@itookit/vfsdriver-localfs';
 import { TauriFsOps } from '../fs/tauri-fs-ops';
 import { TauriSqlSidecarDb } from '../db/tauri-sql-sidecar';
@@ -54,8 +55,7 @@ export class TauriSessionDirectories {
     private async openScope(data: Scope) {
         const scopes: Scope[] = [data];
         try {
-            const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data.root)));
-            const key = Array.from(digest).map(n => n.toString(16).padStart(2, '0')).join('');
+            const key = await sha256Hex(data.root);
             const sidecarPath = `${this.rootDir}/meta/session-sources/${key}`;
             await new TauriFsOps().mkdir(sidecarPath);
             const metadata = await invoke<Scope>('directory_open', { path: sidecarPath }); scopes.unshift(metadata);
