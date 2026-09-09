@@ -687,3 +687,10 @@
         border-color: rgba(239, 68, 68, 0.3);
     }
 }
+
+/* Storage overview stat grid */
+.settings-storage-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--st-space-md, 12px);
+}

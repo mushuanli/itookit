@@ -172,11 +172,13 @@
 /* ============================================
    表单 - Forms
    ============================================ */
-.settings-form-group {
+.settings-form-group,
+.settings-form__group {
     margin-bottom: var(--st-space-lg);
 }
 
-.settings-form-group label {
+.settings-form-group label,
+.settings-form__label {
     display: block;
     margin-bottom: var(--st-space-xs);
     font-weight: 500;
@@ -186,7 +188,10 @@
 
 .settings-input,
 .settings-select,
-.settings-textarea {
+.settings-textarea,
+.settings-form__input,
+.settings-form__select,
+.settings-form__textarea {
     width: 100%;
     padding: 10px 12px;
     border: 2px solid var(--st-border-color);
@@ -201,13 +206,31 @@
 
 .settings-input:focus,
 .settings-select:focus,
-.settings-textarea:focus {
+.settings-textarea:focus,
+.settings-form__input:focus,
+.settings-form__select:focus,
+.settings-form__textarea:focus {
     outline: none;
     border-color: var(--st-border-color-focus);
     box-shadow: 0 0 0 3px var(--st-color-primary-light);
 }
 
-.settings-textarea {
+.settings-form__input,
+.settings-form__select {
+    min-height: 40px;
+    line-height: 1.4;
+}
+
+.settings-form__help {
+    display: block;
+    margin-top: var(--st-space-xs);
+    color: var(--st-text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.settings-textarea,
+.settings-form__textarea {
     min-height: 80px;
     resize: vertical;
 }
@@ -470,4 +493,108 @@
     outline: none;
     border-color: var(--st-border-color-focus);
     box-shadow: 0 0 0 3px var(--st-color-primary-light);
+}
+
+/* ── Section / form layout helpers ───────────────────────────────────────── */
+/* Used by log, storage, recovery and tag editors. BEM aliases of the older
+   flat names keep both markup styles working. */
+.settings-section__header,
+.settings-section-header {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-sm, 8px);
+    margin-bottom: var(--st-space-sm, 8px);
+}
+
+.settings-section__icon {
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.settings-section__content {
+    display: block;
+    margin-top: var(--st-space-sm, 8px);
+}
+
+.settings-section__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-sm, 8px);
+    margin-left: auto;
+}
+
+.settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--st-space-md, 12px);
+}
+
+.settings-form-hint,
+.settings-form-hint__text {
+    display: block;
+    margin-top: var(--st-space-xs, 4px);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--st-text-secondary);
+}
+
+.settings-input-group {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-sm, 8px);
+    flex-wrap: wrap;
+}
+
+.settings-input--sm,
+.settings-select--sm {
+    padding: 6px 8px;
+    font-size: 0.82rem;
+}
+
+.settings-radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--st-space-sm, 8px);
+}
+
+.settings-radio-row {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-sm, 8px);
+}
+
+.settings-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--st-space-xs, 4px);
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--st-text-primary);
+}
+
+.settings-inline-rename {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-xs, 4px);
+}
+
+.settings-list-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--st-space-sm, 8px);
+}
+
+.settings-list-item__check {
+    flex-shrink: 0;
+}
+
+.settings-list-item__content {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-empty__text {
+    display: block;
+    color: var(--st-text-secondary);
+    font-size: 0.85rem;
 }

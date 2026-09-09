@@ -463,3 +463,9 @@
         background: rgba(99,102,241,.2);
     }
 }
+/* Tier row: thinking toggle slot keeps the row height stable */
+.tier-thinking-slot {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}

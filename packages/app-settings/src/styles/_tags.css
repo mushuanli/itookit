@@ -90,3 +90,10 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* Tag card action row */
+.settings-tag-card__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-xs, 4px);
+}

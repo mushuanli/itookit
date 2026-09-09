@@ -1242,3 +1242,162 @@
     border-top: 1px solid var(--border-color-subtle, #f0f0f0);
     margin: 0;
 }
+
+/* ── Inline tool output panel (ToolOutputPanel) ──────────────────────────── */
+/* Shown between the executor row and the textarea for direct tool invocations. */
+.llm-input__tool-output {
+    border: 1px solid var(--llm-border-color);
+    border-radius: var(--llm-radius-md, 6px);
+    background: var(--llm-bg-secondary);
+    margin: 0 0 8px;
+    overflow: hidden;
+}
+
+.llm-input__tool-output-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--llm-border-color);
+    font-size: 11px;
+}
+
+.llm-input__tool-output-cmd {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--llm-font-mono, monospace);
+    color: var(--llm-text-secondary);
+}
+
+.llm-input__tool-output-meta {
+    flex-shrink: 0;
+    color: var(--llm-text-tertiary, var(--llm-text-muted));
+    font-variant-numeric: tabular-nums;
+}
+
+.llm-input__tool-output-close {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: var(--llm-radius-sm, 4px);
+    background: transparent;
+    color: var(--llm-text-muted);
+    cursor: pointer;
+    line-height: 1;
+    font-size: 14px;
+}
+
+.llm-input__tool-output-close:hover {
+    background: var(--llm-bg-hover);
+    color: var(--llm-text-primary);
+}
+
+.llm-input__tool-output-body {
+    margin: 0;
+    padding: 8px 10px;
+    max-height: 200px;
+    overflow: auto;
+    font-family: var(--llm-font-mono, monospace);
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--llm-text-primary);
+}
+
+/* ── Skill panel (chat settings) ─────────────────────────────────────────── */
+.llm-input__skill-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.llm-input__skills-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+.llm-input__skills-empty {
+    display: block;
+    padding: 8px 0;
+    font-size: 12px;
+    color: var(--llm-text-muted);
+}
+
+.llm-input__skills-refresh {
+    align-self: flex-start;
+    padding: 4px 10px;
+    border: 1px solid var(--llm-border-color);
+    border-radius: var(--llm-radius-sm, 4px);
+    background: transparent;
+    color: var(--llm-text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.llm-input__skills-refresh:hover {
+    background: var(--llm-bg-hover);
+    color: var(--llm-text-primary);
+}
+
+.llm-input__skill-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--llm-border-color);
+    border-radius: var(--llm-radius-md, 6px);
+    background: var(--llm-bg-primary);
+}
+
+.llm-input__skill-item--loaded {
+    border-color: var(--llm-color-primary);
+    background: var(--llm-color-primary-bg, var(--llm-bg-secondary));
+}
+
+.llm-input__skill-icon {
+    flex-shrink: 0;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.llm-input__skill-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--llm-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.llm-input__skill-desc {
+    flex-shrink: 1;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--llm-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.llm-input__skill-toggle {
+    flex-shrink: 0;
+}
+
+.llm-input__skill-btn {
+    /* Visually hidden: the .llm-input__toggle-slider renders the switch. */
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
