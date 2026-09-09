@@ -273,7 +273,6 @@ export class DefaultPrintService implements PrintService {
      */
     async printFromHtml(contentHtml: string, options: PrintOptions = {}): Promise<void> {
         const resolved = await this.resolvePrintOptions(options);
-        //const title = resolved.title || 'Print';
         const styles = this.getStyles(resolved);
         const header = this.buildHeader(resolved);
 
@@ -334,10 +333,16 @@ export class DefaultPrintService implements PrintService {
         // 等待渲染完成（图片等资源）
         await new Promise(resolve => setTimeout(resolve, 300));
 
-        window.print();
-
-        // 打印后清理
-        this.cleanupAfterPrint(container, styleEl);
+        const originalTitle = document.title;
+        if (resolved.title) document.title = resolved.title;
+        // 必须在 print() 前注册：阻塞式打印可能在返回前触发 afterprint。
+        const cleanup = this.cleanupAfterPrint(container, styleEl, originalTitle);
+        try {
+            window.print();
+        } catch (error) {
+            cleanup();
+            throw error;
+        }
     }
 
     /**
@@ -355,12 +360,14 @@ export class DefaultPrintService implements PrintService {
     /**
      * 打印后清理容器和样式
      */
-    private cleanupAfterPrint(container: HTMLElement, styleEl: HTMLStyleElement): void {
+    private cleanupAfterPrint(container: HTMLElement, styleEl: HTMLStyleElement, originalTitle: string): () => void {
         let cleaned = false;
 
         const cleanup = () => {
             if (cleaned) return;
             cleaned = true;
+            clearTimeout(timeout);
+            document.title = originalTitle;
             window.removeEventListener('afterprint', cleanup);
             window.removeEventListener('focus', cleanup);
             if (container.parentNode) {
@@ -375,7 +382,8 @@ export class DefaultPrintService implements PrintService {
         // 兜底：打印对话框关闭后主窗口重新获得焦点
         window.addEventListener('focus', cleanup, { once: true });
         // 最终兜底：60 秒后强制清理
-        setTimeout(cleanup, 60000);
+        const timeout = setTimeout(cleanup, 60000);
+        return cleanup;
     }
 
     /**

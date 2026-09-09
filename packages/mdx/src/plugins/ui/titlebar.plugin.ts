@@ -255,14 +255,16 @@ export class CoreTitleBarPlugin implements MDxPlugin {
       try {
         await renameWithStoredTitle(engine, nodeId, finalName, title);
         editor.updateNodeId(replaceBasename(nodeId, finalName));
-        this.currentTitle = title;
-        this.titleEl!.value = title;
+        editor.setTitle(title);
       } catch {
         this.titleEl!.value = this.currentTitle;
       }
     };
 
-    this.titleEl.addEventListener('blur', doRename);
+    let pendingRename: Promise<void> | undefined;
+    this.titleEl.addEventListener('blur', () => {
+      pendingRename = doRename();
+    });
     this.titleEl.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -299,6 +301,8 @@ export class CoreTitleBarPlugin implements MDxPlugin {
 
       button.onclick = async () => {
         try {
+          // Clicking a button blurs the title input first; wait for the rename to sync path and title.
+          await pendingRename;
           if (btnConfig.onClick) {
             await btnConfig.onClick({ editor, context, pluginManager });
           } else if (btnConfig.command) {

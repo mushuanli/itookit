@@ -142,10 +142,19 @@ export const PRINT_STYLES = `
 .mdx-print ol {
     margin: 0 0 16px;
     padding-left: 2em;
+    list-style-position: outside;
 }
 
-.mdx-print li { margin: 0.25em 0; }
+.mdx-print ul { list-style-type: disc; }
+.mdx-print ol { list-style-type: decimal; }
+.mdx-print ul ul { list-style-type: circle; }
+.mdx-print ul ul ul { list-style-type: square; }
+.mdx-print ol ol { list-style-type: lower-alpha; }
+.mdx-print ol ol ol { list-style-type: lower-roman; }
+.mdx-print li { display: list-item; margin: 0.25em 0; }
 .mdx-print li > p { margin: 0; }
+.mdx-print li.task-list-item { list-style: none; }
+.mdx-print input[type="checkbox"] { margin-right: 0.5em; }
 
 /* ============================================
    CODE

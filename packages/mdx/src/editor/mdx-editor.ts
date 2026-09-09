@@ -342,6 +342,7 @@ export class MDxEditor extends IEditor {
     }
 
     setTitle(newTitle: string): void {
+        this.config.title = newTitle;
         this.renderer.getPluginManager().emit('setTitle', { title: newTitle });
     }
 
