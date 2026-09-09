@@ -1,6 +1,6 @@
 # 目标、进度与后续任务
 
-更新：2026-09-09。本文是本轮工作的接续入口；以当前代码和可复现测试为准。**整体目标未完成，完整桌面最小系统尚未验收通过。** 下文“已完成”只指列明的实现与验证范围。
+更新：2026-09-09（P1-08、P2-05 已完成）。本文是本轮工作的接续入口；以当前代码和可复现测试为准。**整体目标未完成，完整桌面最小系统尚未验收通过。** 下文“已完成”只指列明的实现与验证范围。
 
 ## 1. 目标与优先级
 
@@ -41,7 +41,7 @@
 | D15 | 外层 Kernel → Bash → 真实子 CLI → 两节点 DAG | 集成测试验证依赖传值、子 Run/result 落盘、外层 Task/Effect succeeded，外层存储重开记录一致。桥接调用真实 Rust 模块，但未经过真实 Tauri IPC |
 | D16 | Tauri 编译与无显示服务器 CLI 验收 | GDK 已安装，Rust check/build 和前端构建已通过；没有 X11 不影响编译，Xvfb 下窗口与基础页面已验证；完整交互未验收 |
 | D17 | Session 本地 memory provider | 持久保存、按授权 scope 检索与宿主写入；由 `packages/app-core/src/runtime/create-application-runtime.ts` 装配时默认注入。不是跨 Session memory、向量检索或模型写入工具 |
-| D18 | 设计与代码阶段性核对 | `doc/design` 当前 13 个 Markdown 文件（另有 4 份已移入 `doc/deprecated/`）；审计记录包含跨包实现与历史验证。仍需最终逐项闭合，不能用文档数量代替验收 |
+| D18 | 设计与代码阶段性核对 | 已完成全量核对（见 P2-05）：`doc/design` 13 篇 + 全部 API 文档 + `AGENTS.md`/README 逐条对代码修订，`pnpm docs:check` 通过；4 份设计已移入 `doc/deprecated/`。最小系统实机验收仍属 P0 |
 
 ## 3. 需要完成的任务
 
@@ -66,7 +66,9 @@
 - [ ] **P1-05 Durable 五篇文档的完整映射**：逐条建立目标 → API → 持久记录 → 故障测试证据；完成仍有效的遗漏和真实外部 Effect 清理验收。
 - [ ] **P1-06 Transcript 存储分页与导出**：物理读取分页已落地（`packages/durable-kernel/src/infrastructure/seqfile/store.ts` 的 Task 列表/历史/事件分页 + `packages/llm-flow/src/flow/transcript.ts` 的版本化读取）；仍需完成字节预算及真实平台文件导出验收。
 - [ ] **P1-07 Schema/输出策略**：responseFormat 绑定与端口错误策略已实现（`packages/llm-flow/src/flow/builtin-plugins.ts`、`packages/llm-flow/src/flow/port-contract.ts`，校验期与运行期都校验）；结构兼容推导仍未实现（端口只做 `id@version` 精确匹配、无隐式转换），动态节点验证及相应受支持子集仍需闭合，不能把当前受支持子集称为完整实现。
-- [ ] **P1-08 kernel-adapters 两处 Effect 回滚缺陷**：`packages/kernel-adapters/src/effects/skill-load-effect.ts` 与 `packages/kernel-adapters/src/effects/tool-call-effect.ts` 在持久登记失败时未恢复内存中的已加载 Skill，`packages/kernel-adapters/src/runtime/create-kernel-adapters-runtime.ts` 的创建失败清理也会被 `release` 异常中断并覆盖原始错误；复现步骤与修复建议见 [kernel-adapters 核验](deprecated/kernel-adapters-package-review.md)。
+- [x] **P1-08 kernel-adapters 两处 Effect 回滚缺陷**：已修复。`skill.load` 与 `tool.call(load_skill)` 在身份持久化失败时按“调用前是否已加载”回滚（`skill/loaded-state.ts` 的 `rollbackFailedLoad`，已加载的不卸载；回滚自身失败时以 AggregateError 保留原始错误）；`create-kernel-adapters-runtime.ts` 的创建失败清理改为逐项执行并聚合错误（`runCleanup`/`cleanupAfterFailure`），`release` 失败不再跳过 driver dispose，原始初始化错误也不再被覆盖。回归测试见 `runtime/create-kernel-adapters-runtime.test.ts`（新加载回滚、已加载保留、清理继续且保留原始 cause）。复现记录见 [kernel-adapters 核验](deprecated/kernel-adapters-package-review.md)。
+
+- [ ] **P1-09 CLI supervisor 循环集成测试失败（既有缺陷，未修复）**：`pnpm --filter @itookit/cli test` 中 `tests/run.integration.test.ts > CLI run > supervisor dispatches workers in a loop until the final answer` 稳定失败（70 通过 / 1 失败），`result.txt` 得到 `research` 而非 `FINAL ANSWER`，lead 的第二轮请求未带上 worker 结果。已在 HEAD `c66ab618`（把全部未提交改动 stash 后）复现，与本轮改动无关；修复需定位 supervisor 回边节点的上下文/输入注入。
 
 ### P2：保留但后移的扩展与全量设计闭合
 
@@ -74,7 +76,7 @@
 - [ ] **P2-02 跨 Session memory**：共享命名空间、显式读写授权、并发一致性与可审计来源；确保不同 Session 不因同名 namespace 自动互读。
 - [ ] **P2-03 Memory 模型写入与管理**：模型工具、编辑 UI、长期保留/压缩策略；语义/向量检索按有效设计实施，不能用当前词项匹配替代。
 - [ ] **P2-04 VFS/C4 完整验收**：按当前挂载与访问边界设计完成浏览、编辑、工具、附件、撤销和平台故障场景；旧方案已被取代的步骤不重做。
-- [ ] **P2-05 最终文档同步审计**：逐项复核全部 13 篇设计及相关 API 文档；消除过时的“当前”状态、保留历史证据与验证限制，最后才能标记原始目标完成。
+- [x] **P2-05 最终文档同步审计**：已完成。全部 13 篇 `doc/design` + 根/包 API 文档 + `AGENTS.md`/README 逐条对代码核对并修订；已被取代的设计与一次性评审记录移入 `doc/deprecated/` 并加横幅；新增 `scripts/check-docs.mjs` + `pnpm docs:check` 守卫（覆盖 67 份活文档的已删除符号、悬空路径与断链）。最小系统的实机验收仍属 P0。
 
 ## 4. Memory 的“Session 间共享”含义
 

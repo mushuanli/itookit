@@ -1,6 +1,6 @@
 # Kernel Adapters 改动核验
 
-> ⚠️ 已归档：一次性评审记录；其中两个 Effect 回滚问题**仍未修复**，追踪见 `../todo.md`。
+> ⚠️ 已归档：一次性评审记录。文中两个 Effect 回滚问题**已于 2026-09-09 修复**（见 `../todo.md` P1-08 与 `packages/kernel-adapters/src/skill/loaded-state.ts`）；本文保留审查当时的复现与结论。
 
 日期：2026-09-09。范围为当前 kernel-adapters 工作树改动，重点检查 Session scope、Skill 加载持久身份、工具 Effect 与失败清理。本轮未修改生产代码。
 

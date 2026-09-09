@@ -11,6 +11,7 @@ import type {
 } from '@itookit/durable-kernel';
 import type { IDeviceDriver } from '@itookit/vfs-core';
 import type { ITTYDriver, SkillDefinition } from '@itookit/common';
+import { ToolDeviceDriver } from '@itookit/tools';
 import { createKernelAdaptersRuntime } from './create-kernel-adapters-runtime';
 import { buildSkillPromptContext } from '../skill/prompt-context';
 import { ApprovedEffectProgram } from '../programs/approved-effect-program';
@@ -294,6 +295,54 @@ describe('createKernelAdaptersRuntime', () => {
         await tool.execute({ ...request, toolId: 'unload_skill' }, ctx);
         expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
         await runtime.dispose();
+    });
+
+    it.each(['skill.load', 'tool.call'])('rolls back a newly loaded Skill when identity persistence fails (%s)', async kind => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        await runtime.skillCatalog.saveSkill(skillDefinition());
+        const effects: EffectAdapter[] = []; runtime.plugin.install(registration(effects));
+        const state = sessionState(), ctx = context(state);
+        state.set = async () => { throw new Error('storage unavailable'); };
+        const adapter = effects.find(effect => effect.kind === kind)!;
+        await expect(adapter.execute(kind === 'tool.call'
+            ? { resourceHandleId: 'tool-handle', toolId: 'load_skill', args: { skill_id: 'review' } }
+            : { resourceHandleId: 'skill-handle', skillId: 'review' }, ctx)).rejects.toThrow('storage unavailable');
+        expect((await runtime.sessions.get('session-a')).skillService.getLoadedSkills()).toEqual([]);
+        await runtime.dispose();
+    });
+
+    it.each(['skill.load', 'tool.call'])('keeps a Skill that was already live when identity persistence fails (%s)', async kind => {
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver });
+        await runtime.skillCatalog.saveSkill(skillDefinition());
+        const effects: EffectAdapter[] = []; runtime.plugin.install(registration(effects));
+        const state = sessionState(), ctx = context(state);
+        const scope = await runtime.sessions.get('session-a');
+        await scope.skillService.loadSkill('review');
+        state.set = async () => { throw new Error('storage unavailable'); };
+        const adapter = effects.find(effect => effect.kind === kind)!;
+        await expect(adapter.execute(kind === 'tool.call'
+            ? { resourceHandleId: 'tool-handle', toolId: 'load_skill', args: { skill_id: 'review' } }
+            : { resourceHandleId: 'skill-handle', skillId: 'review' }, ctx)).rejects.toThrow('storage unavailable');
+        expect(scope.skillService.getLoadedSkills().map(skill => skill.id)).toEqual(['review']);
+        await runtime.dispose();
+    });
+
+    it('finishes scope cleanup after a release failure and preserves the original cause', async () => {
+        const dispose = vi.spyOn(ToolDeviceDriver.prototype, 'dispose');
+        try {
+            const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+                fileContextForSession: async () => ({ cwd: '/workspace', vfs: {
+                    readFile: async () => '', writeFile: async () => {}, listFiles: async () => [],
+                }, release: async () => { throw new Error('release failed'); } }),
+                skillSourceForSession: () => ({ loadScope: async () => { throw new Error('scan failed'); } }),
+            });
+            const failure = await runtime.sessions.get('one').catch(error => error);
+            expect(dispose).toHaveBeenCalled();
+            expect(failure).toBeInstanceOf(AggregateError);
+            expect((failure as AggregateError).errors.map(error => (error as Error).message))
+                .toEqual(['scan failed', 'release failed']);
+            await runtime.dispose();
+        } finally { dispose.mockRestore(); }
     });
 
     it('keeps a Skill live when durable tool unload persistence fails', async () => {

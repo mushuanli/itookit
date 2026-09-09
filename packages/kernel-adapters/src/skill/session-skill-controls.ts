@@ -2,7 +2,7 @@ import { runSessionSkillOperation } from './operation-queue';
 import type { SessionSkillControls, ISkillService } from '@itookit/common';
 import type { Kernel } from '@itookit/durable-kernel';
 import type { SessionCapabilityRegistry } from '../ports/capabilities';
-import { forgetLoadedSkill, parseLoadedSkillIds, rememberLoadedSkill } from './loaded-state';
+import { forgetLoadedSkill, parseLoadedSkillIds, rememberLoadedSkill, rollbackFailedLoad } from './loaded-state';
 
 /** UI control uses Session shared state directly; it does not impersonate an Agent Effect. */
 export function createSessionSkillControls(kernel: Kernel, registry: SessionCapabilityRegistry): SessionSkillControls {
@@ -52,7 +52,7 @@ async function loadAndRemember(service: ISkillService, id: string,
     if (!result.success) throw new Error(result.error ?? `Failed to load Skill: ${id}`);
     try { await rememberLoadedSkill(id, state); }
     catch (error) {
-        if (!wasLoaded) await service.unloadSkill(id);
+        if (!wasLoaded) await rollbackFailedLoad(service, id, error);
         throw error;
     }
     return result.toolIds;

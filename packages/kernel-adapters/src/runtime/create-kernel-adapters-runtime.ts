@@ -212,7 +212,7 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
         let source: SkillSource | undefined;
         try { source = files && this.options.skillSourceForSession
             ? this.options.skillSourceForSession(files) : this.options.skillSource; }
-        catch (error) { await files?.release(); await toolDriver.dispose(); throw error; }
+        catch (error) { return cleanupAfterFailure(error, [() => files?.release(), () => toolDriver.dispose()]); }
         const skillDriver = new SkillDeviceDriver({
             registry: this.skillDefinitions,
             source,
@@ -225,19 +225,39 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
             await toolDriver.init();
             if (files && this.options.skillSourceForSession) await skillDriver.getService().setCwd(files.cwd);
         }
-        catch (error) { await files?.release(); await toolDriver.dispose(); await skillDriver.dispose(); throw error; }
+        catch (error) { return cleanupAfterFailure(error, [() => files?.release(), () => toolDriver.dispose(), () => skillDriver.dispose()]); }
         const scope = createScope(toolDriver, skillDriver, ttySessions);
         const dispose = scope.dispose.bind(scope);
         let disposed = false;
         scope.dispose = async () => {
             if (disposed) return;
             disposed = true;
-            try { await dispose(); } finally { await files?.release(); }
+            await runCleanup([() => dispose(), () => files?.release()]);
         };
         try { await this.options.configureSession?.(sessionId, scope); }
-        catch (error) { await scope.dispose(); throw error; }
+        catch (error) { return cleanupAfterFailure(error, [() => scope.dispose()]); }
         return scope;
     }
+}
+
+/** Run every cleanup step even if one fails; report failures together. */
+async function runCleanup(steps: Array<() => Promise<unknown> | undefined>): Promise<void> {
+    const errors: unknown[] = [];
+    for (const step of steps) {
+        try { await step(); } catch (error) { errors.push(error); }
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length) throw new AggregateError(errors, 'Session scope cleanup failed');
+}
+
+/**
+ * Preserve the original initialization error while still attempting every cleanup
+ * step: a failing release must not skip driver disposal or hide the cause.
+ */
+async function cleanupAfterFailure(cause: unknown, steps: Array<() => Promise<unknown> | undefined>): Promise<never> {
+    try { await runCleanup(steps); }
+    catch (cleanupError) { throw new AggregateError([cause, cleanupError], 'Session scope initialization failed and cleanup reported errors'); }
+    throw cause;
 }
 
 function createScope(
@@ -292,7 +312,7 @@ function createEffects(
             const snapshot = { skillId, compactInstructions: skill.compact?.rawContent ?? '', tools: boundTools };
             await persistLoadedSkill({ skillId, success: true, toolIds: [] }, context);
             return snapshot;
-        }),
+        }, context => skills(context)),
         new BashEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, () => tools(context))),
         new SkillLoadEffectAdapter(skills, persistLoadedSkill),
         new SkillUnloadEffectAdapter(async context => (await registry.get(context.sessionId)).skillService),

@@ -2,6 +2,7 @@ import { assertEffectGrant } from '@itookit/durable-kernel';
 import type { ISkillService, SkillLoadResult } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
+import { rollbackFailedLoad } from '../skill/loaded-state';
 
 export interface SkillLoadEffectRequest { resourceHandleId: string; skillId: string; }
 
@@ -24,9 +25,16 @@ export class SkillLoadEffectAdapter implements EffectAdapter<SkillLoadEffectRequ
         if (service.getSkill(request.skillId)?.disableModelInvocation) {
             throw new Error(`Skill "${request.skillId}" cannot be loaded by the model`);
         }
+        const wasLoaded = service.getLoadedSkills().some(item => item.id === request.skillId);
         const result = await service.loadSkill(request.skillId);
         if (!result.success) throw new Error(result.error ?? `Skill failed to load: ${request.skillId}`);
-        await this.onLoaded?.(result, context);
+        try {
+            await this.onLoaded?.(result, context);
+        } catch (error) {
+            // A failed identity write must not leave a Skill live that this call loaded.
+            if (!wasLoaded) await rollbackFailedLoad(service, request.skillId, error);
+            throw error;
+        }
         return result;
     }
 

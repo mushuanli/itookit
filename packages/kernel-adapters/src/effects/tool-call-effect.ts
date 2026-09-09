@@ -1,9 +1,11 @@
 import { assertEffectGrant } from '@itookit/durable-kernel';
-import type { IToolService, ToolInvokeResult } from '@itookit/common';
+import type { ISkillService, IToolService, ToolInvokeResult } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
-import { forgetLoadedSkill } from '../skill/loaded-state';
+import { forgetLoadedSkill, rollbackFailedLoad } from '../skill/loaded-state';
 
 type ToolSource = IToolService | ((context: EffectExecutionContext, request: ToolCallEffectRequest) => IToolService | Promise<IToolService>);
+/** Live Skill state used to undo a load whose identity write failed. */
+export type SkillLoadTracker = Pick<ISkillService, 'getLoadedSkills' | 'unloadSkill'>;
 
 export interface ToolCallEffectRequest {
     resourceHandleId: string;
@@ -20,6 +22,7 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
     constructor(
         private readonly service: ToolSource,
         private readonly onSkillLoaded?: (skillId: string, context: EffectExecutionContext) => void | ToolInvokeResult['skillContext'] | Promise<void | ToolInvokeResult['skillContext']>,
+        private readonly resolveSkillTracker?: (context: EffectExecutionContext) => Promise<SkillLoadTracker | undefined>,
     ) {}
 
     async execute(request: ToolCallEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
@@ -32,11 +35,24 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
             if (service.getToolMeta(request.toolId)?.enabled !== true) throw new Error('Skill unload tool is disabled');
             await forgetLoadedSkill(id, context.sessionState);
         }
-        const result = requireToolSuccess(await service.invoke({ ...request, signal: context.abortSignal }));
         const key = service.getToolMeta(request.toolId)?.skillLoaderArgKey;
         const skillId = key ? request.args[key] : undefined;
-        const skillContext = typeof skillId === 'string' && skillId
-            ? await this.onSkillLoaded?.(skillId, context) : undefined;
+        const loadsSkill = typeof skillId === 'string' && Boolean(skillId);
+        // Capture the live state before the tool runs: only a load this call
+        // introduced may be undone when identity persistence fails.
+        const tracker = loadsSkill ? await this.resolveSkillTracker?.(context) : undefined;
+        const wasLoaded = tracker ? tracker.getLoadedSkills().some(item => item.id === skillId) : true;
+        const result = requireToolSuccess(await service.invoke({ ...request, signal: context.abortSignal }));
+        let skillContext: ToolInvokeResult['skillContext'];
+        if (loadsSkill) {
+            try {
+                const loaded = await this.onSkillLoaded?.(skillId as string, context);
+                skillContext = loaded ? loaded : undefined;
+            } catch (error) {
+                if (tracker && !wasLoaded) await rollbackFailedLoad(tracker, skillId as string, error);
+                throw error;
+            }
+        }
         // Tool/provider output cannot manufacture persistent policy context.
         const { skillContext: _untrusted, ...output } = result;
         return skillContext ? { ...output, skillContext } : output;
