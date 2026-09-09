@@ -7,6 +7,7 @@ import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
 import { buildRenamedFilename } from '@itookit/common';
 import { findNodeById } from '../../utils/helpers';
 import { describeDeleteError } from '../../utils/delete-error';
+import { describeCauseChain } from '../../utils/error-detail';
 import { partitionDeletable, READ_ONLY_DELETE_MESSAGE } from '../../utils/delete-guard';
 
 export interface FileCommandOptions {
@@ -43,7 +44,7 @@ export class FileCommandHandler {
             await this.service.createDirectory({ title, parentPath: parentPath ?? null });
           }
         } catch (e) {
-          console.error(`[FileCommandHandler] Create ${type} failed:`, e);
+          console.error(`[FileCommandHandler] Create ${type} failed:`, describeCauseChain(e));
           this.commandBus.execute('ui:cancelCreating', undefined as any);
           alert(`创建失败: ${(e as Error).message}`);
         }
@@ -59,7 +60,7 @@ export class FileCommandHandler {
         try {
           await this.service.deleteItems(deletable);
         } catch (error) {
-          console.error('[FileCommandHandler] Delete failed:', error);
+          console.error('[FileCommandHandler] Delete failed:', describeCauseChain(error));
           alert(`删除失败: ${describeDeleteError(error)}`);
         }
       }),

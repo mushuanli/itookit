@@ -43,7 +43,7 @@ export class TauriFsOps implements IFsOps {
         try {
             await invoke('fs_mkdir', { path: p });
         } catch (e) {
-            console.error('[DEBUG-ASSET] TauriFsOps.mkdir FAILED path=', p, e);
+            console.error('[TauriFsOps] mkdir failed', { path: p, error: e });
             throw e;
         }
     }
@@ -64,7 +64,7 @@ export class TauriFsOps implements IFsOps {
                 data: Array.from(new Uint8Array(data)),
             });
         } catch (e) {
-            console.error('[DEBUG-ASSET] TauriFsOps.writeFile FAILED path=', p, e);
+            console.error('[TauriFsOps] writeFile failed', { path: p, error: e });
             throw e;
         }
     }

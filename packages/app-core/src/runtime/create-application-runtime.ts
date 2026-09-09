@@ -162,10 +162,18 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         });
         cleanupFns.push(() => kernel.dispose());
         cleanupFns.push(async () => { kernelCore.dispose(); await kernelCore.waitIdle(); });
+        // A refused lease is the only reason a Session stays read-only; log who holds
+        // it and when it expires so the condition is diagnosable without a debugger.
+        const describeHolder = async (sessionId: string): Promise<string> => {
+            const held = await leaseStore.inspect(sessionId).catch(() => null);
+            if (!held) return 'another host';
+            const remaining = Math.max(0, held.leaseUntil - Date.now());
+            return `${held.ownerKind}:${held.ownerId} until ${new Date(held.leaseUntil).toISOString()} (${Math.ceil(remaining / 1000)}s left)`;
+        };
         for await (const session of kernelCore.listSessions()) {
             const lease = await leaseStore.acquire(session.id, { id: ownerId, kind: options.ownerKind ?? 'tauri' });
             if (!lease) {
-                console.warn(`[Boot] Session ${session.id} is owned by another host; leaving it read-only`);
+                console.warn(`[Boot] Session ${session.id} is owned by ${await describeHolder(session.id)}; leaving it read-only`);
                 continue;
             }
             recoveredLeases.set(session.id, lease);
@@ -214,10 +222,13 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             if (recoveredLeases.has(sessionId)) return;
             const lease = await leaseStore.acquire(sessionId, { id: ownerId, kind: options.ownerKind ?? 'tauri' });
             if (!lease) {
-                console.warn(`[Shell] Session ${sessionId} is owned by another host; leaving it read-only`);
+                console.warn(`[Shell] Session ${sessionId} is owned by ${await describeHolder(sessionId)}; leaving it read-only`);
                 return;
             }
             recoveredLeases.set(sessionId, lease);
+            // Recovery (and therefore writability) is decided at boot only, so a late
+            // lease must say so explicitly instead of looking like a healthy Session.
+            console.warn(`[Shell] Session ${sessionId} lease acquired after boot (fencingToken=${lease.fencingToken}); restart to recover its writes`);
         };
         const unsubscribeSessionLease = sessionManager.onGlobalEvent(event => {
             if (event.type === 'session_registered') void acquireSessionLease(event.payload.sessionId);
