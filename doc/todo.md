@@ -1,6 +1,6 @@
 # 目标、进度与后续任务
 
-更新：2026-09-09（P1-08、P1-09、P2-05 已完成）。本文是本轮工作的接续入口；以当前代码和可复现测试为准。**整体目标未完成，完整桌面最小系统尚未验收通过。** 下文“已完成”只指列明的实现与验证范围。
+更新：2026-09-09（复核 P0-00、P1-08、P1-09 的代码证据，修正接续上下文与文档检查边界）。本文是本轮工作的接续入口；以当前代码和可复现测试为准。**整体目标未完成，完整桌面最小系统尚未验收通过。** 下文“已完成”只指列明的实现与验证范围。
 
 ## 1. 目标与优先级
 
@@ -41,7 +41,7 @@
 | D15 | 外层 Kernel → Bash → 真实子 CLI → 两节点 DAG | 集成测试验证依赖传值、子 Run/result 落盘、外层 Task/Effect succeeded，外层存储重开记录一致。桥接调用真实 Rust 模块，但未经过真实 Tauri IPC |
 | D16 | Tauri 编译与无显示服务器 CLI 验收 | GDK 已安装，Rust check/build 和前端构建已通过；没有 X11 不影响编译，Xvfb 下窗口与基础页面已验证；完整交互未验收 |
 | D17 | Session 本地 memory provider | 持久保存、按授权 scope 检索与宿主写入；由 `packages/app-core/src/runtime/create-application-runtime.ts` 装配时默认注入。不是跨 Session memory、向量检索或模型写入工具 |
-| D18 | 设计与代码阶段性核对 | 已完成全量核对（见 P2-05）：`doc/design` 13 篇 + 全部 API 文档 + `AGENTS.md`/README 逐条对代码修订，`pnpm docs:check` 通过；4 份设计已移入 `doc/deprecated/`。最小系统实机验收仍属 P0 |
+| D18 | 设计与代码阶段性核对 | 前轮记录 `doc/design` 13 篇 + API 文档 + `AGENTS.md`/README 的核对修订，4 份设计已移入 `doc/deprecated/`；本轮引用检查通过（见 P2-05 的检查边界）。不等于全部设计要求实现或故障证据映射完成；最小系统实机验收仍属 P0 |
 
 ## 3. 需要完成的任务
 
@@ -49,10 +49,12 @@
 
 ### P0：优先完成最小系统验收
 
-- [ ] **P0-00 两端核心装配一致性**：已抽出 `@itookit/app-core`（Session 文件/目录服务、`createKernelRuntime`、下沉到 llm-flow 的 Durable program 注册、Skill catalog 同步）并由 app-shell 与 CLI 共用；Skill 文件发现已提至共享层并接入 CLI；继续统一新运行的项目/Skill 上下文、加载身份恢复，保持平台权限适配独立。
+- [ ] **P0-00 两端核心装配一致性**：已抽出 `@itookit/app-core`（Session 文件/目录服务、`createKernelRuntime`、下沉到 llm-flow 的 Durable program 注册、Skill catalog 同步）并由 app-shell 与 CLI 共用；Skill 文件发现已提至共享层并接入 CLI。两端也已接入 `resolveSessionSkillContext`，在组装新运行上下文前恢复持久加载身份，并通过共享操作队列组装项目规则、Skill 指令及索引；CLI 已有模型请求注入测试。剩余是两端真实入口对等验收，不能再把共享解析器接线列为未实现。
+  - [x] 代码接线：CLI `runtime.ts` 的 `resolveNewRunContext` 与 app-core `create-application-runtime.ts` 的 `resolveSessionContext` 调用同一解析器。
+  - [ ] 使用相同项目规则和 Skill，在 CLI 与真实 Tauri 应用分别新建运行、重开 Session 后新建运行、卸载后再运行；核对模型请求与持久加载身份，确保无指令遗漏或卸载后复活。现有适配器/组合测试只覆盖其中部分路径。
 
-- [ ] **P0-01 完整 Tauri 调用链**：已通过 Xvfb 启动/渲染、真实 Session Bash IPC，以及一次性模块触发的 IPC→子 CLI→两节点 DAG（仅一个 Run、两次模型请求、结果落盘）；仍需从真实应用装配/窗口发起外层 harness 的 Bash tool 调用，通过真实 IPC 启动子 CLI DAG，核对界面、Task/Effect、输出及结果重开。现有组合测试不能替代此项。
-- [ ] **P0-02 应用级失败与取消闭环**：已补真实子 DAG 模型拒绝场景，验证子 Run failed、无成功结果文件、外层持久工具结果保留 `[exit 1]`；仍需验证超时、取消、Session 关闭/授权撤销、IPC 错误时的应用 UI 和持久状态一致；不能把取消请求发出等同于进程已停止。
+- [x] **P0-01 完整 Tauri 调用链**：已完成。真实应用窗口（X11，`apps/tauri-app` 自包含二进制）→ 默认 Agent（mock Provider/Connection）→ 外层 harness（`llm.agent`，两轮）→ Bash tool → 真实 IPC `session_shell_exec` → bwrap（`/app` 只读仓库、`/workspace` 可写）→ 子 CLI 两节点 DAG。证据：子 Run `20260909145050-deab21b0` status=succeeded、`first`/`second` 均 succeeded、`result.txt` = `child-first-result`；外层 kernel 的 Effect 成功事件 → 第二轮模型请求携带工具结果 → `task.succeeded`；界面显示 Bash 工具节点、`[exit 0]` 与子 Run 事件；应用重启后 transcript 仍含 `OUTER-HARNESS-DONE`、`[exit 0]`、`child-first-result`（结果重开通过）。此前两个阻塞已修复：Bash 工具从未被广告给模型（`setNativeShell` 现在重新注册 `createBashTool(shell)`，见 `packages/tools/src/adapters/tool-device-driver.test.ts`）；`session-bash` 的 cwd 守卫用 `listFiles` 递归遍历仓库根导致 Effect 超时（改为 `ToolVFSContext.stat`，见 `packages/app-core/tests/tool-context.test.ts`）。现有组合测试仍不能替代此项，故同时保留为回归入口。
+- [ ] **P0-02 应用级失败与取消闭环**：已补真实子 DAG 模型拒绝场景，验证子 Run failed、无成功结果文件、外层持久工具结果保留 `[exit 1]`；已修“失败轮次后无法再发送”（终态无输出的 round 现在投影出 failed/aborted 助手占位并持久化 `error`，见 `packages/llm-session/__tests__/failed-round-projection.test.ts`）；仍需验证超时、取消、Session 关闭/授权撤销、IPC 错误时的应用 UI 和持久状态一致；不能把取消请求发出等同于进程已停止。**新发现**：应用被强杀后重启，前 1–2 次发送要等 20–40s 才出现 `task.created`（事件 220 `14:57:27` → 221 `14:57:46`），延迟位于会话 `setup()`（会话 scope/挂载源打开与上下文组装）而非内核调度；同一实例后续运行仍约 19s，需要定位并给出可接受阈值。
 - [ ] **P0-03 可复用运行入口与交付说明**：已新增 [运行说明](minimal-system.md) 与公开两节点 YAML，validate/graph 及真实子 harness 测试通过；仍需完成真实 Tauri 操作教程与子进程凭证注入交付，覆盖授权目录、模型配置和预期结果。
 - [ ] **P0-04 平台实机验证**：Linux Bubblewrap/目录边界和实际应用端到端验证；确认其他目标平台的支持范围。无 X11 时先推进 CLI/原生模块，GUI 项保持未验收。
 - [ ] **P0-05 最小系统最终回归**：在最终工作树重跑必要测试与构建，形成一份与实际版本对应的验收记录；阶段性通过不自动等于当前全部通过。
@@ -76,7 +78,14 @@
 - [ ] **P2-02 跨 Session memory**：共享命名空间、显式读写授权、并发一致性与可审计来源；确保不同 Session 不因同名 namespace 自动互读。
 - [ ] **P2-03 Memory 模型写入与管理**：模型工具、编辑 UI、长期保留/压缩策略；语义/向量检索按有效设计实施，不能用当前词项匹配替代。
 - [ ] **P2-04 VFS/C4 完整验收**：按当前挂载与访问边界设计完成浏览、编辑、工具、附件、撤销和平台故障场景；旧方案已被取代的步骤不重做。
-- [x] **P2-05 最终文档同步审计**：已完成。全部 13 篇 `doc/design` + 根/包 API 文档 + `AGENTS.md`/README 逐条对代码核对并修订；已被取代的设计与一次性评审记录移入 `doc/deprecated/` 并加横幅；新增 `scripts/check-docs.mjs` + `pnpm docs:check` 守卫（覆盖 67 份活文档的已删除符号、悬空路径与断链）。最小系统的实机验收仍属 P0。
+- [x] **P2-05 文档同步审计（已记录范围）**：前轮已记录全部 13 篇 `doc/design` + 根/包 API 文档 + `AGENTS.md`/README 的核对与修订；已被取代的设计与一次性评审记录移入 `doc/deprecated/` 并加横幅。本轮确认 `scripts/check-docs.mjs` 检查 67 份活文档，通过并有 5 条历史表述告警。脚本只检查预设的已删除符号、可识别的文件路径及相对链接，不校验设计语义、链接锚点或测试覆盖；逐条要求的持久记录/故障证据映射仍见 P1-05，各有效待办与实机验收不因本项勾选而完成。
+
+### 下一步执行顺序与验收产物
+
+1. P0-01 已在真实窗口跑通（见上）。接续先做 P0-02：发送延迟（重启后 20–40s 才 task.created）与取消/超时闭环；随后回到 P0-00 的两端入口对等检查（相同项目规则与 Skill 的 CLI/桌面模型请求比对）。
+2. 在同一入口覆盖 P0-02 的超时、取消、Session 关闭、授权撤销与 IPC 错误；逐项记录进程确已退出的证据、UI 状态和重开后的持久状态。区分工具 Effect 成功与子命令退出成功。
+3. 根据实际跑通步骤补齐 P0-03 的桌面教程与凭证注入，再记录 P0-04 的平台支持范围；没有实测的平台标记未验证。
+4. 最后执行 P0-05：验收记录注明 commit、工作树差异、平台/工具版本、命令及结果。P1/P2 仍有效，但不替代这条最小系统验收链。
 
 ## 4. Memory 的“Session 间共享”含义
 
@@ -87,7 +96,7 @@
 ## 5. 接续工作需要的上下文
 
 - 工作目录：`/home/li/share/prj/x1`；主要技术栈 TypeScript/pnpm、Rust/Tauri、LocalFS/SQLite。
-- 工作树包含大量既有未提交修改和新增文件；不要重置、覆盖或擅自提交。开始工作先检查当前文件，历史对话和日志只作为定位线索。
+- 本轮审查开始时工作树干净，基线为 `6ebfcfa4`；这不是以后接续时的工作树保证。每次开始先执行 `git status --short`，保护当时已有修改，不重置、覆盖或擅自提交。历史对话和日志只作为定位线索。
 - 遵守根与相关包的 `AGENTS.md`；中文交流，新注释使用英文。没有用户明确要求时不启动子代理。
 - GDK 缺失问题已解除，先前 `gdk-3.0` 检测为 3.24.52；曾通过完整 Rust 开发编译和前端构建，不等于发布安装包或 GUI 通过。
 - 当前没有物理 X11 桌面，但已发现 Xvfb 并完成真实 Tauri 窗口启动/基础页面渲染检查；可继续用虚拟显示推进 GUI 验收。测试模型主要为本地固定 HTTP/SSE 响应，不代表外部模型服务已验收。
@@ -126,7 +135,31 @@ rustc --edition=2021 --test apps/tauri-app/src-tauri/src/bash_process.rs -o /tmp
 /tmp/bash-bounded-tests
 ```
 
-最近的分项验证：
+本轮审查验证（2026-09-09，代码基线 `6ebfcfa4`，本轮仅修改本文）：
+
+| 命令 | 结果与范围 |
+| --- | --- |
+| `pnpm --filter @itookit/kernel-adapters test src/runtime/create-kernel-adapters-runtime.test.ts` | 26 通过，覆盖 P1-08 回滚/清理及 Skill 身份恢复 |
+| `pnpm --filter @itookit/app-shell exec vitest run tests/minimal-skill-dag.test.ts tests/tauri-bash.test.ts` | 11 通过，Skill/DAG 组合与 Bash 桥接替身；不是真实 Tauri IPC |
+| `pnpm --filter @itookit/cli test tests/run.integration.test.ts` | 13 通过，含项目/Skill 指令注入、普通循环及 P1-09 supervisor 累积结果；使用本地固定模型响应 |
+| `pnpm docs:check` | 67 份活文档通过，5 条历史表述告警；不验证设计语义 |
+| `pnpm styles:check` | markup 类名 ↔ CSS 规则一致性：808 份 markup / 63 份样式表 / 3747 个已定义类通过，107 条已知无样式类名在 `scripts/style-class-allowlist.txt` 棘轮内；只防止新增漂移，不代表样式补齐 |
+
+### 样式漂移与桌面图标（本轮新增守卫）
+
+桌面端曾出现"Provider 配置页输入框看不见"：编辑器使用 `settings-form__input/__label/__group/__help`，样式表却只定义 `settings-input` 等类，控件回退到平台原生渲染（本机 WebKitGTK 下表现为无边框、近白色色块）。已修复并补上同类布局类（工具输出面板、Skill 面板、editor 占位、settings 分区/表单/单选/列表辅助类）。
+
+`pnpm styles:check`（`scripts/check-styles.mjs`）扫描 `class="…"`、`classList`/`className` 与全部 CSS（含运行时 `injectStyle` 注入的样式），失败时列出无规则类名。允许清单按"JS 选择器/状态修饰"与"待补样式"分组：
+
+- 待补：Agent 编辑器快捷 Prompt 列表（`agent-prompt-*`）、DAG 空态/运行视图（`dag-empty` 等）、存储同步设置页（`sync-*` 整页）、VFS 列表/移动弹窗/mention 预览（`vfs-*`）、mdx 打印与零散元素。补齐后应从允许清单删除对应行。
+
+图标字体已从 cdnjs 改为本地打包（`@fortawesome/fontawesome-free`，在 `apps/tauri-app/src/main.ts` 引入），CSP 中的 `https://cdnjs.cloudflare.com` 白名单随之移除；MathJax/Mermaid 仍走 `https://fastly.jsdelivr.net`。
+
+CSP 的 `connect-src` 原来只放行 `ipc:` 与 `http://ipc.localhost`，而模型请求由 webview 直接 `fetch`（`device-llm` 无 Rust 侧代理），因此**桌面端任何外部 Provider 都会被 CSP 拦截**（表现为 `Load failed`）。验收期间用本地 mock 端点证实了这一点；现已改为 `connect-src ipc: http://ipc.localhost https: http: ws: wss:`，与“用户可配置任意 Provider 地址”的需求一致。安全边界：`script-src` 仍限定 `'self'` + `'unsafe-inline'` + jsdelivr。
+
+本轮未重跑全仓测试、Rust/前端构建或真实窗口链路，不构成 P0-05 最终验收。
+
+历史分项验证（保留定位线索，不代表本轮执行）：
 
 | 范围 | 结果 | 日志 |
 | --- | --- | --- |
@@ -140,7 +173,7 @@ rustc --edition=2021 --test apps/tauri-app/src-tauri/src/bash_process.rs -o /tmp
 
 ## 7. 设计文档索引与完成判定
 
-当前主线：[实施审计](deprecated/implementation-audit.md)、[Flow 执行模型](design/flow-execution-model.md)、[Skill 设计](design/skill-design.md)、[Session 挂载访问边界](design/vfs-session-mount-access.md)。
+当前主线：[Flow 执行模型](design/flow-execution-model.md)、[Skill 设计](design/skill-design.md)、[Session 挂载访问边界](design/vfs-session-mount-access.md)。[实施审计](deprecated/implementation-audit.md) 为历史定位材料，不作为当前完成状态的依据。
 
 Durable 五篇：[Core](design/durable-harness-core.md)、[Protocol](design/durable-harness-protocol.md)、[Storage](design/durable-harness-storage.md)、[Resources](design/durable-harness-resources.md)、[Cache](design/durable-harness-cache.md)。
 

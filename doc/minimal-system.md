@@ -65,6 +65,8 @@ node /app/apps/cli/dist/cli.js run -f /workspace/workflow.yml --headless --json
 
 Bash 返回 stdout/stderr/退出码，支持超时与取消；原生每个输出流最多保留 1 MiB 原始字节，超出后排空并标注截断。Linux 隔离共享网络，运行库/DNS/证书等可见，不是全封闭网络环境。
 
+桌面端的模型请求由 webview 直接发起，受 `apps/tauri-app/src-tauri/tauri.conf.json` 的 CSP `connect-src` 约束。该指令现放行 `https: http: ws: wss:`（外加 `ipc:`），因为 Provider 地址由用户在设置里配置；若收紧到固定域名，需同时把用到的 Provider 域名列入，否则界面会报 `Load failed`。图标字体已本地打包，MathJax/Mermaid 仍从 `https://fastly.jsdelivr.net` 加载，因此离线时公式/图渲染不可用。
+
 Web 保留 `createSessionProcesses` 接口，默认不注入本机 shell；不能在浏览器界面执行上述原生命令。无 X11 可编译 Tauri 和执行 CLI，但真实窗口、IPC、授权与错误反馈仍需单独验收。
 
 

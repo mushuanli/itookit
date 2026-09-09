@@ -20,6 +20,7 @@ pnpm dev                              # Web app 开发服务器
 pnpm build:libs                       # 构建 packages/*
 pnpm typecheck                        # 全仓类型检查
 pnpm docs:check                       # 活文档与代码同步检查
+pnpm styles:check                     # markup 类名 ↔ CSS 规则一致性检查
 pnpm --filter @itookit/<pkg> test     # 单包测试（vitest）
 pnpm --filter @itookit/<pkg> typecheck
 ```

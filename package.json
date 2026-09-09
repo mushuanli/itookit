@@ -18,7 +18,8 @@
         "cli:build": "pnpm --filter @itookit/cli build",
         "clean": "pnpm -r clean && rm -rf node_modules",
         "typecheck": "pnpm -r typecheck",
-        "docs:check": "node scripts/check-docs.mjs"
+        "docs:check": "node scripts/check-docs.mjs",
+        "styles:check": "node scripts/check-styles.mjs"
     },
     "keywords": [],
     "author": "",

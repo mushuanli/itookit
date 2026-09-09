@@ -37,6 +37,9 @@ import { TauriFsOps } from './fs/tauri-fs-ops';
 import { TauriLLMLogger } from './log/tauri-llm-logger';
 import { TauriSkillSource } from './kernel/tauri-skill-source';
 
+// Bundled locally: the desktop app must render icons offline. The CDN <link> this
+// replaces needed network access and a cdnjs CSP allowance.
+import '@fortawesome/fontawesome-free/css/all.min.css';
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
 import '@itookit/llm-ui/style.css';

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.1.0",
     "@itookit/app-core": "workspace:*",
     "@itookit/app-settings": "workspace:*",
     "@itookit/app-shell": "workspace:*",
