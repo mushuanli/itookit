@@ -19,6 +19,7 @@ import type {
 } from '@itookit/vfs-core';
 import type { Tool } from '../core/Tool';
 import type { INativeShell } from '../core/types';
+import { createBashTool } from '../tools/Bash/BashTool';
 
 // ── Registry entry ──
 
@@ -107,6 +108,10 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
    */
   setNativeShell(shell: INativeShell): void {
     this.shellContext = shell;
+    // The built-in Bash tool ships disabled (no shell bound). An injected shell must
+    // re-register it, otherwise getToolDefinitions() filters it out and the model is
+    // never told the tool exists.
+    this.registerToolInstance(createBashTool(shell));
   }
 
   /** Clear session-scoped app state between agent sessions for full isolation. */

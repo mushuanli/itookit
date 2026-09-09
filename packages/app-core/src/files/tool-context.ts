@@ -34,5 +34,9 @@ export function createVFSToolContext(context: FileSystemContext): ToolVFSContext
             }
             return files;
         },
+        async stat(path) {
+            const node = await context.fs.driver.getNode(resolve(path));
+            return node?.type ?? null;
+        },
     };
 }

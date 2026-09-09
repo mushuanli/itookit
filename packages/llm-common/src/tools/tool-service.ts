@@ -77,6 +77,13 @@ export interface ToolVFSContext {
      * 用于 glob_search 在 VFS 中遍历。
      */
     listFiles(dir?: string): Promise<string[]>;
+    /**
+     * 查询单一路径的节点类型（不递归），不存在返回 null。
+     *
+     * 用于校验工作目录之类的存在性检查：`listFiles` 会递归遍历整棵树，
+     * 对大目录（如仓库根）代价极高，不适合作为存在性判断。
+     */
+    stat?(path: string): Promise<'file' | 'directory' | 'seqfile' | 'device' | 'symlink' | null>;
 }
 
 export interface ToolExecutionContext {

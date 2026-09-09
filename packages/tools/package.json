@@ -33,7 +33,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "prepublishOnly": "pnpm build",
-    "test": "vitest",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist"
   },

@@ -32,7 +32,11 @@ function scopedProcesses(files: Parameters<Factory>[1], grants: Array<[string, s
             if (closed) throw new Error('Session process scope closed');
             if (!['sh', 'bash'].includes(command) || args.length !== 2 || args[0] !== '-c') throw new Error('Session Bash requires a shell command string');
             const cwd = options?.cwd ?? files.cwd;
-            await files.vfs.listFiles(cwd);
+            // Existence check only: listFiles() walks the whole subtree, which is
+            // prohibitive for a repository root. Fall back to it for hosts without stat().
+            if (files.vfs.stat) {
+                if (await files.vfs.stat(cwd) !== 'directory') throw new Error(`Session working directory is unavailable: ${cwd}`);
+            } else await files.vfs.listFiles(cwd);
             if (closed) throw new Error('Session process scope closed');
             options?.signal?.throwIfAborted();
             const requestId = randomUUID();
