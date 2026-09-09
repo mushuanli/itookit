@@ -809,11 +809,13 @@ DurableFlowExecutor 遇到 pending interaction 时返回等待中的同一 Run�
 当前证据为 app-shell minimal-skill-dag 的真实 LocalFS/Run 命令组合测试：单次回应、连续两次回应后下游均执行，根身份不变，重新连接可读取最终成员。调度状态仍在进程内，Kernel 销毁后停止驱动；完整运行中重启恢复保持待办。Skill 成功路径使用固定模型响应，尚非真实模型或完整 GUI 验收。
 
 
-### 人工交互边界的调度检查点
+### 任意崩溃点的调度恢复
 
-当前 executor 在发布等待人工回应的 Run 前保存 `flow.run.<rootTaskId>.scheduler`（version 1）。`resume(sessionId, rootTaskId)` 复用已存在的任务实例，恢复节点/边、循环派发、委派组、预算及配置状态，再继续提交下游。CLI resume 已使用此入口；只有结果重连的 `restoreFlowHandle` 仍不启动调度。
+executor 在派发第一个节点之前就创建 Run 的聚合根（`flow.aggregate` + `flow-root`），并立即保存 `flow.run.<rootTaskId>.scheduler`（version 1）。根任务因此是 Run 从第一刻起就持久存在的锚点：之后任何时刻崩溃，Session 里都已有根身份和已提交的调度状态，`resume(sessionId, rootTaskId)` 复用已存在的任务实例，恢复节点/边、循环派发、委派组、预算及配置状态，再继续提交下游。每个节点提交后都会刷新检查点与 `flow.run.<rootTaskId>.members`，所以恢复读到的是最后已提交的调度事实。CLI 的 manifest 在 `submit` 返回后写入 `rootTaskId`；若崩溃发生在写入之前，`resume` 会从 Session 的 `flow-root` 任务（按 `flow.aggregate` 程序身份校验）找回根身份，而不是报错退出。
 
-CLI 回归验证正常暂停→关闭存储→respond→resume，覆盖有/无下游节点与根任务 ID 不变；另有各命令独立进程的单次和连续两次暂停恢复测试，验证磁盘状态能跨进程继续执行。检查点不是每次 Task 提交的原子日志，不能保证任意 crash 点无重复提交；多个恢复者排他、隔离工作区租约及后台委派定时器恢复仍未完成。隔离工作区恢复当前明确拒绝。
+崩溃时无法核对结果的外部 Effect（例如已发出、但结果未落盘的模型请求）由 Kernel 恢复为 `indeterminate`。协议禁止把「未知」当作「未执行」，因此 CLI 不再空转：`resume` 发现这类 Effect 就写入 `blockedEffects`、把 Run 置为 `waiting` 并以退出码 3 报告，同时打印裁决命令；`resume --retry-indeterminate` 是宿主对「可安全重放」的授权，按确定性 `requestId` 调 `TaskHandle.resolveEffect({outcome:{type:'retry'}})` 重放同一逻辑 Effect，重放后调度从已提交的迭代继续，不重新开始整张图。取消 Run 是另一条裁决路径。
+
+崩溃点验收见 [apps/cli/tests/crash-matrix.test.ts](../../apps/cli/tests/crash-matrix.test.ts)：首个 Effect 在途 kill、回复送达但未提交 kill、循环中途 kill、预算耗尽前 kill，四种场景都要求 `resume` 收敛且不重放已完成迭代。节点 `session.submit` 与检查点写入仍不是同一个事务，但每个节点提交都带 Run 稳定的 `requestId`（`flow:<rootTaskId>:<nodeId>#<iteration>`），Kernel 按 `submission/<requestId>` 记录 spec 指纹并对同请求返回原任务，因此恢复时重复提交会复用原 Task 而不是产生重复实例（`packages/llm-flow/__tests__/durable-flow-executor.test.ts` 用「检查点丢失实例 + 重启 Kernel」验证）；同一 requestId 出现不同 spec 指纹时 Kernel 直接拒绝，不静默重复。仍然存在并明确保留的限制：graph patch 与动态委派的 crashpoint 覆盖、多个恢复者之间的排他（P1-02）、隔离工作区租约恢复（P1-03）、后台委派定时器恢复与图级 retry（P1-04）。隔离工作区恢复当前仍明确拒绝。
 
 
 恢复入口在状态装配完成后立即返回活动句柄，后台调度继续运行，调用方可开始监视与取消。若根任务尚未初始化，恢复判断使用其 input 中的 awaitingSchedule。等待模型响应时返回句柄、取消根任务后取消下游均有回归测试；测试接管已停止 Kernel 的租约，不代表生产环境应强制夺取有效租约。

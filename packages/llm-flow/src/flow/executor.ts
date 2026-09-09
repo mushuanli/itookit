@@ -545,7 +545,17 @@ export class DurableFlowExecutor {
                 return tolerated;
             };
 
-            if (restored && published) publish(published);
+            // Persist the aggregate root before the first node is scheduled: it is the
+            // Run's durable anchor, and the scheduler checkpoint is keyed by its id, so
+            // creating it up front lets a crash at any later point resume from committed
+            // state instead of restarting the whole graph.
+            if (!published) {
+                published = await this.finish(session, instances, nodes, detachedNodes, spec.goal, {
+                    tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
+                }, delegationGroups, completionOrder, undefined, true, toleratedFailureNodes());
+                await saveCheckpoint();
+            }
+            if (restored) publish(published);
             while (true) {
                 if (published && this.options.kernel.isDisposed) return published;
                 if (published && (await published.root.status()).task.status === 'cancelled') {
@@ -580,13 +590,8 @@ export class DurableFlowExecutor {
                 }));
                 if (published && this.options.kernel.isDisposed) return published;
                 if ('interaction' in settled) {
-                    if (!published) {
-                        published = await this.finish(session, instances, nodes, detachedNodes, spec.goal, {
-                            tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
-                        }, delegationGroups, completionOrder, undefined, true, toleratedFailureNodes());
-                        await saveCheckpoint();
-                        publish(published);
-                    }
+                    // The root already exists; publishing here releases `submit` for
+                    // interactive Runs so the host can respond while the graph waits.
                     await saveCheckpoint();
                     publish(published);
                     continue;
@@ -655,7 +660,14 @@ export class DurableFlowExecutor {
         toleratedFailures: Set<string> = new Set(),
     ): Promise<FlowExecutionHandle> {
         const root = await this.aggregate(session, instances, nodes, detachedNodes, delegationGroups, completionOrder, { goal, usage }, existing?.root, awaitingSchedule, toleratedFailures);
-        if (existing) { existing.usage = usage; return existing; }
+        if (existing) {
+            // The handle is published before the graph finishes, so refresh the fields
+            // that only become final here instead of leaving a stale snapshot.
+            existing.usage = usage;
+            existing.goal = goal;
+            existing.detachedNodes = detachedNodes;
+            return existing;
+        }
         return {
             sessionId: session.id,
             root,

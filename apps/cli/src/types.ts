@@ -137,6 +137,14 @@ export interface PendingInteraction {
     payload?: unknown;
 }
 
+/** 结果无法核对的外部 Effect：必须由宿主/操作者裁决后才能继续。 */
+export interface BlockedEffect {
+    taskId: string;
+    effectId: string;
+    kind: string;
+    error?: string;
+}
+
 export interface RunManifest {
     version: 1;
     id: string;
@@ -152,6 +160,8 @@ export interface RunManifest {
     taskStatuses: Record<string, string>;
     taskStartedAt?: Record<string, number>;
     pendingInteractions: PendingInteraction[];
+    /** 崩溃/worker 丢失后无法核对结果的外部 Effect，等待裁决。 */
+    blockedEffects?: BlockedEffect[];
     grants: WorkspaceGrant[];
     lastEventSequence: number;
     createdAt: number;

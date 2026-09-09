@@ -104,11 +104,16 @@ export async function createCliRuntime(
     if (!hostOptions.useProfileConfig) await configureLlm(llmDriver, workflow);
 
     const systemFS = await vfs.openFileSystem('/');
-    const leases = new SessionLeaseStore(systemFS);
+    // Test/tuning knob: a crashed CLI keeps its Session lease until the TTL expires,
+    // so crash-recovery tests shorten it instead of waiting the full minute.
+    const leaseTtlMs = Number(process.env.MINDOS_SESSION_LEASE_TTL_MS) || undefined;
+    const leases = new SessionLeaseStore(systemFS, { ttlMs: leaseTtlMs });
     const lease = await leases.acquire(manifest.sessionId, { id: `cli-${process.pid}-${crypto.randomUUID()}`, kind: 'cli' });
     if (!lease) {
         const current = await leases.inspect(manifest.sessionId);
-        throw new Error(`Session ${manifest.sessionId} is owned by ${current?.ownerKind ?? 'another host'}; only read-only commands are allowed`);
+        const until = current ? new Date(current.leaseUntil).toISOString() : 'unknown';
+        const remaining = current ? Math.max(0, Math.ceil((current.leaseUntil - Date.now()) / 1000)) : 0;
+        throw new Error(`Session ${manifest.sessionId} is owned by ${current?.ownerKind ?? 'another host'} until ${until} (${remaining}s); wait for the lease to expire or close the other host`);
     }
     const leaseHeartbeat = setInterval(() => { void leases.renew(lease).catch(() => {}); }, 10_000);
     leaseHeartbeat.unref?.();

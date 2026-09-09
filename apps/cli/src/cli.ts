@@ -10,6 +10,7 @@ import {
     promptCommand,
     rerunCommand,
     exportConfigCommand,
+    exportCommand,
     tasksCommand,
     respondCommand,
     resumeCommand,
@@ -55,6 +56,7 @@ async function main(argv: string[]): Promise<number> {
         case 'rerun': return rerunCommand(required(parsed.positional[0], 'run-id'), parsed.options);
         case 'fork': return forkCommand(required(parsed.positional[0], 'run-id'), parsed.options);
         case 'export-config': return exportConfigCommand(required(parsed.positional[0], 'run-id'), parsed.options);
+        case 'export': return exportCommand(required(parsed.positional[0], 'run-id'), parsed.options);
         case 'sandbox':
             if (parsed.positional[0] === 'doctor') return doctorCommand(parsed.options);
             throw new Error('sandbox requires doctor');
@@ -86,6 +88,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
         else if (arg === '--verbose' || arg === '-v') options.verbose = true;
         else if (arg === '-d' || arg === '--http') options.http = required(rest[++index], '[ip:]port');
         else if (arg === '--state-dir') options.stateDir = required(rest[++index], 'state directory');
+        else if (arg === '--out') options.out = required(rest[++index], 'output path');
+        else if (arg === '--max-bytes') options.maxBytes = Number(required(rest[++index], 'byte budget'));
+        else if (arg === '--retry-indeterminate') options.retryIndeterminate = true;
         else if (arg === '--profile') options.profile = required(rest[++index], 'profile');
         else if (arg === '--set-home') options.setHome = required(rest[++index], 'home directory');
         else if (arg === '--add-dir') options.addDir = [...(options.addDir ?? []), required(rest[++index], 'directory')];
@@ -122,13 +127,14 @@ function help(): string {
         `  mindos runs [--state-dir .mindos]\n` +
         `  mindos status <run-id> [--state-dir .mindos] [--json]\n` +
         `  mindos logs <run-id> [--state-dir .mindos] [--follow]\n` +
-        `  mindos resume <run-id> [--state-dir .mindos] [--headless] [--json]\n` +
+        `  mindos resume <run-id> [--state-dir .mindos] [--headless] [--json] [--retry-indeterminate]\n` +
         `  mindos respond <run-id> <request-id> (--approve | --deny | --value <json>) [--state-dir .mindos]\n` +
         `  mindos cancel <run-id> [--state-dir .mindos]\n` +
         `  mindos delete <run-id> [--state-dir .mindos]\n` +
         `  mindos tasks <run-id> [--state-dir .mindos] [--json]\n` +
         `  mindos rerun <run-id> [--state-dir .mindos] [--headless] [--json]\n` +
         `  mindos export-config <run-id> [--state-dir .mindos]\n` +
+        `  mindos export <run-id> [--state-dir .mindos] [--out file.json] [--max-bytes N]\n` +
         `  mindos sandbox doctor\n\n` +
         `选项：\n` +
         `  --profile <name>    desktop（默认，共享 ~/.config/mindos）或显式数据根路径\n` +

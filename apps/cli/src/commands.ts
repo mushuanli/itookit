@@ -5,7 +5,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stringify as yamlStringify } from 'yaml';
-import type { EventEnvelope, ExitRecord, JsonValue, TaskHandle } from '@itookit/durable-kernel';
+import type { EventEnvelope, ExitRecord, JsonValue, Kernel, TaskHandle } from '@itookit/durable-kernel';
 import { loadWorkflow, parseDuration, validateWorkflow } from './config';
 import { expandWorkflow } from './expand';
 import { resolveProfileRoot } from './mindos';
@@ -13,9 +13,10 @@ import { compileDag, createCliRuntime, cliStorage, type CliRuntime } from './run
 import { compileRunDefinition } from './run-definition';
 import { createRunDefinitionFromFlow, toDagRunSpec, type RunDefinition } from '@itookit/app-core';
 import { loadFlowDefinition } from './flow-config';
+import { readFlowTaskTranscript } from '@itookit/llm-flow';
 import { RunStore, selectFinalResult } from './run-store';
 import { sandboxDoctor } from './shell';
-import type { CompiledWorkflow, PendingInteraction, RunManifest } from './types';
+import type { BlockedEffect, CompiledWorkflow, PendingInteraction, RunManifest } from './types';
 
 export interface CommandOptions {
     file?: string;
@@ -47,6 +48,12 @@ export interface CommandOptions {
     responsesPath?: string;
     /** --verbose：输出全部事件（默认过滤高频 stream 增量与 task 生命周期）。 */
     verbose?: boolean;
+    /** export 的输出文件路径；默认 <stateDir>/exports/<runId>.json。 */
+    out?: string;
+    /** export 的 transcript 字节预算，默认 256 KiB。 */
+    maxBytes?: number;
+    /** --retry-indeterminate：resume 时对无法核对结果的 Effect 授权重放。 */
+    retryIndeterminate?: boolean;
     /** -d / --http: start the browser-accessible MindOS UI on [ip:]port. */
     http?: string;
 }
@@ -291,11 +298,62 @@ export async function checkpointsCommand(runId: string, options: CommandOptions)
 /** 展示节点运行状态。保留 checkpoints 作为兼容别名；它不是可恢复的状态快照。 */
 export const tasksCommand = checkpointsCommand;
 
+/**
+ * 导出一次运行到真实文件：manifest + 每个节点的 transcript 页。
+ *
+ * transcript 走 `readFlowTaskTranscript` 的字节预算，超出的部分按 `nextOffset`
+ * 截断并标记 `truncated`，因此导出文件大小可预期。
+ */
+export async function exportCommand(runId: string, options: CommandOptions): Promise<number> {
+    const store = new RunStore(resolveStateDir(options));
+    const manifest = await store.load(runId);
+    const loaded = await loadWorkflow(store.configSnapshot(runId));
+    loaded.workflow.workspaceRoot = manifest.workspaceRoot;
+    loaded.workflow.stateDir = store.stateDir;
+    const runtime = await runtimeFor(loaded.workflow, manifest, store, options, 'control');
+    try {
+        const maxBytes = options.maxBytes ?? 256 * 1024;
+        const nodes: Array<{ nodeId: string; taskId: string; transcript?: unknown; error?: string }> = [];
+        for (const [nodeId, taskId] of Object.entries(manifest.nodeTaskIds ?? {})) {
+            if (!manifest.rootTaskId) { nodes.push({ nodeId, taskId }); continue; }
+            try {
+                nodes.push({ nodeId, taskId, transcript: await readFlowTaskTranscript(
+                    runtime.kernel, manifest.sessionId, manifest.rootTaskId, taskId, { maxBytes },
+                ) });
+            } catch (error) {
+                nodes.push({ nodeId, taskId, error: error instanceof Error ? error.message : String(error) });
+            }
+        }
+        const document = { version: 1, exportedAt: new Date().toISOString(), maxBytes, run: manifest, nodes };
+        const content = JSON.stringify(document, null, 2);
+        const target = path.resolve(options.out ?? path.join(store.stateDir, 'exports', `${runId}.json`));
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, content, 'utf8');
+        print(options, { type: 'run.exported', runId, path: target, bytes: Buffer.byteLength(content, 'utf8'),
+            nodes: nodes.length, truncated: nodes.filter(node => (node.transcript as { truncated?: boolean } | undefined)?.truncated).length });
+        return 0;
+    } finally { await runtime.dispose(); }
+}
+
 export async function resumeCommand(runId: string, options: CommandOptions): Promise<number> {
     const store = new RunStore(resolveStateDir(options));
     const releaseScheduler = await acquireRunSchedulerLock(store.runDir(runId));
     try { return await resumeLocked(runId, options, store); }
     finally { releaseScheduler(); }
+}
+
+/**
+ * Find the Run's aggregate root task when the manifest lost it.
+ *
+ * `runLoaded` persists `rootTaskId` after `executor.submit` returns, so a crash in
+ * that window leaves a Run whose root can only be identified through the Session.
+ */
+async function findFlowRootTask(kernel: Kernel, sessionId: string): Promise<string | undefined> {
+    const tasks = await kernel.listSessionTasks(sessionId).catch(() => []);
+    const roots = tasks.filter(task => task.labels?.kind === 'flow-root' && task.program?.kind === 'flow.aggregate');
+    // A Session holds one Run per submission; if a legacy Run left several roots,
+    // the newest one owns the current scheduler checkpoint.
+    return roots[roots.length - 1]?.id;
 }
 
 async function resumeLocked(runId: string, options: CommandOptions, store: RunStore): Promise<number> {
@@ -310,7 +368,14 @@ async function resumeLocked(runId: string, options: CommandOptions, store: RunSt
     if (options.sandbox) loaded.workflow.config.sandbox = { ...loaded.workflow.config.sandbox, mode: options.sandbox };
     const runtime = await runtimeFor(loaded.workflow, manifest, store, options);
     try {
-        if (manifest.rootTaskId) await runtime.executor.resume(manifest.sessionId, manifest.rootTaskId);
+        // A crash between Task creation and manifest persistence leaves rootTaskId
+        // unset; recover it from the Session's flow-root task instead of failing.
+        if (!manifest.rootTaskId) {
+            manifest.rootTaskId = await findFlowRootTask(runtime.kernel, manifest.sessionId);
+            if (!manifest.rootTaskId) throw new Error('Run root task is missing and the Session has no flow-root task');
+            await store.save(manifest);
+        }
+        await runtime.executor.resume(manifest.sessionId, manifest.rootTaskId);
         manifest.status = 'running';
         await store.save(manifest);
         return await monitor(loaded.workflow, manifest, store, runtime, options);
@@ -456,6 +521,71 @@ function printStallDiagnostic(manifest: RunManifest, options: CommandOptions): v
     printError(options, `No run progress for ${STALL_WARN_MS / 1000}s. Task statuses: ${statuses}`);
 }
 
+/**
+ * Decide the Run's indeterminate Effects before the monitor keeps polling.
+ *
+ * A crash can leave an external call whose outcome cannot be proven: the kernel
+ * reconciles a lost Effect lease to `indeterminate`. The protocol forbids treating
+ * "unknown" as "not executed", so the Run blocks until the host authorizes a replay
+ * (`--retry-indeterminate`) or cancels it.
+ */
+async function decideBlockedEffects(
+    manifest: RunManifest,
+    store: RunStore,
+    runtime: CliRuntime,
+    options: CommandOptions,
+): Promise<number | undefined> {
+    const blocked = await collectBlockedEffects(runtime, manifest.sessionId);
+    if (!blocked.length) {
+        if (manifest.blockedEffects?.length) { manifest.blockedEffects = undefined; await store.save(manifest); }
+        return undefined;
+    }
+    if (!options.retryIndeterminate) {
+        manifest.blockedEffects = blocked;
+        manifest.status = 'waiting';
+        await store.save(manifest);
+        printBlockedHint(manifest, options);
+        return 3;
+    }
+    for (const item of blocked) {
+        const task = await runtime.kernel.openTask(item.taskId);
+        // Deterministic requestId: re-running the same decision is a no-op, and a
+        // conflicting decision for the same Effect is rejected by the kernel.
+        await task.resolveEffect({
+            requestId: `resolve:${item.effectId}:retry`, effectId: item.effectId, outcome: { type: 'retry' },
+        });
+        print(options, { type: 'run.effect.retried', runId: manifest.id, taskId: item.taskId, effectId: item.effectId });
+    }
+    manifest.blockedEffects = undefined;
+    await store.save(manifest);
+    return undefined;
+}
+
+async function collectBlockedEffects(runtime: CliRuntime, sessionId: string): Promise<BlockedEffect[]> {
+    const tasks = await runtime.kernel.listSessionTasks(sessionId);
+    return tasks.flatMap(task => Object.entries(task.effects ?? {})
+        .filter(([, effect]) => effect.status === 'indeterminate')
+        .map(([effectId, effect]) => ({
+            taskId: task.id,
+            effectId,
+            kind: effect.request.kind,
+            ...(effect.error?.message ? { error: effect.error.message } : {}),
+        })));
+}
+
+function printBlockedHint(manifest: RunManifest, options: CommandOptions): void {
+    const effects = manifest.blockedEffects ?? [];
+    const resume = `mindos resume ${manifest.id} --state-dir ${resolveStateDir(options)} --retry-indeterminate`;
+    if (options.json) {
+        process.stderr.write(`${JSON.stringify({ type: 'run.blocked', runId: manifest.id, effects, resume })}\n`);
+        return;
+    }
+    process.stderr.write(
+        `运行被阻塞：${effects.length} 个外部 Effect 的结果无法核对（${effects.map(item => `${item.effectId}@${item.taskId}`).join(', ')}）。\n` +
+        `确认可以安全重放后继续：${resume}\n`,
+    );
+}
+
 async function monitorIteration(
     workflow: CompiledWorkflow,
     manifest: RunManifest,
@@ -468,6 +598,8 @@ async function monitorIteration(
     if (interruption.signal) return cancelInterrupted(manifest, store, root, interruption.signal, options);
     await collectEvents(manifest, store, runtime, options);
     await refreshTaskStatuses(workflow, manifest, runtime);
+    const blocked = await decideBlockedEffects(manifest, store, runtime, options);
+    if (blocked !== undefined) return blocked;
     const interaction = await processInteractions(manifest, store, runtime, options);
     if (interaction !== undefined) return interaction;
     const exit = await root.poll();

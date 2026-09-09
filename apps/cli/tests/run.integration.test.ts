@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runCommand } from '../src/commands';
+import { exportCommand, runCommand } from '../src/commands';
 
 const servers: ReturnType<typeof createServer>[] = [];
 
@@ -989,3 +989,30 @@ sandbox:
   mode: native
 `;
 }
+
+describe('CLI export', () => {
+    it('writes a run transcript bundle to a real file with a byte budget', async () => {
+        const server = createServer((_request, response) => respondSse(response, 'done'));
+        const port = await startServer(server);
+        const workspace = await mkdtemp(path.join(tmpdir(), 'mindos-export-'));
+        const configPath = path.join(workspace, 'mindos.yml');
+        process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
+        await writeFile(configPath, config(port), 'utf8');
+        expect(await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true })).toBe(0);
+
+        const runId = await latestRun(workspace);
+        const target = path.join(workspace, 'export.json');
+        expect(await exportCommand(runId, { stateDir: path.join(workspace, '.mindos'), json: true, out: target, maxBytes: 64 * 1024 })).toBe(0);
+
+        const document = JSON.parse(await readFile(target, 'utf8')) as {
+            run: { status: string }; maxBytes: number; nodes: Array<{ nodeId: string; transcript?: { effects: unknown[]; bytes: number } }>;
+        };
+        expect(document.run.status).toBe('succeeded');
+        expect(document.maxBytes).toBe(64 * 1024);
+        expect(document.nodes).toHaveLength(1);
+        expect(document.nodes[0].nodeId).toBe('finish');
+        expect(document.nodes[0].transcript?.effects.length).toBeGreaterThan(0);
+        expect(document.nodes[0].transcript?.bytes).toBeLessThanOrEqual(64 * 1024);
+        expect(await readFile(target, 'utf8')).not.toContain('test-secret-value');
+    }, 20_000);
+});

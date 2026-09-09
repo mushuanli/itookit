@@ -73,10 +73,11 @@ mindos status <run-id> --state-dir .mindos
 mindos tasks <run-id> --state-dir .mindos
 mindos rerun <run-id> --state-dir .mindos
 mindos export-config <run-id> --state-dir .mindos
+mindos export <run-id> --state-dir .mindos --out run.json --max-bytes 262144
 mindos delete <run-id> --state-dir .mindos
 ```
 
-`tasks` 展示节点状态和已生成产物，不是可恢复的状态快照；`rerun` 使用原配置创建全新的完整运行；`export-config` 只导出配置快照。当前不提供 checkpoint replay 或 state fork。
+`tasks` 展示节点状态和已生成产物，不是可恢复的状态快照；`rerun` 使用原配置创建全新的完整运行；`export-config` 只导出配置快照；`export` 把 manifest 与每个节点的 transcript（受 `--max-bytes` 字节预算约束，默认 256 KiB）写到真实文件，需要持有 Session 租约。当前不提供 checkpoint replay 或 state fork。
 
 ### Profile 与本地目录挂载
 
@@ -123,7 +124,18 @@ mindos resume <run-id> --headless --json
 mindos respond <run-id> <request-id> --approve
 ```
 
-退出码 `0` 表示成功，`1` 表示运行失败，`2` 表示配置或命令错误，`3` 表示等待人工输入。
+退出码 `0` 表示成功，`1` 表示运行失败，`2` 表示配置或命令错误，`3` 表示等待人工输入或等待 Effect 裁决。
+
+### 崩溃恢复与 Effect 裁决
+
+Run 的聚合根和调度检查点在第一个节点派发前就已持久化，因此进程在任意后续时刻被杀掉后，`resume` 都能从已提交的调度状态继续，而不是重跑整张图。崩溃时无法核对结果的外部 Effect（例如已发出、结果未落盘的模型请求）会被 Kernel 恢复为 `indeterminate`：
+
+```bash
+mindos resume <run-id> --json                     # 退出码 3，run.json 写入 blockedEffects 并打印裁决命令
+mindos resume <run-id> --retry-indeterminate      # 授权重放同一逻辑 Effect 后继续
+```
+
+`--retry-indeterminate` 只重放逻辑 Effect（`effectId` 不变、确定性 `requestId`），不会重新开始已完成的迭代；确认外部副作用不可重放时应改用 `mindos cancel <run-id>`。
 
 ## HTTP 模式（`-d` / `--http`）
 

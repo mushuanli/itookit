@@ -1,4 +1,4 @@
-import { prepareFlowTaskRetry } from '../src/flow/run-members';
+import { prepareFlowTaskRetry, readFlowRunMembers } from '../src/flow/run-members';
 import { restoreFlowHandle } from '../src/flow/restore-handle';
 import { readFlowTaskTranscript } from '../src/flow/transcript';
 import { flowToDag } from '../src/flow/to-dag';
@@ -194,9 +194,13 @@ describe('DurableFlowExecutor', () => {
             expect(failure).toBeInstanceOf(AggregateError);
             expect((failure as AggregateError).errors.map(error => error.message)).toEqual(['hook failed', 'cleanup failed']);
         } else expect((failure as Error).message).toBe('hook failed');
+        // The aggregate root exists from submission time; every *node* task must be
+        // cleaned up (no live task left behind) and the root must not stay live either.
         const tasks = await kernel.listSessionTasks('session-one');
-        expect(tasks).toHaveLength(1);
-        expect(tasks[0].status).toBe('cancelled');
+        const nodes = tasks.filter(task => task.labels?.kind !== 'flow-root');
+        expect(nodes).toHaveLength(1);
+        expect(['succeeded', 'failed', 'cancelled']).toContain(nodes[0].status);
+        expect(tasks.filter(task => task.labels?.kind === 'flow-root')).toHaveLength(1);
     });
 
     it('exposes post-run workspace cleanup failure without invoking cleanup twice', async () => {
@@ -650,6 +654,46 @@ describe('DurableFlowExecutor', () => {
         expect((await retries[1].wait({ timeoutMs: 2000 })).status).toBe('succeeded');
     });
 
+    it('reuses a submitted node Task when the scheduler checkpoint missed the instance', async () => {
+        const execution = await executor(kernel).submit('session-one', { nodes: [{ ...valueNode('human', null),
+            plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Choose' } }], edges: [] });
+        const session = await kernel.openSession('session-one');
+        let nodeTaskId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer?.status === 'pending');
+            expect(task).toBeDefined();
+            nodeTaskId = task!.id;
+        });
+        // The scheduler checkpoints every submitted instance, so a crash can resume from
+        // the committed schedule instead of re-creating nodes.
+        const key = `flow.run.${execution.root.id}.scheduler`;
+        const saved = await session.getShared(key);
+        const checkpoint = saved!.value as { instances: unknown[] };
+        expect(checkpoint.instances).toContainEqual(['human', [nodeTaskId]]);
+
+        // Simulate a crash between session.submit and the checkpoint write: the durable
+        // checkpoint has no record of the submitted instance.
+        await session.setShared(key, { ...checkpoint, instances: [] }, { expectedVersion: saved!.version });
+        kernel.dispose();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel);
+        await kernel.initialize();
+
+        const resumed = await executor(kernel).resume('session-one', execution.root.id);
+        // The node submission carries a Run-stable requestId, so the Kernel returns the
+        // existing Task instead of creating a duplicate instance.
+        await (await kernel.openSession('session-one')).attachTask(nodeTaskId)
+            .then(task => task.respond({ interactionId: 'answer', value: 'done' }));
+        const exit = await resumed.root.wait({ timeoutMs: 2_000 });
+        expect(exit.status).toBe('succeeded');
+        const nodes = (await kernel.listSessionTasks('session-one'))
+            .filter(task => task.labels?.kind !== 'flow-root');
+        expect(nodes.map(task => task.id)).toEqual([nodeTaskId]);
+        expect(resumed.nodes.get('human')!.id).toBe(nodeTaskId);
+    });
+
     it.each(['target', 'node', 'cancel'])('refreshes persisted retry membership before %s control', async operation => {
         const execution = await executor(kernel).submit('session-one', valueFlow());
         await execution.root.wait({ timeoutMs: 2000 });
@@ -764,7 +808,9 @@ describe('DurableFlowExecutor', () => {
         const execution = await executor(kernel).submit('session-one', flow);
         await execution.root.wait({ timeoutMs: 3_000 });
         const root = (await execution.root.status()).task;
-        const runTasks = (root.input as any).runTasks as Array<{ nodeId: string; taskId: string }>;
+        // Membership is published to shared state while the Run is live, so it is the
+        // authoritative view; the root's own input only carries the initial schedule.
+        const runTasks = await readFlowRunMembers(await kernel.openSession('session-one'), root);
         const entries = runTasks.filter(task => task.nodeId === 'entry');
         expect(entries).toHaveLength(3);
         for (const entry of entries) {
@@ -864,7 +910,8 @@ describe('DurableFlowExecutor', () => {
         const flow = spawnFlow();
         mutate((flow.nodes[0].config as any).spawn);
         await expect(executor(kernel).submit('session-one', flow)).rejects.toThrow(error);
-        const tasks = await (await kernel.openSession('session-one')).listTasks();
+        const tasks = (await (await kernel.openSession('session-one')).listTasks())
+            .filter(task => task.labels?.kind !== 'flow-root');
         expect(tasks).toHaveLength(1);
     });
 
