@@ -147,4 +147,12 @@ cd apps/cli && npx tsx ../../.tauri-acceptance/measure-ipc.mts <dataRoot> <每�
 
 结论：共享路径本身很快（进程内 96ms/4ms），延迟与**每次 VFS 后端调用的跨进程开销**近似线性；桌面端每次后端调用要走 Tauri IPC（`TauriFsOps` + `TauriSqlSidecarDb`），因此 600–800 次调用被放大到秒级。已确认的下一层问题是「桌面端每次发送为什么仍要数百次调用」（进程内同会话第二次只有 26 次），需要在应用内统计后端调用数（Rust 侧计数或 webview 侧 `ioStats` 落盘）后定位。可接受阈值建议：热路径单次发送 ≤ 2s、`task.created` 前后端调用 ≤ 100 次。
 
-2026-09-10 在真实窗口复现同一现象：发送 06:45:13 → `task.created` 06:45:33.720（20.7s），随后链路正常完成；明细见 [最小系统验收记录](minimal-system-acceptance.md) §4。
+2026-09-10 在真实窗口复现同一现象：发送 06:45:13 → `task.created` 06:45:33.720（20.7s），随后链路正常完成；应用内探针（`VITE_MINDOS_TRACE=1` 构建）进一步显示近乎空闲时仍有 ≈60 次 VFS 操作/秒（99% stat），与发送路径自身的 600–780 次操作争用同一条 Tauri IPC 通道。明细见 [最小系统验收记录](minimal-system-acceptance.md) §4。
+
+诊断用法：
+
+```bash
+VITE_MINDOS_TRACE=1 pnpm --filter tauri-app build
+cd apps/tauri-app/src-tauri && cargo build --offline --features tauri/custom-protocol
+# 运行后读 <rootDir>/var/log/vfs-trace.log（每 2s 一行 JSON：ops + 按操作类型增量）
+```

@@ -35,6 +35,7 @@ import { LocalMountService, MountEntry, MOUNT_EVENTS } from './services/local-mo
 import { TauriSqlSidecarDb } from './db/tauri-sql-sidecar';
 import { TauriFsOps } from './fs/tauri-fs-ops';
 import { TauriLLMLogger } from './log/tauri-llm-logger';
+import { startVfsTrace } from './log/vfs-trace';
 import { TauriSkillSource } from './kernel/tauri-skill-source';
 
 // Bundled locally: the desktop app must render icons offline. The CDN <link> this
@@ -280,6 +281,13 @@ async function bootstrap(): Promise<void> {
         },
     });
     startupCleanup.push(() => runtime.dispose());
+    // Acceptance diagnostics: VITE_MINDOS_TRACE=1 records per-interval VFS op counts
+    // so a slow user action can be attributed to backend/IPC round trips.
+    if (import.meta.env.VITE_MINDOS_TRACE === '1') {
+        const stopTrace = startVfsTrace(rootDir, runtime.vfs);
+        startupCleanup.push(stopTrace);
+        console.log('[Boot] VFS trace enabled -> var/log/vfs-trace.log');
+    }
     const app = await initApp({
         runtime,
         workspaces: WORKSPACES.map(ws => ws.workspaceName === 'home' ? { ...ws, files: { fs: homeSource.fs, cwd: '/' } } : ws),

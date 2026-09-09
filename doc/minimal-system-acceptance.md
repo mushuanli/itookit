@@ -73,9 +73,22 @@ bwrap（`/app` 只读仓库 + `/workspace` 可写）→ 子 CLI 两节点 DAG。
 411ms/1532ms。Tauri 端每次后端调用走 IPC（`TauriFsOps` + `TauriSqlSidecarDb`），
 因此 600–800 次调用被放大到秒级。
 
-仍未定位的一层：桌面端**每次**发送为什么仍要数百次调用（进程内同会话第二次只有 26 次）。
-下一步是在应用内统计后端调用数（Rust 侧计数或 webview `ioStats` 落盘）后定位。
-建议阈值：热路径单次发送 ≤ 2s、`task.created` 前后端调用 ≤ 100 次。
+应用内测量（2026-09-10，`VITE_MINDOS_TRACE=1` 构建，见 `apps/tauri-app/src/log/vfs-trace.ts`，
+每 2s 把 `runtime.vfs` 的 `ioStats` 增量追加到 `<rootDir>/var/log/vfs-trace.log`）：
+
+```
+06:48:18 147 stat       06:48:34 220 stat        06:48:50  47 stat
+06:48:20 216 stat+list  06:48:36 190 stat+list   06:48:52  21 stat+list+write
+06:48:22 217 stat       06:48:38 236 stat        06:48:54  77 stat+list
+…（共 36 个区间、4242 次操作 / 70s，≈60 ops/s，99% 是 stat）
+```
+
+结论：**应用在近乎空闲时也持续产生 50–240 次 VFS 操作 / 2s**，而每次操作都是一次 Tauri IPC。
+发送路径自身约 600–780 次操作，与这条后台 stat 流争用同一条 IPC 通道，因此 20s 延迟主要是
+IPC 队列争用而非算法复杂度。修复方向（按收益排序）：① 侧栏/树按事件路径做增量更新，避免
+重复 stat 未变化的节点；② 合并/节流结构刷新；③ 不对 `/var/lib/**` 这类非 UI 路径触发 UI 刷新。
+下一步需定位产生这条 stat 流的具体订阅者（`vfs-trace.log` 已可直接观察）。
+建议阈值：空闲时 VFS 操作 ≤ 5 ops/s；热路径单次发送 ≤ 2s 且 ≤ 100 次调用。
 
 ## 5. 仍未通过的验收项
 
