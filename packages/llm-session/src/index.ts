@@ -1,3 +1,5 @@
+import { bindStandaloneFlowNode } from './session/flow-node-binder';
+import { AgentResolver } from './session/agent-resolver';
 export { createSessionDataProjection } from './persistence/session-projection';
 export * from './core/types';
 export * from './core/errors';
@@ -73,7 +75,6 @@ export { DurableConversationProjection } from './persistence/durable-conversatio
 export { formatErrorMessage } from './utils/error-formatter';
 import type { DagPluginCatalog, ToolDefinition } from '@itookit/common';
 import type { Kernel } from '@itookit/durable-kernel';
-import { DurableAgentProgram, DurableChatProgram, DurablePlanProgram } from '@itookit/llm-tasks';
 import type { IAgentConfigService } from './services/agent-service';
 import type { ISessionRepository } from './persistence/types';
 import { SessionManager, createSessionManager } from './session/session-manager';
@@ -85,15 +86,17 @@ import { createVcsPlugin } from './plugins/vcs-plugin';
 import { createHistoryPlugin } from './plugins/history-plugin';
 import { FlowDefinitionStore, type FlowStore } from '@itookit/llm-flow';
 import { DagCommandService } from '@itookit/llm-flow';
-import { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from '@itookit/llm-flow';
+import { registerDurablePrograms } from '@itookit/llm-flow';
 
 export interface ConversationSystemOptions {
+    retrieveMemory?: import('./session/conversation-run-coordinator').ConversationRunCoordinatorOptions['retrieveMemory'];
     agentService: IAgentConfigService;
     sessionEngine: ISessionRepository;
     promptHistoryFiles: import('@itookit/vfs-core').IFileSystem;
     kernel: Kernel;
     /** Standalone workflow storage (flows VFS module). */
     flowStore: FlowStore;
+    resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
     resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
         definitions: ToolDefinition[];
         externalIds: string[];
@@ -111,7 +114,7 @@ export async function initializeConversationSystem(
     options: ConversationSystemOptions,
 ): Promise<ConversationSystem> {
     await initializeServices(options);
-    registerPrograms(options.kernel);
+    registerDurablePrograms(options.kernel);
     const sessionManager = createSessionManager(
         options.sessionEngine,
         options.agentService,
@@ -120,6 +123,8 @@ export async function initializeConversationSystem(
             dagPlugins: options.dagPlugins,
             flowStore: options.flowStore,
             resolveTools: options.resolveTools,
+            resolveSessionContext: options.resolveSessionContext,
+            retrieveMemory: options.retrieveMemory,
         },
     );
     return createControlPlane(options, sessionManager);
@@ -131,15 +136,6 @@ async function initializeServices(options: ConversationSystemOptions): Promise<v
     await initializePromptHistory(options.promptHistoryFiles).catch(error => {
         console.warn('[Conversation] Prompt history initialization failed:', error);
     });
-}
-
-function registerPrograms(kernel: Kernel): void {
-    if (!kernel.programs.has('llm.chat', '1')) kernel.registerProgram(new DurableChatProgram());
-    if (!kernel.programs.has('llm.agent', '1')) kernel.registerProgram(new DurableAgentProgram());
-    if (!kernel.programs.has('llm.plan', '1')) kernel.registerProgram(new DurablePlanProgram());
-    if (!kernel.programs.has('flow.value', '1')) kernel.registerProgram(new FlowValueProgram());
-    if (!kernel.programs.has('flow.human', '1')) kernel.registerProgram(new FlowHumanProgram());
-    if (!kernel.programs.has('flow.aggregate', '1')) kernel.registerProgram(new FlowAggregateProgram());
 }
 
 function createControlPlane(
@@ -164,6 +160,8 @@ function createDagCommands(
         flowStore,
         kernel: options.kernel,
         plugins: options.dagPlugins,
+        bindNode: (sessionId, node, defaults) => bindStandaloneFlowNode(node, defaults, sessionId, new AgentResolver(options.agentService)),
+        resolveSessionContext: options.resolveSessionContext,
         resolveTools: options.resolveTools,
     });
     dag.register(commandBus);
@@ -180,3 +178,5 @@ function activateConversationPlugins(
     extensions.register(createHistoryPlugin(sessionManager));
     extensions.activate({ commands: commandBus });
 }
+
+export { SessionMemoryProvider, type MemoryWrite } from './session/session-memory-provider';

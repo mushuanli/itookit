@@ -6,10 +6,12 @@ import type {
     ContextPlan,
     DagPluginCatalog,
     DagRunSpec,
+    DagNodeDefinition,
     RoundResult,
     Signal,
     ToolCallInfo,
     ToolDefinition,
+    LLMSkill,
 } from '@itookit/common';
 import {
     bindCapabilities,
@@ -57,6 +59,8 @@ export interface ConversationRunCoordinatorOptions {
     eventBus: SessionEventBus;
     kernel: Kernel;
     dagPlugins: DagPluginCatalog;
+    resolveSessionContext?(sessionId: string, userMessage: string): Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
+    resolveSkills?(ids: string[]): Promise<LLMSkill[]>;
     resolveTools?(sessionId: string, allowedIds: string[]): Promise<{
         definitions: ToolDefinition[];
         externalIds: string[];
@@ -65,6 +69,7 @@ export interface ConversationRunCoordinatorOptions {
     retrieveMemory?: (
         plan: ContextPlan,
         agent: { id: string; version: string },
+        context: { sessionId: string; policy?: import('@itookit/common').MemoryPolicy },
     ) => Promise<RetrievedMemoryEntry[]>;
 }
 
@@ -73,47 +78,63 @@ interface ConversationLocation {
     branchHead: string | null;
 }
 
+interface ActiveConversationRun {
+    root: TaskHandle;
+    tasks(): TaskHandle[];
+}
+
 export class ConversationRunCoordinator {
-    private readonly active = new Map<string, TaskHandle[]>();
+    /** Session id → live root + task membership; DAG nodes can be added after submit. */
+    private readonly active = new Map<string, ActiveConversationRun>();
 
     constructor(private readonly options: ConversationRunCoordinatorOptions) {}
 
     async executeDirect(execution: ConversationExecution): Promise<void> {
+        const ids = execution.config.capabilityPolicy?.skillIds ?? [];
+        const skills = ids.length ? await this.options.resolveSkills?.(ids) ?? [] : [];
+        const skillsPrompt = skills.filter(skill => ids.includes(skill.id) && skill.enabled && !skill.disableModelInvocation)
+            .flatMap(skill => [skill.instructions,
+                skill.compact?.rawContent ? `Skill ${skill.id} — critical rules:\n${skill.compact.rawContent}` : '',
+            ]).filter(Boolean).join('\n\n');
         await this.execute(execution, async snapshot => {
             const root = await this.directTask(execution, snapshot);
-            return { root, tasks: [root], parse: parseOutput };
-        });
+            return { root, tasks: () => [root], parse: parseOutput };
+        }, { skillsPrompt });
     }
 
     async executeDag(
         execution: ConversationExecution,
         parameters: Record<string, JsonValue> | undefined,
         createSpec: (snapshot: ContextSnapshot) => DagRunSpec | Promise<DagRunSpec>,
+        bindPatchNode?: (node: DagNodeDefinition, snapshot: ContextSnapshot, defaults?: Record<string, unknown>) => Promise<Partial<Pick<DagNodeDefinition, 'config' | 'inputs'>>>,
     ): Promise<void> {
         await this.execute(execution, async snapshot => {
             const flow = new DurableFlowExecutor({
                 kernel: this.options.kernel,
                 plugins: this.options.dagPlugins,
                 resolveTools: this.options.resolveTools,
+                sessionContext: flowSessionContext(snapshot),
+                bindPatchNode: bindPatchNode ? (_sessionId, node, defaults) => bindPatchNode(node, snapshot, defaults) : undefined,
             });
             const submitted = await flow.submit(execution.task.sessionId, await createSpec(snapshot), parameters);
-            return { root: submitted.root, tasks: [...submitted.nodes.values()], parse: parseDagOutput };
-        });
+            return { root: submitted.root, tasks: () => [...submitted.nodes.values()], parse: parseDagOutput };
+        }, { includeMemory: false });
     }
 
     private async execute(
         execution: ConversationExecution,
         createTask: (snapshot: ContextSnapshot) => Promise<{
             root: TaskHandle;
-            tasks: TaskHandle[];
+            tasks: () => TaskHandle[];
             parse: (value: unknown) => ChatProgramOutput;
         }>,
+        options: { skillsPrompt?: string; includeMemory?: boolean } = {},
     ): Promise<void> {
         const location = await this.resolveLocation(execution);
-        const snapshot = await this.assembleContext(execution, location);
+        const snapshot = await this.assembleContext(execution, location, options.skillsPrompt, options.includeMemory ?? true);
         const submission = await createTask(snapshot);
         const handle = submission.root;
-        this.active.set(execution.task.sessionId, submission.tasks);
+        this.active.set(execution.task.sessionId, { root: handle, tasks: submission.tasks });
         let roundStarted = false;
         const streamedOutput = { output: false };
         const toolCalls: CapturedToolCall[] = [];
@@ -135,8 +156,8 @@ export class ConversationRunCoordinator {
     }
 
     signal(sessionId: string, signal: Signal): boolean {
-        const handles = this.active.get(sessionId);
-        if (!handles?.length) return false;
+        const handles = this.active.get(sessionId)?.tasks() ?? [];
+        if (!handles.length) return false;
         if (signal.type === 'respond') {
             for (const handle of handles) {
                 void handle.respond({ interactionId: signal.requestId, value: jsonValue(signal.response) }).catch(() => {});
@@ -151,14 +172,20 @@ export class ConversationRunCoordinator {
     }
 
     cancel(sessionId: string): void {
-        for (const handle of this.active.get(sessionId) ?? []) void handle.cancel().catch(() => {});
+        const run = this.active.get(sessionId);
+        if (run) void this.cancelRun(run);
     }
 
     cancelAll(): void {
-        for (const handles of this.active.values()) {
-            for (const handle of handles) void handle.cancel().catch(() => {});
-        }
+        const runs = [...this.active.values()];
         this.active.clear();
+        void Promise.allSettled(runs.map(run => this.cancelRun(run)));
+    }
+
+    private async cancelRun(run: ActiveConversationRun): Promise<void> {
+        await run.root.cancel().catch(() => {});
+        const members = run.tasks().filter(task => task.id !== run.root.id);
+        await Promise.allSettled(members.map(task => task.cancel().catch(() => {})));
     }
 
     private async resolveLocation(
@@ -177,30 +204,36 @@ export class ConversationRunCoordinator {
     private async assembleContext(
         execution: ConversationExecution,
         location: ConversationLocation,
+        skillsPrompt?: string,
+        includeMemory = true,
     ): Promise<ContextSnapshot> {
         const manifest = await execution.log.loadManifest();
         const profile = manifest.branchMeta[location.branchRef]?.contextProfile
             ?? { id: '', revision: 0 };
-        const assembler = this.contextAssembler(execution);
+        const assembler = this.contextAssembler(execution, includeMemory);
         const version = execution.task.frozen?.agentVersion
             ?? execution.config.agentVersion
             ?? 'unversioned';
+        const sessionContext = await this.options.resolveSessionContext?.(execution.task.sessionId, execution.task.input.text);
         const result = await assembler.assemble(contextPlan(execution, location, profile), execution.task.id, {
             id: execution.config.id,
             version,
-        }, execution.config.systemPrompt, undefined, { persist: false });
+        }, execution.config.systemPrompt, skillsPrompt, { persist: false, ...sessionContext });
         return result.snapshot;
     }
 
     private contextAssembler(
         execution: ConversationExecution,
+        includeMemory = true,
     ): ContextAssembler {
         return new ContextAssembler({
             log: execution.log,
             profileStore: new ContextProfileStore(this.options.engine, execution.task.sessionId),
             readRound: roundId => execution.log.readRound(roundId),
             loadArtifact: id => this.options.loadArtifact(id),
-            retrieveMemory: this.options.retrieveMemory,
+            retrieveMemory: includeMemory && this.options.retrieveMemory ? (plan, agent) => this.options.retrieveMemory!(plan, agent, {
+                sessionId: execution.task.sessionId, policy: structuredClone(execution.config.memoryPolicy),
+            }) : undefined,
         });
     }
 
@@ -260,15 +293,34 @@ export class ConversationRunCoordinator {
 
     private async consume(
         handle: TaskHandle,
-        eventTasks: TaskHandle[],
+        getTasks: () => TaskHandle[],
         execution: ConversationExecution,
         parse: (value: unknown) => ChatProgramOutput,
         streamedOutput: { output: boolean },
         toolCalls: CapturedToolCall[],
     ): Promise<ChatProgramOutput> {
-        const events = Promise.all(eventTasks.map(task => this.consumeEvents(task, execution, streamedOutput, toolCalls)));
-        const exit = await handle.wait();
-        await events;
+        const consumers = new Map<string, Promise<void>>();
+        const subscribe = (task: TaskHandle) => {
+            if (consumers.has(task.id)) return;
+            consumers.set(task.id, this.consumeEvents(task, execution, streamedOutput, toolCalls));
+        };
+        let rootDone = false;
+        const discover = (async () => {
+            while (!rootDone) {
+                for (const task of getTasks()) subscribe(task);
+                if (rootDone) break;
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            for (const task of getTasks()) subscribe(task);
+        })();
+        let exit: Awaited<ReturnType<TaskHandle['wait']>>;
+        try {
+            exit = await handle.wait();
+        } finally {
+            rootDone = true;
+            await discover;
+        }
+        await Promise.all([...consumers.values()]);
         if (exit.status === 'failed') throw new Error(exit.error?.message ?? `Task failed: ${handle.id}`);
         if (exit.status === 'cancelled') throw new Error(`Task cancelled: ${handle.id}`);
         return parse(exit.output);
@@ -439,6 +491,8 @@ function directTaskSpec(
             stream: execution.config.stream,
             approval: 'external',
             tools: definitions,
+            allowedToolIds: execution.config.webSearchMode === 'client-tool'
+                ? tools : tools.filter(id => id !== CLIENT_WEB_SEARCH_TOOL),
             externalToolIds: catalog.externalIds,
         }),
         labels: { roundId: execution.roundId, kind: tools.length ? 'agent' : 'chat' },
@@ -619,4 +673,10 @@ function record(value: unknown): Record<string, unknown> {
 
 function jsonValue(value: unknown): JsonValue {
     return JSON.parse(JSON.stringify(value ?? null)) as JsonValue;
+}
+
+function flowSessionContext(snapshot: ContextSnapshot) {
+    const content = (source: string) => (snapshot.blocks ?? []).flatMap(block =>
+        block.kind === 'system' && block.source === source ? [block.content] : []).join('\n\n');
+    return { projectInstructions: content('project'), skillInstructions: content('session-skill'), skillIndex: content('skill-index') };
 }

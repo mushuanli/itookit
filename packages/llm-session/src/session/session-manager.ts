@@ -69,6 +69,7 @@ export class SessionManager implements ISession, SessionQuery {
             kernel: Kernel;
             dagPlugins: DagPluginCatalog;
             flowStore: FlowStore;
+            resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
             resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
                 definitions: ToolDefinition[];
                 externalIds: string[];
@@ -110,6 +111,7 @@ export class SessionManager implements ISession, SessionQuery {
             options.flowStore,
             options.resolveTools,
             options.retrieveMemory,
+            options.resolveSessionContext,
         );
 
         this.roundOps = new RoundOperations(this.registry, this.runs);
@@ -525,15 +527,7 @@ let sessionManagerInstance: SessionManager | null = null;
 export function createSessionManager(
     engine: ISessionRepository,
     agentService: IAgentConfigService,
-    options: {
-        kernel: Kernel;
-        dagPlugins: DagPluginCatalog;
-        flowStore: FlowStore;
-        resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
-            definitions: ToolDefinition[];
-            externalIds: string[];
-        }>;
-    }
+    options: ConstructorParameters<typeof SessionManager>[2]
 ): SessionManager {
     if (sessionManagerInstance) {
         log.warn('SessionManager already exists, returning existing instance');

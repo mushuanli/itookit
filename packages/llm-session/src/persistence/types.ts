@@ -13,10 +13,13 @@ export interface ConversationUIState {
     historyVisibility?: 'visible' | 'hidden';
 }
 
+export type SessionOrigin = 'cli' | 'tauri' | 'web';
+
 export interface ConversationManifest extends RoundManifest {
     id: string;
     title: string;
     summary?: string;
+    origin?: SessionOrigin;
     createdAt: number;
     updatedAt: number;
     uiState?: ConversationUIState;
@@ -46,6 +49,8 @@ export interface ISessionRepository {
     dispose(): Promise<void>;
     subscribe(listener: () => void): () => void;
     createSession(title: string): Promise<string>;
+    /** Idempotently create a Session with a host-supplied durable identity. */
+    ensureSession(id: string, title: string, origin?: SessionOrigin): Promise<string>;
     getManifest(sessionId: string): Promise<ConversationManifest>;
     list(): Promise<ConversationManifest[]>;
     updateManifest(sessionId: string, patch: Partial<ConversationManifest>): Promise<void>;

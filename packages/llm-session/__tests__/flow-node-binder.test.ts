@@ -1,9 +1,83 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowNodeDefinition } from '@itookit/common';
-import { bindFlowNode } from '../src/session/flow-node-binder';
+import { bindFlowNode, bindStandaloneFlowNode } from '../src/session/flow-node-binder';
 import type { AgentResolver } from '../src/session/agent-resolver';
 
 describe('bindFlowNode', () => {
+    it.each(['inherit', 'replace', 'none'])('resolves standalone Agent, prompt and Skill identities with %s policy', async policy => {
+        const resolver = { resolveExact: async () => ({ id: 'reviewer', name: 'Reviewer', type: 'agent', model: 'agent-model',
+            systemPrompt: ['agent rules'], capabilityPolicy: { toolIds: ['inspect'], skillIds: ['review'] } }),
+            getSystemPrompt: async (id: string) => ({ content: [id] }),
+            getSkills: async () => [{ id: 'review', enabled: true, instructions: 'skill rules', tools: [{ toolId: 'read' }] }],
+        } as unknown as AgentResolver;
+        const node = { id: 'node', name: 'Node', plugin: 'builtin.agent', pluginVersion: '1.0.0', inputs: {}, capabilities: [],
+            config: { agentId: 'reviewer', systemPromptId: 'node prompt', systemPrompt: ['node rules'], instruction: 'task',
+                modelName: 'node-model', systemPromptPolicy: policy } } as FlowNodeDefinition;
+        const bound = await bindStandaloneFlowNode(node, { systemPromptId: 'flow prompt', systemPrompt: ['flow rules'] } as never, 'session', resolver);
+        const config = bound.config as any;
+        expect(config.messages.map((message: any) => message.content)).toEqual(policy === 'none' ? ['task'] : [
+            ...(policy === 'inherit' ? ['flow prompt', 'flow rules', 'agent rules'] : []), 'node prompt', 'skill rules', 'node rules', 'task',
+        ]);
+        expect(config.modelName).toBe('node-model');
+        expect(config.sessionId).toBe('session');
+        expect(bound.capabilities).toEqual(['inspect', 'read']);
+    });
+
+    it.each([undefined, 'explicit-model'])('uses selected Skill subagent models only for delegated children (%s)', async modelName => {
+        const resolver = { getSkills: async () => [{ id: 'review', enabled: true, instructions: 'review rules', tools: [],
+            supportsSubagent: true, subagentModel: 'skill-child-model' }],
+        } as unknown as AgentResolver;
+        const node = { id: 'parent', name: 'Parent', plugin: 'builtin.agent', pluginVersion: '1.0.0', inputs: {},
+            config: { skillIds: ['review'], instruction: 'parent', delegation: { enabled: true,
+                template: { skillIds: ['review'], contextSource: 'isolated', modelName } } } } as FlowNodeDefinition;
+        const bound = await bindStandaloneFlowNode(node, { modelName: 'flow-model' } as never, 'session', resolver);
+        const config = bound.config as any;
+        expect(config.modelName).toBe('flow-model');
+        expect(config.delegation.resolvedTemplate.config.modelName).toBe(modelName ?? 'skill-child-model');
+    });
+
+    it('rejects conflicting selected Skill child models before producing a delegation template', async () => {
+        const resolver = { getSkills: async () => ['a', 'b'].map(id => ({ id, enabled: true, instructions: '', tools: [],
+            supportsSubagent: true, subagentModel: id })) } as unknown as AgentResolver;
+        const node = { id: 'parent', name: 'Parent', plugin: 'builtin.agent', pluginVersion: '1.0.0', inputs: {},
+            config: { delegation: { enabled: true, template: { skillIds: ['a', 'b'] } } } } as FlowNodeDefinition;
+        await expect(bindStandaloneFlowNode(node, undefined, 'session', resolver)).rejects.toThrow('conflicting subagent models');
+    });
+
+    it('snapshots selected Skill critical rules and excludes disabled or model-silent skills', async () => {
+        const selected = { id: 'review', enabled: true, instructions: 'Review changes.',
+            tools: [{ toolId: 'inspect' }], compact: { rawContent: 'Preserve access checks.' } };
+        const resolver = { ...agents(), getSkills: async () => [selected,
+            { ...selected, id: 'silent', disableModelInvocation: true, instructions: 'Silent instructions', tools: [{ toolId: 'silent-tool' }] },
+            { ...selected, id: 'disabled', enabled: false, instructions: 'Disabled instructions', tools: [{ toolId: 'disabled-tool' }] },
+        ] } as unknown as AgentResolver;
+        const node = { id: 'review', name: 'Review', plugin: 'builtin.agent', pluginVersion: '1.0.0',
+            config: { skillIds: ['review', 'silent', 'disabled'] }, inputs: {}, capabilities: [] } as FlowNodeDefinition;
+        const project = { kind: 'system', source: 'project', content: 'Project policy' };
+        const routed = [{ kind: 'system', source: 'session-skill', content: 'Loaded rules' },
+            { kind: 'system', source: 'skill-index', content: 'Available metadata' }];
+        const patch = await bindFlowNode(node, undefined, { blocks: [project, ...routed], canonicalMessages: [{ role: 'user', content: 'task' }] } as never,
+            { sessionId: 's', input: { text: 'task' } } as never,
+            { roundId: 'r', config: { id: 'agent', name: 'Agent', type: 'agent' } }, resolver);
+        const config = patch.config as unknown as { messages: Array<{ role: string; content: string }> };
+        expect(config.messages).toEqual([
+            { role: 'system', content: 'Project policy' },
+            { role: 'system', content: 'Loaded rules' },
+            { role: 'system', content: 'Available metadata' },
+            { role: 'system', content: 'Review changes.' },
+            { role: 'system', content: 'Skill review — critical rules:\nPreserve access checks.' },
+            { role: 'user', content: 'task' },
+        ]);
+        expect(patch.capabilities).toEqual(['inspect']);
+        selected.compact.rawContent = 'Edited later';
+        expect(config.messages[4].content).toContain('Preserve access checks.');
+        const none = await bindFlowNode({ ...node, config: { ...node.config, systemPromptPolicy: 'none' } } as FlowNodeDefinition,
+            undefined, { blocks: [project, ...routed], canonicalMessages: [{ role: 'user', content: 'task' }] } as never,
+            { sessionId: 's', input: { text: 'task' } } as never,
+            { roundId: 'r', config: { id: 'agent', name: 'Agent', type: 'agent' } }, resolver);
+        expect((none.config as unknown as typeof config).messages).toEqual([{ role: 'user', content: 'task' }]);
+    });
+
     it('normalizes legacy fields and resolves an isolated child independently', async () => {
         const node = {
             id: 'parent', name: 'Parent', plugin: 'builtin.agent', pluginVersion: '1.0.0',
@@ -49,6 +123,40 @@ describe('bindFlowNode', () => {
             { role: 'system', content: 'session identity' },
             { role: 'system', content: 'legacy child instruction' },
         ]);
+    });
+
+    it.each([undefined, false, true])('keeps parent tool exchanges consistent when includeToolResults=%s', async includeToolResults => {
+        const calls = [{ id: 'call', type: 'function', function: { name: 'inspect', arguments: '{}' } }];
+        const messages = [{ role: 'user', content: 'review' },
+            { role: 'assistant', content: 'Checking now', tool_calls: calls },
+            { role: 'tool', content: 'secret result', tool_call_id: 'call' },
+            { role: 'assistant', content: null, tool_calls: [{ ...calls[0], id: 'second' }] },
+            { role: 'tool', content: 'second result', tool_call_id: 'second' }];
+        const node = { id: 'parent', name: 'Parent', plugin: 'builtin.agent', pluginVersion: '1.0.0', inputs: {},
+            config: { messages, delegation: { enabled: true, template: { contextSource: 'parent', includeToolResults } } } } as FlowNodeDefinition;
+        const bound = await bindStandaloneFlowNode(node, undefined, 'session', { getSkills: async () => [] } as unknown as AgentResolver);
+        const child = (bound.config as any).delegation.resolvedTemplate.config;
+        expect(child.messages).toEqual(includeToolResults ? messages : [
+            { role: 'user', content: 'review' }, { role: 'assistant', content: 'Checking now' },
+        ]);
+        expect(messages[1]).toHaveProperty('tool_calls');
+        expect(messages).toHaveLength(5);
+    });
+
+    it.each(['isolated', 'upstream', 'parent'])('keeps standalone delegation child instruction for %s context', async contextSource => {
+        const node = {
+            id: 'parent', name: 'Parent', plugin: 'builtin.agent', pluginVersion: '1.0.0',
+            config: {
+                instruction: 'parent instruction',
+                delegation: { enabled: true, template: { instruction: 'child instruction', contextSource } },
+            },
+            inputs: {}, capabilities: [],
+        } as FlowNodeDefinition;
+        const bound = await bindStandaloneFlowNode(node, undefined, 'session', { getSkills: async () => [] } as unknown as AgentResolver);
+        const child = (bound.config as Record<string, any>).delegation.resolvedTemplate.config as Record<string, any>;
+        const instruction = child.messages.filter((message: any) => message.content === 'child instruction');
+        expect(instruction).toHaveLength(1);
+        expect(instruction[0].role).toBe('system');
     });
 
     it('session context source keeps the session history for the child', async () => {

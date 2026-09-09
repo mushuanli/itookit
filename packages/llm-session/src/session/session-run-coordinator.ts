@@ -65,6 +65,7 @@ export class SessionRunCoordinator {
             externalIds: string[];
         }>,
         retrieveMemory?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['retrieveMemory'],
+        resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>,
     ) {
         this.runs = new ConversationRunCoordinator({
             engine,
@@ -72,7 +73,9 @@ export class SessionRunCoordinator {
             kernel,
             dagPlugins,
             resolveTools,
+            resolveSkills: ids => this.agents.getSkills(ids),
             retrieveMemory,
+            resolveSessionContext,
             loadArtifact: async () => null,
         });
     }
@@ -158,6 +161,7 @@ export class SessionRunCoordinator {
                 setup.config.connectionId ?? 'default',
                 (id, childRevision) => definitions.loadRevision(id, childRevision),
             ),
+            (node, snapshot, defaults) => bindFlowNode(node as Parameters<typeof bindFlowNode>[0], defaults as Parameters<typeof bindFlowNode>[1], snapshot, task, setup, this.agents),
         );
     }
 

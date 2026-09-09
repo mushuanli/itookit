@@ -59,6 +59,37 @@ describe('Session data repository', () => {
         await repository.updateUIState(id, { branchDrafts: { main: { inputText: '' } } });
         expect((await repository.getUIState(id))?.branchDrafts).toEqual({ main: { inputText: '' }, experiment: { inputText: 'branch draft' } });
     });
+    it('repairs an interrupted Session creation and list skips the incomplete record', async () => {
+        const id = 'interrupted';
+        const root = `/var/lib/sessions/${id}`;
+        for (const name of ['session.seq', 'history.seq']) {
+            await fs.driver.createFile({ name, parentPath: root, type: 'seqfile', recursive: true });
+        }
+        await fs.driver.createDirectory({ name: 'attachments', parentPath: root });
+        expect(await repository.list()).toEqual([]);
+
+        await repository.ensureSession(id, 'Recovered');
+        expect((await repository.getManifest(id)).title).toBe('Recovered');
+        expect((await repository.list()).map(session => session.id)).toContain(id);
+    });
+
+    it('repairs missing history without overwriting an existing Session record', async () => {
+        const id = 'partial';
+        const root = `/var/lib/sessions/${id}`;
+        for (const name of ['session.seq', 'history.seq']) {
+            await fs.driver.createFile({ name, parentPath: root, type: 'seqfile', recursive: true });
+        }
+        await fs.driver.createDirectory({ name: 'attachments', parentPath: root });
+        await fs.meta.seq!.setEntry(`${root}/session.seq`, 'session', JSON.stringify({
+            storageVersion: 1, id, title: 'Original', origin: 'tauri', createdAt: 1, updatedAt: 1, revision: 0,
+        }));
+
+        await repository.ensureSession(id, 'Replacement');
+        const manifest = await repository.getManifest(id);
+        expect(manifest.title).toBe('Original');
+        expect(manifest.currentBranch).toBe('main');
+    });
+
     it('rejects unknown identities and incompatible storage without creating data', async () => {
         await expect(repository.getManifest('missing')).rejects.toMatchObject({ code: 'ENOENT' });
         await expect(repository.getManifest('/old.chat')).rejects.toThrow('identity');

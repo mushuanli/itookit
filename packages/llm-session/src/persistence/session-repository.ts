@@ -1,6 +1,6 @@
 import { generateUUID } from '@itookit/common';
 import { createFileSystemView, FSError, type IFileSystem } from '@itookit/vfs-core';
-import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository } from './types';
+import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionOrigin } from './types';
 import { sessionStorageRoot } from './session-storage-layout';
 
 /** Session identity, history and attachments. No document path is a Session identity. */
@@ -22,16 +22,51 @@ export class SessionRepository implements ISessionRepository {
     }
     private paths(id: string) { const root = this.root(id); return { root, session: `${root}/session.seq`, history: `${root}/history.seq` }; }
     async createSession(title: string): Promise<string> {
-        const id = generateUUID(), now = Date.now();
+        return this.ensureSession(generateUUID(), title);
+    }
+    /** Idempotently create a Session with a host-supplied durable identity. */
+    async ensureSession(id: string, title: string, origin: SessionOrigin = 'tauri'): Promise<string> {
+        if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new FSError('EINVAL', 'Invalid Session identity');
         const p = this.paths(id);
-        for (const name of ['session.seq', 'history.seq']) await this.fs.driver.createFile({ name, parentPath: p.root, type: 'seqfile', recursive: true });
-        await this.fs.driver.createDirectory({ name: 'attachments', parentPath: p.root });
+        const now = Date.now();
+        let repaired = false;
+
+        for (const [path, name] of [[p.session, 'session.seq'], [p.history, 'history.seq']] as const) {
+            if (!await this.fs.driver.exists(path)) {
+                await this.fs.driver.createFile({ name, parentPath: p.root, type: 'seqfile', recursive: true });
+                repaired = true;
+            }
+        }
+        const attachments = `${p.root}/attachments`;
+        if (!await this.fs.driver.exists(attachments)) {
+            await this.fs.driver.createDirectory({ name: 'attachments', parentPath: p.root });
+            repaired = true;
+        }
+
         await this.fs.meta.seq!.transaction!(async tx => {
-            await tx.setEntry(p.session, 'session', JSON.stringify({ storageVersion: 1, id, title, createdAt: now, updatedAt: now, revision: 0 }));
-            await tx.setEntry(p.session, 'settings', JSON.stringify(DEFAULT_SESSION_SETTINGS));
-            await tx.setEntry(p.history, 'index', JSON.stringify({ schemaVersion: 3, rootRoundId: null, branches: { main: null }, branchMeta: {}, currentBranch: 'main', currentHead: null, children: {} }));
+            const rawSession = await tx.getEntry(p.session, 'session');
+            if (rawSession) {
+                const session = JSON.parse(rawSession);
+                if (session.storageVersion !== 1 || session.id !== id) throw new Error('Session storage version incompatible');
+            } else {
+                await tx.setEntry(p.session, 'session', JSON.stringify({ storageVersion: 1, id, title, origin, createdAt: now, updatedAt: now, revision: 0 }));
+                repaired = true;
+            }
+            if (!await tx.getEntry(p.session, 'settings')) {
+                await tx.setEntry(p.session, 'settings', JSON.stringify(DEFAULT_SESSION_SETTINGS));
+                repaired = true;
+            }
+            const rawHistory = await tx.getEntry(p.history, 'index');
+            if (rawHistory) {
+                const history = JSON.parse(rawHistory);
+                if (history?.schemaVersion !== 3) throw new Error('Session history version incompatible');
+            } else {
+                await tx.setEntry(p.history, 'index', JSON.stringify({ schemaVersion: 3, rootRoundId: null, branches: { main: null }, branchMeta: {}, currentBranch: 'main', currentHead: null, children: {} }));
+                repaired = true;
+            }
         });
-        this.notify(); return id;
+        if (repaired) this.notify();
+        return id;
     }
     async getManifest(id: string): Promise<ConversationManifest> {
         const p = this.paths(id);
@@ -39,8 +74,11 @@ export class SessionRepository implements ISessionRepository {
             const raw = await tx.getEntry(p.session, 'session');
             if (!raw) throw new FSError('ENOENT', `Session not found: ${id}`);
             const session = JSON.parse(raw);
-            const history = JSON.parse(await tx.getEntry(p.history, 'index') ?? 'null');
-            if (session.storageVersion !== 1 || session.id !== id || history?.schemaVersion !== 3) throw new Error('Session storage version incompatible');
+            if (session.storageVersion !== 1 || session.id !== id) throw new Error('Session storage version incompatible');
+            const rawHistory = await tx.getEntry(p.history, 'index');
+            if (!rawHistory) throw new FSError('ENOENT', `Session history not found: ${id}`);
+            const history = JSON.parse(rawHistory);
+            if (history?.schemaVersion !== 3) throw new Error('Session history version incompatible');
             return { ...session, ...history };
         });
     }
@@ -49,7 +87,14 @@ export class SessionRepository implements ISessionRepository {
         if (!await this.fs.driver.exists('/var/lib/sessions')) return [];
         const result: ConversationManifest[] = [];
         for (const node of await this.fs.driver.getChildren('/var/lib/sessions')) {
-            if (node.type === 'directory' && await this.fs.driver.exists(`${node.path}/session.seq`)) result.push(await this.getManifest(node.name));
+            if (node.type !== 'directory' || !await this.fs.driver.exists(`${node.path}/session.seq`)) continue;
+            try {
+                result.push(await this.getManifest(node.name));
+            } catch (error) {
+                // A crash can leave seqfiles behind before the init transaction
+                // commits; skip incomplete records until ensureSession repairs them.
+                if (!(error instanceof FSError && error.code === 'ENOENT')) throw error;
+            }
         }
         return result.sort((a, b) => b.updatedAt - a.updatedAt);
     }
@@ -61,8 +106,8 @@ export class SessionRepository implements ISessionRepository {
             if (!raw) throw new FSError('ENOENT', 'Session not found');
             const current = JSON.parse(raw);
             if (current.storageVersion !== 1) throw new Error('Session storage version incompatible');
-            const { id: _id, title, summary, uiState, flow, createdAt: _created, updatedAt: _updated, ...historyPatch } = patch;
-            const next = { ...current, ...(title !== undefined ? { title } : {}), ...(summary !== undefined ? { summary } : {}),
+            const { id: _id, title, summary, origin, uiState, flow, createdAt: _created, updatedAt: _updated, ...historyPatch } = patch;
+            const next = { ...current, ...(title !== undefined ? { title } : {}), ...(summary !== undefined ? { summary } : {}), ...(origin !== undefined ? { origin } : {}),
                 ...(uiState ? { uiState: { ...current.uiState, ...uiState, ...(uiState.branchDrafts ? { branchDrafts: { ...current.uiState?.branchDrafts, ...uiState.branchDrafts } } : {}) } } : {}), ...(flow ? { flow } : {}), updatedAt: Date.now(), revision: current.revision + 1 };
             const index = JSON.parse(await tx.getEntry(p.history, 'index') ?? 'null');
             if (index?.schemaVersion !== 3) throw new Error('Session history version incompatible');

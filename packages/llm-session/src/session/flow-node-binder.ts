@@ -16,8 +16,9 @@ interface BindingSetup {
 
 interface BindingContext {
     flowDefaults: Record<string, unknown>;
-    snapshot: ContextSnapshot;
-    task: ExecutionTask;
+    snapshot: Pick<ContextSnapshot, 'blocks' | 'canonicalMessages'>;
+    task: Pick<ExecutionTask, 'sessionId'> & { input: { text: string } };
+    standalone?: boolean;
     setup: BindingSetup;
     agents: AgentResolver;
 }
@@ -53,11 +54,30 @@ export async function bindFlowNode(
     }, { flowDefaults: normalizeLegacyFields(record(flowDefaultsValue)), snapshot, task, setup, agents });
 }
 
+/** Resolve identities without inventing a conversation Round or inherited chat history. */
+export async function bindStandaloneFlowNode(
+    node: FlowNodeDefinition, defaults: FlowNodeDefinition['config'] | undefined, sessionId: string, agents: AgentResolver,
+) {
+    if (node.plugin !== 'builtin.agent') return {};
+    const config = normalizeLegacyFields(record(node.config));
+    const flowDefaults = normalizeLegacyFields(record(defaults));
+    if (!stringValue(config.instruction) && !stringValue(flowDefaults.instruction) && !Array.isArray(config.messages)) {
+        config.instruction = Object.values(node.inputs).map(value => JSON.stringify(value)).join('\n');
+    }
+    return bindAgentSource({ id: String(node.id), name: node.name,
+        config, capabilities: node.capabilities ?? [],
+    }, { flowDefaults, agents, standalone: true,
+        snapshot: { blocks: [], canonicalMessages: [] }, task: { sessionId, input: { text: '' } },
+        setup: { config: { id: 'flow', name: 'Flow', type: 'agent' }, roundId: 'flow' },
+    });
+}
+
 async function bindAgentSource(source: AgentSource, context: BindingContext, templateDepth = 0) {
     const identity = await resolveIdentity(source.config, context);
     const messages = await resolveMessages(source.config, identity, context);
     const toolIds = resolveCapabilities(source, identity, context);
     const config = resolveExecutionConfig(source.config, identity.referencedAgent, context);
+    if (templateDepth > 0) applySkillSubagentModel(config, source.config, identity);
     const delegation = await resolveDelegation(source, messages, context, templateDepth);
     return {
         config: {
@@ -88,7 +108,7 @@ async function resolveIdentity(
         log.warn('Flow node skillIds resolution failed', { skillIds, error });
         return [];
     });
-    return { referencedAgent, skills };
+    return { referencedAgent, skills: skills.filter(skill => skill.enabled && !skill.disableModelInvocation) };
 }
 
 async function resolveAgent(id: string, agents: AgentResolver): Promise<ExecutorConfig | undefined> {
@@ -106,6 +126,13 @@ async function resolveMessages(
     context: BindingContext,
 ): Promise<ChatMessage[]> {
     const segments = await resolvePromptSegments(config, identity, context);
+    if (context.standalone) {
+        const instruction = stringValue(config.instruction) ?? stringValue(context.flowDefaults.instruction) ?? '';
+        const base = Array.isArray(config.messages) ? config.messages.filter(isChatMessage)
+            : [{ role: 'user' as const, content: instruction }];
+        return [...segments.map(content => ({ role: 'system' as const, content })),
+            ...base.filter(message => systemPromptPolicy(config, context.flowDefaults) !== 'none' || message.role !== 'system')];
+    }
     const base = historyPolicy(config, context.flowDefaults) === 'inherit'
         ? context.snapshot.canonicalMessages.filter(message => message.role !== 'system')
         : context.task.input.text ? [{ role: 'user' as const, content: context.task.input.text }] : [];
@@ -129,14 +156,19 @@ async function resolvePromptSegments(
         resolvePromptReference(stringValue(config.systemPromptId), context.agents, 'Flow node'),
     ]);
     return policy === 'none' ? [] : [
+        ...(context.snapshot.blocks ?? []).flatMap(block =>
+            block.kind === 'system' && ['project', 'session-skill', 'skill-index'].includes(block.source) ? [block.content] : []),
         ...(policy === 'inherit' ? context.setup.config.systemPrompt ?? [] : []),
         ...(policy === 'inherit' ? flowReference : []),
         ...(policy === 'inherit' ? strings(context.flowDefaults.systemPrompt) : []),
         ...(policy === 'inherit' ? identity.referencedAgent?.systemPrompt ?? [] : []),
         ...nodeReference,
-        ...identity.skills.map(skill => skill.instructions).filter(Boolean),
+        ...identity.skills.flatMap(skill => [
+            skill.instructions,
+            skill.compact?.rawContent ? `Skill ${skill.id} — critical rules:\n${skill.compact.rawContent}` : '',
+        ]).filter(Boolean),
         ...strings(config.systemPrompt),
-        ...taskInstruction(config),
+        ...(context.standalone ? [] : taskInstruction(config)),
     ];
 }
 
@@ -241,6 +273,7 @@ async function resolveDelegation(
     const contextSource = delegationContextSource(template.contextSource);
     const child = await bindAgentSource(childSource(parent, template, contextSource), context, templateDepth + 1);
     const resolvedConfig = record(child.config);
+    ensureDelegationInstruction(resolvedConfig, template);
     applyDelegationContext(resolvedConfig, parentMessages, template, contextSource);
     return {
         ...delegation,
@@ -269,6 +302,18 @@ function childSource(
     };
 }
 
+/** Keep the template's own instruction after delegation context filtering. */
+function ensureDelegationInstruction(child: Record<string, unknown>, template: Record<string, unknown>): void {
+    const instruction = stringValue(template.instruction) ?? stringValue(template.prompt);
+    if (!instruction) return;
+    const messages = Array.isArray(child.messages) ? child.messages.filter(isChatMessage) : [];
+    if (messages.some(message => message.role === 'system' && message.content === instruction)) return;
+    child.messages = [
+        ...messages.filter(message => !(message.role === 'user' && message.content === instruction)),
+        { role: 'system', content: instruction },
+    ];
+}
+
 function applyDelegationContext(
     child: Record<string, unknown>,
     parentMessages: ChatMessage[],
@@ -278,8 +323,7 @@ function applyDelegationContext(
     const messages = Array.isArray(child.messages) ? child.messages.filter(isChatMessage) : [];
     const childSystem = messages.filter(message => message.role === 'system');
     if (source === 'parent') {
-        const parentBody = parentMessages.filter(message => message.role !== 'system'
-            && (template.includeToolResults === true || message.role !== 'tool'));
+        const parentBody = delegationParentBody(parentMessages, template.includeToolResults === true);
         child.messages = [
             ...(template.includeParentSystemPrompt !== false ? parentMessages.filter(message => message.role === 'system') : []),
             ...childSystem,
@@ -346,4 +390,23 @@ function normalizeLegacyFields(config: Record<string, unknown>): Record<string, 
         ...(instruction ? { instruction } : {}),
         ...(modelName ? { modelName } : {}),
     };
+}
+
+function applySkillSubagentModel(config: Record<string, unknown>, source: Record<string, unknown>, identity: IdentityLayer): void {
+    if (stringValue(source.modelName) || identity.referencedAgent?.model) return;
+    const selected = new Set(strings(source.skillIds));
+    const models = unique(identity.skills.filter(skill => selected.has(skill.id) && skill.supportsSubagent)
+        .map(skill => stringValue(skill.subagentModel)).filter((model): model is string => Boolean(model)));
+    if (models.length > 1) throw new Error('Selected Skills declare conflicting subagent models; set the child model explicitly');
+    if (models.length === 1) config.modelName = models[0];
+}
+
+/** A child that omits tool results must not inherit calls waiting for those results. */
+function delegationParentBody(messages: ChatMessage[], includeTools: boolean): ChatMessage[] {
+    return messages.flatMap(message => {
+        if (message.role === 'system' || (!includeTools && message.role === 'tool')) return [];
+        if (includeTools || message.role !== 'assistant' || !message.tool_calls?.length) return [message];
+        const { tool_calls: _calls, ...text } = message;
+        return text.content ? [text as ChatMessage] : [];
+    });
 }
