@@ -140,7 +140,7 @@
 ## 8. 未完成清单（与 todo 对齐）
 
 - P1-02：跨主机时钟偏差、共享存储（S3/NFS 类）租约语义、真实多进程接管验收。
-- P1-04：图级 retry 的下游重算、成员/预算/工作区/结果收敛与 UI 控制语义。
+- P1-04：UI 图级 retry 入口与收敛提示、委派组/隔离工作区重算、丢弃实例的 token 退款语义。
 - Cache §10 的依赖版本、fencing generation、策略矩阵、终态清理、provider 能力差异。
 - Resources §9 的 authority 服务、leader 迁移 fencing、stream/GC 保留期。
 - Storage §5 目标布局字段与 compaction。

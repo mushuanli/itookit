@@ -1,5 +1,6 @@
 import { prepareFlowTaskRetry, readFlowRunMembers } from '../src/flow/run-members';
 import { workspaceFinalizationKey } from '../src/flow/workspace-finalization';
+import { requestFlowGraphRetry } from '../src/flow/graph-retry';
 import { restoreFlowHandle } from '../src/flow/restore-handle';
 import { readFlowTaskTranscript } from '../src/flow/transcript';
 import { flowToDag } from '../src/flow/to-dag';
@@ -541,7 +542,9 @@ describe('DurableFlowExecutor', () => {
             const agentSpec = submit.mock.calls
                 .map(([, spec]) => spec as { labels?: Record<string, string>; requestId?: string })
                 .find(spec => spec.labels?.flowNodeId === 'agent');
-            expect(agentSpec?.requestId).toBe(`flow:${original.root.id}:agent#1`);
+            // The generation suffix (@0) keeps crash-recovery dedup stable while letting a
+            // graph retry re-submit the same node with a distinct requestId.
+            expect(agentSpec?.requestId).toBe(`flow:${original.root.id}:agent#1@0`);
             release();
             expect((await original.root.wait({ timeoutMs: 2_000 })).status).toBe('succeeded');
         } finally {
@@ -817,6 +820,72 @@ describe('DurableFlowExecutor', () => {
             .filter(task => task.labels?.kind !== 'flow-root');
         expect(nodes.map(task => task.id)).toEqual([nodeTaskId]);
         expect(resumed.nodes.get('human')!.id).toBe(nodeTaskId);
+    });
+
+    it('recomputes downstream nodes after a graph retry of an upstream node', async () => {
+        const flow: DagRunSpec = {
+            nodes: [
+                { ...valueNode('human', null), plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'First' } },
+                valueNode('after', null),
+                valueNode('last', null),
+                { ...valueNode('human2', null), plugin: 'builtin.human', config: { requestId: 'answer2', prompt: 'Second' } },
+            ],
+            edges: [
+                { id: 'human-after', from: 'human', to: 'after', output: 'response', input: 'input' },
+                { id: 'after-last', from: 'after', to: 'last', output: 'result', input: 'input' },
+                { id: 'last-human2', from: 'last', to: 'human2', output: 'result', input: 'input' },
+            ],
+        };
+        const first = executor(kernel);
+        const submission = first.submit('session-one', flow);
+        let humanTaskId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer?.status === 'pending');
+            expect(task).toBeDefined();
+            humanTaskId = task!.id;
+        });
+        const execution = await submission;
+        const session = await kernel.openSession('session-one');
+        await (await session.attachTask(humanTaskId)).respond({ interactionId: 'answer', value: 'FIRST-VALUE' });
+        // The Run pauses at the second human node with committed downstream work.
+        let staleAfter = '', staleHuman2 = '';
+        await vi.waitFor(async () => {
+            const tasks = await kernel.listSessionTasks('session-one');
+            expect(tasks.some(task => task.interactions?.answer2?.status === 'pending')).toBe(true);
+            staleAfter = tasks.find(task => task.labels?.flowNodeId === 'after')!.id;
+            staleHuman2 = tasks.find(task => task.interactions?.answer2?.status === 'pending')!.id;
+        });
+
+        const request = await requestFlowGraphRetry(session, execution.root.id, humanTaskId, 'retry-1');
+        expect(request).toMatchObject({ sourceNodeId: 'human', downstream: ['after', 'human2', 'last'] });
+
+        kernel.dispose();
+        await first.waitIdle();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel);
+        await kernel.initialize();
+
+        const resumed = await executor(kernel).resume('session-one', execution.root.id);
+        await (await kernel.openSession('session-one')).attachTask(request.retryTaskId)
+            .then(task => task.respond({ interactionId: 'answer', value: 'RETRY-VALUE' }));
+        // The recomputed downstream chain asks for the second input again, as a new Task.
+        let secondTaskId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer2?.status === 'pending' && item.id !== staleHuman2);
+            expect(task).toBeDefined();
+            secondTaskId = task!.id;
+        });
+        await (await kernel.openSession('session-one')).attachTask(secondTaskId)
+            .then(task => task.respond({ interactionId: 'answer2', value: 'done' }));
+        const exit = await resumed.root.wait({ timeoutMs: 5_000 });
+        expect(exit.status).toBe('succeeded');
+        const nodes = (exit.output as { nodes: Record<string, { outputs: Record<string, { content: unknown }> }> }).nodes;
+        expect(nodes.last.outputs.result.content).toBe('RETRY-VALUE');
+        // The stale downstream instance was replaced, not kept alongside the new one.
+        expect(resumed.nodes.get('after')!.id).not.toBe(staleAfter);
     });
 
     it('refuses a second scheduler while the owner lease is live and fences the old owner', async () => {

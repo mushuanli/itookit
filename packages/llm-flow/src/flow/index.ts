@@ -28,6 +28,9 @@ export { prepareFlowTaskRetry, type FlowRunMember } from './run-members';
 
 export { retryFlowTask } from './retry-task';
 
+export { downstreamNodes, graphRetryKey, requestFlowGraphRetry } from './graph-retry';
+export type { FlowGraphRetryIntent, FlowGraphRetryRequest } from './graph-retry';
+
 export { FlowSchemaRegistry, flowSchemaIssue } from './schema-registry';
 export { schemaCompatibilityIssue } from './schema-compat';
 

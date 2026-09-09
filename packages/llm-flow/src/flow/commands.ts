@@ -17,6 +17,7 @@ import { hasValidationErrors, validateFlowRevision } from './validation';
 import { validateFlowParameters } from './parameters';
 import { FlowCommand } from './command-names';
 import { retryFlowTask } from './retry-task';
+import { requestFlowGraphRetry } from './graph-retry';
 import { readFlowRunMembers } from './run-members';
 import { restoreFlowHandle } from './restore-handle';
 import { readFlowTaskTranscript, type FlowTranscriptQuery } from './transcript';
@@ -79,8 +80,17 @@ export class DagCommandService {
             return this.signal(input);
         });
         bus.register(FlowCommand.RunTaskRetry, async args => {
-            const input = args as { sessionId: string; taskId: string; targetTaskId: string; requestId: string };
+            const input = args as { sessionId: string; taskId: string; targetTaskId: string; requestId: string;
+                downstream?: boolean };
             const session = await this.options.kernel.openSession(input.sessionId);
+            if (input.downstream) {
+                // Graph retry: the retry plus a durable intent to recompute its downstream
+                // closure, applied by the next scheduling turn.
+                const request = await requestFlowGraphRetry(session, input.taskId, input.targetTaskId, input.requestId);
+                await this.snapshot(input.taskId, input.sessionId);
+                return { taskId: input.taskId, targetTaskId: request.retryTaskId, retryOfTaskId: input.targetTaskId,
+                    downstream: request.downstream };
+            }
             const task = await retryFlowTask(session, input.taskId, input.targetTaskId, input.requestId);
             await this.snapshot(input.taskId, input.sessionId);
             return { taskId: input.taskId, targetTaskId: task.id, retryOfTaskId: input.targetTaskId };

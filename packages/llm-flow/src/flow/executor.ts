@@ -1,6 +1,7 @@
 import type { SchedulerCheckpoint } from './scheduler-checkpoint';
 import { restoreFlowHandle } from './restore-handle';
 import { acquireSchedulerLease, isSchedulerOwnershipLost, type SchedulerLease } from './scheduler-lease';
+import { graphRetryKey, type FlowGraphRetryIntent } from './graph-retry';
 import { beginWorkspaceFinalization, workspaceFinalizationKey, type WorkspaceFinalization } from './workspace-finalization';
 import { createRunCatalog } from './run-catalog';
 import type {
@@ -259,6 +260,7 @@ export class DurableFlowExecutor {
             const completionOrder: string[] = saved?.completionOrder ?? [];
             // 已派发的节点（按派发顺序），用于 supervisor 的「每轮只等本轮派发的 worker」。
             const dispatchOrder: string[] = saved?.dispatchOrder ?? [];
+            const nodeGenerations = new Map<string, number>(saved?.nodeGenerations ?? []);
             const edgeState = new Map<string, EdgeState>(
                 saved?.edgeState ?? edges.map(edge => [edge.id, routeEdgeIds.has(edge.id) ? 'pending' : 'active']),
             );
@@ -279,6 +281,7 @@ export class DurableFlowExecutor {
                     skipped: [...skipped], detachedNodes: [...detachedNodes], appliedPatches: [...appliedPatches],
                     nodeDefaults: [...nodeDefaults], nodeConnections: [...nodeConnections],
                     consumedTokens, startedAt, completionOrder, dispatchOrder,
+                    nodeGenerations: [...nodeGenerations],
                 };
                 await session.setShared(`flow.run.${published.root.id}.scheduler`, jsonValue(checkpoint));
             };
@@ -388,8 +391,10 @@ export class DurableFlowExecutor {
                     dependencies,
                 });
                 await this.emitHook('task.started', sessionId, { nodeId: node.id, iteration });
+                // The generation keeps re-submissions after a graph retry distinct, while a
+                // crash-recovery re-submission (same generation) still deduplicates.
                 const requestId = published
-                    ? `flow:${published.root.id}:${node.id}#${iteration}`
+                    ? `flow:${published.root.id}:${node.id}#${iteration}@${nodeGenerations.get(node.id) ?? 0}`
                     : undefined;
                 const handle = await session.submit(await this.taskSpec(sessionId, node, task, dependencies, parameters, requestId));
                 if (!instances.has(node.id)) instances.set(node.id, []);
@@ -611,6 +616,68 @@ export class DurableFlowExecutor {
             // them from the persisted absolute deadline before scheduling resumes.
             for (const [groupId, group] of delegationGroups) armDetachedTimer(groupId, group);
 
+            /**
+             * Consume pending graph-retry intents: the retry becomes the node's newest
+             * instance and every downstream node drops its committed work so the loop
+             * recomputes it from the retry's output. Returns the number applied.
+             */
+            const applyGraphRetries = async (): Promise<number> => {
+                if (!published) return 0;
+                const key = graphRetryKey(published.root.id);
+                let applied = 0;
+                for (let attempt = 0; attempt < 5; attempt++) {
+                    const saved = await session.getShared(key);
+                    const intents = Array.isArray(saved?.value) ? saved!.value as unknown as FlowGraphRetryIntent[] : [];
+                    const pending = intents.filter(intent => !intent.applied);
+                    if (!pending.length) return applied;
+                    for (const intent of pending) await applyGraphRetry(intent);
+                    const next = intents.map(intent => intent.applied ? intent : { ...intent, applied: true });
+                    try {
+                        await session.setShared(key, next as unknown as JsonValue,
+                            { expectedVersion: saved?.version ?? null });
+                        applied += pending.length;
+                        break;
+                    } catch (error) { if (attempt === 4) throw error; }
+                }
+                if (applied) {
+                    await session.setShared(`flow.run.${published.root.id}.members`,
+                        jsonValue(runMembers(instances, nodes, detachedNodes)));
+                    await saveCheckpoint();
+                }
+                return applied;
+            };
+
+            const applyGraphRetry = async (intent: FlowGraphRetryIntent): Promise<void> => {
+                if (!published) return;
+                const source = String(intent.sourceNodeId);
+                const handles = instances.get(source) ?? [];
+                if (!handles.some(handle => handle.id === intent.retryTaskId)) {
+                    const retry = await session.attachTask(intent.retryTaskId);
+                    handles.push(retry as TaskHandle);
+                    instances.set(source, handles);
+                    published.nodes.set(source, retry as TaskHandle);
+                    published.iterations.set(source, handles.length);
+                    published.taskIds.add(intent.retryTaskId);
+                }
+                for (const nodeId of intent.downstream) {
+                    nodeGenerations.set(nodeId, (nodeGenerations.get(nodeId) ?? 0) + 1);
+                    for (const [index, handle] of (instances.get(nodeId) ?? []).entries()) {
+                        if (!completed.has(instanceKey(nodeId, index + 1))) {
+                            await handle.cancel(`Graph retry of ${source}`).catch(() => undefined);
+                        }
+                        completed.delete(instanceKey(nodeId, index + 1));
+                    }
+                    instances.delete(nodeId);
+                    published.nodes.delete(nodeId);
+                    published.iterations.delete(nodeId);
+                    skipped.delete(nodeId);
+                    // Route decisions are re-taken; ordinary data edges simply become active.
+                    for (const edge of edges.filter(item => String(item.to) === nodeId)) {
+                        edgeState.set(edge.id, routeEdgeIds.has(edge.id) ? 'pending' : 'active');
+                    }
+                }
+            };
+
             // Persist the aggregate root before the first node is scheduled: it is the
             // Run's durable anchor, and the scheduler checkpoint is keyed by its id, so
             // creating it up front lets a crash at any later point resume from committed
@@ -627,6 +694,9 @@ export class DurableFlowExecutor {
                 lease = await this.acquireLease(session, published.root.id);
             }
             if (restored) publish(published);
+            // Graph retries accepted while no scheduler owned the Run are applied before the
+            // next scheduling turn: attach the retry instance and drop stale downstream work.
+            await applyGraphRetries();
             while (true) {
                 // Fencing: a host that lost the Run's scheduler lease must stop before its
                 // next step, even if its own event stream is still delivering. Stopping is

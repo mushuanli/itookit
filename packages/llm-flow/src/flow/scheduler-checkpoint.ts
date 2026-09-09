@@ -26,4 +26,6 @@ export interface SchedulerCheckpoint {
     startedAt: number;
     completionOrder: string[];
     dispatchOrder: string[];
+    /** 每节点的提交代数；图级 retry 后递增，使重算实例不命中旧提交的 requestId。 */
+    nodeGenerations?: [string, number][];
 }
