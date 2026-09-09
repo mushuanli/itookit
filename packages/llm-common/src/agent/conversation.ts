@@ -36,6 +36,8 @@ export interface Round extends ConversationRound {
     defaultContextMode?: 'include' | 'exclude';
     defaultContextScope?: 'node' | 'subtree';
     result?: RoundResult;
+    /** Failure reason for a terminal round without assistant output; projected into the transcript. */
+    error?: string;
 }
 
 // ─── Conversation Log ────────────────────────────────────────────────

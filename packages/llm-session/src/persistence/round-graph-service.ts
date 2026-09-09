@@ -11,7 +11,7 @@ import type { RoundManifest, PersistedRound, BranchMeta } from './round-types';
 import type { RoundLogEvent, RoundChangeSet } from './round-events';
 import { ulid } from './ulid';
 import { roundToProjection } from './round-log';
-import { toolCallsFromResult } from './projection';
+import { toolCallsFromResult, roundStatusToNodeStatus } from './projection';
 import type { ISessionRepository } from './types';
 
 // ─── Error types ───────────────────────────────────────────────────────────
@@ -349,12 +349,18 @@ export class RoundGraphService {
     async setConversationStatus(
         roundId: RoundId,
         status: NonNullable<Round['status']>,
+        error?: string,
     ): Promise<void> {
         const round = await this.readRound(roundId);
         if (!round) throw new RoundGraphError(`Round not found: ${roundId}`, 'NOT_FOUND');
         const completedAt = isTerminalConversationStatus(status) ? Date.now() : undefined;
-        await this.writeRound(roundId, { ...round, status, completedAt });
-        this.onEvent?.({ type: 'round:updated', roundId, changes: {} });
+        const failure = status === 'failed' ? error : undefined;
+        await this.writeRound(roundId, { ...round, status, completedAt, error: failure });
+        this.onEvent?.({
+            type: 'round:updated',
+            roundId,
+            changes: { status: roundStatusToNodeStatus(status), error: failure },
+        });
     }
 
     /** Associate a new execution without changing conversation lineage. */

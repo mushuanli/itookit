@@ -25,7 +25,7 @@ import type { RoundLogEvent } from './round-events';
 import { ulid } from './ulid';
 import { RoundGraphService } from './round-graph-service';
 import { ContextProfileStore } from './context-profile-store';
-import { toolCallsFromResult } from './projection';
+import { toolCallsFromResult, isFailedRoundStatus, roundStatusToNodeStatus } from './projection';
 
 // ─── Fold cache ───────────────────────────────────────────────────────────
 
@@ -255,8 +255,9 @@ export class RoundLog implements ILog {
     async setConversationStatus(
         roundId: RoundId,
         status: NonNullable<Round['status']>,
+        error?: string,
     ): Promise<void> {
-        await this.graph.setConversationStatus(roundId, status);
+        await this.graph.setConversationStatus(roundId, status, error);
         this._cache.invalidateAll();
     }
 
@@ -410,27 +411,53 @@ export function roundToProjection(round: PersistedRound, roundId: RoundId): Roun
             size: a.size,
         }))
         : undefined;
+    const kind = detectRoundKind(round);
 
     return {
         roundId,
         historyParentIds: round.historyParentIds,
-        kind: detectRoundKind(round),
+        kind,
         userMessage: userMsg ? {
             content: typeof userMsg.content === 'string' ? userMsg.content : JSON.stringify(userMsg.content),
             files: attachments,
             persistedNodeId: roundId,
         } : undefined,
-        assistantMessage: assistantMsg ? {
-            content: typeof assistantMsg.content === 'string' ? assistantMsg.content : JSON.stringify(assistantMsg.content),
-            thinking: (assistantMsg as any).thinking as string | undefined,
-            status: 'success',
-            persistedNodeId: roundId,
-            toolCalls: toolCallsFromResult(round.result),
-        } : undefined,
+        assistantMessage: assistantProjection(round, kind, assistantMsg, roundId),
         createdAt: round.createdAt,
         origin: round.origin,
         agentId: round.agentId,
         stale: round.stale,
         defaultContextMode: round.defaultContextMode,
     };
+}
+
+/**
+ * Project the assistant part of a Round.
+ *
+ * A chat Round that failed or was cancelled before producing output must still
+ * yield an assistant placeholder: otherwise the transcript ends on the user
+ * message and the next send is rejected as a consecutive user message, leaving
+ * the session permanently unusable.
+ */
+function assistantProjection(
+    round: PersistedRound,
+    kind: RoundProjection['kind'],
+    assistantMsg: PersistedRound['output'][number] | undefined,
+    roundId: RoundId,
+): RoundProjection['assistantMessage'] {
+    const status = roundStatusToNodeStatus(round.status);
+    if (assistantMsg) {
+        return {
+            content: typeof assistantMsg.content === 'string' ? assistantMsg.content : JSON.stringify(assistantMsg.content),
+            thinking: (assistantMsg as { thinking?: string }).thinking,
+            status,
+            persistedNodeId: roundId,
+            toolCalls: toolCallsFromResult(round.result),
+            error: round.error,
+        };
+    }
+    if (kind === 'chat' && isFailedRoundStatus(round.status) && round.input.some(m => m.role === 'user')) {
+        return { content: '', status, persistedNodeId: roundId, error: round.error };
+    }
+    return undefined;
 }

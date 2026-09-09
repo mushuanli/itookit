@@ -39,6 +39,7 @@ import {
 import type { ISessionRepository } from '../persistence/types';
 import { ContextProfileStore } from '../persistence/context-profile-store';
 import { RoundLog } from '../persistence/round-log';
+import { formatErrorMessage } from '../utils/error-formatter';
 import { SessionEventBus } from './session-event-bus';
 import { SessionState } from './session-state';
 import { DurableFlowExecutor } from '@itookit/llm-flow';
@@ -148,7 +149,7 @@ export class ConversationRunCoordinator {
             await this.completeRound(execution, output, streamedOutput, toolCalls);
             await execution.finalize();
         } catch (error) {
-            if (roundStarted) await this.failRound(execution);
+            if (roundStarted) await this.failRound(execution, error);
             throw error;
         } finally {
             this.active.delete(execution.task.sessionId);
@@ -438,11 +439,15 @@ export class ConversationRunCoordinator {
         projectOutput(this.options.eventBus, execution, output, streamedOutput.output);
     }
 
-    private async failRound(execution: ConversationExecution): Promise<void> {
+    private async failRound(execution: ConversationExecution, error?: unknown): Promise<void> {
         const status = execution.task.abortController.signal.aborted
             ? 'cancelled'
             : 'failed';
-        await execution.log.setConversationStatus(execution.roundId, status);
+        await execution.log.setConversationStatus(
+            execution.roundId,
+            status,
+            status === 'failed' ? formatErrorMessage(error) : undefined,
+        );
     }
 }
 

@@ -170,6 +170,31 @@ export class SessionState {
             }] : [];
         }
 
+        // A terminal failure with no assistant output must still materialize an
+        // assistant bubble. Otherwise the transcript ends on the user message and
+        // the next send is rejected as a consecutive user message, permanently
+        // blocking the Session.
+        if (!round.assistantMessage
+            && (changes.status === 'failed' || changes.status === 'aborted')
+            && round.userMessage) {
+            round.assistantMessage = {
+                content: '',
+                status: changes.status,
+                persistedNodeId: round.roundId,
+                error: changes.error,
+            };
+            const assistant = this.roundProjectionToSessionGroups(round)
+                .find(group => group.role === 'assistant');
+            return assistant ? [{
+                type: 'message:appended',
+                payload: {
+                    sessionGroup: assistant,
+                    isExecutionRoot: true,
+                    parentId: round.userMessage.persistedNodeId,
+                },
+            }] : [];
+        }
+
         if (round.assistantMessage) {
             if (changes.assistantContent !== undefined) {
                 round.assistantMessage.content = changes.assistantContent;
@@ -179,6 +204,9 @@ export class SessionState {
             }
             if (changes.status !== undefined) {
                 round.assistantMessage.status = changes.status;
+            }
+            if (changes.error !== undefined) {
+                round.assistantMessage.error = changes.error;
             }
             if (changes.toolCalls !== undefined) {
                 round.assistantMessage.toolCalls = changes.toolCalls;
@@ -541,6 +569,7 @@ export class SessionState {
                     data: {
                         output: p.assistantMessage.content,
                         thought: p.assistantMessage.thinking ?? '',
+                        error: p.assistantMessage.error,
                         metaInfo: p.agentId ? { agentId: p.agentId } : undefined,
                     },
                     children: buildToolChildren(p),

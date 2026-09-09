@@ -3,9 +3,27 @@
 // `assistantBlocks` + `toolResults` persistence shape (RoundResult) and the
 // ExecutionNode tree shape (tool children) in one place.
 
-import type { RoundResult } from '@itookit/common';
-import type { ExecutionNode } from '../core/types';
+import type { Round, RoundResult } from '@itookit/common';
+import type { ExecutionNode, NodeStatus } from '../core/types';
 import type { RoundProjection, ToolCallProjection } from './round-types';
+
+/**
+ * Map a persisted Round status onto the assistant node status.
+ *
+ * Only terminal failures differ from the historical default (`success`): a
+ * failed Round must surface as `failed`, an aborted one as `aborted`, so the
+ * transcript never looks like a successful empty answer.
+ */
+export function roundStatusToNodeStatus(status: Round['status']): NodeStatus {
+    if (status === 'failed') return 'failed';
+    if (status === 'cancelled') return 'aborted';
+    return 'success';
+}
+
+/** True for terminal statuses that need a placeholder assistant bubble. */
+export function isFailedRoundStatus(status: Round['status']): boolean {
+    return status === 'failed' || status === 'cancelled';
+}
 
 /** Rebuild the flat tool-call list from a persisted RoundResult. */
 export function toolCallsFromResult(result: RoundResult | undefined): ToolCallProjection[] {

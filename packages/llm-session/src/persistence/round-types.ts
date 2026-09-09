@@ -103,6 +103,8 @@ export interface RoundProjection {
         persistedNodeId: string;
         /** Tool invocations executed before the final assistant message. */
         toolCalls?: ToolCallProjection[];
+        /** Failure reason, rendered by the UI when the node status is failed. */
+        error?: string;
     };
 
     createdAt: number;

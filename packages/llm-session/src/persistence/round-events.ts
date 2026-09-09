@@ -23,4 +23,6 @@ export interface RoundChangeSet {
     _deleted?: boolean;
     /** Tool invocations to surface as assistant execution-tree children. */
     toolCalls?: ToolCallProjection[];
+    /** Failure reason for a terminal round without assistant output. */
+    error?: string;
 }
