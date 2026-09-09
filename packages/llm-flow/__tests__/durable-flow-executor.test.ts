@@ -119,6 +119,31 @@ describe('DurableFlowExecutor', () => {
         }
     });
 
+    it('accumulates every dispatched worker result across supervisor rounds', async () => {
+        const leadInputs: string[][] = [];
+        vi.spyOn(model, 'execute').mockImplementation(async request => {
+            const inner = request.request && typeof request.request === 'object'
+                ? request.request as Record<string, unknown> : request;
+            const messages = Array.isArray(inner.messages) ? inner.messages as Array<{ role?: string; content?: unknown }> : [];
+            leadInputs.push(messages.filter(message => message.role === 'user').map(message => String(message.content)));
+            const text = JSON.stringify(messages);
+            const content = text.includes('A RESULT') && text.includes('B RESULT') ? 'DONE'
+                : text.includes('A RESULT') ? 'B' : 'A';
+            return { choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+                usage: { total_tokens: 2 } };
+        });
+
+        const execution = await executor(kernel).submit('session-one', supervisorFlow());
+        const exit = await execution.root.wait({ timeoutMs: 5_000 });
+        expect(exit.status).toBe('succeeded');
+        expect(JSON.stringify(exit.output)).toContain('DONE');
+        // 每轮只派发一个 worker；第三轮必须同时看到两轮累积的结果。
+        expect(leadInputs).toHaveLength(3);
+        expect(leadInputs[1].join('\n')).toContain('A RESULT');
+        expect(leadInputs[2].join('\n')).toContain('A RESULT');
+        expect(leadInputs[2].join('\n')).toContain('B RESULT');
+    });
+
     it('freezes the run graph and schema before asynchronous host hooks can mutate them', async () => {
         const plugins = createBuiltinDagPluginRegistry();
         const schema = { type: 'string' };
@@ -975,6 +1000,41 @@ function delegationFlow(): DagRunSpec {
             inputs: {}, capabilities: [],
         }],
         edges: [],
+    };
+}
+
+function supervisorFlow(): DagRunSpec {
+    return {
+        nodes: [
+            {
+                id: 'lead', name: 'Lead', plugin: 'builtin.agent', pluginVersion: '1.0.0',
+                config: {
+                    sessionId: 'session-one', roundId: 'round-lead', connectionId: 'default', approval: 'none',
+                    messages: [{ role: 'user', content: 'dispatch workers' }], maxIterations: 6,
+                },
+                inputs: {}, capabilities: [],
+            },
+            {
+                id: 'router', name: 'Router', plugin: 'builtin.route', pluginVersion: '1.0.0',
+                config: {
+                    mode: 'exclusive',
+                    rules: ['A', 'B'].map(worker => ({
+                        edgeId: `lead-${worker.toLowerCase()}`,
+                        expression: { kind: 'eq', args: [{ kind: 'path', path: ['input'] }, { kind: 'literal', value: worker }] },
+                    })),
+                },
+                inputs: {}, capabilities: [],
+            },
+            valueNode('worker-a', 'A RESULT'),
+            valueNode('worker-b', 'B RESULT'),
+        ],
+        edges: [
+            { id: 'lead-router', from: 'lead', to: 'router', output: 'result', input: 'input' },
+            { id: 'lead-a', from: 'router', to: 'worker-a', output: 'result', input: 'input' },
+            { id: 'lead-b', from: 'router', to: 'worker-b', output: 'result', input: 'input' },
+            { id: 'a-lead', from: 'worker-a', to: 'lead', output: 'result', input: 'input' },
+            { id: 'b-lead', from: 'worker-b', to: 'lead', output: 'result', input: 'input' },
+        ],
     };
 }
 

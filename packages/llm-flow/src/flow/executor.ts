@@ -299,12 +299,13 @@ export class DurableFlowExecutor {
                 const incoming = incomingOf(edges, node.id)
                     .filter(edge => (edgeState.get(edge.id) ?? 'active') === 'active')
                     .filter(edge => !backEdges.has(edge.id) || iteration > 1)
-                    // 回边只绑定上一轮 worker；环内前向边绑定同一轮上游。
-                    .filter(edge => !backEdges.has(edge.id) || doneAt(edge.from, iteration - 1))
+                    // 回边绑定每个来源的最新已完成实例：普通 Loop 恰好等于上一轮，
+                    // supervisor 循环则累积所有已派发 worker 的结果；环内前向边绑定同一轮上游。
+                    .filter(edge => !backEdges.has(edge.id) || latestDone(edge.from))
                     .filter(edge => instances.has(edge.from) && !skipped.has(edge.from));
                 const upstreamHandle = (edge: DagEdgeDefinition): TaskHandle => {
                     const upstreamIteration = backEdges.has(edge.id)
-                        ? iteration - 1
+                        ? instances.get(edge.from)?.length ?? 0
                         : loopNodes.has(node.id) && loopNodes.has(edge.from)
                             ? iteration
                             : instances.get(edge.from)?.length ?? 1;

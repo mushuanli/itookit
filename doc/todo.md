@@ -1,6 +1,6 @@
 # 目标、进度与后续任务
 
-更新：2026-09-09（P1-08、P2-05 已完成）。本文是本轮工作的接续入口；以当前代码和可复现测试为准。**整体目标未完成，完整桌面最小系统尚未验收通过。** 下文“已完成”只指列明的实现与验证范围。
+更新：2026-09-09（P1-08、P1-09、P2-05 已完成）。本文是本轮工作的接续入口；以当前代码和可复现测试为准。**整体目标未完成，完整桌面最小系统尚未验收通过。** 下文“已完成”只指列明的实现与验证范围。
 
 ## 1. 目标与优先级
 
@@ -68,7 +68,7 @@
 - [ ] **P1-07 Schema/输出策略**：responseFormat 绑定与端口错误策略已实现（`packages/llm-flow/src/flow/builtin-plugins.ts`、`packages/llm-flow/src/flow/port-contract.ts`，校验期与运行期都校验）；结构兼容推导仍未实现（端口只做 `id@version` 精确匹配、无隐式转换），动态节点验证及相应受支持子集仍需闭合，不能把当前受支持子集称为完整实现。
 - [x] **P1-08 kernel-adapters 两处 Effect 回滚缺陷**：已修复。`skill.load` 与 `tool.call(load_skill)` 在身份持久化失败时按“调用前是否已加载”回滚（`skill/loaded-state.ts` 的 `rollbackFailedLoad`，已加载的不卸载；回滚自身失败时以 AggregateError 保留原始错误）；`create-kernel-adapters-runtime.ts` 的创建失败清理改为逐项执行并聚合错误（`runCleanup`/`cleanupAfterFailure`），`release` 失败不再跳过 driver dispose，原始初始化错误也不再被覆盖。回归测试见 `runtime/create-kernel-adapters-runtime.test.ts`（新加载回滚、已加载保留、清理继续且保留原始 cause）。复现记录见 [kernel-adapters 核验](deprecated/kernel-adapters-package-review.md)。
 
-- [ ] **P1-09 CLI supervisor 循环集成测试失败（既有缺陷，未修复）**：`pnpm --filter @itookit/cli test` 中 `tests/run.integration.test.ts > CLI run > supervisor dispatches workers in a loop until the final answer` 稳定失败（70 通过 / 1 失败），`result.txt` 得到 `research` 而非 `FINAL ANSWER`，lead 的第二轮请求未带上 worker 结果。已在 HEAD `c66ab618`（把全部未提交改动 stash 后）复现，与本轮改动无关；修复需定位 supervisor 回边节点的上下文/输入注入。
+- [x] **P1-09 CLI supervisor 循环集成测试失败**：已修复。根因是回边绑定按 `doneAt(from, iteration - 1)` 取“上一轮”，只对每轮重跑全部节点的普通 Loop 成立；supervisor 每轮只派发一个 worker，第三次迭代时两个 worker 各自只有 1 个实例，回边被全部过滤，lead 拿不到累积结果。改为绑定每个回边来源的**最新已完成实例**（`latestDone(from)` + 实例序号），普通 Loop 语义不变（最新实例即上一轮），supervisor 累积全部 worker 结果。`pnpm --filter @itookit/cli test` 现 71 通过 / 0 失败；llm-flow 132、llm-session 85、app-shell 154、app-core 8 无回归。
 
 ### P2：保留但后移的扩展与全量设计闭合
 
