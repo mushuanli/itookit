@@ -53,7 +53,8 @@ pnpm --filter @itookit/<pkg> typecheck
 | [CLI HTTP 模式](./doc/http-mode.md) | `-d/--http` 远程模式、`/api/*` 路由 |
 | [RunDefinition](./doc/run-definition.md) | CLI/`.flow` → RunDefinition → DagRunSpec |
 | [MindOS profile](./doc/mindos-profile.md) | `--profile` / 数据根 / Session lease |
-| [最小系统](./doc/minimal-system.md) | 两节点 YAML 与运行说明 |
+| [最小系统](./doc/minimal-system.md) | 两节点 YAML 与运行说明（含桌面操作教程） |
+| [最小系统验收记录](./doc/minimal-system-acceptance.md) | 当前工作树的构建/测试/桌面端到端验收记录 |
 | [TODO 与进度](./doc/todo.md) | 目标、已完成范围与待办（活文档） |
 | [设计文档](./doc/design/) | 当前设计规范（VFS / harness / flow / skill / session 浏览） |
 | [Durable 证据映射](./doc/design/durable-harness-evidence.md) | 五篇 Durable 设计的目标 → 实现 → 持久记录 → 故障证据 |

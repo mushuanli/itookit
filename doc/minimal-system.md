@@ -1,6 +1,61 @@
 # 最小系统运行与验收
 
-本页针对当前代码。已验证 CLI 与原生模块组合链，以及 Xvfb 下的真实 Tauri 窗口渲染、真实 IPC 目录会话 Bash 和真实 IPC 启动两节点 DAG；外层 harness 经真实工具调度发起调用的完整桌面链路仍未验收。总进度见 [todo](todo.md)。不需要 X11 即可执行以下 CLI 命令。
+本页针对当前代码。已验收：CLI 与原生模块组合链；真实 Tauri 窗口（X11）→ 默认 Agent（mock Provider/Connection）→ 外层 harness → Bash tool → 真实 IPC `session_shell_exec` → bwrap → 子 CLI 两节点 DAG → 界面/结果重开（证据见下方「桌面端到端」）。总进度见 [todo](todo.md)。不需要 X11 即可执行以下 CLI 命令。
+
+## 桌面端到端（Tauri）
+
+P0-01 的验收链已在真实应用窗口上跑通，证据：
+
+- 子 Run `20260909145050-deab21b0` / `20260909150550-a0b663ab` `status=succeeded`，两节点 succeeded，`result.txt = child-first-result`；
+- 外层 kernel 的 Bash Effect succeeded → 第二轮模型请求携带工具结果 → 外层 `task.succeeded`；
+- 界面显示 Bash 工具节点、`[exit 0]` 与子 Run 事件；
+- 应用重启后 transcript 仍含 `OUTER-HARNESS-DONE`、`[exit 0]`、`child-first-result`（结果重开通过）。
+
+### 启动与数据根
+
+开发模式与生产模式的差别只有前端资源来源，但**必须二选一**，否则窗口会报 `cannot connect to localhost`：
+
+```bash
+# A. 生产模式：前端已打进二进制（推荐用于验收）
+pnpm --filter tauri-app build                       # 先构建前端 dist/
+cd apps/tauri-app/src-tauri
+cargo build --offline --features tauri/custom-protocol
+./target/debug/tauri-app
+
+# B. 开发模式：需要另开 Vite（tauri.conf.json 的 build.devUrl）
+pnpm --filter tauri-app dev                          # 或 pnpm tauri:dev
+```
+
+数据根由 `mindos.json#rootDir` 决定，默认 `<config>/data`；验收时可用 `MINDOS_ROOT` 指向隔离目录，避免污染真实数据：
+
+```bash
+env -u http_proxy -u https_proxy -u all_proxy -u no_proxy \
+  DISPLAY=:0 MINDOS_ROOT=/tmp/mindos-acceptance/data \
+  apps/tauri-app/src-tauri/target/debug/tauri-app
+```
+
+### 模型与目录授权
+
+1. 设置 → Provider：新增 OpenAI-compatible 地址与 `api_key_env`（配置文件只存变量名，不写凭证正文）；验收可用本地 mock 服务。
+2. 设置 → Connection：把 tier 指向实际模型 ID；Agent 保持默认即可。
+3. 目录授权：只有明确授权（`directory_open`）的目录才进入 Session 命名空间。典型映射是仓库只读 `/app` + 可写工作目录 `/workspace`；未授权目录在 Bash 里不可见。
+4. 发送一条要求“运行子 harness”的消息。Agent 会调用 Bash 工具，命令形如：
+
+```bash
+node /app/apps/cli/dist/cli.js run -f /workspace/workflow.yml --state-dir /workspace/.mindos --headless --json
+```
+
+子 Run 的输出目录是 `/workspace/.mindos/runs/<run-id>/`（`run.json`、`result.txt`）。预期：界面出现 Bash 工具节点与 `[exit N]`，外层 Task succeeded，子 Run 的 `result.txt` 与节点依赖一致。
+
+### 子进程凭证注入
+
+原生 Session Bash **清空继承环境**（只保留 `PATH=/usr/local/bin:/usr/bin:/bin`、`HOME=/tmp`、`LANG=C.UTF-8`），因此终端里 `export MINIMAL_API_KEY=...` 不会进入子 harness。可选做法：
+
+- 在 Bash 命令里显式前缀注入（最简单，但命令会进入持久记录与界面，**不要写真实 key**）：`MINIMAL_API_KEY=<值> node /app/apps/cli/dist/cli.js run ...`；
+- 让子 harness 从工作目录内的受控文件/环境变量名读取（例如把凭证放到 Session 可读但不可写的位置，配置里只写变量名）；
+- 生产部署建议由宿主在启动子进程时注入，而不是让模型拼命令。
+
+当前未提供“桌面端凭证注入”的独立 UI；上面前两种方式属于操作约定，交付时需与用户确认数据落盘范围。
 
 ## 不依赖外部模型的组合验收
 
@@ -70,10 +125,26 @@ Bash 返回 stdout/stderr/退出码，支持超时与取消；原生每个输出
 Web 保留 `createSessionProcesses` 接口，默认不注入本机 shell；不能在浏览器界面执行上述原生命令。无 X11 可编译 Tauri 和执行 CLI，但真实窗口、IPC、授权与错误反馈仍需单独验收。
 
 
-当前环境已确认 Xvfb 可用，并以临时配置启动真实 Tauri 窗口，截图验证侧栏与文件列表渲染；这超出了仅编译验证，但尚未完成聊天、目录授权、真实 IPC Bash 子 harness 交互验收。开发启动需本地 Vite 服务，虚拟显示不能自动证明页面功能正确。
+桌面链路现已贯通到「真实窗口 + 真实 IPC + 外层工具调度」（见上方「桌面端到端」）：不再停留在编译或开发者控制台重复求值。
 
 
-另已在真实 Tauri 开发者控制台验证 directory_open→session_shell_exec→directory_close：临时目录内 Bash 的 stdout、stderr 与退出码 7 完整返回。这是实际 IPC 冒烟验证，尚未覆盖外层 harness 通过工具发起调用的完整桌面流程。
+## 已知问题与测量方法（P0-02）
 
+应用被强杀后重启的前几次发送，从用户消息落盘到 `task.created` 存在 11–25s 的空档。已用无界面探针测量同一份数据根上的共享路径（`packages/app-core` + `llm-session`，LocalFS 进程内后端）：
 
-真实 Tauri IPC 已进一步验证可启动公开两节点 CLI DAG：只读仓库/可写工作目录映射，单个 Run、两次本地模型请求、依赖传值和结果落盘均通过。该测试由一次性模块直接调用 IPC，外层 harness 的真实工具调度入口仍需贯通；不能把开发者控制台重复求值当作单次运行证据。
+```bash
+# 需要一个 OpenAI-compatible mock 服务（默认 127.0.0.1:8399）
+cd apps/cli && npx tsx ../../.tauri-acceptance/measure-ipc.mts <dataRoot> <每次后端调用延迟ms> <发送次数>
+```
+
+结果（同一会话、10 个已提交 Task）：
+
+| 每次后端调用延迟 | 第 1 次发送 → task.created | 后端调用数 | 第 2 次发送 |
+|---|---|---|---|
+| 0ms | 96ms | 643 | 4ms（26 次调用） |
+| 1ms | 411ms | 718 | 14ms |
+| 5ms | 1532ms | 779 | 1339ms |
+
+结论：共享路径本身很快（进程内 96ms/4ms），延迟与**每次 VFS 后端调用的跨进程开销**近似线性；桌面端每次后端调用要走 Tauri IPC（`TauriFsOps` + `TauriSqlSidecarDb`），因此 600–800 次调用被放大到秒级。已确认的下一层问题是「桌面端每次发送为什么仍要数百次调用」（进程内同会话第二次只有 26 次），需要在应用内统计后端调用数（Rust 侧计数或 webview 侧 `ioStats` 落盘）后定位。可接受阈值建议：热路径单次发送 ≤ 2s、`task.created` 前后端调用 ≤ 100 次。
+
+2026-09-10 在真实窗口复现同一现象：发送 06:45:13 → `task.created` 06:45:33.720（20.7s），随后链路正常完成；明细见 [最小系统验收记录](minimal-system-acceptance.md) §4。
