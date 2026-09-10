@@ -1,6 +1,6 @@
 # 最小系统验收记录（2026-09-10）
 
-对应工作树：`d883a497`（`docs(todo): 修正 P1-01 的未完成项引用`）+ 本文档所在提交。
+对应工作树：`d883a497`（`docs(todo): 修正 P1-01 的未完成项引用`）+ 本文档所在提交 + 同日复审补丁（§5）。§1/§2 的数字为**复审后重测**结果。
 环境：Node v26.8.1、pnpm 10.20.0、rustc 1.98.1、Linux + X11 `:11.0`（Enlightenment）。
 本文是 P0-05 的交付物：记录本轮在**当前工作树**上重跑的构建、测试与桌面端到端结果，
 并列出仍未通过或未覆盖的项。阶段性通过不自动等于全部通过；上一轮记录不自动适用于当前版本。
@@ -10,8 +10,8 @@
 | 项 | 命令 | 结果 |
 |---|---|---|
 | 全仓类型检查 | `pnpm typecheck` | 通过（无 `error TS`） |
-| 活文档检查 | `pnpm docs:check` | 通过（68 份活文档，5 条历史表述告警） |
-| 样式一致性 | `pnpm styles:check` | 通过（63 stylesheets / 811 markup / 3766 类） |
+| 活文档检查 | `pnpm docs:check` | 通过（70 份活文档，10 条告警：5 条历史表述 + 5 条 `[missing-doc]`） |
+| 样式一致性 | `pnpm styles:check` | 通过（63 stylesheets / 813 markup / 3768 类） |
 | 包构建 | `pnpm build:libs` | 通过 |
 | CLI 构建 | `pnpm --filter @itookit/cli build` | 通过（`apps/cli/dist/cli.js`） |
 | 前端构建 | `pnpm --filter tauri-app build` | 通过（`apps/tauri-app/dist/`） |
@@ -90,7 +90,21 @@ IPC 队列争用而非算法复杂度。修复方向（按收益排序）：① 
 下一步需定位产生这条 stat 流的具体订阅者（`vfs-trace.log` 已可直接观察）。
 建议阈值：空闲时 VFS 操作 ≤ 5 ops/s；热路径单次发送 ≤ 2s 且 ≤ 100 次调用。
 
-## 5. 仍未通过的验收项
+## 5. 复审补丁（同日第二轮）
+
+随后的代码复审发现并修复了两处本记录覆盖范围内的缺陷，并记录一处未修的行为缺口：
+
+| 问题 | 处理 |
+|---|---|
+| `export` 对崩溃的 Run 导出空节点列表：`exportCommand` 只遍历 `manifest.nodeTaskIds`，而非交互 Run 的 monitor 从不运行，SIGKILL 后该字段为空 | 已修：改为按 Session 的 Task 记录（`labels.flowNodeId`，同节点取最新 `createdAt`）合并 manifest，并在缺 `rootTaskId` 时用 `findFlowRootTask`；`crash-matrix` 首个用例新增断言（崩溃后 `nodeTaskIds == {}` 仍能导出 `finish` 节点与其 transcript） |
+| monitor 每个 tick 两次 `listSessionTasks`（P1-01 引入 `decideBlockedEffects` 后与 `refreshTaskStatuses` 重复） | 已修：每 tick 只列一次，两个消费者共用 |
+| CLI 非交互 Run 没有监控窗口（`submit` 晚解析）→ per-task `timeout`、stall 诊断、SIGINT→cancel、`--follow` 对 fresh run 不生效 | 未修，记为 P1-10；实测 `run.started` 在 +3014ms 打印（1.5s mock 的单节点 run 此时已结束） |
+| `packages/app-core` 无 AGENTS.md，且 `scripts/check-docs.mjs` 只把**已存在**的包 AGENTS.md 纳入检查，缺失不会被发现 | 已补 `packages/app-core/AGENTS.md`；检查脚本新增 `[missing-doc]` 告警（仍缺 5 个包，见 todo P2-06） |
+| app-core 包内边界问题（装配根混策略与 i18n、测试在 app-shell 经 shim 导入、`files/` 归类、`index.ts` 转发外家符号、两套租约、静默失败、`any` 读 VFS 私有字段） | 未修，逐条记为 todo P2-06（含代码位置与证据） |
+
+复审后的测试：`apps/cli` 76 通过（含新增断言）、`llm-flow` 166 通过、`20-kernel-ipc` 28 通过（与协议文档声称一致）、typecheck / docs:check / styles:check 通过。
+
+## 6. 仍未通过的验收项
 
 | 项 | 状态 |
 |---|---|

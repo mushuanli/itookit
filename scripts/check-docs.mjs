@@ -117,6 +117,13 @@ for (const doc of collectDocs()) {
     });
 }
 
+// A package without its own AGENTS.md silently drops out of this check (collectDocs
+// only adds existing files), so surface the gap instead of hiding it.
+for (const pkg of readdirSync(join(ROOT, 'packages'))) {
+    if (!existsSync(join(ROOT, 'packages', pkg, 'package.json'))) continue;
+    if (!existsSync(join(ROOT, 'packages', pkg, 'AGENTS.md'))) warnings.push(`[missing-doc] packages/${pkg}/AGENTS.md`);
+}
+
 for (const warning of warnings) console.warn(`  告警 ${warning}`);
 if (errors.length) {
     console.error(`\n文档同步检查失败：${errors.length} 处问题\n`);

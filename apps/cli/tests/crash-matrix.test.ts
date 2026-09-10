@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { listenForTest } from './listen';
-import { resumeCommand } from '../src/commands';
+import { exportCommand, resumeCommand } from '../src/commands';
 
 // A killed CLI cannot release its Session lease or the Run's scheduler lease; shorten
 // both TTLs so recovery can take over within the test instead of waiting the
@@ -103,6 +103,7 @@ async function latestRun(workspaceDir: string): Promise<string> {
 async function manifest(workspaceDir: string, runId: string): Promise<{
     status: string;
     rootTaskId?: string;
+    nodeTaskIds?: Record<string, string>;
     blockedEffects?: Array<{ taskId: string; effectId: string }>;
 }> {
     return JSON.parse(await readFile(path.join(workspaceDir, '.mindos', 'runs', runId, 'run.json'), 'utf8'));
@@ -135,9 +136,22 @@ it('recovers a run killed while the first Effect is in flight', async () => {
     expect(code).toBeNull();
 
     const runId = await latestRun(root);
-    expect((await manifest(root, runId)).status).not.toBe('succeeded');
+    const killed = await manifest(root, runId);
+    expect(killed.status).not.toBe('succeeded');
+    // A non-interactive Run never reaches the monitor, so the killed manifest has no
+    // nodeTaskIds; `export` must still find the node Tasks through the Session.
+    expect(killed.nodeTaskIds).toEqual({});
 
     await settleLease();
+    // Export holds a Session lease itself, so it also waits for the killed owner.
+    const exportPath = path.join(root, 'crash-export.json');
+    expect(await exportCommand(runId, { stateDir, headless: true, json: true, out: exportPath })).toBe(0);
+    const exported = JSON.parse(await readFile(exportPath, 'utf8')) as {
+        nodes: Array<{ nodeId: string; taskId: string; transcript?: unknown; error?: string }>;
+    };
+    expect(exported.nodes.map(node => node.nodeId)).toEqual(['finish']);
+    expect(exported.nodes[0]?.transcript ?? exported.nodes[0]?.error).toBeTruthy();
+
     // The Run root is persisted before the first node runs, so a crash at any later
     // point stays resumable instead of restarting the graph.
     expect(await resumeCommand(runId, { stateDir, headless: true, json: true })).toBe(3);

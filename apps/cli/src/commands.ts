@@ -313,12 +313,16 @@ export async function exportCommand(runId: string, options: CommandOptions): Pro
     const runtime = await runtimeFor(loaded.workflow, manifest, store, options, 'control');
     try {
         const maxBytes = options.maxBytes ?? 256 * 1024;
+        // A killed Run never reached the monitor, so its manifest can lack nodeTaskIds;
+        // the Session's task records are the authoritative node→Task mapping.
+        const nodeTaskIds = await collectNodeTaskIds(runtime, manifest);
+        const rootTaskId = manifest.rootTaskId ?? await findFlowRootTask(runtime.kernel, manifest.sessionId);
         const nodes: Array<{ nodeId: string; taskId: string; transcript?: unknown; error?: string }> = [];
-        for (const [nodeId, taskId] of Object.entries(manifest.nodeTaskIds ?? {})) {
-            if (!manifest.rootTaskId) { nodes.push({ nodeId, taskId }); continue; }
+        for (const [nodeId, taskId] of nodeTaskIds) {
+            if (!rootTaskId) { nodes.push({ nodeId, taskId }); continue; }
             try {
                 nodes.push({ nodeId, taskId, transcript: await readFlowTaskTranscript(
-                    runtime.kernel, manifest.sessionId, manifest.rootTaskId, taskId, { maxBytes },
+                    runtime.kernel, manifest.sessionId, rootTaskId, taskId, { maxBytes },
                 ) });
             } catch (error) {
                 nodes.push({ nodeId, taskId, error: error instanceof Error ? error.message : String(error) });
@@ -354,6 +358,21 @@ async function findFlowRootTask(kernel: Kernel, sessionId: string): Promise<stri
     // A Session holds one Run per submission; if a legacy Run left several roots,
     // the newest one owns the current scheduler checkpoint.
     return roots[roots.length - 1]?.id;
+}
+
+/** Node → Task mapping for export: manifest entries first, newest Session Task per node wins. */
+async function collectNodeTaskIds(runtime: CliRuntime, manifest: RunManifest): Promise<Map<string, string>> {
+    const mapped = new Map<string, string>(Object.entries(manifest.nodeTaskIds ?? {}));
+    const tasks = await runtime.kernel.listSessionTasks(manifest.sessionId).catch(() => []);
+    const newest = new Map<string, { id: string; createdAt: number }>();
+    for (const task of tasks) {
+        const nodeId = task.labels?.flowNodeId;
+        if (!nodeId) continue;
+        const previous = newest.get(nodeId);
+        if (!previous || task.createdAt >= previous.createdAt) newest.set(nodeId, { id: task.id, createdAt: task.createdAt });
+    }
+    for (const [nodeId, task] of newest) mapped.set(nodeId, task.id);
+    return new Map([...mapped].sort(([a], [b]) => a.localeCompare(b)));
 }
 
 async function resumeLocked(runId: string, options: CommandOptions, store: RunStore): Promise<number> {
@@ -534,8 +553,9 @@ async function decideBlockedEffects(
     store: RunStore,
     runtime: CliRuntime,
     options: CommandOptions,
+    tasks: Awaited<ReturnType<Kernel['listSessionTasks']>>,
 ): Promise<number | undefined> {
-    const blocked = await collectBlockedEffects(runtime, manifest.sessionId);
+    const blocked = collectBlockedEffects(tasks);
     if (!blocked.length) {
         if (manifest.blockedEffects?.length) { manifest.blockedEffects = undefined; await store.save(manifest); }
         return undefined;
@@ -561,8 +581,7 @@ async function decideBlockedEffects(
     return undefined;
 }
 
-async function collectBlockedEffects(runtime: CliRuntime, sessionId: string): Promise<BlockedEffect[]> {
-    const tasks = await runtime.kernel.listSessionTasks(sessionId);
+function collectBlockedEffects(tasks: Awaited<ReturnType<Kernel['listSessionTasks']>>): BlockedEffect[] {
     return tasks.flatMap(task => Object.entries(task.effects ?? {})
         .filter(([, effect]) => effect.status === 'indeterminate')
         .map(([effectId, effect]) => ({
@@ -597,8 +616,11 @@ async function monitorIteration(
 ): Promise<number | undefined> {
     if (interruption.signal) return cancelInterrupted(manifest, store, root, interruption.signal, options);
     await collectEvents(manifest, store, runtime, options);
-    await refreshTaskStatuses(workflow, manifest, runtime);
-    const blocked = await decideBlockedEffects(manifest, store, runtime, options);
+    // One session task listing per tick: the Run can hold hundreds of Tasks and each
+    // listing walks task storage, so status refresh and Effect decisions share it.
+    const tasks = await runtime.kernel.listSessionTasks(manifest.sessionId);
+    await refreshTaskStatuses(workflow, manifest, runtime, tasks);
+    const blocked = await decideBlockedEffects(manifest, store, runtime, options, tasks);
     if (blocked !== undefined) return blocked;
     const interaction = await processInteractions(manifest, store, runtime, options);
     if (interaction !== undefined) return interaction;
@@ -722,8 +744,8 @@ async function refreshTaskStatuses(
     workflow: CompiledWorkflow,
     manifest: RunManifest,
     runtime: CliRuntime,
+    tasks: Awaited<ReturnType<Kernel['listSessionTasks']>>,
 ): Promise<void> {
-    const tasks = await runtime.kernel.listSessionTasks(manifest.sessionId);
     for (const task of tasks) {
         const nodeId = task.labels?.flowNodeId;
         if (!nodeId) continue;

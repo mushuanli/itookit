@@ -72,6 +72,8 @@
 
 - [x] **P1-09 CLI supervisor 循环集成测试失败**：已修复。根因是回边绑定按 `doneAt(from, iteration - 1)` 取“上一轮”，只对每轮重跑全部节点的普通 Loop 成立；supervisor 每轮只派发一个 worker，第三次迭代时两个 worker 各自只有 1 个实例，回边被全部过滤，lead 拿不到累积结果。改为绑定每个回边来源的**最新已完成实例**（`latestDone(from)` + 实例序号），普通 Loop 语义不变（最新实例即上一轮），supervisor 累积全部 worker 结果。`pnpm --filter @itookit/cli test` 现 71 通过 / 0 失败；llm-flow 132、llm-session 85、app-shell 154、app-core 8 无回归。
 
+- [ ] **P1-10 CLI 非交互 run 缺少监控窗口**：`DurableFlowExecutor.submit` 只在 interaction 边界或 `execute` 结束时 `publish`（`packages/llm-flow/src/flow/executor.ts:696,745`），因此新建的非交互 run 的 `submit()` 直到整张图跑完才解析。实测（单节点 + 单次 1.5s mock 响应）：`run.started` 在 **+3014ms** 打印，紧随其后 +3088ms 就是 `run.succeeded`。后果：`monitorIteration` 里的 per-task `timeout`（`enforceTaskTimeout`）、stall 诊断、SIGINT/SIGTERM → `root.cancel`、`--follow` 实时事件对 fresh run 全部不生效；`manifest.rootTaskId`/`nodeTaskIds` 也直到结束才落盘（这正是 P1-01 需要 `findFlowRootTask` 的原因）。修复方向：让 fresh run 也在 early-root 处 `publish`（`submitNode` 已把 handle 写进 `published.nodes`，handle 是 live 的），CLI 不再依赖 `flow.nodes` 快照（`run.started` 用 `spec.nodes.length`，节点映射交给 monitor 的会话读取），并更新约 11 个假定 `submit` 返回完整 handle 的 llm-flow 测试。
+
 ### P2：保留但后移的扩展与全量设计闭合
 
 - [ ] **P2-01 Skill 完整生命周期**：运行中更新、L4 编辑器 open/close 接线、初始化工具激活、严格版本冻结、自动委派与作用域销毁/重建竞态。
@@ -79,6 +81,21 @@
 - [ ] **P2-03 Memory 模型写入与管理**：模型工具、编辑 UI、长期保留/压缩策略；语义/向量检索按有效设计实施，不能用当前词项匹配替代。
 - [ ] **P2-04 VFS/C4 完整验收**：按当前挂载与访问边界设计完成浏览、编辑、工具、附件、撤销和平台故障场景；旧方案已被取代的步骤不重做。
 - [x] **P2-05 文档同步审计（已记录范围）**：前轮已记录全部 13 篇 `doc/design` + 根/包 API 文档 + `AGENTS.md`/README 的核对与修订；已被取代的设计与一次性评审记录移入 `doc/deprecated/` 并加横幅。本轮确认 `scripts/check-docs.mjs` 检查 67 份活文档，通过并有 5 条历史表述告警。脚本只检查预设的已删除符号、可识别的文件路径及相对链接，不校验设计语义、链接锚点或测试覆盖；逐条要求的持久记录/故障证据映射仍见 P1-05，各有效待办与实机验收不因本项勾选而完成。
+
+### P2-06 app-core 包内边界与技术债（2026-09-10 审阅记录）
+
+包定位（平台无关装配层，Web/Tauri/CLI 共用）成立且已验证：`src/` 内无 `node:`/DOM 引用，平台能力经 `ApplicationKernelPlatform` 注入，依赖方向只朝下。以下是**包内组织**层面的记录，代码证据已逐条核对：
+
+- [x] **补 `packages/app-core/AGENTS.md`**：已补（结构、入口、约束、测试现状与技术债指回本条）。同时在 `scripts/check-docs.mjs` 增加 `[missing-doc]` 告警，使「包缺少 AGENTS.md」不再被静默跳过；当前仍缺 5 个包（demo、durable-kernel、kernel-adapters、llm-common、ui-common）。
+- [ ] **把 app-core 的测试搬回 app-core**：app-core 自测仅 3 文件 / 10 用例（2081 行源码）；真正覆盖其模块的 12 个测试文件在 app-shell（`session-files`、`session-browser`、`directory-mounts`、`session-bundle`、`privileged-command-service`、`session-delete-lifecycle` 等），且多数经 11 个 1 行兼容 shim 导入（`packages/app-shell/src/files/*.ts`、`src/core/WorkspaceController.ts`、`src/kernel/privileged-command-service.ts`）。搬完后再给 shim 定下线时间；`doc/feat/harness-session-task-final-design.md:1929` 有「确认无引用后删除 kernel 根兼容 re-export」的先例。
+- [ ] **拆 `createApplicationRuntime`**：`:139-144` 的挂载守卫抛出中文用户文案 `'会话仍有未结束的 Task…'`（平台无关层唯一的 i18n 泄漏）；`:154-162` 会话租约策略（ownerId、10s 心跳、拒租文案、延迟取租告警）、`:190-192` Skill 同步、工具过滤、Flow 播种与约 15 处 `console.log`/`performance.now` 启动埋点都写在同一函数里。建议拆为 `createInfrastructure` / `recoverSessionsWithLeases` / `createConversationSystem` + `BootTracer`，用户文案改为 `FSError('EBUSY', code)` 由宿主本地化。
+- [ ] **去掉 VFS 私有字段访问**：`:73-79` 用 `(vfs as any)._engine?.ioStats` / `resetIOStats()`（全包唯一的 `any`）；2026-09-10 新增的 `apps/tauri-app/src/log/vfs-trace.ts` 也依赖同一私有字段。应在 vfs-core 暴露公开的 IO 统计 API。
+- [ ] **`files/` 重新归类**：目录里同时有 VFS 视图服务、挂载、导航模型（`session-browser.ts` 含 `folder:` URL 方案）、带版本的数据交换格式（`session-bundle.ts`）、生命周期与路由解析；bundle/browser 不是「装配」，建议拆为 `session/` 与 `vfs/`。
+- [ ] **`index.ts` 收口**：`:23` 把 llm-flow 的 `registerDurablePrograms` 改名 `registerKernelPrograms` 再导出，`:49-50` 保留 `createMindOSRuntime`/`MindOSRuntime`/`MindOSKernelPorts` 别名；而 `doc/runtime-architecture.md:14,132` 反而把别名当正式 API 名写进装配流程图。
+- [ ] **静默失败可见化**：`:156-158` 的 `void leaseStore.renew(lease).catch(() => null)` 与 `:190-192` 的 `syncSkillsToKernel(...).catch(() => {})`：租约续期失败与 Skill 同步失败都没有任何可观察信号。
+- [ ] **`SessionLeaseStore.init()` 只做一次**：`:43-48` 在 `inspect/acquire/renew/release` 每次都做 `exists` 检查，是热路径上的额外 VFS 往返（与 P0-02 的 IPC 争用同源）。
+
+已记录但需修正表述的：`doc/design/vfs-c4-review.md:7,238`、`doc/design/vfs-session-browser.md:76`、`packages/app-shell/AGENTS.md:22` 都把兼容 shim 记为事实，但没有下线待办；`doc/design/VFS-design.md:197` 记录「平台 Session 装配测试在 app-shell」，但没有把它当作覆盖问题。
 
 ### 下一步执行顺序与验收产物
 
