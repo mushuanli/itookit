@@ -22,7 +22,7 @@
         "styles:check": "node scripts/check-styles.mjs"
     },
     "keywords": [],
-    "author": "",
+    "author": "lizlok@gmail.com",
     "license": "ISC",
     "packageManager": "pnpm@10.20.0",
     "devDependencies": {
