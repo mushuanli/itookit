@@ -35,7 +35,7 @@ export class SaveManager {
         const savingVersion = this.changeVersion;
         const content = getContent();
         this.lastSaveFailed = false;
-        this.currentSavePromise = (async () => {
+        this.currentSavePromise = Promise.resolve().then(async () => {
             try {
                 await this.onSave!(content);
                 // A change may arrive while onSave is pending. Only mark the
@@ -51,7 +51,7 @@ export class SaveManager {
             } finally {
                 this.currentSavePromise = null;
             }
-        })();
+        });
 
         return this.currentSavePromise;
     }
@@ -64,6 +64,7 @@ export class SaveManager {
         onSuccess: () => void,
         onError: (err: unknown) => void
     ): Promise<void> {
+        if (!this.onSave) return;
         if (this.currentSavePromise) {
             try { await this.currentSavePromise; }
             catch { /* already logged */ }

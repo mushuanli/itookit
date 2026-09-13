@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::os::unix::process::CommandExt;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_fs::FsExt;
+mod atomic_file;
 mod sidecar;
 mod directory_boundary;
 mod scoped_fs;
@@ -205,13 +206,7 @@ fn fs_write_file(path: String, data: Vec<u8>, state: State<AppPaths>) -> Result<
     if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    // Atomic write: write to .tmp then rename (POSIX rename is atomic)
-    let tmp = p.with_extension(format!("tmp.{}", std::process::id()));
-    std::fs::write(&tmp, &data).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &p).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        e.to_string()
-    })
+    atomic_file::write(&p, &data).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -418,7 +413,6 @@ async fn git_command(repository_id: String, args: Vec<String>, timeout_ms: Optio
     directories: State<'_, scoped_fs::DirectoryScopes>) -> Result<(String, String, i32), String> {
     host_git::run_scoped(&repository_id, &args, timeout_ms, &directories, workspace_id.as_deref())
 }
-
 
 /// Execute Bash after validating the host working directory.
 /// This host command alone does not enforce Session mount grants.
