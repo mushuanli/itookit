@@ -716,3 +716,5 @@ Task 消息发送拒绝取消祖先下的新入队请求，原消息身份可重
 **预算结算幂等**：`chargeBudget` 可选 `usageId`——扣费与 `usage/<usageId>` 回执在同一事务写入，同 id 重放返回记录的回执（不再扣费），同 id 不同金额/资源/维度抛冲突；Effect 路径由内核默认按逻辑 Effect 结算（`effect:<taskId>:<effectId>:<handleId>:<dimension>`），未提供 `usageId` 的宿主直调保持每次调用都扣。回归 `packages/durable-kernel/src/kernel.test.ts`。
 
 Session 布局声明：新记录携带 `layout`（布局版本、各记录族 schema 版本、必需能力与迁移状态）。`openSession` 与 `requireSessionTx` 校验这些字段；不支持的版本/记录族、缺失 schema、未知必需能力及未完成或非法迁移均拒绝。仅完全缺少 `layout` 字段的旧记录保留兼容读取。低层存储方法并非全部经该入口；这不构成在线迁移或跨主机 fencing 协议。
+
+Task 历史裁剪：`Kernel.compactTaskHistory(sessionId, taskId, { keepVersions?, beforeVersion? })` 只删除 Task 文件中的旧 `snapshot/<version>`，与 `task.history.compacted` 事件同事务提交。`keepVersions` 默认为 20，须为正安全整数；`beforeVersion` 可选，须为非负安全整数。只裁剪同时早于两个保留边界的版本，版本 0 也参与计数；当前 Task、attempts、Effect/交互及回执保留。返回 `{ removed, keptFrom }`，其中 `keptFrom` 是本次计算的保留边界，不保证更早已裁剪的数据存在。已删除版本的分页读取返回空。此 API 不管理外部读者的历史固定版本租约，也不代替完整 retention/GC 故障验收。

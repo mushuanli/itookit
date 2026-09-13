@@ -738,6 +738,43 @@ export class SeqFileKernelStore {
         return snapshots.sort((a, b) => a.version - b.version);
     }
 
+    /**
+     * Retention/GC for Task version history. Snapshots exist for audit and pinned reads;
+     * the Task's main record is authoritative, so compaction never touches it, its
+     * attempts, effects, interactions or receipts. The newest `keepVersions` snapshots
+     * (and everything at/after `beforeVersion`) stay readable, and a pinned read of a
+     * pruned version returns no items instead of corrupting state — the host owns the
+     * retention window.
+     */
+    async compactTaskHistory(
+        binding: ResolvedStorageBinding,
+        taskId: TaskId,
+        options: { keepVersions?: number; beforeVersion?: number } = {},
+    ): Promise<{ removed: number; keptFrom: number }> {
+        const keepVersions = options.keepVersions ?? 20;
+        const beforeVersion = options.beforeVersion;
+        if (!Number.isSafeInteger(keepVersions) || keepVersions < 1) throw new Error('keepVersions must be a positive safe integer');
+        if (beforeVersion !== undefined && (!Number.isSafeInteger(beforeVersion) || beforeVersion < 0))
+            throw new Error('beforeVersion must be a non-negative safe integer');
+        return transaction(binding.fs, async tx => {
+            const task = await requireTaskTx(tx, binding.rootPath, taskId);
+            const keptFrom = Math.max(0, Math.min(task.version - keepVersions + 1, beforeVersion ?? Infinity));
+            const prefix = taskPath(binding.rootPath, taskId);
+            const keys: string[] = [];
+            await tx.walkEntries(prefix, entry => {
+                if (entry.key.startsWith('snapshot/')
+                    && Number(entry.key.slice('snapshot/'.length)) < keptFrom) keys.push(entry.key);
+                return true;
+            });
+            for (const key of keys) await tx.deleteEntry(prefix, key);
+            if (keys.length > 0) {
+                await appendEventTx(tx, binding.rootPath, task.sessionId, taskId,
+                    'task.history.compacted', { removed: keys.length, keptFrom });
+            }
+            return { removed: keys.length, keptFrom };
+        });
+    }
+
     async taskAttempts(binding: ResolvedStorageBinding, taskId: TaskId): Promise<TaskAttempt[]> {
         const attempts: TaskAttempt[] = [];
         await seq(binding.fs).walkEntries(taskPath(binding.rootPath, taskId), entry => {

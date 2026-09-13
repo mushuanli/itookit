@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend, type IVFSManager, type IFileSystem } from '@itookit/vfs-core';
-import { ensureTree, sessionPath } from './infrastructure/seqfile/seqfile-core';
+import { ensureTree, sessionPath, taskPath } from './infrastructure/seqfile/seqfile-core';
 import { Kernel } from './application/kernel';
 import { SeqFileKernelStore } from './infrastructure/seqfile/store';
 import { addEffect, executeEffectAdapter } from './application/effect-utils';
@@ -28,6 +28,60 @@ describe('durable harness protocols', () => {
             expect(await fs.driver.exists('/existing/deep/root/task/artifacts')).toBe(true);
         } finally { exists.mockRestore(); }
     });
+    it('compacts Task version history without touching the authoritative record or facts', async () => {
+        const task = await store.createTask(binding, 's', spec);
+        // Every versioned write records a snapshot; signals advance the record cheaply.
+        for (let step = 0; step < 4; step++) {
+            await store.signalTask(binding, task.id, { type: 'external', payload: { step } });
+        }
+        const before = await store.readTask(binding, task.id);
+        const versions = (await store.taskHistory(binding, task.id)).map(item => item.version);
+        expect(versions[0]).toBe(0);
+        expect(versions).toHaveLength(before.version + 1);
+
+        // Keep the newest two snapshots; the main record stays authoritative.
+        const oldest = versions[0];
+        const compacted = await store.compactTaskHistory(binding, task.id, { keepVersions: 2 });
+        expect(compacted.keptFrom).toBe(before.version - 1);
+        expect(compacted.removed).toBe(versions.length - 2);
+        expect((await store.taskHistory(binding, task.id)).map(item => item.version))
+            .toEqual([before.version - 1, before.version]);
+        expect(await store.readTask(binding, task.id)).toEqual(before);
+        // A pruned version is simply unavailable; the retained window still reads.
+        expect(await store.taskHistoryPage(binding, task.id, { afterVersion: -1, throughVersion: oldest }))
+            .toMatchObject({ items: [] });
+        expect((await store.taskHistoryPage(binding, task.id, { afterVersion: before.version - 1 })).items)
+            .toHaveLength(1);
+        expect((await store.events(binding)).some(event => event.type === 'task.history.compacted')).toBe(true);
+        // Compacting again is a no-op.
+        expect(await store.compactTaskHistory(binding, task.id, { keepVersions: 2 })).toEqual({ removed: 0, keptFrom: compacted.keptFrom });
+        // The default window keeps everything at this size.
+        expect(await store.compactTaskHistory(binding, task.id)).toEqual({ removed: 0, keptFrom: 0 });
+        expect((await store.taskAttempts(binding, task.id))).toEqual([]);
+    });
+
+    it.each([0, 2, 100])('preserves both retention limits when beforeVersion is %s', async beforeVersion => {
+        const task = await store.createTask(binding, 's', spec);
+        for (let step = 0; step < 4; step++) await store.signalTask(binding, task.id, { type: 'advance' });
+        const result = await store.compactTaskHistory(binding, task.id, { keepVersions: 2, beforeVersion });
+        const retained = (await store.taskHistory(binding, task.id)).map(item => item.version);
+        expect(retained).toEqual(beforeVersion === 0 ? [0, 1, 2, 3, 4] : beforeVersion === 2 ? [2, 3, 4] : [3, 4]);
+        expect(result.removed).toBe(5 - retained.length);
+    });
+
+    it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid history retention count %s without deleting data', async keepVersions => {
+        const task = await store.createTask(binding, 's', spec);
+        const history = await store.taskHistory(binding, task.id);
+        await expect(store.compactTaskHistory(binding, task.id, { keepVersions })).rejects.toThrow('keepVersions');
+        expect(await store.taskHistory(binding, task.id)).toEqual(history);
+    });
+
+    it.each([-1, 1.5, NaN, Infinity])('rejects invalid history version boundary %s', async beforeVersion => {
+        const task = await store.createTask(binding, 's', spec);
+        await expect(store.compactTaskHistory(binding, task.id, { beforeVersion })).rejects.toThrow('beforeVersion');
+        expect((await store.taskHistory(binding, task.id)).map(item => item.version)).toEqual([0]);
+    });
+
     it('declares a layout manifest and refuses Sessions it cannot interpret', async () => {
         const record = await store.sessionRecord(binding);
         expect(record.layout).toMatchObject({ layoutVersion: 1, migration: { status: 'complete', to: 1 } });

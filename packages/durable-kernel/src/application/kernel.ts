@@ -335,6 +335,15 @@ export class Kernel implements KernelRegistration {
         return this.store.readTask(await this.binding(sessionId), taskId);
     }
 
+    /** Retention/GC for Task version history; see `SeqFileKernelStore.compactTaskHistory`. */
+    async compactTaskHistory(
+        sessionId: string,
+        taskId: string,
+        options: { keepVersions?: number; beforeVersion?: number } = {},
+    ): Promise<{ removed: number; keptFrom: number }> {
+        return this.store.compactTaskHistory(await this.binding(sessionId), taskId, options);
+    }
+
     async taskHistory(sessionId: string, taskId: string, afterVersion = -1): Promise<TaskRecord[]> {
         return this.store.taskHistory(await this.binding(sessionId), taskId, afterVersion);
     }
