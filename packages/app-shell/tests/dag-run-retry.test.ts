@@ -128,3 +128,38 @@ it('shows a status persistence error alongside the successful workspace cleanup 
     expect(root.querySelector('script')).toBeNull();
     workbench.destroy();
 });
+
+/** A Run that has not finished can still recompute downstream nodes. */
+function resumableSnapshot() {
+    const task = { id: 'original', sessionId: 'session', status: 'failed', program: { kind: 'llm.agent' },
+        labels: { flowNodeId: 'agent' }, attemptCount: 1, effects: {} };
+    return { root: { task: { id: 'root', sessionId: 'session', status: 'waiting' } },
+        nodes: [{ nodeId: 'agent', snapshot: { task } }], iterations: { agent: 1 },
+        taskTree: [task], detachedNodes: [], usage: { tokens: 1, startedAt: 0, elapsedMs: 1 } };
+}
+
+it('recomputes downstream only while the Run can still be resumed', async () => {
+    const execute = vi.fn(async (name: string) => name === 'dag.run.task.retry'
+        ? { targetTaskId: 'retry' } : resumableSnapshot());
+    const root = document.createElement('div');
+    const workbench = new DagWorkbench(root, { commands: { execute } as never });
+    await workbench.openRun('root', 'session');
+
+    const button = root.querySelector<HTMLButtonElement>('[data-run-retry-downstream="original"]');
+    expect(button).not.toBeNull();
+    button!.click();
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledWith('dag.run.task.retry', expect.objectContaining({
+        sessionId: 'session', taskId: 'root', targetTaskId: 'original', downstream: true,
+    })));
+    workbench.destroy();
+});
+
+it('hides the downstream recompute once the Run is terminal', async () => {
+    const execute = vi.fn(async () => snapshot());
+    const root = document.createElement('div');
+    const workbench = new DagWorkbench(root, { commands: { execute } as never });
+    await workbench.openRun('root', 'session');
+    expect(root.querySelector('[data-run-retry-downstream="original"]')).toBeNull();
+    expect(root.querySelector('[data-run-retry="original"]')).not.toBeNull();
+    workbench.destroy();
+});

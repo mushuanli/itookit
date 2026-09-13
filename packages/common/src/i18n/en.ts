@@ -4,6 +4,9 @@
 import type { LocaleStrings } from './zh-CN';
 
 export const en: LocaleStrings = {
+    'flow.retry.downstreamTitle': 'Retry and recompute downstream',
+    'flow.retry.downstreamHint': 'Recompute this node and its downstream with the new result (delegation groups are re-dispatched).',
+    'flow.transcript.truncated': 'Truncated by byte budget',
     'memory.manage.title': 'Manage memories',
     'memory.manage.agent': 'Agent',
     'memory.manage.scope': 'Scope',

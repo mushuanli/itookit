@@ -540,6 +540,7 @@ export class DagWorkbench {
                     ${waiting ? `<div class="dag-run-wait">${escapeHTML(waiting.prompt)}</div><button data-run-respond="${escapeHTML(task.id)}" data-request-id="${escapeHTML(waiting.id)}">Respond</button>` : ''}
                     ${task.id !== run.id && !isTerminalRun(task.status) ? `<menu><button data-run-signal="${escapeHTML(task.id)}">Inject</button><button data-run-cancel-task="${escapeHTML(task.id)}">Cancel</button></menu>` : ''}
                     ${task.id !== run.id && isTerminalRun(task.status) ? `<button data-run-retry="${escapeHTML(task.id)}" ${this.retryRequests.get(task.id)?.pending ? 'disabled' : ''}>${escapeHTML(t('flow.retry.title'))}</button><small>${escapeHTML(t('flow.retry.hint'))}</small>` : ''}
+                    ${task.id !== run.id && isTerminalRun(task.status) && !isTerminalRun(run.status) ? `<button data-run-retry-downstream="${escapeHTML(task.id)}" ${this.retryRequests.get(retryKey(task.id, true))?.pending ? 'disabled' : ''}>${escapeHTML(t('flow.retry.downstreamTitle'))}</button><small>${escapeHTML(t('flow.retry.downstreamHint'))}</small>` : ''}
                     <button data-run-transcript="${escapeHTML(task.id)}">${escapeHTML(t('flow.transcript.title'))}</button>
                     <details><summary>Runtime details</summary><pre>${escapeHTML(JSON.stringify({ wait: task.wait, output: task.output, effects: Object.keys(task.effects ?? {}) }, null, 2))}</pre></details>
                 </article>`;
@@ -549,6 +550,8 @@ export class DagWorkbench {
         this.root.querySelector('[data-run-action="goal"]')?.addEventListener('click', () => this.openGoalDialog());
         this.root.querySelectorAll<HTMLElement>('[data-run-retry]').forEach(button => button.addEventListener('click', () =>
             void this.retryRunTask(button.dataset.runRetry!)));
+        this.root.querySelectorAll<HTMLElement>('[data-run-retry-downstream]').forEach(button => button.addEventListener('click', () =>
+            void this.retryRunTask(button.dataset.runRetryDownstream!, true)));
         this.root.querySelectorAll<HTMLElement>('[data-run-transcript]').forEach(button => button.addEventListener('click', () =>
             openTaskTranscript(this.options.commands, run.sessionId, run.id, button.dataset.runTranscript!)));
         this.root.querySelectorAll<HTMLElement>('[data-run-signal]').forEach(button => button.addEventListener('click', () => this.openSignalDialog(button.dataset.runSignal!)));
@@ -632,19 +635,21 @@ export class DagWorkbench {
         }, { once: true });
     }
 
-    private async retryRunTask(targetTaskId: string): Promise<void> {
+    private async retryRunTask(targetTaskId: string, downstream = false): Promise<void> {
         const run = this.run?.root.task;
-        if (!run || this.retryRequests.get(targetTaskId)?.pending) return;
-        const request = this.retryRequests.get(targetTaskId) ?? { id: randomUUID(), pending: false };
+        const key = retryKey(targetTaskId, downstream);
+        if (!run || this.retryRequests.get(key)?.pending) return;
+        const request = this.retryRequests.get(key) ?? { id: randomUUID(), pending: false };
         request.pending = true;
-        this.retryRequests.set(targetTaskId, request);
+        this.retryRequests.set(key, request);
         const view = this.viewRequest;
         this.render();
         try {
             await this.options.commands.execute(FlowCommand.RunTaskRetry, {
                 sessionId: run.sessionId, taskId: run.id, targetTaskId, requestId: request.id,
+                ...(downstream ? { downstream: true } : {}),
             });
-            this.retryRequests.delete(targetTaskId);
+            this.retryRequests.delete(key);
             if (view === this.viewRequest) await this.refreshRun(run.id);
         } catch (error) {
             if (view === this.viewRequest) Toast.error(error instanceof Error ? error.message : t('flow.retry.failed'));
@@ -819,6 +824,11 @@ export class DagWorkbench {
 
 function paletteLabel(presentation: DagPluginPresentation): string {
     return presentation.ui?.palette.label ?? presentation.manifest.title;
+}
+
+/** A single-task retry and a downstream recompute of the same node are independent requests. */
+function retryKey(targetTaskId: string, downstream: boolean): string {
+    return downstream ? `downstream:${targetTaskId}` : targetTaskId;
 }
 
 function isTerminalRun(status: TaskStatus): boolean {

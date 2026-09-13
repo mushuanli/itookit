@@ -231,7 +231,7 @@ packages/llm-flow/src/
 
 ## 持久任务 Transcript
 
-`FlowCommand.RunTranscript`（`dag.run.transcript`）接受 `{ sessionId, taskId, targetTaskId }`，taskId 是 Run 根聚合任务 ID。返回 `FlowTaskTranscript`，包含任务 input/output、status/version、完整持久 Effect 交换与 interaction 记录；也可直接调用 `readFlowTaskTranscript(kernel, sessionId, runTaskId, taskId)`。以根任务 input.runTasks 验证归属，无需原 DagCommandService 句柄，拒绝其他 Run 的任务。runTasks 包含全部循环实例、未汇总及 detached 节点。支持可选 `query: { version?, offset?, limit?, maxBytes? }`：默认每页 100 条 Effect、最多 500 条，返回 totalEffects 与可选 nextOffset；`maxBytes`（≥64）限制本页 JSON 编码后的 UTF-8 字节数，超出时按固定顺序裁剪——先丢弃尾部 Effect 并前移 nextOffset，再缩短 input/output 与 Effect 负载，最后只保留首个 Effect 或退化为仅头部——结果带 `bytes` 与 `truncated: true`。后续页携带首屏 version 固定历史快照；未提供 version 的非零 offset 拒绝。这是结构化记录；DagWorkbench 的任务记录对话框按交换分段展示并支持 JSON 和 UTF-8 纯文本文件导出，加载更多会合并同一版本的交换，全部加载完才启用导出。底层仍整任务读取，输入/输出/interaction 不分页，但整页受 `maxBytes` 字节预算约束。CLI 提供 `mindos export <run-id> [--out file.json] [--max-bytes N]`：以 control 模式读取 transcript（默认 256 KiB/节点）并连同 manifest 写入真实文件，已在 LocalFS 上通过集成测试。纯文本导出包含快照身份与 version，以及完整输入、交换、交互和输出。
+`FlowCommand.RunTranscript`（`dag.run.transcript`）接受 `{ sessionId, taskId, targetTaskId }`，taskId 是 Run 根聚合任务 ID。返回 `FlowTaskTranscript`，包含任务 input/output、status/version、完整持久 Effect 交换与 interaction 记录；也可直接调用 `readFlowTaskTranscript(kernel, sessionId, runTaskId, taskId)`。以根任务 input.runTasks 验证归属，无需原 DagCommandService 句柄，拒绝其他 Run 的任务。runTasks 包含全部循环实例、未汇总及 detached 节点。支持可选 `query: { version?, offset?, limit?, maxBytes? }`：默认每页 100 条 Effect、最多 500 条，返回 totalEffects 与可选 nextOffset；`maxBytes`（≥64）限制本页 JSON 编码后的 UTF-8 字节数，超出时按固定顺序裁剪——先丢弃尾部 Effect 并前移 nextOffset，再缩短 input/output 与 Effect 负载，最后只保留首个 Effect 或退化为仅头部——结果带 `bytes` 与 `truncated: true`。后续页携带首屏 version 固定历史快照；未提供 version 的非零 offset 拒绝。这是结构化记录；DagWorkbench 的任务记录对话框按交换分段展示并支持 JSON 和 UTF-8 纯文本文件导出，加载更多会合并同一版本的交换，首屏加载后即可按固定版本独立读取全部分页导出。底层仍整任务读取，输入/输出/interaction 不分页，但整页受 `maxBytes` 字节预算约束。CLI 提供 `mindos export <run-id> [--out file.json] [--max-bytes N]`：以 control 模式读取 transcript（默认 256 KiB/节点）并连同 manifest 写入真实文件，已在 LocalFS 上通过集成测试。纯文本导出包含快照身份与 version，以及完整输入、交换、交互和输出。
 
 `dag.run.get({ taskId, sessionId? })` 支持从保存的 Run 根记录重新连接；没有内存句柄时必须提供 sessionId，返回 `attachedFromStorage: true`。依靠 input.run（v1 目标/用量）与 input.runTasks 恢复任务树、最新节点、实例计数及 detached 标记。目标更新使用 Session shared 状态持久保存，读取优先于初始目标。`DagWorkbench.openRun(taskId, sessionId?)` 可打开这类记录。若需要继续调度，用 `DurableFlowExecutor.resume(sessionId, rootTaskId)` 从 `flow.run.<rootTaskId>.scheduler` 检查点恢复（检查点缺失或版本不支持时抛错；隔离 workspace 的恢复需要租约重建，同样抛错），`waitForCheckpoint(sessionId, rootTaskId, taskIds, timeoutMs?)` 可等待检查点已包含指定任务。旧根记录缺少 v1 元数据时拒绝猜测重建。
 
@@ -246,7 +246,7 @@ packages/llm-flow/src/
 - 下一次调度回合（`resume` 或新宿主）消费意图：把重试 Task 作为该节点的最新实例，丢弃下游各节点已提交实例（取消未终态者）、清 `completed`/`skipped`、把入边重置为 `active`（route 边回到 `pending`），并递增这些节点的提交代数 `nodeGenerations`。代数进入节点 requestId（`flow:<root>:<node>#<iteration>@<generation>`），使重算实例不会命中旧提交的 Kernel 去重，而崩溃恢复的同代重提交仍复用原 Task。
 - 要求 Run 可恢复（非终态且存在调度检查点）；已终态 Run 的根不可改写，因此拒绝。重试源的历史用量保留，已废弃下游和委派子节点从 Run 的 token 统计中扣除；工作区收尾仍由 Run 结束时统一执行。
 
-回归：`packages/llm-flow/__tests__/graph-retry.test.ts`（闭包/回边/未知节点）、`durable-flow-executor.test.ts` 的「recomputes downstream nodes after a graph retry of an upstream node」。委派组重算会清理旧成员/边并递增子节点代数，废弃的已完成下游与委派子节点退还 Run 内的 token 统计；这不撤销供应商实际费用。另有预算退款、委派组重算及隔离工作区恢复复用的回归。UI 的图级 retry 入口与结果收敛提示需另行核对。
+回归：`packages/llm-flow/__tests__/graph-retry.test.ts`（闭包/回边/未知节点）、`durable-flow-executor.test.ts` 的「recomputes downstream nodes after a graph retry of an upstream node」。委派组重算会清理旧成员/边并递增子节点代数，废弃的已完成下游与委派子节点退还 Run 内的 token 统计；这不撤销供应商实际费用。另有预算退款、委派组重算及隔离工作区恢复复用的回归。UI 图级 retry 入口已接线并有 DOM 回归，真实窗口结果收敛提示仍需验收。
 
 并发重试的人工交互按具体 Task 匹配：`dag.run.respond` 接受可选 `targetTaskId`，先刷新持久成员清单并校验目标属于当前 Run；省略目标时，仅在所有成员中恰有一个同名 pending 请求时回应，多于一个则报歧义。Run 面板逐 Task 展示等待请求，回应窗口固定打开时的根 Task 与目标 Task，切换 Run 不改变提交目标。指定 targetTaskId 时支持已 resolved 交互同值重放，终态 Task 也可返回已保存结果；不同值拒绝。省略目标仍只搜索 pending 请求，不猜测已完成回应的目标。
 
@@ -271,3 +271,11 @@ Run 控制会在信号注入和单任务取消前刷新持久成员清单，允�
 `waitForFlowRunTasks(session, rootTaskId)` 重新读取持久成员及重试，追踪后代，等待成员终态和全部已知任务（含根）的 activeOperations 清零；不等待根的逻辑终态，以免与聚合收尾循环依赖。`resolveFlowRunForTask`/`resolveFlowTaskWorkspace` 查询持久 Run 归属及工作区租约。
 
 `markSchedulerRunDeleted(session, rootTaskId, options?)` 与 acquireSchedulerLease 在同一 scheduler-owner 记录 CAS：仍有效的租约（含 skewMs）拒绝删除；无主时写入 deleted:true、expiresAt:0 和递增 epoch。后续接管拒绝删除标记，终态工作区恢复也先取得调度租约。非法记录拒绝，重复标记幂等；CLI 先写标记再删除投影目录，物理删除失败保留标记供重试。此协议不为不识别标记的旧宿主或外部副作用提供强 fencing。
+
+### 工作台重算与完整记录导出
+
+DagWorkbench 在 Run 未终态时为终态成员提供「重试并重算下游」，单任务重试保持独立请求身份；Run 已终态时只提供单任务重试。失败复用同一请求 ID，等待响应期间相应按钮禁用，实际重算仍由持久图级 retry 协议执行。
+
+任务记录首屏及后续交互页使用 256 KiB 字节预算，同一窗口固定首次读取的版本。只看过首屏也可导出 JSON/文本：导出重新读取该版本全部分页，不给导出请求设置裁剪预算；窗口关闭后不继续读取后续页、不下载迟到结果。导出期间禁用翻页和重复导出，任何已显示页被裁剪时保留截断提示。
+
+导出最多 10,000 条 Effect（含末页），越界、非递增/非法游标、空页却有后续游标、任务身份或版本不符、返回截断数据均报错，不下载不完整文件。此限制不是字节上限，单个交换仍可能很大；分页依然从完整 Task 记录读取。真实 Kernel 重开与命令服务回归覆盖 101 个交换的两页导出、固定版本及 300 KB 原始响应，UI 文件通过浏览器下载接口交付；不替代各平台真实文件保存验收。

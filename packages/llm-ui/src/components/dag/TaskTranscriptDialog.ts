@@ -1,6 +1,11 @@
 import { escapeHTML, t, type ICommandBus } from '@itookit/common';
 import { FlowCommand, type FlowTaskTranscript } from '@itookit/llm-session';
 
+/** Interactive pages stay bounded; export re-reads the pinned version on demand. */
+const PAGE_BYTES = 256 * 1024;
+/** Guard against an unbounded export loop on a corrupt `nextOffset` chain. */
+const MAX_EXPORT_EFFECTS = 10_000;
+
 export function openTaskTranscript(commands: ICommandBus, sessionId: string, taskId: string, targetTaskId: string): void {
     const dialog = document.createElement('dialog');
     dialog.className = 'dag-dialog dag-transcript';
@@ -17,30 +22,102 @@ export function openTaskTranscript(commands: ICommandBus, sessionId: string, tas
     void loadTranscript(dialog, commands, { sessionId, taskId, targetTaskId });
 }
 
+interface TranscriptArgs { sessionId: string; taskId: string; targetTaskId: string }
+
 async function loadTranscript(dialog: HTMLDialogElement, commands: ICommandBus,
-    args: { sessionId: string; taskId: string; targetTaskId: string }, previous?: FlowTaskTranscript): Promise<void> {
+    args: TranscriptArgs, previous?: FlowTaskTranscript): Promise<void> {
     const more = dialog.querySelector<HTMLButtonElement>('[data-more]')!;
     more.disabled = true;
+    setExportEnabled(dialog, false);
     try {
-        const page = await commands.execute<FlowTaskTranscript>(FlowCommand.RunTranscript, previous
-            ? { ...args, query: { version: previous.version, offset: previous.nextOffset } } : args);
-        const transcript = previous ? { ...page, effects: [...previous.effects, ...page.effects] } : page;
+        const page = await commands.execute<FlowTaskTranscript>(FlowCommand.RunTranscript, {
+            ...args,
+            query: {
+                ...(previous ? { version: previous.version, offset: previous.nextOffset } : {}),
+                maxBytes: PAGE_BYTES,
+            },
+        });
+        const transcript = previous ? { ...page, effects: [...previous.effects, ...page.effects],
+            truncated: Boolean(previous.truncated || page.truncated), bytes: previous.bytes + page.bytes } : page;
         if (!dialog.isConnected) return;
-        dialog.querySelector('[data-status]')!.textContent = `${transcript.nodeId ?? transcript.taskId} · ${transcript.status} · v${transcript.version}`;
+        dialog.querySelector('[data-status]')!.textContent = statusText(transcript);
         dialog.querySelector('[data-transcript]')!.textContent = transcriptText(transcript);
+        // Export does not require paging through every exchange: it re-reads the complete
+        // version itself, so the visible page stays bounded while the file stays lossless.
         const button = dialog.querySelector<HTMLButtonElement>('[data-export]')!;
-        button.disabled = transcript.nextOffset !== undefined;
-        button.onclick = () => downloadTranscript(transcript, 'json');
+        button.disabled = false;
+        button.onclick = () => void exportTranscript(dialog, commands, args, transcript, 'json');
         const textButton = dialog.querySelector<HTMLButtonElement>('[data-export-text]')!;
-        textButton.disabled = button.disabled;
-        textButton.onclick = () => downloadTranscript(transcript, 'txt');
+        textButton.disabled = false;
+        textButton.onclick = () => void exportTranscript(dialog, commands, args, transcript, 'txt');
         more.hidden = transcript.nextOffset === undefined;
         more.onclick = () => void loadTranscript(dialog, commands, args, transcript);
     } catch (error) {
-        if (dialog.isConnected) dialog.querySelector('[data-status]')!.textContent =
-            error instanceof Error ? error.message : t('flow.transcript.failed');
+        if (dialog.isConnected) dialog.querySelector('[data-status]')!.textContent = errorText(error);
     } finally { more.disabled = false; }
 }
+
+/** Fetch every exchange of the reviewed version, then hand the file to the browser. */
+async function exportTranscript(dialog: HTMLDialogElement, commands: ICommandBus,
+    args: TranscriptArgs, visible: FlowTaskTranscript, format: 'json' | 'txt'): Promise<void> {
+    const status = dialog.querySelector('[data-status]')!;
+    const restore = status.textContent;
+    setExportEnabled(dialog, false);
+    dialog.querySelector<HTMLButtonElement>('[data-more]')!.disabled = true;
+    status.textContent = t('status.loading');
+    try {
+        const complete = await readCompleteTranscript(commands, args, visible.version, () => dialog.isConnected);
+        if (!dialog.isConnected) return;
+        downloadTranscript(complete, format);
+        status.textContent = restore;
+    } catch (error) {
+        if (dialog.isConnected) status.textContent = errorText(error);
+    } finally {
+        if (dialog.isConnected) {
+            setExportEnabled(dialog, true);
+            dialog.querySelector<HTMLButtonElement>('[data-more]')!.disabled = false;
+        }
+    }
+}
+
+function setExportEnabled(dialog: HTMLDialogElement, enabled: boolean): void {
+    for (const button of dialog.querySelectorAll<HTMLButtonElement>('[data-export],[data-export-text]')) {
+        button.disabled = !enabled;
+    }
+}
+
+async function readCompleteTranscript(commands: ICommandBus, args: TranscriptArgs, version: number, isOpen: () => boolean): Promise<FlowTaskTranscript> {
+    let complete: FlowTaskTranscript | undefined;
+    let offset = 0;
+    for (;;) {
+        if (!isOpen()) throw new Error(t('flow.transcript.failed'));
+        const page = await commands.execute<FlowTaskTranscript>(FlowCommand.RunTranscript, { ...args, query: { version, offset } });
+        assertExportPage(page, args, version, offset);
+        complete = complete ? { ...page, effects: [...complete.effects, ...page.effects] } : page;
+        if (complete.effects.length > MAX_EXPORT_EFFECTS) throw new Error(t('flow.transcript.failed'));
+        if (page.nextOffset === undefined) return complete;
+        offset = page.nextOffset;
+    }
+}
+
+/** Never label truncated data or mixed identities/versions as a complete export. */
+function assertExportPage(page: FlowTaskTranscript, args: TranscriptArgs, version: number, offset: number): void {
+    const next = page.nextOffset;
+    if (page.sessionId !== args.sessionId || page.runTaskId !== args.taskId || page.taskId !== args.targetTaskId
+        || page.version !== version || page.truncated
+        || (next !== undefined && (!Number.isSafeInteger(next) || next <= offset || !page.effects.length))) {
+        throw new Error(t('flow.transcript.failed'));
+    }
+}
+
+function statusText(transcript: FlowTaskTranscript): string {
+    const identity = `${transcript.nodeId ?? transcript.taskId} · ${transcript.status} · v${transcript.version}`;
+    return transcript.truncated
+        ? `${identity} · ${t('flow.transcript.truncated')} (${transcript.bytes} B)`
+        : identity;
+}
+
+const errorText = (error: unknown): string => error instanceof Error ? error.message : t('flow.transcript.failed');
 
 /** Show each recorded exchange separately; do not deduplicate away repeated or compacted context. */
 export function transcriptText(transcript: FlowTaskTranscript): string {

@@ -5,6 +5,9 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'flow.retry.downstreamTitle': '重试并重算下游',
+    'flow.retry.downstreamHint': '以新结果重算该节点及其下游（委派组会重新派发）。',
+    'flow.transcript.truncated': '已按字节预算截断',
     'memory.manage.title': '记忆管理',
     'memory.manage.agent': 'Agent',
     'memory.manage.scope': '范围',
