@@ -241,12 +241,12 @@ packages/llm-flow/src/
 
 `requestFlowGraphRetry(session, rootTaskId, sourceTaskId, requestId)` 在单任务 retry 之上登记「重算下游」意图：
 
-- 从持久化的调度检查点计算源节点的下游闭包（`downstreamNodes(source, nodes, edges)`，含回边，因此重试循环节点会重算整个环）；委派子节点与委派父节点被明确拒绝（它们由 group 的预算/等待策略拥有）。
+- 从持久化的调度检查点计算源节点的下游闭包（`downstreamNodes(source, nodes, edges)`，含回边，因此重试循环节点会重算整个环）；合成委派子节点不能直接作为重试源；重试父节点或其上游会丢弃原委派组并生成新一代子 Task。
 - 调用 `retryFlowTask` 启动重试 Task（成员、预算、`retryOfTaskId` 语义与单任务 retry 一致），再以 CAS 追加意图到 Session shared `flow.run.<rootTaskId>.graph-retry`。
 - 下一次调度回合（`resume` 或新宿主）消费意图：把重试 Task 作为该节点的最新实例，丢弃下游各节点已提交实例（取消未终态者）、清 `completed`/`skipped`、把入边重置为 `active`（route 边回到 `pending`），并递增这些节点的提交代数 `nodeGenerations`。代数进入节点 requestId（`flow:<root>:<node>#<iteration>@<generation>`），使重算实例不会命中旧提交的 Kernel 去重，而崩溃恢复的同代重提交仍复用原 Task。
-- 要求 Run 可恢复（非终态且存在调度检查点）；已终态 Run 的根不可改写，因此拒绝。预算按实际执行累计，被丢弃实例已消耗的 token 不退款；工作区收尾仍由 Run 结束时统一执行。
+- 要求 Run 可恢复（非终态且存在调度检查点）；已终态 Run 的根不可改写，因此拒绝。重试源的历史用量保留，已废弃下游和委派子节点从 Run 的 token 统计中扣除；工作区收尾仍由 Run 结束时统一执行。
 
-回归：`packages/llm-flow/__tests__/graph-retry.test.ts`（闭包/回边/未知节点）、`durable-flow-executor.test.ts` 的「recomputes downstream nodes after a graph retry of an upstream node」。仍未完成：UI 的图级 retry 入口与结果收敛提示、委派组的图级重算。
+回归：`packages/llm-flow/__tests__/graph-retry.test.ts`（闭包/回边/未知节点）、`durable-flow-executor.test.ts` 的「recomputes downstream nodes after a graph retry of an upstream node」。委派组重算会清理旧成员/边并递增子节点代数，废弃的已完成下游与委派子节点退还 Run 内的 token 统计；这不撤销供应商实际费用。另有预算退款、委派组重算及隔离工作区恢复复用的回归。UI 的图级 retry 入口与结果收敛提示需另行核对。
 
 并发重试的人工交互按具体 Task 匹配：`dag.run.respond` 接受可选 `targetTaskId`，先刷新持久成员清单并校验目标属于当前 Run；省略目标时，仅在所有成员中恰有一个同名 pending 请求时回应，多于一个则报歧义。Run 面板逐 Task 展示等待请求，回应窗口固定打开时的根 Task 与目标 Task，切换 Run 不改变提交目标。指定 targetTaskId 时支持已 resolved 交互同值重放，终态 Task 也可返回已保存结果；不同值拒绝。省略目标仍只搜索 pending 请求，不猜测已完成回应的目标。
 

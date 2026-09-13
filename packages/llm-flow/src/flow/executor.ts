@@ -540,6 +540,7 @@ export class DurableFlowExecutor {
                 if (!group.detached || !group.deadline || armedTimers.has(groupId)) return;
                 armedTimers.add(groupId);
                 const timer = setTimeout(() => {
+                    if (delegationGroups.get(groupId) !== group) return;
                     void cancelGroup(group, instances, completed, skipped, `Detached delegation timeout: ${groupId}`);
                 }, Math.max(0, group.deadline - Date.now()));
                 (timer as unknown as { unref?: () => void }).unref?.();
@@ -647,9 +648,53 @@ export class DurableFlowExecutor {
                 return applied;
             };
 
+            // Discard a delegation's materialized children so recomputing the parent
+            // re-delegates from scratch instead of reusing stale children and edges.
+            const discardDelegationGroups = async (parentNodeId: string, reason: string): Promise<void> => {
+                for (const [groupId, group] of [...delegationGroups]) {
+                    if (!groupId.startsWith(`${parentNodeId}#`)) continue;
+                    for (const childId of group.children) {
+                        await discardDelegationGroups(childId, reason);
+                        for (const [index, handle] of (instances.get(childId) ?? []).entries()) {
+                            const key = instanceKey(childId, index + 1);
+                            if (completed.has(key)) {
+                                const snapshot = await handle.status().catch(() => undefined);
+                                if (snapshot) consumedTokens = Math.max(0, consumedTokens - outputTokens(snapshot.task.output));
+                            } else {
+                                await handle.cancel(reason).catch(() => undefined);
+                            }
+                            published?.taskIds.delete(handle.id);
+                            completed.delete(key);
+                        }
+                        instances.delete(childId);
+                        published?.nodes.delete(childId);
+                        published?.iterations.delete(childId);
+                        skipped.delete(childId);
+                        detachedNodes.delete(childId);
+                        delegationDepth.delete(childId);
+                        delegationGroupByChild.delete(childId);
+                        // Bump the generation so re-materialized children submit with a fresh
+                        // requestId instead of replaying the discarded Task.
+                        nodeGenerations.set(childId, (nodeGenerations.get(childId) ?? 0) + 1);
+                        nodeDefaults.delete(childId);
+                        nodeConnections.delete(childId);
+                        const childIndex = nodes.findIndex(node => String(node.id) === childId);
+                        if (childIndex >= 0) nodes.splice(childIndex, 1);
+                    }
+                    const removed = edges.filter(edge => group.children.has(String(edge.from)) || group.children.has(String(edge.to)));
+                    for (const edge of removed) edgeState.delete(edge.id);
+                    edges.splice(0, edges.length, ...edges.filter(edge => !removed.includes(edge)));
+                    delegationGroups.delete(groupId);
+                    armedTimers.delete(groupId);
+                }
+            };
+
             const applyGraphRetry = async (intent: FlowGraphRetryIntent): Promise<void> => {
                 if (!published) return;
                 const source = String(intent.sourceNodeId);
+                // Retrying a delegation parent drops its group; its children are gone, so a
+                // synthetic child can only be retried through its parent.
+                await discardDelegationGroups(source, `Graph retry of ${source}`);
                 const handles = instances.get(source) ?? [];
                 if (!handles.some(handle => handle.id === intent.retryTaskId)) {
                     const retry = await session.attachTask(intent.retryTaskId);
@@ -661,11 +706,18 @@ export class DurableFlowExecutor {
                 }
                 for (const nodeId of intent.downstream) {
                     nodeGenerations.set(nodeId, (nodeGenerations.get(nodeId) ?? 0) + 1);
+                    await discardDelegationGroups(nodeId, `Graph retry of ${source}`);
                     for (const [index, handle] of (instances.get(nodeId) ?? []).entries()) {
-                        if (!completed.has(instanceKey(nodeId, index + 1))) {
+                        const key = instanceKey(nodeId, index + 1);
+                        if (completed.has(key)) {
+                            // A committed instance is discarded and will be recomputed: refund its
+                            // measured token cost so the Run budget is not charged twice for it.
+                            const snapshot = await handle.status().catch(() => undefined);
+                            if (snapshot) consumedTokens = Math.max(0, consumedTokens - outputTokens(snapshot.task.output));
+                        } else {
                             await handle.cancel(`Graph retry of ${source}`).catch(() => undefined);
                         }
-                        completed.delete(instanceKey(nodeId, index + 1));
+                        completed.delete(key);
                     }
                     instances.delete(nodeId);
                     published.nodes.delete(nodeId);

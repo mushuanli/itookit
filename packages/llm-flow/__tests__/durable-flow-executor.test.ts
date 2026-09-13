@@ -888,6 +888,209 @@ describe('DurableFlowExecutor', () => {
         expect(resumed.nodes.get('after')!.id).not.toBe(staleAfter);
     });
 
+    it('refunds discarded downstream tokens so a graph retry is not double-charged', async () => {
+        const agentNode = (id: string) => ({ ...agentFlow().nodes[0], id, name: id,
+            config: { ...agentFlow().nodes[0].config, roundId: `round-${id}` } });
+        const flow: DagRunSpec = {
+            nodes: [
+                { ...valueNode('human', null), plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'First' } },
+                agentNode('after'),
+                agentNode('last'),
+                { ...valueNode('human2', null), plugin: 'builtin.human', config: { requestId: 'answer2', prompt: 'Second' } },
+            ],
+            edges: [
+                { id: 'human-after', from: 'human', to: 'after', output: 'response', input: 'input' },
+                { id: 'after-last', from: 'after', to: 'last', output: 'result', input: 'input' },
+                { id: 'last-human2', from: 'last', to: 'human2', output: 'result', input: 'input' },
+            ],
+            // Each agent answer reports 2 tokens: after + last cost 4, and the recomputation
+            // after the retry must cost another 4 without exceeding the budget.
+            maxTokens: 6,
+        };
+        const first = executor(kernel);
+        const submission = first.submit('session-one', flow);
+        let humanTaskId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer?.status === 'pending');
+            expect(task).toBeDefined();
+            humanTaskId = task!.id;
+        });
+        const execution = await submission;
+        const session = await kernel.openSession('session-one');
+        await (await session.attachTask(humanTaskId)).respond({ interactionId: 'answer', value: 'FIRST' });
+
+        // after + last commit (4 tokens) and the Run pauses at the second human node.
+        let staleHuman2 = '';
+        await vi.waitFor(async () => {
+            const tasks = await kernel.listSessionTasks('session-one');
+            expect(tasks.some(task => task.interactions?.answer2?.status === 'pending')).toBe(true);
+            staleHuman2 = tasks.find(task => task.interactions?.answer2?.status === 'pending')!.id;
+        });
+
+        const request = await requestFlowGraphRetry(session, execution.root.id, humanTaskId, 'retry-budget');
+        kernel.dispose();
+        await first.waitIdle();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel);
+        kernel.registerEffect(model);
+        await kernel.initialize();
+
+        const resumed = await executor(kernel).resume('session-one', execution.root.id);
+        await (await kernel.openSession('session-one')).attachTask(request.retryTaskId)
+            .then(task => task.respond({ interactionId: 'answer', value: 'RETRY' }));
+        let secondTaskId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer2?.status === 'pending' && item.id !== staleHuman2);
+            expect(task).toBeDefined();
+            secondTaskId = task!.id;
+        });
+        await (await kernel.openSession('session-one')).attachTask(secondTaskId)
+            .then(task => task.respond({ interactionId: 'answer2', value: 'done' }));
+
+        // Without the refund the recomputation would bill 8/6 and fail the Run.
+        const exit = await resumed.root.wait({ timeoutMs: 5_000 });
+        expect(exit.status).toBe('succeeded');
+        expect(resumed.usage.tokens).toBe(4);
+    });
+
+    it.each([false, true])('recomputes a delegation group after an upstream retry (nested: %s)', async nested => {
+        const flow = delegationFlow();
+        if (nested) {
+            const declaration = (flow.nodes[0].config as any).delegation;
+            const childDeclaration = structuredClone(declaration);
+            childDeclaration.fanout.maxDepth = 2;
+            declaration.resolvedTemplate.config.delegation = childDeclaration;
+            declaration.resolvedTemplate.config.messages = [{ role: 'user', content: 'delegate now' }];
+        }
+        flow.nodes.unshift(valueNode('source', 'delegate now'));
+        flow.edges.push({ id: 'source-parent', from: 'source', to: 'parent', output: 'result', input: 'request', kind: 'data' });
+        flow.nodes.push({ ...valueNode('human', null), plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Done?' } });
+        flow.edges.push({ id: 'parent-human', from: 'parent', to: 'human', output: 'result', input: 'input' });
+
+        const first = executor(kernel);
+        const submission = first.submit('session-one', flow);
+        let humanTaskId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer?.status === 'pending');
+            expect(task).toBeDefined();
+            humanTaskId = task!.id;
+        });
+        const execution = await submission;
+        // The parent's delegation materialized a group whose children are committed.
+        expect(execution.nodes.has('parent:delegate:1:0')).toBe(true);
+        const staleChildId = execution.nodes.get('parent:delegate:1:0')!.id;
+        const nestedNodeId = 'parent:delegate:1:0:delegate:1:0';
+        if (nested) await vi.waitFor(() => expect(execution.nodes.has(nestedNodeId)).toBe(true));
+        const staleNestedId = execution.nodes.get(nestedNodeId)?.id;
+        const session = await kernel.openSession('session-one');
+
+        // A delegated child has no declared node to recompute, so it is still refused.
+        await expect(requestFlowGraphRetry(session, execution.root.id, execution.nodes.get('parent:delegate:1:0')!.id, 'retry-child'))
+            .rejects.toThrow('delegated node');
+
+        // Retrying upstream of the parent recomputes the parent, which drops the old group
+        // and re-delegates rather than leaving stale children behind.
+        const request = await requestFlowGraphRetry(session, execution.root.id, execution.nodes.get('source')!.id, 'retry-source');
+        expect(request.downstream).toContain('parent');
+        expect(request.downstream.some(nodeId => nodeId.includes(':delegate:'))).toBe(false);
+
+        kernel.dispose();
+        await first.waitIdle();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel);
+        kernel.registerEffect(model);
+        await kernel.initialize();
+
+        const resumedExecutor = executor(kernel);
+        const resumed = await resumedExecutor.resume('session-one', execution.root.id);
+        // The discarded children are re-materialized as fresh Tasks, not replayed.
+        await vi.waitFor(() => {
+            const child = resumed.nodes.get('parent:delegate:1:0');
+            expect(child).toBeDefined();
+            expect(child!.id).not.toBe(staleChildId);
+        }, { timeout: 3_000 });
+        expect(resumed.nodes.has('parent:delegate:1:1')).toBe(true);
+        if (nested) await vi.waitFor(() => {
+            expect(resumed.nodes.get(nestedNodeId)).toBeDefined();
+            expect(resumed.nodes.get(nestedNodeId)!.id).not.toBe(staleNestedId);
+        }, { timeout: 3_000 });
+        let secondHumanId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer?.status === 'pending' && item.id !== humanTaskId);
+            expect(task).toBeDefined();
+            secondHumanId = task!.id;
+        });
+        await (await (await kernel.openSession('session-one')).attachTask(secondHumanId)).respond({ interactionId: 'answer', value: 'done' });
+        expect((await resumed.root.wait({ timeoutMs: 5_000 })).status).toBe('succeeded');
+        expect(resumed.nodes.get('parent:delegate:1:0')!.id).not.toBe(staleChildId);
+        await resumedExecutor.waitIdle();
+    });
+
+    it('recomputes a delegation group inside an isolated workspace without re-preparing it', async () => {
+        const manager = {
+            prepare: vi.fn(async () => ({ directory: '/isolated', record: { version: 1, directory: '/isolated' },
+                finish: async () => undefined })),
+            restore: vi.fn(async (_sessionId: string, _policy: unknown, record: unknown) => ({
+                directory: '/isolated', record: record as never, finish: async () => undefined,
+            })),
+        };
+        const flow = delegationFlow();
+        flow.nodes.unshift(valueNode('source', 'delegate now'));
+        flow.edges.push({ id: 'source-parent', from: 'source', to: 'parent', output: 'result', input: 'request', kind: 'data' });
+        flow.nodes.push({ ...valueNode('human', null), plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Done?' } });
+        flow.edges.push({ id: 'parent-human', from: 'parent', to: 'human', output: 'result', input: 'input' });
+        const spec = { ...flow, runPolicy: { workspace: { mode: 'worktree' } } } as DagRunSpec;
+
+        const first = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), workspaceManager: manager });
+        const submission = first.submit('session-one', spec);
+        let humanTaskId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer?.status === 'pending');
+            expect(task).toBeDefined();
+            humanTaskId = task!.id;
+        });
+        const execution = await submission;
+        const staleChildId = execution.nodes.get('parent:delegate:1:0')!.id;
+        const session = await kernel.openSession('session-one');
+
+        await requestFlowGraphRetry(session, execution.root.id, execution.nodes.get('source')!.id, 'retry-isolated');
+        kernel.dispose();
+        await first.waitIdle();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel);
+        kernel.registerEffect(model);
+        await kernel.initialize();
+
+        const resumedExecutor = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), workspaceManager: manager });
+        const resumed = await resumedExecutor.resume('session-one', execution.root.id);
+        await vi.waitFor(() => {
+            const child = resumed.nodes.get('parent:delegate:1:0');
+            expect(child).toBeDefined();
+            expect(child!.id).not.toBe(staleChildId);
+        }, { timeout: 3_000 });
+        let secondHumanId = '';
+        await vi.waitFor(async () => {
+            const task = (await kernel.listSessionTasks('session-one'))
+                .find(item => item.interactions?.answer?.status === 'pending' && item.id !== humanTaskId);
+            expect(task).toBeDefined();
+            secondHumanId = task!.id;
+        });
+        await (await (await kernel.openSession('session-one')).attachTask(secondHumanId)).respond({ interactionId: 'answer', value: 'done' });
+        expect((await resumed.root.wait({ timeoutMs: 5_000 })).status).toBe('succeeded');
+        // The recompute reuses the restored workspace instead of preparing a second one.
+        expect(manager.prepare).toHaveBeenCalledTimes(1);
+        expect(manager.restore).toHaveBeenCalledTimes(1);
+        await resumedExecutor.waitIdle();
+    });
+
     it('refuses a second scheduler while the owner lease is live and fences the old owner', async () => {
         const humanFlow: DagRunSpec = { nodes: [{ ...valueNode('human', null),
             plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Choose' } }], edges: [] };

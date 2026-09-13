@@ -55,8 +55,13 @@ export async function requestFlowGraphRetry(
     }
     const source = (await readFlowRunMembers(session, root)).find(entry => entry.taskId === sourceTaskId);
     if (!source) throw new Error(`Task is outside this run: ${sourceTaskId}`);
-    const downstream = downstreamNodes(source.nodeId, checkpoint.nodes, checkpoint.edges);
-    assertNoDelegation([source.nodeId, ...downstream]);
+    // Delegated children are materialized per parent instance: recomputing a parent drops
+    // its group, so synthetic children are not retried directly, only through their parent.
+    if (source.nodeId.includes(':delegate:')) {
+        throw new Error(`Graph retry is not supported for delegated node: ${source.nodeId}`);
+    }
+    const downstream = downstreamNodes(source.nodeId, checkpoint.nodes, checkpoint.edges)
+        .filter(nodeId => !nodeId.includes(':delegate:'));
     const retry = await retryFlowTask(session, rootId, sourceTaskId, requestId);
     const intent: FlowGraphRetryIntent = {
         version: 1, requestId, sourceTaskId, retryTaskId: retry.id, sourceNodeId: source.nodeId, downstream,
@@ -100,15 +105,6 @@ async function appendIntent(session: SessionHandle, rootId: string, intent: Flow
                 { expectedVersion: saved?.version ?? null });
             return;
         } catch (error) { if (attempt === 4) throw error; }
-    }
-}
-
-/** Delegated children are owned by their group's budget/wait policy, so graph retry refuses them. */
-function assertNoDelegation(nodeIds: string[]): void {
-    for (const nodeId of nodeIds) {
-        if (nodeId.includes(':delegate:')) throw new Error(`Graph retry is not supported for delegated node: ${nodeId}`);
-        const group = nodeIds.find(other => other !== nodeId && other.startsWith(`${nodeId}:delegate:`));
-        if (group) throw new Error(`Graph retry is not supported for a delegation parent: ${nodeId}`);
     }
 }
 
