@@ -125,11 +125,15 @@ export async function ensureTaskLayout(binding: ResolvedStorageBinding, taskId: 
 }
 
 export async function ensureTree(fs: IFileSystem, path: string): Promise<void> {
-    let current = '';
-    for (const part of path.split('/').filter(Boolean)) {
-        const parent = current || null;
-        current = `${current}/${part}`;
-        if (!(await fs.driver.exists(current))) await fs.driver.createDirectory({ name: part, parentPath: parent });
+    const parts = path.split('/').filter(Boolean), missing: string[] = [];
+    while (parts.length) {
+        if (await fs.driver.exists(`/${parts.join('/')}`)) break;
+        missing.push(parts.pop()!);
+    }
+    for (const name of missing.reverse()) {
+        const parentPath = parts.length ? `/${parts.join('/')}` : null;
+        await fs.driver.createDirectory({ name, parentPath });
+        parts.push(name);
     }
 }
 

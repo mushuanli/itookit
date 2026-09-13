@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend, type IVFSManager, type IFileSystem } from '@itookit/vfs-core';
+import { ensureTree } from './infrastructure/seqfile/seqfile-core';
 import { Kernel } from './application/kernel';
 import { SeqFileKernelStore } from './infrastructure/seqfile/store';
 import { addEffect, executeEffectAdapter } from './application/effect-utils';
@@ -12,6 +13,21 @@ describe('durable harness protocols', () => {
     let manager: IVFSManager, fs: IFileSystem, binding: ResolvedStorageBinding;
     let store: SeqFileKernelStore, kernel: Kernel;
     const spec = { program: { kind: 'test', version: '1' }, input: null };
+    it('ensures deep layouts with bounded reads and observes deletion on the next call', async () => {
+        await ensureTree(fs, '/existing/deep/root');
+        const exists = vi.spyOn(fs.driver, 'exists');
+        try {
+            await ensureTree(fs, '/existing/deep/root');
+            expect(exists).toHaveBeenCalledTimes(1);
+            exists.mockClear();
+            await ensureTree(fs, '/existing/deep/root/task/artifacts');
+            expect(exists).toHaveBeenCalledTimes(3);
+            expect(await fs.driver.exists('/existing/deep/root/task/artifacts')).toBe(true);
+            await fs.driver.delete(['/existing/deep/root/task'], { recursive: true });
+            await ensureTree(fs, '/existing/deep/root/task/artifacts');
+            expect(await fs.driver.exists('/existing/deep/root/task/artifacts')).toBe(true);
+        } finally { exists.mockRestore(); }
+    });
     beforeEach(async () => {
         ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
         fs = await manager.openFileSystem('/data/test');
