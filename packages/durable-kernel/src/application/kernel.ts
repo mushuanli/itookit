@@ -9,6 +9,7 @@ import { DefaultTaskHandle } from '../public/task-handle';
 import { resourceApi } from '../public/resources';
 import { closedSessionStat, sessionStat } from '../domain/status';
 import { ManagedResourceStore } from '../infrastructure/seqfile/managed-resources';
+import { catalogPath, resourcesPath } from '../infrastructure/seqfile/seqfile-core';
 import {
     createId,
     SeqFileKernelStore,
@@ -109,6 +110,7 @@ export class Kernel implements KernelRegistration {
     private readonly eventsBus = new EventBus<KernelEvents>();
     private readonly sessions = new Map<SessionId, ResolvedStorageBinding>();
     private readonly catalogFs: IFileSystem;
+    private readonly catalogRoot: string;
     private catalogListener?: () => void;
     private readonly storageListeners = new Map<SessionId, () => void>();
     private readonly requestedDrains = new Set<SessionId>();
@@ -142,6 +144,7 @@ export class Kernel implements KernelRegistration {
         if (!Number.isSafeInteger(pollMs) || pollMs < 0) throw new Error('Kernel pollMs must be a non-negative safe integer');
         const catalog = { fs: options.catalog.fs, rootPath: options.catalog.rootPath ?? '/.config/kernel' };
         this.catalogFs = catalog.fs;
+        this.catalogRoot = catalog.rootPath;
         this.store = new SeqFileKernelStore(catalog, reference => this.resolveStorage(reference));
         this.managedResources = new ManagedResourceStore(catalog, id => this.binding(id),
             async () => (await this.store.listSessions()).map(session => session.id),
@@ -185,8 +188,13 @@ export class Kernel implements KernelRegistration {
         await this.store.initialize(); await this.managedResources.initialize();
         this.initialized = true;
         this.catalogListener?.();
-        this.catalogListener = this.catalogFs.on('seq:committed', () => {
-            this.resourcePoller.start('kernel');
+        this.catalogListener = this.catalogFs.on('seq:committed', event => {
+            const paths = event.payload.paths.map(path => pathUtils.normalize(path));
+            const catalogChanged = paths.includes(pathUtils.normalize(catalogPath(this.catalogRoot)));
+            const resourcesChanged = paths.includes(pathUtils.normalize(resourcesPath(this.catalogRoot)));
+            // Resource-only writes wake cleanup without rescanning every Session.
+            if (catalogChanged || resourcesChanged) this.resourcePoller.start('kernel');
+            if (!catalogChanged) return;
             for (const id of this.sessions.keys()) this.schedulePoll(id);
         });
         this.resourcePoller.start('kernel');
@@ -732,11 +740,15 @@ export class Kernel implements KernelRegistration {
         this.sessions.set(sessionId, binding);
         this.resourcePoller.start(`session:${sessionId}`);
         const root = pathUtils.normalize(binding.rootPath);
+        // Session-scope managed resources live in one seq file. Restarting the resource sweep on
+        // *any* Session commit made every Task/Effect record write re-read that file (and open a
+        // transaction) although nothing about resources had changed.
+        const resources = pathUtils.normalize(resourcesPath(root));
         this.storageListeners.set(sessionId, binding.fs.on('seq:committed', event => {
             if (this.disposed || !event.payload.paths.some(path => pathUtils.isUnder(path, root))) return;
             this.notify(sessionId);
             this.queueDrain(sessionId);
-            this.resourcePoller.start(`session:${sessionId}`);
+            if (event.payload.paths.some(path => pathUtils.normalize(path) === resources)) this.resourcePoller.start(`session:${sessionId}`);
             for (const id of this.sessions.keys()) this.schedulePoll(id);
         }));
     }

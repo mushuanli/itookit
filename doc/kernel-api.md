@@ -722,3 +722,5 @@ Task 历史裁剪：`Kernel.compactTaskHistory(sessionId, taskId, { keepVersions
 Task 事件裁剪：`Kernel.pruneTaskEvents(sessionId, taskId, { keepEvents? })` 默认保留最近 200 条已索引事件；数量须为正安全整数。删除旧事件及 Task 索引、写入保留水位和裁剪审计事件在同一事务内完成。裁剪会校验索引指向的事件属于当前 Session/Task，损坏索引或非法水位均拒绝。审计事件本身也进入索引，因此本次保留窗口之外会新增一条事件；重复裁剪可能移除一条旧事件。Session 级事件、其他 Task、当前 Task 记录和历史快照不受影响。
 
 `taskEventPage` 返回可选 `firstAvailableIndex`；旧游标被推进到保留窗口，固定的 `throughIndex` 早于窗口时返回空页，调用方应据水位重新同步。这一水位仅用于 Task 索引分页，未给通用 Session 事件流增加断档通知，也不实现跨进程订阅者的保留租约。
+
+提交事件触发调度：catalog 文件变化唤醒 Kernel 资源清理和已打开 Session 的轮询；Kernel 的 resources 文件变化仅唤醒资源清理。同一文件系统内其他文件的提交（例如 Session 租约心跳）不通过 catalog 监听器触发扫描。Session 监听器仍处理所属存储根下的提交，但仅 resources 文件变化直接唤醒该 Session 的资源清理。定时截止和正常调度保持原有行为；这项触发范围优化本身不证明桌面发送延迟或 IPC 总量达标。

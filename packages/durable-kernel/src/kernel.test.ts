@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend, type IFileSystem, type IVFSManager } from '@itookit/vfs-core';
 import { Kernel } from './application/kernel';
 import type {
@@ -50,6 +50,68 @@ describe('Kernel durable kernel', () => {
         expect(exit.output).toBe('hello');
         expect((await task.status()).task.status).toBe('succeeded');
         expect(await fs.driver.exists('/sessions/one/.kernel/tasks')).toBe(true);
+    });
+
+    it('reschedules polls only for catalog commits, not for sibling files under the catalog root', async () => {
+        const scheduled: string[] = [];
+        // A host's Session-lease heartbeat writes /<catalogRoot>/session-leases.seq every
+        // few seconds. Reacting to it made every idle Session re-scan all its Tasks.
+        const catalogRoot = '/.config/kernel';
+        vi.spyOn(kernel as unknown as { schedulePoll(id: string): void }, 'schedulePoll')
+            .mockImplementation((id: string) => { scheduled.push(id); });
+        const session = await kernel.createSession({ id: 'session-one', storage: binding });
+        const leasePath = `${catalogRoot}/session-leases.seq`;
+        await fs.driver.createFile({ name: 'session-leases.seq', parentPath: catalogRoot, type: 'seqfile' });
+        // Quiesce the resource poller: a background resources.seq commit under the Session
+        // root would legitimately reschedule a poll and hide the catalog filter.
+        await kernel.waitIdle();
+        const internals = kernel as unknown as {
+            resourcePoller: { stop(key: string): void };
+            stopPoll(sessionId: string): void;
+        };
+        internals.resourcePoller.stop('kernel');
+        internals.resourcePoller.stop(`session:${session.id}`);
+        internals.stopPoll(session.id);
+        await new Promise(resolve => setTimeout(resolve, 30));
+        scheduled.length = 0;
+
+        await fs.meta.seq!.transaction(tx => tx.setEntry(leasePath, 'lease', 'value'));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(scheduled).toEqual([]);
+
+        const resourceStarts: string[] = [];
+        vi.spyOn((kernel as unknown as { resourcePoller: { start(key: string): void } }).resourcePoller, 'start')
+            .mockImplementation(key => { resourceStarts.push(key); });
+        await fs.meta.seq!.transaction(tx => tx.setEntry(`${catalogRoot}/resources.seq`, 'managed/schema', '2'));
+        expect(resourceStarts).toContain('kernel');
+        expect(scheduled).toEqual([]);
+
+        await fs.meta.seq!.transaction(tx => tx.setEntry(`${catalogRoot}/catalog.seq`, 'session/other', 'value'));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(scheduled).toContain(session.id);
+    });
+
+    it('sweeps Session managed resources only for resources.seq commits, not for other Session records', async () => {
+        const starts: string[] = [];
+        const session = await kernel.createSession({ id: 'session-one', storage: binding });
+        await kernel.waitIdle();
+        const internals = kernel as unknown as {
+            resourcePoller: { start(key: string): void; stop(key: string): void };
+        };
+        vi.spyOn(internals.resourcePoller, 'start').mockImplementation((key: string) => { starts.push(key); });
+        internals.resourcePoller.stop(`session:${session.id}`);
+        // Drain the sweep scheduled while the Session was being created.
+        await new Promise(resolve => setTimeout(resolve, 30));
+        starts.length = 0;
+
+        // A Task/Effect record write must not re-read the managed-resource file.
+        await fs.meta.seq!.transaction(tx => tx.setEntry('/sessions/one/.kernel/session.seq', 'record/note', 'value'));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(starts, 'after unrelated commit').toEqual([]);
+
+        await fs.meta.seq!.transaction(tx => tx.setEntry('/sessions/one/.kernel/resources.seq', 'managed/schema', '2'));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(starts).toContain(`session:${session.id}`);
     });
 
     it('supports durable task-board claims and task-tree recovery', async () => {
