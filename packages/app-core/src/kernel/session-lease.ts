@@ -1,4 +1,4 @@
-import type { IFileSystem } from '@itookit/vfs-core';
+import { pathUtils, type IFileSystem } from '@itookit/vfs-core';
 
 export type SessionOwnerKind = 'cli' | 'tauri' | 'web';
 
@@ -33,6 +33,7 @@ export class SessionLeaseStore {
     private readonly path: string;
     private readonly ttlMs: number;
     private readonly now: () => number;
+    private ensured?: Promise<void>;
 
     constructor(private readonly fs: IFileSystem, options: SessionLeaseOptions = {}) {
         this.path = options.path ?? DEFAULT_PATH;
@@ -42,8 +43,19 @@ export class SessionLeaseStore {
 
     async init(): Promise<void> {
         if (!this.fs.meta.seq?.transaction) throw new Error('Session leases require transactional SeqFiles');
+        const ensured = this.ensured ??= this.ensureFile();
+        try {
+            await ensured;
+        } catch (error) {
+            // A failed ensure must be retried by the next caller instead of caching the failure.
+            if (this.ensured === ensured) this.ensured = undefined;
+            throw error;
+        }
+    }
+
+    private async ensureFile(): Promise<void> {
         if (!await this.fs.driver.exists(this.path)) {
-            await this.fs.driver.createFile({ name: 'session-leases.seq', parentPath: '/var/lib/kernel', type: 'seqfile', recursive: true });
+            await this.fs.driver.createFile({ name: pathUtils.basename(this.path), parentPath: pathUtils.dirname(this.path), type: 'seqfile', recursive: true });
         }
     }
 
