@@ -21,6 +21,8 @@ pub fn execute_command(mut command: Command, timeout_ms: u64, cancelled: &Atomic
     signal_group(child.id(), "-KILL");
     let _ = child.kill();
     let _ = child.wait();
+    #[cfg(target_os = "linux")]
+    wait_group_stopped(child.id());
     let output = stdout.join().map_err(|_| "Bash stdout reader failed")??;
     let errors = stderr.join().map_err(|_| "Bash stderr reader failed")??;
     Ok((output, errors, status?.code().unwrap_or(-1)))
@@ -46,6 +48,42 @@ fn signal_group(pid: u32, signal: &str) {
     { let _ = Command::new("kill").args([signal, "--", &format!("-{pid}")]).stdout(Stdio::null()).stderr(Stdio::null()).status(); }
     #[cfg(not(unix))]
     { let _ = (pid, signal); }
+}
+
+#[cfg(target_os = "linux")]
+fn wait_group_stopped(group: u32) {
+    let mut reported = false;
+    loop {
+        signal_group(group, "-KILL");
+        match group_active(group) {
+            Ok(false) => return,
+            Ok(true) => {},
+            Err(error) if !reported => {
+                eprintln!("Process cleanup is awaiting confirmation: {error}");
+                reported = true;
+            },
+            Err(_) => {},
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn group_active(group: u32) -> std::io::Result<bool> {
+    for entry in std::fs::read_dir("/proc")? {
+        let entry = entry?;
+        if entry.file_name().to_string_lossy().parse::<u32>().is_err() { continue; }
+        let stat = match std::fs::read_to_string(entry.path().join("stat")) {
+            Ok(stat) => stat,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let fields: Vec<_> = stat.rsplit_once(')').ok_or_else(|| std::io::Error::new(
+            std::io::ErrorKind::InvalidData, "Invalid process stat"))?.1.split_whitespace().collect();
+        if fields.get(2).and_then(|value| value.parse::<u32>().ok()) == Some(group)
+            && !matches!(fields.first(), Some(&"Z") | Some(&"X")) { return Ok(true); }
+    }
+    Ok(false)
 }
 
 fn read_pipe<T: Read + Send + 'static>(pipe: Option<T>) -> std::thread::JoinHandle<Result<String, String>> {
@@ -93,6 +131,21 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn waits_for_background_members_without_output_pipes() {
+        let root = std::env::temp_dir().join(format!("bash-background-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let script = "bash -c 'trap \"\" TERM; echo $$ > pid; while :; do sleep 1; done' >/dev/null 2>&1 & while [ ! -f pid ]; do sleep 0.01; done";
+        execute(script, root.to_str().unwrap(), 5_000, &AtomicBool::new(false)).unwrap();
+        let pid = std::fs::read_to_string(root.join("pid")).unwrap();
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{}/stat", pid.trim())) {
+            let state = stat.rsplit_once(')').unwrap().1.split_whitespace().next().unwrap();
+            assert!(state == "Z" || state == "X", "background member can still execute: {stat}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn executes_bash_syntax_and_preserves_streams_and_exit_status() {
         let cwd = std::env::temp_dir();
         let result = command("items=(first second); printf '%s' \"${items[1]}\"; printf 'diagnostic' >&2; exit 7", cwd.to_str().unwrap())
@@ -130,6 +183,17 @@ mod tests {
             assert_eq!(output.len(), MAX_CAPTURE_BYTES + TRUNCATED.len());
             assert!(output.ends_with(TRUNCATED));
         }
+    }
+
+    #[test]
+    fn a_missing_isolator_fails_the_command_instead_of_running_unescaped() {
+        // Stands in for a host without bubblewrap (non-Linux or a stripped runtime): the only
+        // program the session shell can spawn is the namespace builder, so the command must
+        // fail closed — never silently run in the host environment.
+        let mut command = Command::new("mindos-missing-isolator");
+        command.arg("--").arg("bash").arg("-c").arg("echo leaked");
+        let error = execute_command(command, 5_000, &AtomicBool::new(false)).unwrap_err();
+        assert!(error.contains("bash exec failed"), "{error}");
     }
 
     #[test]

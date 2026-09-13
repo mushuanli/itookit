@@ -1,11 +1,9 @@
-import { spawn } from 'node:child_process';
+import { runProcess } from './process-run';
 import path from 'node:path';
 import type { ITTYDriver, ITTYSession, ITTYSpawnOptions } from '@itookit/common';
 import { NodeTTYDriver } from '@itookit/device-tty';
 import type { INativeShell, NativeShellResult } from '@itookit/tools';
 import type { CompiledWorkflow, SandboxConfig, WorkspaceGrant } from './types';
-
-const MAX_OUTPUT = 50_000;
 
 export interface SandboxDoctorResult {
     engine?: 'podman' | 'docker';
@@ -193,45 +191,6 @@ function nativeInvocation(command: string, args: string[]): { command: string; a
         return { command: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', args[1] ?? ''] };
     }
     return { command, args };
-}
-
-function runProcess(
-    command: string,
-    args: string[],
-    options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal; env?: NodeJS.ProcessEnv },
-): Promise<NativeShellResult> {
-    return new Promise(resolve => {
-        const child = spawn(command, args, {
-            cwd: options.cwd,
-            env: options.env,
-            shell: false,
-            detached: process.platform !== 'win32',
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
-        let stdout = '';
-        let stderr = '';
-        let settled = false;
-        const append = (current: string, chunk: Buffer) => (current + chunk.toString()).slice(0, MAX_OUTPUT);
-        child.stdout.on('data', chunk => { stdout = append(stdout, chunk); });
-        child.stderr.on('data', chunk => { stderr = append(stderr, chunk); });
-        const finish = (code: number | null) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            options.signal?.removeEventListener('abort', abort);
-            resolve({ stdout, stderr, code });
-        };
-        const abort = () => { terminate(child.pid); finish(null); };
-        const timer = setTimeout(abort, options.timeoutMs ?? 120_000);
-        options.signal?.addEventListener('abort', abort, { once: true });
-        child.on('close', finish);
-        child.on('error', error => { stderr = error.message; finish(null); });
-    });
-}
-
-function terminate(pid: number | undefined): void {
-    if (!pid) return;
-    try { process.kill(process.platform === 'win32' ? pid : -pid, 'SIGTERM'); } catch { /* already exited */ }
 }
 
 function safeEnvironment(): NodeJS.ProcessEnv {
