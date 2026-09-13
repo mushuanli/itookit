@@ -259,3 +259,5 @@ Run 控制会在信号注入和单任务取消前刷新持久成员清单，允�
 工作区收尾：DurableFlowSnapshot.workspaceFinalization 返回 pending/succeeded/failed 与可选 message，来源为执行句柄状态或 Session shared `flow.run.<rootTaskId>.workspace`。执行器在清理前保存 pending，成功/失败后保存结果，workspaceCompletion 继续可等待并在失败时拒绝。Run 面板显示收尾状态，pending 时继续轮询，失败不改写根 Task 的成功结果。DagCommandServiceOptions.workspaceManager 可注入宿主管理器；本机制不负责崩溃后的清理重启。
 
 工作区收尾的 status 表示清理本身的结果，和状态记录保存结果分开。清理成功但最终 shared 写入失败时，活动句柄保留 succeeded 并附加 persistenceError，workspaceCompletion 拒绝；UI 同时显示清理结果和保存错误。清理与保存同时失败以 AggregateError 保留两个原因，不重复调用 workspace.finish。此时重连只能读取最后成功写入的状态（可能仍为 pending），活动句柄的保存错误尚无可靠持久副本。
+
+无人消费的输出契约：节点成功返回后，执行器校验没有 active data edge 消费的输出端口自身声明的 schema。控制边不算数据消费；未知 schema 或非法输出使调度失败，不继续派发依赖节点。当前已提交接口在尚未发布句柄时会拒绝 `submit`；已经发布的运行通过根 Task 记录反映失败。此校验不实现输出 repair/continue 策略，也不把 Agent 的 responseFormat 自动编译成端口契约。

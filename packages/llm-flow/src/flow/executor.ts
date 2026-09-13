@@ -41,7 +41,7 @@ export interface FlowWorkspaceManager {
 /** Session shared key holding the durable workspace lease record of a Run. */
 export const workspaceLeaseKey = (rootTaskId: string): string => `flow.run.${rootTaskId}.workspace-lease`;
 import { findCycles } from './graph';
-import { dataEdgeSchemaIssue, validateDataEdgeValue } from './port-contract';
+import { assertUnconsumedOutputs, dataEdgeSchemaIssue, validateDataEdgeValue } from './port-contract';
 import { patchIdentityConfig } from './patch-identity';
 import { mergeAgentConfig } from './to-dag';
 import { resolveNodeConnection } from './connections';
@@ -800,6 +800,11 @@ export class DurableFlowExecutor {
                 if ('tick' in settled) continue;
                 completed.add(settled.key);
                 completionOrder.push(parseInstanceKey(settled.key).nodeId);
+                if (settled.exit.status === 'succeeded') {
+                    const settledNode = nodes.find(candidate => candidate.id === parseInstanceKey(settled.key).nodeId);
+                    // Validate the producer contract when no active data edge consumes it.
+                    if (settledNode) assertUnconsumedOutputs(settledNode, edges.filter(edge => (edgeState.get(edge.id) ?? 'active') === 'active'), plugins, settled.exit.output);
+                }
                 consumedTokens += outputTokens(settled.exit.output);
                 if (maxTokens && consumedTokens > maxTokens) {
                     await cancelPending(instances, completed, 'Flow token budget exceeded');

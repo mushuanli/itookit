@@ -24,6 +24,28 @@ describe('DurableFlowExecutor', () => {
     let kernel: Kernel;
     let model: ReturnType<typeof llmEffect>;
 
+    it.each([[true, false], [false, false], [true, true], [false, true]])('validates an output without data consumers (valid: %s, control: %s)', async (valid, control) => {
+        const plugins = createBuiltinDagPluginRegistry();
+        const ref = { id: 'report', version: '1' };
+        plugins.registerSchema(ref, { type: 'object', required: ['count'], additionalProperties: false,
+            properties: { count: { type: 'integer' } } });
+        const manifest = plugins.getManifest('builtin.transform', '1.0.0')!;
+        const runtime = await plugins.loadRuntime('builtin.transform', '1.0.0');
+        plugins.register({ manifest: { ...manifest, id: 'typed',
+            outputs: manifest.outputs.map(port => ({ ...port, schema: ref })) }, runtime: async () => runtime });
+        // A terminal node with no outgoing edge: only its own declared port can catch this.
+        const only = { ...valueNode('only', null), plugin: 'typed',
+            config: { outputName: 'result', type: 'json', value: { count: valid ? 2 : 'wrong' } } };
+        const submission = new DurableFlowExecutor({ kernel, plugins }).submit('session-one', { nodes: control ? [only, valueNode('target', null)] : [only],
+            edges: control ? [{ id: 'control', from: 'only', to: 'target', kind: 'control' }] : [] });
+        if (valid) {
+            const run = await submission;
+            expect((await run.root.wait({ timeoutMs: 2_000 })).status).toBe('succeeded');
+        } else {
+            await expect(submission).rejects.toThrow('Invalid output only.result: $.count: expected integer');
+        }
+    });
+
     beforeEach(async () => {
         ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
         fs = await manager.openFileSystem('/data/test');
