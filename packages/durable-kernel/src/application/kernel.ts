@@ -116,6 +116,8 @@ export class Kernel implements KernelRegistration {
     private readonly requestedDrains = new Set<SessionId>();
     private readonly draining = new Set<SessionId>();
     private readonly store: SeqFileKernelStore;
+    /** Task list read during the current poll tick, shared until nextWakeDelay consumes it. */
+    private readonly tickTasks = new Map<SessionId, TaskRecord[]>();
     private readonly workerId: string;
     private readonly maxConcurrent: number;
     private readonly maxConcurrentEffects: number;
@@ -203,6 +205,7 @@ export class Kernel implements KernelRegistration {
 
     dispose(): void {
         this.disposed = true;
+        this.tickTasks.clear();
         this.poller.dispose();
         this.resourcePoller.dispose();
         this.managedResources.dispose();
@@ -626,6 +629,10 @@ export class Kernel implements KernelRegistration {
         return { snapshot: await this.store.saveWorkspaceSnapshot(binding, snapshot), conflicts: result.conflicts ?? [] };
     }
 
+    /**
+     * Retention/GC entry point for settled Session messages. `before` is a wall-clock
+     * watermark owned by the host; it must stay older than the deployment's replay window.
+     */
     async pruneSessionMessages(sessionId: string, before: number, limit?: number): Promise<{ outbox: number; inbox: number }> {
         return this.store.pruneMessages(await this.binding(sessionId), before, limit);
     }
@@ -800,12 +807,16 @@ export class Kernel implements KernelRegistration {
     }
 
     private schedulePoll(sessionId: string): void {
+        this.tickTasks.delete(sessionId);
         this.poller.start(sessionId);
     }
 
-    private stopPoll(sessionId: string): void { this.poller.stop(sessionId); }
+    private stopPoll(sessionId: string): void { this.tickTasks.delete(sessionId); this.poller.stop(sessionId); }
 
     private async poll(sessionId: string): Promise<boolean> {
+        // After recovery, share one task scan with effect dispatch and wake calculation.
+        // Recovery retains its own fresh transactional reads and ownership checks.
+        this.tickTasks.delete(sessionId);
         await this.managedResources.sweep('kernel');
         await this.managedResources.sweep(`session:${sessionId}`);
         const binding = await this.binding(sessionId);
@@ -816,28 +827,50 @@ export class Kernel implements KernelRegistration {
         for (const message of await this.store.pendingOutbox(binding, Date.now())) {
             try { await this.relayMessage(binding, message); } catch { /* Persisted outbox is retried by polling. */ }
         }
-        for (const task of await this.store.listTasks(binding)) {
-            if (task.blockedReason === 'program-unavailable' && this.programs.has(task.program.kind, task.program.version)) await this.store.unblockProgram(binding, task.id);
+        // Install before awaiting: a notification during the scan invalidates this holder.
+        const snapshot: TaskRecord[] = [];
+        this.tickTasks.set(sessionId, snapshot);
+        const tasks = await this.store.listTasks(binding);
+        if (this.tickTasks.get(sessionId) === snapshot) this.tickTasks.set(sessionId, tasks);
+        // Any write below makes the snapshot stale for nextWakeDelay(); the common idle
+        // tick mutates nothing and reuses it, a mutating tick re-reads instead.
+        let mutated = false;
+        for (const task of tasks) {
+            if (task.blockedReason === 'program-unavailable' && this.programs.has(task.program.kind, task.program.version)) {
+                await this.store.unblockProgram(binding, task.id);
+                mutated = true;
+            }
             if (session.status === 'closing' && session.closeMode === 'cancel' && !isTerminalStatus(task.status)) {
                 await this.store.cancelTask(binding, task.id, 'Session closed');
+                mutated = true;
             }
             const pending = new Set(Object.entries(task.effects).filter(([, e]) => e.cleanupPending).map(([id]) => id));
-            if (pending.size) { try { await this.cancelTaskEffects(task, pending); } catch { /* Cleanup intent remains durable. */ } }
+            if (pending.size) {
+                mutated = true;
+                try { await this.cancelTaskEffects(task, pending); } catch { /* Cleanup intent remains durable. */ }
+            }
         }
         if (status === 'open' || (status === 'closing' && session.closeMode === 'drain')) {
             this.queueDrain(sessionId);
-            await this.dispatchPendingEffects(binding);
+            if (await this.dispatchPendingEffects(binding, tasks)) mutated = true;
         }
-        if (status === 'suspending' && !(await this.store.listTasks(binding)).some(task => Object.values(task.effects).some(e => e.status === 'leased' || e.status === 'indeterminate'))) {
+        if (status === 'suspending' && !tasks.some(task => Object.values(task.effects).some(e => e.status === 'leased' || e.status === 'indeterminate'))) {
             await this.store.setSessionStatus(binding, 'suspended'); this.notify(sessionId);
         }
         if (status === 'closing') await this.finishSessionClose(sessionId, binding);
         const latest = (await this.store.sessionRecord(binding)).status;
-        return latest !== 'closed' && latest !== 'archived';
+        const again = latest !== 'closed' && latest !== 'archived';
+        // The poller only asks for a delay while it will keep polling; do not keep a
+        // snapshot alive for a Session that just stopped, and drop a stale one.
+        if (!again || mutated) this.tickTasks.delete(sessionId);
+        return again;
     }
 
     private async nextWakeDelay(sessionId: string): Promise<number | undefined> {
         const binding = await this.binding(sessionId), now = Date.now();
+        // Reuse the list poll() just read for this Session; it is the same tick.
+        const cached = this.tickTasks.get(sessionId);
+        this.tickTasks.delete(sessionId);
         let at = Infinity;
         const future = (value?: number) => { if (value !== undefined && value > now) at = Math.min(at, value); };
         const visit = (wait: import('../domain/types').WaitSpec, task: TaskRecord) => {
@@ -845,7 +878,7 @@ export class Kernel implements KernelRegistration {
                 if (!task.pendingEvents.some(e => e.type === 'timer-fired' && e.id === wait.id)) at = Math.min(at, wait.at);
             } else if ('waits' in wait) for (const child of wait.waits) visit(child, task);
         };
-        for (const task of await this.store.listTasks(binding)) {
+        for (const task of cached ?? await this.store.listTasks(binding)) {
             if (task.status === 'waiting' && task.wait) visit(task.wait, task);
             if (task.status === 'ready') future(task.readyAt);
             if (task.status === 'running' && task.currentAttempt) at = Math.min(at, task.currentAttempt.leaseUntil);
@@ -986,10 +1019,13 @@ export class Kernel implements KernelRegistration {
         return committed;
     }
 
-    private async dispatchPendingEffects(binding: ResolvedStorageBinding): Promise<void> {
-        for (const pending of await this.store.pendingEffects(binding)) {
-            void this.dispatchEffect(binding, pending.task, pending.effectId).catch(error => this.handlePollError(error));
+    /** Candidates may start asynchronously; invalidate the snapshot whenever dispatch is attempted. */
+    private async dispatchPendingEffects(binding: ResolvedStorageBinding, tasks?: TaskRecord[]): Promise<boolean> {
+        const pending = await this.store.pendingEffects(binding, tasks);
+        for (const item of pending) {
+            void this.dispatchEffect(binding, item.task, item.effectId).catch(error => this.handlePollError(error));
         }
+        return pending.length > 0;
     }
 
     private async dispatchEffect(
@@ -1118,6 +1154,7 @@ export class Kernel implements KernelRegistration {
     }
 
     private notify(sessionId: string, taskId?: string, reason: KernelChangeReason = 'structure'): void {
+        this.tickTasks.delete(sessionId);
         this.eventsBus.emit('changed', { sessionId, taskId, reason });
     }
 }

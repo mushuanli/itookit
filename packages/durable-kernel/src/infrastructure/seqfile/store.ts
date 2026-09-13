@@ -1394,9 +1394,10 @@ export class SeqFileKernelStore {
         });
     }
 
-    async pendingEffects(binding: ResolvedStorageBinding): Promise<Array<{ task: TaskRecord; effectId: string }>> {
+    /** `tasks` lets a poll tick reuse the list it already read instead of rescanning storage. */
+    async pendingEffects(binding: ResolvedStorageBinding, tasks?: TaskRecord[]): Promise<Array<{ task: TaskRecord; effectId: string }>> {
         const pending: Array<{ task: TaskRecord; effectId: string }> = [];
-        for (const task of await this.listTasks(binding)) {
+        for (const task of tasks ?? await this.listTasks(binding)) {
             for (const [effectId, effect] of Object.entries(task.effects)) {
                 if (effect.status === 'pending') pending.push({ task, effectId });
             }
