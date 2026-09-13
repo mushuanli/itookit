@@ -1,6 +1,6 @@
 // @file: llm-ui/components/history/NodeRenderer.ts
 
-import { escapeHTML } from '@itookit/common';
+import { escapeHTML, FEEDBACK_ICONS } from '@itookit/common';
 import { ExecutionNode } from '@itookit/llm-session';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { IconResolver } from '../../utils/iconResolver';
@@ -48,8 +48,10 @@ export class NodeRenderer {
             ? node.data.output.substring(0, 50).replace(/\n/g, ' ')
             : '';
 
-        const errorHtml = node.status === 'failed' && node.data.error
-            ? `<div class="llm-ui-node__error-embed">⚠️ ${escapeHTML(node.data.error)}</div>`
+        // A cancelled (projected as `aborted`) node carries the same terminal reason as a
+        // failed one, and dropping it left an unexplained empty bubble after a reload.
+        const errorHtml = (node.status === 'failed' || node.status === 'aborted') && node.data.error
+            ? `<div class="llm-ui-node__error-embed">${FEEDBACK_ICONS.warning} ${escapeHTML(node.data.error)}</div>`
             : '';
 
         // 传入折叠状态

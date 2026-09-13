@@ -48,6 +48,7 @@ import {
     buildExecutorOptions, validateAgentId, buildConnectionOptions,
 } from './AgentProvider';
 import { promptInterruptedRun } from './InterruptedRunPrompt';
+import { restoreWaitingAttachment } from './pending-interaction';
 import { bindSkillRefresh } from './skill-refresh';
 import { buildSlashCallbacks } from './SlashCommandRouter';
 
@@ -136,6 +137,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private fileSearchService!: FileSearchService;
     private ocrService!: OcrService;
     private runAttachment?: RunAttachmentController;
+    private attachmentClosed = false;
 
     // === 事件系统 ===
     private bus!: IEditorEventBus;
@@ -950,11 +952,24 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private async restorePrivilegedTaskAttachment(): Promise<void> {
-        if (!this.runAttachment || !this.options.kernel || !this.currentSessionId) return;
-        const session = await this.options.kernel.openSession(this.currentSessionId);
+        const attachment = this.runAttachment, kernel = this.options.kernel, sessionId = this.currentSessionId;
+        if (!attachment || !kernel || !sessionId || this.attachmentClosed) return;
+        const revision = attachment.revision;
+        const isCurrent = () => !this.attachmentClosed && this.runAttachment === attachment
+            && this.currentSessionId === sessionId && attachment.revision === revision;
+        const session = await kernel.openSession(sessionId);
+        if (!isCurrent()) return;
         const entry = await session.getShared(ACTIVE_PRIVILEGED_TASK_KEY);
+        if (!isCurrent()) return;
         const taskId = sharedTaskId(entry?.value);
-        if (taskId) await this.runAttachment.attach(taskId);
+        if (taskId) {
+            const task = (await (await session.attachTask(taskId)).status()).task;
+            if (!isCurrent()) return;
+            if (!['succeeded', 'failed', 'cancelled'].includes(task.status)) {
+                await attachment.attach(taskId); return;
+            }
+        }
+        await restoreWaitingAttachment(kernel, sessionId, id => attachment.attach(id), isCurrent);
     }
 
     private async cancelAttachedTask(): Promise<void> {
@@ -993,6 +1008,10 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     async destroy(): Promise<void> {
+        this.attachmentClosed = true;
+        const attachment = this.runAttachment;
+        this.runAttachment = undefined;
+        void attachment?.detach();
 
         // 1. 状态持久化（先于组件销毁）
         this.assetManager?.close();
@@ -1016,8 +1035,6 @@ export class LLMWorkspaceEditor implements IEditor {
         this.sessionEventUnsub = null;
         this.globalEventUnsub = null;
         this.agentServiceUnsub = null;
-        await this.runAttachment?.detach();
-        this.runAttachment = undefined;
         if (this.refreshAgentsTimer) {
             clearTimeout(this.refreshAgentsTimer);
             this.refreshAgentsTimer = null;

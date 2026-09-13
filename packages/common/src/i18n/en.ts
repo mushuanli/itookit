@@ -4,6 +4,10 @@
 import type { LocaleStrings } from './zh-CN';
 
 export const en: LocaleStrings = {
+    'tty.exit.unknown': 'Process stopped (exit code unknown)',
+    'tty.exit.known': 'Process exited (code {code})',
+    'tty.status.stopped': 'stopped',
+    'tty.status.exited': 'exited',
     'flow.retry.downstreamTitle': 'Retry and recompute downstream',
     'flow.retry.downstreamHint': 'Recompute this node and its downstream with the new result (delegation groups are re-dispatched).',
     'flow.transcript.truncated': 'Truncated by byte budget',

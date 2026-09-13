@@ -1,7 +1,7 @@
 // @file: llm-ui/commands/SendMessageCommand.ts
 
 
-import { SessionCommand, type SessionGroup, type SessionOrigin, type HistoryPolicy } from '@itookit/llm-session';
+import { SessionCommand, type SessionOrigin, type HistoryPolicy } from '@itookit/llm-session';
 import { Command } from './Command';
 import { Toast } from '@itookit/ui-common';
 import { ErrorHandler } from '../utils/errorHandler';
@@ -27,7 +27,6 @@ export class SendMessageCommand extends Command<SendMessageParams> {
 
         const savedText = text;
         const savedAgentId = agentId;
-        const sessionsBeforeSend = (await this.ctx.commands.execute<SessionGroup[]>(SessionCommand.GetSessions)).map(s => s.id);
 
         this.ctx.chatInput.setLoading(true);
         this.ctx.historyView.scrollToBottom(true);
@@ -78,7 +77,8 @@ export class SendMessageCommand extends Command<SendMessageParams> {
                 },
             });
         } catch (error: any) {
-            await this.rollbackFailedSend(sessionsBeforeSend);
+            // A rejected transport response does not prove the host rejected the send.
+            // Preserve persisted rounds; only the host can reconcile accepted execution.
             this.ctx.chatInput.restoreInput(savedText, savedAgentId);
 
             const classified = ErrorHandler.classifyError(error);
@@ -91,20 +91,4 @@ export class SendMessageCommand extends Command<SendMessageParams> {
         }
     }
 
-    private async rollbackFailedSend(sessionsBeforeSend: string[]): Promise<void> {
-        const sessionsAfterFail = (await this.ctx.commands.execute<SessionGroup[]>(SessionCommand.GetSessions)).map(s => s.id);
-        const ghostIds = sessionsAfterFail.filter(id => !sessionsBeforeSend.includes(id));
-
-        if (ghostIds.length > 0) {
-            this.ctx.historyView.removeMessages(ghostIds, false);
-            for (const id of ghostIds) {
-                try {
-                    this.ctx.commands.execute(SessionCommand.DeleteMessage, {
-                        messageId: id,
-                        options: { deleteAssociatedResponses: true },
-                    });
-                } catch (_) { /* silent */ }
-            }
-        }
-    }
 }

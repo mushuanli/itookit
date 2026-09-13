@@ -39,6 +39,28 @@ describe('RunAttachmentController', () => {
         expect(controller.activeTaskId).toBe('fast');
     });
 
+    it('does not resurrect an attachment detached before openTask starts', async () => {
+        const plane = controlPlane(handle('stale'));
+        const controller = new RunAttachmentController(plane, callbacks());
+        const pending = controller.attach('stale');
+        await controller.detach();
+        await pending;
+        expect(controller.activeTaskId).toBeUndefined();
+        expect(plane.openTask).not.toHaveBeenCalled();
+    });
+
+    it('does not present a historical approval that has already been answered', async () => {
+        const task = handle('task-1', [waitingEvent()]);
+        vi.mocked(task.status).mockResolvedValue({ task: taskRecord({}) });
+        const handlers = callbacks();
+        const controller = new RunAttachmentController(controlPlane(task), handlers);
+        await controller.attach(task.id);
+        await until(() => handlers.onEvent.mock.calls.length === 1);
+        await Promise.resolve();
+        expect(handlers.onWaiting).not.toHaveBeenCalled();
+        await controller.detach();
+    });
+
     it('approves the latest pending approval on the attached task', async () => {
         const task = handle('task-1');
         vi.mocked(task.status).mockResolvedValue({
@@ -90,7 +112,9 @@ function handle(id: string, events: EventEnvelope[] = []): AttachedTask {
     return {
         id,
         events: () => stream(events),
-        signal: vi.fn(), start: vi.fn(), cancel: vi.fn(), status: vi.fn(),
+        signal: vi.fn(), start: vi.fn(), cancel: vi.fn(), status: vi.fn(async () => ({ task: taskRecord({
+            approval: { id: 'approval', kind: 'approval', prompt: 'Approve?', status: 'pending', requestedAt: 1 },
+        }) })),
         respond: vi.fn(), pause: vi.fn(), interrupt: vi.fn(), resume: vi.fn(),
     };
 }

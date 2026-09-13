@@ -32,9 +32,14 @@ export class RunAttachmentController {
 
     get activeTaskId(): string | undefined { return this.handle?.id; }
 
+    /** Changes synchronously whenever an attachment is replaced or detached. */
+    get revision(): number { return this.generation; }
+
     async attach(taskId: string): Promise<void> {
-        await this.detach();
-        const generation = ++this.generation;
+        const detached = this.detach();
+        const generation = this.generation;
+        await detached;
+        if (generation !== this.generation) return;
         const handle = await this.controlPlane.openTask(taskId);
         if (generation !== this.generation) return;
         this.handle = handle;
@@ -111,7 +116,10 @@ export class RunAttachmentController {
             if (result.done || generation !== this.generation) return;
             this.callbacks.onEvent(result.value);
             const request = interactionRequest(result.value);
-            if (request) this.callbacks.onWaiting(request);
+            if (request) {
+                const pending = (await this.handle?.status())?.task.interactions[request.id];
+                if (generation === this.generation && pending?.status === 'pending') this.callbacks.onWaiting(pending);
+            }
         }
     }
 

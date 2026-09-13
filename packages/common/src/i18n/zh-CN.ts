@@ -5,6 +5,10 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'tty.exit.unknown': '进程已停止（退出码未知）',
+    'tty.exit.known': '进程已退出（退出码 {code}）',
+    'tty.status.stopped': '已停止',
+    'tty.status.exited': '已退出',
     'flow.retry.downstreamTitle': '重试并重算下游',
     'flow.retry.downstreamHint': '以新结果重算该节点及其下游（委派组会重新派发）。',
     'flow.transcript.truncated': '已按字节预算截断',

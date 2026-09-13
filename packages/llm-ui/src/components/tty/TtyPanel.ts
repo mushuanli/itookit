@@ -6,7 +6,7 @@
 // Shows real-time stdout/stderr output. Process input must travel through the
 // Kernel control plane instead of bypassing process lifecycle management.
 
-import { escapeHTML } from '@itookit/common';
+import { escapeHTML, t } from '@itookit/common';
 
 const MAX_OUTPUT_CHARS = 100_000; // prevent unbounded DOM growth
 
@@ -49,17 +49,20 @@ export class TtyPanel {
     }
 
     finalize(exitCode: number | null): void {
+        if (this.exited) return;
         this.exited = true;
 
         this.statusEl.className = 'llm-ui-tty-panel__status llm-ui-tty-panel__status--exited';
-        this.statusEl.textContent = 'exited';
+        this.statusEl.textContent = t(exitCode === null ? 'tty.status.stopped' : 'tty.status.exited');
 
         // Append exit info bar
         this.exitInfoEl = document.createElement('div');
         this.exitInfoEl.className = 'llm-ui-tty-panel__exit-info';
-        this.exitInfoEl.textContent = exitCode === 0
-            ? `Process exited (code 0)`
-            : `Process exited (code ${exitCode ?? '?'})`;
+        // `null` means no exit code was observed (the session was killed by a signal, or the
+        // host never saw it exit). Reporting a code — even "?" — would misstate how it ended.
+        this.exitInfoEl.textContent = exitCode === null
+            ? t('tty.exit.unknown')
+            : t('tty.exit.known', { code: exitCode });
         this.el.appendChild(this.exitInfoEl);
     }
 
