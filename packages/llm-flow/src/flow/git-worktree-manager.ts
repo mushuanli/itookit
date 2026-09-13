@@ -1,6 +1,6 @@
 import type { JsonValue } from '@itookit/durable-kernel';
 import type { FlowWorkspacePolicy } from '@itookit/common';
-import type { FlowWorkspaceLease, FlowWorkspaceManager } from './executor';
+import type { FlowWorkspaceLease, FlowWorkspaceManager, FlowWorkspaceRestoreOptions } from './executor';
 
 export interface WorkspaceCommandRunner {
     run(program: string, args: string[], options: { cwd: string }): Promise<{ stdout?: string }>;
@@ -10,6 +10,8 @@ export interface GitWorktreeManagerOptions {
     repository: string;
     directoryFor(sessionId: string): string;
     commands: WorkspaceCommandRunner;
+    /** Persist host recovery intent before Git can create either a branch or a directory. */
+    beforeCreate?(record: JsonValue): Promise<void>;
 }
 
 /** Durable lease record: enough to re-attach the worktree in a new host process. */
@@ -33,11 +35,12 @@ export class GitWorktreeFlowWorkspaceManager implements FlowWorkspaceManager {
         const directory = this.options.directoryFor(sessionId);
         const branch = `flow/${safeName(sessionId)}-${Date.now().toString(36)}`;
         const base = policy.base === 'current' || policy.base === 'head' || policy.base === undefined ? 'HEAD' : policy.base;
+        await this.options.beforeCreate?.({ version: 1, directory, branch });
         await this.git(['worktree', 'add', '-b', branch, directory, base]);
         return this.lease({ version: 1, directory, branch }, policy);
     }
 
-    async restore(sessionId: string, policy: FlowWorkspacePolicy, record: JsonValue): Promise<FlowWorkspaceLease> {
+    async restore(sessionId: string, policy: FlowWorkspacePolicy, record: JsonValue, options?: FlowWorkspaceRestoreOptions): Promise<FlowWorkspaceLease> {
         if (policy.mode !== 'worktree') {
             throw new Error(`Git worktree manager does not implement workspace mode ${policy.mode}`);
         }
@@ -45,46 +48,57 @@ export class GitWorktreeFlowWorkspaceManager implements FlowWorkspaceManager {
         if (saved.directory !== this.options.directoryFor(sessionId)) {
             throw new Error('Worktree lease does not belong to this Session');
         }
-        if (!(await this.listedWorktrees()).includes(`worktree ${saved.directory}`)) {
+        if (!options?.forFinalization && !await this.hasWorktree(saved.directory)) {
             throw new Error(`Worktree is missing: ${saved.directory}`);
         }
         return this.lease(saved, policy);
     }
 
     private lease(saved: WorktreeLeaseRecord, policy: FlowWorkspacePolicy): FlowWorkspaceLease {
-        const { directory, branch } = saved;
         let finished = false;
         return {
-            directory,
-            record: { version: 1, directory, branch },
+            directory: saved.directory,
+            record: { version: 1, directory: saved.directory, branch: saved.branch },
             finish: async status => {
                 if (finished) return;
-                const merge = policy.merge ?? 'manual';
-                if (status === 'succeeded' && merge === 'auto-if-clean') {
-                    const state = await this.options.commands.run('git', ['status', '--porcelain'], { cwd: directory });
-                    if (state.stdout?.trim()) throw new Error('Worktree has uncommitted changes; automatic merge was refused');
-                    if (await this.branchExists(branch)) await this.git(['merge', '--ff-only', branch]);
-                }
-                const cleanup = policy.cleanup ?? 'on-success';
-                if (cleanup === 'keep' || (cleanup === 'on-success' && status !== 'succeeded')) {
-                    finished = true;
-                    return;
-                }
-                // A previous host may have removed the worktree before crashing; removing it
-                // again must not fail the finalization.
-                if ((await this.listedWorktrees()).includes(`worktree ${directory}`)) {
-                    await this.git(['worktree', 'remove', ...(status === 'succeeded' ? [] : ['--force']), directory]);
-                }
-                if ((merge === 'discard' || merge === 'auto-if-clean') && await this.branchExists(branch)) {
-                    await this.git(['branch', '-D', branch]);
-                }
+                await this.finishWorkspace(saved, policy, status);
                 finished = true;
             },
         };
     }
 
+    private async finishWorkspace(saved: WorktreeLeaseRecord, policy: FlowWorkspacePolicy,
+        status: 'succeeded' | 'failed' | 'cancelled'): Promise<void> {
+        const { directory, branch } = saved;
+        const present = await this.hasWorktree(directory);
+        const cleanup = policy.cleanup ?? 'on-success';
+        if (!present && (cleanup === 'keep' || (cleanup === 'on-success' && status !== 'succeeded'))) {
+            throw new Error(`Worktree required by retention policy is missing: ${directory}`);
+        }
+        const merge = policy.merge ?? 'manual';
+        if (status === 'succeeded' && merge === 'auto-if-clean') {
+            if (present) await this.assertClean(directory);
+            if (await this.branchExists(branch)) await this.git(['merge', '--ff-only', branch]);
+        }
+        if (cleanup === 'keep' || (cleanup === 'on-success' && status !== 'succeeded')) return;
+        // Cleanup may have removed the directory before the old host persisted completion.
+        if (present) await this.git(['worktree', 'remove', ...(status === 'succeeded' && merge !== 'discard' ? [] : ['--force']), directory]);
+        if ((merge === 'discard' || merge === 'auto-if-clean') && await this.branchExists(branch)) {
+            await this.git(['branch', '-D', branch]);
+        }
+    }
+
+    private async assertClean(directory: string): Promise<void> {
+        const state = await this.options.commands.run('git', ['status', '--porcelain'], { cwd: directory });
+        if (state.stdout?.trim()) throw new Error('Worktree has uncommitted changes; automatic merge was refused');
+    }
+
     private async listedWorktrees(): Promise<string> {
         return (await this.git(['worktree', 'list', '--porcelain'])).stdout ?? '';
+    }
+
+    private async hasWorktree(directory: string): Promise<boolean> {
+        return (await this.listedWorktrees()).split('\n').includes(`worktree ${directory}`);
     }
 
     private async branchExists(branch: string): Promise<boolean> {

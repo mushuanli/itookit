@@ -1,3 +1,4 @@
+import { taskStat } from '@itookit/durable-kernel';
 import type { SessionHandle, TaskRecord, TaskHandle } from '@itookit/durable-kernel';
 
 export interface FlowRunMember {
@@ -15,6 +16,29 @@ export async function readFlowRunMembers(session: SessionHandle, root: TaskRecor
     const base = members(scheduled?.value ?? (root.input as { runTasks?: unknown } | undefined)?.runTasks);
     const saved = await session.getShared(`flow.run.${root.id}.retries`);
     return [...base, ...members(saved?.value ?? [])];
+}
+
+/** Detached members may outlive the aggregate root. Drain them before closing workspace handles. */
+export async function waitForFlowRunTasks(session: SessionHandle, rootId: string): Promise<void> {
+    const root = (await (await session.attachTask(rootId)).status()).task;
+    const ids = new Set([rootId, ...(await readFlowRunMembers(session, root)).map(member => member.taskId)]);
+    while (true) {
+        for (const member of await readFlowRunMembers(session, root)) ids.add(member.taskId);
+        const tasks = await session.listTasks();
+        let grew = true;
+        while (grew) {
+            grew = false;
+            for (const task of tasks) if (task.parentTaskId && ids.has(task.parentTaskId) && !ids.has(task.id)) {
+                ids.add(task.id); grew = true;
+            }
+        }
+        const pending = tasks.filter(task => task.id !== rootId && ids.has(task.id) && !['succeeded', 'failed', 'cancelled'].includes(task.status));
+        if ([...ids].some(id => !tasks.some(task => task.id === id))) throw new Error('Flow workspace member is unavailable');
+        const active = tasks.some(task => ids.has(task.id) && taskStat(task).activeOperations > 0);
+        if (!pending.length && !active) return;
+        if (pending.length) await Promise.all(pending.map(async task => (await session.attachTask(task.id)).wait()));
+        else await new Promise(resolve => setTimeout(resolve, 25));
+    }
 }
 
 /** Prepare a deferred retry and publish membership before any authorization or execution. */

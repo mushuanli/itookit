@@ -96,7 +96,10 @@ it('waits for commands and closes every grant after cancellation IPC fails', asy
     finish(['', '', 0]); await operation;
     expect((await outcome).errors).toEqual([cancelled, closeFailed]);
     expect(invoke.mock.calls.filter(([command]) => command === 'directory_close').map(([, args]) => args.id)).toEqual(['/one', '/two']);
-    expect(scope.release()).toBe(release);
+    invoke.mockResolvedValue(undefined);
+    await Promise.all([scope.release(), scope.release()]);
+    expect(invoke.mock.calls.filter(([command]) => command === 'directory_close').map(([, args]) => args.id))
+        .toEqual(['/one', '/two', '/one']);
     expect(invoke.mock.calls.filter(([command]) => command === 'shell_cancel')).toHaveLength(1);
 });
 
@@ -115,4 +118,42 @@ it('reports initialization and grant cleanup failures together', async () => {
     expect(outcome.errors[0]).toBe(opening);
     expect(outcome.errors[1].errors).toEqual([closing]);
     expect(invoke).toHaveBeenLastCalledWith('directory_close', { id: 'one' });
+});
+
+it('binds an isolated workspace file view and Tauri Bash to the same copy', async () => {
+    const { createVFS, MemoryBackend } = await import('@itookit/vfs-core');
+    const { SessionFilesService, acquireWorkspaceProcessContext } = await import('@itookit/app-core');
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const root = await manager.openFileSystem('/');
+    await root.driver.createFile({ parentPath: '/base', name: 'file', content: 'base', recursive: true });
+    await root.driver.createFile({ parentPath: '/copy', name: 'file', content: 'copy', recursive: true });
+    const files = new SessionFilesService(root); await files.initialize();
+    files.registerSource('admin-home', await manager.openFileSystem('/base'));
+    await files.configure('s', { mounts: [{ mountId: 'work', sourceId: 'admin-home', at: '/workspace', access: 'rw' }], cwd: '/workspace' }, 0);
+    invoke.mockReset().mockImplementation(async (command, args) => {
+        if (command === 'directory_open') return { id: args.path };
+        if (command === 'session_shell_exec') return ['native-copy-output', '', 0];
+    });
+    let context: Awaited<ReturnType<typeof acquireWorkspaceProcessContext>> | undefined;
+    try {
+        context = await acquireWorkspaceProcessContext(files, 's', {
+            mountId: 'work', fs: await manager.openFileSystem('/copy'), directory: '/native/worktree',
+        }, createTauriSessionProcesses('/mindos'), async () => [
+            { sourceId: 'admin-home', directory: '/home/admin/base', at: '/workspace', access: 'rw' },
+        ]);
+        expect(await context.vfs.readFile('file')).toBe('copy');
+        await context.vfs.writeFile('file', 'isolated edit');
+        expect(await root.driver.readContent('/base/file', { encoding: 'utf-8' })).toBe('base');
+        expect((await context.nativeShell!.exec('bash', ['-c', 'cat file'])).stdout).toBe('native-copy-output');
+        expect(invoke).toHaveBeenCalledWith('directory_open', { path: '/native/worktree' });
+        expect(invoke).toHaveBeenCalledWith('session_shell_exec', expect.objectContaining({
+            cwd: '/workspace', mounts: [['/native/worktree', '/workspace', true]],
+        }));
+        await files.disable('s', 1);
+        const started = invoke.mock.calls.filter(([name]) => name === 'session_shell_exec').length;
+        await expect(context.nativeShell!.exec('bash', ['-c', 'cat file'])).rejects.toMatchObject({ code: 'EACCES' });
+        expect(invoke.mock.calls.filter(([name]) => name === 'session_shell_exec')).toHaveLength(started);
+        await context.release();
+        expect(invoke).toHaveBeenCalledWith('directory_close', { id: '/native/worktree' });
+    } finally { await context?.release(); await files.dispose(); await manager.dispose(); }
 });

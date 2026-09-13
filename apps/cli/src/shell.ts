@@ -122,9 +122,10 @@ export function sandboxBaseArgs(
     const sandbox = workflow.config.sandbox ?? {};
     const image = sandbox.image ?? 'mindos-sandbox:v1';
     const writable = workflow.config.tasks.some(task => task.workspace_access === 'write');
+    const readOnly = workflow.config.runtime?.workspace?.mode === 'read-only';
     const workspaceGrant = grants.find(grant => grant.mountAt === '/workspace');
     const workspaceRoot = workspaceGrant?.path ?? workflow.workspaceRoot;
-    const workspaceWritable = workspaceGrant ? workspaceGrant.access === 'write' : writable;
+    const workspaceWritable = !readOnly && (workspaceGrant ? workspaceGrant.access === 'write' : writable);
     const args = [
         'run', ...(interactive ? ['-i'] : []), '--rm', '--read-only', '--cap-drop=ALL',
         '--security-opt=no-new-privileges',
@@ -146,7 +147,7 @@ export function sandboxBaseArgs(
     for (const grant of grants) {
         if (grant.mountAt === '/workspace') continue;
         const target = grant.mountAt ?? `/mnt/grants/${grant.id}`;
-        args.push('--mount', bindMount(grant.path, target, grant.access === 'write'));
+        args.push('--mount', bindMount(grant.path, target, !readOnly && grant.access === 'write'));
     }
     return { args, image };
 }
@@ -162,10 +163,20 @@ function sandboxArgs(
 }
 
 function containerWorkingDirectory(root: string, grants: WorkspaceGrant[], cwd?: string): string {
-    if (!cwd || inside(root, cwd)) return containerPath('/workspace', cwd ? path.relative(root, cwd) : '');
-    const grant = grants.find(item => inside(item.path, cwd));
-    if (!grant) return '/workspace';
-    return containerPath(`/mnt/grants/${grant.id}`, path.relative(grant.path, cwd));
+    if (!cwd) return '/workspace';
+    const mounts = [
+        { source: root, target: '/workspace' },
+        ...grants.filter(grant => grant.mountAt !== '/workspace').map(grant => ({
+            source: grant.path, target: grant.mountAt ?? `/mnt/grants/${grant.id}`,
+        })),
+    ];
+    // Prefer the most specific host mount when grants contain nested directories.
+    const native = mounts.filter(mount => inside(mount.source, cwd))
+        .sort((a, b) => b.source.length - a.source.length)[0];
+    if (native) return containerPath(native.target, path.relative(native.source, cwd));
+    const virtual = path.posix.normalize(cwd);
+    if (mounts.some(mount => virtual === mount.target || virtual.startsWith(`${mount.target}/`))) return virtual;
+    throw new Error(`OCI working directory is outside mounted directories: ${cwd}`);
 }
 
 function containerPath(root: string, relative: string): string {

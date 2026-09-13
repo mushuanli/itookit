@@ -1,4 +1,5 @@
 import { leaseSkewConfig } from './lease-config';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { DagRunSpec, LLMConnection, LLMProvider, ToolDefinition } from '@itookit/common';
 import { parse } from 'yaml';
@@ -14,6 +15,9 @@ import {
 import {
     compileWorkflow,
     DurableFlowExecutor,
+    GitWorktreeFlowWorkspaceManager,
+    type FlowWorkspaceManager,
+    type WorkspaceCommandRunner,
     type WorkflowTaskSpec,
 } from '@itookit/llm-flow';
 import {
@@ -24,15 +28,16 @@ import {
     SessionFilesService,
     SessionLeaseStore,
     syncSkillsToKernel,
+    withWorkspaceScopeCleanup,
     type HeadlessKernelRuntime,
 } from '@itookit/app-core';
 import { SessionRepository } from '@itookit/llm-session';
-import { createVFS, MemoryBackend, type IFileSystem } from '@itookit/vfs-core';
-import { createBashTool } from '@itookit/tools';
+import { createVFS, MemoryBackend, type IFileSystem, type VFSFactoryOptions } from '@itookit/vfs-core';
+import { createBashTool, type INativeShell } from '@itookit/tools';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { taskOutputReference } from './config';
 import { CliDirectorySourceProvider } from './directories';
-import { createShell, OciTtyDriver } from './shell';
+import { createShell, OciTtyDriver, NodeNativeShell } from './shell';
 import type { AgentConfig, CompiledWorkflow, RunManifest, TaskConfig, WorkspaceGrant } from './types';
 import { createWorkspaceAccessTool, WorkspaceGrantRegistry } from './workspace';
 import { NodeSqliteSidecarDb } from './sqlite-sidecar';
@@ -53,11 +58,13 @@ export interface CliRuntime {
     kernel: Kernel;
     executor: DurableFlowExecutor;
     grants: WorkspaceGrantRegistry;
+    /** Session workspace the file tools and shell see (the isolated copy in worktree mode). */
+    workspaceRoot: string;
     waitForCheckpoint(taskIds: string[]): Promise<void>;
     dispose(): Promise<void>;
 }
 
-class CliStorageResolver implements SessionStorageResolver {
+export class CliStorageResolver implements SessionStorageResolver {
     readonly kind = STORAGE_KIND;
     constructor(private readonly fs: IFileSystem) {}
     async resolve(reference: StorageBindingRef): Promise<ResolvedStorageBinding> {
@@ -82,6 +89,28 @@ export interface CliRuntimeOptions {
     useProfileConfig?: boolean;
 }
 
+type AdditionalMounts = NonNullable<VFSFactoryOptions['additionalMounts']>;
+
+/** Mount the CLI VFS at a data root. Shared by the host runtime and read-only state inspection. */
+async function openCliVfs(rootDir: string, sidecarDir: string, additionalMounts: AdditionalMounts = []) {
+    const backend = await openLocalFSBackend({
+        rootDir,
+        sidecarDir,
+        createDb: NodeSqliteSidecarDb.open,
+    });
+    // Extra mounts first, then `/run`, matching the order the host runtime has always used.
+    return createVFS({ rootBackend: backend, additionalMounts: [...additionalMounts, { path: '/run', backend: new MemoryBackend() }] });
+}
+
+/**
+ * Open the CLI data root for read-only inspection (no Session, kernel or LLM wiring).
+ * Used by guards that must read persisted Session state without taking a Session lease.
+ */
+export async function openProfileInspectionFs(vfsRoot: string): Promise<{ fs: IFileSystem; dispose: () => Promise<void> }> {
+    const { manager } = await openCliVfs(vfsRoot, path.join(vfsRoot, '_meta'));
+    return { fs: await manager.openFileSystem('/'), dispose: () => manager.dispose() };
+}
+
 export async function createCliRuntime(
     workflow: CompiledWorkflow,
     manifest: RunManifest,
@@ -91,16 +120,13 @@ export async function createCliRuntime(
     hostOptions: CliRuntimeOptions = {},
 ): Promise<CliRuntime> {
     const skew = leaseSkewConfig(process.env);
+    const readOnly = workflow.config.runtime?.workspace?.mode === 'read-only';
+    if (readOnly && hostOptions.setHome) throw new Error('read-only workspace cannot be combined with --set-home');
+    if (readOnly && (workflow.config.sandbox?.mode ?? 'oci') !== 'oci') throw new Error('read-only workspace requires OCI isolation');
     const root = vfsRoot ?? path.join(workflow.stateDir, 'runtime', 'vfs');
     const sidecarDir = vfsRoot ? path.join(vfsRoot, '_meta') : path.join(workflow.stateDir, 'runtime', 'meta');
-    const backend = await openLocalFSBackend({
-        rootDir: root,
-        sidecarDir,
-        createDb: NodeSqliteSidecarDb.open,
-    });
-    const additionalMounts = [{ path: '/run', backend: new MemoryBackend() }];
-    if (!hostOptions.useProfileConfig) additionalMounts.unshift({ path: '/etc', backend: new MemoryBackend() });
-    const { manager: vfs } = await createVFS({ rootBackend: backend, additionalMounts });
+    const additionalMounts = hostOptions.useProfileConfig ? [] : [{ path: '/etc', backend: new MemoryBackend() }];
+    const { manager: vfs } = await openCliVfs(root, sidecarDir, additionalMounts);
     const llmDriver = new LLMDeviceDriver(vfs);
     await initializeLlmQuietly(llmDriver);
     if (!hostOptions.useProfileConfig) await configureLlm(llmDriver, workflow);
@@ -109,7 +135,9 @@ export async function createCliRuntime(
     // Test/tuning knob: a crashed CLI keeps its Session lease until the TTL expires,
     // so crash-recovery tests shorten it instead of waiting the full minute.
     const leaseTtlMs = Number(process.env.MINDOS_SESSION_LEASE_TTL_MS) || undefined;
-    const leases = new SessionLeaseStore(systemFS, { ttlMs: leaseTtlMs, skewMs: skew.sessionSkewMs });
+    // The skew budget is the explicit cross-host clock-error constraint for shared roots.
+    const leases = new SessionLeaseStore(systemFS, { ttlMs: leaseTtlMs,
+        skewMs: skew.sessionSkewMs });
     const lease = await leases.acquire(manifest.sessionId, { id: `cli-${process.pid}-${crypto.randomUUID()}`, kind: 'cli' });
     if (!lease) {
         const current = await leases.inspect(manifest.sessionId);
@@ -130,25 +158,44 @@ export async function createCliRuntime(
     const directoryMounts = new DirectoryMountService(systemFS, sessionFiles, directorySource);
     await directoryMounts.init();
 
-    const sessionWorkspaceRoot = path.resolve(hostOptions.setHome ?? workflow.workspaceRoot);
+    // In worktree mode the whole Session workspace is the isolated copy, so the VFS file
+    // tools, the session cwd and the access grants agree with the shell's working
+    // directory instead of silently editing the base repository.
+    // Control-mode runtimes (cancel/respond/export) never dispatch nodes, so they keep
+    // the plain workspace and avoid creating an empty worktree directory as a side effect.
+    const worktree = mode !== 'control' && isolatedWorkspace(workflow) && !hostOptions.setHome
+        ? cliWorktreeDirectory(workflow.stateDir, manifest.sessionId)
+        : undefined;
+    if (worktree) {
+        // `git worktree add` accepts an existing empty directory; the mount must exist
+        // before the executor prepares the workspace.
+        await mkdir(worktree, { recursive: true });
+        process.stderr.write(`[worktree] isolated workspace: ${worktree}\n`);
+    } else if (hostOptions.setHome && isolatedWorkspace(workflow)) {
+        process.stderr.write('[worktree] --set-home keeps the host directory as the Session workspace;'
+            + ' the isolated copy is only the agent shell working directory\n');
+    }
+    const sessionWorkspaceRoot = path.resolve(hostOptions.setHome ?? worktree ?? workflow.workspaceRoot);
     const grants = new WorkspaceGrantRegistry(
         sessionWorkspaceRoot,
         workflow.stateDir,
         manifest.grants,
         onGrantChange,
+        readOnly,
     );
     grants.setOnGrant(async grant => {
+        if (readOnly && grant.access === 'write') throw new Error('Read-only workspace cannot acquire writable mounts');
         await directoryMounts.addDirectory(manifest.sessionId, grant.path, grant.access === 'write' ? 'rw' : 'ro');
     });
 
     // Session mounts are the single source for both file tools and platform exec mounts.
     for (const grant of manifest.grants) {
-        await directoryMounts.addDirectory(manifest.sessionId, grant.path, grant.access === 'write' ? 'rw' : 'ro');
+        await directoryMounts.addDirectory(manifest.sessionId, grant.path, !readOnly && grant.access === 'write' ? 'rw' : 'ro');
     }
-    await directoryMounts.addDirectory(manifest.sessionId, sessionWorkspaceRoot, 'rw', '/workspace', true);
+    await directoryMounts.addDirectory(manifest.sessionId, sessionWorkspaceRoot, readOnly ? 'ro' : 'rw', '/workspace', true);
     for (const raw of hostOptions.addDir ?? []) {
         const { directory, access } = parseAddDirectory(raw);
-        await directoryMounts.addDirectory(manifest.sessionId, directory, access);
+        await directoryMounts.addDirectory(manifest.sessionId, directory, readOnly ? 'ro' : access);
     }
 
     const executionMounts = async (): Promise<WorkspaceGrant[]> => {
@@ -170,6 +217,11 @@ export async function createCliRuntime(
         ? new NodePtyDriver()
         : engine ? new OciTtyDriver(engine, workflow, ttyMounts) : undefined;
 
+    const acquireFiles = (id: string) => acquireSessionProcessContext(
+        sessionFiles, id,
+        async () => ({ nativeShell: shell, ttyDriver, release: async () => {} }),
+        () => directoryMounts.processMounts(id),
+    );
     const core = await createKernelRuntime({
         systemFS,
         llmDriver,
@@ -177,17 +229,14 @@ export async function createCliRuntime(
         maxConcurrent: mode === 'control' ? 0 : workflow.config.runtime?.max_concurrency ?? 4,
         maxConcurrentEffects: mode === 'control' ? 0 : undefined,
         skillSourceForSession: files => new SessionFileSkillSource(files.vfs, files.cwd, parse),
-        fileContextForSession: id => acquireSessionProcessContext(
-            sessionFiles,
-            id,
-            async () => ({ nativeShell: shell, ttyDriver, release: async () => {} }),
-            () => directoryMounts.processMounts(id),
-        ),
+        fileContextForSession: acquireFiles,
+        fileContextForScope: acquireFiles,
         additionalTools: [createBashTool(shell), createWorkspaceAccessTool(grants)],
         beforeRecover: async runtime => { await syncSkillsToKernel(llmDriver, runtime); },
         recover: true,
     });
     const { kernel } = core;
+    const workspaceManager = cliWorkspaceManager(workflow, shell);
 
     const executor = new DurableFlowExecutor({
         kernel,
@@ -195,14 +244,17 @@ export async function createCliRuntime(
         resolveNewRunContext: sessionId => resolveSessionSkillContext(kernel, core.sessions, sessionId, workflow.config.goal),
         resolveTools: (sessionId, allowed) => resolveTools(core, sessionId, allowed),
         // A crashed host keeps the Run's scheduler lease until the TTL expires; tests
-        // shorten it the same way they shorten the Session lease.
+        // shorten it the same way they shorten the Session lease. The skew budget is the
+        // explicit cross-host clock-error constraint for shared-storage deployments.
         schedulerLeaseTtlMs: Number(process.env.MINDOS_SCHEDULER_LEASE_TTL_MS) || undefined,
         schedulerLeaseSkewMs: skew.schedulerSkewMs,
+        ...(workspaceManager ? { workspaceManager: withWorkspaceScopeCleanup(workspaceManager, core) } : {}),
     });
     return {
         kernel,
         executor,
         grants,
+        workspaceRoot: sessionWorkspaceRoot,
         waitForCheckpoint: taskIds => {
             if (!manifest.rootTaskId) throw new Error('Run root task is missing');
             return executor.waitForCheckpoint(manifest.sessionId, manifest.rootTaskId, taskIds);
@@ -244,10 +296,10 @@ async function initializeLlmQuietly(driver: LLMDeviceDriver): Promise<void> {
     }
 }
 
-export function compileDag(workflow: CompiledWorkflow): DagRunSpec {
+export function compileDag(workflow: CompiledWorkflow, sessionWorkspace?: string): DagRunSpec {
     const agents = new Map(workflow.config.agents.map(agent => [agent.id, agent]));
     const agentFactory = (task: WorkflowTaskSpec, role?: 'agent' | 'supervisor' | 'worker'): DagRunSpec['nodes'][number] =>
-        compileTask(workflow, task as TaskConfig, agents.get((task as TaskConfig).agent!)!, role);
+        compileTask(workflow, task as TaskConfig, agents.get((task as TaskConfig).agent!)!, role, sessionWorkspace);
     const { nodes, edges } = compileWorkflow(
         workflow.config.tasks as WorkflowTaskSpec[],
         agentFactory,
@@ -261,6 +313,7 @@ function compileTask(
     task: TaskConfig,
     agent: AgentConfig,
     role?: 'agent' | 'supervisor' | 'worker',
+    sessionWorkspace?: string,
 ): DagRunSpec['nodes'][number] {
     const connection = workflow.config.connections.find(item => item.id === agent.connection)!;
     const model = agent.model ?? connection.tiers[agent.model_tier ?? 'standard'];
@@ -277,7 +330,7 @@ function compileTask(
         : [
             agent.system_prompt,
             `Overall goal: ${workflow.config.goal}`,
-            `Workspace: ${workflow.workspaceRoot}`,
+            `Workspace: ${sessionWorkspace ?? workflow.workspaceRoot}`,
             'Only access paths inside the workspace unless RequestWorkspaceAccess has been approved.',
         ].filter(Boolean).join('\n\n');
     return {
@@ -299,7 +352,9 @@ function compileTask(
             ...(agent.web_search !== undefined ? { webSearch: agent.web_search } : {}),
             ...(agent.stream !== undefined ? { stream: agent.stream } : {}),
             maxExchanges: agent.max_exchanges ?? 50,
-            workingDirectory: workflow.workspaceRoot,
+            // An isolated Run lets the executor place every agent node in the workspace it
+            // prepared; pinning the node to the base repository here would silently win.
+            ...(isolatedWorkspace(workflow) ? {} : { workingDirectory: workflow.workspaceRoot }),
             approval: agent.approval ?? 'external',
             ...(task.max_iterations !== undefined ? { maxIterations: task.max_iterations } : {}),
         },
@@ -313,6 +368,12 @@ function compileTask(
             ...(task.retry.backoff_ms !== undefined ? { backoffMs: task.retry.backoff_ms } : {}),
         } : undefined,
     };
+}
+
+/** True when the Run policy asks the host to prepare a per-Run workspace. */
+function isolatedWorkspace(workflow: CompiledWorkflow): boolean {
+    const mode = workflow.config.runtime?.workspace?.mode;
+    return mode !== undefined && mode !== 'shared';
 }
 
 function normalizeTools(tools: string[], access: TaskConfig['workspace_access']): string[] {
@@ -370,4 +431,43 @@ async function configureLlm(driver: LLMDeviceDriver, workflow: CompiledWorkflow)
         };
         await driver.saveConnection(connection);
     }
+}
+
+/**
+ * Assemble the host-side workspace manager; OCI read-only runs use host Git management
+ * while their file and process capabilities remain read-only inside the container.
+ * Worktrees live under the CLI state dir, never inside the repository working tree.
+ */
+function cliWorkspaceManager(workflow: CompiledWorkflow, shell: INativeShell): FlowWorkspaceManager | undefined {
+    if (!isolatedWorkspace(workflow)) return undefined;
+    const readOnly = workflow.config.runtime?.workspace?.mode === 'read-only';
+    const manager = new GitWorktreeFlowWorkspaceManager({
+        repository: workflow.workspaceRoot,
+        directoryFor: sessionId => cliWorktreeDirectory(workflow.stateDir, sessionId),
+        commands: gitRunner(readOnly ? new NodeNativeShell() : shell),
+    });
+    if (!readOnly) return manager;
+    return {
+        prepare: (id, policy) => manager.prepare(id, { ...policy, mode: 'worktree', merge: 'discard' }),
+        restore: (id, policy, record, options) => manager.restore(id, { ...policy, mode: 'worktree', merge: 'discard' }, record, options),
+    };
+}
+
+/** Isolated copy of the repository for one Session; shared by the host and the executor. */
+export function cliWorktreeDirectory(stateDir: string, sessionId: string): string {
+    return path.join(stateDir, 'worktrees', sessionId);
+}
+
+/** argv-safe git runner (never a shell string) so the host sandbox policy still applies. */
+function gitRunner(shell: INativeShell): WorkspaceCommandRunner {
+    return {
+        run: async (program, args, options) => {
+            const result = await shell.exec(program, args, { cwd: options.cwd, timeoutMs: 30_000 });
+            if (result.code !== 0) {
+                throw new Error(`${program} ${args.join(' ')} exited with ${result.code}:`
+                    + ` ${(result.stderr || result.stdout).trim()}`);
+            }
+            return { stdout: result.stdout };
+        },
+    };
 }

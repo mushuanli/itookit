@@ -37,6 +37,9 @@ import { ApprovedEffectProgram } from '../programs/approved-effect-program';
 import { ExecProgram } from '../programs/exec-program';
 
 export interface KernelAdaptersRuntimeOptions {
+    /** Resolve a trusted Task to its isolated Run identity; undefined selects the normal Session. */
+    scopeForEffect?: (context: import('@itookit/durable-kernel').EffectExecutionContext) => Promise<string | undefined>;
+    fileContextForScope?: (sessionId: string, scopeId: string) => ReturnType<NonNullable<KernelAdaptersRuntimeOptions['fileContextForSession']>>;
     /** Acquired independently for each real Session, before any tool can run. */
     fileContextForSession?: (sessionId: string) => Promise<{
         vfs: ToolVFSContext;
@@ -63,6 +66,7 @@ export interface KernelAdaptersRuntime {
     sessions: SessionCapabilityRegistry;
     plugin: KernelAdaptersPlugin;
     disposeSession(sessionId: string): Promise<void>;
+    disposeScope(sessionId: string, scopeId: string): Promise<void>;
     dispose(): Promise<void>;
 }
 
@@ -75,7 +79,7 @@ export async function createKernelAdaptersRuntime(options: KernelAdaptersRuntime
     const catalogTools = new ToolDeviceDriver([...BUILTIN_TOOLS, ...(options.additionalTools ?? [])]);
     registerCoreTools(catalogTools, catalogSkills);
     await catalogTools.init();
-    const effects = createEffects(llmService, registry, Boolean(options.fileContextForSession));
+    const effects = createEffects(llmService, registry, Boolean(options.fileContextForSession || options.fileContextForScope));
     return {
         llmService,
         toolCatalog: {
@@ -94,6 +98,7 @@ export async function createKernelAdaptersRuntime(options: KernelAdaptersRuntime
             onSessionClosed: sessionId => registry.disposeSession(sessionId),
         }),
         disposeSession: sessionId => registry.disposeSession(sessionId),
+        disposeScope: (sessionId, scopeId) => registry.disposeScope(sessionId, scopeId),
         dispose: async () => { await registry.dispose(); await catalogTools.dispose(); await catalogSkills.dispose(); },
     };
 }
@@ -105,8 +110,13 @@ interface KernelAdaptersScope extends SessionCapabilityScope {
 }
 
 class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
+    private readonly runScopes = new Map<string, Map<string, KernelAdaptersSessionRegistry>>();
+    private readonly effectScopes = new WeakMap<import('@itookit/durable-kernel').EffectExecutionContext, Promise<string | undefined>>();
+    private disposal?: Promise<void>;
+    private closeWork?: () => Promise<void>;
     private closed = false;
     private readonly closing = new Map<string, Promise<void>>();
+    private readonly sessionClosers = new Map<string, () => Promise<void>>();
     private readonly scopes = new Map<string, Promise<KernelAdaptersScope>>();
     private readonly hydrated = new Set<string>();
     private readonly hydrating = new Map<string, Promise<KernelAdaptersScope>>();
@@ -116,7 +126,7 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
 
     get(sessionId: string): Promise<KernelAdaptersScope> {
         if (this.closed) return Promise.reject(new Error('Session capability registry is closed'));
-        if (this.closing.has(sessionId)) return Promise.reject(new Error('Session capability scope is closing'));
+        if (this.sessionClosers.has(sessionId)) return Promise.reject(new Error('Session capability scope is closing'));
         const current = this.scopes.get(sessionId);
         if (current) return current;
         const created = this.createScope(sessionId);
@@ -128,14 +138,54 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
     async deleteSkill(id: string, catalog: SkillDeviceDriver): Promise<void> {
         if (this.closed) throw new Error('Session capability registry is closed');
         for (const pending of this.scopes.values()) await (await pending).skillService.deleteSkill(id);
+        for (const scopes of this.runScopes.values()) for (const scope of scopes.values()) {
+            for (const pending of scope.scopes.values()) await (await pending).skillService.deleteSkill(id);
+        }
         await catalog.deleteSkill(id);
     }
 
     async getForContext(
         context: import('@itookit/durable-kernel').EffectExecutionContext,
     ): Promise<KernelAdaptersScope> {
+        const registry = await this.forEffect(context);
+        if (registry !== this) return registry.getForContext(context);
         const saved = await context.sessionState?.get('kernel-adapters.skills.loaded');
         return this.restore(context.sessionId, saved?.value);
+    }
+
+    async getForEffect(context: import('@itookit/durable-kernel').EffectExecutionContext): Promise<KernelAdaptersScope> {
+        return (await this.forEffect(context)).get(context.sessionId);
+    }
+
+    private async forEffect(context: import('@itookit/durable-kernel').EffectExecutionContext): Promise<KernelAdaptersSessionRegistry> {
+        let selected = this.effectScopes.get(context);
+        if (!selected) {
+            selected = Promise.resolve().then(() => this.options.scopeForEffect?.(context));
+            this.effectScopes.set(context, selected);
+        }
+        const scopeId = await selected;
+        if (this.closed || this.sessionClosers.has(context.sessionId)) throw new Error('Session capability scope is closing');
+        if (scopeId === undefined) return this;
+        if (!scopeId.trim() || !this.options.fileContextForScope) throw new Error('Isolated scope requires an identity and file context factory');
+        const scopes = this.runScopes.get(context.sessionId) ?? new Map<string, KernelAdaptersSessionRegistry>();
+        this.runScopes.set(context.sessionId, scopes);
+        let scope = scopes.get(scopeId);
+        if (!scope) {
+            scope = new KernelAdaptersSessionRegistry({ ...this.options, scopeForEffect: undefined,
+                fileContextForScope: undefined,
+                fileContextForSession: id => this.options.fileContextForScope!(id, scopeId) }, this.skillDefinitions);
+            scopes.set(scopeId, scope);
+        }
+        return scope;
+    }
+
+    /** Keep the closed registry as a tombstone so late Effects cannot recreate this Run scope. */
+    async disposeScope(sessionId: string, scopeId: string): Promise<void> {
+        const scopes = this.runScopes.get(sessionId) ?? new Map<string, KernelAdaptersSessionRegistry>();
+        this.runScopes.set(sessionId, scopes);
+        let scope = scopes.get(scopeId);
+        if (!scope) { scope = new KernelAdaptersSessionRegistry(this.options, this.skillDefinitions); scopes.set(scopeId, scope); }
+        await scope.dispose();
     }
 
     restore(sessionId: string, loadedSkillIds: unknown): Promise<KernelAdaptersScope> {
@@ -168,30 +218,54 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
     async disposeSession(sessionId: string): Promise<void> {
         const pending = this.closing.get(sessionId);
         if (pending) return pending;
-        invalidateSessionSkillOperations(this, sessionId);
-        const scope = this.scopes.get(sessionId);
-        this.scopes.delete(sessionId);
-        this.hydrated.delete(sessionId);
-        this.hydrating.delete(sessionId);
-        if (!scope) { reopenSessionSkillOperations(this, sessionId); return; }
-        const close = scope.then(value => value.dispose(), () => {});
+        let cleanup = this.sessionClosers.get(sessionId);
+        if (!cleanup) {
+            invalidateSessionSkillOperations(this, sessionId);
+            const scope = this.scopes.get(sessionId);
+            this.scopes.delete(sessionId);
+            this.hydrated.delete(sessionId);
+            this.hydrating.delete(sessionId);
+            const runs = [...(this.runScopes.get(sessionId)?.values() ?? [])];
+            this.runScopes.delete(sessionId);
+            cleanup = retryCleanup([
+                ...runs.map(run => () => run.dispose()),
+                () => scope?.then(value => value.dispose(), () => {}),
+            ]);
+            this.sessionClosers.set(sessionId, cleanup);
+        }
+        const close = cleanup();
         this.closing.set(sessionId, close);
-        try { await close; } finally { this.closing.delete(sessionId); reopenSessionSkillOperations(this, sessionId); }
+        try {
+            await close;
+            this.sessionClosers.delete(sessionId);
+            reopenSessionSkillOperations(this, sessionId);
+        } finally { this.closing.delete(sessionId); }
     }
 
-    async dispose(): Promise<void> {
+    dispose(): Promise<void> {
+        if (this.disposal) return this.disposal;
+        const pending = this.close();
+        this.disposal = pending;
+        void pending.catch(() => { if (this.disposal === pending) this.disposal = undefined; });
+        return pending;
+    }
+
+    private close(): Promise<void> {
+        if (this.closeWork) return this.closeWork();
         this.closed = true;
         closeSessionSkillOperations(this);
         const scopes = [...this.scopes.values()];
+        const runs = [...this.runScopes.values()].flatMap(scopes => [...scopes.values()]);
+        this.runScopes.clear();
         this.scopes.clear();
         this.hydrated.clear();
         this.hydrating.clear();
-        const results = await Promise.allSettled([...this.closing.values(), ...scopes.map(async scope => {
-            const value = await scope.catch(() => undefined);
-            await value?.dispose();
-        })]);
-        const errors = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map(r => r.reason);
-        if (errors.length) throw new AggregateError(errors, 'Failed to close Session capabilities');
+        this.closeWork = retryCleanup([
+            ...this.sessionClosers.values(),
+            ...runs.map(run => () => run.dispose()),
+            ...scopes.map(scope => async () => { await (await scope.catch(() => undefined))?.dispose(); }),
+        ]);
+        return this.closeWork();
     }
 
     private async createScope(sessionId: string): Promise<KernelAdaptersScope> {
@@ -228,12 +302,7 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
         catch (error) { return cleanupAfterFailure(error, [() => files?.release(), () => toolDriver.dispose(), () => skillDriver.dispose()]); }
         const scope = createScope(toolDriver, skillDriver, ttySessions);
         const dispose = scope.dispose.bind(scope);
-        let disposed = false;
-        scope.dispose = async () => {
-            if (disposed) return;
-            disposed = true;
-            await runCleanup([() => dispose(), () => files?.release()]);
-        };
+        scope.dispose = retryCleanup([() => dispose(), () => files?.release()]);
         try { await this.options.configureSession?.(sessionId, scope); }
         catch (error) { return cleanupAfterFailure(error, [() => scope.dispose()]); }
         return scope;
@@ -290,7 +359,7 @@ function createEffects(
     const effects: import('@itookit/durable-kernel').EffectAdapter[] = [
         new LlmChatEffectAdapter(llm),
         new ToolCallEffectAdapter(async (context, request) => {
-            const scope = await registry.get(context.sessionId);
+            const scope = await registry.getForEffect(context);
             const meta = scope.toolService.getToolMeta(request.toolId);
             if (meta?.skillUnloaderArgKey) return scope.toolService;
             if (meta?.skillLoaderArgKey) return tools(context);
@@ -315,7 +384,7 @@ function createEffects(
         }, context => skills(context)),
         new BashEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, () => tools(context))),
         new SkillLoadEffectAdapter(skills, persistLoadedSkill),
-        new SkillUnloadEffectAdapter(async context => (await registry.get(context.sessionId)).skillService),
+        new SkillUnloadEffectAdapter(async context => (await registry.getForEffect(context)).skillService),
     ];
     if (ttyEnabled) effects.push(new TtyEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, () => tools(context))));
     return effects.map(effect => coordinateSkillEffect(effect, registry));
@@ -327,6 +396,7 @@ async function persistLoadedSkill(
 ): Promise<void> {
     await rememberLoadedSkill(result.skillId, context.sessionState);
 }
+
 
 
 function registerCoreTools(
@@ -342,4 +412,25 @@ function registerCoreTools(
     tools.registerTool(ttyWriteMeta, ttyWriteDefinition, createTtyWriteHandler(sessions));
     tools.registerTool(ttyCloseMeta, ttyCloseDefinition, createTtyCloseHandler(sessions));
     return sessions;
+}
+
+/** Retain only failed cleanup steps; concurrent callers share the same attempt. */
+function retryCleanup(steps: Array<() => Promise<unknown> | undefined>): () => Promise<void> {
+    const remaining = new Set(steps);
+    let pending: Promise<void> | undefined;
+    return () => {
+        if (pending) return pending;
+        const run = async () => {
+            const errors: unknown[] = [];
+            for (const step of remaining) {
+                try { await step(); remaining.delete(step); } catch (error) { errors.push(error); }
+            }
+            if (errors.length === 1) throw errors[0];
+            if (errors.length) throw new AggregateError(errors, 'Session scope cleanup failed');
+        };
+        const attempt = run();
+        pending = attempt;
+        void attempt.catch(() => { if (pending === attempt) pending = undefined; });
+        return attempt;
+    };
 }

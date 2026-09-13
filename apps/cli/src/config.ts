@@ -42,9 +42,27 @@ export function validateWorkflow(value: unknown, checkEnvironment = true): Workf
     validateRouteConditions(config, errors);
     validateReferences(config, errors);
     validateDag(config, errors);
+    validateWorkspacePolicy(config, errors);
     if (checkEnvironment) validateEnvironment(config, errors);
     if (errors.length) throw new Error(errors.join('\n'));
     return config;
+}
+
+/** Run-level workspace policy: only what this host can actually honor is accepted. */
+function validateWorkspacePolicy(config: WorkflowConfigV1, errors: string[]): void {
+    const mode = config.runtime?.workspace?.mode;
+    if (!mode || mode === 'shared') return;
+    if (mode === 'read-only') {
+        if ((config.sandbox?.mode ?? 'oci') !== 'oci') errors.push('runtime.workspace.mode read-only requires sandbox.mode: oci');
+        if (config.runtime?.workspace?.merge && config.runtime.workspace.merge !== 'discard') errors.push('read-only workspaces cannot merge changes');
+        return;
+    }
+    // The OCI sandbox only mounts the workspace root, so an isolated worktree prepared
+    // outside it would be invisible to the agent's shell; require native sandbox instead
+    // of silently running the node in the wrong directory.
+    if ((config.sandbox?.mode ?? 'oci') !== 'native') {
+        errors.push('runtime.workspace.mode worktree requires sandbox.mode: native');
+    }
 }
 
 function validateUniqueIds(config: WorkflowConfigV1, errors: string[]): void {

@@ -1,5 +1,6 @@
 import { TauriSessionDirectories } from './services/session-directories';
 import { createTauriSessionProcesses } from './shell/session-bash';
+import { TauriFlowWorkspaces } from './shell/flow-workspaces';
 import { createFileSystemSource } from '@itookit/vfs-core';
 /**
  * @file apps/tauri-app/src/main.ts
@@ -152,7 +153,8 @@ function injectMountWorkspace(entry: MountEntry): void {
         <a class="app-nav-btn"
            data-target="${entry.id}-workspace"
            data-module="${entry.id}"
-           title="${entry.label}">
+           title="${entry.label}"
+           aria-label="${entry.label}">
             <i class="fas fa-hard-drive"></i>
             <span class="nav-remove" data-unmount="${entry.id}" title="Unmount">×</span>
         </a>`;
@@ -268,6 +270,7 @@ async function bootstrap(): Promise<void> {
             SystemPromptSettingsEditor,
         },
     };
+    const flowWorkspaces = new TauriFlowWorkspaces(rootDir);
     const runtime = await createApplicationRuntime({
         backend: rootBackend,
         additionalMounts: [...workspaceMounts],
@@ -276,12 +279,16 @@ async function bootstrap(): Promise<void> {
         llmLogger: new TauriLLMLogger(rootDir),
         directorySourceProvider: new TauriSessionDirectories(rootDir),
         kernelPlatform: {
+            configure: (kernel, services) => flowWorkspaces.bind(kernel, services),
+            beforeSessionRecovery: sessionId => flowWorkspaces.reconcile(sessionId),
+            flowWorkspaceManager: flowWorkspaces,
+            fileContextForScope: (sessionId, rootTaskId) => flowWorkspaces.fileContext(sessionId, rootTaskId),
             createSessionProcesses: createTauriSessionProcesses(rootDir),
             skillSourceForSession: files => new TauriSkillSource(files.vfs, files.cwd),
         },
     });
     startupCleanup.push(() => runtime.dispose());
-    // Acceptance diagnostics: VITE_MINDOS_TRACE=1 records per-interval VFS op counts
+    // Acceptance diagnostics: VITE_MINDOS_TRACE=1 records per-interval VFS + sidecar op counts
     // so a slow user action can be attributed to backend/IPC round trips.
     if (import.meta.env.VITE_MINDOS_TRACE === '1') {
         const stopTrace = startVfsTrace(rootDir, runtime.vfs);

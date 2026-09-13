@@ -34,6 +34,7 @@ export interface RunConnectionConfig {
 }
 
 export interface RunAgentConfig {
+    memoryPolicy?: import('@itookit/common').MemoryPolicy;
     id: string;
     name?: string;
     connection: string;

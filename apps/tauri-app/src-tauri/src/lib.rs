@@ -392,6 +392,19 @@ fn search_fd(
 
 mod bash_process;
 mod session_bash;
+mod host_git;
+
+/// Run a whitelisted git command inside a repository root (isolated Flow workspaces).
+///
+/// Uses an existing directory capability, exact argv shapes and a cleared environment.
+/// System/global config and hooks are disabled; local repository config still needs review.
+#[tauri::command]
+async fn git_command(repository_id: String, args: Vec<String>, timeout_ms: Option<u64>,
+    workspace_id: Option<String>,
+    directories: State<'_, scoped_fs::DirectoryScopes>) -> Result<(String, String, i32), String> {
+    host_git::run_scoped(&repository_id, &args, timeout_ms, &directories, workspace_id.as_deref())
+}
+
 
 /// Execute Bash after validating the host working directory.
 /// This host command alone does not enforce Session mount grants.
@@ -573,6 +586,7 @@ pub fn run() {
             search_ripgrep,
             search_fd,
             shell_exec,
+            git_command,
             session_shell_exec,
             shell_cancel,
             codex_start,

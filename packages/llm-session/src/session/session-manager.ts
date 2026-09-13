@@ -58,6 +58,7 @@ export class SessionManager implements ISession, SessionQuery {
     private runs: SessionRunCoordinator;
     private agentResolver: AgentResolver;
     private readonly kernel: Kernel;
+    private readonly canWriteSession?: (sessionId: string) => Promise<boolean>;
     private readonly durableProjection: DurableConversationProjection;
     private durableSession?: SessionHandle;
     private durableProjectionUnsubscribe?: () => void;
@@ -75,8 +76,11 @@ export class SessionManager implements ISession, SessionQuery {
                 externalIds: string[];
             }>;
             retrieveMemory?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['retrieveMemory'];
+            canWriteSession?: (sessionId: string) => Promise<boolean>;
+            workspaceManager?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['workspaceManager'];
         }
     ) {
+        this.canWriteSession = options.canWriteSession;
         this.registry = new SessionRegistry(engine);
         this.agentResolver = new AgentResolver(agentService);
         const attachments = new AttachmentProcessor(engine);
@@ -112,6 +116,7 @@ export class SessionManager implements ISession, SessionQuery {
             options.resolveTools,
             options.retrieveMemory,
             options.resolveSessionContext,
+            options.workspaceManager,
         );
 
         this.roundOps = new RoundOperations(this.registry, this.runs);
@@ -294,6 +299,14 @@ export class SessionManager implements ISession, SessionQuery {
         overrides?: ExecutionOverrides, origin?: SessionOrigin, historyPolicy?: HistoryPolicy,
         sendIntent?: SendIntent,
     ): Promise<string> {
+        // A Session leased by another host must not be written from here: refuse before the round
+        // is appended, so the two hosts cannot race the same durable conversation. `ensureBound()`
+        // resolves the same Session the write would target, including a lazy first bind.
+        const sessionId = this.registry.ensureBound().sessionId;
+        if (this.canWriteSession && !await this.canWriteSession(sessionId)) {
+            throw new ConversationError(ConversationErrorCode.SESSION_INVALID,
+                'Session is owned by another host; this host can only read it');
+        }
         return this.roundOps.sendMessage(text, files, agentId, overrides, origin, historyPolicy, sendIntent);
     }
 

@@ -102,6 +102,13 @@ export interface ConversationSystemOptions {
         externalIds: string[];
     }>;
     dagPlugins: DagPluginCatalog;
+    /**
+     * Host single-writer gate: true when this host may write the Session. When it resolves false,
+     * starting a new run is refused so a Session owned by another host stays read-only.
+     */
+    canWriteSession?: (sessionId: string) => Promise<boolean>;
+    /** Host-provided isolated workspace manager for Flow runs (absent → non-shared modes fail closed). */
+    workspaceManager?: import('./session/conversation-run-coordinator').ConversationRunCoordinatorOptions['workspaceManager'];
 }
 
 export interface ConversationSystem {
@@ -125,6 +132,8 @@ export async function initializeConversationSystem(
             resolveTools: options.resolveTools,
             resolveSessionContext: options.resolveSessionContext,
             retrieveMemory: options.retrieveMemory,
+            canWriteSession: options.canWriteSession,
+            workspaceManager: options.workspaceManager,
         },
     );
     return createControlPlane(options, sessionManager);

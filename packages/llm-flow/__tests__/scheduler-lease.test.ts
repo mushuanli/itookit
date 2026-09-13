@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acquireSchedulerLease, isSchedulerOwnershipLost, schedulerOwnerKey } from '../src/flow/scheduler-lease';
+import { markSchedulerRunDeleted, acquireSchedulerLease, isSchedulerOwnershipLost, schedulerOwnerKey } from '../src/flow/scheduler-lease';
 
 /** Minimal versioned shared-state session, enough for the lease protocol. */
 function fakeSession() {
@@ -106,4 +106,34 @@ describe('acquireSchedulerLease', () => {
         const after = session.entries.get(schedulerOwnerKey('root'))?.value as { expiresAt: number };
         expect(after.expiresAt).toBe(0);
     });
+});
+
+it.each([false, true])('serializes deletion and takeover and retains the tombstone (takeover first: %s)', async takeoverFirst => {
+    const session = fakeSession();
+    const lease = await acquireSchedulerLease(session as never, 'root', { ownerId: 'old', now: () => 0 });
+    await lease.release();
+    const deletion = () => markSchedulerRunDeleted(session as never, 'root', { now: () => 100 });
+    const takeover = () => acquireSchedulerLease(session as never, 'root', { ownerId: 'new', now: () => 100 });
+    const outcomes = await Promise.allSettled(takeoverFirst ? [takeover(), deletion()] : [deletion(), takeover()]);
+    expect(outcomes.filter(outcome => outcome.status === 'fulfilled')).toHaveLength(1);
+    const winner = outcomes[takeoverFirst ? 0 : 1];
+    if (winner.status === 'fulfilled' && winner.value) {
+        await expect(markSchedulerRunDeleted(session as never, 'root', { now: () => 100 })).rejects.toThrow('scheduled');
+        await winner.value.release();
+        await markSchedulerRunDeleted(session as never, 'root', { now: () => 100 });
+    }
+    await markSchedulerRunDeleted(session as never, 'root', { now: () => 100_000 });
+    await expect(acquireSchedulerLease(session as never, 'root', { now: () => 100_000 })).rejects.toThrow('deleted');
+    expect(session.entries.get(schedulerOwnerKey('root'))?.value).toMatchObject({ deleted: true, expiresAt: 0 });
+});
+
+it('refuses deletion during clock allowance and rejects unsupported records', async () => {
+    const session = fakeSession();
+    session.entries.set(schedulerOwnerKey('root'), { version: 1,
+        value: { version: 1, ownerId: 'other', epoch: 1, expiresAt: 1000 } });
+    await expect(markSchedulerRunDeleted(session as never, 'root', { now: () => 1199, skewMs: 200 })).rejects.toThrow('scheduled');
+    await markSchedulerRunDeleted(session as never, 'root', { now: () => 1200, skewMs: 200 });
+    session.entries.set(schedulerOwnerKey('invalid'), { version: 1, value: { version: 2 } });
+    await expect(markSchedulerRunDeleted(session as never, 'invalid')).rejects.toThrow('Invalid');
+    await expect(acquireSchedulerLease(session as never, 'invalid')).rejects.toThrow('Invalid');
 });

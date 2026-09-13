@@ -150,7 +150,9 @@ export class DurableFlowExecutor {
         if (await handle.root.poll()) {
             // A crash during workspace finalization leaves the record pending; a new host
             // completes it instead of leaking the workspace.
-            await this.resumeWorkspaceFinalization(session, handle.root, rootTaskId);
+            const lease = await this.acquireLease(session, rootTaskId);
+            try { await this.resumeWorkspaceFinalization(session, handle.root, rootTaskId); }
+            finally { await lease.release(); }
             return handle;
         }
         const root = (await handle.root.status()).task;

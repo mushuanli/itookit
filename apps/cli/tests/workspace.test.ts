@@ -5,6 +5,16 @@ import { describe, expect, it } from 'vitest';
 import { createWorkspacePort, WorkspaceGrantRegistry } from '../src/workspace';
 
 describe('workspace boundary', () => {
+    it('denies write requests even when the saved grant used to be writable', async () => {
+        const root = await mkdtemp(path.join(tmpdir(), 'mindos-readonly-'));
+        const registry = new WorkspaceGrantRegistry(root, path.join(root, '.mindos'), [
+            { id: 'external', path: '/external', access: 'write', createdAt: 1 },
+        ], undefined, true);
+        expect(registry.list()[0].access).toBe('read');
+        expect(registry.permits(path.join(root, 'file'), 'write')).toBe(false);
+        expect(registry.permits('/external/file', 'write')).toBe(false);
+        await expect(registry.grant(root, 'write')).rejects.toThrow('cannot acquire writable mounts');
+    });
     it('allows workspace files and rejects traversal and symlink escapes', async () => {
         const root = await mkdtemp(path.join(tmpdir(), 'mindos-workspace-'));
         const outside = await mkdtemp(path.join(tmpdir(), 'mindos-outside-'));

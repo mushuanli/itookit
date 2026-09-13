@@ -2,8 +2,8 @@ import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createVFS, createFileSystemView } from '@itookit/vfs-core';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
-import { SessionFilesService } from '@itookit/app-core';
-import { createSessionAttachmentMounts } from '@itookit/app-core';
+import { SessionFilesService } from '../src/vfs/session-files';
+import { createSessionAttachmentMounts } from '../src/vfs/session-attachments';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -27,6 +27,57 @@ async function setup() {
 const mount = (root: string, access: 'ro' | 'rw' = 'rw') => [{ mountId: 'work', at: '/workspace', sourceId: 'home', root, access }];
 
 describe('Session file contexts', () => {
+    it('isolates concurrent workspace views without replacing the Session grant or owning the source', async () => {
+        const { service, home } = await setup();
+        const configured = await service.configure('a', { mounts: mount('/a'), cwd: '/workspace' }, 0);
+        const copy = createFileSystemView({ viewId: 'copy', mounts: [{ mountId: 'copy', at: '/', fs: home, root: '/b', access: 'rw' }] });
+        cleanup.push(() => copy.dispose());
+        const first = await service.acquireWorkspaceFiles('a', 'work', copy);
+        const second = await service.acquireWorkspaceFiles('a', 'work', copy);
+        const normal = await service.acquire('a');
+        cleanup.push(() => normal.release());
+        expect(first.context.cwd).toBe('/workspace');
+        await first.context.fs.driver.writeContent('/workspace/same.md', 'isolated');
+        expect(await normal.vfs.readFile('same.md')).toBe('A');
+        expect(await second.context.fs.driver.readContent('/workspace/same.md', { encoding: 'utf-8' })).toBe('isolated');
+        expect(await service.inspect('a')).toEqual(configured);
+        expect((await first.context.fs.driver.getChildren('/')).map(node => node.name).sort()).toEqual(['attachments', 'workspace']);
+        await expect(first.context.fs.driver.readContent('/var/lib/sessions/a/session.seq')).rejects.toMatchObject({ code: 'ENOENT' });
+        await Promise.all([first.release(), first.release()]);
+        await expect(first.context.fs.driver.readContent('/workspace/same.md', { encoding: 'utf-8' })).rejects.toMatchObject({ code: 'EACCES' });
+        expect(await second.context.fs.driver.readContent('/workspace/same.md', { encoding: 'utf-8' })).toBe('isolated');
+        await second.release();
+        expect(await copy.driver.readContent('/same.md', { encoding: 'utf-8' })).toBe('isolated');
+    });
+
+    it.each(['configure', 'disable', 'dispose'] as const)('revokes isolated file handles on %s', async action => {
+        const { service, home } = await setup();
+        await service.configure('a', { mounts: mount('/a'), cwd: '/workspace' }, 0);
+        const isolated = await service.acquireWorkspaceFiles('a', 'work', home);
+        const file = isolated.context.fs.openFile('/workspace/b/same.md');
+        expect(new TextDecoder().decode(await file.read())).toBe('B');
+        if (action === 'configure') await service.configure('a', { mounts: mount('/a', 'ro'), cwd: '/workspace' }, 1);
+        else if (action === 'disable') await service.disable('a', 1);
+        else await service.dispose();
+        await expect(file.read()).rejects.toMatchObject({ code: 'EACCES' });
+        await isolated.release();
+        expect(await home.driver.readContent('/a/same.md', { encoding: 'utf-8' })).toBe('A');
+    });
+
+    it('requires an active writable grant and rejects read-only replacement sources', async () => {
+        const { service, home } = await setup();
+        await expect(service.acquireWorkspaceFiles('a', 'work', home)).rejects.toMatchObject({ code: 'EACCES' });
+        await service.configure('a', { mounts: mount('/a', 'ro'), cwd: '/workspace' }, 0);
+        await expect(service.acquireWorkspaceFiles('a', 'work', home)).rejects.toMatchObject({ code: 'EROFS' });
+        await service.configure('a', { mounts: mount('/a'), cwd: '/workspace' }, 1);
+        await expect(service.acquireWorkspaceFiles('a', 'other', home)).rejects.toMatchObject({ code: 'EACCES' });
+        const readonly = createFileSystemView({ viewId: 'readonly-copy', mounts: [{ mountId: 'copy', at: '/', fs: home, access: 'ro' }] });
+        cleanup.push(() => readonly.dispose());
+        await expect(service.acquireWorkspaceFiles('a', 'work', readonly)).rejects.toMatchObject({ code: 'EROFS' });
+        await service.disable('a', 2);
+        await expect(service.acquireWorkspaceFiles('a', 'work', home)).rejects.toMatchObject({ code: 'EACCES' });
+    });
+
     it('rejects invalid or exhausted revisions without publishing a draining record', async () => {
         const { service, store } = await setup();
         const current = { revision: Number.MAX_SAFE_INTEGER, state: 'active', mounts: mount('/a'), cwd: '/workspace' };

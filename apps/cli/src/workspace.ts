@@ -14,8 +14,9 @@ export class WorkspaceGrantRegistry {
         readonly stateDir: string,
         initial: WorkspaceGrant[] = [],
         private readonly onChange?: (grants: WorkspaceGrant[]) => Promise<void>,
+        private readonly readOnly = false,
     ) {
-        for (const grant of initial) this.values.set(grant.id, grant);
+        for (const grant of initial) this.values.set(grant.id, readOnly ? { ...grant, access: 'read' } : grant);
     }
 
     list(): WorkspaceGrant[] {
@@ -28,6 +29,7 @@ export class WorkspaceGrantRegistry {
     }
 
     async grant(requestedPath: string, access: WorkspaceAccess): Promise<WorkspaceGrant> {
+        if (this.readOnly && access === 'write') throw new Error('Read-only workspace cannot acquire writable mounts');
         const resolved = await realpath(path.resolve(this.workspaceRoot, requestedPath));
         const info = await stat(resolved);
         const directory = info.isDirectory() ? resolved : path.dirname(resolved);
@@ -48,6 +50,7 @@ export class WorkspaceGrantRegistry {
     }
 
     permits(candidate: string, access: WorkspaceAccess): boolean {
+        if (this.readOnly && access === 'write') return false;
         if (inside(this.stateDir, candidate)) return false;
         if (inside(this.workspaceRoot, candidate)) return true;
         return this.list().some(grant => inside(grant.path, candidate) && covers(grant.access, access));

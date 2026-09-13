@@ -3,8 +3,8 @@ import { compileDag } from './runtime';
 import type { CompiledWorkflow } from './types';
 
 /** Compile the CLI YAML schema into the shared RunDefinition model. */
-export function compileRunDefinition(workflow: CompiledWorkflow, digest: string): RunDefinition {
-    const graph = compileDag(workflow);
+export function compileRunDefinition(workflow: CompiledWorkflow, digest: string, sessionWorkspace?: string): RunDefinition {
+    const graph = compileDag(workflow, sessionWorkspace);
     return {
         id: workflow.config.name,
         name: workflow.config.name,
@@ -63,6 +63,7 @@ export function compileRunDefinition(workflow: CompiledWorkflow, digest: string)
             runPolicy: {
                 ...(workflow.config.runtime?.max_concurrency !== undefined ? { maxConcurrency: workflow.config.runtime.max_concurrency } : {}),
                 ...(workflow.maxDurationMs !== undefined ? { timeoutMs: workflow.maxDurationMs } : {}),
+                ...(workflow.config.runtime?.workspace ? { workspace: workflow.config.runtime.workspace } : {}),
             },
         },
         metadata: {

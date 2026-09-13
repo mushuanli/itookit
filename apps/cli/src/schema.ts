@@ -185,6 +185,12 @@ export const workflowSchema = z.strictObject({
     runtime: z.strictObject({
         max_concurrency: z.number().int().positive().optional(),
         max_duration: DURATION.optional(),
+        workspace: z.strictObject({
+            mode: z.enum(['shared', 'read-only', 'worktree']),
+            base: z.string().optional(),
+            merge: z.enum(['manual', 'auto-if-clean', 'discard']).optional(),
+            cleanup: z.enum(['on-success', 'always', 'keep']).optional(),
+        }).optional(),
     }).optional(),
     sandbox: z.strictObject({
         mode: z.enum(['native', 'oci']).optional(),

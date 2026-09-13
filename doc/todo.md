@@ -200,3 +200,11 @@ Durable 五篇：[Core](design/durable-harness-core.md)、[Protocol](design/dura
 本批合入运行句柄提前发布、取消确认、失败消费收尾、关闭与删除重试、失败记录重载，以及 CLI/UI 对应处理。隔离提交快照：durable-kernel 210、kernel-adapters 94、app-core 76、llm-flow 190、llm-session 102、app-shell 112、CLI 集成 20 项测试通过，合计 804 项；30 项既有条件跳过。五个逻辑包和 CLI/Web/Tauri 类型检查通过。Kernel 两项短时序测试曾在六包并行负载下失败，按包顺序复跑全部通过。文档检查仍受基线未构建 CLI 产物路径影响。
 
 这批不替代 P0-02 的真实窗口完整验收、P0-05 最终全仓矩阵，也不表示宿主工作区接线、跨宿主 fencing 或记忆功能已合入。
+
+### 隔离工作区批次验证（2026-09-14）
+
+本批按完整宿主链合入：CLI 工作区配置/文件与进程映射、Tauri Git 能力及创建意图恢复、共用 Run 能力选择与释放屏障、可重试资源清理、调度接管与删除 CAS 互斥。CLI 和 Tauri 都在工作区收尾前等待持久成员及后代的在途操作，再关闭 Run 能力；失败保留待重试的清理步骤。
+
+隔离提交快照验证：llm-flow 210、kernel-adapters 99、app-core 91、llm-session 104、app-shell 142、CLI 工作区相关 44、普通 Run/HTTP 回归 16、Rust 28 项通过，合计 734 项；app-shell 30 项既有条件跳过。七个包/宿主类型检查通过。CLI 使用真实 Git、本地 HTTP 和 SIGKILL；桌面恢复使用 IPC 测试宿主及真实 Git/子进程，Rust 覆盖原生命令边界。文档检查保留基线未构建 apps/cli/dist/cli.js 路径问题。
+
+该批不等于 P1-03 整项验收完成：真实 OCI、GUI 重启/交互及跨平台仍待验证；P1-02 的多主机失权停写和强 fencing、P0-02/P0-05 的完整桌面与最终全仓矩阵也仍未完成。删除标记只对识别该协议的参与宿主有效。

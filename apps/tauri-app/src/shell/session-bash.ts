@@ -51,8 +51,11 @@ function scopedProcesses(files: Parameters<Factory>[1], grants: Array<[string, s
         } },
         release() {
             closed = true;
-            releasing ??= releaseProcesses([...active], grants);
-            return releasing;
+            if (releasing) return releasing;
+            const pending = releaseProcesses([...active], grants);
+            releasing = pending;
+            void pending.catch(() => { if (releasing === pending) releasing = undefined; });
+            return pending;
         },
     };
 }
@@ -60,7 +63,10 @@ function scopedProcesses(files: Parameters<Factory>[1], grants: Array<[string, s
 async function releaseProcesses(active: Array<[string, Promise<unknown>]>, grants: Array<[string, string, boolean]>): Promise<void> {
     const cancellations = await Promise.allSettled(active.map(([requestId]) => invoke('shell_cancel', { requestId })));
     await Promise.allSettled(active.map(([, result]) => result));
-    const closures = await Promise.allSettled(grants.map(([id]) => invoke('directory_close', { id })));
+    const closures = await Promise.allSettled([...grants].map(async grant => {
+        await invoke('directory_close', { id: grant[0] });
+        grants.splice(grants.indexOf(grant), 1);
+    }));
     const errors = [...cancellations, ...closures].filter((result): result is PromiseRejectedResult => result.status === 'rejected')
         .map(result => result.reason);
     if (errors.length) throw new AggregateError(errors, 'Session process cleanup failed');

@@ -8,6 +8,7 @@ import {
     createBuiltinDagPluginRegistry,
     DagPluginRegistry,
     registerDurablePrograms,
+    resolveFlowTaskWorkspace,
 } from '@itookit/llm-flow';
 import type { IFileSystem } from '@itookit/vfs-core';
 
@@ -19,6 +20,8 @@ export interface CreateKernelRuntimeOptions {
     maxConcurrent?: number;
     maxConcurrentEffects?: number;
     fileContextForSession?: KernelAdaptersRuntimeOptions['fileContextForSession'];
+    scopeForEffect?: KernelAdaptersRuntimeOptions['scopeForEffect'];
+    fileContextForScope?: KernelAdaptersRuntimeOptions['fileContextForScope'];
     configureSession?: KernelAdaptersRuntimeOptions['configureSession'];
     skillSource?: KernelAdaptersRuntimeOptions['skillSource'];
     skillSourceForSession?: KernelAdaptersRuntimeOptions['skillSourceForSession'];
@@ -51,6 +54,11 @@ export async function createKernelRuntime(
         llmDriver: options.llmDriver,
         runMode: 'kernel',
         fileContextForSession: options.fileContextForSession,
+        scopeForEffect: options.scopeForEffect ?? (options.fileContextForScope ? async context => {
+            const session = await kernel.openSession(context.sessionId);
+            return (await resolveFlowTaskWorkspace(session, context.taskId))?.rootTaskId;
+        } : undefined),
+        fileContextForScope: options.fileContextForScope,
         configureSession: options.configureSession,
         skillSource: options.skillSource,
         skillSourceForSession: options.skillSourceForSession,

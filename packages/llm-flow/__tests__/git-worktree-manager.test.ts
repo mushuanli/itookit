@@ -90,6 +90,36 @@ describe('GitWorktreeFlowWorkspaceManager', () => {
         expect(git.calls.some(call => call.args.slice(0, 2).join(' ') === 'worktree remove')).toBe(false);
     });
 
+    it.each(['discard', 'auto-if-clean'] as const)('restores finalization after worktree removal before host restart (%s)', async merge => {
+        const record = { version: 1, directory: '/worktrees/run', branch: 'flow/run-abc' };
+        const git = fakeGit({ branches: [record.branch] });
+        const manager = new GitWorktreeFlowWorkspaceManager({
+            repository: '/repo', directoryFor: () => record.directory, commands: git.commands,
+        });
+        const policy = { mode: 'worktree' as const, merge, cleanup: 'always' as const };
+        await expect(manager.restore('run', policy, record)).rejects.toThrow('Worktree is missing');
+        const restored = await manager.restore('run', policy, record, { forFinalization: true });
+        await restored.finish('succeeded');
+        expect(git.branches.size).toBe(0);
+        expect(git.calls.some(call => call.args[0] === 'status' || call.args[1] === 'remove')).toBe(false);
+    });
+
+    it.each(['keep', 'on-success'] as const)('does not report a missing retained worktree as cleaned (%s)', async cleanup => {
+        const git = fakeGit();
+        const manager = new GitWorktreeFlowWorkspaceManager({ repository: '/repo', directoryFor: () => '/worktrees/run', commands: git.commands });
+        const restored = await manager.restore('run', { mode: 'worktree', cleanup },
+            { version: 1, directory: '/worktrees/run', branch: 'flow/run' }, { forFinalization: true });
+        await expect(restored.finish('failed')).rejects.toThrow('retention policy is missing');
+        expect(git.calls.some(call => call.args[0] === 'merge' || call.args[0] === 'branch')).toBe(false);
+    });
+
+    it('does not mistake a longer sibling path for the recorded worktree', async () => {
+        const git = fakeGit({ worktrees: ['/worktrees/run-other'] });
+        const manager = new GitWorktreeFlowWorkspaceManager({ repository: '/repo', directoryFor: () => '/worktrees/run', commands: git.commands });
+        await expect(manager.restore('run', { mode: 'worktree' }, { version: 1, directory: '/worktrees/run', branch: 'flow/run' }))
+            .rejects.toThrow('Worktree is missing');
+    });
+
     it('rejects a lease that belongs to another Session or lost its worktree', async () => {
         const git = fakeGit({ worktrees: ['/worktrees/other'], branches: ['flow/other'] });
         const manager = new GitWorktreeFlowWorkspaceManager({

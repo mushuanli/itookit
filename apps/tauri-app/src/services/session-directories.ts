@@ -29,6 +29,10 @@ class ScopedFsOps implements IFsOps {
 
 /** Sources for Session grants. Choosing one does not create a global workspace. */
 export class TauriSessionDirectories {
+    private closing?: Promise<void>;
+    private closed = false;
+    private readonly disposedOwners = new WeakSet<FileSystemSourceOwner>();
+    private readonly closedScopes = new Set<string>();
     private readonly sources = new Map<string, Promise<{ owner: FileSystemSourceOwner; scopes: Scope[] }>>();
     private readonly canonical = new Map<string, Promise<{ owner: FileSystemSourceOwner; scopes: Scope[] }>>();
     constructor(private readonly rootDir: string) {}
@@ -38,6 +42,7 @@ export class TauriSessionDirectories {
         return typeof result === 'string' ? 'host:' + result : null;
     }
     async openDirectory(path: string): Promise<IFileSystem> {
+        if (this.closed) throw new Error('Directory source provider closed');
         if (!this.sources.has(path)) this.sources.set(path, this.open(path));
         try { return (await this.sources.get(path)!).owner.fs; }
         catch (error) { this.sources.delete(path); throw error; }
@@ -66,11 +71,32 @@ export class TauriSessionDirectories {
             catch (error) { await backend.close(); throw error; }
         } catch (error) { await Promise.allSettled(scopes.map(s => invoke('directory_close', { id: s.id }))); throw error; }
     }
-    async dispose(): Promise<void> {
-        for (const result of await Promise.allSettled(this.canonical.values())) if (result.status === 'fulfilled') {
-            await result.value.owner.dispose();
-            await Promise.all(result.value.scopes.map(s => invoke('directory_close', { id: s.id })));
+    dispose(): Promise<void> {
+        this.closed = true;
+        if (this.closing) return this.closing;
+        const pending = this.closeSources();
+        this.closing = pending;
+        void pending.catch(() => { if (this.closing === pending) this.closing = undefined; });
+        return pending;
+    }
+    private async closeSources(): Promise<void> {
+        const errors: unknown[] = [];
+        // Include acquisitions that have not resolved their canonical path yet.
+        const acquired = await Promise.allSettled(this.sources.values());
+        const sources = new Set(acquired.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
+        for (const source of sources) {
+            try {
+                if (!this.disposedOwners.has(source.owner)) await source.owner.dispose();
+                this.disposedOwners.add(source.owner);
+            } catch (error) { errors.push(error); continue; }
+            const closed = await Promise.allSettled(source.scopes.map(async scope => {
+                if (this.closedScopes.has(scope.id)) return;
+                await invoke('directory_close', { id: scope.id });
+                this.closedScopes.add(scope.id);
+            }));
+            for (const result of closed) if (result.status === 'rejected') errors.push(result.reason);
         }
-        this.sources.clear(); this.canonical.clear();
+        if (errors.length) throw new AggregateError(errors, 'Directory source cleanup failed');
+        this.sources.clear(); this.canonical.clear(); this.closedScopes.clear();
     }
 }

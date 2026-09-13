@@ -67,6 +67,7 @@ export interface ConversationRunCoordinatorOptions {
         externalIds: string[];
     }>;
     loadArtifact(id: string): Promise<Artifact | null>;
+    workspaceManager?: import('@itookit/llm-flow').FlowWorkspaceManager;
     retrieveMemory?: (
         plan: ContextPlan,
         agent: { id: string; version: string },
@@ -115,6 +116,7 @@ export class ConversationRunCoordinator {
                 plugins: this.options.dagPlugins,
                 resolveTools: this.options.resolveTools,
                 sessionContext: flowSessionContext(snapshot),
+                workspaceManager: this.options.workspaceManager,
                 bindPatchNode: bindPatchNode ? (_sessionId, node, defaults) => bindPatchNode(node, snapshot, defaults) : undefined,
             });
             const submitted = await flow.submit(execution.task.sessionId, await createSpec(snapshot), parameters);

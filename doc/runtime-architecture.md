@@ -155,3 +155,11 @@ Node CLI
 ### 应用装配职责
 
 `createApplicationRuntime` 通过 `runtime/infrastructure.ts` 初始化 VFS、设备和用户布局，通过 `runtime/session-recovery.ts` 批量恢复持有租约的 Session，通过 `runtime/conversation-system.ts` 装配会话上下文与工具过滤。基础设施初始化失败会释放已取得的 transport 和 VFS，并保留清理异常。app-core 抛出结构化挂载错误，由 app-shell 本地化；目录提示和启动进度使用 common 的中英文键。平台无关服务测试归属 app-core，app-shell 直接消费 app-core 公共入口。
+
+### 隔离工作区宿主接线与清理
+
+ApplicationKernelPlatform 的 configure(kernel, services) 在恢复前取得 sessionFiles/directoryMounts；beforeSessionRecovery 在取得 Session 租约后、恢复任务前核对宿主创建意图。flowWorkspaceManager 经会话层传入 Flow 执行器，Web 未提供此端口时拒绝非共享工作区。
+
+createKernelRuntime 的 fileContextForScope 提供 Session + Run 能力；默认 scopeForEffect 用 resolveFlowTaskWorkspace 核对持久成员、后代与 workspace lease，失败不回退共享目录。withWorkspaceScopeCleanup 包装 prepare/restore，等待持久成员、重试及后代的 activeOperations 清零，再 disposeScope，最后调用宿主屏障；成功后才能清理工作区。CLI 的 Session 目录已指向副本，Run 能力复用其授权映射；Tauri 通过 acquireWorkspaceProcessContext 将原授权替换成同一副本的文件与进程视图。
+
+释放失败保留失败步骤，并拒绝关闭中能力的重新获取；重试不重复成功的目录句柄释放。Session 进程停止失败时不得先释放文件视图。

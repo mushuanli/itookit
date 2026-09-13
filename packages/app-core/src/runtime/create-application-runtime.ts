@@ -1,7 +1,3 @@
-import { createInfrastructure } from './infrastructure';
-import { createConversationSystem, disposeConversationSystem } from './conversation-system';
-import { SessionUnfinishedTasksError } from '../vfs/errors';
-import { recoverSessionsWithLeases } from './session-recovery';
 import type { IStorageBackend, MountOptions } from '@itookit/vfs-core';
 import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/device-llm';
 import { t, traceBoot, type ILLMLogger } from '@itookit/common';
@@ -13,19 +9,41 @@ import { createKernelRuntime, type HeadlessKernelRuntime, type CreateKernelRunti
 import { RunCatalog } from '../run/run-catalog';
 import { SessionFilesService } from '../vfs/session-files';
 import { DirectoryMountService, type DirectorySourceProvider } from '../vfs/directory-mounts';
+import { SessionUnfinishedTasksError } from '../vfs/errors';
 import { createSessionAttachmentMounts } from '../vfs/session-attachments';
 import { acquireSessionProcessContext, type SessionProcessFactory } from '../vfs/session-process-context';
 import { workspaceRoot } from '../session/workspace-paths';
 import { SessionLeaseStore, type SessionOwnerKind } from '../kernel/session-lease';
+import { recoverSessionsWithLeases } from './session-recovery';
+import { createConversationSystem, disposeConversationSystem } from './conversation-system';
+import { createInfrastructure } from './infrastructure';
 import { syncSkillsToKernel } from '../kernel/sync-skills';
 
+export interface ApplicationPlatformServices {
+    sessionFiles: SessionFilesService;
+    directoryMounts: DirectoryMountService;
+}
+
 export interface ApplicationKernelPlatform {
+    scopeForEffect?: CreateKernelRuntimeOptions['scopeForEffect'];
+    fileContextForScope?: CreateKernelRuntimeOptions['fileContextForScope'];
     createSessionProcesses?: SessionProcessFactory;
     configureSession?: CreateKernelRuntimeOptions['configureSession'];
     skillSource?: CreateKernelRuntimeOptions['skillSource'];
     skillSourceForSession?: CreateKernelRuntimeOptions['skillSourceForSession'];
     skillToolHandlerFactory?: CreateKernelRuntimeOptions['skillToolHandlerFactory'];
-    configure?(kernel: HeadlessKernelRuntime): void | Promise<void>;
+    /** Bind host factories to initialized file grants before any Session recovery. */
+    configure?(kernel: HeadlessKernelRuntime, services: ApplicationPlatformServices): void | Promise<void>;
+    /** Host reconciliation after acquiring the Session write lease, before recovering tasks. */
+    beforeSessionRecovery?(sessionId: string): Promise<void>;
+    /**
+     * Host-provided isolated workspace manager for chat-embedded Flow runs.
+     *
+     * Flows whose frozen run policy asks for a non-shared workspace mode need this port; when it
+     * is absent the executor fails closed with `requires a configured workspace manager` (the
+     * Web host has no workspace channel). See doc/design/flow-execution-model.md.
+     */
+    flowWorkspaceManager?: import('@itookit/llm-flow').FlowWorkspaceManager;
 }
 
 export interface ApplicationRuntime {
@@ -52,6 +70,8 @@ export interface ApplicationRuntimeOptions {
     llmLogger?: ILLMLogger;
     codexTransport?: CodexAppServerTransport;
     ownerKind?: SessionOwnerKind;
+    /** Explicit cross-host clock-error budget for Session leases (default 0). */
+    sessionLeaseSkewMs?: number;
     onProgress?(message: string): void;
 }
 
@@ -61,7 +81,9 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
     const sourceCleanupFns: Array<() => void | Promise<void>> = [];
     const logStep = (label: string) => { console.log(`[Boot] ${label}`); options.onProgress?.(label); };
     try {
+        // ── 1-2. VFS + LLM device driver ───────────────────────────────────────────
         const { vfs, systemFS, llmDriver, logIO, closeCodexTransport } = await createInfrastructure(options);
+        // The VFS owns every other resource, so it is disposed last.
         sourceCleanupFns.push(() => vfs.dispose());
         if (closeCodexTransport) cleanupFns.push(closeCodexTransport);
 
@@ -97,6 +119,8 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             fileContextForSession: id => acquireSessionProcessContext(sessionFiles, id, options.kernelPlatform?.createSessionProcesses,
                 () => directoryMounts.processMounts(id)),
             configureSession: options.kernelPlatform?.configureSession,
+            scopeForEffect: options.kernelPlatform?.scopeForEffect,
+            fileContextForScope: options.kernelPlatform?.fileContextForScope,
             skillSource: options.kernelPlatform?.skillSource,
             skillSourceForSession: options.kernelPlatform?.skillSourceForSession,
             skillToolHandlerFactory: options.kernelPlatform?.skillToolHandlerFactory,
@@ -110,16 +134,18 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
                     }
                 };
                 await traceBoot('syncSkillsToKernel', () => syncSkillsToKernel(llmDriver, runtime));
-                await options.kernelPlatform?.configure?.(runtime);
+                await options.kernelPlatform?.configure?.(runtime, { sessionFiles, directoryMounts });
             },
             // Recover Sessions only after this host acquires their lease.
             recover: false,
         }));
         const kernelCore = kernel.kernel;
-        const leaseStore = new SessionLeaseStore(systemFS);
+        const leaseStore = new SessionLeaseStore(systemFS, {
+            ...(options.sessionLeaseSkewMs ? { skewMs: options.sessionLeaseSkewMs } : {}),
+        });
         const ownerId = `${options.ownerKind ?? "tauri"}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
         const recovery = await recoverSessionsWithLeases(kernelCore, leaseStore,
-            { id: ownerId, kind: options.ownerKind ?? 'tauri' }, 10_000).catch(async error => {
+            { id: ownerId, kind: options.ownerKind ?? 'tauri' }, 10_000, options.kernelPlatform?.beforeSessionRecovery).catch(async error => {
                 kernelCore.dispose();
                 const errors: unknown[] = [error];
                 for (const close of [() => kernelCore.waitIdle(), () => kernel.dispose()]) {
@@ -140,14 +166,23 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         // Keep skills in sync when the user adds / edits / deletes skills in Settings.
         // The initial sync happens before Kernel recovery so restored Skill identities resolve.
         cleanupFns.push(
-            llmDriver.onChange(() => { syncSkillsToKernel(llmDriver, kernel).catch(error => console.warn('[Skills] sync failed', error)); })
+            llmDriver.onChange(() => {
+                // A dropped sync leaves Skills stale in the Kernel; surface it instead of
+                // letting the next Agent run silently miss a Skill change.
+                syncSkillsToKernel(llmDriver, kernel).catch(error => console.warn('[Skills] sync failed', error));
+            })
         );
 
         logIO('core services');
 
         logStep(t('boot.llmEngine'));
+        // Writes are only allowed while this host holds the Session's single-writer lease; the
+        // gate acquires a lease on demand so a freshly created Session is writable immediately.
         const { sessionManager, commandBus } = await traceBoot('initializeConversationSystem',
-            () => createConversationSystem({ vfs, agentService, sessionRepository, flowEngine, kernel }));
+            () => createConversationSystem({ vfs, agentService, sessionRepository, flowEngine, kernel,
+                ensureWritable: sessionId => recovery.acquireLater(sessionId),
+                flowWorkspaceManager: options.kernelPlatform?.flowWorkspaceManager }));
+
         cleanupFns.push(() => disposeConversationSystem());
 
         const acquireSessionLease = (sessionId: string): Promise<boolean> => recovery.acquireLater(sessionId);

@@ -198,3 +198,13 @@ podman build -t mindos-sandbox:v1 -f apps/cli/sandbox/Dockerfile .
 ### 租约接管的时钟偏差配置
 
 `MINDOS_SESSION_LEASE_SKEW_MS` 和 `MINDOS_SCHEDULER_LEASE_SKEW_MS` 分别传给 Session 租约及 Flow 调度租约，单位为毫秒。未设置时使用库默认值 0；显式 0 有效。配置必须为非负安全整数，空白、负数、非整数和非法数值在 CLI 创建运行时资源前报错。不同拥有者须等到旧租约到期时间加偏差预算后再接管；显式释放的 Flow 租约无需等待。该配置不自动校准主机时钟，也不证明共享存储或多主机 fencing 已通过验收。
+
+### Run 隔离工作区
+
+YAML 的 runtime.workspace 支持 mode: shared/worktree/read-only，以及 base、merge: manual/auto-if-clean/discard、cleanup: on-success/always/keep。worktree 要求显式 sandbox.mode: native，副本位于 `<state-dir>/worktrees/<run-id>`，默认 Session 文件挂载与进程 cwd 指向副本；恢复重连已记录的副本。--set-home 会保留用户指定的 Session 目录并明确提示差异。
+
+成功且 merge 非 discard 时，未提交改动会阻止移除；discard 或失败/取消后的清理可以强制移除，因此需要保留产物时使用 cleanup: keep。auto-if-clean 仅接受干净副本并快进合并。收尾前通过共用屏障等待在途操作并关闭 Run 能力。
+
+read-only 只接受 OCI，拒绝写授权和 --set-home，所有用户挂载降为只读；当前配置及挂载参数测试通过，真实 OCI 验收仍待完成。OCI cwd 仅接受已挂载宿主或虚拟路径，范围外路径报错。
+
+mindos delete 在本机锁之外，通过持久调度记录 CAS 写入删除标记，与识别该协议的宿主接管互斥；活租约（含配置时钟偏差）拒绝删除。标记写入后才删除 CLI 投影目录，失败保留标记供重试，不宣称旧宿主或跨主机外部副作用已经强隔离。

@@ -265,3 +265,9 @@ Run 控制会在信号注入和单任务取消前刷新持久成员清单，允�
 ### 运行句柄与失败收尾
 
 `DurableFlowExecutor.submit` 在持久根任务建立并取得调度租约后返回，节点集合随调度更新；调用方通过根任务等待结果，关闭宿主存储前还应等待 `waitIdle()`。工作区清理结果通过 `workspaceCompletion` 和持久 finalization 状态单独观察。调度失败时先确认节点取消，再释放宿主能力及清理工作区；取消或释放失败会阻止后续清理，并与原始错误一起呈现在 Run 失败状态中。终态恢复传递 `forFinalization`，供宿主只恢复清理所需能力。
+
+### 工作区排空与删除互斥
+
+`waitForFlowRunTasks(session, rootTaskId)` 重新读取持久成员及重试，追踪后代，等待成员终态和全部已知任务（含根）的 activeOperations 清零；不等待根的逻辑终态，以免与聚合收尾循环依赖。`resolveFlowRunForTask`/`resolveFlowTaskWorkspace` 查询持久 Run 归属及工作区租约。
+
+`markSchedulerRunDeleted(session, rootTaskId, options?)` 与 acquireSchedulerLease 在同一 scheduler-owner 记录 CAS：仍有效的租约（含 skewMs）拒绝删除；无主时写入 deleted:true、expiresAt:0 和递增 epoch。后续接管拒绝删除标记，终态工作区恢复也先取得调度租约。非法记录拒绝，重复标记幂等；CLI 先写标记再删除投影目录，物理删除失败保留标记供重试。此协议不为不识别标记的旧宿主或外部副作用提供强 fencing。

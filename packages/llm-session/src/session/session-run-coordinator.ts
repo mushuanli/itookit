@@ -66,6 +66,7 @@ export class SessionRunCoordinator {
         }>,
         retrieveMemory?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['retrieveMemory'],
         resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>,
+        workspaceManager?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['workspaceManager'],
     ) {
         this.runs = new ConversationRunCoordinator({
             engine,
@@ -76,6 +77,7 @@ export class SessionRunCoordinator {
             resolveSkills: ids => this.agents.getSkills(ids),
             retrieveMemory,
             resolveSessionContext,
+            workspaceManager,
             loadArtifact: async () => null,
         });
     }

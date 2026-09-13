@@ -3,6 +3,30 @@ import { sandboxBaseArgs } from '../src/shell';
 import type { CompiledWorkflow, WorkspaceGrant } from '../src/types';
 
 describe('sandboxBaseArgs', () => {
+    it.each([false, true])('uses Session mount paths for native and virtual cwd (interactive=%s)', interactive => {
+        const grants: WorkspaceGrant[] = [
+            { id: 'extra', path: '/external/data', mountAt: '/data', access: 'read', createdAt: 1 },
+            { id: 'nested', path: '/host/workspace/vendor', mountAt: '/vendor', access: 'read', createdAt: 1 },
+        ];
+        for (const [cwd, expected] of [
+            ['/external/data/sub', '/data/sub'], ['/data/sub', '/data/sub'],
+            ['/workspace/sub', '/workspace/sub'], ['/host/workspace/vendor/sub', '/vendor/sub'],
+        ]) {
+            expect(pair(sandboxBaseArgs(workflow(), grants, cwd, interactive).args, '--workdir')).toBe(expected);
+        }
+        expect(() => sandboxBaseArgs(workflow(), grants, '/data/../../outside', interactive)).toThrow('outside');
+    });
+    it.each([false, true])('keeps all bind mounts read-only for read-only Runs (interactive=%s)', interactive => {
+        const compiled = workflow(); compiled.config.runtime = { workspace: { mode: 'read-only' } };
+        const grants: WorkspaceGrant[] = [
+            { id: 'copy', path: '/host/copy', mountAt: '/workspace', access: 'write', createdAt: 1 },
+            { id: 'extra', path: '/host/extra', mountAt: '/extra', access: 'write', createdAt: 1 },
+        ];
+        const { args } = sandboxBaseArgs(compiled, grants, '/host/copy/sub', interactive);
+        expect(args).toContain('type=bind,src=/host/copy,dst=/workspace,ro');
+        expect(args).toContain('type=bind,src=/host/extra,dst=/extra,ro');
+        expect(pair(args, '--workdir')).toBe('/workspace/sub');
+    });
     it('adds -i for interactive sessions (TTY) but not for one-shot exec', () => {
         const interactive = sandboxBaseArgs(workflow(), [], '/host/workspace', true);
         const oneShot = sandboxBaseArgs(workflow(), [], '/host/workspace', false);

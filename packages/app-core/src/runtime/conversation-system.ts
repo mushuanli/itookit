@@ -3,6 +3,7 @@ import { resolveSessionSkillContext } from '@itookit/kernel-adapters';
 import type { IVFSManager } from '@itookit/vfs-core';
 import { resetSessionManager } from '@itookit/llm-session';
 import type { HeadlessKernelRuntime } from './create-kernel-runtime';
+import { withWorkspaceScopeCleanup } from './workspace-scope-cleanup';
 
 export interface ConversationSystemOptions {
     vfs: IVFSManager;
@@ -10,7 +11,13 @@ export interface ConversationSystemOptions {
     sessionRepository: SessionRepository;
     flowEngine: FlowEngine;
     kernel: HeadlessKernelRuntime;
-
+    /**
+     * Host-owned single-writer gate: true when this host may write the Session. A Session whose
+     * lease is held by another host must stay read-only instead of racing its owner.
+     */
+    ensureWritable?(sessionId: string): Promise<boolean>;
+    /** Host-provided isolated workspace manager for Flow runs (absent → non-shared modes fail closed). */
+    flowWorkspaceManager?: import('@itookit/llm-flow').FlowWorkspaceManager;
 }
 
 /**
@@ -30,6 +37,8 @@ export async function createConversationSystem(
         flowStore: flowEngine,
         dagPlugins: kernel.dagPlugins,
         retrieveMemory: new SessionMemoryProvider(kernel.kernel).retrieve,
+        workspaceManager: options.flowWorkspaceManager ? withWorkspaceScopeCleanup(options.flowWorkspaceManager, kernel) : undefined,
+        canWriteSession: options.ensureWritable,
         resolveSessionContext: (sessionId, userMessage) => resolveSessionSkillContext(kernel.kernel, kernel.sessions, sessionId, userMessage),
         resolveTools: async (sessionId, allowedIds) => {
             const tools = (await kernel.sessions.get(sessionId)).toolService;

@@ -25,14 +25,21 @@ export async function acquireSessionProcessContext(
         catch (cleanup) { throw new AggregateError([error, cleanup], 'Session process initialization and file cleanup failed'); }
         throw error;
     }
-    let release: Promise<void> | undefined;
     return { ...context, nativeShell: processes.nativeShell, ttyDriver: processes.ttyDriver,
-        release: () => release ??= releaseContext(processes, context) };
+        release: orderedRelease([() => processes.release(), () => context.release()]) };
 }
 
-async function releaseContext(processes: { release(): Promise<void> }, files: ToolFiles): Promise<void> {
-    const errors: unknown[] = [];
-    try { await processes.release(); } catch (error) { errors.push(error); }
-    try { await files.release(); } catch (error) { errors.push(error); }
-    if (errors.length) throw new AggregateError(errors, 'Session process context cleanup failed');
+/** Stop must succeed before files can be released; retry only the unfinished steps. */
+function orderedRelease(steps: Array<() => Promise<void>>): () => Promise<void> {
+    let pending: Promise<void> | undefined;
+    return () => {
+        if (pending) return pending;
+        const run = async () => {
+            while (steps.length) { await steps[0](); steps.shift(); }
+        };
+        const attempt = run();
+        pending = attempt;
+        void attempt.catch(() => { if (pending === attempt) pending = undefined; });
+        return attempt;
+    };
 }

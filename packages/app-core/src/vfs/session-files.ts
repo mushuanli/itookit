@@ -22,6 +22,7 @@ export class SessionFilesService {
     private readonly unavailable = new Map<string, ReturnType<typeof createUnavailableDirectory>>();
     private readonly missingViews = new WeakMap<FileSystemView, Set<string>>();
     private readonly views = new Map<string, FileSystemView>();
+    private readonly workspaceViews = new Map<string, Set<FileSystemView>>();
     private readonly tails = new Map<string, Promise<unknown>>();
     private recordsPath(id: string) { this.key(id); return `/var/lib/sessions/${id}/session.seq`; }
     private closed = false;
@@ -73,6 +74,7 @@ export class SessionFilesService {
             const prepared = await this.create(sessionId, next);
             try {
                 await this.save(sessionId, { ...next, state: 'draining' }, old);
+                await this.revokeWorkspaces(sessionId);
                 await this.views.get(sessionId)?.dispose();
                 this.views.delete(sessionId);
                 await this.save(sessionId, next, { ...next, state: 'draining' });
@@ -91,6 +93,7 @@ export class SessionFilesService {
             const next: FilesRecord = { revision, state: 'disabled', mounts: [], cwd: '/' };
             const draining: FilesRecord = { ...next, state: 'draining' };
             await this.save(sessionId, draining, old);
+            await this.revokeWorkspaces(sessionId);
             await this.views.get(sessionId)?.dispose();
             this.views.delete(sessionId);
             await this.save(sessionId, next, draining);
@@ -102,6 +105,37 @@ export class SessionFilesService {
     async acquire(sessionId: string) {
         const owner = await this.acquireFiles(sessionId);
         return { vfs: createVFSToolContext(owner.context), cwd: owner.context.cwd, release: owner.release };
+    }
+
+    /** Host-owned isolated copy; read-only acquisition attenuates all user mounts without changing grants. */
+    acquireWorkspaceFiles(sessionId: string, mountId: string, fs: IFileSystem, access: 'ro' | 'rw' = 'rw'): Promise<FileSystemContextOwner> {
+        return this.serial(sessionId, async () => {
+            const record = await this.inspect(sessionId);
+            const matches = record?.mounts.filter(item => item.mountId === mountId) ?? [];
+            const mount = matches.length === 1 ? matches[0] : undefined;
+            if (record?.state !== 'active' || !mount) throw new FSError('EACCES', 'Workspace requires an active Session mount');
+            if (access === 'rw' && mount.access !== 'rw') throw new FSError('EROFS', 'Workspace requires a writable Session mount');
+            const authorized = await this.create(sessionId, record);
+            await authorized.dispose();
+            const mounts = access === 'ro' ? record.mounts.map(item => ({ ...item, access: 'ro' as const })) : record.mounts;
+            const view = await this.create(sessionId, { ...record, mounts, cwd: mount.at }, false, { mountId, fs });
+            const views = this.workspaceViews.get(sessionId) ?? new Set<FileSystemView>();
+            this.workspaceViews.set(sessionId, views);
+            views.add(view);
+            let released: Promise<void> | undefined;
+            return { context: { fs: view, cwd: mount.at, sessionId }, release: () => released ??= (async () => {
+                await view.dispose();
+                views.delete(view);
+                if (!views.size && this.workspaceViews.get(sessionId) === views) this.workspaceViews.delete(sessionId);
+            })() };
+        });
+    }
+
+    private async revokeWorkspaces(sessionId: string): Promise<void> {
+        const views = this.workspaceViews.get(sessionId);
+        if (!views) return;
+        await Promise.all([...views].map(view => view.dispose()));
+        this.workspaceViews.delete(sessionId);
     }
 
     /** Fixed revision: a change revokes all derived contexts, including tool scopes. */
@@ -119,6 +153,7 @@ export class SessionFilesService {
         this.closed = true;
         this.listeners.clear(); this.sourceSubscriptions.splice(0).forEach(off => off());
         await Promise.allSettled([...this.tails.values()]);
+        await Promise.all([...this.workspaceViews.keys()].map(id => this.revokeWorkspaces(id)));
         await Promise.all([...this.views.values()].map(view => view.dispose()));
         this.views.clear();
         await Promise.all([...this.unavailable.values()].map(async source => (await source).dispose())); this.unavailable.clear();
@@ -129,6 +164,7 @@ export class SessionFilesService {
             const record = await this.inspect(id);
             let view = this.views.get(id);
             if (view && (view.revision !== (record?.revision ?? 0) || record?.state !== 'active' && record !== null)) {
+                await this.revokeWorkspaces(id);
                 await view.dispose();
                 this.views.delete(id);
                 view = undefined;
@@ -145,7 +181,8 @@ export class SessionFilesService {
             return view;
         });
     }
-    private async create(id: string, record: FilesRecord, allowUnavailable = false): Promise<FileSystemView> {
+    private async create(id: string, record: FilesRecord, allowUnavailable = false,
+        workspace?: { mountId: string; fs: IFileSystem }): Promise<FileSystemView> {
         this.key(id);
         const system = await this.intrinsicMounts(id);
         const missing = new Set<string>();
@@ -154,8 +191,9 @@ export class SessionFilesService {
             if (mount.access !== 'ro' && mount.access !== 'rw') throw new FSError('EINVAL', 'Invalid mount access');
             if (!/^\/[a-zA-Z0-9_-]+$/.test(at) || ['attachments', 'etc', 'var', 'dev', 'run', 'history', 'session'].includes(at.slice(1))) throw new FSError('EACCES', 'Reserved or invalid mount point');
             if (system.some(s => at === s.at)) throw new FSError('EACCES', 'Intrinsic mount cannot be overridden');
-            const root = normalizeVirtualPath(mount.root ?? '/');
-            const fs = this.sources.get(mount.sourceId);
+            const replacement = workspace?.mountId === mount.mountId ? workspace.fs : undefined;
+            const root = normalizeVirtualPath(replacement ? '/' : mount.root ?? '/');
+            const fs = replacement ?? this.sources.get(mount.sourceId);
             try {
                 if (!fs) throw new FSError('EACCES', 'Namespace source is unavailable');
                 if (mount.access === 'rw' && (await fs.capabilitiesAt(root)).readonly) throw new FSError('EROFS', 'Source is read-only');

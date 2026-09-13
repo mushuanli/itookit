@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { IDeviceDriver } from '@itookit/vfs-core';
 import { createKernelAdaptersRuntime } from '@itookit/kernel-adapters';
-import { acquireSessionProcessContext } from '@itookit/app-core';
+import { acquireSessionProcessContext } from '../src/vfs/session-process-context';
 
 function files() {
     const release = vi.fn(async () => {});
@@ -51,12 +51,16 @@ it('releases acquired files when platform initialization fails', async () => {
     expect(source.release).toHaveBeenCalledTimes(1);
 });
 
-it('releases files on process cleanup failure and shares concurrent release', async () => {
-    const source = files(), stop = vi.fn(async () => { throw new Error('stop failed'); });
+it('retains files on process cleanup failure and retries a shared release', async () => {
+    const source = files(), stop = vi.fn().mockRejectedValueOnce(new Error('stop failed')).mockResolvedValue(undefined);
     const context = await acquireSessionProcessContext(source, 'one', async () => ({
         nativeShell: { capabilities: { ripgrep: false, fd: false }, exec: async () => ({ stdout: '', stderr: '', code: 0 }) }, release: stop,
     }));
     const results = await Promise.allSettled([context.release(), context.release()]);
     expect(results.map(result => result.status)).toEqual(['rejected', 'rejected']);
-    expect(stop).toHaveBeenCalledTimes(1); expect(source.release).toHaveBeenCalledTimes(1);
+    expect(stop).toHaveBeenCalledTimes(1); expect(source.release).not.toHaveBeenCalled();
+    await Promise.all([context.release(), context.release()]);
+    expect(stop).toHaveBeenCalledTimes(2); expect(source.release).toHaveBeenCalledTimes(1);
+    await context.release();
+    expect(stop).toHaveBeenCalledTimes(2); expect(source.release).toHaveBeenCalledTimes(1);
 });

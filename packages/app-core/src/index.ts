@@ -1,4 +1,3 @@
-export { DirectorySourceUnavailableError, SessionUnfinishedTasksError } from './vfs/errors';
 export { SessionFilesService } from './vfs/session-files';
 export type { SessionMountRecord, FilesRecord } from './vfs/session-files';
 export { DirectoryMountService } from './vfs/directory-mounts';
@@ -7,9 +6,11 @@ export { createSessionAttachmentMounts } from './vfs/session-attachments';
 export { parseSessionRoute, sessionRoute } from './session/session-route';
 export { createVFSToolContext } from './vfs/tool-context';
 export { createUnavailableDirectory } from './vfs/unavailable-directory';
+export { DirectorySourceUnavailableError, SessionUnfinishedTasksError } from './vfs/errors';
 export { workspaceRoot } from './session/workspace-paths';
 export { acquireSessionProcessContext } from './vfs/session-process-context';
 export type { SessionProcessFactory, SessionProcessMount } from './vfs/session-process-context';
+export { acquireWorkspaceProcessContext, type WorkspaceProcessSource } from './vfs/workspace-process-context';
 export { createSessionBrowser, resolveBrowserTarget, taskSummary, taskKeyEvent } from './session/session-browser';
 export type { BrowserTarget, SessionBrowserDependencies } from './session/session-browser';
 export { SessionLifecycleService } from './session/session-lifecycle';
@@ -45,4 +46,6 @@ export { RunCatalog } from './run/run-catalog';
 export type { RunCatalogEntry } from './run/run-catalog';
 
 export { createApplicationRuntime } from './runtime/create-application-runtime';
-export type { ApplicationRuntime, ApplicationRuntimeOptions, ApplicationKernelPlatform } from './runtime/create-application-runtime';
+export type { ApplicationRuntime, ApplicationRuntimeOptions, ApplicationKernelPlatform, ApplicationPlatformServices } from './runtime/create-application-runtime';
+
+export { withWorkspaceScopeCleanup } from './runtime/workspace-scope-cleanup';

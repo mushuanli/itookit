@@ -13,6 +13,8 @@ export interface SchedulerLeaseRecord {
     /** 每次成功接管递增；同一 owner 续租不变。 */
     epoch: number;
     expiresAt: number;
+    /** Permanent tombstone: this Run must never acquire a new scheduler. */
+    deleted?: true;
 }
 
 /** 抛给调度循环的哨兵错误：本宿主已不是该 Run 的调度者，应停止推进而不是把 Run 判失败。 */
@@ -66,7 +68,9 @@ export async function acquireSchedulerLease(
     const ownerId = options.ownerId ?? createOwnerId();
     for (let attempt = 0; attempt < 5; attempt++) {
         const saved = await session.getShared(key);
-        const current = parseRecord(saved?.value);
+        const current = parseSchedulerLeaseRecord(saved?.value);
+        if (saved && !current) throw new Error('Invalid scheduler lease record');
+        if (current?.deleted) throw new Error('Run has been deleted');
         if (current && current.ownerId !== ownerId && current.expiresAt > 0 && current.expiresAt + skewMs > now()) {
             const until = new Date(current.expiresAt + skewMs).toISOString();
             throw new Error(`Run is scheduled by ${current.ownerId} until ${until};`
@@ -100,8 +104,8 @@ function createLease(
     const renew = async (): Promise<void> => {
         if (released) return;
         const saved = await session.getShared(key).catch(() => undefined);
-        const current = parseRecord(saved?.value);
-        if (!current || current.ownerId !== record.ownerId || current.epoch !== record.epoch) return;
+        const current = parseSchedulerLeaseRecord(saved?.value);
+        if (!current || current.deleted || current.ownerId !== record.ownerId || current.epoch !== record.epoch) return;
         await session.setShared(key, { ...current, expiresAt: now() + ttlMs } as unknown as JsonValue,
             { expectedVersion: saved?.version ?? null }).catch(() => undefined);
     };
@@ -109,8 +113,8 @@ function createLease(
         ownerId: record.ownerId,
         epoch: record.epoch,
         async assertOwned(): Promise<void> {
-            const current = parseRecord((await session.getShared(key))?.value);
-            if (!current || current.ownerId !== record.ownerId || current.epoch !== record.epoch) {
+            const current = parseSchedulerLeaseRecord((await session.getShared(key))?.value);
+            if (!current || current.deleted || current.ownerId !== record.ownerId || current.epoch !== record.epoch) {
                 throw new SchedulerOwnershipLostError(record.epoch);
             }
         },
@@ -119,24 +123,52 @@ function createLease(
             released = true;
             clearInterval(heartbeat);
             const saved = await session.getShared(key).catch(() => undefined);
-            const current = parseRecord(saved?.value);
-            if (!current || current.ownerId !== record.ownerId || current.epoch !== record.epoch) return;
+            const current = parseSchedulerLeaseRecord(saved?.value);
+            if (!current || current.deleted || current.ownerId !== record.ownerId || current.epoch !== record.epoch) return;
             await session.setShared(key, { ...current, expiresAt: 0 } as unknown as JsonValue,
                 { expectedVersion: saved?.version ?? null }).catch(() => undefined);
         },
     };
 }
 
-function parseRecord(value: JsonValue | undefined): SchedulerLeaseRecord | undefined {
+export function parseSchedulerLeaseRecord(value: JsonValue | undefined): SchedulerLeaseRecord | undefined {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
     const record = value as Record<string, JsonValue>;
     const ownerId = record.ownerId, epoch = record.epoch, expiresAt = record.expiresAt;
+    if (record.version !== 1 || (record.deleted !== undefined && record.deleted !== true)) return undefined;
     if (typeof ownerId !== 'string' || !ownerId) return undefined;
     if (typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch < 1) return undefined;
-    if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return undefined;
-    return { version: 1, ownerId, epoch, expiresAt };
+    if (typeof expiresAt !== 'number' || !Number.isSafeInteger(expiresAt) || expiresAt < 0) return undefined;
+    return { version: 1, ownerId, epoch, expiresAt, ...(record.deleted === true ? { deleted: true as const } : {}) };
 }
 
 function createOwnerId(): string {
     return `scheduler-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Compete with scheduler acquisition on the same CAS record, retaining deletion across failures. */
+export async function markSchedulerRunDeleted(
+    session: Pick<SessionHandle, 'getShared' | 'setShared'>,
+    rootTaskId: string,
+    options: Pick<SchedulerLeaseOptions, 'skewMs' | 'now'> = {},
+): Promise<void> {
+    const skewMs = options.skewMs ?? 0;
+    if (!Number.isSafeInteger(skewMs) || skewMs < 0) throw new Error('skewMs must be a non-negative safe integer');
+    const key = schedulerOwnerKey(rootTaskId);
+    for (let attempt = 0; attempt < 5; attempt++) {
+        const saved = await session.getShared(key);
+        const current = parseSchedulerLeaseRecord(saved?.value);
+        if (saved && !current) throw new Error('Invalid scheduler lease record; deletion refused');
+        if (current?.deleted) return;
+        if (current && current.expiresAt > 0 && current.expiresAt + skewMs > (options.now?.() ?? Date.now())) {
+            throw new Error(`Run is scheduled by ${current.ownerId} until ${new Date(current.expiresAt + skewMs).toISOString()}; deletion refused`);
+        }
+        const epoch = (current?.epoch ?? 0) + 1;
+        if (!Number.isSafeInteger(epoch)) throw new Error('Scheduler epoch exhausted');
+        try {
+            await session.setShared(key, { version: 1, ownerId: 'deleted', epoch, expiresAt: 0, deleted: true },
+                { expectedVersion: saved?.version ?? null });
+            return;
+        } catch (error) { if (attempt === 4) throw error; }
+    }
 }

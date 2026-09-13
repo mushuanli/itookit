@@ -1,4 +1,5 @@
 import { acquireRunSchedulerLock } from './run-scheduler-lock';
+import { markRunDeleted } from './run-scheduler-lease';
 import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
@@ -240,7 +241,7 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions, overri
     try {
         runtime = await runtimeFor(loaded.workflow, manifest, store, options, 'execute', override?.useProfileConfig);
         await runtime.kernel.createSession({ id, storage: cliStorage(id) });
-        const definition = override?.definition ?? compileRunDefinition(loaded.workflow, loaded.hash);
+        const definition = override?.definition ?? compileRunDefinition(loaded.workflow, loaded.hash, runtime.workspaceRoot);
         const spec = toDagRunSpec(definition);
         // `submit` resolves as soon as the durable root exists, before the nodes are
         // dispatched, so this handle is live but its node map is still empty here.
@@ -451,6 +452,15 @@ export async function deleteCommand(runId: string, options: CommandOptions): Pro
         const manifest = await store.load(runId);
         if (!isTerminal(manifest.status)) {
             throw new Error(`Run ${runId} is still ${manifest.status}; cancel it before deleting`);
+        }
+        // 本地锁只对本地文件系统有效；共享存储上必须再看通用调度租约，否则会删掉另一个
+        // 宿主正在推进的 Run（manifest 在本地视角可能已经过期）。
+        if (manifest.rootTaskId) {
+            await markRunDeleted({
+                vfsRoot: resolveProfileVfsRoot(options),
+                sessionId: manifest.sessionId,
+                rootTaskId: manifest.rootTaskId,
+            });
         }
         await store.delete(runId);
         print(options, { type: 'run.deleted', runId });

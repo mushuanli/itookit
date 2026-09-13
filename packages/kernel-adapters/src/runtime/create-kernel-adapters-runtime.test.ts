@@ -17,6 +17,125 @@ import { buildSkillPromptContext } from '../skill/prompt-context';
 import { ApprovedEffectProgram } from '../programs/approved-effect-program';
 
 describe('createKernelAdaptersRuntime', () => {
+    it('routes real tool Effects to independent Run files and shells and tombstones closed scopes', async () => {
+        const opened: string[] = [], released: string[] = [];
+        const files = async (id: string) => {
+            opened.push(id);
+            return { cwd: '/workspace', vfs: {
+                readFile: async () => id, writeFile: async () => {}, listFiles: async () => [],
+            }, nativeShell: { capabilities: { ripgrep: false, fd: false },
+                exec: async () => ({ stdout: id, stderr: '', code: 0 }) },
+            release: async () => { released.push(id); } };
+        };
+        const select = vi.fn(async (effect: EffectExecutionContext) => effect.taskId === 'normal' ? undefined : effect.taskId);
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            fileContextForSession: () => files('normal'),
+            scopeForEffect: select,
+            fileContextForScope: (session, run) => files(`${session}:${run}`),
+        });
+        const effects: EffectAdapter[] = []; runtime.plugin.install(registration(effects));
+        const tool = effects.find(effect => effect.kind === 'tool.call')!;
+        const invoke = async (taskId: string, toolId = 'Read') => tool.execute({
+            resourceHandleId: 'tool-handle', toolId,
+            args: toolId === 'Read' ? { file_path: '/workspace/file.txt' } : { command: 'pwd' },
+        }, { ...context(sessionState()), taskId, effectId: crypto.randomUUID() });
+        try {
+            const results = await Promise.all(['one', 'two', 'normal'].map(id => invoke(id)));
+            expect(JSON.stringify(results[0])).toContain('session-a:one');
+            expect(JSON.stringify(results[1])).toContain('session-a:two');
+            expect(JSON.stringify(results[2])).toContain('normal');
+            expect(JSON.stringify(await invoke('one', 'Bash'))).toContain('session-a:one');
+            expect(opened.sort()).toEqual(['normal', 'session-a:one', 'session-a:two']);
+            expect(select).toHaveBeenCalledTimes(4);
+            await runtime.disposeScope('session-a', 'one');
+            await expect(invoke('one')).rejects.toThrow('closed');
+            expect(JSON.stringify(await invoke('two'))).toContain('session-a:two');
+            await runtime.disposeScope('session-a', 'not-opened');
+            await expect(invoke('not-opened')).rejects.toThrow('closed');
+            await runtime.disposeSession('session-a');
+            expect(released.sort()).toEqual(['normal', 'session-a:one', 'session-a:two']);
+        } finally { await runtime.dispose(); }
+        expect(released).toHaveLength(3);
+    });
+
+    it('shares in-flight Run cleanup and does not open a scope after Session disposal', async () => {
+        let stopped!: () => void;
+        const stopping = new Promise<void>(resolve => { stopped = resolve; });
+        const release = vi.fn(() => stopping);
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            scopeForEffect: async () => 'run', fileContextForScope: async () => ({ cwd: '/',
+                vfs: { readFile: async () => '', writeFile: async () => {}, listFiles: async () => [] }, release }),
+        });
+        try {
+            await runtime.sessions.getForEffect!(context(sessionState()));
+            let finished = 0;
+            const first = runtime.disposeScope('session-a', 'run').then(() => { finished++; });
+            const second = runtime.disposeScope('session-a', 'run').then(() => { finished++; });
+            await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+            expect(finished).toBe(0);
+            stopped();
+            await Promise.all([first, second]);
+            expect(finished).toBe(2);
+        } finally { stopped(); await runtime.dispose(); }
+        await expect(runtime.sessions.getForEffect!(context(sessionState()))).rejects.toThrow('closing');
+    });
+
+    it('retries a failed Run release while refusing late capability acquisition', async () => {
+        const release = vi.fn().mockRejectedValueOnce(new Error('release failed')).mockResolvedValue(undefined);
+        const acquire = vi.fn(async () => ({ cwd: '/',
+            vfs: { readFile: async () => '', writeFile: async () => {}, listFiles: async () => [] }, release }));
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            scopeForEffect: async () => 'run', fileContextForScope: acquire });
+        try {
+            await runtime.sessions.getForEffect!(context(sessionState()));
+            await expect(runtime.disposeScope('session-a', 'run')).rejects.toThrow('release failed');
+            await expect(runtime.sessions.getForEffect!(context(sessionState()))).rejects.toThrow('closed');
+            await Promise.all([runtime.disposeScope('session-a', 'run'), runtime.disposeScope('session-a', 'run')]);
+            expect(release).toHaveBeenCalledTimes(2);
+            expect(acquire).toHaveBeenCalledOnce();
+            await runtime.disposeScope('session-a', 'run');
+            expect(release).toHaveBeenCalledTimes(2);
+        } finally { await runtime.dispose(); }
+    });
+
+    it('keeps a failed Session close blocked until its original resources are released', async () => {
+        const release = vi.fn().mockRejectedValueOnce(new Error('release failed')).mockResolvedValue(undefined);
+        const acquire = vi.fn(async () => ({ cwd: '/',
+            vfs: { readFile: async () => '', writeFile: async () => {}, listFiles: async () => [] }, release }));
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            fileContextForSession: acquire });
+        try {
+            await runtime.sessions.get('session-a');
+            await expect(runtime.disposeSession('session-a')).rejects.toThrow('release failed');
+            await expect(runtime.sessions.get('session-a')).rejects.toThrow('closing');
+            await runtime.disposeSession('session-a');
+            expect(release).toHaveBeenCalledTimes(2);
+            expect(acquire).toHaveBeenCalledOnce();
+            await runtime.sessions.get('session-a');
+            expect(acquire).toHaveBeenCalledTimes(2);
+        } finally { await runtime.dispose(); }
+    });
+
+    it('never falls back to Session files if isolated scope selection or acquisition fails', async () => {
+        const normal = vi.fn(async () => ({ cwd: '/', vfs: {
+            readFile: async () => 'base', writeFile: async () => {}, listFiles: async () => [],
+        }, release: async () => {} }));
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            fileContextForSession: normal, scopeForEffect: async ctx => {
+                if (ctx.taskId === 'missing') throw new Error('Run lease missing');
+                return 'isolated';
+            }, fileContextForScope: async () => { throw new Error('Worktree missing'); },
+        });
+        const effects: EffectAdapter[] = []; runtime.plugin.install(registration(effects));
+        const effect = effects.find(effect => effect.kind === 'tool.call')!;
+        try {
+            for (const taskId of ['missing', 'present']) await expect(effect.execute({
+                resourceHandleId: 'tool-handle', toolId: 'Read', args: { file_path: '/workspace/file' },
+            }, { ...context(sessionState()), taskId })).rejects.toThrow(/missing/);
+            expect(normal).not.toHaveBeenCalled();
+        } finally { await runtime.dispose(); }
+    });
+
     it('releases acquired views when the Session skill scan fails', async () => {
         let released = 0;
         const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,

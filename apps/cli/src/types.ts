@@ -33,8 +33,16 @@ export interface WorkflowConfigV1 {
     agents: AgentConfig[];
     tasks: TaskConfig[];
     result: { task: string; output: string };
-    runtime?: { max_concurrency?: number; max_duration?: string | number };
+    runtime?: { max_concurrency?: number; max_duration?: string | number; workspace?: WorkspacePolicyConfig };
     sandbox?: SandboxConfig;
+}
+
+/** Run-level workspace policy; mirrors `FlowWorkspacePolicy` from `@itookit/common`. */
+export interface WorkspacePolicyConfig {
+    mode: 'shared' | 'read-only' | 'worktree';
+    base?: string;
+    merge?: 'manual' | 'auto-if-clean' | 'discard';
+    cleanup?: 'on-success' | 'always' | 'keep';
 }
 
 export interface ProviderConfig {

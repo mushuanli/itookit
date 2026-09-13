@@ -64,7 +64,8 @@ async function coordinate<T>(kind: string, registry: SessionCapabilityRegistry, 
     if (kind === 'tool.call') {
         assertEffectGrant(context, (request as { resourceHandleId: string }).resourceHandleId, 'tool');
         context.abortSignal.throwIfAborted();
-        const meta = (await registry.get(context.sessionId)).toolService.getToolMeta((request as { toolId: string }).toolId);
+        const scope = await (registry.getForEffect?.(context) ?? registry.get(context.sessionId));
+        const meta = scope.toolService.getToolMeta((request as { toolId: string }).toolId);
         mutates = !!(meta?.skillLoaderArgKey || meta?.skillUnloaderArgKey);
     }
     return mutates ? runSessionSkillOperation(registry, context.sessionId, () => {

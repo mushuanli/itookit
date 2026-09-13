@@ -6,7 +6,7 @@ export { flowToDag } from './to-dag';
 export { DagPluginRegistry } from './plugin-registry';
 export { createBuiltinDagPluginRegistry } from './builtin-plugins';
 export { DurableFlowExecutor } from './executor';
-export type { DurableFlowExecutorOptions, FlowExecutionHandle, FlowWorkspaceLease, FlowWorkspaceManager } from './executor';
+export type { DurableFlowExecutorOptions, FlowExecutionHandle, FlowWorkspaceLease, FlowWorkspaceManager, FlowWorkspaceRestoreOptions } from './executor';
 export { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from './programs';
 export { registerDurablePrograms } from './register-programs';
 export { findCycles, type GraphCycles, type GraphEdge, type GraphNode } from './graph';
@@ -24,7 +24,8 @@ export * from './workflow';
 
 export { readFlowTaskTranscript, type FlowTaskTranscript, type FlowTranscriptQuery } from './transcript';
 
-export { prepareFlowTaskRetry, type FlowRunMember } from './run-members';
+export { prepareFlowTaskRetry, waitForFlowRunTasks, type FlowRunMember } from './run-members';
+export { resolveFlowRunForTask, resolveFlowTaskWorkspace, type FlowTaskWorkspace } from './task-run';
 
 export { retryFlowTask } from './retry-task';
 
@@ -36,7 +37,9 @@ export { schemaCompatibilityIssue } from './schema-compat';
 
 export {
     acquireSchedulerLease,
+    markSchedulerRunDeleted,
     isSchedulerOwnershipLost,
+    parseSchedulerLeaseRecord,
     schedulerOwnerKey,
     SchedulerOwnershipLostError,
 } from './scheduler-lease';

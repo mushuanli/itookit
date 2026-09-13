@@ -149,4 +149,28 @@ describe('validateWorkflow', () => {
         (value.tasks[0] as Record<string, unknown>).typo_field = true;
         expect(() => validateWorkflow(value, false)).toThrow('Unrecognized');
     });
+
+    it('accepts a worktree workspace policy with native sandbox', () => {
+        const value = workflow();
+        value.runtime = { workspace: { mode: 'worktree', base: 'head', merge: 'auto-if-clean', cleanup: 'keep' } };
+        value.sandbox = { mode: 'native' };
+        expect(validateWorkflow(value, false).runtime?.workspace).toMatchObject({ mode: 'worktree' });
+    });
+
+    it('rejects a worktree workspace policy without native sandbox', () => {
+        const value = workflow();
+        value.runtime = { workspace: { mode: 'worktree' } };
+        expect(() => validateWorkflow(value, false)).toThrow('worktree requires sandbox.mode: native');
+    });
+
+    it('requires OCI for read-only workspaces', () => {
+        const value = workflow();
+        value.runtime = { workspace: { mode: 'read-only' } };
+        value.sandbox = { mode: 'native' };
+        expect(() => validateWorkflow(value, false)).toThrow('read-only requires sandbox.mode: oci');
+        value.sandbox = { mode: 'oci' };
+        expect(validateWorkflow(value, false).runtime?.workspace?.mode).toBe('read-only');
+        value.runtime.workspace!.merge = 'auto-if-clean';
+        expect(() => validateWorkflow(value, false)).toThrow('cannot merge changes');
+    });
 });
