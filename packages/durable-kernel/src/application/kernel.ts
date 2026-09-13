@@ -406,6 +406,15 @@ export class Kernel implements KernelRegistration {
         return this.store.events(await this.binding(sessionId), after);
     }
 
+    /** Retention/GC for a Task's event log; see `SeqFileKernelStore.pruneTaskEvents`. */
+    async pruneTaskEvents(
+        sessionId: string,
+        taskId: string,
+        options: { keepEvents?: number } = {},
+    ): Promise<{ removed: number; firstAvailableIndex: number }> {
+        return this.store.pruneTaskEvents(await this.binding(sessionId), taskId, options);
+    }
+
     async taskEventPage(sessionId: string, taskId: string, query: import('../domain/types').TaskEventQuery = {}): Promise<import('../domain/types').TaskEventPage> {
         return this.store.taskEventPage(await this.binding(sessionId), taskId, query);
     }

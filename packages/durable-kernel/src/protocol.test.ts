@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend, type IVFSManager, type IFileSystem } from '@itookit/vfs-core';
-import { ensureTree, sessionPath, taskPath } from './infrastructure/seqfile/seqfile-core';
+import { ensureTree, sessionPath, taskPath, eventsPath, taskEventKey, taskEventFirstKey } from './infrastructure/seqfile/seqfile-core';
 import { Kernel } from './application/kernel';
 import { SeqFileKernelStore } from './infrastructure/seqfile/store';
 import { addEffect, executeEffectAdapter } from './application/effect-utils';
@@ -28,6 +28,61 @@ describe('durable harness protocols', () => {
             expect(await fs.driver.exists('/existing/deep/root/task/artifacts')).toBe(true);
         } finally { exists.mockRestore(); }
     });
+    it('prunes old Task events and reports the retention watermark for resync', async () => {
+        const task = await store.createTask(binding, 's', spec);
+        for (let step = 0; step < 4; step++) await store.signalTask(binding, task.id, { type: 'external', payload: { step } });
+        const full = await store.taskEventPage(binding, task.id, { limit: 500 });
+        expect(full.items.length).toBeGreaterThanOrEqual(4);
+        expect(full.firstAvailableIndex).toBeUndefined();
+        const total = full.throughIndex;
+        const kept = 2;
+        const before = await store.readTask(binding, task.id);
+
+        const pruned = await store.pruneTaskEvents(binding, task.id, { keepEvents: kept });
+        expect(pruned.removed).toBe(total - kept);
+        expect(pruned.firstAvailableIndex).toBe(total - kept + 1);
+        // A fresh read starts at the retained window and announces the watermark.
+        const page = await store.taskEventPage(binding, task.id, { limit: 500 });
+        expect(page.firstAvailableIndex).toBe(pruned.firstAvailableIndex);
+        // The retained window keeps the newest `kept` events plus the prune event itself.
+        expect(page.items.slice(0, kept).map(event => event.sequence))
+            .toEqual(full.items.slice(-kept).map(event => event.sequence));
+        expect(page.items.at(-1)?.type).toBe('task.events.pruned');
+        // A stale cursor resyncs instead of reading missing events.
+        const stale = await store.taskEventPage(binding, task.id, { afterIndex: 0, limit: 500 });
+        expect(stale.items.map(event => event.sequence)).toEqual(page.items.map(event => event.sequence));
+        // Pruned rows are gone from the raw log; the Task record and its history remain.
+        const sequences = (await store.events(binding)).map(event => event.sequence);
+        expect(sequences).not.toContain(full.items[0].sequence);
+        expect((await store.readTask(binding, task.id)).version).toBe(before.version);
+        expect((await store.taskHistory(binding, task.id)).length).toBeGreaterThan(0);
+        // Re-running may prune the previous audit event because it is also indexed.
+        const again = await store.pruneTaskEvents(binding, task.id, { keepEvents: kept });
+        expect(again.removed).toBeLessThanOrEqual(1);
+        await fs.meta.seq!.setEntry(eventsPath(binding.rootPath), taskEventFirstKey(task.id), '99999');
+        await expect(store.taskEventPage(binding, task.id)).rejects.toThrow('retention watermark');
+        await expect(store.pruneTaskEvents(binding, task.id)).rejects.toThrow('retention watermark');
+    });
+
+    it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid event retention count %s', async keepEvents => {
+        const task = await store.createTask(binding, 's', spec);
+        const before = await store.events(binding);
+        await expect(store.pruneTaskEvents(binding, task.id, { keepEvents })).rejects.toThrow('keepEvents');
+        expect(await store.events(binding)).toEqual(before);
+    });
+
+    it('refuses to delete another Task event through a corrupt retention index', async () => {
+        const task = await store.createTask(binding, 's', spec);
+        await store.signalTask(binding, task.id, { type: 'advance' });
+        const other = await store.createTask(binding, 's', spec);
+        const before = await store.events(binding);
+        const foreign = before.find(event => event.taskId === other.id)!;
+        await fs.meta.seq!.setEntry(eventsPath(binding.rootPath), taskEventKey(task.id, 1), String(foreign.sequence));
+        await expect(store.pruneTaskEvents(binding, task.id, { keepEvents: 1 })).rejects.toThrow('scope mismatch');
+        expect(await store.events(binding)).toEqual(before);
+        expect(await fs.meta.seq!.getEntry(eventsPath(binding.rootPath), taskEventFirstKey(task.id))).toBeNull();
+    });
+
     it('compacts Task version history without touching the authoritative record or facts', async () => {
         const task = await store.createTask(binding, 's', spec);
         // Every versioned write records a snapshot; signals advance the record cheaply.

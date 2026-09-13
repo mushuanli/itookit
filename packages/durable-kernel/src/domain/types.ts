@@ -691,7 +691,13 @@ export interface TaskHistoryPage {
 
 /** Index cursors are Task-local ordinals, distinct from Session event sequence numbers. */
 export interface TaskEventQuery { afterIndex?: number; throughIndex?: number; limit?: number; }
-export interface TaskEventPage { items: EventEnvelope[]; throughIndex: number; nextAfterIndex?: number; }
+export interface TaskEventPage {
+    items: EventEnvelope[];
+    throughIndex: number;
+    nextAfterIndex?: number;
+    /** Set when older events were pruned: the first index still retained. */
+    firstAvailableIndex?: number;
+}
 export interface TaskListQuery { afterIndex?: number; throughIndex?: number; limit?: number; }
 /** Membership is pinned by throughIndex; each page reads current Task status. */
 export interface TaskListPage { items: TaskRecord[]; throughIndex: number; nextAfterIndex?: number; }

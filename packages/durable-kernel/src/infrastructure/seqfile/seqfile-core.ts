@@ -181,6 +181,8 @@ export async function appendEventTx(
 }
 
 export function taskEventCountKey(taskId: string): string { return `task-event-count/${encodeURIComponent(taskId)}`; }
+/** First Task event index still retained on disk; absent means nothing was pruned yet. */
+export function taskEventFirstKey(taskId: string): string { return `task-event-first/${encodeURIComponent(taskId)}`; }
 export function taskEventKey(taskId: string, index: number): string { return `task-event/${encodeURIComponent(taskId)}/${String(index).padStart(16, '0')}`; }
 export async function indexTaskEventTx(tx: ISeqFileTransaction, root: string, event: EventEnvelope): Promise<void> {
     if (!event.taskId) return;

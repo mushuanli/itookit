@@ -4,7 +4,7 @@ import { executeResourceTx, type PreparedResourceCommand } from './managed-resou
 import { createCacheTx, readCacheTx, publishCacheTx, invalidateCacheTx, renewCacheTx, manageCacheTx, listCachesTx } from './cache-store';
 import { refreshWaiters, recoverWaitGraphTx, hasCancelledAncestorTx, validateRetrySourceTx } from './store-helpers';
 import { assertDurableValue } from '../../application/durability';
-import { snapshotKey, ensureTaskEventIndexTx, taskEventCountKey, taskEventKey } from './seqfile-core';
+import { snapshotKey, ensureTaskEventIndexTx, taskEventCountKey, taskEventFirstKey, taskEventKey } from './seqfile-core';
 
 import type {
     BudgetAccount,
@@ -1253,6 +1253,11 @@ export class SeqFileKernelStore {
         });
     }
 
+    /**
+     * Page a Task's indexed events. A stale cursor below the retention watermark is
+     * clamped to the retained window and reported via `firstAvailableIndex`, so a
+     * consumer that kept an old cursor resyncs instead of reading missing events.
+     */
     async taskEventPage(binding: ResolvedStorageBinding, taskId: TaskId, query: import('../../domain/types').TaskEventQuery = {}): Promise<import('../../domain/types').TaskEventPage> {
         const after = query.afterIndex ?? 0, limit = query.limit ?? 100;
         if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('Invalid Task event page');
@@ -1262,10 +1267,13 @@ export class SeqFileKernelStore {
             const path = eventsPath(binding.rootPath);
             const count = Number(await tx.getEntry(path, taskEventCountKey(taskId)) ?? 0);
             if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid Task event count');
+            const first = Number(await tx.getEntry(path, taskEventFirstKey(taskId)) ?? 1);
+            if (!Number.isSafeInteger(first) || first < 1 || first > count + 1) throw new Error('Invalid Task event retention watermark');
             const through = query.throughIndex ?? count;
             if (!Number.isSafeInteger(through) || through < 0 || through > count) throw new Error('Invalid Task event upper bound');
-            const end = Math.min(through, after + limit), keys: string[] = [];
-            for (let index = after + 1; index <= end; index++) keys.push(taskEventKey(taskId, index));
+            const start = Math.max(after + 1, first);
+            const end = Math.min(through, start - 1 + limit), keys: string[] = [];
+            for (let index = start; index <= end; index++) keys.push(taskEventKey(taskId, index));
             const refs = Object.fromEntries(await Promise.all(keys.map(async key => [key, await tx.getEntry(path, key)] as const)));
             const eventKeys = keys.map(key => {
                 const sequence = Number(refs[key]);
@@ -1279,7 +1287,53 @@ export class SeqFileKernelStore {
                 if (event.taskId !== taskId || event.sessionId !== task.sessionId) throw new Error('Task event index scope mismatch');
                 return event;
             });
-            return { items, throughIndex: through, ...(end < through ? { nextAfterIndex: end } : {}) };
+            return { items, throughIndex: through, ...(end < through ? { nextAfterIndex: end } : {}),
+                ...(first > 1 ? { firstAvailableIndex: first } : {}) };
+        });
+    }
+
+    /**
+     * Retention/GC for a Task's event log (Storage §5 `events.seq` retention). Keeps the
+     * newest `keepEvents` indexed events (and the session-level events, which are not
+     * indexed), removes older `event/<sequence>` rows together with their index entries,
+     * and records the retention watermark that `taskEventPage` reports for resync.
+     */
+    async pruneTaskEvents(
+        binding: ResolvedStorageBinding,
+        taskId: TaskId,
+        options: { keepEvents?: number } = {},
+    ): Promise<{ removed: number; firstAvailableIndex: number }> {
+        const keepEvents = options.keepEvents ?? 200;
+        if (!Number.isSafeInteger(keepEvents) || keepEvents < 1) throw new Error('keepEvents must be a positive safe integer');
+        return transaction(binding.fs, async tx => {
+            const task = await requireTaskTx(tx, binding.rootPath, taskId);
+            await ensureTaskEventIndexTx(tx, binding.rootPath);
+            const path = eventsPath(binding.rootPath);
+            const count = Number(await tx.getEntry(path, taskEventCountKey(taskId)) ?? 0);
+            if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid Task event count');
+            const first = Number(await tx.getEntry(path, taskEventFirstKey(taskId)) ?? 1);
+            if (!Number.isSafeInteger(first) || first < 1 || first > count + 1) throw new Error('Invalid Task event retention watermark');
+            const nextFirst = Math.max(first, count - keepEvents + 1);
+            if (nextFirst <= first) return { removed: 0, firstAvailableIndex: first };
+            let removed = 0;
+            for (let index = first; index < nextFirst; index++) {
+                const key = taskEventKey(taskId, index);
+                const sequence = Number(await tx.getEntry(path, key));
+                if (!Number.isSafeInteger(sequence) || sequence < 1) throw new Error('Invalid Task event index');
+                const eventKey = `event/${String(sequence).padStart(16, '0')}`;
+                const raw = await tx.getEntry(path, eventKey);
+                if (!raw) throw new Error('Task event record missing');
+                const event = decode<EventEnvelope>(raw);
+                if (event.taskId !== taskId || event.sessionId !== task.sessionId || event.sequence !== sequence)
+                    throw new Error('Task event index scope mismatch');
+                await tx.deleteEntry(path, key);
+                await tx.deleteEntry(path, eventKey);
+                removed++;
+            }
+            await tx.setEntry(path, taskEventFirstKey(taskId), String(nextFirst));
+            await appendEventTx(tx, binding.rootPath, task.sessionId, taskId, 'task.events.pruned',
+                { removed, firstAvailableIndex: nextFirst });
+            return { removed, firstAvailableIndex: nextFirst };
         });
     }
 
