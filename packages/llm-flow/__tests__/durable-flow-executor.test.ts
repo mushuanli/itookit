@@ -46,6 +46,11 @@ describe('DurableFlowExecutor', () => {
         }
     });
 
+    it.each([-1, 0.5, NaN, Infinity])('rejects invalid scheduler skew allowance %s', async schedulerLeaseSkewMs => {
+        const run = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), schedulerLeaseSkewMs });
+        await expect(run.submit('session-one', valueFlow())).rejects.toThrow('skewMs');
+    });
+
     beforeEach(async () => {
         ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
         fs = await manager.openFileSystem('/data/test');

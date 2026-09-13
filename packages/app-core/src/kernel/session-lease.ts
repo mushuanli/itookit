@@ -21,6 +21,12 @@ export interface SessionLeaseOptions {
     path?: string;
     /** Default lease duration. */
     ttlMs?: number;
+    /**
+     * Explicit cross-host clock-error budget (default 0 = single host or one clock source).
+     * Takeover requires `leaseUntil + skewMs`, so a host whose clock runs fast cannot take
+     * over a live Session lease from a host whose clock runs slow.
+     */
+    skewMs?: number;
     /** Injectable clock for tests. */
     now?: () => number;
 }
@@ -28,16 +34,20 @@ export interface SessionLeaseOptions {
 const DEFAULT_PATH = '/var/lib/kernel/session-leases.seq';
 const DEFAULT_TTL_MS = 60_000;
 
-/** Single-owner-per-Session lease stored in the shared MindOS SeqFile. */
+/** Single-owner-per-Session lease stored in the shared MindOS SeqFiles. */
 export class SessionLeaseStore {
     private readonly path: string;
     private readonly ttlMs: number;
+    private readonly skewMs: number;
     private readonly now: () => number;
+    /** Lease storage exists once per store; the heartbeat must not stat it every renew. */
     private ensured?: Promise<void>;
 
     constructor(private readonly fs: IFileSystem, options: SessionLeaseOptions = {}) {
         this.path = options.path ?? DEFAULT_PATH;
         this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
+        this.skewMs = options.skewMs ?? 0;
+        if (!Number.isSafeInteger(this.skewMs) || this.skewMs < 0) throw new Error('skewMs must be a non-negative safe integer');
         this.now = options.now ?? Date.now;
     }
 
@@ -73,7 +83,7 @@ export class SessionLeaseStore {
             const raw = await tx.getEntry(this.path, key(sessionId));
             const current = raw ? parse(raw) : null;
             const now = this.now();
-            if (current && current.ownerId !== owner.id && current.leaseUntil > now) return null;
+            if (current && current.ownerId !== owner.id && current.leaseUntil + this.skewMs > now) return null;
             const record: SessionLeaseRecord = {
                 sessionId,
                 ownerId: owner.id,

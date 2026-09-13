@@ -30,6 +30,11 @@ export function isSchedulerOwnershipLost(error: unknown): error is SchedulerOwne
 export interface SchedulerLeaseOptions {
     /** 租约有效期，默认 30s；到期后其他宿主可接管。 */
     ttlMs?: number;
+    /**
+     * 明确的跨主机时钟误差约束（默认 0，仅本机/同时钟源部署）。
+     * 接管要求旧租约到期后再经过 skewMs，避免快时钟宿主抢走慢时钟宿主的活租约。
+     */
+    skewMs?: number;
     /** 测试或宿主指定身份；默认随机生成。 */
     ownerId?: string;
     /** 时钟注入，便于测试到期与接管。 */
@@ -55,13 +60,17 @@ export async function acquireSchedulerLease(
 ): Promise<SchedulerLease> {
     const key = schedulerOwnerKey(rootTaskId);
     const ttlMs = Math.max(1_000, options.ttlMs ?? 30_000);
+    const skewMs = options.skewMs ?? 0;
+    if (!Number.isSafeInteger(skewMs) || skewMs < 0) throw new Error('skewMs must be a non-negative safe integer');
     const now = (): number => options.now?.() ?? Date.now();
     const ownerId = options.ownerId ?? createOwnerId();
     for (let attempt = 0; attempt < 5; attempt++) {
         const saved = await session.getShared(key);
         const current = parseRecord(saved?.value);
-        if (current && current.ownerId !== ownerId && current.expiresAt > now()) {
-            throw new Error(`Run is scheduled by ${current.ownerId} until ${new Date(current.expiresAt).toISOString()};`
+        if (current && current.ownerId !== ownerId && current.expiresAt > 0 && current.expiresAt + skewMs > now()) {
+            const until = new Date(current.expiresAt + skewMs).toISOString();
+            throw new Error(`Run is scheduled by ${current.ownerId} until ${until};`
+                + (skewMs > 0 ? ` takeover waits for the configured ${skewMs}ms clock skew budget;` : '')
                 + ' wait for the lease to expire or stop the other host');
         }
         const record: SchedulerLeaseRecord = {

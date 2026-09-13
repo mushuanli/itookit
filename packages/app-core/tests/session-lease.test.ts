@@ -31,6 +31,10 @@ describe('SessionLeaseStore', () => {
         } finally { await manager.dispose(); }
     });
 
+    it.each([-1, 0.5, NaN, Infinity])('rejects invalid skew allowance %s', skewMs => {
+        expect(() => new SessionLeaseStore({} as never, { skewMs })).toThrow('skewMs');
+    });
+
     it('ensures the lease file once per store instead of on every operation', async () => {
         const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
         const fs = await manager.openFileSystem('/data');
@@ -53,4 +57,38 @@ describe('SessionLeaseStore', () => {
         }
     });
 
+    it('waits out the configured clock-skew budget before taking over a live Session lease', async () => {
+        const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+        const fs = await manager.openFileSystem('/data');
+        try {
+            let now = 0;
+            const store = new SessionLeaseStore(fs, { ttlMs: 1_000, skewMs: 5_000, now: () => now });
+            const first = (await store.acquire('session-a', { id: 'host-a', kind: 'cli' }))!;
+            expect(first.leaseUntil).toBe(1_000);
+
+            // Local time says the lease expired, but a fast clock must not steal it.
+            now = 1_001;
+            expect(await store.acquire('session-a', { id: 'host-b', kind: 'cli' })).toBeNull();
+            expect((await store.inspect('session-a'))?.ownerId).toBe('host-a');
+            now = 6_000;
+            const takeover = (await store.acquire('session-a', { id: 'host-b', kind: 'cli' }))!;
+            expect(takeover).toMatchObject({ ownerId: 'host-b', fencingToken: 2 });
+        } finally {
+            await manager.dispose();
+        }
+    });
+
+    it('keeps takeover immediate when no skew budget is configured', async () => {
+        const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+        const fs = await manager.openFileSystem('/data');
+        try {
+            let now = 0;
+            const store = new SessionLeaseStore(fs, { ttlMs: 1_000, now: () => now });
+            await store.acquire('session-a', { id: 'host-a', kind: 'cli' });
+            now = 1_001;
+            expect(await store.acquire('session-a', { id: 'host-b', kind: 'cli' })).toMatchObject({ ownerId: 'host-b' });
+        } finally {
+            await manager.dispose();
+        }
+    });
 });

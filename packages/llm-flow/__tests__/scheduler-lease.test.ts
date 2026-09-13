@@ -40,6 +40,44 @@ describe('acquireSchedulerLease', () => {
         await second.release();
     });
 
+    it.each([-1, 0.5, NaN, Infinity])('rejects invalid skew allowance %s', async skewMs => {
+        await expect(acquireSchedulerLease(fakeSession() as never, 'root', { skewMs })).rejects.toThrow('skewMs');
+    });
+
+    it('hands over an explicitly released lease without waiting out skew', async () => {
+        const session = fakeSession();
+        const first = await acquireSchedulerLease(session as never, 'root', { ownerId: 'a', now: () => 0 });
+        await first.release();
+        const second = await acquireSchedulerLease(session as never, 'root', { ownerId: 'b', skewMs: 5_000, now: () => 0 });
+        expect(second.epoch).toBe(2);
+        await second.release();
+    });
+
+    it('applies an explicit clock skew budget before taking over an expired lease', async () => {
+        const session = fakeSession();
+        await acquireSchedulerLease(session as never, 'root', { ownerId: 'host-a', ttlMs: 5_000, now: () => 0 });
+        // Local time says the lease expired, but a host whose clock runs fast must not
+        // steal it before the owner's clock could have reached the deadline.
+        await expect(acquireSchedulerLease(session as never, 'root',
+            { ownerId: 'host-b', skewMs: 5_000, now: () => 5_001 }))
+            .rejects.toThrow('clock skew budget');
+        await expect(acquireSchedulerLease(session as never, 'root',
+            { ownerId: 'host-b', skewMs: 5_000, now: () => 9_999 }))
+            .rejects.toThrow('scheduled by host-a until');
+        const takeover = await acquireSchedulerLease(session as never, 'root',
+            { ownerId: 'host-b', skewMs: 5_000, now: () => 10_001 });
+        expect(takeover).toMatchObject({ ownerId: 'host-b', epoch: 2 });
+        await takeover.release();
+    });
+
+    it('keeps the skew budget off (and takeover unchanged) by default', async () => {
+        const session = fakeSession();
+        await acquireSchedulerLease(session as never, 'root', { ownerId: 'host-a', ttlMs: 5_000, now: () => 0 });
+        const takeover = await acquireSchedulerLease(session as never, 'root', { ownerId: 'host-b', now: () => 5_001 });
+        expect(takeover.epoch).toBe(2);
+        await takeover.release();
+    });
+
     it('fences an owner whose epoch was replaced and lets release hand over immediately', async () => {
         const session = fakeSession();
         const first = await acquireSchedulerLease(session as never, 'root', { ownerId: 'host-a', ttlMs: 60_000, now: () => 0 });

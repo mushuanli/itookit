@@ -93,6 +93,8 @@ export interface DurableFlowExecutorOptions {
     workspaceManager?: FlowWorkspaceManager;
     /** Run 级调度租约有效期（默认 30s）；到期后其他宿主可接管。 */
     schedulerLeaseTtlMs?: number;
+    /** Additional clock-error allowance before another owner may take over. */
+    schedulerLeaseSkewMs?: number;
     /** 测试或宿主指定的调度者身份。 */
     schedulerOwnerId?: string;
 }
@@ -859,6 +861,7 @@ export class DurableFlowExecutor {
     private acquireLease(session: SessionHandle, rootTaskId: string): Promise<SchedulerLease> {
         return acquireSchedulerLease(session, rootTaskId, {
             ...(this.options.schedulerLeaseTtlMs ? { ttlMs: this.options.schedulerLeaseTtlMs } : {}),
+            ...(this.options.schedulerLeaseSkewMs !== undefined ? { skewMs: this.options.schedulerLeaseSkewMs } : {}),
             ...(this.options.schedulerOwnerId ? { ownerId: this.options.schedulerOwnerId } : {}),
         });
     }
