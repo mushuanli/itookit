@@ -203,8 +203,8 @@ export class DefaultSessionHandle implements SessionHandle {
         return this.kernel.setBudget(this.id, handleId, dimension, limit, version);
     }
 
-    chargeBudget(handleId: string, dimension: string, amount: number): Promise<BudgetAccount[]> {
-        return this.kernel.chargeBudget(this.id, handleId, dimension, amount);
+    chargeBudget(handleId: string, dimension: string, amount: number, options?: { usageId?: string }): Promise<BudgetAccount[]> {
+        return this.kernel.chargeBudget(this.id, handleId, dimension, amount, options);
     }
 
     snapshotWorkspace(handleId: string, adapter: ProgramRef): Promise<WorkspaceSnapshot> {

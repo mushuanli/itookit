@@ -346,8 +346,13 @@ export interface EffectExecutionContext {
      * Charge a resource budget for work performed by this effect. Injected by
      * the kernel; effect adapters call it after a successful side effect (e.g.
      * LLM token usage). Throws when the budget is exceeded.
+     *
+     * Effect-driven charges are settled once per logical Effect by default
+     * (`usageId` defaults to `effect:<taskId>:<effectId>:<handleId>:<dimension>`), so a retried
+     * attempt after a crash cannot double-charge. Pass an explicit `usageId` to settle a
+     * different logical unit of work or to reuse one settlement across effects.
      */
-    chargeBudget?: (handleId: string, dimension: string, amount: number) => Promise<BudgetAccount[]>;
+    chargeBudget?: (handleId: string, dimension: string, amount: number, options?: { usageId?: string }) => Promise<BudgetAccount[]>;
 }
 
 export interface EffectSessionState {
@@ -434,6 +439,20 @@ export interface BudgetAccount {
     used: number;
     version: number;
     updatedAt: number;
+}
+
+/**
+ * Idempotent budget settlement receipt: one logical settlement (`usageId`) charges an
+ * account chain once, so replaying the same settlement after a crash or retry cannot
+ * double-charge, and a different amount under the same id is a conflict.
+ */
+export interface BudgetUsage {
+    usageId: string;
+    resourceId: ResourceId;
+    dimension: string;
+    amount: number;
+    accounts: BudgetAccount[];
+    settledAt: number;
 }
 
 export interface ResourceGrant {
@@ -565,7 +584,8 @@ export interface SessionResourceApi {
 /** Session 的预算面。 */
 export interface SessionBudgetApi {
     setBudget(handleId: HandleId, dimension: string, hardLimit: number, expectedVersion?: number | null): Promise<BudgetAccount>;
-    chargeBudget(handleId: HandleId, dimension: string, amount: number): Promise<BudgetAccount[]>;
+    /** Charge a budget; `usageId` settles a logical charge at most once (replays return the receipt). */
+    chargeBudget(handleId: HandleId, dimension: string, amount: number, options?: { usageId?: string }): Promise<BudgetAccount[]>;
 }
 
 /** Session 的工作区快照/合并面。 */

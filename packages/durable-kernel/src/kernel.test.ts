@@ -445,6 +445,75 @@ describe('Kernel durable kernel', () => {
         await expect(session.authorizeResource(readHandle.id, 'read', reader.id)).rejects.toThrow('revoked');
     });
 
+    it('settles a budget charge once per usage id and refuses a conflicting replay', async () => {
+        kernel.registerProgram(echoProgram());
+        const session = await kernel.createSession({ id: 'session-one', storage: binding });
+        const owner = await session.submit({ program: { kind: 'test.echo', version: '1' }, input: 'owner' });
+        const workspace = await session.createResource({ kind: 'workspace', uri: 'workspace://settle', ownerTaskId: owner.id });
+        await session.setBudget(workspace.handle.id, 'tokens', 10, null);
+
+        const first = await session.chargeBudget(workspace.handle.id, 'tokens', 4, { usageId: 'usage-1' });
+        expect(first[0].used).toBe(4);
+        // A replay returns the recorded settlement instead of charging again.
+        expect(await session.chargeBudget(workspace.handle.id, 'tokens', 4, { usageId: 'usage-1' })).toEqual(first);
+        // A different amount under the same usage id is a conflict, not a second charge.
+        await expect(session.chargeBudget(workspace.handle.id, 'tokens', 6, { usageId: 'usage-1' })).rejects.toThrow('already settled');
+        await expect(session.chargeBudget(workspace.handle.id, 'tokens', 4, { usageId: '   ' })).rejects.toThrow('non-empty');
+        // Without a usage id the facade keeps the legacy charge-every-call behavior.
+        await session.chargeBudget(workspace.handle.id, 'tokens', 1);
+        await session.chargeBudget(workspace.handle.id, 'tokens', 1);
+        expect((await session.chargeBudget(workspace.handle.id, 'tokens', 1))[0].used).toBe(7);
+
+        // The receipt is durable and still dedupes on a replacement Kernel.
+        const reopened = await configuredKernel(fs);
+        const restored = await reopened.openSession('session-one');
+        expect((await restored.chargeBudget(workspace.handle.id, 'tokens', 4, { usageId: 'usage-1' }))[0].used).toBe(4);
+        expect((await restored.chargeBudget(workspace.handle.id, 'tokens', 1))[0].used).toBe(8);
+    });
+
+    it('charges effect-driven usage once per logical Effect even when the attempt is retried', async () => {
+        kernel.registerProgram(echoProgram());
+        kernel.registerProgram(chargingEffectProgram());
+        kernel.registerEffect(chargingEffect());
+        const session = await kernel.createSession({ id: 'session-one', storage: binding });
+        const task = await session.submit({ program: { kind: 'test.charging-effect', version: '1' }, input: null });
+        await waitForStatus(task, 'waiting');
+        const workspace = await session.createResource({ kind: 'workspace', uri: 'workspace://charging', ownerTaskId: task.id });
+        await session.setBudget(workspace.handle.id, 'tokens', 10, null);
+        await task.signal({ type: 'run', payload: workspace.handle.id });
+        expect((await task.wait({ timeoutMs: 2_000 })).output).toBe('charged');
+
+        const effect = Object.values((await task.status()).task.effects)[0];
+        expect(effect.attempts.map(attempt => attempt.outcome)).toEqual(['failed', 'completed']);
+        // Both attempts charged; the kernel's default settlement id folded them into one.
+        const usageId = `effect:${task.id}:${effect.request.id}:${workspace.handle.id}:tokens`;
+        expect((await session.chargeBudget(workspace.handle.id, 'tokens', 4, { usageId }))[0].used).toBe(4);
+        await expect(session.chargeBudget(workspace.handle.id, 'tokens', 5, { usageId })).rejects.toThrow('already settled');
+    });
+
+    it('charges distinct Tasks independently when their Effect ids and budget handle match', async () => {
+        kernel.registerProgram(echoProgram());
+        const session = await kernel.createSession({ id: 'session-one', storage: binding });
+        const owner = await session.submit({ program: { kind: 'test.echo', version: '1' }, input: 'owner' });
+        const resource = await session.createResource({ kind: 'workspace', uri: 'workspace://shared-charge', ownerTaskId: owner.id });
+        await session.setBudget(resource.handle.id, 'tokens', 10, null);
+        kernel.registerEffect({ kind: 'test.shared-charge', version: '1', async execute(_request, context) {
+            await context.chargeBudget!(resource.handle.id, 'tokens', 4);
+            return 'charged';
+        } });
+        kernel.registerProgram({ manifest: { kind: 'test.shared-charge', version: '1' },
+            init: () => ({ state: null, actions: [{ type: 'effect', effect: {
+                id: 'same-id', kind: 'test.shared-charge', version: '1', request: null, idempotencyKey: 'same-key',
+            } }], next: { type: 'wait', on: { type: 'effect', id: 'same-id' } } }),
+            reduce: () => ({ state: null, next: { type: 'complete', output: 'done' } }),
+        });
+        for (let index = 0; index < 2; index++) {
+            const task = await session.submit({ program: { kind: 'test.shared-charge', version: '1' }, input: null });
+            expect((await task.wait({ timeoutMs: 2_000 })).status).toBe('succeeded');
+        }
+        expect((await session.chargeBudget(resource.handle.id, 'tokens', 1))[0].used).toBe(9);
+    });
+
     it('authorizes declared resource grants before executing an effect', async () => {
         kernel.registerProgram(grantedEffectProgram());
         kernel.registerEffect(uppercaseEffect());
@@ -1073,4 +1142,38 @@ async function waitForEffectStatus(
         await new Promise(resolve => setTimeout(resolve, 2));
     }
     throw new Error(`Effect did not reach ${expected}`);
+}
+
+function chargingEffect(): EffectAdapter<string, string> {
+    let calls = 0;
+    return {
+        kind: 'test.charging', version: '1', recoveryPolicy: 'idempotent-retry',
+        async execute(_request, context) {
+            await context.chargeBudget?.(context.grants[0].handleId, 'tokens', 4);
+            if (++calls === 1) throw new Error('temporary');
+            return 'charged';
+        },
+    };
+}
+
+function chargingEffectProgram(): DurableTaskProgram<null, null, string> {
+    return {
+        manifest: { kind: 'test.charging-effect', version: '1' },
+        init() { return { state: null, next: { type: 'wait', on: { type: 'signal', id: 'run' } } }; },
+        reduce(state, event) {
+            if (event.type === 'signal') {
+                const handleId = String(event.signal.payload);
+                return {
+                    state,
+                    actions: [{ type: 'effect', effect: {
+                        kind: 'test.charging', version: '1', request: 'charge', idempotencyKey: 'charge',
+                        grants: [{ handleId, right: 'execute' }], retry: { maxAttempts: 2, backoffMs: 5 },
+                    } }],
+                    next: { type: 'wait', on: { type: 'effect' } },
+                };
+            }
+            if (event.type === 'effect-completed') return { state, next: { type: 'complete', output: event.result as string } };
+            throw new Error(`Unexpected event: ${event.type}`);
+        },
+    };
 }

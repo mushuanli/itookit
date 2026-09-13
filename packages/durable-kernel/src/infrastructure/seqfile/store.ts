@@ -7,6 +7,7 @@ import { snapshotKey, ensureTaskEventIndexTx, taskEventCountKey, taskEventKey } 
 
 import type {
     BudgetAccount,
+    BudgetUsage,
     ContextBranch,
     ContextCommit,
     ContextCommitOptions,
@@ -34,7 +35,7 @@ import type {
     WorkspaceDiff,
     WorkspaceSnapshot,
 } from '../../domain/types';
-import { advanceDependants,allHandlesTx,appendEventTx,applySharedMutations,applySpawnsTx,assertBudgetCapacity,assertBudgetVersion,assertClaim,assertContextHead,assertRightsSubset,assertSharedVersion,attemptKey,authorizeHandleTx,budgetAccount,budgetKey,cancelActiveEffects,catalogPath,claimMatches,claimTask,clearSeqRecords,collectContextHistory,contextBranchKey,contextCommitKey,contextPath,createId,decode,deletedRevision,dependencySatisfied,descendantHandleIds,effectAttempt,effectClaimMatches,encode,ensureSeqFile,ensureSessionLayout,ensureTaskLayout,ensureTree,eventsPath,finishAttemptTx,finishEffect,graphPath,handleKey,indexPath,indexTask,isTerminal,join,messagesPath,nextSharedVersion,outboxKey,readBudgetTx,readContextBranchTx,readMessages,readSharedTx,readTaskTx,readyCandidates,recoverEffect,registerTaskWaitTx,replaceEffectAttempt,requireContextParents,requireHandleTx,requireResourceTx,requireSessionTx,requireTaskTx,requireTransactionalSeq,resourceBudgetsTx,resourceKey,resourcesPath,seq,sessionPath,sessionRecordPaths,sharedEntry,sharedHistoryPrefix,sharedKey,sharedPath,taskFromSpec,taskPath,terminalDependency,transaction,uniqueRights,unregisterTaskWaitTx,validateSharedKey,wakeFromPendingEvents,wakeTaskWaiters,workspaceDiffKey,workspaceSnapshotKey,writeContextBranchTx,writeSharedHistory,writeSharedRevision,writeTaskTx } from './store-helpers';
+import { advanceDependants,allHandlesTx,appendEventTx,applySharedMutations,applySpawnsTx,assertBudgetCapacity,assertBudgetVersion,assertClaim,assertContextHead,assertRightsSubset,assertSharedVersion,attemptKey,authorizeHandleTx,budgetAccount,budgetKey,budgetUsageKey,cancelActiveEffects,catalogPath,claimMatches,claimTask,clearSeqRecords,collectContextHistory,contextBranchKey,contextCommitKey,contextPath,createId,decode,deletedRevision,dependencySatisfied,descendantHandleIds,effectAttempt,effectClaimMatches,encode,ensureSeqFile,ensureSessionLayout,ensureTaskLayout,ensureTree,eventsPath,finishAttemptTx,finishEffect,graphPath,handleKey,indexPath,indexTask,isTerminal,join,messagesPath,nextSharedVersion,outboxKey,readBudgetTx,readBudgetUsageTx,readContextBranchTx,readMessages,readSharedTx,readTaskTx,readyCandidates,recoverEffect,registerTaskWaitTx,replaceEffectAttempt,requireContextParents,requireHandleTx,requireResourceTx,requireSessionTx,requireTaskTx,requireTransactionalSeq,resourceBudgetsTx,resourceKey,resourcesPath,seq,sessionPath,sessionRecordPaths,sharedEntry,sharedHistoryPrefix,sharedKey,sharedPath,taskFromSpec,taskPath,terminalDependency,transaction,uniqueRights,unregisterTaskWaitTx,validateSharedKey,wakeFromPendingEvents,wakeTaskWaiters,workspaceDiffKey,workspaceSnapshotKey,writeContextBranchTx,writeSharedHistory,writeSharedRevision,writeTaskTx } from './store-helpers';
 import { KernelErrorCode, kernelError } from '../../domain/errors';
 
 const SESSION_KEY = 'record';
@@ -523,12 +524,26 @@ export class SeqFileKernelStore {
         dimension: string,
         amount: number,
         effectClaim?: EffectClaim,
+        options: { usageId?: string } = {},
     ): Promise<BudgetAccount[]> {
         if (!Number.isFinite(amount) || amount <= 0) throw new Error('Budget charge must be positive');
+        const usageId = options.usageId?.trim();
+        if (options.usageId !== undefined && !usageId) throw new Error('Budget usage id must be a non-empty string');
         return transaction(binding.fs, async tx => {
             if (effectClaim) await this.assertEffectClaimTx(tx, binding, effectClaim);
             const handle = await requireHandleTx(tx, binding.rootPath, handleId);
             const resource = await authorizeHandleTx(tx, binding.rootPath, handle, 'write');
+            // The settlement receipt and the charge share one transaction: a replay after a
+            // crash sees the receipt (no second charge), and a lost receipt never happened.
+            if (usageId) {
+                const settled = await readBudgetUsageTx(tx, binding.rootPath, usageId);
+                if (settled) {
+                    if (settled.resourceId !== resource.id || settled.dimension !== dimension || settled.amount !== amount) {
+                        throw new Error(`Budget usage ${usageId} was already settled for another charge`);
+                    }
+                    return settled.accounts;
+                }
+            }
             const budgets = await resourceBudgetsTx(tx, binding.rootPath, resource, dimension);
             for (const budget of budgets) assertBudgetCapacity(budget, amount);
             const charged = budgets.map(budget => ({
@@ -537,8 +552,12 @@ export class SeqFileKernelStore {
             for (const budget of charged) {
                 await tx.setEntry(resourcesPath(binding.rootPath), budgetKey(budget.resourceId, dimension), encode(budget));
             }
+            if (usageId) {
+                const usage: BudgetUsage = { usageId, resourceId: resource.id, dimension, amount, accounts: charged, settledAt: Date.now() };
+                await tx.setEntry(resourcesPath(binding.rootPath), budgetUsageKey(usageId), encode(usage));
+            }
             await appendEventTx(tx, binding.rootPath, resource.sessionId, handle.holderTaskId,
-                'budget.consumed', { handleId, dimension, amount, accounts: charged });
+                'budget.consumed', { handleId, dimension, amount, accounts: charged, ...(usageId ? { usageId } : {}) });
             return charged;
         });
     }

@@ -111,7 +111,7 @@ class Kernel implements KernelRegistration {
 
     // 预算
     setBudget(sessionId, handleId, dimension, hardLimit, expectedVersion?): Promise<BudgetAccount>;
-    chargeBudget(sessionId, handleId, dimension, amount): Promise<BudgetAccount[]>;
+    chargeBudget(sessionId, handleId, dimension, amount, options?: { usageId?: string }): Promise<BudgetAccount[]>;
 
     // 工作区
     snapshotWorkspace(sessionId, handleId, adapterRef: ProgramRef): Promise<WorkspaceSnapshot>;
@@ -222,7 +222,7 @@ interface SessionHandle extends
 | 方法 | 说明 |
 |---|---|
 | `setBudget(handleId, dimension, hardLimit, expectedVersion?)` | 设置硬上限 |
-| `chargeBudget(handleId, dimension, amount)` | 扣减（超限抛错） |
+| `chargeBudget(handleId, dimension, amount, options?)` | 扣减（超限抛错）；`options.usageId` 时按幂等结算回执去重 |
 
 **`SessionWorkspaceApi`** — 工作区快照/合并
 
@@ -712,3 +712,5 @@ Effect 完成提交在存储事务中校验 lease 及祖先取消状态。祖先
 Task 消息发送拒绝取消祖先下的新入队请求，原消息身份可重放已保存的入队回执。接收方祖先已取消时，消息保存为 rejected，原因码为 `target-ancestor-cancelled`；同 Session 和跨 Session 投递一致。既有投递或拒绝回执仍幂等，不重复唤醒目标。
 
 存储层 sweep/recover 在恢复后代 lease 前检查完整祖先链；已有祖先取消时，事务内将后代取消并登记 Effect 清理。该传播不依赖父任务先被扫描，重复恢复不追加取消事件；物理清理由后续清理流程执行。
+
+**预算结算幂等**：`chargeBudget` 可选 `usageId`——扣费与 `usage/<usageId>` 回执在同一事务写入，同 id 重放返回记录的回执（不再扣费），同 id 不同金额/资源/维度抛冲突；Effect 路径由内核默认按逻辑 Effect 结算（`effect:<taskId>:<effectId>:<handleId>:<dimension>`），未提供 `usageId` 的宿主直调保持每次调用都扣。回归 `packages/durable-kernel/src/kernel.test.ts`。

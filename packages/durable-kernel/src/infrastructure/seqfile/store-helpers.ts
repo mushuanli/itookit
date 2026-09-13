@@ -29,6 +29,7 @@ import {
     appendEventTx,
     attemptKey,
     budgetKey,
+    budgetUsageKey,
     contextBranchKey,
     contextCommitKey,
     contextPath,
@@ -483,6 +484,15 @@ export async function readBudgetTx(
     dimension: string,
 ): Promise<BudgetAccount | undefined> {
     const value = await tx.getEntry(resourcesPath(root), budgetKey(resourceId, dimension));
+    return value ? decode(value) : undefined;
+}
+
+export async function readBudgetUsageTx(
+    tx: ISeqFileTransaction,
+    root: string,
+    usageId: string,
+): Promise<import('../../domain/types').BudgetUsage | undefined> {
+    const value = await tx.getEntry(resourcesPath(root), budgetUsageKey(usageId));
     return value ? decode(value) : undefined;
 }
 

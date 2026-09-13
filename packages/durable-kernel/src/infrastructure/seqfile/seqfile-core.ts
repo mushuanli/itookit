@@ -59,6 +59,8 @@ export function handleKey(id: string): string { return `handle/${id}`; }
 export function budgetKey(resourceId: string, dimension: string): string {
     return `budget/${resourceId}/${encodeURIComponent(dimension)}`;
 }
+/** `usage/<encoded usageId>`: idempotent budget settlement receipt (see design §5). */
+export function budgetUsageKey(usageId: string): string { return `usage/${encodeURIComponent(usageId)}`; }
 export function workspaceSnapshotKey(id: string): string { return `workspace/snapshot/${id}`; }
 export function workspaceDiffKey(id: string): string { return `workspace/diff/${id}`; }
 

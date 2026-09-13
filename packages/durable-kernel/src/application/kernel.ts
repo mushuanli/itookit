@@ -531,8 +531,9 @@ export class Kernel implements KernelRegistration {
 
     async chargeBudget(
         sessionId: string, handleId: string, dimension: string, amount: number,
+        options: { usageId?: string } = {},
     ): Promise<BudgetAccount[]> {
-        return this.store.chargeBudget(await this.binding(sessionId), handleId, dimension, amount);
+        return this.store.chargeBudget(await this.binding(sessionId), handleId, dimension, amount, undefined, options);
     }
 
     async snapshotWorkspace(
@@ -981,8 +982,11 @@ export class Kernel implements KernelRegistration {
                     await this.store.appendEvent(binding, task.sessionId, task.id, event.type, event.payload, claim);
                     this.notify(task.sessionId, task.id, 'content');
                 },
-                chargeBudget: (handleId: string, dimension: string, amount: number) =>
-                    this.store.chargeBudget(binding, handleId, dimension, amount, claim),
+                // Effect-driven charges default to one settlement per logical Effect, so a
+                // retried attempt after a crash cannot charge the same tokens twice.
+                chargeBudget: (handleId: string, dimension: string, amount: number, options?: { usageId?: string }) =>
+                    this.store.chargeBudget(binding, handleId, dimension, amount, claim,
+                        { usageId: options?.usageId ?? `effect:${[task.id, effect.id, handleId, dimension].map(encodeURIComponent).join(':')}` }),
             };
             const result = await executeEffectWithDeadline(adapter, effect, claim, context, controller);
             if ('result' in result) assertDurableValue(result.result, 'Effect result');
