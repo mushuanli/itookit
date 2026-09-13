@@ -372,7 +372,8 @@ function emptyBranchTree(): BranchTreeNode {
     };
 }
 
-function projectionGroups(projection: RoundProjection): SessionGroup[] {
+/** Persisted Round → UI groups (pure); exported for the reload-consistency regression test. */
+export function projectionGroups(projection: RoundProjection): SessionGroup[] {
     const groups: SessionGroup[] = [];
     if (projection.userMessage) groups.push(userGroup(projection));
     if (projection.assistantMessage) groups.push(assistantGroup(projection));
@@ -410,6 +411,9 @@ function assistantGroup(projection: RoundProjection): SessionGroup {
             data: {
                 output: message.content,
                 thought: message.thinking ?? '',
+                // Reloaded history must show the same terminal reason the live event stream did
+                // (a cancelled/failed Round whose placeholder has no output).
+                ...(message.error ? { error: message.error } : {}),
             },
             children: buildToolChildren(projection),
         },

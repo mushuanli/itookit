@@ -682,7 +682,8 @@ export class Kernel implements KernelRegistration {
         // already deleted has nothing to close, and its stale record must not
         // block the cleanup that follows.
         if (!await binding.fs.driver.exists(binding.rootPath)) return;
-        await this.store.setSessionStatus(binding, 'closing', cancelRunning ? 'cancel' : 'drain');
+        const closing = await this.store.setSessionStatus(binding, 'closing', cancelRunning ? 'cancel' : 'drain');
+        if (closing.status === 'closed' || closing.status === 'archived') return;
         if (cancelRunning) {
             const tasks = await this.store.listTasks(binding);
             for (const task of tasks) {

@@ -261,3 +261,7 @@ Run 控制会在信号注入和单任务取消前刷新持久成员清单，允�
 工作区收尾的 status 表示清理本身的结果，和状态记录保存结果分开。清理成功但最终 shared 写入失败时，活动句柄保留 succeeded 并附加 persistenceError，workspaceCompletion 拒绝；UI 同时显示清理结果和保存错误。清理与保存同时失败以 AggregateError 保留两个原因，不重复调用 workspace.finish。此时重连只能读取最后成功写入的状态（可能仍为 pending），活动句柄的保存错误尚无可靠持久副本。
 
 无人消费的输出契约：节点成功返回后，执行器校验没有 active data edge 消费的输出端口自身声明的 schema。控制边不算数据消费；未知 schema 或非法输出使调度失败，不继续派发依赖节点。当前已提交接口在尚未发布句柄时会拒绝 `submit`；已经发布的运行通过根 Task 记录反映失败。此校验不实现输出 repair/continue 策略，也不把 Agent 的 responseFormat 自动编译成端口契约。
+
+### 运行句柄与失败收尾
+
+`DurableFlowExecutor.submit` 在持久根任务建立并取得调度租约后返回，节点集合随调度更新；调用方通过根任务等待结果，关闭宿主存储前还应等待 `waitIdle()`。工作区清理结果通过 `workspaceCompletion` 和持久 finalization 状态单独观察。调度失败时先确认节点取消，再释放宿主能力及清理工作区；取消或释放失败会阻止后续清理，并与原始错误一起呈现在 Run 失败状态中。终态恢复传递 `forFinalization`，供宿主只恢复清理所需能力。

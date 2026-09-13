@@ -98,6 +98,35 @@ describe('LlmChatEffectAdapter streaming', () => {
     });
 });
 
+describe('LlmChatEffectAdapter cancellation', () => {
+    it('confirms cancellation only after the in-flight request has settled', async () => {
+        let release!: () => void;
+        const blocked = new Promise<void>(resolve => { release = resolve; });
+        const controller = new AbortController();
+        const service = streamService(async function* () {
+            await blocked;
+            if (controller.signal.aborted) throw new Error('aborted');
+            yield { choices: [{ index: 0, delta: { content: 'late' }, finish_reason: 'stop' }] };
+        });
+        const adapter = new LlmChatEffectAdapter(service);
+        const request = { resourceHandleId: 'llm-handle', connectionId: 'conn', request: { messages: [] } };
+        const execution = adapter.execute(request, { ...context(vi.fn(async () => undefined)), abortSignal: controller.signal });
+
+        let cancelled = false;
+        const cancellation = adapter.cancel(request, { ...context(vi.fn(async () => undefined)), abortSignal: controller.signal })
+            .then(() => { cancelled = true; });
+        await new Promise(resolve => setTimeout(resolve, 5));
+        // The adapter must not report "stopped" while the request is still in flight.
+        expect(cancelled).toBe(false);
+
+        controller.abort();
+        release();
+        await expect(execution).rejects.toThrow('aborted');
+        await cancellation;
+        expect(cancelled).toBe(true);
+    });
+});
+
 function streamService(chatStream: ILLMService['chatStream']): ILLMService {
     return {
         chat: async () => { throw new Error('should not call chat'); },

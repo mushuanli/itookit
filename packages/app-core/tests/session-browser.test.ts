@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
-import { createSessionBrowser, resolveBrowserTarget, SessionLifecycleService } from '@itookit/app-core';
-import { SessionFilesService } from '@itookit/app-core';
+import { createSessionBrowser, resolveBrowserTarget } from '../src/session/session-browser';
+import { SessionLifecycleService } from '../src/session/session-lifecycle';
+import { SessionFilesService } from '../src/vfs/session-files';
 let cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup = []; });
 async function setup(kernelOverrides: Record<string, unknown> = {}) {
@@ -14,7 +15,7 @@ async function setup(kernelOverrides: Record<string, unknown> = {}) {
     const home = await manager.openFileSystem('/home/admin');
     await home.driver.createFile({ parentPath: '/project', name: 'same.md', content: 'mapped', recursive: true });
     files.registerSource('home', home); await files.configure(a, { mounts: [{ mountId: 'work', sourceId: 'home', at: '/workspace', root: '/project', access: 'rw' }], cwd: '/workspace' }, 0);
-    const task = { id: 't', sessionId: a, program: { kind: 'test' }, status: 'succeeded', version: 2, createdAt: 1, updatedAt: 2, input: 'hello', output: 'done', currentAttempt: { leaseToken: 'private-token' } };
+    const task = { id: 't', sessionId: a, program: { kind: 'test' }, status: 'succeeded', version: 2, createdAt: 1, updatedAt: 2, input: 'hello', output: 'done', effects: {}, currentAttempt: { leaseToken: 'private-token' } };
     const kernel = { async *listSessions() { yield { id: a }; }, listSessionTasks: vi.fn(async () => [task]),
         listSessionTaskPage: vi.fn(async () => ({ items: [task], throughIndex: 2, nextAfterIndex: 1 })),
         task: vi.fn(async (sid: string, tid: string) => { if (sid !== a || tid !== 't') throw new Error('Task unavailable'); return task; }),
@@ -148,6 +149,20 @@ describe('Session browser projection', () => {
         expect(JSON.parse(history)).toMatchObject({ id: 't', status: 'succeeded', input: 'hello', output: 'done' });
         expect(f.kernel.taskHistory).not.toHaveBeenCalled();
         expect(history).not.toContain('private-token');
+        expect(JSON.parse(history)).toMatchObject({ control: { requested: 'run', acknowledged: true }, activeOperations: 0 });
         await expect(f.browser.fs.driver.readContent(`/${f.b}/tasks/t`)).rejects.toThrow();
+    });
+
+    it('exposes whether an accepted cancel is still waiting for the external stop', async () => {
+        const f = await setup();
+        const task = await f.kernel.task(f.a, 't') as { status: string; effects: Record<string, unknown> };
+        task.status = 'cancelled';
+        task.effects = { e: { id: 'e', status: 'cancelled', cleanupPending: true } };
+        const pending = JSON.parse(await f.browser.fs.driver.readContent(`/${f.a}/tasks/t`, { encoding: 'utf-8' }));
+        expect(pending).toMatchObject({ status: 'cancelled', control: { requested: 'cancel', acknowledged: false }, activeOperations: 1 });
+
+        task.effects = { e: { id: 'e', status: 'cancelled', cleanupPending: false } };
+        const stopped = JSON.parse(await f.browser.fs.driver.readContent(`/${f.a}/tasks/t`, { encoding: 'utf-8' }));
+        expect(stopped).toMatchObject({ control: { requested: 'cancel', acknowledged: true }, activeOperations: 0 });
     });
 });

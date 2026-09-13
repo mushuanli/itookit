@@ -29,13 +29,20 @@ export interface FlowWorkspaceLease {
      * host can restore the same workspace after a crash instead of creating a second one.
      */
     record?: JsonValue;
+    /** Close host capabilities before workspace filesystem cleanup. */
+    releaseCapabilities?(rootTaskId: string): Promise<void>;
     finish(status: 'succeeded' | 'failed' | 'cancelled'): Promise<void>;
 }
 
 export interface FlowWorkspaceManager {
     prepare(sessionId: string, policy: FlowWorkspacePolicy): Promise<FlowWorkspaceLease>;
     /** Re-attach to a workspace whose lease was persisted by `record` before a crash. */
-    restore?(sessionId: string, policy: FlowWorkspacePolicy, record: JsonValue): Promise<FlowWorkspaceLease>;
+    restore?(sessionId: string, policy: FlowWorkspacePolicy, record: JsonValue, options?: FlowWorkspaceRestoreOptions): Promise<FlowWorkspaceLease>;
+}
+
+export interface FlowWorkspaceRestoreOptions {
+    /** A terminal Run is only completing cleanup; no node may execute in the restored workspace. */
+    forFinalization?: boolean;
 }
 
 /** Session shared key holding the durable workspace lease record of a Run. */
@@ -173,7 +180,7 @@ export class DurableFlowExecutor {
         const policy = checkpoint?.spec.runPolicy?.workspace;
         const leaseRecord = await session.getShared(workspaceLeaseKey(rootTaskId));
         if (!policy || policy.mode === 'shared' || !leaseRecord) return;
-        const workspace = await this.restoreWorkspace(session, rootTaskId, policy);
+        const workspace = await this.restoreWorkspace(session, rootTaskId, policy, { forFinalization: true });
         await (await beginWorkspaceFinalization(session, root, workspace)).completion;
     }
 
@@ -181,13 +188,14 @@ export class DurableFlowExecutor {
         session: SessionHandle,
         rootTaskId: string,
         policy: FlowWorkspacePolicy,
+        options?: FlowWorkspaceRestoreOptions,
     ): Promise<FlowWorkspaceLease> {
         if (!this.options.workspaceManager?.restore) {
             throw new Error(`Resuming an isolated Flow workspace requires a workspace manager that restores leases`);
         }
         const saved = await session.getShared(workspaceLeaseKey(rootTaskId));
         if (!saved) throw new Error('Flow workspace lease record is missing');
-        return this.options.workspaceManager.restore(session.id, policy, saved.value);
+        return this.options.workspaceManager.restore(session.id, policy, saved.value, options);
     }
 
     private async execute(
@@ -747,7 +755,7 @@ export class DurableFlowExecutor {
                 }
                 lease = await this.acquireLease(session, published.root.id);
             }
-            if (restored) publish(published);
+            publish(published);
             // Graph retries accepted while no scheduler owned the Run are applied before the
             // next scheduling turn: attach the retry instance and drop stale downstream work.
             await applyGraphRetries();
@@ -840,17 +848,30 @@ export class DurableFlowExecutor {
                 const finalization = await beginWorkspaceFinalization(session, result.root, workspace);
                 result.workspaceCompletion = finalization.completion;
                 result.workspaceFinalization = finalization.state;
+                void result.workspaceCompletion?.catch(() => undefined);
             }
             void result.root.wait().then(exit => this.emitHook('run.completed', sessionId, {
                 taskId: result.root.id, status: exit.status,
             })).catch(() => undefined);
             return result;
         } catch (error) {
-            if (published && !this.options.kernel.isDisposed) await published.root.signal({ type: 'flow.schedule.failed', payload: String(error) });
-            await cancelPending(instances, completed, 'Flow submission failed');
-            try { await workspace?.finish('failed'); }
-            catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Flow failed and workspace cleanup failed'); }
-            throw error;
+            // A host may already hold the published handle (submit resolved), so a scheduler
+            // failure must be observable on the Run itself, not only as a rejected promise.
+            // Cancel and clean up first, then report the combined message on the root.
+            let failure: unknown = error;
+            try {
+                await cancelPending(instances, completed, 'Flow submission failed');
+                if (published) await workspace?.releaseCapabilities?.(published.root.id);
+                await workspace?.finish('failed');
+            }
+            catch (cleanupError) { failure = new AggregateError([error, cleanupError], 'Flow failed and workspace cleanup failed'); }
+            if (published && !this.options.kernel.isDisposed) {
+                const message = failure instanceof AggregateError
+                    ? failure.errors.map(item => item instanceof Error ? item.message : String(item)).join('; ')
+                    : String(error);
+                await published.root.signal({ type: 'flow.schedule.failed', payload: message });
+            }
+            throw failure;
         } finally {
             // Releasing lets the next host resume without waiting for the TTL; a crashed
             // host cannot run this, so its lease expires instead.
@@ -1116,7 +1137,10 @@ async function cancelPending(
             if (!completed.has(instanceKey(nodeId, index + 1))) cancellations.push(handle.cancel(reason));
         }
     }
-    await Promise.allSettled(cancellations);
+    const results = await Promise.allSettled(cancellations);
+    const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+    if (failures.length) throw new AggregateError(failures,
+        `Flow task cancellation failed: ${failures.map(String).join('; ')}`);
 }
 
 async function cancelGroup(

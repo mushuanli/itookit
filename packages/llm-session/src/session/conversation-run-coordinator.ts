@@ -149,7 +149,7 @@ export class ConversationRunCoordinator {
             await this.completeRound(execution, output, streamedOutput, toolCalls);
             await execution.finalize();
         } catch (error) {
-            if (roundStarted) await this.failRound(execution, error);
+            if (roundStarted) await this.failRound(execution, error, toolCalls);
             throw error;
         } finally {
             this.active.delete(execution.task.sessionId);
@@ -301,9 +301,14 @@ export class ConversationRunCoordinator {
         toolCalls: CapturedToolCall[],
     ): Promise<ChatProgramOutput> {
         const consumers = new Map<string, Promise<void>>();
+        // Capture consumer failures instead of letting the promises reject: when `wait()` rejects
+        // (for example the storage closes while a run is in flight) the join below must still
+        // settle every consumer, and no consumer rejection may escape as an unhandled error.
+        const consumerErrors: unknown[] = [];
         const subscribe = (task: TaskHandle) => {
             if (consumers.has(task.id)) return;
-            consumers.set(task.id, this.consumeEvents(task, execution, streamedOutput, toolCalls));
+            consumers.set(task.id, this.consumeEvents(task, execution, streamedOutput, toolCalls)
+                .catch(error => { consumerErrors.push(error); }));
         };
         let rootDone = false;
         const discover = (async () => {
@@ -313,15 +318,23 @@ export class ConversationRunCoordinator {
                 await new Promise(resolve => setTimeout(resolve, 25));
             }
             for (const task of getTasks()) subscribe(task);
-        })();
-        let exit: Awaited<ReturnType<TaskHandle['wait']>>;
+        })().catch(error => { consumerErrors.push(error); });
+        let exit: Awaited<ReturnType<TaskHandle['wait']>> | undefined;
+        let waitError: unknown;
         try {
             exit = await handle.wait();
+        } catch (error) {
+            waitError = error;
         } finally {
             rootDone = true;
             await discover;
         }
+        // Never short-circuit this join: a rejected `wait()` must not leave an in-flight
+        // event consumer unobserved (that surfaced as an unhandled EACCES when a host
+        // disposed its storage mid-run).
         await Promise.all([...consumers.values()]);
+        if (exit === undefined) throw waitError;
+        if (consumerErrors.length) throw consumerErrors[0];
         if (exit.status === 'failed') throw new Error(exit.error?.message ?? `Task failed: ${handle.id}`);
         if (exit.status === 'cancelled') throw new Error(`Task cancelled: ${handle.id}`);
         return parse(exit.output);
@@ -439,15 +452,26 @@ export class ConversationRunCoordinator {
         projectOutput(this.options.eventBus, execution, output, streamedOutput.output);
     }
 
-    private async failRound(execution: ConversationExecution, error?: unknown): Promise<void> {
+    private async failRound(
+        execution: ConversationExecution,
+        error?: unknown,
+        toolCalls: CapturedToolCall[] = [],
+    ): Promise<void> {
         const status = execution.task.abortController.signal.aborted
             ? 'cancelled'
             : 'failed';
-        await execution.log.setConversationStatus(
-            execution.roundId,
-            status,
-            status === 'failed' ? formatErrorMessage(error) : undefined,
-        );
+        const failure = error === undefined ? undefined : formatErrorMessage(error);
+        // Persist the reason for cancellations too: the live view shows it, and a reloaded
+        // transcript must not turn the same Round into an unexplained empty assistant bubble.
+        // Started Tool calls are persisted with it so the reloaded transcript keeps the node.
+        await execution.log.setConversationStatus(execution.roundId, status, failure,
+            failedToolResult(toolCalls, failure));
+        // A Tool Effect that fails before the tool program settles never emits `tool:*`, so the
+        // live execution node created at `tool:running` would stay RUNNING forever. Settle the
+        // still-in-flight calls the same way a real tool error would.
+        for (const event of unsettledToolErrors(toolCalls, failure ?? `Task ${status}`)) {
+            this.options.eventBus.emitSession(execution.task.sessionId, event);
+        }
     }
 }
 
@@ -556,6 +580,44 @@ interface CapturedToolCall {
     input?: Record<string, unknown>;
     result?: string;
     isError?: boolean;
+}
+
+/**
+ * Tool-call part of a failed Round, persisted so the reloaded projection can rebuild the nodes.
+ *
+ * Successful calls keep their result; calls that never settled are recorded as errors with the
+ * Round failure reason.
+ */
+export function failedToolResult(toolCalls: CapturedToolCall[], error?: string): RoundResult | undefined {
+    if (!toolCalls.length) return undefined;
+    return {
+        assistantBlocks: toolCalls.map(call => ({
+            type: 'tool_use' as const, toolUseId: call.toolId, name: call.name, input: call.input,
+        })),
+        toolResults: toolCalls.map(call => ({
+            toolUseId: call.toolId,
+            content: call.result ?? error ?? '',
+            isError: call.isError ?? call.result === undefined,
+        })),
+    };
+}
+
+/**
+ * Terminal `tool:error` events for tool calls that are still in flight when their Round fails.
+ *
+ * Exported for the regression test: an Effect-level failure must not leave the visible tool node
+ * at RUNNING (the projection has no tool result to rebuild it from either).
+ */
+export function unsettledToolErrors(
+    toolCalls: CapturedToolCall[],
+    error: string,
+): Array<{ type: 'tool:error'; call: ToolCallInfo & { error: string } }> {
+    return toolCalls
+        .filter(call => call.result === undefined)
+        .map(call => ({
+            type: 'tool:error' as const,
+            call: { toolId: call.toolId, name: call.name, input: call.input, error },
+        }));
 }
 
 function captureToolCall(list: CapturedToolCall[], call: ToolCallInfo): void {

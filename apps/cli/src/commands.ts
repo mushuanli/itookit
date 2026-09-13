@@ -65,6 +65,15 @@ interface InterruptWatcher {
 
 const STALL_WARN_MS = 60_000;
 
+/** How long a cancelled Run waits for its node Tasks to settle before projecting statuses. */
+const PROJECTION_SETTLE_MS = 2_000;
+
+const TERMINAL_TASK_STATUSES = ['succeeded', 'failed', 'cancelled', 'skipped'];
+
+function isTerminalTaskStatus(status: string): boolean {
+    return TERMINAL_TASK_STATUSES.includes(status);
+}
+
 export async function validateCommand(options: CommandOptions): Promise<number> {
     // --offline skips the environment check so configs can be validated without API keys set.
     const loaded = await loadWorkflow(options.file ?? 'mindos.yml', !options.offline);
@@ -232,12 +241,16 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions, overri
         runtime = await runtimeFor(loaded.workflow, manifest, store, options, 'execute', override?.useProfileConfig);
         await runtime.kernel.createSession({ id, storage: cliStorage(id) });
         const definition = override?.definition ?? compileRunDefinition(loaded.workflow, loaded.hash);
-        const flow = await runtime.executor.submit(id, toDagRunSpec(definition));
+        const spec = toDagRunSpec(definition);
+        // `submit` resolves as soon as the durable root exists, before the nodes are
+        // dispatched, so this handle is live but its node map is still empty here.
+        // Node → Task mapping is read from the Session by the monitor; `run.started`
+        // reports the graph size from the spec instead of the dispatch snapshot.
+        const flow = await runtime.executor.submit(id, spec);
         manifest.rootTaskId = flow.root.id;
-        manifest.nodeTaskIds = Object.fromEntries([...flow.nodes].map(([nodeId, handle]) => [nodeId, handle.id]));
         manifest.status = 'running';
         await store.save(manifest);
-        print(options, { type: 'run.started', runId: id, tasks: Object.keys(manifest.nodeTaskIds).length });
+        print(options, { type: 'run.started', runId: id, tasks: spec.nodes.length });
         return await monitor(loaded.workflow, manifest, store, runtime, options);
     } catch (error) {
         manifest.status = 'failed';
@@ -614,7 +627,7 @@ async function monitorIteration(
     root: TaskHandle,
     interruption: InterruptWatcher,
 ): Promise<number | undefined> {
-    if (interruption.signal) return cancelInterrupted(manifest, store, root, interruption.signal, options);
+    if (interruption.signal) return cancelInterrupted(workflow, manifest, store, runtime, root, interruption.signal, options);
     await collectEvents(manifest, store, runtime, options);
     // One session task listing per tick: the Run can hold hundreds of Tasks and each
     // listing walks task storage, so status refresh and Effect decisions share it.
@@ -627,7 +640,7 @@ async function monitorIteration(
     const exit = await root.poll();
     if (exit) return finishRun(workflow, manifest, store, exit, options);
     if (workflow.maxDurationMs && Date.now() - manifest.createdAt > workflow.maxDurationMs) {
-        return cancelExpiredRun(manifest, store, root);
+        return cancelExpiredRun(workflow, manifest, store, runtime, root);
     }
     await store.save(manifest);
     return undefined;
@@ -647,8 +660,10 @@ function watchInterrupt(): InterruptWatcher {
 }
 
 async function cancelInterrupted(
+    workflow: CompiledWorkflow,
     manifest: RunManifest,
     store: RunStore,
+    runtime: CliRuntime,
     root: TaskHandle,
     signal: NodeJS.Signals,
     options: CommandOptions,
@@ -657,18 +672,49 @@ async function cancelInterrupted(
     manifest.status = 'cancelled';
     manifest.error = `Interrupted by ${signal}`;
     manifest.completedAt = Date.now();
+    await projectTerminalStatuses(workflow, manifest, runtime);
     await store.save(manifest);
     printError(options, manifest.error);
     return signal === 'SIGINT' ? 130 : 143;
 }
 
-async function cancelExpiredRun(manifest: RunManifest, store: RunStore, root: TaskHandle): Promise<number> {
+async function cancelExpiredRun(
+    workflow: CompiledWorkflow,
+    manifest: RunManifest,
+    store: RunStore,
+    runtime: CliRuntime,
+    root: TaskHandle,
+): Promise<number> {
     await root.cancel('Run duration exceeded');
     manifest.status = 'failed';
     manifest.error = 'Run duration exceeded';
     manifest.completedAt = Date.now();
+    await projectTerminalStatuses(workflow, manifest, runtime);
     await store.save(manifest);
     return 1;
+}
+
+/**
+ * Record the node states a cancellation just committed. Without this the manifest is
+ * saved with whatever the last tick projected (often nothing on a first-tick SIGINT),
+ * so `checkpoints`/`tasks` report a terminal Run with no node statuses.
+ *
+ * Cancelling the root Task only accepts the request: the Kernel commits the child
+ * decisions afterwards, so a single listing can persist a terminal Run whose node still
+ * reads `waiting`. Poll briefly for the node Tasks to settle; the wait is bounded so a
+ * device that never confirms the stop cannot hang the exit path.
+ */
+async function projectTerminalStatuses(workflow: CompiledWorkflow, manifest: RunManifest, runtime: CliRuntime): Promise<void> {
+    const deadline = Date.now() + PROJECTION_SETTLE_MS;
+    try {
+        for (;;) {
+            const tasks = await runtime.kernel.listSessionTasks(manifest.sessionId);
+            await refreshTaskStatuses(workflow, manifest, runtime, tasks);
+            const unsettled = tasks.some(task => task.labels?.flowNodeId && !isTerminalTaskStatus(task.status));
+            if (!unsettled || Date.now() >= deadline) return;
+            await new Promise(resolve => setTimeout(resolve, 25));
+        }
+    } catch { /* The Run is already terminal; a projection failure must not change the outcome. */ }
 }
 
 async function processInteractions(
@@ -764,7 +810,7 @@ async function enforceTaskTimeout(
     taskId: string,
     status: string,
 ): Promise<void> {
-    if (['succeeded', 'failed', 'cancelled', 'skipped'].includes(status)) return;
+    if (isTerminalTaskStatus(status)) return;
     const timeout = parseDuration(workflow.config.tasks.find(task => task.id === nodeId)?.timeout);
     const startedAt = manifest.taskStartedAt?.[nodeId];
     if (!timeout || !startedAt || Date.now() - startedAt <= timeout) return;
@@ -838,7 +884,7 @@ async function runtimeFor(
     useProfileConfig = false,
 ): Promise<CliRuntime> {
     await stat(workflow.workspaceRoot);
-    const vfsRoot = options.stateDir ? path.resolve(options.stateDir) : resolveProfileRoot(options.profile);
+    const vfsRoot = resolveProfileVfsRoot(options);
     process.stderr.write(`[profile] mindos root: ${vfsRoot}\n`);
     return createCliRuntime(workflow, manifest, async grants => {
         manifest.grants = grants;
@@ -889,6 +935,11 @@ export function resolveRespondValue(options: CommandOptions): JsonValue {
 function resolveStateDir(options: CommandOptions, _workspaceRoot?: string): string {
     if (options.stateDir) return path.resolve(options.stateDir);
     return path.join(resolveProfileRoot(options.profile), 'var', 'lib', 'cli-runs');
+}
+
+/** VFS 数据根：Run 的 Session/内核状态（含调度租约）都落在这里。 */
+function resolveProfileVfsRoot(options: CommandOptions): string {
+    return options.stateDir ? path.resolve(options.stateDir) : resolveProfileRoot(options.profile);
 }
 
 function createRunId(): string {

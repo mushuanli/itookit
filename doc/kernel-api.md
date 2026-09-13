@@ -730,3 +730,7 @@ Task 全量列表扫描复用目录扫描时已经读取的 `record`，每个有
 启动前检查与批量恢复：`inspectSession(id)` 返回只读的 `listTasks()` / `getShared(key)`，解析持久绑定但不注册 Session 监听器或启动执行。`recoverSessions(ids, options)` 去重所选 ID，先恢复所有所选 Session 的持久状态及资源，再注册这些 Session 并启动轮询；资源恢复使用只读绑定解析，避免中途激活。该方法也恢复 Kernel 级公共资源，但不遍历其他 Session 或全局投递消息。原 `recover(options)` 仍恢复全部 Session，随后执行消息投递。
 
 `takeover: true` 要求 Kernel 执行空闲，调用方仍须先取得 Session 写租约并停止旧执行者。批量恢复不负责获取租约，也不是跨 Session 原子事务；中途错误可能已恢复部分持久记录，应修正原因后重试。此接口提交不代表所有宿主启动接线或真实桌面重启场景均已合入。
+
+### 关闭与取消观察
+
+`taskStat`、`taskStats`、`sessionStat` 是公开的只读状态投影，宿主用它们区分取消请求与清理确认。`closeSession` 对 closed/archived Session 的重复关闭在事务内保持终态，普通状态转换仍拒绝倒退。kernel-adapters 的六类 Effect 按 Session + Task + Effect 跟踪全部本地在途执行，取消确认等待它们结束；这不证明远程提供方停止计费或跨宿主 fencing 已完成。

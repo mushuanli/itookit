@@ -5,6 +5,9 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'session.tasks.stopPending': '取消已请求，等待外部停止确认（{count} 个操作在途）',
+    'session.tasks.stopStopped': '已停止（取消请求已确认）',
+    'session.tasks.eventsTrimmed': '更早的事件已按保留期裁剪',
     'error.sessionUnfinishedTasks': '会话仍有未结束的任务，请先结束或取消任务再修改挂载',
     'error.directorySourceUnavailable': '目录来源不可用，请重新连接',
     'mount.error.selectUserDirectory': '请选择用户目录',

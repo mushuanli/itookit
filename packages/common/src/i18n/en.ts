@@ -4,6 +4,9 @@
 import type { LocaleStrings } from './zh-CN';
 
 export const en: LocaleStrings = {
+    'session.tasks.stopPending': 'Cancellation requested; waiting for the external stop to be confirmed ({count} operations in flight)',
+    'session.tasks.stopStopped': 'Stopped (cancellation confirmed)',
+    'session.tasks.eventsTrimmed':  'Older events were trimmed by retention',
     'error.sessionUnfinishedTasks': 'This session still has unfinished tasks; finish or cancel them before changing mounts',
     'error.directorySourceUnavailable': 'The directory source is unavailable; reconnect it',
     'mount.error.selectUserDirectory': 'Choose a user directory',

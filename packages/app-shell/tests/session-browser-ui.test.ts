@@ -2,8 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
-import { SessionFilesService } from '@itookit/app-core';
-import { DirectoryMountService } from '@itookit/app-core';
+import { DirectoryMountService, SessionFilesService } from '@itookit/app-core';
 import { createSessionAttachmentMounts } from '@itookit/app-core';
 import { SessionWorkbench } from '../src/core/SessionWorkbench';
 
@@ -25,7 +24,8 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
     await home.driver.createFile({ parentPath: '/project', recursive: true, name: 'note.md', content: 'mapped text' });
     await home.driver.createFile({ parentPath: '/project', recursive: true, name: 'document.pdf', content: '%PDF-1.4 pure ASCII binary document' });
     await files.configure(id, { mounts: [{ mountId: 'home', sourceId: 'home', at: '/workspace', root: '/project', access: 'rw' }], cwd: '/workspace' }, 0);
-    const task = { id: 'task-one', sessionId: id, program: { kind: 'test' }, status: 'succeeded', version: 1, createdAt: 1, updatedAt: 2, output: 'task output' };
+    const task = { id: 'task-one', sessionId: id, program: { kind: 'test' }, status: 'succeeded', version: 1, createdAt: 1, updatedAt: 2,
+        output: 'task output', effects: {} as Record<string, unknown> };
     const kernel = { onChanged: () => () => {}, async *listSessions() { yield { id }; }, listSessionTasks: async () => [task],
         listSessionTaskPage: vi.fn(async (_session: string, query?: { afterIndex: number; throughIndex: number }) => query
             ? { items: [{ ...task, id: 'task-two' }], throughIndex: 2, nextAfterIndex: undefined }
@@ -35,7 +35,7 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
             : { items: [task], throughVersion: 2, nextAfterVersion: 1 }),
         taskEventPage: vi.fn(async (_session: string, _task: string, query?: { afterIndex: number; throughIndex: number }) => query
             ? { items: [{ taskId: task.id, sequence: 5, occurredAt: 3, type: 'effect.failed', payload: { message: 'provider failed' } }], throughIndex: 2, nextAfterIndex: undefined }
-            : { items: [{ taskId: task.id, sequence: 2, occurredAt: 2, type: 'agent.event', payload: { type: 'stream:content', delta: 'hidden delta' } }], throughIndex: 2, nextAfterIndex: 1 }),
+            : { items: [{ taskId: task.id, sequence: 2, occurredAt: 2, type: 'agent.event', payload: { type: 'stream:content', delta: 'hidden delta' } }], throughIndex: 2, nextAfterIndex: 1, firstAvailableIndex: 7 }),
         eventList: vi.fn(async () => []) };
     const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
     const chat = vi.fn(async () => ({ destroy: vi.fn() }));
@@ -60,6 +60,10 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
         expect(main.textContent).not.toContain('agent.event');
         expect(main.textContent).not.toContain('hidden delta');
         expect(main.textContent?.match(/task output/g)).toHaveLength(1);
+        // Retention watermark from the first page stays visible after paging forward.
+        const trimmed = main.querySelector<HTMLElement>('[data-events-trimmed]')!;
+        expect(trimmed.hidden).toBe(false);
+        expect(trimmed.dataset.eventsTrimmedFrom).toBe('7');
         const moreEvents = [...main.querySelectorAll('button')].find(button => button.textContent === '继续查找关键事件')!;
         moreEvents.click(); moreEvents.click();
         await vi.waitFor(() => expect(main.textContent).toContain('provider failed'));
@@ -67,13 +71,40 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
         expect(kernel.taskEventPage).toHaveBeenCalledTimes(2);
         expect(kernel.eventList).not.toHaveBeenCalled();
         expect(moreEvents.hidden).toBe(true);
+        expect(trimmed.hidden).toBe(false);
+        // Invariant: "cancel requested" and "external stop confirmed" must be distinguishable.
+        const stop = main.querySelector<HTMLElement>('[data-stop-state]')!;
+        expect(stop.dataset.stopState).toBe('none');
+        expect(stop.hidden).toBe(true);
+        task.status = 'cancelled';
+        task.effects = { e: { id: 'e', status: 'cancelled', cleanupPending: true } };
+        await workbench.openResource(`/${id}/tasks`);
+        await workbench.openResource(`/${id}/tasks/task-one`);
+        await vi.waitFor(() => expect(main.querySelector<HTMLElement>('[data-stop-state]')!.dataset.stopState).toBe('pending'));
+        const pending = main.querySelector<HTMLElement>('[data-stop-state]')!;
+        expect(pending.hidden).toBe(false);
+        expect(pending.textContent).toContain('1');
+        task.effects = { e: { id: 'e', status: 'cancelled', cleanupPending: false } };
+        await workbench.openResource(`/${id}/tasks`);
+        await workbench.openResource(`/${id}/tasks/task-one`);
+        await vi.waitFor(() => expect(main.querySelector<HTMLElement>('[data-stop-state]')!.dataset.stopState).toBe('stopped'));
+        expect(main.querySelector<HTMLElement>('[data-stop-state]')!.textContent).not.toBe(pending.textContent);
         await workbench.openResource(`/${id}/files/workspace/note.md`);
         const options = (file.mock.calls as unknown as Array<[HTMLElement, any]>)[0][1];
         expect(options.target).toEqual({ kind: 'file', path: '/workspace/note.md' });
         expect(options.files.cwd).toBe('/workspace'); expect(options.initialContent).toBe('mapped text');
         await options.hostContext.saveContent('/wrong', 'saved through mapping');
         expect(await home.driver.readContent('/project/note.md', { encoding: 'utf-8' })).toBe('saved through mapping');
+        // A failed write must be visible instead of looking like a successful save.
+        const driver = options.files.fs.driver;
+        const writeContent = driver.writeContent.bind(driver);
+        driver.writeContent = async () => { throw new Error('EROFS: mount is read-only'); };
+        await expect(options.hostContext.saveContent('/wrong', 'lost')).rejects.toThrow('EROFS');
+        driver.writeContent = writeContent;
+        expect([...main.querySelectorAll<HTMLElement>('[role="alert"]')].map(node => node.textContent))
+            .toContain('EROFS: mount is read-only');
         await workbench.openResource(id); expect(chat).toHaveBeenCalledTimes(2);
+        // Leaving the file editor releases the glob mount.
         await Promise.all([workbench.openResource(`/${id}/tasks`), workbench.openResource(`/${id}/tasks/task-one`)]);
         await new Promise(resolve => setTimeout(resolve, 30));
         expect(workbench.getActiveResourceId()).toBe(`/${id}/tasks/task-one`);

@@ -2,6 +2,7 @@ import { assertEffectGrant } from '@itookit/durable-kernel';
 import type { IToolService, ToolInvokeResult } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
+import { InFlightEffects } from './in-flight';
 import { requireToolSuccess } from './tool-call-effect';
 
 export type TtyEffectRequest =
@@ -13,10 +14,20 @@ export class TtyEffectAdapter implements EffectAdapter<TtyEffectRequest, ToolInv
     readonly kind = 'tty.command';
     readonly version = '1';
     private readonly ownership = new Map<string, string>();
+    private readonly inFlight = new InFlightEffects();
 
     constructor(private readonly service: CapabilitySource<IToolService>) {}
 
     async execute(request: TtyEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
+        return this.inFlight.track(context, this.run(request, context));
+    }
+
+    /** The Kernel aborts the signal first; waiting for the invoke confirms the TTY call stopped. */
+    async cancel(_request: TtyEffectRequest, context: EffectExecutionContext): Promise<void> {
+        await this.inFlight.confirmStopped(context);
+    }
+
+    private async run(request: TtyEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
         assertTtyGrant(request.resourceHandleId, context);
         this.assertOwnership(request, context);
         const service = await resolveCapability(this.service, context);

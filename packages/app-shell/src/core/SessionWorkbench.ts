@@ -1,3 +1,5 @@
+import { t } from '@itookit/common';
+import { taskStat } from '@itookit/durable-kernel';
 import { localizeMountError } from '../files/localize-mount-error';
 import { showMountDialog } from '../files/mount-dialog';
 import type { DirectoryMountService } from '@itookit/app-core';
@@ -219,7 +221,13 @@ export class SessionWorkbench implements WorkspaceController {
                             editor = await this.fileFactory(mount, { target: { kind: 'file', path: target.path }, files: context.context,
                                 initialContent: content, title: target.path.split('/').pop(), readOnly,
                                 hostContext: { toggleSidebar: () => this.sidebarUI?.toggleSidebar(), navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve(),
-                                    saveContent: readOnly ? undefined : async (_path, text) => { await context.context.fs.driver.writeContent(target.path, text); this.refresh(); } },
+                                    saveContent: readOnly ? undefined : async (_path, text) => {
+                                        // A failed write must never look like a successful save: the
+                                        // editor keeps its dirty state, and the user is told now.
+                                        try { await context.context.fs.driver.writeContent(target.path, text); }
+                                        catch (error) { this.report(error); throw error; }
+                                        this.refresh();
+                                    } },
                             });
                         }
                     }
@@ -340,11 +348,30 @@ export class SessionWorkbench implements WorkspaceController {
         if (this.closed || generation !== this.taskRefresh) return;
         const panel = document.createElement('div'); panel.className = 'session-detail';
         const heading = document.createElement('h2'); heading.textContent = `${task.program.kind} · ${task.status}`; panel.append(heading);
+        // Distinguish "cancel request accepted" from "the external work really stopped":
+        // only the confirmed case may read as stopped.
+        const stat = taskStat(task), control = stat.control;
+        const stop = document.createElement('p');
+        stop.dataset.stopState = control.requested !== 'cancel' ? 'none' : control.acknowledged ? 'stopped' : 'pending';
+        stop.textContent = control.requested !== 'cancel' ? ''
+            : control.acknowledged ? t('session.tasks.stopStopped')
+            : t('session.tasks.stopPending', { count: stat.activeOperations });
+        stop.hidden = control.requested !== 'cancel';
+        panel.append(stop);
         const description = document.createElement('p'); description.textContent = task.id; panel.append(description);
         const result = document.createElement('pre'); result.textContent = JSON.stringify(taskSummary(task), null, 2); panel.append(result);
         const entries = document.createElement('div'); panel.append(entries);
+        // Retention may have dropped the oldest events; say so instead of silently
+        // showing a shorter history (the page also reports `firstAvailableIndex`).
+        let watermark = eventPage.firstAvailableIndex ?? 1;
+        const trimmed = document.createElement('p');
+        trimmed.dataset.eventsTrimmed = 'true';
+        trimmed.textContent = t('session.tasks.eventsTrimmed');
+        panel.append(trimmed);
         const moreEvents = document.createElement('button'); moreEvents.type = 'button'; moreEvents.textContent = '继续查找关键事件'; panel.append(moreEvents);
         const render = () => {
+            trimmed.hidden = watermark <= 1;
+            trimmed.dataset.eventsTrimmedFrom = String(watermark);
             entries.replaceChildren();
             moreEvents.hidden = eventPage.nextAfterIndex === undefined;
             const records = events.map(event => ({ time: event.occurredAt, title: event.type, value: event }));
@@ -365,7 +392,9 @@ export class SessionWorkbench implements WorkspaceController {
                 afterIndex: eventPage.nextAfterIndex, throughIndex: eventPage.throughIndex,
             }).then(next => {
                 if (this.closed || generation !== this.taskRefresh) return;
-                eventPage = next; events.push(...projectEvents(next.items)); render();
+                eventPage = next;
+                watermark = Math.max(watermark, next.firstAvailableIndex ?? 1);
+                events.push(...projectEvents(next.items)); render();
             }).catch(error => this.report(error)).finally(() => { moreEvents.disabled = false; });
         };
         render();

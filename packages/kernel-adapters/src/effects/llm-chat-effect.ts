@@ -14,6 +14,7 @@ import type {
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
 import { expandMessagesAttachments } from '@itookit/device-llm';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
+import { InFlightEffects } from './in-flight';
 
 export interface LlmChatEffectRequest {
     resourceHandleId: string;
@@ -25,10 +26,28 @@ export interface LlmChatEffectRequest {
 export class LlmChatEffectAdapter implements EffectAdapter<LlmChatEffectRequest, ChatCompletionResponse> {
     readonly kind = 'llm.chat';
     readonly version = '1';
+    /** In-flight executions by Effect id, so `cancel` can confirm the request settled. */
+    private readonly inFlight = new InFlightEffects();
 
     constructor(private readonly service: CapabilitySource<ILLMService>) {}
 
     async execute(
+        request: LlmChatEffectRequest,
+        context: EffectExecutionContext,
+    ): Promise<ChatCompletionResponse> {
+        return this.inFlight.track(context, this.run(request, context));
+    }
+
+    /**
+     * The Kernel aborts the Effect signal before calling `cancel`, and every provider
+     * passes that signal into `fetch`. Waiting for the recorded execution turns
+     * cancellation into a confirmation instead of an assumption.
+     */
+    async cancel(_request: LlmChatEffectRequest, context: EffectExecutionContext): Promise<void> {
+        await this.inFlight.confirmStopped(context);
+    }
+
+    private async run(
         request: LlmChatEffectRequest,
         context: EffectExecutionContext,
     ): Promise<ChatCompletionResponse> {

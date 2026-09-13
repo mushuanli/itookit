@@ -188,6 +188,7 @@ export class SeqFileKernelStore {
             const value = await tx.getEntry(sessionPath(binding.rootPath), SESSION_KEY);
             if (!value) throw new Error(`Session record missing at ${binding.rootPath}`);
             const current = decode<SessionRecord>(value);
+            if (status === 'closing' && closeMode && ['closed', 'archived'].includes(current.status)) return current;
             const allowed: Record<SessionRecord['status'], SessionRecord['status'][]> = {
                 open: ['open', 'suspended', 'suspending', 'closing'], suspending: ['suspending', 'suspended', 'closing'], suspended: ['suspended', 'open', 'closing'],
                 closing: ['closing', 'closed'], closed: ['closed', 'archived'], archived: ['archived'],

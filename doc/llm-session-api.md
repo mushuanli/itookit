@@ -402,3 +402,7 @@ packages/llm-session/src/
 `SessionMemoryProvider(kernel)` 提供 `upsert(sessionId, policy, { entryId, scope, content })`、`remove(sessionId, policy, scope, entryId)` 和可直接注入的 `retrieve` 回调。存储在目标 Kernel Session shared，按 namespace/scope 精确隔离，写入校验 writeScopes、检索校验 readScopes。检索默认 10 项（0 禁用），使用词项包含匹配及更新时间排序，返回内容和 SHA-256 摘要。返回 entryId 是 JSON 编码的 `[scope, entryId]`，修改/删除使用原始 entryId。当前存储按 scope 整组加载，未提供跨 Session 共享、向量检索或模型写入工具；调用方必须提供可信的 Agent 策略。
 
 记忆继承边界：executeDirect 保持 memory 检索；executeDag 在组装上下文时禁用 provider，避免父 Agent 的长期记忆进入临时 Flow 的编译快照。需要给 Flow 的信息应作为显式输入传递。
+
+### 失败与取消的消费收尾
+
+ConversationRunCoordinator 在根等待或最终任务发现失败后仍等待所有已启动事件消费者结束。失败和取消的 Round 保留原因以及已开始的工具调用；未完成工具调用生成错误结果，重载投影保留相同错误原因。Session 删除的关闭调用及状态读取共享超时，超时保留记录，迟到结果不会触发删除；已关闭 Session 可安全重试删除。

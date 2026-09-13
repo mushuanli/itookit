@@ -1,3 +1,4 @@
+import { taskStat } from '@itookit/durable-kernel';
 import { t } from '@itookit/common';
 import { createFileSystemSource, FSError, normalizeVirtualPath, type FSNode, type IStorageBackend } from '@itookit/vfs-core';
 import type { ISessionRepository } from '@itookit/llm-session';
@@ -77,9 +78,13 @@ export function resolveBrowserTarget(path: string): BrowserTarget {
     throw new FSError('ENOENT', 'Session browser entry not found');
 }
 export function taskSummary(task: TaskRecord) {
+    // `control.acknowledged` is false while a cancel is still waiting for the external stop to
+    // be confirmed, so an observer can tell "requested" apart from "really stopped".
+    const stat = taskStat(task);
     return { id: task.id, sessionId: task.sessionId, parentTaskId: task.parentTaskId, program: task.program,
         status: task.status, version: task.version, createdAt: task.createdAt, updatedAt: task.updatedAt,
-        input: task.input, output: task.output, error: task.lastError };
+        input: task.input, output: task.output, error: task.lastError,
+        control: stat.control, activeOperations: stat.activeOperations };
 }
 /** User-facing timeline: omit scheduler chatter and streamed text already in the result. */
 export function taskKeyEvent(event: EventEnvelope) {

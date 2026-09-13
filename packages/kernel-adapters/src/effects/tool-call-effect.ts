@@ -2,6 +2,7 @@ import { assertEffectGrant } from '@itookit/durable-kernel';
 import type { ISkillService, IToolService, ToolInvokeResult } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
 import { forgetLoadedSkill, rollbackFailedLoad } from '../skill/loaded-state';
+import { InFlightEffects } from './in-flight';
 
 type ToolSource = IToolService | ((context: EffectExecutionContext, request: ToolCallEffectRequest) => IToolService | Promise<IToolService>);
 /** Live Skill state used to undo a load whose identity write failed. */
@@ -18,6 +19,7 @@ export interface ToolCallEffectRequest {
 export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectRequest, ToolInvokeResult> {
     readonly kind = 'tool.call';
     readonly version = '1';
+    private readonly inFlight = new InFlightEffects();
 
     constructor(
         private readonly service: ToolSource,
@@ -26,6 +28,15 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
     ) {}
 
     async execute(request: ToolCallEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
+        return this.inFlight.track(context, this.run(request, context));
+    }
+
+    /** The Kernel aborts the signal first; waiting for the invoke confirms the tool stopped. */
+    async cancel(_request: ToolCallEffectRequest, context: EffectExecutionContext): Promise<void> {
+        await this.inFlight.confirmStopped(context);
+    }
+
+    private async run(request: ToolCallEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
         assertEffectGrant(context, request.resourceHandleId, 'tool');
         const service = await (typeof this.service === 'function' ? this.service(context, request) : this.service);
         const unloadKey = service.getToolMeta(request.toolId)?.skillUnloaderArgKey;

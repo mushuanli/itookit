@@ -174,12 +174,17 @@ export class SessionState {
         // assistant bubble. Otherwise the transcript ends on the user message and
         // the next send is rejected as a consecutive user message, permanently
         // blocking the Session.
+        // `Round.status` is `cancelled`, the node status is `aborted`; both need the placeholder
+        // (the reload path uses the same predicate, so live and reloaded transcripts agree).
+        const terminal = changes.status === 'failed' || changes.status === 'cancelled' || changes.status === 'aborted'
+            ? changes.status
+            : undefined;
         if (!round.assistantMessage
-            && (changes.status === 'failed' || changes.status === 'aborted')
+            && terminal
             && round.userMessage) {
             round.assistantMessage = {
                 content: '',
-                status: changes.status,
+                status: terminal === 'cancelled' ? 'aborted' : terminal,
                 persistedNodeId: round.roundId,
                 error: changes.error,
             };

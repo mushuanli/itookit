@@ -3,6 +3,7 @@ import type { IToolService, ToolInvokeResult } from '@itookit/common';
 import type { EffectExecutionContext } from '@itookit/durable-kernel';
 import { ToolCallEffectAdapter } from './tool-call-effect';
 import { TtyEffectAdapter } from './tty-effect';
+import { BashEffectAdapter } from './bash-effect';
 import { SkillLoadEffectAdapter } from './skill-load-effect';
 
 describe('KernelAdapters Effect adapters', () => {
@@ -101,7 +102,105 @@ describe('KernelAdapters Effect adapters', () => {
     });
 });
 
-function context(kind?: 'tool' | 'tty' | 'skill'): EffectExecutionContext {
+describe('adapter-confirmed cancellation', () => {
+    it.each(['task', 'session', 'same identity'] as const)(
+        'does not lose a blocked execution when a second %s execution settles', async variant => {
+            let release!: () => void;
+            const blocked = new Promise<void>(resolve => { release = resolve; });
+            let calls = 0;
+            const adapter = new ToolCallEffectAdapter(toolService(async () => {
+                if (++calls === 1) await blocked;
+                return result('inspect', true, 'done');
+            }));
+            const first = context('tool');
+            const second = { ...context('tool'),
+                ...(variant === 'task' ? { taskId: 'task-b' } : {}),
+                ...(variant === 'session' ? { sessionId: 'session-b' } : {}),
+            };
+            const request = { resourceHandleId: 'tool-handle', toolId: 'inspect', args: {} };
+            const execution = adapter.execute(request, first);
+            try {
+                await adapter.execute(request, second);
+                let stopped = false;
+                const cancellation = adapter.cancel(request, first).then(() => { stopped = true; });
+                await new Promise(resolve => setTimeout(resolve, 5));
+                expect(stopped).toBe(false);
+                release();
+                await cancellation;
+                expect(stopped).toBe(true);
+            } finally {
+                release();
+                await execution;
+            }
+        },
+    );
+
+    it('waits for the in-flight skill load before confirming cancellation', async () => {
+        let release!: () => void;
+        const blocked = new Promise<void>(resolve => { release = resolve; });
+        const loadSkill = vi.fn(async () => { await blocked; return { success: true, skillId: 'review' }; });
+        const adapter = new SkillLoadEffectAdapter({
+            getSkill: () => ({ disableModelInvocation: false }), getLoadedSkills: () => [], loadSkill,
+        } as any);
+        const request = { resourceHandleId: 'skill-handle', skillId: 'review' };
+        const execution = adapter.execute(request, context('skill'));
+
+        let stopped = false;
+        const cancellation = adapter.cancel(request, context('skill')).then(() => { stopped = true; });
+        await new Promise(resolve => setTimeout(resolve, 5));
+        expect(stopped).toBe(false);
+
+        release();
+        await execution;
+        await cancellation;
+        expect(stopped).toBe(true);
+    });
+
+    it('waits for the in-flight tool invoke before confirming cancellation', async () => {
+        let release!: () => void;
+        const blocked = new Promise<void>(resolve => { release = resolve; });
+        const adapter = new ToolCallEffectAdapter(toolService(async () => {
+            await blocked;
+            return result('inspect', true, 'done');
+        }));
+        const request = { resourceHandleId: 'tool-handle', toolId: 'inspect', args: {} };
+        const execution = adapter.execute(request, context('tool'));
+
+        let stopped = false;
+        const cancellation = adapter.cancel(request, context('tool')).then(() => { stopped = true; });
+        await new Promise(resolve => setTimeout(resolve, 5));
+        // Cancellation must not report success while the tool is still running.
+        expect(stopped).toBe(false);
+
+        release();
+        await execution;
+        await cancellation;
+        expect(stopped).toBe(true);
+    });
+
+    it('waits for the in-flight Bash invoke before confirming cancellation', async () => {
+        let release!: () => void;
+        const blocked = new Promise<void>(resolve => { release = resolve; });
+        const adapter = new BashEffectAdapter(toolService(async () => {
+            await blocked;
+            return result('Bash', true, 'done');
+        }));
+        const request = { resourceHandleId: 'process-handle', command: 'sleep 1' };
+        const execution = adapter.execute(request, context('process'));
+
+        let stopped = false;
+        const cancellation = adapter.cancel(request, context('process')).then(() => { stopped = true; });
+        await new Promise(resolve => setTimeout(resolve, 5));
+        expect(stopped).toBe(false);
+
+        release();
+        await execution;
+        await cancellation;
+        expect(stopped).toBe(true);
+    });
+});
+
+function context(kind?: 'tool' | 'tty' | 'skill' | 'process'): EffectExecutionContext {
     return {
         sessionId: 'session-a', taskId: 'task-a', effectId: 'effect-a',
         abortSignal: new AbortController().signal,

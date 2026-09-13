@@ -350,12 +350,18 @@ export class RoundGraphService {
         roundId: RoundId,
         status: NonNullable<Round['status']>,
         error?: string,
+        result?: RoundResult,
     ): Promise<void> {
         const round = await this.readRound(roundId);
         if (!round) throw new RoundGraphError(`Round not found: ${roundId}`, 'NOT_FOUND');
         const completedAt = isTerminalConversationStatus(status) ? Date.now() : undefined;
-        const failure = status === 'failed' ? error : undefined;
-        await this.writeRound(roundId, { ...round, status, completedAt, error: failure });
+        // Cancellation is a terminal failure too: dropping its reason made a reloaded run show an
+        // unexplained empty assistant bubble while the live transcript had shown the reason.
+        const failure = status === 'failed' || status === 'cancelled' ? error : undefined;
+        await this.writeRound(roundId, { ...round, status, completedAt, error: failure,
+            // A failed Round keeps the Tool calls it managed to start, so a reloaded transcript can
+            // still show which tool failed instead of dropping the node entirely.
+            ...(result ? { result } : {}) });
         this.onEvent?.({
             type: 'round:updated',
             roundId,

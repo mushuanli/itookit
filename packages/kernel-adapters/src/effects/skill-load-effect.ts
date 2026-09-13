@@ -3,12 +3,14 @@ import type { ISkillService, SkillLoadResult } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 import { rollbackFailedLoad } from '../skill/loaded-state';
+import { InFlightEffects } from './in-flight';
 
 export interface SkillLoadEffectRequest { resourceHandleId: string; skillId: string; }
 
 export class SkillLoadEffectAdapter implements EffectAdapter<SkillLoadEffectRequest, SkillLoadResult> {
     readonly kind = 'skill.load';
     readonly version = '1';
+    private readonly inFlight = new InFlightEffects();
 
     constructor(
         private readonly service: CapabilitySource<ISkillService>,
@@ -19,6 +21,15 @@ export class SkillLoadEffectAdapter implements EffectAdapter<SkillLoadEffectRequ
     ) {}
 
     async execute(request: SkillLoadEffectRequest, context: EffectExecutionContext): Promise<SkillLoadResult> {
+        return this.inFlight.track(context, this.run(request, context));
+    }
+
+    /** The Skill mutation is local; confirmation means the in-flight call has settled. */
+    async cancel(_request: SkillLoadEffectRequest, context: EffectExecutionContext): Promise<void> {
+        await this.inFlight.confirmStopped(context);
+    }
+
+    private async run(request: SkillLoadEffectRequest, context: EffectExecutionContext): Promise<SkillLoadResult> {
         assertEffectGrant(context, request.resourceHandleId, 'skill');
         if (!request.skillId.trim()) throw new Error('Skill id is required');
         const service = await resolveCapability(this.service, context);

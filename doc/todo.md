@@ -194,3 +194,9 @@ Durable 五篇：[Core](design/durable-harness-core.md)、[Protocol](design/dura
 标签存储：[标签存储与查询](design/label-storage.md)。
 
 完成判定：每项有效要求都必须有当前代码/实际运行/测试证据；明确区分实现完成、模拟测试、跨进程验证、真实 GUI/IPC。最小系统优先级不缩小原始目标，不能因某个测试组全绿就标记整体完成。
+
+### 生命周期批次验证（2026-09-13）
+
+本批合入运行句柄提前发布、取消确认、失败消费收尾、关闭与删除重试、失败记录重载，以及 CLI/UI 对应处理。隔离提交快照：durable-kernel 210、kernel-adapters 94、app-core 76、llm-flow 190、llm-session 102、app-shell 112、CLI 集成 20 项测试通过，合计 804 项；30 项既有条件跳过。五个逻辑包和 CLI/Web/Tauri 类型检查通过。Kernel 两项短时序测试曾在六包并行负载下失败，按包顺序复跑全部通过。文档检查仍受基线未构建 CLI 产物路径影响。
+
+这批不替代 P0-02 的真实窗口完整验收、P0-05 最终全仓矩阵，也不表示宿主工作区接线、跨宿主 fencing 或记忆功能已合入。

@@ -153,6 +153,20 @@ describe('RoundLog', () => {
 
     // ── Basic CRUD ────────────────────────────────────────────────────────
 
+    describe('terminal status projection', () => {
+        it('persists the cancellation reason and emits it, so reloaded history keeps the cause', async () => {
+            const roundId = await log.append('main', makeRound({ id: 'r-cancel', messages: makeUserPayload('go') }));
+
+            await log.setConversationStatus(roundId, 'cancelled', 'Task cancelled: task-1');
+
+            const persisted = await log.readRound(roundId);
+            expect(persisted).toMatchObject({ status: 'cancelled', error: 'Task cancelled: task-1' });
+            // The live event carries the same reason the reload path will project.
+            expect(events.at(-1)).toMatchObject({ type: 'round:updated', changes: { status: 'aborted', error: 'Task cancelled: task-1' } });
+            expect(roundToProjection(persisted!, roundId).assistantMessage).toMatchObject({ status: 'aborted', error: 'Task cancelled: task-1' });
+        });
+    });
+
     describe('append & fold', () => {
         it('rejects a stale expected branch head before writing', async () => {
             const round = makeRound({ id: 'new', messages: makeUserPayload('Hello') });

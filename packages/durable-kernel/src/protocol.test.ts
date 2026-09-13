@@ -13,6 +13,17 @@ describe('durable harness protocols', () => {
     let manager: IVFSManager, fs: IFileSystem, binding: ResolvedStorageBinding;
     let store: SeqFileKernelStore, kernel: Kernel;
     const spec = { program: { kind: 'test', version: '1' }, input: null };
+    it('keeps repeated close requests terminal while rejecting general reopening transitions', async () => {
+        const session = await kernel.openSession('s');
+        await kernel.closeSession(session.id, true);
+        expect((await kernel.sessionStat(session.id)).phase).toBe('closed');
+        await Promise.all([kernel.closeSession(session.id, true), kernel.closeSession(session.id, false)]);
+        expect((await kernel.sessionStat(session.id)).phase).toBe('closed');
+        await expect(kernel.setSessionStatus(session.id, 'closing')).rejects.toThrow('Invalid session transition');
+        await kernel.setSessionStatus(session.id, 'archived');
+        await kernel.closeSession(session.id, true);
+        expect((await store.sessionRecord(binding)).status).toBe('archived');
+    });
     it('ensures deep layouts with bounded reads and observes deletion on the next call', async () => {
         await ensureTree(fs, '/existing/deep/root');
         const exists = vi.spyOn(fs.driver, 'exists');
