@@ -3,9 +3,27 @@ import path from 'path';
 
 export default defineConfig({
     base: './',
+    plugins: [{
+        name: 'trace-tauri-relative-core',
+        enforce: 'pre',
+        transform(code, id) {
+            if (!id.replaceAll('\\', '/').endsWith('/@tauri-apps/api/core.js')) return;
+            const entry = 'return window.__TAURI_INTERNALS__.invoke(cmd, args, options);';
+            if (code.split(entry).length !== 2) throw new Error('Tauri core invoke changed; update IPC instrumentation');
+            const counter = JSON.stringify(path.resolve(__dirname, 'src/log/ipc-counter-state.ts'));
+            return { code: `import { ipcCounter as __mindosIpc } from ${counter};\n` + code.replace(entry,
+                `if (import.meta.env.VITE_MINDOS_TRACE === '1') __mindosIpc.record(cmd);\n    ${entry}`), map: null };
+        },
+        resolveId(source, importer) {
+            if (source === './core.js' && importer?.replaceAll('\\', '/').includes('/@tauri-apps/api/')) {
+                return path.resolve(__dirname, 'src/log/traced-core.ts');
+            }
+        },
+    }],
 
     resolve: {
         alias: {
+            '@tauri-apps/api/core': path.resolve(__dirname, 'src/log/traced-core.ts'),
             // CSS virtual modules
             '@itookit/vfs-ui/style.css':         path.resolve(__dirname, '../../packages/vfs-ui/src/styles/index.css'),
             '@itookit/mdxeditor/style.css':      path.resolve(__dirname, '../../packages/mdx/src/styles/index.css'),

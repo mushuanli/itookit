@@ -291,8 +291,12 @@ async function bootstrap(): Promise<void> {
     // Acceptance diagnostics: VITE_MINDOS_TRACE=1 records per-interval VFS + sidecar op counts
     // so a slow user action can be attributed to backend/IPC round trips.
     if (import.meta.env.VITE_MINDOS_TRACE === '1') {
-        const stopTrace = startVfsTrace(rootDir, runtime.vfs);
-        startupCleanup.push(stopTrace);
+        const stopTrace = startVfsTrace(rootDir, runtime.vfs, { sidecar: rootBackend });
+        window.__MINDOS_TRACE__ = stopTrace;
+        startupCleanup.push(() => {
+            stopTrace();
+            if (window.__MINDOS_TRACE__ === stopTrace) delete window.__MINDOS_TRACE__;
+        });
         console.log('[Boot] VFS trace enabled -> var/log/vfs-trace.log');
     }
     const app = await initApp({
