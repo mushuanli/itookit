@@ -9,11 +9,11 @@ import {
 } from '@itookit/llm-session';
 import { createKernelRuntime, type HeadlessKernelRuntime, type CreateKernelRuntimeOptions } from './create-kernel-runtime';
 import { RunCatalog } from '../run/run-catalog';
-import { SessionFilesService } from '../files/session-files';
-import { DirectoryMountService, type DirectorySourceProvider } from '../files/directory-mounts';
-import { createSessionAttachmentMounts } from '../files/session-attachments';
-import { acquireSessionProcessContext, type SessionProcessFactory } from '../files/session-process-context';
-import { workspaceRoot } from '../files/workspace-paths';
+import { SessionFilesService } from '../vfs/session-files';
+import { DirectoryMountService, type DirectorySourceProvider } from '../vfs/directory-mounts';
+import { createSessionAttachmentMounts } from '../vfs/session-attachments';
+import { acquireSessionProcessContext, type SessionProcessFactory } from '../vfs/session-process-context';
+import { workspaceRoot } from '../session/workspace-paths';
 import { SessionLeaseStore, type SessionOwnerKind } from '../kernel/session-lease';
 import { syncSkillsToKernel } from '../kernel/sync-skills';
 

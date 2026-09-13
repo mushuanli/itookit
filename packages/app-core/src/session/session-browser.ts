@@ -1,7 +1,7 @@
 import { createFileSystemSource, FSError, normalizeVirtualPath, type FSNode, type IStorageBackend } from '@itookit/vfs-core';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { EventEnvelope, Kernel, TaskRecord } from '@itookit/durable-kernel';
-import type { SessionFilesService } from './session-files';
+import type { SessionFilesService } from '../vfs/session-files';
 import { exportSessionBundle, importSessionBundle, isSessionBundle } from './session-bundle';
 import { SessionLifecycleService } from './session-lifecycle';
 

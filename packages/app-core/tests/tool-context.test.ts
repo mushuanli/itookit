@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createVFS, MemoryBackend, type IFileSystem } from '@itookit/vfs-core';
-import { createVFSToolContext } from '../src/files/tool-context';
+import { createVFSToolContext } from '../src/vfs/tool-context';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });

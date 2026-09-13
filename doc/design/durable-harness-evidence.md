@@ -41,7 +41,7 @@
 | 7 | 控制意图与传播工作持久保存，崩溃不遗忘暂停/取消/关闭/投递 | `kernel.ts` control、`store.ts` cleanupPending、outbox | `task.seq` `control`、`cleanupPending`、`messages.seq` `outbox/inbox` | `20-kernel-ipc.test.ts`「retains Effect cleanup across missing, unsupported and failed adapters after SIGKILL」「recovers a cancelled tree after SIGKILL between parent commit and descendant cleanup」 |
 | 8 | Session 内共享操作可事务原子；跨 Session 不承诺原子/全局顺序 | `shared.seq` + `messages.seq` | `shared.seq` `value/head/history` | `kernel.test.ts`「persists versioned session shared state with CAS」「delivers cross-session messages through a durable outbox」 |
 | 9 | 无 notifier、worker 换进程、首次恢复早于旧租约到期，仍最终推进 | `kernel.ts` sweeper/timer service、`store.ts` recover | `task.seq` `attempt/`、`graph.seq` | `20-kernel-ipc.test.ts`「resumes an unexpired task through Kernel after SIGKILL without periodic polling」「waits for the dead worker lease deadline and resumes without forced takeover」；`protocol.test.ts`「uses a deadline timer without polling and leaves idle sessions idle」 |
-| 10 | 观察者能区分“请求已接受/逻辑状态已变化/外部是否停止” | `domain/status.ts`、事件流 `task.*`/`effect.*` | `events.seq` | `protocol.test.ts`「pages a Task event index without scanning unrelated events and pins the upper bound」；`app-core/src/files/session-browser.ts` 投影。缺口：无 GUI 侧的“三者可区分”验收记录 |
+| 10 | 观察者能区分“请求已接受/逻辑状态已变化/外部是否停止” | `domain/status.ts`、事件流 `task.*`/`effect.*` | `events.seq` | `protocol.test.ts`「pages a Task event index without scanning unrelated events and pins the upper bound」；`app-core/src/session/session-browser.ts` 投影。缺口：无 GUI 侧的“三者可区分”验收记录 |
 
 ## 2. Protocol §15 kill / 故障矩阵
 

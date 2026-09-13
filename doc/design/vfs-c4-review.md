@@ -4,7 +4,7 @@
 
 ## 1. 结论和数据组织
 
-采用单用户 `admin`。`[mindos]` 表示应用打开的文件系统根，不是内层目录名。Session 是业务实体，history 和 attachments 都属于 Session；SessionFS 是运行时组合视图，不是第二份数据。通用映射器属于 `vfs-core`，Session 仓库属于 `llm-session`，持久挂载配置及来源组装属于 `app-core`（`packages/app-core/src/files/session-files.ts`、`packages/app-core/src/files/directory-mounts.ts`）；`app-shell` 只做装配与兼容 re-export。
+采用单用户 `admin`。`[mindos]` 表示应用打开的文件系统根，不是内层目录名。Session 是业务实体，history 和 attachments 都属于 Session；SessionFS 是运行时组合视图，不是第二份数据。通用映射器属于 `vfs-core`，Session 仓库属于 `llm-session`，持久挂载配置及来源组装属于 `app-core`（`packages/app-core/src/vfs/session-files.ts`、`packages/app-core/src/vfs/directory-mounts.ts`）；`app-shell` 只做装配与兼容 re-export。
 
 ```text
 [mindos]/
@@ -163,7 +163,7 @@ stateDiagram-v2
 
 ## 8. 实际接口与调用方式
 
-以下对应已实现接口，不再列出未实现的伪类型。完整定义见 [文件接口](../../packages/vfs-core/src/interfaces/services/file-system.ts)、[视图](../../packages/vfs-core/src/impl/services/FileSystemView.ts)、[Session 仓库](../../packages/llm-session/src/persistence/types.ts)、[挂载服务](../../packages/app-core/src/files/session-files.ts)、[编辑器](../../packages/ui-common/src/interfaces/IEditor.ts)。
+以下对应已实现接口，不再列出未实现的伪类型。完整定义见 [文件接口](../../packages/vfs-core/src/interfaces/services/file-system.ts)、[视图](../../packages/vfs-core/src/impl/services/FileSystemView.ts)、[Session 仓库](../../packages/llm-session/src/persistence/types.ts)、[挂载服务](../../packages/app-core/src/vfs/session-files.ts)、[编辑器](../../packages/ui-common/src/interfaces/IEditor.ts)。
 
 ```ts
 interface FileSystemContext {
