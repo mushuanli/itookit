@@ -1,3 +1,4 @@
+import { recoverSessionsWithLeases } from './session-recovery';
 import { createVFS, MemoryBackend, type IStorageBackend, type MountOptions } from '@itookit/vfs-core';
 import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/device-llm';
 import { traceBoot, type ILLMLogger } from '@itookit/common';
@@ -152,33 +153,19 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         const kernelCore = kernel.kernel;
         const leaseStore = new SessionLeaseStore(systemFS);
         const ownerId = `${options.ownerKind ?? "tauri"}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
-        const recoveredLeases = new Map<string, import('../kernel/session-lease').SessionLeaseRecord>();
-        const leaseHeartbeat = setInterval(() => {
-            for (const lease of recoveredLeases.values()) void leaseStore.renew(lease).catch(() => null);
-        }, 10_000);
-        cleanupFns.push(async () => {
-            clearInterval(leaseHeartbeat);
-            for (const lease of recoveredLeases.values()) await leaseStore.release(lease).catch(() => false);
-        });
+        const recovery = await recoverSessionsWithLeases(kernelCore, leaseStore,
+            { id: ownerId, kind: options.ownerKind ?? 'tauri' }, 10_000).catch(async error => {
+                kernelCore.dispose();
+                const errors: unknown[] = [error];
+                for (const close of [() => kernelCore.waitIdle(), () => kernel.dispose()]) {
+                    try { await close(); } catch (cleanup) { errors.push(cleanup); }
+                }
+                if (errors.length > 1) throw new AggregateError(errors, 'Application recovery and kernel cleanup failed');
+                throw error;
+            });
+        cleanupFns.push(() => recovery.release());
         cleanupFns.push(() => kernel.dispose());
         cleanupFns.push(async () => { kernelCore.dispose(); await kernelCore.waitIdle(); });
-        // A refused lease is the only reason a Session stays read-only; log who holds
-        // it and when it expires so the condition is diagnosable without a debugger.
-        const describeHolder = async (sessionId: string): Promise<string> => {
-            const held = await leaseStore.inspect(sessionId).catch(() => null);
-            if (!held) return 'another host';
-            const remaining = Math.max(0, held.leaseUntil - Date.now());
-            return `${held.ownerKind}:${held.ownerId} until ${new Date(held.leaseUntil).toISOString()} (${Math.ceil(remaining / 1000)}s left)`;
-        };
-        for await (const session of kernelCore.listSessions()) {
-            const lease = await leaseStore.acquire(session.id, { id: ownerId, kind: options.ownerKind ?? 'tauri' });
-            if (!lease) {
-                console.warn(`[Boot] Session ${session.id} is owned by ${await describeHolder(session.id)}; leaving it read-only`);
-                continue;
-            }
-            recoveredLeases.set(session.id, lease);
-            await traceBoot(`recoverSession[${session.id}]`, () => kernelCore.recoverSession(session.id, { takeover: true }));
-        }
         console.log(`[Boot]   ↳ createKernel: +${(performance.now() - ts).toFixed(0)}ms`);
 
         // Inject VFS context so file tools work with the virtual filesystem in browser.
@@ -218,18 +205,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
 
         cleanupFns.push(() => resetSessionManager());
 
-        const acquireSessionLease = async (sessionId: string): Promise<void> => {
-            if (recoveredLeases.has(sessionId)) return;
-            const lease = await leaseStore.acquire(sessionId, { id: ownerId, kind: options.ownerKind ?? 'tauri' });
-            if (!lease) {
-                console.warn(`[Shell] Session ${sessionId} is owned by ${await describeHolder(sessionId)}; leaving it read-only`);
-                return;
-            }
-            recoveredLeases.set(sessionId, lease);
-            // Recovery (and therefore writability) is decided at boot only, so a late
-            // lease must say so explicitly instead of looking like a healthy Session.
-            console.warn(`[Shell] Session ${sessionId} lease acquired after boot (fencingToken=${lease.fencingToken}); restart to recover its writes`);
-        };
+        const acquireSessionLease = (sessionId: string): Promise<boolean> => recovery.acquireLater(sessionId);
         const unsubscribeSessionLease = sessionManager.onGlobalEvent(event => {
             if (event.type === 'session_registered') void acquireSessionLease(event.payload.sessionId);
         });
