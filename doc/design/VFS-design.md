@@ -221,3 +221,12 @@ Node 使用 UUID + wx 独占创建临时文件，Rust 以 create_new 创建候�
 SaveManager 修复同步抛错后把已完成 Promise 留作正在保存、导致后续重试失效的问题；没有保存回调时最终保存直接返回并保留 dirty。真实 Node 文件写入接入 SaveManager 的回归覆盖：发布失败 → 原文件保留且 dirty → 编辑新内容 → 重试成功且 dirty 清除。
 
 隔离快照：LocalFS 74、MDX 11、Rust 36 项测试通过，共 121 项；LocalFS/MDX/Tauri 类型检查、Tauri 前端构建与文档检查通过。P0-02 真实窗口保存失败/重试、其他平台行为与最终全仓验收仍开放；原子 rename 不代表断电 fsync 持久性。
+
+
+## 2026-09-14：数据库初始化失败与定向释放
+
+Tauri sidecar.close 显式传入当前 databaseUrl，避免无参数关闭所有池；初始化的 schema 读取、建表或版本检查失败统一释放本次池，失败与清理错误同时发生时保留 AggregateError 及原始 cause。事务内句柄不能关闭数据库池。通过真实 plugin-sql JavaScript 门面的宿主调用桩验证定向关闭、其他池继续可用及不兼容版本只关闭一次，不作为真实原生多池窗口验收。
+
+LocalFS 不再把探针不可用、未知/空结果、普通探针关闭错误当成损坏。只在明确完整性诊断或 SQLITE_CORRUPT/SQLITE_NOTADB 时沿用重建流程，否则保留数据库文件并抛出原初始化错误。三个误删窗口修复前均实际导致测试文件被删，修复后保留；另补空结果边界，既有真实损坏数据库重建回归仍通过。
+
+隔离 LocalFS 78、app-shell 193 项测试通过，共 271 项，另有 30 项既有跳过；LocalFS/Tauri 类型检查、Tauri 前端构建与文档检查通过。P0-02 真实窗口 Session 关闭/删除与故障恢复、完整持久性验收仍开放。

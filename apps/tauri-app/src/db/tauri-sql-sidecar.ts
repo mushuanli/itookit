@@ -67,9 +67,16 @@ export class TauriSqlSidecarDb implements ISidecarDb {
     static async open(dbPath: string): Promise<TauriSqlSidecarDb> {
         const db = await Database.load(`sqlite:${dbPath}`);
         const instance = new TauriSqlSidecarDb(db, `sqlite:${dbPath}`);
-        await instance.assertSchemaVersion();
-        await instance.initSchema();
-        return instance;
+        try {
+            await instance.assertSchemaVersion();
+            await instance.initSchema();
+            return instance;
+        } catch (error) {
+            try { await instance.close(); } catch (cleanupError) {
+                throw new AggregateError([error, cleanupError], 'Sidecar initialization and cleanup failed', { cause: error });
+            }
+            throw error;
+        }
     }
 
     // ── Schema migration ───────────────────────────────────────────────────────
@@ -79,7 +86,7 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         if (!tables.length) return;
         const versions = tables.some(table => table.name === '_schema_version')
             ? await this.db.select<Array<{ version: number }>>('SELECT version FROM _schema_version') : [];
-        if (versions.length !== 1 || versions[0].version !== SCHEMA_VERSION) { await this.db.close(); throw new Error('Filesystem database version incompatible'); }
+        if (versions.length !== 1 || versions[0].version !== SCHEMA_VERSION) throw new Error('Filesystem database version incompatible');
     }
 
     // ── Schema ─────────────────────────────────────────────────────────────────
@@ -269,7 +276,8 @@ export class TauriSqlSidecarDb implements ISidecarDb {
     // ── lifecycle ──────────────────────────────────────────────────────────────
 
     async close(): Promise<void> {
-        await this.db.close();
+        if (!this.databaseUrl) throw new Error('Cannot close an unidentified sidecar database');
+        await this.db.close(this.databaseUrl);
     }
 }
 
