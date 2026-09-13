@@ -36,7 +36,7 @@ env -u http_proxy -u https_proxy -u all_proxy -u no_proxy \
 
 ### 模型与目录授权
 
-1. 设置 → Provider：新增 OpenAI-compatible 地址与 `api_key_env`（配置文件只存变量名，不写凭证正文）；验收可用本地 mock 服务。
+1. 设置 → Provider：新增 OpenAI-compatible 地址与 API Key；验收可用本地 mock。Key 按已确认的落盘方案，以**明文**保存在数据根的 `/etc/llm/.providers/<id>.json`，表单已标注存储路径。Provider 列表接口与 `.llm` 配置导出不包含该字段；如果把凭证写入消息或命令，仍可能进入对应记录。`api_key_env` 是 CLI YAML 从环境变量读取凭证的配置，桌面 Provider 表单没有该字段。回归见 `packages/device-llm/tests/provider-export.spec.ts` 和 `packages/llm-settings-ui/tests/ProviderSettingsEditor.key-storage.test.ts`。
 2. 设置 → Connection：把 tier 指向实际模型 ID；Agent 保持默认即可。
 3. 目录授权：只有明确授权（`directory_open`）的目录才进入 Session 命名空间。典型映射是仓库只读 `/app` + 可写工作目录 `/workspace`；未授权目录在 Bash 里不可见。
 4. 发送一条要求“运行子 harness”的消息。Agent 会调用 Bash 工具，命令形如：
@@ -55,7 +55,7 @@ node /app/apps/cli/dist/cli.js run -f /workspace/workflow.yml --state-dir /works
 - 让子 harness 从工作目录内的受控文件/环境变量名读取（例如把凭证放到 Session 可读但不可写的位置，配置里只写变量名）；
 - 生产部署建议由宿主在启动子进程时注入，而不是让模型拼命令。
 
-当前未提供“桌面端凭证注入”的独立 UI；上面前两种方式属于操作约定，交付时需与用户确认数据落盘范围。
+桌面 Provider 表单也说明了 Session Bash 不继承宿主环境；子 harness 的凭证需按上述约定单独提供，桌面 Provider 中保存的 Key 不会自动传入子进程。
 
 ## 不依赖外部模型的组合验收
 

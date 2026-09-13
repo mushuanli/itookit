@@ -70,8 +70,8 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                     <div>
                         <h2 class="settings-page__title">Provider 配置</h2>
                         <p class="settings-page__description">
-                            管理云提供商的模型目录、API 地址和默认层级映射。
-                            连接（API Key）在「LLM 连接」页配置。
+                            管理云提供商的模型目录、API 地址与 API Key（认证信息属于 Provider 层）。
+                            连接在「LLM 连接」页把 Provider 绑定到 Agent 并设置模型层级。
                         </p>
                     </div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -540,6 +540,8 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                            value="${existingApiKey}"
                            placeholder="sk-... （留空则不修改现有 Key）">
                     <small class="settings-form__help">所有绑定此 Provider 的连接共享此 Key。</small>
+                    <small class="settings-form__help">Key 以<strong>明文</strong>保存在数据根的 <code>/etc/llm/.providers/&lt;id&gt;.json</code>；Provider 列表与 <code>.llm</code> 导出不含此字段，但文件本身可读。</small>
+                    <small class="settings-form__help">Session Bash 不继承宿主环境：子进程需要凭证时，请在命令里显式传入，或让它从自己读取的受控文件 / 环境变量名取值。</small>
                     <div style="margin-top:6px">
                         <button type="button" id="btn-test-provider"
                                 class="settings-btn settings-btn--secondary settings-btn--sm" style="width:100%">

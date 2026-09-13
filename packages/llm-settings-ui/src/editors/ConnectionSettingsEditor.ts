@@ -67,7 +67,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     <div class="settings-page__header">
                         <div>
                             <h2 class="settings-page__title">${pageTitle}</h2>
-                            <p class="settings-page__description">为云提供商配置 API Key，并设置模型层级（optimal / standard / fast）</p>
+                            <p class="settings-page__description">把 Provider 绑定到 Agent 并设置模型层级（optimal / standard / fast）；API Key 属于 Provider，在「LLM Provider」页配置</p>
                         </div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
                             <input type="file" id="llm-conn-import-file"
