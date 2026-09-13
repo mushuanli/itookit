@@ -409,17 +409,19 @@ export class ManagedResourceStore {
     }
     async sweep(scope: string) {
         const b = await this.binding(scope);
-        await transaction(b.fs, tx => sweepResourceTx(tx, b));
+        const due = await transaction(b.fs, async tx => {
+            await sweepResourceTx(tx, b);
+            return rows<ResourceCleanup>(tx, resourcesPath(b.rootPath), 'cleanup');
+        });
         if (this.disposed) return;
         const running = this.processing.get(scope);
         if (running) return running;
-        const operation = this.runCleanups(b).finally(() => this.processing.delete(scope));
+        const operation = this.runCleanups(b, due).finally(() => this.processing.delete(scope));
         this.processing.set(scope, operation);
         await operation;
     }
-    private async runCleanups(binding: ResolvedStorageBinding) {
+    private async runCleanups(binding: ResolvedStorageBinding, due: ResourceCleanup[]) {
         const path = resourcesPath(binding.rootPath);
-        const due = await transaction(binding.fs, tx => rows<ResourceCleanup>(tx, path, 'cleanup'));
         for (const snapshot of due) {
             if (this.disposed) return;
             if (snapshot.status === 'succeeded' || snapshot.nextAttemptAt > Date.now()) continue;
