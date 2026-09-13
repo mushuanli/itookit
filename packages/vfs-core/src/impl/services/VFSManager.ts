@@ -200,5 +200,8 @@ export class VFSManager implements IVFSManager {
     }
 
     async readBySystemPath(path: string): Promise<FileContent> { return this.engine.readBySystemPath(path); }
+    /** Snapshot of engine operation counters for host diagnostics. */
+    get ioStats(): Readonly<Record<import('../../protocol').IOOperation, number>> { return { ...this.engine.ioStats }; }
+    resetIOStats(): void { this.engine.resetIOStats(); }
     get _engine(): VFSEngine { return this.engine; }
 }

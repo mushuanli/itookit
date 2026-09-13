@@ -24,7 +24,7 @@ createFileSystemView({
 
 ## VFSManager
 
-实现 `IVFSManager`，宿主专用（不注入 Session 或编辑器）：`initialize()` / `dispose()` / `openFileSystem(rootPath)`；子服务 `mounts` / `devices` / `plugins`；设备节点 `registerDevice` / `openDevice` / `createDeviceNode` / `removeDeviceNode`；系统路径 `readBySystemPath`。
+实现 `IVFSManager`，宿主专用（不注入 Session 或编辑器）：`initialize()` / `dispose()` / `openFileSystem(rootPath)`；子服务 `mounts` / `devices` / `plugins`；设备节点 `registerDevice` / `openDevice` / `createDeviceNode` / `removeDeviceNode`；系统路径 `readBySystemPath`；诊断用引擎操作计数 `ioStats`（副本快照）/ `resetIOStats()`，仅统计已埋点操作，不代表完整后端调用数或 IPC 次数。
 
 ## createVFS()
 

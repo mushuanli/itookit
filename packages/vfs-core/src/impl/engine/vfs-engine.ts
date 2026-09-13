@@ -22,6 +22,7 @@ import type {
     ReadOptions,
     DeleteOptions,
     IMountRouter,
+    IOOperation,
 } from '../../protocol';
 
 import {
@@ -32,6 +33,7 @@ import {
     SYSTEM_DIRS,
     DEVICE_HANDLER_METADATA_KEY,
     DEFAULT_FILENAME_PATTERN,
+    IO_OPERATIONS,
 } from '../../protocol';
 
 import { FSEventBus } from '../event/event-bus';
@@ -40,13 +42,6 @@ import { DeviceRegistry } from './device-registry';
 import { toBuffer, toString } from '../../utils/encoding';
 import * as P from '../../utils/path';
 import { toAssetDirName, validateFilename } from '../../utils/validation';
-
-const IO_OPERATIONS = [
-    'stat', 'list', 'read', 'write', 'mkdir',
-    'delete', 'rename', 'metadata', 'search',
-] as const;
-
-type IOOperation = typeof IO_OPERATIONS[number];
 
 export class VFSEngine {
     readonly events: FSEventBus;

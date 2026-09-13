@@ -43,6 +43,10 @@ export type {
     FileSystemStats,
 } from './interfaces/core/types';
 
+// ── IO statistics ──
+export { IO_OPERATIONS } from './interfaces/core/io-stats';
+export type { IOOperation } from './interfaces/core/io-stats';
+
 // re-export SeqFileEntry from canonical location
 export type { SeqFileEntry } from './interfaces/capabilities/seq-file';
 

@@ -1,5 +1,6 @@
 import type { IFileSystem } from './file-system';
 import type { FileContent } from '../core/types';
+import type { IOOperation } from '../core/io-stats';
 import type { IStorageBackend } from '../storage/backend';
 import type { IMountRouter, MountPoint, MountOptions } from '../mount/mount';
 import type { IPluginManager } from '../plugin/plugin';
@@ -48,4 +49,13 @@ export interface IVFSManager {
     createDeviceNode(handlerId: string, devPath: string, metadata?: Record<string, unknown>): Promise<void>;
     removeDeviceNode(devPath: string): Promise<void>;
     readBySystemPath(path: string): Promise<FileContent>;
+
+    /**
+     * Snapshot of instrumented engine operations for diagnostics. Mutating the copy
+     * does not affect the engine. Counts do not represent exhaustive backend calls or IPC.
+     */
+    readonly ioStats: Readonly<Record<IOOperation, number>>;
+
+    /** Reset instrumented engine operation counts for diagnostic sampling. */
+    resetIOStats(): void;
 }
