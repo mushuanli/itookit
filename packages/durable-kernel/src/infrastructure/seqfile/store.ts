@@ -598,9 +598,10 @@ export class SeqFileKernelStore {
     }
 
     async listTasks(binding: ResolvedStorageBinding): Promise<TaskRecord[]> {
-        const result: TaskRecord[] = [];
-        for (const id of await this.listTaskIds(binding)) result.push(await this.readTask(binding, id));
-        return result;
+        // Decode from the entries listTaskIds already read: reading each Task a
+        // second time (readTask) doubles Task record reads during each full scan, and
+        // the Kernel polls Sessions with hundreds of Tasks.
+        return (await this.taskEntries(binding)).map(entry => decode(entry.value));
     }
 
     async listTaskPage(binding: ResolvedStorageBinding, query: import('../../domain/types').TaskListQuery = {}): Promise<import('../../domain/types').TaskListPage> {
@@ -1532,20 +1533,29 @@ export class SeqFileKernelStore {
     }
 
     private async listTaskIds(binding: ResolvedStorageBinding): Promise<string[]> {
+        return (await this.taskEntries(binding)).map(entry => entry.id);
+    }
+
+    /**
+     * Read every Task's id and stored value in one directory scan, sorted by id so
+     * `listTasks` keeps the order callers relied on. Shared by listTaskIds/listTasks
+     * so a full scan costs one read per Task instead of two.
+     */
+    private async taskEntries(binding: ResolvedStorageBinding): Promise<Array<{ id: string; value: string }>> {
         const root = join(binding.rootPath, 'tasks');
         // A removed storage tree has no Tasks; callers must stay usable for retries.
         if (!await binding.fs.driver.exists(root)) return [];
         const children = await binding.fs.driver.getChildren(root);
-        const ids: string[] = [];
+        const entries: Array<{ id: string; value: string }> = [];
         for (const child of children) {
             if (child.type !== 'directory') continue;
             const path = taskPath(binding.rootPath, child.name);
             // A crash can leave a Task directory without its seq file.
             if (!await binding.fs.driver.exists(path)) continue;
             const value = await seq(binding.fs).getEntry(path, TASK_KEY);
-            if (value) ids.push(child.name);
+            if (value) entries.push({ id: child.name, value });
         }
-        return ids.sort();
+        return entries.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
     }
 
     private async requeueExpired(binding: ResolvedStorageBinding, task: TaskRecord, restart = false): Promise<void> {

@@ -176,6 +176,27 @@ describe('durable harness protocols', () => {
         expect((await legacy.getShared('probe'))?.value).toEqual({ ok: true });
     });
 
+    it('reads Task records once per scan and observes later changes while skipping crash leftovers', async () => {
+        const first = await store.createTask(binding, 's', spec);
+        const second = await store.createTask(binding, 's', spec);
+        await fs.driver.createDirectory({ name: 'unfinished', parentPath: `${binding.rootPath}/tasks` });
+        const paths = new Set([taskPath(binding.rootPath, first.id), taskPath(binding.rootPath, second.id)]);
+        const reads = vi.fn((path: string, key: string) => fs.meta.seq!.getEntry(path, key));
+        const measured = { ...binding, fs: new Proxy(fs, { get(target, key) {
+            return key === 'meta' ? { ...fs.meta, seq: { ...fs.meta.seq, getEntry: reads } } : Reflect.get(target, key, target);
+        } }) };
+        {
+            const listed = await store.listTasks(measured);
+            expect(listed.map(task => task.id)).toEqual([first.id, second.id].sort());
+            expect(reads.mock.calls.filter(([path, key]) => paths.has(path) && key === 'record')).toHaveLength(2);
+            await store.signalTask(binding, first.id, { type: 'changed', payload: 'new' });
+            reads.mockClear();
+            const updated = await store.listTasks(measured);
+            expect(updated.find(task => task.id === first.id)?.version).toBe(first.version + 1);
+            expect(reads.mock.calls.filter(([path, key]) => paths.has(path) && key === 'record')).toHaveLength(2);
+        }
+    });
+
     beforeEach(async () => {
         ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
         fs = await manager.openFileSystem('/data/test');
