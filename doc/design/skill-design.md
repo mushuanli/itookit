@@ -156,3 +156,11 @@ Session 作用域销毁会立即使旧 Skill 队列失效；等待项开始时�
 `kernel-adapters/skill/session-file-source.ts` 的 SessionFileSkillSource 统一处理 `_agent/skills`、项目 AGENT.md、frontmatter 和支持文件路径；仅通过授权 ToolVFSContext 访问，YAML parser 由宿主注入。TauriSkillSource 现在是薄封装；CLI createCliRuntime 也通过 skillSourceForSession 装配该类，工作区 Skill 可以由持久 skill.load Effect 加载并登记身份。
 
 这统一了发现与加载来源，不表示 CLI 已与桌面端完全统一新运行上下文、自动匹配、加载状态重建或 UI 生命周期；这些装配仍需继续核验。
+
+### 执行与 UI 接线补充（2026-09-14）
+
+buildSkillContexts 从已选择、enabled、允许模型调用且非 action 的定义中构造 skillContexts；工具仅取 Skill 声明、能力白名单与宿主目录交集。buildLlmTaskInput 透传，DurableAgentProgram 保存独立初始状态并沿用运行中加载的规则重注入路径。直接聊天及 Flow 身份绑定同样排除 action 的系统提示注入。已提交 Task 中的正文、关键规则与定义快照不随后续编辑改变；这尚不是严格版本漂移协议。
+
+SessionSkillControls 增加 describe、mountByGlob/unmountByGlob、onChange。enabled 表示模型上下文可加载，definitionEnabled 表示定义可用于手动入口。/skills 打开面板，/skill 加载，/sk-<id> 显式调用；action/silent 的正文作为用户请求发送，已禁用或删除的定义在调用前拒绝。编辑器关闭撤销临时 glob 匹配，不把它当作持久加载身份。
+
+bindSkillRefresh 返回 refresh/dispose；目录通知与菜单刷新合并到同一请求队列，在请求期间有新事件则丢弃旧响应并重读。关闭后的请求和迟到订阅不能重新更新面板。Session/运行时关闭会排空已开始的 Skill 操作及恢复，随后释放文件能力；尚未开始的排队操作拒绝执行。

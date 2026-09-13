@@ -41,7 +41,8 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
     const chat = vi.fn(async () => ({ destroy: vi.fn() }));
     const file = vi.fn(async () => ({ destroy: vi.fn() }));
     const mounts = new DirectoryMountService(root, files); await mounts.init();
-    const workbench = new SessionWorkbench(sidebar, main, repository, files, chat as any, () => {}, undefined, kernel as any, file as any, mounts);
+    const sessionSkills = { mountByGlob: vi.fn(async () => {}), unmountByGlob: vi.fn(async () => {}), list: vi.fn(), load: vi.fn(), listLoaded: vi.fn(), unload: vi.fn() };
+    const workbench = new SessionWorkbench(sidebar, main, repository, files, chat as any, () => {}, undefined, kernel as any, file as any, mounts, sessionSkills as any);
     try {
         await workbench.start();
         await vi.waitFor(() => expect(chat).toHaveBeenCalledOnce());
@@ -93,6 +94,9 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
         const options = (file.mock.calls as unknown as Array<[HTMLElement, any]>)[0][1];
         expect(options.target).toEqual({ kind: 'file', path: '/workspace/note.md' });
         expect(options.files.cwd).toBe('/workspace'); expect(options.initialContent).toBe('mapped text');
+        // L4 wiring: opening a file mounts matching Skill globs for this Session only.
+        expect(sessionSkills.mountByGlob).toHaveBeenCalledWith(id, '/workspace/note.md');
+        expect(sessionSkills.unmountByGlob).not.toHaveBeenCalled();
         await options.hostContext.saveContent('/wrong', 'saved through mapping');
         expect(await home.driver.readContent('/project/note.md', { encoding: 'utf-8' })).toBe('saved through mapping');
         // A failed write must be visible instead of looking like a successful save.
@@ -105,6 +109,7 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
             .toContain('EROFS: mount is read-only');
         await workbench.openResource(id); expect(chat).toHaveBeenCalledTimes(2);
         // Leaving the file editor releases the glob mount.
+        expect(sessionSkills.unmountByGlob).toHaveBeenCalledWith(id, '/workspace/note.md');
         await Promise.all([workbench.openResource(`/${id}/tasks`), workbench.openResource(`/${id}/tasks/task-one`)]);
         await new Promise(resolve => setTimeout(resolve, 30));
         expect(workbench.getActiveResourceId()).toBe(`/${id}/tasks/task-one`);

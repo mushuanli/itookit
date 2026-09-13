@@ -986,6 +986,12 @@ export class ChatInput implements IChatInputPresenter {
         this.skillPanel.refresh(skills);
     }
 
+    /** Open the settings panel, which carries the Skill list (`/skills`). */
+    showSkillSettings(): void {
+        this.toggleSettings(true);
+        this.skillPanel.reload();
+    }
+
     private updateActiveBadges(): void {
         const activeContainer = this.container.querySelector('.llm-input__active-settings') as HTMLElement;
         const connBadge    = this.container.querySelector('.llm-input__active-badge[data-type="connection"]') as HTMLElement;

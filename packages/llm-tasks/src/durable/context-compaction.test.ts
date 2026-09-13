@@ -44,6 +44,30 @@ describe('durable context compaction', () => {
         expect(legacyEffect.effect.request).toMatchObject({ request: { tools: [{ name: 'load_skill' }] } });
     });
 
+    it('activates initially selected Skills without a load_skill call', () => {
+        const program = new DurableAgentProgram();
+        const initial = program.init({ sessionId: 's', roundId: 'r', connectionId: 'c', approval: 'none',
+            messages: [{ role: 'user', content: 'task' }], allowedToolIds: ['publish'],
+            tools: [{ name: 'task-tool' }],
+            skillContexts: [{ skillId: 'review', compactInstructions: 'Keep access checks.',
+                tools: [{ toolId: 'publish', definition: { name: 'publish' }, external: false },
+                    { toolId: 'unrelated', definition: { name: 'unrelated' }, external: false }] }] });
+        expect(initial.state.skillContexts).toEqual([{ skillId: 'review', compactInstructions: 'Keep access checks.',
+            tools: [{ toolId: 'publish', definition: { name: 'publish' }, external: false },
+                { toolId: 'unrelated', definition: { name: 'unrelated' }, external: false }] }]);
+        const started = program.reduce(initial.state, { type: 'signal', sequence: 1,
+            signal: { type: 'capabilities', payload: { llmHandleId: 'llm', toolHandleId: 'tools' } } });
+        const request = started.actions?.find(action => action.type === 'effect');
+        if (request?.type !== 'effect') throw new Error('LLM effect missing');
+        // Allowed Skill tools are exposed immediately; the critical rules ride along.
+        expect(request.effect.request).toMatchObject({ request: { tools: [{ name: 'task-tool' }, { name: 'publish' }] } });
+        expect(JSON.stringify(request.effect.request)).toContain('Keep access checks.');
+        // Compacting the message window keeps the activation independent of tool history.
+        const compacted = compactMessages([{ role: 'system', content: 'Keep access checks.' },
+            { role: 'user', content: 'task' }], { maxMessages: 2, keepRecent: 1 });
+        expect(compacted.some(message => message.content === 'Keep access checks.')).toBe(true);
+    });
+
     it('requires approval before a dynamically loaded external tool in the same assistant batch', () => {
         const program = new DurableAgentProgram();
         const initial = program.init({ sessionId: 's', roundId: 'r', connectionId: 'c', approval: 'external',

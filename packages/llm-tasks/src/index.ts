@@ -15,6 +15,7 @@ export { DurableAgentProgram } from './durable/agent-program';
 export { DurablePlanProgram } from './durable/plan-program';
 export { extractNodeOutput } from './durable/program-helpers';
 export { buildLlmTaskInput, type LlmTaskInputOptions } from './durable/task-spec';
+export { buildSkillContexts, type SkillContext } from './durable/skill-contexts';
 export {
     collectDependency,
     dependenciesReady,

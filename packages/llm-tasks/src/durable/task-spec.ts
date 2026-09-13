@@ -32,6 +32,8 @@ export interface LlmTaskInputOptions {
     tools?: ToolDefinition[];
     allowedToolIds?: string[];
     externalToolIds?: string[];
+    /** Initial Skill activation snapshots; the host resolves them before submission. */
+    skillContexts?: DurableAgentInput['skillContexts'];
     subtaskTool?: string;
     dependencyBindings?: DurableDependencyBinding[];
     includeDependencyOutputs?: boolean;
@@ -61,6 +63,7 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         tools: options.tools,
         allowedToolIds: options.allowedToolIds,
         externalToolIds: options.externalToolIds,
+        skillContexts: options.skillContexts,
         subtaskTool: options.subtaskTool,
         dependencyBindings: options.dependencyBindings,
         includeDependencyOutputs: options.includeDependencyOutputs,

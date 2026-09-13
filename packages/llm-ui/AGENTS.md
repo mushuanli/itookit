@@ -25,3 +25,5 @@ pnpm --filter @itookit/llm-ui build
 ```
 
 测试用例为 `src/**/*.test.ts`；本包未定义 `test` script，用 `pnpm --filter @itookit/llm-ui exec vitest run` 执行。
+
+Skill 列表通过 bindSkillRefresh 返回的 refresh/dispose 与 SessionSkillControls.onChange 保持一致；菜单请求共用刷新队列，销毁时 dispose。/sk-<id> 发送前重新核验定义，action/silent 仅走显式用户请求。测试入口为 pnpm --filter @itookit/llm-ui test（vitest run）及 test:watch。

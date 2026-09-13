@@ -1,3 +1,4 @@
+import { resolveFlowRunForTask } from '../src/flow/task-run';
 import { prepareFlowTaskRetry, readFlowRunMembers } from '../src/flow/run-members';
 import { workspaceFinalizationKey } from '../src/flow/workspace-finalization';
 import { requestFlowGraphRetry } from '../src/flow/graph-retry';
@@ -57,6 +58,27 @@ describe('DurableFlowExecutor', () => {
     /** For Runs that park on an interaction and can never exit: wait for a dispatched node. */
     const waitForNode = (handle: { nodes: ReadonlyMap<string, unknown> }, nodeId: string): Promise<void> =>
         vi.waitFor(() => expect(handle.nodes.has(nodeId)).toBe(true));
+
+    it('resolves independent Run nodes, descendants and persisted retry membership', async () => {
+        const flow: DagRunSpec = { nodes: [{ ...valueNode('gate', null), plugin: 'builtin.human',
+            config: { requestId: 'continue', prompt: 'Continue' } }], edges: [] };
+        const first = await executor(kernel).submit('session-one', flow);
+        const second = await executor(kernel).submit('session-one', flow);
+        await waitForNode(first, 'gate'); await waitForNode(second, 'gate');
+        const session = await kernel.openSession('session-one');
+        const firstNode = first.nodes.get('gate')!;
+        const task = (await firstNode.status()).task;
+        expect(task.rootTaskId).toBe(firstNode.id);
+        expect((await resolveFlowRunForTask(session, firstNode.id))?.id).toBe(first.root.id);
+        expect((await resolveFlowRunForTask(session, second.nodes.get('gate')!.id))?.id).toBe(second.root.id);
+        const child = await session.submit({ program: { kind: 'flow.value', version: '1' },
+            input: {}, parent: firstNode.id, deferStart: true });
+        expect((await resolveFlowRunForTask(session, child.id))?.id).toBe(first.root.id);
+        await firstNode.cancel('retry test');
+        const retry = await prepareFlowTaskRetry(session, first.root.id, firstNode.id, 'scope-test');
+        expect((await resolveFlowRunForTask(await kernel.openSession('session-one'), retry.id))?.id).toBe(first.root.id);
+        await first.root.cancel('test done'); await second.root.cancel('test done');
+    });
 
     it.each([false, true])('returns a resumed handle while downstream is pending (cancel: %s)', async cancel => {
         const flow = agentFlow();
@@ -221,6 +243,27 @@ describe('DurableFlowExecutor', () => {
         expect([...resumed.nodes.keys()].sort()).toEqual(['agent', 'answer']);
         expect(prompts.join('\n')).toContain('DEFINITION-V1');
         expect(prompts.join('\n')).not.toContain('DEFINITION-V2');
+    });
+
+    it('activates a node\'s initially selected Skills through the host port', async () => {
+        const withSkill = { ...agentFlow().nodes[0], config: { ...agentFlow().nodes[0].config, skillIds: ['review', 7] } };
+        const withoutSkill = { ...agentFlow().nodes[0], id: 'plain', name: 'Plain' };
+        const resolveSkillContexts = vi.fn(async (_session: string, skillIds: string[], allowed: string[]) =>
+            skillIds.map(skillId => ({ skillId, compactInstructions: 'critical rules',
+                tools: allowed.map(toolId => ({ toolId, definition: { name: toolId }, external: false })) })));
+        const run = await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), resolveSkillContexts })
+            .submit('session-one', { nodes: [withSkill, withoutSkill], edges: [] });
+        expect((await run.root.wait({ timeoutMs: 5_000 })).status).toBe('succeeded');
+        // Only the node that declares Skills asks for snapshots, and never with a non-string id.
+        expect(resolveSkillContexts).toHaveBeenCalledTimes(1);
+        expect(resolveSkillContexts).toHaveBeenCalledWith('session-one', ['review'], []);
+        const tasks = await kernel.listSessionTasks('session-one');
+        const skilled = tasks.find(task => task.labels?.flowNodeId === 'agent')!;
+        expect((skilled.input as { skillContexts?: unknown }).skillContexts).toEqual([
+            { skillId: 'review', compactInstructions: 'critical rules', tools: [] },
+        ]);
+        expect((tasks.find(task => task.labels?.flowNodeId === 'plain')!.input as { skillContexts?: unknown }).skillContexts)
+            .toBeUndefined();
     });
 
     it('accumulates every dispatched worker result across supervisor rounds', async () => {

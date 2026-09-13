@@ -31,22 +31,25 @@ export function runSessionSkillOperation<T>(registry: SessionCapabilityRegistry,
     return next;
 }
 
-export function invalidateSessionSkillOperations(registry: SessionCapabilityRegistry, id: string): void {
+export function invalidateSessionSkillOperations(registry: SessionCapabilityRegistry, id: string): Promise<void> {
     const owner = queueFor(registry);
     const queue = owner.sessions.get(id) ?? { invalidated: false };
     queue.invalidated = true;
     owner.sessions.set(id, queue);
+    return queue.tail?.then(() => {}, () => {}) ?? Promise.resolve();
 }
 
 export function reopenSessionSkillOperations(registry: SessionCapabilityRegistry, id: string): void {
     queueFor(registry).sessions.delete(id);
 }
 
-export function closeSessionSkillOperations(registry: SessionCapabilityRegistry): void {
+export function closeSessionSkillOperations(registry: SessionCapabilityRegistry): Promise<void> {
     const owner = queueFor(registry);
     owner.closed = true;
     for (const queue of owner.sessions.values()) queue.invalidated = true;
+    const pending = [...owner.sessions.values()].map(queue => queue.tail);
     owner.sessions.clear();
+    return Promise.allSettled(pending).then(() => {});
 }
 
 export function coordinateSkillEffect(effect: EffectAdapter, registry: SessionCapabilityRegistry): EffectAdapter {

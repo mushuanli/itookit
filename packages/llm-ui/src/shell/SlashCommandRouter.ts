@@ -6,7 +6,7 @@ import { parseDirectoryCommand } from './directory-command';
 
 
 import { SessionCommand, type SessionGroup, type ISessionRepository } from '@itookit/llm-session';
-import {formatDefaultFileTitle} from '@itookit/common';
+import { formatDefaultFileTitle, t } from '@itookit/common';
 import { showConfirmDialog } from '@itookit/ui-common';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter'
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter'
@@ -25,6 +25,8 @@ import type { SwitchBranchByOffsetCommand } from '../commands/BranchCommands';
 import type { EditorHostContext } from '@itookit/ui-common';
 
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
+import { buildActionSkillMessage, buildSkillPrompt } from '../components/input/SkillInvocationParser';
+import type { SkillInfo, SkillInvocation } from '../domain/types';
 import { getAgentDisplayName, sanitizeFileName } from './AgentProvider';
 
 export interface PrivilegedSlashCommands {
@@ -33,6 +35,34 @@ export interface PrivilegedSlashCommands {
     cancel(): Promise<void>;
     resume(): Promise<void>;
     approve(note: string): Promise<void>;
+}
+
+/**
+ * Session Skill access for the slash popup. `snapshot` must be synchronous because the popup
+ * builds `/sk-<id>` commands while rendering; the shell keeps it fresh through the same
+ * subscription that refreshes the input-side Skill panel.
+ */
+export interface SlashSkillCommands {
+    snapshot(): SkillInfo[];
+    load(skillId: string): Promise<unknown>;
+    /** Definition lookup for `/sk-<id>`; undefined when the Skill no longer exists. */
+    describe(skillId: string): Promise<SlashSkillDefinition | undefined>;
+    openPanel(): void;
+    /** Ask the shell to re-read the Session Skill list for the next synchronous snapshot. */
+    refresh(): void;
+}
+
+export interface SlashSkillDefinition {
+    name: string;
+    type: string;
+    instructions: string;
+    triggerStrategy?: 'reference' | 'action';
+    disableModelInvocation?: boolean;
+    enabled: boolean;
+}
+
+function isDirectInvocation(skill: SlashSkillDefinition): boolean {
+    return skill.triggerStrategy === 'action' || Boolean(skill.disableModelInvocation);
 }
 
 export interface SlashCommandRouterDeps {
@@ -45,7 +75,13 @@ export interface SlashCommandRouterDeps {
     branchService: BranchService;
     domCache: DOMCache;
     hostContext?: EditorHostContext;
-    sendCommand: SendMessageCommand;
+    /**
+     * Resolve the send command lazily: the slash callbacks are built while the input plugins
+     * register, which happens before `initCommands()` creates `SendMessageCommand`. Capturing
+     * the instance here used to pass `undefined` and made every sending slash command (`/btw`,
+     * `/sk-<id>`) fail silently.
+     */
+    sendCommand: () => SendMessageCommand;
     switchBranchByOffsetCommand: SwitchBranchByOffsetCommand;
     agentService: IAgentConfigService;
     _sessionEngine: ISessionRepository; // for executeSkillInvocation route
@@ -56,6 +92,8 @@ export interface SlashCommandRouterDeps {
     findCurrentVisibleSession: () => string | null;
     updateCollapseButtonIcon: (isAllCollapsed?: boolean) => void;
     privilegedCommands?: PrivilegedSlashCommands;
+    /** Absent until the host injects Session Skill controls; without it no Skill slash command appears. */
+    skills?: SlashSkillCommands;
 }
 
 /**
@@ -164,7 +202,7 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
                 Toast.error('Usage: /btw <message>');
                 return;
             }
-            deps.sendCommand.run({
+            deps.sendCommand().run({
                 text: args.trim(),
                 files: [],
                 origin: 'user',
@@ -186,6 +224,38 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
         onResumeTask: deps.privilegedCommands?.resume,
         onApproveTask: deps.privilegedCommands?.approve,
         onExec: deps.privilegedCommands?.exec,
+
+        // ── Kernel Skills ───────────────────────────────────
+        // `/skill <id>` loads, `/sk-<id>` loads and sends an invocation prompt. Action skills
+        // have no other UI entry point: the Skill panel disables their unloaded checkbox.
+        ...(deps.skills ? {
+            getSkills: () => deps.skills!.snapshot(),
+            onSkillPickerOpen: () => deps.skills!.refresh(),
+            onSkill: async (skillId: string) => { await deps.skills!.load(skillId); },
+            onSkills: () => deps.skills!.openPanel(),
+            onSkillInvoke: async (invocation: SkillInvocation) => {
+                const skill = await deps.skills!.describe(invocation.skillId);
+                if (!skill?.enabled) throw new Error(t('slash.error.skillUnavailable'));
+                // Action/silent Skills are refused by the model-context gate, so their body is
+                // inlined into the user message instead of being loaded into the Skill context.
+                if (skill && isDirectInvocation(skill)) {
+                    deps.sendCommand().run({
+                        text: buildActionSkillMessage(invocation, skill.instructions),
+                        files: [],
+                        origin: 'user',
+                    });
+                    return;
+                }
+                await deps.skills!.load(invocation.skillId);
+                // Every filesystem Skill is currently type `prompt` (see skill-design), which is
+                // what makes the free text an explicit task directive instead of a bare sentence.
+                deps.sendCommand().run({
+                    text: buildSkillPrompt(invocation, skill?.name ?? invocation.skillId, skill?.type ?? 'prompt'),
+                    files: [],
+                    origin: 'user',
+                });
+            },
+        } : {}),
 
         // ── Refine ──────────────────────────────────────────
 
@@ -382,7 +452,7 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
 function sendFollowUp(deps: SlashCommandRouterDeps, text: string): void {
     const config = deps.chatInput.getConfig();
     const agentId = config.agentId;
-    deps.sendCommand.run({ text, files: [], agentId });
+    deps.sendCommand().run({ text, files: [], agentId });
 }
 
 function formatDefaultTitle(agentId: string, agentService: IAgentConfigService): string {

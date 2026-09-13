@@ -7,6 +7,7 @@ import { parseSkillArgs } from '../SkillInvocationParser';
 import { injectStyle } from '../../../utils/styleInjector';
 import { insertBeforeWrapper } from '../../../utils/domInsertion';
 import { Toast } from '@itookit/ui-common';
+import { SLASH_ICONS, ENTITY_ICONS, t, type LocaleKey } from '@itookit/common';
 
 // ── Tool arg parser ──────────────────────────────────────────────────────────
 // Parses slash command args: positionals and --flag value pairs.
@@ -89,13 +90,18 @@ function resolveAtPath(token: string): string {
  * Slash 命令定义
  */
 export interface SlashCommandDef {
-    /** 命令名（不含 /） */
+    /** 命令名（不含 /），小写 kebab-case，可用对象前缀（branch-*、context-*、message-*） */
     name: string;
     /** 显示标签 */
     label: string;
     /** 描述 */
     description: string;
-    /** 图标 */
+    /**
+     * 兼容别名（不含 /）。用于旧命令名与短写法；解析、面板搜索与 `/help` 都走同一张表，
+     * 因此别名不会绕过 `name` 的执行路径。
+     */
+    aliases?: string[];
+    /** 图标；必须取自 `@itookit/common` 的 SLASH_ICONS */
     icon?: string;
     /** 分组 */
     group?: string;
@@ -107,6 +113,35 @@ export interface SlashCommandDef {
     argsPlaceholder?: string;
     /** 执行后是否保留输入框内容（默认 false = 清空） */
     preserveInput?: boolean;
+}
+
+/** Panel/help group keys, in display order. Dynamic skill groups reuse the same keys. */
+export const SLASH_GROUP_ORDER = ['chat', 'refine', 'context', 'view', 'export', 'branch', 'agent', 'skills', 'skills-active', 'tools', 'files', 'task', 'help'] as const;
+
+/** Group label for display; unknown group keys (custom plugins) render as-is. */
+export function slashGroupLabel(group?: string): string | undefined {
+    if (!group) return undefined;
+    return (SLASH_GROUP_ORDER as readonly string[]).includes(group)
+        ? t(`slash.group.${group}` as LocaleKey) : group;
+}
+
+/** Resolve a command by canonical name or alias. Aliases never bypass the `name` path. */
+export function findCommand(commands: SlashCommandDef[], name: string): SlashCommandDef | undefined {
+    const needle = name.trim().toLowerCase();
+    return commands.find(command => command.name === needle || command.aliases?.includes(needle));
+}
+
+/** Nearest commands for a mistyped slash command (prefix matches first). */
+export function suggestCommands(commands: SlashCommandDef[], name: string, limit = 3): string {
+    const needle = name.trim().toLowerCase();
+    const matches = commands
+        .map(command => ({ command, key: [command.name, ...(command.aliases ?? [])]
+            .find(candidate => candidate.startsWith(needle) || (needle.length > 2 && candidate.includes(needle))) }))
+        .filter((item): item is { command: SlashCommandDef; key: string } => Boolean(item.key))
+        .sort((a, b) => Number(b.key.startsWith(needle)) - Number(a.key.startsWith(needle)))
+        .slice(0, limit)
+        .map(item => `/${item.command.name}`);
+    return matches.length ? t('slash.didYouMean', { commands: matches.join(' ') }) : '';
 }
 
 /**
@@ -187,6 +222,13 @@ export interface SlashCommandCallbacks {
     getSkills?: () => SkillInfo[];
 
     /**
+     * 弹出面板前请求宿主刷新上面的 Skill 快照。
+     *
+     * 快照必须是同步读取，所以列表只能在输入过程中异步补齐；未注入时忽略。
+     */
+    onSkillPickerOpen?: () => void;
+
+    /**
      * 执行 Skill 调用（带参数/文件/文本）。
      *
      * 当用户发送 `/skillname [--key val]* [@file]* [text]` 时触发。
@@ -265,11 +307,16 @@ export class SlashCommandPlugin implements InputPlugin {
         this.panel = new PopupPanel(ctx.textarea, {
             maxVisible: 12,
             showSearch: false,
-            emptyText: 'No matching commands',
-            footerHint: '↑↓ Navigate · Enter Execute · Esc Close',
+            emptyText: t('slash.panel.empty'),
+            footerHint: t('slash.panel.footer'),
             variant: 'slash',
             animated: true,
         });
+    }
+
+    /** Read-only command list for the help panel (single source of truth). */
+    getCommandList(): SlashCommandDef[] {
+        return [...this.commands];
     }
 
     // ================================================================
@@ -334,18 +381,18 @@ export class SlashCommandPlugin implements InputPlugin {
 
         const [, cmdName, argsStr] = match;
 
-        // Check static commands first
-        const staticCmd = this.commands.find(c => c.name === cmdName);
-        if (staticCmd) {
-            this.executeCommand(staticCmd, argsStr.trim());
+        // Static commands (name or alias) first, then dynamic skill commands.
+        const command = findCommand(this.commands, cmdName)
+            ?? findCommand(this.buildSkillCommands(), cmdName);
+        if (command) {
+            this.executeCommand(command, argsStr.trim());
             return false;
         }
 
-        // Check dynamic skill commands
-        const skillCmds = this.buildSkillCommands();
-        const skillCmd = skillCmds.find(c => c.name === cmdName);
-        if (skillCmd) {
-            this.executeCommand(skillCmd, argsStr.trim());
+        // A bare unknown command is a mistyped command, not chat text: report it instead of
+        // silently sending `/foo` to the model. Path-like input (`/etc/hosts`) is left alone.
+        if (/^[a-z][a-z0-9-]*$/i.test(cmdName)) {
+            Toast.error(`${t('slash.unknown', { name: cmdName })} ${suggestCommands(this.commands, cmdName)}`.trim());
             return false;
         }
     }
@@ -356,6 +403,10 @@ export class SlashCommandPlugin implements InputPlugin {
 
     private showCommands(query: string): void {
         if (!this.panel) return;
+
+        // The shell caches the Skill list for the synchronous `/sk-<id>` build below; ask it
+        // to refresh so a Skill mounted after the editor opened still shows up.
+        this.cb.onSkillPickerOpen?.();
 
         // Merge static commands with dynamic skill commands (fresh each time)
         const skillCommands = this.buildSkillCommands();
@@ -382,7 +433,9 @@ export class SlashCommandPlugin implements InputPlugin {
      */
     private buildSkillCommands(): SlashCommandDef[] {
         const cb = this.cb;
-        const skills = (cb.getSkills?.() ?? []).filter((s: SkillInfo) => s.enabled);
+        // Manual invocation is offered for definition-enabled Skills even when the input
+        // checkbox refuses to load them (action / silent), which is what `/sk-<id>` is for.
+        const skills = (cb.getSkills?.() ?? []).filter((s: SkillInfo) => s.definitionEnabled);
         return skills.map((skill: SkillInfo) => {
             const cmdName = `sk-${skill.id}`;
             return {
@@ -391,8 +444,8 @@ export class SlashCommandPlugin implements InputPlugin {
                 description: skill.loaded
                     ? `${skill.name} (loaded)${skill.description ? ' — ' + skill.description : ''}`
                     : `${skill.name}${skill.description ? ' — ' + skill.description : ''}`,
-                icon: skill.icon ?? '⚡',
-                group: skill.loaded ? 'Skills — active' : 'Skills',
+                icon: skill.icon ?? ENTITY_ICONS.skill,
+                group: skill.loaded ? 'skills-active' : 'skills',
                 hasArgs: true,
                 argsPlaceholder: '@file --param value text',
                 preserveInput: false,
@@ -450,7 +503,7 @@ export class SlashCommandPlugin implements InputPlugin {
             await command.execute(args, this.ctx);
         } catch (e) {
             console.error(`[SlashCommand] Failed to execute /${command.name}:`, e);
-            Toast.error(e instanceof Error ? e.message : `/${command.name} failed`);
+            Toast.error(e instanceof Error ? e.message : t('slash.error.failed', { name: command.name }));
         }
 
         this.ctx?.focus();
@@ -470,9 +523,9 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'new',
                 label: '/new',
-                description: 'Create a new chat session (optional: /new <title>)',
-                icon: '➕',
-                group: 'Common',
+                description: t('slash.new.description'),
+                icon: SLASH_ICONS.new,
+                group: 'chat',
                 // hasArgs 移除（默认 false）— 面板选中时直接执行，使用默认标题
                 // 用户仍可手动输入 `/new my-title` 按 Enter 来指定标题
                 execute: (args) => cb.onNew(args),
@@ -480,50 +533,51 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'retry',
                 label: '/retry',
-                description: 'Regenerate last response',
-                icon: '🔄',
-                group: 'Common',
+                description: t('slash.retry.description'),
+                icon: SLASH_ICONS.retry,
+                group: 'chat',
                 execute: () => cb.onRetry(),
             },
             {
                 name: 'continue',
                 label: '/continue',
-                description: 'Continue generating from where it stopped',
-                icon: '▶️',
-                group: 'Common',
+                description: t('slash.continue.description'),
+                icon: SLASH_ICONS.continue,
+                group: 'chat',
                 execute: () => cb.onContinue(),
             },
             {
                 name: 'reedit',
                 label: '/reedit',
-                description: 'Undo last send — restore prompt to input and delete the message',
-                icon: '↩️',
-                group: 'Common',
+                description: t('slash.reedit.description'),
+                icon: SLASH_ICONS.reedit,
+                group: 'chat',
                 preserveInput: true,
                 execute: () => cb.onReedit(),
             },
             {
                 name: 'delete',
                 label: '/delete',
-                description: 'Delete last user message and its responses',
-                icon: '✂️',
-                group: 'Common',
+                aliases: ['message-delete'],
+                description: t('slash.delete.description'),
+                icon: SLASH_ICONS.delete,
+                group: 'chat',
                 execute: () => cb.onDeleteLast(),
             },
             {
                 name: 'clear',
                 label: '/clear',
-                description: 'Clear all messages',
-                icon: '🗑️',
-                group: 'Common',
+                description: t('slash.clear.description'),
+                icon: SLASH_ICONS.clear,
+                group: 'chat',
                 execute: () => cb.onClear(),
             },
             {
                 name: 'btw',
                 label: '/btw',
-                description: 'Send a by-the-way request without affecting chat history',
-                icon: '💬',
-                group: 'Common',
+                description: t('slash.btw.description'),
+                icon: SLASH_ICONS.btw,
+                group: 'chat',
                 hasArgs: true,
                 argsPlaceholder: 'message...',
                 execute: (args) => cb.onBtw(args),
@@ -533,33 +587,33 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'shorter',
                 label: '/shorter',
-                description: 'Ask to make the last response more concise',
-                icon: '📏',
-                group: 'Refine',
+                description: t('slash.shorter.description'),
+                icon: SLASH_ICONS.shorter,
+                group: 'refine',
                 execute: () => cb.onShorter(),
             },
             {
                 name: 'longer',
                 label: '/longer',
-                description: 'Ask to elaborate on the last response',
-                icon: '📐',
-                group: 'Refine',
+                description: t('slash.longer.description'),
+                icon: SLASH_ICONS.longer,
+                group: 'refine',
                 execute: () => cb.onLonger(),
             },
             {
                 name: 'simplify',
                 label: '/simplify',
-                description: 'Explain the last response in simpler terms',
-                icon: '💡',
-                group: 'Refine',
+                description: t('slash.simplify.description'),
+                icon: SLASH_ICONS.simplify,
+                group: 'refine',
                 execute: () => cb.onSimplify(),
             },
             {
                 name: 'summarize',
                 label: '/summarize',
-                description: 'Summarize the entire conversation so far',
-                icon: '📝',
-                group: 'Refine',
+                description: t('slash.summarize.description'),
+                icon: SLASH_ICONS.summarize,
+                group: 'refine',
                 execute: () => cb.onSummarize(),
             },
 
@@ -567,9 +621,10 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'history',
                 label: '/history',
-                description: 'Set context history length (0 = none, -1 = all)',
-                icon: '📚',
-                group: 'Context',
+                aliases: ['context-length'],
+                description: t('slash.history.description'),
+                icon: SLASH_ICONS.history,
+                group: 'context',
                 hasArgs: true,
                 argsPlaceholder: '<number>',
                 execute: (args) => cb.onHistory(args),
@@ -577,9 +632,10 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'fresh',
                 label: '/fresh',
-                description: 'Next message sends without any history context',
-                icon: '✨',
-                group: 'Context',
+                aliases: ['context-reset'],
+                description: t('slash.fresh.description'),
+                icon: SLASH_ICONS.fresh,
+                group: 'context',
                 execute: () => cb.onFresh(),
             },
 
@@ -587,49 +643,51 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'fold',
                 label: '/fold',
-                description: 'Fold current visible chat',
-                icon: '📁',
-                group: 'View',
+                description: t('slash.fold.description'),
+                icon: SLASH_ICONS.fold,
+                group: 'view',
                 execute: () => cb.onFoldCurrent(),
             },
             {
-                name: 'foldall',
-                label: '/foldall',
-                description: 'Fold all chats',
-                icon: '📂',
-                group: 'View',
+                name: 'fold-all',
+                label: '/fold-all',
+                aliases: ['foldall'],
+                description: t('slash.fold-all.description'),
+                icon: SLASH_ICONS.foldAll,
+                group: 'view',
                 execute: () => cb.onFoldAll(),
             },
             {
-                name: 'unfoldall',
-                label: '/unfoldall',
-                description: 'Unfold all chats',
-                icon: '📖',
-                group: 'View',
+                name: 'unfold-all',
+                label: '/unfold-all',
+                aliases: ['unfoldall'],
+                description: t('slash.unfold-all.description'),
+                icon: SLASH_ICONS.unfoldAll,
+                group: 'view',
                 execute: () => cb.onUnfoldAll(),
             },
             {
                 name: 'top',
                 label: '/top',
-                description: 'Scroll to the beginning of conversation',
-                icon: '⬆️',
-                group: 'View',
+                description: t('slash.top.description'),
+                icon: SLASH_ICONS.top,
+                group: 'view',
                 execute: () => cb.onTop(),
             },
             {
                 name: 'bottom',
                 label: '/bottom',
-                description: 'Scroll to the latest message',
-                icon: '⬇️',
-                group: 'View',
+                description: t('slash.bottom.description'),
+                icon: SLASH_ICONS.bottom,
+                group: 'view',
                 execute: () => cb.onBottom(),
             },
             {
                 name: 'nav',
                 label: '/nav',
-                description: 'Open chat navigator panel',
-                icon: '🧭',
-                group: 'View',
+                description: t('slash.nav.description'),
+                icon: SLASH_ICONS.nav,
+                group: 'view',
                 execute: () => cb.onNav(),
             },
 
@@ -637,25 +695,26 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'copy',
                 label: '/copy',
-                description: 'Copy all messages as Markdown',
-                icon: '📋',
-                group: 'Tools',
+                description: t('slash.copy.description'),
+                icon: SLASH_ICONS.copy,
+                group: 'export',
                 execute: () => cb.onCopyAll(),
             },
             {
                 name: 'export',
                 label: '/export',
-                description: 'Export conversation as Markdown',
-                icon: '📤',
-                group: 'Tools',
+                aliases: ['export-chat'],
+                description: t('slash.export.description'),
+                icon: SLASH_ICONS.export,
+                group: 'export',
                 execute: () => cb.onExport(),
             },
             {
                 name: 'print',
                 label: '/print',
-                description: 'Print conversation',
-                icon: '🖨️',
-                group: 'Tools',
+                description: t('slash.print.description'),
+                icon: SLASH_ICONS.print,
+                group: 'export',
                 execute: () => cb.onPrint(),
             },
 
@@ -663,61 +722,67 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'branch',
                 label: '/branch',
-                description: 'Create new branch from current point',
-                icon: '🌿',
-                group: 'Branch',
+                description: t('slash.branch.description'),
+                icon: SLASH_ICONS.branch,
+                group: 'branch',
                 execute: () => cb.onCreateBranch(),
             },
             {
                 name: 'switch',
                 label: '/switch',
-                description: 'Switch to a branch by name',
-                icon: '🔀',
-                group: 'Branch',
+                aliases: ['branch-switch'],
+                description: t('slash.switch.description'),
+                icon: SLASH_ICONS.branchSwitch,
+                group: 'branch',
                 hasArgs: true,
                 argsPlaceholder: '<branch-name>',
                 execute: (args) => { if (args) cb.onSwitchBranch(args); },
             },
             {
-                name: 'branchprev',
-                label: '/branchprev',
-                description: 'Switch to previous branch',
-                icon: '⏮️',
-                group: 'Branch',
+                name: 'branch-prev',
+                label: '/branch-prev',
+                aliases: ['branchprev'],
+                description: t('slash.branch-prev.description'),
+                icon: SLASH_ICONS.branchPrev,
+                group: 'branch',
                 execute: () => cb.onBranchPrev(),
             },
             {
-                name: 'branchnext',
-                label: '/branchnext',
-                description: 'Switch to next branch',
-                icon: '⏭️',
-                group: 'Branch',
+                name: 'branch-next',
+                label: '/branch-next',
+                aliases: ['branchnext'],
+                description: t('slash.branch-next.description'),
+                icon: SLASH_ICONS.branchNext,
+                group: 'branch',
                 execute: () => cb.onBranchNext(),
             },
             {
                 name: 'branches',
                 label: '/branches',
-                description: 'List all branches with current indicator',
-                icon: '📋',
-                group: 'Branch',
+                aliases: ['branch-list'],
+                description: t('slash.branches.description'),
+                icon: SLASH_ICONS.branchList,
+                group: 'branch',
                 execute: () => cb.onListBranches(),
             },
             {
-                name: 'renamebranch',
-                label: '/renamebranch',
-                description: 'Rename a branch',
-                icon: '✏️',
-                group: 'Branch',
+                name: 'branch-rename',
+                label: '/branch-rename',
+                aliases: ['renamebranch'],
+                description: t('slash.branch-rename.description'),
+                icon: SLASH_ICONS.branchRename,
+                group: 'branch',
                 hasArgs: true,
                 argsPlaceholder: '<old-name> <new-name>',
                 execute: (args) => cb.onRenameBranch(args),
             },
             {
-                name: 'deletebranch',
-                label: '/deletebranch',
-                description: 'Delete a branch and its unique messages',
-                icon: '🗑️',
-                group: 'Branch',
+                name: 'branch-delete',
+                label: '/branch-delete',
+                aliases: ['deletebranch'],
+                description: t('slash.branch-delete.description'),
+                icon: SLASH_ICONS.branchDelete,
+                group: 'branch',
                 hasArgs: true,
                 argsPlaceholder: '<branch-name>',
                 execute: (args) => { if (args) cb.onDeleteBranch(args); },
@@ -727,9 +792,9 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'agent',
                 label: '/agent',
-                description: 'Switch to a different agent',
-                icon: '🤖',
-                group: 'Settings',
+                description: t('slash.agent.description'),
+                icon: SLASH_ICONS.agent,
+                group: 'agent',
                 hasArgs: true,
                 argsPlaceholder: '<agent-id>',
                 execute: (args) => { if (args) cb.onSwitchAgent(args); },
@@ -737,9 +802,9 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'model',
                 label: '/model',
-                description: 'Switch to a different model',
-                icon: '🧠',
-                group: 'Settings',
+                description: t('slash.model.description'),
+                icon: SLASH_ICONS.model,
+                group: 'agent',
                 hasArgs: true,
                 argsPlaceholder: '<model-id>',
                 execute: (args) => { if (args) cb.onModel(args); },
@@ -749,9 +814,9 @@ export class SlashCommandPlugin implements InputPlugin {
             {
                 name: 'help',
                 label: '/help',
-                description: 'Show all available commands',
-                icon: '❓',
-                group: 'Help',
+                description: t('slash.help.description'),
+                icon: SLASH_ICONS.help,
+                group: 'help',
                 execute: () => cb.onHelp(),
             },
 
@@ -764,10 +829,10 @@ export class SlashCommandPlugin implements InputPlugin {
                 name: 'skill',
                 label: '/skill',
                 description: cb.onSkill
-                    ? 'Load a skill into the agent (e.g., /skill docker)'
-                    : 'Load a skill — enable Agent Mode first',
-                icon: '⚡',
-                group: 'Agent Skills',
+                    ? t('slash.skill.description')
+                    : `${t('slash.skill.description')}${t('slash.hint.enableAgentMode')}`,
+                icon: SLASH_ICONS.skill,
+                group: 'skills',
                 hasArgs: true,
                 argsPlaceholder: '<skill-id>',
                 execute: async (args?: string) => {
@@ -783,10 +848,10 @@ export class SlashCommandPlugin implements InputPlugin {
                 name: 'skills',
                 label: '/skills',
                 description: cb.onSkills
-                    ? 'Browse and load available skills'
-                    : 'Browse skills — enable Agent Mode first',
-                icon: '⚡',
-                group: 'Agent Skills',
+                    ? t('slash.skills.description')
+                    : `${t('slash.skills.description')}${t('slash.hint.enableAgentMode')}`,
+                icon: SLASH_ICONS.skills,
+                group: 'skills',
                 execute: () => {
                     if (!cb.onSkills) { this.showAgentModeHint('skills'); return; }
                     cb.onSkills();
@@ -798,10 +863,10 @@ export class SlashCommandPlugin implements InputPlugin {
                 name: 'tools',
                 label: '/tools',
                 description: cb.onTools
-                    ? 'Show registered agent tools'
-                    : 'Show tools — enable Agent Mode first',
-                icon: '🔧',
-                group: 'Agent Tools',
+                    ? t('slash.tools.description')
+                    : `${t('slash.tools.description')}${t('slash.hint.enableAgentMode')}`,
+                icon: SLASH_ICONS.tools,
+                group: 'agent',
                 execute: () => {
                     if (!cb.onTools) { this.showAgentModeHint('tools'); return; }
                     cb.onTools();
@@ -809,13 +874,13 @@ export class SlashCommandPlugin implements InputPlugin {
             },
 
             // ── Durable Task Control ─────────────────────────────────────────
-            directoryCommand('add-dir', '挂载目录，默认读写；r 只读 / w 读写', '📁', cb.onAddDirectory, '<dir> [r|w]'),
-            directoryCommand('set-home', '设置默认目录（不自动挂载）', '🏠', cb.onSetHome, '<dir>'),
-            privilegedCommand('plan', 'Create a durable plan task', '🗺️', cb.onPlan, '<goal>'),
-            privilegedCommand('cancel', 'Cancel the attached task', '⏹️', cb.onCancelTask),
-            privilegedCommand('resume', 'Resume the attached task', '▶️', cb.onResumeTask),
-            privilegedCommand('approve', 'Approve the attached task interaction', '✅', cb.onApproveTask),
-            privilegedCommand('exec', 'Execute a shell command after approval', '⬛', cb.onExec, '<command>'),
+            directoryCommand('add-dir', 'slash.add-dir.description', SLASH_ICONS.addDir, cb.onAddDirectory, '<dir> [r|w]'),
+            directoryCommand('set-home', 'slash.set-home.description', SLASH_ICONS.setHome, cb.onSetHome, '<dir>'),
+            privilegedCommand('plan', 'slash.plan.description', SLASH_ICONS.plan, cb.onPlan, '<goal>'),
+            privilegedCommand('cancel', 'slash.cancel.description', SLASH_ICONS.cancel, cb.onCancelTask),
+            privilegedCommand('resume', 'slash.resume.description', SLASH_ICONS.resume, cb.onResumeTask),
+            privilegedCommand('approve', 'slash.approve.description', SLASH_ICONS.approve, cb.onApproveTask),
+            privilegedCommand('exec', 'slash.exec.description', SLASH_ICONS.exec, cb.onExec, '<command>'),
 
             // ── Direct read-only Tool Invocation (bypasses LLM) ─────────────
             // Available when onToolInvoke is injected (kernel with toolService).
@@ -825,9 +890,9 @@ export class SlashCommandPlugin implements InputPlugin {
                 {
                     name: 'read',
                     label: '/read',
-                    description: 'Read a file directly — /read path [--offset N] [--limit N]',
-                    icon: '📄',
-                    group: 'Direct Tools',
+                    description: t('slash.read.description'),
+                    icon: SLASH_ICONS.read,
+                    group: 'tools',
                     hasArgs: true,
                     argsPlaceholder: '<path> [--offset N] [--limit N]',
                     execute: async (args?: string) => {
@@ -842,9 +907,9 @@ export class SlashCommandPlugin implements InputPlugin {
                 {
                     name: 'grep',
                     label: '/grep',
-                    description: 'Search file contents — /grep <pattern> [--glob *.ts] [--dir path]',
-                    icon: '🔎',
-                    group: 'Direct Tools',
+                    description: t('slash.grep.description'),
+                    icon: SLASH_ICONS.grep,
+                    group: 'tools',
                     hasArgs: true,
                     argsPlaceholder: '"<pattern>" [--glob *.ts] [--dir ./src]',
                     execute: async (args?: string) => {
@@ -862,9 +927,9 @@ export class SlashCommandPlugin implements InputPlugin {
                 {
                     name: 'glob',
                     label: '/glob',
-                    description: 'Find files by pattern — /glob <pattern> [--dir path] [--limit N]',
-                    icon: '🔍',
-                    group: 'Direct Tools',
+                    description: t('slash.glob.description'),
+                    icon: SLASH_ICONS.glob,
+                    group: 'tools',
                     hasArgs: true,
                     argsPlaceholder: '"**/*.ts" [--dir ./src] [--limit 50]',
                     execute: async (args?: string) => {
@@ -943,8 +1008,8 @@ export class SlashCommandPlugin implements InputPlugin {
             label: cmd.label,
             description: cmd.description,
             icon: cmd.icon,
-            group: cmd.group,
-            searchText: `${cmd.name} ${cmd.description}`,
+            group: slashGroupLabel(cmd.group),
+            searchText: `${cmd.name} ${(cmd.aliases ?? []).join(' ')} ${cmd.description}`,
             hasArgs: cmd.hasArgs,
         }));
     }
@@ -963,7 +1028,7 @@ export class SlashCommandPlugin implements InputPlugin {
 
 function privilegedCommand(
     name: string,
-    description: string,
+    descriptionKey: LocaleKey,
     icon: string,
     execute: ((args: string) => Promise<void>) | (() => Promise<void>) | undefined,
     placeholder?: string,
@@ -971,22 +1036,22 @@ function privilegedCommand(
     return {
         name,
         label: `/${name}`,
-        description: execute ? description : `${description} — Kernel unavailable`,
+        description: execute ? t(descriptionKey) : `${t(descriptionKey)}${t('slash.hint.kernelUnavailable')}`,
         icon,
-        group: 'Task Control',
+        group: 'task',
         hasArgs: Boolean(placeholder),
         argsPlaceholder: placeholder,
         execute: async args => {
-            if (!execute) throw new Error(`/${name} requires Kernel privileged commands`);
+            if (!execute) throw new Error(t('slash.error.kernelRequired', { name }));
             if (placeholder?.startsWith('<') && !args.trim()) {
-                throw new Error(`Usage: /${name} ${placeholder}`);
+                throw new Error(t('slash.usage', { name, placeholder }));
             }
             await execute(args.trim());
         },
     };
 }
 
-function directoryCommand(name: string, description: string, icon: string, execute: ((args: string) => Promise<void>) | undefined, placeholder: string): SlashCommandDef {
-    return { name, label: `/${name}`, description, icon, group: 'Files', hasArgs: true, argsPlaceholder: placeholder,
-        execute: async args => { if (!execute) throw new Error('此编辑器未提供目录挂载功能'); await execute(args.trim()); } };
+function directoryCommand(name: string, descriptionKey: LocaleKey, icon: string, execute: ((args: string) => Promise<void>) | undefined, placeholder: string): SlashCommandDef {
+    return { name, label: `/${name}`, description: t(descriptionKey), icon, group: 'files', hasArgs: true, argsPlaceholder: placeholder,
+        execute: async args => { if (!execute) throw new Error(t('slash.error.directoryUnavailable')); await execute(args.trim()); } };
 }

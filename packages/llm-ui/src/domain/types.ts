@@ -220,8 +220,13 @@ export interface SkillInfo {
     description: string;
     /** 当前会话是否已加载 */
     loaded: boolean;
-    /** Skill 是否已启用（enabled=false 时不出现在 slash 命令列表） */
+    /** 输入区复选框是否可加载：disabled / 静默 / action 的未加载项为 false（设计约定） */
     enabled: boolean;
+    /**
+     * 定义层面的启用状态，与上面的「可否勾选加载」无关。
+     * `/sk-<id>` 手动词令对 action / 静默 Skill 也出现，因此按本字段过滤。
+     */
+    definitionEnabled: boolean;
     /** 该 Skill 提供的工具数量 */
     toolCount: number;
     icon?: string;

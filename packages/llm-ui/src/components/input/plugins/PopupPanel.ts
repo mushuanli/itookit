@@ -166,6 +166,10 @@ export class PopupPanel {
 
             case 'Enter':
             case 'Tab':
+                // Nothing selected means the typed text is no longer a popup choice (for example
+                // `/sk-review <args>` after the command was inserted). Let the input handle it so
+                // the command can actually be sent instead of being swallowed here.
+                if (this.filteredItems.length === 0) return false;
                 e.preventDefault();
                 this.selectCurrent();
                 return true;

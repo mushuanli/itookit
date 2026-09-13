@@ -71,6 +71,9 @@ export interface IChatInputPresenter {
      */
     refreshSkills(skills: SkillInfo[]): void;
 
+    /** Open the settings panel that carries the Skill list (`/skills`). */
+    showSkillSettings(): void;
+
     /**
      * 在输入框上方内联显示工具执行结果（不弹 Modal）。
      *

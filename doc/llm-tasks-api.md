@@ -278,3 +278,7 @@ packages/llm-tasks/src/
 **注册位置**：`llm.chat@1` / `llm.agent@1` / `llm.plan@1` 由 `llm-flow` 的 `registerDurablePrograms()` 与 Flow 系程序一起注册（`packages/llm-flow/src/flow/register-programs.ts`），本包自身不做注册。
 
 **约定**：本包不持有 Session/Flow/Scheduler/CommandBus/通用 Middleware；新运行模式实现 `DurableTaskProgram` 并放入 `durable/`；所有等待必须返回 Kernel `WaitSpec`，State 必须可持久化（JSON 可序列化）。
+
+### 初始 Skill 激活
+
+buildSkillContexts(skills, catalog, allowedToolIds, selectedIds) 返回 SkillContext[]。buildLlmTaskInput 接受 skillContexts；DurableAgentProgram 初始化时复制到持久状态，逐轮关键规则与工具合并沿用动态 load_skill 路径。有效工具仍受 allowedToolIds 限制，external 标记来自宿主目录；原节点工具定义优先，初始快照不扩展工具授权。

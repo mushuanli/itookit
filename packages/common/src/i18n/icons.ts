@@ -145,6 +145,59 @@ export const ENTITY_ICONS = {
     model:   '🧠',
 } as const;
 
+// ── Slash commands ────────────────────────────────────────────────────────────
+// One entry per slash command identity (`SlashCommandDef.icon`). Command tables
+// must reference these instead of inlining emoji, so a command's icon is always
+// reviewable in one place (see packages/llm-ui SlashCommandPlugin).
+
+export const SLASH_ICONS = {
+    new:          ACTION_ICONS.add,
+    retry:        ACTION_ICONS.refresh,
+    continue:     '⏩',
+    reedit:       '↩️',
+    delete:       '✂️',
+    clear:        ACTION_ICONS.delete,
+    btw:          '💬',
+    shorter:      '📏',
+    longer:       '📐',
+    simplify:     '💡',
+    summarize:    '📝',
+    history:      ENTITY_ICONS.history,
+    fresh:        '✨',
+    fold:         '📁',
+    foldAll:      '📂',
+    unfoldAll:    '📖',
+    top:          '⬆️',
+    bottom:       '⬇️',
+    nav:          ENTITY_ICONS.nav,
+    copy:         ACTION_ICONS.copy,
+    export:       ACTION_ICONS.export,
+    print:        '🖨️',
+    branch:       ENTITY_ICONS.branch,
+    branchSwitch: '🔀',
+    branchPrev:   '⏮️',
+    branchNext:   '⏭️',
+    branchList:   '📋',
+    branchRename: ACTION_ICONS.edit,
+    branchDelete: ACTION_ICONS.delete,
+    agent:        ENTITY_ICONS.agent,
+    model:        ENTITY_ICONS.model,
+    help:         ACTION_ICONS.help,
+    skill:        ENTITY_ICONS.skill,
+    skills:       ENTITY_ICONS.skill,
+    tools:        '🔧',
+    read:         '📄',
+    grep:         '🔎',
+    glob:         ACTION_ICONS.search,
+    addDir:       '📁',
+    setHome:      '🏠',
+    plan:         '🗺️',
+    cancel:       '⏹️',
+    resume:       '▶️',
+    approve:      FEEDBACK_ICONS.success,
+    exec:         '⬛',
+} as const;
+
 // ── Agent icon picker palette ─────────────────────────────────────────────────
 
 export const AGENT_ICON_PALETTE = [

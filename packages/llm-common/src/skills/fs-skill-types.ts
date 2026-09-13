@@ -11,6 +11,11 @@ export interface SkillFrontmatter {
     description: string;
     /** 触发策略：reference（语义/glob 自动触发）| action（仅手动 slash 命令） */
     'trigger-strategy'?: 'reference' | 'action';
+    /**
+     * 显式覆盖 reference 的自动加载：`false` 表示仍可被显式加载（load_skill / 面板 / `/sk-<id>`）
+     * 并登记持久加载身份，但新运行不因策略自动注入。缺省时沿用 `trigger-strategy` 推导值。
+     */
+    'auto-load'?: boolean;
     /** 禁止模型通过 load_skill 加载（action skill 专用） */
     'disable-model-invocation'?: boolean;
     /** Glob 模式列表，匹配打开文件时自动挂载（L4 空间联动） */

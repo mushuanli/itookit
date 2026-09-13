@@ -53,7 +53,7 @@ export {
     SKILL_TYPE_META, MCP_TRANSPORT_ICONS,
     MODEL_CAPABILITY_META, MODEL_CATEGORY_META, STATUS_META,
     EXECUTOR_TYPE_ICONS, ACTION_ICONS, FEEDBACK_ICONS,
-    ENTITY_ICONS, AGENT_ICON_PALETTE, getFileIcon,
+    ENTITY_ICONS, AGENT_ICON_PALETTE, SLASH_ICONS, getFileIcon,
 } from './i18n/icons';
 
 // ── EventBus: 已移入 @itookit/vfs-core；消费方从 vfs-core 导入 ──

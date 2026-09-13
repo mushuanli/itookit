@@ -40,6 +40,12 @@ export interface DurableProgramInput {
 }
 
 export interface DurableAgentInput extends DurableProgramInput {
+    /**
+     * Skill snapshots activated when the Task was created (initial Skill selection). They
+     * behave exactly like runtime `load_skill` results: their critical rules are re-injected
+     * every round and their tool definitions are exposed within `allowedToolIds` only.
+     */
+    skillContexts?: Array<NonNullable<import('@itookit/common').ToolInvokeResult['skillContext']>>;
     maxExchanges?: number;
     workingDirectory?: string;
     approval?: 'none' | 'external' | 'all';

@@ -141,6 +141,27 @@ export interface ISkillService {
 export interface SessionSkillControls {
     list(sessionId: string): ReturnType<SessionSkillControls['listLoaded']>;
     load(sessionId: string, skillId: string): Promise<string[]>;
-    listLoaded(sessionId: string): Promise<Array<{ id: string; name: string; description: string; loaded: boolean; enabled: boolean; toolCount: number }>>;
+    listLoaded(sessionId: string): Promise<Array<{ id: string; name: string; description: string; loaded: boolean; enabled: boolean; definitionEnabled: boolean; toolCount: number }>>;
+    /**
+     * Read one Skill definition for an explicit invocation (`/sk-<id>`).
+     *
+     * Action and silent Skills cannot go through `load` (the model-context gate rejects them),
+     * so the caller needs the instructions to inline them into the user message instead.
+     */
+    describe(sessionId: string, skillId: string): Promise<{ name: string; type: string; instructions: string; triggerStrategy?: 'reference' | 'action'; disableModelInvocation?: boolean; enabled: boolean } | undefined>;
     unload(sessionId: string, skillId: string): Promise<void>;
+    /**
+     * L4 editor wiring: a file became the active editor target. Skills whose `globs` match
+     * get mounted for this Session only; the mount is transient (it is not written to the
+     * persisted loaded identities), so closing the editor releases it again.
+     */
+    mountByGlob(sessionId: string, filePath: string): Promise<void>;
+    /** The file is no longer open: drop it, and unmount Skills without another match. */
+    unmountByGlob(sessionId: string, filePath: string): Promise<void>;
+    /**
+     * Subscribe to catalog/scope changes of a Session's live Skill scope (a Skill file was
+     * written, the scope was refreshed, …). Resolves to the unsubscribe function; hosts use
+     * it to refresh a visible Skill list without polling.
+     */
+    onChange(sessionId: string, listener: () => void): Promise<() => void>;
 }

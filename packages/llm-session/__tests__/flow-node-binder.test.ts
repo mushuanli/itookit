@@ -49,10 +49,11 @@ describe('bindFlowNode', () => {
             tools: [{ toolId: 'inspect' }], compact: { rawContent: 'Preserve access checks.' } };
         const resolver = { ...agents(), getSkills: async () => [selected,
             { ...selected, id: 'silent', disableModelInvocation: true, instructions: 'Silent instructions', tools: [{ toolId: 'silent-tool' }] },
+            { ...selected, id: 'manual', triggerStrategy: 'action', instructions: 'Manual instructions', tools: [{ toolId: 'manual-tool' }] },
             { ...selected, id: 'disabled', enabled: false, instructions: 'Disabled instructions', tools: [{ toolId: 'disabled-tool' }] },
         ] } as unknown as AgentResolver;
         const node = { id: 'review', name: 'Review', plugin: 'builtin.agent', pluginVersion: '1.0.0',
-            config: { skillIds: ['review', 'silent', 'disabled'] }, inputs: {}, capabilities: [] } as FlowNodeDefinition;
+            config: { skillIds: ['review', 'silent', 'disabled', 'manual'] }, inputs: {}, capabilities: [] } as FlowNodeDefinition;
         const project = { kind: 'system', source: 'project', content: 'Project policy' };
         const routed = [{ kind: 'system', source: 'session-skill', content: 'Loaded rules' },
             { kind: 'system', source: 'skill-index', content: 'Available metadata' }];

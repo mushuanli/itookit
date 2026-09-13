@@ -38,6 +38,8 @@
     "dev": "vite build --watch",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "pnpm build"
   },
   "keywords": [

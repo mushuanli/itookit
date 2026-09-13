@@ -257,10 +257,11 @@ describe('createKernelAdaptersRuntime', () => {
     });
 
     it('shares restoration and rejects an old restoration after its scope is disposed', async () => {
+        const released = vi.fn();
         let waiting = true, entered!: () => void, finish!: (value: string) => void;
         const started = new Promise<void>(resolve => { entered = resolve; });
         const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
-            fileContextForSession: async () => ({ cwd: '/workspace', release: async () => {}, vfs: {
+            fileContextForSession: async () => ({ cwd: '/workspace', release: released, vfs: {
                 writeFile: async () => {}, listFiles: async () => [], readFile: async () => {
                     if (!waiting) return 'fresh';
                     entered(); return new Promise<string>(resolve => { finish = resolve; });
@@ -273,14 +274,17 @@ describe('createKernelAdaptersRuntime', () => {
             expect(runtime.sessions.restore('session-a', ['review'])).toBe(old);
             const rejected = expect(old).rejects.toThrow('changed');
             await started;
-            await runtime.disposeSession('session-a');
+            const closing = runtime.disposeSession('session-a');
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect(released).not.toHaveBeenCalled();
+            finish('late');
+            await rejected; await closing;
+            expect(released).toHaveBeenCalledOnce();
             waiting = false;
             const current = await runtime.sessions.restore('session-a', ['review']);
-            finish('late');
-            await rejected;
             expect(current.skillService.getLoadedSkills().map(skill => skill.id)).toEqual(['review']);
             expect(await runtime.sessions.restore('session-a', ['review'])).toBe(current);
-        } finally { await runtime.dispose(); }
+        } finally { finish?.('cleanup'); await runtime.dispose(); }
     });
 
     it('restores loaded identities before prompt assembly and preserves explicit unload in the live scope', async () => {
@@ -520,9 +524,9 @@ describe('createKernelAdaptersRuntime', () => {
         await vi.waitFor(() => expect(started).toBe(true));
         const queued = controls.unload('session-a', 'review');
         const rejected = expect(queued).rejects.toThrow('scope changed');
-        await runtime.disposeSession('session-a');
+        const closing = runtime.disposeSession('session-a');
         const get = vi.spyOn(runtime.sessions, 'get');
-        release(); await active; await rejected;
+        release(); await active; await rejected; await closing;
         expect(get).not.toHaveBeenCalled();
         expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual(['review']);
         await controls.unload('session-a', 'review');

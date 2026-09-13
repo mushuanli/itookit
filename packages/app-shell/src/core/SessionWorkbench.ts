@@ -1,17 +1,18 @@
-import { t } from '@itookit/common';
-import { taskStat } from '@itookit/durable-kernel';
-import { localizeMountError } from '../files/localize-mount-error';
+import { t, type SessionSkillControls } from '@itookit/common';
 import { showMountDialog } from '../files/mount-dialog';
-import type { DirectoryMountService } from '@itookit/app-core';
+import { localizeMountError } from '../files/localize-mount-error';
+
 import type { EditorFactory, IEditor, EditorHostContext } from '@itookit/ui-common';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { Kernel } from '@itookit/durable-kernel';
 import { createVFSUI, type VFSUIShell } from '@itookit/vfs-ui';
 import { createFileSystemView, type FileSystemContextOwner, type FileSystemView, type FileSystemSourceOwner } from '@itookit/vfs-core';
-import type { SessionFilesService } from '@itookit/app-core';
-import { createSessionBrowser, exportSessionBundle, resolveBrowserTarget, taskSummary, taskKeyEvent } from '@itookit/app-core';
-import { parseSessionRoute, sessionRoute } from '@itookit/app-core';
-import type { WorkspaceController } from '@itookit/app-core';
+
+
+
+import { taskStat } from '@itookit/durable-kernel';
+import { createSessionBrowser, exportSessionBundle, parseSessionRoute, resolveBrowserTarget, sessionRoute, taskSummary, taskKeyEvent,
+    type DirectoryMountService, type SessionFilesService, type WorkspaceController } from '@itookit/app-core';
 
 /** Sidebar refresh tracing — enable with localStorage['vfs:debug']='1' (same flag as vfs-ui). */
 function debugEnabled(): boolean {
@@ -43,11 +44,14 @@ export class SessionWorkbench implements WorkspaceController {
     private lastRefreshAt = 0;
     private readonly waiting = new Set<string>();
     private readonly resettingTasks = new Set<string>();
+    /** File whose editor is open, for the L4 glob mount/unmount pair. */
+    private openEditorTarget?: { sessionId: string; path: string };
     constructor(private readonly sidebar: HTMLElement, private readonly container: HTMLElement,
         private readonly repository: ISessionRepository, private readonly files: SessionFilesService,
         private readonly factory: EditorFactory, private readonly onSelect: (id: string, mode?: 'push' | 'replace') => void,
         private readonly hostContext: EditorHostContext | undefined, private readonly kernel: Kernel,
-        private readonly fileFactory: EditorFactory, private readonly directoryMounts?: DirectoryMountService) {}
+        private readonly fileFactory: EditorFactory, private readonly directoryMounts?: DirectoryMountService,
+        private readonly sessionSkills?: SessionSkillControls) {}
     async start(): Promise<void> {
         this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel });
         this.sidebarUI = createVFSUI({ sessionListContainer: this.sidebar, title: '会话', scopeId: 'session-browser:v1:admin',
@@ -232,7 +236,11 @@ export class SessionWorkbench implements WorkspaceController {
                         }
                     }
                     if (this.closed) throw new Error('Session workspace closed');
-                    if (editor || previewCleanup) { this.editor = editor; this.context = context; this.assets = assets; this.previewCleanup = previewCleanup; }
+                    if (editor || previewCleanup) {
+                        this.editor = editor; this.context = context; this.assets = assets; this.previewCleanup = previewCleanup;
+                        // L4: an open file activates Skills whose globs match it.
+                        if (target.kind === 'files') this.mountEditorSkills(target.sessionId, target.path);
+                    }
                 } catch (error) {
                     try { previewCleanup?.(); await editor?.destroy(); } finally { await Promise.allSettled([assets?.dispose(), context.release()]); mount.remove(); }
                     throw error;
@@ -417,13 +425,28 @@ export class SessionWorkbench implements WorkspaceController {
     setWaitingInput(id: string, waiting: boolean): void {
         waiting ? this.waiting.add(id) : this.waiting.delete(id); this.sidebarUI?.setNodeWaitingInput('/' + id, waiting);
     }
+    /** Editor open/close drives the L4 glob mount; a failure must not break the editor. */
+    private mountEditorSkills(sessionId: string, path: string): void {
+        this.openEditorTarget = { sessionId, path };
+        void this.sessionSkills?.mountByGlob(sessionId, path).catch(error => this.report(error));
+    }
+
+    private async unmountEditorSkills(): Promise<void> {
+        const open = this.openEditorTarget;
+        this.openEditorTarget = undefined;
+        if (open) await this.sessionSkills?.unmountByGlob(open.sessionId, open.path).catch(error => this.report(error));
+    }
+
     private async closeEditor(): Promise<void> {
         ++this.taskRefresh;
         this.previewCleanup?.(); this.previewCleanup = undefined;
         const editor = this.editor, assets = this.assets, context = this.context;
         this.editor = undefined; this.assets = undefined; this.context = undefined; this.active = null;
         this.activeBranch = undefined;
-        try { await editor?.destroy(); } finally { await Promise.all([assets?.dispose(), context?.release()]); }
+        try { await editor?.destroy(); } finally {
+            await this.unmountEditorSkills();
+            await Promise.all([assets?.dispose(), context?.release()]);
+        }
     }
     async destroy(): Promise<void> {
         this.closed = true; this.dialogs.abort(); this.unsubscribers.splice(0).forEach(unsubscribe => unsubscribe());

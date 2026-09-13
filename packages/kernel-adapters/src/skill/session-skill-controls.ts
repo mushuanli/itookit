@@ -16,7 +16,11 @@ export function createSessionSkillControls(kernel: Kernel, registry: SessionCapa
             return [...all].sort().map(id => {
                 const skill = scope.skillService.getSkill(id);
                 return { id, name: skill?.name ?? id, description: skill?.description ?? '', loaded: loaded.has(id),
-                    enabled: !!skill?.enabled && !skill.disableModelInvocation && skill.triggerStrategy !== 'action', toolCount: skill?.tools.length ?? 0 };
+                    enabled: !!skill?.enabled && !skill.disableModelInvocation && skill.triggerStrategy !== 'action',
+                    // Definition-level enablement, independent of whether the input-side checkbox may
+                    // load it: `/sk-<id>` exists exactly for the manual (action/silent) invocations.
+                    definitionEnabled: !!skill?.enabled,
+                    toolCount: skill?.tools.length ?? 0 };
             });
     };
     return {
@@ -31,6 +35,24 @@ export function createSessionSkillControls(kernel: Kernel, registry: SessionCapa
             const service = (await registry.get(id)).skillService;
             return loadAndRemember(service, skillId, state);
         }),
+        describe: (sessionId, skillId) => serial(sessionId, async () => {
+            const skill = (await registry.get(sessionId)).skillService.getSkill(skillId);
+            return skill ? { name: skill.name, type: skill.type, instructions: skill.instructions,
+                triggerStrategy: skill.triggerStrategy, disableModelInvocation: skill.disableModelInvocation,
+                enabled: skill.enabled } : undefined;
+        }),
+        mountByGlob: (sessionId, filePath) => serial(sessionId, async () => {
+            requireEditorPath(filePath);
+            (await registry.get(sessionId)).skillService.mountByGlob(filePath);
+        }),
+        unmountByGlob: (sessionId, filePath) => serial(sessionId, async () => {
+            requireEditorPath(filePath);
+            (await registry.get(sessionId)).skillService.unmountByGlob(filePath);
+        }),
+        onChange: async (sessionId, listener) => {
+            if (typeof listener !== 'function') throw new Error('Skill change listener is required');
+            return (await registry.get(sessionId)).skillService.onChange(listener);
+        },
         unload: (sessionId, skillId) => serial(sessionId, async () => {
             const session = await kernel.openSession(sessionId);
             await forgetLoadedSkill(skillId, {
@@ -40,6 +62,11 @@ export function createSessionSkillControls(kernel: Kernel, registry: SessionCapa
             await (await registry.get(sessionId)).skillService.unloadSkill(skillId);
         }),
     };
+}
+
+/** Editor paths are virtual Session paths; reject anything that is not a non-empty string. */
+function requireEditorPath(filePath: string): void {
+    if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('Editor file path is required');
 }
 
 async function loadAndRemember(service: ISkillService, id: string,

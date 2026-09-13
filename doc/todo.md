@@ -214,3 +214,11 @@ Durable 五篇：[Core](design/durable-harness-core.md)、[Protocol](design/dura
 已修复 CLI 启动前已取消仍执行命令、父进程退出且后台成员关闭管道后提前返回，以及清理定时器伪造完成的问题。CLI 与 Tauri 的一次性进程调用在返回前确认本次进程组停止；Linux 排除已不能运行的 zombie，仍能运行或无法核验的成员保持清理等待。失败不释放正在使用的工作区。
 
 隔离快照：CLI 取消/原生 bwrap/普通 Run/shell 共 27 项、Rust 33 项、工作区恢复 5 项、嵌套 harness 成功/失败 2 项通过，合计 67 项；CLI 类型检查通过。嵌套测试首次受快照缺 tsup 命令及容器外依赖链接阻断，补齐相同版本依赖后两项通过；CLI 构建产物已实际生成，docs:check 通过，保留 10 条基线告警。两项新增 CLI 真实进程回归在修复前失败，修复后通过。Tauri 原生测试验证取消前持续写文件、取消后文件不再增长；这不替代真实 GUI 的取消操作。原生进程组不等于安全容器：主动脱离进程组的程序、其他平台和完整 OCI 生命周期仍需后续验收，P0-02/P0-04 保持开放。
+
+### Skill 执行与宿主入口批次（2026-09-14）
+
+本批合入初始 Task Skill 快照、直接聊天与 Flow 节点接线、显式斜杠调用、编辑器 glob 匹配、目录变更刷新，以及 CLI/Tauri 共用文件来源的加载/卸载/身份恢复回归。关闭 Session/运行时先失效排队操作，等待在途 Skill 操作和身份恢复后才释放能力；action Skill 不再自动进入系统提示，显式调用前重新检查定义是否启用。刷新使用同一队列，过期响应不覆盖新状态，销毁后不更新面板。
+
+隔离快照：llm-tasks 37、llm-flow 212、llm-session 105、kernel-adapters 110、app-core 91、llm-ui 26、app-shell 148、真实 CLI Skill 请求 2 项通过，合计 731 项；app-shell 30 项既有条件跳过。相关类型检查和 Tauri 前端构建通过。CLI 使用本地模型服务；桌面证据为宿主装配与 DOM/IPC 测试，未替代真实窗口验收。
+
+P2-01 的严格版本冻结（keep-old / require-reload / drift marker）、自动委派到统一 TaskGroup、剩余作用域竞态仍开放；跨进程修改文件通知、真实 GUI 操作等仍按原 TODO 验收。初始快照不代表完整版本冻结或自动委派已实现。

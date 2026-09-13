@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
 import { SkillPanel } from '../../llm-ui/src/components/input/SkillPanel';
+import { ChatInput } from '../../llm-ui/src/components/input/ChatInputView';
+import { bindSkillRefresh } from '../../llm-ui/src/shell/skill-refresh';
+import type { SessionSkillControls } from '@itookit/common';
 
 it.each([true, false])('unloads from the panel and preserves selection on failure (success: %s)', async success => {
     const root = document.createElement('div');
@@ -42,4 +45,23 @@ it.each([true, false])('loads a Skill and restores its checkbox on failure (succ
             if (!success) expect(root.querySelector('[role="alert"]')?.textContent).toBe('save failed');
         });
     } finally { log.mockRestore(); }
+});
+
+it('refreshes the visible Skill list when the Session scope reports a catalog change', async () => {
+    const container = document.createElement('div');
+    const view = new ChatInput(container, {} as never);
+    const listeners: Array<() => void> = [];
+    let catalog = [{ id: 'review', name: 'Review', description: '', loaded: false, enabled: true, toolCount: 0 }];
+    const controls = {
+        list: async () => catalog,
+        onChange: async (_sessionId: string, listener: () => void) => { listeners.push(listener); return () => {}; },
+    } as unknown as SessionSkillControls;
+
+    const { dispose } = bindSkillRefresh(controls, 'session', skills => view.refreshSkills(skills));
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-skill]')).toHaveLength(1));
+
+    catalog = [...catalog, { id: 'debug', name: 'Debug', description: '', loaded: true, enabled: true, toolCount: 0 }];
+    listeners.forEach(listener => listener());
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-skill]')).toHaveLength(2));
+    dispose();
 });

@@ -26,6 +26,9 @@ export class SessionFileSkillSource implements SkillSource {
         return {
             cwd,
             skills,
+            // Project rules are anchored to the project root only. A nested `_agent/AGENT.md`
+            // (parent-fs/local-fs) is deliberately not merged or substituted: changing cwd must
+            // not silently swap the project instructions. Skills still cascade per level.
             agentInstructions: await this.readText(join(this.projectRoot, '_agent/AGENT.md')) ?? '',
         };
     }
@@ -96,7 +99,8 @@ function toSkillDefinition(
         name: frontmatter.name,
         description: frontmatter.description ?? '',
         type: 'prompt', enabled: true, instructions: body, tools: [], triggerPatterns: [],
-        autoLoad: reference, priority: frontmatter.priority ?? 50,
+        autoLoad: reference && (frontmatter['auto-load'] ?? true),
+        priority: frontmatter.priority ?? 50,
         triggerStrategy: frontmatter['trigger-strategy'] ?? 'reference',
         source: 'filesystem', scopeLevel, scopeRoot,
         disableModelInvocation: frontmatter['disable-model-invocation'] ?? false,

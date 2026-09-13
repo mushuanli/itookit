@@ -339,7 +339,10 @@ function matchesType(value: unknown, type: string): boolean {
 
 function initialState(input: DurableAgentInput): DurableAgentState {
     return {
-        input: clone(input), phase: 'collecting', messages: [], dependencyOutputs: {},
+        input: clone(input), phase: 'collecting',
+        // Initial Skill selection and runtime loads share one activation path.
+        skillContexts: input.skillContexts === undefined ? undefined : clone(input.skillContexts),
+        messages: [], dependencyOutputs: {},
         resolvedDependencyIds: [],
         usage: {}, exchanges: 0, pendingCalls: [], callIndex: 0, approvedCallKeys: [], approvalProtocol: 2, pendingApprovalInteractionId: undefined, outputValidationAttempts: 0,
     };

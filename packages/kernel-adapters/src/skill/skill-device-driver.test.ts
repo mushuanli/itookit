@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SkillDefinition } from '@itookit/common';
 import type { SkillScopeSnapshot } from '../ports/capabilities';
 import { SkillDeviceDriver } from './skill-device-driver';
+import { createSessionSkillControls } from './session-skill-controls';
 
 function skill(id: string, extra: Partial<SkillDefinition> = {}): SkillDefinition {
     return { id, name: id, description: id, type: 'prompt', enabled: true,
@@ -188,4 +189,19 @@ describe('Skill scope boundaries', () => {
         expect(unregisterTool).toHaveBeenCalledWith('local-tool');
         expect(service.getLoadedSkills()).toEqual([]);
     });
+});
+
+it('notifies a Session change subscription whenever the live Skill catalog changes', async () => {
+    const driver = new SkillDeviceDriver({ registry: new Map([['review', skill('review')]]) });
+    const controls = createSessionSkillControls({ openSession: async () => ({ getShared: async () => undefined }) } as never,
+        { get: async () => ({ skillService: driver }) } as never);
+    const listener = vi.fn();
+    const detach = await controls.onChange('session', listener);
+    expect(await controls.list('session')).toContainEqual(expect.objectContaining({ id: 'review' }));
+
+    await driver.saveSkill(skill('debug'));
+    expect(listener).toHaveBeenCalledTimes(1);
+    detach();
+    await driver.saveSkill(skill('other'));
+    expect(listener).toHaveBeenCalledTimes(1);
 });

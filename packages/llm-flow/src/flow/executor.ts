@@ -21,6 +21,7 @@ import {
     type TaskSpec,
 } from '@itookit/durable-kernel';
 import type { FlowWorkspacePolicy, HarnessHookEvent, HarnessHookRunner } from '@itookit/common';
+import type { SkillContext } from '@itookit/llm-tasks';
 
 export interface FlowWorkspaceLease {
     directory: string;
@@ -29,7 +30,7 @@ export interface FlowWorkspaceLease {
      * host can restore the same workspace after a crash instead of creating a second one.
      */
     record?: JsonValue;
-    /** Close host capabilities before workspace filesystem cleanup. */
+    /** Host barrier: all file/process capabilities must be closed before filesystem cleanup. */
     releaseCapabilities?(rootTaskId: string): Promise<void>;
     finish(status: 'succeeded' | 'failed' | 'cancelled'): Promise<void>;
 }
@@ -100,13 +101,23 @@ export interface DurableFlowExecutorOptions {
     workspaceManager?: FlowWorkspaceManager;
     /** Run 级调度租约有效期（默认 30s）；到期后其他宿主可接管。 */
     schedulerLeaseTtlMs?: number;
-    /** Additional clock-error allowance before another owner may take over. */
+    /** 跨主机时钟误差预算（默认 0）：接管在旧租约到期后再等这么久。 */
     schedulerLeaseSkewMs?: number;
     /** 测试或宿主指定的调度者身份。 */
     schedulerOwnerId?: string;
+    /**
+     * Skill snapshots for a node's initially selected Skills. Implementations must keep
+     * every activated tool inside the node's declared capability set.
+     */
+    resolveSkillContexts?: (sessionId: string, skillIds: string[], allowedToolIds: string[]) => Promise<SkillContext[]>;
 }
 
 const MAX_LOOP_ITERATIONS = 100;
+
+/** Node Skill ids are configured as strings; anything else is ignored, never coerced. */
+function stringIds(value: unknown): string[] {
+    return Array.isArray(value) ? [...new Set(value.filter((id): id is string => typeof id === 'string' && id.trim().length > 0))] : [];
+}
 
 export class DurableFlowExecutor {
     private readonly active = new Set<Promise<unknown>>();
@@ -757,6 +768,12 @@ export class DurableFlowExecutor {
                 }
                 lease = await this.acquireLease(session, published.root.id);
             }
+            // Publish as soon as the durable root exists and this host owns the scheduler,
+            // before any node is dispatched. Hosts need a live handle to monitor progress,
+            // enforce per-task timeouts, react to interrupts and follow events; a handle
+            // that only resolves after the whole graph finished offers no monitoring window
+            // at all. The handle stays live: node/task maps are filled as the scheduler
+            // dispatches, so consumers read final state from `root.wait()`.
             publish(published);
             // Graph retries accepted while no scheduler owned the Run are applied before the
             // next scheduling turn: attach the retry instance and drop stale downstream work.
@@ -850,6 +867,10 @@ export class DurableFlowExecutor {
                 const finalization = await beginWorkspaceFinalization(session, result.root, workspace);
                 result.workspaceCompletion = finalization.completion;
                 result.workspaceFinalization = finalization.state;
+                // The handle is published long before this point, so a host may not attach
+                // its handler yet; keep a failed cleanup from surfacing as an unhandled
+                // rejection while it stays observable on `workspaceCompletion` and the
+                // persisted finalization state.
                 void result.workspaceCompletion?.catch(() => undefined);
             }
             void result.root.wait().then(exit => this.emitHook('run.completed', sessionId, {
@@ -936,12 +957,17 @@ export class DurableFlowExecutor {
             ?? { definitions: [], externalIds: [] };
         const subtaskTool = subtaskToolName(node.config);
         const subtaskDescription = subtaskToolDescription(node.config);
+        const skillIds = task.programKind === 'llm.agent' ? stringIds(record(node.config).skillIds) : [];
+        const skillContexts = skillIds.length && this.options.resolveSkillContexts
+            ? await this.options.resolveSkillContexts(sessionId, skillIds, allowed)
+            : [];
         const input = task.programKind === 'llm.agent'
             ? {
                 ...record(task.input),
                 tools: [...catalog.definitions, ...(subtaskTool ? [subtaskToolDef(subtaskTool, subtaskDescription)] : [])],
                 externalToolIds: catalog.externalIds,
                 allowedToolIds: allowed,
+                ...(skillContexts.length ? { skillContexts } : {}),
             }
             : task.programKind === 'flow.value'
                 ? { ...record(task.input), parameters }

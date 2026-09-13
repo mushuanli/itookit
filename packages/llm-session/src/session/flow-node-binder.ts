@@ -108,7 +108,7 @@ async function resolveIdentity(
         log.warn('Flow node skillIds resolution failed', { skillIds, error });
         return [];
     });
-    return { referencedAgent, skills: skills.filter(skill => skill.enabled && !skill.disableModelInvocation) };
+    return { referencedAgent, skills: skills.filter(skill => skill.enabled && !skill.disableModelInvocation && skill.triggerStrategy !== 'action') };
 }
 
 async function resolveAgent(id: string, agents: AgentResolver): Promise<ExecutorConfig | undefined> {

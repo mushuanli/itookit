@@ -17,8 +17,8 @@ it('lists persisted missing identities and unloads only the chosen Session', asy
     } }) };
     const controls = createSessionSkillControls(kernel as never, registry as never);
     expect(await controls.listLoaded('a')).toEqual([
-        { id: 'removed', name: 'removed', description: '', loaded: true, enabled: false, toolCount: 0 },
-        { id: 'review', name: 'Review', description: 'Review changes', loaded: true, enabled: true, toolCount: 0 },
+        { id: 'removed', name: 'removed', description: '', loaded: true, enabled: false, definitionEnabled: false, toolCount: 0 },
+        { id: 'review', name: 'Review', description: 'Review changes', loaded: true, enabled: true, definitionEnabled: true, toolCount: 0 },
     ]);
     await controls.unload('a', 'removed');
     expect(unload).toHaveBeenCalledWith('a', 'removed');
@@ -73,4 +73,46 @@ it.each([{ enabled: false }, { disableModelInvocation: true }, { triggerStrategy
         { get: async () => ({ skillService: service }) } as never);
     await expect(controls.load('session', 'review')).rejects.toThrow('cannot be loaded');
     expect(loadSkill).not.toHaveBeenCalled();
+});
+
+it('describes a Skill definition for explicit invocation without loading it', async () => {
+    const loadSkill = vi.fn();
+    const definition = { name: 'Review', type: 'prompt', instructions: 'Do it.', triggerStrategy: 'action' as const,
+        disableModelInvocation: false, enabled: true, tools: [] };
+    const controls = createSessionSkillControls({ openSession: async () => ({ getShared: async () => undefined }) } as never,
+        { get: async () => ({ skillService: { getSkill: (id: string) => id === 'review' ? definition : undefined, loadSkill } }) } as never);
+
+    expect(await controls.describe('session', 'review')).toEqual({ name: 'Review', type: 'prompt',
+        instructions: 'Do it.', triggerStrategy: 'action', disableModelInvocation: false, enabled: true });
+    expect(await controls.describe('session', 'missing')).toBeUndefined();
+    expect(loadSkill).not.toHaveBeenCalled();
+});
+
+it('mounts and unmounts editor targets through the Session scope in order', async () => {
+    const calls: string[] = [];
+    const service = { mountByGlob: (path: string) => { calls.push(`mount ${path}`); },
+        unmountByGlob: (path: string) => { calls.push(`unmount ${path}`); } };
+    const controls = createSessionSkillControls({ openSession: async () => ({ getShared: async () => undefined }) } as never,
+        { get: async () => ({
+            skillService: { ...service, getLoadedSkills: () => [], listSkills: () => [],
+                getSkill: () => undefined, loadSkill: async () => ({ success: true, toolIds: [] }),
+                unloadSkill: async () => {} } }) } as never);
+    await controls.mountByGlob('session', '/s/files/workspace/src/app.ts');
+    await controls.unmountByGlob('session', '/s/files/workspace/src/app.ts');
+    expect(calls).toEqual(['mount /s/files/workspace/src/app.ts', 'unmount /s/files/workspace/src/app.ts']);
+    await expect(controls.mountByGlob('session', '  ')).rejects.toThrow('file path');
+    await expect(controls.unmountByGlob('session', '')).rejects.toThrow('file path');
+    expect(calls).toHaveLength(2);
+});
+
+it('forwards change subscriptions to the live Session scope and rejects a missing listener', async () => {
+    const listener = () => {};
+    const detach = () => {};
+    const onChange = vi.fn(() => detach);
+    const controls = createSessionSkillControls({ openSession: async () => ({ getShared: async () => undefined }) } as never,
+        { get: async () => ({ skillService: { onChange } }) } as never);
+    expect(await controls.onChange('session', listener)).toBe(detach);
+    expect(onChange).toHaveBeenCalledWith(listener);
+    await expect(controls.onChange('session', undefined as never)).rejects.toThrow('listener');
+    expect(onChange).toHaveBeenCalledTimes(1);
 });

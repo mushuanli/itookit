@@ -34,6 +34,7 @@ import {
     SiblingSwitchCommand, CopyAllCommand, PrintCommand,
 } from '../commands';
 import { Command } from '../commands/Command';
+import type { SkillInfo } from '../domain/types';
 
 // Shell 内部
 import { EditorEventBus } from './EditorEventBus';
@@ -47,6 +48,7 @@ import {
     buildExecutorOptions, validateAgentId, buildConnectionOptions,
 } from './AgentProvider';
 import { promptInterruptedRun } from './InterruptedRunPrompt';
+import { bindSkillRefresh } from './skill-refresh';
 import { buildSlashCallbacks } from './SlashCommandRouter';
 
 // Infrastructure
@@ -159,6 +161,9 @@ export class LLMWorkspaceEditor implements IEditor {
     private globalEventUnsub: (() => void) | null = null;
     private sessionEventUnsub: (() => void) | null = null;
     private agentServiceUnsub: (() => void) | null = null;
+    private skillRefreshBinding: ReturnType<typeof bindSkillRefresh> | null = null;
+    /** Latest Session Skill list; the slash popup needs it synchronously for `/sk-<id>`. */
+    private skillSnapshot: SkillInfo[] = [];
     private refreshAgentsTimer: ReturnType<typeof setTimeout> | null = null;
     private titleInput!: HTMLInputElement;
     private currentTitle: string = 'New Chat';
@@ -385,6 +390,18 @@ export class LLMWorkspaceEditor implements IEditor {
         });
 
         this.registerInputPlugins();
+
+        // 运行中索引更新：Skill 目录变化后重新拉取并刷新输入区（无轮询）
+        if (this.options.sessionSkills) {
+            this.skillRefreshBinding = bindSkillRefresh(
+                this.options.sessionSkills,
+                this.options.sessionId,
+                (skills) => {
+                    this.skillSnapshot = skills;
+                    this.chatInput?.refreshSkills(skills);
+                },
+            );
+        }
 
         this.stateManager.setChatInputGetter(() => this.chatInput);
         return initialSettings;
@@ -860,7 +877,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 branchService: this.branchService,
                 domCache: this.domCache,
                 hostContext: this.hostContext,
-                sendCommand: this.sendCommand,
+                sendCommand: () => this.sendCommand,
                 switchBranchByOffsetCommand: this.switchBranchByOffsetCommand,
                 agentService: this.agentService,
                 _sessionEngine: this.engine,
@@ -876,9 +893,29 @@ export class LLMWorkspaceEditor implements IEditor {
                     resume: () => this.resumeAttachedTask(),
                     approve: note => this.approveAttachedTask(note),
                 } : undefined,
+                ...(this.options.sessionSkills ? {
+                    skills: {
+                        snapshot: () => this.skillSnapshot,
+                        load: (skillId: string) => this.options.sessionSkills!.load(this.options.sessionId, skillId),
+                        describe: (skillId: string) => this.options.sessionSkills!.describe(this.options.sessionId, skillId),
+                        openPanel: () => this.chatInput?.showSkillSettings(),
+                        refresh: () => this.refreshSkillSnapshot(),
+                    },
+                } : {}),
             })
         );
         chatInput.registerPlugin(this.slashPlugin);
+    }
+
+    /**
+     * Re-read the Session Skill list for the slash popup's synchronous snapshot.
+     *
+     * Fire-and-forget: the popup rebuilds its commands on every keystroke, so a mount that
+     * happened after the editor opened is picked up without reopening the session. Failures
+     * leave the previous snapshot in place.
+     */
+    private refreshSkillSnapshot(): void {
+        this.skillRefreshBinding?.refresh();
     }
 
     // ── Q3: Mid-execution user injection ─────────────────────────────────────
@@ -959,6 +996,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // 1. 状态持久化（先于组件销毁）
         this.assetManager?.close();
+        this.skillRefreshBinding?.dispose();
+        this.skillRefreshBinding = null;
         this.sessionEventUnsub?.();
         this.sessionEventUnsub = null;
         this.stateManager?.cleanup();

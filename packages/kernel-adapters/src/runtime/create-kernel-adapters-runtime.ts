@@ -220,14 +220,17 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
         if (pending) return pending;
         let cleanup = this.sessionClosers.get(sessionId);
         if (!cleanup) {
-            invalidateSessionSkillOperations(this, sessionId);
+            const drained = invalidateSessionSkillOperations(this, sessionId);
             const scope = this.scopes.get(sessionId);
+            const hydration = this.hydrating.get(sessionId);
             this.scopes.delete(sessionId);
             this.hydrated.delete(sessionId);
             this.hydrating.delete(sessionId);
             const runs = [...(this.runScopes.get(sessionId)?.values() ?? [])];
             this.runScopes.delete(sessionId);
             cleanup = retryCleanup([
+                () => drained,
+                () => hydration?.catch(() => undefined),
                 ...runs.map(run => () => run.dispose()),
                 () => scope?.then(value => value.dispose(), () => {}),
             ]);
@@ -253,14 +256,17 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
     private close(): Promise<void> {
         if (this.closeWork) return this.closeWork();
         this.closed = true;
-        closeSessionSkillOperations(this);
+        const drained = closeSessionSkillOperations(this);
         const scopes = [...this.scopes.values()];
+        const hydration = [...this.hydrating.values()];
         const runs = [...this.runScopes.values()].flatMap(scopes => [...scopes.values()]);
         this.runScopes.clear();
         this.scopes.clear();
         this.hydrated.clear();
         this.hydrating.clear();
         this.closeWork = retryCleanup([
+            () => drained,
+            () => Promise.allSettled(hydration),
             ...this.sessionClosers.values(),
             ...runs.map(run => () => run.dispose()),
             ...scopes.map(scope => async () => { await (await scope.catch(() => undefined))?.dispose(); }),

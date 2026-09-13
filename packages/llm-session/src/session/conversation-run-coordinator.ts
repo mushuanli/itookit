@@ -31,10 +31,12 @@ import type {
 } from '../core/types';
 import {
     buildLlmTaskInput,
+    buildSkillContexts,
     ContextAssembler,
     type DurableAgentInput,
     type DurableChatOutput as ChatProgramOutput,
     type RetrievedMemoryEntry,
+    type SkillContext,
 } from '@itookit/llm-tasks';
 import type { ISessionRepository } from '../persistence/types';
 import { ContextProfileStore } from '../persistence/context-profile-store';
@@ -67,12 +69,21 @@ export interface ConversationRunCoordinatorOptions {
         externalIds: string[];
     }>;
     loadArtifact(id: string): Promise<Artifact | null>;
-    workspaceManager?: import('@itookit/llm-flow').FlowWorkspaceManager;
     retrieveMemory?: (
         plan: ContextPlan,
         agent: { id: string; version: string },
         context: { sessionId: string; policy?: import('@itookit/common').MemoryPolicy },
     ) => Promise<RetrievedMemoryEntry[]>;
+    /**
+     * Host-provided isolated workspace manager for chat-embedded Flow runs.
+     *
+     * A Flow whose frozen run policy asks for `worktree` (or another non-shared mode) needs a
+     * manager here; without one the executor fails closed with `requires a configured workspace
+     * manager` instead of silently running in the shared workspace. CLI already injects
+     * `GitWorktreeFlowWorkspaceManager`; the desktop/Web hosts inject their own (see
+     * doc/design/flow-execution-model.md).
+     */
+    workspaceManager?: import('@itookit/llm-flow').FlowWorkspaceManager;
 }
 
 interface ConversationLocation {
@@ -94,12 +105,12 @@ export class ConversationRunCoordinator {
     async executeDirect(execution: ConversationExecution): Promise<void> {
         const ids = execution.config.capabilityPolicy?.skillIds ?? [];
         const skills = ids.length ? await this.options.resolveSkills?.(ids) ?? [] : [];
-        const skillsPrompt = skills.filter(skill => ids.includes(skill.id) && skill.enabled && !skill.disableModelInvocation)
+        const skillsPrompt = skills.filter(skill => ids.includes(skill.id) && skill.enabled && !skill.disableModelInvocation && skill.triggerStrategy !== 'action')
             .flatMap(skill => [skill.instructions,
                 skill.compact?.rawContent ? `Skill ${skill.id} — critical rules:\n${skill.compact.rawContent}` : '',
             ]).filter(Boolean).join('\n\n');
         await this.execute(execution, async snapshot => {
-            const root = await this.directTask(execution, snapshot);
+            const root = await this.directTask(execution, snapshot, skills);
             return { root, tasks: () => [root], parse: parseOutput };
         }, { skillsPrompt });
     }
@@ -115,6 +126,9 @@ export class ConversationRunCoordinator {
                 kernel: this.options.kernel,
                 plugins: this.options.dagPlugins,
                 resolveTools: this.options.resolveTools,
+                // Flow Agent nodes activate their initially selected Skills the same way
+                // direct chat does, inside the node's declared capability set.
+                resolveSkillContexts: skillContextResolver(this.options),
                 sessionContext: flowSessionContext(snapshot),
                 workspaceManager: this.options.workspaceManager,
                 bindPatchNode: bindPatchNode ? (_sessionId, node, defaults) => bindPatchNode(node, snapshot, defaults) : undefined,
@@ -243,12 +257,13 @@ export class ConversationRunCoordinator {
     private async directTask(
         execution: ConversationExecution,
         snapshot: ContextSnapshot,
+        skills: LLMSkill[] = [],
     ): Promise<TaskHandle<ChatProgramOutput>> {
         const session = await this.options.kernel.openSession(execution.task.sessionId);
         const tools = execution.config.capabilityPolicy?.toolIds ?? [];
         const catalog = await this.options.resolveTools?.(execution.task.sessionId, tools)
             ?? { definitions: [], externalIds: [] };
-        const spec = directTaskSpec(execution, snapshot, catalog);
+        const spec = directTaskSpec(execution, snapshot, catalog, skills);
         const handle = await session.submit<typeof spec.input, ChatProgramOutput>(spec);
         await this.bindCapabilities(handle, tools.length > 0);
         if (execution.task.abortController.signal.aborted) await handle.cancel();
@@ -502,6 +517,7 @@ function directTaskSpec(
     execution: ConversationExecution,
     snapshot: ContextSnapshot,
     catalog: { definitions: ToolDefinition[]; externalIds: string[] },
+    skills: LLMSkill[] = [],
 ): TaskSpec<DurableAgentInput> {
     const tools = execution.config.capabilityPolicy?.toolIds ?? [];
     // 客户端 WebSearchTool 注入开关：仅 'client-tool' 态注入；'builtin' 与 'disabled'
@@ -509,6 +525,12 @@ function directTaskSpec(
     const definitions = execution.config.webSearchMode === 'client-tool'
         ? catalog.definitions
         : catalog.definitions.filter(tool => toolNameOf(tool) !== CLIENT_WEB_SEARCH_TOOL);
+    // Initial Skill selection activates the same snapshots a runtime load_skill returns,
+    // so critical rules are re-injected per round and tools stay inside the declared set.
+    const allowedToolIds = execution.config.webSearchMode === 'client-tool'
+        ? tools : tools.filter(id => id !== CLIENT_WEB_SEARCH_TOOL);
+    const skillContexts = initialSkillContexts(skills, { definitions: catalog.definitions, externalIds: catalog.externalIds },
+        allowedToolIds, new Set(execution.config.capabilityPolicy?.skillIds ?? []));
     return {
         program: { kind: tools.length ? 'llm.agent' : 'llm.chat', version: '1' },
         input: buildLlmTaskInput({
@@ -525,18 +547,45 @@ function directTaskSpec(
             stream: execution.config.stream,
             approval: 'external',
             tools: definitions,
-            allowedToolIds: execution.config.webSearchMode === 'client-tool'
-                ? tools : tools.filter(id => id !== CLIENT_WEB_SEARCH_TOOL),
+            allowedToolIds,
             externalToolIds: catalog.externalIds,
+            ...(skillContexts.length ? { skillContexts } : {}),
         }),
         labels: { roundId: execution.roundId, kind: tools.length ? 'agent' : 'chat' },
         deferStart: true,
     };
 }
 
+/**
+ * Host-side Skill activation port for Flow Agent nodes: resolves the selected Skills and
+ * binds their tools against the same catalog the node itself is allowed to use.
+ */
+export function skillContextResolver(options: Pick<ConversationRunCoordinatorOptions, 'resolveSkills' | 'resolveTools'>) {
+    return async (sessionId: string, skillIds: string[], allowedToolIds: string[]): Promise<SkillContext[]> => {
+        if (!options.resolveSkills) return [];
+        const skills = await options.resolveSkills(skillIds);
+        if (!skills.length) return [];
+        const catalog = await options.resolveTools?.(sessionId, allowedToolIds) ?? { definitions: [], externalIds: [] };
+        return buildSkillContexts(skills, catalog, allowedToolIds, new Set(skillIds));
+    };
+}
+
 /** 从统一 ToolDefinition 中取工具名（function.name 或顶层 name）。 */
 function toolNameOf(tool: ToolDefinition): string {
     return tool.function?.name ?? tool.name ?? '';
+}
+
+/**
+ * Snapshots for Skills selected at initialization, shared with the Flow executor path.
+ * The builder keeps every activation inside the caller's capability set.
+ */
+function initialSkillContexts(
+    skills: LLMSkill[],
+    catalog: { definitions: ToolDefinition[]; externalIds: string[] },
+    allowedToolIds: string[],
+    selectedIds: ReadonlySet<string>,
+): NonNullable<DurableAgentInput['skillContexts']> {
+    return buildSkillContexts(skills, catalog, allowedToolIds, selectedIds);
 }
 
 function conversationRound(

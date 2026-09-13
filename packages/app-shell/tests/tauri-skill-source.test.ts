@@ -59,6 +59,25 @@ it('discovers and loads supporting files only through each Session view, then re
     } finally { await runtime.dispose(); await manager.dispose(); }
 });
 
+it('honors an explicit auto-load override and anchors project rules to the project root', async () => {
+    const files: Record<string, string> = {
+        '/project/_agent/AGENT.md': 'root rules',
+        '/project/nested/_agent/AGENT.md': 'nested rules',
+        '/project/_agent/skills/review/SKILL.md': '---\nname: Review\nauto-load: false\n---\nReview body',
+        '/project/nested/_agent/skills/local/SKILL.md': '---\nname: Local\n---\nLocal body',
+    };
+    const source = new TauriSkillSource({
+        listFiles: async (dir: string) => Object.keys(files).filter(path => path.startsWith(`${dir.replace(/\/+$/, '')}/`)),
+        readFile: async (path: string) => files[path] ?? '',
+    } as never, '/project');
+    const scope = await source.loadScope('/project/nested');
+    // A nested `_agent/AGENT.md` is not merged or substituted for the project-root rules.
+    expect(scope.agentInstructions).toBe('root rules');
+    expect(scope.skills.map(skill => `${skill.id}:${skill.scopeLevel}`).sort())
+        .toEqual(['local:local-fs', 'review:global-fs']);
+    expect(scope.skills.find(skill => skill.id === 'review')).toMatchObject({ autoLoad: false, triggerStrategy: 'reference' });
+});
+
 it('tolerates missing skill directories but propagates revoked access', async () => {
     const absent = new TauriSkillSource({ listFiles: async () => { throw { code: 'ENOENT' }; },
         readFile: async () => { throw { code: 'ENOENT' }; } }, '/workspace');
