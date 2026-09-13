@@ -268,3 +268,16 @@ P1-05 保持开放：本批不替代真实进程/多主机或旧版本混用测�
 本批只完成同一事务存储内的资源命令隔离。物理 adapter 的执行端 token、接管前已开始的外部操作、跨 store 迁移屏障与真实多主机故障矩阵仍待完成，P1-05 保持开放。
 
 隔离提交快照验证：durable-kernel 239、llm-flow 213、llm-session 116、kernel-adapters 111、app-core 92 项通过，共 771 项；Kernel/CLI 类型检查与文档检查通过。资源回归含同存储两个 Kernel 并发 CAS、重建、身份省略/替换、排队接管、schema 升级与 Decision 回滚；不作为真实多进程或物理执行端验收。
+
+
+## 2026-09-14：跨宿主批量路径类型检查
+
+VFS 的路径前缀检查使用不读取 sidecar 元数据的 getNodeType/statType，嵌套视图也保持该路径；同批前缀通过 Node statMany 或 Tauri fs_stat_many 读取，保留逐路径权限检查。宿主响应条数不匹配时拒绝所有等待者，单个链接不影响同批合法路径。
+
+Node lstat 与 Rust symlink_metadata 保留符号链接/普通文件类型，Tauri 映射不丢字段，DirectoryDriver 不再把权限错误吞成空节点。真实文件系统回归复现了原先链接指向挂载根外文件并被读取的问题；修复后该视图读取被拒绝。此检查不构成抵御恶意并发替换路径的原子防护，也不替代原生进程沙箱。
+
+读取与 rename journal 恢复仍处于同一事务；不使用实例内「日志曾经干净」作为跨进程跳过恢复的依据。真实两个进程覆盖读者先打开、写者在文件 rename 后 SIGKILL、原读者恢复目标记录的 root/module 两条路径。新增 sidecarStats 统计逻辑方法调用（含事务回调），不把该数字等同于真实 IPC 数。
+
+本批完成批量类型检查、链接拒绝和跨进程恢复这条链；P0-02 的桌面 ≤2 秒 / ≤100 次 IPC 仍开放，需继续对正确实现减少宿主往返并重测。
+
+隔离快照验证：VFS 175、LocalFS 69、Kernel 239、app-core 92、Tauri stat 映射 2、Rust 34 项通过，共 611 项；VFS/LocalFS/Tauri 类型检查、Tauri 前端构建与文档检查通过。未替代真实窗口及恶意路径替换竞态验收。

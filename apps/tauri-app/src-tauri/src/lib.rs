@@ -126,6 +126,8 @@ struct FsStatResult {
     mtime_ms:     i64,
     birthtime_ms: i64,
     is_directory: bool,
+    is_symbolic_link: bool,
+    is_file: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -155,9 +157,19 @@ fn is_allowed(path: &Path, paths: &AppPaths) -> bool {
 
 #[tauri::command]
 fn fs_stat(path: String, state: State<AppPaths>) -> Option<FsStatResult> {
-    let p = PathBuf::from(&path);
-    if !is_allowed(&p, &state) { return None; }
-    let m = std::fs::metadata(&p).ok()?;
+    stat_one(Path::new(&path), &state)
+}
+
+/// One IPC for many stats. The VFS capability check walks every path prefix and issues the segment
+/// checks concurrently; without this each segment would be its own `fs_stat` round trip.
+#[tauri::command]
+fn fs_stat_many(paths: Vec<String>, state: State<AppPaths>) -> Vec<Option<FsStatResult>> {
+    paths.iter().map(|path| stat_one(Path::new(path), &state)).collect()
+}
+
+fn stat_one(p: &Path, paths: &AppPaths) -> Option<FsStatResult> {
+    if !is_allowed(p, paths) { return None; }
+    let m = std::fs::symlink_metadata(p).ok()?;
     let ms = |t: std::time::SystemTime| {
         t.duration_since(std::time::UNIX_EPOCH).ok()
             .map(|d| d.as_millis() as i64).unwrap_or(0)
@@ -167,6 +179,8 @@ fn fs_stat(path: String, state: State<AppPaths>) -> Option<FsStatResult> {
         mtime_ms:     m.modified().ok().map(ms).unwrap_or(0),
         birthtime_ms: m.created().ok().map(ms).unwrap_or(0),
         is_directory: m.is_dir(),
+        is_symbolic_link: m.file_type().is_symlink(),
+        is_file: m.is_file(),
     })
 }
 
@@ -573,6 +587,7 @@ pub fn run() {
             get_app_data_dir,
             get_app_config_dir,
             fs_stat,
+            fs_stat_many,
             fs_mkdir,
             fs_read_file,
             fs_write_file,
@@ -596,4 +611,30 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(all(test, unix))]
+mod stat_type_tests {
+    use super::*;
+
+    #[test]
+    fn reports_links_without_following_them() {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("mindos-stat-{}-{stamp}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = AppPaths { config_dir: root.clone(), root_dir: root.clone(), home_dir: root.clone() };
+        let file = root.join("file");
+        std::fs::write(&file, b"content").unwrap();
+        for (name, target) in [("file-link", file.clone()), ("dir-link", root.clone()), ("dangling", root.join("missing"))] {
+            let link = root.join(name);
+            std::os::unix::fs::symlink(target, &link).unwrap();
+            let stat = stat_one(&link, &paths).unwrap();
+            assert!(stat.is_symbolic_link);
+            assert!(!stat.is_file && !stat.is_directory);
+        }
+        let regular = stat_one(&file, &paths).unwrap();
+        assert!(regular.is_file && !regular.is_symbolic_link);
+        assert!(stat_one(&root.join("missing"), &paths).is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

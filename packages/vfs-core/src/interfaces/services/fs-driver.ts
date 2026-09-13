@@ -93,6 +93,12 @@ export interface IFSDriver extends FSEventEmitter {
      */
     getNode(path: string): Promise<FSNode | null>;
 
+    /**
+     * Type-only node lookup for capability checks (`FileSystemView.noLinks`): same source as
+     * `getNode`, but allowed to skip metadata. Callers fall back to `getNode` when absent.
+     */
+    getNodeType?(path: string): Promise<Pick<FSNode, 'type'> | null>;
+
     /** 获取直接子节点 */
     getChildren(
         path: string,

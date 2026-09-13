@@ -20,6 +20,13 @@ export interface IStorageBackend {
     /** 获取节点信息 */
     stat(path: string): Promise<FSNode | null>;
 
+    /**
+     * Type-only lookup for capability checks (`FileSystemView.noLinks`). Must derive the type from
+     * the same source as `stat`, but a backend whose `stat` pays a remote/sidecar round trip should
+     * override this to skip it. Callers fall back to `stat` when absent.
+     */
+    statType?(path: string): Promise<Pick<FSNode, 'type'> | null>;
+
     /** 列出子节点 */
     list(path: string): Promise<FSNode[]>;
 

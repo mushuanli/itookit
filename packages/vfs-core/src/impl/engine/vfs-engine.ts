@@ -194,6 +194,18 @@ export class VFSEngine {
         return node ? this.mapToSystemNode(node, mountPath) : null;
     }
 
+    /**
+     * Type-only stat for capability checks. Prefers the backend's `statType` so a backend whose
+     * `stat` fetches metadata over a remote/sidecar round trip can skip it; the reported type is
+     * otherwise identical to `stat`.
+     */
+    async tryStatType(path: string): Promise<Pick<import('../../protocol').FSNode, 'type'> | null> {
+        const { backend, localPath } = this.resolveStore(path);
+        if (backend.statType) return backend.statType(localPath);
+        const node = await backend.stat(localPath);
+        return node ? { type: node.type } : null;
+    }
+
     // ── Read ──
 
     async readBySystemPath(systemPath: string): Promise<FileContent> {

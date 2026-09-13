@@ -123,6 +123,11 @@ export class DirectoryDriver implements IFSDriver {
         } catch { return null; }
     }
 
+    /** Type-only lookup for capability checks — same source as `getNode`, without metadata. */
+    async getNodeType(path: string): Promise<Pick<FSNode, 'type'> | null> {
+        return this.ctx.engine.tryStatType(this.ctx.toRealPath(path));
+    }
+
     getChildren(path: string, options?: ListOptions & { fields?: 'full' }): Promise<FSNode[]>;
     getChildren(path: string, options: ListOptions & { fields: 'entry' }): Promise<DirEntry[]>;
     getChildren(path: string, options?: ListOptions): Promise<FSNode[] | DirEntry[]>;

@@ -19,6 +19,8 @@ interface RustStatResult {
     mtime_ms:     number;
     birthtime_ms: number;
     is_directory: boolean;
+    is_symbolic_link: boolean;
+    is_file: boolean;
 }
 
 interface RustDirEntry {
@@ -36,7 +38,22 @@ export class TauriFsOps implements IFsOps {
             mtimeMs:     r.mtime_ms,
             birthtimeMs: r.birthtime_ms,
             isDirectory: r.is_directory,
+            isSymbolicLink: r.is_symbolic_link,
+            isFile: r.is_file,
         };
+    }
+
+    /** One IPC for many stats; the VFS capability check coalesces its path-prefix walk into this. */
+    async statMany(paths: string[]): Promise<Array<StatResult | null>> {
+        const rows = await invoke<Array<RustStatResult | null>>('fs_stat_many', { paths });
+        return rows.map(r => r ? {
+            size:        r.size,
+            mtimeMs:     r.mtime_ms,
+            birthtimeMs: r.birthtime_ms,
+            isDirectory: r.is_directory,
+            isSymbolicLink: r.is_symbolic_link,
+            isFile: r.is_file,
+        } : null);
     }
 
     async mkdir(p: string): Promise<void> {

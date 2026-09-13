@@ -151,10 +151,29 @@ export class FileSystemView implements IFileSystem {
     }
     private async noLinks(m: Binding, path: string) {
         const source = this.sourcePath(m, path);
+        // The prefix walk only needs the node type. Prefer the driver's type-only lookup so a
+        // backend whose `getNode` fetches metadata over a remote/sidecar round trip can skip it.
+        // Segments are checked concurrently; a backend coalesces those type stats into one host call.
+        const driver = m.fs.driver as unknown as { getNodeType?: (p: string) => Promise<{ type?: string } | null> };
+        const segments: string[] = [];
         let current = '/';
         for (const part of source.split('/').filter(Boolean)) {
             current = P.join(current, part);
-            const node = await this.invoke(m, m.fs.driver, 'getNode', [current]);
+            segments.push(current);
+        }
+        const checked = await Promise.all(segments.map(async segment => {
+            try {
+                return { node: typeof driver.getNodeType === 'function'
+                    ? await this.invoke(m, driver, 'getNodeType', [segment])
+                    : await this.invoke(m, m.fs.driver, 'getNode', [segment]) };
+            } catch (error) {
+                // Settle every check: a rejected sibling must not escape as an unhandled rejection.
+                return { error };
+            }
+        }));
+        for (const entry of checked) {
+            if ('error' in entry) throw entry.error;
+            const node = entry.node;
             if (node && node.type !== 'directory' && node.type !== 'file' && node.type !== 'seqfile') {
                 throw new FSError('EACCES', 'Links and device nodes require a separate capability');
             }
@@ -179,6 +198,7 @@ export class FileSystemView implements IFileSystem {
     private makeDriver(): IFileSystemDriver {
         const methods: Methods = {
             getNode: (path: string) => this.stat(path),
+            getNodeType: (path: string) => this.statType(path),
             getStats: async () => {
                 let fileCount = 0, directoryCount = 0, totalSize = 0, lastModifiedAt = 0;
                 await this.walk(node => {
@@ -216,6 +236,29 @@ export class FileSystemView implements IFileSystem {
             if (value) return this.node(m, value);
         }
         return this.synthetic(path);
+    }
+
+    /**
+     * Type-only `stat` for capability checks. Validates the path on its mount exactly like `stat`,
+     * but never asks for metadata; a nested view therefore keeps a prefix walk metadata-free.
+     */
+    private async statType(input: string): Promise<Pick<FSNode, 'type'> | null> {
+        const path = normalizeVirtualPath(input);
+        if (!this.visible(path)) throw new FSError('EACCES', 'Path is outside the system projection');
+        const m = this.find(path);
+        if (m) {
+            await this.noLinks(m, path);
+            const source = this.sourcePath(m, path);
+            const driver = m.fs.driver as unknown as { getNodeType?: (p: string) => Promise<{ type?: string } | null> };
+            if (typeof driver.getNodeType === 'function') {
+                const node = await this.invoke(m, driver, 'getNodeType', [source]);
+                return node ? { type: node.type } : null;
+            }
+            const value = await this.invoke(m, m.fs.driver, 'getNode', [source]);
+            return value ? { type: value.type } : null;
+        }
+        const synthetic = this.synthetic(path);
+        return synthetic ? { type: synthetic.type } : null;
     }
     private async children(input: string, options?: any): Promise<FSNode[]> {
         const path = normalizeVirtualPath(input);

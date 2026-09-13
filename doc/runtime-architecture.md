@@ -163,3 +163,16 @@ ApplicationKernelPlatform 的 configure(kernel, services) 在恢复前取得 ses
 createKernelRuntime 的 fileContextForScope 提供 Session + Run 能力；默认 scopeForEffect 用 resolveFlowTaskWorkspace 核对持久成员、后代与 workspace lease，失败不回退共享目录。withWorkspaceScopeCleanup 包装 prepare/restore，等待持久成员、重试及后代的 activeOperations 清零，再 disposeScope，最后调用宿主屏障；成功后才能清理工作区。CLI 的 Session 目录已指向副本，Run 能力复用其授权映射；Tauri 通过 acquireWorkspaceProcessContext 将原授权替换成同一副本的文件与进程视图。
 
 释放失败保留失败步骤，并拒绝关闭中能力的重新获取；重试不重复成功的目录句柄释放。Session 进程停止失败时不得先释放文件视图。
+
+
+## 2026-09-14：跨宿主批量路径类型检查
+
+VFS 的路径前缀检查使用不读取 sidecar 元数据的 getNodeType/statType，嵌套视图也保持该路径；同批前缀通过 Node statMany 或 Tauri fs_stat_many 读取，保留逐路径权限检查。宿主响应条数不匹配时拒绝所有等待者，单个链接不影响同批合法路径。
+
+Node lstat 与 Rust symlink_metadata 保留符号链接/普通文件类型，Tauri 映射不丢字段，DirectoryDriver 不再把权限错误吞成空节点。真实文件系统回归复现了原先链接指向挂载根外文件并被读取的问题；修复后该视图读取被拒绝。此检查不构成抵御恶意并发替换路径的原子防护，也不替代原生进程沙箱。
+
+读取与 rename journal 恢复仍处于同一事务；不使用实例内「日志曾经干净」作为跨进程跳过恢复的依据。真实两个进程覆盖读者先打开、写者在文件 rename 后 SIGKILL、原读者恢复目标记录的 root/module 两条路径。新增 sidecarStats 统计逻辑方法调用（含事务回调），不把该数字等同于真实 IPC 数。
+
+本批完成批量类型检查、链接拒绝和跨进程恢复这条链；P0-02 的桌面 ≤2 秒 / ≤100 次 IPC 仍开放，需继续对正确实现减少宿主往返并重测。
+
+隔离快照验证：VFS 175、LocalFS 69、Kernel 239、app-core 92、Tauri stat 映射 2、Rust 34 项通过，共 611 项；VFS/LocalFS/Tauri 类型检查、Tauri 前端构建与文档检查通过。未替代真实窗口及恶意路径替换竞态验收。
