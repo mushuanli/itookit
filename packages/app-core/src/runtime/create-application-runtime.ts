@@ -1,11 +1,13 @@
+import { createInfrastructure } from './infrastructure';
+import { createConversationSystem, disposeConversationSystem } from './conversation-system';
+import { SessionUnfinishedTasksError } from '../vfs/errors';
 import { recoverSessionsWithLeases } from './session-recovery';
-import { createVFS, MemoryBackend, type IStorageBackend, type MountOptions } from '@itookit/vfs-core';
+import type { IStorageBackend, MountOptions } from '@itookit/vfs-core';
 import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/device-llm';
-import { traceBoot, type ILLMLogger } from '@itookit/common';
-import { resolveSessionSkillContext } from '@itookit/kernel-adapters';
+import { t, traceBoot, type ILLMLogger } from '@itookit/common';
 import {
-    SessionMemoryProvider, SessionRepository, SessionDirectoryStorageResolver,
-    VFSAgentService, FlowEngine, FlowDefinitionStore, seedDefaultFlows, initializeConversationSystem, resetSessionManager,
+    SessionRepository, SessionDirectoryStorageResolver,
+    VFSAgentService, FlowEngine, FlowDefinitionStore, seedDefaultFlows,
 } from '@itookit/llm-session';
 import { createKernelRuntime, type HeadlessKernelRuntime, type CreateKernelRuntimeOptions } from './create-kernel-runtime';
 import { RunCatalog } from '../run/run-catalog';
@@ -55,61 +57,24 @@ export interface ApplicationRuntimeOptions {
 
 /** Host-owned system startup. Contains no DOM, routing or editor initialization. */
 export async function createApplicationRuntime(options: ApplicationRuntimeOptions): Promise<ApplicationRuntime> {
-    const { backend, additionalMounts, llmLogger } = options;
     const cleanupFns: Array<() => void | Promise<void>> = [];
     const sourceCleanupFns: Array<() => void | Promise<void>> = [];
     const logStep = (label: string) => { console.log(`[Boot] ${label}`); options.onProgress?.(label); };
     try {
-        // ── 1. VFS ─────────────────────────────────────────────────────────────────
-
-        logStep('初始化文件系统…');
-        const { manager: vfs } = await traceBoot('createVFS', () => createVFS({
-            rootBackend: backend,
-            additionalMounts: [...(additionalMounts ?? []), { path: '/run', backend: new MemoryBackend() }],
-        }));
-
+        const { vfs, systemFS, llmDriver, logIO, closeCodexTransport } = await createInfrastructure(options);
         sourceCleanupFns.push(() => vfs.dispose());
-
-        // Helper to dump VFS I/O counters (for identifying redundant reads/writes)
-        const logIO = (label: string) => {
-            try {
-                const s = (vfs as any)._engine?.ioStats;
-                if (s) console.log(`[Boot]   ↳ IO after ${label}: stat=${s.stat} list=${s.list} read=${s.read} write=${s.write} mkdir=${s.mkdir} delete=${s.delete} rename=${s.rename}`);
-                (vfs as any)._engine?.resetIOStats();
-            } catch { /* ignore */ }
-        };
-        logIO('createVFS');
-
-
-        // ── 2. LLM device driver ───────────────────────────────────────────────────
-
-        logStep('加载 LLM 驱动…');
-        const llmDriver = new LLMDeviceDriver(vfs, { llmLogger, codexTransport: options.codexTransport });
-        if (options.codexTransport?.close) cleanupFns.push(() => options.codexTransport!.close!());
-        let ts = performance.now();
-        await traceBoot('llmDriver.init', () => llmDriver.init());
-        console.log(`[Boot]   ↳ llmDriver.init: +${(performance.now() - ts).toFixed(0)}ms`);
-        vfs.devices.register(llmDriver);
-        ts = performance.now();
-        await traceBoot('llmDriver.createDeviceNodes', () => llmDriver.createDeviceNodes());
-        console.log(`[Boot]   ↳ createDeviceNodes: +${(performance.now() - ts).toFixed(0)}ms`);
-        vfs.devices.freeze();
-        logIO('LLM driver');
-
-
-        for (const path of ['/home/admin/chats', '/home/admin/notes', '/home/admin/projects', '/home/admin/.config']) await vfs.openFileSystem(path);
+        if (closeCodexTransport) cleanupFns.push(closeCodexTransport);
 
         // ── 3. Core services ───────────────────────────────────────────────────────
 
-        logStep('初始化核心服务…');
+        logStep(t('boot.coreServices'));
         const agentService   = new VFSAgentService(await vfs.openFileSystem(workspaceRoot('agents')), llmDriver);
         const sessionRepository     = new SessionRepository(await vfs.openFileSystem('/'));
         const flowEngine     = new FlowEngine(await vfs.openFileSystem(workspaceRoot('flows')));
         await traceBoot('flowEngine.init', () => flowEngine.init());
 
         // Durable Kernel with application-owned capability injection.
-        ts = performance.now();
-        const systemFS = await vfs.openFileSystem('/');
+        const ts = performance.now();
         const systemMounts = createSessionAttachmentMounts(sessionRepository);
         cleanupFns.push(() => systemMounts.dispose());
         const sessionFiles = new SessionFilesService(await vfs.openFileSystem('/'), id => systemMounts.forSession(id));
@@ -141,7 +106,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
                     let exists = false;
                     for await (const session of runtime.kernel.listSessions()) if (session.id === id) { exists = true; break; }
                     if (exists && (await runtime.kernel.listSessionTasks(id)).some(task => !['succeeded', 'failed', 'cancelled'].includes(task.status))) {
-                        throw new Error('会话仍有未结束的 Task，请先结束或取消任务再修改挂载');
+                        throw new SessionUnfinishedTasksError(id);
                     }
                 };
                 await traceBoot('syncSkillsToKernel', () => syncSkillsToKernel(llmDriver, runtime));
@@ -175,35 +140,15 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         // Keep skills in sync when the user adds / edits / deletes skills in Settings.
         // The initial sync happens before Kernel recovery so restored Skill identities resolve.
         cleanupFns.push(
-            llmDriver.onChange(() => { syncSkillsToKernel(llmDriver, kernel).catch(() => {}); })
+            llmDriver.onChange(() => { syncSkillsToKernel(llmDriver, kernel).catch(error => console.warn('[Skills] sync failed', error)); })
         );
 
         logIO('core services');
 
-        logStep('初始化 LLM 引擎…');
-        const { sessionManager, commandBus } = await traceBoot('initializeConversationSystem', async () => initializeConversationSystem({
-            agentService,
-            sessionEngine: sessionRepository,
-            promptHistoryFiles: await vfs.openFileSystem('/home/admin/.config/mindos/prompt-history'),
-            kernel:             kernel.kernel,
-            flowStore:          flowEngine,
-            dagPlugins:          kernel.dagPlugins,
-            retrieveMemory: new SessionMemoryProvider(kernel.kernel).retrieve,
-            resolveSessionContext: (sessionId, userMessage) => resolveSessionSkillContext(kernel.kernel, kernel.sessions, sessionId, userMessage),
-            resolveTools: async (sessionId, allowedIds) => {
-                const tools = (await kernel.sessions.get(sessionId)).toolService;
-                const allowed = new Set(allowedIds);
-                return {
-                    definitions: tools.getToolDefinitions().filter(definition => {
-                        const name = definition.function?.name ?? definition.name;
-                        return Boolean(name && allowed.has(name));
-                    }),
-                    externalIds: allowedIds.filter(id => tools.getToolMeta(id)?.sideEffect === 'external'),
-                };
-            },
-        }));
-
-        cleanupFns.push(() => resetSessionManager());
+        logStep(t('boot.llmEngine'));
+        const { sessionManager, commandBus } = await traceBoot('initializeConversationSystem',
+            () => createConversationSystem({ vfs, agentService, sessionRepository, flowEngine, kernel }));
+        cleanupFns.push(() => disposeConversationSystem());
 
         const acquireSessionLease = (sessionId: string): Promise<boolean> => recovery.acquireLater(sessionId);
         const unsubscribeSessionLease = sessionManager.onGlobalEvent(event => {

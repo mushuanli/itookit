@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Kernel, TaskHandle } from '@itookit/durable-kernel';
 import type { IAgentConfigService } from '@itookit/llm-session';
-import { PrivilegedCommandService } from '../src/kernel/privileged-command-service';
+import { PrivilegedCommandService } from '@itookit/app-core';
 
 describe('PrivilegedCommandService', () => {
     it('submits and capability-binds a durable plan task', async () => {

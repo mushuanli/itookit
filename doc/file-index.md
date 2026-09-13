@@ -123,7 +123,7 @@
 |---|---|
 | initApp 装配 | `app-shell/src/bootstrap.ts` |
 | App 类型（AppKernelRuntime 等） | `app-shell/src/types.ts` |
-| 特权命令服务（plan 等） | `app-shell/src/kernel/privileged-command-service.ts` |
+| 特权命令服务（plan 等） | `app-core/src/kernel/privileged-command-service.ts` |
 | web-app 入口 | `apps/web-app/src/` |
 | 工作区挂载配置（WS_*/createWsMount、文件注册表） | `app-shell/src/workspaces/`、`app-shell/src/config/` |
 

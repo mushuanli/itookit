@@ -17,14 +17,10 @@ src/
 │   └── index.ts          ← 预定义 WorkspaceConfig 常量 (WS_SETTINGS/WS_CHAT/WS_AGENTS/WS_SKILLS/WS_FLOWS…)
 ├── core/
 │   ├── Workbench.ts          ← 通用工作区控制器
-│   ├── SessionWorkbench.ts   ← Session 侧栏 + 路由 + 文件上下文生命周期
-│   └── WorkspaceController.ts
-├── files/                ← 兼容 re-export（实现位于 @itookit/app-core；mount-dialog.ts 为本包实现）
-│   ├── session-files.ts / session-browser.ts / session-route.ts
-│   ├── directory-mounts.ts / session-attachments.ts / session-process-context.ts
-│   └── tool-context.ts / workspace-paths.ts / unavailable-directory.ts / mount-dialog.ts
-├── kernel/
-│   └── privileged-command-service.ts
+│   └── SessionWorkbench.ts   ← Session 侧栏 + 路由 + 文件上下文生命周期
+├── files/                ← 本包 UI 实现（兼容 re-export shim 已于 2026-09-11 全部删除）
+│   ├── mount-dialog.ts       宿主目录挂载对话框
+│   └── localize-mount-error.ts 把 app-core 结构化错误映射为 i18n 文案
 ├── config/               ← file-registry.ts (FILE_REGISTRY) + templates.ts
 └── styles/workspace.css
 ```

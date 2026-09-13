@@ -82,20 +82,15 @@
 - [ ] **P2-04 VFS/C4 完整验收**：按当前挂载与访问边界设计完成浏览、编辑、工具、附件、撤销和平台故障场景；旧方案已被取代的步骤不重做。
 - [x] **P2-05 文档同步审计（已记录范围）**：前轮已记录全部 13 篇 `doc/design` + 根/包 API 文档 + `AGENTS.md`/README 的核对与修订；已被取代的设计与一次性评审记录移入 `doc/deprecated/` 并加横幅。本轮确认 `scripts/check-docs.mjs` 检查 67 份活文档，通过并有 5 条历史表述告警。脚本只检查预设的已删除符号、可识别的文件路径及相对链接，不校验设计语义、链接锚点或测试覆盖；逐条要求的持久记录/故障证据映射仍见 P1-05，各有效待办与实机验收不因本项勾选而完成。
 
-### P2-06 app-core 包内边界与技术债（2026-09-10 审阅记录）
+### P2-06 app-core 包内边界与技术债
 
-包定位（平台无关装配层，Web/Tauri/CLI 共用）成立且已验证：`src/` 内无 `node:`/DOM 引用，平台能力经 `ApplicationKernelPlatform` 注入，依赖方向只朝下。以下是**包内组织**层面的记录，代码证据已逐条核对：
-
-- [x] **补 `packages/app-core/AGENTS.md`**：已补（结构、入口、约束、测试现状与技术债指回本条）。同时在 `scripts/check-docs.mjs` 增加 `[missing-doc]` 告警，使「包缺少 AGENTS.md」不再被静默跳过；当前仍缺 5 个包（demo、durable-kernel、kernel-adapters、llm-common、ui-common）。
-- [ ] **把 app-core 的测试搬回 app-core**：app-core 自测仅 3 文件 / 10 用例（2081 行源码）；真正覆盖其模块的 12 个测试文件在 app-shell（`session-files`、`session-browser`、`directory-mounts`、`session-bundle`、`privileged-command-service`、`session-delete-lifecycle` 等），且多数经 11 个 1 行兼容 shim 导入（`packages/app-shell/src/files/*.ts`、`src/core/WorkspaceController.ts`、`src/kernel/privileged-command-service.ts`）。搬完后再给 shim 定下线时间；`doc/feat/harness-session-task-final-design.md:1929` 有「确认无引用后删除 kernel 根兼容 re-export」的先例。
-- [ ] **拆 `createApplicationRuntime`**：`:139-144` 的挂载守卫抛出中文用户文案 `'会话仍有未结束的 Task…'`（平台无关层唯一的 i18n 泄漏）；`:154-162` 会话租约策略（ownerId、10s 心跳、拒租文案、延迟取租告警）、`:190-192` Skill 同步、工具过滤、Flow 播种与约 15 处 `console.log`/`performance.now` 启动埋点都写在同一函数里。建议拆为 `createInfrastructure` / `recoverSessionsWithLeases` / `createConversationSystem` + `BootTracer`，用户文案改为 `FSError('EBUSY', code)` 由宿主本地化。
-- [ ] **去掉 VFS 私有字段访问**：`:73-79` 用 `(vfs as any)._engine?.ioStats` / `resetIOStats()`（全包唯一的 `any`）；2026-09-10 新增的 `apps/tauri-app/src/log/vfs-trace.ts` 也依赖同一私有字段。应在 vfs-core 暴露公开的 IO 统计 API。
-- [ ] **`files/` 重新归类**：目录里同时有 VFS 视图服务、挂载、导航模型（`session-browser.ts` 含 `folder:` URL 方案）、带版本的数据交换格式（`session-bundle.ts`）、生命周期与路由解析；bundle/browser 不是「装配」，建议拆为 `session/` 与 `vfs/`。
-- [ ] **`index.ts` 收口**：`:23` 把 llm-flow 的 `registerDurablePrograms` 改名 `registerKernelPrograms` 再导出，`:49-50` 保留 `createMindOSRuntime`/`MindOSRuntime`/`MindOSKernelPorts` 别名；而 `doc/runtime-architecture.md:14,132` 反而把别名当正式 API 名写进装配流程图。
-- [ ] **静默失败可见化**：`:156-158` 的 `void leaseStore.renew(lease).catch(() => null)` 与 `:190-192` 的 `syncSkillsToKernel(...).catch(() => {})`：租约续期失败与 Skill 同步失败都没有任何可观察信号。
-- [ ] **`SessionLeaseStore.init()` 只做一次**：`:43-48` 在 `inspect/acquire/renew/release` 每次都做 `exists` 检查，是热路径上的额外 VFS 往返（与 P0-02 的 IPC 争用同源）。
-
-已记录但需修正表述的：`doc/design/vfs-c4-review.md:7,238`、`doc/design/vfs-session-browser.md:76`、`packages/app-shell/AGENTS.md:22` 都把兼容 shim 记为事实，但没有下线待办；`doc/design/VFS-design.md:197` 记录「平台 Session 装配测试在 app-shell」，但没有把它当作覆盖问题。
+- [x] 平台无关服务测试迁回 app-core，删除 app-shell 兼容转导出并迁移所有仓内消费者。
+- [x] 基础设施、租约恢复、会话系统分开装配；基础设施初始化失败释放 VFS 与 transport，保留清理错误。
+- [x] app-core 与 Tauri trace 使用公开 VFS IO 统计，明确统计不等于 IPC 次数。
+- [x] 模块归入 session/vfs，删除历史 runtime 与程序注册别名，CLI HTTP 使用正式入口。
+- [x] 挂载结构化错误在宿主本地化；目录、启动与分页提示使用中英文键。
+- [x] 租约初始化去重，续租异常与 Skill 同步失败有日志；跨宿主 fencing 仍见 P1-02。
+- [x] 同步包说明与活文档。验证范围为本批提交快照的 app-core、app-shell 测试及宿主类型检查；全仓最终验收仍见 P0-05。
 
 ### 下一步执行顺序与验收产物
 
@@ -130,7 +125,7 @@
 | Flow 调度、恢复、等待退出 | [executor.ts](../packages/llm-flow/src/flow/executor.ts)、[scheduler-checkpoint.ts](../packages/llm-flow/src/flow/scheduler-checkpoint.ts)、[restore-handle.ts](../packages/llm-flow/src/flow/restore-handle.ts) |
 | CLI 生命周期与调度锁 | [commands.ts](../apps/cli/src/commands.ts)、[runtime.ts](../apps/cli/src/runtime.ts)、[run-scheduler-lock.ts](../apps/cli/src/run-scheduler-lock.ts) |
 | Tauri Bash 桥接与原生实现 | [session-bash.ts](../apps/tauri-app/src/shell/session-bash.ts)、[session_bash.rs](../apps/tauri-app/src-tauri/src/session_bash.rs)、[bash_process.rs](../apps/tauri-app/src-tauri/src/bash_process.rs) |
-| Session 平台装配 | [session-process-context.ts](../packages/app-shell/src/files/session-process-context.ts)、[bootstrap.ts](../packages/app-shell/src/bootstrap.ts) |
+| Session 平台装配 | [session-process-context.ts](../packages/app-core/src/vfs/session-process-context.ts)、[bootstrap.ts](../packages/app-shell/src/bootstrap.ts) |
 | Session 本地 Memory | [session-memory-provider.ts](../packages/llm-session/src/session/session-memory-provider.ts) |
 | 外层 Kernel/Bash/子 DAG 集成 | [nested-harness.test.ts](../apps/cli/tests/nested-harness.test.ts)、[native-session-bash.rs](../apps/cli/tests/native-session-bash.rs) |
 | 人工交互跨进程恢复 | [hitl.test.ts](../apps/cli/tests/hitl.test.ts) |

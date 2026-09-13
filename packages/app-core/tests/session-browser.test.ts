@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
-import { createSessionBrowser, resolveBrowserTarget, SessionLifecycleService } from '../src/files/session-browser';
-import { SessionFilesService } from '../src/files/session-files';
+import { createSessionBrowser, resolveBrowserTarget, SessionLifecycleService } from '@itookit/app-core';
+import { SessionFilesService } from '@itookit/app-core';
 let cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup = []; });
 async function setup(kernelOverrides: Record<string, unknown> = {}) {

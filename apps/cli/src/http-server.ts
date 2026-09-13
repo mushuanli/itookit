@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import type { CommandOptions } from './commands';
-import { createMindOSRuntime, type MindOSRuntime } from '@itookit/app-core';
+import { createApplicationRuntime, type ApplicationRuntime } from '@itookit/app-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { CliDirectorySourceProvider } from './directories';
 import { resolveProfileRoot } from './mindos';
@@ -62,11 +62,11 @@ export interface HttpServerOptions {
     /** Log every HTTP IPC command, duration and resolved error. */
     debug?: boolean;
     /** Already-initialized MindOS runtime exposed by the HTTP host. */
-    runtime?: MindOSRuntime;
+    runtime?: ApplicationRuntime;
 }
 
 /** Start the browser-accessible MindOS UI backed by the CLI profile. */
-export async function startHttpServer(address: string, options: CommandOptions, runtime?: MindOSRuntime): Promise<void> {
+export async function startHttpServer(address: string, options: CommandOptions, runtime?: ApplicationRuntime): Promise<void> {
     const { host, port } = parseHttpAddress(address);
     const rootDir = resolveProfileRoot(options.profile);
     const homeDir = path.resolve(options.setHome ?? process.cwd());
@@ -88,7 +88,7 @@ export async function startHttpServer(address: string, options: CommandOptions, 
 }
 
 /** Initialize the shared MindOS runtime before the HTTP listener starts. */
-export async function createHttpMindOSRuntime(options: CommandOptions): Promise<MindOSRuntime> {
+export async function createHttpMindOSRuntime(options: CommandOptions): Promise<ApplicationRuntime> {
     const rootDir = resolveProfileRoot(options.profile);
     const backend = await openLocalFSBackend({
         rootDir,
@@ -96,7 +96,7 @@ export async function createHttpMindOSRuntime(options: CommandOptions): Promise<
         createDb: NodeSqliteSidecarDb.open,
     });
     try {
-        return await createMindOSRuntime({
+        return await createApplicationRuntime({
             backend,
             directorySourceProvider: new CliDirectorySourceProvider(rootDir),
             ownerKind: 'cli',

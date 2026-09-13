@@ -73,7 +73,7 @@ Task 展示选择明确字段；不序列化 currentAttempt、租约、资源令
 
 ## 3. 已实现接口与改动
 
-`packages/app-core/src/session/session-browser.ts`（`packages/app-shell/src/files/session-browser.ts` 只是兼容 re-export）：
+`packages/app-core/src/session/session-browser.ts`：
 
 ```ts
 type BrowserTarget =

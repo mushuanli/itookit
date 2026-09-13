@@ -1,4 +1,5 @@
-import { createFileSystemSource, FSError, type FSNode, type IStorageBackend } from '@itookit/vfs-core';
+import { createFileSystemSource, type FSNode, type IStorageBackend } from '@itookit/vfs-core';
+import { DirectorySourceUnavailableError } from './errors';
 
 /** Retains a mount's identity while failing every content operation closed. */
 class UnavailableDirectory implements IStorageBackend {
@@ -8,7 +9,8 @@ class UnavailableDirectory implements IStorageBackend {
         if (path !== '/') throw this.error();
         return { type: 'directory', path: '/', parentPath: null, name: '', createdAt: 0, modifiedAt: 0, version: 0, tags: [], metadata: { unavailable: true } };
     }
-    private error() { return new FSError('EACCES', '目录来源不可用，请重新连接'); }
+    constructor(private readonly sourceId: string) {}
+    private error() { return new DirectorySourceUnavailableError(this.sourceId); }
     async list(): Promise<FSNode[]> { throw this.error(); }
     async read(): Promise<Uint8Array> { throw this.error(); }
     async write(): Promise<FSNode> { throw this.error(); }
@@ -20,5 +22,5 @@ class UnavailableDirectory implements IStorageBackend {
     async getAllTags(): Promise<string[]> { return []; }
 }
 export function createUnavailableDirectory(sourceId: string) {
-    return createFileSystemSource({ tags: false, backend: new UnavailableDirectory(), viewId: `unavailable:${sourceId}`, access: 'ro' });
+    return createFileSystemSource({ tags: false, backend: new UnavailableDirectory(sourceId), viewId: `unavailable:${sourceId}`, access: 'ro' });
 }

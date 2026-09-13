@@ -27,7 +27,9 @@
     "@itookit/device-llm": "workspace:*"
   },
   "devDependencies": {
+    "@itookit/vfsdriver-indexeddb": "workspace:*",
     "@types/node": "^20.19.25",
+    "fake-indexeddb": "^6.0.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }

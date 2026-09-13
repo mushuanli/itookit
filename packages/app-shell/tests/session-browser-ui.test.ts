@@ -2,9 +2,9 @@
 import { expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
-import { SessionFilesService } from '../src/files/session-files';
-import { DirectoryMountService } from '../src/files/directory-mounts';
-import { createSessionAttachmentMounts } from '../src/files/session-attachments';
+import { SessionFilesService } from '@itookit/app-core';
+import { DirectoryMountService } from '@itookit/app-core';
+import { createSessionAttachmentMounts } from '@itookit/app-core';
 import { SessionWorkbench } from '../src/core/SessionWorkbench';
 
 it('routes a real vfs-ui tree to chat, Task history and the Session mapped file context', async () => {

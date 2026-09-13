@@ -1,5 +1,5 @@
-import type { DirectoryMountService } from './directory-mounts';
-import type { SessionFilesService } from './session-files';
+import type { DirectoryMountService, SessionFilesService } from '@itookit/app-core';
+import { localizeMountError } from './localize-mount-error';
 
 /** One host dialog for sidebar and slash entry points. No Agent-accessible source browser. */
 export function showMountDialog(service: DirectoryMountService, files: SessionFilesService, sessionId: string,
@@ -21,7 +21,10 @@ export function showMountDialog(service: DirectoryMountService, files: SessionFi
         const close = () => { if (!busy) { signal?.removeEventListener('abort', abort); dialog.remove(); resolve(changed); } };
         const run = async (fn: () => Promise<void>) => {
             if (busy) return; busy = true; dialog.querySelectorAll('button').forEach(button => { button.disabled = true; });
-            try { await fn(); } catch (error) { status.textContent = error instanceof Error ? error.message : String(error); }
+            try { await fn(); } catch (error) {
+                const localized = localizeMountError(error);
+                status.textContent = localized instanceof Error ? localized.message : String(localized);
+            }
             finally { busy = false; dialog.querySelectorAll('button').forEach(button => { button.disabled = false; }); }
         };
         const action = (label: string, fn: () => void) => { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.onclick = fn; buttons.append(button); };

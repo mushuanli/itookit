@@ -1,9 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
-import { SessionFilesService } from '../src/files/session-files';
-import { createSessionAttachmentMounts } from '../src/files/session-attachments';
-import { DirectoryMountService } from '../src/files/directory-mounts';
+import { SessionFilesService } from '@itookit/app-core';
+import { createSessionAttachmentMounts } from '@itookit/app-core';
+import { DirectoryMountService } from '@itookit/app-core';
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 async function setup() {

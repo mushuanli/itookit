@@ -1,0 +1,80 @@
+import { createVFS, MemoryBackend, type IFileSystem, type IStorageBackend, type IVFSManager, type MountOptions } from '@itookit/vfs-core';
+import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/device-llm';
+import { t, traceBoot, type ILLMLogger } from '@itookit/common';
+
+export interface ApplicationInfrastructureOptions {
+    backend: IStorageBackend;
+    additionalMounts?: Array<{ path: string; backend: IStorageBackend; options?: MountOptions }>;
+    llmLogger?: ILLMLogger;
+    codexTransport?: CodexAppServerTransport;
+    onProgress?(message: string): void;
+}
+
+export interface ApplicationInfrastructure {
+    vfs: IVFSManager;
+    /** Root filesystem view shared by every Session-independent service. */
+    systemFS: IFileSystem;
+    llmDriver: LLMDeviceDriver;
+    /** Dump and reset VFS I/O counters, for identifying redundant reads/writes. */
+    logIO(label: string): void;
+    /** Close the injected Codex transport, when the host provided one. */
+    closeCodexTransport?(): void | Promise<void>;
+}
+
+/**
+ * Build the platform-independent stores every later step depends on: the VFS (with the
+ * `/run` scratch mount) and the LLM device driver registered as a VFS device.
+ * Hosts still own the cleanup order: the returned VFS must be disposed last.
+ */
+export async function createInfrastructure(options: ApplicationInfrastructureOptions): Promise<ApplicationInfrastructure> {
+    const logStep = (label: string) => { console.log(`[Boot] ${label}`); options.onProgress?.(label); };
+    logStep(t('boot.filesystem'));
+    const { manager: vfs } = await traceBoot('createVFS', () => createVFS({
+        rootBackend: options.backend,
+        additionalMounts: [...(options.additionalMounts ?? []), { path: '/run', backend: new MemoryBackend() }],
+    }));
+    const logIO = (label: string): void => {
+        try {
+            const stats = vfs.ioStats;
+            console.log(`[Boot]   ↳ IO after ${label}: stat=${stats.stat} list=${stats.list} read=${stats.read} write=${stats.write} mkdir=${stats.mkdir} delete=${stats.delete} rename=${stats.rename}`);
+            vfs.resetIOStats();
+        } catch { /* ignore */ }
+    };
+    try {
+        return await initializeDevices(options, vfs, logStep, logIO);
+    } catch (error) {
+        const errors: unknown[] = [error];
+        for (const close of [() => options.codexTransport?.close?.(), () => vfs.dispose()]) {
+            try { await close(); } catch (cleanupError) { errors.push(cleanupError); }
+        }
+        if (errors.length > 1) throw new AggregateError(errors, 'Infrastructure startup and cleanup failed');
+        throw error;
+    }
+}
+
+async function initializeDevices(options: ApplicationInfrastructureOptions, vfs: IVFSManager,
+    logStep: (label: string) => void, logIO: (label: string) => void): Promise<ApplicationInfrastructure> {
+    logIO('createVFS');
+
+    logStep(t('boot.llmDriver'));
+    const llmDriver = new LLMDeviceDriver(vfs, { llmLogger: options.llmLogger, codexTransport: options.codexTransport });
+    let started = performance.now();
+    await traceBoot('llmDriver.init', () => llmDriver.init());
+    console.log(`[Boot]   ↳ llmDriver.init: +${(performance.now() - started).toFixed(0)}ms`);
+    vfs.devices.register(llmDriver);
+    started = performance.now();
+    await traceBoot('llmDriver.createDeviceNodes', () => llmDriver.createDeviceNodes());
+    console.log(`[Boot]   ↳ createDeviceNodes: +${(performance.now() - started).toFixed(0)}ms`);
+    vfs.devices.freeze();
+    logIO('LLM driver');
+
+    // Warm the fixed user layout so later projections do not race their first read.
+    for (const path of ['/home/admin/chats', '/home/admin/notes', '/home/admin/projects', '/home/admin/.config']) {
+        await vfs.openFileSystem(path);
+    }
+    const systemFS = await vfs.openFileSystem('/');
+    return {
+        vfs, systemFS, llmDriver, logIO,
+        ...(options.codexTransport?.close ? { closeCodexTransport: () => options.codexTransport!.close!() } : {}),
+    };
+}

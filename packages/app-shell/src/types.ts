@@ -110,9 +110,9 @@ export interface AppUI {
 }
 
 export interface AppOptions {
-    directorySourceProvider?: import('./files/directory-mounts').DirectorySourceProvider;
+    directorySourceProvider?: import('@itookit/app-core').DirectorySourceProvider;
     /** Host registration/configuration of durable Session file grants. */
-    configureSessionFiles?(files: import('./files/session-files').SessionFilesService): Promise<void> | void;
+    configureSessionFiles?(files: import('@itookit/app-core').SessionFilesService): Promise<void> | void;
     /** Primary storage backend (IndexedDB, LocalFS, InMemory, etc.). Required for local mode. */
     backend?: IStorageBackend;
     /** Pre-created runtime. When supplied, app-shell only mounts UI and never creates a local runtime. */
@@ -148,7 +148,7 @@ export interface AppHandle {
     /** Host-owned resources close with the application, in reverse registration order. */
     onDestroy(cleanup: () => void | Promise<void>, phase?: 'consumers' | 'sources'): void;
     vfs: IVFSManager;
-    sessionFiles: import('./files/session-files').SessionFilesService;
+    sessionFiles: import('@itookit/app-core').SessionFilesService;
     runtime: ApplicationRuntime;
 }
 

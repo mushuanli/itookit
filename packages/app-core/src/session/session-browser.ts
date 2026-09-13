@@ -1,3 +1,4 @@
+import { t } from '@itookit/common';
 import { createFileSystemSource, FSError, normalizeVirtualPath, type FSNode, type IStorageBackend } from '@itookit/vfs-core';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { EventEnvelope, Kernel, TaskRecord } from '@itookit/durable-kernel';
@@ -154,7 +155,7 @@ class BrowserBackend implements IStorageBackend {
         try { manifest = await this.deps.repository.getManifest(target.sessionId); }
         catch (error) { if (error instanceof FSError && error.code === 'ENOENT') return null; throw error; }
         if (target.kind === 'session') return this.sessionNode(manifest);
-        if (target.kind === 'tasks') return this.node(path, path.endsWith('/@more') ? '更多任务（打开分页列表）' : 'tasks', !path.endsWith('/@more'), 0, true);
+        if (target.kind === 'tasks') return this.node(path, path.endsWith('/@more') ? t('session.tasks.more') : 'tasks', !path.endsWith('/@more'), 0, true);
         if (target.kind === 'task') {
             const task = await this.deps.kernel.task(target.sessionId, target.taskId);
             return this.node(path, `${task.program.kind} · ${task.status} · ${task.id}`, false, task.updatedAt, true);
@@ -191,7 +192,7 @@ class BrowserBackend implements IStorageBackend {
             if (!exists) return [];
             const page = await this.deps.kernel.listSessionTaskPage(target.sessionId);
             const nodes = page.items.map(t => this.node(`${path}/${t.id}`, `${t.program.kind} · ${t.status} · ${t.id}`, false, t.updatedAt, true));
-            if (page.nextAfterIndex !== undefined) nodes.push(this.node(`${path}/@more`, '更多任务（打开分页列表）', false, 0, true));
+            if (page.nextAfterIndex !== undefined) nodes.push(this.node(`${path}/@more`, t('session.tasks.more'), false, 0, true));
             return nodes;
         }
         if (target.kind === 'files') {

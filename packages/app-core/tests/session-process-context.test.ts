@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { IDeviceDriver } from '@itookit/vfs-core';
 import { createKernelAdaptersRuntime } from '@itookit/kernel-adapters';
-import { acquireSessionProcessContext } from '../src/files/session-process-context';
+import { acquireSessionProcessContext } from '@itookit/app-core';
 
 function files() {
     const release = vi.fn(async () => {});

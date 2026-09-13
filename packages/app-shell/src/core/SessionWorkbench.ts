@@ -1,14 +1,15 @@
+import { localizeMountError } from '../files/localize-mount-error';
 import { showMountDialog } from '../files/mount-dialog';
-import type { DirectoryMountService } from '../files/directory-mounts';
+import type { DirectoryMountService } from '@itookit/app-core';
 import type { EditorFactory, IEditor, EditorHostContext } from '@itookit/ui-common';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { Kernel } from '@itookit/durable-kernel';
 import { createVFSUI, type VFSUIShell } from '@itookit/vfs-ui';
 import { createFileSystemView, type FileSystemContextOwner, type FileSystemView, type FileSystemSourceOwner } from '@itookit/vfs-core';
-import type { SessionFilesService } from '../files/session-files';
-import { createSessionBrowser, exportSessionBundle, resolveBrowserTarget, taskSummary, taskKeyEvent } from '../files/session-browser';
-import { parseSessionRoute, sessionRoute } from '../files/session-route';
-import type { WorkspaceController } from './WorkspaceController';
+import type { SessionFilesService } from '@itookit/app-core';
+import { createSessionBrowser, exportSessionBundle, resolveBrowserTarget, taskSummary, taskKeyEvent } from '@itookit/app-core';
+import { parseSessionRoute, sessionRoute } from '@itookit/app-core';
+import type { WorkspaceController } from '@itookit/app-core';
 
 /** Sidebar refresh tracing — enable with localStorage['vfs:debug']='1' (same flag as vfs-ui). */
 function debugEnabled(): boolean {
@@ -191,12 +192,16 @@ export class SessionWorkbench implements WorkspaceController {
                             hostContext: { ...this.hostContext!, directoryCommands: this.directoryMounts ? {
                                 addDirectory: async (directory, access) => {
                                     if (!directory) { await this.manageMounts(target.sessionId); return '挂载管理已关闭'; }
-                                    const result = await this.directoryMounts!.addDirectory(target.sessionId, directory, access);
-                                    await this.reloadAfterMount(target.sessionId); return result;
+                                    try {
+                                        const result = await this.directoryMounts!.addDirectory(target.sessionId, directory, access);
+                                        await this.reloadAfterMount(target.sessionId); return result;
+                                    } catch (error) { throw localizeMountError(error); }
                                 },
                                 setHome: async directory => {
-                                    if (directory) { const result = await this.directoryMounts!.setHome(directory); await this.reloadAfterMount(target.sessionId); return result; }
-                                    if (await showMountDialog(this.directoryMounts!, this.files, target.sessionId, 'home', this.dialogs.signal)) await this.reloadAfterMount(target.sessionId); return '默认目录设置已关闭';
+                                    try {
+                                        if (directory) { const result = await this.directoryMounts!.setHome(directory); await this.reloadAfterMount(target.sessionId); return result; }
+                                        if (await showMountDialog(this.directoryMounts!, this.files, target.sessionId, 'home', this.dialogs.signal)) await this.reloadAfterMount(target.sessionId); return '默认目录设置已关闭';
+                                    } catch (error) { throw localizeMountError(error); }
                                 },
                             } : undefined, toggleSidebar: () => this.sidebarUI?.toggleSidebar() } });
                     } else {

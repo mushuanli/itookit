@@ -110,7 +110,7 @@ await source.dispose();
 
 VFS 基础系统保留目录为 `/etc`、`/dev`。`/var/lib/kernel`、`/var/lib/sessions`（含跨 Session 的 `folders.seq` 文件夹索引）、`/home/admin` 和易失 `/run` 由平台/应用启动装配，不能把完整 MindOS 布局归因于 VFS 工厂。
 
-Session 默认只暴露 `/attachments`，显式授权后增加 `/workspace` 等根下一层挂载。history、credentials、Kernel 记录不投影到用户文件上下文。Session 配置 CAS、draining 状态下重启后的拒绝访问和任务执行期间禁止重配由 `app-core` 的 SessionFilesService 管理（`packages/app-core/src/vfs/session-files.ts`，app-shell 仅 re-export），详见 C4 规范。
+Session 默认只暴露 `/attachments`，显式授权后增加 `/workspace` 等根下一层挂载。history、credentials、Kernel 记录不投影到用户文件上下文。Session 配置 CAS、draining 状态下重启后的拒绝访问和任务执行期间禁止重配由 `app-core` 的 SessionFilesService 管理（`packages/app-core/src/vfs/session-files.ts`，app-shell 仅做 UI 装配），详见 C4 规范。
 
 ## 5. Path-based 存储后端
 
@@ -194,7 +194,7 @@ ConfigService 使用注入的 `/etc` 来源，有 records 时用 `.seq`，否则
 
 ## 9. 验证与未覆盖边界
 
-当前测试位于 `packages/vfs-core/tests`：01–12 覆盖 CRUD、目录、assets/tags/refs/seq、链接、事务、搜索、事件、挂载和配置；18–22 覆盖 pipe、回归、组合视图、复制、归档与生命周期。IndexedDB 和 LocalFS 测试位于各自包，平台 Session 装配测试在 app-shell。
+当前测试位于 `packages/vfs-core/tests`：01–12 覆盖 CRUD、目录、assets/tags/refs/seq、链接、事务、搜索、事件、挂载和配置；18–22 覆盖 pipe、回归、组合视图、复制、归档与生命周期。IndexedDB 和 LocalFS 测试位于各自包，平台无关 Session 服务测试在 app-core，宿主 UI 装配测试在 app-shell。
 
 重点验收不止“能读写”：包括路径逃逸、只读写入、旧句柄撤销、来源关闭、records 坐标、事务回滚、搜索和事件信息泄漏、挂载覆盖及应用退出顺序。最新执行结果记录在 [核验清单](../deprecated/implementation-audit.md)，历史结果见 [实现状态](vfs-implementation-status.md)。
 

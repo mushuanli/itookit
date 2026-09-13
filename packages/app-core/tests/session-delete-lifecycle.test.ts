@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { Kernel } from '@itookit/durable-kernel';
 import { SessionDirectoryStorageResolver, SessionRepository, sessionDirectoryStorage } from '@itookit/llm-session';
-import { SessionLifecycleService } from '../src/files/session-browser';
+import { SessionLifecycleService } from '@itookit/app-core';
 
 let cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup = []; });

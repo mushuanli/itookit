@@ -340,9 +340,15 @@ importers:
         specifier: workspace:*
         version: link:../vfs-core
     devDependencies:
+      '@itookit/vfsdriver-indexeddb':
+        specifier: workspace:*
+        version: link:../vfsdriver-indexeddb
       '@types/node':
         specifier: ^20.19.25
         version: 20.19.43
+      fake-indexeddb:
+        specifier: ^6.0.0
+        version: 6.2.5
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

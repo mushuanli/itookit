@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { registerDurablePrograms } from '@itookit/llm-flow';
 import {
     createRunDefinitionFromFlow,
     parseSessionRoute,
     RunCatalog,
     toDagRunSpec,
-    registerKernelPrograms,
     resolveMindOSProfile,
     sessionRoute,
     syncSkillsToKernel,
@@ -29,8 +29,8 @@ describe('app-core shared headless services', () => {
                 programs.set(`${program.manifest.kind}@${program.manifest.version}`, program);
             },
         };
-        registerKernelPrograms(kernel as never);
-        registerKernelPrograms(kernel as never);
+        registerDurablePrograms(kernel as never);
+        registerDurablePrograms(kernel as never);
         expect([...programs.keys()].sort()).toEqual([
             'flow.aggregate@1',
             'flow.human@1',

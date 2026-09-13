@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSessionRoute, sessionRoute } from '../src/files/session-route';
+import { parseSessionRoute, sessionRoute } from '@itookit/app-core';
 
 describe('Session branch route identity', () => {
     it('round trips branch names through the outer shell URI encoding', () => {

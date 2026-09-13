@@ -1,3 +1,4 @@
+export { DirectorySourceUnavailableError, SessionUnfinishedTasksError } from './vfs/errors';
 export { SessionFilesService } from './vfs/session-files';
 export type { SessionMountRecord, FilesRecord } from './vfs/session-files';
 export { DirectoryMountService } from './vfs/directory-mounts';
@@ -20,7 +21,6 @@ export { PrivilegedCommandService } from './kernel/privileged-command-service';
 export type { WorkspaceController } from './core/WorkspaceController';
 export { createKernelRuntime } from './runtime/create-kernel-runtime';
 export type { CreateKernelRuntimeOptions, HeadlessKernelRuntime } from './runtime/create-kernel-runtime';
-export { registerDurablePrograms as registerKernelPrograms } from '@itookit/llm-flow';
 export { syncSkillsToKernel } from './kernel/sync-skills';
 export type { SkillSourceDriver, KernelSkillCatalog } from './kernel/sync-skills';
 export { MINDOS_CONFIG_FILE, resolveMindOSProfile } from './profile/mindos-profile';
@@ -46,5 +46,3 @@ export type { RunCatalogEntry } from './run/run-catalog';
 
 export { createApplicationRuntime } from './runtime/create-application-runtime';
 export type { ApplicationRuntime, ApplicationRuntimeOptions, ApplicationKernelPlatform } from './runtime/create-application-runtime';
-export { createApplicationRuntime as createMindOSRuntime } from './runtime/create-application-runtime';
-export type { ApplicationRuntime as MindOSRuntime, ApplicationRuntimeOptions as CreateMindOSRuntimeOptions, ApplicationKernelPlatform as MindOSKernelPorts } from './runtime/create-application-runtime';

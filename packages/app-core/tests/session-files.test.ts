@@ -2,8 +2,8 @@ import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createVFS, createFileSystemView } from '@itookit/vfs-core';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
-import { SessionFilesService } from '../src/files/session-files';
-import { createSessionAttachmentMounts } from '../src/files/session-attachments';
+import { SessionFilesService } from '@itookit/app-core';
+import { createSessionAttachmentMounts } from '@itookit/app-core';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
