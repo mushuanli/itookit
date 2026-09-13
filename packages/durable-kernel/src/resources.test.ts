@@ -437,6 +437,22 @@ describe('simple durable resource facade', () => {
         expect((await task.status()).task.state).toBeUndefined();
         await expect(task.resources.request('session:s1', 'new').poll()).rejects.toThrow('not found');
     });
+    it('refuses a Decision resource write whose authority epoch was superseded', async () => {
+        await s1.resources.claimAuthority('decision-authority', { ownerId: 'leader-a' });
+        const runner = worker(1);
+        runner.registerProgram({ manifest: { kind: 'fenced-write', version: '1' }, init() {
+            return { state: 'must-not-commit', actions: [{ type: 'resource', command: { type: 'create', requestId: 'fenced', kind: 'pool',
+                name: 'fenced', capacity: 1, authority: { authorityId: 'decision-authority', epoch: 1 } } }], next: { type: 'continue' } };
+        }, reduce() { throw new Error('unreachable'); } });
+        await runner.initialize();
+        const s = await runner.openSession(s1.id);
+        await s.resources.claimAuthority('decision-authority', { ownerId: 'leader-b', expectedEpoch: 1 });
+        const task = await s.spawn({ program: { kind: 'fenced-write', version: '1' }, input: null, retry: { maxAttempts: 1 } });
+        const settled = await task.wait({ timeoutMs: 2000 });
+        expect(settled.status).toBe('failed');
+        expect(settled.error?.message).toContain('Authority epoch conflict');
+        await expect(task.resources.request('session:s1', 'fenced').poll()).rejects.toThrow('not found');
+    });
     it('recovers a Task waiting for capacity and delivers its result once after replacement', async () => {
         const { pool, h1 } = await poolHandles();
         const held = await result(s1.resources.acquire(h1, { requestId: 'hold', quantity: 1 }));
@@ -519,6 +535,159 @@ describe('simple durable resource facade', () => {
         await result(kernel.resources.share(pool.ref, { requestId: 'allow', toSessionId: other.id, rights: ['execute'] }));
         await expect(other.resources.open(pool.ref, { requestId: 'open', taskId: task.id, rights: ['execute'], name: 'pool' })).rejects.toThrow('Cross-backend');
         expect(await other.resources.list()).toEqual([]);
+    });
+    it('fences a superseded authority leader by the ownerEpoch it presents', async () => {
+        const first = await kernel.resources.claimAuthority('browser-authority', { ownerId: 'leader-a' });
+        expect(first).toMatchObject({ authorityId: 'browser-authority', ownerEpoch: 1, ownerId: 'leader-a', status: 'active' });
+        const pool = await result(kernel.resources.create({ requestId: 'a-create', kind: 'pool', name: 'browser', capacity: 1,
+            authority: { authorityId: 'browser-authority', epoch: 1 } }));
+        expect(pool.ref.scope).toBe('kernel');
+
+        await expect(kernel.resources.claimAuthority('browser-authority', { ownerId: 'leader-b', expectedEpoch: 7 }))
+            .rejects.toThrow('Authority epoch conflict: browser-authority is owned by leader-a at epoch 1');
+        const second = await kernel.resources.claimAuthority('browser-authority', { ownerId: 'leader-b', expectedEpoch: 1 });
+        expect(second.ownerEpoch).toBe(2);
+
+        // The superseded leader's new write is refused; the current leader's write succeeds.
+        await expect(result(kernel.resources.create({ requestId: 'a-stale', kind: 'shared', name: 'stale',
+            authority: { authorityId: 'browser-authority', epoch: 1 } })))
+            .rejects.toThrow('Authority epoch conflict: browser-authority is owned by leader-b at epoch 2');
+        await expect(result(kernel.resources.create({ requestId: 'b-unknown', kind: 'shared', name: 'unknown',
+            authority: { authorityId: 'nobody', epoch: 1 } }))).rejects.toThrow('Unknown authority nobody');
+        const shared = await result(kernel.resources.create({ requestId: 'b-create', kind: 'shared', name: 'current', value: 1,
+            authority: { authorityId: 'browser-authority', epoch: 2 } }));
+        expect(shared).toMatchObject({ kind: 'shared', name: 'current' });
+
+        // An accepted request replays its recorded result instead of being re-fenced.
+        const replay = await result(kernel.resources.create({ requestId: 'a-create', kind: 'pool', name: 'browser', capacity: 1,
+            authority: { authorityId: 'browser-authority', epoch: 1 } }));
+        expect(replay.ref).toEqual(pool.ref);
+        expect(await kernel.resources.authority('browser-authority')).toMatchObject({ ownerEpoch: 2, ownerId: 'leader-b' });
+    });
+
+    it.each(['missing', 'substituted', 'stale'] as const)('rejects %s authority on bound resource mutations after reconstruction', async mode => {
+        await s1.resources.claimAuthority('owner', {});
+        await s1.resources.claimAuthority('other', {});
+        const authority = { authorityId: 'owner', epoch: 1 };
+        const resource = await result(s1.resources.create({ requestId: 'bound', kind: 'shared', name: 'bound', value: 0, authority }));
+        const task = await s1.spawn(spec);
+        const handle = await result(s1.resources.open(resource.ref, { requestId: 'open-bound', taskId: task.id, name: 'bound', rights: ['read', 'write'], authority }));
+        const written = await result(s1.resources.write(handle, { requestId: 'accepted', expectedVersion: 1, value: 1, authority }));
+        const reopened = worker(); await reopened.initialize();
+        const session = await reopened.openSession('s1');
+        await session.resources.claimAuthority('owner', { expectedEpoch: 1 });
+        const fence = mode === 'missing' ? {} : { authority: { authorityId: mode === 'substituted' ? 'other' : 'owner', epoch: 1 } };
+        const message = mode === 'stale' ? 'Authority epoch conflict' : 'Resource authority mismatch';
+        await expect(result(session.resources.write(handle, { requestId: 'bad-write', expectedVersion: 2, value: 99, ...fence }))).rejects.toThrow(message);
+        await expect(result(session.resources.share(resource.ref, { requestId: 'bad-share', toSessionId: 's2', rights: ['read'], ...fence }))).rejects.toThrow(message);
+        await expect(result(session.resources.destroy(resource.ref, { requestId: 'bad-destroy', expectedVersion: 2, ...fence }))).rejects.toThrow(message);
+        await expect(result(session.resources.close(handle, { requestId: 'bad-close', ...fence }))).rejects.toThrow(message);
+        expect(await result(s1.resources.write(handle, { requestId: 'accepted', expectedVersion: 1, value: 1, authority }))).toEqual(written);
+        expect(await result(session.resources.read(handle, { requestId: 'read-bound' }))).toMatchObject({ value: 1, version: 2 });
+        expect(await result(session.resources.write(handle, { requestId: 'current', expectedVersion: 2, value: 2,
+            authority: { authorityId: 'owner', epoch: 2 } }))).toMatchObject({ value: 2, version: 3, authorityId: 'owner' });
+    });
+
+    it('fences queued allocation after authority takeover without losing held capacity', async () => {
+        await s1.resources.claimAuthority('pool-owner', {});
+        const authority = { authorityId: 'pool-owner', epoch: 1 };
+        const pool = await result(s1.resources.create({ requestId: 'bound-pool', kind: 'pool', name: 'pool', capacity: 1, authority }));
+        const task = await s1.spawn(spec);
+        await expect(result(s1.resources.open(pool.ref, { requestId: 'missing-open', taskId: task.id, name: 'bad', rights: ['execute'] })))
+            .rejects.toThrow('Resource authority mismatch');
+        const handle = await result(s1.resources.open(pool.ref, { requestId: 'pool-open', taskId: task.id, name: 'pool', rights: ['execute'], authority }));
+        const held = await result(s1.resources.acquire(handle, { requestId: 'hold-bound', quantity: 1, authority }));
+        const waiting = await s1.resources.acquire(handle, { requestId: 'wait-bound', quantity: 1, authority });
+        expect((await waiting.poll()).status).toBe('pending');
+        await s1.resources.claimAuthority('pool-owner', { expectedEpoch: 1 });
+        await expect(result(s1.resources.release(held, { requestId: 'missing-release' }))).rejects.toThrow('Resource authority mismatch');
+        await expect(result(s1.resources.acquire(handle, { requestId: 'missing-acquire', quantity: 1 }))).rejects.toThrow('Resource authority mismatch');
+        await expect(result(s1.resources.revoke(pool.ref, { requestId: 'missing-revoke', toSessionId: 's2', expectedRevision: 0 })))
+            .rejects.toThrow('Resource authority mismatch');
+        const current = { authorityId: 'pool-owner', epoch: 2 };
+        await result(s1.resources.release(held, { requestId: 'current-release', authority: current }));
+        expect(await waiting.poll()).toMatchObject({ status: 'failed', error: expect.stringContaining('Authority epoch conflict') });
+        expect(await result(s1.resources.acquire(handle, { requestId: 'current-acquire', quantity: 1, authority: current })))
+            .toMatchObject({ quantity: 1, released: false });
+    });
+
+    it('upgrades authority stores to schema 3 and preserves the gate on ordinary writes', async () => {
+        await result(s1.resources.create({ requestId: 'legacy', kind: 'shared', name: 'legacy' }));
+        expect(await fs.meta.seq!.getEntry('/s1/resources.seq', 'managed/schema')).toBe('2');
+        await s1.resources.claimAuthority('gated', {});
+        expect(await fs.meta.seq!.getEntry('/s1/resources.seq', 'managed/schema')).toBe('3');
+        await result(s1.resources.create({ requestId: 'ordinary', kind: 'shared', name: 'ordinary' }));
+        expect(await fs.meta.seq!.getEntry('/s1/resources.seq', 'managed/schema')).toBe('3');
+        const reopened = worker(); await reopened.initialize();
+        expect(await (await reopened.openSession('s1')).resources.authority('gated')).toMatchObject({ ownerEpoch: 1 });
+    });
+
+    it('allows only one concurrent takeover of an observed authority epoch', async () => {
+        await kernel.resources.claimAuthority('contended', {});
+        const reopened = worker(); await reopened.initialize();
+        const attempts = await Promise.allSettled([
+            kernel.resources.claimAuthority('contended', { expectedEpoch: 1, ownerId: 'a' }),
+            reopened.resources.claimAuthority('contended', { expectedEpoch: 1, ownerId: 'b' }),
+        ]);
+        expect(attempts.filter(a => a.status === 'fulfilled')).toHaveLength(1);
+        expect(attempts.filter(a => a.status === 'rejected')).toHaveLength(1);
+        expect(await reopened.resources.authority('contended')).toMatchObject({ ownerEpoch: 2 });
+    });
+
+    it('keeps the authority binding fixed to the first claim and survives Kernel reconstruction', async () => {
+        expect(await kernel.resources.authority('shared-pool')).toBeUndefined();
+        await kernel.resources.claimAuthority('shared-pool', { ownerId: 'leader-a', serviceEndpoint: 'unix:///run/pool' });
+        expect(await kernel.resources.authority('shared-pool')).toMatchObject({ ownerEpoch: 1, serviceEndpoint: 'unix:///run/pool' });
+        expect((await kernel.resources.authority('shared-pool'))!.binding).toBeTruthy();
+
+        // A store that does not hold the record cannot take it over, and a takeover that
+        // declares a different storage binding is refused: the first claim fixes the binding.
+        await expect(s1.resources.claimAuthority('shared-pool', { ownerId: 'leader-b', expectedEpoch: 1 }))
+            .rejects.toThrow('Unknown authority shared-pool');
+        await expect(kernel.resources.claimAuthority('shared-pool', { ownerId: 'leader-b', expectedEpoch: 1, binding: 'other-store' }))
+            .rejects.toThrow('bound to another storage binding');
+
+        const reopened = worker(); await reopened.initialize();
+        expect(await reopened.resources.authority('shared-pool')).toMatchObject({ ownerEpoch: 1, ownerId: 'leader-a' });
+        const taken = await reopened.resources.claimAuthority('shared-pool', { ownerId: 'leader-b', expectedEpoch: 1 });
+        expect(taken).toMatchObject({ ownerEpoch: 2, ownerId: 'leader-b', serviceEndpoint: 'unix:///run/pool' });
+        await expect(kernel.resources.claimAuthority('shared-pool', { ownerId: 'leader-a', expectedEpoch: 1 }))
+            .rejects.toThrow('Authority epoch conflict: shared-pool is owned by leader-b at epoch 2');
+    });
+
+    it('refuses Session authority takeover outside its own scope', async () => {
+        await kernel.resources.claimAuthority('service', { ownerId: 'host' });
+        await s2.resources.claimAuthority('service', { ownerId: 's2-host' });
+        for (const scope of ['kernel', 'session:s2']) {
+            await expect(s1.resources.claimAuthority('service', { scope, ownerId: 'intruder', expectedEpoch: 1 }))
+                .rejects.toThrow('Authority scope denied');
+        }
+        expect(await kernel.resources.authority('service')).toMatchObject({ ownerId: 'host', ownerEpoch: 1 });
+        expect(await s2.resources.authority('service')).toMatchObject({ ownerId: 's2-host', ownerEpoch: 1 });
+    });
+
+    it('refuses authority epoch overflow without changing the record', async () => {
+        const initial = await kernel.resources.claimAuthority('limit', { ownerId: 'host' });
+        const path = '/kernel/resources.seq', key = 'managed/authority/limit';
+        const saved = { ...initial, ownerEpoch: Number.MAX_SAFE_INTEGER };
+        await fs.meta.seq!.setEntry(path, key, JSON.stringify(saved));
+        await expect(kernel.resources.claimAuthority('limit', { ownerId: 'next', expectedEpoch: Number.MAX_SAFE_INTEGER }))
+            .rejects.toThrow('Authority epoch exhausted');
+        expect(await kernel.resources.authority('limit')).toEqual(saved);
+    });
+
+    it('rejects invalid authority claims and epoch presentations', async () => {
+        await expect(kernel.resources.claimAuthority('  ', { ownerId: 'a' })).rejects.toThrow('Resource identity/name is required');
+        await expect(kernel.resources.claimAuthority('auth', { ownerId: '' })).rejects.toThrow('Resource identity/name is required');
+        await expect(kernel.resources.claimAuthority('auth', { expectedEpoch: -1 })).rejects.toThrow('non-negative safe integer');
+        await expect(kernel.resources.claimAuthority('auth', { expectedEpoch: 0 })).rejects.toThrow('the first claim takes no expected epoch');
+        await expect(result(kernel.resources.create({ requestId: 'bad-epoch', kind: 'shared', name: 'x',
+            authority: { authorityId: 'auth', epoch: 0 } }))).rejects.toThrow('positive safe integer');
+        // A Session-scoped authority is owned by that Session's store, independently of the kernel.
+        const session = await s1.resources.claimAuthority('session-authority', { ownerId: 's1-leader' });
+        expect(session.ownerEpoch).toBe(1);
+        expect(await s1.resources.authority('session-authority')).toMatchObject({ ownerEpoch: 1, ownerId: 's1-leader' });
+        expect(await kernel.resources.authority('session-authority')).toBeUndefined();
     });
     it('keeps Session cache usable after the creator Task record is removed', async () => {
         const creator = await s1.spawn(spec), reader = await s1.spawn(spec);

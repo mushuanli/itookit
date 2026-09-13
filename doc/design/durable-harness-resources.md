@@ -207,3 +207,14 @@ authority 是持久逻辑服务，不是创建资源的进程。首次创建固�
 ### 能力资源创建回执
 
 低层 `ResourceSpec`/`TaskResourceSpec` 增加可选 requestId，按 owner Task 隔离。Kernel 以 kind/uri/rights/parentResourceId/parentHandleId/metadata 生成规格指纹，资源、句柄、resource.created 事件和创建回执在同一 resources.seq 事务写入。相同 Task/requestId 和规格重放读取当前资源/句柄，不再创建或追加事件；不同规格冲突。已有撤销状态保留，重放不重新授权。未提供 requestId 的调用沿用每次创建新资源的语义。此处是 LLM/tool 等能力资源入口，不替代 managed pool/shared API 的既有请求协议。
+
+
+## 2026-09-14：托管资源 authority 事务隔离
+
+资源创建时携带 authority 会把 `authorityId` 持久绑定到资源；share/revoke/destroy/open/acquire/release/close/write 必须提交同一 authority 的当前 ownerEpoch，省略、替换身份或旧 epoch 均拒绝。接管以 expectedEpoch CAS 递增，Session 不能接管其他作用域，安全整数溢出拒绝且事务回滚。已完成请求重放原回执；尚未分配的排队申请在接管后失败，已有 claim 保留至明确释放。读取沿用既有授权规则。
+
+首次 claim 将该资源存储升级到 managed/schema=3，后续普通写入不降级；只支持 schema 1/2 的旧 managed-resource 实现拒绝访问。既有未绑定资源保持原行为，不猜测或自动迁移 authority。binding 仅是当前存储内不可变标记，不证明其他独立存储不能建立同名 authority。
+
+本批只完成同一事务存储内的资源命令隔离。物理 adapter 的执行端 token、接管前已开始的外部操作、跨 store 迁移屏障与真实多主机故障矩阵仍待完成，P1-05 保持开放。
+
+隔离提交快照验证：durable-kernel 239、llm-flow 213、llm-session 116、kernel-adapters 111、app-core 92 项通过，共 771 项；Kernel/CLI 类型检查与文档检查通过。资源回归含同存储两个 Kernel 并发 CAS、重建、身份省略/替换、排队接管、schema 升级与 Decision 回滚；不作为真实多进程或物理执行端验收。

@@ -738,3 +738,14 @@ Task 全量列表扫描复用目录扫描时已经读取的 `record`，每个有
 ### 保留与清理 API 批次
 
 `Kernel.pruneSessionMessages(sessionId, before, limit?)` 返回 `{outbox, inbox}`；跨 Session 回收以双方持久结算确认为前提。已终态源恢复只补确认，不重新投递。缓存按 Task/Session 生命周期在同一事务清理，旧 owner 索引事务内重建并校验真实所有者。详见 [Cache 设计](design/durable-harness-cache.md) 与 [Storage 设计](design/durable-harness-storage.md)；自动回归在 `packages/durable-kernel/src/retention.test.ts`。
+
+
+## 2026-09-14：托管资源 authority 事务隔离
+
+资源创建时携带 authority 会把 `authorityId` 持久绑定到资源；share/revoke/destroy/open/acquire/release/close/write 必须提交同一 authority 的当前 ownerEpoch，省略、替换身份或旧 epoch 均拒绝。接管以 expectedEpoch CAS 递增，Session 不能接管其他作用域，安全整数溢出拒绝且事务回滚。已完成请求重放原回执；尚未分配的排队申请在接管后失败，已有 claim 保留至明确释放。读取沿用既有授权规则。
+
+首次 claim 将该资源存储升级到 managed/schema=3，后续普通写入不降级；只支持 schema 1/2 的旧 managed-resource 实现拒绝访问。既有未绑定资源保持原行为，不猜测或自动迁移 authority。binding 仅是当前存储内不可变标记，不证明其他独立存储不能建立同名 authority。
+
+本批只完成同一事务存储内的资源命令隔离。物理 adapter 的执行端 token、接管前已开始的外部操作、跨 store 迁移屏障与真实多主机故障矩阵仍待完成，P1-05 保持开放。
+
+隔离提交快照验证：durable-kernel 239、llm-flow 213、llm-session 116、kernel-adapters 111、app-core 92 项通过，共 771 项；Kernel/CLI 类型检查与文档检查通过。资源回归含同存储两个 Kernel 并发 CAS、重建、身份省略/替换、排队接管、schema 升级与 Decision 回滚；不作为真实多进程或物理执行端验收。

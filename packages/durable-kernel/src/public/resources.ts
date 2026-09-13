@@ -35,6 +35,8 @@ export function resourceApi(store: ManagedResourceStore, actor: ResourceActor): 
         read: (handle, options) => execute({ ...options, handle, type: 'read' }),
         write: (handle, options) => execute({ ...options, handle, type: 'write' }),
         request,
+        claimAuthority: (authorityId, options) => store.claimAuthority(actor, authorityId, options),
+        authority: (authorityId, scope) => store.authority(actor, authorityId, scope),
         stat: ref => store.stat(actor, ref),
         validate: claim => store.validate(actor, claim),
         list: () => store.list(actor),

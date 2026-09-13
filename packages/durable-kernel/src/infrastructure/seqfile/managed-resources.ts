@@ -1,5 +1,5 @@
 import type { ISeqFileTransaction } from '@itookit/vfs-core';
-import type { ManagedResource, ManagedHandle, ResourceClaim, ResourceCommand, ResourceRequestSnapshot, ResourceResult, ManagedResourceRef, ManagedGrant, ResourceCleanup, ManagedResourceAdapter, ResourceCleanupReceipt, ResourceQuery, ResourcePage, ResourceRequestInfo } from '../../domain/resource-api';
+import type { ManagedResource, ManagedHandle, ResourceClaim, ResourceCommand, ResourceRequestSnapshot, ResourceResult, ManagedResourceRef, ManagedGrant, ResourceCleanup, ManagedResourceAdapter, ResourceCleanupReceipt, ResourceQuery, ResourcePage, ResourceRequestInfo, ManagedAuthority, ResourceAuthority, AuthorityClaim } from '../../domain/resource-api';
 import type { ResolvedStorageBinding, ResourceRight } from '../../domain/types';
 import { assertDurableValue } from '../../application/durability';
 import { createId, decode, encode, ensureSeqFile, resourcesPath, transaction } from './seqfile-core';
@@ -40,8 +40,54 @@ async function read<T>(tx: ISeqFileTransaction, path: string, name: string): Pro
 }
 async function schemaTx(tx: ISeqFileTransaction, path: string, create = false) {
     const schema = await tx.getEntry(path, 'managed/schema');
-    if (schema !== null && schema !== '1' && schema !== '2') throw new ResourceCommandError('Unsupported managed resource schema; migration required');
-    if (create && schema !== '2') await tx.setEntry(path, 'managed/schema', '2');
+    if (schema !== null && schema !== '1' && schema !== '2' && schema !== '3') throw new ResourceCommandError('Unsupported managed resource schema; migration required');
+    if (create && (schema === null || schema === '1')) await tx.setEntry(path, 'managed/schema', '2');
+}
+const authorityKey = (id: string) => key('authority', id);
+function requireEpoch(value: number, message: string) {
+    if (!Number.isSafeInteger(value) || value < 0) throw new ResourceCommandError(message);
+}
+/**
+ * CAS the authority `ownerEpoch`. A first claim needs no expected epoch; a takeover must
+ * present the epoch it observed, so two leaders cannot both believe they own the authority.
+ * The local binding marker is immutable. Cross-store exclusivity requires a broker.
+ */
+async function claimAuthorityTx(tx: ISeqFileTransaction, path: string, authorityId: string, claim: AuthorityClaim): Promise<ManagedAuthority> {
+    requireText(authorityId);
+    if (claim.ownerId !== undefined) requireText(claim.ownerId);
+    if (claim.binding !== undefined) requireText(claim.binding);
+    if (claim.serviceEndpoint !== undefined) requireText(claim.serviceEndpoint);
+    if (claim.expectedEpoch !== undefined) requireEpoch(claim.expectedEpoch, 'Authority expected epoch must be a non-negative safe integer');
+    await tx.setEntry(path, 'managed/schema', '3');
+    const recordedBinding = claim.binding ?? path;
+    const current = await read<ManagedAuthority>(tx, path, authorityKey(authorityId));
+    if (!current) {
+        if (claim.expectedEpoch !== undefined) throw new ResourceCommandError(`Unknown authority ${authorityId}; the first claim takes no expected epoch`);
+        const created: ManagedAuthority = { authorityId, ownerEpoch: 1, status: 'active', updatedAt: Date.now(), binding: recordedBinding,
+            ...(claim.ownerId ? { ownerId: claim.ownerId } : {}), ...(claim.serviceEndpoint ? { serviceEndpoint: claim.serviceEndpoint } : {}) };
+        await tx.setEntry(path, authorityKey(authorityId), encode(created));
+        return created;
+    }
+    if (claim.binding !== undefined && current.binding !== undefined && claim.binding !== current.binding)
+        throw new ResourceCommandError(`Authority ${authorityId} is bound to another storage binding; migration requires an explicit switch`);
+    if (claim.expectedEpoch !== current.ownerEpoch)
+        throw new ResourceCommandError(`Authority epoch conflict: ${authorityId} is owned by ${current.ownerId ?? '(unknown)'} at epoch ${current.ownerEpoch}`);
+    if (!Number.isSafeInteger(current.ownerEpoch) || current.ownerEpoch < 1) throw new ResourceCommandError('Invalid authority epoch');
+    if (current.ownerEpoch === Number.MAX_SAFE_INTEGER) throw new ResourceCommandError('Authority epoch exhausted');
+    const next: ManagedAuthority = { ...current, binding: current.binding ?? recordedBinding, ownerEpoch: current.ownerEpoch + 1, updatedAt: Date.now(),
+        ...(claim.ownerId ? { ownerId: claim.ownerId } : {}), ...(claim.serviceEndpoint ? { serviceEndpoint: claim.serviceEndpoint } : {}) };
+    await tx.setEntry(path, authorityKey(authorityId), encode(next));
+    return next;
+}
+/** Refuse a command whose presented epoch no longer owns the authority. */
+async function assertAuthorityEpochTx(tx: ISeqFileTransaction, path: string, fence: ResourceAuthority) {
+    requireText(fence.authorityId);
+    if (!Number.isSafeInteger(fence.epoch) || fence.epoch < 1) throw new ResourceCommandError('Authority epoch must be a positive safe integer');
+    const current = await read<ManagedAuthority>(tx, path, authorityKey(fence.authorityId));
+    if (!current) throw new ResourceCommandError(`Unknown authority ${fence.authorityId}`);
+    if (current.status !== 'active') throw new ResourceCommandError(`Authority ${fence.authorityId} is not active`);
+    if (current.ownerEpoch !== fence.epoch)
+        throw new ResourceCommandError(`Authority epoch conflict: ${fence.authorityId} is owned by ${current.ownerId ?? '(unknown)'} at epoch ${current.ownerEpoch}`);
 }
 async function rows<T>(tx: ISeqFileTransaction, path: string, kind: string): Promise<T[]> {
     const result: T[] = [];
@@ -57,6 +103,10 @@ async function resourceTx(tx: ISeqFileTransaction, p: PreparedResourceCommand, r
     if (ref.scope !== p.scope) throw new ResourceCommandError('Resource scope mismatch');
     const r = await read<StoredResource>(tx, resourcesPath(p.authority.rootPath), key('resource', ref.id));
     if (!r) throw new ResourceCommandError('Managed resource not found');
+    if (r.authorityId !== undefined && p.command.type !== 'read') {
+        if (p.command.authority?.authorityId !== r.authorityId) throw new ResourceCommandError('Resource authority mismatch');
+        await assertAuthorityEpochTx(tx, resourcesPath(p.authority.rootPath), p.command.authority);
+    }
     return r;
 }
 function isOwner(p: PreparedResourceCommand, r: StoredResource) {
@@ -171,6 +221,9 @@ export async function executeResourceTx(tx: ISeqFileTransaction, p: PreparedReso
         if (old.fingerprint && old.fingerprint !== fingerprint(c)) throw new ResourceCommandError('Resource request identity conflict');
         return old;
     }
+    // An accepted request replays its recorded result; only a *new* write is fenced, so a
+    // leader takeover never rewrites facts that the previous leader already committed.
+    if (c.authority) await assertAuthorityEpochTx(tx, path, c.authority);
     const cleanup = c.type === 'release' || c.type === 'close' || c.type === 'destroy' || c.type === 'revoke';
     if (p.actorRoot) {
         await schemaTx(tx, resourcesPath(p.actorRoot), true);
@@ -190,6 +243,7 @@ export async function executeResourceTx(tx: ISeqFileTransaction, p: PreparedReso
             requireText(c.physical.kind); requireText(c.physical.version); requireText(c.physical.externalId);
         }
         const resource: StoredResource = { ref: { id: createId('managed'), scope: p.scope }, kind: c.kind, name: c.name, version: 1, state: 'active',
+            ...(c.authority ? { authorityId: c.authority.authorityId } : {}),
             ...(c.physical ? { physical: c.physical } : {}),
             ...(p.actor.taskId ? { creatorTaskId: p.actor.taskId } : {}),
             ...(c.kind === 'pool' ? { capacity: c.capacity } : { value: c.value ?? null }) };
@@ -502,6 +556,29 @@ export class ManagedResourceStore {
             const path = resourcesPath(p.authority.rootPath);
             return { resource: visible, held: (await claimsTx(tx, path, r.ref.id)).reduce((n, c) => n + c.quantity, 0),
                 waiting: (await rows<RequestRow>(tx, path, 'request')).filter(q => q.status === 'pending' && q.command?.type === 'acquire' && q.command.handle.ref.id === r.ref.id).length };
+        });
+    }
+    async claimAuthority(actor: ResourceActor, authorityId: string, claim: AuthorityClaim = {}): Promise<ManagedAuthority> {
+        claim = structuredClone(claim);
+        const scope = claim.scope ?? resourceScope(actor);
+        if (actor.sessionId && scope !== resourceScope(actor)) throw new ResourceCommandError('Authority scope denied');
+        const b = await this.binding(scope);
+        const local = actor.sessionId ? await this.resolveSession(actor.sessionId) : undefined;
+        if (local && local.fs !== b.fs) throw new ResourceCommandError('Cross-backend resources require a broker; unsupported');
+        const path = resourcesPath(b.rootPath);
+        return transaction(b.fs, async tx => {
+            await schemaTx(tx, path, true);
+            return claimAuthorityTx(tx, path, authorityId, claim);
+        });
+    }
+    async authority(actor: ResourceActor, authorityId: string, scope?: string): Promise<ManagedAuthority | undefined> {
+        const b = await this.binding(scope ?? resourceScope(actor));
+        const local = actor.sessionId ? await this.resolveSession(actor.sessionId) : undefined;
+        if (local && local.fs !== b.fs) throw new ResourceCommandError('Cross-backend resources require a broker; unsupported');
+        const path = resourcesPath(b.rootPath);
+        return transaction(b.fs, async tx => {
+            await schemaTx(tx, path);
+            return read<ManagedAuthority>(tx, path, authorityKey(authorityId));
         });
     }
     async query(actor: ResourceActor, options: ResourceQuery): Promise<ResourcePage> {

@@ -257,3 +257,14 @@ TTY 首次结束信息保持不变，后续结束通知与输出不覆盖；已�
 隔离提交快照：durable-kernel 227、llm-flow 213、llm-session 116、kernel-adapters 111、app-core 92 项通过，共 759 项；Kernel/CLI 类型检查通过。retention.test.ts 覆盖 17 项（含三个 Kernel 重建窗口），不依赖尚未合入的资源 authority、轮询性能或其他协议测试改动。文档检查通过。
 
 P1-05 保持开放：本批不替代真实进程/多主机或旧版本混用测试；重放水位、旧在途消息与强 fencing、独立 provider/跨 Session 缓存、完整 GC 故障矩阵仍待完成。
+
+
+## 2026-09-14：托管资源 authority 事务隔离
+
+资源创建时携带 authority 会把 `authorityId` 持久绑定到资源；share/revoke/destroy/open/acquire/release/close/write 必须提交同一 authority 的当前 ownerEpoch，省略、替换身份或旧 epoch 均拒绝。接管以 expectedEpoch CAS 递增，Session 不能接管其他作用域，安全整数溢出拒绝且事务回滚。已完成请求重放原回执；尚未分配的排队申请在接管后失败，已有 claim 保留至明确释放。读取沿用既有授权规则。
+
+首次 claim 将该资源存储升级到 managed/schema=3，后续普通写入不降级；只支持 schema 1/2 的旧 managed-resource 实现拒绝访问。既有未绑定资源保持原行为，不猜测或自动迁移 authority。binding 仅是当前存储内不可变标记，不证明其他独立存储不能建立同名 authority。
+
+本批只完成同一事务存储内的资源命令隔离。物理 adapter 的执行端 token、接管前已开始的外部操作、跨 store 迁移屏障与真实多主机故障矩阵仍待完成，P1-05 保持开放。
+
+隔离提交快照验证：durable-kernel 239、llm-flow 213、llm-session 116、kernel-adapters 111、app-core 92 项通过，共 771 项；Kernel/CLI 类型检查与文档检查通过。资源回归含同存储两个 Kernel 并发 CAS、重建、身份省略/替换、排队接管、schema 升级与 Decision 回滚；不作为真实多进程或物理执行端验收。

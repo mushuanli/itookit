@@ -7,6 +7,8 @@ export interface ManagedResource {
     kind: 'pool' | 'shared';
     name: string;
     version: number;
+    /** Immutable authority identity; mutations must present its current owner epoch. */
+    authorityId?: string;
     capacity?: number;
     value?: JsonValue;
     state?: 'active' | 'closing' | 'tombstoned';
@@ -35,7 +37,28 @@ export interface ResourceClaim {
     epoch?: number;
     cleanupId?: string;
 }
-export type ResourceResult = ManagedResource | ManagedHandle | ResourceClaim | ManagedGrant | { ok: true };
+/**
+ * Ownership of one resource authority (`resources.seq.managed/authority/<id>`).
+ *
+ * `ownerEpoch` is the fencing token of the authority *service*, not of a resource
+ * incarnation or a cache generation: a new leader takes over by CAS-incrementing the epoch,
+ * and every command it issues presents the epoch it observed. A superseded leader therefore
+ * keeps a stale epoch and its writes are refused.
+ */
+export interface ManagedAuthority {
+    authorityId: string;
+    ownerEpoch: number;
+    ownerId?: string;
+    /** Immutable local storage binding marker; cross-store exclusivity requires a broker. */
+    binding?: string;
+    serviceEndpoint?: string;
+    status: 'active' | 'stopped';
+    updatedAt: number;
+}
+
+/** The epoch a caller observed; presented on a resource command to fence superseded leaders. */
+export interface ResourceAuthority { authorityId: string; epoch: number; }
+export type ResourceResult = ManagedResource | ManagedHandle | ResourceClaim | ManagedGrant | ManagedAuthority | { ok: true };
 export interface ResourceRequestSnapshot<T = ResourceResult> {
     id: string;
     scope: string;
@@ -49,7 +72,8 @@ export interface DurableResourceRequest<T = ResourceResult> {
     wait(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<T>;
     cancel(): Promise<ResourceRequestSnapshot<T>>;
 }
-export type ResourceCommand = { requestId: string } & (
+/** Bound resources require their authority epoch on mutations; legacy unbound resources do not. */
+export type ResourceCommand = { requestId: string; authority?: ResourceAuthority } & (
     | { type: 'create'; kind: 'pool' | 'shared'; name: string; capacity?: number; value?: JsonValue; physical?: PhysicalResourceBinding }
     | { type: 'share'; ref: ManagedResourceRef; toSessionId: string; rights: ResourceRight[] }
     | { type: 'revoke'; ref: ManagedResourceRef; toSessionId: string; rights?: ResourceRight[]; expectedRevision: number }
@@ -62,18 +86,34 @@ export type ResourceCommand = { requestId: string } & (
     | { type: 'write'; handle: ManagedHandle; expectedVersion: number; value: JsonValue }
 );
 export interface ManagedResourceStat { resource: ManagedResource; held: number; waiting: number; }
+/** Optional authority epoch presented by a caller that writes an authority's records. */
+export interface Fenced { authority?: ResourceAuthority; }
+export interface AuthorityClaim {
+    /** New leader identity; absent keeps the recorded owner. */
+    ownerId?: string;
+    /** The epoch the caller observed; absent is only valid for the first claim. */
+    expectedEpoch?: number;
+    binding?: string;
+    serviceEndpoint?: string;
+    /** Defaults to the actor's own scope (`session:<id>` or `kernel`). */
+    scope?: string;
+}
 export interface ResourceApi {
     create(spec: Omit<Extract<ResourceCommand, { type: 'create' }>, 'type'>): Promise<DurableResourceRequest<ManagedResource>>;
-    share(ref: ManagedResourceRef, options: { requestId: string; toSessionId: string; rights: ResourceRight[] }): Promise<DurableResourceRequest<{ ok: true }>>;
-    revoke(ref: ManagedResourceRef, options: { requestId: string; toSessionId: string; rights?: ResourceRight[]; expectedRevision: number }): Promise<DurableResourceRequest<ManagedGrant>>;
-    destroy(ref: ManagedResourceRef, options: { requestId: string; expectedVersion: number }): Promise<DurableResourceRequest<ManagedResource>>;
+    share(ref: ManagedResourceRef, options: { requestId: string; toSessionId: string; rights: ResourceRight[] } & Fenced): Promise<DurableResourceRequest<{ ok: true }>>;
+    revoke(ref: ManagedResourceRef, options: { requestId: string; toSessionId: string; rights?: ResourceRight[]; expectedRevision: number } & Fenced): Promise<DurableResourceRequest<ManagedGrant>>;
+    destroy(ref: ManagedResourceRef, options: { requestId: string; expectedVersion: number } & Fenced): Promise<DurableResourceRequest<ManagedResource>>;
     query(options: ResourceQuery): Promise<ResourcePage>;
-    open(ref: ManagedResourceRef, options: { requestId: string; taskId?: string; rights: ResourceRight[]; name: string }): Promise<DurableResourceRequest<ManagedHandle>>;
-    acquire(handle: ManagedHandle, options: { requestId: string; quantity: number; deadlineAt?: number }): Promise<DurableResourceRequest<ResourceClaim>>;
-    release(claim: ResourceClaim, options: { requestId: string }): Promise<DurableResourceRequest<ResourceClaim>>;
-    close(handle: ManagedHandle, options: { requestId: string }): Promise<DurableResourceRequest<ManagedHandle>>;
+    open(ref: ManagedResourceRef, options: { requestId: string; taskId?: string; rights: ResourceRight[]; name: string } & Fenced): Promise<DurableResourceRequest<ManagedHandle>>;
+    acquire(handle: ManagedHandle, options: { requestId: string; quantity: number; deadlineAt?: number } & Fenced): Promise<DurableResourceRequest<ResourceClaim>>;
+    release(claim: ResourceClaim, options: { requestId: string } & Fenced): Promise<DurableResourceRequest<ResourceClaim>>;
+    close(handle: ManagedHandle, options: { requestId: string } & Fenced): Promise<DurableResourceRequest<ManagedHandle>>;
     read(handle: ManagedHandle, options: { requestId: string }): Promise<DurableResourceRequest<ManagedResource>>;
-    write(handle: ManagedHandle, options: { requestId: string; expectedVersion: number; value: JsonValue }): Promise<DurableResourceRequest<ManagedResource>>;
+    write(handle: ManagedHandle, options: { requestId: string; expectedVersion: number; value: JsonValue } & Fenced): Promise<DurableResourceRequest<ManagedResource>>;
+    /** Take ownership of an authority by CAS-incrementing its `ownerEpoch`. */
+    claimAuthority(authorityId: string, options: AuthorityClaim): Promise<ManagedAuthority>;
+    /** Read an authority record; `undefined` when the authority was never claimed. */
+    authority(authorityId: string, scope?: string): Promise<ManagedAuthority | undefined>;
     request(scope: string, requestId: string): DurableResourceRequest;
     stat(ref: ManagedResourceRef): Promise<ManagedResourceStat>;
     validate(claim: ResourceClaim): Promise<ResourceClaim>;
