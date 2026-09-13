@@ -116,7 +116,12 @@ export class SeqFileOps implements ISeqFileOperations {
     }
 
     async getEntries(path: string, keys: string[]): Promise<Record<string, string>> {
-        const entries = await Promise.all(keys.map(async key => [key, await this.getEntry(path, key)] as const));
+        if (!keys.length) return {};
+        const realPath = await this.path(path);
+        const entries = await Promise.all(keys.map(async key => {
+            const value = await this.records.getRecordField(realPath, seqField(key));
+            return [key, value === undefined ? null : stringifyRecordValue(value)] as const;
+        }));
         return Object.fromEntries(entries.filter((entry): entry is [string, string] => entry[1] !== null));
     }
 
