@@ -8,6 +8,13 @@ type ToolSource = IToolService | ((context: EffectExecutionContext, request: Too
 /** Live Skill state used to undo a load whose identity write failed. */
 export type SkillLoadTracker = Pick<ISkillService, 'getLoadedSkills' | 'unloadSkill'>;
 
+/** Host tools requiring Kernel-owned execution identity rather than model arguments. */
+export interface EffectToolBinding {
+    meta: import('@itookit/common').ToolMeta;
+    definition: import('@itookit/common').ToolDefinition;
+    invoke(args: Record<string, unknown>, context: EffectExecutionContext): Promise<string>;
+}
+
 export interface ToolCallEffectRequest {
     resourceHandleId: string;
     toolId: string;
@@ -25,6 +32,7 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
         private readonly service: ToolSource,
         private readonly onSkillLoaded?: (skillId: string, context: EffectExecutionContext) => void | ToolInvokeResult['skillContext'] | Promise<void | ToolInvokeResult['skillContext']>,
         private readonly resolveSkillTracker?: (context: EffectExecutionContext) => Promise<SkillLoadTracker | undefined>,
+        private readonly effectTools: EffectToolBinding[] = [],
     ) {}
 
     async execute(request: ToolCallEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
@@ -39,6 +47,14 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
     private async run(request: ToolCallEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
         assertEffectGrant(context, request.resourceHandleId, 'tool');
         const service = await (typeof this.service === 'function' ? this.service(context, request) : this.service);
+        const bound = this.effectTools.find(tool => tool.meta.id === request.toolId);
+        if (bound) {
+            if (service.getToolMeta(request.toolId)?.enabled !== true) throw new Error('Effect tool is disabled');
+            context.abortSignal.throwIfAborted();
+            const started = Date.now();
+            const output = await bound.invoke(request.args, context);
+            return { toolId: request.toolId, success: true, output, durationMs: Date.now() - started };
+        }
         const unloadKey = service.getToolMeta(request.toolId)?.skillUnloaderArgKey;
         if (unloadKey) {
             const id = request.args[unloadKey];

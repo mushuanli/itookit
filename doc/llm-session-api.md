@@ -399,9 +399,19 @@ packages/llm-session/src/
 
 记忆检索注入：`initializeConversationSystem({ retrieveMemory, ... })` 将回调传递到 SessionManager。回调签名为 `(plan, agent, { sessionId, policy }) => Promise<RetrievedMemoryEntry[]>`；policy 是当前 Agent memoryPolicy 的独立副本，缺少策略时为 undefined。结果经 ContextAssembler 进入 Task 输入快照。app-core 默认装配 SessionMemoryProvider（`create-application-runtime.ts` 以 `new SessionMemoryProvider(kernel.kernel).retrieve` 注入）。
 
-`SessionMemoryProvider(kernel)` 提供 `upsert(sessionId, policy, { entryId, scope, content })`、`remove(sessionId, policy, scope, entryId)` 和可直接注入的 `retrieve` 回调。存储在目标 Kernel Session shared，按 namespace/scope 精确隔离，写入校验 writeScopes、检索校验 readScopes。检索默认 10 项（0 禁用），使用词项包含匹配及更新时间排序，返回内容和 SHA-256 摘要。返回 entryId 是 JSON 编码的 `[scope, entryId]`，修改/删除使用原始 entryId。当前存储按 scope 整组加载，未提供跨 Session 共享、向量检索或模型写入工具；调用方必须提供可信的 Agent 策略。
+`SessionMemoryProvider(kernel)` 提供 `upsert(sessionId, policy, { entryId, scope, content })`、`remove(sessionId, policy, scope, entryId)`、`prune(sessionId, policy, before)`（按宿主水位裁剪 writeScopes 内未更新的条目）和可直接注入的 `retrieve` 回调。存储在目标 Kernel Session shared，按 namespace/scope 精确隔离，写入校验 writeScopes、检索校验 readScopes。检索默认 10 项（0 禁用），使用词项包含匹配及更新时间排序，返回内容和 SHA-256 摘要。返回 entryId 是 JSON 编码的 `[scope, entryId]`，修改/删除使用原始 entryId。**保留期（2026-09-11）**：`MemoryPolicy.retention` 支持 `maxEntriesPerScope`（写入后优先保留本次写入、再按更新时间保留至 N 条；before 水位仍可剔除本次写入）与 `before` 水位（写入/裁剪时丢弃更早条目），作用范围仅限该策略的 scope；`prune` 只作用于 `writeScopes`，非法上限/水位在打开存储前拒绝。当前存储按 scope 整组加载，未提供跨 Session 共享或向量检索；模型写入工具由下述 TaskMemoryService 接线，调用方必须提供可信的 Agent 策略。
 
 记忆继承边界：executeDirect 保持 memory 检索；executeDag 在组装上下文时禁用 provider，避免父 Agent 的长期记忆进入临时 Flow 的编译快照。需要给 Flow 的信息应作为显式输入传递。
+
+记忆管理：`SessionMemoryProvider.list(sessionId, policy)` 返回 `MemoryEntry[]`（原始 entryId、scope、namespaceId、content、contentHash、updatedAt），仅枚举 readScopes，按 scope/entryId 排序并去重 scope，不受 retrievalLimit 限制；返回值与存储隔离。此接口仍按 scope 整组读取，不是分页接口。`upsert`/`remove` 可传末尾参数 `MemoryMutationOptions`：`expectedContentHash` 省略时保持无条件写语义，null 要求条目不存在，SHA-256 要求当前内容匹配。每次 CAS 重试重新检查条件，冲突拒绝并提示重新加载；这是内容级检查，不是历史版本检查，相同内容的删除重建无法据此识别。策略仍由可信宿主提供，接口不赋予模型选择策略的权限。
+
+会话管理入口：`SessionManager.memory` 提供 `list(agentId)`、`upsert(agentId, entry, options?)` 和 `remove(agentId, scope, entryId, options?)`。每次调用先固定当前绑定 Session，再从 Agent 配置服务读取该 Agent 的 memoryPolicy；Agent 不存在或无策略时拒绝，不使用聊天默认 Agent 回退。调用方不传授权策略，写操作遵守宿主 canWriteSession 门控，读取仍按 readScopes。该接口面向宿主管理 UI，不是模型工具；运行中的模型写入需要单独绑定冻结的 Agent 策略。
+
+`SessionMemoryControls.forSession(sessionId)` 创建固定 Session 的宿主管理视图，沿用同一 Agent 配置服务和写租约检查。app-shell 的会话 Files 页用此视图打开记忆管理对话框，避免后台切换绑定会话后窗口后续操作写错目标。
+
+任务级记忆执行：`TaskMemoryService(kernel).invoke(toolId, args, context)` 支持 memory_list/memory_write/memory_remove。context 的 sessionId/taskId/abortSignal 必须由可信宿主 Effect 适配器提供，不能来自模型参数。服务从持久 Task input 读取 memoryPolicy 和 allowedToolIds，要求 llm.agent、工具在白名单且 Task 未终态；模型不能覆盖 Session/策略。写入参数为 scope、entryId、content，可选 expectedContentHash；删除不含 content。共享 createKernelRuntime 已将服务接入工具目录与 tool.call Effect；调用方需显式允许对应 toolIds。取消等待服务实际完成，不能回滚已经提交的存储操作；写入/删除按 local 副作用，崩溃时不自动重放。
+
+存储失败边界：CAS 只对 KernelErrorCode.CONFLICT 重试（最多三次），每次重新读取并校验内容条件；其他存储错误直接返回，包括已提交但回执失败的情况，调用方应先重新加载再决定操作。prune 按 scope 分别提交，不提供跨 scope 原子性，后续 scope 失败时此前提交仍然保留。
 
 ### 失败与取消的消费收尾
 

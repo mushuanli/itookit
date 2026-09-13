@@ -558,7 +558,7 @@ export async function readSharedTx<T extends import('../../domain/types').JsonVa
 export function assertSharedVersion(key: string, actual: number | undefined, expected: number | null | undefined): void {
     if (expected === undefined) return;
     const matches = expected === null ? actual === undefined : actual === expected;
-    if (!matches) throw new Error(`Shared state conflict for ${key}: expected ${expected}, got ${actual ?? 'missing'}`);
+    if (!matches) throw kernelError(KernelErrorCode.CONFLICT, `Shared state conflict for ${key}: expected ${expected}, got ${actual ?? 'missing'}`);
 }
 
 export function sharedEntry<T extends import('../../domain/types').JsonValue>(

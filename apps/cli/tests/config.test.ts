@@ -19,6 +19,14 @@ function workflow(): WorkflowConfigV1 {
 }
 
 describe('validateWorkflow', () => {
+    it('validates explicit memory scope grants and retention limits', () => {
+        const value = workflow();
+        value.agents[0].memory_policy = { namespace_id: 'agent', read_scopes: ['project'], write_scopes: [],
+            retention: { max_entries_per_scope: 10 }, retrieval_limit: 0 };
+        expect(validateWorkflow(value, false).agents[0].memory_policy).toEqual(value.agents[0].memory_policy);
+        value.agents[0].memory_policy.retention!.max_entries_per_scope = 0;
+        expect(() => validateWorkflow(value, false)).toThrow('max_entries_per_scope');
+    });
     it('accepts a minimal workflow', () => {
         expect(validateWorkflow(workflow(), false).name).toBe('test');
     });

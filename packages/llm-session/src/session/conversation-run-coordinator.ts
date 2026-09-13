@@ -549,6 +549,7 @@ function directTaskSpec(
             tools: definitions,
             allowedToolIds,
             externalToolIds: catalog.externalIds,
+            memoryPolicy: execution.config.memoryPolicy,
             ...(skillContexts.length ? { skillContexts } : {}),
         }),
         labels: { roundId: execution.roundId, kind: tools.length ? 'agent' : 'chat' },

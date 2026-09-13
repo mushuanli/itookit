@@ -37,6 +37,7 @@ import { ApprovedEffectProgram } from '../programs/approved-effect-program';
 import { ExecProgram } from '../programs/exec-program';
 
 export interface KernelAdaptersRuntimeOptions {
+    effectTools?: import('../effects/tool-call-effect').EffectToolBinding[];
     /** Resolve a trusted Task to its isolated Run identity; undefined selects the normal Session. */
     scopeForEffect?: (context: import('@itookit/durable-kernel').EffectExecutionContext) => Promise<string | undefined>;
     fileContextForScope?: (sessionId: string, scopeId: string) => ReturnType<NonNullable<KernelAdaptersRuntimeOptions['fileContextForSession']>>;
@@ -78,8 +79,9 @@ export async function createKernelAdaptersRuntime(options: KernelAdaptersRuntime
     const catalogSkills = new SkillDeviceDriver({ registry: definitions });
     const catalogTools = new ToolDeviceDriver([...BUILTIN_TOOLS, ...(options.additionalTools ?? [])]);
     registerCoreTools(catalogTools, catalogSkills);
+    registerEffectTools(catalogTools, options.effectTools);
     await catalogTools.init();
-    const effects = createEffects(llmService, registry, Boolean(options.fileContextForSession || options.fileContextForScope));
+    const effects = createEffects(llmService, registry, Boolean(options.fileContextForSession || options.fileContextForScope), options.effectTools);
     return {
         llmService,
         toolCatalog: {
@@ -301,6 +303,7 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
         });
         skillDriver.setToolService(toolDriver.getService());
         const ttySessions = registerCoreTools(toolDriver, skillDriver.getService(), files?.ttyDriver);
+        registerEffectTools(toolDriver, this.options.effectTools);
         try {
             await toolDriver.init();
             if (files && this.options.skillSourceForSession) await skillDriver.getService().setCwd(files.cwd);
@@ -357,6 +360,7 @@ function createEffects(
     llm: ILLMService,
     registry: KernelAdaptersSessionRegistry,
     ttyEnabled: boolean,
+    effectTools: import('../effects/tool-call-effect').EffectToolBinding[] = [],
 ): import('@itookit/durable-kernel').EffectAdapter[] {
     const tools = async (context: import('@itookit/durable-kernel').EffectExecutionContext) =>
         (await registry.getForContext(context)).toolService;
@@ -387,7 +391,7 @@ function createEffects(
             const snapshot = { skillId, compactInstructions: skill.compact?.rawContent ?? '', tools: boundTools };
             await persistLoadedSkill({ skillId, success: true, toolIds: [] }, context);
             return snapshot;
-        }, context => skills(context)),
+        }, context => skills(context), effectTools),
         new BashEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, () => tools(context))),
         new SkillLoadEffectAdapter(skills, persistLoadedSkill),
         new SkillUnloadEffectAdapter(async context => (await registry.getForEffect(context)).skillService),
@@ -403,6 +407,13 @@ async function persistLoadedSkill(
     await rememberLoadedSkill(result.skillId, context.sessionState);
 }
 
+function registerEffectTools(driver: ToolDeviceDriver, bindings: KernelAdaptersRuntimeOptions['effectTools'] = []): void {
+    const service = driver.getService();
+    for (const binding of bindings) {
+        if (service.getToolMeta(binding.meta.id)) throw new Error(`Duplicate Effect tool: ${binding.meta.id}`);
+        service.registerTool(binding.meta, binding.definition, async () => { throw new Error('Tool requires Kernel Effect identity'); });
+    }
+}
 
 
 function registerCoreTools(

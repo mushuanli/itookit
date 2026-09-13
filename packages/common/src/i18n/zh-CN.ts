@@ -5,6 +5,17 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'memory.manage.title': '记忆管理',
+    'memory.manage.agent': 'Agent',
+    'memory.manage.scope': '范围',
+    'memory.manage.id': '条目标识',
+    'memory.manage.content': '内容',
+    'memory.manage.new': '新建',
+    'memory.manage.save': '保存',
+    'memory.manage.delete': '删除所选',
+    'memory.manage.refresh': '刷新',
+    'memory.manage.close': '关闭',
+    'memory.manage.empty': '暂无可读取的记忆',
     'session.tasks.stopPending': '取消已请求，等待外部停止确认（{count} 个操作在途）',
     'session.tasks.stopStopped': '已停止（取消请求已确认）',
     'session.tasks.eventsTrimmed': '更早的事件已按保留期裁剪',

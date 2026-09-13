@@ -134,6 +134,7 @@ function agentTask(context: DagNodeContext) {
             maxExchanges: optionalNumber(config.maxExchanges),
             workingDirectory: optionalString(config.workingDirectory),
             approval: optionalApproval(config.approval) ?? 'external',
+            memoryPolicy: config.memoryPolicy as LlmTaskInputOptions['memoryPolicy'],
             subtaskTool: hasDelegation
                 ? delegation.enabled === true
                     ? optionalString(delegation.toolName) ?? DELEGATION_DEFAULTS.toolName

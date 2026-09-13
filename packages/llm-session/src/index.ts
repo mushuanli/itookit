@@ -188,4 +188,6 @@ function activateConversationPlugins(
     extensions.activate({ commands: commandBus });
 }
 
-export { SessionMemoryProvider, type MemoryWrite } from './session/session-memory-provider';
+export { SessionMemoryProvider, type MemoryWrite, type MemoryEntry, type MemoryMutationOptions } from './session/session-memory-provider';
+export { SessionMemoryControls } from './session/session-memory-controls';
+export { TaskMemoryService } from './session/task-memory-service';

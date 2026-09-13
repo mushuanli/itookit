@@ -75,6 +75,13 @@ export interface ConnectionConfig {
 }
 
 export interface AgentConfig {
+    memory_policy?: {
+        namespace_id: string;
+        read_scopes: string[];
+        write_scopes: string[];
+        retrieval_limit?: number;
+        retention?: { max_entries_per_scope?: number; before?: number };
+    };
     id: string;
     name?: string;
     connection: string;

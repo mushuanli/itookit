@@ -1,5 +1,6 @@
 import type { RunAgentConfig, RunConnectionConfig, RunDefinition, RunProviderConfig, RunSandboxConfig } from '@itookit/app-core';
 import { compileDag } from './runtime';
+import { memoryPolicyForAgent } from './memory-policy';
 import type { CompiledWorkflow } from './types';
 
 /** Compile the CLI YAML schema into the shared RunDefinition model. */
@@ -45,6 +46,7 @@ export function compileRunDefinition(workflow: CompiledWorkflow, digest: string,
                 modelTier: agent.model_tier,
                 model: agent.model,
                 systemPrompt: agent.system_prompt,
+                memoryPolicy: memoryPolicyForAgent(agent),
                 tools: agent.tools,
                 maxExchanges: agent.max_exchanges,
                 temperature: agent.temperature,

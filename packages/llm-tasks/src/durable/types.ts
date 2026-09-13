@@ -40,6 +40,8 @@ export interface DurableProgramInput {
 }
 
 export interface DurableAgentInput extends DurableProgramInput {
+    /** Host-resolved memory authority frozen at submission; absence grants no memory access. */
+    memoryPolicy?: import('@itookit/common').MemoryPolicy;
     /**
      * Skill snapshots activated when the Task was created (initial Skill selection). They
      * behave exactly like runtime `load_skill` results: their critical rules are re-injected

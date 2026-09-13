@@ -34,6 +34,7 @@ export interface LlmTaskInputOptions {
     externalToolIds?: string[];
     /** Initial Skill activation snapshots; the host resolves them before submission. */
     skillContexts?: DurableAgentInput['skillContexts'];
+    memoryPolicy?: DurableAgentInput['memoryPolicy'];
     subtaskTool?: string;
     dependencyBindings?: DurableDependencyBinding[];
     includeDependencyOutputs?: boolean;
@@ -64,10 +65,25 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         allowedToolIds: options.allowedToolIds,
         externalToolIds: options.externalToolIds,
         skillContexts: options.skillContexts,
+        memoryPolicy: freezeMemoryPolicy(options.memoryPolicy),
         subtaskTool: options.subtaskTool,
         dependencyBindings: options.dependencyBindings,
         includeDependencyOutputs: options.includeDependencyOutputs,
     });
+}
+
+function freezeMemoryPolicy(policy: DurableAgentInput['memoryPolicy']): DurableAgentInput['memoryPolicy'] {
+    if (policy === undefined) return undefined;
+    const validName = (value: unknown) => typeof value === 'string' && Boolean(value.trim());
+    if (!policy || !validName(policy.namespaceId)
+        || ![policy.readScopes, policy.writeScopes].every(scopes => Array.isArray(scopes) && scopes.every(validName))) {
+        throw new Error('Invalid task memory policy');
+    }
+    const limit = policy.retrievalLimit, cap = policy.retention?.maxEntriesPerScope, before = policy.retention?.before;
+    if ((limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0))
+        || (cap !== undefined && (!Number.isSafeInteger(cap) || cap < 1))
+        || (before !== undefined && (!Number.isFinite(before) || before < 0))) throw new Error('Invalid task memory policy limits');
+    return structuredClone(policy);
 }
 
 function omitUndefined<T extends Record<string, unknown>>(value: T): T {

@@ -1,3 +1,4 @@
+import { showMemoryDialog } from './files/memory-dialog';
 import { createApplicationRuntime, PrivilegedCommandService, workspaceRoot, type WorkspaceController } from '@itookit/app-core';
 import { createSessionSkillControls } from '@itookit/kernel-adapters';
 import { SessionWorkbench } from './core/SessionWorkbench';
@@ -287,7 +288,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         if (!files) throw new Error(`Workspace files not configured: ${elementId}`);
 
         if (strategyType === 'chat') {
-            const sessionWorkspace = new SessionWorkbench(sidebarEl, editorEl, sessionRepository, sessionFiles, factory, (id, mode = 'replace') => updateHistory(elementId, id, mode), { toggleSidebar: collapsed => { sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')); }, navigate: handleNavigationRequest }, kernelCore, defaultEditorFactory, directoryMounts, sessionSkills);
+            const sessionWorkspace = new SessionWorkbench(sidebarEl, editorEl, sessionRepository, sessionFiles, factory, (id, mode = 'replace') => updateHistory(elementId, id, mode), { toggleSidebar: collapsed => { sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')); }, navigate: handleNavigationRequest }, kernelCore, defaultEditorFactory, directoryMounts, sessionSkills, async (sessionId, signal) => {
+                await showMemoryDialog(sessionManager.memory.forSession(sessionId), await sessionManager.getAvailableAgents(), signal);
+            });
             cleanupFns.push(() => sessionWorkspace.destroy());
             await sessionWorkspace.start(); managerCache.set(elementId, sessionWorkspace);
             cleanupFns.push(setupHitlVfsBridge(sessionManager, sessionWorkspace));

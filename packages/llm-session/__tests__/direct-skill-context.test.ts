@@ -55,6 +55,9 @@ it.each([false, true])('persists selected Skill and scoped memory in direct chat
         selected.compact.rawContent = 'Later rules';
         const tasks = await kernel.listSessionTasks('session');
         expect(tasks).toHaveLength(1);
+        expect((tasks[0].input as any).memoryPolicy).toEqual(execution.config.memoryPolicy);
+        execution.config.memoryPolicy.writeScopes.push('later-write' as never);
+        expect(((await kernel.listSessionTasks('session'))[0].input as any).memoryPolicy.writeScopes).toEqual([]);
         // Initial Skill selection activates the same snapshot shape as a runtime load_skill.
         expect((tasks[0].input as any).skillContexts).toEqual([{ skillId: 'review',
             compactInstructions: 'Preserve access checks.',

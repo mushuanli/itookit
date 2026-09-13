@@ -51,7 +51,8 @@ export class SessionWorkbench implements WorkspaceController {
         private readonly factory: EditorFactory, private readonly onSelect: (id: string, mode?: 'push' | 'replace') => void,
         private readonly hostContext: EditorHostContext | undefined, private readonly kernel: Kernel,
         private readonly fileFactory: EditorFactory, private readonly directoryMounts?: DirectoryMountService,
-        private readonly sessionSkills?: SessionSkillControls) {}
+        private readonly sessionSkills?: SessionSkillControls,
+        private readonly manageMemory?: (sessionId: string, signal: AbortSignal) => Promise<void>) {}
     async start(): Promise<void> {
         this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel });
         this.sidebarUI = createVFSUI({ sessionListContainer: this.sidebar, title: '会话', scopeId: 'session-browser:v1:admin',
@@ -306,6 +307,11 @@ export class SessionWorkbench implements WorkspaceController {
             const button = document.createElement('button'); button.textContent = '挂载目录 / 管理挂载';
             button.onclick = () => { void this.manageMounts(target.sessionId).catch(error => this.report(error)); }; panel.append(button);
             if (nodes.every(node => node.name === 'attachments')) { const hint = document.createElement('p'); hint.textContent = '尚未挂载工作目录，此会话仅能访问附件'; panel.append(hint); }
+        }
+        if (target.kind === 'files' && target.path === '/' && this.manageMemory) {
+            const button = document.createElement('button'); button.textContent = t('memory.manage.title');
+            button.onclick = () => { void this.manageMemory!(target.sessionId, this.dialogs.signal).catch(error => this.report(error)); };
+            panel.append(button);
         }
         for (const node of nodes) {
             const button = document.createElement('button'); button.type = 'button'; button.className = 'session-detail__entry';

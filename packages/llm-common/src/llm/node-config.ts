@@ -28,12 +28,24 @@ export interface SystemPromptDefinition {
     presets?: PromptPreset[];
 }
 
+/**
+ * How long a scope's entries are kept. This is a *storage* bound, not a retrieval
+ * bound: hosts may also drop entries they no longer trust via an explicit watermark.
+ */
+export interface MemoryRetentionPolicy {
+    /** Keep at most this many entries per scope; the most recently updated survive. */
+    maxEntriesPerScope?: number;
+    /** Drop entries not updated before this epoch-ms watermark (host-owned). */
+    before?: number;
+}
+
 /** Long-term memory policy (long-lived Agents only; flow nodes do not inherit). */
 export interface MemoryPolicy {
     namespaceId: string;
     readScopes: string[];
     writeScopes: string[];
     retrievalLimit?: number;
+    retention?: MemoryRetentionPolicy;
 }
 
 /** Runtime handling when a model response does not satisfy responseFormat. */

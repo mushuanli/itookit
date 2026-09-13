@@ -91,3 +91,5 @@ interface RunRecord {
 ```
 
 `events.jsonl`、`result.json` 和 CLI stdout/JSONL 是投影，不是权威状态。
+
+CLI Agent memory_policy 经 memoryPolicyForAgent 转换为 RunAgentConfig.memoryPolicy 与节点 config.memoryPolicy，嵌套 scope/retention 深复制；RunDefinition 保留该策略快照。记忆工具权限仍要求节点 capabilities 中显式列出 memory_list/write/remove，namespace 不赋予跨 Session 共享。

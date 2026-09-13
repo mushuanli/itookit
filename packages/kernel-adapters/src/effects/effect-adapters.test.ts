@@ -7,6 +7,24 @@ import { BashEffectAdapter } from './bash-effect';
 import { SkillLoadEffectAdapter } from './skill-load-effect';
 
 describe('KernelAdapters Effect adapters', () => {
+    it('binds host tools to trusted Effect identity and waits for their completion on cancellation', async () => {
+        let finish!: (value: string) => void;
+        const pending = new Promise<string>(resolve => { finish = resolve; });
+        const invoke = vi.fn(() => pending), fallback = vi.fn();
+        const service = toolService(fallback); service.getToolMeta = () => ({ enabled: true, sideEffect: 'local' } as any);
+        const adapter = new ToolCallEffectAdapter(service, undefined, undefined, [{
+            meta: { id: 'bound' } as any, definition: { name: 'bound' }, invoke,
+        }]);
+        const request = { resourceHandleId: 'tool-handle', toolId: 'bound', args: { taskId: 'forged' } };
+        await expect(adapter.execute(request, context())).rejects.toThrow(); expect(invoke).not.toHaveBeenCalled();
+        const ctx = context('tool'); const execution = adapter.execute(request, ctx);
+        await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(request.args, ctx));
+        let stopped = false;
+        const cancellation = adapter.cancel(request, ctx).then(() => { stopped = true; });
+        await Promise.resolve(); expect(stopped).toBe(false);
+        finish('saved'); expect((await execution).output).toBe('saved'); await cancellation;
+        expect(stopped).toBe(true); expect(fallback).not.toHaveBeenCalled();
+    });
     it('does not promote arbitrary tool metadata into persistent Skill instructions', async () => {
         const adapter = new ToolCallEffectAdapter(toolService(async () => ({
             ...result('inspect', true, 'ordinary tool output'),

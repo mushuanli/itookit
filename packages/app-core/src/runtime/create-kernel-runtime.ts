@@ -11,6 +11,7 @@ import {
     resolveFlowTaskWorkspace,
 } from '@itookit/llm-flow';
 import type { IFileSystem } from '@itookit/vfs-core';
+import { createMemoryTools } from './memory-tools';
 
 export interface CreateKernelRuntimeOptions {
     /** System VFS view used for the Kernel catalog and storage binding. */
@@ -64,6 +65,7 @@ export async function createKernelRuntime(
         skillSourceForSession: options.skillSourceForSession,
         skillToolHandlerFactory: options.skillToolHandlerFactory,
         additionalTools: options.additionalTools,
+        effectTools: createMemoryTools(() => kernel),
     });
 
     const kernel = new Kernel({

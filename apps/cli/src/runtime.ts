@@ -1,5 +1,6 @@
 import { leaseSkewConfig } from './lease-config';
 import { mkdir } from 'node:fs/promises';
+import { memoryPolicyForAgent } from './memory-policy';
 import path from 'node:path';
 import type { DagRunSpec, LLMConnection, LLMProvider, ToolDefinition } from '@itookit/common';
 import { parse } from 'yaml';
@@ -352,6 +353,7 @@ function compileTask(
             ...(agent.web_search !== undefined ? { webSearch: agent.web_search } : {}),
             ...(agent.stream !== undefined ? { stream: agent.stream } : {}),
             maxExchanges: agent.max_exchanges ?? 50,
+            ...(agent.memory_policy ? { memoryPolicy: memoryPolicyForAgent(agent) } : {}),
             // An isolated Run lets the executor place every agent node in the workspace it
             // prepared; pinning the node to the base repository here would silently win.
             ...(isolatedWorkspace(workflow) ? {} : { workingDirectory: workflow.workspaceRoot }),

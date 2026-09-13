@@ -245,6 +245,20 @@ describe('DurableFlowExecutor', () => {
         expect(prompts.join('\n')).not.toContain('DEFINITION-V2');
     });
 
+    it('persists each node memory policy without granting it to sibling nodes', async () => {
+        const memoryPolicy = { namespaceId: 'node', readScopes: ['project'], writeScopes: [] as string[] };
+        const selected = { ...agentFlow().nodes[0], config: { ...agentFlow().nodes[0].config, memoryPolicy } };
+        const plain = { ...agentFlow().nodes[0], id: 'plain', name: 'Plain' };
+        const run = await new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry() })
+            .submit('session-one', { nodes: [selected, plain], edges: [] });
+        expect((await run.root.wait({ timeoutMs: 5_000 })).status).toBe('succeeded');
+        memoryPolicy.writeScopes.push('later');
+        const tasks = await kernel.listSessionTasks('session-one');
+        expect((tasks.find(task => task.labels?.flowNodeId === 'agent')!.input as any).memoryPolicy)
+            .toEqual({ namespaceId: 'node', readScopes: ['project'], writeScopes: [] });
+        expect(tasks.find(task => task.labels?.flowNodeId === 'plain')!.input).not.toHaveProperty('memoryPolicy');
+    });
+
     it('activates a node\'s initially selected Skills through the host port', async () => {
         const withSkill = { ...agentFlow().nodes[0], config: { ...agentFlow().nodes[0].config, skillIds: ['review', 7] } };
         const withoutSkill = { ...agentFlow().nodes[0], id: 'plain', name: 'Plain' };

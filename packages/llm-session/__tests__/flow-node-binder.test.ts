@@ -4,6 +4,21 @@ import { bindFlowNode, bindStandaloneFlowNode } from '../src/session/flow-node-b
 import type { AgentResolver } from '../src/session/agent-resolver';
 
 describe('bindFlowNode', () => {
+    it('freezes the node Agent memory authority without inheriting parent or inline grants', async () => {
+        const memoryPolicy = { namespaceId: 'node', readScopes: ['project'], writeScopes: [] as string[] };
+        const resolver = { resolveExact: async () => ({ id: 'node-agent', memoryPolicy }), getSkills: async () => [] } as unknown as AgentResolver;
+        const node = { id: 'node', name: 'Node', plugin: 'builtin.agent', pluginVersion: '1.0.0', inputs: {},
+            config: { agentId: 'node-agent', memoryPolicy: { namespaceId: 'inline', readScopes: [], writeScopes: ['private'] } } } as FlowNodeDefinition;
+        const setup = { roundId: 'r', config: { id: 'parent', name: 'Parent', type: 'agent',
+            memoryPolicy: { namespaceId: 'parent', readScopes: [], writeScopes: ['private'] } } };
+        const bind = (config: unknown) => bindFlowNode({ ...node, config } as FlowNodeDefinition, undefined,
+            { blocks: [], canonicalMessages: [] } as never, { sessionId: 's', input: { text: 'task' } } as never, setup as never, resolver);
+        const bound = await bind(node.config);
+        expect((bound.config as any).memoryPolicy).toEqual(memoryPolicy);
+        memoryPolicy.writeScopes.push('later');
+        expect((bound.config as any).memoryPolicy.writeScopes).toEqual([]);
+        expect((await bind({ memoryPolicy: setup.config.memoryPolicy })).config).not.toHaveProperty('memoryPolicy');
+    });
     it.each(['inherit', 'replace', 'none'])('resolves standalone Agent, prompt and Skill identities with %s policy', async policy => {
         const resolver = { resolveExact: async () => ({ id: 'reviewer', name: 'Reviewer', type: 'agent', model: 'agent-model',
             systemPrompt: ['agent rules'], capabilityPolicy: { toolIds: ['inspect'], skillIds: ['review'] } }),

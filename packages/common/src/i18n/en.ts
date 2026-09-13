@@ -4,6 +4,17 @@
 import type { LocaleStrings } from './zh-CN';
 
 export const en: LocaleStrings = {
+    'memory.manage.title': 'Manage memories',
+    'memory.manage.agent': 'Agent',
+    'memory.manage.scope': 'Scope',
+    'memory.manage.id': 'Entry ID',
+    'memory.manage.content': 'Content',
+    'memory.manage.new': 'New',
+    'memory.manage.save': 'Save',
+    'memory.manage.delete': 'Delete selected',
+    'memory.manage.refresh': 'Refresh',
+    'memory.manage.close': 'Close',
+    'memory.manage.empty': 'No readable memories',
     'session.tasks.stopPending': 'Cancellation requested; waiting for the external stop to be confirmed ({count} operations in flight)',
     'session.tasks.stopStopped': 'Stopped (cancellation confirmed)',
     'session.tasks.eventsTrimmed':  'Older events were trimmed by retention',

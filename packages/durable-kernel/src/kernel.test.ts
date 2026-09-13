@@ -473,7 +473,7 @@ describe('Kernel durable kernel', () => {
         expect(second.version).toBe(2);
         expect((await session.getShared('agent/context'))?.value).toEqual({ count: 2 });
         expect(await session.listShared('agent/')).toHaveLength(1);
-        await expect(session.setShared('agent/context', { count: 3 }, { expectedVersion: 1 })).rejects.toThrow('conflict');
+        await expect(session.setShared('agent/context', { count: 3 }, { expectedVersion: 1 })).rejects.toMatchObject({ code: 'CONFLICT' });
         expect(await session.deleteShared('agent/context', { expectedVersion: 2 })).toBe(true);
         const recreated = await session.setShared('agent/context', { count: 3 }, { expectedVersion: null });
         expect(recreated.version).toBe(4);

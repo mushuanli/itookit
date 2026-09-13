@@ -15,6 +15,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
+import { parse, stringify } from 'yaml';
+import { SeqFileKernelStore } from '@itookit/durable-kernel';
+import { CliStorageResolver, cliStorage, openProfileInspectionFs } from '../src/runtime';
 import { listenForTest } from './listen';
 import { exportCommand, resumeCommand } from '../src/commands';
 
@@ -83,9 +86,11 @@ function reply(response: ServerResponse, content: string): void {
     response.end('data: [DONE]\n\n');
 }
 
-function startRun(configPath: string, stateDir: string): ChildProcess {
-    const child = spawn(process.execPath, ['--import', 'tsx', CLI, 'run', '-f', configPath,
-        '--state-dir', stateDir, '--headless', '--json'], { cwd: CLI_CWD, stdio: ['ignore', 'pipe', 'pipe'] });
+function startRun(configPath: string, stateDir: string, crash?: { tool: string; phase: string }): ChildProcess {
+    const entry = crash ? fileURLToPath(new URL('./fixtures/memory-crash.ts', import.meta.url)) : CLI;
+    const child = spawn(process.execPath, ['--import', 'tsx', entry, 'run', '-f', configPath,
+        '--state-dir', stateDir, '--headless', '--json'], { cwd: CLI_CWD, stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ...(crash ? { MINDOS_TEST_MEMORY_CRASH_TOOL: crash.tool, MINDOS_TEST_MEMORY_CRASH_PHASE: crash.phase } : {}) } });
     children.push(child);
     return child;
 }
@@ -117,6 +122,116 @@ async function resumeWithReplay(runId: string, stateDir: string): Promise<number
     expect(await resumeCommand(runId, { stateDir, headless: true, json: true })).toBe(3);
     return resumeCommand(runId, { stateDir, headless: true, json: true, retryIndeterminate: true });
 }
+
+async function storedMemory(stateDir: string, runId: string) {
+    const inspection = await openProfileInspectionFs(stateDir);
+    try {
+        const resolver = new CliStorageResolver(inspection.fs), binding = await resolver.resolve(cliStorage(runId));
+        const store = new SeqFileKernelStore(binding, reference => resolver.resolve(reference));
+        const tasks = await store.listTasks(binding);
+        const effects = tasks.flatMap(task => Object.values(task.effects)).filter(effect => effect.request.kind === 'tool.call');
+        return { memory: await store.getShared(binding, 'memory.entries.["agent","project"]'), effects };
+    } finally { await inspection.dispose(); }
+}
+
+function memoryReply(response: ServerResponse, tool?: string): void {
+    const args = { scope: 'project', entryId: 'note', ...(tool === 'memory_write' ? { content: 'durable memory' } : {}) };
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ id: 'mock', object: 'chat.completion', created: 1, model: 'mock-model',
+        choices: [{ index: 0, message: tool ? { role: 'assistant', content: '', tool_calls: [{ id: tool, type: 'function',
+            function: { name: tool, arguments: JSON.stringify(args) } }] } : { role: 'assistant', content: 'done' },
+        finish_reason: tool ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }));
+}
+
+it.each([
+    { tool: 'memory_write', phase: 'before' }, { tool: 'memory_write', phase: 'after' },
+    { tool: 'memory_remove', phase: 'before' }, { tool: 'memory_remove', phase: 'after' },
+])('blocks an unreceipted $tool killed $phase its mutation until explicit replay', async crash => {
+    let requests = 0;
+    const server = createServer((request, response) => {
+        request.resume(); request.on('end', () => {
+            requests++;
+            memoryReply(response, requests === 1 ? 'memory_write'
+                : crash.tool === 'memory_remove' && requests === 2 ? 'memory_remove' : undefined);
+        });
+    });
+    servers.push(server);
+    const port = await listenForTest(server), root = await workspace('mindos-memory-unreceipted-');
+    const stateDir = path.join(root, '.mindos'), configPath = path.join(root, 'mindos.yml');
+    const config = parse(singleNodeConfig(port));
+    Object.assign(config.agents[0], { tools: ['memory_write', 'memory_remove'], stream: false, approval: 'none',
+        memory_policy: { namespace_id: 'agent', read_scopes: ['project'], write_scopes: ['project'] } });
+    process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
+    await writeFile(configPath, stringify(config));
+    const child = startRun(configPath, stateDir, crash);
+    let stderr = ''; child.stderr?.on('data', data => { stderr += data; });
+    expect(await once(child, 'exit'), stderr).toEqual([null, 'SIGKILL']);
+    const runId = await latestRun(root);
+    await settleLease();
+    const killed = await storedMemory(stateDir, runId);
+    const present = crash.tool === 'memory_write' ? crash.phase === 'after' : crash.phase === 'before';
+    expect(killed.memory?.value ?? []).toEqual(present ? [expect.objectContaining({ content: 'durable memory' })] : []);
+    expect(killed.effects.filter(effect => effect.status === 'leased')).toHaveLength(1);
+    const callsAtCrash = requests;
+    expect(await resumeCommand(runId, { stateDir, headless: true, json: true })).toBe(3);
+    expect(requests).toBe(callsAtCrash);
+    const blocked = await storedMemory(stateDir, runId);
+    expect(blocked.memory).toEqual(killed.memory);
+    const uncertain = blocked.effects.filter(effect => effect.status === 'indeterminate');
+    expect(uncertain).toHaveLength(1);
+    expect(uncertain[0].error?.code).toBe('TOOL_INDETERMINATE');
+    expect(await resumeCommand(runId, { stateDir, headless: true, json: true, retryIndeterminate: true })).toBe(0);
+    expect(requests).toBe(callsAtCrash + 1);
+    const recovered = await storedMemory(stateDir, runId);
+    expect(recovered.memory?.value).toEqual(crash.tool === 'memory_write'
+        ? [expect.objectContaining({ content: 'durable memory' })] : []);
+    expect(recovered.effects.every(effect => effect.status === 'succeeded')).toBe(true);
+    expect(await manifest(root, runId)).toMatchObject({ status: 'succeeded' });
+}, 40_000);
+
+it.each(['write', 'remove'] as const)('preserves a committed memory %s across CLI SIGKILL and resume without replay', async operation => {
+    const requests: any[] = [];
+    const killRequest = operation === 'write' ? 2 : 3;
+    let child: ChildProcess;
+    const server = createServer((request, response) => {
+        let body = ''; request.on('data', chunk => { body += chunk; });
+        request.on('end', () => {
+            requests.push(JSON.parse(body));
+            if (requests.length === killRequest) { child.kill('SIGKILL'); response.destroy(); return; }
+            memoryReply(response, requests.length === 1 ? 'memory_write'
+                : operation === 'remove' && requests.length === 2 ? 'memory_remove' : undefined);
+        });
+    });
+    servers.push(server);
+    const port = await listenForTest(server), root = await workspace('mindos-crash-memory-');
+    const stateDir = path.join(root, '.mindos'), configPath = path.join(root, 'mindos.yml');
+    const config = parse(singleNodeConfig(port));
+    Object.assign(config.agents[0], { tools: ['memory_write', 'memory_remove'], stream: false, approval: 'none',
+        memory_policy: { namespace_id: 'agent', read_scopes: ['project'], write_scopes: ['project'] } });
+    process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
+    await writeFile(configPath, stringify(config));
+    child = startRun(configPath, stateDir);
+    const [code, signal] = await once(child, 'exit');
+    expect([code, signal]).toEqual([null, 'SIGKILL']);
+    const runId = await latestRun(root);
+    await settleLease();
+    const committed = await storedMemory(stateDir, runId);
+    expect(committed.memory?.value).toEqual(operation === 'write'
+        ? [expect.objectContaining({ entryId: 'note', content: 'durable memory' })] : []);
+    expect(committed.effects).toHaveLength(killRequest - 1);
+    for (const effect of committed.effects) expect(effect).toMatchObject({ status: 'succeeded', attemptCount: 1 });
+    const toolResults = requests.at(-1).messages.filter((message: any) => message.role === 'tool');
+    expect(toolResults).toHaveLength(killRequest - 1);
+    for (const result of toolResults) expect(result.content).toContain('success');
+    expect(await resumeCommand(runId, { stateDir, headless: true, json: true })).toBe(3);
+    expect(requests).toHaveLength(killRequest);
+    expect(await storedMemory(stateDir, runId)).toEqual(committed);
+    expect(await resumeCommand(runId, { stateDir, headless: true, json: true, retryIndeterminate: true })).toBe(0);
+    expect(requests).toHaveLength(killRequest + 1);
+    // Compare the entire versioned record: an unconditional duplicate write would change it.
+    expect(await storedMemory(stateDir, runId)).toEqual(committed);
+    expect(await manifest(root, runId)).toMatchObject({ status: 'succeeded' });
+}, 40_000);
 
 it('recovers a run killed while the first Effect is in flight', async () => {
     const crash = crashingServer({ request: 1, when: 'before-reply' }, () => 'done');

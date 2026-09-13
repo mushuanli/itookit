@@ -210,8 +210,11 @@ function resolveExecutionConfig(
     const result = { ...defaults, ...config };
     delete result.model;
     delete result.prompt;
+    // Memory authority comes only from this node's resolved Agent, never prompt/config inheritance.
+    delete result.memoryPolicy;
     return {
         ...result,
+        ...(agent?.memoryPolicy ? { memoryPolicy: structuredClone(agent.memoryPolicy) } : {}),
         instruction: stringValue(config.instruction),
         ...resolveModelSettings(config, agent, context),
         ...resolveHarnessSettings(config, agent, context),

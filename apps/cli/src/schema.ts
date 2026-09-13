@@ -41,6 +41,14 @@ const connectionSchema = z.strictObject({
 });
 
 const agentSchema = z.strictObject({
+    memory_policy: z.strictObject({
+        namespace_id: z.string().trim().min(1),
+        read_scopes: z.array(z.string().trim().min(1)),
+        write_scopes: z.array(z.string().trim().min(1)),
+        retrieval_limit: z.number().int().nonnegative().optional(),
+        retention: z.strictObject({ max_entries_per_scope: z.number().int().positive().optional(),
+            before: z.number().nonnegative().optional() }).optional(),
+    }).optional(),
     id: ID,
     name: z.string().optional(),
     connection: z.string().min(1),

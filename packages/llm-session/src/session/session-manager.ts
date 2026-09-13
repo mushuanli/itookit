@@ -44,6 +44,8 @@ import { RoundLog } from '../persistence/round-log';
 import type { Kernel, SessionHandle } from '@itookit/durable-kernel';
 import { sessionDirectoryStorage } from '../persistence/session-directory-storage';
 import { DurableConversationProjection, RUNTIME_KEY } from '../persistence/durable-conversation-projection';
+import { SessionMemoryProvider } from './session-memory-provider';
+import { SessionMemoryControls } from './session-memory-controls';
 
 /**
  * 会话管理器 — llm-conversation 对外的唯一入口
@@ -52,6 +54,7 @@ import { DurableConversationProjection, RUNTIME_KEY } from '../persistence/durab
  * Conversation session facade backed by Round persistence and Kernel runs.
  */
 export class SessionManager implements ISession, SessionQuery {
+    readonly memory: SessionMemoryControls;
     private registry: SessionRegistry;
     private roundOps: RoundOperations;
     private branchService: BranchService;
@@ -87,6 +90,8 @@ export class SessionManager implements ISession, SessionQuery {
 
         if (!options?.kernel) throw new Error('SessionManager requires Kernel');
         this.kernel = options.kernel;
+        this.memory = new SessionMemoryControls(new SessionMemoryProvider(this.kernel), agentService,
+            () => this.registry.ensureBound().sessionId, options.canWriteSession);
         this.durableProjection = new DurableConversationProjection(engine);
         this.runs = new SessionRunCoordinator(
             engine,

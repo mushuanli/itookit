@@ -212,3 +212,23 @@ mindos delete 在本机锁之外，通过持久调度记录 CAS 写入删除标�
 ### 原生进程结束与取消
 
 一次性 native shell 调用拥有它创建的进程组。取消或超时先发送 SIGTERM，仍未退出时升级 SIGKILL；父进程正常退出也会停止该组剩余后台成员。CLI 等待输出管道关闭及停止确认后才返回，启动前已取消不会执行命令。Linux 通过进程状态排除无法执行的 zombie；无法确认时保持清理等待，不用超时伪造成功。需要长期后台执行的服务不应借助一次性 Bash 调用遗留进程。native 模式不限制程序主动脱离进程组，不提供 OCI 或 Tauri bwrap 的隔离边界。
+
+### Agent 记忆策略
+
+CLI 使用显式 scope 授权，`tools` 与 `memory_policy` 必须同时声明。记忆存于本次 Run 的 Kernel Session，不自动跨新 Run 共享；文件工作区权限不替代记忆权限。
+
+```yaml
+agents:
+  - id: worker
+    connection: default
+    tools: [memory_list, memory_write, memory_remove]
+    memory_policy:
+      namespace_id: worker
+      read_scopes: [project]
+      write_scopes: [project]
+      retrieval_limit: 10
+      retention:
+        max_entries_per_scope: 100
+```
+
+写工具参数为 `scope`、`entryId`、`content`，删除工具不需要 `content`。可传 `expectedContentHash`：旧内容摘要用于冲突检查，null 只允许新建；省略为无条件写入。列表仅返回 read_scopes 中的条目。CLI Flow 节点不自动注入检索结果，可通过 memory_list 显式读取。策略冻结到 Task 输入；修改 YAML 不扩大已提交任务权限。
