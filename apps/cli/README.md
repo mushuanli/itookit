@@ -194,3 +194,7 @@ podman build -t mindos-sandbox:v1 -f apps/cli/sandbox/Dockerfile .
 ```
 
 运行状态位于 `.mindos/runs/<run-id>/`，包括配置快照、`run.json`、`events.jsonl`、产物和最终结果。API Key 只从环境变量读取，不写入配置快照；LLM 的运行时配置使用内存 VFS。
+
+### 租约接管的时钟偏差配置
+
+`MINDOS_SESSION_LEASE_SKEW_MS` 和 `MINDOS_SCHEDULER_LEASE_SKEW_MS` 分别传给 Session 租约及 Flow 调度租约，单位为毫秒。未设置时使用库默认值 0；显式 0 有效。配置必须为非负安全整数，空白、负数、非整数和非法数值在 CLI 创建运行时资源前报错。不同拥有者须等到旧租约到期时间加偏差预算后再接管；显式释放的 Flow 租约无需等待。该配置不自动校准主机时钟，也不证明共享存储或多主机 fencing 已通过验收。

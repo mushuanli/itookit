@@ -1,3 +1,4 @@
+import { leaseSkewConfig } from './lease-config';
 import path from 'node:path';
 import type { DagRunSpec, LLMConnection, LLMProvider, ToolDefinition } from '@itookit/common';
 import { parse } from 'yaml';
@@ -89,6 +90,7 @@ export async function createCliRuntime(
     mode: 'execute' | 'control' = 'execute',
     hostOptions: CliRuntimeOptions = {},
 ): Promise<CliRuntime> {
+    const skew = leaseSkewConfig(process.env);
     const root = vfsRoot ?? path.join(workflow.stateDir, 'runtime', 'vfs');
     const sidecarDir = vfsRoot ? path.join(vfsRoot, '_meta') : path.join(workflow.stateDir, 'runtime', 'meta');
     const backend = await openLocalFSBackend({
@@ -107,7 +109,7 @@ export async function createCliRuntime(
     // Test/tuning knob: a crashed CLI keeps its Session lease until the TTL expires,
     // so crash-recovery tests shorten it instead of waiting the full minute.
     const leaseTtlMs = Number(process.env.MINDOS_SESSION_LEASE_TTL_MS) || undefined;
-    const leases = new SessionLeaseStore(systemFS, { ttlMs: leaseTtlMs });
+    const leases = new SessionLeaseStore(systemFS, { ttlMs: leaseTtlMs, skewMs: skew.sessionSkewMs });
     const lease = await leases.acquire(manifest.sessionId, { id: `cli-${process.pid}-${crypto.randomUUID()}`, kind: 'cli' });
     if (!lease) {
         const current = await leases.inspect(manifest.sessionId);
@@ -195,6 +197,7 @@ export async function createCliRuntime(
         // A crashed host keeps the Run's scheduler lease until the TTL expires; tests
         // shorten it the same way they shorten the Session lease.
         schedulerLeaseTtlMs: Number(process.env.MINDOS_SCHEDULER_LEASE_TTL_MS) || undefined,
+        schedulerLeaseSkewMs: skew.schedulerSkewMs,
     });
     return {
         kernel,
