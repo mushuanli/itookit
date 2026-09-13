@@ -198,3 +198,9 @@ grant 撤销立即阻止未来 cache 读取/发布；历史已提交的 Task 输
 | provider 不支持删除/TTL/ref 控制 | 返回能力差异；不声称已执行不支持的控制 |
 
 最小落地顺序：Task scope reusable + 显式选择 + durable read receipt → Session scope/grants/失效/fill fencing → shared owner cache → single-use 可选能力 → provider adapter 能力映射。Cache 不阻塞基础 Task 状态机落地，但不得引入不可恢复的隐式读路径。
+
+### 缓存物理清理与旧索引兼容
+
+Task 终态在同一事务清理其 step/task namespace、条目、发布序号与相关 resource/handle；Session namespace 保留至 Session closed。Effect 幂等事实、cache-operation 回执及 artifact 不删除。step 的可见性仍在逻辑 step 改变时失效，剩余物理记录在 Task 终态回收。
+
+`cache/owner/<taskId>/<namespaceId>` 只是派生索引。`cache/owner-index-version` 缺失时，创建或 Task 清理先从 namespace 记录事务内重建索引并写版本 1；未知版本拒绝。删除前核对索引键、namespace id 和 ownerTaskId，错误索引不允许删除另一 Task 的缓存；终态提交也回滚。Session closed 时移除索引版本标记。回归位于 `packages/durable-kernel/src/retention.test.ts`。旧宿主继续写入但不维护索引的混合部署，以及跨 Session/provider/大值与 GC 竞争仍需独立验收。

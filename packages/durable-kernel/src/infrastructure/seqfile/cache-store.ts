@@ -9,6 +9,9 @@ const namespaceKey = (id: string) => `cache/namespace/${id}`;
 const entryPrefix = (id: string) => `cache/entry/${id}/`;
 const entryKey = (id: string, key: string) => `${entryPrefix(id)}${encodeURIComponent(key)}`;
 const opKey = (operationId: string) => `cache-operation/${encodeURIComponent(operationId)}`;
+const ownerIndexPrefix = (taskId: string) => `cache/owner/${encodeURIComponent(taskId)}/`;
+const ownerIndexKey = (taskId: string, namespaceId: string) => `${ownerIndexPrefix(taskId)}${namespaceId}`;
+const ownerIndexVersionKey = 'cache/owner-index-version';
 
 function required(value: string, name: string): void {
     if (typeof value !== 'string' || !value || value.length > 512) throw new Error(`Invalid cache ${name}`);
@@ -41,6 +44,7 @@ export async function createCacheTx(tx: ISeqFileTransaction, root: string, taskI
     const maxEntries = spec.maxEntries ?? 256, maxBytes = spec.maxBytes ?? 4 * 1024 * 1024;
     if (!Number.isInteger(maxEntries) || maxEntries < 1 || maxEntries > 4096 || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 64 * 1024 * 1024) throw new Error('Cache quota is invalid');
     if (spec.ttlMs !== undefined) expiresAt(spec.ttlMs, Date.now());
+    await ensureCacheOwnerIndex(tx, resourcesPath(root));
     const id = createId('cache');
     const namespace: CacheNamespace = { id, ownerTaskId: taskId, stepNumber: task.stepNumber ?? 0,
         name: spec.name, scope: spec.scope ?? 'task', usage: spec.usage ?? 'reusable', generation: 1,
@@ -51,6 +55,9 @@ export async function createCacheTx(tx: ISeqFileTransaction, root: string, taskI
         uri: `cache://${id}`, generation: 1, createdAt: namespace.createdAt }));
     await tx.setEntry(resourcesPath(root), handleKey(handle.id), encode(handle));
     await tx.setEntry(resourcesPath(root), namespaceKey(id), encode(namespace));
+    // Rebuildable owner index: lets terminal cleanup find a Task's namespaces without
+    // scanning the whole resources.seq on every Task completion.
+    await tx.setEntry(resourcesPath(root), ownerIndexKey(taskId, id), encode({ id }));
     await appendEventTx(tx, root, task.sessionId, taskId, 'cache.created', { namespaceId: id, scope: namespace.scope });
     return { namespace, handle };
 }
@@ -200,6 +207,113 @@ export async function renewCacheTx(tx: ISeqFileTransaction, root: string, taskId
     await tx.setEntry(resourcesPath(root), namespaceKey(current.id), encode(next));
     await appendEventTx(tx, root, task.sessionId, taskId, 'cache.renewed', { namespaceId: current.id, generation: next.generation, ttlMs });
     return next;
+}
+
+/**
+ * Drop the cache namespaces a Task owns once it reaches a terminal state.
+ *
+ * Step visibility already expires when the logical step changes. Reclaim remaining
+ * `step`/`task` namespaces at Task terminal, while
+ * `session` scope lives until the Session closes. Artifacts, Effect idempotency facts
+ * and `cache-operation` receipts are deliberately left in place — cleanup only removes
+ * the namespace record, its entries, its publication sequence and its handle/resource.
+ * Returns the removed namespace ids for the `cache.cleaned` event payload.
+ */
+export async function cleanupTaskCachesTx(tx: ISeqFileTransaction, root: string, sessionId: string, taskId: string): Promise<string[]> {
+    const path = resourcesPath(root);
+    const namespaces = await expirableNamespaces(tx, path, taskId);
+    if (namespaces.length === 0) return [];
+    const owned = new Set(namespaces.map(namespace => namespace.id));
+    const handleIds: string[] = [];
+    await tx.walkEntries(path, row => {
+        const handle = decode<ResourceHandle>(row.value);
+        if (owned.has(handle.resourceId)) handleIds.push(handle.id);
+        return true;
+    }, { keyPrefix: 'handle/' });
+    for (const namespace of namespaces) await deleteCacheNamespace(tx, path, namespace);
+    for (const handleId of handleIds) await tx.deleteEntry(path, handleKey(handleId));
+    const removed = [...owned];
+    await appendEventTx(tx, root, sessionId, taskId, 'cache.cleaned', { namespaceIds: removed });
+    return removed;
+}
+
+/** `session` scope outlives the owning Task, so it keeps its namespace and index entry. */
+async function expirableNamespaces(tx: ISeqFileTransaction, path: string, taskId: string): Promise<CacheNamespace[]> {
+    await ensureCacheOwnerIndex(tx, path);
+    const indexed: string[] = [];
+    await tx.walkEntries(path, row => {
+        const id = decode<{ id: string }>(row.value).id;
+        if (typeof id !== 'string' || !id || row.key !== ownerIndexKey(taskId, id)) throw new Error('Cache owner index mismatch');
+        indexed.push(id);
+        return true;
+    }, { keyPrefix: ownerIndexPrefix(taskId) });
+    const namespaces: CacheNamespace[] = [];
+    for (const id of indexed) {
+        const raw = await tx.getEntry(path, namespaceKey(id));
+        if (!raw) continue;
+        const namespace = decode<CacheNamespace>(raw);
+        if (namespace.id !== id || namespace.ownerTaskId !== taskId) throw new Error('Cache owner index mismatch');
+        if (namespace.scope !== 'session') namespaces.push(namespace);
+    }
+    return namespaces;
+}
+
+/** Legacy namespaces predate the index; rebuild once, atomically with its version marker. */
+async function ensureCacheOwnerIndex(tx: ISeqFileTransaction, path: string): Promise<void> {
+    const version = await tx.getEntry(path, ownerIndexVersionKey);
+    if (version === '1') return;
+    if (version !== null) throw new Error('Unsupported cache owner index version');
+    const namespaces: CacheNamespace[] = [], obsolete: string[] = [];
+    await tx.walkEntries(path, row => {
+        const namespace = decode<CacheNamespace>(row.value);
+        if (typeof namespace.ownerTaskId !== 'string' || !namespace.ownerTaskId
+            || typeof namespace.id !== 'string' || !namespace.id || row.key !== namespaceKey(namespace.id)
+            || !['step', 'task', 'session'].includes(namespace.scope)) throw new Error('Invalid cache namespace');
+        namespaces.push(namespace); return true;
+    }, { keyPrefix: 'cache/namespace/' });
+    await tx.walkEntries(path, row => { obsolete.push(row.key); return true; }, { keyPrefix: 'cache/owner/' });
+    for (const key of obsolete) await tx.deleteEntry(path, key);
+    for (const namespace of namespaces) {
+        await tx.setEntry(path, ownerIndexKey(namespace.ownerTaskId, namespace.id), encode({ id: namespace.id }));
+    }
+    await tx.setEntry(path, ownerIndexVersionKey, '1');
+}
+
+async function deleteCacheNamespace(tx: ISeqFileTransaction, path: string, namespace: CacheNamespace): Promise<void> {
+    for (const prefix of [`cache/entry/${namespace.id}/`, `cache/version/${namespace.id}/`]) {
+        const keys: string[] = [];
+        await tx.walkEntries(path, row => { keys.push(row.key); return true; }, { keyPrefix: prefix });
+        for (const key of keys) await tx.deleteEntry(path, key);
+    }
+    await tx.deleteEntry(path, namespaceKey(namespace.id));
+    await tx.deleteEntry(path, resourceKey(namespace.id));
+    await tx.deleteEntry(path, ownerIndexKey(namespace.ownerTaskId, namespace.id));
+}
+
+/**
+ * Physical reclaim of every cache namespace of a Session, including `session` scope, once
+ * the Session reaches `closed` (Cache §10 `until-session-closed`). `closed` is checked to
+ * have no unfinished Task before this runs, and cache operations refuse closed Sessions,
+ * so no reader can hold a live reference while the namespaces are dropped.
+ */
+export async function cleanupSessionCachesTx(tx: ISeqFileTransaction, root: string, sessionId: string): Promise<string[]> {
+    const path = resourcesPath(root);
+    const namespaces: CacheNamespace[] = [];
+    await tx.walkEntries(path, row => { namespaces.push(decode<CacheNamespace>(row.value)); return true; }, { keyPrefix: 'cache/namespace/' });
+    await tx.deleteEntry(path, ownerIndexVersionKey);
+    if (namespaces.length === 0) return [];
+    const owned = new Set(namespaces.map(namespace => namespace.id));
+    const handleIds: string[] = [];
+    await tx.walkEntries(path, row => {
+        const handle = decode<ResourceHandle>(row.value);
+        if (owned.has(handle.resourceId)) handleIds.push(handle.id);
+        return true;
+    }, { keyPrefix: 'handle/' });
+    for (const namespace of namespaces) await deleteCacheNamespace(tx, path, namespace);
+    for (const handleId of handleIds) await tx.deleteEntry(path, handleKey(handleId));
+    const removed = [...owned];
+    await appendEventTx(tx, root, sessionId, undefined, 'cache.cleaned', { namespaceIds: removed, scope: 'session' });
+    return removed;
 }
 
 export async function listCachesTx(tx: ISeqFileTransaction, root: string, taskId: string): Promise<Array<{ namespace: CacheNamespace; handleId: string }>> {

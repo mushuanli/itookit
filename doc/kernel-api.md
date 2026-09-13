@@ -734,3 +734,7 @@ Task 全量列表扫描复用目录扫描时已经读取的 `record`，每个有
 ### 关闭与取消观察
 
 `taskStat`、`taskStats`、`sessionStat` 是公开的只读状态投影，宿主用它们区分取消请求与清理确认。`closeSession` 对 closed/archived Session 的重复关闭在事务内保持终态，普通状态转换仍拒绝倒退。kernel-adapters 的六类 Effect 按 Session + Task + Effect 跟踪全部本地在途执行，取消确认等待它们结束；这不证明远程提供方停止计费或跨宿主 fencing 已完成。
+
+### 保留与清理 API 批次
+
+`Kernel.pruneSessionMessages(sessionId, before, limit?)` 返回 `{outbox, inbox}`；跨 Session 回收以双方持久结算确认为前提。已终态源恢复只补确认，不重新投递。缓存按 Task/Session 生命周期在同一事务清理，旧 owner 索引事务内重建并校验真实所有者。详见 [Cache 设计](design/durable-harness-cache.md) 与 [Storage 设计](design/durable-harness-storage.md)；自动回归在 `packages/durable-kernel/src/retention.test.ts`。

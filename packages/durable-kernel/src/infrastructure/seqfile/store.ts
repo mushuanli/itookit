@@ -1,19 +1,17 @@
-import { assertSessionLayout, currentSessionLayout } from './session-layout';
-import { enqueueMessageTx, deliverMessageTx, consumeMessageTx } from './mailbox-store';
+import { enqueueMessageTx, deliverMessageTx, consumeMessageTx, pruneMessagesTx, acknowledgeMessageSettlementTx } from './mailbox-store';
 import { executeResourceTx, type PreparedResourceCommand } from './managed-resources';
-import { createCacheTx, readCacheTx, publishCacheTx, invalidateCacheTx, renewCacheTx, manageCacheTx, listCachesTx } from './cache-store';
+import { assertSessionLayout, currentSessionLayout } from './session-layout';
+import { cleanupSessionCachesTx, cleanupTaskCachesTx, createCacheTx, readCacheTx, publishCacheTx, invalidateCacheTx, renewCacheTx, manageCacheTx, listCachesTx } from './cache-store';
 import { refreshWaiters, recoverWaitGraphTx, hasCancelledAncestorTx, validateRetrySourceTx } from './store-helpers';
 import { assertDurableValue } from '../../application/durability';
 import { snapshotKey, ensureTaskEventIndexTx, taskEventCountKey, taskEventFirstKey, taskEventKey } from './seqfile-core';
 
 import type {
     BudgetAccount,
-    BudgetUsage,
     ContextBranch,
     ContextCommit,
     ContextCommitOptions,
     CrossSessionMessage,
-
     EventEnvelope,
     InteractionResponse,
     PersistedEffect,
@@ -35,6 +33,7 @@ import type {
     TaskSpec,
     WorkspaceDiff,
     WorkspaceSnapshot,
+    BudgetUsage,
 } from '../../domain/types';
 import { advanceDependants,allHandlesTx,appendEventTx,applySharedMutations,applySpawnsTx,assertBudgetCapacity,assertBudgetVersion,assertClaim,assertContextHead,assertRightsSubset,assertSharedVersion,attemptKey,authorizeHandleTx,budgetAccount,budgetKey,budgetUsageKey,cancelActiveEffects,catalogPath,claimMatches,claimTask,clearSeqRecords,collectContextHistory,contextBranchKey,contextCommitKey,contextPath,createId,decode,deletedRevision,dependencySatisfied,descendantHandleIds,effectAttempt,effectClaimMatches,encode,ensureSeqFile,ensureSessionLayout,ensureTaskLayout,ensureTree,eventsPath,finishAttemptTx,finishEffect,graphPath,handleKey,indexPath,indexTask,isTerminal,join,messagesPath,nextSharedVersion,outboxKey,readBudgetTx,readBudgetUsageTx,readContextBranchTx,readMessages,readSharedTx,readTaskTx,readyCandidates,recoverEffect,registerTaskWaitTx,replaceEffectAttempt,requireContextParents,requireHandleTx,requireResourceTx,requireSessionTx,requireTaskTx,requireTransactionalSeq,resourceBudgetsTx,resourceKey,resourcesPath,seq,sessionPath,sessionRecordPaths,sharedEntry,sharedHistoryPrefix,sharedKey,sharedPath,taskFromSpec,taskPath,terminalDependency,transaction,uniqueRights,unregisterTaskWaitTx,validateSharedKey,wakeFromPendingEvents,wakeTaskWaiters,workspaceDiffKey,workspaceSnapshotKey,writeContextBranchTx,writeSharedHistory,writeSharedRevision,writeTaskTx } from './store-helpers';
 import { KernelErrorCode, kernelError } from '../../domain/errors';
@@ -140,6 +139,8 @@ export class SeqFileKernelStore {
         await binding.fs.driver.updateMetadata(binding.rootPath, { vfsFixedLayout: true });
         if (catalog.registrationPending) await this.createSession(id, catalog.storage);
         const record = await this.readSession(binding);
+        // Opening is the entry point: refuse a newer layout, pending migration or
+        // capability this host cannot provide before any caller touches the records.
         assertSessionLayout(record);
         return { record, binding };
     }
@@ -188,6 +189,8 @@ export class SeqFileKernelStore {
             const value = await tx.getEntry(sessionPath(binding.rootPath), SESSION_KEY);
             if (!value) throw new Error(`Session record missing at ${binding.rootPath}`);
             const current = decode<SessionRecord>(value);
+            // A repeated close request cannot reopen a terminal Session. Keep the check
+            // in this transaction so a concurrent closer cannot race it.
             if (status === 'closing' && closeMode && ['closed', 'archived'].includes(current.status)) return current;
             const allowed: Record<SessionRecord['status'], SessionRecord['status'][]> = {
                 open: ['open', 'suspended', 'suspending', 'closing'], suspending: ['suspending', 'suspended', 'closing'], suspended: ['suspended', 'open', 'closing'],
@@ -220,6 +223,8 @@ export class SeqFileKernelStore {
             const next = { ...current, status: nextStatus, closeMode: closeMode ?? current.closeMode, version: current.version + 1, updatedAt: Date.now() };
             await tx.setEntry(sessionPath(binding.rootPath), SESSION_KEY, encode(next));
             await appendEventTx(tx, binding.rootPath, current.id, undefined, `session.${nextStatus}`, next);
+            // `session` scope retention ends with the Session, including its physical reclaim.
+            if (nextStatus === 'closed') await cleanupSessionCachesTx(tx, binding.rootPath, current.id);
             return next;
         });
         await transaction(this.catalog.fs, tx => tx.setEntry(
@@ -282,6 +287,8 @@ export class SeqFileKernelStore {
     }
 
     async listShared(binding: ResolvedStorageBinding, prefix = ''): Promise<SharedStateEntry[]> {
+        // Listing is still a Session read: refuse a layout this host cannot interpret
+        // instead of presenting shared state it does not understand.
         await transaction(binding.fs, tx => requireSessionTx(tx, binding.rootPath));
         const entries: SharedStateEntry[] = [];
         await seq(binding.fs).walkEntries(sharedPath(binding.rootPath), entry => {
@@ -315,9 +322,18 @@ export class SeqFileKernelStore {
         });
     }
 
+    /** Retention/GC for settled messages; see `pruneMessagesTx` for what is kept. */
+    async pruneMessages(
+        binding: ResolvedStorageBinding,
+        before: number,
+        limit?: number,
+    ): Promise<{ outbox: number; inbox: number }> {
+        return transaction(binding.fs, tx => pruneMessagesTx(tx, binding.rootPath, before, limit));
+    }
+
     async pendingOutbox(binding: ResolvedStorageBinding, dueAt?: number): Promise<CrossSessionMessage[]> {
         const messages = await this.outbox(binding);
-        return messages.filter(message => message.status === 'pending' && (dueAt === undefined || (message.nextAttemptAt ?? 0) <= dueAt || (message.expiresAt ?? Infinity) <= dueAt));
+        return messages.filter(message => (message.status === 'pending' || (message.sourceSessionId !== message.targetSessionId && message.settlementAcknowledgedAt === undefined)) && (dueAt === undefined || (message.nextAttemptAt ?? 0) <= dueAt || (message.expiresAt ?? Infinity) <= dueAt));
     }
 
     async outbox(binding: ResolvedStorageBinding): Promise<CrossSessionMessage[]> {
@@ -355,7 +371,8 @@ export class SeqFileKernelStore {
             if (current.status !== 'pending') return current;
             const next: CrossSessionMessage = { ...current, status: receipt?.status ?? 'delivered',
                 deliveredAt: receipt?.status === 'rejected' ? undefined : receipt?.deliveredAt ?? Date.now(),
-                rejectedAt: receipt?.rejectedAt, rejection: receipt?.rejection, nextAttemptAt: undefined };
+                rejectedAt: receipt?.rejectedAt, rejection: receipt?.rejection,
+                settlementAcknowledgedAt: receipt?.settlementAcknowledgedAt, nextAttemptAt: undefined };
             await tx.setEntry(messagesPath(binding.rootPath), key, encode(next));
             await appendEventTx(tx, binding.rootPath, current.sourceSessionId, current.sourceTaskId,
                 `session.message.${next.status}`, next);
@@ -363,12 +380,17 @@ export class SeqFileKernelStore {
         });
     }
 
+    async acknowledgeMessageSettlement(binding: ResolvedStorageBinding, message: CrossSessionMessage,
+        side: 'inbox' | 'outbox'): Promise<CrossSessionMessage | undefined> {
+        return transaction(binding.fs, tx => acknowledgeMessageSettlementTx(tx, binding.rootPath, message, side));
+    }
+
     async recordMessageRetry(binding: ResolvedStorageBinding, messageId: string, error: unknown): Promise<void> {
         await transaction(binding.fs, async tx => {
             const key = outboxKey(messageId), value = await tx.getEntry(messagesPath(binding.rootPath), key);
             if (!value) return;
             const message = decode<CrossSessionMessage>(value);
-            if (message.status !== 'pending') return;
+            if (message.settlementAcknowledgedAt !== undefined) return;
             const deliveryAttempts = (message.deliveryAttempts ?? 0) + 1;
             await tx.setEntry(messagesPath(binding.rootPath), key, encode({ ...message, deliveryAttempts,
                 nextAttemptAt: Date.now() + Math.min(30_000, 250 * 2 ** Math.min(deliveryAttempts - 1, 7)),
@@ -907,6 +929,7 @@ export class SeqFileKernelStore {
                 await executeResourceTx(tx, resource);
             }
             if (isTerminal(committed.status)) {
+                await cleanupTaskCachesTx(tx, binding.rootPath, committed.sessionId, committed.id);
                 await advanceDependants(tx, binding.rootPath, committed);
                 await wakeTaskWaiters(tx, binding.rootPath, committed);
             }
@@ -1516,6 +1539,7 @@ export class SeqFileKernelStore {
             await writeTaskTx(tx, binding.rootPath, next);
             await indexTask(tx, binding.rootPath, next);
             await appendEventTx(tx, binding.rootPath, task.sessionId, taskId, `task.${status}`, next.exit);
+            await cleanupTaskCachesTx(tx, binding.rootPath, task.sessionId, taskId);
             await advanceDependants(tx, binding.rootPath, next);
             await wakeTaskWaiters(tx, binding.rootPath, next);
             return next;

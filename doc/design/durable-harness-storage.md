@@ -166,3 +166,11 @@ Session 的 resources.seq 保存 `create/<encoded ownerTaskId>/<encoded requestI
 ### 初始启动信号回执
 
 任务记录文件中的 `start-signal` 键保存可选初始信号的编码指纹，与 Task 启动状态、pending signal、task.signal/task.started 事件同事务提交。后续相同信号 start 是 no-op，不同信号拒绝；只有普通无信号启动的任务没有此键。该键不替代后续 signal 的事件记录。
+
+### 跨 Session 消息结算与 retention
+
+消费回执不证明发送端已经停止重试。跨 Session 消息使用 `settlementAcknowledgedAt`：源端先写 delivered/rejected 结果，目标持久确认源端已结算，源端再记录目标已确认。未确认的终态 outbox 仍列入 pendingOutbox，但恢复只补确认，不重新 deliver；目标已清理回执时可完成源端确认。目标不存在且已过期的本地拒绝不要求目标确认。
+
+清理仅处理终态 outbox、已消费或已拒绝 inbox；跨 Session 两类记录均需结算确认。同 Session 继续依靠本地事务与未完成 outbox 检查。水位取 created/delivered/rejected/consumed/settlementAcknowledgedAt 的最大时间；before 必须非负有限，limit 非负安全整数（0 不删除）。回归覆盖目标已消费但源端未结算、源已结算确认未完成、目标回执已回收后的 Kernel 重建，以及非法 GC 参数不改记录。
+
+这些测试使用同一内存 VFS 中不同 Session 存储根和 Kernel 重建，不等于 SIGKILL/断电或多主机实测。宿主仍须保证 before 早于有效重放窗口；混合旧版本、超过该窗口仍在途的投递、跨存储 fencing 和来源可信边界仍属完整协议验收，不能因本批通过而关闭。

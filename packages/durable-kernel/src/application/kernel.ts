@@ -626,6 +626,10 @@ export class Kernel implements KernelRegistration {
         return { snapshot: await this.store.saveWorkspaceSnapshot(binding, snapshot), conflicts: result.conflicts ?? [] };
     }
 
+    async pruneSessionMessages(sessionId: string, before: number, limit?: number): Promise<{ outbox: number; inbox: number }> {
+        return this.store.pruneMessages(await this.binding(sessionId), before, limit);
+    }
+
     async relayPendingMessages(): Promise<number> {
         let delivered = 0;
         for (const session of await this.store.listSessions()) {
@@ -637,10 +641,24 @@ export class Kernel implements KernelRegistration {
         return delivered;
     }
 
+    /** Retry settlement acknowledgement without ever re-delivering a terminal outbox record. */
+    private async acknowledgeMessage(source: ResolvedStorageBinding, message: CrossSessionMessage): Promise<CrossSessionMessage> {
+        if (message.settlementAcknowledgedAt !== undefined || message.sourceSessionId === message.targetSessionId) return message;
+        try {
+            const target = await this.binding(message.targetSessionId);
+            await this.store.acknowledgeMessageSettlement(target, message, 'inbox');
+            return (await this.store.acknowledgeMessageSettlement(source, message, 'outbox'))!;
+        } catch (error) {
+            await this.store.recordMessageRetry(source, message.id, error);
+            throw error;
+        }
+    }
+
     private async relayMessage(
         source: ResolvedStorageBinding,
         message: CrossSessionMessage,
     ): Promise<CrossSessionMessage> {
+        if (message.status !== 'pending') return this.acknowledgeMessage(source, message);
         let receipt: CrossSessionMessage;
         try {
             const target = await this.binding(message.targetSessionId);
@@ -650,7 +668,7 @@ export class Kernel implements KernelRegistration {
             // A missing target may still be created later. The caller can bound retries.
             if (message.expiresAt !== undefined && message.expiresAt <= Date.now()
                 && error instanceof Error && 'code' in error && error.code === 'SESSION_NOT_FOUND') {
-                receipt = { ...message, status: 'rejected', rejectedAt: Date.now(),
+                receipt = { ...message, status: 'rejected', rejectedAt: Date.now(), settlementAcknowledgedAt: Date.now(),
                     rejection: { code: 'expired', message: 'Message delivery deadline expired' } };
             } else {
                 await this.store.recordMessageRetry(source, message.id, error);
@@ -660,7 +678,7 @@ export class Kernel implements KernelRegistration {
         const delivered = await this.store.markMessageDelivered(source, message.id, receipt);
         this.notify(message.targetSessionId);
         this.notify(message.sourceSessionId);
-        return delivered;
+        return this.acknowledgeMessage(source, delivered);
     }
 
     async setSessionStatus(sessionId: string, status: SessionRecord['status']): Promise<void> {

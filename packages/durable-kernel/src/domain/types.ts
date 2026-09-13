@@ -86,6 +86,8 @@ export interface CrossSessionMessage<T extends JsonValue = JsonValue> {
     requestFingerprint?: string;
     deliverySequence?: number;
     consumedAt?: number;
+    /** Target recorded source settlement; source then recorded that acknowledgement. */
+    settlementAcknowledgedAt?: number;
     targetSessionId: SessionId;
     topic: string;
     payload: T;

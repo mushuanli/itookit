@@ -967,7 +967,9 @@ describe('durable harness protocols', () => {
         await targetStore.cancelTask(targetBinding, receiver.id);
         expect(await targetStore.deliverMessage(targetBinding, message)).toBe(false);
         expect((await targetStore.messageReceipt(targetBinding, message.id)).status).toBe('delivered');
-        await store.markMessageDelivered(binding, message.id);
+        const settled = await store.markMessageDelivered(binding, message.id);
+        await targetStore.acknowledgeMessageSettlement(targetBinding, settled, 'inbox');
+        await store.acknowledgeMessageSettlement(binding, settled, 'outbox');
         expect((await targetStore.readTask(targetBinding, receiver.id)).pendingEvents).toHaveLength(1);
         expect(await store.pendingOutbox(binding)).toHaveLength(0);
     });
