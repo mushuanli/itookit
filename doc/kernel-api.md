@@ -714,3 +714,5 @@ Task 消息发送拒绝取消祖先下的新入队请求，原消息身份可重
 存储层 sweep/recover 在恢复后代 lease 前检查完整祖先链；已有祖先取消时，事务内将后代取消并登记 Effect 清理。该传播不依赖父任务先被扫描，重复恢复不追加取消事件；物理清理由后续清理流程执行。
 
 **预算结算幂等**：`chargeBudget` 可选 `usageId`——扣费与 `usage/<usageId>` 回执在同一事务写入，同 id 重放返回记录的回执（不再扣费），同 id 不同金额/资源/维度抛冲突；Effect 路径由内核默认按逻辑 Effect 结算（`effect:<taskId>:<effectId>:<handleId>:<dimension>`），未提供 `usageId` 的宿主直调保持每次调用都扣。回归 `packages/durable-kernel/src/kernel.test.ts`。
+
+Session 布局声明：新记录携带 `layout`（布局版本、各记录族 schema 版本、必需能力与迁移状态）。`openSession` 与 `requireSessionTx` 校验这些字段；不支持的版本/记录族、缺失 schema、未知必需能力及未完成或非法迁移均拒绝。仅完全缺少 `layout` 字段的旧记录保留兼容读取。低层存储方法并非全部经该入口；这不构成在线迁移或跨主机 fencing 协议。

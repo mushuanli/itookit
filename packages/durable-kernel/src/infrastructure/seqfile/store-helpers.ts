@@ -23,6 +23,7 @@ import type {
 } from '../../domain/types';
 import type { EffectClaim, EffectCompletion, PreparedSpawn, TaskClaim, TaskCommitSideEffects } from './store';
 import { KernelErrorCode, kernelError } from '../../domain/errors';
+import { assertSessionLayout } from './session-layout';
 
 export * from './seqfile-core';
 import {
@@ -325,7 +326,10 @@ export function replaceAttempt(attempts: EffectAttempt[], current: EffectAttempt
 export async function requireSessionTx(tx: ISeqFileTransaction, root: string): Promise<SessionRecord> {
     const value = await tx.getEntry(sessionPath(root), SESSION_KEY);
     if (!value) throw new Error(`Session record missing at ${root}`);
-    return decode(value);
+    const record = decode<SessionRecord>(value);
+    // Every transactional Session operation refuses a layout this host cannot interpret.
+    assertSessionLayout(record);
+    return record;
 }
 
 export function validateSharedKey(key: string): void {

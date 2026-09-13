@@ -1,3 +1,4 @@
+import { assertSessionLayout, currentSessionLayout } from './session-layout';
 import { enqueueMessageTx, deliverMessageTx, consumeMessageTx } from './mailbox-store';
 import { executeResourceTx, type PreparedResourceCommand } from './managed-resources';
 import { createCacheTx, readCacheTx, publishCacheTx, invalidateCacheTx, renewCacheTx, manageCacheTx, listCachesTx } from './cache-store';
@@ -115,7 +116,7 @@ export class SeqFileKernelStore {
                 if (current.id !== id || encode(current.storage) !== encode(storage)) throw new Error('Session storage already belongs to another session');
                 return current;
             }
-            const created = { ...intent, registrationPending: false };
+            const created = { ...intent, registrationPending: false, layout: currentSessionLayout() };
             await tx.setEntry(sessionPath(binding.rootPath), SESSION_KEY, encode(created));
             await tx.setEntry(indexPath(binding.rootPath), 'task-order-version', '1');
             await appendEventTx(tx, binding.rootPath, id, undefined, 'session.created', created);
@@ -138,7 +139,9 @@ export class SeqFileKernelStore {
         const binding = await this.resolveStorage(catalog.storage);
         await binding.fs.driver.updateMetadata(binding.rootPath, { vfsFixedLayout: true });
         if (catalog.registrationPending) await this.createSession(id, catalog.storage);
-        return { record: await this.readSession(binding), binding };
+        const record = await this.readSession(binding);
+        assertSessionLayout(record);
+        return { record, binding };
     }
 
     async listSessions(): Promise<SessionRecord[]> {
@@ -278,6 +281,7 @@ export class SeqFileKernelStore {
     }
 
     async listShared(binding: ResolvedStorageBinding, prefix = ''): Promise<SharedStateEntry[]> {
+        await transaction(binding.fs, tx => requireSessionTx(tx, binding.rootPath));
         const entries: SharedStateEntry[] = [];
         await seq(binding.fs).walkEntries(sharedPath(binding.rootPath), entry => {
             entries.push(decode(entry.value));

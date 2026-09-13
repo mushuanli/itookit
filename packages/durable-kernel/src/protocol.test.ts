@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend, type IVFSManager, type IFileSystem } from '@itookit/vfs-core';
-import { ensureTree } from './infrastructure/seqfile/seqfile-core';
+import { ensureTree, sessionPath } from './infrastructure/seqfile/seqfile-core';
 import { Kernel } from './application/kernel';
 import { SeqFileKernelStore } from './infrastructure/seqfile/store';
 import { addEffect, executeEffectAdapter } from './application/effect-utils';
@@ -28,6 +28,45 @@ describe('durable harness protocols', () => {
             expect(await fs.driver.exists('/existing/deep/root/task/artifacts')).toBe(true);
         } finally { exists.mockRestore(); }
     });
+    it('declares a layout manifest and refuses Sessions it cannot interpret', async () => {
+        const record = await store.sessionRecord(binding);
+        expect(record.layout).toMatchObject({ layoutVersion: 1, migration: { status: 'complete', to: 1 } });
+        expect(record.layout?.recordSchemas).toHaveProperty('task');
+        expect(record.layout?.requiredCapabilities).toContain('atomic-cas');
+
+        await (await kernel.openSession('s')).setShared('probe', { ok: true });
+        // A record written by a newer host must not be guessed at.
+        const rewrite = (layout: unknown): Promise<void> => fs.meta.seq!.setEntry(
+            sessionPath(binding.rootPath), 'record', JSON.stringify({ ...record, layout }));
+        await rewrite({ ...record.layout, layoutVersion: 2 });
+        await expect(kernel.openSession('s')).rejects.toThrow('Unsupported Session layout version 2');
+        await expect(store.listShared(binding)).rejects.toThrow('Unsupported Session layout version 2');
+
+        await rewrite({ ...record.layout, requiredCapabilities: ['transactional-seq', 'streams'] });
+        await expect(kernel.openSession('s')).rejects.toThrow("unsupported storage capability 'streams'");
+
+        await rewrite({ ...record.layout, migration: { status: 'pending', to: 2 } });
+        await expect(kernel.openSession('s')).rejects.toThrow('migration is pending');
+
+        for (const layout of [null, false, {},
+            { ...record.layout, recordSchemas: { ...record.layout!.recordSchemas, task: 2 } },
+            { ...record.layout, recordSchemas: {} },
+            { ...record.layout, requiredCapabilities: undefined },
+            { ...record.layout, migration: { status: 'complete', to: 2 } },
+        ]) {
+            await rewrite(layout);
+            await expect(kernel.openSession('s')).rejects.toThrow();
+            await expect(store.listShared(binding)).rejects.toThrow();
+            await expect(store.setShared(binding, 'probe', { ok: false })).rejects.toThrow();
+        }
+
+        // A legacy record without a manifest still opens and works.
+        await rewrite(undefined);
+        const legacy = await kernel.openSession('s');
+        expect((await store.sessionRecord(binding)).layout).toBeUndefined();
+        expect((await legacy.getShared('probe'))?.value).toEqual({ ok: true });
+    });
+
     beforeEach(async () => {
         ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
         fs = await manager.openFileSystem('/data/test');

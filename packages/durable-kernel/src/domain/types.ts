@@ -29,9 +29,23 @@ export interface SessionStorageResolver {
 /** takeover requires the caller to have stopped the previous execution instance. */
 export interface RecoveryOptions { takeover?: boolean; }
 
+/**
+ * Storage §5 manifest: what a writer relied on, so a reader never guesses a newer or
+ * partially migrated layout. Absent on records written before layout manifests existed.
+ */
+export interface SessionLayout {
+    layoutVersion: number;
+    /** Schema revision per durable record family the writer owns. */
+    recordSchemas: Record<string, number>;
+    /** Capabilities the writer relied on; an opener lacking one must refuse the Session. */
+    requiredCapabilities: string[];
+    migration: { status: 'none' | 'pending' | 'complete'; to: number };
+}
+
 export interface SessionRecord {
     id: SessionId;
     status: SessionStatus;
+    layout?: SessionLayout;
     closeMode?: 'drain' | 'cancel';
     registrationPending?: boolean;
     storage: StorageBindingRef;
