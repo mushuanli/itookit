@@ -726,3 +726,7 @@ Task 事件裁剪：`Kernel.pruneTaskEvents(sessionId, taskId, { keepEvents? })`
 提交事件触发调度：catalog 文件变化唤醒 Kernel 资源清理和已打开 Session 的轮询；Kernel 的 resources 文件变化仅唤醒资源清理。同一文件系统内其他文件的提交（例如 Session 租约心跳）不通过 catalog 监听器触发扫描。Session 监听器仍处理所属存储根下的提交，但仅 resources 文件变化直接唤醒该 Session 的资源清理。定时截止和正常调度保持原有行为；这项触发范围优化本身不证明桌面发送延迟或 IPC 总量达标。
 
 Task 全量列表扫描复用目录扫描时已经读取的 `record`，每个有效 Task 只读取一次记录，按目录 Task ID 排序。缺少 Task 文件的残留目录跳过，数据仅在单次调用内复用，不跨调用缓存；扫描不是跨 Task 的原子快照。此优化不改变持久索引分页接口。
+
+启动前检查与批量恢复：`inspectSession(id)` 返回只读的 `listTasks()` / `getShared(key)`，解析持久绑定但不注册 Session 监听器或启动执行。`recoverSessions(ids, options)` 去重所选 ID，先恢复所有所选 Session 的持久状态及资源，再注册这些 Session 并启动轮询；资源恢复使用只读绑定解析，避免中途激活。该方法也恢复 Kernel 级公共资源，但不遍历其他 Session 或全局投递消息。原 `recover(options)` 仍恢复全部 Session，随后执行消息投递。
+
+`takeover: true` 要求 Kernel 执行空闲，调用方仍须先取得 Session 写租约并停止旧执行者。批量恢复不负责获取租约，也不是跨 Session 原子事务；中途错误可能已恢复部分持久记录，应修正原因后重试。此接口提交不代表所有宿主启动接线或真实桌面重启场景均已合入。

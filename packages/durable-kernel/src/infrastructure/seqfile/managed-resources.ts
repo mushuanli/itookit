@@ -383,7 +383,7 @@ export class ManagedResourceStore {
         });
     }
     async recover(scope: string, takeover = false) {
-        const binding = await this.binding(scope);
+        const binding = await this.binding(scope, true);
         await transaction(binding.fs, async tx => {
             const path = resourcesPath(binding.rootPath);
             await schemaTx(tx, path, true);

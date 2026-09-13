@@ -263,6 +263,12 @@ export class Kernel implements KernelRegistration {
         for (const session of await this.store.listSessions()) yield session;
     }
 
+    /** Inspect persisted records without registering listeners or starting execution. */
+    async inspectSession(id: SessionId) {
+        const binding = await this.store.inspectSessionBinding(id);
+        return { listTasks: () => this.store.listTasks(binding), getShared: (key: string) => this.store.getShared(binding, key) };
+    }
+
     async openTask<O = unknown>(id: TaskId): Promise<TaskHandle<O>> {
         const sessionId = await this.store.locateTask(id);
         if (!this.sessions.has(sessionId)) await this.openSession(sessionId);
@@ -299,16 +305,23 @@ export class Kernel implements KernelRegistration {
     }
 
     async recover(options: import('../domain/types').RecoveryOptions = {}): Promise<RecoveryReport> {
+        const report = await this.recoverSessions((await this.store.listSessions()).map(session => session.id), options);
+        await this.relayPendingMessages();
+        return report;
+    }
+
+    /** Restore all leased Sessions before starting any of their workers. */
+    async recoverSessions(sessionIds: SessionId[], options: import('../domain/types').RecoveryOptions = {}): Promise<RecoveryReport> {
         const total: RecoveryReport = {
             recoveredTasks: 0, recoveredEffects: 0, expiredAttempts: 0, rebuiltIndexes: 0,
         };
         if (options.takeover && (this.active || this.activeEffects || this.draining.size || !this.poller.isIdle))
             throw new Error('Takeover recovery requires an idle Kernel before opening sessions');
         const restored: Array<{ id: string; binding: ResolvedStorageBinding }> = [];
-        for (const session of await this.store.listSessions()) {
-            const opened = await this.store.openSession(session.id);
+        for (const id of new Set(sessionIds)) {
+            const opened = await this.store.openSession(id);
             mergeReport(total, await this.store.recover(opened.binding, options));
-            restored.push({ id: session.id, binding: opened.binding });
+            restored.push({ id, binding: opened.binding });
         }
         await this.managedResources.recover('kernel', options.takeover);
         for (const { id } of restored) await this.managedResources.recover(`session:${id}`, options.takeover);
@@ -316,7 +329,6 @@ export class Kernel implements KernelRegistration {
             this.rememberBinding(id, binding);
             this.schedulePoll(id);
         }
-        await this.relayPendingMessages();
         return total;
     }
 

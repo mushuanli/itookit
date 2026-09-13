@@ -20,6 +20,37 @@ describe('Kernel durable kernel', () => {
     let fs: IFileSystem;
     let kernel: Kernel;
 
+    it('inspects without activation and restores only selected Sessions before starting their resource workers', async () => {
+        for (const id of ['one', 'two', 'other']) {
+            const session = await kernel.createSession({ id, storage: { kind: 'test', locator: { rootPath: `/sessions/${id}/.kernel` } } });
+            await session.setShared('probe', { id });
+        }
+        kernel.dispose(); await kernel.waitIdle();
+        const reader = await configuredKernel(fs, { maxConcurrent: 0, pollMs: 0 });
+        const order: string[] = [];
+        const internals = reader as unknown as {
+            sessions: Map<string, unknown>;
+            resourcePoller: { start(scope: string): void };
+            managedResources: { recover(scope: string, takeover?: boolean): Promise<void> };
+        };
+        vi.spyOn(internals.resourcePoller, 'start').mockImplementation(scope => {
+            if (scope.startsWith('session:')) order.push(`start:${scope}`);
+        });
+        const recover = internals.managedResources.recover.bind(internals.managedResources);
+        vi.spyOn(internals.managedResources, 'recover').mockImplementation(async (scope, takeover) => {
+            await recover(scope, takeover); order.push(`recovered:${scope}`);
+        });
+        const inspection = await reader.inspectSession('one');
+        expect(await inspection.listTasks()).toEqual([]);
+        expect((await inspection.getShared('probe'))?.value).toEqual({ id: 'one' });
+        expect(internals.sessions.size).toBe(0);
+        expect(order).toEqual([]);
+        await reader.recoverSessions(['one', 'two', 'one'], { takeover: true });
+        expect(order).toEqual(['recovered:kernel', 'recovered:session:one', 'recovered:session:two',
+            'start:session:one', 'start:session:two']);
+        expect([...internals.sessions.keys()]).toEqual(['one', 'two']);
+    });
+
     beforeEach(async () => {
         ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
         fs = await manager.openFileSystem('/data/test');
