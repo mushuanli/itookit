@@ -43,6 +43,8 @@ export const en: LocaleStrings = {
     'session.tasks.more': 'More tasks (open paged list)',
     'session.tasks.stopPending': 'Cancellation requested; waiting for the external stop to be confirmed ({count} operations in flight)',
     'session.tasks.stopStopped': 'Stopped (cancellation confirmed)',
+    'session.tasks.pausePending': 'Pause requested; waiting for in-flight operations to finish ({count} operations in flight)',
+    'session.tasks.pauseStopped': 'Paused (pause request confirmed)',
     'session.tasks.eventsTrimmed':  'Older events were trimmed by retention',
     'session.close.action': 'Close session (stop execution, keep records)',
     'boot.filesystem': 'Initializing filesystem…',

@@ -393,15 +393,21 @@ export class SessionWorkbench implements WorkspaceController {
         if (this.closed || generation !== this.taskRefresh) return;
         const panel = document.createElement('div'); panel.className = 'session-detail';
         const heading = document.createElement('h2'); heading.textContent = `${task.program.kind} · ${task.status}`; panel.append(heading);
-        // Distinguish "cancel request accepted" from "the external work really stopped":
-        // only the confirmed case may read as stopped.
+        // Distinguish "the request was accepted" from "the external work really stopped":
+        // only the confirmed case may read as stopped. Pause is projected the same way, so a
+        // task paused by a Flow or another host does not silently render no state at all.
         const stat = taskStat(task), control = stat.control;
         const stop = document.createElement('p');
-        stop.dataset.stopState = control.requested !== 'cancel' ? 'none' : control.acknowledged ? 'stopped' : 'pending';
-        stop.textContent = control.requested !== 'cancel' ? ''
-            : control.acknowledged ? t('session.tasks.stopStopped')
-            : t('session.tasks.stopPending', { count: stat.activeOperations });
-        stop.hidden = control.requested !== 'cancel';
+        const kind = control.requested === 'cancel' ? 'cancel' : control.requested === 'pause' ? 'pause' : undefined;
+        stop.dataset.stopState = !kind ? 'none'
+            : kind === 'cancel' ? (control.acknowledged ? 'stopped' : 'pending')
+            : (control.acknowledged ? 'paused' : 'pause-pending');
+        stop.textContent = !kind ? ''
+            : kind === 'cancel' ? (control.acknowledged ? t('session.tasks.stopStopped')
+                : t('session.tasks.stopPending', { count: stat.activeOperations }))
+            : (control.acknowledged ? t('session.tasks.pauseStopped')
+                : t('session.tasks.pausePending', { count: stat.activeOperations }));
+        stop.hidden = !kind;
         panel.append(stop);
         const description = document.createElement('p'); description.textContent = task.id; panel.append(description);
         const result = document.createElement('pre'); result.textContent = JSON.stringify(taskSummary(task), null, 2); panel.append(result);

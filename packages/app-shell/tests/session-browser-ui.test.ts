@@ -90,6 +90,27 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
         await workbench.openResource(`/${id}/tasks/task-one`);
         await vi.waitFor(() => expect(main.querySelector<HTMLElement>('[data-stop-state]')!.dataset.stopState).toBe('stopped'));
         expect(main.querySelector<HTMLElement>('[data-stop-state]')!.textContent).not.toBe(pending.textContent);
+        // Pause is projected the same way, so a task held by a Flow or another host is not
+        // silently rendered as having no state at all.
+        task.status = 'running';
+        task.control = { mode: 'pause', acknowledged: false, epoch: 1, requestId: 'p1' } as never;
+        task.effects = { e: { id: 'e', status: 'leased' } };
+        await workbench.openResource(`/${id}/tasks`);
+        await workbench.openResource(`/${id}/tasks/task-one`);
+        await vi.waitFor(() => expect(main.querySelector<HTMLElement>('[data-stop-state]')!.dataset.stopState).toBe('pause-pending'));
+        const pausePending = main.querySelector<HTMLElement>('[data-stop-state]')!;
+        expect(pausePending.hidden).toBe(false);
+        expect(pausePending.textContent).toContain('1');
+        task.control = { mode: 'pause', acknowledged: true, epoch: 2, requestId: 'p1' } as never;
+        await workbench.openResource(`/${id}/tasks`);
+        await workbench.openResource(`/${id}/tasks/task-one`);
+        await vi.waitFor(() => expect(main.querySelector<HTMLElement>('[data-stop-state]')!.dataset.stopState).toBe('paused'));
+        expect(main.querySelector<HTMLElement>('[data-stop-state]')!.textContent).not.toBe(pausePending.textContent);
+        task.control = { mode: 'run', acknowledged: true, epoch: 3 } as never;
+        await workbench.openResource(`/${id}/tasks`);
+        await workbench.openResource(`/${id}/tasks/task-one`);
+        await vi.waitFor(() => expect(main.querySelector<HTMLElement>('[data-stop-state]')!.dataset.stopState).toBe('none'));
+        expect(main.querySelector<HTMLElement>('[data-stop-state]')!.hidden).toBe(true);
         await workbench.openResource(`/${id}/files/workspace/note.md`);
         const options = (file.mock.calls as unknown as Array<[HTMLElement, any]>)[0][1];
         expect(options.target).toEqual({ kind: 'file', path: '/workspace/note.md' });
