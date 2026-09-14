@@ -174,8 +174,8 @@ export class DurableFlowExecutor {
         const root = (await handle.root.status()).task;
         if (!record(root.state ?? root.input).awaitingSchedule) return handle;
         const saved = await session.getShared(`flow.run.${rootTaskId}.scheduler`);
-        if (!saved) throw new Error('Flow scheduler checkpoint is missing');
-        const checkpoint = saved.value as unknown as SchedulerCheckpoint;
+        const checkpoint = (saved?.value ?? record(root.input).initialScheduler) as unknown as SchedulerCheckpoint;
+        if (!checkpoint) throw new Error('Flow scheduler checkpoint is missing');
         if (checkpoint.version !== 1) throw new Error('Unsupported Flow scheduler checkpoint');
         handle.attachedFromStorage = false;
         return new Promise((resolve, reject) => {
@@ -192,12 +192,12 @@ export class DurableFlowExecutor {
     ): Promise<void> {
         const state = (await session.getShared(workspaceFinalizationKey(rootTaskId)))?.value as
             WorkspaceFinalization | undefined;
-        if (state?.status !== 'pending') return;
-        const checkpoint = (await session.getShared(`flow.run.${rootTaskId}.scheduler`))?.value as
+        if (state?.status === 'succeeded') return;
+        const initial = record((await root.status()).task.input).initialScheduler;
+        const checkpoint = ((await session.getShared(`flow.run.${rootTaskId}.scheduler`))?.value ?? initial) as unknown as
             SchedulerCheckpoint | undefined;
         const policy = checkpoint?.spec.runPolicy?.workspace;
-        const leaseRecord = await session.getShared(workspaceLeaseKey(rootTaskId));
-        if (!policy || policy.mode === 'shared' || !leaseRecord) return;
+        if (!policy || policy.mode === 'shared') return;
         const workspace = await this.restoreWorkspace(session, rootTaskId, policy, { forFinalization: true });
         await (await beginWorkspaceFinalization(session, root, workspace)).completion;
     }
@@ -212,8 +212,10 @@ export class DurableFlowExecutor {
             throw new Error(`Resuming an isolated Flow workspace requires a workspace manager that restores leases`);
         }
         const saved = await session.getShared(workspaceLeaseKey(rootTaskId));
-        if (!saved) throw new Error('Flow workspace lease record is missing');
-        return this.options.workspaceManager.restore(session.id, policy, saved.value, options);
+        const value = saved?.value ?? record((await (await session.attachTask(rootTaskId)).status()).task.input).initialWorkspace;
+        if (value === undefined) throw new Error('Flow workspace lease record is missing');
+        if (!saved) await session.setShared(workspaceLeaseKey(rootTaskId), jsonValue(value));
+        return this.options.workspaceManager.restore(session.id, policy, jsonValue(value), options);
     }
 
     private async execute(
@@ -299,9 +301,7 @@ export class DurableFlowExecutor {
                 for (const [id, value] of saved.nodeDefaults) nodeDefaults.set(id, value);
                 for (const [id, value] of saved.nodeConnections) nodeConnections.set(id, value);
             }
-            const saveCheckpoint = async (): Promise<void> => {
-                if (!published) return;
-                const checkpoint: SchedulerCheckpoint = {
+            const checkpointSnapshot = (): SchedulerCheckpoint => ({
                     version: 1, spec, parameters, sessionContext, catalog: plugins.snapshot(),
                     instances: [...instances].map(([id, handles]) => [id, handles.map(handle => handle.id)]),
                     completed: [...completed], nodes, edges, edgeState: [...edgeState],
@@ -312,8 +312,9 @@ export class DurableFlowExecutor {
                     nodeDefaults: [...nodeDefaults], nodeConnections: [...nodeConnections],
                     consumedTokens, startedAt, completionOrder, dispatchOrder,
                     nodeGenerations: [...nodeGenerations],
-                };
-                await session.setShared(`flow.run.${published.root.id}.scheduler`, jsonValue(checkpoint));
+            });
+            const saveCheckpoint = async (): Promise<void> => {
+                if (published) await session.setShared(`flow.run.${published.root.id}.scheduler`, jsonValue(checkpointSnapshot()));
             };
 
             const latestDone = (nodeId: string): boolean => {
@@ -754,7 +755,8 @@ export class DurableFlowExecutor {
             if (!published) {
                 published = await this.finish(session, instances, nodes, detachedNodes, spec.goal, {
                     tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
-                }, delegationGroups, completionOrder, undefined, true, toleratedFailureNodes());
+                }, delegationGroups, completionOrder, undefined, true, toleratedFailureNodes(),
+                    { initialScheduler: jsonValue(checkpointSnapshot()), ...(workspace?.record !== undefined ? { initialWorkspace: workspace.record } : {}) });
                 lease = await this.acquireLease(session, published.root.id);
                 session = fenceSchedulerSession(session, lease.condition);
                 await saveCheckpoint();
@@ -944,8 +946,9 @@ export class DurableFlowExecutor {
         existing?: FlowExecutionHandle,
         awaitingSchedule = false,
         toleratedFailures: Set<string> = new Set(),
+        initial?: Record<string, JsonValue>,
     ): Promise<FlowExecutionHandle> {
-        const root = await this.aggregate(session, instances, nodes, detachedNodes, delegationGroups, completionOrder, { goal, usage }, existing?.root, awaitingSchedule, toleratedFailures);
+        const root = await this.aggregate(session, instances, nodes, detachedNodes, delegationGroups, completionOrder, { goal, usage }, existing?.root, awaitingSchedule, toleratedFailures, initial);
         if (existing) {
             // The handle is published before the graph finishes, so refresh the fields
             // that only become final here instead of leaving a stale snapshot.
@@ -1048,6 +1051,7 @@ export class DurableFlowExecutor {
         existing?: TaskHandle<JsonValue>,
         awaitingSchedule = false,
         toleratedFailures: Set<string> = new Set(),
+        initial?: Record<string, JsonValue>,
     ): Promise<TaskHandle<JsonValue>> {
         // Nodes with persistOutput === false keep feeding downstream nodes via
         // dependencies but are excluded from the flow-root output map. They must
@@ -1063,7 +1067,7 @@ export class DurableFlowExecutor {
                 tolerated: toleratedFailures.has(nodeId),
                 collectOutput: !suppressed.has(nodeId),
             })), delegationGroups, completionOrder);
-        const input = { dependencies, awaitingSchedule, run: jsonValue({ version: 1, goal: run.goal ?? null, usage: run.usage }),
+        const input = { ...initial, dependencies, awaitingSchedule, run: jsonValue({ version: 1, goal: run.goal ?? null, usage: run.usage }),
             runTasks: runMembers(instances, nodes, detachedNodes) };
         if (existing) {
             await session.setShared(`flow.run.${existing.id}.members`, jsonValue(input.runTasks));

@@ -104,7 +104,9 @@ export class TauriFlowWorkspaces implements FlowWorkspaceManager {
         const claimed = new Set<string>();
         for (const root of roots) {
             const record = await session.getShared(`flow.run.${root.id}.workspace-lease`);
-            if (record?.value) claimed.add(parseSaved(record.value).id);
+            const initial = (root.input as { initialWorkspace?: SavedValue } | undefined)?.initialWorkspace;
+            const value = record?.value ?? initial;
+            if (value) claimed.add(parseSaved(value).id);
         }
         for (const entry of entries) {
             if (entry.is_directory || !/^[0-9a-f-]{36}\.json$/i.test(entry.name)) continue;

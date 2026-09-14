@@ -472,7 +472,7 @@ async function storedCheckpoint(stateDir: string, runId: string, rootId: string)
     } finally { await inspection.dispose(); }
 }
 
-it.each(['finish', 'finish:delegate:1:0', 'finish:delegate:1:1', 'delegation-inflight'])(
+it.each(['root-created', 'finish', 'finish:delegate:1:0', 'finish:delegate:1:1', 'delegation-inflight'])(
     'recovers the scheduler SIGKILL window %s', async node => {
         const inflight = node === 'delegation-inflight';
         const delegation = node.includes(':delegate:') || inflight;
@@ -511,10 +511,12 @@ it.each(['finish', 'finish:delegate:1:0', 'finish:delegate:1:1', 'delegation-inf
         await settleLease();
         const before = await storedTasks(stateDir, runId);
         const submittedNode = inflight ? 'finish:delegate:1:0' : node;
-        const submitted = before.find(task => task.labels?.flowNodeId === submittedNode)!;
+        const submitted = before.find(task => node === 'root-created' ? task.labels?.kind === 'flow-root' : task.labels?.flowNodeId === submittedNode)!;
         expect(submitted).toBeDefined();
         const rootId = before.find(task => task.labels?.kind === 'flow-root')!.id;
-        const checkpoint = await storedCheckpoint(stateDir, runId, rootId);
+        const checkpoint = node === 'root-created'
+            ? (submitted.input as { initialScheduler: Awaited<ReturnType<typeof storedCheckpoint>> }).initialScheduler
+            : await storedCheckpoint(stateDir, runId, rootId);
         if (!inflight) expect(checkpoint.instances.flatMap(([, ids]) => ids)).not.toContain(submitted.id);
         const completed = before.filter(task => task.status === 'succeeded');
         const callsAtCrash = prompts.length;
@@ -524,7 +526,7 @@ it.each(['finish', 'finish:delegate:1:0', 'finish:delegate:1:1', 'delegation-inf
         }
         expect(await resumeCommand(runId, { stateDir, headless: true, json: true, retryIndeterminate: inflight })).toBe(0);
         const after = await storedTasks(stateDir, runId);
-        expect(after.filter(task => task.labels?.flowNodeId === submittedNode).map(task => task.id)).toEqual([submitted.id]);
+        expect(after.filter(task => node === 'root-created' ? task.labels?.kind === 'flow-root' : task.labels?.flowNodeId === submittedNode).map(task => task.id)).toEqual([submitted.id]);
         for (const task of completed) expect(after.find(item => item.id === task.id)).toEqual(task);
         expect(after).toHaveLength(delegation ? 4 : 2);
         expect(prompts).toHaveLength(inflight ? 4 : delegation ? 3 : 1);

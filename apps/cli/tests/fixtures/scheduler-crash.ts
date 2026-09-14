@@ -5,7 +5,7 @@ const submit = Kernel.prototype.submit;
 Kernel.prototype.submit = async function<I, O>(sessionId: string, spec: import('@itookit/durable-kernel').TaskSpec<I>, options?: import('@itookit/durable-kernel').LeaseGuardOptions) {
     const handle = await submit.call(this, sessionId, spec, options);
     const target = process.env.MINDOS_TEST_SUBMIT_NODE;
-    if (target && spec.labels?.flowNodeId === target) process.kill(process.pid, 'SIGKILL');
+    if (target && (spec.labels?.flowNodeId === target || (target === 'root-created' && spec.labels?.kind === 'flow-root'))) process.kill(process.pid, 'SIGKILL');
     return handle as import('@itookit/durable-kernel').TaskHandle<O>;
 };
 

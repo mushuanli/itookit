@@ -59,6 +59,47 @@ describe('DurableFlowExecutor', () => {
     const waitForNode = (handle: { nodes: ReadonlyMap<string, unknown> }, nodeId: string): Promise<void> =>
         vi.waitFor(() => expect(handle.nodes.has(nodeId)).toBe(true));
 
+    it('restores the initial root snapshot and workspace before a first shared checkpoint exists', async () => {
+        const workspaceManager = {
+            prepare: vi.fn(async () => ({ directory: '/copy', record: { directory: '/copy' }, finish: vi.fn() })),
+            restore: vi.fn(async () => ({ directory: '/copy', finish: vi.fn() })),
+        };
+        const first = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), workspaceManager });
+        const original = await first.submit('session-one', { ...valueFlow(), runPolicy: { workspace: { mode: 'worktree', cleanup: 'keep' } } });
+        await runToEnd(original); await first.waitIdle();
+        const input = (await original.root.status()).task.input;
+        const session = await kernel.openSession('session-one');
+        // Recreate precisely the only committed record at the root-submit crash boundary.
+        const root = await session.submit({ program: { kind: 'flow.aggregate', version: '1' }, input, labels: { kind: 'flow-root' } });
+        expect(await session.getShared(`flow.run.${root.id}.scheduler`)).toBeUndefined();
+        const resumed = await first.resume('session-one', root.id);
+        expect((await runToEnd(resumed)).status).toBe('succeeded');
+        await first.waitIdle();
+        expect(workspaceManager.prepare).toHaveBeenCalledTimes(1);
+        expect(workspaceManager.restore).toHaveBeenCalledWith('session-one', { mode: 'worktree', cleanup: 'keep' }, { directory: '/copy' }, undefined);
+        expect((await session.getShared(workspaceLeaseKey(root.id)))?.value).toEqual({ directory: '/copy' });
+    });
+
+    it('finishes a terminal workspace even when the pending finalization write was interrupted', async () => {
+        const finish = vi.fn(async () => undefined);
+        const workspaceManager = { prepare: async () => ({ directory: '/copy', record: { directory: '/copy' }, finish }),
+            restore: async () => ({ directory: '/copy', finish }) };
+        const runner = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), workspaceManager });
+        const original = await runner.submit('session-one', { ...valueFlow(), runPolicy: { workspace: { mode: 'worktree' } } });
+        await runToEnd(original); await runner.waitIdle();
+        const session = await kernel.openSession('session-one');
+        const input = (await original.root.status()).task.input as any;
+        const root = await session.submit({ program: { kind: 'flow.aggregate', version: '1' },
+            input: { ...input, awaitingSchedule: false }, labels: { kind: 'flow-root' } });
+        await root.wait({ timeoutMs: 2000 });
+        finish.mockClear();
+        await runner.resume('session-one', root.id);
+        expect(finish).toHaveBeenCalledWith('succeeded');
+        expect((await session.getShared(workspaceFinalizationKey(root.id)))?.value).toMatchObject({ status: 'succeeded' });
+        await runner.resume('session-one', root.id);
+        expect(finish).toHaveBeenCalledTimes(1);
+    });
+
     it('resolves independent Run nodes, descendants and persisted retry membership', async () => {
         const flow: DagRunSpec = { nodes: [{ ...valueNode('gate', null), plugin: 'builtin.human',
             config: { requestId: 'continue', prompt: 'Continue' } }], edges: [] };

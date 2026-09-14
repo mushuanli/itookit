@@ -86,6 +86,18 @@ it('preserves a copy claimed by a persisted Run while preparing another run', as
     expect(getShared).toHaveBeenCalledWith('flow.run.published.workspace-lease');
 });
 
+it('retains a worktree claimed in the root before its first shared checkpoint', async () => {
+    const { workspaces, kernel, services, listTasks } = await setup();
+    const lease = await workspaces.prepare('s', { mode: 'worktree' });
+    const oldDirectory = [...copies][0];
+    listTasks.mockResolvedValue([{ id: 'root', program: { kind: 'flow.aggregate' }, labels: { kind: 'flow-root' },
+        input: { initialWorkspace: lease.record } } as any]);
+    const next = new TauriFlowWorkspaces('/data'); next.bind(kernel, services);
+    await next.prepare('s', { mode: 'worktree' });
+    expect(copies.has(oldDirectory)).toBe(true);
+    expect(copies.size).toBe(2);
+});
+
 it('rejects changed grants and foreign lease identities without issuing Git commands', async () => {
     const { workspaces, files } = await setup();
     const lease = await workspaces.prepare('s', { mode: 'worktree' });
