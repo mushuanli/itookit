@@ -1593,3 +1593,18 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 复现：`VITE_MINDOS_TRACE=1 pnpm --filter tauri-app build` 加 `cargo build --offline --features tauri/custom-protocol --manifest-path apps/tauri-app/src-tauri/Cargo.toml`，Xvfb + 会话总线 + AT-SPI 启动，发送后在 `<rootDir>/var/log/vfs-trace.log` 取 `"kind":"action","label":"send-to-provider"` 行。窗口驱动与数据根在临时目录（`.tauri-acceptance/measure/`，已 gitignore），长期证据以本节数字、`send-boundary.ts` 与 `packages/app-shell/tests/trace-send-boundary.test.ts` 为准。验收后已恢复普通前端与原生构建。
 
 环境注意（可复现性）：本机 `/run/user/<uid>` 对沙箱只读，AT-SPI bridge 无法在其下绑定套接字并会导致应用进程被带走；`XDG_RUNTIME_DIR`/`XDG_CACHE_HOME` 必须指向可写目录。命令隔离环境各自持有独立 `/tmp` 与 PID 命名空间，会话总线套接字因此要放在共享的数据目录下（X11 走抽象套接字不受影响），否则跨调用驱动无障碍树会连接失败。这两点此前未记录，是“AT-SPI 需要可写缓存与显示会话”之外的具体原因。
+
+## 2026-09-14：运行中的 Session 真实窗口关闭并保留记录
+
+此前没有任何窗口入口能在运行中停止一个 Session 而保留历史（切换工作区/会话都不是 Kernel `closeSession`，删除又会清掉记录）。本批新增 `SessionLifecycleService.closeSession`（停跑、等待外部停止确认、保留存储/manifest/文档）与 Session 侧栏右键项「关闭会话（停止执行，保留记录）」，与「删除」并列。
+
+真实 Linux Tauri + Xvfb `:98` + 会话总线 + AT-SPI，本地 mock 接受请求后流一个分块且永不结束（`mock-hang.mjs`）：
+
+- 侧栏右键真实出现菜单项「关闭会话（停止执行，保留记录）」（`@151,368 234x35`），与「新建 会话」「重命名」「删除」并列。
+- 在运行的 Session 上（界面显示 `Stop Generation`、mock 已收齐请求于 `04:31:11.002Z`）点击该项（`04:31:22.378Z`）；mock 于 `04:31:22.831Z` 记录 `responseClosed:true, writableEnded:false`，即约 0.45 秒内确认外部连接停止。
+- 只读核对 sidecar（`_meta/index.db`）：Task `task_99cfbf59-f212-41f3-b17b-dc5a194c0000` 持久 `status: "cancelled"`。
+- **记录保留**：Session 数据目录 `var/lib/sessions/node-1789360202786-x8cphg2fg` 与其 `kernel/tasks/task_99cfbf59-…` 仍在磁盘；关闭不是删除。界面回到可再次发送的状态（出现「重试」）。
+
+边界：本轮只核对了持久 Task 状态与记录存在性，未逐像素确认 live 状态文案与「执行已取消」气泡文本（无障碍树中聊天区因滚动坐标偏移，未取得可判读的文本节点）；该文案断言由 `packages/app-shell/tests/cancelled-history.test.ts` 与 `session-workbench.test.ts` 在 DOM 层覆盖。设备不确认停止时的有界失败仍只有包级证据（`session-delete-lifecycle.test.ts`），未做真实窗口版本。
+
+同一窗口的第三次发送样本（同一边界口径）：`elapsedMs` 2753、公开 IPC **1290**、sidecar 逻辑调用 854、事务对 212/211，与上文两次独立样本一致。
