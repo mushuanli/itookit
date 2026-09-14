@@ -34,7 +34,7 @@ export interface FlowWorkspaceLease {
     record?: JsonValue;
     /** Host barrier: all file/process capabilities must be closed before filesystem cleanup. */
     releaseCapabilities?(rootTaskId: string): Promise<void>;
-    finish(status: 'succeeded' | 'failed' | 'cancelled'): Promise<void>;
+    finish(status: 'succeeded' | 'failed' | 'cancelled'): Promise<void | { message: string }>;
 }
 
 export interface FlowWorkspaceManager {

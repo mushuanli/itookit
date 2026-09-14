@@ -179,12 +179,15 @@ it('runs the node inside the worktree and leaves the base repository untouched',
     // `cleanup: keep` so the worktree survives for inspection after the Run.
     const { root, stateDir, configPath, canonical } = await setup(true, '    cleanup: keep\n');
     const child = startRun(configPath, stateDir);
-    const [code] = await once(child, 'exit') as [number, NodeJS.Signals | null];
+    let stderr = ''; child.stderr!.on('data', chunk => { stderr += String(chunk); });
+    const [code] = await once(child, 'close') as [number, NodeJS.Signals | null];
     const runId = await latestRun(stateDir);
     expect(code).toBe(0);
     expect(await manifest(stateDir, runId)).toMatchObject({ status: 'succeeded' });
 
     const worktree = path.join(stateDir, 'worktrees', runId);
+    expect(stderr).toContain(worktree);
+    expect(stderr).toContain('branch: flow/');
     expect(await readFile(path.join(worktree, 'marker.txt'), 'utf8')).toBe('worktree');
     // The marker must not exist in the base repository: the agent really ran in the worktree.
     expect(await exists(path.join(root, 'marker.txt'))).toBe(false);
@@ -195,7 +198,8 @@ it('runs the node inside the worktree and leaves the base repository untouched',
 it('points the VFS file tools at the isolated copy, not the base repository', async () => {
     const { root, stateDir, configPath } = await setup(true, '    cleanup: keep\n', 'Write');
     const child = startRun(configPath, stateDir);
-    const [code] = await once(child, 'exit') as [number, NodeJS.Signals | null];
+    let stderr = ''; child.stderr!.on('data', chunk => { stderr += String(chunk); });
+    const [code] = await once(child, 'close') as [number, NodeJS.Signals | null];
     const runId = await latestRun(stateDir);
     expect(code).toBe(0);
     const worktree = path.join(stateDir, 'worktrees', runId);
@@ -209,7 +213,8 @@ it('points the VFS file tools at the isolated copy, not the base repository', as
 it('removes a clean worktree after a successful Run under the default cleanup policy', async () => {
     const { root, stateDir, configPath, canonical } = await setup(false);
     const child = startRun(configPath, stateDir);
-    const [code] = await once(child, 'exit') as [number, NodeJS.Signals | null];
+    let stderr = ''; child.stderr!.on('data', chunk => { stderr += String(chunk); });
+    const [code] = await once(child, 'close') as [number, NodeJS.Signals | null];
     const runId = await latestRun(stateDir);
     expect(code).toBe(0);
     const worktree = path.join(stateDir, 'worktrees', runId);
@@ -217,17 +222,21 @@ it('removes a clean worktree after a successful Run under the default cleanup po
     expect(await listedWorktrees(root)).not.toContain(await canonical(worktree));
     // `merge: manual` keeps the branch for a human decision.
     expect((await git(root, ['branch', '--list', 'flow/*'])).trim()).not.toBe('');
+    expect(stderr).toContain('Retained branch: flow/');
 }, 30_000);
 
 it('keeps a dirty worktree instead of deleting uncommitted agent work', async () => {
     const { root, stateDir, configPath, canonical } = await setup(true);
     const child = startRun(configPath, stateDir);
-    const [code] = await once(child, 'exit') as [number, NodeJS.Signals | null];
+    let stderr = ''; child.stderr!.on('data', chunk => { stderr += String(chunk); });
+    const [code] = await once(child, 'close') as [number, NodeJS.Signals | null];
     const runId = await latestRun(stateDir);
     // Cleanup failure must not rewrite the Run result, and must not discard the file.
     expect(code).toBe(0);
     expect(await manifest(stateDir, runId)).toMatchObject({ status: 'succeeded' });
     const worktree = path.join(stateDir, 'worktrees', runId);
+    expect(stderr).toContain(worktree);
+    expect(stderr).toContain('branch: flow/');
     expect(await readFile(path.join(worktree, 'marker.txt'), 'utf8')).toBe('worktree');
     expect(await listedWorktrees(root)).toContain(await canonical(worktree));
 }, 30_000);

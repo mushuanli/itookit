@@ -24,9 +24,10 @@ export async function beginWorkspaceFinalization(session: SessionHandle, root: T
         try {
             const exit = await root.wait().catch(() => ({ status: 'failed' }));
             await workspace.releaseCapabilities?.(root.id);
-            await workspace.finish(exit.status === 'succeeded' ? 'succeeded' : exit.status === 'cancelled' ? 'cancelled' : 'failed');
+            const result = await workspace.finish(exit.status === 'succeeded' ? 'succeeded' : exit.status === 'cancelled' ? 'cancelled' : 'failed');
             state.status = 'succeeded';
-            delete state.message;
+            if (result?.message) state.message = result.message;
+            else delete state.message;
         } catch (error) {
             cleanupError = error;
             state.status = 'failed';

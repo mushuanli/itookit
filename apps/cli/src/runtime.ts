@@ -262,9 +262,10 @@ export async function createCliRuntime(
         },
         async dispose() {
             kernel.dispose();
-            const notice = setTimeout(() => { void reportPendingWorkspace(kernel, manifest); }, 5_000);
+            const notice = setTimeout(() => { void reportWorkspace(kernel, manifest, true); }, 5_000);
             try { await executor.waitIdle(); } finally { clearTimeout(notice); }
             await kernel.waitIdle();
+            if (mode === 'execute') await reportWorkspace(kernel, manifest);
             await core.dispose();
             await directoryMounts.dispose();
             await sessionFiles.dispose();
@@ -498,10 +499,12 @@ function gitRunner(shell: INativeShell): WorkspaceCommandRunner {
     };
 }
 
-async function reportPendingWorkspace(kernel: Kernel, manifest: RunManifest): Promise<void> {
+async function reportWorkspace(kernel: Kernel, manifest: RunManifest, pendingOnly = false): Promise<void> {
     if (!manifest.rootTaskId) return;
     const saved = await kernel.getShared(manifest.sessionId, `flow.run.${manifest.rootTaskId}.workspace`).catch(() => undefined);
     const state = saved?.value as { status?: string; message?: string } | undefined;
-    if (state?.status === 'pending') console.error(state.message
-        ?? 'Workspace cleanup is still pending; files and ownership are retained until physical shutdown is confirmed.');
+    if (pendingOnly) {
+        if (state?.status === 'pending') console.error(state.message
+            ?? 'Workspace cleanup is still pending; files and ownership are retained until physical shutdown is confirmed.');
+    } else if (state?.status !== 'pending' && state?.message) console.error(state.message);
 }

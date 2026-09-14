@@ -55,14 +55,21 @@ export class GitWorktreeFlowWorkspaceManager implements FlowWorkspaceManager {
     }
 
     private lease(saved: WorktreeLeaseRecord, policy: FlowWorkspacePolicy): FlowWorkspaceLease {
-        let finished = false;
+        let finished = false, result: void | { message: string };
         return {
             directory: saved.directory,
             record: { version: 1, directory: saved.directory, branch: saved.branch },
             finish: async status => {
-                if (finished) return;
-                await this.finishWorkspace(saved, policy, status);
+                if (finished) return result;
+                try { await this.finishWorkspace(saved, policy, status); }
+                catch (error) {
+                    throw new Error(`${error instanceof Error ? error.message : String(error)}; workspace: ${saved.directory}; branch: ${saved.branch}. Review the retained changes before retrying cleanup.`, { cause: error });
+                }
+                const retained = policy.cleanup === 'keep' || ((policy.cleanup ?? 'on-success') === 'on-success' && status !== 'succeeded');
+                if (retained || (policy.merge ?? 'manual') === 'manual') result = { message:
+                    `${retained ? `Retained workspace: ${saved.directory}; ` : ''}Retained branch: ${saved.branch}; repository: ${this.options.repository}. Review and merge changes manually when ready.` };
                 finished = true;
+                return result;
             },
         };
     }

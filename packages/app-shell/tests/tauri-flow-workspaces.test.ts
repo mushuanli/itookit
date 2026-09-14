@@ -286,3 +286,14 @@ it('retains recovery intents when the Kernel cannot inspect the Session', async 
     expect([...intents.keys()]).toEqual(paths);
     expect(copies.size).toBe(1);
 });
+
+
+it('returns retained native paths for the durable Run finalization report', async () => {
+    const { workspaces } = await setup();
+    const lease = await workspaces.prepare('s', { mode: 'worktree', cleanup: 'keep', merge: 'manual' });
+    const report = await lease.finish('cancelled');
+    expect(report?.message).toContain(`Retained workspace: ${[...copies][0]}`);
+    expect(report?.message).toContain('Retained branch: flow/');
+    expect(intents.size).toBe(0);
+    expect(copies.size).toBe(1);
+});

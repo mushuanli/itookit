@@ -170,8 +170,10 @@ export class TauriFlowWorkspaces implements FlowWorkspaceManager {
     private wrap(lease: FlowWorkspaceLease, saved: SavedWorkspace): FlowWorkspaceLease {
         return { directory: saved.grant.at, record: { ...saved, grant: { ...saved.grant } },
             finish: async status => {
-                await this.assertGrant(saved.grant); await lease.finish(status);
+                await this.assertGrant(saved.grant);
+                const result = await lease.finish(status);
                 await this.removeIntent(saved.id);
+                return result;
             } };
     }
 }

@@ -65,3 +65,15 @@ it('reports stalled physical shutdown while preserving pending state and the wor
     expect(saved.at(-1)).toEqual({ status: 'succeeded' });
     expect(finish).toHaveBeenCalledOnce();
 });
+
+
+it('persists the retained workspace instructions returned by the host', async () => {
+    const setShared = vi.fn(async () => ({}));
+    const message = 'Retained workspace: /copy; Retained branch: flow/run';
+    const result = await beginWorkspaceFinalization({ setShared } as never,
+        { id: 'root', wait: async () => ({ status: 'cancelled' }) } as never,
+        { directory: '/workspace', finish: async () => ({ message }) });
+    await result.completion;
+    expect(result.state).toEqual({ status: 'succeeded', message });
+    expect(setShared).toHaveBeenLastCalledWith('flow.run.root.workspace', { status: 'succeeded', message });
+});

@@ -1834,3 +1834,12 @@ HTTP 监听首次在沙箱内遭 EPERM，随后经正常提权运行通过。日
 `20-kernel-ipc.test.ts` 增加消息消费提交后、源端结算前 SIGKILL 窗口。两个新进程并发裁剪发送/接收 Session：未结算 outbox 与已消费 inbox 均保留；重投递返回 false，接收任务无重复事件；双边 settlement acknowledgement 后，各自 GC 才删除对应记录，再重启为空。root/module 两种挂载均覆盖，未修改持久回执或绕过事务。
 
 该文件 32 项全部通过，包含既有物理 adapter/receipt 清理中 SIGKILL（恢复前 held=1/waiting=1，确认后复用容量、重放不新建 claim）、single-use cache 提交前/后 SIGKILL、竞争领取以及取消树恢复。Kernel 257 项覆盖未知/错配/超时清理保持容量、暂停与 Session 关闭屏障、authority epoch、usageId 结算幂等及历史/消息裁剪规则。日志 `/tmp/local-p1-receipt-gc.log`。这些证据针对现有本机存储与 adapter 协议，不宣称供应商收费幂等或跨主机硬件 fencing。
+
+
+### 工作区收尾的人工处理报告（2026-09-14）
+
+Git 工作区 `finish` 现在返回可选说明；按策略保留的目录/分支及基础仓库进入 Run 持久 finalization，Tauri 保留此结果，CLI 执行退出时输出到 stderr。Git 失败同时附上目录、分支和检查后重试建议；无需查数据库寻找工作区。Flow 240、Tauri 工作区/控制台/崩溃 29、真实 CLI 工作区 5 项通过（含 stderr 路径断言）。全仓类型检查除测试中误加的一处 stderr 引用外通过，修正后 CLI 与 AppShell 类型检查分别通过；文档检查通过。
+
+真实 Tauri 窗口、隔离 profile 沿用 `/tmp/x1-p1-window-UX0yFe`：首次工作区执行因未授权拒绝；通过会话 `/add-dir` 对话框挂载 `/home/admin → /workspace`、可读写并设为工作目录后发送 go，建立原生 worktree。重启后从运行记录继续，再取消 gate，Run `task_06e22644-bbfe-47d4-87f3-179eac8f1180` 失败，工作区收尾成功；磁盘 worktree 列表仅剩基础仓库，创建意图清空。
+
+第二个 Flow 选择 auto-if-clean/on-success；窗口启动后在测试副本中编辑普通文件 `p1-base.txt` 为 `retained local work`（不改 Kernel 记录），Respond 后 Run `task_9a0fe0c0-74b7-4920-bb84-e805029af4ed` succeeded，清理 failed，窗口与持久状态均显示未提交更改、目录 `.../var/lib/worktrees/445bc50d-5738-4259-af77-eb59f3881099`、分支 `flow/445bc50d-5738-4259-af77-eb59f3881099-mu19kedf`。基础文件仍为 base，重启后副本仍为脏状态。后续人工处理/重新收尾以追加记录为准。

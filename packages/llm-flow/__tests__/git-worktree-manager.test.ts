@@ -56,7 +56,21 @@ describe('GitWorktreeFlowWorkspaceManager', () => {
             repository: '/repo', directoryFor: () => '/worktree', commands: git.commands,
         });
         const lease = await manager.prepare('run', { mode: 'worktree', merge: 'auto-if-clean', cleanup: 'always' });
-        await expect(lease.finish('succeeded')).rejects.toThrow('uncommitted changes');
+        await expect(lease.finish('succeeded')).rejects.toThrow('workspace: /worktree; branch: flow/run-');
+        expect(git.worktrees.has('/worktree')).toBe(true);
+    });
+
+    it('reports a retained workspace and branch for manual recovery after cancellation', async () => {
+        const git = fakeGit();
+        const manager = new GitWorktreeFlowWorkspaceManager({ repository: '/repo', directoryFor: () => '/worktree', commands: git.commands });
+        const lease = await manager.prepare('run', { mode: 'worktree', merge: 'manual', cleanup: 'on-success' });
+        const result = await lease.finish('cancelled');
+        expect(result?.message).toContain('Retained workspace: /worktree; Retained branch: flow/run-');
+        expect(result?.message).toContain('repository: /repo');
+        expect(await lease.finish('cancelled')).toEqual(result);
+        expect(git.worktrees.has('/worktree')).toBe(true);
+        const restored = await manager.restore('run', { mode: 'worktree', merge: 'manual', cleanup: 'on-success' }, lease.record!);
+        expect(await restored.finish('cancelled')).toEqual(result);
     });
 
     it('restores a recorded worktree lease in a new host and finalizes it', async () => {
