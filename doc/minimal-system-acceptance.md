@@ -1608,3 +1608,28 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 边界：本轮只核对了持久 Task 状态与记录存在性，未逐像素确认 live 状态文案与「执行已取消」气泡文本（无障碍树中聊天区因滚动坐标偏移，未取得可判读的文本节点）；该文案断言由 `packages/app-shell/tests/cancelled-history.test.ts` 与 `session-workbench.test.ts` 在 DOM 层覆盖。设备不确认停止时的有界失败仍只有包级证据（`session-delete-lifecycle.test.ts`），未做真实窗口版本。
 
 同一窗口的第三次发送样本（同一边界口径）：`elapsedMs` 2753、公开 IPC **1290**、sidecar 逻辑调用 854、事务对 212/211，与上文两次独立样本一致。
+
+## 2026-09-14：当前树全量回归（P0-05 阶段批次）
+
+工作树 `3c3afe5d`，`git status` 干净（`dirty=0`）。Node 26.8.1 / pnpm 10.20.0 / cargo 1.98.1。复用本机依赖与 Rust 编译缓存，**未做全新依赖安装**。按 [TODO §4](todo.md) 列出的入口逐条执行，全部 rc=0：
+
+| 阶段 | 结果 | 用时 |
+| --- | --- | --- |
+| `pnpm typecheck` | 25 个 workspace 全部通过 | 32 s |
+| `pnpm docs:check` | 76 份活文档通过（5 条历史表述告警） | <1 s |
+| `pnpm styles:check` | 63 样式表 / 842 markup / 3939 类，无未覆盖类名 | 1 s |
+| `pnpm build:libs` | 20 个库构建通过 | 31 s |
+| `pnpm --filter @itookit/cli build` | 通过 | 1 s |
+| `pnpm --filter tauri-app build` | 通过（普通前端，非 trace） | 5 s |
+| `cargo test`（tauri-app src-tauri，offline） | **36 passed**, 0 failed | 3 s |
+| `pnpm -r --filter '!@itookit/cli' test` | **1508 passed / 30 skipped**（190 文件，3 文件整体跳过） | 46 s |
+| CLI 非崩溃测试（`--exclude tests/crash-matrix.test.ts`） | **108 passed**（27 文件） | 42 s |
+| CLI crash-matrix（单独进程） | **12 passed** | 377 s |
+| `cargo build --features tauri/custom-protocol` | 通过 | 3 s |
+| `node --test scripts/tests/test-all.test.mjs` | **3 passed** | 1 s |
+
+合计 **1667 项通过、30 项既有跳过**。与 2026-09-14 上一批记录（Vitest 1593 + 调度器 3 + Rust 36 = 1632）相差 +35；两批的 Vitest 快照并不相同（上批为 `a308eb65` 加选定文件的隔离快照），因此**不逐项归因**。可直接核对的确定增量是本批新增文件：`trace-send-boundary` 4、`cancelled-history` 4、`session-delete-lifecycle` +2、`session-workbench` +1、`host-restart-inflight` +1，以及 `session-terminal-node` 由 1 改为 2。app-shell 也首次纳入显式 typecheck（此前只有经宿主程序的间接覆盖）。
+
+**这不是最终验收**：P0-02 的性能阈值仍未达成、P0-04 仍有未做窗口场景（见各自条目的剩余项），因此本批次证明的是“当前树在类型/文档/样式/构建/测试矩阵上全绿”，不能替代最终整树与 GUI 验收。真实安装包（`bundle.targets: "all"`）未构建：本机没有 AppImage/linuxdeploy 工具，也没有网络，故发布产物边界仍未验证。`release/dist/` 是**受版本控制但停留在 2026-09-04** 的 Web 静态产物，与当前树不同步，本轮未重新生成。
+
+复现：在干净工作树按上表命令顺序执行；日志与阶段退出码见 `.tauri-acceptance/regress/`（已 gitignore，临时文件会消失，长期证据以本表数字与命令为准）。
