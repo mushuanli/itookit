@@ -261,9 +261,15 @@ it('recovers a run killed while the first Effect is in flight', async () => {
     const runId = await latestRun(root);
     const killed = await manifest(root, runId);
     expect(killed.status).not.toBe('succeeded');
-    // A non-interactive Run never reaches the monitor, so the killed manifest has no
-    // nodeTaskIds; `export` must still find the node Tasks through the Session.
-    expect(killed.nodeTaskIds).toEqual({});
+    // Whether the monitor projected node ids before the kill is a race, not an invariant:
+    // both the start and the resume path always run `monitor()` (the non-interactive flag
+    // only skips the UI), so a tick can land before the crash. Only assert that whatever
+    // was recorded is coherent; `export` must find the node Tasks through the Session
+    // either way, which the assertions below cover.
+    for (const [nodeId, taskId] of Object.entries(killed.nodeTaskIds ?? {})) {
+        expect(nodeId).toBe('finish');
+        expect(taskId).toMatch(/^task_/);
+    }
 
     await settleLease();
     // Export holds a Session lease itself, so it also waits for the killed owner.
