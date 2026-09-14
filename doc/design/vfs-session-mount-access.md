@@ -219,3 +219,12 @@ MindOS 的目标更明确：空 Session 不附加用户目录；每个挂载是�
 7. 文件工具与受限进程执行分别验证访问边界；Bubblewrap runner 已覆盖只读/可写授权与保留路径拒绝，但未完成真实 GUI 与网络隔离验收，不能宣称完整隔离。
 
 本轮自动验证包含目录命令拦截、默认目录不授权、只读、撤销、失效来源恢复、实际 DOM 挂载与分支保留、原生路径边界，以及 Bubblewrap runner 的只读/可写授权与越界拒绝单元测试（`cargo test --lib`）。完整 Tauri cargo check 被环境缺少 glib-2.0 开发库阻塞；独立编译实际 Rust 路径与 IO 模块的测试已通过。尚无真实 GUI 人工验收。
+
+
+## 2026-09-14：挂载权限与旧句柄撤销
+
+Session 配置变更、禁用和服务释放会先同时关闭普通视图与工作区视图的入口，再等待已接受操作结束。此前顺序等待工作区读操作时，普通旧句柄仍能写入；IndexedDB/真实视图的受控在途读取回归已复现并验证修复。撤销失败会保留错误，不发布可用的新权限记录；这不是外部进程强制停止或跨主机 fencing 验收。
+
+目录授权回归覆盖两 Session 同名挂载来源隔离、只读 write/append/create/rename/move/delete/metadata/tag/SeqFile setEntry 拒绝，以及源文件和记录不变。多挂载视图的 SeqFile transaction 返回 ECAPABILITY 且回调未执行，不能称为事务内 EROFS 检查。只读来源申请 rw 在配置阶段被拒绝且不留记录，改为 ro 可正常读取。
+
+隔离 app-core 101、app-shell 193 项通过，共 294 项，另有 30 项既有跳过；app-core/Web/Tauri 类型检查与文档检查通过。P2-04 的真实窗口旧句柄路径、P0-02 设备不确认停止时的有界失败、跨进程/平台矩阵仍开放。

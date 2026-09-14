@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createVFS, createFileSystemView } from '@itookit/vfs-core';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { SessionFilesService } from '../src/vfs/session-files';
@@ -191,4 +191,30 @@ it('maps granted Session attachments without history and revokes derived maps', 
     await expect(editorAssets.driver.readContent('/one.bin')).rejects.toMatchObject({ code: 'EACCES' });
     await expect(editorAssets.driver.createFile({ name: 'after.bin', parentPath: '/', content: 'no' })).rejects.toMatchObject({ code: 'EACCES' });
     await expect(target.context.fs.driver.readContent('/other/attachments/one.bin')).rejects.toMatchObject({ code: 'EACCES' });
+});
+
+it.each(['configure', 'disable', 'dispose'] as const)('revokes the ordinary view before workspace draining during %s', async action => {
+    const { service, home } = await setup();
+    const record = await service.configure('a', { mounts: mount('/a'), cwd: '/workspace' }, 0);
+    const ordinary = await service.acquireFiles('a'); cleanup.push(() => ordinary.release());
+    const copy = createFileSystemView({ viewId: 'held-copy', mounts: [{ mountId: 'copy', at: '/', fs: home, root: '/b', access: 'rw' }] });
+    cleanup.push(() => copy.dispose());
+    const workspace = await service.acquireWorkspaceFiles('a', 'work', copy); cleanup.push(() => workspace.release());
+    let release!: () => void, began!: () => void, revoking!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { began = resolve; });
+    const revocation = new Promise<void>(resolve => { revoking = resolve; });
+    const read = home.driver.readContent.bind(home.driver);
+    const reading = vi.spyOn(home.driver, 'readContent').mockImplementation(async (...args: any[]) => { began(); await held; return read(...args as [string]); });
+    const dispose = workspace.context.fs.dispose.bind(workspace.context.fs);
+    const closing = vi.spyOn(workspace.context.fs, 'dispose').mockImplementation(() => { revoking(); return dispose(); });
+    const pendingRead = workspace.context.fs.driver.readContent('/workspace/same.md');
+    await started;
+    const changing = action === 'configure' ? service.configure('a', { mounts: mount('/a', 'ro'), cwd: '/workspace' }, record.revision)
+        : action === 'disable' ? service.disable('a', record.revision) : service.dispose();
+    try {
+        await revocation;
+        await expect(ordinary.context.fs.driver.writeContent('/workspace/same.md', 'late write')).rejects.toMatchObject({ code: 'EACCES' });
+    } finally { release(); await pendingRead; await changing; reading.mockRestore(); closing.mockRestore(); }
+    expect(await home.driver.readContent('/a/same.md', { encoding: 'utf-8' })).toBe('A');
 });

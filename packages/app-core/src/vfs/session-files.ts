@@ -74,9 +74,7 @@ export class SessionFilesService {
             const prepared = await this.create(sessionId, next);
             try {
                 await this.save(sessionId, { ...next, state: 'draining' }, old);
-                await this.revokeWorkspaces(sessionId);
-                await this.views.get(sessionId)?.dispose();
-                this.views.delete(sessionId);
+                await this.revokeSessionViews(sessionId);
                 await this.save(sessionId, next, { ...next, state: 'draining' });
                 this.views.set(sessionId, prepared);
                 this.notify();
@@ -93,9 +91,7 @@ export class SessionFilesService {
             const next: FilesRecord = { revision, state: 'disabled', mounts: [], cwd: '/' };
             const draining: FilesRecord = { ...next, state: 'draining' };
             await this.save(sessionId, draining, old);
-            await this.revokeWorkspaces(sessionId);
-            await this.views.get(sessionId)?.dispose();
-            this.views.delete(sessionId);
+            await this.revokeSessionViews(sessionId);
             await this.save(sessionId, next, draining);
             this.notify();
             return next;
@@ -131,6 +127,17 @@ export class SessionFilesService {
         });
     }
 
+    private async revokeSessionViews(sessionId: string): Promise<void> {
+        // Close both admission gates before awaiting either drain.
+        const closeOrdinary = async () => this.views.get(sessionId)?.dispose();
+        const results = await Promise.allSettled([
+            closeOrdinary(), this.revokeWorkspaces(sessionId),
+        ]);
+        const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Session view revocation failed');
+        this.views.delete(sessionId);
+    }
+
     private async revokeWorkspaces(sessionId: string): Promise<void> {
         const views = this.workspaceViews.get(sessionId);
         if (!views) return;
@@ -153,9 +160,7 @@ export class SessionFilesService {
         this.closed = true;
         this.listeners.clear(); this.sourceSubscriptions.splice(0).forEach(off => off());
         await Promise.allSettled([...this.tails.values()]);
-        await Promise.all([...this.workspaceViews.keys()].map(id => this.revokeWorkspaces(id)));
-        await Promise.all([...this.views.values()].map(view => view.dispose()));
-        this.views.clear();
+        await Promise.all([...new Set([...this.workspaceViews.keys(), ...this.views.keys()])].map(id => this.revokeSessionViews(id)));
         await Promise.all([...this.unavailable.values()].map(async source => (await source).dispose())); this.unavailable.clear();
     }
 
@@ -164,9 +169,7 @@ export class SessionFilesService {
             const record = await this.inspect(id);
             let view = this.views.get(id);
             if (view && (view.revision !== (record?.revision ?? 0) || record?.state !== 'active' && record !== null)) {
-                await this.revokeWorkspaces(id);
-                await view.dispose();
-                this.views.delete(id);
+                await this.revokeSessionViews(id);
                 view = undefined;
             }
             if (record?.state === 'draining') {

@@ -1,19 +1,22 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { createVFS, MemoryBackend } from '@itookit/vfs-core';
+import { createVFS, createFileSystemView, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
-import { SessionFilesService } from '@itookit/app-core';
-import { createSessionAttachmentMounts } from '@itookit/app-core';
-import { DirectoryMountService } from '@itookit/app-core';
+import { SessionFilesService } from '../src/vfs/session-files';
+import { createSessionAttachmentMounts } from '../src/vfs/session-attachments';
+import { DirectoryMountService } from '../src/vfs/directory-mounts';
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-async function setup() {
+async function setup(readOnlySource = false) {
     const { manager } = await createVFS({ rootBackend: new MemoryBackend() }); cleanup.push(() => manager.dispose());
     const root = await manager.openFileSystem('/');
     const repo = new SessionRepository(root); await repo.init(); cleanup.push(() => repo.dispose());
     const a = await repo.createSession('A'), b = await repo.createSession('B');
     const attachments = createSessionAttachmentMounts(repo); cleanup.push(() => attachments.dispose());
     const files = new SessionFilesService(root, id => attachments.forSession(id)); await files.initialize(); cleanup.push(() => files.dispose());
-    files.registerSource('admin-home', await manager.openFileSystem('/home/admin'));
+    const home = await manager.openFileSystem('/home/admin');
+    const source = readOnlySource ? createFileSystemView({ viewId: 'readonly-source', mounts: [{ mountId: 'home', at: '/', fs: home, access: 'ro' }] }) : home;
+    if (readOnlySource) cleanup.push(() => source.dispose());
+    files.registerSource('admin-home', source);
     await root.driver.createFile({ parentPath: '/home/admin/projects/demo', name: 'a.md', content: 'allowed', recursive: true });
     await root.driver.createFile({ parentPath: '/home/admin/notes', name: 'secret.md', content: 'unmounted', recursive: true });
     const after = vi.fn(async () => {}), before = vi.fn(async () => {});
@@ -43,10 +46,40 @@ it('defaults to read-write, attenuates explicit read-only, and removes grants wi
     const current = await f.acquire(f.a);
     await expect(first.fs.driver.readContent('/demo/a.md')).rejects.toMatchObject({ code: 'EACCES' });
     await expect(current.fs.driver.writeContent('/demo/a.md', 'no')).rejects.toMatchObject({ code: 'EROFS' });
+    // A read-only grant refuses every mutating verb, not just content writes.
+    await expect(current.fs.driver.rename('/demo/a.md', 'renamed.md')).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(current.fs.driver.move(['/demo/a.md'], '/')).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(current.fs.driver.delete(['/demo/a.md'])).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(current.fs.driver.updateMetadata('/demo/a.md', { icon: 'locked' })).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(current.fs.meta.tags.setTags('/demo/a.md', ['blocked'])).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(current.fs.driver.createDirectory({ parentPath: '/demo', name: 'created' })).rejects.toMatchObject({ code: 'EROFS' });
+    // The grant is the whole visible tree: absolute sibling paths and traversal stay out.
+    expect((await current.fs.driver.getChildren('/')).map(node => node.name)).toEqual(['attachments', 'demo']);
+    await expect(current.fs.driver.readContent('/home/admin/notes/secret.md')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(current.fs.driver.readContent('/demo/../notes/secret.md')).rejects.toBeDefined();
     const mount = (await f.files.inspect(f.a))!.mounts[0]; await f.mounts.remove(f.a, mount.mountId);
     expect(await f.root.driver.readContent('/home/admin/projects/demo/a.md', { encoding: 'utf-8' })).toBe('changed');
     expect((await (await f.acquire(f.a)).fs.driver.getChildren('/')).map(n => n.name)).toEqual(['attachments']);
 });
+it('keeps the same mount point name bound to each Session source independently', async () => {
+    const f = await setup();
+    await f.root.driver.createFile({ parentPath: '/home/admin/projects/other', name: 'b.md', content: 'other', recursive: true });
+    await f.mounts.addDirectory(f.a, '~/projects/demo', 'rw', '/demo');
+    await f.mounts.addDirectory(f.b, '~/projects/other', 'rw', '/demo');
+    const a = await f.acquire(f.a), b = await f.acquire(f.b);
+    // Same virtual path, different registered source: no cross-Session leakage.
+    expect(await a.fs.driver.readContent('/demo/a.md', { encoding: 'utf-8' })).toBe('allowed');
+    await expect(a.fs.driver.readContent('/demo/b.md')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await b.fs.driver.readContent('/demo/b.md', { encoding: 'utf-8' })).toBe('other');
+    await expect(b.fs.driver.readContent('/demo/a.md')).rejects.toMatchObject({ code: 'ENOENT' });
+    // Both Sessions record the same virtual path, each bound to its own source.
+    expect((await f.files.inspect(f.a))?.mounts[0]).toMatchObject({ at: '/demo' });
+    expect((await f.files.inspect(f.b))?.mounts[0]).toMatchObject({ at: '/demo' });
+    // The source registered for one Session is not reachable from the other.
+    expect((await b.fs.driver.getChildren('/')).map(node => node.name)).toEqual(['attachments', 'demo']);
+    await expect(b.fs.driver.readContent('/home/admin/projects/other/b.md')).rejects.toBeDefined();
+});
+
 it('rejects reserved mount points, absent directories, and changes while the host guard refuses', async () => {
     const f = await setup();
     await expect(f.mounts.addDirectory(f.a, '~/projects/demo', 'rw', '/attachments')).rejects.toThrow('Reserved');
@@ -75,4 +108,36 @@ it('retains unavailable mounts, keeps attachments usable, and reconnects without
     const current = await restarted.acquireFiles(f.a); cleanup.push(() => current.release());
     expect(await current.context.fs.driver.readContent('/demo/a.md', { encoding: 'utf-8' })).toBe('allowed');
     await expect(old.context.fs.driver.getChildren('/')).rejects.toMatchObject({ code: 'EACCES' });
+});
+
+it.each(['append', 'create-file', 'seq-write', 'seq-transaction'] as const)('keeps source data unchanged when a read-only grant rejects %s', async operation => {
+    const f = await setup();
+    const source = '/home/admin/projects/demo';
+    await f.root.driver.createFile({ parentPath: source, name: 'state.seq', type: 'seqfile' });
+    await f.root.meta.seq!.setEntry(`${source}/state.seq`, 'state', 'original');
+    await f.mounts.addDirectory(f.a, '~/projects/demo', 'ro', '/demo');
+    const view = (await f.acquire(f.a)).fs;
+    const transaction = vi.fn(async (tx: import('@itookit/vfs-core').ISeqFileTransaction) => tx.setEntry('/demo/state.seq', 'state', 'changed'));
+    const attempt = () => {
+        if (operation === 'append') return view.driver.appendContent('/demo/a.md', 'changed');
+        if (operation === 'create-file') return view.driver.createFile({ parentPath: '/demo', name: 'new.md', content: 'changed' });
+        if (operation === 'seq-write') return view.meta.seq!.setEntry('/demo/state.seq', 'state', 'changed');
+        return view.meta.seq!.transaction!(transaction);
+    };
+    await expect(attempt()).rejects.toMatchObject({ code: operation === 'seq-transaction' ? 'ECAPABILITY' : 'EROFS' });
+    if (operation === 'seq-transaction') expect(transaction).not.toHaveBeenCalled();
+    expect(await f.root.driver.readContent(`${source}/a.md`, { encoding: 'utf-8' })).toBe('allowed');
+    expect(await f.root.driver.exists(`${source}/new.md`)).toBe(false);
+    expect(await f.root.meta.seq!.getEntry(`${source}/state.seq`, 'state')).toBe('original');
+});
+
+it('cannot elevate a read-only registered source through a read-write Session mount', async () => {
+    const f = await setup(true);
+    await expect(f.mounts.addDirectory(f.a, '~/projects/demo', 'rw', '/demo')).rejects.toMatchObject({ code: 'EROFS' });
+    expect(await f.files.inspect(f.a)).toBeNull();
+    await f.mounts.addDirectory(f.a, '~/projects/demo', 'ro', '/demo');
+    const view = (await f.acquire(f.a)).fs;
+    expect(await view.driver.readContent('/demo/a.md', { encoding: 'utf-8' })).toBe('allowed');
+    await expect(view.driver.writeContent('/demo/a.md', 'elevated')).rejects.toMatchObject({ code: 'EROFS' });
+    expect(await f.root.driver.readContent('/home/admin/projects/demo/a.md', { encoding: 'utf-8' })).toBe('allowed');
 });
