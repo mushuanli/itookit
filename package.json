@@ -8,7 +8,7 @@
         "dev": "pnpm --filter mind-os dev",
         "build": "pnpm -r build",
         "build:libs": "pnpm --filter './packages/*' build",
-        "test": "echo \"Error: no test specified\" && exit 1",
+        "test": "node --test scripts/tests/test-all.test.mjs && node scripts/test-all.mjs",
         "release": "pnpm --filter ./apps/web-app build && node scripts/release.js",
         "deploy:pages": "pnpm --filter ./apps/web-app build && node scripts/deploy-gh-pages.js",
         "tauri:dev": "pnpm --filter tauri-app tauri:dev",
@@ -19,7 +19,8 @@
         "clean": "pnpm -r clean && rm -rf node_modules",
         "typecheck": "pnpm -r typecheck",
         "docs:check": "node scripts/check-docs.mjs",
-        "styles:check": "node scripts/check-styles.mjs"
+        "styles:check": "node scripts/check-styles.mjs",
+        "test:matrix": "node --test scripts/tests/test-all.test.mjs && node scripts/test-all.mjs"
     },
     "keywords": [],
     "author": "lizlok@gmail.com",

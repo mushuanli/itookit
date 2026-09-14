@@ -73,6 +73,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 - [ ] **P0-05 当前最终回归**
   - 旧树 `d883a497` 的阶段性矩阵已完成并保留在[验收记录](minimal-system-acceptance.md)，不能作为后续大量改动后的最终通过证据。
+  - 2026-09-14 统一测试入口批次：以 `a308eb65` 加本批选定文件的隔离快照运行 `pnpm test`，Vitest 1,593、调度器 3、Rust 36 项通过，共 1,632 项；30 项既有跳过。CLI 107 项与 SIGKILL 矩阵 10 项分开执行；CLI 类型与文档检查通过。Node 26.8.1 / pnpm 10.20.0，复用本机依赖与 Rust 编译缓存，未做全新依赖安装验证。这是当前入口的阶段性回归，不是最终全仓/GUI 验收。
   - 待其余有效要求闭合后，对最终工作树执行类型、文档、样式、库/CLI/前端/原生产物构建、全量测试矩阵与真实窗口验收，记录版本、命令、结果和剩余跳过项。
 
 ### P1：Durable、Flow 与恢复正确性
@@ -195,7 +196,9 @@ pnpm --filter @itookit/cli exec vitest run tests/crash-matrix.test.ts
 cargo build --offline --features tauri/custom-protocol --manifest-path apps/tauri-app/src-tauri/Cargo.toml
 ```
 
-全量入口仍待合入：已提交根 `pnpm test` 仍是失败占位，工作树的全量测试调度脚本、package scripts 与各包测试配置尚未组成验证提交；不能把入口存在等同于矩阵完整。上述分项命令用于明确要求，最终还应核对没有 test 脚本的包是否漏验。
+统一入口：`pnpm test`（别名 `pnpm test:matrix`）先执行调度器回归，再按 workspace 顺序运行包测试、CLI 非崩溃测试、独立 CLI crash-matrix 和 Rust 边界测试。任一阶段失败立即停止；从任意目录直接执行脚本也固定使用仓库根目录。llm-tasks 默认 test 不进入 watch，编辑器已有测试纳入入口。
+
+覆盖边界：包测试沿用各自 Vitest 配置及既有跳过；无测试文件的包不自动获得行为验收。测试入口不执行类型、样式、构建或真实 GUI，这些仍按 P0-05 单独验证。Session 删除测试等待已持久的 waiting 状态后再检查活任务删除屏障，避免把异步调度时机误当功能失败。
 
 后端/网络/GUI 操作受环境限制时通过正常权限机制重试，不能把未执行当通过。保护已有工作树修改，不擅自回滚或提交；无明确授权不启动子代理。Xvfb 已用于真实窗口验收，AT-SPI 需要可写缓存与显示会话；临时探针入口、前端和原生二进制均需恢复为正常版本。`/tmp` 日志会消失，长期证据以测试源文件与可复现验收记录为准。
 

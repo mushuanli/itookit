@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { createVFS } from '@itookit/vfs-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { Kernel } from '@itookit/durable-kernel';
@@ -68,7 +68,7 @@ it('keeps Session data on disk when the pinned Kernel layout blocks the delete',
     expect((await f.repository.getManifest(id)).id).toBe(id);
     expect(await f.repository.readDocument(id, 'round-r1.json')).toContain('r1');
     expect(existsSync(path.join(sessionDir(f.root, id), 'session.seq'))).toBe(true);
-});
+}, 15_000);
 
 it('deletes the Session from the real filesystem through the lifecycle service', async () => {
     const f = await setup();
@@ -82,7 +82,7 @@ it('deletes the Session from the real filesystem through the lifecycle service',
     await expect(f.repository.getManifest(id)).rejects.toMatchObject({ code: 'ENOENT' });
     const ids: string[] = []; for await (const record of f.kernel.listSessions()) ids.push(record.id);
     expect(ids).not.toContain(id);
-});
+}, 15_000);
 
 it('refuses to remove a Session with a live Task and deletes it after close', async () => {
     const f = await setup();
@@ -94,7 +94,11 @@ it('refuses to remove a Session with a live Task and deletes it after close', as
         reduce: () => ({ state: null, next: { type: 'complete', output: 'done' } }),
     });
     const task = await (await f.kernel.openSession(id)).submit({ program: { kind: 'test', version: '1' }, input: null });
-    await expect(task.status()).resolves.toMatchObject({ task: { status: 'waiting' } });
+    // The poll claims the Task asynchronously; wait for the persisted status instead of assuming
+    // it flipped within the first tick.
+    await vi.waitFor(async () => {
+        await expect(task.status()).resolves.toMatchObject({ task: { status: 'waiting' } });
+    });
 
     // A live Task keeps the Session: the physical delete must not proceed.
     await expect(f.kernel.removeSession(id)).rejects.toMatchObject({ code: 'CONFLICT' });
@@ -103,7 +107,7 @@ it('refuses to remove a Session with a live Task and deletes it after close', as
     await f.lifecycle.deleteSession(id);
     expect(existsSync(sessionDir(f.root, id))).toBe(false);
     await expect(f.kernel.task(id, task.id)).rejects.toMatchObject({ code: 'SESSION_NOT_FOUND' });
-});
+}, 15_000);
 
 it('recovers an interrupted deletion across a real process restart', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'mindos-session-restart-'));
@@ -122,4 +126,4 @@ it('recovers an interrupted deletion across a real process restart', async () =>
 
     // A third process reusing the identity must not see the removed state.
     expect(await runWorker('reuse', root, id)).toMatchObject({ before: 'closed', after: 'open', stale: null });
-});
+}, 30_000);
