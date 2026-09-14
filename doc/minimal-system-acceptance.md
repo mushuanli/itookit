@@ -1806,3 +1806,23 @@ P0-02 的剩余项里有“以及 pause 同类文案”。查证结果分两层�
 与上一批数字相同，但**含义不同**：上一批的 crash-matrix 12 项是在有竞态的用例上取得的单次通过；本批是在修复该竞态之后取得的，隔离复现 4/4、整矩阵 12/12。因此 `cli-crash` 这一行从现在起才可作为稳定证据引用。
 
 仍未达最终验收：P0-02 的 ≤2 秒 / ≤100 次阈值未达成；P0-04 原生选择器可用性未结论、其他平台与安装包未验证。工作树当时仍有另一位协作者未提交的 `packages/llm-ui/src/styles/chat-nodes.css` 等改动，不在本批统计口径内。
+
+## 2026-09-14：写入前被拒的发送（外部租约）与草稿保留（P0-02）
+
+本会话上文记录过一条边界：“本轮是持久化**之后**的 provider 失败，不是写入前被回滚的那种发送回滚（例如租约被其他宿主夺走时 `sendMessage` 在追加 round 前抛错）”。本轮把那一半补上。
+
+装置：真实 Linux Tauri + Xvfb `:98` + 会话总线 + AT-SPI，普通前端与 `custom-protocol` 原生构建。先用 Node 侧 `SessionLeaseStore`（`packages/app-core`）以 **10 分钟 TTL** 把种子 Session 的租约授予外部持有者 `external-acceptance-holder`（`fencingToken 1`），**再**启动桌面宿主，使宿主在启动恢复时无法取得该 Session 的写租约。窗口内选中该 Session 并发送 `lease-refused-probe`，随后再发一次 `lease-refused-2`。
+
+结果：
+
+| 观测 | 值 |
+| --- | --- |
+| 记录完整请求体的 mock 收到请求数 | **0**（没有发起模型调用） |
+| `history.seq` 中 round 数 | **0**（没有追加半条消息） |
+| 输入框内容（无障碍 `gettext`） | `lease-refused-probelease-refused-2` |
+
+输入框里两次的文本都还在，说明 `SendMessageCommand` 的失败分支确实执行了：它调用 `restoreInput(savedText, savedAgentId)` 把草稿放回输入框，并尝试 `Toast.error(classified.userMessage)`（`packages/llm-ui/src/commands/SendMessageCommand.ts:79-91`）。也就是说这个场景满足“**拒绝写入 ⇒ 不产生半条消息、不丢草稿**”。
+
+已有回归与之对应：`packages/app-shell/tests/send-failure-consistency.test.ts` 覆盖“发送响应丢失时保留已接受轮次”“历史查询不可用时仍恢复草稿”“授权失败不删除持久历史”“附件上传失败时不发送且保留草稿”。
+
+边界（必须如实说明）：本轮**没有**在无障碍树里捕获到那个错误 toast——快照在 +1/+2/+3 秒都没有可见的错误文本节点，也没有消息气泡。因此“用户看到明确提示”这一点，依据的是代码路径（草稿被恢复即证明 catch 执行）与上述包级回归，**不是**本轮的窗口文本证据；toast 是短时元素，本环境也不保证被 AT-SPI 暴露。另外“宿主在租约被持有时仍把该 Session 显示为可交互”本身未做进一步评估。
