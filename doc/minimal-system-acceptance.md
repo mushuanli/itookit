@@ -1570,3 +1570,26 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 可复现命令：`pnpm --filter @itookit/device-llm test`、`pnpm --filter @itookit/app-shell test`；窗口步骤：本地 OpenAI-compatible mock 等待 120 秒后回复，发送消息并观察约 60 秒连接断开，核对错误卡片和 Task/Effect 持久错误。数据根 `/tmp/mindos-live-close-VIgRBk`；截图 `timeout-inflight.png`、`timeout-live.png`、`console.png`，持久摘录 `timeout-persisted.json`，请求日志 `mock.log`。测试/构建日志 `/tmp/x1-timeout-before.log`、`/tmp/x1-timeout-device.log`、`/tmp/x1-timeout-shell.log`、`/tmp/x1-timeout-types.log`、`/tmp/x1-timeout-front.log`、`/tmp/x1-timeout-native.log`。临时文件会消失，长期证据以本提交测试与步骤为准。
 
 补验：旧拥有者租约自然过期后，用新进程重开同一数据根，`timeout-reopened.png` 显示原消息 FAILED 与同一 60000 ms 超时原因。随后发送 `hello user-cancel`，mock 于 `03:36:49.210Z` 收齐，点击真实停止按钮后 `03:36:49.883Z` 记录连接关闭；`user-cancel-live.png` 显示 ABORTED，SQLite 中 Task `task_23d85d37-042a-4541-9a95-f48722ea2592` 和 Effect 为 cancelled、cleanupPending=false，未误写 TIMEOUT，前一条超时仍为 failed。摘录见 `timeout-and-cancel-persisted.json`。取消卡片仍写“执行失败”和 Task cancelled，用户取消文案优化仍属 P0-02，不据此宣称三态文案完成。验收结束后关闭本次应用和 mock，正常构建产物保留。
+
+## 2026-09-14：发送→Provider 动作边界的真实 IPC 计量
+
+此前只有覆盖较宽的区间计数（§70 的 953 次含边界外操作），不能与“单次发送 ≤2s / ≤100 次”直接比较。本轮补上缺失的那一段接线，并取得**动作边界内**的真实数字。
+
+实现：`apps/tauri-app/src/log/send-boundary.ts` 定义一个不嵌套、有上界的 `send-to-provider` 动作；起点是命令总线上的 `SessionCommand.Send`（Session 事件按已绑定 Session 分频道，启动期订阅会因尚未绑定而是空订阅，故改在总线处观察），终点是 Provider 响应头（`TauriLLMLogger.logResponse`，即设备已收到请求并开始应答）。超过 120 秒无应答的窗口会被有界关闭并留下记录，避免下一次发送被静默吞掉。仅在 `VITE_MINDOS_TRACE=1` 时生效，普通构建不接线。
+
+真实 Linux Tauri（Xvfb `:98` + 会话总线 + AT-SPI；自包含正常前端与 `tauri/custom-protocol` 原生构建；全新数据根；本地 OpenAI-compatible mock `18471`；窗口内点消息框输入 `ping`/`ping2` 后按 Return）：
+
+| 样本 | 按键→mock 收齐 | 动作 `elapsedMs` | 公开 IPC | sidecar 逻辑调用 | begin/finish 事务对 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 2.644 s | 2870 | **1301** | 863 | 213 / 213 |
+| 2 | 2.736 s | 2731 | **1173** | 787 | 193 / 192 |
+
+样本 1 的 IPC 分布：`sidecar_select` 541、`sidecar_begin`/`sidecar_finish` 213/213、`fs_stat` 121、`sidecar_execute` 95、`fs_stat_many` 86、`plugin:sql|select` 14、`fs_read_dir` 9、其余少量。逻辑热点为 `getRecordField` 376 / `getMetaExt` 106 / `setRecordField` 87 / `listRecordFields` 73。
+
+**结论：≤2 秒 / ≤100 次两个阈值均未达成**，分别超出约 1.4 倍与 12–13 倍。延迟与 IPC 数近似线性（约 2.2 ms/次），说明瓶颈是宿主往返次数本身，而不是某一次慢调用。同口径的 Node 无界面探针（`apps/cli/tests/fixtures/profile-send-cost.ts`，进程内 LocalFS/Node SQLite）为 868 次逻辑调用 / 67 ms，与桌面 `ipcOps` 的差值即 Tauri 通道与 `fs_*` 命令的额外往返；两个入口不可互相换算。
+
+方向与边界：`packages/vfsdriver-localfs/AGENTS.md` 明确要求减少 IPC 只能走**原子批量操作**，不得为省往返省略事务内的跨进程 rename journal 恢复检查；因此“只读操作不经事务”这条捷径不可用。真正能跨过阈值的是协议层改动（把逐字段/逐路径的 SeqFile 读写合批，或让调用方显式传参而不是每个逻辑步骤重读同一记录），属尚未实施的设计，不能以本次测量宣称完成。
+
+复现：`VITE_MINDOS_TRACE=1 pnpm --filter tauri-app build` 加 `cargo build --offline --features tauri/custom-protocol --manifest-path apps/tauri-app/src-tauri/Cargo.toml`，Xvfb + 会话总线 + AT-SPI 启动，发送后在 `<rootDir>/var/log/vfs-trace.log` 取 `"kind":"action","label":"send-to-provider"` 行。窗口驱动与数据根在临时目录（`.tauri-acceptance/measure/`，已 gitignore），长期证据以本节数字、`send-boundary.ts` 与 `packages/app-shell/tests/trace-send-boundary.test.ts` 为准。验收后已恢复普通前端与原生构建。
+
+环境注意（可复现性）：本机 `/run/user/<uid>` 对沙箱只读，AT-SPI bridge 无法在其下绑定套接字并会导致应用进程被带走；`XDG_RUNTIME_DIR`/`XDG_CACHE_HOME` 必须指向可写目录。命令隔离环境各自持有独立 `/tmp` 与 PID 命名空间，会话总线套接字因此要放在共享的数据目录下（X11 走抽象套接字不受影响），否则跨调用驱动无障碍树会连接失败。这两点此前未记录，是“AT-SPI 需要可写缓存与显示会话”之外的具体原因。
