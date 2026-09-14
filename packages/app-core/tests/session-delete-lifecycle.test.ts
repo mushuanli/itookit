@@ -138,6 +138,44 @@ it('cancels a running Task while deleting and removes storage, catalog and recor
     expect(ids).not.toContain(id);
 });
 
+it('closes a running Session and keeps every record', async () => {
+    const f = await setup();
+    const id = await f.repository.createSession('Closable');
+    await f.repository.writeDocument(id, 'round-r1.json', JSON.stringify({ id: 'r1', input: [], output: [] }));
+    const { task, stopping, release } = await withInFlightEffect(f, id);
+
+    const closing = f.lifecycle.closeSession(id);
+    await stopping; // the Kernel has signalled the stop; the adapter now confirms it
+    release();
+    await closing;
+
+    expect((await task.status()).task.status).toBe('cancelled');
+    expect((await f.kernel.sessionStat(id)).phase).toBe('closed');
+    // Closing is not deleting: manifest, documents and Kernel storage all survive.
+    expect((await f.repository.getManifest(id)).id).toBe(id);
+    expect(await f.repository.readDocument(id, 'round-r1.json')).toContain('r1');
+    expect(await f.fs.driver.exists(`/var/lib/sessions/${id}`)).toBe(true);
+    const ids: string[] = []; for await (const record of f.kernel.listSessions()) ids.push(record.id);
+    expect(ids).toContain(id);
+});
+
+it('bounds a close that never confirms and reports that records were kept', async () => {
+    const f = await setup();
+    const id = await f.repository.createSession('Stuck close');
+    const { stopping, release } = await withInFlightEffect(f, id);
+
+    await expect(f.boundedLifecycle.closeSession(id))
+        .rejects.toMatchObject({ code: 'EBUSY', message: expect.stringContaining('records were kept') });
+    expect((await f.repository.getManifest(id)).id).toBe(id);
+    expect(await f.fs.driver.exists(`/var/lib/sessions/${id}`)).toBe(true);
+
+    // Once the device confirms, the close succeeds and still keeps the records.
+    await stopping; release();
+    await f.lifecycle.closeSession(id);
+    expect((await f.kernel.sessionStat(id)).phase).toBe('closed');
+    expect((await f.repository.getManifest(id)).id).toBe(id);
+});
+
 it('reports a bounded failure and deletes nothing while the in-flight Effect never confirms', async () => {
     const f = await setup();
     const id = await f.repository.createSession('Stuck');

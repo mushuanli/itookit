@@ -45,6 +45,7 @@ export const zhCN = {
     'session.tasks.stopPending': '取消已请求，等待外部停止确认（{count} 个操作在途）',
     'session.tasks.stopStopped': '已停止（取消请求已确认）',
     'session.tasks.eventsTrimmed': '更早的事件已按保留期裁剪',
+    'session.close.action': '关闭会话（停止执行，保留记录）',
     'boot.filesystem': '初始化文件系统…',
     'boot.llmDriver': '加载 LLM 驱动…',
     'boot.coreServices': '初始化核心服务…',

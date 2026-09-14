@@ -12,7 +12,7 @@ import { createFileSystemView, type FileSystemContextOwner, type FileSystemView,
 
 import { taskStat } from '@itookit/durable-kernel';
 import { createSessionBrowser, exportSessionBundle, parseSessionRoute, resolveBrowserTarget, sessionRoute, taskSummary, taskKeyEvent,
-    type DirectoryMountService, type SessionFilesService, type WorkspaceController } from '@itookit/app-core';
+    SessionLifecycleService, type DirectoryMountService, type SessionFilesService, type WorkspaceController } from '@itookit/app-core';
 
 /** Sidebar refresh tracing — enable with localStorage['vfs:debug']='1' (same flag as vfs-ui). */
 function debugEnabled(): boolean {
@@ -28,6 +28,7 @@ export class SessionWorkbench implements WorkspaceController {
     private assets?: FileSystemView;
     private browser?: FileSystemSourceOwner;
     private sidebarUI?: VFSUIShell;
+    private lifecycle!: SessionLifecycleService;
     private active: string | null = null;
     private activeBranch?: string;
     private selectionSync?: string;
@@ -55,6 +56,7 @@ export class SessionWorkbench implements WorkspaceController {
         private readonly manageMemory?: (sessionId: string, signal: AbortSignal) => Promise<void>) {}
     async start(): Promise<void> {
         this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel });
+        this.lifecycle = new SessionLifecycleService({ repository: this.repository, kernel: this.kernel });
         this.sidebarUI = createVFSUI({ sessionListContainer: this.sidebar, title: '会话', scopeId: 'session-browser:v1:admin',
             readOnly: false, activateDirectories: true, defaultUiSettings: { sortBy: 'lastModified' },
             exportDirectories: true,
@@ -63,9 +65,17 @@ export class SessionWorkbench implements WorkspaceController {
             contextMenu: {
                 items: (item, defaults) => {
                     const target = resolveBrowserTarget(item.id);
-                    if (target.kind !== 'task') return defaults;
-                    return [{ id: 'reset-task', label: '强制复位任务（停止执行，保留记录）',
-                        onClick: () => { void this.resetTask(item.id).catch(error => this.report(error)); } }];
+                    if (target.kind === 'task') {
+                        return [{ id: 'reset-task', label: '强制复位任务（停止执行，保留记录）',
+                            onClick: () => { void this.resetTask(item.id).catch(error => this.report(error)); } }];
+                    }
+                    // Closing stops the run but keeps the Session history, so it is offered
+                    // next to (not instead of) the destructive delete.
+                    if (target.kind === 'session') {
+                        return [...defaults, { id: 'close-session', label: t('session.close.action'),
+                            onClick: () => { void this.closeSession(target.sessionId).catch(error => this.report(error)); } }];
+                    }
+                    return defaults;
                 },
             },
         }, this.browser.fs) as VFSUIShell;
@@ -83,6 +93,15 @@ export class SessionWorkbench implements WorkspaceController {
         }));
         await this.sidebarUI.start();
         if (!this.active) this.message('选择一个会话，或新建会话');
+    }
+    /**
+     * Stop a running Session and keep every record. Deletion is a separate action; this
+     * only cancels the in-flight run and waits until the external stop is confirmed.
+     */
+    private async closeSession(sessionId: string): Promise<void> {
+        if (this.closed) return;
+        await this.lifecycle.closeSession(sessionId);
+        this.scheduleRefresh('session-close');
     }
     private async resetTask(path: string): Promise<void> {
         const target = resolveBrowserTarget(path);

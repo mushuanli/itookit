@@ -13,9 +13,10 @@ export interface SessionLifecycleOptions {
 }
 
 /**
- * Single entry point for Session deletion: close the Kernel Session, wait until it
- * is really closed, remove Kernel storage and catalog, and only then delete the
- * repository records. Every step keeps the Session intact when it fails.
+ * Single entry point for Session closure: close the Kernel Session and wait until the
+ * stop is really confirmed. Deleting is the destructive sibling that additionally
+ * removes Kernel storage and the repository records. Every step keeps the Session
+ * intact when it fails.
  */
 export class SessionLifecycleService {
     constructor(
@@ -23,9 +24,18 @@ export class SessionLifecycleService {
         private readonly options: SessionLifecycleOptions = {},
     ) {}
 
+    /**
+     * Stop a Session (cancelling running Tasks and waiting for the external stop to be
+     * confirmed) while keeping every record, so the history stays readable.
+     */
+    async closeSession(sessionId: string): Promise<void> {
+        await this.deps.repository.getManifest(sessionId);
+        await this.closeAndWait(sessionId, 'records were kept');
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         await this.deps.repository.getManifest(sessionId);
-        await this.closeAndWait(sessionId);
+        await this.closeAndWait(sessionId, 'nothing was deleted');
         await this.deps.kernel.removeSession(sessionId);
         await this.deps.repository.deleteSession(sessionId);
     }
@@ -42,7 +52,7 @@ export class SessionLifecycleService {
     }
 
     /** Close cancels running Tasks; deleting before it settles would race live state. */
-    private async closeAndWait(sessionId: string): Promise<void> {
+    private async closeAndWait(sessionId: string, onFailure: string): Promise<void> {
         const timeoutMs = this.options.closeTimeoutMs ?? 30_000;
         const deadline = Date.now() + timeoutMs;
         try {
@@ -50,7 +60,7 @@ export class SessionLifecycleService {
             throw new Error(`Close did not complete within ${timeoutMs}ms`);
         } catch (error) {
             const reason = error instanceof Error ? error.message : String(error);
-            throw new FSError('EBUSY', `Session ${sessionId} could not be closed: ${reason}; nothing was deleted`);
+            throw new FSError('EBUSY', `Session ${sessionId} could not be closed: ${reason}; ${onFailure}`);
         }
     }
 

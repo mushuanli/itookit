@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { t } from '@itookit/common';
 import { createVFSUI } from '@itookit/vfs-ui';
 vi.mock('@itookit/vfs-ui', () => ({ createVFSUI: vi.fn(() => ({ on: () => () => {}, start: async () => {}, refresh: async () => {}, selectPath: async () => {}, destroy: () => {} })) }));
 import { SessionWorkbench } from '../src/core/SessionWorkbench';
@@ -14,7 +15,8 @@ function setup() {
     const destroy = vi.fn(async () => {}), factory = vi.fn(async (...args: any[]) => { manifest.currentBranch = args[1].target.branch ?? 'main'; return { destroy }; });
     const onSelect = vi.fn();
     const sidebar = element();
-    const kernel = { onChanged: () => () => {}, cancel: vi.fn(async () => {}), task: vi.fn(async () => ({ effects: {} })) };
+    const kernel = { onChanged: () => () => {}, cancel: vi.fn(async () => {}), task: vi.fn(async () => ({ effects: {} })),
+        closeSession: vi.fn(async () => {}), sessionStat: vi.fn(async () => ({ phase: 'closed' })) };
     const workbench = new SessionWorkbench(sidebar as any, element() as any, repository as any, files as any, factory as any, onSelect, undefined, kernel as any, factory as any);
     return { kernel, sidebar, workbench, repository, files, factory, release, dispose, destroy, onSelect, manifest, changed: () => listeners.forEach(listener => listener()) };
 }
@@ -86,6 +88,23 @@ it('offers reset only on tasks and cancels through Kernel without deleting histo
     expect(f.kernel.cancel).toHaveBeenCalledTimes(1);
     expect(f.kernel.cancel).toHaveBeenCalledWith('s', 't', expect.stringContaining('强制复位'));
     expect(f.factory).not.toHaveBeenCalled();
+    await f.workbench.destroy();
+});
+
+it('offers closing a Session while keeping its records', async () => {
+    const f = setup(); await f.workbench.start();
+    const options = vi.mocked(createVFSUI).mock.calls.at(-1)![0];
+    const defaults = [{ id: 'delete', label: '删除' }];
+    const items = options.contextMenu!.items!({ id: '/s' } as any, defaults);
+    // The destructive defaults stay; closing is additive.
+    expect(items.slice(0, defaults.length)).toEqual(defaults);
+    const close = items.find(item => (item as { id?: string }).id === 'close-session') as { label?: string; onClick: (item: any) => void };
+    expect(close?.label).toBe(t('session.close.action'));
+    close.onClick({});
+
+    await vi.waitFor(() => expect(f.kernel.closeSession).toHaveBeenCalledWith('s', true));
+    // Closing is not deleting: the Session records are never removed.
+    expect(f.repository.getManifest).toHaveBeenCalledWith('s');
     await f.workbench.destroy();
 });
 
