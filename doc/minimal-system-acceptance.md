@@ -1767,3 +1767,20 @@ P0-02 的剩余项里有“以及 pause 同类文案”。查证结果分两层�
 
 1. **界面没有暂停入口**。`RunAttachmentController.pause()` 在 `packages/llm-ui` 中存在，但全仓没有任何调用方（只有 `resume` 经斜杠命令接线）。因此本轮补的是**投影与展示**：当任务被其他角色（Flow、CLI、另一宿主）暂停时界面不再沉默，而不是“用户能在窗口里暂停任务”。
 2. **没有真实窗口证据**。本轮尝试用挂起模型在窗口中打开该任务的详情视图以读取该行文本，但侧栏的 Session 树行不暴露给 AT-SPI、合成点击也无法展开出 `files`/`tasks` 子节点，四组坐标与 DoAction 均未进入任务视图。任务视图的 `[data-stop-state]` 仍只有 jsdom 证据（`session-browser-ui.test.ts`），以及本会话早前在**内核层**取得的取消三态证据（`kernel.test.ts`「distinguishes an accepted cancel request from a confirmed external stop」）。pause 的窗口验收仍未完成。
+
+## 2026-09-14：CLI crash-matrix 的不确定性与其修复（P0-05）
+
+本轮在 `ee6f413a` 重跑全量回归时，`cli-crash` 阶段**失败**（rc=1）：12 项里
+`recovers a run killed while the first Effect is in flight` 失败，断言
+`expect(killed.nodeTaskIds).toEqual({})` 实际得到 `{ finish: "task_ecf8aa39-…" }`。
+此前同一入口在该树上连续三次通过（`3c3afe5d`、`f81a5bc9` 两批），因此先按“偶发”处理并复现。
+
+隔离复现（`vitest run tests/crash-matrix.test.ts -t "recovers a run killed while the first Effect is in flight"`）四次：**通过 / 失败 / 通过 / 通过**，失败两次的耗时为 768 ms 与 794 ms，通过时约 31 秒。也就是说这不是一次性环境噪声，而是约 50% 的不确定性。
+
+定位：断言注释写的是“A non-interactive Run never reaches the monitor, so the killed manifest has no nodeTaskIds”，但代码里 **start 与 resume 两条路径都无条件调用 `monitor(…)`**（`apps/cli/src/commands.ts:255`、`:414`；`--json`/headless 只跳过界面），monitor 的每一 tick 都会经 `refreshTaskStatuses` 把 `task.labels.flowNodeId` 写进 `manifest.nodeTaskIds`（`commands.ts:808`）。因此“崩溃清单里没有 nodeTaskIds”取决于 tick 与 SIGKILL 的先后，**是竞态而不是不变量**；注释所依据的前提已过时。
+
+修复：把该断言换成对“已记录内容的自洽性”检查（唯一节点是 `finish`，值形如 `task_…`），不再要求它必须为空。该用例真正要保证的东西——Run 不是 `succeeded`、`export` 仍能经 Session 找到节点 Task、`resume` 先返回 3（存在结果不确定的 Effect）再在显式重放后返回 0——紧接其后的断言原样保留、未被削弱。
+
+验证：修复后同一用例隔离运行 **4/4 通过**，整个 crash matrix **12/12 通过**（修复前 4 次观测中失败 2 次）。
+
+影响记录：P0-05 此前把“CLI crash-matrix 12 项通过”当作稳定证据；本轮证明该阶段在修复前不可复现。今后的崩溃矩阵计数应连同本次修复一起复核，不能沿用修复前的单次通过结论。
