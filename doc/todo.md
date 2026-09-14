@@ -94,6 +94,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 2026-09-14 重跑（本会话其余改动合入后）：工作树 `f81a5bc9`，11 个阶段全部 rc=0，合计 **1670 项通过 / 30 项跳过**（包测试 1511、CLI 108、crash-matrix 12、Rust 36、调度器 3、typecheck 25 个 workspace）。较上批 +3，全部来自新增的 `directory-dialog.test.ts`。见[重跑记录](minimal-system-acceptance.md#2026-09-14当前树全量回归重跑-f81a5bc9)。
   - 2026-09-14 崩溃矩阵不确定性修复（见[crash-matrix 修复](minimal-system-acceptance.md#2026-09-14cli-crash-matrix-的不确定性与其修复p0-05)）：本轮重跑时 `cli-crash` 失败。隔离四次为 2 通过 / 2 失败，定位于用例断言了**竞态**（“非交互 Run 不会进入 monitor，故 nodeTaskIds 为空”），而 start 与 resume 两条路径都无条件调用 `monitor()`，tick 会写 `nodeTaskIds`。已把该断言改为对已记录内容的**自洽性**检查，用例真正保证的（`export` 仍能找到节点 Task、`resume` 先 3 后 0）保持不变。修复后隔离 **4/4**、整矩阵 **12/12** 通过。此前的“12 项通过”结论在修复前不可复现，后续计数须连同本修复复核。
   - 仍未达最终验收：P0-02 性能阈值未达成、P0-04 尚有未做窗口场景；未做全新依赖安装，未构建发布安装包（`bundle.targets: "all"`，本机无 AppImage/linuxdeploy 工具且无网络）。受版本控制的 `release/dist/` 停留在 2026-09-04，与当前树不同步，本轮未重新生成。
+  - 2026-09-14 修复后重跑：`561a5d62`（含 crash-matrix 竞态修复与 pause 投影）11 个阶段全部 rc=0，合计 **1670 项通过 / 30 项跳过**（包 1511、CLI 108、crash-matrix **12（现为确定性通过）**、Rust 36、调度器 3、typecheck 25）。数字与上一批相同但含义不同：本批的 crash-matrix 是在修复竞态之后取得的。见[修复后回归](minimal-system-acceptance.md#2026-09-14当前树全量回归561a5d62含-crash-matrix-修复与-pause-投影)。
   - 待其余有效要求闭合后，对最终工作树执行类型、文档、样式、库/CLI/前端/原生产物构建、全量测试矩阵与真实窗口验收，记录版本、命令、结果和剩余跳过项。
 
 ### P1：Durable、Flow 与恢复正确性

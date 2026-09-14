@@ -1784,3 +1784,25 @@ P0-02 的剩余项里有“以及 pause 同类文案”。查证结果分两层�
 验证：修复后同一用例隔离运行 **4/4 通过**，整个 crash matrix **12/12 通过**（修复前 4 次观测中失败 2 次）。
 
 影响记录：P0-05 此前把“CLI crash-matrix 12 项通过”当作稳定证据；本轮证明该阶段在修复前不可复现。今后的崩溃矩阵计数应连同本次修复一起复核，不能沿用修复前的单次通过结论。
+
+## 2026-09-14：当前树全量回归（`561a5d62`，含 crash-matrix 修复与 pause 投影）
+
+在修复崩溃矩阵竞态用例、并补上 pause 投影文案之后重跑同一入口。工作树 `561a5d62`，Node 26.8.1 / pnpm 10.20.0 / cargo 1.98.1，复用本机依赖与 Rust 缓存。11 个阶段全部 rc=0：
+
+| 阶段 | 结果 |
+| --- | --- |
+| `pnpm typecheck` | 25 个 workspace |
+| `pnpm docs:check` / `pnpm styles:check` | 通过 |
+| `pnpm build:libs` / CLI / tauri-app 构建 | 通过（20 个库） |
+| `cargo test`（offline） | 36 passed |
+| 包测试 | **1511 passed / 30 skipped**（191 文件） |
+| CLI 非崩溃 | 108 passed |
+| CLI crash-matrix | **12 passed**（修复后确定性通过） |
+| `cargo build --features tauri/custom-protocol` | 通过 |
+| 调度器 | 3 passed |
+
+合计 **1670 项通过 / 30 项跳过**。
+
+与上一批数字相同，但**含义不同**：上一批的 crash-matrix 12 项是在有竞态的用例上取得的单次通过；本批是在修复该竞态之后取得的，隔离复现 4/4、整矩阵 12/12。因此 `cli-crash` 这一行从现在起才可作为稳定证据引用。
+
+仍未达最终验收：P0-02 的 ≤2 秒 / ≤100 次阈值未达成；P0-04 原生选择器可用性未结论、其他平台与安装包未验证。工作树当时仍有另一位协作者未提交的 `packages/llm-ui/src/styles/chat-nodes.css` 等改动，不在本批统计口径内。
