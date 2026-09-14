@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
-import { exportSessionBundle, importSessionBundle, isSessionBundle, SESSION_BUNDLE_VERSION } from '@itookit/app-core';
+import { exportSessionBundle, importSessionBundle, isSessionBundle, SESSION_BUNDLE_VERSION } from '../src/session/session-bundle';
 
 let cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup = []; });

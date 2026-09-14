@@ -142,6 +142,7 @@ describe('independent file system views', () => {
         await expect(fs.driver.move(['/ref/visible.md'], '/')).rejects.toMatchObject({ code: 'EXMOUNT' });
     });
 
+
     it('rejects traversal and subtree escape, including asset names', async () => {
         const sourceFS = await source();
         await sourceFS.driver.createDirectory({ name: 'allowed' });
