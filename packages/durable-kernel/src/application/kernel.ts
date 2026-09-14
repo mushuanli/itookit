@@ -1,3 +1,4 @@
+import type { LeaseGuardOptions } from '../domain/types';
 import { EventBus, FSError, pathUtils, type IFileSystem } from '@itookit/vfs-core';
 import { EffectRegistry, ProgramRegistry, StorageResolverRegistry, WorkspaceRegistry } from '../ports/registry';
 import type { KernelPlugin, KernelRegistration } from '../ports/plugin';
@@ -335,15 +336,15 @@ export class Kernel implements KernelRegistration {
         return total;
     }
 
-    async submit<I, O>(sessionId: string, spec: import('../domain/types').TaskSpec<I>): Promise<TaskHandle<O>> {
+    async submit<I, O>(sessionId: string, spec: import('../domain/types').TaskSpec<I>, options?: import('../domain/types').LeaseGuardOptions): Promise<TaskHandle<O>> {
         const binding = await this.binding(sessionId);
-        const task = await this.store.createTask(binding, sessionId, spec);
+        const task = await this.store.createTask(binding, sessionId, spec, options);
         this.notify(sessionId, task.id);
         this.queueDrain(sessionId);
         return new DefaultTaskHandle<O>(this, sessionId, task.id);
     }
 
-    async retryTask<O = unknown>(sessionId: string, taskId: string, options: { requestId: string }): Promise<TaskHandle<O>> {
+    async retryTask<O = unknown>(sessionId: string, taskId: string, options: LeaseGuardOptions & { requestId: string }): Promise<TaskHandle<O>> {
         if (typeof options.requestId !== 'string' || !options.requestId.trim()) throw new Error('Manual retry requires requestId');
         const original = await this.task(sessionId, taskId);
         return this.submit(sessionId, {
@@ -351,7 +352,7 @@ export class Kernel implements KernelRegistration {
             retryOfTaskId: taskId, program: original.program, input: original.input,
             dependsOn: original.dependencies, retry: original.retry, priority: original.priority,
             labels: original.labels, deferStart: true,
-        });
+        }, options);
     }
 
     async task(sessionId: string, taskId: string): Promise<TaskRecord> {
@@ -379,8 +380,8 @@ export class Kernel implements KernelRegistration {
         return this.store.taskAttempts(await this.binding(sessionId), taskId);
     }
 
-    async signal(sessionId: string, taskId: string, signal: TaskSignal): Promise<void> {
-        await this.store.signalTask(await this.binding(sessionId), taskId, signal);
+    async signal(sessionId: string, taskId: string, signal: TaskSignal, options?: import('../domain/types').LeaseGuardOptions): Promise<void> {
+        await this.store.signalTask(await this.binding(sessionId), taskId, signal, options);
         this.notify(sessionId, taskId);
         this.queueDrain(sessionId);
     }
@@ -409,11 +410,11 @@ export class Kernel implements KernelRegistration {
         this.queueDrain(sessionId);
     }
 
-    async cancel(sessionId: string, taskId: string, reason?: string): Promise<void> {
+    async cancel(sessionId: string, taskId: string, reason?: string, options?: LeaseGuardOptions): Promise<void> {
         const binding = await this.binding(sessionId);
         const current = await this.store.readTask(binding, taskId);
         const activeEffects = activeEffectIds(current);
-        const task = await this.store.cancelTask(binding, taskId, reason);
+        const task = await this.store.cancelTask(binding, taskId, reason, options);
         await this.abortFencedReducers(sessionId);
         this.notify(sessionId, taskId);
         this.queueDrain(sessionId);
@@ -421,7 +422,7 @@ export class Kernel implements KernelRegistration {
         const children = (await this.store.listTasks(binding))
             .filter(candidate => candidate.parentTaskId === taskId && !isTerminalStatus(candidate.status));
         for (const child of children) {
-            await this.cancel(sessionId, child.id, reason ?? `Parent task ${taskId} cancelled`);
+            await this.cancel(sessionId, child.id, reason ?? `Parent task ${taskId} cancelled`, options);
         }
     }
 
@@ -525,7 +526,7 @@ export class Kernel implements KernelRegistration {
         return this.store.contextHistory(await this.binding(sessionId), head);
     }
 
-    async createResource(sessionId: string, spec: ResourceSpec): Promise<ResourceGrant> {
+    async createResource(sessionId: string, spec: ResourceSpec, options?: LeaseGuardOptions): Promise<ResourceGrant> {
         if (spec.requestId !== undefined && (typeof spec.requestId !== 'string' || !spec.requestId.trim())) throw new Error('Invalid resource requestId');
         const resource: ResourceRecord = {
             id: createId('resource'), sessionId, kind: spec.kind, uri: spec.uri,
@@ -540,7 +541,7 @@ export class Kernel implements KernelRegistration {
             spec.requestId === undefined ? undefined : { id: spec.requestId, fingerprint: JSON.stringify({
                 kind: spec.kind, uri: spec.uri, rights: handle.rights, parentResourceId: spec.parentResourceId,
                 parentHandleId: spec.parentHandleId, metadata: spec.metadata,
-            }) });
+            }) }, options);
     }
 
     async grantResource(
@@ -563,10 +564,10 @@ export class Kernel implements KernelRegistration {
 
     async setBudget(
         sessionId: string, handleId: string, dimension: string, hardLimit: number,
-        expectedVersion?: number | null,
+        expectedVersion?: number | null, options?: LeaseGuardOptions,
     ): Promise<BudgetAccount> {
         return this.store.setBudget(
-            await this.binding(sessionId), handleId, dimension, hardLimit, expectedVersion,
+            await this.binding(sessionId), handleId, dimension, hardLimit, expectedVersion, options,
         );
     }
 

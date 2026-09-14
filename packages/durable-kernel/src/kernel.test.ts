@@ -71,6 +71,50 @@ describe('Kernel durable kernel', () => {
         await manager.dispose();
     });
 
+    it('fences task submission and shared writes in the transaction after a lease takeover', async () => {
+        const session = await kernel.createSession({ id: 'session-one', storage: binding });
+        const lease = { key: 'owner', ownerId: 'old', epoch: 1 };
+        await session.setShared('owner', { ownerId: 'old', epoch: 1, expiresAt: Date.now() + 60_000 });
+        const spec = { program: { kind: 'test.echo', version: '1' }, input: 'once', requestId: 'stable', deferStart: true };
+        const original = await session.submit(spec, { lease });
+        await session.setShared('checkpoint', { task: original.id }, { lease });
+        // A prior ownership read cannot authorize a write after the new owner commits.
+        expect((await session.getShared('owner'))?.value).toMatchObject({ ownerId: 'old' });
+        const successor = { ...lease, ownerId: 'new', epoch: 2 };
+        await session.setShared('owner', { ...successor, expiresAt: Date.now() + 60_000 });
+        const rejection = { code: 'STALE_SHARED_LEASE' };
+        await expect(session.submit({ ...spec, requestId: 'new-task' }, { lease })).rejects.toMatchObject(rejection);
+        await expect(session.submit(spec, { lease })).rejects.toMatchObject(rejection);
+        await expect(session.setShared('checkpoint', null, { lease })).rejects.toMatchObject(rejection);
+        await expect(session.deleteShared('checkpoint', { lease })).rejects.toMatchObject(rejection);
+        const taskBeforeSignal = await original.status();
+        await expect(session.signal(original.id, { type: 'late' }, { lease })).rejects.toMatchObject(rejection);
+        await expect(original.cancel('late', { lease })).rejects.toMatchObject(rejection);
+        await expect(original.pause({ requestId: 'late-pause', lease })).rejects.toMatchObject(rejection);
+        await expect(original.interrupt({ requestId: 'late-interrupt', lease })).rejects.toMatchObject(rejection);
+        await expect(original.resume({ requestId: 'late-resume', lease })).rejects.toMatchObject(rejection);
+        await expect(original.start({ lease })).rejects.toMatchObject(rejection);
+        await expect(original.createResource({ kind: 'test', uri: 'test://late' }, { lease })).rejects.toMatchObject(rejection);
+        await expect(session.setBudget('missing', 'tokens', 3, undefined, { lease })).rejects.toMatchObject(rejection);
+        expect(await original.status()).toEqual(taskBeforeSignal);
+        expect((await session.getShared('checkpoint'))?.value).toEqual({ task: original.id });
+        expect((await session.listTasks()).map(task => task.id)).toEqual([original.id]);
+        // Authority is a write condition, not part of the logical submission fingerprint.
+        expect((await session.submit(spec, { lease: successor })).id).toBe(original.id);
+    });
+
+    it.each(['expired', 'deleted', 'missing'])('refuses a %s lease without committing a task or shared revision', async state => {
+        const session = await kernel.createSession({ id: 'session-one', storage: binding });
+        const lease = { key: 'owner', ownerId: 'old', epoch: 1 };
+        if (state !== 'missing') await session.setShared('owner', { ownerId: 'old', epoch: 1,
+            expiresAt: state === 'expired' ? Date.now() - 1 : Date.now() + 60_000, deleted: state === 'deleted' });
+        const spec = { program: { kind: 'test.echo', version: '1' }, deferStart: true };
+        await expect(session.submit(spec, { lease })).rejects.toMatchObject({ code: 'STALE_SHARED_LEASE' });
+        await expect(session.setShared('checkpoint', 1, { lease })).rejects.toMatchObject({ code: 'STALE_SHARED_LEASE' });
+        expect(await session.getShared('checkpoint')).toBeUndefined();
+        expect(await session.listTasks()).toEqual([]);
+    });
+
     it('persists and completes a task', async () => {
         kernel.registerProgram(echoProgram());
         const session = await kernel.createSession({ id: 'session-one', storage: binding });

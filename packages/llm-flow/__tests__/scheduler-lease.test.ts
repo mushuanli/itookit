@@ -92,6 +92,40 @@ describe('acquireSchedulerLease', () => {
         await expect(second.assertOwned()).resolves.toBeUndefined();
     });
 
+    it('rejects an expired owner without a successor and never revives it on heartbeat', async () => {
+        vi.useFakeTimers();
+        let now = 0;
+        const session = fakeSession();
+        const lease = await acquireSchedulerLease(session as never, 'root', { ttlMs: 3000, now: () => now });
+        now = 2999;
+        await expect(lease.assertOwned()).resolves.toBeUndefined();
+        now = 3000;
+        await expect(lease.assertOwned()).rejects.toSatisfy(isSchedulerOwnershipLost);
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(session.entries.get(schedulerOwnerKey('root'))?.value).toMatchObject({ expiresAt: 3000 });
+        now = 1000;
+        await expect(lease.assertOwned()).rejects.toSatisfy(isSchedulerOwnershipLost);
+        await lease.release();
+    });
+
+    it('does not renew after expiry even when no ownership check has run', async () => {
+        vi.useFakeTimers();
+        let now = 0;
+        const session = fakeSession();
+        const lease = await acquireSchedulerLease(session as never, 'root', { ttlMs: 3000, now: () => now });
+        now = 4000;
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(session.entries.get(schedulerOwnerKey('root'))?.value).toMatchObject({ expiresAt: 3000 });
+        await expect(lease.assertOwned()).rejects.toSatisfy(isSchedulerOwnershipLost);
+        await lease.release();
+    });
+
+    it('rejects a released lease before a successor appears', async () => {
+        const lease = await acquireSchedulerLease(fakeSession() as never, 'root', { now: () => 0 });
+        await lease.release();
+        await expect(lease.assertOwned()).rejects.toSatisfy(isSchedulerOwnershipLost);
+    });
+
     it('renews the lease while the host is alive', async () => {
         vi.useFakeTimers();
         let now = 0;

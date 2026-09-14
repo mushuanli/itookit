@@ -35,11 +35,13 @@ it('reuses an unchanged poll snapshot for wake calculation', async () => {
 });
 
 it.each(['during-read', 'after-poll'])('observes a new timer notified %s instead of sleeping indefinitely', async timing => {
+    // The timer already exists before wake calculation; do not create its deadline during the read.
+    const waiting = waitingTask();
     const scan = vi.spyOn(internals.store, 'listTasks');
     scan.mockImplementationOnce(async () => {
         if (timing === 'during-read') internals.notify('s');
         return [];
-    }).mockImplementation(async () => [waitingTask()]);
+    }).mockImplementation(async () => [waiting]);
     await internals.poll('s');
     if (timing === 'after-poll') internals.notify('s');
     const delay = await internals.nextWakeDelay('s');

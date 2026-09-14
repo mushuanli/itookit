@@ -36,8 +36,8 @@ export class DefaultSessionHandle implements SessionHandle {
     watch(options?: { after?: number }) { return this.events(options); }
     constructor(private readonly kernel: Kernel, readonly id: string) {}
 
-    submit<I, O = unknown>(spec: TaskSpec<I>): Promise<TaskHandle<O>> {
-        return this.kernel.submit<I, O>(this.id, spec);
+    submit<I, O = unknown>(spec: TaskSpec<I>, options?: import('../domain/types').LeaseGuardOptions): Promise<TaskHandle<O>> {
+        return this.kernel.submit<I, O>(this.id, spec, options);
     }
 
     attachTask<O = unknown>(taskId: string): Promise<TaskHandle<O>> {
@@ -48,8 +48,8 @@ export class DefaultSessionHandle implements SessionHandle {
         return this.kernel.listSessionTasks(this.id);
     }
 
-    signal(taskId: string, signal: TaskSignal): Promise<void> {
-        return this.kernel.signal(this.id, taskId, signal);
+    signal(taskId: string, signal: TaskSignal, options?: import('../domain/types').LeaseGuardOptions): Promise<void> {
+        return this.kernel.signal(this.id, taskId, signal, options);
     }
 
     respond<T extends JsonValue>(taskId: string, response: InteractionResponse<T>): Promise<void> {
@@ -198,9 +198,9 @@ export class DefaultSessionHandle implements SessionHandle {
     }
 
     setBudget(
-        handleId: string, dimension: string, limit: number, version?: number | null,
+        handleId: string, dimension: string, limit: number, version?: number | null, options?: import('../domain/types').LeaseGuardOptions,
     ): Promise<BudgetAccount> {
-        return this.kernel.setBudget(this.id, handleId, dimension, limit, version);
+        return this.kernel.setBudget(this.id, handleId, dimension, limit, version, options);
     }
 
     chargeBudget(handleId: string, dimension: string, amount: number, options?: { usageId?: string }): Promise<BudgetAccount[]> {

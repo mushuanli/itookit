@@ -981,7 +981,7 @@ describe('DurableFlowExecutor', () => {
         expect(first.targetTaskId).toBe(same.targetTaskId);
         const task = await (await kernel.openSession('session-one')).attachTask(first.targetTaskId);
         expect((await task.wait({ timeoutMs: 2000 })).status).toBe('succeeded');
-        expect(budget).toHaveBeenCalledWith('session-one', expect.any(String), 'tokens', 3, undefined);
+        expect(budget).toHaveBeenCalledWith('session-one', expect.any(String), 'tokens', 3, undefined, undefined);
         const record = (await task.status()).task;
         expect(record).toMatchObject({ retryOfTaskId: source, input: { allowedToolIds: [] } });
         const events = (await kernel.taskEventPage('session-one', task.id)).items;
@@ -1430,6 +1430,36 @@ describe('DurableFlowExecutor', () => {
         expect(manager.prepare).toHaveBeenCalledTimes(1);
         expect(manager.restore).toHaveBeenCalledTimes(1);
         await resumedExecutor.waitIdle();
+    });
+
+    it.each([false, true])('fences a delayed scheduler without cancelling the successor (hook throws: %s)', async hookThrows => {
+        let entered!: () => void, release!: () => void;
+        const started = new Promise<void>(resolve => { entered = resolve; });
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const cleanup = vi.fn(async (_status: string) => undefined);
+        const workspaceManager = {
+            prepare: async () => ({ directory: '/isolated', record: { path: '/isolated' }, finish: cleanup }),
+            restore: async () => ({ directory: '/isolated', finish: cleanup }),
+        };
+        const first = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), workspaceManager,
+            schedulerOwnerId: 'host', hooks: { descriptor: { trusted: true, source: 'test', contentHash: 'test' },
+                emit: async event => { if (event.event === 'task.started') {
+                    entered(); await gate; if (hookThrows) throw new Error('late hook failure');
+                } } } });
+        const run = await first.submit('session-one', { ...valueFlow(), runPolicy: { workspace: { mode: 'worktree' } } });
+        await started;
+        // Reusing the host identity deliberately increments the epoch while its old hook is pending.
+        const successor = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(), workspaceManager,
+            schedulerOwnerId: 'host' });
+        const resumed = await successor.resume('session-one', run.root.id);
+        expect((await resumed.root.wait({ timeoutMs: 2000 })).status).toBe('succeeded');
+        await successor.waitIdle();
+        const before = await kernel.listSessionTasks('session-one');
+        release();
+        await first.waitIdle();
+        expect(await kernel.listSessionTasks('session-one')).toEqual(before);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        expect(cleanup).toHaveBeenCalledWith('succeeded');
     });
 
     it('refuses a second scheduler while the owner lease is live and fences the old owner', async () => {

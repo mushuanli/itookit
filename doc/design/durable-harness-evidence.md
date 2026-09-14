@@ -13,6 +13,8 @@
 更新约定：新增能力时补一行；把某行的“缺口”改成证据前，必须先有可复现的测试或实机记录。
 本文不宣称设计目标全部达成；没有证据的行保持“缺口”标记。
 
+**当前范围（2026-09-14 用户决定）**：本表保留完整目标的对照，但当前 P1 只验收[本地运行范围](p1-transition.md)。迁移、跨主机、通用资源服务/记录族重构、可插拔缓存、通用业务流不再作为本地 P1 阻塞项；标注未实现不等于当前必须实施。
+
 ## 0. 证据总览
 
 | 证据 | 范围 | 命令 |
@@ -138,11 +140,10 @@
 | 本地进程（bash/tty） | `packages/kernel-adapters/src/effects/*.ts` 的**全部**适配器（llm.chat/tool.call/bash/tty/skill.load/skill.unload）实现 `EffectAdapter.cancel`（`effects/in-flight.ts` 记录在途执行，`cancel` 等待其结束才确认停止）；`apps/cli/src/shell.ts` 的 `runProcess` 取消时先 SIGTERM 进程组、未退出则 SIGKILL，并**等 `close` 才 resolve**；CLI 实机证据 `apps/cli/tests/process-cancel.test.ts`（进程组忽略 SIGTERM，断言 cancel 返回时 pid 确已消失）与 `run-control.test.ts`（超时/SIGINT 后模型服务观察到客户端断开）；适配器契约见 `effect-adapters.test.ts` | Tauri 隔离模式实机证据（2026-09-11 补齐）：`apps/cli/tests/tauri-process-tree.test.ts` 编译**真实** Rust 模块（`apps/tauri-app/src-tauri/src/session_bash.rs` + `bash_process.rs`），在 bwrap（`--die-with-parent --unshare-pid`）内运行一个忽略 SIGTERM、持续写文件的进程树并触发取消：取消路径确认（`cancelled=true`、`elapsed_ms` 远小于 30s 超时）、退出码 1、**取消返回后 1s 内文件不再增长**（无残留进程）。该保证由「进程组 SIGTERM → 100ms → 组 SIGKILL」与 `--die-with-parent`/PID namespace 拆除共同提供，测试断言的是宿主可观察行为而非某一行实现。 Rust 侧原生测试（`cargo test`，经 `pnpm --filter tauri-app test:rust` 运行，**15 通过**）另覆盖 `session_bash::tests::never_falls_back_to_a_host_shell`（唯一可执行程序是 `bwrap`，脚本只作为内层 `bash` 的单个 `-c` 参数）、`session_bash::tests::clears_host_credentials_and_exposes_only_the_fixed_session_environment`（宿主凭证不进入会话 shell，环境恰为 `PATH`/`HOME`/`LANG`）、`bash_process::tests::a_missing_isolator_fails_the_command_instead_of_running_unescaped`（隔离器缺失时以 `bash exec failed` 失败，不静默回退宿主）、 `bash_process::tests::cancellation_stops_a_running_process_group` 与 `timeout_stops_children_that_ignore_term_and_closes_their_pipes`、`session_bash::tests::confines_bash_to_readonly_and_writable_grants`、`directory_boundary::tests::*`（绝对/父路径与符号链接逃逸）。仍缺：`reconcile` 仍返回 `indeterminate`（`PROCESS_INDETERMINATE`），外部进程结果无法核对 |
 | 隔离工作区 | `git-worktree-manager.test.ts` + `durable-flow-executor.test.ts`：恢复租约、补跑 pending finalization、对已移除工作区幂等；`apps/cli/tests/worktree-run.test.ts`（4 通过）：CLI 宿主装配 `runtime.workspace.mode: worktree` 后节点在 worktree 内执行、脏工作区不被静默删除、崩溃恢复复用同一工作区 | CLI/Tauri 工作区装配及文件/进程/cwd 一致已有证据（见 `doc/todo.md` P1-03）；仍缺用户窗口启动与桌面重启、真实 OCI 及跨主机验收 |
 
-## 8. 未完成清单（与 todo 对齐）
+## 8. 本地未完成与扩展的归属
 
-- P1-02：跨主机时钟偏差、共享存储（S3/NFS 类）租约语义、真实多进程接管验收。
-- Cache §10：Task 终态清理与 Session 关闭时的物理回收（含 `session` scope）已于 2026-09-11 实现（见 §5）；仍缺 provider 能力差异（依赖版本、fencing generation、策略矩阵已于 2026-09-11 补证据）与跨 Session retention/GC 竞争。
-- Resources §9 的 authority 服务与 leader 迁移 fencing（stream/消息/receipt 保留期与 GC 已于 2026-09-11 实现，见 §4）。**2026-09-11 第五十一轮进展**：authority `ownerEpoch` 记录、`claimAuthority`/`authority` API 与写命令 epoch fence 已落地（见 §4）；仍缺 adapter 执行令牌 fence、真实多进程/多 store 竞争与迁移切换屏障，account/allocation/export/import 未实现。
-- Storage §5 目标布局字段与 compaction。
-- P1-04：图级重算、委派组/隔离工作区重算、token 退款、DagWorkbench 入口已有代码回归；真实窗口重算操作与结果收敛提示仍未验收，与 `doc/todo.md` 保持开放。
-- GUI/实机验收：观察者区分“已接受/已变化/已停止”、真实设备停止确认、worktree 模式的用户窗口启动与桌面重启（CLI/Tauri 宿主装配已实现，Web 无原生进程时拒绝隔离模式）。
+当前本地 P1 按 [todo](../todo.md) 验收：本机崩溃恢复、全部控制入口的同机所有权、实际进程停止确认、工作区/委派可用性、图重算真实窗口、现有消息/receipt/cache/资源清理竞争以及节点级输出契约。
+
+原表中的以下缺口保留为未来扩展，不再阻塞本地 P1：跨主机时钟与 S3/NFS 后端、跨 store authority 迁移、通用 account/allocation/export/import、Storage §5 全记录族布局、可插拔 cache provider、通用 stream 协议和供应商计费幂等。
+
+图级重算与 CLI/Tauri 工作区装配已实现，剩余是本地用户操作/重启/结果收敛验收，不能再次列为尚未开发。原生工作区为当前基线，OCI 独立验收。详见[范围设计](p1-transition.md)。

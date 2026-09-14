@@ -1774,3 +1774,27 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 | `pnpm docs:check` | 76 份活文档通过，5 条既有历史表述告警 |
 
 HTTP 监听首次在沙箱内遭 EPERM，随后经正常提权运行通过。日志：`/tmp/p1-flow.log`、`/tmp/p1-cli.log`、`/tmp/p1-crash-full.log`、`/tmp/p1-loop-gap.log`，临时文件不作为长期唯一证据。没有执行全仓最终矩阵、发布产物构建或本轮真实窗口验收。
+
+
+## 2026-09-14：P1 过渡设计与同机事务租约条件
+
+先按用户要求提交上一批：`b2ee748a`（`fix(flow): persist contracts and verify scheduler crash recovery`）。本节记录之后的未提交工作树改进，Node 26.8.1 / pnpm 10.20.0。
+
+[过渡设计](design/p1-transition.md)明确三个阶段：同机持久调度、节点级输出契约/停写迁移、指定后端多主机验证。当前实现 A1/A2；A3 所列执行端/其他命令/混合版本边界仍开放，P1 总项不勾选。
+
+- Run 租约到期或释放即失效，无需等待其他 owner。迟到心跳不续活旧租约，已失权句柄不复活。
+- Kernel 的 Task 提交、共享状态写入/删除、Session signal 支持事务内 `LeaseGuardOptions.lease` 条件；校验 owner/epoch/期限失败返回 STALE_SHARED_LEASE，不写业务事实。新 owner 可复用原 requestId，条件不进入 TaskSpec 指纹。
+- Flow 节点、检查点、成员、metadata 与根终态信号使用条件。旧宿主在 task.started 回调内停顿、新宿主完成后旧回调返回或抛错，两种交错均不重复提交、不把 Run 判失败、不触发工作区失败清理。
+- 工作区清理状态写入完成前保持租约，waitIdle 包含该收尾。旧实现提前释放租约导致清理终态写入被新的条件拒绝，已修复；清理失败仍只通过 workspaceCompletion/持久状态报告。
+- 既有 poll-snapshot 测试在读取时才生成“现在 +10s”的期限，偶发算出 10001ms。修正为读取前固定期限，未放宽断言或修改轮询实现。
+
+| 验证 | 最终结果 |
+| --- | --- |
+| `pnpm --filter @itookit/durable-kernel test` | 257 通过 |
+| `pnpm --filter @itookit/llm-flow test` | 225 通过 |
+| `pnpm --filter @itookit/cli exec vitest run --exclude tests/crash-matrix.test.ts` | 108 通过 |
+| `pnpm --filter @itookit/cli exec vitest run tests/crash-matrix.test.ts -t 'scheduler SIGKILL window\|loop iteration whose checkpoint'` | 5 通过；12 为选择器未选 |
+| `pnpm typecheck` | 全仓通过 |
+| `pnpm docs:check` / `git diff --check` | 通过；文档检查 77 份、5 条既有历史告警 |
+
+日志位于 `/tmp/p1-transition-{kernel,flow,cli,crash,types,docs}.log`。未执行本批完整 17 项崩溃矩阵、全仓测试/构建或 GUI/OCI/跨主机验收；不能以本机条件推导物理 adapter fencing。API 省略 lease 条件保持旧行为，混合版本写者保护仍须单独设计与验证。

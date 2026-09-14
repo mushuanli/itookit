@@ -63,7 +63,18 @@ export interface SharedStateEntry<T extends JsonValue = JsonValue> {
     updatedByTaskId?: TaskId;
 }
 
-export interface SharedStateWriteOptions {
+/** Same-store lease condition checked inside the mutation transaction using host time. */
+export interface SharedLeaseCondition {
+    key: string;
+    ownerId: string;
+    epoch: number;
+}
+
+export interface LeaseGuardOptions {
+    lease?: SharedLeaseCondition;
+}
+
+export interface SharedStateWriteOptions extends LeaseGuardOptions {
     expectedVersion?: number | null;
     taskId?: TaskId;
 }
@@ -267,10 +278,10 @@ export interface TaskControl {
     reason?: string;
     acknowledged: boolean;
 }
-export interface TaskControlOptions { requestId: string; expectedEpoch?: number; reason?: string; }
+export interface TaskControlOptions extends LeaseGuardOptions { requestId: string; expectedEpoch?: number; reason?: string; }
 
 export type TaskSignal = { type: string; payload?: unknown };
-export interface TaskStartOptions { signal?: TaskSignal; }
+export interface TaskStartOptions extends LeaseGuardOptions { signal?: TaskSignal; }
 export type TaskInputEvent =
     | { type: 'resource-result'; receipt: import('./resource-api').ResourceRequestSnapshot }
     | { type: 'started' }
@@ -532,12 +543,12 @@ export interface RecoveryReport {
 
 /** Session 的 Task 生命周期面（提交/信号/交互/事件）。 */
 export interface SessionTaskApi {
-    submit<I, O = unknown>(spec: TaskSpec<I>): Promise<TaskHandle<O>>;
+    submit<I, O = unknown>(spec: TaskSpec<I>, options?: LeaseGuardOptions): Promise<TaskHandle<O>>;
     /** Attach to a durable task after a process restart or UI reconnect. */
     attachTask<O = unknown>(taskId: TaskId): Promise<TaskHandle<O>>;
     /** Inspect the complete session task tree, including terminal tasks. */
     listTasks(): Promise<TaskRecord[]>;
-    signal(taskId: TaskId, signal: TaskSignal): Promise<void>;
+    signal(taskId: TaskId, signal: TaskSignal, options?: LeaseGuardOptions): Promise<void>;
     respond<T extends JsonValue>(taskId: TaskId, response: InteractionResponse<T>): Promise<void>;
     events(options?: { after?: number }): AsyncIterable<EventEnvelope>;
 }
@@ -599,7 +610,7 @@ export interface SessionResourceApi {
 
 /** Session 的预算面。 */
 export interface SessionBudgetApi {
-    setBudget(handleId: HandleId, dimension: string, hardLimit: number, expectedVersion?: number | null): Promise<BudgetAccount>;
+    setBudget(handleId: HandleId, dimension: string, hardLimit: number, expectedVersion?: number | null, options?: LeaseGuardOptions): Promise<BudgetAccount>;
     /** Charge a budget; `usageId` settles a logical charge at most once (replays return the receipt). */
     chargeBudget(handleId: HandleId, dimension: string, amount: number, options?: { usageId?: string }): Promise<BudgetAccount[]>;
 }
@@ -657,19 +668,19 @@ export interface TaskHandle<O = unknown> {
     status(): Promise<TaskSnapshot>;
     wait(options?: { timeoutMs?: number }): Promise<ExitRecord<O>>;
     poll(): Promise<ExitRecord<O> | undefined>;
-    signal(signal: TaskSignal): Promise<void>;
+    signal(signal: TaskSignal, options?: LeaseGuardOptions): Promise<void>;
     start(options?: TaskStartOptions): Promise<void>;
     pause(options: TaskControlOptions): Promise<TaskControl>;
     interrupt(options: TaskControlOptions): Promise<TaskControl>;
     resume(options: TaskControlOptions & { signal?: TaskSignal }): Promise<TaskControl>;
     respond<T extends JsonValue>(response: InteractionResponse<T>): Promise<void>;
-    createResource(spec: TaskResourceSpec): Promise<ResourceGrant>;
-    cancel(reason?: string): Promise<void>;
+    createResource(spec: TaskResourceSpec, options?: LeaseGuardOptions): Promise<ResourceGrant>;
+    cancel(reason?: string, options?: LeaseGuardOptions): Promise<void>;
     events(options?: { after?: number }): AsyncIterable<EventEnvelope>;
     history(options?: { afterVersion?: number }): Promise<TaskRecord[]>;
     attempts(): Promise<TaskAttempt[]>;
     /** Create an idempotent, deferred fresh root Task; resources must be granted again. */
-    retry(options: { requestId: string }): Promise<TaskHandle<O>>;
+    retry(options: LeaseGuardOptions & { requestId: string }): Promise<TaskHandle<O>>;
     resolveEffect(request: EffectResolution): Promise<void>;
     sendMessage(request: TaskMessageRequest): Promise<CrossSessionMessage>;
     createCache(spec: CacheSpec): Promise<{ namespace: CacheNamespace; handle: ResourceHandle }>;

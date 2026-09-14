@@ -5,7 +5,7 @@
 // 接管只在旧租约到期后发生（不能凭“我更快”强夺仍在心跳的拥有者），fencing 由每次调度
 // 步进前的 assertOwned 完成：epoch 变化即停止推进，旧拥有者的后续写入不会推进业务状态。
 
-import type { JsonValue, SessionHandle } from '@itookit/durable-kernel';
+import { KernelErrorCode, type SharedLeaseCondition, type JsonValue, type SessionHandle } from '@itookit/durable-kernel';
 
 export interface SchedulerLeaseRecord {
     version: 1;
@@ -26,7 +26,8 @@ export class SchedulerOwnershipLostError extends Error {
 }
 
 export function isSchedulerOwnershipLost(error: unknown): error is SchedulerOwnershipLostError {
-    return error instanceof SchedulerOwnershipLostError;
+    return error instanceof SchedulerOwnershipLostError
+        || (error instanceof Error && 'code' in error && error.code === KernelErrorCode.STALE_SHARED_LEASE);
 }
 
 export interface SchedulerLeaseOptions {
@@ -46,6 +47,7 @@ export interface SchedulerLeaseOptions {
 export interface SchedulerLease {
     readonly ownerId: string;
     readonly epoch: number;
+    readonly condition: SharedLeaseCondition;
     /** 每次调度步进前调用；租约丢失（被接管/过期）时抛错。 */
     assertOwned(): Promise<void>;
     /** 主动放弃所有权，使后续 resume 无需等待到期。 */
@@ -91,44 +93,60 @@ export async function acquireSchedulerLease(
     throw new Error('Scheduler lease acquisition failed');
 }
 
-function createLease(
-    session: SessionHandle,
-    key: string,
-    record: SchedulerLeaseRecord,
-    ttlMs: number,
-    now: () => number,
-): SchedulerLease {
-    let released = false;
-    const heartbeat = setInterval(() => { void renew(); }, Math.max(250, Math.floor(ttlMs / 3)));
-    (heartbeat as unknown as { unref?: () => void }).unref?.();
-    const renew = async (): Promise<void> => {
-        if (released) return;
-        const saved = await session.getShared(key).catch(() => undefined);
+function createLease(session: SessionHandle, key: string, record: SchedulerLeaseRecord, ttlMs: number, now: () => number): SchedulerLease {
+    return new OwnedSchedulerLease(session, key, record, ttlMs, now);
+}
+
+class OwnedSchedulerLease implements SchedulerLease {
+    private released = false;
+    private lost = false;
+    private readonly heartbeat: ReturnType<typeof setInterval>;
+    readonly condition: SharedLeaseCondition;
+    get ownerId(): string { return this.record.ownerId; }
+    get epoch(): number { return this.record.epoch; }
+
+    constructor(private readonly session: SessionHandle, private readonly key: string,
+        private readonly record: SchedulerLeaseRecord, private readonly ttlMs: number, private readonly now: () => number) {
+        this.condition = Object.freeze({ key, ownerId: record.ownerId, epoch: record.epoch });
+        this.heartbeat = setInterval(() => { void this.renew(); }, Math.max(250, Math.floor(ttlMs / 3)));
+        (this.heartbeat as unknown as { unref?: () => void }).unref?.();
+    }
+
+    private matches(current?: SchedulerLeaseRecord): current is SchedulerLeaseRecord {
+        return !!current && !current.deleted && current.ownerId === this.ownerId && current.epoch === this.epoch;
+    }
+
+    private async renew(): Promise<void> {
+        if (this.released || this.lost) return;
+        const saved = await this.session.getShared(this.key).catch(() => undefined);
         const current = parseSchedulerLeaseRecord(saved?.value);
-        if (!current || current.deleted || current.ownerId !== record.ownerId || current.epoch !== record.epoch) return;
-        await session.setShared(key, { ...current, expiresAt: now() + ttlMs } as unknown as JsonValue,
+        if (this.released || this.lost || !this.matches(current) || current.expiresAt <= this.now()) {
+            this.lost = true; return;
+        }
+        await this.session.setShared(this.key, { ...current, expiresAt: this.now() + this.ttlMs } as unknown as JsonValue,
+            { expectedVersion: saved?.version ?? null, lease: this.condition }).catch(error => {
+                if (isSchedulerOwnershipLost(error)) this.lost = true;
+            });
+    }
+
+    async assertOwned(): Promise<void> {
+        const current = parseSchedulerLeaseRecord((await this.session.getShared(this.key))?.value);
+        if (this.released || this.lost || !this.matches(current) || current.expiresAt <= this.now()) {
+            this.lost = true;
+            throw new SchedulerOwnershipLostError(this.epoch);
+        }
+    }
+
+    async release(): Promise<void> {
+        if (this.released) return;
+        this.released = true;
+        clearInterval(this.heartbeat);
+        const saved = await this.session.getShared(this.key).catch(() => undefined);
+        const current = parseSchedulerLeaseRecord(saved?.value);
+        if (!this.matches(current)) return;
+        await this.session.setShared(this.key, { ...current, expiresAt: 0 } as unknown as JsonValue,
             { expectedVersion: saved?.version ?? null }).catch(() => undefined);
-    };
-    return {
-        ownerId: record.ownerId,
-        epoch: record.epoch,
-        async assertOwned(): Promise<void> {
-            const current = parseSchedulerLeaseRecord((await session.getShared(key))?.value);
-            if (!current || current.deleted || current.ownerId !== record.ownerId || current.epoch !== record.epoch) {
-                throw new SchedulerOwnershipLostError(record.epoch);
-            }
-        },
-        async release(): Promise<void> {
-            if (released) return;
-            released = true;
-            clearInterval(heartbeat);
-            const saved = await session.getShared(key).catch(() => undefined);
-            const current = parseSchedulerLeaseRecord(saved?.value);
-            if (!current || current.deleted || current.ownerId !== record.ownerId || current.epoch !== record.epoch) return;
-            await session.setShared(key, { ...current, expiresAt: 0 } as unknown as JsonValue,
-                { expectedVersion: saved?.version ?? null }).catch(() => undefined);
-        },
-    };
+    }
 }
 
 export function parseSchedulerLeaseRecord(value: JsonValue | undefined): SchedulerLeaseRecord | undefined {

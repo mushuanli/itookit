@@ -784,3 +784,10 @@ Kernel 在恢复 sweep 后复用一次任务扫描供任务遍历、Effect 候�
 两项受控交错回归复现读取期间/读取后通知造成旧空列表忽略新 timer，修复后通过。七项快照测试覆盖上述边界；DOM 工作台在 MemoryBackend 和真实 LocalFS/SQLite 上静置一秒，VFS 与 sidecar 逻辑调用增量均为零。工作台测试的 Kernel facade 是桩，不代表完整运行时或桌面 IPC。
 
 隔离验证：Kernel 246、Flow 213、app-shell 184 项通过，共 643 项，另有 30 项既有跳过；Kernel/CLI/Web 类型检查与文档检查通过。P0-02 桌面发送 ≤2 秒 / ≤100 次 IPC、真实窗口与跨进程通知矩阵继续保持开放。
+
+
+### 同存储的共享租约条件
+
+`LeaseGuardOptions.lease = { key, ownerId, epoch }` 可用于 `SessionHandle.submit(spec, options)` 和 `SessionHandle.signal(taskId, signal, options)`；`SharedStateWriteOptions` 同样支持 `lease`，用于 setShared/deleteShared。租约保存在本 Session 共享状态，须含匹配 ownerId/epoch、未置 deleted、expiresAt 严格大于事务内宿主时间。
+
+检查和业务写入在同一事务内，失权返回 `KernelErrorCode.STALE_SHARED_LEASE`。lease 不进入 TaskSpec 提交指纹，因此接管者可以复用稳定 requestId。省略条件保持原 API 行为；不是所有宿主命令自动获得 fencing。有效范围与迁移路径见[过渡设计](design/p1-transition.md)。

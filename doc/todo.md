@@ -92,52 +92,52 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 仍未达最终验收：P0-02 性能阈值未达成、P0-04 尚有未做窗口场景；未做全新依赖安装，未构建发布安装包（`bundle.targets: "all"`，本机无 AppImage/linuxdeploy 工具且无网络）。受版本控制的 `release/dist/` 停留在 2026-09-04，与当前树不同步，本轮未重新生成。
   - 待其余有效要求闭合后，对最终工作树执行类型、文档、样式、库/CLI/前端/原生产物构建、全量测试矩阵与真实窗口验收，记录版本、命令、结果和剩余跳过项。
 
-### P1：Durable、Flow 与恢复正确性
+### P1：完备的本地 Durable/Flow 运行
 
-- [ ] **P1-01 任意崩溃点的持久调度**
-  - 已实现：先持久根/检查点再派发、稳定 requestId 与 spec 指纹去重、成员与循环/patch/委派恢复。结果不确定的 Effect 标记 indeterminate，CLI 退出码 3；显式 `resume --retry-indeterminate` 才授权重放。
-  - 已有 CLI SIGKILL 场景及包级委派恢复；节点提交与检查点并非同一事务，但稳定 requestId 可复用原 Task，不能再笼统称为“没有去重”。
-  - 2026-09-14 补验：完整 CLI crash-matrix 12 项通过；新增 indeterminate 后取消拒绝重放，以及动态 spawn 恢复保持同一持久 Task 集合。另有真实双 CLI 取消拒绝 1 项通过：活拥有者不受干扰，拥有者 SIGINT 后持久 cancelled。见[取消与恢复验收](minimal-system-acceptance.md#2026-09-14run-取消所有权与动态图崩溃恢复)。本机证据不替代下列委派/提交间隙和多主机要求。
-  - 新增可复现矩阵：普通节点、首个/第二个委派子节点提交落盘但检查点未记录身份时 SIGKILL；委派子节点模型请求在途时 SIGKILL；循环第二次入口已成功、完成检查点尚未提交时 SIGKILL。通过真实 CLI/LocalFS/SQLite 恢复核对 Task 身份、已完成记录及模型调用次数；测试夹具只在公开提交边界注入故障，不修改持久状态。CLI schema 尚不暴露 delegation，夹具在编译后注入公开 DagRunSpec，不能视为 YAML 委派入口验收。
-  - 剩余：按 Protocol §15 补全其他崩溃窗口及组合、已完成迭代与外部副作用完整核验；跨主机要求仍由 P1-02/P1-05 跟进。
-  - 入口：`apps/cli/tests/crash-matrix.test.ts`、`packages/llm-flow/__tests__/durable-flow-executor.test.ts`；本轮范围与结果见[ P1 审计验收](minimal-system-acceptance.md#2026-09-14p1-审计提交间隙与契约漂移)。
+**当前范围（用户于 2026-09-14 收窄）**：单主机、当前版本、本地事务存储，CLI/Tauri 可运行、可控制、可恢复、可重开核对。保留同机多进程/多 Session 的正确性；迁移、跨主机执行及通用分布式协议不再是本地 P1 的完成条件。细分边界见[本地 P1 设计](design/p1-transition.md)。下面区分待实现与待验收，不按旧设计章节是否全部实现决定完成。
 
-- [ ] **P1-02 通用调度所有权与 fencing**
-  - 已实现：Session/Run 租约、epoch、心跳、每步所有权检查、失权停止；CLI 本机锁与删除前通用租约核对。
-  - 接管要求旧租约到期加显式 `skewMs` 预算；CLI 支持 Session/Scheduler 两种 `*_LEASE_SKEW_MS`。默认 0 不构成跨主机时钟保证。
-  - 剩余：S3/NFS 类共享存储的原子性、authority store 时间/时钟假设、真实多进程/多主机竞争、迁移与旧拥有者 fencing 验收。
+- [ ] **P1-01 本地崩溃恢复闭环**
+  - 已实现：稳定 requestId/spec 去重、根和检查点持久化、循环/patch/委派恢复；不确定 Effect 默认阻断，显式授权才重放。提交/检查点间隙、委派在途、已完成循环迭代已有真实 SIGKILL 回归。
+  - 剩余：按本地实际持久边界核对并补齐根创建到首检查点、节点能力绑定到启动、图更新/join、终态到收尾等窗口；补齐未被现有测试证明的窗口，修复发现的漏调度/重复派发/丢结果。结果不确定时保留阻断与人工裁决，不追求外部服务恰好执行一次。
+  - 入口：`apps/cli/tests/crash-matrix.test.ts`、`packages/llm-flow/__tests__/durable-flow-executor.test.ts`、[验收记录](minimal-system-acceptance.md)。
 
-- [ ] **P1-03 工作区与后台委派恢复**
-  - 已实现：CLI/Tauri worktree manager、持久租约、Run 文件/进程/cwd 一致、detached deadline 恢复、终态 pending 收尾；Tauri Git 前落创建意图，启动取写租约后核对遗留项。
-  - 已验证：真实 LocalFS/SQLite/Kernel/Flow 三个 SIGKILL 窗口；Tauri WebView/native IPC/SQL/bwrap 自动 worktree 与只读探针。discard 可清脏副本；manual 不强删成功 Run 的脏副本；auto-if-clean 拒绝未提交修改。
-  - 剩余：CLI read-only **真实 OCI** 验收、CLI worktree + OCI、合并/冲突交互、用户窗口启动工作区 Flow 和真实桌面重启、授权变化或 Kernel 未发现 Session 的遗留意图回收、P1-02 跨主机租约验证。
-  - Tauri read-only 当前基于**原有可写仓库授权**创建只读 Git 副本；Web 无宿主进程通道时拒绝隔离模式。CLI 原生只读模式拒绝，OCI 单次命令/TTY 映射已接线，环境尚未找到 Podman/Docker。
-  - 见[Flow 设计](design/flow-execution-model.md)及[验收 §52–60](minimal-system-acceptance.md)。自动探针不等于完整用户窗口验收，临时探针构建需恢复为正常产物。
+- [ ] **P1-02 同机所有权与全部本地控制入口**
+  - 已实现：Session/Run 租约、epoch、CLI 本机锁；Run 到期即失效、迟到心跳不续活；节点提交、共享状态和根信号在事务内检查所有权；失权不触发失败清理。
+  - 待实现/核对：取消、pause/resume、图重试、委派兄弟取消、资源授权及工作区清理的旧句柄/迟到回调路径。已补 TaskHandle cancel/pause/interrupt/resume/start/signal/retry、资源创建和预算事务 guard；后台委派在截止前保留所有权，终态恢复也收敛后台任务。控制命令宿主隔离仍需独立核对。
+  - 待验收：同机两个进程争用、旧宿主暂停后恢复、租约失效后迟到请求；清理不确认时有界报告并保留 pending/数据。保留本机时钟变化的安全失败边界，不实现跨主机时钟协议。
 
-- [ ] **P1-04 图级 retry 与运行控制**
-  - 图级/委派组/隔离工作区重算、下游取消与代数更新、token 退款、DagWorkbench 入口均已有回归；直接以合成委派子节点为重试源仍拒绝。
-  - 入口：`graph-retry.test.ts`、`durable-flow-executor.test.ts`、`dag-run-retry.test.ts`。剩余真实窗口重算操作及结果收敛提示验收。
+- [ ] **P1-03 本地工作区与委派可用性**
+  - 已实现：CLI/Tauri worktree、持久创建意图与租约、文件/进程/cwd 一致、detached deadline 恢复、pending 收尾、脏副本保留；已有真实 LocalFS/SQLite/Kernel/Flow SIGKILL 和 Tauri IPC/bwrap 探针证据。
+  - 待实现/核对：授权变化或 Kernel 未发现 Session 的遗留意图处理；工作区恢复/清理失败不泄漏长期租约、不误删用户文件；CLI YAML 暴露本地已支持的 delegation 配置，不能只靠测试夹具注入。
+  - 待验收：用户窗口启动工作区 Flow、真实桌面重启、失败/取消/保留脏副本、人工合并路径。完整自动合并与冲突编辑器后移，先保证报告冲突、保留分支和工作区供用户处理。
+  - 平台边界：当前 Linux 原生/bwrap 为本地验收目标。OCI 不是基础 P1 前置条件；若选择或声称支持 CLI OCI/read-only 模式，则必须独立真实验收，不能用原生模式冒充只读隔离。
 
-- [ ] **P1-05 Durable 五篇设计完整映射**
-  - 已合入 `bfe3cbf4`：跨 Session settlementAcknowledgedAt 持久确认、未确认回执不回收、终态源恢复只补确认；隔离 759 项测试通过。真实跨进程/多主机旧在途投递、混合版本及 replay 水位假设仍开放。
-  - [证据映射](design/durable-harness-evidence.md)是逐条审计入口，涵盖 Protocol 十条不变量、kill 矩阵及 Core/Storage/Resources/Cache 验收表。
-  - 已实现：Task/Session cache 清理、cache 策略矩阵、预算 usageId 幂等、authority epoch 骨架、消息/回执 retention、layout manifest、Task history compaction、事件裁剪水位及进程停止确认。
-  - 已合入 `fb059403`：同一事务存储内的资源 authority 身份、epoch CAS、排队申请接管检查与 managed schema 升级；不等于物理执行端或跨存储 fencing。
-  - 剩余：cache provider 能力差异及跨 Session retention/GC 竞争；真实供应商重复计费核对；资源 adapter 执行令牌 fence、多进程/多 store 迁移屏障、account/allocation/export/import 记录族；Storage §5 目标字段与记录族拆分；完整 stream/消息/receipt/compaction 故障矩阵；GUI 停止三态验收。
-  - 内核预算回执幂等不等于供应商未重复收费，authority 元数据不等于资源执行端已 fencing，SIGKILL 不等于断电持久性。
+- [ ] **P1-04 图级 retry 与本地控制验收**
+  - 已实现：图级/委派组/隔离工作区重算、下游取消、代数更新、token 退款、DagWorkbench 入口；直接以合成委派子节点为重试源仍拒绝。
+  - 剩余主要是验收：真实窗口重算操作、结果收敛、live 与重开一致；发现问题再修复。旧拥有者重试/取消的命令隔离归 P1-02，不重复开发已有图重算。
+  - 入口：`graph-retry.test.ts`、`durable-flow-executor.test.ts`、`dag-run-retry.test.ts`。
+
+- [ ] **P1-05 现有本地存储与资源生命周期**
+  - 已实现：预算 usageId 幂等、Task/Session cache 清理、消息结算确认与保留、history/event 裁剪水位、现有资源申请/释放/清理回执和布局识别。
+  - 剩余：现有本机多 Session 的消息/receipt/GC 竞争、重启后清理重试、未确认物理停止不释放容量；验证恢复所需事实不被裁剪、旧回执不复活资源、本地预算不重复结算。补故障测试并修复实际缺陷，不为对齐目标表名重构存储。
+  - 不要求：Storage §5 全量记录族拆分、account/allocation/export/import 通用服务、可插拔 cache provider、可恢复业务字节流、真实供应商收费幂等、多 store 迁移。
+  - 完整设计对照仍见[证据映射](design/durable-harness-evidence.md)，其中扩展缺口不阻塞当前本地 P1。
 
 - [x] **P1-06 Transcript 存储分页与导出**
   - 物理分页、固定版本、maxBytes 裁剪及水位、CLI 真实文件导出、UI 独立遍历分页导出已有证据；UI 导出保留单调性和 10k Effect 上限守卫。
   - 入口：`transcript-budget.test.ts`、`task-transcript-dialog.test.ts`、CLI `run.integration.test.ts`。
 
-- [ ] **P1-07 Schema/输出策略**
-  - 已实现：受支持结构子集的同 id 跨版本兼容推导、所有生产者输出独立验证（含宽松或无 schema 消费者）、运行定义/动态图检查点冻结；不同 schema id 不做隐式转换。新检查点持久插件清单/schema 快照，恢复在派发前拒绝契约漂移；旧检查点没有快照时仍沿用宿主定义。
-  - 剩余：端口错误的 repair/continue 策略；明确节点级输出契约后，将 Agent responseFormat 编译成可引用端口 schema。插件清单契约与节点级配置不能直接混用。
-  - 同名 `plugin@version` 的宿主实现代码未冻结；宿主须保留不可变版本，代码变更使用新版本。当前只能检测清单/schema 漂移，不能证明实现代码未变化。见[Flow 设计](design/flow-execution-model.md)、`port-contract.test.ts`。
+- [ ] **P1-07 本地节点输出契约**
+  - 已实现：受支持 schema 子集与同 id 跨版本兼容、所有生产者输出独立验证、Run/动态图及清单/schema 冻结；无效输出使 Run 失败，不派发严格下游，原输出保留。
+  - 待实现：节点级输出契约及 Agent responseFormat 到可引用端口 schema 的绑定；发布/直接执行/动态图/恢复使用同一契约。原始输出、具体校验错误与重试入口需在 CLI/桌面可观察。
+  - 当前策略：Flow 端口默认 fail，使用已有人工修正/重试路径；Agent 内部已有 repair/continue 保留。通用自动修复 Task、invalid 分支 DSL、任意 schema 转换及插件产物版本仓库不作为本地 P1 前置条件。
+  - 当前版本运行并重启应可恢复；不支持契约漂移时静默续跑。跨应用版本升级迁移与旧插件包自动归档后移。
 
 - [x] **P1-08 Effect 回滚缺陷**：Skill 身份持久化失败只回滚本次新加载，清理逐项执行并聚合原始/清理错误；`create-kernel-adapters-runtime.test.ts` 有回归。
 - [x] **P1-09 CLI supervisor 累积结果**：回边使用来源最新已完成实例，支持轮流派发 worker；普通 Loop 语义保持，CLI/Flow 已有回归。
 - [x] **P1-10 CLI 非交互监控窗口**：持久根建好后及时发布 live 句柄，调度期失败写入 Run；Tauri 监控/取消窗口剩余验收归 P0-02。
+
+本地 P1 完成标准：上述本地路径全部闭合，执行最终工作树的相关测试/类型检查与真实 CLI、桌面验收；不存在靠直接改持久记录或仅靠测试夹具才能使用的核心能力。P0 的性能、发布包及其他平台验收保持各自归属，不重复算作 P1 实现任务。
 
 ### P2：扩展与设计闭合
 

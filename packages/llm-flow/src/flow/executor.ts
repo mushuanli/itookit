@@ -1,3 +1,4 @@
+import { fenceSchedulerSession } from './fenced-session';
 import type { SchedulerCheckpoint } from './scheduler-checkpoint';
 import { restoreFlowHandle } from './restore-handle';
 import { acquireSchedulerLease, isSchedulerOwnershipLost, type SchedulerLease } from './scheduler-lease';
@@ -162,7 +163,11 @@ export class DurableFlowExecutor {
             // A crash during workspace finalization leaves the record pending; a new host
             // completes it instead of leaking the workspace.
             const lease = await this.acquireLease(session, rootTaskId);
-            try { await this.resumeWorkspaceFinalization(session, handle.root, rootTaskId); }
+            try {
+                const fenced = fenceSchedulerSession(session, lease.condition);
+                await this.resumeWorkspaceFinalization(fenced, handle.root, rootTaskId);
+                await this.drainDetached(fenced, rootTaskId, lease);
+            }
             finally { await lease.release(); }
             return handle;
         }
@@ -236,26 +241,28 @@ export class DurableFlowExecutor {
         }
         const maxNodes = positiveInteger(spec.maxNodes ?? spec.runPolicy?.maxNodes) ?? 1_000;
         if (spec.nodes.length > maxNodes) throw new Error(`Flow node limit exceeded: ${spec.nodes.length}/${maxNodes}`);
-        const session = await this.options.kernel.openSession(sessionId);
+        let session = await this.options.kernel.openSession(sessionId);
         if (!restored) await this.emitHook('run.started', sessionId, { nodeCount: spec.nodes.length });
         // A resumed Run claims scheduler ownership before touching the workspace or the
         // checkpoint, so a live owner is never overridden.
         let lease = restored ? await this.acquireLease(session, restored.handle.root.id) : undefined;
+        if (lease) session = fenceSchedulerSession(session, lease.condition);
         const workspacePolicy = spec.runPolicy?.workspace;
         // A restored Run re-attaches the workspace lease recorded before the crash instead
         // of preparing a second isolated directory.
-        const workspace = workspacePolicy && workspacePolicy.mode !== 'shared'
-            ? restored
-                ? await this.restoreWorkspace(session, restored.handle.root.id, workspacePolicy)
-                : await this.prepareWorkspace(sessionId, workspacePolicy)
-            : undefined;
+        let workspace: FlowWorkspaceLease | undefined;
         const instances = new Map<string, TaskHandle[]>();
         let published = restored?.handle;
-        if (saved) for (const [id, taskIds] of saved.instances) {
-            instances.set(id, await Promise.all(taskIds.map(taskId => session.attachTask(taskId))));
-        }
         const completed = new Set<string>(saved?.completed);
         try {
+            workspace = workspacePolicy && workspacePolicy.mode !== 'shared'
+                ? restored
+                    ? await this.restoreWorkspace(session, restored.handle.root.id, workspacePolicy)
+                    : await this.prepareWorkspace(sessionId, workspacePolicy)
+                : undefined;
+            if (saved) for (const [id, taskIds] of saved.instances) {
+                instances.set(id, await Promise.all(taskIds.map(taskId => session.attachTask(taskId))));
+            }
             const maxConcurrency = positiveInteger(spec.maxConcurrency ?? spec.runPolicy?.maxConcurrency) ?? Number.MAX_SAFE_INTEGER;
             const timeoutMs = positiveInteger(spec.timeoutMs ?? spec.runPolicy?.timeoutMs);
             const maxTokens = positiveInteger(spec.maxTokens ?? spec.runPolicy?.maxTokens);
@@ -523,7 +530,6 @@ export class DurableFlowExecutor {
                         throw new Error('Detached delegation requires workspace.cleanup=keep when using an isolated workspace');
                     }
                     for (const child of group.children) detachedNodes.add(child);
-                    armDetachedTimer(plan.groupId, group);
                 }
             };
 
@@ -555,29 +561,15 @@ export class DurableFlowExecutor {
                 await Promise.allSettled(cancellations);
             };
 
-            // Detached groups outlive their parent node, so their deadline timer lives in
-            // the scheduler, not in the task. `armedTimers` keeps a restored group from
-            // being armed twice (once at materialization, once at restore).
-            const armedTimers = new Set<string>();
-            const armDetachedTimer = (groupId: string, group: DelegationGroup): void => {
-                if (!group.detached || !group.deadline || armedTimers.has(groupId)) return;
-                armedTimers.add(groupId);
-                const timer = setTimeout(() => {
-                    if (delegationGroups.get(groupId) !== group) return;
-                    void cancelGroup(group, instances, completed, skipped, `Detached delegation timeout: ${groupId}`);
-                }, Math.max(0, group.deadline - Date.now()));
-                (timer as unknown as { unref?: () => void }).unref?.();
-            };
-
             const enforceDeadlines = async (): Promise<void> => {
                 if (timeoutMs && Date.now() - startedAt >= timeoutMs) {
                     await cancelPending(instances, completed, 'Flow timeout exceeded');
                     throw new Error(`Flow timeout exceeded after ${timeoutMs}ms`);
                 }
                 for (const [groupId, group] of delegationGroups) {
-                    if (group.detached || !group.deadline || Date.now() < group.deadline) continue;
+                    if (!group.deadline || Date.now() < group.deadline) continue;
                     await cancelGroup(group, instances, completed, skipped, `Delegation timeout: ${groupId}`);
-                    throw new Error(`Delegation group timed out: ${groupId}`);
+                    if (!group.detached) throw new Error(`Delegation group timed out: ${groupId}`);
                 }
             };
 
@@ -638,7 +630,7 @@ export class DurableFlowExecutor {
 
             // A restored host lost the old process's detached-delegation timers; re-arm
             // them from the persisted absolute deadline before scheduling resumes.
-            for (const [groupId, group] of delegationGroups) armDetachedTimer(groupId, group);
+
 
             /**
              * Consume pending graph-retry intents: the retry becomes the node's newest
@@ -708,7 +700,6 @@ export class DurableFlowExecutor {
                     for (const edge of removed) edgeState.delete(edge.id);
                     edges.splice(0, edges.length, ...edges.filter(edge => !removed.includes(edge)));
                     delegationGroups.delete(groupId);
-                    armedTimers.delete(groupId);
                 }
             };
 
@@ -761,12 +752,13 @@ export class DurableFlowExecutor {
                 published = await this.finish(session, instances, nodes, detachedNodes, spec.goal, {
                     tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
                 }, delegationGroups, completionOrder, undefined, true, toleratedFailureNodes());
+                lease = await this.acquireLease(session, published.root.id);
+                session = fenceSchedulerSession(session, lease.condition);
                 await saveCheckpoint();
                 // The lease record is what lets a new host restore this workspace.
                 if (workspace?.record !== undefined) {
                     await session.setShared(workspaceLeaseKey(published.root.id), workspace.record);
                 }
-                lease = await this.acquireLease(session, published.root.id);
             }
             // Publish as soon as the durable root exists and this host owns the scheduler,
             // before any node is dispatched. Hosts need a live handle to monitor progress,
@@ -867,17 +859,24 @@ export class DurableFlowExecutor {
                 const finalization = await beginWorkspaceFinalization(session, result.root, workspace);
                 result.workspaceCompletion = finalization.completion;
                 result.workspaceFinalization = finalization.state;
-                // The handle is published long before this point, so a host may not attach
-                // its handler yet; keep a failed cleanup from surfacing as an unhandled
-                // rejection while it stays observable on `workspaceCompletion` and the
-                // persisted finalization state.
-                void result.workspaceCompletion?.catch(() => undefined);
+                // Retain ownership until the final cleanup record commits. Cleanup failures
+                // remain observable on workspaceCompletion without changing the Run result.
+                await result.workspaceCompletion?.catch(() => undefined);
             }
             void result.root.wait().then(exit => this.emitHook('run.completed', sessionId, {
                 taskId: result.root.id, status: exit.status,
             })).catch(() => undefined);
+            await this.drainDetached(session, result.root.id, lease!);
             return result;
         } catch (error) {
+            if (published && isSchedulerOwnershipLost(error)) return published;
+            if (published && lease) {
+                try { await lease.assertOwned(); }
+                catch (ownershipError) {
+                    if (isSchedulerOwnershipLost(ownershipError)) return published;
+                    throw ownershipError;
+                }
+            }
             // A host may already hold the published handle (submit resolved), so a scheduler
             // failure must be observable on the Run itself, not only as a rejected promise.
             // Cancel and clean up first, then report the combined message on the root.
@@ -892,13 +891,33 @@ export class DurableFlowExecutor {
                 const message = failure instanceof AggregateError
                     ? failure.errors.map(item => item instanceof Error ? item.message : String(item)).join('; ')
                     : String(error);
-                await published.root.signal({ type: 'flow.schedule.failed', payload: message });
+                await session.signal(published.root.id, { type: 'flow.schedule.failed', payload: message });
             }
             throw failure;
         } finally {
             // Releasing lets the next host resume without waiting for the TTL; a crashed
             // host cannot run this, so its lease expires instead.
             await lease?.release();
+        }
+    }
+
+    /** Keep local ownership until bounded detached work stops or the host shuts down. */
+    private async drainDetached(session: SessionHandle, rootTaskId: string, lease: SchedulerLease): Promise<void> {
+        const saved = await session.getShared(`flow.run.${rootTaskId}.scheduler`);
+        const checkpoint = saved?.value as unknown as SchedulerCheckpoint | undefined;
+        const instances = new Map(checkpoint?.instances);
+        const pending = await Promise.all((checkpoint?.delegationGroups ?? [])
+            .filter(([, group]) => group.detached)
+            .flatMap(([id, group]) => [...group.children].flatMap(child => (instances.get(child) ?? [])
+                .map(async taskId => ({ id, deadline: group.deadline, task: await session.attachTask(taskId) })))));
+        while (pending.length && !this.options.kernel.isDisposed) {
+            await lease.assertOwned();
+            for (let index = pending.length - 1; index >= 0; index--) {
+                const item = pending[index];
+                if (item.deadline && Date.now() >= item.deadline) await item.task.cancel(`Detached delegation timeout: ${item.id}`);
+                if (await item.task.poll()) pending.splice(index, 1);
+            }
+            if (pending.length) await new Promise(resolve => setTimeout(resolve, 25));
         }
     }
 
@@ -1046,7 +1065,7 @@ export class DurableFlowExecutor {
         if (existing) {
             await session.setShared(`flow.run.${existing.id}.members`, jsonValue(input.runTasks));
             await session.setShared(`flow.run.${existing.id}.metadata`, input.run);
-            await existing.signal({ type: 'flow.schedule.completed', payload: jsonValue(input) });
+            await session.signal(existing.id, { type: 'flow.schedule.completed', payload: jsonValue(input) });
             return existing;
         }
         return session.submit({

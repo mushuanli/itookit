@@ -1,3 +1,4 @@
+import type { LeaseGuardOptions } from '../domain/types';
 import type { Kernel } from '../application/kernel';
 import type {
     EventEnvelope,
@@ -41,7 +42,7 @@ export class DefaultTaskHandle<O> implements TaskHandle<O> {
     publishCache(request: import('../domain/cache').CachePublish) { return this.kernel.publishCache(this.sessionId, this.id, request); }
     invalidateCache(handleId: string, expectedGeneration: number) { return this.kernel.invalidateCache(this.sessionId, this.id, handleId, expectedGeneration); }
 
-    retry(options: { requestId: string }): Promise<TaskHandle<O>> {
+    retry(options: LeaseGuardOptions & { requestId: string }): Promise<TaskHandle<O>> {
         return this.kernel.retryTask<O>(this.sessionId, this.id, options);
     }
 
@@ -63,8 +64,8 @@ export class DefaultTaskHandle<O> implements TaskHandle<O> {
         return (await this.kernel.task(this.sessionId, this.id)).exit as ExitRecord<O> | undefined;
     }
 
-    signal(signal: TaskSignal): Promise<void> {
-        return this.kernel.signal(this.sessionId, this.id, signal);
+    signal(signal: TaskSignal, options?: LeaseGuardOptions): Promise<void> {
+        return this.kernel.signal(this.sessionId, this.id, signal, options);
     }
 
     pause(options: import('../domain/types').TaskControlOptions) { return this.kernel.controlTask(this.sessionId, this.id, 'pause', options); }
@@ -79,12 +80,12 @@ export class DefaultTaskHandle<O> implements TaskHandle<O> {
         return this.kernel.respondInteraction(this.sessionId, this.id, response);
     }
 
-    createResource(spec: TaskResourceSpec): Promise<ResourceGrant> {
-        return this.kernel.createResource(this.sessionId, { ...spec, ownerTaskId: this.id });
+    createResource(spec: TaskResourceSpec, options?: LeaseGuardOptions): Promise<ResourceGrant> {
+        return this.kernel.createResource(this.sessionId, { ...spec, ownerTaskId: this.id }, options);
     }
 
-    cancel(reason?: string): Promise<void> {
-        return this.kernel.cancel(this.sessionId, this.id, reason);
+    cancel(reason?: string, options?: LeaseGuardOptions): Promise<void> {
+        return this.kernel.cancel(this.sessionId, this.id, reason, options);
     }
 
     events(options?: { after?: number }): AsyncIterable<EventEnvelope> {

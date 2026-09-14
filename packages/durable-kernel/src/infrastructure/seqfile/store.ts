@@ -1,3 +1,5 @@
+import type { LeaseGuardOptions } from '../../domain/types';
+import { assertSharedLeaseTx } from './shared-lease';
 import { enqueueMessageTx, deliverMessageTx, consumeMessageTx, pruneMessagesTx, acknowledgeMessageSettlementTx } from './mailbox-store';
 import { executeResourceTx, type PreparedResourceCommand } from './managed-resources';
 import { assertSessionLayout, currentSessionLayout } from './session-layout';
@@ -256,6 +258,7 @@ export class SeqFileKernelStore {
         assertDurableValue(value, 'Shared state');
         return transaction(binding.fs, async tx => {
             if (effectClaim) await this.assertEffectClaimTx(tx, binding, effectClaim);
+            await assertSharedLeaseTx(tx, binding.rootPath, options.lease);
             const current = await readSharedTx<T>(tx, binding.rootPath, key);
             assertSharedVersion(key, current?.version, options.expectedVersion);
             const version = await nextSharedVersion(tx, binding.rootPath, key);
@@ -274,6 +277,7 @@ export class SeqFileKernelStore {
     ): Promise<boolean> {
         validateSharedKey(key);
         return transaction(binding.fs, async tx => {
+            await assertSharedLeaseTx(tx, binding.rootPath, options.lease);
             const current = await readSharedTx(tx, binding.rootPath, key);
             assertSharedVersion(key, current?.version, options.expectedVersion);
             if (!current) return false;
@@ -443,8 +447,10 @@ export class SeqFileKernelStore {
         handle: ResourceHandle,
         parentHandleId?: string,
         request?: { id: string; fingerprint: string },
+        options?: LeaseGuardOptions,
     ): Promise<{ resource: ResourceRecord; handle: ResourceHandle }> {
         return transaction(binding.fs, async tx => {
+            await assertSharedLeaseTx(tx, binding.rootPath, options?.lease);
             await requireTaskTx(tx, binding.rootPath, handle.holderTaskId);
             const key = request ? `create/${encodeURIComponent(handle.holderTaskId)}/${encodeURIComponent(request.id)}` : undefined;
             const saved = key ? await tx.getEntry(resourcesPath(binding.rootPath), key) : undefined;
@@ -531,8 +537,10 @@ export class SeqFileKernelStore {
         dimension: string,
         hardLimit: number,
         expectedVersion?: number | null,
+        options?: LeaseGuardOptions,
     ): Promise<BudgetAccount> {
         return transaction(binding.fs, async tx => {
+            await assertSharedLeaseTx(tx, binding.rootPath, options?.lease);
             const handle = await requireHandleTx(tx, binding.rootPath, handleId);
             const resource = await authorizeHandleTx(tx, binding.rootPath, handle, 'admin');
             const current = await readBudgetTx(tx, binding.rootPath, resource.id, dimension);
@@ -658,13 +666,14 @@ export class SeqFileKernelStore {
         await ensureTaskLayout(binding, taskId);
     }
 
-    async createTask(binding: ResolvedStorageBinding, sessionId: SessionId, spec: TaskSpec): Promise<TaskRecord> {
+    async createTask(binding: ResolvedStorageBinding, sessionId: SessionId, spec: TaskSpec, options?: import('../../domain/types').LeaseGuardOptions): Promise<TaskRecord> {
         if (spec.input !== undefined) assertDurableValue(spec.input, 'Task input');
         const id = createId('task');
         await ensureTaskLayout(binding, id);
         const now = Date.now();
         let task = taskFromSpec(id, sessionId, spec, now);
         await transaction(binding.fs, async tx => {
+            await assertSharedLeaseTx(tx, binding.rootPath, options?.lease);
             const session = await requireSessionTx(tx, binding.rootPath);
             if (spec.requestId) {
                 const key = `submission/${encodeURIComponent(spec.requestId)}`;
@@ -953,9 +962,11 @@ export class SeqFileKernelStore {
         if (!options.requestId) throw new Error('Control requestId is required');
         if (options.signal?.payload !== undefined) assertDurableValue(options.signal.payload, 'Signal payload');
         return transaction(binding.fs, async tx => {
+            await assertSharedLeaseTx(tx, binding.rootPath, options?.lease);
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
             const key = `control/${encodeURIComponent(options.requestId)}`;
-            const fingerprint = encode({ mode, ...options });
+            const { lease: _lease, ...identity } = options;
+            const fingerprint = encode({ mode, ...identity });
             const previous = await tx.getEntry(taskPath(binding.rootPath, taskId), key);
             if (previous) {
                 const receipt = decode<{ fingerprint: string; control: import('../../domain/types').TaskControl }>(previous);
@@ -1029,9 +1040,11 @@ export class SeqFileKernelStore {
         binding: ResolvedStorageBinding,
         taskId: TaskId,
         signal: TaskSignal,
+        options?: import('../../domain/types').LeaseGuardOptions,
     ): Promise<TaskRecord> {
         if (signal.payload !== undefined) assertDurableValue(signal.payload, 'Signal payload');
         return transaction(binding.fs, async tx => {
+            await assertSharedLeaseTx(tx, binding.rootPath, options?.lease);
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
             if (isTerminal(task.status)) return task;
             if (await hasCancelledAncestorTx(tx, binding.rootPath, task)) throw new Error('Task ancestor cancelled');
@@ -1054,6 +1067,7 @@ export class SeqFileKernelStore {
     async startTask(binding: ResolvedStorageBinding, taskId: TaskId, options: import('../../domain/types').TaskStartOptions = {}): Promise<TaskRecord> {
         if (options.signal) assertDurableValue(options.signal, 'Start signal');
         return transaction(binding.fs, async tx => {
+            await assertSharedLeaseTx(tx, binding.rootPath, options?.lease);
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
             const key = 'start-signal';
             const saved = await tx.getEntry(taskPath(binding.rootPath, taskId), key);
@@ -1257,8 +1271,8 @@ export class SeqFileKernelStore {
         });
     }
 
-    async cancelTask(binding: ResolvedStorageBinding, taskId: TaskId, reason?: string): Promise<TaskRecord> {
-        return this.finishWithoutClaim(binding, taskId, 'cancelled', undefined, { message: reason ?? 'Cancelled' });
+    async cancelTask(binding: ResolvedStorageBinding, taskId: TaskId, reason?: string, options?: LeaseGuardOptions): Promise<TaskRecord> {
+        return this.finishWithoutClaim(binding, taskId, 'cancelled', undefined, { message: reason ?? 'Cancelled' }, false, options);
     }
 
     /** 放弃当前 claim，把 running task 恢复到 ready（dispose 时避免 task 卡在租约内无法重新调度）。 */
@@ -1522,8 +1536,10 @@ export class SeqFileKernelStore {
         output?: unknown,
         error?: { message: string },
         requireCancelledAncestor = false,
+        options?: LeaseGuardOptions,
     ): Promise<TaskRecord> {
         return transaction(binding.fs, async tx => {
+            await assertSharedLeaseTx(tx, binding.rootPath, options?.lease);
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
             if (isTerminal(task.status)) return task;
             if (requireCancelledAncestor && !await hasCancelledAncestorTx(tx, binding.rootPath, task)) return task;
