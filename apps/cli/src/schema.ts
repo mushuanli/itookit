@@ -123,6 +123,12 @@ const taskSchema: TaskSchema = z.lazy(() => z.strictObject({
     kind: z.enum(['agent', 'route', 'spawn', 'supervisor']).optional(),
     agent: z.string().optional(),
     description: z.string().optional(),
+    delegation: z.strictObject({
+        agent: ID, instruction: z.string().min(1).optional(),
+        max_tasks: z.number().int().min(1).max(32).optional(),
+        max_concurrency: z.number().int().min(1).max(32).optional(),
+        failure_policy: z.enum(['fail-fast', 'continue']).optional(),
+    }).optional(),
     route: routeSchema.optional(),
     max_iterations: z.number().int().positive().optional(),
     spawn: z.strictObject({
@@ -151,6 +157,9 @@ const taskSchema: TaskSchema = z.lazy(() => z.strictObject({
         ctx.addIssue({ code: 'custom', message: `task ${task.id} kind agent conflicts with ${controlFields.join(' and ')}` });
     }
     const inferredKind = task.kind ?? controlFields[0] ?? 'agent';
+    if (task.delegation && inferredKind !== 'agent') {
+        ctx.addIssue({ code: 'custom', message: 'delegation requires an agent task' });
+    }
     if (inferredKind !== 'agent' && task[inferredKind] === undefined) {
         ctx.addIssue({ code: 'custom', message: `task ${task.id} kind ${inferredKind} requires ${inferredKind}` });
     }

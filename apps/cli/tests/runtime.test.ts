@@ -61,3 +61,19 @@ describe('compileRunDefinition', () => {
         expect(definition.graph.nodes).toHaveLength(1);
     });
 });
+
+it('compiles delegation with the selected agent and an intersection of parent and child tools', () => {
+    const workflow = { workspaceRoot: '/work', config: { goal: 'goal',
+        connections: [{ id: 'c', tiers: { standard: 'm' } }], agents: [
+            { id: 'parent', connection: 'c', tools: ['file_read'] },
+            { id: 'child', connection: 'c', tools: ['file_read', 'bash'], system_prompt: 'child persona' },
+        ], tasks: [{ id: 'one', agent: 'parent', workspace_access: 'write',
+            delegation: { agent: 'child', instruction: 'Handle one payload', max_tasks: 2, max_concurrency: 1 } }],
+    } } as CompiledWorkflow;
+    const config = compileDag(workflow).nodes[0].config as any;
+    expect(config.delegation.resolvedTemplate.capabilities).toEqual(['Read', 'RequestWorkspaceAccess']);
+    expect(config.delegation.resolvedTemplate.config.messages[0].content).toContain('child persona');
+    expect(config.delegation.resolvedTemplate.config.messages[1].content).toBe('Handle one payload');
+    expect(config.delegation.fanout).toMatchObject({ maxTasks: 2, maxConcurrency: 1, maxDepth: 1 });
+    expect(config.delegation.resolvedTemplate.config.delegation).toBeUndefined();
+});

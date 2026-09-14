@@ -263,3 +263,22 @@ mindos delete 在本机锁之外，通过持久调度记录 CAS 写入删除标�
 ### 原生进程结束与取消
 
 一次性 native shell 调用拥有它创建的进程组。取消或超时先发送 SIGTERM，仍未退出时升级 SIGKILL；父进程正常退出也会停止该组剩余后台成员。CLI 等待输出管道关闭及停止确认后才返回，启动前已取消不会执行命令。Linux 通过进程状态排除无法执行的 zombie；无法确认时保持清理等待，不用超时伪造成功。需要长期后台执行的服务不应借助一次性 Bash 调用遗留进程。native 模式不限制程序主动脱离进程组，不提供 OCI 或 Tauri bwrap 的隔离边界。
+
+### 本地动态委派
+
+Agent 任务可用 YAML 配置有界委派。父 Agent 获得 `delegate_tasks` 工具，其 `items` 数组生成子任务；子任务使用指定 Agent 的模型与提示，工具权限取父子声明的交集，不能扩大父任务权限。
+
+```yaml
+tasks:
+  - id: plan
+    agent: planner
+    description: 拆分工作并调用 delegate_tasks
+    delegation:
+      agent: worker
+      instruction: Handle one payload
+      max_tasks: 8
+      max_concurrency: 1
+      failure_policy: fail-fast
+```
+
+`planner` 和 `worker` 必须在 `agents` 中声明。省略上限时默认为 8 个任务、并发 1，单项最大 32；嵌套委派不开放。`continue` 允许其余子任务继续并保留失败结果；默认 `fail-fast` 取消同组剩余工作。CLI 使用相同的持久调度与恢复路径。

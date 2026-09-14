@@ -103,6 +103,8 @@ export interface AgentConfig {
 
 /** 路由条件：字符串为相等匹配，对象支持 eq/neq/in/exists/and/or/not 组合。 */
 export interface TaskConfig {
+    delegation?: { agent: string; instruction?: string; max_tasks?: number; max_concurrency?: number;
+        failure_policy?: 'fail-fast' | 'continue' };
     id: string;
     /** 显式任务类型；缺省时按 route/spawn/supervisor 字段推断。 */
     kind?: 'agent' | 'route' | 'spawn' | 'supervisor';

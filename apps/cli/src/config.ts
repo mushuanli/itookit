@@ -5,7 +5,7 @@ import { parse } from 'yaml';
 import { findCycles } from '@itookit/llm-flow';
 import { expandWorkflow } from './expand';
 import { workflowSchema } from './schema';
-import type { CompiledWorkflow, RouteCondition, WorkflowConfigV1, WorkflowTaskSpec } from './types';
+import type { TaskConfig, CompiledWorkflow, RouteCondition, WorkflowConfigV1, WorkflowTaskSpec } from './types';
 
 const TEMPLATE = /^\$\{tasks\.([^.}]+)\.outputs\.([^.}]+)\}$/;
 
@@ -137,6 +137,7 @@ function validateReferences(config: WorkflowConfigV1, errors: string[]): void {
         if (!connections.has(agent.connection)) errors.push(`agent ${agent.id} references unknown connection ${agent.connection}`);
     }
     for (const task of config.tasks ?? []) {
+        validateDelegationAgents(task, agents, errors);
         if (task.route !== undefined) {
             for (const rule of task.route.rules ?? []) {
                 if (rule.then && !tasks.has(rule.then)) errors.push(`task ${task.id} route references unknown task ${rule.then}`);
@@ -264,4 +265,11 @@ export function taskOutputReference(value: unknown): { taskId: string; output: s
     if (typeof value !== 'string') return undefined;
     const match = TEMPLATE.exec(value);
     return match ? { taskId: match[1], output: match[2] } : undefined;
+}
+
+function validateDelegationAgents(task: TaskConfig, agents: Set<string>, errors: string[]): void {
+    if (task.delegation && !agents.has(task.delegation.agent)) {
+        errors.push(`task ${task.id} delegation references unknown agent ${task.delegation.agent}`);
+    }
+    for (const child of task.spawn?.tasks ?? []) validateDelegationAgents(child as TaskConfig, agents, errors);
 }

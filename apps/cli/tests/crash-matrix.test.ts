@@ -500,6 +500,8 @@ it.each(['finish', 'finish:delegate:1:0', 'finish:delegate:1:1', 'delegation-inf
         const stateDir = path.join(root, '.mindos'), configPath = path.join(root, 'mindos.yml');
         const config = parse(singleNodeConfig(port));
         Object.assign(config.agents[0], { stream: false, approval: 'none' });
+        if (delegation) config.tasks[0].delegation = { agent: 'worker', instruction: 'Handle one payload',
+            max_tasks: 2, max_concurrency: 1 };
         process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
         await writeFile(configPath, stringify(config));
         child = startSchedulerCrash(configPath, stateDir, inflight ? '' : node, delegation);

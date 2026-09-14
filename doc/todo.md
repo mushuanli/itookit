@@ -108,7 +108,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 - [ ] **P1-03 本地工作区与委派可用性**
   - 已实现：CLI/Tauri worktree、持久创建意图与租约、文件/进程/cwd 一致、detached deadline 恢复、pending 收尾、脏副本保留；已有真实 LocalFS/SQLite/Kernel/Flow SIGKILL 和 Tauri IPC/bwrap 探针证据。
-  - 待实现/核对：授权变化或 Kernel 未发现 Session 的遗留意图处理；工作区恢复/清理失败不泄漏长期租约、不误删用户文件；CLI YAML 暴露本地已支持的 delegation 配置，不能只靠测试夹具注入。
+  - 待实现/核对：授权变化或 Kernel 未发现 Session 的遗留意图处理；工作区恢复/清理失败不泄漏长期租约、不误删用户文件；CLI YAML 已提供有界 delegation 配置、Agent 引用检查及父子工具交集，真实 SIGKILL 回归已改为经 YAML 配置。
   - 待验收：用户窗口启动工作区 Flow、真实桌面重启、失败/取消/保留脏副本、人工合并路径。完整自动合并与冲突编辑器后移，先保证报告冲突、保留分支和工作区供用户处理。
   - 平台边界：当前 Linux 原生/bwrap 为本地验收目标。OCI 不是基础 P1 前置条件；若选择或声称支持 CLI OCI/read-only 模式，则必须独立真实验收，不能用原生模式冒充只读隔离。
 

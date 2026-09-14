@@ -340,6 +340,7 @@ function compileTask(
         plugin: 'builtin.agent',
         pluginVersion: '1.0.0',
         config: {
+            ...(task.delegation ? { delegation: compileDelegation(workflow, task, agent, sessionWorkspace) } : {}),
             messages: [
                 { role: 'system', content: system },
                 { role: 'user', content: task.description ?? task.id },
@@ -369,6 +370,22 @@ function compileTask(
             maxAttempts: task.retry.max_attempts,
             ...(task.retry.backoff_ms !== undefined ? { backoffMs: task.retry.backoff_ms } : {}),
         } : undefined,
+    };
+}
+
+function compileDelegation(workflow: CompiledWorkflow, task: TaskConfig, parent: AgentConfig, workspace?: string) {
+    const declaration = task.delegation!;
+    const agent = workflow.config.agents.find(item => item.id === declaration.agent);
+    if (!agent) throw new Error(`Unknown delegation agent: ${declaration.agent}`);
+    const child = compileTask(workflow, { id: `${task.id}.child`, agent: agent.id,
+        description: declaration.instruction ?? 'Handle one payload', workspace_access: task.workspace_access }, agent, 'worker', workspace);
+    const parentTools = new Set(normalizeTools(parent.tools ?? [], task.workspace_access ?? 'read'));
+    return { enabled: true, toolName: 'delegate_tasks',
+        resolvedTemplate: { plugin: child.plugin, pluginVersion: child.pluginVersion, config: child.config,
+            capabilities: (child.capabilities ?? []).filter(id => parentTools.has(id)) },
+        fanout: { maxTasks: declaration.max_tasks ?? 8, maxConcurrency: declaration.max_concurrency ?? 1,
+            maxDepth: 1, order: 'sequential' },
+        failure: { policy: declaration.failure_policy ?? 'fail-fast' },
     };
 }
 

@@ -27,6 +27,17 @@ describe('validateWorkflow', () => {
         value.agents[0].memory_policy.retention!.max_entries_per_scope = 0;
         expect(() => validateWorkflow(value, false)).toThrow('max_entries_per_scope');
     });
+    it('validates bounded local delegation', () => {
+        const value = workflow();
+        value.tasks[0].delegation = { agent: 'agent', max_tasks: 2, max_concurrency: 1 };
+        expect(validateWorkflow(value, false).tasks[0].delegation).toEqual(value.tasks[0].delegation);
+        value.tasks[0].delegation.agent = 'missing';
+        expect(() => validateWorkflow(value, false)).toThrow('unknown agent');
+        value.tasks[0].delegation.agent = 'agent';
+        value.tasks[0].delegation.max_tasks = 33;
+        expect(() => validateWorkflow(value, false)).toThrow('max_tasks');
+    });
+
     it('accepts a minimal workflow', () => {
         expect(validateWorkflow(workflow(), false).name).toBe('test');
     });
