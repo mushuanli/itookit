@@ -38,6 +38,7 @@ import { TauriFsOps } from './fs/tauri-fs-ops';
 import { TauriLLMLogger } from './log/tauri-llm-logger';
 import { startVfsTrace } from './log/vfs-trace';
 import { createSendBoundary } from './log/send-boundary';
+import { SessionCommand } from '@itookit/llm-session';
 import { TauriSkillSource } from './kernel/tauri-skill-source';
 
 // Bundled locally: the desktop app must render icons offline. The CDN <link> this
@@ -296,17 +297,21 @@ async function bootstrap(): Promise<void> {
         const stopTrace = startVfsTrace(rootDir, runtime.vfs, { sidecar: rootBackend });
         window.__MINDOS_TRACE__ = stopTrace;
         // Bracket one send with an exact boundary so "≤2s / ≤100 calls" is measured on
-        // the action itself instead of inferred from a wider interval.
+        // the action itself instead of inferred from a wider interval. Session events are
+        // routed per bound Session, so the send is observed at the command bus instead.
         const boundary = createSendBoundary(stopTrace);
         llmLogger.onResponse = () => boundary.responded();
-        const unsubscribeBoundary = runtime.sessionManager.onEvent(event => {
-            if (event.type === 'message:appended') {
-                if (event.payload.sessionGroup.role === 'user') boundary.accepted();
-            } else if (event.type === 'error') boundary.abandoned();
-            else if (event.type === 'message:status' && event.payload.status !== 'running') boundary.abandoned();
-        });
+        const { commandBus } = runtime;
+        const execute = commandBus.execute.bind(commandBus) as typeof commandBus.execute;
+        commandBus.execute = <T>(name: string, args?: unknown): Promise<T> => {
+            if (name !== SessionCommand.Send) return execute<T>(name, args);
+            boundary.accepted();
+            const result = execute<T>(name, args);
+            result.catch(() => boundary.abandoned());
+            return result;
+        };
         startupCleanup.push(() => {
-            unsubscribeBoundary();
+            commandBus.execute = execute;
             stopTrace();
             if (window.__MINDOS_TRACE__ === stopTrace) delete window.__MINDOS_TRACE__;
         });

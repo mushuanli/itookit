@@ -32,6 +32,24 @@ it('records a window that ends without a provider response', () => {
     expect(ended).toEqual([1]);
 });
 
+it('bounds a send that never answers so the next send is still measured', () => {
+    vi.useFakeTimers();
+    try {
+        const { begun, ended, target } = recorder();
+        const boundary = createSendBoundary(target, { timeoutMs: 1000 });
+        boundary.accepted();
+        vi.advanceTimersByTime(1000);
+        expect(ended).toEqual([1]);
+        boundary.accepted();
+        expect(begun).toHaveLength(2);
+        boundary.responded();
+        expect(ended).toEqual([1, 2]);
+        // A closed window leaves no pending timer behind.
+        vi.advanceTimersByTime(1000);
+        expect(ended).toEqual([1, 2]);
+    } finally { vi.useRealTimers(); }
+});
+
 it('closes the trace window when the provider answers with headers', () => {
     const logger = new TauriLLMLogger('/root');
     const onResponse = vi.fn();

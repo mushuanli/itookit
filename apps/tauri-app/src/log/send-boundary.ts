@@ -9,7 +9,8 @@
  *
  * The window is deliberately not nested: a run may append several messages, but only
  * the user message that starts the run opens a window, and only the first provider
- * response (or a terminal failure) closes it.
+ * response (or a terminal failure) closes it. A bound exists so a send that never
+ * answers leaves a visible record instead of silently swallowing the next measurement.
  */
 export interface SendBoundaryTarget {
     begin(label: string): number;
@@ -25,16 +26,28 @@ export interface SendBoundary {
     abandoned(): void;
 }
 
-export function createSendBoundary(target: SendBoundaryTarget): SendBoundary {
+export interface SendBoundaryOptions {
+    /** Upper bound for a window that never gets a provider response. */
+    timeoutMs?: number;
+}
+
+export function createSendBoundary(target: SendBoundaryTarget, options: SendBoundaryOptions = {}): SendBoundary {
+    const timeoutMs = options.timeoutMs ?? 120_000;
     let open: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const close = () => {
+        if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
         if (open === undefined) return;
         const id = open;
         open = undefined;
         target.end(id);
     };
     return {
-        accepted() { if (open === undefined) open = target.begin('send-to-provider'); },
+        accepted() {
+            if (open !== undefined) return;
+            open = target.begin('send-to-provider');
+            timer = setTimeout(close, timeoutMs);
+        },
         responded: close,
         abandoned: close,
     };
