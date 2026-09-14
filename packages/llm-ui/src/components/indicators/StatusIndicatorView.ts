@@ -1,5 +1,6 @@
 // @file: llm-ui/components/indicators/StatusIndicatorView.ts
 
+import { t } from '@itookit/common';
 import type { IStatusPresenter } from '../../domain/ports/IStatusPresenter';
 import type { SessionSnapshot } from '@itookit/llm-session';
 import type { DOMCache } from '../common';
@@ -53,7 +54,7 @@ export class StatusIndicatorView implements IStatusPresenter {
         const info = STATUS_MAP[status] || DEFAULT_STATUS;
 
         this.statusDot.classList.add(info.cls);
-        this.statusText.textContent = info.text;
+        this.statusText.textContent = status === 'aborted' ? t('session.execution.cancelled') : info.text;
         this.onLoadingChange(info.loading);
     }
 

@@ -348,7 +348,7 @@ export class HistoryView implements IHistoryPresenter {
                 const msg = err?.message ?? 'Unknown error';
                 const code = err?.code;
                 const prefix = code === '401' ? '🔐 ' : code === '429' ? '⏳ ' : '';
-                this.appendErrorBubble(new Error(`${prefix}${msg}`));
+                this.appendErrorBubble(new Error(`${prefix}${msg}`), code === 'ABORTED');
                 this.renderer.editors.forEach(editor => editor.finalize().catch(err => console.error('[HistoryView] finalize failed:', err)));
                 break;
             }
@@ -492,7 +492,7 @@ export class HistoryView implements IHistoryPresenter {
     // 内部辅助
     // ================================================================
 
-    private appendErrorBubble(error: Error): void {
+    private appendErrorBubble(error: Error, cancelled = false): void {
         this.stream.exit();
 
         const wrapper = document.createElement('div');
@@ -501,7 +501,7 @@ export class HistoryView implements IHistoryPresenter {
         // 匹配 "API key"/"apiKey"/"401" 等多种认证错误形态（大小写不敏感），
         // 命中时显示"配置连接"入口。
         const isAuthError = /api\s?key|401/i.test(error.message);
-        wrapper.innerHTML = ErrorTemplates.renderErrorBubble(error.message, isAuthError);
+        wrapper.innerHTML = ErrorTemplates.renderErrorBubble(error.message, isAuthError, cancelled);
 
         this.container.appendChild(wrapper);
         this.scrollController.scrollToBottom(true);

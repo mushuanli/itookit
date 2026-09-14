@@ -219,7 +219,7 @@ export class SessionEventHandler {
                 isEstimated: false,
             });
         } else if (event.type === 'error') {
-            this.deps.statusIndicator.update('failed');
+            this.deps.statusIndicator.update(event.payload.error?.code === 'ABORTED' ? 'aborted' : 'failed');
         }
     }
 }

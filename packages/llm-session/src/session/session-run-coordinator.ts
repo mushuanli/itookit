@@ -390,6 +390,6 @@ function projectError(
     }
     eventBus.emitSession(sessionId, {
         type: 'error',
-        error: { message },
+        error: { message, ...(status === 'aborted' ? { code: 'ABORTED' } : {}) },
     });
 }

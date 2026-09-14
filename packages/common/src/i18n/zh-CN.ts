@@ -5,13 +5,15 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'session.execution.cancelled': '执行已取消',
+    'session.execution.failed': '执行失败',
+    'session.execution.runAgain': '重新执行',
+    'session.execution.retry': '重试',
+    'session.execution.configure': '配置连接',
     'tty.exit.unknown': '进程已停止（退出码未知）',
     'tty.exit.known': '进程已退出（退出码 {code}）',
     'tty.status.stopped': '已停止',
     'tty.status.exited': '已退出',
-    'flow.retry.downstreamTitle': '重试并重算下游',
-    'flow.retry.downstreamHint': '以新结果重算该节点及其下游（委派组会重新派发）。',
-    'flow.transcript.truncated': '已按字节预算截断',
     'memory.manage.title': '记忆管理',
     'memory.manage.agent': 'Agent',
     'memory.manage.scope': '范围',
@@ -23,9 +25,7 @@ export const zhCN = {
     'memory.manage.refresh': '刷新',
     'memory.manage.close': '关闭',
     'memory.manage.empty': '暂无可读取的记忆',
-    'session.tasks.stopPending': '取消已请求，等待外部停止确认（{count} 个操作在途）',
-    'session.tasks.stopStopped': '已停止（取消请求已确认）',
-    'session.tasks.eventsTrimmed': '更早的事件已按保留期裁剪',
+
     'error.sessionUnfinishedTasks': '会话仍有未结束的任务，请先结束或取消任务再修改挂载',
     'error.directorySourceUnavailable': '目录来源不可用，请重新连接',
     'mount.error.selectUserDirectory': '请选择用户目录',
@@ -42,6 +42,9 @@ export const zhCN = {
     'mount.access.ro': '只读',
     'mount.access.rw': '可读写',
     'session.tasks.more': '更多任务（打开分页列表）',
+    'session.tasks.stopPending': '取消已请求，等待外部停止确认（{count} 个操作在途）',
+    'session.tasks.stopStopped': '已停止（取消请求已确认）',
+    'session.tasks.eventsTrimmed': '更早的事件已按保留期裁剪',
     'boot.filesystem': '初始化文件系统…',
     'boot.llmDriver': '加载 LLM 驱动…',
     'boot.coreServices': '初始化核心服务…',
@@ -54,8 +57,11 @@ export const zhCN = {
     'flow.retry.hint': '创建新的任务执行，暂不重算下游。',
     'flow.retry.source': '重试来源',
     'flow.run.controlFailed': 'Run 控制操作失败',
+    'flow.retry.downstreamTitle': '重试并重算下游',
+    'flow.retry.downstreamHint': '以新结果重算该节点及其下游（委派组会重新派发）。',
     'flow.retry.failed': '任务重试失败',
     'flow.transcript.more': '加载更多记录',
+    'flow.transcript.truncated': '已按字节预算截断',
     'flow.transcript.exportText': '导出纯文本',
     'flow.transcript.title': '任务记录',
     'flow.transcript.export': '导出 JSON',
@@ -387,6 +393,7 @@ export const zhCN = {
     'chat.origin.system':            '系统',
     'chat.ephemeral':                '不计入上下文',
 
+    // ── Slash commands ────────────────────────────────────────────────────────
     'slash.new.description':                 '新建对话（可选：/new <标题>）',
     'slash.retry.description':               '重新生成上一条回复',
     'slash.continue.description':            '从上次中断处继续生成',
@@ -433,6 +440,7 @@ export const zhCN = {
     'slash.resume.description':              '恢复当前附着的任务',
     'slash.approve.description':             '批准当前附着的任务交互',
     'slash.exec.description':                '经批准后执行 shell 命令',
+
     'slash.group.chat':                      '对话',
     'slash.group.refine':                    '改写',
     'slash.group.context':                   '上下文',
@@ -446,6 +454,7 @@ export const zhCN = {
     'slash.group.help':                      '帮助',
     'slash.group.skills':                    '技能',
     'slash.group.skills-active':             '技能 — 已加载',
+
     'slash.hint.enableAgentMode':            ' — 请先启用 Agent Mode',
     'slash.hint.kernelUnavailable':          ' — Kernel 不可用',
     'slash.unknown':                         '未知命令 /{name}',

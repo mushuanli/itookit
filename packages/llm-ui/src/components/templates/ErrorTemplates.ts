@@ -1,6 +1,6 @@
 // @file: llm-ui/components/templates/ErrorTemplates.ts
 
-import { escapeHTML } from '@itookit/common';
+import { escapeHTML, t } from '@itookit/common';
 
 export class ErrorTemplates {
     /**
@@ -30,22 +30,22 @@ export class ErrorTemplates {
     /**
      * 渲染错误气泡
      */
-    static renderErrorBubble(message: string, showSettings: boolean): string {
+    static renderErrorBubble(message: string, showSettings: boolean, cancelled = false): string {
         let actionButtons = '';
 
-        if (showSettings) {
+        if (showSettings && !cancelled) {
             actionButtons += `
-                <button class="llm-ui-error-btn" data-action="open-settings">⚙️ 配置连接</button>
+                <button class="llm-ui-error-btn" data-action="open-settings">${t('session.execution.configure')}</button>
             `;
         }
 
         actionButtons += `
-            <button class="llm-ui-error-btn" data-action="retry-last">↻ 重试</button>
+            <button class="llm-ui-error-btn" data-action="retry-last">${t(cancelled ? 'session.execution.runAgain' : 'session.execution.retry')}</button>
         `;
 
         return `
-            <div class="llm-ui-bubble llm-ui-bubble--error">
-                <strong>⚠️ 执行失败</strong>
+            <div class="llm-ui-bubble llm-ui-bubble--error" data-outcome="${cancelled ? 'cancelled' : 'failed'}">
+                <strong>${t(cancelled ? 'session.execution.cancelled' : 'session.execution.failed')}</strong>
                 <div class="llm-ui-bubble--error__content">
                     ${escapeHTML(message)}
                 </div>

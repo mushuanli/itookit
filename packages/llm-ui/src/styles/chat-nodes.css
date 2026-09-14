@@ -812,3 +812,16 @@
     content: ' · ephemeral';
     opacity: 0.5;
 }
+
+/* Cancellation is a terminal execution outcome, not a provider failure. */
+.llm-ui-bubble--error[data-outcome="cancelled"] {
+    background: var(--llm-bg-secondary);
+    border-color: var(--llm-border-color);
+    color: var(--llm-text-primary);
+}
+
+.llm-ui-bubble--error[data-outcome="cancelled"] .llm-ui-error-btn {
+    background: var(--llm-bg-primary);
+    border-color: var(--llm-border-color);
+    color: var(--llm-text-primary);
+}
