@@ -71,6 +71,7 @@ export interface DurableChatOutput {
 }
 
 export interface DurableAgentOutput extends DurableChatOutput {
+    outputs?: { result: { content: import('@itookit/durable-kernel').JsonValue; type: 'json' } };
     exchanges: number;
 }
 

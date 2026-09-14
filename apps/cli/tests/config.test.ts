@@ -38,6 +38,15 @@ describe('validateWorkflow', () => {
         expect(() => validateWorkflow(value, false)).toThrow('max_tasks');
     });
 
+    it('accepts explicit structured-output and node port contracts', () => {
+        const value = workflow();
+        value.agents[0].response_format = { type: 'json_schema', json_schema: { name: 'report', schema: { type: 'object' } } };
+        value.tasks[0].port_schemas = { outputs: { result: { id: 'report', version: '1' } } };
+        expect(validateWorkflow(value, false).tasks[0].port_schemas).toEqual(value.tasks[0].port_schemas);
+        value.agents[0].output_validation = { on_invalid: 'repair', retries: -1 };
+        expect(() => validateWorkflow(value, false)).toThrow('retries');
+    });
+
     it('accepts a minimal workflow', () => {
         expect(validateWorkflow(workflow(), false).name).toBe('test');
     });

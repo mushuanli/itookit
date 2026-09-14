@@ -1,3 +1,4 @@
+import { nodePortSchemas } from './node-port-schemas';
 import { assertFlowSchema, flowSchemaIssue } from './schema-registry';
 import { schemaCompatibilityIssue } from './schema-compat';
 import { extractNodeOutput } from '@itookit/llm-tasks';
@@ -18,9 +19,9 @@ export function dataEdgeSchemaIssue(
     if (edge.kind === 'control') return;
     const output = plugins.getManifest(source.plugin, source.pluginVersion)?.outputs.find(port => port.name === edge.output);
     const input = plugins.getManifest(target.plugin, target.pluginVersion)?.inputs.find(port => port.name === edge.input);
-    if (!input?.schema) return;
-    const expected = input.schema;
-    const actual = output?.schema;
+    const expected = nodePortSchemas(target).inputs?.[edge.input ?? ''] ?? input?.schema;
+    if (!expected) return;
+    const actual = nodePortSchemas(source).outputs?.[edge.output ?? ''] ?? output?.schema;
     if (!expected.id?.trim() || (expected.version !== undefined && !expected.version.trim())) return 'Invalid target schema reference';
     if (!actual) return `Output ${source.id}.${edge.output} has no schema required by ${target.id}.${edge.input}`;
     if (actual.id !== expected.id) {
@@ -46,9 +47,10 @@ export function assertNodeOutputs(
     output: unknown,
 ): void {
     for (const port of plugins.getManifest(node.plugin, node.pluginVersion)?.outputs ?? []) {
-        if (!port.schema) continue;
-        const schema = plugins.getSchema?.(port.schema);
-        if (schema === undefined) throw new Error(`Unregistered schema ${port.schema.id}`);
+        const ref = nodePortSchemas(node).outputs?.[port.name] ?? port.schema;
+        if (!ref) continue;
+        const schema = plugins.getSchema?.(ref);
+        if (schema === undefined) throw new Error(`Unregistered schema ${ref.id}`);
         const issue = flowSchemaIssue(schema, extractNodeOutput(output, port.name));
         if (issue) throw new Error(`Invalid output ${node.id}.${port.name}: ${issue}`);
     }
@@ -58,7 +60,8 @@ export function validateDataEdgeValue(
     edge: DagEdgeDefinition, target: DagNodeDefinition, plugins: DagPluginCatalog, output: unknown,
 ): void {
     if (edge.kind === 'control') return;
-    const ref = plugins.getManifest(target.plugin, target.pluginVersion)?.inputs.find(port => port.name === edge.input)?.schema;
+    const ref = nodePortSchemas(target).inputs?.[edge.input]
+        ?? plugins.getManifest(target.plugin, target.pluginVersion)?.inputs.find(port => port.name === edge.input)?.schema;
     if (!ref) return;
     const schema = plugins.getSchema?.(ref);
     if (schema === undefined) throw new Error(`Unregistered schema ${ref.id}`);

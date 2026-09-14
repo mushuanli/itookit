@@ -260,8 +260,14 @@ function complete(
     return {
         state,
         actions,
-        next: { type: 'complete', output: { message, usage: state.usage, finishReason, exchanges: state.exchanges } },
+        next: { type: 'complete', output: { message, usage: state.usage, finishReason, exchanges: state.exchanges, ...structuredResult(state, message) } },
     };
+}
+
+function structuredResult(state: DurableAgentState, message: ChatMessage): Pick<DurableAgentOutput, 'outputs'> {
+    if (state.input.responseFormat?.type !== 'json_schema' || typeof message.content !== 'string') return {};
+    try { return { outputs: { result: { content: JSON.parse(message.content), type: 'json' } } }; }
+    catch { return {}; }
 }
 
 function handleInvalidOutput(

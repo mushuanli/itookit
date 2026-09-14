@@ -1,5 +1,6 @@
 import type {
     ArtifactDraft,
+    NodePortSchemas,
     InputPortSpec,
     JsonValue,
     JsonSchemaRef,
@@ -24,6 +25,7 @@ export interface DagPluginManifest<Config = unknown> {
 }
 
 export interface DagNodeDefinition<Config = unknown> {
+    portSchemas?: NodePortSchemas;
     id: string;
     name: string;
     plugin: string;

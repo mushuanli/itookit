@@ -446,6 +446,7 @@ export class DurableFlowExecutor {
                     if (previous !== fingerprint) throw new Error(`Graph patch ${patch.idempotencyKey}: idempotency conflict`);
                     return;
                 }
+                plugins.addNodes(patch.nodes);
                 const additions = validateGraphPatch(patch, nodes, edges, parentId, plugins);
                 if (nodes.length + patch.nodes.length > maxNodes) {
                     throw new Error(`Flow node limit exceeded by patch ${patch.idempotencyKey}: ${nodes.length + patch.nodes.length}/${maxNodes}`);
@@ -464,6 +465,7 @@ export class DurableFlowExecutor {
                         connection.connections, connection.defaultConnection, connection.fallbackConnectionId);
                     boundNodes.push({ ...node, config: resolvedConfig, inputs: bound?.inputs ?? node.inputs });
                 }
+                plugins.addNodes(boundNodes);
                 validateGraphPatch({ ...patch, nodes: boundNodes }, nodes, edges, parentId, plugins);
                 nodes.push(...boundNodes);
                 const defaults = nodeDefaults.get(parentId);
@@ -515,6 +517,7 @@ export class DurableFlowExecutor {
                     nodes, edges, edgeState, depths: delegationDepth,
                     groups: delegationGroups, groupByChild: delegationGroupByChild,
                 });
+                plugins.addNodes(nodes.filter(item => delegationGroups.get(plan.groupId)?.children.has(item.id)));
                 await this.emitHook('agent.spawned', sessionId, { parentNodeId: node.id, groupId: plan.groupId, count: plan.payloads.length });
                 const group = delegationGroups.get(plan.groupId);
                 const defaults = nodeDefaults.get(node.id);

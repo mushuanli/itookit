@@ -63,3 +63,30 @@ it('persists contracts discovered by dynamic nodes and keeps snapshots isolated'
     expect(run.getManifest('builtin.transform', '1.0.0')!.outputs.length).toBeGreaterThan(0);
     expect(() => createRunCatalog(source, [], run.snapshot())).not.toThrow();
 });
+
+it('freezes node-local response schemas across restart and rejects conflicting dynamic declarations', () => {
+    const source = createBuiltinDagPluginRegistry();
+    const node: any = { id: 'answer', plugin: 'builtin.agent', pluginVersion: '1.0.0', config: {
+        responseFormat: { type: 'json_schema', json_schema: { name: 'report', schema: { type: 'object' } } },
+    }, portSchemas: { outputs: { result: { id: 'report', version: '1' } } } };
+    const run = createRunCatalog(source, [node]);
+    const saved = JSON.parse(JSON.stringify(run.snapshot()));
+    expect(createRunCatalog(source, [node], saved).getSchema!({ id: 'report', version: '1' })).toEqual({ type: 'object' });
+    node.config.responseFormat.json_schema.schema = { type: 'string' };
+    expect(() => run.addNodes([node])).toThrow('Schema definition conflict');
+    expect(() => createRunCatalog(source, [node], saved)).toThrow('Schema definition conflict');
+    expect(run.getSchema!({ id: 'report', version: '1' })).toEqual({ type: 'object' });
+});
+
+it('rejects unknown ports and weakened plugin contracts before running tasks', () => {
+    const source = createBuiltinDagPluginRegistry();
+    const node: any = { id: 'typed', plugin: 'builtin.transform', pluginVersion: '1.0.0',
+        portSchemas: { outputs: { missing: { id: 'local', definition: true } } } };
+    expect(() => createRunCatalog(source, [node])).toThrow('Unknown outputs port');
+    const manifest = source.getManifest('builtin.transform', '1.0.0')!;
+    manifest.outputs[0].schema = { id: 'local', version: '1' };
+    source.getManifest = () => manifest;
+    source.getSchema = ref => ref.version === '1' ? { type: 'string' } : undefined;
+    node.portSchemas = { outputs: { result: { id: 'local', version: '2', definition: true } } };
+    expect(() => createRunCatalog(source, [node])).toThrow('Cannot weaken plugin contract');
+});

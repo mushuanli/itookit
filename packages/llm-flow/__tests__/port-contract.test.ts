@@ -111,3 +111,18 @@ describe('structural compatibility across versions', () => {
             .toThrow('not assignable');
     });
 });
+
+it('uses node-local contracts for publish, direct submit and dynamic patches', async () => {
+    const plugins = catalog(); plugins.getSchema = () => undefined;
+    const producer = { ...source, portSchemas: { outputs: { result: { id: 'report', version: '1', definition: { type: 'string' } } } } };
+    const consumer = { ...target, portSchemas: { inputs: { input: { id: 'report', version: '1' } } } };
+    const revision = { ...crossVersionRevision, nodes: [producer, consumer] } as unknown as FlowRevision;
+    expect(validateFlowRevision(revision, plugins)).toEqual([]);
+    expect(() => validateGraphPatch({ idempotencyKey: 'local', nodes: [consumer], edges: [edge] }, [producer], [], source.id, plugins)).not.toThrow();
+    consumer.portSchemas.inputs.input.id = 'other';
+    expect(validateFlowRevision(revision, plugins)[0].message).toContain('Unregistered schema');
+    const openSession = vi.fn();
+    await expect(new DurableFlowExecutor({ kernel: { openSession } as never, plugins })
+        .submit('s', { nodes: [producer, consumer], edges: [edge] })).rejects.toThrow('Unregistered schema');
+    expect(openSession).not.toHaveBeenCalled();
+});

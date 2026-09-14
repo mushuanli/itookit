@@ -307,3 +307,5 @@ DagWorkbench 在 Run 未终态时为终态成员提供「重试并重算下游�
 调度租约到期后 assertOwned 拒绝继续推进，心跳不续活过期记录。Flow 的节点提交、共享状态和根信号附带同事务的共享租约条件，旧 owner/epoch 的写入返回失权而不执行 Run 失败清理。工作区 finalization 的完成状态持久化前保持租约，waitIdle 包含此收尾；不保证强制终止任意宿主回调。完整支持边界见[ P1 过渡设计](design/p1-transition.md)。
 
 本地调度租约覆盖调度器取得的 Task 控制句柄、资源创建与预算设置。根结果可先完成，`waitIdle()` 等待有界 detached 工作结束或超时取消；终态 Run 的 resume 同样恢复该收尾。旧 epoch 回调不得取消新调度器的任务。工作区恢复/任务重连失败也会释放调度租约。
+
+节点可用 `portSchemas.inputs/outputs` 声明 `{ id, version?, definition? }`。内联 schema 存入 Run catalog，消费者可仅引用同身份；节点不得削弱插件端口契约。`builtin.agent` 的 `responseFormat.json_schema` 自动绑定解析后的 `result`，默认身份为 `agent.response.<nodeId>.<name>@1`，可由显式 result 引用命名。原始 `message.content` 保留；`outputValidation.onInvalid=continue` 不绕过 Flow 严格校验。发布、直接执行、动态图和恢复均使用同一目录，同身份不同定义拒绝；动态委派子节点的契约也写入快照。

@@ -53,7 +53,7 @@ A2 是本机命令提交条件，不是全面执行端 fencing：
 
 ### B1. 节点级输出契约
 
-先定义节点级 output contract，引用 `{ id, version }` 的不可变 schema；没有节点级声明时沿用插件输出契约。节点契约不得静默削弱插件保证。Agent responseFormat 的 JSON schema 编译到节点契约，且确定其对应的是解析后的结构化值，而不是原始响应文本。
+已实现节点级 `portSchemas` contract，引用 `{ id, version }` 的不可变 schema；没有节点级声明时沿用插件输出契约。节点契约不得静默削弱插件保证。Agent responseFormat 的 JSON schema 编译到节点契约，且确定其对应的是解析后的结构化值，而不是原始响应文本。
 
 schema 身份需显式、可被消费者引用；同 id/version 的不同内容拒绝注册，不直接使用 Agent 的展示名称充当全局 schema 身份。编译后的契约和定义进入 Run 快照，恢复不从新宿主配置重新推导。发布、直接提交和动态图使用同一解析路径。
 

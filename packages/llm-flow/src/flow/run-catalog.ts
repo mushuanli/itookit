@@ -1,15 +1,19 @@
+import { nodePortSchemas, assertNodePortSchemas } from './node-port-schemas';
+import { assertFlowSchema } from './schema-registry';
 import type { DagNodeDefinition, DagPluginCatalog, DagPluginManifest, JsonSchemaRef, JsonValue } from '@itookit/common';
 
 export interface RunCatalogSnapshot {
     manifests: [string, DagPluginManifest | null][];
     schemas: [string, JsonValue | null][];
+    localSchemas?: string[];
 }
 
 /** Pin metadata durably; executable contributions remain owned by the host catalog. */
 export function createRunCatalog(source: DagPluginCatalog, nodes: DagNodeDefinition[], saved?: RunCatalogSnapshot):
-    DagPluginCatalog & { snapshot(): RunCatalogSnapshot } {
+    DagPluginCatalog & { snapshot(): RunCatalogSnapshot; addNodes(nodes: DagNodeDefinition[]): void } {
     const manifests = new Map<string, DagPluginManifest | undefined>(saved?.manifests.map(([key, value]) => [key, value ?? undefined]));
     const schemas = new Map<string, JsonValue | undefined>(saved?.schemas.map(([key, value]) => [key, value ?? undefined]));
+    const localSchemas = new Set(saved?.localSchemas);
     if (saved) assertCatalogUnchanged(source, saved);
     const getSchema = (ref: JsonSchemaRef): JsonValue | undefined => {
         const key = JSON.stringify([ref.id, ref.version ?? null]);
@@ -27,17 +31,36 @@ export function createRunCatalog(source: DagPluginCatalog, nodes: DagNodeDefinit
         }
         return structuredClone(manifests.get(key));
     };
-    for (const node of nodes) getManifest(node.plugin, node.pluginVersion);
-    return {
-        getManifest, getSchema,
+    const addNodes = (additions: DagNodeDefinition[]): void => {
+        for (const node of additions) {
+            const ports = nodePortSchemas(node);
+            for (const ref of [...Object.values(ports.inputs ?? {}), ...Object.values(ports.outputs ?? {})]) {
+                if (ref.definition === undefined) continue;
+                assertFlowSchema(ref.definition);
+                const key = JSON.stringify([ref.id, ref.version ?? null]);
+                const existing = getSchema(ref);
+                if (existing !== undefined && canonical(existing) !== canonical(ref.definition)) throw new Error(`Schema definition conflict: ${ref.id}`);
+                if (existing === undefined) { schemas.set(key, structuredClone(ref.definition)); localSchemas.add(key); }
+            }
+        }
+        for (const node of additions) {
+            getManifest(node.plugin, node.pluginVersion);
+            assertNodePortSchemas(node, catalog);
+        }
+    };
+    const catalog = {
+        getManifest, getSchema, addNodes,
         snapshot: () => structuredClone({
             manifests: [...manifests].map(([key, value]) => [key, value ?? null]),
             schemas: [...schemas].map(([key, value]) => [key, value ?? null]),
+            localSchemas: [...localSchemas],
         }),
         listManifests: () => [...manifests.values()].filter((item): item is DagPluginManifest => !!item).map(item => structuredClone(item)),
         loadRuntime: (id, version) => source.loadRuntime(id, version),
         loadUI: (id, version) => source.loadUI(id, version),
-    };
+    } satisfies DagPluginCatalog & { snapshot(): RunCatalogSnapshot; addNodes(nodes: DagNodeDefinition[]): void };
+    addNodes(nodes);
+    return catalog;
 }
 
 function assertCatalogUnchanged(source: DagPluginCatalog, saved: RunCatalogSnapshot): void {
@@ -48,6 +71,7 @@ function assertCatalogUnchanged(source: DagPluginCatalog, saved: RunCatalogSnaps
         }
     }
     for (const [key, expected] of saved.schemas) {
+        if (saved.localSchemas?.includes(key)) continue;
         const [id, version] = JSON.parse(key) as [string, string | null];
         if (canonical(source.getSchema?.({ id, ...(version === null ? {} : { version }) }) ?? null) !== canonical(expected)) {
             throw new Error(`Flow schema drift: ${id}@${version ?? '(unversioned)'}`);

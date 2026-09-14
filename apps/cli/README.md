@@ -282,3 +282,32 @@ tasks:
 ```
 
 `planner` 和 `worker` 必须在 `agents` 中声明。省略上限时默认为 8 个任务、并发 1，单项最大 32；嵌套委派不开放。`continue` 允许其余子任务继续并保留失败结果；默认 `fail-fast` 取消同组剩余工作。CLI 使用相同的持久调度与恢复路径。
+
+### 结构化输出与节点契约
+
+Agent 的 `response_format` 接受 `text`、`json_object` 或 `json_schema`。后者将解析后的 JSON 绑定到节点的 `result` 端口，并保留原始 `message.content`。例如：
+
+```yaml
+agents:
+  - id: writer
+    connection: default
+    response_format:
+      type: json_schema
+      json_schema:
+        name: report
+        schema:
+          type: object
+          required: [title]
+          properties:
+            title: {type: string}
+    output_validation: {on_invalid: repair, retries: 1}
+tasks:
+  - id: write
+    agent: writer
+    description: 生成报告
+    port_schemas:
+      outputs:
+        result: {id: report, version: '1'}
+```
+
+消费者通过 `port_schemas.inputs.<端口名>` 引用相同 schema；普通节点可通过 `definition` 内联定义。未显式命名的 Agent result 使用 `agent.response.<节点 id>.<name>@1`。同身份不同定义会被拒绝，契约随 Run 持久化。Flow 使用受支持的 schema 子集并严格失败；Agent 的 `continue` 不能绕过 Flow 端口验证。具体错误在 Run 结果中，原始响应在 Task transcript 中，可从已有重试入口重新执行。

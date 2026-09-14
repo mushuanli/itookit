@@ -1,3 +1,4 @@
+import { createRunCatalog } from './run-catalog';
 import type { DagEdgeDefinition, DagNodeDefinition, DagPluginCatalog, GraphPatch } from '@itookit/common';
 import { findCycles } from './graph';
 import { dataEdgeSchemaIssue } from './port-contract';
@@ -17,6 +18,7 @@ export function validateGraphPatch(
     parentId: string,
     plugins: DagPluginCatalog,
 ): DagEdgeDefinition[] {
+    plugins = createRunCatalog(plugins, [...nodes, ...patch.nodes]);
     const fail = (reason: string): never => { throw new Error(`Graph patch ${patch.idempotencyKey}: ${reason}`); };
     if (!patch.idempotencyKey?.trim()) fail('idempotency key is required');
     const known = new Map(nodes.map(node => [String(node.id), node]));

@@ -1,3 +1,4 @@
+import { createRunCatalog } from './run-catalog';
 import type {
     DagPluginCatalog,
     FlowRevision,
@@ -40,6 +41,10 @@ export function validateFlowRevision(
     plugins?: DagPluginCatalog,
 ): ValidationIssue[] {
     const issues: ValidationIssue[] = [];
+    if (plugins) {
+        try { plugins = createRunCatalog(plugins, flow.nodes); }
+        catch (error) { return [{ code: 'invalid-port-schema', message: String(error) }]; }
+    }
     const nodes = validateNodes(flow.nodes, plugins, issues);
     validateCompensations(flow.nodes, nodes, issues);
     validateEdges(flow.edges, nodes, plugins, issues);

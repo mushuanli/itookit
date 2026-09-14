@@ -1,3 +1,4 @@
+import { parse, stringify } from 'yaml';
 import { listenForTest } from './listen';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -30,6 +31,26 @@ describe('CLI run', () => {
         const system = requests[0].messages?.filter(message => message.role === 'system').map(message => message.content).join('\n');
         expect(system).toContain('Project rule: verify public interfaces.');
         expect(system).toContain('Skill rule: record validation evidence.');
+    }, 15_000);
+
+    it.each([true, false])('enforces YAML structured output while retaining raw text (valid: %s)', async valid => {
+        const raw = JSON.stringify({ title: valid ? 'report' : 7 });
+        const { server } = mockServer(() => raw);
+        const port = await startServer(server);
+        const workspace = await mkdtemp(path.join(tmpdir(), 'mindos-schema-'));
+        const configPath = path.join(workspace, 'mindos.yml');
+        const value = parse(config(port));
+        value.agents[0].response_format = { type: 'json_schema', json_schema: { name: 'report',
+            schema: { type: 'object', required: ['title'], properties: { title: { type: 'string' } } } } };
+        value.agents[0].output_validation = { on_invalid: 'continue' };
+        value.tasks[0].port_schemas = { outputs: { result: { id: 'report', version: '1' } } };
+        process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
+        await writeFile(configPath, stringify(value));
+        expect(await runCommand({ file: configPath, stateDir: path.join(workspace, '.mindos'), headless: true, json: true }))
+            .toBe(valid ? 0 : 1);
+        const runId = await latestRun(workspace);
+        expect(await readManifest(workspace, runId)).toMatchObject({ status: valid ? 'succeeded' : 'failed' });
+        if (valid) expect(JSON.parse(await readFile(path.join(runDir(workspace, runId), 'result.json'), 'utf8'))).toEqual({ title: 'report' });
     }, 15_000);
 
     it('runs a durable DAG and persists its final result', async () => {

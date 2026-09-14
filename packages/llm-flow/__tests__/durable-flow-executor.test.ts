@@ -1782,6 +1782,28 @@ describe('DurableFlowExecutor', () => {
         }
     });
 
+    it.each([false, true])('binds node response schemas to parsed output and preserves raw text (valid: %s)', async valid => {
+        const flow = agentFlow();
+        const raw = JSON.stringify({ answer: valid ? 'yes' : 7 });
+        model.execute = vi.fn(async () => ({ choices: [{ index: 0, message: { role: 'assistant', content: raw }, finish_reason: 'stop' }] })) as any;
+        const schema = { type: 'object', required: ['answer'], properties: { answer: { type: 'string' } } };
+        Object.assign(flow.nodes[0].config!, { responseFormat: { type: 'json_schema', json_schema: { name: 'answer', schema } },
+            outputValidation: { onInvalid: 'continue' } });
+        flow.nodes[0].portSchemas = { outputs: { result: { id: 'answer', version: '1' } } };
+        flow.nodes.push({ ...valueNode('target', null), portSchemas: { inputs: { input: { id: 'answer', version: '1' } } } });
+        flow.edges.push({ id: 'typed', from: 'agent', to: 'target', output: 'result', input: 'input' });
+        const execution = await executor(kernel).submit('session-one', flow);
+        const exit = await runToEnd(execution);
+        expect(exit.status).toBe(valid ? 'succeeded' : 'failed');
+        const output = (await execution.nodes.get('agent')!.status()).task.output;
+        expect(output).toMatchObject({ message: { content: raw }, outputs: { result: { content: JSON.parse(raw) } } });
+        if (!valid) {
+            expect(exit.error?.message).toContain('Invalid output agent.result');
+            expect(execution.nodes.has('target')).toBe(false);
+        } else expect((await execution.nodes.get('target')!.status()).task.output)
+            .toMatchObject({ outputs: { result: { content: { answer: 'yes' } } } });
+    });
+
     it('repairs invalid structured output and records token usage', async () => {
         const flow = agentFlow();
         (flow.nodes[0].config as Record<string, unknown>).messages = [{ role: 'user', content: 'structured response' }];

@@ -127,9 +127,9 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 物理分页、固定版本、maxBytes 裁剪及水位、CLI 真实文件导出、UI 独立遍历分页导出已有证据；UI 导出保留单调性和 10k Effect 上限守卫。
   - 入口：`transcript-budget.test.ts`、`task-transcript-dialog.test.ts`、CLI `run.integration.test.ts`。
 
-- [ ] **P1-07 本地节点输出契约**
+- [x] **P1-07 本地节点输出契约**
   - 已实现：受支持 schema 子集与同 id 跨版本兼容、所有生产者输出独立验证、Run/动态图及清单/schema 冻结；无效输出使 Run 失败，不派发严格下游，原输出保留。
-  - 待实现：节点级输出契约及 Agent responseFormat 到可引用端口 schema 的绑定；发布/直接执行/动态图/恢复使用同一契约。原始输出、具体校验错误与重试入口需在 CLI/桌面可观察。
+  - 已补齐：节点 `portSchemas` 输入/输出引用及内联定义、Agent responseFormat 到解析后 result 的绑定；发布/直接执行/动态图/恢复复用冻结目录，同身份不同定义和削弱插件契约被拒绝。CLI YAML 提供 `response_format` / `output_validation` / `port_schemas`；原文保留在 Task，具体错误进入 Run，沿用既有 transcript 与人工重试入口。真实 CLI 正反例及 Flow 回归证明严格端口不会被 Agent continue 绕过。
   - 当前策略：Flow 端口默认 fail，使用已有人工修正/重试路径；Agent 内部已有 repair/continue 保留。通用自动修复 Task、invalid 分支 DSL、任意 schema 转换及插件产物版本仓库不作为本地 P1 前置条件。
   - 当前版本运行并重启应可恢复；不支持契约漂移时静默续跑。跨应用版本升级迁移与旧插件包自动归档后移。
 

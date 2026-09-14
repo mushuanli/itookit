@@ -306,7 +306,9 @@ export function compileDag(workflow: CompiledWorkflow, sessionWorkspace?: string
         agentFactory,
         taskOutputReference,
     );
-    return { nodes, edges };
+    const contracts = new Map(workflow.config.tasks.map(task => [task.id, task.port_schemas]));
+    return { nodes: nodes.map(node => contracts.get(node.id)
+        ? { ...node, portSchemas: structuredClone(contracts.get(node.id)) } : node), edges };
 }
 
 function compileTask(
@@ -339,6 +341,7 @@ function compileTask(
         name: task.description ?? task.id,
         plugin: 'builtin.agent',
         pluginVersion: '1.0.0',
+        ...(task.port_schemas ? { portSchemas: structuredClone(task.port_schemas) } : {}),
         config: {
             ...(task.delegation ? { delegation: compileDelegation(workflow, task, agent, sessionWorkspace) } : {}),
             messages: [
@@ -354,6 +357,9 @@ function compileTask(
             ...(agent.web_search !== undefined ? { webSearch: agent.web_search } : {}),
             ...(agent.stream !== undefined ? { stream: agent.stream } : {}),
             maxExchanges: agent.max_exchanges ?? 50,
+            ...(agent.response_format ? { responseFormat: agent.response_format } : {}),
+            ...(agent.output_validation ? { outputValidation: { onInvalid: agent.output_validation.on_invalid,
+                retries: agent.output_validation.retries } } : {}),
             ...(agent.memory_policy ? { memoryPolicy: memoryPolicyForAgent(agent) } : {}),
             // An isolated Run lets the executor place every agent node in the workspace it
             // prepared; pinning the node to the base repository here would silently win.

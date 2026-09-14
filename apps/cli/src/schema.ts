@@ -40,7 +40,21 @@ const connectionSchema = z.strictObject({
     }),
 });
 
+const responseFormatSchema = z.discriminatedUnion('type', [
+    z.strictObject({ type: z.literal('text') }),
+    z.strictObject({ type: z.literal('json_object') }),
+    z.strictObject({ type: z.literal('json_schema'), json_schema: z.strictObject({
+        name: z.string().min(1), schema: z.unknown(), strict: z.boolean().optional(),
+    }) }),
+]);
+const nodePortSchema = z.strictObject({ id: z.string().min(1), version: z.string().min(1).optional(), definition: z.unknown().optional() });
+const nodePortSchemas = z.strictObject({ inputs: z.record(z.string(), nodePortSchema).optional(),
+    outputs: z.record(z.string(), nodePortSchema).optional() });
+
 const agentSchema = z.strictObject({
+    response_format: responseFormatSchema.optional(),
+    output_validation: z.strictObject({ on_invalid: z.enum(['fail', 'repair', 'continue']).optional(),
+        retries: z.number().int().min(0).max(10).optional() }).optional(),
     memory_policy: z.strictObject({
         namespace_id: z.string().trim().min(1),
         read_scopes: z.array(z.string().trim().min(1)),
@@ -123,6 +137,7 @@ const taskSchema: TaskSchema = z.lazy(() => z.strictObject({
     kind: z.enum(['agent', 'route', 'spawn', 'supervisor']).optional(),
     agent: z.string().optional(),
     description: z.string().optional(),
+    port_schemas: nodePortSchemas.optional(),
     delegation: z.strictObject({
         agent: ID, instruction: z.string().min(1).optional(),
         max_tasks: z.number().int().min(1).max(32).optional(),

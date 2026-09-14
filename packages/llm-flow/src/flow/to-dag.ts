@@ -30,6 +30,7 @@ export async function flowToDag(
             name: node.name,
             plugin: node.plugin,
             pluginVersion: node.pluginVersion,
+            portSchemas: node.portSchemas ? structuredClone(node.portSchemas) : undefined,
             config,
             inputs: cloneJson(patch.inputs ?? node.inputs),
             priority: node.priority,

@@ -49,7 +49,15 @@ export interface FlowEdgeDefinition {
     onFailure?: 'fail' | 'skip' | 'continue';
 }
 
+/** Run-local schema definitions are immutable per id/version and may be referenced by other nodes. */
+export interface NodePortSchema extends JsonSchemaRef { definition?: JsonValue; }
+export interface NodePortSchemas {
+    inputs?: Record<string, NodePortSchema>;
+    outputs?: Record<string, NodePortSchema>;
+}
+
 export interface FlowNodeDefinition {
+    portSchemas?: NodePortSchemas;
     id: FlowNodeId;
     name: string;
     plugin: string;
