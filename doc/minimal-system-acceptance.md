@@ -1843,3 +1843,8 @@ Git 工作区 `finish` 现在返回可选说明；按策略保留的目录/分�
 真实 Tauri 窗口、隔离 profile 沿用 `/tmp/x1-p1-window-UX0yFe`：首次工作区执行因未授权拒绝；通过会话 `/add-dir` 对话框挂载 `/home/admin → /workspace`、可读写并设为工作目录后发送 go，建立原生 worktree。重启后从运行记录继续，再取消 gate，Run `task_06e22644-bbfe-47d4-87f3-179eac8f1180` 失败，工作区收尾成功；磁盘 worktree 列表仅剩基础仓库，创建意图清空。
 
 第二个 Flow 选择 auto-if-clean/on-success；窗口启动后在测试副本中编辑普通文件 `p1-base.txt` 为 `retained local work`（不改 Kernel 记录），Respond 后 Run `task_9a0fe0c0-74b7-4920-bb84-e805029af4ed` succeeded，清理 failed，窗口与持久状态均显示未提交更改、目录 `.../var/lib/worktrees/445bc50d-5738-4259-af77-eb59f3881099`、分支 `flow/445bc50d-5738-4259-af77-eb59f3881099-mu19kedf`。基础文件仍为 base，重启后副本仍为脏状态。后续人工处理/重新收尾以追加记录为准。
+
+
+### 已打开控制台的终态用量刷新（2026-09-14）
+
+真实窗口发现：运行中打开的独立控制台缓存初始 usage，终态仍显示 0.0s，重开才显示持久的 289.8s。`dag.run.get` 现在每次读取保存的 metadata 用量，保留同一已打开视图时也能同步最终值。Flow 回归用独立观察者在执行完成前打开快照，随后断言终态用量与持久 metadata 一致且 elapsedMs > 0；240 项通过。全仓 typecheck 与 Tauri Vite 构建通过。

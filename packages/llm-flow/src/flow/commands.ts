@@ -200,6 +200,9 @@ export class DagCommandService {
             handle.iterations.set(entry.nodeId, entry.iteration);
             handle.nodes.set(entry.nodeId, await session.attachTask(entry.taskId));
         }
+        const metadata = (await session.getShared(`flow.run.${taskId}.metadata`))?.value as unknown as
+            { version: number; usage: FlowExecutionHandle['usage'] } | undefined;
+        if (metadata?.version === 1) handle.usage = metadata.usage;
         const savedGoal = await session.getShared(`flow.run.${taskId}.goal`);
         if (savedGoal) handle.goal = savedGoal.value as unknown as FlowRunGoal;
         const savedWorkspace = await session.getShared(workspaceFinalizationKey(taskId));

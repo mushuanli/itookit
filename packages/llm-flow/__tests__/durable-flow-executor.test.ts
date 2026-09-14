@@ -196,8 +196,16 @@ describe('DurableFlowExecutor', () => {
             const tasks = await kernel.listSessionTasks('session-one');
             expect(tasks.some(task => task.labels?.flowNodeId === 'gate' && task.id !== oldGate && task.interactions?.answer?.status === 'pending')).toBe(true);
         });
+        const observer = new Map<string, (args: any) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => observer.set(name, handler) } as never);
+        await observer.get(FlowCommand.RunGet)!({ taskId: run.root.id, sessionId: 'session-one' });
         await handlers.get(FlowCommand.RunRespond)!({ taskId: run.root.id, requestId: 'answer', value: 'done' });
         expect((await (await kernel.openTask(run.root.id)).wait({ timeoutMs: 2000 })).status).toBe('succeeded');
+        const snapshot = await observer.get(FlowCommand.RunGet)!({ taskId: run.root.id });
+        const metadata = (await (await kernel.inspectSession('session-one')).getShared(`flow.run.${run.root.id}.metadata`))!.value as any;
+        expect(snapshot.usage).toEqual(metadata.usage);
+        expect(snapshot.usage.elapsedMs).toBeGreaterThan(0);
     });
 
     it('resolves independent Run nodes, descendants and persisted retry membership', async () => {
