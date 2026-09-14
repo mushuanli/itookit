@@ -20,7 +20,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 | 编号 | 当前实现 | 主要边界 / 证据入口 |
 | --- | --- | --- |
-| D01 | 祖先取消屏障、后代恢复、终态回执重放 | Kernel/LocalFS 跨进程测试；完整故障矩阵仍属 P1-05 |
+| D01 | 祖先取消屏障、后代恢复、终态回执重放 | Kernel/LocalFS 跨进程测试；本地故障矩阵见 P1-05 |
 | D02 | Effect 清理超时、pending 保留、取消等待真实完成 | 超时不伪造成功；在途操作未完成时不能宣称已停止 |
 | D03 | Session 附件与显式目录授权，文件/工具/进程视图一致 | 来源注册不自动授权；[挂载设计](design/vfs-session-mount-access.md) |
 | D04 | Skill 加载/卸载、持久身份、上下文注入、操作队列 | 严格版本冻结与系统性竞态核验仍属 P2-01 |
@@ -28,7 +28,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 | D06 | 人工回应后同进程 DAG 延续，连续多次暂停 | 沿用同一 Run |
 | D07 | 人工检查点与 CLI 独立 run/respond/resume 进程 | 任意崩溃点恢复仍属 P1-01 |
 | D08 | 及时发布 live Run 句柄，退出前等待调度结束 | `waitIdle()` 不强制中断任意宿主回调 |
-| D09 | 本机 CLI SQLite 互斥及删除前通用调度租约检查 | 共享存储/跨主机排他仍属 P1-02 |
+| D09 | 本机 CLI SQLite 互斥及删除前通用调度租约检查 | 同机控制见 P1-02；跨主机后移 P2 |
 | D10 | Run 成员重连、单任务及图级重试、物理分页 | 见 P1-04、P1-06；不再列为未实现 |
 | D11 | 人工暂停 Run 的最终 token/耗时统计持久化 | 旧缺失 metadata 的记录未自动回填 |
 | D12 | Tauri Session Bash 工厂、目录句柄与 Web 接口 | Web 无原生工厂；Tauri 不回退到未隔离 shell |
@@ -37,7 +37,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 | D15 | 外层 Kernel/Bash → 子 CLI DAG 及重开记录 | 真实窗口链路见 P0-01 |
 | D16 | Tauri 构建、Xvfb/AT-SPI 窗口与目录操作 | 不等于其他平台、发布安装包或全部 GUI 验收 |
 | D17 | Session 本地 Memory、管理 UI、模型工具及 CLI 配置 | 已有持久化和 HTTP mock 调用；跨 Session、语义检索仍未完成 |
-| D18 | 设计/API/包说明阶段性审计与历史方案归档 | 全量有效要求闭合仍属 P1-05、P2-05 |
+| D18 | 设计/API/包说明阶段性审计与历史方案归档 | 本地生命周期见 P1-05；扩展设计闭合属 P2-05 |
 
 ## 3. 任务清单
 
@@ -117,9 +117,9 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 已补真实入口：工作流工具栏「运行记录」→ Run 控制台→「继续运行」；重开后的图重试自动恢复调度。列表、快照和 transcript 浏览不激活 Session。真实 Tauri 窗口完成 source 重算、gate 下游替换、重启继续、人工回应、after 与根成功；再次重开保持成功及重试历史。旧拥有者重试/取消的命令隔离归 P1-02。
   - 入口：`graph-retry.test.ts`、`durable-flow-executor.test.ts`、`dag-run-retry.test.ts`。
 
-- [ ] **P1-05 现有本地存储与资源生命周期**
+- [x] **P1-05 现有本地存储与资源生命周期**
   - 已实现：预算 usageId 幂等、Task/Session cache 清理、消息结算确认与保留、history/event 裁剪水位、现有资源申请/释放/清理回执和布局识别。
-  - 剩余：现有本机多 Session 的消息/receipt/GC 竞争、重启后清理重试、未确认物理停止不释放容量；验证恢复所需事实不被裁剪、旧回执不复活资源、本地预算不重复结算。补故障测试并修复实际缺陷，不为对齐目标表名重构存储。
+  - 已验收：LocalFS/SQLite 两进程、root/module 两种挂载下，消息消费后 SIGKILL、发送/接收 Session 并发 GC 保留未结算回执，重投递不重复消费；双方结算后才裁剪，重开保持。现有同组物理清理 adapter/receipt 两个 SIGKILL 窗口验证未确认停止保留容量、重启恢复和回执重放不重复分配；single-use cache 提交前/后 SIGKILL 证明消费原子性。Kernel resource/retention/protocol 测试验证未知或超时清理保持占用、旧回执不复活资源、usageId 幂等与历史裁剪水位。无须重构存储表。
   - 不要求：Storage §5 全量记录族拆分、account/allocation/export/import 通用服务、可插拔 cache provider、可恢复业务字节流、真实供应商收费幂等、多 store 迁移。
   - 完整设计对照仍见[证据映射](design/durable-harness-evidence.md)，其中扩展缺口不阻塞当前本地 P1。
 

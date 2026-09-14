@@ -1827,3 +1827,10 @@ HTTP 监听首次在沙箱内遭 EPERM，随后经正常提权运行通过。日
 `scheduler-paused-owner.test.ts` 使用两个真实 Node 进程、LocalFS 与 Node SQLite：第一进程取得 Run 租约后 SIGSTOP，等待实际期限过期，第二进程取得 epoch 2；SIGCONT 恢复第一进程后 cancel/pause/resume/start/signal/retry/createResource/setShared 八种迟到写入均报 `STALE_SHARED_LEASE`。旧句柄 release 不撤销新租约；新进程 assertOwned 成功，任务仍 created、无额外 retry/共享写入/control。测试不改持久租约或注入时钟。该独立用例与 AppShell typecheck 通过。既有 CLI `run-live-owner-refusal.test.ts` 覆盖活跃宿主下另一真实进程取消被拒。
 
 包含 `8de85fbb` 的全量 `pnpm test` 矩阵通过（`/tmp/local-p1-final-matrix3.log`，含 CLI 22 项 crash matrix 与 Rust）；本新增暂停用例在矩阵之后独立运行通过。
+
+
+### 本地消息、GC 与物理资源故障矩阵（2026-09-14）
+
+`20-kernel-ipc.test.ts` 增加消息消费提交后、源端结算前 SIGKILL 窗口。两个新进程并发裁剪发送/接收 Session：未结算 outbox 与已消费 inbox 均保留；重投递返回 false，接收任务无重复事件；双边 settlement acknowledgement 后，各自 GC 才删除对应记录，再重启为空。root/module 两种挂载均覆盖，未修改持久回执或绕过事务。
+
+该文件 32 项全部通过，包含既有物理 adapter/receipt 清理中 SIGKILL（恢复前 held=1/waiting=1，确认后复用容量、重放不新建 claim）、single-use cache 提交前/后 SIGKILL、竞争领取以及取消树恢复。Kernel 257 项覆盖未知/错配/超时清理保持容量、暂停与 Session 关闭屏障、authority epoch、usageId 结算幂等及历史/消息裁剪规则。日志 `/tmp/local-p1-receipt-gc.log`。这些证据针对现有本机存储与 adapter 协议，不宣称供应商收费幂等或跨主机硬件 fencing。
