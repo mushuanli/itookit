@@ -39,24 +39,14 @@ export function dataEdgeSchemaIssue(
     try { assertFlowSchema(schema); } catch (error) { return (error as Error).message; }
 }
 
-/**
- * Validate the output ports a node declares for itself when no data edge consumes them.
- *
- * Edge validation compares an upstream value with the *consumer's* input schema, so an
- * output that nothing consumes — a terminal node, a Run result, a side output — would
- * otherwise never be checked against its own declared contract.
- */
-export function assertUnconsumedOutputs(
+/** Validate every declared output before publishing it to consumers or the Run result. */
+export function assertNodeOutputs(
     node: DagNodeDefinition,
-    edges: DagEdgeDefinition[],
     plugins: DagPluginCatalog,
     output: unknown,
 ): void {
-    const consumed = new Set(edges
-        .filter(edge => edge.kind !== 'control' && edge.from === node.id)
-        .map(edge => edge.output));
     for (const port of plugins.getManifest(node.plugin, node.pluginVersion)?.outputs ?? []) {
-        if (!port.schema || consumed.has(port.name)) continue;
+        if (!port.schema) continue;
         const schema = plugins.getSchema?.(port.schema);
         if (schema === undefined) throw new Error(`Unregistered schema ${port.schema.id}`);
         const issue = flowSchemaIssue(schema, extractNodeOutput(output, port.name));

@@ -33,3 +33,33 @@ it('pins initial and dynamic contract definitions including missing references',
     schema = false;
     expect(run.getSchema!({ id: 'new' })).toBe(true);
 });
+
+
+it.each(['manifest', 'schema', 'missing'])('rejects persisted %s drift after serialization', kind => {
+    const registry = createBuiltinDagPluginRegistry();
+    const manifest = registry.getManifest('builtin.transform', '1.0.0')!;
+    manifest.outputs[0].schema = { id: 'report' };
+    let schema: any = { type: 'object', properties: { count: { type: 'integer' } } };
+    const source = { ...registry, getManifest: () => manifest, getSchema: () => schema,
+        listManifests: () => [manifest], loadRuntime: vi.fn(), loadUI: vi.fn() };
+    const nodes = [{ plugin: 'builtin.transform', pluginVersion: '1.0.0' } as never];
+    const snapshot = JSON.parse(JSON.stringify(createRunCatalog(source, nodes).snapshot()));
+    // Object key order is not contract identity.
+    schema = { properties: { count: { type: 'integer' } }, type: 'object' };
+    expect(() => createRunCatalog(source, nodes, snapshot)).not.toThrow();
+    if (kind === 'manifest') manifest.outputs.length = 0;
+    else schema = kind === 'missing' ? undefined : { type: 'string' };
+    expect(() => createRunCatalog(source, nodes, snapshot)).toThrow(/drift/);
+    expect(source.loadRuntime).not.toHaveBeenCalled();
+});
+
+it('persists contracts discovered by dynamic nodes and keeps snapshots isolated', () => {
+    const source = createBuiltinDagPluginRegistry();
+    const run = createRunCatalog(source, []);
+    run.getManifest('builtin.transform', '1.0.0');
+    const saved = run.snapshot();
+    expect(saved.manifests).toHaveLength(1);
+    saved.manifests[0][1]!.outputs.length = 0;
+    expect(run.getManifest('builtin.transform', '1.0.0')!.outputs.length).toBeGreaterThan(0);
+    expect(() => createRunCatalog(source, [], run.snapshot())).not.toThrow();
+});

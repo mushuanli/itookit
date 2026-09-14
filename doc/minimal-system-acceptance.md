@@ -1724,107 +1724,53 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 
 复现：`pnpm --filter @itookit/app-shell exec vitest run tests/directory-dialog.test.ts`（包级）；窗口部分需要可用的合成输入与 `/dev/fuse`，本环境未满足。
 
-## 2026-09-14：当前树全量回归重跑（`f81a5bc9`）
 
-上一批回归在 `3c3afe5d`；此后本会话又合入发送边界观察点修正、Session 关闭入口、app-shell 显式 typecheck、嵌套边界与选择器失败可见化等改动，因此重跑同一入口以覆盖新代码。
+## 2026-09-14：P1 审计、提交间隙与契约漂移
 
-工作树 `f81a5bc9`，Node 26.8.1 / pnpm 10.20.0 / cargo 1.98.1，复用本机依赖与 Rust 缓存，未做全新安装。11 个阶段全部 rc=0：typecheck **25 个 workspace**、`docs:check`、`styles:check`、20 个库构建、CLI 与前端构建、`cargo test` **36 项**、包测试 **1511 通过 / 30 跳过**（191 文件）、CLI 非崩溃 **108**、crash-matrix **12**、`custom-protocol` 原生构建、调度器 **3 项**。
+工作树基线 `0625e1e3`，本节为未提交改动的验证记录；Node 26.8.1 / pnpm 10.20.0。保留本轮开始时 `doc/todo.md` 与本文的已有修改。**P1 整体未完成**，不把局部修复和本机证据替代所有未勾选要求。
 
-合计 **1670 项通过 / 30 项跳过**，比上一批（1667）多 3 项，全部来自本批新增的 `packages/app-shell/tests/directory-dialog.test.ts`（3 项）。其余阶段数字与上一批一致。
+### 审计结论
 
-边界不变：这仍是**当前树**回归，不是最终验收——P0-02 的 ≤2 秒 / ≤100 次阈值仍未达成，P0-04 的原生选择器可用性未结论、其他平台与安装包未验证；工作树当时还有另一位协作者未提交的 `packages/llm-ui/src/styles/chat-nodes.css` 等改动，未纳入本批统计口径。
+| 工作项 | 本轮核对 / 处理 | 尚未闭合 |
+| --- | --- | --- |
+| P1-01 | 原提交间隙测试通过修改内存存储检查点模拟；新增真实 CLI 进程 SIGKILL，直接在提交/检查点公开边界杀进程，未重写持久状态 | Protocol §15 其余窗口及组合、完整外部副作用故障矩阵 |
+| P1-02 | 已有租约/epoch/skew 实现仍不能证明共享后端原子性或执行端 fencing | 未提供共享存储部署与第二主机；不能由 LocalFS/SQLite 推导 S3/NFS 保证 |
+| P1-03 | CLI/Tauri 工作区装配已有证据，映射中“仍缺装配”和“VFS 仍指向原仓库”属于过时描述，已修正 | 真实 OCI、合并/冲突、完整用户窗口启动与重启、遗留意图回收；本机无 Docker/Podman |
+| P1-04 | 证据映射误称整项已完成，已与 todo 的未完成状态对齐 | 真实窗口重算与结果收敛提示 |
+| P1-05 | 五篇映射保留有效缺口，未把 authority 元数据等同物理执行端隔离 | adapter 执行令牌 fence、多 store 迁移、记录族布局、provider 能力/收费、完整 GC/stream/receipt 矩阵及 GUI 停止三态 |
+| P1-07 | 修复生产者自身契约被宽松消费者绕过；新检查点保存插件清单/schema，恢复拒绝契约漂移 | 节点级 responseFormat 端口绑定、端口 repair/continue；不能检测同名版本的 JS 实现漂移 |
+| P1-06/08/09/10 | 保持已有完成状态；本轮没有发现需要撤销的证据 | 本轮不重新声称完整桌面或其他 P0 验收 |
 
-## 2026-09-14：发送失败后的状态一致性与可续发性（P0-02）
+### 新增故障窗口
 
-「发送回滚」此前只列在剩余项里，没有真实窗口证据。本场景让模型请求**连接被拒**（provider 指向没有任何监听的端口 `18499`），检查失败后会话是否仍一致、是否还能继续发送。
+`apps/cli/tests/fixtures/scheduler-crash.ts` 只包装公开 `Kernel.submit` / `Kernel.setShared` / `DurableFlowExecutor.submit`，生产代码无测试开关。初始 CLI 子进程由真实 SIGKILL 终止，正常宿主用原数据根执行 `resumeCommand`。存储为真实 LocalFS/SQLite，模型为本地 HTTP mock。
 
-装置：真实 Linux Tauri + Xvfb `:98` + 会话总线 + AT-SPI，普通（非 trace）前端与 `custom-protocol` 原生构建；provider `baseURL` 指向关闭端口。窗口内对已选中会话发送 `refused-probe`（`05:29:39.821Z`）。
-
-实时采样（每次无障碍遍历返回之后取时刻）：
-
-| 采样 | 时刻 (UTC) | `Stop Generation` | `重试` |
-| --- | --- | --- | --- |
-| t+1s | 05:29:41.338 | 有 | 无 |
-| t+2s | 05:29:42.862 | 有 | 无 |
-| t+3s | 05:29:44.285 | 无 | 无 |
-| t+4s | 05:29:45.523 | 无 | 有 |
-| t+5s | 05:29:46.747 | 无 | 有 |
-
-持久状态（只读 sidecar）：Task `…1ec32b95` `status: "failed"`；round `…FRS92VQH` `status: "failed"`、`error: "Load failed"`；`effect.failed` 事件于 `05:29:42.729Z`（发送后约 **+2.9 秒**，与驱动的重试后放弃一致），`retryable: false`。
-
-**可续发性**：随后再发送 `refused-probe-2` 被正常接受，`history.seq` 中 round 数由 1 变为 2（`FRS92VQH`、`X460E17SY`）——没有出现“连续两条用户消息”之类的拒绝，也没有留下阻塞会话的悬挂状态。也就是说，一次失败的发送会留下**终态失败 + 可重试**的记录，而不是半条消息。
-
-边界：本场景是**持久化之后**的 provider 失败，不是“写入前被回滚”的那种发送回滚（例如租约被其他宿主夺走时 `sendMessage` 在追加 round 前抛错）；后者本轮未取窗口证据。另外错误文案为 WebKit 的 `Load failed`，**不含端点或原因**，对用户不可诊断——这是一个已记录但未修的质量问题，不应被当作“错误已清晰呈现”。
-
-## 2026-09-14：pause 的「已请求 / 已确认」投影与界面文案（P0-02）
-
-P0-02 的剩余项里有“以及 pause 同类文案”。查证结果分两层：
-
-- **投影层已经支持**：`taskStat` 的 `control.requested` 取 `task.status === 'cancelled' ? 'cancel' : task.control?.mode ?? 'run'`，`mode` 可为 `run`/`pause`/`interrupt`；`acknowledged` 对非取消任务取 `task.control?.acknowledged ?? true`，而 `controlTask` 在受理非 `run` 模式时把它算作「没有 leased/indeterminate 的 Effect」（`infrastructure/seqfile/store.ts:986`）。所以 pause 与 cancel 一样存在「已请求但外部未确认」的中间态。
-- **界面层此前完全缺失**：`SessionWorkbench.showTask` 只对 `control.requested === 'cancel'` 渲染，其余一律 `data-stop-state="none"` 且文案为空——被 Flow 或另一个宿主暂停的任务在任务视图里**不显示任何状态**。
-
-本轮补齐：pause 现在渲染 `pause-pending`（`暂停已请求，等待在途操作结束（{count} 个操作在途）`）直到内核确认，确认后为 `paused`（`已暂停（暂停请求已确认）`），控制模式回到 `run` 时恢复 `none` 并隐藏。中英文案同步。回归 `packages/app-shell/tests/session-browser-ui.test.ts` 扩展覆盖 pending → paused → none 三态（含 `activeOperations` 计数与 `hidden` 切换）；app-shell 213 项通过、30 项既有跳过，`common`/`app-shell` 类型检查与 `styles:check` 通过。
-
-**边界（不应被当作“pause 已可用”的证据）**：
-
-1. **界面没有暂停入口**。`RunAttachmentController.pause()` 在 `packages/llm-ui` 中存在，但全仓没有任何调用方（只有 `resume` 经斜杠命令接线）。因此本轮补的是**投影与展示**：当任务被其他角色（Flow、CLI、另一宿主）暂停时界面不再沉默，而不是“用户能在窗口里暂停任务”。
-2. **没有真实窗口证据**。本轮尝试用挂起模型在窗口中打开该任务的详情视图以读取该行文本，但侧栏的 Session 树行不暴露给 AT-SPI、合成点击也无法展开出 `files`/`tasks` 子节点，四组坐标与 DoAction 均未进入任务视图。任务视图的 `[data-stop-state]` 仍只有 jsdom 证据（`session-browser-ui.test.ts`），以及本会话早前在**内核层**取得的取消三态证据（`kernel.test.ts`「distinguishes an accepted cancel request from a confirmed external stop」）。pause 的窗口验收仍未完成。
-
-## 2026-09-14：CLI crash-matrix 的不确定性与其修复（P0-05）
-
-本轮在 `ee6f413a` 重跑全量回归时，`cli-crash` 阶段**失败**（rc=1）：12 项里
-`recovers a run killed while the first Effect is in flight` 失败，断言
-`expect(killed.nodeTaskIds).toEqual({})` 实际得到 `{ finish: "task_ecf8aa39-…" }`。
-此前同一入口在该树上连续三次通过（`3c3afe5d`、`f81a5bc9` 两批），因此先按“偶发”处理并复现。
-
-隔离复现（`vitest run tests/crash-matrix.test.ts -t "recovers a run killed while the first Effect is in flight"`）四次：**通过 / 失败 / 通过 / 通过**，失败两次的耗时为 768 ms 与 794 ms，通过时约 31 秒。也就是说这不是一次性环境噪声，而是约 50% 的不确定性。
-
-定位：断言注释写的是“A non-interactive Run never reaches the monitor, so the killed manifest has no nodeTaskIds”，但代码里 **start 与 resume 两条路径都无条件调用 `monitor(…)`**（`apps/cli/src/commands.ts:255`、`:414`；`--json`/headless 只跳过界面），monitor 的每一 tick 都会经 `refreshTaskStatuses` 把 `task.labels.flowNodeId` 写进 `manifest.nodeTaskIds`（`commands.ts:808`）。因此“崩溃清单里没有 nodeTaskIds”取决于 tick 与 SIGKILL 的先后，**是竞态而不是不变量**；注释所依据的前提已过时。
-
-修复：把该断言换成对“已记录内容的自洽性”检查（唯一节点是 `finish`，值形如 `task_…`），不再要求它必须为空。该用例真正要保证的东西——Run 不是 `succeeded`、`export` 仍能经 Session 找到节点 Task、`resume` 先返回 3（存在结果不确定的 Effect）再在显式重放后返回 0——紧接其后的断言原样保留、未被削弱。
-
-验证：修复后同一用例隔离运行 **4/4 通过**，整个 crash matrix **12/12 通过**（修复前 4 次观测中失败 2 次）。
-
-影响记录：P0-05 此前把“CLI crash-matrix 12 项通过”当作稳定证据；本轮证明该阶段在修复前不可复现。今后的崩溃矩阵计数应连同本次修复一起复核，不能沿用修复前的单次通过结论。
-
-## 2026-09-14：当前树全量回归（`561a5d62`，含 crash-matrix 修复与 pause 投影）
-
-在修复崩溃矩阵竞态用例、并补上 pause 投影文案之后重跑同一入口。工作树 `561a5d62`，Node 26.8.1 / pnpm 10.20.0 / cargo 1.98.1，复用本机依赖与 Rust 缓存。11 个阶段全部 rc=0：
-
-| 阶段 | 结果 |
+| 杀进程位置 | 核对事实 |
 | --- | --- |
-| `pnpm typecheck` | 25 个 workspace |
-| `pnpm docs:check` / `pnpm styles:check` | 通过 |
-| `pnpm build:libs` / CLI / tauri-app 构建 | 通过（20 个库） |
-| `cargo test`（offline） | 36 passed |
-| 包测试 | **1511 passed / 30 skipped**（191 文件） |
-| CLI 非崩溃 | 108 passed |
-| CLI crash-matrix | **12 passed**（修复后确定性通过） |
-| `cargo build --features tauri/custom-protocol` | 通过 |
-| 调度器 | 3 passed |
+| 普通节点提交返回、尚未写成员/检查点 | Task 已存在而检查点 instances 不含该 id；恢复复用它，模型恰调用一次 |
+| 首个委派子节点提交返回、尚未写检查点 | 恢复后根/父/两子恰四个 Task，父模型不重跑、无二次 fan-out |
+| 第二个委派子节点提交返回、尚未写检查点 | 父与首个成功子 Task 全记录不变，恢复补齐原第二子 Task；模型总计三次 |
+| 委派首子模型请求在途 | 默认恢复返回 3 且无新增请求，显式重放后成功；同子 Task 身份，模型总计四次 |
+| 循环 entry#2 成功落盘、完成检查点提交前 | 检查点含 entry#1、不含 entry#2，两个入口 Task 已成功；恢复后入口/循环体各三次模型调用，所有旧成功 Task 全记录不变 |
 
-合计 **1670 项通过 / 30 项跳过**。
+委派配置由测试夹具在 CLI 编译后注入公开 DagRunSpec 并正常持久化，恢复不重新注入。**CLI YAML 仍未暴露 delegation**。这些测试证明列出的本机进程故障窗口，不证明任意指令处崩溃、断电、真实供应商幂等或跨主机行为。
 
-与上一批数字相同，但**含义不同**：上一批的 crash-matrix 12 项是在有竞态的用例上取得的单次通过；本批是在修复该竞态之后取得的，隔离复现 4/4、整矩阵 12/12。因此 `cli-crash` 这一行从现在起才可作为稳定证据引用。
+### 契约修复与兼容边界
 
-仍未达最终验收：P0-02 的 ≤2 秒 / ≤100 次阈值未达成；P0-04 原生选择器可用性未结论、其他平台与安装包未验证。工作树当时仍有另一位协作者未提交的 `packages/llm-ui/src/styles/chat-nodes.css` 等改动，不在本批统计口径内。
+- `assertNodeOutputs` 校验生产者全部声明的输出；下游的宽松 schema（例如 number 接收声明为 integer 的输出）或无 schema 都不能放过生产者实际输出 1.5。消费者输入仍独立验证；无效值使 Run 失败，保存原输出、不派发下游。
+- 新调度检查点保存已解析的清单和 schema，含动态节点与缺失引用。恢复在派发新 Task 前核对宿主注册表，清单/schema 变化或消失即明确拒绝，Task 记录不变；对象键顺序不影响比较。
+- 旧检查点没有 `catalog` 时沿用宿主定义；宿主仍须保留不可变插件版本。当前机制不校验可执行代码内容，不能证明同 id/version 实现未变化。
 
-## 2026-09-14：写入前被拒的发送（外部租约）与草稿保留（P0-02）
+### 验证
 
-本会话上文记录过一条边界：“本轮是持久化**之后**的 provider 失败，不是写入前被回滚的那种发送回滚（例如租约被其他宿主夺走时 `sendMessage` 在追加 round 前抛错）”。本轮把那一半补上。
-
-装置：真实 Linux Tauri + Xvfb `:98` + 会话总线 + AT-SPI，普通前端与 `custom-protocol` 原生构建。先用 Node 侧 `SessionLeaseStore`（`packages/app-core`）以 **10 分钟 TTL** 把种子 Session 的租约授予外部持有者 `external-acceptance-holder`（`fencingToken 1`），**再**启动桌面宿主，使宿主在启动恢复时无法取得该 Session 的写租约。窗口内选中该 Session 并发送 `lease-refused-probe`，随后再发一次 `lease-refused-2`。
-
-结果：
-
-| 观测 | 值 |
+| 命令 | 结果 |
 | --- | --- |
-| 记录完整请求体的 mock 收到请求数 | **0**（没有发起模型调用） |
-| `history.seq` 中 round 数 | **0**（没有追加半条消息） |
-| 输入框内容（无障碍 `gettext`） | `lease-refused-probelease-refused-2` |
+| `pnpm --filter @itookit/llm-flow test` | 18 文件，220 通过 |
+| `pnpm --filter @itookit/cli exec vitest run --exclude tests/crash-matrix.test.ts` | 27 文件，108 通过 |
+| `pnpm --filter @itookit/cli exec vitest run tests/crash-matrix.test.ts` | 当时 16 项完整矩阵通过，约 416 秒（真实 Effect lease 到期） |
+| `pnpm --filter @itookit/cli exec vitest run tests/crash-matrix.test.ts -t 'loop iteration whose checkpoint'` | 后增循环窗口 1 通过；其余 16 为选择器未选，不是功能跳过 |
+| `pnpm --filter @itookit/cli exec vitest run tests/crash-matrix.test.ts -t 'scheduler SIGKILL window\|loop iteration whose checkpoint'` | 最终夹具五个新增窗口全部通过（约 45 秒）；其余 12 为选择器未选 |
+| `pnpm --filter @itookit/llm-flow typecheck` / `pnpm --filter @itookit/cli typecheck` | 通过 |
+| `pnpm docs:check` | 76 份活文档通过，5 条既有历史表述告警 |
 
-输入框里两次的文本都还在，说明 `SendMessageCommand` 的失败分支确实执行了：它调用 `restoreInput(savedText, savedAgentId)` 把草稿放回输入框，并尝试 `Toast.error(classified.userMessage)`（`packages/llm-ui/src/commands/SendMessageCommand.ts:79-91`）。也就是说这个场景满足“**拒绝写入 ⇒ 不产生半条消息、不丢草稿**”。
-
-已有回归与之对应：`packages/app-shell/tests/send-failure-consistency.test.ts` 覆盖“发送响应丢失时保留已接受轮次”“历史查询不可用时仍恢复草稿”“授权失败不删除持久历史”“附件上传失败时不发送且保留草稿”。
-
-边界（必须如实说明）：本轮**没有**在无障碍树里捕获到那个错误 toast——快照在 +1/+2/+3 秒都没有可见的错误文本节点，也没有消息气泡。因此“用户看到明确提示”这一点，依据的是代码路径（草稿被恢复即证明 catch 执行）与上述包级回归，**不是**本轮的窗口文本证据；toast 是短时元素，本环境也不保证被 AT-SPI 暴露。另外“宿主在租约被持有时仍把该 Session 显示为可交互”本身未做进一步评估。
+HTTP 监听首次在沙箱内遭 EPERM，随后经正常提权运行通过。日志：`/tmp/p1-flow.log`、`/tmp/p1-cli.log`、`/tmp/p1-crash-full.log`、`/tmp/p1-loop-gap.log`，临时文件不作为长期唯一证据。没有执行全仓最终矩阵、发布产物构建或本轮真实窗口验收。

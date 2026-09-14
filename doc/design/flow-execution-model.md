@@ -668,7 +668,9 @@ data edge 校验 source output schema 与 target input schema；运行时无效�
 
 当前内容校验：`DagPluginRegistry.registerSchema({ id, version? }, schema)` 注册不可覆盖的结构定义；`getSchema` 返回副本，未指定版本不解析到最新版。目标端口有 schema 的 data edge 在发布、直接执行和动态 patch 时要求 id 相同、引用已注册，跨版本时结构可推导。执行器在下游 Task 创建前，以与依赖消费相同的 `extractNodeOutput` 提取成功上游产物并校验；无效数据终止该 Run 并执行已有失败清理，不会启动下游，也不会改写已成功的上游记录。发布前的图/边校验（`dataEdgeSchemaIssue`、`maxNodes`）仍直接拒绝 `submit`；运行期校验发生在聚合根发布之后，因此以失败的 Run 呈现（`root.wait()` 得到 `failed` 与原因，见下方「句柄发布时机」）。control edge 不校验；上游失败继续走既有 onFailure 语义。
 
-注册表支持 boolean schema，以及 type（object/array/string/number/integer/boolean/null）、properties、required、items、additionalProperties、enum、title、description。嵌套定义同样验证；未知关键字、无效定义明确拒绝，未声称支持完整 JSON Schema、引用解析或隐式 JSON 文本解析。**无消费边输出的契约验证（2026-09-11 已实现）**：边校验比较的是上游值与**消费者**的 input schema，因此终止节点、Run 结果或旁路输出在无人消费时不会被检查。执行器在节点成功结算时调用 `assertUnconsumedOutputs(node, edges, plugins, output)`，对「该节点声明了 schema 且没有 active data edge 消费」的输出端口用注册结构做内容校验，不通过则以失败的 Run 呈现（聚合根发布之后、下游派发之前），并沿用既有失败清理。回归：`durable-flow-executor.test.ts`「validates a declared output no edge consumes (valid: %s)」。Agent responseFormat 自动编译成端口引用以及端口错误的 repair/continue 策略仍待补齐。
+注册表支持 boolean schema，以及 type（object/array/string/number/integer/boolean/null）、properties、required、items、additionalProperties、enum、title、description。嵌套定义同样验证；未知关键字、无效定义明确拒绝，未声称支持完整 JSON Schema、引用解析或隐式 JSON 文本解析。**生产者输出契约验证**：节点成功结算时，`assertNodeOutputs(node, plugins, output)` 校验所有声明了 schema 的输出端口，不受消费边是否存在、下游是否声明 schema 或要求是否更宽松影响。消费者输入仍在下游派发前独立校验。无效输出使 Run 失败且不派发下游，原 Task 输出保留供诊断。回归覆盖终止节点、控制边、同版本消费边、宽松版本及无 schema 消费者。Agent responseFormat 自动编译成端口引用以及端口错误的 repair/continue 策略仍待补齐。
+
+**恢复时的契约漂移**：新调度检查点保存 `catalog.manifests` / `catalog.schemas`，包含首次解析的静态及动态插件清单、schema 和缺失引用。恢复在取得调度租约、派发新 Task 之前核对宿主注册表；同 id/version 的清单或 schema 改变、消失均拒绝恢复，报告 `Flow plugin contract drift` / `Flow schema drift`，保留原记录。对象键顺序不影响比较。旧检查点没有此快照，沿用宿主契约，首次续写后才受保护。该机制不校验 JavaScript 实现代码；宿主必须保证同一插件版本对应不可变实现，代码变更应使用新版本，旧 Run 需保留原版本实现。没有原实现时不能用同名新代码冒充已冻结版本。
 
 Harness hooks 采用小而稳定的事件集合：
 

@@ -67,9 +67,9 @@
 | TaskBoard A 过期被 B 领取后 A complete | 拒绝旧 token | `protocol.test.ts`「takes over an unexpired attempt and rejects its stale commit」 |
 | terminal 在事件读取与状态读取间提交 | 订阅读到 terminalSequence 再结束 | `protocol.test.ts`「keeps task exits observable when no waiter existed at completion」 |
 | notifier 全丢、消费者慢、短暂存储故障 | 在策略允许时最终推进，背压可查询 | `20-kernel-ipc.test.ts`「advances another process's waiter and dependant without event delivery or sweep」；缺口：跨主机网络分区与真实 S3/NFS 类后端 |
-| 任意崩溃点的 Flow 调度 | 根身份与已提交调度从 Run 第一刻持久，resume 续跑不重跑 | `apps/cli/tests/crash-matrix.test.ts`（4 通过）、`durable-flow-executor.test.ts`「reuses a submitted node Task when the scheduler checkpoint missed the instance」 |
+| 任意崩溃点的 Flow 调度 | 根身份与已提交调度从 Run 第一刻持久，resume 续跑不重跑 | `apps/cli/tests/crash-matrix.test.ts`（包括真实提交/检查点间隙及委派 SIGKILL）、`durable-flow-executor.test.ts`「reuses a submitted node Task when the scheduler checkpoint missed the instance」 |
 | 多恢复者 | 不能在旧拥有者仍有效时接管 | `scheduler-lease.test.ts`（4 通过）、`durable-flow-executor.test.ts`「refuses a second scheduler while the owner lease is live and fences the old owner」；缺口：跨主机时钟与共享存储后端 |
-| 隔离工作区崩溃恢复 | 恢复租约、补跑 finalization | `git-worktree-manager.test.ts`（5 通过）、`durable-flow-executor.test.ts`「restores an isolated workspace lease instead of preparing a second one」「completes a workspace finalization left pending by a crashed host」、**CLI 宿主端到端** `apps/cli/tests/worktree-run.test.ts`「re-attaches the recorded worktree when a crashed host resumes」（SIGKILL 后 `resume` 复用同一 worktree，`git worktree list` 恰为 2 项）；缺口：Web/Tauri 端装配 |
+| 隔离工作区崩溃恢复 | 恢复租约、补跑 finalization | `git-worktree-manager.test.ts`（5 通过）、`durable-flow-executor.test.ts`「restores an isolated workspace lease instead of preparing a second one」「completes a workspace finalization left pending by a crashed host」、**CLI 宿主端到端** `apps/cli/tests/worktree-run.test.ts`「re-attaches the recorded worktree when a crashed host resumes」（SIGKILL 后 `resume` 复用同一 worktree，`git worktree list` 恰为 2 项）；CLI/Tauri 装配已实现；完整窗口启动与桌面重启、真实 OCI 仍见 P1-03 |
 
 ## 3. Storage
 
@@ -136,7 +136,7 @@
 | 存储/协议层 | `20-kernel-ipc.test.ts`：SIGKILL 后 adapter 缺失/不支持/抛错三种清理失败保留标记、重启后成功清理、再次重启不重复调用，Task 始终 cancelled | 真实设备（摄像头、串口、外部服务）的停止确认 |
 | 真实模型请求 | `apps/cli/tests/crash-matrix.test.ts`：真实 CLI 进程被 SIGKILL 时在途模型请求无法核对 → `indeterminate` → 显式裁决（`--retry-indeterminate`）后重放同一逻辑 Effect | 供应商侧幂等键/查询接口（若供应商支持，可把 indeterminate 收敛为 reconcile） |
 | 本地进程（bash/tty） | `packages/kernel-adapters/src/effects/*.ts` 的**全部**适配器（llm.chat/tool.call/bash/tty/skill.load/skill.unload）实现 `EffectAdapter.cancel`（`effects/in-flight.ts` 记录在途执行，`cancel` 等待其结束才确认停止）；`apps/cli/src/shell.ts` 的 `runProcess` 取消时先 SIGTERM 进程组、未退出则 SIGKILL，并**等 `close` 才 resolve**；CLI 实机证据 `apps/cli/tests/process-cancel.test.ts`（进程组忽略 SIGTERM，断言 cancel 返回时 pid 确已消失）与 `run-control.test.ts`（超时/SIGINT 后模型服务观察到客户端断开）；适配器契约见 `effect-adapters.test.ts` | Tauri 隔离模式实机证据（2026-09-11 补齐）：`apps/cli/tests/tauri-process-tree.test.ts` 编译**真实** Rust 模块（`apps/tauri-app/src-tauri/src/session_bash.rs` + `bash_process.rs`），在 bwrap（`--die-with-parent --unshare-pid`）内运行一个忽略 SIGTERM、持续写文件的进程树并触发取消：取消路径确认（`cancelled=true`、`elapsed_ms` 远小于 30s 超时）、退出码 1、**取消返回后 1s 内文件不再增长**（无残留进程）。该保证由「进程组 SIGTERM → 100ms → 组 SIGKILL」与 `--die-with-parent`/PID namespace 拆除共同提供，测试断言的是宿主可观察行为而非某一行实现。 Rust 侧原生测试（`cargo test`，经 `pnpm --filter tauri-app test:rust` 运行，**15 通过**）另覆盖 `session_bash::tests::never_falls_back_to_a_host_shell`（唯一可执行程序是 `bwrap`，脚本只作为内层 `bash` 的单个 `-c` 参数）、`session_bash::tests::clears_host_credentials_and_exposes_only_the_fixed_session_environment`（宿主凭证不进入会话 shell，环境恰为 `PATH`/`HOME`/`LANG`）、`bash_process::tests::a_missing_isolator_fails_the_command_instead_of_running_unescaped`（隔离器缺失时以 `bash exec failed` 失败，不静默回退宿主）、 `bash_process::tests::cancellation_stops_a_running_process_group` 与 `timeout_stops_children_that_ignore_term_and_closes_their_pipes`、`session_bash::tests::confines_bash_to_readonly_and_writable_grants`、`directory_boundary::tests::*`（绝对/父路径与符号链接逃逸）。仍缺：`reconcile` 仍返回 `indeterminate`（`PROCESS_INDETERMINATE`），外部进程结果无法核对 |
-| 隔离工作区 | `git-worktree-manager.test.ts` + `durable-flow-executor.test.ts`：恢复租约、补跑 pending finalization、对已移除工作区幂等；`apps/cli/tests/worktree-run.test.ts`（4 通过）：CLI 宿主装配 `runtime.workspace.mode: worktree` 后节点在 worktree 内执行、脏工作区不被静默删除、崩溃恢复复用同一工作区 | 缺口：Web/Tauri 端装配；VFS 文件工具仍以会话工作区为根 |
+| 隔离工作区 | `git-worktree-manager.test.ts` + `durable-flow-executor.test.ts`：恢复租约、补跑 pending finalization、对已移除工作区幂等；`apps/cli/tests/worktree-run.test.ts`（4 通过）：CLI 宿主装配 `runtime.workspace.mode: worktree` 后节点在 worktree 内执行、脏工作区不被静默删除、崩溃恢复复用同一工作区 | CLI/Tauri 工作区装配及文件/进程/cwd 一致已有证据（见 `doc/todo.md` P1-03）；仍缺用户窗口启动与桌面重启、真实 OCI 及跨主机验收 |
 
 ## 8. 未完成清单（与 todo 对齐）
 
@@ -144,5 +144,5 @@
 - Cache §10：Task 终态清理与 Session 关闭时的物理回收（含 `session` scope）已于 2026-09-11 实现（见 §5）；仍缺 provider 能力差异（依赖版本、fencing generation、策略矩阵已于 2026-09-11 补证据）与跨 Session retention/GC 竞争。
 - Resources §9 的 authority 服务与 leader 迁移 fencing（stream/消息/receipt 保留期与 GC 已于 2026-09-11 实现，见 §4）。**2026-09-11 第五十一轮进展**：authority `ownerEpoch` 记录、`claimAuthority`/`authority` API 与写命令 epoch fence 已落地（见 §4）；仍缺 adapter 执行令牌 fence、真实多进程/多 store 竞争与迁移切换屏障，account/allocation/export/import 未实现。
 - Storage §5 目标布局字段与 compaction。
-- P1-04 已于 2026-09-11 完成（图级重算、委派组/隔离工作区重算、token 退款、DagWorkbench 入口），不再是缺口。
-- GUI/实机验收：观察者区分“已接受/已变化/已停止”、真实设备停止确认、worktree 模式的 Web/Tauri 端装配（CLI 端已于 2026-09-11 装配并有端到端证据）。
+- P1-04：图级重算、委派组/隔离工作区重算、token 退款、DagWorkbench 入口已有代码回归；真实窗口重算操作与结果收敛提示仍未验收，与 `doc/todo.md` 保持开放。
+- GUI/实机验收：观察者区分“已接受/已变化/已停止”、真实设备停止确认、worktree 模式的用户窗口启动与桌面重启（CLI/Tauri 宿主装配已实现，Web 无原生进程时拒绝隔离模式）。

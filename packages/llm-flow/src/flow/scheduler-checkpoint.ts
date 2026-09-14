@@ -4,6 +4,8 @@ import type { DelegationGroup, EdgeState } from './delegation-runtime';
 /** Scheduler state saved at an explicit human-interaction boundary. */
 export interface SchedulerCheckpoint {
     version: 1;
+    /** Absent on legacy checkpoints; new Runs reject changed host contracts on resume. */
+    catalog?: import('./run-catalog').RunCatalogSnapshot;
     spec: DagRunSpec;
     parameters?: Record<string, JsonValue>;
     sessionContext?: { projectInstructions: string; skillInstructions: string; skillIndex: string };

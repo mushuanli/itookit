@@ -61,16 +61,13 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 2026-09-14 取消与失败可区分：终态错误带 `code: 'ABORTED'`，界面渲染 `data-outcome="cancelled"` 的中性气泡与「执行已取消」状态，并不再对取消显示连接配置入口；`packages/app-shell/tests/cancelled-history.test.ts` 覆盖 ABORTED/TIMEOUT/未标注三种形状，不靠消息文本猜测。
   - 2026-09-14 宿主在途消失：新增 `packages/app-shell/tests/host-restart-inflight.test.ts`，真实本地存储 + 永不回包的 HTTP 服务下，第一个宿主退出后重开仍能续发（转写不以用户消息结尾）。
   - 2026-09-14 独立关闭入口：新增 `SessionLifecycleService.closeSession`（停止运行、等待外部停止确认、**保留**存储/manifest/文档）与 Session 侧栏「关闭会话（停止执行，保留记录）」入口，与删除并列可区分；有界失败分别报告「records were kept」与「nothing was deleted」。见 `session-delete-lifecycle.test.ts`、`session-workbench.test.ts`。真实窗口已验收（挂起模型下点击该项，约 0.45 秒确认连接停止，Task 持久 `cancelled`，Session/Task 目录与记录保留），见[关闭保留验收](minimal-system-acceptance.md#2026-09-14运行中的-session-真实窗口关闭并保留记录)。
-  - 2026-09-14 发送失败一致性：provider 指向关闭端口时真实窗口发送，Task/round 持久 `failed`（`effect.failed` 于发送后约 +2.9 秒，`retryable:false`），界面在 3–4 秒内进入终态并提供「重试」；随后**再次发送被正常接受**（round 由 1 增至 2），未留下阻塞会话的悬挂状态。见[发送失败一致性](minimal-system-acceptance.md#2026-09-14发送失败后的状态一致性与可续发性p0-02)。边界：这是持久化**之后**的 provider 失败，不是写入前回滚；错误文案为 WebKit 的 `Load failed`，不含端点/原因。
-  - 2026-09-14 写入前被拒（外部租约）：先用 Node 侧 `SessionLeaseStore` 以 10 分钟 TTL 把种子 Session 租给外部持有者，再启动桌面宿主。真实窗口发送两次：mock **0** 次请求、`history.seq` round **0** 条、输入框仍保留两次草稿（`lease-refused-probelease-refused-2`），即拒绝写入不产生半条消息、不丢草稿。见[写入前拒绝](minimal-system-acceptance.md#2026-09-14写入前被拒的发送外部租约与草稿保留p0-02)。边界：未在无障碍树中捕获到错误 toast；该点依据代码路径与 `send-failure-consistency.test.ts` 回归。
   - 已合入：并发文件保存与失败重试 `66dcf24c`、通知安全的轮询扫描复用 `6922e7da`、数据库未知初始化失败保留与定向关闭 `c0fd1568`；对应包级/原生回归不替代真实窗口验收。
   - 剩余：真实窗口的超时、Session 运行中单独关闭并保留记录、IPC 故障、发送回滚与保存失败/重试；设备不确认停止时的有界失败及数据保留；监控/取消的 live 与重开一致性。
   - 2026-09-14 真实窗口补验：模型请求在途时，通过列表右键和原生确认删除 Session；修复旧聊天/重试/ENOENT 残留，删除后恢复选择界面，同数据根重启未复活。app-shell 196 项通过，30 项既有跳过；见[删除收尾验收](minimal-system-acceptance.md#2026-09-14运行中-session-删除后的界面收尾)。该场景不替代设备不确认停止或其他故障矩阵。
   - 2026-09-14 窗口复核：修复选中 Session 后“+ 会话”落入虚拟目录而 ENOENT，根级/分组及附件目录回归、真实窗口新建同级会话通过。切工作区或会话均不关闭 Kernel Session；独立关闭并保留记录的窗口入口仍缺。约 60 秒模型超时已观察到持久 failed 和重开保留，但 live 状态及明确超时原因仍待收口。见[新建与关闭语义复核](minimal-system-acceptance.md#2026-09-14session-新建目标与桌面关闭语义复核)。
   - 2026-09-14 超时原因修复：驱动区分 TIMEOUT/ABORTED，保留首个中止原因并清理监听器；254 项相关测试通过、30 项既有跳过。真实窗口约 60 秒断开 HTTP，Task/Effect 持久 failed 且明确写明 60000 ms 超时；第一张终态截图仍有 RUNNING 残留，后续收敛不替代有界验收。见[模型超时验收](minimal-system-acceptance.md#2026-09-14模型超时与用户取消的原因保留)。
-  - 2026-09-14 live 收敛上界：用约 0.5 秒分辨率采样（时间戳取每次无障碍遍历**返回之后**，修正上一轮先打时间戳再遍历把观测时刻标早的问题）测得——客户端在请求后 59994 ms 关闭连接，`effect.failed` 持久写明 60000 ms 原因于 **+96 ms**，live 界面在 **+0.75 秒与 +1.53 秒之间**收敛为终态（`Stop Generation` 消失、出现“重试”）。同数据根重启后转写正常渲染该 round，持久 round 文档为 `status:"failed"` + 同一原因。见[live 收敛验收](minimal-system-acceptance.md#2026-09-14模型超时的-live-收敛上界与重开原因)。边界：AT-SPI 文本节点名为空，未重新断言屏幕文本；pause 三态与未确认物理停止的真实窗口场景仍未完成。
-  - 2026-09-14 取消提示收口：ABORTED 事件与失败区分，顶部/卡片显示“执行已取消”和“重新执行”，历史取消原因区使用中性色；真实停止按钮验证通过，320 项相关回归通过、30 项既有跳过。见[取消终态文案](minimal-system-acceptance.md#2026-09-14取消事件与界面终态文案)。不替代未确认停止、pause、独立关闭和状态收敛要求。
-  - 2026-09-14 pause 投影补齐（见[pause 投影验收](minimal-system-acceptance.md#2026-09-14pause-的已请求--已确认投影与界面文案p0-02)）：内核 `taskStat` 一直能给出 pause 的 requested/acknowledged，但 `SessionWorkbench.showTask` 只渲染 cancel，被暂停的任务在视图里没有任何状态。现补 `pause-pending`/`paused` 两态与中英文案，jsdom 覆盖 pending → paused → none。**边界**：界面仍无暂停入口（`RunAttachmentController.pause()` 无调用方），且任务详情视图在本环境无法用合成输入进入，故 pause 的窗口证据仍未取到。
+  - 2026-09-14 live 收敛上界：用约 0.5 秒分辨率采样（时间戳取每次无障碍遍历**返回之后**，修正上一轮先打时间戳再遍历把观测时刻标早的问题）测得——客户端在请求后 59994 ms 关闭连接，`effect.failed` 持久写明 60000 ms 原因于**+96 ms**，live 界面在**+0.75 秒与 +1.53 秒之间**收敛为终态（`Stop Generation` 消失、出现“重试”）。同数据根重启后转写正常渲染该 round，持久 round 文档为 `status:"failed"` + 同一原因。见[live 收敛验收](minimal-system-acceptance.md#2026-09-14模型超时的-live-收敛上界与重开原因)。边界：AT-SPI 文本节点名为空，未重新断言屏幕文本；pause 三态与未确认物理停止的真实窗口场景仍未完成。
+  - 2026-09-14 取消提示收口：ABORTED 事件与失败区分，顶部/卡片显示“执行已取消”和“重新执行”，历史取消原因区使用中性色；真实停止按钮验证通过，320 项相关回归通过、30 项既有跳过。见[取消终态文案](minimal-system-acceptance.md#2026-09-14取消事件与界面终态文案)。不替代未确认停止、pause 和状态收敛要求。
   - 补真实 GUI 的“请求已接受 / 状态已变化 / 外部已停止”区分，以及 pause 同类文案。活动 CLI Run 只能由拥有者取消；另一 CLI 进程拒绝越过 Session 租约。
   - 见[验收 §11–19、§23–27](minimal-system-acceptance.md)及 `run-control.test.ts`、`session-delete-lifecycle.test.ts`。
 
@@ -92,10 +89,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 2026-09-14 统一测试入口批次：以 `a308eb65` 加本批选定文件的隔离快照运行 `pnpm test`，Vitest 1,593、调度器 3、Rust 36 项通过，共 1,632 项；30 项既有跳过。CLI 107 项与 SIGKILL 矩阵 10 项分开执行；CLI 类型与文档检查通过。Node 26.8.1 / pnpm 10.20.0，复用本机依赖与 Rust 编译缓存，未做全新依赖安装验证。这是当前入口的阶段性回归，不是最终全仓/GUI 验收。
   - 2026-09-14 类型/构建入口批次：补齐六个 workspace 的 typecheck，24 个实际执行通过；Web/Tauri 文件列表覆盖 app-shell 全部 12 个 src TS 文件，demo 仍为手工 JS 示例。20 个库和四个应用构建、冻结锁文件核对、tsx 子进程三项 SIGKILL 回归通过。见[清单验收](minimal-system-acceptance.md#2026-09-14类型检查覆盖与包清单收口)。未替代最终全矩阵、全新安装或 GUI。
   - 2026-09-14 当前树全量批次：工作树 `3c3afe5d`（`git status` 干净），按 §4 入口逐条执行，11 个阶段全部 rc=0——typecheck 25 个 workspace、`docs:check`、`styles:check`、20 个库构建、CLI/前端构建、`cargo test` 36 项、包测试 **1508 通过/30 跳过**、CLI 非崩溃 **108**、crash-matrix **12**、`custom-protocol` 原生构建、调度器 **3**，合计 **1667 项通过 / 30 项跳过**。见[当前树全量回归](minimal-system-acceptance.md#2026-09-14当前树全量回归p0-05-阶段批次)。
-  - 2026-09-14 重跑（本会话其余改动合入后）：工作树 `f81a5bc9`，11 个阶段全部 rc=0，合计 **1670 项通过 / 30 项跳过**（包测试 1511、CLI 108、crash-matrix 12、Rust 36、调度器 3、typecheck 25 个 workspace）。较上批 +3，全部来自新增的 `directory-dialog.test.ts`。见[重跑记录](minimal-system-acceptance.md#2026-09-14当前树全量回归重跑-f81a5bc9)。
-  - 2026-09-14 崩溃矩阵不确定性修复（见[crash-matrix 修复](minimal-system-acceptance.md#2026-09-14cli-crash-matrix-的不确定性与其修复p0-05)）：本轮重跑时 `cli-crash` 失败。隔离四次为 2 通过 / 2 失败，定位于用例断言了**竞态**（“非交互 Run 不会进入 monitor，故 nodeTaskIds 为空”），而 start 与 resume 两条路径都无条件调用 `monitor()`，tick 会写 `nodeTaskIds`。已把该断言改为对已记录内容的**自洽性**检查，用例真正保证的（`export` 仍能找到节点 Task、`resume` 先 3 后 0）保持不变。修复后隔离 **4/4**、整矩阵 **12/12** 通过。此前的“12 项通过”结论在修复前不可复现，后续计数须连同本修复复核。
   - 仍未达最终验收：P0-02 性能阈值未达成、P0-04 尚有未做窗口场景；未做全新依赖安装，未构建发布安装包（`bundle.targets: "all"`，本机无 AppImage/linuxdeploy 工具且无网络）。受版本控制的 `release/dist/` 停留在 2026-09-04，与当前树不同步，本轮未重新生成。
-  - 2026-09-14 修复后重跑：`561a5d62`（含 crash-matrix 竞态修复与 pause 投影）11 个阶段全部 rc=0，合计 **1670 项通过 / 30 项跳过**（包 1511、CLI 108、crash-matrix **12（现为确定性通过）**、Rust 36、调度器 3、typecheck 25）。数字与上一批相同但含义不同：本批的 crash-matrix 是在修复竞态之后取得的。见[修复后回归](minimal-system-acceptance.md#2026-09-14当前树全量回归561a5d62含-crash-matrix-修复与-pause-投影)。
   - 待其余有效要求闭合后，对最终工作树执行类型、文档、样式、库/CLI/前端/原生产物构建、全量测试矩阵与真实窗口验收，记录版本、命令、结果和剩余跳过项。
 
 ### P1：Durable、Flow 与恢复正确性
@@ -104,8 +98,9 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 已实现：先持久根/检查点再派发、稳定 requestId 与 spec 指纹去重、成员与循环/patch/委派恢复。结果不确定的 Effect 标记 indeterminate，CLI 退出码 3；显式 `resume --retry-indeterminate` 才授权重放。
   - 已有 CLI SIGKILL 场景及包级委派恢复；节点提交与检查点并非同一事务，但稳定 requestId 可复用原 Task，不能再笼统称为“没有去重”。
   - 2026-09-14 补验：完整 CLI crash-matrix 12 项通过；新增 indeterminate 后取消拒绝重放，以及动态 spawn 恢复保持同一持久 Task 集合。另有真实双 CLI 取消拒绝 1 项通过：活拥有者不受干扰，拥有者 SIGINT 后持久 cancelled。见[取消与恢复验收](minimal-system-acceptance.md#2026-09-14run-取消所有权与动态图崩溃恢复)。本机证据不替代下列委派/提交间隙和多主机要求。
-  - 剩余：按协议补全崩溃窗口，尤其委派真实进程故障、提交/检查点间隙的完整核验，确认不重复 fan-out、已完成迭代或外部副作用。CLI schema 尚不暴露 delegation。
-  - 入口：`apps/cli/tests/crash-matrix.test.ts`、`packages/llm-flow/__tests__/durable-flow-executor.test.ts`。
+  - 新增可复现矩阵：普通节点、首个/第二个委派子节点提交落盘但检查点未记录身份时 SIGKILL；委派子节点模型请求在途时 SIGKILL；循环第二次入口已成功、完成检查点尚未提交时 SIGKILL。通过真实 CLI/LocalFS/SQLite 恢复核对 Task 身份、已完成记录及模型调用次数；测试夹具只在公开提交边界注入故障，不修改持久状态。CLI schema 尚不暴露 delegation，夹具在编译后注入公开 DagRunSpec，不能视为 YAML 委派入口验收。
+  - 剩余：按 Protocol §15 补全其他崩溃窗口及组合、已完成迭代与外部副作用完整核验；跨主机要求仍由 P1-02/P1-05 跟进。
+  - 入口：`apps/cli/tests/crash-matrix.test.ts`、`packages/llm-flow/__tests__/durable-flow-executor.test.ts`；本轮范围与结果见[ P1 审计验收](minimal-system-acceptance.md#2026-09-14p1-审计提交间隙与契约漂移)。
 
 - [ ] **P1-02 通用调度所有权与 fencing**
   - 已实现：Session/Run 租约、epoch、心跳、每步所有权检查、失权停止；CLI 本机锁与删除前通用租约核对。
@@ -136,9 +131,9 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 入口：`transcript-budget.test.ts`、`task-transcript-dialog.test.ts`、CLI `run.integration.test.ts`。
 
 - [ ] **P1-07 Schema/输出策略**
-  - 已实现：受支持结构子集的同 id 跨版本兼容推导、无人消费输出验证、运行定义/动态图检查点冻结；不同 schema id 不做隐式转换。
+  - 已实现：受支持结构子集的同 id 跨版本兼容推导、所有生产者输出独立验证（含宽松或无 schema 消费者）、运行定义/动态图检查点冻结；不同 schema id 不做隐式转换。新检查点持久插件清单/schema 快照，恢复在派发前拒绝契约漂移；旧检查点没有快照时仍沿用宿主定义。
   - 剩余：端口错误的 repair/continue 策略；明确节点级输出契约后，将 Agent responseFormat 编译成可引用端口 schema。插件清单契约与节点级配置不能直接混用。
-  - 同名 `plugin@version` 的宿主实现代码未冻结；需明确其版本漂移处理。见[Flow 设计](design/flow-execution-model.md)、`port-contract.test.ts`。
+  - 同名 `plugin@version` 的宿主实现代码未冻结；宿主须保留不可变版本，代码变更使用新版本。当前只能检测清单/schema 漂移，不能证明实现代码未变化。见[Flow 设计](design/flow-execution-model.md)、`port-contract.test.ts`。
 
 - [x] **P1-08 Effect 回滚缺陷**：Skill 身份持久化失败只回滚本次新加载，清理逐项执行并聚合原始/清理错误；`create-kernel-adapters-runtime.test.ts` 有回归。
 - [x] **P1-09 CLI supervisor 累积结果**：回边使用来源最新已完成实例，支持轮流派发 worker；普通 Loop 语义保持，CLI/Flow 已有回归。

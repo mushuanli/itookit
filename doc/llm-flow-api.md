@@ -256,7 +256,7 @@ packages/llm-flow/src/
 
 Run 控制会在信号注入和单任务取消前刷新持久成员清单，允许控制其他调用方刚登记的重试任务；按 nodeId 注入信号选择当前最大 iteration 对应的任务，按 targetTaskId 则校验 Run 成员身份。Goal 编辑窗口固定打开时的 Run，信号和取消回调也固定发起时的 Run，异步完成不会刷新切换后的其他 Run；失败通过错误提示呈现。Goal 状态对 Session suspend/resume 的影响及其与目标持久化非原子的边界保持不变。
 
-端口结构注册：`DagPluginRegistry.registerSchema(ref, schema)` / `getSchema(ref)`，或实现 `DagPluginCatalog.getSchema`。相同引用不得重复注册，返回值为副本。FlowSchemaRegistry / flowSchemaIssue / schemaCompatibilityIssue 从包出口导出。目标有 schema 的 data edge 必须解析到已注册定义；发布、直接执行和 patch 拒绝未知引用，下游创建前校验成功上游的实际消费值。id 不同一律拒绝；同一 id 版本不同时要求注册表能证明来源结构是目标结构的子类型（`llm-flow/src/flow/schema-compat.ts`：boolean schema、`integer ⊆ number`、enum 子集、object 的 required/properties/additionalProperties、array items 递归推导）。支持 boolean schema、type、properties、required、items、additionalProperties、enum 及 title/description 注释，未知关键字拒绝。发布前的边引用与图校验使 `submit` 失败；运行期校验无效数据使 Run 失败（见 `submit` 发布时机的说明）。无 active data edge 消费的输出端口同样会在节点成功结算时用其**自身**声明的 schema 校验（`assertUnconsumedOutputs`），失败不派发下游；校验发生在聚合根发布之后，因此表现为失败的 Run。不自动解析 JSON 字符串，不提供端口 repair 策略。
+端口结构注册：`DagPluginRegistry.registerSchema(ref, schema)` / `getSchema(ref)`，或实现 `DagPluginCatalog.getSchema`。相同引用不得重复注册，返回值为副本。FlowSchemaRegistry / flowSchemaIssue / schemaCompatibilityIssue 从包出口导出。目标有 schema 的 data edge 必须解析到已注册定义；发布、直接执行和 patch 拒绝未知引用，下游创建前校验成功上游的实际消费值。id 不同一律拒绝；同一 id 版本不同时要求注册表能证明来源结构是目标结构的子类型（`llm-flow/src/flow/schema-compat.ts`：boolean schema、`integer ⊆ number`、enum 子集、object 的 required/properties/additionalProperties、array items 递归推导）。支持 boolean schema、type、properties、required、items、additionalProperties、enum 及 title/description 注释，未知关键字拒绝。发布前的边引用与图校验使 `submit` 失败；运行期校验无效数据使 Run 失败（见 `submit` 发布时机的说明）。所有声明 schema 的输出端口都会在节点成功结算时用其**自身**契约校验（`assertNodeOutputs`），包括有消费边、下游契约更宽松或未声明 schema 的情况，失败不派发下游；校验发生在聚合根发布之后，因此表现为失败的 Run。不自动解析 JSON 字符串，不提供端口 repair 策略。
 
 单次运行定义隔离：DurableFlowExecutor.submit 在首次异步操作前复制 DagRunSpec 和 parameters；初始节点的插件清单及其端口 schema 同时缓存，后续动态节点的定义在首次读取时缓存，包含未找到的引用。修改调用方原始对象或宿主之后返回的同名 schema 不影响已缓存定义。DagPluginRegistry 注册时复制清单并保留 runtime/UI 方法的调用接收者。定义持久冻结见上一条：调度检查点保存 `spec`/`parameters`/`sessionContext`/live 图与 `nodeDefaults`/`nodeConnections`，`resume` 只从检查点恢复，因此跨进程恢复不依赖宿主重新编译定义。仍未冻结的是宿主插件实现代码（同名 `plugin@version` 的新实现会在下一回合生效）。
 
@@ -299,3 +299,6 @@ DagWorkbench 在 Run 未终态时为终态成员提供「重试并重算下游�
 任务记录首屏及后续交互页使用 256 KiB 字节预算，同一窗口固定首次读取的版本。只看过首屏也可导出 JSON/文本：导出重新读取该版本全部分页，不给导出请求设置裁剪预算；窗口关闭后不继续读取后续页、不下载迟到结果。导出期间禁用翻页和重复导出，任何已显示页被裁剪时保留截断提示。
 
 导出最多 10,000 条 Effect（含末页），越界、非递增/非法游标、空页却有后续游标、任务身份或版本不符、返回截断数据均报错，不下载不完整文件。此限制不是字节上限，单个交换仍可能很大；分页依然从完整 Task 记录读取。真实 Kernel 重开与命令服务回归覆盖 101 个交换的两页导出、固定版本及 300 KB 原始响应，UI 文件通过浏览器下载接口交付；不替代各平台真实文件保存验收。
+
+
+新调度检查点包含 `catalog` 契约快照（插件清单及 schema，含动态解析项）；恢复拒绝同 id/version 的清单或 schema 漂移，且不改写 Task。对象键顺序不构成漂移。旧检查点无快照时继续按宿主定义恢复。快照不包含可执行代码，宿主仍须保留旧版本插件的不可变实现。相关回归：`packages/llm-flow/__tests__/run-catalog.test.ts` 和 `durable-flow-executor.test.ts`。

@@ -161,9 +161,32 @@ describe('DurableFlowExecutor', () => {
             // The edge contract is checked when the source output is applied, after the
             // root is published, so the failure surfaces on the Run instead of `submit`.
             expect(exit.status).toBe('failed');
-            expect(exit.error?.message).toContain('Invalid data on edge typed-edge: $.count: expected integer');
+            expect(exit.error?.message).toContain('Invalid output source.result: $.count: expected integer');
             expect((await kernel.listSessionTasks('session-one')).some(task => task.labels?.flowNodeId === 'target')).toBe(false);
         }
+    });
+
+    it.each([false, true])('enforces the producer contract with a wider consumer (typed: %s)', async typed => {
+        const plugins = createBuiltinDagPluginRegistry();
+        const narrow = { id: 'count', version: '1' }, wide = { id: 'count', version: '2' };
+        plugins.registerSchema(narrow, { type: 'integer' });
+        plugins.registerSchema(wide, { type: 'number' });
+        const manifest = plugins.getManifest('builtin.transform', '1.0.0')!;
+        const runtime = await plugins.loadRuntime('builtin.transform', '1.0.0');
+        plugins.register({ manifest: { ...manifest, id: 'producer',
+            outputs: manifest.outputs.map(port => ({ ...port, schema: narrow })) }, runtime: async () => runtime });
+        plugins.register({ manifest: { ...manifest, id: 'consumer',
+            inputs: manifest.inputs.map(port => ({ ...port, schema: wide })) }, runtime: async () => runtime });
+        const source = { ...valueNode('source', null), plugin: 'producer',
+            config: { outputName: 'result', type: 'json', value: 1.5 } };
+        const target = { ...valueNode('target', null), plugin: typed ? 'consumer' : 'builtin.transform' };
+        const run = await new DurableFlowExecutor({ kernel, plugins }).submit('session-one', {
+            nodes: [source, target], edges: [{ id: 'edge', from: 'source', to: 'target', input: 'input', output: 'result' }],
+        });
+        const exit = await runToEnd(run);
+        expect(exit.status).toBe('failed');
+        expect(exit.error?.message).toContain('Invalid output source.result: $: expected integer');
+        expect((await kernel.listSessionTasks('session-one')).some(task => task.labels?.flowNodeId === 'target')).toBe(false);
     });
 
     it.each([[true, false], [false, false], [true, true], [false, true]])('validates an output without data consumers (valid: %s, control: %s)', async (valid, control) => {
@@ -187,6 +210,30 @@ describe('DurableFlowExecutor', () => {
             expect(exit.status).toBe('failed');
             expect(exit.error?.message).toContain('Invalid output only.result: $.count: expected integer');
         }
+    });
+
+    it('rejects changed host contracts on resume without changing durable tasks', async () => {
+        const plugins = createBuiltinDagPluginRegistry();
+        const first = new DurableFlowExecutor({ kernel, plugins });
+        const run = await first.submit('session-one', { nodes: [{ ...valueNode('human', null),
+            plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Choose' } }], edges: [] });
+        await waitForNode(run, 'human');
+        await first.waitForCheckpoint('session-one', run.root.id, [run.nodes.get('human')!.id]);
+        kernel.dispose();
+        await first.waitIdle(); await kernel.waitIdle();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel); await kernel.initialize();
+        const before = await kernel.listSessionTasks('session-one');
+        const original = plugins.getManifest.bind(plugins);
+        vi.spyOn(plugins, 'getManifest').mockImplementation((id, version) => {
+            const manifest = original(id, version);
+            if (manifest) manifest.outputs = [];
+            return manifest;
+        });
+        await expect(new DurableFlowExecutor({ kernel, plugins }).resume('session-one', run.root.id))
+            .rejects.toThrow('Flow plugin contract drift');
+        expect(await kernel.listSessionTasks('session-one')).toEqual(before);
     });
 
     it('resumes the Run definition frozen at submit instead of a later host definition', async () => {

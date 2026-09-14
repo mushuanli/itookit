@@ -451,6 +451,117 @@ it('preserves budget accounting across a crash and resume', async () => {
     expect(crash.prompts.filter(prompt => prompt.includes('循环入口')).length).toBeLessThanOrEqual(4);
 }, 60_000);
 
+function startSchedulerCrash(configPath: string, stateDir: string, node: string, delegation: boolean, completed = ''): ChildProcess {
+    const entry = fileURLToPath(new URL('./fixtures/scheduler-crash.ts', import.meta.url));
+    const child = spawn(process.execPath, ['--import', 'tsx', entry, 'run', '-f', configPath,
+        '--state-dir', stateDir, '--headless', '--json'], { cwd: CLI_CWD, stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, MINDOS_TEST_SUBMIT_NODE: node, MINDOS_TEST_DELEGATION: delegation ? '1' : '0',
+            MINDOS_TEST_COMPLETED_INSTANCE: completed } });
+    children.push(child);
+    child.stdout?.resume();
+    return child;
+}
+
+async function storedCheckpoint(stateDir: string, runId: string, rootId: string) {
+    const inspection = await openProfileInspectionFs(stateDir);
+    try {
+        const resolver = new CliStorageResolver(inspection.fs), binding = await resolver.resolve(cliStorage(runId));
+        const saved = await new SeqFileKernelStore(binding, reference => resolver.resolve(reference))
+            .getShared(binding, `flow.run.${rootId}.scheduler`);
+        return saved!.value as { instances: [string, string[]][]; completed: string[] };
+    } finally { await inspection.dispose(); }
+}
+
+it.each(['finish', 'finish:delegate:1:0', 'finish:delegate:1:1', 'delegation-inflight'])(
+    'recovers the scheduler SIGKILL window %s', async node => {
+        const inflight = node === 'delegation-inflight';
+        const delegation = node.includes(':delegate:') || inflight;
+        let child: ChildProcess;
+        const prompts: string[] = [];
+        const server = createServer((request, response) => {
+            let body = ''; request.on('data', chunk => { body += chunk; });
+            request.on('end', () => {
+                const prompt = firstUser(body); prompts.push(prompt);
+                const parent = !prompt.includes('Handle one payload');
+                if (inflight && !parent && prompts.length === 2) {
+                    child.kill('SIGKILL'); response.destroy(); return;
+                }
+                const message = delegation && parent ? { role: 'assistant', content: '', tool_calls: [{
+                    id: 'delegate-one', type: 'function', function: { name: 'delegate_tasks',
+                        arguments: JSON.stringify({ items: [{ id: 1 }, { id: 2 }] }) },
+                }] } : { role: 'assistant', content: 'done' };
+                response.writeHead(200, { 'content-type': 'application/json' });
+                response.end(JSON.stringify({ choices: [{ index: 0, message,
+                    finish_reason: delegation && parent ? 'tool_calls' : 'stop' }], usage: { total_tokens: 3 } }));
+            });
+        });
+        servers.push(server);
+        const port = await listenForTest(server), root = await workspace('mindos-submit-gap-');
+        const stateDir = path.join(root, '.mindos'), configPath = path.join(root, 'mindos.yml');
+        const config = parse(singleNodeConfig(port));
+        Object.assign(config.agents[0], { stream: false, approval: 'none' });
+        process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
+        await writeFile(configPath, stringify(config));
+        child = startSchedulerCrash(configPath, stateDir, inflight ? '' : node, delegation);
+        let stderr = ''; child.stderr?.on('data', chunk => { stderr += chunk; });
+        expect(await once(child, 'exit'), stderr).toEqual([null, 'SIGKILL']);
+        const runId = await latestRun(root);
+        await settleLease();
+        const before = await storedTasks(stateDir, runId);
+        const submittedNode = inflight ? 'finish:delegate:1:0' : node;
+        const submitted = before.find(task => task.labels?.flowNodeId === submittedNode)!;
+        expect(submitted).toBeDefined();
+        const rootId = before.find(task => task.labels?.kind === 'flow-root')!.id;
+        const checkpoint = await storedCheckpoint(stateDir, runId, rootId);
+        if (!inflight) expect(checkpoint.instances.flatMap(([, ids]) => ids)).not.toContain(submitted.id);
+        const completed = before.filter(task => task.status === 'succeeded');
+        const callsAtCrash = prompts.length;
+        if (inflight) {
+            expect(await resumeCommand(runId, { stateDir, headless: true, json: true })).toBe(3);
+            expect(prompts).toHaveLength(callsAtCrash);
+        }
+        expect(await resumeCommand(runId, { stateDir, headless: true, json: true, retryIndeterminate: inflight })).toBe(0);
+        const after = await storedTasks(stateDir, runId);
+        expect(after.filter(task => task.labels?.flowNodeId === submittedNode).map(task => task.id)).toEqual([submitted.id]);
+        for (const task of completed) expect(after.find(item => item.id === task.id)).toEqual(task);
+        expect(after).toHaveLength(delegation ? 4 : 2);
+        expect(prompts).toHaveLength(inflight ? 4 : delegation ? 3 : 1);
+        expect(prompts.length).toBeGreaterThan(callsAtCrash);
+        expect(await manifest(root, runId)).toMatchObject({ status: 'succeeded', rootTaskId: rootId });
+    }, 40_000,
+);
+
+it('does not replay a completed loop iteration whose checkpoint was killed before commit', async () => {
+    const model = crashingServer({ request: -1, when: 'before-reply' }, (_prompt, index) => `answer-${index}`);
+    servers.push(model.server);
+    const port = await listenForTest(model.server), root = await workspace('mindos-loop-checkpoint-');
+    const stateDir = path.join(root, '.mindos'), configPath = path.join(root, 'mindos.yml');
+    process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
+    await writeFile(configPath, loopConfig(port));
+    const child = startSchedulerCrash(configPath, stateDir, '', false, 'entry#2');
+    let stderr = ''; child.stderr?.on('data', chunk => { stderr += chunk; });
+    expect(await once(child, 'exit'), stderr).toEqual([null, 'SIGKILL']);
+    const runId = await latestRun(root);
+    await settleLease();
+    const before = await storedTasks(stateDir, runId);
+    const rootId = before.find(task => task.labels?.kind === 'flow-root')!.id;
+    const checkpoint = await storedCheckpoint(stateDir, runId, rootId);
+    expect(checkpoint.completed).toContain('entry#1');
+    expect(checkpoint.completed).not.toContain('entry#2');
+    const entries = before.filter(task => task.labels?.flowNodeId === 'entry');
+    expect(entries).toHaveLength(2);
+    expect(entries.every(task => task.status === 'succeeded')).toBe(true);
+    expect(await resumeCommand(runId, { stateDir, headless: true, json: true })).toBe(0);
+    const after = await storedTasks(stateDir, runId);
+    for (const task of before.filter(task => task.status === 'succeeded')) {
+        expect(after.find(item => item.id === task.id)).toEqual(task);
+    }
+    expect(after.filter(task => task.labels?.flowNodeId === 'entry')).toHaveLength(3);
+    expect(model.prompts.filter(prompt => prompt.includes('循环入口'))).toHaveLength(3);
+    expect(model.prompts.filter(prompt => prompt.includes('循环体'))).toHaveLength(3);
+    expect(await manifest(root, runId)).toMatchObject({ status: 'succeeded' });
+}, 40_000);
+
 // ── Config builders ─────────────────────────────────────────────────────────
 
 function header(port: number, name: string): string {

@@ -49,7 +49,7 @@ export interface FlowWorkspaceRestoreOptions {
 /** Session shared key holding the durable workspace lease record of a Run. */
 export const workspaceLeaseKey = (rootTaskId: string): string => `flow.run.${rootTaskId}.workspace-lease`;
 import { findCycles } from './graph';
-import { assertUnconsumedOutputs, dataEdgeSchemaIssue, validateDataEdgeValue } from './port-contract';
+import { assertNodeOutputs, dataEdgeSchemaIssue, validateDataEdgeValue } from './port-contract';
 import { patchIdentityConfig } from './patch-identity';
 import { mergeAgentConfig } from './to-dag';
 import { resolveNodeConnection } from './connections';
@@ -221,7 +221,7 @@ export class DurableFlowExecutor {
         const saved = restored?.checkpoint;
         spec = structuredClone(spec);
         parameters = structuredClone(parameters);
-        const plugins = createRunCatalog(this.options.plugins, spec.nodes);
+        const plugins = createRunCatalog(this.options.plugins, saved?.nodes ?? spec.nodes, saved?.catalog);
         const sessionContext = structuredClone(saved ? saved.sessionContext
             : this.options.resolveNewRunContext ? await this.options.resolveNewRunContext(sessionId) : this.options.sessionContext);
         const nodeDefaults = new Map(Object.entries(structuredClone(spec.nodeDefaults ?? {}))
@@ -295,7 +295,7 @@ export class DurableFlowExecutor {
             const saveCheckpoint = async (): Promise<void> => {
                 if (!published) return;
                 const checkpoint: SchedulerCheckpoint = {
-                    version: 1, spec, parameters, sessionContext,
+                    version: 1, spec, parameters, sessionContext, catalog: plugins.snapshot(),
                     instances: [...instances].map(([id, handles]) => [id, handles.map(handle => handle.id)]),
                     completed: [...completed], nodes, edges, edgeState: [...edgeState],
                     delegationDepth: [...delegationDepth], delegationGroupByChild: [...delegationGroupByChild],
@@ -831,8 +831,8 @@ export class DurableFlowExecutor {
                 completionOrder.push(parseInstanceKey(settled.key).nodeId);
                 if (settled.exit.status === 'succeeded') {
                     const settledNode = nodes.find(candidate => candidate.id === parseInstanceKey(settled.key).nodeId);
-                    // Validate the producer contract when no active data edge consumes it.
-                    if (settledNode) assertUnconsumedOutputs(settledNode, edges.filter(edge => (edgeState.get(edge.id) ?? 'active') === 'active'), plugins, settled.exit.output);
+                    // Validate the producer contract even when consumers accept a wider schema.
+                    if (settledNode) assertNodeOutputs(settledNode, plugins, settled.exit.output);
                 }
                 consumedTokens += outputTokens(settled.exit.output);
                 if (maxTokens && consumedTokens > maxTokens) {
