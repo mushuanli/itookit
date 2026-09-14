@@ -538,6 +538,28 @@ describe('Kernel durable kernel', () => {
         await expect(session.authorizeResource(readHandle.id, 'read', reader.id)).rejects.toThrow('revoked');
     });
 
+    it('distinguishes an accepted cancel request from a confirmed external stop', async () => {
+        const held = heldEffect();
+        kernel.registerProgram(echoProgram());
+        kernel.registerProgram(held.program);
+        kernel.registerEffect(held.adapter);
+        const session = await kernel.createSession({ id: 'session-one', storage: binding });
+        const task = await session.submit({ program: { kind: 'test.held-effect', version: '1' }, input: null });
+        await held.begun;
+
+        const cancelling = task.cancel();
+        await held.stopping;
+        // The request is accepted and the logical state already changed, but the external
+        // Effect has not confirmed its stop: observers must be able to tell the two apart.
+        expect(await task.stat()).toMatchObject({
+            phase: 'done', activeOperations: 1, control: { requested: 'cancel', acknowledged: false },
+        });
+
+        held.release();
+        await cancelling;
+        expect(await task.stat()).toMatchObject({ activeOperations: 0, control: { requested: 'cancel', acknowledged: true } });
+    });
+
     it('settles a budget charge once per usage id and refuses a conflicting replay', async () => {
         kernel.registerProgram(echoProgram());
         const session = await kernel.createSession({ id: 'session-one', storage: binding });
@@ -829,6 +851,67 @@ describe('Kernel durable kernel', () => {
         expect((await kernel.listSessions().next()).value?.status).toBe('closed');
     });
 });
+
+/** Task + adapter whose external Effect only stops when the returned `release()` is called. */
+function heldEffect() {
+    let begun!: () => void, stopped!: () => void, release!: () => void;
+    const begunPromise = new Promise<void>(resolve => { begun = resolve; });
+    const stopping = new Promise<void>(resolve => { stopped = resolve; });
+    let inFlight: Promise<unknown> | undefined;
+    const adapter: EffectAdapter<null, string> = {
+        kind: 'test.held', version: '1',
+        execute(_request, context) {
+            begun();
+            const execution = new Promise<never>((_, reject) => {
+                context.abortSignal.addEventListener('abort', () => { stopped(); release = () => reject(new Error('aborted')); }, { once: true });
+            });
+            inFlight = execution.catch(() => undefined);
+            return execution;
+        },
+        async cancel() { await inFlight; },
+    };
+    const program: DurableTaskProgram<null, null, string> = {
+        manifest: { kind: 'test.held-effect', version: '1' },
+        init: () => ({ state: null, actions: [{ type: 'effect', effect: { id: 'e', kind: 'test.held', version: '1', request: null, idempotencyKey: 'held' } }],
+            next: { type: 'wait', on: { type: 'effect', id: 'e' } } }),
+        reduce() { throw new Error('Unexpected reduce'); },
+    };
+    return { adapter, program, begun: begunPromise, stopping, release: () => release() };
+}
+
+function chargingEffect(): EffectAdapter<string, string> {
+    let calls = 0;
+    return {
+        kind: 'test.charging', version: '1', recoveryPolicy: 'idempotent-retry',
+        async execute(_request, context) {
+            await context.chargeBudget?.(context.grants[0].handleId, 'tokens', 4);
+            if (++calls === 1) throw new Error('temporary');
+            return 'charged';
+        },
+    };
+}
+
+function chargingEffectProgram(): DurableTaskProgram<null, null, string> {
+    return {
+        manifest: { kind: 'test.charging-effect', version: '1' },
+        init() { return { state: null, next: { type: 'wait', on: { type: 'signal', id: 'run' } } }; },
+        reduce(state, event) {
+            if (event.type === 'signal') {
+                const handleId = String(event.signal.payload);
+                return {
+                    state,
+                    actions: [{ type: 'effect', effect: {
+                        kind: 'test.charging', version: '1', request: 'charge', idempotencyKey: 'charge',
+                        grants: [{ handleId, right: 'execute' }], retry: { maxAttempts: 2, backoffMs: 5 },
+                    } }],
+                    next: { type: 'wait', on: { type: 'effect' } },
+                };
+            }
+            if (event.type === 'effect-completed') return { state, next: { type: 'complete', output: event.result as string } };
+            throw new Error(`Unexpected event: ${event.type}`);
+        },
+    };
+}
 
 function echoProgram(): DurableTaskProgram<null, string, string> {
     return {
@@ -1235,38 +1318,4 @@ async function waitForEffectStatus(
         await new Promise(resolve => setTimeout(resolve, 2));
     }
     throw new Error(`Effect did not reach ${expected}`);
-}
-
-function chargingEffect(): EffectAdapter<string, string> {
-    let calls = 0;
-    return {
-        kind: 'test.charging', version: '1', recoveryPolicy: 'idempotent-retry',
-        async execute(_request, context) {
-            await context.chargeBudget?.(context.grants[0].handleId, 'tokens', 4);
-            if (++calls === 1) throw new Error('temporary');
-            return 'charged';
-        },
-    };
-}
-
-function chargingEffectProgram(): DurableTaskProgram<null, null, string> {
-    return {
-        manifest: { kind: 'test.charging-effect', version: '1' },
-        init() { return { state: null, next: { type: 'wait', on: { type: 'signal', id: 'run' } } }; },
-        reduce(state, event) {
-            if (event.type === 'signal') {
-                const handleId = String(event.signal.payload);
-                return {
-                    state,
-                    actions: [{ type: 'effect', effect: {
-                        kind: 'test.charging', version: '1', request: 'charge', idempotencyKey: 'charge',
-                        grants: [{ handleId, right: 'execute' }], retry: { maxAttempts: 2, backoffMs: 5 },
-                    } }],
-                    next: { type: 'wait', on: { type: 'effect' } },
-                };
-            }
-            if (event.type === 'effect-completed') return { state, next: { type: 'complete', output: event.result as string } };
-            throw new Error(`Unexpected event: ${event.type}`);
-        },
-    };
 }

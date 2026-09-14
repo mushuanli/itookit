@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend, type IVFSManager, type IFileSystem } from '@itookit/vfs-core';
-import { ensureTree, sessionPath, taskPath, eventsPath, taskEventKey, taskEventFirstKey } from './infrastructure/seqfile/seqfile-core';
 import { Kernel } from './application/kernel';
 import { SeqFileKernelStore } from './infrastructure/seqfile/store';
 import { addEffect, executeEffectAdapter } from './application/effect-utils';
 import { recoverWaitGraphTx } from './infrastructure/seqfile/store-helpers';
+import { ensureTree, resourcesPath, sessionPath, taskPath, eventsPath, taskEventKey, taskEventFirstKey } from './infrastructure/seqfile/seqfile-core';
 import { bindCapabilities } from './application/capabilities';
 import { waitForChange } from './public/event-stream';
 import type { ResolvedStorageBinding, TaskRecord, DurableTaskProgram } from './domain/types';
@@ -39,154 +39,6 @@ describe('durable harness protocols', () => {
             expect(await fs.driver.exists('/existing/deep/root/task/artifacts')).toBe(true);
         } finally { exists.mockRestore(); }
     });
-    it('prunes old Task events and reports the retention watermark for resync', async () => {
-        const task = await store.createTask(binding, 's', spec);
-        for (let step = 0; step < 4; step++) await store.signalTask(binding, task.id, { type: 'external', payload: { step } });
-        const full = await store.taskEventPage(binding, task.id, { limit: 500 });
-        expect(full.items.length).toBeGreaterThanOrEqual(4);
-        expect(full.firstAvailableIndex).toBeUndefined();
-        const total = full.throughIndex;
-        const kept = 2;
-        const before = await store.readTask(binding, task.id);
-
-        const pruned = await store.pruneTaskEvents(binding, task.id, { keepEvents: kept });
-        expect(pruned.removed).toBe(total - kept);
-        expect(pruned.firstAvailableIndex).toBe(total - kept + 1);
-        // A fresh read starts at the retained window and announces the watermark.
-        const page = await store.taskEventPage(binding, task.id, { limit: 500 });
-        expect(page.firstAvailableIndex).toBe(pruned.firstAvailableIndex);
-        // The retained window keeps the newest `kept` events plus the prune event itself.
-        expect(page.items.slice(0, kept).map(event => event.sequence))
-            .toEqual(full.items.slice(-kept).map(event => event.sequence));
-        expect(page.items.at(-1)?.type).toBe('task.events.pruned');
-        // A stale cursor resyncs instead of reading missing events.
-        const stale = await store.taskEventPage(binding, task.id, { afterIndex: 0, limit: 500 });
-        expect(stale.items.map(event => event.sequence)).toEqual(page.items.map(event => event.sequence));
-        // Pruned rows are gone from the raw log; the Task record and its history remain.
-        const sequences = (await store.events(binding)).map(event => event.sequence);
-        expect(sequences).not.toContain(full.items[0].sequence);
-        expect((await store.readTask(binding, task.id)).version).toBe(before.version);
-        expect((await store.taskHistory(binding, task.id)).length).toBeGreaterThan(0);
-        // Re-running may prune the previous audit event because it is also indexed.
-        const again = await store.pruneTaskEvents(binding, task.id, { keepEvents: kept });
-        expect(again.removed).toBeLessThanOrEqual(1);
-        await fs.meta.seq!.setEntry(eventsPath(binding.rootPath), taskEventFirstKey(task.id), '99999');
-        await expect(store.taskEventPage(binding, task.id)).rejects.toThrow('retention watermark');
-        await expect(store.pruneTaskEvents(binding, task.id)).rejects.toThrow('retention watermark');
-    });
-
-    it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid event retention count %s', async keepEvents => {
-        const task = await store.createTask(binding, 's', spec);
-        const before = await store.events(binding);
-        await expect(store.pruneTaskEvents(binding, task.id, { keepEvents })).rejects.toThrow('keepEvents');
-        expect(await store.events(binding)).toEqual(before);
-    });
-
-    it('refuses to delete another Task event through a corrupt retention index', async () => {
-        const task = await store.createTask(binding, 's', spec);
-        await store.signalTask(binding, task.id, { type: 'advance' });
-        const other = await store.createTask(binding, 's', spec);
-        const before = await store.events(binding);
-        const foreign = before.find(event => event.taskId === other.id)!;
-        await fs.meta.seq!.setEntry(eventsPath(binding.rootPath), taskEventKey(task.id, 1), String(foreign.sequence));
-        await expect(store.pruneTaskEvents(binding, task.id, { keepEvents: 1 })).rejects.toThrow('scope mismatch');
-        expect(await store.events(binding)).toEqual(before);
-        expect(await fs.meta.seq!.getEntry(eventsPath(binding.rootPath), taskEventFirstKey(task.id))).toBeNull();
-    });
-
-    it('compacts Task version history without touching the authoritative record or facts', async () => {
-        const task = await store.createTask(binding, 's', spec);
-        // Every versioned write records a snapshot; signals advance the record cheaply.
-        for (let step = 0; step < 4; step++) {
-            await store.signalTask(binding, task.id, { type: 'external', payload: { step } });
-        }
-        const before = await store.readTask(binding, task.id);
-        const versions = (await store.taskHistory(binding, task.id)).map(item => item.version);
-        expect(versions[0]).toBe(0);
-        expect(versions).toHaveLength(before.version + 1);
-
-        // Keep the newest two snapshots; the main record stays authoritative.
-        const oldest = versions[0];
-        const compacted = await store.compactTaskHistory(binding, task.id, { keepVersions: 2 });
-        expect(compacted.keptFrom).toBe(before.version - 1);
-        expect(compacted.removed).toBe(versions.length - 2);
-        expect((await store.taskHistory(binding, task.id)).map(item => item.version))
-            .toEqual([before.version - 1, before.version]);
-        expect(await store.readTask(binding, task.id)).toEqual(before);
-        // A pruned version is simply unavailable; the retained window still reads.
-        expect(await store.taskHistoryPage(binding, task.id, { afterVersion: -1, throughVersion: oldest }))
-            .toMatchObject({ items: [] });
-        expect((await store.taskHistoryPage(binding, task.id, { afterVersion: before.version - 1 })).items)
-            .toHaveLength(1);
-        expect((await store.events(binding)).some(event => event.type === 'task.history.compacted')).toBe(true);
-        // Compacting again is a no-op.
-        expect(await store.compactTaskHistory(binding, task.id, { keepVersions: 2 })).toEqual({ removed: 0, keptFrom: compacted.keptFrom });
-        // The default window keeps everything at this size.
-        expect(await store.compactTaskHistory(binding, task.id)).toEqual({ removed: 0, keptFrom: 0 });
-        expect((await store.taskAttempts(binding, task.id))).toEqual([]);
-    });
-
-    it.each([0, 2, 100])('preserves both retention limits when beforeVersion is %s', async beforeVersion => {
-        const task = await store.createTask(binding, 's', spec);
-        for (let step = 0; step < 4; step++) await store.signalTask(binding, task.id, { type: 'advance' });
-        const result = await store.compactTaskHistory(binding, task.id, { keepVersions: 2, beforeVersion });
-        const retained = (await store.taskHistory(binding, task.id)).map(item => item.version);
-        expect(retained).toEqual(beforeVersion === 0 ? [0, 1, 2, 3, 4] : beforeVersion === 2 ? [2, 3, 4] : [3, 4]);
-        expect(result.removed).toBe(5 - retained.length);
-    });
-
-    it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid history retention count %s without deleting data', async keepVersions => {
-        const task = await store.createTask(binding, 's', spec);
-        const history = await store.taskHistory(binding, task.id);
-        await expect(store.compactTaskHistory(binding, task.id, { keepVersions })).rejects.toThrow('keepVersions');
-        expect(await store.taskHistory(binding, task.id)).toEqual(history);
-    });
-
-    it.each([-1, 1.5, NaN, Infinity])('rejects invalid history version boundary %s', async beforeVersion => {
-        const task = await store.createTask(binding, 's', spec);
-        await expect(store.compactTaskHistory(binding, task.id, { beforeVersion })).rejects.toThrow('beforeVersion');
-        expect((await store.taskHistory(binding, task.id)).map(item => item.version)).toEqual([0]);
-    });
-
-    it('declares a layout manifest and refuses Sessions it cannot interpret', async () => {
-        const record = await store.sessionRecord(binding);
-        expect(record.layout).toMatchObject({ layoutVersion: 1, migration: { status: 'complete', to: 1 } });
-        expect(record.layout?.recordSchemas).toHaveProperty('task');
-        expect(record.layout?.requiredCapabilities).toContain('atomic-cas');
-
-        await (await kernel.openSession('s')).setShared('probe', { ok: true });
-        // A record written by a newer host must not be guessed at.
-        const rewrite = (layout: unknown): Promise<void> => fs.meta.seq!.setEntry(
-            sessionPath(binding.rootPath), 'record', JSON.stringify({ ...record, layout }));
-        await rewrite({ ...record.layout, layoutVersion: 2 });
-        await expect(kernel.openSession('s')).rejects.toThrow('Unsupported Session layout version 2');
-        await expect(store.listShared(binding)).rejects.toThrow('Unsupported Session layout version 2');
-
-        await rewrite({ ...record.layout, requiredCapabilities: ['transactional-seq', 'streams'] });
-        await expect(kernel.openSession('s')).rejects.toThrow("unsupported storage capability 'streams'");
-
-        await rewrite({ ...record.layout, migration: { status: 'pending', to: 2 } });
-        await expect(kernel.openSession('s')).rejects.toThrow('migration is pending');
-
-        for (const layout of [null, false, {},
-            { ...record.layout, recordSchemas: { ...record.layout!.recordSchemas, task: 2 } },
-            { ...record.layout, recordSchemas: {} },
-            { ...record.layout, requiredCapabilities: undefined },
-            { ...record.layout, migration: { status: 'complete', to: 2 } },
-        ]) {
-            await rewrite(layout);
-            await expect(kernel.openSession('s')).rejects.toThrow();
-            await expect(store.listShared(binding)).rejects.toThrow();
-            await expect(store.setShared(binding, 'probe', { ok: false })).rejects.toThrow();
-        }
-
-        // A legacy record without a manifest still opens and works.
-        await rewrite(undefined);
-        const legacy = await kernel.openSession('s');
-        expect((await store.sessionRecord(binding)).layout).toBeUndefined();
-        expect((await legacy.getShared('probe'))?.value).toEqual({ ok: true });
-    });
-
     it('reads Task records once per scan and observes later changes while skipping crash leftovers', async () => {
         const first = await store.createTask(binding, 's', spec);
         const second = await store.createTask(binding, 's', spec);
@@ -696,6 +548,58 @@ describe('durable harness protocols', () => {
         expect(await kernel.removeSession('s')).toBe(false);
     });
 
+    it('closes a Session only after the in-flight Effect confirms it stopped', async () => {
+        let started!: () => void, release!: () => void, aborted = false;
+        const begun = new Promise<void>(resolve => { started = resolve; });
+        let inFlight: Promise<unknown> | undefined;
+        kernel.registerEffect({
+            kind: 'slow', version: '1',
+            execute(_request, context) {
+                started();
+                // The external call does not stop on abort alone: it stays pending until
+                // the test releases it, standing in for a process that needs a SIGKILL.
+                const execution = new Promise<never>((_, reject) => {
+                    context.abortSignal.addEventListener('abort', () => { aborted = true; release = () => reject(new Error('aborted')); }, { once: true });
+                });
+                inFlight = execution.catch(() => undefined);
+                return execution;
+            },
+            // The adapter confirms the stop by settling the recorded execution.
+            async cancel() { await inFlight; },
+        });
+        kernel.registerProgram({ manifest: spec.program,
+            init: () => ({ state: null, actions: [{ type: 'effect', effect: {
+                id: 'e', kind: 'slow', version: '1', request: null, idempotencyKey: 'slow',
+            } }], next: { type: 'wait', on: { type: 'effect', id: 'e' } } }),
+            reduce() { throw new Error('unexpected'); },
+        });
+        const task = await (await kernel.openSession('s')).submit(spec);
+        await begun;
+
+        // `cancelRunning` must cancel live work and may only report completion once the
+        // adapter confirms the external Effect stopped (not merely that it was signalled).
+        let closed = false;
+        const closing = kernel.closeSession('s', true).then(() => { closed = true; });
+        await vi.waitFor(() => expect(aborted).toBe(true));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(closed).toBe(false);
+
+        release();
+        await closing;
+        expect(closed).toBe(true);
+        const record = (await task.status()).task;
+        expect(record.status).toBe('cancelled');
+        expect(Object.values(record.effects).every(effect => !effect.cleanupPending)).toBe(true);
+        expect((await kernel.sessionStat('s')).phase).toBe('closed');
+
+        // The terminal state is durable: a fresh Kernel sees the same closed Session.
+        kernel.dispose(); await kernel.waitIdle();
+        kernel = new Kernel({ catalog: { fs, rootPath: '/catalog' }, pollMs: 0 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return binding; } });
+        await kernel.initialize();
+        expect((await kernel.sessionStat('s')).phase).toBe('closed');
+    });
+
     it('does not resurrect records when a removed Session identity is reused', async () => {
         const session = await kernel.openSession('s');
         await session.setShared('topic', { value: 'old' });
@@ -909,6 +813,54 @@ describe('durable harness protocols', () => {
         expect((await store.readCache(binding, task.id, request)).status).toBe('miss');
     });
 
+    it.each(['prefer-cache', 'cache-only'] as const)('serves a live entry in %s mode', async mode => {
+        const task = await store.createTask(binding, 's', spec);
+        const { handle } = await store.createCache(binding, task.id, { name: `serve-${mode}` });
+        await store.publishCache(binding, task.id, { operationId: 'put', handleId: handle.id, key: 'key', fingerprint: 'v1', value: 'cached', expectedGeneration: 1 });
+
+        const receipt = await store.readCache(binding, task.id, { operationId: `read-${mode}`, mode,
+            sources: [{ handleId: handle.id, key: 'key', fingerprint: 'v1' }] });
+        expect(receipt).toMatchObject({ status: 'hit', value: 'cached' });
+    });
+
+    it.each(['refresh', 'bypass'] as const)('never serves an entry in %s mode and leaves a single-use entry unconsumed', async mode => {
+        const task = await store.createTask(binding, 's', spec);
+        const { handle } = await store.createCache(binding, task.id, { name: `skip-${mode}`, usage: 'single-use' });
+        await store.publishCache(binding, task.id, { operationId: 'put', handleId: handle.id, key: 'key', fingerprint: 'v1', value: 'cached', expectedGeneration: 1 });
+
+        const receipt = await store.readCache(binding, task.id, { operationId: `read-${mode}`, mode,
+            sources: [{ handleId: handle.id, key: 'key', fingerprint: 'v1' }] });
+        expect(receipt.status).toBe('bypass');
+        expect(receipt.value).toBeUndefined();
+        // A skipped read must not consume the single-use entry.
+        expect(await store.readCache(binding, task.id, { operationId: 'take',
+            sources: [{ handleId: handle.id, key: 'key', fingerprint: 'v1' }] }))
+            .toMatchObject({ status: 'hit', value: 'cached' });
+    });
+
+    it('misses when the dependency fingerprint or expected version no longer matches', async () => {
+        const task = await store.createTask(binding, 's', spec);
+        const { handle } = await store.createCache(binding, task.id, { name: 'dependency' });
+        const publish = (operationId: string, value: string, expectedVersion?: number) => store.publishCache(binding, task.id, {
+            operationId, handleId: handle.id, key: 'key', fingerprint: 'hash-v1', value, expectedGeneration: 1,
+            ...(expectedVersion === undefined ? {} : { expectedVersion }),
+        });
+        const read = (operationId: string, fingerprint: string, expectedVersion?: number) => store.readCache(binding, task.id, {
+            operationId, sources: [{ handleId: handle.id, key: 'key', fingerprint,
+                ...(expectedVersion === undefined ? {} : { expectedVersion }) }],
+        });
+
+        expect((await publish('put-1', 'one')).version).toBe(1);
+        expect(await read('r-v1', 'hash-v1')).toMatchObject({ status: 'hit', value: 'one', entryVersion: 1 });
+        // A changed dependency fingerprint invalidates the cached derivation.
+        expect(await read('r-v2', 'hash-v2')).toMatchObject({ status: 'miss' });
+
+        expect((await publish('put-2', 'two', 1)).version).toBe(2);
+        // The consumer that pinned the previous entry version must not observe the new one.
+        expect(await read('r-old', 'hash-v1', 1)).toMatchObject({ status: 'miss' });
+        expect(await read('r-new', 'hash-v1', 2)).toMatchObject({ status: 'hit', value: 'two', entryVersion: 2 });
+    });
+
     it('rejects overflowing cache deadlines and generation increments atomically', async () => {
         const task = await store.createTask(binding, 's', spec);
         await expect(store.createCache(binding, task.id, { name: 'invalid', ttlMs: Number.MAX_VALUE })).rejects.toThrow('TTL');
@@ -1000,6 +952,154 @@ describe('durable harness protocols', () => {
         expect(await store.messageReceipt(targetBinding, message.id)).toEqual(receipt);
         expect(await store.events(targetBinding)).toEqual(events);
         expect(await store.readTask(targetBinding, receiver.id)).toEqual(after);
+    });
+
+    it('prunes old Task events and reports the retention watermark for resync', async () => {
+        const task = await store.createTask(binding, 's', spec);
+        for (let step = 0; step < 4; step++) await store.signalTask(binding, task.id, { type: 'external', payload: { step } });
+        const full = await store.taskEventPage(binding, task.id, { limit: 500 });
+        expect(full.items.length).toBeGreaterThanOrEqual(4);
+        expect(full.firstAvailableIndex).toBeUndefined();
+        const total = full.throughIndex;
+        const kept = 2;
+        const before = await store.readTask(binding, task.id);
+
+        const pruned = await store.pruneTaskEvents(binding, task.id, { keepEvents: kept });
+        expect(pruned.removed).toBe(total - kept);
+        expect(pruned.firstAvailableIndex).toBe(total - kept + 1);
+        // A fresh read starts at the retained window and announces the watermark.
+        const page = await store.taskEventPage(binding, task.id, { limit: 500 });
+        expect(page.firstAvailableIndex).toBe(pruned.firstAvailableIndex);
+        // The retained window keeps the newest `kept` events plus the prune event itself.
+        expect(page.items.slice(0, kept).map(event => event.sequence))
+            .toEqual(full.items.slice(-kept).map(event => event.sequence));
+        expect(page.items.at(-1)?.type).toBe('task.events.pruned');
+        // A stale cursor resyncs instead of reading missing events.
+        const stale = await store.taskEventPage(binding, task.id, { afterIndex: 0, limit: 500 });
+        expect(stale.items.map(event => event.sequence)).toEqual(page.items.map(event => event.sequence));
+        // Pruned rows are gone from the raw log; the Task record and its history remain.
+        const sequences = (await store.events(binding)).map(event => event.sequence);
+        expect(sequences).not.toContain(full.items[0].sequence);
+        expect((await store.readTask(binding, task.id)).version).toBe(before.version);
+        expect((await store.taskHistory(binding, task.id)).length).toBeGreaterThan(0);
+        // Re-running may prune the previous audit event because it is also indexed.
+        const again = await store.pruneTaskEvents(binding, task.id, { keepEvents: kept });
+        expect(again.removed).toBeLessThanOrEqual(1);
+        await fs.meta.seq!.setEntry(eventsPath(binding.rootPath), taskEventFirstKey(task.id), '99999');
+        await expect(store.taskEventPage(binding, task.id)).rejects.toThrow('retention watermark');
+        await expect(store.pruneTaskEvents(binding, task.id)).rejects.toThrow('retention watermark');
+    });
+
+    it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid event retention count %s', async keepEvents => {
+        const task = await store.createTask(binding, 's', spec);
+        const before = await store.events(binding);
+        await expect(store.pruneTaskEvents(binding, task.id, { keepEvents })).rejects.toThrow('keepEvents');
+        expect(await store.events(binding)).toEqual(before);
+    });
+
+    it('refuses to delete another Task event through a corrupt retention index', async () => {
+        const task = await store.createTask(binding, 's', spec);
+        await store.signalTask(binding, task.id, { type: 'advance' });
+        const other = await store.createTask(binding, 's', spec);
+        const before = await store.events(binding);
+        const foreign = before.find(event => event.taskId === other.id)!;
+        await fs.meta.seq!.setEntry(eventsPath(binding.rootPath), taskEventKey(task.id, 1), String(foreign.sequence));
+        await expect(store.pruneTaskEvents(binding, task.id, { keepEvents: 1 })).rejects.toThrow('scope mismatch');
+        expect(await store.events(binding)).toEqual(before);
+        expect(await fs.meta.seq!.getEntry(eventsPath(binding.rootPath), taskEventFirstKey(task.id))).toBeNull();
+    });
+
+    it('compacts Task version history without touching the authoritative record or facts', async () => {
+        const task = await store.createTask(binding, 's', spec);
+        // Every versioned write records a snapshot; signals advance the record cheaply.
+        for (let step = 0; step < 4; step++) {
+            await store.signalTask(binding, task.id, { type: 'external', payload: { step } });
+        }
+        const before = await store.readTask(binding, task.id);
+        const versions = (await store.taskHistory(binding, task.id)).map(item => item.version);
+        expect(versions[0]).toBe(0);
+        expect(versions).toHaveLength(before.version + 1);
+
+        // Keep the newest two snapshots; the main record stays authoritative.
+        const oldest = versions[0];
+        const compacted = await store.compactTaskHistory(binding, task.id, { keepVersions: 2 });
+        expect(compacted.keptFrom).toBe(before.version - 1);
+        expect(compacted.removed).toBe(versions.length - 2);
+        expect((await store.taskHistory(binding, task.id)).map(item => item.version))
+            .toEqual([before.version - 1, before.version]);
+        expect(await store.readTask(binding, task.id)).toEqual(before);
+        // A pruned version is simply unavailable; the retained window still reads.
+        expect(await store.taskHistoryPage(binding, task.id, { afterVersion: -1, throughVersion: oldest }))
+            .toMatchObject({ items: [] });
+        expect((await store.taskHistoryPage(binding, task.id, { afterVersion: before.version - 1 })).items)
+            .toHaveLength(1);
+        expect((await store.events(binding)).some(event => event.type === 'task.history.compacted')).toBe(true);
+        // Compacting again is a no-op.
+        expect(await store.compactTaskHistory(binding, task.id, { keepVersions: 2 })).toEqual({ removed: 0, keptFrom: compacted.keptFrom });
+        // The default window keeps everything at this size.
+        expect(await store.compactTaskHistory(binding, task.id)).toEqual({ removed: 0, keptFrom: 0 });
+        expect((await store.taskAttempts(binding, task.id))).toEqual([]);
+    });
+
+    it.each([0, 2, 100])('preserves both retention limits when beforeVersion is %s', async beforeVersion => {
+        const task = await store.createTask(binding, 's', spec);
+        for (let step = 0; step < 4; step++) await store.signalTask(binding, task.id, { type: 'advance' });
+        const result = await store.compactTaskHistory(binding, task.id, { keepVersions: 2, beforeVersion });
+        const retained = (await store.taskHistory(binding, task.id)).map(item => item.version);
+        expect(retained).toEqual(beforeVersion === 0 ? [0, 1, 2, 3, 4] : beforeVersion === 2 ? [2, 3, 4] : [3, 4]);
+        expect(result.removed).toBe(5 - retained.length);
+    });
+
+    it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid history retention count %s without deleting data', async keepVersions => {
+        const task = await store.createTask(binding, 's', spec);
+        const history = await store.taskHistory(binding, task.id);
+        await expect(store.compactTaskHistory(binding, task.id, { keepVersions })).rejects.toThrow('keepVersions');
+        expect(await store.taskHistory(binding, task.id)).toEqual(history);
+    });
+
+    it.each([-1, 1.5, NaN, Infinity])('rejects invalid history version boundary %s', async beforeVersion => {
+        const task = await store.createTask(binding, 's', spec);
+        await expect(store.compactTaskHistory(binding, task.id, { beforeVersion })).rejects.toThrow('beforeVersion');
+        expect((await store.taskHistory(binding, task.id)).map(item => item.version)).toEqual([0]);
+    });
+
+    it('declares a layout manifest and refuses Sessions it cannot interpret', async () => {
+        const record = await store.sessionRecord(binding);
+        expect(record.layout).toMatchObject({ layoutVersion: 1, migration: { status: 'complete', to: 1 } });
+        expect(record.layout?.recordSchemas).toHaveProperty('task');
+        expect(record.layout?.requiredCapabilities).toContain('atomic-cas');
+
+        await (await kernel.openSession('s')).setShared('probe', { ok: true });
+        // A record written by a newer host must not be guessed at.
+        const rewrite = (layout: unknown): Promise<void> => fs.meta.seq!.setEntry(
+            sessionPath(binding.rootPath), 'record', JSON.stringify({ ...record, layout }));
+        await rewrite({ ...record.layout, layoutVersion: 2 });
+        await expect(kernel.openSession('s')).rejects.toThrow('Unsupported Session layout version 2');
+        await expect(store.listShared(binding)).rejects.toThrow('Unsupported Session layout version 2');
+
+        await rewrite({ ...record.layout, requiredCapabilities: ['transactional-seq', 'streams'] });
+        await expect(kernel.openSession('s')).rejects.toThrow("unsupported storage capability 'streams'");
+
+        await rewrite({ ...record.layout, migration: { status: 'pending', to: 2 } });
+        await expect(kernel.openSession('s')).rejects.toThrow('migration is pending');
+
+        for (const layout of [null, false, {},
+            { ...record.layout, recordSchemas: { ...record.layout!.recordSchemas, task: 2 } },
+            { ...record.layout, recordSchemas: {} },
+            { ...record.layout, requiredCapabilities: undefined },
+            { ...record.layout, migration: { status: 'complete', to: 2 } },
+        ]) {
+            await rewrite(layout);
+            await expect(kernel.openSession('s')).rejects.toThrow();
+            await expect(store.listShared(binding)).rejects.toThrow();
+            await expect(store.setShared(binding, 'probe', { ok: false })).rejects.toThrow();
+        }
+
+        // A legacy record without a manifest still opens and works.
+        await rewrite(undefined);
+        const legacy = await kernel.openSession('s');
+        expect((await store.sessionRecord(binding)).layout).toBeUndefined();
+        expect((await legacy.getShared('probe'))?.value).toEqual({ ok: true });
     });
 
     it.each([false, true])('fences messages from cancelled ancestors while preserving queued replay: saved=%s', async saved => {
