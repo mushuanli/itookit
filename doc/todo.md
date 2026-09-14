@@ -101,10 +101,10 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 已补验证：首个能力回执后、Task.start 后、动态 patch 检查点前、委派全部完成但根 join 信号前四个真实 SIGKILL 窗口；恢复保持 Task 身份、已完成输出及模型调用次数。结果不确定时仍阻断并要求显式裁决，不追求外部服务恰好执行一次。
   - 入口：`apps/cli/tests/crash-matrix.test.ts`、`packages/llm-flow/__tests__/durable-flow-executor.test.ts`、[验收记录](minimal-system-acceptance.md)。
 
-- [ ] **P1-02 同机所有权与全部本地控制入口**
+- [x] **P1-02 同机所有权与全部本地控制入口**
   - 已实现：Session/Run 租约、epoch、CLI 本机锁；Run 到期即失效、迟到心跳不续活；节点提交、共享状态和根信号在事务内检查所有权；失权不触发失败清理。
-  - 待实现/核对：取消、pause/resume、图重试、委派兄弟取消、资源授权及工作区清理的旧句柄/迟到回调路径。已补 TaskHandle cancel/pause/interrupt/resume/start/signal/retry、资源创建和预算事务 guard；后台委派在截止前保留所有权，终态恢复也收敛后台任务。独立 DAG 命令已接上 Session 写权限门、工作区管理器以及本 Kernel 的 Run 租约；失权/异宿主控制被拒，HITL 响应同样事务校验。同机并发控制串行化，重复 retry 复用回执；暂停/恢复仅作用于当前 Run，不再暂停整个 Session。
-  - 待验收：同机两个进程争用、旧宿主暂停后恢复、租约失效后迟到请求；清理不确认时已在 5 秒后持久记录 pending 说明，桌面显示且 CLI 退出等待期间报告；继续保留数据和租约，确认停止后才清理。保留本机时钟变化的安全失败边界，不实现跨主机时钟协议。
+  - 已核对取消、pause/resume、图重试、委派兄弟取消、资源授权及工作区清理的旧句柄/迟到回调路径。已补 TaskHandle cancel/pause/interrupt/resume/start/signal/retry、资源创建和预算事务 guard；后台委派在截止前保留所有权，终态恢复也收敛后台任务。独立 DAG 命令已接上 Session 写权限门、工作区管理器以及本 Kernel 的 Run 租约；失权/异宿主控制被拒，HITL 响应同样事务校验。同机并发控制串行化，重复 retry 复用回执；暂停/恢复仅作用于当前 Run，不再暂停整个 Session。
+  - 已验收：CLI 两个进程争用及活跃拥有者拒绝取消；真实 LocalFS/SQLite 进程 SIGSTOP → 租约过期 → 新进程 epoch 2 接管 → SIGCONT 后八种迟到写入全部拒绝，新拥有者与任务保持不变。清理不确认时已在 5 秒后持久记录 pending 说明，桌面显示且 CLI 退出等待期间报告；继续保留数据和租约，确认停止后才清理。保留本机时钟变化的安全失败边界，不实现跨主机时钟协议。
 
 - [ ] **P1-03 本地工作区与委派可用性**
   - 已实现：CLI/Tauri worktree、持久创建意图与租约、文件/进程/cwd 一致、detached deadline 恢复、pending 收尾、脏副本保留；已有真实 LocalFS/SQLite/Kernel/Flow SIGKILL 和 Tauri IPC/bwrap 探针证据。

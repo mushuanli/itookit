@@ -1820,3 +1820,10 @@ HTTP 监听首次在沙箱内遭 EPERM，随后经正常提权运行通过。日
 使用正式 Tauri debug 构建、Xvfb :103、独立 dbus/AT-SPI 与隔离 profile `/tmp/x1-p1-window-UX0yFe`。普通 `.flow` 草稿包含 source(transform) → gate(human) → after(transform)，通过窗口 Run 启动，不修改 Kernel 持久记录、不注入应用 API。窗口中选择运行记录并点击 source 的「重试并重算下游」；source 两次执行成功、原 gate 取消、新 gate 等待。重启应用，重新选中同一 Run，点击「继续运行」并在 Respond 对话框键入 yes；新 gate、after、根均 succeeded。再次重启后列表仍为 succeeded，并保留两代 source、取消的 gate 及新 gate。根 ID `task_5c17c63d-6905-4156-80aa-200176c291be`；终态耗时 1248.5 秒包含人工等待及两次重开，不能用作性能样本。
 
 验证：Flow 238、Kernel 257、Run UI 9 项通过；全仓 typecheck、docs:check（77 份 / 5 条既有历史告警）、styles:check、Tauri Vite 与 Cargo offline 构建通过。本段不代替工作区专门验收，也不推导其他桌面平台支持。
+
+
+### 同机暂停宿主恢复后的控制隔离（2026-09-14）
+
+`scheduler-paused-owner.test.ts` 使用两个真实 Node 进程、LocalFS 与 Node SQLite：第一进程取得 Run 租约后 SIGSTOP，等待实际期限过期，第二进程取得 epoch 2；SIGCONT 恢复第一进程后 cancel/pause/resume/start/signal/retry/createResource/setShared 八种迟到写入均报 `STALE_SHARED_LEASE`。旧句柄 release 不撤销新租约；新进程 assertOwned 成功，任务仍 created、无额外 retry/共享写入/control。测试不改持久租约或注入时钟。该独立用例与 AppShell typecheck 通过。既有 CLI `run-live-owner-refusal.test.ts` 覆盖活跃宿主下另一真实进程取消被拒。
+
+包含 `8de85fbb` 的全量 `pnpm test` 矩阵通过（`/tmp/local-p1-final-matrix3.log`，含 CLI 22 项 crash matrix 与 Rust）；本新增暂停用例在矩阵之后独立运行通过。
