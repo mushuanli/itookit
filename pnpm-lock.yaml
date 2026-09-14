@@ -441,6 +441,9 @@ importers:
       '@itookit/vfsdriver-localfs':
         specifier: workspace:*
         version: link:../vfsdriver-localfs
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.43
       fake-indexeddb:
         specifier: ^6.0.0
         version: 6.2.5
@@ -455,7 +458,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.2.3)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.43)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
 
   packages/common:
     dependencies:
