@@ -10,6 +10,7 @@ import {
 import { BaseProvider } from '../providers/base';
 import { createProvider } from '../providers/registry';
 import { LLMError } from '../errors';
+import { RequestCancellation } from './request-cancellation';
 import { DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY, DEFAULT_TIMEOUT } from '../constants';
 import { expandMessagesAttachments } from '../utils/attachment';
 import { log } from '../utils/logger';
@@ -163,29 +164,23 @@ export class LLMDriver {
             finalParams = await this.config.hooks.beforeRequest(finalParams);
         }
         
-        // 2. 设置超时
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
-        
-        // 合并 signal
-        if (finalParams.signal) {
-            finalParams.signal.addEventListener('abort', () => controller.abort());
-        }
-        finalParams.signal = controller.signal;
-        
+        const cancellation = new RequestCancellation(this.providerName, this.config.timeout, finalParams.signal);
+        finalParams.signal = cancellation.controller.signal;
+
         try {
+            finalParams.signal.throwIfAborted();
             if (finalParams.stream) {
                 // 流式响应
                 const stream = this.provider.stream(finalParams);
                 log.debug('Stream started', { requestId });
-                return this.wrapStreamWithTimeout(stream, controller, timeoutId, requestId);
+                return this.wrapStreamWithTimeout(stream, cancellation, requestId);
             } else {
                 const startTime = Date.now();
                 const response = await this.executeWithRetry(
                     () => this.provider.create(finalParams),
-                    requestId
+                    requestId, finalParams.signal
                 );
-                clearTimeout(timeoutId);
+                cancellation.dispose();
                 
                 // ✅ 简洁调用
                 log.info('Chat success', {
@@ -201,7 +196,8 @@ export class LLMDriver {
                 return response;
             }
         } catch (error: any) {
-            clearTimeout(timeoutId);
+            cancellation.dispose();
+            error = cancellation.error(error);
 
             // 转换为 LLMError
             const llmError = error instanceof LLMError
@@ -234,9 +230,11 @@ export class LLMDriver {
     private async executeWithRetry<T>(
         fn: () => Promise<T>,
         requestId: string,
+        signal: AbortSignal,
         attempt = 1
     ): Promise<T> {
         try {
+            signal.throwIfAborted();
             return await fn();
         } catch (error: any) {
             const llmError = error instanceof LLMError
@@ -244,7 +242,7 @@ export class LLMDriver {
                 : LLMError.fromException(this.providerName, error);
             
             // 检查是否可重试
-            const shouldRetry = llmError.retryable && attempt < this.config.maxRetries;
+            const shouldRetry = !signal.aborted && llmError.retryable && attempt < this.config.maxRetries;
             
             if (shouldRetry) {
                 // 计算延迟（指数退避）
@@ -260,7 +258,7 @@ export class LLMDriver {
                 });
                 
                 await this.sleep(delay);
-                return this.executeWithRetry(fn, requestId, attempt + 1);
+                return this.executeWithRetry(fn, requestId, signal, attempt + 1);
             }
             
             throw llmError;
@@ -271,32 +269,24 @@ export class LLMDriver {
     
     private async *wrapStreamWithTimeout(
         stream: AsyncGenerator<ChatCompletionChunk>,
-        controller: AbortController,
-        timeoutId: ReturnType<typeof setTimeout>,
+        cancellation: RequestCancellation,
         requestId: string
     ): AsyncGenerator<ChatCompletionChunk> {
         let chunkCount = 0;
-        // Rolling inactivity timeout: reset on every chunk.
-        // The initial timeoutId covers "time to first chunk";
-        // after each chunk we replace it so silence also triggers abort.
-        let activeTimeout = timeoutId;
-        const reschedule = () => {
-            clearTimeout(activeTimeout);
-            activeTimeout = setTimeout(() => {
-                log.warn('Stream inactivity timeout', { requestId, chunkCount });
-                controller.abort();
-            }, this.config.timeout);
-        };
         try {
             for await (const chunk of stream) {
-                reschedule();
+                cancellation.controller.signal.throwIfAborted();
+                cancellation.reset();
                 chunkCount++;
                 this.config.hooks?.onStreamChunk?.(chunk);
                 yield chunk;
             }
+            cancellation.controller.signal.throwIfAborted();
             log.debug('Stream completed', { requestId, chunkCount });
+        } catch (error) {
+            throw cancellation.error(error);
         } finally {
-            clearTimeout(activeTimeout);
+            cancellation.dispose();
         }
     }
     

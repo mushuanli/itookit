@@ -197,3 +197,16 @@ IPC 队列争用而非算法复杂度。修复方向（按收益排序）：① 
 复现步骤：配置本地等待 120 秒的 mock；新建并选中 Session；再次点“+ 会话”应在同组产生同级会话；发送请求后切到 Projects 或另一个 Session，观察服务端连接仍在，等待约 60 秒超时，再重开原 Session 查看记录。关闭内核的验收需另有明确操作入口，不能把这些导航当作停止。
 
 临时证据：数据根 `/tmp/mindos-live-close-VYKRwL`，`second-created.png`（旧错误）、`fixed-create.png`、`timeout-reopened.png`、`switch-inflight.png`、`actually-switched.png`、`mock.log`、`closed-storage.json`。日志 `/tmp/x1-close-create-before.log`、`/tmp/x1-close-create-files.log`、`/tmp/x1-close-shell-final.log`、`/tmp/x1-close-vfsui.log`、`/tmp/x1-close-types.log`、`/tmp/x1-close-front.log`、`/tmp/x1-close-native.log`。长期复核以本提交回归和上述步骤为准；临时文件会消失。验收后关闭本次应用与 mock，产物保留正常入口。
+## 2026-09-14：模型超时与用户取消的原因保留
+
+基线 `abacbe43` 加本批选定文件，隔离快照 `/tmp/x1-feature-verify-w_wua9ix`。修复 LLMDriver 将内部首响应/流中停顿超时与调用方取消都转为无原因 AbortError 的问题：RequestCancellation 保留首个取消原因，即使 fetch/ReadableStream 用 `Fetch is aborted` 覆盖原因，也分别返回 TIMEOUT 或 ABORTED。流式迭代异常经过同一原因恢复；完成、失败及消费者结束迭代均清理计时器和外部监听器。已取消请求不派发，已超时的同一请求不继续在失效 signal 上重试。这里没有用 Promise.race 把设备未停止伪装成已停止，仍等待实际 Provider 读取结束。
+
+六项驱动回归覆盖流式/非流式首响应超时、首块后滚动停顿期限、用户取消、调用前已取消、消费者结束流。HTTP 传输替身故意丢弃 signal.reason 并抛 AbortError；旧驱动六项均失败，新驱动六项通过。完整 device-llm 55 项、app-shell 199 项通过，30 项既有跳过。宿主新增真实 runtime/Kernel/模型失败事件回归，核对终态 message:status 指向已挂载的助手节点；该场景旧代码也通过，不将其声称为 UI 残留缺陷的复现。设备层/Tauri 类型、前端与 custom-protocol 原生构建通过。
+
+真实 Linux Tauri/Xvfb/D-Bus/AT-SPI：新建会话，窗口发送 `hello timeout-check`；本地 mock 收齐请求后等待 120 秒。请求于 `03:27:47.271Z` 收齐，`03:28:47.256Z` 响应连接关闭且 `responseEnded=false`，即客户端约 60 秒超时、早于 mock 回复。SQLite 只读核对 Task `task_9c43e467-32d1-4359-b620-3aeafc974bee` 及 Effect 为 failed，持久错误为 `Request timed out after 60000 ms without a response`，Task updatedAt 为 `1789356527314`（连接断开后约 58 ms）。真实画面随后显示 FAILED 与相同错误文本。
+
+边界：连接断开后 2 秒的第一张截图仍显示总体 Error / 助手 RUNNING；打开 Inspector 后画面已显示 FAILED 和错误卡片。现有证据无法区分绘制延迟与事件消费延迟，不能以最终画面替代有界 live 收敛证明，P0-02 保留此项。原生已停止这里只指本地 HTTP 连接被关闭，不证明远端供应商计算或计费已停止。原始结构化错误码并未据此宣称完整穿透所有持久错误序列化层。
+
+可复现命令：`pnpm --filter @itookit/device-llm test`、`pnpm --filter @itookit/app-shell test`；窗口步骤：本地 OpenAI-compatible mock 等待 120 秒后回复，发送消息并观察约 60 秒连接断开，核对错误卡片和 Task/Effect 持久错误。数据根 `/tmp/mindos-live-close-VIgRBk`；截图 `timeout-inflight.png`、`timeout-live.png`、`console.png`，持久摘录 `timeout-persisted.json`，请求日志 `mock.log`。测试/构建日志 `/tmp/x1-timeout-before.log`、`/tmp/x1-timeout-device.log`、`/tmp/x1-timeout-shell.log`、`/tmp/x1-timeout-types.log`、`/tmp/x1-timeout-front.log`、`/tmp/x1-timeout-native.log`。临时文件会消失，长期证据以本提交测试与步骤为准。
+
+补验：旧拥有者租约自然过期后，用新进程重开同一数据根，`timeout-reopened.png` 显示原消息 FAILED 与同一 60000 ms 超时原因。随后发送 `hello user-cancel`，mock 于 `03:36:49.210Z` 收齐，点击真实停止按钮后 `03:36:49.883Z` 记录连接关闭；`user-cancel-live.png` 显示 ABORTED，SQLite 中 Task `task_23d85d37-042a-4541-9a95-f48722ea2592` 和 Effect 为 cancelled、cleanupPending=false，未误写 TIMEOUT，前一条超时仍为 failed。摘录见 `timeout-and-cancel-persisted.json`。取消卡片仍写“执行失败”和 Task cancelled，用户取消文案优化仍属 P0-02，不据此宣称三态文案完成。验收结束后关闭本次应用和 mock，正常构建产物保留。
