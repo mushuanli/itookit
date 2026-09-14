@@ -99,3 +99,44 @@ it('keeps cleanup failures visible and permits retrying reset', async () => {
     expect(f.kernel.cancel).toHaveBeenCalledTimes(3);
     await f.workbench.destroy();
 });
+
+it('releases a deleted active Session and replaces its stale route', async () => {
+    const f = setup(); await f.workbench.start(); await f.workbench.openResource('s');
+    f.repository.getManifest.mockRejectedValueOnce(Object.assign(new Error('Session missing'), { code: 'ENOENT' }));
+    f.changed();
+    try {
+        await vi.waitFor(() => expect(f.workbench.getActiveResourceId()).toBeNull());
+        expect(f.destroy).toHaveBeenCalledOnce(); expect(f.release).toHaveBeenCalledOnce();
+        expect(f.onSelect).toHaveBeenLastCalledWith('', 'replace');
+    } finally { await f.workbench.destroy(); }
+});
+
+it('retains the active Session when reading its manifest fails without proving deletion', async () => {
+    const f = setup(); await f.workbench.start(); await f.workbench.openResource('s');
+    const calls = f.repository.getManifest.mock.calls.length;
+    f.repository.getManifest.mockRejectedValueOnce(Object.assign(new Error('Storage unavailable'), { code: 'EIO' }));
+    f.changed();
+    try {
+        await vi.waitFor(() => expect(f.repository.getManifest.mock.calls.length).toBeGreaterThan(calls));
+        expect(f.workbench.getActiveResourceId()).toBe('s?branch=main');
+        expect(f.destroy).not.toHaveBeenCalled(); expect(f.release).not.toHaveBeenCalled();
+    } finally { await f.workbench.destroy(); }
+});
+
+it('finishes deletion reconciliation before opening a newly selected Session', async () => {
+    const f = setup(); await f.workbench.start(); await f.workbench.openResource('s');
+    let rejectRead!: (error: Error) => void;
+    const read = new Promise<never>((_, reject) => { rejectRead = reject; });
+    const calls = f.repository.getManifest.mock.calls.length;
+    f.repository.getManifest.mockReturnValueOnce(read);
+    f.changed();
+    await vi.waitFor(() => expect(f.repository.getManifest.mock.calls.length).toBeGreaterThan(calls));
+    const opening = f.workbench.openResource('next');
+    rejectRead(Object.assign(new Error('Session missing'), { code: 'ENOENT' }));
+    try {
+        await opening;
+        expect(f.workbench.getActiveResourceId()).toBe('next?branch=main');
+        expect(f.destroy).toHaveBeenCalledOnce(); expect(f.release).toHaveBeenCalledOnce();
+        expect(f.onSelect).toHaveBeenLastCalledWith('next?branch=main');
+    } finally { await f.workbench.destroy(); }
+});

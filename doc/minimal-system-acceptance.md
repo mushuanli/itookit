@@ -113,3 +113,17 @@ IPC 队列争用而非算法复杂度。修复方向（按收益排序）：① 
 | P0-03 真实 Tauri 操作教程与子进程凭证注入交付 | 教程与注入约定已写入 [最小系统](minimal-system.md)；凭证注入仍属操作约定，无独立 UI |
 | P0-04 平台实机验证（Bubblewrap/目录边界、其他平台支持范围） | 仅 Linux + bwrap 组合测试与本次桌面复验；其他平台未验证 |
 | GUI 观察者区分“已接受/已变化/已停止”、真实设备停止确认 | 未验收（见 [Durable 证据映射](design/durable-harness-evidence.md)） |
+
+## 2026-09-14：运行中 Session 删除后的界面收尾
+
+验收基线为 `98e5407b`；从隔离快照执行 Tauri 前端构建与 `cargo build --offline --features tauri/custom-protocol --manifest-path apps/tauri-app/src-tauri/Cargo.toml`，使用嵌入资源的真实二进制、Xvfb/D-Bus/AT-SPI 和全新临时 profile。Provider 为本地 OpenAI-compatible mock，收齐请求后延迟 120 秒才回复。
+
+复现：通过会话面板创建 live-close，输入消息并发送；窗口出现 RUNNING / Stop Generation，mock 收到 `/v1/chat/completions`。右键会话行 → 删除 → 原生 OK 确认后，列表与 `/var/lib/sessions` 下该 Session 目录已删除，但旧聊天仍显示 FAILED / Fetch is aborted、重试按钮和 Session not found。不能把这个结果记作完整删除 UI 验收通过。
+
+修复：SessionWorkbench 的刷新与导航共用串行队列。已选 Session 的 manifest 明确返回 ENOENT 时关闭编辑器、释放文件上下文、显示会话选择提示并替换旧路由；普通 EIO 等错误仍可见，不推断成删除。核对覆盖 Session 及其文件/任务路径；分支变化仍更新路由。
+
+复测：用修复后的前端与原生二进制重新创建临时 profile，连续执行创建 → 发送 → 确认运行 → 右键删除 → 原生 OK。模型请求在 01:10:58 UTC 收齐，确认删除发生在 120 秒延迟回复前；删除后无旧聊天、重试或 Session not found。结束该应用进程，重新启动同一数据根，列表仍为空，Session 目录未复活。过程没有调用内部删除 API。
+
+本地定位：失败 profile `/tmp/mindos-live-close-r2gvit`，修复与重开 profile `/tmp/mindos-live-close-RVCjog`，其中 running/context/confirm/deleted/reopen 文本与 PNG 为当次证据；临时目录不是长期交付物。重现时按上述步骤建立新数据根，并将 mock 回复延迟到删除确认之后。窗口开发者工具中的字体 CSP 告警仍存在，本批未验收其修复。
+
+自动回归先复现了删除后 active route 仍保留的失败，再验证 ENOENT 清理、EIO 保留和核对期间切换新 Session 不误关新编辑器。隔离 app-shell 196 项通过，30 项既有跳过；Tauri 类型、前端与原生构建通过。本场景只证明模型请求在途时的 Session 删除及重开；原生设备不确认停止、单独关闭但保留记录、真实超时/IPC 故障和其余 P0-02 矩阵仍开放。

@@ -258,15 +258,27 @@ export class SessionWorkbench implements WorkspaceController {
         this.tail = operation.catch(() => {}); return operation;
     }
     private async syncBranchRoute(): Promise<void> {
-        const id = this.active, branch = this.activeBranch;
-        if (!id || branch === undefined || !this.editor) return;
-        const manifest = await this.repository.getManifest(id);
-        if (this.closed || this.active !== id || this.activeBranch !== branch || !this.editor) return;
-        const current = manifest.currentBranch ?? 'main';
-        if (current !== branch) {
-            this.activeBranch = current;
-            this.onSelect(sessionRoute(id, current), 'push');
-        }
+        // Serialize reconciliation with navigation so a stale read cannot close a newer editor.
+        const operation = this.tail.then(async () => {
+            if (this.closed || !this.active) return;
+            const id = this.active, target = resolveBrowserTarget(id.startsWith('/') ? id : '/' + id);
+            if (target.kind === 'folder') return;
+            const manifest = await this.repository.getManifest(target.sessionId).catch(async error => {
+                if (error?.code !== 'ENOENT') throw error;
+                await this.closeEditor();
+                this.message('选择一个会话，或新建会话');
+                this.onSelect('', 'replace');
+                return undefined;
+            });
+            if (this.closed || !manifest || this.activeBranch === undefined || !this.editor) return;
+            const current = manifest.currentBranch ?? 'main';
+            if (current !== this.activeBranch) {
+                this.activeBranch = current;
+                this.onSelect(sessionRoute(id, current), 'push');
+            }
+        });
+        this.tail = operation.catch(() => {});
+        await operation;
     }
     private async reloadAfterMount(sessionId: string): Promise<void> {
         if (this.closed) return;
