@@ -1753,3 +1753,17 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 **可续发性**：随后再发送 `refused-probe-2` 被正常接受，`history.seq` 中 round 数由 1 变为 2（`FRS92VQH`、`X460E17SY`）——没有出现“连续两条用户消息”之类的拒绝，也没有留下阻塞会话的悬挂状态。也就是说，一次失败的发送会留下**终态失败 + 可重试**的记录，而不是半条消息。
 
 边界：本场景是**持久化之后**的 provider 失败，不是“写入前被回滚”的那种发送回滚（例如租约被其他宿主夺走时 `sendMessage` 在追加 round 前抛错）；后者本轮未取窗口证据。另外错误文案为 WebKit 的 `Load failed`，**不含端点或原因**，对用户不可诊断——这是一个已记录但未修的质量问题，不应被当作“错误已清晰呈现”。
+
+## 2026-09-14：pause 的「已请求 / 已确认」投影与界面文案（P0-02）
+
+P0-02 的剩余项里有“以及 pause 同类文案”。查证结果分两层：
+
+- **投影层已经支持**：`taskStat` 的 `control.requested` 取 `task.status === 'cancelled' ? 'cancel' : task.control?.mode ?? 'run'`，`mode` 可为 `run`/`pause`/`interrupt`；`acknowledged` 对非取消任务取 `task.control?.acknowledged ?? true`，而 `controlTask` 在受理非 `run` 模式时把它算作「没有 leased/indeterminate 的 Effect」（`infrastructure/seqfile/store.ts:986`）。所以 pause 与 cancel 一样存在「已请求但外部未确认」的中间态。
+- **界面层此前完全缺失**：`SessionWorkbench.showTask` 只对 `control.requested === 'cancel'` 渲染，其余一律 `data-stop-state="none"` 且文案为空——被 Flow 或另一个宿主暂停的任务在任务视图里**不显示任何状态**。
+
+本轮补齐：pause 现在渲染 `pause-pending`（`暂停已请求，等待在途操作结束（{count} 个操作在途）`）直到内核确认，确认后为 `paused`（`已暂停（暂停请求已确认）`），控制模式回到 `run` 时恢复 `none` 并隐藏。中英文案同步。回归 `packages/app-shell/tests/session-browser-ui.test.ts` 扩展覆盖 pending → paused → none 三态（含 `activeOperations` 计数与 `hidden` 切换）；app-shell 213 项通过、30 项既有跳过，`common`/`app-shell` 类型检查与 `styles:check` 通过。
+
+**边界（不应被当作“pause 已可用”的证据）**：
+
+1. **界面没有暂停入口**。`RunAttachmentController.pause()` 在 `packages/llm-ui` 中存在，但全仓没有任何调用方（只有 `resume` 经斜杠命令接线）。因此本轮补的是**投影与展示**：当任务被其他角色（Flow、CLI、另一宿主）暂停时界面不再沉默，而不是“用户能在窗口里暂停任务”。
+2. **没有真实窗口证据**。本轮尝试用挂起模型在窗口中打开该任务的详情视图以读取该行文本，但侧栏的 Session 树行不暴露给 AT-SPI、合成点击也无法展开出 `files`/`tasks` 子节点，四组坐标与 DoAction 均未进入任务视图。任务视图的 `[data-stop-state]` 仍只有 jsdom 证据（`session-browser-ui.test.ts`），以及本会话早前在**内核层**取得的取消三态证据（`kernel.test.ts`「distinguishes an accepted cancel request from a confirmed external stop」）。pause 的窗口验收仍未完成。
