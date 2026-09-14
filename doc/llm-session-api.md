@@ -403,7 +403,7 @@ packages/llm-session/src/
 
 **约定**：Round 只表达对话历史（`historyParentIds`）；Run 引用经 `executions` 附着到 Round；Branch/merge/context fold 只在本包实现；普通 Chat 用 Direct Scheduler，不伪装成单节点 DAG；不访问 Kernel Dispatcher/ProcessTable 内部对象。
 
-记忆检索注入：`initializeConversationSystem({ retrieveMemory, ... })` 将回调传递到 SessionManager。回调签名为 `(plan, agent, { sessionId, policy }) => Promise<RetrievedMemoryEntry[]>`；policy 是当前 Agent memoryPolicy 的独立副本，缺少策略时为 undefined。结果经 ContextAssembler 进入 Task 输入快照。app-core 默认装配 SessionMemoryProvider（`create-application-runtime.ts` 以 `new SessionMemoryProvider(kernel.kernel).retrieve` 注入）。
+记忆检索注入：`initializeConversationSystem({ retrieveMemory, ... })` 将回调传递到 SessionManager。回调签名为 `(plan, agent, { sessionId, policy }) => Promise<RetrievedMemoryEntry[]>`；policy 是当前 Agent memoryPolicy 的独立副本，缺少策略时为 undefined。结果经 ContextAssembler 进入 Task 输入快照。app-core 默认装配 SessionMemoryProvider（`createKernelRuntime` 创建共享 provider，`createConversationSystem` 注入其 retrieve 与管理接口）。
 
 `SessionMemoryProvider(kernel)` 提供 `upsert(sessionId, policy, { entryId, scope, content })`、`remove(sessionId, policy, scope, entryId)`、`prune(sessionId, policy, before)`（按宿主水位裁剪 writeScopes 内未更新的条目）和可直接注入的 `retrieve` 回调。存储在目标 Kernel Session shared，按 namespace/scope 精确隔离，写入校验 writeScopes、检索校验 readScopes。检索默认 10 项（0 禁用），使用词项包含匹配及更新时间排序，返回内容和 SHA-256 摘要。返回 entryId 是 JSON 编码的 `[scope, entryId]`，修改/删除使用原始 entryId。**保留期（2026-09-11）**：`MemoryPolicy.retention` 支持 `maxEntriesPerScope`（写入后优先保留本次写入、再按更新时间保留至 N 条；before 水位仍可剔除本次写入）与 `before` 水位（写入/裁剪时丢弃更早条目），作用范围仅限该策略的 scope；`prune` 只作用于 `writeScopes`，非法上限/水位在打开存储前拒绝。当前存储按 scope 整组加载，未提供跨 Session 共享或向量检索；模型写入工具由下述 TaskMemoryService 接线，调用方必须提供可信的 Agent 策略。
 
@@ -415,7 +415,7 @@ packages/llm-session/src/
 
 `SessionMemoryControls.forSession(sessionId)` 创建固定 Session 的宿主管理视图，沿用同一 Agent 配置服务和写租约检查。app-shell 的会话 Files 页用此视图打开记忆管理对话框，避免后台切换绑定会话后窗口后续操作写错目标。
 
-任务级记忆执行：`TaskMemoryService(kernel).invoke(toolId, args, context)` 支持 memory_list/memory_write/memory_remove。context 的 sessionId/taskId/abortSignal 必须由可信宿主 Effect 适配器提供，不能来自模型参数。服务从持久 Task input 读取 memoryPolicy 和 allowedToolIds，要求 llm.agent、工具在白名单且 Task 未终态；模型不能覆盖 Session/策略。写入参数为 scope、entryId、content，可选 expectedContentHash；删除不含 content。共享 createKernelRuntime 已将服务接入工具目录与 tool.call Effect；调用方需显式允许对应 toolIds。取消等待服务实际完成，不能回滚已经提交的存储操作；写入/删除按 local 副作用，崩溃时不自动重放。
+任务级记忆执行：`TaskMemoryService(kernel).invoke(toolId, args, context)` 支持 memory_list/memory_write/memory_remove/memory_compact。context 的 sessionId/taskId/abortSignal 必须由可信宿主 Effect 适配器提供，不能来自模型参数。服务从持久 Task input 读取 memoryPolicy 和 allowedToolIds，要求 llm.agent、工具在白名单且 Task 未终态；模型不能覆盖 Session/策略。写入参数为 scope、entryId、content，可选 expectedContentHash 与 expectedRevision；删除不含 content。共享 createKernelRuntime 已将服务接入工具目录与 tool.call Effect；调用方需显式允许对应 toolIds。取消等待服务实际完成，不能回滚已经提交的存储操作；写入/删除按 local 副作用，崩溃时不自动重放。
 
 存储失败边界：CAS 只对 KernelErrorCode.CONFLICT 重试（最多三次），每次重新读取并校验内容条件；其他存储错误直接返回，包括已提交但回执失败的情况，调用方应先重新加载再决定操作。prune 按 scope 分别提交，不提供跨 scope 原子性，后续 scope 失败时此前提交仍然保留。
 
@@ -432,3 +432,15 @@ ConversationRunCoordinator 在根等待或最终任务发现失败后仍等待�
 TTY 首次结束信息保持不变，后续结束通知与输出不覆盖；已知退出码与未知退出码分别显示，新增文案同步中英文。failed/aborted 历史节点均显示经过转义的原因。
 
 隔离快照验证：llm-ui 28 项，app-shell 整包 178 项及新增终态原因 2 项，共 208 项通过；30 项既有条件跳过。Web/Tauri 类型检查及 Tauri 前端构建通过。发送回归原逻辑 3 失败/1 通过、修复后 4 通过；关闭挂接回归修复前失败、修复后通过。真实 Kernel 重建后，待审批 Task 重新挂接并批准，原 Task 成功且没有新建替代任务。该测试使用内存 VFS 的持久记录重建，不等同于进程 SIGKILL 或真实 GUI；P0-02/P0-04/P0-05 仍开放。
+
+### 共享 Memory、版本冲突与内容压缩
+
+`createKernelRuntime` 暴露 `memory: SessionMemoryProvider`，其 `shared: SharedMemoryStore` 使用系统文件 `/var/lib/memory/shared.seq`。未配置 `MemoryPolicy.sharedMemory` 时仍使用原 Session shared；配置 `{id, incarnation}` 后使用独立资源。同 namespace 不授予访问权：每次操作在事务内校验资源 incarnation/namespace、当前 Session 的精确 scope grants 与冻结 Task policy 的交集。
+
+宿主管理 API 为 `create(id, namespaceId, creatorSessionId)`、`inspect(ref)`、`list()`、`grant(ref, sessionId, grant|null, expectedRevision)`、`remove(ref, expectedRevision)`、`history(ref, limit?)`。创建不隐式授权；`grant=null` 撤权；删除写墓碑并清空授权，同 ID 重建产生新 incarnation。创建者 Session 删除不删除共享数据。审计与操作回执目前无限期保留，删除不物理清除历史；不支持跨主机/跨数据库原子性。history 默认最多返回前 100 项，上限 1000；尚无分页归档/历史物理 GC。
+
+条目新增 `revision`（每次写入的 UUID）、可信 `source.sessionId/taskId/effectId`。`expectedRevision=null` 要求条目不存在，字符串要求当前 revision 相同，省略保持无条件写语义。管理 UI 先比较最新内容、显式采用比较版本后重提，保留草稿。旧条目读取时生成兼容 revision，下一次写入转为 UUID。
+
+`memory_compact` 参数为目标 scope/entryId/content、`sources: [{entryId, revision}]` 和可选目标版本条件；要求摘要比源总 UTF-8 字节数少、1–100 个同 scope 来源，目标不能覆盖来源。提交时在同一事务校验来源版本、读写授权和目标条件，保存 `compression.version=1/sources/model`，保留全部原文。容量不足以同时保留原文与摘要时拒绝。模型与 Task/Effect 来源由宿主从持久 Task 获取；摘要生成沿用持久 Agent 和 tool.call，不新增语义检索或独立模型调度器。共享写入用可信 Task/Effect 操作身份保存幂等回执，重放不改新版本、不复活已删除内容；工具结果不确定时仍沿用默认阻断、显式恢复策略。
+
+`SessionMemoryControls.sharing` 提供固定 Session 的宿主管理入口；管理权限不注册为模型工具。CLI 和桌面通过同一 provider 写入，共享引用会冻结到 Task policy。词项检索保持原行为，语义检索延期。

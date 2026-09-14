@@ -14,7 +14,7 @@ function driver(skills: SkillDefinition[]) {
 }
 
 describe('Skill scope boundaries', () => {
-    it('reloads selected filesystem definitions and tools on refresh but preserves explicit unload', async () => {
+    it('requires explicit reload for changed filesystem definitions and preserves explicit unload', async () => {
         let version = 'old';
         const definitions = () => [skill('review', { source: 'filesystem', instructions: version,
             tools: [{ toolId: version, executionType: 'http', definition: { name: version } }] })];
@@ -25,7 +25,9 @@ describe('Skill scope boundaries', () => {
         await service.setCwd('/project');
         await service.loadSkill('review');
         version = 'new';
-        await service.refreshScopedSkills();
+        expect(await service.refreshScopedSkills()).toMatchObject([{ success: false, error: expect.stringContaining('reload required') }]);
+        expect(service.getLoadedSkills()).toEqual([]);
+        await service.reloadSkill('review');
         expect(service.getLoadedSkills().map(value => value.instructions)).toEqual(['new']);
         expect(unregisterTool).toHaveBeenCalledWith('old');
         expect(registerTool.mock.calls.at(-1)?.[0].id).toBe('new');

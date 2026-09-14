@@ -61,6 +61,42 @@ it('rejects stale management edits and deletes after a concurrent content update
     await expect(provider.upsert('one', policy, entry, { expectedContentHash: 'invalid' })).rejects.toThrow('Invalid expected');
 });
 
+it('rejects an old revision after the same memory is deleted and recreated with identical content', async () => {
+    const provider = new SessionMemoryProvider(kernel);
+    const entry = { entryId: 'same', scope: 'project', content: 'unchanged text' };
+    await provider.upsert('one', policy, entry);
+    const first = (await provider.list('one', policy))[0];
+    await provider.remove('one', policy, entry.scope, entry.entryId, { expectedRevision: first.revision });
+    await provider.upsert('one', policy, entry, { expectedRevision: null });
+    const recreated = (await provider.list('one', policy))[0];
+    expect(recreated.contentHash).toBe(first.contentHash);
+    expect(recreated.revision).not.toBe(first.revision);
+    await expect(provider.upsert('one', policy, { ...entry, content: 'stale edit' }, { expectedRevision: first.revision }))
+        .rejects.toThrow('revision changed');
+    await expect(provider.remove('one', policy, entry.scope, entry.entryId, { expectedRevision: first.revision }))
+        .rejects.toThrow('revision changed');
+    expect((await provider.list('one', policy))[0]).toEqual(recreated);
+});
+
+it('commits smaller summaries with immutable source references and rejects concurrent source changes', async () => {
+    const provider = new SessionMemoryProvider(kernel);
+    await provider.upsert('one', policy, { entryId: 'source', scope: 'project', content: 'A long original memory describing the same useful fact in many words.' });
+    const source = (await provider.list('one', policy))[0];
+    const summary = { entryId: 'summary', scope: 'project', content: 'Useful fact.' };
+    await provider.compact('one', policy, summary, [{ entryId: source.entryId, revision: source.revision }],
+        { model: 'test-model', origin: { operationId: 'compact', taskId: 'task', effectId: 'effect' } });
+    const stored = await provider.list('one', policy);
+    expect(stored).toHaveLength(2);
+    expect(stored.find(item => item.entryId === 'source')).toEqual(source);
+    expect(stored.find(item => item.entryId === 'summary')).toMatchObject({ content: 'Useful fact.',
+        source: { sessionId: 'one', taskId: 'task', effectId: 'effect' }, compression: { version: 1, model: 'test-model',
+            sources: [{ entryId: source.entryId, revision: source.revision, contentHash: source.contentHash }] } });
+    await provider.upsert('one', policy, { entryId: 'source', scope: 'project', content: 'Concurrent source update' });
+    await expect(provider.compact('one', policy, { ...summary, entryId: 'stale' }, [{ entryId: source.entryId, revision: source.revision }]))
+        .rejects.toThrow('source changed');
+    expect(await provider.list('one', policy)).toHaveLength(2);
+});
+
 it('lists management identities without retrieval truncation and isolates unreadable scopes', async () => {
     const provider = new SessionMemoryProvider(kernel);
     for (const scope of ['project', 'private']) {

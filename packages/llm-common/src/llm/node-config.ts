@@ -41,6 +41,8 @@ export interface MemoryRetentionPolicy {
 
 /** Long-term memory policy (long-lived Agents only; flow nodes do not inherit). */
 export interface MemoryPolicy {
+    /** Explicit shared authority; absent keeps the existing Session-local store. */
+    sharedMemory?: { id: string; incarnation: string };
     namespaceId: string;
     readScopes: string[];
     writeScopes: string[];

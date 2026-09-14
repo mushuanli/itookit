@@ -1,3 +1,4 @@
+import { parseLoadedSkillIds } from './loaded-state';
 // @file: kernel-adapters/src/skill/session-skill-restore.test.ts
 // P0-00 reopen semantics: a persisted loaded Skill identity survives a scope rebuild (a new
 // host or a new run in the same Session) and its content is re-injected even when the user
@@ -50,7 +51,7 @@ it('restores a persisted Skill identity after a scope rebuild and respects unloa
         expect(context.projectInstructions).toContain('Always cite the interface contract.');
         expect(context.skillInstructions).toContain('Check every changed interface.');
         expect(context.skillInstructions).toContain('Preserve access checks.');
-        expect((await (await kernel.openSession('session')).getShared('kernel-adapters.skills.loaded'))?.value)
+        expect(parseLoadedSkillIds((await (await kernel.openSession('session')).getShared('kernel-adapters.skills.loaded'))?.value))
             .toEqual(['review']);
 
         // Reopened Session / new host: an unrelated message must still restore the identity.
@@ -61,7 +62,7 @@ it('restores a persisted Skill identity after a scope rebuild and respects unloa
 
         // Explicit unload removes the persisted identity; a later unrelated run stays clean.
         await createSessionSkillControls(kernel, second.sessions).unload('session', 'review');
-        expect((await (await kernel.openSession('session')).getShared('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        expect(parseLoadedSkillIds((await (await kernel.openSession('session')).getShared('kernel-adapters.skills.loaded'))?.value)).toEqual([]);
         const third = await build();
         const afterUnload = await resolveSessionSkillContext(kernel, third.sessions, 'session', 'unrelated request');
         expect(afterUnload.skillInstructions).not.toContain('Check every changed interface.');
@@ -135,7 +136,7 @@ it('distinguishes persisted-identity restore from autoLoad and rematch for an au
         const matched = await resolveSessionSkillContext(kernel, first.sessions, 'session', 'review changes now');
         expect(matched.skillInstructions).toContain('Check every changed interface.');
         expect(matched.skillInstructions).toContain('Preserve access checks.');
-        expect((await (await kernel.openSession('session')).getShared('kernel-adapters.skills.loaded'))?.value)
+        expect(parseLoadedSkillIds((await (await kernel.openSession('session')).getShared('kernel-adapters.skills.loaded'))?.value))
             .toEqual(['review']);
 
         // A rebuilt scope (reopened Session / new host) with a non-matching message restores it
@@ -148,7 +149,7 @@ it('distinguishes persisted-identity restore from autoLoad and rematch for an au
         // Unload clears the identity; the next scope must not resurrect it, while a matching
         // message is still allowed to load it again (unload is not a permanent disable).
         await createSessionSkillControls(kernel, second.sessions).unload('session', 'review');
-        expect((await (await kernel.openSession('session')).getShared('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        expect(parseLoadedSkillIds((await (await kernel.openSession('session')).getShared('kernel-adapters.skills.loaded'))?.value)).toEqual([]);
         const third = await build();
         const afterUnload = await resolveSessionSkillContext(kernel, third.sessions, 'session', 'unrelated request');
         expect(afterUnload.skillInstructions).not.toContain('Check every changed interface.');

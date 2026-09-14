@@ -694,3 +694,23 @@
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: var(--st-space-md, 12px);
 }
+
+/* Sync details share the settings theme and wrap long paths. */
+.sync-section { margin-block: 16px; min-width: 0; }
+.sync-advanced-options { display: grid; gap: 16px; }
+.sync-advanced-options__section { padding-block: 12px; border-top: 1px solid var(--st-border-color); }
+.sync-advanced-options__buttons, .sync-config-panel__buttons, .sync-conflicts__batch-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sync-advanced-options__warning, .modal-content-warning { padding: 12px; border-left: 3px solid var(--st-color-warning); background: var(--st-bg-secondary); line-height: 1.6; overflow-wrap: anywhere; }
+.sync-config-panel__body { padding: 16px; min-width: 0; }
+.sync-config-panel__actions { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding-top: 16px; }
+.sync-conflicts__header, .sync-logs__header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.sync-conflicts__list { display: grid; gap: 8px; max-height: 360px; overflow: auto; }
+.sync-connection-status__indicator, .sync-log-entry__icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 20px; }
+.sync-error-message { display: flex; align-items: flex-start; gap: 8px; padding: 12px; color: var(--st-color-danger); border: 1px solid currentColor; border-radius: 6px; overflow-wrap: anywhere; }
+.sync-error-message__dismiss { flex-shrink: 0; margin-left: auto; border: 0; padding: 4px; background: transparent; color: inherit; cursor: pointer; }
+.sync-error-message__dismiss:focus-visible { outline: 2px solid currentColor; }
+.sync-logs__container { max-height: 320px; overflow: auto; border: 1px solid var(--st-border-color); border-radius: 6px; padding: 8px; }
+.sync-logs__empty { padding: 24px; text-align: center; color: var(--st-text-secondary); }
+.sync-progress__file { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sync-progress__bytes, .sync-progress__speed, .sync-status__time { color: var(--st-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sync-status__label { font-weight: 600; }

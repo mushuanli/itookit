@@ -438,3 +438,17 @@
     color: var(--st-text-primary);
     line-height: 1.5;
 }
+
+/* Quick prompts remain usable at narrow editor widths. */
+.agent-prompt-list { display: grid; gap: 12px; }
+.agent-prompt-item { padding: 12px; border: 1px solid var(--st-border-color); border-radius: 8px; background: var(--st-bg-secondary); }
+.agent-prompt-item__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.agent-prompt-name { flex: 1 1 160px; min-width: 0; }
+.agent-prompt-actions { display: flex; gap: 4px; margin-left: auto; }
+.agent-prompt-btn { min-width: 30px; min-height: 30px; border: 1px solid var(--st-border-color); border-radius: 4px; background: var(--st-bg-primary); color: var(--st-text-primary); cursor: pointer; }
+.agent-prompt-btn:hover { border-color: var(--st-color-primary); }
+.agent-prompt-btn:focus-visible { outline: 2px solid var(--st-color-primary); outline-offset: 2px; }
+.agent-prompt-btn:disabled { opacity: .5; cursor: default; }
+.agent-prompt-btn--danger { color: var(--st-color-danger); }
+.agent-prompt-text { box-sizing: border-box; width: 100%; min-height: 96px; resize: vertical; }
+.agent-form-edit-link { color: var(--st-color-primary); text-underline-offset: 3px; }

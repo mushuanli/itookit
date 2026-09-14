@@ -85,3 +85,5 @@ pnpm --filter @itookit/kernel-adapters typecheck
 | [Durable 证据映射](../../doc/design/durable-harness-evidence.md) | Effect 取消与清理的持久证据 |
 
 持久身份恢复在 `runtime/create-kernel-adapters-runtime.ts` 的注册表 `restoreScope` 中实现。关闭 Session/运行时时先失效排队操作，等待当前 Skill 操作与身份恢复结束，再释放能力；清理未完成时不能重建作用域。
+
+加载记录支持 format:2 的 ids/snapshots/drifts。默认 require-reload，keep-old 只保留内容而不恢复撤销权限；旧 ID 记录在执行入口要求显式 reload。resolveSessionSelectedSkills 将直接聊天/Flow 初始选择接到同一版本存储和 Session 队列。

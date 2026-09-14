@@ -50,7 +50,7 @@ it.each([false, true])('persists selected Skill and scoped memory in direct chat
         expect(retrieveMemory).toHaveBeenCalledWith(expect.objectContaining({ pendingUserMessage: expect.anything() }),
             { id: 'agent', version: 'unversioned' }, { sessionId: 'session', policy: execution.config.memoryPolicy });
         expect((retrieveMemory.mock.calls[0] as unknown as any[])[2].policy).not.toBe(execution.config.memoryPolicy);
-        expect(resolveSkills).toHaveBeenCalledWith(['review', 'silent', 'disabled', 'manual']);
+        expect(resolveSkills).toHaveBeenCalledWith(['review', 'silent', 'disabled', 'manual'], 'session');
         selected.instructions = 'Later edit';
         selected.compact.rawContent = 'Later rules';
         const tasks = await kernel.listSessionTasks('session');

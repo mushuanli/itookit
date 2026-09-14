@@ -101,6 +101,7 @@ function toSkillDefinition(
         type: 'prompt', enabled: true, instructions: body, tools: [], triggerPatterns: [],
         autoLoad: reference && (frontmatter['auto-load'] ?? true),
         priority: frontmatter.priority ?? 50,
+        versionPolicy: parseVersionPolicy(frontmatter['version-policy']),
         triggerStrategy: frontmatter['trigger-strategy'] ?? 'reference',
         source: 'filesystem', scopeLevel, scopeRoot,
         disableModelInvocation: frontmatter['disable-model-invocation'] ?? false,
@@ -112,6 +113,11 @@ function toSkillDefinition(
         subagentModel: typeof frontmatter.subagent?.model === 'string' ? frontmatter.subagent.model.trim() || undefined : undefined,
         taskProgram: validTaskProgram(frontmatter['task-program']),
     };
+}
+
+function parseVersionPolicy(value: unknown): SkillDefinition['versionPolicy'] {
+    if (value === undefined || value === 'keep-old' || value === 'require-reload') return value;
+    throw new Error('Invalid Skill version-policy');
 }
 
 function validTaskProgram(

@@ -11,6 +11,8 @@ import type {
     SkillMatchContext,
     SkillScopeLevel,
     ParsedCompactInstructions,
+    SkillVersionSnapshot,
+    SkillVersionDrift,
 } from '@itookit/common';
 import type {
     IDeviceDriver,
@@ -20,6 +22,7 @@ import { aggregateCompactInstructions } from './compact-extractor';
 import { matchGlob } from './glob-matcher';
 import { skillSupportPrompt } from './support-files';
 import type { SkillSource, SkillToolHandlerFactory } from '../ports/capabilities';
+import { createSkillVersionSnapshot, snapshotLoadResult, validateSkillVersionSnapshot } from './version-snapshot';
 
 export interface SkillDeviceDriverOptions {
     registry?: Map<string, SkillDefinition>;
@@ -39,6 +42,9 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     private readonly activationRevisions = new Map<string, number>();
     private readonly fileSystemLoadIntent = new Set<string>();
     private loaded = new Set<string>();
+    private readonly snapshots = new Map<string, SkillVersionSnapshot>();
+    private readonly pins = new Map<string, SkillVersionSnapshot>();
+    private readonly drifts = new Map<string, SkillVersionDrift>();
     private changeListeners: Array<() => void> = [];
     private toolService: IToolService | null = null;
 
@@ -69,6 +75,8 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
         this.scopeRevision++;
         for (const id of [...this.loaded]) this.deactivateSkill(id);
         this.fileSystemSkills.clear();
+        this.pins.clear();
+        this.drifts.clear();
         this.agentMdContent = '';
         this.changeListeners = [];
     }
@@ -102,47 +110,104 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     }
 
     async loadSkill(id: string): Promise<SkillLoadResult> {
-        if (this.closed) return { skillId: id, success: false, toolIds: [], error: 'Skill service is closed' };
+        const fail = (error: string): SkillLoadResult => ({ skillId: id, success: false, toolIds: [], error });
+        if (this.closed) return fail('Skill service is closed');
         const skill = this.getSkill(id);
-        if (!skill) {
-            return { skillId: id, success: false, toolIds: [], error: `Skill not found: ${id}` };
-        }
-        if (!skill.enabled) {
-            return { skillId: id, success: false, toolIds: [], error: `Skill is disabled: ${id}` };
-        }
-
-        if (!this.isSkillInScope(skill)) {
-            return { skillId: id, success: false, toolIds: [], error: `Skill is outside the current scope: ${id}` };
-        }
-
+        if (!skill) return fail(`Skill not found: ${id}`);
+        if (!skill.enabled) return fail(`Skill is disabled: ${id}`);
+        if (!this.isSkillInScope(skill)) return fail(`Skill is outside the current scope: ${id}`);
         const revision = this.scopeRevision;
         const activationRevision = this.activationRevisions.get(id);
         let supporting: string;
         try { supporting = await skillSupportPrompt(skill, this.options.readFile); }
-        catch (error) { return { skillId: id, success: false, toolIds: [], error: error instanceof Error ? error.message : String(error) }; }
-        if (this.closed || revision !== this.scopeRevision || activationRevision !== this.activationRevisions.get(id) || this.getSkill(id) !== skill || !this.isSkillInScope(skill)) {
-            return { skillId: id, success: false, toolIds: [], error: 'Skill scope changed during loading' };
-        }
+        catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
+        if (this.closed || revision !== this.scopeRevision || activationRevision !== this.activationRevisions.get(id)
+            || this.getSkill(id) !== skill || !this.isSkillInScope(skill)) return fail('Skill scope changed during loading');
+        const current = createSkillVersionSnapshot(skill, [skill.instructions, supporting].filter(Boolean).join('\n\n'),
+            aggregateCompactInstructions([skill]));
+        let selected: SkillVersionSnapshot;
+        try { selected = this.selectVersion(current); }
+        catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
+        return this.activateVersion(selected);
+    }
+
+    private selectVersion(current: SkillVersionSnapshot): SkillVersionSnapshot {
+        const id = current.definition.id;
+        const pinned = this.pins.get(id);
+        if (pinned && pinned.digest !== current.digest) {
+            const previous = this.drifts.get(id);
+            this.drifts.set(id, { expectedDigest: pinned.digest, observedDigest: current.digest,
+                detectedAt: previous?.observedDigest === current.digest ? previous.detectedAt : Date.now(), policy: pinned.policy });
+            if (pinned.policy === 'require-reload' || !sameSkillAuthority(pinned.definition, current.definition)) {
+                this.deactivateSkill(id);
+                throw new Error(`Skill version or authority changed; reload required: ${id}`);
+            }
+        } else this.drifts.delete(id);
+        return pinned ?? current;
+    }
+
+    private activateVersion(selected: SkillVersionSnapshot): SkillLoadResult {
+        const id = selected.definition.id;
+        if (this.snapshots.has(id) && this.snapshots.get(id)?.digest !== selected.digest) this.deactivateSkill(id);
         this.loaded.add(id);
+        this.snapshots.set(id, selected);
+        this.pins.set(id, selected);
         if (this.fileSystemSkills.has(id)) this.fileSystemLoadIntent.add(id);
-        const toolIds = skill.tools.map((t) => t.toolId);
+        try {
+            for (const binding of selected.definition.tools) this.registerDynamicTool(selected.definition, binding);
+        } catch (error) {
+            try { this.deactivateSkill(id); }
+            catch (cleanup) { throw new AggregateError([error, cleanup], 'Skill activation and cleanup failed'); }
+            throw error;
+        }
+        return snapshotLoadResult(selected);
+    }
 
-        for (const binding of skill.tools) this.registerDynamicTool(skill, binding);
+    getSkillSnapshot(id: string): SkillVersionSnapshot | undefined {
+        const snapshot = this.snapshots.get(id);
+        return snapshot ? structuredClone(snapshot) : undefined;
+    }
 
-        return { skillId: id, success: true, toolIds,
-            instructions: [skill.instructions, supporting].filter(Boolean).join('\n\n'),
-            compactInstructions: aggregateCompactInstructions([skill]),
-        };
+    getSkillDrifts(): Record<string, SkillVersionDrift> { return structuredClone(Object.fromEntries(this.drifts)); }
+
+    async restoreSkillSnapshot(value: SkillVersionSnapshot): Promise<SkillLoadResult> {
+        const snapshot = validateSkillVersionSnapshot(value);
+        this.pins.set(snapshot.definition.id, snapshot);
+        if (this.fileSystemSkills.has(snapshot.definition.id)) this.fileSystemLoadIntent.add(snapshot.definition.id);
+        return this.loadSkill(snapshot.definition.id);
+    }
+
+    async reloadSkill(id: string): Promise<SkillLoadResult> {
+        const previous = this.pins.get(id);
+        this.pins.delete(id);
+        try {
+            const result = await this.loadSkill(id);
+            if (result.success && result.snapshot) this.pins.set(id, result.snapshot);
+            else if (previous) this.pins.set(id, previous);
+            return result;
+        } catch (error) { if (previous) this.pins.set(id, previous); throw error; }
+    }
+
+    async validateLoadedVersions(): Promise<void> {
+        for (const id of this.pins.keys()) {
+            const result = await this.loadSkill(id);
+            if (!result.success) {
+                this.deactivateSkill(id);
+                throw new Error(result.error ?? `Skill version unavailable: ${id}`);
+            }
+        }
     }
 
     async unloadSkill(id: string): Promise<void> {
         this.fileSystemLoadIntent.delete(id);
+        this.pins.delete(id);
+        this.drifts.delete(id);
         this.deactivateSkill(id);
     }
 
     getLoadedSkills(): SkillDefinition[] {
         return [...this.loaded]
-            .map((id) => this.getSkill(id))
+            .map((id) => this.getSkill(id)?.enabled ? this.snapshots.get(id)?.definition ?? this.getSkill(id) : undefined)
             .filter((s): s is SkillDefinition => s !== undefined && s.enabled && this.isSkillInScope(s));
     }
 
@@ -344,7 +409,7 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
             if (revision !== this.scopeRevision) return [];
             const skill = this.fileSystemSkills.get(id);
             if (!skill?.enabled || skill.disableModelInvocation || !this.isSkillInScope(skill)) {
-                this.fileSystemLoadIntent.delete(id);
+                results.push({ skillId: id, success: false, toolIds: [], error: `Loaded Skill is unavailable or unauthorized: ${id}` });
                 continue;
             }
             const result = await this.loadSkill(id);
@@ -390,6 +455,7 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     private deactivateSkill(id: string): void {
         this.activationRevisions.set(id, (this.activationRevisions.get(id) ?? 0) + 1);
         this.loaded.delete(id);
+        this.snapshots.delete(id);
         this.globMounted.delete(id);
         for (const toolId of this.registeredTools.get(id) ?? []) {
             this.toolService?.unregisterTool(toolId);
@@ -425,4 +491,14 @@ function toolMeta(skill: SkillDefinition, binding: SkillToolBinding): import('@i
         type: 'plugin',
         enabled: true,
     };
+}
+
+/** A retained prompt must never retain removed bindings or switch its source authority. */
+function sameSkillAuthority(previous: SkillDefinition, current: SkillDefinition): boolean {
+    const authority = (skill: SkillDefinition) => ({ source: skill.source, scopeLevel: skill.scopeLevel,
+        scopeRoot: skill.scopeRoot, fsRoot: skill.fsRoot, tools: skill.tools, endpoint: skill.endpoint,
+        method: skill.method, headers: skill.headers, command: skill.command,
+        mcpServerId: skill.mcpServerId, mcpToolName: skill.mcpToolName, taskProgram: skill.taskProgram,
+        disableModelInvocation: skill.disableModelInvocation, triggerStrategy: skill.triggerStrategy });
+    return JSON.stringify(authority(previous)) === JSON.stringify(authority(current));
 }

@@ -60,3 +60,5 @@ const factory = factories[strategyType] ?? defaultEditorFactory;
 - `ThemeService` 管理 `<html>` 的 `data-theme` attribute，监听 `app:theme-change` 事件，偏好持久化到 `etc:/ui/theme.json`；`AppHandle.setTheme(mode)` 切换主题
 
 运行: `pnpm --filter @itookit/app-shell test`（vitest，另有 `test:watch`）
+
+Files 页 Memory 管理使用固定 Session controls；冲突保留草稿并支持比较最新版本后显式重提。memory-sharing-dialog 经宿主 controls 管理资源、授权与审计，不从 UI 直接修改 SeqFile。

@@ -16,6 +16,7 @@ export interface SkillFrontmatter {
      * 并登记持久加载身份，但新运行不因策略自动注入。缺省时沿用 `trigger-strategy` 推导值。
      */
     'auto-load'?: boolean;
+    'version-policy'?: import('./skill-types').SkillVersionPolicy;
     /** 禁止模型通过 load_skill 加载（action skill 专用） */
     'disable-model-invocation'?: boolean;
     /** Glob 模式列表，匹配打开文件时自动挂载（L4 空间联动） */

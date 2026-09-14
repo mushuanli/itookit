@@ -578,3 +578,7 @@
 
 .dag-transcript { width: min(900px, 90vw); }
 .dag-transcript pre { max-height: 65vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.dag-empty { margin: auto; padding: 32px; max-width: 44ch; text-align: center; color: var(--dag-text-secondary); line-height: 1.6; }
+.dag-run-workspace { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
+.dag-settings__defaults, .dag-settings__run-policy { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--dag-border); }

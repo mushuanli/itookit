@@ -44,7 +44,8 @@ it('discovers and loads supporting files only through each Session view, then re
         await first.driver.writeContent('/workspace/_agent/skills/review/ref.md', 'edited reference');
         await first.driver.writeContent('/workspace/_agent/AGENT.md', 'edited project rules');
         const refreshed = await a.skillService.refreshScopedSkills();
-        expect(refreshed[0].instructions).toContain('edited reference');
+        expect(refreshed[0]).toMatchObject({ success: false, error: expect.stringContaining('reload required') });
+        expect((await a.skillService.reloadSkill!('review')).instructions).toContain('edited reference');
         expect(a.skillService.getLoadedSkills().map(skill => skill.id)).toEqual(['review']);
         expect(a.skillService.getAgentMdContent()).toBe('edited project rules');
         expect(original.instructions).toContain('first reference');

@@ -39,7 +39,8 @@ function describeError(error: unknown): string {
  * 完整连接（含 apiKey）由 LLMDeviceDriver 内部通过 connectionId 解析。
  */
 export class AgentResolver {
-    constructor(private agentService: IAgentConfigService) {}
+    constructor(private agentService: IAgentConfigService,
+        private readonly resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>) {}
 
     /**
      * Resolve agent for chat — falls back to Default Agent if not found.
@@ -128,8 +129,9 @@ export class AgentResolver {
     }
 
     /** Resolve enabled static Skills in declaration order. */
-    async getSkills(ids: string[]): Promise<import('@itookit/common').LLMSkill[]> {
+    async getSkills(ids: string[], sessionId?: string): Promise<import('@itookit/common').LLMSkill[]> {
         if (!ids.length) return [];
+        if (sessionId && this.resolveSessionSkills) return this.resolveSessionSkills(sessionId, ids);
         const byId = new Map((await this.agentService.getSkills()).map(skill => [skill.id, skill]));
         return ids.map(id => byId.get(id)).filter((skill): skill is import('@itookit/common').LLMSkill => Boolean(skill?.enabled));
     }

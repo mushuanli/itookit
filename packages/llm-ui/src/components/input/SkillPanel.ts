@@ -33,6 +33,10 @@ export class SkillPanel {
             if (target.checked) this.load(skillId);
             else this.unload(skillId);
         });
+        this.section.addEventListener('click', event => {
+            const button = (event.target as Element).closest<HTMLButtonElement>('[data-skill-reload]');
+            if (button?.dataset.skillReload) void this.load(button.dataset.skillReload);
+        });
 
         container.querySelector('.llm-input__skills-refresh')
             ?.addEventListener('click', () => this.reload());
@@ -67,6 +71,7 @@ export class SkillPanel {
 
     private async load(skillId: string): Promise<void> {
         if (!this.deps.onLoadSkill) return;
+        const previouslyLoaded = this.skills.find(skill => skill.id === skillId)?.loaded ?? false;
         const btn = Array.from(this.list.querySelectorAll<HTMLInputElement>('[data-skill]')).find(item => item.dataset.skill === skillId);
         if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
         try {
@@ -76,7 +81,7 @@ export class SkillPanel {
             await this.reload();
         } catch (e) {
             console.error('[SkillPanel] load failed:', e);
-            if (btn) { btn.disabled = false; btn.checked = false; }
+            if (btn) { btn.disabled = false; btn.checked = previouslyLoaded; }
             const notice = document.createElement('span'); notice.setAttribute('role', 'alert');
             notice.textContent = e instanceof Error ? e.message : String(e); this.list.append(notice);
         }

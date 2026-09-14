@@ -1,6 +1,6 @@
 import { leaseSkewConfig } from './lease-config';
 import { mkdir } from 'node:fs/promises';
-import { memoryPolicyForAgent } from './memory-policy';
+import { memoryPolicyForAgent, grantRunMemory } from './memory-policy';
 import path from 'node:path';
 import type { DagRunSpec, LLMConnection, LLMProvider, ToolDefinition } from '@itookit/common';
 import { parse } from 'yaml';
@@ -82,6 +82,7 @@ export function cliStorage(runId: string): StorageBindingRef {
 }
 
 export interface CliRuntimeOptions {
+    grantMemory?: string[];
     /** Explicit session home; defaults to the workflow workspace root. */
     setHome?: string;
     /** Extra host directories mounted read-only by default. */
@@ -233,7 +234,10 @@ export async function createCliRuntime(
         fileContextForSession: acquireFiles,
         fileContextForScope: acquireFiles,
         additionalTools: [createBashTool(shell), createWorkspaceAccessTool(grants)],
-        beforeRecover: async runtime => { await syncSkillsToKernel(llmDriver, runtime); },
+        beforeRecover: async runtime => {
+            await syncSkillsToKernel(llmDriver, runtime);
+            await grantRunMemory(runtime.memory.shared!, workflow.config.agents, manifest.sessionId, hostOptions.grantMemory ?? []);
+        },
         recover: true,
     });
     const { kernel } = core;

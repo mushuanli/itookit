@@ -16,9 +16,9 @@ it('lists persisted missing identities and unloads only the chosen Session', asy
         unloadSkill: async (skill: string) => { expect(records.get(id)).not.toContain(skill); unload(id, skill); },
     } }) };
     const controls = createSessionSkillControls(kernel as never, registry as never);
-    expect(await controls.listLoaded('a')).toEqual([
-        { id: 'removed', name: 'removed', description: '', loaded: true, enabled: false, definitionEnabled: false, toolCount: 0 },
-        { id: 'review', name: 'Review', description: 'Review changes', loaded: true, enabled: true, definitionEnabled: true, toolCount: 0 },
+    expect(await controls.listLoaded('a')).toMatchObject([
+        { id: 'removed', name: 'removed', description: '', loaded: true, enabled: false, definitionEnabled: false, toolCount: 0, unversioned: true },
+        { id: 'review', name: 'Review', description: 'Review changes', loaded: true, enabled: true, definitionEnabled: true, toolCount: 0, unversioned: true },
     ]);
     await controls.unload('a', 'removed');
     expect(unload).toHaveBeenCalledWith('a', 'removed');

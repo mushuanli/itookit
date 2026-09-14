@@ -1,13 +1,17 @@
 import type { MemoryPolicy } from '@itookit/common';
 import type { IAgentConfigService } from '../services/agent-service';
 import { SessionMemoryProvider, type MemoryWrite, type MemoryMutationOptions } from './session-memory-provider';
+import { MemorySharingControls } from './memory-sharing-controls';
 
 /** Host management facade: callers select an Agent, never supply its authorization policy. */
 export class SessionMemoryControls {
+    readonly sharing: MemorySharingControls;
     constructor(private readonly provider: SessionMemoryProvider,
         private readonly agents: IAgentConfigService,
         private readonly sessionId: () => string,
-        private readonly canWrite?: (sessionId: string) => Promise<boolean>) {}
+        private readonly canWrite?: (sessionId: string) => Promise<boolean>) {
+        this.sharing = new MemorySharingControls(provider, agents, sessionId, canWrite);
+    }
 
     /** Pin a management view to its Session for its entire lifetime. */
     forSession(sessionId: string): SessionMemoryControls {

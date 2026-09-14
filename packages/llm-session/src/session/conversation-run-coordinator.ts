@@ -63,7 +63,7 @@ export interface ConversationRunCoordinatorOptions {
     kernel: Kernel;
     dagPlugins: DagPluginCatalog;
     resolveSessionContext?(sessionId: string, userMessage: string): Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
-    resolveSkills?(ids: string[]): Promise<LLMSkill[]>;
+    resolveSkills?(ids: string[], sessionId?: string): Promise<LLMSkill[]>;
     resolveTools?(sessionId: string, allowedIds: string[]): Promise<{
         definitions: ToolDefinition[];
         externalIds: string[];
@@ -104,7 +104,7 @@ export class ConversationRunCoordinator {
 
     async executeDirect(execution: ConversationExecution): Promise<void> {
         const ids = execution.config.capabilityPolicy?.skillIds ?? [];
-        const skills = ids.length ? await this.options.resolveSkills?.(ids) ?? [] : [];
+        const skills = ids.length ? await this.options.resolveSkills?.(ids, execution.task.sessionId) ?? [] : [];
         const skillsPrompt = skills.filter(skill => ids.includes(skill.id) && skill.enabled && !skill.disableModelInvocation && skill.triggerStrategy !== 'action')
             .flatMap(skill => [skill.instructions,
                 skill.compact?.rawContent ? `Skill ${skill.id} — critical rules:\n${skill.compact.rawContent}` : '',
@@ -564,7 +564,7 @@ function directTaskSpec(
 export function skillContextResolver(options: Pick<ConversationRunCoordinatorOptions, 'resolveSkills' | 'resolveTools'>) {
     return async (sessionId: string, skillIds: string[], allowedToolIds: string[]): Promise<SkillContext[]> => {
         if (!options.resolveSkills) return [];
-        const skills = await options.resolveSkills(skillIds);
+        const skills = await options.resolveSkills(skillIds, sessionId);
         if (!skills.length) return [];
         const catalog = await options.resolveTools?.(sessionId, allowedToolIds) ?? { definitions: [], externalIds: [] };
         return buildSkillContexts(skills, catalog, allowedToolIds, new Set(skillIds));

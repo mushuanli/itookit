@@ -10,8 +10,10 @@ import { loadWorkflow } from '../src/config';
 import { compileRunDefinition } from '../src/run-definition';
 import { CliStorageResolver, cliStorage, openProfileInspectionFs } from '../src/runtime';
 import { listenForTest } from './listen';
+import { SharedMemoryStore, SessionMemoryProvider } from '@itookit/llm-session';
+import { sharedMemoryCommand } from '../src/shared-memory-command';
 
-it('runs a configured CLI memory tool through HTTP model calls and persists the result', async () => {
+it.each([false, true])('runs a configured CLI memory tool through HTTP model calls and persists the result (shared: %s)', async shared => {
     const root = await mkdtemp(path.join(tmpdir(), 'cli-memory-'));
     const requests: any[] = [];
     const server = createServer((request, response) => {
@@ -30,17 +32,25 @@ it('runs a configured CLI memory tool through HTTP model calls and persists the 
     const previous = process.env.MINDOS_MEMORY_TEST_KEY; process.env.MINDOS_MEMORY_TEST_KEY = 'test';
     try {
         const port = await listenForTest(server), file = path.join(root, 'workflow.yml'), stateDir = path.join(root, '.mindos');
+        let sharedRef: { id: string; incarnation: string } | undefined;
+        if (shared) {
+            expect(await sharedMemoryCommand(['create', 'team', 'agent', 'creator'], { profile: stateDir })).toBe(0);
+            const inspection = await openProfileInspectionFs(stateDir);
+            try { const [resource] = await new SharedMemoryStore(inspection.fs).list(); sharedRef = { id: resource.id, incarnation: resource.incarnation }; }
+            finally { await inspection.dispose(); }
+        }
         await writeFile(file, stringify({ version: 1, name: 'memory', goal: 'remember', workspace: { root: '.' },
             providers: [{ id: 'mock', implementation: 'openai-compatible', base_url: `http://127.0.0.1:${port}`,
                 default_path: '/v1/chat/completions', api_key_env: 'MINDOS_MEMORY_TEST_KEY', models: [{ id: 'model' }] }],
             connections: [{ id: 'default', provider: 'mock', tiers: { standard: 'model' } }],
             agents: [{ id: 'worker', connection: 'default', tools: ['memory_write'], stream: false, approval: 'none',
-                memory_policy: { namespace_id: 'agent', read_scopes: ['project'], write_scopes: ['project'] } }],
+                memory_policy: { namespace_id: 'agent', read_scopes: ['project'], write_scopes: ['project'],
+                    ...(sharedRef ? { shared_memory: sharedRef } : {}) } }],
             tasks: [{ id: 'finish', agent: 'worker', description: 'remember', outputs: { result: 'text' } }],
             result: { task: 'finish', output: 'result' }, sandbox: { mode: 'native' } }));
         const { workflow } = await loadWorkflow(file);
         expect(compileRunDefinition(workflow, 'digest').environment?.agents?.[0].memoryPolicy?.writeScopes).toEqual(['project']);
-        expect(await runCommand({ file, stateDir, headless: true, json: true })).toBe(0);
+        expect(await runCommand({ file, stateDir, headless: true, json: true, ...(shared ? { grantMemory: ['team'] } : {}) })).toBe(0);
         expect(requests).toHaveLength(2); expect(JSON.stringify(requests[1].messages)).toContain('success');
         const { readdir } = await import('node:fs/promises');
         const [id] = await readdir(path.join(stateDir, 'runs'));
@@ -48,7 +58,10 @@ it('runs a configured CLI memory tool through HTTP model calls and persists the 
         try {
             const resolver = new CliStorageResolver(inspection.fs), binding = await resolver.resolve(cliStorage(id));
             const store = new SeqFileKernelStore(binding, reference => resolver.resolve(reference));
-            expect((await store.getShared(binding, 'memory.entries.["agent","project"]'))?.value).toEqual([
+            const memories = sharedRef ? await new SessionMemoryProvider({} as never, new SharedMemoryStore(inspection.fs)).list(id,
+                { namespaceId: 'agent', readScopes: ['project'], writeScopes: ['project'], sharedMemory: sharedRef })
+                : (await store.getShared(binding, 'memory.entries.["agent","project"]'))?.value;
+            expect(memories).toEqual([
                 expect.objectContaining({ entryId: 'note', content: 'CLI memory' }),
             ]);
         } finally { await inspection.dispose(); }

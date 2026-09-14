@@ -215,6 +215,10 @@ export interface SkillInvocation {
  * Skill 信息（供 UI 渲染，不含内部实现细节）
  */
 export interface SkillInfo {
+    versionDigest?: string;
+    unversioned?: boolean;
+    versionPolicy?: import('@itookit/common').SkillVersionPolicy;
+    drift?: import('@itookit/common').SkillVersionDrift;
     id: string;
     name: string;
     description: string;

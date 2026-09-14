@@ -30,3 +30,10 @@
 .mdx-editor-container__render-mode[style*="display: none"] {
   display: none;
 }
+
+.mdx-editor-root-container { min-width: 0; min-height: 0; }
+.mdx-editor-titlebar__center { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; overflow: hidden; }
+.mdx-callout-text { min-width: 0; overflow-wrap: anywhere; }
+.mdx-plantuml-error, .mermaid-error { padding: 12px; border: 1px solid currentColor; border-radius: 4px; color: var(--vscode-errorForeground, #dc2626); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mdx-stats { color: var(--vscode-descriptionForeground, #666); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mdx-table-task { vertical-align: middle; margin-inline: 4px; }

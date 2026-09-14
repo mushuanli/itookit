@@ -1,4 +1,5 @@
 import { createHttpMindOSRuntime, startHttpServer } from './http-server';
+import { sharedMemoryCommand } from './shared-memory-command';
 import {
     cancelCommand,
     checkpointsCommand,
@@ -37,6 +38,7 @@ async function main(argv: string[]): Promise<number> {
     // -p / --prompt：直接运行一段 prompt（优先于 command 分发）
     if (parsed.options.prompt) return promptCommand(parsed.options);
     switch (parsed.command) {
+        case 'memory': return sharedMemoryCommand(parsed.positional, parsed.options);
         case 'validate': return validateCommand(parsed.options);
         case 'run': return runCommand(parsed.options);
         case 'graph': return graphCommand(parsed.options);
@@ -94,6 +96,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         else if (arg === '--profile') options.profile = required(rest[++index], 'profile');
         else if (arg === '--set-home') options.setHome = required(rest[++index], 'home directory');
         else if (arg === '--add-dir') options.addDir = [...(options.addDir ?? []), required(rest[++index], 'directory')];
+        else if (arg === '--grant-memory') options.grantMemory = [...(options.grantMemory ?? []), required(rest[++index], 'shared Memory resource id')];
         else if (arg === '--headless') options.headless = true;
         else if (arg === '--json') options.json = true;
         else if (arg === '--follow') options.follow = true;
@@ -136,12 +139,14 @@ function help(): string {
         `  mindos export-config <run-id> [--state-dir .mindos]\n` +
         `  mindos export <run-id> [--state-dir .mindos] [--out file.json] [--max-bytes N]\n` +
         `  mindos sandbox doctor\n\n` +
+        `  mindos memory list|create|inspect|grant|revoke|delete|audit [id] [incarnation] [session] [--profile root] [--value JSON]\n\n` +
         `选项：\n` +
         `  --profile <name>    desktop（默认，共享 ~/.config/mindos）或显式数据根路径\n` +
         `  -d, --http <addr>   启动 HTTP 版 MindOS UI（[ip:]port，默认 127.0.0.1）\n` +
         `  --state-dir <dir>   运行状态目录；默认 <dataRoot>/var/lib/cli-runs\n` +
         `  --set-home <dir>    将宿主目录挂载到 /workspace 并作为 Session 工作目录（默认 rw）\n` +
         `  --add-dir <dir>     追加宿主目录到 Session 上下文；可重复，默认只读，支持 <dir>:rw\n` +
+        `  --grant-memory <id> 显式授权本次 Session 使用该共享记忆的配置范围；可重复\n` +
         `  --headless          无交互模式，事件作为 JSONL 写到 stdout（适合 CI）\n` +
         `  --json              JSON 输出；隐含 --headless（遇到人工输入时返回退出码 3 而非阻塞）\n` +
         `  --offline           校验/查看时不要求 API key 环境变量已存在\n`;

@@ -39,3 +39,5 @@ src/
 pnpm --filter @itookit/llm-session typecheck
 pnpm --filter @itookit/llm-session test
 ```
+
+Memory 默认使用 Session shared；显式 sharedMemory 引用经 SharedMemoryStore 的独立 SeqFile 与 Session/scope grants 授权。数据、操作回执、审计在同一事务写入；管理权限不暴露为模型工具。memory_compact 复验源版本与读写授权，保留原文和来源引用。语义检索仍延期。

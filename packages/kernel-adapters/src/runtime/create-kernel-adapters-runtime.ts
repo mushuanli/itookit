@@ -2,7 +2,7 @@ import { coordinateSkillEffect, runSessionSkillOperation, invalidateSessionSkill
 import { restoreLoadedSkills } from '../skill/restore-loaded-skills';
 import { createUnloadSkillHandler, unloadSkillDefinition, unloadSkillMeta } from '../tool/unload-skill';
 import { SkillUnloadEffectAdapter } from '../effects/skill-unload-effect';
-import { rememberLoadedSkill } from '../skill/loaded-state';
+import { rememberLoadedSkill, withSkillDriftPersistence, requireLoadedSkillVersions } from '../skill/loaded-state';
 import type {
     ILLMService,
     ISkillService,
@@ -152,7 +152,13 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
         const registry = await this.forEffect(context);
         if (registry !== this) return registry.getForContext(context);
         const saved = await context.sessionState?.get('kernel-adapters.skills.loaded');
-        return this.restore(context.sessionId, saved?.value);
+        requireLoadedSkillVersions(saved?.value);
+        const scope = await this.get(context.sessionId);
+        return withSkillDriftPersistence(scope.skillService, context.sessionState, async () => {
+            await this.restore(context.sessionId, saved?.value);
+            await scope.skillDriver.validateLoadedVersions();
+            return scope;
+        });
     }
 
     async getForEffect(context: import('@itookit/durable-kernel').EffectExecutionContext): Promise<KernelAdaptersScope> {
@@ -385,7 +391,7 @@ function createEffects(
                     : [];
             });
             const snapshot = { skillId, compactInstructions: skill.compact?.rawContent ?? '', tools: boundTools };
-            await persistLoadedSkill({ skillId, success: true, toolIds: [] }, context);
+            await persistLoadedSkill({ skillId, success: true, toolIds: [], snapshot: service.getSkillSnapshot?.(skillId) }, context);
             return snapshot;
         }, context => skills(context), effectTools),
         new BashEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, () => tools(context))),
@@ -400,7 +406,7 @@ async function persistLoadedSkill(
     result: import('@itookit/common').SkillLoadResult,
     context: import('@itookit/durable-kernel').EffectExecutionContext,
 ): Promise<void> {
-    await rememberLoadedSkill(result.skillId, context.sessionState);
+    await rememberLoadedSkill(result.skillId, context.sessionState, result.snapshot);
 }
 
 function registerEffectTools(driver: ToolDeviceDriver, bindings: KernelAdaptersRuntimeOptions['effectTools'] = []): void {

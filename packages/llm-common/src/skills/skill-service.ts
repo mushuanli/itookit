@@ -8,6 +8,8 @@ import type {
     SkillMatchContext,
     SkillScopeLevel,
     ParsedCompactInstructions,
+    SkillVersionSnapshot,
+    SkillVersionDrift,
 } from './skill-types';
 
 /**
@@ -33,6 +35,11 @@ export interface ISkillService {
      * 并返回加载结果（包含新增的工具列表）。
      */
     loadSkill(id: string): Promise<SkillLoadResult>;
+    /** Explicit host reload; ordinary model loads must respect the existing pin. */
+    reloadSkill?(id: string): Promise<SkillLoadResult>;
+    restoreSkillSnapshot?(snapshot: SkillVersionSnapshot): Promise<SkillLoadResult>;
+    getSkillSnapshot?(id: string): SkillVersionSnapshot | undefined;
+    getSkillDrifts?(): Record<string, SkillVersionDrift>;
 
     /**
      * 卸载 Skill。
@@ -141,7 +148,8 @@ export interface ISkillService {
 export interface SessionSkillControls {
     list(sessionId: string): ReturnType<SessionSkillControls['listLoaded']>;
     load(sessionId: string, skillId: string): Promise<string[]>;
-    listLoaded(sessionId: string): Promise<Array<{ id: string; name: string; description: string; loaded: boolean; enabled: boolean; definitionEnabled: boolean; toolCount: number }>>;
+    listLoaded(sessionId: string): Promise<Array<{ id: string; name: string; description: string; loaded: boolean; enabled: boolean; definitionEnabled: boolean; toolCount: number;
+        versionDigest?: string; versionPolicy?: import('./skill-types').SkillVersionPolicy; drift?: SkillVersionDrift; unversioned?: boolean }>>;
     /**
      * Read one Skill definition for an explicit invocation (`/sk-<id>`).
      *

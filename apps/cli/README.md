@@ -228,7 +228,7 @@ OCI 命令和交互 TTY 的工作目录按 Session 挂载路径映射：接受�
 
 ### Agent 记忆策略
 
-CLI 使用显式 scope 授权，`tools` 与 `memory_policy` 必须同时声明。记忆存于本次 Run 的 Kernel Session，不自动跨新 Run 共享；文件工作区权限不替代记忆权限。
+CLI 使用显式 scope 授权，`tools` 与 `memory_policy` 必须同时声明。默认记忆存于本次 Run 的 Kernel Session，不自动跨新 Run 共享；文件工作区权限不替代记忆权限。
 
 ```yaml
 agents:
@@ -311,3 +311,21 @@ tasks:
 ```
 
 消费者通过 `port_schemas.inputs.<端口名>` 引用相同 schema；普通节点可通过 `definition` 内联定义。未显式命名的 Agent result 使用 `agent.response.<节点 id>.<name>@1`。同身份不同定义会被拒绝，契约随 Run 持久化。Flow 使用受支持的 schema 子集并严格失败；Agent 的 `continue` 不能绕过 Flow 端口验证。具体错误在 Run 结果中，原始响应在 Task transcript 中，可从已有重试入口重新执行。
+
+### 显式共享 Memory
+
+宿主管理命令（均可传 `--profile <path>`）：
+
+```bash
+mindos memory create team notes creator-session
+mindos memory list
+mindos memory inspect team <incarnation>
+mindos memory grant team <incarnation> <session-id> --value '{"readScopes":["project"],"writeScopes":["project"]}'
+mindos memory revoke team <incarnation> <session-id>
+mindos memory audit team <incarnation>
+mindos memory delete team <incarnation>
+```
+
+Agent YAML 的 `memory_policy.shared_memory: {id: team, incarnation: <创建结果>}` 选择资源，仍需配置 namespace_id/read_scopes/write_scopes。引用本身不授权；新 Run 显式传 `--grant-memory team` 才为本次 Session 授予所引用 Agent 策略的 scope 并集，或事先使用管理命令授权已知 Session。资源名称、incarnation 与 namespace 必须一致。删除创建者 Session 不删除共享资源，资源删除后旧引用失效；审计和操作回执保留。
+
+写入/删除支持 `expectedRevision`，应使用 memory_list 返回的版本进行条件修改；null 表示仅新建。`memory_compact` 需单独加入 tools 白名单，参数为目标 scope/entryId/content 与 sources（entryId/revision 数组），原子复验源版本、保存较短摘要及来源引用并保留原文。压缩不等于语义检索，后者暂未实现。

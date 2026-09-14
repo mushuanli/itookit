@@ -12,6 +12,7 @@ import {
 } from '@itookit/llm-flow';
 import type { IFileSystem } from '@itookit/vfs-core';
 import { createMemoryTools } from './memory-tools';
+import { SessionMemoryProvider, SharedMemoryStore } from '@itookit/llm-session';
 
 export interface CreateKernelRuntimeOptions {
     /** System VFS view used for the Kernel catalog and storage binding. */
@@ -40,6 +41,7 @@ export interface CreateKernelRuntimeOptions {
 export interface HeadlessKernelRuntime extends KernelAdaptersRuntime {
     kernel: Kernel;
     dagPlugins: DagPluginRegistry;
+    memory: SessionMemoryProvider;
 }
 
 /**
@@ -51,6 +53,8 @@ export async function createKernelRuntime(
     options: CreateKernelRuntimeOptions,
 ): Promise<HeadlessKernelRuntime> {
     const dagPlugins = options.dagPlugins ?? createBuiltinDagPluginRegistry();
+    const sharedMemory = new SharedMemoryStore(options.systemFS);
+    await sharedMemory.init();
     const adapters = await createKernelAdaptersRuntime({
         llmDriver: options.llmDriver,
         runMode: 'kernel',
@@ -65,7 +69,7 @@ export async function createKernelRuntime(
         skillSourceForSession: options.skillSourceForSession,
         skillToolHandlerFactory: options.skillToolHandlerFactory,
         additionalTools: options.additionalTools,
-        effectTools: createMemoryTools(() => kernel),
+        effectTools: createMemoryTools(() => kernel, () => memory),
     });
 
     const kernel = new Kernel({
@@ -73,12 +77,13 @@ export async function createKernelRuntime(
         maxConcurrent: options.maxConcurrent,
         maxConcurrentEffects: options.maxConcurrentEffects,
     });
+    const memory = new SessionMemoryProvider(kernel, sharedMemory);
     kernel.registerStorageResolver(options.storageResolver);
     await kernel.use(adapters.plugin);
     if (options.registerPrograms !== false) registerDurablePrograms(kernel);
     await kernel.initialize();
 
-    const runtime = Object.assign(adapters, { kernel, dagPlugins }) as HeadlessKernelRuntime;
+    const runtime = Object.assign(adapters, { kernel, dagPlugins, memory }) as HeadlessKernelRuntime;
     await options.beforeRecover?.(runtime);
     if (options.recover !== false) {
         await kernel.recover(options.recover === true || options.recover === undefined ? {} : options.recover);

@@ -502,4 +502,7 @@ export const PRINT_STYLES = `
 .mdx-print--no-header .mdx-print-header {
     display: none;
 }
+
+.mdx-print-content { min-width: 0; overflow-wrap: anywhere; }
+.mdx-print-message__content { white-space: normal; overflow-wrap: anywhere; }
 `;

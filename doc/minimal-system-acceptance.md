@@ -1866,3 +1866,23 @@ Git 工作区 `finish` 现在返回可选说明；按策略保留的目录/分�
 - 真实窗口完成运行记录/图重试/重开/继续，以及会话授权、工作区创建/重启/失败清理/脏副本保留/人工处理/再次收尾。测试窗口已退出，用户数据未参与验收。
 
 功能改动分别提交；本地 P1 不再有未勾选项。P0 性能与其他平台、P2 扩展的未完成状态继续由 `todo.md` 单独维护。
+
+## P2 版本与共享 Memory 提交批次
+
+日期：2026-09-14。本批提交功能实现与已有回归，不将 P2 整体勾选。语义/向量检索由用户明确延期；自动委派、完整 Skill 生命周期竞态、真实窗口及云模型、IndexedDB 和 VFS 消费者矩阵继续开放。
+
+实现入口：`kernel-adapters/src/skill/version-snapshot.ts`、`session-prompt-context.ts`、`llm-session/src/session/shared-memory-store.ts`、`session-memory-provider.ts`、`task-memory-service.ts`、`app-shell/src/files/memory-sharing-dialog.ts`、`apps/cli/src/shared-memory-command.ts`。Skill 选择持久 format:2 的快照和漂移标记；keep-old 保留旧正文但不保留撤销权限，require-reload 拒绝漂移版本，纯 ID 旧记录需要显式 reload。初始 Agent 选择和运行时加载共用版本入口。
+
+共享 Memory 使用系统 SeqFile 独立资源。两个真实 Session / 两个 Node 进程在同一 LocalFS/SQLite 数据根竞争同一预期 revision，恰好一方成功；创建者 Session 删除后另一方读取不变。写入、删除、prune 和压缩各覆盖数据写入后、回执写入后、事务提交后的 SIGKILL：前两处重开回滚，提交后数据/回执/审计一致；重复工具操作不复活删除内容、不覆盖更新版本。压缩保存源 revision/hash 和模型，原文保留；仅有写授权不足以读取源内容并提交摘要。
+
+回归命令与结果：
+
+- `pnpm --filter @itookit/kernel-adapters test`：128 项通过。
+- `pnpm --filter @itookit/llm-session test`：124 项通过。
+- `pnpm --filter @itookit/app-core test`：103 项通过。
+- `pnpm --filter @itookit/cli test tests/run-memory.test.ts tests/run-skill-context.test.ts`：4 项通过，使用本地 HTTP mock。
+- `pnpm --filter @itookit/cli test tests/shared-memory.test.ts`：13 项通过（12 个事务 SIGKILL 窗口 + 1 个双进程/创建者删除场景）。测试宿主关闭在 dispose 后等待 Kernel.waitIdle，再释放 SQLite，避免在途轮询访问已关闭文件视图。
+- `pnpm --filter @itookit/app-shell test`：221 项通过、30 项既有跳过；`scheduler-paused-owner.test.ts` 一个既有用例返回 `Host exited: 1`，单独重跑仍失败，不能记为整包通过。本批 Memory/Skill DOM 与宿主回归均通过；共享管理 DOM 使用生产 controls/provider/store，覆盖创建、读/写授权、撤权、审计与删除。
+- 全仓 `pnpm typecheck` 通过；`pnpm styles:check` 通过，剩余 48 个选择器/状态类豁免；`pnpm docs:check` 通过并保留既有历史表述告警。
+
+样式实际规则补在所属包，打印 CSS 同时覆盖独立打印文档和编辑器打印容器；已删除 59 个待补/待复核类名豁免。此次没有执行真实窗口视觉检查、Tauri/CLI 发布构建、全仓最终测试矩阵、真实云模型、其他平台及跨主机验收，不用包级结果代替这些要求。共享资源墓碑、审计和幂等回执当前永久保留，未实施物理历史 GC；history 默认返回前 100 项、最多 1000 项，未提供分页归档。

@@ -5,6 +5,24 @@ import { ChatInput } from '../../llm-ui/src/components/input/ChatInputView';
 import { bindSkillRefresh } from '../../llm-ui/src/shell/skill-refresh';
 import type { SessionSkillControls } from '@itookit/common';
 
+it('shows a persisted version drift and explicitly reloads the selected Skill', async () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<section class="llm-input__skill-section"><div class="llm-input__skills-list"></div></section>';
+    const drift = { expectedDigest: 'a'.repeat(64), observedDigest: 'b'.repeat(64), detectedAt: 1, policy: 'require-reload' as const };
+    let changed = true;
+    const load = vi.fn(async () => { changed = false; });
+    const panel = new SkillPanel(root, { onLoadSkill: load, onRequestSkills: async () => [{
+        id: 'review', name: 'Review', description: '', loaded: true, enabled: true, definitionEnabled: true,
+        toolCount: 0, ...(changed ? { drift } : {}),
+    }] });
+    await panel.reload();
+    expect(root.querySelector('[role="status"]')).not.toBeNull();
+    root.querySelector<HTMLButtonElement>('[data-skill-reload]')!.click();
+    await vi.waitFor(() => expect(load).toHaveBeenCalledWith('review'));
+    await vi.waitFor(() => expect(root.querySelector('[data-skill-reload]')).toBeNull());
+    expect(root.querySelector<HTMLInputElement>('input')?.checked).toBe(true);
+});
+
 it.each([true, false])('unloads from the panel and preserves selection on failure (success: %s)', async success => {
     const root = document.createElement('div');
     root.innerHTML = '<section class="llm-input__skill-section"><div class="llm-input__skills-list"></div></section>';

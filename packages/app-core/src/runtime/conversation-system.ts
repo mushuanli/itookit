@@ -1,5 +1,5 @@
-import { SessionMemoryProvider, initializeConversationSystem, type CommandBus, type FlowEngine, type SessionManager, type SessionRepository, type VFSAgentService } from '@itookit/llm-session';
-import { resolveSessionSkillContext } from '@itookit/kernel-adapters';
+import { initializeConversationSystem, type CommandBus, type FlowEngine, type SessionManager, type SessionRepository, type VFSAgentService } from '@itookit/llm-session';
+import { resolveSessionSkillContext, resolveSessionSelectedSkills } from '@itookit/kernel-adapters';
 import type { IVFSManager } from '@itookit/vfs-core';
 import { resetSessionManager } from '@itookit/llm-session';
 import type { HeadlessKernelRuntime } from './create-kernel-runtime';
@@ -36,10 +36,12 @@ export async function createConversationSystem(
         kernel: kernel.kernel,
         flowStore: flowEngine,
         dagPlugins: kernel.dagPlugins,
-        retrieveMemory: new SessionMemoryProvider(kernel.kernel).retrieve,
+        retrieveMemory: kernel.memory.retrieve,
+        memoryProvider: kernel.memory,
         workspaceManager: options.flowWorkspaceManager ? withWorkspaceScopeCleanup(options.flowWorkspaceManager, kernel) : undefined,
         canWriteSession: options.ensureWritable,
         resolveSessionContext: (sessionId, userMessage) => resolveSessionSkillContext(kernel.kernel, kernel.sessions, sessionId, userMessage),
+        resolveSessionSkills: (sessionId, ids) => resolveSessionSelectedSkills(kernel.kernel, kernel.sessions, sessionId, ids),
         resolveTools: async (sessionId, allowedIds) => {
             const tools = (await kernel.sessions.get(sessionId)).toolService;
             const allowed = new Set(allowedIds);

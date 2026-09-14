@@ -33,3 +33,11 @@
   }
 }
 
+
+.rich-content-area { line-height: 1.6; overflow-wrap: anywhere; }
+#mdx-print-container { display: none; }
+@media print {
+  .mdx-printing > :not(#mdx-print-container) { display: none !important; }
+  .mdx-printing > #mdx-print-container { display: block; color: #000; background: #fff; }
+  .rich-content-area img, .rich-content-area svg { max-width: 100%; }
+}

@@ -1426,3 +1426,16 @@ a { color: inherit; text-decoration: none; }
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
+
+.vfs-dir-preview { max-width: 400px; max-height: 300px; overflow: auto; padding: 12px; overflow-wrap: anywhere; }
+.vfs-directory-action { margin-left: auto; flex-shrink: 0; padding: 4px 8px; border: 1px solid currentColor; border-radius: 4px; background: transparent; color: var(--color-primary-default); cursor: pointer; }
+.vfs-directory-action:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.vfs-directory-item__empty-placeholder { display: block; padding: 8px 16px; color: var(--vfs-text-secondary, #666); font-size: 12px; }
+.vfs-file-outline__list { list-style: none; margin: 0; padding: 0; }
+.vfs-move-modal__folder-children { border-left: 1px solid var(--color-gray-200); }
+.vfs-move-modal__folder-wrapper { min-width: 0; }
+.vfs-move-modal__folder-toggle { display: inline-flex; justify-content: center; align-items: center; flex: 0 0 24px; min-height: 24px; }
+.vfs-move-modal__folder-toggle[data-action] { cursor: pointer; }
+.vfs-node-list__footer-checkbox { margin: 0 8px 0 0; accent-color: var(--color-primary-default); }
+.vfs-node-list__item-creator-icon { display: inline-flex; align-items: center; flex-shrink: 0; width: 16px; height: 16px; }
+.vfs-node-list__placeholder { padding: 24px; text-align: center; color: var(--vfs-text-secondary, #666); }

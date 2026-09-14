@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { SeqFileKernelStore } from '@itookit/durable-kernel';
+import { parseLoadedSkillIds } from '@itookit/kernel-adapters';
 import { listenForTest } from './listen';
 import { runCommand } from '../src/commands';
 import { CliStorageResolver, cliStorage, openProfileInspectionFs } from '../src/runtime';
@@ -91,7 +92,8 @@ async function loadedSkills(stateDir: string, runId: string): Promise<unknown> {
         const resolver = new CliStorageResolver(fs);
         const binding = await resolver.resolve(cliStorage(runId));
         const store = new SeqFileKernelStore(binding, reference => resolver.resolve(reference));
-        return (await store.getShared(binding, 'kernel-adapters.skills.loaded'))?.value;
+        const value = (await store.getShared(binding, 'kernel-adapters.skills.loaded'))?.value;
+        return value === undefined ? undefined : parseLoadedSkillIds(value);
     } finally { await dispose(); }
 }
 

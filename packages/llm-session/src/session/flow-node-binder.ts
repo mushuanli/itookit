@@ -104,10 +104,7 @@ async function resolveIdentity(
         ...(referencedAgent?.capabilityPolicy?.skillIds ?? []),
         ...strings(config.skillIds),
     ]);
-    const skills = await context.agents.getSkills(skillIds).catch(error => {
-        log.warn('Flow node skillIds resolution failed', { skillIds, error });
-        return [];
-    });
+    const skills = await context.agents.getSkills(skillIds, context.task.sessionId);
     return { referencedAgent, skills: skills.filter(skill => skill.enabled && !skill.disableModelInvocation && skill.triggerStrategy !== 'action') };
 }
 

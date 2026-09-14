@@ -1,3 +1,4 @@
+import { parseLoadedSkillIds } from '../skill/loaded-state';
 import { runSessionSkillOperation } from '../skill/operation-queue';
 import { createSessionSkillControls } from '../skill/session-skill-controls';
 import { describe, expect, it, vi } from 'vitest';
@@ -325,14 +326,14 @@ describe('createKernelAdaptersRuntime', () => {
             await effects.find(effect => effect.kind === 'skill.load')!.execute({ resourceHandleId: 'skill-handle', skillId: 'review' }, ctx);
             const unload = effects.find(effect => effect.kind === 'skill.unload')!;
             await unload.execute({ resourceHandleId: 'skill-handle', skillId: 'review' }, ctx);
-            expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+            expect(parseLoadedSkillIds((await state.get('kernel-adapters.skills.loaded'))?.value)).toEqual([]);
             await runtime.disposeSession('session-a');
             const restored = await runtime.sessions.restore('session-a', (await state.get('kernel-adapters.skills.loaded'))?.value);
             expect(restored.skillService.getLoadedSkills()).toEqual([]);
             // Cleanup remains possible after a saved definition has been removed from the catalog.
             await state.set('kernel-adapters.skills.loaded', ['missing'], (await state.get('kernel-adapters.skills.loaded'))!.version);
             await unload.execute({ resourceHandleId: 'skill-handle', skillId: 'missing' }, ctx);
-            expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+            expect(parseLoadedSkillIds((await state.get('kernel-adapters.skills.loaded'))?.value)).toEqual([]);
         } finally { await runtime.dispose(); }
     });
 
@@ -408,7 +409,7 @@ describe('createKernelAdaptersRuntime', () => {
         expect(runtime.toolCatalog.getToolDefinitions().some(tool => (tool.name ?? tool.function?.name) === 'unload_skill')).toBe(true);
         await tool.execute({ ...request, toolId: 'unload_skill' }, ctx);
         expect((await runtime.sessions.get('session-a')).skillService.getLoadedSkills()).toEqual([]);
-        expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        expect(parseLoadedSkillIds((await state.get('kernel-adapters.skills.loaded'))?.value)).toEqual([]);
         await runtime.disposeSession('session-a');
         await tool.execute({ ...request, toolId: 'missing' }, ctx).catch(() => undefined);
         expect((await runtime.sessions.get('session-a')).skillService.getLoadedSkills()).toEqual([]);
@@ -416,7 +417,7 @@ describe('createKernelAdaptersRuntime', () => {
         await runtime.skillCatalog.deleteSkill('review');
         await runtime.disposeSession('session-a');
         await tool.execute({ ...request, toolId: 'unload_skill' }, ctx);
-        expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        expect(parseLoadedSkillIds((await state.get('kernel-adapters.skills.loaded'))?.value)).toEqual([]);
         await runtime.dispose();
     });
 
@@ -502,7 +503,7 @@ describe('createKernelAdaptersRuntime', () => {
         await vi.waitFor(() => expect(loading).toHaveBeenCalled());
         const unload = controls.unload('session-a', 'review');
         release(); await load; await unload;
-        expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        expect(parseLoadedSkillIds((await state.get('kernel-adapters.skills.loaded'))?.value)).toEqual([]);
         expect(scope.skillService.getLoadedSkills()).toEqual([]);
         await runtime.disposeSession('session-a');
         expect((await runtime.sessions.restore('session-a', (await state.get('kernel-adapters.skills.loaded'))?.value)).skillService.getLoadedSkills()).toEqual([]);
@@ -528,9 +529,9 @@ describe('createKernelAdaptersRuntime', () => {
         const get = vi.spyOn(runtime.sessions, 'get');
         release(); await active; await rejected; await closing;
         expect(get).not.toHaveBeenCalled();
-        expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual(['review']);
+        expect(parseLoadedSkillIds((await state.get('kernel-adapters.skills.loaded'))?.value)).toEqual(['review']);
         await controls.unload('session-a', 'review');
-        expect((await state.get('kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        expect(parseLoadedSkillIds((await state.get('kernel-adapters.skills.loaded'))?.value)).toEqual([]);
         await runtime.dispose();
         await expect(controls.list('session-a')).rejects.toThrow('closed');
     });

@@ -74,7 +74,7 @@ export class SessionRunCoordinator {
             kernel,
             dagPlugins,
             resolveTools,
-            resolveSkills: ids => this.agents.getSkills(ids),
+            resolveSkills: (ids, sessionId) => this.agents.getSkills(ids, sessionId),
             retrieveMemory,
             resolveSessionContext,
             workspaceManager,

@@ -232,7 +232,8 @@ export const ChatInputTemplates = {
     /**
      * 渲染单个 Skill 条目 — toggle switch 样式
      */
-    renderSkillItem(skill: { id: string; name: string; description: string; loaded: boolean; enabled?: boolean; toolCount: number; icon?: string }): string {
+    renderSkillItem(skill: { id: string; name: string; description: string; loaded: boolean; enabled?: boolean; toolCount: number; icon?: string;
+        drift?: import('@itookit/common').SkillVersionDrift; unversioned?: boolean }): string {
         const icon = skill.icon ? escapeHTML(skill.icon) : '⚡';
         const checked = skill.loaded ? 'checked' : '';
         const btnClass = skill.loaded ? 'llm-input__skill-btn--unload' : 'llm-input__skill-btn--load';
@@ -248,6 +249,8 @@ export const ChatInputTemplates = {
                 </label>
                 <span class="llm-input__skill-icon">${icon}</span>
                 <span class="llm-input__skill-name">${escapeHTML(skill.name)}</span>${desc}
+                ${skill.drift || skill.unversioned ? `<span role="status">${escapeHTML(t(skill.drift?.policy === 'keep-old' ? 'skill.version.kept' : 'skill.version.changed'))}</span>
+                    <button type="button" data-skill-reload="${escapeHTML(skill.id)}">${escapeHTML(t('skill.version.reload'))}</button>` : ''}
             </div>
         `;
     },

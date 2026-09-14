@@ -78,6 +78,7 @@ export interface AgentConfig {
     response_format?: import('@itookit/common').ResponseFormat;
     output_validation?: { on_invalid?: 'fail' | 'repair' | 'continue'; retries?: number };
     memory_policy?: {
+        shared_memory?: { id: string; incarnation: string };
         namespace_id: string;
         read_scopes: string[];
         write_scopes: string[];

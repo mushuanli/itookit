@@ -2,14 +2,16 @@ import { runSessionSkillOperation } from './operation-queue';
 import type { SessionSkillControls, ISkillService } from '@itookit/common';
 import type { Kernel } from '@itookit/durable-kernel';
 import type { SessionCapabilityRegistry } from '../ports/capabilities';
-import { forgetLoadedSkill, parseLoadedSkillIds, rememberLoadedSkill, rollbackFailedLoad } from './loaded-state';
+import { forgetLoadedSkill, parseLoadedSkillIds, parseLoadedSkillVersions, rememberLoadedSkill, rollbackFailedLoad } from './loaded-state';
 
 /** UI control uses Session shared state directly; it does not impersonate an Agent Effect. */
 export function createSessionSkillControls(kernel: Kernel, registry: SessionCapabilityRegistry): SessionSkillControls {
     const serial = <T>(id: string, action: () => Promise<T>) => runSessionSkillOperation(registry, id, action);
     const list = async (sessionId: string, onlyLoaded: boolean) => {
             const session = await kernel.openSession(sessionId);
-            const ids = parseLoadedSkillIds((await session.getShared('kernel-adapters.skills.loaded'))?.value);
+            const saved = (await session.getShared('kernel-adapters.skills.loaded'))?.value;
+            const ids = parseLoadedSkillIds(saved);
+            const versions = parseLoadedSkillVersions(saved);
             const scope = await registry.get(sessionId);
             const loaded = new Set([...ids, ...scope.skillService.getLoadedSkills().map(skill => skill.id)]);
             const all = new Set([...loaded, ...(onlyLoaded ? [] : scope.skillService.listSkills().map(skill => skill.id))]);
@@ -20,7 +22,9 @@ export function createSessionSkillControls(kernel: Kernel, registry: SessionCapa
                     // Definition-level enablement, independent of whether the input-side checkbox may
                     // load it: `/sk-<id>` exists exactly for the manual (action/silent) invocations.
                     definitionEnabled: !!skill?.enabled,
-                    toolCount: skill?.tools.length ?? 0 };
+                    toolCount: skill?.tools.length ?? 0, versionDigest: versions?.snapshots[id]?.digest,
+                    versionPolicy: versions?.snapshots[id]?.policy, drift: versions?.drifts[id],
+                    unversioned: ids.includes(id) && (!versions || !Object.hasOwn(versions.snapshots, id)) };
             });
     };
     return {
@@ -33,6 +37,7 @@ export function createSessionSkillControls(kernel: Kernel, registry: SessionCapa
                 set: (key, value, expectedVersion) => session.setShared(key, value, { expectedVersion }) };
             parseLoadedSkillIds((await state.get('kernel-adapters.skills.loaded'))?.value);
             const service = (await registry.get(id)).skillService;
+            await service.refreshScopedSkills?.();
             return loadAndRemember(service, skillId, state);
         }),
         describe: (sessionId, skillId) => serial(sessionId, async () => {
@@ -75,11 +80,19 @@ async function loadAndRemember(service: ISkillService, id: string,
     const skill = service.getSkill(id);
     if (!skill?.enabled || skill.disableModelInvocation || skill.triggerStrategy === 'action') throw new Error(`Skill cannot be loaded into model context: ${id}`);
     const wasLoaded = service.getLoadedSkills().some(item => item.id === id);
-    const result = await service.loadSkill(id);
+    const versions = parseLoadedSkillVersions((await state.get('kernel-adapters.skills.loaded'))?.value);
+    const previous = service.getSkillSnapshot?.(id)
+        ?? (versions && Object.hasOwn(versions.snapshots, id) ? versions.snapshots[id] : undefined);
+    const result = await (service.reloadSkill?.(id) ?? service.loadSkill(id));
     if (!result.success) throw new Error(result.error ?? `Failed to load Skill: ${id}`);
-    try { await rememberLoadedSkill(id, state); }
+    try { await rememberLoadedSkill(id, state, result.snapshot); }
     catch (error) {
-        if (!wasLoaded) await rollbackFailedLoad(service, id, error);
+        if (previous && service.restoreSkillSnapshot) {
+            try {
+                const restored = await service.restoreSkillSnapshot(previous);
+                if (!restored.success) throw new Error(restored.error ?? 'Previous Skill version cannot be restored');
+            } catch (cleanup) { throw new AggregateError([error, cleanup], 'Skill reload persistence and rollback failed'); }
+        } else if (!wasLoaded) await rollbackFailedLoad(service, id, error);
         throw error;
     }
     return result.toolIds;

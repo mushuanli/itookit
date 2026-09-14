@@ -89,6 +89,7 @@ import { DagCommandService } from '@itookit/llm-flow';
 import { registerDurablePrograms } from '@itookit/llm-flow';
 
 export interface ConversationSystemOptions {
+    memoryProvider?: import('./session/session-memory-provider').SessionMemoryProvider;
     retrieveMemory?: import('./session/conversation-run-coordinator').ConversationRunCoordinatorOptions['retrieveMemory'];
     agentService: IAgentConfigService;
     sessionEngine: ISessionRepository;
@@ -97,6 +98,7 @@ export interface ConversationSystemOptions {
     /** Standalone workflow storage (flows VFS module). */
     flowStore: FlowStore;
     resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
+    resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>;
     resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
         definitions: ToolDefinition[];
         externalIds: string[];
@@ -131,7 +133,9 @@ export async function initializeConversationSystem(
             flowStore: options.flowStore,
             resolveTools: options.resolveTools,
             resolveSessionContext: options.resolveSessionContext,
+            resolveSessionSkills: options.resolveSessionSkills,
             retrieveMemory: options.retrieveMemory,
+            memoryProvider: options.memoryProvider,
             canWriteSession: options.canWriteSession,
             workspaceManager: options.workspaceManager,
         },
@@ -171,7 +175,7 @@ function createDagCommands(
         workspaceManager: options.workspaceManager,
         kernel: options.kernel,
         plugins: options.dagPlugins,
-        bindNode: (sessionId, node, defaults) => bindStandaloneFlowNode(node, defaults, sessionId, new AgentResolver(options.agentService)),
+        bindNode: (sessionId, node, defaults) => bindStandaloneFlowNode(node, defaults, sessionId, new AgentResolver(options.agentService, options.resolveSessionSkills)),
         resolveSessionContext: options.resolveSessionContext,
         resolveTools: options.resolveTools,
     });
@@ -191,5 +195,7 @@ function activateConversationPlugins(
 }
 
 export { SessionMemoryProvider, type MemoryWrite, type MemoryEntry, type MemoryMutationOptions } from './session/session-memory-provider';
+export { SharedMemoryStore, type SharedMemoryResource, type SharedMemoryGrant, type SharedMemoryAudit } from './session/shared-memory-store';
 export { SessionMemoryControls } from './session/session-memory-controls';
+export { MemorySharingControls } from './session/memory-sharing-controls';
 export { TaskMemoryService } from './session/task-memory-service';

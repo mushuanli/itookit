@@ -21,6 +21,25 @@ export type SkillTriggerStrategy = 'reference' | 'action';
 /** 作用域层级（文件系统 Skill 专用） */
 export type SkillScopeLevel = 'vfs' | 'global-fs' | 'parent-fs' | 'local-fs';
 
+export type SkillVersionPolicy = 'keep-old' | 'require-reload';
+
+/** Persisted executable definition and resolved instruction content. */
+export interface SkillVersionSnapshot {
+    format: 1;
+    digest: string;
+    definition: SkillDefinition;
+    instructions: string;
+    compactInstructions: string;
+    policy: SkillVersionPolicy;
+}
+
+export interface SkillVersionDrift {
+    expectedDigest: string;
+    observedDigest: string;
+    detectedAt: number;
+    policy: SkillVersionPolicy;
+}
+
 /**
  * Compact Instructions 区块：历史压缩时必须保留的关键规则。
  *
@@ -155,6 +174,9 @@ export interface SkillDefinition {
     /** 加载优先级（越小越优先） */
     priority: number;
 
+    /** Host-configured behavior when a persisted loaded definition changes. */
+    versionPolicy?: SkillVersionPolicy;
+
     /** HTTP 端点配置（type='http' 时使用） */
     endpoint?: string;
     method?: 'GET' | 'POST' | 'PUT';
@@ -267,6 +289,7 @@ export interface SkillLoadResult {
     instructions?: string;
     /** Critical rules captured with the loaded instructions. */
     compactInstructions?: string;
+    snapshot?: SkillVersionSnapshot;
     /** 错误信息（仅 success=false 时） */
     error?: string;
 }

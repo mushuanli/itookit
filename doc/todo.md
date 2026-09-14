@@ -23,7 +23,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 | D01 | 祖先取消屏障、后代恢复、终态回执重放 | Kernel/LocalFS 跨进程测试；本地故障矩阵见 P1-05 |
 | D02 | Effect 清理超时、pending 保留、取消等待真实完成 | 超时不伪造成功；在途操作未完成时不能宣称已停止 |
 | D03 | Session 附件与显式目录授权，文件/工具/进程视图一致 | 来源注册不自动授权；[挂载设计](design/vfs-session-mount-access.md) |
-| D04 | Skill 加载/卸载、持久身份、上下文注入、操作队列 | 严格版本冻结与系统性竞态核验仍属 P2-01 |
+| D04 | Skill 加载/卸载、持久身份、上下文注入、操作队列 | 已补持久版本策略；自动委派与系统性竞态核验仍属 P2-01 |
 | D05 | Skill → Agent → transform 多节点 DAG | 组合测试通过；不替代完整真实桌面操作 |
 | D06 | 人工回应后同进程 DAG 延续，连续多次暂停 | 沿用同一 Run |
 | D07 | 人工检查点与 CLI 独立 run/respond/resume 进程 | 任意崩溃点恢复仍属 P1-01 |
@@ -36,7 +36,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 | D14 | Bash 清理错误聚合、幂等 release、每流 1 MiB 输出上限 | 仍排空管道；不限制子进程磁盘、内存和输出速率 |
 | D15 | 外层 Kernel/Bash → 子 CLI DAG 及重开记录 | 真实窗口链路见 P0-01 |
 | D16 | Tauri 构建、Xvfb/AT-SPI 窗口与目录操作 | 不等于其他平台、发布安装包或全部 GUI 验收 |
-| D17 | Session 本地 Memory、管理 UI、模型工具及 CLI 配置 | 已有持久化和 HTTP mock 调用；跨 Session、语义检索仍未完成 |
+| D17 | Session 本地 Memory、管理 UI、模型工具及 CLI 配置 | 已有持久化和 HTTP mock 调用；已补显式跨 Session 共享、版本冲突处置与内容压缩；语义检索延期 |
 | D18 | 设计/API/包说明阶段性审计与历史方案归档 | 本地生命周期见 P1-05；扩展设计闭合属 P2-05 |
 
 ## 3. 任务清单
@@ -143,26 +143,31 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 实施拆分、协议边界和逐项验收标准见 [P2 实施与验收契约](design/p2-completion.md)。该文档定义目标，不作为已实现证据；P2-01～P2-04 仍按下列剩余项闭合。
 
+本轮范围调整（用户明确指定）：**语义/向量检索暂不实现**，保留延期，不作为本轮完成条件。现有词项检索保持原行为；其余 P2 待办继续推进。
+
 - [ ] **P2-01 Skill 完整生命周期**
-  - 已合入 `a8288084`：Skill 初始快照、直接会话/Flow 接线、UI/宿主入口与关闭屏障整批隔离验证；action Skill 不自动进入 system 提示。严格版本冻结、自动委派与其余竞态要求仍开放。
+  - 已合入 `a8288084`：Skill 初始快照、直接会话/Flow 接线、UI/宿主入口与关闭屏障整批隔离验证；action Skill 不自动进入 system 提示。已补严格版本冻结；自动委派与其余竞态要求仍开放。
   - 已实现：直接会话/Flow 初始 Skill 快照及工具交集、编辑器 glob open/close、列表变更通知、手动斜杠入口。
-  - 剩余：严格版本冻结的 keep-old / require-reload / drift marker 语义、自动委派到统一 TaskGroup 的编译接线、作用域销毁/重建竞态系统核验。
-  - 当前通知仅进程内；跨进程直接修改文件不触发。在途 Task 的 system 消息不改，新定义在后续上下文组装时生效。见[Skill 设计](design/skill-design.md)。
+  - 已实现：持久定义/正文/支持文件/工具快照、默认 require-reload 与显式 keep-old 策略、持久漂移标记和面板重新加载；旧 ID 记录要求显式 reload。直接聊天与 Flow 的初始选择使用同一版本入口，keep-old 不恢复撤销的授权。
+  - 剩余：自动委派到统一 TaskGroup 的编译接线、作用域销毁/重建竞态系统核验，以及完整版本变化的真实窗口/进程矩阵。
+  - 当前通知仅进程内；跨进程直接修改文件不触发。在途 Task 的 system 消息不改，后续上下文组装复核持久版本并执行漂移策略。见[Skill 设计](design/skill-design.md)。
   - 已补错误边界：身份 CAS 仅重试 Kernel CONFLICT，提交前/后非冲突错误直接报告；自动加载回滚聚合身份写入与清理错误；批量恢复失败撤销本次新增加载、保留已有选择并允许修正后重试，action 定义不能经旧身份自动恢复。`loaded-state.test.ts`、`prompt-context.test.ts`、`restore-loaded-skills.test.ts` 有回归，kernel-adapters 120 项及类型检查通过；不替代严格版本或完整竞态验收。
-  - 待交付：持久来源/内容/支持文件/工具快照与漂移处置入口；经现有委派组编译的有界自动委派及幂等恢复；扫描/加载/身份提交/订阅与关闭重建的交错矩阵。具体标准见 [P2 契约 §2](design/p2-completion.md#2-p2-01-skill-生命周期)。
+  - 待交付：经现有委派组编译的有界自动委派及幂等恢复；扫描/加载/身份提交/订阅与关闭重建的交错矩阵。具体标准见 [P2 契约 §2](design/p2-completion.md#2-p2-01-skill-生命周期)。
 
 - [ ] **P2-02 跨 Session Memory**
-  - 已验证不同 Session/namespace/scope 隔离；跨 Session 共享协议尚未实现，需定义独立生命周期存储、显式读写授权、来源身份、并发一致性与审计。
+  - 已实现：独立 `/var/lib/memory/shared.seq` 资源、不可复用 incarnation、精确 Session/scope 授权、来源记录；授权/CAS/数据/幂等回执/审计在同一事务提交。管理对话框和 CLI 提供创建、选择、授权、撤权、删除及审计入口，模型工具不提供管理权限。
   - Session shared state 只在当前 Session 内共享。同一 namespaceId 不自动跨 Session；CLI 新 Run 不自动读取旧 Run 记忆。
-  - 待交付：独立共享资源身份与生命周期、事务内授权/CAS/幂等回执/审计、显式授权与撤权入口、CLI/直接聊天/Flow/管理 UI 接线；两个真实 Session 和同机双进程的并发/删除/SIGKILL 验收。见 [P2 契约 §3](design/p2-completion.md#3-p2-02-跨-session-memory)。不以伪造同一 sessionId 实现共享。
+  - 已有回归：两个真实 Session 的双进程条件写竞争、创建者删除后共享数据保留；写入/删除/prune/压缩各三个 SQLite 事务故障窗口的 SIGKILL、重开与回执审计一致性。
+  - 剩余：IndexedDB 后端独立验证、真实窗口跨 Session 操作及更完整的撤权/并发清理矩阵。见 [P2 契约 §3](design/p2-completion.md#3-p2-02-跨-session-memory)。不以伪造同一 sessionId 实现共享。
 
 - [ ] **P2-03 Memory 模型写入与管理**
-  - 已实现：SessionMemoryProvider 的 CAS 存储、scope 授权、完整列表、摘要条件编辑/删除、容量/时间水位清理；并发 prune 计数和同毫秒裁剪缺陷已修；仅 Kernel CONFLICT 重试，其他提交前/后存储错误直接返回。
-  - 已实现：Files 页记忆管理 UI，固定 Session、写租约检查、冲突保留输入；直接会话与 Flow 的策略快照；memory_list/write/remove 经 tool.call 校验持久 Task 白名单及策略。CLI Agent `memory_policy` 同步进入节点和 RunDefinition。
+  - 已实现：SessionMemoryProvider 的 CAS 存储、scope 授权、完整列表、不可复用 revision 与摘要条件编辑/删除、容量/时间水位清理；并发 prune 计数和同毫秒裁剪缺陷已修；仅 Kernel CONFLICT 重试，其他提交前/后存储错误直接返回。
+  - 已实现：Files 页记忆管理 UI，固定 Session、写租约检查、冲突保留输入；直接会话与 Flow 的策略快照；memory_list/write/remove/compact 经 tool.call 校验持久 Task 白名单及策略。CLI Agent `memory_policy` 同步进入节点和 RunDefinition。
   - 已验证：DOM + 真实 LocalFS/SQLite 重开后编辑保留、删除不复活；真实 Durable Agent 两轮调用；真实 CLI + 本地 HTTP mock 调用及退出后磁盘读取；取消等待和普通 ToolService 绕过被拒；CLI 写入/删除成功回执后 SIGKILL，恢复保持记忆版本及工具执行次数不变；另有写入/删除服务调用前及提交后未写回执的四个 SIGKILL 窗口，默认阻断、显式重放后成功。
-  - 剩余：真实 Tauri 窗口操作、真实云模型调用、条件写冲突后的人工处置、独立 retention/GC 故障及存储事务内部持久性验证；语义/向量检索及压缩策略。当前词项匹配/更新时间排序不等于语义检索，容量/时间裁剪不等于内容压缩。
-  - 写工具属于 local 副作用，崩溃结果不确定时不盲目重放。条件编辑比较内容摘要而非历史版本，无法识别相同内容的删除重建。见[Memory API](llm-session-api.md)、[CLI 配置](../apps/cli/README.md)及[验收 §61–63](minimal-system-acceptance.md)。
-  - 待交付：不可复用的条目版本与冲突后人工比较/重提；受授权和内容版本约束的 embedding 索引；保留来源引用、提交前复验的持久内容压缩任务。词项、向量与压缩分别验收，见 [P2 契约 §4](design/p2-completion.md#4-p2-03-memory-管理检索与压缩)。
+  - 已实现：冲突后读取最新内容、保留草稿、显式采用比较版本再提交；memory_compact 在持久 Agent 工具链中提交更短摘要，原子复验源版本与读写授权，保存来源版本/摘要/模型并保留原文。
+  - 剩余：真实 Tauri 窗口操作、真实云模型调用、完整压缩 Task 取消/恢复与并发 GC 矩阵。SQLite 事务内部故障已有独立证据；语义/向量检索按用户要求延期。
+  - 写工具属于 local 副作用，崩溃结果不确定时不盲目重放。条件编辑支持 expectedRevision，能拒绝相同内容的删除重建；共享工具通过 Task/Effect 操作身份复用事务回执。见[Memory API](llm-session-api.md)、[CLI 配置](../apps/cli/README.md)及[验收 §61–63](minimal-system-acceptance.md)。
+  - 待交付：上述真实窗口、云模型及完整恢复矩阵；embedding 索引延期。词项、向量与压缩分别验收，见 [P2 契约 §4](design/p2-completion.md#4-p2-03-memory-管理检索与压缩)。
 
 - [ ] **P2-04 VFS/C4 完整验收**
   - 附件-only、逃逸拒绝、全部只读变更动词、同名挂载跨 Session 隔离、默认目录不隐式授权、卸载保留文件与旧句柄失效已有包级证据；真实 GUI 挂载/撤销/只读与 bwrap 边界已有记录。
@@ -174,7 +179,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 - [x] **P2-06 app-core 包内边界与技术债**：包说明、测试归属、app-shell 兼容 shim 删除、runtime/infrastructure 拆分、公开 VFS ioStats、session/vfs 目录归类、index 别名收口、静默失败可见化、租约 init 去重及已有 app-core 文案 i18n 均已完成。
   - 分批合入验证：应用层整理提交快照通过 app-core 72 项、app-shell 112 项、CLI HTTP 2 项测试（另有 30 项既有跳过），以及 app-core、Web、Tauri、CLI 类型检查；新增基础设施初始化失败和清理失败回归。最终全仓验收仍见 P0-05。
 
-**样式待办（仍保留）**：补齐 `scripts/style-class-allowlist.txt` 中待补样式，完成后删除对应豁免。包括 Agent 快捷 Prompt、DAG 空态/运行视图、同步设置、VFS 列表/移动弹窗/mention 预览、mdx 打印及零散元素。`styles:check` 通过只表示未新增漂移，不表示豁免项已完成。本地图标字体已接入，MathJax/Mermaid 仍使用配置的 CDN。
+**样式实现已补齐**：Agent 快捷 Prompt、DAG 空态/运行视图、同步设置、VFS 列表/移动弹窗/mention 预览、mdx 打印及零散元素已增加实际样式，并移除相应豁免；allowlist 仅保留 48 个选择器/状态类。`styles:check` 通过，视觉实机验收仍未执行。本地图标字体已接入，MathJax/Mermaid 仍使用配置的 CDN。
 
 ## 4. 下一步与验证入口
 

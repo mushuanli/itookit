@@ -74,23 +74,25 @@ export class SessionManager implements ISession, SessionQuery {
             dagPlugins: DagPluginCatalog;
             flowStore: FlowStore;
             resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
+            resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>;
             resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
                 definitions: ToolDefinition[];
                 externalIds: string[];
             }>;
             retrieveMemory?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['retrieveMemory'];
+            memoryProvider?: SessionMemoryProvider;
             canWriteSession?: (sessionId: string) => Promise<boolean>;
             workspaceManager?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['workspaceManager'];
         }
     ) {
         this.canWriteSession = options.canWriteSession;
         this.registry = new SessionRegistry(engine);
-        this.agentResolver = new AgentResolver(agentService);
+        this.agentResolver = new AgentResolver(agentService, options.resolveSessionSkills);
         const attachments = new AttachmentProcessor(engine);
 
         if (!options?.kernel) throw new Error('SessionManager requires Kernel');
         this.kernel = options.kernel;
-        this.memory = new SessionMemoryControls(new SessionMemoryProvider(this.kernel), agentService,
+        this.memory = new SessionMemoryControls(options.memoryProvider ?? new SessionMemoryProvider(this.kernel), agentService,
             () => this.registry.ensureBound().sessionId, options.canWriteSession);
         this.durableProjection = new DurableConversationProjection(engine);
         this.runs = new SessionRunCoordinator(

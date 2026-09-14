@@ -31,6 +31,7 @@ export interface CommandOptions {
     setHome?: string;
     /** Map additional host directories into the Session runtime context. */
     addDir?: string[];
+    grantMemory?: string[];
     follow?: boolean;
     approve?: boolean;
     deny?: boolean;
@@ -899,7 +900,7 @@ async function runtimeFor(
     return createCliRuntime(workflow, manifest, async grants => {
         manifest.grants = grants;
         await store.save(manifest);
-    }, vfsRoot, mode, { setHome: options.setHome, addDir: options.addDir, useProfileConfig });
+    }, vfsRoot, mode, { setHome: options.setHome, addDir: options.addDir, grantMemory: options.grantMemory, useProfileConfig });
 }
 
 function renderEvent(manifest: RunManifest, event: EventEnvelope, options: CommandOptions): void {

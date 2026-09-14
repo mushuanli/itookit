@@ -1,3 +1,4 @@
+import { parseLoadedSkillIds } from '@itookit/kernel-adapters';
 /**
  * P0-00 应用宿主半边：按**桌面宿主（Tauri）的装配方式**（`createApplicationRuntime` +
  * `TauriSkillSource`）发起一次真实聊天运行，核对落盘的运行输入里同时出现项目规则与
@@ -75,7 +76,7 @@ it('assembles project rules and auto-loaded Skills into an app-host chat run', a
 
         // The loaded identity is durable Session state that a reopening host restores.
         const loaded = await kernel.getShared(sessionId, 'kernel-adapters.skills.loaded');
-        expect(loaded?.value).toEqual(['review']);
+        expect(parseLoadedSkillIds(loaded?.value)).toEqual(['review']);
 
         // A later assembly whose message no longer matches the trigger still gets the Skill body,
         // because the persisted loaded identity is restored first. This calls the same shared
@@ -102,7 +103,7 @@ it('restores the persisted Skill identity when a new host instance starts the ne
         await mountProject(first, sessionId);
         await send(first, sessionId, 'Please review the interface change');
         await vi.waitFor(async () => expect(await first.kernel.kernel.listSessionTasks(sessionId)).toHaveLength(1), { timeout: 20_000 });
-        expect((await first.kernel.kernel.getShared(sessionId, 'kernel-adapters.skills.loaded'))?.value).toEqual(['review']);
+        expect(parseLoadedSkillIds((await first.kernel.kernel.getShared(sessionId, 'kernel-adapters.skills.loaded'))?.value)).toEqual(['review']);
         // Let the failed run reach a terminal state before this host goes away, so the next host
         // starts from a settled round instead of racing a half-finished one.
         await vi.waitFor(async () => {
@@ -188,14 +189,14 @@ it('distinguishes persisted identity restore from autoLoad and respects unload i
         // An explicit (non-auto) load records the durable identity. A non-matching run now gets
         // the Skill through that identity — the same effect a reopened host observes.
         await controls.load(sessionId, 'review');
-        expect((await kernel.getShared(sessionId, 'kernel-adapters.skills.loaded'))?.value).toEqual(['review']);
+        expect(parseLoadedSkillIds((await kernel.getShared(sessionId, 'kernel-adapters.skills.loaded'))?.value)).toEqual(['review']);
         const restored = await resolveSessionSkillContext(kernel, runtime.kernel.sessions, sessionId, 'plain hello only');
         expect(restored.skillInstructions).toContain('Check every changed interface.');
         expect(restored.skillInstructions).toContain('Preserve access checks.');
 
         // Unload clears the identity; a later non-matching run must not resurrect the Skill.
         await controls.unload(sessionId, 'review');
-        expect((await kernel.getShared(sessionId, 'kernel-adapters.skills.loaded'))?.value).toEqual([]);
+        expect(parseLoadedSkillIds((await kernel.getShared(sessionId, 'kernel-adapters.skills.loaded'))?.value)).toEqual([]);
         const afterUnload = await resolveSessionSkillContext(kernel, runtime.kernel.sessions, sessionId, 'plain hello only');
         expect(afterUnload.skillInstructions).not.toContain('Check every changed interface.');
 
