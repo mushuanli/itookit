@@ -40,6 +40,7 @@ import { startVfsTrace } from './log/vfs-trace';
 import { createSendBoundary } from './log/send-boundary';
 import { SessionCommand } from '@itookit/llm-session';
 import { TauriSkillSource } from './kernel/tauri-skill-source';
+import { openDirectoryDialog } from './services/directory-dialog';
 
 // Bundled locally: the desktop app must render icons offline. The CDN <link> this
 // replaces needed network access and a cdnjs CSP allowance.
@@ -126,16 +127,6 @@ async function getRootDir(): Promise<string> {
         const home = (globalThis as { process?: { env?: { HOME?: string } } })
             .process?.env?.HOME ?? '.';
         return `${home}/.config/mindos/data`;
-    }
-}
-
-async function openDirectoryDialog(): Promise<string | null> {
-    try {
-        const { open } = await import('@tauri-apps/plugin-dialog');
-        const result = await open({ directory: true, multiple: false });
-        return typeof result === 'string' ? result : null;
-    } catch {
-        return null;
     }
 }
 
@@ -337,11 +328,17 @@ async function bootstrap(): Promise<void> {
 
     // Add mount button
     document.getElementById('btn-add-mount')!.addEventListener('click', async () => {
-        const localPath = await openDirectoryDialog();
-        if (!localPath) return;
-        const label = localPath.split('/').filter(Boolean).pop() ?? 'Mount';
-        const entry = await localMounts.mount(localPath, label);
-        await app.navigate(entry.id);
+        try {
+            const localPath = await openDirectoryDialog();
+            if (!localPath) return;      // the user cancelled: not an error
+            const label = localPath.split('/').filter(Boolean).pop() ?? 'Mount';
+            const entry = await localMounts.mount(localPath, label);
+            await app.navigate(entry.id);
+        } catch (error) {
+            // Without this the handler rejected unobserved and the button looked dead.
+            console.error('[Mount] Failed to add a local source:', error);
+            alert(`挂载目录失败：${error instanceof Error ? error.message : String(error)}`);
+        }
     });
 
     // React to mount added (restore + user action)
