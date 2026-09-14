@@ -1,5 +1,6 @@
 import { skillIndexPrompt, validateSkillIndexLimit } from './index-prompt';
 import type { ISkillService, SkillLoadResult } from '@itookit/common';
+import { rollbackFailedLoad } from './loaded-state';
 
 /** Build a new-run snapshot through the Session service; this does not grant tools. */
 export async function buildSkillPromptContext(service: ISkillService, options: {
@@ -43,7 +44,7 @@ async function loadAutomaticSkills(service: ISkillService, options: {
         const result = await service.loadSkill(skill.id);
         if (!result.success) throw new Error(result.error ?? `Failed to load Skill: ${skill.id}`);
         try { await options.onAutoLoaded?.(skill.id); }
-        catch (error) { await service.unloadSkill(skill.id); throw error; }
+        catch (error) { await rollbackFailedLoad(service, skill.id, error); }
         results.push(result);
     }
     return results;

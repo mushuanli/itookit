@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { Kernel, type EffectExecutionContext } from '@itookit/durable-kernel';
+import { Kernel, KernelError, KernelErrorCode, type EffectExecutionContext } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { rememberLoadedSkill, forgetLoadedSkill } from './loaded-state';
 
@@ -29,4 +29,28 @@ it.each([{}, ['review', 7], ['review', ' ']])('rejects malformed loaded state wi
     await expect(rememberLoadedSkill('new', state)).rejects.toThrow('Invalid loaded Skill identities');
     await expect(forgetLoadedSkill('review', state)).rejects.toThrow('Invalid loaded Skill identities');
     expect(set).not.toHaveBeenCalled();
+});
+
+it.each([
+    ['load', 'before'], ['load', 'after'], ['unload', 'before'], ['unload', 'after'],
+] as const)('reports %s identity failures %s commit without hiding uncertain results', async (action, phase) => {
+    let value = action === 'load' ? [] : ['review'];
+    const failure = new Error('storage result unavailable');
+    const set = vi.fn(async (_key: string, next: unknown) => {
+        if (phase === 'after') value = next as string[];
+        throw failure;
+    });
+    const state = { get: async () => ({ value, version: 1 }), set } as never;
+    const mutate = action === 'load' ? rememberLoadedSkill : forgetLoadedSkill;
+    await expect(mutate('review', state)).rejects.toBe(failure);
+    expect(set).toHaveBeenCalledOnce();
+    expect(value.includes('review')).toBe((action === 'load') === (phase === 'after'));
+});
+
+it('bounds retries for persistent identity CAS conflicts', async () => {
+    const failure = new KernelError(KernelErrorCode.CONFLICT, 'concurrent writer');
+    const set = vi.fn(async () => { throw failure; });
+    const state = { get: async () => ({ value: [], version: 1 }), set } as never;
+    await expect(rememberLoadedSkill('review', state)).rejects.toBe(failure);
+    expect(set).toHaveBeenCalledTimes(3);
 });

@@ -1,5 +1,5 @@
 import { coordinateSkillEffect, runSessionSkillOperation, invalidateSessionSkillOperations, reopenSessionSkillOperations, closeSessionSkillOperations } from '../skill/operation-queue';
-import { parseLoadedSkillIds } from '../skill/loaded-state';
+import { restoreLoadedSkills } from '../skill/restore-loaded-skills';
 import { createUnloadSkillHandler, unloadSkillDefinition, unloadSkillMeta } from '../tool/unload-skill';
 import { SkillUnloadEffectAdapter } from '../effects/skill-unload-effect';
 import { rememberLoadedSkill } from '../skill/loaded-state';
@@ -207,11 +207,7 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
         const scope = await opening;
         if (this.closed || this.scopes.get(sessionId) !== identity) throw new Error('Session scope changed during Skill restoration');
         if (this.hydrated.has(sessionId)) return scope;
-        for (const id of parseLoadedSkillIds(value)) {
-            if (scope.skillService.getSkill(id)?.disableModelInvocation) throw new Error(`Skill cannot be restored for model invocation: ${id}`);
-            const result = await scope.skillService.loadSkill(id);
-            if (!result.success) throw new Error(result.error ?? `Failed to restore Skill: ${id}`);
-        }
+        await restoreLoadedSkills(scope.skillService, value);
         if (this.closed || this.scopes.get(sessionId) !== identity) throw new Error('Session scope changed during Skill restoration');
         this.hydrated.add(sessionId);
         return scope;

@@ -1,5 +1,6 @@
 import type { ISkillService } from '@itookit/common';
 import type { EffectExecutionContext } from '@itookit/durable-kernel';
+import { KernelError, KernelErrorCode } from '@itookit/durable-kernel';
 
 /** Merge a successful load into the durable identity set using the Session CAS boundary. */
 export async function rememberLoadedSkill(id: string, state: EffectExecutionContext['sessionState']): Promise<void> {
@@ -38,7 +39,9 @@ async function updateLoadedSkill(id: string, state: NonNullable<EffectExecutionC
         const ids = parseLoadedSkillIds(saved?.value);
         if (ids.includes(id) === loaded) return;
         try { await state.set(key, loaded ? [...ids, id] : ids.filter(value => value !== id), saved?.version ?? null); return; }
-        catch (error) { if (attempt === 2) throw error; }
+        catch (error) {
+            if (!(error instanceof KernelError) || error.code !== KernelErrorCode.CONFLICT || attempt === 2) throw error;
+        }
     }
 }
 

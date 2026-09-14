@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import type { SkillDefinition } from '@itookit/common';
 import { SkillDeviceDriver } from './skill-device-driver';
 import { buildSkillPromptContext } from './prompt-context';
@@ -63,4 +63,15 @@ it('unloads a newly matched Skill when loaded identity persistence fails', async
     await expect(buildSkillPromptContext(service, { userMessage: 'review', onAutoLoaded: async () => { throw new Error('state unavailable'); } }))
         .rejects.toThrow('state unavailable');
     expect(service.getLoadedSkills()).toEqual([]);
+});
+
+it('retains both identity and cleanup failures when automatic loading rolls back', async () => {
+    const service = new SkillDeviceDriver({ registry: new Map([['review', skill('review', { autoLoad: true })]]) });
+    const persistence = new Error('identity storage unavailable');
+    const cleanup = new Error('tool cleanup unavailable');
+    const unload = vi.spyOn(service, 'unloadSkill').mockRejectedValue(cleanup);
+    const result = buildSkillPromptContext(service, { userMessage: 'hello', onAutoLoaded: async () => { throw persistence; } });
+    await expect(result).rejects.toBeInstanceOf(AggregateError);
+    await expect(result).rejects.toMatchObject({ errors: [persistence, cleanup] });
+    expect(unload).toHaveBeenCalledWith('review');
 });

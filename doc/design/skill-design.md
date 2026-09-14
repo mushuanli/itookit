@@ -138,6 +138,8 @@ skill.load effect 验证 skill ResourceHandle grant，按实际 sessionId 解析
 
 ## 8. 剩余有效任务与验证
 
+严格版本、自动委派及生命周期故障矩阵的目标行为与验收拆分见 [P2 实施契约](p2-completion.md#2-p2-01-skill-生命周期)。当前 loaded 表仍是 ID 数组，不能据此宣称已实现该版本协议。
+
 - ~~完成运行中索引更新、L4 编辑器事件~~（均已接线，见 §4）：新运行的 L2 索引与 L3/L4 已加载正文已接入 ContextAssembler。
 - 补齐初始化技能的工具激活、独立 skill.load effect；直接聊天与聊天内 Flow 已注入项目规则和所选技能关键规则，load_skill 工具路径已保存并重注入关键规则快照。
 - 完成运行中项目文件 watch、L4 文件关联恢复和 Web/CLI 项目来源装配；新会话运行前刷新、Tauri 来源、支持文件读取与挂载变更已使用 Session 文件上下文。继续拒绝未隔离的原生执行。
@@ -146,6 +148,10 @@ skill.load effect 验证 skill ResourceHandle grant，按实际 sessionId 解析
 本次修补覆盖 Session 文件系统定义隔离、跨目录加载拒绝、压缩规则过滤、glob 禁用标记、迟到扫描与 dispose，以及 skill.load 禁止模型调用标记。测试在 `kernel-adapters/src/skill/skill-device-driver.test.ts`、`effects/effect-adapters.test.ts`，运行结果见 [核验清单](../deprecated/implementation-audit.md)。原有 skill-task 测试验证 TaskSpec 编译与真实 Kernel 执行。
 
 持久 loaded ID 更新与作用域恢复使用同一严格解析：兼容缺失/null 为空列表，其余值必须为非空白字符串数组。加载和卸载遇到损坏记录均报错，不过滤后覆盖原数据。工具卸载在无 execute grant、被禁用、ID 无效或缺少 Session shared state 时不写记录、不调用本地卸载；持久删除后本地清理失败可重试，不再次写入已删除的 ID。
+
+身份 CAS 仅对 Kernel CONFLICT 重试（最多三次），其他提交前/后存储错误原样报告，避免提交结果不确定被后续读取误报为成功。自动匹配加载复用 rollbackFailedLoad，清理失败以 AggregateError 保留身份写入与卸载两项错误。回归位于 loaded-state.test.ts 与 prompt-context.test.ts；服务层故障注入不等于真实存储事务内 SIGKILL 验收。
+
+批量身份恢复经 restoreLoadedSkills：任一加载失败时逆序卸载本次已成功新增的 Skill，保留恢复前已有选择；清理逐项继续并聚合错误，失败不设置 hydrated 标记，允许来源修正后重试。action 与 disableModelInvocation 定义均拒绝自动恢复。该回滚不修改持久身份；清理自身失败仍明确报告，不能宣称所有工具已撤销。回归位于 restore-loaded-skills.test.ts。
 
 队列包装器在 tool.call 执行/reconcile 查询可信 metadata 前验证 tool execute grant，防止未授权调用先打开 Session 文件/技能作用域。排队的 Skill 变更在开始执行前再次检查 abortSignal，取消后不执行原 Effect；后续操作仍可继续。
 

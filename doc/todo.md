@@ -141,15 +141,20 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 ### P2：扩展与设计闭合
 
+实施拆分、协议边界和逐项验收标准见 [P2 实施与验收契约](design/p2-completion.md)。该文档定义目标，不作为已实现证据；P2-01～P2-04 仍按下列剩余项闭合。
+
 - [ ] **P2-01 Skill 完整生命周期**
   - 已合入 `a8288084`：Skill 初始快照、直接会话/Flow 接线、UI/宿主入口与关闭屏障整批隔离验证；action Skill 不自动进入 system 提示。严格版本冻结、自动委派与其余竞态要求仍开放。
   - 已实现：直接会话/Flow 初始 Skill 快照及工具交集、编辑器 glob open/close、列表变更通知、手动斜杠入口。
   - 剩余：严格版本冻结的 keep-old / require-reload / drift marker 语义、自动委派到统一 TaskGroup 的编译接线、作用域销毁/重建竞态系统核验。
   - 当前通知仅进程内；跨进程直接修改文件不触发。在途 Task 的 system 消息不改，新定义在后续上下文组装时生效。见[Skill 设计](design/skill-design.md)。
+  - 已补错误边界：身份 CAS 仅重试 Kernel CONFLICT，提交前/后非冲突错误直接报告；自动加载回滚聚合身份写入与清理错误；批量恢复失败撤销本次新增加载、保留已有选择并允许修正后重试，action 定义不能经旧身份自动恢复。`loaded-state.test.ts`、`prompt-context.test.ts`、`restore-loaded-skills.test.ts` 有回归，kernel-adapters 120 项及类型检查通过；不替代严格版本或完整竞态验收。
+  - 待交付：持久来源/内容/支持文件/工具快照与漂移处置入口；经现有委派组编译的有界自动委派及幂等恢复；扫描/加载/身份提交/订阅与关闭重建的交错矩阵。具体标准见 [P2 契约 §2](design/p2-completion.md#2-p2-01-skill-生命周期)。
 
 - [ ] **P2-02 跨 Session Memory**
   - 已验证不同 Session/namespace/scope 隔离；跨 Session 共享协议尚未实现，需定义独立生命周期存储、显式读写授权、来源身份、并发一致性与审计。
   - Session shared state 只在当前 Session 内共享。同一 namespaceId 不自动跨 Session；CLI 新 Run 不自动读取旧 Run 记忆。
+  - 待交付：独立共享资源身份与生命周期、事务内授权/CAS/幂等回执/审计、显式授权与撤权入口、CLI/直接聊天/Flow/管理 UI 接线；两个真实 Session 和同机双进程的并发/删除/SIGKILL 验收。见 [P2 契约 §3](design/p2-completion.md#3-p2-02-跨-session-memory)。不以伪造同一 sessionId 实现共享。
 
 - [ ] **P2-03 Memory 模型写入与管理**
   - 已实现：SessionMemoryProvider 的 CAS 存储、scope 授权、完整列表、摘要条件编辑/删除、容量/时间水位清理；并发 prune 计数和同毫秒裁剪缺陷已修；仅 Kernel CONFLICT 重试，其他提交前/后存储错误直接返回。
@@ -157,11 +162,13 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 已验证：DOM + 真实 LocalFS/SQLite 重开后编辑保留、删除不复活；真实 Durable Agent 两轮调用；真实 CLI + 本地 HTTP mock 调用及退出后磁盘读取；取消等待和普通 ToolService 绕过被拒；CLI 写入/删除成功回执后 SIGKILL，恢复保持记忆版本及工具执行次数不变；另有写入/删除服务调用前及提交后未写回执的四个 SIGKILL 窗口，默认阻断、显式重放后成功。
   - 剩余：真实 Tauri 窗口操作、真实云模型调用、条件写冲突后的人工处置、独立 retention/GC 故障及存储事务内部持久性验证；语义/向量检索及压缩策略。当前词项匹配/更新时间排序不等于语义检索，容量/时间裁剪不等于内容压缩。
   - 写工具属于 local 副作用，崩溃结果不确定时不盲目重放。条件编辑比较内容摘要而非历史版本，无法识别相同内容的删除重建。见[Memory API](llm-session-api.md)、[CLI 配置](../apps/cli/README.md)及[验收 §61–63](minimal-system-acceptance.md)。
+  - 待交付：不可复用的条目版本与冲突后人工比较/重提；受授权和内容版本约束的 embedding 索引；保留来源引用、提交前复验的持久内容压缩任务。词项、向量与压缩分别验收，见 [P2 契约 §4](design/p2-completion.md#4-p2-03-memory-管理检索与压缩)。
 
 - [ ] **P2-04 VFS/C4 完整验收**
   - 附件-only、逃逸拒绝、全部只读变更动词、同名挂载跨 Session 隔离、默认目录不隐式授权、卸载保留文件与旧句柄失效已有包级证据；真实 GUI 挂载/撤销/只读与 bwrap 边界已有记录。
   - 已合入 `f8c1f181`：普通与工作区视图同时关闭入口再等待在途操作；配置变更、禁用和释放均有受控交错回归。只读来源拒绝 rw 授权；多挂载 SeqFile transaction 返回 ECAPABILITY 且不执行回调。
   - 剩余：旧句柄失效的真实窗口可观察路径及有效设计要求的浏览/编辑/工具/附件/平台故障矩阵；不重做已被取代的方案。
+  - 矩阵按消费者、撤权/在途/存储故障和后端分别记录；旧句柄窗口路径为保持编辑器打开 → 正式入口撤销挂载 → 保存失败且草稿保留。见 [P2 契约 §5](design/p2-completion.md#5-p2-04-文件消费者与平台矩阵)，复用 P0 已有证据，未执行项保持开放。
 
 - [x] **P2-05 文档同步审计（已记录范围）**：已完成阶段性设计/API/AGENTS/README 核对及历史方案归档；本地语义与故障证据见已完成的 P1-05；扩展要求仍由其余未勾选项闭合。
 - [x] **P2-06 app-core 包内边界与技术债**：包说明、测试归属、app-shell 兼容 shim 删除、runtime/infrastructure 拆分、公开 VFS ioStats、session/vfs 目录归类、index 别名收口、静默失败可见化、租约 init 去重及已有 app-core 文案 i18n 均已完成。
@@ -171,7 +178,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 ## 4. 下一步与验证入口
 
-优先补 P0-00/P0-02/P0-04 的真实窗口与性能闭环，再推进 P1 的故障矩阵和共享存储所有权。P2 保持开放；Memory 不再从“缺工具/缺编辑器”重新实现，应从剩余验收、共享协议与检索能力继续。
+本地 P1 和 P0-00 已完成，不再列作待实现任务。P0-02/P0-04 的剩余窗口、性能及平台验收保持开放。P2 按 [实施契约](design/p2-completion.md) 推进：先闭合 Skill 版本和共享 Memory 授权/存储，再接自动委派、检索/压缩与产品入口；VFS 矩阵可独立推进。Memory 不再从“缺工具/缺编辑器”重新实现。所有有效要求完成后执行 P0-05 最终回归。
 
 | 主题 | 入口 |
 | --- | --- |

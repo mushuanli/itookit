@@ -33,6 +33,7 @@ src/
 │   ├── prompt-context.ts        Skill 指令 → 提示块（正文/compact/关键规则）
 │   ├── compact-extractor.ts     aggregateCompactInstructions
 │   ├── loaded-state.ts          kernel-adapters.skills.loaded 读写与回滚
+│   ├── restore-loaded-skills.ts  批量身份恢复与失败时撤销本次新增加载
 │   ├── operation-queue.ts       同一 Session 的 Skill 操作串行化
 │   ├── session-file-source.ts   Session VFS 作为 Skill 来源
 │   └── glob-matcher.ts          mountByGlob 匹配
@@ -63,6 +64,7 @@ await runtime.dispose();
 - 工具/Skill catalog 只暴露**元数据**（`getToolDefinitions`/`getSkillMeta`），可执行服务只经 Session 作用域取得。
 - 可选 `scopeForEffect`/`fileContextForScope` 由宿主选择并获取 Run 独立能力，注册表按 Session + scope 缓存；普通 Session API 保持默认作用域。选择或获取失败不回退；`disposeScope` 合并并发清理并禁止迟到 Effect 重建，Session/运行时关闭释放所有子作用域。
 - 所有 Skill 操作（load/unload/编辑器挂载）经 `runSessionSkillOperation` 串行化，避免同一 Session 竞态。
+- 身份 CAS 只重试 Kernel CONFLICT；提交前/后其他存储错误直接报告。批量恢复失败撤销本次新增加载，保留原有选择；清理失败逐项聚合，不修改持久身份。
 - 变更通知只在宿主进程内传播（`SkillDeviceDriver.notifyChange`）；跨进程直改 Skill 文件不触发，新定义在下次上下文组装时生效。
 - `createKernelAdaptersRuntime` 的创建失败清理逐项执行并聚合错误（`runCleanup`），`release` 失败不跳过 driver dispose，原始初始化错误不被覆盖。
 
