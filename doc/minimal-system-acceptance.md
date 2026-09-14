@@ -1633,3 +1633,28 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 **这不是最终验收**：P0-02 的性能阈值仍未达成、P0-04 仍有未做窗口场景（见各自条目的剩余项），因此本批次证明的是“当前树在类型/文档/样式/构建/测试矩阵上全绿”，不能替代最终整树与 GUI 验收。真实安装包（`bundle.targets: "all"`）未构建：本机没有 AppImage/linuxdeploy 工具，也没有网络，故发布产物边界仍未验证。`release/dist/` 是**受版本控制但停留在 2026-09-04** 的 Web 静态产物，与当前树不同步，本轮未重新生成。
 
 复现：在干净工作树按上表命令顺序执行；日志与阶段退出码见 `.tauri-acceptance/regress/`（已 gitignore，临时文件会消失，长期证据以本表数字与命令为准）。
+
+## 2026-09-14：P0-04 平台边界——图标字体与原生目录选择器
+
+**图标方框字符（根因已定位）。** 文件列表/导航栏图标是 emoji 码位，来自 `@itookit/common` 的 `getFileIcon`/`ENTITY_ICONS`（另有少量在 `vfs-ui` 中硬编码，如 `📁`/`📄`/`📁+`）。本机**没有安装任何 emoji 字体**：`fc-list | grep -ci emoji` 为 0，且 `fc-list ':charset=1F4C1'`（📁）、`':charset=1F5D1'`（🗑）、`':charset=2795'`（➕）**均为 0 条**——即没有任何已安装字体包含这些码位，所以必然渲染为方框。这与上一轮“10 个本地 FontAwesome 字体面加载成功”不冲突：FontAwesome 覆盖的是私有使用区图标，与这些 emoji 码位无关。结论是**宿主字体依赖**，不是本轮代码回归；标准桌面发行版（GNOME/KDE）自带 Noto Color Emoji 时正常，本容器/最小化系统上会显示方框。应用不自带 emoji 字体，这属于已记录的**支持边界**，未在本轮通过捆绑字体解决。
+
+**原生 GTK 目录选择器（部分验证）。** 真实窗口点击导航栏 `#btn-add-mount`（`title="Mount directory…"`）后，经 `@tauri-apps/plugin-dialog` → XDG Desktop Portal（日志显示 `Successfully activated service 'org.freedesktop.portal.desktop'` 与 `org.freedesktop.impl.portal.desktop.gtk`）弹出了**真实原生对话框** `Select Folder`（1494×1144，AT-SPI 暴露“文件选择小部件”、侧栏“主目录”、`取消(C)`/`打开(O)`），而不是应用内自绘控件。截图 `.tauri-acceptance/measure/native-folder-chooser.png`（临时）。
+
+边界：**未能完成一次真实选择**。选择收尾需要驱动原生对话框的路径输入，本环境的合成输入不可靠——键入 `/` 触发 GTK 位置栏时会出现丢字/重复字符（实测得到 `/ome/...`、`/home/lli/...` 两次错误路径），随后 `打开(O)` 未产生挂载记录（`/var/lib/kernel/local-sources` 为空，导航未新增工作区）。另外门户自身报告文档门户不可用：`fuse: device /dev/fuse not found` 与 `error: fuse init failed`，因为容器内没有 `/dev/fuse`。因此“原生选择器可用”只证明了**能打开且能返回**（对话框正常关闭），未证明选中目录后的挂载链路；P0-04 保留该要求。
+
+**发布产物边界。** `apps/tauri-app/src-tauri/tauri.conf.json` 为 `bundle.targets: "all"`，但本机没有 AppImage/linuxdeploy 工具且无网络，未构建任何安装包；所有验收证据都基于 `target/debug/tauri-app` 开发二进制，不代表发布安装包的平台行为。受版本控制的 `release/dist/` 是 Web 静态产物且停留在 2026-09-04，与当前树不同步。
+
+**其他平台。** 本机只有 Linux；Windows/macOS 的构建、安装、窗口行为与沙箱能力均**未验证**，不能由 Linux 证据外推。
+
+仍未做的窗口场景（P0-04 保留）：多层级嵌套挂载下的项目规则（`_agent/AGENT.md` parent-fs/local-fs 不合并）真实窗口验收；原生选择器选中后的挂载链路；发布安装包。
+## 2026-09-14：取消事件与界面终态文案
+
+基线 `52754e9a` 加本批选定文件，隔离快照 `/tmp/x1-feature-verify-w_wua9ix`。SessionRunCoordinator 在执行取消后的 error 事件保留 `code: ABORTED`，HistoryView 和状态指示器按该标记显示“执行已取消”，操作为“重新执行”，取消卡片使用中性色；非取消错误仍为失败和重试，不从 message 中是否含 aborted 猜测原因。新文案中英同步。重开的 aborted 节点原因区同样使用中性色，保留原始原因文本。
+
+回归覆盖真实 runtime/Kernel 的失败与取消终态事件、DOM error 消费、TIMEOUT/缺失 code 不误判、原因文本转义、取消状态结束 loading。app-shell 204 项与 llm-session 116 项通过，共 320 项；30 项既有跳过。llm-session、llm-ui、Tauri 类型检查与样式检查通过，样式检查不等于清空历史 allowlist。前端和 custom-protocol 原生构建通过；新增历史取消配色后重新构建。
+
+真实 Linux Tauri/Xvfb/D-Bus/AT-SPI：使用已有数据根 `/tmp/mindos-live-close-VIgRBk`，打开原会话、发送 `hello cancel-ui-verified`，mock 于 `04:53:23.006Z` 收齐请求；点击实际停止按钮后于 `04:53:23.604Z` 关闭连接（responseEnded=false）。`cancel-ui-live.png` 显示顶部“执行已取消”、消息 ABORTED、中性卡片“执行已取消”与“重新执行”。这验证 UI 取消路径；Task 取消语义不自动证明任意外部设备或供应商已停止，此处只确认本地 HTTP 连接断开。
+
+剩余边界：首次超时后消息状态的短暂 RUNNING 残留及其有界收敛仍需定位；独立关闭 Session 并保留记录的入口、pause 三态及未确认物理停止的真实窗口场景仍未完成。重新打开 Session 时顶部可显示 Ready（当前没有活跃执行），不把它当作历史 Task 状态。本文不宣称整个 P0-02 完成。
+
+可复核命令：`pnpm --filter @itookit/app-shell test`、`pnpm --filter @itookit/llm-session test`、`pnpm styles:check`。长期回归在 `cancelled-history.test.ts` 与 `session-terminal-node.test.ts`；窗口步骤为发送至等待响应的本地 mock，再点停止并重开原会话。临时日志 `/tmp/x1-cancel-ui-shell.log`、`/tmp/x1-cancel-ui-session.log`、`/tmp/x1-cancel-ui-types.log`、`/tmp/x1-cancel-ui-styles.log`、`/tmp/x1-cancel-ui-front-final.log`、`/tmp/x1-cancel-ui-native-final.log`；临时记录会消失，不替代源码回归。

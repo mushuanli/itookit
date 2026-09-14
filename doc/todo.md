@@ -66,6 +66,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 2026-09-14 真实窗口补验：模型请求在途时，通过列表右键和原生确认删除 Session；修复旧聊天/重试/ENOENT 残留，删除后恢复选择界面，同数据根重启未复活。app-shell 196 项通过，30 项既有跳过；见[删除收尾验收](minimal-system-acceptance.md#2026-09-14运行中-session-删除后的界面收尾)。该场景不替代设备不确认停止或其他故障矩阵。
   - 2026-09-14 窗口复核：修复选中 Session 后“+ 会话”落入虚拟目录而 ENOENT，根级/分组及附件目录回归、真实窗口新建同级会话通过。切工作区或会话均不关闭 Kernel Session；独立关闭并保留记录的窗口入口仍缺。约 60 秒模型超时已观察到持久 failed 和重开保留，但 live 状态及明确超时原因仍待收口。见[新建与关闭语义复核](minimal-system-acceptance.md#2026-09-14session-新建目标与桌面关闭语义复核)。
   - 2026-09-14 超时原因修复：驱动区分 TIMEOUT/ABORTED，保留首个中止原因并清理监听器；254 项相关测试通过、30 项既有跳过。真实窗口约 60 秒断开 HTTP，Task/Effect 持久 failed 且明确写明 60000 ms 超时；第一张终态截图仍有 RUNNING 残留，后续收敛不替代有界验收。见[模型超时验收](minimal-system-acceptance.md#2026-09-14模型超时与用户取消的原因保留)。
+  - 2026-09-14 取消提示收口：ABORTED 事件与失败区分，顶部/卡片显示“执行已取消”和“重新执行”，历史取消原因区使用中性色；真实停止按钮验证通过，320 项相关回归通过、30 项既有跳过。见[取消终态文案](minimal-system-acceptance.md#2026-09-14取消事件与界面终态文案)。不替代未确认停止、pause、独立关闭和状态收敛要求。
   - 补真实 GUI 的“请求已接受 / 状态已变化 / 外部已停止”区分，以及 pause 同类文案。活动 CLI Run 只能由拥有者取消；另一 CLI 进程拒绝越过 Session 租约。
   - 见[验收 §11–19、§23–27](minimal-system-acceptance.md)及 `run-control.test.ts`、`session-delete-lifecycle.test.ts`。
 
@@ -77,6 +78,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 已有 Linux bwrap/目录/符号链接边界、取消/超时、缺隔离器拒绝、Xvfb/AT-SPI 窗口与应用内目录授权证据。
   - 剩余：其他目标平台的支持范围及真实行为、原生 GTK 目录选择器、P0-00/P0-02 等尚缺窗口场景、发布产物的支持边界；其中仍含多层级嵌套挂载下的项目规则窗口场景。Skill 面板真实勾选/取消及重开持久身份已于 2026-09-14 验收通过（见 P0-00）。
   - 2026-09-14 桌面字体/导航补验：10 个本地 FontAwesome 字体面在真实 WebView 加载成功，修复 Vite 内联小字体被 CSP 拦截；11 个静态导航控件具有稳定 AT-SPI 名称。文件列表仍有方框字符，需继续核对来源与系统字体回退，不能把字体加载通过等同于全部图标渲染通过。见[字体与导航验收](minimal-system-acceptance.md#2026-09-14桌面本地字体与导航可访问名称)。
+  - 2026-09-14 边界收口（见[平台边界验收](minimal-system-acceptance.md#2026-09-14p0-04-平台边界图标字体与原生目录选择器)）：**方框字符根因已定位**为宿主缺少 emoji 字体——列表图标是 `@itookit/common` 的 emoji 码位，而本机 `fc-list ':charset=1F4C1'`/`1F5D1`/`2795` 均为 0 条，应用不自带该字体；属支持边界而非本轮代码回归。**原生 GTK 选择器**经 XDG Portal 真实弹出 `Select Folder`（含文件选择小部件与 `取消/打开`），但**未能完成选择**：合成输入会破坏 GTK 位置栏路径（实测 `/ome/…`、`/home/lli/…`），且容器无 `/dev/fuse` 使门户文档门户不可用，未产生挂载记录。**发布产物**未构建（无 AppImage/linuxdeploy 工具、无网络）；受版本控制的 `release/dist/` 停留在 2026-09-04。**其他平台未验证**，不能由 Linux 证据外推。
   - Tauri Session Bash **共享宿主网络**；无出网或连接超时不能当作网络沙箱证据。见[验收 §29](minimal-system-acceptance.md)。
 
 - [ ] **P0-05 当前最终回归**
