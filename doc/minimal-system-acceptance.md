@@ -158,3 +158,15 @@ IPC 队列争用而非算法复杂度。修复方向（按收益排序）：① 
 身份由只读 SQLite 连接读取 kernel/shared.seq 的 kernel-adapters.skills.loaded 记录核对，模型侧只检查每次请求的 system 消息，避免把历史用户文本当作当前注入。四次请求的 UTC 时间为 01:40:07.843、01:44:42.642、01:45:16.069、01:47:03.232。临时证据根 `/tmp/mindos-skill-toggle-CGsFtZ` 包含四段 request/state JSON、截图、mock.log 与开关前后 AT-SPI 文本；这些临时产物不作为永久测试入口。
 
 本轮无需修改实现，补齐 P0-04 的真实 GUI 勾选/取消及持久恢复证据。多层级嵌套挂载的项目规则窗口验收、严格 Skill 版本冻结、跨进程通知及其他平台要求仍开放。复现时使用新的临时 profile，保持 auto-load=false，不直接改 loaded 记录，并等待旧实例租约到期后重开。
+
+## 2026-09-14：类型检查覆盖与包清单收口
+
+基线 `35d63f53` 加本批清单变更的隔离快照通过根 `pnpm typecheck`，日志确认实际执行 24 个 workspace。新增 sync-server、app-settings、mdxeditor、vfs-ui、IndexedDB/LocalFS 后端的统一 typecheck 入口；编辑器原有 type-check 命令保留兼容。此前递归命令会跳过这些缺少同名脚本的包，不能仅用根命令退出成功推断覆盖完整。
+
+其余两个 workspace：demo 是无独立 tsconfig 的手工 JavaScript 示例；app-shell 由宿主程序检查。使用 Web 与 Tauri 的 `tsc --noEmit --listFilesOnly` 合并列表，核对覆盖 app-shell 全部 12 个 src TypeScript 文件。此事实不包含测试文件，也不把 demo 的构建当作行为验收。
+
+清单同时补齐 Tauri 对 llm-flow 的直接依赖与 app-shell 工作区崩溃测试对 tsx 的开发依赖，同步锁文件；移除 app-shell 指向已不存在文件的 ./layout 导出。仓库现有 TypeScript/JavaScript 消费端未发现该导入。`pnpm install --offline --frozen-lockfile --lockfile-only --ignore-scripts` 通过：这是 manifest/锁文件核对，不是全新依赖安装验收。
+
+构建：`pnpm build:libs` 的 20 个带构建脚本的库全部通过；`pnpm --filter './apps/*' build` 的 CLI、同步服务、Web、Tauri 前端四个应用全部通过，CLI dist 的 help 命令通过。TypeScript 声明生成未报告错误，前端仍有体积提示。与 tsx 入口直接相关的 tauri-workspace-crash 三项真实 SIGKILL 回归通过。
+
+本轮使用 Node 26.8.1 / pnpm 10.20.0 与已有依赖缓存，未运行完整测试矩阵、原生 Rust 重建或 GUI，不替代 P0-05 的最终验收。对应临时日志为 `/tmp/x1-manifest-types.log`、`x1-manifest-libs-build.log`、`x1-manifest-apps-build.log`、`x1-manifest-lock.log`、`x1-manifest-tsx-test.log`；长期复核应执行上述命令。

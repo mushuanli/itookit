@@ -11,11 +11,6 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./layout": {
-      "types": "./src/files/workspace-paths.ts",
-      "import": "./src/files/workspace-paths.ts",
-      "default": "./src/files/workspace-paths.ts"
     }
   },
   "scripts": {
@@ -53,6 +48,7 @@
     "typescript": "^5.9.3",
     "vitest": "^3.2.4",
     "@itookit/ui-common": "workspace:*",
-    "jsdom": "^27.2.0"
+    "jsdom": "^27.2.0",
+    "tsx": "^4.20.6"
   }
 }

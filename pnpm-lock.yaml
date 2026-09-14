@@ -166,6 +166,9 @@ importers:
       '@itookit/kernel-adapters':
         specifier: workspace:*
         version: link:../../packages/kernel-adapters
+      '@itookit/llm-flow':
+        specifier: workspace:*
+        version: link:../../packages/llm-flow
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../../packages/llm-session
@@ -444,6 +447,9 @@ importers:
       jsdom:
         specifier: ^27.2.0
         version: 27.2.0
+      tsx:
+        specifier: ^4.20.6
+        version: 4.20.6
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

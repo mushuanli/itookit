@@ -29,7 +29,8 @@
   },
   "scripts": {
     "build": "vite build",
-    "dev": "vite build --watch"
+    "dev": "vite build --watch",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "@itookit/common": "workspace:*",
