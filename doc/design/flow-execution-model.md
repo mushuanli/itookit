@@ -142,6 +142,8 @@ export interface LlmNodeConfig {
         readScopes: string[];
         writeScopes: string[];
         retrievalLimit?: number;
+        /** 存储侧保留期：每 scope 上限与宿主水位（2026-09-11 实现）。 */
+        retention?: { maxEntriesPerScope?: number; before?: number };
     };
 }
 ```
@@ -533,9 +535,9 @@ Codex 支持并行 subagent、等待汇总、检查子线程、向运行中子�
 | 持久通讯 | Kernel cross-session outbox/inbox 与带 token 的 TaskBoard claim/renew/complete | 受限 Agent mailbox/task board 产品接线仍需核验 |
 | 并发 | Flow maxNodes/maxConcurrency/timeoutMs/maxTokens 已接入 executor；节点上限覆盖初始图、patch 和 delegation | 恢复后的 Flow 调度状态及预算连续性仍需验收 |
 | 生命周期 | Kernel Session suspend/resume；Flow Goal 与运行 UI | Goal 完成条件验证、后台通知与恢复仍需验收 |
-| 工作区 | Git worktree manager；未配置 manager 时非 shared 模式拒绝执行 | 三端装配、自动合并与冲突处理 UI 仍需核验 |
+| 工作区 | CLI 与 Tauri 均已注入共享 Git worktree manager。Tauri 以 Session 唯一可写挂载解析仓库，持久化授权 revision、原生副本和 Git 身份；恢复前绑定服务，Run 的文件及 Bash 能力使用同一副本，收尾先关闭能力再清理。Tauri manager 的替身/跨进程测试及真实桌面自动通道探针均通过，用户窗口操作和真实桌面重启仍待验收。Web 无宿主进程能力；CLI read-only 已装配 OCI 路径、待容器验收；worktree + OCI 仍明确拒绝；Tauri read-only 已接通并通过真实桌面自动通道探针 | 待完成用户窗口 worktree 操作和桌面重启验收、自动合并与冲突处理 UI；其他策略要求不得据此视为完成 |
 | 结构化输出 | Agent responseFormat/outputValidation、Inspector；data edge 端口 schema 引用在发布/直接执行/动态 patch 校验 | 已提供受限 schema 注册表、data edge 内容校验与同 id 跨版本的子类型推导；responseFormat 到端口契约的自动绑定仍待补齐 |
-| Memory/Context | ConversationSystemOptions → createSessionManager → SessionManager 已传递 retrieveMemory 注入点，检索接收当前 Session 与复制的 memoryPolicy；Agent 每次模型请求前按配置裁剪历史并保护系统指令、当前用户请求和完整工具组 | 已装配 Session 内持久 memory provider；跨 Session 共享、模型记忆工具、语义摘要及长期运行恢复仍待完成 |
+| Memory/Context | ConversationSystemOptions → createSessionManager → SessionManager 已传递 retrieveMemory 注入点，检索接收当前 Session 与复制的 memoryPolicy；Agent 每次模型请求前按配置裁剪历史并保护系统指令、当前用户请求和完整工具组 | 已装配 Session 内持久 memory provider，并实现存储侧保留期（`retention.maxEntriesPerScope` / `before` 水位 + `prune`）；跨 Session 共享、模型记忆工具、语义摘要及长期运行恢复仍待完成 |
 | 扩展点 | Harness hooks 已有 host trust/hash/timeout/output boundary，Flow 发出生命周期事件 | 完整事件接线与信任管理 UI 仍需核验 |
 
 源码依据：`llm-flow/src/flow/executor.ts`、`delegation-runtime.ts`、`builtin-plugins.ts`，`llm-ui/src/components/DagWorkbench.ts`，`llm-session/src/session/session-manager.ts`，`llm-tasks/src/durable/agent-program.ts`。`cd packages/llm-flow && npx vitest run` 实测全套 132 项通过（计数随代码演进，以实际测试输出为准）；这些测试不替代上述尚待验收的 UI、恢复与平台能力。
@@ -560,7 +562,7 @@ type SpawnDependencyTarget =
 
 边的目标必须是本批新节点，来源可以是本批节点、parent 或 parent 的直接入边节点；不允许 patch 修改既有节点的依赖。未指定端口时使用 result/input，control edge 不检查数据端口。校验完成后才发布节点和边，失败时不创建 patch 子任务，并取消本次运行剩余任务、释放已准备的 workspace。相同 idempotency key 和内容在当前 executor 内跳过，同键不同内容拒绝；跨进程恢复仍待补齐。
 
-运行失败清理（2026-09-08）：初始节点超限在打开 Session、触发 hook 和准备工作目录前拒绝；取得 workspace 后的编译、调度、hook、委派、超时及 graph effect 异常均进入统一失败路径，尝试取消尚未完成的已提交实例，并调用 workspace.finish(failed)。清理也失败时抛 AggregateError 保留两项原因。正常返回后的 workspace 清理只执行一次，FlowExecutionHandle.workspaceCompletion 提供可等待的结果，清理失败不改写已成功的根 Task；Run 查询和面板已接入 workspaceFinalization（pending/succeeded/failed），错误单独展示，不改写根任务结果。执行器先将 pending 写入 Session shared `flow.run.<rootTaskId>.workspace`，清理结束后保存结果；新命令服务可从记录读取。pending 时根任务已结束也继续刷新。DagCommandServiceOptions 可注入 workspaceManager，实际平台管理器装配仍按宿主能力提供。保存最终状态也失败时 workspaceCompletion 拒绝并保留错误；旧持久记录可能停在 pending，不伪报完成。宿主崩溃后的清理续跑已实现（2026-09-10）：隔离工作区租约由 `FlowWorkspaceLease.record` 描述并写入 Session shared `flow.run.<rootTaskId>.workspace-lease`，`resume` 用 `FlowWorkspaceManager.restore` 重新挂载同一工作区而不是新建；根任务已终态但 finalization 记录仍是 pending 时，`resume` 会重新读取策略与租约记录、重跑 `finish` 并回写状态（`GitWorktreeFlowWorkspaceManager` 的 restore/finish 对「工作区已被上一宿主移除」幂等）。未实现 `restore` 的宿主会得到明确错误，不会静默新建第二个工作区。实际平台仍无宿主装配 worktree 模式，因此该路径目前只有包级测试证据。取消使用 Promise.allSettled，不能把单个取消失败当作已确认停止。这些是存活进程的清理保证，尚不是崩溃后的租约回收或 Flow 调度恢复。
+运行失败清理（2026-09-08）：初始节点超限在打开 Session、触发 hook 和准备工作目录前拒绝；取得 workspace 后的编译、调度、hook、委派、超时及 graph effect 异常均进入统一失败路径，尝试取消尚未完成的已提交实例，并调用 workspace.finish(failed)。清理也失败时抛 AggregateError 保留两项原因。正常返回后的 workspace 清理只执行一次，FlowExecutionHandle.workspaceCompletion 提供可等待的结果，清理失败不改写已成功的根 Task；Run 查询和面板已接入 workspaceFinalization（pending/succeeded/failed），错误单独展示，不改写根任务结果。执行器先将 pending 写入 Session shared `flow.run.<rootTaskId>.workspace`，清理结束后保存结果；新命令服务可从记录读取。pending 时根任务已结束也继续刷新。DagCommandServiceOptions 可注入 workspaceManager，实际平台管理器装配仍按宿主能力提供。保存最终状态也失败时 workspaceCompletion 拒绝并保留错误；旧持久记录可能停在 pending，不伪报完成。宿主崩溃后的清理续跑已实现（2026-09-10）：隔离工作区租约由 `FlowWorkspaceLease.record` 描述并写入 Session shared `flow.run.<rootTaskId>.workspace-lease`，`resume` 用 `FlowWorkspaceManager.restore` 重新挂载同一工作区而不是新建；根任务已终态但 finalization 记录仍是 pending 时，`resume` 会重新读取策略与租约记录、重跑 `finish` 并回写状态（`GitWorktreeFlowWorkspaceManager` 的 restore/finish 对「工作区已被上一宿主移除」幂等）。未实现 `restore` 的宿主会得到明确错误，不会静默新建第二个工作区。CLI 宿主自 2026-09-11 起装配 worktree 模式（`runtime.workspace.mode: worktree`，端到端证据 `apps/cli/tests/worktree-run.test.ts`：节点在 worktree 内执行、脏工作区不被静默删除、SIGKILL 后 `resume` 复用同一 worktree）；Tauri 现已装配 Run 作用域工作区及恢复/清理，Web 无原生宿主通道；Tauri 已提供基于可写仓库授权的 read-only 副本，CLI 尚未实现。取消使用 Promise.allSettled，不能把单个取消失败当作已确认停止。未发布/已发布工作区的跨进程崩溃回收与 Flow 恢复已有持久存储测试，证据边界见后文；仍不等同用户窗口和跨主机完整验收。
 
 无依赖 spawned nodes 可以并发执行；一个节点有多个入边时，DAG fan-in 天然表示静态 `wait all`，不需要额外 Wait 节点。只有运行时 task handle、`any`、`first-success`、`quorum` 或 timeout 等动态等待才进入 TaskGroup/`await_tasks` API。
 
@@ -664,9 +666,9 @@ data edge 校验 source output schema 与 target input schema；运行时无效�
 
 子类型推导的受支持子集（与注册表一致，超出即拒绝）：boolean schema（`false` 是任何 schema 的子类型，`true` 只对 `true` 成立）、type（`integer ⊆ number`，其余类型必须相同；来源未声明 type 而目标声明了则拒绝）、enum（来源取值必须全部落在目标 enum 内）、object（目标的每个 `required` 键在来源中也必须 required 且有可推导的属性 schema；目标 `additionalProperties: false` 时来源不得再允许额外属性；`additionalProperties` 为 schema 时同样递归推导）、array（目标声明 `items` 时来源也必须声明且递归推导）。`oneOf`/`anyOf`/`$ref`/数值边界等不在子集内，注册阶段即被拒绝。运行时内容校验仍是权威判断，子类型推导只用于在提交前拒绝明显不兼容的图。
 
-当前内容校验：`DagPluginRegistry.registerSchema({ id, version? }, schema)` 注册不可覆盖的结构定义；`getSchema` 返回副本，未指定版本不解析到最新版。目标端口有 schema 的 data edge 在发布、直接执行和动态 patch 时要求 id 相同、引用已注册，跨版本时结构可推导。执行器在下游 Task 创建前，以与依赖消费相同的 `extractNodeOutput` 提取成功上游产物并校验；无效数据使 submit 失败并执行已有失败清理，不会启动下游，也不会改写已成功的上游记录。control edge 不校验；上游失败继续走既有 onFailure 语义。
+当前内容校验：`DagPluginRegistry.registerSchema({ id, version? }, schema)` 注册不可覆盖的结构定义；`getSchema` 返回副本，未指定版本不解析到最新版。目标端口有 schema 的 data edge 在发布、直接执行和动态 patch 时要求 id 相同、引用已注册，跨版本时结构可推导。执行器在下游 Task 创建前，以与依赖消费相同的 `extractNodeOutput` 提取成功上游产物并校验；无效数据终止该 Run 并执行已有失败清理，不会启动下游，也不会改写已成功的上游记录。发布前的图/边校验（`dataEdgeSchemaIssue`、`maxNodes`）仍直接拒绝 `submit`；运行期校验发生在聚合根发布之后，因此以失败的 Run 呈现（`root.wait()` 得到 `failed` 与原因，见下方「句柄发布时机」）。control edge 不校验；上游失败继续走既有 onFailure 语义。
 
-注册表支持 boolean schema，以及 type（object/array/string/number/integer/boolean/null）、properties、required、items、additionalProperties、enum、title、description。嵌套定义同样验证；未知关键字、无效定义明确拒绝，未声称支持完整 JSON Schema、引用解析或隐式 JSON 文本解析。Agent responseFormat 自动编译成端口引用、无消费边输出的契约验证、运行定义持久冻结以及端口错误的 repair/continue 策略仍待补齐。
+注册表支持 boolean schema，以及 type（object/array/string/number/integer/boolean/null）、properties、required、items、additionalProperties、enum、title、description。嵌套定义同样验证；未知关键字、无效定义明确拒绝，未声称支持完整 JSON Schema、引用解析或隐式 JSON 文本解析。**无消费边输出的契约验证（2026-09-11 已实现）**：边校验比较的是上游值与**消费者**的 input schema，因此终止节点、Run 结果或旁路输出在无人消费时不会被检查。执行器在节点成功结算时调用 `assertUnconsumedOutputs(node, edges, plugins, output)`，对「该节点声明了 schema 且没有 active data edge 消费」的输出端口用注册结构做内容校验，不通过则以失败的 Run 呈现（聚合根发布之后、下游派发之前），并沿用既有失败清理。回归：`durable-flow-executor.test.ts`「validates a declared output no edge consumes (valid: %s)」。Agent responseFormat 自动编译成端口引用以及端口错误的 repair/continue 策略仍待补齐。
 
 Harness hooks 采用小而稳定的事件集合：
 
@@ -788,7 +790,7 @@ Goal 支持进度摘要、追加约束、pause/resume 和完成标准验证，�
 
 `prepareFlowTaskRetry(session, rootTaskId, sourceTaskId, requestId)` 先验证源任务属于 Run，再通过 Kernel 人工重试创建 deferred 新任务，使用 Session shared `flow.run.<rootTaskId>.retries` 条件写入节点、实例序号、retryOfTaskId 和预算。原始 runTasks 现在保存每节点预算；重试成员继承该声明。并发同请求复用任务/成员，不同请求按 CAS 结果分配新序号。成员登记失败不启动任务，再次提交同一请求可恢复登记；Task 创建与成员登记仍不是单事务。
 
-图级 retry（2026-09-10）：`requestFlowGraphRetry(session, rootTaskId, sourceTaskId, requestId)` 在单任务 retry 之上追加一条持久意图到 Session shared `flow.run.<rootTaskId>.graph-retry`（CAS，按 requestId 幂等）。意图记录源节点、重试 Task 与下游闭包（含回边，`downstreamNodes`），由下一次调度回合消费：重试 Task 成为该节点最新实例，下游各节点丢弃已提交实例（未终态的先取消）、清 completed/skipped、入边重置为 active（route 边回到 pending），并递增这些节点的 `nodeGenerations`。代数进入节点 requestId 的 `@<generation>` 后缀，使重算实例不命中旧提交的 Kernel 去重，同时保持崩溃恢复的同代重提交仍复用原 Task。约束：Run 必须可恢复（非终态且有检查点）；委派子节点/父节点拒绝图级重试；被丢弃实例的 token 不退款；UI 入口与委派组图级重算仍未完成。回归见 `packages/llm-flow/__tests__/graph-retry.test.ts` 与 `durable-flow-executor.test.ts` 的「recomputes downstream nodes after a graph retry of an upstream node」。
+图级 retry（2026-09-10）：`requestFlowGraphRetry(session, rootTaskId, sourceTaskId, requestId)` 在单任务 retry 之上追加一条持久意图到 Session shared `flow.run.<rootTaskId>.graph-retry`（CAS，按 requestId 幂等）。意图记录源节点、重试 Task 与下游闭包（含回边，`downstreamNodes`），由下一次调度回合消费：重试 Task 成为该节点最新实例，下游各节点丢弃已提交实例（未终态的先取消）、清 completed/skipped、入边重置为 active（route 边回到 pending），并递增这些节点的 `nodeGenerations`。代数进入节点 requestId 的 `@<generation>` 后缀，使重算实例不命中旧提交的 Kernel 去重，同时保持崩溃恢复的同代重提交仍复用原 Task。约束：Run 必须可恢复（非终态且有检查点）；`:delegate:` 合成子节点不能作为重试源（它们由父实例派生）；重算委派父节点时会先丢弃其整个委派组（子实例、合成节点/边、组状态）并递增子节点 generation，使其重新物化为新 Task 而不是回放旧任务；UI 入口与委派组图级重算仍未完成。被丢弃的已提交下游实例按其实测 `usage` 从 Run 的 `consumedTokens` 退款（2026-09-11），使重算不会被重复计费；回归见 `durable-flow-executor.test.ts`「refunds discarded downstream tokens so a graph retry is not double-charged」。回归见 `packages/llm-flow/__tests__/graph-retry.test.ts` 与 `durable-flow-executor.test.ts` 的「recomputes downstream nodes after a graph retry of an upstream node」。
 
 RunGet 每次合并原始清单和重试成员，记录重连与 transcript 使用同一范围。最新节点可指向尚在 created 的重试，根聚合 Task 的既有结果不被改写。`dag.run.task.retry({ sessionId, taskId, targetTaskId, requestId })` 已调用准备 API、恢复节点预算并授权/启动新任务，返回新 targetTaskId。LLM 使用原 input.allowedToolIds 与已保存模型/工具输入，资源创建和原子启动按既有回执重放；非 LLM 任务直接 start。重复请求返回同一任务，旧根输出保持不变，新结果通过成员任务/transcript 查询。DagWorkbench 已为非根终态任务提供重试按钮与来源标记，响应失败时复用原请求 ID，进行中的请求禁用重复点击；根已结束但成员仍运行时继续刷新。RunCancel 重新读取成员并等待全部成员取消尝试，包括同节点的并发重试。当前仍没有下游重算、重试输出触发的新 patch/委派调度、隔离 workspace 重建或新根结果收敛，不能宣称完整图重试恢复。
 
@@ -796,13 +798,13 @@ RunGet 每次合并原始清单和重试成员，记录重连与 transcript 使�
 
 Run 控制会在信号注入和单任务取消前刷新持久成员清单，允许控制其他调用方刚登记的重试任务；按 nodeId 注入信号选择当前最大 iteration 对应的任务，按 targetTaskId 则校验 Run 成员身份。Goal 编辑窗口固定打开时的 Run，信号和取消回调也固定发起时的 Run，异步完成不会刷新切换后的其他 Run；失败通过错误提示呈现。Goal 状态对 Session suspend/resume 的影响及其与目标持久化非原子的边界保持不变。
 
-单次运行定义隔离：DurableFlowExecutor.submit 在首次异步操作前复制 DagRunSpec 和 parameters；初始节点的插件清单及其端口 schema 同时缓存，后续动态节点的定义在首次读取时缓存，包含未找到的引用。修改调用方原始对象或宿主之后返回的同名 schema 不影响已缓存定义。DagPluginRegistry 注册时复制清单并保留 runtime/UI 方法的调用接收者。此隔离不等于将定义持久化，也不冻结宿主 runtime 实现代码；跨进程恢复仍需额外持久定义机制。
+单次运行定义隔离：DurableFlowExecutor.submit 在首次异步操作前复制 DagRunSpec 和 parameters；初始节点的插件清单及其端口 schema 同时缓存，后续动态节点的定义在首次读取时缓存，包含未找到的引用。修改调用方原始对象或宿主之后返回的同名 schema 不影响已缓存定义。DagPluginRegistry 注册时复制清单并保留 runtime/UI 方法的调用接收者。**定义持久冻结（2026-09-11 已实现并取证）**：`submit` 后的调度检查点保存 `spec`、`parameters`、`sessionContext`、live `nodes`/`edges`/`edgeState`（含动态 patch 结果）与 `nodeDefaults`/`nodeConnections`，`resume(sessionId, rootTaskId)` 不接受宿主定义参数，因此跨进程恢复只依赖持久定义，宿主之后编译出的新定义不会影响在进行的 Run。回归：`durable-flow-executor.test.ts`「resumes the Run definition frozen at submit instead of a later host definition」（宿主侧编译出的 v2 定义与检查点 v1 并存，恢复后节点集合与模型指令仍是 v1）。未冻结的只有宿主插件**实现代码**：同名 `plugin@version` 的新实现会在下一回合生效，这是有意的（定义冻结不等于代码冻结）。
 
 工作区收尾的 status 表示清理本身的结果，和状态记录保存结果分开。清理成功但最终 shared 写入失败时，活动句柄保留 succeeded 并附加 persistenceError，workspaceCompletion 拒绝；UI 同时显示清理结果和保存错误。清理与保存同时失败以 AggregateError 保留两个原因，不重复调用 workspace.finish。此时重连只能读取最后成功写入的状态（可能仍为 pending），活动句柄的保存错误尚无可靠持久副本。
 
 记忆检索宿主接口：ConversationSystemOptions.retrieveMemory 经会话工厂传递，调用参数为 `(plan, agent, { sessionId, policy })`，policy 来自本次解析的 Agent 配置并复制后提供，避免 provider 修改配置。返回的记忆沿用 ContextAssembler 的预算和持久 Task 输入快照流程。原有只使用前两个参数的回调仍兼容。默认宿主现已装配 SessionMemoryProvider；跨 Session 共享记忆的授权及存储策略仍未实现。
 
-持久记忆当前实现：SessionMemoryProvider 使用 Session shared key `memory.entries.<JSON([namespaceId, scope])>` 存储条目数组。宿主 upsert/remove 按 memoryPolicy.writeScopes 精确授权，检索仅打开 readScopes；namespaceId 不隐含跨 Session 访问。写入使用 expectedVersion CAS 合并（最多 3 次），条目含 entryId/content/SHA-256 contentHash/scope/updatedAt；损坏记录拒绝读写。默认检索限制 10，0 禁用，按查询词项的包含匹配数、更新时间、scope/ID 排序；返回 entryId 编码为 `[scope, entryId]`，避免多个 scope 的同名条目混淆。app-shell 默认注入此检索器，结果进入既有上下文快照与预算流程。查询无匹配时仍可返回最近条目；这不是向量/语义检索，scope 整组读取也不是存储分页。写 API 面向可信宿主策略，不直接暴露给模型；模型写入工具、记忆编辑 UI、跨 Session 共享和长期保留/压缩策略仍待完成。
+持久记忆当前实现：SessionMemoryProvider 使用 Session shared key `memory.entries.<JSON([namespaceId, scope])>` 存储条目数组。宿主 upsert/remove 按 memoryPolicy.writeScopes 精确授权，检索仅打开 readScopes；namespaceId 不隐含跨 Session 访问。写入使用 expectedVersion CAS 合并（最多 3 次），条目含 entryId/content/SHA-256 contentHash/scope/updatedAt；损坏记录拒绝读写。默认检索限制 10，0 禁用，按查询词项的包含匹配数、更新时间、scope/ID 排序；返回 entryId 编码为 `[scope, entryId]`，避免多个 scope 的同名条目混淆。app-shell 默认注入此检索器，结果进入既有上下文快照与预算流程。查询无匹配时仍可返回最近条目；这不是向量/语义检索，scope 整组读取也不是存储分页。写 API 面向可信宿主策略，不直接暴露给模型；模型写入工具、记忆编辑 UI、跨 Session 共享和压缩策略仍待完成。长期保留已有每 scope 容量及时间水位裁剪；容量裁剪优先保留本次写入，避免同毫秒或时钟回拨导致新条目被立即淘汰（时间水位仍会过滤过期条目）。并发 prune 的删除计数仅来自成功提交的 CAS，失败重试不重复计数。
 
 ## 人工交互期间的调度延续
 
@@ -815,6 +817,8 @@ DurableFlowExecutor 遇到 pending interaction 时返回等待中的同一 Run�
 
 executor 在派发第一个节点之前就创建 Run 的聚合根（`flow.aggregate` + `flow-root`），并立即保存 `flow.run.<rootTaskId>.scheduler`（version 1）。根任务因此是 Run 从第一刻起就持久存在的锚点：之后任何时刻崩溃，Session 里都已有根身份和已提交的调度状态，`resume(sessionId, rootTaskId)` 复用已存在的任务实例，恢复节点/边、循环派发、委派组、预算及配置状态，再继续提交下游。每个节点提交后都会刷新检查点与 `flow.run.<rootTaskId>.members`，所以恢复读到的是最后已提交的调度事实。CLI 的 manifest 在 `submit` 返回后写入 `rootTaskId`；若崩溃发生在写入之前，`resume` 会从 Session 的 `flow-root` 任务（按 `flow.aggregate` 程序身份校验）找回根身份，而不是报错退出。
 
+**句柄发布时机（2026-09-11）**：取得调度租约后、派发任何节点之前，executor 立即 `publish(published)`，因此 `submit` 对 fresh（非交互）Run 也会在派发前解析。句柄是 live 的：`nodes`/`iterations`/`taskIds` 随调度填充，`root.wait()` 给出最终状态；宿主因此能在运行中对同一 Run 施加 per-task 超时、stall 诊断、取消与事件跟随，而不是等整张图结束才拿到句柄。派发前的确定性校验（图规模、边 schema 引用、`maxNodes`）仍在 `submit` 上拒绝；发布之后的调度期失败（运行期边内容校验、动态 patch 冲突、工作区清理）通过 `flow.schedule.failed` 信号落在根任务上，payload 合并主因与清理错误。回归：`packages/llm-flow/__tests__/durable-flow-executor.test.ts` 的「returns a live handle for a fresh Run before it finishes」（旧实现在该 await 上死锁）。
+
 崩溃时无法核对结果的外部 Effect（例如已发出、但结果未落盘的模型请求）由 Kernel 恢复为 `indeterminate`。协议禁止把「未知」当作「未执行」，因此 CLI 不再空转：`resume` 发现这类 Effect 就写入 `blockedEffects`、把 Run 置为 `waiting` 并以退出码 3 报告，同时打印裁决命令；`resume --retry-indeterminate` 是宿主对「可安全重放」的授权，按确定性 `requestId` 调 `TaskHandle.resolveEffect({outcome:{type:'retry'}})` 重放同一逻辑 Effect，重放后调度从已提交的迭代继续，不重新开始整张图。取消 Run 是另一条裁决路径。
 
 崩溃点验收见 [apps/cli/tests/crash-matrix.test.ts](../../apps/cli/tests/crash-matrix.test.ts)：首个 Effect 在途 kill、回复送达但未提交 kill、循环中途 kill、预算耗尽前 kill，四种场景都要求 `resume` 收敛且不重放已完成迭代。节点 `session.submit` 与检查点写入仍不是同一个事务，但每个节点提交都带 Run 稳定的 `requestId`（`flow:<rootTaskId>:<nodeId>#<iteration>`），Kernel 按 `submission/<requestId>` 记录 spec 指纹并对同请求返回原任务，因此恢复时重复提交会复用原 Task 而不是产生重复实例（`packages/llm-flow/__tests__/durable-flow-executor.test.ts` 用「检查点丢失实例 + 重启 Kernel」验证）；同一 requestId 出现不同 spec 指纹时 Kernel 直接拒绝，不静默重复。仍然存在并明确保留的限制：graph patch 与动态委派的 crashpoint 覆盖、多个恢复者之间的排他（P1-02）、图级 retry 的下游重算（P1-04）。隔离工作区租约恢复与 detached 委派计时器恢复已实现：`resume` 用持久租约记录重新挂载工作区、补跑未完成的 finalization；detached 委派组在 checkpoint 里保存的是绝对 `deadline`，恢复时由 `armDetachedTimer` 重新挂载计时器（不会因重启把超时重新计时），回归见 `packages/llm-flow/__tests__/durable-flow-executor.test.ts` 的「re-arms a detached delegation deadline after the scheduling host restarts」。
@@ -825,7 +829,7 @@ executor 在派发第一个节点之前就创建 Run 的聚合根（`flow.aggreg
 
 CLI 的 run/resume 入口通过每个 Run 的独立 SQLite 写锁互斥，锁从创建运行时之前持有到运行时清理完成；争用立即报错，进程终止由 SQLite/操作系统释放。已验证正常退出和 SIGKILL 后重新获取。该机制限定本机 CLI 入口。
 
-Run 级调度所有权（2026-09-10）由 `packages/llm-flow/src/flow/scheduler-lease.ts` 提供，适用于任意宿主与共享存储：记录写在 Session shared `flow.run.<rootTaskId>.scheduler-owner`，内容为 `{version, ownerId, epoch, expiresAt}`。`submit` 在建根任务后、`resume` 在读工作区与检查点前取得租约；同一 owner 身份可续接（epoch 递增），不同 owner 只有在旧租约到期后（或旧宿主主动 release 后）才能接管，否则报错说明持有者与到期时间，绝不在旧拥有者仍有效时强夺。租约按 ttl/3 心跳续期（默认 TTL 30s），每次调度步进前 `assertOwned()` 做 fencing：epoch 被替换即抛出 `SchedulerOwnershipLostError`，旧调度循环立即停止且**不把 Run 判失败**，由新拥有者继续同一 Run。释放时把 `expiresAt` 置 0，因此正常退出后下一次 resume 无需等待到期；SIGKILL 的宿主只能等 TTL 到期（CLI 用 `MINDOS_SCHEDULER_LEASE_TTL_MS` 在测试中缩短）。回归见 `packages/llm-flow/__tests__/scheduler-lease.test.ts`（4 通过：记录/拒绝活拥有者/到期接管/心跳与释放）与 `durable-flow-executor.test.ts` 的「refuses a second scheduler while the owner lease is live and fences the old owner」。仍未完成：跨主机时钟偏差与共享存储上的租约时钟假设、图级 retry 的下游重算（P1-04）。
+Run 级调度所有权（2026-09-10）由 `packages/llm-flow/src/flow/scheduler-lease.ts` 提供，适用于任意宿主与共享存储：记录写在 Session shared `flow.run.<rootTaskId>.scheduler-owner`，内容为 `{version, ownerId, epoch, expiresAt}`。`submit` 在建根任务后、`resume` 在读工作区与检查点前取得租约；同一 owner 身份可续接（epoch 递增），不同 owner 只有在旧租约到期后（或旧宿主主动 release 后）才能接管，否则报错说明持有者与到期时间，绝不在旧拥有者仍有效时强夺。租约按 ttl/3 心跳续期（默认 TTL 30s），每次调度步进前 `assertOwned()` 做 fencing：epoch 被替换即抛出 `SchedulerOwnershipLostError`，旧调度循环立即停止且**不把 Run 判失败**，由新拥有者继续同一 Run。释放时把 `expiresAt` 置 0，因此正常退出后下一次 resume 无需等待到期；SIGKILL 的宿主只能等 TTL 到期（CLI 用 `MINDOS_SCHEDULER_LEASE_TTL_MS` 在测试中缩短）。**跨主机时钟误差约束（2026-09-11 已实现）**：设计明确「不能直接把任意客户端时钟当全局租约事实」，因此 `acquireSchedulerLease` 支持显式 `skewMs`（默认 0 = 仅本机/同时钟源部署）：接管要求旧租约的 `expiresAt` 之后**再经过 `skewMs`**，避免快时钟宿主抢走慢时钟宿主的活租约；错误信息同时给出含误差预算的到期时刻与预算值。executor 经 `schedulerLeaseSkewMs` 透传，CLI 用 `MINDOS_SCHEDULER_LEASE_SKEW_MS` 配置；外层的 Session 单写者租约（`packages/app-core/src/kernel/session-lease.ts` 的 `SessionLeaseStore`）提供同样的 `skewMs`（默认 0，宿主可用 `sessionLeaseSkewMs` 注入，CLI 为 `MINDOS_SESSION_LEASE_SKEW_MS`，回归 `packages/app-core/tests/session-lease.test.ts`），避免两道守卫出现同类时钟漏洞。回归见 `packages/llm-flow/__tests__/scheduler-lease.test.ts`（6 通过：记录/拒绝活拥有者/到期接管/心跳与释放/误差预算内拒绝且预算后接管/默认 0 时行为不变）与 `durable-flow-executor.test.ts` 的「refuses a second scheduler while the owner lease is live and fences the old owner」。仍未完成：共享存储上的租约时钟假设（authority store 时间）与真实多进程接管，图级 retry 的下游重算（P1-04）。
 
 
 宿主关闭运行时应先停止 Kernel，再等待 `DurableFlowExecutor.waitIdle()` 与 Kernel 活动工作结束，最后关闭工具和存储。CLI 已按此顺序装配，调度进程锁在存储关闭之后释放。waitIdle 跟踪后台调度协程，不负责强制终止任意宿主回调。
@@ -835,3 +839,53 @@ CLI delete 同样先获取 Run 调度锁，再检查终态和删除目录。即�
 
 
 人工暂停的根任务在最终调度汇总时，另存版本化 `flow.run.<rootTaskId>.metadata`；重连优先使用其最终 token/耗时统计，避免显示首次暂停时的旧 input 数据。旧 Run 没有该记录时仍回退 input，不自动回填历史用量。
+
+### worktree 收尾恢复的目录缺失边界
+
+终态 Run 的收尾写入顺序存在「已移除 worktree、结果仍 pending」的崩溃窗口。恢复该窗口时，执行器通过 `FlowWorkspaceRestoreOptions.forFinalization` 明确区分清理恢复与节点恢复。Git manager 可对前者继续处理残留分支，不重新创建目录；后者始终要求目录存在。cleanup 要求保留的目录缺失仍失败。`auto-if-clean` 在目录仍存在时继续检查未提交修改；目录已移除时不对不存在的 cwd 执行 status，分支仍存在则通过幂等的 ff-only 合并继续收尾。
+
+证据：`git-worktree-manager.test.ts` 覆盖缺失/保留策略及完整路径匹配，`git-worktree-finalization.test.ts` 在真实临时 Git 仓库移除副本后重建 manager，验证 discard/auto-if-clean 都能清理残留分支；执行器重建 Kernel 的 pending finalization 用例验证恢复标记。仍不能替代真实 Tauri GUI 验收。
+
+工作区收尾需遵守能力生命周期：`releaseCapabilities(rootTaskId)` 成功后才能调用 lease.finish。app-core 包装 manager，在后台成员及其后代终结后关闭 Run 作用域，再让宿主清理文件。root 已终结不代表 detached 成员已经停止；等待成员的屏障仍可 pending。关闭失败保持工作区并报告收尾失败，不能把「请求停止」当成「已可删目录」。
+
+### 桌面 Git IPC 的当前限制（2026-09-13）
+
+Git 工作目录从 `directory_open` 返回的现存 `repositoryId` 获取，IPC 不接受裸 cwd。仅允许 worktree manager 所用的完整 argv 形状；分支变更限 `flow/`，worktree 目标须为绝对路径。子进程清空继承环境并固定 PATH，避免 `GIT_DIR`/`GIT_WORK_TREE` 等改变仓库选择；hooks/fsmonitor 与系统/全局配置继续禁用。
+
+目录句柄关闭后拒绝新调用，不取消已派发 Git。目标授权和本地配置限制见下文；生产 Tauri worktree manager 已装配，真实桌面链路尚待验收。
+
+2026-09-13 目标目录授权补充：worktree add/remove 必须携带有效 `workspaceId`。目标必须位于授权根的严格子路径内，不能使用根自身；复用 directory_boundary 检查目录穿越和符号链接祖先，仓库根也重新检查链接。真实 Git 创建/删除及拒绝路径的 Rust 测试已通过。该校验发生在进程启动前，不等于文件系统使用时的原子隔离。
+
+2026-09-13 本地 Git 配置边界补充：命令显式指定 `--work-tree=<授权目录>`，防止 `core.worktree` 改指外部目录。执行前以 `git config --includes --null --name-only --get-regexp` 检查有效配置中的 filter clean/smudge/process 项，存在则明确拒绝，配置错误也拒绝；预检和操作共享请求超时预算。因此依赖外部 checkout filter（包括相应本地 LFS filter 配置）的仓库不在当前通道支持范围，不能静默略过 filter 然后宣称 checkout 语义一致。这是命令前校验，不提供配置/路径被并发恶意修改时的原子沙箱保证。
+
+桌面 TypeScript 命令适配器 `apps/tauri-app/src/shell/workspace-git.ts` 已连接共享 manager 所需的命令接口和 Git IPC。每个实例只接受固定仓库/副本 cwd 和固定 worktree 目标；每次调用获取所需目录授权并在结束时释放，部分获取失败与命令失败均清理已获取句柄，多个错误通过 AggregateError 保留。`packages/app-shell/tests/tauri-workspace-git.test.ts` 的 6 项 IPC 替身测试通过，包含共享 manager 的创建/收尾链；租约恢复、文件/进程作用域与 main 入口现由下述 TauriFlowWorkspaces 装配。
+
+Tauri 的 `workspace-grant.ts` 从当前 Session 授权解析仓库身份：要求 active 状态、唯一可写挂载且 cwd 为挂载根，核对进程映射的 sourceId/access，并在异步解析后复核 revision；admin-home 的虚拟路径加宿主数据根，外部目录保留原生路径。返回 Session、revision、挂载身份和仓库路径，供后续租约准备与恢复校验使用；该解析不检查 Git 仓库状态，已由生产 manager 消费。app-core 的平台 configure 回调现提供初始化完成的文件与目录服务，并在恢复扫描前等待绑定完成。
+
+`TauriFlowWorkspaces` 已在 main 注入 manager 和 fileContextForScope，并在 configure 中绑定核心服务。每次准备生成独立 UUID 副本，保存 Session 授权身份及共享 Git 租约；恢复核对数据根、副本 ID、分支和当前授权，支持仅收尾时目录已缺失的恢复。返回给执行器的 directory 是虚拟挂载点；原生目录保存在 record 中。作用域工厂单独打开副本来源，经 acquireWorkspaceProcessContext 配对文件与 Bash 挂载，获取后再核对授权，释放先进程/文件上下文再关闭来源。真实 SessionFilesService + 内存文件系统、Git IPC 和目录来源替身的 4 项测试覆盖并发副本、恢复及文件/进程一致性；这不是原生桌面验收。准备后、租约持久化前崩溃的孤儿副本窗口仍待验证/处理，read-only 模式尚不支持。
+
+Tauri 来源关闭必须覆盖尚未完成 directory_open 的获取，不能只遍历 canonical 缓存。来源 owner 关闭失败时仍尝试所有目录句柄及其他来源，汇总清理错误；同一 provider 的并发 dispose 共用结果，关闭后拒绝新的 openDirectory。该行为由来源失败和在途获取两项 IPC 替身回归覆盖。
+
+原生组合验证已补充：host_git 的 worktree_file_io_and_bash_share_the_copy_without_changing_the_repository 测试通过真实 Git 创建副本，以 directory_io 写文件，再用真实 Bubblewrap Session Bash 读改，随后目录 IO 读回并确认基础仓库未变；关闭句柄后访问拒绝，再通过 Git 通道移除副本。此证据不含 WebView IPC、sidecar 来源初始化或 GUI。
+
+授权变化回收的当前证据：tauri-flow-workspaces 测试在 Git 创建回调里通过真实 SessionFilesService.configure 增加 revision，prepare 拒绝返回租约并强制清理尚未发布的副本/分支（覆盖 cleanup=keep）。另一测试在打开来源时改变 revision，工厂关闭已获得的进程句柄和来源、拒绝返回上下文，但保留已持久化副本。两者均不证明进程崩溃后的孤儿恢复。
+
+GitWorktreeManagerOptions.beforeCreate 在任何 Git 创建副作用前等待完成。Tauri 使用它将版本、UUID、目录、原授权与 Git 租约身份写入数据根 var/lib/worktrees/.intents/<id>.json；写入失败不执行 Git，创建或返回失败保留归属记录，正常收尾/回滚完成才删除。删除失败传播。此记录补上 Git 成功但调用返回失败时的信息缺口；启动扫描、与 Session 已发布租约核对、孤儿恢复处理尚未实现。底层 fs_write_file 是临时文件加 rename，当前不声明断电持久性。
+
+Tauri prepare 现先核对当前 Session 的遗留意图（调用方需持有 Session 写租约）：读取 flow-root 的 workspace-lease，保留已声明归属的副本和本 manager 正在准备/持有的副本；仅回收授权仍匹配且无归属的意图，复用 Git manager 的 finalization 恢复、always/discard 清理，再移除意图。同 Session 并发扫描共用 Promise，文件读取/校验失败不视为无归属。当前触发点是新运行准备，不是启动主动扫描；授权已变的遗留项拒绝自动清理。
+
+启动核对已接入：ApplicationKernelPlatform.beforeSessionRecovery 在取得 Session 写租约后、Kernel 恢复任务前调用 Tauri reconcile。拒租会话不扫描；核对错误阻止恢复并触发租约/Kernel 清理。只覆盖 Kernel 启动扫描发现的 Session；真实进程崩溃和桌面重启验收仍待完成。
+
+跨进程证据：tauri-workspace-crash.test.ts 启动独立 TypeScript 宿主，在意图写入 rename 完成和真实 Git worktree add 完成两个窗口分别发送 SIGKILL，等待进程退出后启动新进程运行 reconcile，验证目录/分支/意图清理。宿主夹具以 Node 磁盘/Git 替代 Tauri IPC，重建同一授权配置；不覆盖真实 WebView、原生 IPC、sidecar 或已发布 Run 的持久状态恢复。
+
+崩溃夹具现使用真实 LocalFS、Node SQLite sidecar、Kernel 与 Flow 存储，复用磁盘上的授权和成员/租约记录。新增发布后 SIGKILL 验证：reconcile 保留有归属副本，读取调度 owner 的 expiresAt 等待合法接管，recoverSession + executor.resume 恢复人工节点，响应后根和工作区收尾状态均 succeeded，再核对副本/分支/意图清理。三个崩溃窗口通过；仍以 Node 替代 Tauri IPC，不能代替实际桌面插件和窗口验收。
+
+真实桌面自动探针已贯通运行时、WebView IPC、Tauri SQL sidecar、Git 通道和 Bubblewrap：Write 与 Bash/Read 使用同一副本，普通 Session 保留基础目录，收尾后目录/意图清空。探针首次暴露 Tauri plugin-sql 无参 close 的全局关闭语义，现 sidecar close 明确传自身数据库 URL，版本拒绝分支也复用此关闭方法。成功 Run 的 merge=discard 清理可强制移除未提交修改；auto-if-clean 仍先拒绝脏目录，manual 不强制移除成功 Run 的脏副本。自动探针不是用户窗口交互或真实桌面重启验收。
+
+只读工作区能力端口：SessionFilesService.acquireWorkspaceFiles 增加 access（默认 rw），ro 在派生视图中将全部用户挂载降为只读；acquireWorkspaceProcessContext 的 source.access 同时控制文件与原生挂载。已有 ro 授权可获取 ro 副本，但不得获取 rw 副本。原 Session 视图和持久授权不变，授权 revision 变化仍撤销派生能力。这是权限降低，不保证其他挂载内容不可被其原作者更新；Tauri/CLI read-only 策略尚未消费该端口。
+
+Tauri read-only 使用独立 Git worktree 作为输入副本，租约保存 mode，恢复及 fileContext 对照冻结 scheduler 策略拒绝模式不一致；旧无 mode 租约按 worktree 兼容。只读工厂将全部用户文件/进程挂载降权，不能通过 Bash 绕过文件只读。只读策略禁止 manual/auto-if-clean 合并，默认内部按 discard 收尾，cleanup 保留策略仍生效。创建 worktree 需写 Git 元数据，故当前要求原仓库可写授权；不将只读 Session 授权扩大用于创建 Git 元数据。CLI 和真实桌面只读验收仍待完成。
+
+只读模式的真实桌面自动探针已通过：Write 返回 EROFS；Bubblewrap Bash 可读取，写入返回只读文件系统错误和 exit 1；Read 内容不变。根与工作区收尾均 succeeded，宿主磁盘基础文件未变、worktree 及意图清空。该证据覆盖实际 WebView/native IPC/SQL 插件，不包含用户点击启动或真实桌面重启；CLI 只读已装配 OCI 路径，真实容器验收仍未完成。
+
+CLI read-only 已接入 OCI：宿主 NodeNativeShell 只供 Git manager 执行管理命令，Agent Bash 与 TTY 仍走 OCI；VFS 与全部容器用户挂载降权，WorkspaceGrantRegistry 拒绝写申请/许可。策略只接受默认/discard 合并语义，native 及 --set-home 组合明确拒绝。当前环境无 podman/docker 可执行文件，OCI 参数测试不等于真实容器验收；CLI 只读完成状态仍待端到端证据。

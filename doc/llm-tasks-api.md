@@ -74,6 +74,7 @@ interface DurableAgentInput extends DurableProgramInput {
     approval?: 'none' | 'external' | 'all';
     tools?: ToolDefinition[];
     allowedToolIds?: string[];        // 显式能力 ID 白名单（动态加载的 definition 必须属于该集合）
+    skillContexts?: SkillContext[];   // 初始化选中的 Skill 快照；与运行时 load_skill 结果同形，逐轮重注入关键规则
     externalToolIds?: string[];
     subtaskTool?: string;             // 调用即声明子任务 payload 的工具名（该节点随即完成）
 }
@@ -248,7 +249,7 @@ dependencyWait(bindings: Array<{ taskId: string }>): {
 buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInput;
 ```
 
-**`LlmTaskInputOptions`**：`{ sessionId, roundId, messages, connectionId?（默认 'default'）, model?, temperature?, maxTokens?, timeoutMs?, thinking?, reasoningEffort?, webSearch?, stream?, responseFormat?, outputValidation?, contextCompaction?, maxExchanges?, workingDirectory?, approval?（默认 'external'）, tools?, allowedToolIds?, externalToolIds?, subtaskTool?, dependencyBindings?, includeDependencyOutputs? }` —— 将上层会话数据组装为 `DurableAgentInput`。
+**`LlmTaskInputOptions`**：`{ sessionId, roundId, messages, connectionId?（默认 'default'）, model?, temperature?, maxTokens?, timeoutMs?, thinking?, reasoningEffort?, webSearch?, stream?, responseFormat?, outputValidation?, contextCompaction?, maxExchanges?, workingDirectory?, approval?（默认 'external'）, tools?, allowedToolIds?, externalToolIds?, skillContexts?, subtaskTool?, dependencyBindings?, includeDependencyOutputs? }` —— 将上层会话数据组装为 `DurableAgentInput`。
 
 ---
 
@@ -278,6 +279,8 @@ packages/llm-tasks/src/
 **注册位置**：`llm.chat@1` / `llm.agent@1` / `llm.plan@1` 由 `llm-flow` 的 `registerDurablePrograms()` 与 Flow 系程序一起注册（`packages/llm-flow/src/flow/register-programs.ts`），本包自身不做注册。
 
 **约定**：本包不持有 Session/Flow/Scheduler/CommandBus/通用 Middleware；新运行模式实现 `DurableTaskProgram` 并放入 `durable/`；所有等待必须返回 Kernel `WaitSpec`，State 必须可持久化（JSON 可序列化）。
+
+任务记忆授权快照：`DurableAgentInput.memoryPolicy` 保存宿主在提交时解析的策略。`buildLlmTaskInput` 深复制策略及嵌套 scope/retention；未提供时不生成该字段。直接会话已将解析后的 Agent memoryPolicy 写入 Task input。共享 app-core 已装配 memory_list/write/remove，TaskMemoryService 在 tool.call 执行时以 Kernel 身份读取该持久策略并检查工具白名单；普通 ToolService 直接调用拒绝。Flow builtin.agent 已接线；会话 binder 仅使用节点引用 Agent 的策略，不继承父会话权限。输入构造器校验 namespace、scope 数组及条数/时间限制，非法策略在提交前拒绝。底层 Flow 配置属于可信宿主输入，类型校验不替代来源授权。
 
 ### 初始 Skill 激活
 

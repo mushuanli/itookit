@@ -51,6 +51,8 @@ interface ApplicationRuntimeOptions {
 
 `backend` 是唯一的必填项；挂载项用内联结构（无独立 `Mount` 类型），`options` 为 vfs-core 的 `MountOptions`。
 
+`ApplicationKernelPlatform.configure(kernel, services)` 在核心服务初始化及 Skill 同步后、Session 租约恢复扫描前调用并等待完成。第二参数 `ApplicationPlatformServices` 提供当前运行时的 `sessionFiles` 和 `directoryMounts`，供宿主绑定工作区文件/进程工厂；不能等 `createApplicationRuntime` 返回后再绑定，否则恢复中的 Effect 可能提前取用工厂。已有只接收 kernel 的回调保持兼容。
+
 平台差异：
 
 | 能力 | Web | Tauri | CLI |
@@ -84,7 +86,8 @@ interface HeadlessKernelRuntime extends KernelAdaptersRuntime {
 | 调用方 | 文件 | 说明 |
 |---|---|---|
 | CLI headless | `apps/cli/src/runtime.ts` | `createCliRuntime` 先组装 VFS / TTY / 目录挂载 / 工具，再调用 `createKernelRuntime` |
-| app-core 应用运行时 | `packages/app-core/src/runtime/create-application-runtime.ts` | `createApplicationRuntime` 内部调用，再叠加会话、Flow、`RunCatalog` |
+| app-core 应用基础设施 | `packages/app-core/src/runtime/infrastructure.ts` | `createInfrastructure`：VFS（含 `/run` 挂载与固定用户布局预热）+ LLM 设备驱动注册/冻结；返回 `vfs`/`systemFS`/`llmDriver`/`logIO`/`closeCodexTransport`，宿主负责释放顺序（VFS 最后） |
+| app-core 应用运行时 | `packages/app-core/src/runtime/create-application-runtime.ts` | `createApplicationRuntime` 先调用 `createInfrastructure`，再叠加会话、Flow、`RunCatalog` |
 
 ## app-shell 只负责 UI
 
@@ -143,6 +146,22 @@ Node CLI
 注入点：`apps/cli/src/http-server.ts` 的 `REMOTE_FLAG`，由 `-d` 启动的 HTTP 服务在返回 `index.html` 时插入 `</head>` 之前。
 
 读取点：`apps/tauri-app/src/main.ts` 的 `bootstrapRemote()` —— `__MINDOS_MODE__ === 'remote'` 时只读 `/status`、`/sessions`、`/runs` 并渲染，不调用 `createApplicationRuntime()`；`apps/web-app/src/main.ts` 没有 remote 分支，始终创建本地 runtime。
+
+### 可选 Effect 独立作用域端口
+
+`ApplicationKernelPlatform.scopeForEffect` 与 `fileContextForScope` 经 `createKernelRuntime` 透传给 kernel-adapters。前者以可信 `EffectExecutionContext` 为输入，由宿主查询 Task/Run 持久关系返回作用域 id；`undefined` 表示普通 Session。后者获取该 Session + scope 独立的 VFS/cwd/nativeShell/TTY 及释放函数。选择或获取失败直接拒绝，不回退默认目录。
+
+同一 Effect 上下文的选择固定，能力按 Session + scope 缓存。`tool.call`、`process.exec`、Skill、TTY 的元数据查找和执行均使用所选作用域。`disposeScope(sessionId, scopeId)` 合并并发清理并保留关闭标记以拒绝迟到调用；Session/运行时关闭会释放所有子作用域。Skill 加载身份仍走原 Session 持久键，不新增身份存储协议。
+
+提供 `fileContextForScope` 且未自定义 `scopeForEffect` 时，`createKernelRuntime` 默认调用 llm-flow 的 `resolveFlowTaskWorkspace`，按持久成员、重试记录、祖先链及冻结工作区租约返回 Run 根身份。Tauri 现由 TauriFlowWorkspaces 提供工作区工厂，在 configure 中绑定服务，按持久租约打开独立副本并配对文件与进程能力；真实桌面验收仍待完成。不能用 `TaskRecord.rootTaskId` 直接推断 Flow Run：Flow 节点目前通过 `session.submit` 独立创建，需核对持久成员关系及其后代；恢复与 finalization 也必须绑定同一工作区租约。
+
+`acquireWorkspaceProcessContext(files, sessionId, source, factory, processMounts)` 将独立文件视图与原生进程挂载配对。`source` 的 `mountId` 指向现有可写授权，`fs` 和 `directory` 由宿主验证为同一隔离副本。函数核对文件与进程授权的挂载点、来源和写权限，将唯一匹配的进程挂载替换为副本，并在工厂返回后再验证授权 revision；竞态或初始化失败会清理已获取资源。释放仍先停进程再释放文件，来源文件系统由宿主拥有。该函数不能凭任意路径建立授权，生产宿主必须从已验证的 workspace lease 获取 source。
+
+宿主注入会话的 `flowWorkspaceManager` 经 `withWorkspaceScopeCleanup` 包装：准备和恢复返回的 lease 都带 `releaseCapabilities(rootTaskId)`。屏障先以持久 Flow 成员及 Task 祖先关系等待后台成员和后代结束，再调用 `runtime.disposeScope(sessionId, rootTaskId)`，最后运行宿主原有屏障。执行器确认屏障成功后才调用 `finish`；失败时保留工作区，收尾状态报告失败。此装配不授予新的目录权限，也不代替宿主 manager 的 prepare/restore。
+
+平台可注入 beforeSessionRecovery(sessionId)：成功取得 Session 写租约后、Kernel recoverSession 前等待它完成。Tauri 在此核对工作区创建意图；拒租会话不执行宿主核对。回调或恢复失败时停止心跳并释放已取得的租约，应用装配也关闭已创建的 Kernel，再走其余启动清理。
+
+共享运行时记忆工具：createKernelRuntime 通过 createMemoryTools 注册 memory_list、memory_write、memory_remove。KernelAdaptersRuntimeOptions.effectTools 为需要可信 Effect 身份的宿主工具提供 metadata/definition/invoke 绑定；目录可被宿主过滤展示，普通 ToolService.invoke 的占位处理器拒绝直接调用，tool.call 在验证工具句柄后传入 Kernel context，并将调用纳入取消等待。任务记忆服务另校验持久 input 中冻结的 memoryPolicy 和 allowedToolIds；模型参数不选择 Session 或授权策略。
 
 应用启动的 Session 恢复由 `packages/app-core/src/runtime/session-recovery.ts` 的 `recoverSessionsWithLeases` 承载：先获取可持有的 Session 租约，再调用 Kernel `recoverSessions` 一次性恢复该集合，避免逐个恢复时前一个 Session 已启动导致后一个 takeover 被拒。拒租项跳过并记录拥有者与到期时间；持有集合由心跳续租，恢复失败清理已取得租约，应用装配关闭 Kernel 并执行其余启动清理。服务支持恢复前回调，宿主工作区核对接线另行提供。
 

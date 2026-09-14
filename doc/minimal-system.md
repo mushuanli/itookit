@@ -26,6 +26,12 @@ cargo build --offline --features tauri/custom-protocol
 pnpm --filter tauri-app dev                          # 或 pnpm tauri:dev
 ```
 
+Rust 侧沙箱与进程边界测试（真实 bwrap 授权边界、取消/超时的进程组终止、目录与符号链接逃逸、输出上界），无需 X11：
+
+```bash
+pnpm --filter tauri-app test:rust                    # cargo test，12 通过
+```
+
 数据根由 `mindos.json#rootDir` 决定，默认 `<config>/data`；验收时可用 `MINDOS_ROOT` 指向隔离目录，避免污染真实数据：
 
 ```bash
@@ -49,7 +55,7 @@ node /app/apps/cli/dist/cli.js run -f /workspace/workflow.yml --state-dir /works
 
 ### 子进程凭证注入
 
-原生 Session Bash **清空继承环境**（只保留 `PATH=/usr/local/bin:/usr/bin:/bin`、`HOME=/tmp`、`LANG=C.UTF-8`），因此终端里 `export MINIMAL_API_KEY=...` 不会进入子 harness。可选做法：
+原生 Session Bash **清空继承环境**（只保留 `PATH=/usr/local/bin:/usr/bin:/bin`、`HOME=/tmp`、`LANG=C.UTF-8`），因此终端里 `export MINIMAL_API_KEY=...` 不会进入子 harness。该行为有回归测试：`session_bash::tests::clears_host_credentials_and_exposes_only_the_fixed_session_environment` 与 `session_bash::tests::never_falls_back_to_a_host_shell`（`pnpm --filter tauri-app test:rust`）。可选做法：
 
 - 在 Bash 命令里显式前缀注入（最简单，但命令会进入持久记录与界面，**不要写真实 key**）：`MINIMAL_API_KEY=<值> node /app/apps/cli/dist/cli.js run ...`；
 - 让子 harness 从工作目录内的受控文件/环境变量名读取（例如把凭证放到 Session 可读但不可写的位置，配置里只写变量名）；
@@ -70,11 +76,11 @@ pnpm --filter @itookit/cli test tests/nested-harness.test.ts
 测试读取下方同一份公开 YAML 示例，仅替换服务端口。它绕过真实 Tauri IPC，因此不能作为桌面窗口端到端证据。另可运行：
 
 ```bash
-pnpm --filter @itookit/cli test tests/hitl.test.ts tests/run-scheduler-lock.test.ts
+pnpm --filter @itookit/cli test tests/hitl.test.ts tests/run-scheduler-lock.test.ts tests/run-scheduler-lease-delete.test.ts tests/worktree-run.test.ts
 pnpm --filter @itookit/app-shell exec vitest run tests/minimal-skill-dag.test.ts tests/tauri-bash.test.ts
 ```
 
-分别验证人工暂停的跨进程恢复/调度互斥，以及 Skill→Agent→DAG/平台桥接。沙箱若禁止本地端口或子进程，应在允许这些能力的环境运行。
+分别验证人工暂停的跨进程恢复/调度互斥/删除保护/隔离工作区，以及 Skill→Agent→DAG/平台桥接。沙箱若禁止本地端口或子进程，应在允许这些能力的环境运行。
 
 ## 使用自己的模型运行两节点 DAG
 

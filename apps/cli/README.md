@@ -139,6 +139,10 @@ mindos resume <run-id> --retry-indeterminate      # 授权重放同一逻辑 Eff
 
 `mindos cancel` 用于取消**没有活宿主**的 Run（宿主崩溃、Effect 阻塞）。Session 是单写者：如果 Run 正由另一个 CLI 进程执行，该进程持有 Session 租约，`cancel` 会以退出码 2 明确拒绝并提示租约持有者，不会干扰在途请求；取消正在运行的 Run 请对该进程发送 `SIGINT`（退出码 130，Run 持久为 `cancelled`）。
 
+`mindos delete` 有两道互斥守卫：本机用 Run 目录内的 SQLite 写锁（`run/resume/delete` 共用，争用即拒绝），跨主机再看该 Run 的通用调度租约（Session shared `flow.run.<rootTaskId>.scheduler-owner`）。共享存储（NFS/S3 类）上本地文件锁不可靠，因此只要另一个宿主的租约还没到期，`delete` 就会拒绝并保留 Run 目录，报错给出持有者与到期时间；宿主崩溃后租约到期（默认 30s，可用 `MINDOS_SCHEDULER_LEASE_TTL_MS` 缩短）即自动放行。跨主机共享数据根时，若各主机时钟可能不一致，用 `MINDOS_SCHEDULER_LEASE_SKEW_MS` 声明允许的时钟误差：接管会在旧租约到期后再等这段时间，避免快时钟主机抢走慢时钟主机的活租约（默认 0，适合单机或统一时钟源）。
+
+Session 单写者租约同理：`MINDOS_SESSION_LEASE_SKEW_MS`（默认 0）声明允许的时钟误差，接管会在旧 Session 租约到期后再等这段时间。
+
 ## HTTP 模式（`-d` / `--http`）
 
 CLI 可以作为 HTTP 主机，直接提供 Tauri UI：
@@ -188,6 +192,27 @@ mindos -d 8080
 - 显式选择 OCI 后若容器引擎不可用，运行立即失败，不会降级为 Native。
 - 未配置 `sandbox.mode` 时默认使用 OCI；只有显式设置 `native` 或传入 `--sandbox native` 才会使用宿主 Bash。
 
+### 隔离工作区（`runtime.workspace`）
+
+`mindos.yml` 可用 `runtime.workspace` 让整个 Run 在独立 Git worktree 里执行：
+
+```yaml
+runtime:
+  workspace:
+    mode: worktree        # shared（默认）| worktree | read-only（要求 OCI）
+    base: head            # head | current | <git ref>
+    merge: manual         # manual | auto-if-clean | discard
+    cleanup: on-success   # on-success | always | keep
+sandbox:
+  mode: native            # worktree 只支持 native 沙箱
+```
+
+- 工作区建在 `<state-dir>/worktrees/<run-id>`，**整个 Session 工作区**都指向这份隔离副本：Bash/Glob 的 cwd、VFS 文件工具（`Read`/`Write`/`Edit`，挂载在 `/workspace`）、路径授权与系统提示里的 Workspace 路径一致，基础仓库不在原位改动；worktree 目录与分支名随 Run 持久化，宿主崩溃后 `resume` 会重新挂载同一个 worktree，不会新建第二个。
+- 与 `--set-home` 同时使用时保留该目录作为 Session 工作区（隔离副本只作为 Agent shell 的 cwd），并在 stderr 明确提示。
+- `merge: auto-if-clean` 仅在 worktree 无未提交改动时把分支快进合并回基础仓库；`manual`（默认）保留分支供人工处理。
+- `cleanup: on-success`/`always` 只在工作区干净时移除——有未提交改动时 Git 拒绝删除，Run 结果不受影响，工作区保留，避免静默丢弃 Agent 产物；需要保留时用 `cleanup: keep`。
+- OCI 沙箱只挂载工作区根目录，隔离目录对容器不可见，因此 worktree 模式要求 `sandbox.mode: native`，否则配置校验直接失败。
+
 首次使用 OCI 模式时构建最小镜像：
 
 ```bash
@@ -197,23 +222,9 @@ podman build -t mindos-sandbox:v1 -f apps/cli/sandbox/Dockerfile .
 
 运行状态位于 `.mindos/runs/<run-id>/`，包括配置快照、`run.json`、`events.jsonl`、产物和最终结果。API Key 只从环境变量读取，不写入配置快照；LLM 的运行时配置使用内存 VFS。
 
-### 租约接管的时钟偏差配置
+`runtime.workspace.mode: read-only` 仅接受 OCI 沙箱：宿主 Git 创建独立副本，文件工具、Bash 和交互 TTY 的所有用户挂载均只读，写授权申请被拒绝。`merge` 可省略或设为 `discard`，不允许合并副本改动；`cleanup` 沿用工作区策略。此模式不能与 `--set-home` 合用。native 模式不提供只读进程边界，配置及运行时均拒绝。当前仅有配置/挂载参数回归，真实 OCI 运行仍待验收。
 
-`MINDOS_SESSION_LEASE_SKEW_MS` 和 `MINDOS_SCHEDULER_LEASE_SKEW_MS` 分别传给 Session 租约及 Flow 调度租约，单位为毫秒。未设置时使用库默认值 0；显式 0 有效。配置必须为非负安全整数，空白、负数、非整数和非法数值在 CLI 创建运行时资源前报错。不同拥有者须等到旧租约到期时间加偏差预算后再接管；显式释放的 Flow 租约无需等待。该配置不自动校准主机时钟，也不证明共享存储或多主机 fencing 已通过验收。
-
-### Run 隔离工作区
-
-YAML 的 runtime.workspace 支持 mode: shared/worktree/read-only，以及 base、merge: manual/auto-if-clean/discard、cleanup: on-success/always/keep。worktree 要求显式 sandbox.mode: native，副本位于 `<state-dir>/worktrees/<run-id>`，默认 Session 文件挂载与进程 cwd 指向副本；恢复重连已记录的副本。--set-home 会保留用户指定的 Session 目录并明确提示差异。
-
-成功且 merge 非 discard 时，未提交改动会阻止移除；discard 或失败/取消后的清理可以强制移除，因此需要保留产物时使用 cleanup: keep。auto-if-clean 仅接受干净副本并快进合并。收尾前通过共用屏障等待在途操作并关闭 Run 能力。
-
-read-only 只接受 OCI，拒绝写授权和 --set-home，所有用户挂载降为只读；当前配置及挂载参数测试通过，真实 OCI 验收仍待完成。OCI cwd 仅接受已挂载宿主或虚拟路径，范围外路径报错。
-
-mindos delete 在本机锁之外，通过持久调度记录 CAS 写入删除标记，与识别该协议的宿主接管互斥；活租约（含配置时钟偏差）拒绝删除。标记写入后才删除 CLI 投影目录，失败保留标记供重试，不宣称旧宿主或跨主机外部副作用已经强隔离。
-
-### 原生进程结束与取消
-
-一次性 native shell 调用拥有它创建的进程组。取消或超时先发送 SIGTERM，仍未退出时升级 SIGKILL；父进程正常退出也会停止该组剩余后台成员。CLI 等待输出管道关闭及停止确认后才返回，启动前已取消不会执行命令。Linux 通过进程状态排除无法执行的 zombie；无法确认时保持清理等待，不用超时伪造成功。需要长期后台执行的服务不应借助一次性 Bash 调用遗留进程。native 模式不限制程序主动脱离进程组，不提供 OCI 或 Tauri bwrap 的隔离边界。
+OCI 命令和交互 TTY 的工作目录按 Session 挂载路径映射：接受已挂载的宿主路径或会话虚拟路径（含子目录），嵌套宿主目录优先使用最具体的挂载。挂载范围外的 cwd 会报错，不会静默退回工作区根目录。
 
 ### Agent 记忆策略
 
@@ -234,3 +245,21 @@ agents:
 ```
 
 写工具参数为 `scope`、`entryId`、`content`，删除工具不需要 `content`。可传 `expectedContentHash`：旧内容摘要用于冲突检查，null 只允许新建；省略为无条件写入。列表仅返回 read_scopes 中的条目。CLI Flow 节点不自动注入检索结果，可通过 memory_list 显式读取。策略冻结到 Task 输入；修改 YAML 不扩大已提交任务权限。
+
+### 租约接管的时钟偏差配置
+
+`MINDOS_SESSION_LEASE_SKEW_MS` 和 `MINDOS_SCHEDULER_LEASE_SKEW_MS` 分别传给 Session 租约及 Flow 调度租约，单位为毫秒。未设置时使用库默认值 0；显式 0 有效。配置必须为非负安全整数，空白、负数、非整数和非法数值在 CLI 创建运行时资源前报错。不同拥有者须等到旧租约到期时间加偏差预算后再接管；显式释放的 Flow 租约无需等待。该配置不自动校准主机时钟，也不证明共享存储或多主机 fencing 已通过验收。
+
+### Run 隔离工作区
+
+YAML 的 runtime.workspace 支持 mode: shared/worktree/read-only，以及 base、merge: manual/auto-if-clean/discard、cleanup: on-success/always/keep。worktree 要求显式 sandbox.mode: native，副本位于 `<state-dir>/worktrees/<run-id>`，默认 Session 文件挂载与进程 cwd 指向副本；恢复重连已记录的副本。--set-home 会保留用户指定的 Session 目录并明确提示差异。
+
+成功且 merge 非 discard 时，未提交改动会阻止移除；discard 或失败/取消后的清理可以强制移除，因此需要保留产物时使用 cleanup: keep。auto-if-clean 仅接受干净副本并快进合并。收尾前通过共用屏障等待在途操作并关闭 Run 能力。
+
+read-only 只接受 OCI，拒绝写授权和 --set-home，所有用户挂载降为只读；当前配置及挂载参数测试通过，真实 OCI 验收仍待完成。OCI cwd 仅接受已挂载宿主或虚拟路径，范围外路径报错。
+
+mindos delete 在本机锁之外，通过持久调度记录 CAS 写入删除标记，与识别该协议的宿主接管互斥；活租约（含配置时钟偏差）拒绝删除。标记写入后才删除 CLI 投影目录，失败保留标记供重试，不宣称旧宿主或跨主机外部副作用已经强隔离。
+
+### 原生进程结束与取消
+
+一次性 native shell 调用拥有它创建的进程组。取消或超时先发送 SIGTERM，仍未退出时升级 SIGKILL；父进程正常退出也会停止该组剩余后台成员。CLI 等待输出管道关闭及停止确认后才返回，启动前已取消不会执行命令。Linux 通过进程状态排除无法执行的 zombie；无法确认时保持清理等待，不用超时伪造成功。需要长期后台执行的服务不应借助一次性 Bash 调用遗留进程。native 模式不限制程序主动脱离进程组，不提供 OCI 或 Tauri bwrap 的隔离边界。

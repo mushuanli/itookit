@@ -46,6 +46,8 @@ class Kernel implements KernelRegistration {
     readonly storageResolvers: StorageResolverRegistry;
     readonly workspaces: WorkspaceRegistry;
     get resources(): ResourceApi;                            // kernel 作用域
+    // ResourceApi.claimAuthority(authorityId, {ownerId, expectedEpoch, binding, serviceEndpoint, scope}) 接管/声明 authority
+    // ResourceApi.authority(authorityId, scope?) 只读；写命令可选带 authority: {authorityId, epoch} 由权威事务校验
     resourceApi(sessionId: string, taskId?: string): ResourceApi;   // 指定作用域
 
     // 会话
@@ -96,6 +98,17 @@ class Kernel implements KernelRegistration {
     outbox(sessionId: string): Promise<CrossSessionMessage[]>;
     inbox(sessionId: string, after?: number): Promise<CrossSessionMessage[]>;
     relayPendingMessages(): Promise<number>;
+    /** 保留期/GC：只删除已终结的出箱记录与已被消费（或被拒绝）的收件回执。 */
+    pruneSessionMessages(sessionId: string, before: number, limit?: number): Promise<{ outbox: number; inbox: number }>;
+
+    /** Task 版本历史保留期/GC：只裁剪 `snapshot/<version>`，主记录与 attempts/effects/receipts 不动。 */
+    compactTaskHistory(sessionId: string, taskId: string, options?: { keepVersions?: number; beforeVersion?: number }): Promise<{ removed: number; keptFrom: number }>;
+
+    /** Task 事件日志保留期/GC：保留最新 `keepEvents` 条索引事件，写 `task-event-first` 水位。 */
+    pruneTaskEvents(sessionId: string, taskId: string, options?: { keepEvents?: number }): Promise<{ removed: number; firstAvailableIndex: number }>;
+
+    // Session 布局：会话记录携带 layout manifest（版本/记录 schema/必需能力/迁移状态）；
+    // 更高版本、pending 迁移或未知必需能力的 Session 在 open 与事务操作前被拒绝。
 
     // Context
     commitContext<T>(sessionId, delta, options?): Promise<ContextCommit<T>>;
@@ -111,7 +124,7 @@ class Kernel implements KernelRegistration {
 
     // 预算
     setBudget(sessionId, handleId, dimension, hardLimit, expectedVersion?): Promise<BudgetAccount>;
-    chargeBudget(sessionId, handleId, dimension, amount, options?: { usageId?: string }): Promise<BudgetAccount[]>;
+    chargeBudget(sessionId, handleId, dimension, amount, options?: { usageId?: string }): Promise<BudgetAccount[]>;   // usageId 幂等结算（回执落 usage/<usageId>）
 
     // 工作区
     snapshotWorkspace(sessionId, handleId, adapterRef: ProgramRef): Promise<WorkspaceSnapshot>;
@@ -439,7 +452,7 @@ interface EffectExecutionContext {
     grants: AuthorizedEffectGrant[];
     sessionState?: EffectSessionState;
     emit?: (event: { type: string; payload?: unknown }) => Promise<void>;     // 流式事件
-    chargeBudget?: (handleId, dimension, amount) => Promise<BudgetAccount[]>; // 预算扣减（超限抛错）
+    chargeBudget?: (handleId, dimension, amount, options?) => Promise<BudgetAccount[]>; // 预算扣减（超限抛错；缺省按逻辑 Effect 幂等结算）
 }
 ```
 
@@ -595,6 +608,7 @@ packages/durable-kernel/src/
 │   │                             CacheNamespace/CacheManagementAction/CacheManagementReceipt
 │   ├── resource-api.ts           ResourceApi/ManagedResource/ManagedHandle/ResourceClaim/
 │   │                             ResourceCommand/ManagedResourceAdapter/ResourceCleanup 等托管资源契约
+│   │                             以及 ManagedAuthority/ResourceAuthority（authority ownerEpoch 与写命令 fence）
 │   └── status.ts                 taskStat()/taskStats()/sessionStat()/closedSessionStat() + TaskStat/TaskStats/SessionStat
 ├── ports/                        内核向外的契约（注册面）
 │   ├── registry.ts               ProgramRegistry / EffectRegistry / StorageResolverRegistry / WorkspaceRegistry
@@ -647,6 +661,8 @@ packages/durable-kernel/src/
 ├── graph.seq          Task 依赖图（dependsOn/waiter 关系）
 ├── resources.seq      资源/句柄/预算/缓存：resource/<id>、handle/<id>、budget/<resourceId>/<dimension>、
 │                      managed/request/<…>、managed/access/<…>、managed/claim/<id>、managed/cleanup/<id>、
+│                      managed/authority/<id>（authority ownerEpoch/ownerId/binding）、
+│                      usage/<usageId>（幂等预算结算回执 BudgetUsage）、
 │                      cache/namespace/<id>、cache/entry/<namespaceId>/<key>、cache/version/<namespaceId>/<key>
 ├── index.seq          Task 索引（indexTask）
 └── tasks/<taskId>/
@@ -655,6 +671,12 @@ packages/durable-kernel/src/
                        spawn/<parent>/<key>、workspace/snapshot/<id>、workspace/diff/<id>、
                        cache-operation/<operationId>
 ```
+
+**观察投影的取消三态**：`taskStat(task)` 的 `control.requested` 在取消请求被接受后即为 `'cancel'`，而 `control.acknowledged` 只有在**没有任何在途/待清理操作**（`activeOperations === 0`，含 `cleanupPending` 的 Effect）时才为 true——即“请求已接受/逻辑状态已变化”与“外部确已停止”可区分；`taskStat`/`taskStats`/`sessionStat` 现由包入口公开导出，`@itookit/app-core` 的 `taskSummary` 透传 `control`/`activeOperations` 供宿主渲染。回归 `packages/durable-kernel/src/kernel.test.ts`「distinguishes an accepted cancel request from a confirmed external stop」。
+
+**预算结算幂等**：`chargeBudget` 可选 `usageId`——扣费与 `usage/<usageId>` 回执在同一事务写入，同 id 重放返回记录的回执（不再扣费），同 id 不同金额/资源/维度抛冲突；Effect 路径由内核默认按逻辑 Effect 结算（`effect:<taskId>:<effectId>:<handleId>:<dimension>`），未提供 `usageId` 的宿主直调保持每次调用都扣。回归 `packages/durable-kernel/src/kernel.test.ts`。
+
+**authority 归属**：`managed/authority/<id>` 记录 `{authorityId, ownerEpoch, ownerId, binding, serviceEndpoint, status, updatedAt}`；首次 `claimAuthority` 写 epoch 1，接管必须提交 `expectedEpoch` 并 CAS 递增（失配报 `Authority epoch conflict: …`）；命令携带 `authority: {authorityId, epoch}` 时在同一权威事务内校验，过期 leader 的新写入被拒，已受理请求的重放仍返回原结果。回归见 `packages/durable-kernel/src/resources.test.ts`。
 
 **约定补充**：托管资源（`managed/*`）按作用域落在对应存储根的 `resources.seq`——kernel 作用域落在 `catalog` 根，`session:<id>` 作用域落在该 Session 根；Cache 的 operation 收据（`cache-operation/<operationId>`）落在发起 Task 的 `task.seq`，与 namespace/entry 分离。
 
@@ -713,8 +735,6 @@ Task 消息发送拒绝取消祖先下的新入队请求，原消息身份可重
 
 存储层 sweep/recover 在恢复后代 lease 前检查完整祖先链；已有祖先取消时，事务内将后代取消并登记 Effect 清理。该传播不依赖父任务先被扫描，重复恢复不追加取消事件；物理清理由后续清理流程执行。
 
-**预算结算幂等**：`chargeBudget` 可选 `usageId`——扣费与 `usage/<usageId>` 回执在同一事务写入，同 id 重放返回记录的回执（不再扣费），同 id 不同金额/资源/维度抛冲突；Effect 路径由内核默认按逻辑 Effect 结算（`effect:<taskId>:<effectId>:<handleId>:<dimension>`），未提供 `usageId` 的宿主直调保持每次调用都扣。回归 `packages/durable-kernel/src/kernel.test.ts`。
-
 Session 布局声明：新记录携带 `layout`（布局版本、各记录族 schema 版本、必需能力与迁移状态）。`openSession` 与 `requireSessionTx` 校验这些字段；不支持的版本/记录族、缺失 schema、未知必需能力及未完成或非法迁移均拒绝。仅完全缺少 `layout` 字段的旧记录保留兼容读取。低层存储方法并非全部经该入口；这不构成在线迁移或跨主机 fencing 协议。
 
 Task 历史裁剪：`Kernel.compactTaskHistory(sessionId, taskId, { keepVersions?, beforeVersion? })` 只删除 Task 文件中的旧 `snapshot/<version>`，与 `task.history.compacted` 事件同事务提交。`keepVersions` 默认为 20，须为正安全整数；`beforeVersion` 可选，须为非负安全整数。只裁剪同时早于两个保留边界的版本，版本 0 也参与计数；当前 Task、attempts、Effect/交互及回执保留。返回 `{ removed, keptFrom }`，其中 `keptFrom` 是本次计算的保留边界，不保证更早已裁剪的数据存在。已删除版本的分页读取返回空。此 API 不管理外部读者的历史固定版本租约，也不代替完整 retention/GC 故障验收。
@@ -734,6 +754,12 @@ Task 全量列表扫描复用目录扫描时已经读取的 `record`，每个有
 ### 关闭与取消观察
 
 `taskStat`、`taskStats`、`sessionStat` 是公开的只读状态投影，宿主用它们区分取消请求与清理确认。`closeSession` 对 closed/archived Session 的重复关闭在事务内保持终态，普通状态转换仍拒绝倒退。kernel-adapters 的六类 Effect 按 Session + Task + Effect 跟踪全部本地在途执行，取消确认等待它们结束；这不证明远程提供方停止计费或跨宿主 fencing 已完成。
+
+### 消息结算确认与清理（工作树审查）
+
+跨 Session 的消费与源端记录投递结果不是同一事务。消息 `settlementAcknowledgedAt` 在目标记录“源端已有终态结果”、随后在源端记录“目标已知”后写入；未确认的终态 outbox 仍列入待处理项，但恢复只补确认，不调用目标 deliver。确认缺失的跨 Session inbox/outbox 不因消费或年龄而清理；同 Session 保持本地事务语义。目标已清理回执时，终态源可完成确认而不重新投递。目标不存在且投递已过期的本地拒绝无需等待目标确认。
+
+retention 的 before 必须为非负有限数，limit 必须为非负安全整数（0 为不删除）。清理水位以最近一次投递/拒绝/消费/结算确认时间为准；宿主仍负责保持水位早于允许的重放窗口。该协议尚待完整隔离批次与进程故障验证；旧版本宿主及超过重放窗口仍在途的投递不得据此宣称受强 fencing 保护。
 
 ### 保留与清理 API 批次
 

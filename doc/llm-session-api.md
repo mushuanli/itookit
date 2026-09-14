@@ -192,6 +192,12 @@ class RoundLog implements ILog {
 
 **辅助**：`roundToProjection(round, roundId): RoundProjection`、`hasEffectiveAssistant(round): boolean`。
 
+**助手占位投影规则（2026-09-11 第六十一/六十二轮）**：chat round 若没有 assistant 输出，`roundToProjection` 仍会按以下规则投影助手占位，否则转写会以用户消息结尾，下一次发送被 `Cannot send consecutive user messages` 拒绝：
+1. 终态（`failed`/`cancelled`）且有用户输入 → 投影 `failed`/`aborted` 占位（含 `error`）；
+2. **已记录 execution 但仍为 `running`/`pending`**（拥有它的宿主已消失）→ 投影 `running` 占位，`SessionRegistry.getSnapshot().interruptedAssistantId` 据此提示「上次执行未完成」并可重新执行；
+3. `waiting`（等待人工输入）与从未启动过执行的 round 保持仅用户消息。
+回归：`packages/llm-session/__tests__/failed-round-projection.test.ts`（7 通过）与 `packages/app-shell/tests/host-restart-inflight.test.ts`（真实本地存储 + 永不回包模型，宿主在运行途中退出后重开：转写以助手占位结尾、`interruptedAssistantId` 存在、新消息不再被拒）。
+
 ### RoundGraphService
 
 Round DAG 图服务（加载/保存 manifest + 依赖图）：

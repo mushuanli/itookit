@@ -51,7 +51,7 @@
 - Web 当前支持应用内目录挂载；Tauri 另支持宿主目录。Web File System Access provider 和 CLI slash UI 不属于本次实现。
 - Session 挂载配置由单宿主协调；没有宣称多宿主同时修改 history 和挂载的完整 fencing 协议。
 - 工作区归档不是完整 Session/Kernel 系统快照，跨来源 restore 不具备全局事务原子性。
-- Session 原始目录删除只经业务生命周期：`SessionLifecycleService`（`packages/app-core/src/session/session-lifecycle.ts`）按 `closeSession(id, true)` → 等待 `sessionStat(id).phase === 'closed'` → `removeSession(id)` → `repository.deleteSession(id)` 执行，任一步失败都保留全部数据并报 `EBUSY`；`session-browser.ts` 对 Session 与文件夹递归复用该链路，不把文件树删除直接接到数据根。本轮仍不提供自动 Session 数据 GC；关闭编辑器、禁用文件视图都保留 Session 历史与后台任务。后续数据回收须由业务生命周期协调。
+- Session 原始目录删除只经业务生命周期：`SessionLifecycleService`（`packages/app-core/src/session/session-lifecycle.ts`）按 `closeSession(id, true)` → 等待 `sessionStat(id).phase === 'closed'` → `removeSession(id)` → `repository.deleteSession(id)` 执行，其中「等待」上界 `closeTimeoutMs`（默认 30s）也覆盖 `closeSession` 调用自身——在途 Effect 不确认停止时报 `EBUSY` 而不是无限等待，任一步失败都保留全部数据并报 `EBUSY`；`session-browser.ts` 对 Session 与文件夹递归复用该链路，不把文件树删除直接接到数据根。本轮仍不提供自动 Session 数据 GC；关闭编辑器、禁用文件视图都保留 Session 历史与后台任务。后续数据回收须由业务生命周期协调。
 
 上述边界没有通过保留旧接口来补偿。旧数据版本不兼容应报错，由用户重建数据，不能自动回到旧布局。
 

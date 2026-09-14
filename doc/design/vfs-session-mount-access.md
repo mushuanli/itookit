@@ -218,7 +218,23 @@ MindOS 的目标更明确：空 Session 不附加用户目录；每个挂载是�
 6. 卸载不删文件，旧句柄失效；重新连接不会扩大根目录或权限。
 7. 文件工具与受限进程执行分别验证访问边界；Bubblewrap runner 已覆盖只读/可写授权与保留路径拒绝，但未完成真实 GUI 与网络隔离验收，不能宣称完整隔离。
 
-本轮自动验证包含目录命令拦截、默认目录不授权、只读、撤销、失效来源恢复、实际 DOM 挂载与分支保留、原生路径边界，以及 Bubblewrap runner 的只读/可写授权与越界拒绝单元测试（`cargo test --lib`）。完整 Tauri cargo check 被环境缺少 glib-2.0 开发库阻塞；独立编译实际 Rust 路径与 IO 模块的测试已通过。尚无真实 GUI 人工验收。
+**逐项证据映射（2026-09-11 第四十三轮核对）**：
+1. `packages/app-core/tests/directory-mounts.test.ts`「only grants attachments until the default directory is explicitly mounted」、「keeps the same mount point name bound to each Session source independently」；`session-files.test.ts`「exposes only attachments without system directories, kernel records, or another Session」。
+2. 同上第一条（B 仅见 `attachments`；绝对兄弟路径 ENOENT）；第四十三轮在该文件的只读用例中补 `/demo/../notes/secret.md` 遍历拒绝与根视图只含 `attachments`+`demo`；链接逃逸由 Tauri 侧 `directory_boundary::tests::rejects_link_outside_selected_directory`（`pnpm --filter tauri-app test:rust`）覆盖。
+3. `directory-mounts.test.ts`「defaults to read-write, attenuates explicit read-only, and removes grants without deleting data」第四十三轮扩展为 `writeContent`/`rename`/`move`/`delete`/`updateMetadata`/`setTags`/`createDirectory` 全部 `EROFS`；shell 侧由 `session_bash::tests::confines_bash_to_readonly_and_writable_grants` 覆盖只读/可写绑定。
+4. 第四条「keeps the same mount point name bound to each Session source independently」：同一虚拟路径 `/demo` 绑定不同来源，互不可见。
+5. 第一条（`setHome` 不改变已有 Session 的挂载，新建 Session 不隐式挂载）。
+6. 第二条（`remove` 保留宿主文件、旧句柄 EACCES、重连不扩大根目录）。
+7. 部分：Bubblewrap runner 的只读/可写授权与越界拒绝已由 `cargo test`（`pnpm --filter tauri-app test:rust`，12 通过）覆盖；**仍缺真实 GUI 与网络隔离验收**。
+
+完整 Tauri cargo check 被环境缺少 glib-2.0 开发库阻塞；独立编译实际 Rust 路径与 IO 模块的测试已通过。尚无真实 GUI 人工验收。
+
+
+## 2026-09-14：只读挂载与源权限验收补充
+
+新增回归覆盖 appendContent、createFile、直接 SeqFile setEntry 均返回 EROFS，且源内容、源记录和目录保持不变。多挂载 Session 视图的 SeqFile transaction 因缺少该能力返回 ECAPABILITY，事务回调未执行；这是事务能力边界，不是已进入事务后的只读检查。
+
+来源本身只读时，申请 rw 挂载在配置阶段返回 EROFS，files 记录仍为空；随后申请 ro 能读取，不能写入。以上是既有实现的验收补充，最初测试对事务错误码与授权拒绝阶段的假设已按实际契约修正，未把测试假设错误记为生产缺陷。当前 app-core 全套 98 项与类型检查通过；将随挂载权限验收批次合入，P2-04 的真实窗口和平台故障矩阵保持开放。
 
 
 ## 2026-09-14：挂载权限与旧句柄撤销

@@ -123,9 +123,11 @@
 |---|---|
 | initApp 装配 | `app-shell/src/bootstrap.ts` |
 | App 类型（AppKernelRuntime 等） | `app-shell/src/types.ts` |
-| 特权命令服务（plan 等） | `app-core/src/kernel/privileged-command-service.ts` |
+| 特权命令服务（plan 等） | `packages/app-core/src/kernel/privileged-command-service.ts` |
 | web-app 入口 | `apps/web-app/src/` |
 | 工作区挂载配置（WS_*/createWsMount、文件注册表） | `app-shell/src/workspaces/`、`app-shell/src/config/` |
+| 全量测试矩阵（`pnpm test`，含 crash-matrix 隔离与 Rust 边界） | `scripts/test-all.mjs` |
+| 活文档 / 样式一致性检查 | `scripts/check-docs.mjs`、`scripts/check-styles.mjs` |
 
 ## 联网搜索（跨层）
 

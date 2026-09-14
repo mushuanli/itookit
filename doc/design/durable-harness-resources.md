@@ -71,7 +71,7 @@ Session 逻辑资源表由以下几组权威记录组成，统一放在 `resourc
 | `account/<accountId>` | 分配 authority | Session 根、Task/Effect 子账户；不以 Resource.parentResourceId 隐式替代账务父关系 |
 | `allocation-request/<requestId>` | 分配 authority | 指纹、排队次序、deadlineAt、granted/rejected/cancelled/timed-out 结果 |
 | `allocation/<allocationId>` | 分配 authority | 容量预留/持有、预算预留、归属、release/cleanup 状态 |
-| `usage/<usageId>` | 分配 authority | 幂等结算记录，和账户汇总在同一事务更新 |
+| `usage/<usageId>` | 分配 authority | 幂等结算记录，和账户汇总在同一事务更新。**内核侧已实现（2026-09-11 第五十二轮）**：`Kernel.chargeBudget`/`SessionBudgetApi.chargeBudget` 接受 `{ usageId }`，`chargeBudget` 在同一事务内写 `usage/<usageId>` 回执（`BudgetUsage { usageId, resourceId, dimension, amount, accounts, settledAt }`）；同 id 重放返回记录的回执不再扣费，金额/资源/维度不同即冲突。Effect 路径由内核默认按逻辑 Effect 结算（`effect:<effectId>:<handleId>:<dimension>`），Adapter 不必自己传 id；未提供 `usageId` 的宿主直调保持「每次调用都扣」的旧语义。回归 `packages/durable-kernel/src/kernel.test.ts`「settles a budget charge once per usage id and refuses a conflicting replay」「charges effect-driven usage once per logical Effect even when the attempt is retried」 |
 
 默认每个 Task 有独立 binding 表，不提供隐式 `CLONE_FILES`。spawn 可声明 bindings：派生降权 grant + 新 binding；有状态 use 默认新建，只有显式 `share-use` 才共享游标/交互实例。分配给父 Task 的独占 allocation 不因派生 grant 自动复制给子 Task。
 
@@ -163,6 +163,8 @@ lease 到期首先禁止旧持有者新操作。只有资源端能够 fence 旧�
 
 authority 是持久逻辑服务，不是创建资源的进程。首次创建固定 authorityId→storage binding；Catalog 仅保存发现投影。authority leader 的 ownerEpoch 在该权威存储中 CAS 递增，所有修改验证 epoch；缓存路由不能决定所有权。
 
+**内核侧骨架已实现（2026-09-11 第五十一轮）**：`resources.seq.managed/authority/<id>` 保存 `{authorityId, ownerEpoch, ownerId, binding, serviceEndpoint, status, updatedAt}`；`ResourceApi.claimAuthority(id, {ownerId, expectedEpoch, binding, serviceEndpoint, scope})` 首次声明写入 epoch 1，接管必须提交观察到的 `expectedEpoch` 并 CAS 递增，否则报 `Authority epoch conflict: <id> is owned by <owner> at epoch <n>`；`ResourceApi.authority(id, scope?)` 只读；声明了 `binding` 的接管必须与首次记录一致，否则拒绝（不同物理 store 的显式切换屏障仍未实现）。写命令可携带 `authority: {authorityId, epoch}`：命令在该权威事务内校验 epoch，过期 leader 的**新**写入被拒绝；已受理请求的重放仍返回原结果（幂等事实优先于 fence）。回归 `packages/durable-kernel/src/resources.test.ts`「fences a superseded authority leader by the ownerEpoch it presents」「keeps the authority binding fixed to the first claim and survives Kernel reconstruction」「rejects invalid authority claims and epoch presentations」「refuses a Decision resource write whose authority epoch was superseded」（Task Decision 内的资源命令同样被 fence，整笔 Decision 回滚）。
+
 服务 worker 更换在同一 authority store 完成 fencing；资源端 adapter 必须识别相应执行令牌。迁移到不同物理 store 不在基础热迁移承诺内：需要停止新申请、固定一致性快照、建立单一切换屏障并证明旧 authority 无法再写，否则禁止两个 store 同时受理。迁移请求/进度放 `session.seq.work/<id>`，不能仅改 Catalog URI。
 
 消费 Session close 拒绝新申请，继续接收已登记回复并发出释放/结算/退订命令；未收敛时 closing 显示 blockers。owner Session close 必须先迁移资源责任、冻结只读或完成撤销清理；消费方 suspended 不等于放弃 allocation，owner 暂不可用也不授权客户端自行接管。
@@ -182,7 +184,7 @@ authority 是持久逻辑服务，不是创建资源的进程。首次创建固�
 
 ## 9. 实施与迁移验收
 
-当前 `ResourceRecord/ResourceHandle/BudgetAccount` 仅提供本地定义、Task grant 链及祖先扣费；没有本文的完整 allocation、account、export/import 或 authority 服务。新增表必须由 versioned manifest 标记，不能按缺省值把旧 `used` 解释为 reserved/held。
+当前 `ResourceRecord/ResourceHandle/BudgetAccount` 仅提供本地定义、Task grant 链及祖先扣费。**authority 目前只有 ownerEpoch/绑定/读接口与写命令 fence（见 §7）**；本文的完整 allocation、account、export/import（跨 Session 授权、订阅、授权额度与预留账本）仍未实现。新增表必须由 versioned manifest 标记，不能按缺省值把旧 `used` 解释为 reserved/held。
 
 迁移保留原资源和 handle ID、grant 链、使用记录；旧 resource 的 owner 默认按原 Session 归属解释，创建 Task 只作为初始 handle holder。cache 单独按 scope 推导 owner，迁移前禁止清理其依赖的 creator 记录。旧 budget 的 dimension 经明确映射后才可转为累计 spent；并发/存量/含义不明的维度需核对，不能自动按累计消费迁移。账户父树与资源包含树分别验证。
 
@@ -196,7 +198,7 @@ authority 是持久逻辑服务，不是创建资源的进程。首次创建固�
 | 取消先于申请到达 owner | tombstone 阻止旧申请获得容量 |
 | worker 更换及旧释放请求到达 | 旧 fence 不能释放新 allocation |
 | permit 到期但外部操作仍运行 | 不重分配物理容量，blocked 可观察 |
-| 预算结算后回执丢失 | 同 usageId 重试不重复扣费，未知成本不退款 |
+| 预算结算后回执丢失 | 同 usageId 重试不重复扣费，未知成本不退款。内核侧已于 2026-09-11（第五十二轮）实现 `usage/<usageId>` 幂等结算回执与 Effect 默认结算 id，见 §6 表注；真实后端（供应商侧重复计费核对）仍未验收 |
 | Session cache 创建 Task 被归档 | Session owner 与合法使用者仍可访问，原 Task state 不需保留 |
 | 导出撤销、consumer 暂停后恢复 | 新操作拒绝；旧使用按既定策略收敛，不能凭缓存授权执行 |
 | owner leader 迁移后旧 leader 写入 | authority epoch 和资源端 fence 拒绝旧执行 |
@@ -207,6 +209,12 @@ authority 是持久逻辑服务，不是创建资源的进程。首次创建固�
 ### 能力资源创建回执
 
 低层 `ResourceSpec`/`TaskResourceSpec` 增加可选 requestId，按 owner Task 隔离。Kernel 以 kind/uri/rights/parentResourceId/parentHandleId/metadata 生成规格指纹，资源、句柄、resource.created 事件和创建回执在同一 resources.seq 事务写入。相同 Task/requestId 和规格重放读取当前资源/句柄，不再创建或追加事件；不同规格冲突。已有撤销状态保留，重放不重新授权。未提供 requestId 的调用沿用每次创建新资源的语义。此处是 LLM/tool 等能力资源入口，不替代 managed pool/shared API 的既有请求协议。
+
+### Authority 接管审查（2026-09-14 工作树）
+
+Session 调用方只能 claim 自己的 `session:<id>` 作用域，不能通过 scope 参数接管 kernel 或其他 Session 的 authority；Kernel 宿主调用方仍可管理显式作用域。接管参数在异步读取前复制，绑定标记须非空，epoch 达到 Number.MAX_SAFE_INTEGER 后拒绝递增且不改变持久记录。两项越权/溢出回归已复现并修复，内核 240 项与类型检查通过。
+
+资源与 authority 的持久绑定已补齐，见下方 2026-09-14 事务隔离记录；执行端 token 校验及跨 store 切换仍未完成。
 
 
 ## 2026-09-14：托管资源 authority 事务隔离

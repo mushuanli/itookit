@@ -130,13 +130,17 @@ scope、保留期、使用次数分别表达“谁可以用”“何时可以清
 
 根据 [IPC 完备性审查](../feat/durable-harness-ipc-completeness-review.md)，固定以下目标记录归属，并由 [资源协议](durable-harness-resources.md) 定义 Session 内/跨 Session 资源分配表。**本节是待实现的 1.1 契约，不能按这些 keys 读取当前旧布局。** 数据迁移通过 manifest 切换，禁止同时维护可独立写入的旧内嵌事实和新记录。
 
+**manifest 骨架已实现（2026-09-11）**：`createSession` 在 `session.seq` 的 `record` 中写入 `layout = { layoutVersion: 1, recordSchemas, requiredCapabilities, migration: { status: 'complete', to: 1 } }`；`openSession` 与所有经 `requireSessionTx` 的事务操作（含 `listShared`）在读取前用 `assertSessionLayout` 校验：更高 `layoutVersion`、`migration.status === 'pending'`、或要求本实现不具备的能力（如 `streams`）一律明确拒绝，早于该字段的旧记录按 legacy 兼容读取。回归：`protocol.test.ts`「declares a layout manifest and refuses Sessions it cannot interpret」。表中各记录族（`work/`、`group/`、`allocation/`、`authority/`、`stream/` 等）的拆分仍未落地。
+
+**`events.seq` 保留期（2026-09-11）**：`Kernel.pruneTaskEvents(sessionId, taskId, { keepEvents })` 按 Task 保留最新若干条索引事件，删除更早的 `event/<sequence>` 与 `task-event/<taskId>/<n>`，记录 `task-event-first/<taskId>` 水位；`taskEventPage` 从水位起读并把 `firstAvailableIndex` 返回给消费者（过期游标 clamp + resync），会话级未索引事件不受影响。
+
 | 逻辑归属 | 目标记录 | 权威事实 |
 |---|---|---|
 | `session.seq` | `manifest`、`group/<id>`、`work/<id>` | 布局/schema 能力；TaskGroup 成员策略与 join 结果；多阶段控制传播/cleanup/迁移/GC 的责任、游标、重试和完成 |
 | `messages.seq` | `endpoint/<id>`、`send-stream/<id>`、`consumer/<id>`；扩充 inbox/outbox | owner、generation、消费者、容量、关闭；发送次序和 ack；消费水位、持久拒绝与重试 |
 | `resources.seq` | `resource/<id>`、`handle/<id>`、`binding/<taskId>/<name>`、`use/<id>`（有状态使用时） | 本体与 owner、授权链、Task 私有引用表、显式共享或独立的使用实例 |
 | `resources.seq` | `account/<id>`、`allocation-request/<id>`、`allocation/<id>`、`usage/<id>` | 额度与祖先汇总、申请等待、预留/占用、幂等结算；permit 是 allocation 模式，不另设第二份占用账本 |
-| authority 的 `resources.seq` | `authority/<id>`、`export/<id>`、`subscription/<id>` | 服务 epoch、跨 Session 授权与配额关联、订阅及通知进度；实际 account/allocation 同样在此 authority |
+| authority 的 `resources.seq` | `authority/<id>`（已落地为 `managed/authority/<id>`；其余未实现）、`export/<id>`、`subscription/<id>` | 服务 epoch、跨 Session 授权与配额关联、订阅及通知进度；实际 account/allocation 同样在此 authority |
 | 消费 Session 的 `resources.seq` | `import/<id>`、`remote-request/<id>` | 外部授权引用、观测版本、持久申请/取消意图和 owner 回执；不包含独立全局余额 |
 | `resources.seq` | `artifact/<id>`、`pin/<id>`、`retention/<id>`；扩展 `cache/namespace`、`cache/entry` | 内容定位、引用保留、GC 水位；cache owner 与 creator 分离，entry 实例身份不复用 |
 | `task.seq` | `input/<id>`、`wait/<id>`、`effect/<id>`、`receipt/<id>` | 从大 record 拆分稳定输入、等待解析、Effect 历史和幂等结果；record 只引用当前所需对象 |

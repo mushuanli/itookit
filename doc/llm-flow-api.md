@@ -31,6 +31,8 @@ class DurableFlowExecutor {
 }
 ```
 
+> `submit` 在持久聚合根建立并取得调度租约后、派发任何节点之前就解析（fresh 与 restored 一致），返回的是 live 句柄：`nodes`/`iterations` 随调度填充，最终状态用 `root.wait()` 读取。派发前的确定性校验（图规模、边 schema 引用、`maxNodes`）仍以 rejection 报错；发布之后的调度期失败落在根任务上（`flow.schedule.failed`），宿主应监视 Run 而不是依赖 `submit` 的 rejection。
+
 **`DurableFlowExecutorOptions`**：
 
 ```ts
@@ -45,6 +47,8 @@ interface DurableFlowExecutorOptions {
         definitions: ToolDefinition[];
         externalIds: string[];
     }>;
+    /** 节点初始化选中 Skill 的激活快照；实现必须把工具限制在节点声明的能力内 */
+    resolveSkillContexts?(sessionId, skillIds, allowedToolIds): Promise<SkillContext[]>;
     hooks?: HarnessHookRunner;                   // 可信宿主钩子
     workspaceManager?: FlowWorkspaceManager;     // 宿主工作区管理器
 }
@@ -233,7 +237,7 @@ packages/llm-flow/src/
 
 `FlowCommand.RunTranscript`（`dag.run.transcript`）接受 `{ sessionId, taskId, targetTaskId }`，taskId 是 Run 根聚合任务 ID。返回 `FlowTaskTranscript`，包含任务 input/output、status/version、完整持久 Effect 交换与 interaction 记录；也可直接调用 `readFlowTaskTranscript(kernel, sessionId, runTaskId, taskId)`。以根任务 input.runTasks 验证归属，无需原 DagCommandService 句柄，拒绝其他 Run 的任务。runTasks 包含全部循环实例、未汇总及 detached 节点。支持可选 `query: { version?, offset?, limit?, maxBytes? }`：默认每页 100 条 Effect、最多 500 条，返回 totalEffects 与可选 nextOffset；`maxBytes`（≥64）限制本页 JSON 编码后的 UTF-8 字节数，超出时按固定顺序裁剪——先丢弃尾部 Effect 并前移 nextOffset，再缩短 input/output 与 Effect 负载，最后只保留首个 Effect 或退化为仅头部——结果带 `bytes` 与 `truncated: true`。后续页携带首屏 version 固定历史快照；未提供 version 的非零 offset 拒绝。这是结构化记录；DagWorkbench 的任务记录对话框按交换分段展示并支持 JSON 和 UTF-8 纯文本文件导出，加载更多会合并同一版本的交换，首屏加载后即可按固定版本独立读取全部分页导出。底层仍整任务读取，输入/输出/interaction 不分页，但整页受 `maxBytes` 字节预算约束。CLI 提供 `mindos export <run-id> [--out file.json] [--max-bytes N]`：以 control 模式读取 transcript（默认 256 KiB/节点）并连同 manifest 写入真实文件，已在 LocalFS 上通过集成测试。纯文本导出包含快照身份与 version，以及完整输入、交换、交互和输出。
 
-`dag.run.get({ taskId, sessionId? })` 支持从保存的 Run 根记录重新连接；没有内存句柄时必须提供 sessionId，返回 `attachedFromStorage: true`。依靠 input.run（v1 目标/用量）与 input.runTasks 恢复任务树、最新节点、实例计数及 detached 标记。目标更新使用 Session shared 状态持久保存，读取优先于初始目标。`DagWorkbench.openRun(taskId, sessionId?)` 可打开这类记录。若需要继续调度，用 `DurableFlowExecutor.resume(sessionId, rootTaskId)` 从 `flow.run.<rootTaskId>.scheduler` 检查点恢复（检查点缺失或版本不支持时抛错；隔离 workspace 的恢复需要租约重建，同样抛错），`waitForCheckpoint(sessionId, rootTaskId, taskIds, timeoutMs?)` 可等待检查点已包含指定任务。旧根记录缺少 v1 元数据时拒绝猜测重建。
+`dag.run.get({ taskId, sessionId? })` 支持从保存的 Run 根记录重新连接；没有内存句柄时必须提供 sessionId，返回 `attachedFromStorage: true`。依靠 input.run（v1 目标/用量）与 input.runTasks 恢复任务树、最新节点、实例计数及 detached 标记。目标更新使用 Session shared 状态持久保存，读取优先于初始目标。`DagWorkbench.openRun(taskId, sessionId?)` 可打开这类记录。若需要继续调度，用 `DurableFlowExecutor.resume(sessionId, rootTaskId)` 从 `flow.run.<rootTaskId>.scheduler` 检查点恢复（检查点缺失或版本不支持时抛错；隔离 workspace 的恢复需要租约重建，同样抛错），`waitForCheckpoint(sessionId, rootTaskId, taskIds, timeoutMs?)` 可等待检查点已包含指定任务。**运行定义在 submit 时冻结并随检查点持久化**：检查点保存 `spec`、`parameters`、`sessionContext`、live `nodes`/`edges`/`edgeState`（含动态 patch 结果）以及 `nodeDefaults`/`nodeConnections`；`resume` 不接受任何宿主定义参数，因此宿主之后改动的 Flow/定义不会改变已在进行的 Run。未被冻结的是宿主插件**实现代码**（同名 `plugin@version` 的新实现会在下一回合生效）。回归：`durable-flow-executor.test.ts`「resumes the Run definition frozen at submit instead of a later host definition」。旧根记录缺少 v1 元数据时拒绝猜测重建。
 
 `prepareFlowTaskRetry(session, rootTaskId, sourceTaskId, requestId)` 返回已登记 Run 成员的 deferred 新 Task，要求非空请求 ID 和当前 Run 的终态源任务。成员含 nodeId/iteration/retryOfTaskId/budget，保存在 `flow.run.<rootTaskId>.retries`；RunGet、重连及 transcript 合并读取。此 API 不授权或启动，不重写旧根输出，也不重算下游，`retryFlowTask` 与 `FlowCommand.RunTaskRetry`（`dag.run.task.retry`）则继续按原 input 白名单和成员预算授权/启动，命令接受 `{ sessionId, taskId, targetTaskId, requestId, downstream? }`，返回新的 targetTaskId 与 retryOfTaskId。旧根输出不改写，新的 Task 结果进入成员查询/transcript；UI 已提供终态任务重试入口与来源标记，进行中禁重，失败复用请求身份；根结束后仍刷新活动成员。RunCancel 包括所有持久成员。
 
@@ -252,19 +256,35 @@ packages/llm-flow/src/
 
 Run 控制会在信号注入和单任务取消前刷新持久成员清单，允许控制其他调用方刚登记的重试任务；按 nodeId 注入信号选择当前最大 iteration 对应的任务，按 targetTaskId 则校验 Run 成员身份。Goal 编辑窗口固定打开时的 Run，信号和取消回调也固定发起时的 Run，异步完成不会刷新切换后的其他 Run；失败通过错误提示呈现。Goal 状态对 Session suspend/resume 的影响及其与目标持久化非原子的边界保持不变。
 
-端口结构注册：`DagPluginRegistry.registerSchema(ref, schema)` / `getSchema(ref)`，或实现 `DagPluginCatalog.getSchema`。相同引用不得重复注册，返回值为副本。FlowSchemaRegistry / flowSchemaIssue / schemaCompatibilityIssue 从包出口导出。目标有 schema 的 data edge 必须解析到已注册定义；发布、直接执行和 patch 拒绝未知引用，下游创建前校验成功上游的实际消费值。id 不同一律拒绝；同一 id 版本不同时要求注册表能证明来源结构是目标结构的子类型（`llm-flow/src/flow/schema-compat.ts`：boolean schema、`integer ⊆ number`、enum 子集、object 的 required/properties/additionalProperties、array items 递归推导）。支持 boolean schema、type、properties、required、items、additionalProperties、enum 及 title/description 注释，未知关键字拒绝。无效数据使 submit 失败；不自动解析 JSON 字符串，不提供端口 repair 策略。
+端口结构注册：`DagPluginRegistry.registerSchema(ref, schema)` / `getSchema(ref)`，或实现 `DagPluginCatalog.getSchema`。相同引用不得重复注册，返回值为副本。FlowSchemaRegistry / flowSchemaIssue / schemaCompatibilityIssue 从包出口导出。目标有 schema 的 data edge 必须解析到已注册定义；发布、直接执行和 patch 拒绝未知引用，下游创建前校验成功上游的实际消费值。id 不同一律拒绝；同一 id 版本不同时要求注册表能证明来源结构是目标结构的子类型（`llm-flow/src/flow/schema-compat.ts`：boolean schema、`integer ⊆ number`、enum 子集、object 的 required/properties/additionalProperties、array items 递归推导）。支持 boolean schema、type、properties、required、items、additionalProperties、enum 及 title/description 注释，未知关键字拒绝。发布前的边引用与图校验使 `submit` 失败；运行期校验无效数据使 Run 失败（见 `submit` 发布时机的说明）。无 active data edge 消费的输出端口同样会在节点成功结算时用其**自身**声明的 schema 校验（`assertUnconsumedOutputs`），失败不派发下游；校验发生在聚合根发布之后，因此表现为失败的 Run。不自动解析 JSON 字符串，不提供端口 repair 策略。
 
-单次运行定义隔离：DurableFlowExecutor.submit 在首次异步操作前复制 DagRunSpec 和 parameters；初始节点的插件清单及其端口 schema 同时缓存，后续动态节点的定义在首次读取时缓存，包含未找到的引用。修改调用方原始对象或宿主之后返回的同名 schema 不影响已缓存定义。DagPluginRegistry 注册时复制清单并保留 runtime/UI 方法的调用接收者。此隔离不等于将定义持久化，也不冻结宿主 runtime 实现代码；跨进程恢复仍需额外持久定义机制。
+单次运行定义隔离：DurableFlowExecutor.submit 在首次异步操作前复制 DagRunSpec 和 parameters；初始节点的插件清单及其端口 schema 同时缓存，后续动态节点的定义在首次读取时缓存，包含未找到的引用。修改调用方原始对象或宿主之后返回的同名 schema 不影响已缓存定义。DagPluginRegistry 注册时复制清单并保留 runtime/UI 方法的调用接收者。定义持久冻结见上一条：调度检查点保存 `spec`/`parameters`/`sessionContext`/live 图与 `nodeDefaults`/`nodeConnections`，`resume` 只从检查点恢复，因此跨进程恢复不依赖宿主重新编译定义。仍未冻结的是宿主插件实现代码（同名 `plugin@version` 的新实现会在下一回合生效）。
 
 工作区收尾：DurableFlowSnapshot.workspaceFinalization 返回 pending/succeeded/failed 与可选 message，来源为执行句柄状态或 Session shared `flow.run.<rootTaskId>.workspace`。执行器在清理前保存 pending，成功/失败后保存结果，workspaceCompletion 继续可等待并在失败时拒绝。Run 面板显示收尾状态，pending 时继续轮询，失败不改写根 Task 的成功结果。DagCommandServiceOptions.workspaceManager 可注入宿主管理器；本机制不负责崩溃后的清理重启。
 
 工作区收尾的 status 表示清理本身的结果，和状态记录保存结果分开。清理成功但最终 shared 写入失败时，活动句柄保留 succeeded 并附加 persistenceError，workspaceCompletion 拒绝；UI 同时显示清理结果和保存错误。清理与保存同时失败以 AggregateError 保留两个原因，不重复调用 workspace.finish。此时重连只能读取最后成功写入的状态（可能仍为 pending），活动句柄的保存错误尚无可靠持久副本。
+
+### Task 所属 Run 与隔离工作区解析
+
+`resolveFlowRunForTask(session, taskId)` 返回持久 `TaskRecord` 或 `undefined`。它读取 Session Task 祖先链及各 Flow 的 members/retries 记录（兼容根 input 中旧成员记录），支持独立提交的节点、其后代和手动重试，并优先最近祖先对应的 Run。普通非 Flow Task 返回 `undefined`；Flow 成员缺失、归属歧义、损坏成员或无效祖先链均抛错。不能用节点 `rootTaskId` 替代成员查询。
+
+`resolveFlowTaskWorkspace(session, taskId)` 返回 `{ rootTaskId, policy, lease }`：策略来自持久 scheduler 检查点，租约来自 `flow.run.<rootTaskId>.workspace-lease`。普通 Task 或 shared 模式返回 `undefined`，隔离模式的检查点或租约缺失时拒绝。此 API 只解析持久身份，不授予宿主路径权限，也不创建/恢复工作区；宿主须验证租约内容并获取授权文件及进程上下文。当前实现读取 Session Task 列表和各 Run 成员，尚无反向索引优化。
+
+`FlowWorkspaceManager.restore(sessionId, policy, record, options?)` 的可选 `FlowWorkspaceRestoreOptions.forFinalization` 只用于终态 Run 的 pending 清理恢复。执行器普通调度恢复不设置此标记。Git manager 据此允许目录已被前宿主删除的清理继续完成分支收尾；不会新建目录，也不会恢复节点执行。工作区列表按完整行匹配。若 cleanup 策略要求保留目录（keep，或失败/取消时的 on-success），缺失目录仍明确报错，不能投影为成功保留。
+
+`FlowWorkspaceLease.releaseCapabilities?(rootTaskId)` 是宿主的文件/进程能力关闭屏障。正常收尾、pending finalization 恢复和调度失败清理均先等待它；失败时不调用 `finish`。`waitForFlowRunTasks(session, rootId)` 等待持久成员（包括 detached）和 Task 后代结束；每轮等待后重读后代，成员缺失则拒绝。不等待聚合根本身，以允许调度失败在清理后投影根终态。单独使用执行器的宿主按需提供屏障，app-core 会话装配自动包装宿主工作区 manager。
+
+节点记忆策略：builtin.agent 将配置 memoryPolicy 通过 buildLlmTaskInput 校验、深复制到持久 Task 输入。会话宿主的 bindFlowNode/bindStandaloneFlowNode 从节点引用的 Agent 解析策略，移除节点与 Flow 默认配置中的直接策略覆盖，不隐含继承父会话记忆权限；没有引用策略的兄弟节点不生成授权。该快照由共享 app-core 装配的 memory_list/write/remove 工具通过 Kernel tool.call 消费；TaskMemoryService 使用 Kernel 提供的 Session/Task 身份读取持久输入，校验工具白名单与策略。模型参数不能覆盖授权来源。
 
 无人消费的输出契约：节点成功返回后，执行器校验没有 active data edge 消费的输出端口自身声明的 schema。控制边不算数据消费；未知 schema 或非法输出使调度失败，不继续派发依赖节点。当前已提交接口在尚未发布句柄时会拒绝 `submit`；已经发布的运行通过根 Task 记录反映失败。此校验不实现输出 repair/continue 策略，也不把 Agent 的 responseFormat 自动编译成端口契约。
 
 ### 运行句柄与失败收尾
 
 `DurableFlowExecutor.submit` 在持久根任务建立并取得调度租约后返回，节点集合随调度更新；调用方通过根任务等待结果，关闭宿主存储前还应等待 `waitIdle()`。工作区清理结果通过 `workspaceCompletion` 和持久 finalization 状态单独观察。调度失败时先确认节点取消，再释放宿主能力及清理工作区；取消或释放失败会阻止后续清理，并与原始错误一起呈现在 Run 失败状态中。终态恢复传递 `forFinalization`，供宿主只恢复清理所需能力。
+
+### Run 删除与调度接管互斥
+
+`markSchedulerRunDeleted` 与 `acquireSchedulerLease` 对同一 scheduler-owner 记录使用版本 CAS。删除只有在租约释放或经过时钟误差余量后才写入永久 `deleted` 标记；随后物理删除失败也保留标记供重试。新调度者拒绝已删除 Run，终态恢复同样持有调度租约。CLI 仅移除 Run 投影目录，Kernel 中的删除标记保留。该协议要求参与宿主都识别标记，不等同于对旧版本宿主或在途外部操作的强 fencing。
 
 ### 工作区排空与删除互斥
 

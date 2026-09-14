@@ -33,5 +33,6 @@ src/
 
 ```bash
 pnpm --filter @itookit/llm-tasks typecheck
-pnpm --filter @itookit/llm-tasks test:run
+pnpm --filter @itookit/llm-tasks test        # vitest run（等价于 test:run）
+pnpm --filter @itookit/llm-tasks test:watch  # 监听模式
 ```

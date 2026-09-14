@@ -4,7 +4,7 @@
 
 ## 1. 结论和数据组织
 
-采用单用户 `admin`。`[mindos]` 表示应用打开的文件系统根，不是内层目录名。Session 是业务实体，history 和 attachments 都属于 Session；SessionFS 是运行时组合视图，不是第二份数据。通用映射器属于 `vfs-core`，Session 仓库属于 `llm-session`，持久挂载配置及来源组装属于 `app-core`（`packages/app-core/src/vfs/session-files.ts`、`packages/app-core/src/vfs/directory-mounts.ts`）；`app-shell` 只做 UI 与宿主装配。
+采用单用户 `admin`。`[mindos]` 表示应用打开的文件系统根，不是内层目录名。Session 是业务实体，history 和 attachments 都属于 Session；SessionFS 是运行时组合视图，不是第二份数据。通用映射器属于 `vfs-core`，Session 仓库属于 `llm-session`，持久挂载配置及来源组装属于 `app-core`（`packages/app-core/src/vfs/session-files.ts`、`packages/app-core/src/vfs/directory-mounts.ts`）；`app-shell` 只做装配与兼容 re-export。
 
 ```text
 [mindos]/
@@ -41,7 +41,7 @@ Session 用户文件视图默认只有：
 
 显式挂载默认目录后增加 `/workspace`，其他目录使用所选挂载名称；没有自动 `/home/admin` 授权，也没有系统或 history 文件投影。历史经 Repository/Kernel 业务接口访问。应用宿主可使用通用映射器组合其他来源，但 Session 的用户挂载限根下一层并禁止保留名称。其他 Session 的文件须先取得受限上下文再由宿主注册并授权；知道 sessionId 不构成授权。
 
-[挂载实现规范](vfs-session-mount-access.md) 声明 UI、slash、配置和平台接口。来源支持 IndexedDB、子目录、其他受限视图及 Tauri 授权宿主目录；通用能力属于 vfs-core，Session 策略由 `app-core/vfs` 管理（`app-shell` 仅做 UI 装配）。
+[挂载实现规范](vfs-session-mount-access.md) 声明 UI、slash、配置和平台接口。来源支持 IndexedDB、子目录、其他受限视图及 Tauri 授权宿主目录；通用能力属于 vfs-core，Session 策略由 `app-core/files` 管理（`app-shell` 仅装配与 re-export）。
 
 ## 2. C4：系统上下文
 
@@ -234,8 +234,8 @@ Session manifest 的现有业务类型名仍是 `ConversationManifest`，包含 
 | 包/调用链 | 当前入口及改动 |
 | --- | --- |
 | vfs-core | 删除 IModuleFS、ModuleFS、模块注册、getEngine、BaseModuleService 和 manager 便捷 IO；DirectoryFS 为内部来源适配；公共身份为 viewId；FileSystemStats 取代 FSModuleStats，删除模块生命周期事件及 ENOMODULE；文件句柄只保留 path |
-| app-core | `files/session-files.ts` 持有 SessionFilesService，将 files 配置存入该 Session 的 session.seq；`files/directory-mounts.ts` 持有 DirectoryMountService 与宿主来源登记；`files/session-browser.ts` 提供可写浏览投影与删除链路；`files/session-process-context.ts` 把显式挂载交给平台进程工厂 |
-| app-shell | SessionWorkbench 从 repository 列会话，按 sessionId 打开；文件 Workbench 注入 FileSystemContext，WorkspaceConfig.workspaceName 取代 moduleName；`files/*` 只保留挂载 UI 与错误本地化 |
+| app-core | `vfs/session-files.ts` 持有 SessionFilesService，将 files 配置存入该 Session 的 session.seq；`vfs/directory-mounts.ts` 持有 DirectoryMountService 与宿主来源登记；`session/session-browser.ts` 提供可写浏览投影与删除链路；`vfs/session-process-context.ts` 把显式挂载交给平台进程工厂 |
+| app-shell | SessionWorkbench 从 repository 列会话，按 sessionId 打开；文件 Workbench 注入 FileSystemContext，WorkspaceConfig.workspaceName 取代 moduleName；`files/*` 仅保留兼容 re-export |
 | ui-common | 删除 EditorOptions.nodeId/ownerNodeId；目标通过 EditorTarget 表达；saveContent 为可选宿主能力，Session 不走普通文件保存 |
 | llm-ui | 工厂只接受 Session target，未知 ID 报错；上传、历史渲染、资产管理和打印注入 Session 附件；搜索使用当前 Session 文件上下文 |
 | llm-session | SessionRepository 取代 ChatEngine；绑定、运行状态和 TaskInput 删除重复文件 nodeId；删除 chatFileParser 和隐式文件初始化；Round/Profile 写 history 记录 |

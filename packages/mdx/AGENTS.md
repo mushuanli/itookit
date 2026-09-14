@@ -37,4 +37,4 @@ if (fs) { const file = createMDXFile(fs, context.getCurrentNodeId()!); }
 - `AssetResolverPlugin` 用 `createMDXFile(fs, nodeId)` 创建文件句柄，资源文件系统取自 `getAssetFileSystem()`；路径生成统一走 `services/asset-helper.ts`
 - 暗色主题 CSS 同时使用 `[data-theme="dark"]` 和 `@media (prefers-color-scheme: dark)` 选择器，支持手动和系统主题切换
 
-运行: `pnpm --filter @itookit/mdxeditor type-check` / `build`
+运行: `pnpm --filter @itookit/mdxeditor typecheck` / `test` / `build`
