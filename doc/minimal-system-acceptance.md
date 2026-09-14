@@ -139,3 +139,22 @@ IPC 队列争用而非算法复杂度。修复方向（按收益排序）：① 
 证据定位：`/tmp/mindos-live-close-OJI72o/fonts.txt`、`fonts.png` 与 `nav-labels.txt`。复核命令：Tauri 前端构建、custom-protocol 原生构建、Tauri 类型检查、`node apps/tauri-app/scripts/verify-ipc-trace.mjs`（真实 Vite 配置的 trace 开关/内部调用回归）均通过。临时文件不是长期交付物，复测应从新 profile 重建窗口并重复上述 FontFace/AT-SPI 检查。
 
 边界：本轮文件列表仍观察到部分方框字符，其来源需继续核对；FontAwesome 成功加载不证明所有 emoji、系统字体回退或全部控件都正确渲染。该项保留在 P0-04，未关闭其他平台、GTK 目录选择器、Skill 复选框或完整无障碍验收。
+
+## 2026-09-14：Skill 复选框真实加载、卸载与重开
+
+验收版本 `0113f24b`，沿用该提交已构建的嵌入资源 Tauri 二进制。使用三个独立应用进程及 Xvfb/D-Bus 会话，同一全新 profile；进程间等待 SQLite 中旧拥有者的 leaseUntil 自然到期。没有修改租约、Skill 加载身份或 UI DOM 来模拟交互。
+
+准备：种子仅创建 p000 会话和 `/workspace` 项目目录授权；项目规则为 `Always cite the interface contract.`。`_agent/skills/review/SKILL.md` 定义 name=Review、description=Review changes interface、auto-load=false，正文为 `Check every changed interface.`。起始不预写 loaded 身份。模型使用记录请求体的本地 OpenAI-compatible mock，四次输入分别为 hello loaded、hello reopened-loaded、hello unloaded、hello reopened-unloaded，均不匹配 Skill 名称或描述。
+
+操作：打开 AI Sessions → p000 → Chat Settings，在设置面板内部向下滚动，将 Review 的开关滚入可见区后鼠标点击。验收关闭了开发者工具，使用 1280×800 视口；在此布局中开关从 y=930 滚到 y≈643。无需改变面板 CSS。此前条目在视口下方只证明旧驱动未完成滚动，不证明该控件不能操作。
+
+| 阶段 | 真实 UI / 进程 | 持久 loaded / version | 当次系统消息 |
+| --- | --- | --- | --- |
+| 加载 | 第一个进程点击 Enable skill，变为 Disable skill | `["review"]` / 1 | 有 Skill 正文、有项目规则 |
+| 加载后重开 | 第二个进程面板仍为 Disable skill | `["review"]` / 1 | 有 Skill 正文、有项目规则 |
+| 卸载 | 第二个进程点击可见开关，变为 Enable skill | `[]` / 2 | 无 Skill 正文、有项目规则 |
+| 卸载后重开 | 第三个进程面板仍为 Enable skill | `[]` / 2 | 无 Skill 正文、有项目规则 |
+
+身份由只读 SQLite 连接读取 kernel/shared.seq 的 kernel-adapters.skills.loaded 记录核对，模型侧只检查每次请求的 system 消息，避免把历史用户文本当作当前注入。四次请求的 UTC 时间为 01:40:07.843、01:44:42.642、01:45:16.069、01:47:03.232。临时证据根 `/tmp/mindos-skill-toggle-CGsFtZ` 包含四段 request/state JSON、截图、mock.log 与开关前后 AT-SPI 文本；这些临时产物不作为永久测试入口。
+
+本轮无需修改实现，补齐 P0-04 的真实 GUI 勾选/取消及持久恢复证据。多层级嵌套挂载的项目规则窗口验收、严格 Skill 版本冻结、跨进程通知及其他平台要求仍开放。复现时使用新的临时 profile，保持 auto-load=false，不直接改 loaded 记录，并等待旧实例租约到期后重开。

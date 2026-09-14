@@ -47,7 +47,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 已实现：app-core 共用装配、项目规则与 Skill 解析；CLI 模型请求、Tauri 宿主装配及真实窗口首次加载已有证据。
   - 已收口（2026-09-13）：`SKILL.md` 新增 `auto-load` 覆盖，使文件系统来源能表达「可加载但不自动注入」；项目规则锚定项目根，parent-fs/local-fs 的嵌套 `_agent/AGENT.md` 不合并/不替换，Skill 仍按层级级联。CLI 与真实 Tauri 入口均核对：命中加载并持久身份、重开后按身份恢复、卸载后不复活、再次命中可重新加载；包级（真实 runtime+Kernel+文件来源）、桌面宿主装配（`createApplicationRuntime`+`TauriSkillSource`）、CLI 真实请求与真实窗口四段闭环（Xvfb/dbus/AT-SPI）逐层取证。
   - 见[验收 §71](minimal-system-acceptance.md)、`session-file-source.test.ts`、`session-skill-restore.test.ts`、`tauri-host-skill-context.test.ts` 与 `run-skill-context.test.ts`。
-  - 边界：真实窗口的卸载是把持久身份记录置为 `[]`（与面板/skill.unload 写入同一记录），面板复选框的 GUI 勾选未驱动成功（条目渲染在可达视口之下）；该交互与多层级嵌套挂载的真实窗口场景归 P0-04。
+  - 2026-09-14 补齐真实面板操作：滚动设置面板后点击 Skill 复选框，完成加载 → 重开保持 → 卸载 → 重开不复活；四段分别核对模型 system 消息与持久身份，未直接修改加载记录。见[复选框验收](minimal-system-acceptance.md#2026-09-14skill-复选框真实加载卸载与重开)。多层级嵌套挂载的真实窗口场景仍归 P0-04。
 
 - [x] **P0-01 完整 Tauri 调用链**
   - 真实窗口 → 外层 harness → Bash/IPC/bwrap → CLI 子 DAG → 结果和退出码，重开 transcript 已通过。应用内挂载对话框建授权亦通过。
@@ -69,7 +69,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 - [ ] **P0-04 平台实机验证**
   - 已有 Linux bwrap/目录/符号链接边界、取消/超时、缺隔离器拒绝、Xvfb/AT-SPI 窗口与应用内目录授权证据。
-  - 剩余：其他目标平台的支持范围及真实行为、原生 GTK 目录选择器、P0-00/P0-02 等尚缺窗口场景、发布产物的支持边界；其中含 Skill 面板复选框的真实 GUI 勾选/取消（当前条目渲染在可达视口之下未驱动成功）与多层级嵌套挂载下的项目规则窗口场景。
+  - 剩余：其他目标平台的支持范围及真实行为、原生 GTK 目录选择器、P0-00/P0-02 等尚缺窗口场景、发布产物的支持边界；其中仍含多层级嵌套挂载下的项目规则窗口场景。Skill 面板真实勾选/取消及重开持久身份已于 2026-09-14 验收通过（见 P0-00）。
   - 2026-09-14 桌面字体/导航补验：10 个本地 FontAwesome 字体面在真实 WebView 加载成功，修复 Vite 内联小字体被 CSP 拦截；11 个静态导航控件具有稳定 AT-SPI 名称。文件列表仍有方框字符，需继续核对来源与系统字体回退，不能把字体加载通过等同于全部图标渲染通过。见[字体与导航验收](minimal-system-acceptance.md#2026-09-14桌面本地字体与导航可访问名称)。
   - Tauri Session Bash **共享宿主网络**；无出网或连接超时不能当作网络沙箱证据。见[验收 §29](minimal-system-acceptance.md)。
 
