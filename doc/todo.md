@@ -66,6 +66,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 2026-09-14 真实窗口补验：模型请求在途时，通过列表右键和原生确认删除 Session；修复旧聊天/重试/ENOENT 残留，删除后恢复选择界面，同数据根重启未复活。app-shell 196 项通过，30 项既有跳过；见[删除收尾验收](minimal-system-acceptance.md#2026-09-14运行中-session-删除后的界面收尾)。该场景不替代设备不确认停止或其他故障矩阵。
   - 2026-09-14 窗口复核：修复选中 Session 后“+ 会话”落入虚拟目录而 ENOENT，根级/分组及附件目录回归、真实窗口新建同级会话通过。切工作区或会话均不关闭 Kernel Session；独立关闭并保留记录的窗口入口仍缺。约 60 秒模型超时已观察到持久 failed 和重开保留，但 live 状态及明确超时原因仍待收口。见[新建与关闭语义复核](minimal-system-acceptance.md#2026-09-14session-新建目标与桌面关闭语义复核)。
   - 2026-09-14 超时原因修复：驱动区分 TIMEOUT/ABORTED，保留首个中止原因并清理监听器；254 项相关测试通过、30 项既有跳过。真实窗口约 60 秒断开 HTTP，Task/Effect 持久 failed 且明确写明 60000 ms 超时；第一张终态截图仍有 RUNNING 残留，后续收敛不替代有界验收。见[模型超时验收](minimal-system-acceptance.md#2026-09-14模型超时与用户取消的原因保留)。
+  - 2026-09-14 live 收敛上界：用约 0.5 秒分辨率采样（时间戳取每次无障碍遍历**返回之后**，修正上一轮先打时间戳再遍历把观测时刻标早的问题）测得——客户端在请求后 59994 ms 关闭连接，`effect.failed` 持久写明 60000 ms 原因于 **+96 ms**，live 界面在 **+0.75 秒与 +1.53 秒之间**收敛为终态（`Stop Generation` 消失、出现“重试”）。同数据根重启后转写正常渲染该 round，持久 round 文档为 `status:"failed"` + 同一原因。见[live 收敛验收](minimal-system-acceptance.md#2026-09-14模型超时的-live-收敛上界与重开原因)。边界：AT-SPI 文本节点名为空，未重新断言屏幕文本；pause 三态与未确认物理停止的真实窗口场景仍未完成。
   - 2026-09-14 取消提示收口：ABORTED 事件与失败区分，顶部/卡片显示“执行已取消”和“重新执行”，历史取消原因区使用中性色；真实停止按钮验证通过，320 项相关回归通过、30 项既有跳过。见[取消终态文案](minimal-system-acceptance.md#2026-09-14取消事件与界面终态文案)。不替代未确认停止、pause、独立关闭和状态收敛要求。
   - 补真实 GUI 的“请求已接受 / 状态已变化 / 外部已停止”区分，以及 pause 同类文案。活动 CLI Run 只能由拥有者取消；另一 CLI 进程拒绝越过 Session 租约。
   - 见[验收 §11–19、§23–27](minimal-system-acceptance.md)及 `run-control.test.ts`、`session-delete-lifecycle.test.ts`。
