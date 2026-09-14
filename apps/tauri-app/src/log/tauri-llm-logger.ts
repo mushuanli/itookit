@@ -22,6 +22,13 @@ interface LogRecord {
 export class TauriLLMLogger implements ILLMLogger {
     constructor(private rootDir: string) {}
 
+    /**
+     * Observer for the moment response headers arrive, i.e. the provider has
+     * received the request and started answering. Used by the acceptance trace to
+     * close its `send-to-provider` action; unset in normal builds.
+     */
+    onResponse?: (session: string, status: number) => void;
+
     private pending = new Map<string, LogRecord>();
 
     logMessage(session: string, role: 'user' | 'assistant' | 'system', content: string): void {
@@ -47,6 +54,7 @@ export class TauriLLMLogger implements ILLMLogger {
         let rec = this.pending.get(session);
         if (!rec) { rec = { ts: new Date().toISOString() }; this.pending.set(session, rec); }
         rec.response = response;
+        this.onResponse?.(session, response.status);
     }
 
     private flush(session: string, rec: LogRecord): void {

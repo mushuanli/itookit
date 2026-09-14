@@ -37,6 +37,7 @@ import { TauriSqlSidecarDb } from './db/tauri-sql-sidecar';
 import { TauriFsOps } from './fs/tauri-fs-ops';
 import { TauriLLMLogger } from './log/tauri-llm-logger';
 import { startVfsTrace } from './log/vfs-trace';
+import { createSendBoundary } from './log/send-boundary';
 import { TauriSkillSource } from './kernel/tauri-skill-source';
 
 // Bundled locally: the desktop app must render icons offline. The CDN <link> this
@@ -271,12 +272,13 @@ async function bootstrap(): Promise<void> {
         },
     };
     const flowWorkspaces = new TauriFlowWorkspaces(rootDir);
+    const llmLogger = new TauriLLMLogger(rootDir);
     const runtime = await createApplicationRuntime({
         backend: rootBackend,
         additionalMounts: [...workspaceMounts],
         ownerKind: 'tauri',
         onProgress: showLoading,
-        llmLogger: new TauriLLMLogger(rootDir),
+        llmLogger,
         directorySourceProvider: new TauriSessionDirectories(rootDir),
         kernelPlatform: {
             configure: (kernel, services) => flowWorkspaces.bind(kernel, services),
@@ -293,7 +295,18 @@ async function bootstrap(): Promise<void> {
     if (import.meta.env.VITE_MINDOS_TRACE === '1') {
         const stopTrace = startVfsTrace(rootDir, runtime.vfs, { sidecar: rootBackend });
         window.__MINDOS_TRACE__ = stopTrace;
+        // Bracket one send with an exact boundary so "≤2s / ≤100 calls" is measured on
+        // the action itself instead of inferred from a wider interval.
+        const boundary = createSendBoundary(stopTrace);
+        llmLogger.onResponse = () => boundary.responded();
+        const unsubscribeBoundary = runtime.sessionManager.onEvent(event => {
+            if (event.type === 'message:appended') {
+                if (event.payload.sessionGroup.role === 'user') boundary.accepted();
+            } else if (event.type === 'error') boundary.abandoned();
+            else if (event.type === 'message:status' && event.payload.status !== 'running') boundary.abandoned();
+        });
         startupCleanup.push(() => {
+            unsubscribeBoundary();
             stopTrace();
             if (window.__MINDOS_TRACE__ === stopTrace) delete window.__MINDOS_TRACE__;
         });
