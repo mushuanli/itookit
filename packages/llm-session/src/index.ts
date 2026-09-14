@@ -167,6 +167,8 @@ function createDagCommands(
     );
     const dag = new DagCommandService({
         flowStore,
+        canWriteSession: options.canWriteSession,
+        workspaceManager: options.workspaceManager,
         kernel: options.kernel,
         plugins: options.dagPlugins,
         bindNode: (sessionId, node, defaults) => bindStandaloneFlowNode(node, defaults, sessionId, new AgentResolver(options.agentService)),

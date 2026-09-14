@@ -96,6 +96,7 @@ describe('Kernel durable kernel', () => {
         await expect(original.start({ lease })).rejects.toMatchObject(rejection);
         await expect(original.createResource({ kind: 'test', uri: 'test://late' }, { lease })).rejects.toMatchObject(rejection);
         await expect(session.setBudget('missing', 'tokens', 3, undefined, { lease })).rejects.toMatchObject(rejection);
+        await expect(original.respond({ interactionId: 'late', value: true }, { lease })).rejects.toMatchObject(rejection);
         expect(await original.status()).toEqual(taskBeforeSignal);
         expect((await session.getShared('checkpoint'))?.value).toEqual({ task: original.id });
         expect((await session.listTasks()).map(task => task.id)).toEqual([original.id]);

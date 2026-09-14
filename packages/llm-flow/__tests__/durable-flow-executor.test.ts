@@ -1,3 +1,5 @@
+import { withFlowControl } from '../src/flow/control-session';
+import { acquireSchedulerLease, schedulerOwnerKey } from '../src/flow/scheduler-lease';
 import { resolveFlowRunForTask } from '../src/flow/task-run';
 import { prepareFlowTaskRetry, readFlowRunMembers } from '../src/flow/run-members';
 import { workspaceFinalizationKey } from '../src/flow/workspace-finalization';
@@ -98,6 +100,75 @@ describe('DurableFlowExecutor', () => {
         expect((await session.getShared(workspaceFinalizationKey(root.id)))?.value).toMatchObject({ status: 'succeeded' });
         await runner.resume('session-one', root.id);
         expect(finish).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects every DAG mutation on a read-only host while retaining inspection', async () => {
+        const flow = { nodes: [{ ...valueNode('gate', null), plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Wait' } }], edges: [] };
+        const run = await executor(kernel).submit('session-one', flow); await waitForNode(run, 'gate');
+        const handlers = new Map<string, (args: any) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never,
+            canWriteSession: async () => false }).register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        await handlers.get(FlowCommand.RunGet)!({ taskId: run.root.id, sessionId: 'session-one' });
+        const args = { taskId: run.root.id, sessionId: 'session-one', targetTaskId: run.nodes.get('gate')!.id,
+            requestId: 'answer', value: 'yes', signal: { type: 'hello' }, goal: { status: 'paused' }, flow: {} };
+        for (const name of [FlowCommand.RunStart, FlowCommand.RunCancel, FlowCommand.RunRespond, FlowCommand.RunSignal,
+            FlowCommand.RunTaskRetry, FlowCommand.RunTaskCancel, FlowCommand.RunGoalUpdate]) {
+            await expect(handlers.get(name)!(args)).rejects.toThrow('read-only');
+        }
+        expect((await run.root.status()).task.control).toBeUndefined();
+    });
+
+    it('rejects a delayed control callback after scheduler takeover', async () => {
+        const run = await executor(kernel).submit('session-one', { nodes: [{ ...valueNode('gate', null),
+            plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Wait' } }], edges: [] });
+        await waitForNode(run, 'gate');
+        let entered!: () => void, release!: () => void;
+        const started = new Promise<void>(resolve => { entered = resolve; });
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const delayed = withFlowControl(kernel, 'session-one', run.root.id, undefined, async session => {
+            const task = await session.attachTask(run.nodes.get('gate')!.id); entered(); await gate;
+            await task.cancel('late control');
+        });
+        const rejection = expect(delayed).rejects.toMatchObject({ code: 'STALE_SHARED_LEASE' });
+        await started;
+        const session = await kernel.openSession('session-one');
+        const owner = (await session.getShared(schedulerOwnerKey(run.root.id)))!.value as any;
+        const next = await acquireSchedulerLease(session, run.root.id, { ownerId: owner.ownerId });
+        release(); await rejection;
+        expect((await run.nodes.get('gate')!.status()).task.status).not.toBe('cancelled');
+        await next.release();
+    });
+
+    it('does not borrow a live scheduler lease from a different Kernel host', async () => {
+        const run = await executor(kernel).submit('session-one', { nodes: [{ ...valueNode('gate', null),
+            plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Wait' } }], edges: [] });
+        await waitForNode(run, 'gate');
+        const other = new Kernel({ catalog: { fs }, pollMs: 5 });
+        other.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        const operation = vi.fn();
+        try {
+            await expect(withFlowControl(other, 'session-one', run.root.id, async () => true, operation)).rejects.toThrow('Run is scheduled by');
+            expect(operation).not.toHaveBeenCalled();
+        } finally { other.dispose(); await other.waitIdle(); }
+    });
+
+    it('pauses one Run without suspending another Run in the same Session', async () => {
+        const flow = { nodes: [{ ...valueNode('gate', null), plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Wait' } },
+            valueNode('after', 'done')], edges: [{ id: 'next', from: 'gate', to: 'after', kind: 'control' as const }] };
+        const first = await executor(kernel).submit('session-one', flow), second = await executor(kernel).submit('session-one', flow);
+        await waitForNode(first, 'gate'); await waitForNode(second, 'gate');
+        const handlers = new Map<string, (args: any) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        await handlers.get(FlowCommand.RunGet)!({ taskId: first.root.id, sessionId: 'session-one' });
+        await handlers.get(FlowCommand.RunGoalUpdate)!({ taskId: first.root.id, goal: { status: 'paused' } });
+        expect((await first.root.status()).task.control?.mode).toBe('pause');
+        await second.nodes.get('gate')!.respond({ interactionId: 'answer', value: 'yes' });
+        expect((await runToEnd(second)).status).toBe('succeeded');
+        expect(first.nodes.has('after')).toBe(false);
+        await handlers.get(FlowCommand.RunGoalUpdate)!({ taskId: first.root.id, goal: { status: 'active' } });
+        await first.nodes.get('gate')!.respond({ interactionId: 'answer', value: 'yes' });
+        expect((await runToEnd(first)).status).toBe('succeeded');
     });
 
     it('resolves independent Run nodes, descendants and persisted retry membership', async () => {
@@ -1022,7 +1093,7 @@ describe('DurableFlowExecutor', () => {
         expect(first.targetTaskId).toBe(same.targetTaskId);
         const task = await (await kernel.openSession('session-one')).attachTask(first.targetTaskId);
         expect((await task.wait({ timeoutMs: 2000 })).status).toBe('succeeded');
-        expect(budget).toHaveBeenCalledWith('session-one', expect.any(String), 'tokens', 3, undefined, undefined);
+        expect(budget).toHaveBeenCalledWith('session-one', expect.any(String), 'tokens', 3, undefined, expect.objectContaining({ lease: expect.objectContaining({ key: schedulerOwnerKey(execution.root.id) }) }));
         const record = (await task.status()).task;
         expect(record).toMatchObject({ retryOfTaskId: source, input: { allowedToolIds: [] } });
         const events = (await kernel.taskEventPage('session-one', task.id)).items;

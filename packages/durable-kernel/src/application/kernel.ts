@@ -404,8 +404,9 @@ export class Kernel implements KernelRegistration {
         sessionId: string,
         taskId: string,
         response: InteractionResponse<T>,
+        options?: LeaseGuardOptions,
     ): Promise<void> {
-        await this.store.resolveInteraction(await this.binding(sessionId), taskId, response);
+        await this.store.resolveInteraction(await this.binding(sessionId), taskId, response, options);
         this.notify(sessionId, taskId);
         this.queueDrain(sessionId);
     }

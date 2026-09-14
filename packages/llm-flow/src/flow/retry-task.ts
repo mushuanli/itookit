@@ -1,3 +1,4 @@
+import { isSchedulerOwnershipLost } from './scheduler-lease';
 import type { SessionHandle, TaskHandle } from '@itookit/durable-kernel';
 import { prepareFlowTaskRetry, readFlowRunMembers } from './run-members';
 import { bindFlowTaskCapabilities } from './task-capabilities';
@@ -15,6 +16,7 @@ export async function retryFlowTask(session: SessionHandle, rootId: string, sour
         await bindFlowTaskCapabilities(session, retry, task.program.kind, allowed, member.budget);
         if (task.program.kind !== 'llm.agent' && task.program.kind !== 'llm.chat') await retry.start();
     } catch (error) {
+        if (isSchedulerOwnershipLost(error)) throw error;
         if ((await retry.status()).task.status === 'created') throw error;
     }
     return retry;

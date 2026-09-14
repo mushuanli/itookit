@@ -1100,8 +1100,10 @@ export class SeqFileKernelStore {
         binding: ResolvedStorageBinding,
         taskId: TaskId,
         response: InteractionResponse<import('../../domain/types').JsonValue>,
+        options?: LeaseGuardOptions,
     ): Promise<TaskRecord> {
         return transaction(binding.fs, async tx => {
+            await assertSharedLeaseTx(tx, binding.rootPath, options?.lease);
             const task = await requireTaskTx(tx, binding.rootPath, taskId);
             assertDurableValue(response.value, 'Interaction response');
             const interaction = task.interactions?.[response.interactionId];

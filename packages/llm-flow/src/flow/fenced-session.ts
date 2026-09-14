@@ -7,6 +7,7 @@ export function fenceSchedulerSession(session: SessionHandle, condition: SharedL
     fenced.submit = async (spec, options) => fenceTask(await session.submit(spec, { ...options, lease }), lease);
     fenced.attachTask = async taskId => fenceTask(await session.attachTask(taskId), lease);
     fenced.setBudget = (id, dimension, limit, version, options) => session.setBudget(id, dimension, limit, version, { ...options, lease });
+    fenced.respond = (taskId, response, options) => session.respond(taskId, response, { ...options, lease });
     fenced.signal = (taskId, signal, options) => session.signal(taskId, signal, { ...options, lease });
     fenced.setShared = (key, value, options) => session.setShared(key, value, { ...options, lease });
     fenced.deleteShared = (key, options) => session.deleteShared(key, { ...options, lease });
@@ -16,6 +17,7 @@ export function fenceSchedulerSession(session: SessionHandle, condition: SharedL
 
 function fenceTask<O>(task: TaskHandle<O>, lease: SharedLeaseCondition): TaskHandle<O> {
     const fenced = Object.create(task) as TaskHandle<O>;
+    fenced.respond = (response, options) => task.respond(response, { ...options, lease });
     fenced.cancel = (reason, options) => task.cancel(reason, { ...options, lease });
     fenced.pause = options => task.pause({ ...options, lease });
     fenced.interrupt = options => task.interrupt({ ...options, lease });

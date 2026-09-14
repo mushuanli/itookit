@@ -1,6 +1,7 @@
 import type { Kernel } from '../application/kernel';
 import type {
     BudgetAccount,
+    LeaseGuardOptions,
     ContextBranch,
     ContextCommit,
     ContextCommitOptions,
@@ -52,8 +53,8 @@ export class DefaultSessionHandle implements SessionHandle {
         return this.kernel.signal(this.id, taskId, signal, options);
     }
 
-    respond<T extends JsonValue>(taskId: string, response: InteractionResponse<T>): Promise<void> {
-        return this.kernel.respondInteraction(this.id, taskId, response);
+    respond<T extends JsonValue>(taskId: string, response: InteractionResponse<T>, options?: LeaseGuardOptions): Promise<void> {
+        return this.kernel.respondInteraction(this.id, taskId, response, options);
     }
 
     events(options?: { after?: number }): AsyncIterable<EventEnvelope> {

@@ -103,7 +103,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 - [ ] **P1-02 同机所有权与全部本地控制入口**
   - 已实现：Session/Run 租约、epoch、CLI 本机锁；Run 到期即失效、迟到心跳不续活；节点提交、共享状态和根信号在事务内检查所有权；失权不触发失败清理。
-  - 待实现/核对：取消、pause/resume、图重试、委派兄弟取消、资源授权及工作区清理的旧句柄/迟到回调路径。已补 TaskHandle cancel/pause/interrupt/resume/start/signal/retry、资源创建和预算事务 guard；后台委派在截止前保留所有权，终态恢复也收敛后台任务。控制命令宿主隔离仍需独立核对。
+  - 待实现/核对：取消、pause/resume、图重试、委派兄弟取消、资源授权及工作区清理的旧句柄/迟到回调路径。已补 TaskHandle cancel/pause/interrupt/resume/start/signal/retry、资源创建和预算事务 guard；后台委派在截止前保留所有权，终态恢复也收敛后台任务。独立 DAG 命令已接上 Session 写权限门、工作区管理器以及本 Kernel 的 Run 租约；失权/异宿主控制被拒，HITL 响应同样事务校验。同机并发控制串行化，重复 retry 复用回执；暂停/恢复仅作用于当前 Run，不再暂停整个 Session。
   - 待验收：同机两个进程争用、旧宿主暂停后恢复、租约失效后迟到请求；清理不确认时有界报告并保留 pending/数据。保留本机时钟变化的安全失败边界，不实现跨主机时钟协议。
 
 - [ ] **P1-03 本地工作区与委派可用性**

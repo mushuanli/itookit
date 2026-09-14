@@ -549,7 +549,7 @@ export interface SessionTaskApi {
     /** Inspect the complete session task tree, including terminal tasks. */
     listTasks(): Promise<TaskRecord[]>;
     signal(taskId: TaskId, signal: TaskSignal, options?: LeaseGuardOptions): Promise<void>;
-    respond<T extends JsonValue>(taskId: TaskId, response: InteractionResponse<T>): Promise<void>;
+    respond<T extends JsonValue>(taskId: TaskId, response: InteractionResponse<T>, options?: LeaseGuardOptions): Promise<void>;
     events(options?: { after?: number }): AsyncIterable<EventEnvelope>;
 }
 
@@ -673,7 +673,7 @@ export interface TaskHandle<O = unknown> {
     pause(options: TaskControlOptions): Promise<TaskControl>;
     interrupt(options: TaskControlOptions): Promise<TaskControl>;
     resume(options: TaskControlOptions & { signal?: TaskSignal }): Promise<TaskControl>;
-    respond<T extends JsonValue>(response: InteractionResponse<T>): Promise<void>;
+    respond<T extends JsonValue>(response: InteractionResponse<T>, options?: LeaseGuardOptions): Promise<void>;
     createResource(spec: TaskResourceSpec, options?: LeaseGuardOptions): Promise<ResourceGrant>;
     cancel(reason?: string, options?: LeaseGuardOptions): Promise<void>;
     events(options?: { after?: number }): AsyncIterable<EventEnvelope>;

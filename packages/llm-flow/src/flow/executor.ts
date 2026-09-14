@@ -1,3 +1,4 @@
+import { rememberSchedulerLease } from './control-session';
 import { fenceSchedulerSession } from './fenced-session';
 import type { SchedulerCheckpoint } from './scheduler-checkpoint';
 import { restoreFlowHandle } from './restore-handle';
@@ -785,8 +786,11 @@ export class DurableFlowExecutor {
                     return published;
                 }
                 if (published && this.options.kernel.isDisposed) return published;
-                if (published && (await published.root.status()).task.status === 'cancelled') {
-                    throw new Error('Flow run cancelled');
+                const rootState = published ? (await published.root.status()).task : undefined;
+                if (rootState?.status === 'cancelled') throw new Error('Flow run cancelled');
+                if (rootState?.control && rootState.control.mode !== 'run') {
+                    await new Promise(resolve => setTimeout(resolve, 25));
+                    continue;
                 }
                 await enforceDeadlines();
                 const activeCount = [...instances.entries()].reduce((count, [nodeId, handles]) =>
@@ -926,12 +930,13 @@ export class DurableFlowExecutor {
         }
     }
 
-    private acquireLease(session: SessionHandle, rootTaskId: string): Promise<SchedulerLease> {
-        return acquireSchedulerLease(session, rootTaskId, {
+    private async acquireLease(session: SessionHandle, rootTaskId: string): Promise<SchedulerLease> {
+        const lease = await acquireSchedulerLease(session, rootTaskId, {
             ...(this.options.schedulerLeaseTtlMs ? { ttlMs: this.options.schedulerLeaseTtlMs } : {}),
             ...(this.options.schedulerLeaseSkewMs !== undefined ? { skewMs: this.options.schedulerLeaseSkewMs } : {}),
             ...(this.options.schedulerOwnerId ? { ownerId: this.options.schedulerOwnerId } : {}),
         });
+        return rememberSchedulerLease(this.options.kernel, rootTaskId, lease);
     }
 
     private async finish(

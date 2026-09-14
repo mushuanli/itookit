@@ -311,3 +311,5 @@ DagWorkbench 在 Run 未终态时为终态成员提供「重试并重算下游�
 节点可用 `portSchemas.inputs/outputs` 声明 `{ id, version?, definition? }`。内联 schema 存入 Run catalog，消费者可仅引用同身份；节点不得削弱插件端口契约。`builtin.agent` 的 `responseFormat.json_schema` 自动绑定解析后的 `result`，默认身份为 `agent.response.<nodeId>.<name>@1`，可由显式 result 引用命名。原始 `message.content` 保留；`outputValidation.onInvalid=continue` 不绕过 Flow 严格校验。发布、直接执行、动态图和恢复均使用同一目录，同身份不同定义拒绝；动态委派子节点的契约也写入快照。
 
 根任务 input 与 `initialScheduler`（冻结的初始检查点）及可选 `initialWorkspace` 一起提交，覆盖根创建至首个 shared 检查点/工作区租约之间的崩溃。恢复优先读最新 shared 检查点，缺失时才使用初始记录；桌面意图清理识别根中的工作区认领。终态恢复会补做尚未写入 pending 的工作区收尾，已成功收尾不会重复执行。
+
+`DagCommandService` 接受 `canWriteSession` 与 `workspaceManager` 宿主端口，独立 DAG 与会话运行共用授权及工作区实现。Run 控制在 `withFlowControl` 内执行：本 Kernel 活跃调度器的租约可复用，其他 Kernel 的活跃所有权不可借用；无调度器时短暂取得租约。Task 响应与所有控制写入携带固定 epoch。每个 Run 的本地控制请求串行执行；暂停先停根调度再停成员，恢复顺序相反，同 Session 其他 Run 不受影响。

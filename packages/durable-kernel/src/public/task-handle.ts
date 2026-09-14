@@ -76,8 +76,8 @@ export class DefaultTaskHandle<O> implements TaskHandle<O> {
         return this.kernel.startTask(this.sessionId, this.id, options);
     }
 
-    respond<T extends JsonValue>(response: InteractionResponse<T>): Promise<void> {
-        return this.kernel.respondInteraction(this.sessionId, this.id, response);
+    respond<T extends JsonValue>(response: InteractionResponse<T>, options?: LeaseGuardOptions): Promise<void> {
+        return this.kernel.respondInteraction(this.sessionId, this.id, response, options);
     }
 
     createResource(spec: TaskResourceSpec, options?: LeaseGuardOptions): Promise<ResourceGrant> {

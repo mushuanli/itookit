@@ -1,3 +1,4 @@
+import { withFlowControl } from './control-session';
 import { workspaceFinalizationKey, type WorkspaceFinalization } from './workspace-finalization';
 import type {
     DagPluginCatalog,
@@ -10,7 +11,7 @@ import type {
     FlowRunGoal,
     ToolDefinition,
 } from '@itookit/common';
-import type { Kernel, TaskRecord, TaskSnapshot } from '@itookit/durable-kernel';
+import type { Kernel, SessionHandle, TaskRecord, TaskSnapshot } from '@itookit/durable-kernel';
 import type { FlowDefinitionStore } from '../flow-definition-store';
 import { flowToDag, type FlowNodeBinder } from './to-dag';
 import { hasValidationErrors, validateFlowRevision } from './validation';
@@ -24,6 +25,7 @@ import { readFlowTaskTranscript, type FlowTranscriptQuery } from './transcript';
 import { DurableFlowExecutor, type FlowExecutionHandle } from './executor';
 
 export interface DagCommandServiceOptions {
+    canWriteSession?(sessionId: string): Promise<boolean>;
     workspaceManager?: import('./executor').FlowWorkspaceManager;
     flowStore: FlowDefinitionStore;
     bindNode?: (sessionId: string, ...args: Parameters<FlowNodeBinder>) => ReturnType<FlowNodeBinder>;
@@ -82,40 +84,44 @@ export class DagCommandService {
         bus.register(FlowCommand.RunTaskRetry, async args => {
             const input = args as { sessionId: string; taskId: string; targetTaskId: string; requestId: string;
                 downstream?: boolean };
-            const session = await this.options.kernel.openSession(input.sessionId);
-            if (input.downstream) {
-                // Graph retry: the retry plus a durable intent to recompute its downstream
-                // closure, applied by the next scheduling turn.
-                const request = await requestFlowGraphRetry(session, input.taskId, input.targetTaskId, input.requestId);
+            return withFlowControl(this.options.kernel, input.sessionId, input.taskId, this.options.canWriteSession, async session => {
+                if (input.downstream) {
+                    // Graph retry: the retry plus a durable intent to recompute its downstream
+                    // closure, applied by the next scheduling turn.
+                    const request = await requestFlowGraphRetry(session, input.taskId, input.targetTaskId, input.requestId);
+                    await this.snapshot(input.taskId, input.sessionId);
+                    return { taskId: input.taskId, targetTaskId: request.retryTaskId, retryOfTaskId: input.targetTaskId,
+                        downstream: request.downstream };
+                }
+                const task = await retryFlowTask(session, input.taskId, input.targetTaskId, input.requestId);
                 await this.snapshot(input.taskId, input.sessionId);
-                return { taskId: input.taskId, targetTaskId: request.retryTaskId, retryOfTaskId: input.targetTaskId,
-                    downstream: request.downstream };
-            }
-            const task = await retryFlowTask(session, input.taskId, input.targetTaskId, input.requestId);
-            await this.snapshot(input.taskId, input.sessionId);
-            return { taskId: input.taskId, targetTaskId: task.id, retryOfTaskId: input.targetTaskId };
+                return { taskId: input.taskId, targetTaskId: task.id, retryOfTaskId: input.targetTaskId };
+            });
         });
         bus.register(FlowCommand.RunTaskCancel, async args => {
             const input = args as { taskId: string; targetTaskId: string; reason?: string };
             await this.snapshot(String(input.taskId));
             const handle = this.requireHandle(String(input.taskId));
             if (!handle.taskIds.has(input.targetTaskId)) throw new Error(`Task is outside this run: ${input.targetTaskId}`);
-            const session = await this.options.kernel.openSession(handle.sessionId);
-            await (await session.attachTask(input.targetTaskId)).cancel(input.reason ?? 'Cancelled from DAG run console');
-            return { taskId: input.taskId, targetTaskId: input.targetTaskId, cancelled: true };
+            return withFlowControl(this.options.kernel, handle.sessionId, input.taskId, this.options.canWriteSession, async session => {
+                await (await session.attachTask(input.targetTaskId)).cancel(input.reason ?? 'Cancelled from DAG run console');
+                return { taskId: input.taskId, targetTaskId: input.targetTaskId, cancelled: true };
+            });
         });
         bus.register(FlowCommand.RunGoalUpdate, async args => {
             const input = args as { taskId: string; goal: Partial<FlowRunGoal> };
             const handle = this.requireHandle(String(input.taskId));
-            const session = await this.options.kernel.openSession(handle.sessionId);
-            const key = `flow.run.${input.taskId}.goal`;
-            const saved = await session.getShared(key);
-            const goal = { ...((saved?.value as unknown as FlowRunGoal) ?? handle.goal ?? { objective: '' }), ...input.goal };
-            await session.setShared(key, jsonValue(goal), { expectedVersion: saved?.version ?? null });
-            handle.goal = goal;
-            if (handle.goal.status === 'paused') await session.suspend();
-            if (handle.goal.status === 'active') await session.resume();
-            return { taskId: input.taskId, goal: handle.goal };
+            return withFlowControl(this.options.kernel, handle.sessionId, input.taskId, this.options.canWriteSession, async session => {
+                const key = `flow.run.${input.taskId}.goal`;
+                const saved = await session.getShared(key);
+                const goal = { ...((saved?.value as unknown as FlowRunGoal) ?? handle.goal ?? { objective: '' }), ...input.goal };
+                await session.setShared(key, jsonValue(goal), { expectedVersion: saved?.version ?? null });
+                handle.goal = goal;
+                if (handle.goal.status === 'paused' || handle.goal.status === 'active') {
+                    await controlRunTasks(session, handle, handle.goal.status, `goal:${input.taskId}:${(saved?.version ?? 0) + 1}`);
+                }
+                return { taskId: input.taskId, goal: handle.goal };
+            });
         });
     }
 
@@ -126,6 +132,7 @@ export class DagCommandService {
         goal?: FlowRunGoal,
     ) {
         if (!sessionId) throw new Error('DAG run requires sessionId');
+        if (this.options.canWriteSession && !await this.options.canWriteSession(sessionId)) throw new Error('Session is read-only on this host');
         const issues = [
             ...validateFlowRevision(flow, this.options.plugins),
             ...validateFlowParameters(flow.parameters, parameters),
@@ -134,6 +141,7 @@ export class DagCommandService {
         const compiled = await flowToDag(flow, this.options.bindNode ? (node, defaults) => this.options.bindNode!(sessionId, node, defaults) : undefined, undefined, (id, revision) =>
             this.options.flowStore.loadRevision(id, revision));
         const sessionContext = await this.options.resolveSessionContext?.(sessionId, '');
+        if (this.options.canWriteSession && !await this.options.canWriteSession(sessionId)) throw new Error('Session is read-only on this host');
         const handle = await new DurableFlowExecutor({ ...this.options, sessionContext,
             bindPatchNode: this.options.bindNode ? async (id, node, defaults) =>
                 this.options.bindNode!(id, node as FlowNodeDefinition, defaults as FlowNodeDefinition['config']) : undefined,
@@ -184,39 +192,42 @@ export class DagCommandService {
         await this.snapshot(String(input.taskId));
         const handle = this.requireHandle(String(input.taskId));
         if (input.targetTaskId && !handle.taskIds.has(input.targetTaskId)) throw new Error(`Task is outside this run: ${input.targetTaskId}`);
-        const target = input.targetTaskId
-            ? await (await this.options.kernel.openSession(handle.sessionId)).attachTask(input.targetTaskId)
-            : input.nodeId ? handle.nodes.get(input.nodeId) : undefined;
-        if (!target) throw new Error('A valid nodeId or targetTaskId is required');
-        await target.signal(input.signal);
-        return { taskId: input.taskId, targetTaskId: target.id, signalled: true };
+        return withFlowControl(this.options.kernel, handle.sessionId, input.taskId, this.options.canWriteSession, async session => {
+            const id = input.targetTaskId ?? (input.nodeId ? handle.nodes.get(input.nodeId)?.id : undefined);
+            const target = id ? await session.attachTask(id) : undefined;
+            if (!target) throw new Error('A valid nodeId or targetTaskId is required');
+            await target.signal(input.signal);
+            return { taskId: input.taskId, targetTaskId: target.id, signalled: true };
+        });
     }
 
     private async respond(taskId: string, requestId: string, value: unknown, targetTaskId?: string) {
         await this.snapshot(taskId);
         const handle = this.requireHandle(taskId);
         if (targetTaskId && !handle.taskIds.has(targetTaskId)) throw new Error(`Task is outside this run: ${targetTaskId}`);
-        const session = await this.options.kernel.openSession(handle.sessionId);
-        const matches = [];
-        for (const id of targetTaskId ? [targetTaskId] : handle.taskIds) {
-            const task = await session.attachTask(id);
-            const interaction = (await task.status()).task.interactions?.[requestId];
-            if (interaction?.status === 'pending' || (targetTaskId && interaction?.status === 'resolved')) matches.push(task);
-        }
-        if (matches.length > 1) throw new Error(`Ambiguous interaction ${requestId}; targetTaskId is required`);
-        if (!matches.length) throw new Error(`No pending interaction ${requestId} for DAG task ${taskId}`);
-        await matches[0].respond({ interactionId: requestId, value: jsonValue(value) });
-        return { taskId, targetTaskId: matches[0].id, responded: true };
+        return withFlowControl(this.options.kernel, handle.sessionId, taskId, this.options.canWriteSession, async session => {
+            const matches = [];
+            for (const id of targetTaskId ? [targetTaskId] : handle.taskIds) {
+                const task = await session.attachTask(id);
+                const interaction = (await task.status()).task.interactions?.[requestId];
+                if (interaction?.status === 'pending' || (targetTaskId && interaction?.status === 'resolved')) matches.push(task);
+            }
+            if (matches.length > 1) throw new Error(`Ambiguous interaction ${requestId}; targetTaskId is required`);
+            if (!matches.length) throw new Error(`No pending interaction ${requestId} for DAG task ${taskId}`);
+            await matches[0].respond({ interactionId: requestId, value: jsonValue(value) });
+            return { taskId, targetTaskId: matches[0].id, responded: true };
+        });
     }
 
     private async cancel(taskId: string) {
         await this.snapshot(taskId);
         const handle = this.requireHandle(taskId);
-        const session = await this.options.kernel.openSession(handle.sessionId);
-        const results = await Promise.allSettled([...handle.taskIds].map(async id => (await session.attachTask(id)).cancel()));
-        const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-        if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Run cancellation failed');
-        return { taskId, cancelled: true };
+        return withFlowControl(this.options.kernel, handle.sessionId, taskId, this.options.canWriteSession, async session => {
+            const results = await Promise.allSettled([...handle.taskIds].map(async id => (await session.attachTask(id)).cancel()));
+            const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+            if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Run cancellation failed');
+            return { taskId, cancelled: true };
+        });
     }
 
     private requireHandle(taskId: string): FlowExecutionHandle {
@@ -317,4 +328,15 @@ async function createRevision(
 
 function jsonValue(value: unknown): import('@itookit/durable-kernel').JsonValue {
     return JSON.parse(JSON.stringify(value ?? null));
+}
+
+/** Pause the root first to stop dispatch; resume it only after its members are ready. */
+async function controlRunTasks(session: SessionHandle, handle: FlowExecutionHandle, status: 'paused' | 'active', requestId: string): Promise<void> {
+    const ids = [handle.root.id, ...[...handle.taskIds].filter(id => id !== handle.root.id)];
+    for (const id of status === 'paused' ? ids : ids.reverse()) {
+        const task = await session.attachTask(id);
+        if (await task.poll()) continue;
+        if (status === 'paused') await task.pause({ requestId });
+        else await task.resume({ requestId });
+    }
 }
