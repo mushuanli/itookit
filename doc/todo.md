@@ -77,9 +77,10 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 - [ ] **P0-04 平台实机验证**
   - 已有 Linux bwrap/目录/符号链接边界、取消/超时、缺隔离器拒绝、Xvfb/AT-SPI 窗口与应用内目录授权证据。
-  - 剩余：其他目标平台的支持范围及真实行为、原生 GTK 目录选择器、P0-00/P0-02 等尚缺窗口场景、发布产物的支持边界；其中仍含多层级嵌套挂载下的项目规则窗口场景。Skill 面板真实勾选/取消及重开持久身份已于 2026-09-14 验收通过（见 P0-00）。
+  - 剩余：其他目标平台的支持范围及真实行为、原生 GTK 目录选择器（仅验证到弹出：见下）、发布产物的支持边界；多层级嵌套挂载已按上条收窄为「单挂载内的嵌套目录树」并验证。Skill 面板真实勾选/取消及重开持久身份已于 2026-09-14 验收通过（见 P0-00）。
   - 2026-09-14 桌面字体/导航补验：10 个本地 FontAwesome 字体面在真实 WebView 加载成功，修复 Vite 内联小字体被 CSP 拦截；11 个静态导航控件具有稳定 AT-SPI 名称。文件列表仍有方框字符，需继续核对来源与系统字体回退，不能把字体加载通过等同于全部图标渲染通过。见[字体与导航验收](minimal-system-acceptance.md#2026-09-14桌面本地字体与导航可访问名称)。
   - 2026-09-14 边界收口（见[平台边界验收](minimal-system-acceptance.md#2026-09-14p0-04-平台边界图标字体与原生目录选择器)）：**方框字符根因已定位**为宿主缺少 emoji 字体——列表图标是 `@itookit/common` 的 emoji 码位，而本机 `fc-list ':charset=1F4C1'`/`1F5D1`/`2795` 均为 0 条，应用不自带该字体；属支持边界而非本轮代码回归。**原生 GTK 选择器**经 XDG Portal 真实弹出 `Select Folder`（含文件选择小部件与 `取消/打开`），但**未能完成选择**：合成输入会破坏 GTK 位置栏路径（实测 `/ome/…`、`/home/lli/…`），且容器无 `/dev/fuse` 使门户文档门户不可用，未产生挂载记录。**发布产物**未构建（无 AppImage/linuxdeploy 工具、无网络）；受版本控制的 `release/dist/` 停留在 2026-09-04。**其他平台未验证**，不能由 Linux 证据外推。
+  - 2026-09-14 嵌套边界收窄（见[嵌套规则验收](minimal-system-acceptance.md#2026-09-14项目规则在真实窗口的嵌套边界p0-04)）：**「多层级嵌套挂载」在本实现不可表达**——`SessionFilesService.create` 要求挂载点 `at` 匹配 `^\/[a-zA-Z0-9_-]+$`（单段），`at: '/workspace/inner'` 实测抛 `EACCES Reserved or invalid mount point`；真正存在的嵌套是**一个挂载内部的多层目录树**。按此收窄后在真实窗口验证：单挂载 `/workspace` 的树内含 `inner/_agent/AGENT.md` 与 `inner/_agent/skills/...`，请求体出现 `OUTER-PROJECT-RULE-MARKER`(1) 与 `OUTER-SKILL-BODY-MARKER`(1)，`INNER-NESTED-RULE-MARKER`(0) 与 `INNER-SKILL-BODY-MARKER`(0)，即内层项目规则不合并、不替换。cwd 等于项目根时内层 Skill 不级联（级联需更深 cwd，属 Flow/工作区作用域路径，本场景未覆盖）。
   - Tauri Session Bash **共享宿主网络**；无出网或连接超时不能当作网络沙箱证据。见[验收 §29](minimal-system-acceptance.md)。
 
 - [ ] **P0-05 当前最终回归**

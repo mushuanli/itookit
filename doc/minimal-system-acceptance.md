@@ -1678,3 +1678,31 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 重开一致性：用同一数据根重启应用（不重建数据）后打开该 Session，转写重新渲染该 round（`Chat history` 子节点含 `↻`/`✎`/`🗑️` 与 `Create Branch`），未卡死也未停留在运行态；持久 round 文档为 `status: "failed"`、`error: "Request timed out after 60000 ms without a response"`，即重开路径读取的正是该原因。
 
 边界：AT-SPI 树中错误气泡的文本节点名为空，本轮**没有**用无障碍接口重新断言屏幕文本；“显示同一 60000 ms 原因”依据的是渲染器所读的持久 round 文档与上一轮截图，不是本轮的新文本断言。此处“已停止”只指本地 HTTP 连接关闭，不代表远端供应商计算或停止计费。pause 三态与未确认物理停止的真实窗口场景仍未完成。
+
+## 2026-09-14：项目规则在真实窗口的嵌套边界（P0-04）
+
+**先纠正一个前提：「多层级嵌套挂载」在本实现里不可表达。** `SessionFilesService.create` 对每个挂载点做 `if (!/^\/[a-zA-Z0-9_-]+$/.test(at) || [...保留名...].includes(at.slice(1)))` 校验（`packages/app-core/src/vfs/session-files.ts:195`）——`at` 只允许**一个顶层路径段**。实测把 `at` 设成 `/workspace/inner` 时 `configure` 直接抛 `FSError [EACCES] Reserved or invalid mount point`。因此挂载点之间不存在父子关系；真正会出现的嵌套是**一个挂载内部的多层目录树**（以及它带来的 `parent-fs` / `local-fs` 作用域层级）。P0-04 该项按此收窄后验证。
+
+装置：真实 Linux Tauri + Xvfb `:98` + 会话总线 + AT-SPI；数据根内构造一棵带嵌套规则与嵌套 Skill 的树，并用 Node 侧 `SessionFilesService.configure` 预置一个 Session（`mounts: [{ at: '/workspace', sourceId: 'admin-home', root: '/nest/outer', access: 'rw' }]`，`cwd: '/workspace'`）：
+
+```
+<nest>/outer/_agent/AGENT.md                          → OUTER-PROJECT-RULE-MARKER
+<nest>/outer/_agent/skills/outer-skill/SKILL.md       → OUTER-SKILL-BODY-MARKER
+<nest>/outer/inner/_agent/AGENT.md                    → INNER-NESTED-RULE-MARKER
+<nest>/outer/inner/_agent/skills/inner-skill/SKILL.md → INNER-SKILL-BODY-MARKER
+```
+
+窗口内打开该 Session 并发送 `nested-rules-probe`，用记录完整请求体的 mock 核对（请求 `05:08:31.048Z`，360 字节）：
+
+| 消息 | 内容 |
+| --- | --- |
+| system 1 | `You are a helpful assistant.` |
+| system 2 | `OUTER-PROJECT-RULE-MARKER: project root instructions only.` |
+| system 3 | `Skill outer-skill:\nOUTER-SKILL-BODY-MARKER` |
+| user | `nested-rules-probe` |
+
+标记出现次数：`OUTER-PROJECT-RULE-MARKER` **1**、`OUTER-SKILL-BODY-MARKER` **1**、`INNER-NESTED-RULE-MARKER` **0**、`INNER-SKILL-BODY-MARKER` **0**。
+
+结论：项目规则来自挂载的项目根并被注入；同一挂载树内层的 `_agent/AGENT.md` **既不被合并也不被替换**，符合 `session-file-source.ts` 的注释契约。`cwd` 等于项目根时 `scopeRoots` 只返回根一级，所以内层 Skill 也不参与级联——这与“Skill 按层级级联”不矛盾：级联需要更深的 `cwd`，而普通发送路径使用配置的 `cwd`；更深作用域只在 Flow/工作区作用域路径出现，本窗口场景没有覆盖。
+
+复现：`node --import tsx .tauri-acceptance/seed-nested-mounts.mts <rootDir>` 预置挂载（临时助手，`at` 只允许单段，脚本内注明原因），随后按上述窗口步骤发送并读取 `mock-record.log` 的请求体。长期证据以本节标记计数、`session-file-source.ts` 契约与其包级回归为准；窗口驱动脚本与数据根在已 gitignore 的 `.tauri-acceptance/`，临时文件会消失。
