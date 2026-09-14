@@ -14,8 +14,31 @@ Kernel.prototype.setShared = async function<T extends import('@itookit/durable-k
     key: string, value: T, options?: import('@itookit/durable-kernel').SharedStateWriteOptions) {
     const target = process.env.MINDOS_TEST_COMPLETED_INSTANCE;
     const completed = (value as { completed?: string[] } | null)?.completed;
+    if (process.env.MINDOS_TEST_SUBMIT_NODE === 'graph-patched' && key.endsWith('.scheduler')
+        && (value as { appliedPatches?: unknown[] } | null)?.appliedPatches?.length) process.kill(process.pid, 'SIGKILL');
     if (target && key.endsWith('.scheduler') && completed?.includes(target)) process.kill(process.pid, 'SIGKILL');
     return setShared.call(this, sessionId, key, value, options) as Promise<import('@itookit/durable-kernel').SharedStateEntry<T>>;
+};
+
+const createResource = Kernel.prototype.createResource;
+Kernel.prototype.createResource = async function(sessionId, spec, options) {
+    const grant = await createResource.call(this, sessionId, spec, options);
+    if (process.env.MINDOS_TEST_SUBMIT_NODE === 'capability-bound' && spec.kind === 'llm') process.kill(process.pid, 'SIGKILL');
+    return grant;
+};
+
+const startTask = Kernel.prototype.startTask;
+Kernel.prototype.startTask = async function(sessionId, taskId, options) {
+    await startTask.call(this, sessionId, taskId, options);
+    if (process.env.MINDOS_TEST_SUBMIT_NODE === 'task-started') process.kill(process.pid, 'SIGKILL');
+};
+
+const signal = Kernel.prototype.signal;
+Kernel.prototype.signal = async function(sessionId, taskId, value, options) {
+    if (process.env.MINDOS_TEST_SUBMIT_NODE === 'delegation-joined' && value.type === 'flow.schedule.completed') {
+        process.kill(process.pid, 'SIGKILL');
+    }
+    return signal.call(this, sessionId, taskId, value, options);
 };
 
 await import('../../src/cli');

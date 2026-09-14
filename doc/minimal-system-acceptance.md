@@ -1798,3 +1798,16 @@ HTTP 监听首次在沙箱内遭 EPERM，随后经正常提权运行通过。日
 | `pnpm docs:check` / `git diff --check` | 通过；文档检查 77 份、5 条既有历史告警 |
 
 日志位于 `/tmp/p1-transition-{kernel,flow,cli,crash,types,docs}.log`。未执行本批完整 17 项崩溃矩阵、全仓测试/构建或 GUI/OCI/跨主机验收；不能以本机条件推导物理 adapter fencing。API 省略 lease 条件保持旧行为，混合版本写者保护仍须单独设计与验证。
+
+## 2026-09-14：本地 P1 分功能补齐
+
+本轮按功能独立提交，迁移、跨主机和通用资源服务后移。以下是本轮新增证据，取代前文“CLI YAML 未暴露 delegation”的当前状态描述：
+
+- CLI YAML 支持有界 `delegation`、父子工具交集和 Agent 引用校验；夹具只在 Kernel 边界发送 SIGKILL，不再注入图。
+- `portSchemas` 与 Agent `responseFormat` 绑定、目录冻结和严格失败通过 Flow 正反例；真实 CLI 正反例证明结构化结果写 `result.json`，不符合端口 schema 时 Run 失败。
+- 根 input 携带初始调度快照和工作区身份；根提交后、首 shared 检查点前 SIGKILL 的独立用例通过。Tauri 意图回收识别根中的认领；终态尚无 pending 收尾记录也会恢复清理。
+- 控制命令共用 Session 写权限与本 Kernel 的 Run 租约；旧回调、只读宿主和另一 Kernel 的活跃租约测试拒绝写入。暂停一个 Run 不再暂停整个 Session。
+- 清理超过 5 秒仍保持 pending 并记录说明；CLI 等待退出时报告，桌面沿用 pending 轮询。未确认物理停止时不释放租约或删除文件。遗留意图在授权变化/Session 不可读取时保留，错误包含人工处置路径。
+- `crash-matrix.test.ts` 新增 capability-bound、task-started、graph-patched、delegation-joined 四个真实进程用例通过。模型调用次数、任务身份和已完成输出均受断言保护；动态 patch 用例使用正式 YAML spawn 配置。
+
+分组验证：Kernel 257、Flow 最终阶段 237、llm-tasks 43、llm-session 116、Tauri 工作区 IPC 16；CLI 配置/编译 24、结构化输出集成 2、原 17 项真实崩溃矩阵通过，后增根窗口 1 与能力/启动/patch/join 4 分别通过。计数属于不同阶段，不能累加为唯一测试总数。CLI/Tauri/AppShell 类型检查与活文档检查通过。全量最终矩阵及真实窗口验收须以之后的明确记录为准，以上 IPC/DOM 测试不冒充真实窗口操作。
