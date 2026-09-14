@@ -61,6 +61,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 2026-09-14 取消与失败可区分：终态错误带 `code: 'ABORTED'`，界面渲染 `data-outcome="cancelled"` 的中性气泡与「执行已取消」状态，并不再对取消显示连接配置入口；`packages/app-shell/tests/cancelled-history.test.ts` 覆盖 ABORTED/TIMEOUT/未标注三种形状，不靠消息文本猜测。
   - 2026-09-14 宿主在途消失：新增 `packages/app-shell/tests/host-restart-inflight.test.ts`，真实本地存储 + 永不回包的 HTTP 服务下，第一个宿主退出后重开仍能续发（转写不以用户消息结尾）。
   - 2026-09-14 独立关闭入口：新增 `SessionLifecycleService.closeSession`（停止运行、等待外部停止确认、**保留**存储/manifest/文档）与 Session 侧栏「关闭会话（停止执行，保留记录）」入口，与删除并列可区分；有界失败分别报告「records were kept」与「nothing was deleted」。见 `session-delete-lifecycle.test.ts`、`session-workbench.test.ts`。真实窗口已验收（挂起模型下点击该项，约 0.45 秒确认连接停止，Task 持久 `cancelled`，Session/Task 目录与记录保留），见[关闭保留验收](minimal-system-acceptance.md#2026-09-14运行中的-session-真实窗口关闭并保留记录)。
+  - 2026-09-14 发送失败一致性：provider 指向关闭端口时真实窗口发送，Task/round 持久 `failed`（`effect.failed` 于发送后约 +2.9 秒，`retryable:false`），界面在 3–4 秒内进入终态并提供「重试」；随后**再次发送被正常接受**（round 由 1 增至 2），未留下阻塞会话的悬挂状态。见[发送失败一致性](minimal-system-acceptance.md#2026-09-14发送失败后的状态一致性与可续发性p0-02)。边界：这是持久化**之后**的 provider 失败，不是写入前回滚；错误文案为 WebKit 的 `Load failed`，不含端点/原因。
   - 已合入：并发文件保存与失败重试 `66dcf24c`、通知安全的轮询扫描复用 `6922e7da`、数据库未知初始化失败保留与定向关闭 `c0fd1568`；对应包级/原生回归不替代真实窗口验收。
   - 剩余：真实窗口的超时、Session 运行中单独关闭并保留记录、IPC 故障、发送回滚与保存失败/重试；设备不确认停止时的有界失败及数据保留；监控/取消的 live 与重开一致性。
   - 2026-09-14 真实窗口补验：模型请求在途时，通过列表右键和原生确认删除 Session；修复旧聊天/重试/ENOENT 残留，删除后恢复选择界面，同数据根重启未复活。app-shell 196 项通过，30 项既有跳过；见[删除收尾验收](minimal-system-acceptance.md#2026-09-14运行中-session-删除后的界面收尾)。该场景不替代设备不确认停止或其他故障矩阵。
