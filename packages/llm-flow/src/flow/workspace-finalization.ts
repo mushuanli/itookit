@@ -4,10 +4,21 @@ import type { FlowWorkspaceLease } from './executor';
 export interface WorkspaceFinalization { status: 'pending' | 'succeeded' | 'failed'; message?: string; persistenceError?: string; }
 export const workspaceFinalizationKey = (taskId: string): string => `flow.run.${taskId}.workspace`;
 
-export async function beginWorkspaceFinalization(session: SessionHandle, root: TaskHandle<JsonValue>, workspace: FlowWorkspaceLease) {
+export async function beginWorkspaceFinalization(session: SessionHandle, root: TaskHandle<JsonValue>, workspace: FlowWorkspaceLease, noticeAfterMs = 5_000) {
     const state: WorkspaceFinalization = { status: 'pending' };
-    const save = () => session.setShared(workspaceFinalizationKey(root.id), { ...state });
+    let writes: Promise<unknown> = Promise.resolve();
+    const save = () => {
+        const snapshot = { ...state };
+        writes = writes.catch(() => undefined).then(() => session.setShared(workspaceFinalizationKey(root.id), snapshot));
+        return writes;
+    };
     await save();
+    const notice = setTimeout(() => {
+        if (state.status !== 'pending') return;
+        state.message = 'Workspace cleanup is still pending; files and ownership are retained until physical shutdown is confirmed.';
+        void save().catch(error => { state.persistenceError = String(error); });
+    }, noticeAfterMs);
+    (notice as unknown as { unref?: () => void }).unref?.();
     const completion = (async () => {
         let cleanupError: unknown;
         try {
@@ -15,11 +26,13 @@ export async function beginWorkspaceFinalization(session: SessionHandle, root: T
             await workspace.releaseCapabilities?.(root.id);
             await workspace.finish(exit.status === 'succeeded' ? 'succeeded' : exit.status === 'cancelled' ? 'cancelled' : 'failed');
             state.status = 'succeeded';
+            delete state.message;
         } catch (error) {
             cleanupError = error;
             state.status = 'failed';
             state.message = error instanceof Error ? error.message : String(error);
         }
+        clearTimeout(notice);
         try { await save(); }
         catch (saveError) {
             state.persistenceError = saveError instanceof Error ? saveError.message : String(saveError);

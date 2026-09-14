@@ -99,7 +99,9 @@ export class TauriFlowWorkspaces implements FlowWorkspaceManager {
         if (!this.kernel) throw new Error('Desktop workspace services are not bound');
         await new TauriFsOps().mkdir(`${this.parent}/.intents`);
         const entries = await invoke<Array<{ name: string; is_directory: boolean }>>('fs_read_dir', { path: `${this.parent}/.intents` });
-        const session = await this.kernel.kernel.inspectSession(sessionId);
+        const session = await this.kernel.kernel.inspectSession(sessionId).catch(error => {
+            throw new Error(`Cannot inspect Session ${sessionId}; workspace intents are retained in ${this.parent}/.intents. Reopen the Session before retrying.`, { cause: error });
+        });
         const roots = (await session.listTasks()).filter(task => task.program.kind === 'flow.aggregate' && task.labels?.kind === 'flow-root');
         const claimed = new Set<string>();
         for (const root of roots) {
@@ -114,7 +116,9 @@ export class TauriFlowWorkspaces implements FlowWorkspaceManager {
             const saved = parseSaved(JSON.parse(new TextDecoder().decode(new Uint8Array(bytes))));
             if (saved.grant.sessionId !== sessionId || this.preparing.has(saved.id) || claimed.has(saved.id)) continue;
             if (entry.name !== `${saved.id}.json`) throw new Error('Workspace intent identity does not match its filename');
-            await this.validate(sessionId, { ...saved, grant: { ...saved.grant } });
+            await this.validate(sessionId, { ...saved, grant: { ...saved.grant } }).catch(error => {
+                throw new Error(`Retained workspace ${saved.directory}: ${String(error)}. Restore the original Session grant or resolve this retained worktree manually before retrying.`, { cause: error });
+            });
             const cleanup = await this.manager(saved.grant, saved.directory).restore(saved.id,
                 { mode: 'worktree', cleanup: 'always', merge: 'discard' }, saved.git, { forFinalization: true });
             await cleanup.finish('cancelled');

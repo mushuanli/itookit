@@ -48,3 +48,20 @@ it('persists capability shutdown failure and keeps workspace files', async () =>
     expect(finish).not.toHaveBeenCalled();
     expect(values).toEqual([{ status: 'pending' }, { status: 'failed', message: 'process still running' }]);
 });
+
+it('reports stalled physical shutdown while preserving pending state and the workspace', async () => {
+    let stop!: () => void;
+    const stopped = new Promise<void>(resolve => { stop = resolve; });
+    const saved: any[] = [], finish = vi.fn(async () => undefined);
+    const result = await beginWorkspaceFinalization({ setShared: async (_key: string, value: unknown) => { saved.push(value); } } as never,
+        { id: 'root', wait: async () => ({ status: 'succeeded' }) } as never,
+        { directory: '/isolated', releaseCapabilities: () => stopped, finish }, 10);
+    await vi.waitFor(() => expect(saved.at(-1)).toMatchObject({ status: 'pending', message: expect.stringContaining('physical shutdown') }));
+    expect(finish).not.toHaveBeenCalled();
+    let settled = false;
+    void result.completion.then(() => { settled = true; });
+    expect(settled).toBe(false);
+    stop(); await result.completion;
+    expect(saved.at(-1)).toEqual({ status: 'succeeded' });
+    expect(finish).toHaveBeenCalledOnce();
+});

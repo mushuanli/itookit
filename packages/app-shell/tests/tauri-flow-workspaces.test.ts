@@ -261,3 +261,28 @@ it('rejects merge policies for read-only workspaces before creating any host res
     await expect(workspaces.prepare('s', { mode: 'read-only', merge: 'auto-if-clean' })).rejects.toThrow('cannot merge');
     expect(invoke).not.toHaveBeenCalled();
 });
+
+it('retains orphan intents with actionable diagnostics after grants change', async () => {
+    const { workspaces, kernel, services, files } = await setup();
+    await workspaces.prepare('s', { mode: 'worktree' });
+    const directory = [...copies][0], paths = [...intents.keys()];
+    const record = (await files.inspect('s'))!;
+    await files.configure('s', { mounts: record.mounts, cwd: record.cwd }, record.revision);
+    const next = new TauriFlowWorkspaces('/data'); next.bind(kernel, services);
+    invoke.mockClear();
+    await expect(next.reconcile('s')).rejects.toThrow(`Retained workspace ${directory}`);
+    expect([...intents.keys()]).toEqual(paths);
+    expect(copies.has(directory)).toBe(true);
+    expect(invoke.mock.calls.some(([command]) => command === 'git_command' || command === 'fs_remove')).toBe(false);
+});
+
+it('retains recovery intents when the Kernel cannot inspect the Session', async () => {
+    const { workspaces, services } = await setup();
+    await workspaces.prepare('s', { mode: 'worktree' });
+    const paths = [...intents.keys()];
+    const next = new TauriFlowWorkspaces('/data');
+    next.bind({ kernel: { inspectSession: async () => { throw new Error('Session not discovered'); } } } as unknown as HeadlessKernelRuntime, services);
+    await expect(next.reconcile('s')).rejects.toThrow('workspace intents are retained in /data/var/lib/worktrees/.intents');
+    expect([...intents.keys()]).toEqual(paths);
+    expect(copies.size).toBe(1);
+});
