@@ -1811,3 +1811,12 @@ HTTP 监听首次在沙箱内遭 EPERM，随后经正常提权运行通过。日
 - `crash-matrix.test.ts` 新增 capability-bound、task-started、graph-patched、delegation-joined 四个真实进程用例通过。模型调用次数、任务身份和已完成输出均受断言保护；动态 patch 用例使用正式 YAML spawn 配置。
 
 分组验证：Kernel 257、Flow 最终阶段 237、llm-tasks 43、llm-session 116、Tauri 工作区 IPC 16；CLI 配置/编译 24、结构化输出集成 2、原 17 项真实崩溃矩阵通过，后增根窗口 1 与能力/启动/patch/join 4 分别通过。计数属于不同阶段，不能累加为唯一测试总数。CLI/Tauri/AppShell 类型检查与活文档检查通过。全量最终矩阵及真实窗口验收须以之后的明确记录为准，以上 IPC/DOM 测试不冒充真实窗口操作。
+
+
+### 本地 Run 控制台真实窗口（2026-09-14）
+
+发现并补齐 `DagWorkbench.openRun` 无生产调用者的问题。工作流工具栏提供「运行记录」，可查看已保存 Run、返回设计及继续调度；图级重试会继续调度。读取列表、快照和固定版本 transcript 不调用 `openSession` 激活任务。
+
+使用正式 Tauri debug 构建、Xvfb :103、独立 dbus/AT-SPI 与隔离 profile `/tmp/x1-p1-window-UX0yFe`。普通 `.flow` 草稿包含 source(transform) → gate(human) → after(transform)，通过窗口 Run 启动，不修改 Kernel 持久记录、不注入应用 API。窗口中选择运行记录并点击 source 的「重试并重算下游」；source 两次执行成功、原 gate 取消、新 gate 等待。重启应用，重新选中同一 Run，点击「继续运行」并在 Respond 对话框键入 yes；新 gate、after、根均 succeeded。再次重启后列表仍为 succeeded，并保留两代 source、取消的 gate 及新 gate。根 ID `task_5c17c63d-6905-4156-80aa-200176c291be`；终态耗时 1248.5 秒包含人工等待及两次重开，不能用作性能样本。
+
+验证：Flow 238、Kernel 257、Run UI 9 项通过；全仓 typecheck、docs:check（77 份 / 5 条既有历史告警）、styles:check、Tauri Vite 与 Cargo offline 构建通过。本段不代替工作区专门验收，也不推导其他桌面平台支持。

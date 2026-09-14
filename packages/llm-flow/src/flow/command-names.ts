@@ -13,6 +13,8 @@ export const FlowCommand = {
     RevisionGet: 'flow.revision.get',
     RevisionList: 'flow.revision.list',
     Presentations: 'plugin.dag.presentations',
+    RunList: 'dag.run.list',
+    RunResume: 'dag.run.resume',
     RunStart: 'dag.run.start',
     RunGet: 'dag.run.get',
     RunTranscript: 'dag.run.transcript',

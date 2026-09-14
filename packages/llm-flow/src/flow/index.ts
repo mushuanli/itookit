@@ -1,6 +1,6 @@
 export { DagCommandService } from './commands';
 export type { DagCommandServiceOptions } from './commands';
-export type { DurableFlowSnapshot } from './commands';
+export type { DurableFlowSnapshot, FlowRunSummary } from './commands';
 export * from './git-worktree-manager';
 export { flowToDag } from './to-dag';
 export { DagPluginRegistry } from './plugin-registry';

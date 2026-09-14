@@ -163,3 +163,31 @@ it('hides the downstream recompute once the Run is terminal', async () => {
     expect(root.querySelector('[data-run-retry="original"]')).not.toBeNull();
     workbench.destroy();
 });
+
+it('opens persisted Runs from the visible history action and resumes the selected Run', async () => {
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: vi.fn() });
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.dispatchEvent(new Event('close')); } });
+    let resumed = false;
+    const execute = vi.fn(async (name: string) => {
+        if (name === 'plugin.dag.presentations') return [];
+        if (name === 'dag.run.list') return [{ taskId: 'root', sessionId: 'session', name: '<saved run>', status: 'waiting', createdAt: 1 }];
+        if (name === 'dag.run.resume') { resumed = true; return { taskId: 'root' }; }
+        return { ...snapshot(), attachedFromStorage: !resumed };
+    });
+    const root = document.createElement('div'); document.body.append(root);
+    const workbench = new DagWorkbench(root, { commands: { execute } as never });
+    try {
+        await workbench.initialize();
+        root.querySelector<HTMLButtonElement>('[data-action="runs"]')!.click();
+        await vi.waitFor(() => expect(document.querySelector('[data-run-index]')?.textContent).toContain('<saved run>'));
+        expect(document.querySelector('saved')).toBeNull();
+        document.querySelector<HTMLButtonElement>('[data-run-index]')!.click();
+        await vi.waitFor(() => expect(root.querySelector('[data-mode="run"]')).not.toBeNull());
+        expect(execute).toHaveBeenCalledWith('dag.run.get', { taskId: 'root', sessionId: 'session' });
+        root.querySelector<HTMLButtonElement>('[data-run-action="resume"]')!.click();
+        await vi.waitFor(() => expect(root.querySelector('[data-run-action="resume"]')).toBeNull());
+        expect(execute).toHaveBeenCalledWith('dag.run.resume', { taskId: 'root', sessionId: 'session' });
+        root.querySelector<HTMLButtonElement>('[data-run-action="back"]')!.click();
+        expect(root.querySelector('[data-mode="design"]')).not.toBeNull();
+    } finally { workbench.destroy(); root.remove(); }
+});

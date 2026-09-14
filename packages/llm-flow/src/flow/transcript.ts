@@ -100,7 +100,7 @@ export async function readFlowTaskTranscript(
         || (query.maxBytes !== undefined && (!Number.isSafeInteger(query.maxBytes) || query.maxBytes < 64))) {
         throw new Error('Invalid transcript page');
     }
-    const session = await kernel.openSession(sessionId);
+    const session = await kernel.inspectSession(sessionId);
     const root = (await (await session.attachTask(runTaskId)).status()).task;
     const entries = await readFlowRunMembers(session, root);
     if (taskId !== runTaskId && !entries.some(item => item.taskId === taskId)) {

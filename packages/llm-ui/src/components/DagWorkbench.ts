@@ -1,3 +1,4 @@
+import { openRunPicker } from './dag/RunPicker';
 import type {
     FlowDraft,
     FlowNodeId,
@@ -138,6 +139,7 @@ export class DagWorkbench {
         ).join('');
         return `<header class="dag-toolbar">
             <strong>Flow Design</strong>
+            <button data-action="runs">${escapeHTML(t('flow.runs.title'))}</button>
             <span>${escapeHTML(draft?.name ?? 'No Flow selected')}</span>
             <select data-action="add-kind" ${draft ? '' : 'disabled'}><option value="">Add node…</option>${addOptions}</select>
             <button data-action="undo" ${draft ? '' : 'disabled'}>Undo</button>
@@ -332,6 +334,7 @@ export class DagWorkbench {
                 if (presentation) void this.addNode(presentation.manifest);
             });
         const actions: Record<string, () => void> = {
+            runs: () => openRunPicker(this.options.commands, run => this.openRun(run.taskId, run.sessionId)),
             undo: () => this.changeHistory('undo'),
             redo: () => this.changeHistory('redo'),
             layout: () => this.autoLayout(),
@@ -523,7 +526,7 @@ export class DagWorkbench {
         if (!snapshot) return this.renderDesign();
         const run = snapshot.root.task;
         this.root.innerHTML = `<section class="dag-workbench" data-mode="run">
-            <header class="dag-toolbar"><strong>DAG Run</strong><span>${escapeHTML(String(run.id))}</span><span data-status="${escapeHTML(run.status)}">${escapeHTML(run.status)}</span><small>${snapshot.usage.tokens} tokens · ${(snapshot.usage.elapsedMs / 1000).toFixed(1)}s</small><button data-run-action="goal">Goal</button><button data-run-action="cancel">Cancel run</button></header>
+            <header class="dag-toolbar"><button data-run-action="back">${escapeHTML(t('flow.runs.back'))}</button><strong>DAG Run</strong>${snapshot.attachedFromStorage ? `<button data-run-action="resume">${escapeHTML(t('flow.runs.resume'))}</button>` : ''}<span>${escapeHTML(String(run.id))}</span><span data-status="${escapeHTML(run.status)}">${escapeHTML(run.status)}</span><small>${snapshot.usage.tokens} tokens · ${(snapshot.usage.elapsedMs / 1000).toFixed(1)}s</small><button data-run-action="goal">Goal</button><button data-run-action="cancel">Cancel run</button></header>
             ${snapshot.workspaceFinalization ? `<section class="dag-run-workspace" data-workspace-status="${escapeHTML(snapshot.workspaceFinalization.status)}">${escapeHTML(t(`flow.workspace.${snapshot.workspaceFinalization.status}`))}${snapshot.workspaceFinalization.message ? `<span role="alert">${escapeHTML(snapshot.workspaceFinalization.message)}</span>` : ''}${snapshot.workspaceFinalization.persistenceError ? `<span role="alert">${escapeHTML(t('flow.workspace.persistenceFailed'))}: ${escapeHTML(snapshot.workspaceFinalization.persistenceError)}</span>` : ''}</section>` : ''}
             ${snapshot.goal ? `<section class="dag-run-goal"><strong>${escapeHTML(snapshot.goal.objective || 'Run goal')}</strong><span>${escapeHTML(snapshot.goal.status ?? 'active')}</span>${snapshot.goal.acceptanceCriteria?.length ? `<small>${snapshot.goal.acceptanceCriteria.map(escapeHTML).join(' · ')}</small>` : ''}</section>` : ''}
             <div class="dag-run-nodes">${snapshot.taskTree.map(task => {
@@ -546,6 +549,14 @@ export class DagWorkbench {
                 </article>`;
             }).join('')}</div>
         </section>`;
+        this.root.querySelector('[data-run-action="resume"]')?.addEventListener('click', event => {
+            const button = event.currentTarget as HTMLButtonElement; button.disabled = true;
+            const view = this.viewRequest;
+            void this.options.commands.execute(FlowCommand.RunResume, { sessionId: run.sessionId, taskId: run.id })
+                .then(() => { if (view === this.viewRequest) return this.refreshRun(run.id); })
+                .catch(error => { if (view === this.viewRequest) { button.disabled = false; Toast.error(String(error)); } });
+        });
+        this.root.querySelector('[data-run-action="back"]')?.addEventListener('click', () => { this.viewRequest++; this.stopRunRefresh(); this.setMode('design'); });
         this.root.querySelector('[data-run-action="cancel"]')?.addEventListener('click', () => void this.cancel());
         this.root.querySelector('[data-run-action="goal"]')?.addEventListener('click', () => this.openGoalDialog());
         this.root.querySelectorAll<HTMLElement>('[data-run-retry]').forEach(button => button.addEventListener('click', () =>

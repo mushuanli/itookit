@@ -53,3 +53,10 @@ export function withFlowControl<T>(kernel: Kernel, sessionId: string, rootId: st
     void work.then(clear, clear);
     return work;
 }
+
+export async function hasLocalScheduler(kernel: Kernel, rootId: string): Promise<boolean> {
+    const lease = owners.get(kernel)?.get(rootId);
+    if (!lease) return false;
+    try { await lease.assertOwned(); return true; }
+    catch (error) { if (isSchedulerOwnershipLost(error)) return false; throw error; }
+}

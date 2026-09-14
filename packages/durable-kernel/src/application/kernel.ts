@@ -270,7 +270,12 @@ export class Kernel implements KernelRegistration {
     /** Inspect persisted records without registering listeners or starting execution. */
     async inspectSession(id: SessionId) {
         const binding = await this.store.inspectSessionBinding(id);
-        return { listTasks: () => this.store.listTasks(binding), getShared: (key: string) => this.store.getShared(binding, key) };
+        return { id, listTasks: () => this.store.listTasks(binding),
+            getShared: <T extends import('../domain/types').JsonValue>(key: string) => this.store.getShared<T>(binding, key),
+            attachTask: async <O = unknown>(taskId: string): Promise<TaskHandle<O>> => {
+                await this.store.readTask(binding, taskId);
+                return new DefaultTaskHandle<O>(this, id, taskId);
+            } };
     }
 
     async openTask<O = unknown>(id: TaskId): Promise<TaskHandle<O>> {
@@ -285,7 +290,7 @@ export class Kernel implements KernelRegistration {
     }
 
     async attachTask<O = unknown>(sessionId: SessionId, taskId: TaskId): Promise<TaskHandle<O>> {
-        const task = await this.store.readTask(await this.binding(sessionId), taskId);
+        const task = await this.store.readTask(await this.store.inspectSessionBinding(sessionId), taskId);
         if (task.sessionId !== sessionId) throw new Error(`Task ${taskId} does not belong to session ${sessionId}`);
         return new DefaultTaskHandle<O>(this, sessionId, taskId);
     }
@@ -356,7 +361,7 @@ export class Kernel implements KernelRegistration {
     }
 
     async task(sessionId: string, taskId: string): Promise<TaskRecord> {
-        return this.store.readTask(await this.binding(sessionId), taskId);
+        return this.store.readTask(await this.store.inspectSessionBinding(sessionId), taskId);
     }
 
     /** Retention/GC for Task version history; see `SeqFileKernelStore.compactTaskHistory`. */
@@ -373,7 +378,7 @@ export class Kernel implements KernelRegistration {
     }
 
     async taskHistoryPage(sessionId: string, taskId: string, query: import('../domain/types').TaskHistoryQuery = {}): Promise<import('../domain/types').TaskHistoryPage> {
-        return this.store.taskHistoryPage(await this.binding(sessionId), taskId, query);
+        return this.store.taskHistoryPage(await this.store.inspectSessionBinding(sessionId), taskId, query);
     }
 
     async taskAttempts(sessionId: string, taskId: string): Promise<import('../domain/types').TaskAttempt[]> {

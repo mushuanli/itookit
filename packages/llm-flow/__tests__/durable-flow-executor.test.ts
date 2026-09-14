@@ -111,7 +111,7 @@ describe('DurableFlowExecutor', () => {
         await handlers.get(FlowCommand.RunGet)!({ taskId: run.root.id, sessionId: 'session-one' });
         const args = { taskId: run.root.id, sessionId: 'session-one', targetTaskId: run.nodes.get('gate')!.id,
             requestId: 'answer', value: 'yes', signal: { type: 'hello' }, goal: { status: 'paused' }, flow: {} };
-        for (const name of [FlowCommand.RunStart, FlowCommand.RunCancel, FlowCommand.RunRespond, FlowCommand.RunSignal,
+        for (const name of [FlowCommand.RunResume, FlowCommand.RunStart, FlowCommand.RunCancel, FlowCommand.RunRespond, FlowCommand.RunSignal,
             FlowCommand.RunTaskRetry, FlowCommand.RunTaskCancel, FlowCommand.RunGoalUpdate]) {
             await expect(handlers.get(name)!(args)).rejects.toThrow('read-only');
         }
@@ -169,6 +169,35 @@ describe('DurableFlowExecutor', () => {
         await handlers.get(FlowCommand.RunGoalUpdate)!({ taskId: first.root.id, goal: { status: 'active' } });
         await first.nodes.get('gate')!.respond({ interactionId: 'answer', value: 'yes' });
         expect((await runToEnd(first)).status).toBe('succeeded');
+    });
+
+    it('lists persisted Runs without activation and resumes graph retry from the command surface', async () => {
+        const first = executor(kernel);
+        const run = await first.submit('session-one', { nodes: [valueNode('source', 'original'),
+            { ...valueNode('gate', null), plugin: 'builtin.human', config: { requestId: 'answer', prompt: 'Wait' } }],
+            edges: [{ id: 'edge', from: 'source', to: 'gate', kind: 'control' }] });
+        await waitForNode(run, 'gate');
+        const sourceId = run.nodes.get('source')!.id, oldGate = run.nodes.get('gate')!.id;
+        kernel.dispose(); await first.waitIdle();
+        kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/sessions/one/.kernel' }; } });
+        registerPrograms(kernel); await kernel.initialize();
+        const handlers = new Map<string, (args: any) => Promise<any>>();
+        new DagCommandService({ kernel, plugins: createBuiltinDagPluginRegistry(), flowStore: {} as never })
+            .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+        const open = vi.spyOn(kernel, 'openSession');
+        expect(await handlers.get(FlowCommand.RunList)!({})).toContainEqual(expect.objectContaining({ taskId: run.root.id, sessionId: 'session-one' }));
+        const inspected = await handlers.get(FlowCommand.RunGet)!({ taskId: run.root.id, sessionId: 'session-one' });
+        await handlers.get(FlowCommand.RunTranscript)!({ taskId: run.root.id, sessionId: 'session-one', targetTaskId: sourceId,
+            query: { version: inspected.nodes.find((node: any) => node.nodeId === 'source').snapshot.task.version } });
+        expect(open).not.toHaveBeenCalled();
+        await handlers.get(FlowCommand.RunTaskRetry)!({ taskId: run.root.id, sessionId: 'session-one', targetTaskId: sourceId, requestId: 'ui-recompute', downstream: true });
+        await vi.waitFor(async () => {
+            const tasks = await kernel.listSessionTasks('session-one');
+            expect(tasks.some(task => task.labels?.flowNodeId === 'gate' && task.id !== oldGate && task.interactions?.answer?.status === 'pending')).toBe(true);
+        });
+        await handlers.get(FlowCommand.RunRespond)!({ taskId: run.root.id, requestId: 'answer', value: 'done' });
+        expect((await (await kernel.openTask(run.root.id)).wait({ timeoutMs: 2000 })).status).toBe('succeeded');
     });
 
     it('resolves independent Run nodes, descendants and persisted retry membership', async () => {

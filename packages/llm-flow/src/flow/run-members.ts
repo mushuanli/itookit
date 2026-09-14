@@ -10,7 +10,7 @@ export interface FlowRunMember {
     retryOfTaskId?: string;
 }
 
-export async function readFlowRunMembers(session: SessionHandle, root: TaskRecord): Promise<FlowRunMember[]> {
+export async function readFlowRunMembers(session: Pick<SessionHandle, 'getShared'>, root: TaskRecord): Promise<FlowRunMember[]> {
     if (root.program.kind !== 'flow.aggregate' || root.labels?.kind !== 'flow-root') throw new Error(`Not a Flow run: ${root.id}`);
     const scheduled = await session.getShared(`flow.run.${root.id}.members`);
     const base = members(scheduled?.value ?? (root.input as { runTasks?: unknown } | undefined)?.runTasks);

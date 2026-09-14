@@ -1,4 +1,4 @@
-import { withFlowControl } from './control-session';
+import { hasLocalScheduler, withFlowControl } from './control-session';
 import { workspaceFinalizationKey, type WorkspaceFinalization } from './workspace-finalization';
 import type {
     DagPluginCatalog,
@@ -38,6 +38,8 @@ export interface DagCommandServiceOptions {
     }>;
 }
 
+export interface FlowRunSummary { taskId: string; sessionId: string; name: string; status: string; createdAt: number; }
+
 export interface DurableFlowSnapshot {
     workspaceFinalization?: WorkspaceFinalization;
     attachedFromStorage?: boolean;
@@ -60,6 +62,11 @@ export class DagCommandService {
         registerDraftCommands(bus, this.options.flowStore, this.options.plugins);
         bus.register(FlowCommand.Presentations, async () =>
             loadPresentations(this.options.plugins));
+        bus.register(FlowCommand.RunResume, async args => {
+            const input = args as { sessionId: string; taskId: string };
+            return this.resumeRun(input.sessionId, input.taskId);
+        });
+        bus.register(FlowCommand.RunList, async () => this.listRuns());
         bus.register(FlowCommand.RunStart, async args => {
             const input = args as { sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue>; goal?: FlowRunGoal };
             return this.start(input.sessionId, input.flow, input.parameters, input.goal);
@@ -84,7 +91,7 @@ export class DagCommandService {
         bus.register(FlowCommand.RunTaskRetry, async args => {
             const input = args as { sessionId: string; taskId: string; targetTaskId: string; requestId: string;
                 downstream?: boolean };
-            return withFlowControl(this.options.kernel, input.sessionId, input.taskId, this.options.canWriteSession, async session => {
+            const result = await withFlowControl(this.options.kernel, input.sessionId, input.taskId, this.options.canWriteSession, async session => {
                 if (input.downstream) {
                     // Graph retry: the retry plus a durable intent to recompute its downstream
                     // closure, applied by the next scheduling turn.
@@ -97,6 +104,8 @@ export class DagCommandService {
                 await this.snapshot(input.taskId, input.sessionId);
                 return { taskId: input.taskId, targetTaskId: task.id, retryOfTaskId: input.targetTaskId };
             });
+            if (input.downstream) await this.resumeRun(input.sessionId, input.taskId);
+            return result;
         });
         bus.register(FlowCommand.RunTaskCancel, async args => {
             const input = args as { taskId: string; targetTaskId: string; reason?: string };
@@ -123,6 +132,32 @@ export class DagCommandService {
                 return { taskId: input.taskId, goal: handle.goal };
             });
         });
+    }
+
+    private async resumeRun(sessionId: string, taskId: string): Promise<{ taskId: string }> {
+        if (this.options.canWriteSession && !await this.options.canWriteSession(sessionId)) throw new Error('Session is read-only on this host');
+        if (!await hasLocalScheduler(this.options.kernel, taskId)) {
+            const executor = new DurableFlowExecutor({ ...this.options,
+                bindPatchNode: this.options.bindNode ? async (id, node, defaults) =>
+                    this.options.bindNode!(id, node as FlowNodeDefinition, defaults as FlowNodeDefinition['config']) : undefined });
+            this.handles.set(taskId, await executor.resume(sessionId, taskId));
+        } else await this.snapshot(taskId, sessionId);
+        this.requireHandle(taskId).attachedFromStorage = false;
+        return { taskId };
+    }
+
+    private async listRuns(): Promise<FlowRunSummary[]> {
+        const runs: FlowRunSummary[] = [];
+        for await (const session of this.options.kernel.listSessions()) {
+            const inspection = await this.options.kernel.inspectSession(session.id);
+            for (const task of await inspection.listTasks()) {
+                if (task.program.kind !== 'flow.aggregate' || task.labels?.kind !== 'flow-root') continue;
+                const input = task.input as { run?: { goal?: { objective?: string } }; initialScheduler?: { nodes?: { name?: string }[] } };
+                const name = input?.run?.goal?.objective || input?.initialScheduler?.nodes?.map(node => node.name).filter(Boolean).join(' → ') || 'Flow';
+                runs.push({ taskId: task.id, sessionId: session.id, name, status: task.status, createdAt: task.createdAt });
+            }
+        }
+        return runs.sort((a, b) => b.createdAt - a.createdAt).slice(0, 100);
     }
 
     private async start(
@@ -153,11 +188,11 @@ export class DagCommandService {
 
     private async snapshot(taskId: string, sessionId?: string): Promise<DurableFlowSnapshot> {
         if (!this.handles.has(taskId) && sessionId) {
-            this.handles.set(taskId, await restoreFlowHandle(await this.options.kernel.openSession(sessionId), taskId));
+            this.handles.set(taskId, await restoreFlowHandle(await this.options.kernel.inspectSession(sessionId), taskId));
         }
         const handle = this.requireHandle(taskId);
         if (sessionId && sessionId !== handle.sessionId) throw new Error('Run Session mismatch');
-        const session = await this.options.kernel.openSession(handle.sessionId);
+        const session = await this.options.kernel.inspectSession(handle.sessionId);
         for (const entry of await readFlowRunMembers(session, (await handle.root.status()).task)) {
             handle.taskIds.add(entry.taskId);
             if (entry.detached) handle.detachedNodes.add(entry.nodeId);

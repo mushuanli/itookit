@@ -747,7 +747,7 @@ Task 事件裁剪：`Kernel.pruneTaskEvents(sessionId, taskId, { keepEvents? })`
 
 Task 全量列表扫描复用目录扫描时已经读取的 `record`，每个有效 Task 只读取一次记录，按目录 Task ID 排序。缺少 Task 文件的残留目录跳过，数据仅在单次调用内复用，不跨调用缓存；扫描不是跨 Task 的原子快照。此优化不改变持久索引分页接口。
 
-启动前检查与批量恢复：`inspectSession(id)` 返回只读的 `listTasks()` / `getShared(key)`，解析持久绑定但不注册 Session 监听器或启动执行。`recoverSessions(ids, options)` 去重所选 ID，先恢复所有所选 Session 的持久状态及资源，再注册这些 Session 并启动轮询；资源恢复使用只读绑定解析，避免中途激活。该方法也恢复 Kernel 级公共资源，但不遍历其他 Session 或全局投递消息。原 `recover(options)` 仍恢复全部 Session，随后执行消息投递。
+启动前检查与批量恢复：`inspectSession(id)` 返回 `id`、`listTasks()` / `getShared(key)` 及不激活 Session 的 `attachTask(id)`；后者的 `status()` 与固定版本 `taskHistoryPage` 同样只读。解析持久绑定不注册 Session 监听器或启动执行；任务句柄上的控制方法仍是显式写操作。`recoverSessions(ids, options)` 去重所选 ID，先恢复所有所选 Session 的持久状态及资源，再注册这些 Session 并启动轮询；资源恢复使用只读绑定解析，避免中途激活。该方法也恢复 Kernel 级公共资源，但不遍历其他 Session 或全局投递消息。原 `recover(options)` 仍恢复全部 Session，随后执行消息投递。
 
 `takeover: true` 要求 Kernel 执行空闲，调用方仍须先取得 Session 写租约并停止旧执行者。批量恢复不负责获取租约，也不是跨 Session 原子事务；中途错误可能已恢复部分持久记录，应修正原因后重试。此接口提交不代表所有宿主启动接线或真实桌面重启场景均已合入。
 
