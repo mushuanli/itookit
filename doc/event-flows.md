@@ -106,3 +106,7 @@ FSEventBus（vfs-core/src/impl/event/event-bus.ts）：
 | `llm-ui` | `TaskHandle.events()` / SessionEventBus | 流式聊天渲染、DagWorkbench |
 | `app-shell` | VFS FSEventBus / kernel onChanged | 树刷新、skill 同步 |
 | kernel 内部 | 事件日志 | drain 推进、recover 恢复 |
+
+## 执行取消的错误事件标记
+
+SessionRunCoordinator 在取消终态的 `error` 事件中保留 `code: ABORTED`。HistoryView 与 SessionEventHandler 据此呈现取消状态、取消提示及重新执行入口；缺失该码、TIMEOUT 或仅包含 aborted 文本的普通错误仍按失败显示。状态指示器的取消状态停止 loading，历史 aborted 节点仍保留持久原因。该标记描述执行取消，不替代 Kernel 控制面的外部停止确认。

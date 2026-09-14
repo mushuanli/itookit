@@ -1655,9 +1655,11 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 
 真实 Linux Tauri/Xvfb/D-Bus/AT-SPI：使用已有数据根 `/tmp/mindos-live-close-VIgRBk`，打开原会话、发送 `hello cancel-ui-verified`，mock 于 `04:53:23.006Z` 收齐请求；点击实际停止按钮后于 `04:53:23.604Z` 关闭连接（responseEnded=false）。`cancel-ui-live.png` 显示顶部“执行已取消”、消息 ABORTED、中性卡片“执行已取消”与“重新执行”。这验证 UI 取消路径；Task 取消语义不自动证明任意外部设备或供应商已停止，此处只确认本地 HTTP 连接断开。
 
-剩余边界：首次超时后消息状态的短暂 RUNNING 残留及其有界收敛仍需定位；独立关闭 Session 并保留记录的入口、pause 三态及未确认物理停止的真实窗口场景仍未完成。重新打开 Session 时顶部可显示 Ready（当前没有活跃执行），不把它当作历史 Task 状态。本文不宣称整个 P0-02 完成。
+剩余边界：首次超时后消息状态的短暂 RUNNING 残留及其有界收敛仍需定位；pause 三态及未确认物理停止的真实窗口场景仍未完成。独立关闭并保留记录已由后续 `d393d2fc` / `3c3afe5d` 实现和验收，不再作为本条剩余入口。重新打开 Session 时顶部可显示 Ready（当前没有活跃执行），不把它当作历史 Task 状态。本文不宣称整个 P0-02 完成。
 
 可复核命令：`pnpm --filter @itookit/app-shell test`、`pnpm --filter @itookit/llm-session test`、`pnpm styles:check`。长期回归在 `cancelled-history.test.ts` 与 `session-terminal-node.test.ts`；窗口步骤为发送至等待响应的本地 mock，再点停止并重开原会话。临时日志 `/tmp/x1-cancel-ui-shell.log`、`/tmp/x1-cancel-ui-session.log`、`/tmp/x1-cancel-ui-types.log`、`/tmp/x1-cancel-ui-styles.log`、`/tmp/x1-cancel-ui-front-final.log`、`/tmp/x1-cancel-ui-native-final.log`；临时记录会消失，不替代源码回归。
+
+重开补验：在旧租约自然过期后，用含历史取消配色的原生快照重开同一数据根，`cancel-ui-reopened.png` 显示 ABORTED、原 Task cancelled 原因及中性底色。该 GUI 快照含 `52754e9a` 与取消文案/配色选定文件，不含后续独立关闭、发送计量等功能，不能作为当前 HEAD 全量 GUI 证明。随后工作树已推进到 `390079cb`；最终合入仅补历史原因区配色和事件说明，并在当前工作树重做文档/样式检查及正常前端构建。
 
 ## 2026-09-14：模型超时的 live 收敛上界与重开原因
 
@@ -1677,7 +1679,7 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 
 重开一致性：用同一数据根重启应用（不重建数据）后打开该 Session，转写重新渲染该 round（`Chat history` 子节点含 `↻`/`✎`/`🗑️` 与 `Create Branch`），未卡死也未停留在运行态；持久 round 文档为 `status: "failed"`、`error: "Request timed out after 60000 ms without a response"`，即重开路径读取的正是该原因。
 
-边界：AT-SPI 树中错误气泡的文本节点名为空，本轮**没有**用无障碍接口重新断言屏幕文本；“显示同一 60000 ms 原因”依据的是渲染器所读的持久 round 文档与上一轮截图，不是本轮的新文本断言。此处“已停止”只指本地 HTTP 连接关闭，不代表远端供应商计算或停止计费。pause 三态与未确认物理停止的真实窗口场景仍未完成。
+边界：AT-SPI 树中错误气泡的文本节点名为空，本轮**没有**用无障碍接口重新断言屏幕文本；“显示同一 60000 ms 原因”依据的是渲染器所读的持久 round 文档与上一轮截图，不是本轮的新文本断言。此处“已停止”只指本地 HTTP 连接关闭，不代表远端供应商计算或计费停止。pause 三态与未确认物理停止的真实窗口场景仍未完成。
 
 ## 2026-09-14：项目规则在真实窗口的嵌套边界（P0-04）
 

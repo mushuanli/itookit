@@ -814,7 +814,8 @@
 }
 
 /* Cancellation is a terminal execution outcome, not a provider failure. */
-.llm-ui-bubble--error[data-outcome="cancelled"] {
+.llm-ui-bubble--error[data-outcome="cancelled"],
+.llm-ui-node[data-status="aborted"] .llm-ui-node__error-embed {
     background: var(--llm-bg-secondary);
     border-color: var(--llm-border-color);
     color: var(--llm-text-primary);
