@@ -80,14 +80,15 @@ try {
         await pauseAt('published');
     } else if (phase === 'recover-published') {
         await workspaces.reconcile('s');
-        const session = await kernel.kernel.openSession('s');
-        const task = (await session.listTasks()).find(task => task.labels?.kind === 'flow-root')!;
-        const lease = (await session.getShared(`flow.run.${task.id}.workspace-lease`))!.value as any;
+        const inspection = await kernel.kernel.inspectSession('s');
+        const task = (await inspection.listTasks()).find(task => task.labels?.kind === 'flow-root')!;
+        const lease = (await inspection.getShared(`flow.run.${task.id}.workspace-lease`))!.value as any;
         await realpath(lease.directory);
         await writeFile(`${rootDir}/retained.json`, JSON.stringify({ directory: lease.directory }));
-        const owner = (await session.getShared(`flow.run.${task.id}.scheduler-owner`))!.value as any;
+        const owner = (await inspection.getShared(`flow.run.${task.id}.scheduler-owner`))!.value as any;
         await new Promise(resolve => setTimeout(resolve, Math.max(0, owner.expiresAt - Date.now() + 5)));
         await kernel.kernel.recoverSession('s', { takeover: true });
+        const session = await kernel.kernel.openSession('s');
         const run = await executor.resume('s', task.id);
         await finishGate(run);
         const exit = await run.root.wait();
