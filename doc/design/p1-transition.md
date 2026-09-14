@@ -30,6 +30,7 @@ Kernel 增加可选 `LeaseGuardOptions.lease = { key, ownerId, epoch }`，读取
 - `session.submit(spec, options)`：先检查租约，再进行 requestId 去重或创建 Task。lease 不属于 spec 指纹，因此新拥有者可以复用旧逻辑提交。
 - `session.setShared` / `deleteShared`：先检查租约，再检查目标记录版本并写内容/历史/事件。
 - `session.signal(taskId, signal, options)`：先检查租约，再写 Task 输入与事件。
+- Task cancel/pause/interrupt/resume/start/signal/retry/respond、资源创建和预算：同一事务检查 lease 后写入；图控制命令另检查 Session 写权限并串行化同一 Run 的请求，暂停只作用于该 Run。
 
 失权返回 `STALE_SHARED_LEASE`，不提交 Task、业务输入或共享版本。Task 目录预创建仍遵循既有存储实现；拒绝提交不保证物理上没有空目录。
 
@@ -37,17 +38,17 @@ Flow 取得租约后使用带条件的 Session 视图，覆盖节点提交、成
 
 工作区正常 finalization 完成或失败并写回状态前，调度器保留租约；`waitIdle()` 因而包含这段收尾。清理错误仍由 workspaceCompletion 暴露，不改写已成功的 Run。终态 Run 重开补做 finalization 时同样持租约并校验状态写入。
 
-### A3. 尚未覆盖的执行边界
+### A3. 执行边界与本地验收
 
 A2 是本机命令提交条件，不是全面执行端 fencing：
 
 - 已创建的 Task、已发出的 Effect 和已经进入宿主回调的 Git/进程操作，不会因新的 epoch 自动物理停止。
-- 取消、重试、资源授权等其余命令不能仅凭 A2 声称均已原子 fence；仍需逐条纳入命令审计与受控交错测试。
+- 取消、重试、资源授权等命令已逐条核对；真实进程 SIGSTOP/过期接管/SIGCONT 验证八种迟到写入拒绝，旧 release 不撤销新租约。物理执行停止仍依赖既有取消屏障与 adapter 确认。
 - 条件由新调度器主动附加；省略条件的旧调用方保持原行为，因此不支持混合版本写者共享同一 Run，当前没有统一拒绝旧写者的布局升级屏障。
 - 跨宿主时钟跳变、网络分区和跨 store 迁移不在当前保证内。
-- 工作区清理回调无返回时仍需宿主有界停止/诊断策略；不能靠释放租约谎报清理完成。
+- 工作区清理超过 5 秒报告持久 pending，CLI 等待退出时输出说明；保留文件与所有权，确认停止后才释放。按策略保留或清理失败时报告具体目录/分支，支持人工处理后重试收尾。
 
-退出条件：上述命令审计、实际持久边界的本地崩溃测试、真实窗口的取消三态与重算、原生工作区创建/重启/失败保留验收完成。OCI 属可选运行后端，单独验收，不阻塞原生本地 P1。A1/A2 通过不代表本地 P1 整体完成。
+本地验收已覆盖命令审计、实际持久边界崩溃、真实窗口重算，以及原生工作区授权/创建/重启/失败保留/人工处理。运行记录列表、快照和 transcript 不隐式激活任务；继续运行与图重试经正式控制入口恢复。OCI 属可选运行后端，单独验收，不阻塞原生本地 P1；P0 性能指标保持独立。
 
 ## 3. 本地数据契约与故障处理
 
@@ -80,7 +81,7 @@ Flow 端口采用严格 fail：保存原始输出和具体错误，不派发不�
 | 可插拔 cache provider 能力协商、供应商恰好计费一次 | 内置存储与本地预算去重；不确定 Effect 默认阻断，显式裁决 |
 | 通用自动修复 Task、invalid 分支 DSL、任意 schema 转换 | 节点级契约、严格失败、现有人工重试与 Agent 响应修复 |
 | 插件构建摘要/旧版本产物仓库 | 当前实现版本不可变；清单/schema 漂移明确拒绝，不自动迁移 |
-| 自动合并与完整冲突编辑器 | 保留分支/工作区、报告冲突、允许人工处理 |
+| 自动冲突解决与完整冲突编辑器 | 现有 auto-if-clean 仅快进；保留分支/工作区、报告冲突、允许人工处理 |
 | OCI 与其他平台的完整矩阵 | 当前 Linux 原生/bwrap 基线；选用 OCI 或宣称其能力时单独真实验收 |
 
 “本地”不意味着单进程或无外部副作用：CLI 与桌面竞争、旧进程迟到取消、Bash 子进程未退出、清理悬挂、本机多 Session 的 GC 竞争都必须处理。上述扩展后移不能免除这些义务。
@@ -91,6 +92,8 @@ Flow 端口采用严格 fail：保存原始输出和具体错误，不派发不�
 - `packages/durable-kernel/src/kernel.test.ts`：旧条件的 Task/shared/signal 写入被拒、新 owner 复用逻辑 requestId。
 - `packages/llm-flow/__tests__/durable-flow-executor.test.ts`：旧宿主卡在回调、接管者完成后旧宿主恢复，不重复提交、不执行失败清理；工作区收尾。
 - `apps/cli/tests/crash-matrix.test.ts`：真实 SIGKILL 的提交/完成检查点间隙、委派在途、显式 Effect 重放。
+- `packages/app-shell/tests/scheduler-paused-owner.test.ts`：真实旧进程暂停、过期接管、恢复后的迟到控制隔离。
+- `packages/vfsdriver-localfs/tests/20-kernel-ipc.test.ts`：消息消费后 SIGKILL、并发 GC、物理清理与缓存回执原子性。
 - [完整目标与缺口](../todo.md)、[Durable 证据映射](durable-harness-evidence.md)、[本机验收记录](../minimal-system-acceptance.md)。
 
 本地 YAML 委派入口已落地：`tasks[].delegation` 指定子 Agent、指令、数量/并发上限与失败策略。子任务工具取父子交集，当前不暴露嵌套委派。真实 CLI crash-matrix 的委派用例通过这一公开入口运行，夹具只负责注入进程崩溃。
