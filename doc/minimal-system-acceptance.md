@@ -170,3 +170,17 @@ IPC 队列争用而非算法复杂度。修复方向（按收益排序）：① 
 构建：`pnpm build:libs` 的 20 个带构建脚本的库全部通过；`pnpm --filter './apps/*' build` 的 CLI、同步服务、Web、Tauri 前端四个应用全部通过，CLI dist 的 help 命令通过。TypeScript 声明生成未报告错误，前端仍有体积提示。与 tsx 入口直接相关的 tauri-workspace-crash 三项真实 SIGKILL 回归通过。
 
 本轮使用 Node 26.8.1 / pnpm 10.20.0 与已有依赖缓存，未运行完整测试矩阵、原生 Rust 重建或 GUI，不替代 P0-05 的最终验收。对应临时日志为 `/tmp/x1-manifest-types.log`、`x1-manifest-libs-build.log`、`x1-manifest-apps-build.log`、`x1-manifest-lock.log`、`x1-manifest-tsx-test.log`；长期复核应执行上述命令。
+
+## 2026-09-14：Run 取消所有权与动态图崩溃恢复
+
+基线 `bf477a12` 加本批测试/文档的隔离快照：完整 CLI crash-matrix 12 项通过（约 374 秒），另一个真实双进程取消拒绝用例通过，共 13 项。CLI 类型检查通过。本轮未修改生产实现，补强了既有功能的故障证据。
+
+新增崩溃取消场景由本地模型服务器收到首个请求后、回复前 SIGKILL 真正的 CLI；测试确认 exit signal 为 SIGKILL，等待旧 Session/调度租约自然到期。新的测试宿主调用真实 resumeCommand，不授权重放时返回 3；持久 Effect 确认为 indeterminate，模型提交仍为一次。再调用 cancelCommand 返回 0，manifest 为 cancelled；再次 resume 返回 1，没有新增模型请求，持久 Task ID 集合保持不变。恢复与取消是命令 API 的新宿主实例，不将它描述为独立 cancel 可执行文件进程。
+
+新增动态 spawn 场景在补丁产生的节点已经向模型提交请求时杀死 CLI。恢复前确有一个 leased Effect；先验证缺少重放授权时阻塞，再显式授权同一逻辑 Effect 重放。恢复后 Run succeeded，所有持久 Task succeeded，Task ID 集合与崩溃前完全相同；模型请求恰为初次请求和授权重放两次。Task 身份核对比单独比较请求次数更强，但不覆盖补丁提交与检查点写入之间的全部窗口，也不代表自动委派 TaskGroup 故障矩阵完成。
+
+另一侧边界由 run-live-owner-refusal.test.ts 启动两个真实 CLI：第一进程的模型请求挂起且持有租约；第二进程执行 cancel，以退出码 2 拒绝并报告持有者。拒绝后连接保持、拥有者仍存活；向拥有者发送 SIGINT 后退出码 130，模型连接关闭，manifest 持久为 cancelled，模型只收到一次请求。测试排空两个子进程输出，避免管道填满干扰运行。
+
+复核：`pnpm --filter @itookit/cli exec vitest run tests/crash-matrix.test.ts` 与 `pnpm --filter @itookit/cli exec vitest run tests/run-live-owner-refusal.test.ts`。临时日志 `/tmp/x1-crash-complete.log`、`/tmp/x1-cancel-owner.log`；测试源包含配置、故障点、持久记录读取与断言，临时数据根在测试后清理。
+
+范围为本机真实 Node/SQLite/CLI 与本地 HTTP mock，不证明供应商不会重复计费、跨主机时钟/存储排他或物理资源 fencing。crash-matrix 内既有 after-reply 故障以发送回复后杀进程为触发，不声称精确锁定所有持久提交间隙。P1-01/P1-02 及其余协议故障矩阵继续开放。

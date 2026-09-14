@@ -137,6 +137,8 @@ mindos resume <run-id> --retry-indeterminate      # 授权重放同一逻辑 Eff
 
 `--retry-indeterminate` 只重放逻辑 Effect（`effectId` 不变、确定性 `requestId`），不会重新开始已完成的迭代；确认外部副作用不可重放时应改用 `mindos cancel <run-id>`。
 
+`mindos cancel` 用于取消**没有活宿主**的 Run（宿主崩溃、Effect 阻塞）。Session 是单写者：如果 Run 正由另一个 CLI 进程执行，该进程持有 Session 租约，`cancel` 会以退出码 2 明确拒绝并提示租约持有者，不会干扰在途请求；取消正在运行的 Run 请对该进程发送 `SIGINT`（退出码 130，Run 持久为 `cancelled`）。
+
 ## HTTP 模式（`-d` / `--http`）
 
 CLI 可以作为 HTTP 主机，直接提供 Tauri UI：

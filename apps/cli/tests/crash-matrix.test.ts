@@ -19,7 +19,7 @@ import { parse, stringify } from 'yaml';
 import { SeqFileKernelStore } from '@itookit/durable-kernel';
 import { CliStorageResolver, cliStorage, openProfileInspectionFs } from '../src/runtime';
 import { listenForTest } from './listen';
-import { exportCommand, resumeCommand } from '../src/commands';
+import { cancelCommand, exportCommand, resumeCommand } from '../src/commands';
 
 // A killed CLI cannot release its Session lease or the Run's scheduler lease; shorten
 // both TTLs so recovery can take over within the test instead of waiting the
@@ -131,6 +131,14 @@ async function storedMemory(stateDir: string, runId: string) {
         const tasks = await store.listTasks(binding);
         const effects = tasks.flatMap(task => Object.values(task.effects)).filter(effect => effect.request.kind === 'tool.call');
         return { memory: await store.getShared(binding, 'memory.entries.["agent","project"]'), effects };
+    } finally { await inspection.dispose(); }
+}
+
+async function storedTasks(stateDir: string, runId: string) {
+    const inspection = await openProfileInspectionFs(stateDir);
+    try {
+        const resolver = new CliStorageResolver(inspection.fs), binding = await resolver.resolve(cliStorage(runId));
+        return await new SeqFileKernelStore(binding, reference => resolver.resolve(reference)).listTasks(binding);
     } finally { await inspection.dispose(); }
 }
 
@@ -282,6 +290,75 @@ it('recovers a run killed while the first Effect is in flight', async () => {
     expect(crash.prompts.length).toBeGreaterThanOrEqual(2);
 }, 40_000);
 
+it('cancels a Run blocked on an indeterminate Effect and refuses to replay it', async () => {
+    const crash = crashingServer({ request: 1, when: 'before-reply' }, () => 'done');
+    const port = await listenForTest(crash.server);
+    servers.push(crash.server);
+
+    const root = await workspace('mindos-crash-cancel-');
+    const stateDir = path.join(root, '.mindos');
+    const configPath = path.join(root, 'mindos.yml');
+    process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
+    await writeFile(configPath, singleNodeConfig(port), 'utf8');
+
+    const child = startRun(configPath, stateDir);
+    crash.attach(child);
+    expect(await once(child, 'exit')).toEqual([null, 'SIGKILL']);
+    const runId = await latestRun(root);
+    await settleLease();
+
+    expect(await resumeCommand(runId, { stateDir, headless: true, json: true })).toBe(3);
+    const blocked = await storedTasks(stateDir, runId);
+    expect(blocked.flatMap(task => Object.values(task.effects)).filter(effect => effect.status === 'indeterminate')).toHaveLength(1);
+    expect(crash.prompts).toHaveLength(1);
+
+    // The killed host left an Effect whose outcome cannot be proven. `mindos cancel` is
+    // the documented alternative to authorizing a replay, and it must converge durably:
+    // the old owner is dead and its leases have expired before the new host cancels.
+    expect(await cancelCommand(runId, { stateDir, headless: true, json: true })).toBe(0);
+    expect(await manifest(root, runId)).toMatchObject({ status: 'cancelled' });
+    const callsAfterCancel = crash.prompts.length;
+
+    // A cancelled Run is terminal: resuming must not replay the blocked Effect.
+    expect(await resumeCommand(runId, { stateDir, headless: true, json: true })).toBe(1);
+    expect(crash.prompts.length).toBe(callsAfterCancel);
+    expect((await storedTasks(stateDir, runId)).map(task => task.id).sort()).toEqual(blocked.map(task => task.id).sort());
+    expect(await manifest(root, runId)).toMatchObject({ status: 'cancelled' });
+}, 40_000);
+
+it('does not re-apply a graph patch when replaying a crashed spawned node', async () => {
+    const crash = crashingServer({ request: 1, when: 'before-reply' }, () => 'SPAWNED A');
+    const port = await listenForTest(crash.server);
+    servers.push(crash.server);
+
+    const root = await workspace('mindos-crash-spawn-');
+    const stateDir = path.join(root, '.mindos');
+    const configPath = path.join(root, 'mindos.yml');
+    process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
+    await writeFile(configPath, spawnConfig(port), 'utf8');
+
+    const child = startRun(configPath, stateDir);
+    crash.attach(child);
+    expect(await once(child, 'exit')).toEqual([null, 'SIGKILL']);
+    const runId = await latestRun(root);
+    await settleLease();
+
+    const before = await storedTasks(stateDir, runId);
+    expect(before.flatMap(task => Object.values(task.effects)).filter(effect => effect.status === 'leased')).toHaveLength(1);
+
+    // The patch was applied (the spawned node Task exists) before the kill. Resuming must
+    // replay only the blocked model Effect, not apply the patch again.
+    expect(await resumeWithReplay(runId, stateDir)).toBe(0);
+    const final = await manifest(root, runId);
+    expect(final).toMatchObject({ status: 'succeeded' });
+    const recovered = await storedTasks(stateDir, runId);
+    expect(recovered.map(task => task.id).sort()).toEqual(before.map(task => task.id).sort());
+    expect(recovered.every(task => task.status === 'succeeded')).toBe(true);
+    // One request was killed and one replayed for the same persistent Task set.
+    expect(crash.prompts).toHaveLength(2);
+    expect(crash.prompts.some(body => body.includes('动态任务 A'))).toBe(true);
+}, 40_000);
+
 it('reconciles a run killed after the reply was delivered but before it committed', async () => {
     const crash = crashingServer({ request: 1, when: 'after-reply' }, () => 'done');
     const port = await listenForTest(crash.server);
@@ -404,6 +481,30 @@ function singleNodeConfig(port: number): string {
       result: text
 result:
   task: finish
+  output: result
+sandbox:
+  mode: native
+`;
+}
+
+function spawnConfig(port: number): string {
+    return `${header(port, 'spawn')}tasks:
+  - id: dispatcher
+    description: 派发动态任务
+    spawn:
+      tasks:
+        - id: worker_a
+          agent: worker
+          description: 动态任务 A
+          outputs:
+            result: text
+      edges:
+        - from: dispatcher
+          to: worker_a
+    outputs:
+      result: text
+result:
+  task: dispatcher
   output: result
 sandbox:
   mode: native

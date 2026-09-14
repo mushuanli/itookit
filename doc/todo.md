@@ -83,7 +83,8 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 - [ ] **P1-01 任意崩溃点的持久调度**
   - 已实现：先持久根/检查点再派发、稳定 requestId 与 spec 指纹去重、成员与循环/patch/委派恢复。结果不确定的 Effect 标记 indeterminate，CLI 退出码 3；显式 `resume --retry-indeterminate` 才授权重放。
-  - 已有六个 CLI SIGKILL 场景及包级委派恢复；节点提交与检查点并非同一事务，但稳定 requestId 可复用原 Task，不能再笼统称为“没有去重”。
+  - 已有 CLI SIGKILL 场景及包级委派恢复；节点提交与检查点并非同一事务，但稳定 requestId 可复用原 Task，不能再笼统称为“没有去重”。
+  - 2026-09-14 补验：完整 CLI crash-matrix 12 项通过；新增 indeterminate 后取消拒绝重放，以及动态 spawn 恢复保持同一持久 Task 集合。另有真实双 CLI 取消拒绝 1 项通过：活拥有者不受干扰，拥有者 SIGINT 后持久 cancelled。见[取消与恢复验收](minimal-system-acceptance.md#2026-09-14run-取消所有权与动态图崩溃恢复)。本机证据不替代下列委派/提交间隙和多主机要求。
   - 剩余：按协议补全崩溃窗口，尤其委派真实进程故障、提交/检查点间隙的完整核验，确认不重复 fan-out、已完成迭代或外部副作用。CLI schema 尚不暴露 delegation。
   - 入口：`apps/cli/tests/crash-matrix.test.ts`、`packages/llm-flow/__tests__/durable-flow-executor.test.ts`。
 
