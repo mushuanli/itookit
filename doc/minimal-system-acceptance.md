@@ -1706,3 +1706,18 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 结论：项目规则来自挂载的项目根并被注入；同一挂载树内层的 `_agent/AGENT.md` **既不被合并也不被替换**，符合 `session-file-source.ts` 的注释契约。`cwd` 等于项目根时 `scopeRoots` 只返回根一级，所以内层 Skill 也不参与级联——这与“Skill 按层级级联”不矛盾：级联需要更深的 `cwd`，而普通发送路径使用配置的 `cwd`；更深作用域只在 Flow/工作区作用域路径出现，本窗口场景没有覆盖。
 
 复现：`node --import tsx .tauri-acceptance/seed-nested-mounts.mts <rootDir>` 预置挂载（临时助手，`at` 只允许单段，脚本内注明原因），随后按上述窗口步骤发送并读取 `mock-record.log` 的请求体。长期证据以本节标记计数、`session-file-source.ts` 契约与其包级回归为准；窗口驱动脚本与数据根在已 gitignore 的 `.tauri-acceptance/`，临时文件会消失。
+
+## 2026-09-14：原生目录选择器的静默失败（P0-04）
+
+上一节（[平台边界验收](minimal-system-acceptance.md#2026-09-14p0-04-平台边界图标字体与原生目录选择器)）记录“原生选择器能弹出但未能完成选择”。本轮继续追查，找到一个**代码缺陷**并修复，同时如实记录未能完成的验证。
+
+**缺陷**：`apps/tauri-app/src/main.ts` 的 `openDirectoryDialog` 写成
+`try { … } catch { return null }`，把“用户取消”和“选择器损坏”合并成同一个返回值；`#btn-add-mount` 的点击处理又完全没有 `catch`。于是选择器失效时既没有提示、也没有日志，唯一症状是**按钮点了没反应**——与项目自身“静默失败可见化”的原则相冲突。
+
+**修复**：抽出 `apps/tauri-app/src/services/directory-dialog.ts`，取消仍解析为 `null`，真实失败则记录并**重新抛出**；点击处理捕获后 `console.error` + `alert` 报告失败原因，挂载失败（原先是一个未被观察的 rejection）同样可见。回归 `packages/app-shell/tests/directory-dialog.test.ts` 3 项：成功返回路径、取消返回 `null` 且不记错误、失败重新抛出并记录；Tauri 与 app-shell 类型检查通过。
+
+**验证缺口（必须如实说明）**：改动后在本环境**未能**再让窗口响应合成输入——点击 `Mount directory…` 时点击处理从未执行（用临时写入 `document.title` 的诊断证明标题始终是 `X1`，`DIAG-*` 从未出现），同期点击导航项也不再生效，说明是该实例的输入/焦点问题而不是本改动导致。因此“修复后的选择器在窗口中的端到端行为”**没有**取到证据；其正确性只建立在包级回归与“成功/取消路径逐字未变”之上。最终产物已移除诊断代码并恢复普通前端与 `custom-protocol` 原生构建。
+
+环境侧证据（未变）：选择器由 XDG Portal 承载，`xdg-desktop-portal` 报告 `fuse: device /dev/fuse not found`、`error: fuse init failed`、`Document portal fuse mount point unknown`，本容器没有 `/dev/fuse`，门户文档门户不可用；点击门户的“打开(O)”后对话框关闭，但既没有 `sources.json` 落盘也没有新增导航项，`/var/lib/kernel/local-sources` 为空。**门户选择失败的确切形态（reject / 返回 null / 停留不返回）本轮仍未判定**，不能据此宣称原生选择器在本机可用或不可用。
+
+复现：`pnpm --filter @itookit/app-shell exec vitest run tests/directory-dialog.test.ts`（包级）；窗口部分需要可用的合成输入与 `/dev/fuse`，本环境未满足。
