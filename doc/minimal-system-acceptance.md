@@ -1721,3 +1721,13 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 环境侧证据（未变）：选择器由 XDG Portal 承载，`xdg-desktop-portal` 报告 `fuse: device /dev/fuse not found`、`error: fuse init failed`、`Document portal fuse mount point unknown`，本容器没有 `/dev/fuse`，门户文档门户不可用；点击门户的“打开(O)”后对话框关闭，但既没有 `sources.json` 落盘也没有新增导航项，`/var/lib/kernel/local-sources` 为空。**门户选择失败的确切形态（reject / 返回 null / 停留不返回）本轮仍未判定**，不能据此宣称原生选择器在本机可用或不可用。
 
 复现：`pnpm --filter @itookit/app-shell exec vitest run tests/directory-dialog.test.ts`（包级）；窗口部分需要可用的合成输入与 `/dev/fuse`，本环境未满足。
+
+## 2026-09-14：当前树全量回归重跑（`f81a5bc9`）
+
+上一批回归在 `3c3afe5d`；此后本会话又合入发送边界观察点修正、Session 关闭入口、app-shell 显式 typecheck、嵌套边界与选择器失败可见化等改动，因此重跑同一入口以覆盖新代码。
+
+工作树 `f81a5bc9`，Node 26.8.1 / pnpm 10.20.0 / cargo 1.98.1，复用本机依赖与 Rust 缓存，未做全新安装。11 个阶段全部 rc=0：typecheck **25 个 workspace**、`docs:check`、`styles:check`、20 个库构建、CLI 与前端构建、`cargo test` **36 项**、包测试 **1511 通过 / 30 跳过**（191 文件）、CLI 非崩溃 **108**、crash-matrix **12**、`custom-protocol` 原生构建、调度器 **3 项**。
+
+合计 **1670 项通过 / 30 项跳过**，比上一批（1667）多 3 项，全部来自本批新增的 `packages/app-shell/tests/directory-dialog.test.ts`（3 项）。其余阶段数字与上一批一致。
+
+边界不变：这仍是**当前树**回归，不是最终验收——P0-02 的 ≤2 秒 / ≤100 次阈值仍未达成，P0-04 的原生选择器可用性未结论、其他平台与安装包未验证；工作树当时还有另一位协作者未提交的 `packages/llm-ui/src/styles/chat-nodes.css` 等改动，未纳入本批统计口径。

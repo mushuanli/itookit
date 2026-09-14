@@ -89,6 +89,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 2026-09-14 统一测试入口批次：以 `a308eb65` 加本批选定文件的隔离快照运行 `pnpm test`，Vitest 1,593、调度器 3、Rust 36 项通过，共 1,632 项；30 项既有跳过。CLI 107 项与 SIGKILL 矩阵 10 项分开执行；CLI 类型与文档检查通过。Node 26.8.1 / pnpm 10.20.0，复用本机依赖与 Rust 编译缓存，未做全新依赖安装验证。这是当前入口的阶段性回归，不是最终全仓/GUI 验收。
   - 2026-09-14 类型/构建入口批次：补齐六个 workspace 的 typecheck，24 个实际执行通过；Web/Tauri 文件列表覆盖 app-shell 全部 12 个 src TS 文件，demo 仍为手工 JS 示例。20 个库和四个应用构建、冻结锁文件核对、tsx 子进程三项 SIGKILL 回归通过。见[清单验收](minimal-system-acceptance.md#2026-09-14类型检查覆盖与包清单收口)。未替代最终全矩阵、全新安装或 GUI。
   - 2026-09-14 当前树全量批次：工作树 `3c3afe5d`（`git status` 干净），按 §4 入口逐条执行，11 个阶段全部 rc=0——typecheck 25 个 workspace、`docs:check`、`styles:check`、20 个库构建、CLI/前端构建、`cargo test` 36 项、包测试 **1508 通过/30 跳过**、CLI 非崩溃 **108**、crash-matrix **12**、`custom-protocol` 原生构建、调度器 **3**，合计 **1667 项通过 / 30 项跳过**。见[当前树全量回归](minimal-system-acceptance.md#2026-09-14当前树全量回归p0-05-阶段批次)。
+  - 2026-09-14 重跑（本会话其余改动合入后）：工作树 `f81a5bc9`，11 个阶段全部 rc=0，合计 **1670 项通过 / 30 项跳过**（包测试 1511、CLI 108、crash-matrix 12、Rust 36、调度器 3、typecheck 25 个 workspace）。较上批 +3，全部来自新增的 `directory-dialog.test.ts`。见[重跑记录](minimal-system-acceptance.md#2026-09-14当前树全量回归重跑-f81a5bc9)。
   - 仍未达最终验收：P0-02 性能阈值未达成、P0-04 尚有未做窗口场景；未做全新依赖安装，未构建发布安装包（`bundle.targets: "all"`，本机无 AppImage/linuxdeploy 工具且无网络）。受版本控制的 `release/dist/` 停留在 2026-09-04，与当前树不同步，本轮未重新生成。
   - 待其余有效要求闭合后，对最终工作树执行类型、文档、样式、库/CLI/前端/原生产物构建、全量测试矩阵与真实窗口验收，记录版本、命令、结果和剩余跳过项。
 
