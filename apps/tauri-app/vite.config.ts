@@ -47,6 +47,8 @@ export default defineConfig({
     },
 
     build: {
+        // Keep fonts as same-origin files accepted by the desktop font-src policy.
+        assetsInlineLimit: 0,
         target:    'es2021',
         sourcemap: !!process.env.TAURI_ENV_DEBUG,
         rollupOptions: {

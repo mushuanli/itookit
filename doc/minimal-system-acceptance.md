@@ -127,3 +127,15 @@ IPC 队列争用而非算法复杂度。修复方向（按收益排序）：① 
 本地定位：失败 profile `/tmp/mindos-live-close-r2gvit`，修复与重开 profile `/tmp/mindos-live-close-RVCjog`，其中 running/context/confirm/deleted/reopen 文本与 PNG 为当次证据；临时目录不是长期交付物。重现时按上述步骤建立新数据根，并将 mock 回复延迟到删除确认之后。窗口开发者工具中的字体 CSP 告警仍存在，本批未验收其修复。
 
 自动回归先复现了删除后 active route 仍保留的失败，再验证 ENOENT 清理、EIO 保留和核对期间切换新 Session 不误关新编辑器。隔离 app-shell 196 项通过，30 项既有跳过；Tauri 类型、前端与原生构建通过。本场景只证明模型请求在途时的 Session 删除及重开；原生设备不确认停止、单独关闭但保留记录、真实超时/IPC 故障和其余 P0-02 矩阵仍开放。
+
+## 2026-09-14：桌面本地字体与导航可访问名称
+
+基线 `bc4a04fa` 的真实窗口报告 FontAwesome 兼容字体被 font-src CSP 拦截。生产 CSS 中一个较小的 woff2 被 Vite 内联为 data:font；桌面配置只允许同源文件及既有字体 CDN。Tauri Vite 构建设置 assetsInlineLimit=0，使资源以独立同源文件输出。未扩大 font-src 策略。
+
+隔离构建核对 10 个 FontAwesome font-face 的 URL：均非 data URL，且各自引用的文件存在。重新构建嵌入资源的原生二进制，在全新 profile 的真实 Xvfb/WebKit 窗口，通过开发者控制台对 document.fonts 中 family 匹配 /Font.?Awesome/ 的每个 FontFace 调用 load()；10 项均返回 loaded，包含 Font Awesome 7/5 Brands、Free 与 FontAwesome 兼容面。初始控制台不再出现该字体 CSP 错误。诊断只加载字体并把结果临时显示为 DOM 文本，没有修改应用字体定义或 CSP。
+
+静态导航链接补 aria-label，保留已有 title。AT-SPI 在鼠标停留于开发者工具时读到全部 11 个名称：AI Sessions、Projects、Anki Memory、Emails、Private Notes、Minds、Skills、Workflows、Agents、Mount directory…、Settings。此前多个导航链接只有悬停后才出现名称，不能把这种临时提示当稳定的无障碍名称。
+
+证据定位：`/tmp/mindos-live-close-OJI72o/fonts.txt`、`fonts.png` 与 `nav-labels.txt`。复核命令：Tauri 前端构建、custom-protocol 原生构建、Tauri 类型检查、`node apps/tauri-app/scripts/verify-ipc-trace.mjs`（真实 Vite 配置的 trace 开关/内部调用回归）均通过。临时文件不是长期交付物，复测应从新 profile 重建窗口并重复上述 FontFace/AT-SPI 检查。
+
+边界：本轮文件列表仍观察到部分方框字符，其来源需继续核对；FontAwesome 成功加载不证明所有 emoji、系统字体回退或全部控件都正确渲染。该项保留在 P0-04，未关闭其他平台、GTK 目录选择器、Skill 复选框或完整无障碍验收。
