@@ -59,7 +59,7 @@ export class SessionWorkbench implements WorkspaceController {
             readOnly: false, activateDirectories: true, defaultUiSettings: { sortBy: 'lastModified' },
             exportDirectories: true,
             exportItem: item => this.exportSessionItem(item),
-            fileCreation: { label: '会话' },
+            fileCreation: { label: '会话', resolveParent: sessionCreationParent },
             contextMenu: {
                 items: (item, defaults) => {
                     const target = resolveBrowserTarget(item.id);
@@ -472,4 +472,14 @@ export class SessionWorkbench implements WorkspaceController {
         await Promise.all([this.tail, this.refreshTail]); await this.closeEditor(); this.sidebarUI?.destroy();
         await this.browser?.dispose(); this.container.replaceChildren();
     }
+}
+
+/** Session and Task entries are virtual containers, not writable creation directories. */
+function sessionCreationParent(path: string | null): string | null {
+    if (!path) return null;
+    const target = resolveBrowserTarget(path);
+    if (target.kind === 'folder' || target.kind === 'files') return path;
+    const folders = path.split('/').filter(Boolean);
+    const sessionIndex = folders.findIndex(segment => !segment.startsWith('folder:'));
+    return sessionIndex > 0 ? '/' + folders.slice(0, sessionIndex).join('/') : null;
 }

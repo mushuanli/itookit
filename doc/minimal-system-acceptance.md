@@ -184,3 +184,16 @@ IPC 队列争用而非算法复杂度。修复方向（按收益排序）：① 
 复核：`pnpm --filter @itookit/cli exec vitest run tests/crash-matrix.test.ts` 与 `pnpm --filter @itookit/cli exec vitest run tests/run-live-owner-refusal.test.ts`。临时日志 `/tmp/x1-crash-complete.log`、`/tmp/x1-cancel-owner.log`；测试源包含配置、故障点、持久记录读取与断言，临时数据根在测试后清理。
 
 范围为本机真实 Node/SQLite/CLI 与本地 HTTP mock，不证明供应商不会重复计费、跨主机时钟/存储排他或物理资源 fencing。crash-matrix 内既有 after-reply 故障以发送回复后杀进程为触发，不声称精确锁定所有持久提交间隙。P1-01/P1-02 及其余协议故障矩阵继续开放。
+## 2026-09-14：Session 新建目标与桌面关闭语义复核
+
+基线 `87613126` 加本批选定代码，复用隔离快照 `/tmp/x1-feature-verify-w_wua9ix` 的本机依赖与 Rust 缓存。真实 Linux Tauri/Xvfb/D-Bus/AT-SPI，正常前端与 `tauri/custom-protocol` 原生构建；本地 OpenAI-compatible mock 收齐请求后等待 120 秒，并记录响应连接关闭时间。未替换 UI 删除/发送行为或直接修改 Session 持久记录。
+
+- 复现：创建并选中 `close-preserve`，点击“+ 会话”再输入名称，旧实现试图在 Session 虚拟目录内创建，原生弹窗显示 `创建失败: [ENOENT] getNodeType: Source operation failed: getNodeType`。新实现经 `FileCreationConfig.resolveParent` 将 Session/Task 容器映射到所属虚拟分组；Files 内仍保留真实目录。映射覆盖内联新建和直接创建命令。它不授予写权限，后端继续校验。
+- 回归：`packages/app-shell/tests/session-create-parent.test.ts` 使用真实 SessionRepository/SessionFilesService/VFS UI，分别覆盖根目录和分组内选中已有 Session 后新建同级会话，并在原 Session 的 attachments 内创建文件、断言没有产生第三个 Session。修复前两项均失败，修复后两项通过。app-shell 完整回归 198 项通过、30 项既有跳过；vfs-ui 88 项通过。增加附件断言后两项定向重跑通过；不重复累加测试数。第一次沙箱内 app-shell 的三项 SIGKILL 测试因 `spawnSync git EPERM` 被阻止，正常提权重跑完整包通过。
+- Tauri 类型、前端及原生构建通过。真实窗口使用新构建重开原数据根，在已有 Session 选中时创建 `second-session` 成功：侧栏两个会话并存，原会话的失败消息仍在，未弹新建错误。
+- 关闭边界：切换到 Projects 只隐藏缓存工作区；在 Session 列表切到另一个会话会解绑旧编辑器，但后台请求仍运行。两者都不是 Kernel `closeSession`。目前独立“关闭 Session 并保留记录”的窗口入口仍缺，P0-02 保留该要求，不能用切换或删除替代。
+- 超时观察：第一条请求 `hello close-preserve` 于 `02:47:06.090Z` 收齐，`02:48:06.075Z` 连接关闭且 `responseEnded=false`；第二条 `hello switch-close` 于 `03:11:08.550Z` 收齐，`03:12:08.538Z` 同样关闭。约 60 秒的客户端超时发生在 mock 120 秒回复前，不能归因于窗口切换。SQLite 只读核对两个 Task 均持久 `failed`、两个 Session 数据目录保留；重开首条显示 `FAILED / Fetch is aborted`。超时期间曾出现总体 Error 而消息仍 RUNNING 的画面，live 状态收敛和明确超时原因尚未据此完成。
+
+复现步骤：配置本地等待 120 秒的 mock；新建并选中 Session；再次点“+ 会话”应在同组产生同级会话；发送请求后切到 Projects 或另一个 Session，观察服务端连接仍在，等待约 60 秒超时，再重开原 Session 查看记录。关闭内核的验收需另有明确操作入口，不能把这些导航当作停止。
+
+临时证据：数据根 `/tmp/mindos-live-close-VYKRwL`，`second-created.png`（旧错误）、`fixed-create.png`、`timeout-reopened.png`、`switch-inflight.png`、`actually-switched.png`、`mock.log`、`closed-storage.json`。日志 `/tmp/x1-close-create-before.log`、`/tmp/x1-close-create-files.log`、`/tmp/x1-close-shell-final.log`、`/tmp/x1-close-vfsui.log`、`/tmp/x1-close-types.log`、`/tmp/x1-close-front.log`、`/tmp/x1-close-native.log`。长期复核以本提交回归和上述步骤为准；临时文件会消失。验收后关闭本次应用与 mock，产物保留正常入口。

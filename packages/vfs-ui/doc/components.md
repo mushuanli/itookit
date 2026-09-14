@@ -17,6 +17,8 @@ class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap> {
 
 工厂 `createVFSUI(options, engine)` 返回 `ISessionUI<VFSNodeUI, VFSService>`（`VFSUIShell` 实例）。
 
+`fileCreation.resolveParent(parentPath)` 可将虚拟容器映射到可创建目录；省略时沿用所选目录。内联创建在放置输入框前解析，直接创建命令也解析，因此回调应幂等；返回 `null` 表示根级，不授予额外写权限。该映射同时用于文件和目录创建，不改变导入、复制及后端权限检查。
+
 ## VFSService
 
 写操作服务，实现 `IDataOperationPort`：`createFile` / `createFiles` / `createDirectory` / `renameItem` / `updateMultipleItemsTags`。构造依赖 `{ engine: IFileSystem, newFileContent?, defaultExtension? }`。

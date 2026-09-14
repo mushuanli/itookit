@@ -98,6 +98,7 @@ export function assemble(
 
     const handlers = [
         new FileCommandHandler(commandBus, store, service, {
+            resolveParent: options.fileCreation?.resolveParent,
             newFileContent: options.fileCreation?.content,
             defaultFileName: options.fileCreation?.startupFileName,
             defaultFileContent: options.fileCreation?.startupContent,
@@ -108,7 +109,7 @@ export function assemble(
             getDuplicateTransformer: (ext) => registry.getDuplicateTransformer(ext),
         }),
         new NavigationCommandHandler(commandBus, store, eventBus),
-        new UICommandHandler(commandBus, store),
+        new UICommandHandler(commandBus, store, options.fileCreation?.resolveParent),
         new SelectionCommandHandler(commandBus, store),
         new BulkCommandHandler(commandBus, store, service),
         new ImportCommandHandler(

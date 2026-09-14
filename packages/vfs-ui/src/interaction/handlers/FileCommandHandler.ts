@@ -2,6 +2,7 @@
  * @file vfs-ui/interaction/handlers/FileCommandHandler.ts
  * @desc Handles file CRUD commands. Bridges Commands → Services.
  */
+import type { FileCreationConfig } from '@itookit/ui-common';
 import type { CommandBus } from '../CommandBus';
 import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
 import { buildRenamedFilename } from '@itookit/common';
@@ -11,6 +12,7 @@ import { describeCauseChain } from '../../utils/error-detail';
 import { partitionDeletable, READ_ONLY_DELETE_MESSAGE } from '../../utils/delete-guard';
 
 export interface FileCommandOptions {
+  resolveParent?: FileCreationConfig['resolveParent'];
   newFileContent?: string;
   defaultFileName?: string;
   defaultFileContent?: string;
@@ -34,6 +36,7 @@ export class FileCommandHandler {
     this.unsubs.push(
       this.commandBus.on('file:create', async ({ type, title, parentPath }) => {
         try {
+          parentPath = this.options.resolveParent ? this.options.resolveParent(parentPath) : parentPath;
           if (type === 'file') {
             await this.service.createFile({
               title,

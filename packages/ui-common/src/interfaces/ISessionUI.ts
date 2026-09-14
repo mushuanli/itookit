@@ -52,6 +52,8 @@ export type TagEditorFactory = (
  * Grouped to keep SessionUIOptions focused on session-level concerns.
  */
 export interface FileCreationConfig {
+    /** Map a selected virtual container to a valid creation parent (also for directories). */
+    resolveParent?: (parentPath: string | null) => string | null;
     /** Label on the "+ New" button (e.g. "Chat", "Agent"). Default: "File". */
     label?: string;
     /** Title pre-filled in the new-file inline input. */

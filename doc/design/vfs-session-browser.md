@@ -6,6 +6,8 @@
 
 ## 1. 目录与交互
 
+新建目标由 `fileCreation.resolveParent` 映射：选中 Session 或 Task 虚拟条目时在所属分组创建同级会话/分组；选中 files 内目录时保留原目标并经过文件权限检查。内联命名和直接创建命令使用同一映射。切换会话仅解绑编辑器，不调用 Kernel `closeSession`；切工作区仅隐藏缓存界面，后台执行不因此停止。
+
 ```text
 SessionBrowserFS:/
   <sessionId>/              显示会话标题；打开 Session 聊天
