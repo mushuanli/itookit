@@ -1,10 +1,13 @@
+import { remapFlowNodeReferences } from '@itookit/llm-common';
 import type {
     DagRunSpec,
     FlowRevision,
     FlowNodeDefinition,
 } from '@itookit/common';
 import { resolveNodeConnection } from './connections';
-import { resolveFlowParameters } from './parameters';
+import { resolveFlowParameters, flowParameterValues } from './parameters';
+import { compileReferenceGraph } from './structured/references';
+import { compileDispatchGraph } from './structured/graph';
 
 export type FlowNodeBinder = (
     node: FlowNodeDefinition,
@@ -20,6 +23,7 @@ export async function flowToDag(
     resolveComposite?: (id: string, revision?: number) => Promise<FlowRevision | null>,
     compositeStack: string[] = [],
 ): Promise<DagRunSpec> {
+    flow = compileReferenceGraph(compileDispatchGraph(flow));
     const nodes = await Promise.all(flow.nodes.map(async node => {
         const defaults = node.plugin === 'builtin.agent' ? flowAgentDefaults(flow) : undefined;
         const patch = (await bind?.(node, defaults as FlowNodeDefinition['config'])) ?? {};
@@ -30,6 +34,7 @@ export async function flowToDag(
             name: node.name,
             plugin: node.plugin,
             pluginVersion: node.pluginVersion,
+            outputPolicy: node.outputPolicy ? structuredClone(node.outputPolicy) : undefined,
             portSchemas: node.portSchemas ? structuredClone(node.portSchemas) : undefined,
             config,
             inputs: cloneJson(patch.inputs ?? node.inputs),
@@ -44,6 +49,8 @@ export async function flowToDag(
         };
     }));
     const base: DagRunSpec = {
+        templateVersion: 1,
+        parameterSchema: structuredClone(flow.parameters),
         nodes,
         nodeDefaults: Object.fromEntries(nodes.map(node => [node.id, cloneJson(flowAgentDefaults(flow))])),
         nodeConnections: Object.fromEntries(nodes.map(node => [node.id, cloneJson({
@@ -79,6 +86,7 @@ async function expandCompositeNodes(
     const composites = spec.nodes.filter(node => node.plugin === 'builtin.flow');
     if (!composites.length) return spec;
     if (!resolveComposite) throw new Error('Composite Flow nodes require a Flow revision resolver');
+    const parameterScopes = { ...spec.parameterScopes };
     const nodeDefaults = { ...spec.nodeDefaults };
     const nodeConnections = { ...spec.nodeConnections };
     const replacement = new Map<string, { entries: string[]; exits: string[] }>();
@@ -110,15 +118,17 @@ async function expandCompositeNodes(
         const outgoing = new Set(child.edges.map(edge => edge.from));
         const entries = child.nodes.filter(node => !incoming.has(node.id)).map(node => `${prefix}${node.id}`);
         const exits = child.nodes.filter(node => !outgoing.has(node.id)).map(node => `${prefix}${node.id}`);
-        const parameters = isRecord(config.parameters) ? config.parameters as Record<string, import('@itookit/common').JsonValue> : undefined;
+        const parameters = isRecord(config.parameters) ? config.parameters as Record<string, import('@itookit/common').JsonValue> : {};
+        parameterScopes[prefix] = { parent: composite.id.slice(0, composite.id.lastIndexOf('/') + 1), defaults: flowParameterValues(child.parameterSchema), values: parameters, schema: child.parameterSchema };
+        for (const [id, scope] of Object.entries(child.parameterScopes ?? {})) parameterScopes[`${prefix}${id}`] = { ...scope, parent: `${prefix}${scope.parent}` };
         for (const node of child.nodes) {
             expandedNodes.push({
                 ...node,
                 id: `${prefix}${node.id}`,
                 name: `${composite.name} / ${node.name}`,
-                config: parameters ? resolveFlowParameters(node.config, parameters) : node.config,
+                config: remapFlowNodeReferences(node.config, Object.fromEntries(child.nodes.map(item => [item.id, `${prefix}${item.id}`]))),
                 inputs: {
-                    ...node.inputs,
+                    ...remapFlowNodeReferences(node.inputs, Object.fromEntries(child.nodes.map(item => [item.id, `${prefix}${item.id}`]))) as Record<string, unknown>,
                     ...(entries.includes(`${prefix}${node.id}`) ? composite.inputs : {}),
                 },
                 ...(node.compensate && childIds.has(node.compensate) ? { compensate: `${prefix}${node.compensate}` } : {}),
@@ -137,7 +147,9 @@ async function expandCompositeNodes(
             expandedEdges.push({ ...edge, id: `${edge.id}:${source}->${target}`, from: source, to: target });
         }
     }
-    return { ...spec, nodeDefaults, nodeConnections, nodes: expandedNodes, edges: expandedEdges };
+    const aliases = Object.fromEntries([...replacement].filter(([, value]) => value.exits.length === 1).map(([id, value]) => [id, value.exits[0]]));
+    const mappedNodes = expandedNodes.map(node => ({ ...node, config: remapFlowNodeReferences(node.config, aliases), inputs: remapFlowNodeReferences(node.inputs, aliases) as typeof node.inputs }));
+    return { ...spec, parameterScopes, nodeDefaults, nodeConnections, nodes: mappedNodes, edges: expandedEdges };
 }
 
 /** Apply Flow defaults before the session/agent binder applies its higher layers. */

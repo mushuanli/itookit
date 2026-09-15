@@ -10,7 +10,7 @@ import {
     dependenciesReady,
     dependencyWait,
 } from '@itookit/llm-tasks';
-import { reduceOutcome, routeOutcome, spawnOutcome, transformOutcome } from './operations';
+import { aggregateOutcome, reduceOutcome, routeOutcome, spawnOutcome, transformOutcome } from './operations';
 
 export interface FlowDependencyBinding {
     taskId: string;
@@ -20,7 +20,7 @@ export interface FlowDependencyBinding {
 }
 
 export interface FlowValueInput {
-    operation: 'transform' | 'reduce' | 'route' | 'spawn';
+    operation: 'transform' | 'reduce' | 'route' | 'spawn' | 'aggregate';
     nodeId?: string;
     config: Record<string, JsonValue>;
     inputs: Record<string, JsonValue>;
@@ -166,6 +166,7 @@ function completeValue(state: FlowValueState): Decision<FlowValueState, DagNodeO
     }
     const operation = state.operation === 'transform'
         ? transformOutcome
+        : state.operation === 'aggregate' ? aggregateOutcome
         : state.operation === 'reduce' ? reduceOutcome
         : spawnOutcome;
     const output = state.operation === 'spawn'

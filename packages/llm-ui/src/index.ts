@@ -162,3 +162,7 @@ export type { LLMEditorOptions };
 // AI 右键菜单扩展
 export { createAIContextMenuConfig } from './context-menu/AIContextMenu';
 export type { AIContextMenuOptions } from './context-menu/AIContextMenu';
+
+export { createFlowContextMenuConfig } from './flows/context-menu';
+export { FlowLauncher, type FlowRunOptions } from './flows/run-flow';
+export { installFlowLibrary, restoreFlowLibrary, builtinFlowLibrary } from './flows/library';

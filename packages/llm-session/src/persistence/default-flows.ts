@@ -140,18 +140,6 @@ export function essayReviewDraft(): FlowDraft {
 
 /** Create the default essay-review workflow if it does not exist yet. */
 export async function seedDefaultFlows(store: FlowDefinitionStore): Promise<void> {
-    if (await store.loadDraft(ESSAY_REVIEW_FLOW_ID)) return;
-    const spec = essayReviewDraft();
-    const draft = await store.createDraft({ id: ESSAY_REVIEW_FLOW_ID, name: spec.name });
-    const filled: FlowDraft = {
-        ...draft,
-        nodes: spec.nodes,
-        edges: spec.edges,
-        layout: spec.layout,
-        parameters: spec.parameters,
-        connections: spec.connections,
-        defaultConnection: spec.defaultConnection,
-    };
-    await store.saveDraft(filled, draft.draftVersion);
-    await store.createRevision(filled);
+    const draft = await store.installBuiltinDraft(essayReviewDraft());
+    if (draft) await store.createRevision(draft);
 }

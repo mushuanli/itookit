@@ -10,6 +10,15 @@ function view(...args: Parameters<typeof createFileSystemView>): FileSystemView 
 }
 
 describe('independent file system views', () => {
+    it('reports synthetic parents read-only while a mounted destination remains writable', async () => {
+        const fs = await source();
+        const app = view({ viewId: 'mixed', mounts: [{ mountId: 'work', at: '/nested/work', fs, access: 'rw' }] });
+        expect((await app.capabilitiesAt('/')).readonly).toBe(true);
+        expect((await app.capabilitiesAt('/nested')).readonly).toBe(true);
+        expect((await app.capabilitiesAt('/nested/work')).readonly).toBe(false);
+        await expect(app.driver.createFile({ name: 'blocked.md' })).rejects.toMatchObject({ code: 'EROFS' });
+        await expect(app.driver.createFile({ parentPath: '/nested/work', name: 'allowed.md' })).resolves.toMatchObject({ name: 'allowed.md' });
+    });
     it('disables tag reads and writes for external host sources', async () => {
         const backend = new MemoryBackend();
         await backend.init();

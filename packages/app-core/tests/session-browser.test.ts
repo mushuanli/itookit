@@ -27,6 +27,17 @@ async function setup(kernelOverrides: Record<string, unknown> = {}) {
     return { a, b, files, repository, browser, kernel, lifecycle };
 }
 describe('Session browser projection', () => {
+    it('projects live mounted file permissions and marks the tasks container read-only', async () => {
+        const f = await setup();
+        const prefix = `/${f.a}/files/workspace`;
+        expect((await f.browser.fs.driver.getChildren(`/${f.a}`)).find(node => node.name === 'tasks')?.metadata._readOnly).toBe(true);
+        expect((await f.browser.fs.driver.getNode(prefix))?.metadata._readOnly).toBe(false);
+        await f.files.configure(f.a, { mounts: [{ mountId: 'work', sourceId: 'home', at: '/workspace', root: '/project', access: 'ro' }], cwd: '/workspace' }, 1);
+        expect((await f.browser.fs.driver.getNode(prefix))?.metadata._readOnly).toBe(true);
+        expect((await f.browser.fs.driver.getChildren(prefix)).every(node => node.metadata._readOnly === true)).toBe(true);
+        expect((await f.browser.fs.driver.getChildren(`/${f.a}/files`)).find(node => node.name === 'workspace')?.metadata._readOnly).toBe(true);
+        await expect(f.browser.fs.driver.createFile({ parentPath: prefix, name: 'blocked.md' })).rejects.toMatchObject({ code: 'EROFS' });
+    });
     it('previews one Task page and exposes the explicit paginated-list entry', async () => {
         const f = await setup();
         expect((await f.browser.fs.driver.getChildren(`/${f.a}/tasks`)).map(node => node.name)).toEqual(['t', '@more']);

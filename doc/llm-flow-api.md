@@ -6,6 +6,7 @@
 
 ## 目录
 
+- [统一提交：submitRun](#统一提交submitrun)
 - [入口：DurableFlowExecutor](#入口durableflowexecutor)
 - [Flow Programs：value / human / aggregate](#flow-programs)
 - [命令面：DagCommandService](#命令面dagcommandservice)
@@ -16,6 +17,12 @@
 - [源码结构：文件与路径](#源码结构文件与路径)
 
 ---
+
+## 统一提交：submitRun
+
+`submitRun(definition, { kernel, flowExecutor? })` 接受 `CompiledRunDefinition`：`TaskRunDefinition` 提供直接 Program 和能力绑定，`GraphRunDefinition` 提供图与参数。返回 `RunExecution` 的 `root` 和实时 `tasks()`；图重载返回 `GraphRunExecution`，额外保留 `flow: FlowExecutionHandle`。
+
+Chat/Agent、会话 Flow、Flow 编辑器、Plan/Exec 共用该入口。直接 Task 在能力绑定后才启动；图路径沿用已配置的 `DurableFlowExecutor`。`tasks()` 对直接任务返回根任务，对图返回当前节点任务，根任务单独通过 `root` 访问。恢复、图级重试和工作区清理沿用原执行器协议。完整分层见 [RunDefinition](run-definition.md#会话与命令的统一提交)。
 
 ## 入口：DurableFlowExecutor
 
@@ -258,7 +265,7 @@ packages/llm-flow/src/
 
 Run 控制会在信号注入和单任务取消前刷新持久成员清单，允许控制其他调用方刚登记的重试任务；按 nodeId 注入信号选择当前最大 iteration 对应的任务，按 targetTaskId 则校验 Run 成员身份。Goal 编辑窗口固定打开时的 Run，信号和取消回调也固定发起时的 Run，异步完成不会刷新切换后的其他 Run；失败通过错误提示呈现。Goal 状态对 Session suspend/resume 的影响及其与目标持久化非原子的边界保持不变。
 
-端口结构注册：`DagPluginRegistry.registerSchema(ref, schema)` / `getSchema(ref)`，或实现 `DagPluginCatalog.getSchema`。相同引用不得重复注册，返回值为副本。FlowSchemaRegistry / flowSchemaIssue / schemaCompatibilityIssue 从包出口导出。目标有 schema 的 data edge 必须解析到已注册定义；发布、直接执行和 patch 拒绝未知引用，下游创建前校验成功上游的实际消费值。id 不同一律拒绝；同一 id 版本不同时要求注册表能证明来源结构是目标结构的子类型（`llm-flow/src/flow/schema-compat.ts`：boolean schema、`integer ⊆ number`、enum 子集、object 的 required/properties/additionalProperties、array items 递归推导）。支持 boolean schema、type、properties、required、items、additionalProperties、enum 及 title/description 注释，未知关键字拒绝。发布前的边引用与图校验使 `submit` 失败；运行期校验无效数据使 Run 失败（见 `submit` 发布时机的说明）。所有声明 schema 的输出端口都会在节点成功结算时用其**自身**契约校验（`assertNodeOutputs`），包括有消费边、下游契约更宽松或未声明 schema 的情况，失败不派发下游；校验发生在聚合根发布之后，因此表现为失败的 Run。不自动解析 JSON 字符串，不提供端口 repair 策略。
+端口结构注册：`DagPluginRegistry.registerSchema(ref, schema)` / `getSchema(ref)`，或实现 `DagPluginCatalog.getSchema`。相同引用不得重复注册，返回值为副本。FlowSchemaRegistry / flowSchemaIssue / schemaCompatibilityIssue 从包出口导出。目标有 schema 的 data edge 必须解析到已注册定义；发布、直接执行和 patch 拒绝未知引用，下游创建前校验成功上游的实际消费值。id 不同一律拒绝；同一 id 版本不同时要求注册表能证明来源结构是目标结构的子类型（`llm-flow/src/flow/schema-compat.ts`：boolean schema、`integer ⊆ number`、enum 子集、object 的 required/properties/additionalProperties、array items 递归推导）。支持 boolean schema、type、properties、required、items、additionalProperties、enum、minimum/maximum 及 title/description 注释，未知关键字拒绝。发布前的边引用与图校验使 `submit` 失败；运行期校验无效数据使 Run 失败（见 `submit` 发布时机的说明）。所有声明 schema 的输出端口都会在节点成功结算时用其**自身**契约校验（`assertNodeOutputs`），包括有消费边、下游契约更宽松或未声明 schema 的情况，失败不派发下游；校验发生在聚合根发布之后，因此表现为失败的 Run。不自动解析 JSON 字符串，不提供端口 repair 策略。
 
 单次运行定义隔离：DurableFlowExecutor.submit 在首次异步操作前复制 DagRunSpec 和 parameters；初始节点的插件清单及其端口 schema 同时缓存，后续动态节点的定义在首次读取时缓存，包含未找到的引用。修改调用方原始对象或宿主之后返回的同名 schema 不影响已缓存定义。DagPluginRegistry 注册时复制清单并保留 runtime/UI 方法的调用接收者。定义持久冻结见上一条：调度检查点保存 `spec`/`parameters`/`sessionContext`/live 图与 `nodeDefaults`/`nodeConnections`，`resume` 只从检查点恢复，因此跨进程恢复不依赖宿主重新编译定义。仍未冻结的是宿主插件实现代码（同名 `plugin@version` 的新实现会在下一回合生效）。
 
@@ -317,3 +324,17 @@ DagWorkbench 在 Run 未终态时为终态成员提供「重试并重算下游�
 `DagCommandService` 接受 `canWriteSession` 与 `workspaceManager` 宿主端口，独立 DAG 与会话运行共用授权及工作区实现。Run 控制在 `withFlowControl` 内执行：本 Kernel 活跃调度器的租约可复用，其他 Kernel 的活跃所有权不可借用；无调度器时短暂取得租约。Task 响应与所有控制写入携带固定 epoch。每个 Run 的本地控制请求串行执行；暂停先停根调度再停成员，恢复顺序相反，同 Session 其他 Run 不受影响。
 
 工作区收尾超过 5 秒仍未完成时，`workspaceFinalization` 保持 `pending` 并持久记录说明；桌面轮询显示该说明，CLI 退出等待同时报告。超时提示不代表物理清理完成，不释放调度所有权，也不删除仍在使用的文件。完成后的 succeeded 写入排在提示之后，避免迟到提示覆盖终态；确认成功后清除 pending 说明。
+
+## 结构化输入与派发节点
+
+`builtin.input@1.0.0` 校验命名字段并持久等待缺失输入。必填参数可声明 `onMissing: interact`，由对应 input collector 补齐。
+
+`builtin.route@2.0.0` 是普通 DAG 节点：显式 branches 模板、input/prompt/history 策略、maxRounds/maxConcurrency 和 until；每轮通过 Kernel spawn 独立 Task，校验后按 key 保留各类型最新结果。默认不继承上下文，也不发布子 Task 事件到主会话。输出端口为 result。
+
+`builtin.aggregate@1.0.0` 将 previous/updates 按键合并输出 result。节点 outputPolicy 可分别配置 includeInRunOutput/publishToHistory。完整参数与限制见 [结构化派发](design/essay-review-flow.md)；可运行示例见 [作文评审 .flow](../packages/llm-ui/src/flows/library/essay-review-isolated.flow)。旧 route@1 和回边循环行为保留。
+
+运行参数支持 `minimum` / `maximum` / `integer`。`flowToDag` 将参数声明保存为 `DagRunSpec.parameterSchema`；`prepareFlowParameters` 合并默认值并校验，执行器在创建 Task 前调用。route@2 的 maxRounds/maxConcurrency 可使用完整参数模板，运行时保持 number 类型。详见 [参数契约](design/essay-review-flow.md)。
+
+`FlowCommand.DraftInstall` 校验内置模板后调用 `FlowDefinitionStore.installBuiltinDraft`。独立安装记录防止用户删除模板后重启被自动补装；已有草稿保持原样。
+
+统一调用默认值、param/命名输出引用、schema 判断条件、join/reducer 与可视字段表单见 [作文评审设计第 9 节](design/essay-review-flow.md)。

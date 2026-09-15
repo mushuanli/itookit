@@ -1,12 +1,12 @@
-import { t, type SessionSkillControls } from '@itookit/common';
+import { formatDefaultFileTitle, t, type SessionSkillControls } from '@itookit/common';
 import { showMountDialog } from '../files/mount-dialog';
 import { localizeMountError } from '../files/localize-mount-error';
 
-import type { EditorFactory, IEditor, EditorHostContext } from '@itookit/ui-common';
+import type { EditorFactory, IEditor, EditorHostContext, ContextMenuConfig } from '@itookit/ui-common';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { Kernel } from '@itookit/durable-kernel';
-import { createVFSUI, type VFSUIShell } from '@itookit/vfs-ui';
-import { createFileSystemView, type FileSystemContextOwner, type FileSystemView, type FileSystemSourceOwner } from '@itookit/vfs-core';
+import { createVFSUI, type VFSUIShell, type VFSNodeUI } from '@itookit/vfs-ui';
+import { createFileSystemView, type IFileSystem, type FileSystemContextOwner, type FileSystemView, type FileSystemSourceOwner } from '@itookit/vfs-core';
 
 
 
@@ -27,6 +27,7 @@ export class SessionWorkbench implements WorkspaceController {
     private context?: FileSystemContextOwner;
     private assets?: FileSystemView;
     private browser?: FileSystemSourceOwner;
+    private navigationFiles?: FileSystemView;
     private sidebarUI?: VFSUIShell;
     private lifecycle!: SessionLifecycleService;
     private active: string | null = null;
@@ -53,17 +54,24 @@ export class SessionWorkbench implements WorkspaceController {
         private readonly hostContext: EditorHostContext | undefined, private readonly kernel: Kernel,
         private readonly fileFactory: EditorFactory, private readonly directoryMounts?: DirectoryMountService,
         private readonly sessionSkills?: SessionSkillControls,
-        private readonly manageMemory?: (sessionId: string, signal: AbortSignal) => Promise<void>) {}
+        private readonly manageMemory?: (sessionId: string, signal: AbortSignal) => Promise<void>,
+        private readonly flows?: { fs: IFileSystem; menu: ContextMenuConfig<VFSNodeUI> }) {}
     async start(): Promise<void> {
         this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel });
+        this.navigationFiles = createFileSystemView({ viewId: 'session-navigation:admin', mounts: [
+            { mountId: 'sessions', at: '/', fs: this.browser.fs, access: 'rw' },
+            ...(this.flows ? [{ mountId: 'flows', at: '/@flows', fs: this.flows.fs, access: 'rw' as const }] : []),
+        ] });
         this.lifecycle = new SessionLifecycleService({ repository: this.repository, kernel: this.kernel });
         this.sidebarUI = createVFSUI({ sessionListContainer: this.sidebar, title: '会话', scopeId: 'session-browser:v1:admin',
             readOnly: false, activateDirectories: true, defaultUiSettings: { sortBy: 'lastModified' },
             exportDirectories: true,
             exportItem: item => this.exportSessionItem(item),
-            fileCreation: { label: '会话', resolveParent: sessionCreationParent },
+            fileCreation: { label: '会话', title: formatDefaultFileTitle(), resolveParent: sessionCreationParent },
             contextMenu: {
                 items: (item, defaults) => {
+                    if (isFlowPath(item.id)) return this.flows?.menu.items?.(item,
+                        item.id === '/@flows' ? [] : defaults.filter(entry => 'id' in entry && entry.id === 'delete')) ?? [];
                     const target = resolveBrowserTarget(item.id);
                     if (target.kind === 'task') {
                         return [{ id: 'reset-task', label: '强制复位任务（停止执行，保留记录）',
@@ -78,7 +86,7 @@ export class SessionWorkbench implements WorkspaceController {
                     return defaults;
                 },
             },
-        }, this.browser.fs) as VFSUIShell;
+        }, this.navigationFiles) as VFSUIShell;
         this.unsubscribers.push(this.sidebarUI.on('sessionSelected', ({ item }) => {
             // Expanding ancestors during selectPath can emit intermediate selections too.
             if (item && !this.selectionSync) void this.openResource(item.id).catch(error => this.report(error));
@@ -182,6 +190,10 @@ export class SessionWorkbench implements WorkspaceController {
     openResource(resourceId: string, options: { reload?: boolean; branch?: string } = {}): Promise<void> {
         const route = parseSessionRoute(resourceId);
         const path = route.path;
+        if (isFlowPath(path)) {
+            return Promise.resolve(this.hostContext?.navigate?.({ target: 'flows',
+                ...(path === '/@flows' ? {} : { resourceId: path.slice('/@flows'.length) }) }));
+        }
         const branch = options.branch ?? route.branch;
         const target = resolveBrowserTarget(path);
         const id = target.kind === 'session' ? target.sessionId : path;
@@ -326,7 +338,7 @@ export class SessionWorkbench implements WorkspaceController {
         const target = resolveBrowserTarget(path);
         if (target.kind === 'tasks') return this.showTasks(target.sessionId);
         const generation = ++this.taskRefresh;
-        const nodes = await this.browser.fs.driver.getChildren(path);
+        const nodes = await this.navigationFiles!.driver.getChildren(path);
         if (this.closed || generation !== this.taskRefresh) return;
         const panel = document.createElement('div'); panel.className = 'session-detail';
         const heading = document.createElement('h2');
@@ -495,16 +507,19 @@ export class SessionWorkbench implements WorkspaceController {
         this.closed = true; this.dialogs.abort(); this.unsubscribers.splice(0).forEach(unsubscribe => unsubscribe());
         if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = undefined; }
         await Promise.all([this.tail, this.refreshTail]); await this.closeEditor(); this.sidebarUI?.destroy();
-        await this.browser?.dispose(); this.container.replaceChildren();
+        await this.navigationFiles?.dispose(); await this.browser?.dispose(); this.container.replaceChildren();
     }
 }
 
 /** Session and Task entries are virtual containers, not writable creation directories. */
 function sessionCreationParent(path: string | null): string | null {
     if (!path) return null;
+    if (isFlowPath(path)) return null;
     const target = resolveBrowserTarget(path);
     if (target.kind === 'folder' || target.kind === 'files') return path;
     const folders = path.split('/').filter(Boolean);
     const sessionIndex = folders.findIndex(segment => !segment.startsWith('folder:'));
     return sessionIndex > 0 ? '/' + folders.slice(0, sessionIndex).join('/') : null;
 }
+
+function isFlowPath(path: string): boolean { return path === '/@flows' || path.startsWith('/@flows/'); }

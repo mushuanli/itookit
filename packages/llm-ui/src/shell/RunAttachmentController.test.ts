@@ -80,6 +80,20 @@ describe('RunAttachmentController', () => {
         });
     });
 
+    it('responds only to an input belonging to the current attachment revision', async () => {
+        const task = handle('task-1');
+        vi.mocked(task.status).mockResolvedValue({ task: taskRecord({
+            input: { id: 'input', kind: 'input', prompt: 'Essay', status: 'pending', requestedAt: 1 },
+        }) });
+        const controller = new RunAttachmentController(controlPlane(task), callbacks());
+        await controller.attach(task.id);
+        await controller.respondInput('input', { essay: 'Essay' }, controller.revision);
+        expect(task.respond).toHaveBeenCalledWith({ interactionId: 'input', value: { essay: 'Essay' } });
+        await expect(controller.respondInput('input', {}, controller.revision - 1)).rejects.toThrow('attachment changed');
+        expect(task.respond).toHaveBeenCalledTimes(1);
+        await controller.detach();
+    });
+
     it('starts a persisted task when resume is requested', async () => {
         const task = handle('task-1');
         vi.mocked(task.status).mockResolvedValue({ task: taskRecord({}, 'created') });

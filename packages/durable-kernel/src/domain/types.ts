@@ -293,7 +293,7 @@ export type TaskInputEvent =
     | { type: 'timer-fired'; id: string; at: number }
     | { type: 'effect-completed'; effectId: EffectId; result: unknown }
     | { type: 'effect-failed'; effectId: EffectId; error: SerializableError }
-    | { type: 'task-exited'; taskId: TaskId; exit: ExitRecord }
+    | { type: 'task-exited'; taskId: TaskId; exit: ExitRecord; spawnKey?: string }
     | { type: 'interaction-resolved'; interactionId: string; value: JsonValue }
     | { type: 'signal'; sequence: number; signal: TaskSignal };
 

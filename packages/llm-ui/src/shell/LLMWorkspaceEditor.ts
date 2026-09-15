@@ -1,3 +1,4 @@
+import { promptFlowParameters } from '../components/FlowParameterForm';
 // @file: llm-ui/shell/LLMWorkspaceEditor.ts
 
 import { IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventMap, EditorEventCallback, CollapseExpandResult, Toast } from '@itookit/ui-common';
@@ -137,6 +138,8 @@ export class LLMWorkspaceEditor implements IEditor {
     private fileSearchService!: FileSearchService;
     private ocrService!: OcrService;
     private runAttachment?: RunAttachmentController;
+    private inputDialogKey?: string;
+    private inputDialogAbort?: AbortController;
     private attachmentClosed = false;
 
     // === 事件系统 ===
@@ -459,6 +462,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.runAttachment = new RunAttachmentController(this.options.kernel, {
             onEvent: event => this.handleRunEvent(event),
             onWaiting: condition => this.handleRunWaiting(condition),
+            onDetached: () => this.inputDialogAbort?.abort(),
             onError: error => Toast.error(error.message),
         });
         void this.restorePrivilegedTaskAttachment().catch(error => {
@@ -476,9 +480,32 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private handleRunWaiting(request: InteractionRequest<JsonValue>): void {
+        if (this.showFlowInput(request)) return;
         const plan = interactionPlan(request.payload);
         if (plan) this.chatInput.showToolOutput('/plan', plan, true);
         Toast.info(request.prompt);
+    }
+
+    private showFlowInput(request: InteractionRequest<JsonValue>): boolean {
+        const payload = request.payload;
+        if (request.kind !== 'input' || !payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+        const fields = payload.fields;
+        const attachment = this.runAttachment;
+        if (!fields || typeof fields !== 'object' || Array.isArray(fields) || !attachment) return false;
+        const revision = attachment.revision, key = `${revision}:${request.id}`;
+        if (this.inputDialogKey === key) return true;
+        const values = payload.values && typeof payload.values === 'object' && !Array.isArray(payload.values) ? payload.values : {};
+        const parameters = Object.entries(fields).map(([name, field]) => ({
+            ...(field as unknown as import('@itookit/common').FlowInputField), name,
+            required: (field as unknown as import('@itookit/common').FlowInputField).required !== false,
+            ...(Object.hasOwn(values, name) ? { default: values[name] } : {}),
+        }));
+        this.inputDialogAbort?.abort();
+        this.inputDialogAbort = new AbortController();
+        this.inputDialogKey = key;
+        void promptFlowParameters(parameters, request.prompt, result => attachment.respondInput(request.id, result, revision), this.inputDialogAbort.signal)
+            .finally(() => { if (this.inputDialogKey === key) this.inputDialogKey = undefined; });
+        return true;
     }
 
     private buildCommandContext(): CommandContext {

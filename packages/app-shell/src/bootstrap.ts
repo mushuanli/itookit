@@ -141,6 +141,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         agentService,
         llmDriver,
         options.ui.llmUiEditors,
+        options.ui.restoreFlowLibrary ? () => options.ui.restoreFlowLibrary!(commandBus) : undefined,
     );
     // Pass llmService only when the vision connection is actually configured —
     // this is the single place that knows both the kernel and the connection list.
@@ -165,6 +166,8 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // Skills workspace: VFSUIShell list (SkillsEngine) + form editor (SkillSettingsEditor)
     const skillsEngine  = new SkillsEngine(agentService);
     const skillsFactory = options.ui.createSkillEditor(agentService);
+
+    await options.ui.installFlowLibrary?.(commandBus);
 
     // Workflows workspace: standalone design surface over the flows VFS module.
     const flowsFactory = options.ui.createFlowEditor({
@@ -290,7 +293,8 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         if (strategyType === 'chat') {
             const sessionWorkspace = new SessionWorkbench(sidebarEl, editorEl, sessionRepository, sessionFiles, factory, (id, mode = 'replace') => updateHistory(elementId, id, mode), { toggleSidebar: collapsed => { sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')); }, navigate: handleNavigationRequest }, kernelCore, defaultEditorFactory, directoryMounts, sessionSkills, async (sessionId, signal) => {
                 await showMemoryDialog(sessionManager.memory.forSession(sessionId), await sessionManager.getAvailableAgents(), signal);
-            });
+            }, { fs: flowEngine.engine, menu: options.ui.createFlowContextMenu<VFSNodeUI>({ commands: commandBus,
+                navigate: sessionId => handleNavigationRequest({ target: 'chat', resourceId: sessionId }) }) });
             cleanupFns.push(() => sessionWorkspace.destroy());
             await sessionWorkspace.start(); managerCache.set(elementId, sessionWorkspace);
             cleanupFns.push(setupHitlVfsBridge(sessionManager, sessionWorkspace));
@@ -306,6 +310,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
         const primaryDef = supportedFileTypes?.[0] ? FILE_REGISTRY[supportedFileTypes[0]] : undefined;
 
+        const flowContextMenu = options.ui.createFlowContextMenu<VFSNodeUI>({
+            commands: commandBus,
+            navigate: sessionId => handleNavigationRequest({ target: 'chat', resourceId: sessionId }),
+        });
         const uiOptions = {
             ...uiPassThrough,
             defaultExtension: primaryDef?.extension,
@@ -320,6 +328,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             contextMenu: {
                 items: (_item: VFSNodeUI, defaults: MenuItem<VFSNodeUI>[]) => {
                     if (uiPassThrough.readOnly) return [];
+                    if (strategyType === 'flows') return flowContextMenu.items?.(_item, defaults) ?? defaults;
                     return defaults;
                 },
             },

@@ -1,6 +1,12 @@
 import { rememberSchedulerLease } from './control-session';
 import { fenceSchedulerSession } from './fenced-session';
 import type { SchedulerCheckpoint } from './scheduler-checkpoint';
+import { prepareDispatch } from './structured/prepare';
+import { compileReferenceGraph, invocationReferenceContext, resolveExecutionNode, scopedParameters } from './structured/references';
+import { compileDispatchGraph } from './structured/graph';
+import { reconcileDispatchChildren } from './structured/reconcile';
+import type { DispatchInput } from './structured/types';
+import { validateDispatchCapacity, withDispatchWorkspace } from './structured/limits';
 import { restoreFlowHandle } from './restore-handle';
 import { acquireSchedulerLease, isSchedulerOwnershipLost, type SchedulerLease } from './scheduler-lease';
 import { graphRetryKey, type FlowGraphRetryIntent } from './graph-retry';
@@ -57,7 +63,7 @@ import { mergeAgentConfig } from './to-dag';
 import { resolveNodeConnection } from './connections';
 import { bindFlowTaskCapabilities } from './task-capabilities';
 import { graphPatchFingerprint, validateGraphPatch } from './graph-patch';
-import { resolveFlowParameters } from './parameters';
+import { resolveFlowParameters, prepareFlowParameters } from './parameters';
 import {
     delegationPlan,
     materializeDelegation,
@@ -74,6 +80,7 @@ export interface FlowExecutionHandle {
     sessionId: string;
     root: TaskHandle<JsonValue>;
     nodes: Map<string, TaskHandle>;
+    childTasks?: Map<string, TaskHandle>;
     /** 每个节点实际执行的实例数（Loop 节点会大于 1）。 */
     iterations: Map<string, number>;
     goal?: import('@itookit/common').FlowRunGoal;
@@ -227,8 +234,9 @@ export class DurableFlowExecutor {
         restored?: { checkpoint: SchedulerCheckpoint; handle: FlowExecutionHandle },
     ): Promise<FlowExecutionHandle> {
         const saved = restored?.checkpoint;
-        spec = structuredClone(spec);
-        parameters = structuredClone(parameters);
+        spec = saved || spec.templateVersion === 1 ? structuredClone(spec) : compileReferenceGraph(compileDispatchGraph(structuredClone(spec)));
+        parameters = prepareFlowParameters(spec.parameterSchema, parameters);
+        validateDispatchCapacity(spec, parameters);
         const plugins = createRunCatalog(this.options.plugins, saved?.nodes ?? spec.nodes, saved?.catalog);
         const sessionContext = structuredClone(saved ? saved.sessionContext
             : this.options.resolveNewRunContext ? await this.options.resolveNewRunContext(sessionId) : this.options.sessionContext);
@@ -272,15 +280,7 @@ export class DurableFlowExecutor {
             const startedAt = saved?.startedAt ?? Date.now();
             const routeEdgeIds = collectRouteEdgeIds(spec);
             const { backEdges, loopNodes } = findCycles(spec.nodes, spec.edges);
-            const nodes = saved?.nodes ?? (parameters
-                ? spec.nodes.map(node => ({
-                    ...node,
-                    config: resolveFlowParameters(node.config, parameters) as DagNodeDefinition['config'],
-                    inputs: resolveFlowParameters(node.inputs, parameters) as DagNodeDefinition['inputs'],
-                }))
-                : [...spec.nodes]).map(node => workspace && node.plugin === 'builtin.agent'
-                    ? { ...node, config: { ...record(node.config), workingDirectory: record(node.config).workingDirectory ?? workspace.directory } }
-                    : node);
+            const nodes = saved?.nodes ?? spec.nodes.map(node => withDispatchWorkspace(node, workspace?.directory));
             const edges = saved?.edges ?? [...spec.edges];
             const delegationDepth = new Map(saved?.delegationDepth ?? nodes.map(node => [String(node.id), 0] as [string, number]));
             const delegationGroups = new Map<string, DelegationGroup>(saved?.delegationGroups.map(([id, group]) =>
@@ -413,6 +413,10 @@ export class DurableFlowExecutor {
                     onFailure: edge.onFailure,
                     injectOutput: edge.kind !== 'control',
                 }));
+                const localParameters = scopedParameters(spec, node.id, parameters ?? {});
+                const referenceOutputs: Record<string, unknown> = {};
+                for (const edge of incoming) referenceOutputs[edge.from] = (await upstreamHandle(edge).status()).task.output;
+                if (spec.templateVersion === 1) node = resolveExecutionNode(node, invocationReferenceContext(nodes, referenceOutputs, localParameters, iteration, node.id));
                 const runtime = await plugins.loadRuntime(node.plugin, node.pluginVersion);
                 const task = runtime.createTask({
                     sessionId,
@@ -422,13 +426,22 @@ export class DurableFlowExecutor {
                     inputs: node.inputs,
                     dependencies,
                 });
+                if (task.programKind === 'flow.dispatch') {
+                    const scope = nodeConnections.get(node.id);
+                    const defaults = (task.input as DispatchInput).invocationDefaults;
+                    if (scope && defaults) resolveNodeConnection(defaults as unknown as CommonJsonValue, scope.connections, scope.defaultConnection, scope.fallbackConnectionId);
+                    if (scope) for (const branch of (task.input as DispatchInput).branches) {
+                        if (defaults?.connectionId && !record(branch.target.config).connectionId) branch.target.config = { ...record(branch.target.config), connectionId: defaults.connectionId } as CommonJsonValue;
+                        resolveNodeConnection(branch.target.config, scope.connections, scope.defaultConnection, scope.fallbackConnectionId);
+                    }
+                }
                 await this.emitHook('task.started', sessionId, { nodeId: node.id, iteration });
                 // The generation keeps re-submissions after a graph retry distinct, while a
                 // crash-recovery re-submission (same generation) still deduplicates.
                 const requestId = published
                     ? `flow:${published.root.id}:${node.id}#${iteration}@${nodeGenerations.get(node.id) ?? 0}`
                     : undefined;
-                const handle = await session.submit(await this.taskSpec(sessionId, node, task, dependencies, parameters, requestId));
+                const handle = await session.submit(await this.taskSpec(sessionId, node, task, dependencies, localParameters, requestId));
                 if (!instances.has(node.id)) instances.set(node.id, []);
                 instances.get(node.id)!.push(handle);
                 if (published) {
@@ -465,10 +478,11 @@ export class DurableFlowExecutor {
                     const resolvedConfig = structuredClone(config);
                     if (connection) resolveNodeConnection(resolvedConfig as CommonJsonValue,
                         connection.connections, connection.defaultConnection, connection.fallbackConnectionId);
-                    boundNodes.push({ ...node, config: resolvedConfig, inputs: bound?.inputs ?? node.inputs });
+                    boundNodes.push(withDispatchWorkspace({ ...node, config: resolvedConfig, inputs: bound?.inputs ?? node.inputs }, workspace?.directory));
                 }
                 plugins.addNodes(boundNodes);
                 validateGraphPatch({ ...patch, nodes: boundNodes }, nodes, edges, parentId, plugins);
+                validateDispatchCapacity({ ...spec, nodes: [...nodes, ...boundNodes], edges: [...edges, ...additions] }, parameters);
                 nodes.push(...boundNodes);
                 const defaults = nodeDefaults.get(parentId);
                 if (defaults) for (const node of boundNodes) nodeDefaults.set(node.id, defaults);
@@ -793,7 +807,11 @@ export class DurableFlowExecutor {
                     continue;
                 }
                 await enforceDeadlines();
-                const activeCount = [...instances.entries()].reduce((count, [nodeId, handles]) =>
+                const scopedActive = await reconcileDispatchChildren(session, [...instances.values()].flat(), task => {
+                    published!.taskIds.add(task.id);
+                    (published!.childTasks ??= new Map()).set(task.id, task);
+                }, maxConcurrency);
+                const activeCount = scopedActive ?? [...instances.entries()].reduce((count, [nodeId, handles]) =>
                     count + (detachedNodes.has(nodeId) ? 0 : handles.filter((_, index) =>
                         !completed.has(instanceKey(nodeId, index + 1))).length), 0);
                 const capacity = Math.max(0, maxConcurrency - activeCount);
@@ -991,7 +1009,11 @@ export class DurableFlowExecutor {
         const skillContexts = skillIds.length && this.options.resolveSkillContexts
             ? await this.options.resolveSkillContexts(sessionId, skillIds, allowed)
             : [];
-        const input = task.programKind === 'llm.agent'
+        const input = task.programKind === 'flow.dispatch'
+            ? await this.prepareDispatchTask(sessionId, { ...task.input as DispatchInput, invocationNamespace: requestId! })
+            : task.programKind === 'flow.input'
+                ? { ...record(task.input), values: { ...parameters, ...record(record(task.input).values) } }
+            : task.programKind === 'llm.agent'
             ? {
                 ...record(task.input),
                 tools: [...catalog.definitions, ...(subtaskTool ? [subtaskToolDef(subtaskTool, subtaskDescription)] : [])],
@@ -1012,9 +1034,26 @@ export class DurableFlowExecutor {
             })),
             retry: node.retry,
             priority: node.priority ?? task.priority,
-            labels: { flowNodeId: node.id, plugin: node.plugin },
+            labels: { flowNodeId: node.id, plugin: node.plugin,
+                ...(node.outputPolicy?.publishToHistory === false ? { flowHistory: 'omit' } : {}) },
             deferStart: task.programKind === 'llm.agent' || task.programKind === 'llm.chat',
         };
+    }
+
+    private async prepareDispatchTask(sessionId: string, input: DispatchInput): Promise<DispatchInput> {
+        return prepareDispatch(input, {
+            plugins: this.options.plugins,
+            bind: async target => {
+                const patch = await this.options.bindPatchNode?.(sessionId, target, undefined);
+                return { ...target, ...patch };
+            },
+            task: async target => {
+                const runtime = await this.options.plugins.loadRuntime(target.plugin, target.pluginVersion);
+                const task = runtime.createTask({ sessionId, nodeRunId: target.id, config: target.config,
+                    inputs: target.inputs, dependencies: [] });
+                return this.taskSpec(sessionId, target, task, []);
+            },
+        });
     }
 
     private async emitHook(
@@ -1062,7 +1101,8 @@ export class DurableFlowExecutor {
         // dependencies but are excluded from the flow-root output map. They must
         // still participate in run success/failure judgment.
         const suppressed = new Set(nodes
-            .filter(node => isRecord(node.config) && node.config.persistOutput === false)
+            .filter(node => node.outputPolicy?.includeInRunOutput === false
+                || (node.outputPolicy?.includeInRunOutput === undefined && isRecord(node.config) && node.config.persistOutput === false))
             .map(node => String(node.id)));
         const dependencies = orderDelegationResults([...instances.entries()]
             .filter(([nodeId]) => !detachedNodes.has(nodeId))

@@ -7,6 +7,7 @@ import type { CommandBus } from '../CommandBus';
 import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
 import { buildRenamedFilename } from '@itookit/common';
 import { findNodeById } from '../../utils/helpers';
+import { resolveWritableParent } from '../../utils/creation-guard';
 import { describeDeleteError } from '../../utils/delete-error';
 import { describeCauseChain } from '../../utils/error-detail';
 import { partitionDeletable, READ_ONLY_DELETE_MESSAGE } from '../../utils/delete-guard';
@@ -36,7 +37,7 @@ export class FileCommandHandler {
     this.unsubs.push(
       this.commandBus.on('file:create', async ({ type, title, parentPath }) => {
         try {
-          parentPath = this.options.resolveParent ? this.options.resolveParent(parentPath) : parentPath;
+          parentPath = await resolveWritableParent(this.store, this.service, parentPath ?? null, this.options.resolveParent);
           if (type === 'file') {
             await this.service.createFile({
               title,

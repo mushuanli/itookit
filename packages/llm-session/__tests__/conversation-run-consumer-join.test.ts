@@ -23,6 +23,17 @@ function execution() {
     };
 }
 
+it('drains durable child events without publishing them to conversation history', async () => {
+    const instance = coordinator();
+    const forward = vi.spyOn(instance, 'forwardAgentEvent');
+    let drained = false;
+    const child = { status: async () => ({ task: { labels: { flowHistory: 'omit' } } }),
+        async *events() { yield { type: 'task.event', payload: { type: 'stream:content', delta: 'private child result' } }; drained = true; } };
+    await instance.consumeEvents(child, execution(), { output: false }, []);
+    expect(drained).toBe(true);
+    expect(forward).not.toHaveBeenCalled();
+});
+
 it('settles the event consumer when wait() rejects after the storage closes', async () => {
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown) => { unhandled.push(reason); };

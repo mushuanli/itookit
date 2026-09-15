@@ -660,6 +660,9 @@ importers:
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
+      '@itookit/llm-common':
+        specifier: workspace:*
+        version: link:../llm-common
       '@itookit/llm-tasks':
         specifier: workspace:*
         version: link:../llm-tasks
@@ -796,6 +799,9 @@ importers:
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
+      '@itookit/llm-common':
+        specifier: workspace:*
+        version: link:../llm-common
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../llm-session

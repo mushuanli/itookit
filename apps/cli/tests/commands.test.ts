@@ -33,6 +33,7 @@ describe('parseArgs', () => {
             options: { file: 'x.yml', offline: true },
         });
         expect(parseArgs(['run', '--json', '--headless']).options).toMatchObject({ json: true, headless: true });
+        expect(parseArgs(['run', '--params', 'input.json']).options).toMatchObject({ paramsFile: 'input.json' });
     });
 
     it('parses --profile, --set-home and repeated --add-dir', () => {

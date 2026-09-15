@@ -21,6 +21,7 @@ import type { BlockedEffect, CompiledWorkflow, PendingInteraction, RunManifest }
 
 export interface CommandOptions {
     file?: string;
+    paramsFile?: string;
     stateDir?: string;
     headless?: boolean;
     json?: boolean;
@@ -101,12 +102,14 @@ export async function graphCommand(options: CommandOptions): Promise<number> {
 export async function runCommand(options: CommandOptions): Promise<number> {
     const file = options.file ?? 'mindos.yml';
     if (file.toLowerCase().endsWith('.flow')) return runFlowCommand(file, options);
+    if (options.paramsFile) throw new Error('--params is only supported for .flow inputs');
     const loaded = await loadWorkflow(file);
     return runLoaded(loaded, options);
 }
 
 async function runFlowCommand(file: string, options: CommandOptions): Promise<number> {
     const flow = await loadFlowDefinition(file);
+    const parameters = options.paramsFile ? await loadRunParameters(options.paramsFile) : undefined;
     const workspaceRoot = path.resolve(options.setHome ?? process.cwd());
     const resultTask = String(flow.nodes.at(-1)?.id ?? '');
     if (!resultTask) throw new Error('.flow has no nodes to use as the result task');
@@ -131,7 +134,15 @@ async function runFlowCommand(file: string, options: CommandOptions): Promise<nu
         stateDir,
     };
     const loaded = { workflow, source: JSON.stringify(flow), hash: definition.digest };
-    return runLoaded(loaded, options, { definition, useProfileConfig: true });
+    return runLoaded(loaded, options, { definition, parameters, useProfileConfig: true });
+}
+
+async function loadRunParameters(file: string): Promise<Record<string, JsonValue>> {
+    const value: unknown = JSON.parse(await readFile(file, 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('--params must contain a JSON object');
+    }
+    return value as Record<string, JsonValue>;
 }
 
 /**
@@ -210,6 +221,7 @@ type LoadedWorkflow = Awaited<ReturnType<typeof loadWorkflow>>;
 
 async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions, override?: {
     definition: RunDefinition;
+    parameters?: Record<string, JsonValue>;
     useProfileConfig?: boolean;
 }): Promise<number> {
     if (options.sandbox) loaded.workflow.config.sandbox = { ...loaded.workflow.config.sandbox, mode: options.sandbox };
@@ -220,6 +232,7 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions, overri
     const manifest: RunManifest = {
         version: 1,
         id,
+        ...(override ? { flow: { definition: override.definition, parameters: override.parameters, config: loaded.workflow.config } } : {}),
         name: loaded.workflow.config.name,
         goal: loaded.workflow.config.goal,
         workspaceRoot: loaded.workflow.workspaceRoot,
@@ -248,7 +261,7 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions, overri
         // dispatched, so this handle is live but its node map is still empty here.
         // Node → Task mapping is read from the Session by the monitor; `run.started`
         // reports the graph size from the spec instead of the dispatch snapshot.
-        const flow = await runtime.executor.submit(id, spec);
+        const flow = await runtime.executor.submit(id, spec, override?.parameters);
         manifest.rootTaskId = flow.root.id;
         manifest.status = 'running';
         await store.save(manifest);
@@ -270,10 +283,10 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions, overri
 export async function rerunCommand(runId: string, options: CommandOptions): Promise<number> {
     const store = new RunStore(resolveStateDir(options));
     const manifest = await store.load(runId);
-    const loaded = await loadWorkflow(store.configSnapshot(runId), false);
+    const loaded = await loadSavedWorkflow(store, manifest, false);
     loaded.workflow.workspaceRoot = manifest.workspaceRoot;
     loaded.workflow.stateDir = store.stateDir;
-    return runLoaded(loaded, options);
+    return runLoaded(loaded, options, manifest.flow ? { ...manifest.flow, useProfileConfig: true } : undefined);
 }
 
 /** 把某个 run 的配置快照复制为可编辑文件，供 fork 后修改再 run。 */
@@ -322,7 +335,7 @@ export const tasksCommand = checkpointsCommand;
 export async function exportCommand(runId: string, options: CommandOptions): Promise<number> {
     const store = new RunStore(resolveStateDir(options));
     const manifest = await store.load(runId);
-    const loaded = await loadWorkflow(store.configSnapshot(runId));
+    const loaded = await loadSavedWorkflow(store, manifest);
     loaded.workflow.workspaceRoot = manifest.workspaceRoot;
     loaded.workflow.stateDir = store.stateDir;
     const runtime = await runtimeFor(loaded.workflow, manifest, store, options, 'control');
@@ -396,7 +409,7 @@ async function resumeLocked(runId: string, options: CommandOptions, store: RunSt
         print(options, manifest);
         return manifest.status === 'succeeded' ? 0 : 1;
     }
-    const loaded = await loadWorkflow(store.configSnapshot(runId));
+    const loaded = await loadSavedWorkflow(store, manifest);
     loaded.workflow.workspaceRoot = manifest.workspaceRoot;
     loaded.workflow.stateDir = store.stateDir;
     if (options.sandbox) loaded.workflow.config.sandbox = { ...loaded.workflow.config.sandbox, mode: options.sandbox };
@@ -427,7 +440,7 @@ export async function respondCommand(
     const manifest = await store.load(runId);
     const pending = manifest.pendingInteractions.find(item => item.interactionId === requestId);
     if (!pending) throw new Error(`Pending interaction not found: ${requestId}`);
-    const loaded = await loadWorkflow(store.configSnapshot(runId));
+    const loaded = await loadSavedWorkflow(store, manifest);
     loaded.workflow.workspaceRoot = manifest.workspaceRoot;
     loaded.workflow.stateDir = store.stateDir;
     const runtime = await runtimeFor(loaded.workflow, manifest, store, options, 'control');
@@ -473,7 +486,7 @@ export async function cancelCommand(runId: string, options: CommandOptions): Pro
     const store = new RunStore(resolveStateDir(options));
     const manifest = await store.load(runId);
     if (isTerminal(manifest.status)) return 0;
-    const loaded = await loadWorkflow(store.configSnapshot(runId));
+    const loaded = await loadSavedWorkflow(store, manifest);
     loaded.workflow.workspaceRoot = manifest.workspaceRoot;
     loaded.workflow.stateDir = store.stateDir;
     const runtime = await runtimeFor(loaded.workflow, manifest, store, options);
@@ -886,13 +899,22 @@ async function finishRun(
     return 0;
 }
 
+async function loadSavedWorkflow(store: RunStore, manifest: RunManifest, checkEnvironment = true): Promise<LoadedWorkflow> {
+    if (!manifest.flow) return loadWorkflow(store.configSnapshot(manifest.id), checkEnvironment);
+    return {
+        workflow: { config: structuredClone(manifest.flow.config), workspaceRoot: manifest.workspaceRoot, stateDir: store.stateDir },
+        source: await readFile(store.configSnapshot(manifest.id), 'utf8'),
+        hash: manifest.configHash,
+    };
+}
+
 async function runtimeFor(
     workflow: CompiledWorkflow,
     manifest: RunManifest,
     store: RunStore,
     options: CommandOptions,
     mode: 'execute' | 'control' = 'execute',
-    useProfileConfig = false,
+    useProfileConfig = Boolean(manifest.flow),
 ): Promise<CliRuntime> {
     await stat(workflow.workspaceRoot);
     const vfsRoot = resolveProfileVfsRoot(options);

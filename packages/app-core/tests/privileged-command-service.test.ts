@@ -16,9 +16,10 @@ describe('PrivilegedCommandService', () => {
             input: expect.objectContaining({ goal: 'Ship it', connectionId: 'connection-1' }),
             deferStart: true,
         }));
-        expect(fixture.task.signal).toHaveBeenCalledWith({
-            type: 'capabilities', payload: { llmHandleId: 'handle-1' },
+        expect(fixture.task.start).toHaveBeenCalledWith({
+            signal: { type: 'capabilities', payload: { llmHandleId: 'handle-1' } },
         });
+        expect(fixture.task.signal).not.toHaveBeenCalled();
         expect(fixture.task.start).toHaveBeenCalledOnce();
     });
 
@@ -34,7 +35,10 @@ describe('PrivilegedCommandService', () => {
             deferStart: true,
         }));
         expect(fixture.task.createResource).toHaveBeenCalledWith({
-            kind: 'process', uri: 'process://exec', rights: ['execute'],
+            requestId: 'capability:processHandleId', kind: 'process', uri: 'process://exec', rights: ['execute'],
+        });
+        expect(fixture.task.start).toHaveBeenCalledWith({
+            signal: { type: 'capabilities', payload: { processHandleId: 'handle-1' } },
         });
     });
 });

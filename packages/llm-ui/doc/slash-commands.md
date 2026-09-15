@@ -6,6 +6,7 @@ ChatInputView
 → buildSlashCallbacks（SlashCommandRouter）
 → IPrivilegedCommandService（仅特权命令）
 → app-core PrivilegedCommandService
+→ llm-flow submitRun（CompiledRunDefinition）
 → Kernel SessionHandle.submit → TaskHandle
 ```
 

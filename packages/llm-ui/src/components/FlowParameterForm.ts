@@ -1,85 +1,84 @@
-// @file: llm-ui/components/FlowParameterForm.ts
-// Modal form that collects a workflow's declared runtime parameters.
-// Renders one control per FlowParameter (defaults prefilled, overridable);
-// validates required fields and returns null only on cancel.
+import { escapeHTML, t, type FlowParameter, type JsonValue } from '@itookit/common';
 
-import { escapeHTML, type FlowParameter, type JsonValue } from '@itookit/common';
+type Field = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 
-type Field = HTMLInputElement | HTMLTextAreaElement;
-
-/** Show the parameter form; resolve to the collected values, or null on cancel. */
-export function promptFlowParameters(
-    parameters: FlowParameter[],
-): Promise<Record<string, JsonValue> | null> {
+/** Validate before closing so invalid input can be corrected repeatedly. */
+export function promptFlowParameters(parameters: FlowParameter[], title?: string, submit?: (values: Record<string, JsonValue>) => Promise<void>, signal?: AbortSignal): Promise<Record<string, JsonValue> | null> {
     return new Promise(resolve => {
         const dialog = document.createElement('dialog');
         dialog.className = 'dag-dialog';
-        dialog.innerHTML = `<form method="dialog"><h2>Run workflow</h2>
+        dialog.innerHTML = `<form novalidate><h2>${escapeHTML(title ?? t('flow.launch.title'))}</h2>
             ${parameters.map(parameterField).join('')}
-            <p data-form-error class="dag-dialog__error"></p>
-            <menu><button value="cancel">Cancel</button><button value="run">Create & Run</button></menu></form>`;
+            <p data-form-error class="dag-dialog__error" role="alert"></p>
+            <menu><button type="button" data-cancel>${escapeHTML(t('flow.launch.cancel'))}</button>
+            <button type="submit">${escapeHTML(t(submit ? 'flow.editor.submit' : 'flow.launch.confirm'))}</button></menu></form>`;
+        let result: Record<string, JsonValue> | null = null;
+        dialog.querySelector('[data-cancel]')!.addEventListener('click', () => dialog.close());
+        let submitting = false;
+        dialog.querySelector('form')!.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (submitting) return;
+            submitting = true;
+            try { const values = collectParameters(dialog, parameters); await submit?.(values); result = values; dialog.close(); }
+            catch (error) { dialog.querySelector('[data-form-error]')!.textContent =
+                error instanceof Error ? error.message : t('flow.launch.invalidValue'); }
+            finally { submitting = false; }
+        });
+        const abort = () => { result = null; dialog.close(); };
+        signal?.addEventListener('abort', abort, { once: true });
+        dialog.addEventListener('close', () => { signal?.removeEventListener('abort', abort); dialog.remove(); resolve(result); }, { once: true });
         document.body.append(dialog);
         dialog.showModal();
-        dialog.addEventListener('close', () => {
-            if (dialog.returnValue !== 'run') { dialog.remove(); resolve(null); return; }
-            try {
-                const values = collectParameters(dialog, parameters);
-                dialog.remove();
-                resolve(values);
-            } catch (error) {
-                dialog.querySelector<HTMLElement>('[data-form-error]')!.textContent =
-                    error instanceof Error ? error.message : 'Invalid value';
-                dialog.showModal();
-            }
-        }, { once: true });
+        if (signal?.aborted) abort();
     });
 }
 
 function collectParameters(dialog: HTMLDialogElement, parameters: FlowParameter[]): Record<string, JsonValue> {
     const values: Record<string, JsonValue> = {};
-    for (const param of parameters) {
-        const field = dialog.querySelector<Field>(`[name="${escapeHTML(param.name)}"]`);
-        if (!field) continue;
-        if (param.required && isEmptyField(field)) throw new Error(`${param.name} is required`);
-        values[param.name] = parseParameterValue(param.type, field);
-    }
+    parameters.forEach((param, index) => {
+        const field = dialog.querySelector<Field>(`[data-parameter="${index}"]`)!;
+        const checkbox = field instanceof HTMLInputElement && field.type === 'checkbox';
+        if (!checkbox && field.value.trim() === '') {
+            if (param.required) throw new Error(t('flow.launch.required', { name: param.name }));
+            return;
+        }
+        const value = parseParameterValue(param.type, field);
+        if (typeof value === 'number' && ((param.integer && !Number.isInteger(value))
+            || (param.minimum !== undefined && value < param.minimum) || (param.maximum !== undefined && value > param.maximum))) {
+            throw new Error(t('flow.launch.numericRange', { name: param.name }));
+        }
+        values[param.name] = value;
+    });
     return values;
 }
 
-function isEmptyField(field: Field): boolean {
-    if (field instanceof HTMLInputElement && field.type === 'checkbox') return false;
-    return field.value.trim() === '';
-}
-
-function parameterField(param: FlowParameter): string {
-    const name = escapeHTML(param.name);
+function parameterField(param: FlowParameter, index: number): string {
+    const name = escapeHTML(param.label ?? param.name);
     const description = param.description ? `<small>${escapeHTML(param.description)}</small>` : '';
-    const required = param.required ? ' *' : '';
-    if (param.type === 'boolean') {
-        return `<label>${name}${required}${description}<input type="checkbox" name="${name}" ${param.default ? 'checked' : ''}></label>`;
-    }
-    const value = param.default !== undefined ? escapeHTML(stringifyDefault(param.default)) : '';
-    if (param.type === 'number') {
-        return `<label>${name}${required}${description}<input type="number" name="${name}" value="${value}"></label>`;
-    }
-    if (param.type === 'json') {
-        return `<label>${name}${required}${description}<textarea name="${name}" rows="3">${value}</textarea></label>`;
-    }
-    return `<label>${name}${required}${description}<input type="text" name="${name}" value="${value}"></label>`;
-}
-
-function stringifyDefault(value: JsonValue): string {
-    if (value !== null && typeof value === 'object') return JSON.stringify(value);
-    return String(value);
+    const label = `${name}${param.required ? ' *' : ''}${description}`;
+    const attr = `data-parameter="${index}" name="${name}"`;
+    if (param.widget === 'select') return `<label>${label}<select ${attr}><option value=""></option>${(param.options ?? []).map(option => `<option value="${escapeHTML(JSON.stringify(option))}" ${JSON.stringify(option) === JSON.stringify(param.default) ? 'selected' : ''}>${escapeHTML(String(option))}</option>`).join('')}</select></label>`;
+    if (param.type === 'boolean') return `<label>${label}<input type="checkbox" ${attr} ${param.default === true ? 'checked' : ''}></label>`;
+    const value = param.default === undefined ? '' : escapeHTML(typeof param.default === 'object'
+        ? JSON.stringify(param.default) : String(param.default));
+    if (param.type === 'number') return `<label>${label}<input type="number" step="${param.integer ? '1' : 'any'}"
+        ${param.minimum !== undefined ? `min="${escapeHTML(String(param.minimum))}"` : ''} ${param.maximum !== undefined ? `max="${escapeHTML(String(param.maximum))}"` : ''}
+        ${attr} value="${value}"></label>`;
+    if (param.widget === 'text') return `<label>${label}<input type="text" ${attr} value="${value}"></label>`;
+    return `<label>${label}<textarea ${attr} rows="3">${value}</textarea></label>`;
 }
 
 function parseParameterValue(type: FlowParameter['type'], field: Field): JsonValue {
+    if (field instanceof HTMLSelectElement) return JSON.parse(field.value) as JsonValue;
     if (field instanceof HTMLInputElement && field.type === 'checkbox') return field.checked;
     if (type === 'number') {
         const value = Number(field.value);
-        if (!Number.isFinite(value)) throw new Error('Number required');
+        if (!Number.isFinite(value)) throw new Error(t('flow.launch.numberRequired'));
         return value;
     }
-    if (type === 'json') return JSON.parse(field.value) as JsonValue;
+    if (type === 'json') {
+        try { return JSON.parse(field.value) as JsonValue; }
+        catch { throw new Error(t('flow.launch.jsonRequired')); }
+    }
     return field.value;
 }

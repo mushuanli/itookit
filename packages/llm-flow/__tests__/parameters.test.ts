@@ -51,3 +51,16 @@ describe('validateFlowParameters', () => {
         expect(issues).toEqual([]);
     });
 });
+
+describe('numeric runtime parameter contracts', () => {
+    const schema = [{ name: 'rounds', type: 'number' as const, required: true, default: 10, minimum: 1, maximum: 1000, integer: true }];
+    it('applies defaults before required validation', () => {
+        expect(validateFlowParameters(schema, {})).toEqual([]);
+    });
+    it.each([0, -1, 1.5, 1001])('rejects invalid round count %s', rounds => {
+        expect(validateFlowParameters(schema, { rounds })).toHaveLength(1);
+    });
+    it('accepts custom bounded integer counts', () => {
+        expect(validateFlowParameters(schema, { rounds: 2 })).toEqual([]);
+    });
+});

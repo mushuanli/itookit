@@ -30,3 +30,5 @@ src/
 运行: `pnpm --filter @itookit/app-settings build`（`dev` 为 watch 模式）
 
 [架构设计](./Architecture.md)
+
+系统恢复页通过 createSettingsFactory 的可选 restoreFlows 回调提供「恢复内置工作流」：只恢复缺失模板，保留已有内容。回调由 app-shell 注入 llm-ui.restoreFlowLibrary，设置包不依赖 Flow 运行器或 llm-ui。此操作与原有 Provider/Connection/Agent 强制重置分开。

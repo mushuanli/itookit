@@ -4,6 +4,24 @@ import { bindFlowNode, bindStandaloneFlowNode } from '../src/session/flow-node-b
 import type { AgentResolver } from '../src/session/agent-resolver';
 
 describe('bindFlowNode', () => {
+    it('binds an invocation using only the target identity despite Session history and default prompts', async () => {
+        const resolver = { resolveExact: async () => ({ id: 'reviewer', systemPrompt: ['TARGET'],
+            memoryPolicy: { namespaceId: 'memory', readScopes: ['private'], writeScopes: [] } }),
+            getSkills: async () => [], getSystemPrompt: async () => ({ content: [] }),
+        } as unknown as AgentResolver;
+        const node = { id: 'review', name: 'Review', plugin: 'builtin.agent', pluginVersion: '1.0.0', inputs: {},
+            config: { agentId: 'reviewer', invocationContext: 'isolated', instruction: 'CHECK',
+                messages: [{ role: 'assistant', content: 'OLD_TEMPLATE' }] } } as FlowNodeDefinition;
+        const bound = await bindFlowNode(node, { systemPrompt: ['OLD_FLOW'] },
+            { blocks: [{ kind: 'system', source: 'project', content: 'OLD_PROJECT' }],
+                canonicalMessages: [{ role: 'user', content: 'OLD_HISTORY' }] } as never,
+            { sessionId: 's', input: { text: 'OLD_INPUT' } } as never,
+            { roundId: 'r', config: { id: 'session', name: 'Session', type: 'agent', systemPrompt: ['OLD_SESSION'] } }, resolver);
+        expect((bound.config as any).invocationInstructions).toEqual(['TARGET', 'CHECK']);
+        expect((bound.config as any).messages).toEqual([]);
+        expect((bound.config as any).memoryPolicy).toBeUndefined();
+        expect(JSON.stringify(bound)).not.toContain('OLD_');
+    });
     it('freezes the node Agent memory authority without inheriting parent or inline grants', async () => {
         const memoryPolicy = { namespaceId: 'node', readScopes: ['project'], writeScopes: [] as string[] };
         const resolver = { resolveExact: async () => ({ id: 'node-agent', memoryPolicy }), getSkills: async () => [] } as unknown as AgentResolver;

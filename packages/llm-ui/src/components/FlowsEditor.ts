@@ -5,10 +5,11 @@ import { editorResourceId } from '@itookit/ui-common';
 // new chat session instance with the declared parameters filled in.
 
 import { IEditor, type EditorFactory, type EditorOptions } from '@itookit/ui-common';
-import { NAVIGATION_EVENTS, type FlowDraft, type FlowParameter, type ICommandBus } from '@itookit/common';
-import { FlowCommand, SessionCommand } from '@itookit/llm-session';
+import { NAVIGATION_EVENTS, type FlowDraft, type ICommandBus } from '@itookit/common';
+import { FlowCommand } from '@itookit/llm-session';
 import { DagWorkbench } from './DagWorkbench';
-import { promptFlowParameters } from './FlowParameterForm';
+import { FlowLauncher, flowIdFromNodeId } from '../flows/run-flow';
+import { Toast } from '@itookit/ui-common';
 
 export interface FlowsEditorDeps {
     commands: ICommandBus;
@@ -25,12 +26,18 @@ export interface FlowsEditorDeps {
 export class FlowsEditor extends IEditor {
     private workbench?: DagWorkbench;
     private container?: HTMLElement;
+    private readonly launcher: FlowLauncher;
 
     constructor(
         private readonly deps: FlowsEditorDeps,
         private initialNodeId?: string,
     ) {
         super();
+        this.launcher = new FlowLauncher({ commands: deps.commands, navigate: sessionId => {
+            this.container?.dispatchEvent(new CustomEvent(NAVIGATION_EVENTS.NAVIGATE, {
+                bubbles: true, composed: true, detail: { target: 'chat', resourceId: sessionId },
+            }));
+        } });
     }
 
     async init(container: HTMLElement, _initialContent?: string): Promise<void> {
@@ -53,7 +60,7 @@ export class FlowsEditor extends IEditor {
         const flowId = flowIdFromNodeId(this.initialNodeId);
         if (flowId) {
             try {
-                const draft = await this.deps.commands.execute<FlowDraft | null>(FlowCommand.DraftLoad, { id: flowId });
+                const draft = await this.deps.commands.execute<FlowDraft | null>(FlowCommand.DraftLoad, { id: flowId, expandScopes: true });
                 if (!draft) return;
                 if (!draft.id) {
                     // Template file created via the VFS "+" button has an empty id;
@@ -76,24 +83,8 @@ export class FlowsEditor extends IEditor {
             this.deps.onRunFlow(flowId, revision);
             return;
         }
-        const flow = await this.deps.commands.execute<{ name?: string; parameters?: FlowParameter[] } | null>(
-            FlowCommand.RevisionGet, { id: flowId, revision },
-        ).catch(() => null);
-        const parameters = flow?.parameters ?? [];
-        const values = parameters.length ? await promptFlowParameters(parameters) : {};
-        if (!values) return;
-        try {
-            const created = await this.deps.commands.execute<{ sessionId: string }>(SessionCommand.CreateFromFlow, {
-                flowId, revision, parameters: values, title: flow?.name ?? 'Workflow',
-            });
-            this.container?.dispatchEvent(new CustomEvent(NAVIGATION_EVENTS.NAVIGATE, {
-                bubbles: true,
-                composed: true,
-                detail: { target: 'chat', resourceId: created.sessionId },
-            }));
-        } catch (error) {
-            console.error('[FlowsEditor] Failed to create workflow session', error);
-        }
+        try { await this.launcher.run(flowId, revision); }
+        catch (error) { Toast.error(String(error)); }
     }
 
     async destroy(): Promise<void> {
@@ -118,14 +109,6 @@ export class FlowsEditor extends IEditor {
     gotoMatch(): void {}
     clearSearch(): void {}
     on(): () => void { return () => {}; }
-}
-
-function flowIdFromNodeId(nodeId: string | undefined): string | null {
-    if (!nodeId) return null;
-    const base = nodeId.split('/').pop() ?? '';
-    if (!base.toLowerCase().endsWith('.flow')) return null;
-    const id = base.slice(0, -'.flow'.length);
-    return id || null;
 }
 
 export function createFlowsEditorFactory(deps: FlowsEditorDeps): EditorFactory {

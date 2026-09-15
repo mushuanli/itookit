@@ -1,3 +1,4 @@
+import { resolveExecutionNode, scopedParameters } from '../src/flow/structured/references';
 import { describe, expect, it } from 'vitest';
 import type { FlowConnection, FlowId, FlowNodeDefinition, FlowNodeId, FlowRevision } from '@itookit/common';
 import { resolveConnectionId } from '../src/flow/connections';
@@ -116,7 +117,9 @@ describe('flowToDag connection resolution', () => {
 
         const spec = await flowToDag(parent, undefined, undefined, async id => id === 'child' ? child : null);
         expect(spec.nodes.map(node => node.id)).toEqual(['source', 'sink', 'composite/first', 'composite/last']);
-        expect((spec.nodes.find(node => node.id === 'composite/first')!.config as Record<string, unknown>).value).toBe(42);
+        const first = spec.nodes.find(node => node.id === 'composite/first')!;
+        expect((first.config as Record<string, unknown>).value).toBe('${params.value}');
+        expect(resolveExecutionNode(first, { param: scopedParameters(spec, first.id, {}) }).config).toMatchObject({ value: 42 });
         expect(spec.edges.some(edge => edge.from === 'source' && edge.to === 'composite/first')).toBe(true);
         expect(spec.edges.some(edge => edge.from === 'composite/last' && edge.to === 'sink')).toBe(true);
     });

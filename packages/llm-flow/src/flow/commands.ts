@@ -13,6 +13,8 @@ import type {
 } from '@itookit/common';
 import type { Kernel, SessionHandle, TaskRecord, TaskSnapshot } from '@itookit/durable-kernel';
 import type { FlowDefinitionStore } from '../flow-definition-store';
+import { submitRun } from '../run-submission';
+import { expandDispatchDraft } from './structured/expand';
 import { flowToDag, type FlowNodeBinder } from './to-dag';
 import { hasValidationErrors, validateFlowRevision } from './validation';
 import { validateFlowParameters } from './parameters';
@@ -177,11 +179,13 @@ export class DagCommandService {
             this.options.flowStore.loadRevision(id, revision));
         const sessionContext = await this.options.resolveSessionContext?.(sessionId, '');
         if (this.options.canWriteSession && !await this.options.canWriteSession(sessionId)) throw new Error('Session is read-only on this host');
-        const handle = await new DurableFlowExecutor({ ...this.options, sessionContext,
+        const executor = new DurableFlowExecutor({ ...this.options, sessionContext,
             bindPatchNode: this.options.bindNode ? async (id, node, defaults) =>
                 this.options.bindNode!(id, node as FlowNodeDefinition, defaults as FlowNodeDefinition['config']) : undefined,
-        })
-            .submit(sessionId, { ...compiled, ...(goal ? { goal } : {}) }, parameters);
+        });
+        const { flow: handle } = await submitRun({ kind: 'graph', sessionId,
+            graph: { ...compiled, ...(goal ? { goal } : {}) }, parameters,
+        }, { kernel: this.options.kernel, flowExecutor: executor });
         this.handles.set(handle.root.id, handle);
         return { taskId: handle.root.id };
     }
@@ -290,12 +294,22 @@ function registerDraftCommands(
     plugins: DagPluginCatalog,
 ): void {
     bus.register(FlowCommand.DraftList, async () => store.listDrafts());
+    for (const command of [FlowCommand.DraftInstall, FlowCommand.DraftRestore]) bus.register(command, async args => {
+        const draft = args as FlowDraft;
+        const validation = validateDraft(draft, plugins);
+        if (!validation.valid) throw new Error(validation.validationIssues.map(issue => issue.message).join('; '));
+        return store.installBuiltinDraft(draft, { restoreMissing: command === FlowCommand.DraftRestore });
+    });
     bus.register(FlowCommand.DraftCreate, async args => store.createDraft(args as { id: string; name: string }));
     bus.register(FlowCommand.DraftAdopt, async args => {
         const { nodeId, name } = args as { nodeId: string; name: string };
         return store.adoptDraft(nodeId, name);
     });
-    bus.register(FlowCommand.DraftLoad, async args => store.loadDraft(String((args as { id: string }).id)));
+    bus.register(FlowCommand.DraftLoad, async args => {
+        const input = args as { id: string; expandScopes?: boolean };
+        const draft = await store.loadDraft(String(input.id));
+        return draft && input.expandScopes ? expandDispatchDraft(draft) : draft;
+    });
     bus.register(FlowCommand.DraftSave, async args => saveDraft(
         store,
         plugins,

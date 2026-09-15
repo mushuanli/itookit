@@ -57,6 +57,8 @@ export interface NodePortSchemas {
 }
 
 export interface FlowNodeDefinition {
+    /** Result projection never disables durable Task output or downstream data access. */
+    outputPolicy?: { includeInRunOutput?: boolean; publishToHistory?: boolean };
     portSchemas?: NodePortSchemas;
     id: FlowNodeId;
     name: string;
@@ -107,9 +109,18 @@ export interface FlowDraft {
  * reference it via the `${params.<name>}` template; each run supplies a value.
  */
 export interface FlowParameter {
+    widget?: 'text' | 'textarea' | 'number' | 'select' | 'checkbox';
+    label?: string;
+    nonBlank?: boolean;
+    options?: JsonValue[];
     name: string;
     type: 'string' | 'number' | 'boolean' | 'json';
     required?: boolean;
+    minimum?: number;
+    maximum?: number;
+    integer?: boolean;
+    /** Missing values may be collected by an explicit builtin.input node. */
+    onMissing?: 'error' | 'interact';
     default?: JsonValue;
     description?: string;
 }

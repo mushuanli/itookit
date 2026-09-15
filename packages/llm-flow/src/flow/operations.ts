@@ -1,4 +1,13 @@
 import type { DagNodeOutcome, JsonValue, SerializableExpression } from '@itookit/common';
+import { mergeResults } from './structured/results';
+
+export function aggregateOutcome(_config: Record<string, unknown>, inputs: Record<string, unknown>): DagNodeOutcome {
+    // Dependency bindings already extract artifact content; keys belong to the caller.
+    const previous = inputs.previous ?? {};
+    const updates = inputs.updates ?? {};
+    if (!isRecord(previous) || !isRecord(updates)) throw new Error('Aggregate inputs must be keyed objects');
+    return outcome({ type: 'json' }, mergeResults(previous, updates));
+}
 
 export function transformOutcome(
     config: Record<string, unknown>,
@@ -106,7 +115,7 @@ function selectEdges(
     return selected;
 }
 
-function evaluate(
+export function evaluate(
     expression: SerializableExpression | undefined,
     value: unknown,
     parameters?: Record<string, JsonValue>,
@@ -130,7 +139,7 @@ function evaluate(
     return resolve(expression, value, parameters) !== undefined;
 }
 
-function resolve(
+export function resolve(
     expression: SerializableExpression | undefined,
     value: unknown,
     parameters?: Record<string, JsonValue>,

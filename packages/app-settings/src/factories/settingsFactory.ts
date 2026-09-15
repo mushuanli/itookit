@@ -48,6 +48,7 @@ export const createSettingsFactory = (
     connectionService: IConnectionService,
     /** 由调用方 (app-shell) 注入，避免 app-settings 上行依赖 llm-ui */
     llmUiEditors: LLMUIEditors,
+    restoreFlows?: () => Promise<number>,
 ): EditorFactory => {
     return async (container: HTMLElement, options: EditorOptions) => {
         const nodeId = resolveSettingsSlug(editorResourceId(options) || '');
@@ -64,7 +65,7 @@ export const createSettingsFactory = (
             case 'mcp-servers': editor = new llmUiEditors.MCPSettingsEditor(container, agentService, options); break;
             case 'cost':        editor = new llmUiEditors.CostEditor(container, agentService, options); break;
             case 'system-prompts': editor = new llmUiEditors.SystemPromptSettingsEditor(container, agentService, options); break;
-            case 'recovery':    editor = new RecoverySettingsEditor(container, agentService, options); break;
+            case 'recovery':    editor = new RecoverySettingsEditor(container, agentService, options, restoreFlows); break;
             case 'log':         editor = new LogSettingsEditor(container, settingsService, options); break;
             case 'about':       editor = new AboutSettingsEditor(container, settingsService, options); break;
             case 'fs-explorer': editor = new SystemFSExploreEditor(container, settingsService, options); break;

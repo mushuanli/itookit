@@ -33,7 +33,9 @@ describe('app-core shared headless services', () => {
         registerDurablePrograms(kernel as never);
         expect([...programs.keys()].sort()).toEqual([
             'flow.aggregate@1',
+            'flow.dispatch@1',
             'flow.human@1',
+            'flow.input@1',
             'flow.value@1',
             'llm.agent@1',
             'llm.chat@1',
@@ -95,15 +97,23 @@ describe('toDagRunSpec', () => {
             id: 'flow-1', revision: 1, name: 'Flow', digest: 'd', createdAt: 1,
             nodes: [{ id: 'n', name: 'N', plugin: 'builtin.agent', pluginVersion: '1.0.0', config: {}, inputs: {} }],
             edges: [],
+            parameters: [{ name: 'maxRounds', type: 'number', default: 2 }],
             runPolicy: { maxConcurrency: 2, timeoutMs: 1000, maxTokens: 10 },
         } as never);
         expect(toDagRunSpec(definition)).toMatchObject({
+            templateVersion: 1,
+            parameterSchema: [{ name: 'maxRounds', type: 'number', default: 2 }],
             nodes: [{ id: 'n' }],
             maxConcurrency: 2,
             timeoutMs: 1000,
             maxTokens: 10,
             runPolicy: { maxConcurrency: 2, timeoutMs: 1000, maxTokens: 10 },
         });
+        definition.graph.parameterScopes = { 'child/': { parent: '', defaults: { limit: 2 }, values: { limit: '${param.limit}' } } };
+        const spec = toDagRunSpec(definition);
+        expect(spec.parameterScopes).toEqual(definition.graph.parameterScopes);
+        spec.parameterScopes!['child/'].defaults.limit = 3;
+        expect(definition.graph.parameterScopes['child/'].defaults.limit).toBe(2);
     });
 });
 

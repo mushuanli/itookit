@@ -791,3 +791,7 @@ Kernel 在恢复 sweep 后复用一次任务扫描供任务遍历、Effect 候�
 `LeaseGuardOptions.lease = { key, ownerId, epoch }` 可用于 `SessionHandle.submit(spec, options)` 和 `SessionHandle.signal(taskId, signal, options)`；`SharedStateWriteOptions` 同样支持 `lease`，用于 setShared/deleteShared。租约保存在本 Session 共享状态，须含匹配 ownerId/epoch、未置 deleted、expiresAt 严格大于事务内宿主时间。
 
 检查和业务写入在同一事务内，失权返回 `KernelErrorCode.STALE_SHARED_LEASE`。lease 不进入 TaskSpec 提交指纹，因此接管者可以复用稳定 requestId。省略条件保持原 API 行为；不是所有宿主命令自动获得 fencing。有效范围与迁移路径见[过渡设计](design/p1-transition.md)。
+
+### 父子任务完成关联
+
+`TaskInputEvent` 的 task-exited 事件支持可选 spawnKey。Kernel 从持久子 Task 记录读取该值，仅向实际父 Task 提供，用于恢复后关联声明式 child wait；普通依赖完成事件不附带其他父级的 spawnKey。Flow 的结构化派发控制器使用这一关联读取子任务返回。

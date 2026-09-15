@@ -135,7 +135,11 @@ const dependencySchema = z.union([
 type TaskSchema = z.ZodTypeAny;
 const taskSchema: TaskSchema = z.lazy(() => z.strictObject({
     id: ID,
-    kind: z.enum(['agent', 'route', 'spawn', 'supervisor']).optional(),
+    kind: z.enum(['agent', 'route', 'spawn', 'supervisor', 'node']).optional(),
+    node: z.strictObject({ plugin: z.string().min(1), pluginVersion: z.string().min(1), config: z.unknown(),
+        capabilities: z.array(z.string()).optional(),
+        outputPolicy: z.strictObject({ includeInRunOutput: z.boolean().optional(), publishToHistory: z.boolean().optional() }).optional(),
+    }).optional(),
     agent: z.string().optional(),
     description: z.string().optional(),
     port_schemas: nodePortSchemas.optional(),
@@ -162,7 +166,7 @@ const taskSchema: TaskSchema = z.lazy(() => z.strictObject({
     priority: z.number().int().min(0).optional(),
     budget: z.record(z.string(), z.number().positive()).optional(),
 }).superRefine((task, ctx) => {
-    const controlFields = (['route', 'spawn', 'supervisor'] as const).filter(field => task[field] !== undefined);
+    const controlFields = (['route', 'spawn', 'supervisor', 'node'] as const).filter(field => task[field] !== undefined);
     if (controlFields.length > 1) {
         ctx.addIssue({ code: 'custom', message: `task ${task.id} cannot combine ${controlFields.join(' and ')}` });
     }

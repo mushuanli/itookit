@@ -5,6 +5,18 @@
 import type { FlowParameter, JsonValue } from '@itookit/common';
 import type { ValidationIssue } from './validation';
 
+export function flowParameterValues(schema: FlowParameter[] | undefined, values?: Record<string, JsonValue>): Record<string, JsonValue> {
+    const defaults = Object.fromEntries((schema ?? []).filter(param => param.default !== undefined).map(param => [param.name, param.default!]));
+    return structuredClone({ ...defaults, ...values });
+}
+
+export function prepareFlowParameters(schema: FlowParameter[] | undefined, values?: Record<string, JsonValue>): Record<string, JsonValue> {
+    const resolved = flowParameterValues(schema, values);
+    const issues = validateFlowParameters(schema, resolved);
+    if (issues.length) throw new Error(issues.map(issue => issue.message).join('; '));
+    return resolved;
+}
+
 /**
  * Deep-resolve `${params.name}` templates inside node config/inputs.
  * A value that is exactly one `${params.name}` keeps the parameter's native
@@ -16,13 +28,13 @@ export function resolveFlowParameters(
 ): unknown {
     if (typeof value === 'string') {
         const trimmed = value.trim();
-        const whole = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(trimmed);
+        const whole = /^\$\{(?:params|param)\.([A-Za-z0-9_.-]+)\}$/.exec(trimmed);
         if (whole) {
             const resolved = resolveParamPath(parameters, whole[1]);
             if (resolved !== undefined) return resolved;
             return value;
         }
-        return value.replace(/\$\{params\.([A-Za-z0-9_.-]+)\}/g, (_match, path: string) => {
+        return value.replace(/\$\{(?:params|param)\.([A-Za-z0-9_.-]+)\}/g, (_match, path: string) => {
             const resolved = resolveParamPath(parameters, path);
             return resolved !== undefined ? stringifyParameter(resolved) : `\${params.${path}}`;
         });
@@ -54,16 +66,22 @@ export function validateFlowParameters(
     values: Record<string, JsonValue> | undefined,
 ): ValidationIssue[] {
     const issues: ValidationIssue[] = [];
-    const provided = values ?? {};
+    const provided = flowParameterValues(schema, values);
     for (const param of schema ?? []) {
         const present = param.name in provided && provided[param.name] !== undefined;
         if (param.required && !present) {
-            issues.push({ code: 'missing-parameter', message: `Missing required parameter: ${param.name}` });
+            if (param.onMissing !== 'interact') issues.push({ code: 'missing-parameter', message: `Missing required parameter: ${param.name}` });
             continue;
         }
         if (!present) continue;
-        if (!matchesParameterType(param.type, provided[param.name])) {
+        if (param.onMissing !== 'interact' && !matchesParameterType(param.type, provided[param.name])) {
             issues.push({ code: 'invalid-parameter', message: `Parameter ${param.name} must be ${param.type}` });
+        }
+        const value = provided[param.name];
+        if (param.onMissing !== 'interact' && typeof value === 'number' && (
+            (param.integer && !Number.isInteger(value)) || (param.minimum !== undefined && value < param.minimum)
+            || (param.maximum !== undefined && value > param.maximum))) {
+            issues.push({ code: 'invalid-parameter', message: `Parameter ${param.name} is outside its numeric constraints` });
         }
     }
     return issues;

@@ -42,7 +42,9 @@ export interface SupervisorConfig {
 /** 工作流中的一个任务。`kind` 缺省时按 route/spawn/supervisor 字段推断。 */
 export interface WorkflowTaskSpec {
     id: string;
-    kind?: 'agent' | 'route' | 'spawn' | 'supervisor';
+    kind?: 'agent' | 'route' | 'spawn' | 'supervisor' | 'node';
+    /** Versioned plugin node, including input, structured route and aggregate. */
+    node?: Pick<DagNodeDefinition, 'plugin' | 'pluginVersion' | 'config' | 'capabilities' | 'outputPolicy'>;
     /** 执行本任务的 agent id（spawn 子任务与 supervisor 需要）。 */
     agent?: string;
     description?: string;

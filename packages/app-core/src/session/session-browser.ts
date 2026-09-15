@@ -126,8 +126,9 @@ class BrowserBackend implements IStorageBackend {
         const owner = await this.deps.files.acquireFiles(id);
         try { return await fn(owner.context.fs); } finally { await owner.release(); }
     }
-    private mapped(_id: string, node: FSNode, prefix: string): FSNode {
-        return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + node.assetDirPath } : {}), path: prefix + (node.path === '/' ? '' : node.path), parentPath: node.path === '/' ? prefix : prefix + (node.parentPath === '/' ? '' : node.parentPath ?? ''), metadata: { ...node.metadata, _showAll: true } };
+    private async mapped(fs: import('@itookit/vfs-core').IFileSystem, node: FSNode, prefix: string): Promise<FSNode> {
+        const readOnly = node.metadata?._readOnly === true || (await fs.capabilitiesAt(node.path)).readonly;
+        return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + node.assetDirPath } : {}), path: prefix + (node.path === '/' ? '' : node.path), parentPath: node.path === '/' ? prefix : prefix + (node.parentPath === '/' ? '' : node.parentPath ?? ''), metadata: { ...node.metadata, _showAll: true, _readOnly: readOnly } };
     }
     private sessionBrowserPath(id: string, folder: string | null | undefined): string {
         return `${folderBrowserPath(folder)}/${id}`;
@@ -167,8 +168,8 @@ class BrowserBackend implements IStorageBackend {
         }
         const prefix = filesBrowserPrefix(path);
         return this.withFiles(target.sessionId, async fs => {
-            if (target.path === '/') return this.node(path, 'files', true);
-            const node = await fs.driver.getNode(target.path); return node ? this.mapped(target.sessionId, node, prefix) : null;
+            if (target.path === '/') return this.node(path, 'files', true, 0, (await fs.capabilitiesAt('/')).readonly);
+            const node = await fs.driver.getNode(target.path); return node ? this.mapped(fs, node, prefix) : null;
         });
     }
     async list(path: string): Promise<FSNode[]> {
@@ -189,7 +190,7 @@ class BrowserBackend implements IStorageBackend {
             ];
         }
         await this.deps.repository.getManifest(target.sessionId);
-        if (target.kind === 'session') return [this.node(path + '/tasks', 'tasks', true), this.node(path + '/files', 'files', true)];
+        if (target.kind === 'session') return [this.node(path + '/tasks', 'tasks', true, 0, true), this.node(path + '/files', 'files', true, 0, true)];
         if (target.kind === 'tasks') {
             if (path.endsWith('/@more')) throw new FSError('ENOTDIR', 'Open the paginated Task list');
             let exists = false;
@@ -202,7 +203,7 @@ class BrowserBackend implements IStorageBackend {
         }
         if (target.kind === 'files') {
             const prefix = filesBrowserPrefix(path);
-            return this.withFiles(target.sessionId, async fs => (await fs.driver.getChildren(target.path)).map(n => this.mapped(target.sessionId, n, prefix)));
+            return this.withFiles(target.sessionId, async fs => Promise.all((await fs.driver.getChildren(target.path)).map(n => this.mapped(fs, n, prefix))));
         }
         throw new FSError('ENOTDIR', 'Task is a history entry');
     }
@@ -230,7 +231,7 @@ class BrowserBackend implements IStorageBackend {
             const prefix = filesBrowserPrefix(path);
             return this.withFiles(target.sessionId, async fs => {
                 const node = await fs.driver.createDirectory({ parentPath: parentBrowserPath(target.path), name: browserName(target.path) });
-                return this.mapped(target.sessionId, node, prefix);
+                return this.mapped(fs, node, prefix);
             });
         }
         throw new FSError('EROFS', 'Use the Session file context for this path');
@@ -257,10 +258,10 @@ class BrowserBackend implements IStorageBackend {
                     await fs.driver.writeContent(target.path, buffer);
                     const node = await fs.driver.getNode(target.path);
                     if (!node) throw new FSError('EIO', 'Session file disappeared after write');
-                    return this.mapped(target.sessionId, node, prefix);
+                    return this.mapped(fs, node, prefix);
                 }
                 const node = await fs.driver.createFile({ parentPath: parentBrowserPath(target.path), name: browserName(target.path), content: buffer });
-                return this.mapped(target.sessionId, node, prefix);
+                return this.mapped(fs, node, prefix);
             });
         }
         throw new FSError('EROFS', 'Only Session folders and Session files are writable');

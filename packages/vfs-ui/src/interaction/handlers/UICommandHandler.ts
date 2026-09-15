@@ -4,14 +4,17 @@
  */
 import type { FileCreationConfig } from '@itookit/ui-common';
 import type { CommandBus } from '../CommandBus';
-import type { IStatePort } from '../../contracts/ports';
+import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
+import { resolveWritableParent } from '../../utils/creation-guard';
 
 export class UICommandHandler {
   private unsubs: (() => void)[] = [];
+  private creationRevision = 0;
 
   constructor(
     private readonly commandBus: CommandBus,
     private readonly store: IStatePort,
+    private readonly service: Pick<IDataOperationPort, 'assertCanCreate'>,
     private readonly resolveParent?: FileCreationConfig['resolveParent']
   ) {
     this.register();
@@ -29,12 +32,17 @@ export class UICommandHandler {
       this.commandBus.on('ui:updateSettings', ({ settings }) =>
         this.dispatch('SETTINGS_UPDATE', { settings })
       ),
-      this.commandBus.on('ui:startCreating', data =>
-        this.dispatch('CREATE_ITEM_START', { ...data, parentPath: this.resolveParent ? this.resolveParent(data.parentPath) : data.parentPath })
-      ),
-      this.commandBus.on('ui:cancelCreating', () =>
-        this.dispatch('CREATE_ITEM_END')
-      ),
+      this.commandBus.on('ui:startCreating', async data => {
+        const revision = ++this.creationRevision;
+        try {
+          const parentPath = await resolveWritableParent(this.store, this.service, data.parentPath, this.resolveParent);
+          if (revision === this.creationRevision) this.dispatch('CREATE_ITEM_START', { ...data, parentPath });
+        } catch (error) { if (revision === this.creationRevision) alert((error as Error).message); }
+      }),
+      this.commandBus.on('ui:cancelCreating', () => {
+        ++this.creationRevision;
+        this.dispatch('CREATE_ITEM_END');
+      }),
       this.commandBus.on('ui:updateSearch', ({ query }) =>
         this.dispatch('SEARCH_QUERY_UPDATE', { query })
       ),
@@ -48,6 +56,7 @@ export class UICommandHandler {
   }
 
   destroy(): void {
+    ++this.creationRevision;
     this.unsubs.forEach(u => u());
   }
 }

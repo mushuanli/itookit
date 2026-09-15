@@ -9,6 +9,10 @@ import type {
 } from '@itookit/common';
 import { DELEGATION_LIMITS, simpleHash } from '@itookit/common';
 import { findCycles } from './graph';
+import { validateDispatch } from './structured/validation';
+import { compileReferenceGraph } from './structured/references';
+import { compileDispatchGraph } from './structured/graph';
+import { validateFields } from './structured/input';
 import { dataEdgeSchemaIssue } from './port-contract';
 
 export interface ValidationIssue {
@@ -41,6 +45,8 @@ export function validateFlowRevision(
     plugins?: DagPluginCatalog,
 ): ValidationIssue[] {
     const issues: ValidationIssue[] = [];
+    try { flow = compileReferenceGraph(compileDispatchGraph(flow)); }
+    catch (error) { return [{ code: 'invalid-dispatch-graph', message: String(error) }]; }
     if (plugins) {
         try { plugins = createRunCatalog(plugins, flow.nodes); }
         catch (error) { return [{ code: 'invalid-port-schema', message: String(error) }]; }
@@ -52,6 +58,12 @@ export function validateFlowRevision(
     validateConnections(flow.connections, flow.defaultConnection, issues);
     validateConnectionReferences(flow, issues);
     validateRunPolicy(flow, issues);
+    for (const parameter of flow.parameters ?? []) {
+        if (parameter.onMissing === 'interact' && !flow.nodes.some(node => node.plugin === 'builtin.input'
+            && isRecord(node.config) && isRecord(node.config.fields) && Object.hasOwn(node.config.fields, parameter.name))) {
+            issues.push({ code: 'missing-input-collector', message: `Interactive parameter requires an input node: ${parameter.name}` });
+        }
+    }
     return deduplicate(issues);
 }
 
@@ -108,6 +120,10 @@ function validateNodes(
         validateDelegation(node, issues);
         validateSpawnPatch(node, issues);
         validateHarnessLimits(node, issues);
+        try {
+            if (node.plugin === 'builtin.route' && node.pluginVersion === '2.0.0') validateDispatch(node.config as unknown as import('@itookit/common').DispatchConfig, true);
+            if (node.plugin === 'builtin.input') validateFields((node.config as unknown as import('@itookit/common').FlowInputConfig).fields);
+        } catch (error) { add(issues, 'invalid-structured-config', String(error), node.id); }
     }
     return nodes;
 }
@@ -293,7 +309,7 @@ function validateConnections(
     }
 }
 
-function validateSchema(schema: JsonValue, value: JsonValue, path = '$'): string[] {
+export function validateSchema(schema: JsonValue, value: JsonValue, path = '$'): string[] {
     if (!isRecord(schema)) return [];
     const errors: string[] = [];
     // A whole `${params.name}` placeholder is resolved at run time to the
@@ -325,7 +341,7 @@ function matchesType(type: string, value: JsonValue): boolean {
 
 /** True when the value is exactly one `${params.path}` template placeholder. */
 function isParameterTemplate(value: JsonValue): boolean {
-    return typeof value === 'string' && /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.test(value.trim());
+    return typeof value === 'string' && /^\$\{(?:params|param|nodes|state|iteration)\.([A-Za-z0-9_.-]+)\}$/.test(value.trim());
 }
 
 function canonicalJson(value: unknown): string {

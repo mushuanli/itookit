@@ -111,7 +111,8 @@ export interface TaskConfig {
         failure_policy?: 'fail-fast' | 'continue' };
     id: string;
     /** 显式任务类型；缺省时按 route/spawn/supervisor 字段推断。 */
-    kind?: 'agent' | 'route' | 'spawn' | 'supervisor';
+    kind?: 'agent' | 'route' | 'spawn' | 'supervisor' | 'node';
+    node?: import('@itookit/llm-flow').WorkflowTaskSpec['node'];
     agent?: string;
     description?: string;
     route?: RouteConfig;
@@ -167,6 +168,11 @@ export interface BlockedEffect {
 }
 
 export interface RunManifest {
+    flow?: {
+        definition: import('@itookit/app-core').RunDefinition;
+        parameters?: Record<string, import('@itookit/durable-kernel').JsonValue>;
+        config: WorkflowConfigV1;
+    };
     version: 1;
     id: string;
     name: string;

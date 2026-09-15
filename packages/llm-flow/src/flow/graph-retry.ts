@@ -55,6 +55,8 @@ export async function requestFlowGraphRetry(
     }
     const source = (await readFlowRunMembers(session, root)).find(entry => entry.taskId === sourceTaskId);
     if (!source) throw new Error(`Task is outside this run: ${sourceTaskId}`);
+    const sourceTask = (await (await session.attachTask(sourceTaskId)).status()).task;
+    if (sourceTask.labels?.dispatchKey) throw new Error('Retry the structured route scope instead of a dispatched child');
     // Delegated children are materialized per parent instance: recomputing a parent drops
     // its group, so synthetic children are not retried directly, only through their parent.
     if (source.nodeId.includes(':delegate:')) {

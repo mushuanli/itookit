@@ -1,3 +1,5 @@
+import { enhanceInputFieldsEditor } from './dag/InputFieldsEditor';
+import { enhanceInvocationEditor } from './dag/InvocationEditor';
 import { openRunPicker } from './dag/RunPicker';
 import type {
     FlowDraft,
@@ -72,7 +74,7 @@ export class DagWorkbench {
     async loadDraft(id: string, selectedNodeId?: FlowNodeId): Promise<void> {
         const request = ++this.viewRequest;
         this.stopRunRefresh();
-        const draft = await this.options.commands.execute<FlowDraft | null>(FlowCommand.DraftLoad, { id })
+        const draft = await this.options.commands.execute<FlowDraft | null>(FlowCommand.DraftLoad, { id, expandScopes: true })
             .catch(error => { if (request === this.viewRequest) throw error; return null; });
         if (request !== this.viewRequest) return;
         if (!draft) throw new Error(`Flow draft not found: ${id}`);
@@ -162,7 +164,7 @@ export class DagWorkbench {
 
     private renderCanvas(draft: FlowDraft): void {
         const root = this.root.querySelector<HTMLElement>('.dag-canvas')!;
-        const manifests = new Map(this.catalogue.map(item => [item.manifest.id, item.manifest]));
+        const manifests = new Map(this.catalogue.map(item => [`${item.manifest.id}@${item.manifest.version}`, item.manifest]));
         this.canvas = new DagCanvas(root, {
             onSelectNode: id => this.selectNode(id),
             onSelectEdge: id => this.selectEdge(id),
@@ -209,7 +211,7 @@ export class DagWorkbench {
                 <label>Priority<input data-inline-priority type="number" value="${node.priority ?? 0}"></label>
             </details>`;
         let schema = withConnectionEnum(presentation.manifest.configSchema, draft, formValue);
-        if (node.plugin === 'builtin.agent') {
+        if (presentation.manifest.authoring?.invocation && presentation.manifest.authoring.scopeRole !== 'route') {
             const [agents, prompts, tools, skills] = await Promise.all([
                 this.options.listAgents?.() ?? Promise.resolve([]),
                 this.options.listSystemPrompts?.() ?? Promise.resolve([]),
@@ -225,6 +227,8 @@ export class DagWorkbench {
         const formRoot = inspector.querySelector<HTMLElement>('[data-inline-config]')!;
         const schemaForm = new SchemaForm(formRoot, schema, formValue, presentation.ui?.inspector.layout);
         schemaForm.render();
+        enhanceInvocationEditor(formRoot, this.controller!.value, node, presentation.manifest.authoring?.invocation === true);
+        if (presentation.manifest.authoring?.scopeRole === 'input') enhanceInputFieldsEditor(formRoot, isRecord(formValue) ? formValue : {});
         if (node.plugin === 'builtin.spawn') enhanceSpawnForm(formRoot);
         inspector.querySelector('[data-node-action="save"]')?.addEventListener('click', () => {
             try {
@@ -383,7 +387,7 @@ export class DagWorkbench {
         let schema = this.controller
             ? withConnectionEnum(presentation.manifest.configSchema, this.controller.value, formValue)
             : presentation.manifest.configSchema;
-        if (node.plugin === 'builtin.agent') {
+        if (presentation.manifest.authoring?.invocation && presentation.manifest.authoring.scopeRole !== 'route') {
             const [agents, prompts, tools, skills] = await Promise.all([
                 this.options.listAgents?.() ?? Promise.resolve([]),
                 this.options.listSystemPrompts?.() ?? Promise.resolve([]),
@@ -402,6 +406,8 @@ export class DagWorkbench {
             presentation.ui?.inspector.layout,
         );
         schemaForm.render();
+        enhanceInvocationEditor(formRoot, this.controller!.value, node, presentation.manifest.authoring?.invocation === true);
+        if (presentation.manifest.authoring?.scopeRole === 'input') enhanceInputFieldsEditor(formRoot, isRecord(formValue) ? formValue : {});
         if (node.plugin === 'builtin.spawn') enhanceSpawnForm(formRoot);
         this.bindNodeDialog(dialog, node, schemaForm);
     }
@@ -505,7 +511,6 @@ export class DagWorkbench {
         const revision = await this.publish();
         if (!revision) return;
         this.options.onSelectFlow?.(String(revision.id), revision.revision);
-        Toast.success(`Flow r${revision.revision} selected. Send a message to run it.`);
     }
 
     private async refreshValidation(draft: FlowDraft): Promise<void> {
@@ -730,7 +735,10 @@ export class DagWorkbench {
             const output = source?.outputs[0]?.name;
             const input = target?.inputs[0]?.name;
             const kind = output && input ? 'data' : 'control';
-            const edge = createFlowEdge(from, to, kind, { output, input });
+            const repeat = from.plugin === 'builtin.judge' && to.plugin === 'builtin.route' && to.pluginVersion === '3.0.0';
+            const edge = repeat
+                ? { ...createFlowEdge(from, to, 'control'), output: 'repeat' }
+                : createFlowEdge(from, to, kind, { output, input });
             this.controller?.addEdge(edge);
             this.wireRouteBranch(from, to, edge.id);
             this.render();
@@ -741,7 +749,7 @@ export class DagWorkbench {
 
     /** When wiring a route node, register the new edge id so the branch actually activates. */
     private wireRouteBranch(from: FlowNodeDefinition, to: FlowNodeDefinition, edgeId: string): void {
-        if (from.plugin !== 'builtin.route') return;
+        if (from.plugin !== 'builtin.route' || from.pluginVersion !== '1.0.0') return;
         const config: Record<string, unknown> = isRecord(from.config)
             ? { ...from.config } as Record<string, unknown>
             : {};
@@ -875,9 +883,12 @@ function withConnectionEnum(
     nodeConfig: FlowNodeDefinition['config'],
 ): JsonValue {
     if (!isRecord(schema)) return schema;
-    const properties = isRecord(schema.properties) ? schema.properties : {};
+    const properties = isRecord(schema.properties) ? { ...schema.properties } : {};
+    if (isRecord(properties.invocationDefaults)) {
+        properties.invocationDefaults = withConnectionEnum(properties.invocationDefaults as JsonValue, flow, (isRecord(nodeConfig) ? nodeConfig.invocationDefaults ?? {} : {}) as JsonValue);
+    }
     const connectionField = isRecord(properties.connectionId) ? properties.connectionId : undefined;
-    if (!connectionField) return schema;
+    if (!connectionField) return { ...schema, properties } as JsonValue;
     const aliases = (flow.connections ?? []).map(connection => connection.name);
     const current = isRecord(nodeConfig) ? nodeConfig.connectionId : undefined;
     const enumValues: JsonValue[] = [...aliases];

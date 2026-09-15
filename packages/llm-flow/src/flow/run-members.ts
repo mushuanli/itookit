@@ -10,12 +10,30 @@ export interface FlowRunMember {
     retryOfTaskId?: string;
 }
 
-export async function readFlowRunMembers(session: Pick<SessionHandle, 'getShared'>, root: TaskRecord): Promise<FlowRunMember[]> {
+export async function readFlowRunMembers(session: Pick<SessionHandle, 'getShared'> & Partial<Pick<SessionHandle, 'listTasks'>>, root: TaskRecord): Promise<FlowRunMember[]> {
     if (root.program.kind !== 'flow.aggregate' || root.labels?.kind !== 'flow-root') throw new Error(`Not a Flow run: ${root.id}`);
     const scheduled = await session.getShared(`flow.run.${root.id}.members`);
     const base = members(scheduled?.value ?? (root.input as { runTasks?: unknown } | undefined)?.runTasks);
     const saved = await session.getShared(`flow.run.${root.id}.retries`);
-    return [...base, ...members(saved?.value ?? [])];
+    const result = [...base, ...members(saved?.value ?? [])];
+    if (session.listTasks) appendDescendants(result, await session.listTasks());
+    return result;
+}
+
+function appendDescendants(result: FlowRunMember[], tasks: TaskRecord[]): void {
+    const known = new Map(result.map(member => [member.taskId, member]));
+    const owners = new Set(tasks.filter(task => task.program?.kind === 'flow.dispatch').map(task => task.id));
+    let added = true;
+    while (added) {
+        added = false;
+        for (const task of tasks) {
+            const parent = task.parentTaskId ? known.get(task.parentTaskId) : undefined;
+            if (!parent || !owners.has(task.parentTaskId!) || known.has(task.id)) continue;
+            const member = { taskId: task.id, nodeId: `${parent.nodeId}/${task.labels?.dispatchKey ?? task.id}`,
+                iteration: Number(task.labels?.dispatchRound) || 1, detached: parent.detached };
+            result.push(member); known.set(task.id, member); owners.add(task.id); added = true;
+        }
+    }
 }
 
 /** Detached members may outlive the aggregate root. Drain them before closing workspace handles. */

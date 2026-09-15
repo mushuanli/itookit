@@ -2,6 +2,7 @@ import type { FormLayout, JsonValue } from '@itookit/common';
 import { escapeHTML } from '@itookit/common';
 
 interface JsonSchema {
+    format?: string;
     type?: string;
     title?: string;
     description?: string;
@@ -39,6 +40,7 @@ export class SchemaForm {
                 errors.push(error instanceof Error ? error.message : 'Invalid field value');
             }
         }
+        value = pruneInheritedObjects(asSchema(this.schema), value);
         errors.push(...validateSchema(asSchema(this.schema), value));
         if (errors.length) return { errors };
         this.value = value;
@@ -74,6 +76,7 @@ function renderSection(
 }
 
 export function validateSchema(schema: JsonSchema, value: JsonValue, path = '$'): string[] {
+    if (isParameterReference(value)) return [];
     const errors: string[] = [];
     if (schema.type && !matchesType(schema.type, value)) errors.push(`${path} must be ${schema.type}`);
     if (schema.enum && !schema.enum.some(item => same(item, value))) errors.push(`${path} is not an allowed value`);
@@ -133,6 +136,8 @@ function renderProperty(
 
 function renderControl(schema: JsonSchema, value: JsonValue, path: string, optional = false, present = true): string {
     const encodedPath = escapeHTML(path);
+    if (isParameterReference(value) && schema.type !== 'number' && schema.type !== 'integer') return `<input data-schema-path="${encodedPath}" type="text" value="${escapeHTML(String(value))}">`;
+    if (schema.format === 'multiline') return `<textarea data-schema-path="${encodedPath}" rows="6">${escapeHTML(String(value ?? ''))}</textarea>`;
     if (schema.type === 'array' && schema.items?.enum) {
         const selected = new Set(Array.isArray(value) ? value.map(item => JSON.stringify(item)) : []);
         return `<select data-schema-path="${encodedPath}" data-schema-type="multi" multiple size="${Math.min(8, Math.max(3, schema.items.enum.length))}">${schema.items.enum.map(item => {
@@ -150,7 +155,7 @@ function renderControl(schema: JsonSchema, value: JsonValue, path: string, optio
         return `<input data-schema-path="${encodedPath}" data-schema-type="boolean" type="checkbox" ${value ? 'checked' : ''}>`;
     }
     if (schema.type === 'number' || schema.type === 'integer') {
-        return `<input data-schema-path="${encodedPath}" data-schema-type="${schema.type}" ${optional ? 'data-schema-optional="true"' : ''} type="number" value="${present ? escapeHTML(String(value ?? 0)) : ''}" placeholder="${optional ? escapeHTML(schema.unsetLabel ?? 'inherit') : ''}">`;
+        return `<input data-schema-path="${encodedPath}" data-schema-type="${schema.type}" ${optional ? 'data-schema-optional="true"' : ''} type="text" inputmode="decimal" value="${present ? escapeHTML(String(value ?? 0)) : ''}" placeholder="${optional ? escapeHTML(schema.unsetLabel ?? 'inherit') : ''}">`;
     }
     if (schema.type === 'object' || schema.type === 'array' || !schema.type) {
         return `<textarea data-schema-path="${encodedPath}" data-schema-type="json" ${optional ? 'data-schema-optional="true"' : ''} rows="5" placeholder="${optional ? '(inherit)' : ''}">${present ? escapeHTML(JSON.stringify(value ?? defaultValue(schema), null, 2)) : ''}</textarea>`;
@@ -159,6 +164,7 @@ function renderControl(schema: JsonSchema, value: JsonValue, path: string, optio
 }
 
 function readField(field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement): JsonValue | undefined {
+    if (isParameterReference(field.value)) return field.value;
     if (field.dataset.schemaOptional === 'true' && field.value === '') return undefined;
     if (field.dataset.schemaType === 'optional-boolean') return field.value === 'true';
     if (field instanceof HTMLInputElement && field.dataset.schemaType === 'boolean') return field.checked;
@@ -253,4 +259,18 @@ function same(left: JsonValue, right: JsonValue): boolean {
 /** Empty-string enum entries read as "(inherit)" in dropdowns. */
 function enumLabel(item: JsonValue): string {
     return item === '' ? '(inherit)' : String(item);
+}
+
+function isParameterReference(value: unknown): value is string {
+    return typeof value === 'string' && /^\$\{(?:param|params|nodes|state|iteration)\.([A-Za-z0-9_.-]+)\}$/.test(value.trim());
+}
+
+function pruneInheritedObjects(schema: JsonSchema, value: JsonValue): JsonValue {
+    if (!isRecord(value) || !schema.properties) return value;
+    for (const [key, child] of Object.entries(schema.properties)) {
+        if (!(key in value)) continue;
+        value[key] = pruneInheritedObjects(child, value[key]);
+        if (!schema.required?.includes(key) && child.properties && isRecord(value[key]) && !Object.keys(value[key]).length) delete value[key];
+    }
+    return value;
 }

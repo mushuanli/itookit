@@ -4,6 +4,15 @@ import { compileRunDefinition } from '../src/run-definition';
 import type { CompiledWorkflow } from '../src/types';
 
 describe('compileDag', () => {
+    it('compiles generic plugin nodes and their data bindings without the Agent factory', () => {
+        const compiled = compileDag({ config: { agents: [], tasks: [
+            { id: 'collect', kind: 'node', node: { plugin: 'builtin.input', pluginVersion: '1.0.0', config: { fields: {} } } },
+            { id: 'review', kind: 'node', node: { plugin: 'builtin.route', pluginVersion: '2.0.0', config: { maxRounds: 10 } },
+                inputs: { input: '${tasks.collect.outputs.result}' } },
+        ] } } as never);
+        expect(compiled.nodes[1]).toMatchObject({ plugin: 'builtin.route', pluginVersion: '2.0.0', config: { maxRounds: 10 }, inputs: {} });
+        expect(compiled.edges).toEqual([{ id: 'collect:result->review:input', from: 'collect', to: 'review', output: 'result', input: 'input' }]);
+    });
     it('maps explicit task outputs to deterministic DAG edges', () => {
         const workflow: CompiledWorkflow = {
             workspaceRoot: '/work', stateDir: '/work/.mindos',

@@ -21,10 +21,12 @@ export interface DagPluginManifest<Config = unknown> {
     defaultConfig?: Partial<Config>;
     inputs: InputPortSpec[];
     outputs: OutputPortSpec[];
+    authoring?: { invocation?: boolean; scopeRole?: 'route' | 'check' | 'aggregate' | 'judge' | 'input' };
     requiredCapabilities?: string[];
 }
 
 export interface DagNodeDefinition<Config = unknown> {
+    outputPolicy?: { includeInRunOutput?: boolean; publishToHistory?: boolean };
     portSchemas?: NodePortSchemas;
     id: string;
     name: string;
@@ -53,6 +55,9 @@ export interface DagEdgeDefinition {
 }
 
 export interface DagRunSpec {
+    templateVersion?: 1;
+    parameterScopes?: Record<string, { parent: string; defaults: Record<string, JsonValue>; values: Record<string, JsonValue>; schema?: import('./flow-definition').FlowParameter[] }>;
+    parameterSchema?: import('./flow-definition').FlowParameter[];
     /** Compiler-owned identity defaults by node; dynamic descendants inherit their parent's scope. */
     nodeDefaults?: Record<string, Record<string, unknown>>;
     /** Connection aliases for dynamic descendants, scoped by their compiled source node. */

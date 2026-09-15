@@ -99,6 +99,7 @@ describe('app-shell navigation listener cleanup', () => {
                 createFlowEditor: vi.fn(() => vi.fn(async () => ({ destroy: vi.fn(async () => {}) }))),
                 createSkillEditor: vi.fn(() => vi.fn(async () => ({ destroy: vi.fn(async () => {}) }))),
                 createAIContextMenu: vi.fn(() => ({})),
+                createFlowContextMenu: vi.fn(() => ({})),
                 llmUiEditors: {},
             },
         });

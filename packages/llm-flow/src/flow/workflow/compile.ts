@@ -27,7 +27,12 @@ export function compileWorkflow(
     const extraEdges: DagEdgeDefinition[] = [];
     for (const task of tasks) {
         const kind = taskKind(task);
-        if (kind === 'supervisor') {
+        if (kind === 'node') {
+            if (!task.node) throw new Error(`Task ${task.id} requires a node definition`);
+            nodes.push({ ...structuredClone(task.node), id: task.id, name: task.description ?? task.id,
+                inputs: staticInputs(task, resolveOutputReference), priority: task.priority, budget: task.budget,
+                ...(task.retry ? { retry: { maxAttempts: task.retry.max_attempts, backoffMs: task.retry.backoff_ms } } : {}) });
+        } else if (kind === 'supervisor') {
             const sub = compileSupervisor(task, agentFactory);
             nodes.push(...sub.nodes);
             extraEdges.push(...sub.edges);
@@ -48,8 +53,9 @@ export function compileWorkflow(
 }
 
 /** 显式 kind 优先，否则按 route/spawn/supervisor 字段推断为对应控制节点。 */
-function taskKind(task: WorkflowTaskSpec): 'agent' | 'route' | 'spawn' | 'supervisor' {
+function taskKind(task: WorkflowTaskSpec): 'agent' | 'route' | 'spawn' | 'supervisor' | 'node' {
     if (task.kind) return task.kind;
+    if (task.node !== undefined) return 'node';
     if (task.supervisor !== undefined) return 'supervisor';
     if (task.route !== undefined) return 'route';
     if (task.spawn !== undefined) return 'spawn';

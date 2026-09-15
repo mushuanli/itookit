@@ -8,6 +8,8 @@ import type { IStatePort } from '../../contracts/ports';
 import type { VFSService } from '../../services/VFSService';
 import { deserialize, decodeContent } from '@itookit/vfs-core';
 import type { VFSExportManifest, VFSExportAsset } from '@itookit/vfs-core';
+import type { FileCreationConfig } from '@itookit/ui-common';
+import { resolveWritableParent } from '../../utils/creation-guard';
 
 export class ImportCommandHandler {
     private unsubs: (() => void)[] = [];
@@ -17,14 +19,17 @@ export class ImportCommandHandler {
         private readonly store: IStatePort,
         private readonly service: VFSService,
         private readonly reloadData: () => Promise<void>,
+        private readonly resolveParent?: FileCreationConfig['resolveParent'],
     ) {
         this.register();
     }
 
     private register(): void {
         this.unsubs.push(
-            this.commandBus.on('file:import', ({ parentPath }) => {
-                this.showFilePicker(parentPath);
+            this.commandBus.on('file:import', async ({ parentPath }) => {
+                try {
+                    this.showFilePicker(await resolveWritableParent(this.store, this.service, parentPath, this.resolveParent));
+                } catch (error) { alert((error as Error).message); }
             }),
         );
     }
@@ -42,6 +47,7 @@ export class ImportCommandHandler {
             if (!files?.length) return;
 
             try {
+                await resolveWritableParent(this.store, this.service, parentPath);
                 const ymlFiles: File[] = [];
                 const regularFiles: File[] = [];
 

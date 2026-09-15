@@ -12,7 +12,7 @@ it('freezes registered versions and returns isolated definitions', () => {
     expect(() => registry.register(ref, true)).toThrow('already registered');
 });
 
-it.each([{ $ref: '#/definitions/report' }, { minimum: 2 }, { type: 'unknown' }, { items: { pattern: 'x' } }])(
+it.each([{ $ref: '#/definitions/report' }, { minimum: 'invalid' }, { type: 'unknown' }, { items: { pattern: 'x' } }])(
     'rejects unsupported or invalid schemas %j', schema => {
         expect(() => new FlowSchemaRegistry().register({ id: 'report' }, schema as any)).toThrow();
     },

@@ -101,6 +101,12 @@ export interface AIContextMenuNode {
 }
 
 export interface AppUI {
+    installFlowLibrary?(commands: ICommandBus): Promise<void>;
+    restoreFlowLibrary?(commands: ICommandBus): Promise<number>;
+    createFlowContextMenu<TNode extends { id: string; type: 'file' | 'directory' }>(deps: {
+        commands: ICommandBus;
+        navigate(sessionId: string): void | Promise<void>;
+    }): ContextMenuConfig<TNode>;
     createChatEditor(agentService: VFSAgentService, deps: ChatEditorDeps): EditorFactory;
     createAgentEditor(agentService: VFSAgentService): EditorFactory;
     createFlowEditor(deps: FlowEditorDeps): EditorFactory;

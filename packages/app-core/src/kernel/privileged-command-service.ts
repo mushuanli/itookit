@@ -1,4 +1,4 @@
-import type { Kernel, TaskHandle } from '@itookit/durable-kernel';
+import type { Kernel } from '@itookit/durable-kernel';
 import {
     AgentResolver,
     type IAgentConfigService,
@@ -7,6 +7,7 @@ import {
     type ExecCommandRequest,
 } from '@itookit/llm-session';
 import { randomUUID } from '@itookit/common';
+import { submitRun } from '@itookit/llm-flow';
 
 export class PrivilegedCommandService implements IPrivilegedCommandService {
     private readonly agents: AgentResolver;
@@ -21,48 +22,39 @@ export class PrivilegedCommandService implements IPrivilegedCommandService {
     async plan(request: PlanCommandRequest): Promise<string> {
         const config = await this.agents.resolveForChat(request.agentId);
         if (!config.connectionId) throw new Error('Selected agent has no LLM connection');
-        const session = await this.kernel.openSession(request.sessionId);
-        const task = await session.submit({
-            program: { kind: 'llm.plan', version: '1' },
-            input: {
-                sessionId: request.sessionId,
-                roundId: createRunId('plan'),
-                connectionId: config.connectionId,
-                model: config.model,
-                temperature: config.temperature,
-                thinking: config.enableThinking,
-                reasoningEffort: config.reasoningEffort,
-                goal: request.goal,
+        const run = await submitRun({
+            kind: 'task', sessionId: request.sessionId,
+            task: {
+                program: { kind: 'llm.plan', version: '1' },
+                input: {
+                    sessionId: request.sessionId,
+                    roundId: createRunId('plan'),
+                    connectionId: config.connectionId,
+                    model: config.model,
+                    temperature: config.temperature,
+                    thinking: config.enableThinking,
+                    reasoningEffort: config.reasoningEffort,
+                    goal: request.goal,
+                },
+                labels: { command: 'plan' },
             },
-            labels: { command: 'plan' },
-            deferStart: true,
-        });
-        await bindCapability(task, 'llm', 'llm://plan', 'llmHandleId');
-        return task.id;
+            capabilities: [{ kind: 'llm', uri: 'llm://plan', rights: ['execute'], signalKey: 'llmHandleId' }],
+        }, { kernel: this.kernel });
+        return run.root.id;
     }
 
     async exec(request: ExecCommandRequest): Promise<string> {
-        const session = await this.kernel.openSession(request.sessionId);
-        const task = await session.submit({
-            program: { kind: 'kernel-adapters.exec', version: '1' },
-            input: { command: request.command },
-            labels: { command: 'exec' },
-            deferStart: true,
-        });
-        await bindCapability(task, 'process', 'process://exec', 'processHandleId');
-        return task.id;
+        const run = await submitRun({
+            kind: 'task', sessionId: request.sessionId,
+            task: {
+                program: { kind: 'kernel-adapters.exec', version: '1' },
+                input: { command: request.command },
+                labels: { command: 'exec' },
+            },
+            capabilities: [{ kind: 'process', uri: 'process://exec', rights: ['execute'], signalKey: 'processHandleId' }],
+        }, { kernel: this.kernel });
+        return run.root.id;
     }
-}
-
-async function bindCapability(
-    task: TaskHandle,
-    kind: string,
-    uri: string,
-    field: string,
-): Promise<void> {
-    const grant = await task.createResource({ kind, uri, rights: ['execute'] });
-    await task.signal({ type: 'capabilities', payload: { [field]: grant.handle.id } });
-    await task.start();
 }
 
 function createRunId(prefix: string): string {

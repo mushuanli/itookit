@@ -94,7 +94,7 @@ export class FileSystemView implements IFileSystem {
     async capabilitiesAt(path: string): Promise<FSCapabilities> {
         return this.operation(async () => {
             const m = this.find(normalizeVirtualPath(path));
-            if (!m) return this.capabilities;
+            if (!m) return { ...this.capabilities, readonly: true };
             const caps = await m.fs.capabilitiesAt(this.sourcePath(m, path));
             return { ...caps, tags: this.capabilities.tags && caps.tags, symlinks: false, hardlinks: false, deviceFiles: false, watch: false, readonly: m.access === 'ro' || caps.readonly };
         });

@@ -43,6 +43,9 @@ export async function bindFlowNode(
     setup: BindingSetup,
     agents: AgentResolver,
 ) {
+    if (record(node.config).invocationContext === 'isolated') {
+        return bindIsolatedInvocation(node, flowDefaultsValue, task.sessionId, agents);
+    }
     if (node.plugin !== 'builtin.agent') {
         return { inputs: { ...node.inputs, prompt: task.input.text } };
     }
@@ -58,6 +61,7 @@ export async function bindFlowNode(
 export async function bindStandaloneFlowNode(
     node: FlowNodeDefinition, defaults: FlowNodeDefinition['config'] | undefined, sessionId: string, agents: AgentResolver,
 ) {
+    if (record(node.config).invocationContext === 'isolated') return bindIsolatedInvocation(node, defaults, sessionId, agents);
     if (node.plugin !== 'builtin.agent') return {};
     const config = normalizeLegacyFields(record(node.config));
     const flowDefaults = normalizeLegacyFields(record(defaults));
@@ -70,6 +74,24 @@ export async function bindStandaloneFlowNode(
         snapshot: { blocks: [], canonicalMessages: [] }, task: { sessionId, input: { text: '' } },
         setup: { config: { id: 'flow', name: 'Flow', type: 'agent' }, roundId: 'flow' },
     });
+}
+
+/** Resolve the target identity without importing the caller's conversational context. */
+async function bindIsolatedInvocation(node: FlowNodeDefinition, _defaults: FlowNodeDefinition['config'] | undefined,
+    sessionId: string, agents: AgentResolver) {
+    if (node.plugin !== 'builtin.agent') return {};
+    const config = { ...record(node.config), invocationContext: undefined, messages: undefined, historyPolicy: 'none' };
+    const agentId = stringValue(record(node.config).agentId);
+    if (agentId) await agents.resolveExact(agentId);
+    const bound = await bindAgentSource({ id: String(node.id), name: node.name,
+        config, capabilities: node.capabilities ?? [] }, { flowDefaults: {}, agents, standalone: true,
+        snapshot: { blocks: [], canonicalMessages: [] }, task: { sessionId, input: { text: '' } },
+        setup: { config: { id: 'flow', name: 'Flow', type: 'agent' }, roundId: 'flow' } });
+    const resolved = record(bound.config);
+    const messages = Array.isArray(resolved.messages) ? resolved.messages.filter(isChatMessage) : [];
+    return { ...bound, config: { ...resolved, invocationInstructions: [
+        ...messages.filter(message => message.role === 'system').map(message => message.content), ...taskInstruction(config)],
+        messages: [], memoryPolicy: undefined } as never };
 }
 
 async function bindAgentSource(source: AgentSource, context: BindingContext, templateDepth = 0) {

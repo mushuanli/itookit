@@ -109,14 +109,15 @@ export function assemble(
             getDuplicateTransformer: (ext) => registry.getDuplicateTransformer(ext),
         }),
         new NavigationCommandHandler(commandBus, store, eventBus),
-        new UICommandHandler(commandBus, store, options.fileCreation?.resolveParent),
+        new UICommandHandler(commandBus, store, service, options.fileCreation?.resolveParent),
         new SelectionCommandHandler(commandBus, store),
         new BulkCommandHandler(commandBus, store, service),
         new ImportCommandHandler(
             commandBus,
             store,
             service,
-            () => engineAdapter.loadData()
+            () => engineAdapter.loadData(),
+            options.fileCreation?.resolveParent,
         ),
         new ExportCommandHandler(commandBus, service, engine, { exportItem: options.exportItem }),
         new CustomMenuCommandHandler(commandBus, eventBus),

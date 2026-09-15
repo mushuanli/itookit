@@ -26,8 +26,12 @@ it.each([null, '/group'] as const)('creates a sibling Session when the selected 
         await workbench.start();
         await workbench.openResource(`${folder ? '/folder:group' : ''}/${id}`);
         sidebar.querySelector<HTMLButtonElement>('[data-action="create-file"]')!.click();
+        await vi.waitFor(() => { expect(alert.mock.calls).toEqual([]); expect(sidebar.querySelector('.vfs-node-list__item-creator-input')).not.toBeNull(); });
         const input = sidebar.querySelector<HTMLInputElement>('.vfs-node-list__item-creator-input')!;
         expect(input).not.toBeNull();
+        expect(input.value).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}$/);
+        expect(input.selectionStart).toBe(0);
+        expect(input.selectionEnd).toBe(input.value.length);
         input.value = 'Sibling'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
         await vi.waitFor(async () => expect(await repository.list()).toHaveLength(2));
         const sibling = (await repository.list()).find(item => item.id !== id)!;
@@ -37,6 +41,7 @@ it.each([null, '/group'] as const)('creates a sibling Session when the selected 
         // Real writable directories retain their target instead of creating another Session.
         await workbench.openResource(`${folder ? '/folder:group' : ''}/${id}/files/attachments`);
         sidebar.querySelector<HTMLButtonElement>('[data-action="create-file"]')!.click();
+        await vi.waitFor(() => { expect(alert.mock.calls).toEqual([]); expect(sidebar.querySelector('.vfs-node-list__item-creator-input')).not.toBeNull(); });
         const fileInput = sidebar.querySelector<HTMLInputElement>('.vfs-node-list__item-creator-input')!;
         fileInput.value = 'note.md'; fileInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
         const owner = await files.acquireFiles(id);
@@ -47,5 +52,37 @@ it.each([null, '/group'] as const)('creates a sibling Session when the selected 
     } finally {
         await workbench.destroy(); await files.dispose(); await repository.dispose(); await manager.dispose();
         sidebar.remove(); main.remove(); vi.unstubAllGlobals();
+    }
+});
+
+it('maps Flow files into the chat sidebar and deletes through to the shared Flow directory', async () => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const root = await manager.openFileSystem('/');
+    const flowFiles = await manager.openFileSystem('/home/admin/flows');
+    await flowFiles.driver.createFile({ parentPath: '/', name: 'essay-review-isolated.flow', content: '{}' });
+    const repository = new SessionRepository(root); await repository.init();
+    const intrinsic = createSessionAttachmentMounts(repository);
+    const files = new SessionFilesService(root, id => intrinsic.forSession(id)); await files.initialize();
+    const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
+    const factory = vi.fn(async () => ({ destroy: vi.fn() })), navigate = vi.fn();
+    const kernel = { onChanged: () => () => {}, listSessionTasks: async () => [] };
+    const workbench = new SessionWorkbench(sidebar, main, repository, files, factory as never, () => {},
+        { navigate } as never, kernel as never, factory as never, undefined, undefined, undefined,
+        { fs: flowFiles, menu: { items: (_item, defaults) => defaults } });
+    try {
+        await workbench.start();
+        const view = (workbench as any).navigationFiles;
+        expect((await view.driver.getChildren('/')).map((node: any) => node.path)).toContain('/@flows');
+        expect(sidebar.textContent).toMatch(/flows/i);
+        expect((await view.driver.getChildren('/@flows')).map((node: any) => node.name)).toContain('essay-review-isolated.flow');
+        await workbench.openResource('/@flows/essay-review-isolated.flow');
+        expect(navigate).toHaveBeenCalledWith({ target: 'flows', resourceId: '/essay-review-isolated.flow' });
+        await view.driver.delete(['/@flows/essay-review-isolated.flow']);
+        expect(await flowFiles.driver.exists('/essay-review-isolated.flow')).toBe(false);
+    } finally {
+        await workbench.destroy(); await files.dispose(); await repository.dispose(); await manager.dispose();
+        sidebar.remove(); main.remove();
+        vi.unstubAllGlobals();
     }
 });

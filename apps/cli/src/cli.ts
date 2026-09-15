@@ -80,6 +80,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     for (let index = 0; index < rest.length; index++) {
         const arg = rest[index];
         if (arg === '-f' || arg === '--file') options.file = required(rest[++index], 'config path');
+        else if (arg === '--params') options.paramsFile = required(rest[++index], 'parameters JSON file');
         else if (arg === '-p' || arg === '--prompt') options.prompt = (options.prompt ? `${options.prompt} ` : '') + required(rest[++index], 'prompt');
         else if (arg === '--model') options.model = required(rest[++index], 'model');
         else if (arg === '--api-key-env') options.apiKeyEnv = required(rest[++index], 'api-key-env');
@@ -148,6 +149,7 @@ function help(): string {
         `  --add-dir <dir>     追加宿主目录到 Session 上下文；可重复，默认只读，支持 <dir>:rw\n` +
         `  --grant-memory <id> 显式授权本次 Session 使用该共享记忆的配置范围；可重复\n` +
         `  --headless          无交互模式，事件作为 JSONL 写到 stdout（适合 CI）\n` +
+        `  --params <file>     .flow 运行参数（JSON 对象，覆盖参数默认值）\n` +
         `  --json              JSON 输出；隐含 --headless（遇到人工输入时返回退出码 3 而非阻塞）\n` +
         `  --offline           校验/查看时不要求 API key 环境变量已存在\n`;
 }

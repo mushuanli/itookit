@@ -241,7 +241,7 @@ export class ContextMenuHandler {
     const items: MenuItem[] = [];
     const label = this.createFileLabel;
 
-    if (item.type === 'directory') {
+    if (item.type === 'directory' && !isItemReadOnly(item)) {
       items.push(
         {
           id: 'create-in-folder-session',

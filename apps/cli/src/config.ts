@@ -159,7 +159,7 @@ function validateReferences(config: WorkflowConfigV1, errors: string[]): void {
                     errors.push(`task ${task.id} spawn edge references unknown task ${edge.to}`);
                 }
             }
-        } else if (!agents.has(task.agent ?? '')) {
+        } else if (!task.node && !agents.has(task.agent ?? '')) {
             errors.push(`task ${task.id} references unknown agent ${task.agent}`);
         }
         if (task.compensate !== undefined && !tasks.has(task.compensate)) {

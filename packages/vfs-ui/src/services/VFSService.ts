@@ -3,7 +3,8 @@
  * @desc Data mutation service implementing IDataOperationPort.
  */
 import type { IFileSystem, FSNode } from '@itookit/vfs-core';
-import { buildRenamedFilename, formatDefaultFileTitle } from '@itookit/common';
+import { buildRenamedFilename, formatDefaultFileTitle, t } from '@itookit/common';
+import { FSError, normalizeVirtualPath } from '@itookit/vfs-core';
 import type { IDataOperationPort } from '../contracts/ports';
 
 export interface VFSServiceDependencies {
@@ -46,6 +47,18 @@ export class VFSService implements IDataOperationPort {
   private ensureExtension = (filename: string): string =>
     EXT_REGEX.test(filename) ? filename : `${filename}${this.defaultExtension}`;
 
+  async assertCanCreate(parentPath: string | null): Promise<void> {
+    let path = normalizeVirtualPath(parentPath ?? '/');
+    const caps = await this.engine.capabilitiesAt(path);
+    if (caps.readonly) throw new FSError('EROFS', t('vfs.creation.readOnly'));
+    while (true) {
+      const node = await this.engine.driver.getNode(path);
+      if (node?.metadata?._readOnly === true) throw new FSError('EROFS', t('vfs.creation.readOnly'));
+      if (node || path === '/') return;
+      path = path.slice(0, path.lastIndexOf('/')) || '/';
+    }
+  }
+
   createFile = async ({
     title,
     parentPath = null,
@@ -54,6 +67,7 @@ export class VFSService implements IDataOperationPort {
     const rawName = title || formatDefaultFileTitle();
 
     if (!rawName.includes('/')) {
+      await this.assertCanCreate(parentPath);
       return this.engine.driver.createFile({
         name: this.ensureExtension(rawName),
         parentPath,
@@ -69,6 +83,7 @@ export class VFSService implements IDataOperationPort {
     const base = parentPath ?? '/';
     const resolvedParentPath: string | null = dirPart ? `${base}/${dirPart}` : (parentPath ?? null);
 
+    await this.assertCanCreate(resolvedParentPath);
     return this.engine.driver.createFile({
       name: this.ensureExtension(fileName),
       parentPath: resolvedParentPath,
@@ -82,6 +97,7 @@ export class VFSService implements IDataOperationPort {
     files,
   }: CreateMultipleFilesOptions): Promise<FSNode[]> => {
     if (!files?.length) return [];
+    await this.assertCanCreate(parentPath);
     return Promise.all(
       files.map(f =>
         this.engine.driver.createFile({
@@ -98,6 +114,7 @@ export class VFSService implements IDataOperationPort {
     parentPath = null,
   }: { title?: string; parentPath?: string | null } = {}): Promise<FSNode> => {
     if (!title.includes('/')) {
+      await this.assertCanCreate(parentPath);
       return this.engine.driver.createDirectory({ name: title, parentPath });
     }
 
@@ -109,6 +126,7 @@ export class VFSService implements IDataOperationPort {
     const base = parentPath ?? '/';
     const resolvedParentPath: string | null = dirPart ? `${base}/${dirPart}` : (parentPath ?? null);
 
+    await this.assertCanCreate(resolvedParentPath);
     return this.engine.driver.createDirectory({
       name: dirName,
       parentPath: resolvedParentPath,

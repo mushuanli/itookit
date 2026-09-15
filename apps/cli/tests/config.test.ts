@@ -19,6 +19,13 @@ function workflow(): WorkflowConfigV1 {
 }
 
 describe('validateWorkflow', () => {
+    it('accepts versioned plugin nodes without an Agent reference', () => {
+        const value = workflow();
+        value.tasks = [{ id: 'collect', kind: 'node', node: { plugin: 'builtin.input', pluginVersion: '1.0.0',
+            config: { fields: { text: { type: 'string' } } } }, outputs: { result: 'json' } }];
+        value.result = { task: 'collect', output: 'result' };
+        expect(validateWorkflow(value, false).tasks[0].node?.plugin).toBe('builtin.input');
+    });
     it('validates explicit memory scope grants and retention limits', () => {
         const value = workflow();
         value.agents[0].memory_policy = { namespace_id: 'agent', read_scopes: ['project'], write_scopes: [],

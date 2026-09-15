@@ -33,10 +33,11 @@ export class DagCanvas {
                 const to = positions[edge.to] ?? { x: 40, y: 40 };
                 const marker = edge.kind === 'control' ? 'dag-arrow-control' : 'dag-arrow-data';
                 const id = escapeHTML(String(edge.id));
-                const path = edgePath(from, to);
+                const lane = edge.output === 'repeat' ? Math.max(...Object.values(positions).map(position => position.y), 0) + 160 : undefined;
+                const path = edgePath(from, to, lane);
                 return `<path data-edge-id="${id}" d="${path}" class="dag-edge-hit"></path><path data-edge-id="${id}" d="${path}" class="is-${edge.kind}${String(edge.id) === selectedEdgeId ? ' is-selected' : ''}" marker-end="url(#${marker})"></path>`;
             }).join('')}</svg>
-            ${draft.nodes.map(node => renderNode(node, positions[node.id], node.id === selectedId, manifests?.get(node.plugin))).join('')}
+            ${draft.nodes.map(node => renderNode(node, positions[node.id], node.id === selectedId, manifests?.get(`${node.plugin}@${node.pluginVersion}`))).join('')}
         </div>`;
         this.bind(draft);
     }
@@ -200,11 +201,12 @@ function portSummary(ports: Array<{ name: string; cardinality?: string }> | unde
     return ports.map(port => `${port.name}${port.cardinality === 'many' ? '*' : ''}`).join(', ');
 }
 
-function edgePath(from: { x: number; y: number }, to: { x: number; y: number }): string {
+function edgePath(from: { x: number; y: number }, to: { x: number; y: number }, lane?: number): string {
     const startX = from.x + 180;
     const startY = from.y + 42;
     const endX = to.x;
     const endY = to.y + 42;
+    if (lane !== undefined) return `M ${startX} ${startY} L ${startX + 30} ${startY} L ${startX + 30} ${lane} L ${endX - 30} ${lane} L ${endX - 30} ${endY} L ${endX} ${endY}`;
     const bend = Math.max(40, Math.abs(endX - startX) / 2);
     return `M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`;
 }
@@ -228,7 +230,7 @@ function surfaceSize(
     for (const node of nodes) {
         const position = positions[node.id] ?? { x: 40, y: 40 };
         width = Math.max(width, position.x + 220);
-        height = Math.max(height, position.y + 100);
+        height = Math.max(height, position.y + 200);
     }
     return { width, height };
 }

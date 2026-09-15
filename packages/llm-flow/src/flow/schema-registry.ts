@@ -1,7 +1,7 @@
 import type { JsonSchemaRef, JsonValue } from '@itookit/common';
 
 type Schema = Record<string, JsonValue>;
-const keywords = new Set(['type', 'properties', 'required', 'items', 'additionalProperties', 'enum', 'title', 'description']);
+const keywords = new Set(['type', 'properties', 'required', 'items', 'additionalProperties', 'enum', 'title', 'description', 'minimum', 'maximum']);
 const types = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null']);
 
 /** An immutable registry for the supported JSON Schema subset; unsupported constraints fail closed. */
@@ -35,6 +35,8 @@ export function assertFlowSchema(value: JsonValue, path = '$'): asserts value is
     for (const key of Object.keys(value)) if (!keywords.has(key)) throw new Error(`Unsupported schema keyword ${path}.${key}`);
     if (value.type !== undefined && (typeof value.type !== 'string' || !types.has(value.type))) throw new Error(`Invalid schema type at ${path}`);
     for (const key of ['title', 'description']) if (value[key] !== undefined && typeof value[key] !== 'string') throw new Error(`Invalid ${key} at ${path}`);
+    for (const key of ['minimum', 'maximum']) if (value[key] !== undefined && (typeof value[key] !== 'number' || !Number.isFinite(value[key]))) throw new Error(`Invalid ${key} at ${path}`);
+    if (typeof value.minimum === 'number' && typeof value.maximum === 'number' && value.minimum > value.maximum) throw new Error(`Invalid numeric range at ${path}`);
     if (value.enum !== undefined && (!Array.isArray(value.enum) || !value.enum.length)) throw new Error(`Invalid enum at ${path}`);
     if (value.required !== undefined && (!Array.isArray(value.required) || value.required.some(key => typeof key !== 'string'))) throw new Error(`Invalid required at ${path}`);
     if (value.properties !== undefined) {
@@ -51,6 +53,7 @@ export function flowSchemaIssue(schema: JsonValue, value: unknown, path = '$'): 
     if (schema === false) return `${path}: value is forbidden`;
     if (schema.type && !matchesType(String(schema.type), value)) return `${path}: expected ${schema.type}`;
     if (Array.isArray(schema.enum) && !schema.enum.some(item => equalJson(item, value))) return `${path}: value is outside enum`;
+    if (typeof value === 'number' && ((typeof schema.minimum === 'number' && value < schema.minimum) || (typeof schema.maximum === 'number' && value > schema.maximum))) return `${path}: number outside range`;
     if (isObject(value)) return objectIssue(schema, value, path);
     if (Array.isArray(value) && schema.items !== undefined) {
         for (let i = 0; i < value.length; i++) {

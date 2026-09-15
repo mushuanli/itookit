@@ -60,6 +60,7 @@ export const makeVFSNodeUI = (overrides: Partial<VFSNodeUI> = {}): VFSNodeUI => 
  * - Returns [] for driver.getChildren()
  */
 export class MockSessionEngine {
+    capabilitiesAt = async (_path: string) => ({ readonly: false });
     private handlers = new Map<string, Array<(e: EngineEvent) => void>>();
     /** Pre-populated node map for driver.getNode() responses. Keyed by id or path. */
     readonly nodes = new Map<string, EngineNode>();

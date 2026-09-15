@@ -314,6 +314,9 @@ function validateSchemaValue(value: unknown, schema: Record<string, unknown>, pa
     if (Array.isArray(schema.enum) && !schema.enum.some(item => JSON.stringify(item) === JSON.stringify(value))) {
         return `${path} is not one of the allowed values`;
     }
+    if (typeof value === 'number' && (!Number.isFinite(value)
+        || (typeof schema.minimum === 'number' && value < schema.minimum)
+        || (typeof schema.maximum === 'number' && value > schema.maximum))) return `${path} is outside the numeric range`;
     if (isRecord(value)) {
         const required = Array.isArray(schema.required) ? schema.required.map(String) : [];
         for (const key of required) if (!(key in value)) return `${path}.${key} is required`;

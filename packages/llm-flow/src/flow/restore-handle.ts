@@ -4,7 +4,7 @@ import type { SessionHandle, JsonValue } from '@itookit/durable-kernel';
 import type { FlowExecutionHandle } from './executor';
 
 /** Reattach persisted task records; this does not restart the Flow scheduler. */
-export async function restoreFlowHandle(session: Pick<SessionHandle, 'id' | 'attachTask' | 'getShared'>, taskId: string): Promise<FlowExecutionHandle> {
+export async function restoreFlowHandle(session: Pick<SessionHandle, 'id' | 'attachTask' | 'getShared'> & Partial<Pick<SessionHandle, 'listTasks'>>, taskId: string): Promise<FlowExecutionHandle> {
     const root = await session.attachTask<JsonValue>(taskId);
     const task = (await root.status()).task;
     const input = task.input as {

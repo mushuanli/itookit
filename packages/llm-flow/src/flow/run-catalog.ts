@@ -32,6 +32,7 @@ export function createRunCatalog(source: DagPluginCatalog, nodes: DagNodeDefinit
         return structuredClone(manifests.get(key));
     };
     const addNodes = (additions: DagNodeDefinition[]): void => {
+        additions = additions.flatMap(node => [node, ...dispatchTemplates(node)]);
         for (const node of additions) {
             const ports = nodePortSchemas(node);
             for (const ref of [...Object.values(ports.inputs ?? {}), ...Object.values(ports.outputs ?? {})]) {
@@ -61,6 +62,18 @@ export function createRunCatalog(source: DagPluginCatalog, nodes: DagNodeDefinit
     } satisfies DagPluginCatalog & { snapshot(): RunCatalogSnapshot; addNodes(nodes: DagNodeDefinition[]): void };
     addNodes(nodes);
     return catalog;
+}
+
+function dispatchTemplates(node: DagNodeDefinition): DagNodeDefinition[] {
+    if (node.plugin !== 'builtin.route' || node.pluginVersion !== '2.0.0') return [];
+    const config = node.config as { branches?: { target: DagNodeDefinition }[] };
+    return (config?.branches ?? []).map(branch => {
+        if (!branch.target || branch.target.plugin === 'builtin.flow'
+            || (branch.target.plugin === 'builtin.route' && branch.target.pluginVersion === '2.0.0')) {
+            throw new Error('Invalid or nested dispatch target');
+        }
+        return branch.target;
+    });
 }
 
 function assertCatalogUnchanged(source: DagPluginCatalog, saved: RunCatalogSnapshot): void {

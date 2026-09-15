@@ -1,9 +1,12 @@
 // @file: app-settings/editors/RecoverySettingsEditor.ts
 
-import {type RestorableItem, type IAgentManagementService} from '@itookit/common';
-import { BaseSettingsEditor, Toast, Modal } from '@itookit/ui-common';
+import {t, type RestorableItem, type IAgentManagementService} from '@itookit/common';
+import { BaseSettingsEditor, Toast, Modal, type EditorOptions } from '@itookit/ui-common';
 
 export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
+    constructor(container: HTMLElement, service: IAgentManagementService, options: EditorOptions,
+        private readonly restoreFlows?: () => Promise<number>) { super(container, service, options); }
+    private restoringFlows = false;
     private selectedItems = new Set<string>(); // key = "type:id"
     private allItems: RestorableItem[] = [];
 
@@ -42,6 +45,12 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementS
                 </div>
 
                 ${dupWarnings}
+                ${this.restoreFlows ? `<section class="settings-section">
+                    <h3>${this.escapeHtml(t('flow.library.restore'))}</h3>
+                    <p>${this.escapeHtml(t('flow.library.recoveryHint'))}</p>
+                    <button id="btn-restore-flows" class="settings-btn settings-btn--primary" ${this.restoringFlows ? 'disabled' : ''}>
+                        ${this.escapeHtml(t('flow.library.restore'))}</button>
+                </section>` : ''}
 
                 ${this.renderSection('🏭 Provider 配置', 'provider', providers)}
                 ${this.renderSection('🔗 默认连接（Connection）', 'connection', connections)}
@@ -68,6 +77,19 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementS
                 <ul style="margin:8px 0 0 16px;font-size:0.875rem">${rows}</ul>
             </div>
         `;
+    }
+
+    private async restoreMissingFlows(): Promise<void> {
+        if (!this.restoreFlows || this.restoringFlows) return;
+        this.restoringFlows = true;
+        const button = this.container.querySelector<HTMLButtonElement>('#btn-restore-flows');
+        if (button) button.disabled = true;
+        try { Toast.success(t('flow.library.restored', { count: await this.restoreFlows() })); }
+        catch (error) { Toast.error(String(error)); }
+        finally {
+            this.restoringFlows = false;
+            if (button?.isConnected) button.disabled = false;
+        }
     }
 
     private escapeHtml(s: string): string {
@@ -158,6 +180,8 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementS
 
         // Batch restore
         const batchBtn = this.container.querySelector('#btn-batch-restore');
+        const flowButton = this.container.querySelector('#btn-restore-flows');
+        if (flowButton) this.addEventListener(flowButton, 'click', () => this.restoreMissingFlows());
         if (batchBtn) this.addEventListener(batchBtn, 'click', () => this.handleBatchRestore());
 
         // Force reset all

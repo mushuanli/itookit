@@ -1,6 +1,6 @@
 # 目标、进度与后续任务
 
-更新：2026-09-14。**本地 P1 已补齐并逐功能验收；整体目标未完成，P0 的性能等剩余验收仍开放。** 本文只维护当前状态、剩余要求和证据入口；逐轮经过见[9 月 13 日归档](deprecated/todo-progress-2026-09-13.md)与[9 月 14 日归档](deprecated/todo-progress-2026-09-14.md)，实机步骤见[最小系统验收记录](minimal-system-acceptance.md)。
+更新：2026-09-14。**以 `345a8994` 为本次核对基线：本地 P1 已有完成记录，P2 部分实现已提交；整体目标未完成，且当前存在 1 个待排查的调度租约回归失败。** 本文只维护当前状态、剩余要求和证据入口；逐轮经过见[9 月 13 日归档](deprecated/todo-progress-2026-09-13.md)与[9 月 14 日归档](deprecated/todo-progress-2026-09-14.md)，实机步骤见[最小系统验收记录](minimal-system-acceptance.md)。
 
 ## 1. 目标与完成标准
 
@@ -10,7 +10,7 @@ Tauri 与 CLI 共用执行核心。第一优先级是 Durable Kernel 的持久 T
 
 `Tauri 外层 harness → Kernel tool.call → Bash → 原生进程 → CLI 子 harness → DAG → 输出、退出状态和持久记录`
 
-Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skill 自动委派等扩展后移但保留。
+Web 保留平台接口，不启用本机 Bash。跨 Session Memory 已有实现但尚未完成全部契约与验收；Skill 自动委派未实现；语义/向量检索按用户要求延期。
 
 完成必须逐项核对有效设计、代码、持久记录及实际运行证据。包级测试、DOM 测试、跨进程 SIGKILL、真实 GUI/IPC、跨主机验证是不同层次；某组测试通过不证明整个工作包完成。`docs:check` 检查路径和预设符号，不验证设计语义、链接锚点或测试覆盖。
 
@@ -26,9 +26,9 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 | D04 | Skill 加载/卸载、持久身份、上下文注入、操作队列 | 已补持久版本策略；自动委派与系统性竞态核验仍属 P2-01 |
 | D05 | Skill → Agent → transform 多节点 DAG | 组合测试通过；不替代完整真实桌面操作 |
 | D06 | 人工回应后同进程 DAG 延续，连续多次暂停 | 沿用同一 Run |
-| D07 | 人工检查点与 CLI 独立 run/respond/resume 进程 | 任意崩溃点恢复仍属 P1-01 |
+| D07 | 人工检查点与 CLI 独立 run/respond/resume 进程 | 本地约定故障窗口已由 P1-01 验证，不声称覆盖任意崩溃点 |
 | D08 | 及时发布 live Run 句柄，退出前等待调度结束 | `waitIdle()` 不强制中断任意宿主回调 |
-| D09 | 本机 CLI SQLite 互斥及删除前通用调度租约检查 | 同机控制见 P1-02；跨主机后移 P2 |
+| D09 | 本机 CLI SQLite 互斥及删除前通用调度租约检查 | 同机控制见 P1-02；当前回归失败跟踪于 P0-05，跨主机后移 |
 | D10 | Run 成员重连、单任务及图级重试、物理分页 | 见 P1-04、P1-06；不再列为未实现 |
 | D11 | 人工暂停 Run 的最终 token/耗时统计持久化 | 旧缺失 metadata 的记录未自动回填 |
 | D12 | Tauri Session Bash 工厂、目录句柄与 Web 接口 | Web 无原生工厂；Tauri 不回退到未隔离 shell |
@@ -41,35 +41,42 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 ## 3. 任务清单
 
+### 当前未完成内容总览
+
+| 归属 | 尚未完成 | 性质 |
+| --- | --- | --- |
+| P0-05 | 定位 `scheduler-paused-owner.test.ts` 的 `Host exited: 1`，修复后重跑；原因未确定，不能归因为环境或视作已解决 | 当前回归失败 |
+| P0-02 | 发送性能达到 ≤2 秒 / ≤100 次公开 IPC；IPC/发送失败、保存重试、pause 与未确认停止的真实窗口闭环 | 实现优化 + 验收 |
+| P0-04 | 原生目录选择完整授权路径、支持平台及发布安装包、深层 cwd 的 Skill 级联 | 平台验收 |
+| P2-01 | Skill 自动委派编译、稳定请求身份与有界监管；完整版本/作用域生命周期矩阵、CLI 漂移处置入口核对 | 实现 + 验收 |
+| P2-02 | 审计变更明细与来源展示；IndexedDB、双进程撤权/删除重建/并发清理、桌面跨 Session 链路 | 契约补齐 + 验收 |
+| P2-03 | 模型工具的结构化冲突/最新版本引用；完整压缩 Task 恢复与 GC 矩阵；真实窗口和云模型 | 契约补齐 + 验收 |
+| P2-04 | 保持编辑器打开后撤权，再保存失败且草稿保留；浏览/工具/附件及后端故障矩阵 | 验收 |
+| 样式 | 本批新增样式的真实窗口检查（主题、窄布局、长内容、打印） | 视觉验收 |
+| P0-05 | 最终源码全量测试、构建、全新依赖安装、发布产物和真实窗口复核 | 最终验收 |
+| 延期 | 语义/向量检索、embedding 索引及真实召回验证 | 用户明确延期，本轮不执行 |
+
+`345a8994` 已交付的 Skill 快照/漂移策略、共享 Memory 存储及管理入口、条目 revision/冲突比较、内容压缩提交和样式规则不重复列为“缺实现”。以下子项分别记录剩余要求；P1 的历史完成结论不代表当前整树回归通过。
+
 ### P0：最小系统验收
 
 - [x] **P0-00 两端核心装配一致性**
   - 已实现：app-core 共用装配、项目规则与 Skill 解析；CLI 模型请求、Tauri 宿主装配及真实窗口首次加载已有证据。
   - 已收口（2026-09-13）：`SKILL.md` 新增 `auto-load` 覆盖，使文件系统来源能表达「可加载但不自动注入」；项目规则锚定项目根，parent-fs/local-fs 的嵌套 `_agent/AGENT.md` 不合并/不替换，Skill 仍按层级级联。CLI 与真实 Tauri 入口均核对：命中加载并持久身份、重开后按身份恢复、卸载后不复活、再次命中可重新加载；包级（真实 runtime+Kernel+文件来源）、桌面宿主装配（`createApplicationRuntime`+`TauriSkillSource`）、CLI 真实请求与真实窗口四段闭环（Xvfb/dbus/AT-SPI）逐层取证。
   - 见[验收 §71](minimal-system-acceptance.md)、`session-file-source.test.ts`、`session-skill-restore.test.ts`、`tauri-host-skill-context.test.ts` 与 `run-skill-context.test.ts`。
-  - 2026-09-14 补齐真实面板操作：滚动设置面板后点击 Skill 复选框，完成加载 → 重开保持 → 卸载 → 重开不复活；四段分别核对模型 system 消息与持久身份，未直接修改加载记录。见[复选框验收](minimal-system-acceptance.md#2026-09-14skill-复选框真实加载卸载与重开)。多层级嵌套挂载的真实窗口场景仍归 P0-04。
+  - 2026-09-14 补齐真实面板操作：滚动设置面板后点击 Skill 复选框，完成加载 → 重开保持 → 卸载 → 重开不复活；四段分别核对模型 system 消息与持久身份，未直接修改加载记录。见[复选框验收](minimal-system-acceptance.md#2026-09-14skill-复选框真实加载卸载与重开)。嵌套边界见 P0-04：单挂载内的目录树已有窗口证据，更深 cwd 下的 Skill 级联仍待验证。
 
 - [x] **P0-01 完整 Tauri 调用链**
   - 真实窗口 → 外层 harness → Bash/IPC/bwrap → CLI 子 DAG → 结果和退出码，重开 transcript 已通过。应用内挂载对话框建授权亦通过。
   - 见[验收 §3、§18、§20](minimal-system-acceptance.md)。模型为本地 mock；其他失败场景归 P0-02。
 
 - [ ] **P0-02 应用级失败、取消与性能闭环**
-  - 2026-09-14 恢复复核：两个真实进程下，已打开读者未发现另一进程 SIGKILL 遗留 rename intent，root/module 两条回归均复现。已移除实例内 journal 干净缓存，读取与恢复处于同一事务。修复已随 `6af6e452` 合入；修复后 Node 探针为 62 ms / 857 次 sidecar 逻辑调用，替代此前依靠跳过恢复检查的数字，不代表桌面 IPC。
-  - 已验证：CLI 超时/SIGINT/进程树停止；Session 关闭等待确认；真实窗口取消及重开后的 ABORTED/原因保留；撤销挂载后工具 FAILED、重开仍保留工具与错误；只读挂载拒绝写入。文件保存失败会提示并保留 dirty。
-  - 空闲目标已达成：既有真实窗口 70 秒 VFS 0、sidecar 32 次（约 0.46 次/秒）。此前真实窗口发送 ping 到 mock 收齐请求为 **2.707 秒**，仍未达 **≤2 秒 / ≤100 次调用**；覆盖发送的两个 trace 区间共 953 次公开 API 请求，但含边界外操作，不是精确发送计数。已合并资源清理候选事务并减少目录/批量读取的重复解析；桌面动作边界与官方 core 内部调用计量已在 `f814d609` 合入，但真实发送/Provider 收齐边界尚未接线，通道直接传输仍待覆盖。继续按正确读取实现重测，见[运行时诊断](runtime-architecture.md)、[验收 §70](minimal-system-acceptance.md)。
-  - 2026-09-14 发送边界计量：已接线 `SessionCommand.Send → Provider 响应头` 的 `send-to-provider` 动作（`apps/tauri-app/src/log/send-boundary.ts`，仅 trace 构建生效，有上界且不嵌套）。真实窗口两次独立样本为 **2870 ms / 1301 次公开 IPC** 与 **2731 ms / 1173 次**，`elapsedMs` 与按键→mock 收齐时间一致（2.6–2.7 秒）。**两个阈值均未达成**（延迟约 1.4 倍、调用约 12–13 倍）；延迟与 IPC 数近似线性（约 2.2 ms/次），瓶颈是宿主往返次数。热点为 `sidecar_select` 541、事务对 213+213、`fs_stat` 121；逻辑热点 `getRecordField` 376。减少 IPC 只能走原子批量操作（`vfsdriver-localfs/AGENTS.md` 禁止省略事务内的跨进程恢复检查），属未实施的设计，不能宣称完成。见[发送边界验收](minimal-system-acceptance.md#2026-09-14发送provider-动作边界的真实-ipc-计量)。
-  - 2026-09-14 取消与失败可区分：终态错误带 `code: 'ABORTED'`，界面渲染 `data-outcome="cancelled"` 的中性气泡与「执行已取消」状态，并不再对取消显示连接配置入口；`packages/app-shell/tests/cancelled-history.test.ts` 覆盖 ABORTED/TIMEOUT/未标注三种形状，不靠消息文本猜测。
-  - 2026-09-14 宿主在途消失：新增 `packages/app-shell/tests/host-restart-inflight.test.ts`，真实本地存储 + 永不回包的 HTTP 服务下，第一个宿主退出后重开仍能续发（转写不以用户消息结尾）。
-  - 2026-09-14 独立关闭入口：新增 `SessionLifecycleService.closeSession`（停止运行、等待外部停止确认、**保留**存储/manifest/文档）与 Session 侧栏「关闭会话（停止执行，保留记录）」入口，与删除并列可区分；有界失败分别报告「records were kept」与「nothing was deleted」。见 `session-delete-lifecycle.test.ts`、`session-workbench.test.ts`。真实窗口已验收（挂起模型下点击该项，约 0.45 秒确认连接停止，Task 持久 `cancelled`，Session/Task 目录与记录保留），见[关闭保留验收](minimal-system-acceptance.md#2026-09-14运行中的-session-真实窗口关闭并保留记录)。
-  - 已合入：并发文件保存与失败重试 `66dcf24c`、通知安全的轮询扫描复用 `6922e7da`、数据库未知初始化失败保留与定向关闭 `c0fd1568`；对应包级/原生回归不替代真实窗口验收。
-  - 剩余：真实窗口的超时、Session 运行中单独关闭并保留记录、IPC 故障、发送回滚与保存失败/重试；设备不确认停止时的有界失败及数据保留；监控/取消的 live 与重开一致性。
-  - 2026-09-14 真实窗口补验：模型请求在途时，通过列表右键和原生确认删除 Session；修复旧聊天/重试/ENOENT 残留，删除后恢复选择界面，同数据根重启未复活。app-shell 196 项通过，30 项既有跳过；见[删除收尾验收](minimal-system-acceptance.md#2026-09-14运行中-session-删除后的界面收尾)。该场景不替代设备不确认停止或其他故障矩阵。
-  - 2026-09-14 窗口复核：修复选中 Session 后“+ 会话”落入虚拟目录而 ENOENT，根级/分组及附件目录回归、真实窗口新建同级会话通过。切工作区或会话均不关闭 Kernel Session；独立关闭并保留记录的窗口入口仍缺。约 60 秒模型超时已观察到持久 failed 和重开保留，但 live 状态及明确超时原因仍待收口。见[新建与关闭语义复核](minimal-system-acceptance.md#2026-09-14session-新建目标与桌面关闭语义复核)。
-  - 2026-09-14 超时原因修复：驱动区分 TIMEOUT/ABORTED，保留首个中止原因并清理监听器；254 项相关测试通过、30 项既有跳过。真实窗口约 60 秒断开 HTTP，Task/Effect 持久 failed 且明确写明 60000 ms 超时；第一张终态截图仍有 RUNNING 残留，后续收敛不替代有界验收。见[模型超时验收](minimal-system-acceptance.md#2026-09-14模型超时与用户取消的原因保留)。
-  - 2026-09-14 live 收敛上界：用约 0.5 秒分辨率采样（时间戳取每次无障碍遍历**返回之后**，修正上一轮先打时间戳再遍历把观测时刻标早的问题）测得——客户端在请求后 59994 ms 关闭连接，`effect.failed` 持久写明 60000 ms 原因于**+96 ms**，live 界面在**+0.75 秒与 +1.53 秒之间**收敛为终态（`Stop Generation` 消失、出现“重试”）。同数据根重启后转写正常渲染该 round，持久 round 文档为 `status:"failed"` + 同一原因。见[live 收敛验收](minimal-system-acceptance.md#2026-09-14模型超时的-live-收敛上界与重开原因)。边界：AT-SPI 文本节点名为空，未重新断言屏幕文本；pause 三态与未确认物理停止的真实窗口场景仍未完成。
-  - 2026-09-14 取消提示收口：ABORTED 事件与失败区分，顶部/卡片显示“执行已取消”和“重新执行”，历史取消原因区使用中性色；真实停止按钮验证通过，320 项相关回归通过、30 项既有跳过。见[取消终态文案](minimal-system-acceptance.md#2026-09-14取消事件与界面终态文案)。不替代未确认停止、pause 和状态收敛要求。
-  - 补真实 GUI 的“请求已接受 / 状态已变化 / 外部已停止”区分，以及 pause 同类文案。活动 CLI Run 只能由拥有者取消；另一 CLI 进程拒绝越过 Session 租约。
-  - 见[验收 §11–19、§23–27](minimal-system-acceptance.md)及 `run-control.test.ts`、`session-delete-lifecycle.test.ts`。
+  - 已实现/验收：取消与失败使用 ABORTED/TIMEOUT 区分；真实窗口取消、约 60 秒模型超时及重开原因保留；独立“关闭会话并保留记录”入口和运行中删除均已有窗口证据。关闭挂起模型约 0.45 秒确认连接停止并保留记录；超时 live 终态在连接关闭后 +0.75～+1.53 秒间收敛。不能外推远端供应商物理停止，AT-SPI 终态文本仍缺独立断言。
+  - 已实现：发送到 Provider 响应头的动作边界计量、并发保存与失败重试、数据库未知失败保留、宿主在途消失后的重开续发；这些包级或局部证据不替代全部窗口矩阵。
+  - [ ] **性能优化及重测**：最新有动作边界的历史样本为 2870 ms / 1301 次公开 IPC、2731 ms / 1173 次，均未达到 **≤2 秒 / ≤100 次**。需减少原子事务内的宿主往返并在最终构建重测；不得跳过跨进程恢复检查。空闲历史样本已达 70 秒 VFS 0、sidecar 32 次，不重复列作未实现。
+  - [ ] **失败与重试窗口**：IPC 故障、发送失败保留草稿/已接受消息、保存失败与人工重试；核对磁盘、live 状态与重开记录一致。
+  - [ ] **控制状态与停止确认**：真实 GUI 区分“请求已接受 / 状态已变化 / 外部已停止”，补 pause 同类文案和路径；设备不确认停止时有界失败并保留数据，核对监控/取消的 live 与重开一致性。
+  - 证据：[发送边界](minimal-system-acceptance.md#2026-09-14发送provider-动作边界的真实-ipc-计量)、[关闭保留](minimal-system-acceptance.md#2026-09-14运行中的-session-真实窗口关闭并保留记录)、[超时收敛](minimal-system-acceptance.md#2026-09-14模型超时的-live-收敛上界与重开原因)、[取消文案](minimal-system-acceptance.md#2026-09-14取消事件与界面终态文案)及 `run-control.test.ts`、`session-delete-lifecycle.test.ts`、`host-restart-inflight.test.ts`。
 
 - [x] **P0-03 可复用运行入口与交付说明**
   - [运行说明](minimal-system.md)已覆盖启动、隔离数据根、Provider/Connection、目录授权、子进程凭证注入与预期结果。
@@ -77,14 +84,16 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 - [ ] **P0-04 平台实机验证**
   - 已有 Linux bwrap/目录/符号链接边界、取消/超时、缺隔离器拒绝、Xvfb/AT-SPI 窗口与应用内目录授权证据。
-  - 剩余：其他目标平台的支持范围及真实行为、原生 GTK 目录选择器（仅验证到弹出：见下）、发布产物的支持边界；多层级嵌套挂载已按上条收窄为「单挂载内的嵌套目录树」并验证。Skill 面板真实勾选/取消及重开持久身份已于 2026-09-14 验收通过（见 P0-00）。
-  - 2026-09-14 桌面字体/导航补验：10 个本地 FontAwesome 字体面在真实 WebView 加载成功，修复 Vite 内联小字体被 CSP 拦截；11 个静态导航控件具有稳定 AT-SPI 名称。文件列表仍有方框字符，需继续核对来源与系统字体回退，不能把字体加载通过等同于全部图标渲染通过。见[字体与导航验收](minimal-system-acceptance.md#2026-09-14桌面本地字体与导航可访问名称)。
+  - 剩余：其他目标平台的支持范围及真实行为、原生 GTK 目录选择器（仅验证到弹出：见下）、发布产物的支持边界；多层级嵌套挂载收窄为「单挂载内的嵌套目录树」并验证；更深 cwd 下的 Skill 级联仍未覆盖。Skill 面板真实勾选/取消及重开持久身份已于 2026-09-14 验收通过（见 P0-00）。
+  - 2026-09-14 桌面字体/导航补验：10 个本地 FontAwesome 字体面在真实 WebView 加载成功，修复 Vite 内联小字体被 CSP 拦截；11 个静态导航控件具有稳定 AT-SPI 名称。文件列表方框字符已定位为本机缺少 emoji 字体（见下条支持边界），字体面加载通过不等于全部图标渲染通过。见[字体与导航验收](minimal-system-acceptance.md#2026-09-14桌面本地字体与导航可访问名称)。
   - 2026-09-14 边界收口（见[平台边界验收](minimal-system-acceptance.md#2026-09-14p0-04-平台边界图标字体与原生目录选择器)）：**方框字符根因已定位**为宿主缺少 emoji 字体——列表图标是 `@itookit/common` 的 emoji 码位，而本机 `fc-list ':charset=1F4C1'`/`1F5D1`/`2795` 均为 0 条，应用不自带该字体；属支持边界而非本轮代码回归。**原生 GTK 选择器**经 XDG Portal 真实弹出 `Select Folder`（含文件选择小部件与 `取消/打开`），但**未能完成选择**：合成输入会破坏 GTK 位置栏路径（实测 `/ome/…`、`/home/lli/…`），且容器无 `/dev/fuse` 使门户文档门户不可用，未产生挂载记录。**发布产物**未构建（无 AppImage/linuxdeploy 工具、无网络）；受版本控制的 `release/dist/` 停留在 2026-09-04。**其他平台未验证**，不能由 Linux 证据外推。
   - 2026-09-14 嵌套边界收窄（见[嵌套规则验收](minimal-system-acceptance.md#2026-09-14项目规则在真实窗口的嵌套边界p0-04)）：**「多层级嵌套挂载」在本实现不可表达**——`SessionFilesService.create` 要求挂载点 `at` 匹配 `^\/[a-zA-Z0-9_-]+$`（单段），`at: '/workspace/inner'` 实测抛 `EACCES Reserved or invalid mount point`；真正存在的嵌套是**一个挂载内部的多层目录树**。按此收窄后在真实窗口验证：单挂载 `/workspace` 的树内含 `inner/_agent/AGENT.md` 与 `inner/_agent/skills/...`，请求体出现 `OUTER-PROJECT-RULE-MARKER`(1) 与 `OUTER-SKILL-BODY-MARKER`(1)，`INNER-NESTED-RULE-MARKER`(0) 与 `INNER-SKILL-BODY-MARKER`(0)，即内层项目规则不合并、不替换。cwd 等于项目根时内层 Skill 不级联（级联需更深 cwd，属 Flow/工作区作用域路径，本场景未覆盖）。
   - 2026-09-14 选择器静默失败已修（见[静默失败验收](minimal-system-acceptance.md#2026-09-14原生目录选择器的静默失败p0-04)）：`openDirectoryDialog` 原为 `catch { return null }`，把“取消”与“选择器损坏”合并，且点击处理没有 `catch`，失效时唯一症状是按钮无反应。现抽出 `apps/tauri-app/src/services/directory-dialog.ts`：取消返回 `null`，真实失败记录并重新抛出；点击处理报告挂载/选择失败。回归 `packages/app-shell/tests/directory-dialog.test.ts` 3 项通过。**验证缺口**：改动后本环境合成输入不再激活窗口（诊断标题从未改变，同期导航点击也失效），因此修复后的端到端行为未在窗口复验；门户选择失败的确切形态（reject / null / 挂起）仍未判定，原生选择器在本机的可用性**未结论**。
   - Tauri Session Bash **共享宿主网络**；无出网或连接超时不能当作网络沙箱证据。见[验收 §29](minimal-system-acceptance.md)。
 
 - [ ] **P0-05 当前最终回归**
+  - [ ] **优先排查当前失败**：`345a8994` 提交批次 app-shell 为 221 通过 / 1 失败 / 30 跳过；`packages/app-shell/tests/scheduler-paused-owner.test.ts` 返回 `Host exited: 1`，单独重跑仍失败。保留子进程 stderr、定位失败阶段并修复或明确环境前置条件后，重跑该用例和整包。未定位前不判定为无关失败，不用旧 P1 通过记录覆盖。
+  - 最近 P2 批次类型/文档/样式检查、kernel-adapters 128、llm-session 124、app-core 103、CLI Skill/Memory 4 及共享 Memory 13 项通过；没有执行该提交的全量最终矩阵、完整构建和真实窗口。见 [P2 批次证据](minimal-system-acceptance.md#p2-版本与共享-memory-提交批次)。
   - 旧树 `d883a497` 的阶段性矩阵已完成并保留在[验收记录](minimal-system-acceptance.md)，不能作为后续大量改动后的最终通过证据。
   - 2026-09-14 统一测试入口批次：以 `a308eb65` 加本批选定文件的隔离快照运行 `pnpm test`，Vitest 1,593、调度器 3、Rust 36 项通过，共 1,632 项；30 项既有跳过。CLI 107 项与 SIGKILL 矩阵 10 项分开执行；CLI 类型与文档检查通过。Node 26.8.1 / pnpm 10.20.0，复用本机依赖与 Rust 编译缓存，未做全新依赖安装验证。这是当前入口的阶段性回归，不是最终全仓/GUI 验收。
   - 2026-09-14 类型/构建入口批次：补齐六个 workspace 的 typecheck，24 个实际执行通过；Web/Tauri 文件列表覆盖 app-shell 全部 12 个 src TS 文件，demo 仍为手工 JS 示例。20 个库和四个应用构建、冻结锁文件核对、tsx 子进程三项 SIGKILL 回归通过。见[清单验收](minimal-system-acceptance.md#2026-09-14类型检查覆盖与包清单收口)。未替代最终全矩阵、全新安装或 GUI。
@@ -94,7 +103,7 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 
 ### P1：完备的本地 Durable/Flow 运行
 
-**当前范围（用户于 2026-09-14 收窄）**：单主机、当前版本、本地事务存储，CLI/Tauri 可运行、可控制、可恢复、可重开核对。保留同机多进程/多 Session 的正确性；迁移、跨主机执行及通用分布式协议不再是本地 P1 的完成条件。细分边界见[本地 P1 设计](design/p1-transition.md)。下列本地路径已完成；不按旧设计章节是否全部实现决定完成。
+**当前范围（用户于 2026-09-14 收窄）**：单主机、当前版本、本地事务存储，CLI/Tauri 可运行、可控制、可恢复、可重开核对。保留同机多进程/多 Session 的正确性；迁移、跨主机执行及通用分布式协议不再是本地 P1 的完成条件。细分边界见[本地 P1 设计](design/p1-transition.md)。下列本地路径已有完成记录；不按旧设计章节是否全部实现决定完成。当前调度租约用例失败单列于 P0-05，须排查后才能恢复当前整树回归通过的结论。
 
 - [x] **P1-01 本地崩溃恢复闭环**
   - 已实现：稳定 requestId/spec 去重、根和检查点持久化、循环/patch/委派恢复；不确定 Effect 默认阻断，显式授权才重放。提交/检查点间隙、委派在途、已完成循环迭代已有真实 SIGKILL 回归。新增根提交后、首检查点前的真实 SIGKILL 回归；初始调度/工作区身份与根同事务持久，终态到收尾 pending 的窗口也可恢复。
@@ -149,25 +158,35 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
   - 已合入 `a8288084`：Skill 初始快照、直接会话/Flow 接线、UI/宿主入口与关闭屏障整批隔离验证；action Skill 不自动进入 system 提示。已补严格版本冻结；自动委派与其余竞态要求仍开放。
   - 已实现：直接会话/Flow 初始 Skill 快照及工具交集、编辑器 glob open/close、列表变更通知、手动斜杠入口。
   - 已实现：持久定义/正文/支持文件/工具快照、默认 require-reload 与显式 keep-old 策略、持久漂移标记和面板重新加载；旧 ID 记录要求显式 reload。直接聊天与 Flow 的初始选择使用同一版本入口，keep-old 不恢复撤销的授权。
-  - 剩余：自动委派到统一 TaskGroup 的编译接线、作用域销毁/重建竞态系统核验，以及完整版本变化的真实窗口/进程矩阵。
+  - [ ] **自动委派实现**：宿主显式允许后编译到现有 TaskGroup/Flow 委派组，固定 Skill 版本、父子工具交集、模型/角色、输入输出和数量/并发/深度/预算上界；接直接聊天与 Flow 正式入口。定义稳定触发身份，加载列表或刷新 UI 不触发任务。
+  - [ ] **自动委派恢复验收**：子任务创建前后、子任务完成而父 join 未提交时 SIGKILL；重复匹配/Effect 重放不重复创建，父取消或失权后迟到创建被拒。已有显式 Flow 委派证据不替代此链路。
+  - [ ] **版本与生命周期矩阵**：正文/compact/支持文件/工具/来源变化及删除、禁用、撤权，经直接聊天、Flow、load_skill、面板和真实进程重开复核；扫描/读取/工具注册/身份提交/订阅与 load/unload、cwd 切换、关闭重建交错，不残留部分授权。
+  - [ ] **CLI 版本处置**：核对并补齐持久漂移的正式查询与显式 reload 路径、旧 ID 记录处置，不能只依赖桌面面板或直接改持久记录。
   - 当前通知仅进程内；跨进程直接修改文件不触发。在途 Task 的 system 消息不改，后续上下文组装复核持久版本并执行漂移策略。见[Skill 设计](design/skill-design.md)。
-  - 已补错误边界：身份 CAS 仅重试 Kernel CONFLICT，提交前/后非冲突错误直接报告；自动加载回滚聚合身份写入与清理错误；批量恢复失败撤销本次新增加载、保留已有选择并允许修正后重试，action 定义不能经旧身份自动恢复。`loaded-state.test.ts`、`prompt-context.test.ts`、`restore-loaded-skills.test.ts` 有回归，kernel-adapters 120 项及类型检查通过；不替代严格版本或完整竞态验收。
-  - 待交付：经现有委派组编译的有界自动委派及幂等恢复；扫描/加载/身份提交/订阅与关闭重建的交错矩阵。具体标准见 [P2 契约 §2](design/p2-completion.md#2-p2-01-skill-生命周期)。
+  - 已补错误边界：身份 CAS 仅重试 Kernel CONFLICT，提交前/后非冲突错误直接报告；自动加载回滚聚合身份写入与清理错误；批量恢复失败撤销本次新增加载、保留已有选择并允许修正后重试，action 定义不能经旧身份自动恢复。`loaded-state.test.ts`、`prompt-context.test.ts`、`restore-loaded-skills.test.ts` 有回归，早期批次 kernel-adapters 120 项通过；`345a8994` 批次含版本回归共 128 项通过，不替代完整竞态/窗口验收。
+  - 完成标准见 [P2 契约 §2](design/p2-completion.md#2-p2-01-skill-生命周期)。
 
 - [ ] **P2-02 跨 Session Memory**
   - 已实现：独立 `/var/lib/memory/shared.seq` 资源、不可复用 incarnation、精确 Session/scope 授权、来源记录；授权/CAS/数据/幂等回执/审计在同一事务提交。管理对话框和 CLI 提供创建、选择、授权、撤权、删除及审计入口，模型工具不提供管理权限。
   - Session shared state 只在当前 Session 内共享。同一 namespaceId 不自动跨 Session；CLI 新 Run 不自动读取旧 Run 记忆。
   - 已有回归：两个真实 Session 的双进程条件写竞争、创建者删除后共享数据保留；写入/删除/prune/压缩各三个 SQLite 事务故障窗口的 SIGKILL、重开与回执审计一致性。
-  - 剩余：IndexedDB 后端独立验证、真实窗口跨 Session 操作及更完整的撤权/并发清理矩阵。见 [P2 契约 §3](design/p2-completion.md#3-p2-02-跨-session-memory)。不以伪造同一 sessionId 实现共享。
+  - [ ] **审计与来源契约**：当前审计记录 action、Session、资源/数据提交版本及部分 Task/Effect 来源；补齐可复核的条目前后版本、授权变更内容和管理操作来源，管理 UI 展示条目来源。当前 `mutate` 事件未记录具体写/删/压缩内容身份，授权事件也未保存前后 scope 列表。
+  - [ ] **共享边界矩阵**：IndexedDB 事务独立验证；真实双进程撤权与在途写入、资源删除重建/旧引用、重复操作与并发清理；直接聊天/Flow/CLI/管理 UI 的两个 Session 正式链路，桌面重开后权限与来源一致。
+  - 已知保留边界：墓碑、审计和回执永久保留；history 默认前 100 项、上限 1000，无分页归档或物理历史 GC。此为当前保留策略，不把物理历史 GC 擅自增加为本轮前置条件；条目 retention 的并发清理验收仍须完成。
+  - 标准见 [P2 契约 §3](design/p2-completion.md#3-p2-02-跨-session-memory)。不以伪造同一 sessionId 实现共享。
 
 - [ ] **P2-03 Memory 模型写入与管理**
   - 已实现：SessionMemoryProvider 的 CAS 存储、scope 授权、完整列表、不可复用 revision 与摘要条件编辑/删除、容量/时间水位清理；并发 prune 计数和同毫秒裁剪缺陷已修；仅 Kernel CONFLICT 重试，其他提交前/后存储错误直接返回。
   - 已实现：Files 页记忆管理 UI，固定 Session、写租约检查、冲突保留输入；直接会话与 Flow 的策略快照；memory_list/write/remove/compact 经 tool.call 校验持久 Task 白名单及策略。CLI Agent `memory_policy` 同步进入节点和 RunDefinition。
   - 已验证：DOM + 真实 LocalFS/SQLite 重开后编辑保留、删除不复活；真实 Durable Agent 两轮调用；真实 CLI + 本地 HTTP mock 调用及退出后磁盘读取；取消等待和普通 ToolService 绕过被拒；CLI 写入/删除成功回执后 SIGKILL，恢复保持记忆版本及工具执行次数不变；另有写入/删除服务调用前及提交后未写回执的四个 SIGKILL 窗口，默认阻断、显式重放后成功。
   - 已实现：冲突后读取最新内容、保留草稿、显式采用比较版本再提交；memory_compact 在持久 Agent 工具链中提交更短摘要，原子复验源版本与读写授权，保存来源版本/摘要/模型并保留原文。
-  - 剩余：真实 Tauri 窗口操作、真实云模型调用、完整压缩 Task 取消/恢复与并发 GC 矩阵。SQLite 事务内部故障已有独立证据；语义/向量检索按用户要求延期。
+  - [ ] **模型冲突返回契约**：当前条件冲突抛普通错误，工具成功仅返回 success；补齐可识别的冲突类型及授权范围内的最新版本引用，验证模型不自动转为无条件覆盖。已完成的 UI 比较重提不替代模型工具契约。
+  - [ ] **压缩 Task 完整验收**：使用真实 Durable Agent → tool.call 链验证预算、源版本并发变化、撤权、取消、结果不确定后的显式恢复、摘要提交后父 Task 恢复和原文保留。已有 SQLite 事务内三个 SIGKILL 窗口调用 provider，不等于完整模型任务恢复验收；核对模型/程序/策略版本的持久可追溯性。
+  - [ ] **retention/GC 并发验收**：同机多进程清理与写入交错、多 scope 部分失败及重开计数；不重复实现已有时间/容量裁剪或重做已经通过的事务故障窗口。
+  - [ ] **真实入口验收**：Tauri 创建/编辑/删除/版本冲突处置/切 Session/重开；真实云模型记录 Provider/模型、授权 scope、工具请求/回执和重开内容。目前只有本地 HTTP mock 证据，真实云模型配置尚未确定。
+  - **延期**：语义/向量检索与 embedding 索引按用户要求暂不实现或验收。
   - 写工具属于 local 副作用，崩溃结果不确定时不盲目重放。条件编辑支持 expectedRevision，能拒绝相同内容的删除重建；共享工具通过 Task/Effect 操作身份复用事务回执。见[Memory API](llm-session-api.md)、[CLI 配置](../apps/cli/README.md)及[验收 §61–63](minimal-system-acceptance.md)。
-  - 待交付：上述真实窗口、云模型及完整恢复矩阵；embedding 索引延期。词项、向量与压缩分别验收，见 [P2 契约 §4](design/p2-completion.md#4-p2-03-memory-管理检索与压缩)。
+  - 词项、向量与压缩分别验收，见 [P2 契约 §4](design/p2-completion.md#4-p2-03-memory-管理检索与压缩)。
 
 - [ ] **P2-04 VFS/C4 完整验收**
   - 附件-only、逃逸拒绝、全部只读变更动词、同名挂载跨 Session 隔离、默认目录不隐式授权、卸载保留文件与旧句柄失效已有包级证据；真实 GUI 挂载/撤销/只读与 bwrap 边界已有记录。
@@ -179,11 +198,11 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 - [x] **P2-06 app-core 包内边界与技术债**：包说明、测试归属、app-shell 兼容 shim 删除、runtime/infrastructure 拆分、公开 VFS ioStats、session/vfs 目录归类、index 别名收口、静默失败可见化、租约 init 去重及已有 app-core 文案 i18n 均已完成。
   - 分批合入验证：应用层整理提交快照通过 app-core 72 项、app-shell 112 项、CLI HTTP 2 项测试（另有 30 项既有跳过），以及 app-core、Web、Tauri、CLI 类型检查；新增基础设施初始化失败和清理失败回归。最终全仓验收仍见 P0-05。
 
-**样式实现已补齐**：Agent 快捷 Prompt、DAG 空态/运行视图、同步设置、VFS 列表/移动弹窗/mention 预览、mdx 打印及零散元素已增加实际样式，并移除相应豁免；allowlist 仅保留 48 个选择器/状态类。`styles:check` 通过，视觉实机验收仍未执行。本地图标字体已接入，MathJax/Mermaid 仍使用配置的 CDN。
+- [ ] **样式视觉验收（规则实现已提交）**：Agent 快捷 Prompt、DAG 空态/运行视图、同步设置、VFS 列表/移动弹窗/mention 预览、mdx 打印及零散元素已增加实际样式，并移除相应豁免；allowlist 仅保留 48 个选择器/状态类。`styles:check` 通过；仍需真实窗口核对明暗主题、窄布局、长路径/长正文、按钮可用性和打印内容，视觉实机验收未执行。本地图标字体已接入，MathJax/Mermaid 仍使用配置的 CDN。
 
 ## 4. 下一步与验证入口
 
-本地 P1 和 P0-00 已完成，不再列作待实现任务。P0-02/P0-04 的剩余窗口、性能及平台验收保持开放。P2 按 [实施契约](design/p2-completion.md) 推进：先闭合 Skill 版本和共享 Memory 授权/存储，再接自动委派、检索/压缩与产品入口；VFS 矩阵可独立推进。Memory 不再从“缺工具/缺编辑器”重新实现。所有有效要求完成后执行 P0-05 最终回归。
+先定位 P0-05 的调度租约回归失败。随后按 [P2 实施契约](design/p2-completion.md) 补 Skill 自动委派与剩余 Memory 契约，并完成版本/共享/压缩的系统矩阵。已有版本快照、共享存储、冲突 UI、压缩提交和样式规则不重新实现。真实窗口合并复核 P0/P2 的相关场景，性能和发布平台保持各自完成条件。语义检索继续延期。最后对最终工作树执行全量回归、构建及交付验收。
 
 | 主题 | 入口 |
 | --- | --- |
@@ -195,10 +214,11 @@ Web 保留平台接口，不启用本机 Bash。跨 Session Memory、完整 Skil
 | Skill 与文件边界 | [Skill 设计](design/skill-design.md)、[挂载设计](design/vfs-session-mount-access.md)、[Session 浏览](design/vfs-session-browser.md) |
 | 其余有效设计 | [VFS 总设计](design/VFS-design.md)、[实现状态](design/vfs-implementation-status.md)、[C4 核验](design/vfs-c4-review.md)、[运行时诊断](runtime-architecture.md)、[标签存储](design/label-storage.md) |
 
-最近已提交批次（逐批隔离验证，**不是当前整树最终矩阵，不累加为独立测试总数**）：
+最近已提交批次（各批验证范围不同，**不是当前整树最终矩阵，不累加为独立测试总数**）：
 
 | 提交 | 功能 | 当批通过项数 |
 | --- | --- | --- |
+| `345a8994` | Skill 版本、共享 Memory、冲突/压缩及样式 | 128 / 124 / 103 / CLI 4+13；app-shell 221 通过、1 失败、30 跳过，详见 P0-05 |
 | `f8c1f181` | 挂载权限与旧句柄撤销 | 294；30 项跳过 |
 | `c0fd1568` | 数据库失败保留与定向关闭 | 271；30 项跳过 |
 | `f814d609` | 桌面 IPC 计量与动作边界 | 188；30 项跳过；另有真实 Vite 开关构建探针 |

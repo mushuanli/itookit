@@ -39,7 +39,8 @@
   "dependencies": {
     "@itookit/durable-kernel": "workspace:*",
     "@itookit/common": "workspace:*",
-    "@itookit/llm-tasks": "workspace:*"
+    "@itookit/llm-tasks": "workspace:*",
+    "@itookit/llm-common": "workspace:*"
   },
   "devDependencies": {
     "@itookit/vfs-core": "workspace:*",

@@ -100,3 +100,39 @@ describe('FlowDefinitionStore', () => {
         await expect(store.saveRevision({ ...second, name: 'changed' })).rejects.toThrow(/digest mismatch|immutable/);
     });
 });
+
+describe('builtin Flow installation receipts', () => {
+    it('does not resurrect a deleted template after the store is recreated', async () => {
+        const storage = memoryStore();
+        const first = new FlowDefinitionStore(storage);
+        const draft = { id: 'builtin', name: 'Builtin', nodes: [], edges: [], draftVersion: 1, updatedAt: 0, layout: {} } as FlowDraft;
+        expect(await first.installBuiltinDraft(draft)).not.toBeNull();
+        await storage.deleteFile('/builtin.flow');
+        const restarted = new FlowDefinitionStore(storage);
+        expect(await restarted.installBuiltinDraft(draft)).toBeNull();
+        expect(await restarted.listDrafts()).toEqual([]);
+        expect(await storage.findFile('builtin.flow')).toBeNull();
+    });
+    it('records existing templates without overwriting edits and respects a later deletion', async () => {
+        const storage = memoryStore(); const store = new FlowDefinitionStore(storage);
+        const existing = await store.createDraft({ id: 'builtin', name: 'User edited' });
+        expect(await store.installBuiltinDraft({ ...existing, name: 'Replacement' })).toBeNull();
+        expect((await store.loadDraft('builtin'))?.name).toBe('User edited');
+        await storage.deleteFile('/builtin.flow');
+        expect(await new FlowDefinitionStore(storage).installBuiltinDraft(existing)).toBeNull();
+    });
+});
+
+it('explicitly restores a missing builtin without overwriting edits or enabling startup resurrection', async () => {
+    const storage = memoryStore(); const store = new FlowDefinitionStore(storage);
+    const template = { id: 'builtin', name: 'Builtin', nodes: [], edges: [], draftVersion: 1, updatedAt: 0, layout: {} } as FlowDraft;
+    await store.installBuiltinDraft(template);
+    await storage.deleteFile('/builtin.flow');
+    const restored = await store.installBuiltinDraft(template, { restoreMissing: true });
+    expect(restored?.id).toBe('builtin');
+    await store.saveDraft({ ...restored!, name: 'Edited' }, restored!.draftVersion);
+    expect(await store.installBuiltinDraft(template, { restoreMissing: true })).toBeNull();
+    expect((await store.loadDraft('builtin'))?.name).toBe('Edited');
+    await storage.deleteFile('/builtin.flow');
+    expect(await new FlowDefinitionStore(storage).installBuiltinDraft(template)).toBeNull();
+});

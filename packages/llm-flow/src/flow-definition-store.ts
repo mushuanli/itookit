@@ -40,6 +40,18 @@ const FLOW_EXTENSION = '.flow';
 
 /** Workflow draft/revision persistence: one .flow file per flow + revision assets. */
 export class FlowDefinitionStore {
+    /** Installation receipts survive file deletion, so startup respects user removal. */
+    async installBuiltinDraft(template: FlowDraft, options: { restoreMissing?: boolean } = {}): Promise<FlowDraft | null> {
+        const name = fileName(String(template.id));
+        const receipt = `.installed-${name}.json`;
+        const installed = await this.store.findFile(receipt);
+        if (installed && !options.restoreMissing) return null;
+        const existing = await this.store.findFile(name);
+        const draft = { ...structuredClone(template), draftVersion: 1, updatedAt: Date.now() };
+        if (!existing) await this.store.createFile(name, JSON.stringify(draft, null, 2));
+        if (!installed) await this.store.createFile(receipt, JSON.stringify({ flowId: template.id, installedAt: Date.now() }));
+        return existing ? null : draft;
+    }
     constructor(
         private readonly store: FlowStore,
         private readonly plugins?: DagPluginCatalog,

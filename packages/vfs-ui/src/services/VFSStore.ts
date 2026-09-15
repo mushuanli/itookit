@@ -356,12 +356,17 @@ export class VFSStore implements IStatePort {
   private handleCreate(draft: VFSUIState, newItem: VFSNodeUI): void {
     const parentPath = newItem.metadata.parentPath;
     const parent = parentPath ? findNodeById(draft.items, parentPath) : null;
+    // A delayed create event from another directory must not dismiss a new draft.
+    const preserveCreation = Boolean(draft.creatingItem
+      && draft.creatingItem.parentPath !== (parentPath === '/' ? null : parentPath ?? null));
 
     if (parent?.type === 'directory' && newItem.id !== parent.id) {
       const wasUnexpanded = parent.children === undefined;
       (parent.children ??= []).unshift(newItem);
-      this.collapseExpandedSiblings(draft, parentPath!);
-      draft.expandedFolderIds.add(parentPath!);
+      if (!preserveCreation) {
+        this.collapseExpandedSiblings(draft, parentPath!);
+        draft.expandedFolderIds.add(parentPath!);
+      }
       // If the directory was never expanded, trigger a full load so all
       // existing siblings are fetched (not just the newly created file).
       if (wasUnexpanded) {
@@ -371,11 +376,11 @@ export class VFSStore implements IStatePort {
       draft.items.unshift(newItem);
     }
 
-    if (newItem.type === 'file') {
+    if (!preserveCreation && newItem.type === 'file') {
       draft.activeId = newItem.id;
       draft.selectedItemIds = new Set([newItem.id]);
     }
-    draft.creatingItem = null;
+    if (!preserveCreation) draft.creatingItem = null;
     draft.tags = rebuildTagsMap(draft.items);
   }
 

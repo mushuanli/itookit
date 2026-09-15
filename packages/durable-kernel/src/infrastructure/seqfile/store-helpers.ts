@@ -717,7 +717,7 @@ export async function wakeTaskWaiter(
     const waiter = await readTaskTx(tx, root, waiterId);
     await tx.deleteEntry(graphPath(root), key);
     if (!waiter || waiter.status !== 'waiting' || !waiter.wait) return;
-    const event = { type: 'task-exited' as const, taskId: completed.id, exit: completed.exit! };
+    const event = childExitEvent(completed, waiter.id);
     const pendingEvents = hasTaskExit(waiter, completed.id)
         ? waiter.pendingEvents : [...waiter.pendingEvents, event];
     let next: TaskRecord = { ...waiter, pendingEvents, version: waiter.version + 1, updatedAt: Date.now() };
@@ -795,7 +795,7 @@ export async function hydrateTaskWaitEventsTx(
         const target = await readTaskTx(tx, root, targetId);
         if (!target) throw new Error(`Wait target not found: ${targetId}`);
         if (isTerminal(target.status) && target.exit && !hasTaskExit(task, targetId)) {
-            pendingEvents = [...pendingEvents, { type: 'task-exited', taskId: targetId, exit: target.exit }];
+            pendingEvents = [...pendingEvents, childExitEvent(target, task.id)];
         }
     }
     return { ...task, pendingEvents };
@@ -817,6 +817,12 @@ export async function registerTaskTargetsTx(
 
 export function hasTaskExit(task: TaskRecord, targetId: string): boolean {
     return task.pendingEvents.some(event => event.type === 'task-exited' && event.taskId === targetId);
+}
+
+/** Only the actual parent receives the persisted spawn correlation key. */
+function childExitEvent(child: TaskRecord, waiterId: string): import('../../domain/types').TaskInputEvent {
+    return { type: 'task-exited', taskId: child.id, exit: child.exit!,
+        ...(child.parentTaskId === waiterId && child.spawnKey ? { spawnKey: child.spawnKey } : {}) };
 }
 
 export async function advanceDependants(

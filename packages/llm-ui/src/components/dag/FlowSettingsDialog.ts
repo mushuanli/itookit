@@ -3,7 +3,7 @@
 // connections + one default) and declared runtime parameters with defaults.
 
 import type { FlowConnection, FlowDefaults, FlowParameter, FlowRunPolicy, JsonValue } from '@itookit/common';
-import { escapeHTML } from '@itookit/common';
+import { escapeHTML, t } from '@itookit/common';
 
 export interface FlowSettingsOptions {
     connections: FlowConnection[];
@@ -67,7 +67,7 @@ export function openFlowSettings(options: FlowSettingsOptions): Promise<FlowSett
                     error instanceof Error ? error.message : 'Invalid settings';
                 dialog.showModal();
             }
-        }, { once: true });
+        });
     });
 }
 
@@ -191,8 +191,33 @@ function parameterRow(parameter?: FlowParameter): string {
         <input data-param-default placeholder="default" value="${escapeHTML(value)}">
         <label class="dag-settings__check" title="Required"><input type="checkbox" data-param-required ${param.required ? 'checked' : ''}>required</label>
         <input data-param-desc placeholder="description" value="${escapeHTML(param.description ?? '')}">
+        ${parameterConstraints(param)}
         <button type="button" data-remove-param>×</button>
     </div>`;
+}
+
+function parameterConstraints(param: FlowParameter): string {
+    return `<label>${escapeHTML(t('flow.parameters.minimum'))}<input type="number" step="any" data-param-min value="${escapeHTML(String(param.minimum ?? ''))}"></label>
+        <label>${escapeHTML(t('flow.parameters.maximum'))}<input type="number" step="any" data-param-max value="${escapeHTML(String(param.maximum ?? ''))}"></label>
+        <label><input type="checkbox" data-param-integer ${param.integer ? 'checked' : ''}>${escapeHTML(t('flow.parameters.integer'))}</label>
+        <label>${escapeHTML(t('flow.parameters.onMissing'))}<select data-param-missing>
+            <option value="error">${escapeHTML(t('flow.parameters.reject'))}</option>
+            <option value="interact" ${param.onMissing === 'interact' ? 'selected' : ''}>${escapeHTML(t('flow.parameters.interact'))}</option>
+        </select></label>`;
+}
+
+function readParameterConstraints(row: HTMLElement, type: FlowParameter['type']): Partial<FlowParameter> {
+    const result: Partial<FlowParameter> = {};
+    if (readInput(row, '[data-param-missing]') === 'interact') result.onMissing = 'interact';
+    if (type !== 'number') return result;
+    for (const [key, selector] of [['minimum', '[data-param-min]'], ['maximum', '[data-param-max]']] as const) {
+        const raw = readInput(row, selector).trim();
+        if (raw) result[key] = Number(raw);
+    }
+    if (row.querySelector<HTMLInputElement>('[data-param-integer]')?.checked) result.integer = true;
+    if ((result.minimum !== undefined && !Number.isFinite(result.minimum)) || (result.maximum !== undefined && !Number.isFinite(result.maximum))
+        || (result.minimum !== undefined && result.maximum !== undefined && result.minimum > result.maximum)) throw new Error(t('flow.launch.invalidValue'));
+    return result;
 }
 
 function bindRowControls(dialog: HTMLDialogElement, options: FlowSettingsOptions): void {
@@ -243,7 +268,7 @@ function readSettings(dialog: HTMLDialogElement): FlowSettingsResult {
         const description = readInput(row, '[data-param-desc]').trim();
         if (!name) throw new Error('Every parameter needs a name');
         const raw = readInput(row, '[data-param-default]');
-        const result: FlowParameter = { name, type, ...(description ? { description } : {}) };
+        const result: FlowParameter = { name, type, ...readParameterConstraints(row, type), ...(description ? { description } : {}) };
         if (required) result.required = true;
         if (raw !== '') result.default = parseDefault(raw, type);
         return result;

@@ -17,7 +17,9 @@ export {
     validateFlowRevision,
 } from './validation';
 export type { ValidationIssue } from './validation';
-export { resolveFlowParameters, validateFlowParameters } from './parameters';
+export { resolveFlowParameters, validateFlowParameters, flowParameterValues, prepareFlowParameters } from './parameters';
+export { compileDispatchGraph } from './structured/graph';
+export { expandDispatchDraft } from './structured/expand';
 export { resolveConnectionId, resolveNodeConnection } from './connections';
 export { FlowCommand } from './command-names';
 export * from './workflow';
@@ -44,3 +46,11 @@ export {
     SchedulerOwnershipLostError,
 } from './scheduler-lease';
 export type { SchedulerLease, SchedulerLeaseOptions, SchedulerLeaseRecord } from './scheduler-lease';
+export { FlowInputProgram } from './structured/input';
+export { FlowDispatchProgram } from './structured/dispatch';
+export { mergeResults } from './structured/results';
+export { validateDispatch } from './structured/validation';
+export type { DispatchInput, DispatchState, ResultSlot } from './structured/types';
+
+export { FlowReducerRegistry } from './structured/join';
+export type { FlowReducer } from './structured/join';

@@ -6,7 +6,7 @@
 
 ## 1. 目录与交互
 
-新建目标由 `fileCreation.resolveParent` 映射：选中 Session 或 Task 虚拟条目时在所属分组创建同级会话/分组；选中 files 内目录时保留原目标并经过文件权限检查。内联命名和直接创建命令使用同一映射。切换会话仅解绑编辑器，不调用 Kernel `closeSession`；切工作区仅隐藏缓存界面，后台执行不因此停止。
+新建目标由 `fileCreation.resolveParent` 映射：选中 Session 时在所属分组创建同级会话/分组；Task 历史及只读挂载目录拒绝创建与导入；选中 files 内可写目录时保留原目标。内联命名、直接创建和导入使用同一映射，映射前后均检查目标权限。会话侧栏使用通用时间戳默认名称并全选，用户可直接确认或修改。切换会话仅解绑编辑器，不调用 Kernel `closeSession`；切工作区仅隐藏缓存界面，后台执行不因此停止。
 
 ```text
 SessionBrowserFS:/
@@ -26,7 +26,7 @@ tasks 主视图按存储索引显示列表，侧栏预览首批并在有后续�
 
 files 直接代理受限 Session 文件上下文，不使用目录黑名单。未挂载时只有 attachments；用户明确授权后才增加 workspace 或其他目录。etc/var/dev/run/history 不在该用户上下文中，不能通过直接路径绕过。文本通过普通文件编辑器打开，文件身份和保存路径均为原 SessionFS 路径，cwd 为文件父目录；权限取自 capabilitiesAt。二进制文件提供下载，常见栅格图片提供预览，关闭时释放对象 URL。Session 聊天附件使用 `/attachments` 子视图。
 
-投影支持 Session/文件夹 CRUD 与 `/files` 下的文件 CRUD。根级创建文件按导入 Session 处理，根级创建目录建立虚拟分组；Session 重命名写 `repository.updateManifest`。`/files` 写操作仍经 Session 文件上下文和授权校验。
+投影支持 Session/文件夹 CRUD 与 `/files` 下的文件 CRUD。根级创建文件按导入 Session 处理，根级创建目录建立虚拟分组；Session 重命名写 `repository.updateManifest`。`/files` 写操作仍经 Session 文件上下文和授权校验。浏览器节点的 `_readOnly` 合并节点自身标记与 `capabilitiesAt(path).readonly`，tasks 容器和历史条目均标记只读；VFS UI 在打开命名输入框/文件选择器前检查，并在写入前复核。无挂载覆盖的虚拟父目录报告只读。
 
 删除统一走 `SessionLifecycleService`（`@itookit/app-core`，浏览器投影与文件夹递归删除共用）：`kernel.closeSession(id, true)` → 有界等待 `sessionStat(id).phase === 'closed'` → `kernel.removeSession(id)`（解除固定布局、删除 Kernel 存储根、清理 catalog）→ `repository.deleteSession(id)`。`closeTimeoutMs`（默认 30s）同时约束 **`closeSession` 调用本身**（它在途 Effect 确认停止才返回）与随后等待 `closed` 的轮询：设备/进程始终不确认停止时抛 `EBUSY`（`…did not confirm its in-flight work within <n>ms; nothing was deleted`）而不是无限挂起，关闭抛错或超时同样抛 `EBUSY` 并**保留全部数据**，不进入删除，因此确认后可用同一入口重试；文件夹删除逐会话走同一路径，全部成功后才删文件夹记录。回归 `packages/app-core/tests/session-delete-lifecycle.test.ts`（含运行中 Task 取消、以及从不确认停止时的有界失败与重试）。
 

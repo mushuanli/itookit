@@ -35,6 +35,8 @@ export function schemaCompatibilityIssue(source: JsonValue, target: JsonValue, p
     const typeIssue = typeCompatibility(source.type, target.type, path);
     if (typeIssue) return typeIssue;
 
+    const rangeIssue = numericCompatibility(source, target, path);
+    if (rangeIssue) return rangeIssue;
     const sourceType = source.type as TypeName | undefined;
     const targetType = target.type as TypeName | undefined;
     if (targetType === 'object' || (!targetType && sourceType === 'object')) {
@@ -113,4 +115,10 @@ function equalJson(left: unknown, right: unknown): boolean {
     if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
     const a = left as Schema, b = right as Schema;
     return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(key => Object.hasOwn(b, key) && equalJson(a[key], b[key]));
+}
+
+function numericCompatibility(source: Schema, target: Schema, path: string): string | undefined {
+    if (source.type && !['number', 'integer'].includes(String(source.type))) return;
+    if (typeof target.minimum === 'number' && (typeof source.minimum !== 'number' || source.minimum < target.minimum)) return `${path}: source minimum is wider than target`;
+    if (typeof target.maximum === 'number' && (typeof source.maximum !== 'number' || source.maximum > target.maximum)) return `${path}: source maximum is wider than target`;
 }

@@ -88,6 +88,15 @@ export class RunAttachmentController {
         await handle.interrupt({ requestId: randomUUID(), expectedEpoch: task.control?.epoch ?? 0, reason });
     }
 
+    async respondInput(interactionId: string, value: JsonValue, expectedRevision: number): Promise<void> {
+        const handle = this.requireHandle();
+        const task = (await handle.status()).task;
+        if (this.generation !== expectedRevision || handle !== this.handle) throw new Error('Task attachment changed');
+        const interaction = task.interactions[interactionId];
+        if (!interaction || interaction.status !== 'pending' || interaction.kind !== 'input') throw new Error('Input is no longer pending');
+        await handle.respond({ interactionId, value });
+    }
+
     async approve(note = ''): Promise<void> {
         const handle = this.requireHandle();
         const { task } = await handle.status();

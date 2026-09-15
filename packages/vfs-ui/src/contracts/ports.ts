@@ -41,6 +41,7 @@ export interface IEventPort {
  * Services layer implements this; Interaction layer consumes it.
  */
 export interface IDataOperationPort {
+  assertCanCreate(parentPath: string | null): Promise<void>;
   createFile(options: { title?: string; parentPath?: string | null; content?: string | ArrayBuffer }): Promise<any>;
   createFiles(options: { parentPath?: string | null; files: { title: string; content: string | ArrayBuffer }[] }): Promise<any[]>;
   createDirectory(options: { title?: string; parentPath?: string | null }): Promise<any>;

@@ -65,3 +65,12 @@ describe('default essay-review flow', () => {
         expect(revision?.defaultConnection).toBe('default');
     });
 });
+
+it('does not recreate the legacy essay Flow after deletion and restart', async () => {
+    const storage = memoryStore();
+    await seedDefaultFlows(new FlowDefinitionStore(storage));
+    await storage.deleteFile(`/${ESSAY_REVIEW_FLOW_ID}.flow`);
+    const restarted = new FlowDefinitionStore(storage);
+    await seedDefaultFlows(restarted);
+    expect(await restarted.loadDraft(ESSAY_REVIEW_FLOW_ID)).toBeNull();
+});

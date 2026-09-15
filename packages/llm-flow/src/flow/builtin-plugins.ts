@@ -8,6 +8,8 @@ import { DELEGATION_DEFAULTS } from '@itookit/common';
 import { buildLlmTaskInput, type LlmTaskInputOptions } from '@itookit/llm-tasks';
 import { delegationSchema } from './delegation-schema';
 import { DagPluginRegistry } from './plugin-registry';
+import { structuredPlugins } from './structured/plugins';
+import { splitGraphPlugins } from './structured/graph-plugins';
 
 export function createBuiltinDagPluginRegistry(): DagPluginRegistry {
     const registry = new DagPluginRegistry();
@@ -19,11 +21,14 @@ function builtinPlugins(): DagPlugin[] {
     return [
         valuePlugin('builtin.transform', transformManifest(), 'transform'),
         valuePlugin('builtin.reduce', reduceManifest(), 'reduce'),
+        valuePlugin('builtin.aggregate', aggregateManifest(), 'aggregate'),
         valuePlugin('builtin.route', routeManifest(), 'route'),
         valuePlugin('builtin.spawn', spawnManifest(), 'spawn'),
         compositePlugin(),
         humanPlugin(),
         agentPlugin(),
+        ...structuredPlugins(),
+        ...splitGraphPlugins(agentManifest()),
     ];
 }
 
@@ -41,7 +46,7 @@ function compositePlugin(): DagPlugin {
 function valuePlugin(
     id: string,
     descriptor: DagPluginManifest,
-    operation: 'transform' | 'reduce' | 'route' | 'spawn',
+    operation: 'transform' | 'reduce' | 'route' | 'spawn' | 'aggregate',
 ): DagPlugin {
     const manifest = { ...descriptor, id };
     return {
@@ -162,6 +167,12 @@ function reduceManifest(): DagPluginManifest {
     }, { outputName: 'result', type: 'text', separator: '\n' });
 }
 
+function aggregateManifest(): DagPluginManifest {
+    return { ...manifest('aggregate', 'Aggregate Results', 'Data', {}, {}),
+        inputs: [{ name: 'previous', cardinality: 'one', required: false, order: 0 },
+            { name: 'updates', cardinality: 'one', required: false, order: 1 }] };
+}
+
 function routeManifest(): DagPluginManifest {
     return manifest('route', 'Route', 'Control', {
         mode: enumSchema(['exclusive', 'multicast', 'fallback']),
@@ -254,6 +265,7 @@ function manifest(
 ): DagPluginManifest {
     return {
         id: `builtin.${kind}`, version: '1.0.0', kind, title, category,
+        ...(kind === 'agent' ? { authoring: { invocation: true } } : {}),
         configSchema: {
             type: 'object',
             // Loop bound shared by every node kind: any node on a cycle may carry

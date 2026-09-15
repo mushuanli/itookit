@@ -92,6 +92,8 @@ export interface RunDefinition {
         nodeDefaults?: Record<string, Record<string, JsonValue>>;
         nodeConnections?: Record<string, Record<string, JsonValue>>;
         maxNodes?: number;
+        templateVersion?: import('@itookit/common').DagRunSpec['templateVersion'];
+        parameterScopes?: import('@itookit/common').DagRunSpec['parameterScopes'];
     };
     parameters?: FlowParameter[];
     environment: RunEnvironment;
@@ -135,6 +137,8 @@ export async function createRunDefinitionFromFlow(flow: FlowRevision, options: {
         graph: {
             nodes: structuredClone(dag.nodes) as DagNodeDefinition[],
             edges: structuredClone(dag.edges) as DagEdgeDefinition[],
+            templateVersion: dag.templateVersion,
+            parameterScopes: structuredClone(dag.parameterScopes),
             ...(dag.nodeDefaults ? { nodeDefaults: structuredClone(dag.nodeDefaults) as Record<string, Record<string, JsonValue>> } : {}),
             ...(dag.nodeConnections ? { nodeConnections: structuredClone(dag.nodeConnections) as Record<string, Record<string, JsonValue>> } : {}),
             ...(dag.maxNodes !== undefined ? { maxNodes: dag.maxNodes } : {}),
@@ -171,6 +175,9 @@ export function toDagRunSpec(definition: RunDefinition): import('@itookit/common
     return {
         nodes: structuredClone(definition.graph.nodes),
         edges: structuredClone(definition.graph.edges),
+        templateVersion: definition.graph.templateVersion,
+        parameterScopes: structuredClone(definition.graph.parameterScopes),
+        parameterSchema: structuredClone(definition.parameters),
         ...(definition.graph.nodeDefaults ? { nodeDefaults: structuredClone(definition.graph.nodeDefaults) } : {}),
         ...(definition.graph.nodeConnections ? { nodeConnections: structuredClone(definition.graph.nodeConnections) } : {}),
         ...(definition.graph.maxNodes !== undefined ? { maxNodes: definition.graph.maxNodes } : {}),
