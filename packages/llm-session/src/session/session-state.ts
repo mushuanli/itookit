@@ -6,7 +6,7 @@
 import type { RoundId } from '@itookit/common';
 import type { RoundProjection } from '../persistence/round-types';
 import type { RoundLogEvent } from '../persistence/round-events';
-import { buildToolChildren } from '../persistence/projection';
+import { buildToolChildren, buildFlowChildren } from '../persistence/projection';
 import { NodeStatus } from '../core/types';
 import {
     SessionGroup,
@@ -157,6 +157,7 @@ export class SessionState {
                 status: changes.status ?? 'success',
                 persistedNodeId: round.roundId,
                 toolCalls: changes.toolCalls,
+                flowInteractions: changes.flowInteractions,
             };
             const assistant = this.roundProjectionToSessionGroups(round)
                 .find(group => group.role === 'assistant');
@@ -201,6 +202,7 @@ export class SessionState {
         }
 
         if (round.assistantMessage) {
+            if (changes.flowInteractions !== undefined) round.assistantMessage.flowInteractions = changes.flowInteractions;
             if (changes.assistantContent !== undefined) {
                 round.assistantMessage.content = changes.assistantContent;
             }
@@ -577,7 +579,7 @@ export class SessionState {
                         error: p.assistantMessage.error,
                         metaInfo: p.agentId ? { agentId: p.agentId } : undefined,
                     },
-                    children: buildToolChildren(p),
+                    children: [...buildToolChildren(p), ...buildFlowChildren(p)],
                 },
             });
         }

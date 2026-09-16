@@ -262,7 +262,11 @@ export interface SkillToolBinding {
      * - 'shell':     本地 Shell 命令，支持 {{argName}} 模板替换
      * - 'handler':   由 Skill 自身的 handler 函数处理（预留）
      */
-    executionType: 'builtin' | 'http' | 'shell' | 'handler';
+    executionType: 'builtin' | 'http' | 'shell' | 'handler' | 'mcp';
+    mcpServerId?: string;
+    mcpToolName?: string;
+    /** Argument vector for shell bindings; avoids shell interpolation. */
+    args?: string[];
     /**
      * Shell 命令模板（executionType='shell'）。
      * 支持 {{argName}} 占位符，由 LLM 传入的参数替换。

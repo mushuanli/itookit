@@ -341,6 +341,7 @@ export class RoundGraphService {
                 : '',
             agentId: update.agentId,
             toolCalls: toolCallsFromResult(update.result),
+            flowInteractions: update.result?.flowInteractions,
         };
         this.onEvent?.({ type: 'round:updated', roundId, changes });
     }
@@ -365,7 +366,7 @@ export class RoundGraphService {
         this.onEvent?.({
             type: 'round:updated',
             roundId,
-            changes: { status: roundStatusToNodeStatus(status), error: failure },
+            changes: { status: roundStatusToNodeStatus(status), error: failure, flowInteractions: result?.flowInteractions },
         });
     }
 

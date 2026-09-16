@@ -23,6 +23,7 @@ export class NodeRenderer {
         el.className = `llm-ui-node llm-ui-node--${node.executorType} ${layoutClass}`;
         el.dataset.id = node.id;
         el.dataset.status = node.status;
+        if (node.messageRole) el.dataset.role = node.messageRole;
 
         const mountPoints: { output?: HTMLElement } = {};
 
@@ -60,6 +61,8 @@ export class NodeRenderer {
         el.innerHTML = `
             ${NodeTemplates.renderAgentHeader(node, previewText, icon, isCollapsed)}
             <div class="llm-ui-node__body">
+                ${node.data.metaInfo?.actor?.kind === 'tool' && node.data.input !== undefined
+                    ? `<details class="llm-ui-node__input"><summary>${escapeHTML(node.name)}</summary><pre>${escapeHTML(typeof node.data.input === 'string' ? node.data.input : JSON.stringify(node.data.input, null, 2))}</pre></details>` : ''}
                 ${NodeTemplates.renderThinking(node.data.thought || '', hasThought, node.status)}
                 ${errorHtml}
                 <div class="llm-ui-node__output">

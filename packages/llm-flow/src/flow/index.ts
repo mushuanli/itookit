@@ -26,7 +26,7 @@ export * from './workflow';
 
 export { readFlowTaskTranscript, type FlowTaskTranscript, type FlowTranscriptQuery } from './transcript';
 
-export { prepareFlowTaskRetry, waitForFlowRunTasks, type FlowRunMember } from './run-members';
+export { readFlowRunMembers, prepareFlowTaskRetry, waitForFlowRunTasks, type FlowRunMember } from './run-members';
 export { resolveFlowRunForTask, resolveFlowTaskWorkspace, type FlowTaskWorkspace } from './task-run';
 
 export { retryFlowTask } from './retry-task';

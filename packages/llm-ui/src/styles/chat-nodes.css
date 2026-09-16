@@ -826,3 +826,8 @@
     border-color: var(--llm-border-color);
     color: var(--llm-text-primary);
 }
+.llm-ui-node__identity {
+    color: var(--llm-text-secondary);
+    overflow-wrap: anywhere;
+    min-width: 0;
+}

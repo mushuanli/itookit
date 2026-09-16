@@ -445,7 +445,7 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
         if (!this.toolService || binding.executionType === 'builtin') return;
         if (this.toolService.getToolMeta(binding.toolId)) return;
         const handler = this.options.toolHandlerFactory?.create(skill, binding);
-        if (!handler) return;
+        if (!handler) throw new Error(`No tool handler registered for ${skill.id}/${binding.toolId} (${binding.executionType})`);
         this.toolService.registerTool(toolMeta(skill, binding), binding.definition, handler);
         const owned = this.registeredTools.get(skill.id) ?? new Set<string>();
         owned.add(binding.toolId);
@@ -486,7 +486,7 @@ function toolMeta(skill: SkillDefinition, binding: SkillToolBinding): import('@i
         id: binding.toolId,
         name: binding.definition.function?.name ?? binding.definition.name ?? binding.toolId,
         description: binding.definition.function?.description ?? skill.description,
-        sideEffect: binding.sideEffect ?? (binding.executionType === 'http' ? 'external' : 'local'),
+        sideEffect: binding.sideEffect ?? (['http', 'mcp'].includes(binding.executionType) || skill.type === 'mcp' ? 'external' : 'local'),
         timeoutMs: binding.timeoutMs ?? 30_000,
         type: 'plugin',
         enabled: true,

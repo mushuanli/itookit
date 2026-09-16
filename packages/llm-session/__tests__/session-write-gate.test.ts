@@ -75,7 +75,8 @@ describe('Session single-writer gate', () => {
 
         await expect(f.sessionManager.sendMessage('hello', [], 'default'))
             .rejects.toThrow('Session is owned by another host; this host can only read it');
-        expect(checked).toEqual([f.sessionId]);
+        await expect(f.sessionManager.rerunFlow({}, 'source')).rejects.toThrow('another host');
+        expect(checked).toEqual([f.sessionId, f.sessionId]);
         // The refusal happens before the round is appended.
         expect(await f.engine.listHistory(f.sessionId)).toEqual([]);
     });

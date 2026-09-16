@@ -435,6 +435,11 @@ export class HistoryView implements IHistoryPresenter {
                 break;
             }
 
+            case 'message:updated': {
+                if (event.payload.content !== undefined) this.stream.replaceContent(event.payload.messageId, event.payload.content);
+                break;
+            }
+
             case 'message:status': {
                 const sp = event.payload;
                 this.stream.updateStatus(sp.messageId, sp.status, sp.result);

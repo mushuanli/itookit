@@ -257,6 +257,10 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions, overri
         await runtime.kernel.createSession({ id, storage: cliStorage(id) });
         const definition = override?.definition ?? compileRunDefinition(loaded.workflow, loaded.hash, runtime.workspaceRoot);
         const spec = toDagRunSpec(definition);
+        if (override) {
+            for (const node of spec.nodes) Object.assign(node, await runtime.flowCapabilities.bindNode(id,
+                node as import('@itookit/common').FlowNodeDefinition, spec.nodeDefaults?.[node.id] as never));
+        }
         // `submit` resolves as soon as the durable root exists, before the nodes are
         // dispatched, so this handle is live but its node map is still empty here.
         // Node → Task mapping is read from the Session by the monitor; `run.started`
@@ -657,6 +661,7 @@ async function monitorIteration(
     // listing walks task storage, so status refresh and Effect decisions share it.
     const tasks = await runtime.kernel.listSessionTasks(manifest.sessionId);
     await refreshTaskStatuses(workflow, manifest, runtime, tasks);
+    await runtime.syncHistory(tasks);
     const blocked = await decideBlockedEffects(manifest, store, runtime, options, tasks);
     if (blocked !== undefined) return blocked;
     const interaction = await processInteractions(manifest, store, runtime, options);
@@ -734,6 +739,7 @@ async function projectTerminalStatuses(workflow: CompiledWorkflow, manifest: Run
         for (;;) {
             const tasks = await runtime.kernel.listSessionTasks(manifest.sessionId);
             await refreshTaskStatuses(workflow, manifest, runtime, tasks);
+    await runtime.syncHistory(tasks);
             const unsettled = tasks.some(task => task.labels?.flowNodeId && !isTerminalTaskStatus(task.status));
             if (!unsettled || Date.now() >= deadline) return;
             await new Promise(resolve => setTimeout(resolve, 25));

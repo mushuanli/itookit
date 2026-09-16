@@ -54,7 +54,7 @@ export class EventBatchProcessor<T extends BatchableEvent = BatchableEvent> {
     }
 
     push(event: T): void {
-        if (this.immediateTypes.has(event.type)) {
+        if (this.immediateTypes.has(event.type) || (event.type === this.chunkType && typeof event.payload?.content === 'string')) {
             this.flush();
             this.onImmediate(event);
             return;

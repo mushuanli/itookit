@@ -26,6 +26,8 @@ src/
 - DAG/Flow 依赖 `@itookit/llm-flow`（本包通过它编排，不直接持有动态图语义）。
 - 只通过 `@itookit/durable-kernel` 公开类型（`Kernel` / `SessionHandle` 等）与 Effect 访问内核，不触碰内核内部实现。
 
+Flow 重新运行通过 `FlowRerunService` 校验参数并创建替代分支，调用参数固定在 `Round.flow`。`FlowHistory` 将 Task 事件投影为 History 交互并存入 `RoundResult.flowInteractions`，与模型 history 独立；内部逻辑节点不展示，流式内容按 Task 隔离。见 [Flow 能力与输出](../../doc/design/flow-capabilities-and-output.md)。
+
 ## 联网搜索
 
 - 三态 `ExecutorConfig.webSearchMode`（`WebSearchMode`）由 `AgentResolver.resolveWebSearch` 经 `resolveWebSearchStrategy` 解析。
@@ -42,3 +44,5 @@ pnpm --filter @itookit/llm-session test
 ```
 
 Memory 默认使用 Session shared；显式 sharedMemory 引用经 SharedMemoryStore 的独立 SeqFile 与 Session/scope grants 授权。数据、操作回执、审计在同一事务写入；管理权限不暴露为模型工具。memory_compact 复验源版本与读写授权，保留原文和来源引用。语义检索仍延期。
+
+CLI 使用共享 `FlowRunProjection` 按根 Task 幂等写入 History Round；节点、工具、输入和批准携带 `FlowActor` 身份。Skill 作为节点/工具来源展示，工具调用按 Task 和 call ID 隔离；分支切换保留 Flow 交互。验证见 [CLI 能力验收](../../doc/design/flow-cli-capabilities-verification.md)。

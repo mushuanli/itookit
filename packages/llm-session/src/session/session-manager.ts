@@ -1,3 +1,4 @@
+import { FlowRerunService } from './flow-rerun';
 // @file: llm-conversation/session/session-manager.ts
 
 import {
@@ -62,6 +63,7 @@ export class SessionManager implements ISession, SessionQuery {
     private agentResolver: AgentResolver;
     private readonly kernel: Kernel;
     private readonly canWriteSession?: (sessionId: string) => Promise<boolean>;
+    private readonly flowRerun: FlowRerunService;
     private readonly durableProjection: DurableConversationProjection;
     private durableSession?: SessionHandle;
     private durableProjectionUnsubscribe?: () => void;
@@ -127,6 +129,7 @@ export class SessionManager implements ISession, SessionQuery {
         );
 
         this.roundOps = new RoundOperations(this.registry, this.runs);
+        this.flowRerun = new FlowRerunService(this.registry, this.runs, options.flowStore);
         this.branchService = new BranchService(this.registry);
     }
 
@@ -219,6 +222,18 @@ export class SessionManager implements ISession, SessionQuery {
         this.durableProjectionUnsubscribe = undefined;
         this.durableSession = undefined;
         this.registry.unbindSession();
+    }
+
+    getFlowRerunContext() { return this.flowRerun.context(); }
+
+    async rerunFlow(parameters: Record<string, JsonValue>, sourceRoundId: string) {
+        const sessionId = this.registry.ensureBound().sessionId;
+        if (this.canWriteSession && !await this.canWriteSession(sessionId)) {
+            throw new ConversationError(ConversationErrorCode.SESSION_INVALID,
+                'Session is owned by another host; this host can only read it');
+        }
+        if (this.registry.ensureBound().sessionId !== sessionId) throw new Error('Session changed; reopen the rerun form');
+        return this.flowRerun.run(parameters, sourceRoundId);
     }
 
     /** Create a fresh session instance bound to a workflow run (records flow + parameters). */

@@ -582,3 +582,15 @@
 .dag-empty { margin: auto; padding: 32px; max-width: 44ch; text-align: center; color: var(--dag-text-secondary); line-height: 1.6; }
 .dag-run-workspace { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
 .dag-settings__defaults, .dag-settings__run-policy { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--dag-border); }
+
+.dag-output { padding: 12px; border: 1px solid var(--dag-border, #ddd); border-radius: 6px; margin: 8px 0; }
+.dag-output__entry { min-width: 0; }
+.dag-output__value { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+.dag-output__empty { color: var(--dag-text-secondary); }
+.dag-output__summary { font-weight: 600; }
+.dag-output__scores { width: 100%; border-collapse: collapse; }
+.dag-output__scores th, .dag-output__scores td { padding: 6px; text-align: left; border-bottom: 1px solid var(--dag-border, #ddd); }
+.dag-output-dialog { width: min(1100px, 94vw); max-height: 90vh; }
+.dag-output-dialog > header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dag-output-dialog > header select { max-width: 45%; }
+.dag-output-dialog__body { height: 70vh; overflow: auto; }

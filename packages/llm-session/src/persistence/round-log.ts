@@ -453,20 +453,20 @@ function assistantProjection(
             thinking: (assistantMsg as { thinking?: string }).thinking,
             status,
             persistedNodeId: roundId,
-            toolCalls: toolCallsFromResult(round.result),
+            flowInteractions: round.result?.flowInteractions, toolCalls: toolCallsFromResult(round.result),
             error: round.error,
         };
     }
     if (kind === 'chat' && round.input.some(m => m.role === 'user')) {
         if (isFailedRoundStatus(round.status)) return { content: '', status, persistedNodeId: roundId, error: round.error,
             // Tools the failed Round had already started; the projection must not silently drop them.
-            toolCalls: toolCallsFromResult(round.result) };
+            flowInteractions: round.result?.flowInteractions, toolCalls: toolCallsFromResult(round.result) };
         // A round that already recorded an execution but never reached a terminal status means the
         // host that owned the run is gone. Project it as *running* so the transcript does not end on
         // the user message (which would refuse the next send) and the host can offer to re-run it.
-        // `waiting` is excluded: a run waiting for human input is interrupted work, not lost work.
-        if ((round.status === 'running' || round.status === 'pending') && round.executions.length > 0) {
-            return { content: '', status: 'running', persistedNodeId: roundId };
+        // Preserve waiting identity so input requests remain visible without reporting a lost run.
+        if ((round.status === 'running' || round.status === 'pending' || round.status === 'waiting') && round.executions.length > 0) {
+            return { content: '', status, persistedNodeId: roundId, flowInteractions: round.result?.flowInteractions };
         }
     }
     return undefined;

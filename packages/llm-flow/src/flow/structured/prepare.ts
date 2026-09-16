@@ -72,7 +72,7 @@ async function bindInvocation(branch: DispatchBranch, context: DispatchPreparati
 
 function sanitizeInput(input: unknown): JsonValue {
     const value = { ...object(input) };
-    for (const key of ['messages', 'memoryPolicy', 'sessionContext', 'skillContexts']) delete value[key];
+    for (const key of ['messages', 'memoryPolicy', 'sessionContext']) delete value[key];
     value.dependencyBindings = [];
     value.includeDependencyOutputs = false;
     return json(value) as JsonValue;

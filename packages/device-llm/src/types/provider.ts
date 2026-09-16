@@ -11,7 +11,10 @@ export interface MCPServerConfig {
     /** 服务器名称（唯一） */
     name: string;
     /** 传输类型 */
-    transport: 'stdio' | 'sse' | 'websocket';
+    transport: 'stdio' | 'http' | 'sse' | 'websocket';
+    headers?: Record<string, string>;
+    cwd?: string;
+    timeout?: number;
     /** 启动命令（stdio 模式） */
     command?: string;
     /** 命令参数（stdio 模式） */

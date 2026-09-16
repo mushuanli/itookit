@@ -27,6 +27,7 @@ import { readFlowTaskTranscript, type FlowTranscriptQuery } from './transcript';
 import { DurableFlowExecutor, type FlowExecutionHandle } from './executor';
 
 export interface DagCommandServiceOptions {
+    resolveSkillContexts?: import('./executor').DurableFlowExecutorOptions['resolveSkillContexts'];
     canWriteSession?(sessionId: string): Promise<boolean>;
     workspaceManager?: import('./executor').FlowWorkspaceManager;
     flowStore: FlowDefinitionStore;
@@ -68,7 +69,7 @@ export class DagCommandService {
             const input = args as { sessionId: string; taskId: string };
             return this.resumeRun(input.sessionId, input.taskId);
         });
-        bus.register(FlowCommand.RunList, async () => this.listRuns());
+        bus.register(FlowCommand.RunList, async args => this.listRuns((args as { sessionId?: string } | undefined)?.sessionId));
         bus.register(FlowCommand.RunStart, async args => {
             const input = args as { sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue>; goal?: FlowRunGoal };
             return this.start(input.sessionId, input.flow, input.parameters, input.goal);
@@ -140,6 +141,7 @@ export class DagCommandService {
         if (this.options.canWriteSession && !await this.options.canWriteSession(sessionId)) throw new Error('Session is read-only on this host');
         if (!await hasLocalScheduler(this.options.kernel, taskId)) {
             const executor = new DurableFlowExecutor({ ...this.options,
+                resolveSkillContexts: this.options.resolveSkillContexts,
                 bindPatchNode: this.options.bindNode ? async (id, node, defaults) =>
                     this.options.bindNode!(id, node as FlowNodeDefinition, defaults as FlowNodeDefinition['config']) : undefined });
             this.handles.set(taskId, await executor.resume(sessionId, taskId));
@@ -148,9 +150,10 @@ export class DagCommandService {
         return { taskId };
     }
 
-    private async listRuns(): Promise<FlowRunSummary[]> {
+    private async listRuns(sessionId?: string): Promise<FlowRunSummary[]> {
         const runs: FlowRunSummary[] = [];
         for await (const session of this.options.kernel.listSessions()) {
+            if (sessionId && session.id !== sessionId) continue;
             const inspection = await this.options.kernel.inspectSession(session.id);
             for (const task of await inspection.listTasks()) {
                 if (task.program.kind !== 'flow.aggregate' || task.labels?.kind !== 'flow-root') continue;
@@ -180,6 +183,7 @@ export class DagCommandService {
         const sessionContext = await this.options.resolveSessionContext?.(sessionId, '');
         if (this.options.canWriteSession && !await this.options.canWriteSession(sessionId)) throw new Error('Session is read-only on this host');
         const executor = new DurableFlowExecutor({ ...this.options, sessionContext,
+            resolveSkillContexts: this.options.resolveSkillContexts,
             bindPatchNode: this.options.bindNode ? async (id, node, defaults) =>
                 this.options.bindNode!(id, node as FlowNodeDefinition, defaults as FlowNodeDefinition['config']) : undefined,
         });

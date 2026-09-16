@@ -11,7 +11,7 @@ import type { IShellRunner } from './llm-device-driver';
 
 const SKILLS_DIR = '/llm/.skills';
 const SKILL_TYPES = new Set(['builtin', 'http', 'shell', 'prompt', 'mcp', 'custom']);
-const TOOL_EXECUTION_TYPES = new Set(['builtin', 'http', 'shell', 'handler']);
+const TOOL_EXECUTION_TYPES = new Set(['builtin', 'http', 'shell', 'handler', 'mcp']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);

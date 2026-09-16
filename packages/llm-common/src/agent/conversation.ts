@@ -26,6 +26,8 @@ export interface ConversationRound {
 }
 
 export interface Round extends ConversationRound {
+    /** Frozen workflow invocation owned by this branch round. */
+    flow?: { flowId: import('./flow-definition').FlowId; revision: number; parameters?: Record<string, import('./flow-definition').JsonValue> };
     exposure?: 'public' | 'internal' | 'artifact';
     origin: 'merge' | 'rebase' | 'edit' | 'user';
     agentId?: string;
@@ -74,7 +76,33 @@ export type Signal =
     | { type: 'respond'; requestId: string; response: unknown }
     | { type: 'navigate'; ref: RefName };
 
+export interface FlowActor {
+    kind: 'node' | 'tool' | 'input' | 'approval';
+    nodeId?: string;
+    nodeName?: string;
+    agentId?: string;
+    skillIds?: string[];
+    toolName?: string;
+    toolCallId?: string;
+    round?: number;
+}
+
+export interface FlowInteraction {
+    actor?: FlowActor;
+    input?: unknown;
+    id: string;
+    taskId: string;
+    name: string;
+    role: 'user' | 'assistant';
+    status: 'running' | 'waiting_input' | 'success' | 'failed' | 'aborted';
+    content: string;
+    createdAt: number;
+    error?: string;
+}
+
 export interface RoundResult {
+    /** Display projection only; never appended to model history. */
+    flowInteractions?: FlowInteraction[];
     assistantBlocks: Array<{
         type: 'thinking' | 'text' | 'tool_use';
         [key: string]: unknown;

@@ -179,340 +179,69 @@ export class MCPClient {
 // ─── MCPServerConnection ──────────────────────────────────────────────────────
 
 export class MCPServerConnection {
-    private connected = false;
-    private transport: MCPTransport | null = null;
+    private client: import('@modelcontextprotocol/sdk/client/index.js').Client | undefined;
+    private connecting: Promise<void> | undefined;
+    constructor(private readonly config: MCPServerConfig) {}
 
-    constructor(private config: MCPServerConfig) {}
+    connect(): Promise<void> {
+        if (this.client) return Promise.resolve();
+        return this.connecting ??= this.open().finally(() => { this.connecting = undefined; });
+    }
 
-    async connect(): Promise<void> {
-        switch (this.config.transport) {
-            case 'stdio':
-                this.transport = new StdioTransport(this.config);
-                break;
-            case 'sse':
-                this.transport = new SSETransport(this.config);
-                break;
-            case 'websocket':
-                this.transport = new WebSocketTransport(this.config);
-                break;
-            default:
-                throw new Error(`Unsupported MCP transport: ${this.config.transport}`);
+    private async open(): Promise<void> {
+        const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+        const client = new Client({ name: 'mindos', version: '1.0.0' });
+        const transport = await this.createTransport();
+        try { await client.connect(transport, { timeout: this.config.timeout ?? 30000 }); }
+        catch (error) { await client.close(); throw error; }
+        this.client = client;
+    }
+
+    private async createTransport() {
+        const config = this.config;
+        if (config.transport === 'stdio') {
+            if (typeof window !== 'undefined') throw new Error('MCP stdio requires a Node host');
+            if (!config.command) throw new Error('MCP stdio requires command');
+            const { createStdioTransport } = await import('#mcp-stdio');
+            return createStdioTransport(config);
         }
-
-        await this.transport.connect();
-        this.connected = true;
-        await this.initialize();
+        if (!config.url) throw new Error('MCP remote transport requires url');
+        const url = new URL(config.url);
+        if (config.transport === 'websocket') {
+            const { WebSocketClientTransport } = await import('@modelcontextprotocol/sdk/client/websocket.js');
+            return new WebSocketClientTransport(url);
+        }
+        if (config.transport === 'sse') {
+            const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
+            return new SSEClientTransport(url, { requestInit: { headers: config.headers } });
+        }
+        const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+        return new StreamableHTTPClientTransport(url, { requestInit: { headers: config.headers } });
     }
 
     async disconnect(): Promise<void> {
-        if (this.transport) {
-            await this.transport.disconnect();
-            this.transport = null;
-        }
-        this.connected = false;
+        await this.connecting;
+        const client = this.client;
+        this.client = undefined;
+        await client?.close();
     }
-
-    isConnected(): boolean {
-        return this.connected;
-    }
-
+    isConnected(): boolean { return Boolean(this.client); }
     async listTools(): Promise<MCPToolInfo[]> {
-        const response = await this.sendRequest('tools/list', {});
-        return response.tools ?? [];
+        if (!this.client) throw new Error('MCP not connected');
+        const tools: MCPToolInfo[] = [];
+        let cursor: string | undefined;
+        const seen = new Set<string>();
+        do {
+            const page = await this.client.listTools({ cursor });
+            tools.push(...page.tools.map(tool => ({ name: tool.name, description: tool.description ?? '', inputSchema: tool.inputSchema })));
+            cursor = page.nextCursor;
+            if (cursor && seen.has(cursor)) throw new Error('MCP tools/list returned a repeated cursor');
+            if (cursor) seen.add(cursor);
+        } while (cursor);
+        return tools;
     }
-
-    async callTool(
-        name: string,
-        args: Record<string, any>,
-        options?: { timeout?: number; signal?: AbortSignal },
-    ): Promise<any> {
-        const response = await this.sendRequest('tools/call', { name, arguments: args }, options);
-
-        if (response.content && Array.isArray(response.content)) {
-            const textParts = response.content
-                .filter((c: any) => c.type === 'text')
-                .map((c: any) => c.text);
-            if (textParts.length > 0) return textParts.join('\n');
-            return response.content;
-        }
-        return response;
-    }
-
-    private async initialize(): Promise<void> {
-        await this.sendRequest('initialize', {
-            protocolVersion: '2024-11-05',
-            capabilities: { tools: {} },
-            clientInfo: { name: 'itookit-device-llm', version: '1.0.0' },
-        });
-        await this.sendNotification('notifications/initialized', {});
-    }
-
-    private sendRequest(
-        method: string,
-        params: any,
-        options?: { timeout?: number; signal?: AbortSignal },
-    ): Promise<any> {
-        if (!this.transport) throw new Error('Not connected');
-        return this.transport.request(method, params, options);
-    }
-
-    private async sendNotification(method: string, params: any): Promise<void> {
-        if (!this.transport) throw new Error('Not connected');
-        await this.transport.notify(method, params);
-    }
-}
-
-// ─── Transport implementations ────────────────────────────────────────────────
-
-interface MCPTransport {
-    connect(): Promise<void>;
-    disconnect(): Promise<void>;
-    request(method: string, params: any, options?: { timeout?: number; signal?: AbortSignal }): Promise<any>;
-    notify(method: string, params: any): Promise<void>;
-}
-
-// ── Stdio ─────────────────────────────────────────────────────────────────────
-
-class StdioTransport implements MCPTransport {
-    private process: any = null;
-    private requestId = 0;
-    private pendingRequests = new Map<number, { resolve: Function; reject: Function }>();
-
-    constructor(private config: MCPServerConfig) {}
-
-    async connect(): Promise<void> {
-        if (typeof window !== 'undefined') {
-            throw new Error('Stdio transport is not supported in browser environment');
-        }
-
-        const { spawn } = await import('child_process');
-        this.process = spawn(this.config.command!, this.config.args ?? [], {
-            env: { ...process.env, ...this.config.env },
-            stdio: ['pipe', 'pipe', 'pipe'],
-        });
-
-        let buffer = '';
-        this.process.stdout.on('data', (data: Buffer) => {
-            buffer += data.toString();
-            const lines = buffer.split('\n');
-            buffer = lines.pop() ?? '';
-            for (const line of lines) {
-                if (line.trim()) {
-                    try { this.handleMessage(JSON.parse(line)); } catch { /* ignore non-JSON */ }
-                }
-            }
-        });
-
-        this.process.on('error', (error: Error) => {
-            log.error('MCP stdio process error', { error: error.message });
-        });
-    }
-
-    async disconnect(): Promise<void> {
-        if (this.process) {
-            this.process.kill();
-            this.process = null;
-        }
-    }
-
-    async request(
-        method: string,
-        params: any,
-        options?: { timeout?: number; signal?: AbortSignal },
-    ): Promise<any> {
-        const id = ++this.requestId;
-        const message = { jsonrpc: '2.0', id, method, params };
-
-        return new Promise((resolve, reject) => {
-            const timeout = options?.timeout ?? 30000;
-            const timer = setTimeout(() => {
-                this.pendingRequests.delete(id);
-                reject(new Error('Request timeout'));
-            }, timeout);
-
-            options?.signal?.addEventListener('abort', () => {
-                clearTimeout(timer);
-                this.pendingRequests.delete(id);
-                reject(new DOMException('Aborted', 'AbortError'));
-            });
-
-            this.pendingRequests.set(id, {
-                resolve: (result: any) => { clearTimeout(timer); resolve(result); },
-                reject: (error: any) => { clearTimeout(timer); reject(error); },
-            });
-
-            this.process.stdin.write(JSON.stringify(message) + '\n');
-        });
-    }
-
-    async notify(method: string, params: any): Promise<void> {
-        this.process.stdin.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n');
-    }
-
-    private handleMessage(message: any): void {
-        if (message.id !== undefined) {
-            const pending = this.pendingRequests.get(message.id);
-            if (pending) {
-                this.pendingRequests.delete(message.id);
-                if (message.error) {
-                    pending.reject(new Error(message.error.message ?? 'Unknown error'));
-                } else {
-                    pending.resolve(message.result);
-                }
-            }
-        }
-    }
-}
-
-// ── SSE ───────────────────────────────────────────────────────────────────────
-
-class SSETransport implements MCPTransport {
-    private eventSource: EventSource | null = null;
-    private requestId = 0;
-    private pendingRequests = new Map<number, { resolve: Function; reject: Function }>();
-
-    constructor(private config: MCPServerConfig) {}
-
-    async connect(): Promise<void> {
-        if (!this.config.url) throw new Error('SSE transport requires url');
-
-        this.eventSource = new EventSource(this.config.url);
-        this.eventSource.onmessage = (event) => {
-            try { this.handleMessage(JSON.parse(event.data)); } catch { /* ignore */ }
-        };
-        this.eventSource.onerror = () => { log.error('MCP SSE connection error'); };
-
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('Connection timeout')), 10000);
-            this.eventSource!.onopen = () => { clearTimeout(timeout); resolve(); };
-        });
-    }
-
-    async disconnect(): Promise<void> {
-        if (this.eventSource) {
-            this.eventSource.close();
-            this.eventSource = null;
-        }
-    }
-
-    async request(
-        method: string,
-        params: any,
-        options?: { timeout?: number; signal?: AbortSignal },
-    ): Promise<any> {
-        const message = { jsonrpc: '2.0', id: ++this.requestId, method, params };
-        const response = await fetch(this.config.url!, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(message),
-            signal: options?.signal,
-        });
-
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const result = await response.json();
-        if (result.error) throw new Error(result.error.message ?? 'Unknown error');
-        return result.result;
-    }
-
-    async notify(method: string, params: any): Promise<void> {
-        await fetch(this.config.url!, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', method, params }),
-        });
-    }
-
-    private handleMessage(message: any): void {
-        if (message.id !== undefined) {
-            const pending = this.pendingRequests.get(message.id);
-            if (pending) {
-                this.pendingRequests.delete(message.id);
-                if (message.error) {
-                    pending.reject(new Error(message.error.message));
-                } else {
-                    pending.resolve(message.result);
-                }
-            }
-        }
-    }
-}
-
-// ── WebSocket ─────────────────────────────────────────────────────────────────
-
-class WebSocketTransport implements MCPTransport {
-    private ws: WebSocket | null = null;
-    private requestId = 0;
-    private pendingRequests = new Map<number, { resolve: Function; reject: Function }>();
-
-    constructor(private config: MCPServerConfig) {}
-
-    async connect(): Promise<void> {
-        if (!this.config.url) throw new Error('WebSocket transport requires url');
-
-        this.ws = new WebSocket(this.config.url);
-        this.ws.onmessage = (event) => {
-            try { this.handleMessage(JSON.parse(event.data)); } catch { /* ignore */ }
-        };
-        this.ws.onerror = () => { log.error('MCP WebSocket error'); };
-
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('Connection timeout')), 10000);
-            this.ws!.onopen = () => { clearTimeout(timeout); resolve(); };
-        });
-    }
-
-    async disconnect(): Promise<void> {
-        if (this.ws) {
-            this.ws.close();
-            this.ws = null;
-        }
-    }
-
-    async request(
-        method: string,
-        params: any,
-        options?: { timeout?: number; signal?: AbortSignal },
-    ): Promise<any> {
-        const id = ++this.requestId;
-        const message = { jsonrpc: '2.0', id, method, params };
-
-        return new Promise((resolve, reject) => {
-            const timeout = options?.timeout ?? 30000;
-            const timer = setTimeout(() => {
-                this.pendingRequests.delete(id);
-                reject(new Error('Request timeout'));
-            }, timeout);
-
-            options?.signal?.addEventListener('abort', () => {
-                clearTimeout(timer);
-                this.pendingRequests.delete(id);
-                reject(new DOMException('Aborted', 'AbortError'));
-            });
-
-            this.pendingRequests.set(id, {
-                resolve: (result: any) => { clearTimeout(timer); resolve(result); },
-                reject: (error: any) => { clearTimeout(timer); reject(error); },
-            });
-
-            this.ws!.send(JSON.stringify(message));
-        });
-    }
-
-    async notify(method: string, params: any): Promise<void> {
-        this.ws!.send(JSON.stringify({ jsonrpc: '2.0', method, params }));
-    }
-
-    private handleMessage(message: any): void {
-        if (message.id !== undefined) {
-            const pending = this.pendingRequests.get(message.id);
-            if (pending) {
-                this.pendingRequests.delete(message.id);
-                if (message.error) {
-                    pending.reject(new Error(message.error.message));
-                } else {
-                    pending.resolve(message.result);
-                }
-            }
-        }
+    async callTool(name: string, args: Record<string, unknown>, options?: { timeout?: number; signal?: AbortSignal }): Promise<unknown> {
+        if (!this.client) throw new Error('MCP not connected');
+        return this.client.callTool({ name, arguments: args }, undefined, { timeout: options?.timeout ?? this.config.timeout ?? 30000, signal: options?.signal });
     }
 }

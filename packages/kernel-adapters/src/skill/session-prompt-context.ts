@@ -35,7 +35,9 @@ export function resolveSessionSelectedSkills(kernel: Kernel, registry: SessionCa
             const skills: import('@itookit/common').LLMSkill[] = [];
             for (const id of new Set(ids)) {
                 const definition = service.getSkill(id);
-                if (!definition?.enabled || definition.disableModelInvocation || definition.triggerStrategy === 'action') continue;
+                if (!definition?.enabled || definition.disableModelInvocation || definition.triggerStrategy === 'action') {
+                    throw new Error(`Skill is missing, disabled, or unavailable for model invocation: ${id}`);
+                }
                 const wasLoaded = service.getLoadedSkills().some(skill => skill.id === id);
                 const result = await service.loadSkill(id);
                 if (!result.success) throw new Error(result.error ?? `Unable to load Skill: ${id}`);

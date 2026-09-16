@@ -137,6 +137,6 @@ describe('round whose owning host disappeared', () => {
     });
 
     it('does not report a run waiting for human input as interrupted work', () => {
-        expect(roundToProjection(round('r1', 'waiting', undefined, execution), 'r1').assistantMessage).toBeUndefined();
+        expect(roundToProjection(round('r1', 'waiting', undefined, execution), 'r1').assistantMessage).toMatchObject({ status: 'waiting_input' });
     });
 });

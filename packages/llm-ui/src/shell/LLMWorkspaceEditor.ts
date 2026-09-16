@@ -1,3 +1,6 @@
+import { rerunSessionFlow } from '../flows/rerun-flow';
+import { t } from '@itookit/common';
+import { openSessionFlowOutputs } from '../flows/session-output';
 import { promptFlowParameters } from '../components/FlowParameterForm';
 // @file: llm-ui/shell/LLMWorkspaceEditor.ts
 
@@ -138,6 +141,8 @@ export class LLMWorkspaceEditor implements IEditor {
     private fileSearchService!: FileSearchService;
     private ocrService!: OcrService;
     private runAttachment?: RunAttachmentController;
+    private flowRerunAbort?: AbortController;
+    private flowOutputAbort?: AbortController;
     private inputDialogKey?: string;
     private inputDialogAbort?: AbortController;
     private attachmentClosed = false;
@@ -472,6 +477,9 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private handleRunEvent(event: EventEnvelope): void {
+        if (event.type === 'task.interaction.resolved') {
+            void this.restorePrivilegedTaskAttachment().catch(error => Toast.error(String(error)));
+        }
         if (event.type === 'task.succeeded') this.statusIndicator.update('completed');
         else if (event.type === 'task.failed' || event.type === 'task.cancelled') {
             this.statusIndicator.update(event.type === 'task.failed' ? 'failed' : 'idle');
@@ -530,6 +538,20 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     private bindEvents(): void {
+        this.container.querySelector('#llm-btn-flow-rerun')?.addEventListener('click', () => {
+            if (!this.currentSessionId) return;
+            if (this.sessionManager.isGenerating()) { Toast.info(t('flow.rerun.busy')); return; }
+            this.flowRerunAbort?.abort();
+            this.flowRerunAbort = new AbortController();
+            void rerunSessionFlow(this.commandBus, this.flowRerunAbort.signal).catch(error => Toast.error(String(error)));
+        });
+        this.container.querySelector('#llm-btn-flow-output')?.addEventListener('click', () => {
+            if (!this.currentSessionId) return;
+            this.flowRerunAbort?.abort();
+            this.flowOutputAbort?.abort();
+            this.flowOutputAbort = new AbortController();
+            openSessionFlowOutputs(this.commandBus, this.currentSessionId, this.flowOutputAbort.signal);
+        });
         this.eventBinder = new EventBinder(this.container, {
             onToggleSidebar: () => this.hostContext?.toggleSidebar(),
             onToggleHistory: () => this.toggleHistoryView(),
@@ -689,6 +711,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.refreshAgents();
 
+        this.flowRerunAbort?.abort();
+        this.flowOutputAbort?.abort();
         const { sessionId, snapshot, title } = await this.sessionService.loadSession(
             this.options.sessionId!, this.currentTitle
         );
@@ -760,7 +784,7 @@ export class LLMWorkspaceEditor implements IEditor {
         // 从 workflow 创建的新 session：立即运行一次（用 title 作为首条消息）。
         if (autoRunFlow) {
             void this.sendCommand.run({
-                text: title,
+                text: `${title}\n\n${JSON.stringify(autoRunFlow.parameters ?? {}, null, 2)}`,
                 files: [],
                 agentId: 'default',
                 overrides: {
@@ -1035,6 +1059,8 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     async destroy(): Promise<void> {
+        this.flowRerunAbort?.abort();
+        this.flowOutputAbort?.abort();
         this.attachmentClosed = true;
         const attachment = this.runAttachment;
         this.runAttachment = undefined;

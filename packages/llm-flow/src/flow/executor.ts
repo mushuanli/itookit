@@ -136,7 +136,7 @@ export class DurableFlowExecutor {
         while (this.active.size) await Promise.allSettled([...this.active]);
     }
 
-    /** Wait until the persisted scheduler checkpoint contains the supplied Task identities. */
+    /** Wait for scheduled tasks, or the scheduled ancestors of durable spawned tasks. */
     async waitForCheckpoint(sessionId: string, rootTaskId: string, taskIds: string[], timeoutMs = 5_000): Promise<void> {
         const session = await this.options.kernel.openSession(sessionId);
         const deadline = Date.now() + timeoutMs;
@@ -144,6 +144,16 @@ export class DurableFlowExecutor {
             const saved = await session.getShared(`flow.run.${rootTaskId}.scheduler`);
             const checkpoint = saved?.value as SchedulerCheckpoint | undefined;
             const ids = new Set<string>((checkpoint?.instances ?? []).flatMap(([, handles]) => handles));
+            // Spawned tasks are persisted by Kernel, while the scheduler owns their ancestors.
+            const tasks = await session.listTasks();
+            let added = true;
+            while (added) {
+                added = false;
+                for (const task of tasks) {
+                    if (!task.parentTaskId || !ids.has(task.parentTaskId) || ids.has(task.id)) continue;
+                    ids.add(task.id); added = true;
+                }
+            }
             if (taskIds.every(id => ids.has(id))) return;
             await new Promise(resolve => setTimeout(resolve, 25));
         }
@@ -1034,7 +1044,8 @@ export class DurableFlowExecutor {
             })),
             retry: node.retry,
             priority: node.priority ?? task.priority,
-            labels: { flowNodeId: node.id, plugin: node.plugin,
+            labels: { flowNodeId: node.id, flowNodeName: node.name, plugin: node.plugin,
+                ...(typeof (node.config as Record<string, unknown> | undefined)?.agentId === 'string' ? { agentId: (node.config as Record<string, string>).agentId } : {}),
                 ...(node.outputPolicy?.publishToHistory === false ? { flowHistory: 'omit' } : {}) },
             deferStart: task.programKind === 'llm.agent' || task.programKind === 'llm.chat',
         };

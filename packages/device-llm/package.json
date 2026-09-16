@@ -24,6 +24,12 @@
         "import": "./dist/index.mjs",
         "require": "./dist/index.js"
       }
+    },
+    "imports": {
+      "#mcp-stdio": {
+        "browser": "./dist/mcp-stdio-browser.js",
+        "default": "./dist/mcp-stdio.js"
+      }
     }
   },
   "files": [
@@ -60,9 +66,10 @@
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/device-llm#readme",
   "dependencies": {
     "@itookit/common": "workspace:*",
+    "@itookit/ui-common": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
-    "js-yaml": "^4.1.1",
-    "@itookit/ui-common": "workspace:*"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
@@ -73,5 +80,11 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "imports": {
+    "#mcp-stdio": {
+      "browser": "./src/skills/mcp-stdio-browser.ts",
+      "default": "./src/skills/mcp-stdio.ts"
+    }
   }
 }

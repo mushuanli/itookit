@@ -1,3 +1,5 @@
+import { MCPToolAdapter } from '../tool/mcp-tools';
+import { createSkillToolHandlers } from '../skill/tool-handlers';
 import { coordinateSkillEffect, runSessionSkillOperation, invalidateSessionSkillOperations, reopenSessionSkillOperations, closeSessionSkillOperations } from '../skill/operation-queue';
 import { restoreLoadedSkills } from '../skill/restore-loaded-skills';
 import { createUnloadSkillHandler, unloadSkillDefinition, unloadSkillMeta } from '../tool/unload-skill';
@@ -297,11 +299,14 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
         try { source = files && this.options.skillSourceForSession
             ? this.options.skillSourceForSession(files) : this.options.skillSource; }
         catch (error) { return cleanupAfterFailure(error, [() => files?.release(), () => toolDriver.dispose()]); }
+        const mcp = new MCPToolAdapter(this.options.llmDriver);
+        const defaults = createSkillToolHandlers(mcp, nativeShell);
         const skillDriver = new SkillDeviceDriver({
             registry: this.skillDefinitions,
             source,
             readFile: files ? path => files.vfs.readFile(path) : undefined,
-            toolHandlerFactory: this.options.skillToolHandlerFactory,
+            toolHandlerFactory: { create: (skill, binding) =>
+                this.options.skillToolHandlerFactory?.create(skill, binding) ?? defaults.create(skill, binding) },
         });
         skillDriver.setToolService(toolDriver.getService());
         const ttySessions = registerCoreTools(toolDriver, skillDriver.getService(), files?.ttyDriver);
@@ -312,6 +317,7 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
         }
         catch (error) { return cleanupAfterFailure(error, [() => files?.release(), () => toolDriver.dispose(), () => skillDriver.dispose()]); }
         const scope = createScope(toolDriver, skillDriver, ttySessions);
+        scope.prepareTools = ids => mcp.prepare(scope.toolService, ids);
         const dispose = scope.dispose.bind(scope);
         scope.dispose = retryCleanup([() => dispose(), () => files?.release()]);
         try { await this.options.configureSession?.(sessionId, scope); }
@@ -375,7 +381,11 @@ function createEffects(
             const meta = scope.toolService.getToolMeta(request.toolId);
             if (meta?.skillUnloaderArgKey) return scope.toolService;
             if (meta?.skillLoaderArgKey) return tools(context);
-            return runSessionSkillOperation(registry, context.sessionId, () => tools(context));
+            return runSessionSkillOperation(registry, context.sessionId, async () => {
+                const ready = await registry.getForContext(context);
+                await ready.prepareTools?.([request.toolId]);
+                return ready.toolService;
+            });
         }, async (skillId, context) => {
             const service = await skills(context);
             const skill = service.getLoadedSkills().find(item => item.id === skillId);

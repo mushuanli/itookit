@@ -587,8 +587,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 }
 
                 case LLM_IOCTL.MCP_CALL_TOOL: {
-                    const { tool, args, timeout } = arg as { tool: string; args: Record<string, any>; timeout?: number };
-                    return session.connection.callTool(tool, args, { timeout });
+                    const { tool, args, timeout, signal } = arg as { tool: string; args: Record<string, any>; timeout?: number; signal?: AbortSignal };
+                    return session.connection.callTool(tool, args, { timeout, signal });
                 }
 
                 default:

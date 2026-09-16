@@ -1,0 +1,63 @@
+import { expect, it, vi } from 'vitest';
+import { FlowHistory } from '../src/session/flow-history';
+import { roundToProjection } from '../src/persistence/round-log';
+import { buildFlowChildren } from '../src/persistence/projection';
+
+it('streams isolated tasks independently, hides logic, and preserves display after reload', async () => {
+    const emitSession = vi.fn();
+    const state = { appendChildNode: vi.fn(), updateNodeOutput: vi.fn(), updateNodeStatus: vi.fn() };
+    const history = new FlowHistory({ task: { sessionId: 's' }, rootNodeId: 'root', state } as never, { emitSession } as never);
+    let finish!: () => void;
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    function handle(id: string, kind = 'llm.agent') {
+        const task = { id, program: { kind }, labels: { flowHistory: 'omit', dispatchKey: id }, createdAt: 1,
+            status: 'succeeded', output: { message: { role: 'assistant', content: `${id} done` } } };
+        return { status: async () => ({ task }), async *events() {
+            yield { type: 'agent.event', payload: { type: 'stream:content', delta: `${id} partial` } };
+            await gate;
+        } };
+    }
+    const work = Promise.all([history.consume(handle('a') as never), history.consume(handle('b') as never), history.consume(handle('route', 'flow.dispatch') as never)]);
+    await vi.waitFor(() => expect(emitSession.mock.calls.filter(([, e]) => e.type === 'message:updated')).toHaveLength(2));
+    expect(emitSession.mock.calls.filter(([, e]) => e.type === 'message:updated').map(([, e]) => e.payload.messageId)).toEqual(['flow-a', 'flow-b']);
+    finish(); await work;
+    expect(history.interactions.map(item => item.taskId)).toEqual(['a', 'b']);
+    expect(history.interactions.every(item => item.status === 'success' && item.content.includes('done'))).toBe(true);
+    const round = { id: 'r', sessionId: 's', origin: 'user', input: [{ role: 'user', content: 'input' }],
+        output: [{ role: 'assistant', content: 'final' }], status: 'completed', executions: [], historyParentIds: [], createdAt: 1,
+        result: { assistantBlocks: [], toolResults: [], flowInteractions: history.interactions } };
+    const projection = roundToProjection(JSON.parse(JSON.stringify(round)), 'r');
+    expect(buildFlowChildren(projection).map(node => node.data.output)).toEqual(history.interactions.map(item => item.content));
+    expect(round.output).toHaveLength(1);
+});
+
+it('shows requests and responses as separate assistant/user interactions', async () => {
+    const history = new FlowHistory({ task: { sessionId: 's' }, rootNodeId: 'root', state: {
+        appendChildNode() {}, updateNodeOutput() {}, updateNodeStatus() {},
+    } } as never, { emitSession() {} } as never);
+    const task = { id: 'dispatch', program: { kind: 'flow.dispatch' }, createdAt: 1, status: 'succeeded',
+        interactions: { missing: { response: { essay: 'new essay' } } } };
+    await history.consume({ status: async () => ({ task }), async *events() {
+        yield { type: 'task.interaction.requested', payload: { id: 'missing', kind: 'input', prompt: 'Essay?' } };
+        yield { type: 'task.interaction.resolved', payload: { interactionId: 'missing' } };
+    } } as never);
+    expect(history.interactions.map(item => item.role)).toEqual(['assistant', 'user']);
+    expect(history.interactions.map(item => item.content)).toEqual(['Essay?', '{\n  "essay": "new essay"\n}']);
+});
+
+it('retains failed tool identity and separates identical call IDs across tasks', async () => {
+    const { projectTaskInteractions } = await import('../src/persistence/flow-run-projection');
+    const task = { id: 'a', program: { kind: 'llm.agent' }, status: 'failed', createdAt: 1,
+        labels: { flowNodeId: 'check', flowNodeName: 'Check' }, input: {}, interactions: {},
+        state: { skillContexts: [{ skillId: 'review', tools: [{ toolId: 'lookup' }] }], messages: [
+            { role: 'assistant', tool_calls: [{ id: 'call:1', function: { name: 'lookup', arguments: '{}' } }] },
+            { role: 'tool', tool_call_id: 'call:1', content: 'failed' },
+        ] } };
+    const events = [{ occurredAt: 2, type: 'agent.event', payload: { type: 'tool:error',
+        call: { toolId: 'call:1', name: 'lookup', input: {}, error: 'MCP unavailable' } } }];
+    const first = projectTaskInteractions(task as never, events as never).find(item => item.actor?.kind === 'tool')!;
+    const second = projectTaskInteractions({ ...task, id: 'b' } as never, events as never).find(item => item.actor?.kind === 'tool')!;
+    expect(first).toMatchObject({ status: 'failed', content: 'MCP unavailable', actor: { skillIds: ['review'], nodeName: 'Check' } });
+    expect(first.id).not.toBe(second.id);
+    expect(first.id).not.toContain(':');
+});

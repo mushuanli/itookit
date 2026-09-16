@@ -49,3 +49,5 @@ export { createApplicationRuntime } from './runtime/create-application-runtime';
 export type { ApplicationRuntime, ApplicationRuntimeOptions, ApplicationKernelPlatform, ApplicationPlatformServices } from './runtime/create-application-runtime';
 
 export { withWorkspaceScopeCleanup } from './runtime/workspace-scope-cleanup';
+
+export { createFlowCapabilities } from './runtime/flow-capabilities';

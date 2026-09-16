@@ -6,7 +6,7 @@ import { BranchTreeNode } from '../persistence/types';
 import { SessionRegistry } from './session-registry';
 import { log } from '../utils/logger';
 import { RoundLog, roundToProjection } from '../persistence/round-log';
-import { buildToolChildren } from '../persistence/projection';
+import { buildFlowChildren, buildToolChildren } from '../persistence/projection';
 import type {
     PersistedRound,
     RoundManifest,
@@ -415,7 +415,7 @@ function assistantGroup(projection: RoundProjection): SessionGroup {
                 // (a cancelled/failed Round whose placeholder has no output).
                 ...(message.error ? { error: message.error } : {}),
             },
-            children: buildToolChildren(projection),
+            children: [...buildToolChildren(projection), ...buildFlowChildren(projection)],
         },
     };
 }

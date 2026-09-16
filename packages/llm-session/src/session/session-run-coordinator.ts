@@ -152,6 +152,7 @@ export class SessionRunCoordinator {
         const definitions = new FlowDefinitionStore(this.flowStore);
         const revision = await definitions.loadRevision(flow.flowId, flow.revision);
         if (!revision) throw new Error(`Flow revision not found: ${flow.flowId}`);
+        flow.revision = revision.revision;
         const parameterIssues = validateFlowParameters(revision.parameters, flow.parameters);
         if (hasValidationErrors(parameterIssues)) {
             throw new Error(parameterIssues.map(issue => issue.message).join('; '));

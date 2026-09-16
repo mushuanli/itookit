@@ -1,3 +1,4 @@
+import { renderFlowIdentity } from '../history/FlowIdentity';
 // @file: llm-ui/components/templates/NodeTemplates.ts
 
 import { ExecutionNode, SessionGroup } from '@itookit/llm-session';
@@ -145,6 +146,10 @@ export class NodeTemplates {
         icon: string,
         isCollapsed: boolean = false,
     ): string {
+        if (node.messageRole) return `<div class="llm-ui-node__header">
+            ${renderFlowIdentity(node)}
+            <span class="llm-ui-node__status llm-ui-node__status--${node.status}">${escapeHTML(node.status)}</span>
+            <div class="llm-ui-time">${this.formatTime(node.startTime)}</div></div>`;
         const timeStr = this.formatTime(node.startTime);
         const branchHtml = this.renderBranchNav(
             node.data.metaInfo?.siblingIndex ?? 0,

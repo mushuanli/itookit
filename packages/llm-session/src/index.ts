@@ -1,3 +1,4 @@
+import { skillContextResolver } from './session/conversation-run-coordinator';
 import { bindStandaloneFlowNode } from './session/flow-node-binder';
 import { AgentResolver } from './session/agent-resolver';
 export { createSessionDataProjection } from './persistence/session-projection';
@@ -178,6 +179,7 @@ function createDagCommands(
         bindNode: (sessionId, node, defaults) => bindStandaloneFlowNode(node, defaults, sessionId, new AgentResolver(options.agentService, options.resolveSessionSkills)),
         resolveSessionContext: options.resolveSessionContext,
         resolveTools: options.resolveTools,
+        resolveSkillContexts: skillContextResolver({ resolveSkills: (ids, sessionId) => options.resolveSessionSkills?.(sessionId!, ids) ?? Promise.resolve([]), resolveTools: options.resolveTools }),
     });
     dag.register(commandBus);
     return dag;
@@ -199,3 +201,9 @@ export { SharedMemoryStore, type SharedMemoryResource, type SharedMemoryGrant, t
 export { SessionMemoryControls } from './session/session-memory-controls';
 export { MemorySharingControls } from './session/memory-sharing-controls';
 export { TaskMemoryService } from './session/task-memory-service';
+
+export { bindStandaloneFlowNode, type FlowIdentityResolver } from './session/flow-node-binder';
+
+export { buildSkillContexts } from '@itookit/llm-tasks';
+
+export { FlowRunProjection, projectTaskInteractions, type FlowRunProjectionOptions } from './persistence/flow-run-projection';

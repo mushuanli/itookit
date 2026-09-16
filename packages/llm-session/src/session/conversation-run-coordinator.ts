@@ -1,3 +1,5 @@
+import { FlowHistory } from './flow-history';
+import { formatFlowOutput } from '@itookit/common';
 import type {
     AgentEvent,
     Artifact,
@@ -146,7 +148,8 @@ export class ConversationRunCoordinator {
         const handle = submission.root;
         this.active.set(execution.task.sessionId, { root: handle, tasks: submission.tasks });
         let roundStarted = false;
-        const streamedOutput = { output: false };
+        const streamedOutput: { output: boolean; history?: FlowHistory } = { output: false };
+        if (execution.task.input.sendIntent?.execution.kind === 'flow') streamedOutput.history = new FlowHistory(execution, this.options.eventBus);
         const toolCalls: CapturedToolCall[] = [];
         try {
             await this.startRound(execution, location, handle.id);
@@ -158,7 +161,7 @@ export class ConversationRunCoordinator {
             await this.completeRound(execution, output, streamedOutput, toolCalls);
             await execution.finalize();
         } catch (error) {
-            if (roundStarted) await this.failRound(execution, error, toolCalls);
+            if (roundStarted) await this.failRound(execution, error, toolCalls, streamedOutput.history);
             throw error;
         } finally {
             this.active.delete(execution.task.sessionId);
@@ -301,7 +304,7 @@ export class ConversationRunCoordinator {
         getTasks: () => TaskHandle[],
         execution: ConversationExecution,
         parse: (value: unknown) => ChatProgramOutput,
-        streamedOutput: { output: boolean },
+        streamedOutput: { output: boolean; history?: FlowHistory },
         toolCalls: CapturedToolCall[],
     ): Promise<ChatProgramOutput> {
         const consumers = new Map<string, Promise<void>>();
@@ -347,9 +350,10 @@ export class ConversationRunCoordinator {
     private async consumeEvents(
         handle: TaskHandle,
         execution: ConversationExecution,
-        streamedOutput: { output: boolean },
+        streamedOutput: { output: boolean; history?: FlowHistory },
         toolCalls: CapturedToolCall[],
     ): Promise<void> {
+        if (streamedOutput.history) return streamedOutput.history.consume(handle);
         const omit = typeof handle.status === 'function' && (await handle.status()).task.labels?.flowHistory === 'omit';
         for await (const envelope of handle.events()) {
             if (!omit) this.forwardAgentEvent(envelope, execution, streamedOutput, toolCalls);
@@ -359,7 +363,7 @@ export class ConversationRunCoordinator {
     private forwardAgentEvent(
         envelope: EventEnvelope,
         execution: ConversationExecution,
-        streamedOutput: { output: boolean },
+        streamedOutput: { output: boolean; history?: FlowHistory },
         toolCalls: CapturedToolCall[],
     ): void {
         const event = getAgentEvent(envelope);
@@ -379,7 +383,7 @@ export class ConversationRunCoordinator {
         event: AgentEvent,
         sessionId: string,
         rootNodeId: string,
-        streamedOutput: { output: boolean },
+        streamedOutput: { output: boolean; history?: FlowHistory },
     ): void {
         if (event.type === 'stream:content') {
             streamedOutput.output = true;
@@ -446,13 +450,13 @@ export class ConversationRunCoordinator {
     private async completeRound(
         execution: ConversationExecution,
         output: ChatProgramOutput,
-        streamedOutput: { output: boolean },
+        streamedOutput: { output: boolean; history?: FlowHistory },
         toolCalls: CapturedToolCall[],
     ): Promise<void> {
         await execution.log.setAssistantInRound(execution.roundId, {
             assistantMessages: [output.message],
             agentId: execution.config.id,
-            result: roundResult(output, toolCalls),
+            result: { ...roundResult(output, toolCalls), ...(streamedOutput.history ? { flowInteractions: streamedOutput.history.interactions } : {}) },
         });
         projectOutput(this.options.eventBus, execution, output, streamedOutput.output);
     }
@@ -461,6 +465,7 @@ export class ConversationRunCoordinator {
         execution: ConversationExecution,
         error?: unknown,
         toolCalls: CapturedToolCall[] = [],
+        history?: FlowHistory,
     ): Promise<void> {
         const status = execution.task.abortController.signal.aborted
             ? 'cancelled'
@@ -470,7 +475,7 @@ export class ConversationRunCoordinator {
         // transcript must not turn the same Round into an unexplained empty assistant bubble.
         // Started Tool calls are persisted with it so the reloaded transcript keeps the node.
         await execution.log.setConversationStatus(execution.roundId, status, failure,
-            failedToolResult(toolCalls, failure));
+            history ? { ...(failedToolResult(toolCalls, failure) ?? { assistantBlocks: [], toolResults: [] }), flowInteractions: history.interactions } : failedToolResult(toolCalls, failure));
         // A Tool Effect that fails before the tool program settles never emits `tool:*`, so the
         // live execution node created at `tool:running` would stay RUNNING forever. Settle the
         // still-in-flight calls the same way a real tool error would.
@@ -596,6 +601,11 @@ function conversationRound(
         status: 'running',
         createdAt: Date.now(),
         origin: 'user',
+        ...(execution.task.input.sendIntent?.execution.kind === 'flow' ? { flow: {
+            flowId: execution.task.input.sendIntent.execution.flowId,
+            revision: execution.task.input.sendIntent.execution.revision!,
+            parameters: execution.task.input.sendIntent.execution.parameters,
+        } } : {}),
         defaultContextMode: temporary ? 'exclude' : 'include',
         defaultContextScope: 'subtree',
     };
@@ -762,19 +772,7 @@ function parseOutput(value: unknown): ChatProgramOutput {
 }
 
 function parseDagOutput(value: unknown): ChatProgramOutput {
-    const contents = collectArtifactContents(record(value).nodes);
-    return { message: { role: 'assistant', content: contents.join('\n\n') }, usage: {} };
-}
-
-function collectArtifactContents(value: unknown): string[] {
-    if (!value || typeof value !== 'object') return [];
-    if ('content' in value) return [stringify((value as { content: unknown }).content)];
-    if ('message' in value) return collectArtifactContents((value as { message: unknown }).message);
-    return Object.values(value).flatMap(collectArtifactContents);
-}
-
-function stringify(value: unknown): string {
-    return typeof value === 'string' ? value : JSON.stringify(value);
+    return { message: { role: 'assistant', content: formatFlowOutput(value) }, usage: {} };
 }
 
 function record(value: unknown): Record<string, unknown> {

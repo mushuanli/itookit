@@ -1,3 +1,4 @@
+import { renderFlowOutput } from './dag/FlowOutput';
 import { enhanceInputFieldsEditor } from './dag/InputFieldsEditor';
 import { enhanceInvocationEditor } from './dag/InvocationEditor';
 import { openRunPicker } from './dag/RunPicker';
@@ -25,6 +26,7 @@ import { openFlowSettings } from './dag/FlowSettingsDialog';
 import type { EntityOption } from './dag/FlowSettingsDialog';
 
 export interface DagWorkbenchOptions {
+    backLabel?: string;
     commands: ICommandBus;
     onModeChange?: (mode: 'design' | 'run') => void;
     onSelectFlow?: (flowId: string, revision: number) => void;
@@ -531,11 +533,12 @@ export class DagWorkbench {
         if (!snapshot) return this.renderDesign();
         const run = snapshot.root.task;
         this.root.innerHTML = `<section class="dag-workbench" data-mode="run">
-            <header class="dag-toolbar"><button data-run-action="back">${escapeHTML(t('flow.runs.back'))}</button><strong>DAG Run</strong>${snapshot.attachedFromStorage ? `<button data-run-action="resume">${escapeHTML(t('flow.runs.resume'))}</button>` : ''}<span>${escapeHTML(String(run.id))}</span><span data-status="${escapeHTML(run.status)}">${escapeHTML(run.status)}</span><small>${snapshot.usage.tokens} tokens · ${(snapshot.usage.elapsedMs / 1000).toFixed(1)}s</small><button data-run-action="goal">Goal</button><button data-run-action="cancel">Cancel run</button></header>
+            <header class="dag-toolbar"><button data-run-action="back">${escapeHTML(this.options.backLabel ?? t('flow.runs.back'))}</button><strong>DAG Run</strong>${snapshot.attachedFromStorage ? `<button data-run-action="resume">${escapeHTML(t('flow.runs.resume'))}</button>` : ''}<span>${escapeHTML(String(run.id))}</span><span data-status="${escapeHTML(run.status)}">${escapeHTML(run.status)}</span><small>${snapshot.usage.tokens} tokens · ${(snapshot.usage.elapsedMs / 1000).toFixed(1)}s</small><button data-run-action="goal">Goal</button><button data-run-action="cancel">Cancel run</button></header>
             ${snapshot.workspaceFinalization ? `<section class="dag-run-workspace" data-workspace-status="${escapeHTML(snapshot.workspaceFinalization.status)}">${escapeHTML(t(`flow.workspace.${snapshot.workspaceFinalization.status}`))}${snapshot.workspaceFinalization.message ? `<span role="alert">${escapeHTML(snapshot.workspaceFinalization.message)}</span>` : ''}${snapshot.workspaceFinalization.persistenceError ? `<span role="alert">${escapeHTML(t('flow.workspace.persistenceFailed'))}: ${escapeHTML(snapshot.workspaceFinalization.persistenceError)}</span>` : ''}</section>` : ''}
             ${snapshot.goal ? `<section class="dag-run-goal"><strong>${escapeHTML(snapshot.goal.objective || 'Run goal')}</strong><span>${escapeHTML(snapshot.goal.status ?? 'active')}</span>${snapshot.goal.acceptanceCriteria?.length ? `<small>${snapshot.goal.acceptanceCriteria.map(escapeHTML).join(' · ')}</small>` : ''}</section>` : ''}
+            <section class="dag-output"><h3>${escapeHTML(t('flow.output.final'))}</h3>${renderFlowOutput(run.output, true)}</section>
             <div class="dag-run-nodes">${snapshot.taskTree.map(task => {
-                const nodeId = task.labels?.flowNodeId ?? (task.id === run.id ? 'Result' : task.program.kind);
+                const nodeId = task.labels?.dispatchKey ?? task.labels?.flowNodeId ?? (task.id === run.id ? 'Result' : task.program.kind);
                 const iterations = snapshot.iterations[nodeId] ?? 1;
                 const waiting = pendingInteraction({ task });
                 const detached = snapshot.detachedNodes.includes(nodeId);
@@ -549,6 +552,7 @@ export class DagWorkbench {
                     ${task.id !== run.id && !isTerminalRun(task.status) ? `<menu><button data-run-signal="${escapeHTML(task.id)}">Inject</button><button data-run-cancel-task="${escapeHTML(task.id)}">Cancel</button></menu>` : ''}
                     ${task.id !== run.id && isTerminalRun(task.status) ? `<button data-run-retry="${escapeHTML(task.id)}" ${this.retryRequests.get(task.id)?.pending ? 'disabled' : ''}>${escapeHTML(t('flow.retry.title'))}</button><small>${escapeHTML(t('flow.retry.hint'))}</small>` : ''}
                     ${task.id !== run.id && isTerminalRun(task.status) && !isTerminalRun(run.status) ? `<button data-run-retry-downstream="${escapeHTML(task.id)}" ${this.retryRequests.get(retryKey(task.id, true))?.pending ? 'disabled' : ''}>${escapeHTML(t('flow.retry.downstreamTitle'))}</button><small>${escapeHTML(t('flow.retry.downstreamHint'))}</small>` : ''}
+                    ${task.output !== undefined && task.id !== run.id ? `<details class="dag-output" open><summary>${escapeHTML(t('flow.output.node'))}</summary>${renderFlowOutput(task.output)}</details>` : ''}
                     <button data-run-transcript="${escapeHTML(task.id)}">${escapeHTML(t('flow.transcript.title'))}</button>
                     <details><summary>Runtime details</summary><pre>${escapeHTML(JSON.stringify({ wait: task.wait, output: task.output, effects: Object.keys(task.effects ?? {}) }, null, 2))}</pre></details>
                 </article>`;

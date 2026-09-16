@@ -37,6 +37,13 @@
     transition: all var(--llm-transition-normal);
 }
 
+.llm-workspace-titlebar__btn.llm-workspace-titlebar__btn--text {
+    width: auto;
+    padding: 0 8px;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
 .llm-workspace-titlebar__btn:hover {
     background-color: var(--llm-bg-hover);
     color: var(--llm-text-primary);

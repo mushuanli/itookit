@@ -153,6 +153,7 @@ export interface ExecutionOverrides {
  * 执行节点（UI 层表示）
  */
 export interface ExecutionNode {
+    messageRole?: 'user' | 'assistant';
     /** 节点 ID */
     id: string;
 
@@ -462,6 +463,8 @@ export type MessageProjectionEvent =
             messageId: string;
             /** Streaming chunk — text delta appended to field. */
             delta?: string;
+            /** Replace the displayed field after a final structured result. */
+            content?: string;
             /** Which field the chunk belongs to. */
             field?: 'thought' | 'output';
             /** Arbitrary metadata (TTY, HITL, budget, skill, etc). */

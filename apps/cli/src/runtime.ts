@@ -1,8 +1,9 @@
+import { selectFinalResult } from './run-store';
 import { leaseSkewConfig } from './lease-config';
 import { mkdir } from 'node:fs/promises';
 import { memoryPolicyForAgent, grantRunMemory } from './memory-policy';
 import path from 'node:path';
-import type { DagRunSpec, LLMConnection, LLMProvider, ToolDefinition } from '@itookit/common';
+import type { DagRunSpec, LLMConnection, LLMProvider } from '@itookit/common';
 import { parse } from 'yaml';
 import { SessionFileSkillSource, resolveSessionSkillContext } from '@itookit/kernel-adapters';
 import { LLMDeviceDriver } from '@itookit/device-llm';
@@ -24,15 +25,15 @@ import {
 import {
     acquireSessionProcessContext,
     createKernelRuntime,
+    createFlowCapabilities,
     createSessionAttachmentMounts,
     DirectoryMountService,
     SessionFilesService,
     SessionLeaseStore,
     syncSkillsToKernel,
     withWorkspaceScopeCleanup,
-    type HeadlessKernelRuntime,
 } from '@itookit/app-core';
-import { SessionRepository } from '@itookit/llm-session';
+import { FlowRunProjection, SessionRepository } from '@itookit/llm-session';
 import { createVFS, MemoryBackend, type IFileSystem, type VFSFactoryOptions } from '@itookit/vfs-core';
 import { createBashTool, type INativeShell } from '@itookit/tools';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
@@ -56,11 +57,13 @@ const TOOL_ALIASES: Record<string, string> = {
 };
 
 export interface CliRuntime {
+    flowCapabilities: ReturnType<typeof createFlowCapabilities>;
     kernel: Kernel;
     executor: DurableFlowExecutor;
     grants: WorkspaceGrantRegistry;
     /** Session workspace the file tools and shell see (the isolated copy in worktree mode). */
     workspaceRoot: string;
+    syncHistory(tasks?: import('@itookit/durable-kernel').TaskRecord[]): Promise<void>;
     waitForCheckpoint(taskIds: string[]): Promise<void>;
     dispose(): Promise<void>;
 }
@@ -243,11 +246,14 @@ export async function createCliRuntime(
     const { kernel } = core;
     const workspaceManager = cliWorkspaceManager(workflow, shell);
 
+    const flowCapabilities = createFlowCapabilities(core);
     const executor = new DurableFlowExecutor({
         kernel,
         plugins: core.dagPlugins,
         resolveNewRunContext: sessionId => resolveSessionSkillContext(kernel, core.sessions, sessionId, workflow.config.goal),
-        resolveTools: (sessionId, allowed) => resolveTools(core, sessionId, allowed),
+        resolveTools: flowCapabilities.resolveTools,
+        resolveSkillContexts: flowCapabilities.resolveSkillContexts,
+        bindPatchNode: (id, node, defaults) => flowCapabilities.bindNode(id, node as import('@itookit/common').FlowNodeDefinition, defaults as never),
         // A crashed host keeps the Run's scheduler lease until the TTL expires; tests
         // shorten it the same way they shorten the Session lease. The skew budget is the
         // explicit cross-host clock-error constraint for shared-storage deployments.
@@ -255,8 +261,20 @@ export async function createCliRuntime(
         schedulerLeaseSkewMs: skew.schedulerSkewMs,
         ...(workspaceManager ? { workspaceManager: withWorkspaceScopeCleanup(workspaceManager, core) } : {}),
     });
+    const projection = new FlowRunProjection(sessionRepository, kernel);
+    const syncHistory = async (tasks?: import('@itookit/durable-kernel').TaskRecord[]) => {
+        if (!manifest.rootTaskId) return;
+        await projection.sync({ sessionId: manifest.sessionId, rootTaskId: manifest.rootTaskId,
+            input: `${workflow.config.goal}\n\n${JSON.stringify(manifest.flow?.parameters ?? {}, null, 2)}`,
+            ...(manifest.flow ? { flow: { flowId: manifest.flow.definition.id as import('@itookit/common').FlowId,
+                revision: manifest.flow.definition.revision, parameters: manifest.flow.parameters } } : {}),
+            selectResult: output => selectFinalResult(output, workflow.config.result.task, workflow.config.result.output),
+        }, tasks);
+    };
     return {
         kernel,
+        syncHistory,
+        flowCapabilities,
         executor,
         grants,
         workspaceRoot: sessionWorkspaceRoot,
@@ -269,8 +287,11 @@ export async function createCliRuntime(
             const notice = setTimeout(() => { void reportWorkspace(kernel, manifest, true); }, 5_000);
             try { await executor.waitIdle(); } finally { clearTimeout(notice); }
             await kernel.waitIdle();
+            let projectionError: unknown;
+            try { await syncHistory(); } catch (error) { projectionError = error; }
             if (mode === 'execute') await reportWorkspace(kernel, manifest);
             await core.dispose();
+            await llmDriver.dispose();
             await directoryMounts.dispose();
             await sessionFiles.dispose();
             await systemMounts.dispose();
@@ -279,6 +300,7 @@ export async function createCliRuntime(
             clearInterval(leaseHeartbeat);
             await leases.release(lease).catch(() => false);
             await vfs.dispose();
+            if (projectionError) throw projectionError;
         },
     };
 }
@@ -414,19 +436,6 @@ function normalizeTools(tools: string[], access: TaskConfig['workspace_access'])
         : normalized.filter(tool => !['Write', 'Edit', 'Bash'].includes(tool));
     if (allowed.length && !allowed.includes('RequestWorkspaceAccess')) allowed.push('RequestWorkspaceAccess');
     return [...new Set(allowed)];
-}
-
-async function resolveTools(
-    core: HeadlessKernelRuntime,
-    sessionId: string,
-    allowedIds: string[],
-): Promise<{ definitions: ToolDefinition[]; externalIds: string[] }> {
-    const service = (await core.sessions.get(sessionId)).toolService;
-    const allowed = new Set(allowedIds);
-    const definitions = service.getToolDefinitions().filter(definition =>
-        typeof definition.name === 'string' && allowed.has(definition.name));
-    const externalIds = allowedIds.filter(id => service.getToolMeta(id)?.sideEffect !== 'none');
-    return { definitions, externalIds };
 }
 
 async function configureLlm(driver: LLMDeviceDriver, workflow: CompiledWorkflow): Promise<void> {

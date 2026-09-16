@@ -103,6 +103,7 @@ export interface RoundProjection {
         persistedNodeId: string;
         /** Tool invocations executed before the final assistant message. */
         toolCalls?: ToolCallProjection[];
+    flowInteractions?: import('@itookit/common').FlowInteraction[];
         /** Failure reason, rendered by the UI when the node status is failed. */
         error?: string;
     };

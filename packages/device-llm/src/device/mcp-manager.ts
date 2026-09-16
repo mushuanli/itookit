@@ -12,6 +12,7 @@ const MCP_DIR = '/llm/.mcp';
 
 export class MCPManager {
     private _mcpServers: MCPServer[] = [];
+    private connecting = new Map<string, Promise<void>>();
     private _activeMCPConns = new Map<string, MCPServerConnection>();
 
     constructor(
@@ -78,27 +79,25 @@ export class MCPManager {
     // ─── Connection lifecycle ──────────────────────────────────────────────
 
     async connectMCPServer(server: MCPServer): Promise<void> {
-        if (this._activeMCPConns.has(server.id)) return; // already connected
-        const config = this.mcpServerToConfig(server);
-        const conn = new MCPServerConnection(config);
-        await conn.connect();
-        this._activeMCPConns.set(server.id, conn);
+        if (this._activeMCPConns.has(server.id)) return;
+        if (!this.connecting.has(server.id)) {
+            const connection = new MCPServerConnection(this.mcpServerToConfig(server));
+            const pending = connection.connect().then(() => { this._activeMCPConns.set(server.id, connection); })
+                .finally(() => { this.connecting.delete(server.id); });
+            this.connecting.set(server.id, pending);
+        }
+        await this.connecting.get(server.id);
     }
 
     async getOrConnectServer(serverId: string, servers: MCPServer[]): Promise<MCPServerConnection> {
-        let conn = this._activeMCPConns.get(serverId);
-        if (!conn) {
-            const server = servers.find(s => s.id === serverId);
-            if (!server) throw new Error(`MCP server '${serverId}' not configured`);
-            const config = this.mcpServerToConfig(server);
-            conn = new MCPServerConnection(config);
-            await conn.connect();
-            this._activeMCPConns.set(serverId, conn);
-        }
-        return conn;
+        const server = servers.find(item => item.id === serverId);
+        if (!server) throw new Error(`MCP server '${serverId}' not configured`);
+        await this.connectMCPServer(server);
+        return this._activeMCPConns.get(serverId)!;
     }
 
     async disconnectServer(id: string): Promise<void> {
+        await this.connecting.get(id)?.catch(() => {});
         const conn = this._activeMCPConns.get(id);
         if (conn) {
             try { await conn.disconnect(); } catch { /* ignore */ }
@@ -107,6 +106,7 @@ export class MCPManager {
     }
 
     async disconnectAll(): Promise<void> {
+        await Promise.allSettled(this.connecting.values());
         for (const conn of this._activeMCPConns.values()) {
             try { await conn.disconnect(); } catch {}
         }
@@ -135,13 +135,27 @@ export class MCPManager {
 
     /** Convert MCPServer (common) → MCPServerConfig (local transport layer) */
     mcpServerToConfig(server: MCPServer): MCPServerConfig {
-        const transport = server.transport === 'http' ? 'sse' : server.transport as 'stdio' | 'sse';
+        const transport = server.transport;
         return {
             name: server.name,
             transport,
             command: server.command,
-            args: server.args ? server.args.trim().split(/\s+/).filter(Boolean) : undefined,
+            args: parseMcpArgs(server.args),
             url: server.endpoint,
+            cwd: server.cwd, timeout: server.timeout,
+            headers: { ...(server.apiKey ? { Authorization: `Bearer ${server.apiKey}` } : {}), ...server.headers },
         };
     }
+}
+
+/** JSON arrays preserve spaces and quoting without executing a shell. */
+export function parseMcpArgs(value?: string): string[] | undefined {
+    if (!value?.trim()) return undefined;
+    if (value.trim().startsWith('[')) {
+        const args: unknown = JSON.parse(value);
+        if (!Array.isArray(args) || args.some(arg => typeof arg !== 'string')) throw new Error('MCP args must be a JSON string array');
+        return args;
+    }
+    const args = value.match(/(?:[^\s"']+|"[^"\n]*"|'[^'\n]*')+/g) ?? [];
+    return args.map(arg => arg.replace(/"([^"\n]*)"|'([^'\n]*)'/g, (_match, double, single) => double ?? single));
 }

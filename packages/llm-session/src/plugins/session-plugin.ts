@@ -11,6 +11,8 @@ export const SessionCommand = {
     Bind: 'session.bind',
     Unbind: 'session.unbind',
     CreateFromFlow: 'session.create-from-flow',
+    FlowRerunContext: 'session.flow-rerun-context',
+    FlowRerun: 'session.flow-rerun',
     GetSnapshot: 'session.get-snapshot',
     GetSessions: 'session.get-sessions',
     GetCurrentId: 'session.get-current-id',
@@ -67,6 +69,12 @@ export function createSessionPlugin(sessionManager: SessionManager): ILLMPlugin 
                     parameters as Record<string, import('@itookit/common').JsonValue> | undefined,
                     title ?? 'Workflow',
                 );
+            });
+
+            ctx.commands.register(SessionCommand.FlowRerunContext, () => sm.getFlowRerunContext());
+            ctx.commands.register(SessionCommand.FlowRerun, args => {
+                const { parameters, sourceRoundId } = args as { parameters: Record<string, import('@itookit/common').JsonValue>; sourceRoundId: string };
+                return sm.rerunFlow(parameters, sourceRoundId);
             });
 
             ctx.commands.register(SessionCommand.GetSnapshot, async () => sm.getSnapshot());

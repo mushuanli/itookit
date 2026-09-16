@@ -1,5 +1,9 @@
 # llm-flow 的 Flow / Node 定义与 Harness 覆盖分析
 
+2026-09-16 补充：已接通 CLI/UI 的 MCP/tools/Skill 装配、隔离任务 Skill 上下文与批准恢复，并新增会话「流程输出」入口。当前能力、边界及验证见 [Flow 能力与输出](flow-capabilities-and-output.md)。下文核查记录保留当时的测试范围。
+
+构建产物及真实模型的复验见 [CLI 能力与持久化实测](flow-cli-capabilities-verification.md)：修复 MCP stdio 的 ESM require 问题；CLI 已保存 Kernel 交互和结果，并通过幂等投影生成聊天 History Round，包含节点、工具、Skill 来源及用户交互身份。
+
 > 核查日期：2026-09-15。依据当前工作树源码与包内测试；这是现状分析，不是新增功能承诺。
 > 范围：`packages/llm-flow`，以及它使用的 `llm-common` 类型。规范依据为 [Harness Core](durable-harness-core.md)、[Protocol](durable-harness-protocol.md)、[Storage](durable-harness-storage.md)、[Resources](durable-harness-resources.md)、[Cache](durable-harness-cache.md)；跨包验收边界见 [Durable 证据映射](durable-harness-evidence.md)。
 

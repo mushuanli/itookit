@@ -5,7 +5,8 @@ export default defineConfig({
     format: ['esm'],
     clean: true,
     sourcemap: true,
-    banner: { js: '#!/usr/bin/env node' },
+    // Bundled CJS dependencies (including MCP stdio's cross-spawn) need Node require in ESM chunks.
+    banner: { js: '#!/usr/bin/env node\nimport { createRequire as __cliCreateRequire } from "node:module";\nconst require = __cliCreateRequire(import.meta.url);' },
     noExternal: [/^@itookit\//],
     external: ['better-sqlite3', 'node-pty'],
 });

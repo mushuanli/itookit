@@ -15,6 +15,8 @@ import type { RoundProjection, ToolCallProjection } from './round-types';
  * transcript never looks like a successful empty answer.
  */
 export function roundStatusToNodeStatus(status: Round['status']): NodeStatus {
+    if (status === 'running' || status === 'pending') return 'running';
+    if (status === 'waiting') return 'waiting_input';
     if (status === 'failed') return 'failed';
     if (status === 'cancelled') return 'aborted';
     return 'success';
@@ -67,4 +69,16 @@ export function buildToolChildren(projection: RoundProjection): ExecutionNode[] 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Rebuild display-only workflow interactions without adding model history messages. */
+export function flowInteractionNode(entry: import('@itookit/common').FlowInteraction, parentId: string): ExecutionNode {
+    return { id: entry.id, parentId, messageRole: entry.role, executorId: entry.taskId, executorType: 'composite',
+        name: entry.name, status: entry.status, startTime: entry.createdAt,
+        data: { input: entry.input, output: entry.content, error: entry.error, metaInfo: { flowInteraction: true, actor: entry.actor } }, children: [] };
+}
+
+export function buildFlowChildren(projection: RoundProjection): ExecutionNode[] {
+    return (projection.assistantMessage?.flowInteractions ?? []).map(entry =>
+        flowInteractionNode(entry, projection.assistantMessage!.persistedNodeId));
 }

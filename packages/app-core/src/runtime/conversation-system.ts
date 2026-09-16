@@ -1,3 +1,4 @@
+import { createFlowCapabilities } from './flow-capabilities';
 import { initializeConversationSystem, type CommandBus, type FlowEngine, type SessionManager, type SessionRepository, type VFSAgentService } from '@itookit/llm-session';
 import { resolveSessionSkillContext, resolveSessionSelectedSkills } from '@itookit/kernel-adapters';
 import type { IVFSManager } from '@itookit/vfs-core';
@@ -42,17 +43,7 @@ export async function createConversationSystem(
         canWriteSession: options.ensureWritable,
         resolveSessionContext: (sessionId, userMessage) => resolveSessionSkillContext(kernel.kernel, kernel.sessions, sessionId, userMessage),
         resolveSessionSkills: (sessionId, ids) => resolveSessionSelectedSkills(kernel.kernel, kernel.sessions, sessionId, ids),
-        resolveTools: async (sessionId, allowedIds) => {
-            const tools = (await kernel.sessions.get(sessionId)).toolService;
-            const allowed = new Set(allowedIds);
-            return {
-                definitions: tools.getToolDefinitions().filter(definition => {
-                    const name = definition.function?.name ?? definition.name;
-                    return Boolean(name && allowed.has(name));
-                }),
-                externalIds: allowedIds.filter(id => tools.getToolMeta(id)?.sideEffect === 'external'),
-            };
-        },
+        resolveTools: createFlowCapabilities(kernel).resolveTools,
     });
 }
 

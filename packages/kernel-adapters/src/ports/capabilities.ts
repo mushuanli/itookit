@@ -34,6 +34,7 @@ export interface SkillToolHandlerFactory {
 }
 
 export interface SessionCapabilityScope {
+    prepareTools?(ids: string[]): Promise<void>;
     readonly toolService: import('@itookit/common').IToolService;
     readonly skillService: ISkillService;
     dispose(): Promise<void>;

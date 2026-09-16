@@ -101,6 +101,11 @@ export class StreamController {
     // 内容更新
     // ================================================================
 
+    replaceContent(nodeId: string, content: string): void {
+        this.renderer.getEditor(nodeId)?.setContent(content);
+        this.dirtyNodes.add(nodeId);
+    }
+
     updateContent(nodeId: string, chunk: string, field: 'thought' | 'output'): void {
         const el = this.renderer.getNode(nodeId);
         if (!el) return;

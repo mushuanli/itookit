@@ -6,8 +6,9 @@ import {
     type LLMSkill,
 } from '@itookit/common';
 import type { ExecutionTask, ExecutorConfig } from '../core/types';
-import { log } from '../utils/logger';
 import { AgentResolver } from './agent-resolver';
+
+export type FlowIdentityResolver = Pick<AgentResolver, 'resolveExact' | 'getSkills' | 'getSystemPrompt'>;
 
 interface BindingSetup {
     config: ExecutorConfig;
@@ -20,7 +21,7 @@ interface BindingContext {
     task: Pick<ExecutionTask, 'sessionId'> & { input: { text: string } };
     standalone?: boolean;
     setup: BindingSetup;
-    agents: AgentResolver;
+    agents: FlowIdentityResolver;
 }
 
 interface AgentSource {
@@ -41,7 +42,7 @@ export async function bindFlowNode(
     snapshot: ContextSnapshot,
     task: ExecutionTask,
     setup: BindingSetup,
-    agents: AgentResolver,
+    agents: FlowIdentityResolver,
 ) {
     if (record(node.config).invocationContext === 'isolated') {
         return bindIsolatedInvocation(node, flowDefaultsValue, task.sessionId, agents);
@@ -59,7 +60,7 @@ export async function bindFlowNode(
 
 /** Resolve identities without inventing a conversation Round or inherited chat history. */
 export async function bindStandaloneFlowNode(
-    node: FlowNodeDefinition, defaults: FlowNodeDefinition['config'] | undefined, sessionId: string, agents: AgentResolver,
+    node: FlowNodeDefinition, defaults: FlowNodeDefinition['config'] | undefined, sessionId: string, agents: FlowIdentityResolver,
 ) {
     if (record(node.config).invocationContext === 'isolated') return bindIsolatedInvocation(node, defaults, sessionId, agents);
     if (node.plugin !== 'builtin.agent') return {};
@@ -78,7 +79,7 @@ export async function bindStandaloneFlowNode(
 
 /** Resolve the target identity without importing the caller's conversational context. */
 async function bindIsolatedInvocation(node: FlowNodeDefinition, _defaults: FlowNodeDefinition['config'] | undefined,
-    sessionId: string, agents: AgentResolver) {
+    sessionId: string, agents: FlowIdentityResolver) {
     if (node.plugin !== 'builtin.agent') return {};
     const config = { ...record(node.config), invocationContext: undefined, messages: undefined, historyPolicy: 'none' };
     const agentId = stringValue(record(node.config).agentId);
@@ -130,12 +131,11 @@ async function resolveIdentity(
     return { referencedAgent, skills: skills.filter(skill => skill.enabled && !skill.disableModelInvocation && skill.triggerStrategy !== 'action') };
 }
 
-async function resolveAgent(id: string, agents: AgentResolver): Promise<ExecutorConfig | undefined> {
+async function resolveAgent(id: string, agents: FlowIdentityResolver): Promise<ExecutorConfig | undefined> {
     try {
         return await agents.resolveExact(id);
     } catch (error) {
-        log.warn('Flow node agentId resolution failed, falling back to session agent', { agentId: id, error });
-        return undefined;
+        throw new Error(`Flow agent reference cannot be resolved: ${id}`, { cause: error });
     }
 }
 
@@ -193,15 +193,16 @@ async function resolvePromptSegments(
 
 async function resolvePromptReference(
     id: string | undefined,
-    agents: AgentResolver,
+    agents: FlowIdentityResolver,
     owner: string,
 ): Promise<string[]> {
     if (!id) return [];
     try {
-        return (await agents.getSystemPrompt(id))?.content ?? [];
+        const prompt = await agents.getSystemPrompt(id);
+        if (!prompt) throw new Error(`System prompt not found: ${id}`);
+        return prompt.content;
     } catch (error) {
-        log.warn(`${owner} systemPromptId resolution failed`, { systemPromptId: id, error });
-        return [];
+        throw new Error(`${owner} system prompt cannot be resolved: ${id}`, { cause: error });
     }
 }
 
