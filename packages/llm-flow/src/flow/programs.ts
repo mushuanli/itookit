@@ -95,6 +95,7 @@ export class FlowHumanProgram implements DurableTaskProgram<FlowHumanState, Flow
 }
 
 export interface FlowAggregateInput {
+    variables?: JsonValue;
     awaitingSchedule?: boolean;
     dependencies: Array<{ taskId: string; nodeId: string; tolerated?: boolean; collectOutput?: boolean }>;
 }
@@ -135,6 +136,7 @@ export class FlowAggregateProgram implements DurableTaskProgram<FlowAggregateSta
                 return { state: next, next: { type: 'wait', on: { type: 'signal' } } };
             }
             next.dependencies = (event.signal.payload as unknown as FlowAggregateInput).dependencies;
+            next.variables = (event.signal.payload as unknown as FlowAggregateInput).variables;
             next.awaitingSchedule = false;
         }
         if (event.type === 'task-exited') {
@@ -153,7 +155,7 @@ export class FlowAggregateProgram implements DurableTaskProgram<FlowAggregateSta
         }
         const ready = next.dependencies.every(item => next.resolved.includes(item.taskId));
         if (!ready) return { state: next, next: dependencyWait(next.dependencies) };
-        const output: Record<string, JsonValue> = { nodes: next.outputs };
+        const output: Record<string, JsonValue> = { nodes: next.outputs, ...(next.variables ? { variables: next.variables } : {}) };
         if (Object.keys(next.failures).length > 0) output.failures = next.failures;
         return { state: next, next: { type: 'complete', output } };
     }

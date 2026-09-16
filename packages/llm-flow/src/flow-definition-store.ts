@@ -163,21 +163,7 @@ export class FlowDefinitionStore {
 
     async createRevision(draft: FlowDraft): Promise<FlowRevision> {
         const latest = await this.loadRevision(String(draft.id));
-        const withoutDigest = {
-            id: draft.id,
-            revision: (latest?.revision ?? 0) + 1,
-            name: draft.name,
-            nodes: structuredClone(draft.nodes),
-            edges: structuredClone(draft.edges),
-            parameters: structuredClone(draft.parameters ?? []),
-            ...cloneConnections(draft),
-            ...(draft.systemPrompt ? { systemPrompt: structuredClone(draft.systemPrompt) } : {}),
-            ...(draft.toolIds ? { toolIds: structuredClone(draft.toolIds) } : {}),
-            ...(draft.defaults ? { defaults: structuredClone(draft.defaults) } : {}),
-            ...(draft.runPolicy ? { runPolicy: structuredClone(draft.runPolicy) } : {}),
-            createdAt: Date.now(),
-        };
-        return this.saveRevision({ ...withoutDigest, digest: flowRevisionDigest(withoutDigest) });
+        return this.saveRevision(createFlowRevision(draft, (latest?.revision ?? 0) + 1));
     }
 
     /**
@@ -196,6 +182,7 @@ export class FlowDefinitionStore {
             edges: existing?.edges ?? [],
             layout: existing?.layout ?? {},
             parameters: existing?.parameters ?? [],
+            ...(existing?.variables ? { variables: structuredClone(existing.variables) } : {}),
             ...cloneConnections(existing ?? {}),
             ...(existing?.systemPrompt ? { systemPrompt: structuredClone(existing.systemPrompt) } : {}),
             ...(existing?.toolIds ? { toolIds: structuredClone(existing.toolIds) } : {}),
@@ -282,4 +269,24 @@ export function generateFlowId(name: string): string {
         ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     const suffix = value.replace(/[^a-z0-9-]/g, '').slice(0, 8);
     return `${slug}-${suffix}`;
+}
+
+/** Share the complete draft-to-revision projection across validation and publication. */
+export function createFlowRevision(draft: FlowDraft, revision: number, createdAt = Date.now()): FlowRevision {
+    const withoutDigest = {
+        id: draft.id,
+        revision,
+        name: draft.name,
+        nodes: structuredClone(draft.nodes),
+        edges: structuredClone(draft.edges),
+        parameters: structuredClone(draft.parameters ?? []),
+        ...(draft.variables ? { variables: structuredClone(draft.variables) } : {}),
+        ...cloneConnections(draft),
+        ...(draft.systemPrompt ? { systemPrompt: structuredClone(draft.systemPrompt) } : {}),
+        ...(draft.toolIds ? { toolIds: structuredClone(draft.toolIds) } : {}),
+        ...(draft.defaults ? { defaults: structuredClone(draft.defaults) } : {}),
+        ...(draft.runPolicy ? { runPolicy: structuredClone(draft.runPolicy) } : {}),
+        createdAt,
+    };
+    return { ...withoutDigest, digest: flowRevisionDigest(withoutDigest) };
 }

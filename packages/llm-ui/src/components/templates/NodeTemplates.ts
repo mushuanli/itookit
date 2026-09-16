@@ -2,7 +2,7 @@ import { renderFlowIdentity } from '../history/FlowIdentity';
 // @file: llm-ui/components/templates/NodeTemplates.ts
 
 import { ExecutionNode, SessionGroup } from '@itookit/llm-session';
-import { escapeHTML, type Citation, ACTION_ICONS } from '@itookit/common';
+import { escapeHTML, type Citation, ACTION_ICONS, t } from '@itookit/common';
 import { LayoutTemplates } from './LayoutTemplates';
 
 export class NodeTemplates {
@@ -140,6 +140,14 @@ export class NodeTemplates {
         </div>`;
     }
 
+    static renderReadActions(collapsed = false): string {
+        return `<div class="llm-ui-actions">
+            <button type="button" class="llm-icon-btn" data-action="copy" title="${t('action.copy')}" aria-label="${t('action.copy')}">${ACTION_ICONS.copy}</button>
+            <button type="button" class="llm-icon-btn" data-action="collapse" title="${t('flow.history.toggle')}" aria-label="${t('flow.history.toggle')}" aria-expanded="${!collapsed}">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">${collapsed ? LayoutTemplates.chevronDown() : LayoutTemplates.chevronUp()}</svg>
+            </button></div>`;
+    }
+
     static renderAgentHeader(
         node: ExecutionNode,
         preview: string,
@@ -149,7 +157,7 @@ export class NodeTemplates {
         if (node.messageRole) return `<div class="llm-ui-node__header">
             ${renderFlowIdentity(node)}
             <span class="llm-ui-node__status llm-ui-node__status--${node.status}">${escapeHTML(node.status)}</span>
-            <div class="llm-ui-time">${this.formatTime(node.startTime)}</div></div>`;
+            <div class="llm-ui-time">${this.formatTime(node.startTime)}</div>${this.renderReadActions(isCollapsed)}</div>`;
         const timeStr = this.formatTime(node.startTime);
         const branchHtml = this.renderBranchNav(
             node.data.metaInfo?.siblingIndex ?? 0,

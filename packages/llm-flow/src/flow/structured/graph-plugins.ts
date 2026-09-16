@@ -8,6 +8,7 @@ export function splitGraphPlugins(agent: DagPluginManifest): DagPlugin[] {
             selectionOrder: { type: 'string', enum: ['missing-first', 'declared'] } },
             { mode: 'multicast', maxConcurrency: 4, context: { history: 'none' }, requireNoHistory: true }),
         checkManifest(agent),
+        revisionManifest(agent),
         manifest('builtin.aggregate', '2.0.0', 'Keep results by type', { strategy: { type: 'string', enum: ['latest', 'append'] },
             reducer: { type: 'string' }, failure: { type: 'string', enum: ['fail', 'partial'] }, projection: { type: 'object' }, initialResults: { type: 'object' } }, { strategy: 'latest' }),
         manifest('builtin.judge', '1.0.0', 'Stop or repeat', { maxRounds: { type: 'integer' }, threshold: { type: 'number' },
@@ -18,7 +19,7 @@ export function splitGraphPlugins(agent: DagPluginManifest): DagPlugin[] {
         node: { summarize: config => JSON.stringify(config) }, inspector: {} }) }));
 }
 function manifest(id: string, version: string, title: string, properties: Record<string, JsonValue>, defaults: Record<string, JsonValue>): DagPluginManifest {
-    return { id, version, title, authoring: { scopeRole: id.split('.').pop() as 'route' | 'check' | 'aggregate' | 'judge', invocation: id === 'builtin.route' || id === 'builtin.check' }, kind: id.split('.').pop()!, category: 'Review',
+    return { id, version, title, authoring: { scopeRole: id.split('.').pop() as 'route' | 'check' | 'aggregate' | 'judge' | 'revise', invocation: id === 'builtin.route' || id === 'builtin.check' || id === 'builtin.revise' }, kind: id.split('.').pop()!, category: 'Review',
         configSchema: { type: 'object', properties, ...(id === 'builtin.judge' ? { advancedProperties: ['until', 'revision'] } : {}) }, defaultConfig: defaults,
         inputs: [{ name: 'input', cardinality: id === 'builtin.aggregate' ? 'many' : 'one', required: false, order: 0 }],
         outputs: [{ name: 'result', required: true, order: 0 },
@@ -50,4 +51,12 @@ function conditionSchema(): JsonValue {
         value: { type: 'string' }, operator: { type: 'string', enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] },
         expected: {}, all: { type: 'array' }, any: { type: 'array' },
     } };
+}
+
+function revisionManifest(agent: DagPluginManifest): DagPluginManifest {
+    const value = checkManifest(agent);
+    return { ...value, id: 'builtin.revise', kind: 'revise', title: 'Revise inputs',
+        authoring: { scopeRole: 'revise', invocation: true },
+        configSchema: { ...object(value.configSchema), properties: { ...object(object(value.configSchema).properties), fields: { type: 'object' } } },
+        defaultConfig: { fields: {}, context: { history: 'none' } } };
 }

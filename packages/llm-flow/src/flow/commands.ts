@@ -12,7 +12,7 @@ import type {
     ToolDefinition,
 } from '@itookit/common';
 import type { Kernel, SessionHandle, TaskRecord, TaskSnapshot } from '@itookit/durable-kernel';
-import type { FlowDefinitionStore } from '../flow-definition-store';
+import { createFlowRevision, type FlowDefinitionStore } from '../flow-definition-store';
 import { submitRun } from '../run-submission';
 import { expandDispatchDraft } from './structured/expand';
 import { flowToDag, type FlowNodeBinder } from './to-dag';
@@ -44,6 +44,7 @@ export interface DagCommandServiceOptions {
 export interface FlowRunSummary { taskId: string; sessionId: string; name: string; status: string; createdAt: number; }
 
 export interface DurableFlowSnapshot {
+    variables?: import('./variables').VariableCheckpoint;
     workspaceFinalization?: WorkspaceFinalization;
     attachedFromStorage?: boolean;
     root: TaskSnapshot;
@@ -214,7 +215,9 @@ export class DagCommandService {
         const savedGoal = await session.getShared(`flow.run.${taskId}.goal`);
         if (savedGoal) handle.goal = savedGoal.value as unknown as FlowRunGoal;
         const savedWorkspace = await session.getShared(workspaceFinalizationKey(taskId));
+        const scheduler = (await session.getShared(`flow.run.${taskId}.scheduler`))?.value as unknown as import('./scheduler-checkpoint').SchedulerCheckpoint | undefined;
         return {
+            variables: scheduler?.variables,
             workspaceFinalization: handle.workspaceFinalization ?? savedWorkspace?.value as unknown as WorkspaceFinalization | undefined,
             attachedFromStorage: handle.attachedFromStorage,
             root: await handle.root.status(),
@@ -344,22 +347,7 @@ async function saveDraft(
 }
 
 function validateDraft(draft: FlowDraft, plugins: DagPluginCatalog) {
-    const revision = {
-        id: draft.id,
-        revision: draft.baseRevision ?? 0,
-        name: draft.name,
-        nodes: draft.nodes,
-        edges: draft.edges,
-        connections: draft.connections,
-        defaultConnection: draft.defaultConnection,
-        systemPrompt: draft.systemPrompt,
-        toolIds: draft.toolIds,
-        defaults: draft.defaults,
-        parameters: draft.parameters,
-        runPolicy: draft.runPolicy,
-        createdAt: draft.updatedAt,
-        digest: '',
-    };
+    const revision = createFlowRevision(draft, draft.baseRevision ?? 0, draft.updatedAt);
     const validationIssues = validateFlowRevision(revision, plugins);
     return { valid: !hasValidationErrors(validationIssues), validationIssues };
 }

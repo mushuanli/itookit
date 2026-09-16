@@ -66,8 +66,8 @@ export function createRunCatalog(source: DagPluginCatalog, nodes: DagNodeDefinit
 
 function dispatchTemplates(node: DagNodeDefinition): DagNodeDefinition[] {
     if (node.plugin !== 'builtin.route' || node.pluginVersion !== '2.0.0') return [];
-    const config = node.config as { branches?: { target: DagNodeDefinition }[] };
-    return (config?.branches ?? []).map(branch => {
+    const config = node.config as { branches?: { target: DagNodeDefinition }[]; revision?: { invocation?: { target: DagNodeDefinition } } };
+    return [...(config?.branches ?? []), ...(config.revision?.invocation ? [config.revision.invocation] : [])].map(branch => {
         if (!branch.target || branch.target.plugin === 'builtin.flow'
             || (branch.target.plugin === 'builtin.route' && branch.target.pluginVersion === '2.0.0')) {
             throw new Error('Invalid or nested dispatch target');

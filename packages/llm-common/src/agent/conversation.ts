@@ -88,6 +88,8 @@ export interface FlowActor {
 }
 
 export interface FlowInteraction {
+    parallelGroup?: string;
+    requests?: Array<Omit<import('./agent-event').AgentEventLlmRequest, 'type'>>;
     actor?: FlowActor;
     input?: unknown;
     id: string;
@@ -96,6 +98,8 @@ export interface FlowInteraction {
     role: 'user' | 'assistant';
     status: 'running' | 'waiting_input' | 'success' | 'failed' | 'aborted';
     content: string;
+    /** Model thinking for display only; kept separate from node output. */
+    thinking?: string;
     createdAt: number;
     error?: string;
 }

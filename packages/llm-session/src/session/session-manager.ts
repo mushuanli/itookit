@@ -1,3 +1,5 @@
+import { restoreFlowHistory } from '../persistence/restore-flow-history';
+import { flowBranchExecutions } from './flow-branches';
 import { FlowRerunService } from './flow-rerun';
 // @file: llm-conversation/session/session-manager.ts
 
@@ -88,7 +90,7 @@ export class SessionManager implements ISession, SessionQuery {
         }
     ) {
         this.canWriteSession = options.canWriteSession;
-        this.registry = new SessionRegistry(engine);
+        this.registry = new SessionRegistry(engine, round => restoreFlowHistory(options.kernel, round));
         this.agentResolver = new AgentResolver(agentService, options.resolveSessionSkills);
         const attachments = new AttachmentProcessor(engine);
 
@@ -129,7 +131,7 @@ export class SessionManager implements ISession, SessionQuery {
         );
 
         this.roundOps = new RoundOperations(this.registry, this.runs);
-        this.flowRerun = new FlowRerunService(this.registry, this.runs, options.flowStore);
+        this.flowRerun = new FlowRerunService(this.registry, this.runs, options.flowStore, options.dagPlugins);
         this.branchService = new BranchService(this.registry);
     }
 
@@ -224,16 +226,21 @@ export class SessionManager implements ISession, SessionQuery {
         this.registry.unbindSession();
     }
 
+    getFlowBranchExecutions(sessionId: string) {
+        return flowBranchExecutions(this.registry.engine, sessionId);
+    }
+
     getFlowRerunContext() { return this.flowRerun.context(); }
 
-    async rerunFlow(parameters: Record<string, JsonValue>, sourceRoundId: string) {
+    async rerunFlow(parameters: Record<string, JsonValue>, sourceRoundId: string | null, expectedSessionId?: string, expectedDefinitionKey?: string) {
         const sessionId = this.registry.ensureBound().sessionId;
         if (this.canWriteSession && !await this.canWriteSession(sessionId)) {
             throw new ConversationError(ConversationErrorCode.SESSION_INVALID,
                 'Session is owned by another host; this host can only read it');
         }
         if (this.registry.ensureBound().sessionId !== sessionId) throw new Error('Session changed; reopen the rerun form');
-        return this.flowRerun.run(parameters, sourceRoundId);
+        if (expectedSessionId && expectedSessionId !== sessionId) throw new Error('Session changed; reopen the rerun form');
+        return this.flowRerun.run(parameters, sourceRoundId, expectedDefinitionKey);
     }
 
     /** Create a fresh session instance bound to a workflow run (records flow + parameters). */

@@ -7,7 +7,8 @@ export interface PreparedBranch extends DispatchBranch {
     instructions: string[];
 }
 
-export interface DispatchInput extends Omit<DispatchConfig, 'branches'> {
+export interface DispatchInput extends Omit<DispatchConfig, 'branches' | 'revision'> {
+    revision?: Omit<NonNullable<DispatchConfig['revision']>, 'invocation'> & { invocation?: PreparedBranch };
     invocationNamespace: string;
     branches: PreparedBranch[];
     values: Record<string, JsonValue>;
@@ -23,7 +24,7 @@ export interface ResultSlot {
 
 export interface DispatchState extends DispatchInput {
     summary?: JsonValue;
-    phase: 'dependencies' | 'dispatch' | 'revision';
+    phase: 'dependencies' | 'dispatch' | 'revision' | 'revision-task';
     round: number;
     dependencyOutputs: Record<string, JsonValue>;
     resolvedDependencyIds: string[];
@@ -36,4 +37,6 @@ export interface DispatchState extends DispatchInput {
     revisionSequence: number;
     revisionValues: Record<string, JsonValue>;
     consumedTokens: number;
+    variableChanges?: Array<{ taskId: string; nodeId: string; round: number; updates: Record<string, JsonValue> }>;
+    revisions?: Array<{ taskId: string; round: number; inputRevision: string; values: Record<string, JsonValue> }>;
 }

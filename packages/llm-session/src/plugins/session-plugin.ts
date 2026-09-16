@@ -11,6 +11,7 @@ export const SessionCommand = {
     Bind: 'session.bind',
     Unbind: 'session.unbind',
     CreateFromFlow: 'session.create-from-flow',
+    FlowBranchExecutions: 'session.flow-branch-executions',
     FlowRerunContext: 'session.flow-rerun-context',
     FlowRerun: 'session.flow-rerun',
     GetSnapshot: 'session.get-snapshot',
@@ -71,10 +72,11 @@ export function createSessionPlugin(sessionManager: SessionManager): ILLMPlugin 
                 );
             });
 
+            ctx.commands.register(SessionCommand.FlowBranchExecutions, args => sm.getFlowBranchExecutions((args as { sessionId: string }).sessionId));
             ctx.commands.register(SessionCommand.FlowRerunContext, () => sm.getFlowRerunContext());
             ctx.commands.register(SessionCommand.FlowRerun, args => {
-                const { parameters, sourceRoundId } = args as { parameters: Record<string, import('@itookit/common').JsonValue>; sourceRoundId: string };
-                return sm.rerunFlow(parameters, sourceRoundId);
+                const { parameters, sourceRoundId, sessionId, definitionKey } = args as { parameters: Record<string, import('@itookit/common').JsonValue>; sourceRoundId: string | null; sessionId?: string; definitionKey?: string };
+                return sm.rerunFlow(parameters, sourceRoundId, sessionId, definitionKey);
             });
 
             ctx.commands.register(SessionCommand.GetSnapshot, async () => sm.getSnapshot());

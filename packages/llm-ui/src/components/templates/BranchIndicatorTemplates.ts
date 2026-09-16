@@ -1,6 +1,6 @@
 // @file: llm-ui/components/templates/BranchIndicatorTemplates.ts
 
-import { escapeHTML } from '@itookit/common';
+import { escapeHTML, ACTION_ICONS, t } from '@itookit/common';
 import { BranchItem } from '../../domain/types';
 
 export const BranchIndicatorTemplates = {
@@ -47,6 +47,9 @@ export const BranchIndicatorTemplates = {
                 <span class="llm-branch-dropdown__icon">${b.isCurrent ? '●' : '○'}</span>
                 <span class="llm-branch-dropdown__name">${escapeHTML(b.name)}</span>
                 ${b.isCurrent ? '<span class="llm-branch-dropdown__badge">current</span>' : ''}
+                <button type="button" class="llm-branch-dropdown__delete"
+                    title="${escapeHTML(t(b.isCurrent ? 'branch.deleteCurrentHint' : 'branch.delete'))}"
+                    aria-label="${escapeHTML(t('branch.delete') + ': ' + b.name)}" ${b.isCurrent ? 'disabled' : ''}>${ACTION_ICONS.delete}</button>
             </div>
         `).join('');
     },

@@ -2,13 +2,14 @@
 // Flow-level settings modal: named connection slots (bound to global LLM
 // connections + one default) and declared runtime parameters with defaults.
 
-import type { FlowConnection, FlowDefaults, FlowParameter, FlowRunPolicy, JsonValue } from '@itookit/common';
+import type { FlowConnection, FlowVariables, FlowDefaults, FlowParameter, FlowRunPolicy, JsonValue } from '@itookit/common';
 import { escapeHTML, t } from '@itookit/common';
 
 export interface FlowSettingsOptions {
     connections: FlowConnection[];
     defaultConnection?: string;
     parameters: FlowParameter[];
+    variables?: FlowVariables;
     /** Global LLM connections available to bind a slot to. */
     availableConnections: Array<{ id: string; name: string }>;
     defaults?: FlowDefaults;
@@ -25,6 +26,7 @@ export interface FlowSettingsResult {
     connections: FlowConnection[];
     defaultConnection?: string;
     parameters: FlowParameter[];
+    variables?: FlowVariables;
     defaults?: FlowDefaults;
     runPolicy?: FlowRunPolicy;
 }
@@ -49,6 +51,10 @@ export function openFlowSettings(options: FlowSettingsOptions): Promise<FlowSett
                 <legend>Parameters</legend>
                 <div data-parameters>${options.parameters.map(parameterRow).join('')}</div>
                 <button type="button" data-add-parameter class="dag-settings__add">Add parameter</button>
+            </fieldset>
+            <fieldset><legend>${escapeHTML(t('flow.variables.title'))}</legend>
+                <p>${escapeHTML(t('flow.variables.hint'))}</p>
+                <textarea data-variables rows="6">${escapeHTML(JSON.stringify(options.variables ?? {}, null, 2))}</textarea>
             </fieldset>
             <p data-dialog-error class="dag-dialog__error"></p>
             <menu><button value="cancel">Cancel</button><button value="save">Save settings</button></menu>
@@ -278,7 +284,9 @@ function readSettings(dialog: HTMLDialogElement): FlowSettingsResult {
     }
     const defaults = readDefaults(dialog);
     const runPolicy = readRunPolicy(dialog);
-    return { connections, defaultConnection, parameters, defaults, runPolicy };
+    const variables = JSON.parse(dialog.querySelector<HTMLTextAreaElement>('[data-variables]')!.value);
+    if (!variables || Array.isArray(variables) || typeof variables !== 'object') throw new Error(t('flow.variables.invalid'));
+    return { connections, defaultConnection, parameters, variables, defaults, runPolicy };
 }
 
 function readRunPolicy(dialog: HTMLDialogElement): FlowRunPolicy {

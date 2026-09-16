@@ -31,6 +31,26 @@ describe('LlmChatEffectAdapter streaming', () => {
         expect(emitted).toContainEqual({ type: 'stream:content', delta: 'Hello world' });
     });
 
+    it('propagates a timed persistence failure and aborts the provider without an unhandled rejection', async () => {
+        const failure = new Error('Stale effect claim');
+        let providerSignal: AbortSignal | undefined;
+        const emit = vi.fn(async (event: any) => {
+            if (event.payload.type === 'stream:content') throw failure;
+        });
+        const service = streamService(async function* (_connection, params) {
+            providerSignal = params.signal;
+            yield { choices: [{ index: 0, delta: { content: 'partial' }, finish_reason: null }] };
+            await new Promise<void>((resolve, reject) => {
+                const timeout = setTimeout(resolve, 1000);
+                params.signal?.addEventListener('abort', () => { clearTimeout(timeout); reject(params.signal?.reason); }, { once: true });
+            });
+        });
+        await expect(new LlmChatEffectAdapter(service).execute({ resourceHandleId: 'llm-handle',
+            connectionId: 'conn', request: { messages: [] } }, context(emit))).rejects.toBe(failure);
+        expect(providerSignal?.aborted).toBe(true);
+        expect(emit.mock.calls.filter(([event]) => event.payload.type === 'stream:content')).toHaveLength(1);
+    });
+
     it('keeps interleaved thinking and content deltas ordered', async () => {
         const emit = vi.fn(async () => undefined);
         const service = streamService(async function* () {
@@ -46,7 +66,8 @@ describe('LlmChatEffectAdapter streaming', () => {
         }, context(emit));
 
         const emitted = emit.mock.calls.map(([event]) => (event as { payload: unknown }).payload);
-        expect(emitted).toEqual([
+        expect(emitted[0]).toMatchObject({ type: 'llm:request', connectionId: 'conn', request: { messages: [] } });
+        expect(emitted.slice(1)).toEqual([
             { type: 'stream:thinking', delta: 'a' },
             { type: 'stream:content', delta: 'b' },
             { type: 'stream:thinking', delta: 'c' },

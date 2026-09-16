@@ -21,10 +21,10 @@ export class SessionService {
         private commands: ICommandBus,
     ) { }
 
-    async ensureReady(sessionId: string, branch = 'main'): Promise<string> {
+    async ensureReady(sessionId: string, branch?: string): Promise<string> {
         await this.engine.getManifest(sessionId);
         await this.commands.execute(SessionCommand.Bind, { sessionId });
-        await this.commands.execute('vcs.branch.switch', { branchName: branch });
+        if (branch !== undefined) await this.commands.execute('vcs.branch.switch', { branchName: branch });
         return sessionId;
     }
 

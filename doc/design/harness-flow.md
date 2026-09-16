@@ -193,3 +193,11 @@ delegation.budget.maxTokens/timeoutMs 只是子任务单次请求默认限制；
 `builtin.route@3`、`builtin.check@1`、`builtin.aggregate@2`、`builtin.judge@1` 将派发作用域拆成独立可配置的可视节点。编译器从连线生成 route@2 的 branches、结果累积和停止条件，保留既有持久执行语义。检查节点数量由图决定；非法内部连线、孤立算子、重复结果 key 会阻止执行。旧紧凑草稿在编辑时自动展开，保存前不改变原文件。详见 [作文评审设计](essay-review-flow.md)。
 
 统一节点契约已接入：公共 invocationDefaults、运行前 param/命名输出解析、条件配置、版本化 reducer 与输入字段表单。执行及兼容边界见 [作文评审设计第 9 节](essay-review-flow.md)。
+
+## 自动修改与运行版本
+
+`builtin.revise@1.0.0` 将判断节点的 repeat 分支接回 route；它通过独立 Task 返回 fields 指定的输入更新，支持 prompt、systemPrompt、context.history、outputContract、工具与模型配置。详见 [版本与自动修改闭环](./flow-capabilities-and-output.md#版本与自动修改闭环)。Session 重新运行使用最新保存定义，新 Round 固定 flowId/revision/parameters；恢复执行使用原快照。
+
+## Flow 内部变量
+
+通用 variables/assign、运行隔离、依赖排序、原子写回、检查点及 UI 行为见 [Flow 内部变量设计](./flow-variables.md)。新作文模板用 `${param.essay}` 保存输入，用 `${vars.essay}` 读取当前稿件。

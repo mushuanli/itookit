@@ -338,3 +338,14 @@ DagWorkbench 在 Run 未终态时为终态成员提供「重试并重算下游�
 `FlowCommand.DraftInstall` 校验内置模板后调用 `FlowDefinitionStore.installBuiltinDraft`。独立安装记录防止用户删除模板后重启被自动补装；已有草稿保持原样。
 
 统一调用默认值、param/命名输出引用、schema 判断条件、join/reducer 与可视字段表单见 [作文评审设计第 9 节](design/essay-review-flow.md)。
+
+### 自动输入修改节点
+
+`builtin.revise@1.0.0` 可连接 `builtin.judge` 的 repeat 分支，再返回所属 route。
+配置 `fields` 指定允许更新的输入字段，其他调用配置与 check 相同（prompt、systemPrompt、history、outputContract、模型、工具和预算）。运行时编译为 `DispatchConfig.revision.invocation`，每次修改生成独立子 Task；输出更新参数并使旧输入对应的评分失效。最大评审轮数由 judge.maxRounds 控制，最后一轮不再生成未经评审的修改稿。
+
+Flow 的发布 revision 与草稿 draftVersion 分开保存。Session 重跑使用最新保存定义，为新分支固定发布 revision；旧分支和进行中的运行继续使用原版本。详见 [Flow 输出与版本](./design/flow-capabilities-and-output.md)。
+
+### variables 与 assign
+
+FlowDraft/FlowRevision.variables 声明类型和 initial；FlowNodeDefinition.assign 将输出映射到变量。DagRunSpec 同步携带声明与子流程 variableScopes。模板支持 `${vars.field}`、赋值阶段的 `${output.field}` 和 `${output}`。变量提交进入 SchedulerCheckpoint，RunGet 与最终输出可读取其状态与来源。完整语义及示例见 [Flow 内部变量](./design/flow-variables.md)。

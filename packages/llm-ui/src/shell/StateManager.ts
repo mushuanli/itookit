@@ -68,7 +68,7 @@ export class StateManager {
             input?.restoreInput(state?.input_text ?? '', state?.input_agent_id);
         });
         this.draftTail = operation.catch(() => {});
-        return operation.finally(() => { if (generation === this.draftGeneration) this.chatInputGetter?.()?.setLoading(false); });
+        return operation.finally(() => { if (generation === this.draftGeneration) this.chatInputGetter?.()?.setLoading(this.sessionManager.isGenerating()); });
     }
 
     async waitForDrafts(): Promise<void> { await this.draftTail; }

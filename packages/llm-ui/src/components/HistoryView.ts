@@ -72,6 +72,7 @@ export class HistoryView implements IHistoryPresenter {
 
             fs: options.fs,
             assets: options.assets,
+            collapsedState: (id, fallback) => this.collapse?.getStates()[id] ?? fallback,
         };
 
         this.renderer = new SessionRenderer(container, ctx, options.onContentChange);
@@ -326,6 +327,7 @@ export class HistoryView implements IHistoryPresenter {
 
         for (const [nodeId, metaInfo] of batched.metaUpdates) {
             this.ttyCtrl.handleMeta(nodeId, metaInfo);
+            this.renderer.updateRequests(nodeId, metaInfo.requests);
         }
     }
     private processEventImmediate(event: SessionEventEnvelope): void {

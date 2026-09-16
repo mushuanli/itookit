@@ -14,6 +14,7 @@ import { IconResolver } from '../../utils/iconResolver';
 export interface RendererContext {
     fs?: IFileSystem;
     assets?: IFileSystem;
+    collapsedState?: (id: string, fallback: boolean) => boolean;
 }
 
 /**
@@ -28,6 +29,7 @@ export interface RendererContext {
  * 不负责：事件绑定、折叠逻辑、编辑模式、流式更新
  */
 export class SessionRenderer {
+    private flowWindows = new Map<string, HTMLElement>();
     private nodeMap = new Map<string, HTMLElement>();
     private editorMap = new Map<string, MDxController>();
     private renderedSessionIds = new Set<string>();
@@ -57,7 +59,7 @@ export class SessionRenderer {
 
     getSessionElement(sessionId: string): HTMLElement | null {
         return this.container.querySelector(
-            `[data-session-id="${sessionId}"]`
+            `[data-session-id="${sessionId}"], [data-history-id="${sessionId}"]`
         ) as HTMLElement | null;
     }
 
@@ -124,6 +126,7 @@ export class SessionRenderer {
     }
 
     appendNode(parentId: string | undefined, node: ExecutionNode, isCollapsed: boolean): void {
+        isCollapsed = this.context.collapsedState?.(node.id, isCollapsed) ?? isCollapsed;
         if (this.nodeMap.has(node.id)) {
             console.warn(`[SessionRenderer] Duplicate node: ${node.id}`);
             return;
@@ -139,11 +142,13 @@ export class SessionRenderer {
         }
 
         if (!parentEl) return;
+        if (node.data.metaInfo?.flowInteraction && parentId) parentEl = this.flowWindow(parentId, node, parentEl, isCollapsed);
 
         const { element } = NodeRenderer.create(node);
 
         if (isCollapsed) {
             element.classList.add('is-collapsed');
+            element.querySelector('[data-action="collapse"]')?.setAttribute('aria-expanded', 'false');
             const svg = element.querySelector('[data-action="collapse"] svg');
             if (svg) svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
         }
@@ -151,6 +156,55 @@ export class SessionRenderer {
         this.nodeMap.set(node.id, element);
         parentEl.appendChild(element);
         this.mountNodeEditor(element, node);
+    }
+
+    private flowWindow(parentId: string, node: ExecutionNode, fallback: HTMLElement, collapsed: boolean): HTMLElement {
+        const root = this.nodeMap.get(parentId);
+        if (!root?.parentElement) return fallback;
+        const meta = node.data.metaInfo;
+        const taskKey = `${parentId}:task:${node.executorId}`;
+        const related = meta?.actor?.kind === 'tool' ? this.flowWindows.get(taskKey) : undefined;
+        if (related) return related.querySelector<HTMLElement>('.llm-ui-flow-window__body')!;
+        const key = `${parentId}:${meta?.parallelGroup ? `parallel:${meta.parallelGroup}` : `node:${node.id}`}`;
+        let window = this.flowWindows.get(key);
+        if (!window) {
+            window = document.createElement('section');
+            window.className = 'llm-ui-flow-window';
+            window.dataset.flowGroup = key;
+            window.dataset.historyId = `flow-window-${encodeURIComponent(meta?.parallelGroup ? `parallel:${meta.parallelGroup}` : `node:${node.id}`)}`;
+            collapsed = this.context.collapsedState?.(window.dataset.historyId, collapsed) ?? collapsed;
+            window.classList.toggle('is-collapsed', collapsed);
+            window.innerHTML = `<div class="llm-ui-node__header"><span class="llm-ui-node__name"></span>${NodeTemplates.renderReadActions(collapsed)}</div><div class="llm-ui-flow-window__body"></div>`;
+            root.dataset.historyId = root.dataset.id;
+            root.dataset.role = 'assistant';
+            window.dataset.role = node.messageRole ?? 'assistant';
+            root.parentElement.insertBefore(window, root);
+            this.flowWindows.set(key, window);
+        }
+        this.flowWindows.set(taskKey, window);
+        const title = window.querySelector('.llm-ui-node__name')!;
+        title.textContent = title.textContent ? `${title.textContent} · ${node.name}` : node.name;
+        return window.querySelector<HTMLElement>('.llm-ui-flow-window__body')!;
+    }
+
+    copyContent(id: string): string | undefined {
+        const editor = this.editorMap.get(id);
+        if (editor) return editor.content;
+        const window = this.getSessionElement(id);
+        if (!window?.classList.contains('llm-ui-flow-window')) return undefined;
+        return [...window.querySelectorAll<HTMLElement>('.llm-ui-node[data-id]')].map(node => {
+            const content = this.editorMap.get(node.dataset.id!)?.content ?? '';
+            const title = node.dataset.title ?? '';
+            return content ? `## ${title}\n\n${content}` : '';
+        }).filter(Boolean).join('\n\n');
+    }
+
+    updateRequests(nodeId: string, requests: unknown): void {
+        if (!Array.isArray(requests)) return;
+        const node = this.nodeMap.get(nodeId);
+        const panel = node?.querySelector<HTMLDetailsElement>('.llm-ui-node__req');
+        const pre = panel?.querySelector('pre');
+        if (pre) pre.textContent = JSON.stringify(requests, null, 2);
     }
 
     // ================================================================
@@ -281,7 +335,7 @@ export class SessionRenderer {
         const ids: string[] = [];
         if (this.editorMap.has(sessionId)) ids.push(sessionId);
 
-        const sessionEl = this.container.querySelector(`[data-session-id="${sessionId}"]`);
+        const sessionEl = this.getSessionElement(sessionId);
         if (sessionEl) {
             sessionEl.querySelectorAll('.llm-ui-node[data-id]').forEach(node => {
                 const nodeId = (node as HTMLElement).dataset.id;
@@ -299,6 +353,7 @@ export class SessionRenderer {
         this.editorMap.forEach(editor => editor.destroy());
         this.editorMap.clear();
         this.nodeMap.clear();
+        this.flowWindows.clear();
         this.renderedSessionIds.clear();
         this.container.innerHTML = '';
     }

@@ -1,3 +1,4 @@
+import { validateVariableGraph, nodeUsesVariables } from '../variables';
 import { prepareFlowParameters } from '../parameters';
 import { flowTemplateReferences, renderFlowTemplate, renderFlowText, type FlowTemplateContext } from '@itookit/llm-common';
 import type { DagNodeDefinition, DagEdgeDefinition, DagRunSpec, JsonValue } from '@itookit/common';
@@ -5,7 +6,7 @@ import { extractNodeOutput } from '@itookit/llm-tasks';
 import { findCycles } from '../graph';
 import { object } from './value';
 
-type Graph = { nodes: DagNodeDefinition[]; edges: Array<Omit<DagEdgeDefinition, 'input' | 'output'> & { input?: string; output?: string }> };
+type Graph = { variables?: import('@itookit/common').FlowVariables; nodes: DagNodeDefinition[]; edges: Array<Omit<DagEdgeDefinition, 'input' | 'output'> & { input?: string; output?: string }> };
 
 /** References create explicit scheduling dependencies without injecting extra model history. */
 export function compileReferenceGraph<T extends Graph>(source: T): T {
@@ -18,7 +19,7 @@ export function compileReferenceGraph<T extends Graph>(source: T): T {
     }
     for (const scope of new Set(graph.nodes.map(node => nodeScope(node.id)))) inputProducers(graph.nodes, scope);
     const oldBackEdges = findCycles(source.nodes, source.edges as DagEdgeDefinition[]).backEdges;
-    for (const node of graph.nodes) for (const ref of flowTemplateReferences([withoutHistory(node.config), node.inputs])) {
+    for (const node of graph.nodes) for (const ref of flowTemplateReferences([withoutHistory(node.config), node.inputs, node.assign, ...(nodeUsesVariables(node, graph.variables ?? {}) ? Object.values(graph.variables ?? {}).map(value => value.initial) : [])])) {
         const id = ref.root === 'nodes' ? ref.path[0] : ref.root === 'param' ? inputProducers(graph.nodes, nodeScope(node.id)).get(ref.path[0]) : undefined;
         if (!id || id === node.id && ref.root === 'param') continue;
         if (!graph.nodes.some(item => item.id === id) || id === node.id) throw new Error(`Invalid reference producer: ${id}`);
@@ -30,6 +31,7 @@ export function compileReferenceGraph<T extends Graph>(source: T): T {
     }
     const cycles = findCycles(graph.nodes, graph.edges as DagEdgeDefinition[]).backEdges;
     if ([...cycles].some(id => !oldBackEdges.has(id))) throw new Error('Flow references introduce a dependency cycle');
+    validateVariableGraph(graph as DagRunSpec);
     return { ...graph, templateVersion: 1 };
 }
 
@@ -60,8 +62,11 @@ export function invocationReferenceContext(nodes: DagNodeDefinition[], outputs: 
 
 export function resolveExecutionNode(node: DagNodeDefinition, context: FlowTemplateContext): DagNodeDefinition {
     if (node.plugin === 'builtin.route' && node.pluginVersion === '2.0.0') {
-        const { branches, invocationDefaults, until, ...config } = object(node.config);
-        return { ...node, config: { ...object(renderFlowTemplate(config, context)), branches: resolveBranchSettings(branches, context), invocationDefaults, until: renderFlowTemplate(until, context), referenceNodes: context.nodes },
+        const { branches, invocationDefaults, until, revision, ...config } = object(node.config);
+        return { ...node, config: { ...object(renderFlowTemplate(config, context)), branches: resolveBranchSettings(branches, context),
+            ...(revision ? { revision: { ...object(revision), ...(object(revision).invocation ? {
+                invocation: (resolveBranchSettings([object(revision).invocation], context) as unknown[])[0],
+            } : {}) } } : {}), invocationDefaults, until: renderFlowTemplate(until, context), referenceNodes: context.nodes, ...(context.vars ? { variableValues: context.vars, initialParameters: context.param } : {}) },
             inputs: { ...context.param, ...object(renderFlowTemplate(node.inputs, context)) } };
     }
     return { ...node, config: renderNodeConfig(node.config, context), inputs: object(renderFlowTemplate(node.inputs, context)) };

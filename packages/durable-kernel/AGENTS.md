@@ -54,7 +54,7 @@ const task = await session.spawn(spec);
 const harness = createHarness(options);
 ```
 
-`Kernel` 承载：`createSession`/`openSession`/`recover`/`recoverSession`/`waitIdle`/`dispose`、`registerProgram`/`registerEffect`/`registerWorkspace`/`registerResourceAdapter`/`registerStorageResolver`，以及资源/缓存/事件面。`session.spawn()` 返回 `TaskHandle<O>`（`wait`/`stat`/`cancel`/`pause`/`resume`/`respond`/`signal`）。
+`Kernel` 承载：`createSession`/`openSession`/`reopenSession`/`recover`/`recoverSession`/`waitIdle`/`dispose`、`registerProgram`/`registerEffect`/`registerWorkspace`/`registerResourceAdapter`/`registerStorageResolver`，以及资源/缓存/事件面。`session.spawn()` 返回 `TaskHandle<O>`（`wait`/`stat`/`cancel`/`pause`/`resume`/`respond`/`signal`）。
 
 ## 关键语义（改这里前先读证据）
 

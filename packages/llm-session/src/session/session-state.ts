@@ -402,6 +402,14 @@ export class SessionState {
         }
     }
 
+    updateNodeMeta(nodeId: string, metaInfo: Record<string, unknown>): void {
+        for (const session of this.getSessions()) {
+            if (!session.executionRoot) continue;
+            const node = this.findNodeInTree(session.executionRoot, nodeId);
+            if (node) { node.data.metaInfo = { ...node.data.metaInfo, ...metaInfo }; return; }
+        }
+    }
+
     updateNodeOutput(nodeId: string, content: string): void {
         for (const session of this.getSessions()) {
             if (session.executionRoot) {

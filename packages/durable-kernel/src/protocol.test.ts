@@ -24,6 +24,44 @@ describe('durable harness protocols', () => {
         await kernel.closeSession(session.id, true);
         expect((await store.sessionRecord(binding)).status).toBe('archived');
     });
+    it('explicitly reopens a closed Session for new Tasks while retaining terminal Tasks', async () => {
+        const session = await kernel.openSession('s');
+        const old = await session.spawn(spec);
+        await kernel.closeSession('s', true);
+        const snapshot = (await old.status()).task;
+        expect(snapshot.status).toBe('cancelled');
+        await expect((await kernel.openSession('s')).spawn(spec)).rejects.toThrow('Session is closed');
+        await expect(kernel.setSessionStatus('s', 'open')).rejects.toThrow('Invalid session transition');
+        kernel.dispose(); await kernel.waitIdle();
+        kernel = new Kernel({ catalog: { fs, rootPath: '/catalog' }, pollMs: 0 });
+        kernel.registerStorageResolver({ kind: 'test', async resolve() { return binding; } });
+        await kernel.initialize();
+        const [reopened] = await Promise.all([kernel.reopenSession('s'), kernel.reopenSession('s')]);
+        const next = await reopened.spawn(spec);
+        expect(next.id).not.toBe(old.id);
+        expect((await old.status()).task).toEqual(snapshot);
+        expect((await kernel.sessionStat('s')).phase).toBe('open');
+        expect((await kernel.eventList('s')).filter(event => event.type === 'session.reopened')).toHaveLength(1);
+    });
+    it('does not reopen closing or archived Sessions', async () => {
+        await store.setSessionStatus(binding, 'closing', 'cancel');
+        await expect(kernel.reopenSession('s')).rejects.toThrow('Cannot reopen session: closing');
+        await store.setSessionStatus(binding, 'closed');
+        await store.setSessionStatus(binding, 'archived');
+        await expect(kernel.reopenSession('s')).rejects.toThrow('Cannot reopen session: archived');
+    });
+    it('waits for close cleanup before admitting new work', async () => {
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        let calls = 0;
+        await kernel.use({ id: 'slow-close', version: '1', install() {}, async onSessionClosed() { calls++; await gate; } });
+        const closing = kernel.closeSession('s', true);
+        await expect.poll(() => calls).toBe(1);
+        const reopening = kernel.reopenSession('s');
+        expect((await kernel.sessionStat('s')).phase).toBe('closed');
+        release(); await closing; await reopening;
+        expect((await kernel.sessionStat('s')).phase).toBe('open');
+    });
     it('ensures deep layouts with bounded reads and observes deletion on the next call', async () => {
         await ensureTree(fs, '/existing/deep/root');
         const exists = vi.spyOn(fs.driver, 'exists');

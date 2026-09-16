@@ -55,7 +55,7 @@ export interface BranchMeta {
     createdAt: number;
     createdFrom: 'regenerate' | 'manual' | 'edit';
     forkedFromBranch: Ref;
-    sourceRoundId: RoundId;
+    sourceRoundId?: RoundId;
     commonHeadId?: RoundId;
     branchRootRoundId: RoundId;
 

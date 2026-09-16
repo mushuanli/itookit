@@ -235,6 +235,30 @@ export class SeqFileKernelStore {
         return record;
     }
 
+    /** Explicit new execution admission; terminal Tasks and reclaimed caches stay unchanged. */
+    async reopenSession(binding: ResolvedStorageBinding): Promise<SessionRecord> {
+        const record = await transaction(binding.fs, async tx => {
+            const current = await requireSessionTx(tx, binding.rootPath);
+            if (current.status === 'open') return current;
+            if (current.status !== 'closed') throw new Error(`Cannot reopen session: ${current.status}`);
+            const ids: string[] = [];
+            await tx.walkEntries(indexPath(binding.rootPath), row => { ids.push(row.key.slice(5)); return true; }, { keyPrefix: 'task/' });
+            for (const id of ids) {
+                const task = await requireTaskTx(tx, binding.rootPath, id);
+                if (!isTerminal(task.status) || Object.values(task.effects).some(effect => effect.cleanupPending)) {
+                    throw new Error('Session still has unfinished tasks or pending cleanup');
+                }
+            }
+            const next: SessionRecord = { ...current, status: 'open', version: current.version + 1, updatedAt: Date.now() };
+            delete next.closeMode;
+            await tx.setEntry(sessionPath(binding.rootPath), SESSION_KEY, encode(next));
+            await appendEventTx(tx, binding.rootPath, current.id, undefined, 'session.reopened', next);
+            return next;
+        });
+        await transaction(this.catalog.fs, tx => tx.setEntry(catalogPath(this.catalog.rootPath), `session/${record.id}`, encode(record)));
+        return record;
+    }
+
     async sessionRecord(binding: ResolvedStorageBinding): Promise<SessionRecord> {
         return this.readSession(binding);
     }

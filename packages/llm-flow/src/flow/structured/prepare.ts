@@ -1,4 +1,4 @@
-import type { DagNodeDefinition, DagPluginCatalog, DispatchBranch, JsonValue } from '@itookit/common';
+import type { DagNodeDefinition, DagPluginCatalog, DispatchBranch, DispatchConfig, FlowInvocationDefaults, JsonValue } from '@itookit/common';
 import type { TaskSpec } from '@itookit/durable-kernel';
 import { validateSchema } from '../validation';
 import type { DispatchInput, PreparedBranch } from './types';
@@ -11,25 +11,27 @@ export interface DispatchPreparation {
     task(node: DagNodeDefinition): Promise<TaskSpec>;
 }
 
-export async function prepareDispatch(input: DispatchInput, context: DispatchPreparation): Promise<DispatchInput> {
+export async function prepareDispatch(input: Omit<DispatchInput, 'branches' | 'revision'> & Pick<DispatchConfig, 'branches' | 'revision'>, context: DispatchPreparation): Promise<DispatchInput> {
     validateDispatch(input);
     const branches: PreparedBranch[] = [];
-    for (const branch of input.branches) {
-        const contract = branch.outputContract ?? input.invocationDefaults?.outputContract;
-        const defaults = input.invocationDefaults;
-        const target = { ...branch.target, config: { ...(defaults?.connectionId ? { connectionId: defaults.connectionId } : {}),
-            ...(defaults?.model ? { model: defaults.model } : {}), ...object(branch.target.config),
-            ...(contract?.onInvalid ? { outputValidation: { onInvalid: contract.onInvalid, retries: contract.retries ?? (contract.onInvalid === 'repair' ? 1 : 0) } } : {}),
-        } };
-        branches.push(await prepareBranch({ ...branch, target: target as DispatchBranch['target'],
-            context: branch.context ?? input.invocationDefaults?.context,
-            outputFormat: branch.outputFormat ?? contract?.format,
-            outputSchema: branch.outputSchema ?? contract?.schema,
-            output: branch.output ?? contract?.select,
-            validate: branch.validate ?? contract?.validate,
-        }, context));
-    }
-    return json({ ...input, branches });
+    for (const branch of input.branches) branches.push(await configuredBranch(branch, input.invocationDefaults, context));
+    const invocation = input.revision?.invocation;
+    const revision = input.revision ? { ...input.revision, ...(invocation ? { invocation: await configuredBranch(invocation,
+        { connectionId: input.invocationDefaults?.connectionId, model: input.invocationDefaults?.model }, context) } : {}) } : undefined;
+    return json({ ...input, branches, revision }) as DispatchInput;
+}
+
+async function configuredBranch(branch: DispatchBranch, defaults: FlowInvocationDefaults | undefined, context: DispatchPreparation): Promise<PreparedBranch> {
+    const contract = branch.outputContract ?? defaults?.outputContract;
+    const target = { ...branch.target, config: { ...(defaults?.connectionId ? { connectionId: defaults.connectionId } : {}),
+        ...(defaults?.model ? { model: defaults.model } : {}), ...object(branch.target.config),
+        ...(contract?.onInvalid ? { outputValidation: { onInvalid: contract.onInvalid, retries: contract.retries ?? (contract.onInvalid === 'repair' ? 1 : 0) } } : {}),
+    } };
+    return prepareBranch({ ...branch, target: target as DispatchBranch['target'],
+        context: branch.context ?? defaults?.context,
+        outputFormat: branch.outputFormat ?? contract?.format, outputSchema: branch.outputSchema ?? contract?.schema,
+        output: branch.output ?? contract?.select, validate: branch.validate ?? contract?.validate,
+    }, context);
 }
 
 async function prepareBranch(branch: DispatchBranch, context: DispatchPreparation): Promise<PreparedBranch> {

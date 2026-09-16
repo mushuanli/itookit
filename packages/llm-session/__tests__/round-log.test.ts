@@ -724,10 +724,58 @@ function projection(
 }
 
 describe('Flow rerun branches', () => {
+    it.each([false, true])('reruns Session metadata with an empty current branch (prior run=%s)', async priorRun => {
+        const { FlowRerunService } = await import('../src/session/flow-rerun');
+        const { FlowDefinitionStore } = await import('@itookit/llm-flow');
+        const { vi } = await import('vitest');
+        const draftLoad = vi.spyOn(FlowDefinitionStore.prototype, 'loadDraft').mockResolvedValue(null);
+        const engine = new InMemorySessionRepository(), log = new RoundLog(engine as never, 's');
+        const flow = { flowId: 'review', revision: 3, parameters: { essay: 'initial' } };
+        engine.setManifest({ flow });
+        if (priorRun) {
+            await log.append('main', makeRound({ id: 'old', sessionId: 's', flow: { ...flow, parameters: { essay: 'last' } } as never }));
+            await log.createBranchForReplacement(null, 'unused', { createdFrom: 'manual', branchName: 'empty' });
+        }
+        const registry = { engine, ensureBound: () => ({ sessionId: 's', state: { getRounds: () => [] }, runtime: {} }),
+            ensureNotGenerating() {}, reloadSessionData: async () => {}, eventBus: { emitSession: vi.fn() } };
+        const submit = vi.fn(async (input: any) => {
+            const manifest = await log.loadManifest();
+            expect(manifest.currentHead).toBeNull();
+            await log.appendExpected(manifest.currentBranch, makeRound({ id: input.roundTarget.roundId, sessionId: 's', flow: input.sendIntent.execution }), null);
+            return 'new-task';
+        });
+        const load = vi.spyOn(FlowDefinitionStore.prototype, 'loadRevision').mockResolvedValue({ ...flow, id: 'review', name: 'Review', parameters: [] } as never);
+        try {
+            const service = new FlowRerunService(registry as never, { submit, assertCanSubmit: async () => {} } as never, {} as never);
+            const context = await service.context();
+            expect(context?.flow.parameters).toEqual({ essay: priorRun ? 'last' : 'initial' });
+            expect(context?.sourceRoundId).toBe(priorRun ? 'old' : null);
+            const before = await log.loadManifest();
+            const result = await service.run({ essay: 'new' }, context!.sourceRoundId);
+            const after = await log.loadManifest();
+            expect(result.branchName).not.toBe(before.currentBranch);
+            for (const [name, head] of Object.entries(before.branches)) expect(after.branches[name]).toBe(head);
+            expect(submit).toHaveBeenCalledOnce();
+        } finally { load.mockRestore(); draftLoad.mockRestore(); }
+    });
+
+    it('lists only the execution references in each persisted branch', async () => {
+        const { flowBranchExecutions } = await import('../src/session/flow-branches');
+        const engine = new InMemorySessionRepository(), log = new RoundLog(engine as never, 's');
+        await log.append('main', makeRound({ id: 'old', executions: [{ taskId: 'old-task', role: 'primary' }] }));
+        await log.createBranchForReplacement(null, 'new', { branchName: 'rerun', createdFrom: 'regenerate' });
+        await log.append('rerun', makeRound({ id: 'new', executions: [{ taskId: 'new-task', role: 'primary' }] }));
+        await log.createBranchForReplacement(null, 'empty-root', { branchName: 'empty', createdFrom: 'manual' });
+        expect(await flowBranchExecutions(engine as never, 's')).toEqual({ sessionId: 's', currentBranch: 'empty', branches: [
+            { name: 'main', taskIds: ['old-task'], runs: [] }, { name: 'rerun', taskIds: ['new-task'], runs: [] }, { name: 'empty', taskIds: [], runs: [] },
+        ] });
+    });
+
     it('validates before forking and persists new parameters without changing the source', async () => {
         const { FlowRerunService } = await import('../src/session/flow-rerun');
         const { FlowDefinitionStore } = await import('@itookit/llm-flow');
         const { vi } = await import('vitest');
+        const draftLoad = vi.spyOn(FlowDefinitionStore.prototype, 'loadDraft').mockResolvedValue(null);
         const engine = new InMemorySessionRepository();
         const log = new RoundLog(engine as never, 's');
         const source = makeRound({ id: 'original', sessionId: 's', input: [{ role: 'user', content: 'old' }],
@@ -747,12 +795,30 @@ describe('Flow rerun branches', () => {
         const revision = vi.spyOn(FlowDefinitionStore.prototype, 'loadRevision').mockResolvedValue({
             id: 'review', revision: 3, name: 'Review', parameters: [{ name: 'essay', type: 'string', required: true }],
         } as never);
+        const publish = vi.spyOn(FlowDefinitionStore.prototype, 'createRevision').mockImplementation(async draft => ({ ...draft, revision: 4, createdAt: 1 }) as never);
         try {
-            const service = new FlowRerunService(registry as never, { submit } as never, {} as never);
+            const assertCanSubmit = vi.fn(async () => {});
+            const service = new FlowRerunService(registry as never, { submit, assertCanSubmit } as never, {} as never);
+            const before = await log.loadManifest();
+            assertCanSubmit.mockRejectedValueOnce(new Error('Session is closed'));
+            await expect(service.run({ essay: 'new' }, 'original')).rejects.toThrow('Session is closed');
+            expect(await log.loadManifest()).toEqual(before);
+            expect(submit).not.toHaveBeenCalled();
             await expect(service.run({}, 'original')).rejects.toThrow();
             expect(Object.keys((await log.loadManifest()).branches)).toEqual(['main']);
-            const rerun = await service.run({ essay: 'new' }, 'original');
+            const opened = await service.context();
+            draftLoad.mockResolvedValue({ id: 'review', name: 'Updated review', parameters: [{ name: 'essay', type: 'string', required: true }] } as never);
+            await expect(service.run({ essay: 'new' }, 'original', opened!.definitionKey)).rejects.toThrow('Flow changed');
+            expect(publish).not.toHaveBeenCalled();
+            const updated = await service.context();
+            const rerun = await service.run({ essay: 'new' }, 'original', updated!.definitionKey);
+            expect(publish).toHaveBeenCalledTimes(1);
+            expect(submit.mock.calls[0][0].sendIntent.execution.revision).toBe(4);
+            expect(submit.mock.calls[0][0].text).toContain('review@v4');
+            expect((await log.readRound('original'))?.flow?.revision).toBe(3);
+            revision.mockResolvedValue({ ...updated!.definition, revision: 4 } as never);
             expect(rerun.branchName).not.toBe('main');
+            expect(assertCanSubmit).toHaveBeenLastCalledWith('s', true);
             expect((await log.loadManifest()).branches.main).toBe('original');
             expect((await log.readRound('original'))?.flow?.parameters).toEqual({ essay: 'old' });
             expect((await service.context())?.flow.parameters).toEqual({ essay: 'new' });
@@ -763,6 +829,6 @@ describe('Flow rerun branches', () => {
             submit.mockRejectedValueOnce(new Error('cannot resolve agent'));
             await expect(service.run({ essay: 'retry' }, current!.sourceRoundId)).rejects.toThrow('cannot resolve agent');
             expect(await log.loadManifest()).toEqual(saved);
-        } finally { revision.mockRestore(); }
+        } finally { revision.mockRestore(); draftLoad.mockRestore(); publish.mockRestore(); }
     });
 });

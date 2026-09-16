@@ -44,6 +44,7 @@ const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
     'log:appended': ['refreshBranch', 'flashIndicator'],
     'log:ref_moved': ['resetCollapse', 'refreshBranch', 'flashIndicator'],
     'log:ref_renamed': ['refreshBranch'],
+    'log:ref_deleted': ['refreshBranch', 'refreshNav'],
 
     // 重新生成（保留 — 无 canonical 等价事件）
     regenerate_started: ['clearErrors', 'flashIndicator'],

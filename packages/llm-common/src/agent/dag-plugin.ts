@@ -21,11 +21,12 @@ export interface DagPluginManifest<Config = unknown> {
     defaultConfig?: Partial<Config>;
     inputs: InputPortSpec[];
     outputs: OutputPortSpec[];
-    authoring?: { invocation?: boolean; scopeRole?: 'route' | 'check' | 'aggregate' | 'judge' | 'input' };
+    authoring?: { invocation?: boolean; scopeRole?: 'route' | 'check' | 'aggregate' | 'judge' | 'input' | 'revise' };
     requiredCapabilities?: string[];
 }
 
 export interface DagNodeDefinition<Config = unknown> {
+    assign?: Record<string, JsonValue>;
     outputPolicy?: { includeInRunOutput?: boolean; publishToHistory?: boolean };
     portSchemas?: NodePortSchemas;
     id: string;
@@ -55,6 +56,8 @@ export interface DagEdgeDefinition {
 }
 
 export interface DagRunSpec {
+    variables?: import('./flow-definition').FlowVariables;
+    variableScopes?: Record<string, import('./flow-definition').FlowVariables>;
     templateVersion?: 1;
     parameterScopes?: Record<string, { parent: string; defaults: Record<string, JsonValue>; values: Record<string, JsonValue>; schema?: import('./flow-definition').FlowParameter[] }>;
     parameterSchema?: import('./flow-definition').FlowParameter[];

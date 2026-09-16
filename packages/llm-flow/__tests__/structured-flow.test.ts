@@ -49,7 +49,7 @@ describe('structured route / spawn / aggregate DAG', () => {
     let manager: IVFSManager, fs: IFileSystem, kernel: Kernel, executor: DurableFlowExecutor;
     let requests: Record<string, any>[];
     let scores: number[];
-    let delay = 0, active = 0, peak = 0;
+    let delay = 0, active = 0, peak = 0, invalidResponses = 0;
 
     function boot() {
         kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
@@ -60,7 +60,8 @@ describe('structured route / spawn / aggregate DAG', () => {
             active++; peak = Math.max(peak, active);
             if (delay) await new Promise(resolve => setTimeout(resolve, delay));
             active--;
-            return { choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ score: scores.shift() ?? 9, issues: [], suggestions: [] }) }, finish_reason: 'stop' }], usage: { total_tokens: 2 } };
+            const revising = JSON.stringify(request).includes('你是作文修改员');
+            return { choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(revising ? { essay: `REVISED_ESSAY_${requests.length}` } : { score: scores.shift() ?? 9, issues: [], suggestions: [], ...(invalidResponses-- > 0 ? { additionalProperties: false } : {}) }) }, finish_reason: 'stop' }], usage: { total_tokens: 2 } };
         } } as EffectAdapter);
         executor = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
             sessionContext: { projectInstructions: 'OLD_PROJECT', skillInstructions: 'OLD_SKILL', skillIndex: 'OLD_INDEX' } });
@@ -68,7 +69,7 @@ describe('structured route / spawn / aggregate DAG', () => {
 
     beforeEach(async () => {
         ({ manager } = await createVFS({ rootBackend: new MemoryBackend() }));
-        fs = await manager.openFileSystem('/test'); requests = []; scores = []; delay = 0; active = 0; peak = 0;
+        fs = await manager.openFileSystem('/test'); requests = []; scores = []; delay = 0; active = 0; peak = 0; invalidResponses = 0;
         boot(); await kernel.initialize();
         await kernel.createSession({ id: 's', storage: { kind: 'test', locator: null } });
     });
@@ -106,6 +107,37 @@ describe('structured route / spawn / aggregate DAG', () => {
         expect(requests[1].request.messages.at(-1).content).toContain('Essay: ${param.secret}; round: 2');
         expect(requests[1].request.messages[0]).toEqual({ role: 'system', content: 'Rubric content' });
         expect(JSON.stringify(requests)).not.toContain('OLD_');
+    });
+
+    it('records an initial passing judgment without pretending to execute reviews', async () => {
+        const settings = config(2);
+        settings.branches = settings.branches.slice(0, 1);
+        settings.until = passed('content');
+        settings.initialResults = { content: { score: 9 } };
+        const run = await executor.submit('s', graph(settings), { requirements: 'REQ', essay: 'ESSAY' });
+        expect((await run.root.wait({ timeoutMs: 6000 })).status).toBe('succeeded');
+        expect(requests).toHaveLength(0);
+        const events = (await kernel.eventList('s', 0)).filter(event => event.type === 'flow.logic.completed');
+        expect(events).toHaveLength(1);
+        expect(events[0].payload).toMatchObject({ phase: 'judge', round: 0,
+            result: { matched: true, stopReason: 'condition_met' } });
+    });
+
+    it('journals aggregate and judge decisions for each round, including continuation and limits', async () => {
+        scores = [4, 5];
+        const settings = config(2);
+        settings.branches = settings.branches.slice(0, 1);
+        settings.until = passed('content');
+        settings.logicNodes = { aggregate: { id: 'summary', name: 'Summary' }, judge: { id: 'exit', name: 'Exit' } };
+        const run = await executor.submit('s', graph(settings), { requirements: 'REQ', essay: 'ESSAY' });
+        expect((await run.root.wait({ timeoutMs: 6000 })).status).toBe('succeeded');
+        const events = (await kernel.eventList('s', 0)).filter(event => event.type === 'flow.logic.completed');
+        expect(events.map(event => (event.payload as any).phase)).toEqual(['aggregate', 'judge', 'aggregate', 'judge']);
+        expect(events[1].payload).toMatchObject({ nodeId: 'exit', round: 1,
+            result: { matched: false, maxRounds: 2, stopReason: 'continue', condition: settings.until } });
+        expect(events[2].payload).toMatchObject({ nodeId: 'summary', round: 2,
+            result: { results: { content: { value: { score: 5 } } } } });
+        expect(events[3].payload).toMatchObject({ round: 2, result: { stopReason: 'max_rounds' } });
     });
 
     it('enforces a shared output schema and repairs within the same spawned Task', async () => {
@@ -180,6 +212,22 @@ describe('structured route / spawn / aggregate DAG', () => {
         expect(result.outputs.result.content).toEqual({ content: 7, logic: 9 });
     });
 
+    it('repairs forbidden schema keywords inside a child before the route joins its output', async () => {
+        invalidResponses = 1;
+        const settings = config();
+        settings.branches = [settings.branches[0]];
+        settings.until = passed('content');
+        settings.branches[0].outputSchema = { type: 'object', properties: {
+            score: { type: 'number' }, issues: { type: 'array' }, suggestions: { type: 'array' },
+        }, required: ['score'], additionalProperties: false };
+        settings.invocationDefaults = { outputContract: { format: 'json', onInvalid: 'repair', retries: 1 } };
+        const run = await executor.submit('s', graph(settings), { requirements: 'REQ', essay: 'ESSAY' });
+        const exit = await run.root.wait({ timeoutMs: 6000 });
+        expect(exit.status, JSON.stringify(exit)).toBe('succeeded');
+        expect(requests).toHaveLength(2);
+        expect(requests[1].request.messages.at(-1).content).toContain('$.additionalProperties: unexpected property');
+    });
+
     it('spawns isolated Tasks and preserves other result types across batches, then feeds a downstream DAG node', async () => {
         const run = await executor.submit('s', graph(), { requirements: 'REQ', essay: 'ESSAY' });
         const exit = await run.root.wait({ timeoutMs: 6000 });
@@ -187,7 +235,8 @@ describe('structured route / spawn / aggregate DAG', () => {
         expect(requests).toHaveLength(4);
         for (const request of requests) {
             expect(JSON.stringify(request)).not.toContain('OLD_');
-            expect(request.request.messages.at(-1).content).toBe(JSON.stringify({ requirements: 'REQ', essay: 'ESSAY' }));
+            expect(request.request.messages.at(-1).content.split('\n')[0]).toBe(JSON.stringify({ requirements: 'REQ', essay: 'ESSAY' }));
+            expect(request.request.messages.at(-1).content).toContain('not the schema itself');
         }
         const result = (await run.nodes.get('report')!.status()).task.output as any;
         expect(result.outputs.result.content).toMatchObject({ stopReason: 'condition_met', completedRounds: 4 });
@@ -272,6 +321,31 @@ describe('structured route / spawn / aggregate DAG', () => {
         expect(output.outputs.result.content.results.content).toMatchObject({ taskId: secondId, round: 2, value: { score: 9 } });
     });
 
+    it('persists generic check assignments through a scope restart', async () => {
+        const settings = config(2); settings.branches = settings.branches.slice(0, 1);
+        settings.until = { kind: 'literal', value: false }; delete settings.branches[0].when;
+        settings.branches[0].assign = { score: '${output.score}' };
+        settings.branches[0].target = { id: 'human', name: 'Human', plugin: 'builtin.human', pluginVersion: '1.0.0', inputs: {}, config: { requestId: 'score', prompt: 'Score' } };
+        settings.branches[0].output = path('output', 'outputs', 'response', 'content');
+        settings.branches[0].outputFormat = 'value';
+        const spec = graph(settings); spec.variables = { score: { type: 'number', initial: 0 } };
+        const run = await executor.submit('s', spec, { requirements: 'REQ', essay: 'ESSAY' });
+        const session = await kernel.openSession('s');
+        const childAt = async (round: string) => (await session.listTasks()).find(task => task.labels?.dispatchRound === round);
+        await vi.waitFor(async () => expect((await childAt('1'))?.interactions.score).toBeDefined());
+        await (await session.attachTask((await childAt('1'))!.id)).respond({ interactionId: 'score', value: { score: 8 } });
+        await vi.waitFor(async () => expect((await childAt('2'))?.interactions.score).toBeDefined());
+        const secondId = (await childAt('2'))!.id;
+        kernel.dispose(); await executor.waitIdle(); boot(); await kernel.initialize();
+        const resumed = await executor.resume('s', run.root.id);
+        await (await (await kernel.openSession('s')).attachTask(secondId)).respond({ interactionId: 'score', value: { score: 9 } });
+        expect((await resumed.root.wait({ timeoutMs: 6000 })).status).toBe('succeeded');
+        const output = (await resumed.nodes.get('route')!.status()).task.output as any;
+        expect(output.outputs.result.content.vars).toEqual({ score: 9 });
+        expect(output.outputs.result.content.variableChanges).toHaveLength(2);
+        expect(output.outputs.result.content.results.content.current).toBe(true);
+    });
+
     it('marks earlier type results stale when a revision changes the input and rechecks them', async () => {
         const settings = config(2); settings.branches = settings.branches.slice(0, 1);
         settings.until = { kind: 'literal', value: false };
@@ -305,9 +379,44 @@ describe('structured route / spawn / aggregate DAG', () => {
         const exit = await run.root.wait({ timeoutMs: 6000 });
         expect(exit.status, JSON.stringify(exit)).toBe('succeeded');
         expect(Object.keys((exit.output as any).nodes)).toEqual(['report']);
-        expect(requests).toHaveLength(8);
+        expect(requests).toHaveLength(9);
+        expect(JSON.stringify(requests[4])).toContain('本轮评审意见');
+        expect(JSON.stringify(requests[5])).toContain('REVISED_ESSAY_5');
+        expect(requests[5].request.messages.every((message: any) => ['system', 'user'].includes(message.role))).toBe(true);
         const report = (await run.nodes.get('report')!.status()).task.output as any;
         expect(report.outputs.result.content).toMatchObject({ completedRounds: 2, stopReason: 'max_rounds' });
+    });
+
+    it('invalidates even passing scores after rewriting and stops on the new passing draft', async () => {
+        const draft = JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+        scores = [9, 7, 9, 9, 9, 9, 9, 9];
+        const revision = { ...draft, revision: 1, createdAt: 0, digest: '' };
+        revision.digest = flowRevisionDigest(revision);
+        const spec = await flowToDag(revision);
+        spec.nodes.push({ id: 'observe', name: 'observe', plugin: 'builtin.transform', pluginVersion: '1.0.0', inputs: {}, config: { value: { original: '${param.essay}', current: '${vars.essay}' } } });
+        spec.edges.push({ id: 'observe', from: 'report', to: 'observe', kind: 'control', input: 'input', output: 'result' });
+        const run = await executor.submit('s', spec, { requirements: 'REQ', essay: 'ESSAY', maxRounds: 10, maxConcurrency: 1 });
+        const exit = await run.root.wait({ timeoutMs: 6000 });
+        expect(exit.status, JSON.stringify(exit)).toBe('succeeded');
+        expect(requests).toHaveLength(9);
+        const report = (await run.nodes.get('report')!.status()).task.output as any;
+        expect(report.outputs.result.content).toMatchObject({ completedRounds: 2, stopReason: 'condition_met', inputs: { essay: 'ESSAY' }, vars: { essay: 'REVISED_ESSAY_5' } });
+        expect(report.outputs.result.content.revisions).toHaveLength(1);
+        expect((await run.nodes.get('observe')!.status()).task.output).toMatchObject({ outputs: { result: { content: { original: 'ESSAY', current: 'REVISED_ESSAY_5' } } } });
+        expect(Object.values(report.outputs.result.content.results).every((slot: any) => slot.current && slot.round === 2)).toBe(true);
+    });
+
+    it('repairs an invalid first response in the shipped essay Flow without consuming another review round', async () => {
+        const draft = JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+        scores = [11, 9, 9, 9, 9];
+        const spec = await flowToDag({ ...draft, revision: 1, createdAt: 0, digest: '' });
+        const run = await executor.submit('s', spec, { requirements: 'REQ', essay: 'ESSAY', maxRounds: 1, maxConcurrency: 1 });
+        const exit = await run.root.wait({ timeoutMs: 6000 });
+        expect(exit.status, JSON.stringify(exit)).toBe('succeeded');
+        expect(requests).toHaveLength(5);
+        expect(JSON.stringify(requests[1])).toContain('did not satisfy the required output contract');
+        const report = (await run.nodes.get('report')!.status()).task.output as any;
+        expect(report.outputs.result.content.completedRounds).toBe(1);
     });
 
     it('applies declared defaults and rejects invalid runtime limits before creating Tasks', async () => {
@@ -348,6 +457,9 @@ describe('structured route / spawn / aggregate DAG', () => {
         const run = await executor.submit('s', { ...graph(settings), maxConcurrency }, { requirements: 'REQ', essay: 'ESSAY' });
         expect((await run.root.wait({ timeoutMs: 6000 })).status).toBe('succeeded');
         expect(peak).toBe(maxConcurrency);
+        const children = (await kernel.listSessionTasks('s')).filter(task => task.labels?.dispatchKey);
+        if (maxConcurrency === 1) expect(children.every(task => !task.labels?.flowHistoryGroup)).toBe(true);
+        else expect(children.filter(task => task.labels?.flowHistoryGroup).length).toBeGreaterThanOrEqual(2);
     });
 
     it('cancels the owned spawned Task when its Run is cancelled', async () => {

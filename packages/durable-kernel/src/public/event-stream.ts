@@ -7,6 +7,7 @@ export async function* eventStream(
     taskId: string | undefined,
     after: number,
 ): AsyncGenerator<EventEnvelope> {
+    if (taskId) { yield* taskEventStream(kernel, sessionId, taskId, after); return; }
     let cursor = after;
     while (true) {
         const events = await kernel.eventList(sessionId, cursor);
@@ -14,16 +15,23 @@ export async function* eventStream(
             cursor = event.sequence;
             if (!taskId || event.taskId === taskId) yield event;
         }
-        if (taskId && await isTerminal(kernel, sessionId, taskId)) {
-            // Terminal state and journal are committed together. Read the tail
-            // after observing terminal so a concurrent final commit is not lost.
-            for (const event of await kernel.eventList(sessionId, cursor)) {
-                cursor = event.sequence;
-                if (event.taskId === taskId) yield event;
-            }
-            return;
-        }
         await waitForChange(kernel, sessionId, taskId, 250);
+    }
+}
+
+/** Read only this Task's indexed tail, preserving the public Session-sequence cursor. */
+async function* taskEventStream(kernel: Kernel, sessionId: string, taskId: string, after: number): AsyncGenerator<EventEnvelope> {
+    let index = 0, terminalSeen = false;
+    while (true) {
+        const page = await kernel.taskEventPage(sessionId, taskId, { afterIndex: index, limit: 100 });
+        for (const event of page.items) if (event.sequence > after) yield event;
+        index = page.nextAfterIndex ?? page.throughIndex;
+        if (page.nextAfterIndex !== undefined) continue;
+        // Terminal state and the journal commit together. Drain once more after
+        // observing terminal, including every page committed during the prior read.
+        if (terminalSeen) return;
+        terminalSeen = await isTerminal(kernel, sessionId, taskId);
+        if (!terminalSeen) await waitForChange(kernel, sessionId, taskId, 250);
     }
 }
 

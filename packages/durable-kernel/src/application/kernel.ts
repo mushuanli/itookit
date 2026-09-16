@@ -263,6 +263,31 @@ export class Kernel implements KernelRegistration {
         return new DefaultSessionHandle(this, id);
     }
 
+    private readonly sessionReopens = new Map<string, Promise<SessionHandle>>();
+
+    /** Admit new Tasks after an explicit user rerun, without reviving any previous Task. */
+    async reopenSession(id: SessionId): Promise<SessionHandle> {
+        const pending = this.sessionReopens.get(id);
+        if (pending) return pending;
+        const work = this.reopenClosedSession(id);
+        this.sessionReopens.set(id, work);
+        try { return await work; }
+        finally { if (this.sessionReopens.get(id) === work) this.sessionReopens.delete(id); }
+    }
+
+    private async reopenClosedSession(id: SessionId): Promise<SessionHandle> {
+        const binding = await this.binding(id);
+        const session = await this.store.sessionRecord(binding);
+        if (session.status === 'open') return new DefaultSessionHandle(this, id);
+        if (session.status !== 'closed') throw new Error(`Cannot reopen session: ${session.status}`);
+        await this.sessionClosures.get(id);
+        await Promise.all([...this.plugins.values()].map(plugin => plugin.onSessionClosed?.(id)));
+        await this.store.reopenSession(binding);
+        this.rememberBinding(id, binding);
+        this.notify(id); this.queueDrain(id); this.schedulePoll(id);
+        return new DefaultSessionHandle(this, id);
+    }
+
     async *listSessions(): AsyncIterable<SessionRecord> {
         for (const session of await this.store.listSessions()) yield session;
     }
@@ -760,7 +785,18 @@ export class Kernel implements KernelRegistration {
         return true;
     }
 
+    private readonly sessionClosures = new Map<string, Promise<void>>();
+
     private async finishSessionClose(sessionId: string, binding: ResolvedStorageBinding): Promise<void> {
+        const pending = this.sessionClosures.get(sessionId);
+        if (pending) return pending;
+        const work = this.completeSessionClose(sessionId, binding);
+        this.sessionClosures.set(sessionId, work);
+        try { await work; }
+        finally { if (this.sessionClosures.get(sessionId) === work) this.sessionClosures.delete(sessionId); }
+    }
+
+    private async completeSessionClose(sessionId: string, binding: ResolvedStorageBinding): Promise<void> {
         if ((await this.store.sessionRecord(binding)).status !== 'closing') return;
         const tasks = await this.store.listTasks(binding);
         if (tasks.some(t => !isTerminalStatus(t.status) || Object.values(t.effects).some(e => e.cleanupPending))) return;

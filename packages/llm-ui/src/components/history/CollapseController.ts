@@ -103,14 +103,11 @@ export class CollapseController {
      * 按 sessionId 切换折叠（供 Command/外部调用）
      */
     toggleSession(sessionId: string, forceState?: boolean): boolean {
-        const sessionEl = this.container.querySelector(
-            `[data-session-id="${sessionId}"]`
-        ) as HTMLElement;
+        const sessionEl = this.renderer.getSessionElement(sessionId) ?? this.renderer.getNode(sessionId);
         if (!sessionEl) return false;
 
-        const collapsible = sessionEl.querySelector(
-            '.llm-ui-bubble--user, .llm-ui-node'
-        ) as HTMLElement;
+        const collapsible = sessionEl.matches('.llm-ui-flow-window, .llm-ui-node') ? sessionEl
+            : sessionEl.querySelector<HTMLElement>('.llm-ui-bubble--user, .llm-ui-node');
         if (!collapsible) return false;
 
         const current = collapsible.classList.contains('is-collapsed');
@@ -132,11 +129,13 @@ export class CollapseController {
     // ================================================================
 
     setAllCollapsed(collapsed: boolean): void {
-        const items = this.container.querySelectorAll('.llm-ui-bubble--user, .llm-ui-node');
+        const items = this.container.querySelectorAll<HTMLElement>('.llm-ui-bubble--user, .llm-ui-node, .llm-ui-flow-window');
         items.forEach((el) => {
             el.classList.toggle('is-collapsed', collapsed);
             const btn = el.querySelector('[data-action="collapse"]') as HTMLElement;
             if (btn) this.updateChevron(btn, collapsed);
+            const id = el.dataset.historyId || el.dataset.id || el.closest<HTMLElement>('[data-session-id]')?.dataset.sessionId;
+            if (id) this.states[id] = collapsed;
         });
 
         this.container.querySelectorAll('[data-session-id]').forEach(el => {
@@ -233,11 +232,11 @@ export class CollapseController {
      */
     shouldCollapse(): boolean {
         const assistantNodes = this.container.querySelectorAll(
-            '.llm-ui-session--assistant .llm-ui-node'
+            '.llm-ui-session--assistant .llm-ui-node, .llm-ui-flow-window[data-role="assistant"]'
         );
 
         for (const node of assistantNodes) {
-            if (!node.classList.contains('is-collapsed')) {
+            if (!node.classList.contains('is-collapsed') && !node.parentElement?.closest('.is-collapsed')) {
                 return true;
             }
         }
@@ -299,16 +298,17 @@ export class CollapseController {
      */
     private collectUnfoldedElements(roleFilter: string | null): HTMLElement[] {
         const unfoldedElements: HTMLElement[] = [];
-        const allSessions = this.container.querySelectorAll('.llm-ui-session');
+        const allSessions = this.container.querySelectorAll('.llm-ui-session, [data-history-id]');
 
         for (const el of allSessions) {
             const sessionEl = el as HTMLElement;
-            const id = sessionEl.dataset.sessionId;
+            if (sessionEl.classList.contains('llm-ui-session') && sessionEl.querySelector('.llm-ui-flow-window')) continue;
+            const id = sessionEl.dataset.historyId || sessionEl.dataset.sessionId;
             if (!id) continue;
-            if (this.states[id]) continue; // 已折叠，跳过
+            if (this.states[id] || sessionEl.classList.contains('is-collapsed')) continue; // 已折叠，跳过
 
             if (roleFilter &&
-                !sessionEl.classList.contains(`llm-ui-session--${roleFilter}`)) {
+                !sessionEl.classList.contains(`llm-ui-session--${roleFilter}`) && sessionEl.dataset.role !== roleFilter) {
                 continue;
             }
 
@@ -328,7 +328,7 @@ export class CollapseController {
     ): string | null {
         // 视口中有 unfold chat → 返回最靠上的
         if (inViewport.length > 0) {
-            return inViewport[0].dataset.sessionId || null;
+            return inViewport[0].dataset.historyId || inViewport[0].dataset.sessionId || null;
         }
 
         // 视口中没有，检查视口上方最后一个是否 body 仍然可见
@@ -336,7 +336,7 @@ export class CollapseController {
             const last = aboveViewport[aboveViewport.length - 1];
             const rect = last.getBoundingClientRect();
             if (rect.bottom > viewportTop) {
-                return last.dataset.sessionId || null;
+                return last.dataset.historyId || last.dataset.sessionId || null;
             }
         }
 
@@ -356,11 +356,11 @@ export class CollapseController {
         const titleHidden = this.findTitleHiddenElement(
             allUnfolded, viewportTop, titleHeight
         );
-        if (titleHidden) return titleHidden.dataset.sessionId || null;
+        if (titleHidden) return titleHidden.dataset.historyId || titleHidden.dataset.sessionId || null;
 
         // 视口上方最后一个
         if (aboveViewport.length > 0) {
-            return aboveViewport[aboveViewport.length - 1].dataset.sessionId || null;
+            return aboveViewport[aboveViewport.length - 1].dataset.historyId || aboveViewport[aboveViewport.length - 1].dataset.sessionId || null;
         }
 
         // 已在最顶部
@@ -378,7 +378,7 @@ export class CollapseController {
     ): string | null | '__end__' {
         // 视口下方的第一个
         if (belowViewport.length > 0) {
-            return belowViewport[0].dataset.sessionId || null;
+            return belowViewport[0].dataset.historyId || belowViewport[0].dataset.sessionId || null;
         }
 
         // 所有 unfold chat 都在视口中或上方 → 到底了
@@ -416,6 +416,7 @@ export class CollapseController {
     // ================================================================
 
     private updateChevron(btn: HTMLElement, isCollapsed: boolean): void {
+        btn.setAttribute('aria-expanded', String(!isCollapsed));
         const svg = btn.querySelector('svg');
         if (svg) {
             svg.innerHTML = isCollapsed

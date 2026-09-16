@@ -1,6 +1,6 @@
 // @file: llm-ui/components/history/NodeRenderer.ts
 
-import { escapeHTML, FEEDBACK_ICONS } from '@itookit/common';
+import { escapeHTML, FEEDBACK_ICONS, t } from '@itookit/common';
 import { ExecutionNode } from '@itookit/llm-session';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { IconResolver } from '../../utils/iconResolver';
@@ -22,6 +22,7 @@ export class NodeRenderer {
 
         el.className = `llm-ui-node llm-ui-node--${node.executorType} ${layoutClass}`;
         el.dataset.id = node.id;
+        el.dataset.title = node.name;
         el.dataset.status = node.status;
         if (node.messageRole) el.dataset.role = node.messageRole;
 
@@ -36,6 +37,10 @@ export class NodeRenderer {
         }
 
         return { element: el, mountPoints };
+    }
+
+    static renderRequests(requests?: unknown[]): string {
+        return `<details class="llm-ui-node__req"><summary>req</summary><pre>${escapeHTML(requests?.length ? JSON.stringify(requests, null, 2) : t('flow.history.noRequest'))}</pre></details>`;
     }
 
     private static renderAgent(
@@ -63,6 +68,7 @@ export class NodeRenderer {
             <div class="llm-ui-node__body">
                 ${node.data.metaInfo?.actor?.kind === 'tool' && node.data.input !== undefined
                     ? `<details class="llm-ui-node__input"><summary>${escapeHTML(node.name)}</summary><pre>${escapeHTML(typeof node.data.input === 'string' ? node.data.input : JSON.stringify(node.data.input, null, 2))}</pre></details>` : ''}
+                ${node.data.metaInfo?.flowInteraction && node.data.metaInfo?.actor?.kind !== 'tool' ? NodeRenderer.renderRequests(node.data.metaInfo?.requests) : ''}
                 ${NodeTemplates.renderThinking(node.data.thought || '', hasThought, node.status)}
                 ${errorHtml}
                 <div class="llm-ui-node__output">

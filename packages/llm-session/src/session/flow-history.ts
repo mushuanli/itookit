@@ -1,3 +1,4 @@
+import { flowLogicInteraction } from './flow-logic-history';
 import { flowActor, flowToolInteraction, flowToolId, flowRequestId } from './flow-identity';
 import { formatFlowOutput, type AgentEvent, type FlowInteraction } from '@itookit/common';
 import type { EventEnvelope, TaskHandle, TaskRecord } from '@itookit/durable-kernel';
@@ -17,6 +18,8 @@ export class FlowHistory {
         const entry = visible && !input ? this.append(task) : undefined;
         for await (const envelope of handle.events()) {
             if (entry) this.event(entry, envelope);
+            const logic = flowLogicInteraction(task, envelope);
+            if (logic && !this.interactions.some(item => item.id === logic.id)) this.append(task, logic);
             if (envelope.type === 'agent.event' && String((envelope.payload as AgentEvent).type).startsWith('tool:')) {
                 this.tool((await handle.status()).task, envelope.payload as AgentEvent);
             }
@@ -37,7 +40,7 @@ export class FlowHistory {
     private append(task: TaskRecord, overrides: Partial<FlowInteraction> = {}): FlowInteraction {
         const entry: FlowInteraction = { id: `flow-${task.id}`, taskId: task.id,
             name: task.labels?.flowNodeName ?? task.labels?.dispatchKey ?? task.labels?.flowNodeId ?? task.program.kind,
-            actor: flowActor(task),
+            actor: flowActor(task), parallelGroup: task.labels?.flowHistoryGroup,
             role: ['flow.input', 'flow.human'].includes(task.program.kind) ? 'user' : 'assistant',
             status: 'running', content: '', createdAt: task.createdAt, ...overrides };
         this.interactions.push(entry);
@@ -50,11 +53,28 @@ export class FlowHistory {
     private event(entry: FlowInteraction, envelope: EventEnvelope): void {
         if (envelope.type !== 'agent.event') return;
         const event = envelope.payload as AgentEvent;
-        if (event.type !== 'stream:content') return;
-        entry.content += event.delta;
-        this.execution.state.updateNodeOutput(entry.id, entry.content);
+        if (event.type === 'llm:request') { this.requestSnapshot(entry, event); return; }
+        if (event.type !== 'stream:content' && event.type !== 'stream:thinking') return;
+        const field = event.type === 'stream:thinking' ? 'thought' : 'output';
+        if (field === 'thought') {
+            entry.thinking = (entry.thinking ?? '') + event.delta;
+            this.execution.state.appendToNode(entry.id, event.delta, 'thought');
+        } else {
+            entry.content += event.delta;
+            this.execution.state.updateNodeOutput(entry.id, entry.content);
+        }
         this.bus.emitSession(this.execution.task.sessionId, { type: 'message:updated',
-            payload: { messageId: entry.id, delta: event.delta, field: 'output' } });
+            payload: { messageId: entry.id, delta: event.delta, field } });
+    }
+
+    private requestSnapshot(entry: FlowInteraction, event: Extract<AgentEvent, { type: 'llm:request' }>): void {
+        const { type: _type, ...request } = event;
+        const requests = entry.requests ??= [];
+        const index = requests.findIndex(item => item.effectId === request.effectId);
+        if (index < 0) requests.push(request); else requests[index] = request;
+        const metaInfo = { requests: [...requests] };
+        this.execution.state.updateNodeMeta(entry.id, metaInfo);
+        this.bus.emitSession(this.execution.task.sessionId, { type: 'message:updated', payload: { messageId: entry.id, metaInfo } });
     }
 
     private tool(task: TaskRecord, event: AgentEvent): void {

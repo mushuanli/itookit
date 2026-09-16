@@ -1,3 +1,4 @@
+import { FlowVariableStore, validateVariableGraph, variableDefinitions, variableCurrent } from './variables';
 import { rememberSchedulerLease } from './control-session';
 import { fenceSchedulerSession } from './fenced-session';
 import type { SchedulerCheckpoint } from './scheduler-checkpoint';
@@ -247,6 +248,7 @@ export class DurableFlowExecutor {
         spec = saved || spec.templateVersion === 1 ? structuredClone(spec) : compileReferenceGraph(compileDispatchGraph(structuredClone(spec)));
         parameters = prepareFlowParameters(spec.parameterSchema, parameters);
         validateDispatchCapacity(spec, parameters);
+        validateVariableGraph(spec);
         const plugins = createRunCatalog(this.options.plugins, saved?.nodes ?? spec.nodes, saved?.catalog);
         const sessionContext = structuredClone(saved ? saved.sessionContext
             : this.options.resolveNewRunContext ? await this.options.resolveNewRunContext(sessionId) : this.options.sessionContext);
@@ -303,6 +305,7 @@ export class DurableFlowExecutor {
             const completionOrder: string[] = saved?.completionOrder ?? [];
             // 已派发的节点（按派发顺序），用于 supervisor 的「每轮只等本轮派发的 worker」。
             const dispatchOrder: string[] = saved?.dispatchOrder ?? [];
+            const variableStore = new FlowVariableStore(spec, saved?.variables);
             const nodeGenerations = new Map<string, number>(saved?.nodeGenerations ?? []);
             const edgeState = new Map<string, EdgeState>(
                 saved?.edgeState ?? edges.map(edge => [edge.id, routeEdgeIds.has(edge.id) ? 'pending' : 'active']),
@@ -313,7 +316,7 @@ export class DurableFlowExecutor {
                 for (const [id, value] of saved.nodeConnections) nodeConnections.set(id, value);
             }
             const checkpointSnapshot = (): SchedulerCheckpoint => ({
-                    version: 1, spec, parameters, sessionContext, catalog: plugins.snapshot(),
+                    version: 1, spec, parameters, sessionContext, variables: variableStore.state, catalog: plugins.snapshot(),
                     instances: [...instances].map(([id, handles]) => [id, handles.map(handle => handle.id)]),
                     completed: [...completed], nodes, edges, edgeState: [...edgeState],
                     delegationDepth: [...delegationDepth], delegationGroupByChild: [...delegationGroupByChild],
@@ -325,6 +328,7 @@ export class DurableFlowExecutor {
                     nodeGenerations: [...nodeGenerations],
             });
             const saveCheckpoint = async (): Promise<void> => {
+                variableStore.prune(new Set([...instances.values()].flat().map(handle => handle.id)));
                 if (published) await session.setShared(`flow.run.${published.root.id}.scheduler`, jsonValue(checkpointSnapshot()));
             };
 
@@ -394,7 +398,7 @@ export class DurableFlowExecutor {
                 return activeReady && backReady;
             });
 
-            const submitNode = async (node: DagNodeDefinition): Promise<void> => {
+            const submitNode = async (node: DagNodeDefinition, historyGroup?: string): Promise<void> => {
                 const iteration = (instances.get(node.id)?.length ?? 0) + 1;
                 const incoming = incomingOf(edges, node.id)
                     .filter(edge => (edgeState.get(edge.id) ?? 'active') === 'active')
@@ -426,7 +430,12 @@ export class DurableFlowExecutor {
                 const localParameters = scopedParameters(spec, node.id, parameters ?? {});
                 const referenceOutputs: Record<string, unknown> = {};
                 for (const edge of incoming) referenceOutputs[edge.from] = (await upstreamHandle(edge).status()).task.output;
-                if (spec.templateVersion === 1) node = resolveExecutionNode(node, invocationReferenceContext(nodes, referenceOutputs, localParameters, iteration, node.id));
+                variableStore.prune(new Set([...instances.values()].flat().map(handle => handle.id)));
+                const context = variableStore.snapshot(node, invocationReferenceContext(nodes, referenceOutputs, localParameters, iteration, node.id));
+                if (spec.templateVersion === 1) node = resolveExecutionNode(node, context);
+                if (node.plugin === 'builtin.route' && node.pluginVersion === '2.0.0' && context.vars) {
+                    node = { ...node, config: { ...record(node.config), variables: variableDefinitions(spec, node.id) } };
+                }
                 const runtime = await plugins.loadRuntime(node.plugin, node.pluginVersion);
                 const task = runtime.createTask({
                     sessionId,
@@ -437,10 +446,12 @@ export class DurableFlowExecutor {
                     dependencies,
                 });
                 if (task.programKind === 'flow.dispatch') {
+                    const input = task.input as DispatchInput;
+                    input.maxConcurrency = Math.min(input.maxConcurrency ?? maxConcurrency, maxConcurrency);
                     const scope = nodeConnections.get(node.id);
                     const defaults = (task.input as DispatchInput).invocationDefaults;
                     if (scope && defaults) resolveNodeConnection(defaults as unknown as CommonJsonValue, scope.connections, scope.defaultConnection, scope.fallbackConnectionId);
-                    if (scope) for (const branch of (task.input as DispatchInput).branches) {
+                    if (scope) for (const branch of [...(task.input as DispatchInput).branches, ...((task.input as DispatchInput).revision?.invocation ? [(task.input as DispatchInput).revision!.invocation!] : [])]) {
                         if (defaults?.connectionId && !record(branch.target.config).connectionId) branch.target.config = { ...record(branch.target.config), connectionId: defaults.connectionId } as CommonJsonValue;
                         resolveNodeConnection(branch.target.config, scope.connections, scope.defaultConnection, scope.fallbackConnectionId);
                     }
@@ -451,7 +462,10 @@ export class DurableFlowExecutor {
                 const requestId = published
                     ? `flow:${published.root.id}:${node.id}#${iteration}@${nodeGenerations.get(node.id) ?? 0}`
                     : undefined;
-                const handle = await session.submit(await this.taskSpec(sessionId, node, task, dependencies, localParameters, requestId));
+                const taskSpec = await this.taskSpec(sessionId, node, task, dependencies, localParameters, requestId);
+                if (historyGroup) taskSpec.labels = { ...taskSpec.labels, flowHistoryGroup: historyGroup };
+                const handle = await session.submit(taskSpec);
+                variableStore.remember(handle.id, context);
                 if (!instances.has(node.id)) instances.set(node.id, []);
                 instances.get(node.id)!.push(handle);
                 if (published) {
@@ -493,6 +507,7 @@ export class DurableFlowExecutor {
                 plugins.addNodes(boundNodes);
                 validateGraphPatch({ ...patch, nodes: boundNodes }, nodes, edges, parentId, plugins);
                 validateDispatchCapacity({ ...spec, nodes: [...nodes, ...boundNodes], edges: [...edges, ...additions] }, parameters);
+                validateVariableGraph({ ...spec, nodes: [...nodes, ...boundNodes], edges: [...edges, ...additions] });
                 nodes.push(...boundNodes);
                 const defaults = nodeDefaults.get(parentId);
                 if (defaults) for (const node of boundNodes) nodeDefaults.set(node.id, defaults);
@@ -735,6 +750,7 @@ export class DurableFlowExecutor {
             const applyGraphRetry = async (intent: FlowGraphRetryIntent): Promise<void> => {
                 if (!published) return;
                 const source = String(intent.sourceNodeId);
+                variableStore.retry(intent.sourceTaskId, intent.retryTaskId);
                 // Retrying a delegation parent drops its group; its children are gone, so a
                 // synthetic child can only be retried through its parent.
                 await discardDelegationGroups(source, `Graph retry of ${source}`);
@@ -825,7 +841,9 @@ export class DurableFlowExecutor {
                     count + (detachedNodes.has(nodeId) ? 0 : handles.filter((_, index) =>
                         !completed.has(instanceKey(nodeId, index + 1))).length), 0);
                 const capacity = Math.max(0, maxConcurrency - activeCount);
-                for (const node of readyNodes().slice(0, capacity)) await submitNode(node);
+                const ready = readyNodes().slice(0, capacity);
+                const historyGroup = ready.length > 1 ? `${published!.root.id}:${ready.map(node => `${node.id}#${instances.get(node.id)?.length ?? 0}@${nodeGenerations.get(node.id) ?? 0}`).join(',')}` : undefined;
+                for (const node of ready) await submitNode(node, historyGroup);
                 const pending = [...instances.entries()].flatMap(([nodeId, handles]) =>
                     detachedNodes.has(nodeId) ? [] :
                     handles.map((handle, index) => ({ key: instanceKey(nodeId, index + 1), handle }))
@@ -861,7 +879,11 @@ export class DurableFlowExecutor {
                 if (settled.exit.status === 'succeeded') {
                     const settledNode = nodes.find(candidate => candidate.id === parseInstanceKey(settled.key).nodeId);
                     // Validate the producer contract even when consumers accept a wider schema.
-                    if (settledNode) assertNodeOutputs(settledNode, plugins, settled.exit.output);
+                    if (settledNode) {
+                        variableStore.prune(new Set([...instances.values()].flat().map(handle => handle.id)));
+                        assertNodeOutputs(settledNode, plugins, settled.exit.output);
+                        variableStore.commit(settledNode, pending.find(item => item.key === settled.key)!.handle.id, settled.exit.output);
+                    }
                 }
                 consumedTokens += outputTokens(settled.exit.output);
                 if (maxTokens && consumedTokens > maxTokens) {
@@ -1123,7 +1145,9 @@ export class DurableFlowExecutor {
                 tolerated: toleratedFailures.has(nodeId),
                 collectOutput: !suppressed.has(nodeId),
             })), delegationGroups, completionOrder);
-        const input = { ...initial, dependencies, awaitingSchedule, run: jsonValue({ version: 1, goal: run.goal ?? null, usage: run.usage }),
+        const checkpoint = existing && !awaitingSchedule
+            ? (await session.getShared(`flow.run.${existing.id}.scheduler`))?.value as unknown as SchedulerCheckpoint : undefined;
+        const input = { ...initial, ...(checkpoint?.variables && Object.keys(checkpoint.variables.initial).length ? { variables: jsonValue({ initial: checkpoint.variables.initial, changes: checkpoint.variables.commits, current: variableCurrent(checkpoint.variables) }) } : {}), dependencies, awaitingSchedule, run: jsonValue({ version: 1, goal: run.goal ?? null, usage: run.usage }),
             runTasks: runMembers(instances, nodes, detachedNodes) };
         if (existing) {
             await session.setShared(`flow.run.${existing.id}.members`, jsonValue(input.runTasks));

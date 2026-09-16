@@ -75,7 +75,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function flowInteractionNode(entry: import('@itookit/common').FlowInteraction, parentId: string): ExecutionNode {
     return { id: entry.id, parentId, messageRole: entry.role, executorId: entry.taskId, executorType: 'composite',
         name: entry.name, status: entry.status, startTime: entry.createdAt,
-        data: { input: entry.input, output: entry.content, error: entry.error, metaInfo: { flowInteraction: true, actor: entry.actor } }, children: [] };
+        data: { input: entry.input, output: entry.content, thought: entry.thinking, error: entry.error, metaInfo: { flowInteraction: true, actor: entry.actor, parallelGroup: entry.parallelGroup, requests: entry.requests } }, children: [] };
 }
 
 export function buildFlowChildren(projection: RoundProjection): ExecutionNode[] {

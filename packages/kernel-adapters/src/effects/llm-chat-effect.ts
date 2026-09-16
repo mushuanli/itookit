@@ -54,14 +54,20 @@ export class LlmChatEffectAdapter implements EffectAdapter<LlmChatEffectRequest,
         assertEffectGrant(context, request.resourceHandleId, 'llm');
         if (!request.connectionId.trim()) throw new Error('LLM connection id is required');
         const service = await resolveCapability(this.service, context);
-        const params: ChatCompletionParams = { ...request.request, signal: context.abortSignal };
-        const emit = makeEmitter(context);
-
-        const response = request.request.stream === false
-            ? await completeChat(service, request.connectionId, params, emit)
-            : await streamChat(service, request.connectionId, params, emit);
-        await chargeUsage(context, request.resourceHandleId, response.usage);
-        return response;
+        const controller = new AbortController();
+        const abort = () => controller.abort(context.abortSignal.reason);
+        if (context.abortSignal.aborted) abort();
+        context.abortSignal.addEventListener('abort', abort, { once: true });
+        const params: ChatCompletionParams = { ...request.request, signal: controller.signal };
+        const emit = makeEmitter(context, controller);
+        try {
+            await emit({ type: 'llm:request', effectId: context.effectId, connectionId: request.connectionId, request: request.request });
+            const response = request.request.stream === false
+                ? await completeChat(service, request.connectionId, params, emit)
+                : await streamChat(service, request.connectionId, params, emit);
+            await chargeUsage(context, request.resourceHandleId, response.usage);
+            return response;
+        } finally { context.abortSignal.removeEventListener('abort', abort); }
     }
 
     async reconcile(request: LlmChatEffectRequest): Promise<EffectReconcileResult<ChatCompletionResponse>> {
@@ -96,10 +102,11 @@ export async function prepareLlmChatEffectRequest(
 /** 流式事件批量窗口（ms）。合并 LLM 高频 chunk 为低频事件写入，缓解事件日志 O(n²) 轮询。 */
 const STREAM_BATCH_MS = 40;
 
-function makeEmitter(context: EffectExecutionContext): (event: AgentEvent) => Promise<void> {
+function makeEmitter(context: EffectExecutionContext, controller: AbortController): (event: AgentEvent) => Promise<void> {
     const emit = context.emit;
     return async (event: AgentEvent): Promise<void> => {
-        await emit?.({ type: 'agent.event', payload: event });
+        try { await emit?.({ type: 'agent.event', payload: event }); }
+        catch (error) { controller.abort(error); throw error; }
     };
 }
 
@@ -175,33 +182,39 @@ class DeltaBatcher {
     private timer: ReturnType<typeof setTimeout> | null = null;
     /** 串行化 flush：并发 flush 会让增量 emit 交错、下游顺序错乱（内容被"洗牌"）。 */
     private chain: Promise<void> = Promise.resolve();
+    private failure?: { error: unknown };
 
     constructor(private readonly emit: (event: AgentEvent) => Promise<void>) {}
 
     push(type: 'stream:thinking' | 'stream:content', delta: string): void {
+        if (this.failure) throw this.failure.error;
         this.pending.push({ type, delta });
         if (this.timer) return;
         this.timer = setTimeout(() => {
             this.timer = null;
-            void this.flush();
+            void this.flush().catch(() => { /* The stored failure is propagated by push/flush. */ });
         }, STREAM_BATCH_MS);
     }
+
+    private throwIfFailed(): void { if (this.failure) throw this.failure.error; }
 
     async flush(): Promise<void> {
         if (this.timer) {
             clearTimeout(this.timer);
             this.timer = null;
         }
+        if (this.failure) { this.pending = []; throw this.failure.error; }
         const batch = mergeConsecutive(this.pending);
         this.pending = [];
-        if (batch.length === 0) return this.chain;
+        if (batch.length === 0) { await this.chain; this.throwIfFailed(); return; }
         // 每个批次串到前一批之后，保证 emit 顺序与增量到达顺序一致。
         const next = this.chain.then(async () => {
+            if (this.failure) throw this.failure.error;
             for (const item of batch) {
                 await this.emit({ type: item.type, delta: item.delta });
             }
         });
-        this.chain = next.catch(() => {});
+        this.chain = next.catch(error => { this.failure ??= { error }; });
         return next;
     }
 }

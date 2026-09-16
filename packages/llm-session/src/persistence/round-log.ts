@@ -286,7 +286,7 @@ export class RoundLog implements ILog {
     }
 
     async createBranchForReplacement(
-        sourceRoundId: RoundId,
+        sourceRoundId: RoundId | null,
         newRootRoundId: RoundId,
         options: { branchName?: Ref; createdFrom: 'regenerate' | 'manual' | 'edit' },
     ): Promise<{ branchName: Ref; commonHeadId?: RoundId }> {

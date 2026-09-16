@@ -1,19 +1,21 @@
 /** Runtime references are evaluated once against a persisted invocation snapshot. */
 export interface FlowTemplateContext {
+    vars?: Record<string, unknown>;
+    output?: unknown;
     param?: Record<string, unknown>;
     nodes?: Record<string, unknown>;
     state?: Record<string, unknown>;
     iteration?: { round: number };
 }
-const referencePattern = /\$\{(param|params|nodes|state|iteration)\.([A-Za-z0-9_./-]+)\}/g;
+const referencePattern = /\$\{(param|params|nodes|state|iteration|vars|output)\.([A-Za-z0-9_./-]+)\}|\$\{(output)\}/g;
 
 export function flowTemplateReferences(value: unknown): Array<{ root: string; path: string[] }> {
-    if (typeof value === 'string') return [...value.matchAll(referencePattern)].map(match => ({ root: match[1] === 'params' ? 'param' : match[1], path: match[2].split('.') }));
+    if (typeof value === 'string') return [...value.matchAll(referencePattern)].map(match => ({ root: match[1] === 'params' ? 'param' : match[1] ?? match[3], path: match[2]?.split('.') ?? [] }));
     if (Array.isArray(value)) return value.flatMap(flowTemplateReferences);
     if (value && typeof value === 'object') {
         const expression = value as { kind?: string; path?: string[] };
-        if (expression.kind === 'path' && Array.isArray(expression.path) && ['inputs', 'nodes'].includes(expression.path[0])) {
-            return [{ root: expression.path[0] === 'inputs' ? 'param' : 'nodes', path: expression.path.slice(1) }];
+        if (expression.kind === 'path' && Array.isArray(expression.path) && ['inputs', 'nodes', 'vars'].includes(expression.path[0])) {
+            return [{ root: expression.path[0] === 'inputs' ? 'param' : expression.path[0], path: expression.path.slice(1) }];
         }
         return Object.values(value).flatMap(flowTemplateReferences);
     }
@@ -35,9 +37,9 @@ export function renderFlowTemplate(value: unknown, context: FlowTemplateContext)
 }
 
 function readReference(match: ArrayLike<string>, context: FlowTemplateContext): unknown {
-    const root = match[1] === 'params' ? 'param' : match[1];
+    const root = match[1] === 'params' ? 'param' : match[1] ?? match[3];
     let value: unknown = context[root as keyof FlowTemplateContext];
-    const parts = match[2].split('.');
+    const parts = match[2]?.split('.') ?? [];
     if (parts.some(key => ['__proto__', 'constructor', 'prototype'].includes(key))) throw new Error(`Unsafe Flow reference: ${match[0]}`);
     if (root === 'param' && value && typeof value === 'object' && Object.hasOwn(value, match[2])) return (value as Record<string, unknown>)[match[2]];
     for (const key of parts) {

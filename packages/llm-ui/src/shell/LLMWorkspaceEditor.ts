@@ -260,7 +260,7 @@ export class LLMWorkspaceEditor implements IEditor {
             module: 'LLMWorkspaceEditor',
             defaultSeverity: 'toast',
             onRenderError: (err) => this.historyView?.renderError(err),
-            onResetLoading: () => this.chatInput?.setLoading(false),
+            onResetLoading: () => this.chatInput?.setLoading(this.sessionManager.isGenerating()),
         });
         // CommandBus comes from initializeConversationSystem, with a no-op fallback.
         this.commandBus = this.options.commandBus ?? {
@@ -370,7 +370,7 @@ export class LLMWorkspaceEditor implements IEditor {
             } : {}),
             onSend: (text, files, agentId, overrides) =>
                 this.sendCommand.run({ text, files, agentId, overrides }),
-            onStop: () => this.commandBus.execute(SessionCommand.Abort).catch(() => {}),
+            onStop: () => this.commandBus.execute(SessionCommand.Abort).catch(error => this.errorHandler.handle(error, 'Stop execution')),
             initialAgents,
             initialConfig: {
                 text: savedUIState?.input_text || '',
@@ -539,11 +539,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private bindEvents(): void {
         this.container.querySelector('#llm-btn-flow-rerun')?.addEventListener('click', () => {
-            if (!this.currentSessionId) return;
-            if (this.sessionManager.isGenerating()) { Toast.info(t('flow.rerun.busy')); return; }
-            this.flowRerunAbort?.abort();
-            this.flowRerunAbort = new AbortController();
-            void rerunSessionFlow(this.commandBus, this.flowRerunAbort.signal).catch(error => Toast.error(String(error)));
+            void this.rerunFlow().catch(error => Toast.error(String(error)));
         });
         this.container.querySelector('#llm-btn-flow-output')?.addEventListener('click', () => {
             if (!this.currentSessionId) return;
@@ -871,7 +867,15 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     setReadOnly(): void { }
-    get commands() { return {}; }
+    get commands() { return { rerunFlow: () => this.rerunFlow() }; }
+
+    private async rerunFlow(): Promise<void> {
+        if (!this.currentSessionId) return;
+        if (this.sessionManager.isGenerating()) throw new Error(t('flow.rerun.busy'));
+        this.flowRerunAbort?.abort();
+        this.flowRerunAbort = new AbortController();
+        await rerunSessionFlow(this.commandBus, this.flowRerunAbort.signal);
+    }
     getMode() { return 'edit' as const; }
     async switchToMode(): Promise<void> { }
     async getHeadings() { return []; }

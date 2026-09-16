@@ -53,6 +53,7 @@ class Kernel implements KernelRegistration {
     // 会话
     createSession(spec: { id?: string; storage: StorageBindingRef }): Promise<SessionHandle>;
     openSession(id: SessionId): Promise<SessionHandle>;
+    reopenSession(id: SessionId): Promise<SessionHandle>;
     listSessions(): AsyncIterable<SessionRecord>;
     sessionStat(sessionId: string): Promise<SessionStat>;
     setSessionStatus(sessionId: string, status: SessionRecord['status']): Promise<void>;
@@ -530,7 +531,7 @@ interface ExitRecord<O = unknown> { taskId; status: 'succeeded'|'failed'|'cancel
 
 **常用事件名**（`store.ts`/`store-helpers.ts`/`cache-store.ts`/`mailbox-store.ts`/`managed-resources.ts` 落盘）：
 
-- 会话：`session.created`、`session.open/suspending/suspended/closing/closed/archived`（`setSessionStatus` 按状态派生）。
+- 会话：`session.created`、`session.reopened`、`session.open/suspending/suspended/closing/closed/archived`（`setSessionStatus` 按状态派生）。
 - Task：`task.created`、`task.spawned`、`task.started`、`task.signal`、`task.blocked/ready/running/waiting/succeeded/failed/cancelled`（提交与完成时按状态派生）、`task.retry.scheduled`、`task.program.unavailable`、`task.attempt.lost`、`task.control.run/pause/interrupt`、`task.control.acknowledged`、`task.wait.progress`、`task.wait.satisfied`。
 - Effect / 交互：`effect.leased`、`effect.pending/succeeded/failed/cancelled/indeterminate`、`effect.retry.scheduled`、`effect.resolved`、`effect.attempt.lost`、`task.interaction.requested`、`task.interaction.resolved`。
 - 资源 / 预算：`resource.created`、`resource.granted`、`resource.revoked`、`resource.requested`、`resource.resolved`、`budget.configured`、`budget.consumed`。
@@ -795,3 +796,7 @@ Kernel 在恢复 sweep 后复用一次任务扫描供任务遍历、Effect 候�
 ### 父子任务完成关联
 
 `TaskInputEvent` 的 task-exited 事件支持可选 spawnKey。Kernel 从持久子 Task 记录读取该值，仅向实际父 Task 提供，用于恢复后关联声明式 child wait；普通依赖完成事件不附带其他父级的 spawnKey。Flow 的结构化派发控制器使用这一关联读取子任务返回。
+
+**显式重新运行**：`openSession()` 不改变 closed 状态。用户明确重跑时可调用 `reopenSession()`：等待本机关闭清理并清理旧能力作用域，事务内只允许 closed → open（open 幂等），拒绝 closing/archived 以及未完成 Task/Effect 清理；记录 `session.reopened`。旧 Task 终态和已回收 cache 不恢复。普通 `setSessionStatus` 仍拒绝 closed → open。宿主负责持有 Session 写租约；llm-session 在 Flow 重跑创建替代分支前调用此入口。
+
+Task 事件流按 Task 事件索引分页追尾，`events({ after })` 的 after 仍使用 Session sequence；订阅单 Task 不扫描其他 Task 的 Session 日志。终态后继续排空最终页面以保留末尾增量。

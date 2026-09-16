@@ -16,7 +16,9 @@ export function withDispatchWorkspace(node: DagNodeDefinition, directory?: strin
         const branch = object(value);
         return { ...branch, target: withDispatchWorkspace(branch.target as DagNodeDefinition, directory) };
     }) : config.branches;
-    return { ...node, config: { ...config, branches } } as DagNodeDefinition;
+    const revision = object(config.revision), invocation = object(revision.invocation);
+    return { ...node, config: { ...config, branches, ...(revision.invocation ? { revision: { ...revision,
+        invocation: { ...invocation, target: withDispatchWorkspace(invocation.target as DagNodeDefinition, directory) } } } : {}) } } as DagNodeDefinition;
 }
 
 /** Reserve the worst-case child count before creating any task, across every scope. */
@@ -33,6 +35,7 @@ export function validateDispatchCapacity(spec: DagRunSpec, parameters?: Record<s
         }
         if (Number.isSafeInteger(config.maxRounds) && Array.isArray(config.branches)) {
             reserved += Number(config.maxRounds) * (config.mode === 'exclusive' ? 1 : config.branches.length);
+            if (object(config.revision).invocation) reserved += Math.max(0, Number(config.maxRounds) - 1);
         }
     }
     const limit = spec.maxNodes ?? spec.runPolicy?.maxNodes ?? 1000;

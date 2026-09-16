@@ -1,3 +1,4 @@
+import type { PersistedRound } from '../persistence/round-types';
 // @file: llm-conversation/session/session-registry.ts
 
 import {
@@ -46,7 +47,7 @@ export class SessionRegistry {
     private _eventBus: SessionEventBus;
     private _engine: ISessionRepository;
 
-    constructor(engine: ISessionRepository) {
+    constructor(engine: ISessionRepository, private readonly restoreRound: (round: PersistedRound) => Promise<PersistedRound> = async round => round) {
         this._engine = engine;
         this._eventBus = new SessionEventBus();
     }
@@ -407,7 +408,7 @@ export class SessionRegistry {
         const rounds = await Promise.all(chain.map(id => log.readRound(id)));
         for (const t of rounds) {
             if (!t || t._deleted) continue;
-            state.loadFromProjection(roundToProjection(t, t.id));
+            state.loadFromProjection(roundToProjection(await this.restoreRound(t), t.id));
         }
     }
 
@@ -465,7 +466,7 @@ export class SessionRegistry {
             if (!t || t._deleted) continue;
             if (state.hasRound(t.id)) continue;
 
-            const projection = roundToProjection(t, t.id);
+            const projection = roundToProjection(await this.restoreRound(t), t.id);
             const events = state.apply({
                 type: 'round:appended',
                 ref: (await log.loadManifest()).currentBranch,

@@ -9,9 +9,9 @@ function example(): FlowDraft {
 function revision(draft = example()) { return { ...draft, revision: 1, createdAt: 0, digest: '' }; }
 
 describe('visible dispatch graph', () => {
-    it('keeps all nine authoring nodes and compiles their wiring into the durable scope', async () => {
+    it('keeps all ten authoring nodes and compiles their wiring into the durable scope', async () => {
         const draft = example(); const before = structuredClone(draft);
-        expect(draft.nodes).toHaveLength(9);
+        expect(draft.nodes).toHaveLength(10);
         const graph = await flowToDag(revision(draft));
         expect(draft).toEqual(before);
         expect(graph.nodes.map(node => node.id)).toEqual(['collect', 'review', 'report']);
@@ -58,7 +58,7 @@ describe('visible dispatch graph', () => {
         const saved = structuredClone(compact);
         const expanded = expandDispatchDraft(compact);
         expect(compact).toEqual(saved);
-        expect(expanded.nodes).toHaveLength(9);
+        expect(expanded.nodes).toHaveLength(10);
         expect(expanded.nodes.filter(node => node.plugin === 'builtin.check')).toHaveLength(4);
         const recompiled = compileDispatchGraph(expanded);
         expect((recompiled.nodes[1].config as any).until).toEqual((compact.nodes[1].config as any).until);

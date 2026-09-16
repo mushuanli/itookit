@@ -36,3 +36,14 @@ it('keeps a restored branch draft separate from main when a mount reloads the ed
     expect(drafts.get('experiment')).toBe('updated experiment');
     manager.cleanup(); await manager.waitForDrafts();
 });
+
+it('keeps Stop available when generation starts during branch draft restoration', async () => {
+    let generating = false;
+    const input = { getConfig: () => ({}), restoreInput: vi.fn(), setLoading: vi.fn() };
+    const service = { saveUIState: async () => {}, loadUIState: async () => { generating = true; return {}; } };
+    const manager = new StateManager(service as unknown as StateService, { isGenerating: () => generating } as SessionManager, 's', id => id);
+    manager.setChatInputGetter(() => input as unknown as IChatInputPresenter);
+    await manager.switchDraftBranch('experiment');
+    expect(input.setLoading).toHaveBeenLastCalledWith(true);
+    manager.cleanup();
+});

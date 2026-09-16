@@ -38,8 +38,12 @@
         "y": 250
       },
       "report": {
-        "x": 1600,
-        "y": 250
+        "x": 1630,
+        "y": 200
+      },
+      "rewrite": {
+        "x": 1280,
+        "y": 510
       }
     },
     "viewport": {
@@ -89,6 +93,16 @@
       "minimum": 0,
       "maximum": 10,
       "description": "各项达标分数"
+    },
+    {
+      "name": "maxExchanges",
+      "type": "number",
+      "required": true,
+      "default": 3,
+      "minimum": 2,
+      "maximum": 100,
+      "integer": true,
+      "description": "每个检查节点最多模型交互次数，包含工具调用后的续答和格式修复；与评审轮数独立"
     }
   ],
   "nodes": [
@@ -139,7 +153,7 @@
         },
         "requireNoHistory": true,
         "invocationDefaults": {
-          "prompt": "作文要求：${param.requirements}\n作文内容：${param.essay}\n请根据你的 system prompt 中的职责进行检查，返回 score、issues、suggestions。",
+          "prompt": "作文要求：${param.requirements}\n作文内容：${vars.essay}\n请根据你的 system prompt 中的职责进行检查，返回 score、issues、suggestions。",
           "context": {
             "history": "none"
           },
@@ -230,7 +244,7 @@
       "capabilities": [],
       "config": {
         "approval": "none",
-        "maxExchanges": 1,
+        "maxExchanges": "${param.maxExchanges}",
         "temperature": 0,
         "key": "content",
         "systemPrompt": "执行审题与内容检查。按作文要求评审作文，给出0到10分的score、具体issues和suggestions。只输出符合schema的JSON，不修改作文，不参考其他检查评分。"
@@ -245,7 +259,7 @@
       "capabilities": [],
       "config": {
         "approval": "none",
-        "maxExchanges": 1,
+        "maxExchanges": "${param.maxExchanges}",
         "temperature": 0,
         "key": "structure",
         "systemPrompt": "执行结构主旨检查。按作文要求评审作文，给出0到10分的score、具体issues和suggestions。只输出符合schema的JSON，不修改作文，不参考其他检查评分。"
@@ -260,7 +274,7 @@
       "capabilities": [],
       "config": {
         "approval": "none",
-        "maxExchanges": 1,
+        "maxExchanges": "${param.maxExchanges}",
         "temperature": 0,
         "key": "language",
         "systemPrompt": "执行描写语言检查。按作文要求评审作文，给出0到10分的score、具体issues和suggestions。只输出符合schema的JSON，不修改作文，不参考其他检查评分。"
@@ -275,7 +289,7 @@
       "capabilities": [],
       "config": {
         "approval": "none",
-        "maxExchanges": 1,
+        "maxExchanges": "${param.maxExchanges}",
         "temperature": 0,
         "key": "logic",
         "systemPrompt": "执行逻辑一致性检查。按作文要求评审作文，给出0到10分的score、具体issues和suggestions。只输出符合schema的JSON，不修改作文，不参考其他检查评分。"
@@ -305,6 +319,51 @@
       "outputPolicy": {
         "includeInRunOutput": false,
         "publishToHistory": false
+      }
+    },
+    {
+      "id": "rewrite",
+      "name": "根据评审意见修改作文",
+      "plugin": "builtin.revise",
+      "pluginVersion": "1.0.0",
+      "inputs": {},
+      "capabilities": [],
+      "config": {
+        "key": "rewrite",
+        "systemPrompt": "你是作文修改员。根据四维评审意见修改作文，保持原题意、事实和作者立场。只输出符合 schema 的 JSON，essay 为完整修改稿。",
+        "prompt": "作文要求：${param.requirements}\n当前作文：${vars.essay}\n本轮评审意见：${state.results}\n请针对这些意见改写作文，返回完整的 essay。",
+        "fields": {
+          "essay": {
+            "type": "string",
+            "required": true,
+            "nonBlank": true
+          }
+        },
+        "context": {
+          "history": "none"
+        },
+        "approval": "none",
+        "maxExchanges": "${param.maxExchanges}",
+        "outputContract": {
+          "format": "json",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "essay": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "essay"
+            ],
+            "additionalProperties": false
+          },
+          "onInvalid": "repair",
+          "retries": 1
+        }
+      },
+      "assign": {
+        "essay": "${output.essay}"
       }
     },
     {
@@ -401,9 +460,9 @@
       "input": "input"
     },
     {
-      "id": "judge-review",
+      "id": "judge-rewrite",
       "from": "judge",
-      "to": "review",
+      "to": "rewrite",
       "kind": "control",
       "output": "repeat",
       "input": "input"
@@ -415,6 +474,20 @@
       "kind": "data",
       "output": "result",
       "input": "input"
+    },
+    {
+      "id": "rewrite-review",
+      "from": "rewrite",
+      "to": "review",
+      "kind": "data",
+      "output": "result",
+      "input": "input"
     }
-  ]
+  ],
+  "variables": {
+    "essay": {
+      "type": "string",
+      "initial": "${param.essay}"
+    }
+  }
 }

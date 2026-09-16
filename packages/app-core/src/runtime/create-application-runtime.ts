@@ -187,7 +187,8 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
 
         const acquireSessionLease = (sessionId: string): Promise<boolean> => recovery.acquireLater(sessionId);
         const unsubscribeSessionLease = sessionManager.onGlobalEvent(event => {
-            if (event.type === 'session_registered') void acquireSessionLease(event.payload.sessionId);
+            if (event.type === 'session_registered') void acquireSessionLease(event.payload.sessionId)
+                .catch(error => console.warn(`[Shell] Session ${event.payload.sessionId} recovery failed; writes remain blocked`, error));
         });
         cleanupFns.push(unsubscribeSessionLease);
 

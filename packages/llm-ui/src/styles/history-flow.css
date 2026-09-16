@@ -1,0 +1,45 @@
+.llm-ui-flow-window {
+    border: 1px solid var(--llm-border-color);
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 12px;
+    min-width: 0;
+}
+
+.llm-ui-node__req {
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.llm-ui-node__req > summary {
+    cursor: pointer;
+}
+
+.llm-ui-node__req > pre {
+    max-height: 360px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding: 8px;
+    background: var(--llm-bg-secondary);
+}
+
+.llm-ui-flow-window.is-collapsed > .llm-ui-flow-window__body {
+    display: none;
+}
+
+.llm-ui-flow-window > .llm-ui-node__header .llm-ui-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 4px;
+}
+
+.llm-ui-flow-window__body {
+    padding-top: 8px;
+}
+
+.llm-ui-flow-window:hover > .llm-ui-node__header .llm-ui-actions,
+.llm-ui-flow-window.is-collapsed > .llm-ui-node__header .llm-ui-actions,
+.llm-ui-flow-window:focus-within > .llm-ui-node__header .llm-ui-actions {
+    opacity: 1;
+}

@@ -31,6 +31,7 @@ export function flowRevisionDigest(flow: Omit<FlowRevision, 'digest'>): string {
         nodes: flow.nodes,
         edges: flow.edges,
         parameters: flow.parameters,
+        ...(flow.variables ? { variables: flow.variables } : {}),
         connections: flow.connections,
         defaultConnection: flow.defaultConnection,
         systemPrompt: flow.systemPrompt,

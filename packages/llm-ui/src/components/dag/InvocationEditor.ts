@@ -45,6 +45,7 @@ function preview(root: HTMLElement, toolbar: HTMLElement, draft: FlowDraft, conf
 function referenceOptions(draft: FlowDraft, editing: FlowNodeDefinition): string[] {
     const currentScope = scopeRoute(draft, editing.id);
     const options = new Set((draft.parameters ?? []).map(item => `\${param.${item.name}}`));
+    for (const key of Object.keys(draft.variables ?? {})) options.add(`\${vars.${key}}`);
     for (const node of draft.nodes) {
         const config = record(node.config);
         if (node.plugin === 'builtin.input') for (const key of Object.keys(record(config.param ?? config.fields))) options.add(`\${param.${key}}`);
@@ -78,7 +79,7 @@ function scopeRoute(draft: FlowDraft, id: string): string | undefined {
         seen.add(current);
         const node = draft.nodes.find(item => item.id === current);
         if (node?.plugin === 'builtin.route') return current;
-        if (!node || !['builtin.check', 'builtin.aggregate', 'builtin.judge'].includes(node.plugin)) continue;
+        if (!node || !['builtin.check', 'builtin.aggregate', 'builtin.judge', 'builtin.revise'].includes(node.plugin)) continue;
         pending.push(...draft.edges.filter(edge => edge.to === current && edge.output !== 'repeat').map(edge => edge.from));
     }
     return undefined;

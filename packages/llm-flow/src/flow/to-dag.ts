@@ -30,6 +30,7 @@ export async function flowToDag(
         const config = cloneJson((patch.config ?? (defaults ? mergeAgentConfig(defaults, node.config) : node.config)) as FlowNodeDefinition['config']);
         resolveNodeConnection(config, flow.connections, flow.defaultConnection, fallbackConnectionId);
         return {
+            assign: structuredClone(node.assign),
             id: String(node.id),
             name: node.name,
             plugin: node.plugin,
@@ -49,6 +50,7 @@ export async function flowToDag(
         };
     }));
     const base: DagRunSpec = {
+        variables: structuredClone(flow.variables),
         templateVersion: 1,
         parameterSchema: structuredClone(flow.parameters),
         nodes,
@@ -87,6 +89,7 @@ async function expandCompositeNodes(
     if (!composites.length) return spec;
     if (!resolveComposite) throw new Error('Composite Flow nodes require a Flow revision resolver');
     const parameterScopes = { ...spec.parameterScopes };
+    const variableScopes = { ...spec.variableScopes };
     const nodeDefaults = { ...spec.nodeDefaults };
     const nodeConnections = { ...spec.nodeConnections };
     const replacement = new Map<string, { entries: string[]; exits: string[] }>();
@@ -107,6 +110,8 @@ async function expandCompositeNodes(
         const child = await flowToDag(flow, bind, fallbackConnectionId, resolveComposite, [...compositeStack, reference]);
         if (!child.nodes.length) throw new Error(`Composite Flow is empty: ${flowId}`);
         const prefix = `${composite.id}/`;
+        variableScopes[prefix] = child.variables ?? {};
+        for (const [scope, variables] of Object.entries(child.variableScopes ?? {})) variableScopes[`${prefix}${scope}`] = variables;
         delete nodeDefaults[composite.id];
         delete nodeConnections[composite.id];
         for (const [id, scope] of Object.entries(child.nodeConnections ?? {})) nodeConnections[`${prefix}${id}`] = scope;
@@ -126,6 +131,7 @@ async function expandCompositeNodes(
                 ...node,
                 id: `${prefix}${node.id}`,
                 name: `${composite.name} / ${node.name}`,
+                assign: remapFlowNodeReferences(node.assign, Object.fromEntries(child.nodes.map(item => [item.id, `${prefix}${item.id}`]))) as typeof node.assign,
                 config: remapFlowNodeReferences(node.config, Object.fromEntries(child.nodes.map(item => [item.id, `${prefix}${item.id}`]))),
                 inputs: {
                     ...remapFlowNodeReferences(node.inputs, Object.fromEntries(child.nodes.map(item => [item.id, `${prefix}${item.id}`]))) as Record<string, unknown>,
@@ -149,7 +155,7 @@ async function expandCompositeNodes(
     }
     const aliases = Object.fromEntries([...replacement].filter(([, value]) => value.exits.length === 1).map(([id, value]) => [id, value.exits[0]]));
     const mappedNodes = expandedNodes.map(node => ({ ...node, config: remapFlowNodeReferences(node.config, aliases), inputs: remapFlowNodeReferences(node.inputs, aliases) as typeof node.inputs }));
-    return { ...spec, parameterScopes, nodeDefaults, nodeConnections, nodes: mappedNodes, edges: expandedEdges };
+    return { ...spec, variableScopes, parameterScopes, nodeDefaults, nodeConnections, nodes: mappedNodes, edges: expandedEdges };
 }
 
 /** Apply Flow defaults before the session/agent binder applies its higher layers. */

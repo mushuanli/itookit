@@ -1,3 +1,4 @@
+import type { ChatCompletionParams } from '../llm/completion';
 // Canonical AgentEvent schema — single event vocabulary for the entire LLM subsystem.
 //
 // Replaces 5 event vocabularies + 3 translation layers (~91 events) with ~22 events.
@@ -192,7 +193,15 @@ export interface EventEnvelope<T> {
 
 // ─── Canonical union ─────────────────────────────────────────────────
 
+export interface AgentEventLlmRequest {
+    type: 'llm:request';
+    effectId: string;
+    connectionId: string;
+    request: Omit<ChatCompletionParams, 'signal'>;
+}
+
 export type AgentEvent =
+    | AgentEventLlmRequest
     | AgentEventRoundStart
     | AgentEventRoundEnd
     | AgentEventFinished

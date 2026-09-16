@@ -52,6 +52,7 @@ export class BranchIndicatorView implements IBranchPresenter {
         const current = this.branchStore.currentBranch;
         const name = current?.name || 'main';
 
+        this.events.cleanup();
         el.innerHTML = BranchIndicatorTemplates.renderIndicator(name, branches.length);
         if (branches.length <= 1) return;
 
@@ -59,7 +60,7 @@ export class BranchIndicatorView implements IBranchPresenter {
         const dropdown = el.querySelector('.llm-branch-dropdown') as HTMLElement;
         if (!btn || !dropdown) return;
 
-        this.events.cleanup();
+        this.events.add(dropdown, 'click', ((event: MouseEvent) => this.handleDropdownClick(event, dropdown)) as EventListener);
 
         this.events.add(btn, 'click', ((e: MouseEvent) => {
             e.stopPropagation();
@@ -85,19 +86,23 @@ export class BranchIndicatorView implements IBranchPresenter {
         );
         dropdown.style.display = 'block';
 
-        dropdown.addEventListener('click', (ev) => {
-            const itemEl = (ev.target as HTMLElement).closest(
-                '.llm-branch-dropdown__item'
-            ) as HTMLElement;
-            if (!itemEl || itemEl.classList.contains('is-current')) return;
-            ev.stopPropagation();
+    }
 
-            const branchName = itemEl.dataset.branchName;
-            if (branchName) {
-                this.closeDropdown(dropdown);
-                this.bus.emit('branch:switch', { branchName });
-            }
-        });
+    private handleDropdownClick(event: MouseEvent, dropdown: HTMLElement): void {
+        const target = event.target as HTMLElement;
+        const item = target.closest<HTMLElement>('.llm-branch-dropdown__item');
+        const branchName = item?.dataset.branchName;
+        if (!branchName) return;
+        event.stopPropagation();
+        const deleteButton = target.closest<HTMLButtonElement>('.llm-branch-dropdown__delete');
+        if (deleteButton) {
+            if (deleteButton.disabled) return;
+            this.closeDropdown(dropdown);
+            this.bus.emit('branch:delete', { branchName });
+        } else if (!item?.classList.contains('is-current')) {
+            this.closeDropdown(dropdown);
+            this.bus.emit('branch:switch', { branchName });
+        }
     }
 
     private closeDropdown(dropdown: HTMLElement): void {

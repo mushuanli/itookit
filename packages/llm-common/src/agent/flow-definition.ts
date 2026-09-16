@@ -56,7 +56,14 @@ export interface NodePortSchemas {
     outputs?: Record<string, NodePortSchema>;
 }
 
+export interface FlowVariable {
+    type: 'string' | 'number' | 'boolean' | 'json';
+    initial: JsonValue;
+}
+export type FlowVariables = Record<string, FlowVariable>;
+
 export interface FlowNodeDefinition {
+    assign?: Record<string, JsonValue>;
     /** Result projection never disables durable Task output or downstream data access. */
     outputPolicy?: { includeInRunOutput?: boolean; publishToHistory?: boolean };
     portSchemas?: NodePortSchemas;
@@ -89,6 +96,7 @@ export interface FlowDraft {
     layout: FlowLayout;
     /** Declared runtime parameters (editable in the designer, frozen into revisions). */
     parameters?: FlowParameter[];
+    variables?: FlowVariables;
     /** Named connection slots; nodes reference a slot by name (default = defaultConnection). */
     connections?: FlowConnection[];
     /** Connection slot name used when a node does not specify one. */
@@ -249,6 +257,7 @@ export interface FlowRevision {
     edges: FlowEdgeDefinition[];
     /** Declared runtime parameters (the workflow's variable inputs). */
     parameters?: FlowParameter[];
+    variables?: FlowVariables;
     /** Named connection slots (frozen into the revision). */
     connections?: FlowConnection[];
     /** Connection slot name used when a node does not specify one. */

@@ -166,8 +166,12 @@ it('preserves editable parameter bounds and missing-input policy through Flow se
         { name: 'essay', type: 'string', required: true, onMissing: 'interact' },
     ] });
     document.querySelector<HTMLInputElement>('[data-param-max]')!.value = '20';
+    const variables = { essay: { type: 'string', initial: '${param.essay}' } };
+    document.querySelector<HTMLTextAreaElement>('[data-variables]')!.value = JSON.stringify(variables);
     const dialog = document.querySelector('dialog')!; dialog.returnValue = 'save'; dialog.close();
-    expect((await result)?.parameters).toEqual([
+    const saved = await result;
+    expect(saved?.variables).toEqual(variables);
+    expect(saved?.parameters).toEqual([
         { name: 'rounds', type: 'number', default: 10, required: true, minimum: 1, maximum: 20, integer: true },
         { name: 'essay', type: 'string', required: true, onMissing: 'interact' },
     ]);

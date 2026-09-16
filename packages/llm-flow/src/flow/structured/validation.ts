@@ -36,7 +36,14 @@ export function validateDispatch(config: DispatchConfig, allowTemplates = false)
         keys.add(branch.key);
         validateBranch(config, branch);
     }
-    if (config.revision) validateFields(config.revision.fields);
+    if (config.revision) {
+        validateFields(config.revision.fields);
+        if (config.revision.invocation) {
+            assertKey(config.revision.invocation.key);
+            if (keys.has(config.revision.invocation.key)) throw new Error('Revision key conflicts with a review branch');
+            validateBranch(config, config.revision.invocation);
+        }
+    }
 }
 
 function deferredNumber(value: unknown, allowed: boolean): boolean {

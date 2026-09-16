@@ -70,7 +70,7 @@ function collect(state: DurableAgentState, event: TaskInputEvent): Decision<Dura
 
 function requestLlm(state: DurableAgentState): Decision<DurableAgentState, DurableAgentOutput> {
     if (state.exchanges >= (state.input.maxExchanges ?? DEFAULT_AGENT_MAX_EXCHANGES)) {
-        return fail(state, 'Agent exchange budget exhausted', 'BUDGET_EXHAUSTED');
+        return fail(state, `Agent exchange budget exhausted (${state.exchanges}/${state.input.maxExchanges ?? DEFAULT_AGENT_MAX_EXCHANGES}); increase maxExchanges for tool follow-ups or output repair`, 'BUDGET_EXHAUSTED');
     }
     state.exchanges++;
     state.messages = compactMessages(state.messages, state.input.contextCompaction);
@@ -281,6 +281,11 @@ function handleInvalidOutput(
     }
     const retries = Math.max(0, Math.floor(policy?.retries ?? (policy?.onInvalid === 'repair' ? 1 : 0)));
     if (policy?.onInvalid === 'repair' && state.outputValidationAttempts < retries) {
+        const limit = state.input.maxExchanges ?? DEFAULT_AGENT_MAX_EXCHANGES;
+        if (state.exchanges >= limit) return { state, actions, next: { type: 'fail', error: {
+            code: 'BUDGET_EXHAUSTED', message: `Invalid structured output: ${issue}; output repair requires another LLM exchange, but maxExchanges=${limit} is exhausted (${state.exchanges}/${limit})`,
+        } } };
+
         state.outputValidationAttempts++;
         state.messages.push({
             role: 'user',
@@ -308,7 +313,9 @@ function outputValidationIssue(input: DurableAgentInput, content: unknown): stri
     return validateSchemaValue(value, format.json_schema.schema, '$');
 }
 
-function validateSchemaValue(value: unknown, schema: Record<string, unknown>, path: string): string | undefined {
+function validateSchemaValue(value: unknown, schema: Record<string, unknown> | boolean, path: string): string | undefined {
+    if (schema === true) return undefined;
+    if (schema === false) return `${path}: value is forbidden`;
     const type = schema.type;
     if (typeof type === 'string' && !matchesType(value, type)) return `${path} must be ${type}`;
     if (Array.isArray(schema.enum) && !schema.enum.some(item => JSON.stringify(item) === JSON.stringify(value))) {
@@ -317,20 +324,26 @@ function validateSchemaValue(value: unknown, schema: Record<string, unknown>, pa
     if (typeof value === 'number' && (!Number.isFinite(value)
         || (typeof schema.minimum === 'number' && value < schema.minimum)
         || (typeof schema.maximum === 'number' && value > schema.maximum))) return `${path} is outside the numeric range`;
-    if (isRecord(value)) {
-        const required = Array.isArray(schema.required) ? schema.required.map(String) : [];
-        for (const key of required) if (!(key in value)) return `${path}.${key} is required`;
-        const properties = isRecord(schema.properties) ? schema.properties : {};
-        for (const [key, child] of Object.entries(properties)) {
-            if (key in value && isRecord(child)) {
-                const issue = validateSchemaValue(value[key], child, `${path}.${key}`);
-                if (issue) return issue;
-            }
-        }
-    }
-    if (Array.isArray(value) && isRecord(schema.items)) {
+    if (isRecord(value)) return validateObjectValue(value, schema, path);
+    if (Array.isArray(value) && (isRecord(schema.items) || typeof schema.items === 'boolean')) {
         for (let index = 0; index < value.length; index++) {
             const issue = validateSchemaValue(value[index], schema.items, `${path}[${index}]`);
+            if (issue) return issue;
+        }
+    }
+    return undefined;
+}
+
+function validateObjectValue(value: Record<string, unknown>, schema: Record<string, unknown>, path: string): string | undefined {
+    const required = Array.isArray(schema.required) ? schema.required.map(String) : [];
+    for (const key of required) if (!Object.hasOwn(value, key)) return `${path}.${key} is required`;
+    const properties = isRecord(schema.properties) ? schema.properties : {};
+    for (const [key, item] of Object.entries(value)) {
+        const declared = Object.hasOwn(properties, key);
+        if (!declared && schema.additionalProperties === false) return `${path}.${key}: unexpected property`;
+        const child = declared ? properties[key] : schema.additionalProperties;
+        if (isRecord(child) || typeof child === 'boolean') {
+            const issue = validateSchemaValue(item, child, `${path}.${key}`);
             if (issue) return issue;
         }
     }

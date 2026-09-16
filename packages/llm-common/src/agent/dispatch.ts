@@ -33,6 +33,7 @@ export interface FlowJoinConfig {
 }
 
 export interface DispatchBranch {
+    assign?: Record<string, JsonValue>;
     prompt?: string;
     outputContract?: FlowOutputContract;
     key: string;
@@ -50,7 +51,20 @@ export interface DispatchBranch {
 }
 
 /** A durable, structured route/spawn/join scope, usable as an ordinary DAG node. */
+/** Durable visibility for graph nodes compiled into a dispatch scope. */
+export interface FlowLogicEvent {
+    nodeId: string;
+    name: string;
+    phase: 'aggregate' | 'judge';
+    round: number;
+    result: unknown;
+}
+
 export interface DispatchConfig {
+    logicNodes?: { aggregate: { id: string; name: string }; judge: { id: string; name: string } };
+    variables?: import('./flow-definition').FlowVariables;
+    variableValues?: Record<string, JsonValue>;
+    initialParameters?: Record<string, JsonValue>;
     referenceNodes?: Record<string, unknown>;
     invocationDefaults?: FlowInvocationDefaults;
     join?: FlowJoinConfig;
@@ -67,8 +81,8 @@ export interface DispatchConfig {
     initialResults?: Record<string, JsonValue>;
     /** Optional explicit input revision; changed inputs must not reuse old results. */
     inputRevision?: string;
-    /** Optional human revision between batches; omitted means route again. */
-    revision?: { fields: Record<string, FlowInputField>; prompt: string };
+    /** Update inputs between batches via an isolated Task or an explicit human response. */
+    revision?: { fields: Record<string, FlowInputField>; prompt: string; invocation?: DispatchBranch };
 }
 
 export interface FlowInputField {

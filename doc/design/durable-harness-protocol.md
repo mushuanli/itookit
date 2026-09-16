@@ -449,7 +449,7 @@ Interaction 请求绑定 schema、权限、deadline 和可选输入版本；resp
 | shared 13 唤醒后更新为 14、删除、重启 | waiter 仍消费被绑定的 revision，不漂移 |
 | 跨 Session owner 更新、通知前 kill | outbox 重投版本事件，请求方本地 wait 最终满足 |
 | 前 worker lease 未过期时新 worker 启动 | 到期后 sweeper 接管，无需第二次人工 recover |
-| Session close drain/cancel 中重启 | closing 继续收敛；closed 无普通业务派发 |
+| Session close drain/cancel 中重启 | closing 继续收敛；closed 无普通业务派发；用户显式重新运行可经 reopenSession 进入新执行周期，旧 Task 不恢复 |
 | TaskBoard A 过期被 B 领取后 A complete | 拒绝旧 token，不覆盖 B 的结果 |
 | terminal 在事件读取与状态读取间提交 | 订阅读到 terminalSequence 再结束 |
 | notifier 全丢、消费者慢、短暂存储/网络故障 | 在容量/权限/策略允许时最终推进；背压及阻塞可查询 |

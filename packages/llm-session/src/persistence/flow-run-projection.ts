@@ -1,3 +1,4 @@
+import { flowLogicInteraction } from '../session/flow-logic-history';
 import { readFlowRunMembers } from '@itookit/llm-flow';
 import { formatFlowOutput, outputText, type AgentEvent, type FlowInteraction, type Round } from '@itookit/common';
 import type { EventEnvelope, Kernel, TaskRecord } from '@itookit/durable-kernel';
@@ -52,9 +53,9 @@ export class FlowRunProjection {
         const events = await this.kernel.eventList(sessionId, this.cursor);
         for (const event of events) {
             this.cursor = event.sequence;
-            if (!event.taskId || event.type !== 'agent.event') continue;
+            if (!event.taskId || !['agent.event', 'flow.logic.completed'].includes(event.type)) continue;
             const type = (event.payload as AgentEvent).type;
-            if (type !== 'stream:content' && !type.startsWith('tool:')) continue;
+            if (event.type !== 'flow.logic.completed' && type !== 'stream:content' && type !== 'stream:thinking' && type !== 'llm:request' && !type.startsWith('tool:')) continue;
             const entries = this.events.get(event.taskId) ?? [];
             entries.push(event); this.events.set(event.taskId, entries);
         }
@@ -63,7 +64,7 @@ export class FlowRunProjection {
     private async update(log: RoundLog, round: Round, root: TaskRecord, tasks: TaskRecord[], options: FlowRunProjectionOptions): Promise<void> {
         // A completed conversation is immutable, even when an old CLI Run is inspected again.
         if (['completed', 'failed', 'cancelled'].includes(round.status)) return;
-        const interactions = tasks.filter(task => task.id !== root.id).flatMap(task => projectTaskInteractions(task, this.events.get(task.id)));
+        const interactions = tasks.filter(task => task.id !== root.id).flatMap(task => projectTaskInteractions(task, this.events.get(task.id))).sort((a, b) => a.createdAt - b.createdAt);
         const result = { assistantBlocks: [], toolResults: [], flowInteractions: interactions };
         if (root.status === 'succeeded') {
             const output = options.selectResult ? options.selectResult(root.output) : root.output;
@@ -76,7 +77,7 @@ export class FlowRunProjection {
     }
 }
 
-function runTasks(root: TaskRecord, tasks: TaskRecord[], members: string[]): TaskRecord[] {
+export function runTasks(root: TaskRecord, tasks: TaskRecord[], members: string[]): TaskRecord[] {
     const input = record(root.input);
     const ids = new Set<string>([root.id, ...members, ...(input.runTasks ?? []).map((item: any) => item.taskId)]);
     // Scheduled nodes need not use the aggregate as parent; dependencies are the durable join membership.
@@ -93,13 +94,16 @@ function runTasks(root: TaskRecord, tasks: TaskRecord[], members: string[]): Tas
 
 export function projectTaskInteractions(task: TaskRecord, events: EventEnvelope[] = []): FlowInteraction[] {
     const status = flowTaskStatus(task), actor = flowActor(task);
-    const result: FlowInteraction[] = [];
+    const result: FlowInteraction[] = events.flatMap(event => flowLogicInteraction(task, event) ?? []);
     const input = ['flow.input', 'flow.human'].includes(task.program.kind);
     const answered = Object.values(task.interactions ?? {}).some(request => request.status === 'resolved');
     if (!['flow.dispatch', 'flow.aggregate', 'flow.value'].includes(task.program.kind) && (!input || (task.output !== undefined && !answered))) result.push({
         id: `flow-${task.id}`, taskId: task.id, name: actor.nodeName ?? task.program.kind, actor,
         role: ['flow.input', 'flow.human'].includes(task.program.kind) ? 'user' : 'assistant', status,
         content: task.output === undefined ? partialContent(task, events) : formatFlowOutput(task.output), createdAt: task.createdAt,
+        thinking: taskThinking(task, events) || undefined,
+        parallelGroup: task.labels?.flowHistoryGroup,
+        requests: requestSnapshots(events),
         error: task.exit?.error?.message ?? task.lastError?.message,
     });
     result.push(...toolInteractions(task, events));
@@ -112,6 +116,27 @@ export function projectTaskInteractions(task: TaskRecord, events: EventEnvelope[
             actor: { ...actor, kind: request.kind }, status: 'success', content: outputText(request.response), createdAt: request.resolvedAt ?? request.requestedAt });
     }
     return result;
+}
+
+function requestSnapshots(events: EventEnvelope[]): FlowInteraction['requests'] {
+    const requests = new Map<string, NonNullable<FlowInteraction['requests']>[number]>();
+    for (const envelope of events) {
+        const event = envelope.payload as AgentEvent;
+        if (event.type !== 'llm:request') continue;
+        const { type: _type, ...request } = event;
+        requests.set(event.effectId, request);
+    }
+    return requests.size ? [...requests.values()] : undefined;
+}
+
+function taskThinking(task: TaskRecord, events: EventEnvelope[]): string {
+    const stream = events.map(event => event.payload as AgentEvent)
+        .filter(event => event.type === 'stream:thinking').map(event => event.delta).join('');
+    if (stream) return stream;
+    const messages = record(task.state).messages ?? [];
+    const thinking = messages.filter((message: any) => message.role === 'assistant' && typeof message.thinking === 'string')
+        .map((message: any) => message.thinking).join('\n\n');
+    return thinking || record(record(task.output).message).thinking || '';
 }
 
 function partialContent(task: TaskRecord, events: EventEnvelope[]): string {

@@ -265,15 +265,15 @@ export class RoundGraphService {
 
     /** Create a branch at the source Round's primary parent without committing a partial Round. */
     async createBranchForReplacement(
-        sourceRoundId: RoundId,
+        sourceRoundId: RoundId | null,
         newRootRoundId: RoundId,
         options: { branchName?: Ref; createdFrom: 'regenerate' | 'manual' | 'edit' },
     ): Promise<{ branchName: Ref; commonHeadId?: RoundId }> {
-        const source = await this.readRound(sourceRoundId);
-        if (!source) throw new RoundGraphError(`Source round not found: ${sourceRoundId}`, 'NOT_FOUND');
+        const source = sourceRoundId ? await this.readRound(sourceRoundId) : null;
+        if (sourceRoundId && !source) throw new RoundGraphError(`Source round not found: ${sourceRoundId}`, 'NOT_FOUND');
         const manifest = await this.loadManifest();
         const fromBranch = manifest.currentBranch;
-        const commonHeadId = source.historyParentIds[0];
+        const commonHeadId = source?.historyParentIds[0];
         let branchName = options.branchName;
         if (!branchName) {
             let index = Object.keys(manifest.branches).length;
@@ -287,7 +287,7 @@ export class RoundGraphService {
             createdAt: Date.now(),
             createdFrom: options.createdFrom,
             forkedFromBranch: fromBranch,
-            sourceRoundId,
+            sourceRoundId: sourceRoundId ?? undefined,
             commonHeadId,
             branchRootRoundId: newRootRoundId,
             contextProfile: manifest.branchMeta[fromBranch]?.contextProfile,

@@ -50,12 +50,12 @@ export class EventDispatcher {
 
         m.set('collapse', (ctx) => {
             const collapsible = ctx.actionEl.closest(
-                '.llm-ui-bubble--user, .llm-ui-node'
+                '.llm-ui-bubble--user, .llm-ui-node, .llm-ui-flow-window'
             ) as HTMLElement;
             if (!collapsible) return;
 
             const expanded = this.collapse.toggle(
-                collapsible, ctx.actionEl, ctx.sessionId || ctx.nodeId,
+                collapsible, ctx.actionEl, collapsible.dataset.historyId || collapsible.dataset.id || ctx.sessionId,
                 this.stream.isStreamingMode
             );
 
@@ -65,11 +65,8 @@ export class EventDispatcher {
         });
 
         m.set('copy', (ctx) => {
-            const editor = this.renderer.getEditor(ctx.nodeId)
-                || this.renderer.getEditor(ctx.sessionId);
-            if (editor) {
-                this.handleCopy(editor.content, ctx.actionEl);
-            }
+            const content = this.renderer.copyContent(ctx.nodeId) ?? this.renderer.copyContent(ctx.sessionId);
+            if (content !== undefined) this.handleCopy(content, ctx.actionEl);
         });
 
         m.set('delete', (ctx) => {
@@ -177,13 +174,13 @@ export class EventDispatcher {
             e.stopImmediatePropagation();
 
             const sessionEl = actionEl.closest('[data-session-id]') as HTMLElement;
-            const nodeEl = actionEl.closest('.llm-ui-node') as HTMLElement;
+            const nodeEl = actionEl.closest('.llm-ui-node, .llm-ui-flow-window') as HTMLElement;
 
             const ctx: ActionContext = {
                 actionEl,
                 sessionEl,
                 sessionId: sessionEl?.dataset.sessionId || '',
-                nodeId: nodeEl?.dataset.id || sessionEl?.dataset.sessionId || '',
+                nodeId: nodeEl?.dataset.historyId || nodeEl?.dataset.id || sessionEl?.dataset.sessionId || '',
             };
 
             const handler = this.actionMap.get(action);

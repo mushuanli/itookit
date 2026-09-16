@@ -48,3 +48,5 @@ Flow Session 标题栏「流程输出」挂接当前 Session 的持久 Run，显
 作文评审图按路由、检查、汇总、判断分节点编辑；打开旧 route@2 草稿时请求 `expandScopes`，仅显式保存才持久化。插件端口按 id + version 匹配，判断回路自动使用 repeat 控制边。数字表单支持运行参数引用。
 
 `InvocationEditor` 提供 schema 字段引用、继承来源与提示词预览；`InputFieldsEditor` 编辑 param 字段。运行缺项复用 FlowParameterForm，提交通过 RunAttachmentController.respondInput 校验 attachment revision 与 pending interaction；切换任务关闭旧表单。
+
+会话右键与顶部重新运行共用编辑器 `commands.rerunFlow`；流程输出提供只读分支选择，按 `session.flow-branch-executions` 返回的 Task 引用筛选。切换为空分支时必须清空上一分支结果并取消旧刷新。

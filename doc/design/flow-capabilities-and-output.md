@@ -4,7 +4,7 @@
 
 ### History 交互与重新运行
 
-Session 标题栏的「重新运行」读取当前分支的最近一次 Flow 调用，预填其参数。提交前校验参数；成功提交会创建替代分支并切换展示，原分支的参数和结果不变。使用原调用的固定 revision，不自动切换到最新草稿。取消表单不创建分支；运行中不允许再提交；宿主的 Session 写入租约同样适用。每个执行 Round 保存自己的 `flow`，旧 Session 的首次调用兼容读取 manifest.flow。
+Session 标题栏的「重新运行」读取整个 Session 的最近一次同类 Flow 调用，预填其参数。提交前校验参数；成功提交会创建替代分支并切换展示，原分支的参数和结果不变。使用最新保存的草稿：内容变化时发布新 revision，否则复用最新发布版本；每次 Round 固定自己的 revision。表单打开后定义变化会要求重新打开表单，避免使用过期参数。取消表单不创建分支；运行中不允许再提交；宿主的 Session 写入租约同样适用。每个执行 Round 保存自己的 `flow`，旧 Session 的首次调用兼容读取 manifest.flow。
 
 History 展示交互而不展开 DAG：输入节点与补充输入显示为 user，执行任务和输入请求显示为 assistant；路由、内部汇总和判断不显示逻辑卡片。LLM 默认沿用设备流式能力（节点显式 `stream:false` 时返回完整内容），按 Task ID 投影独立消息，多个并发检查不会混合增量。终态用实际返回值替换该任务的流式文本，支持 JSON、失败及取消状态。
 
@@ -65,3 +65,81 @@ Skill 可通过工具绑定声明：
 这些测试不依赖外部模型或用户 MCP 服务，也不等同于真实桌面手工验收。
 
 CLI 使用共享 `FlowRunProjection` 按根 Task 幂等写入 History Round；节点、工具、输入和批准携带 `FlowActor` 身份。Skill 作为节点/工具来源展示，工具调用按 Task 和 call ID 隔离；分支切换保留 Flow 交互。验证见 [CLI 能力验收](flow-cli-capabilities-verification.md)。
+
+### 已关闭 Session 的重新运行
+
+Flow 重跑在参数和原分支校验后、创建替代分支前检查 Kernel Session。closed 会话经显式 `reopenSession` 重新接收新 Task，然后在原 Session 创建新分支；原分支、旧 Task 和结果保留。关闭清理未完成或会话已归档时拒绝，不生成空分支。普通打开 Session 不解除关闭状态。
+
+### Session 级重跑与分支输出
+
+“重新运行”从 Session manifest 的 `flowId` 查找最新保存的流程定义，预填同一流程最近一次运行的参数；没有 Round 时使用 Session 初始参数。查找范围为整个 Session 的 Round 索引，不依赖当前分支或已加载的 History。每次重跑创建无历史父节点的新分支、新 Round 和新 Task；原分支不变。左侧会话右键与顶部按钮复用同一编辑器命令和参数表单。
+
+“流程输出”默认选中当前分支，允许只读切换查看其他分支。`session.flow-branch-executions` 从各分支的 Round 引用解析 Task ID，界面仅展示所选分支引用的 Flow Run，空分支清空旧输出。观察不会切换 History 的当前分支或恢复执行，也不提供取消、注入、重试等写操作。
+
+存储布局保持不变：同一 Session 的分支索引和 Round 都在 `history.seq`，执行记录在 `kernel/tasks/<taskId>/`；不会新增 branch 目录或复制 `.flow` 文件。分支通过 `branches[name] → Round.historyParentIds / executions → taskId` 隔离读取；新建无来源分支的 `branchMeta.sourceRoundId` 可省略。已有数据不需要搬迁。
+
+### 评审预算与租约恢复
+
+四维评审的 `maxRounds` 与检查节点的 `maxExchanges` 独立。内置模板默认单节点 3 次模型交互，并允许通过运行参数设置，最低 2 次以容纳一次 JSON/schema 修复。修复因预算不足失败时保留具体输出校验原因与限额。已有发布版本不修改；旧模板的四个检查节点需保存为至少 2 次预算的新版本，再从 Flow 目录启动。
+
+Web 刷新后若旧宿主写租约仍有效，当前实例保持只读；租约取得后执行在线恢复再开放提交，不再要求再次重启。Task/Effect 的未过期执行租约不被强制接管。
+
+### 版本与自动修改闭环
+
+Flow 发布版本使用递增整数 revision，`.flow` 草稿的 draftVersion 仅表示编辑版本。每个 Round 的 `flow` 保存 flowId、revision、parameters；流程输出的分支与运行选项显示 `flowId@vN`。重新运行不会改写旧 Round 或旧发布版本。恢复未完成运行仍使用原快照。
+
+作文模板按“路由 → 四维检查 → 汇总 → 判断 → 修改作文 → 路由”运行。`builtin.revise` 是通用输入修改节点，fields 定义允许更新的参数，prompt 可读 `${state.results}`；独立 Task 返回结构化字段后更新本轮输入。修改稿件会使历史评分变为非当前评分，下一轮重新检查全部维度。通过阈值或达到 maxRounds 时直接输出，不再修改未评审的稿件。修改 Task 的预算、模型、工具、schema 和 history 策略均可配置。
+
+### 变量与输入分离
+
+新作文模板使用 variables/assign，修改写回 `${vars.essay}`，`${param.essay}` 保留初始输入。普通节点同样可以声明 assign；跨节点读取依赖图确定顺序。流程输出和持久结果包含初始值、当前值和更新来源。详见 [内部变量设计](./flow-variables.md)。
+
+### 实时事件读取
+
+Task.events 使用按 Task 索引的分页事件尾部，避免每个节点反复扫描整个 Session（包含旧分支）的 events.seq。公开 after 仍为 Session sequence；分页内部使用独立 Task index。观察到终态后再排空尾页，防止丢失最终 delta。Session.events 保持全 Session 订阅语义。
+
+验证包含：模型返回首段后暂停且不结束时，实际 LLM Effect → Kernel → FlowHistory 必须已发出正文增量；真实 HistoryView/MDx 在没有完成事件时必须绘制正文。无需将 for-await 消费改成 callback，也不依赖末尾 Promise.all 才刷新。
+
+### Flow 思考内容展示
+
+`FlowHistory` 将 `stream:thinking` 投影为 `message:updated(field: thought)`，即时更新节点思考区域；`stream:content` 继续更新正文。并行节点按 Task 隔离，思考内容保存为 `RoundResult.flowInteractions[].thinking`，历史恢复映射为 `ExecutionNode.data.thought`，不进入节点返回值或模型 history。CLI 的 `FlowRunProjection` 同样读取 thinking 事件，无事件时从 Task 的 assistant messages / output.message 回退恢复；失败或取消前的部分思考也保留。
+
+思考区域直接更新文本，不经正文 MDx 编辑器。临时 StreamTrace 诊断日志已移除，req 面板和请求持久化保留。
+
+
+### History 分组与刷新恢复
+
+一次 Flow 运行仍对应一个持久 Round，但 History 将可见节点展示为用户输入后的多个独立窗口。调度器同一并行派发批次携带相同 flowHistoryGroup，窗口内分别显示各节点；串行节点、下一轮和不同批次使用独立窗口。工具结果跟随所属节点窗口。运行总结果保留在最后；内部调度 Task 不直接创建窗口，路由内的汇总与判断通过持久事件逐轮显示条件与结果。旧 Task 没有批次记录时逐节点展示，不猜测其并发关系。
+
+运行期间的增量已在 Kernel Task 事件日志持久化，但最终 `RoundResult.flowInteractions` 在运行结束时才完整保存。页面重新绑定或加载分支时，通过 `restoreFlowHistory` 从该 Round 的 primary execution 和 Run 成员索引读取 Task 分页事件，重建尚未保存的交互投影（正文、thinking、工具、输入状态）。重建只读，不回写 Round、不重新执行任务；只恢复已持久化的内容。已有完整终态交互的 Round 直接使用保存结果。
+
+Session 路由未指定 branch 时使用 manifest.currentBranch；显式 branch 参数优先，避免打开已有 Session 时被强制切回空 main 分支。此修复恢复 History 快照，不新增跨宿主实时事件订阅机制。
+
+
+分支下拉列表提供删除按钮，复用 `branch:delete` 命令和确认流程；当前分支禁用删除，需先切换到其他分支。删除成功后 `log:ref_deleted` 刷新分支列表。运行中仍保留删除保护；删除等操作报错和分支草稿恢复结束时，输入区按 Session 实际生成状态更新，避免隐藏仍在运行任务的停止按钮。上下文丢失导致执行提前退出时将 Session 标为 failed，清除残留 queued 状态。
+
+
+### 节点请求调试
+
+每个 Flow 节点 thinking 上方提供默认折叠的 `req`。`llm.chat` 适配器调用模型服务前写入 `llm:request` 事件，携带 Effect ID、connectionId、模型服务请求参数（messages、tools、生成参数等）。它是应用交给模型服务的请求，不是 Provider 最终 HTTP body；不包含连接密钥、HTTP headers 或 AbortSignal。同一 Task 的多次 Effect 调用分别保存，历史投影保存于 `FlowInteraction.requests`，实时更新通过 message:updated.metaInfo 传递。req 以纯文本 JSON 展示，正文中的 HTML 不执行；没有记录的历史节点明确显示“尚无模型请求记录”，不从模板伪造请求。
+
+`FlowInteraction.parallelGroup` 持久化并行批次标识，实时与历史恢复共用窗口分组规则。DAG 调度器只给同批多个就绪节点设置分组；route spawn 只给同批多个子任务设置分组，运行级并发上限也约束 route 的派发批次。分组描述调度上的并行批次，不代表网络请求在同一毫秒开始。
+
+Flow 窗口与节点均提供标题、复制和折叠按钮。窗口级复制汇总该窗口中节点的正文，节点级复制只复制自身正文；不混入 req。窗口和节点使用独立折叠 ID，接入全局 fold、视口导航及 UI 折叠状态恢复；并行窗口 ID 由持久化批次标识派生，避免实时与历史投影的父节点 ID 差异导致折叠状态丢失。
+
+
+结构化输出由 Agent 在结束 Task 前验证：除类型、必填字段与数值范围外，也校验 `additionalProperties`（false 或子 schema）以及布尔 schema。额外字段错误会进入节点的 outputValidation 修复策略，受 retries 和 maxExchanges 双重限制；修复耗尽后仍失败，不静默删除字段。Flow 层继续执行最终契约校验。路由提示明确要求返回匹配 schema 的结果实例，禁止把 schema 关键字当作结果字段；没有自定义 prompt 的节点也会附带 schema 说明。
+
+
+### 汇总与判断的执行可见性
+
+可视图中的 aggregate / judge 仍编译到 dispatch 的持久状态机中，执行时每轮提交两个
+`flow.logic.completed` 事件。事件保留原节点 ID / 名称 / 轮数：汇总展示 reducer、各类型最新结果及失败项；
+判断展示条件表达式、实际结果、matched、当前轮数 / maxRounds，以及 condition_met / max_rounds / continue。
+History 为每次汇总、判断建立独立窗口，不与并行评审合并。实时消费、CLI 投影和刷新恢复共用相同事件投影；
+历史运行没有这些事件时不补造执行记录。评审失败且策略为 fail 时在汇总前失败，因此没有完成的汇总/判断事件。
+
+流式批次写入失败（例如 Effect claim 已失效）时，适配器保留首个持久化错误、取消模型请求、
+停止后续批次，并将错误传回 Kernel；定时 flush 不再产生游离的 Promise rejection。
+Session 租约与 Effect claim 是不同层的写入保护，续租过期或其他实例接管的确切原因需要租约记录佐证，
+不能通过忽略 Stale effect claim 或取消 fencing 校验恢复写入。

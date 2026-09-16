@@ -1,3 +1,4 @@
+import { renderVariables } from './dag/VariableView';
 import { renderFlowOutput } from './dag/FlowOutput';
 import { enhanceInputFieldsEditor } from './dag/InputFieldsEditor';
 import { enhanceInvocationEditor } from './dag/InvocationEditor';
@@ -26,6 +27,7 @@ import { openFlowSettings } from './dag/FlowSettingsDialog';
 import type { EntityOption } from './dag/FlowSettingsDialog';
 
 export interface DagWorkbenchOptions {
+    readOnly?: boolean;
     backLabel?: string;
     commands: ICommandBus;
     onModeChange?: (mode: 'design' | 'run') => void;
@@ -205,6 +207,7 @@ export class DagWorkbench {
                 <button data-node-action="delete">Delete</button>
             </div>
             <details><summary>Advanced scheduling</summary>
+                <label>${escapeHTML(t('flow.variables.assign'))}<textarea data-inline-assign rows="3">${escapeHTML(JSON.stringify(node.assign ?? {}, null, 2))}</textarea></label>
                 <label>Static inputs<textarea data-inline-inputs rows="4">${escapeHTML(JSON.stringify(node.inputs, null, 2))}</textarea></label>
                 <label>Legacy capabilities<textarea data-inline-capabilities rows="3">${escapeHTML(JSON.stringify(node.capabilities ?? [], null, 2))}</textarea></label>
                 <label>Budget<textarea data-inline-budget rows="3">${escapeHTML(JSON.stringify(node.budget ?? {}, null, 2))}</textarea></label>
@@ -242,6 +245,7 @@ export class DagWorkbench {
                     name: read('[data-inline-node-name]').trim() || node.name,
                     config: node.plugin === 'builtin.agent' ? canonicalAgentConfig(config.value) : config.value,
                     inputs: JSON.parse(read('[data-inline-inputs]')),
+                    assign: JSON.parse(read('[data-inline-assign]')),
                     capabilities: JSON.parse(read('[data-inline-capabilities]')),
                     budget: JSON.parse(read('[data-inline-budget]')),
                     retry: JSON.parse(read('[data-inline-retry]')),
@@ -422,6 +426,7 @@ export class DagWorkbench {
             <label>Name <input name="name" value="${escapeHTML(node.name)}" required></label>
             <div data-config-form></div>
             <details><summary>Scheduling (JSON)</summary>
+                <label>${escapeHTML(t('flow.variables.assign'))}<textarea name="assign">${escapeHTML(JSON.stringify(node.assign ?? {}, null, 2))}</textarea></label>
                 <label>Static inputs<textarea name="inputs">${escapeHTML(JSON.stringify(node.inputs, null, 2))}</textarea></label>
                 <label>Capabilities<textarea name="capabilities">${escapeHTML(JSON.stringify(node.capabilities ?? [], null, 2))}</textarea></label>
                 <label>Budget<textarea name="budget">${escapeHTML(JSON.stringify(node.budget ?? {}, null, 2))}</textarea></label>
@@ -464,6 +469,7 @@ export class DagWorkbench {
                 name: field('name').trim(),
                 config: node.plugin === 'builtin.agent' ? canonicalAgentConfig(config.value) : config.value,
                 inputs: JSON.parse(field('inputs')),
+                assign: JSON.parse(field('assign')),
                 capabilities: JSON.parse(field('capabilities')),
                 budget: JSON.parse(field('budget')),
                 priority: Number(field('priority')),
@@ -537,6 +543,7 @@ export class DagWorkbench {
             ${snapshot.workspaceFinalization ? `<section class="dag-run-workspace" data-workspace-status="${escapeHTML(snapshot.workspaceFinalization.status)}">${escapeHTML(t(`flow.workspace.${snapshot.workspaceFinalization.status}`))}${snapshot.workspaceFinalization.message ? `<span role="alert">${escapeHTML(snapshot.workspaceFinalization.message)}</span>` : ''}${snapshot.workspaceFinalization.persistenceError ? `<span role="alert">${escapeHTML(t('flow.workspace.persistenceFailed'))}: ${escapeHTML(snapshot.workspaceFinalization.persistenceError)}</span>` : ''}</section>` : ''}
             ${snapshot.goal ? `<section class="dag-run-goal"><strong>${escapeHTML(snapshot.goal.objective || 'Run goal')}</strong><span>${escapeHTML(snapshot.goal.status ?? 'active')}</span>${snapshot.goal.acceptanceCriteria?.length ? `<small>${snapshot.goal.acceptanceCriteria.map(escapeHTML).join(' · ')}</small>` : ''}</section>` : ''}
             <section class="dag-output"><h3>${escapeHTML(t('flow.output.final'))}</h3>${renderFlowOutput(run.output, true)}</section>
+            ${renderVariables(snapshot)}
             <div class="dag-run-nodes">${snapshot.taskTree.map(task => {
                 const nodeId = task.labels?.dispatchKey ?? task.labels?.flowNodeId ?? (task.id === run.id ? 'Result' : task.program.kind);
                 const iterations = snapshot.iterations[nodeId] ?? 1;
@@ -558,6 +565,9 @@ export class DagWorkbench {
                 </article>`;
             }).join('')}</div>
         </section>`;
+        if (this.options.readOnly) this.root.querySelectorAll(
+            '[data-run-action]:not([data-run-action="back"]), [data-run-retry], [data-run-retry-downstream], [data-run-signal], [data-run-cancel-task], [data-run-respond]',
+        ).forEach(control => control.remove());
         this.root.querySelector('[data-run-action="resume"]')?.addEventListener('click', event => {
             const button = event.currentTarget as HTMLButtonElement; button.disabled = true;
             const view = this.viewRequest;
@@ -813,6 +823,7 @@ export class DagWorkbench {
             connections: draft.connections ?? [],
             defaultConnection: draft.defaultConnection,
             parameters: draft.parameters ?? [],
+            variables: draft.variables,
             availableConnections,
             defaults: draft.defaults,
             runPolicy: draft.runPolicy,

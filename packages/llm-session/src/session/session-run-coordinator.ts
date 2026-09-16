@@ -1,6 +1,7 @@
-import type {
-    Signal,
-    ToolDefinition,
+import {
+    t,
+    type Signal,
+    type ToolDefinition,
 } from '@itookit/common';
 import type { Kernel } from '@itookit/durable-kernel';
 import { ulid } from '../persistence/ulid';
@@ -57,7 +58,7 @@ export class SessionRunCoordinator {
         private readonly agents: AgentResolver,
         private readonly attachments: AttachmentProcessor,
         private readonly callbacks: SessionRunCallbacks,
-        kernel: Kernel,
+        private readonly kernel: Kernel,
         dagPlugins: import('@itookit/common').DagPluginCatalog,
         private readonly flowStore: FlowStore,
         resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
@@ -82,7 +83,20 @@ export class SessionRunCoordinator {
         });
     }
 
+    async assertCanSubmit(sessionId: string, reopen = false): Promise<void> {
+        const status = await this.kernel.sessionStat(sessionId);
+        if (reopen && status.phase === 'closed' && !status.archived) {
+            await this.kernel.reopenSession(sessionId);
+            return;
+        }
+        if (status.phase === 'closed' || status.phase === 'closing') {
+            throw new ConversationError(ConversationErrorCode.SESSION_INVALID,
+                t(status.phase === 'closed' ? 'flow.rerun.sessionClosed' : 'flow.rerun.sessionClosing'));
+        }
+    }
+
     async submit(input: TaskInput, runtime: SessionRuntime): Promise<string> {
+        await this.assertCanSubmit(input.sessionId);
         if (this.active.has(input.sessionId)) {
             throw new ConversationError(ConversationErrorCode.SESSION_BUSY, 'Session already has an active run');
         }
@@ -301,6 +315,7 @@ export class SessionRunCoordinator {
     private finishMissingContext(task: ExecutionTask, runtime: SessionRuntime): void {
         this.active.delete(task.sessionId);
         runtime.currentTaskId = undefined;
+        this.callbacks.onStatusChange(task.sessionId, 'failed');
         log.error('Session context not found', { sessionId: task.sessionId });
     }
 }

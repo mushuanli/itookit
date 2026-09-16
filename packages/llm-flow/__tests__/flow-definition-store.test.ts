@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { DagCommandService } from '../src/flow/commands';
+import { FlowCommand } from '../src/flow/command-names';
+import { createBuiltinDagPluginRegistry } from '../src/flow/builtin-plugins';
 import { describe, expect, it } from 'vitest';
 import type { FlowDraft, FlowRevision } from '@itookit/common';
 import type { FlowStore } from '../src/flow-definition-store';
@@ -135,4 +139,51 @@ it('explicitly restores a missing builtin without overwriting edits or enabling 
     expect((await store.loadDraft('builtin'))?.name).toBe('Edited');
     await storage.deleteFile('/builtin.flow');
     expect(await new FlowDefinitionStore(storage).installBuiltinDraft(template)).toBeNull();
+});
+
+it('pins variables and assignments in immutable revision digests', async () => {
+    const store = new FlowDefinitionStore(memoryStore());
+    const draft = await store.createDraft({ id: 'vars', name: 'Vars' });
+    draft.variables = { essay: { type: 'string', initial: '${param.essay}' } };
+    draft.nodes = [{ id: 'write' as never, name: 'write', plugin: 'builtin.transform', pluginVersion: '1.0.0', inputs: {}, config: { value: { essay: 'NEW' } }, assign: { essay: '${output.essay}' } }];
+    const first = await store.createRevision(draft);
+    draft.variables.essay.initial = 'OTHER';
+    const second = await store.createRevision(draft);
+    expect((await store.loadRevision('vars', 1))?.variables?.essay.initial).toBe('${param.essay}');
+    expect(first.nodes[0].assign).toEqual({ essay: '${output.essay}' });
+    expect(first.digest).not.toBe(second.digest);
+});
+
+function libraryCommands() {
+    const plugins = createBuiltinDagPluginRegistry(), files = memoryStore(), store = new FlowDefinitionStore(files, plugins);
+    const handlers = new Map<string, (args: any) => Promise<any>>();
+    new DagCommandService({ kernel: {} as never, plugins, flowStore: store })
+        .register({ register: (name: string, handler: any) => handlers.set(name, handler) } as never);
+    const template: FlowDraft = JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+    return { store, files, template, execute: (name: string, args: unknown) => handlers.get(name)!(args) };
+}
+
+it('installs, validates, saves and publishes the bundled variable Flow through real commands', async () => {
+    const { store, files, template, execute } = libraryCommands();
+    await expect(execute(FlowCommand.DraftInstall, template)).resolves.toMatchObject({ variables: template.variables });
+    await expect(execute(FlowCommand.DraftValidate, template)).resolves.toMatchObject({ valid: true });
+    const installed = (await store.loadDraft(template.id))!;
+    const saved = await execute(FlowCommand.DraftSave, { draft: { ...installed, name: 'User edited' }, expectedDraftVersion: installed.draftVersion });
+    expect(saved.valid).toBe(true);
+    const published = await execute(FlowCommand.RevisionCreate, { draftId: template.id, expectedDraftVersion: saved.draft.draftVersion });
+    expect(published.revision.variables).toEqual(template.variables);
+    expect(published.revision.nodes.find((node: any) => node.id === 'rewrite').assign).toEqual({ essay: '${output.essay}' });
+    await execute(FlowCommand.DraftInstall, template);
+    expect((await store.loadDraft(template.id))?.name).toBe('User edited');
+    await files.deleteFile((await files.findFile(`${template.id}.flow`))!.nodeId);
+    await expect(execute(FlowCommand.DraftInstall, template)).resolves.toBeNull();
+    await expect(execute(FlowCommand.DraftRestore, template)).resolves.toMatchObject({ variables: template.variables });
+});
+
+it('still rejects an actually undeclared variable before installing any file', async () => {
+    const { store, template, execute } = libraryCommands();
+    delete template.variables;
+    await expect(execute(FlowCommand.DraftInstall, template)).rejects.toThrow('Undeclared Flow variable');
+    expect(await store.loadDraft(template.id)).toBeNull();
+    expect(await store.listDrafts()).toEqual([]);
 });
