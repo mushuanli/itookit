@@ -22,11 +22,6 @@
     <script src="https://fastly.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://fastly.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 
-    <!-- LiteGraph 依赖 -->
-    <link rel="stylesheet" type="text/css" href="https://fastly.jsdelivr.net/gh/jagenjo/litegraph.js/css/litegraph.css">
-    <script type="text/javascript" src="https://fastly.jsdelivr.net/gh/jagenjo/litegraph.js/build/litegraph.min.js"
-        defer></script>
-
     <!-- Immer -->
     <script src="https://fastly.jsdelivr.net/npm/immer/dist/immer.umd.production.min.js"></script>
     <script>
@@ -36,9 +31,9 @@
     </script>
 
     <!-- 3. 应用样式 -->
-  <script type="module" crossorigin src="./assets/index-DCMtWrQ8.js"></script>
-  <link rel="modulepreload" crossorigin href="./assets/vendor-CpIDhNQT.js">
-  <link rel="stylesheet" crossorigin href="./assets/index-DaxHNrIf.css">
+  <script type="module" crossorigin src="./assets/index-DX0PsFX3.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/vendor-CF35kW7z.js">
+  <link rel="stylesheet" crossorigin href="./assets/index-Bw8J8gCm.css">
 </head>
 
 <body>
@@ -92,6 +87,11 @@
                 </a>
             </li>
             <li>
+                <a class="app-nav-btn" data-target="flows-workspace" title="Workflows">
+                    <i class="fas fa-diagram-project"></i>
+                </a>
+            </li>
+            <li>
                 <a class="app-nav-btn" data-target="settings-workspace" title="Settings">
                     <i class="fas fa-cog"></i>
                 </a>
@@ -132,6 +132,9 @@
 
         <!-- Skills Workspace -->
         <div id="skills-workspace" class="workspace-view"></div>
+
+        <!-- Workflows Workspace -->
+        <div id="flows-workspace" class="workspace-view"></div>
         <!-- 
            Settings Workspace 
            这是一个特殊的视图，不使用 MemoryManager 文件管理，
