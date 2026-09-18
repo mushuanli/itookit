@@ -1,4 +1,5 @@
 import { assertEffectGrant } from '@itookit/durable-kernel';
+import { createModuleLogger } from '@itookit/common';
 import type {
     AgentEvent,
     AssistantMessage,
@@ -15,6 +16,8 @@ import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } fro
 import { expandMessagesAttachments } from '@itookit/device-llm';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 import { InFlightEffects } from './in-flight';
+
+const log = createModuleLogger('llm-chat-effect');
 
 export interface LlmChatEffectRequest {
     resourceHandleId: string;
@@ -65,9 +68,25 @@ export class LlmChatEffectAdapter implements EffectAdapter<LlmChatEffectRequest,
             const response = request.request.stream === false
                 ? await completeChat(service, request.connectionId, params, emit)
                 : await streamChat(service, request.connectionId, params, emit);
+            log.debug('LLM response assembled', {
+                sessionId: context.sessionId, taskId: context.taskId, effectId: context.effectId,
+                connectionId: request.connectionId, responseId: response.id, model: response.model,
+                stream: request.request.stream !== false, responseFormat: request.request.responseFormat?.type,
+                finishReason: response.choices[0]?.finish_reason,
+                contentLength: response.choices[0]?.message.content?.length ?? 0, usage: response.usage,
+            });
             await chargeUsage(context, request.resourceHandleId, response.usage);
             return response;
         } finally { context.abortSignal.removeEventListener('abort', abort); }
+    }
+
+    shouldRetry(error: unknown, context: EffectExecutionContext): boolean {
+        if (context.abortSignal.aborted) return false;
+        const failure = error as { name?: string; code?: string; retryable?: boolean; status?: number; message?: string };
+        if (failure?.name === 'AbortError' || /\b(?:stale|lease|grant|permission|unauthorized|forbidden)\b|connection id/i.test(failure?.message ?? '')) return false;
+        if (typeof failure?.retryable === 'boolean') return failure.retryable;
+        if (typeof failure?.status === 'number') return failure.status === 408 || failure.status === 429 || failure.status >= 500;
+        return /network|fetch failed|timeout|timed out|connection reset|ECONNRESET|ETIMEDOUT|rate limit|overload/i.test(failure?.message ?? '');
     }
 
     async reconcile(request: LlmChatEffectRequest): Promise<EffectReconcileResult<ChatCompletionResponse>> {

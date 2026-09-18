@@ -19,6 +19,7 @@ export interface LlmTaskInputOptions {
     temperature?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    llmRetry?: DurableProgramInput['llmRetry'];
     thinking?: boolean;
     reasoningEffort?: DurableProgramInput['reasoningEffort'];
     webSearch?: boolean;
@@ -51,6 +52,7 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         temperature: options.temperature,
         maxTokens: options.maxTokens,
         timeoutMs: options.timeoutMs,
+        llmRetry: options.llmRetry,
         thinking: options.thinking,
         reasoningEffort: options.reasoningEffort,
         webSearch: options.webSearch,

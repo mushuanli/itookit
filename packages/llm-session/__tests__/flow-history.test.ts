@@ -97,3 +97,18 @@ it('shows durable aggregate and judge events live and restores the same distinct
     expect(history.interactions.every(item => !item.parallelGroup && item.status === 'success')).toBe(true);
     expect(projectTaskInteractions(task as never, events as never)).toEqual(history.interactions);
 });
+
+it('replaces failed stream fragments on retry both live and after recovery', async () => {
+    const { projectTaskInteractions } = await import('../src/persistence/flow-run-projection');
+    const state = { appendChildNode() {}, updateNodeOutput: vi.fn(), updateNodeThought: vi.fn(), updateNodeStatus() {}, updateNodeMeta() {} };
+    const history = new FlowHistory({ task: { sessionId: 's' }, rootNodeId: 'root', state } as never, { emitSession() {} } as never);
+    const task = { id: 'a', program: { kind: 'llm.agent' }, status: 'failed', createdAt: 1, interactions: {} };
+    const request = { type: 'agent.event', payload: { type: 'llm:request', effectId: 'llm-exchange-1', connectionId: 'default', request: { messages: [] } } };
+    const events = [request, { type: 'agent.event', payload: { type: 'stream:content', delta: 'BAD' } },
+        { type: 'effect.retry.scheduled', payload: { effectId: 'llm-exchange-1', attempt: 2, maxAttempts: 4 } },
+        request, { type: 'agent.event', payload: { type: 'stream:content', delta: 'GOOD' } }];
+    await history.consume({ status: async () => ({ task }), async *events() { yield* events; } } as never);
+    expect(history.interactions[0].content).toBe('GOOD');
+    expect(state.updateNodeThought).toHaveBeenCalledWith('flow-a', '');
+    expect(projectTaskInteractions(task as never, events as never)[0].content).toBe('GOOD');
+});

@@ -400,6 +400,8 @@ export interface EffectAdapter<Req = unknown, Res = unknown> {
     readonly kind: string;
     readonly version: string;
     readonly recoveryPolicy?: 'idempotent-retry' | 'manual';
+    /** Decide live failure retries independently of crash reconciliation. */
+    shouldRetry?(error: unknown, context: EffectExecutionContext): boolean;
     execute(request: Req, context: EffectExecutionContext): Promise<Res>;
     reconcile?(request: Req, context: EffectExecutionContext): Promise<EffectReconcileResult<Res>>;
     cancel?(request: Req, context: EffectExecutionContext): Promise<void>;

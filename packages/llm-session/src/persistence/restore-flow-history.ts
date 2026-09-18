@@ -28,7 +28,7 @@ async function taskEvents(kernel: Kernel, sessionId: string, taskId: string): Pr
     let afterIndex = 0;
     do {
         const page = await kernel.taskEventPage(sessionId, taskId, { afterIndex, limit: 100 });
-        events.push(...page.items.filter(event => ['agent.event', 'flow.logic.completed'].includes(event.type)));
+        events.push(...page.items.filter(event => ['agent.event', 'flow.logic.completed', 'effect.retry.scheduled'].includes(event.type)));
         if (page.nextAfterIndex === undefined) return events;
         afterIndex = page.nextAfterIndex;
     } while (true);

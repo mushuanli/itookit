@@ -58,6 +58,14 @@ describe('LLMDriver Core', () => {
         expect(response.choices[0].message.content).toBe('Success');
     });
 
+    it('does not multiply transport attempts when the durable effect owns retries', async () => {
+        const driver = new LLMDriver({ provider: 'openai', apiKey: 'test', maxRetries: 3, retryDelay: 1 });
+        globalFetch.mockResolvedValue({ ok: false, status: 500, statusText: 'Server Error',
+            json: async () => ({ error: { message: 'temporary failure' } }) });
+        await expect(driver.chat.create({ messages: [{ role: 'user', content: 'Hi' }], _maxAttempts: 1 })).rejects.toThrow();
+        expect(globalFetch).toHaveBeenCalledTimes(1);
+    });
+
     it('should throw error immediately on 4xx errors (non-retryable)', async () => {
         const driver = new LLMDriver({ provider: 'openai', apiKey: 'sk-test' });
 

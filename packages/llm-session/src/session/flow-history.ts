@@ -9,6 +9,7 @@ import { flowInteractionNode } from '../persistence/projection';
 /** History presentation is independent of the model's history inclusion policy. */
 export class FlowHistory {
     readonly interactions: FlowInteraction[] = [];
+    private attempts = new Map<string, { content: string; thinking: string }>();
     constructor(private execution: ConversationExecution, private bus: SessionEventBus) {}
 
     async consume(handle: TaskHandle): Promise<void> {
@@ -51,6 +52,17 @@ export class FlowHistory {
     }
 
     private event(entry: FlowInteraction, envelope: EventEnvelope): void {
+        if (envelope.type === 'effect.retry.scheduled') {
+            const retry = envelope.payload as { effectId: string };
+            if (!retry.effectId.startsWith('llm-')) return;
+            const baseline = this.attempts.get(`${entry.id}:${retry.effectId}`) ?? { content: '', thinking: '' };
+            entry.content = baseline.content; entry.thinking = baseline.thinking;
+            this.execution.state.updateNodeOutput(entry.id, entry.content);
+            this.execution.state.updateNodeThought(entry.id, entry.thinking);
+            for (const field of ['output', 'thought'] as const) this.bus.emitSession(this.execution.task.sessionId,
+                { type: 'message:updated', payload: { messageId: entry.id, field, content: field === 'output' ? entry.content : entry.thinking } });
+            return;
+        }
         if (envelope.type !== 'agent.event') return;
         const event = envelope.payload as AgentEvent;
         if (event.type === 'llm:request') { this.requestSnapshot(entry, event); return; }
@@ -68,6 +80,8 @@ export class FlowHistory {
     }
 
     private requestSnapshot(entry: FlowInteraction, event: Extract<AgentEvent, { type: 'llm:request' }>): void {
+        const key = `${entry.id}:${event.effectId}`;
+        if (!this.attempts.has(key)) this.attempts.set(key, { content: entry.content, thinking: entry.thinking ?? '' });
         const { type: _type, ...request } = event;
         const requests = entry.requests ??= [];
         const index = requests.findIndex(item => item.effectId === request.effectId);

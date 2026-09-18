@@ -410,6 +410,14 @@ export class SessionState {
         }
     }
 
+    updateNodeThought(nodeId: string, content: string): void {
+        for (const session of this.getSessions()) {
+            if (!session.executionRoot) continue;
+            const node = this.findNodeInTree(session.executionRoot, nodeId);
+            if (node) { node.data.thought = content; return; }
+        }
+    }
+
     updateNodeOutput(nodeId: string, content: string): void {
         for (const session of this.getSessions()) {
             if (session.executionRoot) {

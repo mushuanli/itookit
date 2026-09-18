@@ -143,3 +143,29 @@ History 为每次汇总、判断建立独立窗口，不与并行评审合并。
 停止后续批次，并将错误传回 Kernel；定时 flush 不再产生游离的 Promise rejection。
 Session 租约与 Effect claim 是不同层的写入保护，续租过期或其他实例接管的确切原因需要租约记录佐证，
 不能通过忽略 Stale effect claim 或取消 fencing 校验恢复写入。
+
+
+### LLM 请求失败重试
+
+Agent / Chat / Plan 的每次 LLM exchange 默认允许失败后重试 3 次，共最多 4 次调用。
+节点 `config.llmRetry` 可设置 `{ retries: 0..3, backoffMs: 1000 }`；0 禁用重试。
+网络失败、限流及可重试服务错误进入内核 Effect 的持久重试队列，次数、等待时间及失败记录由内核保存，
+事件 `effect.retry.scheduled` 携带下一次 attempt / maxAttempts。取消、认证、权限和失效 claim 不重试。
+重试沿用同一份输入，不增加 maxExchanges 或业务 maxRounds；仍受该 Effect 的总 timeoutMs 限制。
+底层非流式 transport 被限制为单次调用，避免与 Effect 重试相乘。
+流式失败后的重试清除该 attempt 的残片，实时 History 与刷新恢复只展示有效的最新输出。
+此策略独立于 outputContract 的 schema 修复重试、node.retry 和宿主丢失后的 reconcile；
+LLM crash outcome 默认仍为 indeterminate，不因实时重试开启自动重放。
+
+
+作文模板的评审与修改节点均设置 outputContract.retries=3；maxExchanges 默认 4，为首次输出和三次格式修复留出预算。
+格式修复请求重复提供目标 schema，并要求仅返回完整结果 JSON、转义字符串中的换行/引号/反斜杠。
+达到格式修复上限时错误包含实际修复次数；这是输出格式修复，不属于 llmRetry 的请求失败重试。
+已保存 Flow 不会因模板文件更新自动覆盖，需更新该 Flow 的 outputContract 和运行参数再重新运行。
+
+`onInvalid: repair` 未指定 retries 时默认修复 3 次；显式次数仍优先，maxExchanges 仍限制总交互。
+每次无效结构化响应写入 Kernel `llm.output.invalid` 事件，可通过 `kernel.eventList(sessionId, after)` 查询。
+事件包含 taskId（envelope）、effectId、responseId、model、finishReason、usage、JSON 解析错误、响应长度、
+最多各 256 字符的首尾片段，以及实际策略、已修复次数和交互预算，用于区分截断、空输出和格式错误。
+片段是模型响应内容，会随 Kernel 事件持久保存。能力层 `llm-chat-effect` 的 debug 日志记录响应装配摘要，
+不记录正文；可与上述事件按 taskId/effectId 对照，检查流式装配与模型返回是否一致。

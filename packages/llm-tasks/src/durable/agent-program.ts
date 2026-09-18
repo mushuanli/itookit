@@ -101,7 +101,10 @@ function handleLlm(state: DurableAgentState, event: TaskInputEvent): Decision<Du
     const actions = responseEvents(state.input, state.exchanges);
     if (!calls.length) {
         const issue = outputValidationIssue(state.input, message.content);
-        if (issue) return handleInvalidOutput(state, issue, actions);
+        if (issue) {
+            actions.push(outputValidationDiagnostic(state, value, issue));
+            return handleInvalidOutput(state, issue, actions);
+        }
         return complete(state, message, value.choices[0].finish_reason, actions);
     }
     // Subtask delegation: a subtask tool call declares sub-task payloads and
@@ -279,7 +282,7 @@ function handleInvalidOutput(
     if (policy?.onInvalid === 'continue') {
         return complete(state, state.messages[state.messages.length - 1], 'stop', actions);
     }
-    const retries = Math.max(0, Math.floor(policy?.retries ?? (policy?.onInvalid === 'repair' ? 1 : 0)));
+    const retries = Math.max(0, Math.floor(policy?.retries ?? (policy?.onInvalid === 'repair' ? 3 : 0)));
     if (policy?.onInvalid === 'repair' && state.outputValidationAttempts < retries) {
         const limit = state.input.maxExchanges ?? DEFAULT_AGENT_MAX_EXCHANGES;
         if (state.exchanges >= limit) return { state, actions, next: { type: 'fail', error: {
@@ -289,15 +292,38 @@ function handleInvalidOutput(
         state.outputValidationAttempts++;
         state.messages.push({
             role: 'user',
-            content: `The previous response did not satisfy the required output contract: ${issue}. Return only a corrected response.`,
+            content: outputRepairPrompt(state, issue),
         });
         return withActions(requestLlm(state), actions);
     }
     return {
         state,
         actions,
-        next: { type: 'fail', error: { message: `Invalid structured output: ${issue}`, code: 'INVALID_OUTPUT' } },
+        next: { type: 'fail', error: { message: `Invalid structured output: ${issue}; output repair attempts exhausted (${state.outputValidationAttempts}/${retries}); exchanges=${state.exchanges}`, code: 'INVALID_OUTPUT' } },
     };
+}
+
+function outputRepairPrompt(state: DurableAgentState, issue: string): string {
+    const format = state.input.responseFormat;
+    const schema = format?.type === 'json_schema' ? JSON.stringify(format.json_schema.schema) : undefined;
+    return `The previous response did not satisfy the required output contract: ${issue}.
+Return only a complete valid JSON result, without Markdown fences or explanations.
+Escape newlines, quotes and backslashes inside JSON strings. Do not truncate the result.
+${schema ? `Return data matching this schema, not the schema itself: ${schema}` : 'Return a JSON object.'}`;
+}
+
+function outputValidationDiagnostic(state: DurableAgentState, value: ReturnType<typeof response>, issue: string): KernelAction {
+    const content = value.choices[0]?.message.content;
+    const text = typeof content === 'string' ? content : '';
+    return { type: 'emit', eventType: 'llm.output.invalid', payload: {
+        sessionId: state.input.sessionId, roundId: state.input.roundId, connectionId: state.input.connectionId,
+        effectId: `llm-exchange-${state.exchanges}`, model: value.model ?? state.input.model ?? null,
+        responseId: value.id ?? null, finishReason: value.choices[0]?.finish_reason ?? null,
+        usage: value.usage ?? {}, issue, contentLength: text.length,
+        contentHead: text.slice(0, 256), contentTail: text.length > 256 ? text.slice(-256) : '',
+        repairAttempts: state.outputValidationAttempts, policy: state.input.outputValidation ?? {},
+        maxExchanges: state.input.maxExchanges ?? DEFAULT_AGENT_MAX_EXCHANGES,
+    } };
 }
 
 function outputValidationIssue(input: DurableAgentInput, content: unknown): string | undefined {
@@ -306,7 +332,7 @@ function outputValidationIssue(input: DurableAgentInput, content: unknown): stri
     if (typeof content !== 'string') return 'response content must be text for structured output';
     let value: unknown;
     try { value = JSON.parse(content); }
-    catch { return 'response is not valid JSON'; }
+    catch (error) { return `response is not valid JSON: ${error instanceof Error ? error.message : String(error)}`; }
     if (format.type === 'json_object') {
         return isRecord(value) ? undefined : 'response must be a JSON object';
     }

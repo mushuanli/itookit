@@ -30,6 +30,9 @@ it('paints a Flow delta before any completion event arrives', async () => {
         await vi.waitFor(() => expect(host.querySelector('#mount-flow-child')?.closest('.llm-ui-node')?.querySelector('.llm-ui-thought__content')?.textContent).toContain('Live thinking before content'));
         expect((host.querySelector('#mount-flow-child')?.closest('.llm-ui-node')?.querySelector('.llm-ui-thought') as HTMLElement).style.display).toBe('block');
         expect(host.querySelector('#mount-flow-child')?.textContent).not.toContain('Live thinking before content');
+        view.processEvent({ type: 'message:updated', payload: { messageId: 'flow-child', field: 'thought', content: '' } } as never);
+        expect(node.querySelector('.llm-ui-thought__content')?.textContent).toBe('');
+        expect((node.querySelector('.llm-ui-thought') as HTMLElement).style.display).toBe('none');
         view.processEvent({ type: 'message:updated', payload: { messageId: 'flow-child', field: 'output', delta: 'FIRST live chunk' } } as never);
         await vi.waitFor(() => expect(host.querySelector('#mount-flow-child .mdx-editor-renderer')?.textContent).toContain('FIRST live chunk'), { timeout: 2000 });
         expect(host.querySelector('.llm-ui-node--streaming')).not.toBeNull();

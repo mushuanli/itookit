@@ -1,6 +1,30 @@
 import { expect, it } from 'vitest';
 import { DurableAgentProgram } from './agent-program';
 
+it.each([false, true])('defaults to three durable output repairs (recover=%s)', recover => {
+    const program = new DurableAgentProgram();
+    const initial = program.init({ sessionId: 's', roundId: 'r', connectionId: 'c', maxExchanges: 4,
+        messages: [{ role: 'user', content: 'Rewrite' }], responseFormat: { type: 'json_object' },
+        outputValidation: { onInvalid: 'repair' } });
+    let step = program.reduce(initial.state, { type: 'signal', sequence: 1,
+        signal: { type: 'capabilities', payload: { llmHandleId: 'llm' } } });
+    for (let exchange = 1; exchange <= 4; exchange++) {
+        step = program.reduce(JSON.parse(JSON.stringify(step.state)), { type: 'effect-completed', effectId: `llm-exchange-${exchange}`,
+            result: { id: 'response-id', choices: [{ message: { role: 'assistant', content: recover && exchange === 4 ? '{"essay":"done"}' : '{"essay":"broken' }, finish_reason: 'length' }] } });
+        if (exchange < 4) expect(step.next.type).toBe('wait');
+    }
+    expect(step.state.outputValidationAttempts).toBe(3);
+    expect(step.state.exchanges).toBe(4);
+    expect(step.next.type).toBe(recover ? 'complete' : 'fail');
+    if (!recover) {
+        expect(step.next).toMatchObject({ error: { code: 'INVALID_OUTPUT', message: expect.stringContaining('(3/3)') } });
+        expect(step.actions).toContainEqual(expect.objectContaining({ eventType: 'llm.output.invalid', payload: expect.objectContaining({
+            responseId: 'response-id', finishReason: 'length', contentLength: 16, repairAttempts: 3,
+            issue: expect.stringContaining('JSON'), contentHead: '{"essay":"broken',
+        }) }));
+    }
+});
+
 it.each([1, 2])('keeps output validation evidence and respects a %s-exchange budget', maxExchanges => {
     const program = new DurableAgentProgram();
     const initial = program.init({ sessionId: 's', roundId: 'r', connectionId: 'c', maxExchanges,

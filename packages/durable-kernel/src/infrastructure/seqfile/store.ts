@@ -1227,7 +1227,8 @@ export class SeqFileKernelStore {
                 const pending = { ...finished, status: 'pending' as const, readyAt: Date.now() + (effect.request.retry?.backoffMs ?? 0) };
                 const next = { ...task, effects: { ...task.effects, [effectId]: pending }, version: task.version + 1, updatedAt: Date.now() };
                 await writeTaskTx(tx, binding.rootPath, next);
-                await appendEventTx(tx, binding.rootPath, task.sessionId, taskId, 'effect.retry.scheduled', { effectId, readyAt: pending.readyAt });
+                await appendEventTx(tx, binding.rootPath, task.sessionId, taskId, 'effect.retry.scheduled', { effectId, readyAt: pending.readyAt, attempt: effect.attemptCount + 1,
+                    maxAttempts: effect.request.retry?.maxAttempts ?? 1, error: outcome.error });
                 return next;
             }
             const event = outcome.error

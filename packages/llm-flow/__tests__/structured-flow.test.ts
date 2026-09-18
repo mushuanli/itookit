@@ -49,18 +49,21 @@ describe('structured route / spawn / aggregate DAG', () => {
     let manager: IVFSManager, fs: IFileSystem, kernel: Kernel, executor: DurableFlowExecutor;
     let requests: Record<string, any>[];
     let scores: number[];
-    let delay = 0, active = 0, peak = 0, invalidResponses = 0;
+    let delay = 0, active = 0, peak = 0, invalidResponses = 0, llmFailures = 0, invalidRevisionResponses = 0;
 
     function boot() {
         kernel = new Kernel({ catalog: { fs }, pollMs: 5 });
         kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/s' }; } });
         registerDurablePrograms(kernel);
-        kernel.registerEffect({ kind: 'llm.chat', version: '1', async execute(request: Record<string, any>) {
+        kernel.registerEffect({ kind: 'llm.chat', version: '1', shouldRetry: () => true, async execute(request: Record<string, any>) {
             requests.push(request);
+            if (llmFailures-- > 0) throw new Error('temporary network failure');
             active++; peak = Math.max(peak, active);
             if (delay) await new Promise(resolve => setTimeout(resolve, delay));
             active--;
             const revising = JSON.stringify(request).includes('你是作文修改员');
+            if (revising && invalidRevisionResponses-- > 0) return { choices: [{ index: 0,
+                message: { role: 'assistant', content: 'Here is the revised essay:\nnot JSON' }, finish_reason: 'stop' }] };
             return { choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(revising ? { essay: `REVISED_ESSAY_${requests.length}` } : { score: scores.shift() ?? 9, issues: [], suggestions: [], ...(invalidResponses-- > 0 ? { additionalProperties: false } : {}) }) }, finish_reason: 'stop' }], usage: { total_tokens: 2 } };
         } } as EffectAdapter);
         executor = new DurableFlowExecutor({ kernel, plugins: createBuiltinDagPluginRegistry(),
@@ -109,6 +112,41 @@ describe('structured route / spawn / aggregate DAG', () => {
         expect(JSON.stringify(requests)).not.toContain('OLD_');
     });
 
+    it.each([{ retries: 3, failures: 3, calls: 4, status: 'succeeded' },
+        { retries: 3, failures: 4, calls: 4, status: 'failed' },
+        { retries: 0, failures: 1, calls: 1, status: 'failed' }])(
+        'honors LLM retry budget $retries after $failures failed calls', async ({ retries, failures, calls, status }) => {
+            llmFailures = failures;
+            const settings = config(1);
+            settings.branches = settings.branches.slice(0, 1);
+            settings.until = passed('content');
+            settings.branches[0].target.config = { ...settings.branches[0].target.config as object,
+                llmRetry: { retries, backoffMs: 5 } };
+            const run = await executor.submit('s', graph(settings), { requirements: 'REQ', essay: 'ESSAY' });
+            expect((await run.root.wait({ timeoutMs: 6000 })).status).toBe(status);
+            expect(requests).toHaveLength(calls);
+            expect(requests.every(request => request.request._maxAttempts === 1)).toBe(true);
+            const events = (await kernel.eventList('s', 0)).filter(event => event.type === 'effect.retry.scheduled');
+            expect(events).toHaveLength(calls - 1);
+            llmFailures = 0;
+        });
+
+    it('cancels an LLM retry during durable backoff', async () => {
+        llmFailures = 4;
+        const settings = config(1);
+        settings.branches = settings.branches.slice(0, 1);
+        settings.until = passed('content');
+        settings.branches[0].target.config = { ...settings.branches[0].target.config as object,
+            llmRetry: { retries: 3, backoffMs: 5000 } };
+        const run = await executor.submit('s', graph(settings), { requirements: 'REQ', essay: 'ESSAY' });
+        await vi.waitFor(async () => expect((await kernel.eventList('s', 0))
+            .some(event => event.type === 'effect.retry.scheduled')).toBe(true));
+        await run.root.cancel('stop');
+        expect((await run.root.wait({ timeoutMs: 6000 })).status).toBe('cancelled');
+        expect(requests).toHaveLength(1);
+        llmFailures = 0;
+    });
+
     it('records an initial passing judgment without pretending to execute reviews', async () => {
         const settings = config(2);
         settings.branches = settings.branches.slice(0, 1);
@@ -140,19 +178,19 @@ describe('structured route / spawn / aggregate DAG', () => {
         expect(events[3].payload).toMatchObject({ round: 2, result: { stopReason: 'max_rounds' } });
     });
 
-    it('enforces a shared output schema and repairs within the same spawned Task', async () => {
-        scores = [11, 9];
+    it.each([1, undefined])('enforces a shared output schema with repair retries=%s within the same spawned Task', async retries => {
+        scores = retries === undefined ? [11, 11, 11, 9] : [11, 9];
         const settings = config(1); settings.branches = settings.branches.slice(0, 1);
         settings.until = passed('content');
         const branch = settings.branches[0];
         delete branch.output; delete branch.outputFormat; delete branch.outputSchema; delete branch.validate;
         settings.invocationDefaults = { prompt: 'Essay ${param.essay}', outputContract: {
-            format: 'json', onInvalid: 'repair', retries: 1,
+            format: 'json', onInvalid: 'repair', ...(retries === undefined ? {} : { retries }),
             schema: { type: 'object', properties: { score: { type: 'number', minimum: 0, maximum: 10 } }, required: ['score'] },
         } };
         const run = await executor.submit('s', graph(settings), { requirements: 'REQ', essay: 'ESSAY' });
         expect((await run.root.wait({ timeoutMs: 6000 })).status).toBe('succeeded');
-        expect(requests).toHaveLength(2);
+        expect(requests).toHaveLength(retries === undefined ? 4 : 2);
         const result = (await run.nodes.get('report')!.status()).task.output as any;
         expect(result.outputs.result.content).toMatchObject({ completedRounds: 1, stopReason: 'condition_met' });
         const tasks = await (await kernel.openSession('s')).listTasks();
@@ -385,6 +423,23 @@ describe('structured route / spawn / aggregate DAG', () => {
         expect(requests[5].request.messages.every((message: any) => ['system', 'user'].includes(message.role))).toBe(true);
         const report = (await run.nodes.get('report')!.status()).task.output as any;
         expect(report.outputs.result.content).toMatchObject({ completedRounds: 2, stopReason: 'max_rounds' });
+    });
+
+    it('repairs three non-JSON revision responses and reroutes using the repaired essay', async () => {
+        const draft = JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+        scores = [7, 7, 7, 7, 9, 9, 9, 9];
+        invalidRevisionResponses = 3;
+        const spec = await flowToDag({ ...draft, revision: 1, createdAt: 0, digest: '' });
+        const run = await executor.submit('s', spec, { requirements: 'REQ', essay: 'ESSAY', maxRounds: 2, maxConcurrency: 1 });
+        const exit = await run.root.wait({ timeoutMs: 6000 });
+        expect(exit.status, JSON.stringify(exit)).toBe('succeeded');
+        expect(requests).toHaveLength(12);
+        expect(requests[5].request.messages.at(-1).content).toContain('Escape newlines');
+        expect(requests[5].request.messages.at(-1).content).toContain('"essay"');
+        expect(requests[8].request.messages.at(-1).content).toContain('REVISED_ESSAY_8');
+        const report = (await run.nodes.get('report')!.status()).task.output as any;
+        expect(report.outputs.result.content).toMatchObject({ completedRounds: 2, stopReason: 'condition_met', vars: { essay: 'REVISED_ESSAY_8' } });
+        invalidRevisionResponses = 0;
     });
 
     it('invalidates even passing scores after rewriting and stops on the new passing draft', async () => {

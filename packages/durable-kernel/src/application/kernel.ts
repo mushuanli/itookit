@@ -1138,7 +1138,9 @@ export class Kernel implements KernelRegistration {
             try {
                 await this.store.completeEffect(binding, task.id, effect.id,
                     claim.effect.currentAttempt!.leaseToken, { ...effectFailure(error),
-                        retryable: this.effects.resolve(effect.kind, effect.version).recoveryPolicy === 'idempotent-retry' });
+                        retryable: !controller.signal.aborted && (this.effects.resolve(effect.kind, effect.version).shouldRetry?.(error,
+                            { sessionId: task.sessionId, taskId: task.id, effectId: effect.id, idempotencyKey: effect.idempotencyKey, abortSignal: controller.signal, grants: [] })
+                            ?? this.effects.resolve(effect.kind, effect.version).recoveryPolicy === 'idempotent-retry') });
             } catch { /* Effect lease was recovered by another worker. */ }
         } finally {
             stopHeartbeat();

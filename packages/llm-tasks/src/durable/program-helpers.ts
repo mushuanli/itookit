@@ -81,7 +81,12 @@ export function llmEffect(
     tools?: import('@itookit/common').ToolDefinition[],
     effectId?: string,
 ): KernelAction {
+    const retries = input.llmRetry?.retries ?? 3;
+    const backoffMs = input.llmRetry?.backoffMs ?? 1000;
+    if (!Number.isInteger(retries) || retries < 0 || retries > 3
+        || !Number.isFinite(backoffMs) || backoffMs < 0) throw new Error('Invalid llmRetry policy');
     const request = compact({
+        _maxAttempts: 1,
         messages,
         model: input.model,
         temperature: input.temperature,
@@ -104,6 +109,7 @@ export function llmEffect(
             request: { resourceHandleId: handleId, connectionId: input.connectionId, request },
             idempotencyKey: effectId ? `${input.roundId}:${effectId}` : `${input.roundId}:llm:${messages.length}`,
             timeoutMs: input.timeoutMs ?? DEFAULT_EFFECT_TIMEOUT_MS,
+            retry: { maxAttempts: retries + 1, backoffMs },
             grants: [{ handleId, right: 'execute' }],
         },
     };

@@ -285,3 +285,12 @@ packages/llm-tasks/src/
 ### 初始 Skill 激活
 
 buildSkillContexts(skills, catalog, allowedToolIds, selectedIds) 返回 SkillContext[]。buildLlmTaskInput 接受 skillContexts；DurableAgentProgram 初始化时复制到持久状态，逐轮关键规则与工具合并沿用动态 load_skill 路径。有效工具仍受 allowedToolIds 限制，external 标记来自宿主目录；原节点工具定义优先，初始快照不扩展工具授权。
+
+
+LLM 请求失败策略：`DurableProgramInput.llmRetry?: { retries?: number; backoffMs?: number }`，
+默认 retries=3、backoffMs=1000，retries 范围 0..3（额外重试，不含首次）。共享 llmEffect
+生成持久 Effect retry，Agent / Chat / Plan 使用同一策略；可重试错误由适配器分类，总等待受 timeoutMs 限制。
+
+结构化输出的 `outputValidation.onInvalid: repair` 默认额外修复 3 次，显式 retries 优先；
+修复计入 maxExchanges。无效响应生成 `llm.output.invalid` 持久事件，包含解析错误、finishReason、
+响应长度与首尾片段、实际修复策略和预算，详见 [Flow 能力与输出](./design/flow-capabilities-and-output.md)。

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskInputEvent } from '@itookit/durable-kernel';
-import { applyDependencyMessages, dependencyOutput, type DurableDependencyBinding } from './program-helpers';
+import { applyDependencyMessages, dependencyOutput, llmEffect, type DurableDependencyBinding } from './program-helpers';
 import { collectDependency } from './dependency-collector';
 
 describe('dependencyOutput', () => {
@@ -95,3 +95,18 @@ function exited(output: unknown): TaskInputEvent {
         exit: { taskId: 'upstream', status: 'succeeded', output, completedAt: 1 },
     };
 }
+
+it.each([undefined, { retries: 0, backoffMs: 0 }, { retries: 3, backoffMs: 5 }])(
+    'builds an explicit durable LLM retry policy %s', llmRetry => {
+        const action = llmEffect({ sessionId: 's', roundId: 'r', connectionId: 'c', messages: [], llmRetry }, [], 'h');
+        expect(action).toMatchObject({ type: 'effect', effect: {
+            retry: { maxAttempts: (llmRetry?.retries ?? 3) + 1, backoffMs: llmRetry?.backoffMs ?? 1000 },
+            request: { request: { _maxAttempts: 1 } },
+        } });
+    });
+
+it.each([{ retries: -1 }, { retries: 4 }, { retries: 1.5 }, { backoffMs: -1 }])(
+    'rejects invalid llmRetry %s', llmRetry => {
+        expect(() => llmEffect({ sessionId: 's', roundId: 'r', connectionId: 'c', messages: [], llmRetry }, [], 'h'))
+            .toThrow('Invalid llmRetry');
+    });

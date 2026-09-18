@@ -800,3 +800,8 @@ Kernel 在恢复 sweep 后复用一次任务扫描供任务遍历、Effect 候�
 **显式重新运行**：`openSession()` 不改变 closed 状态。用户明确重跑时可调用 `reopenSession()`：等待本机关闭清理并清理旧能力作用域，事务内只允许 closed → open（open 幂等），拒绝 closing/archived 以及未完成 Task/Effect 清理；记录 `session.reopened`。旧 Task 终态和已回收 cache 不恢复。普通 `setSessionStatus` 仍拒绝 closed → open。宿主负责持有 Session 写租约；llm-session 在 Flow 重跑创建替代分支前调用此入口。
 
 Task 事件流按 Task 事件索引分页追尾，`events({ after })` 的 after 仍使用 Session sequence；订阅单 Task 不扫描其他 Task 的 Session 日志。终态后继续排空最终页面以保留末尾增量。
+
+
+`EffectAdapter.shouldRetry?(error, context)` 分类当前 worker 的执行失败；若未实现，沿用 recoveryPolicy 判断。
+它不改变崩溃后的 reconcile / manual 语义。持久重试仍要求 EffectRequest.retry 的 maxAttempts / backoffMs，
+受总 deadline 和取消约束；`effect.retry.scheduled` 包含 attempt / maxAttempts / error。

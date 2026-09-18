@@ -129,6 +129,7 @@ function agentTask(context: DagNodeContext) {
             temperature: optionalNumber(config.temperature),
             maxTokens: optionalNumber(config.maxTokens),
             timeoutMs: optionalNumber(config.timeoutMs),
+            llmRetry: config.llmRetry as LlmTaskInputOptions['llmRetry'],
             thinking: config.thinking === true,
             reasoningEffort: optionalReasoning(config.reasoningEffort),
             stream: optionalBoolean(config.stream),
@@ -244,6 +245,10 @@ function agentManifest(): DagPluginManifest {
         // Execution policy
         maxExchanges: { type: 'integer' },
         timeoutMs: { type: 'integer' },
+        llmRetry: { type: 'object', title: 'LLM failure retry', properties: {
+            retries: { type: 'integer', minimum: 0, maximum: 3, default: 3 },
+            backoffMs: { type: 'integer', minimum: 0, default: 1000 },
+        } },
         approval: enumSchema(['none', 'external', 'all']),
         historyPolicy: enumSchema(['inherit', 'none', 'upstream']),
         systemPromptPolicy: enumSchema(['inherit', 'replace', 'none']),
@@ -289,7 +294,7 @@ function defaultUI(manifest: DagPluginManifest) {
                     { id: 'model', title: 'Model', fields: ['connectionId', 'modelName', 'temperature', 'maxTokens', 'thinking', 'reasoningEffort', 'stream', 'webSearch', 'responseFormat', 'outputValidation'] },
                     { id: 'capabilities', title: 'Capabilities', fields: ['toolIds', 'skillIds'] },
                     { id: 'context', title: 'Context & output', fields: ['historyPolicy', 'persistOutput', 'contextCompaction'] },
-                    { id: 'execution', title: 'Execution', fields: ['approval', 'maxExchanges', 'timeoutMs', 'maxIterations', 'workingDirectory', 'delegation', 'subtasks'] },
+                    { id: 'execution', title: 'Execution', fields: ['approval', 'maxExchanges', 'timeoutMs', 'llmRetry', 'maxIterations', 'workingDirectory', 'delegation', 'subtasks'] },
                 ],
             },
         } : {},

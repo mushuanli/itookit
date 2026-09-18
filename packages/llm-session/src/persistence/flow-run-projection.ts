@@ -53,9 +53,9 @@ export class FlowRunProjection {
         const events = await this.kernel.eventList(sessionId, this.cursor);
         for (const event of events) {
             this.cursor = event.sequence;
-            if (!event.taskId || !['agent.event', 'flow.logic.completed'].includes(event.type)) continue;
+            if (!event.taskId || !['agent.event', 'flow.logic.completed', 'effect.retry.scheduled'].includes(event.type)) continue;
             const type = (event.payload as AgentEvent).type;
-            if (event.type !== 'flow.logic.completed' && type !== 'stream:content' && type !== 'stream:thinking' && type !== 'llm:request' && !type.startsWith('tool:')) continue;
+            if (event.type === 'agent.event' && type !== 'stream:content' && type !== 'stream:thinking' && type !== 'llm:request' && !type.startsWith('tool:')) continue;
             const entries = this.events.get(event.taskId) ?? [];
             entries.push(event); this.events.set(event.taskId, entries);
         }
@@ -130,6 +130,7 @@ function requestSnapshots(events: EventEnvelope[]): FlowInteraction['requests'] 
 }
 
 function taskThinking(task: TaskRecord, events: EventEnvelope[]): string {
+    events = latestAttempts(events);
     const stream = events.map(event => event.payload as AgentEvent)
         .filter(event => event.type === 'stream:thinking').map(event => event.delta).join('');
     if (stream) return stream;
@@ -140,6 +141,7 @@ function taskThinking(task: TaskRecord, events: EventEnvelope[]): string {
 }
 
 function partialContent(task: TaskRecord, events: EventEnvelope[]): string {
+    events = latestAttempts(events);
     const stream = events.map(event => event.payload as AgentEvent).filter(event => event.type === 'stream:content').map(event => event.delta).join('');
     if (stream) return stream;
     const messages = record(task.state).messages ?? [];
@@ -168,4 +170,16 @@ function toolInteractions(task: TaskRecord, events: EventEnvelope[]): FlowIntera
     }
     for (const entry of entries) if (entry.status === 'running' && ['failed', 'aborted'].includes(flowTaskStatus(task))) entry.status = flowTaskStatus(task);
     return entries;
+}
+
+/** Drop partial text from failed attempts while keeping earlier successful exchanges. */
+function latestAttempts(events: EventEnvelope[]): EventEnvelope[] {
+    const result: EventEnvelope[] = [];
+    let start = 0;
+    for (const event of events) {
+        if (event.type === 'agent.event' && (event.payload as AgentEvent).type === 'llm:request') start = result.length;
+        if (event.type === 'effect.retry.scheduled' && String((event.payload as { effectId: string }).effectId).startsWith('llm-')) result.splice(start);
+        else result.push(event);
+    }
+    return result;
 }

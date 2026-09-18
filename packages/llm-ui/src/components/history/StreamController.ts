@@ -101,7 +101,15 @@ export class StreamController {
     // 内容更新
     // ================================================================
 
-    replaceContent(nodeId: string, content: string): void {
+    replaceContent(nodeId: string, content: string, field: 'thought' | 'output' = 'output'): void {
+        if (field === 'thought') {
+            const node = this.renderer.getNode(nodeId);
+            const text = node?.querySelector('.llm-ui-thought__content');
+            const container = node?.querySelector<HTMLElement>('.llm-ui-thought');
+            if (text) text.textContent = content;
+            if (container) container.style.display = content ? 'block' : 'none';
+            return;
+        }
         this.renderer.getEditor(nodeId)?.setContent(content);
         this.dirtyNodes.add(nodeId);
     }

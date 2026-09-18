@@ -51,6 +51,22 @@ describe('LlmChatEffectAdapter streaming', () => {
         expect(emit.mock.calls.filter(([event]) => event.payload.type === 'stream:content')).toHaveLength(1);
     });
 
+    it.each([
+        [Object.assign(new Error('temporary'), { retryable: true }), true],
+        [new Error('fetch failed'), true], [new Error('request timed out'), true],
+        [new Error('Service overloaded; please retry later'), true],
+        [Object.assign(new Error('Please retry later'), { retryable: true }), true],
+        [Object.assign(new Error('bad credentials'), { retryable: false }), false],
+        [new Error('Stale effect claim'), false], [new Error('Effect lease lost'), false],
+        [Object.assign(new Error('aborted'), { name: 'AbortError' }), false],
+        [new Error('invalid configuration'), false],
+    ])('classifies live LLM failures without relaxing crash recovery: %s', async (error, expected) => {
+        const adapter = new LlmChatEffectAdapter({} as ILLMService);
+        expect(adapter.shouldRetry(error, context(undefined))).toBe(expected);
+        await expect(adapter.reconcile({ resourceHandleId: 'llm-handle', connectionId: 'conn', request: { messages: [] } }))
+            .resolves.toMatchObject({ status: 'indeterminate' });
+    });
+
     it('keeps interleaved thinking and content deltas ordered', async () => {
         const emit = vi.fn(async () => undefined);
         const service = streamService(async function* () {

@@ -17,6 +17,8 @@ export type ResponseFormat =
     | { type: 'json_schema'; json_schema: { name: string; schema: Record<string, unknown>; strict?: boolean } };
 
 export interface ChatCompletionParams {
+    /** Internal transport attempt limit; not sent to providers. */
+    _maxAttempts?: number;
     messages: ChatMessage[];
     model?: string;
     stream?: boolean;

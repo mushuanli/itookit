@@ -178,7 +178,7 @@ export class LLMDriver {
                 const startTime = Date.now();
                 const response = await this.executeWithRetry(
                     () => this.provider.create(finalParams),
-                    requestId, finalParams.signal
+                    requestId, finalParams.signal, 1, finalParams._maxAttempts ?? this.config.maxRetries
                 );
                 cancellation.dispose();
                 
@@ -231,7 +231,8 @@ export class LLMDriver {
         fn: () => Promise<T>,
         requestId: string,
         signal: AbortSignal,
-        attempt = 1
+        attempt = 1,
+        maxAttempts = this.config.maxRetries
     ): Promise<T> {
         try {
             signal.throwIfAborted();
@@ -242,7 +243,7 @@ export class LLMDriver {
                 : LLMError.fromException(this.providerName, error);
             
             // 检查是否可重试
-            const shouldRetry = !signal.aborted && llmError.retryable && attempt < this.config.maxRetries;
+            const shouldRetry = !signal.aborted && llmError.retryable && attempt < maxAttempts;
             
             if (shouldRetry) {
                 // 计算延迟（指数退避）
@@ -258,7 +259,7 @@ export class LLMDriver {
                 });
                 
                 await this.sleep(delay);
-                return this.executeWithRetry(fn, requestId, signal, attempt + 1);
+                return this.executeWithRetry(fn, requestId, signal, attempt + 1, maxAttempts);
             }
             
             throw llmError;

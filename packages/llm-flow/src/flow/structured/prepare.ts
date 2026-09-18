@@ -25,7 +25,7 @@ async function configuredBranch(branch: DispatchBranch, defaults: FlowInvocation
     const contract = branch.outputContract ?? defaults?.outputContract;
     const target = { ...branch.target, config: { ...(defaults?.connectionId ? { connectionId: defaults.connectionId } : {}),
         ...(defaults?.model ? { model: defaults.model } : {}), ...object(branch.target.config),
-        ...(contract?.onInvalid ? { outputValidation: { onInvalid: contract.onInvalid, retries: contract.retries ?? (contract.onInvalid === 'repair' ? 1 : 0) } } : {}),
+        ...(contract?.onInvalid ? { outputValidation: { onInvalid: contract.onInvalid, retries: contract.retries ?? (contract.onInvalid === 'repair' ? 3 : 0) } } : {}),
     } };
     return prepareBranch({ ...branch, target: target as DispatchBranch['target'],
         context: branch.context ?? defaults?.context,

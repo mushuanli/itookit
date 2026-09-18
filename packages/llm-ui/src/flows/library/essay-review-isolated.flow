@@ -98,7 +98,7 @@
       "name": "maxExchanges",
       "type": "number",
       "required": true,
-      "default": 3,
+      "default": 4,
       "minimum": 2,
       "maximum": 100,
       "integer": true,
@@ -225,7 +225,7 @@
               ]
             },
             "onInvalid": "repair",
-            "retries": 1
+            "retries": 3
           },
           "connectionId": "default"
         }
@@ -330,7 +330,7 @@
       "capabilities": [],
       "config": {
         "key": "rewrite",
-        "systemPrompt": "你是作文修改员。根据四维评审意见修改作文，保持原题意、事实和作者立场。只输出符合 schema 的 JSON，essay 为完整修改稿。",
+        "systemPrompt": "你是作文修改员。根据四维评审意见修改作文，保持原题意、事实和作者立场。只输出一个符合 schema 的 JSON 对象，essay 为完整修改稿。不得添加 Markdown 代码块或解释。essay 字符串内的换行、双引号、反斜杠必须按 JSON 规则转义，不得截断输出。",
         "prompt": "作文要求：${param.requirements}\n当前作文：${vars.essay}\n本轮评审意见：${state.results}\n请针对这些意见改写作文，返回完整的 essay。",
         "fields": {
           "essay": {
@@ -359,7 +359,7 @@
             "additionalProperties": false
           },
           "onInvalid": "repair",
-          "retries": 1
+          "retries": 3
         }
       },
       "assign": {

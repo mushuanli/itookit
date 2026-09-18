@@ -25,6 +25,8 @@ export interface DurableProgramInput {
     temperature?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    /** Additional attempts per LLM exchange; default 3, maximum 3. */
+    llmRetry?: { retries?: number; backoffMs?: number };
     thinking?: boolean;
     reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     /** stream !== false → LLM streams (default); false → non-streaming fallback. */
