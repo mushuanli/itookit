@@ -25,7 +25,12 @@ export function createFlowCapabilities(runtime: HeadlessKernelRuntime, identitie
         return { definitions: tools.getToolDefinitions().filter(tool => allowed.has(tool.function?.name ?? tool.name ?? '')),
             externalIds: ids.filter(id => tools.getToolMeta(id)?.sideEffect === 'external') };
     };
-    return { resolveSkills, resolveTools,
+    const resolveHarnessToolIds = async (sessionId: string) => {
+        const scope = await runtime.sessions.get(sessionId);
+        return ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash']
+            .filter(id => scope.toolService.getToolMeta(id)?.enabled);
+    };
+    return { resolveSkills, resolveTools, resolveHarnessToolIds,
         bindNode: (sessionId: string, node: FlowNodeDefinition, defaults?: FlowNodeDefinition['config']) =>
             bindStandaloneFlowNode(node, defaults, sessionId, resolver),
         resolveSkillContexts: async (sessionId: string, ids: string[], allowed: string[]) =>

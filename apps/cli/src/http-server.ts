@@ -99,6 +99,7 @@ export async function createHttpMindOSRuntime(options: CommandOptions): Promise<
         return await createApplicationRuntime({
             backend,
             directorySourceProvider: new CliDirectorySourceProvider(rootDir),
+            defaultSessionDirectory: `host:${path.resolve(options.setHome ?? process.cwd())}`,
             ownerKind: 'cli',
         });
     } catch (error) {
@@ -194,6 +195,7 @@ class HttpUiServer {
     private async command(cmd: string, args: Record<string, unknown>): Promise<unknown> {
         switch (cmd) {
             case 'get_home_dir': return this.options.homeDir;
+            case 'get_current_dir': return this.options.homeDir;
             case 'get_root_dir': return this.options.rootDir;
             case 'get_app_data_dir': return this.options.rootDir;
             case 'get_app_config_dir': return this.options.configDir;

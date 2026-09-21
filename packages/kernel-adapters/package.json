@@ -38,7 +38,8 @@
     "@itookit/device-llm": "workspace:*",
     "@itookit/durable-kernel": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
-    "@itookit/tools": "workspace:*"
+    "@itookit/tools": "workspace:*",
+    "@itookit/context": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "20.19.25",

@@ -30,6 +30,7 @@ export async function createConversationSystem(
     options: ConversationSystemOptions,
 ): Promise<{ sessionManager: SessionManager; commandBus: CommandBus }> {
     const { vfs, agentService, sessionRepository, flowEngine, kernel } = options;
+    const capabilities = createFlowCapabilities(kernel);
     return initializeConversationSystem({
         agentService,
         sessionEngine: sessionRepository,
@@ -43,7 +44,8 @@ export async function createConversationSystem(
         canWriteSession: options.ensureWritable,
         resolveSessionContext: (sessionId, userMessage) => resolveSessionSkillContext(kernel.kernel, kernel.sessions, sessionId, userMessage),
         resolveSessionSkills: (sessionId, ids) => resolveSessionSelectedSkills(kernel.kernel, kernel.sessions, sessionId, ids),
-        resolveTools: createFlowCapabilities(kernel).resolveTools,
+        resolveTools: capabilities.resolveTools,
+        resolveHarnessToolIds: capabilities.resolveHarnessToolIds,
     });
 }
 

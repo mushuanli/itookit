@@ -162,6 +162,11 @@ export async function createCliRuntime(
     const directorySource = new CliDirectorySourceProvider(root);
     const directoryMounts = new DirectoryMountService(systemFS, sessionFiles, directorySource);
     await directoryMounts.init();
+    const savedFiles = await sessionFiles.inspect(manifest.sessionId);
+    const savedMounts = await directoryMounts.processMounts(manifest.sessionId);
+    const savedWorkingMount = savedMounts.find(mount => savedFiles?.cwd === mount.at || savedFiles?.cwd.startsWith(mount.at + '/'));
+    const savedWorkspace = savedWorkingMount ? path.join(savedWorkingMount.directory, savedFiles!.cwd.slice(savedWorkingMount.at.length))
+        : savedMounts.find(mount => mount.at === '/workspace')?.directory;
 
     // In worktree mode the whole Session workspace is the isolated copy, so the VFS file
     // tools, the session cwd and the access grants agree with the shell's working
@@ -180,28 +185,38 @@ export async function createCliRuntime(
         process.stderr.write('[worktree] --set-home keeps the host directory as the Session workspace;'
             + ' the isolated copy is only the agent shell working directory\n');
     }
-    const sessionWorkspaceRoot = path.resolve(hostOptions.setHome ?? worktree ?? workflow.workspaceRoot);
+    const sessionWorkspaceRoot = path.resolve(hostOptions.setHome ?? savedWorkspace ?? worktree ?? workflow.workspaceRoot);
+    // Session mounts are the single source for both file tools and platform exec mounts.
+    for (const grant of savedFiles ? [] : manifest.grants) {
+        await directoryMounts.addDirectory(manifest.sessionId, `host:${grant.path}`, !readOnly && grant.access === 'write' ? 'rw' : 'ro');
+    }
+    if (!savedFiles || hostOptions.setHome) {
+        await directoryMounts.setWorkspace(manifest.sessionId, `host:${sessionWorkspaceRoot}`, readOnly ? 'ro' : 'rw');
+    }
+    for (const raw of hostOptions.addDir ?? []) {
+        const { directory, access } = parseAddDirectory(raw);
+        await directoryMounts.addDirectory(manifest.sessionId, `host:${path.resolve(directory)}`, readOnly ? 'ro' : access);
+    }
+
+    const configuredMounts = await directoryMounts.processMounts(manifest.sessionId);
     const grants = new WorkspaceGrantRegistry(
         sessionWorkspaceRoot,
         workflow.stateDir,
-        manifest.grants,
+        configuredMounts.filter(mount => mount.at !== '/workspace').map(mount => ({
+            id: manifest.grants.find(grant => grant.path === mount.directory)?.id ?? `mount-${mount.at.slice(1)}`,
+            path: mount.directory, access: mount.access === 'rw' ? 'write' as const : 'read' as const,
+            mountAt: mount.at, createdAt: 0,
+        })),
         onGrantChange,
         readOnly,
     );
     grants.setOnGrant(async grant => {
         if (readOnly && grant.access === 'write') throw new Error('Read-only workspace cannot acquire writable mounts');
-        await directoryMounts.addDirectory(manifest.sessionId, grant.path, grant.access === 'write' ? 'rw' : 'ro');
+        await directoryMounts.addDirectory(manifest.sessionId, `host:${grant.path}`, grant.access === 'write' ? 'rw' : 'ro');
+        const mounted = (await directoryMounts.processMounts(manifest.sessionId)).find(mount => mount.directory === grant.path);
+        if (!mounted) throw new Error('Granted directory has no Session mount');
+        grant.mountAt = mounted.at;
     });
-
-    // Session mounts are the single source for both file tools and platform exec mounts.
-    for (const grant of manifest.grants) {
-        await directoryMounts.addDirectory(manifest.sessionId, grant.path, !readOnly && grant.access === 'write' ? 'rw' : 'ro');
-    }
-    await directoryMounts.addDirectory(manifest.sessionId, sessionWorkspaceRoot, readOnly ? 'ro' : 'rw', '/workspace', true);
-    for (const raw of hostOptions.addDir ?? []) {
-        const { directory, access } = parseAddDirectory(raw);
-        await directoryMounts.addDirectory(manifest.sessionId, directory, readOnly ? 'ro' : access);
-    }
 
     const executionMounts = async (): Promise<WorkspaceGrant[]> => {
         const mounts = await directoryMounts.processMounts(manifest.sessionId);
@@ -361,8 +376,9 @@ function compileTask(
         : [
             agent.system_prompt,
             `Overall goal: ${workflow.config.goal}`,
-            `Workspace: ${sessionWorkspace ?? workflow.workspaceRoot}`,
-            'Only access paths inside the workspace unless RequestWorkspaceAccess has been approved.',
+            'File tools use the Session virtual namespace: /workspace is the primary workspace. Use virtual paths, not host paths, for file reads and writes.',
+            'Relative file paths use the Session working directory (normally /workspace). The host maps shell working directories to mounted sources.',
+            'Additional directories must be explicitly mounted through RequestWorkspaceAccess before using their Session paths.',
         ].filter(Boolean).join('\n\n');
     return {
         id: task.id,
@@ -389,9 +405,7 @@ function compileTask(
             ...(agent.output_validation ? { outputValidation: { onInvalid: agent.output_validation.on_invalid,
                 retries: agent.output_validation.retries } } : {}),
             ...(agent.memory_policy ? { memoryPolicy: memoryPolicyForAgent(agent) } : {}),
-            // An isolated Run lets the executor place every agent node in the workspace it
-            // prepared; pinning the node to the base repository here would silently win.
-            ...(isolatedWorkspace(workflow) ? {} : { workingDirectory: workflow.workspaceRoot }),
+            // Use the Session file context cwd. A host directory is not a VFS path.
             approval: agent.approval ?? 'external',
             ...(task.max_iterations !== undefined ? { maxIterations: task.max_iterations } : {}),
         },

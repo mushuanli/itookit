@@ -5,8 +5,6 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_fs::FsExt;
 mod atomic_file;
@@ -14,6 +12,7 @@ mod sidecar;
 mod directory_boundary;
 mod scoped_fs;
 mod scoped_directory;
+pub mod diagnostics;
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
@@ -285,6 +284,11 @@ fn get_root_dir(paths: State<AppPaths>) -> String {
 }
 
 #[tauri::command]
+fn get_current_dir() -> Result<String, String> {
+    std::env::current_dir().map(|path| path.to_string_lossy().into_owned()).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_app_data_dir(app: AppHandle) -> String {
     app.path().app_local_data_dir()
         .map(|p| p.to_string_lossy().into_owned())
@@ -531,7 +535,8 @@ fn canonicalise(raw: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    diagnostics::install();
+    let app = tauri::Builder::default()
         .setup(|app| {
             let system_home = app.path().home_dir().unwrap_or_else(|_| PathBuf::from("."));
             let paths = resolve_all_paths(&system_home);
@@ -559,6 +564,16 @@ pub fn run() {
             app.manage(CodexAppServer::default());
             app.manage(sidecar::SidecarTransactions::default());
 
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.with_webview(|webview| {
+                    use webkit2gtk::WebViewExt;
+                    webview.inner().connect_web_process_terminated(|_, reason| {
+                        diagnostics::record("webview.terminated", serde_json::json!({"reason": format!("{reason:?}")}));
+                    });
+                });
+            }
+
             #[cfg(debug_assertions)]
             if let Some(window) = app.get_webview_window("main") {
                 window.open_devtools();
@@ -569,8 +584,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            diagnostics::diagnostic_event,
             scoped_fs::directory_open,
             scoped_fs::directory_close,
+            scoped_fs::directory_stat_many,
+            scoped_fs::directory_read_range,
             scoped_fs::directory_io,
             sidecar::sidecar_begin,
             sidecar::sidecar_execute,
@@ -578,6 +596,7 @@ pub fn run() {
             sidecar::sidecar_finish,
             get_home_dir,
             get_root_dir,
+            get_current_dir,
             get_app_data_dir,
             get_app_config_dir,
             fs_stat,
@@ -603,8 +622,14 @@ pub fn run() {
             codex_poll,
             codex_stop,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+    app.run(|_, event| match event {
+        tauri::RunEvent::Ready => diagnostics::record("app.ready", serde_json::json!({})),
+        tauri::RunEvent::ExitRequested { code, .. } => diagnostics::record("app.exit_requested", serde_json::json!({"code": code})),
+        tauri::RunEvent::Exit => diagnostics::clean_exit(),
+        _ => {},
+    });
 }
 
 #[cfg(all(test, unix))]

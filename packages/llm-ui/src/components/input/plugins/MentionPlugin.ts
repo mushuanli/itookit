@@ -21,6 +21,7 @@
 
 import type { InputPlugin, InputPluginContext } from './InputPlugin';
 import { PopupPanel } from './PopupPanel';
+import { t } from '@itookit/common';
 import type { FileSuggestion } from '../../../domain/types';
 
 const TRIGGER_CHAR = '@';
@@ -30,7 +31,7 @@ const IMAGE_MIMES = new Set([
 
 export interface MentionPluginOptions {
     /** 根据用户输入的 query 返回文件建议列表 */
-    onRequestFiles: (query: string) => Promise<FileSuggestion[]>;
+    onRequestFiles: (query: string, options?: { includeIgnored?: boolean; signal?: AbortSignal }) => Promise<FileSuggestion[]>;
 }
 
 export class MentionPlugin implements InputPlugin {
@@ -48,6 +49,8 @@ export class MentionPlugin implements InputPlugin {
     private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
     private cachedSuggestions: FileSuggestion[] = [];
+    private includeIgnored = false;
+    private pendingFetch?: AbortController;
 
     constructor(private readonly opts: MentionPluginOptions) {}
 
@@ -60,6 +63,10 @@ export class MentionPlugin implements InputPlugin {
             emptyText: 'No files found',
             footerHint: 'Type to filter · Enter to insert · Esc to cancel',
             animated: true,
+            toggle: { label: t('chatInput.includeIgnored'), checked: this.includeIgnored, onChange: checked => {
+                this.includeIgnored = checked;
+                this.scheduleFetch();
+            } },
         });
     }
 
@@ -123,6 +130,7 @@ export class MentionPlugin implements InputPlugin {
     }
 
     deactivate(): void {
+        this.pendingFetch?.abort();
         this.clearDebounce();
         this.popup?.destroy();
         this.popup = null;
@@ -133,6 +141,7 @@ export class MentionPlugin implements InputPlugin {
     // ── Private ──────────────────────────────────────────────────────────────
 
     private scheduleFetch(): void {
+        this.pendingFetch?.abort();
         this.clearDebounce();
         this.debounceTimer = setTimeout(() => this.fetchAndShow(), 150);
     }
@@ -146,16 +155,17 @@ export class MentionPlugin implements InputPlugin {
 
     private async fetchAndShow(): Promise<void> {
         if (!this.ctx || this.mentionStart < 0) return;
+        const controller = new AbortController();
+        this.pendingFetch = controller;
 
         try {
-            this.cachedSuggestions = await this.opts.onRequestFiles(this.currentQuery);
+            const suggestions = await this.opts.onRequestFiles(this.currentQuery,
+                { includeIgnored: this.includeIgnored, signal: controller.signal });
+            if (controller.signal.aborted) return;
+            this.cachedSuggestions = suggestions;
         } catch {
+            if (controller.signal.aborted) return;
             this.cachedSuggestions = [];
-        }
-
-        if (this.cachedSuggestions.length === 0) {
-            this.popup?.hide();
-            return;
         }
 
         const items = this.cachedSuggestions.map((f) => ({
@@ -201,6 +211,7 @@ export class MentionPlugin implements InputPlugin {
     }
 
     private close(): void {
+        this.pendingFetch?.abort();
         this.clearDebounce();
         this.popup?.hide();
         this.mentionStart = -1;

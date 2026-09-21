@@ -40,3 +40,15 @@ describe('workspace boundary', () => {
         await expect(createWorkspacePort(registry).readFile(path.join(outside, 'allowed.txt'))).resolves.toBe('ok');
     });
 });
+
+it('reports the actual Session mount path after an approved directory grant', async () => {
+    const { createWorkspaceAccessTool } = await import('../src/workspace');
+    const { rm } = await import('node:fs/promises');
+    const root = await mkdtemp(path.join(tmpdir(), 'mindos-grant-path-'));
+    try {
+        const registry = new WorkspaceGrantRegistry(root, path.join(root, '.mindos'));
+        registry.setOnGrant(async grant => { grant.mountAt = '/reference'; });
+        const result = await createWorkspaceAccessTool(registry).call({ path: root, access: 'read', reason: 'reference' });
+        expect(result.data).toMatchObject({ sandboxPath: '/reference', access: 'read' });
+    } finally { await rm(root, { recursive: true, force: true }); }
+});

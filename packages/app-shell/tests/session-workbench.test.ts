@@ -12,14 +12,14 @@ function setup() {
     const repository = { getManifest: vi.fn(async (id: string) => ({ id, title: 'Session', ...manifest })), list: vi.fn(async () => []),
         openAttachments: vi.fn(async () => ({ dispose })), subscribe: (listener: () => void) => { listeners.push(listener); return () => {}; } };
     const files = { subscribe: () => () => {}, inspect: vi.fn(async () => ({ revision: 1 })), acquireFiles: vi.fn(async () => ({ context: { fs: { capabilities: {} }, sessionId: 's' }, release })) };
-    const rerunFlow = vi.fn(async () => {});
-    const destroy = vi.fn(async () => {}), factory = vi.fn(async (...args: any[]) => { manifest.currentBranch = args[1].target.branch ?? 'main'; return { destroy, commands: { rerunFlow } }; });
+    const rerunSession = vi.fn(async () => {});
+    const destroy = vi.fn(async () => {}), factory = vi.fn(async (...args: any[]) => { manifest.currentBranch = args[1].target.branch ?? 'main'; return { destroy, commands: { rerunSession } }; });
     const onSelect = vi.fn();
     const sidebar = element();
     const kernel = { onChanged: () => () => {}, cancel: vi.fn(async () => {}), task: vi.fn(async () => ({ effects: {} })),
         closeSession: vi.fn(async () => {}), sessionStat: vi.fn(async () => ({ phase: 'closed' })) };
     const workbench = new SessionWorkbench(sidebar as any, element() as any, repository as any, files as any, factory as any, onSelect, undefined, kernel as any, factory as any);
-    return { rerunFlow, kernel, sidebar, workbench, repository, files, factory, release, dispose, destroy, onSelect, manifest, changed: () => listeners.forEach(listener => listener()) };
+    return { rerunSession, kernel, sidebar, workbench, repository, files, factory, release, dispose, destroy, onSelect, manifest, changed: () => listeners.forEach(listener => listener()) };
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('Session workbench lifecycle', () => {
@@ -37,9 +37,9 @@ describe('Session workbench lifecycle', () => {
         const options = (createVFSUI as any).mock.calls.at(-1)[0];
         const menu = options.contextMenu.items({ id: '/target' }, []);
         const action = menu.find((item: any) => item.id === 'rerun-session');
-        expect(action.label).toBe(t('flow.rerun.title'));
+        expect(action.label).toBe(t('session.rerun.title'));
         action.onClick();
-        await vi.waitFor(() => expect(f.rerunFlow).toHaveBeenCalledOnce());
+        await vi.waitFor(() => expect(f.rerunSession).toHaveBeenCalledOnce());
         expect(f.factory.mock.calls.at(-1)?.[1].target.sessionId).toBe('target');
         expect(f.workbench.getActiveResourceId()).toBe('target?branch=main');
         await f.workbench.destroy();

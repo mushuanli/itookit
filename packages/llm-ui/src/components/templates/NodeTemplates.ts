@@ -205,10 +205,11 @@ export class NodeTemplates {
     }
 
     static renderTool(node: ExecutionNode, icon: string): string {
-        const hasResult = node.data.output || node.status === 'success';
+        const result = node.data.error ?? node.data.output;
+        const hasResult = result !== undefined && result !== '' || node.status === 'success';
         const resultDisplay = hasResult ? 'block' : 'none';
-        const resultText = node.data.output
-            ? (typeof node.data.output === 'string' ? node.data.output : JSON.stringify(node.data.output))
+        const resultText = result !== undefined
+            ? (typeof result === 'string' ? result : JSON.stringify(result, null, 2))
             : '';
 
         return `
@@ -222,6 +223,7 @@ export class NodeTemplates {
                 typeof node.data.input === 'string' ? node.data.input : JSON.stringify(node.data.input, null, 2)
             )}</pre></div>` : ''}
             <div class="llm-ui-node__result" style="display:${resultDisplay}">${escapeHTML(resultText)}</div>
+            <div class="llm-ui-node__progress" role="status" hidden></div>
             <div class="llm-ui-node__children"></div>
         </div>`;
     }

@@ -7,6 +7,21 @@ import { BashEffectAdapter } from './bash-effect';
 import { SkillLoadEffectAdapter } from './skill-load-effect';
 
 describe('KernelAdapters Effect adapters', () => {
+    it('streams bounded progress using the call identity before tool completion', async () => {
+        const emit = vi.fn(async () => {});
+        const adapter = new ToolCallEffectAdapter(toolService(async request => {
+            await request.onProgress?.({ message: 'x'.repeat(3000), output: 'y'.repeat(10_000) });
+            expect(emit).toHaveBeenCalledOnce();
+            return result('Grep', true, 'final');
+        }));
+        await adapter.execute({ callId: 'call-123', resourceHandleId: 'tool-handle', toolId: 'Grep', args: { pattern: 'mdx' } }, { ...context('tool'), emit });
+        const event = (emit.mock.calls as unknown[][])[0][0] as any;
+        expect(event).toMatchObject({ type: 'agent.event', payload: { type: 'tool:progress', call: {
+            toolId: 'call-123', name: 'Grep', input: { pattern: 'mdx' },
+        } } });
+        expect(event.payload.call.progress.message).toHaveLength(2048);
+        expect(event.payload.call.progress.output).toHaveLength(8192);
+    });
     it('binds host tools to trusted Effect identity and waits for their completion on cancellation', async () => {
         let finish!: (value: string) => void;
         const pending = new Promise<string>(resolve => { finish = resolve; });

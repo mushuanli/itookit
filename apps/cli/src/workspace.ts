@@ -99,7 +99,7 @@ export function createWorkspaceAccessTool(registry: WorkspaceGrantRegistry) {
             return { data: {
                 grantId: grant.id,
                 hostPath: grant.path,
-                sandboxPath: `/mnt/grants/${grant.id}`,
+                sandboxPath: grant.mountAt ?? `/mnt/grants/${grant.id}`,
                 access: grant.access,
             } };
         },

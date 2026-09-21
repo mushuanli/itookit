@@ -59,9 +59,12 @@ function toolDefinitionFromTool(tool: Tool): ToolDefinition {
   }
 
   return {
-    name: tool.name,
-    description: '', // filled in by init()
-    parameters,
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: '', // filled in by init()
+      parameters,
+    },
   };
 }
 
@@ -132,7 +135,8 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
     for (const entry of this.registry.values()) {
       const desc = await entry.tool.description();
       entry.meta.description = desc;
-      entry.definition.description = desc;
+      if (entry.definition.function) entry.definition.function.description = desc;
+      else entry.definition.description = desc;
     }
   }
 
@@ -189,7 +193,7 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
         throw new ToolInputError('TOOL_DISABLED', 'Tool was disabled or replaced before execution');
       }
       const result = await entry.tool.call(args, context);
-      return toolSuccess(entry.tool, result.data, started);
+      return await toolSuccess(entry.tool, result.data, started, request.admitOutput);
     } catch (error) {
       const result = toolFailure(request.toolId, error, started);
       return signal.controller.signal.aborted ? { ...result, errorCode: 'CANCELLED', recoverable: false } : result;
@@ -203,6 +207,7 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
     return {
       cwd: request.cwd ?? this.fileCwd ?? (typeof process !== 'undefined' ? process.cwd() : '/'),
       signal: controller.signal, timeoutMs, vfs: this.vfsContext, shell: this.shellContext,
+      onProgress: request.onProgress,
       abortController: controller, appState,
       setAppState: (key, value) => { appState[key] = value; },
     };

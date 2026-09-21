@@ -351,8 +351,50 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    flex-wrap: nowrap;
-    overflow: hidden;
+    flex-wrap: wrap;
+}
+
+.llm-input__execution-mode {
+    display: inline-flex;
+    flex-shrink: 0;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--llm-border-color);
+    border-radius: 6px;
+}
+
+.llm-input__execution-option {
+    padding: 4px 8px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--llm-text-secondary);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.llm-input__execution-option[aria-pressed="true"] {
+    background: var(--llm-bg-hover);
+    color: var(--llm-text-primary);
+}
+
+.llm-input__execution-option:focus-visible {
+    outline: 2px solid var(--llm-color-primary);
+    outline-offset: 1px;
+}
+
+.llm-input__execution-option:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.llm-input__execution-hint {
+    padding: 2px 4px;
+    color: var(--llm-text-secondary);
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
 }
 
 .llm-input__toolbar-right {

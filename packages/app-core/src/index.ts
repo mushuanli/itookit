@@ -22,6 +22,7 @@ export { PrivilegedCommandService } from './kernel/privileged-command-service';
 export type { WorkspaceController } from './core/WorkspaceController';
 export { createKernelRuntime } from './runtime/create-kernel-runtime';
 export type { CreateKernelRuntimeOptions, HeadlessKernelRuntime } from './runtime/create-kernel-runtime';
+export type { RuntimeContextGc, RuntimeContextGcOptions, RuntimeContextGcResult } from './runtime/context-gc';
 export { syncSkillsToKernel } from './kernel/sync-skills';
 export type { SkillSourceDriver, KernelSkillCatalog } from './kernel/sync-skills';
 export { MINDOS_CONFIG_FILE, resolveMindOSProfile } from './profile/mindos-profile';

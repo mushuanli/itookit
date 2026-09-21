@@ -12,7 +12,8 @@ interface SessionPaths { root: string; session: string; history: string }
 export class SessionRepository implements ISessionRepository {
     private readonly listeners = new Set<() => void>();
     private closed = false;
-    constructor(private readonly fs: IFileSystem) {}
+    constructor(private readonly fs: IFileSystem,
+        private readonly initializeNewSession?: (sessionId: string) => Promise<void>) {}
     async init(): Promise<void> {
         if (this.closed) throw new FSError('EACCES', 'Session repository is closed');
         if (!this.fs.meta.seq?.transaction) throw new Error('Session storage requires record transactions');
@@ -42,6 +43,7 @@ export class SessionRepository implements ISessionRepository {
             if (await this.fs.meta.seq!.transaction!(tx => this.initializeSessionTx(tx, p, { id, title, origin, folder: normalizedFolder, now }))) {
                 repaired = true;
             }
+            if (!existed) await this.initializeNewSession?.(id);
         } catch (error) {
             // Only this call's own empty directory is removed; an existing Session
             // that merely failed to validate is left untouched.

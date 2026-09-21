@@ -94,6 +94,8 @@ class SessionManager implements ISession, SessionQuery {
 
 **工厂**：`createSessionManager(engine, agentService, { kernel, dagPlugins, flowStore, resolveSessionContext?, resolveTools?, retrieveMemory? })`、`getSessionManager()`（单例读取）、`resetSessionManager()`。
 
+**对话 / 执行模式**：`ChatSessionSettings.executionMode` 与 `ExecutionOverrides.executionMode` 使用 `ChatExecutionMode = 'chat' | 'agent'`；UI 默认 chat，Session settings 持久化该偏好。`SendIntent.execution` 的 agent 分支可携带 `mode`，优先于 overrides。发送准入前复制意图与覆盖参数，创建的 Task 在 labels 固定 executionMode。chat 剥离工作区工具，保留显式授权的客户端 WebSearch / Provider 内置搜索；agent 固定 llm.agent 与默认 50 次交换预算。未配置 `capabilityPolicy.toolIds` 时，宿主 `resolveHarnessToolIds(sessionId)` 提供已启用的 Read/Glob/Grep/Write/Edit/Bash；Bash 需要宿主注入 Shell。显式白名单（含空数组）优先，无可用工具时拒绝提交。工具仍受 Session 挂载与 external 审批限制；执行提示要求实际使用工具并按 Session 虚拟路径操作。无 mode 的旧 API 调用继续按工具自动选择程序；Flow 分支不消费该偏好。实现见 [direct-execution-mode.ts](../packages/llm-session/src/session/direct-execution-mode.ts)，完整调用链回归见 [harness-default-tools.test.ts](../packages/app-core/tests/harness-default-tools.test.ts)。
+
 ---
 
 ## 会话核心
@@ -217,6 +219,8 @@ class RoundGraphService {
 ### RoundOperations
 
 `class RoundOperations` —— round 业务操作（sendMessage 执行、regenerate 判定）。`hasRegenerateAssistant(...)` 辅助。
+
+Chat/Harness 重跑沿用 regenerate：已有回复时创建替代分支和新 Task，保留原 Task；工具重新执行，使用当前文件状态，不自动撤销文件修改。顶部与会话右键入口选择当前分支最后一条用户消息，消息旁入口可选择指定轮次；执行模式由 UI 固定后传入 overrides。`SessionRunCoordinator` 在执行结束后等待 `refreshSession` 同步持久 Round，再发布终态，避免刚完成的临时消息缺少轮次索引而无法立即重新生成。相关真实工具回归见 [harness-default-tools.test.ts](../packages/app-core/tests/harness-default-tools.test.ts)。
 
 ---
 

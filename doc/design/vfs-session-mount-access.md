@@ -4,7 +4,7 @@
 
 ## 1. 核心契约
 
-Session 可访问的用户文件 = 自有 attachments + 用户明确授予的挂载。
+Session 可访问的用户文件 = 自有 attachments + 持久化的会话挂载。Tauri/CLI 新 Session 默认授权宿主当前目录为 `/workspace`（rw），用户可以修改；Web 未提供默认目录时仍只开放自有文件区域。应用 profile 的 `rootDir` 是会话记录/配置的存储根，与工作目录分开。
 
 - 来源注册只意味着宿主能够连接该来源，不授予任何 Session 访问权。
 - 未挂载目录不能通过列目录、绝对路径、搜索、编辑器、附件引用或后台 Task 访问。
@@ -16,7 +16,7 @@ Session 可访问的用户文件 = 自有 attachments + 用户明确授予的挂
 
 ## 2. 目录
 
-新 Session：
+未配置默认目录的 Session（例如 Web）：
 
 ```text
 <sessionId>/
@@ -41,15 +41,19 @@ files 是 Browser 前缀。Agent 和编辑器使用 `/workspace/src/a.ts`，不�
 
 挂载点采用根下一层名称，UI 默认建议 workspace 或来源目录名；名称冲突要求重新命名。未挂载时不生成空 workspace、mounts、home 等目录。禁止挂载 `/`、覆盖 attachments、重叠挂载或占用系统保留名称。vfs-core 仍保留通用组合能力，这些约束由 SessionFilesService 实施。
 
-默认 cwd 为 `/`；根只能列目录，不能凭空创建未授权的顶层路径。挂载时可勾选“设为工作目录”，之后 cwd 必须落在有效挂载内；移除当前工作目录时回到 `/`，不会自动改用另一来源。
+Tauri/CLI 新会话默认 cwd 为 `/workspace`；没有工作区授权时 cwd 为 `/`；根只能列目录，不能凭空创建未授权的顶层路径。挂载时可勾选“设为工作目录”，之后 cwd 必须落在有效挂载内；移除当前工作目录时回到 `/`，不会自动改用另一来源。
 
 Session 持久布局保持 `/var/lib/sessions/<id>/{session.seq,history.seq,attachments/,...}`，跨 Session 的文件夹索引在 `/var/lib/sessions/folders.seq`。用户挂载是映射，不复制到 Session 目录，卸载不删除来源。上传附件则是复制进当前 Session，不能因此获得对原附件所在目录的访问权。
 
 ## 3. UI
 
+llm-ui 标题栏「工作目录与挂载」与标题栏/输入工具栏右键菜单共用宿主 `directoryCommands.configureWorkspace` 接口。工作目录操作替换 `/workspace` 映射并保留其他挂载；挂载管理显示来源、会话路径、权限、当前 cwd，可切换权限、重连和卸载。附加目录默认只读；工作目录默认读写。运行中 UI 禁用入口，宿主继续拒绝任何非终态 Task 期间的授权变更。
+
+Tauri 在创建 Session 返回前完成启动 cwd 的默认挂载；已显式设置的默认目录优先。CLI 未指定 `workspace.root` 时使用调用进程 cwd，显式相对路径仍相对于 Flow 配置文件。CLI 重开 Session 保留已保存挂载；`--set-home` 显式替换主目录。本机选择器与 CLI 路径使用 `host:` 解析，避免与 `/home/admin` 应用命名空间混淆。
+
 files 行提供一个“＋”动作，点击 files 主视图顶部也提供“挂载目录”和“管理挂载”。两处复用同一个挂载弹窗（`packages/app-shell/src/files/mount-dialog.ts`）与宿主控制器 `DirectoryMountService`（`packages/app-core/src/vfs/directory-mounts.ts`），不写两套业务逻辑。vfs-ui 仅提供通用条目动作扩展点。
 
-新 Session 的 files 主视图显示 attachments 和说明：“尚未挂载工作目录，此会话仅能访问附件。”
+未挂载目录的 Session files 主视图显示 attachments 和说明：“尚未挂载工作目录，此会话仅能访问附件。”
 
 挂载弹窗：
 
@@ -191,7 +195,7 @@ flowchart LR
 
 进程执行是必要的独立检查点：VFS 只能约束经过 VFS 的操作。原生 shell/PTY 若仍可直接读宿主文件，则仅修改 cwd、过滤路径或限制文件工具不能实现本方案。提供 process 能力的平台必须通过 OS 沙箱/容器/受控执行器实施等价文件范围；无法实施的平台不得向受限 Session 提供无约束宿主 shell。运行程序所需的运行库等系统资源由执行器固定提供，与用户数据挂载分开，不借此授权其他用户数据。
 
-Tauri 已移除向 Session 注入无约束 native shell、原生 skill tool handler 和本地 Codex app-server 传输；进程执行改由 Bubblewrap runner 实施：`apps/tauri-app/src-tauri/src/session_bash.rs` 按显式 Session 挂载生成 `bwrap` 命令（`--ro-bind`/`--bind`、`--unshare-pid/--unshare-ipc/--unshare-uts`、`--die-with-parent`），cwd 必须落在授权挂载内，宿主环境变量被清空；`apps/tauri-app/src/shell/session-bash.ts` 经 `directory_open`/`directory_close` 取得目录句柄并接线到 `SessionProcessFactory`（`packages/app-core/src/vfs/session-process-context.ts`）。该 runner 不隔离网络，也不是完整 OS 沙箱。CLI 的独立原生/OCI 执行策略不由本次 UI 挂载功能修改。
+Tauri 已移除向 Session 注入无约束 native shell、原生 skill tool handler 和本地 Codex app-server 传输；进程执行改由 Bubblewrap runner 实施：`apps/tauri-app/src-tauri/src/session_bash.rs` 按显式 Session 挂载生成 `bwrap` 命令（`--ro-bind`/`--bind`、`--unshare-pid/--unshare-ipc/--unshare-uts`、`--die-with-parent`），cwd 必须落在授权挂载内，宿主环境变量被清空；`apps/tauri-app/src/shell/session-bash.ts` 经 `directory_open`/`directory_close` 取得目录句柄并接线到 `SessionProcessFactory`（`packages/app-core/src/vfs/session-process-context.ts`）。该 runner 不隔离网络，也不是完整 OS 沙箱。CLI 默认 OCI 使用同一 Session 挂载列表；主挂载被卸载时 Shell/TTY 拒绝启动，不能从旧 Flow 路径自动恢复授权。`RequestWorkspaceAccess` 返回实际会话挂载路径。CLI 显式 `native` 模式仍以宿主权限执行，不具备等价的 OS 文件范围隔离。
 
 Tauri 文件 IO 使用原生 directory_open/close/io，保存规范化目录根，每次拒绝 parent traversal 和符号链接，关闭 scope 后 IO 失败；元数据位于独立 sidecar，用户内容保持原路径，包括 __tests__。这不等于 OS 进程沙箱，也不宣称能抵抗外部宿主进程在路径检查和 IO 之间恶意换链的竞态。
 
@@ -206,7 +210,7 @@ Tauri 文件 IO 使用原生 directory_open/close/io，保存规范化目录根�
 | OpenCode V2 | 外部目录先检查 external_directory，再检查 read/edit；文档说明 shell 使用宿主用户权限，对命令参数中的目录并非完整边界 | 借鉴目录授权与操作授权分层；必须补足进程边界。[官方文档](https://opencode.ai/v2/docs/permissions) |
 | Aider | 以一个 Git repo 为编辑中心，可 `/read` 另一个 repo 的文件 | 借鉴工作项目与只读参考；加入模型上下文不是 OS 文件隔离。[官方文档](https://aider.chat/docs/faq.html) |
 
-MindOS 的目标更明确：空 Session 不附加用户目录；每个挂载是该 Session 的真实访问授权；用户只需理解附件、工作目录与附加目录。
+MindOS 的目标更明确：未配置默认来源的 Session 不附加用户目录；每个挂载是该 Session 的真实访问授权；用户只需理解附件、工作目录与附加目录。
 
 ## 7. 验收
 
@@ -214,7 +218,7 @@ MindOS 的目标更明确：空 Session 不附加用户目录；每个挂载是�
 2. 挂载 demo 后只访问 demo 子树，兄弟项目不可通过绝对路径、..、链接或搜索访问。
 3. 只读挂载不能写入、重命名、删除、写 metadata，也不能经 shell 绕过。
 4. 两个 Session 选择同名挂载点不会串来源；注册来源不会让其他 Session 自动获得访问。
-5. 默认目录设置不改变已有 Session，创建 Session 不隐式挂载。
+5. 默认目录设置不改变已有 Session；Tauri/CLI 新建时按宿主当前目录或显式默认配置挂载，Web 未配置时保持无用户挂载。
 6. 卸载不删文件，旧句柄失效；重新连接不会扩大根目录或权限。
 7. 文件工具与受限进程执行分别验证访问边界；Bubblewrap runner 已覆盖只读/可写授权与保留路径拒绝，但未完成真实 GUI 与网络隔离验收，不能宣称完整隔离。
 

@@ -28,8 +28,9 @@ export const LayoutTemplates = {
             </div>
 
             <div class="llm-workspace-titlebar__right">
+                <button class="llm-workspace-titlebar__btn llm-workspace-titlebar__btn--text" id="llm-btn-workspace" hidden aria-haspopup="menu" aria-expanded="false">${escapeHTML(t('workspace.menu'))}</button>
                 <button class="llm-workspace-titlebar__btn llm-workspace-titlebar__btn--text" id="llm-btn-flow-output" title="${escapeHTML(t('flow.output.title'))}">${escapeHTML(t('flow.output.title'))}</button>
-                <button class="llm-workspace-titlebar__btn llm-workspace-titlebar__btn--text" id="llm-btn-flow-rerun" title="${escapeHTML(t('flow.rerun.title'))}">${escapeHTML(t('flow.rerun.title'))}</button>
+                <button class="llm-workspace-titlebar__btn llm-workspace-titlebar__btn--text" id="llm-btn-session-rerun" title="${escapeHTML(t('session.rerun.hint'))}">${escapeHTML(t('session.rerun.title'))}</button>
                 <div class="llm-workspace-titlebar__bg-indicator" id="llm-bg-indicator" style="display:none;">
                     <span class="llm-bg-badge">2 running</span>
                 </div>

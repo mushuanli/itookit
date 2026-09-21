@@ -16,7 +16,7 @@ import {
     type EffectAdapter,
 } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend, type IFileSystem, type IVFSManager } from '@itookit/vfs-core';
-import { DurableAgentProgram } from '@itookit/llm-tasks';
+import { DurableAgentProgram, DurableChatProgram } from '@itookit/llm-tasks';
 import { createBuiltinDagPluginRegistry } from '../src/flow/builtin-plugins';
 import { DurableFlowExecutor, upstreamOf, workspaceLeaseKey } from '../src/flow/executor';
 import { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from '../src/flow/programs';
@@ -60,6 +60,26 @@ describe('DurableFlowExecutor', () => {
     /** For Runs that park on an interaction and can never exit: wait for a dispatched node. */
     const waitForNode = (handle: { nodes: ReadonlyMap<string, unknown> }, nodeId: string): Promise<void> =>
         vi.waitFor(() => expect(handle.nodes.has(nodeId)).toBe(true));
+
+    it('freezes context program versions per Run and keeps legacy checkpoints on v1', async () => {
+        const first = executor(kernel);
+        const original = await first.submit('session-one', agentFlow());
+        await runToEnd(original); await first.waitIdle();
+        const initial = structuredClone((await original.root.status()).task.input) as any;
+        delete initial.initialScheduler.contextProgramVersion;
+        const agent = new DurableAgentProgram(); agent.manifest.version = '2';
+        const chat = new DurableChatProgram(); chat.manifest.version = '2';
+        kernel.registerProgram(agent); kernel.registerProgram(chat);
+        const session = await kernel.openSession('session-one');
+        const root = await session.submit({ program: { kind: 'flow.aggregate', version: '1' }, input: initial, labels: { kind: 'flow-root' } });
+        const restored = await first.resume('session-one', root.id);
+        expect((await runToEnd(restored)).status).toBe('succeeded'); await first.waitIdle();
+        expect((await restored.nodes.get('agent')!.status()).task.program.version).toBe('1');
+        const fresh = await first.submit('session-one', agentFlow());
+        expect((await runToEnd(fresh)).status).toBe('succeeded'); await first.waitIdle();
+        expect((await fresh.nodes.get('agent')!.status()).task.program.version).toBe('2');
+        expect(((await fresh.root.status()).task.input as any).initialScheduler.contextProgramVersion).toBe('2');
+    });
 
     it('restores the initial root snapshot and workspace before a first shared checkpoint exists', async () => {
         const workspaceManager = {

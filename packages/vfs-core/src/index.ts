@@ -18,6 +18,8 @@ export * from './eventbus';
 // ── 工厂 ──
 export { createVFS } from './impl/factory';
 export { copyFileSystemTree } from './impl/services/copy-tree';
+export { discoverFiles, createVFSFileDiscoverySource } from './impl/services/file-discovery';
+export { DEFAULT_DISCOVERY_EXCLUDES } from './impl/services/file-ignore';
 export { FileSystemView, createFileSystemView, normalizeVirtualPath } from './impl/services/FileSystemView';
 export type { FileSystemMount, FileSystemViewOptions } from './impl/services/FileSystemView';
 

@@ -37,8 +37,10 @@ import type {
 } from '../ports/capabilities';
 import { ApprovedEffectProgram } from '../programs/approved-effect-program';
 import { ExecProgram } from '../programs/exec-program';
+import { ContextPrepareEffect, ContextLlmEffect, ContextToolEffect, type ContextServiceResolver } from '../context/effects';
 
 export interface KernelAdaptersRuntimeOptions {
+    contextService?: ContextServiceResolver;
     effectTools?: import('../effects/tool-call-effect').EffectToolBinding[];
     /** Resolve a trusted Task to its isolated Run identity; undefined selects the normal Session. */
     scopeForEffect?: (context: import('@itookit/durable-kernel').EffectExecutionContext) => Promise<string | undefined>;
@@ -84,6 +86,9 @@ export async function createKernelAdaptersRuntime(options: KernelAdaptersRuntime
     registerEffectTools(catalogTools, options.effectTools);
     await catalogTools.init();
     const effects = createEffects(llmService, registry, Boolean(options.fileContextForSession || options.fileContextForScope), options.effectTools);
+    if (options.contextService) effects.push(new ContextPrepareEffect(options.contextService),
+        new ContextLlmEffect(options.contextService, effects.find(effect => effect.kind === 'llm.chat')! as LlmChatEffectAdapter),
+        new ContextToolEffect(options.contextService, effects.find(effect => effect.kind === 'tool.call')! as ToolCallEffectAdapter));
     return {
         llmService,
         toolCatalog: {
@@ -97,7 +102,7 @@ export async function createKernelAdaptersRuntime(options: KernelAdaptersRuntime
         },
         sessions: registry,
         plugin: new KernelAdaptersPlugin({
-            effects,
+            effects: effects.map(effect => coordinateSkillEffect(effect, registry)),
             programs: [new ApprovedEffectProgram(), new ExecProgram()],
             onSessionClosed: sessionId => registry.disposeSession(sessionId),
         }),
@@ -409,7 +414,7 @@ function createEffects(
         new SkillUnloadEffectAdapter(async context => (await registry.getForEffect(context)).skillService),
     ];
     if (ttyEnabled) effects.push(new TtyEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, () => tools(context))));
-    return effects.map(effect => coordinateSkillEffect(effect, registry));
+    return effects;
 }
 
 async function persistLoadedSkill(

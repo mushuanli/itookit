@@ -68,7 +68,7 @@ it.each([false, true])('persists selected Skill and scoped memory in direct chat
             { role: 'system', content: 'Loaded skill rules' },
             ...(withMemory ? [{ role: 'system', content: 'Available skill metadata' }] : []),
             { role: 'system', content: 'Review changes.\n\nSkill review — critical rules:\nPreserve access checks.' },
-            ...(withMemory ? [{ role: 'system', content: 'Memory (agent-memory/entry):\nRemember project constraints.' }] : []),
+            ...(withMemory ? [{ role: 'user', tags: ['context-reference'], content: 'Memory (agent-memory/entry):\nRemember project constraints.' }] : []),
             { role: 'user', content: 'Please review' },
         ]);
         resolveSkills.mockClear();

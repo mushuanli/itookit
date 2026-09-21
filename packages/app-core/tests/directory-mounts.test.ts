@@ -141,3 +141,33 @@ it('cannot elevate a read-only registered source through a read-write Session mo
     await expect(view.driver.writeContent('/demo/a.md', 'elevated')).rejects.toMatchObject({ code: 'EROFS' });
     expect(await f.root.driver.readContent('/home/admin/projects/demo/a.md', { encoding: 'utf-8' })).toBe('allowed');
 });
+
+it('replaces the workspace without moving data, preserves reference mounts and revokes old views', async () => {
+    const f = await setup();
+    await f.root.driver.createFile({ parentPath: '/home/admin/projects/second', name: 'a.md', content: 'second', recursive: true });
+    await f.mounts.setWorkspace(f.a, '~/projects/demo');
+    await f.mounts.addDirectory(f.a, '~/notes', 'ro', '/reference');
+    const old = await f.acquire(f.a);
+    await f.mounts.setWorkspace(f.a, '~/projects/second');
+    const current = await f.files.acquire(f.a); cleanup.push(current.release);
+    expect(current.cwd).toBe('/workspace');
+    expect(await current.vfs.readFile('a.md')).toBe('second');
+    expect(await current.vfs.readFile('/reference/secret.md')).toBe('unmounted');
+    await expect(current.vfs.writeFile('/reference/secret.md', 'changed')).rejects.toMatchObject({ code: 'EROFS' });
+    for (const path of ['../notes/secret.md', '/workspace/../reference/secret.md', 'host:/home/admin/notes/secret.md', '/home/admin/notes/secret.md']) {
+        await expect(current.vfs.readFile(path)).rejects.toBeDefined();
+    }
+    await expect(old.fs.driver.readContent('/workspace/a.md')).rejects.toMatchObject({ code: 'EACCES' });
+    expect(await f.root.driver.readContent('/home/admin/projects/demo/a.md', { encoding: 'utf-8' })).toBe('allowed');
+    expect((await f.files.inspect(f.a))!.mounts.map(m => m.at).sort()).toEqual(['/reference', '/workspace']);
+});
+
+it('moves the working directory with a renamed mount and leaves grants intact when changes are refused', async () => {
+    const f = await setup();
+    await f.mounts.setWorkspace(f.a, '~/projects/demo');
+    await f.mounts.addDirectory(f.a, '~/projects/demo', 'rw', '/project');
+    expect((await f.files.inspect(f.a))?.cwd).toBe('/project');
+    f.before.mockRejectedValueOnce(new Error('Task active'));
+    await expect(f.mounts.setWorkspace(f.a, '~/notes')).rejects.toThrow('Task active');
+    expect((await f.files.inspect(f.a))?.cwd).toBe('/project');
+});

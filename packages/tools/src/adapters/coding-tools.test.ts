@@ -2,6 +2,87 @@ import { expect, it, vi } from 'vitest';
 import { BUILTIN_TOOLS } from '../index';
 import { ToolDeviceDriver } from './tool-device-driver';
 
+it('streams the cwd and matches while a subsequent read is still pending', async () => {
+  const driver = new ToolDeviceDriver([...BUILTIN_TOOLS]);
+  let release!: (text: string) => void;
+  const slow = new Promise<string>(resolve => { release = resolve; });
+  const progress: Array<{ message: string; output?: string }> = [];
+  driver.setFileContext({ listFiles: async () => ['/work/first', '/work/slow'],
+    readFile: async path => path.endsWith('first') ? 'mdx' : slow, writeFile: vi.fn() }, '/work');
+  const pending = driver.invoke({ toolId: 'Grep', args: { pattern: 'mdx' }, onProgress: async event => { progress.push(event); } });
+  try {
+    await vi.waitFor(() => expect(progress.some(event => event.output?.includes('/work/first:1: mdx'))).toBe(true));
+    expect(progress[0].message).toContain('cwd: /work | path: /work');
+  } finally { release('no match'); }
+  expect(await pending).toMatchObject({ success: true, data: { numMatches: 1 } });
+});
+
+it('reports skipped oversized files instead of claiming a complete negative search', async () => {
+  const driver = new ToolDeviceDriver([...BUILTIN_TOOLS]);
+  const readFile = vi.fn(async () => { throw Object.assign(new Error('too large'), { code: 'SEARCH_FILE_TOO_LARGE' }); });
+  driver.setFileContext({ listFiles: async () => ['/large'], readFile, writeFile: vi.fn() }, '/');
+  const result = await driver.invoke({ toolId: 'Grep', args: { pattern: 'mdx', includeIgnored: true } });
+  expect(readFile).toHaveBeenCalledWith('/large', { maxBytes: 2 * 1024 * 1024 });
+  expect(result).toMatchObject({ success: true, data: { skippedFiles: 1, numMatches: 0, truncated: true } });
+  expect(result.output).toContain('search is incomplete');
+});
+
+it('yields during a large file scan so a UI cancellation can interrupt it', async () => {
+  const driver = new ToolDeviceDriver([...BUILTIN_TOOLS]);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error('Cancelled from UI')), 0);
+  driver.setFileContext({ listFiles: async () => ['/large.txt'],
+    readFile: async () => 'no match\n'.repeat(100_000), writeFile: vi.fn() }, '/');
+  try {
+    const result = await driver.invoke({ toolId: 'Grep', args: { pattern: 'mdx' }, signal: controller.signal });
+    expect(result.success).toBe(false);
+    expect(result.output).toContain('Cancelled from UI');
+  } finally { clearTimeout(timer); }
+});
+
+it('preserves line numbers and the final empty line across scan batches', async () => {
+  const driver = new ToolDeviceDriver([...BUILTIN_TOOLS]);
+  driver.setFileContext({ listFiles: async () => ['/large.txt'],
+    readFile: async () => 'none\n'.repeat(2048) + 'mdx\n', writeFile: vi.fn() }, '/');
+  expect(await driver.invoke({ toolId: 'Grep', args: { pattern: 'mdx|^$' } })).toMatchObject({
+    success: true, data: { matches: [
+      { file: '/large.txt', line: 2049, content: 'mdx' }, { file: '/large.txt', line: 2050, content: '' },
+    ] },
+  });
+});
+
+it.each(['Grep', 'Glob'])('stops lazy VFS discovery at the %s result limit', async toolId => {
+  const driver = new ToolDeviceDriver([...BUILTIN_TOOLS]);
+  const listFiles = vi.fn(async () => { throw new Error('Must not collect the entire tree'); });
+  let closed = false;
+  const walkFiles = async function* () {
+    try {
+      if (toolId === 'Grep') yield '/early.txt';
+      else for (let i = 0; i < 100; i++) yield `/file${i}.txt`;
+      throw new Error('Must not traverse the remaining slow directories');
+    } finally { closed = true; }
+  };
+  driver.setFileContext({ listFiles, walkFiles, readFile: async () => Array(60).fill('mdx').join('\n'), writeFile: vi.fn() }, '/');
+  expect(await driver.invoke({ toolId, args: { pattern: toolId === 'Grep' ? 'mdx' : '**/*' } }))
+    .toMatchObject({ success: true, data: { truncated: true } });
+  expect(closed).toBe(true);
+  expect(listFiles).not.toHaveBeenCalled();
+});
+
+it('stops reading VFS files at the match limit and passes discovery options', async () => {
+  const driver = new ToolDeviceDriver([...BUILTIN_TOOLS]);
+  const listFiles = vi.fn(async () => ['/matches.txt', '/unused.txt']);
+  const readFile = vi.fn(async (path: string) => {
+    if (path === '/unused.txt') throw new Error('Must stop once the result limit is reached');
+    return Array(60).fill('mdx').join('\n');
+  });
+  driver.setFileContext({ listFiles, readFile, writeFile: vi.fn() }, '/');
+  expect(await driver.invoke({ toolId: 'Grep', args: { pattern: 'mdx' } }))
+    .toMatchObject({ success: true, data: { numMatches: 50, truncated: true } });
+  expect(readFile).toHaveBeenCalledOnce();
+  expect(listFiles).toHaveBeenCalledWith('/', expect.objectContaining({ includeIgnored: undefined }));
+});
+
 function files(initial = 'before target after') {
   let content = initial;
   const writeFile = vi.fn(async (_path: string, value: string) => { content = value; });

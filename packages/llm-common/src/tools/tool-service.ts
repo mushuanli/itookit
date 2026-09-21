@@ -69,14 +69,17 @@ export type ToolHandler = (
  */
 export interface ToolVFSContext {
     /** 读取 VFS 文件，返回 UTF-8 字符串。 */
-    readFile(path: string): Promise<string>;
+    readFile(path: string, options?: { maxBytes?: number }): Promise<string>;
     /** 写入 VFS 文件（upsert 语义）。 */
     writeFile(path: string, content: string): Promise<void>;
     /**
      * 列出路径下所有文件（递归），返回相对路径列表。
-     * 用于 glob_search 在 VFS 中遍历。
+     * Discovery respects .gitignore/.mindosignore by default. includeIgnored only
+     * changes discovery filtering; it never grants access to additional files.
      */
-    listFiles(dir?: string): Promise<string[]>;
+    listFiles(dir?: string, options?: { includeIgnored?: boolean; excludeDirectories?: readonly string[]; signal?: AbortSignal }): Promise<string[]>;
+    /** Lazy discovery; consumers can stop traversal as soon as their result budget is full. */
+    walkFiles?(dir?: string, options?: { includeIgnored?: boolean; excludeDirectories?: readonly string[]; signal?: AbortSignal }): AsyncIterable<string>;
     /**
      * 查询单一路径的节点类型（不递归），不存在返回 null。
      *

@@ -80,7 +80,7 @@ export class SessionWorkbench implements WorkspaceController {
                     // Closing stops the run but keeps the Session history, so it is offered
                     // next to (not instead of) the destructive delete.
                     if (target.kind === 'session') {
-                        return [...defaults, { id: 'rerun-session', label: t('flow.rerun.title'),
+                        return [...defaults, { id: 'rerun-session', label: t('session.rerun.title'),
                             onClick: () => { void this.rerunSession(target.sessionId).catch(error => this.report(error)); } }, { id: 'close-session', label: t('session.close.action'),
                             onClick: () => { void this.closeSession(target.sessionId).catch(error => this.report(error)); } }];
                     }
@@ -110,8 +110,8 @@ export class SessionWorkbench implements WorkspaceController {
     private async rerunSession(sessionId: string): Promise<void> {
         await this.openResource(sessionId);
         if (this.closed || this.active !== sessionId) return;
-        const rerun = this.editor?.commands?.rerunFlow;
-        if (!rerun) throw new Error(t('flow.rerun.unavailable'));
+        const rerun = this.editor?.commands?.rerunSession;
+        if (!rerun) throw new Error(t('session.rerun.unavailable'));
         await rerun();
     }
 
@@ -237,6 +237,11 @@ export class SessionWorkbench implements WorkspaceController {
                         assets = createFileSystemView({ viewId: `editor-attachments:${target.sessionId}`, mounts: [{ mountId: 'attachments', at: '/', root: '/attachments', fs: context.context.fs, access: 'rw' }] });
                         editor = await this.factory(mount, { target: { kind: 'session', sessionId: target.sessionId, branch: branch ?? manifest.currentBranch ?? 'main' }, files: context.context, assets, title: manifest.title,
                             hostContext: { ...this.hostContext!, directoryCommands: this.directoryMounts ? {
+                                configureWorkspace: async mode => {
+                                    if (await showMountDialog(this.directoryMounts!, this.files, target.sessionId, mode, this.dialogs.signal)) {
+                                        await this.reloadAfterMount(target.sessionId);
+                                    }
+                                },
                                 addDirectory: async (directory, access) => {
                                     if (!directory) { await this.manageMounts(target.sessionId); return '挂载管理已关闭'; }
                                     try {

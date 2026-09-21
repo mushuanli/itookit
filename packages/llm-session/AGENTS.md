@@ -20,9 +20,10 @@ src/
 
 - Round 只表达对话历史，使用 `historyParentIds`。
 - Run 引用通过 `executions` 附着到 Round。
-- Branch、merge、context fold 只在本包实现（`BranchService` / `RoundLog`）。
+- Branch/merge 拓扑归本包；Context 历史选择、Profile 规则和装配经 `@itookit/context` 接口执行，`RoundLog` 只提供存储和缓存。
 - Chat/Agent 与 Flow 的提交统一经过 llm-flow 的 `submitRun(CompiledRunDefinition)`；上下文组装和结果解析保留各自策略，运行成员使用 `RunExecution.tasks()` 实时读取。
 - 普通 Chat 走 `ConversationRunCoordinator` 的直接任务路径（`directTaskSpec`），不包装成单节点 DAG。
+- `SendIntent.execution.mode` 优先于 `ExecutionOverrides.executionMode`；提交前复制并固定。chat 只保留已授权 WebSearch；agent 在未配置 `capabilityPolicy.toolIds` 时经宿主 `resolveHarnessToolIds` 获取默认工具，显式白名单（包括空数组）优先。执行模式无可用工具时拒绝提交，保持 external 审批及 Session 挂载边界；Flow 不消费该偏好，无 mode 的旧 API 调用保持兼容。
 - DAG/Flow 依赖 `@itookit/llm-flow`（本包通过它编排，不直接持有动态图语义）。
 - 只通过 `@itookit/durable-kernel` 公开类型（`Kernel` / `SessionHandle` 等）与 Effect 访问内核，不触碰内核内部实现。
 

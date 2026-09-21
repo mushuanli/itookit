@@ -2,6 +2,7 @@
 
 import type { JsonValue, ModelTier, PromptPreset } from '@itookit/common';
 import type { SessionTokenUsage } from '@itookit/llm-session';
+import type { ChatExecutionMode } from '@itookit/llm-common';
 
 export type { PromptPreset } from '@itookit/common';
 
@@ -98,6 +99,7 @@ export interface ConnectionOption {
 // ============================================================
 
 export interface ChatSessionSettings {
+    executionMode?: ChatExecutionMode;
     /**
      * 覆盖 Agent 使用的 LLM 连接 ID。
      * 不设置时使用 Agent 自身配置的连接。
@@ -125,6 +127,7 @@ export interface ChatSessionSettings {
 }
 
 export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
+    executionMode: 'chat',
     connectionId: undefined,
     modelTier: 'auto',
     historyLength: -1,
@@ -134,6 +137,7 @@ export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
 };
 
 export interface ChatOverrides {
+    executionMode?: ChatExecutionMode;
     /** 覆盖 Agent 定义中的 LLM 连接 ID。 */
     connectionId?: string;
     /** 模型层级覆盖（'auto' 不传此字段） */

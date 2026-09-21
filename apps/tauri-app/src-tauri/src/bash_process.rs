@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 const TRUNCATED: &str = "\n[Bash output truncated at 1048576 bytes]";
 
+#[cfg(test)]
 pub fn execute(script: &str, cwd: &str, timeout_ms: u64, cancelled: &AtomicBool) -> Result<(String, String, i32), String> {
     execute_command(command(script, cwd), timeout_ms, cancelled)
 }

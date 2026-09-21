@@ -209,3 +209,18 @@ describe('validateWorkflow', () => {
         expect(() => validateWorkflow(value, false)).toThrow('cannot merge changes');
     });
 });
+
+it('defaults the workspace to the invoking cwd and resolves an explicit root beside the config', async () => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const path = await import('node:path');
+    const { loadWorkflow } = await import('../src/config');
+    const directory = await mkdtemp(path.join(tmpdir(), 'mindos-default-workspace-'));
+    try {
+        const file = path.join(directory, 'flow.yml');
+        await writeFile(file, JSON.stringify(workflow()));
+        expect((await loadWorkflow(file, false)).workflow.workspaceRoot).toBe(process.cwd());
+        await writeFile(file, JSON.stringify({ ...workflow(), workspace: { root: './project' } }));
+        expect((await loadWorkflow(file, false)).workflow.workspaceRoot).toBe(path.join(directory, 'project'));
+    } finally { await rm(directory, { recursive: true, force: true }); }
+});

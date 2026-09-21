@@ -44,6 +44,7 @@ export class RegenerateCommand extends Command<{ nodeId: string }> {
         // even if a stale UI delegate dispatches the action twice.
         if (this.running) return;
         this.running = true;
+        const overrides = { executionMode: this.ctx.chatInput.getConfig?.().settings?.executionMode ?? 'chat' };
         try {
             const sessions = await this.ctx.commands.execute<SessionGroup[]>(SessionCommand.GetSessions);
             const session = findSession(sessions, nodeId);
@@ -64,10 +65,10 @@ export class RegenerateCommand extends Command<{ nodeId: string }> {
                 const agentId = this.ctx.chatInput.getConfig().agentId;
                 await this.ctx.commands.execute(SessionCommand.RegenerateFromUser, {
                     userMessageId: session.id,
-                    options: agentId ? { agentId } : undefined,
+                    options: { ...(agentId ? { agentId } : {}), overrides },
                 });
             } else {
-                await this.ctx.commands.execute(SessionCommand.Regenerate, { assistantId: session.id });
+                await this.ctx.commands.execute(SessionCommand.Regenerate, { assistantId: session.id, options: { overrides } });
             }
         } finally {
             this.running = false;

@@ -68,6 +68,7 @@ export interface PermissionResult {
  * Tool execution context passed to Tool.call().
  */
 export interface ToolUseContext {
+  onProgress?: (progress: import('@itookit/common').ToolProgress) => Promise<void>;
   /** Working directory (real path for Node.js, module path for VFS). */
   cwd: string;
   /** Abort signal for cancellation. */

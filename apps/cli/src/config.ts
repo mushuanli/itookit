@@ -19,7 +19,7 @@ export async function loadWorkflow(configPath: string, checkEnvironment = true):
     const raw = parse(source) as unknown;
     const config = validateWorkflow(expandWorkflow(raw), checkEnvironment);
     const base = path.dirname(absoluteConfig);
-    const workspaceRoot = path.resolve(base, config.workspace?.root ?? '.');
+    const workspaceRoot = config.workspace?.root === undefined ? process.cwd() : path.resolve(base, config.workspace.root);
     const stateDir = path.resolve(workspaceRoot, config.workspace?.state_dir ?? '.mindos');
     if (!isInside(workspaceRoot, stateDir)) throw new Error('workspace.state_dir must be inside workspace.root');
     if (stateDir === workspaceRoot) throw new Error('workspace.state_dir cannot equal workspace.root');

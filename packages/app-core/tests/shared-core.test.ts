@@ -36,6 +36,7 @@ describe('app-core shared headless services', () => {
             'flow.dispatch@1',
             'flow.human@1',
             'flow.input@1',
+            'flow.join@1',
             'flow.value@1',
             'llm.agent@1',
             'llm.chat@1',

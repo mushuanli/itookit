@@ -100,6 +100,7 @@ export interface ConversationSystemOptions {
     flowStore: FlowStore;
     resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
     resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>;
+    resolveHarnessToolIds?: (sessionId: string) => Promise<string[]>;
     resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
         definitions: ToolDefinition[];
         externalIds: string[];
@@ -133,6 +134,7 @@ export async function initializeConversationSystem(
             dagPlugins: options.dagPlugins,
             flowStore: options.flowStore,
             resolveTools: options.resolveTools,
+            resolveHarnessToolIds: options.resolveHarnessToolIds,
             resolveSessionContext: options.resolveSessionContext,
             resolveSessionSkills: options.resolveSessionSkills,
             retrieveMemory: options.retrieveMemory,

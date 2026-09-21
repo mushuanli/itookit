@@ -77,6 +77,10 @@ export class DirectoryMountService {
     addDirectory(sessionId: string, directory: string, access: 'ro' | 'rw' = 'rw', at?: string, asCwd = false): Promise<string> {
         return this.serial(async () => this.mount(sessionId, await this.resolve(directory), access, at, asCwd));
     }
+    /** Explicitly replace the primary workspace grant, retaining unrelated mounts. */
+    setWorkspace(sessionId: string, directory: string, access: 'ro' | 'rw' = 'rw'): Promise<string> {
+        return this.serial(async () => this.mount(sessionId, await this.resolve(directory), access, '/workspace', true, true));
+    }
     remove(sessionId: string, mountId: string): Promise<void> {
         return this.serial(async () => {
             await this.beforeChange(sessionId);
@@ -109,16 +113,19 @@ export class DirectoryMountService {
             await this.afterChange(sessionId);
         });
     }
-    private async mount(sessionId: string, source: DirectoryRef, access: 'ro' | 'rw', requestedAt?: string, asCwd = false): Promise<string> {
+    private async mount(sessionId: string, source: DirectoryRef, access: 'ro' | 'rw', requestedAt?: string, asCwd = false, replace = false): Promise<string> {
         await this.beforeChange(sessionId);
         const record = await this.files.inspect(sessionId);
         const mounts = record?.mounts ?? [];
         const same = mounts.find(m => m.sourceId === source.sourceId && (m.root ?? '/') === source.root);
         const name = source.label.split(/[\\/]/).filter(Boolean).pop()?.replace(/[^a-zA-Z0-9_-]/g, '-') || 'directory';
         const at = normalizeVirtualPath(requestedAt ?? same?.at ?? '/' + name);
-        if (mounts.some(m => m.at === at && m.mountId !== same?.mountId)) throw new Error(t('mount.error.pointExists', { at }));
+        if (!replace && mounts.some(m => m.at === at && m.mountId !== same?.mountId)) throw new Error(t('mount.error.pointExists', { at }));
         const mount: SessionMountRecord = { mountId: same?.mountId ?? randomUUID(), at, sourceId: source.sourceId, root: source.root, access };
-        await this.files.configure(sessionId, { mounts: [...mounts.filter(m => m.mountId !== same?.mountId), mount], cwd: asCwd ? at : record?.cwd ?? '/' }, record?.revision ?? 0);
+        let cwd = record?.cwd ?? '/';
+        if (same && (cwd === same.at || cwd.startsWith(same.at + '/'))) cwd = at + cwd.slice(same.at.length);
+        await this.files.configure(sessionId, { mounts: [...mounts.filter(m => m.mountId !== same?.mountId && (!replace || m.at !== at)), mount],
+            cwd: asCwd ? at : cwd }, record?.revision ?? 0);
         await this.afterChange(sessionId);
         return t('mount.mounted', { label: source.label, at, access: t(access === 'ro' ? 'mount.access.ro' : 'mount.access.rw') });
     }

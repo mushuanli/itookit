@@ -3,6 +3,15 @@ import { StateManager } from './StateManager';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { StateService } from '../services/StateService';
 import type { SessionManager } from '@itookit/llm-session';
+it('restores Session mode even when navigation overrides the input text', () => {
+    const manager = new StateManager({} as StateService, {} as SessionManager, 's', id => id);
+    const input = { setConfig: vi.fn() } as unknown as IChatInputPresenter;
+    manager.restoreInputState(input, { initialInputState: { text: 'new goal' }, sessionSettings: { executionMode: 'agent' } });
+    expect(input.setConfig).toHaveBeenCalledWith(expect.objectContaining({ settings: expect.objectContaining({ executionMode: 'agent', flowId: undefined }) }));
+    manager.restoreInputState(input, { initialInputState: { text: 'other session' } });
+    expect(input.setConfig).toHaveBeenCalledWith(expect.objectContaining({ settings: expect.objectContaining({ executionMode: 'chat' }) }));
+    manager.cleanup();
+});
 it('serializes rapid branch switches and preserves independent drafts before disposal', async () => {
     const drafts = new Map<string, string>([['experiment', 'experiment draft']]);
     let text = 'main draft';

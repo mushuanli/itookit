@@ -9,7 +9,7 @@ VFS 唯一入口 — 协议层 + 引擎实现 + 事件总线 + 工具。
 - **事件总线**:通用 `EventBus`/`EventBuffer`,被 VFS 与 LLM/UI 共用。
 - **工具**:`guessMimeType`、序列化、编码、路径、校验、`pipe` 等。
 
-**依赖**:仅 `yaml`(序列化)。不依赖 `@itookit/common`。
+**依赖**:`yaml`(序列化)、`ignore`（Git ignore 语法匹配）。不依赖 `@itookit/common`。
 
 ## 结构
 
@@ -99,3 +99,5 @@ pnpm --filter @itookit/vfs-core typecheck   # tsc --noEmit
 ```
 
 LocalFS 后端测试在 `@itookit/vfsdriver-localfs`,IndexedDB 后端测试在 `@itookit/vfsdriver-indexeddb`。
+
+文件发现使用 `discoverFiles` + `FileDiscoverySource`：每次搜索从授权边界继承 `.gitignore` / `.mindosignore`，在遍历前剪枝，缓存仅限本次搜索。`IFileSystem.discoveryRoot` 可选声明规则边界；FileSystemView 必须透传嵌套视图边界并限制在当前挂载内。忽略规则不改变直接读写权限。回归在 `tests/file-discovery.test.ts`。

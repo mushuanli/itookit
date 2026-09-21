@@ -12,6 +12,43 @@ async function openFs(): Promise<IFileSystem> {
 }
 
 describe('createVFSToolContext.stat', () => {
+    it('rejects oversized search reads before loading contents and allows explicit unbounded reads', async () => {
+        const fs = await openFs();
+        await fs.driver.createFile({ name: 'large', parentPath: '/', content: '12345' });
+        const context = createVFSToolContext({ fs, cwd: '/' });
+        await expect(context.readFile('/large', { maxBytes: 4 })).rejects.toMatchObject({ code: 'SEARCH_FILE_TOO_LARGE' });
+        expect(await context.readFile('/large', { maxBytes: 5 })).toBe('12345');
+        expect(await context.readFile('/large')).toBe('12345');
+    });
+    it('yields early files without visiting the rest of the tree', async () => {
+        const fs = await openFs();
+        await fs.driver.createFile({ name: 'early.txt', parentPath: '/work', recursive: true, content: 'mdx' });
+        await fs.driver.createFile({ name: 'later.txt', parentPath: '/work/slow', recursive: true, content: 'mdx' });
+        const context = createVFSToolContext({ fs, cwd: '/work' });
+        const children = fs.driver.getChildren.bind(fs.driver);
+        fs.driver.getChildren = async (path, options) => {
+            if (path === '/work/slow') throw new Error('Unneeded directory was visited');
+            return children(path, options as { fields?: 'full' });
+        };
+        for await (const file of context.walkFiles!('.')) {
+            expect(file).toBe('/work/early.txt');
+            break;
+        }
+    });
+    it('prunes excluded directories before traversal and observes cancellation', async () => {
+        const fs = await openFs();
+        await fs.driver.createFile({ name: 'main.ts', parentPath: '/work/src', recursive: true, content: 'mdx' });
+        await fs.driver.createFile({ name: 'dep.ts', parentPath: '/work/node_modules', recursive: true, content: 'mdx' });
+        const context = createVFSToolContext({ fs, cwd: '/work', sessionId: 's1' });
+        const children = fs.driver.getChildren.bind(fs.driver);
+        fs.driver.getChildren = async path => {
+            if (path.includes('node_modules')) throw new Error('Excluded directory was traversed');
+            return children(path);
+        };
+        expect(await context.listFiles('.', { excludeDirectories: ['node_modules'] })).toEqual(['/work/src/main.ts']);
+        const abort = new AbortController(); abort.abort();
+        await expect(context.listFiles('.', { signal: abort.signal })).rejects.toThrow();
+    });
     it('reports the node type without walking the subtree', async () => {
         const fs = await openFs();
         await fs.driver.createFile({ name: 'notes.md', parentPath: '/', content: 'hello' });

@@ -8,14 +8,14 @@
 src/
 ├── index.ts                        统一导出
 ├── core/
-│   ├── context-assembler.ts        上下文装配（ContextPlan / ContextBlock）
-│   └── provider-message-adapter.ts Provider 消息校验与清洗
+│   ├── context-assembler.ts        兼容转发到 @itookit/context
+│   └── provider-message-adapter.ts 兼容转发到 @itookit/context
 └── durable/
     ├── types.ts                    Program 状态 / 输入 / 输出类型
     ├── task-spec.ts                llm.agent / llm.chat 的 TaskInput 装配
     ├── program-helpers.ts          Program 共享辅助（事件、用量、失败处理）
     ├── dependency-collector.ts     依赖收集状态机（等待 task-exited → 就绪）
-    ├── context-compaction.ts       上下文压缩策略校验与消息裁剪
+    ├── context-compaction.ts       兼容转发到 @itookit/context
     ├── chat-program.ts             DurableChatProgram
     ├── agent-program.ts            DurableAgentProgram（工具调用 / 审批）
     └── plan-program.ts             DurablePlanProgram
@@ -36,3 +36,5 @@ pnpm --filter @itookit/llm-tasks typecheck
 pnpm --filter @itookit/llm-tasks test        # vitest run（等价于 test:run）
 pnpm --filter @itookit/llm-tasks test:watch  # 监听模式
 ```
+
+ContextTaskProgram 为 Agent/Chat v2 bridge，负责把 context 写集转换为 Kernel actions；预算、Notes 与检索策略全部归独立 context 包。

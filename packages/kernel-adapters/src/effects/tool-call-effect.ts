@@ -16,6 +16,7 @@ export interface EffectToolBinding {
 }
 
 export interface ToolCallEffectRequest {
+    callId?: string;
     resourceHandleId: string;
     toolId: string;
     args: Record<string, unknown>;
@@ -39,12 +40,18 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
         return this.inFlight.track(context, this.run(request, context));
     }
 
+    executeWithOutputAdmission(request: ToolCallEffectRequest, context: EffectExecutionContext,
+        admit: import('@itookit/common').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
+        return this.inFlight.track(context, this.run(request, context, admit));
+    }
+
     /** The Kernel aborts the signal first; waiting for the invoke confirms the tool stopped. */
     async cancel(_request: ToolCallEffectRequest, context: EffectExecutionContext): Promise<void> {
         await this.inFlight.confirmStopped(context);
     }
 
-    private async run(request: ToolCallEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
+    private async run(request: ToolCallEffectRequest, context: EffectExecutionContext,
+        admitOutput?: import('@itookit/common').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
         assertEffectGrant(context, request.resourceHandleId, 'tool');
         const service = await (typeof this.service === 'function' ? this.service(context, request) : this.service);
         const bound = this.effectTools.find(tool => tool.meta.id === request.toolId);
@@ -69,7 +76,14 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
         // introduced may be undone when identity persistence fails.
         const tracker = loadsSkill ? await this.resolveSkillTracker?.(context) : undefined;
         const wasLoaded = tracker ? tracker.getLoadedSkills().some(item => item.id === skillId) : true;
-        const result = await service.invoke({ ...request, signal: context.abortSignal });
+        const onProgress: import('@itookit/common').ToolInvokeRequest['onProgress'] = request.callId ? async progress => {
+            context.abortSignal.throwIfAborted();
+            await context.emit?.({ type: 'agent.event', payload: { type: 'tool:progress', call: {
+                toolId: request.callId!, name: request.toolId, input: request.args,
+                progress: { message: progress.message.slice(0, 2048), output: progress.output?.slice(0, 8192) },
+            } } });
+        } : undefined;
+        const result = await service.invoke({ ...request, signal: context.abortSignal, admitOutput, onProgress });
         // Unload has already changed persistent state; its cleanup must still settle as an Effect.
         if (result.recoverable !== true || unloadKey) requireToolSuccess(result);
         let skillContext: ToolInvokeResult['skillContext'];

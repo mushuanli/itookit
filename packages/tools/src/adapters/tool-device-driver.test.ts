@@ -16,6 +16,21 @@ function shellSpy(calls: string[]): INativeShell {
 const toolNames = (driver: ToolDeviceDriver): string[] =>
     driver.getToolDefinitions().map(definition => definition.function?.name ?? definition.name ?? '');
 
+it('advertises built-in tools with function schemas and initialized descriptions', async () => {
+    const driver = new ToolDeviceDriver([...BUILTIN_TOOLS]);
+    await driver.init();
+    const definitions = driver.getToolDefinitions();
+    expect(definitions.length).toBeGreaterThan(0);
+    for (const definition of definitions) {
+        expect(definition).toMatchObject({ type: 'function', function: {
+            name: expect.any(String), description: expect.any(String), parameters: { type: 'object' },
+        } });
+        expect(definition.function!.description).not.toBe('');
+    }
+    const grep = definitions.find(definition => definition.function?.name === 'Grep');
+    expect(grep?.function?.parameters?.required).toContain('pattern');
+});
+
 describe('ToolDeviceDriver.setNativeShell', () => {
     it('advertises Bash only after a native shell is injected', async () => {
         const driver = new ToolDeviceDriver([...BUILTIN_TOOLS]);

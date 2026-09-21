@@ -14,10 +14,11 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 
 | Package | Role |
 |---|---|
-| `@itookit/common` | 共享接口、类型、i18n、工具。跨包契约之源，运行时依赖仅 `@itookit/llm-common`（re-export LLM 契约）。 |
-| `@itookit/llm-common` | LLM 领域共享接口/类型：DagNodeDefinition/DagEdgeDefinition/DagRunSpec、FlowDraft/FlowRevision、SerializableExpression、TokenUsage、Tool 定义等纯契约。零依赖。 |
+| `@itookit/common` | 共享接口、类型、i18n、工具。跨包契约之源，依赖 `@itookit/llm-common`（兼容契约）及 `@itookit/context`（hash 与 Context 契约）。 |
+| `@itookit/llm-common` | LLM 领域共享接口/类型：DagNodeDefinition/DagEdgeDefinition/DagRunSpec、FlowDraft/FlowRevision、SerializableExpression、TokenUsage、Tool 定义等纯契约；只对 `@itookit/context` 有类型依赖。 |
+| `@itookit/context` | 零运行时依赖的上下文领域：Profile、装配、窗口预算、Notes、原始历史、不可变请求与内容存储端口。详见 [Context API](context-api.md)。 |
 | `@itookit/durable-kernel` | 持久化执行内核：`DurableTaskProgram`（init/reduce 状态机）、`EffectAdapter`、Task/Resource/Budget/Interaction 调度与恢复。 |
-| `@itookit/llm-tasks` | 平台无关的 LLM Durable Program 层：`llm.agent`/`llm.chat`/`llm.plan` 状态机、依赖收集（`collectDependency`/`dependenciesReady`/`dependencyWait`）、`extractNodeOutput`、`buildLlmTaskInput`、ContextAssembler。 |
+| `@itookit/llm-tasks` | 平台无关的 LLM Durable Program 层：`llm.agent`/`llm.chat`/`llm.plan` 状态机、依赖收集（`collectDependency`/`dependenciesReady`/`dependencyWait`）、`extractNodeOutput`、`buildLlmTaskInput`、ContextTaskProgram v2 bridge。 |
 | `@itookit/llm-flow` | DAG 编排：`DurableFlowExecutor`（route/loop/spawn/compensate/on_failure/budget）、内置插件、Flow programs、环检测（`findCycles`）、FlowDefinitionStore。 |
 | `@itookit/llm-session` | 用户可见的会话语义 + 持久化：SessionManager、Round/Branch、SessionRepository（会话资产）、FlowEngine（Flow 定义存储）、RoundLog、SessionEventBus、UI projections。依赖 llm-flow。 |
 | `@itookit/kernel-adapters` | Kernel 能力适配器：bash/llm-chat/tool-call/tty/skill-load 等 EffectAdapter、Exec/ApprovedEffect 程序、运行时装配。 |

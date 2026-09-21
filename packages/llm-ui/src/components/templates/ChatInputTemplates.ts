@@ -282,6 +282,7 @@ export const ChatInputTemplates = {
             <div class="llm-input__main">
                 ${this.renderFieldWrapper()}
                 ${this.renderToolbar()}
+                <div class="llm-input__execution-hint" role="status"></div>
             </div>
         `;
     },
@@ -296,6 +297,7 @@ export const ChatInputTemplates = {
         return `
             <div class="llm-input__toolbar">
                 <div class="llm-input__toolbar-left">
+                    ${this.renderExecutionMode()}
                     <button class="llm-input__btn llm-input__btn--attach" title="${t('chatInput.add.menu')}">
                         ${this.addIcon()}
                     </button>
@@ -323,9 +325,14 @@ export const ChatInputTemplates = {
         `;
     },
 
-    /**
-     * 工具栏联网搜索快速开关 — 点击切换启用/禁用，开启时高亮。
-     */
+    /** Accessible mode selection for future sends. */
+    renderExecutionMode(): string {
+        return `<div class="llm-input__execution-mode" role="group" aria-label="${t('chatInput.executionMode.label')}">
+            <button class="llm-input__execution-option" type="button" data-execution-mode="chat" aria-pressed="true">${t('chatInput.executionMode.chat')}</button>
+            <button class="llm-input__execution-option" type="button" data-execution-mode="agent" aria-pressed="false">${t('chatInput.executionMode.agent')}</button>
+        </div>`;
+    },
+
     renderWebSearchQuick(): string {
         return `
             <button class="llm-input__btn llm-input__btn--websearch" type="button"

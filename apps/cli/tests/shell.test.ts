@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { sandboxBaseArgs } from '../src/shell';
+import { NodeNativeShell, sandboxBaseArgs } from '../src/shell';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { CompiledWorkflow, WorkspaceGrant } from '../src/types';
+
+it('maps native shell cwd through current Session mounts and rejects removed mounts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cli-native-cwd-'));
+    await mkdir(join(root, 'sub'));
+    let mounts: WorkspaceGrant[] = [{ id: 'main', mountAt: '/workspace', path: root, access: 'write', createdAt: 0 }];
+    const shell = new NodeNativeShell(() => mounts);
+    try {
+        const result = await shell.exec('pwd', [], { cwd: '/workspace/sub' });
+        expect(result.code).toBe(0); expect(result.stdout.trim()).toBe(join(root, 'sub'));
+        await expect(shell.exec('pwd', [], { cwd: '/workspace/../../outside' })).rejects.toThrow('outside');
+        mounts = [];
+        await expect(shell.exec('pwd', [], { cwd: root })).rejects.toThrow('not mounted');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 describe('sandboxBaseArgs', () => {
     it.each([false, true])('uses Session mount paths for native and virtual cwd (interactive=%s)', interactive => {
@@ -98,3 +115,10 @@ function pair(args: string[], flag: string, occurrence = 1): string | undefined 
     }
     return undefined;
 }
+
+it('does not recreate an unmounted workspace from the workflow path for Shell or TTY', async () => {
+    const { OciSandboxShell, OciTtyDriver } = await import('../src/shell');
+    const shell = new OciSandboxShell('docker', workflow(), async () => []);
+    await expect(shell.exec('sh', ['-c', 'true'])).rejects.toThrow('Session workspace is not mounted');
+    expect(() => new OciTtyDriver('docker', workflow(), []).spawn('sh')).toThrow('Session workspace is not mounted');
+});

@@ -65,6 +65,8 @@ export interface ApplicationRuntimeOptions {
     backend: IStorageBackend;
     additionalMounts?: Array<{ path: string; backend: IStorageBackend; options?: MountOptions }>;
     directorySourceProvider?: DirectorySourceProvider;
+    /** Host startup cwd, mounted into newly created Sessions only. */
+    defaultSessionDirectory?: string;
     configureSessionFiles?(files: SessionFilesService): void | Promise<void>;
     kernelPlatform?: ApplicationKernelPlatform;
     llmLogger?: ILLMLogger;
@@ -91,7 +93,11 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
 
         logStep(t('boot.coreServices'));
         const agentService   = new VFSAgentService(await vfs.openFileSystem(workspaceRoot('agents')), llmDriver);
-        const sessionRepository     = new SessionRepository(await vfs.openFileSystem('/'));
+        const sessionRepository     = new SessionRepository(await vfs.openFileSystem('/'), async id => {
+            if (!options.defaultSessionDirectory) return;
+            if (directoryMounts.getHome()) await directoryMounts.mountHome(id);
+            else await directoryMounts.setWorkspace(id, options.defaultSessionDirectory);
+        });
         const flowEngine     = new FlowEngine(await vfs.openFileSystem(workspaceRoot('flows')));
         await traceBoot('flowEngine.init', () => flowEngine.init());
 
@@ -111,8 +117,10 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             id => mountGuard(id), id => mountChanged(id));
         cleanupFns.push(() => directoryMounts.dispose());
         await traceBoot('directoryMounts.init', () => directoryMounts.init());
+        let mayCollectContext = (_id: string): boolean => false;
         const kernel: HeadlessKernelRuntime = await traceBoot('createKernelRuntime', () => createKernelRuntime({
             systemFS,
+            contextGc: { canCollectSession: id => mayCollectContext(id) },
             llmDriver,
             storageResolver: new SessionDirectoryStorageResolver(systemFS),
             maxConcurrent: 20,
@@ -145,7 +153,10 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         });
         const ownerId = `${options.ownerKind ?? "tauri"}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
         const recovery = await recoverSessionsWithLeases(kernelCore, leaseStore,
-            { id: ownerId, kind: options.ownerKind ?? 'tauri' }, 10_000, options.kernelPlatform?.beforeSessionRecovery).catch(async error => {
+            { id: ownerId, kind: options.ownerKind ?? 'tauri' }, 10_000, async id => {
+                await options.kernelPlatform?.beforeSessionRecovery?.(id);
+                await kernel.contextGc?.observeSession(id);
+            }).catch(async error => {
                 kernelCore.dispose();
                 const errors: unknown[] = [error];
                 for (const close of [() => kernelCore.waitIdle(), () => kernel.dispose()]) {
@@ -154,6 +165,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
                 if (errors.length > 1) throw new AggregateError(errors, 'Application recovery and kernel cleanup failed');
                 throw error;
             });
+        mayCollectContext = id => (recovery.leases.get(id)?.leaseUntil ?? 0) > Date.now();
         cleanupFns.push(() => recovery.release());
         cleanupFns.push(() => kernel.dispose());
         cleanupFns.push(async () => { kernelCore.dispose(); await kernelCore.waitIdle(); });

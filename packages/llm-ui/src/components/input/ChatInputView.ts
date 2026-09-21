@@ -17,6 +17,7 @@ import { ToolOutputPanel } from './ToolOutputPanel';
 import { HelpPanel } from './HelpPanel';
 import { SkillPanel } from './SkillPanel';
 import { ConnectionTierController } from './ConnectionTierController';
+import { ExecutionModeControl } from './ExecutionModeControl';
 import { delegate } from '../../utils/domEvents';
 
 export interface ChatInputOptions {
@@ -72,7 +73,7 @@ export interface ChatInputOptions {
      * 返回的 `path` 字段将以 Markdown 链接形式插入输入框，
      * 发送时由 AttachmentProcessor 自动解析并附加文件内容。
      */
-    onRequestFiles?: (query: string) => Promise<FileSuggestion[]>;
+    onRequestFiles?: (query: string, options?: { includeIgnored?: boolean; signal?: AbortSignal }) => Promise<FileSuggestion[]>;
 
     /**
      * 对图片做 OCR（图片转文字），返回 Markdown 文本。
@@ -141,6 +142,7 @@ export class ChatInput implements IChatInputPresenter {
 
     private skillPanel!: SkillPanel;
     private connectionTier!: ConnectionTierController;
+    private executionMode!: ExecutionModeControl;
 
     // ── Help panel ───────────────────────────────────────────────────────────
     private helpPanel!: HelpPanel;
@@ -167,6 +169,7 @@ export class ChatInput implements IChatInputPresenter {
         text: '',
         agentId: 'default',
         settings: {
+            executionMode: 'chat',
             connectionId: undefined,
             modelTier: 'auto',
             historyLength: -1,
@@ -211,6 +214,10 @@ export class ChatInput implements IChatInputPresenter {
         });
 
         this.bindEvents();
+        this.executionMode = new ExecutionModeControl(container, mode => {
+            this.config.settings.executionMode = mode;
+            this.notifyConfigChange();
+        });
         this.initExecutors();
         this.syncUIFromConfig();
         this.loadConnections();
@@ -287,6 +294,7 @@ export class ChatInput implements IChatInputPresenter {
 
     setLoading(loading: boolean): void {
         this.loading = loading;
+        this.syncExecutionMode();
         this.sendBtn.style.display = loading ? 'none' : 'flex';
         this.stopBtn.style.display = loading ? 'flex' : 'none';
         this.textarea.disabled = loading;
@@ -474,7 +482,11 @@ export class ChatInput implements IChatInputPresenter {
             this.syncWebSearchUI(next);
             this.notifyConfigChange();
         });
-        this.flowIdInput?.addEventListener('input', () => { this.config.settings.flowId = this.flowIdInput.value.trim() || undefined; this.notifyConfigChange(); });
+        this.flowIdInput?.addEventListener('input', () => {
+            this.config.settings.flowId = this.flowIdInput.value.trim() || undefined;
+            this.syncExecutionMode();
+            this.notifyConfigChange();
+        });
         this.branchModeSelect?.addEventListener('change', () => {
             this.config.settings.branchMode =
                 this.branchModeSelect.value === 'fork' ? 'fork' : 'continue';
@@ -704,7 +716,7 @@ export class ChatInput implements IChatInputPresenter {
     }
 
     private buildOverrides(): ChatOverrides {
-        const overrides: ChatOverrides = {};
+        const overrides: ChatOverrides = { executionMode: this.config.settings.executionMode ?? 'chat' };
         if (this.config.settings.connectionId) overrides.connectionId = this.config.settings.connectionId;
         // 'auto' means no override — only pass an explicit tier
         const tier = this.config.settings.modelTier;
@@ -756,6 +768,7 @@ export class ChatInput implements IChatInputPresenter {
         this.config.settings.flowRevision = revision;
         this.config.settings.flowParameters = parameters;
         if (this.flowIdInput) this.flowIdInput.value = flowId;
+        this.syncExecutionMode();
         this.notifyConfigChange();
         this.focus();
     }
@@ -773,7 +786,12 @@ export class ChatInput implements IChatInputPresenter {
     // UI 同步
     // ================================================================
 
+    private syncExecutionMode(): void {
+        this.executionMode?.update(this.config.settings.executionMode, Boolean(this.config.settings.flowId), this.loading);
+    }
+
     private syncUIFromConfig(): void {
+        this.syncExecutionMode();
         if (this.textarea) {
             this.textarea.value = this.config.text;
             this.adjustTextareaHeight();

@@ -6,7 +6,7 @@ import { TauriFsOps } from '../fs/tauri-fs-ops';
 import { TauriSqlSidecarDb } from '../db/tauri-sql-sidecar';
 
 interface Scope { id: string; root: string; }
-class ScopedFsOps implements IFsOps {
+export class ScopedFsOps implements IFsOps {
     constructor(private readonly scopes: Scope[]) {}
     private target(path: string) {
         const normalized = path.replace(/\\/g, '/');
@@ -16,10 +16,32 @@ class ScopedFsOps implements IFsOps {
     }
     private io<T>(operation: string, path: string, extra: object = {}): Promise<T> { return invoke('directory_io', { ...this.target(path), operation, ...extra }); }
     stat(path: string) { return this.io<StatResult | null>('stat', path); }
+    async statMany(paths: string[]): Promise<Array<StatResult | null>> {
+        const groups = new Map<string, Array<{ path: string; index: number }>>();
+        paths.forEach((path, index) => {
+            const target = this.target(path);
+            const group = groups.get(target.id) ?? [];
+            group.push({ path: target.path, index }); groups.set(target.id, group);
+        });
+        const output: Array<StatResult | null> = new Array(paths.length);
+        await Promise.all([...groups].map(async ([id, entries]) => {
+            for (let start = 0; start < entries.length; start += 256) {
+                const batch = entries.slice(start, start + 256);
+                const rows = await invoke<Array<StatResult | null>>('directory_stat_many', { id, paths: batch.map(item => item.path) });
+                if (rows.length !== batch.length) throw new Error('Invalid directory stat response');
+                batch.forEach((item, index) => { output[item.index] = rows[index]; });
+            }
+        }));
+        return output;
+    }
     exists(path: string) { return this.io<boolean>('exists', path); }
     mkdir(path: string) { return this.io<void>('mkdir', path); }
     readDir(path: string) { return this.io<DirEntry[]>('list', path); }
     async readFile(path: string): Promise<ArrayBuffer | null> { const bytes = await this.io<number[] | null>('read', path); return bytes ? new Uint8Array(bytes).buffer : null; }
+    async readFileRange(path: string, offset: number, length: number): Promise<ArrayBuffer | null> {
+        const bytes = await invoke<number[] | null>('directory_read_range', { ...this.target(path), offset, length });
+        return bytes ? new Uint8Array(bytes).buffer : null;
+    }
     writeFile(path: string, data: ArrayBuffer) { return this.io<void>('write', path, { data: Array.from(new Uint8Array(data)) }); }
     appendFile(path: string, data: ArrayBuffer) { return this.io<void>('append', path, { data: Array.from(new Uint8Array(data)) }); }
     rename(from: string, to: string) { const a = this.target(from), b = this.target(to); if (a.id !== b.id) throw new Error('Cross-source rename forbidden'); return this.io<void>('rename', from, { to: b.path }); }

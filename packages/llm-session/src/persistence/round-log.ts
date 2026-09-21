@@ -1,3 +1,4 @@
+import { foldContextHistory } from '@itookit/context';
 // @file: llm-conversation/src/persistence/round-log.ts
 // RoundLog — native Round DAG ILog implementation.
 //
@@ -147,37 +148,7 @@ export class RoundLog implements ILog {
             ? await this.profileStore.getProfile(profilePointer.id, profilePointer.revision)
             : null;
 
-        // Collect the primary history-parent chain from head to root.
-        const chain: RoundId[] = [];
-        let current: RoundId | undefined = headId ?? undefined;
-        const visited = new Set<RoundId>();
-        while (current && !visited.has(current)) {
-            visited.add(current);
-            chain.unshift(current);
-            const r = await this.readRound(current);
-            current = r?.historyParentIds[0];
-        }
-
-        // Parallel-read all rounds in chain (§3.4)
-        const rounds = await Promise.all(chain.map(id => this.readRound(id)));
-
-        const messages: ChatMessage[] = [];
-        for (const r of rounds) {
-            if (!r || r._deleted) continue; // §3.4: skip soft-deleted
-            const rule = profile?.rules[r.id];
-            const defaultExcluded = r.defaultContextMode === 'exclude';
-            if (rule ? rule.mode === 'exclude' : defaultExcluded) continue;
-            for (const msg of [...r.input, ...r.output]) {
-                if (msg.role === 'system' || msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool') {
-                    const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-                    if (msg.role === 'assistant' && !content.trim() && !(msg as any).tool_calls) continue; // drop empty assistant
-                    messages.push({ ...msg, role: msg.role as 'system' | 'user' | 'assistant' | 'tool', content });
-                }
-            }
-        }
-
-        // Phase 2: Provider-specific validation handled by ProviderMessageAdapter
-        // The process program consumes the canonical context snapshot.
+        const messages = await foldContextHistory(headId, id => this.readRound(id), profile);
         this._cache.set(cacheKey, messages);
         return messages;
     }

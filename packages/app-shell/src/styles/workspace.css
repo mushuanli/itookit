@@ -67,3 +67,6 @@
 .session-memory-dialog textarea { min-height: 8rem; }
 
 .session-detail__error { margin: 16px; padding: 12px; border: 1px solid currentColor; border-radius: 6px; color: var(--vscode-errorForeground, #dc2626); white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-mount-dialog__table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.session-mount-dialog__table th, .session-mount-dialog__table td { text-align: left; padding: 8px 4px; border-bottom: 1px solid var(--mm-border-color, #ddd); overflow-wrap: anywhere; }
+.session-mount-dialog__table button { font-size: 12px; }

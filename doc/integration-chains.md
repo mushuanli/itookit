@@ -37,7 +37,8 @@ ChatInput.send (llm-ui)
   → SendMessageCommand
     → llm-session SessionManager.sendMessage()
       → ConversationRunCoordinator
-        → (无工具) session.submit(llm.chat)  |  (有工具) llm.agent
+        → 对话：仅保留联网检索能力；执行：保留 Agent 已授权工具
+          → session.submit(llm.chat / llm.agent，优先 v2)
           → bindCapabilities(llm[/tool] handle)
           → kernel drain → DurableAgentProgram.reduce → llm.chat effect
             → kernel-adapters LlmChatEffectAdapter（assertEffectGrant + chargeBudget）
@@ -56,6 +57,14 @@ ChatInput.send (llm-ui)
 | 能力绑定 | `bindCapabilities` → capabilities signal | `durable-kernel/src/application/capabilities.ts` |
 | Effect | `LlmChatEffectAdapter`（llm.chat） | `kernel-adapters/src/effects/llm-chat-effect.ts` |
 | LLM | `ILLMService.chatStream` → provider | `kernel-adapters/llm/llm-service-adapter.ts`、`device-llm/src/` |
+
+输入工具栏提供「对话 / 执行」：`executionMode` 随 Session settings 保存，发送时写入 `SendIntent.execution.mode`，在异步上传/任务准入前复制。Task 固定 `labels.executionMode`、工具列表和预算；执行中的模式按钮禁用，程序恢复不重新读取 UI 设置。对话模式只允许已授权的 WebSearch 客户端工具或 Provider 内置搜索；执行模式使用 llm.agent，最多 50 次模型交换，外部操作继续审批。Flow 选择后禁用该开关，按 Flow 定义执行。两种模式均使用既有 Context/GC。
+
+执行模式工具链：app-core 的 `resolveHarnessToolIds` 从 Session 工具目录选择已启用的 Read/Glob/Grep/Write/Edit/Bash → llm-session 仅在 Agent 未配置 toolIds 时采用该默认集 → `resolveTools` 装配定义 → Task 固定 tools/allowedToolIds。显式空白名单不回退，无工具时显示错误。ToolDeviceDriver 将内置工具编码为 `type: function` + `function.name/description/parameters`，供模型适配器使用；文件操作仍经 Session VFS。
+
+工具结果回传：OpenAI 兼容适配器必须保留 assistant 的 `tool_calls`，并把 `thinking` 映射为 `reasoning_content`，随后才能发送带 `tool_call_id` 的 tool 消息；丢失前者会使 DeepSeek 拒绝第二轮请求。CLI 流式工具往返回归见 [prompt-harness.test.ts](../apps/cli/tests/prompt-harness.test.ts)。
+
+会话右键/顶部「重新运行」统一调用 `LLMWorkspaceEditor.commands.rerunSession`：关联 Flow 进入参数表单；Chat/Harness 从当前分支最后一条用户消息调用 `SessionCommand.RegenerateFromUser`。已有回复时创建替代分支，新的 Task 重新执行工具，保留旧 Task；使用当前工作区文件状态，不撤销旧文件修改。执行模式在点击时固定，重复点击只提交一次，切换会话或关闭编辑器取消尚未提交的操作。消息旁「重新生成」仍可选择指定轮次。回归见 [session-rerun.test.ts](../packages/app-shell/tests/session-rerun.test.ts) 和 [harness-default-tools.test.ts](../packages/app-core/tests/harness-default-tools.test.ts)。
 
 ## 3. DAG Flow 链（CLI 工作流）
 

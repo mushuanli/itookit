@@ -43,7 +43,7 @@ export interface CommandOptions {
     model?: string;
     apiKeyEnv?: string;
     baseUrl?: string;
-    /** --no-tools：-p 时不注入 WebSearch 工具。 */
+    /** --no-tools: omit client tools from a quick prompt. */
     noTools?: boolean;
     /** --protocol：API 协议（openai-chat / openai-responses 等）。 */
     protocol?: string;
@@ -146,12 +146,9 @@ async function loadRunParameters(file: string): Promise<Record<string, JsonValue
 }
 
 /**
- * -p / --prompt：直接运行一段 prompt。
- *
- * 默认生成一个带 WebSearch 工具的代理（便于验证客户端联网搜索），使用
- * deepseek/deepseek-v4-flash + DEEPSEEK_LLM_TOKEN。
- * `--protocol openai-responses` 时改用 Responses API（内置 server-side web_search），
- * 并自动关闭客户端 WebSearchTool 以避免重复检索。
+ * Run a quick prompt with file search and optional client WebSearch tools.
+ * Defaults to deepseek-v4-flash and DEEPSEEK_LLM_TOKEN.
+ * Responses uses server-side web search instead of the client WebSearch tool.
  */
 export async function promptCommand(options: CommandOptions): Promise<number> {
     const prompt = (options.prompt ?? '').trim();
@@ -164,7 +161,7 @@ export async function promptCommand(options: CommandOptions): Promise<number> {
     const responsesPath = options.responsesPath ?? (protocol === 'openai-responses' ? '/responses' : undefined);
     const defaultPath = protocol === 'openai-responses' ? undefined : '/chat/completions';
     // 内置 server-side search 时不注入客户端 WebSearchTool（避免重复检索）
-    const tools = options.noTools || protocol === 'openai-responses' ? [] : ['WebSearch'];
+    const tools = options.noTools ? [] : ['Read', 'Glob', 'Grep', ...(protocol === 'openai-responses' ? [] : ['WebSearch'])];
     // 引导模型主动联网搜索。
     // - openai-responses：web_search 是服务端内置工具（服务端执行、结果经 web_search_call 回传），
     //   模型不能也不应显式“调用”它，只需正常回答并注明来源即可。
@@ -192,7 +189,8 @@ export async function promptCommand(options: CommandOptions): Promise<number> {
         agents: [{
             id: 'default', connection: 'default', tools,
             web_search: protocol === 'openai-responses',
-            system_prompt: searchInstruction,
+            system_prompt: [tools.length ? 'Use the available tools to inspect the workspace and execute requests. Report observed results instead of suggesting commands.' : '',
+                !options.noTools || protocol === 'openai-responses' ? searchInstruction : 'Answer the user request.'].filter(Boolean).join('\n\n'),
         }],
         tasks: [{ id: 'q', agent: 'default', description: prompt, outputs: { result: 'text' } }],
         result: { task: 'q', output: 'result' },

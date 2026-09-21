@@ -22,6 +22,10 @@ export class SendMessageCommand extends Command<SendMessageParams> {
     protected name = 'Send Message';
 
     protected async execute({ text, files, agentId, overrides, origin, historyPolicy }: SendMessageParams): Promise<void> {
+        overrides = { ...overrides,
+            executionMode: overrides?.executionMode ?? this.ctx.chatInput.getConfig?.().settings?.executionMode ?? 'chat',
+            ...(overrides?.flowParameters ? { flowParameters: structuredClone(overrides.flowParameters) } : {}),
+        };
         const sessionId = this.ctx.getSessionId();
         if (!sessionId) throw new Error('No session loaded');
 
@@ -73,7 +77,7 @@ export class SendMessageCommand extends Command<SendMessageParams> {
                             revision: overrides.flowRevision,
                             parameters: overrides.flowParameters,
                         }
-                        : { kind: 'agent', agentId: agentId || 'default' },
+                        : { kind: 'agent', agentId: agentId || 'default', mode: overrides.executionMode },
                 },
             });
         } catch (error: any) {

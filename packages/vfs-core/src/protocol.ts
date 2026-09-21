@@ -9,6 +9,7 @@
 
 // ── 常量 ──
 export type { IFileSystem, IFileSystemDriver, FileSystemContext, FileSystemContextOwner } from './interfaces/services/file-system';
+export type { FileDiscoveryEntry, FileDiscoveryOptions, FileDiscoverySource } from './interfaces/services/file-discovery';
 export {
     ETC_DIR,
     SYSTEM_DIRS,

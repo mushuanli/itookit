@@ -1,76 +1,161 @@
-import type { DirectoryMountService, SessionFilesService } from '@itookit/app-core';
+import type { DirectoryMountService, SessionFilesService, SessionMountRecord } from '@itookit/app-core';
+import { t } from '@itookit/common';
 import { localizeMountError } from './localize-mount-error';
 
-/** One host dialog for sidebar and slash entry points. No Agent-accessible source browser. */
+type Mode = 'mount' | 'home' | 'workspace';
+
+/** Host-only configuration shared by sidebar, slash commands and the chat menu. */
 export function showMountDialog(service: DirectoryMountService, files: SessionFilesService, sessionId: string,
-    mode: 'mount' | 'home' = 'mount', signal?: AbortSignal): Promise<boolean> {
-    return new Promise(resolve => {
-        const dialog = document.createElement('dialog'); dialog.className = 'session-mount-dialog';
-        const title = document.createElement('h2'); title.textContent = mode === 'home' ? '设置默认目录' : '挂载目录';
-        const path = document.createElement('input'); path.placeholder = '/home/admin/projects/demo'; path.setAttribute('aria-label', '来源目录');
-        const at = document.createElement('input'); at.placeholder = '/workspace 或其他挂载名称'; at.setAttribute('aria-label', '会话路径');
-        const access = document.createElement('select'); access.setAttribute('aria-label', '访问权限');
-        for (const [value, label] of [['rw', '可读写'], ['ro', '只读']]) { const option = document.createElement('option'); option.value = value; option.textContent = label; access.append(option); }
-        const cwd = document.createElement('input'); cwd.type = 'checkbox';
-        const cwdLabel = document.createElement('label'); cwdLabel.append(cwd, document.createTextNode('设为工作目录'));
-        const status = document.createElement('p'); status.setAttribute('role', 'status');
-        const buttons = document.createElement('div');
-        let changed = false, busy = false;
-        const abort = () => { dialog.remove(); resolve(changed); };
-        signal?.addEventListener('abort', abort, { once: true });
-        const close = () => { if (!busy) { signal?.removeEventListener('abort', abort); dialog.remove(); resolve(changed); } };
-        const run = async (fn: () => Promise<void>) => {
-            if (busy) return; busy = true; dialog.querySelectorAll('button').forEach(button => { button.disabled = true; });
-            try { await fn(); } catch (error) {
-                const localized = localizeMountError(error);
-                status.textContent = localized instanceof Error ? localized.message : String(localized);
-            }
-            finally { busy = false; dialog.querySelectorAll('button').forEach(button => { button.disabled = false; }); }
-        };
-        const action = (label: string, fn: () => void) => { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.onclick = fn; buttons.append(button); };
-        action('选择应用目录…', () => { void run(async () => { await browse('/home/admin'); }); });
-        action('设置默认目录', () => { void run(async () => { status.textContent = await service.setHome(path.value); changed = true; hint.textContent = `默认目录：${service.getHome()}。设置默认目录不会自动挂载。`; }); });
-        if (service.canSelectHost) action('选择宿主目录…', () => { void run(async () => { const selected = await service.chooseDirectory(); if (selected) path.value = selected; else status.textContent = '未选择目录；也可输入应用内目录'; }); });
-        action(mode === 'home' ? '保存默认目录' : '挂载', () => { void run(async () => {
-            status.textContent = mode === 'home' ? await service.setHome(path.value) : await service.addDirectory(sessionId, path.value, access.value as 'ro' | 'rw', at.value || undefined, cwd.checked);
-            changed = true; hint.textContent = `默认目录：${service.getHome() ?? '未设置'}。设置默认目录不会自动挂载。`;
-            if (mode === 'mount') await renderMounts();
-        }); });
-        if (mode === 'mount') action('挂载默认目录', () => { void run(async () => { status.textContent = await service.mountHome(sessionId); changed = true; await renderMounts(); }); });
-        action('关闭', close);
-        dialog.oncancel = event => { event.preventDefault(); close(); };
-        const list = document.createElement('div');
-        const chooser = document.createElement('div');
-        const browse = async (directory: string) => {
-            chooser.replaceChildren();
-            const current = document.createElement('button'); current.textContent = `选择 ${directory}`;
-            current.onclick = () => { path.value = directory; chooser.replaceChildren(); }; chooser.append(current);
-            if (directory !== '/home/admin') {
-                const up = document.createElement('button'); up.textContent = '上一级'; up.onclick = () => { void run(() => browse(directory.slice(0, directory.lastIndexOf('/')))); }; chooser.append(up);
-            }
-            for (const child of await service.listDirectories(directory)) {
-                const button = document.createElement('button'); button.textContent = child.split('/').pop()!;
-                button.onclick = () => { void run(() => browse(child)); }; chooser.append(button);
-            }
-        };
-        const renderMounts = async () => {
-            list.replaceChildren();
-            const record = await files.inspect(sessionId);
-            for (const mount of record?.mounts ?? []) {
-                const row = document.createElement('div');
-                const label = document.createElement('span'); label.textContent = `${mount.at} ← ${service.describe(mount)} · ${mount.access === 'ro' ? '只读' : '可读写'}${record?.cwd === mount.at ? ' · 工作目录' : ''}`;
-                const remove = document.createElement('button'); remove.textContent = '卸载'; remove.onclick = () => { void run(async () => { await service.remove(sessionId, mount.mountId); changed = true; await renderMounts(); }); };
-                const permission = document.createElement('button'); permission.textContent = mount.access === 'ro' ? '改为读写' : '改为只读';
-                permission.onclick = () => { void run(async () => { await service.update(sessionId, mount.mountId, mount.access === 'ro' ? 'rw' : 'ro', false); changed = true; await renderMounts(); }); };
-                const home = document.createElement('button'); home.textContent = '设为工作目录'; home.onclick = () => { void run(async () => { await service.update(sessionId, mount.mountId, mount.access, true); changed = true; await renderMounts(); }); };
-                const reconnect = document.createElement('button'); reconnect.textContent = '重新连接'; reconnect.onclick = () => { void run(async () => { await service.reconnect(sessionId, mount.mountId); changed = true; await renderMounts(); }); };
-                row.append(label, permission, home, reconnect, remove); list.append(row);
-            }
-        };
-        const hint = document.createElement('p'); hint.textContent = `默认目录：${service.getHome() ?? '未设置'}。设置默认目录不会自动挂载。`;
-        dialog.append(title, hint, path);
-        if (mode === 'mount') dialog.append(at, access, cwdLabel);
-        dialog.append(buttons, status, chooser, list); document.body.append(dialog); dialog.showModal();
-        if (mode === 'mount') void run(renderMounts);
-    });
+    mode: Mode = 'mount', signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(false);
+    return new Promise(resolve => new MountDialog(service, files, sessionId, mode, signal, resolve).open());
+}
+
+class MountDialog {
+    private readonly dialog = document.createElement('dialog');
+    private readonly path = document.createElement('input');
+    private readonly at = document.createElement('input');
+    private readonly access = document.createElement('select');
+    private readonly cwd = document.createElement('input');
+    private readonly status = document.createElement('p');
+    private readonly hint = document.createElement('p');
+    private readonly current = document.createElement('p');
+    private readonly chooser = document.createElement('div');
+    private readonly list = document.createElement('div');
+    private busy = false;
+    private changed = false;
+    private closed = false;
+    private readonly abort = () => this.close(true);
+
+    constructor(private readonly service: DirectoryMountService, private readonly files: SessionFilesService,
+        private readonly sessionId: string, private readonly mode: Mode, private readonly signal: AbortSignal | undefined,
+        private readonly resolve: (changed: boolean) => void) {}
+
+    open(): void {
+        this.dialog.className = 'session-mount-dialog';
+        const title = document.createElement('h2'); title.textContent = t(`mount.dialog.${this.mode}`);
+        const description = document.createElement('p'); description.textContent = t('mount.dialog.explanation');
+        this.status.setAttribute('role', 'status');
+        this.dialog.setAttribute('aria-label', title.textContent);
+        this.dialog.append(title, description, this.current, this.hint);
+        this.renderFields(); this.renderActions();
+        this.dialog.append(this.status, this.chooser, this.list);
+        this.dialog.oncancel = event => { event.preventDefault(); this.close(); };
+        this.signal?.addEventListener('abort', this.abort, { once: true });
+        document.body.append(this.dialog); this.dialog.showModal();
+        void this.run(() => this.refresh());
+    }
+
+    private renderFields(): void {
+        this.path.placeholder = '/home/admin/projects/demo';
+        this.field('mount.dialog.source', this.path);
+        for (const value of ['rw', 'ro'] as const) {
+            const option = document.createElement('option'); option.value = value; option.textContent = t(`mount.access.${value}`); this.access.append(option);
+        }
+        this.access.value = this.mode === 'mount' ? 'ro' : 'rw';
+        if (this.mode === 'home') return;
+        this.field('mount.dialog.access', this.access);
+        if (this.mode === 'workspace') {
+            const note = document.createElement('p'); note.textContent = t('mount.dialog.replace'); this.dialog.append(note); return;
+        }
+        this.at.placeholder = '/reference'; this.field('mount.dialog.target', this.at);
+        this.cwd.type = 'checkbox'; this.field('mount.dialog.setCwd', this.cwd);
+    }
+
+    private field(key: Parameters<typeof t>[0], input: HTMLElement): void {
+        const label = document.createElement('label'); label.textContent = t(key);
+        input.setAttribute('aria-label', t(key)); label.append(input); this.dialog.append(label);
+    }
+
+    private button(parent: HTMLElement, label: string, action: () => Promise<void> | void): void {
+        const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
+        button.onclick = () => { void this.run(async () => { await action(); }); }; parent.append(button);
+    }
+
+    private renderActions(): void {
+        const actions = document.createElement('div');
+        this.button(actions, t('mount.dialog.internal'), () => this.browse('/home/admin'));
+        if (this.service.canSelectHost) this.button(actions, t('mount.dialog.host'), async () => {
+            const path = await this.service.chooseDirectory();
+            // Preserve the host namespace even when its path resembles an application path.
+            if (!this.closed && path) this.path.value = `host:${path}`;
+            else this.status.textContent = t('mount.dialog.cancelled');
+        });
+        this.button(actions, t(this.mode === 'workspace' ? 'mount.dialog.save' : this.mode === 'home' ? 'mount.dialog.home' : 'mount.dialog.add'), () => this.save());
+        if (this.mode === 'mount') this.button(actions, t('mount.dialog.mountDefault'), async () => {
+            this.status.textContent = await this.service.mountHome(this.sessionId); this.changed = true; await this.refresh();
+        });
+        const close = document.createElement('button'); close.type = 'button'; close.textContent = t('mount.dialog.close');
+        close.onclick = () => this.close(); actions.append(close); this.dialog.append(actions);
+    }
+
+    private async save(): Promise<void> {
+        const access = this.access.value as 'ro' | 'rw';
+        this.status.textContent = this.mode === 'home' ? await this.service.setHome(this.path.value)
+            : this.mode === 'workspace' ? await this.service.setWorkspace(this.sessionId, this.path.value, access)
+                : await this.service.addDirectory(this.sessionId, this.path.value, access, this.at.value || undefined, this.cwd.checked);
+        this.changed = true; await this.refresh();
+    }
+
+    private async refresh(): Promise<void> {
+        const record = await this.files.inspect(this.sessionId);
+        if (this.closed) return;
+        this.current.textContent = t('mount.dialog.cwd', { path: record?.cwd ?? '/' });
+        this.hint.textContent = t('mount.dialog.default', { path: this.service.getHome() ?? t('mount.dialog.unset') });
+        this.list.replaceChildren();
+        if (this.mode === 'home') return;
+        if (!record?.mounts.length) { this.list.textContent = t('mount.dialog.empty'); return; }
+        const table = document.createElement('table'); table.className = 'session-mount-dialog__table';
+        const header = table.createTHead().insertRow();
+        for (const key of ['source', 'target', 'access', 'actions'] as const) {
+            const th = document.createElement('th'); th.textContent = t(`mount.dialog.${key}`); header.append(th);
+        }
+        const body = table.createTBody();
+        for (const mount of record.mounts) this.renderMount(body.insertRow(), mount, record.cwd);
+        this.list.append(table);
+    }
+
+    private renderMount(row: HTMLTableRowElement, mount: SessionMountRecord, cwd: string): void {
+        row.insertCell().textContent = this.service.describe(mount);
+        row.insertCell().textContent = mount.at;
+        row.insertCell().textContent = t(`mount.access.${mount.access}`);
+        const actions = row.insertCell();
+        this.button(actions, t(mount.access === 'ro' ? 'mount.dialog.makeRw' : 'mount.dialog.makeRo'),
+            () => this.mutate(() => this.service.update(this.sessionId, mount.mountId, mount.access === 'ro' ? 'rw' : 'ro', false)));
+        if (cwd !== mount.at) this.button(actions, t('mount.dialog.setCwd'),
+            () => this.mutate(() => this.service.update(this.sessionId, mount.mountId, mount.access, true)));
+        this.button(actions, t('mount.dialog.reconnect'), () => this.mutate(() => this.service.reconnect(this.sessionId, mount.mountId)));
+        this.button(actions, t('mount.dialog.remove'), () => this.mutate(() => this.service.remove(this.sessionId, mount.mountId)));
+    }
+
+    private async mutate(action: () => Promise<void>): Promise<void> {
+        await action(); this.changed = true; await this.refresh();
+    }
+
+    private async browse(directory: string): Promise<void> {
+        const children = await this.service.listDirectories(directory);
+        if (this.closed) return;
+        this.chooser.replaceChildren();
+        this.button(this.chooser, t('mount.dialog.choose', { path: directory }), () => { this.path.value = directory; this.chooser.replaceChildren(); });
+        if (directory !== '/home/admin') this.button(this.chooser, t('mount.dialog.parent'), () => this.browse(directory.slice(0, directory.lastIndexOf('/'))));
+        for (const child of children) this.button(this.chooser, child.split('/').pop()!, () => this.browse(child));
+    }
+
+    private async run(action: () => Promise<void>): Promise<void> {
+        if (this.busy || this.closed) return;
+        this.busy = true; this.setDisabled(true);
+        try { await action(); }
+        catch (error) { const localized = localizeMountError(error); this.status.textContent = localized instanceof Error ? localized.message : String(localized); }
+        finally { this.busy = false; this.setDisabled(false); }
+    }
+
+    private setDisabled(disabled: boolean): void {
+        this.dialog.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select').forEach(input => { input.disabled = disabled; });
+    }
+
+    private close(force = false): void {
+        if (this.closed || this.busy && !force) return;
+        this.closed = true; this.signal?.removeEventListener('abort', this.abort);
+        this.dialog.remove(); this.resolve(this.changed);
+    }
 }

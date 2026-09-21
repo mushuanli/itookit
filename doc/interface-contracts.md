@@ -8,10 +8,11 @@
 |---|---|---|---|---|
 | `IStorageBackend` | `stat/list/read/write/mkdir/delete/rename` | `vfs-core/interfaces/storage/` | `vfsdriver-indexeddb`、`vfsdriver-localfs` | `vfs-core (VFSEngine)` |
 | `IVFSManager` | `openFileSystem()/mounts/devices/plugins` | `vfs-core/interfaces/services/vfs-manager.ts` | `vfs-core (VFSManager)` | `app-core`、`app-shell`、`device-llm` |
-| `IFileSystem` | `openFile()/driver/meta/capabilities/capabilitiesAt()` | `vfs-core/interfaces/services/file-system.ts` | `vfs-core (FileSystemView)` | `vfs-ui`、`llm-ui`、`llm-session`、`app-core` |
+| `IFileSystem` | `openFile()/driver/meta/capabilities/capabilitiesAt()/discoveryRoot?()` | `vfs-core/interfaces/services/file-system.ts` | `vfs-core (FileSystemView)` | `vfs-ui`、`llm-ui`、`llm-session`、`app-core` |
 | `IFSDriver` | `getNode/getChildren/readContent/writeContent/createFile/createDirectory/rename/move/delete/search` | `vfs-core/interfaces/services/fs-driver.ts` | `FileSystemView.driver` | `vfs-ui`、`mdxeditor`、`llm-session` |
 | `IFSMetaDriver` | `assets/tags/seq/refs/watcher` | `vfs-core/interfaces/services/fs-meta-driver.ts` | `FileSystemView.meta` | `llm-session`、`mdxeditor` |
 | `IFile` | `read()/write()`（extends `IIOStream`） | `vfs-core/interfaces/IFile.ts` | `FileHandle`、`MDXFileHandle` | `mdxeditor`、`llm-session` |
+| `FileDiscoverySource` / `FileDiscoveryOptions` | `list/stat/readIgnoreFile/rootFor`；`includeIgnored/excludeDirectories/signal` | `vfs-core/interfaces/services/file-discovery.ts` | VFS 适配器、tools Node 适配器 | `discoverFiles` → 工具搜索及 llm-ui 文件候选 |
 | `IIOStream` | `read()/write()/readStream?/close?` | `vfs-core/interfaces/` | 文件/设备句柄 | 文件↔LLM↔TTY 互拷 |
 | `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `kernel-adapters`、`device-llm` |
 
@@ -62,8 +63,12 @@
 | `buildLlmTaskInput` | 统一装配 llm.agent/chat 的 input |
 | `extractNodeOutput` | `outputs[name].content → message.content → raw` 统一提取 |
 | `collectDependency/dependenciesReady/dependencyWait` | 依赖收集状态机 |
-| `ContextAssembler` | 上下文/记忆装配（tokenBudget 裁剪） |
-| `ProviderMessageAdapter` | provider 消息策略适配（OpenAI/Anthropic 消息差异） |
+| `ContextTaskProgram` | v2 执行 bridge：Context 写集、Task 状态与下一 Effect 联合提交 |
+| `ContextAssembler` / `ProviderMessageAdapter` | 兼容转发至 `@itookit/context` |
+
+## 上下文（@itookit/context）
+
+独立接口为 `IContextAssembler`、`IContextProfiles`、`IContextEngine`、`IContextService`、`IContextReader`、`IContextContentStore`、`IContextGcStore`。`PreparedContext` 返回 cursor、explanation 和 CAS writes；消费方通过 Kernel 通用 action 提交，Context 不依赖 Kernel。GC 端口提供与发布和根提交串行化的原子视图，默认仅回收静止终态 Task 的过期孤儿。完整字段与调用链见 [Context API](context-api.md)。
 
 ## DAG 编排（@itookit/llm-flow）
 
@@ -110,3 +115,9 @@
 | `ICollapseManager` | `toggleSessionCollapse()/setAllCollapsed()/toggleAllFold()` | `HistoryView`（经 `CollapseController`） |
 | `INavigationPresenter` | `toggle()/update()` | `FloatingNavPanel` |
 | `IStatusPresenter` | `update()/updateFromSnapshot()/updateBackground()` | `StatusIndicatorView` |
+
+### 会话目录配置
+
+`EditorHostContext.directoryCommands.configureWorkspace(mode)` 由 SessionWorkbench 注入，llm-ui 的 WorkspaceDirectoryMenu 消费。`workspace` 模式替换主挂载并设置 cwd，`mount` 模式管理附加来源和读写权限；界面不直接接触宿主文件路径 API。`DirectoryMountService.setWorkspace` 复用 Session 授权 revision 和挂载变更守卫。
+
+文件搜索可通过 `ToolVFSContext.walkFiles(dir, options)` 增量消费路径；`createVFSToolContext` 同时实现惰性接口和兼容的 `listFiles`，两者共享忽略规则。Grep/Glob 必须优先使用惰性接口，达到结果上限立即关闭迭代器，避免桌面 IPC 完整遍历导致工具超时。

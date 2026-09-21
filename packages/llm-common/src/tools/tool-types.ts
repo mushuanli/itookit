@@ -57,7 +57,17 @@ export interface ToolMeta {
 /**
  * 工具执行请求
  */
+export interface ToolProgress {
+    /** Human-readable activity, including the resolved search scope where applicable. */
+    message: string;
+    /** Bounded replacement snapshot, not an authoritative final tool result. */
+    output?: string;
+}
+
 export interface ToolInvokeRequest {
+    onProgress?: (progress: ToolProgress) => Promise<void>;
+    /** Host-only admission before legacy output truncation; never a model argument. */
+    admitOutput?: (output: string) => Promise<{ output: string; contentRef?: import('@itookit/context').ContentRef }>;
     /** 工具 ID */
     toolId: string;
     /** 调用参数（JSON Schema 验证后的对象） */
@@ -74,6 +84,8 @@ export interface ToolInvokeRequest {
  * 工具执行结果
  */
 export interface ToolInvokeResult {
+    /** Immutable source evidence for an externalized output. */
+    contentRef?: import('@itookit/context').ContentRef;
     /** 工具 ID */
     toolId: string;
     /** 是否成功 */

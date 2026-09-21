@@ -45,3 +45,26 @@ const program: DurableTaskProgram = {
             : { state, next: { type: 'fail', error: { message: JSON.stringify(event) } } };
     },
 };
+
+it('retains a changed Session workspace when the CLI runtime is reopened without an override', async () => {
+    const root = await mkdtemp(`${tmpdir()}/cli-workspace-`);
+    const changed = `${root}/changed`; await mkdir(changed);
+    const source = await readFile(fileURLToPath(new URL('../examples/minimal-dag.yml', import.meta.url)), 'utf8');
+    await writeFile(`${root}/workflow.yml`, source);
+    const { workflow } = await loadWorkflow(`${root}/workflow.yml`, false);
+    const manifest: RunManifest = { version: 1, id: 'workspace-test', sessionId: 'workspace-test', name: 'workspace-test', goal: 'Workspace',
+        workspaceRoot: root, configPath: `${root}/workflow.yml`, configHash: '', status: 'created',
+        nodeTaskIds: {}, taskStatuses: {}, taskStartedAt: {}, pendingInteractions: [], grants: [], lastEventSequence: 0,
+        createdAt: Date.now(), updatedAt: Date.now() };
+    try {
+        const first = await createCliRuntime(workflow, manifest, async () => {});
+        try {
+            expect(first.workspaceRoot).toBe(root);
+            expect(await first.grants.grant(changed, 'read')).toMatchObject({ path: changed, mountAt: '/changed', access: 'read' });
+        } finally { await first.dispose(); }
+        const configured = await createCliRuntime(workflow, manifest, async () => {}, undefined, 'execute', { setHome: changed });
+        try { expect(configured.workspaceRoot).toBe(changed); } finally { await configured.dispose(); }
+        const reopened = await createCliRuntime(workflow, manifest, async () => {});
+        try { expect(reopened.workspaceRoot).toBe(changed); } finally { await reopened.dispose(); }
+    } finally { await rm(root, { recursive: true, force: true }); }
+});

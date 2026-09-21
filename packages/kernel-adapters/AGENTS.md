@@ -4,7 +4,7 @@
 
 ## 定位与铁律
 
-- **只依赖下层**：`common`、`device-llm`、`durable-kernel`、`vfs-core`、`tools`；不得依赖 `llm-session` / `llm-flow` / `llm-tasks` / `app-core` / UI 包或任何 app。
+- **只依赖下层**：`context`、`common`、`device-llm`、`durable-kernel`、`vfs-core`、`tools`；不得依赖 `llm-session` / `llm-flow` / `llm-tasks` / `app-core` / UI 包或任何 app。
 - **Effect 必须可取消且确认停止**：6 个适配器（`llm.chat`、`tool.call`、`skill.load`、`skill.unload`、`process.exec`、`tty.command`）全部实现 `EffectAdapter.cancel`；`effects/in-flight.ts` 记录在途执行，`cancel` 必须等它结束才确认——「取消已发出」不等于「外部已停止」。
 - **装配即接线**：`createKernelAdaptersRuntime` 只做组合与生命周期；策略（工具白名单、Skill 触发、项目规则）由注入的 `SkillSource` / `configureSession` / `additionalTools` 决定，调用方（CLI / app-core）负责宿主差异。
 - **Skill 身份持久化**：成功 `load_skill` 后把身份写入 `kernel-adapters.skills.loaded`（`skill/loaded-state.ts`）；身份写入失败必须回滚（新加载卸载、已加载保留），回滚自身失败以 `AggregateError` 保留原始错误。
@@ -62,6 +62,7 @@ await runtime.dispose();
 ## 约束
 
 - 工具/Skill catalog 只暴露**元数据**（`getToolDefinitions`/`getSkillMeta`），可执行服务只经 Session 作用域取得。
+- Context 的 `createTaskContextStorage` 使用 Task SeqFile 独立内容命名空间，发布和 GC 与 Kernel 提交共用后端事务。GC 只接受终态且 Effect 清理已确认的 Task，根包含保留的 Task/shared 历史；不得按文件年龄直接删除可达内容或解除固定目录保护。
 - 可选 `scopeForEffect`/`fileContextForScope` 由宿主选择并获取 Run 独立能力，注册表按 Session + scope 缓存；普通 Session API 保持默认作用域。选择或获取失败不回退；`disposeScope` 合并并发清理并禁止迟到 Effect 重建，Session/运行时关闭释放所有子作用域。
 - 所有 Skill 操作（load/unload/编辑器挂载）经 `runSessionSkillOperation` 串行化，避免同一 Session 竞态。
 - 身份 CAS 只重试 Kernel CONFLICT；提交前/后其他存储错误直接报告。批量恢复失败撤销本次新增加载，保留原有选择；清理失败逐项聚合，不修改持久身份。

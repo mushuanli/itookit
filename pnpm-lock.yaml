@@ -324,6 +324,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
+      '@itookit/context':
+        specifier: workspace:*
+        version: link:../context
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
@@ -462,6 +465,9 @@ importers:
 
   packages/common:
     dependencies:
+      '@itookit/context':
+        specifier: workspace:*
+        version: link:../context
       '@itookit/llm-common':
         specifier: workspace:*
         version: link:../llm-common
@@ -475,6 +481,21 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/context:
+    devDependencies:
+      '@types/node':
+        specifier: 20.19.25
+        version: 20.19.25
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.25))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
 
   packages/demo:
     dependencies:
@@ -617,6 +638,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
+      '@itookit/context':
+        specifier: workspace:*
+        version: link:../context
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
@@ -647,6 +671,10 @@ importers:
         version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
 
   packages/llm-common:
+    dependencies:
+      '@itookit/context':
+        specifier: workspace:*
+        version: link:../context
     devDependencies:
       tsup:
         specifier: ^8.5.1
@@ -691,9 +719,15 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
+      '@itookit/context':
+        specifier: workspace:*
+        version: link:../context
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
+      '@itookit/llm-common':
+        specifier: workspace:*
+        version: link:../llm-common
       '@itookit/llm-flow':
         specifier: workspace:*
         version: link:../llm-flow
@@ -762,6 +796,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
+      '@itookit/context':
+        specifier: workspace:*
+        version: link:../context
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
@@ -977,6 +1014,9 @@ importers:
 
   packages/vfs-core:
     dependencies:
+      ignore:
+        specifier: 5.3.2
+        version: 5.3.2
       yaml:
         specifier: ^2.8.2
         version: 2.8.2
@@ -7910,8 +7950,7 @@ snapshots:
 
   ieee754@1.2.1: {}
 
-  ignore@5.3.2:
-    optional: true
+  ignore@5.3.2: {}
 
   immer@10.2.0: {}
 

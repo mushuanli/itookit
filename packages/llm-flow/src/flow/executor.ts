@@ -247,6 +247,8 @@ export class DurableFlowExecutor {
         restored?: { checkpoint: SchedulerCheckpoint; handle: FlowExecutionHandle },
     ): Promise<FlowExecutionHandle> {
         const saved = restored?.checkpoint;
+        const contextProgramVersion = saved ? saved.contextProgramVersion ?? '1'
+            : this.options.kernel.programs?.has('llm.agent', '2') && this.options.kernel.programs?.has('llm.chat', '2') ? '2' : '1';
         spec = saved || spec.templateVersion === 1 ? structuredClone(spec) : compileReferenceGraph(compileControlGraph(compileDispatchGraph(structuredClone(spec))));
         parameters = prepareFlowParameters(spec.parameterSchema, parameters);
         validateDispatchCapacity(spec, parameters);
@@ -318,7 +320,7 @@ export class DurableFlowExecutor {
                 for (const [id, value] of saved.nodeConnections) nodeConnections.set(id, value);
             }
             const checkpointSnapshot = (): SchedulerCheckpoint => ({
-                    version: 1, spec, parameters, sessionContext, variables: variableStore.state, catalog: plugins.snapshot(),
+                    version: 1, contextProgramVersion, spec, parameters, sessionContext, variables: variableStore.state, catalog: plugins.snapshot(),
                     instances: [...instances].map(([id, handles]) => [id, handles.map(handle => handle.id)]),
                     completed: [...completed], nodes, edges, edgeState: [...edgeState],
                     delegationDepth: [...delegationDepth], delegationGroupByChild: [...delegationGroupByChild],
@@ -472,7 +474,7 @@ export class DurableFlowExecutor {
                 const requestId = published
                     ? `flow:${published.root.id}:${node.id}#${iteration}@${nodeGenerations.get(node.id) ?? 0}`
                     : undefined;
-                const taskSpec = await this.taskSpec(sessionId, node, task, dependencies, localParameters, requestId);
+                const taskSpec = await this.taskSpec(sessionId, node, task, dependencies, localParameters, requestId, contextProgramVersion);
                 if (memberGroup(nodes, node.id)) taskSpec.deferStart = true;
                 if (historyGroup) taskSpec.labels = { ...taskSpec.labels, flowHistoryGroup: historyGroup };
                 const handle = await session.submit(taskSpec);
@@ -1054,6 +1056,7 @@ export class DurableFlowExecutor {
         dependencies: import('@itookit/common').DagTaskDependencyBinding[],
         parameters?: Record<string, CommonJsonValue>,
         requestId?: string,
+        contextProgramVersion: '1' | '2' = '1',
     ): Promise<TaskSpec<unknown>> {
         const allowed = node.capabilities ?? [];
         const catalog = await this.options.resolveTools?.(sessionId, allowed)
@@ -1065,7 +1068,7 @@ export class DurableFlowExecutor {
             ? await this.options.resolveSkillContexts(sessionId, skillIds, allowed)
             : [];
         const input = task.programKind === 'flow.dispatch'
-            ? await this.prepareDispatchTask(sessionId, { ...task.input as DispatchInput, invocationNamespace: requestId! })
+            ? await this.prepareDispatchTask(sessionId, { ...task.input as DispatchInput, invocationNamespace: requestId! }, contextProgramVersion)
             : task.programKind === 'flow.input'
                 ? { ...record(task.input), values: { ...parameters, ...record(record(task.input).values) } }
             : task.programKind === 'llm.agent'
@@ -1081,7 +1084,8 @@ export class DurableFlowExecutor {
                 : task.input;
         return {
             ...(requestId ? { requestId } : {}),
-            program: { kind: task.programKind, version: task.programVersion },
+            program: { kind: task.programKind, version: task.programVersion === '1' && ['llm.agent', 'llm.chat'].includes(task.programKind)
+                ? contextProgramVersion : task.programVersion },
             input: jsonValue(input),
             dependsOn: dependencies.filter(binding => task.programKind !== 'flow.join' || binding.injectOutput === false).map(binding => ({
                 task: binding.taskId,
@@ -1096,7 +1100,7 @@ export class DurableFlowExecutor {
         };
     }
 
-    private async prepareDispatchTask(sessionId: string, input: DispatchInput): Promise<DispatchInput> {
+    private async prepareDispatchTask(sessionId: string, input: DispatchInput, contextProgramVersion: '1' | '2'): Promise<DispatchInput> {
         return prepareDispatch(input, {
             plugins: this.options.plugins,
             bind: async target => {
@@ -1107,7 +1111,7 @@ export class DurableFlowExecutor {
                 const runtime = await this.options.plugins.loadRuntime(target.plugin, target.pluginVersion);
                 const task = runtime.createTask({ sessionId, nodeRunId: target.id, config: target.config,
                     inputs: target.inputs, dependencies: [] });
-                return this.taskSpec(sessionId, target, task, []);
+                return this.taskSpec(sessionId, target, task, [], undefined, undefined, contextProgramVersion);
             },
         });
     }

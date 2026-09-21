@@ -91,6 +91,15 @@ export class FileSystemView implements IFileSystem {
 
     openFile(path: string) { this.assertOpen(); return new FileHandle(this, normalizeVirtualPath(path)); }
 
+    discoveryRoot(path: string): string {
+        this.assertOpen();
+        const target = normalizeVirtualPath(path);
+        const mount = this.find(target);
+        if (!mount) return '/';
+        const inner = mount.fs.discoveryRoot?.(this.sourcePath(mount, target));
+        return inner && P.isUnder(inner, mount.root) ? this.virtualPath(mount, inner) : mount.at;
+    }
+
     async capabilitiesAt(path: string): Promise<FSCapabilities> {
         return this.operation(async () => {
             const m = this.find(normalizeVirtualPath(path));

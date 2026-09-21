@@ -4,7 +4,7 @@ LLM 领域**共享契约层**：Provider / Connection / Agent / Tool / Skill / T
 
 ## 定位与铁律
 
-- **零依赖**：`src/` 内不 import 任何 `@itookit/*`，也不 import 第三方运行时库；只用 TypeScript 类型与纯函数（比较、构造、默认值）。
+- **零运行时依赖**：仅可 type import/re-export `@itookit/context` 的中立消息与 Context 类型，不 import 其他 workspace 或第三方运行时库；只用 TypeScript 类型与纯函数（比较、构造、默认值）。
 - **无副作用**：不得读写文件、DOM、网络或全局状态；需要 I/O 的能力以接口（`ILLMService`、`ISkillService`、`IToolService`、`ITTYDriver`）声明，由实现层提供。
 - **向后兼容的 re-export**：`@itookit/common` 通过 `export * from '@itookit/llm-common'` 转发（历史兼容）。**新代码直接从本包导入**，避免依赖链上多一跳。
 - 类型演进会影响 `device-llm`、`llm-session`、`llm-flow`、`llm-tasks`、`kernel-adapters`、`llm-ui`：改名/改形状前先看 [接口契约](../../doc/interface-contracts.md) 与各实现的编译错误。

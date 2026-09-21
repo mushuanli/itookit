@@ -23,6 +23,8 @@ export interface IFileSystem extends FSEventEmitter {
     readonly external?: boolean;
     openFile(path: string): IFile;
     capabilitiesAt(path: string): Promise<FSCapabilities>;
+    /** Rule inheritance boundary in this authorized view (defaults to its root). */
+    discoveryRoot?(path: string): string;
 }
 
 export interface FileSystemContext {

@@ -136,6 +136,7 @@ export class HistoryView implements IHistoryPresenter {
                     'tool:queued',
                     'tool:running',
                     'tool:input',
+                    'tool:progress',
                     'stream:thinking:stop',
                     'tool:success', 'tool:error',
                     // LLM 2.0 canonical events (S7)
@@ -382,6 +383,10 @@ export class HistoryView implements IHistoryPresenter {
 
             case 'tool:running':
                 this.stream.updateStatus(event.payload.call.toolId, 'running');
+                break;
+
+            case 'tool:progress':
+                this.stream.updateToolProgress(event.payload.call.toolId, event.payload.call.progress);
                 break;
 
             case 'tool:success':

@@ -40,6 +40,7 @@ describe('compileDag', () => {
             id: 'one:report->two:source', from: 'one', to: 'two', output: 'report', input: 'source',
         }]);
         expect(dag.nodes[0].capabilities).toEqual(['Read', 'AskUserQuestion', 'RequestWorkspaceAccess']);
+        expect(dag.nodes[0].config).not.toHaveProperty('workingDirectory');
         expect(dag.nodes[1].capabilities).toEqual(['Read', 'Bash', 'AskUserQuestion', 'RequestWorkspaceAccess']);
         expect(dag.nodes[1].retry).toEqual({ maxAttempts: 3, backoffMs: 10 });
     });

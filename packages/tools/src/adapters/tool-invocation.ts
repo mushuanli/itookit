@@ -26,9 +26,15 @@ export async function prepareToolInput(tool: Tool, args: Record<string, unknown>
   return approved;
 }
 
-export function toolSuccess(tool: Tool, data: unknown, started: number): ToolInvokeResult {
+export async function toolSuccess(tool: Tool, data: unknown, started: number,
+  admit?: import('@itookit/common').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
   const block = tool.mapToolResultToToolResultBlockParam(data, tool.name);
   const text = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+  if (admit) {
+    const admitted = await admit(text);
+    return { toolId: tool.name, success: true, durationMs: Date.now() - started,
+      ...admitted, ...(admitted.contentRef ? { truncated: true } : {}) };
+  }
   const limit = Math.max(0, Math.floor(Math.min(tool.maxResultSizeChars, MAX_RESULT_CHARS)));
   const notice = TRUNCATION_NOTICE.slice(0, limit);
   const serialized = JSON.stringify(data);

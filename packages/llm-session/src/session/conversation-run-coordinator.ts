@@ -1,5 +1,8 @@
+import { createContextAssembler, type IContextAssembler, type RetrievedMemoryEntry } from '@itookit/context';
 import { FlowHistory } from './flow-history';
-import { formatFlowOutput } from '@itookit/common';
+import { CLIENT_WEB_SEARCH_TOOL, directExecutionMode, directToolIds } from './direct-execution-mode';
+import { DEFAULT_AGENT_MAX_EXCHANGES } from '@itookit/llm-common';
+import { formatFlowOutput, t } from '@itookit/common';
 import type {
     AgentEvent,
     Artifact,
@@ -33,10 +36,8 @@ import type {
 import {
     buildLlmTaskInput,
     buildSkillContexts,
-    ContextAssembler,
     type DurableAgentInput,
     type DurableChatOutput as ChatProgramOutput,
-    type RetrievedMemoryEntry,
     type SkillContext,
 } from '@itookit/llm-tasks';
 import type { ISessionRepository } from '../persistence/types';
@@ -69,6 +70,7 @@ export interface ConversationRunCoordinatorOptions {
         definitions: ToolDefinition[];
         externalIds: string[];
     }>;
+    resolveHarnessToolIds?(sessionId: string): Promise<string[]>;
     loadArtifact(id: string): Promise<Artifact | null>;
     retrieveMemory?: (
         plan: ContextPlan,
@@ -99,6 +101,11 @@ export class ConversationRunCoordinator {
     constructor(private readonly options: ConversationRunCoordinatorOptions) {}
 
     async executeDirect(execution: ConversationExecution): Promise<void> {
+        if (directExecutionMode(execution.task.input) === 'agent' && execution.config.capabilityPolicy?.toolIds === undefined) {
+            const toolIds = await this.options.resolveHarnessToolIds?.(execution.task.sessionId) ?? [];
+            execution = { ...execution, config: { ...execution.config,
+                capabilityPolicy: { mcpProfileIds: [], ...execution.config.capabilityPolicy, toolIds } } };
+        }
         const ids = execution.config.capabilityPolicy?.skillIds ?? [];
         const skills = ids.length ? await this.options.resolveSkills?.(ids, execution.task.sessionId) ?? [] : [];
         const skillsPrompt = skills.filter(skill => ids.includes(skill.id) && skill.enabled && !skill.disableModelInvocation && skill.triggerStrategy !== 'action')
@@ -238,8 +245,8 @@ export class ConversationRunCoordinator {
     private contextAssembler(
         execution: ConversationExecution,
         includeMemory = true,
-    ): ContextAssembler {
-        return new ContextAssembler({
+    ): IContextAssembler {
+        return createContextAssembler({
             log: execution.log,
             profileStore: new ContextProfileStore(this.options.engine, execution.task.sessionId),
             readRound: roundId => execution.log.readRound(roundId),
@@ -255,10 +262,14 @@ export class ConversationRunCoordinator {
         snapshot: ContextSnapshot,
         skills: LLMSkill[] = [],
     ): Promise<RunExecution> {
-        const tools = execution.config.capabilityPolicy?.toolIds ?? [];
+        const tools = directToolIds(execution.config, execution.task.input);
         const catalog = await this.options.resolveTools?.(execution.task.sessionId, tools)
             ?? { definitions: [], externalIds: [] };
         const spec = directTaskSpec(execution, snapshot, catalog, skills);
+        if (directExecutionMode(execution.task.input) === 'agent' && !spec.input.tools?.length) {
+            throw new Error(t('chatInput.executionMode.noTools'));
+        }
+        if (this.options.kernel.programs.has(spec.program.kind, '2')) spec.program.version = '2';
         const run = await submitRun({
             kind: 'task', sessionId: execution.task.sessionId, task: spec,
             capabilities: [
@@ -503,21 +514,18 @@ function contextPlan(
     };
 }
 
-/** 客户端统一联网搜索工具名（与 @itookit/tools 的 WEB_SEARCH_TOOL_NAME 一致）。 */
-const CLIENT_WEB_SEARCH_TOOL = 'WebSearch';
-
 function directTaskSpec(
     execution: ConversationExecution,
     snapshot: ContextSnapshot,
     catalog: { definitions: ToolDefinition[]; externalIds: string[] },
     skills: LLMSkill[] = [],
 ): TaskSpec<DurableAgentInput> {
-    const tools = execution.config.capabilityPolicy?.toolIds ?? [];
+    const tools = directToolIds(execution.config, execution.task.input);
+    const mode = directExecutionMode(execution.task.input);
     // 客户端 WebSearchTool 注入开关：仅 'client-tool' 态注入；'builtin' 与 'disabled'
     // 均剥离，避免重复检索。决策直接消费 webSearchMode（源自 resolveWebSearchStrategy）。
-    const definitions = execution.config.webSearchMode === 'client-tool'
-        ? catalog.definitions
-        : catalog.definitions.filter(tool => toolNameOf(tool) !== CLIENT_WEB_SEARCH_TOOL);
+    const definitions = catalog.definitions.filter(tool => tools.includes(toolNameOf(tool))
+        && (execution.config.webSearchMode === 'client-tool' || toolNameOf(tool) !== CLIENT_WEB_SEARCH_TOOL));
     // Initial Skill selection activates the same snapshots a runtime load_skill returns,
     // so critical rules are re-injected per round and tools stay inside the declared set.
     const allowedToolIds = execution.config.webSearchMode === 'client-tool'
@@ -525,11 +533,12 @@ function directTaskSpec(
     const skillContexts = initialSkillContexts(skills, { definitions: catalog.definitions, externalIds: catalog.externalIds },
         allowedToolIds, new Set(execution.config.capabilityPolicy?.skillIds ?? []));
     return {
-        program: { kind: tools.length ? 'llm.agent' : 'llm.chat', version: '1' },
+        program: { kind: mode === 'agent' || tools.length ? 'llm.agent' : 'llm.chat', version: '1' },
         input: buildLlmTaskInput({
             sessionId: execution.task.sessionId,
             roundId: execution.roundId,
-            messages: snapshot.canonicalMessages,
+            messages: mode === 'agent' ? [{ role: 'system', content: 'Execute the user request with the available tools. Inspect the Session workspace and report observed results; do not merely suggest commands when you can perform the requested action. Relative file paths use the Session working directory; absolute file paths are Session virtual paths, not host paths. Access only mounted directories and respect tool approvals.' },
+                ...snapshot.canonicalMessages] : snapshot.canonicalMessages,
             connectionId: execution.config.connectionId,
             model: execution.config.model,
             temperature: execution.config.temperature,
@@ -539,13 +548,15 @@ function directTaskSpec(
             webSearch: execution.config.webSearchMode === 'builtin',
             stream: execution.config.stream,
             approval: 'external',
+            maxExchanges: mode === 'agent' ? DEFAULT_AGENT_MAX_EXCHANGES : undefined,
             tools: definitions,
             allowedToolIds,
             externalToolIds: catalog.externalIds,
             memoryPolicy: execution.config.memoryPolicy,
             ...(skillContexts.length ? { skillContexts } : {}),
         }),
-        labels: { roundId: execution.roundId, kind: tools.length ? 'agent' : 'chat' },
+        labels: { roundId: execution.roundId, kind: mode === 'agent' || tools.length ? 'agent' : 'chat',
+            ...(mode ? { executionMode: mode } : {}) },
         deferStart: true,
     };
 }

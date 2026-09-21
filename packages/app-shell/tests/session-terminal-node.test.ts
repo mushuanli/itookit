@@ -10,9 +10,12 @@ it.each(['failed', 'aborted'])('addresses %s status to the mounted assistant and
     const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
     await backend.write('/etc/llm/.providers/mock.json', encode({ id: 'mock', name: 'Mock', implementation: 'openai-compatible', apiKey: 'test', baseURL: 'http://localhost:18449', models: [{ id: 'mock-model', name: 'Mock' }] }));
     await backend.write('/etc/llm/.connections/default.json', encode({ id: 'default', name: 'Default', providerId: 'mock', tiers: { standard: 'mock-model' } }));
-    let failRequest!: (error: Error) => void;
-    const fetch = vi.fn((_url: unknown, options: RequestInit) => new Promise((_resolve, reject) => {
-        failRequest = reject;
+    let failRequest!: () => void;
+    const fetch = vi.fn((_url: unknown, options: RequestInit) => new Promise((resolve, reject) => {
+        // A permanent provider error reaches terminal status without entering durable retries.
+        failRequest = () => resolve(new Response(JSON.stringify({ error: { message: 'Invalid model request' } }), {
+            status: 400, headers: { 'Content-Type': 'application/json' },
+        }));
         options.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
     }));
     vi.stubGlobal('fetch', fetch);
@@ -28,7 +31,7 @@ it.each(['failed', 'aborted'])('addresses %s status to the mounted assistant and
             }).catch(() => {});
             await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
             if (status === 'aborted') await runtime.commandBus.execute(SessionCommand.Abort);
-            else failRequest(new Error('Model request timed out'));
+            else failRequest();
             await vi.waitFor(() => expect(events.some(event => event.type === 'message:status' && event.payload.status === status)).toBe(true));
         } finally { unsubscribe(); }
         const error = events.find(event => event.type === 'error');

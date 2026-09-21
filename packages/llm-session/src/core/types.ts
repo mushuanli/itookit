@@ -110,6 +110,7 @@ export interface SessionTokenUsage {
  * ✅ 新增：查询覆盖参数
  */
 export interface ExecutionOverrides {
+    executionMode?: import('@itookit/llm-common').ChatExecutionMode;
     /**
      * 覆盖使用的 LLM 连接 ID（替代 modelId）。
      * Overrides the Agent definition connection.

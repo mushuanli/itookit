@@ -1,4 +1,5 @@
 import type { FlowId, JsonValue } from './flow-definition';
+import type { ChatExecutionMode } from '../chat';
 
 export type FlowNodeId = string;
 
@@ -12,7 +13,7 @@ export interface SendIntent {
         mode: 'persistent' | 'temporary';
     };
     execution:
-        | { kind: 'agent'; agentId: string }
+        | { kind: 'agent'; agentId: string; mode?: ChatExecutionMode }
         | { kind: 'flow'; flowId: FlowId; revision?: number; parameters?: Record<string, JsonValue> };
 }
 

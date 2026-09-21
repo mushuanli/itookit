@@ -26,6 +26,8 @@
 
 依赖铁律：**上层可依赖下层，下层永不知上层**。跨层通过接口注入：装配下沉在 `app-core/src/runtime/create-application-runtime.ts`（`createApplicationRuntime()`），`app-shell/src/bootstrap.ts` 只是调用方。
 
+上下文实现独立于执行内核，位于零运行时依赖的 `@itookit/context`。接口与 v2 持久执行见 [Context API](context-api.md)，设计依据与扩展边界见 [Context 模块设计](design/context-module.md)。
+
 ## 2. Kernel — 持久化执行内核
 
 `@itookit/durable-kernel` 是唯一的执行引擎：一个 Task 一个持久化状态机。
@@ -91,7 +93,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 - **输入**：`DurableAgentInput`（sessionId/roundId/messages/connectionId/model/approval/tools/…），统一由 `buildLlmTaskInput` 装配。
 - **依赖收集**：`collectDependency`/`dependenciesReady`/`dependencyWait` — 等待上游 task-exited → 提取输出（`extractNodeOutput`）→ 注入消息。
 - **能力**：LLM/tool 通过 `capabilities` signal 获得 handle，走 `llm.chat`/`tool.call` effect。
-- **上下文**：`ContextAssembler`（历史/记忆/tokenBudget 裁剪）+ `ProviderMessageAdapter`（provider 消息差异）。
+- **上下文**：`@itookit/context` 的 `IContextAssembler`（历史/记忆装配）与 `IContextService`（窗口、Notes、原文检索、持久请求）；llm-tasks 仅保留兼容导出与 Program bridge。
 
 ### 3.2 llm-flow — DAG 编排
 

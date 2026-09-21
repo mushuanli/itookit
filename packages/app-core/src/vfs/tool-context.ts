@@ -1,5 +1,5 @@
 import type { ToolVFSContext } from '@itookit/common';
-import { normalizeVirtualPath, pathUtils, type FileSystemContext } from '@itookit/vfs-core';
+import { createVFSFileDiscoverySource, discoverFiles, normalizeVirtualPath, pathUtils, type FileSystemContext } from '@itookit/vfs-core';
 
 /** One exact-path adapter per authorized view. Never resolves a basename globally. */
 export function createVFSToolContext(context: FileSystemContext): ToolVFSContext {
@@ -9,29 +9,30 @@ export function createVFSToolContext(context: FileSystemContext): ToolVFSContext
         }
         return normalizeVirtualPath(path.startsWith('/') ? path : `${context.cwd}/${path}`);
     };
+    const walkFiles: NonNullable<ToolVFSContext['walkFiles']> = async function* (path, options) {
+        const source = createVFSFileDiscoverySource(context.fs);
+        for await (const node of discoverFiles(source, resolve(path ?? context.cwd), options)) yield node.path;
+    };
     return {
-        async readFile(path) {
-            const content = await context.fs.driver.readContent(resolve(path), { encoding: 'utf-8' });
-            return content;
+        walkFiles,
+        async readFile(path, options) {
+            const target = resolve(path), maxBytes = options?.maxBytes;
+            if (maxBytes === undefined) return context.fs.driver.readContent(target, { encoding: 'utf-8' });
+            const node = await context.fs.driver.getNode(target);
+            const tooLarge = () => Object.assign(new Error(`Search file exceeds ${maxBytes} bytes: ${target}`), { code: 'SEARCH_FILE_TOO_LARGE' });
+            if (node && 'size' in node && (node.size ?? 0) > maxBytes) throw tooLarge();
+            const bytes = await context.fs.driver.readContent(target, { encoding: 'binary', offset: 0, length: maxBytes + 1 });
+            if (bytes.byteLength > maxBytes) throw tooLarge();
+            return new TextDecoder().decode(bytes);
         },
         async writeFile(path, content) {
             const target = resolve(path);
             if (await context.fs.driver.exists(target)) await context.fs.driver.writeContent(target, content);
             else await context.fs.driver.createFile({ name: pathUtils.basename(target), parentPath: pathUtils.dirname(target), content, recursive: true });
         },
-        async listFiles(path) {
-            const root = resolve(path ?? context.cwd);
+        async listFiles(path, options) {
             const files: string[] = [];
-            const queue = [root];
-            let visited = 0;
-            while (queue.length) {
-                if (++visited > 10000) throw new Error('Directory traversal limit exceeded');
-                for (const node of await context.fs.driver.getChildren(queue.shift()!)) {
-                    if (node.type === 'directory') queue.push(node.path);
-                    else if (node.type === 'file' || node.type === 'seqfile') files.push(node.path);
-                    if (files.length > 10000) throw new Error('File listing limit exceeded');
-                }
-            }
+            for await (const file of walkFiles(path, options)) files.push(file);
             return files;
         },
         async stat(path) {

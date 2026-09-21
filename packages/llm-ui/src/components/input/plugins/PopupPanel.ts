@@ -29,6 +29,7 @@ export interface PopupItem {
 }
 
 export interface PopupPanelOptions {
+    toggle?: { label: string; checked?: boolean; onChange: (checked: boolean) => void };
     /** 最大可见条数 */
     maxVisible?: number;
     /** 是否显示搜索框 */
@@ -217,6 +218,11 @@ export class PopupPanel {
 
         html += `<div class="llm-popup__list"></div>`;
 
+        if (this.options.toggle) {
+            html += `<label class="llm-popup__footer"><input type="checkbox" data-popup-toggle
+                ${this.options.toggle.checked ? 'checked' : ''}> ${escapeHTML(this.options.toggle.label)}</label>`;
+        }
+
         if (this.options.footerHint) {
             html += `
                 <div class="llm-popup__footer">
@@ -226,6 +232,10 @@ export class PopupPanel {
         }
 
         el.innerHTML = html;
+
+        el.querySelector<HTMLInputElement>('[data-popup-toggle]')?.addEventListener('change', event => {
+            this.options.toggle?.onChange((event.target as HTMLInputElement).checked);
+        });
 
         // 搜索绑定
         this.searchInput = el.querySelector('.llm-popup__search-input');
@@ -408,4 +418,3 @@ export class PopupPanel {
         this.panel.remove();
     }
 }
-

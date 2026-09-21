@@ -134,6 +134,7 @@ export function toolEffect(
             version: '1',
             request: {
                 resourceHandleId: handleId,
+                callId: call.id,
                 toolId: toolName(call),
                 args: toolArguments(call),
                 ...(cwd ? { cwd } : {}),

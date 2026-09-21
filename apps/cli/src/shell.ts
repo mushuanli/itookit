@@ -13,6 +13,7 @@ export interface SandboxDoctorResult {
 
 export class NodeNativeShell implements INativeShell {
     readonly capabilities = { ripgrep: false, fd: false };
+    constructor(private readonly grants?: () => Promise<WorkspaceGrant[]> | WorkspaceGrant[]) {}
 
     async exec(
         command: string,
@@ -20,8 +21,9 @@ export class NodeNativeShell implements INativeShell {
         options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal } = {},
     ): Promise<NativeShellResult> {
         const invocation = nativeInvocation(command, args);
+        const cwd = this.grants ? nativeWorkingDirectory(await this.grants(), options.cwd) : options.cwd;
         return runProcess(invocation.command, invocation.args, {
-            cwd: options.cwd,
+            cwd,
             timeoutMs: options.timeoutMs,
             signal: options.signal,
             env: safeEnvironment(),
@@ -44,7 +46,9 @@ export class OciSandboxShell implements INativeShell {
         options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal } = {},
     ): Promise<NativeShellResult> {
         const shellCommand = command === 'sh' && args[0] === '-c' ? args[1] : quote([command, ...args]);
-        const runArgs = sandboxArgs(this.workflow, await this.grants(), shellCommand, options.cwd);
+        const grants = await this.grants();
+        requireSessionWorkspace(grants);
+        const runArgs = sandboxArgs(this.workflow, grants, shellCommand, options.cwd);
         return runProcess(this.engine, runArgs, {
             timeoutMs: options.timeoutMs,
             signal: options.signal,
@@ -63,7 +67,7 @@ export async function createShell(
     workflow: CompiledWorkflow,
     grants: () => Promise<WorkspaceGrant[]> | WorkspaceGrant[],
 ): Promise<ShellBinding> {
-    if ((workflow.config.sandbox?.mode ?? 'oci') === 'native') return { shell: new NodeNativeShell() };
+    if ((workflow.config.sandbox?.mode ?? 'oci') === 'native') return { shell: new NodeNativeShell(grants) };
     const doctor = await sandboxDoctor(workflow.config.sandbox?.engine ?? 'auto');
     if (!doctor.available || !doctor.engine) throw new Error(doctor.message);
     return { shell: new OciSandboxShell(doctor.engine, workflow, grants), engine: doctor.engine };
@@ -87,6 +91,7 @@ export class OciTtyDriver implements ITTYDriver {
     ) {}
 
     spawn(command: string, args: string[] = [], options: ITTYSpawnOptions = {}): ITTYSession {
+        requireSessionWorkspace(this.grants);
         const { args: sandbox, image } = sandboxBaseArgs(this.workflow, this.grants, options.cwd, true, options.env);
         // The container working directory is expressed via --workdir; the host
         // podman/docker process itself runs from the host CWD and a clean env.
@@ -97,6 +102,24 @@ export class OciTtyDriver implements ITTYDriver {
             env: undefined,
         });
     }
+}
+
+function requireSessionWorkspace(grants: WorkspaceGrant[]): void {
+    if (!grants.some(grant => grant.mountAt === '/workspace')) {
+        throw new Error('Session workspace is not mounted; configure it before executing commands');
+    }
+}
+
+function nativeWorkingDirectory(grants: WorkspaceGrant[], cwd = '/workspace'): string {
+    requireSessionWorkspace(grants);
+    const virtual = path.posix.normalize(cwd);
+    const mount = grants.filter(grant => grant.mountAt &&
+        (virtual === grant.mountAt || virtual.startsWith(`${grant.mountAt}/`)))
+        .sort((a, b) => b.mountAt!.length - a.mountAt!.length)[0];
+    if (mount) return path.resolve(mount.path, path.posix.relative(mount.mountAt!, virtual));
+    // Worktree managers can supply an already resolved host cwd.
+    if (grants.some(grant => inside(grant.path, cwd))) return cwd;
+    throw new Error(`Native working directory is outside mounted directories: ${cwd}`);
 }
 
 export async function sandboxDoctor(

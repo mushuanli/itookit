@@ -151,11 +151,24 @@ export class StreamController {
         sidecar.innerHTML = NodeTemplates.renderCitations(citations);
     }
 
+    updateToolProgress(nodeId: string, progress: import('@itookit/common').ToolProgress): void {
+        const el = this.renderer.getNode(nodeId);
+        if (!el || !['running', 'queued'].includes(el.dataset.status ?? '')) return;
+        const activity = el.querySelector<HTMLElement>('.llm-ui-node__progress');
+        if (activity) { activity.hidden = false; activity.textContent = progress.message; }
+        const result = el.querySelector<HTMLElement>('.llm-ui-node__result');
+        if (result && progress.output !== undefined) { result.style.display = 'block'; result.textContent = progress.output; }
+    }
+
     updateStatus(nodeId: string, status: string, result?: any): void {
         const el = this.renderer.getNode(nodeId);
         if (el) {
             el.classList.remove('llm-ui-node--streaming');
             el.dataset.status = status;
+            if (!['queued', 'running'].includes(status)) {
+                const progress = el.querySelector<HTMLElement>('.llm-ui-node__progress');
+                if (progress) progress.hidden = true;
+            }
             el.classList.remove(
                 'llm-ui-node--running',
                 'llm-ui-node--success',
@@ -170,12 +183,12 @@ export class StreamController {
             }
 
             // tool 结果
-            if (result && el.classList.contains('llm-ui-node--tool')) {
+            if (result !== undefined && el.classList.contains('llm-ui-node--tool')) {
                 const resEl = el.querySelector('.llm-ui-node__result') as HTMLElement;
                 if (resEl) {
                     resEl.style.display = 'block';
                     resEl.textContent = typeof result === 'string'
-                        ? result : JSON.stringify(result);
+                        ? result : JSON.stringify(result, null, 2);
                 }
             }
 

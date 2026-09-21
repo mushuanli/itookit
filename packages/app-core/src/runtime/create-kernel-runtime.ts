@@ -13,8 +13,13 @@ import {
 import type { IFileSystem } from '@itookit/vfs-core';
 import { createMemoryTools } from './memory-tools';
 import { SessionMemoryProvider, SharedMemoryStore } from '@itookit/llm-session';
+import { createRuntimeContextResolver } from './context-service';
+import { createRuntimeContextGc, type RuntimeContextGc, type RuntimeContextGcOptions } from './context-gc';
 
 export interface CreateKernelRuntimeOptions {
+    contextGc?: RuntimeContextGcOptions | false;
+    /** Override the context storage/engine ports at the host composition boundary. */
+    contextService?: import('@itookit/kernel-adapters').ContextServiceResolver;
     /** System VFS view used for the Kernel catalog and storage binding. */
     systemFS: IFileSystem;
     llmDriver: KernelAdaptersRuntimeOptions['llmDriver'];
@@ -39,6 +44,7 @@ export interface CreateKernelRuntimeOptions {
 }
 
 export interface HeadlessKernelRuntime extends KernelAdaptersRuntime {
+    contextGc?: RuntimeContextGc;
     kernel: Kernel;
     dagPlugins: DagPluginRegistry;
     memory: SessionMemoryProvider;
@@ -55,7 +61,10 @@ export async function createKernelRuntime(
     const dagPlugins = options.dagPlugins ?? createBuiltinDagPluginRegistry();
     const sharedMemory = new SharedMemoryStore(options.systemFS);
     await sharedMemory.init();
+    const contextGc = options.contextService || options.contextGc === false ? undefined
+        : createRuntimeContextGc(() => kernel, options.contextGc);
     const adapters = await createKernelAdaptersRuntime({
+        contextService: options.contextService ?? createRuntimeContextResolver(() => kernel, () => adapters.llmService, contextGc?.observe),
         llmDriver: options.llmDriver,
         runMode: 'kernel',
         fileContextForSession: options.fileContextForSession,
@@ -79,14 +88,37 @@ export async function createKernelRuntime(
     });
     const memory = new SessionMemoryProvider(kernel, sharedMemory);
     kernel.registerStorageResolver(options.storageResolver);
+    if (contextGc) {
+        const closeAdapterSession = adapters.plugin.onSessionClosed.bind(adapters.plugin);
+        adapters.plugin.onSessionClosed = async id => {
+            await contextGc.forget(id);
+            await closeAdapterSession(id);
+        };
+    }
     await kernel.use(adapters.plugin);
-    if (options.registerPrograms !== false) registerDurablePrograms(kernel);
+    if (options.registerPrograms !== false) registerDurablePrograms(kernel, undefined, true);
     await kernel.initialize();
 
-    const runtime = Object.assign(adapters, { kernel, dagPlugins, memory }) as HeadlessKernelRuntime;
-    await options.beforeRecover?.(runtime);
-    if (options.recover !== false) {
-        await kernel.recover(options.recover === true || options.recover === undefined ? {} : options.recover);
+    const disposeAdapters = adapters.dispose.bind(adapters);
+    const disposeSession = adapters.disposeSession.bind(adapters);
+    const runtime = Object.assign(adapters, { kernel, dagPlugins, memory, contextGc,
+        async dispose() { await contextGc?.dispose(); await disposeAdapters(); },
+        async disposeSession(id: string) { await contextGc?.forget(id); await disposeSession(id); },
+    }) as HeadlessKernelRuntime;
+    try {
+        await options.beforeRecover?.(runtime);
+        if (options.recover !== false) {
+            await kernel.recover(options.recover === true || options.recover === undefined ? {} : options.recover);
+            if (contextGc) for await (const session of kernel.listSessions()) await contextGc.observeSession(session.id);
+        }
+        return runtime;
+    } catch (error) {
+        kernel.dispose();
+        const failures: unknown[] = [error];
+        for (const close of [() => kernel.waitIdle(), () => runtime.dispose()]) {
+            try { await close(); } catch (failure) { failures.push(failure); }
+        }
+        if (failures.length > 1) throw new AggregateError(failures, 'Kernel initialization cleanup failed');
+        throw error;
     }
-    return runtime;
 }

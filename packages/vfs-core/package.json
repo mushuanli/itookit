@@ -58,6 +58,7 @@
   },
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/vfs-core#readme",
   "dependencies": {
+    "ignore": "5.3.2",
     "yaml": "^2.8.2"
   },
   "devDependencies": {

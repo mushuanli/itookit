@@ -355,3 +355,29 @@
     opacity: 0.35;
     cursor: not-allowed;
 }
+.llm-workspace-menu {
+    position: fixed;
+    z-index: 10000;
+    max-width: min(360px, 95vw);
+    padding: 6px;
+    border: 1px solid var(--llm-border-color);
+    border-radius: 8px;
+    color: var(--llm-text-primary);
+    background: var(--llm-bg-primary);
+    box-shadow: 0 4px 18px #0003;
+}
+.llm-workspace-menu button {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.llm-workspace-menu button:hover, .llm-workspace-menu button:focus-visible { background: var(--llm-bg-hover); }
+.llm-workspace-menu button:disabled { opacity: .5; cursor: default; }
+.llm-workspace-menu p { padding: 0 12px; font-size: 12px; color: var(--llm-text-secondary); }
+.llm-workspace-titlebar__btn[hidden] { display: none; }

@@ -29,8 +29,11 @@ import { ConversationRunCoordinator } from './conversation-run-coordinator';
 import { SessionEventBus } from './session-event-bus';
 import { SessionState } from './session-state';
 import { bindFlowNode } from './flow-node-binder';
+import { snapshotTaskInput } from './direct-execution-mode';
 
 export interface SessionRunCallbacks {
+    /** Commit persisted rounds to the projection before exposing a terminal status. */
+    refreshSession?(sessionId: string): Promise<void>;
     onStatusChange(sessionId: string, status: SessionStatus): void;
     onUnread(sessionId: string): void;
     getBoundSessionId?(): string | null;
@@ -68,6 +71,7 @@ export class SessionRunCoordinator {
         retrieveMemory?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['retrieveMemory'],
         resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>,
         workspaceManager?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['workspaceManager'],
+        resolveHarnessToolIds?: (sessionId: string) => Promise<string[]>,
     ) {
         this.runs = new ConversationRunCoordinator({
             engine,
@@ -75,6 +79,7 @@ export class SessionRunCoordinator {
             kernel,
             dagPlugins,
             resolveTools,
+            resolveHarnessToolIds,
             resolveSkills: (ids, sessionId) => this.agents.getSkills(ids, sessionId),
             retrieveMemory,
             resolveSessionContext,
@@ -96,6 +101,7 @@ export class SessionRunCoordinator {
     }
 
     async submit(input: TaskInput, runtime: SessionRuntime): Promise<string> {
+        input = snapshotTaskInput(input);
         await this.assertCanSubmit(input.sessionId);
         if (this.active.has(input.sessionId)) {
             throw new ConversationError(ConversationErrorCode.SESSION_BUSY, 'Session already has an active run');
@@ -134,7 +140,8 @@ export class SessionRunCoordinator {
         try {
             roundLog = await this.getLog(task);
             const setup = await this.setup(task, context.state);
-            await this.executeRequest(task, context.state, roundLog, setup);
+            try { await this.executeRequest(task, context.state, roundLog, setup); }
+            finally { await this.callbacks.refreshSession?.(task.sessionId); }
             this.callbacks.onStatusChange(task.sessionId, 'completed');
             this.callbacks.onUnread(task.sessionId);
         } catch (error) {

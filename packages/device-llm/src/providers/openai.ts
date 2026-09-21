@@ -252,6 +252,8 @@ export class OpenAIProvider extends BaseProvider {
             
             if (msg.name) converted.name = msg.name;
             if (msg.tool_call_id) converted.tool_call_id = msg.tool_call_id;
+            if (msg.role === 'assistant' && msg.tool_calls?.length) converted.tool_calls = msg.tool_calls;
+            if (msg.role === 'assistant' && msg.thinking) converted.reasoning_content = msg.thinking;
             
             return converted;
         });

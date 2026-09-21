@@ -1,4 +1,4 @@
-import { rerunSessionFlow } from '../flows/rerun-flow';
+import { rerunSession } from './rerun-session';
 import { t } from '@itookit/common';
 import { openSessionFlowOutputs } from '../flows/session-output';
 import { promptFlowParameters } from '../components/FlowParameterForm';
@@ -46,6 +46,7 @@ import { SessionEventHandler } from './SessionEventHandler';
 import { StateManager } from './StateManager';
 import { EventBinder } from './EventBinder';
 import { WorkspacePaneController } from './WorkspacePaneController';
+import { WorkspaceDirectoryMenu } from './WorkspaceDirectoryMenu';
 import { NavigationHelper } from './NavigationHelper';
 import { RunAttachmentController } from './RunAttachmentController';
 import {
@@ -125,6 +126,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // === 委托的子模块 ===
     private navigation!: NavigationHelper;
     private workspacePanes!: WorkspacePaneController;
+    private directoryMenu?: WorkspaceDirectoryMenu;
 
     // === Services ===
     private sessionManager: SessionManager;
@@ -141,7 +143,8 @@ export class LLMWorkspaceEditor implements IEditor {
     private fileSearchService!: FileSearchService;
     private ocrService!: OcrService;
     private runAttachment?: RunAttachmentController;
-    private flowRerunAbort?: AbortController;
+    private rerunAbort?: AbortController;
+    private rerunPending = false;
     private flowOutputAbort?: AbortController;
     private inputDialogKey?: string;
     private inputDialogAbort?: AbortController;
@@ -382,7 +385,7 @@ export class LLMWorkspaceEditor implements IEditor {
             onRequestConnections: () => buildConnectionOptions(this.agentService),
 
             // ── @mention file reference ───────────────────────────────────────
-            onRequestFiles: async (query) => this.fileSearchService.search(query),
+            onRequestFiles: async (query, options) => this.fileSearchService.search(query, options),
 
             // ── OCR (image → text) — only when a one-shot LLM service is injected ─
             ...(this.options.llmService
@@ -538,12 +541,14 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     private bindEvents(): void {
-        this.container.querySelector('#llm-btn-flow-rerun')?.addEventListener('click', () => {
-            void this.rerunFlow().catch(error => Toast.error(String(error)));
+        this.directoryMenu = new WorkspaceDirectoryMenu(this.container, this.hostContext?.directoryCommands,
+            () => this.sessionManager.isGenerating());
+        this.container.querySelector('#llm-btn-session-rerun')?.addEventListener('click', () => {
+            void this.rerunSession().catch(error => Toast.error(String(error)));
         });
         this.container.querySelector('#llm-btn-flow-output')?.addEventListener('click', () => {
             if (!this.currentSessionId) return;
-            this.flowRerunAbort?.abort();
+            this.rerunAbort?.abort();
             this.flowOutputAbort?.abort();
             this.flowOutputAbort = new AbortController();
             openSessionFlowOutputs(this.commandBus, this.currentSessionId, this.flowOutputAbort.signal);
@@ -707,7 +712,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.refreshAgents();
 
-        this.flowRerunAbort?.abort();
+        this.rerunAbort?.abort();
         this.flowOutputAbort?.abort();
         const { sessionId, snapshot, title } = await this.sessionService.loadSession(
             this.options.sessionId!, this.currentTitle
@@ -725,7 +730,9 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // Check if this session was interrupted (VFS meta.status === 'running')
         promptInterruptedRun(snapshot, (interruptedAssistantId) => {
-            this.commandBus.execute(SessionCommand.Regenerate, { assistantId: interruptedAssistantId }).catch(() => {
+            this.commandBus.execute(SessionCommand.Regenerate, { assistantId: interruptedAssistantId,
+                options: { overrides: { executionMode: this.chatInput.getConfig().settings.executionMode ?? 'chat' } },
+            }).catch(() => {
                 Toast.info('重新执行失败，请手动重试');
             });
         });
@@ -867,14 +874,18 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     setReadOnly(): void { }
-    get commands() { return { rerunFlow: () => this.rerunFlow() }; }
+    get commands() { return { rerunSession: () => this.rerunSession() }; }
 
-    private async rerunFlow(): Promise<void> {
-        if (!this.currentSessionId) return;
-        if (this.sessionManager.isGenerating()) throw new Error(t('flow.rerun.busy'));
-        this.flowRerunAbort?.abort();
-        this.flowRerunAbort = new AbortController();
-        await rerunSessionFlow(this.commandBus, this.flowRerunAbort.signal);
+    private async rerunSession(): Promise<void> {
+        if (!this.currentSessionId || this.rerunPending) return;
+        if (this.sessionManager.isGenerating()) throw new Error(t('session.rerun.busy'));
+        this.rerunPending = true;
+        this.rerunAbort?.abort();
+        this.rerunAbort = new AbortController();
+        try {
+            await rerunSession(this.commandBus, this.currentSessionId,
+                this.chatInput.getConfig().settings.executionMode ?? 'chat', this.rerunAbort.signal);
+        } finally { this.rerunPending = false; }
     }
     getMode() { return 'edit' as const; }
     async switchToMode(): Promise<void> { }
@@ -1063,7 +1074,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     async destroy(): Promise<void> {
-        this.flowRerunAbort?.abort();
+        this.rerunAbort?.abort();
         this.flowOutputAbort?.abort();
         this.attachmentClosed = true;
         const attachment = this.runAttachment;
@@ -1099,6 +1110,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // 3. 事件系统
         this.eventBinder?.cleanup();
+        this.directoryMenu?.destroy();
         this.commandRegistry?.destroy();
 
         // 4. 导航子模块

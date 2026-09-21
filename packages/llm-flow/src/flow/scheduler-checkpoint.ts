@@ -3,6 +3,8 @@ import type { DelegationGroup, EdgeState } from './delegation-runtime';
 
 /** Scheduler state saved at an explicit human-interaction boundary. */
 export interface SchedulerCheckpoint {
+    /** Frozen at Run creation; missing on legacy Runs means v1. */
+    contextProgramVersion?: '1' | '2';
     version: 1;
     variables?: import('./variables').VariableCheckpoint;
     /** Absent on legacy checkpoints; new Runs reject changed host contracts on resume. */

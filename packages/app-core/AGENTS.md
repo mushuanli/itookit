@@ -5,7 +5,7 @@
 ## 定位与铁律
 
 - **平台无关**：`src/` 内不出现 `node:*`、DOM、`window`、`localStorage`；宿主差异一律通过注入传入（`ApplicationKernelPlatform`：`createSessionProcesses` / `skillSourceForSession` / `configureSession` / `configure`）。
-- **依赖只朝下**：只依赖 `common`、`vfs-core`、`durable-kernel`、`kernel-adapters`、`llm-flow`、`llm-session`、`device-llm`；不得依赖 `app-shell`、UI 包或任何 app。
+- **依赖只朝下**：只依赖 `context`、`common`、`vfs-core`、`durable-kernel`、`kernel-adapters`、`llm-flow`、`llm-session`、`device-llm`；不得依赖 `app-shell`、UI 包或任何 app。
 - **装配不是策略**：这里只做「接线 + 生命周期」。宿主策略（租约文案、挂载守卫、恢复时机）应能被宿主替换；新增这类逻辑时优先放进可单测的服务模块，而不是 `createApplicationRuntime` 内联。
 - 无构建脚本：`main` 直接指向 `src/index.ts`，由宿主 app（web-app / tauri-app / cli）打包。
 
@@ -64,6 +64,7 @@ const kernel = await createKernelRuntime({ systemFS, llmDriver, storageResolver,
 - Session 与 Kernel 的所有写入都必须先持有 Session 租约（`SessionLeaseStore`）；拒租只让该 Session 保持只读，不影响其他 Session。该「只读」由 `createApplicationRuntime` 注入的写入门强制（`ensureWritable` → `recovery.acquireLater` → `initializeConversationSystem.canWriteSession` → `SessionManager.sendMessage`），被拒的 Session 会在追加 round 前报 `Session is owned by another host`。
 - `ApplicationKernelPlatform.configure(kernel, services)` 在 Session 恢复扫描前等待完成；`services` 提供已初始化的 `sessionFiles`/`directoryMounts`，宿主可据此绑定工作区工厂。
 - 修改挂载前必须确认该 Session 没有未结束的 Task（`mountGuard`）。
+- Context GC 只登记已授权恢复/执行的 Session；完整应用每个 Task 前检查租约，关闭作用域先等待维护事务。策略和可达性算法在 context，事务适配在 kernel-adapters，装配层不裁剪历史根。
 - `SessionFilesService.acquireWorkspaceFiles` 为宿主提供独立工作区视图：替换唯一匹配的现有挂载，来源由宿主提供；默认 rw 要求原授权可写，可选 ro 将全部用户挂载同时降权而不改持久授权。原授权配置改变、禁用或服务销毁时撤销全部派生工作区视图。运行时已透传 `scopeForEffect`/`fileContextForScope` 到 kernel-adapters；提供作用域文件工厂时默认按 llm-flow 持久成员及工作区租约选择 Run。Tauri 已连接独立副本文件视图、进程映射及释放，并在成功取得 Session 写租约后的 beforeSessionRecovery 回调核对创建意图。
 - 用户可见文案不写在本包：结构化错误（宿主可分支/本地化，见 `src/vfs/errors.ts`）或 `t()` 键（文案在 `@itookit/common`）。`tests/no-user-copy.test.ts` 守卫本包源码不含 CJK 文案。
 - 长耗时启动步骤应经 `traceBoot`/`logStep` 暴露进度，便于宿主显示启动状态。

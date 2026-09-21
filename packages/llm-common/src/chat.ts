@@ -9,7 +9,10 @@ export interface ChatAttachment {
 }
 
 /** Per-conversation UI execution preferences. */
+export type ChatExecutionMode = 'chat' | 'agent';
+
 export interface ChatSessionSettings {
+    executionMode?: ChatExecutionMode;
     version: '1.0';
     modelId?: string;
     historyLength: number;
@@ -19,6 +22,7 @@ export interface ChatSessionSettings {
 }
 
 export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
+    executionMode: 'chat',
     version: '1.0',
     modelId: undefined,
     historyLength: -1,

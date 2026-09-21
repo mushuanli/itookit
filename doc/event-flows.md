@@ -35,7 +35,8 @@ LLM 流式与程序进度经 `agent.event` 透传（`KernelAction.emit` 或 effe
 |---|---|---|
 | `stream:content` / `stream:thinking` | `LlmChatEffectAdapter`（SSE chunk） | 流式正文/思考渲染 |
 | `round:start` / `round:end` | `DurableAgentProgram` | 轮次边界 |
-| `tool:running` / `tool:success` | `DurableAgentProgram` | 工具执行进度 |
+| `tool:running` / `tool:success` / `tool:error` | `DurableAgentProgram` | 工具生命周期（开始、结果、失败） |
+| `tool:progress` | `ToolCallEffectAdapter`（工具进度回调） | 有界活动/匹配快照，携带真实 callId，最终结果到达后停止展示 |
 | `finished` | `DurableAgentProgram`（含 usage） | 任务完成、token 统计 |
 | `citations` | `LlmChatEffectAdapter`（终态 chunk） | 联网搜索引用（一次性，投影为 `message:citations`） |
 
@@ -65,6 +66,8 @@ DurableAgentProgram.request-interaction（approval/human）
 | `message:appended` | 创建会话分组、渲染消息 |
 | `message:updated` | 流式追加文字、更新 thought |
 | `message:status` | 完成/失败/工具结果 |
+| `node:appended` → `tool:running` | 先挂载工具卡片（名称、真实参数），再立即更新运行状态 |
+| `tool:success` / `tool:error` | 更新工具卡片的结果/错误，保留多行文本与转义 |
 | `finished` | token 统计、停止 loading |
 | `message:citations` | 渲染联网搜索引用块 |
 | `branch:switched` / 再生事件 | 分支切换/再生 |
@@ -75,6 +78,8 @@ ConversationRunCoordinator → RoundLog 投影 → SessionEventBus.emitSession()
 ```
 
 > 联网搜索的 citations 事件链与三态决策详见 [web-search.md](./web-search.md)。
+
+Harness 工具事件无需等待 effect 完成：`tool:running` 随发起 effect 的 decision 持久化，`ConversationRunCoordinator` 先发 `node:appended` 再透传生命周期事件，`HistoryView` 对二者立即处理。工具结果区按预格式文本展示；刷新后的失败卡片读取持久化 `data.error`。Grep 目前通过授权 VFS 遍历并执行 JavaScript 正则，没有实际 shell 命令可展示；Bash 的真实命令在调用参数中。Grep 通过 `ToolInvokeRequest.onProgress` → effect `context.emit` → `agent.event/tool:progress` → `HistoryView` 显示 cwd、搜索路径、扫描数、跳过数和匹配预览。快照按约 250ms 限频，首个匹配及时发送；消息最多 2048 字符，预览最多 8192 字符，不作为 LLM 的最终工具结果。终态覆盖预览，迟到进度不改写终态。通用 `getActivityDescription` 尚未接线。回归：`packages/app-core/tests/harness-default-tools.test.ts` 阻塞搜索完成并确认开始事件已到达；`packages/app-shell/tests/tool-history-live.test.ts` 验证执行中卡片及成功/失败结果。
 
 ## 5. 跨会话同步（outbox/inbox）
 

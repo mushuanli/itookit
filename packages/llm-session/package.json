@@ -37,12 +37,14 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@itookit/llm-common": "workspace:*",
     "@itookit/durable-kernel": "workspace:*",
     "@itookit/common": "workspace:*",
     "@itookit/llm-tasks": "workspace:*",
     "@itookit/llm-flow": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.2",
+    "@itookit/context": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",

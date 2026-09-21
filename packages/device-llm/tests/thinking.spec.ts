@@ -10,6 +10,22 @@ describe('Thinking Mode Normalization', () => {
         vi.resetAllMocks();
     });
 
+    it('preserves assistant tool calls and reasoning when sending tool results back', async () => {
+        const driver = new LLMDriver({ provider: 'deepseek', apiKey: 'test' });
+        globalFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({
+            choices: [{ message: { role: 'assistant', content: 'found' }, finish_reason: 'stop' }],
+        }) });
+        const call = { id: 'grep-1', type: 'function' as const, function: { name: 'Grep', arguments: '{"pattern":"mdx"}' } };
+        await driver.chat.create({ messages: [
+            { role: 'user', content: 'find mdx' },
+            { role: 'assistant', content: '', thinking: 'Search the workspace.', tool_calls: [call] },
+            { role: 'tool', tool_call_id: 'grep-1', content: '/workspace/file.ts' },
+        ] });
+        const request = JSON.parse(globalFetch.mock.calls[0][1].body);
+        expect(request.messages[1]).toMatchObject({ tool_calls: [call], reasoning_content: 'Search the workspace.' });
+        expect(request.messages[2]).toMatchObject({ role: 'tool', tool_call_id: 'grep-1' });
+    });
+
     // 1. 测试 DeepSeek / OpenAI Compatible (字段: reasoning_content)
     it('should parse DeepSeek/OpenAI reasoning_content correctly', async () => {
         const driver = new LLMDriver({ 

@@ -242,3 +242,13 @@ Session 配置变更、禁用和服务释放会先同时关闭普通视图与工
 目录授权回归覆盖两 Session 同名挂载来源隔离、只读 write/append/create/rename/move/delete/metadata/tag/SeqFile setEntry 拒绝，以及源文件和记录不变。多挂载视图的 SeqFile transaction 返回 ECAPABILITY 且回调未执行，不能称为事务内 EROFS 检查。只读来源申请 rw 在配置阶段被拒绝且不留记录，改为 ro 可正常读取。
 
 隔离 app-core 101、app-shell 193 项通过，共 294 项，另有 30 项既有跳过；app-core/Web/Tauri 类型检查与文档检查通过。P2-04 的真实窗口旧句柄路径、P0-02 设备不确认停止时的有界失败、跨进程/平台矩阵仍开放。
+
+## Context 装配
+
+`createKernelRuntime` 在 app-core 注入 Task 作用域 `ContextServiceResolver`，kernel-adapters 注册 `context.prepare@1`、`llm.chat@2`、`tool.call@2`，llm-tasks 注册 v2 Program bridge。存储适配器只用 Kernel 公共 Session/shared 与 VFS 端口；内核自身不引入 Context 依赖。新请求消费不可变快照，v1 程序继续可恢复。见 [Context API](context-api.md)。
+
+默认 Context GC 由 [context-gc.ts](../packages/app-core/src/runtime/context-gc.ts) 装配：授权恢复/首次 Context 执行时登记 Session，延迟启动定时扫描，分页处理已静止的 Task。完整应用通过 Session 租约检查限制回收范围；覆写 `contextService` 或 `contextGc: false` 时不启动默认维护器。运行时和 Session 释放先停止维护入口并等待事务。标记和保留策略属于 Context，VFS SeqFile 事务属于适配器；详细边界见 [自动 GC](design/context-gc.md)。
+
+### 会话工作目录默认值
+
+`ApplicationRuntimeOptions.defaultSessionDirectory` 是宿主提供的新会话工作目录。`SessionRepository` 在发布新 Session 前等待初始化回调，由 `DirectoryMountService.setWorkspace` 写入授权；已存在的 Session 不重新应用默认值。Tauri 通过 `get_current_dir` 注入启动 cwd；CLI 未显式指定 Flow workspace.root 时使用 `process.cwd()`，重开时保留持久化挂载。工作目录与应用 profile 数据根分别管理。

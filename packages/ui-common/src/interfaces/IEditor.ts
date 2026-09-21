@@ -77,6 +77,7 @@ export interface EditorHostContext {
     directoryCommands?: {
         addDirectory(directory?: string, access?: 'ro' | 'rw'): Promise<string>;
         setHome(directory?: string): Promise<string>;
+        configureWorkspace?(mode: 'workspace' | 'mount'): Promise<void>;
     };
 }
 

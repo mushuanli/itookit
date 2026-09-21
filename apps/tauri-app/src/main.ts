@@ -1,4 +1,6 @@
+import { recordDiagnostic, observeTools } from './log/desktop-diagnostics';
 import { TauriSessionDirectories } from './services/session-directories';
+import { invoke } from '@tauri-apps/api/core';
 import { createTauriSessionProcesses } from './shell/session-bash';
 import { TauriFlowWorkspaces } from './shell/flow-workspaces';
 import { createFileSystemSource } from '@itookit/vfs-core';
@@ -180,7 +182,8 @@ async function bootstrap(): Promise<void> {
     // 1. Resolve paths
     //    homeDir   = working project directory (CWD or --home arg)
     //    rootDir   = resolved data root (mindos.json#rootDir, never ~/.mindos)
-    const [homeDir, rootDir] = await Promise.all([getHomeDir(), getRootDir()]);
+    const [homeDir, rootDir, sessionDirectory] = await Promise.all([getHomeDir(), getRootDir(),
+        invoke<string>('get_current_dir')]);
     log(`路径解析 (home=${homeDir})`);
     console.log(`[Boot] 本地文件工作区 home=${homeDir}; 系统数据 root=${rootDir}`);
 
@@ -278,7 +281,9 @@ async function bootstrap(): Promise<void> {
         onProgress: showLoading,
         llmLogger,
         directorySourceProvider: new TauriSessionDirectories(rootDir),
+        defaultSessionDirectory: `host:${sessionDirectory}`,
         kernelPlatform: {
+            configureSession: (sessionId, { toolDriver }) => observeTools(toolDriver, sessionId),
             configure: (kernel, services) => flowWorkspaces.bind(kernel, services),
             beforeSessionRecovery: sessionId => flowWorkspaces.reconcile(sessionId),
             flowWorkspaceManager: flowWorkspaces,
@@ -288,6 +293,7 @@ async function bootstrap(): Promise<void> {
         },
     });
     startupCleanup.push(() => runtime.dispose());
+    recordDiagnostic('workspace.default', { sessionDirectory, rootDir });
     // Acceptance diagnostics: VITE_MINDOS_TRACE=1 records per-interval VFS + sidecar op counts
     // so a slow user action can be attributed to backend/IPC round trips.
     if (import.meta.env.VITE_MINDOS_TRACE === '1') {
@@ -442,11 +448,13 @@ function escapeHtml(value: string): string {
 
 if ((window as { __MINDOS_MODE__?: string }).__MINDOS_MODE__ === 'remote') {
     bootstrapRemote().catch(err => {
+        recordDiagnostic('bootstrap.failed', err);
         console.error('[Remote Bootstrap] Fatal:', err);
         showError(err instanceof Error ? err.message : String(err));
     });
 } else {
     bootstrap().catch(err => {
+        recordDiagnostic('bootstrap.failed', err);
         console.error('[Bootstrap] Fatal:', err);
         showError(err instanceof Error ? err.message : String(err));
     });

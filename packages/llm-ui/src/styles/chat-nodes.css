@@ -554,7 +554,7 @@
 }
 
 /* Tool node */
-.llm-ui-node--tool .llm-ui-node__args {
+.llm-ui-node--tool .llm-ui-node__input {
     padding: 8px 12px;
     background: var(--llm-bg-secondary);
     font-family: monospace;
@@ -571,6 +571,18 @@
     background: var(--llm-bg-secondary);
     max-height: 200px;
     overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: monospace;
+}
+
+/* Inline error */
+.llm-ui-node__progress {
+    padding: 8px 12px;
+    font-size: 0.85em;
+    color: var(--llm-text-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 /* Inline error */

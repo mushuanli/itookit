@@ -2,6 +2,8 @@
 
 本包负责 Conversation 展示和 Run 控制，不直接控制 Engine。
 
+ChatInput 工具栏的「对话 / 执行」由 `ExecutionModeControl` 呈现，偏好随 Session settings 保存；发送/重新生成显式携带模式，Flow 会话禁用开关。工具由宿主与 llm-session 装配：未配置白名单时执行模式使用宿主默认工具，显式白名单优先；UI 不自行枚举工具或改变目录授权。Task 过滤与预算由 llm-session 固定。相关回归在 app-shell 的 `chat-execution-mode.test.ts`。
+
 ## 关键边界
 
 - `RunAttachmentController` 经 `TaskControlPlane.openTask()` 取得 `AttachedTask`（`TaskHandle` 子集）后 attach、消费事件流，并转发 signal / cancel / resume。
@@ -12,6 +14,8 @@
 - TTY 面板（`TtyPanel` / `TtyController`）只展示运行输出，输出块以文本节点写入（禁止拼接未转义 HTML）；交互输入必须通过 Kernel 控制面。 终态语义：`finalize(exitCode)` 如实报告退出码，`null`（`tty_close` 未观测到退出码）显示 `Process stopped (exit code unknown)`，且终态后到达的输出被忽略。回归在 `packages/app-shell/tests/tty-panel.test.ts`（jsdom；llm-ui 的 vitest 无 jsdom）。
 
 ## 联网搜索 citations
+
+Harness 工具卡片由 `node:appended` 立即挂载，再消费 `tool:running/success/error`；名称、参数、状态和结果在 History 中显示。结果保留换行并作文本转义，恢复失败卡片读取 `data.error`。`tool:progress` 展示有界活动和结果快照；终态隐藏活动并覆盖预览，迟到进度不能改写终态。Grep 提供实际 cwd、路径、扫描数量和匹配预览，尚未消费通用 `getActivityDescription`。回归见 app-shell `tool-history-live.test.ts`。
 
 - `HistoryView` 订阅 `message:citations`（`immediateTypes`）→ `StreamController.updateCitations`。
 - `NodeTemplates.renderCitations` 渲染引用块（图标用 `ACTION_ICONS.search`，禁止硬编码 emoji）。
@@ -49,4 +53,8 @@ Flow Session 标题栏「流程输出」挂接当前 Session 的持久 Run，显
 
 `InvocationEditor` 提供 schema 字段引用、继承来源与提示词预览；`InputFieldsEditor` 编辑 param 字段。运行缺项复用 FlowParameterForm，提交通过 RunAttachmentController.respondInput 校验 attachment revision 与 pending interaction；切换任务关闭旧表单。
 
-会话右键与顶部重新运行共用编辑器 `commands.rerunFlow`；流程输出提供只读分支选择，按 `session.flow-branch-executions` 返回的 Task 引用筛选。切换为空分支时必须清空上一分支结果并取消旧刷新。
+会话右键与顶部重新运行共用编辑器 `commands.rerunSession`，经 `shell/rerun-session.ts` 分流：关联 Flow 使用参数表单；普通 Chat/Harness 选择当前分支最后一条用户消息并调用 `RegenerateFromUser`，冻结当前执行模式，Agent 沿用原轮次。已有回复时创建替代分支和新 Task，旧结果保留，文件修改不回退。准入期间去重，切换会话/销毁取消未提交操作，空分支给出明确提示。流程输出提供只读分支选择，按 `session.flow-branch-executions` 返回的 Task 引用筛选。切换为空分支时必须清空上一分支结果并取消旧刷新。
+
+`WorkspaceDirectoryMenu` 在标题栏按钮及标题栏/输入工具栏右键提供工作目录和挂载管理，经 `EditorHostContext.directoryCommands.configureWorkspace` 调用宿主；输入文本的原生右键菜单保持可用，运行中禁止修改。
+
+聊天 `@` 文件候选通过 `FileSearchService` 消费 vfs-core 的 `discoverFiles`，过滤发生在 20 条候选上限之前。MentionPlugin 面板提供“包含忽略文件”复选框；取消旧请求后不得用过期结果重新打开面板。Grep/Glob 的 `includeIgnored` 是独立工具参数，候选框开关不改变 Agent 工具或目录授权。

@@ -11,6 +11,17 @@ beforeEach(async () => {
 afterEach(async () => { await repository.dispose(); await manager.dispose(); });
 
 describe('Session data repository', () => {
+    it('persists execution mode across reopening and isolates it between Sessions', async () => {
+        const first = await repository.createSession('Execute');
+        const second = await repository.createSession('Chat');
+        expect((await repository.getSessionSettings(first)).executionMode).toBe('chat');
+        await repository.saveSessionSettings(first, { executionMode: 'agent' });
+        const reopened = new SessionRepository(fs); await reopened.init();
+        try {
+            expect((await reopened.getSessionSettings(first)).executionMode).toBe('agent');
+            expect((await reopened.getSessionSettings(second)).executionMode).toBe('chat');
+        } finally { await reopened.dispose(); }
+    });
     it('creates independent Sessions whose identities survive a title change', async () => {
         const ids = await Promise.all([repository.createSession('Same'), repository.createSession('Same')]);
         expect(new Set(ids).size).toBe(2);

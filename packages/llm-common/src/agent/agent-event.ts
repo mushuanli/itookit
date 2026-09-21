@@ -83,6 +83,11 @@ export interface AgentEventToolInput {
     call: ToolCallInfo & { delta: string };
 }
 
+export interface AgentEventToolProgress {
+    type: 'tool:progress';
+    call: ToolCallInfo & { progress: import('../tools/tool-types').ToolProgress };
+}
+
 export interface AgentEventToolSuccess {
     type: 'tool:success';
     call: ToolCallInfo & { result: string };
@@ -212,6 +217,7 @@ export type AgentEvent =
     | AgentEventToolQueued
     | AgentEventToolRunning
     | AgentEventToolInput
+    | AgentEventToolProgress
     | AgentEventToolSuccess
     | AgentEventToolError
     | AgentEventAwaitSignal

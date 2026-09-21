@@ -1,6 +1,6 @@
 # @itookit/tools 开发说明
 
-独立工具包，采用 `buildTool()` 工厂 + 按工具分目录的架构模式。平台能力由宿主注入：文件读写走 `ToolVFSContext`，命令执行走 `INativeShell`（本包不 spawn 进程），Grep/Glob 在无 VFS 时回退到 Node 文件系统遍历。
+独立工具包，采用 `buildTool()` 工厂 + 按工具分目录的架构模式。平台能力由宿主注入：文件读写走 `ToolVFSContext`，命令执行走 `INativeShell`（本包不 spawn 进程），Grep/Glob 在无 VFS 时回退到 Node 文件系统遍历；通过同一发现服务支持 `.gitignore` / `.mindosignore` 和 `includeIgnored`，不使用 rg/fd 的独立过滤路径。
 
 ## 目录结构
 
@@ -73,8 +73,9 @@ src/
 
 - `satisfies ToolDef<InputSchema, OutputType>` 确保类型安全
 - `lazySchema()` 包裹所有 Zod schema 避免模块加载时循环依赖
-- 文件读写工具（FileRead/FileWrite/FileEdit）要求 `context.vfs`，缺失时抛错；Grep/Glob 优先用 `context.shell` 的 ripgrep/fd，其次 `context.vfs`，最后 Node 手动遍历
+- 文件读写工具（FileRead/FileWrite/FileEdit）要求 `context.vfs`，缺失时抛错；Grep/Glob 优先用授权 `context.vfs`，没有 VFS 时用 Node 文件适配器；两者共用 vfs-core 的文件发现与忽略规则
 - 驱动在 call 前执行 schema、validateInput、checkPermissions；权限更新参数再次校验，禁用工具拒绝执行。注册的 ToolHandler 按 JSON Schema 校验。
+- 内置工具定义使用 `type: 'function'` + `function.name/description/parameters`，初始化 description 时写入同一嵌套对象，保证 OpenAI/Gemini/Codex 等适配器均能识别。
 - 已知且可纠正的操作前提错误抛 `ToolInputError(code, message)`，驱动返回 `success: false, recoverable: true`；普通异常保持不可自动纠正，避免重放未知副作用。
 - ToolInvokeResult 保留 output 和有界的 JSON data；文本/结构化数据分别最多 100000 字符且服从工具上限，超大 data 省略。Bash 退出码和 Edit 替换信息保存在 data 中。
 - `mapToolResultToToolResultBlockParam()` 将结构化输出转为 LLM 文本
@@ -88,3 +89,9 @@ pnpm --filter @itookit/tools test        # vitest
 ```
 
 相关文档：[开发模式](../../doc/dev-patterns.md) `#tools`、[接口契约](../../doc/interface-contracts.md)
+
+宿主可在 ToolInvokeRequest 注入 admitOutput 端口，在旧截断之前保存完整模型可读文本并返回有界预览/引用。回调失败属于基础设施失败，不允许当作可纠正工具错误重放外部操作。
+
+Grep/Glob 优先消费 `ToolVFSContext.walkFiles`，达到结果上限立即关闭发现迭代器；`listFiles` 仅为旧适配器兼容回退。不得在搜索前把完整目录树收集成数组，否则桌面端 IPC 开销可能用尽 30 秒工具预算。
+
+Grep 的 `onProgress` 发出 cwd/搜索路径、扫描与跳过计数、匹配快照（约 250ms 限频；首次匹配及时发出）。`ToolCallEffectAdapter` 用真实 callId 转为 `tool:progress`，UI 不能将其当作最终结果。Grep 搜索单文件最多 2 MiB，超限返回 skippedFiles 和 truncated，显式 Read 不受此搜索上限影响。

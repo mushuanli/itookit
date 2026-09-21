@@ -42,7 +42,7 @@ import { SessionQuery } from './session-query';
 import { RoundOperations } from './round-operations';
 import { BranchService } from './branch-service';
 import { ContextProfileStore } from '../persistence/context-profile-store';
-import { ContextAssembler } from '@itookit/llm-tasks';
+import { createContextAssembler } from '@itookit/context';
 import { RoundLog } from '../persistence/round-log';
 import type { Kernel, SessionHandle } from '@itookit/durable-kernel';
 import { sessionDirectoryStorage } from '../persistence/session-directory-storage';
@@ -79,6 +79,7 @@ export class SessionManager implements ISession, SessionQuery {
             flowStore: FlowStore;
             resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
             resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>;
+            resolveHarnessToolIds?: (sessionId: string) => Promise<string[]>;
             resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
                 definitions: ToolDefinition[];
                 externalIds: string[];
@@ -105,6 +106,10 @@ export class SessionManager implements ISession, SessionQuery {
             this.agentResolver,
             attachments,
             {
+                refreshSession: async sid => {
+                    const state = this.registry.getSessionState(sid);
+                    if (state) await this.registry.reloadSessionData(sid, state);
+                },
                 onStatusChange: (sid, status) => {
                     this.registry.updateStatus(sid, status);
                     this.queueDurableProjectionForSession(sid);
@@ -128,6 +133,7 @@ export class SessionManager implements ISession, SessionQuery {
             options.retrieveMemory,
             options.resolveSessionContext,
             options.workspaceManager,
+            options.resolveHarnessToolIds,
         );
 
         this.roundOps = new RoundOperations(this.registry, this.runs);
@@ -365,7 +371,7 @@ export class SessionManager implements ISession, SessionQuery {
         const profile = manifest.branchMeta[branchRef]?.contextProfile ?? { id: '', revision: 0 };
         const agent = await this.agentResolver.resolveForChat(agentId);
         const version = agent.agentVersion ?? 'unversioned';
-        const assembler = new ContextAssembler({
+        const assembler = createContextAssembler({
             log,
             profileStore: new ContextProfileStore(this.registry.engine, sessionId),
             readRound: roundId => log.readRound(roundId),
