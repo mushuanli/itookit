@@ -1,5 +1,7 @@
 # Flow 能力装配与输出查看
 
+当前新图采用独立的 route、taskGroup、join、aggregate@3、loop 控制节点；作文评审模板已迁移。实现、策略默认值及边界见 [Flow 控制节点](flow-control-primitives.md)。下文 route@2/@3 的派发模型保留用于旧定义兼容。
+
 ## 查看执行结果
 
 ### History 交互与重新运行

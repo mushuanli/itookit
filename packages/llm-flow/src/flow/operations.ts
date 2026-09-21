@@ -76,7 +76,10 @@ export function routeOutcome(
     // 待决定边 = 所有规则边 + 默认边；未选中的一律禁用（含默认边，当规则命中时）。
     const candidates = [...rules.map(rule => String(rule.edgeId ?? '')), defaultEdgeId].filter(Boolean);
     return {
-        outputs: {},
+        outputs: { result: { outputName: 'result', type: 'json', content: {
+            selectedEdgeIds: selected, selectedValue: rules.find(rule => selected.includes(String(rule.edgeId))
+                && evaluate((rule.expression ?? record(rule.condition).expression) as SerializableExpression, inputs, parameters))?.value as JsonValue ?? null,
+        } } },
         effects: [
             ...selected.map(edgeId => ({ type: 'activate-edge' as const, edgeId: edgeId as never })),
             ...candidates.filter(id => !selected.includes(id))

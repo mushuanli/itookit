@@ -8,6 +8,7 @@ import { resolveNodeConnection } from './connections';
 import { resolveFlowParameters, flowParameterValues } from './parameters';
 import { compileReferenceGraph } from './structured/references';
 import { compileDispatchGraph } from './structured/graph';
+import { compileControlGraph } from './control/graph';
 
 export type FlowNodeBinder = (
     node: FlowNodeDefinition,
@@ -23,7 +24,7 @@ export async function flowToDag(
     resolveComposite?: (id: string, revision?: number) => Promise<FlowRevision | null>,
     compositeStack: string[] = [],
 ): Promise<DagRunSpec> {
-    flow = compileReferenceGraph(compileDispatchGraph(flow));
+    flow = compileReferenceGraph(compileControlGraph(compileDispatchGraph(flow)));
     const nodes = await Promise.all(flow.nodes.map(async node => {
         const defaults = node.plugin === 'builtin.agent' ? flowAgentDefaults(flow) : undefined;
         const patch = (await bind?.(node, defaults as FlowNodeDefinition['config'])) ?? {};

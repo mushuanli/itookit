@@ -141,7 +141,7 @@ export class DagWorkbench {
 
     private renderToolbar(draft: FlowDraft | undefined): string {
         const addOptions = this.catalogue.map((item, index) =>
-            `<option value="${index}">${escapeHTML(paletteLabel(item))}</option>`,
+            legacyScopePlugin(item.manifest) ? '' : `<option value="${index}">${escapeHTML(paletteLabel(item))}</option>`,
         ).join('');
         return `<header class="dag-toolbar">
             <strong>Flow Design</strong>
@@ -216,7 +216,7 @@ export class DagWorkbench {
                 <label>Priority<input data-inline-priority type="number" value="${node.priority ?? 0}"></label>
             </details>`;
         let schema = withConnectionEnum(presentation.manifest.configSchema, draft, formValue);
-        if (presentation.manifest.authoring?.invocation && presentation.manifest.authoring.scopeRole !== 'route') {
+        if ((node.plugin === 'builtin.agent' || presentation.manifest.authoring?.invocation) && presentation.manifest.authoring?.scopeRole !== 'route') {
             const [agents, prompts, tools, skills] = await Promise.all([
                 this.options.listAgents?.() ?? Promise.resolve([]),
                 this.options.listSystemPrompts?.() ?? Promise.resolve([]),
@@ -232,7 +232,7 @@ export class DagWorkbench {
         const formRoot = inspector.querySelector<HTMLElement>('[data-inline-config]')!;
         const schemaForm = new SchemaForm(formRoot, schema, formValue, presentation.ui?.inspector.layout);
         schemaForm.render();
-        enhanceInvocationEditor(formRoot, this.controller!.value, node, presentation.manifest.authoring?.invocation === true);
+        enhanceInvocationEditor(formRoot, this.controller!.value, node, node.plugin === 'builtin.agent' || presentation.manifest.authoring?.invocation === true);
         if (presentation.manifest.authoring?.scopeRole === 'input') enhanceInputFieldsEditor(formRoot, isRecord(formValue) ? formValue : {});
         if (node.plugin === 'builtin.spawn') enhanceSpawnForm(formRoot);
         inspector.querySelector('[data-node-action="save"]')?.addEventListener('click', () => {
@@ -393,7 +393,7 @@ export class DagWorkbench {
         let schema = this.controller
             ? withConnectionEnum(presentation.manifest.configSchema, this.controller.value, formValue)
             : presentation.manifest.configSchema;
-        if (presentation.manifest.authoring?.invocation && presentation.manifest.authoring.scopeRole !== 'route') {
+        if ((node.plugin === 'builtin.agent' || presentation.manifest.authoring?.invocation) && presentation.manifest.authoring?.scopeRole !== 'route') {
             const [agents, prompts, tools, skills] = await Promise.all([
                 this.options.listAgents?.() ?? Promise.resolve([]),
                 this.options.listSystemPrompts?.() ?? Promise.resolve([]),
@@ -412,7 +412,7 @@ export class DagWorkbench {
             presentation.ui?.inspector.layout,
         );
         schemaForm.render();
-        enhanceInvocationEditor(formRoot, this.controller!.value, node, presentation.manifest.authoring?.invocation === true);
+        enhanceInvocationEditor(formRoot, this.controller!.value, node, node.plugin === 'builtin.agent' || presentation.manifest.authoring?.invocation === true);
         if (presentation.manifest.authoring?.scopeRole === 'input') enhanceInputFieldsEditor(formRoot, isRecord(formValue) ? formValue : {});
         if (node.plugin === 'builtin.spawn') enhanceSpawnForm(formRoot);
         this.bindNodeDialog(dialog, node, schemaForm);
@@ -748,7 +748,9 @@ export class DagWorkbench {
             const target = this.findDescriptor(to);
             const output = source?.outputs[0]?.name;
             const input = target?.inputs[0]?.name;
-            const kind = output && input ? 'data' : 'control';
+            const control = ['builtin.loop', 'builtin.taskGroup'].includes(from.plugin)
+                || from.plugin === 'builtin.route' && from.pluginVersion === '1.0.0' || to.plugin === 'builtin.loop';
+            const kind = !control && output && input ? 'data' : 'control';
             const repeat = from.plugin === 'builtin.judge' && to.plugin === 'builtin.route' && to.pluginVersion === '3.0.0';
             const edge = repeat
                 ? { ...createFlowEdge(from, to, 'control'), output: 'repeat' }
@@ -854,6 +856,12 @@ export class DagWorkbench {
         this.options.onModeChange?.(mode);
         this.render();
     }
+}
+
+function legacyScopePlugin(manifest: DagPluginManifest): boolean {
+    return manifest.id === 'builtin.route' && manifest.version !== '1.0.0'
+        || ['builtin.check', 'builtin.judge', 'builtin.revise'].includes(manifest.id)
+        || manifest.id === 'builtin.aggregate' && manifest.version === '2.0.0';
 }
 
 function paletteLabel(presentation: DagPluginPresentation): string {

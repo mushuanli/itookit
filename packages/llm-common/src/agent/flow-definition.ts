@@ -184,6 +184,8 @@ export interface DelegationConfig {
         mode?: 'all' | 'any' | 'first-success' | 'quorum';
         quorum?: number;
         timeoutMs?: number;
+        /** Explicit sibling policy after an early wait is satisfied. Legacy default: cancel. */
+        remaining?: 'continue' | 'cancel';
     };
     /** Whether and in which order child results enter the Flow aggregate. */
     result?: {

@@ -12,6 +12,8 @@ import { findCycles } from './graph';
 import { validateDispatch } from './structured/validation';
 import { compileReferenceGraph } from './structured/references';
 import { compileDispatchGraph } from './structured/graph';
+import { compileControlGraph } from './control/graph';
+import { validateWaitPolicy } from './control/join-program';
 import { validateFields } from './structured/input';
 import { dataEdgeSchemaIssue } from './port-contract';
 
@@ -46,7 +48,7 @@ export function validateFlowRevision(
     plugins?: DagPluginCatalog,
 ): ValidationIssue[] {
     const issues: ValidationIssue[] = [];
-    try { flow = compileReferenceGraph(compileDispatchGraph(flow)); }
+    try { flow = compileReferenceGraph(compileControlGraph(compileDispatchGraph(flow))); }
     catch (error) { return [{ code: 'invalid-dispatch-graph', message: String(error) }]; }
     if (plugins) {
         try { plugins = createRunCatalog(plugins, flow.nodes); }
@@ -122,6 +124,7 @@ function validateNodes(
         validateSpawnPatch(node, issues);
         validateHarnessLimits(node, issues);
         try {
+            if (node.plugin === 'builtin.join') validateWaitPolicy({ mode: 'all', ...node.config as object } as import('@itookit/llm-common').FlowWaitPolicy);
             if (node.plugin === 'builtin.route' && node.pluginVersion === '2.0.0') validateDispatch(node.config as unknown as import('@itookit/common').DispatchConfig, true);
             if (node.plugin === 'builtin.input') validateFields((node.config as unknown as import('@itookit/common').FlowInputConfig).fields);
         } catch (error) { add(issues, 'invalid-structured-config', String(error), node.id); }

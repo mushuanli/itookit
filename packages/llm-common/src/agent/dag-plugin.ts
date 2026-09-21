@@ -21,7 +21,7 @@ export interface DagPluginManifest<Config = unknown> {
     defaultConfig?: Partial<Config>;
     inputs: InputPortSpec[];
     outputs: OutputPortSpec[];
-    authoring?: { invocation?: boolean; scopeRole?: 'route' | 'check' | 'aggregate' | 'judge' | 'input' | 'revise' };
+    authoring?: { invocation?: boolean; scopeRole?: 'route' | 'check' | 'aggregate' | 'judge' | 'input' | 'revise' | 'loop' | 'taskGroup' | 'join' };
     requiredCapabilities?: string[];
 }
 
@@ -85,6 +85,7 @@ export interface DagNodeContext<Config = unknown> {
 
 export interface DagTaskDependencyBinding {
     taskId: string;
+    nodeId?: string;
     input: string;
     output?: string;
     edgeId?: string;
@@ -158,7 +159,8 @@ export interface DagPluginCatalog {
 export type GraphEffect =
     | { type: 'activate-edge'; edgeId: FlowEdgeId }
     | { type: 'disable-edge'; edgeId: FlowEdgeId }
-    | { type: 'patch-graph'; patch: GraphPatch };
+    | { type: 'patch-graph'; patch: GraphPatch }
+    | { type: 'cancel-tasks'; tasks: Array<{ nodeId: string; taskId: string }>; reason: string };
 
 export interface GraphPatch {
     idempotencyKey: string;

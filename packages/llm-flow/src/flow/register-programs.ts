@@ -4,6 +4,7 @@ import { FlowAggregateProgram, FlowHumanProgram, FlowValueProgram } from './prog
 import { FlowInputProgram } from './structured/input';
 import type { FlowReducerRegistry } from './structured/join';
 import { FlowDispatchProgram } from './structured/dispatch';
+import { FlowJoinProgram } from './control/join-program';
 
 /** Register the Durable programs shared by direct Chat, Agent and Flow execution. */
 export function registerDurablePrograms(kernel: Pick<Kernel, 'programs' | 'registerProgram'>, reducers?: FlowReducerRegistry): void {
@@ -11,11 +12,12 @@ export function registerDurablePrograms(kernel: Pick<Kernel, 'programs' | 'regis
         new DurableChatProgram(),
         new DurableAgentProgram(),
         new DurablePlanProgram(),
-        new FlowValueProgram(),
+        new FlowValueProgram(reducers),
         new FlowHumanProgram(),
         new FlowAggregateProgram(),
         new FlowInputProgram(),
         new FlowDispatchProgram(reducers),
+        new FlowJoinProgram(),
     ];
     for (const program of programs) {
         if (!kernel.programs.has(program.manifest.kind, program.manifest.version)) {

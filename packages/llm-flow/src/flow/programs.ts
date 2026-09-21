@@ -11,6 +11,9 @@ import {
     dependencyWait,
 } from '@itookit/llm-tasks';
 import { aggregateOutcome, reduceOutcome, routeOutcome, spawnOutcome, transformOutcome } from './operations';
+import { FlowReducerRegistry, projectSummary } from './structured/join';
+import type { FlowJoinConfig } from '@itookit/llm-common';
+import type { ResultSlot } from './structured/types';
 
 export interface FlowDependencyBinding {
     taskId: string;
@@ -20,7 +23,8 @@ export interface FlowDependencyBinding {
 }
 
 export interface FlowValueInput {
-    operation: 'transform' | 'reduce' | 'route' | 'spawn' | 'aggregate';
+    operation: 'transform' | 'reduce' | 'route' | 'spawn' | 'aggregate' | 'taskGroup' | 'loop';
+    iteration?: number;
     nodeId?: string;
     config: Record<string, JsonValue>;
     inputs: Record<string, JsonValue>;
@@ -36,17 +40,18 @@ interface FlowValueState extends FlowValueInput {
 
 export class FlowValueProgram implements DurableTaskProgram<FlowValueState, FlowValueInput, DagNodeOutcome> {
     readonly manifest = { kind: 'flow.value', version: '1' };
+    constructor(private readonly reducers = new FlowReducerRegistry()) {}
 
     init(input: FlowValueInput): Decision<FlowValueState, DagNodeOutcome> {
         const state = { ...clone(input), dependencyOutputs: {}, resolvedDependencyIds: [] };
-        return input.dependencies.length ? { state, next: dependencyWait(input.dependencies) } : completeValue(state);
+        return input.dependencies.length ? { state, next: dependencyWait(input.dependencies) } : completeValue(state, this.reducers);
     }
 
     reduce(state: Readonly<FlowValueState>, event: TaskInputEvent): Decision<FlowValueState, DagNodeOutcome> {
         const next = clone(state) as FlowValueState;
         collectDependency(next.dependencies, next.dependencyOutputs, next.resolvedDependencyIds, event, 'result');
         return dependenciesReady(next.dependencies, next.resolvedDependencyIds)
-            ? completeValue(next)
+            ? completeValue(next, this.reducers)
             : { state: next, next: dependencyWait(next.dependencies) };
     }
 }
@@ -161,8 +166,13 @@ export class FlowAggregateProgram implements DurableTaskProgram<FlowAggregateSta
     }
 }
 
-function completeValue(state: FlowValueState): Decision<FlowValueState, DagNodeOutcome> {
+function completeValue(state: FlowValueState, reducers: FlowReducerRegistry): Decision<FlowValueState, DagNodeOutcome> {
     const inputs = { ...state.inputs, ...state.dependencyOutputs };
+    if (state.operation === 'loop') return { state, next: { type: 'complete', output: artifactOutcome('result', {
+        round: state.iteration ?? 1, maxRounds: state.config.maxRounds, lastRound: (state.iteration ?? 1) >= Number(state.config.maxRounds),
+    }) } };
+    if (state.operation === 'taskGroup') return { state, next: { type: 'complete', output: artifactOutcome('result', (inputs.input ?? null) as JsonValue) } };
+    if (state.operation === 'aggregate' && state.config.reducer) return aggregateValue(state, inputs, reducers);
     if (state.operation === 'route') {
         return { state, next: { type: 'complete', output: routeOutcome(state.config, inputs, state.parameters) } };
     }
@@ -175,6 +185,16 @@ function completeValue(state: FlowValueState): Decision<FlowValueState, DagNodeO
         ? spawnOutcome(state.config, inputs, state.nodeId)
         : operation(state.config, inputs);
     return { state, next: { type: 'complete', output } };
+}
+
+function aggregateValue(state: FlowValueState, inputs: Record<string, JsonValue>, reducers: FlowReducerRegistry): Decision<FlowValueState, DagNodeOutcome> {
+    const updates = state.config.updates ?? (inputs.input as { results?: JsonValue } | undefined)?.results ?? {};
+    if (!updates || typeof updates !== 'object' || Array.isArray(updates)) throw new Error('Aggregate updates must be keyed results');
+    const policy: FlowJoinConfig = { failure: 'fail', reducer: String(state.config.reducer),
+        projection: state.config.projection as unknown as FlowJoinConfig['projection'] };
+    const previous = state.config.previous ?? undefined;
+    const summary = reducers.reduce(policy, previous, updates as unknown as Record<string, ResultSlot>);
+    return { state, next: { type: 'complete', output: artifactOutcome('result', projectSummary(policy, summary)) } };
 }
 
 function requestHuman(state: FlowHumanState): Decision<FlowHumanState, DagNodeOutcome> {

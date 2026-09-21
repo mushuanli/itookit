@@ -407,8 +407,8 @@ describe('structured route / spawn / aggregate DAG', () => {
         expect(requests).toHaveLength(0);
     });
 
-    it('validates and executes the shipped reusable Flow definition with customized rounds and threshold', async () => {
-        const draft = JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+    it('validates and executes the legacy reusable Flow definition with customized rounds and threshold', async () => {
+        const draft = JSON.parse(readFileSync(new URL('./fixtures/essay-review-legacy.flow', import.meta.url), 'utf8'));
         scores = Array(8).fill(7);
         const revision = { ...draft, revision: 1, createdAt: 0, digest: '' };
         revision.digest = flowRevisionDigest(revision);
@@ -426,7 +426,7 @@ describe('structured route / spawn / aggregate DAG', () => {
     });
 
     it('repairs three non-JSON revision responses and reroutes using the repaired essay', async () => {
-        const draft = JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+        const draft = JSON.parse(readFileSync(new URL('./fixtures/essay-review-legacy.flow', import.meta.url), 'utf8'));
         scores = [7, 7, 7, 7, 9, 9, 9, 9];
         invalidRevisionResponses = 3;
         const spec = await flowToDag({ ...draft, revision: 1, createdAt: 0, digest: '' });
@@ -443,7 +443,7 @@ describe('structured route / spawn / aggregate DAG', () => {
     });
 
     it('invalidates even passing scores after rewriting and stops on the new passing draft', async () => {
-        const draft = JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+        const draft = JSON.parse(readFileSync(new URL('./fixtures/essay-review-legacy.flow', import.meta.url), 'utf8'));
         scores = [9, 7, 9, 9, 9, 9, 9, 9];
         const revision = { ...draft, revision: 1, createdAt: 0, digest: '' };
         revision.digest = flowRevisionDigest(revision);
@@ -461,8 +461,8 @@ describe('structured route / spawn / aggregate DAG', () => {
         expect(Object.values(report.outputs.result.content.results).every((slot: any) => slot.current && slot.round === 2)).toBe(true);
     });
 
-    it('repairs an invalid first response in the shipped essay Flow without consuming another review round', async () => {
-        const draft = JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+    it('repairs an invalid first response in the legacy essay Flow without consuming another review round', async () => {
+        const draft = JSON.parse(readFileSync(new URL('./fixtures/essay-review-legacy.flow', import.meta.url), 'utf8'));
         scores = [11, 9, 9, 9, 9];
         const spec = await flowToDag({ ...draft, revision: 1, createdAt: 0, digest: '' });
         const run = await executor.submit('s', spec, { requirements: 'REQ', essay: 'ESSAY', maxRounds: 1, maxConcurrency: 1 });
@@ -475,7 +475,7 @@ describe('structured route / spawn / aggregate DAG', () => {
     });
 
     it('applies declared defaults and rejects invalid runtime limits before creating Tasks', async () => {
-        const draft = JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+        const draft = JSON.parse(readFileSync(new URL('./fixtures/essay-review-legacy.flow', import.meta.url), 'utf8'));
         const spec = await flowToDag({ ...draft, revision: 1, createdAt: 0, digest: '' });
         await expect(executor.submit('s', spec, { maxRounds: 1.5 })).rejects.toThrow('numeric constraints');
         expect(await (await kernel.openSession('s')).listTasks()).toEqual([]);

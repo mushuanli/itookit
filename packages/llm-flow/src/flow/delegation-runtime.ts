@@ -16,6 +16,7 @@ export interface DelegationGroup {
     completed: Set<string>;
     succeeded: Set<string>;
     waitMode: 'all' | 'any' | 'first-success' | 'quorum';
+    remaining?: 'continue' | 'cancel';
     quorum: number;
     detached: boolean;
     deadline?: number;
@@ -35,6 +36,7 @@ export interface DelegationPlan {
     includeResults: boolean;
     resultOrder: DelegationGroup['resultOrder'];
     waitMode: DelegationGroup['waitMode'];
+    remaining: 'continue' | 'cancel';
     quorum: number;
     detached: boolean;
     waitTimeoutMs?: number;
@@ -87,6 +89,7 @@ export function delegationPlan(
         includeResults: result.mode ? result.mode !== 'discard' : join.mode !== 'none',
         resultOrder: result.order === 'completion' ? 'completion' : 'declared',
         waitMode,
+        remaining: wait.remaining === 'continue' ? 'continue' : 'cancel',
         quorum: waitMode === 'quorum'
             ? Math.min(payloads.length, positiveInteger(wait.quorum) ?? payloads.length)
             : waitMode === 'all' ? payloads.length : 1,
@@ -108,6 +111,7 @@ export function materializeDelegation(
         completed: new Set(),
         succeeded: new Set(),
         waitMode: plan.waitMode,
+        remaining: plan.remaining,
         quorum: plan.quorum,
         detached: plan.detached,
         resultOrder: plan.resultOrder,

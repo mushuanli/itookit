@@ -4,7 +4,7 @@ import { compileDispatchGraph, expandDispatchDraft, flowToDag, validateFlowRevis
 import type { FlowDraft } from '@itookit/common';
 
 function example(): FlowDraft {
-    return JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+    return JSON.parse(readFileSync(new URL('./fixtures/essay-review-legacy.flow', import.meta.url), 'utf8'));
 }
 function revision(draft = example()) { return { ...draft, revision: 1, createdAt: 0, digest: '' }; }
 

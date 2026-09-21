@@ -5,6 +5,8 @@ import type { SchedulerCheckpoint } from './scheduler-checkpoint';
 import { prepareDispatch } from './structured/prepare';
 import { compileReferenceGraph, invocationReferenceContext, resolveExecutionNode, scopedParameters } from './structured/references';
 import { compileDispatchGraph } from './structured/graph';
+import { compileControlGraph } from './control/graph';
+import { memberGroup, startReservedWorkers } from './control/scheduling';
 import { reconcileDispatchChildren } from './structured/reconcile';
 import type { DispatchInput } from './structured/types';
 import { validateDispatchCapacity, withDispatchWorkspace } from './structured/limits';
@@ -245,7 +247,7 @@ export class DurableFlowExecutor {
         restored?: { checkpoint: SchedulerCheckpoint; handle: FlowExecutionHandle },
     ): Promise<FlowExecutionHandle> {
         const saved = restored?.checkpoint;
-        spec = saved || spec.templateVersion === 1 ? structuredClone(spec) : compileReferenceGraph(compileDispatchGraph(structuredClone(spec)));
+        spec = saved || spec.templateVersion === 1 ? structuredClone(spec) : compileReferenceGraph(compileControlGraph(compileDispatchGraph(structuredClone(spec))));
         parameters = prepareFlowParameters(spec.parameterSchema, parameters);
         validateDispatchCapacity(spec, parameters);
         validateVariableGraph(spec);
@@ -355,7 +357,8 @@ export class DurableFlowExecutor {
                 return MAX_LOOP_ITERATIONS;
             };
             const maxIterations = (node: DagNodeDefinition): number => {
-                const config = isRecord(node.config) ? node.config : {};
+                const resolved = resolveFlowParameters(node.config, scopedParameters(spec, node.id, parameters ?? {}));
+                const config = isRecord(resolved) ? resolved : {};
                 if (typeof config.maxIterations === 'number' && config.maxIterations > 0) return config.maxIterations;
                 return loopNodes.has(node.id) ? loopMaxIterations() : 1;
             };
@@ -365,8 +368,12 @@ export class DurableFlowExecutor {
                 if (iteration > maxIterations(node) || skipped.has(node.id)) return false;
                 // Loop 节点的每一轮都必须等自身上一轮结束，避免 Human 未回应时提前创建后续实例。
                 if (iteration > 1 && !doneAt(node.id, iteration - 1)) return false;
+                if (node.plugin === 'builtin.loop' && iteration > 1
+                    && (record(node.config).members as unknown as string[]).some(id => (instances.get(id)?.length ?? 0) >= iteration - 1 && !doneAt(id, iteration - 1))) return false;
                 const incoming = incomingOf(edges, node.id);
                 if (!incoming.length) return true;
+                const gates = incoming.filter(edge => routeEdgeIds.has(edge.id));
+                if (gates.length && gates.every(edge => edgeState.get(edge.id) === 'inactive')) return false;
                 const active = incoming.filter(e => !backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'active');
                 const pending = incoming.filter(e => !backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'pending');
                 const backActive = incoming.filter(e => backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'active');
@@ -381,6 +388,8 @@ export class DurableFlowExecutor {
                 if (pending.length || (iteration > 1 && backPending.length)) return false;
                 const activeReady = active.every(e => {
                     if (skipped.has(e.from)) return true;
+                    if (node.plugin === 'builtin.join' && e.kind !== 'control') return loopNodes.has(node.id) && loopNodes.has(e.from)
+                        ? (instances.get(e.from)?.length ?? 0) >= iteration : instances.has(e.from);
                     // 环内前向边必须绑定同一轮上游；环外/外部输入仍等最新已完成实例。
                     return loopNodes.has(node.id) && loopNodes.has(e.from)
                         ? doneAt(e.from, iteration)
@@ -421,6 +430,7 @@ export class DurableFlowExecutor {
                 }
                 const dependencies = incoming.map(edge => ({
                     taskId: upstreamHandle(edge).id,
+                    nodeId: edge.from,
                     input: edge.input,
                     output: edge.output,
                     edgeId: edge.id,
@@ -463,6 +473,7 @@ export class DurableFlowExecutor {
                     ? `flow:${published.root.id}:${node.id}#${iteration}@${nodeGenerations.get(node.id) ?? 0}`
                     : undefined;
                 const taskSpec = await this.taskSpec(sessionId, node, task, dependencies, localParameters, requestId);
+                if (memberGroup(nodes, node.id)) taskSpec.deferStart = true;
                 if (historyGroup) taskSpec.labels = { ...taskSpec.labels, flowHistoryGroup: historyGroup };
                 const handle = await session.submit(taskSpec);
                 variableStore.remember(handle.id, context);
@@ -474,7 +485,7 @@ export class DurableFlowExecutor {
                     published.taskIds.add(handle.id);
                     await session.setShared(`flow.run.${published.root.id}.members`, jsonValue(runMembers(instances, nodes, detachedNodes)));
                 }
-                await bindFlowTaskCapabilities(session, handle, task.programKind, node.capabilities ?? [], node.budget);
+                if (!memberGroup(nodes, node.id)) await bindFlowTaskCapabilities(session, handle, task.programKind, node.capabilities ?? [], node.budget);
                 if (published) await saveCheckpoint();
             };
 
@@ -523,6 +534,7 @@ export class DurableFlowExecutor {
                     if (effect.type === 'activate-edge') {
                         edgeState.set(String(effect.edgeId), 'active');
                         const activated = edges.find(edge => edge.id === String(effect.edgeId));
+                        if (activated) skipped.delete(activated.to);
                         // Only record dispatch order for back-edge sources (supervisor
                         // workers); an ordinary loop's exit branch must not re-arm the
                         // loop head through dispatchOrder.
@@ -533,6 +545,14 @@ export class DurableFlowExecutor {
                         edgeState.set(String(effect.edgeId), 'inactive');
                     } else if (effect.type === 'patch-graph') {
                         await applyPatch(effect.patch, parentId);
+                    } else if (effect.type === 'cancel-tasks') {
+                        const owner = nodes.find(node => node.id === parentId);
+                        if (owner?.plugin !== 'builtin.join') throw new Error('Only join nodes may cancel observed tasks');
+                        for (const target of effect.tasks) {
+                            if (!edges.some(edge => edge.from === target.nodeId && edge.to === parentId)) throw new Error('Join cancellation target is not a dependency');
+                            const handle = instances.get(target.nodeId)?.find(item => item.id === target.taskId);
+                            if (handle) await handle.cancel(effect.reason);
+                        }
                     }
                 }
             };
@@ -593,7 +613,7 @@ export class DurableFlowExecutor {
                     && (group.waitMode === 'first-success' || group.waitMode === 'quorum')) {
                     throw new Error(`Delegation ${group.waitMode} condition could not be satisfied`);
                 }
-                if (!satisfied || group.waitMode === 'all') return;
+                if (!satisfied || group.waitMode === 'all' || group.remaining === 'continue') return;
                 const cancellations: Promise<void>[] = [];
                 for (const childId of group.children) {
                     if (group.completed.has(childId)) continue;
@@ -837,11 +857,14 @@ export class DurableFlowExecutor {
                     published!.taskIds.add(task.id);
                     (published!.childTasks ??= new Map()).set(task.id, task);
                 }, maxConcurrency);
-                const activeCount = scopedActive ?? [...instances.entries()].reduce((count, [nodeId, handles]) =>
+                const groupedActive = await startReservedWorkers(session, nodes, instances, maxConcurrency, detachedNodes);
+                const activeCount = groupedActive ?? scopedActive ?? [...instances.entries()].reduce((count, [nodeId, handles]) =>
                     count + (detachedNodes.has(nodeId) ? 0 : handles.filter((_, index) =>
                         !completed.has(instanceKey(nodeId, index + 1))).length), 0);
                 const capacity = Math.max(0, maxConcurrency - activeCount);
-                const ready = readyNodes().slice(0, capacity);
+                const candidates = readyNodes();
+                const reserved = candidates.filter(node => memberGroup(nodes, node.id) || node.plugin === 'builtin.join');
+                const ready = [...reserved, ...candidates.filter(node => !reserved.includes(node)).slice(0, capacity)];
                 const historyGroup = ready.length > 1 ? `${published!.root.id}:${ready.map(node => `${node.id}#${instances.get(node.id)?.length ?? 0}@${nodeGenerations.get(node.id) ?? 0}`).join(',')}` : undefined;
                 for (const node of ready) await submitNode(node, historyGroup);
                 const pending = [...instances.entries()].flatMap(([nodeId, handles]) =>
@@ -1054,13 +1077,13 @@ export class DurableFlowExecutor {
                 ...(skillContexts.length ? { skillContexts } : {}),
             }
             : task.programKind === 'flow.value'
-                ? { ...record(task.input), parameters }
+                ? { ...record(task.input), parameters, iteration: Number(/#(\d+)(?:@|$)/.exec(requestId ?? '')?.[1] ?? 1) }
                 : task.input;
         return {
             ...(requestId ? { requestId } : {}),
             program: { kind: task.programKind, version: task.programVersion },
             input: jsonValue(input),
-            dependsOn: dependencies.map(binding => ({
+            dependsOn: dependencies.filter(binding => task.programKind !== 'flow.join' || binding.injectOutput === false).map(binding => ({
                 task: binding.taskId,
                 ...(binding.onFailure ? { onFailure: binding.onFailure } : {}),
             })),

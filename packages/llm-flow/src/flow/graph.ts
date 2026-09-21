@@ -18,7 +18,6 @@ export interface GraphCycles {
  */
 export function findCycles(nodes: GraphNode[], edges: GraphEdge[]): GraphCycles {
     const backEdges = new Set<string>();
-    const loopNodes = new Set<string>();
     const adjacency = new Map<string, string[]>();
     for (const edge of edges) {
         const next = adjacency.get(edge.from) ?? [];
@@ -27,26 +26,56 @@ export function findCycles(nodes: GraphNode[], edges: GraphEdge[]): GraphCycles 
     }
     const edgeById = new Map(edges.map(edge => [edge.id, edge]));
     const visited = new Set<string>();
-    const stack: string[] = [];
     const inStack = new Set<string>();
     const visit = (nodeId: string): void => {
         visited.add(nodeId);
-        stack.push(nodeId);
         inStack.add(nodeId);
         for (const edgeId of adjacency.get(nodeId) ?? []) {
             const to = edgeById.get(edgeId)?.to;
             if (to === undefined) continue;
             if (inStack.has(to)) {
                 backEdges.add(edgeId);
-                const fromIndex = stack.indexOf(to);
-                for (let i = fromIndex; i < stack.length; i++) loopNodes.add(stack[i]);
             } else if (!visited.has(to)) {
                 visit(to);
             }
         }
-        stack.pop();
         inStack.delete(nodeId);
     };
     for (const node of nodes) if (!visited.has(node.id)) visit(node.id);
-    return { backEdges, loopNodes };
+    return { backEdges, loopNodes: cycleMembers(nodes, edges) };
+}
+
+interface Components {
+    next: number;
+    index: Map<string, number>;
+    low: Map<string, number>;
+    stack: string[];
+    active: Set<string>;
+    members: Set<string>;
+    adjacency: Map<string, string[]>;
+}
+
+/** SCC membership includes parallel paths that DFS back-edge stacks miss. */
+function cycleMembers(nodes: GraphNode[], edges: GraphEdge[]): Set<string> {
+    const state: Components = { next: 0, index: new Map(), low: new Map(), stack: [], active: new Set(), members: new Set(), adjacency: new Map() };
+    for (const edge of edges) state.adjacency.set(edge.from, [...(state.adjacency.get(edge.from) ?? []), edge.to]);
+    for (const node of nodes) if (!state.index.has(node.id)) visitComponent(state, node.id);
+    return state.members;
+}
+
+function visitComponent(state: Components, id: string): void {
+    const index = state.next++;
+    state.index.set(id, index); state.low.set(id, index);
+    state.stack.push(id); state.active.add(id);
+    for (const next of state.adjacency.get(id) ?? []) {
+        if (!state.index.has(next)) {
+            visitComponent(state, next);
+            state.low.set(id, Math.min(state.low.get(id)!, state.low.get(next)!));
+        } else if (state.active.has(next)) state.low.set(id, Math.min(state.low.get(id)!, state.index.get(next)!));
+    }
+    if (state.low.get(id) !== index) return;
+    const component: string[] = [];
+    let member: string;
+    do { member = state.stack.pop()!; state.active.delete(member); component.push(member); } while (member !== id);
+    if (component.length > 1 || state.adjacency.get(id)?.includes(id)) for (const member of component) state.members.add(member);
 }

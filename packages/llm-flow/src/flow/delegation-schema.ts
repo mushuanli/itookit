@@ -28,6 +28,7 @@ export function delegationSchema(): JsonValue {
                     mode: { ...enumSchema(['all', 'any', 'first-success', 'quorum']), title: 'Wait mode', unsetLabel: 'all (default)' },
                     quorum: { type: 'integer', title: 'Required successes' },
                     timeoutMs: { type: 'integer', title: 'Group timeout (ms)' },
+                    remaining: { ...enumSchema(['continue', 'cancel']), title: 'Remaining tasks', unsetLabel: 'cancel (legacy default)' },
                 },
             },
             result: {

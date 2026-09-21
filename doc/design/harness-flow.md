@@ -1,5 +1,7 @@
 # llm-flow 的 Flow / Node 定义与 Harness 覆盖分析
 
+当前新图采用独立的 route、taskGroup、join、aggregate@3、loop 控制节点；作文评审模板已迁移。实现、策略默认值及边界见 [Flow 控制节点](flow-control-primitives.md)。下文 route@2/@3 的派发模型保留用于旧定义兼容。
+
 2026-09-16 补充：已接通 CLI/UI 的 MCP/tools/Skill 装配、隔离任务 Skill 上下文与批准恢复，并新增会话「流程输出」入口。当前能力、边界及验证见 [Flow 能力与输出](flow-capabilities-and-output.md)。下文核查记录保留当时的测试范围。
 
 构建产物及真实模型的复验见 [CLI 能力与持久化实测](flow-cli-capabilities-verification.md)：修复 MCP stdio 的 ESM require 问题；CLI 已保存 Kernel 交互和结果，并通过幂等投影生成聊天 History Round，包含节点、工具、Skill 来源及用户交互身份。
@@ -77,7 +79,7 @@ DSL 定义 `agent | route | spawn | supervisor | node` 五类任务。`node` 直
 | `builtin.human` | `flow.human@1` | 等待依赖后发起人工输入 interaction | requestId、prompt、schema |
 | `builtin.transform` | `flow.value@1` | identity 或按 path 提取字段；不是任意脚本变换 | operation、value、path、outputName、type |
 | `builtin.reduce` | `flow.value@1` | 收集输入并展平一层，返回数组或用 separator 拼接文本 | outputName、type、separator |
-| `builtin.route@1.0.0` | `flow.value@1` | 解释可序列化条件，激活/禁用分支；实际 `outputs` 为空 | mode、rules、defaultEdgeId |
+| `builtin.route@1.0.0` | `flow.value@1` | 解释可序列化条件，激活/禁用分支；输出 selectedEdgeIds/selectedValue | mode、rules、defaultEdgeId |
 | `builtin.spawn` | `flow.value@1` | 产出值，并附带 `patch-graph` 图修改指令 | spawn.nodes/edges/idempotencyKey；支持 `$parent`、`$upstream:<id>` |
 | `builtin.flow` | 无独立 Program | 必须先经 `flowToDag` 展开；直接创建运行任务会抛错 | flowId、revision、parameters |
 
@@ -132,7 +134,7 @@ DSL 定义 `agent | route | spawn | supervisor | node` 五类任务。`node` 直
 
 ### 5.2 端口声明与实际产出不完全一致
 
-传统通用 manifest 声明 `input → result`，但 `FlowHumanProgram` 实际产出 `response`，route@1 的 `outputs` 为空；transform/reduce/spawn 允许自定义 outputName，却不随之更新 manifest。静态 data edge 校验会按 manifest 检查端口名。
+传统通用 manifest 声明 `input → result`，但 `FlowHumanProgram` 实际产出 `response`，route@1 现已输出选路元数据；transform/reduce/spawn 允许自定义 outputName，却不随之更新 manifest。静态 data edge 校验会按 manifest 检查端口名。
 
 建议统一 human 的输出名称，明确 route 为控制节点，并让可配置 outputName 与端口契约同步。此处是源码层面的契约差异；本轮未新增连接这些端口的端到端回归，不能断言所有现有接线都会失败。
 

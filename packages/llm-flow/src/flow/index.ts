@@ -20,6 +20,8 @@ export type { ValidationIssue } from './validation';
 export { resolveFlowParameters, validateFlowParameters, flowParameterValues, prepareFlowParameters } from './parameters';
 export { compileDispatchGraph } from './structured/graph';
 export { expandDispatchDraft } from './structured/expand';
+export { compileControlGraph } from './control/graph';
+export { FlowJoinProgram } from './control/join-program';
 export { resolveConnectionId, resolveNodeConnection } from './connections';
 export { FlowCommand } from './command-names';
 export * from './workflow';

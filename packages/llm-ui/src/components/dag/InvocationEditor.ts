@@ -34,7 +34,7 @@ function preview(root: HTMLElement, toolbar: HTMLElement, draft: FlowDraft, conf
     const defaults = record(config.invocationDefaults ?? record(parent?.config).invocationDefaults);
     const system = read('$.systemPrompt', config.systemPrompt ?? config.instruction ?? '');
     const prompt = read('$.invocationDefaults.prompt', defaults.prompt ?? '');
-    const local = read('$.prompt', config.prompt ?? '');
+    const local = read('$.instruction', config.instruction ?? read('$.prompt', config.prompt ?? ''));
     const param = Object.fromEntries((draft.parameters ?? []).filter(item => item.default !== undefined).map(item => [item.name, item.default]));
     const output = toolbar.querySelector<HTMLElement>('[data-prompt-preview]')!;
     const template = [prompt, local].filter(Boolean).join('\n\n');
@@ -49,7 +49,11 @@ function referenceOptions(draft: FlowDraft, editing: FlowNodeDefinition): string
     for (const node of draft.nodes) {
         const config = record(node.config);
         if (node.plugin === 'builtin.input') for (const key of Object.keys(record(config.param ?? config.fields))) options.add(`\${param.${key}}`);
-        if (node.plugin === 'builtin.check') {
+        if (node.plugin === 'builtin.agent' && node.id !== editing.id) {
+            const schema = record(record(record(config.responseFormat).json_schema).schema);
+            for (const field of Object.keys(record(schema.properties))) options.add(`\${nodes.${node.id}.outputs.result.${field}}`);
+            options.add(`\${nodes.${node.id}.outputs.result}`);
+        } else if (node.plugin === 'builtin.check') {
             const key = String(config.key ?? node.id);
             const route = draft.nodes.find(item => draft.edges.some(edge => edge.from === item.id && edge.to === node.id));
             const contract = record(config.outputContract ?? record(record(route?.config).invocationDefaults).outputContract);

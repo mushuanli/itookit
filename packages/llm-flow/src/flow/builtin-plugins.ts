@@ -10,6 +10,7 @@ import { delegationSchema } from './delegation-schema';
 import { DagPluginRegistry } from './plugin-registry';
 import { structuredPlugins } from './structured/plugins';
 import { splitGraphPlugins } from './structured/graph-plugins';
+import { controlPlugins } from './control/plugins';
 
 export function createBuiltinDagPluginRegistry(): DagPluginRegistry {
     const registry = new DagPluginRegistry();
@@ -29,6 +30,7 @@ function builtinPlugins(): DagPlugin[] {
         agentPlugin(),
         ...structuredPlugins(),
         ...splitGraphPlugins(agentManifest()),
+        ...controlPlugins(),
     ];
 }
 
@@ -105,13 +107,19 @@ function agentTask(context: DagNodeContext) {
     const prompt = string(config.instruction, string(config.prompt, inputText(context.inputs)));
     const policy = config.systemPromptPolicy;
     const sessionContext = record(config.sessionContext);
-    const project = policy === 'none' ? [] : ['projectInstructions', 'skillInstructions', 'skillIndex']
+    const isolated = config.invocationContext === 'isolated' || Array.isArray(config.invocationInstructions);
+    const project = policy === 'none' || isolated ? [] : ['projectInstructions', 'skillInstructions', 'skillIndex']
         .flatMap(key => typeof sessionContext[key] === 'string' && sessionContext[key]
             ? [{ role: 'system' as const, content: sessionContext[key] as string }] : []);
     const system = policy === 'none' || !Array.isArray(config.systemPrompt) ? []
         : config.systemPrompt.filter((value): value is string => typeof value === 'string' && Boolean(value))
             .map(content => ({ role: 'system' as const, content }));
-    const base = Array.isArray(config.messages) ? config.messages : [...system, { role: 'user', content: prompt }];
+    const instructions = Array.isArray(config.invocationInstructions)
+        ? config.invocationInstructions.filter((value): value is string => typeof value === 'string').map(content => ({ role: 'system' as const, content })) : system;
+    const explicit = Array.isArray(config.messages) && config.messages.length ? config.messages : [{ role: 'user', content: prompt }];
+    const base = isolated ? [...instructions.filter(item => item.content !== prompt
+        && !explicit.some(message => message.role === 'system' && message.content === item.content)), ...explicit]
+        : Array.isArray(config.messages) ? config.messages : [...system, { role: 'user', content: prompt }];
     const inherited = project.filter(item => !base.some(message => message.role === 'system' && message.content === item.content));
     const messages = [...inherited, ...base.filter(message => policy !== 'none' || message.role !== 'system')];
     const delegation = record(config.delegation);
