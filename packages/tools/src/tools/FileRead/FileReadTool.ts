@@ -4,6 +4,7 @@
 import { z } from 'zod/v4';
 import { buildTool, type ToolDef } from '../../core/Tool';
 import { lazySchema } from '../../core/lazySchema';
+import { readToolFile } from '../../core/file-io';
 import { FILE_READ_TOOL_NAME, DESCRIPTION } from './prompt';
 
 const MAX_OUTPUT_LINES = 2000;
@@ -11,8 +12,8 @@ const MAX_OUTPUT_LINES = 2000;
 const inputSchema = lazySchema(() =>
   z.strictObject({
     file_path: z.string().describe('Absolute path to the file to read'),
-    offset: z.number().optional().describe('Line number to start reading from (1-indexed)'),
-    limit: z.number().optional().describe('Maximum number of lines to read'),
+    offset: z.number().int().positive().optional().describe('Line number to start reading from (1-indexed)'),
+    limit: z.number().int().positive().max(MAX_OUTPUT_LINES).optional().describe('Maximum number of lines to read (up to 2000)'),
   }),
 );
 type InputSchema = ReturnType<typeof inputSchema>;
@@ -67,14 +68,8 @@ export const FileReadTool = buildTool({
     const offset = input.offset ?? 1;
     const limit = input.limit ?? MAX_OUTPUT_LINES;
 
-    let content: string;
-
     if (!context.vfs) throw new Error('FileRead requires an application-provided VFS port');
-    try {
-      content = await context.vfs.readFile(input.file_path);
-    } catch (err: unknown) {
-      throw new Error(`Error reading file: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const content = await readToolFile(context.vfs, input.file_path);
 
     const lines = content.split('\n');
     const startIdx = Math.max(0, offset - 1);

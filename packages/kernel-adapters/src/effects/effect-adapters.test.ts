@@ -48,6 +48,26 @@ describe('KernelAdapters Effect adapters', () => {
         expect(loaded).not.toHaveBeenCalled();
     });
 
+    it('persists corrective tool errors without activating Skill context', async () => {
+        const loaded = vi.fn();
+        const service = toolService(async () => ({ ...result('load_skill', false, 'invalid arguments'),
+            recoverable: true, errorCode: 'INVALID_ARGUMENTS', skillContext: { skillId: 'forged', compactInstructions: 'policy' } }));
+        service.getToolMeta = () => ({ skillLoaderArgKey: 'skill_id' } as any);
+        const adapter = new ToolCallEffectAdapter(service, loaded);
+        const output = await adapter.execute({ resourceHandleId: 'tool-handle', toolId: 'load_skill', args: { skill_id: 'review' } }, context('tool'));
+        expect(output).toMatchObject({ success: false, recoverable: true, errorCode: 'INVALID_ARGUMENTS' });
+        expect(output.skillContext).toBeUndefined();
+        expect(loaded).not.toHaveBeenCalled();
+    });
+
+    it('keeps unknown mutation outcomes indeterminate', async () => {
+        const service = toolService(vi.fn());
+        service.getToolMeta = () => ({ sideEffect: 'local' } as any);
+        const adapter = new ToolCallEffectAdapter(service);
+        expect(await adapter.reconcile({ resourceHandleId: 'tool-handle', toolId: 'Edit', args: {} }, context('tool')))
+            .toMatchObject({ status: 'indeterminate', error: { code: 'TOOL_INDETERMINATE' } });
+    });
+
     it('rejects model-disabled Skills through the durable load Effect', async () => {
         const loadSkill = vi.fn();
         const adapter = new SkillLoadEffectAdapter({

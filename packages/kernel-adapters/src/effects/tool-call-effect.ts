@@ -69,9 +69,11 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
         // introduced may be undone when identity persistence fails.
         const tracker = loadsSkill ? await this.resolveSkillTracker?.(context) : undefined;
         const wasLoaded = tracker ? tracker.getLoadedSkills().some(item => item.id === skillId) : true;
-        const result = requireToolSuccess(await service.invoke({ ...request, signal: context.abortSignal }));
+        const result = await service.invoke({ ...request, signal: context.abortSignal });
+        // Unload has already changed persistent state; its cleanup must still settle as an Effect.
+        if (result.recoverable !== true || unloadKey) requireToolSuccess(result);
         let skillContext: ToolInvokeResult['skillContext'];
-        if (loadsSkill) {
+        if (loadsSkill && result.success) {
             try {
                 const loaded = await this.onSkillLoaded?.(skillId as string, context);
                 skillContext = loaded ? loaded : undefined;

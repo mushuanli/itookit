@@ -74,7 +74,9 @@ src/
 - `satisfies ToolDef<InputSchema, OutputType>` 确保类型安全
 - `lazySchema()` 包裹所有 Zod schema 避免模块加载时循环依赖
 - 文件读写工具（FileRead/FileWrite/FileEdit）要求 `context.vfs`，缺失时抛错；Grep/Glob 优先用 `context.shell` 的 ripgrep/fd，其次 `context.vfs`，最后 Node 手动遍历
-- 错误通过 throw 抛出，由 ToolDeviceDriver 捕获并转为 `ToolInvokeResult { success: false }`
+- 驱动在 call 前执行 schema、validateInput、checkPermissions；权限更新参数再次校验，禁用工具拒绝执行。注册的 ToolHandler 按 JSON Schema 校验。
+- 已知且可纠正的操作前提错误抛 `ToolInputError(code, message)`，驱动返回 `success: false, recoverable: true`；普通异常保持不可自动纠正，避免重放未知副作用。
+- ToolInvokeResult 保留 output 和有界的 JSON data；文本/结构化数据分别最多 100000 字符且服从工具上限，超大 data 省略。Bash 退出码和 Edit 替换信息保存在 data 中。
 - `mapToolResultToToolResultBlockParam()` 将结构化输出转为 LLM 文本
 
 ## 命令

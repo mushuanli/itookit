@@ -234,15 +234,20 @@ function requestTool(
 function handleTool(state: DurableAgentState, event: TaskInputEvent): Decision<DurableAgentState, DurableAgentOutput> {
     const call = state.pendingCalls[state.callIndex];
     if (!call) return fail(state, 'Pending tool call is missing');
-    if (event.type === 'effect-failed') return { state, next: { type: 'fail', error: event.error } };
+    if (event.type === 'effect-failed') return { state,
+        actions: [emit({ type: 'tool:error', call: { ...callInfo(call), error: event.error.message } })],
+        next: { type: 'fail', error: event.error } };
     if (event.type !== 'effect-completed') return fail(state, `Expected Tool Effect, received ${event.type}`);
     const result = event.result as ToolInvokeResult;
+    if (!result.success && result.recoverable !== true) return fail(state, result.error ?? result.output, result.errorCode);
     if (result.success && result.skillContext) {
         state.skillContexts = (state.skillContexts ?? []).filter(skill => skill.skillId !== result.skillContext!.skillId);
         state.skillContexts.push(result.skillContext);
     }
     state.messages.push({ role: 'tool', tool_call_id: call.id, content: result.output });
-    const actions = [emit({ type: 'tool:success', call: { ...callInfo(call), result: result.output } })];
+    const actions = [emit(result.success
+        ? { type: 'tool:success', call: { ...callInfo(call), result: result.output } }
+        : { type: 'tool:error', call: { ...callInfo(call), error: result.error ?? result.output } })];
     state.callIndex++;
     if (state.callIndex < state.pendingCalls.length) return dispatchNextCall(state, actions);
     state.pendingCalls = [];

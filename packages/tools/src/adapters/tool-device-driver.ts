@@ -18,7 +18,9 @@ import type {
   IDeviceDriver,
 } from '@itookit/vfs-core';
 import type { Tool } from '../core/Tool';
-import type { INativeShell } from '../core/types';
+import type { INativeShell, ToolUseContext } from '../core/types';
+import { ToolInputError } from '../core/tool-error';
+import { invocationSignal, prepareToolInput, toolFailure, toolSuccess } from './tool-invocation';
 import { createBashTool } from '../tools/Bash/BashTool';
 
 // ── Registry entry ──
@@ -169,80 +171,41 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
   }
 
   async invoke(request: ToolInvokeRequest): Promise<ToolInvokeResult> {
+    const started = Date.now();
     const entry = this.registry.get(request.toolId);
-    if (!entry) {
-      return {
-        toolId: request.toolId,
-        success: false,
-        output: `Error: tool not found: ${request.toolId}`,
-        durationMs: 0,
-        error: 'tool_not_found',
-      };
+    if (!entry) return toolFailure(request.toolId, new ToolInputError('TOOL_NOT_FOUND', `Tool not found: ${request.toolId}`), started);
+    if (!entry.meta.enabled || !entry.tool.isEnabled()) {
+      return toolFailure(request.toolId, new ToolInputError('TOOL_DISABLED', `Tool is disabled: ${request.toolId}`), started);
     }
-
-    const cwd = request.cwd ?? this.fileCwd ?? (typeof process !== 'undefined' ? process.cwd() : '/');
     const timeoutMs = request.timeoutMs ?? entry.meta.timeoutMs;
-    const t0 = Date.now();
-
-    const abortController = new AbortController();
-    const timer = setTimeout(() => abortController.abort(), timeoutMs);
-
-    if (request.signal) {
-      request.signal.addEventListener('abort', () => abortController.abort(), { once: true });
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
+      return toolFailure(request.toolId, new ToolInputError('INVALID_ARGUMENTS', 'Invalid tool timeout'), started);
     }
-
-    const canCancel = entry.tool.interruptBehavior?.() === 'cancel';
+    const signal = invocationSignal(request.signal, timeoutMs);
     try {
-      const appState = this.sessionAppState;
-      const result = await entry.tool.call(request.args, {
-        cwd,
-        signal: abortController.signal,
-        timeoutMs,
-        vfs: this.vfsContext,
-        shell: this.shellContext,
-        abortController,
-        appState,
-        setAppState: (key, value) => { appState[key] = value; },
-      });
-
-      const blockParam = entry.tool.mapToolResultToToolResultBlockParam(result.data, request.toolId);
-      const output = typeof blockParam.content === 'string'
-        ? blockParam.content
-        : JSON.stringify(blockParam.content);
-
-      return {
-        toolId: request.toolId,
-        success: true,
-        output,
-        durationMs: Date.now() - t0,
-      };
-    } catch (err: unknown) {
-      if (canCancel && abortController.signal.aborted) {
-        // Only suppress the error if it was directly caused by the abort signal.
-        // If it's an unrelated error that raced with the abort, preserve the message.
-        const isAbortError = err instanceof Error && err.name === 'AbortError';
-        const errMsg = isAbortError ? undefined : (err instanceof Error ? err.message : String(err));
-        return {
-          toolId: request.toolId,
-          success: false,
-          output: isAbortError
-            ? 'Tool execution was cancelled.'
-            : `Tool cancelled. ${errMsg}`,
-          durationMs: Date.now() - t0,
-          error: 'cancelled',
-        };
+      const context = this.invocationContext(request, timeoutMs, signal.controller);
+      const args = await prepareToolInput(entry.tool, request.args, context);
+      if (!entry.meta.enabled || !entry.tool.isEnabled() || this.registry.get(request.toolId) !== entry) {
+        throw new ToolInputError('TOOL_DISABLED', 'Tool was disabled or replaced before execution');
       }
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        toolId: request.toolId,
-        success: false,
-        output: `Error: ${msg}`,
-        durationMs: Date.now() - t0,
-        error: msg,
-      };
+      const result = await entry.tool.call(args, context);
+      return toolSuccess(entry.tool, result.data, started);
+    } catch (error) {
+      const result = toolFailure(request.toolId, error, started);
+      return signal.controller.signal.aborted ? { ...result, errorCode: 'CANCELLED', recoverable: false } : result;
     } finally {
-      clearTimeout(timer);
+      signal.dispose();
     }
+  }
+
+  private invocationContext(request: ToolInvokeRequest, timeoutMs: number, controller: AbortController): ToolUseContext {
+    const appState = this.sessionAppState;
+    return {
+      cwd: request.cwd ?? this.fileCwd ?? (typeof process !== 'undefined' ? process.cwd() : '/'),
+      signal: controller.signal, timeoutMs, vfs: this.vfsContext, shell: this.shellContext,
+      abortController: controller, appState,
+      setAppState: (key, value) => { appState[key] = value; },
+    };
   }
 
   async invokeBatch(requests: ToolInvokeRequest[]): Promise<ToolBatchResult> {
@@ -274,6 +237,7 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
   }
 
   registerTool(meta: ToolMeta, definition: ToolDefinition, handler: ToolHandler): void {
+    const schema = definition.function?.parameters ?? definition.parameters ?? { type: 'object' };
     // Wrap a ToolHandler as a Tool adapter for backward compatibility.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const adapter = {
@@ -282,8 +246,7 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
       description() { return Promise.resolve(meta.description); },
       prompt() { return Promise.resolve(meta.description); },
       userFacingName() { return meta.name; },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      inputSchema: {} as any,
+      inputSchema: z.fromJSONSchema(schema as Parameters<typeof z.fromJSONSchema>[0]),
       isConcurrencySafe() { return meta.sideEffect === 'none'; },
       isReadOnly() { return meta.sideEffect === 'none'; },
       isEnabled() { return meta.enabled; },

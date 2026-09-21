@@ -6,6 +6,7 @@ export { buildTool, toolMatchesName, findToolByName } from './core/Tool';
 export type { Tool, ToolDef, AnyObject } from './core/Tool';
 export { lazySchema } from './core/lazySchema';
 export { globToRegex } from './core/globToRegex';
+export { ToolInputError } from './core/tool-error';
 export type {
   ValidationResult,
   PermissionResult,

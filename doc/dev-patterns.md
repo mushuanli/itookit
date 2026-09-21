@@ -38,6 +38,8 @@
 2. `packages/tools/src/tools/<Name>/<Name>Tool.ts` — `buildTool(def)` 实现
 3. `packages/tools/src/index.ts` — 在 `BUILTIN_TOOLS` 数组注册
 
+工具驱动在 `call()` 前执行输入 schema、`validateInput` 和 `checkPermissions`，权限回调更新的参数会重新校验。已知的参数/操作前提错误可抛出 `ToolInputError(code, message)`，Agent 会收到可纠正的失败结果；存储异常或可能已发生副作用的未知失败应保持普通异常。不要把任意异常包装成可重试错误。结构化 `data` 与模型文本分别受输出上限限制，超大 data 被省略。人工审批由 Durable Agent interaction 承担，工具权限回调只负责 allow/deny。
+
 ## 新增 Kernel 工具 (需运行时引用)
 
 1. `packages/kernel-adapters/src/tool/<name>.ts` — ToolMeta + ToolDefinition + ToolHandler

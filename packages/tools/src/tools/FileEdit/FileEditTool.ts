@@ -4,12 +4,14 @@
 import { z } from 'zod/v4';
 import { buildTool, type ToolDef } from '../../core/Tool';
 import { lazySchema } from '../../core/lazySchema';
+import { ToolInputError } from '../../core/tool-error';
+import { readToolFile } from '../../core/file-io';
 import { FILE_EDIT_TOOL_NAME, DESCRIPTION } from './prompt';
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
     file_path: z.string().describe('Absolute path to the file to modify'),
-    old_string: z.string().describe('The text to replace'),
+    old_string: z.string().min(1).describe('The non-empty text to replace'),
     new_string: z.string().describe('The text to replace it with (must be different from old_string)'),
     replace_all: z.boolean().optional().describe('Replace all occurrences of old_string (default false)'),
   }),
@@ -21,6 +23,8 @@ const outputSchema = lazySchema(() =>
     filePath: z.string(),
     replacements: z.number().describe('Number of replacements made'),
     replaceAll: z.boolean(),
+    oldString: z.string(),
+    newString: z.string(),
   }),
 );
 type OutputSchema = ReturnType<typeof outputSchema>;
@@ -68,34 +72,30 @@ export const FileEditTool = buildTool({
   },
 
   async call(input, context) {
-    let content: string;
-
     if (!context.vfs) throw new Error('FileEdit requires an application-provided VFS port');
-    try {
-      content = await context.vfs.readFile(input.file_path);
-    } catch (err: unknown) {
-      throw new Error(`Error reading file: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const content = await readToolFile(context.vfs, input.file_path);
 
     const count = content.split(input.old_string).length - 1;
     if (count === 0) {
-      throw new Error(`old_string not found in file: ${input.file_path}`);
+      throw new ToolInputError('EDIT_NOT_FOUND', `old_string not found in file: ${input.file_path}. Read the file before editing again.`);
     }
     if (!input.replace_all && count > 1) {
-      throw new Error(
+      throw new ToolInputError('EDIT_AMBIGUOUS',
         `old_string matches ${count} locations (must be unique). Set replace_all=true to replace all.`,
       );
     }
 
     const newContent = input.replace_all
-      ? content.replaceAll(input.old_string, input.new_string)
-      : content.replace(input.old_string, input.new_string);
+      ? content.replaceAll(input.old_string, () => input.new_string)
+      : content.replace(input.old_string, () => input.new_string);
 
+    context.signal?.throwIfAborted();
     await context.vfs.writeFile(input.file_path, newContent);
 
     const replacements = input.replace_all ? count : 1;
     return {
-      data: { filePath: input.file_path, replacements, replaceAll: !!input.replace_all },
+      data: { filePath: input.file_path, replacements, replaceAll: !!input.replace_all,
+        oldString: input.old_string, newString: input.new_string },
     };
   },
 

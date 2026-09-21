@@ -84,6 +84,14 @@ export interface ToolInvokeResult {
     durationMs: number;
     /** 错误详情（仅 success=false 时） */
     error?: string;
+    /** Stable failure code for model correction and host diagnostics. */
+    errorCode?: string;
+    /** Only explicit, known tool failures may return to the model for correction. */
+    recoverable?: boolean;
+    /** Bounded, JSON-serializable output retained alongside the model-facing text. */
+    data?: unknown;
+    /** Either the text or structured result exceeded the output budget. */
+    truncated?: boolean;
     /** 额外元数据 */
     metadata?: Record<string, unknown>;
     /** Trusted adapter snapshot after a successful Skill load; retained across context pruning. */

@@ -940,7 +940,7 @@ importers:
         specifier: workspace:*
         version: link:../vfs-core
       zod:
-        specifier: ^4.1.0
+        specifier: ^4.4.2
         version: 4.4.2
     devDependencies:
       '@types/node':

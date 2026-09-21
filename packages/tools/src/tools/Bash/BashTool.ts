@@ -77,7 +77,7 @@ function isSearchOrReadBashCommand(command: string): 'search' | 'read' | 'list' 
 const inputSchema = lazySchema(() =>
   z.strictObject({
     command: z.string().describe('The shell command to execute'),
-    timeout_ms: z.number().optional().describe('Maximum execution time in milliseconds (default: 120000)'),
+    timeout_ms: z.number().int().positive().max(2_147_483_647).optional().describe('Requested execution time in milliseconds, capped by the host timeout'),
   }),
 );
 type InputSchema = ReturnType<typeof inputSchema>;
@@ -160,7 +160,7 @@ export function createBashTool(shell?: INativeShell) {
     },
 
     async call(input, context) {
-      const timeoutMs = input.timeout_ms ?? context.timeoutMs;
+      const timeoutMs = Math.min(input.timeout_ms ?? context.timeoutMs, context.timeoutMs);
       const sh = context.shell ?? shell;
       if (!sh) throw new Error('BashTool requires an application-provided native shell');
       const result = await sh.exec('sh', ['-c', input.command], {

@@ -4,6 +4,7 @@
 import { z } from 'zod/v4';
 import { buildTool, type ToolDef } from '../../core/Tool';
 import { lazySchema } from '../../core/lazySchema';
+import { toolFileExists } from '../../core/file-io';
 import { FILE_WRITE_TOOL_NAME, DESCRIPTION } from './prompt';
 
 const inputSchema = lazySchema(() =>
@@ -56,7 +57,8 @@ export const FileWriteTool = buildTool({
 
   async call(input, context) {
     if (!context.vfs) throw new Error('FileWrite requires an application-provided VFS port');
-    const exists = await context.vfs.readFile(input.file_path).then(() => true).catch(() => false);
+    const exists = await toolFileExists(context.vfs, input.file_path);
+    context.signal?.throwIfAborted();
     await context.vfs.writeFile(input.file_path, input.content);
     const output: Output = {
       filePath: input.file_path,

@@ -6,6 +6,8 @@
 
 构建产物及真实模型的复验见 [CLI 能力与持久化实测](flow-cli-capabilities-verification.md)：修复 MCP stdio 的 ESM require 问题；CLI 已保存 Kernel 交互和结果，并通过幂等投影生成聊天 History Round，包含节点、工具、Skill 来源及用户交互身份。
 
+2026-09-21 补充：编码工具执行与 Agent 错误修正链路已补齐第一批实现，见本文末尾「Coding harness 第一批实现」。这一批不改变 Flow 的编排职责与文件写入的并发保证。
+
 > 核查日期：2026-09-15。依据当前工作树源码与包内测试；这是现状分析，不是新增功能承诺。
 > 范围：`packages/llm-flow`，以及它使用的 `llm-common` 类型。规范依据为 [Harness Core](durable-harness-core.md)、[Protocol](durable-harness-protocol.md)、[Storage](durable-harness-storage.md)、[Resources](durable-harness-resources.md)、[Cache](durable-harness-cache.md)；跨包验收边界见 [Durable 证据映射](durable-harness-evidence.md)。
 
@@ -203,3 +205,30 @@ delegation.budget.maxTokens/timeoutMs 只是子任务单次请求默认限制；
 ## Flow 内部变量
 
 通用 variables/assign、运行隔离、依赖排序、原子写回、检查点及 UI 行为见 [Flow 内部变量设计](./flow-variables.md)。新作文模板用 `${param.essay}` 保存输入，用 `${vars.essay}` 读取当前稿件。
+
+## Coding harness 第一批实现（2026-09-21）
+
+编码入口复用现有 `Read / Glob / Grep / Edit / Write / Bash`，`fd` 和 `rg` 保留为搜索实现细节。单 Agent 的模型—工具循环由 `DurableAgentProgram` 承担；Flow 只在需要编码、验证、评审等任务编排时参与，不为每次文件操作新增节点。
+
+### 调用与失败契约
+
+- `ToolDeviceDriver` 在执行前检查工具启用状态，执行 Zod schema、`validateInput` 和 `checkPermissions`。权限回调返回的更新参数需要再次通过 schema 和语义校验；等待校验后重新检查工具是否被禁用、替换或注销。注册的 `ToolHandler` 也按其 JSON Schema 校验。当前工具权限回调支持 allow/deny，人工批准继续由 Agent 的持久 interaction 管理。
+- `ToolInputError` 表达已知且可纠正的失败，驱动返回 `success=false`、`errorCode`、`recoverable=true`。参数错误、禁用/缺失工具、权限拒绝、Edit 未匹配/多处匹配和明确的文件读取路径错误属于此类。
+- `ToolCallEffectAdapter` 将这类结果作为已完成的 Effect 保存，Agent 发出 `tool:error`，将工具文本反馈给模型并继续现有轮次循环。`maxExchanges` 仍限制修正次数；不同调用仍需按原审批策略获批。
+- 未声明可纠正的失败、取消及未知执行结果保持原故障语义。Skill 加载失败不提交 Skill 上下文；卸载已经修改持久身份后发生的失败仍交给 Effect 收尾。未知写操作继续返回 `TOOL_INDETERMINATE`，不自动重放。
+
+### 文件与输出行为
+
+- Edit 拒绝空目标和相同替换，默认要求唯一匹配，替换内容始终按字面量写入（包括 `$&`、`$$` 等）；结构化结果包含实际匹配文本、替换文本和次数。
+- Write 判断文件是否存在时，不再把任意读取失败当成文件不存在；仅明确 ENOENT 或 stat 的不存在结果允许按创建记录。
+- Read 的 offset/limit 必须为正整数，单次最多 2000 行。工具驱动限制模型文本和结构化数据各自的序列化大小，遵循工具上限且最多 100000 字符；超大文本带截断提示，超大 data 省略并标记 truncated。此限制不等于底层文件读取或进程输出的内存上限。
+- `ToolInvokeResult` 保留兼容的 output 文本，新增可选 data/errorCode/recoverable/truncated。Bash 结构化结果保留 exitCode；命令非零退出作为已完成命令返回给模型。请求的 Bash 超时不能超过宿主调用超时。
+- 已取消请求不会进入工具；取消监听器在调用结束后移除，Edit/Write 在异步读取后、写入前检查取消。实际进程停止仍依赖宿主 Shell 和 Effect cancel 的确认协议。
+
+实现入口：[工具调用驱动](../../packages/tools/src/adapters/tool-device-driver.ts)、[调用校验与结果封装](../../packages/tools/src/adapters/tool-invocation.ts)、[工具 Effect](../../packages/kernel-adapters/src/effects/tool-call-effect.ts)、[Agent Program](../../packages/llm-tasks/src/durable/agent-program.ts)。
+
+### 验证和后续边界
+
+[跨包编码验收](../../apps/cli/tests/coding-harness.test.ts) 使用真实临时文件和原生 Shell，脚本化模型响应依次触发错误 Edit、Read、正确 Edit、Bash 验证。每次 reducer 调用前序列化并恢复状态，每个工具调用重新走审批；最终文件与执行退出码共同证明修正成功。它不等价于真实 Provider、Kernel 存储重启或 SIGKILL 验收。
+
+文件端口仍为 read/write，不提供原子条件写；本批不能保证多个 Agent、编辑器或外部进程之间的并发覆盖安全。后续应在后端实现条件提交与操作核对，再增加版本前提、持久变更记录和 diff 展示。搜索的授权视图加速、进程输出流式限额、只读策略与独立编码 Flow 模板也不在本批保证范围内。
