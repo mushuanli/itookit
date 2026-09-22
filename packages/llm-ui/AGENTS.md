@@ -7,6 +7,7 @@ ChatInput 工具栏的「对话 / 执行」由 `ExecutionModeControl` 呈现，�
 ## 关键边界
 
 - `RunAttachmentController` 经 `TaskControlPlane.openTask()` 取得 `AttachedTask`（`TaskHandle` 子集）后 attach、消费事件流，并转发 signal / cancel / resume。
+- `ChatInput` 的 `InteractionPanel` 常驻显示审批/简单人工回复，备注与聊天草稿独立；经 `respondApproval` / `respondInput` 校验固定 interaction id、attachment revision 和非终态 pending 状态后提交。失败留在卡片内，解除挂接/解决/终态清理；复杂 Flow 输入沿用参数表单。DOM 与实际 Kernel Exec 审批回归在 app-shell 的 `input-interaction.test.ts`、`input-approval-exec.test.ts`。
 - 会话打开时除恢复特权任务外，还用 `src/shell/pending-interaction.ts` 的 `restoreWaitingAttachment` 重新挂接「仍有 pending interaction 的非终态 Task」，以重放其 `task.interaction.requested`（宿主崩溃期间的批准通道恢复）；回归 `packages/app-shell/tests/pending-interaction-restore.test.ts`。
 - `DagWorkbench` 从 `FlowCommand.Presentations` 返回的插件呈现（manifest + `ui.palette`）构建 Palette、端口和表单。
 - UI 不 import DAG Runtime；对 `@itookit/durable-kernel` 只有 `import type`。

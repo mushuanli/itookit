@@ -23,6 +23,18 @@ export interface IChatInputConfig {
     settings: ChatInputSettings;
 }
 
+export interface ChatInputInteraction {
+    /** Includes attachment identity so replay never resets an in-progress reply. */
+    key: string;
+    id: string;
+    kind: 'approval' | 'input';
+    prompt: string;
+    details?: string;
+    options?: string[];
+}
+
+export type InteractionReply = { approved: boolean; note?: string } | string;
+
 /**
  * ChatInput 的能力接口
  *
@@ -86,6 +98,10 @@ export interface IChatInputPresenter {
 
     /** 清除 inline 工具输出面板。 */
     clearToolOutput(): void;
+
+    /** Keep a pending approval/reply visible until it is answered or invalidated. */
+    showInteraction(request: ChatInputInteraction, respond: (reply: InteractionReply) => Promise<void>): void;
+    clearInteraction(interactionId?: string): void;
 
     destroy(): void;
 }

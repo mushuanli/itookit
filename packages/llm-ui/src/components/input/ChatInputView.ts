@@ -1,6 +1,7 @@
 // @file: llm-ui/components/input/ChatInputView.ts
 
 import type { IChatInputPresenter, IChatInputConfig } from '../../domain/ports/IChatInputPresenter';
+import type { ChatInputInteraction, InteractionReply } from '../../domain/ports/IChatInputPresenter';
 import type {
     ExecutorOption, ConnectionOption,
     ChatOverrides, SkillInfo, FileSuggestion,
@@ -18,6 +19,7 @@ import { HelpPanel } from './HelpPanel';
 import { SkillPanel } from './SkillPanel';
 import { ConnectionTierController } from './ConnectionTierController';
 import { ExecutionModeControl } from './ExecutionModeControl';
+import { InteractionPanel } from './InteractionPanel';
 import { delegate } from '../../utils/domEvents';
 
 export interface ChatInputOptions {
@@ -154,6 +156,7 @@ export class ChatInput implements IChatInputPresenter {
 
     // ── Tool output panel ─────────────────────────────────────────────────────
     private toolOutput: ToolOutputPanel;
+    private interactionPanel: InteractionPanel;
 
     // ── Session profile ───────────────────────────────────────────────────────
     private systemPromptAppendInput!: HTMLTextAreaElement;
@@ -193,6 +196,7 @@ export class ChatInput implements IChatInputPresenter {
 
         // 面板必须在 render()（写入模板 + bindElements）之后构造，DOM 才存在。
         this.toolOutput = new ToolOutputPanel(container, () => this.textarea?.focus());
+        this.interactionPanel = new InteractionPanel(container);
         this.helpPanel = new HelpPanel(container, {
             hasFiles: () => !!this.options.onRequestFiles,
             onCloseSettings: () => this.toggleSettings(false),
@@ -388,7 +392,14 @@ export class ChatInput implements IChatInputPresenter {
         this.toolOutput.clear();
     }
 
+    showInteraction(request: ChatInputInteraction, respond: (reply: InteractionReply) => Promise<void>): void {
+        this.interactionPanel.show(request, respond);
+    }
+
+    clearInteraction(interactionId?: string): void { this.interactionPanel.clear(interactionId); }
+
     destroy(): void {
+        this.interactionPanel.clear();
         if (this.outsideClickHandler) {
             document.removeEventListener('click', this.outsideClickHandler);
             this.outsideClickHandler = null;

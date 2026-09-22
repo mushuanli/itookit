@@ -3,6 +3,45 @@ import type { EventEnvelope } from '@itookit/durable-kernel';
 import { RunAttachmentController, type TaskControlPlane, type AttachedTask } from './RunAttachmentController';
 
 describe('RunAttachmentController', () => {
+    it.each([true, false])('responds to the exact approval with a note (%s)', async approved => {
+        const task = handle('task-1');
+        const controller = new RunAttachmentController(controlPlane(task), callbacks());
+        await controller.attach(task.id);
+        await controller.respondApproval('approval', approved, ' reviewed ', controller.revision);
+        expect(task.respond).toHaveBeenCalledWith({ interactionId: 'approval', value: { approved, note: 'reviewed' } });
+        await expect(controller.respondApproval('another', true, '', controller.revision)).rejects.toThrow('no longer pending');
+        await expect(controller.respondApproval('approval', true, '', controller.revision - 1)).rejects.toThrow('attachment changed');
+        expect(task.respond).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['button', 'slash'])('rejects a %s approval when attachment changes during status lookup', async mode => {
+        const task = handle('task-1');
+        const controller = new RunAttachmentController(controlPlane(task), callbacks());
+        await controller.attach(task.id);
+        const status = await task.status();
+        const slow = deferred<typeof status>();
+        vi.mocked(task.status).mockReturnValue(slow.promise);
+        const responding = mode === 'button' ? controller.respondApproval('approval', true, '', controller.revision) : controller.approve();
+        const rejected = expect(responding).rejects.toThrow('attachment changed');
+        await controller.detach();
+        slow.resolve(status);
+        await rejected;
+        expect(task.respond).not.toHaveBeenCalled();
+    });
+
+    it.each(['succeeded', 'failed', 'cancelled'] as const)('ignores pending interactions in a %s task', async status => {
+        const task = handle('task-1', [waitingEvent()]);
+        const record = (await task.status()).task;
+        vi.mocked(task.status).mockResolvedValue({ task: { ...record, status } });
+        const handlers = callbacks();
+        const controller = new RunAttachmentController(controlPlane(task), handlers);
+        await controller.attach(task.id);
+        await until(() => handlers.onEvent.mock.calls.length === 1);
+        expect(handlers.onWaiting).not.toHaveBeenCalled();
+        await expect(controller.respondApproval('approval', true, '', controller.revision)).rejects.toThrow('no longer pending');
+        expect(task.respond).not.toHaveBeenCalled();
+    });
+
     it('replays task events and exposes interaction requests', async () => {
         const events = [statusEvent(), waitingEvent()];
         const onEvent = vi.fn();

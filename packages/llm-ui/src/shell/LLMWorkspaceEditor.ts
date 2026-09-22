@@ -50,6 +50,7 @@ import { WorkspacePaneController } from './WorkspacePaneController';
 import { WorkspaceDirectoryMenu } from './WorkspaceDirectoryMenu';
 import { NavigationHelper } from './NavigationHelper';
 import { RunAttachmentController } from './RunAttachmentController';
+import { inputInteraction } from './input-interaction';
 import {
     buildExecutorOptions, validateAgentId, buildConnectionOptions,
 } from './AgentProvider';
@@ -477,7 +478,10 @@ export class LLMWorkspaceEditor implements IEditor {
         this.runAttachment = new RunAttachmentController(this.options.kernel, {
             onEvent: event => this.handleRunEvent(event),
             onWaiting: condition => this.handleRunWaiting(condition),
-            onDetached: () => this.inputDialogAbort?.abort(),
+            onDetached: () => {
+                this.inputDialogAbort?.abort();
+                this.chatInput.clearInteraction();
+            },
             onError: error => Toast.error(error.message),
         });
         void this.restorePrivilegedTaskAttachment().catch(error => {
@@ -488,7 +492,13 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private handleRunEvent(event: EventEnvelope): void {
         if (event.type === 'task.interaction.resolved') {
+            const payload = event.payload as { interactionId?: string };
+            if (payload.interactionId) this.chatInput.clearInteraction(payload.interactionId);
             void this.restorePrivilegedTaskAttachment().catch(error => Toast.error(String(error)));
+        }
+        if (['task.succeeded', 'task.failed', 'task.cancelled'].includes(event.type)) {
+            this.chatInput.clearInteraction();
+            this.inputDialogAbort?.abort();
         }
         if (event.type === 'task.succeeded') this.statusIndicator.update('completed');
         else if (event.type === 'task.failed' || event.type === 'task.cancelled') {
@@ -499,9 +509,16 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private handleRunWaiting(request: InteractionRequest<JsonValue>): void {
         if (this.showFlowInput(request)) return;
-        const plan = interactionPlan(request.payload);
-        if (plan) this.chatInput.showToolOutput('/plan', plan, true);
-        Toast.info(request.prompt);
+        const attachment = this.runAttachment, sessionId = this.currentSessionId;
+        if (!attachment) return;
+        const revision = attachment.revision;
+        this.chatInput.showInteraction(inputInteraction(request, revision), async reply => {
+            if (this.currentSessionId !== sessionId || this.runAttachment !== attachment || this.attachmentClosed) {
+                throw new Error('Task attachment changed');
+            }
+            if (typeof reply === 'string') await attachment.respondInput(request.id, reply, revision);
+            else await attachment.respondApproval(request.id, reply.approved, reply.note ?? '', revision);
+        });
     }
 
     private showFlowInput(request: InteractionRequest<JsonValue>): boolean {
@@ -510,6 +527,7 @@ export class LLMWorkspaceEditor implements IEditor {
         const fields = payload.fields;
         const attachment = this.runAttachment;
         if (!fields || typeof fields !== 'object' || Array.isArray(fields) || !attachment) return false;
+        this.chatInput.clearInteraction();
         const revision = attachment.revision, key = `${revision}:${request.id}`;
         if (this.inputDialogKey === key) return true;
         const values = payload.values && typeof payload.values === 'object' && !Array.isArray(payload.values) ? payload.values : {};
@@ -742,6 +760,7 @@ export class LLMWorkspaceEditor implements IEditor {
         }
 
         // Assign before prompting because the callback reads the active session.
+        if (this.currentSessionId && this.currentSessionId !== sessionId) await this.runAttachment?.detach();
         this.currentSessionId = sessionId;
         this.currentTitle = title;
 
@@ -1023,15 +1042,15 @@ export class LLMWorkspaceEditor implements IEditor {
         const taskId = await this.options.privilegedCommands!.exec({
             sessionId: this.requireSessionId(), command,
         });
-        await this.attachPrivilegedTask(taskId, 'Command is waiting for approval');
+        await this.attachPrivilegedTask(taskId);
     }
 
-    private async attachPrivilegedTask(taskId: string, message: string): Promise<void> {
+    private async attachPrivilegedTask(taskId: string, message?: string): Promise<void> {
         if (!this.runAttachment) throw new Error('Kernel task attachment is unavailable');
         const session = await this.options.kernel!.openSession(this.requireSessionId());
         await session.setShared(ACTIVE_PRIVILEGED_TASK_KEY, { taskId });
         await this.runAttachment.attach(taskId);
-        Toast.info(message);
+        if (message) Toast.info(message);
     }
 
     private async restorePrivilegedTaskAttachment(): Promise<void> {
@@ -1049,7 +1068,8 @@ export class LLMWorkspaceEditor implements IEditor {
             const task = (await (await session.attachTask(taskId)).status()).task;
             if (!isCurrent()) return;
             if (!['succeeded', 'failed', 'cancelled'].includes(task.status)) {
-                await attachment.attach(taskId); return;
+                if (attachment.activeTaskId !== taskId) await attachment.attach(taskId);
+                return;
             }
         }
         await restoreWaitingAttachment(kernel, sessionId, id => attachment.attach(id), isCurrent);
@@ -1161,11 +1181,6 @@ export class LLMWorkspaceEditor implements IEditor {
         this.editorEvents.clear();
         this.nodeCommands.clear();
     }
-}
-
-function interactionPlan(payload: JsonValue | undefined): string | undefined {
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
-    return typeof payload.plan === 'string' ? payload.plan : undefined;
 }
 
 function sharedTaskId(value: JsonValue | undefined): string | undefined {

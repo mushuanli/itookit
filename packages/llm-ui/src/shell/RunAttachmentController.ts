@@ -89,25 +89,36 @@ export class RunAttachmentController {
     }
 
     async respondInput(interactionId: string, value: JsonValue, expectedRevision: number): Promise<void> {
+        await this.respondInteraction(interactionId, 'input', value, expectedRevision);
+    }
+
+    async respondApproval(interactionId: string, approved: boolean, note: string, expectedRevision: number): Promise<void> {
+        await this.respondInteraction(interactionId, 'approval', {
+            approved, ...(note.trim() ? { note: note.trim() } : {}),
+        }, expectedRevision);
+    }
+
+    private async respondInteraction(interactionId: string, kind: 'input' | 'approval', value: JsonValue, expectedRevision: number): Promise<void> {
         const handle = this.requireHandle();
         const task = (await handle.status()).task;
         if (this.generation !== expectedRevision || handle !== this.handle) throw new Error('Task attachment changed');
         const interaction = task.interactions[interactionId];
-        if (!interaction || interaction.status !== 'pending' || interaction.kind !== 'input') throw new Error('Input is no longer pending');
+        if (isTerminal(task.status) || !interaction || interaction.status !== 'pending' || interaction.kind !== kind) {
+            throw new Error('Interaction is no longer pending');
+        }
         await handle.respond({ interactionId, value });
     }
 
     async approve(note = ''): Promise<void> {
+        const revision = this.generation;
         const handle = this.requireHandle();
         const { task } = await handle.status();
+        if (revision !== this.generation || handle !== this.handle) throw new Error('Task attachment changed');
         const interaction = Object.values(task.interactions)
             .filter(item => item.status === 'pending' && item.kind === 'approval')
             .sort((left, right) => right.requestedAt - left.requestedAt)[0];
         if (!interaction) throw new Error('Attached task has no pending approval');
-        await handle.respond({
-            interactionId: interaction.id,
-            value: { approved: true, ...(note.trim() ? { note: note.trim() } : {}) },
-        });
+        await this.respondApproval(interaction.id, true, note, revision);
     }
 
     async detach(): Promise<void> {
@@ -126,8 +137,11 @@ export class RunAttachmentController {
             this.callbacks.onEvent(result.value);
             const request = interactionRequest(result.value);
             if (request) {
-                const pending = (await this.handle?.status())?.task.interactions[request.id];
-                if (generation === this.generation && pending?.status === 'pending') this.callbacks.onWaiting(pending);
+                const task = (await this.handle?.status())?.task;
+                const pending = task?.interactions[request.id];
+                if (generation === this.generation && task && !isTerminal(task.status) && pending?.status === 'pending') {
+                    this.callbacks.onWaiting(pending);
+                }
             }
         }
     }
@@ -136,6 +150,10 @@ export class RunAttachmentController {
         if (!this.handle) throw new Error('No task is attached');
         return this.handle;
     }
+}
+
+function isTerminal(status: string): boolean {
+    return ['succeeded', 'failed', 'cancelled'].includes(status);
 }
 
 function acceptsSignal(wait: import('@itookit/durable-kernel').WaitSpec | undefined, type: string): boolean {
