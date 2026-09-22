@@ -58,6 +58,8 @@
 
 ## 实现与验证
 
+调用面板首次挂载立即加载；存在非终态调用或读取失败时每秒刷新，空列表或全部终态时改为 30 秒同步，保留其他宿主变更的可见性。窗口获得焦点、页面恢复可见和当前界面发起调用时立即刷新；销毁后解绑监听器、停止轮询并忽略迟到结果。计时与销毁回归见 [调用轮询](../../packages/app-shell/tests/flow-invocation-polling.test.ts)。
+
 - 编译与契约：[function-call](../../packages/llm-flow/src/flow/function-call.ts)、[function-outputs](../../packages/llm-flow/src/flow/function-outputs.ts)、[dependency-locks](../../packages/llm-flow/src/flow/dependency-locks.ts)。
 - 会话调用：[FlowInvocationService](../../packages/llm-session/src/session/flow-invocations.ts)。
 - UI：[InvocationPanel](../../packages/llm-ui/src/flows/InvocationPanel.ts)、[invoke-flow](../../packages/llm-ui/src/flows/invoke-flow.ts)。

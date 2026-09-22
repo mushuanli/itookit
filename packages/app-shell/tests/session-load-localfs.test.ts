@@ -1,5 +1,5 @@
 // Real SQLite sidecar measurements; these are not Tauri IPC or browser paint timings.
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,8 @@ import { createVFS } from '@itookit/vfs-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { SessionRepository } from '@itookit/llm-session';
 import { SessionRegistry } from '../../llm-session/src/session/session-registry';
+import { Kernel } from '@itookit/durable-kernel';
+import { NodeFsOps } from '../../vfsdriver-localfs/src/fs/node-fs-ops';
 
 it('measures cold history loading on LocalFS without reading each round twice', async () => {
     const root = await mkdtemp(join(tmpdir(), 'session-load-cost-'));
@@ -38,6 +40,37 @@ it('measures cold history loading on LocalFS without reading each round twice', 
         console.info('session-load-localfs', JSON.stringify(samples));
     } finally {
         await repository.dispose(); await manager.dispose(); await rm(root, { recursive: true, force: true });
+    }
+}, 30_000);
+
+it('reduces existing Session binding I/O compared with repeating creation checks', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'session-bind-cost-'));
+    const ops = new NodeFsOps();
+    const backend = await openLocalFSBackend({ rootDir: join(root, 'data'), sidecarDir: join(root, 'db'), createFs: () => ops });
+    const { manager } = await createVFS({ rootBackend: backend });
+    const fs = await manager.openFileSystem('/');
+    const kernel = new Kernel({ catalog: { fs, rootPath: '/catalog' }, pollMs: 0, maxConcurrent: 0 });
+    const storage = { kind: 'local', locator: '/session' };
+    kernel.registerStorageResolver({ kind: 'local', async resolve() { return { fs, rootPath: '/session' }; } });
+    vi.useFakeTimers();
+    try {
+        await kernel.initialize(); await kernel.createSession({ id: 's', storage });
+        const stat = vi.spyOn(ops, 'stat'), statMany = vi.spyOn(ops, 'statMany');
+        const sample = async (open: () => Promise<unknown>) => {
+            backend.resetSidecarStats(); stat.mockClear(); statMany.mockClear();
+            await open();
+            return { sidecar: { ...backend.sidecarStats }, stat: stat.mock.calls.length, statMany: statMany.mock.calls.length };
+        };
+        const creation = await sample(() => kernel.createSession({ id: 's', storage }));
+        const opened = await sample(() => kernel.openSession('s', storage));
+        console.info('session-bind-localfs', JSON.stringify({ creation, opened }));
+        expect(opened.statMany).toBeLessThan(creation.statMany);
+        expect(opened.sidecar.upsertMetaExt).toBe(0);
+        expect(opened.sidecar.setRecordField).toBe(0);
+        expect(opened.sidecar.begin).toBeLessThanOrEqual(creation.sidecar.begin);
+    } finally {
+        vi.useRealTimers(); kernel.dispose(); await kernel.waitIdle(); vi.restoreAllMocks();
+        await manager.dispose(); await rm(root, { recursive: true, force: true });
     }
 }, 30_000);
 

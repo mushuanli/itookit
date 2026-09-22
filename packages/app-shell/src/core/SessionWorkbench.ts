@@ -104,7 +104,8 @@ export class SessionWorkbench implements WorkspaceController {
             // Expanding ancestors during selectPath can emit intermediate selections too.
             if (item && !this.selectionSync) void this.openResource(item.id).catch(error => this.report(error));
         }), this.sidebarUI.on('sidebarStateChanged', ({ isCollapsed }) => this.sidebar.classList.toggle('is-collapsed', isCollapsed)),
-        this.repository.subscribe(() => this.scheduleRefresh('repository')), this.files.subscribe(() => this.scheduleRefresh('files')),
+        this.repository.subscribe(change => { if (change?.kind !== 'ui-state') this.scheduleRefresh('repository'); }),
+        this.files.subscribe(() => this.scheduleRefresh('files')),
         // Task content (stream deltas, logs, shared state) notifies many times per
         // second while a run streams. The sidebar only lists Sessions and Tasks, so
         // re-render on structural changes only — never per output chunk.

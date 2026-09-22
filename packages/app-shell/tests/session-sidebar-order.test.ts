@@ -53,6 +53,11 @@ it.each([null, '/Work'])('keeps creation order after opening, updating and reope
             await vi.waitFor(() => expect(sidebar.textContent).toContain(`Renamed ${id}`));
             expect(order()).toEqual(expected);
         }
+        await new Promise(resolve => setTimeout(resolve, 180));
+        const list = vi.spyOn(repository, 'list');
+        await repository.updateUIState('old', { branchDrafts: { main: { inputText: 'new draft' } } });
+        await new Promise(resolve => setTimeout(resolve, 180));
+        expect(list).not.toHaveBeenCalled(); list.mockRestore();
         await workbench.destroy(); workbench = createWorkbench();
         await workbench.start();
         await vi.waitFor(() => expect(order()).toEqual(expected));

@@ -154,10 +154,9 @@ export class Kernel implements KernelRegistration {
             id => this.store.inspectSessionBinding(id));
         this.resourcePoller = new DurablePoller({
             intervalMs: 0,
-            poll: async scope => { await this.managedResources.sweep(scope); return true; },
-            nextDelay: async scope => {
-                const at = await this.managedResources.nextDeadline(scope);
-                return at === undefined ? undefined : Math.max(0, at - Date.now());
+            poll: async scope => {
+                const at = await this.managedResources.sweep(scope);
+                return { nextDelay: at === undefined ? undefined : Math.max(0, at - Date.now()) };
             },
             onError: (_scope, error) => this.handlePollError(error),
         });
@@ -255,8 +254,8 @@ export class Kernel implements KernelRegistration {
         return new DefaultSessionHandle(this, id);
     }
 
-    async openSession(id: SessionId): Promise<SessionHandle> {
-        const opened = await this.store.openSession(id);
+    async openSession(id: SessionId, expectedStorage?: StorageBindingRef): Promise<SessionHandle> {
+        const opened = await this.store.openSession(id, { expectedStorage, previousBinding: this.sessions.get(id) });
         this.rememberBinding(id, opened.binding);
         this.queueDrain(id);
         this.schedulePoll(id);
@@ -765,8 +764,8 @@ export class Kernel implements KernelRegistration {
     async removeSession(sessionId: SessionId, options: { force?: boolean } = {}): Promise<boolean> {
         let binding: ResolvedStorageBinding;
         try {
-            // Resolve straight from the catalog: openSession() would pin metadata on
-            // a storage root that an interrupted removal already deleted.
+            // Resolve straight from the catalog: openSession() requires the main
+            // record file, which an interrupted removal may already have deleted.
             binding = await this.store.inspectSessionBinding(sessionId);
         } catch (error) {
             if (isMissingStorage(error)) return false;
@@ -822,6 +821,8 @@ export class Kernel implements KernelRegistration {
     }
 
     private rememberBinding(sessionId: string, binding: ResolvedStorageBinding): void {
+        const previous = this.sessions.get(sessionId);
+        if (previous?.fs === binding.fs && previous.rootPath === binding.rootPath) return;
         this.storageListeners.get(sessionId)?.();
         this.sessions.set(sessionId, binding);
         this.resourcePoller.start(`session:${sessionId}`);

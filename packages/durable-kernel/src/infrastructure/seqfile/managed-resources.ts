@@ -194,7 +194,8 @@ async function settleLifecycleTx(tx: ISeqFileTransaction, authority: ResolvedSto
         }
         await tx.setEntry(path, key('resource', resource.ref.id), encode({ ...resource, state: 'tombstoned', version: resource.version + 1 }));
     }
-    for (const row of await rows<RequestRow>(tx, path, 'request')) {
+    const requests = await rows<RequestRow>(tx, path, 'request');
+    for (const row of requests) {
         if (row.status !== 'pending') continue;
         const c = row.command;
         if (c?.type === 'release') {
@@ -209,6 +210,7 @@ async function settleLifecycleTx(tx: ISeqFileTransaction, authority: ResolvedSto
         row.status = 'succeeded';
         await finishTx(tx, { authority, scope: row.scope, actor: row.actor, actorRoot: row.actorRoot, command: c }, row);
     }
+    return requests;
 }
 
 /** Called inside the same transaction as the owning Decision, or by the host facade. */
@@ -335,8 +337,8 @@ export async function executeResourceTx(tx: ISeqFileTransaction, p: PreparedReso
 export async function sweepResourceTx(tx: ISeqFileTransaction, authority: ResolvedStorageBinding) {
     const path = resourcesPath(authority.rootPath), blocked = new Set<string>();
     await schemaTx(tx, path, true);
-    await settleLifecycleTx(tx, authority);
-    const pending = (await rows<RequestRow>(tx, path, 'request')).filter(r => r.status === 'pending').sort((a, b) => a.sequence - b.sequence);
+    const requests = await settleLifecycleTx(tx, authority);
+    const pending = requests.filter(r => r.status === 'pending').sort((a, b) => a.sequence - b.sequence);
     for (const row of pending) {
         if (row.command?.type !== 'acquire') continue;
         const c = row.command, p: PreparedResourceCommand = { authority, scope: row.scope, actor: row.actor, actorRoot: row.actorRoot, command: c };
@@ -367,6 +369,16 @@ export async function sweepResourceTx(tx: ISeqFileTransaction, authority: Resolv
         await finishTx(tx, p, row);
         if (row.actorRoot) await appendEventTx(tx, row.actorRoot, row.actor.sessionId!, row.actor.taskId, 'resource.resolved', { requestId: row.id, scope: row.scope, status: row.status });
     }
+    return requests;
+}
+
+function resourceDeadline(requests: RequestRow[], cleanups: ResourceCleanup[]): number | undefined {
+    let next = Infinity;
+    for (const row of requests) {
+        if (row.status === 'pending' && row.command?.type === 'acquire') next = Math.min(next, row.command.deadlineAt ?? Infinity);
+    }
+    for (const row of cleanups) if (row.status !== 'succeeded') next = Math.min(next, row.nextAttemptAt);
+    return Number.isFinite(next) ? next : undefined;
 }
 
 export class ManagedResourceStore {
@@ -451,28 +463,25 @@ export class ManagedResourceStore {
     async nextDeadline(scope: string): Promise<number | undefined> {
         const b = await this.binding(scope);
         return transaction(b.fs, async tx => {
-            const deadlines = (await rows<RequestRow>(tx, resourcesPath(b.rootPath), 'request'))
-                .filter(r => r.status === 'pending' && r.command?.type === 'acquire')
-                .map(r => r.command?.type === 'acquire' ? r.command.deadlineAt : undefined)
-                .filter((at): at is number => at !== undefined);
-            for (const operation of await rows<ResourceCleanup>(tx, resourcesPath(b.rootPath), 'cleanup')) {
-                if (operation.status !== 'succeeded') deadlines.push(operation.nextAttemptAt);
-            }
-            return deadlines.length ? Math.min(...deadlines) : undefined;
+            return resourceDeadline(await rows<RequestRow>(tx, resourcesPath(b.rootPath), 'request'),
+                await rows<ResourceCleanup>(tx, resourcesPath(b.rootPath), 'cleanup'));
         });
     }
-    async sweep(scope: string) {
+    async sweep(scope: string): Promise<number | undefined> {
         const b = await this.binding(scope);
-        const due = await transaction(b.fs, async tx => {
-            await sweepResourceTx(tx, b);
-            return rows<ResourceCleanup>(tx, resourcesPath(b.rootPath), 'cleanup');
+        const snapshot = await transaction(b.fs, async tx => {
+            const requests = await sweepResourceTx(tx, b);
+            const cleanups = await rows<ResourceCleanup>(tx, resourcesPath(b.rootPath), 'cleanup');
+            return { cleanups, deadline: resourceDeadline(requests, cleanups) };
         });
         if (this.disposed) return;
         const running = this.processing.get(scope);
-        if (running) return running;
-        const operation = this.runCleanups(b, due).finally(() => this.processing.delete(scope));
+        if (running) { await running; return this.nextDeadline(scope); }
+        if (!snapshot.cleanups.some(row => row.status !== 'succeeded' && row.nextAttemptAt <= Date.now())) return snapshot.deadline;
+        const operation = this.runCleanups(b, snapshot.cleanups).finally(() => this.processing.delete(scope));
         this.processing.set(scope, operation);
         await operation;
+        return this.disposed ? undefined : this.nextDeadline(scope);
     }
     private async runCleanups(binding: ResolvedStorageBinding, due: ResourceCleanup[]) {
         const path = resourcesPath(binding.rootPath);

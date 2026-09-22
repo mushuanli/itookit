@@ -92,3 +92,32 @@ VFS 层的已修问题和后续架构建议见 [VFS 读取性能与架构审查]
 验证：Kernel 263 项、llm-ui 51 项、llm-session 与 app-core 全包通过；app-shell 完整矩阵合计 314 项通过、30 项按既有配置跳过。宿主重启/工作区崩溃的 4 项首次受沙箱限制，在沙箱外重跑通过。最后单独重跑 5 项编辑器加载测量通过；6 个相关包/应用类型检查及 Tauri 前端构建通过。jsdom 中 Mermaid/布局能力告警仍存在，未将其计时视为真实浏览器性能。
 
 当前边界：历史首次加载仍读当前分支整条父链，历史 DOM 仍全部创建。尚未实现正文分页、视口虚拟化或宿主批量 SQL/IPC；不能把减少事务与重复读取理解为每个字段只有一次 IPC。Kernel 正常调度/恢复仍可能枚举 Task 目录，审批恢复使用索引不代表整个 Kernel 不再扫描。大历史的下一步重点是 DOM 数量与按页历史读取，并需保持发送上下文、导出、分支切换和执行恢复的完整语义。
+
+## 2026-09-22：根据真实 WebKit 录制减少绑定前置 I/O
+
+用户提供的 `localhost-recording.json` 覆盖 3.981 秒：207 次本地 IPC，其中属性检查 58 次、SQL 查询 85 次、事务开始/结束 59 次、SQL 写入 3 次、目录枚举 2 次。点击约在录制开始后 1.598 秒，录制结束时新 Session 尚未完整显示。因此这不是完整切换时延，也不能用此前 jsdom 样本推断这次瓶颈仍是历史 DOM。录制未显示递归扫描用户挂载目录；固定 Kernel 布局检查与托管资源维护是明显的重复操作来源。
+
+本轮实施：
+
+- `SessionManager.bindSession` 优先 `openSession(id, expectedStorage)`，只有 `SESSION_NOT_FOUND` 才创建。打开每次读取当前 catalog/主记录、校验绑定身份和布局；同一 Kernel 已登记的相同 fs/root 复用监听器，不重写固定布局元数据、不因再次绑定唤醒资源扫描。删除、绑定冲突和新版布局仍拒绝，不缓存可变主记录。
+- 固定布局文件的存在性检查合批，缺失文件顺序创建；LocalFS 的属性批次对相同路径去重，仅复用本批次结果。
+- 托管资源维护复用事务内已更新的 request 行，并在同一事务计算截止时间；无到期物理清理时，不再另开事务读取 deadline。实际调用外部清理器后仍重新读取持久结果，以保留重试和容量释放语义。
+- UI 状态只读写 session 记录，不触碰 history index；相同内容不写入、不增加 revision、不通知。纯 UI 状态通知不触发 sidebar 全量刷新；名称、分组、分支等变更仍刷新。
+- Flow 面板空闲/全终态每 30 秒同步，活跃或失败每秒刷新，窗口焦点/恢复可见及本地调用主动刷新；销毁后停止请求与迟到渲染。
+
+真实 LocalFS + SQLite 隔离实验，在同一实现中对已有 Session 分别调用创建检查和新的打开路径；计数窗口内暂停后台定时器，只比较前台绑定，不包含编辑器和 IPC 延迟：
+
+| 操作 | 重复创建检查 | 已登记绑定打开 |
+|---|---:|---:|
+| `statMany` 宿主调用 | 9 | 2 |
+| 底层 `stat`（包含批量内部调用） | 27 | 6 |
+| sidecar begin/commit | 5/5 | 4/4 |
+| record 字段读取（含 journal） | 8 | 6 |
+| 附加元数据读取 | 2 | 2 |
+| 布局元数据写入 | 1 | 0 |
+
+空闲资源维护从两次事务、六次前缀扫描降为一次事务、三次前缀扫描；UI 状态更新从两条记录的读写降为一条，重复保存只有一次记录读取、零写入。没有新增通用 VFS 缓存或宿主批量 SQL 协议，外层事务的 journal 恢复核对完整保留。
+
+验证入口：`durable-kernel/src/session-open-cost.test.ts`、`llm-session/__tests__/history-snapshot.test.ts`、`vfsdriver-localfs/tests/25-journal-probe.test.ts`、`app-shell/tests/session-load-localfs.test.ts`、`app-shell/tests/session-sidebar-order.test.ts` 和 `app-shell/tests/flow-invocation-polling.test.ts`。本轮未完成真实桌面改动后的录制对比，不能据操作次数宣称切换已降至某个毫秒值。录制中 WebKit 主线程高负载、约 40–60 ms 的部分 IPC 响应仍需关闭截图录制并结合宿主计时验证。
+
+本轮验证：Kernel 266 项、llm-session 167 项、llm-ui 51 项、LocalFS 86 项（含跨进程崩溃恢复）、app-core 125 项通过。app-shell 全包 314 项通过、30 项按既有配置跳过；受沙箱限制的 4 项宿主恢复测试在沙箱外重跑通过，随后新增的绑定 I/O 实验及编辑器加载共 8 项定向复跑通过。6 个相关包类型检查、Tauri 前端构建和文档检查通过；文档保留原有 5 条历史表述告警。

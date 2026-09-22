@@ -1,6 +1,6 @@
 import { generateUUID } from '@itookit/common';
 import { createFileSystemView, FSError, type IFileSystem, type ISeqFileTransaction } from '@itookit/vfs-core';
-import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin, type SessionLoadState } from './types';
+import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin, type SessionLoadState, type SessionRepositoryChange } from './types';
 import { sessionStorageRoot } from './session-storage-layout';
 import { collectHistoryChain, readRoundDocument, type SessionHistoryChain } from './history-chain';
 
@@ -11,7 +11,7 @@ interface SessionPaths { root: string; session: string; history: string }
 
 /** Session identity, history and attachments. No document path is a Session identity. */
 export class SessionRepository implements ISessionRepository {
-    private readonly listeners = new Set<() => void>();
+    private readonly listeners = new Set<(change?: SessionRepositoryChange) => void>();
     private closed = false;
     constructor(private readonly fs: IFileSystem,
         private readonly initializeNewSession?: (sessionId: string) => Promise<void>) {}
@@ -20,8 +20,8 @@ export class SessionRepository implements ISessionRepository {
         if (!this.fs.meta.seq?.transaction) throw new Error('Session storage requires record transactions');
     }
     async dispose(): Promise<void> { this.closed = true; this.listeners.clear(); }
-    subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-    private notify() { for (const listener of this.listeners) listener(); }
+    subscribe(listener: (change?: SessionRepositoryChange) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+    private notify(change: SessionRepositoryChange = { kind: 'session' }) { for (const listener of this.listeners) listener(change); }
     private root(id: string) { if (this.closed) throw new FSError('EACCES', 'Session repository is closed'); return sessionStorageRoot(id); }
     private name(name: string): string {
         if (!name || name.includes('/') || name.includes('\\') || name.includes('\0') || name === '.' || name === '..') throw new FSError('EINVAL', 'Invalid Session data name');
@@ -244,10 +244,10 @@ export class SessionRepository implements ISessionRepository {
         const p = this.paths(id);
         if (patch.id && patch.id !== id) throw new FSError('EINVAL', 'Session identity cannot change');
         if (patch.folder !== undefined) await this.ensureFolderRecord();
-        await this.fs.meta.seq!.transaction!(tx => this.writeManifestTx(tx, p, patch));
-        this.notify();
+        const changed = await this.fs.meta.seq!.transaction!(tx => this.writeManifestTx(tx, p, patch));
+        if (changed) this.notify({ sessionId: id, kind: Object.keys(patch).every(key => key === 'uiState') ? 'ui-state' : 'session' });
     }
-    private async writeManifestTx(tx: ISeqFileTransaction, p: SessionPaths, patch: Partial<ConversationManifest>): Promise<void> {
+    private async writeManifestTx(tx: ISeqFileTransaction, p: SessionPaths, patch: Partial<ConversationManifest>): Promise<boolean> {
         const raw = await tx.getEntry(p.session, 'session');
         if (!raw) throw new FSError('ENOENT', 'Session not found');
         const current = JSON.parse(raw);
@@ -260,11 +260,20 @@ export class SessionRepository implements ISessionRepository {
         }
         const next = { ...current, ...(title !== undefined ? { title } : {}), ...(summary !== undefined ? { summary } : {}), ...(origin !== undefined ? { origin } : {}),
             ...(normalizedFolder !== undefined ? { folder: normalizedFolder } : {}),
-            ...(uiState ? { uiState: { ...current.uiState, ...uiState, ...(uiState.branchDrafts ? { branchDrafts: { ...current.uiState?.branchDrafts, ...uiState.branchDrafts } } : {}) } } : {}), ...(flow ? { flow } : {}), updatedAt: Date.now(), revision: current.revision + 1 };
+            ...(uiState ? { uiState: { ...current.uiState, ...uiState, ...(uiState.branchDrafts ? { branchDrafts: { ...current.uiState?.branchDrafts, ...uiState.branchDrafts } } : {}) } } : {}), ...(flow ? { flow } : {}) };
+        const historyChanged = await this.writeHistoryPatchTx(tx, p, historyPatch);
+        if (!historyChanged && JSON.stringify(current) === JSON.stringify(next)) return false;
+        await tx.setEntry(p.session, 'session', JSON.stringify({ ...next, updatedAt: Date.now(), revision: current.revision + 1 }));
+        return true;
+    }
+    private async writeHistoryPatchTx(tx: ISeqFileTransaction, p: SessionPaths, patch: object): Promise<boolean> {
+        if (!Object.keys(patch).length) return false;
         const index = JSON.parse(await tx.getEntry(p.history, 'index') ?? 'null');
         if (index?.schemaVersion !== 3) throw new Error('Session history version incompatible');
-        await tx.setEntry(p.session, 'session', JSON.stringify(next));
-        await tx.setEntry(p.history, 'index', JSON.stringify({ ...index, ...historyPatch, schemaVersion: 3 }));
+        const next = JSON.stringify({ ...index, ...patch, schemaVersion: 3 });
+        if (JSON.stringify(index) === next) return false;
+        await tx.setEntry(p.history, 'index', next);
+        return true;
     }
     async getUIState(id: string): Promise<ConversationUIState | null> { return (await this.getManifest(id)).uiState ?? null; }
     async updateUIState(id: string, updates: Partial<ConversationUIState>): Promise<void> { await this.updateManifest(id, { uiState: updates }); }

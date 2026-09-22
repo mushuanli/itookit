@@ -15,21 +15,29 @@ export class InvocationPanel {
     private abort = new AbortController();
     private timer?: ReturnType<typeof setTimeout>;
     private refreshing?: Promise<void>;
+    private refreshFailed = false;
     private actions = new Set<string>();
     private element = document.createElement('section');
     constructor(private commands: ICommandBus, private sessionId: string, parent: HTMLElement, private useResult: (text: string) => void) {
         this.element.className = 'flow-invocations'; this.element.hidden = true;
         this.element.setAttribute('aria-label', t('flow.invoke.calls')); parent.append(this.element);
+        const refreshVisible = () => { if (!document.hidden) void this.refresh(); };
+        window.addEventListener('focus', refreshVisible, { signal: this.abort.signal });
+        document.addEventListener('visibilitychange', refreshVisible, { signal: this.abort.signal });
         void this.refresh();
     }
 
     refresh(): Promise<void> {
+        if (this.abort.signal.aborted) return Promise.resolve();
         if (this.refreshing) return this.refreshing;
-        this.refreshing = this.load().catch(error => {
+        this.refreshing = this.load().then(() => { this.refreshFailed = false; }).catch(error => {
+            this.refreshFailed = true;
             if (!this.abort.signal.aborted) this.element.setAttribute('title', String(error));
         }).finally(() => {
             this.refreshing = undefined; clearTimeout(this.timer);
-            if (!this.abort.signal.aborted) this.timer = setTimeout(() => { void this.refresh(); }, 1000);
+            const active = this.refreshFailed || [...this.cards.values()].some(card => card.active);
+            // Idle polling remains a fallback for changes made by another host.
+            if (!this.abort.signal.aborted) this.timer = setTimeout(() => { void this.refresh(); }, active ? 1000 : 30_000);
         });
         return this.refreshing;
     }

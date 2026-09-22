@@ -113,7 +113,9 @@ export async function ensureSessionLayout(binding: ResolvedStorageBinding): Prom
     const fresh = !await binding.fs.driver.exists(join(binding.rootPath, 'session.seq'));
     await ensureTree(binding.fs, binding.rootPath);
     await binding.fs.driver.updateMetadata(binding.rootPath, { vfsFixedLayout: true });
-    for (const file of sessionSeqFiles(binding.rootPath)) await ensureSeqFile(binding.fs, file);
+    const files = sessionSeqFiles(binding.rootPath);
+    const existing = await Promise.all(files.map(file => binding.fs.driver.exists(file)));
+    for (const [index, file] of files.entries()) if (!existing[index]) await ensureSeqFile(binding.fs, file);
     await ensureTree(binding.fs, join(binding.rootPath, 'tasks'));
     if (fresh) await clearSeqRecords(binding.fs, await sessionRecordPaths(binding));
 }

@@ -1,6 +1,6 @@
 export interface DurablePollerOptions<K> {
     intervalMs: number;
-    poll(key: K): Promise<boolean>;
+    poll(key: K): Promise<boolean | { nextDelay: number | undefined }>;
     nextDelay?(key: K): Promise<number | undefined>;
     onError(key: K, error: unknown): boolean;
 }
@@ -51,8 +51,10 @@ export class DurablePoller<K> {
         let again = false;
         let delay: number | undefined;
         try {
-            again = await this.options.poll(key);
-            if (again) delay = await this.options.nextDelay?.(key);
+            const result = await this.options.poll(key);
+            again = result !== false;
+            if (typeof result === 'object') delay = result.nextDelay;
+            else if (again) delay = await this.options.nextDelay?.(key);
         } catch (error) {
             again = this.options.onError(key, error);
             if (again) delay = Math.max(this.options.intervalMs, 1000);

@@ -50,6 +50,7 @@ export type {
     ConversationManifest,
     ConversationUIState,
     SessionLoadState,
+    SessionRepositoryChange,
     BranchTreeNode,
 } from './persistence/types';
 

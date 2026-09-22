@@ -129,7 +129,7 @@ class SessionRepository implements ISessionRepository {
     constructor(fs: IFileSystem);
     init(): Promise<void>;
     dispose(): Promise<void>;
-    subscribe(listener: () => void): () => void;
+    subscribe(listener: (change?: SessionRepositoryChange) => void): () => void;
 
     // 会话生命周期
     createSession(title: string, folder?: string | null): Promise<string>;   // 返回 sessionId
@@ -166,6 +166,8 @@ class SessionRepository implements ISessionRepository {
 ```
 
 **`ISessionRepository`**（`persistence/types.ts`）：上述契约接口。会话身份即 `<id>` 目录，不存在 UI 节点 ↔ 会话的映射 API；会话标题是 manifest 的 `title` 字段，经 `updateManifest()` 修改。
+
+`SessionRepositoryChange` 为 `{ kind: 'session' | 'ui-state'; sessionId?: string }`。纯 UI 状态保存通知 `ui-state`，sidebar 不因此重新枚举；旧实现不提供事件参数时仍按普通变更处理。manifest 更新只读写受影响的记录，UI 状态不触碰 history index；相同内容不增加 revision、不写记录、不通知。比较和分支草稿合并仍在持久事务内完成，不使用跨加载的状态缓存。
 
 ---
 

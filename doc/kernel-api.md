@@ -52,7 +52,7 @@ class Kernel implements KernelRegistration {
 
     // 会话
     createSession(spec: { id?: string; storage: StorageBindingRef }): Promise<SessionHandle>;
-    openSession(id: SessionId): Promise<SessionHandle>;
+    openSession(id: SessionId, expectedStorage?: StorageBindingRef): Promise<SessionHandle>;
     reopenSession(id: SessionId): Promise<SessionHandle>;
     listSessions(): AsyncIterable<SessionRecord>;
     sessionStat(sessionId: string): Promise<SessionStat>;
@@ -711,11 +711,13 @@ packages/durable-kernel/src/
 
 **约定**：存储根必须是支持事务性 SeqFile 的 `IFileSystem`（`requireTransactionalSeq` 校验，缺失时报错）；`createSession()` 将会话登记进全局 `catalog.seq`，`openSession()` 从 `session.seq` 读取主记录后按需恢复 `tasks/` 下的 Task。
 
+`openSession` 可选 `expectedStorage` 校验调用方预期的存储绑定；每次打开仍读取 catalog/主记录并验证身份与布局。同一 Kernel 中已登记且 fs/root 未变的绑定复用监听器，不重复写固定布局元数据或重新启动资源扫描。只有未登记的 Session 才由上层进入创建路径；未完成登记仍按持久 intent 恢复。
+
 **会话删除**：`removeSession(id)` 只负责 Kernel 拥有的部分，顺序固定为：停止轮询与资源扫描 → 取消 fenced reducer → 通知插件 `onSessionClosed` → 解除存储根 `vfsFixedLayout` 固定布局保护 → 删除存储根子树 → **清除该 Session 全部 SeqFile 记录**（`session/shared/context/messages/events/graph/resources/index.seq` 以及每个 `tasks/<id>/task.seq`；记录独立于文件存在，删文件不会清理它们）→ 最后在同一事务删除 `catalog.seq` 的 `session/<id>` 与所有指向它的 `task/<taskId>`。存在非终态 Task 或 `cleanupPending` 的 Effect 时抛 `CONFLICT`（`force: true` 才强制），因此**关闭失败不会连带销毁数据**；会话不存在时返回 `false`（幂等）。
 
 catalog 记录最后删除，使中断的删除**可安全重试**（绑定在收尾前始终可解析）；此外 `ensureSessionLayout` 在发现 `session.seq` 缺失时会先清空同名遗留记录，因此即使删除在"删文件"与"清记录"之间被中断，用同一 ID 重建也不会复活旧的 closed 状态或 shared 数据。Kernel 之外的会话记录（如 llm-session 的 history/session seq）由宿主在 `removeSession` 成功后自行删除，顺序不可颠倒。
 
-**重启后恢复未完成的删除**：`removeSession` 通过 `catalog` 直接解析绑定（`inspectSessionBinding`），不走 `openSession()`——后者会在已被删除的存储根上写 `vfsFixedLayout` metadata 并抛 `ENOENT`，导致重启后无法继续清理。`closeSession` 与 `sessionStat` 同样对"存储已不存在"的会话幂等：前者视为无需关闭（也不再尝试 `closed → closing` 状态迁移），后者报告 `closed`。因此应用层 `SessionLifecycleService` 在进程重启后仍能走完 close → remove → 记录删除的完整链路。
+**重启后恢复未完成的删除**：`removeSession` 通过 `catalog` 直接解析绑定（`inspectSessionBinding`），不走要求主记录文件仍存在的 `openSession()`，因此存储根已删除时仍可继续清理。`closeSession` 与 `sessionStat` 同样对"存储已不存在"的会话幂等：前者视为无需关闭（也不再尝试 `closed → closing` 状态迁移），后者报告 `closed`。因此应用层 `SessionLifecycleService` 在进程重启后仍能走完 close → remove → 记录删除的完整链路。
 
 ## 人工重试
 

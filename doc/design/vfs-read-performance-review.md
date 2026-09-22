@@ -57,6 +57,8 @@ Session 文件上下文的挂载根、cwd 检查使用类型端口；启动只�
 
 Session 界面渲染和分段日志见 [Session 性能审查](./llm-ui-session-performance.md)。
 
+2026-09-22 录制分析后的补充：LocalFS 的 `statType` 在同一微批次内按路径复用 pending Promise，避免同一个祖先在宿主批量请求中重复出现；批次发出时即丢弃该表，下一批仍检查真实文件。删除和符号链接回归保持通过。Kernel 首次布局准备将固定文件的存在性检查并发合批，缺失文件仍顺序创建，避免失败后遗留在途创建。已有 Session 的 UI 绑定改用打开路径，进一步省去重复固定布局检查；没有加入挂载目录 TTL 缓存。
+
 本轮验证通过：vfs-core 194 项、LocalFS 85 项（含跨进程崩溃恢复）、IndexedDB 15 项、llm-session 165 项、llm-ui 全包、vfs-ui 97 项、app-core 124 项、device-llm 配置/Skill/MCP/提示词定向 14 项；app-shell 的 Session 加载/导航/审批恢复/历史渲染与 Flow 控件定向回归通过。9 个相关包/应用类型检查、Tauri 前端与 native dev 构建通过；文档检查保留原有 5 条历史符号告警。未对真实用户 profile 执行写入测试，也未完成真实桌面的优化前后计时对比。
 
 后续 Session 切换轮次已将仓库展示读取合并为单次快照、Session 列表改为每批 64 个事务读取、挂载授权与 cwd 共用同一 revision 的配置，并消除重复 catalog 写入。审批恢复复用已有 Task 状态索引，跳过终态 Task 正文与目录枚举。没有新增通用 VFS TTL 缓存，也没有省略权限/恢复检查；宿主多字段 SQL 批量端口仍未实现。A → B → A 的测量方法、收益及剩余 DOM 热点见 [Session 性能审查](./llm-ui-session-performance.md)。

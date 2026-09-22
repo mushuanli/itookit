@@ -138,16 +138,22 @@ export class SeqFileKernelStore {
         return this.resolveStorage(catalog.storage);
     }
 
-    async openSession(id: SessionId): Promise<{ record: SessionRecord; binding: ResolvedStorageBinding }> {
+    async openSession(id: SessionId, options: {
+        expectedStorage?: StorageBindingRef; previousBinding?: ResolvedStorageBinding;
+    } = {}): Promise<{ record: SessionRecord; binding: ResolvedStorageBinding }> {
         const catalog = await this.readCatalog(id);
         if (!catalog) throw kernelError(KernelErrorCode.SESSION_NOT_FOUND, `Session not found: ${id}`);
+        if (options.expectedStorage && encode(catalog.storage) !== encode(options.expectedStorage)) throw new Error('Session storage binding conflict');
         const binding = await this.resolveStorage(catalog.storage);
-        await binding.fs.driver.updateMetadata(binding.rootPath, { vfsFixedLayout: true });
         if (catalog.registrationPending) await this.createSession(id, catalog.storage);
         const record = await this.readSession(binding);
+        if (record.id !== id || encode(record.storage) !== encode(catalog.storage)) throw new Error('Session storage already belongs to another session');
         // Opening is the entry point: refuse a newer layout, pending migration or
         // capability this host cannot provide before any caller touches the records.
         assertSessionLayout(record);
+        if (options.previousBinding?.fs !== binding.fs || options.previousBinding.rootPath !== binding.rootPath) {
+            await binding.fs.driver.updateMetadata(binding.rootPath, { vfsFixedLayout: true });
+        }
         return { record, binding };
     }
 

@@ -58,11 +58,13 @@ export interface SessionLoadState {
     settings: import('@itookit/common').ChatSessionSettings;
 }
 
+export interface SessionRepositoryChange { kind: 'session' | 'ui-state'; sessionId?: string }
+
 /** Domain storage. History and attachments belong to the Session identity. */
 export interface ISessionRepository {
     init(): Promise<void>;
     dispose(): Promise<void>;
-    subscribe(listener: () => void): () => void;
+    subscribe(listener: (change?: SessionRepositoryChange) => void): () => void;
     createSession(title: string, folder?: string | null): Promise<string>;
     /** Idempotently create a Session with a host-supplied durable identity. */
     ensureSession(id: string, title: string, origin?: SessionOrigin, folder?: string | null): Promise<string>;

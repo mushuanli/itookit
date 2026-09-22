@@ -1,4 +1,5 @@
 import { restoreFlowHistory } from '../persistence/restore-flow-history';
+import { KernelError, KernelErrorCode } from '@itookit/durable-kernel';
 import { flowBranchExecutions } from './flow-branches';
 import { FlowRerunService } from './flow-rerun';
 // @file: llm-conversation/session/session-manager.ts
@@ -218,9 +219,13 @@ export class SessionManager implements ISession, SessionQuery {
     // ================================================================
 
     async bindSession(sessionId: string): Promise<SessionSnapshot> {
-        this.durableSession = await this.kernel.createSession({
-            id: sessionId, storage: sessionDirectoryStorage(sessionId),
-        });
+        const storage = sessionDirectoryStorage(sessionId);
+        try {
+            this.durableSession = await this.kernel.openSession(sessionId, storage);
+        } catch (error) {
+            if (!(error instanceof KernelError) || error.code !== KernelErrorCode.SESSION_NOT_FOUND) throw error;
+            this.durableSession = await this.kernel.createSession({ id: sessionId, storage });
+        }
         const snapshot = await this.registry.bindSession(sessionId);
         await this.bindDurableProjection(sessionId);
         return snapshot;
