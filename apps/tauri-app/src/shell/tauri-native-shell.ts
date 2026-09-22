@@ -11,8 +11,9 @@
 //   // Optionally register a Tauri-native BashTool:
 //   toolDriver.registerToolInstance(createBashTool(shell));
 
+import { shellOutputChannel } from './shell-output-channel';
 import { invoke } from '@tauri-apps/api/core';
-import type { INativeShell, NativeShellResult } from '@itookit/tools';
+import type { INativeShell, NativeShellResult, NativeShellOptions } from '@itookit/tools';
 import { randomUUID } from '@itookit/common';
 
 interface NativeCapabilities {
@@ -39,7 +40,7 @@ export class TauriNativeShell implements INativeShell {
   async exec(
     command: string,
     args: string[],
-    opts?: { cwd?: string; timeoutMs?: number; signal?: AbortSignal },
+    opts?: NativeShellOptions,
   ): Promise<NativeShellResult> {
     // Skip execution when the caller has already cancelled.
     if (opts?.signal?.aborted) {
@@ -80,15 +81,17 @@ export class TauriNativeShell implements INativeShell {
         const requestId = randomUUID();
         const cancel = () => { void invoke('shell_cancel', { requestId }).catch(() => {}); };
         opts?.signal?.addEventListener('abort', cancel, { once: true });
+        const output = shellOutputChannel(opts?.onOutput);
         try {
           const [stdout, stderr, code] = await invoke<[string, string, number]>('shell_exec', {
-            command: shellCmd,
+            onOutput: output.channel, command: shellCmd,
             cwd,
             timeoutMs: opts?.timeoutMs ?? 30_000,
             requestId,
           });
           return { stdout, stderr, code };
         } finally {
+          output.close();
           opts?.signal?.removeEventListener('abort', cancel);
         }
       }

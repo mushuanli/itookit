@@ -148,7 +148,7 @@ export interface ISkillService {
 export interface SessionSkillControls {
     list(sessionId: string): ReturnType<SessionSkillControls['listLoaded']>;
     load(sessionId: string, skillId: string): Promise<string[]>;
-    listLoaded(sessionId: string): Promise<Array<{ id: string; name: string; description: string; loaded: boolean; enabled: boolean; definitionEnabled: boolean; toolCount: number;
+    listLoaded(sessionId: string): Promise<Array<{ id: string; name: string; description: string; loaded: boolean; enabled: boolean; definitionEnabled: boolean; toolCount: number; toolIds?: string[];
         versionDigest?: string; versionPolicy?: import('./skill-types').SkillVersionPolicy; drift?: SkillVersionDrift; unversioned?: boolean }>>;
     /**
      * Read one Skill definition for an explicit invocation (`/sk-<id>`).

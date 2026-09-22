@@ -1,6 +1,7 @@
 // @file llm-ui/editors/MCPSettingsEditor.ts
 import {
     generateShortUUID,
+    escapeHTML as escape,
     t,
     MCP_TRANSPORT_ICONS,
     STATUS_META,
@@ -8,6 +9,11 @@ import {
 } from '@itookit/common';
 import { BaseSettingsEditor, Toast, Modal } from '@itookit/ui-common';
 import type { MCPServer, IAgentManagementService } from '@itookit/common';
+import { bindMCPContent, renderMCPPrompts, parseMCPStringMap } from './mcp-content';
+import { hasMCPStdioHost } from '@itookit/device-llm';
+import { mcpTimeoutMs } from '@itookit/llm-common';
+
+
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -66,6 +72,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
             </div>`;
 
         this.bindEvents(servers);
+        if (selected) bindMCPContent(this.container, selected, this.service);
     }
 
     // ─── List ───────────────────────────────────────────────────────────────
@@ -85,11 +92,11 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         const isSelected = server.id === this.selectedId;
         const transportIcon = MCP_TRANSPORT_ICONS[server.transport as keyof typeof MCP_TRANSPORT_ICONS] ?? '🌐';
         return `
-            <div class="settings-list-item ${isSelected ? 'selected' : ''}" data-id="${server.id}" style="cursor:pointer">
-                <span class="settings-list-item__icon" style="font-size:1.25rem">${server.icon || ENTITY_ICONS.mcp}</span>
+            <div class="settings-list-item ${isSelected ? 'selected' : ''}" data-id="${escape(server.id)}" style="cursor:pointer">
+                <span class="settings-list-item__icon" style="font-size:1.25rem">${escape(server.icon || ENTITY_ICONS.mcp)}</span>
                 <div class="settings-list-item__info" style="min-width:0">
-                    <div class="settings-list-item__title" data-name-for="${server.id}"
-                         title="${t('tooltip.dblClickRename')}" style="cursor:text">${server.name}</div>
+                    <div class="settings-list-item__title" data-name-for="${escape(server.id)}"
+                         title="${t('tooltip.dblClickRename')}" style="cursor:text">${escape(server.name)}</div>
                     <div class="settings-list-item__desc">
                         ${transportIcon} ${t(`mcpTransport.${server.transport}` as Parameters<typeof t>[0]) ?? server.transport}
                     </div>
@@ -107,12 +114,12 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         return `
             <!-- ── Header ── -->
             ${this.renderEntityHeader({
-                icon:            server.icon || '',
+                icon:            escape(server.icon || ''),
                 fallbackIcon:    ENTITY_ICONS.mcp,
-                name:            server.name,
+                name:            escape(server.name),
                 namePlaceholder: t('mcp.placeholder.name'),
                 badges:  statusBadge(server.status),
-                subtitle: server.description || t(`mcpTransport.${server.transport}` as Parameters<typeof t>[0]) || server.transport,
+                subtitle: escape(server.description || t(`mcpTransport.${server.transport}` as Parameters<typeof t>[0]) || server.transport),
                 actions: `
                     <button class="settings-btn settings-btn--secondary" data-action="test">
                         <i class="fas fa-plug"></i> ${t('action.test')}
@@ -134,17 +141,17 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
                         <div class="settings-form-group">
                             <label>${t('form.name')}</label>
-                            <input class="settings-input" name="name" value="${server.name}" placeholder="${t('mcp.placeholder.name')}">
+                            <input class="settings-input" name="name" value="${escape(server.name)}" placeholder="${t('mcp.placeholder.name')}">
                         </div>
                         <div class="settings-form-group">
                             <label>${t('form.icon')} <span style="color:var(--st-text-tertiary);font-size:.8em">emoji</span></label>
-                            <input class="settings-input" name="icon" value="${server.icon || ''}" placeholder="🔌">
+                            <input class="settings-input" name="icon" value="${escape(server.icon || '')}" placeholder="🔌">
                         </div>
                     </div>
                     <div class="settings-form-group">
                         <label>${t('form.description')}</label>
                         <textarea class="settings-textarea" name="description" rows="2"
-                            placeholder="${t('mcp.placeholder.desc')}">${server.description || ''}</textarea>
+                            placeholder="${t('mcp.placeholder.desc')}">${escape(server.description || '')}</textarea>
                     </div>
                 </div>
 
@@ -153,17 +160,23 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                     <h3 class="settings-section__title">${t('mcp.section.transport')}</h3>
                     <div class="settings-form-group">
                         <label>${t('mcp.transport.label')}</label>
+                        <p>${t('mcp.protocolRequirement')}</p>
                         <select class="settings-select" name="transport" id="transport-select">
-                            <option value="stdio" ${server.transport === 'stdio' ? 'selected' : ''}>${MCP_TRANSPORT_ICONS.stdio} ${t('mcpTransport.stdio.option')}</option>
-                            <option value="sse"   ${server.transport === 'sse'   ? 'selected' : ''}>${MCP_TRANSPORT_ICONS.sse} ${t('mcpTransport.sse.option')}</option>
+                            ${!['stdio', 'http'].includes(server.transport) ? `<option value="${escape(server.transport)}" selected disabled>${escape(server.transport)} — ${t('mcp.unsupportedTransport')}</option>` : ''}
+                            <option value="stdio" ${hasMCPStdioHost() ? '' : 'disabled'} ${server.transport === 'stdio' ? 'selected' : ''}>${MCP_TRANSPORT_ICONS.stdio} ${t('mcpTransport.stdio.option')}</option>
                             <option value="http"  ${server.transport === 'http'  ? 'selected' : ''}>${MCP_TRANSPORT_ICONS.http} ${t('mcpTransport.http.option')}</option>
                         </select>
                     </div>
+                    ${!hasMCPStdioHost() ? `<p>${t('mcp.stdioUnavailable')}</p>` : ''}
                     <div id="transport-fields">
                         ${this.renderTransportFields(server)}
                     </div>
                 </div>
 
+                <div class="settings-section"><label>${t('mcp.headers')}
+                    <textarea class="settings-textarea" name="headers" rows="3">${escape(JSON.stringify(server.headers ?? {}, null, 2))}</textarea></label>
+                    <label>${t('mcp.environment')}<textarea class="settings-textarea" name="env" rows="3">${escape(JSON.stringify(server.env ?? {}, null, 2))}</textarea></label></div>
+                ${renderMCPPrompts(server)}
                 <!-- Advanced -->
                 <div class="settings-section">
                     <h3 class="settings-section__title">${t('mcp.section.advanced')}</h3>
@@ -171,7 +184,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                         <div class="settings-form-group" style="margin-bottom:0">
                             <label>${t('form.timeout')}</label>
                             <input class="settings-input" type="number" name="timeout"
-                                value="${server.timeout ?? 30}" min="5" max="300">
+                                value="${mcpTimeoutMs(server) / 1000}" min="0.001" max="300" step="0.001">
                         </div>
                         <div class="settings-checkbox-row" style="padding-bottom:.5rem">
                             <input type="checkbox" id="auto-connect" name="autoConnect"
@@ -186,8 +199,6 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                     <h3 class="settings-section__title" style="display:flex;align-items:center;gap:.5rem">
                         Tools
                         <span class="settings-badge">${tools.length}</span>
-                        <button class="settings-btn settings-btn--sm" data-action="add-tool"
-                            style="margin-left:auto;font-size:.75rem">${t('mcp.tools.addBtn')}</button>
                     </h3>
                     <p style="font-size:.75rem;color:var(--st-text-tertiary);margin:0 0 .5rem">
                         ${t('mcp.tools.hint')}
@@ -203,8 +214,6 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                     <h3 class="settings-section__title" style="display:flex;align-items:center;gap:.5rem">
                         Resources
                         <span class="settings-badge">${resources.length}</span>
-                        <button class="settings-btn settings-btn--sm" data-action="add-resource"
-                            style="margin-left:auto;font-size:.75rem">${t('mcp.resources.addBtn')}</button>
                     </h3>
                     ${resources.length > 0 ? this.renderResourceList(resources) : `
                         <div class="settings-empty settings-empty--mini">
@@ -219,47 +228,44 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
             return `
                 <div class="settings-form-group">
                     <label>${t('mcp.command.label')} <span style="color:var(--st-text-tertiary);font-size:.8em">${t('mcp.command.hint')}</span></label>
-                    <input class="settings-input" name="command" value="${server.command || ''}"
+                    <input class="settings-input" name="command" value="${escape(server.command || '')}"
                         placeholder="${t('mcp.placeholder.command')}" style="font-family:monospace">
                 </div>
                 <div class="settings-form-group">
                     <label>${t('mcp.args.label')} <span style="color:var(--st-text-tertiary);font-size:.8em">${t('mcp.args.hint')}</span></label>
-                    <input class="settings-input" name="args" value="${server.args || ''}"
+                    <input class="settings-input" name="args" value="${escape(server.args || '')}"
                         placeholder="${t('mcp.placeholder.args')}" style="font-family:monospace">
                 </div>
                 <div class="settings-form-group">
                     <label>${t('mcp.cwd.label')} <span style="color:var(--st-text-tertiary);font-size:.8em">${t('mcp.cwd.hint')}</span></label>
-                    <input class="settings-input" name="cwd" value="${server.cwd || ''}"
+                    <input class="settings-input" name="cwd" value="${escape(server.cwd || '')}"
                         placeholder="${t('mcp.placeholder.cwd')}" style="font-family:monospace">
                 </div>`;
         }
         return `
             <div class="settings-form-group">
                 <label>Endpoint URL</label>
-                <input class="settings-input" type="url" name="endpoint" value="${server.endpoint || ''}"
+                <input class="settings-input" type="url" name="endpoint" value="${escape(server.endpoint || '')}"
                     placeholder="${t('mcp.placeholder.endpoint')}">
             </div>
             <div class="settings-form-group">
                 <label>${t('mcp.apiKey.label')} <span style="color:var(--st-text-tertiary);font-size:.8em">${t('mcp.apiKey.hint')}</span></label>
-                <input class="settings-input" type="password" name="apiKey" value="${server.apiKey || ''}"
+                <input class="settings-input" type="password" name="apiKey" value="${escape(server.apiKey || '')}"
                     placeholder="${t('mcp.placeholder.apiKey')}">
             </div>`;
     }
 
     private renderToolList(tools: any[]) {
         return `<div style="display:flex;flex-direction:column;gap:.375rem">${
-            tools.map((tool, i) => `
+            tools.map(tool => `
                 <div class="settings-card" style="display:flex;align-items:center;gap:.75rem;padding:.625rem .875rem">
                     <i class="fas fa-wrench" style="color:var(--st-color-primary);flex-shrink:0;font-size:.875rem"></i>
                     <div style="flex:1;min-width:0">
-                        <div style="font-weight:600;font-size:.875rem;font-family:monospace">${tool.name}</div>
+                        <div style="font-weight:600;font-size:.875rem;font-family:monospace">${escape(tool.name)}</div>
                         <div style="font-size:.8125rem;color:var(--st-text-secondary);
                                     white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                            ${tool.description || t('mcp.tools.noDesc')}</div>
+                            ${escape(tool.description || t('mcp.tools.noDesc'))}</div>
                     </div>
-                    <button class="settings-btn-icon" data-action="del-tool" data-index="${i}" title="${t('action.delete')}">
-                        <i class="fas fa-times"></i>
-                    </button>
                 </div>`).join('')}
         </div>`;
     }
@@ -270,13 +276,11 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                 <div class="settings-card" style="display:flex;align-items:center;gap:.75rem;padding:.625rem .875rem">
                     <i class="fas fa-database" style="color:var(--st-color-primary);flex-shrink:0;font-size:.875rem"></i>
                     <div style="flex:1;min-width:0">
-                        <div style="font-weight:600;font-size:.875rem">${r.name || r.uri}</div>
+                        <div style="font-weight:600;font-size:.875rem">${escape(r.name || r.uri)}</div>
                         <div style="font-size:.8125rem;color:var(--st-text-secondary);font-family:monospace;
-                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.uri}</div>
+                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escape(r.uri)}</div>
                     </div>
-                    <button class="settings-btn-icon" data-action="del-resource" data-index="${i}" title="${t('action.delete')}">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    <button class="settings-btn" data-action="preview-resource" data-index="${i}">${t('mcp.preview')}</button>
                 </div>`).join('')}
         </div>`;
     }
@@ -332,8 +336,6 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         this.bindAction('save',         () => this.saveCurrent(servers));
         this.bindAction('delete',       () => this.deleteCurrent());
         this.bindAction('test',         () => this.testCurrent(servers));
-        this.bindAction('add-tool',     () => this.addTool(servers));
-        this.bindAction('add-resource', () => this.addResource(servers));
 
         // ── Transport select ──────────────────────────────────────────────────
         const transportSel = this.container.querySelector<HTMLSelectElement>('#transport-select');
@@ -345,18 +347,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
             });
         }
 
-        // ── Dynamic delete buttons (tool / resource) ──────────────────────────
-        const content = this.container.querySelector('.settings-split__content');
-        if (content) {
-            this.addEventListener(content, 'click', async (e) => {
-                const btn = (e.target as HTMLElement).closest('[data-action]') as HTMLElement | null;
-                if (!btn) return;
-                const action = btn.dataset.action;
-                const idx    = parseInt(btn.dataset.index ?? '-1', 10);
-                if (action === 'del-tool')     { await this.deleteTool(idx, servers); await this.render(); }
-                if (action === 'del-resource') { await this.deleteResource(idx, servers); await this.render(); }
-            });
-        }
+
     }
 
     private bindAction(action: string, handler: () => void) {
@@ -378,7 +369,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
         await this.service.saveMCPServer({ ...server, name: newName });
 
-        const sidebarTitle = this.container.querySelector<HTMLElement>(`[data-name-for="${this.selectedId}"]`);
+        const sidebarTitle = this.container.querySelector<HTMLElement>(`[data-name-for="${CSS.escape(this.selectedId!)}"]`);
         if (sidebarTitle && !sidebarTitle.querySelector('input')) sidebarTitle.textContent = newName;
         const formInput = this.container.querySelector<HTMLInputElement>('[name="name"]');
         if (formInput) formInput.value = newName;
@@ -411,7 +402,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         const server: MCPServer = {
             id:        `mcp-${generateShortUUID()}`,
             name:      'New Server',
-            transport: 'stdio',
+            transport: hasMCPStdioHost() ? 'stdio' : 'http',
             status:    'idle',
             tools:     [],
             resources: [],
@@ -421,31 +412,32 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         await this.render();
     }
 
+    private readDraft(existing: MCPServer): MCPServer {
+        const transport = this.val('transport') as MCPServer['transport'];
+        const seconds = Number(this.val('timeout'));
+        if (!Number.isFinite(seconds) || seconds <= 0) throw new Error(t('mcp.invalidTimeout'));
+        return {
+            ...existing, transport,
+            headers: parseMCPStringMap(this.val('headers')), env: parseMCPStringMap(this.val('env')),
+            name: this.val('header-name') || this.val('name') || existing.name,
+            icon: this.val('icon') || undefined, description: this.val('description') || undefined,
+            command: transport === 'stdio' ? this.val('command') || undefined : undefined,
+            args: transport === 'stdio' ? this.val('args') || undefined : undefined,
+            cwd: transport === 'stdio' ? this.val('cwd') || undefined : undefined,
+            endpoint: transport !== 'stdio' ? this.val('endpoint') || undefined : undefined,
+            apiKey: transport !== 'stdio' ? this.val('apiKey') || undefined : undefined,
+            timeout: seconds * 1000, timeoutUnit: 'ms', autoConnect: this.chk('autoConnect'),
+        };
+    }
+
     private async saveCurrent(servers: MCPServer[]) {
-        if (!this.selectedId) return;
         const existing = servers.find(s => s.id === this.selectedId);
         if (!existing) return;
-
-        const transport = this.val('transport') as MCPServer['transport'];
-        const updated: MCPServer = {
-            ...existing,
-            name:        this.val('header-name') || this.val('name') || existing.name,
-            icon:        this.val('icon')        || undefined,
-            description: this.val('description') || undefined,
-            transport,
-            // stdio
-            command:     transport === 'stdio' ? (this.val('command') || undefined) : undefined,
-            args:        transport === 'stdio' ? (this.val('args')    || undefined) : undefined,
-            cwd:         transport === 'stdio' ? (this.val('cwd')     || undefined) : undefined,
-            // http/sse
-            endpoint:    transport !== 'stdio' ? (this.val('endpoint') || undefined) : undefined,
-            apiKey:      transport !== 'stdio' ? (this.val('apiKey')   || undefined) : undefined,
-            timeout:     parseInt(this.val('timeout')) || 30,
-            autoConnect: this.chk('autoConnect'),
-        };
-        await this.service.saveMCPServer(updated);
-        Toast.success(t('mcp.toast.saved'));
-        await this.render();
+        try {
+            await this.service.saveMCPServer(this.readDraft(existing));
+            Toast.success(t('mcp.toast.saved'));
+            await this.render();
+        } catch (error) { Toast.error((error as Error).message); }
     }
 
     private deleteCurrent() {
@@ -459,116 +451,19 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
     }
 
     private async testCurrent(servers: MCPServer[]) {
-        if (!this.selectedId) return;
-        const server = servers.find(s => s.id === this.selectedId);
-        if (!server) return;
-
+        const existing = servers.find(s => s.id === this.selectedId);
         const btn = this.container.querySelector<HTMLButtonElement>('[data-action="test"]');
-        if (!btn) return;
+        if (!existing || !btn) return;
         const originalHTML = btn.innerHTML;
-        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${t('status.testing')}`;
-        btn.disabled = true;
-
+        btn.textContent = t('status.testing'); btn.disabled = true;
         try {
-            if (server.transport === 'stdio') {
-                Toast.info(t('mcp.toast.testStdio'));
-                return;
-            }
-            if (!server.endpoint) {
-                Toast.error(t('mcp.toast.testNoEndpoint'));
-                return;
-            }
-            const res = await fetch(server.endpoint, {
-                method:  'GET',
-                headers: server.apiKey
-                    ? { Authorization: `Bearer ${server.apiKey}` }
-                    : {},
-                signal: AbortSignal.timeout(5000),
-            });
-            if (res.ok) {
-                Toast.success(t('mcp.toast.testSuccess', { status: res.status }));
-                // Update status
-                const updated = { ...server, status: 'connected' as const };
-                await this.service.saveMCPServer(updated);
-                await this.render();
-            } else {
-                Toast.error(t('mcp.toast.testFailed', { status: res.status }));
-            }
-        } catch (e: unknown) {
-            Toast.error(t('mcp.toast.testError', { message: (e as Error).message }));
-        } finally {
-            if (btn.isConnected) {
-                btn.innerHTML = originalHTML;
-                btn.disabled = false;
-            }
-        }
-    }
-
-    private async addTool(servers: MCPServer[]) {
-        const body = `
-            <div class="settings-form-group">
-                <label>${t('mcp.addTool.nameLabel')} <span style="color:var(--st-text-tertiary);font-size:.8em">snake_case</span></label>
-                <input class="settings-input" id="tool-name" placeholder="${t('mcp.addTool.namePlaceholder')}" style="font-family:monospace">
-            </div>
-            <div class="settings-form-group">
-                <label>${t('form.description')}</label>
-                <textarea class="settings-textarea" id="tool-desc" rows="2"
-                    placeholder="${t('mcp.addTool.descPlaceholder')}"></textarea>
-            </div>`;
-        new Modal(t('mcp.addTool.title'), body, {
-            onConfirm: async () => {
-                const name = (document.getElementById('tool-name') as HTMLInputElement).value.trim();
-                const desc = (document.getElementById('tool-desc') as HTMLTextAreaElement).value.trim();
-                if (!name) return false;
-                const server = servers.find(s => s.id === this.selectedId);
-                if (server) {
-                    server.tools = [...((server.tools as any[]) || []), { name, description: desc }];
-                    await this.service.saveMCPServer(server);
-                    await this.render();
-                }
-            },
-        }).show();
-    }
-
-    private async deleteTool(index: number, servers: MCPServer[]) {
-        const server = servers.find(s => s.id === this.selectedId);
-        if (!server?.tools) return;
-        const tools = [...(server.tools as any[])];
-        tools.splice(index, 1);
-        await this.service.saveMCPServer({ ...server, tools });
-    }
-
-    private async addResource(servers: MCPServer[]) {
-        const body = `
-            <div class="settings-form-group">
-                <label>${t('mcp.addResource.uriLabel')}</label>
-                <input class="settings-input" id="res-uri" placeholder="${t('mcp.addResource.uriPlaceholder')}" style="font-family:monospace">
-            </div>
-            <div class="settings-form-group">
-                <label>${t('form.name')}</label>
-                <input class="settings-input" id="res-name" placeholder="${t('mcp.addResource.namePlaceholder')}">
-            </div>`;
-        new Modal(t('mcp.addResource.title'), body, {
-            onConfirm: async () => {
-                const uri  = (document.getElementById('res-uri')  as HTMLInputElement).value.trim();
-                const name = (document.getElementById('res-name') as HTMLInputElement).value.trim();
-                if (!uri) return false;
-                const server = servers.find(s => s.id === this.selectedId);
-                if (server) {
-                    server.resources = [...((server.resources as any[]) || []), { uri, name }];
-                    await this.service.saveMCPServer(server);
-                    await this.render();
-                }
-            },
-        }).show();
-    }
-
-    private async deleteResource(index: number, servers: MCPServer[]) {
-        const server = servers.find(s => s.id === this.selectedId);
-        if (!server?.resources) return;
-        const resources = [...(server.resources as any[])];
-        resources.splice(index, 1);
-        await this.service.saveMCPServer({ ...server, resources });
+            const draft = this.readDraft(existing);
+            const discovered = await this.service.testMCPServer(draft);
+            await this.service.saveMCPServer({ ...draft, ...discovered, status: 'connected' });
+            Toast.success(t('mcp.discoverySuccess', { count: discovered.tools.length }));
+            await this.render();
+        } catch (error) { Toast.error(t('mcp.toast.testError', { message: (error as Error).message })); }
+        finally { if (btn.isConnected) { btn.innerHTML = originalHTML; btn.disabled = false; } }
     }
 
     private showImport() {
@@ -602,7 +497,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
     private async exportAll(servers: MCPServer[]) {
         // Remove apiKey from export for security
-        const safe = servers.map(({ apiKey: _k, ...rest }) => rest);
+        const safe = servers.map(({ apiKey: _k, headers: _h, env: _e, ...rest }) => rest);
         const blob = new Blob([JSON.stringify(safe, null, 2)], { type: 'application/json' });
         const a = Object.assign(document.createElement('a'), {
             href: URL.createObjectURL(blob), download: 'mcp-servers.json',

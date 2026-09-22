@@ -54,7 +54,7 @@ async function savedRounds(root: string, sessionId: string) {
     } finally { await inspection.dispose(); }
 }
 
-it.each([[false, false], [true, false], [true, true]])('CLI Flow calls MCP: Skill=%s, built CLI=%s', async (useSkill, built) => {
+it.each([[false, false, false], [true, false, false], [true, true, false], [false, false, true]])('CLI Flow calls MCP: Skill=%s, built CLI=%s, profile=%s', async (useSkill, built, useProfile) => {
     if (built) await promisify(execFile)('pnpm', ['build'], { timeout: 60000, maxBuffer: 2000000 });
     const { root, requests, save } = await profile();
     await save('etc/llm/.skills/review.yaml', { id: 'review', name: 'Review', description: '', type: 'mcp', enabled: true,
@@ -63,7 +63,7 @@ it.each([[false, false], [true, false], [true, true]])('CLI Flow calls MCP: Skil
         triggerPatterns: [], autoLoad: false, priority: 50 });
     const target = { id: 'check', name: 'Check', plugin: 'builtin.agent', pluginVersion: '1.0.0', inputs: {}, capabilities: [],
         config: { connectionId: 'default', systemPrompt: ['CHECK_ONLY'], maxExchanges: 3, approval: useSkill ? 'external' : 'none',
-            ...(useSkill ? { skillIds: ['review'] } : { toolIds: ['mcp__fixture__lookup'] }) } };
+            ...(useSkill ? { skillIds: ['review'] } : useProfile ? { mcpProfileIds: ['fixture'] } : { toolIds: ['mcp__fixture__lookup'] }) } };
     await save('review.flow', { id: 'review', name: 'Review', draftVersion: 1, updatedAt: 1, parameters: [], edges: [],
         nodes: [{ id: 'review', name: 'Review', plugin: 'builtin.route', pluginVersion: '2.0.0', inputs: {},
             config: { mode: 'exclusive', maxRounds: 1, until: { kind: 'literal', value: false }, context: { history: 'none' }, requireNoHistory: true,

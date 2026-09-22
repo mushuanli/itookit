@@ -90,6 +90,7 @@ export interface ToolVFSContext {
 }
 
 export interface ToolExecutionContext {
+    onProgress?: (progress: import('./tool-types').ToolProgress) => Promise<void>;
     /** 工作目录（Node.js 真实路径 或 VFS 模块相对路径） */
     cwd: string;
     /** 取消信号 */

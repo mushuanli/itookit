@@ -1,3 +1,4 @@
+import { shellOutputChannel } from './shell-output-channel';
 import { invoke } from '@tauri-apps/api/core';
 import type { AppKernelPlatform } from '@itookit/app-shell';
 import { randomUUID } from '@itookit/common';
@@ -42,12 +43,13 @@ function scopedProcesses(files: Parameters<Factory>[1], grants: Array<[string, s
             const requestId = randomUUID();
             const cancel = () => { void invoke('shell_cancel', { requestId }).catch(() => {}); };
             options?.signal?.addEventListener('abort', cancel, { once: true });
+            const output = shellOutputChannel(options?.onOutput);
             const result = invoke<[string, string, number]>('session_shell_exec', {
-                command: args[1], cwd, mounts: grants, requestId, timeoutMs: options?.timeoutMs ?? 30_000,
+                onOutput: output.channel, command: args[1], cwd, mounts: grants, requestId, timeoutMs: options?.timeoutMs ?? 30_000,
             });
             active.set(requestId, result);
             try { const [stdout, stderr, code] = await result; return { stdout, stderr, code }; }
-            finally { active.delete(requestId); options?.signal?.removeEventListener('abort', cancel); }
+            finally { output.close(); active.delete(requestId); options?.signal?.removeEventListener('abort', cancel); }
         } },
         release() {
             closed = true;

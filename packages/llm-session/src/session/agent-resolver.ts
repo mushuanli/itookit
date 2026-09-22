@@ -40,7 +40,14 @@ function describeError(error: unknown): string {
  */
 export class AgentResolver {
     constructor(private agentService: IAgentConfigService,
-        private readonly resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>) {}
+        private readonly resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>,
+        private readonly resolveMCPProfiles?: (sessionId: string, ids: string[]) => Promise<string[]>) {}
+
+    async getMCPToolIds(ids: string[], sessionId: string): Promise<string[]> {
+        if (!ids.length) return [];
+        if (!this.resolveMCPProfiles) throw new Error('MCP profile resolution is unavailable');
+        return this.resolveMCPProfiles(sessionId, ids);
+    }
 
     /**
      * Resolve agent for chat — falls back to Default Agent if not found.
@@ -191,9 +198,10 @@ export class AgentResolver {
             icon: agentDef.icon,
             temperature: agentDef.modelPolicy?.temperature ?? agentDef.config.temperature,
             agentVersion: agentDef.version ?? await this.hashDefinition(agentDef),
-            capabilityPolicy: agentDef.capabilityPolicy,
-            memoryPolicy: agentDef.memoryPolicy,
-            defaultContextPolicy: agentDef.defaultContextPolicy,
+            capabilityPolicy: structuredClone(agentDef.capabilityPolicy ?? (agentDef.config.mcpServers?.length
+                ? { mcpProfileIds: [...agentDef.config.mcpServers] } : undefined)),
+            memoryPolicy: structuredClone(agentDef.memoryPolicy),
+            defaultContextPolicy: structuredClone(agentDef.defaultContextPolicy),
         } as ExecutorConfig;
     }
 

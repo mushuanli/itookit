@@ -26,11 +26,10 @@ export const SKILL_TYPE_META: Record<SkillType, SkillTypeMeta> = {
 
 // ── MCP transport ─────────────────────────────────────────────────────────────
 
-export type MCPTransport = 'stdio' | 'sse' | 'http';
+export type MCPTransport = 'stdio' | 'http';
 
 export const MCP_TRANSPORT_ICONS: Record<MCPTransport, string> = {
     stdio: '🖥️',
-    sse:   '📡',
     http:  '🌐',
 } as const;
 

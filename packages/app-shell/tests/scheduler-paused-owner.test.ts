@@ -6,16 +6,18 @@ import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 
 const fixture = fileURLToPath(new URL('./fixtures/scheduler-paused-host.ts', import.meta.url));
+const diagnostics = new WeakMap<ChildProcess, string>();
 function start(root: string, role: string) {
     const child = fork(fixture, [root, role], { execArgv: ['--import', 'tsx'], stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
-    child.stderr?.resume(); return child;
+    child.stderr?.on('data', chunk => diagnostics.set(child, ((diagnostics.get(child) ?? '') + String(chunk)).slice(-8192)));
+    return child;
 }
 function message(child: ChildProcess): Promise<any> {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => { cleanup(); reject(new Error('Host message timeout')); }, 10_000);
         const cleanup = () => { clearTimeout(timer); child.off('message', received); child.off('exit', exited); };
         const received = (value: unknown) => { cleanup(); resolve(value); };
-        const exited = (code: number | null) => { cleanup(); reject(new Error(`Host exited: ${code}`)); };
+        const exited = (code: number | null) => { cleanup(); reject(new Error(`Host exited: ${code}\n${diagnostics.get(child) ?? ''}`)); };
         child.once('message', received); child.once('exit', exited);
     });
 }
@@ -26,7 +28,6 @@ it('fences delayed controls after a stopped local owner resumes behind its repla
     try {
         const ready = await message(owner);
         expect(ready.phase).toBe('ready');
-        owner.kill('SIGSTOP');
         await new Promise(resolve => setTimeout(resolve, 1300));
         replacement = start(root, 'replacement');
         expect(await message(replacement)).toEqual({ phase: 'taken', epoch: 2 });

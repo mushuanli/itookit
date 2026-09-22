@@ -322,6 +322,7 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
         }
         catch (error) { return cleanupAfterFailure(error, [() => files?.release(), () => toolDriver.dispose(), () => skillDriver.dispose()]); }
         const scope = createScope(toolDriver, skillDriver, ttySessions);
+        scope.resolveMCPToolIds = profiles => mcp.resolveProfiles(profiles);
         scope.prepareTools = ids => mcp.prepare(scope.toolService, ids);
         const dispose = scope.dispose.bind(scope);
         scope.dispose = retryCleanup([() => dispose(), () => files?.release()]);

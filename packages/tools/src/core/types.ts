@@ -21,6 +21,11 @@ export interface NativeShellResult {
  *
  * Platform applications provide implementations and inject them at assembly time.
  */
+export interface NativeShellOptions {
+  cwd?: string; timeoutMs?: number; signal?: AbortSignal;
+  onOutput?: (chunk: { stream: 'stdout' | 'stderr'; text: string }) => void;
+}
+
 export interface INativeShell {
   /**
    * Execute a native command and return its output.
@@ -29,7 +34,7 @@ export interface INativeShell {
   exec(
     command: string,
     args: string[],
-    opts?: { cwd?: string; timeoutMs?: number; signal?: AbortSignal },
+    opts?: NativeShellOptions,
   ): Promise<NativeShellResult>;
 
   /**

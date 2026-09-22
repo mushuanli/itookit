@@ -221,3 +221,6 @@ export type { LLMIoctlCommand, LLMDeviceOpenOptions, IShellRunner, LLMDeviceDriv
 
 // ============================================
 // ============================================
+
+export { registerMCPStdioHost, hasMCPStdioHost } from './skills/mcp-host-transport';
+export type { MCPProcessBridge, MCPProcessBatch } from './skills/mcp-host-transport';

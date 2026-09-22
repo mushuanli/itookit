@@ -38,6 +38,7 @@ export interface ChatInputOptions {
      * 仅在 kernel 模式可用时由 Shell 注入。
      * ChatInput 在设置面板打开时调用此函数刷新列表。
      */
+    onConfigureCapabilities?: () => void;
     onRequestSkills?: () => Promise<SkillInfo[]>;
 
     /**
@@ -197,6 +198,7 @@ export class ChatInput implements IChatInputPresenter {
             onCloseSettings: () => this.toggleSettings(false),
         });
         this.skillPanel = new SkillPanel(container, {
+            onConfigureCapabilities: this.options.onConfigureCapabilities,
             onRequestSkills: this.options.onRequestSkills,
             onLoadSkill: this.options.onLoadSkill,
             onUnloadSkill: this.options.onUnloadSkill,

@@ -2,7 +2,7 @@ import { runProcess } from './process-run';
 import path from 'node:path';
 import type { ITTYDriver, ITTYSession, ITTYSpawnOptions } from '@itookit/common';
 import { NodeTTYDriver } from '@itookit/device-tty';
-import type { INativeShell, NativeShellResult } from '@itookit/tools';
+import type { INativeShell, NativeShellResult, NativeShellOptions } from '@itookit/tools';
 import type { CompiledWorkflow, SandboxConfig, WorkspaceGrant } from './types';
 
 export interface SandboxDoctorResult {
@@ -18,7 +18,7 @@ export class NodeNativeShell implements INativeShell {
     async exec(
         command: string,
         args: string[],
-        options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal } = {},
+        options: NativeShellOptions = {},
     ): Promise<NativeShellResult> {
         const invocation = nativeInvocation(command, args);
         const cwd = this.grants ? nativeWorkingDirectory(await this.grants(), options.cwd) : options.cwd;
@@ -26,6 +26,7 @@ export class NodeNativeShell implements INativeShell {
             cwd,
             timeoutMs: options.timeoutMs,
             signal: options.signal,
+            onOutput: options.onOutput,
             env: safeEnvironment(),
         });
     }
@@ -43,7 +44,7 @@ export class OciSandboxShell implements INativeShell {
     async exec(
         command: string,
         args: string[],
-        options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal } = {},
+        options: NativeShellOptions = {},
     ): Promise<NativeShellResult> {
         const shellCommand = command === 'sh' && args[0] === '-c' ? args[1] : quote([command, ...args]);
         const grants = await this.grants();
@@ -52,6 +53,7 @@ export class OciSandboxShell implements INativeShell {
         return runProcess(this.engine, runArgs, {
             timeoutMs: options.timeoutMs,
             signal: options.signal,
+            onOutput: options.onOutput,
             env: safeEnvironment(),
         });
     }

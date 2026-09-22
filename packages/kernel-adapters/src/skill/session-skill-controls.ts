@@ -22,7 +22,7 @@ export function createSessionSkillControls(kernel: Kernel, registry: SessionCapa
                     // Definition-level enablement, independent of whether the input-side checkbox may
                     // load it: `/sk-<id>` exists exactly for the manual (action/silent) invocations.
                     definitionEnabled: !!skill?.enabled,
-                    toolCount: skill?.tools.length ?? 0, versionDigest: versions?.snapshots[id]?.digest,
+                    toolCount: skill?.tools.length ?? 0, toolIds: skill?.tools.map(tool => tool.toolId) ?? [], versionDigest: versions?.snapshots[id]?.digest,
                     versionPolicy: versions?.snapshots[id]?.policy, drift: versions?.drifts[id],
                     unversioned: ids.includes(id) && (!versions || !Object.hasOwn(versions.snapshots, id)) };
             });

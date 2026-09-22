@@ -77,3 +77,32 @@ it('captures mode before asynchronous admission', async () => {
     expect(captured[0].sendIntent?.execution).toMatchObject({ mode: 'chat' });
     expect(captured[0].overrides?.executionMode).toBe('chat');
 });
+
+it.each(['agent', 'chat'] as const)('resolves configured MCP profiles only for %s execution and freezes their tool grants', async mode => {
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const fs = await manager.openFileSystem('/');
+    const kernel = new Kernel({ catalog: { fs, rootPath: '/catalog' }, pollMs: 0 });
+    kernel.registerStorageResolver({ kind: 'test', resolve: async () => ({ fs, rootPath: '/session' }) });
+    await kernel.initialize(); await kernel.createSession({ id: 's', storage: { kind: 'test', locator: null } });
+    try {
+        const name = 'mcp__server__lookup';
+        const resolveMCPToolIds = vi.fn(async () => [name]);
+        const coordinator = new ConversationRunCoordinator({ kernel, resolveMCPToolIds,
+            resolveTools: async () => ({ definitions: [{ name }], externalIds: [name] }), engine: {}, eventBus: {}, dagPlugins: {} } as never);
+        const internal = coordinator as any;
+        vi.spyOn(internal, 'startRound').mockResolvedValue(undefined);
+        vi.spyOn(internal, 'projectRun').mockReturnValue(undefined);
+        vi.spyOn(internal, 'consume').mockResolvedValue({ message: { role: 'assistant', content: 'done' } });
+        vi.spyOn(internal, 'completeRound').mockResolvedValue(undefined);
+        const policy = { toolIds: [], mcpProfileIds: ['server'] };
+        await coordinator.executeDirect({ task: { id: 'request', sessionId: 's', input: { text: 'lookup',
+            sendIntent: { execution: { kind: 'agent', mode } } }, abortController: new AbortController() },
+            config: { id: 'a', capabilityPolicy: policy, webSearchMode: 'disabled' },
+            log: { loadManifest: async () => ({ currentBranch: 'main', branches: { main: null }, branchMeta: {} }) },
+            roundId: 'r', contextFiles: [], finalize: async () => {} } as never);
+        const [task] = await kernel.listSessionTasks('s');
+        expect(task.input).toMatchObject({ tools: mode === 'agent' ? [{ name }] : [], allowedToolIds: mode === 'agent' ? [name] : [], approval: 'external' });
+        expect(resolveMCPToolIds).toHaveBeenCalledTimes(mode === 'agent' ? 1 : 0);
+        expect(policy.toolIds).toEqual([]);
+    } finally { kernel.dispose(); await kernel.waitIdle(); await manager.dispose(); }
+});

@@ -2,7 +2,7 @@
 //
 // MCPManager — MCP server config storage and active connection lifecycle.
 
-import type { MCPServer } from '@itookit/common';
+import { mcpTimeoutMs, type MCPServer, type MCPDiscovery } from '@itookit/llm-common';
 import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { MCPServerConnection } from '../skills/mcp-client';
 import type { MCPServerConfig } from '../types/provider';
@@ -12,7 +12,10 @@ const MCP_DIR = '/llm/.mcp';
 
 export class MCPManager {
     private _mcpServers: MCPServer[] = [];
-    private connecting = new Map<string, Promise<void>>();
+    private fingerprints = new Map<string, string>();
+    private operations = new Map<string, Promise<void>>();
+    private closed = false;
+    private revisions = new Map<string, number>();
     private _activeMCPConns = new Map<string, MCPServerConnection>();
 
     constructor(
@@ -24,7 +27,7 @@ export class MCPManager {
     // ─── Read accessors ────────────────────────────────────────────────────
 
     getMCPServers(): MCPServer[] {
-        return [...this._mcpServers];
+        return this._mcpServers.map(server => ({ ...server, status: this._activeMCPConns.get(server.id)?.isConnected() ? 'connected' : 'idle' }));
     }
 
     getServers(): MCPServer[] {
@@ -41,8 +44,19 @@ export class MCPManager {
 
     // ─── Mutations ─────────────────────────────────────────────────────────
 
-    async saveMCPServer(server: MCPServer, systemFS?: IFileSystem): Promise<void> {
+    saveMCPServer(server: MCPServer, systemFS?: IFileSystem): Promise<void> {
+        validateMCPServer(server);
+        const snapshot = structuredClone(server);
+        return this.serial(snapshot.id, () => this.saveServer(snapshot, systemFS));
+    }
+
+    private async saveServer(server: MCPServer, systemFS?: IFileSystem): Promise<void> {
+        validateMCPServer(server);
+        server = { ...server, timeout: mcpTimeoutMs(server), timeoutUnit: 'ms' };
+        const fingerprint = JSON.stringify(this.mcpServerToConfig(server));
+        if (this.fingerprints.has(server.id) && this.fingerprints.get(server.id) !== fingerprint) await this.closeServer(server.id);
         await this.writeMCPToDisk(server, systemFS);
+        this.revisions.set(server.id, (this.revisions.get(server.id) ?? 0) + 1);
         const idx = this._mcpServers.findIndex(s => s.id === server.id);
         if (idx >= 0) { this._mcpServers[idx] = server; } else { this._mcpServers.push(server); }
         await this.vfs.createDeviceNode('llm', `/dev/llm/mcp/${server.id}`, {
@@ -52,14 +66,16 @@ export class MCPManager {
         this.onChanged();
     }
 
-    async deleteMCPServer(id: string, systemFS?: IFileSystem): Promise<void> {
+    deleteMCPServer(id: string, systemFS?: IFileSystem): Promise<void> {
+        validateMCPServerId(id);
+        return this.serial(id, () => this.deleteServer(id, systemFS));
+    }
+
+    private async deleteServer(id: string, systemFS?: IFileSystem): Promise<void> {
         await this.deleteMCPFromDisk(id, systemFS);
+        this.revisions.set(id, (this.revisions.get(id) ?? 0) + 1);
         this._mcpServers = this._mcpServers.filter(s => s.id !== id);
-        const conn = this._activeMCPConns.get(id);
-        if (conn) {
-            try { await conn.disconnect(); } catch { /* ignore */ }
-            this._activeMCPConns.delete(id);
-        }
+        await this.closeServer(id);
         await this.vfs.removeDeviceNode(`/dev/llm/mcp/${id}`);
         this.onChanged();
     }
@@ -73,44 +89,84 @@ export class MCPManager {
     // ─── VFS reload (called from bindVFSEvents debounce) ──────────────────
 
     async reload(): Promise<void> {
-        this._mcpServers = await this.loadAllMCP();
+        const revisions = new Map(this.revisions);
+        const servers = await this.loadAllMCP();
+        const ids = new Set([...this._mcpServers.map(server => server.id), ...servers.map(server => server.id)]);
+        await Promise.all([...ids].map(id => this.serial(id, async () => {
+            if ((revisions.get(id) ?? 0) !== (this.revisions.get(id) ?? 0)) return;
+            const server = servers.find(item => item.id === id);
+            if (!server || JSON.stringify(this.mcpServerToConfig(server)) !== this.fingerprints.get(id)) await this.closeServer(id);
+            this._mcpServers = this._mcpServers.filter(item => item.id !== id);
+            if (server) this._mcpServers.push(server);
+        })));
     }
 
     // ─── Connection lifecycle ──────────────────────────────────────────────
 
-    async connectMCPServer(server: MCPServer): Promise<void> {
-        if (this._activeMCPConns.has(server.id)) return;
-        if (!this.connecting.has(server.id)) {
-            const connection = new MCPServerConnection(this.mcpServerToConfig(server));
-            const pending = connection.connect().then(() => { this._activeMCPConns.set(server.id, connection); })
-                .finally(() => { this.connecting.delete(server.id); });
-            this.connecting.set(server.id, pending);
-        }
-        await this.connecting.get(server.id);
+    connectMCPServer(server: MCPServer): Promise<void> {
+        return this.serial(server.id, () => this.connectServer(server));
     }
 
-    async getOrConnectServer(serverId: string, servers: MCPServer[]): Promise<MCPServerConnection> {
-        const server = servers.find(item => item.id === serverId);
-        if (!server) throw new Error(`MCP server '${serverId}' not configured`);
-        await this.connectMCPServer(server);
-        return this._activeMCPConns.get(serverId)!;
+    private async connectServer(server: MCPServer): Promise<void> {
+        validateMCPServer(server);
+        const fingerprint = JSON.stringify(this.mcpServerToConfig(server));
+        if (this.fingerprints.get(server.id) !== fingerprint) await this.closeServer(server.id);
+        if (this._activeMCPConns.get(server.id)?.isConnected()) return;
+        const connection = new MCPServerConnection(this.mcpServerToConfig(server));
+        await connection.connect();
+        this.fingerprints.set(server.id, fingerprint);
+        this._activeMCPConns.set(server.id, connection);
     }
 
-    async disconnectServer(id: string): Promise<void> {
-        await this.connecting.get(id)?.catch(() => {});
+    async readMCPResource(id: string, uri: string): Promise<unknown> {
+        return (await this.getOrConnectServer(id, this._mcpServers)).readResource(uri);
+    }
+
+    async getMCPPrompt(id: string, name: string, args?: Record<string, string>): Promise<unknown> {
+        return (await this.getOrConnectServer(id, this._mcpServers)).getPrompt(name, args);
+    }
+
+    testMCPServer(server: MCPServer): Promise<MCPDiscovery> {
+        return this.serial(server.id, async () => {
+            await this.connectServer(server);
+            try { return await this._activeMCPConns.get(server.id)!.discover(); }
+            catch (error) { await this.closeServer(server.id); throw error; }
+        });
+    }
+
+    getOrConnectServer(serverId: string, _servers: MCPServer[]): Promise<MCPServerConnection> {
+        return this.serial(serverId, async () => {
+            const server = this._mcpServers.find(item => item.id === serverId);
+            if (!server) throw new Error(`MCP server '${serverId}' not configured`);
+            await this.connectServer(server);
+            return this._activeMCPConns.get(serverId)!;
+        });
+    }
+
+    disconnectServer(id: string): Promise<void> { return this.serial(id, () => this.closeServer(id)); }
+
+    private async closeServer(id: string): Promise<void> {
         const conn = this._activeMCPConns.get(id);
-        if (conn) {
-            try { await conn.disconnect(); } catch { /* ignore */ }
-            this._activeMCPConns.delete(id);
-        }
+        await conn?.disconnect();
+        this.fingerprints.delete(id);
+        this._activeMCPConns.delete(id);
     }
 
     async disconnectAll(): Promise<void> {
-        await Promise.allSettled(this.connecting.values());
-        for (const conn of this._activeMCPConns.values()) {
-            try { await conn.disconnect(); } catch {}
-        }
-        this._activeMCPConns.clear();
+        this.closed = true;
+        await Promise.allSettled(this.operations.values());
+        const results = await Promise.allSettled([...this._activeMCPConns.keys()].map(id => this.closeServer(id)));
+        const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map(result => result.reason);
+        if (errors.length) throw new AggregateError(errors, 'MCP cleanup failed');
+    }
+
+    private serial<T>(id: string, operation: () => Promise<T>): Promise<T> {
+        if (this.closed) return Promise.reject(new Error('MCP manager is closed'));
+        const result = (this.operations.get(id) ?? Promise.resolve()).then(operation);
+        const done = result.then(() => {}, () => {});
+        this.operations.set(id, done);
+        void done.then(() => { if (this.operations.get(id) === done) this.operations.delete(id); });
+        return result;
     }
 
     // ─── Private helpers ───────────────────────────────────────────────────
@@ -142,7 +198,7 @@ export class MCPManager {
             command: server.command,
             args: parseMcpArgs(server.args),
             url: server.endpoint,
-            cwd: server.cwd, timeout: server.timeout,
+            env: server.env, cwd: server.cwd, timeout: mcpTimeoutMs(server),
             headers: { ...(server.apiKey ? { Authorization: `Bearer ${server.apiKey}` } : {}), ...server.headers },
         };
     }
@@ -158,4 +214,17 @@ export function parseMcpArgs(value?: string): string[] | undefined {
     }
     const args = value.match(/(?:[^\s"']+|"[^"\n]*"|'[^'\n]*')+/g) ?? [];
     return args.map(arg => arg.replace(/"([^"\n]*)"|'([^'\n]*)'/g, (_match, double, single) => double ?? single));
+}
+
+function validateMCPServerId(id: string): void {
+    if (typeof id !== 'string' || !id.trim() || /[/\\\x00-\x1f]/.test(id)) throw new Error('Invalid MCP server ID');
+}
+
+function validateMCPServer(server: MCPServer): void {
+    validateMCPServerId(server?.id);
+    if (typeof server.name !== 'string' || !server.name.trim()) throw new Error('MCP server name is required');
+    if (!['stdio', 'http'].includes(server.transport)) throw new Error('MCP 2026-07-28 requires stdio or Streamable HTTP; legacy transports are not supported');
+    for (const map of [server.headers, server.env]) {
+        if (map !== undefined && (!map || typeof map !== 'object' || Array.isArray(map) || Object.values(map).some(value => typeof value !== 'string'))) throw new Error('MCP headers and environment must be string maps');
+    }
 }

@@ -80,3 +80,7 @@ pnpm --filter @itookit/device-llm verify      # tsx scripts/verify.ts
 - 附件 base64 展开在 `utils/attachment.ts` 的 `expandMessagesAttachments()`，由 `@itookit/kernel-adapters` 的 `LLMServiceAdapter` 在调用前执行
 - `CostStore` 依赖 `engine.meta.seq` 后端能力，不存在时静默跳过
 - 定价信息通过 `applyPricingToModel()` 应用，`/llm/pricing.json` 支持热更新
+
+MCP 管理面提供真实握手/发现、资源读取与 Prompt 获取；配置超时统一为带 `timeoutUnit: ms` 的毫秒。旧 UI 秒值兼容策略、连接串行失效规则与 Tauri stdio 桥见 [能力配置与执行](../../doc/design/tool-skill-mcp-capabilities.md)。`.llm` Agent 转换必须保留顶层策略和嵌套配置，显式空白名单不能丢失。
+
+MCP 使用官方 client/core 2.0.0（Node >= 20），强制协议 `2026-07-28`，不允许旧协议回退；只提供 stdio 与 Streamable HTTP。版本常量位于 llm-common，浏览器包不得引入 Node stdio transport。

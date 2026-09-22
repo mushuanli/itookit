@@ -74,7 +74,8 @@ it.each([
         const [task] = await runtime.kernel.kernel.listSessionTasks(id);
         const input = task.input as { tools: Array<{ function?: { name: string }; name?: string }>; allowedToolIds: string[] };
         if (mode === 'agent') {
-            const progress = events.find(event => event.type === 'tool:progress');
+            const progress = events.find(event => event.type === 'tool:progress'
+                && event.payload.call.progress?.message?.includes('cwd: /workspace'));
             expect(progress).toMatchObject({ payload: { call: { toolId: 'grep-mdx', name: 'Grep',
                 input: { pattern: 'mdx', path: '.' }, progress: { message: expect.stringContaining('cwd: /workspace') } } } });
             expect(input.allowedToolIds).toEqual(['Read', 'Glob', 'Grep', 'Write', 'Edit', ...(shell ? ['Bash'] : [])]);

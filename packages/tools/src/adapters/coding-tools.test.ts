@@ -12,7 +12,7 @@ it('streams the cwd and matches while a subsequent read is still pending', async
   const pending = driver.invoke({ toolId: 'Grep', args: { pattern: 'mdx' }, onProgress: async event => { progress.push(event); } });
   try {
     await vi.waitFor(() => expect(progress.some(event => event.output?.includes('/work/first:1: mdx'))).toBe(true));
-    expect(progress[0].message).toContain('cwd: /work | path: /work');
+    expect(progress.some(event => event.message.includes('cwd: /work | path: /work'))).toBe(true);
   } finally { release('no match'); }
   expect(await pending).toMatchObject({ success: true, data: { numMatches: 1 } });
 });

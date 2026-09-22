@@ -4,6 +4,24 @@ import { SkillPanel } from '../../llm-ui/src/components/input/SkillPanel';
 import { ChatInput } from '../../llm-ui/src/components/input/ChatInputView';
 import { bindSkillRefresh } from '../../llm-ui/src/shell/skill-refresh';
 import type { SessionSkillControls } from '@itookit/common';
+import { t } from '@itookit/common';
+
+it('separates loaded instructions from tool grants and keeps configuration accessible without Skills', async () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<section class="llm-input__skill-section"><div class="llm-input__skills-list"></div></section>';
+    const configure = vi.fn();
+    const panel = new SkillPanel(root, { onConfigureCapabilities: configure });
+    const skill = { id: 'review', name: 'Review', description: '', loaded: true, toolCount: 2, authorizedToolCount: 0 };
+    panel.refresh([skill]);
+    expect(root.querySelector<HTMLInputElement>('input')?.checked).toBe(true);
+    expect(root.textContent).toContain(t('skill.instructionsLoaded'));
+    expect(root.textContent).toContain(t('skill.toolGrants', { granted: 0, total: 2 }));
+    panel.refresh([{ ...skill, capabilitiesManagedByFlow: true }]);
+    expect(root.textContent).toContain(t('skill.flowGrants'));
+    panel.refresh([]);
+    root.querySelector<HTMLButtonElement>('button')!.click();
+    expect(configure).toHaveBeenCalledOnce();
+});
 
 it('shows a persisted version drift and explicitly reloads the selected Skill', async () => {
     const root = document.createElement('div');

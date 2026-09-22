@@ -70,6 +70,7 @@ export interface ConversationRunCoordinatorOptions {
         definitions: ToolDefinition[];
         externalIds: string[];
     }>;
+    resolveMCPToolIds?(sessionId: string, ids: string[]): Promise<string[]>;
     resolveHarnessToolIds?(sessionId: string): Promise<string[]>;
     loadArtifact(id: string): Promise<Artifact | null>;
     retrieveMemory?: (
@@ -105,6 +106,14 @@ export class ConversationRunCoordinator {
             const toolIds = await this.options.resolveHarnessToolIds?.(execution.task.sessionId) ?? [];
             execution = { ...execution, config: { ...execution.config,
                 capabilityPolicy: { mcpProfileIds: [], ...execution.config.capabilityPolicy, toolIds } } };
+        }
+        const profiles = execution.config.capabilityPolicy?.mcpProfileIds ?? [];
+        if (profiles.length && directExecutionMode(execution.task.input) !== 'chat') {
+            if (!this.options.resolveMCPToolIds) throw new Error('MCP profile resolution is unavailable');
+            const mcpIds = await this.options.resolveMCPToolIds(execution.task.sessionId, profiles);
+            const policy = execution.config.capabilityPolicy!;
+            execution = { ...execution, config: { ...execution.config,
+                capabilityPolicy: { ...policy, toolIds: [...new Set([...(policy.toolIds ?? []), ...mcpIds])] } } };
         }
         const ids = execution.config.capabilityPolicy?.skillIds ?? [];
         const skills = ids.length ? await this.options.resolveSkills?.(ids, execution.task.sessionId) ?? [] : [];

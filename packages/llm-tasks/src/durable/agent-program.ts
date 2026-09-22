@@ -141,6 +141,11 @@ function dispatchNextCall(
 ): Decision<DurableAgentState, DurableAgentOutput> {
     const call = state.pendingCalls[state.callIndex];
     if (!call) return fail(state, 'Pending tool call is missing');
+    const allowed = state.input.allowedToolIds;
+    if (allowed && !allowed.includes(toolName(call)) && !loadedTools(state).some(tool =>
+        (tool.definition.function?.name ?? tool.definition.name) === toolName(call))) {
+        return fail(state, `Tool is not authorized for this task: ${toolName(call)}`, 'TOOL_NOT_ALLOWED');
+    }
     if (requiresApproval(state, call) && !isCallApproved(state, call)) {
         return requestInteraction(state, call, false, actions);
     }

@@ -224,6 +224,7 @@ function agentManifest(): DagPluginManifest {
         connectionId: { type: 'string' },
         toolIds: { type: 'array', items: { type: 'string' } },
         skillIds: { type: 'array', items: { type: 'string' } },
+        mcpProfileIds: { type: 'array', items: { type: 'string' } },
         // Inline task instruction + model
         instruction: { type: 'string' }, systemPrompt: { type: 'array', items: { type: 'string' } }, modelName: { type: 'string' },
         temperature: { type: 'number' }, maxTokens: { type: 'integer' },
@@ -300,7 +301,7 @@ function defaultUI(manifest: DagPluginManifest) {
                 sections: [
                     { id: 'identity', title: 'Identity & task', fields: ['agentId', 'systemPromptId', 'systemPromptPolicy', 'instruction', 'systemPrompt'] },
                     { id: 'model', title: 'Model', fields: ['connectionId', 'modelName', 'temperature', 'maxTokens', 'thinking', 'reasoningEffort', 'stream', 'webSearch', 'responseFormat', 'outputValidation'] },
-                    { id: 'capabilities', title: 'Capabilities', fields: ['toolIds', 'skillIds'] },
+                    { id: 'capabilities', title: 'Capabilities', fields: ['toolIds', 'skillIds', 'mcpProfileIds'] },
                     { id: 'context', title: 'Context & output', fields: ['historyPolicy', 'persistOutput', 'contextCompaction'] },
                     { id: 'execution', title: 'Execution', fields: ['approval', 'maxExchanges', 'timeoutMs', 'llmRetry', 'maxIterations', 'workingDirectory', 'delegation', 'subtasks'] },
                 ],

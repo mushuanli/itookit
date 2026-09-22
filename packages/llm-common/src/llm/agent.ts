@@ -8,6 +8,8 @@ import type { SystemPromptDefinition, PromptPreset } from './node-config';
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
 
+export const DEFAULT_HARNESS_TOOL_IDS: readonly string[] = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash'];
+
 export type AgentType = 'agent' | 'composite' | 'tool' | 'workflow';
 
 export interface AgentConfig {
@@ -73,7 +75,8 @@ export interface AgentDefinition {
 
     /** Tool & MCP capability declarations. */
     capabilityPolicy?: {
-        toolIds: string[];
+        /** Undefined selects host defaults; an empty array grants no direct tools. */
+        toolIds?: string[];
         /** Static skill references (complements trigger-based progressive disclosure). */
         skillIds?: string[];
         mcpProfileIds: string[];
@@ -111,10 +114,12 @@ export type LLMSkill = SkillDefinition;
 
 // ─── MCP ──────────────────────────────────────────────────────────────────────
 
+export const MCP_PROTOCOL_VERSION = '2026-07-28' as const;
+
 export interface MCPServer {
     id: string;
     name: string;
-    transport: 'stdio' | 'http' | 'sse';
+    transport: 'stdio' | 'http';
     command?: string;
     endpoint?: string;
     status?: 'idle' | 'connected' | 'error';
@@ -122,12 +127,31 @@ export interface MCPServer {
     cwd?: string;
     apiKey?: string;
     headers?: Record<string, string>;
+    env?: Record<string, string>;
     autoConnect?: boolean;
+    /** Milliseconds; timeoutUnit marks new writes, legacy UI values <= 300 were seconds. */
     timeout?: number;
+    timeoutUnit?: 'ms';
     tools?: unknown[];
     resources?: unknown[];
+    prompts?: unknown[];
     icon?: string;
     description?: string;
+}
+
+export interface MCPDiscovery {
+    protocolVersion?: typeof MCP_PROTOCOL_VERSION;
+    capabilities?: { tools: boolean; resources: boolean; prompts: boolean };
+    tools: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }>;
+    resources: Array<{ uri: string; name: string; description?: string; mimeType?: string }>;
+    prompts: Array<{ name: string; description?: string; arguments?: Array<{ name: string; description?: string; required?: boolean }> }>;
+}
+
+/** Normalize old UI seconds and existing millisecond configurations. */
+export function mcpTimeoutMs(server: Pick<MCPServer, 'timeout' | 'timeoutUnit'>): number {
+    const timeout = server.timeout ?? 30000;
+    if (!Number.isFinite(timeout) || timeout <= 0) throw new Error('MCP timeout must be positive');
+    return server.timeoutUnit === 'ms' || timeout > 300 ? timeout : timeout * 1000;
 }
 
 // ─── IConnectionReader ────────────────────────────────────────────────────────
@@ -195,6 +219,10 @@ export interface ILLMManagementService extends IConnectionService {
     getMCPServers(): Promise<MCPServer[]>;
     saveMCPServer(server: MCPServer): Promise<void>;
     deleteMCPServer(id: string): Promise<void>;
+    /** Connect with the supplied draft and discover the server capabilities. */
+    testMCPServer(server: MCPServer): Promise<MCPDiscovery>;
+    readMCPResource(serverId: string, uri: string): Promise<unknown>;
+    getMCPPrompt(serverId: string, name: string, args?: Record<string, string>): Promise<unknown>;
 
     // ── Skills ────────────────────────────────────────────────────
     getSkills(): Promise<LLMSkill[]>;
@@ -248,6 +276,8 @@ export interface ILLMManagementService extends IConnectionService {
 export interface IAgentConfigService extends IConnectionReader {
     init(): Promise<void>;
     getAgentConfig(agentId: string): Promise<AgentDefinition | null>;
+    /** Host navigation target for the persisted Agent definition. */
+    getAgentResourceId?(agentId: string): string | undefined;
     getAgents(): Promise<AgentDefinition[]>;
     /** 同步返回 agent 列表（从内存缓存读取） */
     listAgents(): AgentDefinition[];

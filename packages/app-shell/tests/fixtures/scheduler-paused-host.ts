@@ -19,7 +19,11 @@ const task = role === 'owner'
 const lease = await acquireSchedulerLease(session, task.id, { ownerId: role, ttlMs: 1000 });
 try {
     if (role === 'owner') {
+        // Suspend after startup writes drain so this exercises lease fencing,
+        // not a process frozen while holding SQLite's writer lock.
+        await kernel.waitIdle();
         process.send?.({ phase: 'ready', taskId: task.id });
+        process.kill(process.pid, 'SIGSTOP');
         await once(process, 'message');
         const guard = { lease: lease.condition };
         const actions = [() => task.cancel('stale', guard), () => task.pause({ ...guard, requestId: 'stale-pause' }), () => task.resume({ ...guard, requestId: 'stale-resume' }),

@@ -15,7 +15,7 @@ ChatInput 工具栏的「对话 / 执行」由 `ExecutionModeControl` 呈现，�
 
 ## 联网搜索 citations
 
-Harness 工具卡片由 `node:appended` 立即挂载，再消费 `tool:running/success/error`；名称、参数、状态和结果在 History 中显示。结果保留换行并作文本转义，恢复失败卡片读取 `data.error`。`tool:progress` 展示有界活动和结果快照；终态隐藏活动并覆盖预览，迟到进度不能改写终态。Grep 提供实际 cwd、路径、扫描数量和匹配预览，尚未消费通用 `getActivityDescription`。回归见 app-shell `tool-history-live.test.ts`。
+Harness 工具卡片由 `node:appended` 立即挂载，再消费 `tool:running/success/error`；名称、参数、状态和结果在 History 中显示。结果保留换行并作文本转义，恢复失败卡片读取 `data.error`。`tool:progress` 展示有界活动和结果快照；终态隐藏活动并覆盖预览，迟到进度不能改写终态。Grep 提供实际 cwd、路径、扫描数量和匹配预览；工具驱动消费通用 `getActivityDescription`，Bash 提供 stdout/stderr 快照，MCP 提供协议 progress。回归见 app-shell `tool-history-live.test.ts`。
 
 - `HistoryView` 订阅 `message:citations`（`immediateTypes`）→ `StreamController.updateCitations`。
 - `NodeTemplates.renderCitations` 渲染引用块（图标用 `ACTION_ICONS.search`，禁止硬编码 emoji）。
@@ -58,3 +58,5 @@ Flow Session 标题栏「流程输出」挂接当前 Session 的持久 Run，显
 `WorkspaceDirectoryMenu` 在标题栏按钮及标题栏/输入工具栏右键提供工作目录和挂载管理，经 `EditorHostContext.directoryCommands.configureWorkspace` 调用宿主；输入文本的原生右键菜单保持可用，运行中禁止修改。
 
 聊天 `@` 文件候选通过 `FileSearchService` 消费 vfs-core 的 `discoverFiles`，过滤发生在 20 条候选上限之前。MentionPlugin 面板提供“包含忽略文件”复选框；取消旧请求后不得用过期结果重新打开面板。Grep/Glob 的 `includeIgnored` 是独立工具参数，候选框开关不改变 Agent 工具或目录授权。
+
+Skill 面板区分指令加载与 Agent 工具授权，配置入口通过 Agent 的真实资源路径导航；Flow 模式导航到节点配置。授权计数表示配置声明，不能替代运行时目录权限和工具审批。见 [能力配置与执行](../../doc/design/tool-skill-mcp-capabilities.md)。

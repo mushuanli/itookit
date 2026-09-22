@@ -60,7 +60,7 @@ export { runSessionSkillOperation } from './skill/operation-queue';
 export { SessionFileSkillSource } from './skill/session-file-source';
 export { resolveSessionSkillContext, resolveSessionSelectedSkills } from './skill/session-prompt-context';
 
-export { MCPToolAdapter, mcpToolId } from './tool/mcp-tools';
+export { MCPToolAdapter, mcpToolId, mcpResourceToolId, mcpPromptToolId } from './tool/mcp-tools';
 export { createSkillToolHandlers } from './skill/tool-handlers';
 export { createFileContextContentStore } from './context/file-content-store';
 export { createTaskContextStorage } from './context/task-content-store';

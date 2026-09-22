@@ -350,13 +350,14 @@ export class DurableFlowExecutor {
                 completed.has(instanceKey(nodeId, iteration));
             // 环上的节点共享同一个迭代上限（任一环上节点声明即可），非环节点单次执行。
             const loopMaxIterations = (): number => {
+                let maximum = 0;
                 for (const id of loopNodes) {
                     const config = nodes.find(n => n.id === id)?.config;
                     if (isRecord(config) && typeof config.maxIterations === 'number' && config.maxIterations > 0) {
-                        return config.maxIterations;
+                        maximum = Math.max(maximum, config.maxIterations);
                     }
                 }
-                return MAX_LOOP_ITERATIONS;
+                return maximum || MAX_LOOP_ITERATIONS;
             };
             const maxIterations = (node: DagNodeDefinition): number => {
                 const resolved = resolveFlowParameters(node.config, scopedParameters(spec, node.id, parameters ?? {}));
@@ -375,7 +376,10 @@ export class DurableFlowExecutor {
                 const incoming = incomingOf(edges, node.id);
                 if (!incoming.length) return true;
                 const gates = incoming.filter(edge => routeEdgeIds.has(edge.id));
-                if (gates.length && gates.every(edge => edgeState.get(edge.id) === 'inactive')) return false;
+                if (gates.length && gates.every(edge => edgeState.get(edge.id) === 'inactive')) {
+                    if (!loopNodes.has(node.id)) skipped.add(node.id);
+                    return false;
+                }
                 const active = incoming.filter(e => !backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'active');
                 const pending = incoming.filter(e => !backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'pending');
                 const backActive = incoming.filter(e => backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'active');

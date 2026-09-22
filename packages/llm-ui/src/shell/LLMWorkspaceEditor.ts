@@ -1,3 +1,4 @@
+import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/common';
 import { rerunSession } from './rerun-session';
 import { t } from '@itookit/common';
 import { openSessionFlowOutputs } from '../flows/session-output';
@@ -367,7 +368,13 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.chatInput = new ChatInput(inputEl, {
             ...(this.options.sessionSkills ? {
-                onRequestSkills: () => this.options.sessionSkills!.list(this.options.sessionId),
+                onRequestSkills: async () => this.decorateSkillCapabilities(await this.options.sessionSkills!.list(this.options.sessionId)),
+                onConfigureCapabilities: () => {
+                    const flowId = this.chatInput.getConfig().settings.flowId;
+                    if (flowId) { void this.hostContext?.navigate?.({ target: 'flows', resourceId: flowId }); return; }
+                    const id = this.chatInput.getConfig().agentId || 'default';
+                    void this.hostContext?.navigate?.({ target: 'agents', resourceId: this.agentService.getAgentResourceId?.(id) });
+                },
                 onLoadSkill: (id: string) => this.options.sessionSkills!.load(this.options.sessionId, id),
                 onUnloadSkill: (id: string) => this.options.sessionSkills!.unload(this.options.sessionId, id),
             } : {}),
@@ -381,7 +388,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 settings: initialSettings,
             },
             onConfigChange: (config) => this.handleConfigChange(config),
-            onExecutorChange: () => this.bus.emit('state:inputChanged', {}),
+            onExecutorChange: () => { this.skillRefreshBinding?.refresh(); this.bus.emit('state:inputChanged', {}); },
             onRequestConnections: () => buildConnectionOptions(this.agentService),
 
             // ── @mention file reference ───────────────────────────────────────
@@ -411,7 +418,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 this.options.sessionId,
                 (skills) => {
                     this.skillSnapshot = skills;
-                    this.chatInput?.refreshSkills(skills);
+                    this.chatInput?.refreshSkills(this.decorateSkillCapabilities(skills));
                 },
             );
         }
@@ -594,6 +601,7 @@ export class LLMWorkspaceEditor implements IEditor {
             this.refreshAgentsTimer = setTimeout(() => {
                 this.refreshAgentsTimer = null;
                 this.refreshAgents();
+                this.skillRefreshBinding?.refresh();
             }, 300);
         });
     }
@@ -633,7 +641,16 @@ export class LLMWorkspaceEditor implements IEditor {
         }, 'Commit edit', 'warn');
     }
 
+    private decorateSkillCapabilities(skills: SkillInfo[]): SkillInfo[] {
+        if (this.chatInput?.getConfig().settings.flowId) return skills.map(skill => ({ ...skill, capabilitiesManagedByFlow: true }));
+        const agentId = this.chatInput?.getConfig().agentId || 'default';
+        const policy = this.agentService.findAgent(agentId)?.capabilityPolicy;
+        const grants = new Set(policy?.toolIds ?? DEFAULT_HARNESS_TOOL_IDS);
+        return skills.map(skill => ({ ...skill, authorizedToolCount: (skill.toolIds ?? []).filter(id => grants.has(id)).length }));
+    }
+
     private async handleConfigChange(config: IChatInputConfig): Promise<void> {
+        this.skillRefreshBinding?.refresh();
         if (config.settings) {
             if (this.currentSessionId) {
                 await this.errorHandler.wrap(

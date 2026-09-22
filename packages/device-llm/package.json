@@ -66,9 +66,11 @@
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/device-llm#readme",
   "dependencies": {
     "@itookit/common": "workspace:*",
+    "@itookit/llm-common": "workspace:*",
     "@itookit/ui-common": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/core": "2.0.0",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {
@@ -79,7 +81,7 @@
     "vitest": "^1.6.1"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "imports": {
     "#mcp-stdio": {

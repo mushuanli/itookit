@@ -1,10 +1,11 @@
 // @file: device-llm/skills/mcp-client.ts
 //
 // MCPClient — MCP (Model Context Protocol) client.
-// Manages connections to multiple MCP servers via stdio / SSE / WebSocket transports.
+// Manages connections to multiple MCP servers via stdio / Streamable HTTP transports.
 
+import { hostMCPStdioTransport } from './mcp-host-transport';
 import { createModuleLogger } from '@itookit/common';
-import type { ToolDefinition } from '@itookit/common';
+import { MCP_PROTOCOL_VERSION, type ToolDefinition, type MCPDiscovery } from '@itookit/llm-common';
 import type { MCPConfig, MCPServerConfig } from '../types/provider';
 
 const log = createModuleLogger('device-llm:mcp');
@@ -179,7 +180,7 @@ export class MCPClient {
 // ─── MCPServerConnection ──────────────────────────────────────────────────────
 
 export class MCPServerConnection {
-    private client: import('@modelcontextprotocol/sdk/client/index.js').Client | undefined;
+    private client: import('@modelcontextprotocol/client').Client | undefined;
     private connecting: Promise<void> | undefined;
     constructor(private readonly config: MCPServerConfig) {}
 
@@ -189,41 +190,43 @@ export class MCPServerConnection {
     }
 
     private async open(): Promise<void> {
-        const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-        const client = new Client({ name: 'mindos', version: '1.0.0' });
+        const { Client } = await import('@modelcontextprotocol/client');
+        const client = new Client({ name: 'mindos', version: '1.0.0' }, {
+            supportedProtocolVersions: [MCP_PROTOCOL_VERSION],
+            inputRequired: { autoFulfill: false },
+            versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } },
+        });
         const transport = await this.createTransport();
+        let transportError: Error | undefined;
+        client.onerror = error => { transportError = error; };
         try { await client.connect(transport, { timeout: this.config.timeout ?? 30000 }); }
-        catch (error) { await client.close(); throw error; }
+        catch (error) { await client.close(); throw transportError ?? error; }
+        client.onclose = () => { if (this.client === client) this.client = undefined; };
         this.client = client;
     }
 
     private async createTransport() {
         const config = this.config;
         if (config.transport === 'stdio') {
-            if (typeof window !== 'undefined') throw new Error('MCP stdio requires a Node host');
+            const hosted = hostMCPStdioTransport(config);
+            if (hosted) return hosted;
+            if (typeof window !== 'undefined') throw new Error('MCP stdio requires a desktop or Node host');
             if (!config.command) throw new Error('MCP stdio requires command');
             const { createStdioTransport } = await import('#mcp-stdio');
             return createStdioTransport(config);
         }
         if (!config.url) throw new Error('MCP remote transport requires url');
         const url = new URL(config.url);
-        if (config.transport === 'websocket') {
-            const { WebSocketClientTransport } = await import('@modelcontextprotocol/sdk/client/websocket.js');
-            return new WebSocketClientTransport(url);
-        }
-        if (config.transport === 'sse') {
-            const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
-            return new SSEClientTransport(url, { requestInit: { headers: config.headers } });
-        }
-        const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+        if (config.transport !== 'http') throw new Error(`MCP ${MCP_PROTOCOL_VERSION} supports only stdio and Streamable HTTP; update transport ${config.transport}`);
+        const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
         return new StreamableHTTPClientTransport(url, { requestInit: { headers: config.headers } });
     }
 
     async disconnect(): Promise<void> {
         await this.connecting;
         const client = this.client;
-        this.client = undefined;
         await client?.close();
+        if (this.client === client) this.client = undefined;
     }
     isConnected(): boolean { return Boolean(this.client); }
     async listTools(): Promise<MCPToolInfo[]> {
@@ -232,7 +235,7 @@ export class MCPServerConnection {
         let cursor: string | undefined;
         const seen = new Set<string>();
         do {
-            const page = await this.client.listTools({ cursor });
+            const page = await this.client.listTools({ cursor }, { timeout: this.config.timeout ?? 30000 });
             tools.push(...page.tools.map(tool => ({ name: tool.name, description: tool.description ?? '', inputSchema: tool.inputSchema })));
             cursor = page.nextCursor;
             if (cursor && seen.has(cursor)) throw new Error('MCP tools/list returned a repeated cursor');
@@ -240,8 +243,44 @@ export class MCPServerConnection {
         } while (cursor);
         return tools;
     }
-    async callTool(name: string, args: Record<string, unknown>, options?: { timeout?: number; signal?: AbortSignal }): Promise<unknown> {
+    async discover(): Promise<MCPDiscovery> {
         if (!this.client) throw new Error('MCP not connected');
-        return this.client.callTool({ name, arguments: args }, undefined, { timeout: options?.timeout ?? this.config.timeout ?? 30000, signal: options?.signal });
+        const capabilities = this.client.getServerCapabilities();
+        const tools = capabilities?.tools ? await this.listTools() : [];
+        const resources = capabilities?.resources ? await this.listPages('resources', async cursor => {
+            const page = await this.client!.listResources({ cursor }, { timeout: this.config.timeout ?? 30000 });
+            return { items: page.resources, nextCursor: page.nextCursor };
+        }) : [];
+        const prompts = capabilities?.prompts ? await this.listPages('prompts', async cursor => {
+            const page = await this.client!.listPrompts({ cursor }, { timeout: this.config.timeout ?? 30000 });
+            return { items: page.prompts, nextCursor: page.nextCursor };
+        }) : [];
+        return { protocolVersion: MCP_PROTOCOL_VERSION, tools, resources, prompts, capabilities: { tools: !!capabilities?.tools, resources: !!capabilities?.resources, prompts: !!capabilities?.prompts } };
+    }
+
+    private async listPages<T>(kind: string, fetch: (cursor?: string) => Promise<{ items: T[]; nextCursor?: string }>): Promise<T[]> {
+        const items: T[] = [], seen = new Set<string>();
+        let cursor: string | undefined;
+        do {
+            const page = await fetch(cursor); items.push(...page.items); cursor = page.nextCursor;
+            if (cursor && seen.has(cursor)) throw new Error(`MCP ${kind}/list returned a repeated cursor`);
+            if (cursor) seen.add(cursor);
+        } while (cursor);
+        return items;
+    }
+
+    async readResource(uri: string, options?: { signal?: AbortSignal }) {
+        if (!this.client) throw new Error('MCP not connected');
+        return this.client.readResource({ uri }, { ...options, timeout: this.config.timeout ?? 30000 });
+    }
+
+    async getPrompt(name: string, args?: Record<string, string>, options?: { signal?: AbortSignal }) {
+        if (!this.client) throw new Error('MCP not connected');
+        return this.client.getPrompt({ name, arguments: args }, { ...options, timeout: this.config.timeout ?? 30000 });
+    }
+
+    async callTool(name: string, args: Record<string, unknown>, options?: { timeout?: number; signal?: AbortSignal; onProgress?: (progress: { progress: number; total?: number; message?: string }) => void }): Promise<unknown> {
+        if (!this.client) throw new Error('MCP not connected');
+        return this.client.callTool({ name, arguments: args }, { timeout: Math.min(options?.timeout ?? Infinity, this.config.timeout ?? 30000), signal: options?.signal, onprogress: options?.onProgress });
     }
 }

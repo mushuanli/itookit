@@ -1,3 +1,4 @@
+mod mcp_process;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Component, Path, PathBuf};
@@ -418,6 +419,9 @@ async fn git_command(repository_id: String, args: Vec<String>, timeout_ms: Optio
     host_git::run_scoped(&repository_id, &args, timeout_ms, &directories, workspace_id.as_deref())
 }
 
+#[derive(Clone, serde::Serialize)]
+struct ShellOutput { stream: &'static str, data: Vec<u8> }
+
 /// Execute Bash after validating the host working directory.
 /// This host command alone does not enforce Session mount grants.
 #[tauri::command]
@@ -428,17 +432,18 @@ async fn shell_exec(
     request_id: String,
     state:   State<'_, AppPaths>,
     processes: State<'_, ShellProcesses>,
+    on_output: Option<tauri::ipc::JavaScriptChannelId>, webview: tauri::Webview,
 ) -> Result<(String, String, i32), String> {
     let p = PathBuf::from(&cwd);
     if !is_allowed(&p, &state) { return Err(format!("cwd not allowed: {cwd}")); }
 
-    run_shell(bash_process::command(&command, &cwd), timeout_ms.unwrap_or(30_000), request_id, processes.0.clone()).await
+    run_shell(bash_process::command(&command, &cwd), timeout_ms.unwrap_or(30_000), request_id, processes.0.clone(), on_output.map(|id| id.channel_on(webview))).await
 }
 
 #[tauri::command]
 async fn session_shell_exec(command: String, cwd: String, timeout_ms: Option<u64>, request_id: String,
     mounts: Vec<(String, String, bool)>, directories: State<'_, scoped_fs::DirectoryScopes>,
-    processes: State<'_, ShellProcesses>) -> Result<(String, String, i32), String> {
+    processes: State<'_, ShellProcesses>, on_output: Option<tauri::ipc::JavaScriptChannelId>, webview: tauri::Webview) -> Result<(String, String, i32), String> {
     let grants = {
         let scopes = directories.0.lock().map_err(|_| "directory lock poisoned")?;
         mounts.into_iter().map(|(id, target, writable)| {
@@ -446,11 +451,11 @@ async fn session_shell_exec(command: String, cwd: String, timeout_ms: Option<u64
             Ok(session_bash::Mount { source: source.to_string_lossy().into_owned(), target, writable })
         }).collect::<Result<Vec<_>, String>>()?
     };
-    run_shell(session_bash::command(&command, &cwd, &grants)?, timeout_ms.unwrap_or(30_000), request_id, processes.0.clone()).await
+    run_shell(session_bash::command(&command, &cwd, &grants)?, timeout_ms.unwrap_or(30_000), request_id, processes.0.clone(), on_output.map(|id| id.channel_on(webview))).await
 }
 
 async fn run_shell(command: Command, timeout_ms: u64, request_id: String,
-    registry: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>) -> Result<(String, String, i32), String> {
+    registry: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>, on_output: Option<tauri::ipc::Channel<ShellOutput>>) -> Result<(String, String, i32), String> {
     let cancelled = Arc::new(AtomicBool::new(false));
     {
         let mut entries = registry.lock().map_err(|_| "shell process lock poisoned")?;
@@ -458,7 +463,10 @@ async fn run_shell(command: Command, timeout_ms: u64, request_id: String,
         entries.insert(request_id.clone(), cancelled.clone());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let result = bash_process::execute_command(command, timeout_ms, &cancelled);
+        let output = on_output.map(|channel| Arc::new(move |stream, data: &[u8]| {
+            let _ = channel.send(ShellOutput { stream, data: data.to_vec() });
+        }) as bash_process::OutputSink);
+        let result = bash_process::execute_streamed(command, timeout_ms, &cancelled, output);
         registry.lock().map_err(|_| "shell process lock poisoned")?.remove(&request_id);
         result
     }).await.map_err(|e| format!("Bash worker failed: {e}"))?
@@ -537,6 +545,7 @@ fn canonicalise(raw: &str) -> String {
 pub fn run() {
     diagnostics::install();
     let app = tauri::Builder::default()
+        .manage(mcp_process::MCPProcesses::default())
         .setup(|app| {
             let system_home = app.path().home_dir().unwrap_or_else(|_| PathBuf::from("."));
             let paths = resolve_all_paths(&system_home);
@@ -617,6 +626,10 @@ pub fn run() {
             git_command,
             session_shell_exec,
             shell_cancel,
+            mcp_process::mcp_start,
+            mcp_process::mcp_send,
+            mcp_process::mcp_poll,
+            mcp_process::mcp_stop,
             codex_start,
             codex_send,
             codex_poll,
@@ -624,10 +637,10 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
-    app.run(|_, event| match event {
+    app.run(|app, event| match event {
         tauri::RunEvent::Ready => diagnostics::record("app.ready", serde_json::json!({})),
         tauri::RunEvent::ExitRequested { code, .. } => diagnostics::record("app.exit_requested", serde_json::json!({"code": code})),
-        tauri::RunEvent::Exit => diagnostics::clean_exit(),
+        tauri::RunEvent::Exit => { app.state::<mcp_process::MCPProcesses>().shutdown(); diagnostics::clean_exit(); },
         _ => {},
     });
 }

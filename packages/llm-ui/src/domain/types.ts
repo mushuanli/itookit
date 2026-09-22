@@ -237,5 +237,8 @@ export interface SkillInfo {
     definitionEnabled: boolean;
     /** 该 Skill 提供的工具数量 */
     toolCount: number;
+    toolIds?: string[];
+    authorizedToolCount?: number;
+    capabilitiesManagedByFlow?: boolean;
     icon?: string;
 }

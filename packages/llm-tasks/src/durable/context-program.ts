@@ -27,7 +27,8 @@ export class ContextTaskProgram<S, O> implements DurableTaskProgram<ContextProgr
     async reduce(state: Readonly<ContextProgramState<S>>, event: TaskInputEvent): Promise<Decision<ContextProgramState<S>, O>> {
         if (state.preparing) return acceptPrepared(state, event);
         const checkpoint = checkpointFromEvent(state.inner, event);
-        return this.wrap(await this.inner.reduce(state.inner, event), state.cursor, state.policy, checkpoint ?? state.notes);
+        const inner = this.manifest.kind === 'llm.agent' ? withContextToolGrants(state.inner) : state.inner;
+        return this.wrap(await this.inner.reduce(inner, event), state.cursor, state.policy, checkpoint ?? state.notes);
     }
     private wrap(decision: Decision<S, O>, cursor?: ContextCursor, policy?: ContextCompactionPolicy, notes?: WorkingNotes): Decision<ContextProgramState<S>, O> {
         const state: ContextProgramState<S> = { inner: decision.state, ...(cursor ? { cursor } : {}), ...(policy ? { policy } : {}), ...(notes ? { notes } : {}) };
@@ -44,6 +45,14 @@ export class ContextTaskProgram<S, O> implements DurableTaskProgram<ContextProgr
         actions[index] = { type: 'effect', effect };
         return { state, actions, next: { type: 'wait', on: { type: 'effect', id: effect.id } } };
     }
+}
+
+/** Only the v2 host wrapper can grant its built-in context tools. */
+function withContextToolGrants<S>(state: S): S {
+    const inner = state as { input: DurableAgentInput; capabilities?: { toolHandleId?: string } };
+    if (!inner.capabilities?.toolHandleId || !inner.input.allowedToolIds) return state;
+    const names = contextToolDefinitions().map(tool => tool.function!.name);
+    return { ...state, input: { ...inner.input, allowedToolIds: [...new Set([...inner.input.allowedToolIds, ...names])] } };
 }
 
 function prepareEffect(effect: EffectRequest, cursor?: ContextCursor, policy?: ContextCompactionPolicy, notes?: WorkingNotes): EffectRequest {

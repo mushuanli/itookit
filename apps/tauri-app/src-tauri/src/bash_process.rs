@@ -3,6 +3,8 @@ use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+pub type OutputSink = std::sync::Arc<dyn Fn(&'static str, &[u8]) + Send + Sync>;
+
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 const TRUNCATED: &str = "\n[Bash output truncated at 1048576 bytes]";
 
@@ -11,12 +13,16 @@ pub fn execute(script: &str, cwd: &str, timeout_ms: u64, cancelled: &AtomicBool)
     execute_command(command(script, cwd), timeout_ms, cancelled)
 }
 
-pub fn execute_command(mut command: Command, timeout_ms: u64, cancelled: &AtomicBool) -> Result<(String, String, i32), String> {
+pub fn execute_command(command: Command, timeout_ms: u64, cancelled: &AtomicBool) -> Result<(String, String, i32), String> {
+    execute_streamed(command, timeout_ms, cancelled, None)
+}
+
+pub fn execute_streamed(mut command: Command, timeout_ms: u64, cancelled: &AtomicBool, output: Option<OutputSink>) -> Result<(String, String, i32), String> {
     if timeout_ms == 0 || timeout_ms > 2147483647 { return Err("Invalid Bash timeout".into()); }
     if cancelled.load(Ordering::SeqCst) { return Err("Bash command cancelled before start".into()); }
     let mut child = command.spawn().map_err(|e| format!("bash exec failed: {e}"))?;
-    let stdout = read_pipe(child.stdout.take());
-    let stderr = read_pipe(child.stderr.take());
+    let stdout = read_pipe(child.stdout.take(), "stdout", output.clone());
+    let stderr = read_pipe(child.stderr.take(), "stderr", output);
     let status = wait(&mut child, timeout_ms, cancelled);
     // One-shot execution owns its entire group, including inherited output pipes.
     signal_group(child.id(), "-KILL");
@@ -52,7 +58,7 @@ fn signal_group(pid: u32, signal: &str) {
 }
 
 #[cfg(target_os = "linux")]
-fn wait_group_stopped(group: u32) {
+pub(crate) fn wait_group_stopped(group: u32) {
     let mut reported = false;
     loop {
         signal_group(group, "-KILL");
@@ -87,7 +93,7 @@ fn group_active(group: u32) -> std::io::Result<bool> {
     Ok(false)
 }
 
-fn read_pipe<T: Read + Send + 'static>(pipe: Option<T>) -> std::thread::JoinHandle<Result<String, String>> {
+fn read_pipe<T: Read + Send + 'static>(pipe: Option<T>, stream: &'static str, output: Option<OutputSink>) -> std::thread::JoinHandle<Result<String, String>> {
     std::thread::spawn(move || {
         let mut bytes = Vec::new();
         let mut truncated = false;
@@ -102,6 +108,7 @@ fn read_pipe<T: Read + Send + 'static>(pipe: Option<T>) -> std::thread::JoinHand
                 };
                 let retained = count.min(MAX_CAPTURE_BYTES - bytes.len());
                 bytes.extend_from_slice(&chunk[..retained]);
+                if retained > 0 { if let Some(ref output) = output { output(stream, &chunk[..retained]); } }
                 truncated |= retained < count;
                 // Keep draining after the limit so the child cannot block on a full pipe.
             }
@@ -130,6 +137,16 @@ pub fn command(script: &str, cwd: &str) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn emits_output_before_command_completion() {
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || execute_streamed(command("printf first; sleep 0.2; printf second", "/tmp"), 5000,
+            &AtomicBool::new(false), Some(std::sync::Arc::new(move |stream, bytes| { send.send((stream, bytes.to_vec())).unwrap(); }))));
+        let first = receive.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(first, ("stdout", b"first".to_vec())); assert!(!worker.is_finished());
+        let result = worker.join().unwrap().unwrap(); assert_eq!(result.0, "firstsecond");
+    }
 
     #[test]
     #[cfg(target_os = "linux")]

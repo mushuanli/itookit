@@ -87,6 +87,9 @@ export const LLM_IOCTL = {
     MCP_LIST_TOOLS:   'list-tools',
     /** arg: { tool: string; args: Record<string,any>; timeout?: number } → any */
     MCP_CALL_TOOL:    'call-tool',
+    MCP_DISCOVER:     'mcp-discover',
+    MCP_READ_RESOURCE: 'mcp-read-resource',
+    MCP_GET_PROMPT:    'mcp-get-prompt',
 
     // ── Provider 管理（无需 sessionId）──────────────────────────────────────
     /** → LLMProvider[]（不含 apiKey） */
@@ -574,6 +577,15 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         const session = this.sessions.get(ctx.sessionId!);
         if (session?.kind === 'mcp') {
             switch (command) {
+                case LLM_IOCTL.MCP_DISCOVER: return session.connection.discover();
+                case LLM_IOCTL.MCP_READ_RESOURCE: {
+                    const { uri, signal } = arg as { uri: string; signal?: AbortSignal };
+                    return session.connection.readResource(uri, { signal });
+                }
+                case LLM_IOCTL.MCP_GET_PROMPT: {
+                    const { name, args, signal } = arg as { name: string; args?: Record<string, string>; signal?: AbortSignal };
+                    return session.connection.getPrompt(name, args, { signal });
+                }
                 case LLM_IOCTL.MCP_LIST_TOOLS: {
                     const tools = await session.connection.listTools();
                     return tools.map((t: MCPToolInfo): ToolDefinition => ({
@@ -587,8 +599,9 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 }
 
                 case LLM_IOCTL.MCP_CALL_TOOL: {
-                    const { tool, args, timeout, signal } = arg as { tool: string; args: Record<string, any>; timeout?: number; signal?: AbortSignal };
-                    return session.connection.callTool(tool, args, { timeout, signal });
+                    const { tool, args, ...options } = arg as { tool: string; args: Record<string, any>; timeout?: number; signal?: AbortSignal;
+                        onProgress?: (progress: { progress: number; total?: number; message?: string }) => void };
+                    return session.connection.callTool(tool, args, options);
                 }
 
                 default:
@@ -729,6 +742,13 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     async saveMCPServer(server: MCPServer, systemFS?: IFileSystem): Promise<void> {
         this.cancelPendingSync();
         await this.mcpManager.saveMCPServer(server, systemFS);
+    }
+
+    async readMCPResource(id: string, uri: string) { return this.mcpManager.readMCPResource(id, uri); }
+    async getMCPPrompt(id: string, name: string, args?: Record<string, string>) { return this.mcpManager.getMCPPrompt(id, name, args); }
+
+    async testMCPServer(server: MCPServer) {
+        return this.mcpManager.testMCPServer(server);
     }
 
     async deleteMCPServer(id: string, systemFS?: IFileSystem): Promise<void> {

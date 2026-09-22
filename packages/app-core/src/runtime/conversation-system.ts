@@ -46,6 +46,7 @@ export async function createConversationSystem(
         resolveSessionSkills: (sessionId, ids) => resolveSessionSelectedSkills(kernel.kernel, kernel.sessions, sessionId, ids),
         resolveTools: capabilities.resolveTools,
         resolveHarnessToolIds: capabilities.resolveHarnessToolIds,
+        resolveMCPToolIds: capabilities.resolveMCPToolIds,
     });
 }
 

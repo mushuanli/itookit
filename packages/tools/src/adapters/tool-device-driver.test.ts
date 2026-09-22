@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BUILTIN_TOOLS } from '../index';
 import type { INativeShell } from '../core/types';
 import { ToolDeviceDriver } from './tool-device-driver';
@@ -55,4 +55,20 @@ describe('ToolDeviceDriver.setNativeShell', () => {
         expect(result.success).toBe(true);
         expect(result.output).toContain('[exit 0]');
     });
+});
+
+it('streams Bash output before completion and retains the final result separately', async () => {
+    let release!: () => void;
+    const driver = new ToolDeviceDriver([...BUILTIN_TOOLS]);
+    driver.setNativeShell({ capabilities: { ripgrep: false, fd: false }, exec: async (_command, _args, options) => {
+        options?.onOutput?.({ stream: 'stdout', text: 'early output' });
+        await new Promise<void>(resolve => { release = resolve; });
+        return { stdout: 'early output and final', stderr: '', code: 0 };
+    } });
+    await driver.init(); const progress = vi.fn(async () => {});
+    const running = driver.invoke({ toolId: 'Bash', args: { command: 'test command' }, cwd: '/workspace', onProgress: progress });
+    await vi.waitFor(() => expect(progress).toHaveBeenCalledWith(expect.objectContaining({ output: 'early output' })));
+    release(); const result = await running;
+    expect(result.output).toContain('early output and final'); expect(result.success).toBe(true);
+    await driver.dispose();
 });

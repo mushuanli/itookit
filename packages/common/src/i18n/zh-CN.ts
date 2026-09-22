@@ -176,12 +176,12 @@ export const zhCN = {
 
     // ── MCP transport ───────────────────────────────────────────────────────
     'mcpTransport.stdio':       'Stdio (本地进程)',
-    'mcpTransport.sse':         'SSE (HTTP 流)',
-    'mcpTransport.http':        'HTTP (REST)',
+    'mcp.unsupportedTransport': '已不支持，请选择 stdio 或 Streamable HTTP',
+    'mcp.protocolRequirement': '仅支持 MCP 2026-07-28。旧服务器需要升级；不会回退到旧协议。',
+    'mcpTransport.http':        'Streamable HTTP（JSON-RPC）',
 
     'mcpTransport.stdio.option':'Stdio — 启动本地进程',
-    'mcpTransport.sse.option':  'SSE — Server-Sent Events',
-    'mcpTransport.http.option': 'HTTP — REST 端点',
+    'mcpTransport.http.option': 'Streamable HTTP — MCP 端点',
 
     // ── Model capability labels ─────────────────────────────────────────────
     'model.capability.vision':           '视觉',
@@ -375,6 +375,24 @@ export const zhCN = {
     'skill.import.placeholder':  '[{"name":"My Skill","type":"http","endpoint":"..."}]',
 
     // ── MCP editor ──────────────────────────────────────────────────────────
+    'agent.capabilities.title': '工具与 Skill 授权',
+    'agent.capabilities.defaults': '使用宿主默认工具',
+    'agent.capabilities.help': '关闭默认工具后，下方白名单生效；留空表示禁止直接工具。MCP 服务授权单独叠加。',
+    'agent.capabilities.tools': '工具 ID（每行一个）',
+    'agent.capabilities.skillHelp': '勾选 Skill 加载其指令；调用其工具还需将显示的工具 ID 加入白名单。',
+    'mcp.stdioUnavailable': 'stdio 需要桌面或 CLI 宿主。浏览器请使用 HTTP/SSE MCP 服务。',
+    'skill.flowGrants': '权限由 Flow 节点配置',
+    'skill.configureCapabilities': '配置工具授权',
+    'skill.instructionsLoaded': '指令已加载',
+    'skill.instructionsUnloaded': '指令未加载',
+    'skill.toolGrants': '工具授权 {granted}/{total}',
+    'mcp.preview': '查看内容',
+    'mcp.argumentRequired': '请输入必填参数：{name}',
+    'mcp.headers': 'HTTP 请求头（JSON）',
+    'mcp.environment': 'stdio 环境变量（JSON）',
+    'mcp.invalidMap': '请输入键和值均为字符串的 JSON 对象',
+    'mcp.invalidTimeout': '超时时间必须大于 0 秒',
+    'mcp.discoverySuccess': 'MCP 握手成功，发现 {count} 个工具',
     'mcp.header':                'MCP Servers',
     'mcp.addNew':                '添加服务器',
     'mcp.importConfig':          '导入配置',

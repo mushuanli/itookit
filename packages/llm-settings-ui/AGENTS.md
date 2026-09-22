@@ -29,3 +29,5 @@ src/
 pnpm --filter @itookit/llm-settings-ui typecheck
 pnpm --filter @itookit/llm-settings-ui test
 ```
+
+Agent 编辑必须保留未展示的策略字段；工具授权写顶层 `capabilityPolicy`，不再写旧 `config.mcpServers`。MCP 测试经管理服务执行真实协议握手与发现，不可使用普通 HTTP 探测代替；导入字段和远端文案必须转义。见 [能力配置与执行](../../doc/design/tool-skill-mcp-capabilities.md)。

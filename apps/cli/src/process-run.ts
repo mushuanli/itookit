@@ -1,8 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import type { NativeShellResult } from '@itookit/tools';
+import type { NativeShellResult, NativeShellOptions } from '@itookit/tools';
 import { signalProcessGroup, stopProcessGroup } from './process-stop';
 
-interface ProcessOptions {
+interface ProcessOptions extends NativeShellOptions {
     cwd?: string;
     timeoutMs?: number;
     signal?: AbortSignal;
@@ -32,9 +32,14 @@ class ProcessCompletion {
 
     constructor(private readonly child: ChildProcess, private readonly options: ProcessOptions,
         private readonly resolve: (result: NativeShellResult) => void) {
-        const append = (current: string, chunk: Buffer) => (current + chunk.toString()).slice(0, 50_000);
-        child.stdout!.on('data', chunk => { this.stdout = append(this.stdout, chunk); });
-        child.stderr!.on('data', chunk => { this.stderr = append(this.stderr, chunk); });
+        for (const stream of ['stdout', 'stderr'] as const) {
+            child[stream]!.setEncoding('utf8');
+            child[stream]!.on('data', (chunk: string) => {
+                const text = chunk.slice(0, Math.max(0, 50_000 - this[stream].length));
+                this[stream] += text;
+                if (text) options.onOutput?.({ stream, text });
+            });
+        }
         this.timer = setTimeout(this.abort, options.timeoutMs ?? 120_000);
         options.signal?.addEventListener('abort', this.abort, { once: true });
         child.on('exit', () => { this.stopping ??= stopProcessGroup(child.pid); });

@@ -80,6 +80,7 @@ export class SessionRunCoordinator {
             dagPlugins,
             resolveTools,
             resolveHarnessToolIds,
+            resolveMCPToolIds: (sessionId, ids) => this.agents.getMCPToolIds(ids, sessionId),
             resolveSkills: (ids, sessionId) => this.agents.getSkills(ids, sessionId),
             retrieveMemory,
             resolveSessionContext,

@@ -9,6 +9,7 @@ import {
 import { IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback, UnifiedSearchResult, CollapseExpandResult } from '@itookit/ui-common';
 import type { AgentType, AgentDefinition, IAgentManagementService, ModelTier, PromptPreset } from '@itookit/common';
 import { EventBus } from '@itookit/vfs-core';
+import { bindAgentCapabilities, readAgentCapabilities, renderAgentCapabilities } from './agent-capabilities';
 import { renderModelCapabilityBadges } from '../utils/modelBadges';
 
 /**
@@ -61,12 +62,14 @@ export class AgentConfigEditor implements IEditor {
             const validType = this.normalizeAgentType(parsed.type);
 
             this.content = {
+                ...parsed,
                 id: agentId,
                 name: parsed.name || 'New Agent',
                 type: validType,
                 description: parsed.description || '',
                 icon: parsed.icon || '🤖',
                 config: {
+                    ...parsed.config,
                     connectionId: parsed.config?.connectionId || '',
                     modelTier: (parsed.config?.modelTier as ModelTier | undefined) ?? 'optimal',
                     // Preserve modelName for backward compat with existing data
@@ -132,7 +135,7 @@ export class AgentConfigEditor implements IEditor {
     async render() {
         if (!this.content) return;
         const agent = this.content;
-        const config = agent.config;
+        const config = { ...agent.config, ...agent.modelPolicy, systemPrompt: agent.systemPrompt ?? agent.config.systemPrompt };
 
         // Fetch all connections, then split into valid (enabled + hasApiKey) and invalid
         const allConns = await this.service.getConnections();
@@ -193,7 +196,11 @@ export class AgentConfigEditor implements IEditor {
         ].join('');
 
         const currentTier = config.modelTier ?? 'optimal';
-        const allMCPServers = await this.service.getMCPServers();
+        const allMCPServers = [...await this.service.getMCPServers()];
+        for (const id of agent.capabilityPolicy?.mcpProfileIds ?? config.mcpServers ?? []) {
+            if (!allMCPServers.some(server => server.id === id)) allMCPServers.push({ id, name: id, transport: 'http', status: 'error' });
+        }
+        const allSkills = await this.service.getSkills();
 
         this.container.innerHTML = `
             <div class="agent-editor-container">
@@ -368,6 +375,8 @@ export class AgentConfigEditor implements IEditor {
                     </div>
                 </div>
 
+                ${renderAgentCapabilities(agent, allSkills)}
+
                 <!-- MCP Tools -->
                 <div class="agent-section" id="mcp-section" style="${agent.type !== 'agent' ? 'display:none' : ''}">
                     <div class="agent-section__header">
@@ -390,8 +399,8 @@ export class AgentConfigEditor implements IEditor {
                                         <label class="agent-mcp-item">
                                             <input type="checkbox" 
                                                    name="mcpServers" 
-                                                   value="${server.id}" 
-                                                   ${(config.mcpServers || []).includes(server.id) ? 'checked' : ''}>
+                                                   value="${this.escapeHtml(server.id)}"
+                                                   ${(agent.capabilityPolicy?.mcpProfileIds ?? config.mcpServers ?? []).includes(server.id) ? 'checked' : ''}>
                                             <div class="agent-mcp-item__info">
                                                 <div class="agent-mcp-item__name">
                                                     ${server.icon || '🔌'} ${this.escapeHtml(server.name)}
@@ -504,6 +513,7 @@ export class AgentConfigEditor implements IEditor {
     }
 
     private bindEvents() {
+        bindAgentCapabilities(this.container);
         // 全局变更监听
         const handleChange = () => {
             this._isDirty = true;
@@ -801,16 +811,11 @@ export class AgentConfigEditor implements IEditor {
     }
 
     private syncModelFromUI() {
-        if (!this.content) return;
+        if (!this.content || !this.container.querySelector('[name="name"]')) return;
 
         const getVal = (name: string): string => {
             const el = this.container.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
             return el?.value || '';
-        };
-
-        const getCheckedValues = (name: string): string[] => {
-            return Array.from(this.container.querySelectorAll(`input[name="${name}"]:checked`))
-                .map((el: any) => el.value);
         };
 
         // 获取选中的类型
@@ -831,20 +836,26 @@ export class AgentConfigEditor implements IEditor {
         if (type === 'agent') {
             const tempVal = parseFloat(getVal('temperature'));
             this.content.config = {
+                ...this.content.config,
                 connectionId: getVal('connectionId'),
                 modelTier: (getVal('modelTier') as ModelTier) || 'optimal',
                 systemPrompt: getVal('systemPrompt'),
-                maxHistoryLength: parseInt(getVal('maxHistoryLength')) || -1,
-                mcpServers: getCheckedValues('mcpServers'),
+                maxHistoryLength: Number.isNaN(Number.parseInt(getVal('maxHistoryLength'))) ? -1 : Number.parseInt(getVal('maxHistoryLength')),
+                mcpServers: undefined,
                 temperature: !isNaN(tempVal) ? tempVal : undefined,
             };
+            this.content.capabilityPolicy = readAgentCapabilities(this.container, this.content.capabilityPolicy);
+            if (this.content.systemPrompt !== undefined) this.content.systemPrompt = this.content.config.systemPrompt;
+            if (this.content.modelPolicy) this.content.modelPolicy = { ...this.content.modelPolicy,
+                connectionId: this.content.config.connectionId, modelTier: this.content.config.modelTier,
+                temperature: this.content.config.temperature };
         }
     }
 
     private escapeHtml(str: string): string {
         const div = document.createElement('div');
         div.textContent = str;
-        return div.innerHTML;
+        return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     /** 解析连接某个 tier 对应的模型显示名（未配置时返回空字符串） */

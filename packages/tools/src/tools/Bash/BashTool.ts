@@ -3,6 +3,7 @@
 //
 // Platform applications inject INativeShell; this package never spawns processes.
 
+import { createToolProgressReporter } from '../../core/progress';
 import { z } from 'zod/v4';
 import { buildTool, type ToolDef } from '../../core/Tool';
 import { lazySchema } from '../../core/lazySchema';
@@ -163,9 +164,17 @@ export function createBashTool(shell?: INativeShell) {
       const timeoutMs = Math.min(input.timeout_ms ?? context.timeoutMs, context.timeoutMs);
       const sh = context.shell ?? shell;
       if (!sh) throw new Error('BashTool requires an application-provided native shell');
+      const progress = createToolProgressReporter(context.onProgress);
+      const message = `$ ${input.command}\ncwd: ${context.cwd}`;
+      let preview = '';
+      progress.update({ message });
       const result = await sh.exec('sh', ['-c', input.command], {
         cwd: context.cwd, timeoutMs, signal: context.signal,
-      });
+        onOutput: chunk => {
+          preview = (preview + (chunk.stream === 'stderr' ? '[stderr] ' : '') + chunk.text).slice(-8192);
+          progress.update({ message, output: preview });
+        },
+      }).finally(() => progress.finish());
       const combined = result.stdout + (result.stderr ? '\n[stderr]\n' + result.stderr : '');
       const truncated = combined.length > MAX_OUTPUT_CHARS;
       return { data: {

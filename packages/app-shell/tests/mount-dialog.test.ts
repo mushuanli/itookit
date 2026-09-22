@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
+import { t } from '@itookit/common';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
 import { DirectoryMountService, SessionFilesService } from '@itookit/app-core';
@@ -15,23 +16,26 @@ it('sets a default without granting it, then mounts and unmounts through the sha
     files.registerSource('admin-home', await manager.openFileSystem('/home/admin'));
     await root.driver.createDirectory({ parentPath: '/home/admin/projects', name: 'demo', recursive: true });
     const mounts = new DirectoryMountService(root, files); await mounts.init();
-    const closing = showMountDialog(mounts, files, id);
+    const homeClosing = showMountDialog(mounts, files, id, 'home');
     const button = (text: string) => [...document.querySelectorAll('dialog button')].find(b => b.textContent === text) as HTMLButtonElement;
     try {
-        await new Promise(resolve => setTimeout(resolve, 10));
+        await vi.waitFor(() => expect(button(t('mount.dialog.home')).disabled).toBe(false));
         (document.querySelector('[aria-label="来源目录"]') as HTMLInputElement).value = '~/projects/demo';
-        button('设置默认目录').click();
+        button(t('mount.dialog.home')).click();
         await vi.waitFor(() => expect(mounts.getHome()).toBe('/home/admin/projects/demo'));
         expect(await files.inspect(id)).toBeNull();
-        await vi.waitFor(() => expect(button('挂载默认目录').disabled).toBe(false));
-        button('挂载默认目录').click();
+        await vi.waitFor(() => expect(button(t('mount.dialog.close')).disabled).toBe(false));
+        button(t('mount.dialog.close')).click(); expect(await homeClosing).toBe(true);
+        const closing = showMountDialog(mounts, files, id, 'mount');
+        await vi.waitFor(() => expect(button(t('mount.dialog.mountDefault')).disabled).toBe(false));
+        button(t('mount.dialog.mountDefault')).click();
         await vi.waitFor(async () => expect((await files.inspect(id))?.cwd).toBe('/workspace'));
-        await vi.waitFor(() => expect(button('卸载')).toBeTruthy());
-        await vi.waitFor(() => expect(button('卸载').disabled).toBe(false));
-        button('卸载').click();
+        await vi.waitFor(() => expect(button(t('mount.dialog.remove'))).toBeTruthy());
+        await vi.waitFor(() => expect(button(t('mount.dialog.remove')).disabled).toBe(false));
+        button(t('mount.dialog.remove')).click();
         await vi.waitFor(async () => expect((await files.inspect(id))?.mounts).toEqual([]));
-        await vi.waitFor(() => expect(button('卸载')).toBeUndefined());
-        await vi.waitFor(() => expect(button('关闭').disabled).toBe(false));
-        button('关闭').click(); expect(await closing).toBe(true);
+        await vi.waitFor(() => expect(button(t('mount.dialog.remove'))).toBeUndefined());
+        await vi.waitFor(() => expect(button(t('mount.dialog.close')).disabled).toBe(false));
+        button(t('mount.dialog.close')).click(); expect(await closing).toBe(true);
     } finally { document.body.replaceChildren(); if (modalDescriptor) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', modalDescriptor); else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); vi.restoreAllMocks(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose(); }
 });

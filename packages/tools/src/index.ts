@@ -154,3 +154,6 @@ export const BUILTIN_TOOLS: Tool[] = [
   WebFetchTool,
   WebSearchTool,
 ];
+
+export { createToolProgressReporter } from './core/progress';
+export type { NativeShellOptions } from './core/types';

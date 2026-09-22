@@ -11,6 +11,23 @@ const capability: TaskInputEvent = { type: 'signal', sequence: 1,
 const cursor = { contextId: 't', revision: 1, generation: 0,
     snapshot: { id: 'sha', sha256: 'sha', bytes: 100, mediaType: 'application/json' } };
 
+it('keeps v2 context tools available after restore without granting unrelated tools', async () => {
+    const program = new ContextTaskProgram(new DurableAgentProgram());
+    const initial = await program.init({ sessionId: 's', roundId: 'r', connectionId: 'c', approval: 'none',
+        allowedToolIds: ['Read'], messages: [{ role: 'user', content: 'goal' }] });
+    const preparation = await program.reduce(initial.state, capability);
+    const llm = await program.reduce(preparation.state, { type: 'effect-completed', effectId: effect(preparation.actions).id,
+        result: { cursor, writes: [], explanation: {} } });
+    for (const name of ['context_history', 'Write']) {
+        const next = await program.reduce(JSON.parse(JSON.stringify(llm.state)), { type: 'effect-completed', effectId: effect(llm.actions).id,
+            result: { choices: [{ message: { role: 'assistant', content: '', tool_calls: [
+                { id: 'call', type: 'function', function: { name, arguments: '{}' } },
+            ] }, finish_reason: 'tool_calls' }] } });
+        if (name === 'context_history') expect(effect(next.actions)).toMatchObject({ kind: 'tool.call', version: '2', request: { toolId: name } });
+        else expect(next.next).toMatchObject({ type: 'fail', error: { code: 'TOOL_NOT_ALLOWED' } });
+    }
+});
+
 it('commits the context head and frozen LLM request in one decision without repeated working history', async () => {
     const program = new ContextTaskProgram(new DurableAgentProgram());
     const initial = await program.init({ sessionId: 's', roundId: 'r', connectionId: 'c', messages: [{ role: 'user', content: 'goal' }] });

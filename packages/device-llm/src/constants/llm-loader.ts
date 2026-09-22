@@ -94,7 +94,7 @@ export interface LLMSkillDef {
 }
 
 /** Agent definition as stored in a .llm file — mirrors AgentDefinition without runtime timestamps. */
-export interface LLMAgentDef {
+export interface LLMAgentDef extends Omit<AgentDefinition, 'type' | 'config' | 'interface' | 'createdAt' | 'modifiedAt'> {
     id: string;
     name: string;
     type?: string;              // AgentType; defaults to 'agent' on import
@@ -116,7 +116,7 @@ export interface LLMAgentDef {
 export interface LLMMCPDef {
     servers: Array<{
         name: string;
-        transport: 'stdio' | 'sse' | 'websocket';
+        transport: 'stdio' | 'http';
         command?: string;
         args?: string[];
         url?: string;
@@ -251,22 +251,25 @@ export function toLLMProvider(def: LLMProviderDef): LLMProvider {
  * Convert a parsed LLMAgentDef to the runtime AgentDefinition type.
  */
 export function toRuntimeAgent(def: LLMAgentDef): AgentDefinition {
+    const snapshot = structuredClone(def);
     return {
+        ...snapshot,
         id: def.id,
         name: def.name,
         type: (def.type ?? 'agent') as AgentType,
         icon: def.icon,
         description: def.description,
         config: {
+            ...snapshot.config,
             connectionId: def.config.connectionId || 'default',
             modelTier: def.config.modelTier as ModelTier | undefined,
             systemPrompt: def.config.systemPrompt,
             maxHistoryLength: def.config.maxHistoryLength,
             temperature: def.config.temperature,
-            mcpServers: def.config.mcpServers,
+            mcpServers: snapshot.config.mcpServers,
         } as AgentConfig,
-        tags: def.tags,
-        interface: def.interface as AgentDefinition['interface'],
+        tags: snapshot.tags,
+        interface: snapshot.interface as AgentDefinition['interface'],
         createdAt: Date.now(),
     };
 }
@@ -346,23 +349,8 @@ export function fromLLMProvider(p: LLMProvider): LLMProviderDef {
  * Strips runtime-only timestamps.
  */
 export function fromAgentDef(agent: AgentDefinition): LLMAgentDef {
-    return {
-        id: agent.id,
-        name: agent.name,
-        type: agent.type,
-        icon: agent.icon,
-        description: agent.description,
-        config: {
-            connectionId: agent.config.connectionId,
-            modelTier: agent.config.modelTier,
-            systemPrompt: agent.config.systemPrompt,
-            maxHistoryLength: agent.config.maxHistoryLength,
-            temperature: agent.config.temperature,
-            mcpServers: agent.config.mcpServers,
-        },
-        tags: agent.tags,
-        interface: agent.interface,
-    };
+    const { createdAt: _createdAt, modifiedAt: _modifiedAt, ...definition } = agent;
+    return structuredClone({ ...definition, config: { ...definition.config } });
 }
 
 /**

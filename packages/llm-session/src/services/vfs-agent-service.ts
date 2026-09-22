@@ -164,6 +164,8 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
         return [...this._agents];
     }
 
+    getAgentResourceId(id: string): string | undefined { return this._agentNodeIds.get(id); }
+
     findAgent(id: string): AgentDefinition | undefined {
         return this._agents.find(a => a.id === id);
     }
@@ -363,6 +365,10 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
     async saveConnection(conn: LLMConnection): Promise<void> { return this.llmService.saveConnection(conn); }
     async deleteConnection(id: string): Promise<void> { return this.llmService.deleteConnection(id); }
 
+    async readMCPResource(id: string, uri: string) { return this.llmService.readMCPResource(id, uri); }
+    async getMCPPrompt(id: string, name: string, args?: Record<string, string>) { return this.llmService.getMCPPrompt(id, name, args); }
+
+    async testMCPServer(server: MCPServer) { return this.llmService.testMCPServer(server); }
     async getMCPServers(): Promise<MCPServer[]> { return this.llmService.getMCPServers(); }
     async saveMCPServer(server: MCPServer): Promise<void> { return this.llmService.saveMCPServer(server); }
     async deleteMCPServer(id: string): Promise<void> { return this.llmService.deleteMCPServer(id); }

@@ -18,6 +18,20 @@ function pending(maxExchanges = 4) {
 const mismatch: ToolInvokeResult = { toolId: 'Edit', success: false, output: 'Read the file again',
     error: 'old_string not found', errorCode: 'EDIT_NOT_FOUND', recoverable: true, durationMs: 1 };
 
+it.each([{ allowedToolIds: [] }, { allowedToolIds: ['Read'] }])('rejects undeclared tools before approval or execution (grants: $allowedToolIds)', ({ allowedToolIds }) => {
+    const program = new DurableAgentProgram();
+    const initial = program.init({ sessionId: 's', roundId: 'r', connectionId: 'c', allowedToolIds,
+        approval: 'all', messages: [{ role: 'user', content: 'Read code' }] });
+    const llm = program.reduce(initial.state, { type: 'signal', sequence: 1,
+        signal: { type: 'capabilities', payload: { llmHandleId: 'llm', toolHandleId: 'tool' } } });
+    const next = program.reduce(JSON.parse(JSON.stringify(llm.state)), { type: 'effect-completed', effectId: 'llm-exchange-1',
+        result: { choices: [{ message: { role: 'assistant', content: '', tool_calls: [
+            { id: 'write', type: 'function', function: { name: 'Write', arguments: '{}' } },
+        ] }, finish_reason: 'tool_calls' }] } });
+    expect(next.next).toMatchObject({ type: 'fail', error: { code: 'TOOL_NOT_ALLOWED' } });
+    expect(next.actions?.some(action => action.type === 'effect' || action.type === 'request-interaction')).not.toBe(true);
+});
+
 it('returns known tool errors to the model after restoring serialized state', () => {
     const { program, state } = pending();
     const next = program.reduce(state, { type: 'effect-completed', effectId: 'tool-1-edit', result: mismatch as never });

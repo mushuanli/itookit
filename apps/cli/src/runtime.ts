@@ -259,7 +259,7 @@ export async function createCliRuntime(
         recover: true,
     });
     const { kernel } = core;
-    const workspaceManager = cliWorkspaceManager(workflow, shell);
+    const workspaceManager = cliWorkspaceManager(workflow);
 
     const flowCapabilities = createFlowCapabilities(core);
     const executor = new DurableFlowExecutor({
@@ -492,13 +492,14 @@ async function configureLlm(driver: LLMDeviceDriver, workflow: CompiledWorkflow)
  * while their file and process capabilities remain read-only inside the container.
  * Worktrees live under the CLI state dir, never inside the repository working tree.
  */
-function cliWorkspaceManager(workflow: CompiledWorkflow, shell: INativeShell): FlowWorkspaceManager | undefined {
+function cliWorkspaceManager(workflow: CompiledWorkflow): FlowWorkspaceManager | undefined {
     if (!isolatedWorkspace(workflow)) return undefined;
     const readOnly = workflow.config.runtime?.workspace?.mode === 'read-only';
     const manager = new GitWorktreeFlowWorkspaceManager({
         repository: workflow.workspaceRoot,
         directoryFor: sessionId => cliWorktreeDirectory(workflow.stateDir, sessionId),
-        commands: gitRunner(readOnly ? new NodeNativeShell() : shell),
+        // Host Git setup needs the base repository before the agent workspace exists.
+        commands: gitRunner(new NodeNativeShell()),
     });
     if (!readOnly) return manager;
     return {

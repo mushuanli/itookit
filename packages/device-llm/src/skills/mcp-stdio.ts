@@ -1,4 +1,4 @@
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import type { MCPServerConfig } from '../types/provider';
 
 export function createStdioTransport(config: MCPServerConfig): StdioClientTransport {

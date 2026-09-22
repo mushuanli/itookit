@@ -11,7 +11,7 @@ export interface MCPServerConfig {
     /** 服务器名称（唯一） */
     name: string;
     /** 传输类型 */
-    transport: 'stdio' | 'http' | 'sse' | 'websocket';
+    transport: 'stdio' | 'http';
     headers?: Record<string, string>;
     cwd?: string;
     timeout?: number;
@@ -19,7 +19,7 @@ export interface MCPServerConfig {
     command?: string;
     /** 命令参数（stdio 模式） */
     args?: string[];
-    /** 服务端点 URL（sse / websocket 模式） */
+    /** Streamable HTTP endpoint URL. */
     url?: string;
     /** 额外环境变量（stdio 模式） */
     env?: Record<string, string>;

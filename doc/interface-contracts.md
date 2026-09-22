@@ -121,3 +121,7 @@
 `EditorHostContext.directoryCommands.configureWorkspace(mode)` 由 SessionWorkbench 注入，llm-ui 的 WorkspaceDirectoryMenu 消费。`workspace` 模式替换主挂载并设置 cwd，`mount` 模式管理附加来源和读写权限；界面不直接接触宿主文件路径 API。`DirectoryMountService.setWorkspace` 复用 Session 授权 revision 和挂载变更守卫。
 
 文件搜索可通过 `ToolVFSContext.walkFiles(dir, options)` 增量消费路径；`createVFSToolContext` 同时实现惰性接口和兼容的 `listFiles`，两者共享忽略规则。Grep/Glob 必须优先使用惰性接口，达到结果上限立即关闭迭代器，避免桌面 IPC 完整遍历导致工具超时。
+
+## Tool / Skill / MCP 能力配置
+
+`ILLMManagementService` 的 `testMCPServer`、`readMCPResource`、`getMCPPrompt` 由 LLMDeviceDriver 实现，VFSAgentService 转发给设置 UI。`SessionCapabilityScope.resolveMCPToolIds` 经 app-core 注入 AgentResolver 与 Harness/Flow 提交层；最终授权固定在 Task 输入。`ToolExecutionContext.onProgress` 与 `INativeShell.exec` 的 `onOutput` 连接进度生产者和 History 投影。详细语义与验证见 [能力配置与执行](./design/tool-skill-mcp-capabilities.md)。

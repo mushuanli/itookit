@@ -226,7 +226,7 @@ export class SessionState {
             events.push({
                 type: 'message:status',
                 payload: {
-                    messageId: round.assistantMessage.persistedNodeId,
+                    messageId: `round-${round.roundId}-assistant`,
                     status: changes.status,
                 },
             });
@@ -582,7 +582,7 @@ export class SessionState {
                 historyPolicy: (p.defaultContextMode === 'exclude' ? 'exclude' : 'include') as HistoryPolicy,
                 roundId: p.roundId,
                 executionRoot: {
-                    id: p.assistantMessage.persistedNodeId,
+                    id: `round-${p.roundId}-assistant`,
                     name: 'Assistant',
                     executorType: 'agent',
                     executorId: p.agentId ?? '',

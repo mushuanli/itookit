@@ -1,3 +1,4 @@
+import { installTauriMCP } from './shell/tauri-mcp-transport';
 import { recordDiagnostic, observeTools } from './log/desktop-diagnostics';
 import { TauriSessionDirectories } from './services/session-directories';
 import { invoke } from '@tauri-apps/api/core';
@@ -168,6 +169,7 @@ function removeMountWorkspace(id: string): void {
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 
 async function bootstrap(): Promise<void> {
+    installTauriMCP();
     const t0 = performance.now();
     let t = t0;
     const log = (label: string) => {

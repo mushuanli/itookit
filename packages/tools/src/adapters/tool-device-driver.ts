@@ -192,6 +192,8 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
       if (!entry.meta.enabled || !entry.tool.isEnabled() || this.registry.get(request.toolId) !== entry) {
         throw new ToolInputError('TOOL_DISABLED', 'Tool was disabled or replaced before execution');
       }
+      const activity = entry.tool.getActivityDescription?.(args);
+      if (activity) await context.onProgress?.({ message: activity });
       const result = await entry.tool.call(args, context);
       return await toolSuccess(entry.tool, result.data, started, request.admitOutput);
     } catch (error) {

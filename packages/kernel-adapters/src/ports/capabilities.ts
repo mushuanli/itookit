@@ -34,6 +34,7 @@ export interface SkillToolHandlerFactory {
 }
 
 export interface SessionCapabilityScope {
+    resolveMCPToolIds?(profiles: string[]): Promise<string[]>;
     prepareTools?(ids: string[]): Promise<void>;
     readonly toolService: import('@itookit/common').IToolService;
     readonly skillService: ISkillService;

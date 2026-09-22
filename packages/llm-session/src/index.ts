@@ -100,6 +100,7 @@ export interface ConversationSystemOptions {
     flowStore: FlowStore;
     resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
     resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>;
+    resolveMCPToolIds?: (sessionId: string, ids: string[]) => Promise<string[]>;
     resolveHarnessToolIds?: (sessionId: string) => Promise<string[]>;
     resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
         definitions: ToolDefinition[];
@@ -135,6 +136,7 @@ export async function initializeConversationSystem(
             flowStore: options.flowStore,
             resolveTools: options.resolveTools,
             resolveHarnessToolIds: options.resolveHarnessToolIds,
+            resolveMCPToolIds: options.resolveMCPToolIds,
             resolveSessionContext: options.resolveSessionContext,
             resolveSessionSkills: options.resolveSessionSkills,
             retrieveMemory: options.retrieveMemory,
@@ -178,7 +180,7 @@ function createDagCommands(
         workspaceManager: options.workspaceManager,
         kernel: options.kernel,
         plugins: options.dagPlugins,
-        bindNode: (sessionId, node, defaults) => bindStandaloneFlowNode(node, defaults, sessionId, new AgentResolver(options.agentService, options.resolveSessionSkills)),
+        bindNode: (sessionId, node, defaults) => bindStandaloneFlowNode(node, defaults, sessionId, new AgentResolver(options.agentService, options.resolveSessionSkills, options.resolveMCPToolIds)),
         resolveSessionContext: options.resolveSessionContext,
         resolveTools: options.resolveTools,
         resolveSkillContexts: skillContextResolver({ resolveSkills: (ids, sessionId) => options.resolveSessionSkills?.(sessionId!, ids) ?? Promise.resolve([]), resolveTools: options.resolveTools }),

@@ -8,7 +8,7 @@ import {
 import type { ExecutionTask, ExecutorConfig } from '../core/types';
 import { AgentResolver } from './agent-resolver';
 
-export type FlowIdentityResolver = Pick<AgentResolver, 'resolveExact' | 'getSkills' | 'getSystemPrompt'>;
+export type FlowIdentityResolver = Pick<AgentResolver, 'resolveExact' | 'getSkills' | 'getSystemPrompt'> & Partial<Pick<AgentResolver, 'getMCPToolIds'>>;
 
 interface BindingSetup {
     config: ExecutorConfig;
@@ -98,7 +98,7 @@ async function bindIsolatedInvocation(node: FlowNodeDefinition, _defaults: FlowN
 async function bindAgentSource(source: AgentSource, context: BindingContext, templateDepth = 0) {
     const identity = await resolveIdentity(source.config, context);
     const messages = await resolveMessages(source.config, identity, context);
-    const toolIds = resolveCapabilities(source, identity, context);
+    const toolIds = await resolveCapabilities(source, identity, context);
     const config = resolveExecutionConfig(source.config, identity.referencedAgent, context);
     if (templateDepth > 0) applySkillSubagentModel(config, source.config, identity);
     const delegation = await resolveDelegation(source, messages, context, templateDepth);
@@ -206,12 +206,18 @@ async function resolvePromptReference(
     }
 }
 
-function resolveCapabilities(
+async function resolveCapabilities(
     source: AgentSource,
     identity: IdentityLayer,
     context: BindingContext,
-): string[] {
+): Promise<string[]> {
+    const profiles = unique([...(context.setup.config.capabilityPolicy?.mcpProfileIds ?? []),
+        ...strings(context.flowDefaults.mcpProfileIds), ...(identity.referencedAgent?.capabilityPolicy?.mcpProfileIds ?? []),
+        ...strings(source.config.mcpProfileIds)]);
+    if (profiles.length && !context.agents.getMCPToolIds) throw new Error('MCP profile resolution is unavailable');
+    const mcpIds = profiles.length ? await context.agents.getMCPToolIds!(profiles, context.task.sessionId) : [];
     return unique([
+        ...mcpIds,
         ...(context.setup.config.capabilityPolicy?.toolIds ?? []),
         ...strings(context.flowDefaults.toolIds),
         ...(identity.referencedAgent?.capabilityPolicy?.toolIds ?? []),

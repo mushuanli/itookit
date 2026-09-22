@@ -79,7 +79,8 @@ export class SessionManager implements ISession, SessionQuery {
             flowStore: FlowStore;
             resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
             resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>;
-            resolveHarnessToolIds?: (sessionId: string) => Promise<string[]>;
+            resolveMCPToolIds?: (sessionId: string, ids: string[]) => Promise<string[]>;
+    resolveHarnessToolIds?: (sessionId: string) => Promise<string[]>;
             resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
                 definitions: ToolDefinition[];
                 externalIds: string[];
@@ -92,7 +93,7 @@ export class SessionManager implements ISession, SessionQuery {
     ) {
         this.canWriteSession = options.canWriteSession;
         this.registry = new SessionRegistry(engine, round => restoreFlowHistory(options.kernel, round));
-        this.agentResolver = new AgentResolver(agentService, options.resolveSessionSkills);
+        this.agentResolver = new AgentResolver(agentService, options.resolveSessionSkills, options.resolveMCPToolIds);
         const attachments = new AttachmentProcessor(engine);
 
         if (!options?.kernel) throw new Error('SessionManager requires Kernel');

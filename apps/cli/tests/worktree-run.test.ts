@@ -98,7 +98,7 @@ function sendJson(response: ServerResponse, message: Record<string, unknown>, fi
     }));
 }
 
-function config(port: number, workspaceBlock: string): string {
+function config(port: number, workspaceBlock: string, tool = 'Bash'): string {
     return `version: 1
 name: worktree
 goal: Run isolated
@@ -122,7 +122,7 @@ agents:
     connection: default
     stream: false
     approval: none
-    tools: [Bash]
+    tools: [${tool}]
 tasks:
   - id: finish
     agent: worker
@@ -154,7 +154,7 @@ async function setup(writes: boolean, workspaceBlock = '', tool: 'Bash' | 'Write
     const stateDir = path.join(root, '.mindos');
     const configPath = path.join(root, 'mindos.yml');
     process.env.MINDOS_TEST_API_KEY = 'test-secret-value';
-    await writeFile(configPath, config(port, workspaceBlock), 'utf8');
+    await writeFile(configPath, config(port, workspaceBlock, tool), 'utf8');
     return { root, stateDir, configPath, canonical: target => realpath(target).catch(() => target) };
 }
 
@@ -182,7 +182,7 @@ it('runs the node inside the worktree and leaves the base repository untouched',
     let stderr = ''; child.stderr!.on('data', chunk => { stderr += String(chunk); });
     const [code] = await once(child, 'close') as [number, NodeJS.Signals | null];
     const runId = await latestRun(stateDir);
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
     expect(await manifest(stateDir, runId)).toMatchObject({ status: 'succeeded' });
 
     const worktree = path.join(stateDir, 'worktrees', runId);
@@ -201,13 +201,29 @@ it('points the VFS file tools at the isolated copy, not the base repository', as
     let stderr = ''; child.stderr!.on('data', chunk => { stderr += String(chunk); });
     const [code] = await once(child, 'close') as [number, NodeJS.Signals | null];
     const runId = await latestRun(stateDir);
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
     const worktree = path.join(stateDir, 'worktrees', runId);
     // The Write tool resolves `/workspace` through the Session mount, which is the worktree.
     expect(await readFile(path.join(worktree, 'written.txt'), 'utf8')).toBe('from vfs');
     expect(await exists(path.join(root, 'written.txt'))).toBe(false);
-    // The agent is told which workspace it actually works in.
-    expect(prompts.join('\n')).toContain(worktree);
+    // The agent uses virtual paths; only the host resolves the isolated directory.
+    expect(prompts.join('\n')).toContain('/workspace');
+    expect(prompts.join('\n')).not.toContain(worktree);
+}, 30_000);
+
+it('refuses a model-requested file tool outside the declared grants', async () => {
+    const { root, stateDir, configPath } = await setup(true, '    cleanup: keep\n', 'Write');
+    const definition = await readFile(configPath, 'utf8');
+    await writeFile(configPath, definition.replace('tools: [Write]', 'tools: [Bash]'));
+    const child = startRun(configPath, stateDir);
+    let stderr = ''; child.stderr!.on('data', chunk => { stderr += String(chunk); });
+    child.stdout!.resume();
+    const [code] = await once(child, 'close');
+    expect(code, stderr).toBe(1);
+    expect(stderr).toContain('Tool is not authorized for this task: Write');
+    const runId = await latestRun(stateDir);
+    expect(await exists(path.join(stateDir, 'worktrees', runId, 'written.txt'))).toBe(false);
+    expect(await exists(path.join(root, 'written.txt'))).toBe(false);
 }, 30_000);
 
 it('removes a clean worktree after a successful Run under the default cleanup policy', async () => {
@@ -216,7 +232,7 @@ it('removes a clean worktree after a successful Run under the default cleanup po
     let stderr = ''; child.stderr!.on('data', chunk => { stderr += String(chunk); });
     const [code] = await once(child, 'close') as [number, NodeJS.Signals | null];
     const runId = await latestRun(stateDir);
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
     const worktree = path.join(stateDir, 'worktrees', runId);
     expect(await exists(worktree)).toBe(false);
     expect(await listedWorktrees(root)).not.toContain(await canonical(worktree));
@@ -232,7 +248,7 @@ it('keeps a dirty worktree instead of deleting uncommitted agent work', async ()
     const [code] = await once(child, 'close') as [number, NodeJS.Signals | null];
     const runId = await latestRun(stateDir);
     // Cleanup failure must not rewrite the Run result, and must not discard the file.
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
     expect(await manifest(stateDir, runId)).toMatchObject({ status: 'succeeded' });
     const worktree = path.join(stateDir, 'worktrees', runId);
     expect(stderr).toContain(worktree);
