@@ -10,7 +10,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "typecheck": "tsc --noEmit",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml"
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml -p itookit-sanbox && cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.1.0",

@@ -252,3 +252,7 @@ Session 配置变更、禁用和服务释放会先同时关闭普通视图与工
 ### 会话工作目录默认值
 
 `ApplicationRuntimeOptions.defaultSessionDirectory` 是宿主提供的新会话工作目录。`SessionRepository` 在发布新 Session 前等待初始化回调，由 `DirectoryMountService.setWorkspace` 写入授权；已存在的 Session 不重新应用默认值。Tauri 通过 `get_current_dir` 注入启动 cwd；CLI 未显式指定 Flow workspace.root 时使用 `process.cwd()`，重开时保留持久化挂载。工作目录与应用 profile 数据根分别管理。
+
+## 系统沙箱接入边界
+
+`@itookit/sanbox` 提供 Seatbelt / Bubblewrap 启动计划与 Node 探测。应在宿主的 `createSessionProcesses` / `fileContextForScope` 所创建的 `nativeShell`、`ttyDriver` 中应用，再由 kernel-adapters 按作用域供给 Effect；Kernel/Flow/UI 不持有系统沙箱实现。Tauri 的 `session_shell_exec` 已调用包内 `itookit-sanbox` Rust crate，Linux Bubblewrap / macOS Seatbelt 均默认禁网，沿用宿主输出与取消管理。CLI OCI/native 路径保持原配置；具体职责和路径映射限制见 [系统沙箱设计](design/system-sandbox.md)。

@@ -1886,3 +1886,16 @@ Git 工作区 `finish` 现在返回可选说明；按策略保留的目录/分�
 - 全仓 `pnpm typecheck` 通过；`pnpm styles:check` 通过，剩余 48 个选择器/状态类豁免；`pnpm docs:check` 通过并保留既有历史表述告警。
 
 样式实际规则补在所属包，打印 CSS 同时覆盖独立打印文档和编辑器打印容器；已删除 59 个待补/待复核类名豁免。此次没有执行真实窗口视觉检查、Tauri/CLI 发布构建、全仓最终测试矩阵、真实云模型、其他平台及跨主机验收，不用包级结果代替这些要求。共享资源墓碑、审计和幂等回执当前永久保留，未实施物理历史 GC；history 默认返回前 100 项、最多 1000 项，未提供分页归档。
+
+
+## 系统沙箱模块接入桌面 Bash（2026-09-22）
+
+Tauri `session_shell_exec` 通过宿主目录句柄解析 grants，调用 `packages/sanbox/native` 的 `session_command`；基础参数与 TypeScript 入口共用 `runtime-policy.json`。Linux 使用 Bubblewrap 并默认隔离网络，保留虚拟挂载路径；macOS 已有 Seatbelt 分支，使用真实 cwd，尚待 macOS 实机确认。CLI native/OCI 未改，MCP 与持久 TTY 不在本次桌面 Bash 覆盖范围。
+
+真实 Tauri WebView 探针在隔离数据根 `/tmp/x1-sanbox-desktop-probe/profile` 运行，通过生产 `createApplicationRuntime`、`SessionCommand.Send` 的 agent 模式、LLM task/kernel/tool 链、`createTauriSessionProcesses`、Rust IPC 和新模块执行 Bash。仅模型响应使用确定性模拟：第一轮发起 Bash tool call，第二轮消费真实工具结果；文件操作、VFS 授权、IPC、进程执行与 `llm-ui` HistoryView 渲染都为真实实现。
+
+`sanbox-result.json` 记录 `phase=complete`，模型收到工具结果 `[exit 0]\nSANBOX_PROBE_PASS\n`；HistoryView DOM 包含同一标记。实际核验：授权目录可读写、宿主未授权文件不可读、net/mnt/pid namespace 与宿主不同、宿主测试环境变量未进入子进程、子 Bash 继承边界。宿主复核工作目录 output.txt=written、外部 marker 未改变。该探针经 xvfb/WebView 执行，不代表真实云模型或用户手动点击验收，也不代表重启恢复或 macOS 验收。
+
+回归：Rust 沙箱包 6 项与 Tauri 全部 46 项通过；app-shell 的 tauri-bash、tauri-flow-workspaces、chat-execution-mode 共 30 项通过。Tauri 取消测试先确认沙箱内脚本已经启动，再触发超时并等待超过后台写入延迟，确认没有迟到写入。TypeScript 沙箱测试、类型检查与双格式构建通过；Linux 原生隔离证据同时来自 Rust 用例和上述 WebView 探针。
+
+探针使用独立前端与二进制副本，未修改生产 main.ts 或 tauri.conf.json，未访问用户现有 profile。正常应用按原配置重新构建；启动新代码需重启开发版桌面应用。设计、限制与调用链见 [系统沙箱](design/system-sandbox.md)。

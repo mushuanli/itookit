@@ -1,59 +1,10 @@
-use std::path::{Component, Path};
-use std::process::{Command, Stdio};
+pub use itookit_sanbox::Mount;
+use itookit_sanbox::{session_command, NetworkAccess};
+use std::process::Command;
 
-pub struct Mount {
-    pub source: String,
-    pub target: String,
-    pub writable: bool,
-}
-
-/** Build a Linux process namespace from explicit Session directory grants. */
+/// Session/Flow Bash always uses the shared package with host-owned deny-network policy.
 pub fn command(script: &str, cwd: &str, mounts: &[Mount]) -> Result<Command, String> {
-    if !cfg!(target_os = "linux") { return Err("Session Bash isolation is not available on this platform".into()); }
-    // A Session without any mounted directory has cwd "/", which is not a valid bwrap target.
-    // Say so explicitly instead of the generic path-validation error.
-    if mounts.is_empty() {
-        return Err("Session Bash requires a mounted Session directory; mount one before running commands".into());
-    }
-    validate_target(cwd)?;
-    if !mounts.iter().any(|mount| inside(cwd, &mount.target)) { return Err("Bash cwd has no Session directory grant".into()); }
-    let mut sorted: Vec<_> = mounts.iter().collect();
-    sorted.sort_by_key(|mount| mount.target.len());
-    let mut result = Command::new("bwrap");
-    result.args(["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
-        "--ro-bind", "/usr", "/usr", "--symlink", "/usr/bin", "/bin",
-        "--symlink", "/usr/lib", "/lib", "--symlink", "/usr/lib64", "/lib64",
-        "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/etc"]);
-    for path in ["/etc/resolv.conf", "/etc/hosts", "/etc/ssl", "/etc/ld.so.cache"] {
-        if Path::new(path).exists() { result.args(["--ro-bind", path, path]); }
-    }
-    let mut targets = std::collections::HashSet::new();
-    for mount in sorted {
-        validate_target(&mount.target)?;
-        if !targets.insert(&mount.target) { return Err("Duplicate Session mount target".into()); }
-        let source = std::fs::canonicalize(&mount.source).map_err(|e| e.to_string())?;
-        if !source.is_dir() { return Err("Session Bash source must be a directory".into()); }
-        result.arg(if mount.writable { "--bind" } else { "--ro-bind" }).arg(source).arg(&mount.target);
-    }
-    result.args(["--chdir", cwd, "--", "bash", "--noprofile", "--norc", "-c", script]);
-    result.env_clear().env("PATH", "/usr/local/bin:/usr/bin:/bin").env("HOME", "/tmp").env("LANG", "C.UTF-8");
-    result.stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(unix)]
-    { use std::os::unix::process::CommandExt; result.process_group(0); }
-    Ok(result)
-}
-
-fn inside(path: &str, root: &str) -> bool { path == root || path.starts_with(&format!("{root}/")) }
-
-fn validate_target(path: &str) -> Result<(), String> {
-    if !path.starts_with('/') || path == "/" || path.ends_with('/') || path.contains("//")
-        || path.split('/').any(|part| part == "." || part == "..")
-        || Path::new(path).components().any(|part| !matches!(part, Component::RootDir | Component::Normal(_))) {
-        return Err("Invalid Session Bash path".into());
-    }
-    if ["/usr", "/bin", "/lib", "/lib64", "/etc", "/proc", "/dev", "/tmp"]
-        .iter().any(|root| inside(path, root)) { return Err("Session mount overlaps runtime directories".into()); }
-    Ok(())
+    session_command(script, cwd, mounts, NetworkAccess::Deny)
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -92,7 +43,7 @@ mod tests {
         let built = command("echo hi", "/workspace", &mounts).unwrap();
         // The only program this crate will ever spawn is the namespace builder: there is no
         // host-shell path to fall back to when isolation is unavailable.
-        assert_eq!(built.get_program(), "bwrap");
+        assert_eq!(built.get_program(), "/usr/bin/bwrap");
         let args: Vec<String> = built.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
         let switches: Vec<usize> = args.iter().enumerate().filter(|(_, arg)| arg.as_str() == "-c").map(|(index, _)| index).collect();
         assert_eq!(switches.len(), 1, "{args:?}");
@@ -123,8 +74,39 @@ mod tests {
     #[test]
     fn refuses_ungranted_cwd_and_reserved_or_traversing_paths() {
         assert!(command("true", "/workspace", &[]).is_err());
+        let root = std::env::temp_dir().join(format!("session-bash-path-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mounts = [Mount { source: root.to_string_lossy().into(), target: "/workspace".into(), writable: true }];
         for path in ["/", "/usr/bin", "/workspace/../etc", "/workspace/", "relative", "/workspace//sub"] {
-            assert!(validate_target(path).is_err(), "{path}");
+            assert!(command("true", path, &mounts).is_err(), "{path}");
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn desktop_session_bash_uses_a_private_network_namespace() {
+        let root = std::env::temp_dir().join(format!("session-bash-network-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mounts = [Mount { source: root.to_string_lossy().into(), target: "/workspace".into(), writable: true }];
+        let output = command("readlink /proc/self/ns/net", "/workspace", &mounts).unwrap().output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let host = std::fs::read_link("/proc/self/ns/net").unwrap();
+        assert_ne!(String::from_utf8(output.stdout).unwrap().trim(), host.to_str().unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn desktop_cancellation_stops_the_sandbox_before_releasing_its_workspace() {
+        let root = std::env::temp_dir().join(format!("session-bash-cancel-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mounts = [Mount { source: root.to_string_lossy().into(), target: "/workspace".into(), writable: true }];
+        let script = "printf started > started; (sleep 1; printf leaked > late) & wait";
+        let result = crate::bash_process::execute_command(command(script, "/workspace", &mounts).unwrap(), 300,
+            &std::sync::atomic::AtomicBool::new(false)).unwrap();
+        assert_ne!(result.2, 0);
+        assert_eq!(std::fs::read(root.join("started")).unwrap(), b"started");
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        assert!(!root.join("late").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
