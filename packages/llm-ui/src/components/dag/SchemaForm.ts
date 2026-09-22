@@ -18,7 +18,7 @@ interface JsonSchema {
 export class SchemaForm {
     constructor(
         private readonly root: HTMLElement,
-        private readonly schema: JsonValue,
+        private schema: JsonValue,
         private value: JsonValue,
         private readonly layout?: FormLayout,
     ) {}
@@ -26,6 +26,8 @@ export class SchemaForm {
     render(): void {
         this.root.innerHTML = renderRoot(asSchema(this.schema), this.value, this.layout);
     }
+
+    update(schema: JsonValue, value: JsonValue): void { this.schema = schema; this.value = value; this.render(); }
 
     read(): { value?: JsonValue; errors: string[] } {
         const errors: string[] = [];
@@ -262,7 +264,7 @@ function enumLabel(item: JsonValue): string {
 }
 
 function isParameterReference(value: unknown): value is string {
-    return typeof value === 'string' && /^\$\{(?:param|params|nodes|state|iteration)\.([A-Za-z0-9_.-]+)\}$/.test(value.trim());
+    return typeof value === 'string' && /^\$\{(?:param|params|nodes|state|iteration|vars)\.([A-Za-z0-9_./-]+)\}$/.test(value.trim());
 }
 
 function pruneInheritedObjects(schema: JsonSchema, value: JsonValue): JsonValue {

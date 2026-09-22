@@ -119,6 +119,7 @@ export class DagDraftController {
     }
 
     updateFlowSettings(settings: {
+        outputs?: FlowDraft['outputs'];
         connections?: FlowConnection[];
         defaultConnection?: string;
         parameters?: FlowParameter[];
@@ -127,6 +128,7 @@ export class DagDraftController {
         runPolicy?: import('@itookit/common').FlowRunPolicy;
     }): void {
         this.change(draft => {
+            if (settings.outputs) { if (Object.keys(settings.outputs).length) draft.outputs = clone(settings.outputs); else delete draft.outputs; }
             if (settings.connections) draft.connections = clone(settings.connections);
             if ('defaultConnection' in settings) draft.defaultConnection = settings.defaultConnection;
             if (settings.variables) draft.variables = clone(settings.variables);

@@ -38,6 +38,7 @@ export class FlowLauncher {
     private async createSession(flow: FlowRevision, parameters: Record<string, JsonValue>): Promise<void> {
         const created = await this.options.commands.execute<{ sessionId: string }>(SessionCommand.CreateFromFlow, {
             flowId: flow.id, revision: flow.revision, parameters, title: flow.name,
+            invocation: true,
         });
         await this.options.navigate(created.sessionId);
     }

@@ -11,7 +11,7 @@ export class InteractionPanel {
 
     constructor(private readonly container: HTMLElement) {}
 
-    show(request: ChatInputInteraction, respond: Pending['respond']): void {
+    show(request: ChatInputInteraction, respond: Pending['respond'], focus = true): void {
         if (this.pending?.request.key === request.key) return;
         this.clear();
         this.pending = { request, respond };
@@ -28,7 +28,7 @@ export class InteractionPanel {
         this.renderOptions(request.options ?? []);
         const wrapper = this.container.querySelector('.llm-input__field-wrapper');
         (wrapper?.parentElement ?? this.container).insertBefore(element, wrapper ?? null);
-        element.querySelector('textarea')!.focus({ preventScroll: true });
+        if (focus) element.querySelector('textarea')!.focus({ preventScroll: true });
     }
 
     clear(interactionId?: string): void {

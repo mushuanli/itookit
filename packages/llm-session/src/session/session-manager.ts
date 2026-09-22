@@ -256,10 +256,16 @@ export class SessionManager implements ISession, SessionQuery {
         revision: number,
         parameters: Record<string, JsonValue> | undefined,
         title: string,
+        invocation = false,
     ): Promise<{ sessionId: string }> {
         const name = title.trim() || 'Workflow';
         const engine = this.registry.engine;
         const sessionId = await engine.createSession(name);
+        if (invocation) {
+            if (this.canWriteSession && !await this.canWriteSession(sessionId)) throw new Error('Session is owned by another host');
+            await this.kernel.createSession({ id: sessionId, storage: sessionDirectoryStorage(sessionId) });
+            return { sessionId };
+        }
         await engine.updateManifest(sessionId, {
             flow: { flowId, revision, ...(parameters ? { parameters } : {}) },
         });

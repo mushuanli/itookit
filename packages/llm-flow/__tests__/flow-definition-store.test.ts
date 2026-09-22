@@ -7,6 +7,7 @@ import type { FlowDraft, FlowRevision } from '@itookit/common';
 import type { FlowStore } from '../src/flow-definition-store';
 import { FlowDefinitionStore } from '../src/flow-definition-store';
 import { flowRevisionDigest } from '../src/flow/validation';
+import { flowToDag } from '../src/flow/to-dag';
 
 interface MemoryFile { nodeId: string; name: string; content: string; }
 
@@ -186,4 +187,24 @@ it('still rejects an actually undeclared variable before installing any file', a
     await expect(execute(FlowCommand.DraftInstall, template)).rejects.toThrow('Undeclared Flow variable');
     expect(await store.loadDraft(template.id)).toBeNull();
     expect(await store.listDrafts()).toEqual([]);
+});
+
+it('pins a published parent to its transitive child revisions after the child is edited', async () => {
+    const store = new FlowDefinitionStore(memoryStore(), createBuiltinDagPluginRegistry());
+    const child = await store.createDraft({ id: 'child', name: 'Child' });
+    child.outputs = { result: { value: 'first' } };
+    const firstChild = await store.createRevision(child);
+    const parent = await store.createDraft({ id: 'parent', name: 'Parent' });
+    parent.nodes = [{ id: 'call' as never, name: 'Call', plugin: 'builtin.flow', pluginVersion: '2.0.0', inputs: {}, config: { flowId: 'child', parameters: {} } }];
+    parent.outputs = { result: { value: '${nodes.call.outputs.result}' } };
+    const firstParent = await store.createRevision(parent);
+    child.outputs.result.value = 'second';
+    await store.createRevision(child);
+    const persisted = (await store.loadRevision('parent', firstParent.revision))!;
+    expect(persisted.dependencyLocks?.call).toMatchObject({ revision: firstChild.revision, digest: firstChild.digest });
+    const graph = await flowToDag(persisted, undefined, undefined, (id, revision) => store.loadRevision(id, revision));
+    expect(graph.nodes.find(node => node.id === 'call/__flow_return')?.config).toMatchObject({ returns: { result: { value: 'first' } } });
+    const secondParent = await store.createRevision(parent);
+    expect(secondParent.dependencyLocks?.call.revision).toBe(2);
+    expect(secondParent.digest).not.toBe(firstParent.digest);
 });

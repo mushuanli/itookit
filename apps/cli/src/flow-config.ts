@@ -14,6 +14,7 @@ export async function loadFlowDefinition(file: string): Promise<FlowRevision> {
             nodes: structuredClone(draft.nodes),
             edges: structuredClone(draft.edges),
             parameters: structuredClone(draft.parameters ?? []),
+            ...(draft.outputs ? { outputs: structuredClone(draft.outputs) } : {}),
             connections: structuredClone(draft.connections ?? []),
             defaultConnection: draft.defaultConnection,
             systemPrompt: structuredClone(draft.systemPrompt ?? []),

@@ -661,11 +661,6 @@
     border-radius: var(--llm-radius-lg);
 }
 
-.llm-input__field-wrapper--disabled {
-    opacity: 0.6;
-    pointer-events: none;
-}
-
 /* 活动设置指示器 */
 .llm-input__active-settings {
     display: flex;

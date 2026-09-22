@@ -45,7 +45,8 @@ Flow Session 标题栏「流程输出」挂接当前 Session 的持久 Run，显
 
 - `src/flows/library/` 保存随包发布的 `.flow` 定义；在 `src/flows/library.ts` 注册。Web/Tauri 的 app-shell 启动装配调用 `installFlowLibrary`，只复制尚不存在的定义到 FlowEngine 的 `/home/admin/flows`，不覆盖用户草稿。
 - `src/flows/context-menu.ts` 提供 `.flow` 文件右键「运行」菜单；`FlowLauncher` 与 FlowsEditor 工具栏共用参数 → 固定 revision → CreateFromFlow → 导航流程。
-- 参数校验在关闭对话框前执行；取消不创建 Session，草稿版本冲突不启动。新 Session 保存 manifest.flow，现有 LLMWorkspaceEditor 在首次打开空 Session 时自动发送 Flow 执行请求。
+- 参数校验在关闭对话框前执行；取消不创建 Session，草稿版本冲突不启动。新入口通过 CreateFromFlow 的 invocation 模式直接创建持久调用，旧 manifest.flow 会话保持兼容。
+- `/flow` 在当前 Session 启动独立调用；`InvocationPanel` 按 root Task 显示各调用及人工确认，结果可放入聊天草稿。`builtin.flow@2.0.0` 提供参数与命名返回值组合。契约见 [Flow 调用与组合](../../doc/design/flow-invocation-composition.md)。
 - UI 通过命令总线接入，不读写 Kernel 存储。DOM 回归见 `packages/app-shell/tests/flow-launch.test.ts`，实际模板 DAG 执行见 llm-flow 的 structured-flow 测试。
 
 内置模板安装通过 `flow.draft.install` 保存独立安装记录；删除 `.flow` 后记录仍在，重启不再恢复该模板。聊天侧栏将同一 FlowEngine 挂到 `/@flows`，支持展开、打开和右键运行/删除。新增作文文件统一名为 `essay-review-isolated.flow`。

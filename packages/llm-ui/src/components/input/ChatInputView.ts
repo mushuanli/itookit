@@ -303,19 +303,14 @@ export class ChatInput implements IChatInputPresenter {
         this.syncExecutionMode();
         this.sendBtn.style.display = loading ? 'none' : 'flex';
         this.stopBtn.style.display = loading ? 'flex' : 'none';
-        this.textarea.disabled = loading;
+        this.textarea.disabled = false;
         this.agentPickerBtn.disabled = loading;
         this.connectionTier.setLoading(loading);
         this.attachBtn.disabled = loading;
         this.settingsBtn.disabled = loading;
         if (this.moreBtn) this.moreBtn.disabled = loading;
 
-        if (loading) {
-            this.inputWrapper.classList.add('llm-input__field-wrapper--disabled');
-            this.toggleSettings(false);
-        } else {
-            this.inputWrapper.classList.remove('llm-input__field-wrapper--disabled');
-        }
+        if (loading) this.toggleSettings(false);
     }
 
     setConfig(config: Partial<IChatInputConfig>): void {
@@ -699,7 +694,8 @@ export class ChatInput implements IChatInputPresenter {
 
     private async triggerSend(): Promise<void> {
         const text = this.textarea.value.trim();
-        if ((!text && this.files.length === 0) || this.loading) return;
+        if (!text && this.files.length === 0) return;
+        if (this.loading && !/^\/(flow|cancel|approve|resume)(?:\s|$)/.test(text)) return;
 
         // ✨ before 钩子
         for (const plugin of this.plugins) {

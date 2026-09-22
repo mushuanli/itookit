@@ -2,6 +2,8 @@ import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/common';
 import { rerunSession } from './rerun-session';
 import { t } from '@itookit/common';
 import { openSessionFlowOutputs } from '../flows/session-output';
+import { InvocationPanel } from '../flows/InvocationPanel';
+import { invokeFlowText } from '../flows/invoke-flow';
 import { promptFlowParameters } from '../components/FlowParameterForm';
 // @file: llm-ui/shell/LLMWorkspaceEditor.ts
 
@@ -148,6 +150,9 @@ export class LLMWorkspaceEditor implements IEditor {
     private rerunAbort?: AbortController;
     private rerunPending = false;
     private flowOutputAbort?: AbortController;
+    private invocationPanel?: InvocationPanel;
+    private invocationAbort = new AbortController();
+    private invocationPending?: Promise<boolean>;
     private inputDialogKey?: string;
     private inputDialogAbort?: AbortController;
     private attachmentClosed = false;
@@ -327,6 +332,9 @@ export class LLMWorkspaceEditor implements IEditor {
             },
         });
         this.historyView = historyView;
+        const calls = document.createElement('div'); inputEl.before(calls);
+        this.invocationPanel = new InvocationPanel(this.commandBus, this.options.sessionId, calls,
+            text => this.chatInput.restoreInput(text));
 
         // Create NavigationHelper now that historyView is available
         this.navigation = new NavigationHelper({
@@ -973,6 +981,12 @@ export class LLMWorkspaceEditor implements IEditor {
         this.slashPlugin = new SlashCommandPlugin(
             buildSlashCallbacks({
                 commands: this.commandBus,
+                onFlow: async args => {
+                    if (this.invocationPending) return false;
+                    this.invocationPending = invokeFlowText(this.commandBus, this.options.sessionId, args, this.invocationAbort.signal);
+                    try { return await this.invocationPending; }
+                    finally { this.invocationPending = undefined; void this.invocationPanel?.refresh(); }
+                },
                 chatInput: this.chatInput,
                 bus: this.bus,
                 historyView: this.historyView,
@@ -1072,22 +1086,26 @@ export class LLMWorkspaceEditor implements IEditor {
                 return;
             }
         }
-        await restoreWaitingAttachment(kernel, sessionId, id => attachment.attach(id), isCurrent);
+        const calls = await this.invocationPanel?.taskIds() ?? new Set<string>();
+        await restoreWaitingAttachment({ listSessionTasks: async id => (await kernel.listSessionTasks(id)).filter(task => !calls.has(task.id)) }, sessionId, id => attachment.attach(id), isCurrent);
     }
 
     private async cancelAttachedTask(): Promise<void> {
+        if (await this.invocationPanel?.hasActive()) throw new Error(t('flow.invoke.ambiguous'));
         if (!this.runAttachment) throw new Error('Kernel task attachment is unavailable');
         await this.runAttachment.cancel();
         Toast.info('Task cancelled');
     }
 
     private async resumeAttachedTask(): Promise<void> {
+        if (await this.invocationPanel?.hasActive()) throw new Error(t('flow.invoke.ambiguous'));
         if (!this.runAttachment) throw new Error('Kernel task attachment is unavailable');
         await this.runAttachment.resume();
         Toast.info('Task resumed');
     }
 
     private async approveAttachedTask(note: string): Promise<void> {
+        if (await this.invocationPanel?.hasActive()) throw new Error(t('flow.invoke.ambiguous'));
         if (!this.runAttachment) throw new Error('Kernel task attachment is unavailable');
         await this.runAttachment.approve(note);
         Toast.info('Task approved');
@@ -1159,6 +1177,8 @@ export class LLMWorkspaceEditor implements IEditor {
         // 6. 插件清理
         this.historyPlugin?.deactivate();
         this.slashPlugin?.deactivate();
+        this.invocationAbort.abort();
+        this.invocationPanel?.destroy();
         this.historyPlugin = null;
         this.slashPlugin = null;
 

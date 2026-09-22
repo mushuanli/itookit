@@ -72,8 +72,8 @@ export class DagCommandService {
         });
         bus.register(FlowCommand.RunList, async args => this.listRuns((args as { sessionId?: string } | undefined)?.sessionId));
         bus.register(FlowCommand.RunStart, async args => {
-            const input = args as { sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue>; goal?: FlowRunGoal };
-            return this.start(input.sessionId, input.flow, input.parameters, input.goal);
+            const input = args as { sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue>; goal?: FlowRunGoal; invocation?: import('@itookit/common').DagRunSpec['invocation'] };
+            return this.start(input.sessionId, input.flow, input.parameters, input.goal, input.invocation);
         });
         bus.register(FlowCommand.RunGet, async args => {
             const input = args as { taskId: string; sessionId?: string };
@@ -171,6 +171,7 @@ export class DagCommandService {
         flow: FlowRevision,
         parameters?: Record<string, JsonValue>,
         goal?: FlowRunGoal,
+        invocation?: import('@itookit/common').DagRunSpec['invocation'],
     ) {
         if (!sessionId) throw new Error('DAG run requires sessionId');
         if (this.options.canWriteSession && !await this.options.canWriteSession(sessionId)) throw new Error('Session is read-only on this host');
@@ -189,7 +190,7 @@ export class DagCommandService {
                 this.options.bindNode!(id, node as FlowNodeDefinition, defaults as FlowNodeDefinition['config']) : undefined,
         });
         const { flow: handle } = await submitRun({ kind: 'graph', sessionId,
-            graph: { ...compiled, ...(goal ? { goal } : {}) }, parameters,
+            graph: { ...compiled, ...(goal ? { goal } : {}), ...(invocation ? { invocation } : {}) }, parameters,
         }, { kernel: this.options.kernel, flowExecutor: executor });
         this.handles.set(handle.root.id, handle);
         return { taskId: handle.root.id };
@@ -289,7 +290,7 @@ export class DagCommandService {
 async function loadPresentations(
     plugins: DagPluginCatalog,
 ): Promise<DagPluginPresentation[]> {
-    return Promise.all(plugins.listManifests().map(async manifest => ({
+    return Promise.all(plugins.listManifests().filter(manifest => manifest.id !== 'builtin.return').map(async manifest => ({
         manifest,
         ui: await plugins.loadUI(manifest.id, manifest.version),
     })));

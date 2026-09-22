@@ -1,5 +1,7 @@
 # Slash Command
 
+`/flow` 打开 Flow 选择器；`/flow <id> [JSON 参数]` 预填参数表单并创建独立持久调用。多次调用在当前会话显示独立卡片，普通聊天模式保持可用。Flow 后台运行不会禁用输入；普通聊天生成期间也可通过 slash 发起 Flow。卡片分别处理输入/审批、取消、恢复、固定版本重跑和结果引用。多个调用存在时，通用任务控制命令提示使用对应卡片。详见 [Flow 调用与组合](../../../doc/design/flow-invocation-composition.md)。
+
 ```text
 ChatInputView
 → SlashCommandPlugin.onBeforeSend

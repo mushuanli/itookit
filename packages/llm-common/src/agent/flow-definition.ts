@@ -87,6 +87,7 @@ export interface FlowLayout {
 }
 
 export interface FlowDraft {
+    outputs?: Record<string, { value: JsonValue; schema?: JsonValue }>;
     id: FlowId;
     draftVersion: number;
     baseRevision?: number;
@@ -252,6 +253,8 @@ export interface FlowRunGoal {
 }
 
 export interface FlowRevision {
+    dependencyLocks?: Record<string, FlowDependencyLock>;
+    outputs?: FlowDraft['outputs'];
     id: FlowId;
     revision: number;
     name: string;
@@ -274,6 +277,13 @@ export interface FlowRevision {
     runPolicy?: FlowRunPolicy;
     createdAt: number;
     digest: string;
+}
+
+export interface FlowDependencyLock {
+    flowId: string;
+    revision: number;
+    digest: string;
+    children: Record<string, FlowDependencyLock>;
 }
 
 export interface BlobRef {

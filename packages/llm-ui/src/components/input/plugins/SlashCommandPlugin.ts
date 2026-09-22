@@ -151,6 +151,7 @@ export function suggestCommands(commands: SlashCommandDef[], name: string, limit
  * 插件本身不依赖 SessionManager 等业务对象。
  */
 export interface SlashCommandCallbacks {
+    onFlow?: (args: string) => Promise<boolean>;
     // Common
     onRetry: () => void;
     onClear: () => void;
@@ -519,6 +520,12 @@ export class SlashCommandPlugin implements InputPlugin {
 
     private buildDefaultCommands(cb: SlashCommandCallbacks): SlashCommandDef[] {
         return [
+            ...(cb.onFlow ? [{ name: 'flow', label: '/flow', description: t('flow.invoke.description'), icon: SLASH_ICONS.new,
+                group: 'chat' as const, hasArgs: true, argsPlaceholder: '[id] [JSON]', preserveInput: true,
+                execute: async (args: string, context: InputPluginContext) => {
+                    const submitted = context.getText();
+                    if (await cb.onFlow!(args) && context.getText() === submitted) context.setText('');
+                } }] : []),
             // ── Common ──────────────────────────────────────────
             {
                 name: 'new',

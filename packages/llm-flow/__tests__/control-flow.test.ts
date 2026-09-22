@@ -131,6 +131,24 @@ describe('ordinary task groups and joins', () => {
             results: { content: { current: true, round: 2, value: { score: 9 } } },
         } } } });
     });
+
+    it('runs the shipped review graph as a function and returns its final report after revision', async () => {
+        automatic = true; scores = [9, 7, 9, 9, 9, 9, 9, 9];
+        const draft = JSON.parse(readFileSync(new URL('../../llm-ui/src/flows/library/essay-review-isolated.flow', import.meta.url), 'utf8'));
+        const child = { ...draft, revision: 1, digest: 'child', createdAt: 0, runPolicy: undefined,
+            outputs: { report: { value: '${nodes.report.outputs.result}' } } };
+        const parent = { id: 'parent', name: 'Parent', revision: 1, digest: 'parent', createdAt: 0, edges: [],
+            nodes: [{ ...node('review', 'flow'), pluginVersion: '2.0.0', config: { flowId: child.id,
+                parameters: { requirements: 'REQ', essay: 'ESSAY', maxRounds: 10, maxConcurrency: 2 } } },
+                node('result', 'transform', { value: '${nodes.review.outputs.report}' })] };
+        const spec = await flowToDag(parent as never, undefined, undefined, async () => child);
+        const run = await executor.submit('s', spec);
+        const exit = await run.root.wait({ timeoutMs: 6000 });
+        expect(exit.status, JSON.stringify(exit)).toBe('succeeded');
+        expect((await run.nodes.get('result')!.status()).task.output).toMatchObject({ outputs: { result: { content: {
+            completedRounds: 2, stopReason: 'condition_met', vars: { essay: 'REVISED_ESSAY' },
+        } } } });
+    });
 });
 
 it('rejects impossible quorums and result-key collisions before execution', () => {

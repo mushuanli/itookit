@@ -52,6 +52,7 @@ export class DagWorkbench {
     private viewRequest = 0;
     private refreshRequest = 0;
     private runRefreshTimer?: ReturnType<typeof setTimeout>;
+    private callSignatures = new Map<string, FlowDraft | null>();
 
     constructor(
         private readonly root: HTMLElement,
@@ -134,6 +135,7 @@ export class DagWorkbench {
         </section>`;
         this.bindToolbar();
         if (!draft) return this.renderEmpty();
+        void this.loadCallSignatures(draft);
         this.renderCanvas(draft);
         this.renderInspector(draft);
         void this.refreshValidation(draft);
@@ -169,6 +171,7 @@ export class DagWorkbench {
     private renderCanvas(draft: FlowDraft): void {
         const root = this.root.querySelector<HTMLElement>('.dag-canvas')!;
         const manifests = new Map(this.catalogue.map(item => [`${item.manifest.id}@${item.manifest.version}`, item.manifest]));
+        for (const node of draft.nodes) { const descriptor = this.findDescriptor(node); if (descriptor) manifests.set(String(node.id), descriptor); }
         this.canvas = new DagCanvas(root, {
             onSelectNode: id => this.selectNode(id),
             onSelectEdge: id => this.selectEdge(id),
@@ -232,6 +235,7 @@ export class DagWorkbench {
         const formRoot = inspector.querySelector<HTMLElement>('[data-inline-config]')!;
         const schemaForm = new SchemaForm(formRoot, schema, formValue, presentation.ui?.inspector.layout);
         schemaForm.render();
+        if (node.plugin === 'builtin.flow') bindCompositeForm(formRoot, schemaForm, presentation.manifest.configSchema, this.options.commands);
         enhanceInvocationEditor(formRoot, this.controller!.value, node, node.plugin === 'builtin.agent' || presentation.manifest.authoring?.invocation === true);
         if (presentation.manifest.authoring?.scopeRole === 'input') enhanceInputFieldsEditor(formRoot, isRecord(formValue) ? formValue : {});
         if (node.plugin === 'builtin.spawn') enhanceSpawnForm(formRoot);
@@ -412,6 +416,7 @@ export class DagWorkbench {
             presentation.ui?.inspector.layout,
         );
         schemaForm.render();
+        if (node.plugin === 'builtin.flow') bindCompositeForm(formRoot, schemaForm, presentation.manifest.configSchema, this.options.commands);
         enhanceInvocationEditor(formRoot, this.controller!.value, node, node.plugin === 'builtin.agent' || presentation.manifest.authoring?.invocation === true);
         if (presentation.manifest.authoring?.scopeRole === 'input') enhanceInputFieldsEditor(formRoot, isRecord(formValue) ? formValue : {});
         if (node.plugin === 'builtin.spawn') enhanceSpawnForm(formRoot);
@@ -822,6 +827,7 @@ export class DagWorkbench {
             this.options.listSkills?.() ?? Promise.resolve([]),
         ]);
         const result = await openFlowSettings({
+            outputs: draft.outputs,
             connections: draft.connections ?? [],
             defaultConnection: draft.defaultConnection,
             parameters: draft.parameters ?? [],
@@ -841,7 +847,28 @@ export class DagWorkbench {
     }
 
     private findDescriptor(node: FlowNodeDefinition): DagPluginManifest | undefined {
-        return this.findPresentation(node)?.manifest;
+        const manifest = this.findPresentation(node)?.manifest;
+        const config = isRecord(node.config) ? node.config : {};
+        const flow = this.callSignatures.get(`${config.flowId}@${config.revision ?? 'latest'}`);
+        if (!manifest || node.plugin !== 'builtin.flow' || node.pluginVersion !== '2.0.0' || !flow?.outputs) return manifest;
+        return { ...manifest, outputs: Object.keys(flow.outputs).map((name, order) => ({ name, required: true, order })) };
+    }
+
+    private async loadCallSignatures(draft: FlowDraft): Promise<void> {
+        const request = this.viewRequest;
+        for (const node of draft.nodes.filter(item => item.plugin === 'builtin.flow' && item.pluginVersion === '2.0.0')) {
+            const config = isRecord(node.config) ? node.config : {};
+            if (!config.flowId) continue;
+            const key = `${config.flowId}@${config.revision ?? 'latest'}`;
+            if (this.callSignatures.has(key)) continue;
+            this.callSignatures.set(key, null);
+            try {
+                const flow = await this.options.commands.execute<FlowDraft | null>(FlowCommand.RevisionGet, { id: config.flowId, revision: config.revision });
+                if (request !== this.viewRequest) { this.callSignatures.delete(key); return; }
+                this.callSignatures.set(key, flow);
+                if (flow && this.controller) this.renderCanvas(this.controller.value);
+            } catch { this.callSignatures.set(key, null); }
+        }
     }
 
     private findPresentation(node: FlowNodeDefinition): DagPluginPresentation | undefined {
@@ -1020,11 +1047,16 @@ function withCompositeFlowEnum(schema: JsonValue, config: JsonValue, flows: Flow
     if (!isRecord(schema) || !isRecord(schema.properties) || !isRecord(schema.properties.flowId)) return schema;
     const selected = isRecord(config) && typeof config.flowId === 'string' ? config.flowId : '';
     const ids = flows.map(flow => String(flow.id));
+    const definition = flows.find(flow => flow.id === selected);
     if (selected && !ids.includes(selected)) ids.unshift(selected);
     return {
         ...schema,
         properties: {
             ...schema.properties,
+            ...(definition ? { parameters: { type: 'object', title: 'Parameters', properties: Object.fromEntries((definition.parameters ?? []).map(field => [field.name, {
+                ...(field.type === 'string' || field.type === 'number' ? { type: field.type } : {}),
+                title: field.label ?? field.name, description: `${field.type}${field.required ? ' *' : ''} · ${field.description ?? ''}`,
+            }])) } } : {}),
             flowId: {
                 ...schema.properties.flowId,
                 enum: ids,
@@ -1032,6 +1064,17 @@ function withCompositeFlowEnum(schema: JsonValue, config: JsonValue, flows: Flow
             },
         },
     } as JsonValue;
+}
+
+function bindCompositeForm(root: HTMLElement, form: SchemaForm, schema: JsonValue, commands: ICommandBus): void {
+    root.addEventListener('change', event => {
+        if ((event.target as HTMLElement).dataset.schemaPath !== '$.flowId') return;
+        const value = form.read().value;
+        if (!value) return;
+        void commands.execute<FlowDraft[]>(FlowCommand.DraftList).then(flows => {
+            if (root.isConnected) form.update(withCompositeFlowEnum(schema, value, flows), value);
+        }).catch(error => Toast.error(String(error)));
+    });
 }
 
 function pendingInteraction(

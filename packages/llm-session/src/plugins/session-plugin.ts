@@ -5,6 +5,7 @@
 
 import type { ILLMPlugin, ExtensionContext } from '@itookit/common';
 import type { SessionManager } from '../session/session-manager';
+import { FlowInvocationCommand } from '../session/flow-invocations';
 
 /** Session-scoped command names owned by the session plugin. */
 export const SessionCommand = {
@@ -58,18 +59,24 @@ export function createSessionPlugin(sessionManager: SessionManager): ILLMPlugin 
             });
             ctx.commands.register(SessionCommand.Unbind, async () => sm.unbindSession());
             ctx.commands.register(SessionCommand.CreateFromFlow, async (args) => {
-                const { flowId, revision, parameters, title } = args as {
+                const { flowId, revision, parameters, title, invocation } = args as {
                     flowId: string;
                     revision: number;
                     parameters?: Record<string, unknown>;
                     title?: string;
+                    invocation?: boolean;
                 };
-                return sm.createSessionFromFlow(
+                const created = await sm.createSessionFromFlow(
                     flowId,
                     revision,
                     parameters as Record<string, import('@itookit/common').JsonValue> | undefined,
                     title ?? 'Workflow',
+                    invocation,
                 );
+                if (invocation) await ctx.commands.execute(FlowInvocationCommand.Invoke, {
+                    sessionId: created.sessionId, requestId: 'initial-flow', flowId, revision, parameters: parameters ?? {},
+                });
+                return created;
             });
 
             ctx.commands.register(SessionCommand.FlowBranchExecutions, args => sm.getFlowBranchExecutions((args as { sessionId: string }).sessionId));

@@ -66,6 +66,7 @@ function isDirectInvocation(skill: SlashSkillDefinition): boolean {
 }
 
 export interface SlashCommandRouterDeps {
+    onFlow?: (args: string) => Promise<boolean>;
     commands: ICommandBus;
     chatInput: IChatInputPresenter;
     bus: IEditorEventBus;
@@ -102,6 +103,7 @@ export interface SlashCommandRouterDeps {
  */
 export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandCallbacks {
     return {
+        onFlow: deps.onFlow,
         // ── Common ──────────────────────────────────────────
 
         onNew: (args: string) => {

@@ -14,6 +14,7 @@ import { aggregateOutcome, reduceOutcome, routeOutcome, spawnOutcome, transformO
 import { FlowReducerRegistry, projectSummary } from './structured/join';
 import type { FlowJoinConfig } from '@itookit/llm-common';
 import type { ResultSlot } from './structured/types';
+import { returnOutcome } from './function-outputs';
 
 export interface FlowDependencyBinding {
     taskId: string;
@@ -23,7 +24,7 @@ export interface FlowDependencyBinding {
 }
 
 export interface FlowValueInput {
-    operation: 'transform' | 'reduce' | 'route' | 'spawn' | 'aggregate' | 'taskGroup' | 'loop';
+    operation: 'transform' | 'reduce' | 'route' | 'spawn' | 'aggregate' | 'taskGroup' | 'loop' | 'return';
     iteration?: number;
     nodeId?: string;
     config: Record<string, JsonValue>;
@@ -167,6 +168,7 @@ export class FlowAggregateProgram implements DurableTaskProgram<FlowAggregateSta
 }
 
 function completeValue(state: FlowValueState, reducers: FlowReducerRegistry): Decision<FlowValueState, DagNodeOutcome> {
+    if (state.operation === 'return') return { state, next: { type: 'complete', output: returnOutcome(state.config.returns) } };
     const inputs = { ...state.inputs, ...state.dependencyOutputs };
     if (state.operation === 'loop') return { state, next: { type: 'complete', output: artifactOutcome('result', {
         round: state.iteration ?? 1, maxRounds: state.config.maxRounds, lastRound: (state.iteration ?? 1) >= Number(state.config.maxRounds),

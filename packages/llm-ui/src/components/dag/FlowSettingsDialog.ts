@@ -6,6 +6,7 @@ import type { FlowConnection, FlowVariables, FlowDefaults, FlowParameter, FlowRu
 import { escapeHTML, t } from '@itookit/common';
 
 export interface FlowSettingsOptions {
+    outputs?: import('@itookit/llm-common').FlowDraft['outputs'];
     connections: FlowConnection[];
     defaultConnection?: string;
     parameters: FlowParameter[];
@@ -23,6 +24,7 @@ export interface FlowSettingsOptions {
 export interface EntityOption { id: string; name: string; description?: string }
 
 export interface FlowSettingsResult {
+    outputs?: import('@itookit/llm-common').FlowDraft['outputs'];
     connections: FlowConnection[];
     defaultConnection?: string;
     parameters: FlowParameter[];
@@ -57,6 +59,7 @@ export function openFlowSettings(options: FlowSettingsOptions): Promise<FlowSett
                 <textarea data-variables rows="6">${escapeHTML(JSON.stringify(options.variables ?? {}, null, 2))}</textarea>
             </fieldset>
             <p data-dialog-error class="dag-dialog__error"></p>
+            <label>${escapeHTML(t('flow.invoke.outputs'))}<textarea data-outputs rows="5">${escapeHTML(JSON.stringify(options.outputs ?? {}, null, 2))}</textarea></label>
             <menu><button value="cancel">Cancel</button><button value="save">Save settings</button></menu>
         </form>`;
         document.body.append(dialog);
@@ -286,7 +289,9 @@ function readSettings(dialog: HTMLDialogElement): FlowSettingsResult {
     const runPolicy = readRunPolicy(dialog);
     const variables = JSON.parse(dialog.querySelector<HTMLTextAreaElement>('[data-variables]')!.value);
     if (!variables || Array.isArray(variables) || typeof variables !== 'object') throw new Error(t('flow.variables.invalid'));
-    return { connections, defaultConnection, parameters, variables, defaults, runPolicy };
+    const outputs = JSON.parse(dialog.querySelector<HTMLTextAreaElement>('[data-outputs]')!.value);
+    if (!outputs || Array.isArray(outputs) || typeof outputs !== 'object') throw new Error(t('flow.launch.invalidValue'));
+    return { connections, defaultConnection, parameters, variables, defaults, runPolicy, outputs };
 }
 
 function readRunPolicy(dialog: HTMLDialogElement): FlowRunPolicy {

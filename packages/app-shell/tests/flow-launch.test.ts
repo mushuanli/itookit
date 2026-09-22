@@ -53,6 +53,7 @@ describe('Flow file launch', () => {
         await pending;
         expect(f.execute).toHaveBeenCalledWith(FlowCommand.RevisionCreate, { draftId: 'essay', expectedDraftVersion: 3 });
         expect(f.execute).toHaveBeenCalledWith(SessionCommand.CreateFromFlow, {
+            invocation: true,
             flowId: 'essay', revision: 2, title: 'Essay', parameters: { requirements: 'Write about spring', essay: 'My essay\nSecond paragraph' },
         });
         expect(f.navigate).toHaveBeenCalledWith('new-session');

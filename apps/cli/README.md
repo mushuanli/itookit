@@ -4,6 +4,8 @@ MindOS CLI 在指定工作区中运行声明式多 Agent workflow graph。无环
 
 无显示服务器的最小 DAG、Bash 子 harness 验收及平台边界见 [最小系统运行说明](../../doc/minimal-system.md)，公开配置见 [minimal-dag.yml](examples/minimal-dag.yml)。
 
+文件工具、Skill、本地 MCP 及组合流程的可运行定义和审批验证见 [Harness 验证例子](examples/harness-validation/README.md)。
+
 ## 使用
 
 ```bash
@@ -55,11 +57,13 @@ mindos --profile desktop run -f workflow.flow
 - draft 文件（`draftVersion`）自动转为临时 revision；
 - revision 文件（`revision` + `digest`）；
 - inline 节点配置；
-- 从 desktop profile 读取 Provider / Connection / Skill。
+- 从所选 profile 读取 Provider / Connection / Skill；节点支持显式 `toolIds`、`skillIds` 和 `mcpProfileIds`；
+- `--params file.json` 传递参数对象，未提供时使用定义默认值；
+- 保留草稿的 `outputs` 返回声明，并编译为持久返回节点。
 
 当前限制：
 
-- `.flow` 中的 `agentId` / `systemPromptId` / `skillIds` 引用解析仍待补 headless binder；
+- `.flow` 中的 `agentId` / `systemPromptId` 引用需要宿主身份解析器；CLI 例子使用 inline 配置；
 - `.flow` 默认使用最后一个节点 + `result` 输出作为最终结果；
 - 参数 `--param` 尚未实现。
 

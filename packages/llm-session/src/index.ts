@@ -1,4 +1,7 @@
 import { skillContextResolver } from './session/conversation-run-coordinator';
+import { FlowInvocationService } from './session/flow-invocations';
+import { RoundLog as InvocationRoundLog } from './persistence/round-log';
+export { FlowInvocationService, FlowInvocationCommand, type FlowInvocationRecord, type FlowInvocationInput } from './session/flow-invocations';
 import { bindStandaloneFlowNode } from './session/flow-node-binder';
 import { AgentResolver } from './session/agent-resolver';
 export { createSessionDataProjection } from './persistence/session-projection';
@@ -145,7 +148,14 @@ export async function initializeConversationSystem(
             workspaceManager: options.workspaceManager,
         },
     );
-    return createControlPlane(options, sessionManager);
+    const system = createControlPlane(options, sessionManager);
+    const invocations = new FlowInvocationService(options.kernel, new FlowDefinitionStore(options.flowStore, options.dagPlugins), system.commandBus, options.canWriteSession, async id => {
+        const manifest = await new InvocationRoundLog(options.sessionEngine, id).loadManifest();
+        return { branch: manifest.currentBranch, head: manifest.currentHead };
+    });
+    invocations.register();
+    await invocations.recover();
+    return system;
 }
 
 async function initializeServices(options: ConversationSystemOptions): Promise<void> {

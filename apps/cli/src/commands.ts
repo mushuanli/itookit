@@ -665,7 +665,14 @@ async function monitorIteration(
     const interaction = await processInteractions(manifest, store, runtime, options);
     if (interaction !== undefined) return interaction;
     const exit = await root.poll();
-    if (exit) return finishRun(workflow, manifest, store, exit, options);
+    if (exit) {
+        // Nodes may finish between the tick snapshot and root.poll; persist the final projection.
+        await collectEvents(manifest, store, runtime, options);
+        const finalTasks = await runtime.kernel.listSessionTasks(manifest.sessionId);
+        await refreshTaskStatuses(workflow, manifest, runtime, finalTasks);
+        await runtime.syncHistory(finalTasks);
+        return finishRun(workflow, manifest, store, exit, options);
+    }
     if (workflow.maxDurationMs && Date.now() - manifest.createdAt > workflow.maxDurationMs) {
         return cancelExpiredRun(workflow, manifest, store, runtime, root);
     }

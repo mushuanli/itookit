@@ -310,6 +310,16 @@ export class DurableFlowExecutor {
             // 已派发的节点（按派发顺序），用于 supervisor 的「每轮只等本轮派发的 worker」。
             const dispatchOrder: string[] = saved?.dispatchOrder ?? [];
             const variableStore = new FlowVariableStore(spec, saved?.variables);
+            const callInputs: Record<string, unknown> = {};
+            const refreshCallInputs = async () => {
+                for (const scope of Object.values(spec.parameterScopes ?? {})) {
+                    if (!scope.source) continue;
+                    const handle = instances.get(scope.source)?.at(-1);
+                    const task = handle ? (await handle.status()).task : undefined;
+                    if (task?.status === 'succeeded') callInputs[scope.source] = task.output;
+                    else delete callInputs[scope.source];
+                }
+            };
             const nodeGenerations = new Map<string, number>(saved?.nodeGenerations ?? []);
             const edgeState = new Map<string, EdgeState>(
                 saved?.edgeState ?? edges.map(edge => [edge.id, routeEdgeIds.has(edge.id) ? 'pending' : 'active']),
@@ -360,13 +370,15 @@ export class DurableFlowExecutor {
                 return maximum || MAX_LOOP_ITERATIONS;
             };
             const maxIterations = (node: DagNodeDefinition): number => {
-                const resolved = resolveFlowParameters(node.config, scopedParameters(spec, node.id, parameters ?? {}));
+                const resolved = resolveFlowParameters(node.config, scopedParameters(spec, node.id, parameters ?? {}, callInputs));
                 const config = isRecord(resolved) ? resolved : {};
                 if (typeof config.maxIterations === 'number' && config.maxIterations > 0) return config.maxIterations;
                 return loopNodes.has(node.id) ? loopMaxIterations() : 1;
             };
 
-            const readyNodes = (): DagNodeDefinition[] => nodes.filter(node => {
+            const readyNodes = (): DagNodeDefinition[] => {
+                const candidates = nodes.filter(node => {
+                if (Object.entries(spec.parameterScopes ?? {}).some(([prefix, scope]) => node.id.startsWith(prefix) && scope.source && !Object.hasOwn(callInputs, scope.source))) return false;
                 const iteration = (instances.get(node.id)?.length ?? 0) + 1;
                 if (iteration > maxIterations(node) || skipped.has(node.id)) return false;
                 // Loop 节点的每一轮都必须等自身上一轮结束，避免 Human 未回应时提前创建后续实例。
@@ -411,7 +423,15 @@ export class DurableFlowExecutor {
                         : backActive.every(e => doneAt(e.from, iteration - 1));
                 }
                 return activeReady && backReady;
-            });
+                });
+                // A function returns only after its scope settles, including further loop rounds.
+                return candidates.filter(node => {
+                    if (node.plugin !== 'builtin.return') return true;
+                    const prefix = node.id.slice(0, node.id.lastIndexOf('/') + 1);
+                    return !nodes.some(member => member.id !== node.id && member.id.startsWith(prefix) && !detachedNodes.has(member.id)
+                        && (candidates.includes(member) || (instances.get(member.id) ?? []).some((_, index) => !doneAt(member.id, index + 1))));
+                });
+            };
 
             const submitNode = async (node: DagNodeDefinition, historyGroup?: string): Promise<void> => {
                 const iteration = (instances.get(node.id)?.length ?? 0) + 1;
@@ -443,7 +463,7 @@ export class DurableFlowExecutor {
                     onFailure: edge.onFailure,
                     injectOutput: edge.kind !== 'control',
                 }));
-                const localParameters = scopedParameters(spec, node.id, parameters ?? {});
+                const localParameters = scopedParameters(spec, node.id, parameters ?? {}, callInputs);
                 const referenceOutputs: Record<string, unknown> = {};
                 for (const edge of incoming) referenceOutputs[edge.from] = (await upstreamHandle(edge).status()).task.output;
                 variableStore.prune(new Set([...instances.values()].flat().map(handle => handle.id)));
@@ -868,6 +888,7 @@ export class DurableFlowExecutor {
                     count + (detachedNodes.has(nodeId) ? 0 : handles.filter((_, index) =>
                         !completed.has(instanceKey(nodeId, index + 1))).length), 0);
                 const capacity = Math.max(0, maxConcurrency - activeCount);
+                await refreshCallInputs();
                 const candidates = readyNodes();
                 const reserved = candidates.filter(node => memberGroup(nodes, node.id) || node.plugin === 'builtin.join');
                 const ready = [...reserved, ...candidates.filter(node => !reserved.includes(node)).slice(0, capacity)];
@@ -1188,6 +1209,8 @@ export class DurableFlowExecutor {
         }
         return session.submit({
             program: { kind: 'flow.aggregate', version: '1' }, input,
+            ...((initial?.initialScheduler as unknown as SchedulerCheckpoint | undefined)?.spec.invocation
+                ? { requestId: `flow-invocation:${(initial!.initialScheduler as unknown as SchedulerCheckpoint).spec.invocation!.requestId}` } : {}),
             // 汇聚节点在任一依赖终态后聚合；非容忍 failed 依赖由 FlowAggregateProgram
             // 使根失败，显式 on_failure: continue 或委派策略容忍的失败继续完成并记录。
             dependsOn: awaitingSchedule ? [] : dependencies.map(item => ({ task: item.taskId, condition: 'terminal' })),

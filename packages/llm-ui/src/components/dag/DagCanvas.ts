@@ -37,7 +37,7 @@ export class DagCanvas {
                 const path = edgePath(from, to, lane);
                 return `<path data-edge-id="${id}" d="${path}" class="dag-edge-hit"></path><path data-edge-id="${id}" d="${path}" class="is-${edge.kind}${String(edge.id) === selectedEdgeId ? ' is-selected' : ''}" marker-end="url(#${marker})"></path>`;
             }).join('')}</svg>
-            ${draft.nodes.map(node => renderNode(node, positions[node.id], node.id === selectedId, manifests?.get(`${node.plugin}@${node.pluginVersion}`))).join('')}
+            ${draft.nodes.map(node => renderNode(node, positions[node.id], node.id === selectedId, manifests?.get(String(node.id)) ?? manifests?.get(`${node.plugin}@${node.pluginVersion}`))).join('')}
         </div>`;
         this.bind(draft);
     }

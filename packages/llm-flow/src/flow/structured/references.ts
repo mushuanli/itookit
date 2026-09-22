@@ -105,7 +105,7 @@ function renderNodeConfig(value: unknown, context: FlowTemplateContext): unknown
 }
 
 /** Resolve each lexical scope once; substituted values are data in all descendant templates. */
-export function scopedParameters(spec: DagRunSpec, nodeId: string, root: Record<string, JsonValue>): Record<string, JsonValue> {
+export function scopedParameters(spec: DagRunSpec, nodeId: string, root: Record<string, JsonValue>, outputs: Record<string, unknown> = {}): Record<string, JsonValue> {
     const scopes = spec.parameterScopes ?? {};
     const key = Object.keys(scopes).filter(prefix => nodeId.startsWith(prefix)).sort((a, b) => b.length - a.length)[0];
     const visit = (id: string, seen: Set<string>): Record<string, JsonValue> => {
@@ -113,6 +113,13 @@ export function scopedParameters(spec: DagRunSpec, nodeId: string, root: Record<
         if (seen.has(id) || !scopes[id]) throw new Error('Invalid parameter scope');
         seen.add(id);
         const scope = scopes[id], parent = visit(scope.parent, seen);
+        if (scope.source) {
+            if (!Object.hasOwn(outputs, scope.source)) throw new Error(`Missing Flow call input: ${scope.source}`);
+            const supplied = object(extractNodeOutput(outputs[scope.source], 'result')) as Record<string, JsonValue>;
+            const allowed = new Set((scope.schema ?? []).map(field => field.name));
+            for (const key of Object.keys(supplied)) if (!allowed.has(key)) throw new Error(`Unknown Flow parameter: ${key}`);
+            return prepareFlowParameters(scope.schema, { ...scope.defaults, ...supplied });
+        }
         const values = { ...parent, ...scope.defaults, ...object(renderFlowTemplate(scope.values, { param: parent })) } as Record<string, JsonValue>;
         return prepareFlowParameters(scope.schema, values);
     };

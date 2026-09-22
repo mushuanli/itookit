@@ -1,0 +1,5 @@
+.flow-invocations { max-height: 45vh; overflow: auto; padding: 8px; }
+.flow-invocations__card { border: 1px solid var(--border-color, #8885); border-radius: 8px; padding: 12px; margin: 8px 0; }
+.flow-invocations__card header { display: flex; justify-content: space-between; gap: 12px; }
+.flow-invocations__card pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.flow-invocations__card button { margin: 4px; }

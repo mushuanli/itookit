@@ -163,7 +163,12 @@ export class FlowDefinitionStore {
 
     async createRevision(draft: FlowDraft): Promise<FlowRevision> {
         const latest = await this.loadRevision(String(draft.id));
-        return this.saveRevision(createFlowRevision(draft, (latest?.revision ?? 0) + 1));
+        const revision = createFlowRevision(draft, (latest?.revision ?? 0) + 1);
+        const { lockFlowDependencies } = await import('./flow/dependency-locks');
+        const locks = await lockFlowDependencies(draft, (id, version) => this.loadRevision(id, version));
+        if (Object.keys(locks).length) revision.dependencyLocks = locks;
+        revision.digest = flowRevisionDigest(revision);
+        return this.saveRevision(revision);
     }
 
     /**
@@ -182,6 +187,7 @@ export class FlowDefinitionStore {
             edges: existing?.edges ?? [],
             layout: existing?.layout ?? {},
             parameters: existing?.parameters ?? [],
+            ...(existing?.outputs ? { outputs: structuredClone(existing.outputs) } : {}),
             ...(existing?.variables ? { variables: structuredClone(existing.variables) } : {}),
             ...cloneConnections(existing ?? {}),
             ...(existing?.systemPrompt ? { systemPrompt: structuredClone(existing.systemPrompt) } : {}),
@@ -280,6 +286,7 @@ export function createFlowRevision(draft: FlowDraft, revision: number, createdAt
         nodes: structuredClone(draft.nodes),
         edges: structuredClone(draft.edges),
         parameters: structuredClone(draft.parameters ?? []),
+        ...(draft.outputs ? { outputs: structuredClone(draft.outputs) } : {}),
         ...(draft.variables ? { variables: structuredClone(draft.variables) } : {}),
         ...cloneConnections(draft),
         ...(draft.systemPrompt ? { systemPrompt: structuredClone(draft.systemPrompt) } : {}),

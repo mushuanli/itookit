@@ -16,6 +16,7 @@ import { compileControlGraph } from './control/graph';
 import { validateWaitPolicy } from './control/join-program';
 import { validateFields } from './structured/input';
 import { dataEdgeSchemaIssue } from './port-contract';
+import { withFlowReturns } from './function-outputs';
 
 export interface ValidationIssue {
     code: string;
@@ -33,6 +34,8 @@ export function flowRevisionDigest(flow: Omit<FlowRevision, 'digest'>): string {
         nodes: flow.nodes,
         edges: flow.edges,
         parameters: flow.parameters,
+        ...(flow.outputs ? { outputs: flow.outputs } : {}),
+        ...(flow.dependencyLocks ? { dependencyLocks: flow.dependencyLocks } : {}),
         ...(flow.variables ? { variables: flow.variables } : {}),
         connections: flow.connections,
         defaultConnection: flow.defaultConnection,
@@ -48,7 +51,7 @@ export function validateFlowRevision(
     plugins?: DagPluginCatalog,
 ): ValidationIssue[] {
     const issues: ValidationIssue[] = [];
-    try { flow = compileReferenceGraph(compileControlGraph(compileDispatchGraph(flow))); }
+    try { flow = compileReferenceGraph(withFlowReturns(compileControlGraph(compileDispatchGraph(flow)))); }
     catch (error) { return [{ code: 'invalid-dispatch-graph', message: String(error) }]; }
     if (plugins) {
         try { plugins = createRunCatalog(plugins, flow.nodes); }
@@ -257,7 +260,9 @@ function validatePorts(
     }
     const source = plugins?.getManifest(from.plugin, from.pluginVersion);
     const target = plugins?.getManifest(to.plugin, to.pluginVersion);
-    if (source && !source.outputs.some(port => port.name === edge.output)) {
+    const namedReturn = from.plugin === 'builtin.return' && isRecord(from.config) && isRecord(from.config.returns) && Object.hasOwn(from.config.returns, edge.output);
+    const functionCall = from.plugin === 'builtin.flow' && from.pluginVersion === '2.0.0';
+    if (source && !source.outputs.some(port => port.name === edge.output) && !functionCall && !namedReturn) {
         edgeIssue(issues, 'unknown-output', edge, `Unknown output ${edge.output}`);
     }
     if (target && !target.inputs.some(port => port.name === edge.input)) {

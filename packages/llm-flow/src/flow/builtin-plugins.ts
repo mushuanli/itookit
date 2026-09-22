@@ -26,6 +26,8 @@ function builtinPlugins(): DagPlugin[] {
         valuePlugin('builtin.route', routeManifest(), 'route'),
         valuePlugin('builtin.spawn', spawnManifest(), 'spawn'),
         compositePlugin(),
+        compositePlugin('2.0.0'),
+        valuePlugin('builtin.return', manifest('return', 'Return', 'Composition', { returns: { type: 'object' } }, { returns: {} }), 'return'),
         humanPlugin(),
         agentPlugin(),
         ...structuredPlugins(),
@@ -34,8 +36,8 @@ function builtinPlugins(): DagPlugin[] {
     ];
 }
 
-function compositePlugin(): DagPlugin {
-    const manifest = compositeManifest();
+function compositePlugin(version = '1.0.0'): DagPlugin {
+    const manifest = { ...compositeManifest(), version, ...(version === '2.0.0' ? { title: 'Call Flow' } : {}) };
     return {
         manifest,
         runtime: async () => ({
@@ -48,7 +50,7 @@ function compositePlugin(): DagPlugin {
 function valuePlugin(
     id: string,
     descriptor: DagPluginManifest,
-    operation: 'transform' | 'reduce' | 'route' | 'spawn' | 'aggregate',
+    operation: 'transform' | 'reduce' | 'route' | 'spawn' | 'aggregate' | 'return',
 ): DagPlugin {
     const manifest = { ...descriptor, id };
     return {
