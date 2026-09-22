@@ -43,9 +43,15 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
     const mounts = new DirectoryMountService(root, files); await mounts.init();
     const sessionSkills = { mountByGlob: vi.fn(async () => {}), unmountByGlob: vi.fn(async () => {}), list: vi.fn(), load: vi.fn(), listLoaded: vi.fn(), unload: vi.fn() };
     const workbench = new SessionWorkbench(sidebar, main, repository, files, chat as any, () => {}, undefined, kernel as any, file as any, mounts, sessionSkills as any);
+    storage.set('vfs_ui_state_session-browser:v1:admin', JSON.stringify({ activeId: '/' + id,
+        expandedFolderIds: ['/' + id, `/${id}/files`, `/${id}/files/workspace`], selectedItemIds: [] }));
+    const listMountedFiles = vi.spyOn(home.driver, 'getChildren');
     try {
         await workbench.start();
         await vi.waitFor(() => expect(chat).toHaveBeenCalledOnce());
+        expect(listMountedFiles).not.toHaveBeenCalled();
+        expect(kernel.listSessionTaskPage).not.toHaveBeenCalled();
+        expect(sidebar.querySelector(`[data-item-id="/${id}/files"]`)).toBeNull();
         await workbench.openResource(`/${id}/tasks`);
         expect(main.textContent).toContain('task-one');
         const moreTasks = [...main.querySelectorAll('button')].find(button => button.textContent === '加载更多任务')!;

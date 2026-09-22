@@ -47,6 +47,7 @@ export interface VFSUIShellOptions extends SessionUIOptions<VFSNodeUI> {
   defaultEditorFactory?: EditorFactory;
   directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
   activateDirectories?: boolean;
+  restoreExpandedDirectory?: (path: string) => boolean;
   primaryAction?: { label: string; run(): Promise<void> };
   /** Include directories in the export button selection (default false). */
   exportDirectories?: boolean;
@@ -236,7 +237,10 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
     const parts = path.split('/').filter(Boolean);
     for (let index = 1; index < parts.length; index++) {
       const parent = '/' + parts.slice(0, index).join('/');
-      await this.engineAdapter.expandDirectory(parent);
+      const state = this.statePort.getState();
+      const node = findNodeById(state.items, parent);
+      if (node?.children === undefined) await this.engineAdapter.expandDirectory(parent, { restoreDescendants: false });
+      else if (!state.expandedFolderIds.has(parent)) this.commandPort.execute('nav:toggleFolder', { folderId: parent });
     }
     this.commandPort.execute('nav:selectSession', { sessionId: path });
   }

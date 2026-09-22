@@ -137,6 +137,7 @@ class SessionRepository implements ISessionRepository {
 
     // Manifest / 列表 / 删除
     getManifest(sessionId: string): Promise<ConversationManifest>;
+    getLoadState(sessionId: string): Promise<SessionLoadState>;
     list(): Promise<ConversationManifest[]>;
     deleteSession(sessionId: string): Promise<void>;
 
@@ -154,6 +155,7 @@ class SessionRepository implements ISessionRepository {
     saveSessionSettings(sessionId: string, patch: Partial<ChatSessionSettings>): Promise<void>;
 
     // 历史文档与附件
+    readHistoryChain(sessionId: string): Promise<SessionHistoryChain>;
     readDocument(sessionId: string, name: string): Promise<string | null>;
     writeDocument(sessionId: string, name: string, content: string): Promise<void>;
     listHistory(sessionId: string): Promise<string[]>;
@@ -256,6 +258,10 @@ class BranchService {
 ### SessionRegistry
 
 `class SessionRegistry` —— 会话运行时注册表（状态取 `SessionStatus`：`idle` / `queued` / `running` / `completed` / `failed` / `aborted`）。`BoundContext`：绑定上下文类型。
+
+注册和分支重载优先使用可选 `ISessionRepository.readHistoryChain`，将 manifest 校验和当前主父链读取放在一次事务内，事务结束后再恢复并投影轮次；无此能力时逐轮读取。两条路径共用父链遍历，不持有跨加载的正文缓存。单条 `SessionRepository.readDocument` 仍在同一事务内校验 Session/历史版本并读取正文，`getSessionSettings` 同样合并校验与设置读取。测量与验证见 [Session 性能审查](./design/llm-ui-session-performance.md)。
+
+可选 `getLoadState` 返回同一事务内的 `{ manifest, settings }`，编辑器在绑定与显式分支切换完成后读取一次，标题、Flow 来源、分支草稿、折叠状态和设置复用该结果。每次打开或显式重载重新读取，不跨打开缓存；旧仓库实现回退原有读取入口。Session 列表使用轻量目录条目，保留物理文件存在性及身份/版本校验，每批最多 64 个 manifest 共用一次事务。
 
 ---
 

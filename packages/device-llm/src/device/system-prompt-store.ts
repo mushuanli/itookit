@@ -2,7 +2,7 @@
 // /llm/systemprompt seqfile: key = agent id, value = SystemPromptDefinition
 // (system segments + quick-prompt presets). Seeded from DEFAULT_AGENTS on init.
 
-import type { IFileSystem } from '@itookit/vfs-core';
+import type { IFileSystem, ISeqFileTransaction } from '@itookit/vfs-core';
 import type { SystemPromptDefinition } from '@itookit/common';
 import { DEFAULT_AGENTS } from '../constants/agents';
 
@@ -34,6 +34,13 @@ export class SystemPromptStore {
     async seedDefaults(): Promise<void> {
         const seq = this.engine.meta.seq;
         if (!seq) return;
+        const seed = (store: Pick<ISeqFileTransaction, 'getEntry' | 'setEntry'>) => this.seedMissing(store);
+        // One startup transaction avoids per-agent metadata checks and preserves user edits.
+        if (seq.transaction) await seq.transaction(seed);
+        else await seed(seq);
+    }
+
+    private async seedMissing(seq: Pick<ISeqFileTransaction, 'getEntry' | 'setEntry'>): Promise<void> {
         for (const def of DEFAULT_AGENTS) {
             const existing = await seq.getEntry(SYSTEM_PROMPT_PATH, def.id);
             if (existing) continue;

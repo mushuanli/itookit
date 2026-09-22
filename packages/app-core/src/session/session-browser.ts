@@ -113,6 +113,10 @@ class BrowserBackend implements IStorageBackend {
         this.lifecycle = deps.lifecycle ?? new SessionLifecycleService({ repository: deps.repository, kernel: deps.kernel });
     }
     async init() {} async close() {}
+    async assertMutableSubtree(_path: string): Promise<void> {
+        // Displayed tasks and mounted files are not owned Session storage. Session lifecycle
+        // and delegated file mutations enforce the layout guard on the actual storage instead.
+    }
     /** `readOnly` marks entries the backend refuses to mutate (Task history). */
     private node(path: string, title: string, directory: boolean, updatedAt = 0, readOnly = false): FSNode {
         const segment = path.split('/').pop() || '';

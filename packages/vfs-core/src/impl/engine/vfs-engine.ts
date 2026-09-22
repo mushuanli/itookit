@@ -17,6 +17,7 @@
 import type {
     IStorageBackend,
     FSNode,
+    DirEntry,
     FileContent,
     WriteOptions,
     ReadOptions,
@@ -209,26 +210,25 @@ export class VFSEngine {
     // ── Read ──
 
     async readBySystemPath(systemPath: string): Promise<FileContent> {
-        const { backend, localPath } = this.resolveStore(systemPath);
-        try {
-            this._inc('read'); const data = await backend.read(localPath);
-            return toString(data.buffer as ArrayBuffer);
-        } catch {
-            return '';
-        }
+        return toString(await this.readContent(systemPath));
     }
 
     async readContent(path: string, options?: ReadOptions): Promise<ArrayBuffer> {
-        const { backend, localPath } = this.resolveStore(path);
-        this._inc('stat'); const node = await backend.stat(localPath);
-        if (!node) throw new FSError('ENOENT', 'not found', 'read', path);
-        if (node.type === 'directory') throw new FSError('EISDIR', 'cannot read directory', 'read', path);
         try {
+            const { backend, localPath } = this.resolveStore(path);
+            const node = await this.tryStatType(path);
+            if (!node) throw new FSError('ENOENT', 'not found', 'read', path);
+            if (node.type === 'directory') throw new FSError('EISDIR', 'cannot read directory', 'read', path);
             this._inc('read');
             const data = await backend.read(localPath, { offset: options?.offset, length: options?.length });
-            return (data as Uint8Array).buffer as ArrayBuffer;
-        } catch {
-            return new ArrayBuffer(0);
+            return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+        } catch (error) {
+            if (error instanceof FSError) throw error;
+            const nativeCode = (error as { code?: string } | null)?.code;
+            const code = nativeCode === 'EPERM' ? 'EACCES' : nativeCode;
+            const known = ['ENOENT', 'EACCES', 'EISDIR', 'ENOTDIR', 'EINVAL', 'ELOOP'] as const;
+            throw new FSError(known.find(value => value === code) ?? 'EIO', 'Content read failed', 'read', path,
+                error instanceof Error ? error : undefined);
         }
     }
 
@@ -371,6 +371,14 @@ export class VFSEngine {
             if (node?.metadata.vfsFixedLayout) throw new FSError('EBUSY', 'Fixed storage layout; unpin before offline migration or deletion', 'structure', path);
             if (parent === '/') break;
         }
+        await this.assertMutableSubtree(path, stat);
+    }
+
+    private async assertMutableSubtree(path: string, stat: (path: string) => Promise<FSNode | null>): Promise<void> {
+        const { backend, localPath } = this.resolveStore(path);
+        const prefix = P.normalize(path).replace(/\/$/, '') + '/';
+        const nestedMount = this._mountRouter?.listMounts().some(mount => mount.mountPath.startsWith(prefix));
+        if (backend.assertMutableSubtree && !nestedMount) return backend.assertMutableSubtree(localPath);
         const visit = async (current: string): Promise<void> => {
             const node = await stat(current);
             if (node?.metadata.vfsFixedLayout) throw new FSError('EBUSY', 'Contains a fixed storage layout', 'structure', path);
@@ -430,6 +438,14 @@ export class VFSEngine {
         const { backend, localPath, mountPath } = this.resolveStore(path);
         this._inc('list'); const nodes = await backend.list(localPath === '/' ? '/' : localPath);
         return nodes.map(n => this.mapToSystemNode(n, mountPath));
+    }
+
+    async listEntries(path: string): Promise<DirEntry[]> {
+        const { backend, localPath, mountPath } = this.resolveStore(path);
+        this._inc('list');
+        const entries = await (backend.listEntries ? backend.listEntries(localPath) : backend.list(localPath));
+        return entries.map(node => ({ path: this.mapToSystemPath(node.path, mountPath), name: node.name,
+            type: node.type, modifiedAt: node.modifiedAt, ...('size' in node ? { size: node.size } : {}) }));
     }
 
     // ── Metadata ──
@@ -593,7 +609,8 @@ export class VFSEngine {
         for (const seg of parts) {
             current += '/' + seg;
             const { backend, localPath } = this.resolveStore(current);
-            this._inc('stat'); const exists = await backend.stat(localPath);
+            this._inc('stat');
+            const exists = backend.statType ? await backend.statType(localPath) : await backend.stat(localPath);
             if (!exists) {
                 this._inc('mkdir'); await backend.mkdir(localPath);
             } else if (exists.type !== 'directory') throw new FSError('ENOTDIR', 'Not a directory', 'mkdir', current);

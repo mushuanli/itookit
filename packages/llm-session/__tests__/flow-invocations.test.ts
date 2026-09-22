@@ -108,3 +108,10 @@ it('starts the launcher call before any view binds the new Session and leaves it
         await vi.waitFor(async () => expect((await kernel.listSessionTasks(created.sessionId)).some(task => task.interactions.same?.status === 'pending')).toBe(true));
     } finally { await kernel.closeSession(created.sessionId, true); await repository.dispose(); }
 });
+
+it('does not scan chat tasks when the Session has no Flow invocations', async () => {
+    const tasks = vi.spyOn(kernel, 'listSessionTasks');
+    expect(await service.list('s')).toEqual([]);
+    expect(tasks).not.toHaveBeenCalled();
+    tasks.mockRestore();
+});

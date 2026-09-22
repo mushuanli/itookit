@@ -4,6 +4,7 @@ import { TauriSqlSidecarDb } from '../../../apps/tauri-app/src/db/tauri-sql-side
 afterEach(() => vi.unstubAllGlobals());
 it('closes only the selected sidecar pool', async () => {
     const invoke = vi.fn(async (command: string, params: any) => {
+        if (command === 'sidecar_open_scope') return 1;
         if (command === 'plugin:sql|load') return params.db;
         if (command === 'plugin:sql|select') return [];
         if (command === 'plugin:sql|execute') return [0, 0];
@@ -19,6 +20,7 @@ it.each(['schema-read', 'schema-write'])('closes only its pool after %s fails du
     const failure = new Error(stage);
     const pools = new Set<string>();
     const invoke = vi.fn(async (command: string, params: any) => {
+        if (command === 'sidecar_open_scope') return 1;
         if (command === 'plugin:sql|load') { pools.add(params.db); return params.db; }
         if (command === 'plugin:sql|close') { params.db ? pools.delete(params.db) : pools.clear(); return true; }
         if (!pools.has(params.db)) throw new Error('Pool is closed');
@@ -37,6 +39,7 @@ it.each(['schema-read', 'schema-write'])('closes only its pool after %s fails du
 it('preserves both the initialization failure and cleanup failure', async () => {
     const initialization = new Error('schema failed'), cleanup = new Error('close failed');
     const invoke = vi.fn(async (command: string, params: any) => {
+        if (command === 'sidecar_open_scope') return 1;
         if (command === 'plugin:sql|load') return params.db;
         if (command === 'plugin:sql|close') throw cleanup;
         throw initialization;
@@ -49,6 +52,7 @@ it('preserves both the initialization failure and cleanup failure', async () => 
 
 it('closes an incompatible schema exactly once and scopes the close to its database', async () => {
     const invoke = vi.fn(async (command: string, params: any) => {
+        if (command === 'sidecar_open_scope') return 1;
         if (command === 'plugin:sql|load') return params.db;
         if (command === 'plugin:sql|close') return true;
         if (params.query.includes('sqlite_master')) return [{ name: '_schema_version' }];
@@ -59,4 +63,35 @@ it('closes an incompatible schema exactly once and scopes the close to its datab
     expect(invoke.mock.calls.filter(call => call[0] === 'plugin:sql|close')).toEqual([
         ['plugin:sql|close', { db: 'sqlite:/data/incompatible.sqlite' }, undefined],
     ]);
+});
+
+it('skips DDL on a complete current schema but retains connection setup', async () => {
+    const names = ['_schema_version', 'meta_ext', 'meta_tags', 'records', 'idx_meta_tags_tag', 'idx_records_path'];
+    const invoke = vi.fn(async (command: string, params: any) => {
+        if (command === 'sidecar_open_scope') return 1;
+        if (command === 'plugin:sql|load') return params.db;
+        if (params?.query?.includes('sqlite_master')) return names.map(name => ({ name }));
+        if (params?.query?.includes('SELECT version')) return [{ version: 4 }];
+        return [];
+    });
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke } });
+    const db = await TauriSqlSidecarDb.open('/data/current.sqlite');
+    try {
+        expect(invoke.mock.calls.filter(([command]) => command === 'plugin:sql|execute')).toEqual([]);
+        expect(invoke.mock.calls.filter(([command]) => command === 'plugin:sql|select')).toHaveLength(5);
+    } finally { await db.close(); }
+});
+
+it('repairs a missing schema object instead of trusting only the version stamp', async () => {
+    const invoke = vi.fn(async (command: string, params: any) => {
+        if (command === 'sidecar_open_scope') return 1;
+        if (command === 'plugin:sql|load') return params.db;
+        if (params?.query?.includes('sqlite_master')) return [{ name: '_schema_version' }];
+        if (params?.query?.includes('SELECT version')) return [{ version: 4 }];
+        return [];
+    });
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke } });
+    const db = await TauriSqlSidecarDb.open('/data/partial.sqlite');
+    expect(invoke.mock.calls.some(([command, params]) => command === 'plugin:sql|execute' && params.query.includes('CREATE TABLE IF NOT EXISTS records'))).toBe(true);
+    await db.close();
 });

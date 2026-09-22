@@ -123,7 +123,11 @@ export class SeqFileKernelStore {
             await appendEventTx(tx, binding.rootPath, id, undefined, 'session.created', created);
             return created;
         });
-        await transaction(this.catalog.fs, tx => tx.setEntry(catalogPath(this.catalog.rootPath), `session/${id}`, encode(record)));
+        await transaction(this.catalog.fs, async tx => {
+            const path = catalogPath(this.catalog.rootPath), key = `session/${id}`, value = encode(record);
+            // Rebinding an unchanged Session must not wake every catalog subscriber.
+            if (await tx.getEntry(path, key) !== value) await tx.setEntry(path, key, value);
+        });
         return record;
     }
 
@@ -657,6 +661,27 @@ export class SeqFileKernelStore {
         // second time (readTask) doubles Task record reads during each full scan, and
         // the Kernel polls Sessions with hundreds of Tasks.
         return (await this.taskEntries(binding)).map(entry => decode(entry.value));
+    }
+
+    /** Existing status indexes bound recovery reads to non-terminal Task records. */
+    async listPendingInteractionTasks(binding: ResolvedStorageBinding): Promise<TaskRecord[]> {
+        return transaction(binding.fs, async tx => {
+            const session = await requireSessionTx(tx, binding.rootPath);
+            const candidates: string[] = [];
+            await tx.walkEntries(indexPath(binding.rootPath), row => {
+                if (!isTerminal(decode<{ status: TaskRecord['status'] }>(row.value).status)) {
+                    candidates.push(row.key.slice('task/'.length));
+                }
+                return true;
+            }, { keyPrefix: 'task/' });
+            const result: TaskRecord[] = [];
+            for (const id of candidates) {
+                const task = await requireTaskTx(tx, binding.rootPath, id);
+                if (task.sessionId !== session.id) throw new Error('Task interaction index scope mismatch');
+                if (!isTerminal(task.status) && Object.values(task.interactions ?? {}).some(item => item.status === 'pending')) result.push(task);
+            }
+            return result;
+        });
     }
 
     async listTaskPage(binding: ResolvedStorageBinding, query: import('../../domain/types').TaskListQuery = {}): Promise<import('../../domain/types').TaskListPage> {

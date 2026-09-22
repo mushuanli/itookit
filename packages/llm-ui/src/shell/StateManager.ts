@@ -2,8 +2,8 @@
 
 import type { UIState, CollapseStateMap } from '../domain/types';
 import type { IChatInputPresenter, IChatInputConfig, ChatInputSettings } from '../domain/ports/IChatInputPresenter';
-import type { StateService } from '../services/StateService';
-import type { SessionManager } from '@itookit/llm-session';
+import { fromConversationState, type StateService } from '../services/StateService';
+import type { ConversationManifest, SessionManager } from '@itookit/llm-session';
 import { createDebouncedSave, DebouncedFn } from '../utils/debounce';
 import { ErrorHandler } from '../utils/errorHandler';
 /**
@@ -117,15 +117,15 @@ export class StateManager {
         );
     }
 
-    async loadUIState(): Promise<UIState | null> {
-        const result = await this.errorHandler.wrapWithFallback(
+    async loadUIState(initial?: ConversationManifest): Promise<UIState | null> {
+        if (initial) this.branch = initial.currentBranch;
+        const result = initial ? (initial.uiState ? fromConversationState(initial.uiState, this.branch) : null)
+            : await this.errorHandler.wrapWithFallback(
             () => this.stateService.loadUIState(this.sessionId, this.branch),
             null, 'Load UI state', 'silent'
         );
 
-        if (result?.collapse_states) {
-            this.collapseStatesCache = result.collapse_states;
-        }
+        this.collapseStatesCache = result?.collapse_states ?? {};
         this.historyVisibilityCache = result?.history_visibility ?? 'visible';
         return result;
     }

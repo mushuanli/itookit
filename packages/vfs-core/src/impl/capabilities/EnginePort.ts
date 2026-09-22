@@ -10,12 +10,28 @@ import type {
     FSNode,
     FSEventType,
     FSEventPayloadMap,
+    FileContent,
+    FSNodeType,
+    ReadOptions,
+    DeleteOptions,
 } from '../../protocol';
-import type { VFSEngine } from '../engine/vfs-engine';
+
+/** Operations used by capabilities; does not depend on a concrete engine implementation. */
+export interface CapabilityEngine {
+    listTagEntries(root: string): Promise<Array<{ path: string; tag: string }>>;
+    setTags(path: string, tags: string[]): Promise<void>;
+    ensureAssetDir(path: string): Promise<string>;
+    getAssetDirPath(path: string): Promise<string | null>;
+    listChildren(path: string): Promise<FSNode[]>;
+    readContent(path: string, options?: ReadOptions): Promise<ArrayBuffer>;
+    delete(path: string, options?: DeleteOptions): Promise<void>;
+    createFile(parent: string, name: string, type?: FSNodeType, content?: FileContent,
+        metadata?: Record<string, unknown>, options?: { overwrite?: boolean; recursive?: boolean; deviceHandlerId?: string }): Promise<FSNode>;
+}
 
 export interface EnginePort {
     readonly viewId: string;
-    readonly engine: VFSEngine;
+    readonly engine: CapabilityEngine;
     readonly backend: IStorageBackend;
     toRealPath(path: string): string;
     toVirtualPath(path: string): string;

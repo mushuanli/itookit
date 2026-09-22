@@ -18,13 +18,17 @@ export function pendingInteractionTask(tasks: readonly TaskRecord[]): TaskRecord
 
 /** Re-attach a waiting run; returns the attached Task id when there was one. */
 export async function restoreWaitingAttachment(
-    kernel: Pick<Kernel, 'listSessionTasks'>,
+    kernel: Pick<Kernel, 'listSessionTasks'> & Partial<Pick<Kernel, 'listSessionPendingInteractionTasks'>>,
     sessionId: string,
     attach: (taskId: string) => Promise<void>,
     isCurrent: () => boolean = () => true,
+    excluded: ReadonlySet<string> = new Set(),
 ): Promise<string | undefined> {
     if (!isCurrent()) return undefined;
-    const waiting = pendingInteractionTask(await kernel.listSessionTasks(sessionId));
+    const tasks = kernel.listSessionPendingInteractionTasks
+        ? await kernel.listSessionPendingInteractionTasks(sessionId)
+        : await kernel.listSessionTasks(sessionId);
+    const waiting = pendingInteractionTask(tasks.filter(task => !excluded.has(task.id)));
     if (!waiting || !isCurrent()) return undefined;
     await attach(waiting.id);
     return waiting.id;

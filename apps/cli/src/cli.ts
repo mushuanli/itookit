@@ -1,4 +1,6 @@
 import { createHttpMindOSRuntime, startHttpServer } from './http-server';
+import { installRuntimeDiagnostics, recordRuntimeDiagnostic, traceRuntimeStage } from './diagnostics';
+import { errorDetails } from '@itookit/common';
 import { sharedMemoryCommand } from './shared-memory-command';
 import {
     cancelCommand,
@@ -29,6 +31,7 @@ interface ParsedArgs {
 
 async function main(argv: string[]): Promise<number> {
     const parsed = parseArgs(argv);
+    recordRuntimeDiagnostic('command.start', { command: parsed.options.http ? 'http' : parsed.options.prompt ? 'prompt' : parsed.command ?? 'help' });
     // -d / --http: run as the headless HTTP host for the Tauri UI.
     if (parsed.options.http) {
         const runtime = await createHttpMindOSRuntime(parsed.options);
@@ -154,9 +157,12 @@ function help(): string {
         `  --offline           校验/查看时不要求 API key 环境变量已存在\n`;
 }
 
-main(process.argv.slice(2)).then(code => {
+const diagnostics = installRuntimeDiagnostics();
+traceRuntimeStage('cli', () => main(process.argv.slice(2))).then(code => {
+    recordRuntimeDiagnostic('command.completed', { code });
+    if (code !== 0) process.stderr.write(`[Diagnostics] ${diagnostics.file}\n`);
     process.exitCode = code;
 }).catch(error => {
-    process.stderr.write(`错误：${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(`错误：${errorDetails(error)}\n运行日志：${diagnostics.file}\n`);
     process.exitCode = 2;
 });

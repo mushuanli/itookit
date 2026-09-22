@@ -20,6 +20,8 @@ SessionBrowserFS:/
 
 Session 直属入口只有 tasks/files。点击标题打开 main history，顶部 branch 切换和底部输入框由 llm-ui 提供；点击箭头仅展开目录。Session ID 决定路径，标题修改不改变路径。已打开的同一条目重复选择保持当前视图；离开后普通重新打开 Session 默认 main。带分支的路由会显式打开指定分支，即使该 Session 已在当前视图中也会切换。
 
+打开 Session 不自动展开或枚举 tasks/files。启动恢复展开状态时只保留会话分组与 Flow 库，忽略之前展开的 Session 子目录；手动点击箭头才加载下一层。定位深层文件只加载必要祖先，不递归恢复无关后代。后台刷新只重读当前展开路径；已经折叠但仍有 children 缓存的目录不再重读。编辑器仍取得授权文件上下文并校验挂载根/cwd 类型，不扫描目录内容。真实 SessionWorkbench + vfs-ui 回归预置了展开的挂载目录，打开聊天后挂载目录枚举和侧栏 Task 页读取均为 0。
+
 切换分支会更新 manifest.currentBranch/currentHead，后续发送沿该分支继续。草稿按 Session + branch 保存，切换期间禁用输入，关闭前等待草稿切换完成。运行中的 Session 保留已有的分支切换限制；重开正在运行的当前 main 分支允许执行。
 
 tasks 主视图按存储索引显示列表，侧栏预览首批并在有后续页时显示“更多任务（打开分页列表）”；具体 Task 显示一份当前状态、输入、输出、错误摘要，以及审批、工具调用、失败、重试等关键事件；不展示流式片段和调度事件。Task 是只读执行信息，不是可续聊分支。历史读取为有限快照，不收集持续事件流。
@@ -29,6 +31,10 @@ files 直接代理受限 Session 文件上下文，不使用目录黑名单。�
 投影支持 Session/文件夹 CRUD 与 `/files` 下的文件 CRUD。根级创建文件按导入 Session 处理，根级创建目录建立虚拟分组；Session 重命名写 `repository.updateManifest`。`/files` 写操作仍经 Session 文件上下文和授权校验。浏览器节点的 `_readOnly` 合并节点自身标记与 `capabilitiesAt(path).readonly`，tasks 容器和历史条目均标记只读；VFS UI 在打开命名输入框/文件选择器前检查，并在写入前复核。无挂载覆盖的虚拟父目录报告只读。
 
 删除统一走 `SessionLifecycleService`（`@itookit/app-core`，浏览器投影与文件夹递归删除共用）：`kernel.closeSession(id, true)` → 有界等待 `sessionStat(id).phase === 'closed'` → `kernel.removeSession(id)`（解除固定布局、删除 Kernel 存储根、清理 catalog）→ `repository.deleteSession(id)`。`closeTimeoutMs`（默认 30s）同时约束 **`closeSession` 调用本身**（它在途 Effect 确认停止才返回）与随后等待 `closed` 的轮询：设备/进程始终不确认停止时抛 `EBUSY`（`…did not confirm its in-flight work within <n>ms; nothing was deleted`）而不是无限挂起，关闭抛错或超时同样抛 `EBUSY` 并**保留全部数据**，不进入删除，因此确认后可用同一入口重试；文件夹删除逐会话走同一路径，全部成功后才删文件夹记录。回归 `packages/app-core/tests/session-delete-lifecycle.test.ts`（含运行中 Task 取消、以及从不确认停止时的有界失败与重试）。
+
+Session 的 `/tasks`、`/files` 是展示投影，不是 Session 拥有的物理子树。删除或重命名 Session/分组不遍历挂载目录；访问授权（包括 rw）不赋予 Session 对挂载目录的生命周期所有权。`BrowserBackend.assertMutableSubtree` 把保护责任留给实际 Session lifecycle / 文件变更入口；VFS 保留祖先固定布局检查，存在嵌套引擎挂载时仍回退递归检查。普通物理后端不实现此可选端口，保持原有子树保护。
+
+回归使用包含 65 个文件的挂载目录：一次删除原本打开文件上下文 69 次、读 manifest 82 次、读 Task 预览 1 次；修复后分别为 0、7、0。此为内存后端调用计数，不是 Tauri 耗时。目录离线也能删除 Session；显式删除挂载文件仍检查物理固定布局，Session 删除后项目文件仍存在。证据见 `packages/app-core/tests/session-browser.test.ts`、`packages/vfs-core/tests/24-layout-guard.test.ts`；VFS/Core 回归分别 186/124 项通过。
 
 导入/导出协议为 `itookit.session` v2（`session-bundle.ts`，浏览器投影与 `SessionWorkbench` 导出共用一份实现）：
 

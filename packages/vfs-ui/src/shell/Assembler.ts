@@ -64,6 +64,10 @@ export function assemble(
     const store = new VFSStore({
         ...options.initialState,
         ...persisted,
+        ...(options.restoreExpandedDirectory ? { expandedFolderIds: new Set(
+            [...new Set(persisted.expandedFolderIds ?? options.initialState?.expandedFolderIds ?? [])]
+                .filter(options.restoreExpandedDirectory),
+        ) } : {}),
         uiSettings: {
             ...DEFAULT_SETTINGS,
             ...options.defaultUiSettings,

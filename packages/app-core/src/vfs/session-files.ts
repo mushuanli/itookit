@@ -146,14 +146,15 @@ export class SessionFilesService {
     }
 
     /** Fixed revision: a change revokes all derived contexts, including tool scopes. */
-    async acquireFiles(sessionId: string, cwd?: string): Promise<FileSystemContextOwner> {
-        const source = await this.get(sessionId);
-        const configured = (await this.inspect(sessionId))?.cwd ?? '/';
-        const directory = normalizeVirtualPath(cwd ?? configured);
-        if (directory !== '/' && (await source.driver.getNode(directory))?.type !== 'directory') throw new FSError('ENOTDIR', 'Working directory is unavailable');
-        const fs = createFileSystemView({ viewId: source.viewId, revision: source.revision,
-            mounts: [{ mountId: 'session', at: '/', fs: source, access: 'rw' }] });
-        return { context: { fs, cwd: directory, sessionId }, release: () => fs.dispose() };
+    acquireFiles(sessionId: string, cwd?: string): Promise<FileSystemContextOwner> {
+        return this.serial(sessionId, async () => {
+            const { view: source, configuredCwd } = await this.get(sessionId);
+            const directory = normalizeVirtualPath(cwd ?? configuredCwd);
+            if (directory !== '/' && !await this.isDirectory(source, directory)) throw new FSError('ENOTDIR', 'Working directory is unavailable');
+            const fs = createFileSystemView({ viewId: source.viewId, revision: source.revision,
+                mounts: [{ mountId: 'session', at: '/', fs: source, access: 'rw' }] });
+            return { context: { fs, cwd: directory, sessionId }, release: () => fs.dispose() };
+        });
     }
 
     async dispose(): Promise<void> {
@@ -164,25 +165,24 @@ export class SessionFilesService {
         await Promise.all([...this.unavailable.values()].map(async source => (await source).dispose())); this.unavailable.clear();
     }
 
-    private get(id: string): Promise<FileSystemView> {
-        return this.serial(id, async () => {
-            const record = await this.inspect(id);
-            let view = this.views.get(id);
-            if (view && (view.revision !== (record?.revision ?? 0) || record?.state !== 'active' && record !== null)) {
-                await this.revokeSessionViews(id);
-                view = undefined;
-            }
-            if (record?.state === 'draining') {
-                // No process-local operations survive restart. Keep grants disabled until reconfigured.
-                throw new FSError('EBUSY', 'Namespace reconfiguration requires recovery');
-            }
-            if (record?.state === 'disabled') throw new FSError('EACCES', 'Session files disabled');
-            if (!view) {
-                view = await this.create(id, record ?? { revision: 0, state: 'active', mounts: [], cwd: '/' }, true);
-                this.views.set(id, view);
-            }
-            return view;
-        });
+    /** Called inside the Session queue: cwd and grants belong to the same revision. */
+    private async get(id: string): Promise<{ view: FileSystemView; configuredCwd: string }> {
+        const record = await this.inspect(id);
+        let view = this.views.get(id);
+        if (view && (view.revision !== (record?.revision ?? 0) || record?.state !== 'active' && record !== null)) {
+            await this.revokeSessionViews(id);
+            view = undefined;
+        }
+        if (record?.state === 'draining') {
+            // No process-local operations survive restart. Keep grants disabled until reconfigured.
+            throw new FSError('EBUSY', 'Namespace reconfiguration requires recovery');
+        }
+        if (record?.state === 'disabled') throw new FSError('EACCES', 'Session files disabled');
+        if (!view) {
+            view = await this.create(id, record ?? { revision: 0, state: 'active', mounts: [], cwd: '/' }, true);
+            this.views.set(id, view);
+        }
+        return { view, configuredCwd: record?.cwd ?? '/' };
     }
     private async create(id: string, record: FilesRecord, allowUnavailable = false,
         workspace?: { mountId: string; fs: IFileSystem }): Promise<FileSystemView> {
@@ -200,7 +200,7 @@ export class SessionFilesService {
             try {
                 if (!fs) throw new FSError('EACCES', 'Namespace source is unavailable');
                 if (mount.access === 'rw' && (await fs.capabilitiesAt(root)).readonly) throw new FSError('EROFS', 'Source is read-only');
-                if ((await fs.driver.getNode(root))?.type !== 'directory') throw new FSError('ENOTDIR', 'Mount source must be a directory');
+                if (!await this.isDirectory(fs, root)) throw new FSError('ENOTDIR', 'Mount source must be a directory');
                 return { ...mount, root, at, fs };
             } catch (error) {
                 if (!allowUnavailable) throw error;
@@ -213,10 +213,15 @@ export class SessionFilesService {
         const view = createFileSystemView({ viewId: `session:${id}`, revision: record.revision, mounts: [...system, ...mounts] });
         this.missingViews.set(view, missing);
         try {
-            if (record.cwd !== '/' && (await view.driver.getNode(record.cwd))?.type !== 'directory') throw new FSError('ENOTDIR', 'Working directory must be mounted');
+            if (record.cwd !== '/' && !await this.isDirectory(view, record.cwd)) throw new FSError('ENOTDIR', 'Working directory must be mounted');
             return view;
         } catch (error) { await view.dispose(); throw error; }
     }
+    private async isDirectory(fs: IFileSystem, path: string): Promise<boolean> {
+        const node = fs.driver.getNodeType ? await fs.driver.getNodeType(path) : await fs.driver.getNode(path);
+        return node?.type === 'directory';
+    }
+
     private async save(id: string, value: FilesRecord, expected: FilesRecord | null): Promise<void> {
         const path = this.recordsPath(id);
         if (!await this.store.driver.exists(path)) await this.store.driver.createFile({ name: 'session.seq', parentPath: `/var/lib/sessions/${id}`, type: 'seqfile', recursive: true });

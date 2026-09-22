@@ -20,7 +20,7 @@ export class VFSHelpers {
             const fs = systemFS ?? this.engine;
             const nodeId = await fs.driver.resolvePath(path);
             if (!nodeId) return null;
-            const raw = await fs.driver.readContent(nodeId);
+            const raw = await fs.driver.readContent(nodeId, { representation: 'bytes' });
             const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
             return JSON.parse(text) as T;
         } catch { return null; }
@@ -64,7 +64,7 @@ export class VFSHelpers {
             const fs = systemFS ?? this.engine;
             const dirId = await fs.driver.resolvePath(dirPath);
             if (!dirId) { console.log(`[Boot]       loadDir ${dirPath}: empty`); return []; }
-            const children = await fs.driver.getChildren(dirId);
+            const children = await fs.driver.getChildren(dirId, { fields: 'entry' });
             console.log(`[Boot]       loadDir ${dirPath}: ${children.length} entries`);
             for (const child of children) {
                 if (child.type !== 'file') continue;
@@ -73,7 +73,7 @@ export class VFSHelpers {
                 const isJson = child.name.endsWith('.json');
                 if (!isYaml && !isJson) continue;
                 try {
-                    const raw = await fs.driver.readContent(child.path);
+                    const raw = await fs.driver.readContent(child.path, { representation: 'bytes' });
                     const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
                     const parsed = isYaml
                         ? yaml.load(text)

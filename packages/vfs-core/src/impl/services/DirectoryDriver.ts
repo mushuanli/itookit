@@ -30,7 +30,7 @@ import type {
     IAssetOperations,
     FSNodeMetadata,
 } from '../../protocol';
-import { FSCapabilityError } from '../../protocol';
+import { FSCapabilityError, FSError } from '../../protocol';
 
 import { TransactionEventBuffer } from '../event/event-bus';
 import { toBuffer, toString } from '../../utils/encoding';
@@ -45,8 +45,6 @@ export class DirectoryDriver implements IFSDriver {
 
     /** Injected by DirectoryFS so the plugin pipeline can expose asset/metadata helpers. */
     assets?: IAssetOperations;
-
-    /** Read-through content cache (invalidated on write/delete/rename). */
 
     constructor(private readonly ctx: DirectoryContext) {
         this.viewId = ctx.viewId;
@@ -134,38 +132,43 @@ export class DirectoryDriver implements IFSDriver {
     async getChildren(path: string, options?: ListOptions): Promise<FSNode[] | DirEntry[]> {
         const realPath = this.ctx.toRealPath(path);
 
+        if (options?.fields === 'entry') {
+            const entries = await this.ctx.engine.listEntries(realPath);
+            return entries.filter(entry => this.visibleChild(entry.name, options))
+                .map(entry => ({ ...entry, path: this.ctx.toVirtualPath(entry.path) }))
+                .filter(entry => entry.path !== path);
+        }
         const children = await this.ctx.engine.listChildren(realPath);
 
-        const filtered = children.filter(c => {
-            if (!options?.includeHidden && isHiddenName(c.name)) return false;
-            if (!options?.includeAssetDirs && isAssetDirName(c.name)) return false;
-            if (!options?.includeInternalDirs && isInternalDirName(c.name)) return false;
-            return true;
-        });
-        if (options?.fields === 'entry') {
-            return filtered.map(c => ({
-                path: this.ctx.scope.toVirtualPath(c.path), name: c.name, type: c.type,
-                size: c.type === 'file' ? c.size : undefined,
-                modifiedAt: c.modifiedAt,
-            } as DirEntry));
-        }
+        const filtered = children.filter(c => this.visibleChild(c.name, options));
         // Filter out any child whose virtualized path equals the request path
         // (would create a self-cycle in the tree, crashing the renderer).
         const virtualChildren = filtered.map(c => this.ctx.toVirtualNode(c));
         return virtualChildren.filter(c => c.path !== path);
     }
 
+    private visibleChild(name: string, options?: ListOptions): boolean {
+        return (options?.includeHidden || !isHiddenName(name))
+            && (options?.includeAssetDirs || !isAssetDirName(name))
+            && (options?.includeInternalDirs || !isInternalDirName(name));
+    }
+
     readContent(path: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
     readContent(path: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
     readContent(path: string, options?: ReadOptions): Promise<FileContent>;
     async readContent(path: string, options?: ReadOptions): Promise<FileContent> {
-        const { realPath } = await this.ctx.resolveNode(path);
-
-        const records = this.ctx.recordsForPath(realPath);
-        if (records) {
-            const text = await this.ctx.serializeSeqFile(realPath, records);
-            if (text !== null) {
-                return options?.encoding === 'binary' ? toBuffer(text) : text;
+        const realPath = this.ctx.toRealPath(path);
+        if (options?.representation !== 'bytes') {
+            const node = await this.ctx.engine.tryStatType(realPath);
+            if (!node) throw new FSError('ENOENT', 'not found', 'read', path);
+            if (node.type === 'directory') throw new FSError('EISDIR', 'cannot read directory', 'read', path);
+            const records = this.ctx.recordsForPath(realPath);
+            if (options?.representation === 'records' && !records) throw new FSCapabilityError('records', this.viewId);
+            if (records) {
+                const text = await this.ctx.serializeSeqFile(realPath, records);
+                if (text !== null || options?.representation === 'records') {
+                    return options?.encoding === 'binary' ? toBuffer(text ?? '') : text ?? '';
+                }
             }
         }
         // Independent views and host processes can write the same source.
@@ -176,17 +179,13 @@ export class DirectoryDriver implements IFSDriver {
     }
 
     async resolvePath(path: string): Promise<string | null> {
-        try {
-            const realPath = this.ctx.toRealPath(path);
-            const node = await this.ctx.engine.stat(realPath);
-            return node ? path : null;
-        } catch { return null; }
+        return await this.exists(path) ? path : null;
     }
 
     async exists(path: string): Promise<boolean> {
         try {
             const realPath = this.ctx.toRealPath(path);
-            const node = await this.ctx.engine.tryStat(realPath);
+            const node = await this.ctx.engine.tryStatType(realPath);
             return node !== null;
         } catch { return false; }
     }

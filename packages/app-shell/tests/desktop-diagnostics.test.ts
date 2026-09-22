@@ -31,3 +31,17 @@ it('logs the actual scope and lifecycle without consuming the UI progress callba
     expect(invoke.mock.calls.map(call => (call as any)[1].event)).toEqual(['tool.running', 'tool.progress', 'tool.success']);
     expect(JSON.stringify(invoke.mock.calls)).not.toContain('private file contents');
 });
+
+it('keeps source names and nested AggregateError causes in the persisted failure', async () => {
+    const invoke = capture();
+    const database = new Error('database is locked');
+    const source = new Error('root database=/data/_meta/index.db', { cause: database });
+    const failure = new AggregateError([source, new Error('cleanup failed')], 'Filesystem sources could not be opened');
+    await recordDiagnostic('bootstrap.failed', failure);
+    const message = invoke.mock.calls.at(-1)![1].message;
+    expect(message).toContain('/data/_meta/index.db');
+    expect(message).toContain('database is locked');
+    expect(message).toContain('cleanup failed');
+    (database as Error & { cause: unknown }).cause = failure;
+    await expect(recordDiagnostic('cyclic', failure)).resolves.toBeUndefined();
+});

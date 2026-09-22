@@ -256,3 +256,13 @@ Session 配置变更、禁用和服务释放会先同时关闭普通视图与工
 ## 系统沙箱接入边界
 
 `@itookit/sanbox` 提供 Seatbelt / Bubblewrap 启动计划与 Node 探测。应在宿主的 `createSessionProcesses` / `fileContextForScope` 所创建的 `nativeShell`、`ttyDriver` 中应用，再由 kernel-adapters 按作用域供给 Effect；Kernel/Flow/UI 不持有系统沙箱实现。Tauri 的 `session_shell_exec` 已调用包内 `itookit-sanbox` Rust crate，Linux Bubblewrap / macOS Seatbelt 均默认禁网，沿用宿主输出与取消管理。CLI OCI/native 路径保持原配置；具体职责和路径映射限制见 [系统沙箱设计](design/system-sandbox.md)。
+
+## 宿主启动诊断与桌面事务生命周期
+
+Tauri 的文件系统打开、runtime 和 UI 初始化阶段写入持久 JSONL，失败展开 `AggregateError.errors` / `Error.cause` 并保留 source 名称与数据库路径。CLI 在入口安装进程诊断，记录命令/runtime/HTTP 失败和退出状态，日志不进入机器读取的 stdout。
+
+Tauri 每个页面先调用 `sidecar_open_scope`，Rust 以 WebView label 维护页面代次，回滚上一代未完成事务后才允许加载数据库。`sidecar_begin` 在等待 SQLite 写锁前后均校验代次，防止旧页面迟到的请求占用新页面的连接；其它窗口的事务不受该窗口刷新影响。完整且版本兼容的数据库只校验 schema 并设置连接 PRAGMA，跳过重复 DDL；缺少对象仍走初始化，版本不兼容仍明确拒绝。LocalFS 在 journal 初始化失败后关闭已打开 sidecar，保留原错误和关闭失败原因。
+
+日志路径、排查流程与回归证据见 [启动故障与运行日志](design/startup-diagnostics.md)。
+
+目录预热的 `ensureDirectoryPath` 使用后端 `statType`（缺失时回退完整 stat），逐路径前缀验证类型而不读取无关元数据。LLM 默认提示词在一次 SeqFile 事务中检查/补齐，已有用户值保持不变。暖启动 I/O 计数及 Linux 实际分段耗时见上述诊断文档。

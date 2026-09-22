@@ -32,7 +32,9 @@ export class SessionRenderer {
     private flowWindows = new Map<string, HTMLElement>();
     private nodeMap = new Map<string, HTMLElement>();
     private editorMap = new Map<string, MDxController>();
+    private editorMounts = new Map<string, HTMLElement>();
     private renderedSessionIds = new Set<string>();
+    private lastExecutionRoot: HTMLElement | null = null;
     private timers = new TimerManager();
 
     constructor(
@@ -55,6 +57,17 @@ export class SessionRenderer {
 
     getEditor(nodeId: string): MDxController | undefined {
         return this.editorMap.get(nodeId);
+    }
+
+    isEditorVisible(id: string): boolean {
+        const mount = this.editorMounts.get(id);
+        return !!mount && this.container.contains(mount) && !mount.closest('.is-collapsed');
+    }
+
+    activateVisibleEditors(root: HTMLElement = this.container): void {
+        for (const [id, mount] of this.editorMounts) {
+            if (root.contains(mount) && this.isEditorVisible(id)) this.editorMap.get(id)?.activate();
+        }
     }
 
     getSessionElement(sessionId: string): HTMLElement | null {
@@ -114,6 +127,7 @@ export class SessionRenderer {
                 <div class="llm-ui-execution-root" id="container-${group.id}"></div>
             `;
             this.container.appendChild(wrapper);
+            this.lastExecutionRoot = wrapper.querySelector('.llm-ui-execution-root');
         }
     }
 
@@ -137,8 +151,11 @@ export class SessionRenderer {
             parentEl = this.nodeMap.get(parentId)?.querySelector('.llm-ui-node__children') || null;
         }
         if (!parentEl) {
-            const roots = this.container.querySelectorAll('.llm-ui-execution-root');
-            if (roots.length > 0) parentEl = roots[roots.length - 1] as HTMLElement;
+            if (!this.lastExecutionRoot || !this.container.contains(this.lastExecutionRoot)) {
+                const roots = this.container.querySelectorAll<HTMLElement>('.llm-ui-execution-root');
+                this.lastExecutionRoot = roots.item(roots.length - 1);
+            }
+            parentEl = this.lastExecutionRoot;
         }
 
         if (!parentEl) return;
@@ -217,6 +234,7 @@ export class SessionRenderer {
 
         const controller = new MDxController(mountPoint, group.content || '', {
             readOnly: true,
+            deferred: !!mountPoint.closest('.is-collapsed'),
             onChange: (text) => {
                 this.onContentChange?.(group.id, text, 'user');
                 const previewEl = wrapper.querySelector('.llm-ui-header-preview');
@@ -228,6 +246,7 @@ export class SessionRenderer {
             assets: this.context.assets,
         });
         this.editorMap.set(group.id, controller);
+        this.editorMounts.set(group.id, mountPoint);
     }
 
     private mountNodeEditor(element: HTMLElement, node: ExecutionNode): void {
@@ -241,6 +260,7 @@ export class SessionRenderer {
 
         const controller = new MDxController(mountPoint, node.data.output || '', {
             readOnly: true,
+            deferred: !!mountPoint.closest('.is-collapsed'),
             streaming: isStreaming,
             onChange: (text) => {
                 if (controller.isEditing()) {
@@ -253,6 +273,7 @@ export class SessionRenderer {
             assets: this.context.assets,
         });
         this.editorMap.set(node.id, controller);
+        this.editorMounts.set(node.id, mountPoint);
 
         const iconEl = element.querySelector('.llm-ui-node__icon--clickable');
         if (iconEl && node.data.metaInfo?.agentId) {
@@ -285,6 +306,7 @@ export class SessionRenderer {
             if (editor) {
                 editor.destroy();
                 this.editorMap.delete(id);
+                this.editorMounts.delete(id);
             }
 
             removed.push(id);
@@ -352,9 +374,11 @@ export class SessionRenderer {
     clear(): void {
         this.editorMap.forEach(editor => editor.destroy());
         this.editorMap.clear();
+        this.editorMounts.clear();
         this.nodeMap.clear();
         this.flowWindows.clear();
         this.renderedSessionIds.clear();
+        this.lastExecutionRoot = null;
         this.container.innerHTML = '';
     }
 

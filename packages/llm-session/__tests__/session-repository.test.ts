@@ -150,10 +150,19 @@ describe('Session data repository', () => {
 
     it('rejects unknown identities and incompatible storage without creating data', async () => {
         await expect(repository.getManifest('missing')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(repository.readDocument('missing', 'round-r1.json')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(repository.readHistoryChain('missing')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(repository.getSessionSettings('missing')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(repository.getLoadState('missing')).rejects.toMatchObject({ code: 'ENOENT' });
         await expect(repository.getManifest('/old.chat')).rejects.toThrow('identity');
         const id = await repository.createSession('Bad version');
         await fs.meta.seq!.setEntry(`/var/lib/sessions/${id}/session.seq`, 'session', JSON.stringify({ id, storageVersion: 0 }));
         await expect(repository.getManifest(id)).rejects.toThrow('incompatible');
+        await expect(repository.readDocument(id, 'round-r1.json')).rejects.toThrow('incompatible');
+        await expect(repository.readHistoryChain(id)).rejects.toThrow('incompatible');
+        await expect(repository.getSessionSettings(id)).rejects.toThrow('incompatible');
+        await expect(repository.getLoadState(id)).rejects.toThrow('incompatible');
+        await expect(repository.list()).rejects.toThrow('incompatible');
         expect(await fs.driver.exists('/var/lib/sessions/missing')).toBe(false);
     });
 });

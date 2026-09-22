@@ -38,7 +38,7 @@ export abstract class FileBackedService {
      */
     protected async readJson<T>(path: string): Promise<T | null> {
         try {
-            const content = await this.engine.driver.readContent(path);
+            const content = await this.engine.driver.readContent(path, { representation: 'bytes' });
             const str =
                 typeof content === 'string'
                     ? content

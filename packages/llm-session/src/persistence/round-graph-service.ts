@@ -13,6 +13,7 @@ import { ulid } from './ulid';
 import { roundToProjection } from './round-log';
 import { toolCallsFromResult, roundStatusToNodeStatus } from './projection';
 import type { ISessionRepository } from './types';
+import { readRoundDocument } from './history-chain';
 
 // ─── Error types ───────────────────────────────────────────────────────────
 
@@ -179,15 +180,7 @@ export class RoundGraphService {
     // ── Read / Write ───────────────────────────────────────────────────────
 
     async readRound(roundId: RoundId): Promise<PersistedRound | null> {
-        try {
-            const content = await this.engine.readDocument(this.sessionId, `round-${roundId}.json`);
-            if (!content) return null;
-            const text = typeof content === 'string'
-                ? content
-                : new TextDecoder().decode(content);
-            return JSON.parse(text) as PersistedRound;
-        } catch { /* round file missing */ }
-        return null;
+        return readRoundDocument(() => this.engine.readDocument(this.sessionId, `round-${roundId}.json`));
     }
 
     private async writeRound(roundId: RoundId, round: PersistedRound): Promise<void> {

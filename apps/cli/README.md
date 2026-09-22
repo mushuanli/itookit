@@ -6,6 +6,8 @@ MindOS CLI 在指定工作区中运行声明式多 Agent workflow graph。无环
 
 文件工具、Skill、本地 MCP 及组合流程的可运行定义和审批验证见 [Harness 验证例子](examples/harness-validation/README.md)。
 
+CLI 的运行异常会自动写入 `~/.config/mindos/logs/cli/`（遵循 `XDG_CONFIG_HOME`，可用 `MINDOS_DIAGNOSTICS_DIR` 覆盖），失败时 stderr 显示具体路径；详见 [运行日志](../../doc/mindos-profile.md#tauri--cli-运行日志)。
+
 ## 使用
 
 ```bash

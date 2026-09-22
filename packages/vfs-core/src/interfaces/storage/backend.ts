@@ -9,7 +9,7 @@
  * 不支持的实现将对应属性设为 undefined 或不定义。
  */
 
-import type { FSNode, FSSearchQuery } from '../core/types';
+import type { FSNode, FSSearchQuery, DirEntry } from '../core/types';
 import type { IRecordStore } from './record-backend';
 
 export interface IStorageBackend {
@@ -29,12 +29,21 @@ export interface IStorageBackend {
 
     /** 列出子节点 */
     list(path: string): Promise<FSNode[]>;
+    /** Same children as list, without extended metadata. Fall back to list when absent. */
+    listEntries?(path: string): Promise<DirEntry[]>;
 
     /** 创建目录 */
     mkdir(path: string): Promise<FSNode>;
 
     /** 删除节点 */
     delete(path: string, options?: { recursive?: boolean }): Promise<void>;
+
+    /**
+     * Optional subtree layout guard for structural mutations. Ancestors are still checked
+     * by the engine. A projection may delegate protection to the physical mutation it owns,
+     * rather than recursively walking display-only children. Throw when the mutation is blocked.
+     */
+    assertMutableSubtree?(path: string): Promise<void>;
 
     /** 重命名/移动 */
     rename(fromPath: string, toPath: string): Promise<void>;

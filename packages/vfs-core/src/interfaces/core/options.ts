@@ -21,6 +21,8 @@ export interface VisibilityOptions {
 }
 
 export interface ReadOptions {
+    /** auto preserves SeqFile projection; bytes reads physical content; records reads only the record projection. */
+    representation?: 'auto' | 'bytes' | 'records';
     /** 起始偏移（需要 capabilities.partialRead） */
     offset?: number;
     /** 读取长度（需要 capabilities.partialRead） */

@@ -8,6 +8,8 @@ export interface MDxControllerOptions {
     readOnly?: boolean;
     onChange?: (text: string) => void;
     streaming?: boolean;
+    /** Keep content in memory until explicitly revealed or edited. */
+    deferred?: boolean;
     fs?: IFileSystem;
     assets?: IFileSystem;
 }
@@ -34,6 +36,8 @@ export class MDxController implements IStreamableEditor {
     private isStreamingInit: boolean = false;
     private options: MDxControllerOptions;
     private isInitialized: boolean = false;
+    private destroyed = false;
+    private started = false;
     private readyPromise: Promise<void>;
     private readyResolve!: () => void;
     private readyReject!: (reason: any) => void;
@@ -54,18 +58,26 @@ export class MDxController implements IStreamableEditor {
             this.readyResolve = resolve;
             this.readyReject = reject;
         });
-
-        this.init();
+        void this.readyPromise.catch(() => {});
+        if (!options?.deferred || options.streaming) this.activate();
     }
 
     async waitUntilReady(): Promise<void> {
+        this.activate();
         return this.readyPromise;
+    }
+
+    activate(): void {
+        if (this.started || this.destroyed) return;
+        this.started = true;
+        void this.init();
     }
 
     private async init(): Promise<void> {
         try {
-            this.editor = await createMDxEditor(this.container, {
-                initialContent: this.currentContent,
+            const initialContent = this.currentContent;
+            const editor = await createMDxEditor(this.container, {
+                initialContent,
                 initialMode: this.isReadOnly ? 'render' : 'edit',
                 assets: this.options.assets,
                 files: this.options.fs ? { fs: this.options.fs, cwd: '/' } : undefined,
@@ -87,6 +99,12 @@ export class MDxController implements IStreamableEditor {
                     }
                 }
             }) as MDxEditor;
+            if (this.destroyed) {
+                editor.destroy();
+                this.readyResolve();
+                return;
+            }
+            this.editor = editor;
 
             this.editor.on('change', () => {
                 if (!this.isStreaming) {
@@ -102,7 +120,7 @@ export class MDxController implements IStreamableEditor {
             // Render any content that arrived before the editor was ready.
             // finishStream() clears pendingDelta before isInitialized is true, so
             // check currentContent (never cleared until reset) instead of pendingDelta.
-            if (this.currentContent) {
+            if (this.currentContent !== initialContent) {
                 void this.finalize();
             }
         } catch (e) {
@@ -229,6 +247,7 @@ export class MDxController implements IStreamableEditor {
     // ================================================================
 
     async toggleEdit(): Promise<void> {
+        await this.waitUntilReady();
         if (!this.editor) return;
 
         this.isReadOnly = !this.isReadOnly;
@@ -253,6 +272,7 @@ export class MDxController implements IStreamableEditor {
     }
 
     async setMode(mode: 'edit' | 'render'): Promise<void> {
+        await this.waitUntilReady();
         if (!this.editor) return;
 
         const shouldBeReadOnly = mode === 'render';
@@ -271,6 +291,8 @@ export class MDxController implements IStreamableEditor {
     // ================================================================
 
     destroy(): void {
+        this.destroyed = true;
+        this.readyResolve();
         this.editor?.destroy();
         this.editor = null;
         this.isInitialized = false;

@@ -1,5 +1,6 @@
 import { installTauriMCP } from './shell/tauri-mcp-transport';
 import { recordDiagnostic, observeTools } from './log/desktop-diagnostics';
+import { errorDetails, t } from '@itookit/common';
 import { TauriSessionDirectories } from './services/session-directories';
 import { invoke } from '@tauri-apps/api/core';
 import { createTauriSessionProcesses } from './shell/session-bash';
@@ -69,6 +70,7 @@ function pathToMetaDir(rootDir: string, absPath: string): string {
 }
 
 // ── Loading overlay ────────────────────────────────────────────────────────────
+let diagnosticLogPath: string | undefined;
 
 function showLoading(msg: string): void {
     let el = document.getElementById('__boot-overlay');
@@ -96,13 +98,15 @@ function hideLoading(): void {
 }
 
 function showError(msg: string): void {
+    if (diagnosticLogPath) msg += `\n\n${t('boot.runtimeLog')}${diagnosticLogPath}`;
     const el = document.getElementById('__boot-overlay');
     if (el) {
         el.innerHTML = `
             <div style="font-size:28px">⚠️</div>
             <div style="font-size:14px;font-weight:600;color:#111">启动失败</div>
-            <div style="font-size:12px;color:#ef4444;max-width:400px;text-align:center;word-break:break-all">${msg}</div>
+            <div id="__boot-error" style="font-size:12px;color:#ef4444;max-width:720px;text-align:left;white-space:pre-wrap;word-break:break-all"></div>
             <button onclick="location.reload()" style="margin-top:8px;padding:6px 16px;border-radius:6px;border:none;background:var(--primary-color,#5B66F5);color:#fff;cursor:pointer;font-size:13px">重试</button>`;
+        el.querySelector('#__boot-error')!.textContent = msg;
     } else {
         alert(`启动失败: ${msg}`);
     }
@@ -175,11 +179,14 @@ async function bootstrap(): Promise<void> {
     const log = (label: string) => {
         const now = performance.now();
         console.log(`[Boot] ${label}: +${(now - t).toFixed(0)}ms (total ${(now - t0).toFixed(0)}ms)`);
+        void recordDiagnostic('bootstrap.stage', { label, durationMs: Math.round(now - t), elapsedMs: Math.round(now - t0) });
         t = now;
         showLoading(label);
     };
 
     log('正在初始化…');
+    diagnosticLogPath = await invoke<string | undefined>('diagnostic_log_path').catch(() => undefined);
+    if (diagnosticLogPath) console.info(`[Diagnostics] ${diagnosticLogPath}`);
 
     // 1. Resolve paths
     //    homeDir   = working project directory (CWD or --home arg)
@@ -208,12 +215,20 @@ async function bootstrap(): Promise<void> {
     //
     // Each module gets its own SQLite to eliminate cross-module DB locking.
 
-    const openBackend = (rootDir: string, sidecarDir: string) =>
-        openLocalFSBackend({
-            rootDir, sidecarDir,
-            createDb: (dbPath) => TauriSqlSidecarDb.open(dbPath),
-            createFs: () => new TauriFsOps(),
-        });
+    const openBackend = async (rootDir: string, sidecarDir: string) => {
+        const started = performance.now();
+        void recordDiagnostic('bootstrap.source.start', { rootDir, sidecarDir });
+        try {
+            const backend = await openLocalFSBackend({ rootDir, sidecarDir,
+                createDb: dbPath => TauriSqlSidecarDb.open(dbPath), createFs: () => new TauriFsOps() });
+            void recordDiagnostic('bootstrap.source.ready', { rootDir, sidecarDir, durationMs: Math.round(performance.now() - started) });
+            return backend;
+        } catch (error) {
+            const failure = new Error(`Open filesystem root=${rootDir}, database=${sidecarDir}/index.db`, { cause: error });
+            void recordDiagnostic('bootstrap.source.failed', failure);
+            throw failure;
+        }
+    };
 
     // Collect module names that need their own backend (skip settings/home)
     const workspaceNames = WORKSPACES
@@ -231,7 +246,9 @@ async function bootstrap(): Promise<void> {
             openBackend(`${rootDir}${workspaceRoot(name)}`, `${rootDir}/_db/${name}`)
         ),
     ]);
-    const failures = opened.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+    const sourceNames = ['root', 'home', ...workspaceNames];
+    const failures = opened.flatMap((result, index) => result.status === 'rejected'
+        ? [new Error(`Filesystem source ${sourceNames[index]} failed`, { cause: result.reason })] : []);
     if (failures.length) {
         const closed = await Promise.allSettled(opened.flatMap(result => result.status === 'fulfilled' ? [result.value.close()] : []));
         throw new AggregateError([...failures, ...closed.flatMap(result => result.status === 'rejected' ? [result.reason] : [])], 'Filesystem sources could not be opened');
@@ -258,7 +275,10 @@ async function bootstrap(): Promise<void> {
     // 3. Hand off to app-shell
     // Session Bash runs through the platform directory-grant namespace.
     const ui: AppUI = {
-        createChatEditor: createLLMFactory,
+        createChatEditor: (agents, deps) => createLLMFactory(agents, {
+            ...deps,
+            onLoadMetrics: metrics => { void recordDiagnostic('session.load.ready', metrics); },
+        }),
         createAgentEditor: createAgentEditorFactory,
         createFlowEditor: createFlowsEditorFactory,
         createFlowContextMenu: createFlowContextMenuConfig,
@@ -280,7 +300,7 @@ async function bootstrap(): Promise<void> {
         backend: rootBackend,
         additionalMounts: [...workspaceMounts],
         ownerKind: 'tauri',
-        onProgress: showLoading,
+        onProgress: log,
         llmLogger,
         directorySourceProvider: new TauriSessionDirectories(rootDir),
         defaultSessionDirectory: `host:${sessionDirectory}`,
@@ -327,7 +347,7 @@ async function bootstrap(): Promise<void> {
         workspaces: WORKSPACES.map(ws => ws.workspaceName === 'home' ? { ...ws, files: { fs: homeSource.fs, cwd: '/' } } : ws),
         defaultSlug: 'files',
         routeAliases: { home: 'home-workspace' },
-        onProgress: showLoading,
+        onProgress: log,
         ui,
     });
     startupCleanup.push(() => app.destroy());
@@ -392,6 +412,7 @@ async function bootstrap(): Promise<void> {
 
     hideLoading();
     console.log(`[Boot] 总启动耗时: ${(performance.now() - t0).toFixed(0)}ms`);
+    void recordDiagnostic('bootstrap.ready', { durationMs: Math.round(performance.now() - t0) });
     } catch (error) {
         for (const close of startupCleanup.reverse()) { try { await close(); } catch (cleanupError) { console.error('[Boot] Source cleanup failed', cleanupError); } }
         throw error;
@@ -452,17 +473,17 @@ if ((window as { __MINDOS_MODE__?: string }).__MINDOS_MODE__ === 'remote') {
     bootstrapRemote().catch(err => {
         recordDiagnostic('bootstrap.failed', err);
         console.error('[Remote Bootstrap] Fatal:', err);
-        showError(err instanceof Error ? err.message : String(err));
+        showError(errorDetails(err));
     });
 } else {
     bootstrap().catch(err => {
         recordDiagnostic('bootstrap.failed', err);
         console.error('[Bootstrap] Fatal:', err);
-        showError(err instanceof Error ? err.message : String(err));
+        showError(errorDetails(err));
     });
 }
 
 window.addEventListener('unhandledrejection', (e) => {
     console.error('[Unhandled rejection]', e.reason);
-    if (document.getElementById('__boot-overlay')) showError(String(e.reason));
+    if (document.getElementById('__boot-overlay')) showError(errorDetails(e.reason));
 });

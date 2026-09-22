@@ -1,7 +1,8 @@
 import { generateUUID } from '@itookit/common';
 import { createFileSystemView, FSError, type IFileSystem, type ISeqFileTransaction } from '@itookit/vfs-core';
-import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin } from './types';
+import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin, type SessionLoadState } from './types';
 import { sessionStorageRoot } from './session-storage-layout';
+import { collectHistoryChain, readRoundDocument, type SessionHistoryChain } from './history-chain';
 
 const FOLDERS_PATH = '/var/lib/sessions/folders.seq';
 const FOLDERS_KEY = 'folders';
@@ -104,33 +105,62 @@ export class SessionRepository implements ISessionRepository {
     }
     async getManifest(id: string): Promise<ConversationManifest> {
         const p = this.paths(id);
+        return this.fs.meta.seq!.transaction!(tx => this.readManifestTx(tx, p, id));
+    }
+    async getLoadState(id: string): Promise<SessionLoadState> {
+        const p = this.paths(id);
+        return this.fs.meta.seq!.transaction!(async tx => ({
+            manifest: await this.readManifestTx(tx, p, id),
+            settings: { ...DEFAULT_SESSION_SETTINGS, ...JSON.parse(await tx.getEntry(p.session, 'settings') ?? '{}') },
+        }));
+    }
+    async readHistoryChain(id: string): Promise<SessionHistoryChain> {
+        const p = this.paths(id);
         return this.fs.meta.seq!.transaction!(async tx => {
-            const raw = await tx.getEntry(p.session, 'session');
-            if (!raw) throw new FSError('ENOENT', `Session not found: ${id}`);
-            const session = JSON.parse(raw);
-            if (session.storageVersion !== 1 || session.id !== id) throw new Error('Session storage version incompatible');
-            const rawHistory = await tx.getEntry(p.history, 'index');
-            if (!rawHistory) throw new FSError('ENOENT', `Session history not found: ${id}`);
-            const history = JSON.parse(rawHistory);
-            if (history?.schemaVersion !== 3) throw new Error('Session history version incompatible');
-            return { ...session, ...history };
+            const manifest = await this.readManifestTx(tx, p, id);
+            return collectHistoryChain(manifest, roundId => readRoundDocument(() =>
+                tx.getEntry(p.history, `document/${this.name(`round-${roundId}.json`)}`)));
         });
+    }
+    private async readManifestTx(tx: ISeqFileTransaction, p: SessionPaths, id: string): Promise<ConversationManifest> {
+        const raw = await tx.getEntry(p.session, 'session');
+        if (!raw) throw new FSError('ENOENT', `Session not found: ${id}`);
+        const session = JSON.parse(raw);
+        if (session.storageVersion !== 1 || session.id !== id) throw new Error('Session storage version incompatible');
+        const rawHistory = await tx.getEntry(p.history, 'index');
+        if (!rawHistory) throw new FSError('ENOENT', `Session history not found: ${id}`);
+        const history = JSON.parse(rawHistory);
+        if (history?.schemaVersion !== 3) throw new Error('Session history version incompatible');
+        return { ...session, ...history };
     }
     async list(): Promise<ConversationManifest[]> {
         this.root('catalog');
         if (!await this.fs.driver.exists('/var/lib/sessions')) return [];
+        const candidates: string[] = [];
+        for (const node of await this.fs.driver.getChildren('/var/lib/sessions', { fields: 'entry' })) {
+            if (node.type === 'directory' && await this.fs.driver.exists(`${node.path}/session.seq`)) candidates.push(node.name);
+        }
         const result: ConversationManifest[] = [];
-        for (const node of await this.fs.driver.getChildren('/var/lib/sessions')) {
-            if (node.type !== 'directory' || !await this.fs.driver.exists(`${node.path}/session.seq`)) continue;
-            try {
-                result.push(await this.getManifest(node.name));
-            } catch (error) {
-                // A crash can leave seqfiles behind before the init transaction
-                // commits; skip incomplete records until ensureSession repairs them.
-                if (!(error instanceof FSError && error.code === 'ENOENT')) throw error;
-            }
+        // Bound transaction duration without opening a transaction for every Session.
+        for (let start = 0; start < candidates.length; start += 64) {
+            result.push(...await this.readManifestBatch(candidates.slice(start, start + 64)));
         }
         return result.sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+    private readManifestBatch(ids: string[]): Promise<ConversationManifest[]> {
+        return this.fs.meta.seq!.transaction!(async tx => {
+            const result: ConversationManifest[] = [];
+            for (const id of ids) {
+                try {
+                    result.push(await this.readManifestTx(tx, this.paths(id), id));
+                } catch (error) {
+                    // A crash can leave seqfiles behind before the init transaction
+                    // commits; skip incomplete records until ensureSession repairs them.
+                    if (!(error instanceof FSError && error.code === 'ENOENT')) throw error;
+                }
+            }
+            return result;
+        });
     }
     async deleteSession(id: string): Promise<void> {
         const root = this.root(id);
@@ -239,8 +269,7 @@ export class SessionRepository implements ISessionRepository {
     async getUIState(id: string): Promise<ConversationUIState | null> { return (await this.getManifest(id)).uiState ?? null; }
     async updateUIState(id: string, updates: Partial<ConversationUIState>): Promise<void> { await this.updateManifest(id, { uiState: updates }); }
     async getSessionSettings(id: string): Promise<ChatSessionSettings> {
-        await this.getManifest(id);
-        return { ...DEFAULT_SESSION_SETTINGS, ...JSON.parse(await this.fs.meta.seq!.getEntry(this.paths(id).session, 'settings') ?? '{}') };
+        return (await this.getLoadState(id)).settings;
     }
     async saveSessionSettings(id: string, patch: Partial<ChatSessionSettings>): Promise<void> {
         await this.getManifest(id);
@@ -251,8 +280,11 @@ export class SessionRepository implements ISessionRepository {
         });
     }
     async readDocument(id: string, name: string): Promise<string | null> {
-        await this.getManifest(id);
-        return this.fs.meta.seq!.getEntry(this.paths(id).history, `document/${this.name(name)}`);
+        const p = this.paths(id), key = `document/${this.name(name)}`;
+        return this.fs.meta.seq!.transaction!(async tx => {
+            await this.readManifestTx(tx, p, id);
+            return tx.getEntry(p.history, key);
+        });
     }
     async writeDocument(id: string, name: string, content: string): Promise<void> {
         await this.getManifest(id);

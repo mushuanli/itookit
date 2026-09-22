@@ -104,6 +104,7 @@ export const zhCN = {
     'session.tasks.eventsTrimmed': '更早的事件已按保留期裁剪',
     'session.close.action': '关闭会话（停止执行，保留记录）',
     'boot.filesystem': '初始化文件系统…',
+    'boot.runtimeLog': '运行日志：',
     'boot.llmDriver': '加载 LLM 驱动…',
     'boot.coreServices': '初始化核心服务…',
     'boot.llmEngine': '初始化 LLM 引擎…',

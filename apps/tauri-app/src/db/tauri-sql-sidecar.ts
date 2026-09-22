@@ -18,6 +18,15 @@ import { PATH_DATA_EXISTS, movePathStatements, SCHEMA_VERSION } from '@itookit/v
 import type { ISidecarDb, MetaExtRow } from '@itookit/vfsdriver-localfs';
 
 type SidecarConnection = Pick<Database, 'execute' | 'select' | 'close'>;
+let pageScope: Promise<number> | undefined;
+
+function openPageScope(): Promise<number> {
+    // One handshake per JS page, before loading pools from the previous page.
+    return pageScope ??= invoke<number>('sidecar_open_scope').catch(error => {
+        pageScope = undefined;
+        throw error;
+    });
+}
 
 // ── Path-based DDL — one statement per execute() ──────────────────────────────
 
@@ -58,18 +67,20 @@ const DDL_STATEMENTS = [
     'CREATE INDEX IF NOT EXISTS idx_records_path ON records(path, field)',
 
 ];
+const SCHEMA_OBJECTS = ['_schema_version', 'meta_ext', 'meta_tags', 'records', 'idx_meta_tags_tag', 'idx_records_path'];
 
 export class TauriSqlSidecarDb implements ISidecarDb {
-    private constructor(private readonly db: SidecarConnection, private readonly databaseUrl?: string) {}
+    private constructor(private readonly db: SidecarConnection, private readonly databaseUrl?: string, private readonly scope?: number) {}
 
     // ── Factory ────────────────────────────────────────────────────────────────
 
     static async open(dbPath: string): Promise<TauriSqlSidecarDb> {
+        const scope = await openPageScope();
         const db = await Database.load(`sqlite:${dbPath}`);
-        const instance = new TauriSqlSidecarDb(db, `sqlite:${dbPath}`);
+        const instance = new TauriSqlSidecarDb(db, `sqlite:${dbPath}`, scope);
         try {
-            await instance.assertSchemaVersion();
-            await instance.initSchema();
+            const initialized = await instance.assertSchemaVersion();
+            await instance.initSchema(initialized);
             return instance;
         } catch (error) {
             try { await instance.close(); } catch (cleanupError) {
@@ -81,18 +92,19 @@ export class TauriSqlSidecarDb implements ISidecarDb {
 
     // ── Schema migration ───────────────────────────────────────────────────────
 
-    private async assertSchemaVersion(): Promise<void> {
-        const tables = await this.db.select<Array<{ name: string }>>("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
-        if (!tables.length) return;
+    private async assertSchemaVersion(): Promise<boolean> {
+        const tables = await this.db.select<Array<{ name: string }>>("SELECT name FROM sqlite_master WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'");
+        if (!tables.length) return false;
         const versions = tables.some(table => table.name === '_schema_version')
             ? await this.db.select<Array<{ version: number }>>('SELECT version FROM _schema_version') : [];
         if (versions.length !== 1 || versions[0].version !== SCHEMA_VERSION) throw new Error('Filesystem database version incompatible');
+        return SCHEMA_OBJECTS.every(name => tables.some(table => table.name === name));
     }
 
     // ── Schema ─────────────────────────────────────────────────────────────────
 
-    private async initSchema(): Promise<void> {
-        for (const stmt of DDL_STATEMENTS) {
+    private async initSchema(initialized: boolean): Promise<void> {
+        for (const stmt of initialized ? DDL_STATEMENTS.filter(sql => sql.startsWith('PRAGMA')) : DDL_STATEMENTS) {
             // PRAGMAs return rows → use select(); DDL → use execute()
             if (stmt.startsWith('PRAGMA')) {
                 await this.db.select(stmt);
@@ -100,6 +112,7 @@ export class TauriSqlSidecarDb implements ISidecarDb {
                 await this.db.execute(stmt);
             }
         }
+        if (initialized) return;
 
         // Version stamp
         const rows = await this.db.select<Array<{ version: number }>>(
@@ -250,7 +263,7 @@ export class TauriSqlSidecarDb implements ISidecarDb {
 
     async transaction<T>(operation: (db: ISidecarDb) => Promise<T>): Promise<T> {
         if (!this.databaseUrl) throw new Error('Nested sidecar transactions are not supported');
-        const transactionId = await invoke<number>('sidecar_begin', { database: this.databaseUrl });
+        const transactionId = await invoke<number>('sidecar_begin', { database: this.databaseUrl, scope: this.scope });
         const scoped = new TauriSqlSidecarDb({
             execute: (query, values) => invoke('sidecar_execute', { transactionId, query, values: values ?? [] }),
             select: (query, values) => invoke('sidecar_select', { transactionId, query, values: values ?? [] }),

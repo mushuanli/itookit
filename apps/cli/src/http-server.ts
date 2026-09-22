@@ -1,3 +1,4 @@
+import { recordRuntimeDiagnostic, runtimeDiagnosticPath, traceRuntimeStage } from './diagnostics';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile, appendFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -96,12 +97,13 @@ export async function createHttpMindOSRuntime(options: CommandOptions): Promise<
         createDb: NodeSqliteSidecarDb.open,
     });
     try {
-        return await createApplicationRuntime({
+        return await traceRuntimeStage('http.runtime', () => createApplicationRuntime({
             backend,
             directorySourceProvider: new CliDirectorySourceProvider(rootDir),
             defaultSessionDirectory: `host:${path.resolve(options.setHome ?? process.cwd())}`,
             ownerKind: 'cli',
-        });
+            onProgress: stage => recordRuntimeDiagnostic('http.runtime.stage', { stage }),
+        }));
     } catch (error) {
         await backend.close();
         throw error;
@@ -148,6 +150,7 @@ class HttpUiServer {
             if (url.pathname === '/api/runs') return await this.runs(response);
             return await this.staticFile(url.pathname, response);
         } catch (error) {
+            recordRuntimeDiagnostic('http.request.failed', error);
             return json(response, 500, { error: error instanceof Error ? error.message : String(error) });
         }
     }
@@ -185,6 +188,7 @@ class HttpUiServer {
             if (this.options.debug) console.error(`[HTTP] <- ${cmd} ${Date.now() - started}ms`);
             return json(response, 200, { result });
         } catch (error) {
+            recordRuntimeDiagnostic('http.invoke.failed', new Error(`IPC ${cmd} failed`, { cause: error }));
             const message = error instanceof Error ? error.message : String(error);
             console.error(`[HTTP] ${cmd} failed after ${Date.now() - started}ms: ${message} ${summarizeArgs(args)}`);
             if (this.options.debug && error instanceof Error && error.stack) console.error(error.stack);
@@ -194,6 +198,8 @@ class HttpUiServer {
 
     private async command(cmd: string, args: Record<string, unknown>): Promise<unknown> {
         switch (cmd) {
+            case 'diagnostic_log_path': return runtimeDiagnosticPath() ?? null;
+            case 'diagnostic_event': recordRuntimeDiagnostic(`frontend.${String(args.event)}`, String(args.message)); return null;
             case 'get_home_dir': return this.options.homeDir;
             case 'get_current_dir': return this.options.homeDir;
             case 'get_root_dir': return this.options.rootDir;

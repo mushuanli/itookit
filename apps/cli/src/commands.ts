@@ -1,3 +1,4 @@
+import { recordRuntimeDiagnostic } from './diagnostics';
 import { acquireRunSchedulerLock } from './run-scheduler-lock';
 import { markRunDeleted } from './run-scheduler-lease';
 import { randomUUID } from 'node:crypto';
@@ -270,6 +271,7 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions, overri
         print(options, { type: 'run.started', runId: id, tasks: spec.nodes.length });
         return await monitor(loaded.workflow, manifest, store, runtime, options);
     } catch (error) {
+        recordRuntimeDiagnostic('run.failed', error);
         manifest.status = 'failed';
         manifest.error = errorMessage(error);
         manifest.completedAt = Date.now();
@@ -997,6 +999,7 @@ function print(options: CommandOptions, value: unknown): void {
 }
 
 function printError(options: CommandOptions, message: string): void {
+    recordRuntimeDiagnostic('command.error', message);
     if (options.json || options.headless) process.stderr.write(`${JSON.stringify({ type: 'error', message })}\n`);
     else process.stderr.write(`错误：${message}\n`);
 }

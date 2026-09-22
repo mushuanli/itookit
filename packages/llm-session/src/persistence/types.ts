@@ -52,6 +52,12 @@ export interface SessionFolder {
     updatedAt: number;
 }
 
+/** A fresh, single-transaction snapshot for one editor load; never a persistent cache. */
+export interface SessionLoadState {
+    manifest: ConversationManifest;
+    settings: import('@itookit/common').ChatSessionSettings;
+}
+
 /** Domain storage. History and attachments belong to the Session identity. */
 export interface ISessionRepository {
     init(): Promise<void>;
@@ -61,6 +67,9 @@ export interface ISessionRepository {
     /** Idempotently create a Session with a host-supplied durable identity. */
     ensureSession(id: string, title: string, origin?: SessionOrigin, folder?: string | null): Promise<string>;
     getManifest(sessionId: string): Promise<ConversationManifest>;
+    getLoadState?(sessionId: string): Promise<SessionLoadState>;
+    /** Read the selected history chain in one storage snapshot when supported. */
+    readHistoryChain?(sessionId: string): Promise<import('./history-chain').SessionHistoryChain>;
     list(): Promise<ConversationManifest[]>;
     /** Delete a Session and its owned storage. */
     deleteSession(sessionId: string): Promise<void>;

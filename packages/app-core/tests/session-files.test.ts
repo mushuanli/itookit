@@ -27,6 +27,21 @@ async function setup() {
 const mount = (root: string, access: 'ro' | 'rw' = 'rw') => [{ mountId: 'work', at: '/workspace', sourceId: 'home', root, access }];
 
 describe('Session file contexts', () => {
+    it('reads cwd and grants once per acquisition and observes the next revision', async () => {
+        const { service } = await setup();
+        await service.configure('a', { mounts: mount('/a'), cwd: '/workspace' }, 0);
+        const inspect = vi.spyOn(service, 'inspect');
+        const first = await service.acquireFiles('a'); cleanup.push(() => first.release());
+        expect(inspect).toHaveBeenCalledTimes(1);
+        expect(first.context.cwd).toBe('/workspace');
+        await service.configure('a', { mounts: mount('/b'), cwd: '/' }, 1);
+        inspect.mockClear();
+        const second = await service.acquireFiles('a'); cleanup.push(() => second.release());
+        expect(inspect).toHaveBeenCalledTimes(1);
+        expect(second.context.cwd).toBe('/');
+        expect(await second.context.fs.driver.readContent('/workspace/same.md', { encoding: 'utf-8' })).toBe('B');
+        await expect(first.context.fs.driver.readContent('/workspace/same.md')).rejects.toMatchObject({ code: 'EACCES' });
+    });
     it('isolates concurrent workspace views without replacing the Session grant or owning the source', async () => {
         const { service, home } = await setup();
         const configured = await service.configure('a', { mounts: mount('/a'), cwd: '/workspace' }, 0);

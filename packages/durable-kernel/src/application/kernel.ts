@@ -324,6 +324,11 @@ export class Kernel implements KernelRegistration {
         return this.store.listTasks(await this.binding(sessionId));
     }
 
+    /** Read pending interactions without enumerating completed Task directories. */
+    async listSessionPendingInteractionTasks(sessionId: SessionId): Promise<TaskRecord[]> {
+        return this.store.listPendingInteractionTasks(await this.binding(sessionId));
+    }
+
     /** Restore durable state without clearing explicit Task/Session pause controls. */
     async recoverSession(sessionId: SessionId, options: import('../domain/types').RecoveryOptions = {}): Promise<RecoveryReport> {
         if (options.takeover && (this.active || this.activeEffects || this.draining.size || !this.poller.isIdle))

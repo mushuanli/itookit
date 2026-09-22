@@ -65,6 +65,7 @@ export class SessionWorkbench implements WorkspaceController {
         this.lifecycle = new SessionLifecycleService({ repository: this.repository, kernel: this.kernel });
         this.sidebarUI = createVFSUI({ sessionListContainer: this.sidebar, title: '会话', scopeId: 'session-browser:v1:admin',
             readOnly: false, activateDirectories: true, defaultUiSettings: { sortBy: 'lastModified' },
+            restoreExpandedDirectory: path => isFlowPath(path) || resolveBrowserTarget(path).kind === 'folder',
             exportDirectories: true,
             exportItem: item => this.exportSessionItem(item),
             fileCreation: { label: '会话', title: formatDefaultFileTitle(), resolveParent: sessionCreationParent },
@@ -486,7 +487,14 @@ export class SessionWorkbench implements WorkspaceController {
     async createResource(options: { title?: string } = {}): Promise<string> {
         if (this.closed) throw new Error('Session workspace closed');
         const id = await this.repository.createSession(options.title || '新会话');
-        await this.sidebarUI?.refresh(); await this.openResource(id); return id;
+        const opening = this.openResource(id);
+        await Promise.all([opening, this.sidebarUI?.refresh()]);
+        if (!this.closed && this.active === id) {
+            // The editor can finish before its new sidebar entry is available.
+            this.selectionSync = '/' + id;
+            try { await this.sidebarUI?.selectPath('/' + id); } finally { this.selectionSync = undefined; }
+        }
+        return id;
     }
     getActiveResourceId(): string | null {
         return this.active && this.activeBranch !== undefined ? sessionRoute(this.active, this.activeBranch) : this.active;

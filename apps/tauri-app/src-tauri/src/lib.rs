@@ -594,12 +594,14 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             diagnostics::diagnostic_event,
+            diagnostics::diagnostic_log_path,
             scoped_fs::directory_open,
             scoped_fs::directory_close,
             scoped_fs::directory_stat_many,
             scoped_fs::directory_read_range,
             scoped_fs::directory_io,
             sidecar::sidecar_begin,
+            sidecar::sidecar_open_scope,
             sidecar::sidecar_execute,
             sidecar::sidecar_select,
             sidecar::sidecar_finish,

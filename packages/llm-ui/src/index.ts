@@ -79,6 +79,7 @@ export const createLLMFactory = (
         kernel?: Kernel;
         privilegedCommands?: import('./domain/ports/IPrivilegedCommandService').IPrivilegedCommandService;
         sessionSkills?: import('@itookit/common').SessionSkillControls;
+        onLoadMetrics?: LLMEditorOptions['onLoadMetrics'];
     },
 ): EditorFactory => {
 
@@ -117,6 +118,7 @@ export const createLLMFactory = (
             kernel: deps.kernel,
             privilegedCommands: deps.privilegedCommands,
             sessionSkills: deps.sessionSkills,
+            onLoadMetrics: deps.onLoadMetrics,
         };
 
         // 将创建过程包装为 Promise，注册到 pendingCreations

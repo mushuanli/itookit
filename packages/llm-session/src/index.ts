@@ -31,6 +31,7 @@ export { AgentResolver, type AgentInfo, type ModelInfo } from './session/agent-r
 export { AttachmentProcessor } from './session/attachment-processor';
 
 export { SessionRepository } from './persistence/session-repository';
+export type { SessionHistoryChain } from './persistence/history-chain';
 export { FlowEngine, FLOW_MODULE_NAME } from './persistence/flow-engine';
 export { seedDefaultFlows, essayReviewDraft, ESSAY_REVIEW_FLOW_ID } from './persistence/default-flows';
 export { RoundLog, roundToProjection, hasEffectiveAssistant } from './persistence/round-log';
@@ -48,6 +49,7 @@ export type {
     ISessionRepository,
     ConversationManifest,
     ConversationUIState,
+    SessionLoadState,
     BranchTreeNode,
 } from './persistence/types';
 

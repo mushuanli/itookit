@@ -13,7 +13,10 @@ fn append(path: &Path, event: &str, detail: Value) -> std::io::Result<()> {
         let _ = std::fs::rename(path, path.with_extension("previous.jsonl"));
     }
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
-    writeln!(file, "{}", json!({"timeMs": stamp(), "pid": std::process::id(), "event": event, "detail": detail}))?;
+    // Formatting Value directly streams many writes, interleaving concurrent emergency records.
+    let mut line = serde_json::to_vec(&json!({"timeMs": stamp(), "pid": std::process::id(), "event": event, "detail": detail}))?;
+    line.push(b'\n');
+    file.write_all(&line)?;
     file.sync_data()
 }
 
@@ -104,6 +107,11 @@ fn process_alive(pid: u32) -> bool {
 }
 
 #[tauri::command]
+pub fn diagnostic_log_path() -> Option<String> {
+    LOG.get().map(|log| log.path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 pub async fn diagnostic_event(event: String, message: String) -> Result<(), String> {
     if event.len() > 80 || message.len() > 16_384 { return Err("Diagnostic event exceeds limit".into()); }
     tauri::async_runtime::spawn_blocking(move || record(&format!("frontend.{event}"), json!({"message": message})))
@@ -125,6 +133,26 @@ mod tests {
         assert!(root.join("alive.active").exists());
         let text = std::fs::read_to_string(root.join("dead.jsonl")).unwrap();
         assert!(text.contains("process.previous_unclean_exit"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn concurrent_emergency_records_remain_complete_json_lines() {
+        let root = std::env::temp_dir().join(format!("desktop-concurrent-log-{}", stamp()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("emergency.jsonl");
+        std::thread::scope(|scope| {
+            for worker in 0..8 {
+                let path = &path;
+                scope.spawn(move || {
+                    for index in 0..8 {
+                        append(path, "bootstrap.source.ready", json!({"worker": worker, "index": index, "message": "x".repeat(4000)})).unwrap();
+                    }
+                });
+            }
+        });
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text.lines().count(), 64);
+        for line in text.lines() { serde_json::from_str::<Value>(line).unwrap(); }
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

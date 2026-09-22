@@ -51,7 +51,7 @@ function toConversationState(state: UIState, branch: string): ConversationUIStat
     };
 }
 
-function fromConversationState(state: ConversationUIState, branch: string): UIState {
+export function fromConversationState(state: ConversationUIState, branch: string): UIState {
     return {
         collapse_states: state.collapseStates ?? {},
         history_visibility: state.historyVisibility,

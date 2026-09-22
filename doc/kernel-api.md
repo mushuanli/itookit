@@ -66,6 +66,7 @@ class Kernel implements KernelRegistration {
     inspectTask(id: TaskId): Promise<TaskSnapshot>;
     attachTask<O>(sessionId: SessionId, taskId: TaskId): Promise<TaskHandle<O>>;
     listSessionTasks(sessionId: SessionId): Promise<TaskRecord[]>;
+    listSessionPendingInteractionTasks(sessionId: SessionId): Promise<TaskRecord[]>;
     listSessionTaskPage(sessionId: SessionId, query?: TaskListQuery): Promise<TaskListPage>;
     submit<I, O>(sessionId: string, spec: TaskSpec<I>): Promise<TaskHandle<O>>;
     retryTask<O>(sessionId: string, taskId: string, options: { requestId: string }): Promise<TaskHandle<O>>;

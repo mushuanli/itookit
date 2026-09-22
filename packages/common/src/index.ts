@@ -14,6 +14,7 @@ export { LogLevel, LogLevelNames } from './interfaces/ILogger';
 export type { LogEntry, LogFilter, LoggerStats, ModuleLog } from './interfaces/ILogger';
 
 // ── 工具 ──
+export { errorDetails } from './utils/error-details';
 export { traceBoot } from './utils/boot-trace';
 export {
     simpleHash, escapeHTML, escapeAttr,

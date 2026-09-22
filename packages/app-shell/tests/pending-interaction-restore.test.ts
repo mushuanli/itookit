@@ -22,14 +22,15 @@ function waitProgram(): DurableTaskProgram<null, null, string> {
 }
 
 async function fixture() {
-    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const backend = new MemoryBackend();
+    const { manager } = await createVFS({ rootBackend: backend });
     const fs = await manager.openFileSystem('/data');
     const kernel = new Kernel({ catalog: { fs }, pollMs: 0 });
     kernel.registerStorageResolver({ kind: 'test', async resolve() { return { fs, rootPath: '/session' }; } });
     kernel.registerProgram(waitProgram());
     await kernel.initialize();
     const session = await kernel.createSession({ id: 'session', storage: { kind: 'test', locator: null } });
-    return { kernel, session, fs, async dispose() { kernel.dispose(); await kernel.waitIdle(); await manager.dispose(); } };
+    return { kernel, session, fs, backend, async dispose() { kernel.dispose(); await kernel.waitIdle(); await manager.dispose(); } };
 }
 
 it('re-attaches the non-terminal Task that is waiting for an approval', async () => {
@@ -52,6 +53,30 @@ it('attaches nothing when no run is waiting', async () => {
         const attach = vi.fn(async () => {});
         expect(await restoreWaitingAttachment(f.kernel, 'session', attach)).toBeUndefined();
         expect(attach).not.toHaveBeenCalled();
+    } finally { await f.dispose(); }
+});
+
+it('uses the durable status index without reading completed Task bodies or enumerating directories', async () => {
+    const f = await fixture();
+    try {
+        const finished = await f.session.submit(spec);
+        await vi.waitFor(async () => expect((await finished.status()).task.interactions?.answer?.status).toBe('pending'));
+        await finished.respond({ interactionId: 'answer', value: true });
+        await finished.wait({ timeoutMs: 2000 });
+        const waiting = await f.session.submit(spec);
+        await vi.waitFor(async () => expect((await waiting.status()).task.interactions?.answer?.status).toBe('pending'));
+        await f.kernel.waitIdle();
+        const fullScan = vi.spyOn(f.kernel, 'listSessionTasks');
+        const directories = vi.spyOn(f.fs.driver, 'getChildren');
+        const reads = vi.spyOn(f.backend.records!, 'getRecordField');
+        try {
+            expect(await restoreWaitingAttachment(f.kernel, 'session', async () => {})).toBe(waiting.id);
+            expect(fullScan).not.toHaveBeenCalled();
+            expect(directories).not.toHaveBeenCalled();
+            expect(reads.mock.calls.some(([path]) => path.includes(finished.id))).toBe(false);
+            expect(reads.mock.calls.some(([path]) => path.includes(waiting.id))).toBe(true);
+            expect(await restoreWaitingAttachment(f.kernel, 'session', async () => {}, () => true, new Set([waiting.id]))).toBeUndefined();
+        } finally { reads.mockRestore(); directories.mockRestore(); fullScan.mockRestore(); }
     } finally { await f.dispose(); }
 });
 

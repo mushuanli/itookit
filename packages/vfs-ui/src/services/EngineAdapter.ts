@@ -51,7 +51,7 @@ export class EngineAdapter {
                 undefined,
                 this.showFileExtensions
             );
-            if (silent) await this.reloadOpenChildren(uiItems, previousItems);
+            if (silent) await this.reloadOpenChildren(uiItems);
             const tags = this.buildTagsMap(uiItems);
             adapterDEBUG.dispatch('STATE_LOAD_SUCCESS', `${uiItems.length} items`);
             this.store.dispatch({
@@ -66,19 +66,16 @@ export class EngineAdapter {
 
     /**
      * Re-read the children of every directory that was open before a silent reload.
-     * Reuses the previous tree to decide which nodes are open (the store only keeps
-     * the deepest expanded id, not the whole path), and fetches children fresh so
-     * Task labels do not go stale.
+     * Loaded children are not evidence that a directory is still expanded.
+     * Include ancestors for older persisted states that only kept the deepest path.
      */
-    private async reloadOpenChildren(next: VFSNodeUI[], previous: VFSNodeUI[]): Promise<void> {
-        const openBefore = new Set<string>();
-        const collect = (items: VFSNodeUI[]) => {
-            for (const item of items) {
-                if (item.type === 'directory' && item.children !== undefined) openBefore.add(item.id);
-                if (item.children?.length) collect(item.children);
+    private async reloadOpenChildren(next: VFSNodeUI[]): Promise<void> {
+        const openBefore = new Set(this.store.getState().expandedFolderIds);
+        for (const id of [...openBefore]) {
+            for (let parent = id.slice(0, id.lastIndexOf('/')); parent; parent = parent.slice(0, parent.lastIndexOf('/'))) {
+                openBefore.add(parent);
             }
-        };
-        collect(previous);
+        }
 
         const walk = async (items: VFSNodeUI[]): Promise<void> => {
             for (const item of items) {
@@ -293,7 +290,7 @@ export class EngineAdapter {
         return map;
     }
 
-    async expandDirectory(folderId: string): Promise<void> {
+    async expandDirectory(folderId: string, options: { restoreDescendants?: boolean } = {}): Promise<void> {
         if (this.loadingFolderIds.has(folderId)) return;
         this.loadingFolderIds.add(folderId);
 
@@ -307,6 +304,7 @@ export class EngineAdapter {
                 type: 'FOLDER_CHILDREN_LOADED',
                 payload: { parentPath: folderId, children: uiChildren },
             });
+            if (options.restoreDescendants === false) return;
 
             // Recursively expand persisted subdirectories so the full tree is
             // restored before the shell re-emits sessionSelected.

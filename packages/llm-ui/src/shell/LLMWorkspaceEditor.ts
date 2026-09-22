@@ -41,7 +41,7 @@ import {
     SiblingSwitchCommand, CopyAllCommand, PrintCommand,
 } from '../commands';
 import { Command } from '../commands/Command';
-import type { SkillInfo } from '../domain/types';
+import type { SkillInfo, UIState } from '../domain/types';
 
 // Shell 内部
 import { EditorEventBus } from './EditorEventBus';
@@ -59,6 +59,7 @@ import {
 import { promptInterruptedRun } from './InterruptedRunPrompt';
 import { restoreWaitingAttachment } from './pending-interaction';
 import { bindSkillRefresh } from './skill-refresh';
+import { measureSessionLoad, type SessionLoadMetrics } from './load-metrics';
 import { buildSlashCallbacks } from './SlashCommandRouter';
 
 // Infrastructure
@@ -77,6 +78,12 @@ import { HistoryPlugin } from '../components/input/plugins/HistoryPlugin';
 import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlugin';
 import { getPromptHistory } from '@itookit/llm-session';
 import { AssetManagerUI } from '@itookit/mdxeditor';
+
+interface InitialSessionData {
+    session: Awaited<ReturnType<SessionService['loadSession']>>;
+    settings: Awaited<ReturnType<SessionService['getSessionSettings']>> | undefined;
+    savedUIState: UIState | null;
+}
 
 const ACTIVE_PRIVILEGED_TASK_KEY = 'ui.privileged.active-task';
 
@@ -101,6 +108,7 @@ export interface LLMEditorOptions extends EditorOptions {
     /** Application service for durable privileged slash commands. */
     privilegedCommands?: IPrivilegedCommandService;
     sessionSkills?: import('@itookit/common').SessionSkillControls;
+    onLoadMetrics?: (metrics: SessionLoadMetrics) => void;
 }
 
 /**
@@ -219,6 +227,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     async init(container: HTMLElement, _initialContent?: string): Promise<void> {
+        const measurement = measureSessionLoad(this.options.sessionId, this.options.onLoadMetrics);
         this.container = container;
         this.container.classList.add('llm-ui-workspace');
         this.initComplete = false;
@@ -227,24 +236,32 @@ export class LLMWorkspaceEditor implements IEditor {
             this.initLayout();
             this.initInfrastructure();
             this.initServices();
+            measurement.mark('layout');
 
             // Bind the existing Session before rendering its settings.
-            this.currentSessionId = await this.sessionService.ensureReady(
-                this.options.sessionId!, this.options.target?.kind === 'session' ? this.options.target.branch : undefined
+            const session = await this.sessionService.loadSession(
+                this.options.sessionId!, this.currentTitle, this.options.target?.kind === 'session' ? this.options.target.branch : undefined
             );
+            measurement.mark('bindSession');
 
-            const preloadedSettings = await this.initComponents();
+            this.currentSessionId = session.sessionId;
+            const initial = await this.initComponents(session);
+            measurement.mark('componentsAndSettings');
             this.initCommands();
             this.initEventHandler();
             this.bindEvents();
-            await this.loadSession(preloadedSettings);
+            session.snapshot = await this.commandBus.execute(SessionCommand.GetSnapshot);
+            await this.loadSession({ session, ...initial });
+            measurement.mark('restoreAndRender');
 
             this.statusIndicator.cacheElements();
             await this.branchIndicator.refresh();
+            measurement.mark('branches');
 
             this.initComplete = true;
             this.emit('ready', undefined);
             this.initResolve?.();
+            measurement.finish();
         } catch (error: unknown) {
             const code = typeof error === 'object' && error !== null && 'code' in error
                 ? error.code
@@ -298,7 +315,12 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
-    private async initComponents(): Promise<Awaited<ReturnType<SessionService['getSessionSettings']>> | undefined> {
+    private async initComponents(session: InitialSessionData['session']): Promise<Omit<InitialSessionData, 'session'>> {
+        const initialSettings = session.settings;
+        const [initialAgents, savedUIState] = await Promise.all([
+            buildExecutorOptions(this.agentService),
+            this.stateManager.loadUIState(session.manifest),
+        ]);
         const historyEl = this.domCache.byId('llm-ui-history')!;
         const inputEl = this.domCache.byId('llm-ui-input')!;
         const historyToggle = this.domCache.byId('llm-btn-history-visibility') as HTMLButtonElement;
@@ -358,22 +380,12 @@ export class LLMWorkspaceEditor implements IEditor {
             (loading) => this.chatInput?.setLoading(loading)
         );
 
-        const initialAgents = await buildExecutorOptions(this.agentService);
-        const savedUIState = await this.stateManager.loadUIState();
         this.workspacePanes.setHistoryVisibility(
             savedUIState?.history_visibility ?? 'visible',
             { persist: false },
         );
         const savedAgentId = savedUIState?.input_agent_id || 'default';
         const validAgentId = validateAgentId(this.agentService, savedAgentId);
-
-        let initialSettings;
-        if (this.currentSessionId) {
-            initialSettings = await this.errorHandler.wrap(
-                () => this.sessionService.getSessionSettings(),
-                'Load session settings', 'warn'
-            );
-        }
 
         this.chatInput = new ChatInput(inputEl, {
             ...(this.options.sessionSkills ? {
@@ -433,7 +445,7 @@ export class LLMWorkspaceEditor implements IEditor {
         }
 
         this.stateManager.setChatInputGetter(() => this.chatInput);
-        return initialSettings;
+        return { settings: initialSettings, savedUIState };
     }
 
     private initCommands(): void {
@@ -747,17 +759,17 @@ export class LLMWorkspaceEditor implements IEditor {
     // 会话加载
     // ================================================================
 
-    private async loadSession(preloadedSettings?: Awaited<ReturnType<SessionService['getSessionSettings']>>): Promise<void> {
+    private async loadSession(initial?: InitialSessionData): Promise<void> {
         if (!this.options.sessionId) throw new Error('Session identity is required');
 
         this.sessionEventUnsub?.();
         this.sessionEventUnsub = null;
 
-        this.refreshAgents();
+        if (!initial) void this.refreshAgents().catch(error => this.errorHandler.handle(error, 'Refresh agents'));
 
         this.rerunAbort?.abort();
         this.flowOutputAbort?.abort();
-        const { sessionId, snapshot, title } = await this.sessionService.loadSession(
+        const { sessionId, snapshot, title, manifest, settings } = initial?.session ?? await this.sessionService.loadSession(
             this.options.sessionId!, this.currentTitle
         );
 
@@ -784,17 +796,12 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput?.updateTokenStats?.(null);
         this.titleInput.value = title;
 
-        const savedUIState = await this.stateManager.loadUIState();
+        const savedUIState = initial ? initial.savedUIState : await this.stateManager.loadUIState(manifest);
 
         const emptySession = snapshot.sessions.length === 0;
         const effectiveInitialInputState = this.options.initialInputState;
 
-        const sessionSettings = preloadedSettings !== undefined
-            ? preloadedSettings
-            : await this.errorHandler.wrap(
-                () => this.sessionService.getSessionSettings(),
-                'Load session settings', 'warn'
-            );
+        const sessionSettings = initial ? initial.settings : settings;
 
         this.stateManager.restoreInputState(this.chatInput, {
             initialInputState: effectiveInitialInputState,
@@ -811,7 +818,6 @@ export class LLMWorkspaceEditor implements IEditor {
         // 恢复 workflow 实例来源（manifest.flow）→ 恢复参数；新实例则立即运行一次。
         let autoRunFlow: NonNullable<ConversationManifest['flow']> | undefined;
         try {
-            const manifest = await this.options.sessionRepository.getManifest(this.options.sessionId);
             const flow = manifest?.flow;
             if (flow) {
                 this.chatInput?.selectFlow(flow.flowId, flow.revision, flow.parameters);
@@ -1087,7 +1093,7 @@ export class LLMWorkspaceEditor implements IEditor {
             }
         }
         const calls = await this.invocationPanel?.taskIds() ?? new Set<string>();
-        await restoreWaitingAttachment({ listSessionTasks: async id => (await kernel.listSessionTasks(id)).filter(task => !calls.has(task.id)) }, sessionId, id => attachment.attach(id), isCurrent);
+        await restoreWaitingAttachment(kernel, sessionId, id => attachment.attach(id), isCurrent, calls);
     }
 
     private async cancelAttachedTask(): Promise<void> {

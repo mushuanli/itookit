@@ -14,6 +14,7 @@ import { ISessionRepository } from '../persistence/types';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
 import { RoundLog, roundToProjection } from '../persistence/round-log';
+import { collectHistoryChain, type SessionHistoryChain } from '../persistence/history-chain';
 import { log } from '../utils/logger';
 
 /**
@@ -299,7 +300,6 @@ export class SessionRegistry {
             return;
         }
 
-        await this._engine.getManifest(sessionId);
         const runtime: SessionRuntime = { sessionId, status: 'idle', lastActiveTime: Date.now(), unreadCount: 0 };
         const state = new SessionState(sessionId);
         await this.populateState(state, sessionId);
@@ -380,32 +380,17 @@ export class SessionRegistry {
         await this.populateFromRoundLog(state, sessionId);
     }
 
-    private async collectHeadChain(sessionId: string): Promise<{ chain: string[]; log: RoundLog }> {
+    private async collectHeadChain(sessionId: string): Promise<SessionHistoryChain> {
+        if (this._engine.readHistoryChain) return this._engine.readHistoryChain(sessionId);
         const log = new RoundLog(this._engine, sessionId);
-        const manifest = await log.loadManifest();
-        const headId = manifest.currentHead;
-        if (!headId) return { chain: [], log };
-
-        const chain: string[] = [];
-        let current: string | undefined = headId;
-        const visited = new Set<string>();
-        while (current && !visited.has(current)) {
-            visited.add(current);
-            chain.unshift(current);
-            const t = await log.readRound(current);
-            current = t?.historyParentIds[0];
-        }
-        return { chain, log };
+        return collectHistoryChain(await log.loadManifest(), id => log.readRound(id));
     }
 
     private async populateFromRoundLog(
         state: SessionState,
         sessionId: string,
     ): Promise<void> {
-        const { chain, log } = await this.collectHeadChain(sessionId);
-        if (chain.length === 0) return;
-
-        const rounds = await Promise.all(chain.map(id => log.readRound(id)));
+        const { rounds } = await this.collectHeadChain(sessionId);
         for (const t of rounds) {
             if (!t || t._deleted) continue;
             state.loadFromProjection(roundToProjection(await this.restoreRound(t), t.id));
@@ -416,7 +401,7 @@ export class SessionRegistry {
         sessionId: string,
         state: SessionState,
     ): Promise<void> {
-        const { chain } = await this.collectHeadChain(sessionId);
+        const { chain, rounds, branch } = await this.collectHeadChain(sessionId);
         if (chain.length === 0) {
             // No head chain (e.g. after a regenerate whose new round is not yet
             // persisted, so currentHead points at a not-yet-existing round).
@@ -460,8 +445,6 @@ export class SessionRegistry {
             });
         }
 
-        const log = new RoundLog(this._engine, sessionId);
-        const rounds = await Promise.all(chain.map(id => log.readRound(id)));
         for (const t of rounds) {
             if (!t || t._deleted) continue;
             if (state.hasRound(t.id)) continue;
@@ -469,7 +452,7 @@ export class SessionRegistry {
             const projection = roundToProjection(await this.restoreRound(t), t.id);
             const events = state.apply({
                 type: 'round:appended',
-                ref: (await log.loadManifest()).currentBranch,
+                ref: branch,
                 roundId: t.id,
                 projection,
             });

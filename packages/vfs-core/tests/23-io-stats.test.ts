@@ -1,8 +1,51 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createVFS, createFileSystemView, MemoryBackend } from '../src';
 import { IO_OPERATIONS } from '../src/protocol';
 import { freshMem, setupVFS } from './helpers';
 
 describe('VFS IO statistics', () => {
+    it('uses type-only probes through nested views without caching existence or losing virtual parents', async () => {
+        const backend = new MemoryBackend(), stat = backend.stat.bind(backend);
+        const statType = async (path: string) => { const node = await stat(path); return node ? { type: node.type } : null; };
+        const vfs = await setupVFS(Object.assign(backend, { statType }));
+        const view = createFileSystemView({ viewId: 'probe', mounts: [
+            { mountId: 'root', at: '/', root: '/', fs: vfs.fs, access: 'ro' },
+            { mountId: 'nested', at: '/virtual/nested', root: '/', fs: vfs.fs, access: 'ro' },
+        ] });
+        try {
+            await vfs.fs.driver.createFile({ name: 'note.txt', content: 'hello' });
+            const fullStat = vi.spyOn(backend, 'stat');
+            expect(await view.driver.exists('/note.txt')).toBe(true);
+            expect(await view.driver.resolvePath('/note.txt')).toBe('/note.txt');
+            expect(await view.driver.readContent('/note.txt', { encoding: 'utf-8' })).toBe('hello');
+            expect(await view.driver.exists('/virtual')).toBe(true);
+            expect(await view.driver.getNodeType!('/virtual')).toEqual({ type: 'directory' });
+            expect(fullStat).not.toHaveBeenCalled();
+            await backend.delete('/data/test/note.txt');
+            expect(await view.driver.exists('/note.txt')).toBe(false);
+            expect(await view.driver.resolvePath('/note.txt')).toBeNull();
+            await expect(view.driver.readContent('/note.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+            await expect(view.driver.exists('/../escape')).rejects.toMatchObject({ code: 'EINVAL' });
+        } finally { await view.dispose(); await vfs.dispose(); }
+    });
+    it('checks directory prefixes through type-only IO while still rejecting non-directory ancestors', async () => {
+        const backend = new MemoryBackend(), stat = backend.stat.bind(backend);
+        const statType = vi.fn(async (path: string) => {
+            const node = await stat(path); return node ? { type: node.type } : null;
+        });
+        const { manager } = await createVFS({ rootBackend: Object.assign(backend, { statType }) });
+        try {
+            await backend.mkdir('/data/startup/deep');
+            const fullStat = vi.spyOn(backend, 'stat');
+            statType.mockClear();
+            await manager.openFileSystem('/data/startup/deep');
+            expect(statType.mock.calls.map(([path]) => path)).toEqual(['/data', '/data/startup', '/data/startup/deep']);
+            expect(fullStat.mock.calls.some(([path]) => path === '/data' || path === '/data/startup')).toBe(false);
+            await backend.delete('/data/startup', { recursive: true });
+            await backend.write('/data/startup', new Uint8Array());
+            await expect(manager.openFileSystem('/data/startup/blocked')).rejects.toMatchObject({ code: 'ENOTDIR' });
+        } finally { await manager.dispose(); }
+    });
     it('exposes a public snapshot of backend operations and resets on demand', async () => {
         const vfs = await setupVFS(freshMem());
         try {

@@ -7,6 +7,29 @@ import { SessionRenderer } from '../../llm-ui/src/components/history/SessionRend
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it('routes roots to the latest assistant and recovers after removing or clearing that assistant', () => {
+    vi.spyOn(SessionRenderer.prototype as any, 'mountNodeEditor').mockImplementation(() => {});
+    const host = document.createElement('div'), renderer = new SessionRenderer(host, {});
+    const append = (id: string) => renderer.appendNode(undefined, {
+        id, executorId: id, executorType: 'composite', name: id, status: 'success', startTime: 1, data: {}, children: [],
+    }, false);
+    try {
+        renderer.appendSession({ id: 'a', role: 'assistant' } as never, false);
+        append('first');
+        renderer.appendSession({ id: 'b', role: 'assistant' } as never, false);
+        append('second');
+        expect(renderer.getNode('first')?.closest<HTMLElement>('[data-session-id]')?.dataset.sessionId).toBe('a');
+        expect(renderer.getNode('second')?.closest<HTMLElement>('[data-session-id]')?.dataset.sessionId).toBe('b');
+        renderer.removeMessages(['b'], false);
+        append('after-delete');
+        expect(renderer.getNode('after-delete')?.closest<HTMLElement>('[data-session-id]')?.dataset.sessionId).toBe('a');
+        renderer.clear();
+        renderer.appendSession({ id: 'c', role: 'assistant' } as never, false);
+        append('after-clear');
+        expect(renderer.getNode('after-clear')?.closest<HTMLElement>('[data-session-id]')?.dataset.sessionId).toBe('c');
+    } finally { renderer.destroy(); }
+});
+
 it('supports window/node copy, independent folding, global fold and restored fold states', async () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
     vi.spyOn(SessionRenderer.prototype as any, 'mountNodeEditor').mockImplementation(() => {});

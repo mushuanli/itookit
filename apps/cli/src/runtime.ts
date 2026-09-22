@@ -1,4 +1,5 @@
 import { selectFinalResult } from './run-store';
+import { recordRuntimeDiagnostic, traceRuntimeStage } from './diagnostics';
 import { leaseSkewConfig } from './lease-config';
 import { mkdir } from 'node:fs/promises';
 import { memoryPolicyForAgent, grantRunMemory } from './memory-policy';
@@ -98,11 +99,12 @@ type AdditionalMounts = NonNullable<VFSFactoryOptions['additionalMounts']>;
 
 /** Mount the CLI VFS at a data root. Shared by the host runtime and read-only state inspection. */
 async function openCliVfs(rootDir: string, sidecarDir: string, additionalMounts: AdditionalMounts = []) {
-    const backend = await openLocalFSBackend({
+    recordRuntimeDiagnostic('runtime.filesystem', { rootDir, sidecarDir });
+    const backend = await traceRuntimeStage('runtime.filesystem', () => openLocalFSBackend({
         rootDir,
         sidecarDir,
         createDb: NodeSqliteSidecarDb.open,
-    });
+    }));
     // Extra mounts first, then `/run`, matching the order the host runtime has always used.
     return createVFS({ rootBackend: backend, additionalMounts: [...additionalMounts, { path: '/run', backend: new MemoryBackend() }] });
 }
@@ -133,7 +135,7 @@ export async function createCliRuntime(
     const additionalMounts = hostOptions.useProfileConfig ? [] : [{ path: '/etc', backend: new MemoryBackend() }];
     const { manager: vfs } = await openCliVfs(root, sidecarDir, additionalMounts);
     const llmDriver = new LLMDeviceDriver(vfs);
-    await initializeLlmQuietly(llmDriver);
+    await traceRuntimeStage('runtime.llm', () => initializeLlmQuietly(llmDriver));
     if (!hostOptions.useProfileConfig) await configureLlm(llmDriver, workflow);
 
     const systemFS = await vfs.openFileSystem('/');
@@ -286,6 +288,7 @@ export async function createCliRuntime(
             selectResult: output => selectFinalResult(output, workflow.config.result.task, workflow.config.result.output),
         }, tasks);
     };
+    recordRuntimeDiagnostic('runtime.ready', { sessionId: manifest.sessionId, runId: manifest.id });
     return {
         kernel,
         syncHistory,

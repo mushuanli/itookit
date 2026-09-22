@@ -9,7 +9,7 @@ function setup() {
     const release = vi.fn(async () => {}), dispose = vi.fn(async () => {});
     const manifest = { currentBranch: 'main' };
     const listeners: Array<() => void> = [];
-    const repository = { getManifest: vi.fn(async (id: string) => ({ id, title: 'Session', ...manifest })), list: vi.fn(async () => []),
+    const repository = { createSession: vi.fn(async () => 'new-session'), getManifest: vi.fn(async (id: string) => ({ id, title: 'Session', ...manifest })), list: vi.fn(async () => []),
         openAttachments: vi.fn(async () => ({ dispose })), subscribe: (listener: () => void) => { listeners.push(listener); return () => {}; } };
     const files = { subscribe: () => () => {}, inspect: vi.fn(async () => ({ revision: 1 })), acquireFiles: vi.fn(async () => ({ context: { fs: { capabilities: {} }, sessionId: 's' }, release })) };
     const rerunSession = vi.fn(async () => {});
@@ -183,4 +183,18 @@ it('reopens the saved branch when the Session route has no branch parameter', as
     await f.workbench.openResource('s?branch=main');
     expect(f.factory.mock.calls.at(-1)?.[1].target.branch).toBe('main');
     await f.workbench.destroy();
+});
+
+it('starts the new editor while the sidebar listing is still pending', async () => {
+    const f = setup(); await f.workbench.start();
+    const sidebar = vi.mocked(createVFSUI).mock.results.at(-1)!.value;
+    let release!: () => void;
+    sidebar.refresh = () => new Promise<void>(resolve => { release = resolve; });
+    const creating = f.workbench.createResource();
+    try {
+        await vi.waitFor(() => expect(f.factory).toHaveBeenCalledOnce());
+        expect(f.factory.mock.calls[0][1].target.sessionId).toBe('new-session');
+    } finally {
+        release(); await creating; await f.workbench.destroy();
+    }
 });

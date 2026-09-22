@@ -587,7 +587,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
             const scanned = await Promise.all(Array.from(result.nodes).map(async (node) => {
                 if (!node.name.endsWith('.agent')) return null;
                 try {
-                    const content = await this.engine.driver.readContent(node.path);
+                    const content = await this.engine.driver.readContent(node.path, { representation: 'bytes' });
                     if (!content) return null;
                     const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
                     const data = JSON.parse(jsonStr) as AgentDefinition;

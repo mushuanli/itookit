@@ -103,6 +103,7 @@ export const en: LocaleStrings = {
     'session.tasks.eventsTrimmed':  'Older events were trimmed by retention',
     'session.close.action': 'Close session (stop execution, keep records)',
     'boot.filesystem': 'Initializing filesystem…',
+    'boot.runtimeLog': 'Runtime log: ',
     'boot.llmDriver': 'Loading LLM driver…',
     'boot.coreServices': 'Initializing core services…',
     'boot.llmEngine': 'Initializing LLM engine…',

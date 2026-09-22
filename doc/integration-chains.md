@@ -32,6 +32,8 @@ node:renamed
 
 ## 2. LLM Chat 链（Direct 会话）
 
+打开 Session 时，`SessionService.loadSession` 只绑定一次，完成目标分支选择后复用 manifest；输入状态在 HistoryView 创建前读取。新建 API 的侧栏刷新与编辑器打开并行。历史链读取和首屏 Markdown 去重的证据见 [Session 性能审查](./design/llm-ui-session-performance.md)。
+
 ```
 ChatInput.send (llm-ui)
   → SendMessageCommand

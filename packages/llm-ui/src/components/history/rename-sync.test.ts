@@ -10,7 +10,8 @@ describe('LLM rename synchronization', () => {
             updateManifest,
         };
 
-        const title = await service.getSessionTitle('/new.chat', 'New');
+        service.commands = { execute: vi.fn(async () => ({ sessionId: 'session', sessions: [] })) };
+        const { title } = await service.loadSession('session', 'New');
 
         expect(title).toBe('Old');
         expect(updateManifest).not.toHaveBeenCalled();

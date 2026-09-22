@@ -185,7 +185,7 @@ export class ConfigService implements IConfigService {
         // Fallback: JSON file
         const path = this.jsonPath(configName);
         if (await this.fs.driver.exists(path)) {
-            const content = await this.fs.driver.readContent(path, { encoding: 'utf-8' });
+            const content = await this.fs.driver.readContent(path, { encoding: 'utf-8', representation: 'bytes' });
             if (typeof content === 'string' && content.length > 0) {
                 try {
                     const parsed = JSON.parse(content);

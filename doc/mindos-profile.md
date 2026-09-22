@@ -92,9 +92,15 @@ CLI `-p` 默认启用 Read/Glob/Grep 和客户端 WebSearch；Responses 协议�
 - Tauri 启动时只恢复能成功获取 lease 的 Session，已被 CLI 持有的 Session 保持只读；**「只读」自 2026-09-11（第六十四轮）起是强制的**：应用运行时把租约检查作为写入门（`createApplicationRuntime` 的 `ensureWritable` → `recovery.acquireLater`，经 `initializeConversationSystem` 的 `canWriteSession` 进入 `SessionManager.sendMessage`），被拒的 Session 在**追加 round 之前**就以 `Session is owned by another host; this host can only read it` 拒绝发送，因此同一数据根上的第二个宿主不会再和持有者竞争写入；本宿主新建的 Session 在首次发送时按需取租约（回归 `packages/llm-session/__tests__/session-write-gate.test.ts`、`packages/app-core/tests/session-recovery.test.ts`）。
 - 跨主机共享同一数据根时用 `MINDOS_SESSION_LEASE_SKEW_MS`（或宿主的 `sessionLeaseSkewMs` 选项，默认 0）声明允许的时钟误差：接管要求旧租约 `leaseUntil + skewMs` 已过，避免快时钟主机抢走慢时钟主机的活租约（回归 `packages/app-core/tests/session-lease.test.ts`）。
 
-## 桌面异常诊断日志
+## Tauri / CLI 运行日志
 
 Tauri 启动即输出 `[Diagnostics] <日志路径>`，默认写入 `${XDG_CONFIG_HOME:-$HOME/.config}/mindos/logs/desktop/<时间>-<PID>.jsonl`；可用 `MINDOS_DIAGNOSTICS_DIR` 指定位置。日志独立于 Session data root，记录进程启动/cwd、目录授权到真实路径的映射、前端错误与未处理 rejection、工具开始/进度/终态、Rust panic/backtrace、正常退出。每个文件超过 4 MiB 后轮换为一份 previous 文件。异常日志不保存完整工具结果。
+
+CLI 每次执行也写入 `${XDG_CONFIG_HOME:-$HOME/.config}/mindos/logs/cli/<时间>-<PID>.jsonl`，同样支持 `MINDOS_DIAGNOSTICS_DIR`（直接替换日志目录）。记录命令种类、文件系统/LLM/runtime 初始化耗时、HTTP 请求异常、执行失败、进程 warning、未捕获异常/未处理 rejection 和退出码。失败时 stderr 显示日志路径，不向 JSON/JSONL stdout 混入诊断信息；未捕获异常继续按 Node 原有行为失败退出。CLI 文件按 4 MiB 轮换一份 `.previous.jsonl`，历史进程的文件保留供排查。
+
+桌面日志新增 `bootstrap.stage`、`bootstrap.source.start/ready/failed`、`bootstrap.ready/failed`，包含各阶段耗时、数据根与 sidecar 路径。`AggregateError.errors` 和 `Error.cause` 会递归展开（有层数、条数及消息长度上限）；启动失败页面显示内层错误与当前日志路径。日志目录不可写时会报告写入失败，但不阻止 CLI 执行。日志不主动采集完整 argv、环境变量或 prompt；错误文本和路径仍可能包含业务信息。
+
+排查方法及桌面刷新后的 SQLite 事务回收见 [启动故障与运行日志](design/startup-diagnostics.md)。
 
 Linux 额外监听 WebKit `web-process-terminated` 原因，并启动独立监测进程：主进程消失且没有正常退出标记时，写入 `process.unexpected_exit`。如果监测进程也被杀死，下次启动根据遗留 `.active` 文件补记 `process.previous_unclean_exit`；仍存活的进程不被误报。缺少正常退出记录只证明异常结束，不能单独断言 OOM，具体信号需结合 OS 日志；其他平台目前只覆盖 panic、前端错误和正常退出。
 

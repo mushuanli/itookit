@@ -39,6 +39,7 @@ export class FlowInvocationService {
     async list(sessionId: string): Promise<FlowInvocationRecord[]> {
         const session = await this.kernel.inspectSession(sessionId);
         const entries = await this.kernel.listShared(sessionId, PREFIX);
+        if (entries.length === 0) return [];
         const tasks = await session.listTasks();
         return entries.map(entry => {
             const record = entry.value as unknown as FlowInvocationRecord;

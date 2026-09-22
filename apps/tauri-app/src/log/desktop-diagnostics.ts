@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { IToolService } from '@itookit/common';
+import { errorDetails } from '@itookit/common';
 
 export async function recordDiagnostic(event: string, value: unknown): Promise<void> {
     const text = diagnosticText(value);
@@ -9,7 +10,7 @@ export async function recordDiagnostic(event: string, value: unknown): Promise<v
 }
 
 function diagnosticText(value: unknown): string {
-    if (value instanceof Error) return `${value.name}: ${value.message}\n${value.stack ?? ''}`;
+    if (value instanceof Error) return `${errorDetails(value)}\n${value.stack ?? ''}`;
     try { return typeof value === 'string' ? value : JSON.stringify(value) ?? ''; }
     catch { return String(value); }
 }

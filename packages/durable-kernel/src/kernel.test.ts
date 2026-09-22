@@ -71,6 +71,22 @@ describe('Kernel durable kernel', () => {
         await manager.dispose();
     });
 
+    it('does not publish a catalog change when creating an already registered Session', async () => {
+        await kernel.createSession({ id: 'session-one', storage: binding });
+        await kernel.waitIdle();
+        const changed: string[] = [];
+        const off = fs.on('seq:committed', event => changed.push(...event.payload.paths));
+        try {
+            const repeated = await kernel.createSession({ id: 'session-one', storage: binding });
+            await kernel.waitIdle();
+            expect(repeated.id).toBe('session-one');
+            expect(changed.filter(path => path.endsWith('/catalog.seq'))).toEqual([]);
+            await expect(kernel.createSession({ id: 'session-one', storage: {
+                kind: 'test', locator: { rootPath: '/other' },
+            } })).rejects.toThrow('binding conflict');
+        } finally { off(); }
+    });
+
     it('fences task submission and shared writes in the transaction after a lease takeover', async () => {
         const session = await kernel.createSession({ id: 'session-one', storage: binding });
         const lease = { key: 'owner', ownerId: 'old', epoch: 1 };

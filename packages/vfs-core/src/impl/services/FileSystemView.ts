@@ -1,5 +1,5 @@
 import type {
-    IFileSystem, IFileSystemDriver, IFSMetaDriver, FSNode, FSCapabilities,
+    IFileSystem, IFileSystemDriver, IFSMetaDriver, FSNode, FSCapabilities, DirEntry, ListOptions,
     FSEvent, FSEventType, FSSearchQuery, FSSearchResult, TreeWalkCallback, TreeWalkOptions,
 } from '../../protocol';
 import { FSError, FSCapabilityError } from '../../protocol';
@@ -217,13 +217,9 @@ export class FileSystemView implements IFileSystem {
                 });
                 return { fileCount, directoryCount, totalSize, lastModifiedAt };
             },
-            exists: async (path: string) => (await this.stat(path)) !== null,
-            resolvePath: async (path: string) => await this.stat(path) ? normalizeVirtualPath(path) : null,
-            getChildren: async (path: string, options?: any) => {
-                const nodes = await this.children(path, options);
-                return options?.fields === 'entry' ? nodes.map(node => ({ path: node.path, name: node.name,
-                    type: node.type, modifiedAt: node.modifiedAt, ...('size' in node ? { size: node.size } : {}) })) : nodes;
-            },
+            exists: async (path: string) => (await this.statType(path)) !== null,
+            resolvePath: async (path: string) => await this.statType(path) ? normalizeVirtualPath(path) : null,
+            getChildren: (path: string, options?: ListOptions) => this.children(path, options),
             search: (query: FSSearchQuery) => this.search(query),
             walkTree: (callback: TreeWalkCallback, options?: TreeWalkOptions) => this.walk(callback, options),
             transaction: (fn: Method) => this.transaction('/', fn),
@@ -261,34 +257,45 @@ export class FileSystemView implements IFileSystem {
             const driver = m.fs.driver as unknown as { getNodeType?: (p: string) => Promise<{ type?: string } | null> };
             if (typeof driver.getNodeType === 'function') {
                 const node = await this.invoke(m, driver, 'getNodeType', [source]);
-                return node ? { type: node.type } : null;
+                if (node) return { type: node.type };
+            } else {
+                const value = await this.invoke(m, m.fs.driver, 'getNode', [source]);
+                if (value) return { type: value.type };
             }
-            const value = await this.invoke(m, m.fs.driver, 'getNode', [source]);
-            return value ? { type: value.type } : null;
         }
         const synthetic = this.synthetic(path);
         return synthetic ? { type: synthetic.type } : null;
     }
-    private async children(input: string, options?: any): Promise<FSNode[]> {
+    private entry(m: Binding, node: DirEntry): DirEntry {
+        const path = this.virtualPath(m, node.path);
+        return this.readable(path) ? { path, name: P.basename(path), type: node.type,
+            modifiedAt: node.modifiedAt, ...('size' in node ? { size: node.size } : {}) }
+            : { path, name: P.basename(path), type: 'directory', modifiedAt: 0 };
+    }
+
+    private async children(input: string, options?: ListOptions): Promise<Array<FSNode | DirEntry>> {
         const path = normalizeVirtualPath(input);
-        const parent = await this.stat(path);
+        const parent = await this.statType(path);
         if (!parent) throw new FSError('ENOENT', 'Directory not found', 'list', path);
         if (parent.type !== 'directory') throw new FSError('ENOTDIR', 'Not a directory', 'list', path);
-        const entries = new Map<string, FSNode>();
+        const entries = new Map<string, FSNode | DirEntry>();
         const m = this.find(path);
         if (m && await m.fs.driver.exists(this.sourcePath(m, path))) {
-            const nodes = await this.invoke(m, m.fs.driver, 'getChildren', [this.sourcePath(m, path), { ...options, fields: 'full' }]);
+            const nodes: Array<FSNode | DirEntry> = await this.invoke(m, m.fs.driver, 'getChildren', [this.sourcePath(m, path), options]);
             for (const n of nodes) {
                 if (!P.isUnder(n.path, m.root) || P.dirname(n.path) !== this.sourcePath(m, path)) throw new FSError('EACCES', 'Invalid source listing');
                 const vp = P.join(m.at, P.relative(m.root, n.path));
-                if (this.visible(vp) && this.find(vp) === m) entries.set(n.name, this.node(m, n));
+                if (this.visible(vp) && this.find(vp) === m) entries.set(n.name,
+                    options?.fields === 'entry' ? this.entry(m, n) : this.node(m, n as FSNode));
             }
         }
         for (const mount of this.mounts) {
             if (mount.at === path || !P.isUnder(mount.at, path)) continue;
             const name = P.relative(path, mount.at).split('/')[0];
             const child = await this.stat(P.join(path, name));
-            if (child) entries.set(name, child);
+            if (child) entries.set(name, options?.fields === 'entry'
+                ? { path: child.path, name: child.name, type: child.type, modifiedAt: child.modifiedAt,
+                    ...('size' in child ? { size: child.size } : {}) } : child);
         }
         return [...entries.values()];
     }

@@ -27,6 +27,39 @@ async function setup(kernelOverrides: Record<string, unknown> = {}) {
     return { a, b, files, repository, browser, kernel, lifecycle };
 }
 describe('Session browser projection', () => {
+    it('deletes a Session without traversing its mounted workspace or Task previews', async () => {
+        const f = await setup();
+        const owner = await f.files.acquireFiles(f.a); cleanup.push(() => owner.release());
+        for (let index = 0; index < 64; index++) {
+            await owner.context.fs.driver.createFile({ parentPath: '/workspace', name: `source-${index}.ts`, content: 'keep' });
+        }
+        const acquire = vi.spyOn(f.files, 'acquireFiles');
+        const manifest = vi.spyOn(f.repository, 'getManifest');
+        const started = performance.now();
+        await f.browser.fs.driver.delete(['/' + f.a], { recursive: true });
+        console.info('session-delete-projection', { ms: Math.round(performance.now() - started),
+            workspaceOpens: acquire.mock.calls.length, manifestReads: manifest.mock.calls.length,
+            taskPreviews: f.kernel.listSessionTaskPage.mock.calls.length });
+        expect(acquire).not.toHaveBeenCalled();
+        expect(f.kernel.listSessionTaskPage).not.toHaveBeenCalled();
+        expect(await owner.context.fs.driver.readContent('/workspace/source-63.ts', { encoding: 'utf-8' })).toBe('keep');
+        await expect(f.repository.getManifest(f.a)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+    it('keeps physical layout protection when deleting a projected workspace file', async () => {
+        const f = await setup();
+        const owner = await f.files.acquireFiles(f.a); cleanup.push(() => owner.release());
+        await owner.context.fs.driver.updateMetadata('/workspace/same.md', { vfsFixedLayout: true });
+        await expect(f.browser.fs.driver.delete([`/${f.a}/files/workspace/same.md`])).rejects.toThrow();
+        expect(await owner.context.fs.driver.readContent('/workspace/same.md', { encoding: 'utf-8' })).toBe('mapped');
+        await f.browser.fs.driver.delete(['/' + f.a], { recursive: true });
+        expect(await owner.context.fs.driver.readContent('/workspace/same.md', { encoding: 'utf-8' })).toBe('mapped');
+    });
+    it('can delete a Session even when its mounted files cannot be opened', async () => {
+        const f = await setup();
+        vi.spyOn(f.files, 'acquireFiles').mockRejectedValue(new Error('Mounted directory offline'));
+        await f.browser.fs.driver.delete(['/' + f.a], { recursive: true });
+        await expect(f.repository.getManifest(f.a)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
     it('projects live mounted file permissions and marks the tasks container read-only', async () => {
         const f = await setup();
         const prefix = `/${f.a}/files/workspace`;

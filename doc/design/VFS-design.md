@@ -52,6 +52,7 @@ interface FileSystemContextOwner {
 [IFSDriver](../../packages/vfs-core/src/interfaces/services/fs-driver.ts) 提供：
 
 - 读取：getNode、getChildren、readContent、resolvePath、exists、search，可选 walkTree/getStats。
+- `getChildren({ fields: 'entry' })` 经可选后端 listEntries 获取轻量条目，不强制读取扩展元数据；后端未实现时回退完整列表并裁剪。`readContent` 的 representation 为 auto（兼容记录投影优先）、bytes（物理内容）、records（仅记录投影）。普通配置读取显式选择 bytes；底层读取失败传播错误，不能伪装为空文件。见 [读取性能与架构审查](vfs-read-performance-review.md)。
 - 修改：createFile/createDirectory、writeContent/appendContent、rename/move/delete、updateMetadata，可选 copy。
 - 链接及事务：symlink/readlink/hardlink、transaction 方法存在，但可因当前能力不支持而拒绝。
 - 事件：on、可选 onAny，取消订阅函数由调用方持有。

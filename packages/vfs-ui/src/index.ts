@@ -26,6 +26,8 @@ export type VFSUIOptions = SessionUIOptions<VFSNodeUI> & {
     defaultEditorFactory?: EditorFactory;
   directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
   activateDirectories?: boolean;
+  /** Choose which persisted directory expansions may be restored on startup. */
+  restoreExpandedDirectory?: (path: string) => boolean;
   primaryAction?: { label: string; run(): Promise<void> };
   exportDirectories?: boolean;
   exportItem?: import('./interaction/handlers/ExportCommandHandler').ExportCommandOptions['exportItem'];

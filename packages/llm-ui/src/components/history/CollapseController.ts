@@ -59,9 +59,7 @@ export class CollapseController {
         index: number,
         totalCount: number
     ): boolean {
-        const hasStored = Object.keys(this.states).length > 0;
-
-        if (hasStored && this.states[sessionId] !== undefined) {
+        if (this.states[sessionId] !== undefined) {
             return this.states[sessionId];
         }
 
@@ -88,6 +86,7 @@ export class CollapseController {
         const wasCollapsed = element.classList.contains('is-collapsed');
         element.classList.toggle('is-collapsed');
         const isCollapsed = element.classList.contains('is-collapsed');
+        if (!isCollapsed) this.renderer.activateVisibleEditors(element);
 
         this.updateChevron(btn, isCollapsed);
         this.states[sessionId] = isCollapsed;
@@ -115,6 +114,7 @@ export class CollapseController {
         if (target === current) return false;
 
         collapsible.classList.toggle('is-collapsed', target);
+        if (!target) this.renderer.activateVisibleEditors(collapsible);
         const btn = collapsible.querySelector('[data-action="collapse"]') as HTMLElement;
         if (btn) this.updateChevron(btn, target);
 
@@ -142,6 +142,8 @@ export class CollapseController {
             const id = (el as HTMLElement).dataset.sessionId;
             if (id) this.states[id] = collapsed;
         });
+
+        if (!collapsed) this.renderer.activateVisibleEditors();
 
         this.notifyChange();
     }
@@ -263,7 +265,7 @@ export class CollapseController {
         const ids = this.renderer.getEditorIdsForSession(sessionId);
         await Promise.all(ids.map(async (id) => {
             const ctrl = this.renderer.getEditor(id);
-            if (ctrl) {
+            if (ctrl && this.renderer.isEditorVisible(id)) {
                 try {
                     await ctrl.waitUntilReady();
                     await ctrl.collapseBlocks();
