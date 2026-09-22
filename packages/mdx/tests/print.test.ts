@@ -63,6 +63,8 @@ describe('print title', () => {
         expect(editor.config.title).toBe(title);
         expect(input.value).toBe(title);
         expect(editor.print).toHaveBeenCalledWith(expect.objectContaining({ title }));
+        // The default print handler must not inject a date into the header.
+        expect(editor.print.mock.calls[0][0]).not.toHaveProperty('headerMeta');
         plugin.destroy();
     });
 
@@ -72,6 +74,8 @@ describe('print title', () => {
         vi.spyOn(window, 'print').mockImplementation(() => {
             expect(document.title).toBe('Renamed document');
             expect(document.querySelector('.mdx-print-header__title')?.textContent).toBe('Renamed document');
+            // The header shows the title only: no implicit date when headerMeta is omitted.
+            expect(document.querySelector('.mdx-print-header__meta')).toBeNull();
             window.dispatchEvent(new Event('afterprint'));
         });
         const printing = new DefaultPrintService().printFromHtml('<p>Body</p>', {
@@ -84,6 +88,21 @@ describe('print title', () => {
         expect(document.getElementById('mdx-print-overlay-style')).toBeNull();
         expect(document.getElementById('mdx-print-overlay')?.innerHTML).toBe('');
         expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('renders a header date only when the caller provides one', async () => {
+        vi.useFakeTimers();
+        vi.spyOn(window, 'print').mockImplementation(() => {
+            expect(document.querySelector('.mdx-print-header__meta')?.textContent).toBe('2024-01-02');
+            window.dispatchEvent(new Event('afterprint'));
+        });
+        const printing = new DefaultPrintService().printFromHtml('<p>Body</p>', {
+            title: 'Dated document', showHeader: true, fontSize: 'normal',
+            headerMeta: { date: '2024-01-02' },
+        });
+        await vi.advanceTimersByTimeAsync(300);
+        await printing;
+        expect(window.print).toHaveBeenCalledOnce();
     });
 });
 

@@ -365,9 +365,6 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     editor.print({
       title: editor.config.title || 'Document',
       showHeader: true,
-      headerMeta: {
-        date: new Date().toLocaleDateString(),
-      },
     }).catch(err => {
       console.error('[TitleBarPlugin] Print failed:', err);
     });

@@ -214,10 +214,9 @@ export class DefaultPrintService implements PrintService {
             metaItems += `<span class="mdx-print-header__meta-item">${this.escapeHtml(meta.author)}</span>`;
         }
 
+        // Date is rendered only when the caller supplies it explicitly.
         if (meta.date) {
             metaItems += `<span class="mdx-print-header__meta-item">${this.escapeHtml(meta.date)}</span>`;
-        } else {
-            metaItems += `<span class="mdx-print-header__meta-item">${new Date().toLocaleDateString()}</span>`;
         }
 
         if (meta.version) {

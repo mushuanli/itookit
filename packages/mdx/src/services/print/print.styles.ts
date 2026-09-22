@@ -50,9 +50,8 @@ export const PRINT_STYLES = `
    ============================================ */
 
 .mdx-print-header {
+    /* Title-only header: no divider line, whitespace separates it from the body. */
     margin-bottom: 32px;
-    padding-bottom: 16px;
-    border-bottom: 2px solid #e0e0e0;
 }
 
 .mdx-print-header__title {

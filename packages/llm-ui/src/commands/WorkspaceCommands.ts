@@ -40,7 +40,6 @@ export class PrintCommand extends Command<{ title: string; engine: IFileSystem; 
         try { await this.printService.print(md, {
             title: title || 'Chat Conversation',
             showHeader: true,
-            headerMeta: { date: new Date().toLocaleString() },
         }); } finally { this.printService.destroy?.(); this.printService = null; }
     }
 }
