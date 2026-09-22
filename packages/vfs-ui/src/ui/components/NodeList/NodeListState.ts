@@ -33,7 +33,8 @@ export interface ParsedSearchQuery {
 
 export class NodeListStateTransformer {
   constructor(
-    private readonly searchFilter?: SearchFilter
+    private readonly searchFilter?: SearchFilter,
+    private readonly compareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined,
   ) {}
 
   transform(globalState: VFSUIState): NodeListState {
@@ -183,6 +184,8 @@ export class NodeListStateTransformer {
     if (!itemList) return;
 
     itemList.sort((a, b) => {
+      const order = this.compareItems?.(a, b);
+      if (order !== undefined) return order;
       const aIsPinned = a.metadata?.custom?.isPinned || false;
       const bIsPinned = b.metadata?.custom?.isPinned || false;
       if (aIsPinned !== bIsPinned) return aIsPinned ? -1 : 1;

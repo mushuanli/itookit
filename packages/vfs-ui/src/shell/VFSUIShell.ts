@@ -42,6 +42,7 @@ import { findNodeById } from '../utils/helpers';
 export interface VFSUIShellOptions extends SessionUIOptions<VFSNodeUI> {
   initialState?: Partial<VFSUIState>;
   defaultUiSettings?: Partial<UISettings>;
+  compareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined;
   defaultExtension?: string;
   fileTypes?: FileTypeDefinition[];
   defaultEditorFactory?: EditorFactory;
@@ -344,6 +345,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
       primaryAction: this.options.primaryAction,
       exportDirectories: this.options.exportDirectories,
       searchFilter: this.options.searchFilter,
+      compareItems: this.options.compareItems,
       instanceId: this.instanceId,
       engine: this.engine,
     });

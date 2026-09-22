@@ -27,6 +27,7 @@ interface NodeListOptions extends BaseComponentDeps {
   title?: string;
   fileCreation?: FileCreationConfig;
   searchFilter?: SearchFilter;
+  compareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined;
   instanceId: string;
   engine?: any;
   directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
@@ -66,7 +67,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     this.exportDirectories = options.exportDirectories ?? false;
 
     this.stateTransformer = new NodeListStateTransformer(
-      options.searchFilter
+      options.searchFilter, options.compareItems
     );
 
     this.buildInitialHTML(options);

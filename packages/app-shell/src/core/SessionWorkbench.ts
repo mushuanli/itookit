@@ -19,6 +19,16 @@ function debugEnabled(): boolean {
     try { return typeof localStorage !== 'undefined' && localStorage.getItem('vfs:debug') === '1'; } catch { return false; }
 }
 
+/** Keep Session order independent of mutable titles, timestamps and persisted UI sorting. */
+function compareSessionEntries(a: VFSNodeUI, b: VFSNodeUI): number | undefined {
+    const isSession = (item: VFSNodeUI) => !isFlowPath(item.id) && resolveBrowserTarget(item.id).kind === 'session';
+    const aSession = isSession(a), bSession = isSession(b);
+    // Keep folder/Flow navigation together so mixed siblings have a transitive order.
+    if (aSession !== bSession) return aSession ? 1 : -1;
+    if (!aSession) return undefined;
+    return Date.parse(b.metadata.createdAt) - Date.parse(a.metadata.createdAt) || a.id.localeCompare(b.id);
+}
+
 /** vfs-ui owns the sidebar; this host owns business views and their file leases. */
 export class SessionWorkbench implements WorkspaceController {
     private readonly dialogs = new AbortController();
@@ -65,6 +75,7 @@ export class SessionWorkbench implements WorkspaceController {
         this.lifecycle = new SessionLifecycleService({ repository: this.repository, kernel: this.kernel });
         this.sidebarUI = createVFSUI({ sessionListContainer: this.sidebar, title: '会话', scopeId: 'session-browser:v1:admin',
             readOnly: false, activateDirectories: true, defaultUiSettings: { sortBy: 'lastModified' },
+            compareItems: compareSessionEntries,
             restoreExpandedDirectory: path => isFlowPath(path) || resolveBrowserTarget(path).kind === 'folder',
             exportDirectories: true,
             exportItem: item => this.exportSessionItem(item),

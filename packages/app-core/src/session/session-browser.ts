@@ -137,8 +137,9 @@ class BrowserBackend implements IStorageBackend {
     private sessionBrowserPath(id: string, folder: string | null | undefined): string {
         return `${folderBrowserPath(folder)}/${id}`;
     }
-    private sessionNode(manifest: { id: string; title: string; updatedAt: number; folder?: string | null }): FSNode {
-        return { ...this.node(this.sessionBrowserPath(manifest.id, manifest.folder), manifest.title, true, manifest.updatedAt), icon: '💬' };
+    private sessionNode(manifest: { id: string; title: string; createdAt: number; updatedAt: number; folder?: string | null }): FSNode {
+        return { ...this.node(this.sessionBrowserPath(manifest.id, manifest.folder), manifest.title, true, manifest.updatedAt),
+            createdAt: manifest.createdAt, icon: '💬' };
     }
     private folderNode(folder: { path: string; name: string; updatedAt: number }): FSNode {
         return this.node(folderBrowserPath(folder.path), folder.name, true, folder.updatedAt);

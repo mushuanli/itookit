@@ -42,10 +42,13 @@ interface FileTypeDefinition {
 
 ## VFSUIOptions
 
+`compareItems` 可为可排序列表注入宿主排序规则，优先于置顶和用户排序设置；返回 `undefined` 时回退通用排序，返回 `0` 表示保持同序。比较器必须为混合类型条目提供传递一致的顺序，并适用于递归子列表。只读列表继续保留来源顺序。
+
 ```typescript
 type VFSUIOptions = SessionUIOptions<VFSNodeUI> & {
     initialState?: Partial<VFSUIState>;
     defaultUiSettings?: Partial<UISettings>;
+    compareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined;
     fileTypes?: FileTypeDefinition[];
     defaultEditorFactory: EditorFactory;
     customEditorResolver?: CustomEditorResolver;

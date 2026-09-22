@@ -21,6 +21,8 @@ export { createVFSMentionProviders } from './mention/createVFSMentionProviders';
 export type VFSUIOptions = SessionUIOptions<VFSNodeUI> & {
     initialState?: Partial<VFSUIState>;
     defaultUiSettings?: Partial<UISettings>;
+    /** Host ordering takes precedence; undefined falls back to user sorting. */
+    compareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined;
     // [新增]
     fileTypes?: FileTypeDefinition[];
     defaultEditorFactory?: EditorFactory;
