@@ -21,7 +21,7 @@ LocalFS journal 初始化失败会关闭已打开 sidecar，失败来源、数�
 
 启动失败先打开界面/终端提示的文件，查找 `.failed` 事件，沿内层原因定位具体 source 与数据库。比较 `bootstrap.stage` / `bootstrap.source.ready` 的 `durationMs` 可区分数据库打开、runtime 和 UI 初始化耗时。`sidecar.scope.open` 的 `rolledBack` 表示本次刷新回收了多少旧事务；`sidecar.database.open` 区分新建与复用 pool。常规阶段事件只追加日志，不再逐条 `fsync`；panic、异常退出和前端 failure/error/exception/rejection 事件仍同步落盘。
 
-`sidecar.sql` 把一次语句的**宿主耗时**拆成 `waitMs`（事务互斥锁等待、`BEGIN IMMEDIATE` 等写出锁、或 pool 取连接）与 `queryMs`（SQL 本身），`rows` 是返回行数；`database_*` 语句还带 `poolSize` / `poolIdleBefore`。默认只记录 `waitMs + queryMs ≥ 25 ms` 或 `poolIdleBefore == 0`（pool 需要新建连接，典型是空闲超时回收后的第一条语句）；设 `MINDOS_SIDECAR_TRACE=1` 记录全部语句。**WebKit 录制里的 IPC 时长不等于宿主耗时**：例如 `sidecar.database.open` 自报 `durationMs: 0` 却观测到 336 ms，说明差值来自命令返回之后的交付/排队，不能用它归因到 SQLite。判断启动慢属于宿主还是交付路径，必须两边对着看。
+`sidecar.sql` 把一次语句的**宿主耗时**拆成 `waitMs`（事务互斥锁等待、`BEGIN IMMEDIATE` 等写出锁、或 pool 取连接）、`queryMs`（SQL 本身）与 `decodeMs`（行→JSON 解码），并带 `rows`、`ok`（失败时另有 `error`）；`database_*` 语句还带 `poolSize` / `poolIdleBefore`。判定记录的条件是 **失败（`ok:false`）**、`waitMs + queryMs + decodeMs ≥ 25 ms`、或 `poolIdleBefore == 0`（pool 需要新建连接，典型是空闲超时回收后的第一条语句）；`MINDOS_SIDECAR_TRACE` 取 `1`/`true`/`yes`/`on`（不区分大小写）时记录全部语句，其余值（含 `0`）不改变默认行为。**WebKit 录制里的 IPC 时长不等于宿主耗时**：例如 `sidecar.database.open` 自报 `durationMs: 0` 却观测到 336 ms，说明差值来自命令返回之后的交付/排队，不能用它归因到 SQLite。判断启动慢属于宿主还是交付路径，必须两边对着看。
 
 CLI 使用 `uncaughtExceptionMonitor` 记录致命异常，不安装吞错的异常处理器；同步日志追加使普通失败退出前的记录可读取。SIGKILL 等无法运行 JS 回调的结束不保证有 CLI 退出记录。桌面的 Linux 独立监测进程和下次启动补记机制见 [MindOS profile](../mindos-profile.md#tauri--cli-运行日志)。
 
@@ -29,7 +29,7 @@ CLI 使用 `uncaughtExceptionMonitor` 记录致命异常，不安装吞错的异
 
 - `packages/app-shell/tests/desktop-diagnostics.test.ts`：嵌套 AggregateError/cause、循环引用、长度限制。
 - `packages/app-shell/tests/tauri-sidecar-close.test.ts`：宿主 pool 命令接线、定向关闭、初始化失败保留原因、暖启动跳过 DDL、缺对象补齐。
-- `apps/tauri-app/src-tauri/src/sidecar.rs`：真实 SQLite 验证重载回滚、旧代次/旧 close 拒绝、pool 租约转移、等待中 begin 拒绝、其它窗口隔离和新事务提交；另有单测固定「只记录慢语句或需要新建连接的语句」。
+- `apps/tauri-app/src-tauri/src/sidecar.rs`：真实 SQLite 验证重载回滚、旧代次/旧 close 拒绝、pool 租约转移、等待中 begin 拒绝、其它窗口隔离和新事务提交；另有单测固定「失败语句、慢阶段或需要新建连接时记录」与追踪开关的真值解析。
 - `apps/cli/tests/http-server.test.ts`：HTTP 宿主跨页面复用连接、拒绝旧 scope close，并保持记录可读。
 - `packages/vfsdriver-localfs/tests/25-journal-probe.test.ts`：journal 初始化失败关闭 sidecar，随后可重试。
 - `apps/cli/tests/diagnostics.test.ts`：轮换/长度限制、真实 CLI 缺文件失败、未捕获异常/未处理 rejection 的落盘与失败退出码、stdout 不受影响。
