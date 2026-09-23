@@ -70,6 +70,8 @@ export class SessionManager implements ISession, SessionQuery {
     private readonly durableProjection: DurableConversationProjection;
     private durableSession?: SessionHandle;
     private durableProjectionUnsubscribe?: () => void;
+    private projectionSyncTail?: Promise<void>;
+    private projectionSyncQueued = false;
 
     constructor(
         engine: ISessionRepository,
@@ -236,6 +238,8 @@ export class SessionManager implements ISession, SessionQuery {
     unbindSession(): void {
         this.durableProjectionUnsubscribe?.();
         this.durableProjectionUnsubscribe = undefined;
+        this.projectionSyncQueued = false;
+        this.projectionSyncTail = undefined;
         this.durableSession = undefined;
         this.registry.unbindSession();
     }
@@ -284,8 +288,10 @@ export class SessionManager implements ISession, SessionQuery {
     private async bindDurableProjection(sessionId: string): Promise<void> {
         if (!this.durableProjection || !this.durableSession) return;
         await this.restoreDurableRuntime(sessionId);
+        // The bind just read this manifest; hand it over instead of reading the record again.
         await this.durableProjection.sync(
             this.durableSession, sessionId, this.registry.getSessionRuntime(sessionId),
+            this.registry.getLoadedView(sessionId)?.manifest,
         );
         this.durableProjectionUnsubscribe?.();
         this.durableProjectionUnsubscribe = this.registry.eventBus.onSession(sessionId, () => {
@@ -293,12 +299,34 @@ export class SessionManager implements ISession, SessionQuery {
         });
     }
 
+    /**
+     * One bind emits many Session events, and every sync re-reads the manifest and the shared
+     * record before it can tell whether anything changed. Coalesce: mark the session queued and
+     * let one pass per settle do the work, re-reading the runtime for the latest state.
+     */
     private queueDurableProjection(sessionId: string): void {
         if (!this.durableProjection || !this.durableSession) return;
-        const runtime = this.registry.getSessionRuntime(this.durableSession.id);
-        this.durableProjection.sync(this.durableSession, sessionId, runtime).catch(error => {
-            log.warn('Durable conversation projection failed', { sessionId, error });
-        });
+        this.projectionSyncQueued = true;
+        this.projectionSyncTail ??= this.drainDurableProjection(sessionId);
+    }
+
+    private async drainDurableProjection(sessionId: string): Promise<void> {
+        try {
+            while (this.projectionSyncQueued && this.durableSession?.id === sessionId) {
+                this.projectionSyncQueued = false;
+                try {
+                    await this.durableProjection.sync(
+                        this.durableSession, sessionId, this.registry.getSessionRuntime(sessionId),
+                    );
+                } catch (error) {
+                    log.warn('Durable conversation projection failed', { sessionId, error });
+                }
+            }
+        } finally {
+            this.projectionSyncTail = undefined;
+            // An event that arrived while the loop was unwinding still needs its pass.
+            if (this.projectionSyncQueued) this.queueDurableProjection(sessionId);
+        }
     }
 
     private queueDurableProjectionForSession(sessionId: string): void {

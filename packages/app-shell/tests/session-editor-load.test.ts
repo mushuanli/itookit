@@ -146,7 +146,10 @@ it('measures A → B → A with retained session state and fresh editor preferen
             // re-read when it is revisited.
             expect(history).toHaveBeenCalledTimes(0);
             expect(loadView).toHaveBeenCalledTimes(index === 2 ? 0 : 1);
-            expect(manifest).toHaveBeenCalledTimes(1);
+            // The bind hands its manifest to the projection sync, so a first load does not read
+            // the Session record again; a revisit re-reads it because the registry drops the
+            // projection when it does not re-read the chain.
+            expect(manifest).toHaveBeenCalledTimes(index === 2 ? 1 : 0);
             if (index === 2) {
                 expect(container.querySelector<HTMLInputElement>('#llm-title-input')?.value).toBe('Updated A');
                 expect(container.querySelector<HTMLTextAreaElement>('.llm-input__textarea')?.value).toBe('Fresh draft');

@@ -37,6 +37,18 @@ describe('DurableConversationProjection', () => {
         expect((await session.getShared('conversation/manifest'))?.value).toMatchObject({ currentHead: 'round-1' });
         expect(await session.sharedHistory('conversation/manifest')).toHaveLength(2);
     });
+
+    it('reuses a caller-read manifest instead of reading the Session record again', async () => {
+        let reads = 0;
+        const engine = { getManifest: async () => { reads++; return manifest; } } as unknown as ISessionRepository;
+        const projection = new DurableConversationProjection(engine);
+        // A bind passes the manifest it just loaded, so the projection must not re-read it.
+        await projection.sync(session, '/chat/session.chat', undefined, manifest);
+        expect(reads).toBe(0);
+        // Event-driven syncs have no fresh manifest and must read the current one.
+        await projection.sync(session, '/chat/session.chat');
+        expect(reads).toBe(1);
+    });
 });
 
 function createManifest(): ConversationManifest {
