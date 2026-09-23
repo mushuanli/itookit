@@ -6,11 +6,14 @@ use sqlx::{Column, Row, Sqlite, SqlitePool, Transaction, TypeInfo, ValueRef};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::sync::{Arc, OnceLock, Weak};
+use std::time::{Duration, Instant};
 use tauri::State;
 use tauri_plugin_sql::{DbInstances, DbPool};
 use tokio::sync::Mutex;
+
+/// Statements at or above this host-side cost are always recorded.
+const SIDECAR_SLOW_SQL_MS: u128 = 25;
 
 #[derive(Default)]
 pub struct SidecarTransactions {
@@ -63,6 +66,57 @@ fn bind_query(
         };
     }
     Ok(statement)
+}
+
+fn sidecar_sql_trace_enabled() -> bool {
+    static TRACE: OnceLock<bool> = OnceLock::new();
+    *TRACE.get_or_init(|| {
+        std::env::var_os("MINDOS_SIDECAR_TRACE").is_some_and(|value| !value.is_empty())
+    })
+}
+
+/// Which statements are worth a log line. `idle_before == 0` means the pool had to open a
+/// connection (or wait for one), which is what the first statement after sqlx reaped the idle
+/// connection looks like; those are the ones that explain a slow cold page.
+fn should_record_sql(
+    trace: bool,
+    wait_ms: u128,
+    query_ms: u128,
+    idle_before: Option<usize>,
+) -> bool {
+    trace || wait_ms + query_ms >= SIDECAR_SLOW_SQL_MS || idle_before == Some(0)
+}
+
+/// Host-side timing for one sidecar statement. A multi-second client-side measurement cannot be
+/// attributed to the host (mutex wait, pool acquire, query) or to request delivery without it.
+fn record_sql(
+    operation: &str,
+    database: &str,
+    scope: Option<u64>,
+    total_ms: u128,
+    wait_ms: u128,
+    query_ms: u128,
+    rows: usize,
+    pool: Option<(u32, usize)>,
+) {
+    if !should_record_sql(
+        sidecar_sql_trace_enabled(),
+        wait_ms,
+        query_ms,
+        pool.map(|(_, idle)| idle),
+    ) {
+        return;
+    }
+    let mut detail = serde_json::json!({"operation": operation, "database": database,
+        "totalMs": total_ms, "waitMs": wait_ms, "queryMs": query_ms, "rows": rows});
+    if let Some(scope) = scope {
+        detail["scope"] = serde_json::json!(scope);
+    }
+    if let Some((size, idle)) = pool {
+        detail["poolSize"] = serde_json::json!(size);
+        detail["poolIdleBefore"] = serde_json::json!(idle);
+    }
+    crate::diagnostics::record("sidecar.sql", detail);
 }
 
 fn decode_rows(rows: Vec<SqliteRow>) -> Result<Vec<Map<String, Value>>, String> {
@@ -275,11 +329,24 @@ impl SidecarTransactions {
         if self.state.lock().await.scopes.get(owner) != Some(&scope) {
             return Err("Sidecar page scope is no longer active".into());
         }
+        let (pool_size, pool_idle) = (pool.size(), pool.num_idle());
+        let wait_start = Instant::now();
         // Do not hold active's mutex while waiting for another SQLite writer.
         let tx = pool
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(|e| e.to_string())?;
+        let wait_ms = wait_start.elapsed().as_millis();
+        record_sql(
+            "begin",
+            database,
+            Some(scope),
+            wait_ms,
+            wait_ms,
+            0,
+            0,
+            Some((pool_size, pool_idle)),
+        );
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         let mut state = self.state.lock().await;
         let leased = state
@@ -335,15 +402,29 @@ impl SidecarTransactions {
         query: &str,
         values: Vec<Value>,
     ) -> Result<ExecuteResult, String> {
+        let started = Instant::now();
         let tx = self.transaction_for(id, owner, scope, database).await?;
+        let lock_start = Instant::now();
         let mut transaction = tx.lock().await;
+        let wait_ms = lock_start.elapsed().as_millis();
         let transaction = transaction
             .as_mut()
             .ok_or("Sidecar transaction is no longer active")?;
+        let query_start = Instant::now();
         let result = bind_query(query, values)?
             .execute(&mut **transaction)
             .await
             .map_err(|e| e.to_string())?;
+        record_sql(
+            "execute",
+            database,
+            Some(scope),
+            started.elapsed().as_millis(),
+            wait_ms,
+            query_start.elapsed().as_millis(),
+            result.rows_affected() as usize,
+            None,
+        );
         Ok(ExecuteResult {
             rows_affected: result.rows_affected(),
             last_insert_id: result.last_insert_rowid(),
@@ -359,15 +440,29 @@ impl SidecarTransactions {
         query: &str,
         values: Vec<Value>,
     ) -> Result<Vec<Map<String, Value>>, String> {
+        let started = Instant::now();
         let tx = self.transaction_for(id, owner, scope, database).await?;
+        let lock_start = Instant::now();
         let mut transaction = tx.lock().await;
+        let wait_ms = lock_start.elapsed().as_millis();
         let transaction = transaction
             .as_mut()
             .ok_or("Sidecar transaction is no longer active")?;
+        let query_start = Instant::now();
         let rows = bind_query(query, values)?
             .fetch_all(&mut **transaction)
             .await
             .map_err(|e| e.to_string())?;
+        record_sql(
+            "select",
+            database,
+            Some(scope),
+            started.elapsed().as_millis(),
+            wait_ms,
+            query_start.elapsed().as_millis(),
+            rows.len(),
+            None,
+        );
         decode_rows(rows)
     }
 
@@ -379,9 +474,13 @@ impl SidecarTransactions {
         database: &str,
         commit: bool,
     ) -> Result<(), String> {
+        let started = Instant::now();
         let tx = self.transaction_for(id, owner, scope, database).await?;
+        let lock_start = Instant::now();
         let mut guard = tx.lock().await;
+        let wait_ms = lock_start.elapsed().as_millis();
         let transaction = guard.take();
+        let query_start = Instant::now();
         let result = match transaction {
             Some(tx) if commit => tx.commit().await.map_err(|e| e.to_string()),
             Some(tx) => tx.rollback().await.map_err(|e| e.to_string()),
@@ -389,6 +488,16 @@ impl SidecarTransactions {
             None if !commit => Ok(()),
             None => Err("Sidecar transaction is no longer active".into()),
         };
+        record_sql(
+            if commit { "commit" } else { "rollback" },
+            database,
+            Some(scope),
+            started.elapsed().as_millis(),
+            wait_ms,
+            query_start.elapsed().as_millis(),
+            0,
+            None,
+        );
         if result.is_ok() || !commit {
             self.state.lock().await.active.remove(&id);
         }
@@ -548,10 +657,26 @@ pub async fn sidecar_database_execute(
         .assert_database(webview.label(), scope, &database)
         .await?;
     let pool = database_pool(&databases, &database).await?;
+    let (pool_size, pool_idle) = (pool.size(), pool.num_idle());
+    let started = Instant::now();
+    let acquire_start = Instant::now();
+    let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+    let wait_ms = acquire_start.elapsed().as_millis();
+    let query_start = Instant::now();
     let result = bind_query(&query, values)?
-        .execute(&pool)
+        .execute(&mut *connection)
         .await
         .map_err(|error| error.to_string())?;
+    record_sql(
+        "database_execute",
+        &database,
+        Some(scope),
+        started.elapsed().as_millis(),
+        wait_ms,
+        query_start.elapsed().as_millis(),
+        result.rows_affected() as usize,
+        Some((pool_size, pool_idle)),
+    );
     Ok(ExecuteResult {
         rows_affected: result.rows_affected(),
         last_insert_id: result.last_insert_rowid(),
@@ -572,10 +697,26 @@ pub async fn sidecar_database_select(
         .assert_database(webview.label(), scope, &database)
         .await?;
     let pool = database_pool(&databases, &database).await?;
+    let (pool_size, pool_idle) = (pool.size(), pool.num_idle());
+    let started = Instant::now();
+    let acquire_start = Instant::now();
+    let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+    let wait_ms = acquire_start.elapsed().as_millis();
+    let query_start = Instant::now();
     let rows = bind_query(&query, values)?
-        .fetch_all(&pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| error.to_string())?;
+    record_sql(
+        "database_select",
+        &database,
+        Some(scope),
+        started.elapsed().as_millis(),
+        wait_ms,
+        query_start.elapsed().as_millis(),
+        rows.len(),
+        Some((pool_size, pool_idle)),
+    );
     decode_rows(rows)
 }
 
@@ -708,6 +849,19 @@ pub async fn sidecar_finish(
 mod tests {
     use super::*;
     use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+
+    #[test]
+    fn records_slow_statements_and_connection_rebuilds_only() {
+        // Warm and fast: quiet, so a busy session does not pay a log write per statement.
+        assert!(!should_record_sql(false, 0, 1, Some(3)));
+        // The pool had to open a connection: always worth a line (cold page, reaped idle pool).
+        assert!(should_record_sql(false, 0, 1, Some(0)));
+        // Host-side wait or query above the threshold is always worth a line.
+        assert!(should_record_sql(false, SIDECAR_SLOW_SQL_MS, 0, Some(2)));
+        assert!(should_record_sql(false, 0, SIDECAR_SLOW_SQL_MS, None));
+        // MINDOS_SIDECAR_TRACE=1 records everything, including transaction-scoped statements.
+        assert!(should_record_sql(true, 0, 0, None));
+    }
 
     #[test]
     fn transactions_keep_connection_and_recover_after_failures() {
