@@ -17,8 +17,7 @@ declare global {
  */
 export interface MermaidPluginOptions {
   /**
-   * Mermaid CDN URL
-   * @default 'https://fastly.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'
+   * Optional Mermaid module URL. The bundled dependency is used by default.
    */
   cdnUrl?: string;
 
@@ -40,7 +39,7 @@ export interface MermaidPluginOptions {
 
   /**
    * 是否自动加载 Mermaid
-   * @default true
+   * @default false — diagrams still load Mermaid on first render.
    */
   autoLoad?: boolean;
 }
@@ -134,7 +133,9 @@ class MermaidManager {
       }
 
       try {
-        const mermaid = await import(/* @vite-ignore */ this.cdnUrl);
+        const mermaid = this.cdnUrl
+          ? await import(/* @vite-ignore */ this.cdnUrl)
+          : await import('mermaid');
 
         if (mermaid.default) {
           window.mermaid = mermaid.default;
@@ -303,11 +304,11 @@ export class MermaidPlugin implements MDxPlugin {
 
   constructor(options: MermaidPluginOptions = {}) {
     this.options = {
-      cdnUrl: options.cdnUrl || 'https://fastly.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs',
+      cdnUrl: options.cdnUrl || '',
       theme: options.theme || 'neutral',
       darkTheme: options.darkTheme || 'dark',
       mermaidConfig: options.mermaidConfig ?? {},
-      autoLoad: options.autoLoad !== false,
+      autoLoad: options.autoLoad === true,
     };
 
     this.instanceId = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;

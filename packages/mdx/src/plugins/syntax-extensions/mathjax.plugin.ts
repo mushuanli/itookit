@@ -34,7 +34,8 @@ export interface MathJaxPluginOptions {
   };
 
   /**
-   * 是否自动加载 MathJax
+   * Whether to load MathJax during plugin installation.
+   * @default false — math content still loads it on first render.
    */
   autoLoad?: boolean;
 }
@@ -212,7 +213,7 @@ export class MathJaxPlugin implements MDxPlugin {
         },
         ...options.config,
       },
-      autoLoad: options.autoLoad !== false,
+      autoLoad: options.autoLoad === true,
     };
 
     this.manager = MathJaxManager.getInstance();
@@ -278,7 +279,7 @@ export class MathJaxPlugin implements MDxPlugin {
     }
 
     const removeListener = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
-      this.manager.queueRender(element);
+      if (containsMath(element)) this.manager.queueRender(element);
     });
 
     if (removeListener) {
@@ -301,6 +302,11 @@ export class MathJaxPlugin implements MDxPlugin {
     this.cleanupFns = [];
     this.manager.unregisterInstance();
   }
+}
+
+function containsMath(element: HTMLElement): boolean {
+  const text = element.textContent ?? '';
+  return text.includes('\\(') || text.includes('\\[');
 }
 
 export type { MathJaxPluginOptions as MathJaxOptions };

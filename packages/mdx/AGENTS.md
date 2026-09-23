@@ -36,5 +36,6 @@ if (fs) { const file = createMDXFile(fs, context.getCurrentNodeId()!); }
 - `ScopedPersistenceStore` — 插件私有持久化，由 `createStore()` 二级回退：引擎节点元数据（`EngineMetadataStore`，基于 `IFileSystem`）→ 内存（`MemoryStore`）
 - `AssetResolverPlugin` 用 `createMDXFile(fs, nodeId)` 创建文件句柄，资源文件系统取自 `getAssetFileSystem()`；路径生成统一走 `services/asset-helper.ts`
 - 暗色主题 CSS 同时使用 `[data-theme="dark"]` 和 `@media (prefers-color-scheme: dark)` 选择器，支持手动和系统主题切换
+- Mermaid 默认使用本地依赖且只在出现 `language-mermaid` 块时动态加载；Tauri 构建把其依赖放入独立 `mermaid-runtime` chunk。MathJax 只在渲染结果含 `\\(`/`\\[` 时加载。普通 Markdown 更新不得触发这两个运行时。
 
 运行: `pnpm --filter @itookit/mdxeditor typecheck` / `test` / `build`
