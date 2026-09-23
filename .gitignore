@@ -43,3 +43,6 @@ tests/test_sidecar/
 
 # Throwaway desktop acceptance harness (mock LLM, AT-SPI driver, screenshots, data roots)
 .tauri-acceptance/
+
+# Local performance traces
+localhost-recording*.json

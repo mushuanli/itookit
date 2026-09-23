@@ -28,11 +28,6 @@
         "fs:scope-appconfig-recursive",
         "fs:scope-temp-recursive",
 
-        "sql:allow-load",
-        "sql:allow-execute",
-        "sql:allow-select",
-        "sql:allow-close",
-
         "core:webview:allow-print"
     ]
 }
