@@ -486,6 +486,12 @@ export class Kernel implements KernelRegistration {
         return this.store.getShared<T>(await this.binding(sessionId), key);
     }
 
+    async getSharedMany(
+        sessionId: string, keys: string[],
+    ): Promise<Record<string, SharedStateEntry<import('../domain/types').JsonValue> | undefined>> {
+        return this.store.getSharedMany(await this.binding(sessionId), keys);
+    }
+
     async setShared<T extends import('../domain/types').JsonValue>(
         sessionId: string, key: string, value: T, options?: SharedStateWriteOptions,
     ): Promise<SharedStateEntry<T>> {

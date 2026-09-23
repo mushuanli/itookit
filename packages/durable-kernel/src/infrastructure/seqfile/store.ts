@@ -281,6 +281,25 @@ export class SeqFileKernelStore {
         return value ? decode<SharedStateEntry<T>>(value) : undefined;
     }
 
+    /** Read several shared keys from one snapshot; the editor bind needs more than one. */
+    async getSharedMany(
+        binding: ResolvedStorageBinding,
+        keys: string[],
+    ): Promise<Record<string, SharedStateEntry<import('../../domain/types').JsonValue> | undefined>> {
+        for (const key of keys) validateSharedKey(key);
+        const unique = [...new Set(keys)];
+        const result: Record<string, SharedStateEntry<import('../../domain/types').JsonValue> | undefined> = {};
+        for (const key of unique) result[key] = undefined;
+        if (!unique.length) return result;
+        const fields = unique.map(sharedKey);
+        const rows = await transaction(binding.fs, tx => tx.getEntries(sharedPath(binding.rootPath), fields));
+        unique.forEach((key, index) => {
+            const value = rows[fields[index]];
+            if (value !== undefined) result[key] = decode<SharedStateEntry<import('../../domain/types').JsonValue>>(value);
+        });
+        return result;
+    }
+
     async setShared<T extends import('../../domain/types').JsonValue>(
         binding: ResolvedStorageBinding,
         key: string,

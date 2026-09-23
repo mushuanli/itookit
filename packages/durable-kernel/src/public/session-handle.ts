@@ -65,6 +65,10 @@ export class DefaultSessionHandle implements SessionHandle {
         return this.kernel.getShared<T>(this.id, key);
     }
 
+    getSharedMany(keys: string[]): Promise<Record<string, SharedStateEntry | undefined>> {
+        return this.kernel.getSharedMany(this.id, keys);
+    }
+
     setShared<T extends JsonValue>(
         key: string, value: T, options?: SharedStateWriteOptions,
     ): Promise<SharedStateEntry<T>> {

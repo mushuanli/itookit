@@ -558,6 +558,8 @@ export interface SessionTaskApi {
 /** Session 内共享状态面。 */
 export interface SessionSharedStateApi {
     getShared<T extends JsonValue = JsonValue>(key: string): Promise<SharedStateEntry<T> | undefined>;
+    /** Read several keys from one snapshot when the host supports it. */
+    getSharedMany?(keys: string[]): Promise<Record<string, SharedStateEntry | undefined>>;
     setShared<T extends JsonValue>(key: string, value: T, options?: SharedStateWriteOptions): Promise<SharedStateEntry<T>>;
     deleteShared(key: string, options?: SharedStateWriteOptions): Promise<boolean>;
     listShared(prefix?: string): Promise<SharedStateEntry[]>;

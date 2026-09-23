@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Kernel, type SessionHandle } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend, type IFileSystem, type IVFSManager } from '@itookit/vfs-core';
 import { DurableConversationProjection } from '../src/persistence/durable-conversation-projection';
@@ -48,6 +48,21 @@ describe('DurableConversationProjection', () => {
         // Event-driven syncs have no fresh manifest and must read the current one.
         await projection.sync(session, '/chat/session.chat');
         expect(reads).toBe(1);
+    });
+
+    it('reads the manifest and runtime from one snapshot when the handle supports it', async () => {
+        const getSharedMany = vi.fn(async (keys: string[]) => Object.fromEntries(keys.map(key => [key, undefined])));
+        const getShared = vi.fn(async () => undefined);
+        const setShared = vi.fn(async () => ({}));
+        const handle = { id: 's', getShared, getSharedMany, setShared } as unknown as SessionHandle;
+        const engine = { getManifest: async () => manifest } as unknown as ISessionRepository;
+        const projection = new DurableConversationProjection(engine);
+        await projection.sync(handle, '/chat/session.chat', { sessionId: 's', status: 'idle', unreadCount: 0, lastActiveTime: 1 });
+        expect(getSharedMany).toHaveBeenCalledTimes(1);
+        expect(getSharedMany.mock.calls[0][0]).toEqual(['conversation/manifest', 'conversation/runtime']);
+        // Both values were written because the snapshot reported neither key as stored yet.
+        expect(setShared.mock.calls.map(([key]) => key)).toEqual(['conversation/manifest', 'conversation/runtime']);
+        expect(getShared).not.toHaveBeenCalled();
     });
 });
 
