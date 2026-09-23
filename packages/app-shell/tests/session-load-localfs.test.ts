@@ -31,9 +31,12 @@ it('measures cold history loading on LocalFS without reading each round twice', 
             const registry = new SessionRegistry(repository), start = performance.now();
             const snapshot = await registry.bindSession(id);
             samples.push({ ms: Math.round(performance.now() - start), sidecar: { ...backend.sidecarStats } });
+            // Projection and history chain share this one transaction (one journal probe), and a
+            // manifest read is no longer repeated by a second editor-side load.
             expect(backend.sidecarStats.begin).toBe(1);
-            expect(backend.sidecarStats.getRecordField).toBe(3);
-            expect(backend.sidecarStats.getRecordFields).toBe(1);
+            expect(backend.sidecarStats.commit).toBe(1);
+            expect(backend.sidecarStats.getRecordField).toBe(2);
+            expect(backend.sidecarStats.getRecordFields).toBe(2);
             expect(backend.sidecarStats.getMetaExt).toBe(0);
             expect(backend.sidecarStats.setRecordField).toBe(0);
             expect(snapshot.sessions.filter(message => message.role === 'user').map(message => message.content))

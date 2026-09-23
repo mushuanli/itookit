@@ -48,8 +48,9 @@ async function fixture(backend: IStorageBackend = new MemoryBackend()) {
     const id = await repository.createSession('Loaded title');
     const getUIState = vi.spyOn(repository, 'getUIState');
     const getLoadState = vi.spyOn(repository, 'getLoadState');
+    const loadView = vi.spyOn(repository, 'loadView');
     const bind = vi.spyOn(sessions, 'bindSession');
-    return { repository, agents, id, getUIState, getLoadState, bind, commandBus, execute, fs, kernel };
+    return { repository, agents, id, getUIState, getLoadState, loadView, bind, commandBus, execute, fs, kernel };
 }
 
 it.each(['main', 'review'])('initializes %s once and restores the selected branch draft and settings', async branch => {
@@ -79,7 +80,10 @@ it.each(['main', 'review'])('initializes %s once and restores the selected branc
     if (branch === 'main') { expect(user).not.toBeNull(); expect(user?.classList.contains('is-collapsed')).toBe(false); }
     else expect(user).toBeNull();
     expect(f.getUIState).not.toHaveBeenCalled();
+    // Switching a branch mutates the manifest, so the projection is read again after the bind.
     expect(f.getLoadState).toHaveBeenCalledTimes(1);
+    // A branch switch may re-read the chain while reconciling the projection.
+    expect(f.loadView).toHaveBeenCalled();
     expect(f.execute.mock.calls.filter(([name]) => name === 'vcs.branch.list')).toHaveLength(0);
     expect(container.querySelector('.llm-branch-indicator-name')?.textContent).toBe(branch);
     expect(f.execute.mock.calls.filter(([name]) => name === SessionCommand.GetSettings)).toHaveLength(0);
@@ -113,6 +117,7 @@ it('measures A → B → A with retained session state and fresh editor preferen
         await f.repository.updateManifest(id, { rootRoundId: 'r0', currentHead: 'r99', branches: { main: 'r99' } });
     }
     const history = vi.spyOn(f.repository, 'readHistoryChain');
+    const loadView = vi.spyOn(f.repository, 'loadView');
     const manifest = vi.spyOn(f.repository, 'getManifest');
     const children = vi.spyOn(f.fs.driver, 'getChildren');
     const samples: unknown[] = [];
@@ -122,7 +127,7 @@ it('measures A → B → A with retained session state and fresh editor preferen
             await f.repository.saveSessionSettings(id, { executionMode: 'agent' });
         }
         await f.kernel.waitIdle();
-        history.mockClear(); manifest.mockClear(); children.mockClear(); backend.resetSidecarStats();
+        history.mockClear(); loadView.mockClear(); manifest.mockClear(); children.mockClear(); backend.resetSidecarStats();
         Object.values(fileCalls).forEach(spy => spy.mockClear());
         const container = document.createElement('div'); document.body.append(container);
         let metrics: unknown;
@@ -135,9 +140,12 @@ it('measures A → B → A with retained session state and fresh editor preferen
             await f.kernel.waitIdle();
             samples.push({ label: ['A first', 'B first', 'A return'][index], metrics, readySidecar, readyFiles,
                 idleSidecar: { ...backend.sidecarStats }, idleFiles: fileCounts(),
-                historyReads: history.mock.calls.length, manifestReads: manifest.mock.calls.length, directoryLists: children.mock.calls.map(([path]) => path) });
+                historyReads: history.mock.calls.length, loadViews: loadView.mock.calls.length, manifestReads: manifest.mock.calls.length, directoryLists: children.mock.calls.map(([path]) => path) });
             expect(container.querySelector('[data-session-id="round-r99-user"]')?.textContent).toContain(`${id} question 99`);
-            expect(history).toHaveBeenCalledTimes(index === 2 ? 0 : 1);
+            // The chain is read together with the projection, and a registered Session is not
+            // re-read when it is revisited.
+            expect(history).toHaveBeenCalledTimes(0);
+            expect(loadView).toHaveBeenCalledTimes(index === 2 ? 0 : 1);
             expect(manifest).toHaveBeenCalledTimes(1);
             if (index === 2) {
                 expect(container.querySelector<HTMLInputElement>('#llm-title-input')?.value).toBe('Updated A');
@@ -162,7 +170,9 @@ it('restores the persisted branch draft when navigation does not specify a branc
     await editor.init(container);
     expect(container.querySelector<HTMLTextAreaElement>('.llm-input__textarea')?.value).toBe('selected draft');
     expect(f.getUIState).not.toHaveBeenCalled();
-    expect(f.getLoadState).toHaveBeenCalledTimes(1);
+    // Bind returns the projection, so the editor does not read the Session record again.
+    expect(f.getLoadState).toHaveBeenCalledTimes(0);
+    expect(f.loadView).toHaveBeenCalledTimes(1);
 });
 
 it('profiles complete editor initialization with LocalFS history and preserves stored UI/settings', async () => {

@@ -58,6 +58,11 @@ export interface SessionLoadState {
     settings: import('@itookit/common').ChatSessionSettings;
 }
 
+/** Editor load projection plus the selected history chain, read in the same transaction. */
+export interface SessionView extends SessionLoadState {
+    chain: import('./history-chain').SessionHistoryChain;
+}
+
 export interface SessionRepositoryChange { kind: 'session' | 'ui-state'; sessionId?: string }
 
 /** Domain storage. History and attachments belong to the Session identity. */
@@ -70,6 +75,8 @@ export interface ISessionRepository {
     ensureSession(id: string, title: string, origin?: SessionOrigin, folder?: string | null): Promise<string>;
     getManifest(sessionId: string): Promise<ConversationManifest>;
     getLoadState?(sessionId: string): Promise<SessionLoadState>;
+    /** Read the projection and the selected history chain together, when supported. */
+    loadView?(sessionId: string): Promise<SessionView>;
     /** Read the selected history chain in one storage snapshot when supported. */
     readHistoryChain?(sessionId: string): Promise<import('./history-chain').SessionHistoryChain>;
     list(): Promise<ConversationManifest[]>;

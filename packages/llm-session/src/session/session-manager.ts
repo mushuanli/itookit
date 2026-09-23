@@ -228,7 +228,9 @@ export class SessionManager implements ISession, SessionQuery {
         }
         const snapshot = await this.registry.bindSession(sessionId);
         await this.bindDurableProjection(sessionId);
-        return snapshot;
+        // Hand the projection loaded with the binding to the caller so the editor does not read
+        // the Session record a second time.
+        return { ...snapshot, view: this.registry.getLoadedView(sessionId) };
     }
 
     unbindSession(): void {

@@ -1,6 +1,6 @@
 import { generateUUID } from '@itookit/common';
 import { createFileSystemView, FSError, type IFileSystem, type ISeqFileTransaction } from '@itookit/vfs-core';
-import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin, type SessionLoadState, type SessionRepositoryChange } from './types';
+import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin, type SessionLoadState, type SessionView, type SessionRepositoryChange } from './types';
 import { sessionStorageRoot } from './session-storage-layout';
 import { collectHistoryChain, readRoundDocument, type SessionHistoryChain } from './history-chain';
 import type { PersistedRound, RoundManifest } from './round-types';
@@ -115,6 +115,24 @@ export class SessionRepository implements ISessionRepository {
             return {
                 manifest: await this.readManifestTx(tx, p, id, rows.session ?? null),
                 settings: { ...DEFAULT_SESSION_SETTINGS, ...JSON.parse(rows.settings ?? '{}') },
+            };
+        });
+    }
+    /**
+     * Projection plus history chain for one editor load. The editor needs both, and reading them
+     * together keeps one storage snapshot (one sidecar transaction, one journal probe) per bind.
+     */
+    async loadView(id: string): Promise<SessionView> {
+        const p = this.paths(id);
+        return this.fs.meta.seq!.transaction!(async tx => {
+            const rows = await tx.getEntries(p.session, ['session', 'settings']);
+            const manifest = await this.readManifestTx(tx, p, id, rows.session ?? null);
+            const chain = await this.readIndexedHistoryChain(tx, p, manifest)
+                ?? await collectHistoryChain(manifest, roundId => this.readRound(tx, p, roundId));
+            return {
+                manifest,
+                settings: { ...DEFAULT_SESSION_SETTINGS, ...JSON.parse(rows.settings ?? '{}') },
+                chain,
             };
         });
     }

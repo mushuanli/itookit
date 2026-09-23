@@ -56,9 +56,13 @@ export class SessionService {
         if (cached) {
             return { sessionId, snapshot, title: cached.title, manifest: cached.manifest, settings: cached.settings };
         }
-        const { manifest, settings } = this.engine.getLoadState
-            ? await this.engine.getLoadState(sessionId)
-            : { manifest: await this.engine.getManifest(sessionId), settings: await this.getSessionSettings() };
+        // The binding already read the projection in the same snapshot; only read the store when
+        // the host does not provide it.
+        const loaded = snapshot.view
+            ?? (this.engine.getLoadState
+                ? await this.engine.getLoadState(sessionId)
+                : { manifest: await this.engine.getManifest(sessionId), settings: await this.getSessionSettings() });
+        const { manifest, settings } = loaded;
         const title = manifest.title || defaultTitle;
         this.subscribeOnce();
         this.projections.set(sessionId, { at: Date.now(), title, manifest, settings });

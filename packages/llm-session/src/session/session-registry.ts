@@ -10,7 +10,7 @@ import {
     RegistryEvent,
 } from '../core/types';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
-import { ISessionRepository } from '../persistence/types';
+import { ISessionRepository, type SessionLoadState } from '../persistence/types';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
 import { RoundLog, roundToProjection } from '../persistence/round-log';
@@ -41,6 +41,8 @@ export class SessionRegistry {
 
     // === 当前视图绑定 ===
     private _boundSessionId: string | null = null;
+    /** Projection loaded with the head chain, reused by the editor while the binding stands. */
+    private readonly views = new Map<string, SessionLoadState>();
     private bindingVersion = 0;
     private eventUnsubscribe: (() => void) | null = null;
 
@@ -145,6 +147,13 @@ export class SessionRegistry {
     }
 
     getCurrentSessionId(): string | null { return this._boundSessionId; }
+
+    /**
+     * Projection read together with the head chain during the current bind, when the host reads
+     * both in one snapshot. It is dropped again when a later bind does not re-read the chain, so
+     * callers must treat an absent view as "read the store".
+     */
+    getLoadedView(sessionId: string): SessionLoadState | undefined { return this.views.get(sessionId); }
 
     getStatus(): SessionStatus | 'unbound' {
         if (!this._boundSessionId) return 'unbound';
@@ -294,6 +303,9 @@ export class SessionRegistry {
             const state = this.states.get(sessionId);
             existing.lastActiveTime = Date.now();
             this._eventBus.ensureSession(sessionId);
+            // A registered Session is not re-read here, so any projection from an earlier load may
+            // be stale: drop it and let the caller read the store (or use its own invalidated cache).
+            this.views.delete(sessionId);
             if (state && (existing.status === 'completed' || existing.status === 'failed')) {
                 await this.reloadSessionData(sessionId, state);
             }
@@ -315,6 +327,7 @@ export class SessionRegistry {
         if (runtime && (runtime.status === 'running' || runtime.status === 'queued')) abortFn(sessionId);
         this.sessions.delete(sessionId);
         this.states.delete(sessionId);
+        this.views.delete(sessionId);
         this._eventBus.removeSession(sessionId);
         if (this._activeSessionId === sessionId) this._activeSessionId = null;
         this._eventBus.emitGlobal({ type: 'session_unregistered', payload: { sessionId } });
@@ -381,6 +394,13 @@ export class SessionRegistry {
     }
 
     private async collectHeadChain(sessionId: string): Promise<SessionHistoryChain> {
+        // One snapshot for the projection and the chain when the host can read both together;
+        // the editor reuses this projection instead of reading the Session record again.
+        if (this._engine.loadView) {
+            const view = await this._engine.loadView(sessionId);
+            this.views.set(sessionId, { manifest: view.manifest, settings: view.settings });
+            return view.chain;
+        }
         if (this._engine.readHistoryChain) return this._engine.readHistoryChain(sessionId);
         const log = new RoundLog(this._engine, sessionId);
         return collectHistoryChain(await log.loadManifest(), id => log.readRound(id));

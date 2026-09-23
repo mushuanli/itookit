@@ -304,6 +304,11 @@ export type RegenerateTrigger = 'from_assistant' | 'from_user' | 'from_edit';
 
 export interface SessionSnapshot {
     sessionId: string;
+    /**
+     * Projection read together with the binding, when the host reads it in the same snapshot.
+     * Consumers must still fall back to a repository read when it is absent.
+     */
+    view?: import('../persistence/types').SessionLoadState;
     sessions: SessionGroup[];
     status: SessionStatus;
     isRunning: boolean;
