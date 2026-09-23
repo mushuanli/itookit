@@ -17,6 +17,11 @@ use tokio::sync::Mutex;
 /// Statements at or above this host-side cost are always recorded.
 const SIDECAR_SLOW_SQL_MS: u128 = 25;
 
+/// Commits between explicit checkpoints. SQLite's own autocheckpoint runs *inside* the committing
+/// statement and busy-waits for the WAL write lock when a reader holds a snapshot, which shows up
+/// as a ~500 ms commit; checking in from the host, outside any transaction, cannot wait.
+const SIDECAR_CHECKPOINT_EVERY: u32 = 16;
+
 #[derive(Default)]
 pub struct SidecarTransactions {
     next_id: AtomicU64,
@@ -29,6 +34,8 @@ struct SidecarState {
     active: HashMap<u64, ScopedTransaction>,
     databases: HashMap<String, HashMap<(String, u64), usize>>,
     database_locks: HashMap<String, Weak<Mutex<()>>>,
+    /// Commits since the last explicit WAL checkpoint, per database.
+    commit_counters: HashMap<String, u32>,
 }
 
 struct ScopedTransaction {
@@ -359,8 +366,7 @@ impl SidecarTransactions {
         Ok(())
     }
 
-    async fn database_lock(&self, database: &str) -> Arc<Mutex<()>> {
-        let mut state = self.state.lock().await;
+    async fn database_lock(&self, database: &str) -> Arc<Mutex<()>> {        let mut state = self.state.lock().await;
         if let Some(lock) = state.database_locks.get(database).and_then(Weak::upgrade) {
             return lock;
         }
@@ -403,6 +409,28 @@ impl SidecarTransactions {
             return false;
         }
         state.databases.remove(database);
+        true
+    }
+
+    /// True while any page still has an open transaction on this database.
+    async fn has_active_transaction(&self, database: &str) -> bool {
+        self.state
+            .lock()
+            .await
+            .active
+            .values()
+            .any(|entry| entry.database == database)
+    }
+
+    /// Reserves a checkpoint slot so steady-state commits do not pay a PRAGMA each time.
+    async fn take_checkpoint_slot(&self, database: &str) -> bool {
+        let mut state = self.state.lock().await;
+        let counter = state.commit_counters.entry(database.to_owned()).or_default();
+        *counter += 1;
+        if *counter < SIDECAR_CHECKPOINT_EVERY {
+            return false;
+        }
+        *counter = 0;
         true
     }
 
@@ -656,15 +684,67 @@ async fn connect_database(database: &str) -> Result<SqlitePool, String> {
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .busy_timeout(Duration::from_secs(30))
-        .foreign_keys(true);
+        .foreign_keys(true)
+        // SQLite's autocheckpoint runs inside the committing statement and busy-waits for the WAL
+        // write lock while a reader holds a snapshot (measured: ~520 ms per heartbeat commit).
+        // The host checkpoints explicitly instead, outside any transaction, so it cannot wait.
+        .pragma("wal_autocheckpoint", "0");
     SqlitePoolOptions::new()
         .connect_with(options)
         .await
         .map_err(|error| error.to_string())
 }
 
-async fn retire_pool(pool: SqlitePool, database: String) {
-    if tokio::time::timeout(Duration::from_secs(2), pool.close())
+/// Run a PASSIVE checkpoint and report `(busy, walFrames, checkpointedFrames)`. PASSIVE never
+/// waits for readers, so this cannot reproduce the commit-time stall it replaces.
+async fn checkpoint_pool(pool: &SqlitePool) -> Result<(i64, i64, i64), String> {
+    let rows = sqlx::query("PRAGMA wal_checkpoint(PASSIVE)")
+        .fetch_all(pool)
+        .await
+        .map_err(|error| error.to_string())?;
+    let decoded = decode_rows(rows)?;
+    let field = |name: &str| {
+        decoded
+            .first()
+            .and_then(|row| row.get(name))
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+    };
+    Ok((field("busy"), field("log"), field("checkpointed")))
+}
+
+/// Check the WAL in from the host, outside any transaction, once the page using the database is
+/// quiet. Only checkpoints that did work or met a reader are recorded.
+async fn checkpoint_after_commit(
+    databases: &DbInstances,
+    transactions: &SidecarTransactions,
+    database: &str,
+) {
+    if transactions.has_active_transaction(database).await {
+        return;
+    }
+    let Ok(pool) = database_pool(databases, database).await else {
+        return;
+    };
+    let started = Instant::now();
+    let result = checkpoint_pool(&pool).await;
+    let duration_ms = started.elapsed().as_millis();
+    match &result {
+        Ok((busy, frames, checkpointed)) => {
+            if *busy != 0 || *checkpointed != 0 || duration_ms >= SIDECAR_SLOW_SQL_MS {
+                crate::diagnostics::record("sidecar.checkpoint", serde_json::json!({
+                    "database": database, "busy": busy, "walFrames": frames,
+                    "checkpointed": checkpointed, "durationMs": duration_ms}));
+            }
+        }
+        Err(error) => crate::diagnostics::record_durable(
+            "sidecar.checkpoint.failed",
+            serde_json::json!({"database": database, "durationMs": duration_ms, "error": error}),
+        ),
+    }
+}
+
+async fn retire_pool(pool: SqlitePool, database: String) {    if tokio::time::timeout(Duration::from_secs(2), pool.close())
         .await
         .is_err()
     {
@@ -957,11 +1037,16 @@ pub async fn sidecar_finish(
     scope: u64,
     commit: bool,
     webview: tauri::WebviewWindow,
+    databases: State<'_, DbInstances>,
     transactions: State<'_, SidecarTransactions>,
 ) -> Result<(), String> {
-    transactions
+    let result = transactions
         .finish(transaction_id, webview.label(), scope, &database, commit)
-        .await
+        .await;
+    if result.is_ok() && commit && transactions.take_checkpoint_slot(&database).await {
+        checkpoint_after_commit(&databases, &transactions, &database).await;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -1050,6 +1135,99 @@ mod tests {
             assert!(should_record_sql(false, false, &write, Some(1)));
 
             pool.close().await;
+        });
+    }
+
+    #[test]
+    fn explicit_checkpoints_do_not_wait_for_a_reader_and_are_slotted() {
+        tauri::async_runtime::block_on(async {
+            let path = std::env::temp_dir().join(format!(
+                "sidecar-checkpoint-{}-{}.sqlite",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let database = format!("sqlite:{}", path.display());
+            let pool = connect_database(&database).await.unwrap();
+            sqlx::query("CREATE TABLE records (value TEXT)")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO records VALUES ('x')")
+                .execute(&pool)
+                .await
+                .unwrap();
+            // Autocheckpoint stays off so the host, not the committing statement, checks in.
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>("PRAGMA wal_autocheckpoint")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+
+            // A reader holding a snapshot is what made SQLite's own checkpoint busy-wait; the
+            // explicit PASSIVE checkpoint must return promptly instead.
+            let reader = connect_database(&database).await.unwrap();
+            let mut snapshot = reader.acquire().await.unwrap();
+            sqlx::query("BEGIN").execute(&mut *snapshot).await.unwrap();
+            sqlx::query("SELECT count(*) FROM records")
+                .fetch_all(&mut *snapshot)
+                .await
+                .unwrap();
+            let started = Instant::now();
+            let (busy, frames, _) = checkpoint_pool(&pool).await.unwrap();
+            assert!(
+                started.elapsed() < Duration::from_millis(500),
+                "checkpoint waited for the reader"
+            );
+            assert!(busy == 0 || busy == 1);
+            assert!(frames >= 0);
+            sqlx::query("COMMIT").execute(&mut *snapshot).await.unwrap();
+            drop(snapshot);
+            reader.close().await;
+
+            // Padding the WAL with many frames still checkpoints promptly once the reader is gone.
+            for index in 0..64 {
+                sqlx::query("INSERT INTO records VALUES (?)")
+                    .bind("x".repeat(1024 + index))
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+            let (busy, _, checkpointed) = checkpoint_pool(&pool).await.unwrap();
+            assert_eq!(busy, 0);
+            assert!(checkpointed > 0, "expected frames to be checkpointed");
+
+            // Steady-state commits only reserve a slot every SIDECAR_CHECKPOINT_EVERY commits.
+            let transactions = SidecarTransactions::default();
+            let scope = transactions.open_scope("main").await.unwrap();
+            transactions
+                .register_database("main", scope, &database)
+                .await
+                .unwrap();
+            let mut slots = 0;
+            for _ in 0..(SIDECAR_CHECKPOINT_EVERY * 3) {
+                if transactions.take_checkpoint_slot(&database).await {
+                    slots += 1;
+                }
+            }
+            assert_eq!(slots, 3);
+            assert!(!transactions.has_active_transaction(&database).await);
+            let id = transactions
+                .begin(&pool, "main", scope, &database)
+                .await
+                .unwrap();
+            assert!(transactions.has_active_transaction(&database).await);
+            transactions
+                .finish(id, "main", scope, &database, false)
+                .await
+                .unwrap();
+
+            pool.close().await;
+            std::fs::remove_file(path).unwrap();
         });
     }
 
