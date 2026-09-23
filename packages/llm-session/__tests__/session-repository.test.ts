@@ -84,6 +84,13 @@ describe('Session data repository', () => {
         expect((await repository.list()).map(session => session.id)).toContain(id);
     });
 
+    it('omits a Session whose seqfile was removed while its records remain', async () => {
+        const id = await repository.createSession('Interrupted deletion');
+        await fs.driver.delete([`/var/lib/sessions/${id}/session.seq`]);
+        expect(await fs.driver.exists(`/var/lib/sessions/${id}`)).toBe(true);
+        expect(await repository.list()).toEqual([]);
+    });
+
     it('repairs missing history without overwriting an existing Session record', async () => {
         const id = 'partial';
         const root = `/var/lib/sessions/${id}`;
