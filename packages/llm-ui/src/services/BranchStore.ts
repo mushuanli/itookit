@@ -28,6 +28,12 @@ export class BranchStore implements IBranchStore {
     get currentBranch(): BranchItem | undefined { return this.branches.find(b => b.isCurrent); }
     get count(): number { return this.branches.length; }
 
+    setBranches(branches: BranchItem[]): void {
+        if (this.isEqual(this.branches, branches)) return;
+        this.branches = [...branches];
+        this.notify();
+    }
+
     /**
      * 刷新 — 合并并发请求
      */
@@ -52,10 +58,7 @@ export class BranchStore implements IBranchStore {
             ? [{ name: 'main', headNodeId: '', isCurrent: true }]
             : raw.map(b => ({ name: b.name, headNodeId: b.headNodeId, isCurrent: b.isCurrent }));
 
-        if (!this.isEqual(this.branches, newBranches)) {
-            this.branches = newBranches;
-            this.notify();
-        }
+        this.setBranches(newBranches);
 
         return this.branches;
     }
@@ -82,4 +85,3 @@ export class BranchStore implements IBranchStore {
         this.refreshPromise = null;
     }
 }
-

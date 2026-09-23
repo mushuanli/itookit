@@ -247,6 +247,9 @@ export class LLMWorkspaceEditor implements IEditor {
             this.currentSessionId = session.sessionId;
             const initial = await this.initComponents(session);
             measurement.mark('componentsAndSettings');
+            this.branchStore.setBranches(Object.entries(session.manifest.branches).map(([name, headNodeId]) => ({
+                name, headNodeId: headNodeId ?? '', isCurrent: name === session.manifest.currentBranch,
+            })));
             this.initCommands();
             this.initEventHandler();
             this.bindEvents();
@@ -255,7 +258,6 @@ export class LLMWorkspaceEditor implements IEditor {
             measurement.mark('restoreAndRender');
 
             this.statusIndicator.cacheElements();
-            await this.branchIndicator.refresh();
             measurement.mark('branches');
 
             this.initComplete = true;

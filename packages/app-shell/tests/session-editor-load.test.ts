@@ -80,6 +80,8 @@ it.each(['main', 'review'])('initializes %s once and restores the selected branc
     else expect(user).toBeNull();
     expect(f.getUIState).not.toHaveBeenCalled();
     expect(f.getLoadState).toHaveBeenCalledTimes(1);
+    expect(f.execute.mock.calls.filter(([name]) => name === 'vcs.branch.list')).toHaveLength(0);
+    expect(container.querySelector('.llm-branch-indicator-name')?.textContent).toBe(branch);
     expect(f.execute.mock.calls.filter(([name]) => name === SessionCommand.GetSettings)).toHaveLength(0);
     expect(container.querySelector<HTMLTextAreaElement>('.llm-input__textarea')?.value).toBe(`${branch} draft`);
     expect(container.querySelector<HTMLInputElement>('#llm-title-input')?.value).toBe('Loaded title');
@@ -136,7 +138,7 @@ it('measures A → B → A with retained session state and fresh editor preferen
                 historyReads: history.mock.calls.length, manifestReads: manifest.mock.calls.length, directoryLists: children.mock.calls.map(([path]) => path) });
             expect(container.querySelector('[data-session-id="round-r99-user"]')?.textContent).toContain(`${id} question 99`);
             expect(history).toHaveBeenCalledTimes(index === 2 ? 0 : 1);
-            expect(manifest).toHaveBeenCalledTimes(2);
+            expect(manifest).toHaveBeenCalledTimes(1);
             if (index === 2) {
                 expect(container.querySelector<HTMLInputElement>('#llm-title-input')?.value).toBe('Updated A');
                 expect(container.querySelector<HTMLTextAreaElement>('.llm-input__textarea')?.value).toBe('Fresh draft');
