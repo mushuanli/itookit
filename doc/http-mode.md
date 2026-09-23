@@ -18,7 +18,7 @@ Browser
   → CLI HTTP bridge
       ├── profile VFS rootDir
       ├── Node fs (fs_* / directory_*)
-      └── node:sqlite (plugin:sql|* / sidecar_*)
+      └── node:sqlite (sidecar_*；兼容旧构建的 plugin:sql|*)
 ```
 
 CLI HTTP 模式会先启动共享的 MindOS runtime，再开始监听 HTTP：
@@ -60,6 +60,7 @@ Tauri UI 入口检测到 remote 模式后不会再执行 `initApp()`，因此不
 - 文件访问限制在 `rootDir` 与 `--set-home <dir>` 内；
 - `directory_open` 返回受限目录句柄，`directory_io` 不能越出该目录；
 - SQLite 文件相对路径按 profile `rootDir` 解析。
+- 浏览器页面以 `sidecar_open_scope` 建立代次；刷新复用已打开连接，旧页面迟到的事务与 close 被拒绝。
 
 ## 能力边界
 

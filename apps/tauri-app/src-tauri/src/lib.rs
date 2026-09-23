@@ -38,7 +38,7 @@ fn read_settings(config_dir: &PathBuf) -> MindosSettings {
 
 // ── Path resolution ────────────────────────────────────────────────────────────
 
-struct AppPaths {
+pub(crate) struct AppPaths {
     /// Config dir: $XDG_CONFIG_HOME/mindos or ~/.config/mindos. mindos.json lives here.
     /// Deliberately separate from the data root — ~/.mindos may hold unrelated
     /// data, so it is never used as a default location.
@@ -151,7 +151,7 @@ fn normalize_path(path: &Path) -> PathBuf {
     out
 }
 
-fn is_allowed(path: &Path, paths: &AppPaths) -> bool {
+pub(crate) fn is_allowed(path: &Path, paths: &AppPaths) -> bool {
     let norm = normalize_path(path);
     norm.starts_with(&paths.root_dir) || norm.starts_with(&paths.home_dir)
 }
@@ -578,7 +578,7 @@ pub fn run() {
                 let _ = window.with_webview(|webview| {
                     use webkit2gtk::WebViewExt;
                     webview.inner().connect_web_process_terminated(|_, reason| {
-                        diagnostics::record("webview.terminated", serde_json::json!({"reason": format!("{reason:?}")}));
+                        diagnostics::record_durable("webview.terminated", serde_json::json!({"reason": format!("{reason:?}")}));
                     });
                 });
             }
@@ -600,6 +600,10 @@ pub fn run() {
             scoped_fs::directory_stat_many,
             scoped_fs::directory_read_range,
             scoped_fs::directory_io,
+            sidecar::sidecar_open_database,
+            sidecar::sidecar_database_execute,
+            sidecar::sidecar_database_select,
+            sidecar::sidecar_close_database,
             sidecar::sidecar_begin,
             sidecar::sidecar_open_scope,
             sidecar::sidecar_execute,

@@ -1,7 +1,7 @@
 /**
  * @file apps/tauri-app/src/db/tauri-sql-sidecar.ts
  *
- * TauriSqlSidecarDb — ISidecarDb backed by @tauri-apps/plugin-sql (Rust SQLite).
+ * TauriSqlSidecarDb — ISidecarDb backed by the Tauri host's SQLite pools.
  *
  * v4.1: Path-based schema — aligns with BetterSqliteSidecarDb.
  *   - meta_ext keyed by path (TEXT), no ino allocation
@@ -12,12 +12,16 @@
  * preserve connection affinity across statements.
  */
 
-import Database from '@tauri-apps/plugin-sql';
 import { invoke } from '@tauri-apps/api/core';
 import { PATH_DATA_EXISTS, movePathStatements, SCHEMA_VERSION } from '@itookit/vfsdriver-localfs';
 import type { ISidecarDb, MetaExtRow } from '@itookit/vfsdriver-localfs';
 
-type SidecarConnection = Pick<Database, 'execute' | 'select' | 'close'>;
+interface SidecarConnection {
+    execute(query: string, values?: unknown[]): Promise<unknown>;
+    select<T>(query: string, values?: unknown[]): Promise<T>;
+    close(): Promise<void>;
+}
+
 let pageScope: Promise<number> | undefined;
 
 function openPageScope(): Promise<number> {
@@ -26,6 +30,18 @@ function openPageScope(): Promise<number> {
         pageScope = undefined;
         throw error;
     });
+}
+
+function openConnection(database: string, scope: number): SidecarConnection {
+    return {
+        execute: (query, values) => invoke('sidecar_database_execute', {
+            database, scope, query, values: values ?? [],
+        }),
+        select: (query, values) => invoke('sidecar_database_select', {
+            database, scope, query, values: values ?? [],
+        }),
+        close: () => invoke('sidecar_close_database', { database, scope }).then(() => undefined),
+    };
 }
 
 // ── Path-based DDL — one statement per execute() ──────────────────────────────
@@ -76,8 +92,9 @@ export class TauriSqlSidecarDb implements ISidecarDb {
 
     static async open(dbPath: string): Promise<TauriSqlSidecarDb> {
         const scope = await openPageScope();
-        const db = await Database.load(`sqlite:${dbPath}`);
-        const instance = new TauriSqlSidecarDb(db, `sqlite:${dbPath}`, scope);
+        const database = `sqlite:${dbPath}`;
+        await invoke('sidecar_open_database', { database, scope });
+        const instance = new TauriSqlSidecarDb(openConnection(database, scope), database, scope);
         try {
             const initialized = await instance.assertSchemaVersion();
             await instance.initSchema(initialized);
@@ -135,6 +152,14 @@ export class TauriSqlSidecarDb implements ISidecarDb {
             [path],
         );
         return rows[0] ?? null;
+    }
+
+    async getMetaExtMany(paths: string[]): Promise<MetaExtRow[]> {
+        const unique = [...new Set(paths)];
+        if (!unique.length) return [];
+        return this.db.select<MetaExtRow[]>(
+            `SELECT * FROM meta_ext WHERE path IN (${unique.map(() => '?').join(', ')})`, unique,
+        );
     }
 
     async upsertMetaExt(row: MetaExtRow): Promise<void> {
@@ -209,6 +234,20 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         return rows[0] ? JSON.parse(rows[0].value) : undefined;
     }
 
+    async getRecordFields(path: string, fields: string[]): Promise<Record<string, unknown>> {
+        const unique = [...new Set(fields)];
+        const result: Record<string, unknown> = {};
+        for (let start = 0; start < unique.length; start += 512) {
+            const batch = unique.slice(start, start + 512);
+            const rows = await this.db.select<Array<{ field: string; value: string }>>(
+                `SELECT field, value FROM records WHERE path = ? AND field IN (${batch.map(() => '?').join(', ')})`,
+                [path, ...batch],
+            );
+            for (const row of rows) result[row.field] = JSON.parse(row.value);
+        }
+        return result;
+    }
+
     async setRecordField(path: string, field: string, value: unknown): Promise<void> {
         await this.db.execute(
             `INSERT INTO records(path, field, value) VALUES (?, ?, ?)
@@ -264,17 +303,18 @@ export class TauriSqlSidecarDb implements ISidecarDb {
     async transaction<T>(operation: (db: ISidecarDb) => Promise<T>): Promise<T> {
         if (!this.databaseUrl) throw new Error('Nested sidecar transactions are not supported');
         const transactionId = await invoke<number>('sidecar_begin', { database: this.databaseUrl, scope: this.scope });
+        const identity = { transactionId, database: this.databaseUrl, scope: this.scope };
         const scoped = new TauriSqlSidecarDb({
-            execute: (query, values) => invoke('sidecar_execute', { transactionId, query, values: values ?? [] }),
-            select: (query, values) => invoke('sidecar_select', { transactionId, query, values: values ?? [] }),
+            execute: (query, values) => invoke('sidecar_execute', { ...identity, query, values: values ?? [] }),
+            select: (query, values) => invoke('sidecar_select', { ...identity, query, values: values ?? [] }),
             close: async () => { throw new Error('Cannot close a transaction-scoped sidecar'); },
         });
         try {
             const result = await operation(scoped);
-            await invoke('sidecar_finish', { transactionId, commit: true });
+            await invoke('sidecar_finish', { ...identity, commit: true });
             return result;
         } catch (error) {
-            try { await invoke('sidecar_finish', { transactionId, commit: false }); }
+            try { await invoke('sidecar_finish', { ...identity, commit: false }); }
             catch (rollbackError) {
                 throw new AggregateError([error, rollbackError], 'Sidecar transaction failed and rollback failed', { cause: error });
             }
@@ -290,7 +330,7 @@ export class TauriSqlSidecarDb implements ISidecarDb {
 
     async close(): Promise<void> {
         if (!this.databaseUrl) throw new Error('Cannot close an unidentified sidecar database');
-        await this.db.close(this.databaseUrl);
+        await this.db.close();
     }
 }
 

@@ -4,9 +4,9 @@
 
 Linux 实际桌面日志展开后的错误为 `Filesystem sources could not be opened → Filesystem source root failed → (code: 5) database is locked`。这是启动阶段 root SQLite 写锁冲突，与 Session 编辑器重复绑定是不同路径；仅凭锁错误不能确定所有锁持有者。
 
-桌面原来的 Rust 事务表跨页面存活，页面刷新丢失 JS 回调后，未提交的 `BEGIN IMMEDIATE` 仍可能留在宿主内持锁。修复后，每个新页面先建立事务代次：回滚同一 WebView 上一代事务，拒绝旧页面迟到的 begin，并保持其它窗口事务。该协议需要一起重新构建并重启 Rust 宿主与前端；只刷新旧版宿主不能启用新命令。
+桌面原来的 Rust 事务表跨页面存活，页面刷新丢失 JS 回调后，未提交的 `BEGIN IMMEDIATE` 仍可能留在宿主内持锁。修复后，每个新页面先建立事务代次：回滚同一 WebView 上一代事务，拒绝旧页面迟到的 begin，并保持其它窗口事务。事务语句和结束还会校验窗口、代次和数据库，不能凭可预测的事务 ID 操作其它窗口。SQLite pool 由同一协议按页面租用：刷新撤销旧租约并复用健康 pool；关闭最后一份租约前回滚遗留事务，同库打开/关闭串行，关闭 pool 最多等待两秒。该协议需要一起重新构建并重启 Rust 宿主与前端；只刷新旧版宿主不能启用新命令。
 
-暖启动不再对已有完整 schema 重复执行 DDL。每个已初始化数据库的 schema 打开路径由原来的 13 次 SQL/plugin IPC 降到 6 次（load + 5 select）；每页面额外一次共享 scope 握手。新库、缺少 schema 对象、版本不兼容分别保留初始化、补齐、拒绝语义。此计数不代表完整应用启动时间；后续 journal 恢复和 Session 恢复仍执行。
+暖启动不再对已有完整 schema 重复执行 DDL。每个已初始化数据库仍执行 schema/PRAGMA 校验，但刷新不再通过 `plugin:sql|load` 新建 pool；`sidecar.database.open` 的 `reused` 与 `durationMs` 可直接确认复用和打开耗时。新库、缺少 schema 对象、版本不兼容分别保留初始化、补齐、拒绝语义。此计数不代表完整应用启动时间；后续 journal 恢复和 Session 恢复仍执行。
 
 LocalFS journal 初始化失败会关闭已打开 sidecar，失败来源、数据库路径及清理错误都会进入错误链。不会因 `database is locked` 删除数据库，也不会绕过跨进程 journal 恢复。
 
@@ -14,20 +14,21 @@ LocalFS journal 初始化失败会关闭已打开 sidecar，失败来源、数�
 
 | 宿主 | Linux 默认目录 | 重点事件 |
 |---|---|---|
-| Tauri | `${XDG_CONFIG_HOME:-$HOME/.config}/mindos/logs/desktop/` | `bootstrap.source.failed`、`bootstrap.stage`、`bootstrap.failed`、`sidecar.scope.open`、WebKit/Rust/进程异常 |
+| Tauri | `${XDG_CONFIG_HOME:-$HOME/.config}/mindos/logs/desktop/` | `bootstrap.source.failed`、`bootstrap.stage`、`bootstrap.failed`、`sidecar.scope.open`、`sidecar.database.open`、WebKit/Rust/进程异常 |
 | CLI（含 HTTP） | `${XDG_CONFIG_HOME:-$HOME/.config}/mindos/logs/cli/` | `cli.failed`、`command.error`、`run.failed`、`runtime.*`、`http.*`、`process.*` |
 
 `MINDOS_DIAGNOSTICS_DIR` 可直接指定日志目录；日志独立于 `--profile` / 数据根。每个进程一个 `<时间>-<PID>.jsonl`，4 MiB 后保留一份 previous 文件，历史进程文件不自动清除。错误链最多展开 8 层、32 项，单条前端/CLI 消息截断到 4000 字符。
 
-启动失败先打开界面/终端提示的文件，查找 `.failed` 事件，沿内层原因定位具体 source 与数据库。比较 `bootstrap.stage` / `bootstrap.source.ready` 的 `durationMs` 可区分数据库打开、runtime 和 UI 初始化耗时。`sidecar.scope.open` 的 `rolledBack` 表示本次刷新回收了多少旧事务。
+启动失败先打开界面/终端提示的文件，查找 `.failed` 事件，沿内层原因定位具体 source 与数据库。比较 `bootstrap.stage` / `bootstrap.source.ready` 的 `durationMs` 可区分数据库打开、runtime 和 UI 初始化耗时。`sidecar.scope.open` 的 `rolledBack` 表示本次刷新回收了多少旧事务；`sidecar.database.open` 区分新建与复用 pool。常规阶段事件只追加日志，不再逐条 `fsync`；panic、异常退出和前端 failure/error/exception/rejection 事件仍同步落盘。
 
 CLI 使用 `uncaughtExceptionMonitor` 记录致命异常，不安装吞错的异常处理器；同步日志追加使普通失败退出前的记录可读取。SIGKILL 等无法运行 JS 回调的结束不保证有 CLI 退出记录。桌面的 Linux 独立监测进程和下次启动补记机制见 [MindOS profile](../mindos-profile.md#tauri--cli-运行日志)。
 
 ## 回归证据
 
 - `packages/app-shell/tests/desktop-diagnostics.test.ts`：嵌套 AggregateError/cause、循环引用、长度限制。
-- `packages/app-shell/tests/tauri-sidecar-close.test.ts`：只关闭当前 pool、初始化失败保留原因、暖启动跳过 DDL、缺对象补齐。
-- `apps/tauri-app/src-tauri/src/sidecar.rs`：真实 SQLite 验证重载回滚、旧代次拒绝、等待中 begin 拒绝、其它窗口隔离和新事务提交。
+- `packages/app-shell/tests/tauri-sidecar-close.test.ts`：宿主 pool 命令接线、定向关闭、初始化失败保留原因、暖启动跳过 DDL、缺对象补齐。
+- `apps/tauri-app/src-tauri/src/sidecar.rs`：真实 SQLite 验证重载回滚、旧代次/旧 close 拒绝、pool 租约转移、等待中 begin 拒绝、其它窗口隔离和新事务提交。
+- `apps/cli/tests/http-server.test.ts`：HTTP 宿主跨页面复用连接、拒绝旧 scope close，并保持记录可读。
 - `packages/vfsdriver-localfs/tests/25-journal-probe.test.ts`：journal 初始化失败关闭 sidecar，随后可重试。
 - `apps/cli/tests/diagnostics.test.ts`：轮换/长度限制、真实 CLI 缺文件失败、未捕获异常/未处理 rejection 的落盘与失败退出码、stdout 不受影响。
 
@@ -75,3 +76,5 @@ CLI 使用 `uncaughtExceptionMonitor` 记录致命异常，不安装吞错的异
 后续类型读取优化将上述隔离暖启动事务进一步从 149 降为 70，元数据读取从 142 降为 66，record 字段读取从 158 降为 79；文件读取/枚举/配置写入数量不变。改动覆盖 DirectoryDriver 与 FileSystemView 的存在性、类型检查及读内容路径，详见 [VFS 读取性能与架构审查](./vfs-read-performance-review.md)。
 
 桌面新增 `frontend.session.load.ready`，一次记录 Session 编辑器的 `layout`、`bindSession`、`componentsAndSettings`、`restoreAndRender`、`branches` 分段和总耗时。每个分段表示刚完成的步骤，与 bootstrap 的下一阶段标签不同。它衡量 init 等待链，不包含路由准备、后台 Task 恢复完成、所有异步 Markdown 完成或浏览器首帧；诊断写入不阻塞编辑器 ready。
+
+首次打开 Session 时，`branches` 阶段使用 `loadSession` 已读取的 manifest 初始化分支指示器，不再额外调用 `vcs.branch.list`；分支变更事件仍会刷新列表。因此该阶段现在只反映本地初始化耗时，不能再用于衡量分支数据库读取延迟。

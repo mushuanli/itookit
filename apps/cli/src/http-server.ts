@@ -132,12 +132,14 @@ async function resolveStaticDir(): Promise<string> {
     throw new Error('No built UI found. Run `pnpm --filter tauri-app build` or `pnpm --filter mind-os build` first.');
 }
 
-class HttpUiServer {
+export class HttpUiServer {
     readonly http = createServer((request, response) => { void this.handle(request, response); });
     private readonly scopes = new Map<string, DirectoryScope>();
     private readonly sqlite = new Map<string, SqliteConnection>();
-    private readonly transactions = new Map<number, { connection: SqliteConnection; nextId: number }>();
+    private readonly databaseLeases = new Map<string, number>();
+    private readonly transactions = new Map<number, { connection: SqliteConnection; scope: number; database: string }>();
     private nextTransaction = 1;
+    private sidecarScope = 0;
 
     constructor(private readonly options: HttpServerOptions) {}
 
@@ -228,10 +230,15 @@ class HttpUiServer {
             case 'plugin:sql|execute': return this.sqliteExecute(String(args.db), String(args.query), values(args.values));
             case 'plugin:sql|select': return this.sqliteSelect(String(args.db), String(args.query), values(args.values));
             case 'plugin:sql|close': return this.sqliteClose(String(args.db));
-            case 'sidecar_begin': return this.sidecarBegin(String(args.database));
-            case 'sidecar_execute': return this.sidecarExecute(Number(args.transactionId), String(args.query), values(args.values), false);
-            case 'sidecar_select': return this.sidecarExecute(Number(args.transactionId), String(args.query), values(args.values), true);
-            case 'sidecar_finish': return this.sidecarFinish(Number(args.transactionId), Boolean(args.commit));
+            case 'sidecar_open_scope': return this.sidecarOpenScope();
+            case 'sidecar_open_database': return this.sidecarOpenDatabase(String(args.database), Number(args.scope));
+            case 'sidecar_database_execute': return this.sidecarDatabaseExecute(String(args.database), Number(args.scope), String(args.query), values(args.values));
+            case 'sidecar_database_select': return this.sidecarDatabaseSelect(String(args.database), Number(args.scope), String(args.query), values(args.values));
+            case 'sidecar_close_database': return this.sidecarCloseDatabase(String(args.database), Number(args.scope));
+            case 'sidecar_begin': return this.sidecarBegin(String(args.database), Number(args.scope));
+            case 'sidecar_execute': return this.sidecarExecute(Number(args.transactionId), String(args.database), Number(args.scope), String(args.query), values(args.values), false);
+            case 'sidecar_select': return this.sidecarExecute(Number(args.transactionId), String(args.database), Number(args.scope), String(args.query), values(args.values), true);
+            case 'sidecar_finish': return this.sidecarFinish(Number(args.transactionId), String(args.database), Number(args.scope), Boolean(args.commit));
             case 'shell_exec':
             case 'session_shell_exec':
             case 'shell_cancel':
@@ -319,10 +326,57 @@ class HttpUiServer {
         return true;
     }
 
-    private async sidecarBegin(database: string): Promise<number> {
+    private sidecarOpenScope(): number {
+        for (const transaction of this.transactions.values()) {
+            try { transaction.connection.exec('ROLLBACK'); } catch { /* connection closes below */ }
+            transaction.connection.close();
+        }
+        this.transactions.clear();
+        this.databaseLeases.clear();
+        return ++this.sidecarScope;
+    }
+
+    private async sidecarOpenDatabase(database: string, scope: number): Promise<boolean> {
+        this.assertSidecarScope(scope);
+        const file = sqlitePath(this.options.rootDir, database);
+        const reused = this.sqlite.has(file);
+        await this.sqliteLoad(database);
+        this.assertSidecarScope(scope);
+        this.databaseLeases.set(file, (this.databaseLeases.get(file) ?? 0) + 1);
+        return reused;
+    }
+
+    private sidecarDatabaseExecute(database: string, scope: number, query: string, bind: unknown[]) {
+        const db = this.leasedDatabase(database, scope);
+        const result = db.prepare(query).run(...sanitizeBindings(bind));
+        return { rowsAffected: Number(result.changes), lastInsertId: Number(result.lastInsertRowid) };
+    }
+
+    private sidecarDatabaseSelect(database: string, scope: number, query: string, bind: unknown[]) {
+        return this.leasedDatabase(database, scope).prepare(query).all(...sanitizeBindings(bind));
+    }
+
+    private sidecarCloseDatabase(database: string, scope: number): boolean {
+        if (scope !== this.sidecarScope) return false;
+        const file = sqlitePath(this.options.rootDir, database), count = this.databaseLeases.get(file);
+        if (!count) return false;
+        if (count > 1) { this.databaseLeases.set(file, count - 1); return false; }
+        for (const [id, transaction] of this.transactions) {
+            if (transaction.scope !== scope || transaction.database !== file) continue;
+            transaction.connection.exec('ROLLBACK');
+            transaction.connection.close();
+            this.transactions.delete(id);
+        }
+        this.databaseLeases.delete(file);
+        return this.sqliteClose(database);
+    }
+
+    private async sidecarBegin(database: string, scope: number): Promise<number> {
+        this.leasedDatabase(database, scope);
         const file = sqlitePath(this.options.rootDir, database);
         if (this.options.debug) console.error(`[HTTP] sidecar_begin database=${database} file=${file}`);
         await mkdir(path.dirname(file), { recursive: true });
+        this.leasedDatabase(database, scope);
         const sqlite = loadSqlite();
         const connection = new sqlite.DatabaseSync(file) as SqliteConnection;
         connection.exec('PRAGMA journal_mode = WAL');
@@ -330,23 +384,36 @@ class HttpUiServer {
         connection.exec('PRAGMA foreign_keys = ON');
         connection.exec('BEGIN IMMEDIATE');
         const id = this.nextTransaction++;
-        this.transactions.set(id, { connection, nextId: id });
+        this.transactions.set(id, { connection, scope, database: file });
         return id;
     }
 
-    private sidecarExecute(transactionId: number, query: string, bind: unknown[], select: boolean): unknown {
+    private sidecarExecute(transactionId: number, database: string, scope: number, query: string, bind: unknown[], select: boolean): unknown {
         const transaction = this.transactions.get(transactionId);
-        if (!transaction) throw new Error('Sidecar transaction is not open');
+        if (!transaction || transaction.scope !== scope || scope !== this.sidecarScope
+            || transaction.database !== sqlitePath(this.options.rootDir, database)) throw new Error('Sidecar transaction is not open');
         return select ? transaction.connection.prepare(query).all(...sanitizeBindings(bind)) : transaction.connection.prepare(query).run(...sanitizeBindings(bind));
     }
 
-    private sidecarFinish(transactionId: number, commit: boolean): null {
+    private sidecarFinish(transactionId: number, database: string, scope: number, commit: boolean): null {
         const transaction = this.transactions.get(transactionId);
-        if (!transaction) throw new Error('Sidecar transaction is not open');
+        if (!transaction || transaction.scope !== scope || scope !== this.sidecarScope
+            || transaction.database !== sqlitePath(this.options.rootDir, database)) throw new Error('Sidecar transaction is not open');
         transaction.connection.exec(commit ? 'COMMIT' : 'ROLLBACK');
         transaction.connection.close();
         this.transactions.delete(transactionId);
         return null;
+    }
+
+    private leasedDatabase(database: string, scope: number): SqliteConnection {
+        this.assertSidecarScope(scope);
+        const file = sqlitePath(this.options.rootDir, database);
+        if (!this.databaseLeases.has(file)) throw new Error('Sidecar database is not leased by this page');
+        return this.sqliteConnection(file);
+    }
+
+    private assertSidecarScope(scope: number): void {
+        if (scope !== this.sidecarScope) throw new Error('Sidecar page scope is no longer active');
     }
 
     private sqliteConnection(file: string): SqliteConnection {
