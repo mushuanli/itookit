@@ -43,6 +43,8 @@ export interface RecordWalkOptions {
 /** Atomic record operations scoped to one storage backend. */
 export interface IRecordTransaction {
     getRecordField(path: string, field: string): Promise<RecordValue | undefined>;
+    /** Read exact fields from one record path in one backend operation when supported. */
+    getRecordFields?(path: string, fields: string[]): Promise<Record<string, RecordValue>>;
     setRecordField(path: string, field: string, value: RecordValue): Promise<void>;
     deleteRecordField(path: string, field: string): Promise<void>;
     walkRecordFields(
@@ -54,6 +56,8 @@ export interface IRecordTransaction {
 
 export interface IRecordStore {
     getRecordField(path: string, field: string): Promise<RecordValue | undefined>;
+    /** Read exact fields from one record path in one backend operation when supported. */
+    getRecordFields?(path: string, fields: string[]): Promise<Record<string, RecordValue>>;
     setRecordField(path: string, field: string, value: RecordValue): Promise<void>;
     deleteRecordField(path: string, field: string): Promise<void>;
     setAllRecordFields(path: string, fields: Record<string, RecordValue>): Promise<void>;

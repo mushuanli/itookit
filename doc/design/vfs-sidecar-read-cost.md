@@ -143,3 +143,21 @@ cd apps/cli && node --import tsx ../../.tauri-acceptance/probe-sidecar-attrib.mt
 公共 invoke 的导出包装会漏掉同一 core 模块中的 Resource.close、checkPermissions/requestPermissions、addPluginListener 与 PluginListener.unregister。真实 Vite 构建回归已复现；现改为在官方 core invoke 内部记录提交，不改写宿主内部对象。兼容注册的第一次失败与第二次 fallback 分别计数；诊断写入显式旁路。trace 开/关两次构建执行均通过，正常关闭时所有计数为空。
 
 范围仍是经过该官方 JavaScript core 的调用，不能推断为全部底层传输。动作边界快照、WebView 内部通道取数/传输重试与真实窗口计量需继续补齐。
+
+## 2026-09-22：有明确调用方后的批量读取
+
+新的 WebKit 录制显示 302 个 sidecar 外层事务、729 次 `sidecar_select`，并确认了两类可在调用前完整枚举的集合，因此满足本文 §4 的实施前提：
+
+- `LocalFSBackend.list` 已经持有一个目录批次的全部路径，现按最多 64 项调用 `getMetaExtMany`，并把恢复检查和所有批次留在同一个外层事务；轻量 `listEntries` 继续不读元数据。
+- `ISeqFileTransaction.getEntries` 已经持有精确字段集合，现通过可选 `IRecordTransaction.getRecordFields` 合成一次 SQL；路径映射适配器显式转发能力。Task event 分页分别批量读取指针和事件正文，代替每项一次 `getEntry`。
+- Session `getLoadState` 把同一 `session.seq` 的 manifest/settings 改为一次 `getEntries`，确保桌面实际会话打开负载命中 `field IN (...)` 路径；history index 位于另一文件，仍在同一外层事务中单独读取。当前分支的父子索引可枚举且与 round 文档父指针一致时，整条历史链也由一次 `getEntries` 读取；不一致时在同一事务内回退逐项读取。100 轮 LocalFS 回归从 103 次单字段读降为 3 次单字段读 + 1 次批量读，事务仍为 1 组。
+
+这次仍未引入进程级读缓存。批量查询发生在原来的事务和 journal 恢复边界内，不改变跨进程可见性；没有批量能力的后端保留逐字段兼容路径。四层嵌套 `FileSystemView` 还发现一个独立放大器：每层 `statType` 在前缀检查后再次查询目标，形成 16 次底层目标检查；现在复用 `noLinks` 已取得的目标类型，现有和缺失目标均为 1 次。
+
+渲染侧也从启动路径移走 Mermaid：默认使用本地动态依赖，Tauri 构建产出独立 `mermaid-runtime` chunk，HTML 不预加载它；MathJax 只在渲染结果实际含公式定界符时加载。上述为代码与构建级证据，尚无改后真实桌面同口径录制，不能从旧 recording 推算最终延迟或宣称 P0-02 达标。
+
+`LocalFSBackend.list()` 目前在恢复事务内执行目录枚举与分批 stat，宽目录会延长 SQLite 写锁。直接把枚举移到事务前并不等价：如果已有 rename intent，事务里的恢复可能改变目录内容，使此前枚举的路径与随后读取的元数据不属于同一命名空间状态。后续缩短这段锁持有时间需要在宿主侧提供可验证的目录快照/代次，或检测恢复及并发 rename 后重试；在此之前保持当前事务边界。
+
+## 2026-09-23：Session 列表减少重复属性检查
+
+Session 列表枚举目录后直接批量读取 manifest，不再对每个候选目录先做一次 `session.seq` 存在性检查；批量读取原有的 `ENOENT` 跳过逻辑仍处理创建中断留下的不完整目录。

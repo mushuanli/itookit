@@ -23,7 +23,8 @@ it('measures cold history loading on LocalFS without reading each round twice', 
             historyParentIds: index ? [`r${index - 1}`] : [],
             input: [{ role: 'user', content: `question ${index}` }], output: [{ role: 'assistant', content: `answer ${index}` }],
         }));
-        await repository.updateManifest(id, { rootRoundId: 'r0', currentHead: 'r99', branches: { main: 'r99' } });
+        const children = Object.fromEntries(Array.from({ length: 99 }, (_, index) => [`r${index}`, [`r${index + 1}`]]));
+        await repository.updateManifest(id, { rootRoundId: 'r0', currentHead: 'r99', branches: { main: 'r99' }, children });
         const samples = [];
         for (let trial = 0; trial < 5; trial++) {
             backend.resetSidecarStats();
@@ -31,7 +32,8 @@ it('measures cold history loading on LocalFS without reading each round twice', 
             const snapshot = await registry.bindSession(id);
             samples.push({ ms: Math.round(performance.now() - start), sidecar: { ...backend.sidecarStats } });
             expect(backend.sidecarStats.begin).toBe(1);
-            expect(backend.sidecarStats.getRecordField).toBe(103);
+            expect(backend.sidecarStats.getRecordField).toBe(3);
+            expect(backend.sidecarStats.getRecordFields).toBe(1);
             expect(backend.sidecarStats.getMetaExt).toBe(0);
             expect(backend.sidecarStats.setRecordField).toBe(0);
             expect(snapshot.sessions.filter(message => message.role === 'user').map(message => message.content))

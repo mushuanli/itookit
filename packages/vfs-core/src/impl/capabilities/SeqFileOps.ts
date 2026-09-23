@@ -33,6 +33,19 @@ export function seqKey(field: string): string {
     return field.slice(SEQ_FIELD_PREFIX.length);
 }
 
+async function readEntries(records: IRecordTransaction, path: string, keys: string[]): Promise<Record<string, string>> {
+    const unique = [...new Set(keys)];
+    if (!unique.length) return {};
+    const values = records.getRecordFields
+        ? await records.getRecordFields(path, unique.map(seqField))
+        : Object.fromEntries(await Promise.all(unique.map(async key =>
+            [seqField(key), await records.getRecordField(path, seqField(key))])));
+    return Object.fromEntries(unique.flatMap(key => {
+        const value = values[seqField(key)];
+        return value === undefined ? [] : [[key, stringifyRecordValue(value)]];
+    }));
+}
+
 class SeqTransaction implements ISeqFileTransaction {
     readonly changed = new Set<string>();
     constructor(
@@ -45,6 +58,10 @@ class SeqTransaction implements ISeqFileTransaction {
     async getEntry(path: string, key: string): Promise<string | null> {
         const value = await this.records.getRecordField(this.path(path), seqField(key));
         return value === undefined ? null : stringifyRecordValue(value);
+    }
+
+    async getEntries(path: string, keys: string[]): Promise<Record<string, string>> {
+        return readEntries(this.records, this.path(path), keys);
     }
 
     async setEntry(path: string, key: string, value: string): Promise<void> {
@@ -118,13 +135,7 @@ export class SeqFileOps implements ISeqFileOperations {
     async getEntries(path: string, keys: string[]): Promise<Record<string, string>> {
         if (!keys.length) return {};
         const realPath = await this.path(path);
-        const read = async (records: IRecordTransaction) => {
-            const entries = await Promise.all([...new Set(keys)].map(async key => {
-                const value = await records.getRecordField(realPath, seqField(key));
-                return [key, value === undefined ? null : stringifyRecordValue(value)] as const;
-            }));
-            return Object.fromEntries(entries.filter((entry): entry is [string, string] => entry[1] !== null));
-        };
+        const read = (records: IRecordTransaction) => readEntries(records, realPath, keys);
         return this.records.transaction ? this.records.transaction(read) : read(this.records);
     }
 

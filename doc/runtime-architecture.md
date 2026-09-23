@@ -186,11 +186,13 @@ createKernelRuntime 的 fileContextForScope 提供 Session + Run 能力；默认
 
 ## 2026-09-14：跨宿主批量路径类型检查
 
-VFS 的路径前缀检查使用不读取 sidecar 元数据的 getNodeType/statType，嵌套视图也保持该路径；同批前缀通过 Node statMany 或 Tauri fs_stat_many 读取，保留逐路径权限检查。宿主响应条数不匹配时拒绝所有等待者，单个链接不影响同批合法路径。
+VFS 的路径前缀检查使用不读取 sidecar 元数据的 getNodeType/statType，嵌套视图也保持该路径；同批前缀通过 Node statMany 或 Tauri fs_stat_many 读取，保留逐路径权限检查。`noLinks` 把已经检查的目标类型返回给 `statType`，避免嵌套视图再次查询目标并按层数指数放大。宿主响应条数不匹配时拒绝所有等待者，单个链接不影响同批合法路径。
 
 Node lstat 与 Rust symlink_metadata 保留符号链接/普通文件类型，Tauri 映射不丢字段，DirectoryDriver 不再把权限错误吞成空节点。真实文件系统回归复现了原先链接指向挂载根外文件并被读取的问题；修复后该视图读取被拒绝。此检查不构成抵御恶意并发替换路径的原子防护，也不替代原生进程沙箱。
 
 读取与 rename journal 恢复仍处于同一事务；不使用实例内「日志曾经干净」作为跨进程跳过恢复的依据。真实两个进程覆盖读者先打开、写者在文件 rename 后 SIGKILL、原读者恢复目标记录的 root/module 两条路径。新增 sidecarStats 统计逻辑方法调用（含事务回调），不把该数字等同于真实 IPC 数。
+
+可枚举读取通过 sidecar 原子批量接口减少事务内往返：完整目录列表每 64 项查询一次 `getMetaExtMany`，SeqFile 的精确字段集合查询一次 `getRecordFields`，路径映射层保留该能力；Task event 分页的索引和事件正文各批量读取一次。恢复探针仍在同一外层事务中执行，没有引入跨事务缓存。
 
 本批完成批量类型检查、链接拒绝和跨进程恢复这条链；P0-02 的桌面 ≤2 秒 / ≤100 次 IPC 仍开放，需继续对正确实现减少宿主往返并重测。
 
@@ -228,7 +230,7 @@ trace 构建在官方 Tauri core invoke 的统一入口计数，覆盖直接导�
 
 ## 2026-09-14：数据库初始化失败与定向释放
 
-Tauri sidecar.close 显式传入当前 databaseUrl，避免无参数关闭所有池；初始化的 schema 读取、建表或版本检查失败统一释放本次池，失败与清理错误同时发生时保留 AggregateError 及原始 cause。事务内句柄不能关闭数据库池。通过真实 plugin-sql JavaScript 门面的宿主调用桩验证定向关闭、其他池继续可用及不兼容版本只关闭一次，不作为真实原生多池窗口验收。
+Tauri sidecar 由宿主命令按页面 scope 租用 SQLite pool；初始化的 schema 读取、建表或版本检查失败统一释放本次租约，失败与清理错误同时发生时保留 AggregateError 及原始 cause。事务内句柄不能关闭数据库 pool。页面刷新撤销旧租约但保留健康 pool 供新页面复用，旧 scope 的迟到 close 不生效；正常关闭最后一个租约时才移除并关闭 pool。CLI HTTP 宿主实现同一命令与代次语义。
 
 LocalFS 不再把探针不可用、未知/空结果、普通探针关闭错误当成损坏。只在明确完整性诊断或 SQLITE_CORRUPT/SQLITE_NOTADB 时沿用重建流程，否则保留数据库文件并抛出原初始化错误。三个误删窗口修复前均实际导致测试文件被删，修复后保留；另补空结果边界，既有真实损坏数据库重建回归仍通过。
 
@@ -261,7 +263,7 @@ Session 配置变更、禁用和服务释放会先同时关闭普通视图与工
 
 Tauri 的文件系统打开、runtime 和 UI 初始化阶段写入持久 JSONL，失败展开 `AggregateError.errors` / `Error.cause` 并保留 source 名称与数据库路径。CLI 在入口安装进程诊断，记录命令/runtime/HTTP 失败和退出状态，日志不进入机器读取的 stdout。
 
-Tauri 每个页面先调用 `sidecar_open_scope`，Rust 以 WebView label 维护页面代次，回滚上一代未完成事务后才允许加载数据库。`sidecar_begin` 在等待 SQLite 写锁前后均校验代次，防止旧页面迟到的请求占用新页面的连接；其它窗口的事务不受该窗口刷新影响。完整且版本兼容的数据库只校验 schema 并设置连接 PRAGMA，跳过重复 DDL；缺少对象仍走初始化，版本不兼容仍明确拒绝。LocalFS 在 journal 初始化失败后关闭已打开 sidecar，保留原错误和关闭失败原因。
+Tauri 每个页面先调用 `sidecar_open_scope`，Rust 以 WebView label 维护页面代次，回滚上一代未完成事务后才允许租用数据库。事务索引锁只用于查找句柄，SQL await 只持有该事务自己的锁；事务执行和结束均校验窗口、代次、数据库，裸事务 ID 不能跨窗口使用。`sidecar_begin` 在等待 SQLite 写锁前后均校验代次与租约。关闭最后一份页面租约前先回滚其遗留事务，同库打开与关闭共用一把锁；被替换 pool 在锁外关闭且关闭等待有上限。完整且版本兼容的数据库只校验 schema 并设置连接 PRAGMA，跳过重复 DDL；缺少对象仍走初始化，版本不兼容仍明确拒绝。LocalFS 在 journal 初始化失败后关闭已打开 sidecar，保留原错误和关闭失败原因。
 
 日志路径、排查流程与回归证据见 [启动故障与运行日志](design/startup-diagnostics.md)。
 

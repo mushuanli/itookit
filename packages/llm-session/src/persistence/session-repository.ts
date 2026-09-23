@@ -3,6 +3,7 @@ import { createFileSystemView, FSError, type IFileSystem, type ISeqFileTransacti
 import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin, type SessionLoadState, type SessionRepositoryChange } from './types';
 import { sessionStorageRoot } from './session-storage-layout';
 import { collectHistoryChain, readRoundDocument, type SessionHistoryChain } from './history-chain';
+import type { PersistedRound, RoundManifest } from './round-types';
 
 const FOLDERS_PATH = '/var/lib/sessions/folders.seq';
 const FOLDERS_KEY = 'folders';
@@ -109,21 +110,41 @@ export class SessionRepository implements ISessionRepository {
     }
     async getLoadState(id: string): Promise<SessionLoadState> {
         const p = this.paths(id);
-        return this.fs.meta.seq!.transaction!(async tx => ({
-            manifest: await this.readManifestTx(tx, p, id),
-            settings: { ...DEFAULT_SESSION_SETTINGS, ...JSON.parse(await tx.getEntry(p.session, 'settings') ?? '{}') },
-        }));
+        return this.fs.meta.seq!.transaction!(async tx => {
+            const rows = await tx.getEntries(p.session, ['session', 'settings']);
+            return {
+                manifest: await this.readManifestTx(tx, p, id, rows.session ?? null),
+                settings: { ...DEFAULT_SESSION_SETTINGS, ...JSON.parse(rows.settings ?? '{}') },
+            };
+        });
     }
     async readHistoryChain(id: string): Promise<SessionHistoryChain> {
         const p = this.paths(id);
         return this.fs.meta.seq!.transaction!(async tx => {
             const manifest = await this.readManifestTx(tx, p, id);
-            return collectHistoryChain(manifest, roundId => readRoundDocument(() =>
-                tx.getEntry(p.history, `document/${this.name(`round-${roundId}.json`)}`)));
+            return await this.readIndexedHistoryChain(tx, p, manifest)
+                ?? collectHistoryChain(manifest, roundId => this.readRound(tx, p, roundId));
         });
     }
-    private async readManifestTx(tx: ISeqFileTransaction, p: SessionPaths, id: string): Promise<ConversationManifest> {
-        const raw = await tx.getEntry(p.session, 'session');
+    private async readIndexedHistoryChain(tx: ISeqFileTransaction, p: SessionPaths,
+        manifest: ConversationManifest): Promise<SessionHistoryChain | null> {
+        const candidates = indexedHistoryCandidates(manifest);
+        if (!candidates) return null;
+        const keys = candidates.map(id => `document/${this.name(`round-${id}.json`)}`);
+        const rows = await tx.getEntries(p.history, keys);
+        const parsed = await Promise.all(keys.map(key => readRoundDocument(async () => rows[key] ?? null)));
+        if (!historyIndexMatches(candidates, parsed)) return null;
+        const byId = new Map(candidates.map((id, index) => [id, parsed[index]]));
+        return collectHistoryChain(manifest, async roundId => byId.get(roundId) ?? null);
+    }
+    private readRound(tx: ISeqFileTransaction, p: SessionPaths, roundId: string) {
+        return readRoundDocument(() => tx.getEntry(
+            p.history, `document/${this.name(`round-${roundId}.json`)}`,
+        ));
+    }
+    private async readManifestTx(tx: ISeqFileTransaction, p: SessionPaths, id: string,
+        sessionValue?: string | null): Promise<ConversationManifest> {
+        const raw = sessionValue === undefined ? await tx.getEntry(p.session, 'session') : sessionValue;
         if (!raw) throw new FSError('ENOENT', `Session not found: ${id}`);
         const session = JSON.parse(raw);
         if (session.storageVersion !== 1 || session.id !== id) throw new Error('Session storage version incompatible');
@@ -136,14 +157,17 @@ export class SessionRepository implements ISessionRepository {
     async list(): Promise<ConversationManifest[]> {
         this.root('catalog');
         if (!await this.fs.driver.exists('/var/lib/sessions')) return [];
-        const candidates: string[] = [];
+        const candidates: Array<{ id: string; path: string }> = [];
         for (const node of await this.fs.driver.getChildren('/var/lib/sessions', { fields: 'entry' })) {
-            if (node.type === 'directory' && await this.fs.driver.exists(`${node.path}/session.seq`)) candidates.push(node.name);
+            if (node.type === 'directory') candidates.push({ id: node.name, path: node.path });
         }
         const result: ConversationManifest[] = [];
         // Bound transaction duration without opening a transaction for every Session.
         for (let start = 0; start < candidates.length; start += 64) {
-            result.push(...await this.readManifestBatch(candidates.slice(start, start + 64)));
+            const batch = candidates.slice(start, start + 64);
+            const present = await Promise.all(batch.map(async ({ id, path }) =>
+                await this.fs.driver.exists(`${path}/session.seq`) ? id : null));
+            result.push(...await this.readManifestBatch(present.filter((id): id is string => id !== null)));
         }
         return result.sort((a, b) => b.updatedAt - a.updatedAt);
     }
@@ -357,6 +381,29 @@ export class SessionRepository implements ISessionRepository {
             if (!(error instanceof FSError && error.code === 'EEXIST')) throw error;
         }
     }
+}
+
+function indexedHistoryCandidates(manifest: Pick<RoundManifest, 'currentHead' | 'children'>): string[] | null {
+    if (!manifest.currentHead) return [];
+    const parents = new Map<string, string>();
+    for (const [parent, children] of Object.entries(manifest.children ?? {})) {
+        for (const child of children) {
+            const previous = parents.get(child);
+            if (previous && previous !== parent) return null;
+            parents.set(child, parent);
+        }
+    }
+    const result: string[] = [], visited = new Set<string>();
+    let current: string | undefined = manifest.currentHead;
+    while (current && !visited.has(current)) {
+        result.push(current); visited.add(current); current = parents.get(current);
+    }
+    return result;
+}
+
+function historyIndexMatches(candidates: string[], rounds: Array<PersistedRound | null>): boolean {
+    return rounds.every((round, index) => !round
+        || round.historyParentIds[0] === candidates[index + 1]);
 }
 
 function normalizeFolderPath(value: string | null | undefined): string | null {

@@ -242,6 +242,15 @@ class MemoryRecordStore implements IRecordStore, IRecordTransaction {
         return structuredClone(this.fields.get(path)?.get(field));
     }
 
+    async getRecordFields(path: string, fields: string[]): Promise<Record<string, RecordValue>> {
+        const row = this.fields.get(path), result: Record<string, RecordValue> = {};
+        for (const field of new Set(fields)) {
+            const value = row?.get(field);
+            if (value !== undefined) result[field] = structuredClone(value);
+        }
+        return result;
+    }
+
     async setRecordField(path: string, field: string, value: RecordValue): Promise<void> {
         const row = this.fields.get(path) ?? new Map<string, RecordValue>();
         row.set(field, structuredClone(value));

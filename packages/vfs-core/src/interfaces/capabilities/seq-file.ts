@@ -22,6 +22,7 @@ export interface SeqCompareAndSetOptions {
 
 export interface ISeqFileTransaction {
     getEntry(fileIdOrPath: string, key: string): Promise<string | null>;
+    getEntries(fileIdOrPath: string, keys: string[]): Promise<Record<string, string>>;
     setEntry(fileIdOrPath: string, key: string, value: string): Promise<void>;
     deleteEntry(fileIdOrPath: string, key: string): Promise<void>;
     compareAndSet(

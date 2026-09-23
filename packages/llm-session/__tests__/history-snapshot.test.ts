@@ -21,10 +21,13 @@ async function fixture() {
 
 it('reads one selected chain without writes, and sees later branch changes on the next snapshot', async () => {
     const { repository, id, backend } = await fixture();
+    await repository.updateManifest(id, { children: { r0: ['r1'] } });
     const transaction = vi.spyOn(backend.records!, 'transaction');
+    const batch = vi.spyOn(backend.records!, 'getRecordFields');
     const changed = vi.fn(); repository.subscribe(changed);
     expect(await repository.readHistoryChain(id)).toMatchObject({ chain: ['r0', 'r1'], rounds: [{ id: 'r0' }, { id: 'r1' }], branch: 'main' });
     expect(transaction).toHaveBeenCalledTimes(1);
+    expect(batch).toHaveBeenCalledTimes(1);
     expect(changed).not.toHaveBeenCalled();
     await repository.updateManifest(id, { currentHead: 'other', currentBranch: 'other' });
     expect(await repository.readHistoryChain(id)).toMatchObject({ chain: ['other'], rounds: [{ id: 'other' }], branch: 'other' });

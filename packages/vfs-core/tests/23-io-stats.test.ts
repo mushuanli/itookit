@@ -46,6 +46,36 @@ describe('VFS IO statistics', () => {
             await expect(manager.openFileSystem('/data/startup/blocked')).rejects.toMatchObject({ code: 'ENOTDIR' });
         } finally { await manager.dispose(); }
     });
+    it('checks a target once at the backend through deeply nested views', async () => {
+        const backend = new MemoryBackend(), stat = backend.stat.bind(backend);
+        const statType = vi.fn(async (path: string) => {
+            const node = await stat(path); return node ? { type: node.type } : null;
+        });
+        const { manager } = await createVFS({ rootBackend: Object.assign(backend, { statType }) });
+        const views = [], base = await manager.openFileSystem('/');
+        let current = base;
+        try {
+            await base.driver.createFile({ name: 'AGENT.md', parentPath: '/_agent', recursive: true });
+            for (let depth = 0; depth < 4; depth++) {
+                current = createFileSystemView({ viewId: `nested-${depth}`, mounts: [
+                    { mountId: 'source', at: '/', root: '/', fs: current, access: 'ro' },
+                ] });
+                views.push(current);
+            }
+            statType.mockClear();
+            expect(await current.driver.getNodeType!('/_agent/AGENT.md')).toEqual({ type: 'file' });
+            expect(statType.mock.calls.filter(([path]) => path === '/_agent/AGENT.md')).toHaveLength(1);
+            statType.mockClear();
+            expect(await current.driver.getNodeType!('/_agent/missing.md')).toBeNull();
+            expect(statType.mock.calls.filter(([path]) => path === '/_agent/missing.md')).toHaveLength(1);
+            statType.mockClear();
+            expect(await current.driver.getNodeType!('/')).toEqual({ type: 'directory' });
+            expect(statType).toHaveBeenCalledTimes(1);
+        } finally {
+            for (const view of views.reverse()) await view.dispose();
+            await manager.dispose();
+        }
+    });
     it('exposes a public snapshot of backend operations and resets on demand', async () => {
         const vfs = await setupVFS(freshMem());
         try {

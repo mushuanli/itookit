@@ -327,9 +327,10 @@ describe('durable harness protocols', () => {
             transaction: (operation: any) => fs.meta.seq!.transaction!(tx => operation(new Proxy(tx, {
                 get(target, key) {
                     if (key === 'walkEntries') return walk;
-                    if (key === 'getEntry') return (path: string, entry: string) => {
-                        if (entry.startsWith('task-event/') || entry.startsWith('event/')) reads.push(1);
-                        return tx.getEntry(path, entry);
+                    if (key === 'getEntries') return (path: string, entries: string[]) => {
+                        const selected = entries.filter(entry => entry.startsWith('task-event/') || entry.startsWith('event/'));
+                        if (selected.length) reads.push(selected.length);
+                        return tx.getEntries(path, entries);
                     };
                     const value = Reflect.get(target, key); return typeof value === 'function' ? value.bind(target) : value;
                 },

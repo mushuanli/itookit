@@ -158,12 +158,12 @@ export class FileSystemView implements IFileSystem {
         if (structural && this.mounts.some(n => P.isUnder(n.at, path))) throw new FSError('EBUSY', 'Cannot replace a mount or its ancestor', undefined, path);
         return m;
     }
-    private async noLinks(m: Binding, path: string) {
+    private async noLinks(m: Binding, path: string): Promise<Pick<FSNode, 'type'> | null | undefined> {
         const source = this.sourcePath(m, path);
         // The prefix walk only needs the node type. Prefer the driver's type-only lookup so a
         // backend whose `getNode` fetches metadata over a remote/sidecar round trip can skip it.
         // Segments are checked concurrently; a backend coalesces those type stats into one host call.
-        const driver = m.fs.driver as unknown as { getNodeType?: (p: string) => Promise<{ type?: string } | null> };
+        const driver = m.fs.driver as unknown as { getNodeType?: (p: string) => Promise<Pick<FSNode, 'type'> | null> };
         const segments: string[] = [];
         let current = '/';
         for (const part of source.split('/').filter(Boolean)) {
@@ -187,6 +187,8 @@ export class FileSystemView implements IFileSystem {
                 throw new FSError('EACCES', 'Links and device nodes require a separate capability');
             }
         }
+        const target = checked.at(-1);
+        return target && 'node' in target ? target.node ?? null : undefined;
     }
     private async invoke(_m: Binding, api: object, method: string, args: any[]) {
         const fn = (api as Methods)[method];
@@ -252,15 +254,15 @@ export class FileSystemView implements IFileSystem {
         if (!this.visible(path)) throw new FSError('EACCES', 'Path is outside the system projection');
         const m = this.find(path);
         if (m) {
-            await this.noLinks(m, path);
-            const source = this.sourcePath(m, path);
-            const driver = m.fs.driver as unknown as { getNodeType?: (p: string) => Promise<{ type?: string } | null> };
-            if (typeof driver.getNodeType === 'function') {
-                const node = await this.invoke(m, driver, 'getNodeType', [source]);
+            const checked = await this.noLinks(m, path);
+            if (checked) return { type: checked.type };
+            if (checked === undefined) {
+                const source = this.sourcePath(m, path);
+                const driver = m.fs.driver as unknown as { getNodeType?: (p: string) => Promise<Pick<FSNode, 'type'> | null> };
+                const node = typeof driver.getNodeType === 'function'
+                    ? await this.invoke(m, driver, 'getNodeType', [source])
+                    : await this.invoke(m, m.fs.driver, 'getNode', [source]);
                 if (node) return { type: node.type };
-            } else {
-                const value = await this.invoke(m, m.fs.driver, 'getNode', [source]);
-                if (value) return { type: value.type };
             }
         }
         const synthetic = this.synthetic(path);

@@ -1899,3 +1899,17 @@ Tauri `session_shell_exec` 通过宿主目录句柄解析 grants，调用 `packa
 回归：Rust 沙箱包 6 项与 Tauri 全部 46 项通过；app-shell 的 tauri-bash、tauri-flow-workspaces、chat-execution-mode 共 30 项通过。Tauri 取消测试先确认沙箱内脚本已经启动，再触发超时并等待超过后台写入延迟，确认没有迟到写入。TypeScript 沙箱测试、类型检查与双格式构建通过；Linux 原生隔离证据同时来自 Rust 用例和上述 WebView 探针。
 
 探针使用独立前端与二进制副本，未修改生产 main.ts 或 tauri.conf.json，未访问用户现有 profile。正常应用按原配置重新构建；启动新代码需重启开发版桌面应用。设计、限制与调用链见 [系统沙箱](design/system-sandbox.md)。
+
+## Session 切换录制后的 I/O 与渲染批处理（2026-09-22）
+
+`localhost-recording.json` 的 14.15 秒录制包含 2091 次公开 IPC：`sidecar_select` 729、`sidecar_begin`/`sidecar_finish` 各 302、`directory_stat_many` 313、`fs_stat_many` 271、`fs_stat` 103。302 个事务均保留一次 rename journal 探针；非探针 payload 查询 453 次，只对应 107 个不同的 path/field 组合。1885 个 stat 路径只对应 60 个路径。该文件没有完整 JavaScript 调用栈，因此只能支持次数与时间相关性，不能把全部主线程时间精确归到单个函数。
+
+实施内容：
+
+- 四层嵌套 `FileSystemView` 的目标类型检查从 16 次降为 1 次；`noLinks` 返回并复用本轮目标，缺失目标同样只查一次，前缀链接拒绝语义不变。
+- sidecar 新增 `getMetaExtMany` 与 `getRecordFields`。完整目录每 64 项批量读取元数据；SeqFile 精确字段集合在原外层事务内一次读取，Task event 页的指针和正文分别一批。路径映射层转发批量能力，journal 探针仍按外层事务执行。
+- Mermaid 默认本地动态导入，Tauri 输出独立 `mermaid-runtime`（2232.94 kB，gzip 634.32 kB），`index.html` 不预加载该 chunk；启动 vendor 从 3777.81 kB 降至 1534.57 kB。普通 Markdown 不加载 Mermaid/MathJax，公式出现后才创建 MathJax 脚本。
+
+回归结果：VFS 22 文件 / 195 项、LocalFS 9 文件 / 86 项、Durable Kernel 8 文件 / 266 项、MDX 3 文件 / 14 项通过；Tauri sidecar 批量 IPC 定向测试 8 项通过。四个相关包类型检查与 Tauri Vite 构建通过。AppShell 整包在受限沙箱中运行到工作区崩溃用例时，子进程 `spawnSync git` 返回 EPERM；本次相关的 sidecar 定向测试独立通过，未把该环境失败记成功。
+
+本节没有改后真实 WebView 录制，因此只证明请求合并、嵌套放大消除和启动 chunk 拆分已经落地；P0-02 的 ≤2 秒 / ≤100 次仍保持开放，下一步须用同一 profile、同一 Session 和同一动作边界重录。

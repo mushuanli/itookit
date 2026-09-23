@@ -75,6 +75,9 @@ IFileSystem (view)
 - `IFSDriver` 可选实现 `getNodeType(path)`,`DirectoryDriver` 已用 `VFSEngine.tryStatType` 实现;
 - `FileSystemView.makeDriver()` 同样暴露 `getNodeType`(指向私有 `statType`:先做 `noLinks`、再优先用内层 driver 的 `getNodeType`),因此**嵌套视图**的前缀检查也免元数据;
 - `noLinks` 优先调用 `getNodeType`,缺失时回退 `getNode`;各前缀检查**并发发起**(仍按前缀顺序判定),这样后端能把同一 tick 的类型查询合并成一次宿主调用(`LocalFSBackend` 微批处理 → `fs_stat_many`)。
+- `noLinks` 返回本轮已检查的目标类型，`statType` 必须复用它；嵌套视图若再次查询目标，会按嵌套深度指数放大（4 层曾从 1 次变为 16 次）。
+
+SeqFile 的 `getEntries` 在事务内优先调用记录后端可选的 `getRecordFields`，把已知字段集合合成一次存储读取；`mapRecordPaths` 必须同时转发这个可选能力。不能用跨事务读缓存替代该批量接口，跨进程写入须保持可见。
 
 对桌面 LocalFS,前缀检查原本每次要付一次 `getMetaExt` IPC(且计入 `ioStats.stat`);实测一次聊天发送的前缀检查从 653 次 VFS stat 降到 114,合并 IPC 后发送延迟从 5.66s 降到 4.21s。**新增后端时若 `stat` 有远程/侧车往返,应实现 `statType`(并让 `fsOps` 提供批量 `statMany`);新增 driver 时实现 `getNodeType`。** 语义不变:类型仍来自与 `stat` 相同的底层调用,只是不取元数据、并把同 tick 的调用合并成一次往返。
 

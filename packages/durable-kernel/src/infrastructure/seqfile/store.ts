@@ -1371,13 +1371,13 @@ export class SeqFileKernelStore {
             const start = Math.max(after + 1, first);
             const end = Math.min(through, start - 1 + limit), keys: string[] = [];
             for (let index = start; index <= end; index++) keys.push(taskEventKey(taskId, index));
-            const refs = Object.fromEntries(await Promise.all(keys.map(async key => [key, await tx.getEntry(path, key)] as const)));
+            const refs = await tx.getEntries(path, keys);
             const eventKeys = keys.map(key => {
                 const sequence = Number(refs[key]);
                 if (!Number.isSafeInteger(sequence) || sequence < 1) throw new Error('Invalid Task event index');
                 return `event/${String(sequence).padStart(16, '0')}`;
             });
-            const rows = Object.fromEntries(await Promise.all(eventKeys.map(async key => [key, await tx.getEntry(path, key)] as const)));
+            const rows = await tx.getEntries(path, eventKeys);
             const items = eventKeys.map(key => {
                 if (!rows[key]) throw new Error('Task event is missing');
                 const event = decode<EventEnvelope>(rows[key]);
