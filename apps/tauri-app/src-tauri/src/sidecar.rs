@@ -1001,6 +1001,59 @@ mod tests {
     }
 
     #[test]
+    fn times_pool_statements_that_fail_or_decode() {
+        tauri::async_runtime::block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::query("CREATE TABLE records (path TEXT PRIMARY KEY, value TEXT)")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO records VALUES ('a', '{\"n\":1}')")
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            // Success: rows are counted and both stages belong to the same timing record.
+            let mut timings = SqlTimings::default();
+            let rows = select_on_pool(&pool, "SELECT path, value FROM records", vec![], &mut timings)
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(timings.rows, 1);
+
+            // Query failure: the error comes back and the timings are still filled, so the
+            // failure is recorded even though it was fast.
+            let mut failed = SqlTimings::default();
+            let error = select_on_pool(&pool, "SELECT * FROM missing_table", vec![], &mut failed)
+                .await
+                .unwrap_err();
+            assert!(error.contains("missing_table"), "{error}");
+            assert!(should_record_sql(false, false, &failed, Some(1)));
+
+            // Decode failure: an unsupported column type is a decode error, not a query error.
+            let mut undecodable = SqlTimings::default();
+            let error = select_on_pool(&pool, "SELECT zeroblob(1) AS data", vec![], &mut undecodable)
+                .await
+                .unwrap_err();
+            assert!(error.contains("Unsupported sidecar column type"), "{error}");
+
+            // Write failure: same contract for execute_on_pool.
+            let mut write = SqlTimings::default();
+            let error = execute_on_pool(&pool, "INSERT INTO missing_table VALUES (1)", vec![], &mut write)
+                .await
+                .unwrap_err();
+            assert!(error.contains("missing_table"), "{error}");
+            assert!(should_record_sql(false, false, &write, Some(1)));
+
+            pool.close().await;
+        });
+    }
+
+    #[test]
     fn transactions_keep_connection_and_recover_after_failures() {
         tauri::async_runtime::block_on(async {
             let path = std::env::temp_dir().join(format!(

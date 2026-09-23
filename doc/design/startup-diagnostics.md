@@ -29,7 +29,7 @@ CLI 使用 `uncaughtExceptionMonitor` 记录致命异常，不安装吞错的异
 
 - `packages/app-shell/tests/desktop-diagnostics.test.ts`：嵌套 AggregateError/cause、循环引用、长度限制。
 - `packages/app-shell/tests/tauri-sidecar-close.test.ts`：宿主 pool 命令接线、定向关闭、初始化失败保留原因、暖启动跳过 DDL、缺对象补齐。
-- `apps/tauri-app/src-tauri/src/sidecar.rs`：真实 SQLite 验证重载回滚、旧代次/旧 close 拒绝、pool 租约转移、等待中 begin 拒绝、其它窗口隔离和新事务提交；另有单测固定「失败语句、慢阶段或需要新建连接时记录」与追踪开关的真值解析。
+- `apps/tauri-app/src-tauri/src/sidecar.rs`：真实 SQLite 验证重载回滚、旧代次/旧 close 拒绝、pool 租约转移、等待中 begin 拒绝、其它窗口隔离和新事务提交；另有单测固定「失败语句、慢阶段或需要新建连接时记录」、追踪开关的真值解析，以及真实 pool 上失败与解码路径仍留下计时。
 - `apps/cli/tests/http-server.test.ts`：HTTP 宿主跨页面复用连接、拒绝旧 scope close，并保持记录可读。
 - `packages/vfsdriver-localfs/tests/25-journal-probe.test.ts`：journal 初始化失败关闭 sidecar，随后可重试。
 - `apps/cli/tests/diagnostics.test.ts`：轮换/长度限制、真实 CLI 缺文件失败、未捕获异常/未处理 rejection 的落盘与失败退出码、stdout 不受影响。
