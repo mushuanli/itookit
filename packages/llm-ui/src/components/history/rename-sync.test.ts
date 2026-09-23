@@ -4,13 +4,13 @@ import { SessionService } from '../../services/SessionService';
 describe('LLM rename synchronization', () => {
     it('uses the stored Session title without modifying it on load', async () => {
         const updateManifest = vi.fn(async () => {});
-        const service = Object.create(SessionService.prototype) as any;
-        service.engine = {
+        const engine = {
             getManifest: vi.fn(async () => ({ title: 'Old' })),
             updateManifest,
         };
-
-        service.commands = { execute: vi.fn(async () => ({ sessionId: 'session', sessions: [] })) };
+        const commands = { execute: vi.fn(async () => ({ sessionId: 'session', sessions: [] })) };
+        // Constructed normally: the service keeps per-instance projection state.
+        const service = new SessionService(engine as never, commands as never) as any;
         const { title } = await service.loadSession('session', 'New');
 
         expect(title).toBe('Old');

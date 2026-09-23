@@ -1197,6 +1197,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput?.destroy();
 
         // 8. 服务
+        this.sessionService?.dispose();
         this.branchStore?.destroy();
         this.domCache?.destroy();
         this.bus?.destroy();
