@@ -140,6 +140,19 @@ async function getRootDir(): Promise<string> {
     }
 }
 
+/**
+ * Where the resolved root and workspace came from — `mindos.json#rootDir`,
+ * `INIT_CWD (launch dir)`, `<config_dir>/data (default)`, and so on.
+ */
+async function getPathSources(): Promise<{ root: string; home: string }> {
+    try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<{ root: string; home: string }>('get_path_sources');
+    } catch {
+        return { root: 'unknown', home: 'unknown' };
+    }
+}
+
 // ── Dynamic mount DOM helpers ──────────────────────────────────────────────────
 
 function injectMountWorkspace(entry: MountEntry): void {
@@ -191,10 +204,10 @@ async function bootstrap(): Promise<void> {
     // 1. Resolve paths
     //    homeDir   = working project directory (CWD or --home arg)
     //    rootDir   = resolved data root (mindos.json#rootDir, never ~/.mindos)
-    const [homeDir, rootDir, sessionDirectory] = await Promise.all([getHomeDir(), getRootDir(),
-        invoke<string>('get_current_dir')]);
+    const [homeDir, rootDir, sessionDirectory, sources] = await Promise.all([getHomeDir(), getRootDir(),
+        invoke<string>('get_current_dir'), getPathSources()]);
     log(`路径解析 (home=${homeDir})`);
-    console.log(`[Boot] 本地文件工作区 home=${homeDir}; 系统数据 root=${rootDir}`);
+    console.log(`[Boot] MindOS root=${rootDir} (${sources.root}); 工作目录 home=${homeDir} (${sources.home})`);
 
     const dirName = homeDir.split('/').filter(Boolean).pop() ?? homeDir;
     const navLabel = document.getElementById('nav-home-label');

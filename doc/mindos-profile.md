@@ -33,6 +33,17 @@ MINDOS_ROOT
 
 `rootDir` 为相对路径时按 `configDir` 解析。
 
+桌面端工作目录（新会话默认映射为 `/workspace`）解析顺序：
+
+```text
+--home <dir>
+  → mindos.json#homeDir
+  → INIT_CWD            （启动命令所在目录；pnpm/npm 导出）
+  → 进程 cwd
+```
+
+`tauri dev` 把应用进程的 cwd 设为 `src-tauri/`，所以 `INIT_CWD` 才是用户敲命令时所在的目录；该值为空或已不存在时回退进程 cwd。启动时终端会打印 `[MindOS] data root` 与 `[MindOS] workspace` 两行及其来源。
+
 ## CLI profile 选择
 
 ```bash

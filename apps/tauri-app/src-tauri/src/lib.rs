@@ -17,6 +17,9 @@ pub mod diagnostics;
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
+/// Canonical config file name, mirroring MINDOS_CONFIG_FILE in @itookit/app-core.
+const MINDOS_CONFIG_FILE: &str = "mindos.json";
+
 struct MindosSettings {
     /// Raw value from mindos.json#rootDir — may be relative or absolute.
     root_dir: Option<PathBuf>,
@@ -24,7 +27,7 @@ struct MindosSettings {
 }
 
 fn read_settings(config_dir: &PathBuf) -> MindosSettings {
-    let Ok(raw) = std::fs::read_to_string(config_dir.join("mindos.json")) else {
+    let Ok(raw) = std::fs::read_to_string(config_dir.join(MINDOS_CONFIG_FILE)) else {
         return MindosSettings { root_dir: None, home_dir: None };
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
@@ -47,6 +50,48 @@ pub(crate) struct AppPaths {
     /// From MINDOS_ROOT env, mindos.json#rootDir, or <config_dir>/data.
     root_dir: PathBuf,
     home_dir: PathBuf,
+    /// Which input produced `root_dir`, surfaced at startup and in diagnostics.
+    root_source: RootSource,
+    /// Which input produced `home_dir`, surfaced at startup and in diagnostics.
+    home_source: HomeSource,
+}
+
+/// Origin of the resolved data root — keeps startup logs self-explanatory.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum RootSource {
+    Env,
+    Settings,
+    Default,
+}
+
+impl RootSource {
+    fn label(self) -> &'static str {
+        match self {
+            RootSource::Env => "MINDOS_ROOT env",
+            RootSource::Settings => "mindos.json#rootDir",
+            RootSource::Default => "<config_dir>/data (default)",
+        }
+    }
+}
+
+/// Origin of the resolved workspace directory (mounted at `/workspace`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum HomeSource {
+    CliArg,
+    Settings,
+    InitCwd,
+    ProcessCwd,
+}
+
+impl HomeSource {
+    fn label(self) -> &'static str {
+        match self {
+            HomeSource::CliArg => "--home arg",
+            HomeSource::Settings => "mindos.json#homeDir",
+            HomeSource::InitCwd => "INIT_CWD (launch dir)",
+            HomeSource::ProcessCwd => "process cwd (fallback)",
+        }
+    }
 }
 
 #[derive(Default)]
@@ -70,30 +115,69 @@ fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
         .map(PathBuf::from)
         .unwrap_or_else(|| system_home.join(".config").join("mindos"));
 
-    let settings = read_settings(&config_dir);
+    let MindosSettings { root_dir: settings_root, home_dir: settings_home } = read_settings(&config_dir);
 
     // Data root resolution order:
     //   MINDOS_ROOT env      → explicit override, used as-is
     //   mindos.json#rootDir → primary source; relative resolved against config_dir
     //   default              → <config_dir>/data (never ~/.mindos)
-    let root_dir = std::env::var("MINDOS_ROOT")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            settings.root_dir.map(|rd| {
-                if rd.is_absolute() { rd } else { normalize_path(&config_dir.join(&rd)) }
-            })
-        })
-        .unwrap_or_else(|| config_dir.join("data"));
+    let env_root = std::env::var("MINDOS_ROOT").ok().filter(|s| !s.is_empty());
+    let (root_dir, root_source) = match (env_root, settings_root) {
+        (Some(raw), _) => (PathBuf::from(raw), RootSource::Env),
+        (None, Some(rd)) => (
+            if rd.is_absolute() { rd } else { normalize_path(&config_dir.join(&rd)) },
+            RootSource::Settings,
+        ),
+        (None, None) => (config_dir.join("data"), RootSource::Default),
+    };
 
-    let home_dir = resolve_home_from_cli()
-        .or(settings.home_dir)
-        .unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
+    let (home_dir, home_source) = resolve_home_dir(settings_home);
 
-    AppPaths { config_dir, root_dir, home_dir }
+    AppPaths { config_dir, root_dir, home_dir, root_source, home_source }
+}
+
+/// Resolve the host workspace directory (mounted at `/workspace`).
+///
+/// `--home` wins, then mindos.json#homeDir, then `INIT_CWD` — the directory the
+/// user launched from, which npm/pnpm export because `tauri dev` runs the app
+/// with `src-tauri/` as its process cwd — and only then the process cwd.
+fn resolve_home_dir(settings_home: Option<PathBuf>) -> (PathBuf, HomeSource) {
+    if let Some(path) = resolve_home_from_cli() {
+        return (path, HomeSource::CliArg);
+    }
+    if let Some(path) = settings_home {
+        return (path, HomeSource::Settings);
+    }
+    if let Some(path) = init_cwd() {
+        return (path, HomeSource::InitCwd);
+    }
+    (
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        HomeSource::ProcessCwd,
+    )
+}
+
+/// Launch directory exported by npm/pnpm, when it still exists.
+fn init_cwd() -> Option<PathBuf> {
+    let raw = std::env::var("INIT_CWD").ok().filter(|value| !value.is_empty())?;
+    let path = PathBuf::from(raw);
+    path.is_dir().then_some(path)
+}
+
+/// Report the resolved paths on the launching terminal, so the active data root
+/// and where it came from are visible without opening the webview console.
+fn log_resolved_paths(paths: &AppPaths) {
+    let config_file = paths.config_dir.join(MINDOS_CONFIG_FILE);
+    println!("[MindOS] config file : {}", config_file.display());
+    println!("[MindOS] data root   : {}  ({})", paths.root_dir.display(), paths.root_source.label());
+    println!("[MindOS] workspace   : {}  ({})", paths.home_dir.display(), paths.home_source.label());
+    diagnostics::record("paths.resolved", serde_json::json!({
+        "configFile": config_file.to_string_lossy(),
+        "dataRoot": paths.root_dir.to_string_lossy(),
+        "homeDir": paths.home_dir.to_string_lossy(),
+        "rootSource": paths.root_source.label(),
+        "homeSource": paths.home_source.label(),
+    }));
 }
 
 fn resolve_home_from_cli() -> Option<PathBuf> {
@@ -282,6 +366,21 @@ fn get_home_dir(paths: State<AppPaths>) -> String {
 #[tauri::command]
 fn get_root_dir(paths: State<AppPaths>) -> String {
     paths.root_dir.to_string_lossy().into_owned()
+}
+
+/// Where the resolved root and workspace came from, e.g. `mindos.json#rootDir`.
+#[derive(serde::Serialize)]
+struct PathSources {
+    root: String,
+    home: String,
+}
+
+#[tauri::command]
+fn get_path_sources(paths: State<AppPaths>) -> PathSources {
+    PathSources {
+        root: paths.root_source.label().to_string(),
+        home: paths.home_source.label().to_string(),
+    }
 }
 
 #[tauri::command]
@@ -549,6 +648,7 @@ pub fn run() {
         .setup(|app| {
             let system_home = app.path().home_dir().unwrap_or_else(|_| PathBuf::from("."));
             let paths = resolve_all_paths(&system_home);
+            log_resolved_paths(&paths);
 
             let _ = std::fs::create_dir_all(&paths.config_dir);
             for sub in &["", "_meta", "_db", "meta", "home/admin", "var/lib", "etc", "run"] {
@@ -611,6 +711,7 @@ pub fn run() {
             sidecar::sidecar_finish,
             get_home_dir,
             get_root_dir,
+            get_path_sources,
             get_current_dir,
             get_app_data_dir,
             get_app_config_dir,
@@ -660,7 +761,7 @@ mod stat_type_tests {
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let root = std::env::temp_dir().join(format!("mindos-stat-{}-{stamp}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let paths = AppPaths { config_dir: root.clone(), root_dir: root.clone(), home_dir: root.clone() };
+        let paths = AppPaths { config_dir: root.clone(), root_dir: root.clone(), home_dir: root.clone(), root_source: RootSource::Default, home_source: HomeSource::ProcessCwd };
         let file = root.join("file");
         std::fs::write(&file, b"content").unwrap();
         for (name, target) in [("file-link", file.clone()), ("dir-link", root.clone()), ("dangling", root.join("missing"))] {
