@@ -131,22 +131,25 @@ fn recover_markers(base: &Path) {
         let pid = std::fs::read_to_string(&path)
             .ok()
             .and_then(|v| v.parse::<u32>().ok());
+        // Liveness needs /proc, so unclean-exit recovery only runs where it is reliable.
         #[cfg(target_os = "linux")]
-        if pid.is_some_and(process_alive) {
-            continue;
+        {
+            if pid.is_some_and(process_alive) {
+                continue;
+            }
+            let _ = append(
+                &path.with_extension("jsonl"),
+                "process.previous_unclean_exit",
+                json!({"pid": pid, "reason": "unknown; inspect OS OOM/coredump logs"}),
+                true,
+            );
+            let _ = std::fs::remove_file(path);
         }
         #[cfg(not(target_os = "linux"))]
         {
+            // Without /proc a live pid cannot be told apart from a recycled one; keep the marker.
             let _ = pid;
-            continue;
         }
-        let _ = append(
-            &path.with_extension("jsonl"),
-            "process.previous_unclean_exit",
-            json!({"pid": pid, "reason": "unknown; inspect OS OOM/coredump logs"}),
-            true,
-        );
-        let _ = std::fs::remove_file(path);
     }
 }
 
