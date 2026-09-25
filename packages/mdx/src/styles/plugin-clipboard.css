@@ -1,0 +1,121 @@
+/* src/styles/plugin-clipboard.css */
+
+/**
+ * 粘贴后的内联提示条：可把刚插入的内容在「原文 / Markdown」之间切换。
+ * 使用 fixed 定位贴近光标，避免打断编辑视线。
+ */
+.mdx-paste-hint {
+  position: fixed;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: min(22rem, calc(100vw - 1rem));
+  padding: 0.4rem 0.5rem 0.4rem 0.75rem;
+  border: 1px solid var(--mdx-border-color, #d0d7de);
+  border-radius: 8px;
+  background: var(--mdx-bg-color, #ffffff);
+  color: var(--mdx-text-color, #24292f);
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+
+.mdx-paste-hint--visible {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  pointer-events: auto;
+}
+
+.mdx-paste-hint__message {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mdx-paste-hint__action {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--mdx-accent-color, #0969da);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mdx-accent-color, #0969da);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.mdx-paste-hint__action:hover {
+  background: var(--mdx-accent-color, #0969da);
+  color: #ffffff;
+}
+
+.mdx-paste-hint__close {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--mdx-text-color, #57606a);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.mdx-paste-hint__close:hover {
+  opacity: 1;
+}
+
+/* 暗色主题：手动切换 与 跟随系统 两种入口都要覆盖 */
+[data-theme="dark"] .mdx-paste-hint {
+  border-color: var(--mdx-border-color, #30363d);
+  background: var(--mdx-bg-color, #161b22);
+  color: var(--mdx-text-color, #c9d1d9);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .mdx-paste-hint__action {
+  border-color: var(--mdx-accent-color, #58a6ff);
+  color: var(--mdx-accent-color, #58a6ff);
+}
+
+[data-theme="dark"] .mdx-paste-hint__action:hover {
+  background: var(--mdx-accent-color, #58a6ff);
+  color: #0d1117;
+}
+
+@media (prefers-color-scheme: dark) {
+  .mdx-paste-hint {
+    border-color: var(--mdx-border-color, #30363d);
+    background: var(--mdx-bg-color, #161b22);
+    color: var(--mdx-text-color, #c9d1d9);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  }
+
+  .mdx-paste-hint__action {
+    border-color: var(--mdx-accent-color, #58a6ff);
+    color: var(--mdx-accent-color, #58a6ff);
+  }
+
+  .mdx-paste-hint__action:hover {
+    background: var(--mdx-accent-color, #58a6ff);
+    color: #0d1117;
+  }
+}
+
+@media print {
+  .mdx-paste-hint {
+    display: none !important;
+  }
+}
