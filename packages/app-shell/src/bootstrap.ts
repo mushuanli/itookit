@@ -1,7 +1,12 @@
-import { showMemoryDialog } from './files/memory-dialog';
-import { createApplicationRuntime, PrivilegedCommandService, workspaceRoot, type WorkspaceController } from '@itookit/app-core';
+import { ConfigurationDeletionDialog } from './configuration/delete-dialog';
+import { createToolboxModule } from './toolbox';
+import { legacyToolboxRoute, toolboxSettingsRoute } from './toolbox/routes';
+import { createProjectModule } from './projects';
+import { setupHitlVfsBridge } from './workspaces/hitl-bridge';
+import { createWorkspaceModule, restoreWorkspaceResource, type WorkspaceHandle } from './workspaces/module';
+import { createApplicationRuntime, PrivilegedCommandService, workspaceRoot, type WorkspaceController, type WorkspaceCreation } from '@itookit/app-core';
 import { createSessionSkillControls } from '@itookit/kernel-adapters';
-import { SessionWorkbench } from './core/SessionWorkbench';
+import { parseWorkspaceHash, resolveLegacyProjectResource } from './navigation/workspace-route';
 import type { VFSNodeUI } from '@itookit/vfs-ui';
 import type { EditorFileType as FileTypeDefinition } from './browser/types';
 import { connectEditorLifecycle } from './browser/editor-connector';
@@ -9,8 +14,8 @@ import {NavigationRequest, NAVIGATION_EVENTS, formatDefaultFileTitle, traceBoot}
 import { MenuItem } from '@itookit/ui-common';
 import { EditorFactory } from '@itookit/ui-common';
 import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
-import type { SessionManager } from '@itookit/llm-session';
 import { Workbench } from './core/Workbench';
+import { setupMobileWorkspaceView } from './navigation/mobile-workspace-view';
 import { SkillsEngine } from '@itookit/app-settings';
 
 import { AppOptions, AppHandle, WorkspaceConfig } from './types';
@@ -42,45 +47,6 @@ function waitForEditorMount(container: HTMLElement): Promise<void> {
         const observer = new MutationObserver(check);
         observer.observe(container, { childList: true, subtree: true });
         check();
-    });
-}
-
-// ── HITL → vfs-ui bridge ───────────────────────────────────────────────────────
-//
-// When a background session's agent calls human_input, the SessionManager emits
-// session_hitl_active / session_hitl_resolved RegistryEvents. This bridge
-// translates those into VFSStore state so the session list renders an orange
-// pulsing indicator on the waiting session's .chat file entry.
-
-function setupHitlVfsBridge(sessionManager: SessionManager, manager: WorkspaceController): () => void {
-    // NOTE: This bridge is "eventual" — it only responds to events that fire
-    // AFTER the workspace is loaded. Sessions that started waiting before the
-    // workspace loaded won't be highlighted until the NEXT input request.
-    // In practice this is not an issue because chat workspaces are loaded at
-    // app startup, before any background session can trigger human_input.
-    return sessionManager.onGlobalEvent((event) => {
-        if (event.type === 'session_hitl_active') {
-            const runtime = sessionManager.getSessionRuntime(event.payload.sessionId);
-            if (runtime) {
-                manager.setWaitingInput(runtime.sessionId, true);
-            }
-        } else if (event.type === 'session_hitl_resolved') {
-            const runtime = sessionManager.getSessionRuntime(event.payload.sessionId);
-            if (runtime) {
-                manager.setWaitingInput(runtime.sessionId, false);
-            }
-        } else if (event.type === 'session_status_changed') {
-            // Defensive cleanup: if the session is no longer running (aborted /
-            // completed / failed), clear any lingering waiting-input indicator.
-            // This also clears stale waiting indicators when a Process is cancelled.
-            const stopped = event.payload.status !== 'running' && event.payload.status !== 'queued';
-            if (stopped) {
-                const runtime = sessionManager.getSessionRuntime(event.payload.sessionId);
-                if (runtime) {
-                    manager.setWaitingInput(runtime.sessionId, false);
-                }
-            }
-        }
     });
 }
 
@@ -117,6 +83,8 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     };
 
     workspaces.forEach(registerWorkspaceRoute);
+    const toolboxId = workspaces.find(ws => ws.type === 'toolbox')?.elementId;
+    if (toolboxId) for (const slug of ['agents', 'skills', 'flows', 'mcp', 'tools', 'providers', 'connections']) routeMap[slug] = toolboxId;
 
     const resolvedDefault = defaultSlug ?? workspaces[0]?.slug ?? '';
 
@@ -124,28 +92,26 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const ownsRuntime = !options.runtime;
     const runtime = options.runtime ?? await createApplicationRuntime({ ...options, backend: options.backend! });
     if (ownsRuntime) cleanupFns.push(() => runtime.dispose());
-    const { vfs, llmDriver, agentService, sessionRepository, flowEngine, sessionFiles, directoryMounts,
+    const { vfs, llmDriver, agentService, sessionRepository, flowEngine, sessionFiles,
         kernel, sessionManager, commandBus } = runtime;
-    const kernelCore = kernel.kernel;
     await themeService.init(await vfs.openFileSystem('/etc'));
     cleanupFns.push(() => themeService.destroy());
     logStep('初始化界面服务…');
-    const settingsSources = await Promise.all(workspaces.filter(workspace => !['settings', 'skills'].includes(workspace.type ?? '')).map(async workspace => ({
+    const settingsSources = await Promise.all(workspaces.filter(workspace => !['settings', 'skills', 'toolbox'].includes(workspace.type ?? '')).map(async workspace => ({
         name: workspace.workspaceName, description: workspace.title,
         fs: workspace.files?.fs ?? await vfs.openFileSystem(workspaceRoot(workspace.workspaceName)),
         syncEnabled: workspace.syncEnabled && !workspace.isSystem,
     })));
-    const settingsModule = await traceBoot('createSettingsModule', () => createSettingsModule(vfs, settingsSources));
+    const settingsModule = await traceBoot('createSettingsModule', () => createSettingsModule(vfs, settingsSources, { excludedPages: toolboxId ? ['providers', 'connections', 'mcp-servers'] : [] }));
     cleanupFns.push(() => settingsModule.service.dispose());
 
-    const settingsFactory = createSettingsFactory(
-        settingsModule.service,
-        agentService,
-        llmDriver,
-        options.ui.llmUiEditors,
-        (browser, fs, container, factory) => connectEditorLifecycle(browser, fs, container, factory, { readOnly: true }),
-        options.ui.restoreFlowLibrary ? () => options.ui.restoreFlowLibrary!(commandBus) : undefined,
-    );
+    const deletionDialog = new ConfigurationDeletionDialog(runtime.configuration);
+    const settingsFactory = createSettingsFactory({
+        settingsService: settingsModule.service, agentService, connectionService: llmDriver, llmUiEditors: options.ui.llmUiEditors,
+        connectBrowser: (browser, fs, container, factory) => connectEditorLifecycle(browser, fs, container, factory, { readOnly: true }),
+        restoreFlows: options.ui.restoreFlowLibrary ? () => options.ui.restoreFlowLibrary!(commandBus) : undefined,
+        requestDelete: targets => deletionDialog.request(targets),
+    });
     // Pass llmService only when the vision connection is actually configured —
     // this is the single place that knows both the kernel and the connection list.
     const connections = await agentService.getConnections();
@@ -169,6 +135,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // Skills workspace: VFSUIShell list (SkillsEngine) + form editor (SkillSettingsEditor)
     const skillsEngine  = new SkillsEngine(agentService);
     const skillsFactory = options.ui.createSkillEditor(agentService);
+    cleanupFns.push(() => skillsEngine.dispose());
 
     await options.ui.installFlowLibrary?.(commandBus);
 
@@ -201,6 +168,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         const fs = workspace.files?.fs ?? (workspace.type === 'settings' ? settingsModule.engine
             : workspace.type === 'skills' ? skillsEngine
             : workspace.type === 'flows' ? flowEngine.engine
+            : workspace.type === 'toolbox' ? await vfs.openFileSystem(workspaceRoot('agents'))
             : await vfs.openFileSystem(workspaceRoot(workspace.workspaceName)));
         workspaceFiles.set(workspace.elementId, workspace.files ?? { fs, cwd: '/' });
     }
@@ -255,7 +223,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // ── 6. Manager cache + workspace loader ────────────────────────────────────
 
-    const managerCache = new Map<string, WorkspaceController>();
+    const managerCache = new Map<string, WorkspaceHandle>();
     // Deduplicate concurrent loads: if the same workspace is loading, reuse the promise.
     const pendingLoads = new Map<string, Promise<WorkspaceController | undefined>>();
 
@@ -287,22 +255,32 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         layoutEl.appendChild(sidebarEl);
         layoutEl.appendChild(editorEl);
         container.appendChild(layoutEl);
+        cleanupFns.push(setupMobileWorkspaceView(layoutEl, sidebarEl, editorEl));
 
         const strategyType = wsConfig.type ?? 'standard';
         const factory = factories[strategyType] ?? defaultEditorFactory;
         const files = workspaceFiles.get(elementId);
         if (!files) throw new Error(`Workspace files not configured: ${elementId}`);
 
+        if (strategyType === 'toolbox') {
+            const module = await createToolboxModule({ runtime, ui: options.ui, sidebar: sidebarEl, editor: editorEl,
+                skills: skillsEngine, factories: { agents: agentFactory, skills: skillsFactory, flows: flowsFactory },
+                navigate: handleNavigationRequest, selected: path => updateHistory(elementId, path, 'replace') });
+            const toolbox = module.workbench;
+            cleanupFns.push(module.dispose); await toolbox.start(); managerCache.set(elementId, toolbox);
+            if (initialResourceId) await toolbox.openResource(initialResourceId);
+            return toolbox;
+        }
+
         if (strategyType === 'chat') {
-            const sessionWorkspace = new SessionWorkbench(sidebarEl, editorEl, sessionRepository, sessionFiles, factory, (id, mode = 'replace') => updateHistory(elementId, id, mode), { toggleSidebar: collapsed => { sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')); }, navigate: handleNavigationRequest }, kernelCore, defaultEditorFactory, directoryMounts, sessionSkills, async (sessionId, signal) => {
-                await showMemoryDialog(sessionManager.memory.forSession(sessionId), await sessionManager.getAvailableAgents(), signal);
-            }, { fs: flowEngine.engine, menu: options.ui.createFlowContextMenu<VFSNodeUI>({ commands: commandBus,
-                navigate: sessionId => handleNavigationRequest({ target: 'chat', resourceId: sessionId }) }) });
-            cleanupFns.push(() => sessionWorkspace.destroy());
-            await sessionWorkspace.start(); managerCache.set(elementId, sessionWorkspace);
-            cleanupFns.push(setupHitlVfsBridge(sessionManager, sessionWorkspace));
-            if (initialResourceId) await sessionWorkspace.openResource(initialResourceId);
-            return sessionWorkspace;
+            const module = createProjectModule({ runtime, sessionSkills, sidebar: sidebarEl, container: editorEl,
+                factory, fileFactory: defaultEditorFactory, createFlowContextMenu: options.ui.createFlowContextMenu,
+                onSelect: (id, mode = 'replace') => updateHistory(elementId, id, mode),
+                hostContext: { toggleSidebar: collapsed => sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')), navigate: handleNavigationRequest } });
+            cleanupFns.push(module.dispose);
+            await module.workbench.start(); managerCache.set(elementId, module.workbench);
+            if (initialResourceId) await restoreWorkspaceResource(module.workbench, initialResourceId);
+            return module.workbench;
         }
 
         const { workspaceName: _workspaceName, plugins, mentionScope, aiEnabled, supportedFileTypes, showFileExtensions, ...uiPassThrough } = wsConfig;
@@ -372,20 +350,22 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             },
         });
 
-        const controller: WorkspaceController = {
+        const controller: WorkspaceController & WorkspaceCreation = {
             start: () => manager.start(), destroy: () => manager.destroy(),
             openResource: id => manager.openFile(id), createResource: options => manager.createAndOpenFile(options),
-            getActiveResourceId: () => manager.getActiveFilePath(), setWaitingInput: (id, waiting) => manager.setNodeWaitingInput(id, waiting),
+            getActiveResourceId: () => manager.getActiveFilePath(),
         };
         // Start without resourceId to avoid double sessionSelected race with LLMFactory.
-        cleanupFns.push(() => manager.destroy());
-        await manager.start();
-        managerCache.set(elementId, controller);
+        let releaseHitl: (() => void) | undefined;
+        const module = createWorkspaceModule(controller, async () => { releaseHitl?.(); await manager.destroy(); });
+        cleanupFns.push(module.dispose);
+        await module.workbench.start();
+        managerCache.set(elementId, module.workbench);
 
         // Bridge: session HITL status → vfs-ui session list highlight.
         // Calls manager.setWaitingInput() which delegates to VFSUIShell internally,
         // keeping bootstrap decoupled from the concrete VFSUIShell type.
-        cleanupFns.push(setupHitlVfsBridge(sessionManager, controller));
+        releaseHitl = setupHitlVfsBridge(sessionManager, (id, waiting) => manager.setNodeWaitingInput(id, waiting));
 
         if (initialResourceId && manager.getActiveFilePath() !== initialResourceId) {
             await manager.openFile(initialResourceId);
@@ -394,7 +374,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             if (onProgress) await waitForEditorMount(container);
         }
 
-        return controller;
+        return module.workbench;
     };
 
     /** Deduplicated workspace loader: concurrent calls for the same elementId share one promise. */
@@ -415,7 +395,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // ── 7. Routing helpers ─────────────────────────────────────────────────────
 
-    const resolveTarget = (target: string): string => {
+    const resolveTarget = (target: string, resource?: string): string => {
+        if (toolboxId && (target === 'settings' || target === routeMap.settings) && toolboxSettingsRoute(resource)) return toolboxId;
+        if (toolboxId && legacyToolboxRoute(target)) return toolboxId;
         if (routeMap[target]) return routeMap[target];
         if (document.getElementById(target)) return target;
         const ws = workspaces.find(w => w.workspaceName === target);
@@ -434,7 +416,14 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         }
     };
 
-    const performNavigation = async (workspaceId: string, resourceId?: string): Promise<void> => {
+    const performNavigation = async (workspaceId: string, resourceId?: string, sourceSlug?: string): Promise<void> => {
+        const movedSettings = toolboxId && (sourceSlug === 'settings' || workspaceId === routeMap.settings) ? toolboxSettingsRoute(resourceId) : undefined;
+        if (movedSettings) { workspaceId = toolboxId!; resourceId = movedSettings; }
+        const legacyToolbox = toolboxId ? legacyToolboxRoute(sourceSlug ?? workspaceId, resourceId) : undefined;
+        if (legacyToolbox) { workspaceId = toolboxId!; resourceId = legacyToolbox.path ?? '/' + legacyToolbox.kind; }
+        if (sourceSlug === 'projects' && resourceId && workspaces.some(ws => ws.elementId === workspaceId && ws.type === 'chat')) {
+            resourceId = await resolveLegacyProjectResource(resourceId, runtime.projects);
+        }
         console.log(`[Shell] performNavigation: ${workspaceId} resourceId=${resourceId ?? '—'} cached=${managerCache.has(workspaceId)}`);
         document.querySelectorAll('.workspace-view').forEach(ws => {
             ws.classList.toggle('active', ws.id === workspaceId);
@@ -449,7 +438,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         } else if (resourceId) {
             const mgr = managerCache.get(workspaceId)!;
             const wasAlreadyOpen = mgr.getActiveResourceId() === resourceId;
-            await mgr.openResource(resourceId);
+            await restoreWorkspaceResource(mgr, resourceId);
             // If the file was already open, render() was skipped → dispatch anchor manually
             if (wasAlreadyOpen) {
                 const raw = sessionStorage.getItem('settings_anchor');
@@ -466,10 +455,13 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 }
             }
         }
+        if (movedSettings || legacyToolbox) updateHistory(workspaceId, resourceId ?? null, 'replace');
     };
 
     const handleNavigationRequest = async (req: NavigationRequest): Promise<void> => {
-        const targetWsId = resolveTarget(req.target);
+        const moved = toolboxId && req.target === 'settings' ? toolboxSettingsRoute(req.resourceId, req.state?.anchor) : undefined;
+        if (moved) req = { ...req, target: 'toolbox', resourceId: moved, state: undefined };
+        const targetWsId = resolveTarget(req.target, req.resourceId);
         const action = req.action ?? 'open';
         console.log(`[Shell] handleNavigationRequest: action=${action} target=${req.target} → wsId=${targetWsId}`);
 
@@ -487,10 +479,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                     }));
                 }
                 updateHistory(targetWsId, null, 'push');
-                await performNavigation(targetWsId);
+                await performNavigation(targetWsId, undefined, req.target);
                 const mgr = managerCache.get(targetWsId);
                 console.log(`[Shell] create: mgr found=${!!mgr} wsId=${targetWsId}`);
-                if (mgr) {
+                if (mgr?.createResource) {
                     try {
                         const newId = await mgr.createResource({
                             title:    req.create?.title,
@@ -509,11 +501,11 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             }
             case 'reveal':
                 updateHistory(targetWsId, req.resourceId ?? null, 'replace');
-                await performNavigation(targetWsId);
+                await performNavigation(targetWsId, undefined, req.target);
                 break;
             case 'focus':
                 updateHistory(targetWsId, null, 'replace');
-                await performNavigation(targetWsId);
+                await performNavigation(targetWsId, undefined, req.target);
                 break;
             default: {
                 if (req.state?.anchor) {
@@ -524,7 +516,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                     }));
                 }
                 updateHistory(targetWsId, req.resourceId ?? null, 'push');
-                await performNavigation(targetWsId, req.resourceId);
+                await performNavigation(targetWsId, req.resourceId, req.target);
             }
         }
     };
@@ -559,23 +551,20 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         if (state) {
             performNavigation(state.workspaceId, state.resourceId);
         } else {
-            const parts = location.hash.slice(2).split('/');
-            const slug  = parts[0] || resolvedDefault;
-            const resource = parts[1] ? decodeURIComponent(parts[1]) : undefined;
-            performNavigation(resolveTarget(slug), resource === 'new' ? undefined : resource);
+            const { slug, resource } = parseWorkspaceHash(location.hash, resolvedDefault);
+            performNavigation(resolveTarget(slug, resource), resource, slug);
         }
     }, { signal: navigationSignal });
 
     // ── 9. Initial navigation ──────────────────────────────────────────────────
 
     onProgress?.('加载工作区…');
-    const parts    = location.hash.slice(2).split('/');
-    const initSlug = parts[0] || resolvedDefault;
-    const initId   = parts[1] ? decodeURIComponent(parts[1]) : undefined;
-    const initWs   = resolveTarget(initSlug);
-
-    await performNavigation(initWs, initId === 'new' ? undefined : initId);
-    updateHistory(initWs, initId ?? null, 'replace');
+    const initialRoute = parseWorkspaceHash(location.hash, resolvedDefault);
+    const initWs = resolveTarget(initialRoute.slug, initialRoute.resource);
+    await performNavigation(initWs, initialRoute.resource, initialRoute.slug);
+    const initialManager = managerCache.get(initWs);
+    const initialResource = initialManager?.getActiveResourceId() ?? null;
+    updateHistory(initWs, initialResource, 'replace');
 
     // ── AppHandle ──────────────────────────────────────────────────────────────
 
@@ -585,9 +574,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         runtime,
 
         async navigate(slug: string, resourceId?: string): Promise<void> {
-            const wsId = resolveTarget(slug);
+            const wsId = resolveTarget(slug, resourceId);
             updateHistory(wsId, resourceId ?? null, 'push');
-            await performNavigation(wsId, resourceId);
+            await performNavigation(wsId, resourceId, slug);
         },
 
         async setTheme(mode: ThemeMode): Promise<void> {

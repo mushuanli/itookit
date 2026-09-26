@@ -22,6 +22,9 @@
     gap: 0.5rem;
 }
 
+.llm-workspace-titlebar__left { min-width: 0; }
+.llm-workspace-titlebar__right { flex-shrink: 0; }
+
 .llm-workspace-titlebar__btn {
     display: inline-flex;
     align-items: center;
@@ -318,9 +321,13 @@
 }
 
 @media (max-width: 480px) {
-    #llm-btn-copy { display: none; }
+    .llm-workspace-titlebar__right { gap: 2px; max-width: 48%; overflow-x: auto; scrollbar-width: none; }
+    .llm-workspace-titlebar__right::-webkit-scrollbar { display: none; }
+    .llm-workspace-titlebar__btn--text { max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+    .llm-workspace-titlebar__input { max-width: none; min-width: 0; width: 100%; }
+    .llm-workspace-titlebar__left { flex: 1; }
+    .llm-branch-indicator-bar { margin-left: 0; }
     .llm-workspace-status { display: none; }
-    .llm-workspace-titlebar__input { min-width: 50px; }
     .llm-branch-indicator-name { max-width: 70px; }
 }
 
@@ -381,3 +388,15 @@
 .llm-workspace-menu button:disabled { opacity: .5; cursor: default; }
 .llm-workspace-menu p { padding: 0 12px; font-size: 12px; color: var(--llm-text-secondary); }
 .llm-workspace-titlebar__btn[hidden] { display: none; }
+
+/* Secondary actions remain available without competing with the conversation title. */
+.llm-workspace-titlebar__left { flex: 1; }
+.llm-workspace-titlebar__input { min-width: 0; width: 100%; }
+.llm-workspace-titlebar__right { overflow: visible; max-width: none; }
+.llm-workspace-titlebar__menu { position: relative; }
+.llm-workspace-titlebar__menu summary { list-style: none; cursor: pointer; padding: 4px 10px; font-size: 22px; border-radius: 6px; }
+.llm-workspace-titlebar__menu summary:focus-visible { outline: 2px solid var(--llm-color-primary); }
+.llm-workspace-titlebar__menu-actions { position: absolute; top: 100%; right: 0; width: 250px; max-height: min(480px, 70vh); overflow: auto; padding: 6px; border: 1px solid var(--llm-border-color); border-radius: 8px; background: var(--llm-bg-primary); box-shadow: 0 8px 24px #0002; }
+.llm-workspace-titlebar__menu-actions .llm-workspace-titlebar__btn:not([hidden]) { display: flex; width: 100%; max-width: none; min-height: 36px; justify-content: flex-start; padding: 6px 10px; gap: 10px; text-align: left; }
+.llm-workspace-titlebar__menu-actions .llm-workspace-titlebar__btn:not(.llm-workspace-titlebar__btn--text)::after { content: attr(title); font-size: 13px; }
+.llm-workspace-titlebar__menu-actions .llm-workspace-titlebar__sep { display: block; height: 1px; width: auto; margin: 5px 0; }

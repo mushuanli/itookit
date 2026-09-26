@@ -76,29 +76,90 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 100%;
-    min-height: 300px;
-    color: var(--llm-text-muted);
+    min-height: 100%;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 36px 20px;
+    color: var(--llm-text-secondary);
     text-align: center;
-    user-select: none;
 }
 
-.llm-ui-welcome__icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-    opacity: 0.8;
+.llm-ui-welcome__mark {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    margin-bottom: 18px;
+    border-radius: 18px;
+    background: linear-gradient(145deg, #4f46e5, #6366f1);
+    box-shadow: 0 10px 24px #4f46e533;
+    color: white;
+    font-size: 18px;
+    font-weight: 750;
+}
+
+.llm-ui-welcome__eyebrow {
+    color: #4f46e5;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .08em;
 }
 
 .llm-ui-welcome h2 {
-    margin: 0 0 8px 0;
-    font-size: 20px;
-    font-weight: 600;
+    margin: 10px 0;
+    font-size: clamp(25px, 3vw, 34px);
+    font-weight: 700;
+    letter-spacing: -.025em;
     color: var(--llm-text-primary);
 }
 
 .llm-ui-welcome p {
     margin: 0;
+    font-size: 15px;
+    line-height: 1.6;
+}
+
+.llm-ui-welcome__prompts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    width: 100%;
+    margin-top: 34px;
+}
+
+.llm-ui-welcome__prompt {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 96px;
+    padding: 18px;
+    border: 1px solid var(--llm-border-color);
+    border-radius: 16px;
+    background: var(--llm-bg-primary);
+    color: var(--llm-text-primary);
+    font: inherit;
     font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: 0 4px 16px #0f172a0a;
+}
+
+.llm-ui-welcome__prompt:hover,
+.llm-ui-welcome__prompt:focus-visible {
+    border-color: #a5b4fc;
+    background: #f7f8ff;
+}
+
+.llm-ui-welcome__prompt:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
+.llm-ui-welcome__prompt span { color: #6366f1; font-size: 18px; }
+
+@media (max-width: 600px) {
+    .llm-ui-welcome { padding: 24px 8px; }
+    .llm-ui-welcome__prompts { grid-template-columns: 1fr; gap: 8px; margin-top: 22px; }
+    .llm-ui-welcome__prompt { min-height: 52px; padding: 13px 15px; }
 }
 
 /* --- New Content Indicator --- */

@@ -24,6 +24,8 @@ export interface ConversationManifest extends RoundManifest {
     updatedAt: number;
     /** Virtual sidebar folder path, normalized as /A/B; null/undefined means root. */
     folder?: string | null;
+    /** Organizational parent; history, drafts and executions remain independent. */
+    parentSessionId?: string | null;
     uiState?: ConversationUIState;
     /** Workflow instance source: set when the session is created from a workflow run. */
     flow?: {
@@ -50,6 +52,8 @@ export interface SessionFolder {
     name: string;
     parentPath: string | null;
     updatedAt: number;
+    /** A project root owns a file directory; descendants organize its Sessions. */
+    project?: { id: string; directory: string };
 }
 
 /** A fresh, single-transaction snapshot for one editor load; never a persistent cache. */
@@ -65,12 +69,19 @@ export interface SessionView extends SessionLoadState {
 
 export interface SessionRepositoryChange { kind: 'session' | 'ui-state'; sessionId?: string }
 
+/** Required for recoverable structural changes; implementations cannot silently skip these steps. */
+export interface SessionDeletionStore {
+    assertStructuralWritable(ids: string[]): Promise<void>;
+    prepareSessionDeletion(sessionId: string): Promise<void>;
+    pendingSessionDeletions(): Promise<Array<{ id: string }>>;
+}
+
 /** Domain storage. History and attachments belong to the Session identity. */
-export interface ISessionRepository {
+export interface ISessionRepository extends SessionDeletionStore {
     init(): Promise<void>;
     dispose(): Promise<void>;
     subscribe(listener: (change?: SessionRepositoryChange) => void): () => void;
-    createSession(title: string, folder?: string | null): Promise<string>;
+    createSession(title: string, folder?: string | null, parentSessionId?: string | null): Promise<string>;
     /** Idempotently create a Session with a host-supplied durable identity. */
     ensureSession(id: string, title: string, origin?: SessionOrigin, folder?: string | null): Promise<string>;
     getManifest(sessionId: string): Promise<ConversationManifest>;
@@ -83,7 +94,7 @@ export interface ISessionRepository {
     /** Delete a Session and its owned storage. */
     deleteSession(sessionId: string): Promise<void>;
     listFolders(): Promise<SessionFolder[]>;
-    createFolder(path: string): Promise<SessionFolder>;
+    createFolder(path: string, project?: SessionFolder['project']): Promise<SessionFolder>;
     deleteFolder(path: string, recursive?: boolean): Promise<void>;
     renameFolder(from: string, to: string): Promise<void>;
     updateManifest(sessionId: string, patch: Partial<ConversationManifest>): Promise<void>;

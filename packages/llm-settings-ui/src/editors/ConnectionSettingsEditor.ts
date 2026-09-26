@@ -1,3 +1,5 @@
+import { showConfigurationForm, addConfigurationAction, addConfigurationEnabled } from './configuration-form';
+import { t } from '@itookit/common';
 // @file: llm-ui/editors/ConnectionSettingsEditor.ts
 //
 // 三层架构：Provider → Connection → Agent
@@ -13,7 +15,7 @@ import type { IConnectionService,
     ModelTier,
     ApiProtocol
 } from '@itookit/common';
-import { Modal, Toast } from '@itookit/ui-common';
+import { Toast } from '@itookit/ui-common';
 import { fromConnectionDef, serializeLLMConfig } from '@itookit/device-llm';
 import { runLLMImport } from './llm-import';
 import { renderModelCapabilityBadges } from '../utils/modelBadges';
@@ -25,11 +27,19 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     private _checkedIds = new Set<string>();
     private _selectedProviderId: string | null = null;
 
+    private get formOnly(): boolean { return this.options.target?.kind === 'entity' && this.options.target.entityType === 'connection'; }
+
     async render() {
         this.providers = Object.fromEntries(
             this.service.getProviders().map(p => [p.id, p])
         );
         const allConnections = await this.service.getConnections();
+        if (this.formOnly) {
+            const target = this.options.target;
+            const connection = await this.service.getFullConnection(target?.kind === 'entity' ? target.id : '');
+            if (connection) this.showEditModal(connection); else this.container.textContent = t('toolbox.resourceMissing');
+            return;
+        }
 
         // Sort: has-apiKey first → enabled first → alphabetical
         allConnections.sort((a, b) => {
@@ -454,34 +464,21 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         const allConns = await this.service.getConnections();
         // Default connection cannot be deleted
         const deletable = allConns.filter(c => ids.includes(c.id) && c.id !== 'default');
-        const skipped   = ids.length - deletable.length;
 
         if (!deletable.length) {
             Toast.error('选中的连接均不可删除（默认连接不可删除）');
             return;
         }
 
-        const names = deletable.map(c => `「${c.name}」`).join('、');
-        const hint  = skipped > 0 ? `\n（另有 ${skipped} 个默认连接将跳过）` : '';
-
-        Modal.confirm(
-            '批量删除连接',
-            `确定删除 ${names}？此操作不可撤销。${hint}`,
-            async () => {
-                for (const c of deletable) {
-                    await this.service.deleteConnection(c.id);
-                }
-                this._checkedIds.clear();
-                Toast.success(`已删除 ${deletable.length} 个连接`);
-                this.render();
-            },
-        );
+        const request = this.options.hostContext?.requestDelete;
+        if (!request) throw new Error('Configuration deletion is not connected');
+        await request(deletable.map(item => ({ kind: 'entity', entityType: 'connection', id: item.id })));
+        this._checkedIds.clear(); await this.render();
     }
 
     // ── Edit modal ─────────────────────────────────────────────────────────────
 
     private showEditModal(connection: LLMConnection | null) {
-        const isNew = !connection;
         const providerKeys = Object.keys(this.providers);
         const initialPid = connection?.providerId ?? this._selectedProviderId ?? providerKeys[0];
         const initialProvider = this.providers[initialPid] ?? this.providers[providerKeys[0]];
@@ -502,7 +499,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     </select>
                     <small class="settings-form__help">
                         Provider 的模型列表和地址在
-                        <strong>设置 → LLM Providers</strong> 中管理。
+                        <strong>${this.formOnly ? t('toolbox.providerLocation') : '设置 → LLM Providers'}</strong> 中管理。
                     </small>
                 </div>
 
@@ -540,7 +537,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                         ${this.renderTierForm(initialProvider)}
                     </div>
                     <small class="settings-form__help">
-                        API Key 和模型列表在 <strong>设置 → LLM Providers</strong> 中管理。
+                        API Key 和模型列表在 <strong>${this.formOnly ? t('toolbox.providerLocation') : '设置 → LLM Providers'}</strong> 中管理。
                     </small>
                 </div>
 
@@ -583,7 +580,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             </form>
         `;
 
-        new Modal(isNew ? '添加连接' : '配置连接', modalContent, {
+        showConfigurationForm(this.container, connection?.name ?? '添加连接', modalContent, {
             width: '560px',
             confirmText: '保存',
             onConfirm: async () => {
@@ -622,6 +619,8 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     delete metadata.tierThinking;
                 }
                 const newConn: LLMConnection = {
+                    ...connection,
+                    enabled: this.formOnly ? data.enabled === 'on' : connection?.enabled,
                     id: connection?.id || `conn-${generateShortUUID()}`,
                     name: data.name,
                     providerId: pid,
@@ -636,9 +635,17 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 Toast.success('连接配置已保存');
                 this.render();
             },
-        }).show();
+        }, this.formOnly);
 
-        setTimeout(() => this.bindModalEvents(connection, initialPid), 100);
+        if (this.formOnly) {
+            this.bindModalEvents(connection, initialPid);
+            addConfigurationEnabled(this.container, connection?.enabled !== false);
+            addConfigurationAction(this.container, t('toolbox.configureProvider'), () => {
+                const id = this.container.querySelector<HTMLSelectElement>('[name="providerId"]')?.value;
+                if (id) void this.options.hostContext?.navigate({ target: 'toolbox', resourceId: '/providers/' + encodeURIComponent(id) });
+            });
+            if (connection && connection.id !== 'default') addConfigurationAction(this.container, t('action.delete'), () => this.deleteConnection(connection.id, connection.name));
+        } else setTimeout(() => this.bindModalEvents(connection, initialPid), 100);
     }
 
     /** 渲染单个 tier 的 thinking 开关 HTML（有 modelId 时显示，否则返回空字符串） */
@@ -761,12 +768,11 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         }
     }
 
-    private deleteConnection(id: string, name: string) {
-        Modal.confirm('确认删除', `确定要删除连接"${name}"吗？此操作无法撤销。`, async () => {
-            await this.service.deleteConnection(id);
-            Toast.success('连接已删除');
-            this.render();
-        });
+    private async deleteConnection(id: string, _name: string): Promise<void> {
+        const request = this.options.hostContext?.requestDelete;
+        if (!request) throw new Error('Configuration deletion is not connected');
+        await request([{ kind: 'entity', entityType: 'connection', id }]);
+        await this.render();
     }
 
     private bindButton(selector: string, handler: () => void) {

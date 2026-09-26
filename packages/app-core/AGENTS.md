@@ -1,12 +1,13 @@
 # @itookit/app-core
 
-平台无关的**应用装配层**：把 VFS / LLM 设备驱动 / durable-kernel / kernel-adapters / llm-session / llm-flow 装配成可运行的 MindOS 运行时，供 Tauri、Web 与 CLI 共用。详见 [运行时架构](../../doc/runtime-architecture.md)、[包结构](../../doc/pkgstructure.md)。
+平台无关的**应用用例与装配层**：封装项目组织、配置关联操作等应用策略，并把 VFS / LLM 设备驱动 / durable-kernel / kernel-adapters / llm-session / llm-flow 装配成运行时，供 Tauri、Web 与 CLI 共用。详见 [运行时架构](../../doc/runtime-architecture.md)、[包结构](../../doc/pkgstructure.md)。
 
 ## 定位与铁律
 
 - **平台无关**：`src/` 内不出现 `node:*`、DOM、`window`、`localStorage`；宿主差异一律通过注入传入（`ApplicationKernelPlatform`：`createSessionProcesses` / `skillSourceForSession` / `configureSession` / `configure`）。
 - **依赖只朝下**：只依赖 `context`、`common`、`vfs-core`、`durable-kernel`、`kernel-adapters`、`llm-flow`、`llm-session`、`device-llm`；不得依赖 `app-shell`、UI 包或任何 app。
-- **装配不是策略**：这里只做「接线 + 生命周期」。宿主策略（租约文案、挂载守卫、恢复时机）应能被宿主替换；新增这类逻辑时优先放进可单测的服务模块，而不是 `createApplicationRuntime` 内联。
+- **用例与装配分开**：应用策略放入 configuration/projects/session 等可单测服务；`runtime/` 负责接线与生命周期，不内联业务用例。宿主差异通过端口注入，DOM、导航与确认交互归 app-shell。
+- **显式公共出口**：`src/index.ts` 按需导出服务与契约，不使用 `export *`，内部实现与辅助函数不默认公开。`pnpm architecture:check` 检查生产源码与运行依赖的层次边界。
 - 无构建脚本：`main` 直接指向 `src/index.ts`，由宿主 app（web-app / tauri-app / cli）打包。
 
 ## 结构
@@ -21,6 +22,8 @@ src/
 │   ├── conversation-system.ts   会话系统装配（工具过滤、Session 上下文、生命周期）
 │   ├── workspace-scope-cleanup.ts 工作区清理前等待后台成员并关闭 Run 能力作用域
 │   └── create-application-runtime.ts 应用运行时装配：VFS → LLM → 会话/Flow → 租约与恢复 → RunCatalog
+├── configuration/               工具箱资源/分组/目录、模型关联删除与工具授权
+├── projects/                    项目生命周期、会话组织查询/命令、项目归档与业务目标
 ├── session/                     Session 语义与数据交换（可依赖 vfs/）
 │   ├── session-browser.ts       浏览器侧导航模型（folder:/tasks 目标解析与投影）
 │   ├── session-bundle.ts        会话导出/导入格式（带版本与校验）

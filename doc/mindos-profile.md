@@ -12,6 +12,18 @@ $XDG_CONFIG_HOME/mindos/mindos.json
 ~/.config/mindos/mindos.json
 ```
 
+CLI（desktop profile）和 Tauri 启动时，如果配置文件不存在，会自动创建以下默认值。已有文件不会被覆盖；`MINDOS_ROOT`、启动目录等临时参数不会写入默认配置。
+
+```json
+{
+  "rootDir": "data",
+  "storageVersion": 1,
+  "layoutVersion": 1
+}
+```
+
+两端共用 `packages/app-core/src/profile/default-profile.json`，均将 `XDG_CONFIG_HOME` 视为配置基目录，并在其下使用 `mindos/`。可选的 `homeDir` 只在用户希望固定项目目录时填写。
+
 Schema：
 
 ```json
@@ -33,7 +45,7 @@ MINDOS_ROOT
 
 `rootDir` 为相对路径时按 `configDir` 解析。
 
-桌面端工作目录（新会话默认映射为 `/workspace`）解析顺序：
+桌面端当前项目目录（注册到统一工作台，其新会话默认映射为 `/workspace`）解析顺序：
 
 ```text
 --home <dir>
@@ -43,6 +55,14 @@ MINDOS_ROOT
 ```
 
 `tauri dev` 把应用进程的 cwd 设为 `src-tauri/`，所以 `INIT_CWD` 才是用户敲命令时所在的目录；该值为空或已不存在时回退进程 cwd。启动时终端会打印 `[MindOS] data root` 与 `[MindOS] workspace` 两行及其来源。
+
+## 工作台与已有数据
+
+统一工作台新增项目与会话的导航分组，数据根与存储版本不变。现有 `~/.config/mindos/` 只有 `data/`、`logs/` 时，无需搬迁；启动后会在同级补齐 `mindos.json`。
+
+旧 `#/projects/<编码后的路径>` 地址会在工作台注册“原项目文档”，指向原来的 `/home/admin/projects`，再打开相应文件。`.prj` 文档保留原路径和内容，地址更新为工作台项目文件路由，刷新后继续可用。项目分组保存在 Session repository 中，应用内新项目的文件位于 `/home/admin/projects/<项目 ID>`；宿主项目仍引用其原本的本地目录。
+
+换机器时，先退出使用该 profile 的 Tauri/CLI，再复制整个 `mindos/`（包括数据、元数据和配置）；若 `rootDir` 指向目录外，还需复制该数据根并调整配置。宿主项目目录是外部引用，需要在新机器上保留或重新配置其路径。Web 的 IndexedDB 存储属于浏览器来源（协议、地址和端口），不会自动读取宿主的 `~/.config/mindos`。
 
 ## CLI profile 选择
 

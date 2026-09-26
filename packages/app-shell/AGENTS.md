@@ -14,11 +14,16 @@ src/
 ├── ThemeService.ts       ← 主题管理 (data-theme attribute + system/os 检测)
 ├── types.ts              ← AppOptions, AppHandle, WorkspaceConfig, AppKernelPlatform, AppUI
 ├── workspaces/
-│   └── index.ts          ← 预定义 WorkspaceConfig 常量 (WS_SETTINGS/WS_CHAT/WS_AGENTS/WS_SKILLS/WS_FLOWS…)
+│   ├── index.ts          ← 预定义 WorkspaceConfig 常量 (WS_SETTINGS/WS_CHAT/WS_AGENTS/WS_SKILLS/WS_FLOWS…)
+│   ├── module.ts         ← 工作区能力、路由恢复、模块资源统一释放
+│   └── hitl-bridge.ts    ← Session 等待输入状态适配
 ├── browser/             ← 文件浏览器与编辑器装配、媒体预览、mention/元数据策略
 ├── core/
-│   ├── Workbench.ts          ← 通用工作区控制器
-│   └── SessionWorkbench.ts   ← Session 侧栏 + 路由 + 文件上下文生命周期
+│   └── Workbench.ts          ← 通用工作区控制器
+├── projects/             ← createProjectModule、SessionWorkbench、项目导航与归档目标适配
+├── toolbox/              ← 工具箱模块入口、分类/分组显示、编辑器装配
+├── configuration/        ← 删除影响确认（调用 app-core 的共享命令）
+├── navigation/           ← URL 适配与移动端切换
 ├── files/                ← 本包 UI 实现（兼容 re-export shim 已于 2026-09-11 全部删除）
 │   ├── mount-dialog.ts       宿主目录挂载对话框
 │   └── localize-mount-error.ts 把 app-core 结构化错误映射为 i18n 文案
@@ -56,6 +61,7 @@ const factory = factories[strategyType] ?? defaultEditorFactory;
 ## Conventions
 
 - `initApp()` 是唯一 UI 装配点 — VFS/LLM/Kernel 由 `app-core` 的 `createApplicationRuntime()` 装配，编辑器/AI 菜单/LLM 设置编辑器经 `AppOptions.ui` 注入
+- 项目与工具箱分别通过 `createProjectModule` / `createToolboxModule` 装配，返回统一 WorkspaceModule；bootstrap 只消费工作区能力，不用具体工作台类做 instanceof 判断。模块销毁同时释放目录投影和事件订阅，动态移除与应用退出共用一次释放。
 - `loadWorkspace()` 包含去重 — 并发加载同一工作区共享同一个 Promise (`pendingLoads`)
 - 路由基于 hash URL (`#/<slug>/<resourceId>`)，由 `history.pushState/replaceState` 写入，监听 `popstate` + `NAVIGATION_EVENTS.NAVIGATE`
 - `ThemeService` 管理 `<html>` 的 `data-theme` attribute，监听 `app:theme-change` 事件，偏好持久化到 `etc:/ui/theme.json`；`AppHandle.setTheme(mode)` 切换主题

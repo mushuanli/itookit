@@ -1,3 +1,7 @@
+import defaultSettings from './default-profile.json';
+
+export const DEFAULT_MINDOS_SETTINGS: Readonly<MindOSProfileSettings> = Object.freeze(defaultSettings);
+
 /** Canonical MindOS config file name under $XDG_CONFIG_HOME/mindos or ~/.config/mindos. */
 export const MINDOS_CONFIG_FILE = 'mindos.json';
 

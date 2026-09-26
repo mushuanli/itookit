@@ -189,6 +189,7 @@ class SkillsDriver implements IFSDriver {
     // ── Read ─────────────────────────────────────────
 
     async getNode(id: string): Promise<FSNode | null> {
+        if (id === "/") return { type: "directory", path: "/", name: "skills", parentPath: null, createdAt: 0, modifiedAt: 0, version: 0, tags: [], metadata: {} };
         const skills = await this.service.getSkills();
         const skillId = toSkillId(id);
         const s = skills.find((x: LLMSkill) => x.id === skillId);
@@ -209,6 +210,7 @@ class SkillsDriver implements IFSDriver {
     }
 
     async resolvePath(_path: string): Promise<string | null> {
+        if (_path === "/") return "/";
         const skills = await this.service.getSkills();
         for (const s of skills) {
             if (_path === `/${s.id}` || _path === s.id) return `/${s.id}`;
@@ -217,6 +219,7 @@ class SkillsDriver implements IFSDriver {
     }
 
     async exists(id: string): Promise<boolean> {
+        if (id === "/") return true;
         const skills = await this.service.getSkills();
         const skillId = toSkillId(id);
         return skills.some((s: LLMSkill) => s.id === skillId);
@@ -435,7 +438,7 @@ class SkillsDriver implements IFSDriver {
 function toFSNode(s: LLMSkill): FSFileNode {
     return {
         parentPath: null,
-        name: s.name,
+        name: s.id,
         type: 'file',
         icon: s.icon ?? '⚡',
         path: `/${s.id}`,

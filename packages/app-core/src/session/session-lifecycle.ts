@@ -34,9 +34,13 @@ export class SessionLifecycleService {
     }
 
     async deleteSession(sessionId: string): Promise<void> {
-        await this.deps.repository.getManifest(sessionId);
+        await this.deps.repository.assertStructuralWritable([sessionId]);
+        const pending = await this.deps.repository.pendingSessionDeletions();
+        if (!pending.some(item => item.id === sessionId)) await this.deps.repository.getManifest(sessionId);
         await this.closeAndWait(sessionId, 'nothing was deleted');
-        await this.deps.kernel.removeSession(sessionId);
+        await this.deps.repository.prepareSessionDeletion(sessionId);
+        try { await this.deps.kernel.removeSession(sessionId); }
+        catch (error) { if (!isMissingSession(error)) throw error; }
         await this.deps.repository.deleteSession(sessionId);
     }
 

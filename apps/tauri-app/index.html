@@ -1,100 +1,71 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>X1</title>
     <link rel="stylesheet" href="src/styles/index.css" />
 </head>
 <body>
-    <nav class="app-sidebar">
-        <ul class="main-nav-list" id="main-nav-list">
-
-            <!-- Home: local filesystem (top, primary) -->
-            <li>
-                <a class="app-nav-btn nav-home active"
-                   data-target="home-workspace"
-                   data-module="home"
-                   id="nav-home-btn"
-                   title="Files">
-                    <i class="fas fa-folder-open"></i>
-                    <span class="nav-home-label" id="nav-home-label">…</span>
-                </a>
+    <nav class="app-sidebar" aria-label="主导航">
+        <div class="app-sidebar__brand" aria-label="MindOS 个人助理"><span>X1</span><small>MindOS</small></div>
+        <ul class="main-nav-list">
+            <li class="app-nav-item--primary">
+                <button type="button" class="app-nav-btn active" data-target="llm-workspace" title="工作台" aria-label="工作台">
+                    <i class="fas fa-comment-dots" aria-hidden="true"></i><span>工作台</span>
+                </button>
             </li>
-
-            <!-- Shared workspaces — order mirrors WORKSPACES array in config/modules.ts -->
-            <li>
-                <a class="app-nav-btn" data-target="llm-workspace" title="AI Sessions" aria-label="AI Sessions">
-                    <i class="fas fa-robot"></i>
-                </a>
+            <li class="app-nav-item--primary">
+                <button type="button" class="app-nav-btn" data-target="minds-workspace" title="笔记" aria-label="笔记">
+                    <i class="fas fa-pen-to-square" aria-hidden="true"></i><span>笔记</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="project-workspace" title="Projects" aria-label="Projects">
-                    <i class="fas fa-folder-tree"></i>
-                </a>
+            <li class="app-nav-item--primary">
+                <button type="button" class="app-nav-btn" data-target="anki-workspace" title="记忆卡片" aria-label="记忆卡片">
+                    <i class="fas fa-brain" aria-hidden="true"></i><span>记忆</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="anki-workspace" title="Anki Memory" aria-label="Anki Memory">
-                    <i class="fas fa-brain"></i>
-                </a>
+            <li class="app-nav-item--secondary">
+                <button type="button" class="app-nav-btn" data-target="email-workspace" title="邮件" aria-label="邮件">
+                    <i class="fas fa-envelope" aria-hidden="true"></i><span>邮件</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="email-workspace" title="Emails" aria-label="Emails">
-                    <i class="fas fa-envelope"></i>
-                </a>
+            <li class="app-nav-item--secondary">
+                <button type="button" class="app-nav-btn" data-target="private-workspace" title="私密笔记" aria-label="私密笔记">
+                    <i class="fas fa-lock" aria-hidden="true"></i><span>私密</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="private-workspace" title="Private Notes" aria-label="Private Notes">
-                    <i class="fas fa-lock"></i>
-                </a>
+            <li class="app-nav-item--secondary">
+                <button type="button" class="app-nav-btn" data-target="toolbox-workspace" title="工具箱" aria-label="工具箱">
+                    <i class="fas fa-toolbox" aria-hidden="true"></i><span>工具箱</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="minds-workspace" title="Minds" aria-label="Minds">
-                    <i class="fas fa-pen-to-square"></i>
-                </a>
+            <li class="app-nav-item--secondary">
+                <button type="button" class="app-nav-btn" data-target="settings-workspace" title="设置" aria-label="设置">
+                    <i class="fas fa-cog" aria-hidden="true"></i><span>设置</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="skills-workspace" title="Skills" aria-label="Skills">
-                    <i class="fas fa-bolt"></i>
-                </a>
+            <li class="app-nav-item--more">
+                <button type="button" class="app-nav-btn" id="mobile-more-button" aria-label="更多功能" aria-haspopup="dialog" aria-controls="mobile-more-menu" aria-expanded="false">
+                    <i class="fas fa-ellipsis" aria-hidden="true"></i><span>更多</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="flows-workspace" title="Workflows" aria-label="Workflows">
-                    <i class="fas fa-diagram-project"></i>
-                </a>
-            </li>
-            <li>
-                <a class="app-nav-btn" data-target="agent-workspace" title="Agents" aria-label="Agents">
-                    <i class="fas fa-user-secret"></i>
-                </a>
-            </li>
-
-            <li><div class="nav-divider"></div></li>
-
-            <!-- Dynamic mount entries injected here by main.ts -->
-            <li id="nav-mounts-anchor" style="display:none"></li>
-
         </ul>
-
-        <!-- Add mount + Settings at bottom -->
-        <div class="nav-add-mount">
-            <a class="app-nav-btn" id="btn-add-mount" title="Mount directory…" aria-label="Mount directory…">
-                <i class="fas fa-plus"></i>
-            </a>
-        </div>
-        <div style="height:8px"></div>
-        <a class="app-nav-btn" data-target="settings-workspace" title="Settings" aria-label="Settings">
-            <i class="fas fa-cog"></i>
-        </a>
-        <div style="height:4px"></div>
-
-        <div class="home-dir-badge" id="home-dir-label" title=""></div>
     </nav>
+    <dialog id="mobile-more-menu" class="mobile-more-menu" aria-label="更多功能">
+        <div class="mobile-more-menu__header"><strong>更多功能</strong><button type="button" class="mobile-more-menu__close" aria-label="关闭更多功能">×</button></div>
+        <div class="mobile-more-menu__grid">
+            <button type="button" class="app-nav-btn" data-target="email-workspace"><i class="fas fa-envelope" aria-hidden="true"></i><span>邮件</span></button>
+            <button type="button" class="app-nav-btn" data-target="private-workspace"><i class="fas fa-lock" aria-hidden="true"></i><span>私密笔记</span></button>
+            <button type="button" class="app-nav-btn" data-target="toolbox-workspace"><i class="fas fa-toolbox" aria-hidden="true"></i><span>工具箱</span></button>
+            <button type="button" class="app-nav-btn" data-target="settings-workspace"><i class="fas fa-cog" aria-hidden="true"></i><span>设置</span></button>
+        </div>
+    </dialog>
+
 
     <main class="main-content-area">
-        <div id="home-workspace"     class="workspace-view active"></div>
-        <div id="llm-workspace"      class="workspace-view"></div>
-        <div id="project-workspace"  class="workspace-view"></div>
+        <div id="home-workspace"     class="workspace-view"></div>
+        <div id="llm-workspace"      class="workspace-view active"></div>
         <div id="anki-workspace"     class="workspace-view"></div>
         <div id="email-workspace"    class="workspace-view"></div>
         <div id="private-workspace"  class="workspace-view"></div>
@@ -102,6 +73,7 @@
         <div id="skills-workspace"   class="workspace-view"></div>
         <div id="flows-workspace"    class="workspace-view"></div>
         <div id="agent-workspace"    class="workspace-view"></div>
+        <div id="toolbox-workspace" class="workspace-view"></div>
         <div id="settings-workspace" class="workspace-view">
             <div id="settings-content"></div>
         </div>

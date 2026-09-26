@@ -1,0 +1,100 @@
+// @vitest-environment jsdom
+import { expect, it, vi } from 'vitest';
+import { createVFS, MemoryBackend } from '@itookit/vfs-core';
+import { SessionRepository } from '@itookit/llm-session';
+import { DirectoryMountService, SessionFilesService, ProjectService, folderBrowserPath } from '@itookit/app-core';
+import { SessionWorkbench } from '../src/projects/SessionWorkbench';
+
+it('creates project Sessions from the selected project and edits its files in the same tree', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
+    vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(fn, 0));
+    vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const root = await manager.openFileSystem('/');
+    const repository = new SessionRepository(root, async id => { await projects.initializeSession(id); }); await repository.init();
+    const files = new SessionFilesService(root); await files.initialize();
+    files.registerSource('admin-home', await manager.openFileSystem('/home/admin'));
+    const mounts = new DirectoryMountService(root, files); await mounts.init();
+    const projects = new ProjectService(root, repository, mounts, files); await projects.ensureStartup();
+    const other = await projects.create('Research');
+    const projectPath = folderBrowserPath(other.path);
+    const owner = await projects.openFiles(other.path);
+    await owner.fs.driver.createFile({ parentPath: '/', name: 'notes.md', content: 'research notes' }); await owner.dispose();
+    const kernel = { onChanged: () => () => {}, async *listSessions() {} };
+    const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
+    const chat = vi.fn(async (element: HTMLElement) => { element.textContent = 'chat'; return { destroy: vi.fn() }; });
+    const file = vi.fn(async (element: HTMLElement, _options: any) => { element.textContent = 'file'; return { destroy: vi.fn() }; });
+    const workbench = new SessionWorkbench({ sidebar: sidebar, container: main, repository: repository, files: files, factory: chat as any, onSelect: () => {}, hostContext: undefined, kernel: kernel as any, fileFactory: file as any, directoryMounts: mounts, sessionSkills: undefined, manageMemory: undefined, flows: undefined, projects: projects });
+    try {
+        await workbench.start();
+        expect(sidebar.querySelector('[aria-label="新建项目"]')).not.toBeNull();
+        expect(sidebar.querySelector('.project-navigation__actions')).toBeNull();
+        await workbench.openResource(projectPath);
+        expect(sidebar.querySelector('.vfs-columns__navigation')?.textContent).toContain('Research');
+        expect(sidebar.querySelector('.vfs-columns__navigation')?.textContent).not.toContain('notes.md');
+        expect(sidebar.querySelector('.vfs-directory-item--card')).not.toBeNull();
+        expect(sidebar.querySelector('[data-mode]')).toBeNull();
+        const session = await workbench.createResource();
+        expect((await repository.getManifest(session)).folder).toBe(other.path + '/@sessions');
+        expect(sidebar.querySelector(`[data-item-id="${folderBrowserPath(other.path + '/@sessions')}/${session}"]`)).not.toBeNull();
+        await workbench.openResource(projectPath + '/@files/notes.md');
+        expect(file.mock.calls.at(-1)?.[1].initialContent).toBe('research notes');
+        expect(sidebar.querySelector('.vfs-columns')?.getAttribute('data-content-visible')).toBe('true');
+        expect(sidebar.querySelector('.vfs-columns__content')?.textContent).toContain('notes.md');
+        expect(sidebar.querySelector('.vfs-columns__content')?.textContent).not.toContain('新会话');
+        await file.mock.calls.at(-1)![1].hostContext.saveContent('/notes.md', 'edited in workbench');
+        const context = await files.acquire(session);
+        expect(await context.vfs.readFile('notes.md')).toBe('edited in workbench'); await context.release();
+        const another = await workbench.createResource();
+        expect((await repository.getManifest(another)).folder).toBe(other.path + '/@sessions');
+        await repository.createFolder(other.path + '/@sessions/Planning');
+        await workbench.openResource(folderBrowserPath(other.path + '/@sessions/Planning'));
+        const nested = await workbench.createResource();
+        expect((await repository.getManifest(nested)).folder).toBe(other.path + '/@sessions/Planning');
+        expect(sidebar.querySelector('.vfs-columns__navigation')?.textContent).toContain('Planning');
+        const child = await workbench.createChild(nested);
+        const grandchild = await workbench.createChild(child);
+        const sibling = await workbench.createChild(nested);
+        const nav = sidebar.querySelector('.vfs-columns__navigation')!;
+        const content = sidebar.querySelector('.vfs-columns__content')!;
+        const itemPath = (id: string) => `${folderBrowserPath(other.path + '/@sessions/Planning')}/${id}`;
+        expect(nav.querySelector(`[data-item-id="${itemPath(nested)}"]`)).not.toBeNull();
+        expect(nav.querySelector(`[data-item-id="${itemPath(child)}"]`)).toBeNull();
+        for (const id of [nested, child, grandchild, sibling]) expect(content.querySelector(`[data-item-id="${itemPath(id)}"]`)).not.toBeNull();
+        await workbench.openResource(grandchild);
+        for (const id of [nested, child, grandchild, sibling]) expect(content.querySelector(`[data-item-id="${itemPath(id)}"]`)).not.toBeNull();
+        expect((await repository.getManifest(grandchild)).parentSessionId).toBe(child);
+        expect(content.textContent).toContain('属于：');
+        expect(content.querySelector('[data-item-id]')?.getAttribute('data-item-id')).toBe(itemPath(nested));
+        const active = workbench.getActiveResourceId(), opened = chat.mock.calls.length;
+        const cardHeader = () => nav.querySelector<HTMLElement>(`[data-item-id="${projectPath}"] > .vfs-node-item__main-row > .vfs-directory-item__header`)!;
+        cardHeader().click();
+        expect(workbench.getActiveResourceId()).toBe(active); expect(chat).toHaveBeenCalledTimes(opened);
+        cardHeader().click();
+        const search = nav.querySelector<HTMLInputElement>('input[type="search"]')!;
+        search.value = (await repository.getManifest(grandchild)).title; search.dispatchEvent(new Event('input'));
+        await vi.waitFor(() => expect(nav.querySelector(`[data-item-id="${itemPath(grandchild)}"]`)).not.toBeNull());
+        search.value = ''; search.dispatchEvent(new Event('input'));
+        await vi.waitFor(() => expect(nav.querySelector(`[data-item-id="${itemPath(grandchild)}"]`)).toBeNull());
+        (content.querySelector('.vfs-node-list__secondary-action') as HTMLButtonElement).click();
+        await repository.updateManifest(grandchild, { title: 'Updated child' });
+        await vi.waitFor(() => expect(content.textContent).toContain('Updated child'));
+        expect(sidebar.classList.contains('project-workbench--single')).toBe(true);
+        [...main.querySelectorAll<HTMLButtonElement>('.session-family__toolbar > button')].find(button => button.textContent === '同组会话')!.click();
+        expect(sidebar.classList.contains('project-workbench--single')).toBe(false);
+        const localSearch = content.querySelector<HTMLInputElement>('input[type="search"]')!;
+        localSearch.value = 'Updated'; localSearch.dispatchEvent(new Event('input'));
+        await vi.waitFor(() => expect(content.querySelector(`[data-item-id="${itemPath(nested)}"]`)).toBeNull());
+        const newRoot = await workbench.createResource();
+        await workbench.createChild(newRoot);
+        expect(localSearch.value).toBe('');
+        expect(content.querySelectorAll('[data-item-type="directory"]')).toHaveLength(2);
+
+
+
+    } finally {
+        await workbench.destroy(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose();
+        document.body.replaceChildren(); vi.unstubAllGlobals();
+    }
+});

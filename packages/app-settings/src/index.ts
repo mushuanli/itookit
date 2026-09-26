@@ -21,9 +21,9 @@ export { SkillsEngine } from './engine/SkillsEngine';
  *       vfsCore.devices,  // IDeviceManager，供 ConnectionSettingsEditor 使用
  *   );
  */
-export async function createSettingsModule(vfs: IVFSManager, workspaces: readonly WorkspaceFileSource[]) {
+export async function createSettingsModule(vfs: IVFSManager, workspaces: readonly WorkspaceFileSource[], options: { excludedPages?: readonly string[] } = {}) {
     const service = new SettingsService(vfs, undefined, workspaces);
     await service.init();
-    const engine = new SettingsEngine(service);
+    const engine = new SettingsEngine(service, options.excludedPages);
     return { service, engine };
 }

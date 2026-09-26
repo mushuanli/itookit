@@ -110,7 +110,9 @@ export class SettingsEngine implements IFileSystem {
         tags: noopTags,
     };
 
-    constructor(private _service: SettingsService) {
+    readonly pages: typeof SETTINGS_PAGES;
+    constructor(private _service: SettingsService, excludedPages: readonly string[] = []) {
+        this.pages = Object.fromEntries(Object.entries(SETTINGS_PAGES).filter(([id]) => !excludedPages.includes(id)));
         this.driver = new SettingsDriver(this);
     }
 
@@ -151,14 +153,14 @@ class SettingsDriver implements IFSDriver {
     // ── Read ─────────────────────────────────────────
     async getNode(id: string): Promise<FSNode | null> {
         await this.engine.service.init();
-        const config = SETTINGS_PAGES[id];
+        const config = this.engine.pages[id];
         return config ? toFSNode(id, config) : null;
     }
 
     async getChildren(parentId: string, _options?: ListOptions): Promise<FSNode[]> {
         if (parentId !== '/') return [];
         await this.engine.service.init();
-        return Object.entries(SETTINGS_PAGES).map(([id, c]) => toFSNode(id, c));
+        return Object.entries(this.engine.pages).map(([id, c]) => toFSNode(id, c));
     }
 
     readContent(id: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
@@ -170,16 +172,16 @@ class SettingsDriver implements IFSDriver {
 
     async resolvePath(_path: string): Promise<string | null> {
         // path === slug after toFSNode change
-        if (_path in SETTINGS_PAGES) return _path;
+        if (_path in this.engine.pages) return _path;
         // backward-compat: accept legacy "/${name}" paths
-        for (const [id, cfg] of Object.entries(SETTINGS_PAGES)) {
+        for (const [id, cfg] of Object.entries(this.engine.pages)) {
             if (_path === `/${cfg.name}`) return id;
         }
         return null;
     }
 
     async exists(id: string): Promise<boolean> {
-        return id in SETTINGS_PAGES;
+        return id in this.engine.pages;
     }
 
     async search(query: FSSearchQuery): Promise<FSSearchResult> {
@@ -187,7 +189,7 @@ class SettingsDriver implements IFSDriver {
         const nodes: FSNode[] = [];
         if (text) {
             const lower = text.toLowerCase();
-            for (const [id, cfg] of Object.entries(SETTINGS_PAGES)) {
+            for (const [id, cfg] of Object.entries(this.engine.pages)) {
                 if (cfg.name.toLowerCase().includes(lower)) {
                     nodes.push(toFSNode(id, cfg));
                 }
@@ -197,7 +199,7 @@ class SettingsDriver implements IFSDriver {
     }
 
     async getStats(): Promise<FileSystemStats> {
-        const count = Object.keys(SETTINGS_PAGES).length;
+        const count = Object.keys(this.engine.pages).length;
         return { fileCount: count, directoryCount: 1, totalSize: 0, lastModifiedAt: Date.now() };
     }
 

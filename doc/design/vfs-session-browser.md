@@ -4,6 +4,29 @@
 
 挂载的授权、UI、slash 与平台边界见 [Session 挂载与访问边界](vfs-session-mount-access.md)，已同步实现。
 
+## 项目工作台（2026-09-26）
+
+Web 与 Tauri 的 Chat／项目导航统一为“工作台”，由 `ProjectService`、`SessionWorkbench` 共用以下投影：
+
+```text
+工作台
+  项目分组/                       可多级嵌套
+    项目/                         稳定 project.id + 文件目录来源
+      会话/                       持久路径段 @sessions，显示名称随语言变化
+        会话分组/                 可多级嵌套
+          <sessionId>/            聊天；可展开 tasks/files 诊断入口
+      文件/                       路径段 @files，映射该项目文件目录
+        文档与目录
+```
+
+浏览器路径为 `folder:<encoded name>/…/folder:%40sessions/<sessionId>`；项目文件使用 `folder:<encoded name>/…/@files/<file path>`。`BrowserTarget` 新增 `project-files`，宿主通过 `ProjectService.openFiles()` 取得项目文件视图。此视图属于用户的导航能力，不会自动扩大任意 Session 的授权。
+
+新建会话、从会话文件夹导入会话均在返回 ID 前完成项目挂载。项目名和分组路径可修改；稳定 ID、物理目录、Session ID 不变。跨项目拖动会话／分组会被拒绝，避免仅移动显示位置却继续访问旧项目文件。“会话”与“文件”入口本身不可重命名或删除。删除项目只删除导航及所属会话，保留实际目录。
+
+工作台没有已保存选择时显示欢迎页（手机显示项目列表）；恢复选择时仍打开上次内容。手机列表和内容分屏，通过“返回列表”切换。主导航收敛到工作台、笔记、记忆、更多，桌面继续显示完整功能入口。文件编辑及聊天顶部显示当前项目名称。
+
+验证：`packages/app-core/tests/projects.test.ts` 覆盖共享、隔离、文件 CRUD、项目重命名、跨项目移动拒绝及 IndexedDB 重开；`packages/app-shell/tests/project-workbench-ui.test.ts` 覆盖真实 vfs-ui 的项目选择、会话创建与文件保存。
+
 ## 1. 目录与交互
 
 Session 在各自分组内固定按创建时间倒序排列（新建在前），同一时间以 Session ID 升序确定顺序。节点 `createdAt` 映射真实创建时间，`modifiedAt` 仍反映更新；选择、保存草稿、执行状态更新和重命名不改变 Session 顺序。宿主排序优先于之前持久化的标题/修改时间排序，分组及 Flow 导航放在 Session 前；Session 内的 Task/映射文件仍沿用通用排序设置。
@@ -88,6 +111,7 @@ Task 展示选择明确字段；不序列化 currentAttempt、租约、资源令
 ```ts
 type BrowserTarget =
   | { kind: 'folder'; path: string }
+  | { kind: 'project-files'; folder: string; path: string }
   | { kind: 'session'; sessionId: string }
   | { kind: 'tasks'; sessionId: string }
   | { kind: 'task'; sessionId: string; taskId: string }
@@ -95,6 +119,7 @@ type BrowserTarget =
 
 interface SessionBrowserDependencies {
   repository: ISessionRepository;
+  projects?: ProjectService;
   files: SessionFilesService;
   kernel: Kernel;
   /** 缺省时由 repository 与 kernel 构造 */
@@ -199,3 +224,27 @@ files 的目录动作与主视图按钮复用挂载弹窗。slash 经 EditorHost
 
 
 Task 右键提供“强制复位任务（停止执行，保留记录）”，调用 Kernel.cancel，取消任务及其活动子任务，不将任务改回 created，也不重新执行。保留会话 history、DAG、输入、checkpoint 历史、Effect 与审批记录、产物；取消原因和时间由 Kernel 的取消事件记录。已终结任务保留原终态。菜单操作防止重复提交，清理失败或 cleanupPending 会显示错误，不伪造资源已释放。该入口不删除底层 SeqFile，也不撤销已经发生的外部副作用。
+
+### 旧项目链接兼容
+
+`#/projects/<resource>` 在统一工作台中映射到“原项目文档”的文件区域，继续访问 `/home/admin/projects` 原文件，不复制或转换 `.prj` 内容。成功打开后保存规范的 `#/chat/<resource>` 地址。启动与历史导航遇到无效或已删除的会话地址时显示工作台提示并修正 URL；存储 I/O 错误仍向上传播。目录限定的 Session 地址也支持 `?branch=`，文件名中的查询字符保持原义。
+
+### 双列工作台导航
+
+项目抽屉及独立子会话的交互、数据约束与验收见 [项目抽屉与子会话导航](project-session-navigation.md)。
+
+Web/Tauri 的 SessionWorkbench 使用 vfs-ui 可选 `columns`：左列为可独立展开的项目卡片，文件固定首项，其下直接列出顶层会话与保留的目录分组。内部 `@sessions` 容器只作为持久路径存在，不增加点击层级。项目标题只展开/收起；卡片内的新会话按钮有明确项目目标。
+
+选择有后代的会话时，辅助列固定显示顶层会话及全部后代，根会话第一，其余按创建时间排列；选择任意成员只切正文，不改变列表范围。父会话名称作为说明及直接导航入口。无子会话时收起辅助列；文件入口将其切换为项目文件树。菜单提供重命名、移动归属、提升到顶层及保留子会话的删除；任务和会话挂载继续通过会话菜单访问。
+
+两列复用同一浏览文件系统，搜索与批量选择隔离；导航搜索按需读取所有虚拟会话分组，显示可直接打开的子会话结果，不读取聊天正文或任务历史。其他工作区省略 `columns`，继续使用单列。手机从抽屉直接进入聊天，同组切换使用可搜索面板，不按父子深度叠加页面。
+
+### 独立子会话
+
+`ConversationManifest.parentSessionId` 是可空的组织关系，与 Round 分支和 Task 关系分开。每个会话保留原 ID、存储目录、历史、草稿及附件。父子共享项目与分组目录；调整父关系时同事务移动整棵子树的目录引用，拒绝循环及跨项目移动。缺省父关系的旧会话保持原位置。
+
+`SessionLifecycleService` 停止成功后先调用仓库的 `prepareSessionDeletion`：持久化删除意图并提升直接子会话，然后移除 Kernel 与 Session 存储。失败可重试；应用启动取得租约后继续待删记录的清理，不恢复它们的执行。正常新建和归属修改拒绝挂入待删会话；删除其他会话不影响项目文件。
+
+### 工作台选择项归档
+
+项目工具栏使用 `WorkbenchArchiveExporter` / `WorkbenchArchiveImporter`（`@itookit/app-core`）完成选择项 JSON 往返。项目、分组、会话及其独立子会话按树导出，项目文件和嵌套附件使用 `file-archive.ts` 编码。导入生成新的项目/会话 ID，保留内容及相对组织结构；同名副本不覆盖，失败清理仅针对本次创建的对象。具体工具栏和目的目录语义见 [项目抽屉与子会话导航](project-session-navigation.md)。

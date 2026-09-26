@@ -7,10 +7,11 @@
  * Mirrors apps/tauri-app/src-tauri/src/lib.rs `resolve_all_paths`.
  */
 import { homedir } from 'node:os';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
     MINDOS_CONFIG_FILE,
+    DEFAULT_MINDOS_SETTINGS,
     resolveMindOSProfile as resolveProfile,
     type MindOSProfile,
     type MindOSProfileSettings,
@@ -22,7 +23,17 @@ function configDir(): string {
     return xdg ? path.join(xdg, 'mindos') : path.join(homedir(), '.config', 'mindos');
 }
 
+function ensureSettings(): void {
+    mkdirSync(configDir(), { recursive: true });
+    try {
+        writeFileSync(path.join(configDir(), MINDOS_CONFIG_FILE), JSON.stringify(DEFAULT_MINDOS_SETTINGS, null, 2) + '\n', { flag: 'wx' });
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+}
+
 function readSettings(): MindOSProfileSettings {
+    ensureSettings();
     try {
         const raw = JSON.parse(readFileSync(path.join(configDir(), MINDOS_CONFIG_FILE), 'utf8'));
         return {

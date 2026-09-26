@@ -2,7 +2,7 @@ import { FSError } from '@itookit/vfs-core';
 
 /** Query syntax is reserved only on a Session identity, never on file paths. */
 export function parseSessionRoute(resource: string): { path: string; branch?: string } {
-    const match = /^\/?([a-zA-Z0-9_-]+)\?(.*)$/.exec(resource);
+    const match = /^\/?((?:folder:[^/?]+\/)*[a-zA-Z0-9_-]+)\?(.*)$/.exec(resource);
     if (!match) return { path: resource.startsWith('/') ? resource : '/' + resource };
     const query = new URLSearchParams(match[2]);
     const branch = query.get('branch');

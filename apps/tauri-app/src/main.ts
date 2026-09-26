@@ -20,7 +20,7 @@ import { createFileSystemSource } from '@itookit/vfs-core';
  *  4. Wire tauri-only features: loading overlay, dynamic local mounts
  */
 
-import { initApp, createWsMount, workspaceRoot, type AppUI } from '@itookit/app-shell';
+import { initApp, installMobileNavigation, workspaceRoot, type AppUI } from '@itookit/app-shell';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import {
@@ -39,7 +39,6 @@ import {
     SystemPromptSettingsEditor,
 } from '@itookit/llm-ui';
 import { WORKSPACES } from './config/modules';
-import { LocalMountService, MountEntry, MOUNT_EVENTS } from './services/local-mounts';
 import { TauriSqlSidecarDb } from './db/tauri-sql-sidecar';
 import { TauriFsOps } from './fs/tauri-fs-ops';
 import { TauriLLMLogger } from './log/tauri-llm-logger';
@@ -47,7 +46,6 @@ import { startVfsTrace } from './log/vfs-trace';
 import { createSendBoundary } from './log/send-boundary';
 import { SessionCommand } from '@itookit/llm-session';
 import { TauriSkillSource } from './kernel/tauri-skill-source';
-import { openDirectoryDialog } from './services/directory-dialog';
 
 // Bundled locally: the desktop app must render icons offline. The CDN <link> this
 // replaces needed network access and a cdnjs CSP allowance.
@@ -153,40 +151,11 @@ async function getPathSources(): Promise<{ root: string; home: string }> {
     }
 }
 
-// ── Dynamic mount DOM helpers ──────────────────────────────────────────────────
-
-function injectMountWorkspace(entry: MountEntry): void {
-    if (document.getElementById(entry.id + '-workspace')) return;
-
-    const panel = document.createElement('div');
-    panel.id = entry.id + '-workspace';
-    panel.className = 'workspace-view';
-    document.querySelector('.main-content-area')!.appendChild(panel);
-
-    const li = document.createElement('li');
-    li.dataset.mountId = entry.id;
-    li.innerHTML = `
-        <a class="app-nav-btn"
-           data-target="${entry.id}-workspace"
-           data-module="${entry.id}"
-           title="${entry.label}"
-           aria-label="${entry.label}">
-            <i class="fas fa-hard-drive"></i>
-            <span class="nav-remove" data-unmount="${entry.id}" title="Unmount">×</span>
-        </a>`;
-    const anchor = document.getElementById('nav-mounts-anchor')!;
-    anchor.parentElement!.insertBefore(li, anchor.nextSibling);
-}
-
-function removeMountWorkspace(id: string): void {
-    document.getElementById(id + '-workspace')?.remove();
-    document.querySelector(`[data-mount-id="${id}"]`)?.remove();
-}
-
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 
 async function bootstrap(): Promise<void> {
     installTauriMCP();
+    installMobileNavigation();
     const t0 = performance.now();
     let t = t0;
     const log = (label: string) => {
@@ -204,8 +173,7 @@ async function bootstrap(): Promise<void> {
     // 1. Resolve paths
     //    homeDir   = working project directory (CWD or --home arg)
     //    rootDir   = resolved data root (mindos.json#rootDir, never ~/.mindos)
-    const [homeDir, rootDir, sessionDirectory, sources] = await Promise.all([getHomeDir(), getRootDir(),
-        invoke<string>('get_current_dir'), getPathSources()]);
+    const [homeDir, rootDir, sources] = await Promise.all([getHomeDir(), getRootDir(), getPathSources()]);
     log(`路径解析 (home=${homeDir})`);
     console.log(`[Boot] MindOS root=${rootDir} (${sources.root}); 工作目录 home=${homeDir} (${sources.home})`);
 
@@ -316,7 +284,7 @@ async function bootstrap(): Promise<void> {
         onProgress: log,
         llmLogger,
         directorySourceProvider: new TauriSessionDirectories(rootDir),
-        defaultSessionDirectory: `host:${sessionDirectory}`,
+        defaultSessionDirectory: `host:${homeDir}`,
         kernelPlatform: {
             configureSession: (sessionId, { toolDriver }) => observeTools(toolDriver, sessionId),
             configure: (kernel, services) => flowWorkspaces.bind(kernel, services),
@@ -328,7 +296,7 @@ async function bootstrap(): Promise<void> {
         },
     });
     startupCleanup.push(() => runtime.dispose());
-    recordDiagnostic('workspace.default', { sessionDirectory, rootDir });
+    recordDiagnostic('workspace.default', { sessionDirectory: homeDir, rootDir });
     // Acceptance diagnostics: VITE_MINDOS_TRACE=1 records per-interval VFS + sidecar op counts
     // so a slow user action can be attributed to backend/IPC round trips.
     if (import.meta.env.VITE_MINDOS_TRACE === '1') {
@@ -358,8 +326,8 @@ async function bootstrap(): Promise<void> {
     const app = await initApp({
         runtime,
         workspaces: WORKSPACES.map(ws => ws.workspaceName === 'home' ? { ...ws, files: { fs: homeSource.fs, cwd: '/' } } : ws),
-        defaultSlug: 'files',
-        routeAliases: { home: 'home-workspace' },
+        defaultSlug: 'chat',
+        routeAliases: { home: 'llm-workspace', projects: 'llm-workspace', workbench: 'llm-workspace' },
         onProgress: log,
         ui,
     });
@@ -368,60 +336,16 @@ async function bootstrap(): Promise<void> {
     app.onDestroy(() => homeSource.dispose(), 'sources');
     log('App 初始化完成');
 
-    // 4. Local mount service (tauri-only dynamic mounts)
+    // Restore directory bookmarks into the shared project tree.
     const localRegistry = await app.vfs.openFileSystem('/var/lib/kernel/local-sources');
-    const localMounts = new LocalMountService(localRegistry, rootDir, id => app.removeWorkspace(id + '-workspace'));
-    app.onDestroy(() => localMounts.dispose(), 'sources');
-
-    // Add mount button
-    document.getElementById('btn-add-mount')!.addEventListener('click', async () => {
-        try {
-            const localPath = await openDirectoryDialog();
-            if (!localPath) return;      // the user cancelled: not an error
-            const label = localPath.split('/').filter(Boolean).pop() ?? 'Mount';
-            const entry = await localMounts.mount(localPath, label);
-            await app.navigate(entry.id);
-        } catch (error) {
-            // Without this the handler rejected unobserved and the button looked dead.
-            console.error('[Mount] Failed to add a local source:', error);
-            alert(`挂载目录失败：${error instanceof Error ? error.message : String(error)}`);
+    if (await localRegistry.driver.exists('/sources.json')) {
+        const saved = JSON.parse(await localRegistry.driver.readContent('/sources.json', { encoding: 'utf-8' }));
+        if (saved.version === 1 && Array.isArray(saved.entries)) for (const entry of saved.entries) {
+            if (typeof entry.localPath !== 'string') continue;
+            try { await runtime.projects.ensureDirectory(`host:${entry.localPath}`, typeof entry.label === 'string' ? entry.label : undefined); }
+            catch (error) { console.warn('[Projects] Directory unavailable', entry.localPath, error); }
         }
-    });
-
-    // React to mount added (restore + user action)
-    document.addEventListener(MOUNT_EVENTS.ADDED, (e) => {
-        const entry = (e as CustomEvent<MountEntry>).detail;
-        injectMountWorkspace(entry);
-        app.addWorkspace(createWsMount(entry.id, entry.label, localMounts.contextFor(entry.id)));
-    });
-
-    // React to mount removed
-    document.addEventListener(MOUNT_EVENTS.REMOVED, (e) => {
-        const id = (e as CustomEvent<MountEntry>).detail.id;
-        removeMountWorkspace(id);
-    });
-
-    // Dynamic nav delegation (unmount button + dynamic workspace nav)
-    document.getElementById('main-nav-list')!.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        const unmountId = target.dataset.unmount
-            ?? target.closest('[data-unmount]')?.getAttribute('data-unmount');
-        if (unmountId) {
-            e.stopPropagation();
-            localMounts.unmount(unmountId);
-            return;
-        }
-        const btn = target.closest('.app-nav-btn[data-target]') as HTMLElement | null;
-        if (btn?.dataset.target) {
-            e.preventDefault();
-            app.navigate(btn.dataset.target);
-        }
-    });
-
-    // Restore persisted mounts
-    const beforeRestore = performance.now();
-    await localMounts.restoreMounts();
-    console.log(`[Boot] 恢复挂载: +${(performance.now() - beforeRestore).toFixed(0)}ms`);
+    }
 
     hideLoading();
     console.log(`[Boot] 总启动耗时: ${(performance.now() - t0).toFixed(0)}ms`);

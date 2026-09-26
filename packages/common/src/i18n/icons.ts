@@ -134,8 +134,12 @@ export const FEEDBACK_ICONS = {
 // ── Entity shortcuts ──────────────────────────────────────────────────────────
 
 export const ENTITY_ICONS = {
+    chat:         '💬',
+    project:      '▣',
     agent:   '🤖',
     skill:   '⚡',
+    tool:    '🔧',
+    flow:    '🔀',
     mcp:     '🔌',
     llm:     '🧠',
     branch:  '🌿',
@@ -209,8 +213,37 @@ export const AGENT_ICON_PALETTE = [
     '🦾','🦿','🕸️','🔮','💎','🏆','🎖️','🥇',
 ] as const;
 
+
 /** Small outline icons for the shared file toolbar. */
 export const VFS_TOOLBAR_ICONS = {
     import: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4"/></svg>',
     export: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M4 16v4h16v-4"/></svg>',
 } as const;
+
+/** Consistent outline icons for toolbox resource types and purpose groups. */
+const toolboxIcon = (shape: string): string => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shape}</svg>`;
+export const TOOLBOX_ICONS = {
+    providers: toolboxIcon('<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M8 6h.01M8 12h.01M8 18h.01"/>'),
+    connections: toolboxIcon('<path d="m10 13 4-4m-6 7-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 10a4 4 0 0 0 6 0l4-4a4 4 0 0 0-6-6l-1 1"/>'),
+    agents: toolboxIcon('<rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 7V3M9 16h6M8 11h.01M16 11h.01M1 11v5m22-5v5"/>'),
+    skills: toolboxIcon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z"/>'),
+    flows: toolboxIcon('<rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-5h14v5"/>'),
+    mcp: toolboxIcon('<path d="M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0V8zm6 9v5"/>'),
+    tools: toolboxIcon('<path d="M14 6a5 5 0 0 0-6 6l-5 5a3 3 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-4 3-3-3 3-4z"/>'),
+    files: toolboxIcon('<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>'),
+    web: toolboxIcon('<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>'),
+    memory: toolboxIcon('<path d="M12 4a4 4 0 0 0-7 2 4 4 0 0 0-2 7 4 4 0 0 0 5 6 3 3 0 0 0 4 1V4zm0 0a4 4 0 0 1 7 2 4 4 0 0 1 2 7 4 4 0 0 1-5 6 3 3 0 0 1-4 1M8 8l4 3m4-3-4 3M7 15l5-1m5 1-5-1"/>'),
+    tasks: toolboxIcon('<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m7 8 1 1 2-2m-3 7 1 1 2-2m3-5h4m-4 6h4"/>'),
+    terminal: toolboxIcon('<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 8 4 4-4 4m7 0h5"/>'),
+    collaboration: toolboxIcon('<path d="M21 11a8 8 0 0 1-8 8H6l-4 3V11a8 8 0 0 1 8-8h3a8 8 0 0 1 8 8zM7 10h10M7 14h6"/>'),
+    extensions: toolboxIcon('<path d="M9 3h6v4a3 3 0 1 1 4 4h3v7h-7a3 3 0 1 1-6 0H3v-7h4a3 3 0 1 1 2-4V3z"/>'),
+    settings: toolboxIcon('<path d="M4 6h16M4 12h16M4 18h16"/><rect x="7" y="4" width="3" height="4" rx="1"/><rect x="14" y="10" width="3" height="4" rx="1"/><rect x="8" y="16" width="3" height="4" rx="1"/>'),
+} as const;
+
+/** Provider lettermarks remain legible on hosts without emoji fonts. */
+const providerMark = (label: string): string => `<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6" fill="currentColor" opacity=".08"/><text x="12" y="16" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="currentColor">${label}</text></svg>`;
+export const TOOLBOX_PROVIDER_ICONS: Readonly<Record<string, string>> = {
+    anthropic: providerMark('A'), gemini: providerMark('G'), deepseek: providerMark('DS'),
+    openai: providerMark('O'), openrouter: providerMark('OR'), cloudapi: providerMark('C'),
+    volcengine: providerMark('V'), codex: TOOLBOX_ICONS.terminal, custom: TOOLBOX_ICONS.providers,
+};

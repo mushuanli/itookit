@@ -10,7 +10,7 @@ import type { FileSystemContext } from '@itookit/vfs-core';
 export type EditorTarget =
     | { kind: 'file'; path: string; namespaceId?: string; sessionId?: string }
     | { kind: 'session'; sessionId: string; branch?: string }
-    | { kind: 'entity'; entityType: 'agent' | 'skill' | 'flow'; id: string };
+    | { kind: 'entity'; entityType: 'agent' | 'skill' | 'flow' | 'mcp' | 'tool' | 'provider' | 'connection'; id: string };
 
 /** Validate an explicitly supplied target against its granted file context. */
 export function normalizeEditorOptions(options: EditorOptions): EditorOptions {
@@ -63,6 +63,8 @@ export interface NavigateToOptions {
  * 任何接管编辑器的容器（如 MemoryManager）都应提供这些能力
  */
 export interface EditorHostContext {
+    /** Ask the host to confirm and execute resource deletion. */
+    requestDelete?: (targets: readonly EditorTarget[]) => Promise<void>;
     /** 切换侧边栏 (无参则 toggle，有参则强制设为该状态) */
     toggleSidebar: (collapsed?: boolean) => void;
 

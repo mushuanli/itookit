@@ -47,11 +47,13 @@ export type {
 export type { RoundLogEvent, RoundChangeSet } from './persistence/round-events';
 export type {
     ISessionRepository,
+    SessionDeletionStore,
     ConversationManifest,
     ConversationUIState,
     SessionLoadState,
     SessionRepositoryChange,
     BranchTreeNode,
+    SessionFolder,
 } from './persistence/types';
 
 export {

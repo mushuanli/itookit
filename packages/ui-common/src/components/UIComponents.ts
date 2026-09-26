@@ -8,7 +8,7 @@ export interface ModalOptions {
     type?: 'default' | 'danger' | 'success';
     // ✅ [新增] 支持自定义宽度 (例如 '800px' 或 '60vw')
     width?: string; 
-    onConfirm?: () => void | boolean | Promise<void | boolean>;
+    onConfirm?: (element: HTMLElement) => void | boolean | Promise<void | boolean>;
     onCancel?: () => void;
 }
 
@@ -61,12 +61,16 @@ export class Modal {
         
         modal.querySelector('.settings-modal-close')?.addEventListener('click', close);
         modal.querySelector('.settings-modal-cancel')?.addEventListener('click', close);
-        modal.querySelector('.settings-modal-confirm')?.addEventListener('click', async () => {
-             if (this.options.onConfirm) {
-                const result = await this.options.onConfirm();
-                if (result === false) return; // 允许 onConfirm 返回 false 阻止关闭
-            }
-            this.hide();
+        const confirm = modal.querySelector<HTMLButtonElement>('.settings-modal-confirm')!;
+        confirm.addEventListener('click', async () => {
+            if (confirm.disabled) return;
+            confirm.disabled = true;
+            try {
+                const result = await this.options.onConfirm?.(modal);
+                if (result !== false) this.hide();
+            } catch (error) {
+                Toast.error(error instanceof Error ? error.message : String(error));
+            } finally { confirm.disabled = false; }
         });
         
         modal.addEventListener('click', (e) => {

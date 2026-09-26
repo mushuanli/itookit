@@ -144,3 +144,16 @@
 | CLI -p prompt 命令 | `apps/cli/src/commands.ts` |
 
 > 详见 [web-search.md](./web-search.md)
+
+## 应用策略与 UI 机制
+
+| 场景 | 入口 |
+| --- | --- |
+| Provider 关联删除、工具授权 | `app-core/src/configuration/model-commands.ts`、`tool-grants.ts` |
+| 工具箱归档与分组查询 | `app-core/src/configuration/toolbox-resources.ts`、`toolbox-drawers.ts` |
+| 项目同组查询与组织命令 | `app-core/src/projects/project-sessions.ts` |
+| 项目归档业务目标 | `app-core/src/projects/targets.ts`、`app-shell/src/projects/archive-targets.ts` |
+| 业务边界与接口说明 | [应用策略边界](design/application-policy-boundaries.md) |
+| 生产源码依赖边界检查（`pnpm architecture:check`） | `scripts/check-boundaries.mjs` |
+| 工作区模块能力、路由恢复与统一释放 | `packages/app-shell/src/workspaces/module.ts` |
+| 项目 UI 模块装配 | `packages/app-shell/src/projects/index.ts` |

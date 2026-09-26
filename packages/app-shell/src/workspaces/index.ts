@@ -189,3 +189,9 @@ export function createWsMount(id: string, label: string, files: import('@itookit
         showFileExtensions: true,   // external FS mount: show full filenames with extensions
     };
 }
+
+/** Shared management surface for reusable AI resources and their capability sources. */
+export const WS_TOOLBOX: WorkspaceConfig = {
+    elementId: 'toolbox-workspace', workspaceName: 'toolbox', slug: 'toolbox', type: 'toolbox',
+    title: 'Toolbox', supportedFileTypes: [], syncEnabled: false, readOnly: false, mentionAble: false, aiEnabled: false,
+};

@@ -8,6 +8,7 @@ export interface SessionRecovery {
     leases: Map<string, SessionLeaseRecord>;
     /** Acquire and recover before admitting writes; concurrent requests share one recovery. */
     acquireLater(sessionId: string): Promise<boolean>;
+    acquireMetadataLease(sessionId: string): Promise<boolean>;
     release(): Promise<void>;
 }
 
@@ -19,7 +20,7 @@ class LeasedRecovery implements SessionRecovery {
     private readonly heartbeat: ReturnType<typeof setInterval>;
     private released = false;
     constructor(private kernel: RecoveryKernel, private store: SessionLeaseStore, private owner: Owner,
-        heartbeatMs: number, private beforeRecover?: (sessionId: string) => Promise<void>) {
+        heartbeatMs: number, private beforeRecover?: (sessionId: string) => Promise<void>, private excluded = new Set<string>()) {
         this.heartbeat = setInterval(() => {
             for (const id of this.leases.keys()) void this.renew(id).catch(error => console.warn(`[Lease] renew failed for Session ${id}`, error));
         }, heartbeatMs);
@@ -27,15 +28,20 @@ class LeasedRecovery implements SessionRecovery {
 
     async boot(): Promise<void> {
         for await (const session of this.kernel.listSessions()) {
-            if (!await this.acquire(session.id)) continue;
+            if (this.excluded.has(session.id) || !await this.acquire(session.id)) continue;
             await this.beforeRecover?.(session.id);
         }
         if (this.leases.size) await traceBoot('recoverLeasedSessions', () => this.kernel.recoverSessions([...this.leases.keys()], { takeover: true }));
         for (const id of this.leases.keys()) this.ready.add(id);
     }
 
+    async acquireMetadataLease(id: string): Promise<boolean> {
+        if (this.released) return false;
+        return await this.renew(id) || await this.acquire(id);
+    }
+
     acquireLater(id: string): Promise<boolean> {
-        if (this.released) return Promise.resolve(false);
+        if (this.released || this.excluded.has(id)) return Promise.resolve(false);
         const current = this.pending.get(id);
         if (current) return current;
         const work = this.prepare(id);
@@ -113,8 +119,8 @@ class LeasedRecovery implements SessionRecovery {
 
 /** Boot may take over an idle Kernel; later acquisition recovers only the selected Session online. */
 export async function recoverSessionsWithLeases(kernel: RecoveryKernel, leaseStore: SessionLeaseStore, owner: Owner,
-    heartbeatMs = 10_000, beforeRecover?: (sessionId: string) => Promise<void>): Promise<SessionRecovery> {
-    const recovery = new LeasedRecovery(kernel, leaseStore, owner, heartbeatMs, beforeRecover);
+    heartbeatMs = 10_000, beforeRecover?: (sessionId: string) => Promise<void>, excluded = new Set<string>()): Promise<SessionRecovery> {
+    const recovery = new LeasedRecovery(kernel, leaseStore, owner, heartbeatMs, beforeRecover, excluded);
     try { await recovery.boot(); return recovery; }
     catch (error) {
         try { await recovery.release(); }

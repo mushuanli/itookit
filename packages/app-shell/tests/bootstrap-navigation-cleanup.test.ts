@@ -37,7 +37,7 @@ vi.mock('../src/core/Workbench', () => ({
     },
 }));
 
-vi.mock('../src/core/SessionWorkbench', () => ({
+vi.mock('../src/projects/SessionWorkbench', () => ({
     SessionWorkbench: class {
         start = vi.fn(async () => {});
         destroy = vi.fn(async () => {});

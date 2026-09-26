@@ -1,10 +1,10 @@
+import type { EditorFileType as FileTypeDefinition, EditorResolver as CustomEditorResolver } from './browser/types';
 import type {NavigationRequest, ICommandBus, ILLMService} from '@itookit/common';
 import type { ApplicationRuntime } from '@itookit/app-core';
 import type { FileCreationConfig, EditorFactory, EditorOptions, ContextMenuConfig } from '@itookit/ui-common';
 import type { IStorageBackend, IVFSManager, MountOptions, IFileSystem } from '@itookit/vfs-core';
 import type { ThemeMode } from './ThemeService';
 import type { VFSUIOptions } from '@itookit/vfs-ui';
-import type { EditorFileType as FileTypeDefinition, EditorResolver as CustomEditorResolver } from './browser/types';
 import type { KernelAdaptersRuntime } from '@itookit/kernel-adapters';
 import type { Kernel } from '@itookit/durable-kernel';
 import type {
@@ -24,7 +24,7 @@ export interface AppKernelRuntime extends KernelAdaptersRuntime {
 
 export type AppKernelPlatform = import('@itookit/app-core').ApplicationKernelPlatform;
 
-export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills' | 'flows';
+export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills' | 'flows' | 'toolbox';
 
 export interface WorkspaceConfig {
     /** Explicit application file context. workspaceName selects the default user directory. */

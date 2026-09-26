@@ -427,7 +427,7 @@ export const ChatInputTemplates = {
                 ${this.renderActiveBadges()}
                 <textarea
                     class="llm-input__textarea"
-                    placeholder="Message... (Paste images or Drag & Drop)"
+                    placeholder="${escapeHTML(t('chatInput.messagePlaceholder'))}"
                     rows="2"
                 ></textarea>
             </div>

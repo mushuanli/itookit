@@ -33,7 +33,21 @@ export class EventBinder {
         private callbacks: EventBinderCallbacks
     ) { }
 
+    private bindToolbarMenu(): void {
+        const menu = this.container.querySelector<HTMLDetailsElement>('.llm-workspace-titlebar__menu');
+        if (!menu) return;
+        this.events.add(document, 'click', event => {
+            const target = event.target as Element;
+            if (!menu.contains(target) || target.closest('button')) menu.open = false;
+        });
+        this.events.add(menu, 'keydown', event => {
+            if ((event as KeyboardEvent).key !== 'Escape') return;
+            menu.open = false; menu.querySelector('summary')?.focus();
+        });
+    }
+
     bindTitleBarEvents(): void {
+        this.bindToolbarMenu();
         const sidebarBtn = this.container.querySelector('#llm-btn-sidebar');
         if (sidebarBtn) {
             this.events.add(sidebarBtn, 'click', () => {

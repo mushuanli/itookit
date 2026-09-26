@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { FSError } from '@itookit/vfs-core';
 import { t } from '@itookit/common';
 import { createVFSUI } from '@itookit/vfs-ui';
-vi.mock('@itookit/vfs-ui', () => ({ createVFSUI: vi.fn(() => ({ on: () => () => {}, start: async () => {}, refresh: async () => {}, selectPath: async () => {}, destroy: () => {} })) }));
-import { SessionWorkbench } from '../src/core/SessionWorkbench';
+vi.mock('@itookit/vfs-ui', () => ({ createVFSUI: vi.fn(() => ({ on: () => () => {}, start: async () => {}, getActiveSession: () => undefined, refresh: async () => {}, selectPath: async () => {}, destroy: () => {} })) }));
+import { SessionWorkbench } from '../src/projects/SessionWorkbench';
 const element = () => ({ replaceChildren: vi.fn(), append: vi.fn(), setAttribute: vi.fn(), classList: { add: vi.fn() }, remove: vi.fn(), title: '', textContent: '', hidden: false });
 function setup() {
     vi.stubGlobal('document', { createElement: () => element() });
@@ -18,11 +19,24 @@ function setup() {
     const sidebar = element();
     const kernel = { onChanged: () => () => {}, cancel: vi.fn(async () => {}), task: vi.fn(async () => ({ effects: {} })),
         closeSession: vi.fn(async () => {}), sessionStat: vi.fn(async () => ({ phase: 'closed' })) };
-    const workbench = new SessionWorkbench(sidebar as any, element() as any, repository as any, files as any, factory as any, onSelect, undefined, kernel as any, factory as any);
+    const workbench = new SessionWorkbench({ sidebar: sidebar as any, container: element() as any, repository: repository as any, files: files as any, factory: factory as any, onSelect: onSelect, hostContext: undefined, kernel: kernel as any, fileFactory: factory as any });
     return { rerunSession, kernel, sidebar, workbench, repository, files, factory, release, dispose, destroy, onSelect, manifest, changed: () => listeners.forEach(listener => listener()) };
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('Session workbench lifecycle', () => {
+    it('recovers invalid saved routes but continues to surface storage failures', async () => {
+        const f = setup(); await f.workbench.start();
+        await f.workbench.restoreResource('/旧项目.prj');
+        expect(f.onSelect).toHaveBeenLastCalledWith('', 'replace');
+        await f.workbench.openResource('existing');
+        f.repository.getManifest.mockRejectedValueOnce(new FSError('ENOENT', 'Deleted'));
+        await f.workbench.restoreResource('deleted');
+        expect(f.workbench.getActiveResourceId()).toBe('existing?branch=main');
+        expect(f.onSelect).toHaveBeenLastCalledWith('existing?branch=main', 'replace');
+        f.repository.getManifest.mockRejectedValueOnce(new FSError('EIO', 'Storage failed'));
+        await expect(f.workbench.restoreResource('broken')).rejects.toThrow('Storage failed');
+        await f.workbench.destroy();
+    });
     it('uses vfs-ui for the Session sidebar with directory activation', async () => {
         const f = setup(); await f.workbench.start();
         expect(createVFSUI).toHaveBeenCalledWith(expect.objectContaining({ activateDirectories: true, readOnly: false, exportDirectories: true, fileCreation: expect.objectContaining({ label: '会话' }) }), expect.anything());

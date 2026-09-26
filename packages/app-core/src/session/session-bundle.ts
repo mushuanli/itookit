@@ -1,3 +1,4 @@
+import { archivePath, decodeArchiveBytes } from './file-archive';
 import { FSError } from '@itookit/vfs-core';
 import type { ChatSessionSettings, ConversationManifest, ISessionRepository } from '@itookit/llm-session';
 
@@ -14,6 +15,7 @@ export interface SessionBundleManifest {
     origin?: ConversationManifest['origin'];
     folder?: string | null;
     uiState?: ConversationManifest['uiState'];
+    flow?: ConversationManifest['flow'];
     rootRoundId: ConversationManifest['rootRoundId'];
     branches: ConversationManifest['branches'];
     branchMeta: ConversationManifest['branchMeta'];
@@ -46,7 +48,7 @@ export async function exportSessionBundle(repository: ISessionRepository, sessio
         version: SESSION_BUNDLE_VERSION,
         manifest: {
             title: manifest.title, summary: manifest.summary, origin: manifest.origin, folder: manifest.folder ?? null,
-            uiState: manifest.uiState, rootRoundId: manifest.rootRoundId, branches: manifest.branches,
+            uiState: manifest.uiState, flow: manifest.flow, rootRoundId: manifest.rootRoundId, branches: manifest.branches,
             branchMeta: manifest.branchMeta, currentBranch: manifest.currentBranch,
             currentHead: manifest.currentHead, children: manifest.children,
         },
@@ -73,7 +75,7 @@ export async function importSessionBundle(
         await restoreSession(repository, id, bundle);
         return id;
     } catch (error) {
-        await repository.deleteSession(id).catch(() => undefined);
+        try { await repository.deleteSession(id); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Session import and cleanup failed'); }
         throw error;
     }
 }
@@ -141,6 +143,7 @@ function readManifest(value: unknown, documents: Record<string, string>): Sessio
         origin: manifest.origin === 'cli' || manifest.origin === 'tauri' || manifest.origin === 'web' ? manifest.origin : undefined,
         folder: typeof manifest.folder === 'string' ? manifest.folder : null,
         uiState: (asRecord(manifest.uiState) ?? undefined) as ConversationManifest['uiState'],
+        flow: (asRecord(manifest.flow) ?? undefined) as ConversationManifest['flow'],
         rootRoundId, branches,
         branchMeta: (asRecord(manifest.branchMeta) ?? {}) as ConversationManifest['branchMeta'],
         currentBranch, currentHead,
@@ -154,6 +157,7 @@ function readDocuments(value: unknown): Record<string, string> {
     const documents: Record<string, string> = {};
     for (const [name, content] of Object.entries(record)) {
         if (typeof content !== 'string') throw new FSError('EINVAL', `Session document is not text: ${name}`);
+        archivePath(name); if (name.includes('/') || ['__proto__', 'constructor', 'prototype'].includes(name)) throw new FSError('EINVAL', 'Invalid Session document name');
         assertRoundIdentity(name, parseJson(content, name));
         documents[name] = content;
     }
@@ -208,6 +212,7 @@ function readAttachmentsRecord(value: unknown): SessionAttachmentBundle[] {
         if (!record || typeof record.name !== 'string' || !record.name || record.name.includes('/') || typeof record.base64 !== 'string') {
             throw new FSError('EINVAL', 'Invalid Session attachment entry');
         }
+        archivePath(record.name); decodeArchiveBytes(record.base64);
         return { name: record.name, base64: record.base64 };
     });
 }

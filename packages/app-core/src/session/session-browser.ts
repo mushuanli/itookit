@@ -1,25 +1,31 @@
+import { sessionFamilyRoots } from '../projects/session-family';
 import { createFileSystemSource, FSError, normalizeVirtualPath, type FSNode, type IStorageBackend } from '@itookit/vfs-core';
-import { t } from '@itookit/common';
-import type { ISessionRepository } from '@itookit/llm-session';
+import { t, ENTITY_ICONS } from '@itookit/common';
+import type { ISessionRepository, SessionFolder } from '@itookit/llm-session';
 import type { EventEnvelope, Kernel, TaskRecord } from '@itookit/durable-kernel';
 import { taskStat } from '@itookit/durable-kernel';
 import type { SessionFilesService } from '../vfs/session-files';
 import { exportSessionBundle, importSessionBundle, isSessionBundle } from './session-bundle';
+import type { ProjectService } from '../projects/project-service';
 import { SessionLifecycleService } from './session-lifecycle';
 
 export type BrowserTarget =
     | { kind: 'folder'; path: string }
+    | { kind: 'project-files'; folder: string; path: string }
     | { kind: 'session'; sessionId: string }
     | { kind: 'tasks'; sessionId: string }
     | { kind: 'task'; sessionId: string; taskId: string }
     | { kind: 'files'; sessionId: string; path: string };
+
+type FileTarget = Extract<BrowserTarget, { kind: 'files' | 'project-files' }>;
+function isFileTarget(target: BrowserTarget): target is FileTarget { return target.kind === 'files' || target.kind === 'project-files'; }
 
 const FOLDER_SEGMENT_PREFIX = 'folder:';
 
 function isFolderSegment(segment: string): boolean {
     return segment.startsWith(FOLDER_SEGMENT_PREFIX) && segment.length > FOLDER_SEGMENT_PREFIX.length;
 }
-function folderBrowserPath(folder: string | null | undefined): string {
+export function folderBrowserPath(folder: string | null | undefined): string {
     if (!folder || folder === '/') return '';
     return '/' + folder.split('/').filter(Boolean).map(segment => FOLDER_SEGMENT_PREFIX + encodeURIComponent(segment)).join('/');
 }
@@ -32,7 +38,7 @@ function browserFolderPath(path: string): string | null {
     }
     return prefix.length ? '/' + prefix.join('/') : null;
 }
-function folderPathFromBrowserPath(path: string): string | null {
+export function folderPathFromBrowserPath(path: string): string | null {
     const prefix = browserFolderPath(path);
     if (!prefix) return null;
     return '/' + prefix.slice(1).split('/').filter(Boolean).map(segment => decodeURIComponent(segment.slice(FOLDER_SEGMENT_PREFIX.length))).join('/');
@@ -44,7 +50,8 @@ function sessionBrowserPrefix(path: string): string {
     return '/' + segments.slice(0, index + 1).join('/');
 }
 function filesBrowserPrefix(path: string): string {
-    return `${sessionBrowserPrefix(path)}/files`;
+    const target = resolveBrowserTarget(path);
+    return target.kind === 'project-files' ? `${folderBrowserPath(target.folder)}/@files` : `${sessionBrowserPrefix(path)}/files`;
 }
 function parentBrowserPath(path: string): string {
     const normalized = normalizeVirtualPath(path);
@@ -63,6 +70,8 @@ export function resolveBrowserTarget(path: string): BrowserTarget {
     while (index < segments.length && isFolderSegment(segments[index])) index++;
     const folderPrefix = '/' + segments.slice(0, index).join('/');
     if (index === segments.length) return { kind: 'folder', path: folderPrefix };
+    if (segments[index] === '@files' && index > 0) return { kind: 'project-files',
+        folder: folderPathFromBrowserPath(folderPrefix)!, path: '/' + segments.slice(index + 1).join('/') };
     const sessionId = segments[index];
     if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) throw new FSError('EINVAL', 'Invalid Session browser path');
     const area = segments[index + 1];
@@ -101,6 +110,7 @@ export function taskKeyEvent(event: EventEnvelope) {
 }
 export interface SessionBrowserDependencies {
     repository: ISessionRepository;
+    projects?: ProjectService;
     files: SessionFilesService;
     kernel: Kernel;
     /** Defaults to a service over `repository` and `kernel`. */
@@ -126,8 +136,13 @@ class BrowserBackend implements IStorageBackend {
             metadata: { title, _showAll: true, ...(readOnly ? { _readOnly: true } : {}) }, icon: directory ? '📁' : '📋' };
         return directory ? { ...base, type: 'directory' } : { ...base, type: 'file', size: 0 };
     }
-    private async withFiles<T>(id: string, fn: (fs: import('@itookit/vfs-core').IFileSystem) => Promise<T>): Promise<T> {
-        const owner = await this.deps.files.acquireFiles(id);
+    private async withFiles<T>(target: FileTarget, fn: (fs: import('@itookit/vfs-core').IFileSystem) => Promise<T>): Promise<T> {
+        if (target.kind === 'project-files') {
+            if (!this.deps.projects) throw new FSError('ENOENT', 'Projects unavailable');
+            const owner = await this.deps.projects.openFiles(target.folder);
+            try { return await fn(owner.fs); } finally { await owner.dispose(); }
+        }
+        const owner = await this.deps.files.acquireFiles(target.sessionId);
         try { return await fn(owner.context.fs); } finally { await owner.release(); }
     }
     private async mapped(fs: import('@itookit/vfs-core').IFileSystem, node: FSNode, prefix: string): Promise<FSNode> {
@@ -137,12 +152,25 @@ class BrowserBackend implements IStorageBackend {
     private sessionBrowserPath(id: string, folder: string | null | undefined): string {
         return `${folderBrowserPath(folder)}/${id}`;
     }
-    private sessionNode(manifest: { id: string; title: string; createdAt: number; updatedAt: number; folder?: string | null }): FSNode {
+    private sessionNode(manifest: { id: string; title: string; createdAt: number; updatedAt: number; folder?: string | null; parentSessionId?: string | null }): FSNode {
         return { ...this.node(this.sessionBrowserPath(manifest.id, manifest.folder), manifest.title, true, manifest.updatedAt),
-            createdAt: manifest.createdAt, icon: '💬' };
+            createdAt: manifest.createdAt, icon: ENTITY_ICONS.chat, metadata: { title: manifest.title, _showAll: true, parentSessionId: manifest.parentSessionId ?? null } };
     }
-    private folderNode(folder: { path: string; name: string; updatedAt: number }): FSNode {
-        return this.node(folderBrowserPath(folder.path), folder.name, true, folder.updatedAt);
+    private sessionNodes(sessions: import('@itookit/llm-session').ConversationManifest[], folder: string | null): FSNode[] {
+        const roots = sessionFamilyRoots(sessions);
+        const counts = new Map<string, number>();
+        for (const root of roots.values()) counts.set(root, (counts.get(root) ?? 0) + 1);
+        return sessions.filter(item => (item.folder ?? null) === folder).map(item => {
+            const node = this.sessionNode(item), root = roots.get(item.id)!;
+            return { ...node, metadata: { ...node.metadata, familyRoot: root, familyCount: counts.get(root) ?? 1,
+                parentTitle: sessions.find(parent => parent.id === item.parentSessionId)?.title ?? '' } };
+        });
+    }
+    private folderNode(folder: SessionFolder): FSNode {
+        const title = folder.name === '@sessions' ? t('project.sessions') : folder.name;
+        const node = this.node(folderBrowserPath(folder.path), title, true, folder.updatedAt);
+        return { ...node, ...(folder.project ? { icon: ENTITY_ICONS.project } : {}),
+            metadata: { ...node.metadata, ...(folder.project ? { projectId: folder.project.id, directory: folder.project.directory } : {}) } };
     }
     private isFolderContainer(path: string): boolean {
         if (path === '/') return true;
@@ -162,6 +190,7 @@ class BrowserBackend implements IStorageBackend {
             const folder = (await this.deps.repository.listFolders()).find(item => item.path === folderPath);
             return folder ? this.folderNode(folder) : null;
         }
+        if (target.kind === 'project-files') return this.statFiles(path, target);
         let manifest;
         try { manifest = await this.deps.repository.getManifest(target.sessionId); }
         catch (error) { if (error instanceof FSError && error.code === 'ENOENT') return null; throw error; }
@@ -171,9 +200,12 @@ class BrowserBackend implements IStorageBackend {
             const task = await this.deps.kernel.task(target.sessionId, target.taskId);
             return this.node(path, `${task.program.kind} · ${task.status} · ${task.id}`, false, task.updatedAt, true);
         }
+        return this.statFiles(path, target);
+    }
+    private statFiles(path: string, target: FileTarget): Promise<FSNode | null> {
         const prefix = filesBrowserPrefix(path);
-        return this.withFiles(target.sessionId, async fs => {
-            if (target.path === '/') return this.node(path, 'files', true, 0, (await fs.capabilitiesAt('/')).readonly);
+        return this.withFiles(target, async fs => {
+            if (target.path === '/') return this.node(path, t('project.files'), true, 0, (await fs.capabilitiesAt('/')).readonly);
             const node = await fs.driver.getNode(target.path); return node ? this.mapped(fs, node, prefix) : null;
         });
     }
@@ -182,7 +214,7 @@ class BrowserBackend implements IStorageBackend {
             const [folders, sessions] = await Promise.all([this.deps.repository.listFolders(), this.deps.repository.list()]);
             return [
                 ...folders.filter(folder => !folder.parentPath).map(folder => this.folderNode(folder)),
-                ...sessions.filter(session => !session.folder).map(session => this.sessionNode(session)),
+                ...this.sessionNodes(sessions, null),
             ];
         }
         const target = resolveBrowserTarget(path);
@@ -191,9 +223,12 @@ class BrowserBackend implements IStorageBackend {
             const [folders, sessions] = await Promise.all([this.deps.repository.listFolders(), this.deps.repository.list()]);
             return [
                 ...folders.filter(folder => folder.parentPath === folderPath).map(folder => this.folderNode(folder)),
-                ...sessions.filter(session => (session.folder ?? null) === folderPath).map(session => this.sessionNode(session)),
+                ...(this.deps.projects && folders.find(folder => folder.path === folderPath)?.project
+                    ? [this.node(path + '/@files', t('project.files'), true)] : []),
+                ...this.sessionNodes(sessions, folderPath),
             ];
         }
+        if (target.kind === 'project-files') return this.listFiles(path, target);
         await this.deps.repository.getManifest(target.sessionId);
         if (target.kind === 'session') return [this.node(path + '/tasks', 'tasks', true, 0, true), this.node(path + '/files', 'files', true, 0, true)];
         if (target.kind === 'tasks') {
@@ -206,18 +241,19 @@ class BrowserBackend implements IStorageBackend {
             if (page.nextAfterIndex !== undefined) nodes.push(this.node(`${path}/@more`, t('session.tasks.more'), false, 0, true));
             return nodes;
         }
-        if (target.kind === 'files') {
-            const prefix = filesBrowserPrefix(path);
-            return this.withFiles(target.sessionId, async fs => Promise.all((await fs.driver.getChildren(target.path)).map(n => this.mapped(fs, n, prefix))));
-        }
+        if (target.kind === 'files') return this.listFiles(path, target);
         throw new FSError('ENOTDIR', 'Task is a history entry');
+    }
+    private listFiles(path: string, target: FileTarget): Promise<FSNode[]> {
+        const prefix = filesBrowserPrefix(path);
+        return this.withFiles(target, async fs => Promise.all((await fs.driver.getChildren(target.path)).map(n => this.mapped(fs, n, prefix))));
     }
     async read(path: string): Promise<Uint8Array> {
         const target = resolveBrowserTarget(path);
         if (target.kind === 'folder') throw new FSError('EISDIR', 'Open this folder using its browser target');
         if (target.kind === 'session') return this.sessionBundle(target.sessionId);
+        if (isFileTarget(target)) return this.withFiles(target, async fs => new Uint8Array(await fs.driver.readContent(target.path, { encoding: 'binary' })));
         await this.deps.repository.getManifest(target.sessionId);
-        if (target.kind === 'files') return this.withFiles(target.sessionId, async fs => new Uint8Array(await fs.driver.readContent(target.path, { encoding: 'binary' })));
         if (target.kind === 'task') {
             const task = await this.deps.kernel.task(target.sessionId, target.taskId);
             return new TextEncoder().encode(JSON.stringify(taskSummary(task), null, 2));
@@ -232,9 +268,9 @@ class BrowserBackend implements IStorageBackend {
             return this.folderNode(folder);
         }
         const target = resolveBrowserTarget(path);
-        if (target.kind === 'files') {
+        if (isFileTarget(target)) {
             const prefix = filesBrowserPrefix(path);
-            return this.withFiles(target.sessionId, async fs => {
+            return this.withFiles(target, async fs => {
                 const node = await fs.driver.createDirectory({ parentPath: parentBrowserPath(target.path), name: browserName(target.path) });
                 return this.mapped(fs, node, prefix);
             });
@@ -255,10 +291,10 @@ class BrowserBackend implements IStorageBackend {
             return this.sessionNode(await this.deps.repository.getManifest(id));
         }
         const target = resolveBrowserTarget(path);
-        if (target.kind === 'files') {
+        if (isFileTarget(target)) {
             const prefix = filesBrowserPrefix(path);
             const buffer = content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength) as ArrayBuffer;
-            return this.withFiles(target.sessionId, async fs => {
+            return this.withFiles(target, async fs => {
                 if (await fs.driver.exists(target.path)) {
                     await fs.driver.writeContent(target.path, buffer);
                     const node = await fs.driver.getNode(target.path);
@@ -276,6 +312,7 @@ class BrowserBackend implements IStorageBackend {
         if (target.kind === 'folder') {
             const folderPath = folderPathFromBrowserPath(path);
             if (!folderPath) throw new FSError('EINVAL', 'Cannot delete the Session browser root');
+            if (folderPath.endsWith('/@sessions')) throw new FSError('EACCES', 'Cannot delete the Sessions section');
             await this.lifecycle.deleteFolder(folderPath, true);
             return;
         }
@@ -283,8 +320,9 @@ class BrowserBackend implements IStorageBackend {
             await this.lifecycle.deleteSession(target.sessionId);
             return;
         }
-        if (target.kind === 'files') {
-            await this.withFiles(target.sessionId, fs => fs.driver.delete([target.path], { recursive: true }));
+        if (isFileTarget(target)) {
+            if (target.path === '/') throw new FSError('EACCES', 'Cannot delete a file root');
+            await this.withFiles(target, fs => fs.driver.delete([target.path], { recursive: true }));
             return;
         }
         throw new FSError('EROFS', 'Tasks are read-only');
@@ -293,8 +331,10 @@ class BrowserBackend implements IStorageBackend {
         const targetPath = to.startsWith('/') ? to : `${parentBrowserPath(from)}/${to}`;
         const source = resolveBrowserTarget(from);
         if (source.kind === 'session') {
+            const manifest = await this.deps.repository.getManifest(source.sessionId);
+            await this.deps.projects?.assertMove(manifest.folder ?? null, folderPathFromBrowserPath(parentBrowserPath(targetPath)));
             await this.deps.repository.updateManifest(source.sessionId, {
-                title: browserName(targetPath).replace(/\.[^.]+$/, ''),
+                title: browserName(targetPath) === browserName(from) ? manifest.title : browserName(targetPath).replace(/\.[^.]+$/, ''),
                 folder: folderPathFromBrowserPath(parentBrowserPath(targetPath)),
             });
             return;
@@ -303,12 +343,25 @@ class BrowserBackend implements IStorageBackend {
             const fromFolder = folderPathFromBrowserPath(from);
             const parentFolder = folderPathFromBrowserPath(parentBrowserPath(targetPath));
             if (!fromFolder) throw new FSError('EINVAL', 'Cannot rename the Session browser root');
+            if (fromFolder.endsWith('/@sessions')) throw new FSError('EACCES', 'Cannot rename the Sessions section');
+            const folders = await this.deps.repository.listFolders();
+            const containsProject = folders.some(folder => folder.project && (folder.path === fromFolder || folder.path.startsWith(fromFolder + '/')));
+            await this.deps.projects?.assertMove(fromFolder, parentFolder, containsProject);
             await this.deps.repository.renameFolder(fromFolder, `${parentFolder ?? ''}/${browserName(targetPath)}`);
             return;
         }
-        if (source.kind === 'files') {
-            const targetFsPath = `${parentBrowserPath(source.path)}/${browserName(targetPath)}`;
-            await this.withFiles(source.sessionId, fs => fs.driver.rename(source.path, targetFsPath));
+        if (isFileTarget(source)) {
+            const destination = resolveBrowserTarget(targetPath);
+            if (!isFileTarget(destination) || filesBrowserPrefix(from) !== filesBrowserPrefix(targetPath)) throw new FSError('EACCES', 'Cannot move files between projects or Sessions');
+            if (source.path === '/') throw new FSError('EACCES', 'Cannot rename a file root');
+            await this.withFiles(source, async fs => {
+                if (parentBrowserPath(source.path) === parentBrowserPath(destination.path)) {
+                    await fs.driver.rename(source.path, browserName(destination.path));
+                } else {
+                    if (browserName(source.path) !== browserName(destination.path)) throw new FSError('EINVAL', 'Move and rename separately');
+                    await fs.driver.move([source.path], parentBrowserPath(destination.path));
+                }
+            });
             return;
         }
         throw new FSError('EROFS', 'Unsupported browser rename');
@@ -321,16 +374,16 @@ class BrowserBackend implements IStorageBackend {
             });
             return;
         }
-        if (target.kind === 'files') {
-            await this.withFiles(target.sessionId, fs => fs.driver.updateMetadata(target.path, metadata));
+        if (isFileTarget(target)) {
+            await this.withFiles(target, fs => fs.driver.updateMetadata(target.path, metadata));
             return;
         }
         throw new FSError('EROFS', 'Metadata is read-only for this entry');
     }
     async setTags(path: string, tags: string[]): Promise<void> {
         const target = resolveBrowserTarget(path);
-        if (target.kind !== 'files') throw new FSError('EROFS', 'Tags are read-only for this entry');
-        await this.withFiles(target.sessionId, async fs => {
+        if (!isFileTarget(target)) throw new FSError('EROFS', 'Tags are read-only for this entry');
+        await this.withFiles(target, async fs => {
             if (!fs.meta.tags) throw new FSError('EROFS', 'Tags are unavailable');
             await fs.meta.tags.setTags(target.path, tags);
         });

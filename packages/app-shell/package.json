@@ -11,7 +11,8 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
-    }
+    },
+    "./navigation.css": "./src/styles/navigation.css"
   },
   "scripts": {
     "test": "vitest run",

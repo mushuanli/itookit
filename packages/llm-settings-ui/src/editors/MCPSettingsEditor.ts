@@ -35,6 +35,14 @@ function statusBadge(status?: MCPServer['status']): string {
 
 export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
     private selectedId: string | null = null;
+    private formOnly = false;
+    async init(container: HTMLElement): Promise<void> {
+        if (this.options.target?.kind === 'entity' && this.options.target.entityType === 'mcp') {
+            this.formOnly = true; this.selectedId = this.options.target.id;
+        }
+        await super.init(container);
+    }
+
 
     async render() {
         const servers = await this.service.getMCPServers();
@@ -42,13 +50,13 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         if (this.selectedId && !servers.find(s => s.id === this.selectedId)) {
             this.selectedId = null;
         }
-        if (!this.selectedId && servers.length > 0) {
+        if (!this.formOnly && !this.selectedId && servers.length > 0) {
             this.selectedId = servers[0].id;
         }
 
         const selected = servers.find(s => s.id === this.selectedId) ?? null;
 
-        this.container.innerHTML = `
+        this.container.innerHTML = this.formOnly ? `<div class="settings-page">${selected ? this.renderDetail(selected) : this.renderEmptyState()}</div>` : `
             <div class="settings-split${this.selectedId ? ' has-detail' : ''}">
                 <div class="settings-split__sidebar">
                     <div class="settings-split__header">
@@ -440,14 +448,12 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         } catch (error) { Toast.error((error as Error).message); }
     }
 
-    private deleteCurrent() {
-        if (!this.selectedId) return;
-        Modal.confirm(t('dialog.delete.title'), t('mcp.confirm.delete'), async () => {
-            await this.service.deleteMCPServer(this.selectedId!);
-            this.selectedId = null;
-            Toast.success(t('mcp.toast.deleted'));
-            await this.render();
-        });
+    private async deleteCurrent(): Promise<void> {
+        const id = this.selectedId; if (!id) return;
+        const request = this.options.hostContext?.requestDelete;
+        if (!request) throw new Error('Configuration deletion is not connected');
+        await request([{ kind: 'entity', entityType: 'mcp', id }]);
+        this.selectedId = null; await this.render();
     }
 
     private async testCurrent(servers: MCPServer[]) {

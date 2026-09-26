@@ -2,8 +2,11 @@
 export interface WorkspaceController {
     start(): Promise<void>;
     openResource(id: string): Promise<void>;
-    createResource(options?: { title?: string; content?: string; parentPath?: string | null }): Promise<string>;
     getActiveResourceId(): string | null;
-    setWaitingInput(id: string, waiting: boolean): void;
     destroy(): void | Promise<void>;
+}
+
+/** Optional capability; not every workspace creates resources. */
+export interface WorkspaceCreation {
+    createResource(options?: { title?: string; content?: string; parentPath?: string | null }): Promise<string>;
 }

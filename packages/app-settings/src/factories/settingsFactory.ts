@@ -40,18 +40,19 @@ function resolveSettingsSlug(nodeId: string): string {
     return nodeId;
 }
 
-export const createSettingsFactory = (
-    settingsService: SettingsService,
-    /** 用于 Agent、MCP、Recovery 编辑器 */
-    agentService: IAgentManagementService,
-    /** 连接服务（由 LLMDeviceDriver 实现），供 ConnectionSettingsEditor 使用 */
-    connectionService: IConnectionService,
-    /** 由调用方 (app-shell) 注入，避免 app-settings 上行依赖 llm-ui */
-    llmUiEditors: LLMUIEditors,
-    connectBrowser: FileBrowserConnector,
-    restoreFlows?: () => Promise<number>,
-): EditorFactory => {
+export interface SettingsFactoryOptions {
+    settingsService: SettingsService;
+    agentService: IAgentManagementService;
+    connectionService: IConnectionService;
+    llmUiEditors: LLMUIEditors;
+    connectBrowser: FileBrowserConnector;
+    restoreFlows?: () => Promise<number>;
+    requestDelete?: import('@itookit/ui-common').EditorHostContext['requestDelete'];
+}
+export const createSettingsFactory = ({ settingsService, agentService, connectionService, llmUiEditors,
+    connectBrowser, restoreFlows, requestDelete }: SettingsFactoryOptions): EditorFactory => {
     return async (container: HTMLElement, options: EditorOptions) => {
+        if (requestDelete) options = { ...options, hostContext: { toggleSidebar: () => {}, navigate: async () => {}, ...options.hostContext, requestDelete } };
         const nodeId = resolveSettingsSlug(editorResourceId(options) || '');
         await settingsService.init();
 

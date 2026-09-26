@@ -8,7 +8,7 @@
         "dev": "pnpm --filter mind-os dev",
         "build": "pnpm -r build",
         "build:libs": "pnpm --filter './packages/*' build",
-        "test": "node --test scripts/tests/test-all.test.mjs && node scripts/test-all.mjs",
+        "test": "pnpm architecture:check && node --test scripts/tests/test-all.test.mjs && node scripts/test-all.mjs",
         "release": "pnpm --filter ./apps/web-app build && node scripts/release.js",
         "deploy:pages": "pnpm --filter ./apps/web-app build && node scripts/deploy-gh-pages.js",
         "tauri:dev": "pnpm --filter tauri-app tauri:dev",
@@ -20,7 +20,8 @@
         "typecheck": "pnpm -r typecheck",
         "docs:check": "node scripts/check-docs.mjs",
         "styles:check": "node scripts/check-styles.mjs",
-        "test:matrix": "node --test scripts/tests/test-all.test.mjs && node scripts/test-all.mjs"
+        "architecture:check": "node --test scripts/tests/check-boundaries.test.mjs && node scripts/check-boundaries.mjs",
+        "test:matrix": "pnpm architecture:check && node --test scripts/tests/test-all.test.mjs && node scripts/test-all.mjs"
     },
     "keywords": [],
     "author": "lizlok@gmail.com",

@@ -458,3 +458,10 @@ TTY 首次结束信息保持不变，后续结束通知与输出不覆盖；已�
 `memory_compact` 参数为目标 scope/entryId/content、`sources: [{entryId, revision}]` 和可选目标版本条件；要求摘要比源总 UTF-8 字节数少、1–100 个同 scope 来源，目标不能覆盖来源。提交时在同一事务校验来源版本、读写授权和目标条件，保存 `compression.version=1/sources/model`，保留全部原文。容量不足以同时保留原文与摘要时拒绝。模型与 Task/Effect 来源由宿主从持久 Task 获取；摘要生成沿用持久 Agent 和 tool.call，不新增语义检索或独立模型调度器。共享写入用可信 Task/Effect 操作身份保存幂等回执，重放不改新版本、不复活已删除内容；工具结果不确定时仍沿用默认阻断、显式恢复策略。
 
 `SessionMemoryControls.sharing` 提供固定 Session 的宿主管理入口；管理权限不注册为模型工具。CLI 和桌面通过同一 provider 写入，共享引用会冻结到 Task policy。词项检索保持原行为，语义检索延期。
+
+
+## 独立子会话与归属
+
+`ConversationManifest.parentSessionId?: string | null` 表示组织关系，缺省为顶层会话。`SessionRepository.createSession(title, folder?, parentSessionId?)` 创建独立历史与草稿，并使用父会话的项目分组。`updateManifest(id, { parentSessionId })` 调整归属；null 提升到顶层，循环及跨项目操作拒绝。父关系与子树目录在同一结构事务中更新，`folders.seq` 的关系版本防止并发结构修改遗漏新成员。
+
+`prepareSessionDeletion(id)` 记录可恢复意图并提升直接子会话；`pendingSessionDeletions()` 提供待清理 ID。宿主仍应通过 `SessionLifecycleService` 先停止执行再删除。删除意图在物理清理完成后移除，重启可以继续处理。此字段属于 `session.seq` 元信息，不写入 `history.seq` 的 Round 索引，也不编码成物理子目录。详见 [项目抽屉与子会话导航](design/project-session-navigation.md)。

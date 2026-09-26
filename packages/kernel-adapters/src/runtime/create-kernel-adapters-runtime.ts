@@ -66,7 +66,7 @@ export interface KernelAdaptersRuntimeOptions {
 
 export interface KernelAdaptersRuntime {
     llmService: ILLMService;
-    toolCatalog: Pick<IToolService, 'getToolDefinitions' | 'getToolMeta'>;
+    toolCatalog: Pick<IToolService, 'getToolDefinitions' | 'getToolMeta' | 'listTools'>;
     skillCatalog: Pick<ISkillService, 'getSkillNames' | 'saveSkill' | 'deleteSkill'>;
     sessions: SessionCapabilityRegistry;
     plugin: KernelAdaptersPlugin;
@@ -92,6 +92,7 @@ export async function createKernelAdaptersRuntime(options: KernelAdaptersRuntime
     return {
         llmService,
         toolCatalog: {
+            listTools: () => catalogTools.listTools(),
             getToolDefinitions: () => catalogTools.getToolDefinitions(),
             getToolMeta: id => catalogTools.getToolMeta(id),
         },

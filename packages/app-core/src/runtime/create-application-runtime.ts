@@ -1,3 +1,5 @@
+import { ModelConfigurationCommands } from '../configuration/model-commands';
+import { resumeSessionDeletions } from './resume-session-deletions';
 import type { IStorageBackend, MountOptions } from '@itookit/vfs-core';
 import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/device-llm';
 import { t, traceBoot, type ILLMLogger } from '@itookit/common';
@@ -6,6 +8,7 @@ import {
     VFSAgentService, FlowEngine, FlowDefinitionStore, seedDefaultFlows,
 } from '@itookit/llm-session';
 import { createKernelRuntime, type HeadlessKernelRuntime, type CreateKernelRuntimeOptions } from './create-kernel-runtime';
+import { ProjectService } from '../projects/project-service';
 import { RunCatalog } from '../run/run-catalog';
 import { SessionFilesService } from '../vfs/session-files';
 import { DirectoryMountService, type DirectorySourceProvider } from '../vfs/directory-mounts';
@@ -50,10 +53,12 @@ export interface ApplicationRuntime {
     vfs: import('@itookit/vfs-core').IVFSManager;
     llmDriver: LLMDeviceDriver;
     agentService: VFSAgentService;
+    configuration: ModelConfigurationCommands;
     sessionRepository: SessionRepository;
     flowEngine: FlowEngine;
     sessionFiles: SessionFilesService;
     directoryMounts: DirectoryMountService;
+    projects: ProjectService;
     kernel: HeadlessKernelRuntime;
     sessionManager: import('@itookit/llm-session').SessionManager;
     commandBus: import('@itookit/llm-session').CommandBus;
@@ -93,7 +98,10 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
 
         logStep(t('boot.coreServices'));
         const agentService   = new VFSAgentService(await vfs.openFileSystem(workspaceRoot('agents')), llmDriver);
+        const configuration = new ModelConfigurationCommands(agentService);
+        cleanupFns.push(() => configuration.dispose());
         const sessionRepository     = new SessionRepository(await vfs.openFileSystem('/'), async id => {
+            if (await projects.initializeSession(id)) return;
             if (!options.defaultSessionDirectory) return;
             if (directoryMounts.getHome()) await directoryMounts.mountHome(id);
             else await directoryMounts.setWorkspace(id, options.defaultSessionDirectory);
@@ -117,6 +125,10 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             id => mountGuard(id), id => mountChanged(id));
         cleanupFns.push(() => directoryMounts.dispose());
         await traceBoot('directoryMounts.init', () => directoryMounts.init());
+        const projects = new ProjectService(systemFS, sessionRepository, directoryMounts, sessionFiles);
+        if (options.ownerKind === 'web' || options.defaultSessionDirectory) {
+            await traceBoot('projects.init', () => projects.ensureStartup(options.defaultSessionDirectory));
+        }
         let mayCollectContext = (_id: string): boolean => false;
         const kernel: HeadlessKernelRuntime = await traceBoot('createKernelRuntime', () => createKernelRuntime({
             systemFS,
@@ -152,11 +164,13 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             ...(options.sessionLeaseSkewMs ? { skewMs: options.sessionLeaseSkewMs } : {}),
         });
         const ownerId = `${options.ownerKind ?? "tauri"}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+        const excluded = await resumeSessionDeletions(sessionRepository, kernelCore, leaseStore, { id: ownerId, kind: options.ownerKind ?? 'tauri' });
         const recovery = await recoverSessionsWithLeases(kernelCore, leaseStore,
             { id: ownerId, kind: options.ownerKind ?? 'tauri' }, 10_000, async id => {
+                await projects.adoptSession(id);
                 await options.kernelPlatform?.beforeSessionRecovery?.(id);
                 await kernel.contextGc?.observeSession(id);
-            }).catch(async error => {
+            }, excluded).catch(async error => {
                 kernelCore.dispose();
                 const errors: unknown[] = [error];
                 for (const close of [() => kernelCore.waitIdle(), () => kernel.dispose()]) {
@@ -165,6 +179,9 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
                 if (errors.length > 1) throw new AggregateError(errors, 'Application recovery and kernel cleanup failed');
                 throw error;
             });
+        sessionRepository.setStructuralWriteGuard(async ids => {
+            for (const id of ids) if (!await recovery.acquireMetadataLease(id)) throw new Error(`Session is owned by another host: ${id}`);
+        });
         mayCollectContext = id => (recovery.leases.get(id)?.leaseUntil ?? 0) > Date.now();
         cleanupFns.push(() => recovery.release());
         cleanupFns.push(() => kernel.dispose());
@@ -192,7 +209,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         // gate acquires a lease on demand so a freshly created Session is writable immediately.
         const { sessionManager, commandBus } = await traceBoot('initializeConversationSystem',
             () => createConversationSystem({ vfs, agentService, sessionRepository, flowEngine, kernel,
-                ensureWritable: sessionId => recovery.acquireLater(sessionId),
+                ensureWritable: async sessionId => !await sessionRepository.isSessionDeletionPending(sessionId) && await recovery.acquireLater(sessionId),
                 flowWorkspaceManager: options.kernelPlatform?.flowWorkspaceManager }));
 
         cleanupFns.push(() => disposeConversationSystem());
@@ -219,7 +236,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             }
             if (errors.length) throw new AggregateError(errors, 'Application runtime cleanup failed');
         };
-        return { vfs, llmDriver, agentService, sessionRepository, flowEngine, sessionFiles, directoryMounts,
+        return { vfs, llmDriver, agentService, configuration, sessionRepository, flowEngine, sessionFiles, directoryMounts, projects,
             kernel, sessionManager, commandBus, runCatalog, dispose };
     } catch (error) {
         for (const close of [...cleanupFns].reverse().concat([...sourceCleanupFns].reverse())) {

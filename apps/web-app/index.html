@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 
 <head>
     <meta charset="UTF-8">
@@ -15,21 +15,6 @@
     <meta name="mobile-web-app-capable" content="yes">
     <link rel="apple-touch-icon" href="./icon.svg">
 
-    <!-- 1. 图标库 -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-
-    <!-- 2. 基础依赖 (Markdown/Graph) -->
-    <script src="https://fastly.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://fastly.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-
-    <!-- Immer -->
-    <script src="https://fastly.jsdelivr.net/npm/immer/dist/immer.umd.production.min.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            if (window.immer) { window.immer.enableMapSet(); }
-        });
-    </script>
-
     <!-- 3. 应用样式 -->
     <link rel="stylesheet" href="src/styles/index.css">
 </head>
@@ -39,63 +24,60 @@
     <!-- ============================================= -->
     <!--          1. 左侧主导航栏 (App Sidebar)         -->
     <!-- ============================================= -->
-    <nav class="app-sidebar">
+    <nav class="app-sidebar" aria-label="主导航">
+        <div class="app-sidebar__brand" aria-label="MindOS 个人助理"><span>X1</span><small>MindOS</small></div>
         <ul class="main-nav-list">
-            <!-- [新增] Anki Workspace 按钮 (放在第一个) -->
-            <li>
-                <a class="app-nav-btn" data-target="anki-workspace" title="Anki Memory">
-                    <i class="fas fa-brain"></i>
-                </a>
+            <li class="app-nav-item--primary">
+                <button type="button" class="app-nav-btn active" data-target="llm-workspace" title="工作台" aria-label="工作台">
+                    <i class="fas fa-comment-dots" aria-hidden="true"></i><span>工作台</span>
+                </button>
             </li>
-
-            <li>
-                <a class="app-nav-btn" data-target="project-workspace" title="Projects">
-                    <i class="fas fa-folder-tree"></i>
-                </a>
+            <li class="app-nav-item--primary">
+                <button type="button" class="app-nav-btn" data-target="minds-workspace" title="笔记" aria-label="笔记">
+                    <i class="fas fa-pen-to-square" aria-hidden="true"></i><span>笔记</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="email-workspace" title="Emails">
-                    <i class="fas fa-envelope"></i>
-                </a>
+            <li class="app-nav-item--primary">
+                <button type="button" class="app-nav-btn" data-target="anki-workspace" title="记忆卡片" aria-label="记忆卡片">
+                    <i class="fas fa-brain" aria-hidden="true"></i><span>记忆</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="private-workspace" title="Private Notes">
-                    <i class="fas fa-lock"></i>
-                </a>
+            <li class="app-nav-item--secondary">
+                <button type="button" class="app-nav-btn" data-target="email-workspace" title="邮件" aria-label="邮件">
+                    <i class="fas fa-envelope" aria-hidden="true"></i><span>邮件</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn active" data-target="llm-workspace" title="AI 会话">
-                    <i class="fas fa-robot"></i>
-                </a>
+            <li class="app-nav-item--secondary">
+                <button type="button" class="app-nav-btn" data-target="private-workspace" title="私密笔记" aria-label="私密笔记">
+                    <i class="fas fa-lock" aria-hidden="true"></i><span>私密</span>
+                </button>
             </li>
-
-            <li>
-                <a class="app-nav-btn" data-target="minds-workspace" title="Minds">
-                    <i class="fas fa-pen-to-square"></i>
-                </a>
+            <li class="app-nav-item--secondary">
+                <button type="button" class="app-nav-btn" data-target="toolbox-workspace" title="工具箱" aria-label="工具箱">
+                    <i class="fas fa-toolbox" aria-hidden="true"></i><span>工具箱</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="agent-workspace" title="Agents">
-                    <i class="fas fa-user-secret"></i>
-                </a>
+            <li class="app-nav-item--secondary">
+                <button type="button" class="app-nav-btn" data-target="settings-workspace" title="设置" aria-label="设置">
+                    <i class="fas fa-cog" aria-hidden="true"></i><span>设置</span>
+                </button>
             </li>
-            <li>
-                <a class="app-nav-btn" data-target="skills-workspace" title="Skills">
-                    <i class="fas fa-bolt"></i>
-                </a>
-            </li>
-            <li>
-                <a class="app-nav-btn" data-target="flows-workspace" title="Workflows">
-                    <i class="fas fa-diagram-project"></i>
-                </a>
-            </li>
-            <li>
-                <a class="app-nav-btn" data-target="settings-workspace" title="Settings">
-                    <i class="fas fa-cog"></i>
-                </a>
+            <li class="app-nav-item--more">
+                <button type="button" class="app-nav-btn" id="mobile-more-button" aria-label="更多功能" aria-haspopup="dialog" aria-controls="mobile-more-menu" aria-expanded="false">
+                    <i class="fas fa-ellipsis" aria-hidden="true"></i><span>更多</span>
+                </button>
             </li>
         </ul>
     </nav>
+    <dialog id="mobile-more-menu" class="mobile-more-menu" aria-label="更多功能">
+        <div class="mobile-more-menu__header"><strong>更多功能</strong><button type="button" class="mobile-more-menu__close" aria-label="关闭更多功能">×</button></div>
+        <div class="mobile-more-menu__grid">
+            <button type="button" class="app-nav-btn" data-target="email-workspace"><i class="fas fa-envelope" aria-hidden="true"></i><span>邮件</span></button>
+            <button type="button" class="app-nav-btn" data-target="private-workspace"><i class="fas fa-lock" aria-hidden="true"></i><span>私密笔记</span></button>
+            <button type="button" class="app-nav-btn" data-target="toolbox-workspace"><i class="fas fa-toolbox" aria-hidden="true"></i><span>工具箱</span></button>
+            <button type="button" class="app-nav-btn" data-target="settings-workspace"><i class="fas fa-cog" aria-hidden="true"></i><span>设置</span></button>
+        </div>
+    </dialog>
 
     <!-- ============================================= -->
     <!--         2. 主内容区域 (Workspace Area)         -->
@@ -110,10 +92,7 @@
         <div id="anki-workspace" class="workspace-view"></div>
 
 
-        <!-- (B) Project Workspace -->
-        <div id="project-workspace" class="workspace-view"></div>
-
-        <!-- (C) Email Workspace -->
+<!-- (C) Email Workspace -->
         <div id="email-workspace" class="workspace-view"></div>
 
         <!-- (D) Private Workspace -->
@@ -127,6 +106,7 @@
 
         <!-- (A) Agent Workspace (默认激活) -->
         <div id="agent-workspace" class="workspace-view"></div>
+        <div id="toolbox-workspace" class="workspace-view"></div>
 
         <!-- Skills Workspace -->
         <div id="skills-workspace" class="workspace-view"></div>

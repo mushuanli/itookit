@@ -1,3 +1,5 @@
+import { showConfigurationForm, addConfigurationAction, addConfigurationEnabled } from './configuration-form';
+import { t } from '@itookit/common';
 // @file: llm-ui/editors/ProviderSettingsEditor.ts
 //
 // Provider 配置编辑器（三层架构第一层）。
@@ -17,8 +19,6 @@ import type { IConnectionService,
     LLMProvider,
     LLMModel,
     ModelCategory,
-    ConnectionMeta,
-    AgentDefinition
 } from '@itookit/common';
 import { Modal, Toast } from '@itookit/ui-common';
 import { exportBundleToLLM, fromConnectionDef } from '@itookit/device-llm';
@@ -41,8 +41,16 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
     private _checkedIds = new Set<string>();
     private currentProviderId?: string;
 
+    private get formOnly(): boolean { return this.options.target?.kind === 'entity' && this.options.target.entityType === 'provider'; }
+
     async render() {
         const providers = this.service.getProviders();
+        if (this.formOnly) {
+            const target = this.options.target;
+            const provider = providers.find(item => item.id === (target?.kind === 'entity' ? target.id : ''));
+            if (provider) this.showEditModal(provider); else this.container.textContent = t('toolbox.resourceMissing');
+            return;
+        }
 
         // Sort: has-apiKey first → enabled first → alphabetical
         const keyedIds = new Set<string>();
@@ -320,196 +328,14 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
     }
 
     private async batchDelete(): Promise<void> {
-        const ids = [...this._checkedIds];
+        await this.deleteProviders([...this._checkedIds]);
+    }
+    private async deleteProviders(ids: string[]): Promise<void> {
         if (!ids.length) return;
-
-        const allProviders = this.service.getProviders();
-        const deletable = allProviders.filter(p => ids.includes(p.id));
-
-        if (!deletable.length) {
-            Toast.error('未找到可删除的 Provider');
-            return;
-        }
-
-        // ── Cascade analysis ───────────────────────────────────────────────────
-        const deletableIds   = new Set(deletable.map(p => p.id));
-        const allConns       = await this.service.getConnections();
-        const affectedConns  = allConns.filter(c => deletableIds.has(c.providerId ?? ''));
-        const affectedConnIds = new Set(affectedConns.map(c => c.id));
-        // Connections available as replacement targets (not being deleted)
-        const replacementConns = allConns.filter(c => !affectedConnIds.has(c.id));
-
-        type AgentSvc = {
-            getAgents(): Promise<AgentDefinition[]>;
-            saveAgent(a: AgentDefinition): Promise<void>;
-            deleteAgent(id: string): Promise<void>;
-        };
-        const agentSvc = 'getAgents' in this.service ? this.service as unknown as AgentSvc : null;
-        const affectedAgents: AgentDefinition[] = agentSvc
-            ? (await agentSvc.getAgents()).filter(a => affectedConnIds.has(a.config.connectionId))
-            : [];
-
-        this.showDeleteImpactModal({
-            deletable,
-            affectedConns,
-            affectedAgents, replacementConns,
-            agentSvc,
-        });
-    }
-
-    /**
-     * Pick the best default replacement connection for agents:
-     * 1. Has API key + same model (tiers.optimal) as the agent's old connection
-     * 2. Has API key (any model)
-     * 3. First available connection
-     */
-    private pickBestReplacement(
-        affectedConns: ConnectionMeta[],
-        replacementConns: ConnectionMeta[],
-    ): string {
-        // Build a quick lookup: connectionId → model
-        const modelMap = new Map(affectedConns.map(c => [c.id, c.model]));
-        // Filter to connections with API keys
-        const withKey = replacementConns.filter(c => c.hasApiKey);
-        // Try same-model match among key-bearing connections
-        for (const rc of (withKey.length > 0 ? withKey : replacementConns)) {
-            for (const ac of affectedConns) {
-                const oldModel = modelMap.get(ac.id);
-                if (oldModel && rc.model === oldModel) return rc.id;
-            }
-        }
-        // Fallback: first key-bearing, otherwise first available
-        return withKey[0]?.id ?? replacementConns[0]?.id ?? '';
-    }
-
-    private showDeleteImpactModal(opts: {
-        deletable: LLMProvider[];
-        affectedConns: ConnectionMeta[];
-        affectedAgents: AgentDefinition[];
-        replacementConns: ConnectionMeta[];
-        agentSvc: {
-            saveAgent(a: AgentDefinition): Promise<void>;
-            deleteAgent(id: string): Promise<void>;
-        } | null;
-    }): void {
-        const { deletable, affectedConns, affectedAgents, replacementConns, agentSvc } = opts;
-
-        const providerListHtml = deletable.map(p =>
-            `<li>${p.icon ?? ''} <strong>${p.name}</strong> <code style="font-size:.75rem;opacity:.7">${p.id}</code></li>`,
-        ).join('');
-
-        const connSectionHtml = affectedConns.length > 0 ? `
-            <div class="llm-delete-impact-section llm-delete-impact-section--warn">
-                <div class="llm-delete-impact-section__title">
-                    ⚠️ 同时将删除以下关联连接（${affectedConns.length} 个）
-                </div>
-                <ul class="llm-delete-impact-list">
-                    ${affectedConns.map(c => `<li><strong>${c.name}</strong> <code style="font-size:.75rem;opacity:.7">${c.id}</code></li>`).join('')}
-                </ul>
-            </div>
-        ` : '';
-
-        const bestReplacement = this.pickBestReplacement(affectedConns, replacementConns);
-        const replacementOptions = replacementConns.map(c =>
-            `<option value="${c.id}" ${c.id === bestReplacement ? 'selected' : ''}>${c.name}${c.hasApiKey ? ' ✓' : ''}</option>`,
-        ).join('');
-
-        const agentSectionHtml = affectedAgents.length > 0 ? `
-            <div class="llm-delete-impact-section llm-delete-impact-section--info">
-                <div class="llm-delete-impact-section__title">
-                    以下 Agent 引用了被删除的连接（${affectedAgents.length} 个）
-                </div>
-                <ul class="llm-delete-impact-list">
-                    ${affectedAgents.map(a => {
-                        const connName = opts.affectedConns.find(c => c.id === a.config.connectionId)?.name ?? a.config.connectionId;
-                        return `<li>${a.icon ?? '🤖'} <strong>${a.name}</strong> <span style="opacity:.6;font-size:.8rem">→ ${connName}</span></li>`;
-                    }).join('')}
-                </ul>
-                <fieldset style="border:none;padding:8px 0 0;margin:0">
-                    <legend style="font-size:.8rem;font-weight:600;margin-bottom:8px;color:var(--st-text-primary)">Agent 处理方式</legend>
-                    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;font-size:.875rem">
-                        <input type="radio" name="agent-action" value="delete">
-                        删除以上 Agent
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;font-size:.875rem">
-                        <input type="radio" name="agent-action" value="replace" ${replacementConns.length > 0 ? 'checked' : 'disabled'}>
-                        替换连接为
-                        <select id="agent-replacement-conn" class="settings-form__select"
-                                style="padding:2px 6px;font-size:.8rem;min-width:140px"
-                                ${replacementConns.length === 0 ? 'disabled' : ''}>
-                            ${replacementConns.length > 0 ? replacementOptions : '<option>（无可用连接）</option>'}
-                        </select>
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.875rem">
-                        <input type="radio" name="agent-action" value="keep" ${replacementConns.length === 0 ? 'checked' : ''}>
-                        保留 Agent（连接引用失效，可手动修复）
-                    </label>
-                </fieldset>
-            </div>
-        ` : '';
-
-        const body = `
-            <div style="font-size:.875rem">
-                <div class="llm-delete-impact-section">
-                    <div class="llm-delete-impact-section__title">将删除以下 Provider（${deletable.length} 个）</div>
-                    <ul class="llm-delete-impact-list">${providerListHtml}</ul>
-                </div>
-                ${connSectionHtml}
-                ${agentSectionHtml}
-            </div>
-            <style>
-                .llm-delete-impact-section { margin-bottom:14px; padding:10px 12px; border-radius:6px; background:var(--st-bg-secondary,#f8f8f8); }
-                .llm-delete-impact-section--warn { background:var(--st-warning-bg,#fff8e1); }
-                .llm-delete-impact-section--info { background:var(--st-info-bg,#e8f4fd); }
-                .llm-delete-impact-section__title { font-weight:600; margin-bottom:6px; }
-                .llm-delete-impact-list { margin:0; padding-left:18px; }
-                .llm-delete-impact-list li { margin-bottom:3px; }
-            </style>
-        `;
-
-        new Modal('确认删除 Provider', body, {
-            confirmText: '确认删除',
-            type: 'danger',
-            width: '520px',
-            onConfirm: async () => {
-                // 1. Delete providers
-                for (const p of deletable) {
-                    await this.service.deleteProvider(p.id);
-                }
-                // 2. Delete affected connections
-                for (const c of affectedConns) {
-                    await this.service.deleteConnection(c.id);
-                }
-                // 3. Handle affected agents
-                if (agentSvc && affectedAgents.length > 0) {
-                    const radio = document.querySelector(
-                        'input[name="agent-action"]:checked',
-                    ) as HTMLInputElement | null;
-                    const action = radio?.value ?? 'keep';
-
-                    if (action === 'delete') {
-                        for (const a of affectedAgents) {
-                            await agentSvc.deleteAgent(a.id);
-                        }
-                    } else if (action === 'replace') {
-                        const sel = document.getElementById('agent-replacement-conn') as HTMLSelectElement | null;
-                        const newConnId = sel?.value;
-                        if (newConnId) {
-                            for (const a of affectedAgents) {
-                                await agentSvc.saveAgent({ ...a, config: { ...a.config, connectionId: newConnId } });
-                            }
-                        }
-                    }
-                    // 'keep' → do nothing
-                }
-
-                this._checkedIds.clear();
-                const parts = [`${deletable.length} 个 Provider`];
-                if (affectedConns.length) parts.push(`${affectedConns.length} 个连接`);
-                Toast.success(`已删除：${parts.join('、')}`);
-                this.render();
-            },
-        }).show();
+        const request = this.options.hostContext?.requestDelete;
+        if (!request) throw new Error('Configuration deletion is not connected');
+        await request(ids.map(id => ({ kind: 'entity', entityType: 'provider', id })));
+        this._checkedIds.clear(); await this.render();
     }
 
     // ── Edit modal ─────────────────────────────────────────────────────────────
@@ -617,7 +443,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
             </form>
         `;
 
-        new Modal(isNew ? '添加 Provider' : `编辑 Provider — ${provider!.name}`, modalContent, {
+        showConfigurationForm(this.container, isNew ? '添加 Provider' : provider!.name, modalContent, {
             width: '620px',
             confirmText: '保存',
             onConfirm: async () => {
@@ -652,6 +478,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                     apiKey: newApiKey || existingApiKey || undefined,
                     models: [...this.editModels],
                     isBuiltin: isBuiltin,
+                    enabled: this.formOnly ? data.enabled === 'on' : provider?.enabled,
                     defaultTemperature: (() => {
                         const v = parseFloat(data.defaultTemperature);
                         return !isNaN(v) ? v : undefined;
@@ -663,9 +490,14 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                 Toast.success('Provider 已保存');
                 this.render();
             },
-        }).show();
+        }, this.formOnly);
 
-        setTimeout(() => this.bindModalEvents(), 100);
+        if (this.formOnly) {
+            this.bindModalEvents();
+            addConfigurationEnabled(this.container, provider?.enabled !== false);
+            if (provider && isBuiltin) addConfigurationAction(this.container, t('toolbox.resetDefaults'), () => this.confirmReset(provider));
+            if (provider) addConfigurationAction(this.container, t('action.delete'), () => { void this.confirmDelete(provider); });
+        } else setTimeout(() => this.bindModalEvents(), 100);
     }
 
     private renderModelListHTML(): string {
@@ -832,30 +664,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
 
     // ── Delete / Reset ─────────────────────────────────────────────────────────
 
-    private async confirmDelete(provider: LLMProvider): Promise<void> {
-        const allConns       = await this.service.getConnections();
-        const affectedConns  = allConns.filter(c => (c.providerId ?? '') === provider.id);
-        const affectedConnIds = new Set(affectedConns.map(c => c.id));
-        const replacementConns = allConns.filter(c => !affectedConnIds.has(c.id));
-
-        type AgentSvc = {
-            getAgents(): Promise<AgentDefinition[]>;
-            saveAgent(a: AgentDefinition): Promise<void>;
-            deleteAgent(id: string): Promise<void>;
-        };
-        const agentSvc = 'getAgents' in this.service ? this.service as unknown as AgentSvc : null;
-        const affectedAgents: AgentDefinition[] = agentSvc
-            ? (await agentSvc.getAgents()).filter(a => affectedConnIds.has(a.config.connectionId))
-            : [];
-
-        this.showDeleteImpactModal({
-            deletable: [provider],
-            affectedConns,
-            affectedAgents,
-            replacementConns,
-            agentSvc,
-        });
-    }
+    private confirmDelete(provider: LLMProvider): Promise<void> { return this.deleteProviders([provider.id]); }
 
     private confirmReset(provider: LLMProvider) {
         Modal.confirm(

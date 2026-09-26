@@ -1,4 +1,4 @@
-import { normalizeVirtualPath, type IFileSystem } from '@itookit/vfs-core';
+import { createFileSystemView, normalizeVirtualPath, type IFileSystem, type FileSystemSourceOwner } from '@itookit/vfs-core';
 import { t } from '@itookit/common';
 import type { SessionFilesService, SessionMountRecord } from './session-files';
 import { randomUUID } from '@itookit/common';
@@ -56,6 +56,17 @@ export class DirectoryMountService {
     }
     getHome(): string | undefined { return this.preferences.home?.label; }
     async chooseDirectory(): Promise<string | null> { return this.provider?.selectDirectory() ?? null; }
+    /** A host-owned project view, rooted at the same directory used for Session grants. */
+    openDirectory(directory: string): Promise<FileSystemSourceOwner> {
+        return this.serial(async () => {
+            const source = await this.resolve(directory);
+            const internal = source.sourceId === 'admin-home';
+            const fs = internal ? this.root : await this.provider!.openDirectory(this.preferences.external[source.sourceId]);
+            const root = internal ? '/home/admin' + (source.root === '/' ? '' : source.root) : source.root;
+            const view = createFileSystemView({ viewId: `project:${directory}`, mounts: [{ mountId: 'project', at: '/', fs, root, access: 'rw' }] });
+            return { fs: view, dispose: () => view.dispose() };
+        });
+    }
     setHome(directory: string): Promise<string> {
         return this.serial(async () => {
             const source = await this.resolve(directory);

@@ -1,18 +1,23 @@
+import { archiveTarget, archiveTargetPath } from './archive-targets';
+import { chooseArchive, downloadArchive } from '../files/archive-transfer';
+import { SessionFamilyActions } from './SessionFamilyActions';
 import { formatDefaultFileTitle, t, type SessionSkillControls } from '@itookit/common';
+import { ProjectNavigation } from './ProjectNavigation';
+import { showProjectDialog } from '../files/project-dialog';
 import { showMountDialog } from '../files/mount-dialog';
 import { localizeMountError } from '../files/localize-mount-error';
 
 import type { EditorFactory, IEditor, EditorHostContext, ContextMenuConfig } from '@itookit/ui-common';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { Kernel } from '@itookit/durable-kernel';
-import { createVFSUI, type VFSUIShell, type VFSNodeUI } from '@itookit/vfs-ui';
-import { createFileSystemView, type IFileSystem, type FileSystemContextOwner, type FileSystemView, type FileSystemSourceOwner } from '@itookit/vfs-core';
+import { createVFSUI, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI } from '@itookit/vfs-ui';
+import { FSError, createFileSystemView, type IFileSystem, type FileSystemContextOwner, type FileSystemView, type FileSystemSourceOwner } from '@itookit/vfs-core';
 
 
 
 import { taskStat } from '@itookit/durable-kernel';
-import { createSessionBrowser, exportSessionBundle, parseSessionRoute, resolveBrowserTarget, sessionRoute, taskSummary, taskKeyEvent,
-    SessionLifecycleService, type DirectoryMountService, type SessionFilesService, type WorkspaceController } from '@itookit/app-core';
+import { createSessionBrowser, folderBrowserPath, folderPathFromBrowserPath, exportSessionBundle, parseSessionRoute, resolveBrowserTarget, sessionRoute, taskSummary, taskKeyEvent,
+    WorkbenchArchiveExporter, WorkbenchArchiveImporter, SessionLifecycleService, ProjectSessions, type ProjectService, type DirectoryMountService, type SessionFilesService, type WorkspaceController } from '@itookit/app-core';
 
 /** Sidebar refresh tracing — enable with localStorage['vfs:debug']='1' (same flag as vfs-ui). */
 function debugEnabled(): boolean {
@@ -29,6 +34,23 @@ function compareSessionEntries(a: VFSNodeUI, b: VFSNodeUI): number | undefined {
     return Date.parse(b.metadata.createdAt) - Date.parse(a.metadata.createdAt) || a.id.localeCompare(b.id);
 }
 
+export interface SessionWorkbenchOptions {
+    sidebar: HTMLElement;
+    container: HTMLElement;
+    repository: ISessionRepository;
+    files: SessionFilesService;
+    factory: EditorFactory;
+    onSelect: (id: string, mode?: 'push' | 'replace') => void;
+    hostContext: EditorHostContext | undefined;
+    kernel: Kernel;
+    fileFactory: EditorFactory;
+    directoryMounts?: DirectoryMountService;
+    sessionSkills?: SessionSkillControls;
+    manageMemory?: (sessionId: string, signal: AbortSignal) => Promise<void>;
+    flows?: { fs: IFileSystem; menu: ContextMenuConfig<VFSNodeUI> };
+    projects?: ProjectService;
+}
+
 /** vfs-ui owns the sidebar; this host owns business views and their file leases. */
 export class SessionWorkbench implements WorkspaceController {
     private readonly dialogs = new AbortController();
@@ -39,6 +61,8 @@ export class SessionWorkbench implements WorkspaceController {
     private browser?: FileSystemSourceOwner;
     private navigationFiles?: FileSystemView;
     private sidebarUI?: VFSUIShell;
+    private projectNavigation?: ProjectNavigation;
+    private familyActions?: SessionFamilyActions;
     private lifecycle!: SessionLifecycleService;
     private active: string | null = null;
     private activeBranch?: string;
@@ -58,25 +82,54 @@ export class SessionWorkbench implements WorkspaceController {
     private readonly resettingTasks = new Set<string>();
     /** File whose editor is open, for the L4 glob mount/unmount pair. */
     private openEditorTarget?: { sessionId: string; path: string };
-    constructor(private readonly sidebar: HTMLElement, private readonly container: HTMLElement,
-        private readonly repository: ISessionRepository, private readonly files: SessionFilesService,
-        private readonly factory: EditorFactory, private readonly onSelect: (id: string, mode?: 'push' | 'replace') => void,
-        private readonly hostContext: EditorHostContext | undefined, private readonly kernel: Kernel,
-        private readonly fileFactory: EditorFactory, private readonly directoryMounts?: DirectoryMountService,
-        private readonly sessionSkills?: SessionSkillControls,
-        private readonly manageMemory?: (sessionId: string, signal: AbortSignal) => Promise<void>,
-        private readonly flows?: { fs: IFileSystem; menu: ContextMenuConfig<VFSNodeUI> }) {}
+    private readonly sidebar: SessionWorkbenchOptions['sidebar'];
+    private readonly container: SessionWorkbenchOptions['container'];
+    private readonly repository: SessionWorkbenchOptions['repository'];
+    private readonly files: SessionWorkbenchOptions['files'];
+    private readonly factory: SessionWorkbenchOptions['factory'];
+    private readonly onSelect: SessionWorkbenchOptions['onSelect'];
+    private readonly hostContext: SessionWorkbenchOptions['hostContext'];
+    private readonly kernel: SessionWorkbenchOptions['kernel'];
+    private readonly fileFactory: SessionWorkbenchOptions['fileFactory'];
+    private readonly directoryMounts: SessionWorkbenchOptions['directoryMounts'];
+    private readonly sessionSkills: SessionWorkbenchOptions['sessionSkills'];
+    private readonly manageMemory: SessionWorkbenchOptions['manageMemory'];
+    private readonly flows: SessionWorkbenchOptions['flows'];
+    private readonly projects: SessionWorkbenchOptions['projects'];
+    private readonly sessions: ProjectSessions;
+    constructor(options: SessionWorkbenchOptions) {
+        this.sidebar = options.sidebar;
+        this.container = options.container;
+        this.repository = options.repository;
+        this.files = options.files;
+        this.factory = options.factory;
+        this.onSelect = options.onSelect;
+        this.hostContext = options.hostContext;
+        this.kernel = options.kernel;
+        this.fileFactory = options.fileFactory;
+        this.directoryMounts = options.directoryMounts;
+        this.sessionSkills = options.sessionSkills;
+        this.manageMemory = options.manageMemory;
+        this.flows = options.flows;
+        this.projects = options.projects;
+        this.sessions = options.projects?.sessions ?? new ProjectSessions(options.repository);
+    }
     async start(): Promise<void> {
-        this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel });
+        this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel, projects: this.projects });
         this.navigationFiles = createFileSystemView({ viewId: 'session-navigation:admin', mounts: [
             { mountId: 'sessions', at: '/', fs: this.browser.fs, access: 'rw' },
-            ...(this.flows ? [{ mountId: 'flows', at: '/@flows', fs: this.flows.fs, access: 'rw' as const }] : []),
+            ...(this.flows && !this.projects ? [{ mountId: 'flows', at: '/@flows', fs: this.flows.fs, access: 'rw' as const }] : []),
         ] });
         this.lifecycle = new SessionLifecycleService({ repository: this.repository, kernel: this.kernel });
-        this.sidebarUI = createVFSUI({ sessionListContainer: this.sidebar, title: '会话', scopeId: 'session-browser:v1:admin',
-            readOnly: false, activateDirectories: true, defaultUiSettings: { sortBy: 'lastModified' },
+        const tree = document.createElement('div'); tree.className = 'project-workbench__tree';
+        this.sidebar.append(tree);
+        if (this.projects) this.installProjectNavigation();
+        this.sidebarUI = createVFSUI({ sessionListContainer: tree, title: this.projects ? t('project.workspace') : '会话', scopeId: 'session-browser:v1:admin',
+            columns: this.projectNavigation?.options, toolbar: 'full',
+            searchPlaceholder: t(this.projects ? 'project.searchContents' : 'project.search'), showFileExtensions: true,
+            readOnly: false, activateDirectories: true, autoSelectFirst: !this.projects, defaultUiSettings: { sortBy: 'lastModified' },
             compareItems: compareSessionEntries,
-            restoreExpandedDirectory: path => isFlowPath(path) || resolveBrowserTarget(path).kind === 'folder',
+            restoreExpandedDirectory: path => isFlowPath(path) || ['folder', 'project-files'].includes(resolveBrowserTarget(path).kind),
             exportDirectories: true,
             exportItem: item => this.exportSessionItem(item),
             fileCreation: { label: '会话', title: formatDefaultFileTitle(), resolveParent: sessionCreationParent },
@@ -85,6 +138,11 @@ export class SessionWorkbench implements WorkspaceController {
                     if (isFlowPath(item.id)) return this.flows?.menu.items?.(item,
                         item.id === '/@flows' ? [] : defaults.filter(entry => 'id' in entry && entry.id === 'delete')) ?? [];
                     const target = resolveBrowserTarget(item.id);
+                    if (target.kind === 'project-files' && target.path === '/') return [];
+                    if (this.projects && item.metadata?.custom?.projectId)
+                        return defaults.filter(entry => !('id' in entry) || !['create-in-folder-session', 'create-in-folder-folder', 'import'].includes(entry.id));
+                    if (target.kind === 'folder' && folderPathFromBrowserPath(item.id)?.endsWith('/@sessions'))
+                        return defaults.filter(entry => !('id' in entry) || !['delete', 'rename'].includes(entry.id));
                     if (target.kind === 'task') {
                         return [{ id: 'reset-task', label: '强制复位任务（停止执行，保留记录）',
                             onClick: () => { void this.resetTask(item.id).catch(error => this.report(error)); } }];
@@ -92,7 +150,11 @@ export class SessionWorkbench implements WorkspaceController {
                     // Closing stops the run but keeps the Session history, so it is offered
                     // next to (not instead of) the destructive delete.
                     if (target.kind === 'session') {
-                        return [...defaults, { id: 'rerun-session', label: t('session.rerun.title'),
+                        return [...defaults.filter(entry => !this.familyActions || !('id' in entry) || !['delete', 'move', 'create-in-folder-session', 'create-in-folder-folder'].includes(entry.id)),
+                            ...(this.familyActions ? this.familyMenu(target.sessionId) : []),
+                            { id: 'session-tasks', label: t('project.sessionTasks'), onClick: () => { void this.openResource(item.id + '/tasks').catch(error => this.report(error)); } },
+                            { id: 'session-files', label: t('project.sessionFiles'), onClick: () => { void this.openResource(item.id + '/files').catch(error => this.report(error)); } },
+                            { id: 'rerun-session', label: t('session.rerun.title'),
                             onClick: () => { void this.rerunSession(target.sessionId).catch(error => this.report(error)); } }, { id: 'close-session', label: t('session.close.action'),
                             onClick: () => { void this.closeSession(target.sessionId).catch(error => this.report(error)); } }];
                     }
@@ -114,7 +176,14 @@ export class SessionWorkbench implements WorkspaceController {
             if (event.reason !== 'content') this.scheduleRefresh('kernel:' + event.reason);
         }));
         await this.sidebarUI.start();
-        if (!this.active) this.message('选择一个会话，或新建会话');
+        if (this.projectNavigation && !this.active) {
+            const current = await this.projects!.current();
+            if (current) await this.projectNavigation.sync(folderBrowserPath(current.path));
+        }
+        if (!this.active) {
+            if (this.projects) this.showWelcome();
+            else this.message('选择一个会话，或新建会话');
+        }
     }
     /**
      * Stop a running Session and keep every record. Deletion is a separate action; this
@@ -187,12 +256,13 @@ export class SessionWorkbench implements WorkspaceController {
             this.refreshQueued = false;
             if (this.closed) return;
             await this.sidebarUI?.refresh();
+            await this.projectNavigation?.refresh();
             await this.syncBranchRoute();
-            for (const id of this.waiting) this.sidebarUI?.setNodeAttention('/' + id, t('project.waitingInput'));
+            for (const id of this.waiting) this.sidebarUI?.setNodeAttention(await this.sessionPath(id), t('project.waitingInput'));
             if (this.active?.startsWith('/')) {
                 const target = resolveBrowserTarget(this.active);
                 if (target.kind === 'task') await this.showTask(this.active);
-                else if (target.kind === 'folder' || target.kind === 'tasks' || (target.kind === 'files' && !this.editor && !this.previewCleanup)) await this.showDirectory(this.active);
+                else if ((target.kind === 'folder' && !this.projectNavigation) || target.kind === 'tasks' || ((target.kind === 'files' || target.kind === 'project-files') && !this.editor && !this.previewCleanup)) await this.showDirectory(this.active);
             }
         }).catch(error => this.report(error));
     }
@@ -209,9 +279,19 @@ export class SessionWorkbench implements WorkspaceController {
             notice.setAttribute('role', 'alert'); notice.textContent = text; this.container.append(notice);
         }
     }
-    openResource(resourceId: string, options: { reload?: boolean; branch?: string } = {}): Promise<void> {
+    /** Stale bookmarks must not abort the entire application bootstrap. */
+    async restoreResource(resourceId: string): Promise<void> {
+        try { await this.openResource(resourceId); }
+        catch (error) {
+            if (!(error instanceof URIError) && !(error instanceof FSError && ['EINVAL', 'ENOENT'].includes(error.code))) throw error;
+            if (!this.editor && !this.previewCleanup) { this.active = null; this.activeBranch = undefined; }
+            this.report(new Error(t('project.error.staleRoute')));
+            this.onSelect(this.getActiveResourceId() ?? '', 'replace');
+        }
+    }
+    async openResource(resourceId: string, options: { reload?: boolean; branch?: string } = {}): Promise<void> {
         const route = parseSessionRoute(resourceId);
-        const path = route.path;
+        let path = route.path;
         if (isFlowPath(path)) {
             return Promise.resolve(this.hostContext?.navigate?.({ target: 'flows',
                 ...(path === '/@flows' ? {} : { resourceId: path.slice('/@flows'.length) }) }));
@@ -221,18 +301,35 @@ export class SessionWorkbench implements WorkspaceController {
         const id = target.kind === 'session' ? target.sessionId : path;
         const operation = this.tail.then(async () => {
             if (this.closed) throw new Error('Session workspace closed');
-            if (id === this.active && !options.reload && (branch === undefined || branch === this.activeBranch)) return;
+            if (id === this.active && !options.reload && (branch === undefined || branch === this.activeBranch)) {
+                if (target.kind === 'project-files') await this.projectNavigation?.sync(path, true);
+                return;
+            }
             if (target.kind === 'folder') {
                 await this.closeEditor();
                 this.active = id;
                 this.activeBranch = undefined;
-                await this.showDirectory(path);
+                await this.projectNavigation?.sync(path, true);
+                const folder = folderPathFromBrowserPath(path);
+                const project = this.projectNavigation?.currentProject();
+                if (this.projectNavigation && (!project || folder === project.path)) this.showWelcome();
+                else await this.showDirectory(path);
                 this.onSelect(id);
                 this.selectionSync = path;
                 try { await this.sidebarUI?.selectPath(path); } finally { this.selectionSync = undefined; }
                 return;
             }
-            const manifest = await this.repository.getManifest(target.sessionId);
+            if (target.kind === 'project-files') {
+                await this.closeEditor();
+                await this.projectNavigation?.sync(path, true);
+                await this.openProjectFile(path, target);
+                this.active = path; this.onSelect(path); await this.selectPath(path); return;
+            }
+            const manifest = await this.sessions.get(target.sessionId);
+            const suffix = target.kind === 'session' ? '' : target.kind === 'files' ? '/files' + (target.path === '/' ? '' : target.path)
+                : target.kind === 'tasks' ? '/tasks' : '/tasks/' + target.taskId;
+            path = `${folderBrowserPath(manifest.folder)}/${target.sessionId}${suffix}`;
+            await this.projectNavigation?.sync(path);
             await this.closeEditor();
             if (target.kind === 'session' || target.kind === 'files') {
                 const cwd = target.kind === 'session' ? undefined : target.path.slice(0, target.path.lastIndexOf('/')) || '/';
@@ -240,8 +337,7 @@ export class SessionWorkbench implements WorkspaceController {
                 let assets: FileSystemView | undefined;
                 let editor: IEditor | undefined;
                 let previewCleanup: (() => void) | undefined;
-                const mount = document.createElement('div'); mount.className = 'session-editor-mount';
-                this.container.replaceChildren(mount);
+                const mount = await this.editorMount(manifest.folder, target.kind === 'session' ? manifest.id : undefined);
                 try {
                     if (target.kind === 'files' && (await context.context.fs.driver.getNode(target.path))?.type === 'directory') {
                         await context.release();
@@ -320,8 +416,8 @@ export class SessionWorkbench implements WorkspaceController {
         const operation = this.tail.then(async () => {
             if (this.closed || !this.active) return;
             const id = this.active, target = resolveBrowserTarget(id.startsWith('/') ? id : '/' + id);
-            if (target.kind === 'folder') return;
-            const manifest = await this.repository.getManifest(target.sessionId).catch(async error => {
+            if (target.kind === 'folder' || target.kind === 'project-files') return;
+            const manifest = await this.sessions.get(target.sessionId).catch(async error => {
                 if (error?.code !== 'ENOENT') throw error;
                 await this.closeEditor();
                 this.message('选择一个会话，或新建会话');
@@ -342,7 +438,7 @@ export class SessionWorkbench implements WorkspaceController {
         if (this.closed) return;
         this.refresh();
         if (this.active === sessionId) {
-            const manifest = await this.repository.getManifest(sessionId);
+            const manifest = await this.sessions.get(sessionId);
             await this.openResource(sessionId, { reload: true, branch: manifest.currentBranch });
         }
     }
@@ -369,10 +465,16 @@ export class SessionWorkbench implements WorkspaceController {
         if (this.closed || generation !== this.taskRefresh) return;
         const panel = document.createElement('div'); panel.className = 'session-detail';
         const heading = document.createElement('h2');
-        heading.textContent = target.kind === 'folder'
-            ? (path === '/' ? '会话' : decodeURIComponent(path.split('/').pop()!.replace(/^folder:/, '')))
-            : path.endsWith('/tasks') ? 'Tasks' : 'Files';
+        heading.textContent = String((await this.navigationFiles!.driver.getNode(path))?.metadata.title ?? t('project.workspace'));
         panel.append(heading);
+        if (this.projects && target.kind === 'folder') {
+            const project = await this.projects.forFolder(folderPathFromBrowserPath(path));
+            if (project) {
+                const directory = document.createElement('p'); directory.className = 'project-workbench__directory';
+                directory.textContent = project.project.directory.startsWith('host:') ? project.project.directory.slice(5) : t('project.managedDirectory'); panel.append(directory);
+                this.actionButton(panel, t('project.createSession'), () => this.createResource({ parentPath: path }));
+            }
+        }
         if (target.kind === 'files' && target.path === '/' && this.directoryMounts) {
             const button = document.createElement('button'); button.textContent = '挂载目录 / 管理挂载';
             button.onclick = () => { void this.manageMounts(target.sessionId).catch(error => this.report(error)); }; panel.append(button);
@@ -490,21 +592,149 @@ export class SessionWorkbench implements WorkspaceController {
         render();
         this.container.replaceChildren(panel);
     }
+    private async exportSelection(context: VFSToolbarContext): Promise<void> {
+        if (!context.selectedIds.length) throw new Error(t('vfs.toolbar.selectExport'));
+        const archive = await new WorkbenchArchiveExporter(this.projects!, this.repository).export(await Promise.all(context.selectedIds.map(path => archiveTarget(path, this.projects!))));
+        if (!this.closed) downloadArchive(JSON.stringify(archive, null, 2));
+    }
+    private async importSelection(context: VFSToolbarContext): Promise<void> {
+        const path = context.selectedIds[0] ?? context.parentPath ?? context.activeId ?? '/';
+        const file = await chooseArchive(this.dialogs.signal);
+        if (!file || this.closed) return;
+        const content = await file.text();
+        if (this.closed) return;
+        const paths = await new WorkbenchArchiveImporter(this.projects!, this.lifecycle, this.repository).import(content, await archiveTarget(path, this.projects!));
+        if (this.closed) return;
+        await this.sidebarUI?.refresh();
+        if (paths[0]) await this.openResource(await archiveTargetPath(paths[0], this.projects!));
+    }
     private async exportSessionItem(item: { path: string; type: string }): Promise<{ name: string; content: string; mimeType: string } | null> {
         const target = resolveBrowserTarget(item.path);
         if (target.kind !== 'session') return null;
         return exportSessionBundle(this.repository, target.sessionId);
     }
 
-    async createResource(options: { title?: string } = {}): Promise<string> {
+    private async sessionPath(id: string): Promise<string> {
+        const manifest = await this.sessions.get(id);
+        return `${folderBrowserPath(manifest.folder)}/${id}`;
+    }
+    private async selectPath(path: string): Promise<void> {
+        this.selectionSync = path;
+        try { await this.sidebarUI?.selectPath(path); } finally { this.selectionSync = undefined; }
+    }
+    private async creationFolder(parent?: string | null): Promise<string | null> {
+        const root = this.sidebarUI?.getContentRoot?.();
+        const selected = this.active?.startsWith('/') ? this.active : this.sidebarUI?.getActiveSession()?.id;
+        const path = parent ?? (root && selected?.startsWith(root + '/') ? selected : root) ?? selected ?? this.active;
+        let folder = path ? folderPathFromBrowserPath(path) : null;
+        if (path && !isFlowPath(path)) {
+            const target = resolveBrowserTarget(path.startsWith('/') ? path : '/' + path);
+            if (target.kind === 'session') folder = (await this.sessions.get(target.sessionId)).folder ?? null;
+        }
+        if (!this.projects) return folder;
+        const project = await this.projects.forFolder(folder) ?? await this.projects.current();
+        if (!project) return folder;
+        return folder && folder.startsWith(project.path + '/') ? folder : this.projects.sessionFolder(project);
+    }
+    private actionButton(parent: HTMLElement, label: string, action: () => Promise<unknown>): void {
+        const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
+        button.onclick = () => { button.disabled = true; void action().catch(error => this.report(error)).finally(() => { button.disabled = false; }); };
+        parent.append(button);
+    }
+    private installProjectNavigation(): void {
+        this.sidebar.classList.add('project-workbench');
+        this.familyActions = new SessionFamilyActions(this.projects!.sessions, this.dialogs.signal, {
+            open: id => this.openResource(id, { reload: this.active === id }), child: id => this.createChild(id),
+            remove: async id => { await this.lifecycle.deleteSession(id); if (this.active === id) { await this.closeEditor(); this.showWelcome(); this.onSelect('', 'replace'); } await this.sidebarUI?.refresh(); await this.projectNavigation?.refresh(); },
+            changed: async () => { await this.sidebarUI?.refresh(); await this.projectNavigation?.refresh(); },
+            showFamily: () => this.projectNavigation?.showContent(),
+            report: error => this.report(error),
+        });
+        this.projectNavigation = new ProjectNavigation(this.projects!, () => this.sidebarUI, {
+            createSession: path => this.createResource({ parentPath: path }), createChild: id => this.createChild(id),
+            retryDeletions: async () => {
+                for (const entry of await this.repository.pendingSessionDeletions()) await this.lifecycle.deleteSession(entry.id);
+                await this.sidebarUI?.refresh(); await this.projectNavigation?.refresh();
+            },
+            contentChanged: visible => { this.sidebar.classList.toggle('project-workbench--single', !visible); }, importItems: context => this.importSelection(context), exportItems: context => this.exportSelection(context),
+            createProject: path => this.createProject(path), report: error => this.report(error),
+        });
+    }
+    private familyMenu(id: string) {
+        const run = (action: () => Promise<unknown>) => () => { void action().catch(error => this.report(error)); };
+        return [
+            { id: 'new-child', label: t('project.newChild'), onClick: run(() => this.createChild(id)) },
+            { id: 'move-under', label: t('project.moveUnder'), onClick: run(() => this.familyActions!.move(id)) },
+            { id: 'promote-session', label: t('project.promoteSession'), onClick: run(() => this.familyActions!.promote(id)) },
+            { id: 'delete-session-only', label: t('project.deleteSessionOnly'), onClick: run(() => this.familyActions!.remove(id)) },
+        ];
+    }
+    async createChild(parentSessionId: string): Promise<string> {
+        if (!this.projects) throw new Error('Projects unavailable');
+        const id = await this.projects.sessions.createChild(parentSessionId);
+        await this.sidebarUI?.refresh(); await this.openResource(id); this.projectNavigation?.showContent(); this.editor?.focus?.(); return id;
+    }
+    private async createProject(selected?: string | null): Promise<void> {
+        const path = selected ?? this.sidebarUI?.getActiveSession()?.id ?? '/';
+        const folder = folderPathFromBrowserPath(path);
+        const current = await this.projects!.forFolder(folder);
+        const parent = current ? current.parentPath : folder;
+        await showProjectDialog(this.projects!, parent, this.dialogs.signal, async created => {
+            await this.sidebarUI?.refresh(); await this.openResource(folderBrowserPath(created));
+        });
+    }
+    private showWelcome(): void {
+        const panel = document.createElement('div'); panel.className = 'mm-placeholder project-workbench__welcome';
+        const mark = document.createElement('span'); mark.className = 'project-workbench__mark'; mark.textContent = 'X1';
+        const title = document.createElement('h1'); title.textContent = t('project.welcome');
+        const hint = document.createElement('p'); hint.textContent = t('project.welcomeHint');
+        panel.append(mark, title, hint);
+        this.actionButton(panel, t('project.createSession'), () => this.createResource());
+        this.container.replaceChildren(panel);
+    }
+    private async editorMount(folder?: string | null, sessionId?: string): Promise<HTMLElement> {
+        const mount = document.createElement('div'); mount.className = 'session-editor-mount';
+        const project = await this.projects?.forFolder(folder);
+        this.container.replaceChildren();
+        if (project) {
+            const context = document.createElement('div'); context.className = 'project-workbench__context';
+            context.textContent = t('project.current', { name: project.name });
+            this.container.append(context);
+        }
+        if (sessionId && this.familyActions) this.container.append(await this.familyActions.header(await this.sessions.get(sessionId)));
+        this.container.append(mount); return mount;
+    }
+    private async openProjectFile(_path: string, target: { folder: string; path: string }): Promise<void> {
+        if (!this.projects) throw new Error('Projects unavailable');
+        const owner = await this.projects.openFiles(target.folder);
+        const context: FileSystemContextOwner = { context: { fs: owner.fs, cwd: target.path.slice(0, target.path.lastIndexOf('/')) || '/' }, release: () => owner.dispose() };
+        try {
+            if ((await owner.fs.driver.getNode(target.path))?.type === 'directory') {
+                await context.release(); this.message(t('project.selectFile')); return;
+            }
+            const mount = await this.editorMount(target.folder);
+            const bytes = await owner.fs.driver.readContent(target.path, { encoding: 'binary' });
+            const content = decodeFile(target.path, bytes);
+            if (content === undefined) this.previewCleanup = this.showBinary(mount, target.path, bytes);
+            else this.editor = await this.fileFactory(mount, { target: { kind: 'file', path: target.path }, files: context.context,
+                initialContent: content, title: target.path.split('/').pop(),
+                hostContext: { toggleSidebar: () => this.sidebarUI?.toggleSidebar(),
+                    navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve(),
+                    saveContent: async (_path, text) => { await owner.fs.driver.writeContent(target.path, text); this.refresh(); } } });
+            this.context = context;
+        } catch (error) { await context.release(); throw error; }
+    }
+
+    async createResource(options: { title?: string; parentPath?: string | null } = {}): Promise<string> {
         if (this.closed) throw new Error('Session workspace closed');
-        const id = await this.repository.createSession(options.title || '新会话');
+        const folder = await this.creationFolder(options.parentPath);
+        const id = await this.sessions.create(options.title || '新会话', folder);
         const opening = this.openResource(id);
         await Promise.all([opening, this.sidebarUI?.refresh()]);
         if (!this.closed && this.active === id) {
             // The editor can finish before its new sidebar entry is available.
-            this.selectionSync = '/' + id;
-            try { await this.sidebarUI?.selectPath('/' + id); } finally { this.selectionSync = undefined; }
+            this.selectionSync = await this.sessionPath(id);
+            try { await this.sidebarUI?.selectPath(this.selectionSync); } finally { this.selectionSync = undefined; }
         }
         return id;
     }
@@ -512,7 +742,8 @@ export class SessionWorkbench implements WorkspaceController {
         return this.active && this.activeBranch !== undefined ? sessionRoute(this.active, this.activeBranch) : this.active;
     }
     setWaitingInput(id: string, waiting: boolean): void {
-        waiting ? this.waiting.add(id) : this.waiting.delete(id); this.sidebarUI?.setNodeAttention('/' + id, waiting ? t('project.waitingInput') : undefined);
+        waiting ? this.waiting.add(id) : this.waiting.delete(id);
+        void this.sessionPath(id).then(path => { if (!this.closed) this.sidebarUI?.setNodeAttention(path, this.waiting.has(id) ? t('project.waitingInput') : undefined); }).catch(error => this.report(error));
     }
     /** Editor open/close drives the L4 glob mount; a failure must not break the editor. */
     private mountEditorSkills(sessionId: string, path: string): void {
@@ -550,10 +781,16 @@ function sessionCreationParent(path: string | null): string | null {
     if (!path) return null;
     if (isFlowPath(path)) return null;
     const target = resolveBrowserTarget(path);
-    if (target.kind === 'folder' || target.kind === 'files') return path;
+    if (target.kind === 'folder' || target.kind === 'files' || target.kind === 'project-files') return path;
     const folders = path.split('/').filter(Boolean);
     const sessionIndex = folders.findIndex(segment => !segment.startsWith('folder:'));
     return sessionIndex > 0 ? '/' + folders.slice(0, sessionIndex).join('/') : null;
 }
 
 function isFlowPath(path: string): boolean { return path === '/@flows' || path.startsWith('/@flows/'); }
+
+function decodeFile(path: string, bytes: ArrayBuffer): string | undefined {
+    if (/\.(pdf|zip|gz|tar|7z|rar|png|jpe?g|gif|webp|avif|ico|mp[34]|wav|ogg|webm|mov|woff2?|ttf|bin|sqlite|db|docx?|xlsx?|pptx?)$/i.test(path)) return;
+    try { const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); if (!text.includes('\0')) return text; }
+    catch { /* Binary files are previewed or downloaded. */ }
+}

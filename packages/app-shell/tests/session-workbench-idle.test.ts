@@ -7,7 +7,7 @@ import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
 import { SessionFilesService } from '@itookit/app-core';
 import { createSessionAttachmentMounts } from '@itookit/app-core';
-import { SessionWorkbench } from '../src/core/SessionWorkbench';
+import { SessionWorkbench } from '../src/projects/SessionWorkbench';
 
 it('issues no VFS operations while the Session workbench is idle', async () => {
     const storage = new Map<string, string>();
@@ -37,7 +37,7 @@ it('issues no VFS operations while the Session workbench is idle', async () => {
     document.body.append(sidebar, main);
     const chat = vi.fn(async () => ({ destroy: vi.fn() }));
     const file = vi.fn(async () => ({ destroy: vi.fn() }));
-    const workbench = new SessionWorkbench(sidebar, main, repository, files, chat as never, () => {}, undefined, kernel as never, file as never);
+    const workbench = new SessionWorkbench({ sidebar: sidebar, container: main, repository: repository, files: files, factory: chat as never, onSelect: () => {}, hostContext: undefined, kernel: kernel as never, fileFactory: file as never });
     try {
         await workbench.start();
         await workbench.openResource(id);

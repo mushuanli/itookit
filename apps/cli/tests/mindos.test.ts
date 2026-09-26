@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -27,6 +27,28 @@ async function configDir(settings: Record<string, unknown>): Promise<string> {
 }
 
 describe('MindOS profile resolution', () => {
+    it('creates shared defaults beside existing data and preserves later edits', async () => {
+        const root = await mkdtemp(path.join(tmpdir(), 'mindos-default-'));
+        cleanup.push(root); process.env.XDG_CONFIG_HOME = root; delete process.env.MINDOS_ROOT;
+        const dir = path.join(root, 'mindos');
+        await mkdir(path.join(dir, 'data'), { recursive: true });
+        await writeFile(path.join(dir, 'data', 'keep'), 'existing data');
+        expect(resolveMindosRoot()).toBe(path.join(dir, 'data'));
+        expect(JSON.parse(await readFile(path.join(dir, 'mindos.json'), 'utf8')))
+            .toEqual({ rootDir: 'data', storageVersion: 1, layoutVersion: 1 });
+        const custom = '{"rootDir":"elsewhere","custom":true}';
+        await writeFile(path.join(dir, 'mindos.json'), custom);
+        expect(resolveMindosRoot()).toBe(path.join(dir, 'elsewhere'));
+        expect(await readFile(path.join(dir, 'mindos.json'), 'utf8')).toBe(custom);
+        expect(await readFile(path.join(dir, 'data', 'keep'), 'utf8')).toBe('existing data');
+    });
+    it('does not persist a temporary environment override', async () => {
+        const root = await mkdtemp(path.join(tmpdir(), 'mindos-env-'));
+        cleanup.push(root); process.env.XDG_CONFIG_HOME = root; process.env.MINDOS_ROOT = '/temporary';
+        expect(resolveMindosRoot()).toBe('/temporary');
+        delete process.env.MINDOS_ROOT;
+        expect(resolveMindosRoot()).toBe(path.join(root, 'mindos', 'data'));
+    });
     it('reads mindos.json rootDir relative to the config dir', async () => {
         const dir = await configDir({ rootDir: 'data' });
         expect(resolveMindosRoot()).toBe(path.join(dir, 'data'));

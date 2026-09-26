@@ -6,7 +6,7 @@ export { initApp } from './bootstrap';
 export { SessionFilesService } from '@itookit/app-core';
 export type { SessionMountRecord, FilesRecord } from '@itookit/app-core';
 export { createVFSToolContext } from '@itookit/app-core';
-export { WS_SETTINGS, WS_CHAT, WS_AGENTS, WS_MINDS, WS_ANKI, WS_PROJECTS, WS_EMAILS, WS_PRIVATE, WS_SKILLS, WS_FLOWS, WS_HOME, createWsMount } from './workspaces/index';
+export { WS_SETTINGS, WS_CHAT, WS_TOOLBOX, WS_AGENTS, WS_MINDS, WS_ANKI, WS_PROJECTS, WS_EMAILS, WS_PRIVATE, WS_SKILLS, WS_FLOWS, WS_HOME, createWsMount } from './workspaces/index';
 export type {
     AppOptions,
     AppHandle,
@@ -27,3 +27,5 @@ export * from './config/templates';
 export { themeService } from './ThemeService';
 export type { ThemeMode } from './ThemeService';
 export { Workbench } from './core/Workbench';
+
+export { installMobileNavigation } from './navigation/mobile-navigation';

@@ -8,6 +8,11 @@ describe('Session branch route identity', () => {
             path: '/session-1', branch: 'review/中文 + &?%',
         });
     });
+    it('restores branches on folder-qualified Session identities', () => {
+        expect(parseSessionRoute('/folder:%E9%A1%B9%E7%9B%AE/folder:%40sessions/s?branch=review%2Fone'))
+            .toEqual({ path: '/folder:%E9%A1%B9%E7%9B%AE/folder:%40sessions/s', branch: 'review/one' });
+        expect(parseSessionRoute('/folder:Project/@files/a?branch=b')).toEqual({ path: '/folder:Project/@files/a?branch=b' });
+    });
     it('does not interpret file query characters as a branch', () => {
         expect(parseSessionRoute('/s/files/workspace/a?branch=b')).toEqual({ path: '/s/files/workspace/a?branch=b' });
         expect(parseSessionRoute('s')).toEqual({ path: '/s' });

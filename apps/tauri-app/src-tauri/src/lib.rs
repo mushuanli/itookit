@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_fs::FsExt;
 mod atomic_file;
+mod profile_config;
 mod sidecar;
 mod directory_boundary;
 mod scoped_fs;
@@ -18,7 +19,7 @@ pub mod diagnostics;
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 /// Canonical config file name, mirroring MINDOS_CONFIG_FILE in @itookit/app-core.
-const MINDOS_CONFIG_FILE: &str = "mindos.json";
+const MINDOS_CONFIG_FILE: &str = profile_config::FILE_NAME;
 
 struct MindosSettings {
     /// Raw value from mindos.json#rootDir — may be relative or absolute.
@@ -106,14 +107,15 @@ struct CodexProcess {
 #[derive(Default)]
 struct CodexAppServer(Mutex<Option<CodexProcess>>);
 
-fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
+fn resolve_all_paths(system_home: &PathBuf) -> std::io::Result<AppPaths> {
     // Config lives at $XDG_CONFIG_HOME/mindos/mindos.json (default ~/.config/mindos),
     // never inside the data root. This keeps unrelated ~/.mindos data untouched.
-    let config_dir = std::env::var("XDG_CONFIG_HOME")
+    let xdg = std::env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| system_home.join(".config").join("mindos"));
+        .map(PathBuf::from);
+    let config_dir = profile_config::config_dir(system_home, xdg);
+    profile_config::ensure_settings(&config_dir)?;
 
     let MindosSettings { root_dir: settings_root, home_dir: settings_home } = read_settings(&config_dir);
 
@@ -133,7 +135,7 @@ fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
 
     let (home_dir, home_source) = resolve_home_dir(settings_home);
 
-    AppPaths { config_dir, root_dir, home_dir, root_source, home_source }
+    Ok(AppPaths { config_dir, root_dir, home_dir, root_source, home_source })
 }
 
 /// Resolve the host workspace directory (mounted at `/workspace`).
@@ -647,7 +649,7 @@ pub fn run() {
         .manage(mcp_process::MCPProcesses::default())
         .setup(|app| {
             let system_home = app.path().home_dir().unwrap_or_else(|_| PathBuf::from("."));
-            let paths = resolve_all_paths(&system_home);
+            let paths = resolve_all_paths(&system_home)?;
             log_resolved_paths(&paths);
 
             let _ = std::fs::create_dir_all(&paths.config_dir);

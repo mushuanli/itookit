@@ -280,7 +280,15 @@ export class LLMWorkspaceEditor implements IEditor {
     private initLayout(): void {
         this.container.innerHTML = LayoutTemplates.renderWorkspace(this.currentTitle);
         this.titleInput = this.container.querySelector('#llm-title-input') as HTMLInputElement;
+        this.container.addEventListener('click', this.onWelcomePrompt);
     }
+
+    private readonly onWelcomePrompt = (event: MouseEvent): void => {
+        const button = (event.target as Element).closest<HTMLButtonElement>('.llm-ui-welcome__prompt');
+        if (!button || !this.container.contains(button) || !this.chatInput) return;
+        const current = this.chatInput.getConfig().text.trim();
+        this.chatInput.restoreInput([current, button.dataset.prompt].filter(Boolean).join('\n'));
+    };
 
     private initInfrastructure(): void {
         this.domCache = new DOMCache(this.container);
@@ -1137,6 +1145,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     async destroy(): Promise<void> {
+        this.container.removeEventListener('click', this.onWelcomePrompt);
         this.rerunAbort?.abort();
         this.flowOutputAbort?.abort();
         this.attachmentClosed = true;

@@ -91,6 +91,8 @@ interface HeadlessKernelRuntime extends KernelAdaptersRuntime {
 
 ## app-shell 只负责 UI
 
+Web/Tauri 的智能体、技能、流程、Provider/Connection 模型配置、MCP 和工具共用工具箱导航。文件视图与编辑器上下文适配由 app-shell 负责，原有存储与执行授权不变；见[工具箱导航](./design/toolbox-navigation.md)。
+
 `app-shell` 支持注入 runtime：
 
 ```ts
@@ -253,7 +255,6 @@ Session 配置变更、禁用和服务释放会先同时关闭普通视图与工
 
 ### 会话工作目录默认值
 
-`ApplicationRuntimeOptions.defaultSessionDirectory` 是宿主提供的新会话工作目录。`SessionRepository` 在发布新 Session 前等待初始化回调，由 `DirectoryMountService.setWorkspace` 写入授权；已存在的 Session 不重新应用默认值。Tauri 通过 `get_current_dir` 注入启动 cwd；CLI 未显式指定 Flow workspace.root 时使用 `process.cwd()`，重开时保留持久化挂载。工作目录与应用 profile 数据根分别管理。
 
 ## 系统沙箱接入边界
 
@@ -268,3 +269,11 @@ Tauri 每个页面先调用 `sidecar_open_scope`，Rust 以 WebView label 维护
 日志路径、排查流程与回归证据见 [启动故障与运行日志](design/startup-diagnostics.md)。
 
 目录预热的 `ensureDirectoryPath` 使用后端 `statType`（缺失时回退完整 stat），逐路径前缀验证类型而不读取无关元数据。LLM 默认提示词在一次 SeqFile 事务中检查/补齐，已有用户值保持不变。暖启动 I/O 计数及 Linux 实际分段耗时见上述诊断文档。
+
+### 项目与统一工作台
+
+`ApplicationRuntime.projects` 提供 `ProjectService`：项目的稳定 ID、目录来源保存在 `SessionFolder.project`，导航路径用于组织项目与会话，项目重命名或分组移动不会移动实际文件。Web 首次启动创建“个人项目”，文件存放在 `/home/admin/projects/<projectId>`；Tauri 将解析后的 `homeDir` 注册为当前项目，并用同一目录创建新会话的 `/workspace`，来源遵循 `--home → mindos.json#homeDir → INIT_CWD → cwd`。
+
+新建会话先根据目标分组查找项目，再配置项目目录挂载。`Read`、`Write`、`Edit`、`Glob`、`Grep` 在 Web 使用 VFS；没有原生进程能力时不启用 `Bash`。现有会话的授权不会被重开覆盖；拿到 Session 写租约后，可将目录已匹配的旧会话归入项目，保留原授权。
+
+Web 与 Tauri 共用工作台导航、创建对话框和小屏幕列表／内容切换。项目可放入多级分组，各项目内有“会话”与“文件”；会话可继续用目录组织。旧 `projects` 路由指向工作台，桌面原有目录书签恢复到项目树。删除项目导航及会话不会递归删除其真实文件目录。
