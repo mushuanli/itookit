@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/mention/DirectoryMentionSource.ts
+ * @file app-shell/src/browser/mention/DirectoryMentionSource.ts
  */
 import { type Suggestion, type HoverPreviewData } from './autocomplete-source';
 import { BaseMentionSource, MentionSourceDependencies } from './BaseMentionSource';

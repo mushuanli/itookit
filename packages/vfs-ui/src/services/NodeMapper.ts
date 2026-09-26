@@ -22,7 +22,7 @@ export const mapFSNodeToUIItem = (
     node.icon || iconResolver?.(node.name, isDir) || (isDir ? '📁' : '📄');
 
   return {
-    id: node.path,
+    id: node.path, resource: { viewId: node.viewId ?? '', path: node.path }, kind: isDir ? 'directory' : 'file', parentId: node.parentPath,
     type: isDir ? 'directory' : 'file',
     version: '1.0',
     icon: displayIcon,

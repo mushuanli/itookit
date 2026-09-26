@@ -20,6 +20,7 @@ export abstract class BaseComponent<TState extends object> {
 
   constructor({ container, store, commandBus }: BaseComponentDeps) {
     this.container = container;
+    container.classList.add('vfs-ui');
     this.store = store;
     this.commandBus = commandBus;
   }

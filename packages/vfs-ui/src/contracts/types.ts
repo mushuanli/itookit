@@ -4,7 +4,6 @@
  *       ALL other layers depend on this file. This file depends on NOTHING internal.
  */
 import type { Heading, TaskCounts } from '@itookit/common';
-
 // --- Parsed Metadata ---
 
 export interface FileMetadata {
@@ -23,7 +22,17 @@ export interface ParseResult {
 
 // --- Core UI Data Model ---
 
+export interface NodePresentation {
+  subtitle?: string;
+  badges?: readonly string[];
+  attention?: string;
+  unread?: boolean;
+}
 export interface VFSNodeUI {
+  presentation?: NodePresentation;
+  resource?: import('./source').ResourceRef;
+  kind?: 'file' | 'directory' | 'group';
+  parentId?: string | null;
   id: string;
   type: 'file' | 'directory';
   version: string;
@@ -49,6 +58,17 @@ export interface VFSNodeUI {
 }
 
 // --- UI State & Settings ---
+
+/** Host-controlled ordering, independent of persisted user display preferences. */
+export interface VFSListSort {
+  by: 'title' | 'lastModified' | 'createdAt';
+  /** Defaults to ascending for title, descending for dates. */
+  direction?: 'asc' | 'desc';
+  directoriesFirst?: boolean;
+  pinnedFirst?: boolean;
+  /** Defaults to zh-CN; names use natural numeric ordering. */
+  locale?: string;
+}
 
 export interface UISettings {
   sortBy: 'lastModified' | 'title';
@@ -88,28 +108,6 @@ export type SearchFilter = (item: VFSNodeUI, queryTokens: string[]) => boolean;
 // --- Component Configuration ---
 
 export type { TagEditorOptions, TagEditorFactory } from '@itookit/ui-common';
-
-interface RegularMenuItem {
-  id: string;
-  label: string;
-  iconHTML?: string;
-  type?: 'item';
-  hidden?: (item: VFSNodeUI) => boolean;
-  /** Custom click handler. When provided, bypasses the command-bus dispatch. */
-  onClick?: (item: VFSNodeUI) => void;
-}
-
-interface SeparatorMenuItem {
-  type: 'separator';
-}
-
-export type MenuItem = RegularMenuItem | SeparatorMenuItem;
-
-export type ContextMenuBuilder = (
-  item: VFSNodeUI,
-  defaultItems: MenuItem[]
-) => MenuItem[];
-
-export interface ContextMenuConfig {
-  items?: ContextMenuBuilder;
-}
+export type MenuItem = import('@itookit/ui-common').MenuItem<VFSNodeUI>;
+export type ContextMenuBuilder = import('@itookit/ui-common').ContextMenuBuilder<VFSNodeUI>;
+export type ContextMenuConfig = import('@itookit/ui-common').ContextMenuConfig<VFSNodeUI>;

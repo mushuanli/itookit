@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/editors/MediaViewerEditor.ts
+ * @file app-shell/src/browser/MediaViewerEditor.ts
  *
  * 轻量多媒体查看器，实现 IEditor 接口。
  * 用于替代文本编辑器来预览图片、视频、音频、PDF 等二进制文件。

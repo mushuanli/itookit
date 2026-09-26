@@ -2,7 +2,9 @@ import { showMemoryDialog } from './files/memory-dialog';
 import { createApplicationRuntime, PrivilegedCommandService, workspaceRoot, type WorkspaceController } from '@itookit/app-core';
 import { createSessionSkillControls } from '@itookit/kernel-adapters';
 import { SessionWorkbench } from './core/SessionWorkbench';
-import { FileTypeDefinition, type VFSNodeUI } from '@itookit/vfs-ui';
+import type { VFSNodeUI } from '@itookit/vfs-ui';
+import type { EditorFileType as FileTypeDefinition } from './browser/types';
+import { connectEditorLifecycle } from './browser/editor-connector';
 import {NavigationRequest, NAVIGATION_EVENTS, formatDefaultFileTitle, traceBoot} from '@itookit/common';
 import { MenuItem } from '@itookit/ui-common';
 import { EditorFactory } from '@itookit/ui-common';
@@ -141,6 +143,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         agentService,
         llmDriver,
         options.ui.llmUiEditors,
+        (browser, fs, container, factory) => connectEditorLifecycle(browser, fs, container, factory, { readOnly: true }),
         options.ui.restoreFlowLibrary ? () => options.ui.restoreFlowLibrary!(commandBus) : undefined,
     );
     // Pass llmService only when the vision connection is actually configured —

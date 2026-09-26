@@ -2,10 +2,9 @@
  * @file vfs-ui/contracts/ports.ts
  * @desc Interfaces that decouple layers. Kept minimal — one per boundary, not per component.
  */
-import type { VFSUIState, VFSNodeUI } from './types';
+import type { VFSUIState } from './types';
 import type { CommandName, CommandPayload } from './commands';
 import type { PublicEventName, PublicEventPayload } from './events';
-import type { EditorFactory } from '@itookit/ui-common';
 
 /**
  * Port for state reads + writes (Store boundary).
@@ -24,7 +23,7 @@ export interface IStatePort {
  * Interaction layer implements this; Components layer consumes it.
  */
 export interface ICommandPort {
-  execute<T extends CommandName>(command: T, payload: CommandPayload<T>): void;
+  execute<T extends CommandName>(command: T, payload: CommandPayload<T>): void | Promise<void>;
 }
 
 /**
@@ -57,7 +56,6 @@ export interface IDataOperationPort {
  */
 export interface IFileTypePort {
   getIcon(filename: string, isDirectory?: boolean): string;
-  resolveEditorFactory(node: VFSNodeUI): EditorFactory;
   resolveContentParser(filename: string): ((content: string, ext: string) => any) | undefined;
 }
 

@@ -208,3 +208,9 @@ export const AGENT_ICON_PALETTE = [
     '🌟','⭐','🌙','☀️','🌈','🍀','🌸','🌺',
     '🦾','🦿','🕸️','🔮','💎','🏆','🎖️','🥇',
 ] as const;
+
+/** Small outline icons for the shared file toolbar. */
+export const VFS_TOOLBAR_ICONS = {
+    import: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4"/></svg>',
+    export: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M4 16v4h16v-4"/></svg>',
+} as const;

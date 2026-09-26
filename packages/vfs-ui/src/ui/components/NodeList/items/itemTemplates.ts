@@ -2,7 +2,7 @@
  * @file vfs-ui/ui/components/NodeList/items/itemTemplates.ts
  * @desc HTML templates for file and directory items.
  */
-import { Heading, escapeHTML } from '@itookit/common';
+import { Heading, escapeHTML, t } from '@itookit/common';
 import type { VFSNodeUI, UISettings } from '../../../../contracts/types';
 import { formatRelativeTime } from '../../../../utils/helpers';
 
@@ -65,11 +65,10 @@ export const createFileItemHTML = (
     searchQueries,
     uiSettings,
   } = props;
-  const { isPinned = false, hasUnreadUpdate = false, hasWaitingInput = false } = custom;
+  const { isPinned = false } = custom;
+  const { unread: hasUnreadUpdate, attention: hasWaitingInput } = file.presentation ?? {};
   const summary = content?.summary || '';
-  const connLabel = custom._extension === '.agent'
-    ? (custom.ai_connectionLabel as string | undefined)
-    : undefined;
+  const connLabel = file.presentation?.subtitle;
 
   let deleteBtnHTML = '';
   if (!isReadOnly) {
@@ -96,10 +95,8 @@ export const createFileItemHTML = (
       ? `<div class="vfs-node-item__checkbox-wrapper"><input type="checkbox" class="vfs-node-item__checkbox" data-item-id="${id}" ${isSelected ? 'checked' : ''} data-action="toggle-selection"></div>`
       : '';
 
-  const badgesHTML =
-    uiSettings.showBadges && custom.taskCount && custom.taskCount.total > 0
-      ? `<span class="vfs-badge">✅ ${custom.taskCount.completed}/${custom.taskCount.total}</span>`
-      : '';
+  const badgesHTML = uiSettings.showBadges
+    ? (file.presentation?.badges ?? []).map(label => `<span class="vfs-badge">${escapeHTML(label)}</span>`).join('') : '';
 
   const tagsHTML =
     uiSettings.showTags && tags.length > 0
@@ -120,9 +117,11 @@ export const createFileItemHTML = (
   let displayIcon = icon || '📄';
   if (isPinned) displayIcon = '📌';
 
-  const hasActions = deleteBtnHTML || outlineToggleHTML;
+  const menuHTML = custom.navigationMenu ? `<button type="button" class="vfs-node-item__action-btn" data-action="item-menu" aria-label="${escapeHTML(t('vfs.columns.more'))}">⋯</button>` : '';
+  const hasActions = deleteBtnHTML || outlineToggleHTML || menuHTML;
   const actionsHTML = hasActions
     ? `<div class="vfs-node-item__actions">
+        ${menuHTML}
         ${deleteBtnHTML}
         ${outlineToggleHTML}
       </div>`
@@ -138,7 +137,7 @@ export const createFileItemHTML = (
           <div class="vfs-node-item__body">
             <div class="vfs-node-item__row-primary">
               <span class="vfs-node-item__title">${highlight(title, searchQueries)}</span>
-              ${hasWaitingInput ? '<span class="vfs-node-item__indicator vfs-node-item__indicator--waiting" title="等待用户输入"></span>' : ''}
+              ${hasWaitingInput ? `<span class="vfs-node-item__indicator vfs-node-item__indicator--waiting" title="${escapeHTML(hasWaitingInput)}"></span>` : ''}
               ${hasUnreadUpdate && !hasWaitingInput ? '<span class="vfs-node-item__indicator"></span>' : ''}
             </div>
             ${connLabel ? `<div class="vfs-node-item__conn-label">${escapeHTML(connLabel)}</div>` : ''}
@@ -162,6 +161,9 @@ export const createFileItemHTML = (
 };
 
 export interface DirectoryItemProps {
+  isLeaf?: boolean;
+  isCard?: boolean;
+  isActive?: boolean;
   isExpanded: boolean;
   dirSelectionState: 'none' | 'partial' | 'all';
   isSelected: boolean;
@@ -194,17 +196,19 @@ export const createDirectoryItemHTML = (
     : '';
 
   return `
-    <div class="vfs-node-item vfs-directory-item" data-item-id="${id}" data-item-type="directory">
+    <div class="vfs-node-item vfs-directory-item ${props.isCard ? 'vfs-directory-item--card' : ''}" data-item-id="${id}" data-item-type="directory">
       <div class="vfs-node-item__main-row ${isSelectionMode ? 'is-selection-mode' : ''}">
         ${checkbox}
-        <div class="vfs-directory-item__header ${isSelected ? 'is-selected' : ''}" data-action="select-item">
-          <span class="vfs-directory-item__toggle ${isExpanded ? 'is-expanded' : ''}" data-action="toggle-folder"></span>
+        <div class="vfs-directory-item__header ${props.isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''}" role="button" tabindex="0" ${props.isLeaf ? `aria-pressed="${!!props.isActive}"` : `aria-expanded="${isExpanded}"`} data-action="${props.isCard ? 'toggle-folder' : 'select-item'}">
+          ${props.isLeaf ? '' : `<span class="vfs-directory-item__toggle ${isExpanded ? 'is-expanded' : ''}" data-action="toggle-folder"></span>`}
           <span class="vfs-directory-item__icon">${icon || '📁'}</span>
           <div class="vfs-directory-item__title-container">
             <span class="vfs-directory-item__title">${highlight(title, searchQueries)}</span>
+            ${typeof metadata.custom.navigationDescription === 'string' ? `<span class="vfs-directory-item__description">${escapeHTML(metadata.custom.navigationDescription)}</span>` : ''}
             ${tagsHtml}
           </div>
         </div>
+        ${metadata.custom.navigationMenu ? `<button type="button" class="vfs-directory-item__menu" data-action="item-menu" aria-label="${escapeHTML(t('vfs.columns.more'))}">⋯</button>` : ''}
       </div>
       <div class="vfs-directory-item__children" style="${isExpanded ? '' : 'display:none;'}"></div>
     </div>`;

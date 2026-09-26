@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/mention/createVFSMentionProviders.ts
+ * @file app-shell/src/browser/mention/createVFSMentionProviders.ts
  * @desc Factory for creating VFS-backed mention providers.
  *
  * System file filtering (. prefix, __ prefix, _ asset dirs) is handled

@@ -12,6 +12,7 @@ import { createItemInputHTML } from './templates';
 import { isItemReadOnly } from '../../../utils/helpers';
 
 export interface RenderContext {
+  rootPath?: string | null;
   confirmDeleteId: string | null;
   findItemById: (id: string) => VFSNodeUI | null;
 }
@@ -19,7 +20,7 @@ export interface RenderContext {
 export class NodeListRenderer {
   private itemInstances: Map<string, BaseNodeItem> = new Map();
 
-  constructor(private readonly selectionHandler: SelectionHandler) {}
+  constructor(private readonly selectionHandler: SelectionHandler, private readonly leafDirectory?: (node: VFSNodeUI) => boolean, private readonly cardDirectory?: (node: VFSNodeUI) => boolean) {}
 
   renderItems(
     container: HTMLElement,
@@ -32,7 +33,7 @@ export class NodeListRenderer {
     this.traverseAndRender(
       state.items,
       fragment,
-      null,
+      context.rootPath ?? null,
       state,
       context,
       newInstances,
@@ -105,7 +106,7 @@ export class NodeListRenderer {
       parentEl.appendChild(itemInstance.element);
       newInstances.set(item.id, itemInstance);
 
-      if (item.type === 'directory') {
+      if (item.type === 'directory' && !this.leafDirectory?.(item)) {
         const isExpanded =
           state.expandedFolderIds.has(item.id) || !!state.searchQuery;
 
@@ -148,7 +149,10 @@ export class NodeListRenderer {
     state: NodeListState
   ): DirectoryItemProps {
     return {
-      isExpanded: state.expandedFolderIds.has(item.id) || !!state.searchQuery,
+      isLeaf: this.leafDirectory?.(item),
+      isCard: this.cardDirectory?.(item),
+      isActive: item.id === state.activeId,
+      isExpanded: !this.leafDirectory?.(item) && (state.expandedFolderIds.has(item.id) || !!state.searchQuery),
       dirSelectionState: this.selectionHandler.getFolderSelectionState(
         item,
         state.selectedItemIds

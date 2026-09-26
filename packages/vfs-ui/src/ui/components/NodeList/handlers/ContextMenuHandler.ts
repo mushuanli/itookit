@@ -1,3 +1,4 @@
+import { ActionRunner } from '../../../../interaction/ActionRunner';
 /**
  * @file vfs-ui/ui/components/NodeList/handlers/ContextMenuHandler.ts
  * @desc Context menu display and action dispatch via ICommandPort.
@@ -27,7 +28,7 @@ export interface ContextMenuCallbacks {
 
 export class ContextMenuHandler {
   private menuEl: HTMLElement | null = null;
-  private activeOnClickMap = new Map<string, (item: VFSNodeUI) => void>();
+
 
   constructor(
     private readonly store: IStatePort,
@@ -36,6 +37,7 @@ export class ContextMenuHandler {
     private readonly callbacks: ContextMenuCallbacks,
     private readonly createFileLabel: string = 'File',
     private readonly tagsEnabled: boolean = true,
+    private readonly runner: ActionRunner = new ActionRunner(),
   ) {}
 
   show(event: MouseEvent, itemEl: HTMLElement): void {
@@ -53,6 +55,11 @@ export class ContextMenuHandler {
 
     if (selectedItemIds.size > 1 && isTargetSelected) {
       menuItems = this.getBulkContextMenuItems(selectedItemIds.size);
+      const selected = [...selectedItemIds].map(id => this.callbacks.findItemById(id)).filter((item): item is VFSNodeUI => !!item);
+      if (this.contextMenuConfig?.bulkItems) {
+        contextItem = selected[0] ?? null;
+        menuItems = this.contextMenuConfig.bulkItems(selected, menuItems);
+      }
     } else {
       if (!isTargetSelected) {
         this.commandBus.execute('selection:update', {
@@ -74,8 +81,29 @@ export class ContextMenuHandler {
     if (this.menuEl) {
       this.menuEl.remove();
       this.menuEl = null;
-      this.activeOnClickMap.clear();
+
     }
+  }
+
+  private actions(item: VFSNodeUI | null): MenuItem[] {
+    if (item) return this.buildContextMenuItems(item);
+    const ids = [...this.store.getState().selectedItemIds];
+    const selected = ids.map(id => this.callbacks.findItemById(id)).filter((node): node is VFSNodeUI => !!node);
+    const defaults = this.getBulkContextMenuItems(selected.length);
+    return this.contextMenuConfig?.bulkItems?.(selected, defaults) ?? defaults;
+  }
+  allows(action: string, item: VFSNodeUI | null = null): boolean {
+    return this.actions(item).some(entry => entry.type !== 'separator' && entry.id === action && !entry.disabled);
+  }
+  run(action: string, item: VFSNodeUI | null = null, position = { x: 0, y: 0 }): Promise<void> {
+    const entry = this.actions(item).find(entry => entry.type !== 'separator' && entry.id === action && !entry.disabled);
+    if (!entry || entry.type === 'separator' || entry.disabled) return Promise.resolve();
+    const target = item ?? this.callbacks.findItemById([...this.store.getState().selectedItemIds][0]);
+    return this.runner.run(action.replace(/^bulk-/, ''), async () => {
+      if (!this.allows(action, item)) return;
+      if (entry.onClick && target) await entry.onClick(target);
+      else await this.handleAction(action, item, position);
+    });
   }
 
   private createMenu(
@@ -84,16 +112,10 @@ export class ContextMenuHandler {
     y: number,
     contextItem: VFSNodeUI | null
   ): void {
-    this.activeOnClickMap.clear();
-    for (const item of items) {
-      if (item.type !== 'separator' && item.onClick) {
-        this.activeOnClickMap.set(item.id, item.onClick);
-      }
-    }
-
     const container = document.createElement('div');
     container.innerHTML = createContextMenuHTML(items);
     this.menuEl = container.firstElementChild as HTMLElement;
+    this.menuEl.classList.add('vfs-ui');
     this.menuEl.style.top = `${y}px`;
     this.menuEl.style.left = `${x}px`;
 
@@ -101,12 +123,15 @@ export class ContextMenuHandler {
       const actionEl = (e.target as Element).closest<HTMLButtonElement>(
         'button[data-action]'
       );
-      if (!actionEl) return;
-      await this.handleAction(actionEl.dataset.action!, contextItem, { x, y });
+      if (!actionEl || actionEl.disabled) return;
+      await this.run(actionEl.dataset.action!, this.store.getState().selectedItemIds.size > 1 ? null : contextItem, { x, y }).catch(() => {});
       this.hide();
     });
 
     document.body.appendChild(this.menuEl);
+    const bounds = this.menuEl.getBoundingClientRect();
+    this.menuEl.style.left = `${Math.max(8, Math.min(x, window.innerWidth - bounds.width - 8))}px`;
+    this.menuEl.style.top = `${Math.max(8, Math.min(y, window.innerHeight - bounds.height - 8))}px`;
   }
 
   private async handleAction(
@@ -114,25 +139,18 @@ export class ContextMenuHandler {
     contextItem: VFSNodeUI | null,
     position: { x: number; y: number }
   ): Promise<void> {
-    // Custom onClick handler takes priority
-    const onClickHandler = this.activeOnClickMap.get(action);
-    if (onClickHandler && contextItem) {
-      onClickHandler(contextItem);
-      return;
-    }
-
     const state = this.store.getState();
 
     // Bulk actions
     if (action === 'bulk-delete') {
-      this.commandBus.execute('bulk:delete', {
+      await this.commandBus.execute('bulk:delete', {
         itemIds: [...state.selectedItemIds],
       });
       return;
     }
 
     if (action === 'bulk-export') {
-      this.commandBus.execute('file:export', {
+      await this.commandBus.execute('file:export', {
         itemIds: [...state.selectedItemIds],
       });
       return;
@@ -205,27 +223,27 @@ export class ContextMenuHandler {
       } else if (action === 'moveTo') {
         this.commandBus.execute('move:start', { itemIds: [contextItem.id] });
       } else if (action === 'export') {
-        this.commandBus.execute('file:export', { itemIds: [contextItem.id] });
+        await this.commandBus.execute('file:export', { itemIds: [contextItem.id] });
       } else if (action === 'rename') {
         const currentTitle = contextItem.metadata.title || '';
         // Tauri v2 replaces window.prompt() with a Promise-based dialog.
         let newTitle: string | null | Promise<string | null> = prompt('输入新名称:', currentTitle);
         newTitle = await Promise.resolve(newTitle);
         if (newTitle?.trim() && newTitle.trim() !== currentTitle) {
-          this.commandBus.execute('file:rename', {
+          await this.commandBus.execute('file:rename', {
             itemId: contextItem.id,
             newTitle: newTitle.trim(),
           });
         }
       } else if (action === 'duplicate') {
-        this.commandBus.execute('file:duplicate', { itemId: contextItem.id });
+        await this.commandBus.execute('file:duplicate', { itemId: contextItem.id });
       } else if (action === 'delete') {
         const title = contextItem.metadata.title || 'this item';
         // Tauri v2 replaces window.confirm() with a Promise-based dialog.
         let result: boolean | Promise<boolean> = confirm(`确定删除 "${title}"?`);
         result = await Promise.resolve(result);
         if (result) {
-          this.commandBus.execute('file:delete', { itemIds: [contextItem.id] });
+          await this.commandBus.execute('file:delete', { itemIds: [contextItem.id] });
         }
       }
     } else {
@@ -238,6 +256,7 @@ export class ContextMenuHandler {
   }
 
   private getDefaultContextMenuItems(item: VFSNodeUI): MenuItem[] {
+    if (item.kind === 'group') return [];
     const items: MenuItem[] = [];
     const label = this.createFileLabel;
 
@@ -339,6 +358,7 @@ export class ContextMenuHandler {
           });
       } catch (e) {
         console.error('Error executing custom contextMenu.items:', e);
+        return [];
       }
     }
 

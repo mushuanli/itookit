@@ -10,19 +10,17 @@ type Handler<T extends CommandName> = (payload: CommandPayload<T>) => void | Pro
 export class CommandBus implements ICommandPort {
   private handlers = new Map<string, Set<Handler<any>>>();
 
-  execute<T extends CommandName>(command: T, payload: CommandPayload<T>): void {
+  execute<T extends CommandName>(command: T, payload: CommandPayload<T>): Promise<void> {
     const handlers = this.handlers.get(command);
-    if (!handlers?.size) {
-      console.warn(`[CommandBus] No handler for: ${command}`);
-      return;
+    if (!handlers?.size) return Promise.resolve();
+    const tasks: Promise<void>[] = [];
+    for (const handler of handlers) {
+      try { tasks.push(Promise.resolve(handler(payload))); }
+      catch (error) { tasks.push(Promise.reject(error)); }
     }
-    handlers.forEach(h => {
-      try {
-        h(payload);
-      } catch (e) {
-        console.error(`[CommandBus] Error in handler for ${command}:`, e);
-      }
-    });
+    const work = Promise.all(tasks).then(() => {});
+    void work.catch(error => console.error(`[CommandBus] ${command} failed`, error));
+    return work;
   }
 
   on<T extends CommandName>(

@@ -8,7 +8,7 @@ import type { IStatePort } from '../../contracts/ports';
 import type { VFSService } from '../../services/VFSService';
 import { deserialize, decodeContent } from '@itookit/vfs-core';
 import type { VFSExportManifest, VFSExportAsset } from '@itookit/vfs-core';
-import type { FileCreationConfig } from '@itookit/ui-common';
+import type { FileCreationConfig } from '../../contracts/options';
 import { resolveWritableParent } from '../../utils/creation-guard';
 
 export class ImportCommandHandler {

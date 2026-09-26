@@ -7,10 +7,11 @@ interface IRegularMenuItem<TItem extends object = Record<string, unknown>> {
     id: string;
     label: string;
     iconHTML?: string;
+    disabled?: boolean;
     type?: 'item'; // 'type' 是可辨识的属性
     hidden?: (item: TItem) => boolean;
     /** Custom click handler. When provided, bypasses the command-bus dispatch. */
-    onClick?: (item: TItem) => void;
+    onClick?: (item: TItem) => void | Promise<void>;
 }
 
 // 定义一个分割线
@@ -30,6 +31,7 @@ export type ContextMenuBuilder<TItem extends object = Record<string, unknown>> =
 
 export interface ContextMenuConfig<TItem extends object = Record<string, unknown>> {
     items?: ContextMenuBuilder<TItem>;
+    bulkItems?: (items: TItem[], defaults: MenuItem<TItem>[]) => MenuItem<TItem>[];
 }
 
 export interface TagEditorOptions {
@@ -49,7 +51,7 @@ export type TagEditorFactory = (
 
 /**
  * Options controlling new-file creation behaviour.
- * Grouped to keep SessionUIOptions focused on session-level concerns.
+ * Grouped to keep ResourceListOptions focused on list-level concerns.
  */
 export interface FileCreationConfig {
     /** Map a selected virtual container to a valid creation parent (also for directories). */
@@ -72,7 +74,7 @@ export interface FileCreationConfig {
     instant?: boolean;
 }
 
-export interface SessionUIOptions<TItem extends object = Record<string, unknown>> {
+export interface ResourceListOptions<TItem extends object = Record<string, unknown>> {
     sessionListContainer: HTMLElement;
     documentOutlineContainer?: HTMLElement;
     initialState?: object;
@@ -93,6 +95,9 @@ export interface SessionUIOptions<TItem extends object = Record<string, unknown>
         tagEditor?: TagEditorFactory;
     };
 }
+
+/** Compatibility name for existing session hosts; the contract is resource-neutral. */
+export type SessionUIOptions<TItem extends object = Record<string, unknown>> = ResourceListOptions<TItem>;
 
 export interface SessionUIEventMap<TSession extends object> {
     sessionSelected: { item: TSession | undefined };

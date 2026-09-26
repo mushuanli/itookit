@@ -11,7 +11,8 @@ export class SettingsPopover {
 
   constructor(
     private readonly commandBus: ICommandPort,
-    private readonly containerEl: HTMLElement
+    private readonly containerEl: HTMLElement,
+    private readonly fixedSort = false
   ) { }
 
   toggle(currentSettings: UISettings): void {
@@ -26,7 +27,7 @@ export class SettingsPopover {
     if (this.element) return;
 
     const container = document.createElement('div');
-    container.innerHTML = createSettingsPopoverHTML(currentSettings);
+    container.innerHTML = createSettingsPopoverHTML(currentSettings, !this.fixedSort);
     this.element = container.firstElementChild as HTMLElement;
 
     this.element.addEventListener('click', this.handleChange);
@@ -75,7 +76,7 @@ export class SettingsPopover {
       const currentSettings = this.getCurrentSettingsFromUI();
       const updatedSettings = { ...currentSettings, ...newSettings };
       const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = createSettingsPopoverHTML(updatedSettings);
+      tempDiv.innerHTML = createSettingsPopoverHTML(updatedSettings, !this.fixedSort);
       const newContent = tempDiv.firstElementChild as HTMLElement;
       this.element.innerHTML = newContent.innerHTML;
     }

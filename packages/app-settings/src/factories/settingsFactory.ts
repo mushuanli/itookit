@@ -14,7 +14,7 @@ import { StorageSettingsEditor } from '../editors/StorageSettingsEditor';
 import { AboutSettingsEditor } from '../editors/AboutSettingsEditor';
 import { RecoverySettingsEditor } from '../editors/RecoverySettingsEditor';
 import { LogSettingsEditor } from '../editors/LogSettingsEditor';
-import { SystemFSExploreEditor } from '../editors/SystemFSExploreEditor';
+import { SystemFSExploreEditor, type FileBrowserConnector } from '../editors/SystemFSExploreEditor';
 import { AppearanceSettingsEditor } from '../editors/AppearanceSettingsEditor';
 
 /** Injected UI editors from @itookit/llm-ui (to avoid upward dependency). */
@@ -48,6 +48,7 @@ export const createSettingsFactory = (
     connectionService: IConnectionService,
     /** 由调用方 (app-shell) 注入，避免 app-settings 上行依赖 llm-ui */
     llmUiEditors: LLMUIEditors,
+    connectBrowser: FileBrowserConnector,
     restoreFlows?: () => Promise<number>,
 ): EditorFactory => {
     return async (container: HTMLElement, options: EditorOptions) => {
@@ -68,7 +69,7 @@ export const createSettingsFactory = (
             case 'recovery':    editor = new RecoverySettingsEditor(container, agentService, options, restoreFlows); break;
             case 'log':         editor = new LogSettingsEditor(container, settingsService, options); break;
             case 'about':       editor = new AboutSettingsEditor(container, settingsService, options); break;
-            case 'fs-explorer': editor = new SystemFSExploreEditor(container, settingsService, options); break;
+            case 'fs-explorer': editor = new SystemFSExploreEditor(container, settingsService, options, connectBrowser); break;
             case 'appearance':  editor = new AppearanceSettingsEditor(container, settingsService, options); break;
             default:
                 container.innerHTML = `<div style="padding:2rem;text-align:center;color:#666">Select a setting category</div>`;

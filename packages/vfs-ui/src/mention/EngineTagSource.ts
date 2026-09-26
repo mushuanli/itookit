@@ -2,7 +2,7 @@
  * @file vfs-ui/mention/EngineTagSource.ts
  * @desc A generic tag autocomplete source that works with any IFSEngine.
  */
-import { IAutocompleteSource, type Suggestion } from './autocomplete-source';
+import type { Suggestion } from '@itookit/ui-common';
 import type { IFileSystem } from '@itookit/vfs-core';
 
 interface TagData {
@@ -11,9 +11,9 @@ interface TagData {
     refCount?: number;
 }
 
-export class EngineTagSource extends IAutocompleteSource {
+export class EngineTagSource {
     constructor(private engine: IFileSystem) {
-        super();
+
     }
 
     async getSuggestions(query: string): Promise<Suggestion[]> {

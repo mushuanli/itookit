@@ -1,13 +1,17 @@
+import { decorateFileNodes } from '../browser/presentation';
+import { connectEditorLifecycle } from '../browser/editor-connector';
+import { resolveFileEditor } from '../browser/types';
+import { createVFSMentionProviders } from '../browser/mention/createVFSMentionProviders';
 /**
  * @file app-shell/core/Workbench.ts
  *
  * 工作区装配器 — 粘合 VFS-UI (侧边栏) + Editor (编辑器)。
  * 不创建 DOM，不拥有布局。消费方负责创建 sidebar/editor 容器并传入。
  */
-import { createVFSUI, connectEditorLifecycle, VFSUIShell, createVFSMentionProviders } from '@itookit/vfs-ui';
+import { createVFSUI, VFSUIShell } from '@itookit/vfs-ui';
 import { defaultEditorFactory, MentionPlugin } from '@itookit/mdxeditor';
 import type { WorkbenchConfig } from '../types';
-import {NavigationRequest} from '@itookit/common';
+import { t, NavigationRequest} from '@itookit/common';
 import { EditorOptions, IEditor, EditorHostContext } from '@itookit/ui-common';
 import type { IFileSystem } from '@itookit/vfs-core';
 
@@ -36,9 +40,8 @@ export class Workbench {
                     startupFileName: config.uiOptions?.fileCreation?.startupFileName ?? config.defaultContentConfig?.fileName,
                     startupContent:  config.uiOptions?.fileCreation?.startupContent  ?? config.defaultContentConfig?.content,
                 },
-                defaultEditorFactory: this.enhancedEditorFactory,
                 fileTypes: config.fileTypes,
-                customEditorResolver: config.customEditorResolver,
+                listItems: items => decorateFileNodes(config.uiOptions?.listItems?.(items) ?? items),
                 showFileExtensions: config.showFileExtensions,
             },
             this.engine
@@ -66,6 +69,7 @@ export class Workbench {
             config.editorContainer,
             this.enhancedEditorFactory,
             {
+                resolveEditor: resolveFileEditor(config.fileTypes, config.customEditorResolver),
                 hostContext: sharedHostContext,
                 files: config.files,
                 ...config.editorConfig
@@ -187,14 +191,11 @@ export class Workbench {
     }
 
     private async openFileInternal(nodeId: string): Promise<void> {
-        await this.vfsUI.store.dispatch({
-            type: 'SESSION_SELECT',
-            payload: { sessionId: nodeId }
-        });
+        await this.vfsUI.selectPath(nodeId);
     }
 
     public setNodeWaitingInput(nodeId: string, waiting: boolean): void {
-        this.vfsUI.setNodeWaitingInput(nodeId, waiting);
+        this.vfsUI.setNodeAttention(nodeId, waiting ? t('project.waitingInput') : undefined);
     }
 
     /** @deprecated This is a file path, not a durable Session ID. */

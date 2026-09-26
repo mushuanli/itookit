@@ -1,3 +1,6 @@
+import { ActionRunner } from '../../../interaction/ActionRunner';
+import type { VFSListSort } from '../../../contracts/types';
+import { toolbarHTML, type VFSToolbarOptions, type VFSToolbarAction } from './toolbar';
 /**
  * @file vfs-ui/ui/components/NodeList/NodeList.ts
  * @desc Main file list component. Orchestrates handlers and rendering.
@@ -5,8 +8,8 @@
  */
 import { BaseComponent, BaseComponentDeps } from '../../core/BaseComponent';
 import type { VFSNodeUI, VFSUIState, SearchFilter } from '../../../contracts/types';
-import type { FileCreationConfig } from '@itookit/ui-common';
-import { debounce, escapeHTML, ACTION_ICONS } from '@itookit/common';
+import type { FileCreationConfig } from '../../../contracts/options';
+import { debounce, escapeHTML, t } from '@itookit/common';
 
 import { NodeListStateTransformer, NodeListState } from './NodeListState';
 import { SelectionHandler } from './handlers/SelectionHandler';
@@ -21,6 +24,13 @@ import { EngineTagSource } from '../../../mention/EngineTagSource';
 import { TagEditorComponent } from '../TagEditor/TagEditorComponent';
 
 interface NodeListOptions extends BaseComponentDeps {
+  listItems?: (items: VFSNodeUI[]) => VFSNodeUI[];
+  listHeader?: HTMLElement;
+  rootPath?: () => string | null;
+  cardDirectory?: (node: VFSNodeUI) => boolean;
+  leafDirectory?: (node: VFSNodeUI) => boolean;
+  toolbar?: 'full' | 'compact' | 'hidden';
+  toolbarOptions?: VFSToolbarOptions;
   contextMenu?: any;
   tagEditorFactory?: any;
   searchPlaceholder?: string;
@@ -28,7 +38,10 @@ interface NodeListOptions extends BaseComponentDeps {
   fileCreation?: FileCreationConfig;
   searchFilter?: SearchFilter;
   compareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined;
+  /** Fixed sorting overrides saved preferences; compareItems can override individual pairs. */
+  sort?: VFSListSort;
   instanceId: string;
+  onError?: (error: unknown) => void;
   engine?: any;
   directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
   activateDirectories?: boolean;
@@ -37,6 +50,7 @@ interface NodeListOptions extends BaseComponentDeps {
 }
 
 export class NodeList extends BaseComponent<NodeListState> {
+  private readonly actions: ActionRunner;
   private readonly stateTransformer: NodeListStateTransformer;
   private readonly selectionHandler: SelectionHandler;
   private readonly dragDropHandler: DragDropHandler;
@@ -54,6 +68,11 @@ export class NodeList extends BaseComponent<NodeListState> {
   private readonly footer: Footer;
   private readonly renderer: NodeListRenderer;
 
+  private readonly listItems?: NodeListOptions['listItems'];
+  private readonly rootPath?: () => string | null;
+  private readonly toolbar: NodeListOptions['toolbar'];
+  private toolbarOptions: VFSToolbarOptions;
+  private readonly cardDirectory?: (node: VFSNodeUI) => boolean;
   private readonly fileCreation?: FileCreationConfig;
   private readonly directoryAction?: NodeListOptions['directoryAction'];
   private readonly activateDirectories: boolean;
@@ -61,13 +80,16 @@ export class NodeList extends BaseComponent<NodeListState> {
 
   constructor(options: NodeListOptions) {
     super(options);
-    this.fileCreation = options.fileCreation;
+    this.actions = new ActionRunner(options.onError);
+    this.listItems = options.listItems;
+    this.fileCreation = options.fileCreation; this.toolbarOptions = options.toolbarOptions ?? {}; this.cardDirectory = options.cardDirectory;
+    this.rootPath = options.rootPath; this.toolbar = options.toolbar;
     this.directoryAction = options.directoryAction;
     this.activateDirectories = options.activateDirectories ?? false;
     this.exportDirectories = options.exportDirectories ?? false;
 
     this.stateTransformer = new NodeListStateTransformer(
-      options.searchFilter, options.compareItems
+      options.searchFilter, options.compareItems, options.sort
     );
 
     this.buildInitialHTML(options);
@@ -89,18 +111,30 @@ export class NodeList extends BaseComponent<NodeListState> {
     this.titleEl = this.container.querySelector('[data-ref="title"]')!;
     this.newControlsEl = this.container.querySelector('[data-ref="new-controls"]')!;
     this.footerEl = this.container.querySelector('.vfs-node-list__footer')!;
+    if (options.toolbar === 'compact') this.installCompactToolbar();
+    this.setToolbarOptions(this.toolbarOptions);
+    if (options.listHeader) this.newControlsEl.after(options.listHeader);
 
     this.selectionHandler = new SelectionHandler(this.commandBus);
 
+    const mutations = { execute: (command: any, payload: any) => {
+      if (command === 'file:delete') return this.contextMenuHandler.run('delete', this.findItemById(payload.itemIds[0]));
+      if (command === 'file:move') {
+        if (this.findItemById(payload.targetId)?.kind === 'group' || options.sort && payload.position !== 'into') return;
+        if (!payload.itemIds.every((id: string) => { const item = this.findItemById(id); return item && this.contextMenuHandler.allows('moveTo', item); })) return;
+        return this.actions.run('move', async () => { await this.commandBus.execute(command, payload); });
+      }
+      return this.commandBus.execute(command, payload);
+    } };
     this.dragDropHandler = new DragDropHandler(
       options.instanceId,
-      this.commandBus,
+      mutations,
       this.bodyEl,
       () => this.state.expandedFolderIds,
       () => this.state.selectedItemIds
     );
 
-    this.itemActionHandler = new ItemActionHandler(this.commandBus);
+    this.itemActionHandler = new ItemActionHandler(mutations);
 
     const tagProvider = options.engine
       ? new EngineTagSource(options.engine)
@@ -131,9 +165,10 @@ export class NodeList extends BaseComponent<NodeListState> {
       },
       this.fileCreation?.label ?? 'File',
       options.engine?.capabilities.tags !== false,
+      this.actions,
     );
 
-    this.settingsPopover = new SettingsPopover(this.commandBus, this.mainContainerEl);
+    this.settingsPopover = new SettingsPopover(this.commandBus, this.mainContainerEl, !!options.sort);
 
     this.footer = new Footer(this.footerEl, {
       onSelectAllToggle: () =>
@@ -142,40 +177,60 @@ export class NodeList extends BaseComponent<NodeListState> {
           this.state.visibleItemIds
         ),
       onDeselectAll: () => this.selectionHandler.clearSelection(),
-      onBulkDelete: () =>
-        this.commandBus.execute('bulk:delete', {
-          itemIds: [...this.state.selectedItemIds],
-        }),
-      onBulkMove: () =>
-        this.commandBus.execute('move:start', {
-          itemIds: [...this.state.selectedItemIds],
-        }),
+      onBulkDelete: () => { void this.contextMenuHandler.run('bulk-delete'); },
+      onBulkMove: () => { void this.contextMenuHandler.run('bulk-move'); },
       onSettingsClick: () =>
         this.settingsPopover.toggle(this.state.uiSettings),
     });
 
-    this.renderer = new NodeListRenderer(this.selectionHandler);
+    this.renderer = new NodeListRenderer(this.selectionHandler, options.leafDirectory, options.cardDirectory);
 
     if (options.title) this.setTitle(options.title);
   }
+
+  private installCompactToolbar(): void {
+    const menu = document.createElement('details'); menu.className = 'vfs-node-list__menu';
+    const summary = document.createElement('summary'); summary.textContent = '⋯';
+    summary.setAttribute('aria-label', t('vfs.columns.more')); summary.title = t('vfs.columns.more');
+    menu.append(summary, this.newControlsEl);
+    this.container.querySelector('.vfs-node-list__title-bar')!.append(menu);
+    for (const button of this.newControlsEl.querySelectorAll<HTMLButtonElement>('button')) button.textContent = button.title;
+    this.newControlsEl.addEventListener('click', () => { menu.open = false; });
+    menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; summary.focus(); } });
+  }
+
+  setToolbarOptions(options: VFSToolbarOptions): void {
+    this.toolbarOptions = options;
+    this.newControlsEl.classList.toggle('vfs-node-list__new-controls--single-create', !!options.hiddenActions?.includes('create-directory'));
+    this.newControlsEl.classList.toggle('vfs-node-list__new-controls--transfer-only', !!options.hiddenActions?.includes('create-file') && !!options.hiddenActions?.includes('create-directory'));
+    this.newControlsEl.innerHTML = toolbarHTML(options, this.fileCreation?.label ?? t('vfs.toolbar.file'));
+    this.container.querySelector('.vfs-node-list__secondary-action')?.remove();
+    if (options.secondary) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'vfs-node-list__secondary-action';
+      button.textContent = options.secondary.label; button.onclick = options.secondary.run;
+      this.container.querySelector('.vfs-node-list__title-bar')?.append(button);
+    }
+  }
+
+  refreshView(): void { this.state = this.transformState(this.store.getState()); this.render(); }
 
   public setTitle(newTitle: string): void {
     if (this.titleEl) this.titleEl.textContent = newTitle;
   }
 
   protected transformState(globalState: VFSUIState): NodeListState {
-    return this.stateTransformer.transform(globalState);
+    const state = this.stateTransformer.transform(this.listItems ? { ...globalState, items: this.listItems(globalState.items) } : globalState);
+    if (!this.listItems) return state;
+    const included = new Set<string>();
+    const collect = (items: VFSNodeUI[]): void => { for (const item of items) { included.add(item.id); collect(item.children ?? []); } };
+    collect(state.items);
+    return { ...state, selectedItemIds: new Set([...state.selectedItemIds].filter(id => included.has(id))),
+      activeId: state.activeId && included.has(state.activeId) ? state.activeId : null };
   }
 
   protected bindEvents(): void {
-    this.searchEl.addEventListener(
-      'input',
-      debounce((e: Event) => {
-        this.commandBus.execute('ui:updateSearch', {
-          query: (e.target as HTMLInputElement).value,
-        });
-      }, 300)
-    );
+    const search = debounce((query: string) => this.commandBus.execute('ui:updateSearch', { query }), 300);
+    this.searchEl.addEventListener('input', () => search(this.searchEl.value));
 
     this.newControlsEl.addEventListener('click', this.handleNewControlsClick);
     document.addEventListener('click', this.handleGlobalClick, true);
@@ -198,25 +253,34 @@ export class NodeList extends BaseComponent<NodeListState> {
   private handleNewControlsClick = (event: MouseEvent): void => {
     const target = event.target as Element;
     const actionEl = target.closest<HTMLElement>('[data-action]');
-    if (!actionEl) return;
+    if (!actionEl || (actionEl as HTMLButtonElement).disabled) return;
 
-    const action = actionEl.dataset.action;
+    const action = actionEl.dataset.action as VFSToolbarAction;
     const parentPath = this.itemActionHandler.getTargetParentId(
       this.state.selectedItemIds,
       id => this.findItemById(id)
     );
 
+    const selectedIds = this.state.selectedItemIds.size ? [...this.state.selectedItemIds] : this.state.activeId ? [this.state.activeId] : [];
+    const custom = this.toolbarOptions.actions?.[action];
+    if (custom) {
+      const button = actionEl as HTMLButtonElement; button.disabled = true;
+      void this.actions.run(action, () => custom({ selectedIds, activeId: this.state.activeId, parentPath: parentPath ?? this.rootPath?.() ?? null }))
+        .catch(() => {}).finally(() => { button.disabled = false; });
+      return;
+    }
+
     if (action === 'import') {
       this.commandBus.execute('file:import', { parentPath });
     } else if (action === 'export') {
-      const selectedFileIds = [...this.state.selectedItemIds].filter(id => {
+      const selectedFileIds = selectedIds.filter(id => {
         const item = this.findItemById(id);
         return item?.type === 'file' || (this.exportDirectories && item?.type === 'directory');
       });
       if (selectedFileIds.length) {
         this.commandBus.execute('file:export', { itemIds: selectedFileIds });
       } else {
-        alert('请先选择要导出的文件');
+        alert(t('vfs.toolbar.selectExport'));
       }
     } else if (action === 'create-file' || action === 'create-directory') {
       const type = action.split('-')[1] as 'file' | 'directory';
@@ -248,8 +312,18 @@ export class NodeList extends BaseComponent<NodeListState> {
       return;
     }
 
+    const menuButton = target.closest('[data-action="item-menu"]');
+    if (menuButton) {
+      event.preventDefault(); event.stopPropagation();
+      const rect = menuButton.getBoundingClientRect();
+      this.contextMenuHandler.show(new MouseEvent('contextmenu', { clientX: rect.left, clientY: rect.bottom }), itemEl); return;
+    }
     const itemId = itemEl.dataset.itemId!;
     const itemType = itemEl.dataset.itemType;
+
+    const node = this.findItemById(itemId);
+    if (node && this.cardDirectory?.(node) && target.closest('[data-action="toggle-folder"]'))
+      this.selectionHandler.handleItemSelection(itemId, event, this.state.visibleItemIds, this.state.readOnly);
 
     const result = this.itemActionHandler.handleItemClick(
       event,
@@ -294,6 +368,9 @@ export class NodeList extends BaseComponent<NodeListState> {
 
   private handleKeyDown = (event: KeyboardEvent): void => {
     const target = event.target as HTMLElement;
+    if (target.classList.contains('vfs-directory-item__header') && ['Enter', ' '].includes(event.key)) {
+      event.preventDefault(); target.click(); return;
+    }
     if (target.dataset.action === 'create-input') {
       if (event.key === 'Enter') {
         event.preventDefault();
@@ -313,6 +390,8 @@ export class NodeList extends BaseComponent<NodeListState> {
 
   private handleGlobalClick = (event: MouseEvent): void => {
     const target = event.target as Element;
+    const menu = this.container.querySelector<HTMLDetailsElement>('.vfs-node-list__menu');
+    if (menu?.open && !menu.contains(target)) menu.open = false;
 
     if (
       this.settingsPopover.isVisible() &&
@@ -374,12 +453,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         <div class="vfs-node-list__header">
           <input type="search" class="vfs-node-list__search" placeholder="${escapeHTML(searchPlaceholder)}" />
           <div class="vfs-node-list__new-controls" data-ref="new-controls">
-            <button class="vfs-node-list__new-btn" data-action="create-file" title="新建 ${escapeHTML(this.fileCreation?.label ?? 'File')}">
-              <span>+</span><span class="btn-label">${escapeHTML(this.fileCreation?.label ?? 'File')}</span>
-            </button>
-            <button class="vfs-node-list__new-btn vfs-node-list__new-btn--folder" data-action="create-directory" title="新建目录"><span>📁+</span></button>
-            <button class="vfs-node-list__new-btn vfs-node-list__new-btn--icon" data-action="import" title="导入文件"><span>${ACTION_ICONS.import}</span></button>
-            <button class="vfs-node-list__new-btn vfs-node-list__new-btn--icon" data-action="export" title="导出文件"><span>${ACTION_ICONS.export}</span></button>
+            ${toolbarHTML(this.toolbarOptions, this.fileCreation?.label ?? t('vfs.toolbar.file'))}
           </div>
         </div>
         <div class="vfs-node-list__body"></div>
@@ -397,11 +471,13 @@ export class NodeList extends BaseComponent<NodeListState> {
     const isBulkMode = !this.state.readOnly && this.state.selectedItemIds.size > 1;
     this.mainContainerEl.classList.toggle('vfs-node-list--bulk-mode', isBulkMode);
 
-    this.newControlsEl.style.display = this.state.readOnly ? 'none' : '';
+    this.newControlsEl.style.display = this.state.readOnly || this.toolbar === 'hidden' ? 'none' : '';
+    if (this.searchEl.value !== this.state.searchQuery) this.searchEl.value = this.state.searchQuery;
     const shouldShowFooter = !this.state.readOnly && this.state.selectedItemIds.size > 1;
     this.footerEl.style.display = shouldShowFooter ? '' : 'none';
 
     this.footer.render({
+      canDelete: this.contextMenuHandler.allows('bulk-delete'), canMove: this.contextMenuHandler.allows('bulk-move'),
       selectionStatus: this.state.selectionStatus,
       selectedCount: this.state.selectedItemIds.size,
       isReadOnly: this.state.readOnly,
@@ -409,6 +485,8 @@ export class NodeList extends BaseComponent<NodeListState> {
 
     // renderItems rebuilds the DOM; keep the scroll position so a background
     // refresh does not visibly jump the list.
+    const focused = this.bodyEl.contains(document.activeElement) && document.activeElement?.classList.contains('vfs-directory-item__header')
+      ? document.activeElement.closest<HTMLElement>('[data-item-id]')?.dataset.itemId : undefined;
     const scrollTop = this.bodyEl.scrollTop;
     if (this.state.status === 'loading') {
       this.bodyEl.innerHTML = '<div class="vfs-node-list__placeholder">正在加载...</div>';
@@ -416,11 +494,15 @@ export class NodeList extends BaseComponent<NodeListState> {
       this.bodyEl.innerHTML = '<div class="vfs-node-list__placeholder">加载失败！</div>';
     } else {
       this.renderer.renderItems(this.bodyEl, this.state, {
+        rootPath: this.rootPath?.() ?? null,
         confirmDeleteId: this.itemActionHandler.getConfirmDeleteId(),
         findItemById: id => this.findItemById(id),
       });
     }
     if (scrollTop) this.bodyEl.scrollTop = scrollTop;
+    if (focused) for (const row of this.bodyEl.querySelectorAll<HTMLElement>('[data-item-id]')) {
+      if (row.dataset.itemId === focused) row.querySelector<HTMLElement>('.vfs-directory-item__header')?.focus({ preventScroll: true });
+    }
 
     if (this.directoryAction) {
       const action = this.directoryAction;
@@ -431,7 +513,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         button.onclick = event => { event.stopPropagation(); button.disabled = true;
           void action.run(path).catch(error => { console.error('Directory action failed', error); })
             .finally(() => { button.disabled = false; }); };
-        row.querySelector(':scope > .vfs-node-item__main-row')?.append(button);
+        row.querySelector(row.classList.contains('vfs-directory-item--card') ? ':scope > .vfs-directory-item__children' : ':scope > .vfs-node-item__main-row')?.append(button);
       }
     }
     const creatorInput = this.bodyEl.querySelector<HTMLInputElement>(
@@ -447,6 +529,7 @@ export class NodeList extends BaseComponent<NodeListState> {
   }
 
   public destroy(): void {
+    this.actions.destroy();
     super.destroy();
     document.removeEventListener('click', this.handleGlobalClick, true);
     this.dragDropHandler.destroy();

@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/utils/parser.ts
+ * @file app-shell/src/browser/parser.ts
  * @desc Content parsing utility. No internal dependencies except contracts.
  */
 
@@ -9,7 +9,9 @@ import {
   parseMarkdown,
 } from '@itookit/common';
 
-import type { FileMetadata, ParseResult } from '../contracts/types';
+import type { Heading, TaskCounts } from '@itookit/common';
+interface FileMetadata { taskCount?: TaskCounts; clozeCount?: number; mermaidCount?: number; mentions?: Record<string, string[]> }
+interface ParseResult { summary: string; searchableText: string; headings: Heading[]; metadata: FileMetadata }
 
 export function parseFileInfo(
   contentString: string | null | undefined

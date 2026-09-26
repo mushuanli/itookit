@@ -307,3 +307,17 @@ describe('subscriber notifications', () => {
         expect(calls).toHaveLength(1);
     });
 });
+
+it('does not promote a created child of an unloaded folder to the root', () => {
+    store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: [dir('/project')], tags: new Map() } });
+    store.dispatch({ type: 'SESSION_CREATE_SUCCESS', payload: file('/project/files/note.md', '/project/files') });
+    expect(store.getState().items.map(item => item.id)).toEqual(['/project']);
+});
+
+it('keeps a delayed create event idempotent after the parent was refreshed', () => {
+    const note = file('/project/note.md', '/project');
+    store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: [dir('/project', null, [note])], tags: new Map() } });
+    store.dispatch({ type: 'SESSION_CREATE_SUCCESS', payload: note });
+    expect(store.getState().items).toHaveLength(1);
+    expect(store.getState().items[0].children).toHaveLength(1);
+});

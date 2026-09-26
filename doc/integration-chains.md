@@ -23,7 +23,7 @@ vfs-ui (VFSUIShell)
 ```
 node:renamed
   → VFSStore 原子迁移节点、后代路径和 active/selected/expanded 状态
-  → editor-connector.setTitle() + updateNodeId()
+  → app-shell/browser/editor-connector.setTitle() + updateNodeId()
   → LLMWorkspaceEditor
       ├─ StateManager / HistoryView 内嵌 MDX owner
       ├─ SessionRegistry / active task

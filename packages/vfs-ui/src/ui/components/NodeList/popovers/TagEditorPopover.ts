@@ -20,7 +20,7 @@ export class TagEditorPopover {
     this.hide();
 
     this.element = document.createElement('div');
-    this.element.className = 'vfs-tag-editor vfs-tag-editor--popover';
+    this.element.className = 'vfs-ui vfs-tag-editor vfs-tag-editor--popover';
     document.body.appendChild(this.element);
 
     this.element.style.left = `${options.position.x}px`;

@@ -2,7 +2,7 @@
  * @file vfs-ui/interaction/handlers/UICommandHandler.ts
  * @desc Handles pure UI state mutations (settings, search, sidebar, outlines).
  */
-import type { FileCreationConfig } from '@itookit/ui-common';
+import type { FileCreationConfig } from '../../contracts/options';
 import type { CommandBus } from '../CommandBus';
 import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
 import { resolveWritableParent } from '../../utils/creation-guard';
@@ -14,7 +14,7 @@ export class UICommandHandler {
   constructor(
     private readonly commandBus: CommandBus,
     private readonly store: IStatePort,
-    private readonly service: Pick<IDataOperationPort, 'assertCanCreate'>,
+    private readonly service?: Pick<IDataOperationPort, 'assertCanCreate'>,
     private readonly resolveParent?: FileCreationConfig['resolveParent']
   ) {
     this.register();
@@ -33,6 +33,7 @@ export class UICommandHandler {
         this.dispatch('SETTINGS_UPDATE', { settings })
       ),
       this.commandBus.on('ui:startCreating', async data => {
+        if (!this.service) return;
         const revision = ++this.creationRevision;
         try {
           const parentPath = await resolveWritableParent(this.store, this.service, data.parentPath, this.resolveParent);

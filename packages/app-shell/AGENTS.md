@@ -15,6 +15,7 @@ src/
 ├── types.ts              ← AppOptions, AppHandle, WorkspaceConfig, AppKernelPlatform, AppUI
 ├── workspaces/
 │   └── index.ts          ← 预定义 WorkspaceConfig 常量 (WS_SETTINGS/WS_CHAT/WS_AGENTS/WS_SKILLS/WS_FLOWS…)
+├── browser/             ← 文件浏览器与编辑器装配、媒体预览、mention/元数据策略
 ├── core/
 │   ├── Workbench.ts          ← 通用工作区控制器
 │   └── SessionWorkbench.ts   ← Session 侧栏 + 路由 + 文件上下文生命周期

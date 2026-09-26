@@ -20,7 +20,7 @@ export {
 export { type EditorFactory } from './interfaces/IEditorFactory';
 export {
     ISessionUI,
-    type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions, type FileCreationConfig,
+    type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions, type ResourceListOptions, type FileCreationConfig,
     type TagEditorOptions, type TagEditorInstance, type TagEditorFactory,
     type SessionManagerEvent,
     type SessionManagerCallback,
@@ -33,3 +33,5 @@ export * from './components/UIComponents';
 
 // ── Browser utilities ──
 export { copyText } from './utils/clipboard';
+
+export type { Suggestion, IAutocompleteSource } from './interfaces/IAutocompleteSource';

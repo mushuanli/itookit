@@ -80,6 +80,9 @@ export class VFSStore implements IStatePort {
   private actionListeners = new Set<(action: { type: string; payload?: any }, state: VFSUIState) => void>();
   private onExpandNeeded?: (folderId: string) => void;
 
+  private independentExpansion?: (node: VFSNodeUI) => boolean;
+  setIndependentExpansion(predicate?: (node: VFSNodeUI) => boolean): void { this.independentExpansion = predicate; }
+
   constructor(initial: Partial<VFSUIState> = {}) {
     this.state = createInitialState(initial);
   }
@@ -135,8 +138,10 @@ export class VFSStore implements IStatePort {
         };
         draft.selectedItemIds.clear();
         if (payload.parentPath) {
-          this.collapseExpandedSiblings(draft, payload.parentPath);
-          draft.expandedFolderIds.add(payload.parentPath);
+          if (payload.expand !== false) {
+            this.collapseExpandedSiblings(draft, payload.parentPath);
+            draft.expandedFolderIds.add(payload.parentPath);
+          }
         }
       },
       'CREATE_ITEM_END': () => {
@@ -194,8 +199,10 @@ export class VFSStore implements IStatePort {
             }
           }
 
-          this.collapseExpandedSiblings(draft, payload.parentPath);
-          draft.expandedFolderIds.add(payload.parentPath);
+          if (payload.expand !== false) {
+            this.collapseExpandedSiblings(draft, payload.parentPath);
+            draft.expandedFolderIds.add(payload.parentPath);
+          }
         }
         draft.tags = rebuildTagsMap(draft.items);
       },
@@ -212,19 +219,9 @@ export class VFSStore implements IStatePort {
       'SEARCH_QUERY_UPDATE': () => {
         draft.searchQuery = payload.query || '';
       },
-      'SET_NODE_WAITING_INPUT': () => {
-        const { nodeId, waiting } = payload;
-        const updateWaiting = (items: VFSNodeUI[]): boolean => {
-          for (const item of items) {
-            if (item.id === nodeId) {
-              item.metadata.custom.hasWaitingInput = waiting;
-              return true;
-            }
-            if (item.children && updateWaiting(item.children)) return true;
-          }
-          return false;
-        };
-        updateWaiting(draft.items);
+      'NODE_PRESENTATION_UPDATE': () => {
+        const item = findNodeById(draft.items, payload.nodeId);
+        if (item) item.presentation = { ...item.presentation, ...payload.presentation };
       },
     };
     handlers[type]?.();
@@ -259,11 +256,11 @@ export class VFSStore implements IStatePort {
    */
   private collapseExpandedSiblings(draft: VFSUIState, folderId: string): void {
     const node = findNodeById(draft.items, folderId);
-    if (!node) return;
+    if (!node || this.independentExpansion?.(node)) return;
     const parentPath = node.metadata.parentPath;
     const parent = parentPath ? findNodeById(draft.items, parentPath) : null;
     const siblings = (parent?.children ?? draft.items).filter(
-      n => n.id !== folderId && n.type === 'directory'
+      n => n.id !== folderId && n.type === 'directory' && !this.independentExpansion?.(n)
     );
     for (const sibling of siblings) {
       this.collapseSubtree(draft.expandedFolderIds, draft.items, sibling.id);
@@ -360,7 +357,11 @@ export class VFSStore implements IStatePort {
     const preserveCreation = Boolean(draft.creatingItem
       && draft.creatingItem.parentPath !== (parentPath === '/' ? null : parentPath ?? null));
 
-    if (parent?.type === 'directory' && newItem.id !== parent.id) {
+    // Events may arrive after a refresh, or before their parent is loaded.
+    // Never promote a nested file to the root or insert the same identity twice.
+    const existing = findNodeById(draft.items, newItem.id);
+    if (existing) Object.assign(existing, newItem, { children: existing.children });
+    else if (parent?.type === 'directory' && newItem.id !== parent.id) {
       const wasUnexpanded = parent.children === undefined;
       (parent.children ??= []).unshift(newItem);
       if (!preserveCreation) {
@@ -373,6 +374,7 @@ export class VFSStore implements IStatePort {
         this.onExpandNeeded?.(parentPath!);
       }
     } else {
+      if (parentPath && parentPath !== '/') return;
       draft.items.unshift(newItem);
     }
 

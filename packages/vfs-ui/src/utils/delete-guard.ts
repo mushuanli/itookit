@@ -16,10 +16,10 @@ export function partitionDeletable(
     const blocked: string[] = [];
     for (const id of itemIds) {
         const item = findNodeById(items, id);
-        if (item && isItemReadOnly(item)) blocked.push(id);
+        if (item && (item.kind === 'group' || isItemReadOnly(item))) blocked.push(id);
         else deletable.push(id);
     }
     return { deletable, blocked };
 }
 
-export const READ_ONLY_DELETE_MESSAGE = '任务历史为只读，无法删除';
+export const READ_ONLY_DELETE_MESSAGE = '所选条目为只读，无法删除';

@@ -1,3 +1,4 @@
+import { SourceAdapter } from '../browser/SourceAdapter';
 // shell/Assembler.ts
 /**
  * @file vfs-ui/shell/Assembler.ts
@@ -36,8 +37,8 @@ export interface AssembledParts {
     commandBus: ICommandPort;
     eventBus: IEventPort;
     fileTypePort: IFileTypePort;
-    service: VFSService;
-    engineAdapter: EngineAdapter;
+    service?: VFSService;
+    engineAdapter: EngineAdapter | SourceAdapter;
     persistence: StatePersistence;
 
     // Handler 析构列表
@@ -54,11 +55,11 @@ const DEFAULT_SETTINGS = {
 
 export function assemble(
     options: VFSUIShellOptions,
-    engine: IFileSystem
+    engine?: IFileSystem
 ): AssembledParts {
     // --- Services ---
-    const scopeId = options.scopeId || engine.viewId || 'default';
-    const persistence = new StatePersistence(scopeId);
+    const scopeId = options.scopeId || engine?.viewId || 'default';
+    const persistence = new StatePersistence(scopeId, options.persistence !== false);
     const persisted = persistence.load();
 
     const store = new VFSStore({
@@ -77,20 +78,18 @@ export function assemble(
         isSidebarCollapsed: options.initialSidebarCollapsed ?? persisted.isSidebarCollapsed ?? options.initialState?.isSidebarCollapsed ?? false,
         readOnly: options.readOnly || false,
     });
+    store.setIndependentExpansion(options.columns?.navigationCard);
 
-    const registry = new FileTypeRegistry(
-        options.defaultEditorFactory ?? (async () => { throw new Error('No editor connected'); }),
-        options.customEditorResolver
-    );
+    const registry = new FileTypeRegistry();
     options.fileTypes?.forEach(def => registry.register(def));
 
-    const service = new VFSService({
+    const service = engine && new VFSService({
         engine,
         defaultExtension: options.defaultExtension,
         newFileContent: options.fileCreation?.content,
     });
 
-    const engineAdapter = new EngineAdapter(engine, store, registry, options.showFileExtensions ?? false);
+    const engineAdapter = options.source ? new SourceAdapter(options.source, store, options.onError) : new EngineAdapter(engine!, store, registry, options.showFileExtensions ?? false, options.alwaysLoadedDirectories);
 
     // Wire auto-expand: when a file is created inside an unexpanded directory,
     // trigger a full load so all siblings are visible (not just the new file).
@@ -101,6 +100,7 @@ export function assemble(
     const eventBus = new EventBus();
 
     const handlers = [
+        ...(service && engine ? [
         new FileCommandHandler(commandBus, store, service, {
             resolveParent: options.fileCreation?.resolveParent,
             newFileContent: options.fileCreation?.content,
@@ -112,9 +112,6 @@ export function assemble(
             },
             getDuplicateTransformer: (ext) => registry.getDuplicateTransformer(ext),
         }),
-        new NavigationCommandHandler(commandBus, store, eventBus),
-        new UICommandHandler(commandBus, store, service, options.fileCreation?.resolveParent),
-        new SelectionCommandHandler(commandBus, store),
         new BulkCommandHandler(commandBus, store, service),
         new ImportCommandHandler(
             commandBus,
@@ -124,6 +121,10 @@ export function assemble(
             options.fileCreation?.resolveParent,
         ),
         new ExportCommandHandler(commandBus, service, engine, { exportItem: options.exportItem }),
+        ] : []),
+        new UICommandHandler(commandBus, store, service, options.fileCreation?.resolveParent),
+        new NavigationCommandHandler(commandBus, store, eventBus),
+        new SelectionCommandHandler(commandBus, store),
         new CustomMenuCommandHandler(commandBus, eventBus),
     ];
 

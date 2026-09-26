@@ -5,6 +5,20 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'vfs.toolbar.directory': '目录',
+    'vfs.toolbar.file': '文件',
+    'vfs.toolbar.import': '导入',
+    'vfs.toolbar.export': '导出',
+    'vfs.toolbar.create': '新建{name}',
+    'vfs.toolbar.selectExport': '请先选择要导出的项目、会话或文件',
+    'vfs.toolbar.project': '项目',
+    'vfs.toolbar.projects': '项目列表',
+    'vfs.toolbar.session': '会话',
+    'vfs.toolbar.child': '子会话',
+    'project.waitingInput': '等待用户输入',
+    'vfs.columns.back': '返回',
+    'vfs.columns.content': '内容',
+    'vfs.columns.more': '更多操作',
     'flow.invoke.title': '调用 Flow',
     'flow.invoke.description': '选择并调用 Flow，可同时运行多个',
     'flow.invoke.run': '调用',

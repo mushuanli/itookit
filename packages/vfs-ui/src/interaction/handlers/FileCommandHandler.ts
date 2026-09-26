@@ -2,7 +2,7 @@
  * @file vfs-ui/interaction/handlers/FileCommandHandler.ts
  * @desc Handles file CRUD commands. Bridges Commands → Services.
  */
-import type { FileCreationConfig } from '@itookit/ui-common';
+import type { FileCreationConfig } from '../../contracts/options';
 import type { CommandBus } from '../CommandBus';
 import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
 import { buildRenamedFilename } from '@itookit/common';

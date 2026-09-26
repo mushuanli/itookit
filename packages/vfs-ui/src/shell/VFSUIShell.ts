@@ -1,3 +1,5 @@
+import { SourceAdapter } from '../browser/SourceAdapter';
+import type { VFSListSort } from '../contracts/types';
 // shell/VFSUIShell.ts
 /**
  * @file vfs-ui/shell/VFSUIShell.ts
@@ -8,7 +10,7 @@ import {
     formatDefaultFileTitle,
     generateShortUUID
 } from '@itookit/common';
-import { ISessionUI, type SessionUIOptions, type EditorFactory } from '@itookit/ui-common';
+import type { BrowserBaseOptions } from '../contracts/options';
 import type { IFileSystem } from '@itookit/vfs-core';
 
 import type {
@@ -21,16 +23,17 @@ import type {
   IStatePort,
   ICommandPort,
   IEventPort,
-  IFileTypePort,
 } from '../contracts/ports';
 import type { PublicEventMap, PublicEventName } from '../contracts/events';
 
-import type { FileTypeDefinition, CustomEditorResolver } from '../services/FileTypeRegistry';
+import type { FileTypeDefinition } from '../services/FileTypeRegistry';
 import type { EngineAdapter } from '../services/EngineAdapter';
 import type { StatePersistence } from '../services/StatePersistence';
 
 import { VFSService } from '../services/VFSService';
 import { assemble } from './Assembler';
+import { ColumnLayout } from './ColumnLayout';
+import { ColumnState } from './ColumnState';
 
 // UI (Shell is allowed to know concrete UI classes for init)
 import { NodeList } from '../ui/components/NodeList/NodeList';
@@ -39,22 +42,35 @@ import { MoveToModal } from '../ui/components/MoveToModal/MoveToModal';
 
 import { findNodeById } from '../utils/helpers';
 
-export interface VFSUIShellOptions extends SessionUIOptions<VFSNodeUI> {
+export interface VFSUIShellOptions extends BrowserBaseOptions {
+  onError?: (error: unknown) => void;
+  persistence?: boolean;
+  source?: import('../contracts/source').BrowserSource;
   initialState?: Partial<VFSUIState>;
+  columns?: import('./ColumnLayout').VFSColumnsOptions;
+  toolbar?: 'full' | 'compact' | 'hidden';
+  listItems?: (items: VFSNodeUI[]) => VFSNodeUI[];
+  listHeader?: HTMLElement;
+  /** Render selected display directories as expandable cards. */
+  cardDirectory?: (node: VFSNodeUI) => boolean;
+  alwaysLoadedDirectories?: string[];
+  toolbarOptions?: import('../ui/components/NodeList/toolbar').VFSToolbarOptions;
   defaultUiSettings?: Partial<UISettings>;
   compareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined;
+  /** Fixed sorting overrides saved preferences; compareItems can override individual pairs. */
+  sort?: VFSListSort;
   defaultExtension?: string;
   fileTypes?: FileTypeDefinition[];
-  defaultEditorFactory?: EditorFactory;
   directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
   activateDirectories?: boolean;
+  /** Restore saved selection, but optionally keep a new tree unselected. */
+  autoSelectFirst?: boolean;
   restoreExpandedDirectory?: (path: string) => boolean;
   primaryAction?: { label: string; run(): Promise<void> };
   /** Include directories in the export button selection (default false). */
   exportDirectories?: boolean;
   /** Custom export payload for directories that have no direct file content. */
   exportItem?: import('../interaction/handlers/ExportCommandHandler').ExportCommandOptions['exportItem'];
-  customEditorResolver?: CustomEditorResolver;
   searchFilter?: SearchFilter;
   scopeId?: string;
   /**
@@ -66,23 +82,31 @@ export interface VFSUIShellOptions extends SessionUIOptions<VFSNodeUI> {
   showFileExtensions?: boolean;
 }
 
-export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap> {
+export class VFSUIShell {
   public readonly instanceId: string;
 
   // ===== 全部通过接口持有 =====
   private readonly statePort: IStatePort;
   private commandPort: ICommandPort;
   private readonly eventPort: IEventPort;
-  private readonly fileTypePort: IFileTypePort;
 
   // Services (保留具体类型仅因为 public API 需要返回)
-  private readonly vfsService: VFSService;
-  private readonly engineAdapter: EngineAdapter;
+  private readonly vfsService?: VFSService;
+  private readonly engineAdapter: EngineAdapter | SourceAdapter;
   private readonly persistence: StatePersistence;
   private readonly destroyHandlers: () => void;
 
   // UI Components
   private nodeList!: NodeList;
+  private navigationList?: NodeList;
+  private columnLayout?: ColumnLayout;
+  private contentState?: ColumnState;
+  private contentRoot: string | null = null;
+  private contentRevision = 0;
+  private navigationTail: Promise<void> = Promise.resolve();
+  private serializeNavigation(run: () => Promise<void>): Promise<void> {
+    const work = this.navigationTail.then(run); this.navigationTail = work.catch(() => {}); return work;
+  }
   private fileOutline?: FileOutline;
   private moveToModal!: MoveToModal;
   private instanceModalContainer!: HTMLElement;
@@ -95,14 +119,14 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
 
   constructor(
     private readonly options: VFSUIShellOptions,
-    private readonly engine: IFileSystem
+    private readonly engine?: IFileSystem
   ) {
-    super();
 
     if (!options.sessionListContainer) {
       throw new Error("VFSUIShell requires 'sessionListContainer'.");
     }
 
+    options.sessionListContainer.classList.add('vfs-ui');
     this.instanceId = generateShortUUID();
 
     // ===== Assemble all layers (Composition Root) =====
@@ -111,7 +135,6 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
     this.statePort = parts.store;
     this.commandPort = parts.commandBus;
     this.eventPort = parts.eventBus;
-    this.fileTypePort = parts.fileTypePort;
     this.vfsService = parts.service;
     this.engineAdapter = parts.engineAdapter;
     this.persistence = parts.persistence;
@@ -129,25 +152,31 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
     this.connectRenameEvents();
   }
 
-  // ===== editor-connector compatibility =====
-  public get store(): { getState(): VFSUIState; dispatch(action: any): void } {
-    return {
-      getState: () => this.statePort.getState(),
-      dispatch: (action: any) => this.statePort.dispatch(action),
-    };
-  }
-
   // ===== Public API (ISessionUI) =====
 
   get sessionService(): VFSService {
+    if (!this.vfsService) throw new Error('This browser source has no file operations');
     return this.vfsService;
   }
 
-  resolveEditorFactory(node: VFSNodeUI): any {
-    return this.fileTypePort.resolveEditorFactory(node);
+  getNode(id: string): VFSNodeUI | undefined { return findNodeById(this.statePort.getState().items, id); }
+  updateNodeMetadata(itemId: string, metadata: Partial<VFSNodeUI['metadata']>): void {
+    this.statePort.dispatch({ type: 'ITEM_METADATA_UPDATE', payload: { itemId, metadata } });
+  }
+  setExpanded(folderId: string, expanded: boolean): void {
+    if (this.statePort.getState().expandedFolderIds.has(folderId) !== expanded)
+      this.commandPort.execute('nav:toggleFolder', { folderId });
+  }
+  setQuery(query: string): void { this.statePort.dispatch({ type: 'SEARCH_QUERY_UPDATE', payload: { query } }); }
+  setSelection(ids: string[]): void { this.statePort.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids } }); }
+  getSnapshot(): import('../contracts/source').BrowserSnapshot {
+    const state = this.statePort.getState();
+    return Object.freeze({ activeId: state.activeId, query: state.searchQuery,
+      selectedIds: Object.freeze([...state.selectedItemIds]), expandedIds: Object.freeze([...state.expandedFolderIds]) });
   }
 
   async start(): Promise<VFSNodeUI | undefined> {
+    this.navigationList?.init();
     this.nodeList.init();
     this.fileOutline?.init();
     this.moveToModal.init();
@@ -174,7 +203,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
   private async ensureDefaultFile(): Promise<void> {
     const state = this.statePort.getState();
     const startup = this.options.fileCreation;
-    if (!state.items.length && !this.options.readOnly && startup?.startupFileName) {
+    if (!state.items.length && !this.options.readOnly && this.vfsService && startup?.startupFileName) {
       try {
         // Title uses the timestamped default (formatDefaultFileTitle) so the
         // startup file isn't a fixed name that can collide with a stale file
@@ -208,6 +237,8 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
     // No valid persisted session with stale selected items — nothing to restore.
     if (selectedItemIds.size > 0) return undefined;
 
+    if (this.options.autoSelectFirst === false) return undefined;
+
     // Pick the first file in the tree.
     const first = this.findFirstFile(this.statePort.getState().items);
     if (first) {
@@ -227,24 +258,101 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
     return null;
   }
 
-  async refresh(): Promise<void> {
+  refreshList(): void { this.nodeList.refreshView(); }
+  setToolbar(options: import('../ui/components/NodeList/toolbar').VFSToolbarOptions): void { this.nodeList.setToolbarOptions(options); }
+
+  refresh(): Promise<void> { return this.serializeNavigation(() => this.refreshNow()); }
+  private async refreshNow(): Promise<void> {
     const expanded = new Set(this.statePort.getState().expandedFolderIds);
     // Silent: a background refresh must not blank the list or collapse the tree.
     await this.engineAdapter.loadData({ silent: true });
     await this.engineAdapter.restoreExpansion(expanded);
+    await this.refreshNavigationChildren();
   }
 
-  async selectPath(path: string): Promise<void> {
+  selectPath(path: string): Promise<void> { return this.serializeNavigation(() => this.selectPathNow(path)); }
+  private async selectPathNow(path: string): Promise<void> {
+    if (this.engineAdapter instanceof SourceAdapter) {
+      await this.engineAdapter.reveal(path);
+      await this.commandPort.execute('nav:selectSession', { sessionId: path }); return;
+    }
     const parts = path.split('/').filter(Boolean);
     for (let index = 1; index < parts.length; index++) {
       const parent = '/' + parts.slice(0, index).join('/');
       const state = this.statePort.getState();
       const node = findNodeById(state.items, parent);
       if (node?.children === undefined) await this.engineAdapter.expandDirectory(parent, { restoreDescendants: false });
-      else if (!state.expandedFolderIds.has(parent)) this.commandPort.execute('nav:toggleFolder', { folderId: parent });
+      else if (!state.expandedFolderIds.has(parent)) this.statePort.dispatch({ type: 'FOLDER_TOGGLE', payload: { folderId: parent } });
     }
     this.commandPort.execute('nav:selectSession', { sessionId: path });
   }
+
+  /** Change the content column without rebasing node identities or changing the editor. */
+  setContentRoot(path: string | null, title?: string, reveal = true): Promise<void> {
+    return this.serializeNavigation(() => this.setContentRootNow(path, title, reveal));
+  }
+  private async setContentRootNow(path: string | null, title?: string, reveal = true): Promise<void> {
+    if (!this.columnLayout) return;
+    const revision = ++this.contentRevision;
+    const changed = path !== this.contentRoot;
+    if (changed) this.commandPort.execute('ui:cancelCreating', undefined);
+    if (path) await this.expandPathNow(path);
+    if (revision !== this.contentRevision) return;
+    this.contentRoot = path;
+    this.contentState?.refresh(changed);
+    if (title) this.nodeList.setTitle(title);
+    if (reveal) this.columnLayout.show('content');
+  }
+
+  /** Expand a canonical directory while retaining the selected editor and content root. */
+  expandPath(path: string): Promise<void> { return this.serializeNavigation(() => this.expandPathNow(path)); }
+  private async expandPathNow(path: string): Promise<void> {
+    if (this.engineAdapter instanceof SourceAdapter) {
+      await this.engineAdapter.reveal(path); await this.engineAdapter.expandDirectory(path); return;
+    }
+    const parts = path.split('/').filter(Boolean);
+    for (let index = 1; index <= parts.length; index++) {
+      const parent = '/' + parts.slice(0, index).join('/');
+      const state = this.statePort.getState();
+      if (findNodeById(state.items, parent)?.children === undefined) await this.engineAdapter.expandDirectory(parent, { restoreDescendants: false });
+      else if (!state.expandedFolderIds.has(parent)) this.statePort.dispatch({ type: 'FOLDER_TOGGLE', payload: { folderId: parent } });
+      await this.loadNavigationChildren(parent);
+    }
+  }
+
+  private async loadNavigationChildren(path: string, reload = false): Promise<void> {
+    const node = findNodeById(this.statePort.getState().items, path);
+    if (!node) return;
+    for (const child of this.options.columns?.navigationChildren?.(node) ?? []) {
+      if (reload || findNodeById(this.statePort.getState().items, child)?.children === undefined)
+        await this.engineAdapter.expandDirectory(child, { restoreDescendants: false, expand: false });
+    }
+  }
+  private async refreshNavigationChildren(): Promise<void> {
+    for (const path of this.statePort.getState().expandedFolderIds) await this.loadNavigationChildren(path, true);
+  }
+
+  setNavigationTitle(title: string): void { this.navigationList?.setTitle(title); }
+  setContentToolbar(options: import('../ui/components/NodeList/toolbar').VFSToolbarOptions): void { this.nodeList.setToolbarOptions(options); }
+  resetContentState(): void { this.contentState?.refresh(true); }
+  setContentVisible(visible: boolean): void { this.columnLayout?.setContentVisible(visible); }
+  showColumn(column: 'navigation' | 'content'): void { this.columnLayout?.show(column); }
+
+  /** Preload virtual navigation directories without changing expansion or selection. */
+  loadDirectories(paths: string[]): Promise<void> {
+    return this.serializeNavigation(async () => {
+      for (const path of paths) {
+        const parts = path.split('/').filter(Boolean);
+        for (let index = 1; index <= parts.length; index++) {
+          const parent = '/' + parts.slice(0, index).join('/');
+          if (findNodeById(this.statePort.getState().items, parent)?.children === undefined)
+            await this.engineAdapter.expandDirectory(parent, { restoreDescendants: false, expand: false });
+        }
+      }
+    });
+  }
+
+  getContentRoot(): string | null { return this.contentRoot; }
 
   getActiveSession(): VFSNodeUI | undefined {
     const { activeId, items } = this.statePort.getState();
@@ -252,18 +360,14 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
   }
 
   updateSessionContent = (sessionId: string, content: string): Promise<void> =>
-    this.engine.driver.writeContent(sessionId, content);
+    this.engine ? this.engine.driver.writeContent(sessionId, content) : Promise.reject(new Error('No file operations'));
 
   toggleSidebar(): void {
     this.commandPort.execute('ui:toggleSidebar', undefined as any);
   }
 
-  /**
-   * 设置节点的等待输入状态（由外部 bootstrap 调用）。
-   * 用于在 session 列表中将等待 human_input 的会话高亮显示。
-   */
-  setNodeWaitingInput(nodeId: string, waiting: boolean): void {
-    this.statePort.dispatch({ type: 'SET_NODE_WAITING_INPUT', payload: { nodeId, waiting } });
+  setNodeAttention(nodeId: string, label?: string): void {
+    this.statePort.dispatch({ type: 'NODE_PRESENTATION_UPDATE', payload: { nodeId, presentation: { attention: label } } });
   }
 
   setTitle(title: string): void {
@@ -278,7 +382,10 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
   }
 
   destroy(): void {
+    this.navigationList?.destroy();
     this.nodeList.destroy();
+    this.columnLayout?.destroy();
+    ++this.contentRevision;
     this.fileOutline?.destroy();
     this.moveToModal.destroy();
     this.instanceModalContainer?.remove();
@@ -316,8 +423,8 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
               if (willExpand) {
                 const node = findNodeById(state.items, folderId);
                 if (node?.type === 'directory' && node.children === undefined) {
-                  void shell.engineAdapter.expandDirectory(folderId);
-                }
+                  void shell.serializeNavigation(async () => { await shell.engineAdapter.expandDirectory(folderId, { expand: false }); await shell.loadNavigationChildren(folderId); });
+                } else void shell.serializeNavigation(() => shell.loadNavigationChildren(folderId));
               }
             }
 
@@ -330,7 +437,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
   }
 
   private initializeComponents(): void {
-    this.nodeList = new NodeList({
+    const listOptions = {
       container: this.options.sessionListContainer,
       store: this.statePort,
       commandBus: this.commandPort,
@@ -339,16 +446,37 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
       searchPlaceholder:
         this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
       fileCreation: this.options.fileCreation,
+      listItems: this.options.listItems, listHeader: this.options.listHeader, cardDirectory: this.options.cardDirectory,
       title: this.options.title,
+      toolbar: this.options.toolbar, toolbarOptions: this.options.toolbarOptions,
       activateDirectories: this.options.activateDirectories,
       directoryAction: this.options.directoryAction,
       primaryAction: this.options.primaryAction,
       exportDirectories: this.options.exportDirectories,
       searchFilter: this.options.searchFilter,
-      compareItems: this.options.compareItems,
+      compareItems: this.options.compareItems, sort: this.options.sort,
       instanceId: this.instanceId,
-      engine: this.engine,
-    });
+      engine: this.engine, onError: this.options.onError,
+    };
+    const columns = this.options.columns;
+    if (columns) {
+      this.columnLayout = new ColumnLayout(this.options.sessionListContainer, columns);
+      const navigation = new ColumnState(this.statePort, (state, query) => columns.navigationItems(state.items, query), () => null, columns.navigationSearch, columns.navigationActiveId);
+      this.contentState = new ColumnState(this.statePort, state => {
+        const items = this.contentRoot === '/' ? state.items : findNodeById(state.items, this.contentRoot ?? '')?.children ?? [];
+        return pruneLeaves(columns.contentItems?.(items) ?? items, columns.contentLeaf);
+      }, () => this.contentRoot);
+      this.navigationList = new NodeList({ ...listOptions, container: this.columnLayout.navigation,
+        title: columns.navigationTitle, searchPlaceholder: columns.navigationSearchPlaceholder ?? listOptions.searchPlaceholder, store: navigation, commandBus: navigation.commands(this.commandPort),
+        leafDirectory: columns.navigationLeaf, cardDirectory: columns.navigationCard,
+        directoryAction: columns.navigationAction,
+        toolbarOptions: columns.navigationToolbarOptions,
+        compareItems: columns.navigationCompareItems ?? listOptions.compareItems, toolbar: columns.navigationToolbar ?? 'hidden', primaryAction: undefined });
+      this.nodeList = new NodeList({ ...listOptions, container: this.columnLayout.content,
+        store: this.contentState, commandBus: this.contentState.commands(this.commandPort),
+        compareItems: columns.contentCompareItems ?? listOptions.compareItems,
+        leafDirectory: columns.contentLeaf, rootPath: () => this.contentRoot });
+    } else this.nodeList = new NodeList(listOptions);
 
     if (this.options.documentOutlineContainer) {
       this.fileOutline = new FileOutline({
@@ -374,7 +502,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
     }
 
     this.instanceModalContainer = document.createElement('div');
-    this.instanceModalContainer.className = `vfs-modal-wrapper-${this.instanceId}`;
+    this.instanceModalContainer.className = `vfs-ui vfs-modal-wrapper-${this.instanceId}`;
     globalAnchor.appendChild(this.instanceModalContainer);
 
     this.moveToModal = new MoveToModal({
@@ -415,8 +543,16 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService, PublicEventMap
     this.statePort.onAction((action, _state) => {
       if (action.type !== 'ITEM_RENAME_SUCCESS') return;
       const { oldId, newItem } = action.payload as { oldId: string; newItem: import('../contracts/types').VFSNodeUI };
+      if (this.contentRoot === oldId || this.contentRoot?.startsWith(oldId + '/')) {
+        this.contentRoot = newItem.id + this.contentRoot.slice(oldId.length);
+        this.contentState?.refresh();
+      }
       this.eventPort.emit('fileRenamed', { oldId, newId: newItem.id, item: newItem });
     });
   }
 
+}
+
+function pruneLeaves(items: VFSNodeUI[], leaf?: (node: VFSNodeUI) => boolean): VFSNodeUI[] {
+  return items.map(item => ({ ...item, children: leaf?.(item) ? undefined : item.children && pruneLeaves(item.children, leaf) }));
 }

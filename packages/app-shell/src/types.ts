@@ -3,7 +3,8 @@ import type { ApplicationRuntime } from '@itookit/app-core';
 import type { FileCreationConfig, EditorFactory, EditorOptions, ContextMenuConfig } from '@itookit/ui-common';
 import type { IStorageBackend, IVFSManager, MountOptions, IFileSystem } from '@itookit/vfs-core';
 import type { ThemeMode } from './ThemeService';
-import type { FileTypeDefinition, CustomEditorResolver, VFSUIOptions } from '@itookit/vfs-ui';
+import type { VFSUIOptions } from '@itookit/vfs-ui';
+import type { EditorFileType as FileTypeDefinition, EditorResolver as CustomEditorResolver } from './browser/types';
 import type { KernelAdaptersRuntime } from '@itookit/kernel-adapters';
 import type { Kernel } from '@itookit/durable-kernel';
 import type {

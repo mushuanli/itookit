@@ -4,6 +4,20 @@
 import type { LocaleStrings } from './zh-CN';
 
 export const en: LocaleStrings = {
+    'vfs.toolbar.directory': 'Folder',
+    'vfs.toolbar.file': 'File',
+    'vfs.toolbar.import': 'Import',
+    'vfs.toolbar.export': 'Export',
+    'vfs.toolbar.create': 'New {name}',
+    'vfs.toolbar.selectExport': 'Select a project, session or file to export',
+    'vfs.toolbar.project': 'Project',
+    'vfs.toolbar.projects': 'Projects',
+    'vfs.toolbar.session': 'Session',
+    'vfs.toolbar.child': 'Child',
+    'project.waitingInput': 'Waiting for input',
+    'vfs.columns.back': 'Back',
+    'vfs.columns.content': 'Contents',
+    'vfs.columns.more': 'More actions',
     'flow.invoke.title': 'Call Flow',
     'flow.invoke.description': 'Select and call a Flow; multiple calls can run together',
     'flow.invoke.run': 'Call',

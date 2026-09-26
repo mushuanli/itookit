@@ -30,6 +30,7 @@ export class EngineAdapter {
         private readonly store: IStatePort,
         private readonly fileTypePort: IFileTypePort,
         private readonly showFileExtensions = false,
+        private readonly alwaysLoadedDirectories: string[] = [],
     ) { }
 
     private get iconResolver() {
@@ -51,7 +52,7 @@ export class EngineAdapter {
                 undefined,
                 this.showFileExtensions
             );
-            if (silent) await this.reloadOpenChildren(uiItems);
+            if (silent || this.alwaysLoadedDirectories.length) await this.reloadOpenChildren(uiItems);
             const tags = this.buildTagsMap(uiItems);
             adapterDEBUG.dispatch('STATE_LOAD_SUCCESS', `${uiItems.length} items`);
             this.store.dispatch({
@@ -70,7 +71,7 @@ export class EngineAdapter {
      * Include ancestors for older persisted states that only kept the deepest path.
      */
     private async reloadOpenChildren(next: VFSNodeUI[]): Promise<void> {
-        const openBefore = new Set(this.store.getState().expandedFolderIds);
+        const openBefore = new Set([...this.store.getState().expandedFolderIds, ...this.alwaysLoadedDirectories]);
         for (const id of [...openBefore]) {
             for (let parent = id.slice(0, id.lastIndexOf('/')); parent; parent = parent.slice(0, parent.lastIndexOf('/'))) {
                 openBefore.add(parent);
@@ -290,7 +291,7 @@ export class EngineAdapter {
         return map;
     }
 
-    async expandDirectory(folderId: string, options: { restoreDescendants?: boolean } = {}): Promise<void> {
+    async expandDirectory(folderId: string, options: { restoreDescendants?: boolean; expand?: boolean } = {}): Promise<void> {
         if (this.loadingFolderIds.has(folderId)) return;
         this.loadingFolderIds.add(folderId);
 
@@ -302,7 +303,7 @@ export class EngineAdapter {
 
             this.store.dispatch({
                 type: 'FOLDER_CHILDREN_LOADED',
-                payload: { parentPath: folderId, children: uiChildren },
+                payload: { parentPath: folderId, children: uiChildren, expand: options.expand },
             });
             if (options.restoreDescendants === false) return;
 

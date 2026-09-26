@@ -1,3 +1,5 @@
+import type { IFileSystem } from '@itookit/vfs-core';
+import type { EditorFactory, EditorOptions } from '@itookit/ui-common';
 /**
  * @file SystemFSExploreEditor.ts
  * @desc Debug settings page — read-only view of all VFS modules.
@@ -17,17 +19,23 @@
  * content is replaced with a placeholder by SystemVFSEngine.readContent().
  */
 import { BaseSettingsEditor } from '@itookit/ui-common';
-import { createVFSUI, connectEditorLifecycle, VFSUIShell } from '@itookit/vfs-ui';
+import { createVFSUI, fromVFS, VFSUIShell } from '@itookit/vfs-ui';
 import { defaultEditorFactory } from '@itookit/mdxeditor';
 import '@itookit/mdxeditor/style.css';
 import { SettingsService } from '../services/SettingsService';
 import { createSystemFileInspector } from './system-fs/system-file-inspector';
+
+export type FileBrowserConnector = (browser: VFSUIShell, fs: IFileSystem, container: HTMLElement, factory: EditorFactory) => () => void;
 
 export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
     private inspector?: Awaited<ReturnType<typeof createSystemFileInspector>>;
     private vfsUI?: VFSUIShell;
     private lifecycleUnsub?: () => void;
     private isStructureInitialized = false;
+
+    constructor(container: HTMLElement, service: SettingsService, options: EditorOptions, private readonly connectBrowser: FileBrowserConnector) {
+        super(container, service, options);
+    }
 
     async init(container: HTMLElement): Promise<void> {
         await super.init(container);
@@ -75,22 +83,21 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
         // ── VFSUIShell + editor lifecycle ───────────────────────────────────
         this.vfsUI = createVFSUI(
             {
+                source: fromVFS(engine),
                 readOnly: true,
                 title: 'Files',
                 searchPlaceholder: 'Search files…',
                 initialSidebarCollapsed: false,
                 sessionListContainer: sidebarEl,
-                defaultEditorFactory,
             },
             engine,
         ) as VFSUIShell;
 
-        this.lifecycleUnsub = connectEditorLifecycle(
+        this.lifecycleUnsub = this.connectBrowser(
             this.vfsUI,
             engine,
             editorEl,
             defaultEditorFactory,
-            { readOnly: true },
         );
 
         await this.vfsUI.start();

@@ -1,9 +1,11 @@
+import { createNodeComparator } from '../../../utils/node-sort';
 /**
  * @file vfs-ui/ui/components/NodeList/NodeListState.ts
  * @desc State transformation and filtering logic for NodeList.
  */
 import type {
   VFSNodeUI,
+  VFSListSort,
   UISettings,
   VFSUIState,
   SearchFilter,
@@ -32,10 +34,12 @@ export interface ParsedSearchQuery {
 }
 
 export class NodeListStateTransformer {
+  private readonly fixedCompare?: (a: VFSNodeUI, b: VFSNodeUI) => number;
   constructor(
     private readonly searchFilter?: SearchFilter,
     private readonly compareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined,
-  ) {}
+    sort?: VFSListSort,
+  ) { this.fixedCompare = sort && createNodeComparator(sort); }
 
   transform(globalState: VFSUIState): NodeListState {
     const {
@@ -124,7 +128,7 @@ export class NodeListStateTransformer {
       processedItems = this.filterRecursively(processedItems, queries);
     }
 
-    if (!isReadOnly) {
+    if (!isReadOnly || this.fixedCompare || this.compareItems) {
       this.sortRecursively(processedItems, uiSettings);
     }
 
@@ -186,6 +190,7 @@ export class NodeListStateTransformer {
     itemList.sort((a, b) => {
       const order = this.compareItems?.(a, b);
       if (order !== undefined) return order;
+      if (this.fixedCompare) return this.fixedCompare(a, b);
       const aIsPinned = a.metadata?.custom?.isPinned || false;
       const bIsPinned = b.metadata?.custom?.isPinned || false;
       if (aIsPinned !== bIsPinned) return aIsPinned ? -1 : 1;

@@ -8,6 +8,8 @@ export interface FooterProps {
   selectionStatus: 'none' | 'partial' | 'all';
   selectedCount: number;
   isReadOnly: boolean;
+  canDelete?: boolean;
+  canMove?: boolean;
 }
 
 export interface FooterCallbacks {
@@ -42,6 +44,10 @@ export class Footer {
 
   render(props: FooterProps): void {
     this.element.innerHTML = createFooterHTML(props);
+    for (const [action, allowed] of [['bulk-delete', props.canDelete], ['bulk-move', props.canMove]] as const) {
+      const button = this.element.querySelector<HTMLButtonElement>(`[data-action="${action}"]`);
+      if (button) { button.hidden = allowed === false; button.disabled ||= allowed === false; }
+    }
     const checkbox = this.element.querySelector<HTMLInputElement>(
       '.vfs-node-list__footer-checkbox'
     );

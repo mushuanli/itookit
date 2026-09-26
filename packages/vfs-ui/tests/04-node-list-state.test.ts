@@ -121,3 +121,29 @@ describe('NodeListStateTransformer — search filtering', () => {
         expect(result.visibleItemIds).toContain('f2');
     });
 });
+
+describe('fixed host sorting', () => {
+    const node = (id: string, title: string, date = '2026-01-01') => makeVFSNodeUI({ id,
+        metadata: { ...makeVFSNodeUI().metadata, title, lastModified: date } });
+    it('uses natural names and stable IDs despite active selection, saved date sorting and source order', () => {
+        const fixed = new NodeListStateTransformer(undefined, undefined, { by: 'title', direction: 'asc' });
+        const state = makeState({ items: [node('z', 'tool10'), node('b', 'Tool2'), node('a', 'tool2')] });
+        state.uiSettings.sortBy = 'lastModified';
+        expect(fixed.transform(state).items.map(n => n.id)).toEqual(['a', 'b', 'z']);
+        state.activeId = 'z'; state.items.reverse(); state.items[0].metadata.lastModified = '2030-01-01';
+        expect(fixed.transform(state).items.map(n => n.id)).toEqual(['a', 'b', 'z']);
+    });
+    it('supports descending dates and directories first in nested and read-only lists', () => {
+        const fixed = new NodeListStateTransformer(undefined, undefined, { by: 'lastModified', direction: 'desc', directoriesFirst: true });
+        const children = [node('old', 'Old'), node('new', 'New', '2026-02-01')];
+        const folder = { ...node('dir', 'Folder'), type: 'directory' as const, children };
+        const result = fixed.transform(makeState({ items: [...children, folder], readOnly: true }));
+        expect(result.items.map(n => n.id)).toEqual(['dir', 'new', 'old']);
+        expect(result.items[0].children?.map(n => n.id)).toEqual(['new', 'old']);
+        expect(children.map(n => n.id)).toEqual(['old', 'new']);
+    });
+    it('keeps custom ordering precedence and falls back to fixed sorting for other pairs', () => {
+        const fixed = new NodeListStateTransformer(undefined, (a, b) => a.id === 'first' ? -1 : b.id === 'first' ? 1 : undefined, { by: 'title', direction: 'desc' });
+        expect(fixed.transform(makeState({ items: [node('a', 'Alpha'), node('first', 'First'), node('z', 'Zulu')] })).items.map(n => n.id)).toEqual(['first', 'z', 'a']);
+    });
+});

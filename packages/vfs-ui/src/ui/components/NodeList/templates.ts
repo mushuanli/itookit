@@ -22,7 +22,7 @@ export const createContextMenuHTML = (items: MenuItem[]): string => {
     .map(item =>
       item.type === 'separator'
         ? '<li class="vfs-context-menu__separator"></li>'
-        : `<li><button data-action="${escapeHTML(item.id)}">${item.iconHTML || ''}<span>${escapeHTML(item.label)}</span></button></li>`
+        : `<li><button data-action="${escapeHTML(item.id)}" ${item.disabled ? 'disabled' : ''}>${item.iconHTML || ''}<span>${escapeHTML(item.label)}</span></button></li>`
     )
     .join('')}</ul></div>`;
 };
@@ -55,7 +55,7 @@ export const createFooterHTML = ({
     </div>`;
 };
 
-export const createSettingsPopoverHTML = (settings: UISettings): string => {
+export const createSettingsPopoverHTML = (settings: UISettings, showSorting = true): string => {
   const btn = (group: keyof UISettings, value: string, label: string) =>
     `<button data-value="${value}" class="vfs-settings-popover__option-btn ${settings[group] === value ? 'is-active' : ''}">${label}</button>`;
 
@@ -67,8 +67,8 @@ export const createSettingsPopoverHTML = (settings: UISettings): string => {
 
   return `
     <div class="vfs-settings-popover">
-      <div class="vfs-settings-popover__title">排序方式</div>
-      <div class="vfs-settings-popover__group" data-setting="sortBy">${btn('sortBy', 'lastModified', '修改时间')}${btn('sortBy', 'title', '标题')}</div>
+      ${showSorting ? `<div class="vfs-settings-popover__title">排序方式</div>
+      <div class="vfs-settings-popover__group" data-setting="sortBy">${btn('sortBy', 'lastModified', '修改时间')}${btn('sortBy', 'title', '标题')}</div>` : ''}
       <div class="vfs-settings-popover__title">显示密度</div>
       <div class="vfs-settings-popover__group" data-setting="density">${btn('density', 'comfortable', '舒适')}${btn('density', 'compact', '紧凑')}</div>
       <div class="vfs-settings-popover__title">显示内容</div>

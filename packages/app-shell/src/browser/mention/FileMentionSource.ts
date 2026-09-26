@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/mention/FileMentionSource.ts
+ * @file app-shell/src/browser/mention/FileMentionSource.ts
  */
 import { escapeHTML } from '@itookit/common';
 import type { FSNode } from '@itookit/vfs-core';

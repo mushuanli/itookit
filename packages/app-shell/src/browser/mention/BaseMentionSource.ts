@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/mention/BaseMentionSource.ts
+ * @file app-shell/src/browser/mention/BaseMentionSource.ts
  * @desc Base class for mention sources.
  */
 import {
@@ -11,7 +11,8 @@ import {
   type IFileSystem,
   type FSNode,
 } from '@itookit/vfs-core';
-import { shouldFilterNode } from '../utils/helpers';
+const shouldFilterNode = (node: FSNode): boolean => !node.metadata?._showAll &&
+  [node.name, ...node.path.split('/')].some(part => part.startsWith('.') || part.startsWith('_'));
 
 export interface MentionSourceDependencies {
   engine: IFileSystem;

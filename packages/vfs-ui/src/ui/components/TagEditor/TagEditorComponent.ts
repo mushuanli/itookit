@@ -3,7 +3,7 @@
  * @desc Inline tag editor with autocomplete. Standalone — no dependency on ports.
  */
 import { escapeHTML } from '@itookit/common';
-import { IAutocompleteSource, Suggestion } from '../../../mention/autocomplete-source';
+import type { IAutocompleteSource, Suggestion } from '@itookit/ui-common';
 
 export interface TagEditorParams {
   container: HTMLElement;

@@ -1,63 +1,17 @@
-/**
- * @file vfs-ui/index.ts
- * @desc Public API entry point for the VFS-UI library.
- */
 import './styles/index.css';
-
-import { VFSUIShell } from './shell/VFSUIShell';
-
-import type { SessionUIOptions, ISessionUI, EditorFactory } from '@itookit/ui-common';
+import { VFSUIShell, type VFSUIShellOptions } from './shell/VFSUIShell';
 import type { IFileSystem } from '@itookit/vfs-core';
-import type { VFSNodeUI, VFSUIState, UISettings } from './contracts/types';
-import { VFSService } from './services/VFSService';
-
-import type { FileTypeDefinition, CustomEditorResolver } from './services/FileTypeRegistry';
-
-export { FileMentionSource } from './mention/FileMentionSource';
-export { DirectoryMentionSource } from './mention/DirectoryMentionSource';
-export { createVFSMentionProviders } from './mention/createVFSMentionProviders';
-
-// 修改 Options 类型定义以包含新的配置项
-export type VFSUIOptions = SessionUIOptions<VFSNodeUI> & {
-    initialState?: Partial<VFSUIState>;
-    defaultUiSettings?: Partial<UISettings>;
-    /** Host ordering takes precedence; undefined falls back to user sorting. */
-    compareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined;
-    // [新增]
-    fileTypes?: FileTypeDefinition[];
-    defaultEditorFactory?: EditorFactory;
-  directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
-  activateDirectories?: boolean;
-  /** Choose which persisted directory expansions may be restored on startup. */
-  restoreExpandedDirectory?: (path: string) => boolean;
-  primaryAction?: { label: string; run(): Promise<void> };
-  exportDirectories?: boolean;
-  exportItem?: import('./interaction/handlers/ExportCommandHandler').ExportCommandOptions['exportItem'];
-    customEditorResolver?: CustomEditorResolver;
-
-    /**
-     * [新增] 必须在此处定义，以便 createVFSUI 能够识别
-     * 用于多实例隔离标识
-     */
-    scopeId?: string;
-
-    /**
-     * 在文件树中显示文件扩展名（如 .md / .ts / .pdf）。
-     * 适用于外部文件系统挂载（home / mount）。内部模块保持 false（默认）。
-     */
-    showFileExtensions?: boolean;
-};
-
-
-/**
- * 创建 VFSUI 实例 (通用引擎模式)
- */
-export const createVFSUI = (options: VFSUIOptions, engine: IFileSystem): ISessionUI<VFSNodeUI, VFSService> =>
-    new VFSUIShell(options, engine);
-
-export { VFSService, VFSUIShell };
+export type VFSUIOptions = VFSUIShellOptions;
+export const createVFSUI = (options: VFSUIOptions, fs: IFileSystem): VFSUIShell => new VFSUIShell(options, fs);
+export { VFSUIShell };
+export { VFSService } from './services/VFSService';
+export type { FileTypeDefinition } from './services/FileTypeRegistry';
 export * from './contracts/types';
+export type { FileCreationConfig } from './contracts/options';
+export type { VFSColumnsOptions } from './shell/ColumnLayout';
+export type { VFSToolbarOptions, VFSToolbarContext, VFSToolbarAction } from './ui/components/NodeList/toolbar';
 
-export type { FileTypeDefinition, CustomEditorResolver } from './services/FileTypeRegistry';
-
-export { connectEditorLifecycle } from './integrations/editor-connector';
+export { createVFSBrowser, VFSBrowser, type BrowserOptions } from './browser/Browser';
+export { fromVFS, type VFSDataOptions } from './browser/from-vfs';
+export type { BrowserNode, BrowserSource, ResourceRef, SourceChange } from './contracts/source';
+export type { BrowserAction, ActionContext } from './browser/actions';

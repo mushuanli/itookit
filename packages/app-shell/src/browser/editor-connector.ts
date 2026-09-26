@@ -1,49 +1,43 @@
+import type { EditorFactory } from '@itookit/ui-common';
 /**
- * @file vfs-ui/integrations/editor-connector.ts
+ * @file app-shell/src/browser/editor-connector.ts
  * @desc Connects VFS-UI with IEditor instances. Updated to work with new shell.
  */
 import type {
     NavigationRequest
 } from '@itookit/common';
-import type { IEditor, EditorFactory, EditorOptions, ISessionUI, EditorHostContext } from '@itookit/ui-common';
+import type { IEditor, EditorOptions, EditorHostContext } from '@itookit/ui-common';
 import type { IFileSystem, FileSystemContext } from '@itookit/vfs-core';
 
-import type { VFSNodeUI, VFSUIState } from '../contracts/types';
-import type { VFSService } from '../services/VFSService';
-import { parseFileInfo, extractTaskCounts } from '../utils/parser';
-import { findNodeById, replacePathPrefix } from '../utils/helpers';
-import { MediaViewerEditor, isBinaryViewable } from '../editors/MediaViewerEditor';
+import type { VFSUIShell, VFSNodeUI } from '@itookit/vfs-ui';
+import { parseFileInfo, extractTaskCounts } from './parser';
+const replacePathPrefix = (path: string, old: string, next: string) => path === old || path.startsWith(old + '/') ? next + path.slice(old.length) : path;
+import { MediaViewerEditor, isBinaryViewable } from './MediaViewerEditor';
 import { guessMimeType } from '@itookit/vfs-core';
 
-import type { PublicEventMap } from '../contracts/events';
 
-export interface ConnectOptions {
+
+export interface ConnectOptions<Node extends VFSNodeUI = VFSNodeUI> {
+  resolveEditor?: (node: Node) => EditorFactory | null | undefined;
   onEditorCreated?: (editor: IEditor | null) => void;
   saveDebounceMs?: number;
   files?: FileSystemContext;
   [key: string]: any;
 }
 
-type VFSManager = ISessionUI<VFSNodeUI, VFSService> & {
-  resolveEditorFactory?: (node: VFSNodeUI) => EditorFactory;
-  store?: { getState(): VFSUIState; dispatch(action: any): void };
-  on(event: 'fileRenamed', handler: (payload: PublicEventMap['fileRenamed']) => void): () => void;
-  on(event: string, handler: (payload: any) => void): () => void;
-};
-
 /**
  * Connects a session manager to an editor.
  * 
- * [Updated] Now supports dynamic editor factory resolution via vfsManager.
+ * The host supplies editor factories and file context.
  */
 export function connectEditorLifecycle(
-  vfsManager: VFSManager,
+  vfsManager: VFSUIShell,
   engine: IFileSystem,
   editorContainer: HTMLElement,
   defaultEditorFactory?: EditorFactory,
-  options: ConnectOptions = {}
+  options: ConnectOptions<VFSNodeUI> = {}
 ): () => void {
-  const { onEditorCreated, saveDebounceMs = 500, files = { fs: engine, cwd: '/' }, ...factoryExtraOptions } = options;
+  const { resolveEditor, onEditorCreated, saveDebounceMs = 500, files = { fs: engine, cwd: '/' }, ...factoryExtraOptions } = options;
   if (files.fs !== engine) throw new Error('Editor file context differs from its file tree');
 
   let activeEditor: IEditor | null = null;
@@ -55,10 +49,7 @@ export function connectEditorLifecycle(
   let hasUnsavedChanges = false;
 
   const dispatch = (itemId: string, metadata: any) => {
-    vfsManager.store?.dispatch({
-      type: 'ITEM_METADATA_UPDATE',
-      payload: { itemId, metadata },
-    });
+    vfsManager.updateNodeMetadata(itemId, metadata);
   };
 
   const optimisticUpdate = () => {
@@ -89,10 +80,7 @@ export function connectEditorLifecycle(
     if (!activeEditor.isDirty?.() && !hasUnsavedChanges) return;
 
     try {
-      const state = vfsManager.store?.getState();
-      const exists = state?.items.some(function check(n): boolean {
-        return n.id === activeNode!.id || !!n.children?.some(check);
-      });
+      const exists = vfsManager.getNode(activeNode.id);
 
       if (exists) {
         const content = activeEditor.getText();
@@ -208,7 +196,7 @@ export function connectEditorLifecycle(
         }
 
         const factory =
-          vfsManager.resolveEditorFactory?.(item) || defaultEditorFactory;
+          resolveEditor?.(item) || defaultEditorFactory;
         if (!factory) throw new Error('No suitable editor factory found.');
 
         const editorOptions: EditorOptions = {
@@ -282,14 +270,12 @@ export function connectEditorLifecycle(
 
   const unsubRename = vfsManager.on(
     'fileRenamed',
-    ({ oldId, newId, item }: PublicEventMap['fileRenamed']) => {
+    ({ oldId, newId, item }: { oldId: string; newId: string; item: VFSNodeUI }) => {
       if (!activeEditor || !activeNode) return;
       const renamedNodeId = replacePathPrefix(activeNode.id, oldId, newId);
       if (renamedNodeId === activeNode.id) return;
 
-      const stateItem = vfsManager.store
-        ? findNodeById(vfsManager.store.getState().items, renamedNodeId)
-        : undefined;
+      const stateItem = vfsManager.getNode(renamedNodeId);
       activeNode = stateItem ?? (activeNode.id === oldId
         ? item
         : { ...activeNode, id: renamedNodeId });

@@ -1,5 +1,5 @@
 import { t } from '@itookit/common';
-import type { FileCreationConfig } from '@itookit/ui-common';
+import type { FileCreationConfig } from '../contracts/options';
 import type { IDataOperationPort, IStatePort } from '../contracts/ports';
 
 /** Check the selected destination before applying a host's creation redirect. */

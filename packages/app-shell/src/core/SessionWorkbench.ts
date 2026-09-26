@@ -188,7 +188,7 @@ export class SessionWorkbench implements WorkspaceController {
             if (this.closed) return;
             await this.sidebarUI?.refresh();
             await this.syncBranchRoute();
-            for (const id of this.waiting) this.sidebarUI?.setNodeWaitingInput('/' + id, true);
+            for (const id of this.waiting) this.sidebarUI?.setNodeAttention('/' + id, t('project.waitingInput'));
             if (this.active?.startsWith('/')) {
                 const target = resolveBrowserTarget(this.active);
                 if (target.kind === 'task') await this.showTask(this.active);
@@ -512,7 +512,7 @@ export class SessionWorkbench implements WorkspaceController {
         return this.active && this.activeBranch !== undefined ? sessionRoute(this.active, this.activeBranch) : this.active;
     }
     setWaitingInput(id: string, waiting: boolean): void {
-        waiting ? this.waiting.add(id) : this.waiting.delete(id); this.sidebarUI?.setNodeWaitingInput('/' + id, waiting);
+        waiting ? this.waiting.add(id) : this.waiting.delete(id); this.sidebarUI?.setNodeAttention('/' + id, waiting ? t('project.waitingInput') : undefined);
     }
     /** Editor open/close drives the L4 glob mount; a failure must not break the editor. */
     private mountEditorSkills(sessionId: string, path: string): void {
