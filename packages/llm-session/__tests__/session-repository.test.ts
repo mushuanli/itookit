@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend, type IVFSManager, type IFileSystem } from '@itookit/vfs-core';
 import { SessionRepository } from '../src/persistence/session-repository';
 import { createSessionDataProjection } from '../src/persistence/session-projection';
@@ -11,6 +11,23 @@ beforeEach(async () => {
 afterEach(async () => { await repository.dispose(); await manager.dispose(); });
 
 describe('Session data repository', () => {
+    it('tracks saved activity without promoting a Session for view-only preferences', async () => {
+        const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
+        try {
+            const id = await repository.createSession('Activity');
+            now.mockReturnValue(2000);
+            await repository.updateUIState(id, { scrollPosition: 50, historyVisibility: 'hidden' });
+            expect((await repository.getManifest(id)).updatedAt).toBe(1000);
+            await repository.updateUIState(id, { branchDrafts: { main: { inputText: '', inputAgentId: 'default' } } });
+            expect((await repository.getManifest(id)).updatedAt).toBe(1000);
+            now.mockReturnValue(3000);
+            await repository.updateUIState(id, { branchDrafts: { main: { inputText: 'draft' } } });
+            expect((await repository.getManifest(id)).updatedAt).toBe(3000);
+            now.mockReturnValue(4000);
+            await repository.updateManifest(id, { title: 'Renamed' });
+            expect(await repository.getManifest(id)).toMatchObject({ createdAt: 1000, updatedAt: 4000 });
+        } finally { now.mockRestore(); }
+    });
     it('persists execution mode across reopening and isolates it between Sessions', async () => {
         const first = await repository.createSession('Execute');
         const second = await repository.createSession('Chat');

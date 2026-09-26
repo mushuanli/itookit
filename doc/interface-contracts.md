@@ -118,7 +118,7 @@
 
 ### 会话目录配置
 
-`EditorHostContext.directoryCommands.configureWorkspace(mode)` 由 SessionWorkbench 注入，llm-ui 的 WorkspaceDirectoryMenu 消费。`workspace` 模式替换主挂载并设置 cwd，`mount` 模式管理附加来源和读写权限；界面不直接接触宿主文件路径 API。`DirectoryMountService.setWorkspace` 复用 Session 授权 revision 和挂载变更守卫。
+`EditorHostContext.directoryCommands.configureWorkspace(mode)` 由 SessionWorkbench 注入，llm-ui 的 WorkspaceDirectoryMenu 消费。`workspaceReadOnly` 表示主目录设置仅供查看，不改变文件权限：项目会话的 `workspace` 模式展示项目目录，`mount` 模式管理额外挂载；未归属项目的会话仍可设置主目录。界面不直接接触宿主文件路径 API。运行时向 `DirectoryMountService.fixedWorkspace(sessionId)` 注入所属项目的目录，服务在写入授权前校验主挂载来源、权限和 cwd，拒绝替换、移除或借附加挂载改变主目录；继续复用 Session 授权 revision 和挂载变更守卫。
 
 文件搜索可通过 `ToolVFSContext.walkFiles(dir, options)` 增量消费路径；`createVFSToolContext` 同时实现惰性接口和兼容的 `listFiles`，两者共享忽略规则。Grep/Glob 必须优先使用惰性接口，达到结果上限立即关闭迭代器，避免桌面 IPC 完整遍历导致工具超时。
 

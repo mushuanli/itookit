@@ -31,7 +31,7 @@ export class WorkspaceDirectoryMenu {
         menu.setAttribute('aria-label', t('workspace.menu')); this.popup = menu;
         for (const mode of ['workspace', 'mount'] as const) {
             const item = document.createElement('button'); item.type = 'button'; item.setAttribute('role', 'menuitem');
-            item.textContent = t(mode === 'workspace' ? 'workspace.configure' : 'workspace.mounts');
+            item.textContent = t(mode === 'workspace' ? this.commands?.workspaceReadOnly ? 'workspace.view' : 'workspace.configure' : 'workspace.mounts');
             item.disabled = this.isRunning(); item.dataset.directoryMode = mode;
             item.onclick = () => { void this.configure(mode); }; menu.append(item);
         }

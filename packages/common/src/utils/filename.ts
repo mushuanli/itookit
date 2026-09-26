@@ -11,11 +11,11 @@ export function formatDefaultFileTitle(): string {
 }
 
 /**
- * Build a renamed filename by preserving the original extension.
+ * Preserve the original extension unless the user supplies an explicit suffix.
  *
  * @param newTitle       The user-supplied new title (may or may not include the extension).
  * @param originalFilename  The current filename including extension (e.g. "notes.md").
- * @returns `{ filename }` — the new filename with the original extension preserved.
+ * @returns `{ filename }` — the new filename with an explicit or preserved extension.
  *          `{ title }` — the bare title without any extension (for use in metadata/manifests).
  *
  * @example
@@ -32,8 +32,9 @@ export function buildRenamedFilename(
 ): { filename: string; title: string } {
     const dotIdx = originalFilename.lastIndexOf('.');
     const ext = dotIdx > 0 ? originalFilename.slice(dotIdx) : '';
-    const base = ext && newTitle.toLowerCase().endsWith(ext.toLowerCase())
-        ? newTitle.slice(0, -ext.length)
-        : newTitle;
-    return { filename: base + ext, title: base };
+    const requestedDot = newTitle.lastIndexOf('.');
+    const explicit = requestedDot > 0 && requestedDot < newTitle.length - 1;
+    return explicit
+        ? { filename: newTitle, title: newTitle.slice(0, requestedDot) }
+        : { filename: newTitle + ext, title: newTitle };
 }

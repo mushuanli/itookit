@@ -1,5 +1,6 @@
 // @file: llm-ui/shell/EventBinder.ts
 
+import { installResponsiveActions } from '@itookit/ui-common';
 import { EventCleanup } from '../components/common/EventCleanup';
 
 export interface EventBinderCallbacks {
@@ -27,6 +28,7 @@ export interface GlobalShortcutCallbacks {
 
 export class EventBinder {
     private events = new EventCleanup();
+    private disposeResponsive?: () => void;
 
     constructor(
         private container: HTMLElement,
@@ -36,6 +38,15 @@ export class EventBinder {
     private bindToolbarMenu(): void {
         const menu = this.container.querySelector<HTMLDetailsElement>('.llm-workspace-titlebar__menu');
         if (!menu) return;
+        const titlebar = menu.closest<HTMLElement>('.llm-workspace-titlebar');
+        const toolbar = titlebar?.querySelector<HTMLElement>('.llm-workspace-titlebar__primary');
+        if (titlebar && toolbar) {
+            const actions = ['llm-btn-session-rerun', 'llm-btn-history-visibility', 'llm-btn-navigator', 'llm-btn-copy']
+                .flatMap(id => { const button = menu.querySelector<HTMLElement>('#' + id); return button ? [button] : []; });
+            this.disposeResponsive?.();
+            this.disposeResponsive = installResponsiveActions({ container: titlebar, toolbar, actions, minWidth: 760,
+                fallbackFocus: menu.querySelector('summary')! });
+        }
         this.events.add(document, 'click', event => {
             const target = event.target as Element;
             if (!menu.contains(target) || target.closest('button')) menu.open = false;
@@ -143,6 +154,7 @@ export class EventBinder {
     }
 
     cleanup(): void {
+        this.disposeResponsive?.(); this.disposeResponsive = undefined;
         this.events.cleanup();
     }
 }

@@ -1,5 +1,6 @@
 import { showNameDialog } from '../files/project-dialog';
-import { t } from '@itookit/common';
+import { getLocale, t } from '@itookit/common';
+import { installResponsiveActions } from '@itookit/ui-common';
 import { type ProjectSessions } from '@itookit/app-core';
 import type { ConversationManifest } from '@itookit/llm-session';
 
@@ -11,35 +12,71 @@ interface Actions {
 /** Small, explicit organization actions; every member keeps an independent editor. */
 export class SessionFamilyActions {
     private headerEvents?: AbortController;
+    private currentHeader?: HTMLElement;
     constructor(private readonly sessions: ProjectSessions,
         private readonly signal: AbortSignal, private readonly actions: Actions) { signal.addEventListener('abort', () => this.headerEvents?.abort(), { once: true }); }
     async header(manifest: ConversationManifest): Promise<HTMLElement> {
+        const { members } = await this.sessions.family(manifest.id);
         const header = document.createElement('div'); header.className = 'session-family__toolbar';
-        const { members: sessions } = await this.sessions.family(manifest.id);
-        if (manifest.parentSessionId) {
-            const parent = sessions.find(item => item.id === manifest.parentSessionId);
-            if (parent) header.append(this.button(t('project.parentSession', { name: parent.title }), () => this.actions.open(parent.id)));
-        }
-        if (sessions.length > 1) header.append(this.button(t('project.family'), async () => {
-            if (window.matchMedia?.('(max-width: 768px)').matches) await this.showFamily(manifest.id);
-            else this.actions.showFamily();
-        }));
-        header.append(this.button(t('project.newChild'), () => this.actions.child(manifest.id)));
+        header.dataset.sessionId = manifest.id; this.currentHeader = header;
+        const primary = document.createElement('div'); primary.className = 'session-family__primary';
         const menu = document.createElement('details'); menu.className = 'session-family__menu';
-        const summary = document.createElement('summary'); summary.textContent = t('chat.toolbar.more');
+        const summary = document.createElement('summary'); summary.textContent = t('project.sessionActions');
         const items = document.createElement('div'); items.className = 'session-family__menu-items';
-        menu.append(summary, items);
-        this.bindMenu(menu);
-        const item = (label: string, run: () => Promise<unknown>) => items.append(this.button(label, async () => { menu.open = false; await run(); }));
-        item(t('project.renameSession'), () => this.rename(manifest.id));
-        item(t('project.moveUnder'), () => this.move(manifest.id));
-        if (manifest.parentSessionId) item(t('project.promoteSession'), () => this.promote(manifest.id));
-        item(t('project.deleteSessionOnly'), () => this.remove(manifest.id));
-        header.append(menu);
+        items.append(this.information()); menu.append(summary, items); header.append(primary, menu);
+        this.bindMenu(menu); this.updateMetadata(manifest);
+        const actions = this.headerActions(manifest, members).map(action => {
+            const button = this.button(action.label, async () => { menu.open = false; await action.run(); });
+            items.append(button); return { button, primary: action.primary };
+        });
+        const dispose = installResponsiveActions({ container: header, toolbar: primary, fallbackFocus: summary,
+            actions: actions.filter(action => action.primary).map(action => action.button), minWidth: 640 });
+        this.headerEvents!.signal.addEventListener('abort', dispose, { once: true });
+        menu.addEventListener('toggle', () => {
+            if (menu.open) void this.sessions.get(manifest.id).then(current => {
+                if (!this.signal.aborted && this.currentHeader === header) this.updateMetadata(current);
+            }).catch(this.actions.report);
+        }, { signal: this.headerEvents!.signal });
         if (manifest.parentSessionId && !manifest.currentHead) {
             const hint = document.createElement('span'); hint.className = 'session-family__hint'; hint.textContent = t('project.independentSession'); header.append(hint);
         }
         return header;
+    }
+    private headerActions(manifest: ConversationManifest, members: ConversationManifest[]) {
+        const actions: Array<{ label: string; primary?: boolean; run: () => Promise<unknown> }> = [];
+        const parent = members.find(item => item.id === manifest.parentSessionId);
+        if (parent) actions.push({ label: t('project.parentSession', { name: parent.title }), primary: true, run: () => this.actions.open(parent.id) });
+        if (members.length > 1) actions.push({ label: t('project.family'), primary: true, run: async () => {
+            if (window.matchMedia?.('(max-width: 768px)').matches) await this.showFamily(manifest.id);
+            else this.actions.showFamily();
+        } });
+        actions.push({ label: t('project.newChild'), primary: true, run: () => this.actions.child(manifest.id) },
+            { label: t('project.renameSession'), run: () => this.rename(manifest.id) },
+            { label: t('project.moveUnder'), run: () => this.move(manifest.id) });
+        if (parent) actions.push({ label: t('project.promoteSession'), run: () => this.promote(manifest.id) });
+        actions.push({ label: t('project.deleteSessionOnly'), run: () => this.remove(manifest.id) });
+        return actions;
+    }
+    private information(): HTMLElement {
+        const info = document.createElement('dl'); info.className = 'session-family__information';
+        for (const field of ['createdAt', 'updatedAt'] as const) {
+            const label = document.createElement('dt'); label.textContent = t(field === 'createdAt' ? 'project.createdAt' : 'project.lastActivity');
+            const value = document.createElement('dd'), time = document.createElement('time'); time.dataset.sessionTime = field;
+            value.append(time); info.append(label, value);
+        }
+        const hint = document.createElement('small'); hint.textContent = t('project.activityHint');
+        const wrapper = document.createElement('div'); wrapper.className = 'session-family__metadata'; wrapper.append(info, hint); return wrapper;
+    }
+    updateMetadata(manifest: ConversationManifest): void {
+        if (this.currentHeader?.dataset.sessionId !== manifest.id) return;
+        for (const time of this.currentHeader.querySelectorAll<HTMLTimeElement>('time[data-session-time]')) {
+            const value = manifest[time.dataset.sessionTime as 'createdAt' | 'updatedAt'];
+            const date = new Date(value);
+            time.textContent = Number.isFinite(date.getTime())
+                ? new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', timeStyle: 'medium' }).format(date) : t('project.timeUnknown');
+            if (Number.isFinite(date.getTime())) { time.dateTime = date.toISOString(); time.title = date.toLocaleString(getLocale()); }
+            else { time.removeAttribute('datetime'); time.removeAttribute('title'); }
+        }
     }
     private bindMenu(menu: HTMLDetailsElement): void {
         this.headerEvents?.abort(); this.headerEvents = new AbortController();

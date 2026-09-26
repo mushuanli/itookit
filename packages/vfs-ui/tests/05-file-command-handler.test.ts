@@ -143,7 +143,11 @@ describe('FileCommandHandler — command → engine wiring', () => {
         }
     });
 
-    it('file:rename preserves the file type and updates its stored title', async () => {
+    it.each([
+        ['new-name', 'new-name.prj'],
+        ['new-name.prj', 'new-name.prj'],
+        ['new-name.md', 'new-name.md'],
+    ])('file:rename resolves %s to %s and updates its stored title', async (newTitle, filename) => {
         const oldPath = '/old-name.prj';
         const oldItem = makeVFSNodeUI({
             id: oldPath,
@@ -166,11 +170,11 @@ describe('FileCommandHandler — command → engine wiring', () => {
         engine.driver.rename = vi.fn(async () => {});
         engine.driver.updateMetadata = vi.fn(async () => {});
 
-        commandBus.execute('file:rename', { itemId: oldPath, newTitle: 'new-name' });
+        commandBus.execute('file:rename', { itemId: oldPath, newTitle });
         await sleep(10);
 
         expect(engine.driver.updateMetadata).toHaveBeenCalledWith(oldPath, { title: 'new-name' });
-        expect(engine.driver.rename).toHaveBeenCalledWith(oldPath, 'new-name.prj');
+        expect(engine.driver.rename).toHaveBeenCalledWith(oldPath, filename);
         expect(vi.mocked(engine.driver.updateMetadata).mock.invocationCallOrder[0])
             .toBeLessThan(vi.mocked(engine.driver.rename).mock.invocationCallOrder[0]);
     });

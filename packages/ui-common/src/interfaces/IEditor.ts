@@ -77,6 +77,8 @@ export interface EditorHostContext {
     navigate: (request: NavigationRequest) => Promise<void>;
     /** Explicit human commands; never exposed as model-callable tools. */
     directoryCommands?: {
+        /** The host owns the workspace location; additional mounts remain editable. */
+        workspaceReadOnly?: boolean;
         addDirectory(directory?: string, access?: 'ro' | 'rw'): Promise<string>;
         setHome(directory?: string): Promise<string>;
         configureWorkspace?(mode: 'workspace' | 'mount'): Promise<void>;

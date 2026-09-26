@@ -122,7 +122,8 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         let mountChanged: (id: string) => Promise<void> = async () => {};
         let mountGuard: (id: string) => Promise<void> = async () => {};
         const directoryMounts = new DirectoryMountService(systemFS, sessionFiles, options.directorySourceProvider,
-            id => mountGuard(id), id => mountChanged(id));
+            id => mountGuard(id), id => mountChanged(id),
+            async (id): Promise<string | undefined> => (await projects.forFolder((await sessionRepository.getManifest(id)).folder))?.project.directory);
         cleanupFns.push(() => directoryMounts.dispose());
         await traceBoot('directoryMounts.init', () => directoryMounts.init());
         const projects = new ProjectService(systemFS, sessionRepository, directoryMounts, sessionFiles);

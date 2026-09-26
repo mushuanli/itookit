@@ -24,7 +24,9 @@ it('creates project Sessions from the selected project and edits its files in th
     const kernel = { onChanged: () => () => {}, async *listSessions() {} };
     const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
     const chat = vi.fn(async (element: HTMLElement) => { element.textContent = 'chat'; return { destroy: vi.fn() }; });
-    const file = vi.fn(async (element: HTMLElement, _options: any) => { element.textContent = 'file'; return { destroy: vi.fn() }; });
+    const file = vi.fn(async (element: HTMLElement, options: any) => { element.textContent = 'file'; return {
+        destroy: vi.fn(), setTitle: vi.fn(), updateNodeId: (path: string) => { options.target.path = path; },
+    }; });
     const workbench = new SessionWorkbench({ sidebar: sidebar, container: main, repository: repository, files: files, factory: chat as any, onSelect: () => {}, hostContext: undefined, kernel: kernel as any, fileFactory: file as any, directoryMounts: mounts, sessionSkills: undefined, manageMemory: undefined, flows: undefined, projects: projects });
     try {
         await workbench.start();
@@ -41,11 +43,20 @@ it('creates project Sessions from the selected project and edits its files in th
         await workbench.openResource(projectPath + '/@files/notes.md');
         expect(file.mock.calls.at(-1)?.[1].initialContent).toBe('research notes');
         expect(sidebar.querySelector('.vfs-columns')?.getAttribute('data-content-visible')).toBe('true');
-        expect(sidebar.querySelector('.vfs-columns__content')?.textContent).toContain('notes.md');
+        expect(sidebar.querySelector('.vfs-columns__content')?.textContent).toContain('notes');
+        expect(sidebar.querySelector('.vfs-columns__content')?.textContent).not.toContain('notes.md');
+        expect(file.mock.calls.at(-1)?.[1].title).toBe('notes');
         expect(sidebar.querySelector('.vfs-columns__content')?.textContent).not.toContain('新会话');
         await file.mock.calls.at(-1)![1].hostContext.saveContent('/notes.md', 'edited in workbench');
         const context = await files.acquire(session);
         expect(await context.vfs.readFile('notes.md')).toBe('edited in workbench'); await context.release();
+        const options = file.mock.calls.at(-1)![1];
+        await options.files.fs.driver.rename('/notes.md', 'renamed.txt');
+        await vi.waitFor(() => expect(options.target.path).toBe('/renamed.txt'));
+        expect(workbench.getActiveResourceId()).toBe(projectPath + '/@files/renamed.txt');
+        await options.hostContext.saveContent(options.target.path, 'saved after rename');
+        expect(await options.files.fs.driver.readContent('/renamed.txt', { encoding: 'utf-8' })).toBe('saved after rename');
+        expect(await options.files.fs.driver.exists('/notes.md')).toBe(false);
         const another = await workbench.createResource();
         expect((await repository.getManifest(another)).folder).toBe(other.path + '/@sessions');
         await repository.createFolder(other.path + '/@sessions/Planning');
@@ -81,7 +92,7 @@ it('creates project Sessions from the selected project and edits its files in th
         await repository.updateManifest(grandchild, { title: 'Updated child' });
         await vi.waitFor(() => expect(content.textContent).toContain('Updated child'));
         expect(sidebar.classList.contains('project-workbench--single')).toBe(true);
-        [...main.querySelectorAll<HTMLButtonElement>('.session-family__toolbar > button')].find(button => button.textContent === '同组会话')!.click();
+        [...main.querySelectorAll<HTMLButtonElement>('.session-family__toolbar button')].find(button => button.textContent === '同组会话')!.click();
         expect(sidebar.classList.contains('project-workbench--single')).toBe(false);
         const localSearch = content.querySelector<HTMLInputElement>('input[type="search"]')!;
         localSearch.value = 'Updated'; localSearch.dispatchEvent(new Event('input'));

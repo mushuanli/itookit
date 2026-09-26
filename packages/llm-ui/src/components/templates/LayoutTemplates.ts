@@ -28,6 +28,7 @@ export const LayoutTemplates = {
             </div>
 
             <div class="llm-workspace-titlebar__right">
+                <div class="llm-workspace-titlebar__primary"></div>
                 <details class="llm-workspace-titlebar__menu">
                     <summary aria-label="${escapeHTML(t('chat.toolbar.more'))}" title="${escapeHTML(t('chat.toolbar.more'))}">⋯</summary>
                     <div class="llm-workspace-titlebar__menu-actions">

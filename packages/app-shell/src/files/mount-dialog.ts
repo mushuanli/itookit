@@ -5,10 +5,12 @@ import { localizeMountError } from './localize-mount-error';
 type Mode = 'mount' | 'home' | 'workspace';
 
 /** Host-only configuration shared by sidebar, slash commands and the chat menu. */
-export function showMountDialog(service: DirectoryMountService, files: SessionFilesService, sessionId: string,
+export async function showMountDialog(service: DirectoryMountService, files: SessionFilesService, sessionId: string,
     mode: Mode = 'mount', signal?: AbortSignal): Promise<boolean> {
-    if (signal?.aborted) return Promise.resolve(false);
-    return new Promise(resolve => new MountDialog(service, files, sessionId, mode, signal, resolve).open());
+    if (signal?.aborted) return false;
+    const fixed = mode !== 'home' && (await service.fixedWorkspace(sessionId)) !== undefined;
+    if (signal?.aborted) return false;
+    return new Promise(resolve => new MountDialog(service, files, sessionId, mode, signal, resolve, fixed).open());
 }
 
 class MountDialog {
@@ -29,12 +31,12 @@ class MountDialog {
 
     constructor(private readonly service: DirectoryMountService, private readonly files: SessionFilesService,
         private readonly sessionId: string, private readonly mode: Mode, private readonly signal: AbortSignal | undefined,
-        private readonly resolve: (changed: boolean) => void) {}
+        private readonly resolve: (changed: boolean) => void, private readonly fixed: boolean) {}
 
     open(): void {
         this.dialog.className = 'session-mount-dialog';
-        const title = document.createElement('h2'); title.textContent = t(`mount.dialog.${this.mode}`);
-        const description = document.createElement('p'); description.textContent = t('mount.dialog.explanation');
+        const title = document.createElement('h2'); title.textContent = t(this.fixed && this.mode === 'workspace' ? 'mount.dialog.projectWorkspace' : `mount.dialog.${this.mode}`);
+        const description = document.createElement('p'); description.textContent = t(this.fixed ? 'mount.dialog.fixedWorkspace' : 'mount.dialog.explanation');
         this.status.setAttribute('role', 'status');
         this.dialog.setAttribute('aria-label', title.textContent);
         this.dialog.append(title, description, this.current, this.hint);
@@ -47,6 +49,7 @@ class MountDialog {
     }
 
     private renderFields(): void {
+        if (this.fixed && this.mode === 'workspace') return;
         this.path.placeholder = '/home/admin/projects/demo';
         this.field('mount.dialog.source', this.path);
         for (const value of ['rw', 'ro'] as const) {
@@ -59,7 +62,7 @@ class MountDialog {
             const note = document.createElement('p'); note.textContent = t('mount.dialog.replace'); this.dialog.append(note); return;
         }
         this.at.placeholder = '/reference'; this.field('mount.dialog.target', this.at);
-        this.cwd.type = 'checkbox'; this.field('mount.dialog.setCwd', this.cwd);
+        if (!this.fixed) { this.cwd.type = 'checkbox'; this.field('mount.dialog.setCwd', this.cwd); }
     }
 
     private field(key: Parameters<typeof t>[0], input: HTMLElement): void {
@@ -74,6 +77,12 @@ class MountDialog {
 
     private renderActions(): void {
         const actions = document.createElement('div');
+        if (!this.fixed || this.mode !== 'workspace') this.renderMountActions(actions);
+        const close = document.createElement('button'); close.type = 'button'; close.textContent = t('mount.dialog.close');
+        close.onclick = () => this.close(); actions.append(close); this.dialog.append(actions);
+    }
+
+    private renderMountActions(actions: HTMLElement): void {
         this.button(actions, t('mount.dialog.internal'), () => this.browse('/home/admin'));
         if (this.service.canSelectHost) this.button(actions, t('mount.dialog.host'), async () => {
             const path = await this.service.chooseDirectory();
@@ -82,11 +91,9 @@ class MountDialog {
             else this.status.textContent = t('mount.dialog.cancelled');
         });
         this.button(actions, t(this.mode === 'workspace' ? 'mount.dialog.save' : this.mode === 'home' ? 'mount.dialog.home' : 'mount.dialog.add'), () => this.save());
-        if (this.mode === 'mount') this.button(actions, t('mount.dialog.mountDefault'), async () => {
+        if (this.mode === 'mount' && !this.fixed) this.button(actions, t('mount.dialog.mountDefault'), async () => {
             this.status.textContent = await this.service.mountHome(this.sessionId); this.changed = true; await this.refresh();
         });
-        const close = document.createElement('button'); close.type = 'button'; close.textContent = t('mount.dialog.close');
-        close.onclick = () => this.close(); actions.append(close); this.dialog.append(actions);
     }
 
     private async save(): Promise<void> {
@@ -101,7 +108,7 @@ class MountDialog {
         const record = await this.files.inspect(this.sessionId);
         if (this.closed) return;
         this.current.textContent = t('mount.dialog.cwd', { path: record?.cwd ?? '/' });
-        this.hint.textContent = t('mount.dialog.default', { path: this.service.getHome() ?? t('mount.dialog.unset') });
+        this.hint.textContent = this.fixed ? '' : t('mount.dialog.default', { path: this.service.getHome() ?? t('mount.dialog.unset') });
         this.list.replaceChildren();
         if (this.mode === 'home') return;
         if (!record?.mounts.length) { this.list.textContent = t('mount.dialog.empty'); return; }
@@ -111,7 +118,10 @@ class MountDialog {
             const th = document.createElement('th'); th.textContent = t(`mount.dialog.${key}`); header.append(th);
         }
         const body = table.createTBody();
-        for (const mount of record.mounts) this.renderMount(body.insertRow(), mount, record.cwd);
+        for (const mount of record.mounts) {
+            if (this.fixed && this.mode === 'workspace' && mount.at !== '/workspace') continue;
+            this.renderMount(body.insertRow(), mount, record.cwd);
+        }
         this.list.append(table);
     }
 
@@ -120,9 +130,13 @@ class MountDialog {
         row.insertCell().textContent = mount.at;
         row.insertCell().textContent = t(`mount.access.${mount.access}`);
         const actions = row.insertCell();
+        if (this.fixed && mount.at === '/workspace') {
+            this.button(actions, t('mount.dialog.reconnect'), () => this.mutate(() => this.service.reconnect(this.sessionId, mount.mountId)));
+            return;
+        }
         this.button(actions, t(mount.access === 'ro' ? 'mount.dialog.makeRw' : 'mount.dialog.makeRo'),
             () => this.mutate(() => this.service.update(this.sessionId, mount.mountId, mount.access === 'ro' ? 'rw' : 'ro', false)));
-        if (cwd !== mount.at) this.button(actions, t('mount.dialog.setCwd'),
+        if (!this.fixed && cwd !== mount.at) this.button(actions, t('mount.dialog.setCwd'),
             () => this.mutate(() => this.service.update(this.sessionId, mount.mountId, mount.access, true)));
         this.button(actions, t('mount.dialog.reconnect'), () => this.mutate(() => this.service.reconnect(this.sessionId, mount.mountId)));
         this.button(actions, t('mount.dialog.remove'), () => this.mutate(() => this.service.remove(this.sessionId, mount.mountId)));

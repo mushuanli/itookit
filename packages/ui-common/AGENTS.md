@@ -22,7 +22,8 @@ src/
 │   └── ISessionUI.ts            Session 视图契约：菜单/上下文菜单/标签编辑器/事件
 ├── components/
 │   ├── BaseSettingsEditor.ts    设置编辑器抽象基类（统一渲染/生命周期/host context）
-│   └── UIComponents.ts          Modal / Toast / showConfirmDialog
+│   ├── UIComponents.ts          Modal / Toast / showConfirmDialog
+│   └── responsive-actions.ts   按容器宽度在工具栏与菜单间移动原按钮，返回释放函数
 └── utils/
     └── clipboard.ts             copyText()（带回退的剪贴板写入）
 ```

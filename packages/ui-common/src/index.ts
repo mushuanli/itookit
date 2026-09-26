@@ -30,6 +30,7 @@ export {
 // ── UI components ──
 export * from './components/BaseSettingsEditor';
 export * from './components/UIComponents';
+export { installResponsiveActions, type ResponsiveActionsOptions } from './components/responsive-actions';
 
 // ── Browser utilities ──
 export { copyText } from './utils/clipboard';

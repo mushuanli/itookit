@@ -343,7 +343,8 @@ export class SessionRepository implements ISessionRepository {
             ...(uiState ? { uiState: { ...current.uiState, ...uiState, ...(uiState.branchDrafts ? { branchDrafts: { ...current.uiState?.branchDrafts, ...uiState.branchDrafts } } : {}) } } : {}), ...(flow ? { flow } : {}) };
         const historyChanged = await this.writeHistoryPatchTx(tx, p, historyPatch);
         if (!historyChanged && JSON.stringify(current) === JSON.stringify(next)) return false;
-        await tx.setEntry(p.session, 'session', JSON.stringify({ ...next, updatedAt: Date.now(), revision: current.revision + 1 }));
+        const updatedAt = activityChanged(current, next, historyChanged) ? Date.now() : current.updatedAt;
+        await tx.setEntry(p.session, 'session', JSON.stringify({ ...next, updatedAt, revision: current.revision + 1 }));
         return true;
     }
     private async writeHistoryPatchTx(tx: ISeqFileTransaction, p: SessionPaths, patch: object): Promise<boolean> {
@@ -472,6 +473,18 @@ function normalizeFolderPath(value: string | null | undefined): string | null {
         throw new FSError('EINVAL', 'Invalid Session folder path');
     }
     return '/' + parts.join('/');
+}
+
+/** Reading, scrolling and folding do not make an old conversation newly active. */
+function activityChanged(before: ConversationManifest, after: ConversationManifest, historyChanged: boolean): boolean {
+    return historyChanged || JSON.stringify({ ...before, uiState: undefined }) !== JSON.stringify({ ...after, uiState: undefined }) ||
+        activeDrafts(before) !== activeDrafts(after);
+}
+
+function activeDrafts(manifest: ConversationManifest): string {
+    // Editors initialize empty draft slots when opened; only actual text is activity.
+    return JSON.stringify(Object.entries(manifest.uiState?.branchDrafts ?? {})
+        .filter(([, draft]) => !!draft.inputText).sort(([a], [b]) => a.localeCompare(b)));
 }
 
 function folderParent(path: string): string | null {

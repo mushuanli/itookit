@@ -78,6 +78,39 @@ it('rejects cross-project Session moves and protects project sections', async ()
     await expect(r.browser.fs.driver.rename(folderBrowserPath(aFolder), 'Hidden')).rejects.toThrow();
 });
 
+it('fixes the workspace to its project while allowing additional mounts to be managed', async () => {
+    const r = await setup();
+    const a = (await r.projects.current())!, b = await r.projects.create('Reference');
+    const id = await r.sessionRepository.createSession('Bound', await r.projects.sessionFolder(a));
+    const primary = (await r.sessionFiles.inspect(id))!.mounts[0];
+    const mounts = r.directoryMounts;
+    expect(await mounts.fixedWorkspace(id)).toBe(a.project.directory);
+    await mounts.addDirectory(id, b.project.directory, 'ro', '/reference');
+    const before = (await r.sessionFiles.inspect(id))!;
+    const extra = before.mounts.find(m => m.at === '/reference')!;
+    await mounts.setHome(b.project.directory);
+    const attempts = [
+        () => mounts.setWorkspace(id, b.project.directory),
+        () => mounts.remove(id, primary.mountId),
+        () => mounts.update(id, primary.mountId, 'ro', false),
+        () => mounts.update(id, extra.mountId, 'ro', true),
+        () => mounts.addDirectory(id, a.project.directory, 'rw', '/renamed'),
+        () => mounts.addDirectory(id, b.project.directory, 'rw', '/reference', true),
+        () => mounts.mountHome(id),
+    ];
+    for (const attempt of attempts) {
+        await expect(attempt()).rejects.toThrow();
+        expect(await r.sessionFiles.inspect(id)).toEqual(before);
+    }
+    await mounts.update(id, extra.mountId, 'rw', false);
+    await mounts.reconnect(id, primary.mountId);
+    await mounts.remove(id, extra.mountId);
+    expect((await r.sessionFiles.inspect(id))!.mounts).toEqual([primary]);
+    const owner = await r.sessionFiles.acquire(id);
+    try { await owner.vfs.writeFile('editable.txt', 'still writable'); } finally { await owner.release(); }
+    expect(await readSession(r, id, 'editable.txt')).toBe('still writable');
+});
+
 it('restores the default project after reopening persistent storage', async () => {
     const dbName = `project-reopen-${crypto.randomUUID()}`;
     const backend = new IndexedDBBackend({ dbName });

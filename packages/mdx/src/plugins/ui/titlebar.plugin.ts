@@ -81,7 +81,6 @@ export class CoreTitleBarPlugin implements MDxPlugin {
   private cleanupFns: Array<() => void> = [];
   private toggleModeBtn: HTMLButtonElement | null = null;
   private titleEl: HTMLInputElement | null = null;
-  private fileExt: string = '';
   private currentTitle: string = '';
 
   constructor(options: CoreTitleBarPluginOptions = {}) {
@@ -228,7 +227,6 @@ export class CoreTitleBarPlugin implements MDxPlugin {
 
     const titleContainer = document.createElement('div');
     titleContainer.className = 'mdx-editor-titlebar__center';
-    this.fileExt = (editor.config.language as string) || '';
     this.currentTitle = editor.config.title || '';
     this.titleEl = document.createElement('input');
     this.titleEl.type = 'text';
@@ -242,16 +240,14 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         this.titleEl!.value = this.currentTitle;
         return;
       }
-      const { filename: finalName, title } = buildRenamedFilename(
-        newTitle,
-        this.currentTitle + this.fileExt,
-      );
       const engine = context.getFileSystem?.();
       const nodeId = context.getCurrentNodeId();
       if (!engine || !nodeId) {
         this.titleEl!.value = this.currentTitle;
         return;
       }
+      // The actual path remains authoritative when the display title hides the suffix.
+      const { filename: finalName, title } = buildRenamedFilename(newTitle, nodeId.split('/').pop()!);
       try {
         await renameWithStoredTitle(engine, nodeId, finalName, title);
         editor.updateNodeId(replaceBasename(nodeId, finalName));
@@ -375,7 +371,6 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     this.cleanupFns = [];
     this.toggleModeBtn = null;
     this.titleEl = null;
-    this.fileExt = '';
     this.currentTitle = '';
   }
 }

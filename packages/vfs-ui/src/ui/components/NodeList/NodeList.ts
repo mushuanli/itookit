@@ -28,6 +28,7 @@ interface NodeListOptions extends BaseComponentDeps {
   listHeader?: HTMLElement;
   rootPath?: () => string | null;
   cardDirectory?: (node: VFSNodeUI) => boolean;
+  directoryPreview?: (node: VFSNodeUI) => number | undefined;
   leafDirectory?: (node: VFSNodeUI) => boolean;
   toolbar?: 'full' | 'compact' | 'hidden';
   toolbarOptions?: VFSToolbarOptions;
@@ -183,7 +184,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         this.settingsPopover.toggle(this.state.uiSettings),
     });
 
-    this.renderer = new NodeListRenderer(this.selectionHandler, options.leafDirectory, options.cardDirectory);
+    this.renderer = new NodeListRenderer(this.selectionHandler, options.leafDirectory, options.cardDirectory, options.directoryPreview);
 
     if (options.title) this.setTitle(options.title);
   }
@@ -497,6 +498,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         rootPath: this.rootPath?.() ?? null,
         confirmDeleteId: this.itemActionHandler.getConfirmDeleteId(),
         findItemById: id => this.findItemById(id),
+        onPreviewChange: () => this.render(),
       });
     }
     if (scrollTop) this.bodyEl.scrollTop = scrollTop;

@@ -1,7 +1,7 @@
 import { archiveTarget, archiveTargetPath } from './archive-targets';
 import { chooseArchive, downloadArchive } from '../files/archive-transfer';
 import { SessionFamilyActions } from './SessionFamilyActions';
-import { formatDefaultFileTitle, t, type SessionSkillControls } from '@itookit/common';
+import { buildRenamedFilename, formatDefaultFileTitle, t, type SessionSkillControls } from '@itookit/common';
 import { ProjectNavigation } from './ProjectNavigation';
 import { showProjectDialog } from '../files/project-dialog';
 import { showMountDialog } from '../files/mount-dialog';
@@ -24,14 +24,14 @@ function debugEnabled(): boolean {
     try { return typeof localStorage !== 'undefined' && localStorage.getItem('vfs:debug') === '1'; } catch { return false; }
 }
 
-/** Keep Session order independent of mutable titles, timestamps and persisted UI sorting. */
+/** Sort Sessions by activity, with stable IDs resolving timestamp ties. */
 function compareSessionEntries(a: VFSNodeUI, b: VFSNodeUI): number | undefined {
     const isSession = (item: VFSNodeUI) => !isFlowPath(item.id) && resolveBrowserTarget(item.id).kind === 'session';
     const aSession = isSession(a), bSession = isSession(b);
     // Keep folder/Flow navigation together so mixed siblings have a transitive order.
     if (aSession !== bSession) return aSession ? 1 : -1;
     if (!aSession) return undefined;
-    return Date.parse(b.metadata.createdAt) - Date.parse(a.metadata.createdAt) || a.id.localeCompare(b.id);
+    return Date.parse(b.metadata.lastModified) - Date.parse(a.metadata.lastModified) || a.id.localeCompare(b.id);
 }
 
 export interface SessionWorkbenchOptions {
@@ -56,6 +56,7 @@ export class SessionWorkbench implements WorkspaceController {
     private readonly dialogs = new AbortController();
     private editor?: IEditor;
     private previewCleanup?: () => void;
+    private fileRenameCleanup?: () => void;
     private context?: FileSystemContextOwner;
     private assets?: FileSystemView;
     private browser?: FileSystemSourceOwner;
@@ -126,7 +127,7 @@ export class SessionWorkbench implements WorkspaceController {
         if (this.projects) this.installProjectNavigation();
         this.sidebarUI = createVFSUI({ sessionListContainer: tree, title: this.projects ? t('project.workspace') : '会话', scopeId: 'session-browser:v1:admin',
             columns: this.projectNavigation?.options, toolbar: 'full',
-            searchPlaceholder: t(this.projects ? 'project.searchContents' : 'project.search'), showFileExtensions: true,
+            searchPlaceholder: t(this.projects ? 'project.searchContents' : 'project.search'), showFileExtensions: !this.projects,
             readOnly: false, activateDirectories: true, autoSelectFirst: !this.projects, defaultUiSettings: { sortBy: 'lastModified' },
             compareItems: compareSessionEntries,
             restoreExpandedDirectory: path => isFlowPath(path) || ['folder', 'project-files'].includes(resolveBrowserTarget(path).kind),
@@ -346,6 +347,7 @@ export class SessionWorkbench implements WorkspaceController {
                         assets = createFileSystemView({ viewId: `editor-attachments:${target.sessionId}`, mounts: [{ mountId: 'attachments', at: '/', root: '/attachments', fs: context.context.fs, access: 'rw' }] });
                         editor = await this.factory(mount, { target: { kind: 'session', sessionId: target.sessionId, branch: branch ?? manifest.currentBranch ?? 'main' }, files: context.context, assets, title: manifest.title,
                             hostContext: { ...this.hostContext!, directoryCommands: this.directoryMounts ? {
+                                workspaceReadOnly: (await this.directoryMounts.fixedWorkspace(target.sessionId)) !== undefined,
                                 configureWorkspace: async mode => {
                                     if (await showMountDialog(this.directoryMounts!, this.files, target.sessionId, mode, this.dialogs.signal)) {
                                         await this.reloadAfterMount(target.sessionId);
@@ -425,6 +427,7 @@ export class SessionWorkbench implements WorkspaceController {
                 return undefined;
             });
             if (this.closed || !manifest || this.activeBranch === undefined || !this.editor) return;
+            this.familyActions?.updateMetadata(manifest);
             const current = manifest.currentBranch ?? 'main';
             if (current !== this.activeBranch) {
                 this.activeBranch = current;
@@ -715,14 +718,31 @@ export class SessionWorkbench implements WorkspaceController {
             const mount = await this.editorMount(target.folder);
             const bytes = await owner.fs.driver.readContent(target.path, { encoding: 'binary' });
             const content = decodeFile(target.path, bytes);
+            const filename = target.path.split('/').pop()!;
             if (content === undefined) this.previewCleanup = this.showBinary(mount, target.path, bytes);
             else this.editor = await this.fileFactory(mount, { target: { kind: 'file', path: target.path }, files: context.context,
-                initialContent: content, title: target.path.split('/').pop(),
+                initialContent: content, title: buildRenamedFilename(filename, filename).title,
                 hostContext: { toggleSidebar: () => this.sidebarUI?.toggleSidebar(),
                     navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve(),
-                    saveContent: async (_path, text) => { await owner.fs.driver.writeContent(target.path, text); this.refresh(); } } });
+                    saveContent: async (path, text) => { await owner.fs.driver.writeContent(path, text); this.refresh(); } } });
             this.context = context;
+            if (this.editor) this.trackProjectFileRenames(owner.fs, target.folder, target.path);
         } catch (error) { await context.release(); throw error; }
+    }
+
+    private trackProjectFileRenames(fs: IFileSystem, folder: string, path: string): void {
+        this.fileRenameCleanup = fs.on('node:renamed', event => {
+            for (const { oldPath, newPath } of event.payload.nodes) {
+                if (path !== oldPath && !path.startsWith(oldPath + '/')) continue;
+                path = newPath + path.slice(oldPath.length);
+                const filename = path.split('/').pop()!;
+                this.editor?.updateNodeId?.(path);
+                this.editor?.setTitle?.(buildRenamedFilename(filename, filename).title);
+                this.active = folderBrowserPath(folder) + '/@files' + path;
+                this.onSelect(this.active, 'replace');
+                this.scheduleRefresh('file-rename');
+            }
+        });
     }
 
     async createResource(options: { title?: string; parentPath?: string | null } = {}): Promise<string> {
@@ -760,6 +780,7 @@ export class SessionWorkbench implements WorkspaceController {
     private async closeEditor(): Promise<void> {
         ++this.taskRefresh;
         this.previewCleanup?.(); this.previewCleanup = undefined;
+        this.fileRenameCleanup?.(); this.fileRenameCleanup = undefined;
         const editor = this.editor, assets = this.assets, context = this.context;
         this.editor = undefined; this.assets = undefined; this.context = undefined; this.active = null;
         this.activeBranch = undefined;

@@ -598,3 +598,5 @@
     color: var(--st-text-secondary);
     font-size: 0.85rem;
 }
+
+.settings-modal-confirm:disabled { cursor: wait; opacity: 0.65; }

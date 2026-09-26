@@ -1448,3 +1448,9 @@
 
 .vfs-node-list__new-controls--transfer-only { display: flex; justify-content: flex-end; }
 .vfs-node-list__new-controls--transfer-only .vfs-node-list__new-btn { flex: none; }
+
+.vfs-ui .vfs-directory-item__preview-toggle { display: block; width: 100%; border: 0; border-top: 1px solid var(--vfs-border-color, #e5e7eb); background: transparent; color: var(--vfs-text-secondary, #64748b); text-align: left; padding: 8px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+.vfs-ui .vfs-directory-item__preview-toggle:hover { background: var(--vfs-bg-hover, #f1f5f9); }
+.vfs-ui .vfs-directory-item__preview-toggle:focus-visible { outline: 2px solid var(--vfs-color-primary, #6366f1); outline-offset: -2px; }
+.vfs-directory-item__children--preview-expanded { max-height: clamp(220px, 45vh, 480px); overflow-y: auto; overscroll-behavior-y: contain; }
+.vfs-ui .vfs-directory-item__children--preview-expanded > .vfs-directory-item__preview-toggle { position: sticky; bottom: 0; background: var(--vfs-bg-primary, #fff); }

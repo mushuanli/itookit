@@ -53,6 +53,8 @@ export interface VFSUIShellOptions extends BrowserBaseOptions {
   listHeader?: HTMLElement;
   /** Render selected display directories as expandable cards. */
   cardDirectory?: (node: VFSNodeUI) => boolean;
+  /** Preview child count; active/selected entries and search matches stay visible. */
+  directoryPreview?: (node: VFSNodeUI) => number | undefined;
   alwaysLoadedDirectories?: string[];
   toolbarOptions?: import('../ui/components/NodeList/toolbar').VFSToolbarOptions;
   defaultUiSettings?: Partial<UISettings>;
@@ -446,7 +448,7 @@ export class VFSUIShell {
       searchPlaceholder:
         this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
       fileCreation: this.options.fileCreation,
-      listItems: this.options.listItems, listHeader: this.options.listHeader, cardDirectory: this.options.cardDirectory,
+      listItems: this.options.listItems, listHeader: this.options.listHeader, cardDirectory: this.options.cardDirectory, directoryPreview: this.options.directoryPreview,
       title: this.options.title,
       toolbar: this.options.toolbar, toolbarOptions: this.options.toolbarOptions,
       activateDirectories: this.options.activateDirectories,
@@ -469,6 +471,7 @@ export class VFSUIShell {
       this.navigationList = new NodeList({ ...listOptions, container: this.columnLayout.navigation,
         title: columns.navigationTitle, searchPlaceholder: columns.navigationSearchPlaceholder ?? listOptions.searchPlaceholder, store: navigation, commandBus: navigation.commands(this.commandPort),
         leafDirectory: columns.navigationLeaf, cardDirectory: columns.navigationCard,
+        directoryPreview: columns.navigationDirectoryPreview ?? listOptions.directoryPreview,
         directoryAction: columns.navigationAction,
         toolbarOptions: columns.navigationToolbarOptions,
         compareItems: columns.navigationCompareItems ?? listOptions.compareItems, toolbar: columns.navigationToolbar ?? 'hidden', primaryAction: undefined });

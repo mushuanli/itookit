@@ -9,7 +9,7 @@ import { SessionWorkbench } from '../src/projects/SessionWorkbench';
 
 afterEach(() => vi.unstubAllGlobals());
 
-it.each([null, '/Work'])('keeps creation order after opening, updating and reopening Sessions in %s', async folder => {
+it.each([null, '/Work'])('orders Sessions by latest activity with stable timestamp ties in %s', async folder => {
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null,
         setItem: (key: string, value: string) => storage.set(key, value), clear: () => storage.clear() });
@@ -43,7 +43,7 @@ it.each([null, '/Work'])('keeps creation order after opening, updating and reope
     let workbench = createWorkbench();
     const order = () => [...sidebar.querySelectorAll<HTMLElement>('.vfs-node-item[data-item-id]')]
         .map(node => node.dataset.itemId!.slice(prefix.length + 1)).filter(id => ['old', 'new', 'tie-a', 'tie-b'].includes(id));
-    const expected = ['tie-a', 'tie-b', 'new', 'old'];
+    let expected = ['tie-a', 'tie-b', 'new', 'old'];
     try {
         await workbench.start();
         await vi.waitFor(() => expect(order()).toEqual(expected));
@@ -51,13 +51,15 @@ it.each([null, '/Work'])('keeps creation order after opening, updating and reope
             await workbench.openResource(`${prefix}/${id}`);
             await repository.updateManifest(id, { title: `Renamed ${id}`, currentBranch: 'review' });
             await vi.waitFor(() => expect(sidebar.textContent).toContain(`Renamed ${id}`));
-            expect(order()).toEqual(expected);
+            expected = [id, ...expected.filter(value => value !== id)];
+            await vi.waitFor(() => expect(order()).toEqual(expected));
         }
         await new Promise(resolve => setTimeout(resolve, 180));
         const list = vi.spyOn(repository, 'list');
         await repository.updateUIState('old', { branchDrafts: { main: { inputText: 'new draft' } } });
         await new Promise(resolve => setTimeout(resolve, 180));
         expect(list).not.toHaveBeenCalled(); list.mockRestore();
+        expected = ['old', ...expected.filter(value => value !== 'old')];
         await workbench.destroy(); workbench = createWorkbench();
         await workbench.start();
         await vi.waitFor(() => expect(order()).toEqual(expected));

@@ -6,12 +6,12 @@ import type { DirectoryMountService, SessionFilesService } from '@itookit/app-co
 
 const cleanup: Array<() => void> = [];
 afterEach(() => { cleanup.splice(0).forEach(close => close()); document.body.replaceChildren(); vi.restoreAllMocks(); });
-function menuFixture(running = false) {
+function menuFixture(running = false, workspaceReadOnly = false) {
     const container = document.createElement('div');
     container.innerHTML = '<div class="llm-workspace-titlebar"><button id="llm-btn-workspace" hidden></button><input></div><div class="llm-input__toolbar"></div>';
     document.body.append(container);
     const configureWorkspace = vi.fn(async () => {});
-    const menu = new WorkspaceDirectoryMenu(container, { configureWorkspace, addDirectory: vi.fn(), setHome: vi.fn() }, () => running);
+    const menu = new WorkspaceDirectoryMenu(container, { workspaceReadOnly, configureWorkspace, addDirectory: vi.fn(), setHome: vi.fn() }, () => running);
     cleanup.push(() => menu.destroy());
     return { container, configureWorkspace };
 }
@@ -41,11 +41,18 @@ it('preserves input context menus and prevents configuration while generating', 
     expect(document.querySelector('[role=menu]')).toBeNull();
 });
 
-function dialogFixture() {
+it('labels the project workspace as a view while retaining mount management', () => {
+    const { container } = menuFixture(false, true);
+    container.querySelector<HTMLButtonElement>('#llm-btn-workspace')!.click();
+    expect(document.querySelector('[data-directory-mode="workspace"]')!.textContent).toBe('查看项目工作目录…');
+    expect(document.querySelector<HTMLButtonElement>('[data-directory-mode="mount"]')!.disabled).toBe(false);
+});
+
+function dialogFixture(fixed = false) {
     HTMLDialogElement.prototype.showModal = vi.fn();
     const controller = new AbortController(); cleanup.push(() => controller.abort());
-    const service = { canSelectHost: true, chooseDirectory: vi.fn(async () => '/home/admin/real-project'), getHome: () => undefined,
-        setWorkspace: vi.fn(async () => 'saved'), addDirectory: vi.fn(async () => 'mounted'), describe: () => '/actual/source',
+    const service = { fixedWorkspace: vi.fn(async () => fixed ? '/actual/source' : undefined), canSelectHost: true, chooseDirectory: vi.fn(async () => '/home/admin/real-project'), getHome: () => undefined,
+        setWorkspace: vi.fn(async () => 'saved'), addDirectory: vi.fn(async () => 'mounted'), remove: vi.fn(async () => {}), describe: () => '/actual/source',
     };
     const files = { inspect: vi.fn(async () => ({ cwd: '/workspace', mounts: [
         { mountId: 'w', at: '/workspace', access: 'rw', sourceId: 'source' },
@@ -78,4 +85,31 @@ it('adds reference mounts read-only and does not open a dialog after host dispos
     f.controller.abort(); expect(await result).toBe(true);
     expect(await showMountDialog(f.service as unknown as DirectoryMountService, f.files as unknown as SessionFilesService, 'session', 'mount', f.controller.signal)).toBe(false);
     expect(document.querySelector('dialog')).toBeNull();
+});
+
+it('shows the project workspace without editing controls and protects its row when managing mounts', async () => {
+    const f = dialogFixture(true);
+    const service = f.service as unknown as DirectoryMountService, files = f.files as unknown as SessionFilesService;
+    const viewing = showMountDialog(service, files, 'session', 'workspace', f.controller.signal);
+    await vi.waitFor(() => expect(document.querySelector('tbody')?.textContent).toContain('/actual/source'));
+    expect(document.querySelector('input,select')).toBeNull();
+    expect(document.querySelector('dialog')!.textContent).not.toContain('应用工作目录');
+    expect(document.querySelector('tbody')!.textContent).not.toContain('卸载');
+    click('完成'); expect(await viewing).toBe(false);
+    f.files.inspect.mockResolvedValue({ cwd: '/workspace', mounts: [
+        { mountId: 'w', at: '/workspace', access: 'rw', sourceId: 'source' },
+        { mountId: 'ref', at: '/reference', access: 'ro', sourceId: 'reference' },
+    ] });
+    const managing = showMountDialog(service, files, 'session', 'mount', f.controller.signal);
+    await vi.waitFor(() => expect(document.querySelector('tbody')).not.toBeNull());
+    expect(document.querySelector('[aria-label="设为工作目录"]')).toBeNull();
+    expect(document.querySelector('tbody')!.textContent).not.toContain('改为只读');
+    document.querySelector<HTMLInputElement>('[aria-label="来源目录"]')!.value = '~/reference';
+    click('挂载');
+    await vi.waitFor(() => expect(f.service.addDirectory).toHaveBeenCalledWith('session', '~/reference', 'ro', undefined, false));
+    await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('button')!.disabled).toBe(false));
+    expect(document.querySelectorAll('tbody tr')[0].querySelectorAll('button')).toHaveLength(1);
+    click('卸载');
+    await vi.waitFor(() => expect(f.service.remove).toHaveBeenCalledWith('session', 'ref'));
+    f.controller.abort(); expect(await managing).toBe(true);
 });

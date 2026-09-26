@@ -171,3 +171,15 @@ it('moves the working directory with a renamed mount and leaves grants intact wh
     await expect(f.mounts.setWorkspace(f.a, '~/notes')).rejects.toThrow('Task active');
     expect((await f.files.inspect(f.a))?.cwd).toBe('/project');
 });
+
+it('distinguishes fixed host workspaces from virtual directories with the same visible path', async () => {
+    const f = await setup();
+    const fixed = new DirectoryMountService(f.root, f.files, {
+        openDirectory: async () => f.root, selectDirectory: async () => null, dispose: async () => {},
+    }, undefined, undefined, async () => 'host:/home/admin/projects/demo');
+    await fixed.init(); cleanup.push(() => fixed.dispose());
+    await fixed.setWorkspace(f.a, 'host:/home/admin/projects/demo');
+    const before = await f.files.inspect(f.a);
+    await expect(fixed.setWorkspace(f.a, '/home/admin/projects/demo')).rejects.toMatchObject({ code: 'EACCES' });
+    expect(await f.files.inspect(f.a)).toEqual(before);
+});

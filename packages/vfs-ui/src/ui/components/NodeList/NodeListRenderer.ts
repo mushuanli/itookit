@@ -10,23 +10,34 @@ import { FileItem, FileItemProps } from './items/FileItem';
 import { DirectoryItem, DirectoryItemProps } from './items/DirectoryItem';
 import { createItemInputHTML } from './templates';
 import { isItemReadOnly } from '../../../utils/helpers';
+import { DirectoryPreview } from './DirectoryPreview';
 
 export interface RenderContext {
   rootPath?: string | null;
   confirmDeleteId: string | null;
   findItemById: (id: string) => VFSNodeUI | null;
+  onPreviewChange?: () => void;
 }
 
 export class NodeListRenderer {
   private itemInstances: Map<string, BaseNodeItem> = new Map();
+  private readonly preview: DirectoryPreview;
+  private rerender?: (focusId: string) => void;
 
-  constructor(private readonly selectionHandler: SelectionHandler, private readonly leafDirectory?: (node: VFSNodeUI) => boolean, private readonly cardDirectory?: (node: VFSNodeUI) => boolean) {}
+  constructor(private readonly selectionHandler: SelectionHandler, private readonly leafDirectory?: (node: VFSNodeUI) => boolean, private readonly cardDirectory?: (node: VFSNodeUI) => boolean,
+    directoryPreview?: (node: VFSNodeUI) => number | undefined) { this.preview = new DirectoryPreview(directoryPreview); }
 
   renderItems(
     container: HTMLElement,
     state: NodeListState,
     context: RenderContext
   ): void {
+    this.rerender = focusId => {
+      if (context.onPreviewChange) context.onPreviewChange(); else this.renderItems(container, state, context);
+      for (const control of container.querySelectorAll<HTMLButtonElement>('[data-preview-id]')) {
+        if (control.dataset.previewId === focusId) control.focus({ preventScroll: true });
+      }
+    };
     const newInstances: Map<string, BaseNodeItem> = new Map();
     const fragment = document.createDocumentFragment();
 
@@ -113,9 +124,12 @@ export class NodeListRenderer {
         if (isExpanded) {
           const childrenContainer = (itemInstance as DirectoryItem)
             .childrenContainer;
+          const scrollTop = childrenContainer.scrollTop;
           childrenContainer.innerHTML = '';
+          const preview = this.preview.project(item, state);
+          childrenContainer.classList.toggle('vfs-directory-item__children--preview-expanded', preview.expanded === true);
           this.traverseAndRender(
-            item.children || [],
+            preview.children,
             childrenContainer,
             item.id,
             state,
@@ -123,6 +137,10 @@ export class NodeListRenderer {
             newInstances,
             visitedIds
           );
+          if (preview.expanded !== undefined) childrenContainer.append(this.preview.control(item.id, preview.expanded, preview.hidden!, () => {
+            this.rerender?.(item.id);
+          }));
+          if (preview.expanded) childrenContainer.scrollTop = scrollTop;
         }
       }
     }
@@ -164,6 +182,7 @@ export class NodeListRenderer {
   }
 
   destroy(): void {
+    this.rerender = undefined; this.preview.clear();
     this.itemInstances.forEach(instance => instance.destroy());
     this.itemInstances.clear();
   }

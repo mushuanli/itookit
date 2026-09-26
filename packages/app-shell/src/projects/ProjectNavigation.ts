@@ -31,6 +31,7 @@ export class ProjectNavigation {
             },
             navigationSearch: query => { if (query.trim()) void this.loadSearch().catch(this.actions.report); },
             navigationCard: node => !!node.metadata.custom.projectId,
+            navigationDirectoryPreview: node => node.metadata.custom.projectId ? 6 : undefined,
             navigationChildren: node => node.metadata.custom.projectId ? [node.id + '/folder:%40sessions'] : [],
             navigationLeaf: node => ['session', 'project-files'].includes(resolveBrowserTarget(node.id).kind),
             navigationCompareItems: (a, b) => fileFirst(a, b),
@@ -114,7 +115,7 @@ export class ProjectNavigation {
     private compareFamily(a: VFSNodeUI, b: VFSNodeUI): number {
         const root = (item: VFSNodeUI) => item.id.split('/').pop() === this.family;
         if (root(a) !== root(b)) return root(a) ? -1 : 1;
-        return new Date(a.metadata.createdAt).getTime() - new Date(b.metadata.createdAt).getTime() || a.id.localeCompare(b.id);
+        return new Date(b.metadata.lastModified).getTime() - new Date(a.metadata.lastModified).getTime() || a.id.localeCompare(b.id);
     }
     private familyItems(items: VFSNodeUI[]): VFSNodeUI[] {
         return items.filter(item => item.metadata.custom.familyRoot === this.family).map(item => {
@@ -139,7 +140,7 @@ function fileFirst(a: VFSNodeUI, b: VFSNodeUI): number | undefined {
     const files = (item: VFSNodeUI) => resolveBrowserTarget(item.id).kind === 'project-files';
     if (files(a) !== files(b)) return files(a) ? -1 : 1;
     const session = (item: VFSNodeUI) => resolveBrowserTarget(item.id).kind === 'session';
-    if (session(a) && session(b)) return (new Date(b.metadata.createdAt).getTime() - new Date(a.metadata.createdAt).getTime()) || a.id.localeCompare(b.id);
+    if (session(a) && session(b)) return (new Date(b.metadata.lastModified).getTime() - new Date(a.metadata.lastModified).getTime()) || a.id.localeCompare(b.id);
     return undefined;
 }
 function projectItems(items: VFSNodeUI[], query = ''): VFSNodeUI[] {

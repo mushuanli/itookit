@@ -185,3 +185,14 @@
 .toolbox-navigation .vfs-node-list__title-bar { display: flex; align-items: center; gap: 8px; }
 .toolbox-navigation .vfs-node-list__secondary-action { min-height: 32px; font-size: 12px; }
 .project-dialog { max-height: calc(100dvh - 32px); overflow: auto; }
+
+.session-family__primary { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; flex: 1; }
+.session-family__primary:empty { display: none; }
+.session-family__primary button { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-family__menu-items { width: min(290px, calc(100vw - 36px)); max-height: 70vh; overflow: auto; border: 1px solid var(--mm-border-color, #e5e7eb); }
+.session-family__menu-items > button { width: 100%; margin-top: 3px; }
+.session-family__menu summary:focus-visible { outline: 2px solid #6366f1; }
+.session-family__metadata { padding: 6px 8px 10px; border-bottom: 1px solid var(--mm-border-color, #e5e7eb); }
+.session-family__information { margin: 0 0 8px; display: grid; gap: 3px; }
+.session-family__information dt, .session-family__metadata small { color: var(--text-secondary, #64748b); font-size: 11px; line-height: 1.5; }
+.session-family__information dd { margin: 0 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; }

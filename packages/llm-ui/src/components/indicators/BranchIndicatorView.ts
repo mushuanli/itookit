@@ -24,6 +24,8 @@ export class BranchIndicatorView implements IBranchPresenter {
         private branchStore: IBranchStore
     ) {
         this.unsub = this.branchStore.onChange(() => this.render());
+        // Initial state may already be cached, so refresh need not emit a change.
+        this.render();
     }
 
     async refresh(): Promise<void> {

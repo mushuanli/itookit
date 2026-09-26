@@ -400,3 +400,8 @@
 .llm-workspace-titlebar__menu-actions .llm-workspace-titlebar__btn:not([hidden]) { display: flex; width: 100%; max-width: none; min-height: 36px; justify-content: flex-start; padding: 6px 10px; gap: 10px; text-align: left; }
 .llm-workspace-titlebar__menu-actions .llm-workspace-titlebar__btn:not(.llm-workspace-titlebar__btn--text)::after { content: attr(title); font-size: 13px; }
 .llm-workspace-titlebar__menu-actions .llm-workspace-titlebar__sep { display: block; height: 1px; width: auto; margin: 5px 0; }
+
+.llm-workspace-titlebar__primary { display: flex; align-items: center; gap: 4px; }
+.llm-workspace-titlebar__primary:empty { display: none; }
+.llm-workspace-titlebar__primary .llm-workspace-titlebar__btn { flex-shrink: 0; }
+.llm-branch-indicator-bar, .llm-workspace-status { flex-shrink: 0; }

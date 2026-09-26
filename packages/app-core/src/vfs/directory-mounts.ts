@@ -1,4 +1,4 @@
-import { createFileSystemView, normalizeVirtualPath, type IFileSystem, type FileSystemSourceOwner } from '@itookit/vfs-core';
+import { FSError, createFileSystemView, normalizeVirtualPath, type IFileSystem, type FileSystemSourceOwner } from '@itookit/vfs-core';
 import { t } from '@itookit/common';
 import type { SessionFilesService, SessionMountRecord } from './session-files';
 import { randomUUID } from '@itookit/common';
@@ -22,7 +22,8 @@ export class DirectoryMountService {
     constructor(private readonly root: IFileSystem, private readonly files: SessionFilesService,
         private readonly provider?: DirectorySourceProvider,
         private readonly beforeChange: (sessionId: string) => Promise<void> = async () => {},
-        private readonly afterChange: (sessionId: string) => Promise<void> = async () => {}) {}
+        private readonly afterChange: (sessionId: string) => Promise<void> = async () => {},
+        readonly fixedWorkspace: (sessionId: string) => Promise<string | undefined> = async () => undefined) {}
     async init(): Promise<void> {
         if (await this.root.driver.exists(preferencesPath)) {
             const saved = JSON.parse(await this.root.driver.readContent(preferencesPath, { encoding: 'utf-8' }));
@@ -98,7 +99,7 @@ export class DirectoryMountService {
             const record = await this.files.inspect(sessionId); if (!record) return;
             const removed = record.mounts.find(m => m.mountId === mountId);
             const cwd = removed && (record.cwd === removed.at || record.cwd.startsWith(removed.at + '/')) ? '/' : record.cwd;
-            await this.files.configure(sessionId, { mounts: record.mounts.filter(m => m.mountId !== mountId), cwd }, record.revision);
+            await this.configure(sessionId, { mounts: record.mounts.filter(m => m.mountId !== mountId), cwd }, record);
             await this.afterChange(sessionId);
         });
     }
@@ -110,7 +111,7 @@ export class DirectoryMountService {
             if (!record || !mount) throw new Error(t('mount.error.missing'));
             const path = this.preferences.external[mount.sourceId];
             if (path) await this.connect(mount.sourceId, path);
-            await this.files.configure(sessionId, { mounts: record.mounts, cwd: record.cwd }, record.revision);
+            await this.configure(sessionId, { mounts: record.mounts, cwd: record.cwd }, record);
             await this.afterChange(sessionId);
         });
     }
@@ -120,7 +121,7 @@ export class DirectoryMountService {
             const record = await this.files.inspect(sessionId);
             const mount = record?.mounts.find(m => m.mountId === mountId);
             if (!record || !mount) throw new Error(t('mount.error.missing'));
-            await this.files.configure(sessionId, { mounts: record.mounts.map(m => m.mountId === mountId ? { ...m, access } : m), cwd: asCwd ? mount.at : record.cwd }, record.revision);
+            await this.configure(sessionId, { mounts: record.mounts.map(m => m.mountId === mountId ? { ...m, access } : m), cwd: asCwd ? mount.at : record.cwd }, record);
             await this.afterChange(sessionId);
         });
     }
@@ -135,10 +136,26 @@ export class DirectoryMountService {
         const mount: SessionMountRecord = { mountId: same?.mountId ?? randomUUID(), at, sourceId: source.sourceId, root: source.root, access };
         let cwd = record?.cwd ?? '/';
         if (same && (cwd === same.at || cwd.startsWith(same.at + '/'))) cwd = at + cwd.slice(same.at.length);
-        await this.files.configure(sessionId, { mounts: [...mounts.filter(m => m.mountId !== same?.mountId && (!replace || m.at !== at)), mount],
-            cwd: asCwd ? at : cwd }, record?.revision ?? 0);
+        await this.configure(sessionId, { mounts: [...mounts.filter(m => m.mountId !== same?.mountId && (!replace || m.at !== at)), mount],
+            cwd: asCwd ? at : cwd }, record);
         await this.afterChange(sessionId);
         return t('mount.mounted', { label: source.label, at, access: t(access === 'ro' ? 'mount.access.ro' : 'mount.access.rw') });
+    }
+    private async configure(sessionId: string, next: { mounts: SessionMountRecord[]; cwd: string },
+        previous: Awaited<ReturnType<SessionFilesService['inspect']>>): Promise<void> {
+        const directory = await this.fixedWorkspace(sessionId);
+        if (directory !== undefined) {
+            const primary = next.mounts.find(m => m.at === '/workspace');
+            const old = previous?.mounts.find(m => m.at === '/workspace');
+            const expected = directory === '~' ? '/home/admin' : directory.startsWith('~/') ? '/home/admin/' + directory.slice(2) : directory;
+            const internal = expected === '/home/admin' || expected.startsWith('/home/admin/');
+            const label = internal ? normalizeVirtualPath(expected) : expected.replace(/^host:/, '');
+            if (!primary || (primary.sourceId === 'admin-home') !== internal || this.describe(primary) !== label
+                || next.cwd !== '/workspace' || primary.access !== (old?.access ?? 'rw')) {
+                throw new FSError('EACCES', t('mount.error.fixedWorkspace'));
+            }
+        }
+        await this.files.configure(sessionId, next, previous?.revision ?? 0);
     }
     private async resolve(raw: string): Promise<DirectoryRef> {
         const path = raw.trim(); if (!path) throw new Error(t('mount.error.selectDirectory'));
