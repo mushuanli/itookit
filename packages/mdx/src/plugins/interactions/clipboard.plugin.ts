@@ -359,11 +359,22 @@ export class ClipboardPlugin implements MDxPlugin {
      * （空行、行尾空格都是内容的一部分，Turndown 已在围栏外补好空行）。
      */
     private postprocessMarkdown(markdown: string): string {
-        return markdown
-            .split(/(^ {0,3}(?:```|~~~)[\s\S]*?^ {0,3}(?:```|~~~)[ \t]*$)/m)
-            .map((segment, index) => index % 2 === 1 ? segment : this.cleanProse(segment))
-            .join('')
-            .trim();
+        const output: string[] = [];
+        let prose: string[] = [];
+        let fence: string | undefined;
+        const flush = () => { output.push(this.cleanProse(prose.join('\n'))); prose = []; };
+        for (const line of markdown.split('\n')) {
+            const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+            if (fence) {
+                output.push(line);
+                if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = undefined;
+            } else if (marker) {
+                if (prose.length) flush();
+                fence = marker[1]; output.push(line);
+            } else prose.push(line);
+        }
+        if (prose.length) flush();
+        return output.join('\n').trim();
     }
 
     /** 移除多余的连续空行与行尾空格 */
@@ -545,16 +556,19 @@ export class ClipboardPlugin implements MDxPlugin {
     private bindHintTracking(view: EditorView): void {
         const reposition = () => this.scheduleReposition();
         const hide = () => this.clearHint();
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key !== 'Tab' && !['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) hide();
+        };
 
         window.addEventListener('resize', reposition);
         view.scrollDOM.addEventListener('scroll', reposition, { passive: true });
-        view.dom.addEventListener('keydown', hide);
+        view.dom.addEventListener('keydown', onKey);
         view.dom.addEventListener('mousedown', hide);
 
         this.hintDismissFns.push(() => {
             window.removeEventListener('resize', reposition);
             view.scrollDOM.removeEventListener('scroll', reposition);
-            view.dom.removeEventListener('keydown', hide);
+            view.dom.removeEventListener('keydown', onKey);
             view.dom.removeEventListener('mousedown', hide);
         });
     }
