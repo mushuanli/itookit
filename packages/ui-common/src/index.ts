@@ -36,3 +36,6 @@ export { installResponsiveActions, type ResponsiveActionsOptions } from './compo
 export { copyText } from './utils/clipboard';
 
 export type { Suggestion, IAutocompleteSource } from './interfaces/IAutocompleteSource';
+
+export type { OcrControls, OcrSettingsState } from './interfaces/OcrControls';
+export { OcrSettingsForm, renderOcrSettings, readOcrSettings } from './components/OcrSettingsForm';

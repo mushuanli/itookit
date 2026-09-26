@@ -250,7 +250,7 @@ export class SessionManager implements ISession, SessionQuery {
 
     getFlowRerunContext() { return this.flowRerun.context(); }
 
-    async rerunFlow(parameters: Record<string, JsonValue>, sourceRoundId: string | null, expectedSessionId?: string, expectedDefinitionKey?: string) {
+    async rerunFlow(parameters: Record<string, JsonValue>, sourceRoundId: string | null, expectedSessionId?: string, expectedDefinitionKey?: string, connectionId?: string) {
         const sessionId = this.registry.ensureBound().sessionId;
         if (this.canWriteSession && !await this.canWriteSession(sessionId)) {
             throw new ConversationError(ConversationErrorCode.SESSION_INVALID,
@@ -258,7 +258,7 @@ export class SessionManager implements ISession, SessionQuery {
         }
         if (this.registry.ensureBound().sessionId !== sessionId) throw new Error('Session changed; reopen the rerun form');
         if (expectedSessionId && expectedSessionId !== sessionId) throw new Error('Session changed; reopen the rerun form');
-        return this.flowRerun.run(parameters, sourceRoundId, expectedDefinitionKey);
+        return this.flowRerun.run(parameters, sourceRoundId, expectedDefinitionKey, connectionId);
     }
 
     /** Create a fresh session instance bound to a workflow run (records flow + parameters). */
@@ -268,6 +268,7 @@ export class SessionManager implements ISession, SessionQuery {
         parameters: Record<string, JsonValue> | undefined,
         title: string,
         invocation = false,
+        connectionId?: string,
     ): Promise<{ sessionId: string }> {
         const name = title.trim() || 'Workflow';
         const engine = this.registry.engine;
@@ -278,7 +279,7 @@ export class SessionManager implements ISession, SessionQuery {
             return { sessionId };
         }
         await engine.updateManifest(sessionId, {
-            flow: { flowId, revision, ...(parameters ? { parameters } : {}) },
+            flow: { flowId, revision, ...(connectionId ? { connectionId } : {}), ...(parameters ? { parameters } : {}) },
         });
         return { sessionId };
     }

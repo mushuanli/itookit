@@ -1,22 +1,23 @@
+import { renderPromptReference, bindPromptReference } from './agent-prompt-reference';
 import { editorResourceId } from '@itookit/ui-common';
 // @file: llm-ui/editors/AgentConfigEditor.ts
 
 import {
     generateUUID,
     buildRenamedFilename,
-    Heading
+    Heading, t
 } from '@itookit/common';
 import { IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback, UnifiedSearchResult, CollapseExpandResult } from '@itookit/ui-common';
-import type { AgentType, AgentDefinition, IAgentManagementService, ModelTier, PromptPreset } from '@itookit/common';
+import type { AgentType, AgentDefinition, IAgentManagementService, PromptPreset } from '@itookit/common';
 import { EventBus } from '@itookit/vfs-core';
 import { bindAgentCapabilities, readAgentCapabilities, renderAgentCapabilities } from './agent-capabilities';
-import { renderModelCapabilityBadges } from '../utils/modelBadges';
 
 /**
  * Agent 配置编辑器
  * 需要完整的 CRUD 能力，因此依赖 IAgentManagementService
  */
 export class AgentConfigEditor implements IEditor {
+    private promptLibrary: import('@itookit/common').SystemPromptDefinition[] = [];
     private container!: HTMLElement;
     private content: AgentDefinition | null = null;
     private _isDirty = false;
@@ -70,11 +71,7 @@ export class AgentConfigEditor implements IEditor {
                 icon: parsed.icon || '🤖',
                 config: {
                     ...parsed.config,
-                    connectionId: parsed.config?.connectionId || '',
-                    modelTier: (parsed.config?.modelTier as ModelTier | undefined) ?? 'optimal',
-                    // Preserve modelName for backward compat with existing data
-                    modelName: parsed.config?.modelName || undefined,
-                    systemPrompt: parsed.config?.systemPrompt || 'You are a helpful assistant.',
+                    systemPrompt: parsed.config?.systemPrompt ?? '',
                     mcpServers: parsed.config?.mcpServers || [],
                     maxHistoryLength: parsed.config?.maxHistoryLength ?? -1,
                     temperature: parsed.config?.temperature
@@ -135,67 +132,10 @@ export class AgentConfigEditor implements IEditor {
     async render() {
         if (!this.content) return;
         const agent = this.content;
-        const config = { ...agent.config, ...agent.modelPolicy, systemPrompt: agent.systemPrompt ?? agent.config.systemPrompt };
+        const config = { ...agent.config, systemPrompt: agent.systemPrompt ?? agent.config.systemPrompt };
 
-        // Fetch all connections, then split into valid (enabled + hasApiKey) and invalid
-        const allConns = await this.service.getConnections();
-        const connections = allConns
-            .filter(c => c.enabled !== false && c.hasApiKey)
-            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-        // Connections excluded because their Provider has no API key
-        const noKeyConns = allConns.filter(c => c.enabled !== false && !c.hasApiKey);
-
-        // System Prompt library entries (for the select + edit link)
-        const systemPrompts = await this.service.listSystemPrompts().catch(() => []);
-
-        // Detect if the saved connectionId is now invalid (provider lost its key)
-        const savedConnId = config.connectionId;
-        const savedConnInvalid = !!(savedConnId && !connections.find(c => c.id === savedConnId));
-        const savedConnMeta = savedConnInvalid ? allConns.find(c => c.id === savedConnId) : null;
-
-        // 确保有有效的连接选择
-        let selectedConn = connections.find(c => c.id === config.connectionId);
-
-        // 如果没有选中的连接，或者连接ID为空，且有可用连接，默认选中列表第一个（即排序后的最优项）
-        if (!selectedConn && connections.length > 0) {
-            selectedConn = connections[0];
-            if (this.content && this.content.config) {
-                this.content.config.connectionId = selectedConn.id;
-            }
-        }
-
-        // Group connections by provider for optgroup display
-        const providers = this.service.getProviders();
-        const providerMap = new Map(providers.map(p => [p.id, p]));
-        const grouped = providers
-            .map(p => ({
-                provider: p,
-                conns: connections.filter(c => c.providerId === p.id),
-            }))
-            .filter(g => g.conns.length > 0);
-        const ungrouped = connections.filter(c => !providerMap.has(c.providerId));
-        const connectionOptionsHtml = [
-            ...grouped.map(g => `
-                <optgroup label="${g.provider.icon ?? ''} ${this.escapeHtml(g.provider.name)}">
-                    ${g.conns.map(c => `
-                        <option value="${c.id}" ${selectedConn?.id === c.id ? 'selected' : ''}>
-                            ${c.id === 'default' ? '⭐ ' : ''}${this.escapeHtml(c.name)}
-                        </option>
-                    `).join('')}
-                </optgroup>
-            `),
-            ungrouped.length > 0 ? `
-                <optgroup label="其他">
-                    ${ungrouped.map(c => `
-                        <option value="${c.id}" ${selectedConn?.id === c.id ? 'selected' : ''}>
-                            ${this.escapeHtml(c.name)}
-                        </option>
-                    `).join('')}
-                </optgroup>
-            ` : '',
-        ].join('');
-
-        const currentTier = config.modelTier ?? 'optimal';
+        const systemPrompts = await this.service.listSystemPrompts();
+        this.promptLibrary = systemPrompts;
         const allMCPServers = [...await this.service.getMCPServers()];
         for (const id of agent.capabilityPolicy?.mcpProfileIds ?? config.mcpServers ?? []) {
             if (!allMCPServers.some(server => server.id === id)) allMCPServers.push({ id, name: id, transport: 'http', status: 'error' });
@@ -250,98 +190,22 @@ export class AgentConfigEditor implements IEditor {
                     </div>
                 </div>
 
-                <!-- LLM Configuration -->
+                <!-- Agent behavior -->
                 <div class="agent-section" id="llm-config-section" style="${agent.type !== 'agent' ? 'display:none' : ''}">
                     <div class="agent-section__header">
                         <span class="agent-section__icon">🧠</span>
-                        <span class="agent-section__title">LLM 配置</span>
+                        <span class="agent-section__title">${t('agent.behavior.title')}</span>
                         <span class="agent-section__toggle">▼</span>
                     </div>
                     <div class="agent-section__body">
+                        ${renderPromptReference(systemPrompts, config.systemPromptId)}
                         <div class="agent-form-row">
-                            <label class="agent-form-label">
-                                连接 <small>选择已配置的 LLM 服务</small>
-                            </label>
-                            ${savedConnInvalid ? `
-                                <div class="agent-conn-invalid-banner">
-                                    ⚠️ 连接「${this.escapeHtml(savedConnMeta?.name ?? savedConnId)}」不可用 — Provider 未配置 API Key。
-                                    已自动切换至首个可用连接。
-                                    <button class="agent-goto-btn" data-action="goto-providers"
-                                            data-provider-id="${this.escapeHtml(savedConnMeta?.providerId ?? '')}">
-                                        → 配置 Provider API Key
-                                    </button>
-                                </div>
-                            ` : ''}
-                            <div style="display:flex;align-items:center;gap:6px">
-                                <select class="agent-form-select" name="connectionId" id="connection-select"
-                                        style="flex:1" ${connections.length === 0 ? 'disabled' : ''}>
-                                    <option value="">-- 选择连接 --</option>
-                                    ${connectionOptionsHtml}
-                                </select>
-                                ${selectedConn ? `
-                                    <button class="agent-goto-btn agent-goto-btn--inline" data-action="goto-connection"
-                                            data-connection-id="${selectedConn.id}" title="编辑此连接的模型配置">
-                                        → 编辑连接
-                                    </button>
-                                ` : ''}
-                            </div>
-                            <div id="conn-info-panel" style="margin-top:8px">
-                                ${this.renderConnInfoPanel(selectedConn)}
-                            </div>
-                            ${connections.length === 0 ? `
-                                <p class="agent-form-help" style="color:var(--st-color-warning,#f59e0b)">
-                                    ⚠️ 所有连接均不可用，请先配置 API Key。
-                                    <button class="agent-goto-btn" data-action="goto-providers">→ 前往 LLM Providers</button>
-                                </p>
-                            ` : noKeyConns.length > 0 ? `
-                                <p class="agent-form-help">
-                                    另有 ${noKeyConns.length} 个连接因 Provider 未配置 API Key 而不可用。
-                                    <button class="agent-goto-btn" data-action="goto-providers">→ 配置 API Key</button>
-                                </p>
-                            ` : ''}
-                        </div>
-
-                        <div class="agent-form-row">
-                            <label class="agent-form-label">
-                                模型层级 <small>选择本次对话使用的质量/成本偏好</small>
-                            </label>
-                            <div class="agent-tier-selector" id="tier-selector">
-                                ${(['optimal', 'standard', 'fast'] as ModelTier[]).map(t => {
-                const meta: Record<ModelTier, { label: string; desc: string; icon: string }> = {
-                    optimal:  { label: '最优', desc: '复杂推理',   icon: '💎' },
-                    standard: { label: '标准', desc: '日常工作',   icon: '⚖️' },
-                    fast:     { label: '快速', desc: '简单任务',   icon: '⚡' },
-                };
-                const m = meta[t];
-                const modelName = this.resolveTierModelName(selectedConn, t);
-                return `
-                                    <button type="button" class="agent-tier-btn ${currentTier === t ? 'selected' : ''}" data-tier="${t}" title="${m.desc}">
-                                        <span class="agent-tier-btn__icon">${m.icon}</span>
-                                        <span class="agent-tier-btn__label">${m.label}</span>
-                                        <span class="agent-tier-btn__model" id="tier-model-${t}">${modelName}</span>
-                                    </button>`;
-            }).join('')}
-                            </div>
-                            <input type="hidden" name="modelTier" id="model-tier-input" value="${currentTier}">
-                        </div>
-
-                        <div class="agent-form-row">
-                            <label class="agent-form-label">
-                                System Prompt <small>从 System Prompt 库选择，或手动编辑</small>
-                            </label>
-                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
-                                <select id="system-prompt-preset" style="flex:1;">
-                                    <option value="">自定义（手动编辑）</option>
-                                    ${systemPrompts.map(sp => `<option value="${this.escapeHtml(sp.id)}">${this.escapeHtml(sp.name || sp.id)}</option>`).join('')}
-                                </select>
-                                <a href="#/settings/system-prompts" class="agent-form-edit-link"
-                                   title="编辑 System Prompt 库">编辑库</a>
-                            </div>
+                            <label class="agent-form-label">${t('prompt.additional')}</label>
                             <textarea class="agent-form-textarea" 
                                       name="systemPrompt" 
                                       placeholder="You are a helpful assistant...">${this.escapeHtml(config.systemPrompt || '')}</textarea>
                             <p class="agent-form-help">
-                                提示：可从库中选择复用片段；手动编辑则写入当前 Agent
+                                ${t('prompt.additionalHint')}
                             </p>
                         </div>
 
@@ -464,17 +328,7 @@ export class AgentConfigEditor implements IEditor {
 
         this.bindEvents();
 
-        // Non-critical: write resolved connection label to FSNode metadata for vfs-ui display.
-        // Must run AFTER innerHTML is set so a failure here never breaks rendering.
-        const engine = this.options.files?.fs;
-        const nodeId = editorResourceId(this.options);
-        if (engine?.driver && nodeId && selectedConn) {
-            const connGroup = grouped.find(g => g.conns.some(c => c.id === selectedConn!.id));
-            if (connGroup) {
-                const label = `${connGroup.provider.icon ?? ''} ${connGroup.provider.name} · ${selectedConn.name}`.trim();
-                engine.driver.updateMetadata(nodeId, { ai_connectionLabel: label }).catch(() => {});
-            }
-        }
+
     }
 
     /** 渲染单个预设 Prompt 行（name + prompt + 排序/删除操作） */
@@ -526,27 +380,7 @@ export class AgentConfigEditor implements IEditor {
             el.addEventListener('change', handleChange);
         });
 
-        // System Prompt 库下拉框：选中条目 → 填入其 content 到 textarea + presets 到快捷 prompt 列表
-        const presetSelect = this.container.querySelector('#system-prompt-preset') as HTMLSelectElement | null;
-        const systemPromptTextarea = this.container.querySelector('textarea[name="systemPrompt"]') as HTMLTextAreaElement | null;
-        if (presetSelect && systemPromptTextarea) {
-            presetSelect.addEventListener('change', () => {
-                const id = presetSelect.value;
-                if (!id) return;
-                void this.service.getSystemPrompt(id).then(sp => {
-                    if (!sp) return;
-                    if (sp.content?.length) {
-                        systemPromptTextarea.value = sp.content.join('\n\n');
-                    }
-                    // 同步快捷 prompt（presets）到 agent.defaultPrompts 列表
-                    if (this.content) {
-                        this.content.defaultPrompts = sp.presets ?? [];
-                        this.rerenderPromptList();
-                    }
-                    handleChange();
-                });
-            });
-        }
+        bindPromptReference(this.container, this.promptLibrary, this.service, this.options.hostContext, handleChange);
 
         // 名称输入框 → 同步重命名 VFS 文件（复用 engine.rename + node:renamed 事件链）
         const nameInput = this.container.querySelector('.agent-header__name-input') as HTMLInputElement;
@@ -614,64 +448,6 @@ export class AgentConfigEditor implements IEditor {
                 handleChange();
             });
         });
-
-        // Connection 变更（只更新 connectionId，tier 独立管理）
-        const connSelect = this.container.querySelector('#connection-select') as HTMLSelectElement;
-        if (connSelect) {
-            connSelect.addEventListener('change', async () => {
-                if (this.content?.config) this.content.config.connectionId = connSelect.value;
-                // Update connection label in FSNode metadata for vfs-ui list display
-                const engine = this.options.files?.fs;
-                const nodeId = editorResourceId(this.options);
-                if (engine?.driver && nodeId && connSelect.value) {
-                    const selectedOpt = connSelect.options[connSelect.selectedIndex];
-                    const groupLabel = (selectedOpt?.closest('optgroup') as HTMLOptGroupElement | null)?.label ?? '';
-                    const label = groupLabel ? `${groupLabel} · ${selectedOpt.text.trim()}` : selectedOpt.text.trim();
-                    engine.driver.updateMetadata(nodeId, { ai_connectionLabel: label }).catch(() => {});
-                }
-                await this.refreshConnInfo(connSelect.value);
-                handleChange();
-            });
-        }
-
-        // Navigate buttons (goto-providers / goto-connection) — delegated on container
-        this.container.addEventListener('click', (e) => {
-            const btn = (e.target as HTMLElement).closest('[data-action]') as HTMLElement | null;
-            if (!btn) return;
-            const action = btn.dataset.action;
-            if (action === 'goto-providers') {
-                const providerId = btn.dataset.providerId;
-                this.options.hostContext?.navigate?.({
-                    target: 'settings',
-                    resourceId: 'providers',
-                    ...(providerId ? { state: { anchor: providerId } } : {}),
-                });
-            } else if (action === 'goto-connection') {
-                const connId = btn.dataset.connectionId;
-                this.options.hostContext?.navigate?.({
-                    target: 'settings',
-                    resourceId: 'connections',
-                    ...(connId ? { state: { anchor: `conn:${connId}` } } : {}),
-                });
-            }
-        });
-
-        // Tier 选择器
-        const tierSelector = this.container.querySelector('#tier-selector');
-        const tierInput = this.container.querySelector('#model-tier-input') as HTMLInputElement;
-        if (tierSelector && tierInput) {
-            tierSelector.addEventListener('click', (e) => {
-                const btn = (e.target as HTMLElement).closest('.agent-tier-btn') as HTMLElement | null;
-                if (!btn) return;
-                const tier = btn.dataset.tier as ModelTier;
-                if (!tier) return;
-                tierSelector.querySelectorAll('.agent-tier-btn').forEach(b => b.classList.remove('selected'));
-                btn.classList.add('selected');
-                tierInput.value = tier;
-                if (this.content?.config) this.content.config.modelTier = tier;
-                handleChange();
-            });
-        }
 
         // Icon Picker
         const iconPicker = this.container.querySelector('#icon-picker');
@@ -837,8 +613,7 @@ export class AgentConfigEditor implements IEditor {
             const tempVal = parseFloat(getVal('temperature'));
             this.content.config = {
                 ...this.content.config,
-                connectionId: getVal('connectionId'),
-                modelTier: (getVal('modelTier') as ModelTier) || 'optimal',
+                systemPromptId: getVal('systemPromptId') || undefined,
                 systemPrompt: getVal('systemPrompt'),
                 maxHistoryLength: Number.isNaN(Number.parseInt(getVal('maxHistoryLength'))) ? -1 : Number.parseInt(getVal('maxHistoryLength')),
                 mcpServers: undefined,
@@ -846,9 +621,7 @@ export class AgentConfigEditor implements IEditor {
             };
             this.content.capabilityPolicy = readAgentCapabilities(this.container, this.content.capabilityPolicy);
             if (this.content.systemPrompt !== undefined) this.content.systemPrompt = this.content.config.systemPrompt;
-            if (this.content.modelPolicy) this.content.modelPolicy = { ...this.content.modelPolicy,
-                connectionId: this.content.config.connectionId, modelTier: this.content.config.modelTier,
-                temperature: this.content.config.temperature };
+
         }
     }
 
@@ -856,77 +629,6 @@ export class AgentConfigEditor implements IEditor {
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
-
-    /** 解析连接某个 tier 对应的模型显示名（未配置时返回空字符串） */
-    private resolveTierModelName(conn: { providerId?: string; tiers?: Partial<Record<ModelTier, string>> } | undefined, tier: ModelTier): string {
-        if (!conn?.tiers?.[tier]) return '';
-        const pid = conn.providerId ?? '';
-        const provider = this.service.getProviders().find(p => p.id === pid);
-        const modelId = conn.tiers[tier]!;
-        const modelDef = provider?.models.find(m => m.id === modelId);
-        return modelDef ? modelDef.name : modelId;
-    }
-
-    /** 渲染连接信息面板：三个 tier 的模型名 + 能力 badges */
-    private renderConnInfoPanel(conn?: { providerId?: string; tiers?: Partial<Record<ModelTier, string>> }): string {
-        if (!conn) return '';
-        const pid = conn.providerId ?? '';
-        const provider = this.service.getProviders().find(p => p.id === pid);
-
-        const tierMeta: Record<string, { label: string; cls: string }> = {
-            optimal:  { label: '最优', cls: 'settings-tier-badge--optimal' },
-            standard: { label: '标准', cls: 'settings-tier-badge--standard' },
-            fast:     { label: '快速', cls: 'settings-tier-badge--fast' },
-        };
-
-        const rows = (['optimal', 'standard', 'fast'] as ModelTier[])
-            .filter(t => conn.tiers?.[t])
-            .map(t => {
-                const modelId = conn.tiers![t]!;
-                const modelDef = provider?.models.find(m => m.id === modelId);
-                const name = modelDef ? modelDef.name : modelId;
-                const caps = modelDef ? renderModelCapabilityBadges(modelDef) : '';
-                const { label, cls } = tierMeta[t];
-                return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0">
-                    <span class="settings-tier-badge ${cls}" style="flex-shrink:0">${label}</span>
-                    <span style="font-size:0.8rem;color:var(--st-text-primary)">${this.escapeHtml(name)}</span>
-                    ${caps ? `<span style="display:flex;gap:2px">${caps}</span>` : ''}
-                </div>`;
-            });
-
-        if (rows.length === 0) {
-            // No tiers configured — show the first model from provider
-            const modelDef = provider?.models[0];
-            const caps = modelDef ? renderModelCapabilityBadges(modelDef) : '';
-            return `<div style="font-size:0.8rem;color:var(--st-text-secondary);display:flex;align-items:center;gap:6px">
-                <span>模型：${this.escapeHtml(modelDef?.name ?? '未配置')}</span>
-                ${caps ? `<span style="display:flex;gap:2px">${caps}</span>` : ''}
-            </div>`;
-        }
-
-        return `<div style="background:var(--st-bg-secondary,#f8f9fa);border-radius:6px;padding:6px 10px;display:flex;flex-direction:column;gap:0">
-            ${rows.join('')}
-        </div>`;
-    }
-
-    /** 连接变更后刷新信息面板和 tier 按钮上的模型名 */
-    private async refreshConnInfo(connId: string): Promise<void> {
-        const allConns = await this.service.getConnections();
-        const conn = allConns.find(c => c.id === connId);
-
-        const panel = this.container.querySelector('#conn-info-panel') as HTMLElement | null;
-        if (panel) panel.innerHTML = this.renderConnInfoPanel(conn);
-
-        // Update model name shown on each tier button
-        (['optimal', 'standard', 'fast'] as ModelTier[]).forEach(t => {
-            const slot = this.container.querySelector(`#tier-model-${t}`) as HTMLElement | null;
-            if (slot) slot.textContent = this.resolveTierModelName(conn, t);
-        });
-
-        // Update goto-connection button data attribute
-        const gotoBtn = this.container.querySelector('[data-action="goto-connection"]') as HTMLElement | null;
-        if (gotoBtn && conn) gotoBtn.dataset.connectionId = conn.id;
     }
 
     // --- IEditor Interface Implementation ---

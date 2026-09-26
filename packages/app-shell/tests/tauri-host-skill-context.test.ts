@@ -45,6 +45,7 @@ async function mountProject(runtime: Runtime, sessionId: string) {
 
 /** Returns the error a run raised (the model service is unavailable in tests), if any. */
 async function dispatch(runtime: Runtime, sessionId: string, text: string): Promise<unknown> {
+    await runtime.agentService.setDefaultConnection('default');
     // The assembled input is committed before the model call, so a failing model is expected.
     return runtime.commandBus.execute(SessionCommand.Send, {
         text, files: [], agentId: 'default', sendIntent: createAgentSendIntent('default'),

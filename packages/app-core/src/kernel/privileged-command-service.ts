@@ -20,8 +20,8 @@ export class PrivilegedCommandService implements IPrivilegedCommandService {
     }
 
     async plan(request: PlanCommandRequest): Promise<string> {
-        const config = await this.agents.resolveForChat(request.agentId);
-        if (!config.connectionId) throw new Error('Selected agent has no LLM connection');
+        const config = await this.agents.reResolveModel(await this.agents.resolveForChat(request.agentId), { connectionId: request.connectionId });
+        if (!config.connectionId) throw new Error('No LLM connection configured');
         const run = await submitRun({
             kind: 'task', sessionId: request.sessionId,
             task: {

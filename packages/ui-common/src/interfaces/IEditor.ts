@@ -10,7 +10,7 @@ import type { FileSystemContext } from '@itookit/vfs-core';
 export type EditorTarget =
     | { kind: 'file'; path: string; namespaceId?: string; sessionId?: string }
     | { kind: 'session'; sessionId: string; branch?: string }
-    | { kind: 'entity'; entityType: 'agent' | 'skill' | 'flow' | 'mcp' | 'tool' | 'provider' | 'connection'; id: string };
+    | { kind: 'entity'; entityType: 'agent' | 'skill' | 'flow' | 'mcp' | 'tool' | 'provider' | 'connection' | 'system-prompt'; id: string };
 
 /** Validate an explicitly supplied target against its granted file context. */
 export function normalizeEditorOptions(options: EditorOptions): EditorOptions {

@@ -1,5 +1,6 @@
 import { providerIcon } from './resource-icons';
 import { TOOLBOX_ICONS, t } from '@itookit/common';
+import { TOOLBOX_FILTERS } from './routes';
 import type { VFSNodeUI } from '@itookit/vfs-ui';
 import type { ToolboxInventory } from '@itookit/app-core';
 
@@ -31,7 +32,9 @@ export function modelDrawers(items: VFSNodeUI[], inventory: ToolboxInventory): V
 }
 
 export function compareModelItems(a: VFSNodeUI, b: VFSNodeUI): number | undefined {
-    if (!!a.metadata.custom.modelDrawer !== !!b.metadata.custom.modelDrawer) return a.metadata.custom.modelDrawer ? -1 : 1;
+    const category = (item: VFSNodeUI) => item.metadata.custom.modelDrawer ? 'models' : item.metadata.custom.toolboxKind;
+    const left = TOOLBOX_FILTERS.indexOf(category(a) as never), right = TOOLBOX_FILTERS.indexOf(category(b) as never);
+    if (left >= 0 && right >= 0 && left !== right) return left - right;
     if (a.metadata.custom.modelDrawer && b.metadata.custom.modelDrawer)
         return Number(a.metadata.custom.modelRank) - Number(b.metadata.custom.modelRank) || undefined;
     if (!!a.metadata.custom.modelSettings !== !!b.metadata.custom.modelSettings) return a.metadata.custom.modelSettings ? -1 : 1;

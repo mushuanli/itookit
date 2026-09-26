@@ -20,6 +20,6 @@ export function resourceDrawers(items: VFSNodeUI[], inventory: ToolboxInventory,
 function drawerNode(group: Drawer, children: VFSNodeUI[], showKind: boolean): VFSNodeUI {
     return { id: group.id, type: 'directory', kind: 'group', version: '1', icon: group.icon ?? resourceIcon(group.kind), children,
         metadata: { title: group.name, path: group.id, parentPath: null, tags: [], createdAt: '', lastModified: '',
-            custom: { _readOnly: true, resourceDrawer: true, navigationMenu: true,
+            custom: { _readOnly: true, toolboxKind: group.kind, resourceDrawer: true, navigationMenu: true,
                 navigationDescription: [showKind ? t(`toolbox.${group.kind}`) : '', t('toolbox.drawerCount', { count: children.length })].filter(Boolean).join(' · ') } } };
 }

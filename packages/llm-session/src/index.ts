@@ -90,7 +90,7 @@ import { SessionManager, createSessionManager } from './session/session-manager'
 import { initializePromptHistory } from './services/prompt-history-service';
 import { CommandBus } from './core/command-bus';
 import { ExtensionRegistry } from './core/extension-registry';
-import { createSessionPlugin } from './plugins/session-plugin';
+import { createSessionPlugin, SessionCommand } from './plugins/session-plugin';
 import { createVcsPlugin } from './plugins/vcs-plugin';
 import { createHistoryPlugin } from './plugins/history-plugin';
 import { FlowDefinitionStore, type FlowStore } from '@itookit/llm-flow';
@@ -157,7 +157,7 @@ export async function initializeConversationSystem(
     const invocations = new FlowInvocationService(options.kernel, new FlowDefinitionStore(options.flowStore, options.dagPlugins), system.commandBus, options.canWriteSession, async id => {
         const manifest = await new InvocationRoundLog(options.sessionEngine, id).loadManifest();
         return { branch: manifest.currentBranch, head: manifest.currentHead };
-    });
+    }, (id, selected) => resolveSessionConnection(options, id, selected));
     invocations.register();
     await invocations.recover();
     return system;
@@ -176,6 +176,9 @@ function createControlPlane(
     sessionManager: SessionManager,
 ): ConversationSystem {
     const commandBus = new CommandBus();
+    commandBus.register(SessionCommand.GetConnections, async () => ({ connections: (await options.agentService.getConnections()).map(connection => ({ ...connection,
+        enabled: connection.enabled !== false && options.agentService.getProvider(connection.providerId)?.enabled !== false })),
+        defaultId: (await options.agentService.getDefaultConnection())?.id }));
     const dag = createDagCommands(options, commandBus);
     activateConversationPlugins(sessionManager, commandBus);
     return { sessionManager, commandBus, dag };
@@ -190,6 +193,7 @@ function createDagCommands(
         options.dagPlugins,
     );
     const dag = new DagCommandService({
+        resolveConnection: (id, selected) => resolveSessionConnection(options, id, selected),
         flowStore,
         canWriteSession: options.canWriteSession,
         workspaceManager: options.workspaceManager,
@@ -226,3 +230,12 @@ export { bindStandaloneFlowNode, type FlowIdentityResolver } from './session/flo
 export { buildSkillContexts } from '@itookit/llm-tasks';
 
 export { FlowRunProjection, projectTaskInteractions, type FlowRunProjectionOptions } from './persistence/flow-run-projection';
+
+async function resolveSessionConnection(options: ConversationSystemOptions, sessionId: string, selected?: string): Promise<string | undefined> {
+    const id = selected ?? (await options.sessionEngine.getSessionSettings(sessionId)).connectionId;
+    const connection = id ? await options.agentService.getConnection(id) : await options.agentService.getDefaultConnection();
+    if (id && !connection) throw new Error(`Connection not found: ${id}`);
+    if (connection && (connection.enabled === false || options.agentService.getProvider(connection.providerId)?.enabled === false))
+        throw new Error(`Connection is disabled: ${connection.id}`);
+    return connection?.id;
+}

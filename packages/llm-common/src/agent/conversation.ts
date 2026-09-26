@@ -27,7 +27,7 @@ export interface ConversationRound {
 
 export interface Round extends ConversationRound {
     /** Frozen workflow invocation owned by this branch round. */
-    flow?: { flowId: import('./flow-definition').FlowId; revision: number; parameters?: Record<string, import('./flow-definition').JsonValue> };
+    flow?: { flowId: import('./flow-definition').FlowId; connectionId?: string; revision: number; parameters?: Record<string, import('./flow-definition').JsonValue> };
     exposure?: 'public' | 'internal' | 'artifact';
     origin: 'merge' | 'rebase' | 'edit' | 'user';
     agentId?: string;

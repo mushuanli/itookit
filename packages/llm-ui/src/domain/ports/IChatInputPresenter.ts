@@ -41,6 +41,7 @@ export type InteractionReply = { approved: boolean; note?: string } | string;
  * Command 层只依赖此接口，不知道 ChatInput 的 DOM 实现。
  */
 export interface IChatInputPresenter {
+    openConnectionPicker(): void;
     setLoading(loading: boolean): void;
     setConfig(config: Partial<IChatInputConfig>): void;
     getConfig(): IChatInputConfig;
@@ -83,7 +84,7 @@ export interface IChatInputPresenter {
      */
     refreshSkills(skills: SkillInfo[]): void;
 
-    /** Open the settings panel that carries the Skill list (`/skills`). */
+    /** Open the separate Skill manager (`/skills`). */
     showSkillSettings(): void;
 
     /**

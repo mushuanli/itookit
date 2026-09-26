@@ -38,10 +38,12 @@ export function resolveNodeConnection(
     connections: FlowConnection[] | undefined,
     defaultConnection: string | undefined,
     fallbackConnectionId?: string,
+    runConnectionId?: string,
 ): void {
     if (!isRecord(config)) return;
-    const resolved = resolveConnectionId(config.connectionId, connections, defaultConnection)
-        ?? fallbackConnectionId;
+    const explicit = typeof config.connectionId === 'string' && config.connectionId.length > 0;
+    const resolved = (explicit ? resolveConnectionId(config.connectionId, connections, defaultConnection) : runConnectionId
+        ?? resolveConnectionId(undefined, connections, defaultConnection)) ?? fallbackConnectionId;
     if (resolved !== undefined) config.connectionId = resolved;
 }
 

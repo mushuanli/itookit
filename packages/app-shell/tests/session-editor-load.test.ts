@@ -29,7 +29,7 @@ async function fixture(backend: IStorageBackend = new MemoryBackend()) {
     const kernel = new Kernel({ catalog: { fs }, pollMs: 0 });
     kernel.registerStorageResolver(new SessionDirectoryStorageResolver(fs)); await kernel.initialize();
     cleanup.push(async () => { kernel.dispose(); await kernel.waitIdle(); });
-    const agents = { listAgents: () => [], getConnections: vi.fn(async () => []), findAgent: () => undefined, onChange: () => () => {} };
+    const agents = { listAgents: () => [], getDefaultConnection: async () => null, getConnections: vi.fn(async () => []), findAgent: () => undefined, onChange: () => () => {} };
     const sessions = createSessionManager(repository, agents as never, { kernel, dagPlugins: {} as never, flowStore: {} as never });
     cleanup.push(() => resetSessionManager());
     const execute = vi.fn(async (command: string, args?: any) => {
@@ -75,7 +75,7 @@ it.each(['main', 'review'])('initializes %s once and restores the selected branc
         restoreAndRender: expect.any(Number), branches: expect.any(Number),
     } });
     expect(f.bind).toHaveBeenCalledTimes(1);
-    expect(f.agents.getConnections).toHaveBeenCalledTimes(2);
+    expect(f.agents.getConnections).toHaveBeenCalledTimes(1);
     const user = container.querySelector('[data-session-id="round-r0-user"]');
     if (branch === 'main') { expect(user).not.toBeNull(); expect(user?.classList.contains('is-collapsed')).toBe(false); }
     else expect(user).toBeNull();

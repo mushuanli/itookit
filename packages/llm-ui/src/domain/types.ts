@@ -63,12 +63,6 @@ export interface ExecutorOption {
     icon?: string;
     category?: string;
     description?: string;
-    /** Provider name resolved from agent's configured connection, e.g. "Anthropic" */
-    provider?: string;
-    /** Connection display name resolved from agent's configured connection */
-    connectionName?: string;
-    /** Agent's configured connectionId (for connection override linkage) */
-    connectionId?: string;
     /** Agent 预设的快捷 Prompt 列表（供输入框下拉选择填入） */
     defaultPrompts?: PromptPreset[];
 }
@@ -83,6 +77,7 @@ export interface ModelOption {
 
 /** 连接选项（用于 ChatInput 连接选择器，不含 apiKey） */
 export interface ConnectionOption {
+    isDefault?: boolean;
     id: string;
     name: string;
     provider?: string;
@@ -101,13 +96,13 @@ export interface ConnectionOption {
 export interface ChatSessionSettings {
     executionMode?: ChatExecutionMode;
     /**
-     * 覆盖 Agent 使用的 LLM 连接 ID。
-     * 不设置时使用 Agent 自身配置的连接。
+     * Session connection selection.
+     * Omitted means follow the global default.
      */
     connectionId?: string;
     /**
      * 模型层级偏好。
-     * - `'auto'`     — 不覆盖，使用 Agent 自身的 modelTier（默认 optimal）
+     * - `'auto'`     — Use the selected connection's optimal tier
      * - `'optimal'`  — 强制使用最优模型
      * - `'standard'` — 强制使用标准模型
      * - `'fast'`     — 强制使用快速/廉价模型
@@ -138,7 +133,7 @@ export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
 
 export interface ChatOverrides {
     executionMode?: ChatExecutionMode;
-    /** 覆盖 Agent 定义中的 LLM 连接 ID。 */
+    /** Explicit Session connection; absent means follow the global default. */
     connectionId?: string;
     /** 模型层级覆盖（'auto' 不传此字段） */
     modelTier?: ModelTier;

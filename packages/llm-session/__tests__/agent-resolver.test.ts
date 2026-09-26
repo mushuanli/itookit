@@ -7,7 +7,7 @@ const connection = {
 
 const agentDefinition = {
     id: 'default', name: 'Default Assistant', type: 'agent',
-    config: { connectionId: 'default', modelName: '' },
+    config: {},
 } as never;
 
 function service(overrides: Record<string, unknown> = {}): never {
@@ -53,5 +53,47 @@ describe('AgentResolver agentVersion', () => {
 
         expect(config.id).toBe('default');
         expect(config.agentVersion).toBeUndefined();
+    });
+});
+
+
+describe('independent connection selection', () => {
+    it('resolves Agent identity without any model configuration', async () => {
+        const resolver = new AgentResolver(service({ getDefaultConnection: async () => null }));
+        const identity = await resolver.resolveForChat('default');
+        expect(identity.agentVersion).toBeTruthy();
+        expect(identity.connectionId).toBeUndefined();
+        await expect(resolver.reResolveModel(identity, {})).rejects.toThrow('No default connection');
+    });
+
+    it('uses the explicit Session connection before the global default', async () => {
+        const resolver = new AgentResolver(service({ getConnection: async (id: string) => id === 'chosen'
+            ? { id, name: 'Chosen', providerId: 'p2', model: 'm2' } : null }));
+        const identity = await resolver.resolveForChat('default');
+        expect(await resolver.reResolveModel(identity, {})).toMatchObject({ connectionId: 'default', model: 'm1' });
+        expect(await resolver.reResolveModel(identity, { connectionId: 'chosen' })).toMatchObject({ connectionId: 'chosen', model: 'm2' });
+        await expect(resolver.reResolveModel(identity, { connectionId: 'missing' })).rejects.toThrow('Connection not found');
+    });
+
+    it('rejects a disabled connection instead of falling back', async () => {
+        const resolver = new AgentResolver(service({ getConnection: async () => ({ id: 'off', providerId: 'p', enabled: false }) }));
+        await expect(resolver.reResolveModel(await resolver.resolveForChat('default'), { connectionId: 'off' })).rejects.toThrow('disabled');
+    });
+});
+
+describe('shared Agent prompts', () => {
+    it('reads current shared content and appends Agent instructions, leaving prior configurations frozen', async () => {
+        const prompt = { id: 'rules', content: ['Shared'] };
+        const resolver = new AgentResolver(service({ getAgentConfig: async () => ({ id: 'a', name: 'A', type: 'agent', config: { systemPromptId: 'rules', systemPrompt: 'Additional' } }),
+            getSystemPrompt: async () => prompt }));
+        const before = await resolver.resolveForChat('a');
+        expect(before.systemPrompt).toEqual(['Shared', 'Additional']);
+        prompt.content[0] = 'Updated';
+        expect((await resolver.resolveForChat('a')).systemPrompt).toEqual(['Updated', 'Additional']);
+        expect(before.systemPrompt).toEqual(['Shared', 'Additional']);
+    });
+    it('rejects a missing prompt instead of silently omitting shared rules', async () => {
+        const resolver = new AgentResolver(service({ getAgentConfig: async () => ({ id: 'a', name: 'A', type: 'agent', config: { systemPromptId: 'missing', systemPrompt: 'Additional' } }) }));
+        await expect(resolver.resolveForChat('a')).rejects.toThrow('System prompt not found');
     });
 });

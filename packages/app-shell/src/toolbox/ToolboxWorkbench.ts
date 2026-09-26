@@ -20,6 +20,7 @@ import { TOOLBOX_KINDS, TOOLBOX_FILTERS, toolboxFilter, toolboxKind, toolboxSour
 import type { ToolboxInventory } from '@itookit/app-core';
 
 interface Options {
+    ocr?: import('../configuration/ocr-controls').OcrConfigurationControls;
     sidebar: HTMLElement; editor: HTMLElement; resources: ToolboxResources; inventory: ToolboxInventory;
     configuration: ModelConfigurationCommands;
     factories: Record<ToolboxKind, EditorFactory>; flowMenu: ContextMenuConfig<VFSNodeUI>;
@@ -59,7 +60,7 @@ export class ToolboxWorkbench implements WorkspaceController {
         this.drawerActions = new DrawerActions({ groups: resources.drawers, signal: this.abort.signal,
             refresh: () => { this.ui.refreshList(); const active = this.ui.getSnapshot().activeId; if (active) this.revealDrawer(active); }, create: group => this.createResource({ drawerId: group.id }), title: path => this.titles.get(path) ?? path });
         this.view = createFileSystemView({ viewId: 'toolbox:admin', mounts: TOOLBOX_KINDS.map(kind => ({
-            mountId: kind, at: '/' + kind, fs: resources.sources[kind], access: ['mcp', 'tools', 'providers', 'connections'].includes(kind) ? 'ro' : 'rw' })) });
+            mountId: kind, at: '/' + kind, fs: resources.sources[kind], access: ['prompts', 'mcp', 'tools', 'providers', 'connections'].includes(kind) ? 'ro' : 'rw' })) });
         this.descriptions = await resources.descriptions();
         await this.loadDirectories();
         this.buildFilters();
@@ -78,7 +79,7 @@ export class ToolboxWorkbench implements WorkspaceController {
     }
     private connectSources(): void {
         const { resources, editor } = this.options;
-        this.deletion = new ConfigurationDeletionDialog(this.options.configuration, () => this.refresh());
+        this.deletion = new ConfigurationDeletionDialog(this.options.configuration, () => this.refresh(), this.options.ocr?.deletionImpact);
         this.cleanups.push(connectEditorLifecycle(this.ui, this.view, editor, undefined, { files: { fs: this.view, cwd: '/' }, resolveEditor: node => this.factory(toolboxKind(node.id)!),
             hostContext: { navigate: this.options.navigate } }));
         this.cleanups.push(this.ui.on('sessionSelected', ({ item }) => this.selected(item?.id ?? null)));
@@ -98,7 +99,7 @@ export class ToolboxWorkbench implements WorkspaceController {
         return async (container, options) => {
             const original = editorResourceId(options) ?? '', path = toolboxSourcePath(original), source = this.options.resources.sources[kind];
             const target = kind !== 'agents' && kind !== 'flows'
-                ? { kind: 'entity' as const, entityType: { skills: 'skill' as const, mcp: 'mcp' as const, tools: 'tool' as const, providers: 'provider' as const, connections: 'connection' as const }[kind], id: decodeURIComponent(path.slice(1)) }
+                ? { kind: 'entity' as const, entityType: { prompts: 'system-prompt' as const, skills: 'skill' as const, mcp: 'mcp' as const, tools: 'tool' as const, providers: 'provider' as const, connections: 'connection' as const }[kind], id: decodeURIComponent(path.slice(1)) }
                 : { kind: 'file' as const, path };
             const instance = await this.options.factories[kind](container, { ...options, target, files: { fs: source, cwd: '/' },
                 hostContext: { ...options.hostContext!, navigate: this.options.navigate, requestDelete: targets => this.deletion.request(targets), saveContent: (id, content) => source.driver.writeContent(toolboxSourcePath(id), content) } });
@@ -124,7 +125,7 @@ export class ToolboxWorkbench implements WorkspaceController {
     }
     private updateToolbar(): void {
         this.ui?.setToolbar({ fileLabel: t('toolbox.new'),
-            secondary: this.prefs.filter === 'models' ? undefined : { label: t('toolbox.organize'), run: () => { const group = this.selectedDrawer();
+            secondary: this.prefs.filter === 'models' ? (this.options.ocr ? { label: t('ocr.configure'), run: async () => { await this.options.ocr!.configure(); } } : undefined) : { label: t('toolbox.organize'), run: () => { const group = this.selectedDrawer();
                 const kind = group?.kind ?? (drawerKind(this.prefs.filter as ToolboxKind) ? this.prefs.filter as import('@itookit/app-core').DrawerKind : 'agents');
                 void this.drawerActions.move(kind, group?.paths).catch(error => alert(String(error))); } },
             hiddenActions: this.prefs.filter === 'tools' ? ['create-file', 'create-directory']
@@ -179,11 +180,17 @@ export class ToolboxWorkbench implements WorkspaceController {
         const kind = toolboxKind(item.id), provider = modelDrawerProvider(item.id);
         const actions = [this.exportMenu([item.id])];
         if (provider !== undefined) return [...this.modelMenu(provider), ...actions];
+        if (kind === 'connections') {
+            const id = decodeURIComponent(toolboxSourcePath(item.id).slice(1));
+            const current = this.options.inventory.defaultConnectionId === id;
+            actions.push({ id: 'default-connection', label: t(current ? 'connection.clearDefault' : 'connection.setDefault'),
+                onClick: async () => { await this.options.resources.setDefaultConnection(current ? null : id); } });
+        }
         const drawers = this.drawerActions.menu(item);
-        if (kind === 'mcp' || kind === 'connections' && toolboxSourcePath(item.id) !== '/default'
+        if (kind === 'prompts' || kind === 'mcp' || kind === 'connections'
             || kind === 'providers')
             actions.push(this.deleteMenu(item.id));
-        if (!kind || ['mcp', 'tools', 'providers', 'connections'].includes(kind)) return [...drawers, ...actions];
+        if (!kind || ['prompts', 'mcp', 'tools', 'providers', 'connections'].includes(kind)) return [...drawers, ...actions];
         const kept = defaults.filter(entry => 'id' in entry && ['rename', 'delete'].includes(entry.id));
         return [...drawers, ...actions, ...(kind === 'flows' ? this.options.flowMenu.items?.(item, kept) ?? kept : kept)];
     }
@@ -196,7 +203,7 @@ export class ToolboxWorkbench implements WorkspaceController {
         return menu;
     }
     private deleteMenu(path: string): MenuItem<VFSNodeUI> {
-        const kind = toolboxKind(path), entityType = kind === 'providers' ? 'provider' : kind === 'connections' ? 'connection' : 'mcp';
+        const kind = toolboxKind(path), entityType = kind === 'prompts' ? 'system-prompt' : kind === 'providers' ? 'provider' : kind === 'connections' ? 'connection' : 'mcp';
         return { id: 'delete-resource', label: t(kind === 'providers' ? 'toolbox.deleteProvider' : 'action.delete'),
             onClick: () => this.deletion.request([{ kind: 'entity', entityType, id: decodeURIComponent(toolboxSourcePath(path).slice(1)) }]) };
     }
@@ -207,6 +214,10 @@ export class ToolboxWorkbench implements WorkspaceController {
             menu.unshift({ id: 'moveDrawer', label: t('toolbox.moveDrawer'), onClick: () => {
                 void this.drawerActions.move(kind, paths).catch(error => alert(String(error)));
             } });
+        if (kind === 'prompts' && items.every(item => toolboxKind(item.id) === 'prompts'))
+            menu.push({ id: 'delete-resource', label: t('action.delete'), onClick: () => this.deletion.request(paths.map(path => ({
+                kind: 'entity', entityType: 'system-prompt', id: decodeURIComponent(toolboxSourcePath(path).slice(1)),
+            }))) });
         if (items.every(item => item.type === 'file' && ['agents', 'skills', 'flows'].includes(toolboxKind(item.id) ?? '') && !item.metadata.custom._readOnly))
             menu.push(...defaults.filter(item => 'id' in item && item.id === 'bulk-delete'));
         return menu;
@@ -245,7 +256,8 @@ export class ToolboxWorkbench implements WorkspaceController {
     }
     private revealDrawer(path: string): void {
         const id = decodeURIComponent(toolboxSourcePath(path).slice(1));
-        const provider = toolboxKind(path) === 'providers' ? id : this.options.inventory.connections.get(id)?.providerId;
+        const kind = toolboxKind(path);
+        const provider = kind === 'providers' ? id : kind === 'connections' ? this.options.inventory.connections.get(id)?.providerId : undefined;
         const folderId = provider ? modelDrawerId(provider) : this.options.resources.drawers.forPath(path)?.id;
         if (!folderId) return;
         this.ui.setExpanded(folderId, true);

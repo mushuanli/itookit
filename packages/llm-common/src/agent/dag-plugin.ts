@@ -65,7 +65,7 @@ export interface DagRunSpec {
     /** Compiler-owned identity defaults by node; dynamic descendants inherit their parent's scope. */
     nodeDefaults?: Record<string, Record<string, unknown>>;
     /** Connection aliases for dynamic descendants, scoped by their compiled source node. */
-    nodeConnections?: Record<string, { connections?: FlowConnection[]; defaultConnection?: string; fallbackConnectionId?: string }>;
+    nodeConnections?: Record<string, { connections?: FlowConnection[]; defaultConnection?: string; fallbackConnectionId?: string; runConnectionId?: string }>;
     nodes: DagNodeDefinition[];
     edges: DagEdgeDefinition[];
     maxNodes?: number;

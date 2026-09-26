@@ -22,7 +22,8 @@ function fixture() {
 }
 
 it('reruns the latest user request in Harness mode without invoking Flow commands', async () => {
-    const f = fixture(); await f.run();
+    const f = fixture();
+    f.responses.set(SessionCommand.GetConnections, { connections: [] }); await f.run();
     expect(f.execute).toHaveBeenLastCalledWith(SessionCommand.RegenerateFromUser, {
         userMessageId: 'latest', options: { overrides: { executionMode: 'agent' } },
     });
@@ -32,6 +33,7 @@ it('reruns the latest user request in Harness mode without invoking Flow command
 
 it('retains the Flow parameter form and does not regenerate its setup message as a chat', async () => {
     const f = fixture();
+    f.responses.set(SessionCommand.GetConnections, { connections: [] });
     f.responses.set(SessionCommand.FlowRerunContext, { sessionId: 's', sourceRoundId: 'r', definitionKey: 'key',
         flow: { parameters: { goal: 'saved' } }, definition: { parameters: [{ name: 'goal', type: 'string' }] } });
     const pending = f.run();
@@ -46,6 +48,7 @@ it('retains the Flow parameter form and does not regenerate its setup message as
 
 it.each(['empty', 'busy', 'switched', 'aborted'] as const)('does not submit when the branch is %s', async reason => {
     const f = fixture();
+    f.responses.set(SessionCommand.GetConnections, { connections: [] });
     if (reason === 'empty') f.responses.set(SessionCommand.GetSessions, []);
     if (reason === 'busy') f.responses.set(SessionCommand.CanRegenerate, { allowed: false, reason: 'busy' });
     if (reason === 'switched') f.responses.set(SessionCommand.GetCurrentId, 'other');
@@ -62,6 +65,7 @@ it.each(['empty', 'busy', 'switched', 'aborted'] as const)('does not submit when
 
 it('deduplicates editor reruns before admission and captures the selected mode', async () => {
     const f = fixture();
+    f.responses.set(SessionCommand.GetConnections, { connections: [] });
     let release!: () => void;
     f.execute.mockImplementation(async command => {
         if (command === SessionCommand.FlowRerunContext) await new Promise<void>(resolve => { release = resolve; });

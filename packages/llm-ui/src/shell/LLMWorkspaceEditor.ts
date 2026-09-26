@@ -10,7 +10,6 @@ import { promptFlowParameters } from '../components/FlowParameterForm';
 import { IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventMap, EditorEventCallback, CollapseExpandResult, Toast } from '@itookit/ui-common';
 import { EventBus } from '@itookit/vfs-core';
 import type {
-    ILLMService,
     ICommandBus,
 } from '@itookit/common';
 import type { EventEnvelope, Kernel, InteractionRequest, JsonValue } from '@itookit/durable-kernel';
@@ -30,7 +29,7 @@ import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { IPrivilegedCommandService } from '../domain/ports/IPrivilegedCommandService';
 
 // Services
-import { SessionService, StateService, AssetService, BranchStore, BranchService, NavDataBuilder, FileSearchService, OcrService } from '../services';
+import { SessionService, StateService, AssetService, BranchStore, BranchService, NavDataBuilder, FileSearchService } from '../services';
 
 // Commands
 import type { CommandContext } from '../commands/CommandContext';
@@ -93,11 +92,8 @@ export interface LLMEditorOptions extends EditorOptions {
     agentService: IAgentConfigService;
     initialInputState?: { text?: string; agentId?: string };
     isNewSession?: boolean;
-    /**
-     * 一次性 LLM 服务（无会话，针对任意 connectionId 调用）。
-     * 由组合根注入，供图片 OCR 等工具型调用使用。未提供时 OCR 入口不显示。
-     */
-    llmService?: ILLMService;
+    /** Host-owned OCR capability and configuration. */
+    ocr?: import('@itookit/ui-common').OcrControls;
     /**
      * Conversation command bus returned by initializeConversationSystem().
      * 所有高层操作通过 commands.execute('session.*') / 'vcs.*' 调用。
@@ -153,7 +149,6 @@ export class LLMWorkspaceEditor implements IEditor {
     private navDataBuilder!: NavDataBuilder;
     private assetManager?: AssetManagerUI;
     private fileSearchService!: FileSearchService;
-    private ocrService!: OcrService;
     private runAttachment?: RunAttachmentController;
     private rerunAbort?: AbortController;
     private rerunPending = false;
@@ -320,9 +315,6 @@ export class LLMWorkspaceEditor implements IEditor {
         this.branchService = new BranchService(this.commandBus, this.branchStore);
         this.navDataBuilder = new NavDataBuilder(this.commandBus);
         this.fileSearchService = new FileSearchService(this.options.files?.fs);
-        if (this.options.llmService) {
-            this.ocrService = new OcrService(this.options.llmService);
-        }
     }
 
     private async initComponents(session: InitialSessionData['session']): Promise<Omit<InitialSessionData, 'session'>> {
@@ -426,9 +418,7 @@ export class LLMWorkspaceEditor implements IEditor {
             onRequestFiles: async (query, options) => this.fileSearchService.search(query, options),
 
             // ── OCR (image → text) — only when a one-shot LLM service is injected ─
-            ...(this.options.llmService
-                ? { onOcrImage: (image: Blob) => this.ocrImage(image) }
-                : {}),
+            ocr: this.options.ocr,
 
             // ── Settings navigation ──────────────────────────────────────────
             onNavigateSettings: ({ resourceId, anchor }) => {
@@ -854,6 +844,7 @@ export class LLMWorkspaceEditor implements IEditor {
                     flowId: autoRunFlow.flowId,
                     flowRevision: autoRunFlow.revision,
                     flowParameters: autoRunFlow.parameters,
+                    ...(autoRunFlow.connectionId ? { connectionId: autoRunFlow.connectionId } : {}),
                 },
             });
         }
@@ -1064,7 +1055,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private async startPlan(goal: string): Promise<void> {
         const sessionId = this.requireSessionId();
         const agentId = this.chatInput.getConfig().agentId;
-        const taskId = await this.options.privilegedCommands!.plan({ sessionId, agentId, goal });
+        const taskId = await this.options.privilegedCommands!.plan({ sessionId, agentId, goal, connectionId: this.chatInput.getConfig().settings?.connectionId });
         await this.attachPrivilegedTask(taskId, 'Plan task created');
     }
 
@@ -1136,9 +1127,6 @@ export class LLMWorkspaceEditor implements IEditor {
     // 文件搜索 / OCR → 委托到专用 Service
     // ================================================================
 
-    private async ocrImage(image: Blob): Promise<string> {
-        return this.ocrService.ocr(image);
-    }
 
     // ================================================================
     // 销毁 — 逆序清理

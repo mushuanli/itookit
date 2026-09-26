@@ -123,7 +123,7 @@ class DagCommandService {
 }
 ```
 
-**`DagCommandServiceOptions`**：`{ flowStore: FlowDefinitionStore; kernel: Kernel; plugins: DagPluginCatalog; resolveTools?; resolveSessionContext?; bindNode?; workspaceManager? }`。`bindNode(sessionId, node, defaults?)` 用于静态/Composite 编译及动态 patch 身份解析；动态节点传入产生节点所属 Flow 的 defaults。编译结果 `DagRunSpec.nodeDefaults` 保存按节点划分的默认身份层，Composite 展开保留子 Flow 的作用域；执行器提交时冻结它，并由动态 patch/委派后代沿用。默认配置不扩大动态节点的原能力声明。`DagRunSpec.nodeConnections` 同样按节点保存连接别名、默认槽位与宿主回退连接，供动态 patch 和委派子节点在提交前解析，Composite 保留子 Flow 的作用域。动态绑定在整批发布前完成，仅采用 config/inputs，并保留原工具能力、预算及委派调度策略；递归保留 resolvedTemplate 的身份内容，将每级模板能力限定为原声明，缺省为空。`resolveSessionContext(sessionId, userMessage)` 返回项目规则、已加载 Skill 规则及 Skill 索引；独立入口传空 userMessage，由执行器冻结并提供给每个 Agent 实例。
+**`DagCommandServiceOptions`**：`{ flowStore: FlowDefinitionStore; kernel: Kernel; plugins: DagPluginCatalog; resolveTools?; resolveSessionContext?; bindNode?; workspaceManager? }`。`bindNode(sessionId, node, defaults?)` 用于静态/Composite 编译及动态 patch 身份解析；动态节点传入产生节点所属 Flow 的 defaults。编译结果 `DagRunSpec.nodeDefaults` 保存按节点划分的默认身份层，Composite 展开保留子 Flow 的作用域；执行器提交时冻结它，并由动态 patch/委派后代沿用。默认配置不扩大动态节点的原能力声明。`DagRunSpec.nodeConnections` 同样按节点保存连接别名、默认槽位、本次运行选择与宿主回退连接，供动态 patch 和委派子节点在提交前解析，Composite 保留子 Flow 的作用域。动态绑定在整批发布前完成，仅采用 config/inputs，并保留原工具能力、预算及委派调度策略；递归保留 resolvedTemplate 的身份内容，将每级模板能力限定为原声明，缺省为空。`resolveSessionContext(sessionId, userMessage)` 返回项目规则、已加载 Skill 规则及 Skill 索引；独立入口传空 userMessage，由执行器冻结并提供给每个 Agent 实例。
 
 **`DurableFlowSnapshot`**：运行快照类型（命令面查询用）。
 
@@ -172,6 +172,8 @@ interface FlowStore {
 
 ## DAG 编译
 
+`dag.run.start` 支持可选 `connectionId`；`DagCommandServiceOptions.resolveConnection(sessionId, connectionId?)` 由宿主解析会话/全局回退。编译优先级为节点显式连接、本次运行选择、Flow 默认配置、宿主回退。运行选择为实际 Connection ID，不经过 Flow 槽位别名转换；保留节点显式连接，且不修改保存的 Flow 定义。Composite、动态节点和委派子节点沿用持久化的连接作用域。
+
 ```ts
 type FlowNodeBinder = (
     node: FlowNodeDefinition,
@@ -185,6 +187,9 @@ flowToDag(
     fallbackConnectionId?: string,
     resolveComposite?: (id: string, revision?: number) => Promise<FlowRevision | null>,
     compositeStack?: string[],
+    dependencyLocks?: FlowRevision['dependencyLocks'],
+    isolated?: boolean,
+    runConnectionId?: string,
 ): Promise<DagRunSpec>;
 findCycles(nodes: GraphNode[], edges: GraphEdge[]): GraphCycles;   // 通用环检测
 ```

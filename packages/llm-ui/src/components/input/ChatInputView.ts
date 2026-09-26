@@ -1,3 +1,4 @@
+import { OcrSettingsForm, Modal } from '@itookit/ui-common';
 // @file: llm-ui/components/input/ChatInputView.ts
 
 import type { IChatInputPresenter, IChatInputConfig } from '../../domain/ports/IChatInputPresenter';
@@ -6,7 +7,7 @@ import type {
     ExecutorOption, ConnectionOption,
     ChatOverrides, SkillInfo, FileSuggestion,
 } from '../../domain/types';
-import type { JsonValue, ModelTier } from '@itookit/common';
+import { t, randomUUID, type JsonValue, type ModelTier } from '@itookit/common';
 import { ChatInputTemplates } from '../templates/ChatInputTemplates';
 import type { InputPlugin, InputPluginContext } from './plugins/InputPlugin';
 import { MentionPlugin } from './plugins/MentionPlugin';
@@ -78,13 +79,8 @@ export interface ChatInputOptions {
      */
     onRequestFiles?: (query: string, options?: { includeIgnored?: boolean; signal?: AbortSignal }) => Promise<FileSuggestion[]>;
 
-    /**
-     * 对图片做 OCR（图片转文字），返回 Markdown 文本。
-     *
-     * 由 Shell 注入：内部调用视觉连接（conn-volcengine-vision）做单次 LLM 调用。
-     * 未提供时，图片附件 chip 不显示「提取文字」按钮（优雅降级）。
-     */
-    onOcrImage?: (image: Blob) => Promise<string>;
+    /** Host-owned image recognition, shared configuration and live connection label. */
+    ocr?: import('@itookit/ui-common').OcrControls;
 
     /**
      * 预留（本期不接线）：语音转文字。
@@ -117,6 +113,7 @@ export class ChatInput implements IChatInputPresenter {
     private historyValue: HTMLSpanElement | null = null; // removed from new template
     private streamToggle!: HTMLInputElement;
     private settingsPanel!: HTMLElement;
+    private ocrSettings?: OcrSettingsForm;
     private flowIdInput!: HTMLInputElement;
     private branchModeSelect!: HTMLSelectElement;
     private retentionModeSelect!: HTMLSelectElement;
@@ -143,7 +140,8 @@ export class ChatInput implements IChatInputPresenter {
     private settingsExpanded = false;
     private currentAgentId: string = 'default';
 
-    private skillPanel!: SkillPanel;
+    private skillPanel?: SkillPanel;
+    private skillModal?: Modal;
     private connectionTier!: ConnectionTierController;
     private executionMode!: ExecutionModeControl;
 
@@ -201,15 +199,7 @@ export class ChatInput implements IChatInputPresenter {
             hasFiles: () => !!this.options.onRequestFiles,
             onCloseSettings: () => this.toggleSettings(false),
         });
-        this.skillPanel = new SkillPanel(container, {
-            onConfigureCapabilities: this.options.onConfigureCapabilities,
-            onRequestSkills: this.options.onRequestSkills,
-            onLoadSkill: this.options.onLoadSkill,
-            onUnloadSkill: this.options.onUnloadSkill,
-        });
         this.connectionTier = new ConnectionTierController(container, {
-            getAgents: () => this.agents,
-            getAgentId: () => this.config.agentId,
             onNavigateSettings: (target) => this.options.onNavigateSettings?.(target),
             onChange: () => {
                 this.config.settings.connectionId = this.connectionTier.getConnectionId();
@@ -219,6 +209,10 @@ export class ChatInput implements IChatInputPresenter {
             },
         });
 
+        if (options.ocr) {
+            const section = container.querySelector<HTMLElement>('[data-ocr-preferences]')!; section.hidden = false;
+            this.ocrSettings = new OcrSettingsForm(section.querySelector<HTMLElement>('[data-ocr-fields]')!, options.ocr);
+        }
         this.bindEvents();
         this.executionMode = new ExecutionModeControl(container, mode => {
             this.config.settings.executionMode = mode;
@@ -394,6 +388,8 @@ export class ChatInput implements IChatInputPresenter {
     clearInteraction(interactionId?: string): void { this.interactionPanel.clear(interactionId); }
 
     destroy(): void {
+        this.ocrSettings?.destroy();
+        this.skillModal?.hide(); this.skillPanel = undefined;
         this.interactionPanel.clear();
         if (this.outsideClickHandler) {
             document.removeEventListener('click', this.outsideClickHandler);
@@ -436,7 +432,7 @@ export class ChatInput implements IChatInputPresenter {
             textarea: this.textarea,
             inputWrapper: this.inputWrapper,
             attachBtn: this.attachBtn,
-            onOcrImage: this.options.onOcrImage,
+            ocr: this.options.ocr,
             onRequestFiles: this.options.onRequestFiles,
             getLoading: () => this.loading,
             getFiles: () => this.files,
@@ -573,7 +569,7 @@ export class ChatInput implements IChatInputPresenter {
             if (Number.isNaN(index)) return;
             this.attachmentMgr.ocrImage(this.files[index], index);
         });
-        delegate(this.attachmentContainer, 'click', '.llm-input__ocr-all-btn', ({ event }) => {
+        delegate(this.attachmentContainer, 'click', '.llm-input__ocr-all-btn:not([data-ocr-configure])', ({ event }) => {
             event.stopPropagation();
             this.attachmentMgr.ocrAllImages();
         });
@@ -723,6 +719,8 @@ export class ChatInput implements IChatInputPresenter {
             plugin.onAfterSend?.(text, currentExecutor);
         }
     }
+
+    openConnectionPicker(): void { this.connectionTier.openConnPicker(); }
 
     private buildOverrides(): ChatOverrides {
         const overrides: ChatOverrides = { executionMode: this.config.settings.executionMode ?? 'chat' };
@@ -880,14 +878,12 @@ export class ChatInput implements IChatInputPresenter {
         this.settingsBtn.classList.toggle('active', this.settingsExpanded);
 
         if (this.settingsExpanded) {
+            void this.ocrSettings?.refresh();
             this.settingsPanel.classList.add('llm-input__settings-panel--entering');
             requestAnimationFrame(() => {
                 this.settingsPanel.classList.remove('llm-input__settings-panel--entering');
             });
-            // Lazily load skills when panel opens (skills always visible now)
-            if (this.options.onRequestSkills) {
-                this.skillPanel.reload();
-            }
+
         }
     }
 
@@ -1010,13 +1006,24 @@ export class ChatInput implements IChatInputPresenter {
      * 也可在用户点击 Refresh 按钮时由内部调用 onRequestSkills 回调。
      */
     refreshSkills(skills: SkillInfo[]): void {
-        this.skillPanel.refresh(skills);
+        this.skillPanel?.refresh(skills);
     }
 
-    /** Open the settings panel, which carries the Skill list (`/skills`). */
+    /** The explicit /skills command opens a separate manager. */
     showSkillSettings(): void {
-        this.toggleSettings(true);
-        this.skillPanel.reload();
+        if (this.skillModal) return;
+        this.toggleSettings(false);
+        const id = 'skills-' + randomUUID();
+        const modal = new Modal(t('chatSettings.skills'), `<div id="${id}">${ChatInputTemplates.renderSkillsSetting()}</div>`, {
+            onCancel: () => { if (this.skillModal === modal) { this.skillModal = undefined; this.skillPanel = undefined; } },
+        });
+        this.skillModal = modal; modal.show();
+        this.skillPanel = new SkillPanel(document.getElementById(id)!, {
+            onConfigureCapabilities: this.options.onConfigureCapabilities ? () => { modal.hide(); this.options.onConfigureCapabilities?.(); } : undefined,
+            onRequestSkills: this.options.onRequestSkills,
+            onLoadSkill: this.options.onLoadSkill, onUnloadSkill: this.options.onUnloadSkill,
+        });
+        void this.skillPanel.reload();
     }
 
     private updateActiveBadges(): void {
@@ -1126,14 +1133,13 @@ export class ChatInput implements IChatInputPresenter {
     /** Convert agents list to PopupItem[] for the picker. */
     private buildAgentItems(): PopupItem[] {
         return this.agents.map(a => {
-            const meta = [a.provider, a.connectionName].filter(Boolean).join(' · ');
             return {
                 id: a.id,
                 label: a.name,
                 icon: a.icon ?? '🤖',
-                description: meta || undefined,
+                description: a.description,
                 group: a.category,
-                searchText: [a.provider, a.connectionName, a.category].filter(Boolean).join(' '),
+                searchText: a.category,
             };
         });
     }
@@ -1143,7 +1149,6 @@ export class ChatInput implements IChatInputPresenter {
         this.config.agentId = id;
         this.currentAgentId = id;
         this.updateAgentTrigger();
-        this.connectionTier.refreshForAgentChange();
         this.options.onExecutorChange?.(id);
         this.notifyConfigChange();
     }
@@ -1155,7 +1160,7 @@ export class ChatInput implements IChatInputPresenter {
         if (agent) {
             this.agentIconEl.textContent = agent.icon ?? '🤖';
             this.agentNameEl.textContent = agent.name;
-            const meta = [agent.provider, agent.connectionName].filter(Boolean).join(' · ');
+            const meta = agent.category ?? '';
             this.agentMetaEl.textContent = meta;
             this.agentMetaEl.style.display = meta ? '' : 'none';
         } else {

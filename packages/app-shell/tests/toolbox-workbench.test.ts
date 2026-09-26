@@ -1,3 +1,4 @@
+import { SystemPromptSettingsEditor } from '../../llm-settings-ui/src/editors/SystemPromptSettingsEditor';
 // @vitest-environment jsdom
 import * as archiveTransfer from '../src/files/archive-transfer';
 import { ProviderSettingsEditor } from '../../llm-settings-ui/src/editors/ProviderSettingsEditor';
@@ -20,7 +21,7 @@ let runtime: ApplicationRuntime;
 const cleanup: Array<() => unknown> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); await runtime?.dispose(); document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 class Editor extends BaseSettingsEditor<object> { async render() { this.container.textContent = editorResourceId(this.options) ?? ''; } }
-async function setup() {
+async function setup(ocr?: import('../src/configuration/ocr-controls').OcrConfigurationControls) {
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0));
     vi.stubGlobal('cancelAnimationFrame', clearTimeout);
     HTMLDialogElement.prototype.showModal ??= function () { this.setAttribute('open', ''); };
@@ -34,17 +35,17 @@ async function setup() {
     await runtime.commandBus.execute(FlowCommand.DraftCreate, { id: 'review', name: 'English review' });
     await runtime.agentService.saveMCPServer({ id: 'docs', name: 'Documentation', transport: 'http', autoConnect: false, endpoint: 'https://example.invalid/mcp', tools: [{ name: 'lookup', description: 'Find docs', inputSchema: { type: 'object' } }] });
     const skills = new SkillsEngine(runtime.agentService); cleanup.push(() => skills.dispose());
-    const inventory = new ToolboxInventory(() => runtime.agentService.getMCPServers(), runtime.kernel.toolCatalog, runtime.agentService); await inventory.init(); cleanup.push(() => inventory.dispose());
+    const inventory = new ToolboxInventory(() => runtime.agentService.getMCPServers(), runtime.kernel.toolCatalog, runtime.agentService, () => runtime.agentService.listSystemPrompts()); await inventory.init(); cleanup.push(() => inventory.dispose());
     const resources = new ToolboxResources({ agents: await runtime.vfs.openFileSystem('/home/admin/agents'), skills,
         flows: runtime.flowEngine.engine, ...inventory.sources }, runtime.agentService, runtime.commandBus, await runtime.vfs.openFileSystem('/etc'));
     const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
     const factory = vi.fn(async (container: HTMLElement, options: EditorOptions) => { const editor = new Editor(container, {}, options); await editor.init(container); return editor; });
-    const factories = { agents: factory, skills: factory, flows: factory,
+    const factories = { prompts: async (container: HTMLElement, options: EditorOptions) => { const editor = new SystemPromptSettingsEditor(container, runtime.agentService, options); await editor.init(container); return editor; }, agents: factory, skills: factory, flows: factory,
         providers: async (container: HTMLElement, options: EditorOptions) => { const editor = new ProviderSettingsEditor(container, runtime.agentService, options); await editor.init(container); return editor; },
         connections: async (container: HTMLElement, options: EditorOptions) => { const editor = new ConnectionSettingsEditor(container, runtime.agentService, options); await editor.init(container); return editor; },
         mcp: async (container: HTMLElement, options: EditorOptions) => { const editor = new MCPSettingsEditor(container, runtime.agentService, options); await editor.init(container); return editor; },
         tools: async (container: HTMLElement, options: EditorOptions) => { const editor = new ToolDetailsEditor(container, inventory, options, resources); await editor.init(container); return editor; } };
-    const workbench = new ToolboxWorkbench({ sidebar, editor: main, resources, inventory, configuration: runtime.configuration, factories, flowMenu: {}, navigate: vi.fn(), selected: vi.fn() });
+    const workbench = new ToolboxWorkbench({ ocr, sidebar, editor: main, resources, inventory, configuration: runtime.configuration, factories, flowMenu: {}, navigate: vi.fn(), selected: vi.fn() });
     cleanup.push(() => workbench.destroy()); await workbench.start();
     return { workbench, sidebar, main, factory, resources, inventory };
 }
@@ -101,7 +102,7 @@ it('copies editable definitions and resolves tool references without installing 
     expect(imported).toHaveLength(5);
     for (let i = 0; i < 4; i++) {
         expect(imported[i]).not.toBe(paths[i]);
-        const kind = TOOLBOX_KINDS[i];
+        const kind = ['agents', 'skills', 'flows', 'mcp'][i] as typeof TOOLBOX_KINDS[number];
         expect(await f.resources.sources[kind].driver.exists(imported[i].slice(kind.length + 1))).toBe(true);
     }
     expect(imported[4]).toBe(paths[4]);
@@ -118,7 +119,7 @@ it('creates resources at paths that their owning editors can reopen', async () =
     const f = await setup();
     for (const kind of TOOLBOX_KINDS.filter(kind => kind !== 'tools')) {
         const path = await f.resources.create(kind, 'Created ' + kind);
-        expect(await f.resources.sources[kind].driver.exists(path.slice(kind.length + 1))).toBe(!['mcp', 'providers', 'connections'].includes(kind));
+        expect(await f.resources.sources[kind].driver.exists(path.slice(kind.length + 1))).toBe(!['prompts', 'mcp', 'providers', 'connections'].includes(kind));
         await f.inventory.refresh();
         expect(await f.resources.sources[kind].driver.exists(path.slice(kind.length + 1))).toBe(true);
     }
@@ -219,7 +220,7 @@ it('redirects moved settings pages and their selected resource anchors', () => {
 
 it('creates every editable category in named drawers and persists their organization in VFS', async () => {
     const f = await setup();
-    for (const kind of ['agents', 'skills', 'flows', 'mcp'] as const) {
+    for (const kind of ['agents', 'skills', 'flows', 'prompts', 'mcp'] as const) {
         f.workbench.setFilter(kind);
         const pending = f.workbench.createResource();
         const dialog = document.querySelector('.project-dialog')!;
@@ -238,7 +239,7 @@ it('creates every editable category in named drawers and persists their organiza
     }
     const { ToolboxDrawers } = await import('@itookit/app-core');
     const reloaded = new ToolboxDrawers(await runtime.vfs.openFileSystem('/etc')); await reloaded.init();
-    expect(reloaded.snapshot().filter(item => item.name === '学习')).toHaveLength(4);
+    expect(reloaded.snapshot().filter(item => item.name === '学习')).toHaveLength(5);
 });
 it('moves tool references in bulk without changing definitions and deleting a drawer only ungroups them', async () => {
     const f = await setup(); f.workbench.setFilter('all');
@@ -371,40 +372,106 @@ it('keeps bulk deletion and JSON export for editable files while tool references
     expect(document.querySelector('[data-action="delete"]')).toBeNull();
     expect(document.querySelector('[data-action="export-json"]')).not.toBeNull();
 });
-it('does not partially delete a provider used by the protected default connection', async () => {
+it('deletes a provider with the selected default connection and clears the preference', async () => {
     const f = await setup();
     await runtime.agentService.saveProvider({ id: 'protected-provider', name: 'Protected', implementation: 'openai-compatible', models: [] });
     await runtime.agentService.saveConnection({ id: 'default', name: 'Protected default', providerId: 'protected-provider' });
+    await runtime.agentService.setDefaultConnection('default');
     await vi.waitFor(() => expect(f.sidebar.querySelector('[data-item-id="/model-groups/protected-provider"]')).not.toBeNull());
     f.sidebar.querySelector<HTMLButtonElement>('[data-item-id="/model-groups/protected-provider"] [data-action="item-menu"]')!.click();
     document.querySelector<HTMLButtonElement>('[data-action="delete-resource"]')!.click();
     await vi.waitFor(() => expect(document.querySelector('.settings-modal-confirm')).not.toBeNull());
     document.querySelector<HTMLButtonElement>('.settings-modal-confirm')!.click();
-    await vi.waitFor(() => expect(document.querySelector('.settings-toast--error')?.textContent).toContain('默认连接'));
-    expect(runtime.agentService.getFullProvider('protected-provider')).toBeDefined();
-    expect((await runtime.agentService.getFullConnection('default'))?.providerId).toBe('protected-provider');
+    await vi.waitFor(() => expect(runtime.agentService.getFullProvider('protected-provider')).toBeUndefined());
+    expect(await runtime.agentService.getDefaultConnection()).toBeNull();
+    expect(await runtime.agentService.getFullConnection('default')).toBeNull();
 });
-it.each(['replace', 'keep', 'delete'] as const)('deletes builtin providers and their connections with agent action %s', async action => {
+it('deletes builtin providers and their connections while retaining independent agents', async () => {
     const f = await setup(), service = runtime.agentService;
     await service.saveConnection({ id: 'cascade-connection', name: 'Cascade connection', providerId: 'anthropic' });
-    await service.saveAgent({ id: 'cascade-agent', name: 'Affected agent', type: 'agent', config: { connectionId: 'cascade-connection', modelName: '' } });
+    await service.saveAgent({ id: 'cascade-agent', name: 'Affected agent', type: 'agent', config: {} });
     f.workbench.setFilter('models');
     f.sidebar.querySelector<HTMLButtonElement>('[data-item-id="/model-groups/anthropic"] [data-action="item-menu"]')!.click();
     document.querySelector<HTMLButtonElement>('[data-action="delete-resource"]')!.click();
-    await vi.waitFor(() => expect(document.querySelector('.settings-modal')?.textContent).toContain('Affected agent'));
+    await vi.waitFor(() => expect(document.querySelector('.settings-modal')?.textContent).toContain('Cascade connection'));
     expect(document.querySelector('.settings-modal')?.textContent).toContain('Cascade connection');
-    document.querySelector<HTMLInputElement>(`input[name="agent-action"][value="${action}"]`)!.checked = true;
-    document.querySelector<HTMLSelectElement>('#agent-replacement-conn')!.value = 'default';
     document.querySelector<HTMLButtonElement>('.settings-modal-confirm')!.click();
     await vi.waitFor(() => expect(document.querySelector('.settings-modal')).toBeNull());
     expect(service.getFullProvider('anthropic')).toBeUndefined();
     expect((await service.getConnections()).filter(connection => connection.providerId === 'anthropic')).toHaveLength(0);
     const agent = (await service.getAgents()).find(item => item.id === 'cascade-agent');
-    if (action === 'delete') expect(agent).toBeUndefined();
-    else expect(agent?.config.connectionId).toBe(action === 'replace' ? 'default' : 'cascade-connection');
+    expect(agent?.config).toEqual({});
     expect((await service.getAgents()).find(item => item.id === 'english')).toBeDefined();
     await vi.waitFor(() => expect(f.sidebar.querySelector('[data-item-id="/model-groups/anthropic"]')).toBeNull());
     const config = await runtime.vfs.openFileSystem('/etc');
     const persisted = JSON.parse(await config.driver.readContent('/llm/.providers/anthropic.json', { encoding: 'utf-8' }));
     expect(persisted.__deleted).toBe(true);
+});
+
+it('opens prompts in the toolbox without a second sidebar and preserves multiline segments on save', async () => {
+    const f = await setup();
+    const content = ['First line\nSecond line', 'Another paragraph'];
+    await runtime.agentService.saveSystemPrompt({ id: 'rules', name: 'Shared rules', content });
+    await vi.waitFor(() => expect(f.inventory.sources.prompts.driver.exists('/rules')).resolves.toBe(true));
+    await f.workbench.openResource('/prompts/rules');
+    expect(f.main.querySelector('.settings-split__sidebar')).toBeNull();
+    await vi.waitFor(() => expect(f.main.querySelector<HTMLTextAreaElement>('[data-field="content"]')?.value).toBe(content.join('\n')));
+    f.main.querySelector<HTMLInputElement>('[data-field="name"]')!.value = 'Updated rules';
+    f.main.querySelector<HTMLButtonElement>('[data-action="save"]')!.click();
+    await vi.waitFor(async () => expect(await runtime.agentService.getSystemPrompt('rules')).toMatchObject({ name: 'Updated rules', content }));
+    expect(toolboxSettingsRoute('system-prompts', 'rules')).toBe('/prompts/rules');
+});
+
+it('exports shared prompts with their Agent and remaps references on import', async () => {
+    const f = await setup();
+    await runtime.agentService.saveSystemPrompt({ id: 'rules', name: 'Rules', content: ['One\nTwo', 'Three'], presets: [{ name: 'Check', prompt: 'Check this' }] });
+    await runtime.agentService.saveAgent({ id: 'linked', name: 'Linked', type: 'agent', config: { systemPromptId: 'rules', systemPrompt: 'Agent only' } });
+    const archive = await f.resources.export(['/agents' + runtime.agentService.getAgentResourceId('linked')]);
+    expect(JSON.parse(archive).entries.map((entry: any) => entry.kind)).toEqual(['agents', 'prompts']);
+    const paths = await f.resources.import(archive);
+    const promptId = paths.find(path => path.startsWith('/prompts/'))!.split('/').pop()!;
+    const agent = (await runtime.agentService.getAgents()).find(item => item.id !== 'linked' && item.name === 'Linked')!;
+    expect(agent.config).toEqual({ systemPromptId: promptId, systemPrompt: 'Agent only' });
+    expect(promptId).not.toBe('rules');
+    expect(await runtime.agentService.getSystemPrompt(promptId)).toMatchObject({ content: ['One\nTwo', 'Three'], presets: [{ name: 'Check', prompt: 'Check this' }] });
+});
+
+it('orders categories consistently and deletes prompts through the configuration menu', async () => {
+    const f = await setup();
+    const order = [...f.sidebar.querySelectorAll<HTMLButtonElement>('[data-filter]')].map(button => button.dataset.filter);
+    expect(order).toEqual(['all', 'agents', 'flows', 'skills', 'prompts', 'tools', 'mcp', 'models']);
+    const roots = [...f.sidebar.querySelectorAll<HTMLElement>('.vfs-directory-item')].map(item => item.dataset.itemId).filter(Boolean);
+    expect(roots.indexOf('/drawers/ungrouped-agents')).toBeLessThan(roots.indexOf('/drawers/ungrouped-prompts'));
+    await f.workbench.openResource('/prompts/default');
+    f.sidebar.querySelector('[data-item-id="/prompts/default"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+    document.querySelector<HTMLButtonElement>('[data-action="delete-resource"]')!.click();
+    await vi.waitFor(() => expect(document.querySelector('.settings-modal-confirm')).not.toBeNull());
+    document.querySelector<HTMLButtonElement>('.settings-modal-confirm')!.click();
+    await vi.waitFor(async () => expect(await runtime.agentService.getSystemPrompt('default')).toBeNull());
+    expect((await runtime.agentService.getAgents()).some(agent => agent.id === 'default')).toBe(true);
+    expect((await runtime.agentService.listSystemPrompts()).some(prompt => prompt.id === 'default')).toBe(false);
+});
+
+it('remaps prompt references in Flow defaults and nested node configuration', async () => {
+    const f = await setup();
+    await runtime.agentService.saveSystemPrompt({ id: 'flow-rules', name: 'Flow rules', content: ['Check carefully'] });
+    const draft = await runtime.commandBus.execute<any>(FlowCommand.DraftLoad, { id: 'review' });
+    await runtime.commandBus.execute(FlowCommand.DraftSave, { draft: { ...draft, defaults: { systemPromptId: 'flow-rules' }, nodes: [
+        { id: 'reviewer', name: 'Reviewer', plugin: 'builtin.agent', pluginVersion: '1.0.0', inputs: {},
+            config: { systemPromptId: 'flow-rules', instruction: 'Review', approval: 'external' } },
+    ] }, expectedDraftVersion: draft.draftVersion });
+    const imported = await f.resources.import(await f.resources.export(['/flows/review.flow']));
+    const promptId = imported.find(path => path.startsWith('/prompts/'))!.split('/').pop()!;
+    const flowId = imported.find(path => path.startsWith('/flows/'))!.split('/').pop()!.replace(/\.flow$/, '');
+    const flow = await runtime.commandBus.execute<any>(FlowCommand.DraftLoad, { id: flowId });
+    expect(flow.defaults.systemPromptId).toBe(promptId);
+    expect(flow.nodes[0].config.systemPromptId).toBe(promptId);
+});
+
+it('opens shared OCR configuration from the models toolbar', async () => {
+    const configure = vi.fn().mockResolvedValue(true);
+    const f = await setup({ readSettings: async () => ({ value: {}, connections: [] }), saveSettings: async () => {}, openSettings: async () => {}, configure, recognize: async () => '', label: async () => 'OCR', subscribe: () => () => {}, deletionImpact: async () => '' });
+    await f.workbench.openResource('/connections');
+    const button = [...f.sidebar.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('文字识别设置'));
+    expect(button).toBeDefined(); button!.click(); expect(configure).toHaveBeenCalledOnce();
 });

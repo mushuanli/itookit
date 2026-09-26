@@ -486,10 +486,10 @@ export class DurableFlowExecutor {
                     input.maxConcurrency = Math.min(input.maxConcurrency ?? maxConcurrency, maxConcurrency);
                     const scope = nodeConnections.get(node.id);
                     const defaults = (task.input as DispatchInput).invocationDefaults;
-                    if (scope && defaults) resolveNodeConnection(defaults as unknown as CommonJsonValue, scope.connections, scope.defaultConnection, scope.fallbackConnectionId);
+                    if (scope && defaults) resolveNodeConnection(defaults as unknown as CommonJsonValue, scope.connections, scope.defaultConnection, scope.fallbackConnectionId, scope.runConnectionId);
                     if (scope) for (const branch of [...(task.input as DispatchInput).branches, ...((task.input as DispatchInput).revision?.invocation ? [(task.input as DispatchInput).revision!.invocation!] : [])]) {
                         if (defaults?.connectionId && !record(branch.target.config).connectionId) branch.target.config = { ...record(branch.target.config), connectionId: defaults.connectionId } as CommonJsonValue;
-                        resolveNodeConnection(branch.target.config, scope.connections, scope.defaultConnection, scope.fallbackConnectionId);
+                        resolveNodeConnection(branch.target.config, scope.connections, scope.defaultConnection, scope.fallbackConnectionId, scope.runConnectionId);
                     }
                 }
                 await this.emitHook('task.started', sessionId, { nodeId: node.id, iteration });
@@ -538,7 +538,7 @@ export class DurableFlowExecutor {
                     const connection = nodeConnections.get(parentId);
                     const resolvedConfig = structuredClone(config);
                     if (connection) resolveNodeConnection(resolvedConfig as CommonJsonValue,
-                        connection.connections, connection.defaultConnection, connection.fallbackConnectionId);
+                        connection.connections, connection.defaultConnection, connection.fallbackConnectionId, connection.runConnectionId);
                     boundNodes.push(withDispatchWorkspace({ ...node, config: resolvedConfig, inputs: bound?.inputs ?? node.inputs }, workspace?.directory));
                 }
                 plugins.addNodes(boundNodes);
@@ -613,7 +613,7 @@ export class DurableFlowExecutor {
                 if (connection && group) for (const child of nodes.filter(item => group.children.has(item.id))) {
                     nodeConnections.set(child.id, connection);
                     resolveNodeConnection(child.config as CommonJsonValue,
-                        connection.connections, connection.defaultConnection, connection.fallbackConnectionId);
+                        connection.connections, connection.defaultConnection, connection.fallbackConnectionId, connection.runConnectionId);
                 }
                 if (group?.detached) {
                     if (workspace && workspacePolicy?.cleanup !== 'keep') {

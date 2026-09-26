@@ -9,7 +9,7 @@ import {
     ISessionRepository,
 } from '@itookit/llm-session';
 import { IEditor } from '@itookit/ui-common';
-import type { ILLMService, ICommandBus } from '@itookit/common';
+import type { ICommandBus } from '@itookit/common';
 import { EditorFactory, EditorOptions } from '@itookit/ui-common';
 import type { Kernel } from '@itookit/durable-kernel';
 import { AgentConfigEditor } from '@itookit/llm-settings-ui';
@@ -74,7 +74,7 @@ export const createLLMFactory = (
     agentService: VFSAgentService,
     deps: {
         sessionRepository: ISessionRepository;
-        llmService?: ILLMService;
+        ocr?: import('@itookit/ui-common').OcrControls;
         commandBus?: ICommandBus;
         kernel?: Kernel;
         privilegedCommands?: import('./domain/ports/IPrivilegedCommandService').IPrivilegedCommandService;
@@ -113,7 +113,7 @@ export const createLLMFactory = (
             sessionId,
             sessionRepository: engine,
             isNewSession,
-            llmService: deps.llmService,
+            ocr: deps.ocr,
             commandBus: deps.commandBus,
             kernel: deps.kernel,
             privilegedCommands: deps.privilegedCommands,

@@ -269,11 +269,17 @@ class BranchService {
 
 ## 服务
 
+会话 `ChatSessionSettings.connectionId` 为可选覆盖；未设置时使用 `IConnectionService.getDefaultConnection()`。
+`setDefaultConnection(id | null)` 显式设置或清空全局默认。`session.get-connections` 返回连接列表与 `defaultId`，供 Flow 运行表单使用。
+Agent 定义不再包含连接、模型层级和 `modelPolicy`。普通执行在接收请求时冻结解析后的配置。
+Flow Invocation 记录请求的 `connectionId` 与接收时的 `resolvedConnectionId`，重复请求与恢复沿用该记录。
+
+
 | 类 | 职责 | 关键 API |
 |---|---|---|
 | `VFSAgentService extends FileBackedService implements IAgentManagementService` | Agent 配置的 VFS 持久化 | CRUD（实现 `IAgentManagementService` / `IAgentConfigService` / `IConnectionService`） |
 | `PromptHistoryService extends FileBackedService` | prompt 历史（注入的文件系统） | `getPromptHistory()` 单例、`initializePromptHistory(fs)`、`resetPromptHistory()` |
-| `AgentResolver` | Agent → 模型/连接解析 | `AgentInfo` / `ModelInfo` 类型 |
+| `AgentResolver` | 独立解析 Agent 身份，再按会话/全局连接解析执行模型 | `AgentInfo` / `ModelInfo` 类型 |
 | `AttachmentProcessor` | 附件处理（文件 → 内联） | — |
 | `ContextProfileStore`（`persistence/context-profile-store.ts`） | 上下文画像（VFS） | — |
 | `VFSEntityStore<T>`（`utils/vfs-entity-store.ts`） | 通用 VFS 实体存储 | `EntityStoreConfig` / `Identifiable` |

@@ -1,3 +1,4 @@
+import { flowConnectionSelection } from './connection-selection';
 import { escapeHTML, randomUUID, t, type FlowDraft, type FlowRevision, type ICommandBus, type JsonValue } from '@itookit/common';
 import { FlowCommand, FlowInvocationCommand } from '@itookit/llm-session';
 import { promptFlowParameters } from '../components/FlowParameterForm';
@@ -12,18 +13,18 @@ export async function invokeFlowText(commands: ICommandBus, sessionId: string, t
     if (!draft) throw new Error(t('flow.launch.invalid'));
     const provided = parseArguments(match?.[2]), fields = draft.parameters ?? [];
     for (const name of Object.keys(provided)) if (!fields.some(field => field.name === name)) throw new Error(t('flow.invoke.unknownParameter', { name }));
+    const connection = await flowConnectionSelection(commands);
     const requests = new Map<string, string>();
     let revision: FlowRevision | undefined;
     const submit = async (parameters: Record<string, JsonValue>) => {
         if (signal?.aborted) throw new Error(t('flow.launch.cancel'));
         revision ??= (await commands.execute<{ revision: FlowRevision }>(FlowCommand.RevisionCreate, { draftId: id, expectedDraftVersion: draft.draftVersion })).revision;
         if (signal?.aborted) throw new Error(t('flow.launch.cancel'));
-        const key = JSON.stringify(parameters), requestId = requests.get(key) ?? randomUUID(); requests.set(key, requestId);
-        await commands.execute(FlowInvocationCommand.Invoke, { sessionId, requestId, flowId: id, revision: revision.revision, parameters });
+        const key = JSON.stringify([parameters, connection.selected]), requestId = requests.get(key) ?? randomUUID(); requests.set(key, requestId);
+        await commands.execute(FlowInvocationCommand.Invoke, { sessionId, requestId, flowId: id, revision: revision.revision, parameters, connectionId: connection.selected });
     };
-    if (!fields.length) { await submit({}); return true; }
     return await promptFlowParameters(fields.map(field => ({ ...field, ...(Object.hasOwn(provided, field.name) ? { default: provided[field.name] } : {}) })),
-        `${t('flow.invoke.title')} · ${draft.name}`, submit, signal) !== null;
+        `${t('flow.invoke.title')} · ${draft.name}`, submit, signal, connection) !== null;
 }
 
 function parseArguments(text?: string): Record<string, JsonValue> {

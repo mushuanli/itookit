@@ -433,6 +433,20 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
             deps.bus.emit('state:inputChanged', {});
         },
 
+        onConnection: async args => {
+            const id = args.trim();
+            if (!id) { deps.chatInput.openConnectionPicker(); return; }
+            if (id !== '--reset') {
+                const connection = await deps.agentService.getConnection(id);
+                if (!connection || connection.enabled === false || deps.agentService.getProvider(connection.providerId)?.enabled === false)
+                    throw new Error(t('connection.unavailable', { id }));
+            }
+            const connectionId = id === '--reset' ? undefined : id;
+            await deps.commands.execute(SessionCommand.SaveSettings, { connectionId });
+            deps.chatInput.setConfig({ settings: { connectionId } });
+            deps.bus.emit('state:inputChanged', {});
+        },
+
         onModel: (modelId: string) => {
             deps.chatInput.setConfig({
                 settings: { modelId },

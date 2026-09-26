@@ -63,7 +63,7 @@ export { ToolboxResources } from './configuration/toolbox-resources';
 export { ToolboxDrawers, DRAWER_KINDS, drawerKind, ungroupedId } from './configuration/toolbox-drawers';
 export type { Drawer, DrawerKind } from './configuration/toolbox-drawers';
 export { ModelConfigurationCommands, ConfigurationMutationError } from './configuration/model-commands';
-export type { ConfigurationStore, AgentDeletionChoice, ProviderDeletionImpact, ConfigurationDeletionTarget } from './configuration/model-commands';
+export type { ConfigurationStore, ProviderDeletionImpact, ConfigurationDeletionTarget } from './configuration/model-commands';
 export { toolGrant } from './configuration/tool-grants';
 export type { ToolGrantTarget } from './configuration/tool-grants';
 export { ProjectSessions } from './projects/project-sessions';
@@ -71,3 +71,5 @@ export type { ProjectNavigationSnapshot } from './projects/project-sessions';
 export type { ProjectTarget } from './projects/targets';
 export { ToolboxInventory } from './configuration/toolbox-catalog';
 export type { ToolboxTool } from './configuration/toolbox-catalog';
+
+export { OcrService, type OcrSettings, type OcrConnection } from './configuration/ocr-service';

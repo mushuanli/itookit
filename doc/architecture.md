@@ -2,6 +2,14 @@
 
 > 基于当前代码（2026-09-08 重构后）：执行内核 `durable-kernel`、LLM 任务单元 `llm-tasks`、DAG 编排 `llm-flow`、会话语义 `llm-session`。
 
+## Agent 与模型连接
+
+- `AgentDefinition` 描述共享系统提示词引用、专属补充指令、Skills、Tools、MCP 和执行约束，不绑定 Connection 或模型层级。共享提示词在工具箱集中管理，后续运行读取最新内容；已提交运行保留执行快照。
+- Provider 管理服务端和模型目录；Connection 管理该服务商的模型映射。会话的 `settings.connectionId` 显式选择连接，未设置则读取全局 `defaultConnectionId`。
+- 全局默认由工具箱「模型」的连接菜单或编辑器设置，持久化到 `/etc/llm/.connection-settings.json`。不按 ID 或列表顺序猜测默认；删除默认连接会清空此设置，保留独立的 Agent。
+- `/connection` 打开选择器，`/connection <id>` 设置当前会话，`/connection --reset` 恢复跟随全局默认。显式连接失效时要求重新选择。
+- Flow 运行表单将连接选择与业务参数分开：节点显式连接 > 本次运行选择 > Flow 默认配置 > 会话连接 > 全局默认。运行选择不改写 Flow 定义或会话设置；已提交任务保留已解析连接。
+
 ## 1. 分层总览
 
 ```

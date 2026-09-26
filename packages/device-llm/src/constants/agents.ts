@@ -1,7 +1,6 @@
 // @file: device-llm/constants/agents.ts
 // Layer 3 — Agent 默认定义（个性化功能定制）。
-// 职责：绑定 Connection（通过 connectionId）+ system prompt + tier 偏好。
-// Agent 不持有 apiKey，也不关心具体 model ID（通过 modelTier 抽象）。
+// Agents define prompts and capabilities independently of model connections.
 
 import type { AgentType, AgentConfig, PromptPreset, AgentDefinition, InitialAgentDef } from '@itookit/common';
 
@@ -122,7 +121,7 @@ const DEV_PROMPTLIST: PromptPreset[] = [
 
 /**
  * 内置默认 Agent 列表。
- * connectionId 留空（''）的在 syncDefaultAgents 时会被填入真实的默认连接 ID。
+ * Connections are selected by the Session or Flow run.
  */
 export const DEFAULT_AGENTS: InitialAgentDef[] = [
     // ── 默认 ───────────────────────────────────────────────────────────────────
@@ -135,7 +134,6 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         initPath: AGENT_DEFAULT_DIR,
         initialTags: ['system', 'default'],
         config: {
-            connectionId: 'default',
             systemPrompt: 'You are a helpful assistant.',
         },
     },
@@ -150,31 +148,11 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
         defaultPrompts: DEV_PROMPTLIST,
-        config: { connectionId: '', modelTier: 'optimal', systemPrompt: DEV_SYSTEM_PROMPT },
+        config: { systemPrompt: DEV_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
-    {
-        id: 'devG-id',
-        name: '编程大师G',
-        type: 'agent',
-        icon: '⚡️',
-        description: '编程大师（Gemini）：遵循 SOLID / DRY / KISS / YAGNI / CoC / LoD 开发原则',
-        initialTags: ['default'],
-        initPath: AGENT_DEFAULT_DIR,
-        config: { connectionId: 'conn-gemini', modelTier: 'optimal', systemPromptId: 'dev-id' },
-        interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
-    },
-    {
-        id: 'devD-id',
-        name: '编程大师D',
-        type: 'agent',
-        icon: '⚡️',
-        description: '编程大师（DeepSeek）：遵循 SOLID / DRY / KISS / YAGNI / CoC / LoD 开发原则',
-        initialTags: ['default'],
-        initPath: AGENT_DEFAULT_DIR,
-        config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPromptId: 'dev-id' },
-        interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
-    },
+
+
 
     // ── 费曼大师 ────────────────────────────────────────────────────────────────
     {
@@ -186,29 +164,9 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
         defaultPrompts: FEYNMAN_PROMPTLIST,
-        config: { connectionId: '', modelTier: 'optimal', systemPrompt: FEYNMAN_SYSTEM_PROMPT },
+        config: { systemPrompt: FEYNMAN_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
-    {
-        id: 'learnD-id',
-        name: '费曼大师D',
-        type: 'agent',
-        icon: '⚡️',
-        description: '你是一位体现理查德·费曼简化复杂概念理念的杰出教师。',
-        initialTags: ['default'],
-        initPath: AGENT_DEFAULT_DIR,
-        config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPromptId: 'learn-id' },
-        interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
-    },
-    {
-        id: 'learnO-id',
-        name: '费曼大师O',
-        type: 'agent',
-        icon: '⚡️',
-        description: '你是一位体现理查德·费曼简化复杂概念理念的杰出教师。',
-        initialTags: ['default'],
-        initPath: AGENT_DEFAULT_DIR,
-        config: { connectionId: 'default', modelTier: 'optimal', systemPromptId: 'learn-id' },
-        interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
-    },
+
+
 ];

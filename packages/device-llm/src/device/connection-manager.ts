@@ -11,9 +11,11 @@ import type { ProviderManager } from './provider-manager';
 
 const CONNECTIONS_DIR  = '/llm/.connections';
 const DEFAULTS_VERSION = '/llm/.connections_version.json';
+const SETTINGS_PATH = '/llm/.connection-settings.json';
 
 export class ConnectionManager {
     private _connections: LLMConnection[] = [];
+    private defaultId?: string;
 
     constructor(
         private readonly helpers: VFSHelpers,
@@ -35,7 +37,23 @@ export class ConnectionManager {
 
     getDefaultConnection(): ConnectionMeta | null {
         const c = this.defaultConnection;
-        return c ? toConnectionMeta(c) : null;
+        return c ? this.connToMeta(c) : null;
+    }
+
+    async loadSettings(): Promise<void> {
+        this.defaultId = (await this.helpers.readJson<{ defaultConnectionId?: string }>(SETTINGS_PATH))?.defaultConnectionId;
+    }
+
+    async setDefaultConnection(id: string | null): Promise<void> {
+        if (id !== null) {
+            const connection = this.findConn(id);
+            const provider = connection && this.getProviderForConn(connection);
+            if (!connection || connection.enabled === false || !provider || provider.enabled === false)
+                throw new Error(`Connection is missing or disabled: ${id}`);
+        }
+        await this.helpers.writeJson(SETTINGS_PATH, id === null ? {} : { defaultConnectionId: id });
+        this.defaultId = id ?? undefined;
+        this.onChanged();
     }
 
     getFullConnection(id: string): LLMConnection | null {
@@ -80,7 +98,7 @@ export class ConnectionManager {
     }
 
     async deleteConnection(id: string, systemFS?: IFileSystem): Promise<void> {
-        if (id === 'default') throw new Error('Cannot delete the default connection');
+        if (id === this.defaultId) await this.setDefaultConnection(null);
         await this.deleteFromDisk(id, systemFS);
         this._connections = this._connections.filter(c => c.id !== id);
         await this.vfs.removeDeviceNode(`/dev/llm/connection/${id}`);
@@ -110,6 +128,7 @@ export class ConnectionManager {
 
     async reload(): Promise<void> {
         this._connections = await this.loadAll();
+        await this.loadSettings();
     }
 
     // ─── Private helpers ───────────────────────────────────────────────────
@@ -171,7 +190,7 @@ export class ConnectionManager {
     }
 
     private get defaultConnection(): LLMConnection | undefined {
-        return this.findConn('default') ?? this._connections[0];
+        return this.defaultId ? this.findConn(this.defaultId) : undefined;
     }
 
     private connToMeta(conn: LLMConnection): ConnectionMeta {

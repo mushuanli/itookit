@@ -1,7 +1,7 @@
 // @file: common/interfaces/llm/agent.ts
 // Agent、MCP 及服务接口定义。
 
-import type { LLMConnection, ConnectionMeta, LLMProvider, DefaultConnectionDef, ConnectionTestResult, ModelTier } from './connection';
+import type { LLMConnection, ConnectionMeta, LLMProvider, DefaultConnectionDef, ConnectionTestResult } from './connection';
 import type { RestorableItem } from '../types';
 import type { SkillDefinition } from '../skills/skill-types';
 import type { SystemPromptDefinition, PromptPreset } from './node-config';
@@ -13,17 +13,6 @@ export const DEFAULT_HARNESS_TOOL_IDS: readonly string[] = ['Read', 'Glob', 'Gre
 export type AgentType = 'agent' | 'composite' | 'tool' | 'workflow';
 
 export interface AgentConfig {
-    connectionId: string;
-    /**
-     * 模型层级偏好。决定从连接的 `tiers` 中取哪个模型。
-     * 未设置时默认使用 'optimal'（即连接的 `model` 字段）。
-     */
-    modelTier?: ModelTier;
-    /**
-     * 精确固定某一 model ID（高级用途）。
-     * 优先级高于 modelTier；设置后 tier 系统对该 agent 无效。
-     */
-    modelName?: string;
     systemPrompt?: string;
     /** Reference a System Prompt library entry (shared by multiple agents). */
     systemPromptId?: string;
@@ -59,16 +48,6 @@ export interface AgentDefinition {
     modifiedAt?: number;
 
     // ── Phase 3: Structured capability declarations ──────────────────────
-
-    /** Model selection policy (elevated from config for versioning). */
-    modelPolicy?: {
-        connectionId: string;
-        modelName?: string;
-        modelTier?: ModelTier;
-        temperature?: number;
-        thinking?: boolean;
-        reasoningEffort?: string;
-    };
 
     /** System prompt — elevated to top-level for snapshot audit. */
     systemPrompt?: string;
@@ -192,6 +171,8 @@ export interface IConnectionReader {
  * 仅 getFullConnection() / getFullProvider() 返回完整对象，供 Settings UI 编辑使用。
  */
 export interface IConnectionService extends IConnectionReader {
+    /** Persist the global default; null clears it without choosing a replacement. */
+    setDefaultConnection(id: string | null): Promise<void>;
     /** 保存连接（接受完整连接，含 apiKey） */
     saveConnection(conn: LLMConnection): Promise<void>;
     /** 删除连接 */

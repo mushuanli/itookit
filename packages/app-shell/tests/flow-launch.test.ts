@@ -14,6 +14,7 @@ function fixture() {
     const draft = { id: 'essay', name: 'Essay', draftVersion: 3, parameters };
     const revision = { ...draft, revision: 2 };
     const execute = vi.fn(async (command: string) => {
+        if (command === SessionCommand.GetConnections) return { connections: [{ id: 'run-model', name: 'Run model', providerId: 'p' }] };
         if (command === FlowCommand.DraftLoad) return draft;
         if (command === FlowCommand.RevisionGet) return revision;
         if (command === FlowCommand.RevisionCreate) return { revision };
@@ -49,11 +50,12 @@ describe('Flow file launch', () => {
         const pending = action.onClick!(node);
         await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
         expect(f.execute).not.toHaveBeenCalledWith(SessionCommand.CreateFromFlow, expect.anything());
+        document.querySelector<HTMLSelectElement>('[data-run-connection]')!.value = 'run-model';
         field(0).value = 'Write about spring'; field(1).value = 'My essay\nSecond paragraph'; submit();
         await pending;
         expect(f.execute).toHaveBeenCalledWith(FlowCommand.RevisionCreate, { draftId: 'essay', expectedDraftVersion: 3 });
         expect(f.execute).toHaveBeenCalledWith(SessionCommand.CreateFromFlow, {
-            invocation: true,
+            invocation: true, connectionId: 'run-model',
             flowId: 'essay', revision: 2, title: 'Essay', parameters: { requirements: 'Write about spring', essay: 'My essay\nSecond paragraph' },
         });
         expect(f.navigate).toHaveBeenCalledWith('new-session');
@@ -62,7 +64,7 @@ describe('Flow file launch', () => {
     it('cancels without publishing or creating a Session', async () => {
         const f = fixture(); const launcher = new FlowLauncher({ ...f, prompt: async () => null });
         await launcher.run('essay');
-        expect(f.execute.mock.calls.map(call => call[0])).toEqual([FlowCommand.DraftLoad]);
+        expect(f.execute.mock.calls.map(call => call[0])).toEqual([FlowCommand.DraftLoad, SessionCommand.GetConnections]);
         expect(f.navigate).not.toHaveBeenCalled();
     });
 
@@ -86,7 +88,7 @@ describe('Flow file launch', () => {
         await vi.waitFor(() => expect(answer).toBeDefined());
         await launcher.run('essay', 2);
         answer({ essay: 'Text', requirements: 'Topic' }); await first;
-        expect(f.execute.mock.calls.map(call => call[0])).toEqual([FlowCommand.RevisionGet, SessionCommand.CreateFromFlow]);
+        expect(f.execute.mock.calls.map(call => call[0])).toEqual([FlowCommand.RevisionGet, SessionCommand.GetConnections, SessionCommand.CreateFromFlow]);
     });
 });
 

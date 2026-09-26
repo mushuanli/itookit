@@ -84,6 +84,7 @@ it.each([true, false])('loads a Skill and restores its checkbox on failure (succ
 });
 
 it('refreshes the visible Skill list when the Session scope reports a catalog change', async () => {
+    vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => { fn(0); return 0; });
     const container = document.createElement('div');
     const view = new ChatInput(container, {} as never);
     const listeners: Array<() => void> = [];
@@ -93,11 +94,13 @@ it('refreshes the visible Skill list when the Session scope reports a catalog ch
         onChange: async (_sessionId: string, listener: () => void) => { listeners.push(listener); return () => {}; },
     } as unknown as SessionSkillControls;
 
+    view.showSkillSettings();
+    const list = document.querySelector('.settings-modal-overlay')!;
     const { dispose } = bindSkillRefresh(controls, 'session', skills => view.refreshSkills(skills));
-    await vi.waitFor(() => expect(container.querySelectorAll('[data-skill]')).toHaveLength(1));
+    await vi.waitFor(() => expect(list.querySelectorAll('[data-skill]')).toHaveLength(1));
 
     catalog = [...catalog, { id: 'debug', name: 'Debug', description: '', loaded: true, enabled: true, toolCount: 0 }];
     listeners.forEach(listener => listener());
-    await vi.waitFor(() => expect(container.querySelectorAll('[data-skill]')).toHaveLength(2));
-    dispose();
+    await vi.waitFor(() => expect(list.querySelectorAll('[data-skill]')).toHaveLength(2));
+    dispose(); view.destroy(); list.remove(); vi.unstubAllGlobals();
 });

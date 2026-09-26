@@ -2,14 +2,12 @@
 // 连接 + 模型层级选择：快速按钮/弹窗 + 设置面板的 connection select / tier cards。
 // 从 ChatInputView 抽出，自包含（状态 + DOM + 弹窗渲染），变更通过 onChange 回调通知宿主。
 
-import type { ModelTier } from '@itookit/common';
+import { t, type ModelTier } from '@itookit/common';
 import { ChatInputTemplates } from '../templates/ChatInputTemplates';
 import { PopupPanel, type PopupItem } from './plugins/PopupPanel';
-import type { ConnectionOption, ExecutorOption } from '../../domain/types';
+import type { ConnectionOption } from '../../domain/types';
 
 export interface ConnectionTierDeps {
-    getAgents: () => ExecutorOption[];
-    getAgentId: () => string;
     onNavigateSettings: (target: { resourceId: string }) => void;
     onChange: () => void;
 }
@@ -88,12 +86,6 @@ export class ConnectionTierController {
         this.updateTierPills(this.modelTier);
     }
 
-    /** agent 变更后刷新依赖 effective-tiers 的显示（tier quick label + tier card 模型名）。 */
-    refreshForAgentChange(): void {
-        this.updateTierQuick();
-        this.updateTierCardModels();
-    }
-
     /** 关闭连接/tier 弹窗（供其它弹窗互斥时调用）。 */
     hidePopups(): void {
         this.connPopup?.hide();
@@ -119,6 +111,7 @@ export class ConnectionTierController {
         this.connectionId = id || undefined;
         if (this.connectionSelect) this.connectionSelect.value = id;
         this.updateConnQuick();
+        this.updateTierQuick();
         this.updateTierCardModels();
         this.deps.onChange();
     }
@@ -128,11 +121,11 @@ export class ConnectionTierController {
         const id = this.connectionId;
         if (id) {
             const conn = this.connections.find(c => c.id === id);
-            this.connQuickLabel.textContent = conn?.name ?? id;
+            this.connQuickLabel.textContent = conn?.name ?? t('connection.unavailable', { id });
             this.connQuickClear.style.display = '';
             this.connQuickBtn.classList.add('llm-input__conn-quick--active');
         } else {
-            this.connQuickLabel.textContent = 'Default';
+            this.connQuickLabel.textContent = this.defaultLabel();
             this.connQuickClear.style.display = 'none';
             this.connQuickBtn.classList.remove('llm-input__conn-quick--active');
         }
@@ -156,7 +149,7 @@ export class ConnectionTierController {
         return this.connPopup;
     }
 
-    private openConnPicker(): void {
+    openConnPicker(): void {
         const popup = this.getOrCreateConnPopup();
         popup.show(this.buildConnItems(), {
             onSelect: (item) => {
@@ -169,6 +162,10 @@ export class ConnectionTierController {
         });
     }
 
+    private defaultLabel(): string {
+        return t('connection.followDefault', { name: this.connections.find(c => c.isDefault)?.name ?? t('connection.unset') });
+    }
+
     private toggleConnPicker(): void {
         const popup = this.getOrCreateConnPopup();
         if (popup.isVisible) popup.hide();
@@ -178,7 +175,7 @@ export class ConnectionTierController {
     private buildConnItems(): PopupItem[] {
         const currentId = this.connectionId ?? '';
         const items: PopupItem[] = [
-            { id: '', label: 'Agent Default', icon: currentId === '' ? '✓' : '' },
+            { id: '', label: this.defaultLabel(), icon: currentId === '' ? '✓' : '' },
         ];
 
         const withKey    = this.connections.filter(c => c.hasApiKey);
@@ -262,17 +259,8 @@ export class ConnectionTierController {
      * Priority: connection override → agent's default connection → first available connection.
      */
     private resolveEffectiveTiers(): Partial<Record<string, string>> {
-        const overrideId = this.connectionId;
-        let conn = overrideId
-            ? this.connections.find(c => c.id === overrideId)
-            : undefined;
-
-        if (!conn) {
-            const agent = this.deps.getAgents().find(a => a.id === this.deps.getAgentId());
-            conn = agent?.connectionId
-                ? this.connections.find(c => c.id === agent.connectionId)
-                : this.connections[0];
-        }
+        const conn = this.connectionId ? this.connections.find(c => c.id === this.connectionId)
+            : this.connections.find(c => c.isDefault);
         return conn?.tiers ?? {};
     }
 

@@ -12,6 +12,8 @@ export interface ChatAttachment {
 export type ChatExecutionMode = 'chat' | 'agent';
 
 export interface ChatSessionSettings {
+    /** Omitted means follow the global default connection. */
+    connectionId?: string;
     executionMode?: ChatExecutionMode;
     version: '1.0';
     modelId?: string;

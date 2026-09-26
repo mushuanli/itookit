@@ -10,6 +10,7 @@ import { ToolDetailsEditor } from './ToolDetailsEditor';
 import { createWorkspaceModule, type WorkspaceModule } from '../workspaces/module';
 
 interface Options {
+    ocr?: import('../configuration/ocr-controls').OcrConfigurationControls;
     runtime: Pick<ApplicationRuntime, 'vfs' | 'agentService' | 'commandBus' | 'kernel' | 'flowEngine' | 'configuration'>;
     ui: Pick<AppUI, 'llmUiEditors' | 'createFlowContextMenu'>;
     sidebar: HTMLElement; editor: HTMLElement; skills: IFileSystem;
@@ -19,7 +20,7 @@ interface Options {
 /** The toolbox owns its projection lifetime and editor wiring as one module. */
 export async function createToolboxModule(options: Options): Promise<WorkspaceModule> {
     const { agentService, commandBus, kernel, vfs, flowEngine } = options.runtime;
-    const inventory = new ToolboxInventory(() => agentService.getMCPServers(), kernel.toolCatalog, agentService);
+    const inventory = new ToolboxInventory(() => agentService.getMCPServers(), kernel.toolCatalog, agentService, () => agentService.listSystemPrompts());
     try {
         await inventory.init();
         const resources = new ToolboxResources({ agents: await vfs.openFileSystem(workspaceRoot('agents')),
@@ -33,10 +34,10 @@ export async function createToolboxModule(options: Options): Promise<WorkspaceMo
 }
 function configurationFactories(options: Options, inventory: ToolboxInventory, resources: ToolboxResources) {
     const { agentService } = options.runtime, editors = options.ui.llmUiEditors;
-    const create = (Editor: typeof editors.ProviderSettingsEditor): EditorFactory => async (element, config) => {
+    const create = (Editor: new (element: HTMLElement, service: typeof agentService, options: import('@itookit/ui-common').EditorOptions) => import('@itookit/ui-common').IEditor): EditorFactory => async (element, config) => {
         const editor = new Editor(element, agentService, config); await editor.init(element); return editor;
     };
-    return { ...options.factories, providers: create(editors.ProviderSettingsEditor), connections: create(editors.ConnectionSettingsEditor),
+    return { ...options.factories, prompts: create(editors.SystemPromptSettingsEditor), providers: create(editors.ProviderSettingsEditor), connections: create(editors.ConnectionSettingsEditor),
         mcp: async (element: HTMLElement, config: import('@itookit/ui-common').EditorOptions) => {
             const editor = new editors.MCPSettingsEditor(element, agentService, config); await editor.init(element); return editor;
         }, tools: async (element: HTMLElement, config: import('@itookit/ui-common').EditorOptions) => {

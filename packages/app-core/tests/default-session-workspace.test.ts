@@ -24,11 +24,11 @@ it('awaits default host workspace setup for every new Session and preserves late
             try { expect(await files.vfs.readFile('test.txt')).toBe('cwd file'); } finally { await files.release(); }
         }
         expect(openDirectory).toHaveBeenCalledWith('/home/admin/current');
-        await runtime.directoryMounts.setWorkspace(a, 'host:/changed', 'ro');
+        await expect(runtime.directoryMounts.setWorkspace(a, 'host:/changed', 'ro')).rejects.toMatchObject({ code: 'EACCES' });
         await runtime.sessionRepository.ensureSession(a, 'Reopened');
         const record = (await runtime.sessionFiles.inspect(a))!;
-        expect(record.mounts[0].access).toBe('ro');
-        expect(runtime.directoryMounts.describe(record.mounts[0])).toBe('/changed');
+        expect(record.mounts[0].access).toBe('rw');
+        expect(runtime.directoryMounts.describe(record.mounts[0])).toBe('/home/admin/current');
         expect(runtime.directoryMounts.describe((await runtime.sessionFiles.inspect(b))!.mounts[0])).toBe('/home/admin/current');
     } finally { await runtime.dispose(); await source.manager.dispose(); }
 });

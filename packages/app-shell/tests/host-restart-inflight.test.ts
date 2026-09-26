@@ -19,11 +19,12 @@ import { SessionCommand } from '@itookit/llm-session';
 import { createAgentSendIntent } from '@itookit/common';
 import { FakeSidecarDb } from './fake-sidecar';
 
-/** Point the default agent at a local endpoint that accepts the request and never answers. */
+/** Point the global default connection at a local endpoint that accepts the request and never answers. */
 async function seedHangingProvider(root: string, port: number): Promise<void> {
     const etc = join(root, 'data', 'etc', 'llm');
     await mkdir(join(etc, '.providers'), { recursive: true });
     await mkdir(join(etc, '.connections'), { recursive: true });
+    await writeFile(join(etc, '.connection-settings.json'), JSON.stringify({ defaultConnectionId: 'default' }));
     await writeFile(join(etc, '.providers', 'mock.json'), JSON.stringify({
         id: 'mock', name: 'Mock', implementation: 'openai-compatible', apiKey: 'test-key',
         baseURL: `http://127.0.0.1:${port}`, models: [{ id: 'mock-model', name: 'mock-model' }],

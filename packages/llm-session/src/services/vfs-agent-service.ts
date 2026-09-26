@@ -56,6 +56,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
 
     private bindVFSEvents(): void {
         const debounce = () => {
+            this._systemPromptCache.clear(); this._systemPromptListLoaded = false;
             if (this._syncTimer) clearTimeout(this._syncTimer);
             this._syncTimer = setTimeout(async () => {
                 await this.refreshData();
@@ -107,7 +108,6 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
     }
 
     private async syncDefaultAgents(): Promise<void> {
-        const defaultConnId = await this.getDefaultConnectionId();
         let created = 0;
 
         for (const def of this.llmService.getDefaultAgents()) {
@@ -117,14 +117,13 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
             if (await this.engine.driver.exists(fullPath)) continue;
 
             const { initPath, initialTags, ...content } = def;
-            if (!content.config.connectionId) content.config.connectionId = defaultConnId;
 
             try {
                 await this.ensureDirectory(parentDir);
                 const node = await this.engine.driver.createFile({
                     name: filename,
                     parentPath: parentDir,
-                    content: JSON.stringify(content, null, 2),
+                    content: JSON.stringify(sharedPromptAgent(content), null, 2),
                     metadata: { icon: def.icon || '🤖', title: def.name, description: def.description },
                 });
                 if (initialTags?.length && node?.path) await this.engine.meta.tags?.setTags(node.path, initialTags);
@@ -141,13 +140,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
             // Variants reference a shared entry via config.systemPromptId (no inline
             // systemPrompt), so they are skipped — dedupes the shared prompt/presets.
             if (!def.config.systemPrompt) continue;
-            const entry: SystemPromptDefinition = {
-                id: def.id,
-                name: def.name,
-                description: def.description,
-                content: [def.config.systemPrompt].filter((s): s is string => Boolean(s)),
-                ...(def.defaultPrompts?.length ? { presets: def.defaultPrompts } : {}),
-            };
+            const entry = defaultPrompt(def);
             const path = `/system-prompts/${def.id}.sp`;
             try {
                 if (await this.readJson(path)) continue;
@@ -176,6 +169,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
         const cached = this._systemPromptCache.get(id);
         if (cached) return cached;
         const loaded = await this.readJson<SystemPromptDefinition>(`/system-prompts/${id}.sp`);
+        if ((loaded as { __deleted?: boolean } | null)?.__deleted) return null;
         if (loaded) this._systemPromptCache.set(id, loaded);
         return loaded;
     }
@@ -191,7 +185,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
                 const str = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
                 return JSON.parse(str) as SystemPromptDefinition;
             }));
-            const valid = prompts.filter((p): p is SystemPromptDefinition => Boolean(p?.id));
+            const valid = prompts.filter((p): p is SystemPromptDefinition => Boolean(p?.id) && !(p as { __deleted?: boolean }).__deleted);
             for (const p of valid) this._systemPromptCache.set(p.id, p);
             this._systemPromptListLoaded = true;
             return valid;
@@ -201,15 +195,22 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
     }
 
     async saveSystemPrompt(prompt: SystemPromptDefinition): Promise<void> {
-        if (!prompt?.id?.trim()) throw new Error('System prompt requires an id');
+        assertPromptId(prompt.id);
+        if (!prompt.name?.trim() || !Array.isArray(prompt.content) || prompt.content.some(part => typeof part !== 'string'))
+            throw new Error('Invalid system prompt');
         await this.writeJson(`/system-prompts/${prompt.id}.sp`, prompt);
-        this._systemPromptCache.set(prompt.id, prompt);
+        this._systemPromptCache.set(prompt.id, structuredClone(prompt));
+        this.notify();
     }
 
     async deleteSystemPrompt(id: string): Promise<void> {
         if (!id?.trim()) return;
-        await this.engine.driver.delete([`/system-prompts/${id}.sp`]);
+        assertPromptId(id);
+        if (this.llmService.getDefaultAgents().some(agent => agent.id === id))
+            await this.writeJson(`/system-prompts/${id}.sp`, { id, __deleted: true });
+        else await this.engine.driver.delete([`/system-prompts/${id}.sp`]);
         this._systemPromptCache.delete(id);
+        this.notify();
     }
 
     listConnections(): ConnectionMeta[] {
@@ -230,16 +231,12 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
             found = {
                 id: 'default', name: 'Default Assistant', type: 'agent',
                 icon: '🤖', description: 'Built-in default assistant',
-                config: { connectionId: 'default', modelName: '' },
+                config: {},
             };
         }
         if (!found) return null;
 
         const result: AgentDefinition = JSON.parse(JSON.stringify(found));
-        if (!result.config.connectionId) result.config.connectionId = 'default';
-
-        const connMeta = await this.getConnection(result.config.connectionId);
-        result.config.modelName = this.resolveModelName(connMeta, result.config.modelName);
         return result;
     }
 
@@ -250,11 +247,11 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
     async getDefaultConnection(): Promise<ConnectionMeta | null> {
         return this.llmService.getDefaultConnection();
     }
+    async setDefaultConnection(id: string | null): Promise<void> { return this.llmService.setDefaultConnection(id); }
 
     // ─── IAgentManagementService — Agent CRUD ─────────────────────────────────
 
     async saveAgent(agent: AgentDefinition, options?: { onDuplicate?: 'merge' | 'error' }): Promise<void> {
-        if (!agent.config.connectionId) agent.config.connectionId = 'default';
         const filename = `${agent.id}.agent`;
         const contentStr = JSON.stringify(agent, null, 2);
         const metadata = { icon: agent.icon || '🤖', title: agent.name, description: agent.description };
@@ -479,16 +476,13 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
     }
 
     private isAgentModified(current: AgentDefinition, def: InitialAgentDef): boolean {
+        const expected = sharedPromptAgent(def);
+        if (current.config.systemPromptId !== expected.config.systemPromptId) return true;
         if (current.name !== def.name) return true;
-        // saveAgent() normalizes empty connectionId → 'default'; mirror that here
-        // so a restored agent isn't perpetually flagged as modified.
-        const defConnId = def.config.connectionId || 'default';
-        if ((current.config.connectionId || 'default') !== defConnId) return true;
-        if (current.config.modelTier !== def.config.modelTier) return true;
-        if (current.config.systemPrompt !== def.config.systemPrompt) return true;
+        if (current.config.systemPrompt !== expected.config.systemPrompt) return true;
         if (current.config.temperature !== def.config.temperature) return true;
         if (current.config.maxHistoryLength !== def.config.maxHistoryLength) return true;
-        if (!deepEqual(current.defaultPrompts, def.defaultPrompts)) return true;
+        if (!deepEqual(current.defaultPrompts, expected.defaultPrompts)) return true;
         return false;
     }
 
@@ -556,26 +550,11 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
         const def = this.llmService.getDefaultAgents().find(a => a.id === agentId);
         if (!def) throw new Error(`No default definition for agent id: ${agentId}`);
         const { initPath, initialTags, ...agentData } = def;
-        if (!agentData.config.connectionId) agentData.config.connectionId = 'default';
-        await this.saveAgent(agentData as AgentDefinition);
+        if (def.config.systemPrompt && !await this.getSystemPrompt(def.id)) await this.saveSystemPrompt(defaultPrompt(def));
+        await this.saveAgent(sharedPromptAgent(agentData as AgentDefinition));
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
-
-    private async getDefaultConnectionId(): Promise<string> {
-        const meta = await this.getDefaultConnection();
-        return meta?.id ?? 'default';
-    }
-
-    private resolveModelName(
-        connMeta: ConnectionMeta | undefined,
-        currentModelName: string | undefined,
-    ): string {
-        // Model names are now resolved via provider catalog, not connection.availableModels.
-        // Return the modelTier-resolved model or the current name as-is.
-        if (!currentModelName) return connMeta?.model ?? '';
-        return currentModelName;
-    }
 
     private async scanAgentFiles(): Promise<AgentDefinition[]> {
         const agents: AgentDefinition[] = [];
@@ -665,4 +644,21 @@ function deepEqual(a: unknown, b: unknown): boolean {
     if (typeof a !== typeof b) return false;
     if (typeof a !== 'object') return false;
     return JSON.stringify(a) === JSON.stringify(b);
+}
+
+
+/** New built-in Agents reference the separately seeded prompt library. */
+function sharedPromptAgent(agent: AgentDefinition): AgentDefinition {
+    if (!agent.config.systemPrompt) return agent;
+    return { ...agent, defaultPrompts: undefined,
+        config: { ...agent.config, systemPromptId: agent.id, systemPrompt: undefined } };
+}
+function assertPromptId(id: string): void {
+    if (!id?.trim() || id === '.' || id === '..' || /[/\\\x00]/.test(id)) throw new Error('Invalid system prompt id');
+}
+
+function defaultPrompt(agent: AgentDefinition): SystemPromptDefinition {
+    return { id: agent.id, name: agent.name, description: agent.description,
+        content: agent.config.systemPrompt ? [agent.config.systemPrompt] : [],
+        ...(agent.defaultPrompts?.length ? { presets: agent.defaultPrompts } : {}) };
 }

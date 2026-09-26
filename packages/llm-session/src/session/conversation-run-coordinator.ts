@@ -623,6 +623,7 @@ function conversationRound(
         origin: 'user',
         ...(execution.task.input.sendIntent?.execution.kind === 'flow' ? { flow: {
             flowId: execution.task.input.sendIntent.execution.flowId,
+            connectionId: execution.task.input.overrides?.connectionId,
             revision: execution.task.input.sendIntent.execution.revision!,
             parameters: execution.task.input.sendIntent.execution.parameters,
         } } : {}),

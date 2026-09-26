@@ -194,6 +194,7 @@ export interface SlashCommandCallbacks {
 
     // Settings
     onSwitchAgent: (agentId: string) => void;
+    onConnection?: (args: string) => void | Promise<void>;
     onModel: (modelId: string) => void;
 
     // Help
@@ -805,6 +806,11 @@ export class SlashCommandPlugin implements InputPlugin {
                 hasArgs: true,
                 argsPlaceholder: '<agent-id>',
                 execute: (args) => { if (args) cb.onSwitchAgent(args); },
+            },
+            {
+                name: 'connection', label: '/connection', description: t('connection.command'),
+                icon: SLASH_ICONS.model, group: 'agent', hasArgs: true, argsPlaceholder: '<id> | --reset',
+                execute: args => cb.onConnection?.(args),
             },
             {
                 name: 'model',

@@ -11,8 +11,6 @@ export async function buildExecutorOptions(
     agentService: IAgentConfigService,
 ): Promise<ExecutorOption[]> {
     const agents = agentService.listAgents();
-    const connections = await agentService.getConnections();
-    const connMap = new Map(connections.map(c => [c.id, c]));
 
     const seen = new Set<string>();
     const options: ExecutorOption[] = [];
@@ -26,7 +24,8 @@ export async function buildExecutorOptions(
     for (const agent of agents) {
         if (seen.has(agent.id)) continue;
         seen.add(agent.id);
-        const conn = agent.config?.connectionId ? connMap.get(agent.config.connectionId) : undefined;
+        const shared = agent.config.systemPromptId ? await agentService.getSystemPrompt(agent.config.systemPromptId) : null;
+        const presets = new Map([...(shared?.presets ?? []), ...(agent.defaultPrompts ?? [])].map(item => [item.name, item]));
         options.push({
             id: agent.id,
             name: agent.name,
@@ -34,10 +33,7 @@ export async function buildExecutorOptions(
             category: agent.type === 'agent' ? 'Agents' :
                 agent.type === 'workflow' ? 'Workflows' : 'Other',
             description: agent.description,
-            provider: conn?.providerId,
-            connectionName: conn?.name,
-            connectionId: agent.config?.connectionId,
-            defaultPrompts: agent.defaultPrompts,
+            defaultPrompts: [...presets.values()],
         });
     }
 
@@ -52,9 +48,10 @@ export async function buildConnectionOptions(
     agentService: IAgentConfigService,
 ): Promise<ConnectionOption[]> {
     const connections = await agentService.getConnections();
+    const defaultId = (await agentService.getDefaultConnection())?.id;
 
     return connections
-        .filter(c => c.enabled !== false)
+        .filter(c => c.enabled !== false && agentService.getProvider(c.providerId)?.enabled !== false)
         .map(c => {
             // Use getProvider() — same cache as getProviders() but more direct
             const provider = agentService.getProvider(c.providerId);
@@ -74,6 +71,7 @@ export async function buildConnectionOptions(
 
             return {
                 id: c.id,
+                isDefault: c.id === defaultId,
                 name: c.name,
                 provider: c.providerId,
                 hasApiKey: c.hasApiKey,

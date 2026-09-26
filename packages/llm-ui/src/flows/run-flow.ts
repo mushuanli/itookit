@@ -1,3 +1,4 @@
+import { flowConnectionSelection } from './connection-selection';
 import { t, type FlowDraft, type FlowRevision, type ICommandBus, type JsonValue } from '@itookit/common';
 import { FlowCommand, SessionCommand } from '@itookit/llm-session';
 import { promptFlowParameters } from '../components/FlowParameterForm';
@@ -26,19 +27,20 @@ export class FlowLauncher {
             revision === undefined ? FlowCommand.DraftLoad : FlowCommand.RevisionGet,
             { id: flowId, ...(revision === undefined ? {} : { revision }) });
         if (!flow?.id) throw new Error(t('flow.launch.invalid'));
-        const values = await (this.options.prompt ?? promptFlowParameters)(flow.parameters ?? []);
+        const connection = await flowConnectionSelection(commands);
+        const values = await (this.options.prompt ?? promptFlowParameters)(flow.parameters ?? [], undefined, undefined, undefined, connection);
         if (values === null) return;
         const published = revision === undefined
             ? (await commands.execute<{ revision: FlowRevision }>(FlowCommand.RevisionCreate,
                 { draftId: flow.id, expectedDraftVersion: (flow as FlowDraft).draftVersion })).revision
             : flow as FlowRevision;
-        await this.createSession(published, values);
+        await this.createSession(published, values, connection.selected);
     }
 
-    private async createSession(flow: FlowRevision, parameters: Record<string, JsonValue>): Promise<void> {
+    private async createSession(flow: FlowRevision, parameters: Record<string, JsonValue>, connectionId?: string): Promise<void> {
         const created = await this.options.commands.execute<{ sessionId: string }>(SessionCommand.CreateFromFlow, {
             flowId: flow.id, revision: flow.revision, parameters, title: flow.name,
-            invocation: true,
+            invocation: true, connectionId,
         });
         await this.options.navigate(created.sessionId);
     }

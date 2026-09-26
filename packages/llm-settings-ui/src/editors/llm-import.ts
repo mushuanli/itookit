@@ -5,7 +5,7 @@
 // Handles:
 //   - Conflict detection (providers / connections / agents / skills)
 //   - Conflict resolution modal (skip / overwrite / rename)
-//   - Cascading ID remapping on rename (provider → connections → agents)
+//   - Cascading ID remapping on rename (provider → connections)
 //   - Executing the import in dependency order
 
 import { Toast } from '@itookit/ui-common';
@@ -16,7 +16,7 @@ import {
     parseLLMConfig,
     toLLMProvider, toRuntimeConnection, toRuntimeAgent,
     getProviderDefs,
-    type LLMConfigFile, type LLMAgentDef, type LLMConnectionDef,
+    type LLMConfigFile, type LLMConnectionDef,
 } from '@itookit/device-llm';
 import type { ModelPricingConfig } from '@itookit/common';
 
@@ -185,8 +185,7 @@ export function showConflictModal(conflicts: ConflictItem[]): Promise<ConflictSt
 // ─── Execute import ───────────────────────────────────────────────────────────
 
 /**
- * Apply remapping to connections that reference renamed providers,
- * and to agents that reference renamed connections.
+ * Remap connection identities and their provider references.
  */
 function applyRemap(
     config: LLMConfigFile,
@@ -199,15 +198,7 @@ function applyRemap(
         providerId: providerRemap.get(c.providerId) ?? c.providerId,
     }));
 
-    const agents: LLMAgentDef[] = (config.agents ?? []).map(a => ({
-        ...a,
-        config: {
-            ...a.config,
-            connectionId: connRemap.get(a.config.connectionId) ?? a.config.connectionId,
-        },
-    }));
-
-    return { ...config, connections, agents };
+    return { ...config, connections };
 }
 
 /**

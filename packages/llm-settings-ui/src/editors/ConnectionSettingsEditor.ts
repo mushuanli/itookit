@@ -21,6 +21,7 @@ import { runLLMImport } from './llm-import';
 import { renderModelCapabilityBadges } from '../utils/modelBadges';
 
 export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionService> {
+    private defaultConnectionId?: string;
     private currentEditTiers: Partial<Record<ModelTier, string>> = {};
     private currentEditTierThinking: Partial<Record<ModelTier, boolean>> = {};
     private providers: Record<string, LLMProvider> = {};
@@ -34,6 +35,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             this.service.getProviders().map(p => [p.id, p])
         );
         const allConnections = await this.service.getConnections();
+        this.defaultConnectionId = (await this.service.getDefaultConnection())?.id;
         if (this.formOnly) {
             const target = this.options.target;
             const connection = await this.service.getFullConnection(target?.kind === 'entity' ? target.id : '');
@@ -174,6 +176,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         if (!anchor.startsWith('conn:')) return;
         const connId = anchor.slice(5);
         const allConnections = await this.service.getConnections();
+        this.defaultConnectionId = (await this.service.getDefaultConnection())?.id;
         const conn = allConnections.find(c => c.id === connId);
         if (!conn) return;
         const pid = conn.providerId;
@@ -233,7 +236,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     // ── Card rendering ─────────────────────────────────────────────────────────
 
     private renderConnectionCard(conn: ConnectionMeta) {
-        const isDefault    = conn.id === 'default';
+        const isDefault    = conn.id === this.defaultConnectionId;
         const hasKey       = conn.hasApiKey;
         const enabled      = conn.enabled !== false;
         const pid          = conn.providerId;
@@ -302,7 +305,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
 
                 <div class="settings-page__actions" style="margin-top:auto; width:100%">
                     <button class="settings-btn settings-btn--secondary settings-btn--sm settings-btn-edit" style="flex:1">✏️ 编辑</button>
-                    ${!isDefault ? '<button class="settings-btn settings-btn--danger settings-btn--sm settings-btn-delete" style="flex:1">🗑️ 删除</button>' : ''}
+                    ${'<button class="settings-btn settings-btn--danger settings-btn--sm settings-btn-delete" style="flex:1">🗑️ 删除</button>'}
                 </div>
             </div>
         `;
@@ -463,7 +466,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
 
         const allConns = await this.service.getConnections();
         // Default connection cannot be deleted
-        const deletable = allConns.filter(c => ids.includes(c.id) && c.id !== 'default');
+        const deletable = allConns.filter(c => ids.includes(c.id));
 
         if (!deletable.length) {
             Toast.error('选中的连接均不可删除（默认连接不可删除）');
@@ -644,7 +647,12 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 const id = this.container.querySelector<HTMLSelectElement>('[name="providerId"]')?.value;
                 if (id) void this.options.hostContext?.navigate({ target: 'toolbox', resourceId: '/providers/' + encodeURIComponent(id) });
             });
-            if (connection && connection.id !== 'default') addConfigurationAction(this.container, t('action.delete'), () => this.deleteConnection(connection.id, connection.name));
+            if (connection) addConfigurationAction(this.container,
+                t(connection.id === this.defaultConnectionId ? 'connection.clearDefault' : 'connection.setDefault'), async () => {
+                    await this.service.setDefaultConnection(connection.id === this.defaultConnectionId ? null : connection.id);
+                    await this.render();
+                });
+            if (connection) addConfigurationAction(this.container, t('action.delete'), () => this.deleteConnection(connection.id, connection.name));
         } else setTimeout(() => this.bindModalEvents(connection, initialPid), 100);
     }
 

@@ -115,3 +115,31 @@ it('does not scan chat tasks when the Session has no Flow invocations', async ()
     expect(tasks).not.toHaveBeenCalled();
     tasks.mockRestore();
 });
+
+
+it('freezes connection selection at admission and rejects reusing an id with another connection', async () => {
+    const resolve = vi.fn(async (_session: string, selected?: string) => selected ?? 'global-before');
+    service = new FlowInvocationService(kernel, definitions, commands, undefined, undefined, resolve);
+    const execute = vi.spyOn(commands, 'execute');
+    const call = await service.invoke({ ...input('connection-choice'), connectionId: 'run-choice' });
+    expect(call.resolvedConnectionId).toBe('run-choice');
+    expect(execute).toHaveBeenCalledWith(FlowCommand.RunStart, expect.objectContaining({ connectionId: 'run-choice', fallbackConnectionId: 'run-choice' }));
+    resolve.mockResolvedValue('global-after');
+    expect((await service.invoke({ ...input('connection-choice'), connectionId: 'run-choice' })).rootTaskId).toBe(call.rootTaskId);
+    expect(resolve).toHaveBeenCalledOnce();
+    await expect(service.invoke({ ...input('connection-choice'), connectionId: 'other' })).rejects.toThrow('different arguments');
+});
+
+
+it('retains the admitted fallback when retrying a submission after the global default changes', async () => {
+    const resolve = vi.fn(async () => 'global-before');
+    service = new FlowInvocationService(kernel, definitions, commands, undefined, undefined, resolve);
+    const execute = vi.spyOn(commands, 'execute');
+    execute.mockRejectedValueOnce(new Error('submission unavailable'));
+    await expect(service.invoke(input('retry-connection'))).rejects.toThrow('submission unavailable');
+    resolve.mockResolvedValue('global-after');
+    const call = await service.invoke(input('retry-connection'));
+    expect(call.resolvedConnectionId).toBe('global-before');
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenLastCalledWith(FlowCommand.RunStart, expect.objectContaining({ fallbackConnectionId: 'global-before' }));
+});

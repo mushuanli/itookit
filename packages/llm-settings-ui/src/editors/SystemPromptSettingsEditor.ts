@@ -1,14 +1,23 @@
 // @file: llm-settings-ui/editors/SystemPromptSettingsEditor.ts
 import { BaseSettingsEditor, Modal, Toast } from '@itookit/ui-common';
-import { escapeHTML, type SystemPromptDefinition, type PromptPreset } from '@itookit/common';
+import { editorResourceId } from '@itookit/ui-common';
+import { t, TOOLBOX_ICONS, escapeHTML, type SystemPromptDefinition, type PromptPreset } from '@itookit/common';
 import type { IAgentManagementService } from '@itookit/common';
 
 export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
     private prompts: SystemPromptDefinition[] = [];
     private selectedId: string | null = null;
 
+    private get formOnly(): boolean { return this.options.target?.kind === 'entity' && this.options.target.entityType === 'system-prompt'; }
+
     async render(): Promise<void> {
         this.prompts = await this.service.listSystemPrompts();
+        if (this.formOnly) {
+            this.selectedId = editorResourceId(this.options) ?? null;
+            const prompt = this.prompts.find(item => item.id === this.selectedId);
+            this.container.innerHTML = prompt ? this.form(prompt) : `<p>${escapeHTML(t('prompt.missing', { id: this.selectedId ?? '' }))}</p>`;
+            this.bind(); return;
+        }
         if (this.selectedId && !this.prompts.some(p => p.id === this.selectedId)) this.selectedId = null;
         if (!this.selectedId && this.prompts.length) this.selectedId = this.prompts[0].id;
         const selected = this.prompts.find(p => p.id === this.selectedId) ?? null;
@@ -34,7 +43,7 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
     private listItem(p: SystemPromptDefinition): string {
         const summary = p.description?.trim() || `${p.content?.length ?? 0} 段消息 · ${p.presets?.length ?? 0} 个快捷项`;
         return `<div class="settings-list-item ${p.id === this.selectedId ? 'selected' : ''}" data-sp-id="${escapeHTML(p.id)}" role="button" tabindex="0">
-            <span class="settings-list-item__icon">✦</span>
+            <span class="settings-list-item__icon">${TOOLBOX_ICONS.prompts}</span>
             <div class="settings-list-item__info">
                 <div class="settings-list-item__title">${escapeHTML(p.name || p.id)}</div>
                 <div class="settings-list-item__desc" title="${escapeHTML(summary)}">${escapeHTML(summary)}</div>
@@ -44,14 +53,14 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
 
     private emptyList(): string {
         return `<div class="settings-empty settings-empty--mini">
-            <div class="settings-empty__icon">✦</div><p>还没有系统提示词</p>
+            <div class="settings-empty__icon">${TOOLBOX_ICONS.prompts}</div><p>还没有系统提示词</p>
             <button class="settings-btn settings-btn--primary settings-btn--sm" data-action="new"><i class="fas fa-plus"></i> 创建第一个</button>
         </div>`;
     }
 
     private emptyState(): string {
         return `<div class="settings-empty" style="min-height:100%;justify-content:center;padding:2rem">
-            <div class="settings-empty__icon">✦</div><h3 class="settings-empty__title">创建可复用的系统提示词</h3>
+            <div class="settings-empty__icon">${TOOLBOX_ICONS.prompts}</div><h3 class="settings-empty__title">创建可复用的系统提示词</h3>
             <p style="max-width:28rem;text-align:center;color:var(--st-text-secondary);line-height:1.6">集中维护角色设定、行为约束和常用指令，在不同 Agent 之间快速复用。</p>
             <button class="settings-btn settings-btn--primary" data-action="new"><i class="fas fa-plus"></i> 新建系统提示词</button>
         </div>`;
@@ -60,7 +69,7 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
     private form(p: SystemPromptDefinition): string {
         const content = (p.content ?? []).join('\n');
         return `<header style="display:flex;align-items:center;gap:1rem;padding:1.25rem 1.75rem;border-bottom:1px solid var(--st-border-color)">
-            <div style="width:2.75rem;height:2.75rem;border-radius:.75rem;display:grid;place-items:center;background:var(--st-color-primary-bg,#eef2ff);color:var(--st-color-primary);font-size:1.25rem">✦</div>
+            <div style="width:2.75rem;height:2.75rem;border-radius:.75rem;display:grid;place-items:center;background:var(--st-color-primary-bg,#eef2ff);color:var(--st-color-primary);font-size:1.25rem">${TOOLBOX_ICONS.prompts}</div>
             <div style="min-width:0;flex:1"><h2 data-title style="margin:0;font-size:1.125rem">${escapeHTML(p.name || '未命名提示词')}</h2>
                 <p style="margin:.25rem 0 0;color:var(--st-text-tertiary);font-size:.8125rem">保存后即可在 Agent 配置中复用</p></div>
             ${p.id ? `<button class="settings-btn settings-btn--danger" data-action="delete" title="删除"><i class="fas fa-trash"></i></button>` : ''}
@@ -78,8 +87,8 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
             </section>
             <section class="settings-section">
                 <h3 class="settings-section__title" style="margin-bottom:.35rem">提示词内容</h3>
-                <p style="margin:0 0 1rem;color:var(--st-text-tertiary);font-size:.8125rem">每个非空行保存为一段 system 消息，建议每行只表达一条清晰规则。</p>
-                <div class="settings-form-group"><label for="sp-content" style="display:flex;justify-content:space-between"><span>System 消息</span><span data-count style="font-weight:400;color:var(--st-text-tertiary)">${this.lineCount(content)} 段</span></label>
+                <p style="margin:0 0 1rem;color:var(--st-text-tertiary);font-size:.8125rem">${t('prompt.contentHint')}</p>
+                <div class="settings-form-group"><label for="sp-content" style="display:flex;justify-content:space-between"><span>System 消息</span><span data-count style="font-weight:400;color:var(--st-text-tertiary)">${t('prompt.lines', { count: this.lineCount(content) })}</span></label>
                     <textarea class="settings-textarea" id="sp-content" data-field="content" rows="12" spellcheck="false" style="min-height:14rem;resize:vertical;line-height:1.65;font-family:ui-monospace,SFMono-Regular,Menlo,monospace" placeholder="你是一位经验丰富的软件工程师。&#10;优先给出简洁、可验证的解决方案。">${escapeHTML(content)}</textarea></div>
             </section>
             <section class="settings-section" style="margin-bottom:0">
@@ -128,7 +137,7 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
         });
         this.addEventListener(this.container.querySelector('[data-field="content"]'), 'input', () => {
             const count = this.container.querySelector<HTMLElement>('[data-count]');
-            if (count) count.textContent = `${this.lineCount(this.field('content'))} 段`;
+            if (count) count.textContent = t('prompt.lines', { count: this.lineCount(this.field('content')) });
         });
         this.addEventListener(this.container.querySelector('[data-field="name"]'), 'input', e => {
             const title = this.container.querySelector<HTMLElement>('[data-title]');
@@ -150,7 +159,9 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
     private async save(): Promise<void> {
         const id = this.field('id').trim() || this.slug(this.field('name')) || `sp-${Date.now().toString(36)}`;
         const name = this.field('name').trim() || id;
-        const content = this.field('content').split('\n').map(s => s.trim()).filter(Boolean);
+        const previous = this.prompts.find(item => item.id === id);
+        const text = this.field('content');
+        const content = previous && text === previous.content.join('\n') ? previous.content : text.trim() ? [text] : [];
         const presets = Array.from(this.container.querySelectorAll<HTMLElement>('[data-preset-row]')).map(row => ({
             name: row.querySelector<HTMLInputElement>('[data-preset-name]')?.value.trim() ?? '',
             prompt: row.querySelector<HTMLTextAreaElement>('[data-preset-prompt]')?.value.trim() ?? '',
@@ -158,7 +169,7 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
         try {
             await this.service.saveSystemPrompt({ id, name, content, ...(this.field('description').trim() ? { description: this.field('description').trim() } : {}), ...(presets.length ? { presets } : {}) });
             this.selectedId = id;
-            Toast.success('系统提示词已保存');
+            Toast.success(t('prompt.saved'));
             await this.render();
         } catch (error) { Toast.error(`保存失败：${error instanceof Error ? error.message : String(error)}`); }
     }
@@ -166,6 +177,11 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
     private remove(): void {
         const prompt = this.prompts.find(p => p.id === this.selectedId);
         if (!prompt) return;
+        if (this.formOnly && this.options.hostContext?.requestDelete) {
+            void this.options.hostContext.requestDelete([{ kind: 'entity', entityType: 'system-prompt', id: prompt.id }])
+                .then(() => this.render()).catch(error => Toast.error(String(error)));
+            return;
+        }
         Modal.confirm('确认删除', `确定要删除“${prompt.name || prompt.id}”吗？此操作无法撤销。`, async () => {
             try {
                 await this.service.deleteSystemPrompt(prompt.id);

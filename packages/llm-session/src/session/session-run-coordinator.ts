@@ -183,8 +183,9 @@ export class SessionRunCoordinator {
             flowToDag(
                 revision,
                 (node, defaults) => bindFlowNode(node, defaults, snapshot, task, setup, this.agents),
-                setup.config.connectionId ?? 'default',
+                setup.config.connectionId,
                 (id, childRevision) => definitions.loadRevision(id, childRevision),
+                [], revision.dependencyLocks, false, task.input.overrides?.connectionId,
             ),
             (node, snapshot, defaults) => bindFlowNode(node as Parameters<typeof bindFlowNode>[0], defaults as Parameters<typeof bindFlowNode>[1], snapshot, task, setup, this.agents),
         );
@@ -195,7 +196,7 @@ export class SessionRunCoordinator {
             ?? new RoundLog(this.engine, input.sessionId);
         this.logs.set(input.sessionId, roundLog);
         const manifest = await roundLog.loadManifest();
-        const agent = await this.agents.resolveForChat(input.agentId);
+        const agent = await this.resolveConfig(input);
         if (!agent.agentVersion) {
             throw new Error(
                 `Agent version is required: ${agent.id} — requested agentId='${input.agentId}' `
@@ -216,6 +217,7 @@ export class SessionRunCoordinator {
                 branchHead: manifest.branches[branchRef] ?? null,
                 contextProfile: manifest.branchMeta[branchRef]?.contextProfile,
                 agentVersion: agent.agentVersion,
+                config: structuredClone(agent),
             },
         };
     }
@@ -233,7 +235,7 @@ export class SessionRunCoordinator {
         const userNodeId = task.input.skipUserMessage
             ? task.input.parentUserNodeId
             : this.createUserMessage(task, state, files, roundId);
-        const config = await this.resolveConfig(task.input);
+        const config = task.frozen?.config ?? await this.resolveConfig(task.input);
         const rootNode = this.createAssistantNode(task, state, config, roundId, userNodeId);
         return { config, rootNode, roundId, contextFiles: files };
     }
@@ -285,16 +287,14 @@ export class SessionRunCoordinator {
     }
 
     private async resolveConfig(input: TaskInput): Promise<ExecutorConfig> {
-        let config = await this.agents.resolve(input.agentId);
-        if (!input.overrides) return config;
-        config = applyOverrides(config, input.overrides);
-        if (input.overrides.connectionId || input.overrides.modelTier) {
-            config = await this.agents.reResolveModel(config, {
-                connectionId: input.overrides.connectionId,
-                modelTier: input.overrides.modelTier,
-            });
-        }
-        return config;
+        const settings = await this.engine.getSessionSettings(input.sessionId);
+        const identity = await this.agents.resolve(input.agentId);
+        const config = await this.agents.reResolveModel(identity, {
+            connectionId: input.overrides && 'connectionId' in input.overrides ? input.overrides.connectionId : settings.connectionId,
+            modelTier: input.overrides?.modelTier,
+            allowUnconfigured: input.sendIntent?.execution.kind === 'flow',
+        });
+        return input.overrides ? applyOverrides(config, input.overrides) : config;
     }
 
     private async getLog(task: ExecutionTask): Promise<RoundLog> {

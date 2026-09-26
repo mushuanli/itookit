@@ -30,6 +30,7 @@ export interface ConversationManifest extends RoundManifest {
     /** Workflow instance source: set when the session is created from a workflow run. */
     flow?: {
         flowId: string;
+        connectionId?: string;
         revision: number;
         parameters?: Record<string, JsonValue>;
     };

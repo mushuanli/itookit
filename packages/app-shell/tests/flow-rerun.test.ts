@@ -12,19 +12,19 @@ beforeEach(() => {
 afterEach(() => { document.body.innerHTML = ''; vi.restoreAllMocks(); });
 
 it('prefills branch parameters, submits the source identity and cancels without creating a branch', async () => {
-    const execute = vi.fn(async (command: string) => command === SessionCommand.FlowRerunContext
+    const execute = vi.fn(async (command: string) => command === SessionCommand.GetConnections ? { connections: [] } : command === SessionCommand.FlowRerunContext
         ? { sessionId: 's', definitionKey: 'draft-key', sourceRoundId: 'r', flow: { parameters: { essay: 'previous' } }, definition: { parameters: [{ name: 'essay', type: 'string', required: true }] } }
         : { branchName: 'branch-1' });
     const first = rerunSessionFlow({ execute } as never, new AbortController().signal);
     await vi.waitFor(() => expect(document.querySelector('textarea')?.value).toBe('previous'));
     (document.querySelector('[data-cancel]') as HTMLButtonElement).click(); await first;
-    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(2);
     const second = rerunSessionFlow({ execute } as never, new AbortController().signal);
     await vi.waitFor(() => expect(document.querySelector('textarea')).not.toBeNull());
     document.querySelector('textarea')!.value = 'new';
     document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await second;
-    expect(execute).toHaveBeenLastCalledWith(SessionCommand.FlowRerun, { parameters: { essay: 'new' }, sourceRoundId: 'r', sessionId: 's', definitionKey: 'draft-key' });
+    expect(execute).toHaveBeenLastCalledWith(SessionCommand.FlowRerun, { parameters: { essay: 'new' }, sourceRoundId: 'r', sessionId: 's', definitionKey: 'draft-key', connectionId: undefined });
 });
 
 it('renders interaction roles without logical node controls and flushes deltas before final replacement', () => {

@@ -1,6 +1,6 @@
 import { saveToolGrant, type ToolGrantTarget } from './tool-grants';
 import { ToolboxDrawers, drawerKind, ungroupedId, type Drawer, type DrawerKind } from './toolbox-drawers';
-import { randomUUID, t, type MCPServer, type LLMProvider, type LLMConnection, type AgentDefinition, type LLMSkill, type FlowDraft, type ICommandBus } from '@itookit/common';
+import { randomUUID, t, type SystemPromptDefinition, type MCPServer, type LLMProvider, type LLMConnection, type AgentDefinition, type LLMSkill, type FlowDraft, type ICommandBus } from '@itookit/common';
 import { FlowCommand, type VFSAgentService } from '@itookit/llm-session';
 import type { IFileSystem } from '@itookit/vfs-core';
 import { toolboxPath, type ToolboxKind } from './toolbox-identity';
@@ -10,13 +10,14 @@ export class ToolboxResources {
     readonly drawers: ToolboxDrawers;
     constructor(readonly sources: Record<ToolboxKind, IFileSystem>, private readonly agents: VFSAgentService, private readonly commands: ICommandBus, settings: IFileSystem) { this.drawers = new ToolboxDrawers(settings); }
     subscribe(listener: () => void): () => void { return this.agents.onChange(listener); }
+    setDefaultConnection(id: string | null): Promise<void> { return this.agents.setDefaultConnection(id); }
     getAgents(): Promise<AgentDefinition[]> { return this.agents.getAgents(); }
     hasProvider(id: string): boolean { return this.agents.getProviders().some(item => item.id === id); }
     setToolGrant(tool: ToolGrantTarget, agentId: string, enabled: boolean): Promise<void> { return saveToolGrant(this.agents, tool, agentId, enabled); }
     async refreshGroups(toolGroups: readonly Drawer[]): Promise<void> {
         const defaults: Drawer[] = [...toolGroups], resources: Array<{ path: string; kind: DrawerKind; groupId?: string }> = [];
         for (const group of toolGroups) for (const path of group.paths) resources.push({ path, kind: 'tools', groupId: group.id });
-        for (const kind of ['agents', 'skills', 'flows', 'mcp'] as const) await this.scanGroups(kind, '/', defaults, resources);
+        for (const kind of ['agents', 'skills', 'flows', 'prompts', 'mcp'] as const) await this.scanGroups(kind, '/', defaults, resources);
         this.drawers.setCatalog(resources, defaults);
     }
     private async scanGroups(kind: DrawerKind, parent: string, groups: Drawer[], resources: Array<{ path: string; kind: DrawerKind; groupId?: string }>, group?: Drawer): Promise<void> {
@@ -39,12 +40,16 @@ export class ToolboxResources {
         if (kind === 'tools') throw new Error(t('toolbox.toolsCreate'));
         const id = randomUUID();
         if (kind === 'providers' || kind === 'connections') return this.createModel(kind, id, name, providerId);
+        if (kind === 'prompts') {
+            await this.agents.saveSystemPrompt({ id, name, content: [] });
+            return toolboxPath(kind, '/' + id);
+        }
         if (kind === 'mcp') {
             await this.agents.saveMCPServer({ id, name, transport: 'http', status: 'idle', autoConnect: false });
             return toolboxPath(kind, '/' + id);
         }
         if (kind === 'agents') {
-            await this.agents.saveAgent({ id, name, type: 'agent', description: '', config: { connectionId: 'default', modelName: '' } });
+            await this.agents.saveAgent({ id, name, type: 'agent', description: '', config: {} });
             return toolboxPath(kind, this.agents.getAgentResourceId(id)!);
         }
         if (kind === 'flows') {
@@ -62,7 +67,8 @@ export class ToolboxResources {
         try { await this.drawers.assign([{ path, name: drawer }]); return path; }
         catch (error) {
             try {
-                if (kind === 'mcp') await this.agents.deleteMCPServer(path.split('/').pop()!);
+                if (kind === 'prompts') await this.agents.deleteSystemPrompt(path.split('/').pop()!);
+                else if (kind === 'mcp') await this.agents.deleteMCPServer(path.split('/').pop()!);
                 else await this.sources[kind].driver.delete([path.slice(kind.length + 1)]);
             } catch (cleanup) { throw new AggregateError([error, cleanup], 'Resource creation and cleanup failed'); }
             throw error;
@@ -88,14 +94,20 @@ export class ToolboxResources {
     }
     async export(paths: string[], drawers: Array<{ kind: DrawerKind; name: string }> = []): Promise<string> {
         const entries = [];
-        for (const path of [...new Set(paths)]) {
+        const queue = [...new Set(paths)];
+        for (const path of queue) {
             const kind = path.split('/')[1] as ToolboxKind, source = this.sources[kind], local = path.slice(kind.length + 1);
-            if (!source || (await source.driver.getNode(local))?.type !== 'file') throw new Error(t('toolbox.selectFiles'));
+            if (!source || kind !== 'prompts' && (await source.driver.getNode(local))?.type !== 'file') throw new Error(t('toolbox.selectFiles'));
             const data = kind === 'providers' ? this.agents.getFullProvider(decodeURIComponent(local.slice(1)))
+                : kind === 'prompts' ? await this.agents.getSystemPrompt(decodeURIComponent(local.slice(1)))
                 : kind === 'connections' ? await this.agents.getFullConnection(decodeURIComponent(local.slice(1)))
                 : kind === 'mcp' ? (await this.agents.getMCPServers()).find(item => item.id === decodeURIComponent(local.slice(1))) : kind === 'skills' ? (await this.agents.getSkills()).find(item => item.id === local.slice(1))
                 : JSON.parse(await source.driver.readContent(local, { encoding: 'utf-8' }));
             if (!data) throw new Error(t('toolbox.resourceMissing'));
+            for (const id of promptIds(kind, data)) {
+                const dependency = toolboxPath('prompts', '/' + encodeURIComponent(id));
+                if (!queue.includes(dependency)) queue.push(dependency);
+            }
             const group = this.drawers.forPath(path);
             entries.push({ kind, data, drawer: group && group.id === ungroupedId(group.kind) ? '' : group?.name });
         }
@@ -125,6 +137,7 @@ export class ToolboxResources {
                 try { if (kind === 'tools') continue;
                     if (kind === 'providers') await this.agents.deleteProvider(decodeURIComponent(path.split('/').pop()!));
                     else if (kind === 'connections') await this.agents.deleteConnection(decodeURIComponent(path.split('/').pop()!));
+                    else if (kind === 'prompts') await this.agents.deleteSystemPrompt(decodeURIComponent(path.split('/').pop()!));
                     else if (kind === 'mcp') await this.agents.deleteMCPServer(decodeURIComponent(path.split('/').pop()!)); else await this.sources[kind].driver.delete([path.slice(kind.length + 1)]); } catch (cleanup) { errors.push(cleanup); }
             }
             if (errors.length > 1) throw new AggregateError(errors, 'Toolbox import and cleanup failed');
@@ -138,6 +151,10 @@ export class ToolboxResources {
     }
     private async importEntry(kind: ToolboxKind, data: ToolboxDefinition, id: string): Promise<string> {
         if (kind === 'tools') return this.toolReference(data.id);
+        if (kind === 'prompts') {
+            await this.agents.saveSystemPrompt({ ...data as SystemPromptDefinition, id });
+            return toolboxPath(kind, '/' + id);
+        }
         if (kind === 'providers' || kind === 'connections') return this.importModel(kind, data, id);
         if (kind === 'mcp') {
             await this.agents.saveMCPServer({ ...data as MCPServer, id, status: 'idle', autoConnect: false, tools: [], resources: [], prompts: [] });
@@ -175,6 +192,8 @@ export class ToolboxResources {
 function validateEntry(entry: { kind?: string; data?: Record<string, unknown> }): void {
     const data = entry?.data;
     if (!data || typeof data.name !== 'string' || !data.name.trim()) throw new Error(t('toolbox.importInvalid'));
+    if (entry.kind === 'prompts' && typeof data.id === 'string' && Array.isArray(data.content) && data.content.every(value => typeof value === 'string')
+        && (data.presets === undefined || Array.isArray(data.presets) && data.presets.every(value => value && typeof value.name === 'string' && typeof value.prompt === 'string'))) return;
     if (entry.kind === 'providers' && typeof data.implementation === 'string' && Array.isArray(data.models)) return;
     if (entry.kind === 'connections' && typeof data.providerId === 'string') return;
     if (entry.kind === 'tools' && typeof data.id === 'string') return;
@@ -187,20 +206,37 @@ function validateEntry(entry: { kind?: string; data?: Record<string, unknown> })
     throw new Error(t('toolbox.importInvalid'));
 }
 
-type ToolboxDefinition = AgentDefinition | LLMSkill | FlowDraft | MCPServer | LLMProvider | LLMConnection;
+type ToolboxDefinition = SystemPromptDefinition | AgentDefinition | LLMSkill | FlowDraft | MCPServer | LLMProvider | LLMConnection;
 function planImport(entries: Array<{ kind: ToolboxKind; data: ToolboxDefinition; drawer?: string }>) {
     const plan = entries.map(entry => ({ ...entry, id: randomUUID() }));
     const replacements = new Map(plan.map(entry => [entry.kind + '/' + entry.data.id, entry.id]));
     for (const entry of plan) {
+        if (entry.kind === 'agents' || entry.kind === 'flows') {
+            entry.data = structuredClone(entry.data);
+            rewritePromptReferences(entry.kind, entry.data, id => replacements.get('prompts/' + id) ?? id);
+        }
         if (entry.kind === 'connections') {
             const connection = entry.data as LLMConnection;
             entry.data = { ...connection, providerId: replacements.get('providers/' + connection.providerId) ?? connection.providerId };
         }
-        if (entry.kind === 'agents') {
-            const agent = entry.data as AgentDefinition;
-            entry.data = { ...agent, config: { ...agent.config, connectionId: replacements.get('connections/' + agent.config.connectionId) ?? agent.config.connectionId } };
-        }
     }
-    const rank = (kind: ToolboxKind) => kind === 'providers' ? 0 : kind === 'connections' ? 1 : 2;
+    const rank = (kind: ToolboxKind) => kind === 'providers' || kind === 'prompts' ? 0 : kind === 'connections' ? 1 : 2;
     return plan.sort((a, b) => rank(a.kind) - rank(b.kind));
+}
+
+
+function rewritePromptReferences(kind: ToolboxKind, data: ToolboxDefinition, resolve: (id: string) => string): void {
+    const visit = (value: unknown): void => {
+        if (!value || typeof value !== 'object') return;
+        const item = value as Record<string, unknown>;
+        if (typeof item.systemPromptId === 'string') item.systemPromptId = resolve(item.systemPromptId);
+        for (const child of Object.values(item)) visit(child);
+    };
+    if (kind === 'agents') visit((data as AgentDefinition).config);
+    if (kind === 'flows') { visit((data as FlowDraft).defaults); for (const node of (data as FlowDraft).nodes) visit(node.config); }
+}
+function promptIds(kind: ToolboxKind, data: ToolboxDefinition): string[] {
+    const ids: string[] = [];
+    rewritePromptReferences(kind, structuredClone(data), id => { ids.push(id); return id; });
+    return ids;
 }

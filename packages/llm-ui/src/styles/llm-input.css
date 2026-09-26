@@ -26,6 +26,8 @@
     background: var(--llm-settings-bg);
     border-bottom: 1px solid var(--llm-border-color);
     padding: 12px 16px;
+    overflow-y: auto;
+    max-height: min(520px, 65vh);
     animation: llm-ui-slideDown 0.2s ease-out;
 }
 
@@ -40,11 +42,9 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.8rem;
+    font-size: .9rem;
     font-weight: 600;
     color: var(--llm-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
 }
 
 .llm-input__settings-close {
@@ -801,6 +801,15 @@
     color: var(--llm-text-primary);
 }
 
+/* Keep the active OCR connection readable without expanding the input width. */
+.llm-input__ocr-settings {
+    display: block;
+    max-width: 100%;
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* OCR 审阅面板 — 处理 / 审阅 / 错误三态 */
 .llm-input__ocr-panel {
     display: none;
@@ -1437,4 +1446,28 @@
     opacity: 0;
     width: 0;
     height: 0;
+}
+
+/* Group frequent settings and reveal advanced controls on demand. */
+.llm-input__settings-group { display: grid; gap: 12px; min-width: 0; }
+.llm-input__settings-group h3 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: .8rem; color: var(--llm-text-secondary); }
+.llm-input__settings-group h3 svg { width: 16px; height: 16px; }
+.llm-input__settings-toggles { display: flex; gap: 12px 24px; flex-wrap: wrap; align-items: center; }
+.llm-input__settings-toggles .llm-input__setting-row { flex: 1 1 180px; }
+.llm-input__settings-advanced { border-top: 1px solid var(--llm-border-color); padding-top: 12px; }
+.llm-input__settings-advanced summary { cursor: pointer; font-size: .85rem; color: var(--llm-text-secondary); }
+.llm-input__settings-advanced[open] summary { margin-bottom: 12px; }
+.llm-input__ocr-preferences { border-top: 1px solid var(--llm-border-color); padding-top: 12px; }
+.llm-input__ocr-preferences[hidden] { display: none; }
+.llm-input__ocr-preferences .settings-form { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.llm-input__ocr-preferences .settings-form__group { flex: 1 1 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.llm-input__ocr-preferences .settings-form__label { grid-column: 1 / -1; font-size: .8rem; }
+.llm-input__ocr-preferences .settings-form__select { width: 100%; min-width: 0; }
+.llm-input__ocr-preferences .settings-form__help { flex-basis: 100%; margin: 0; font-size: .75rem; color: var(--llm-text-secondary); }
+.llm-input__ocr-preferences .settings-form__help:empty { display: none; }
+.llm-input__ocr-preferences .settings-btn { padding: 4px 8px; font-size: .75rem; }
+@media (max-width: 480px) {
+    .llm-input__ocr-preferences .settings-form__group { grid-template-columns: minmax(0, 1fr); }
+    .llm-input__ocr-preferences .settings-btn { justify-self: start; }
+    .llm-input__settings-toggles { gap: 10px; }
 }

@@ -1,14 +1,20 @@
-import { escapeHTML, t, type FlowParameter, type JsonValue } from '@itookit/common';
+import { escapeHTML, t, type FlowParameter, type JsonValue, type ConnectionMeta } from '@itookit/common';
 
 type Field = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+export interface FlowConnectionSelection {
+    connections: ConnectionMeta[];
+    selected?: string;
+    onChange(id: string | undefined): void;
+}
 
 /** Validate before closing so invalid input can be corrected repeatedly. */
-export function promptFlowParameters(parameters: FlowParameter[], title?: string, submit?: (values: Record<string, JsonValue>) => Promise<void>, signal?: AbortSignal): Promise<Record<string, JsonValue> | null> {
+export function promptFlowParameters(parameters: FlowParameter[], title?: string, submit?: (values: Record<string, JsonValue>) => Promise<void>, signal?: AbortSignal, connection?: FlowConnectionSelection): Promise<Record<string, JsonValue> | null> {
     return new Promise(resolve => {
         const dialog = document.createElement('dialog');
         dialog.className = 'dag-dialog';
         dialog.innerHTML = `<form novalidate><h2>${escapeHTML(title ?? t('flow.launch.title'))}</h2>
             ${parameters.map(parameterField).join('')}
+            ${connection ? connectionField(connection) : ''}
             <p data-form-error class="dag-dialog__error" role="alert"></p>
             <menu><button type="button" data-cancel>${escapeHTML(t('flow.launch.cancel'))}</button>
             <button type="submit">${escapeHTML(t(submit ? 'flow.editor.submit' : 'flow.launch.confirm'))}</button></menu></form>`;
@@ -19,7 +25,11 @@ export function promptFlowParameters(parameters: FlowParameter[], title?: string
             event.preventDefault();
             if (submitting) return;
             submitting = true;
-            try { const values = collectParameters(dialog, parameters); await submit?.(values); result = values; dialog.close(); }
+            try {
+                const values = collectParameters(dialog, parameters);
+                if (connection) connection.onChange(dialog.querySelector<HTMLSelectElement>('[data-run-connection]')!.value || undefined);
+                await submit?.(values); result = values; dialog.close();
+            }
             catch (error) { dialog.querySelector('[data-form-error]')!.textContent =
                 error instanceof Error ? error.message : t('flow.launch.invalidValue'); }
             finally { submitting = false; }
@@ -31,6 +41,15 @@ export function promptFlowParameters(parameters: FlowParameter[], title?: string
         dialog.showModal();
         if (signal?.aborted) abort();
     });
+}
+
+function connectionField(selection: FlowConnectionSelection): string {
+    const options = selection.connections.map(item => `<option value="${escapeHTML(item.id)}" ${item.id === selection.selected ? 'selected' : ''}
+        ${item.enabled === false ? 'disabled' : ''}>${escapeHTML(item.name)} · ${escapeHTML(item.providerId)}</option>`).join('');
+    const missing = selection.selected && !selection.connections.some(item => item.id === selection.selected)
+        ? `<option value="${escapeHTML(selection.selected)}" selected>${escapeHTML(t('connection.unavailable', { id: selection.selected }))}</option>` : '';
+    return `<label>${escapeHTML(t('connection.flowLabel'))}<select data-run-connection><option value="">${escapeHTML(t('connection.flowInherit'))}</option>${missing}${options}</select>
+        <small>${escapeHTML(t('connection.flowHint'))}</small></label>`;
 }
 
 function collectParameters(dialog: HTMLDialogElement, parameters: FlowParameter[]): Record<string, JsonValue> {

@@ -44,7 +44,7 @@ async function fixture() {
     const mounts = new DirectoryMountService(root, files); await mounts.init();
     const projects = new ProjectService(root, repository, mounts, files); await projects.ensureStartup();
     await root.driver.createFile({ parentPath: '/home/admin/projects', name: documentName, content: 'original study notes' });
-    const runtime = { vfs: manager, llmDriver: {}, agentService: { getConnections: async () => [] },
+    const runtime = { vfs: manager, llmDriver: {}, agentService: { getConnections: async () => [], getSystemPrompt: async () => null, saveSystemPrompt: vi.fn() },
         sessionRepository: repository, sessionFiles: files, directoryMounts: mounts, projects,
         flowEngine: { engine: {} }, kernel: { kernel: { onChanged: () => () => {}, async *listSessions() {} }, sessions: {} },
         sessionManager: { onGlobalEvent: () => () => {} }, commandBus: {} } as unknown as ApplicationRuntime;

@@ -12,7 +12,7 @@ import yaml from 'js-yaml';
 import type {
     LLMProvider, DefaultConnectionDef, LLMModel, LLMConnection,
     AgentDefinition, AgentType, AgentConfig,
-    ModelTier, ModelPricingEntry,
+    ModelPricingEntry,
 } from '@itookit/common';
 
 // ─── .llm File Types ─────────────────────────────────────────────────────────
@@ -101,8 +101,6 @@ export interface LLMAgentDef extends Omit<AgentDefinition, 'type' | 'config' | '
     icon?: string;
     description?: string;
     config: {
-        connectionId: string;
-        modelTier?: string;     // ModelTier
         systemPrompt?: string;
         maxHistoryLength?: number;
         temperature?: number;
@@ -135,7 +133,7 @@ export interface LLMMCPDef {
  * Use `providers` (array) when a file bundles multiple providers.
  *
  * Dependency order (import respects this order automatically):
- *   providers → connections → agents (reference connectionId) → skills → mcp
+ *   providers → connections → agents (independent behavior) → skills → mcp
  */
 export interface LLMConfigFile {
     /** Single provider — backward-compat shorthand. Prefer `providers` for new files. */
@@ -261,8 +259,6 @@ export function toRuntimeAgent(def: LLMAgentDef): AgentDefinition {
         description: def.description,
         config: {
             ...snapshot.config,
-            connectionId: def.config.connectionId || 'default',
-            modelTier: def.config.modelTier as ModelTier | undefined,
             systemPrompt: def.config.systemPrompt,
             maxHistoryLength: def.config.maxHistoryLength,
             temperature: def.config.temperature,

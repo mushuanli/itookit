@@ -10,6 +10,7 @@ it.each(['failed', 'aborted'])('addresses %s status to the mounted assistant and
     const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
     await backend.write('/etc/llm/.providers/mock.json', encode({ id: 'mock', name: 'Mock', implementation: 'openai-compatible', apiKey: 'test', baseURL: 'http://localhost:18449', models: [{ id: 'mock-model', name: 'Mock' }] }));
     await backend.write('/etc/llm/.connections/default.json', encode({ id: 'default', name: 'Default', providerId: 'mock', tiers: { standard: 'mock-model' } }));
+    await backend.write('/etc/llm/.connection-settings.json', encode({ defaultConnectionId: 'default' }));
     let failRequest!: () => void;
     const fetch = vi.fn((_url: unknown, options: RequestInit) => new Promise((resolve, reject) => {
         // A permanent provider error reaches terminal status without entering durable retries.

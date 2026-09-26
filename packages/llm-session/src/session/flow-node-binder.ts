@@ -254,10 +254,9 @@ function resolveModelSettings(
 ): Record<string, unknown> {
     const defaults = context.flowDefaults;
     return {
-        connectionId: stringValue(config.connectionId) ?? agent?.connectionId
-            ?? stringValue(defaults.connectionId) ?? context.setup.config.connectionId,
-        modelName: stringValue(config.modelName) ?? agent?.model
-            ?? stringValue(defaults.modelName) ?? context.setup.config.model,
+        connectionId: stringValue(config.connectionId) ?? stringValue(defaults.connectionId),
+        modelName: stringValue(config.modelName)
+            ?? (stringValue(config.connectionId) ? undefined : stringValue(defaults.modelName)),
         temperature: numberValue(config.temperature) ?? agent?.temperature
             ?? numberValue(defaults.temperature) ?? context.setup.config.temperature,
         maxTokens: numberValue(config.maxTokens) ?? agent?.constraints?.maxTokens

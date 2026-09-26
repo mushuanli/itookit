@@ -24,30 +24,26 @@ export const ChatInputTemplates = {
      */
     renderSettingsPanel(): string {
         return `
-            <div class="llm-input__settings-panel" style="display: none; overflow-y: auto; max-height: 420px;">
+            <div class="llm-input__settings-panel" style="display: none;">
                 <div class="llm-input__settings-header">
-                    <span class="llm-input__settings-title">
-                        ${this.settingsIcon()}
-                        Settings
-                    </span>
-                    <button class="llm-input__settings-close" title="Close">
-                        ${this.closeIcon()}
-                    </button>
+                    <span class="llm-input__settings-title">${this.settingsIcon()} ${t('chatSettings.title')}</span>
+                    <button type="button" class="llm-input__settings-close" title="${t('chatSettings.close')}" aria-label="${t('chatSettings.close')}">${this.closeIcon()}</button>
                 </div>
-
                 <div class="llm-input__settings-body">
-                    ${this.renderConnectionRow()}
-                    ${this.renderFlowInvocationRow()}
-                    ${this.renderTierRow()}
-                    ${this.renderContextSetting()}
-                    ${this.renderThinkingSetting()}
-                    ${this.renderWebSearchSetting()}
-                    ${this.renderAdvancedSection()}
-                    ${this.renderSessionProfileSection()}
-                    ${this.renderSkillsSetting()}
+                    <section class="llm-input__settings-group">
+                        <h3>${t('chatSettings.conversation')}</h3>
+                        ${this.renderConnectionRow()}${this.renderTierRow()}${this.renderContextSetting()}
+                        <div class="llm-input__settings-toggles">${this.renderThinkingSetting()}${this.renderWebSearchSetting()}</div>
+                    </section>
+                    <section class="llm-input__settings-group llm-input__ocr-preferences" data-ocr-preferences hidden>
+                        <h3>${ACTION_ICONS.ocr} ${t('ocr.section')}</h3><div data-ocr-fields></div>
+                    </section>
+                    <details class="llm-input__settings-advanced">
+                        <summary>${t('chatSettings.advanced')}</summary>
+                        <div class="llm-input__settings-group">${this.renderSessionProfileSection()}${this.renderAdvancedSection()}${this.renderFlowInvocationRow()}</div>
+                    </details>
                 </div>
-            </div>
-        `;
+            </div>`;
     },
 
     /**
@@ -57,11 +53,10 @@ export const ChatInputTemplates = {
         return `
             <div class="llm-input__setting-row">
                 <label class="llm-input__setting-label">
-                    <span class="llm-input__setting-icon">🔌</span>
-                    Connection
+                    ${t('chatSettings.connection')}
                 </label>
-                <select class="llm-input__connection-select" title="Override LLM connection for this session">
-                    <option value="">Agent Default</option>
+                <select class="llm-input__connection-select" aria-label="${t('chatSettings.connection')}" title="${t('chatSettings.connectionHint')}">
+                    <option value="">${t('connection.followDefaultShort')}</option>
                 </select>
             </div>
         `;
@@ -70,16 +65,16 @@ export const ChatInputTemplates = {
     renderFlowInvocationRow(): string {
         return `
             <div class="llm-input__setting-row llm-input__flow-row">
-                <label class="llm-input__setting-label"><span class="llm-input__setting-icon">◇</span> Flow / branch</label>
+                <label class="llm-input__setting-label">${t('chatSettings.flow')}</label>
                 <div class="llm-input__flow-controls">
-                    <input class="llm-input__flow-id" type="text" placeholder="Flow ID (optional)" aria-label="Flow ID" />
+                    <input class="llm-input__flow-id" type="text" placeholder="${t('chatSettings.flowHint')}" aria-label="${t('chatSettings.flow')}" />
                     <select class="llm-input__branch-mode" aria-label="Branch mode">
-                        <option value="continue">Continue branch</option>
-                        <option value="fork">Start new branch</option>
+                        <option value="continue">${t('chatSettings.continue')}</option>
+                        <option value="fork">${t('chatSettings.fork')}</option>
                     </select>
                     <select class="llm-input__retention-mode" aria-label="History retention">
-                        <option value="persistent">Keep in history</option>
-                        <option value="temporary">Temporary (exclude subtree)</option>
+                        <option value="persistent">${t('chatSettings.persistent')}</option>
+                        <option value="temporary">${t('chatSettings.temporary')}</option>
                     </select>
                 </div>
             </div>
@@ -100,28 +95,27 @@ export const ChatInputTemplates = {
         return `
             <div class="llm-input__setting-row">
                 <label class="llm-input__setting-label">
-                    <span class="llm-input__setting-icon">⚡</span>
-                    Model Tier
+                    ${t('chatSettings.tier')}
                 </label>
                 <div class="llm-input__tier-cards" role="group" aria-label="Model tier">
                     <button type="button" class="llm-input__tier-card active" data-tier="auto"
-                            title="Use agent's configured tier">
-                        <span class="llm-input__tier-card-name">Auto</span>
+                            title="${t('chatSettings.autoTier')}">
+                        <span class="llm-input__tier-card-name">${t('chatSettings.auto')}</span>
                         <span class="llm-input__tier-card-model" data-tier-model="auto">${escapeHTML(t_auto)}</span>
                     </button>
                     <button type="button" class="llm-input__tier-card" data-tier="optimal"
                             title="Best quality — complex reasoning">
-                        <span class="llm-input__tier-card-name">最优</span>
+                        <span class="llm-input__tier-card-name">${t('ocr.tier.optimal')}</span>
                         <span class="llm-input__tier-card-model" data-tier-model="optimal">${escapeHTML(t_opt)}</span>
                     </button>
                     <button type="button" class="llm-input__tier-card" data-tier="standard"
                             title="Balanced — most daily work">
-                        <span class="llm-input__tier-card-name">标准</span>
+                        <span class="llm-input__tier-card-name">${t('ocr.tier.standard')}</span>
                         <span class="llm-input__tier-card-model" data-tier-model="standard">${escapeHTML(t_std)}</span>
                     </button>
                     <button type="button" class="llm-input__tier-card" data-tier="fast"
                             title="Cheapest — simple tasks">
-                        <span class="llm-input__tier-card-name">快速</span>
+                        <span class="llm-input__tier-card-name">${t('ocr.tier.fast')}</span>
                         <span class="llm-input__tier-card-model" data-tier-model="fast">${escapeHTML(t_fast)}</span>
                     </button>
                 </div>
@@ -136,14 +130,13 @@ export const ChatInputTemplates = {
         return `
             <div class="llm-input__setting-row">
                 <label class="llm-input__setting-label">
-                    <span class="llm-input__setting-icon">📜</span>
-                    Context
+                    ${t('chatSettings.history')}
                 </label>
                 <div class="llm-input__preset-buttons" role="group" aria-label="Context length">
-                    <button class="llm-input__preset-btn" data-history="0"  title="No history — fresh start">Fresh</button>
-                    <button class="llm-input__preset-btn" data-history="5"  title="Last 5 messages">Short</button>
-                    <button class="llm-input__preset-btn" data-history="20" title="Last 20 messages">Long</button>
-                    <button class="llm-input__preset-btn active" data-history="-1" title="Full history">All</button>
+                    <button class="llm-input__preset-btn" data-history="0"  title="No history — fresh start">${t('chatSettings.fresh')}</button>
+                    <button class="llm-input__preset-btn" data-history="5"  title="Last 5 messages">${t('chatSettings.short')}</button>
+                    <button class="llm-input__preset-btn" data-history="20" title="Last 20 messages">${t('chatSettings.long')}</button>
+                    <button class="llm-input__preset-btn active" data-history="-1" title="Full history">${t('chatSettings.all')}</button>
                 </div>
             </div>
             <input type="range" class="llm-input__history-slider" min="-1" max="50" value="-1"
@@ -196,14 +189,12 @@ export const ChatInputTemplates = {
      */
     renderSessionProfileSection(): string {
         return `
-            <div class="llm-input__setting-divider">Session Profile</div>
             <div class="llm-input__setting-row" style="flex-direction:column; align-items:stretch; gap:4px;">
                 <label class="llm-input__setting-label">
-                    <span class="llm-input__setting-icon">📝</span>
-                    System Prompt Append
+                    ${t('chatSettings.instructions')}
                 </label>
                 <textarea class="llm-input__system-prompt-append"
-                    placeholder="Extra instructions appended to the agent's system prompt for this session..."
+                    placeholder="${t('chatSettings.instructionsHint')}"
                     rows="3"
                 ></textarea>
             </div>
@@ -211,7 +202,7 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * Skills 面板 — 始终可见（影响 system prompt，与 Mode 无关）
+     * Skills manager content, opened explicitly through /skills.
      *
      * 每个 Skill 以 toggle 开关控制当前会话是否启用。
      */
@@ -266,7 +257,7 @@ export const ChatInputTemplates = {
                     <input type="checkbox" class="llm-input__stream-toggle">
                     <span class="llm-input__toggle-slider"></span>
                 </label>
-                <span>Block Mode</span>
+                <span>${t('chatSettings.block')}</span>
             </div>
         `;
     },
@@ -312,7 +303,7 @@ export const ChatInputTemplates = {
                     </button>
                 </div>
                 <div class="llm-input__toolbar-right">
-                    <button class="llm-input__btn llm-input__btn--settings" title="Chat Settings">
+                    <button class="llm-input__btn llm-input__btn--settings" title="${t('chatSettings.title')}" aria-label="${t('chatSettings.title')}">
                         ${this.sliderIcon()}
                     </button>
                     <button class="llm-input__btn llm-input__btn--send" title="Send (Enter)">
@@ -346,7 +337,7 @@ export const ChatInputTemplates = {
     /**
      * Agent 选择器 — 自定义 Combobox（替代原生 select）
      *
-     * Trigger 按钮常驻显示：icon + name + provider·connection meta。
+     * The Agent trigger displays its icon, name and category.
      * 下拉列表由 PopupPanel 管理（挂载在 body，position:fixed，规避 overflow:hidden）。
      */
     renderAgentPicker(): string {
@@ -392,7 +383,7 @@ export const ChatInputTemplates = {
             <div class="llm-input__tier-quick-wrapper">
                 <button class="llm-input__tier-quick" type="button" title="Override model tier">
                     <span class="llm-input__tier-quick-icon">⚡</span>
-                    <span class="llm-input__tier-quick-label">Auto</span>
+                    <span class="llm-input__tier-quick-label">${t('chatSettings.auto')}</span>
                     <span class="llm-input__tier-quick-clear" style="display:none" title="Clear tier">×</span>
                 </button>
             </div>
@@ -589,7 +580,9 @@ export const ChatInputTemplates = {
             ? `<button class="llm-input__ocr-all-btn" type="button" title="${t('chatInput.ocr.all.tooltip')}">${ACTION_ICONS.ocr} ${t('chatInput.ocr.all')}</button>`
             : '';
 
-        return chips + batchBtn;
+        const settings = canOcr && imageCount > 0
+            ? `<button class="llm-input__ocr-all-btn llm-input__ocr-settings" type="button" data-ocr-configure title="${t('ocr.configure')}">${t('ocr.configure')}</button>` : '';
+        return chips + batchBtn + settings;
     },
 
     /**
@@ -607,7 +600,7 @@ export const ChatInputTemplates = {
             return `<option value="${escapeHTML(c.id)}"${selected}>${label}${tierHint}</option>`;
         };
 
-        let html = '<option value="">Agent Default</option>';
+        let html = `<option value="">${t('connection.followDefaultShort')}</option>`;
         html += withKey.map(renderOption).join('');
         if (withoutKey.length > 0) {
             html += `<optgroup label="⚠️ 需配置 API Key">`;

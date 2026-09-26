@@ -145,3 +145,26 @@ describe('validateFlowRevision connections', () => {
         expect(validateFlowRevision(flow).some(issue => issue.code === 'invalid-default-connection')).toBe(true);
     });
 });
+
+
+describe('per-run connection selection', () => {
+    it('overrides Flow defaults without changing explicit node connections or the saved definition', async () => {
+        const flow = revision([agentNode('inherited'), agentNode('explicit', 'premium')]);
+        flow.defaults = { connectionId: 'economy', modelName: 'cheap-model' };
+        const spec = await flowToDag(flow, undefined, 'session', undefined, [], undefined, false, 'economy');
+        expect(spec.nodes[0].config).toMatchObject({ connectionId: 'economy' });
+        expect(spec.nodes[0].config).not.toHaveProperty('modelName');
+        expect(spec.nodes[1].config).toMatchObject({ connectionId: 'conn-pro' });
+        expect(flow.defaults).toEqual({ connectionId: 'economy', modelName: 'cheap-model' });
+        expect(spec.nodeConnections?.inherited).toMatchObject({ runConnectionId: 'economy', fallbackConnectionId: 'session' });
+    });
+
+    it('inherits the run choice into nested Flows and preserves their explicit slots', async () => {
+        const child = revision([agentNode('inherited'), agentNode('explicit', 'premium')]);
+        const parent = revision([{ ...agentNode('child'), plugin: 'builtin.flow', config: { flowId: 'child' } }]);
+        const spec = await flowToDag(parent, undefined, 'session', async () => child, [], undefined, false, 'run');
+        expect(spec.nodes.find(node => node.id === 'child/inherited')?.config).toMatchObject({ connectionId: 'run' });
+        expect(spec.nodes.find(node => node.id === 'child/explicit')?.config).toMatchObject({ connectionId: 'conn-pro' });
+        expect(spec.nodeConnections?.['child/inherited']).toMatchObject({ runConnectionId: 'run' });
+    });
+});

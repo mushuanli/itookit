@@ -113,12 +113,12 @@ export interface ExecutionOverrides {
     executionMode?: import('@itookit/llm-common').ChatExecutionMode;
     /**
      * 覆盖使用的 LLM 连接 ID（替代 modelId）。
-     * Overrides the Agent definition connection.
+     * Explicit connection for this execution; otherwise use Session/global defaults.
      */
     connectionId?: string;
     /**
      * 模型层级偏好（与 connectionId 配合使用）。
-     * Overrides the Agent definition model tier.
+     * Model tier within the selected connection.
      */
     modelTier?: ModelTier;
     /**
@@ -403,6 +403,7 @@ export interface ExecutionTask {
     abortController: AbortController;
     /** Context/definition pointers frozen before the task enters the queue. */
     frozen?: {
+        config?: ExecutorConfig;
         branchRef: string;
         branchHead: string | null;
         contextProfile?: { id: string; revision: number };

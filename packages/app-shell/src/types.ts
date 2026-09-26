@@ -1,5 +1,5 @@
 import type { EditorFileType as FileTypeDefinition, EditorResolver as CustomEditorResolver } from './browser/types';
-import type {NavigationRequest, ICommandBus, ILLMService} from '@itookit/common';
+import type {NavigationRequest, ICommandBus} from '@itookit/common';
 import type { ApplicationRuntime } from '@itookit/app-core';
 import type { FileCreationConfig, EditorFactory, EditorOptions, ContextMenuConfig } from '@itookit/ui-common';
 import type { IStorageBackend, IVFSManager, MountOptions, IFileSystem } from '@itookit/vfs-core';
@@ -69,7 +69,7 @@ export interface AdditionalMount {
 
 export interface ChatEditorDeps {
     sessionRepository: ISessionRepository;
-    llmService?: ILLMService;
+    ocr?: import('@itookit/ui-common').OcrControls;
     commandBus?: ICommandBus;
     kernel?: Kernel;
     privilegedCommands?: IPrivilegedCommandService;

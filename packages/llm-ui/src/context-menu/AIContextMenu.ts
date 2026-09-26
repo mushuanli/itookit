@@ -119,7 +119,7 @@ async function showAgentDialog(
         icon: '🤖',
         type: 'agent',
         description: '系统默认 AI 助手',
-        config: { connectionId: '', modelName: '' },
+        config: {},
     };
     const allAgents = [DEFAULT_AGENT, ...agents.filter(a => a.id !== 'default')];
 

@@ -28,8 +28,11 @@ export async function flowToDag(
     compositeStack: string[] = [],
     dependencyLocks = flow.dependencyLocks,
     isolated = false,
+    runConnectionId?: string,
 ): Promise<DagRunSpec> {
     if (compositeStack.length > 32) throw new Error('Flow nesting exceeds 32 calls');
+    if (runConnectionId) flow = { ...flow, defaults: { ...(isRecord(flow.defaults) ? flow.defaults : {}),
+        connectionId: undefined, modelName: undefined } as FlowRevision['defaults'] };
     flow = compileReferenceGraph(withFlowReturns(compileControlGraph(compileDispatchGraph(flow))));
     const nodes = await Promise.all(flow.nodes.map(async node => {
         if (node.plugin === 'builtin.flow' && node.pluginVersion === '2.0.0') return {
@@ -40,7 +43,7 @@ export async function flowToDag(
         if (isolated) node = { ...node, config: { ...(defaults ? mergeAgentConfig(defaults, node.config) : isRecord(node.config) ? node.config : {}), invocationContext: 'isolated' } as FlowNodeDefinition['config'] };
         const patch = (await bind?.(node, defaults as FlowNodeDefinition['config'])) ?? {};
         const config = cloneJson((patch.config ?? (defaults && !isolated ? mergeAgentConfig(defaults, node.config) : node.config)) as FlowNodeDefinition['config']);
-        resolveNodeConnection(config, flow.connections, flow.defaultConnection, fallbackConnectionId);
+        resolveNodeConnection(config, flow.connections, flow.defaultConnection, fallbackConnectionId, runConnectionId);
         return {
             assign: structuredClone(node.assign),
             id: String(node.id),
@@ -68,7 +71,7 @@ export async function flowToDag(
         nodes,
         nodeDefaults: Object.fromEntries(nodes.map(node => [node.id, cloneJson(flowAgentDefaults(flow))])),
         nodeConnections: Object.fromEntries(nodes.map(node => [node.id, cloneJson({
-            connections: flow.connections, defaultConnection: flow.defaultConnection, fallbackConnectionId,
+            connections: flow.connections, defaultConnection: flow.defaultConnection, fallbackConnectionId, runConnectionId,
         })])),
         edges: flow.edges.map(edge => ({
             id: String(edge.id),
@@ -87,7 +90,7 @@ export async function flowToDag(
             maxTokens: flow.runPolicy.maxTokens,
         } : {}),
     };
-    return expandCompositeNodes(base, bind, fallbackConnectionId, resolveComposite, compositeStack, dependencyLocks, isolated);
+    return expandCompositeNodes(base, bind, fallbackConnectionId, resolveComposite, compositeStack, dependencyLocks, isolated, runConnectionId);
 }
 
 async function expandCompositeNodes(
@@ -98,6 +101,7 @@ async function expandCompositeNodes(
     compositeStack: string[],
     dependencyLocks: FlowRevision['dependencyLocks'],
     isolated: boolean,
+    runConnectionId?: string,
 ): Promise<DagRunSpec> {
     const composites = spec.nodes.filter(node => node.plugin === 'builtin.flow');
     if (!composites.length) return spec;
@@ -130,7 +134,7 @@ async function expandCompositeNodes(
             && Array.isArray(node.config.members) && node.config.members.includes(composite.id))) {
             throw new Error(`Flow call ${composite.id}: taskGroup cannot limit a whole function; configure concurrency on the parent Run`);
         }
-        const child = await flowToDag(flow, bind, fallbackConnectionId, resolveComposite, [...compositeStack, reference], lock?.children ?? flow.dependencyLocks, callable || isolated);
+        const child = await flowToDag(flow, bind, fallbackConnectionId, resolveComposite, [...compositeStack, reference], lock?.children ?? flow.dependencyLocks, callable || isolated, runConnectionId);
         const entry = callable ? callEntry(composite) : undefined;
         if (entry && spec.nodes.some(node => node.id === entry.id || node.id.startsWith(`${composite.id}/`))) throw new Error(`Flow call namespace collision: ${composite.id}`);
         if (callable) assertCallable(flow, child);

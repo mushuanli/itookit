@@ -145,58 +145,23 @@ export class AgentResolver {
 
     /** Build ExecutorConfig from an AgentDefinition. */
     private async buildConfig(agentDef: import('@itookit/common').AgentDefinition): Promise<ExecutorConfig> {
-        const connId = agentDef.modelPolicy?.connectionId ?? agentDef.config.connectionId;
-        log.debug('buildConfig resolving agent', {
-            agentId: agentDef.id,
-            agentName: agentDef.name,
-            modelPolicyConnId: agentDef.modelPolicy?.connectionId,
-            configConnId: agentDef.config.connectionId,
-            resolvedConnId: connId,
-        });
-        const connMeta = await this.agentService.getConnection(connId);
-
-        if (!connMeta) {
-            throw new ConversationError(
-                ConversationErrorCode.AGENT_NOT_FOUND,
-                `Connection '${connId}' for agent '${agentDef.name}' not found.`,
-            );
-        }
-
-        const tier = agentDef.modelPolicy?.modelTier ?? agentDef.config.modelTier ?? 'optimal';
-        const modelId = agentDef.modelPolicy?.modelName
-            ?? agentDef.config.modelName
-            ?? resolveModelForTier(connMeta, tier)
-            ?? '';
-
-        const { enableThinking, reasoningEffort } =
-            this.resolveThinkingConfig(connMeta, tier, modelId);
-
-        const webSearchMode = this.resolveWebSearch(connMeta);
-
-        // Resolve system prompt: prefer a shared System Prompt library entry
-        // (systemPromptId) over the inline config.systemPrompt.
-        let systemPromptSegments: string[] = [];
+        const systemPromptSegments: string[] = [];
         if (agentDef.config.systemPromptId) {
-            const sp = await this.agentService.getSystemPrompt(agentDef.config.systemPromptId);
-            if (sp?.content?.length) systemPromptSegments = [...sp.content];
+            const prompt = await this.agentService.getSystemPrompt(agentDef.config.systemPromptId);
+            if (!prompt) throw new ConversationError(ConversationErrorCode.AGENT_NOT_FOUND,
+                `System prompt not found: ${agentDef.config.systemPromptId}`);
+            systemPromptSegments.push(...prompt.content);
         }
-        if (!systemPromptSegments.length) {
-            systemPromptSegments = [agentDef.systemPrompt ?? agentDef.config.systemPrompt]
-                .filter((s): s is string => Boolean(s));
-        }
+        const additional = agentDef.systemPrompt ?? agentDef.config.systemPrompt;
+        if (additional) systemPromptSegments.push(additional);
 
         return {
             id: agentDef.id,
             name: agentDef.name,
             type: 'agent',
-            connectionId: connId,
-            model: modelId,
-            enableThinking: agentDef.modelPolicy?.thinking ?? enableThinking,
-            reasoningEffort: agentDef.modelPolicy?.reasoningEffort ?? reasoningEffort,
-            webSearchMode,
             systemPrompt: systemPromptSegments,
             icon: agentDef.icon,
-            temperature: agentDef.modelPolicy?.temperature ?? agentDef.config.temperature,
+            temperature: agentDef.config.temperature,
             agentVersion: agentDef.version ?? await this.hashDefinition(agentDef),
             capabilityPolicy: structuredClone(agentDef.capabilityPolicy ?? (agentDef.config.mcpServers?.length
                 ? { mcpProfileIds: [...agentDef.config.mcpServers] } : undefined)),
@@ -248,13 +213,7 @@ export class AgentResolver {
 
     async getModelsForAgent(agentId: string): Promise<ModelInfo[]> {
         try {
-            const agentConfig = await this.agentService.getAgentConfig(agentId);
-            const connectionId = agentConfig?.config.connectionId;
-
-            const connMeta = connectionId
-                ? await this.agentService.getConnection(connectionId)
-                : await this.agentService.getDefaultConnection();
-
+            const connMeta = await this.agentService.getDefaultConnection();
             // Model catalog is now on the Provider, not ConnectionMeta.
             // Return the resolved optimal model as the only option.
             if (!connMeta?.model) return [];
@@ -306,38 +265,20 @@ export class AgentResolver {
     async reResolveModel(config: ExecutorConfig, overrides: {
         connectionId?: string;
         modelTier?: ModelTier;
+        allowUnconfigured?: boolean;
     }): Promise<ExecutorConfig> {
-        const newConfig = { ...config };
-        const connId = overrides.connectionId || config.connectionId;
-        if (!connId) return newConfig;
-
-        try {
-            const connMeta = await this.agentService.getConnection(connId);
-            if (connMeta) {
-                const tier = overrides.modelTier ?? 'optimal';
-                newConfig.model = resolveModelForTier(connMeta, tier);
-                if (overrides.connectionId) newConfig.connectionId = overrides.connectionId;
-
-                // Sync thinking support from the newly resolved model
-                const { enableThinking, reasoningEffort } =
-                    this.resolveThinkingConfig(connMeta, tier, newConfig.model ?? '');
-                newConfig.enableThinking = enableThinking;
-                newConfig.reasoningEffort = reasoningEffort;
-
-                log.info('reResolveModel: model resolved for override connection', {
-                    connectionId: connId,
-                    model: newConfig.model,
-                    tier,
-                });
-            } else {
-                log.warn('reResolveModel: override connection not found, keeping original', {
-                    connectionId: connId,
-                });
-            }
-        } catch (e) {
-            log.error('Failed to re-resolve model', { connectionId: connId, error: e });
-        }
-        return newConfig;
+        const connId = overrides.connectionId ?? config.connectionId;
+        const connMeta = connId ? await this.agentService.getConnection(connId) : await this.agentService.getDefaultConnection();
+        if (!connMeta && !connId && overrides.allowUnconfigured) return config;
+        if (!connMeta) throw new Error(connId ? `Connection not found: ${connId}` : 'No default connection configured');
+        const provider = this.agentService.getProvider(connMeta.providerId);
+        if (connMeta.enabled === false || provider?.enabled === false) throw new Error(`Connection is disabled: ${connMeta.id}`);
+        const tier = overrides.modelTier ?? 'optimal';
+        const model = resolveModelForTier(connMeta, tier);
+        if (!model) throw new Error(`Connection has no model: ${connMeta.id}`);
+        return { ...config, connectionId: connMeta.id, model,
+            temperature: config.temperature ?? connMeta.temperature,
+            ...this.resolveThinkingConfig(connMeta, tier, model), webSearchMode: this.resolveWebSearch(connMeta) };
     }
 
     /** Derive enableThinking and reasoningEffort from connection metadata + model supportsThinking flag. */
@@ -379,28 +320,6 @@ export class AgentResolver {
     }
 
     private async getFallbackConfig(): Promise<ExecutorConfig> {
-        const connMeta = await this.agentService.getDefaultConnection();
-
-        if (!connMeta) {
-            log.error('CRITICAL: No connections available');
-            console.error('[AgentResolver] No LLM connection available — fallback config has no model or agentVersion');
-            return { id: 'default', name: 'Error: No Connection', type: 'agent', model: '' } as ExecutorConfig;
-        }
-
-        const modelId = resolveModelForTier(connMeta, 'optimal') || '';
-
-        log.info('Using fallback configuration', {
-            connectionId: connMeta.id, connectionName: connMeta.name, modelId,
-        });
-        console.warn(
-            `[AgentResolver] Fallback config has no agentVersion (connection='${connMeta.id}', model='${modelId}'). `
-            + 'Sends that require a frozen agent identity will fail with "Agent version is required: default".',
-        );
-
-        return {
-            id: 'default', name: 'Default Assistant', type: 'agent',
-            connectionId: connMeta.id,
-            model: modelId,
-        } as ExecutorConfig;
+        return { id: 'default', name: 'Unknown Agent', type: 'agent' };
     }
 }

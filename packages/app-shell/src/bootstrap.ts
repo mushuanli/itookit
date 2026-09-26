@@ -1,6 +1,8 @@
+import { createOcrControls } from './configuration/ocr-controls';
+import { OcrService } from '@itookit/app-core';
 import { ConfigurationDeletionDialog } from './configuration/delete-dialog';
 import { createToolboxModule } from './toolbox';
-import { legacyToolboxRoute, toolboxSettingsRoute } from './toolbox/routes';
+import { TOOLBOX_KINDS, legacyToolboxRoute, toolboxSettingsRoute } from './toolbox/routes';
 import { createProjectModule } from './projects';
 import { setupHitlVfsBridge } from './workspaces/hitl-bridge';
 import { createWorkspaceModule, restoreWorkspaceResource, type WorkspaceHandle } from './workspaces/module';
@@ -84,7 +86,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     workspaces.forEach(registerWorkspaceRoute);
     const toolboxId = workspaces.find(ws => ws.type === 'toolbox')?.elementId;
-    if (toolboxId) for (const slug of ['agents', 'skills', 'flows', 'mcp', 'tools', 'providers', 'connections']) routeMap[slug] = toolboxId;
+    if (toolboxId) for (const slug of TOOLBOX_KINDS) routeMap[slug] = toolboxId;
 
     const resolvedDefault = defaultSlug ?? workspaces[0]?.slug ?? '';
 
@@ -102,34 +104,24 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         fs: workspace.files?.fs ?? await vfs.openFileSystem(workspaceRoot(workspace.workspaceName)),
         syncEnabled: workspace.syncEnabled && !workspace.isSystem,
     })));
-    const settingsModule = await traceBoot('createSettingsModule', () => createSettingsModule(vfs, settingsSources, { excludedPages: toolboxId ? ['providers', 'connections', 'mcp-servers'] : [] }));
+    const settingsModule = await traceBoot('createSettingsModule', () => createSettingsModule(vfs, settingsSources, { excludedPages: toolboxId ? ['providers', 'connections', 'mcp-servers', 'system-prompts'] : [] }));
     cleanupFns.push(() => settingsModule.service.dispose());
 
-    const deletionDialog = new ConfigurationDeletionDialog(runtime.configuration);
+    const ocrService = new OcrService(await vfs.openFileSystem('/etc'), agentService, kernel.llmService);
+    await ocrService.init();
+    const ocr = createOcrControls(ocrService, agentService, request => handleNavigationRequest(request));
+    const deletionDialog = new ConfigurationDeletionDialog(runtime.configuration, undefined, ocr.deletionImpact);
     const settingsFactory = createSettingsFactory({
         settingsService: settingsModule.service, agentService, connectionService: llmDriver, llmUiEditors: options.ui.llmUiEditors,
         connectBrowser: (browser, fs, container, factory) => connectEditorLifecycle(browser, fs, container, factory, { readOnly: true }),
         restoreFlows: options.ui.restoreFlowLibrary ? () => options.ui.restoreFlowLibrary!(commandBus) : undefined,
         requestDelete: targets => deletionDialog.request(targets),
     });
-    // Pass llmService only when the vision connection is actually configured —
-    // this is the single place that knows both the kernel and the connection list.
-    const connections = await agentService.getConnections();
-    const visionConnExists = connections.some(c => c.id === 'conn-volcengine-vision');
     const privilegedCommands = new PrivilegedCommandService(kernel.kernel, agentService);
     const sessionSkills = createSessionSkillControls(kernel.kernel, kernel.sessions);
-    const llmFactory = options.ui.createChatEditor(
-        agentService,
-        visionConnExists
-            ? {
-                sessionRepository,
-                llmService: kernel.llmService,
-                commandBus,
-                kernel: kernel.kernel,
-                privilegedCommands, sessionSkills,
-            }
-            : { sessionRepository, commandBus, kernel: kernel.kernel, privilegedCommands, sessionSkills },
-    );
+    const llmFactory = options.ui.createChatEditor(agentService, {
+        sessionRepository, ocr, commandBus, kernel: kernel.kernel, privilegedCommands, sessionSkills,
+    });
     const agentFactory = options.ui.createAgentEditor(agentService);
 
     // Skills workspace: VFSUIShell list (SkillsEngine) + form editor (SkillSettingsEditor)
@@ -263,7 +255,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         if (!files) throw new Error(`Workspace files not configured: ${elementId}`);
 
         if (strategyType === 'toolbox') {
-            const module = await createToolboxModule({ runtime, ui: options.ui, sidebar: sidebarEl, editor: editorEl,
+            const module = await createToolboxModule({ runtime, ocr, ui: options.ui, sidebar: sidebarEl, editor: editorEl,
                 skills: skillsEngine, factories: { agents: agentFactory, skills: skillsFactory, flows: flowsFactory },
                 navigate: handleNavigationRequest, selected: path => updateHistory(elementId, path, 'replace') });
             const toolbox = module.workbench;

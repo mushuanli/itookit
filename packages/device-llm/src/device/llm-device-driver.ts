@@ -319,6 +319,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         const updatedConns = await this.connectionManager.ensureDefaultsWith(preConnections);
         _log('ensureDefaults');
         this.connectionManager.setConnections(updatedConns);
+        await this.connectionManager.loadSettings();
         _log('reload');
 
         // Cache MCP & skills from pre-loaded data
@@ -406,7 +407,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         const resourceId   = (ctx.metadata?.resourceId   ?? options?.resourceId)   as string | undefined;
 
         if (resourceType === 'connection') {
-            return this.openConnectionSession(resourceId ?? 'default', options);
+            return this.openConnectionSession(resourceId ?? this.connectionManager.getDefaultConnection()?.id, options);
         }
         if (resourceType === 'mcp') {
             if (!resourceId) throw new Error('LLMDeviceDriver: resourceId required for MCP session');
@@ -419,7 +420,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
         // Legacy: openDevice('/dev/llm', { connectionId: 'xxx' })
         const opts = options as LLMDeviceOpenOptions | undefined;
-        return this.openConnectionSession(opts?.connectionId ?? 'default', options);
+        return this.openConnectionSession(opts?.connectionId ?? this.connectionManager.getDefaultConnection()?.id, options);
     }
 
     async close(ctx: DeviceContext): Promise<void> {
@@ -705,6 +706,9 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     async getDefaultConnection(): Promise<ConnectionMeta | null> {
         return this.connectionManager.getDefaultConnection();
     }
+    async setDefaultConnection(id: string | null): Promise<void> {
+        await this.connectionManager.setDefaultConnection(id);
+    }
 
     async getFullConnection(id: string): Promise<LLMConnection | null> {
         return this.connectionManager.getFullConnection(id);
@@ -856,13 +860,11 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     // ─── Session management ───────────────────────────────────────────────────
 
     private async openConnectionSession(
-        connectionId: string,
+        connectionId: string | undefined,
         options?: Record<string, unknown>,
     ): Promise<string> {
         const opts = options as LLMDeviceOpenOptions | undefined;
-        const conn = this.connectionManager.findRawConnection(connectionId)
-            ?? this.connectionManager.findRawConnection('default')
-            ?? this.connectionManager.getRawConnections()[0];
+        const conn = connectionId ? this.connectionManager.findRawConnection(connectionId) : undefined;
 
         if (!conn) {
             throw new Error(`LLMDeviceDriver: no connection available for id '${connectionId}'`);

@@ -2,7 +2,7 @@ import { randomUUID, t } from '@itookit/common';
 import type { IFileSystem } from '@itookit/vfs-core';
 import { toolboxKind, type ToolboxKind } from './toolbox-identity';
 
-export const DRAWER_KINDS = ['agents', 'skills', 'flows', 'mcp', 'tools'] as const;
+export const DRAWER_KINDS = ['agents', 'flows', 'skills', 'prompts', 'tools', 'mcp'] as const;
 export type DrawerKind = typeof DRAWER_KINDS[number];
 export interface Drawer { id: string; kind: DrawerKind; name: string; paths: string[]; icon?: string }
 interface State { version: 1; names: Record<string, { kind: DrawerKind; name: string }>; assignments: Record<string, string>; removed: string[] }

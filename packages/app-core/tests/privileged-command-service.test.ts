@@ -61,9 +61,9 @@ function agentService(): IAgentConfigService {
     return {
         getAgentConfig: vi.fn(async () => ({
             id: 'agent-1', version: 'v1', name: 'Agent', type: 'agent',
-            config: { connectionId: 'connection-1', modelName: 'model-1' },
+            config: {},
         })),
-        getConnection: vi.fn(async () => ({
+        getDefaultConnection: vi.fn(async () => ({
             id: 'connection-1', name: 'Connection', providerId: '', model: 'model-1',
             hasApiKey: true, enabled: true,
         })),

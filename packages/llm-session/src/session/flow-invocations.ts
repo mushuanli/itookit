@@ -3,9 +3,10 @@ import type { Kernel, TaskRecord, SessionHandle } from '@itookit/durable-kernel'
 import { FlowCommand, FlowDefinitionStore, validateFlowParameters } from '@itookit/llm-flow';
 
 export const FlowInvocationCommand = { Invoke: 'session.flow.invoke', List: 'session.flow.invocations' } as const;
-export interface FlowInvocationInput { sessionId: string; requestId: string; flowId: string; revision: number; parameters: Record<string, JsonValue> }
+export interface FlowInvocationInput { connectionId?: string; sessionId: string; requestId: string; flowId: string; revision: number; parameters: Record<string, JsonValue> }
 export interface FlowInvocationRecord extends FlowInvocationInput {
     flow: FlowRevision;
+    resolvedConnectionId?: string | null;
     createdAt: number;
     rootTaskId?: string;
     error?: string;
@@ -19,7 +20,8 @@ export class FlowInvocationService {
     private pending = new Map<string, Promise<FlowInvocationRecord>>();
     constructor(private kernel: Kernel, private definitions: FlowDefinitionStore, private commands: ICommandBus,
         private canWrite?: (id: string) => Promise<boolean>,
-        private source?: (id: string) => Promise<{ branch: string; head: string | null }>) {}
+        private source?: (id: string) => Promise<{ branch: string; head: string | null }>,
+        private resolveConnection?: (sessionId: string, connectionId?: string) => Promise<string | undefined>) {}
 
     register(): void {
         this.commands.register(FlowInvocationCommand.Invoke, args => this.invoke(args as FlowInvocationInput));
@@ -75,6 +77,7 @@ export class FlowInvocationService {
             await this.assertWritable(input.sessionId);
             const { taskId } = await this.commands.execute<{ taskId: string }>(FlowCommand.RunStart, {
                 sessionId: input.sessionId, flow: record.flow, parameters: record.parameters, invocation,
+                connectionId: record.connectionId, fallbackConnectionId: record.resolvedConnectionId,
             });
             record = { ...record, rootTaskId: taskId, error: undefined };
         } catch (error) {
@@ -98,7 +101,7 @@ export class FlowInvocationService {
             const issues = validateFlowParameters(flow.parameters, input.parameters);
             for (const name of Object.keys(input.parameters)) if (!(flow.parameters ?? []).some(field => field.name === name)) throw new Error(`Unknown Flow parameter: ${name}`);
             if (issues.length) throw new Error(issues.map(issue => issue.message).join('; '));
-            record = { ...input, flow, createdAt: Date.now(), ...await this.source?.(input.sessionId) };
+            record = { ...input, resolvedConnectionId: await this.resolveConnection?.(input.sessionId, input.connectionId) ?? null, flow, createdAt: Date.now(), ...await this.source?.(input.sessionId) };
             await session.setShared(key, json(record), { expectedVersion: null });
         }
         return record;
@@ -110,7 +113,7 @@ export class FlowInvocationService {
     }
 
     private assertSame(record: FlowInvocationRecord, input: FlowInvocationInput): void {
-        if (record.flowId !== input.flowId || record.revision !== input.revision || canonical(record.parameters) !== canonical(input.parameters)) {
+        if (record.connectionId !== input.connectionId || record.flowId !== input.flowId || record.revision !== input.revision || canonical(record.parameters) !== canonical(input.parameters)) {
             throw new Error('Flow invocation request id was already used with different arguments');
         }
     }

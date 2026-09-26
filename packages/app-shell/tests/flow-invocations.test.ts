@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Kernel } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
-import { CommandBus, FlowEngine, FlowDefinitionStore, DagCommandService, FlowInvocationService, FlowCommand, createBuiltinDagPluginRegistry, registerDurablePrograms } from '@itookit/llm-session';
+import { CommandBus, FlowEngine, FlowDefinitionStore, DagCommandService, FlowInvocationService, FlowCommand, SessionCommand, createBuiltinDagPluginRegistry, registerDurablePrograms } from '@itookit/llm-session';
 import { invokeFlowText } from '../../llm-ui/src/flows/invoke-flow';
 import { InvocationPanel } from '../../llm-ui/src/flows/InvocationPanel';
 import { SlashCommandPlugin } from '../../llm-ui/src/components/input/plugins/SlashCommandPlugin';
@@ -25,7 +25,9 @@ beforeEach(async () => {
     await store.saveDraft({ ...draft, parameters: [{ name: 'text', type: 'string', required: true }], nodes: [
         { id: 'ask' as never, name: 'Ask', plugin: 'builtin.human', pluginVersion: '1.0.0', inputs: {}, config: { requestId: 'same', prompt: '${param.text}' } },
     ] }, draft.draftVersion);
-    commands = new CommandBus(); new DagCommandService({ kernel, plugins, flowStore: store }).register(commands);
+    commands = new CommandBus();
+    commands.register(SessionCommand.GetConnections, async () => ({ connections: [] }));
+    new DagCommandService({ kernel, plugins, flowStore: store }).register(commands);
     new FlowInvocationService(kernel, store, commands).register();
 });
 afterEach(async () => {

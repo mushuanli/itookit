@@ -27,6 +27,7 @@ import { readFlowTaskTranscript, type FlowTranscriptQuery } from './transcript';
 import { DurableFlowExecutor, type FlowExecutionHandle } from './executor';
 
 export interface DagCommandServiceOptions {
+    resolveConnection?(sessionId: string, connectionId?: string): Promise<string | undefined>;
     resolveSkillContexts?: import('./executor').DurableFlowExecutorOptions['resolveSkillContexts'];
     canWriteSession?(sessionId: string): Promise<boolean>;
     workspaceManager?: import('./executor').FlowWorkspaceManager;
@@ -72,8 +73,8 @@ export class DagCommandService {
         });
         bus.register(FlowCommand.RunList, async args => this.listRuns((args as { sessionId?: string } | undefined)?.sessionId));
         bus.register(FlowCommand.RunStart, async args => {
-            const input = args as { sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue>; goal?: FlowRunGoal; invocation?: import('@itookit/common').DagRunSpec['invocation'] };
-            return this.start(input.sessionId, input.flow, input.parameters, input.goal, input.invocation);
+            const input = args as { connectionId?: string; fallbackConnectionId?: string | null; sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue>; goal?: FlowRunGoal; invocation?: import('@itookit/common').DagRunSpec['invocation'] };
+            return this.start(input.sessionId, input.flow, input.parameters, input.goal, input.invocation, input.connectionId, input.fallbackConnectionId);
         });
         bus.register(FlowCommand.RunGet, async args => {
             const input = args as { taskId: string; sessionId?: string };
@@ -172,6 +173,8 @@ export class DagCommandService {
         parameters?: Record<string, JsonValue>,
         goal?: FlowRunGoal,
         invocation?: import('@itookit/common').DagRunSpec['invocation'],
+        connectionId?: string,
+        fallbackConnectionId?: string | null,
     ) {
         if (!sessionId) throw new Error('DAG run requires sessionId');
         if (this.options.canWriteSession && !await this.options.canWriteSession(sessionId)) throw new Error('Session is read-only on this host');
@@ -180,8 +183,10 @@ export class DagCommandService {
             ...validateFlowParameters(flow.parameters, parameters),
         ];
         if (hasValidationErrors(issues)) throw new Error(issues.map(issue => issue.message).join('; '));
-        const compiled = await flowToDag(flow, this.options.bindNode ? (node, defaults) => this.options.bindNode!(sessionId, node, defaults) : undefined, undefined, (id, revision) =>
-            this.options.flowStore.loadRevision(id, revision));
+        const resolved = fallbackConnectionId !== undefined ? fallbackConnectionId ?? undefined
+            : await this.options.resolveConnection?.(sessionId, connectionId);
+        const compiled = await flowToDag(flow, this.options.bindNode ? (node, defaults) => this.options.bindNode!(sessionId, node, defaults) : undefined, resolved, (id, revision) =>
+            this.options.flowStore.loadRevision(id, revision), [], flow.dependencyLocks, false, connectionId);
         const sessionContext = await this.options.resolveSessionContext?.(sessionId, '');
         if (this.options.canWriteSession && !await this.options.canWriteSession(sessionId)) throw new Error('Session is read-only on this host');
         const executor = new DurableFlowExecutor({ ...this.options, sessionContext,

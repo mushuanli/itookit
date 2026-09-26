@@ -17,7 +17,7 @@ export interface AttachmentManagerOptions {
     textarea: HTMLTextAreaElement;
     inputWrapper: HTMLElement;
     attachBtn: HTMLButtonElement;
-    onOcrImage?: (image: Blob) => Promise<string>;
+    ocr?: import('@itookit/ui-common').OcrControls;
     onRequestFiles?: (query: string) => Promise<any[]>;
     getLoading: () => boolean;
     getFiles: () => File[];
@@ -28,11 +28,12 @@ export interface AttachmentManagerOptions {
 export class AttachmentManager {
     private ocrPanel: OcrReviewPanel | null = null;
     private addPopup: PopupPanel | null = null;
+    private unsubscribe?: () => void;
+    private revision = 0;
+    private activeOcr?: AbortController;
 
     constructor(private opts: AttachmentManagerOptions) {
-        if (opts.onOcrImage) {
-            // OcrReviewPanel is created lazily; imported at top
-        }
+        this.unsubscribe = opts.ocr?.subscribe(() => this.renderAttachments());
     }
 
     // ── Paste ─────────────────────────────────────────────────────────────
@@ -66,14 +67,22 @@ export class AttachmentManager {
     }
 
     renderAttachments(): void {
+        const revision = ++this.revision;
         const files = this.opts.getFiles();
         if (files.length === 0) {
             this.opts.attachmentContainer.style.display = 'none';
             return;
         }
         this.opts.attachmentContainer.style.display = 'flex';
-        const canOcr = !!this.opts.onOcrImage;
+        const canOcr = !!this.opts.ocr;
         this.opts.attachmentContainer.innerHTML = ChatInputTemplates.renderAttachments(files, canOcr);
+        const button = this.opts.attachmentContainer.querySelector<HTMLButtonElement>('[data-ocr-configure]');
+        if (button && this.opts.ocr) {
+            button.onclick = () => { void this.opts.ocr!.configure().catch(error => { button.title = String(error); }); };
+            void this.opts.ocr.label().then(label => {
+                if (revision === this.revision) { button.textContent = t('ocr.current', { label }); button.title = t('ocr.configure') + ' · ' + label; }
+            }).catch(error => { if (revision === this.revision) button.title = String(error); });
+        }
     }
 
     // ── Drag events ───────────────────────────────────────────────────────
@@ -227,136 +236,89 @@ export class AttachmentManager {
 
     // ── OCR (image → text) ────────────────────────────────────────────────
 
-    /**
-     * Batch OCR: process all image attachments sequentially without review panel.
-     * Results are appended to the textarea separated by newlines.
-     * Failures are skipped silently; a status message is shown via the OCR panel.
-     */
+    /** Process sequentially; preserve completed text and stop on the first failure. */
     async ocrAllImages(): Promise<void> {
-        if (!this.opts.onOcrImage) return;
-        const files = this.opts.getFiles();
-        const imageEntries = files
-            .map((f, i) => ({ file: f, index: i }))
-            .filter(e => e.file.type.startsWith('image/'));
-        if (imageEntries.length < 2) return;
-
-        if (!this.ocrPanel) {
-            this.ocrPanel = new OcrReviewPanel(this.opts.container);
-        }
-        const panel = this.ocrPanel;
-        const ocr = this.opts.onOcrImage;
-        let cancelled = false;
-
-        panel.showProcessing(
-            t('chatInput.ocr.all'),
-            () => { cancelled = true; panel.hide(); },
-        );
-
-        const results: string[] = [];
-        const removeIndices: number[] = [];
-        let done = 0;
-
-        for (const { file, index } of imageEntries) {
-            if (cancelled) return;
+        if (!this.opts.ocr) return;
+        const files = this.opts.getFiles().filter(file => file.type.startsWith('image/'));
+        if (files.length < 2) return;
+        const { panel, signal } = this.startOcr(t('chatInput.ocr.all'));
+        const results: string[] = [], processed = new Set<File>();
+        for (const file of files) {
+            if (signal.aborted) return;
             try {
-                const downscaled = await downscaleImageForOcr(file);
-                const text = (await ocr(downscaled)).trim();
-                if (text) {
-                    results.push(text);
-                    removeIndices.push(index);
-                }
-            } catch {
-                // skip failed images silently
+                const text = await this.recognize(file, signal);
+                if (signal.aborted) return;
+                results.push(text); processed.add(file);
+            } catch (error) {
+                if (signal.aborted) return;
+                this.showOcrError(panel, file, error); break;
             }
-            done++;
-            // Update progress label between images
-            if (!cancelled) {
-                panel.showProcessing(
-                    t('chatInput.ocr.all.done')
-                        .replace('{done}', String(done))
-                        .replace('{total}', String(imageEntries.length)),
-                    () => { cancelled = true; panel.hide(); },
-                );
-            }
+            if (processed.size === files.length) panel.hide();
+            else panel.showProcessing(t('chatInput.ocr.all.done')
+                .replace('{done}', String(processed.size)).replace('{total}', String(files.length)), () => this.cancelOcr());
         }
-
-        if (cancelled) return;
-        panel.hide();
-
-        if (results.length === 0) return;
-
-        // Insert all results at cursor, joined by blank lines
-        const ta = this.opts.textarea;
-        const pos = ta.selectionStart;
-        const combined = results.join('\n\n');
-        ta.value = ta.value.slice(0, pos) + combined + ta.value.slice(pos);
-        ta.selectionStart = ta.selectionEnd = pos + combined.length;
-
-        // Remove processed images (high → low index to preserve positions)
-        const remaining = this.opts.getFiles().filter((_, i) => !removeIndices.includes(i));
-        this.opts.setFiles(remaining);
-        this.renderAttachments();
-        this.opts.notifyConfigChange();
-        ta.focus();
+        if (!results.length || signal.aborted) return;
+        this.insertOcrText(results.join('\n\n'));
+        this.opts.setFiles(this.opts.getFiles().filter(file => !processed.has(file)));
+        this.renderAttachments(); this.opts.notifyConfigChange();
     }
 
     async ocrImage(file: File, index: number): Promise<void> {
-        if (!this.opts.onOcrImage) return;
-        // Lazy-create OcrReviewPanel
-        if (!this.ocrPanel) {
-            this.ocrPanel = new OcrReviewPanel(this.opts.container);
-        }
-        const panel = this.ocrPanel!;
-        const ocr = this.opts.onOcrImage;
-
-        let cancelled = false;
-        panel.showProcessing(file.name, () => { cancelled = true; panel.hide(); });
-
+        if (!this.opts.ocr || index < 0) return;
+        const { panel, signal } = this.startOcr(file.name);
         try {
-            const downscaled = await downscaleImageForOcr(file);
-            const markdown = (await ocr(downscaled)).trim();
-            if (cancelled) return;
-
-            if (!markdown) {
-                panel.showError(t('chatInput.ocr.empty'),
-                    () => this.ocrImage(file, index), () => panel.hide());
-                return;
-            }
-
+            const markdown = await this.recognize(file, signal);
+            if (signal.aborted) return;
             panel.showReview(file, markdown, {
-                onConfirm: (text) => this.applyOcrResult(text, index, true),
-                onConfirmKeep: (text) => this.applyOcrResult(text, index, false),
-                onRetry: () => this.ocrImage(file, index),
-                onCancel: () => panel.hide(),
+                onConfirm: text => this.applyOcrResult(text, file, true),
+                onConfirmKeep: text => this.applyOcrResult(text, file, false),
+                onRetry: () => { void this.ocrImage(file, this.opts.getFiles().indexOf(file)); },
+                onCancel: () => this.cancelOcr(),
             });
-        } catch (err) {
-            if (cancelled) return;
-            const msg = err instanceof Error ? err.message : String(err);
-            panel.showError(msg, () => this.ocrImage(file, index), () => panel.hide());
+        } catch (error) {
+            if (!signal.aborted) this.showOcrError(panel, file, error);
         }
     }
 
-    private applyOcrResult(text: string, index: number, removeImage: boolean): void {
-        // Insert at cursor
-        const ta = this.opts.textarea;
-        const pos = ta.selectionStart;
+    private startOcr(label: string): { panel: OcrReviewPanel; signal: AbortSignal } {
+        this.activeOcr?.abort(); this.activeOcr = new AbortController();
+        const panel = this.ocrPanel ??= new OcrReviewPanel(this.opts.container);
+        panel.showProcessing(label, () => this.cancelOcr());
+        return { panel, signal: this.activeOcr.signal };
+    }
+    private cancelOcr(): void { this.activeOcr?.abort(); this.ocrPanel?.hide(); }
+    private async recognize(file: File, signal: AbortSignal): Promise<string> {
+        const downscaled = await downscaleImageForOcr(file);
+        signal.throwIfAborted();
+        const text = (await this.opts.ocr!.recognize(downscaled, signal)).trim();
+        if (!text) throw new Error(t('chatInput.ocr.empty'));
+        return text;
+    }
+    private showOcrError(panel: OcrReviewPanel, file: File, error: unknown): void {
+        panel.showError(error instanceof Error ? error.message : String(error),
+            () => { void this.ocrImage(file, this.opts.getFiles().indexOf(file)); }, () => this.cancelOcr());
+    }
+    private insertOcrText(text: string): void {
+        const ta = this.opts.textarea, pos = ta.selectionStart;
         ta.value = ta.value.slice(0, pos) + text + ta.value.slice(pos);
-        ta.selectionStart = ta.selectionEnd = pos + text.length;
+        ta.selectionStart = ta.selectionEnd = pos + text.length; ta.focus();
+    }
 
-        if (removeImage && this.opts.getFiles()[index]) {
-            const files = [...this.opts.getFiles()];
-            files.splice(index, 1);
-            this.opts.setFiles(files);
+    private applyOcrResult(text: string, file: File, removeImage: boolean): void {
+        this.insertOcrText(text);
+
+        if (removeImage) {
+            this.opts.setFiles(this.opts.getFiles().filter(item => item !== file));
             this.renderAttachments();
         }
         this.opts.notifyConfigChange();
         this.ocrPanel?.hide();
-        ta.focus();
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────
 
     destroy(): void {
+        this.revision++; this.activeOcr?.abort(); this.unsubscribe?.();
         this.addPopup?.destroy();
         this.addPopup = null;
         this.ocrPanel?.destroy();

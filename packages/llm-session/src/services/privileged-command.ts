@@ -7,6 +7,7 @@ export interface PlanCommandRequest {
     sessionId: string;
     agentId: string;
     goal: string;
+    connectionId?: string;
 }
 
 export interface ExecCommandRequest {

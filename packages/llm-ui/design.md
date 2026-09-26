@@ -111,7 +111,6 @@ llm-ui/
 │   ├── BranchService.ts              #   分支操作(vcs.branch.*)
 │   ├── NavDataBuilder.ts             #   导航面板数据构建
 │   ├── FileSearchService.ts          #   @mention 文件搜索
-│   ├── OcrService.ts                 #   图片 OCR(一次性 llmService 注入时启用)
 │   └── index.ts
 │
 ├── commands/                         # Layer 3
@@ -1117,7 +1116,7 @@ import { createLLMFactory, createAgentEditorFactory, createSkillsEditorFactory }
 // 会话工作区编辑器(vfs-ui 选中 session 目标时创建)
 const llmFactory = createLLMFactory(agentService, {
     sessionRepository,                   // 必填:ISessionRepository
-    llmService?: llmService,             // 可选:注入后启用 OCR 等工具型调用
+    ocr?: OcrControls,                   // 可选:宿主提供识别、配置与状态订阅
     commandBus?: commandBus,             // initializeConversationSystem 返回
     kernel?: kernel,                     // 可选:附加执行运行(TaskHandle)
     privilegedCommands?: privilegedCommands,

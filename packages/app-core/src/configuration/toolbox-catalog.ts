@@ -1,30 +1,33 @@
 import { createFileSystemSource, MemoryBackend, type FileSystemSourceOwner } from '@itookit/vfs-core';
 import { LLM_PROVIDERS } from '@itookit/device-llm';
-import { ENTITY_ICONS, t, type MCPServer, type IConnectionService, type ToolMeta, type ToolDefinition } from '@itookit/common';
+import { ENTITY_ICONS, t, type SystemPromptDefinition, type MCPServer, type IConnectionService, type ToolMeta, type ToolDefinition } from '@itookit/common';
 
 export interface ToolboxTool { id: string; name: string; description: string; source: string; serverId?: string; enabled: boolean; parameters?: unknown }
 interface Catalog { listTools(): ToolMeta[]; getToolDefinitions(): ToolDefinition[] }
 
-/** A read-only projection of registered tools and discovered MCP capabilities. */
+/** Read-only navigation metadata; configuration remains in its owning services. */
 export class ToolboxInventory {
-    private readonly backends = { mcp: new MemoryBackend(), tools: new MemoryBackend(), providers: new MemoryBackend(), connections: new MemoryBackend() };
-    private owners: Partial<Record<'mcp' | 'tools' | 'providers' | 'connections', FileSystemSourceOwner>> = {};
+    private readonly backends = { mcp: new MemoryBackend(), tools: new MemoryBackend(), providers: new MemoryBackend(), connections: new MemoryBackend(), prompts: new MemoryBackend() };
+    private owners: Partial<Record<'mcp' | 'tools' | 'providers' | 'connections' | 'prompts', FileSystemSourceOwner>> = {};
     readonly providers = new Map<string, { id: string; name: string; icon?: string; enabled: boolean; configured: boolean }>();
     readonly connections = new Map<string, { providerId: string; enabled: boolean }>();
+    defaultConnectionId?: string;
     readonly tools = new Map<string, ToolboxTool>();
-    constructor(private readonly servers: () => Promise<MCPServer[]>, private readonly catalog: Catalog, private readonly models?: IConnectionService) {}
+    constructor(private readonly servers: () => Promise<MCPServer[]>, private readonly catalog: Catalog, private readonly models?: IConnectionService, private readonly prompts?: () => Promise<SystemPromptDefinition[]>) {}
     async init(): Promise<void> {
         try {
-            for (const kind of ['mcp', 'tools', 'providers', 'connections'] as const) this.owners[kind] = await createFileSystemSource({
+            for (const kind of ['mcp', 'tools', 'providers', 'connections', 'prompts'] as const) this.owners[kind] = await createFileSystemSource({
                 backend: this.backends[kind], viewId: 'toolbox:' + kind, access: 'ro' });
             await this.refresh();
         } catch (error) { await this.dispose(); throw error; }
     }
-    get sources() { return { mcp: this.owners.mcp!.fs, tools: this.owners.tools!.fs, providers: this.owners.providers!.fs, connections: this.owners.connections!.fs }; }
+    get sources() { return { prompts: this.owners.prompts!.fs, mcp: this.owners.mcp!.fs, tools: this.owners.tools!.fs, providers: this.owners.providers!.fs, connections: this.owners.connections!.fs }; }
 
     async refresh(): Promise<void> {
         const servers = await this.servers();
         await this.refreshModels();
+        await this.replace('prompts', (await this.prompts?.() ?? []).map(item => ({ id: item.id, name: item.name,
+            description: item.description ?? item.content.join('\n'), source: '', icon: '' })));
         this.tools.clear();
         const definitions = this.catalog.getToolDefinitions();
         for (const meta of this.catalog.listTools()) {
@@ -41,6 +44,7 @@ export class ToolboxInventory {
     private async refreshModels(): Promise<void> {
         const providers = this.models?.getProviders() ?? [];
         const connections = await this.models?.getConnections() ?? [];
+        this.defaultConnectionId = (await this.models?.getDefaultConnection())?.id;
         this.providers.clear(); this.connections.clear();
         for (const item of providers) this.providers.set(item.id, { id: item.id, name: item.name,
             icon: item.icon === LLM_PROVIDERS[item.id]?.icon ? undefined : item.icon, enabled: item.enabled !== false,
@@ -49,7 +53,7 @@ export class ToolboxInventory {
         await this.replace('providers', providers.map(item => ({ id: item.id, name: item.name,
             description: item.baseURL ?? '', source: item.implementation, icon: item.icon ?? ENTITY_ICONS.llm })));
         await this.replace('connections', connections.map(item => ({
-            id: item.id, name: item.name, description: Object.values(item.tiers ?? {}).join(' · '),
+            id: item.id, name: item.name, description: [item.id === this.defaultConnectionId ? t('connection.default') : '', ...Object.values(item.tiers ?? {})].filter(Boolean).join(' · '),
             source: providers.find(provider => provider.id === item.providerId)?.name ?? item.providerId, icon: ENTITY_ICONS.model })));
     }
     private addMCPTools(server: MCPServer): void {
@@ -61,7 +65,7 @@ export class ToolboxInventory {
                 serverId: server.id, enabled: server.status === 'connected', parameters: item.inputSchema });
         }
     }
-    private async replace(kind: 'mcp' | 'tools' | 'providers' | 'connections', entries: Array<{ id: string; name: string; description: string; source: string; icon: string }>): Promise<void> {
+    private async replace(kind: 'mcp' | 'tools' | 'providers' | 'connections' | 'prompts', entries: Array<{ id: string; name: string; description: string; source: string; icon: string }>): Promise<void> {
         const backend = this.backends[kind], paths = new Set(entries.map(item => '/' + encodeURIComponent(item.id)));
         for (const old of await backend.list('/')) if (!paths.has(old.path)) await backend.delete(old.path);
         for (const item of entries) {
