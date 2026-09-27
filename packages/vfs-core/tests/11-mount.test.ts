@@ -5,7 +5,7 @@
  * - Test cross-mount isolation
  * - System-level readBySystemPath
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { freshMem, setupDualMountVFS, setupVFS, readText, type TestVFS } from './helpers';
 import { createVFS } from '../src/impl/factory';
 import type { VFSEngine } from '../src';
@@ -183,3 +183,46 @@ describe('same-backend mount shadowing', () => {
     });
 });
 
+
+describe('Batch mount preparation', () => {
+    it('prepares independent backends together and registers them in declared order', async () => {
+        const backends = [freshMem(), freshMem(), freshMem()];
+        const paths = ['/data/a', '/data/b', '/data/c'];
+        const { manager } = await createVFS({
+            rootBackend: freshMem(),
+            additionalMounts: paths.map((path, index) => ({ path, backend: backends[index] })),
+        });
+        try {
+            const mounted = manager.mounts.listMounts().filter(mount => mount.mountPath !== '/');
+            expect(mounted.map(mount => mount.mountPath)).toEqual(paths);
+            expect(new Set(mounted.map(mount => mount.mountId)).size).toBe(paths.length);
+            const b = await manager.openFileSystem('/data/b');
+            await b.driver.createFile({ name: 'b.txt', parentPath: null, content: 'in-b' });
+            expect(await readText(b, '/b.txt')).toBe('in-b');
+            expect(await backends[1].stat('/b.txt')).not.toBeNull();
+            expect(await backends[0].stat('/b.txt')).toBeNull();
+        } finally {
+            await manager.dispose();
+        }
+    });
+
+    it('closes the backends it prepared when one mount cannot be prepared', async () => {
+        const prepared = freshMem(), closed = vi.spyOn(prepared, 'close');
+        const broken = freshMem();
+        vi.spyOn(broken, 'init').mockRejectedValue(new Error('backend unavailable'));
+        await expect(createVFS({
+            rootBackend: freshMem(),
+            additionalMounts: [{ path: '/data/a', backend: prepared }, { path: '/data/b', backend: broken }],
+        })).rejects.toThrow('backend unavailable');
+        expect(closed).toHaveBeenCalled();
+    });
+
+    it('rejects a batch that mounts the same path twice and closes the loser', async () => {
+        const first = freshMem(), second = freshMem(), closed = vi.spyOn(second, 'close');
+        await expect(createVFS({
+            rootBackend: freshMem(),
+            additionalMounts: [{ path: '/data/dup', backend: first }, { path: '/data/dup', backend: second }],
+        })).rejects.toThrow(/mount already exists/);
+        expect(closed).toHaveBeenCalled();
+    });
+});

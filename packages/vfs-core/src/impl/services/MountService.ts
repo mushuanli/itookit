@@ -9,14 +9,21 @@ import type {
     IMountService,
     IMountRouter,
     IStorageBackend,
+    MountEntry,
     MountPoint,
     MountOptions,
+    PreparedMount,
     ResolvedMount,
 } from '../../protocol';
 import { FSError } from '../../protocol';
 import type { VFSEngine } from '../engine/vfs-engine';
 import { detectCapabilities } from '../engine/capabilities';
 import * as P from '../../utils/path';
+
+/** Batch mount failures keep every cause (preparation and cleanup) in one error. */
+function mountBatchError(errors: unknown[], message: string): unknown {
+    return errors.length === 1 ? errors[0] : new AggregateError(errors, message);
+}
 
 export class MountService implements IMountService {
     readonly router: IMountRouter;
@@ -32,7 +39,45 @@ export class MountService implements IMountService {
         backend: IStorageBackend,
         options?: MountOptions,
     ): Promise<MountPoint> {
-        const mount = await this.router.mount(mountPath, backend, options);
+        return this.attach(await this.router.prepare(mountPath, backend, options));
+    }
+
+    /**
+     * 批量挂载：独立后端的初始化与根校验并发进行，注册仍按声明顺序，
+     * 因此挂载点 ID 与 `listMounts()` 顺序保持确定。准备阶段失败时，
+     * 本次已准备但未注册的后端会被关闭（`close` 幂等，宿主可再次关闭）。
+     */
+    async mountBackends(mounts: MountEntry[]): Promise<MountPoint[]> {
+        const settled = await Promise.allSettled(mounts.map(mount =>
+            this.router.prepare(mount.path, mount.backend, mount.options)));
+        const prepared = settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
+        const failures = settled.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+        if (failures.length) {
+            const cleanup: unknown[] = [];
+            for (const mount of prepared) {
+                try { await mount.backend.close(); } catch (error) { cleanup.push(error); }
+            }
+            throw mountBatchError([...failures, ...cleanup], 'Mount batch preparation and cleanup failed');
+        }
+        const points: MountPoint[] = [];
+        const registered = new Set<PreparedMount>();
+        try {
+            for (const mount of prepared) { points.push(this.attach(mount)); registered.add(mount); }
+        } catch (error) {
+            const cleanup: unknown[] = [error];
+            // Registration keeps declared order, so only the tail can be unprepared;
+            // their backends are this call's responsibility, the registered ones stay mounted.
+            for (const mount of prepared) {
+                if (registered.has(mount)) continue;
+                try { await mount.backend.close(); } catch (closeError) { cleanup.push(closeError); }
+            }
+            throw mountBatchError(cleanup, 'Mount batch registration and cleanup failed');
+        }
+        return points;
+    }
+
+    private attach(prepared: PreparedMount): MountPoint {
+        const mount = this.router.register(prepared);
         this.engine.events.emit('mount:added', {
             mountPath: mount.mountPath,
             mountId: mount.mountId,
@@ -83,6 +128,14 @@ class InlineMountRouter implements IMountRouter {
         backend: IStorageBackend,
         options?: MountOptions,
     ): Promise<MountPoint> {
+        return this.register(await this.prepare(mountPath, backend, options));
+    }
+
+    async prepare(
+        mountPath: string,
+        backend: IStorageBackend,
+        options?: MountOptions,
+    ): Promise<PreparedMount> {
         const norm = P.normalize(mountPath);
         if (this.mounts.has(norm)) {
             throw new FSError('EEXIST', 'mount already exists: ' + norm, 'mount', norm);
@@ -97,18 +150,31 @@ class InlineMountRouter implements IMountRouter {
             throw error;
         }
 
-        const mp: MountPoint = {
-            mountId: 'mount_' + this.nextId++,
+        return {
             mountPath: norm,
             backend,
             options: options ?? {},
-            mountedAt: Date.now(),
             capabilities: detectCapabilities(backend, {
                 readonly: options?.readonly ?? false,
                 syncable: options?.syncable ?? false,
             }),
         };
-        this.mounts.set(norm, mp);
+    }
+
+    register(prepared: PreparedMount): MountPoint {
+        if (this.mounts.has(prepared.mountPath)) {
+            throw new FSError('EEXIST', 'mount already exists: ' + prepared.mountPath, 'mount', prepared.mountPath);
+        }
+
+        const mp: MountPoint = {
+            mountId: 'mount_' + this.nextId++,
+            mountPath: prepared.mountPath,
+            backend: prepared.backend,
+            options: prepared.options,
+            mountedAt: Date.now(),
+            capabilities: prepared.capabilities,
+        };
+        this.mounts.set(prepared.mountPath, mp);
         return mp;
     }
 

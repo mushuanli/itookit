@@ -6,6 +6,13 @@ import type { IMountRouter, MountPoint, MountOptions } from '../mount/mount';
 import type { IPluginManager } from '../plugin/plugin';
 import type { IDeviceManager, IDeviceDriver, IDeviceHandle } from '../device/device';
 
+/** 批量挂载的一项：路径、后端与挂载选项。 */
+export interface MountEntry {
+    path: string;
+    backend: IStorageBackend;
+    options?: MountOptions;
+}
+
 export interface IMountService {
     /** 底层挂载路由器（高级用法） */
     readonly router: IMountRouter;
@@ -19,6 +26,12 @@ export interface IMountService {
         backend: IStorageBackend,
         options?: MountOptions,
     ): Promise<MountPoint>;
+
+    /**
+     * 批量挂载：并发准备各后端，按声明顺序注册（挂载点 ID 与顺序确定）。
+     * @emits mount:added（按注册顺序）
+     */
+    mountBackends(mounts: MountEntry[]): Promise<MountPoint[]>;
 
     /**
      * 卸载存储后端

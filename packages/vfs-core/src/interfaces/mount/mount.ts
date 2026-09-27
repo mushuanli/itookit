@@ -22,6 +22,19 @@ export interface MountPoint {
     readonly capabilities: FSCapabilities;
 }
 
+/**
+ * 已初始化并校验、但尚未注册的挂载。
+ *
+ * 批量挂载时先并发 `prepare` 各自独立的后端，再按声明顺序 `register`，
+ * 这样互不相关的后端准备可以重叠，而挂载点 ID 与顺序保持确定。
+ */
+export interface PreparedMount {
+    readonly mountPath: string;
+    readonly backend: IStorageBackend;
+    readonly options: MountOptions;
+    readonly capabilities: FSCapabilities;
+}
+
 export interface MountOptions {
     /** @default false */
     readonly?: boolean;
@@ -65,6 +78,24 @@ export interface IMountRouter {
         backend: IStorageBackend,
         options?: MountOptions,
     ): Promise<MountPoint>;
+
+    /**
+     * 初始化后端并校验挂载路径，但不注册挂载点。
+     *
+     * 供批量挂载并发准备使用；失败时后端已被关闭（与 `mount` 的失败语义一致）。
+     * @throws FSError('EEXIST') 路径已有挂载
+     */
+    prepare(
+        mountPath: string,
+        backend: IStorageBackend,
+        options?: MountOptions,
+    ): Promise<PreparedMount>;
+
+    /**
+     * 注册 `prepare` 的结果并分配挂载点 ID。
+     * @throws FSError('EEXIST') 路径在准备之后被占用
+     */
+    register(prepared: PreparedMount): MountPoint;
 
     /**
      * 卸载

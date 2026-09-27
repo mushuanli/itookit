@@ -46,11 +46,12 @@ export async function createVFS(options: VFSFactoryOptions): Promise<VFSInstance
             }
         }
 
-        // Mount additional backends
+        // Mount additional backends: independent backends prepare together, registration keeps
+        // the declared order (and therefore mount ids and listMounts order).
         if (options.additionalMounts) {
-            for (const am of options.additionalMounts) {
-                await manager.mounts.mountBackend(am.path, am.backend, am.options);
-            }
+            await manager.mounts.mountBackends(options.additionalMounts.map(mount => ({
+                path: mount.path, backend: mount.backend, options: mount.options,
+            })));
         }
 
         // Create config service
