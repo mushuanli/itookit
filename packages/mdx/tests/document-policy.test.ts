@@ -69,3 +69,13 @@ it('opens the repository lockfile without a Markdown parser and respects readonl
         expect(parse).not.toHaveBeenCalled();
     } finally { await editor.destroy(); }
 });
+
+it('shares an immutable document policy without mutating caller options', async () => {
+    const { documentProfile } = await import('../src/editor/document-policy');
+    const options = { contentFormat: 'markdown' as const, initialMode: 'render' as const };
+    const profile = documentProfile(options, 'line\n'.repeat(5_001));
+    expect(profile).toMatchObject({ largeReason: 'lines', initialMode: 'edit',
+        enableMarkdown: false, enableLineWrapping: false, showSourceNotice: true });
+    expect(Object.isFrozen(profile)).toBe(true);
+    expect(options.initialMode).toBe('render');
+});

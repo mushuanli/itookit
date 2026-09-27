@@ -1,4 +1,4 @@
-import { isLargeDocument } from './document-policy';
+import { documentProfile, type DocumentProfile } from './document-policy';
 import { t } from '@itookit/common';
 import { editorFilePath } from '@itookit/ui-common';
 // @mdx/editor/mdx-editor.ts
@@ -46,6 +46,7 @@ export class MDxEditor extends IEditor {
     private _container: HTMLElement | null = null;
     private isDestroying = false;
     private destruction?: Promise<void>;
+    private profile?: DocumentProfile;
     private docVersion = 0;
 
     constructor(config: MDxEditorConfig = {}) {
@@ -72,7 +73,9 @@ export class MDxEditor extends IEditor {
 
     // === 初始化 ===
 
-    async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
+    async init(container: HTMLElement, initialContent: string = '', profile: DocumentProfile = documentProfile(this.config, initialContent)): Promise<void> {
+        this.profile = profile;
+        this.modeManager = new ModeManager(profile.initialMode);
         this._container = container;
         this.createContainers(container);
         this.saveManager.setDirty(false);
@@ -96,11 +99,11 @@ export class MDxEditor extends IEditor {
                 onBlur: () => this.eventBus.emit('blur'),
                 onFocus: () => this.eventBus.emit('focus'),
             },
-            this.config.contentFormat !== 'text' && !isLargeDocument(initialContent)
+            profile.enableMarkdown
         );
 
         if (this.config.readOnly) this.cmAdapter.setReadOnly(true);
-        if (this.config.contentFormat !== 'text' && isLargeDocument(initialContent)) {
+        if (profile.showSourceNotice) {
             const notice = document.createElement('p');
             notice.className = 'mdx-source-notice'; notice.setAttribute('role', 'status');
             notice.textContent = t('editor.largeDocument.sourceFirst');
@@ -235,7 +238,7 @@ export class MDxEditor extends IEditor {
     }
 
     async switchToMode(mode: 'edit' | 'render'): Promise<void> {
-        if (this.config.contentFormat === 'text' && mode === 'render') return;
+        if ((this.profile?.format ?? this.config.contentFormat) === 'text' && mode === 'render') return;
         if (this.modeManager.getMode() === mode) return;
         if (this.isDirty()) {
             await this.save();
@@ -336,7 +339,7 @@ export class MDxEditor extends IEditor {
 
     private async renderContent(): Promise<void> {
         const renderContainer = this.modeManager.getRenderContainer();
-        if (renderContainer && this.config.contentFormat === 'text') {
+        if (renderContainer && (this.profile?.format ?? this.config.contentFormat) === 'text') {
             const source = document.createElement('pre'); source.textContent = this.getText();
             renderContainer.replaceChildren(source); return;
         }

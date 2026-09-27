@@ -1,4 +1,4 @@
-import { documentFormat, isLargeDocument } from './editor/document-policy';
+import { documentProfile } from './editor/document-policy';
 import { editorFilePath } from '@itookit/ui-common';
 import { normalizeEditorOptions } from '@itookit/ui-common';
 /**
@@ -195,7 +195,10 @@ export async function createMDxEditor(
   container: HTMLElement,
   config: MDxEditorFactoryConfig = {}
 ): Promise<IEditor> {
-  const source = config.contentFormat === 'text';
+  const profile = documentProfile(config, config.initialContent ?? '');
+  config = { ...config, contentFormat: profile.format, initialMode: profile.initialMode,
+    defaultPluginOptions: { ...config.defaultPluginOptions } };
+  const source = profile.format === 'text';
   const userPlugins = source ? ['core:titlebar', 'interaction:auto-save'] : [...config.plugins || []];
   const defaultOpts = config.defaultPluginOptions || {};
 
@@ -215,7 +218,7 @@ export async function createMDxEditor(
 
   // 4. 核心插件（强制加载）
   editor.use(new CoreEditorPlugin({ ...defaultOpts['editor:core'],
-    ...(isLargeDocument(config.initialContent ?? '') ? { enableLineWrapping: false } : {}),
+    ...(!profile.enableLineWrapping ? { enableLineWrapping: false } : {}),
   }));
 
   // 5. 构建最终插件列表
@@ -236,7 +239,7 @@ export async function createMDxEditor(
   }
 
   // 8. 异步初始化
-  await editor.init(container, config.initialContent || '');
+  await editor.init(container, config.initialContent || '', profile);
 
   return editor;
 }
@@ -313,8 +316,6 @@ export const registerPlugin = globalPluginRegistry.register.bind(globalPluginReg
 // === 默认工厂 ===
 
 export const defaultEditorFactory: EditorFactory = async (container, options) => {
-  const contentFormat = documentFormat(options);
-  const sourceFirst = contentFormat === 'text' || isLargeDocument(options.initialContent ?? '');
   const plugins = (options.plugins ?? []).filter(isPluginConfig);
   const rawDefaults = options.defaultPluginOptions ?? {};
   const titlebarDefaults = rawDefaults['core:titlebar'];
@@ -325,8 +326,7 @@ export const defaultEditorFactory: EditorFactory = async (container, options) =>
   return createMDxEditor(container, {
     ...options,
     plugins: ['core:titlebar', 'interaction:auto-save', ...plugins],
-    contentFormat,
-    initialMode: sourceFirst ? 'edit' : options.initialMode ?? 'render',
+    initialMode: options.initialMode ?? 'render',
     defaultPluginOptions: {
       ...rawDefaults,
       'core:titlebar': {
