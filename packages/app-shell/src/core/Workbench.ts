@@ -48,6 +48,7 @@ export class Workbench {
         ) as VFSUIShell;
 
         const sharedHostContext: EditorHostContext = {
+            chatFromFile: config.chatFromFile,
             toggleSidebar: (_collapsed?: boolean) => {
                 this.vfsUI.toggleSidebar();
             },

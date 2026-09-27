@@ -441,7 +441,9 @@ export class SessionWorkbench implements WorkspaceController {
                             const readOnly = (await context.context.fs.capabilitiesAt(target.path)).readonly;
                             editor = await load.read(async () => editor = await this.fileFactory(mount!, { ...fileContentFormat(target.path), target: { kind: 'file', path: target.path }, files: context.context,
                                 initialContent: content, signal: load.signal, title: target.path.split('/').pop(), readOnly,
-                                hostContext: { toggleSidebar: () => this.sidebarUI?.toggleSidebar(), navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve(),
+                                hostContext: { chatFromFile: this.hostContext?.chatFromFile
+                                    ? reference => this.hostContext!.chatFromFile!(reference, { sessionId: target.sessionId }) : undefined,
+                                    toggleSidebar: () => this.sidebarUI?.toggleSidebar(), navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve(),
                                     saveContent: readOnly ? undefined : async (_path, text) => {
                                         // A failed write must never look like a successful save: the
                                         // editor keeps its dirty state, and the user is told now.
@@ -803,7 +805,9 @@ export class SessionWorkbench implements WorkspaceController {
             showBinary: (mount, path, bytes) => this.showBinary(mount, path, bytes),
             deferCleanup: cleanup => this.finishReads(cleanup),
             changed: () => this.refresh(),
-            host: { toggleSidebar: () => this.sidebarUI?.toggleSidebar(),
+            host: { chatFromFile: this.hostContext?.chatFromFile
+                ? reference => this.hostContext!.chatFromFile!(reference, { projectFolder: target.folder }) : undefined,
+                toggleSidebar: () => this.sidebarUI?.toggleSidebar(),
                 navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve() },
         });
         if (!opened) { this.message(t('project.selectFile')); return; }

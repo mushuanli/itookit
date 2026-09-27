@@ -1,3 +1,4 @@
+import { fileReference } from './editor/file-reference';
 import { documentProfile } from './editor/document-policy';
 import { editorFilePath } from '@itookit/ui-common';
 import { normalizeEditorOptions } from '@itookit/ui-common';
@@ -184,6 +185,12 @@ function bridgeTitleBarOptions(config: MDxEditorFactoryConfig): void {
 
   config.defaultPluginOptions['core:titlebar'] = {
     ...existing,
+    aiCallback: existing.aiCallback ?? (config.hostContext.chatFromFile && editorFilePath(config)
+      ? async (editor: MDxEditor) => {
+          const reference = fileReference(editor);
+          await editor.flushPendingSave();
+          await config.hostContext!.chatFromFile!(reference);
+        } : undefined),
     onSidebarToggle: existing.onSidebarToggle || (() => config.hostContext?.toggleSidebar()),
     saveCallback: async (editor: any) => { await editor.save(); },
   };

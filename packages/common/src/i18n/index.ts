@@ -24,6 +24,11 @@ export function setLocale(locale: Locale): void {
     _locale = locale;
 }
 
+/** Known historical labels, for migrating persisted names without changing the active locale. */
+export function translatedValues(key: import('./zh-CN').LocaleKey): readonly string[] {
+    return [...new Set(Object.values(LOCALES).map(strings => strings[key]))];
+}
+
 /** Get the currently active locale. */
 export function getLocale(): Locale {
     return _locale;

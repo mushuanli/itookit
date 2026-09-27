@@ -48,7 +48,7 @@ export type { HoverPreviewData } from './interfaces/IHoverPreview';
 export type { Heading } from './types/heading';
 
 // ── i18n ──
-export { t, setLocale, getLocale } from './i18n';
+export { t, setLocale, getLocale, translatedValues } from './i18n';
 export type { Locale, LocaleKey, LocaleStrings } from './i18n';
 export {
     SKILL_TYPE_META, MCP_TRANSPORT_ICONS,

@@ -175,6 +175,7 @@ export interface AppHandle {
 // ── Workbench config ────────────────────────────────────────────────────
 
 export interface WorkbenchConfig {
+    chatFromFile?: import('@itookit/ui-common').EditorHostContext['chatFromFile'];
     /** Preferred input: an already authorized file context. The host owns its lifetime. */
     files: import('@itookit/vfs-core').FileSystemContext;
     /** VFS 侧边栏挂载容器（消费方负责创建 DOM） */

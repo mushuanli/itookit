@@ -126,3 +126,16 @@ it('restores the default project after reopening persistent storage', async () =
     expect((await second.sessionRepository.getManifest(id)).folder).toBe(project.path + '/@sessions');
     expect(await readSession(second, id, 'remember.md')).toBe('persisted');
 });
+
+it('adopts the legacy personal project by label and retains its identity after a rename', async () => {
+    const r = await setup();
+    const personal = await r.projects.personal();
+    const root = await r.vfs.openFileSystem('/');
+    await root.driver.delete(['/etc/personal-project.json']);
+    await r.projects.create('AAA unrelated');
+    expect((await r.projects.personal()).project.id).toBe(personal.project.id);
+    await r.sessionRepository.renameFolder(personal.path, '/Renamed');
+    expect((await r.projects.personal()).path).toBe('/Renamed');
+    expect(JSON.parse(await root.driver.readContent('/etc/personal-project.json', { encoding: 'utf-8' })).id)
+        .toBe(personal.project.id);
+});

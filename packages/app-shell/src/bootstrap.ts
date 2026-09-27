@@ -1,3 +1,4 @@
+import { createFileChatHandler } from './projects/file-chat';
 import { createOcrControls } from './configuration/ocr-controls';
 import { OcrService } from '@itookit/app-core';
 import { ConfigurationDeletionDialog } from './configuration/delete-dialog';
@@ -107,6 +108,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const settingsModule = await traceBoot('createSettingsModule', () => createSettingsModule(vfs, settingsSources, { excludedPages: toolboxId ? ['providers', 'connections', 'mcp-servers', 'system-prompts'] : [] }));
     cleanupFns.push(() => settingsModule.service.dispose());
 
+    const chatFromFile = createFileChatHandler(runtime.projects, sessionRepository, request => handleNavigationRequest(request));
     const ocrService = new OcrService(await vfs.openFileSystem('/etc'), agentService, kernel.llmService);
     await ocrService.init();
     const ocr = createOcrControls(ocrService, agentService, request => handleNavigationRequest(request));
@@ -272,7 +274,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             const module = createProjectModule({ runtime, sessionSkills, sidebar: sidebarEl, container: editorEl,
                 factory, fileFactory: defaultEditorFactory, createFlowContextMenu: options.ui.createFlowContextMenu,
                 onSelect: (id, mode = 'replace') => updateHistory(elementId, id, mode),
-                hostContext: { toggleSidebar: collapsed => sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')), navigate: handleNavigationRequest } });
+                hostContext: { chatFromFile, toggleSidebar: collapsed => sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')), navigate: handleNavigationRequest } });
             cleanupFns.push(module.dispose);
             await module.workbench.start(); managerCache.set(elementId, module.workbench);
             if (visibleWorkspaceId && visibleWorkspaceId !== elementId) {
@@ -346,6 +348,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 readOnly:     false,
                 mentionScope: mentionScope?.[0] === '*' ? mentionableModules() : mentionScope,
             },
+            chatFromFile,
             aiConfig: { enabled: aiEnabled ?? true },
             onNavigate:      async (req: NavigationRequest) => handleNavigationRequest(req),
             onSessionChange: (sessionId) => updateHistory(elementId, sessionId, 'replace'),

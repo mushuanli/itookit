@@ -278,4 +278,6 @@ Tauri 每个页面先调用 `sidecar_open_scope`，Rust 以 WebView label 维护
 
 新建会话先根据目标分组查找项目，再配置项目目录挂载。`Read`、`Write`、`Edit`、`Glob`、`Grep` 在 Web 使用 VFS；没有原生进程能力时不启用 `Bash`。现有会话的授权不会被重开覆盖；拿到 Session 写租约后，可将目录已匹配的旧会话归入项目，保留原授权。
 
+`ProjectService.personal()` 独立于当前项目解析个人项目，以 `/etc/personal-project.json` 保存稳定项目 ID。旧 profile 首次使用时仅接纳已知中英文默认名称的托管个人项目，否则新建；改名、分组移动和重启后仍按 ID 找回。标题栏 AI 引用产生新的会话输入草稿：项目文件归其项目，Session 文件沿用 Session 所属项目，其余归个人项目。草稿先写入 `uiState.branchDrafts.main.inputText`，再导航到聊天，不触发模型请求。
+
 Web 与 Tauri 共用工作台导航、创建对话框和小屏幕列表／内容切换。项目可放入多级分组，各项目内有“会话”与“文件”；会话可继续用目录组织。旧 `projects` 路由指向工作台，桌面原有目录书签恢复到项目树。删除项目导航及会话不会递归删除其真实文件目录。

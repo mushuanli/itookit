@@ -127,6 +127,7 @@ export function connectEditorLifecycle(
       | EditorHostContext
       | undefined;
     return {
+      chatFromFile: external?.chatFromFile,
       toggleSidebar: () => vfsManager.toggleSidebar(),
       saveContent: persistContent,
       navigate: async (request: NavigationRequest) => {

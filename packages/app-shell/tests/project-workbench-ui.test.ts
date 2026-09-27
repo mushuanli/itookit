@@ -27,7 +27,8 @@ it('creates project Sessions from the selected project and edits its files in th
     const file = vi.fn(async (element: HTMLElement, options: any) => { element.textContent = 'file'; return {
         destroy: vi.fn(), setTitle: vi.fn(), updateNodeId: (path: string) => { options.target.path = path; },
     }; });
-    const workbench = new SessionWorkbench({ sidebar: sidebar, container: main, repository: repository, files: files, factory: chat as any, onSelect: () => {}, hostContext: undefined, kernel: kernel as any, fileFactory: file as any, directoryMounts: mounts, sessionSkills: undefined, manageMemory: undefined, flows: undefined, projects: projects });
+    const chatFromFile = vi.fn(async () => {});
+    const workbench = new SessionWorkbench({ sidebar: sidebar, container: main, repository: repository, files: files, factory: chat as any, onSelect: () => {}, hostContext: { chatFromFile, toggleSidebar() {}, navigate: async () => {} }, kernel: kernel as any, fileFactory: file as any, directoryMounts: mounts, sessionSkills: undefined, manageMemory: undefined, flows: undefined, projects: projects });
     try {
         await workbench.start();
         expect(sidebar.querySelector('[aria-label="新建项目"]')).not.toBeNull();
@@ -52,6 +53,9 @@ it('creates project Sessions from the selected project and edits its files in th
         const context = await files.acquire(session);
         expect(await context.vfs.readFile('notes.md')).toBe('edited in workbench'); await context.release();
         const options = file.mock.calls.at(-1)![1];
+        const quote = { path: '/notes.md', content: 'selected', selection: true };
+        await options.hostContext.chatFromFile(quote);
+        expect(chatFromFile).toHaveBeenCalledWith(quote, { projectFolder: other.path });
         await options.files.fs.driver.rename('/notes.md', 'renamed.txt');
         await vi.waitFor(() => expect(options.target.path).toBe('/renamed.txt'));
         expect(workbench.getActiveResourceId()).toBe(projectPath + '/@files/renamed.txt');

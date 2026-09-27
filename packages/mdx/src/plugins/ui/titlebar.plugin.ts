@@ -184,8 +184,8 @@ export class CoreTitleBarPlugin implements MDxPlugin {
 
       context.registerTitleBarButton?.({
         id: 'ai-action',
-        title: 'AI 助手',
-        icon: '<i class="fas fa-magic"></i>',
+        title: t('editor.ai.title'),
+        icon: ACTION_ICONS.ai,
         command: 'triggerAI',
         location: 'right',
       });
@@ -309,7 +309,13 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         button.appendChild(btnConfig.icon.cloneNode(true));
       }
 
+      // Preserve a browser preview selection when the AI button is pressed.
+      if (btnConfig.id === 'ai-action') button.onmousedown = event => {
+        if (this.titleEl !== button.ownerDocument.activeElement) event.preventDefault();
+      };
       button.onclick = async () => {
+        if (button.disabled) return;
+        button.disabled = true;
         try {
           // Clicking a button blurs the title input first; wait for the rename to sync path and title.
           await pendingRename;
@@ -321,7 +327,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
           }
         } catch (error) {
           console.error(`[TitleBarPlugin] Button "${btnConfig.id}" failed:`, error);
-        }
+        } finally { button.disabled = false; }
       };
 
       // 添加到对应的 Fragment

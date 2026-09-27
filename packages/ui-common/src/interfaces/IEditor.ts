@@ -58,11 +58,22 @@ export interface NavigateToOptions {
     highlightDuration?: number;
 }
 
+export interface EditorFileReference {
+    path: string;
+    content: string;
+    selection: boolean;
+}
+
 /**
  * 定义编辑器宿主环境提供的标准能力
  * 任何接管编辑器的容器（如 MemoryManager）都应提供这些能力
  */
 export interface EditorHostContext {
+    /** Prepare a new chat draft; association is supplied by the file host, never inferred by MDX. */
+    chatFromFile?: (reference: EditorFileReference, association?: {
+        projectFolder?: string;
+        sessionId?: string;
+    }) => Promise<void>;
     /** Ask the host to confirm and execute resource deletion. */
     requestDelete?: (targets: readonly EditorTarget[]) => Promise<void>;
     /** 切换侧边栏 (无参则 toggle，有参则强制设为该状态) */

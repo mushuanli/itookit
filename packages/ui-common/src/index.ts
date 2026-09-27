@@ -9,6 +9,7 @@ export {
     editorFilePath,
     editorResourceId,
     type EditorHostContext,
+    type EditorFileReference,
     type EditorEvent,
     type EditorEventMap,
     type EditorEventCallback,

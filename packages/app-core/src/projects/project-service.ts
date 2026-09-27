@@ -1,5 +1,5 @@
 import { ProjectSessions } from './project-sessions';
-import { randomUUID, t } from '@itookit/common';
+import { randomUUID, t, translatedValues } from '@itookit/common';
 import { FSError, normalizeVirtualPath, type IFileSystem } from '@itookit/vfs-core';
 import type { ISessionRepository, SessionFolder } from '@itookit/llm-session';
 import type { DirectoryMountService } from '../vfs/directory-mounts';
@@ -10,6 +10,7 @@ export type ProjectFolder = SessionFolder & { project: NonNullable<SessionFolder
 /** Project identity and file roots survive navigation-folder renames and moves. */
 export class ProjectService {
     private startupId?: string;
+    private personalPending?: Promise<ProjectFolder>;
     readonly sessions: ProjectSessions;
     constructor(private readonly root: IFileSystem, private readonly repository: ISessionRepository,
         private readonly directories: DirectoryMountService, private readonly files: SessionFilesService) { this.sessions = new ProjectSessions(repository); }
@@ -74,9 +75,32 @@ export class ProjectService {
         for (let n = 2; folders.some(folder => folder.path === '/' + name); n++) name = `${base} (${n})`;
         return this.create(name, null, directory);
     }
+    /** Persist identity separately from the current project and its renameable folder. */
+    personal(): Promise<ProjectFolder> {
+        return this.personalPending ??= this.resolvePersonal().finally(() => { this.personalPending = undefined; });
+    }
+    private async resolvePersonal(): Promise<ProjectFolder> {
+        const path = '/etc/personal-project.json', driver = this.root.driver;
+        const exists = await driver.exists(path);
+        const identity: { id?: string } = exists
+            ? JSON.parse(await driver.readContent(path, { encoding: 'utf-8' })) : {};
+        const projects = await this.list();
+        const saved = projects.find(folder => folder.project.id === identity.id);
+        if (saved) return saved;
+        // Older profiles have no identity record; adopt only the named personal project.
+        const legacy = projects.find(folder => translatedValues('project.defaultName').includes(folder.path.split('/').pop()!)
+            && folder.project.directory.startsWith('/home/admin/projects/'));
+        const project = legacy ?? await this.createUnique(t('project.defaultName'));
+        const content = JSON.stringify({ id: project.project.id });
+        if (exists) await driver.writeContent(path, content);
+        else {
+            await driver.createDirectory({ parentPath: '/', name: 'etc', recursive: true });
+            await driver.createFile({ parentPath: '/etc', name: 'personal-project.json', content });
+        }
+        return project;
+    }
     async ensureStartup(directory?: string): Promise<void> {
-        const existing = directory ? await this.ensureDirectory(directory) : (await this.list()).find(folder =>
-            folder.project.directory.startsWith('/home/admin/projects/')) ?? await this.createUnique(t('project.defaultName'));
+        const existing = directory ? await this.ensureDirectory(directory) : await this.personal();
         this.startupId = existing.project.id;
         await this.sessionFolder(existing);
     }

@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import { connectEditorLifecycle } from '../src/browser/editor-connector';
 
-function fixture() {
+function fixture(chatFromFile?: import('@itookit/ui-common').EditorHostContext['chatFromFile']) {
     const events = new Map<string, (event: any) => Promise<void>>();
     const ui = { on: (name: string, callback: any) => { events.set(name, callback); return () => {}; },
         getNode: () => undefined, updateNodeMetadata: vi.fn() };
@@ -13,7 +13,7 @@ function fixture() {
         return { destroy: vi.fn(async () => { mount.replaceChildren(); }), flushPendingSave: vi.fn(async () => {}), on: () => () => {} };
     });
     const container = document.createElement('div');
-    const lifecycle = connectEditorLifecycle(ui as any, engine as any, container, factory as any);
+    const lifecycle = connectEditorLifecycle(ui as any, engine as any, container, factory as any, { hostContext: { chatFromFile } });
     const select = (id: string) => events.get('sessionSelected')!({ item: { id, type: 'file', metadata: { title: id, custom: { _extension: '.md' } } } });
     return { read, factory, container, lifecycle, select };
 }
@@ -71,4 +71,13 @@ it('uses the editor save coordinator and retains the editor on a failed switch',
     await vi.waitFor(() => expect(f.factory).toHaveBeenCalledTimes(2));
     expect(editor.destroy).toHaveBeenCalledOnce();
     await f.lifecycle();
+});
+
+it('passes the host chat capability through the generic editor connector', async () => {
+    const chat = vi.fn(async () => {}), f = fixture(chat);
+    try {
+        await f.select('/note.md');
+        await vi.waitFor(() => expect(f.factory).toHaveBeenCalledOnce());
+        expect(f.factory.mock.calls[0][1].hostContext.chatFromFile).toBe(chat);
+    } finally { await f.lifecycle(); }
 });
