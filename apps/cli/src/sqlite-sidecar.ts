@@ -78,6 +78,16 @@ export class NodeSqliteSidecarDb implements ISidecarDb {
         return row ? JSON.parse(row.value) : undefined;
     }
 
+    /** Requests are pre-batched by the caller (SidecarRecordStore) to stay under the parameter limit. */
+    async getRecordFieldsMany(requests: ReadonlyArray<{ path: string; field: string }>): Promise<Array<unknown | undefined>> {
+        if (!requests.length) return [];
+        const rows = this.db.prepare(
+            `SELECT path, field, value FROM records WHERE (path, field) IN (${requests.map(() => '(?, ?)').join(', ')})`)
+            .all(...requests.flatMap(request => [request.path, request.field])) as Array<{ path: string; field: string; value: string }>;
+        const found = new Map(rows.map(row => [`${row.path}\u0000${row.field}`, JSON.parse(row.value) as unknown]));
+        return requests.map(request => found.get(`${request.path}\u0000${request.field}`));
+    }
+
     async setRecordField(itemPath: string, field: string, value: unknown): Promise<void> {
         this.db.prepare(`
             INSERT INTO records(path, field, value) VALUES (?, ?, ?)

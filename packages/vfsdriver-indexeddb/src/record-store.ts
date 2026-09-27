@@ -16,6 +16,7 @@
 
 import type {
     IRecordStore,
+    RecordFieldRequest,
     RecordValue,
     RecordQuery,
     RecordQueryOptions,
@@ -38,6 +39,12 @@ export class IDBRecordStore implements IRecordStore {
             this.records.get(IDBKeyRange.only([path, field])),
         );
         return row?.value;
+    }
+
+    /** Every `get` is issued synchronously, so one readonly transaction serves the whole batch. */
+    async getRecordFieldsMany(requests: ReadonlyArray<RecordFieldRequest>): Promise<Array<RecordValue | undefined>> {
+        return Promise.all(requests.map(async request =>
+            (await req<RecordRow | undefined>(this.records.get(IDBKeyRange.only([request.path, request.field]))))?.value));
     }
 
     async setRecordField(path: string, field: string, value: RecordValue): Promise<void> {

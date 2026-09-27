@@ -7,6 +7,7 @@ import type {
     ISeqFileOperations,
     ISeqFileTransaction,
     SeqFileEntry,
+    SeqFileReadRequest,
     RecordQuery,
     RecordQueryOptions,
     RecordQueryResult,
@@ -46,6 +47,50 @@ async function readEntries(records: IRecordTransaction, path: string, keys: stri
     }));
 }
 
+/** 后端在路径不存在时抛 ENOENT；批量读把它降级为 null。 */
+function isMissingRecord(error: unknown): boolean {
+    return error instanceof FSError && error.code === 'ENOENT';
+}
+
+async function readFallback(
+    records: IRecordTransaction,
+    pending: ReadonlyArray<{ path: string; field: string }>,
+): Promise<Array<RecordValue | undefined>> {
+    const values: Array<RecordValue | undefined> = [];
+    for (const entry of pending) {
+        try {
+            values.push(await records.getRecordField(entry.path, entry.field));
+        } catch (error) {
+            if (!isMissingRecord(error)) throw error;
+            values.push(undefined);
+        }
+    }
+    return values;
+}
+
+/**
+ * 多路径单轮读取：优先后端批量能力，未实现时退化为逐条读取。
+ * `paths[i] === null` 表示路径自身缺失，结果为 null。
+ */
+async function readEntriesMany(
+    records: IRecordTransaction,
+    paths: ReadonlyArray<string | null>,
+    keys: ReadonlyArray<string>,
+): Promise<Array<string | null>> {
+    const results: Array<string | null> = new Array(paths.length).fill(null);
+    const pending = paths.flatMap((path, index) =>
+        path === null ? [] : [{ index, path, field: seqField(keys[index]!) }]);
+    if (!pending.length) return results;
+    const values = records.getRecordFieldsMany
+        ? await records.getRecordFieldsMany(pending.map(entry => ({ path: entry.path, field: entry.field })))
+        : await readFallback(records, pending);
+    pending.forEach((entry, position) => {
+        const value = values[position];
+        if (value !== undefined) results[entry.index] = stringifyRecordValue(value);
+    });
+    return results;
+}
+
 class SeqTransaction implements ISeqFileTransaction {
     readonly changed = new Set<string>();
     constructor(
@@ -62,6 +107,12 @@ class SeqTransaction implements ISeqFileTransaction {
 
     async getEntries(path: string, keys: string[]): Promise<Record<string, string>> {
         return readEntries(this.records, this.path(path), keys);
+    }
+
+    async getEntriesMany(requests: ReadonlyArray<SeqFileReadRequest>): Promise<Array<string | null>> {
+        if (!requests.length) return [];
+        const paths = requests.map(request => this.path(request.fileIdOrPath));
+        return readEntriesMany(this.records, paths, requests.map(request => request.key));
     }
 
     async setEntry(path: string, key: string, value: string): Promise<void> {
@@ -136,6 +187,32 @@ export class SeqFileOps implements ISeqFileOperations {
         if (!keys.length) return {};
         const realPath = await this.path(path);
         const read = (records: IRecordTransaction) => readEntries(records, realPath, keys);
+        return this.records.transaction ? this.records.transaction(read) : read(this.records);
+    }
+
+    /** 逐路径解析；节点不存在（ENOENT）时记为 null 而非抛错。 */
+    private async resolveMany(requests: ReadonlyArray<SeqFileReadRequest>): Promise<Array<string | null>> {
+        const cache = new Map<string, string | null>();
+        const paths: Array<string | null> = [];
+        for (const request of requests) {
+            if (!cache.has(request.fileIdOrPath)) {
+                try {
+                    cache.set(request.fileIdOrPath, await this.path(request.fileIdOrPath));
+                } catch (error) {
+                    if (!isMissingRecord(error)) throw error;
+                    cache.set(request.fileIdOrPath, null);
+                }
+            }
+            paths.push(cache.get(request.fileIdOrPath) ?? null);
+        }
+        return paths;
+    }
+
+    async getEntriesMany(requests: ReadonlyArray<SeqFileReadRequest>): Promise<Array<string | null>> {
+        if (!requests.length) return [];
+        const paths = await this.resolveMany(requests);
+        const keys = requests.map(request => request.key);
+        const read = (records: IRecordTransaction) => readEntriesMany(records, paths, keys);
         return this.records.transaction ? this.records.transaction(read) : read(this.records);
     }
 

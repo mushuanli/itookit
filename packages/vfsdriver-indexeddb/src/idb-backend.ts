@@ -478,6 +478,9 @@ class LazyRecordStore implements IRecordStore {
     async getRecordField(path: string, field: string): Promise<RecordValue | undefined> {
         return new IDBRecordStore(this.roStore()).getRecordField(path, field);
     }
+    async getRecordFieldsMany(requests: ReadonlyArray<{ path: string; field: string }>): Promise<Array<RecordValue | undefined>> {
+        return new IDBRecordStore(this.roStore()).getRecordFieldsMany(requests);
+    }
     async setRecordField(path: string, field: string, value: RecordValue): Promise<void> {
         return new IDBRecordStore(this.store()).setRecordField(path, field, value);
     }

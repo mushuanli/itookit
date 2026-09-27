@@ -40,11 +40,22 @@ export interface RecordWalkOptions {
     offset?: number;
 }
 
+/** One (record path, field) pair for the batch read below. */
+export interface RecordFieldRequest {
+    path: string;
+    field: string;
+}
+
 /** Atomic record operations scoped to one storage backend. */
 export interface IRecordTransaction {
     getRecordField(path: string, field: string): Promise<RecordValue | undefined>;
     /** Read exact fields from one record path in one backend operation when supported. */
     getRecordFields?(path: string, fields: string[]): Promise<Record<string, RecordValue>>;
+    /**
+     * Read one field from many record paths in one backend operation when supported.
+     * Result order matches `requests`; a missing path/field yields `undefined`.
+     */
+    getRecordFieldsMany?(requests: ReadonlyArray<RecordFieldRequest>): Promise<Array<RecordValue | undefined>>;
     setRecordField(path: string, field: string, value: RecordValue): Promise<void>;
     deleteRecordField(path: string, field: string): Promise<void>;
     walkRecordFields(
@@ -58,6 +69,11 @@ export interface IRecordStore {
     getRecordField(path: string, field: string): Promise<RecordValue | undefined>;
     /** Read exact fields from one record path in one backend operation when supported. */
     getRecordFields?(path: string, fields: string[]): Promise<Record<string, RecordValue>>;
+    /**
+     * Read one field from many record paths in one backend operation when supported.
+     * Result order matches `requests`; a missing path/field yields `undefined`.
+     */
+    getRecordFieldsMany?(requests: ReadonlyArray<RecordFieldRequest>): Promise<Array<RecordValue | undefined>>;
     setRecordField(path: string, field: string, value: RecordValue): Promise<void>;
     deleteRecordField(path: string, field: string): Promise<void>;
     setAllRecordFields(path: string, fields: Record<string, RecordValue>): Promise<void>;

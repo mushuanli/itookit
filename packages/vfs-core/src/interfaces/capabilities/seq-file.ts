@@ -20,9 +20,19 @@ export interface SeqCompareAndSetOptions {
     value: string | null;
 }
 
+export interface SeqFileReadRequest {
+    fileIdOrPath: string;
+    key: string;
+}
+
 export interface ISeqFileTransaction {
     getEntry(fileIdOrPath: string, key: string): Promise<string | null>;
     getEntries(fileIdOrPath: string, keys: string[]): Promise<Record<string, string>>;
+    /**
+     * Read one entry from many files in one storage round-trip.
+     * Result order matches `requests`; a missing file/key yields `null`.
+     */
+    getEntriesMany(requests: ReadonlyArray<SeqFileReadRequest>): Promise<Array<string | null>>;
     setEntry(fileIdOrPath: string, key: string, value: string): Promise<void>;
     deleteEntry(fileIdOrPath: string, key: string): Promise<void>;
     compareAndSet(
@@ -42,6 +52,11 @@ export interface ISeqFileTransaction {
 export interface ISeqFileOperations {
     getEntry(fileIdOrPath: string, key: string): Promise<string | null>;
     getEntries(fileIdOrPath: string, keys: string[]): Promise<Record<string, string>>;
+    /**
+     * Read one entry from many files in one storage round-trip.
+     * Result order matches `requests`; a missing file/key yields `null`.
+     */
+    getEntriesMany(requests: ReadonlyArray<SeqFileReadRequest>): Promise<Array<string | null>>;
     setEntry(fileIdOrPath: string, key: string, value: string): Promise<void>;
     setEntries(fileIdOrPath: string, entries: Record<string, string>): Promise<void>;
     deleteEntry(fileIdOrPath: string, key: string): Promise<void>;

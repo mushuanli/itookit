@@ -3,8 +3,8 @@
  * setEntries, deleteEntry, hasEntry, queryEntries.
  * IndexedDB backend provides native IRecordStore → seqFiles capability is true.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { setupVFS, type TestVFS } from './helpers';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { freshMem, setupVFS, type TestVFS } from './helpers';
 
 describe('SeqFile operations (IndexedDB backend)', () => {
     let vfs: TestVFS;
@@ -103,6 +103,49 @@ describe('SeqFile operations (IndexedDB backend)', () => {
         expect(Object.keys(result).sort()).toEqual(['x', 'z']);
         expect(result.x).toBe('1');
         expect(result.z).toBe('3');
+    });
+
+    it('getEntriesMany reads many files in request order and reports missing paths as null', async () => {
+        const left = await mkSeq('many-left.seq'), right = await mkSeq('many-right.seq');
+        await vfs.fs.meta.seq!.setEntry(left, 'state', 'ready');
+        await vfs.fs.meta.seq!.setEntry(right, 'state', 'waiting');
+        const requests = [
+            { fileIdOrPath: left, key: 'state' },
+            { fileIdOrPath: right, key: 'state' },
+            { fileIdOrPath: right, key: 'absent' },
+            { fileIdOrPath: '/many-missing.seq', key: 'state' },
+        ];
+        expect(await vfs.fs.meta.seq!.getEntriesMany(requests))
+            .toEqual(['ready', 'waiting', null, null]);
+        expect(await vfs.fs.meta.seq!.transaction!(tx => tx.getEntriesMany(requests)))
+            .toEqual(['ready', 'waiting', null, null]);
+        expect(await vfs.fs.meta.seq!.getEntriesMany([])).toEqual([]);
+    });
+
+    it('getEntriesMany issues one backend batch call and falls back without the capability', async () => {
+        const backend = freshMem();
+        const batch = vi.spyOn(backend.records, 'getRecordFieldsMany');
+        const batched = await setupVFS(backend);
+        try {
+            await batched.fs.driver.createFile({ name: 'pair.seq', parentPath: null, type: 'seqfile' });
+            await batched.fs.meta.seq!.setEntries('/pair.seq', { x: '1', y: '2' });
+            batch.mockClear();
+            expect(await batched.fs.meta.seq!.getEntriesMany([
+                { fileIdOrPath: '/pair.seq', key: 'x' }, { fileIdOrPath: '/pair.seq', key: 'y' },
+            ])).toEqual(['1', '2']);
+            expect(batch).toHaveBeenCalledTimes(1);
+        } finally { await batched.dispose(); }
+
+        const degraded = freshMem();
+        (degraded.records as { getRecordFieldsMany?: unknown }).getRecordFieldsMany = undefined;
+        const plain = await setupVFS(degraded);
+        try {
+            await plain.fs.driver.createFile({ name: 'pair.seq', parentPath: null, type: 'seqfile' });
+            await plain.fs.meta.seq!.setEntries('/pair.seq', { x: '1' });
+            expect(await plain.fs.meta.seq!.getEntriesMany([
+                { fileIdOrPath: '/pair.seq', key: 'x' }, { fileIdOrPath: '/pair.seq', key: 'nope' },
+            ])).toEqual(['1', null]);
+        } finally { await plain.dispose(); }
     });
 
     it('deleteEntry removes a key', async () => {

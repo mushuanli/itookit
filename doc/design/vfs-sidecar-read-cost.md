@@ -161,3 +161,11 @@ cd apps/cli && node --import tsx ../../.tauri-acceptance/probe-sidecar-attrib.mt
 ## 2026-09-23：Session 列表减少重复属性检查
 
 Session 列表枚举目录后直接批量读取 manifest，不再对每个候选目录先做一次 `session.seq` 存在性检查；批量读取原有的 `ENOENT` 跳过逻辑仍处理创建中断留下的不完整目录。
+
+## 2026-09-27：跨文件批量读 `getRecordFieldsMany`
+
+§3.5 的结论「批量原语只在调用方先并发/可枚举时才有用」在 Task 扫描上同样成立，本轮据此新增第三种批量原语：`SeqFile.getEntriesMany(requests)`（多文件同名/异名键一次读，缺失 → `null`），内部优先走可选 `IRecordStore/IRecordTransaction.getRecordFieldsMany(requests)`，未实现时逐条回退。
+
+调用方是 durable-kernel 的 `taskEntries`（`listTasks`/`listTaskIds`/恢复投影共用）：原先对 `tasks/` 下每个 Task 目录各读一次记录，在 LocalFS 上每次读自成一个事务与 journal 核对；现在一次目录枚举 + 一个事务内一次批量读。CLI 引导成本 fixture（3 Session + 9 终态 Task）sidecar 调用 994 → 814、事务 220 → 175；无 Task 的空 Session 场景保持 697/157 不变。
+
+SQLite 侧一条 `SELECT … WHERE (path, field) IN ((?,?),(?,?),…)`（`SidecarRecordStore` 按 200 条/批），IndexedDB 侧一条 readonly 事务内同步发起全部 `get`；两者都在原有的外层事务/journal 恢复边界内，未引入进程级读缓存，也没有可枚举集合之外的调用方。路径映射（`mapRecordPaths`）与 `FileSystemView` 都转发该能力，避免视图层丢失批量语义。

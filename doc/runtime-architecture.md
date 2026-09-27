@@ -194,7 +194,7 @@ Node lstat 与 Rust symlink_metadata 保留符号链接/普通文件类型，Tau
 
 读取与 rename journal 恢复仍处于同一事务；不使用实例内「日志曾经干净」作为跨进程跳过恢复的依据。真实两个进程覆盖读者先打开、写者在文件 rename 后 SIGKILL、原读者恢复目标记录的 root/module 两条路径。新增 sidecarStats 统计逻辑方法调用（含事务回调），不把该数字等同于真实 IPC 数。
 
-可枚举读取通过 sidecar 原子批量接口减少事务内往返：完整目录列表每 64 项查询一次 `getMetaExtMany`，SeqFile 的精确字段集合查询一次 `getRecordFields`，路径映射层保留该能力；Task event 分页的索引和事件正文各批量读取一次。恢复探针仍在同一外层事务中执行，没有引入跨事务缓存。
+可枚举读取通过 sidecar 原子批量接口减少事务内往返：完整目录列表每 64 项查询一次 `getMetaExtMany`，SeqFile 的精确字段集合查询一次 `getRecordFields`，跨文件的同类扫描（如列出全部 Task 记录）查询一次 `getRecordFieldsMany`，路径映射与 `FileSystemView` 都保留该能力；Task event 分页的索引和事件正文各批量读取一次。恢复探针仍在同一外层事务中执行，没有引入跨事务缓存。
 
 本批完成批量类型检查、链接拒绝和跨进程恢复这条链；P0-02 的桌面 ≤2 秒 / ≤100 次 IPC 仍开放，需继续对正确实现减少宿主往返并重测。
 

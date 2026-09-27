@@ -43,6 +43,7 @@ const { manager } = await createVFS({ rootBackend: backend });
 - `init()` 遇到旧版本或不兼容 schema 直接抛错(`Filesystem database version/schema incompatible`),**不会**自动删库重建;`VerifyResult.missingStores` 需要重建数据库处理。
 - `verify()` 返回 `{ healthy, missingStores, orphanNodes, missingParents, orphanTags, totalNodes, totalTags }`;`repair()` 目前只清理孤儿 tag,返回 `{ fixedOrphanTags }`。
 - 可选 Record Store:后端 `records` 属性是 `LazyRecordStore`(按需取 IDB 事务),内部委托 `IDBRecordStore`。
+- 跨文件批量读:`IDBRecordStore.getRecordFieldsMany(requests)` 在**同一条 readonly 事务**内同步发起全部 `get`(请求必须在 await 之前全部发出,否则 IDB 会自动提交),`LazyRecordStore` 转发该能力。SeqFile 的 `getEntriesMany` 优先走它,未实现时逐条回退。
 
 ## 测试
 

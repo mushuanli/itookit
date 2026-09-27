@@ -10,6 +10,10 @@ export function mapRecordPaths(records: IRecordStore, path: (systemPath: string)
             walkRecordFields: (p, callback, options) => tx.walkRecordFields(path(p), callback, options),
         };
         if (tx.getRecordFields) mapped.getRecordFields = (p, fields) => tx.getRecordFields!(path(p), fields);
+        if (tx.getRecordFieldsMany) {
+            mapped.getRecordFieldsMany = requests =>
+                tx.getRecordFieldsMany!(requests.map(request => ({ path: path(request.path), field: request.field })));
+        }
         return mapped;
     };
     return {

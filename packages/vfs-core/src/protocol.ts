@@ -112,6 +112,7 @@ export type {
     RecordQueryOptions,
     RecordQueryResult,
     RecordWalkOptions,
+    RecordFieldRequest,
     IRecordTransaction,
     IRecordStore,
 } from './interfaces/storage';
@@ -122,6 +123,7 @@ export type {
     ISeqFileOperations,
     ISeqFileTransaction,
     SeqCompareAndSetOptions,
+    SeqFileReadRequest,
 } from './interfaces/capabilities/seq-file';
 export type { IAssetOperations } from './interfaces/capabilities/asset-ops';
 export type { TagDefinition, ITagOperations } from './interfaces/capabilities/tag-ops';
@@ -157,6 +159,7 @@ export type {
 export type {
     MountPoint,
     MountOptions,
+    PreparedMount,
     ResolvedMount,
     IMountRouter,
 } from './interfaces/mount/mount';
@@ -175,6 +178,7 @@ export type { IFSMetaDriver } from './interfaces/services/fs-meta-driver';
 export type {
     IMountService,
     IVFSManager,
+    MountEntry,
 } from './interfaces/services/vfs-manager';
 
 // ── 配置服务 ──

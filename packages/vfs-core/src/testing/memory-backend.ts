@@ -14,6 +14,7 @@ import type {
     FSSearchQuery,
     IRecordStore,
     IRecordTransaction,
+    RecordFieldRequest,
     RecordValue,
     RecordQuery,
     RecordQueryOptions,
@@ -249,6 +250,10 @@ class MemoryRecordStore implements IRecordStore, IRecordTransaction {
             if (value !== undefined) result[field] = structuredClone(value);
         }
         return result;
+    }
+
+    async getRecordFieldsMany(requests: ReadonlyArray<RecordFieldRequest>): Promise<Array<RecordValue | undefined>> {
+        return requests.map(request => structuredClone(this.fields.get(request.path)?.get(request.field)));
     }
 
     async setRecordField(path: string, field: string, value: RecordValue): Promise<void> {

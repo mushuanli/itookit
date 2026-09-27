@@ -1,6 +1,7 @@
 import type {
     IFileSystem, IFileSystemDriver, IFSMetaDriver, FSNode, FSCapabilities, DirEntry, ListOptions,
     FSEvent, FSEventType, FSSearchQuery, FSSearchResult, TreeWalkCallback, TreeWalkOptions,
+    SeqFileReadRequest,
 } from '../../protocol';
 import { FSError, FSCapabilityError } from '../../protocol';
 import { FileHandle } from '../file-io/File';
@@ -402,15 +403,43 @@ export class FileSystemView implements IFileSystem {
             return this.metaCall(group, method, args);
         }) });
     }
+    /**
+     * 多路径 seq 读：逐条把虚拟路径映射到挂载源路径后，交给挂载后端一次读取。
+     * 与单路径读相同的挂载/可见性校验，避免批量接口绕过视图边界。
+     */
+    private async seqEntriesMany(
+        requests: ReadonlyArray<SeqFileReadRequest>,
+        api: object | undefined,
+        expected: Binding | undefined,
+    ): Promise<Array<string | null>> {
+        if (!requests.length) return [];
+        const mapped: Array<{ fileIdOrPath: string; key: string }> = [];
+        let owner: Binding | undefined = expected;
+        for (const request of requests) {
+            const path = normalizeVirtualPath(request.fileIdOrPath);
+            if (!this.readable(path)) throw new FSError('EACCES', 'Projection ancestors are navigation only');
+            const mount = this.binding(path, false);
+            if (owner && owner !== mount) throw new FSError('EXMOUNT', 'Record transaction crossed a mount');
+            owner = mount;
+            if (!api) await this.noLinks(mount, path);
+            mapped.push({ fileIdOrPath: this.sourcePath(mount, path), key: request.key });
+        }
+        const target = (api ?? owner?.fs.meta?.seq) as { getEntriesMany?: unknown } | undefined;
+        if (!target?.getEntriesMany) throw new FSCapabilityError('seq.getEntriesMany');
+        return this.invoke(owner!, target, 'getEntriesMany', [mapped]);
+    }
     private async metaCall(group: string, method: string, input: any[], api?: object, expected?: Binding): Promise<any> {
         if (group === 'tags' && !this.capabilities.tags) throw new FSCapabilityError('tags');
         const allowed: Record<string, readonly string[]> = {
             assets: ['getAssetDirPath', 'ensureAssetDir', 'putAsset', 'getAsset', 'deleteAsset', 'listAssets', 'removeAssetDir', 'hasAssetDir', 'validateAssetDir', 'repairAssetDir'],
             tags: ['setTags', 'addTag', 'removeTag'],
-            seq: ['getEntry', 'getEntries', 'setEntry', 'setEntries', 'deleteEntry', 'hasEntry', 'walkEntries', 'queryEntries', 'createIndex', 'deleteIndex', 'compareAndSet', 'increment', 'append'],
+            seq: ['getEntry', 'getEntries', 'getEntriesMany', 'setEntry', 'setEntries', 'deleteEntry', 'hasEntry', 'walkEntries', 'queryEntries', 'createIndex', 'deleteIndex', 'compareAndSet', 'increment', 'append'],
             refs: ['addRef', 'removeRef', 'hasRef', 'walkOutgoing', 'walkIncoming', 'syncOutgoing'],
         };
         if (!allowed[group]?.includes(method)) throw new FSCapabilityError(method);
+        if (group === 'seq' && method === 'getEntriesMany') {
+            return this.seqEntriesMany(input[0] ?? [], api, expected);
+        }
         const args = [...input];
         const write = !/^(get|has|list|walk|query|validate)/.test(method);
         const path = normalizeVirtualPath(args[0]);
