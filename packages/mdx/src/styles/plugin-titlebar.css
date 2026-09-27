@@ -23,6 +23,8 @@
  * 左侧按钮区域
  */
 .mdx-editor-titlebar__left {
+  flex: 1 1 160px;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -32,6 +34,11 @@
 /**
  * 右侧按钮区域
  */
+.mdx-editor-titlebar__title-container {
+  flex: 1;
+  min-width: 0;
+}
+
 .mdx-editor-titlebar__right {
   display: flex;
   align-items: center;
@@ -153,7 +160,9 @@
   font-size: 14px;
   font-weight: 600;
   color: #24292f;
-  margin: 0 auto 0 0.5rem;
+  margin: 0;
+  box-sizing: border-box;
+  text-overflow: ellipsis;
   max-width: 300px;
   /* input reset */
   border: 1px solid transparent;
@@ -162,7 +171,7 @@
   padding: 2px 6px;
   border-radius: 4px;
   font-family: inherit;
-  min-width: 80px;
+  min-width: 0;
   width: 100%;
 }
 

@@ -5,7 +5,7 @@
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MDxEditor } from '../../editor/mdx-editor';
 import type { PluginManager } from '../../core/plugin-manager';
-import { t, buildRenamedFilename } from '@itookit/common';
+import { ACTION_ICONS, t, buildRenamedFilename } from '@itookit/common';
 import type { IFileSystem } from '@itookit/vfs-core';
 
 const replaceBasename = (path: string, filename: string): string => {
@@ -146,8 +146,8 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     context.registerTitleBarButton?.({
       id: 'toggle-line-wrapping',
       title: t('editor.wrap.label'),
-      icon: t('editor.wrap.label'),
-      location: 'left',
+      icon: ACTION_ICONS.wordWrap,
+      location: 'right',
       onClick: () => editor.setLineWrapping(!editor.getLineWrapping()),
     });
 
@@ -173,7 +173,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         title: '切换到阅读模式',
         icon: '<i class="fas fa-book-open"></i>',
         command: 'toggleEditMode',
-        location: 'left',
+        location: 'right',
       });
     }
 
@@ -239,7 +239,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     leftGroup.className = 'mdx-editor-titlebar__left';
 
     const titleContainer = document.createElement('div');
-    titleContainer.className = 'mdx-editor-titlebar__center';
+    titleContainer.className = 'mdx-editor-titlebar__title-container';
     this.currentTitle = editor.config.title || '';
     this.titleEl = document.createElement('input');
     this.titleEl.type = 'text';
@@ -300,6 +300,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
       button.type = 'button';
       button.className = 'mdx-editor-titlebar__button';
       button.title = btnConfig.title || btnConfig.id;
+      button.setAttribute('aria-label', button.title);
       button.setAttribute('data-button-id', btnConfig.id);
 
       if (typeof btnConfig.icon === 'string') {
@@ -341,12 +342,12 @@ export class CoreTitleBarPlugin implements MDxPlugin {
 
     // 一次性添加所有按钮
     leftGroup.appendChild(leftFragment);
+    leftGroup.appendChild(titleContainer);
     rightGroup.appendChild(rightFragment);
 
     // 清空并重建标题栏
     titleBar.innerHTML = '';
     titleBar.appendChild(leftGroup);
-    titleBar.appendChild(titleContainer);
     titleBar.appendChild(rightGroup);
 
     if (buttons.length === 0 && !this.titleEl.value) {
@@ -373,6 +374,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
       this.toggleModeBtn.title = '切换到编辑模式';
       this.toggleModeBtn.innerHTML = '<i class="fas fa-edit"></i>';
     }
+    this.toggleModeBtn.setAttribute('aria-label', this.toggleModeBtn.title);
   }
 
   /**
