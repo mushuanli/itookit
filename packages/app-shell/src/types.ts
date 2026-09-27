@@ -116,6 +116,12 @@ export interface AppUI {
     llmUiEditors: LLMUIEditors;
 }
 
+/** Containers a staged boot overlay can target once the workspace shell exists. */
+export interface BootWorkspaceParts {
+    /** Editor area that grows from empty to the mounted editor. */
+    editor: HTMLElement;
+}
+
 export interface AppOptions {
     directorySourceProvider?: import('@itookit/app-core').DirectorySourceProvider;
     /** Host registration/configuration of durable Session file grants. */
@@ -133,6 +139,13 @@ export interface AppOptions {
     routeAliases?: Record<string, string>;
     /** Called during boot steps; use this to drive a loading overlay. */
     onProgress?: (msg: string) => void;
+    /**
+     * The workspace layout and its sidebar are mounted; a host overlay may now cover only
+     * `editor`, keeping the app nav and the Session sidebar readable during the rest of boot.
+     */
+    onWorkspaceReady?: (parts: BootWorkspaceParts) => void;
+    /** The initial editor finished mounting (or the workspace has no editor to wait for). */
+    onEditorReady?: () => void;
     /** LLM traffic logger (NoopLLMLogger for web, TauriLLMLogger for Tauri) */
     llmLogger?: import('@itookit/common').ILLMLogger;
     /** Runtime transport for the local Codex app-server (Node/Tauri only). */

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createVFS, createFileSystemView } from '@itookit/vfs-core';
+import { createVFS, createFileSystemView, type IFileSystem } from '@itookit/vfs-core';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { SessionFilesService } from '../src/vfs/session-files';
 import { createSessionAttachmentMounts } from '../src/vfs/session-attachments';
@@ -15,8 +15,8 @@ async function setup() {
     const home = await manager.openFileSystem('/home/admin');
     await home.driver.createFile({ name: 'same.md', parentPath: '/a', content: 'A', recursive: true });
     await home.driver.createFile({ name: 'same.md', parentPath: '/b', content: 'B', recursive: true });
-    const make = async () => {
-        const service = new SessionFilesService(store, async id => [{ mountId: 'attachments', at: '/attachments', fs: await manager.openFileSystem(`/var/lib/sessions/${id}/attachments`), access: 'rw' }]);
+    const make = async (resolveSource?: (sourceId: string) => Promise<IFileSystem | undefined>) => {
+        const service = new SessionFilesService(store, async id => [{ mountId: 'attachments', at: '/attachments', fs: await manager.openFileSystem(`/var/lib/sessions/${id}/attachments`), access: 'rw' }], resolveSource);
         await service.initialize();
         service.registerSource('home', home);
         cleanup.push(() => service.dispose());
@@ -232,4 +232,29 @@ it.each(['configure', 'disable', 'dispose'] as const)('revokes the ordinary view
         await expect(ordinary.context.fs.driver.writeContent('/workspace/same.md', 'late write')).rejects.toMatchObject({ code: 'EACCES' });
     } finally { release(); await pendingRead; await changing; reading.mockRestore(); closing.mockRestore(); }
     expect(await home.driver.readContent('/a/same.md', { encoding: 'utf-8' })).toBe('A');
+});
+
+describe('lazily resolved mount sources', () => {
+    const saved = (root: string) => [{ mountId: 'work', at: '/workspace', sourceId: 'saved', root, access: 'rw' as const }];
+
+    it('opens a configured but unregistered source through the resolver', async () => {
+        const { home, make } = await setup();
+        const resolveSource = vi.fn(async (id: string) => id === 'saved' ? home : undefined);
+        const service = await make(resolveSource);
+        await service.configure('lazy', { mounts: saved('/a'), cwd: '/workspace' }, 0);
+        expect(resolveSource).toHaveBeenCalledWith('saved');
+        const acquired = await service.acquireFiles('lazy'); cleanup.push(() => acquired.release());
+        expect(await acquired.context.fs.driver.readContent('/workspace/same.md', { encoding: 'utf-8' })).toBe('A');
+        const resolved = resolveSource.mock.calls.length;
+        const again = await service.acquireFiles('lazy'); cleanup.push(() => again.release());
+        expect(resolveSource.mock.calls.length).toBe(resolved);
+    });
+
+    it('fails closed when the resolver cannot open the source', async () => {
+        const { make } = await setup();
+        const service = await make(async () => undefined);
+        await expect(service.configure('missing', { mounts: saved('/a'), cwd: '/workspace' }, 0))
+            .rejects.toMatchObject({ code: 'EACCES' });
+        expect(await service.inspect('missing')).toBeNull();
+    });
 });

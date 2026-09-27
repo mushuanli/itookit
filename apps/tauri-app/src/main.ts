@@ -3,6 +3,8 @@ import { recordDiagnostic, observeTools } from './log/desktop-diagnostics';
 import { errorDetails, t } from '@itookit/common';
 import { TauriSessionDirectories } from './services/session-directories';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { installWindowClose } from './shell/window-lifecycle';
 import { createTauriSessionProcesses } from './shell/session-bash';
 import { TauriFlowWorkspaces } from './shell/flow-workspaces';
 import { createFileSystemSource } from '@itookit/vfs-core';
@@ -20,7 +22,7 @@ import { createFileSystemSource } from '@itookit/vfs-core';
  *  4. Wire tauri-only features: loading overlay, dynamic local mounts
  */
 
-import { initApp, installMobileNavigation, workspaceRoot, type AppUI } from '@itookit/app-shell';
+import { initApp, installMobileNavigation, windowSessionLeaseToken, workspaceRoot, type AppUI } from '@itookit/app-shell';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import {
@@ -58,6 +60,15 @@ import './styles/index.css';
 
 // ── Path helpers ───────────────────────────────────────────────────────────────
 
+const entryAt = performance.now();
+const documentAt = performance.getEntriesByName('mindos.document')[0]?.startTime;
+void recordDiagnostic('bootstrap.entry', {
+    timeOrigin: performance.timeOrigin, entryMs: Math.round(entryAt),
+    documentMs: documentAt === undefined ? undefined : Math.round(documentAt),
+    documentToEntryMs: documentAt === undefined ? undefined : Math.round(entryAt - documentAt),
+    resourceCount: performance.getEntriesByType('resource').length,
+});
+
 /**
  * Derive a stable sidecar directory path from an absolute filesystem path.
  * /Users/rain/Projects → <rootDir>/meta/Users_rain_Projects
@@ -71,6 +82,9 @@ function pathToMetaDir(rootDir: string, absPath: string): string {
 let diagnosticLogPath: string | undefined;
 
 function showLoading(msg: string): void {
+    // The shell is visible from the first paint; disable its controls until boot finishes so an
+    // early click cannot race the initial navigation.
+    document.body.classList.add('is-booting');
     let el = document.getElementById('__boot-overlay');
     if (!el) {
         el = document.createElement('div');
@@ -91,14 +105,38 @@ function showLoading(msg: string): void {
     if (msgEl) msgEl.textContent = msg;
 }
 
+let releaseLoadingTarget: (() => void) | undefined;
+
+/**
+ * Move the boot overlay into the workspace editor area so the app nav and the Session sidebar
+ * stay readable while the editor mounts. The target's inline positioning is restored on hide.
+ */
+function focusLoading(target: HTMLElement): void {
+    const overlay = document.getElementById('__boot-overlay');
+    if (!overlay || overlay.parentElement === target) return;
+    releaseLoadingTarget?.();
+    const previous = target.style.position;
+    if (!previous) target.style.position = 'relative';
+    target.appendChild(overlay);
+    releaseLoadingTarget = () => {
+        if (previous) target.style.position = previous;
+        else target.style.removeProperty('position');
+        releaseLoadingTarget = undefined;
+    };
+}
+
 function hideLoading(): void {
     document.getElementById('__boot-overlay')?.remove();
+    releaseLoadingTarget?.();
+    document.body.classList.remove('is-booting');
 }
 
 function showError(msg: string): void {
     if (diagnosticLogPath) msg += `\n\n${t('boot.runtimeLog')}${diagnosticLogPath}`;
     const el = document.getElementById('__boot-overlay');
     if (el) {
+        // A fatal failure takes over the whole window, not just the content area.
+        el.classList.add('boot-overlay--error');
         el.innerHTML = `
             <div style="font-size:28px">⚠️</div>
             <div style="font-size:14px;font-weight:600;color:#111">启动失败</div>
@@ -281,6 +319,9 @@ async function bootstrap(): Promise<void> {
         backend: rootBackend,
         additionalMounts: [...workspaceMounts],
         ownerKind: 'tauri',
+        // The same window keeps its lease identity across reloads, so a refresh can take over
+        // the Sessions its previous page still leases instead of leaving them read-only for a TTL.
+        sessionOwnerToken: windowSessionLeaseToken(),
         onProgress: log,
         llmLogger,
         directorySourceProvider: new TauriSessionDirectories(rootDir),
@@ -329,11 +370,15 @@ async function bootstrap(): Promise<void> {
         defaultSlug: 'chat',
         routeAliases: { home: 'llm-workspace', projects: 'llm-workspace', workbench: 'llm-workspace' },
         onProgress: log,
+        // Staged reveal: nav (static) → Session sidebar → editor, instead of one full-screen wait.
+        onWorkspaceReady: parts => focusLoading(parts.editor),
+        onEditorReady: () => hideLoading(),
         ui,
     });
     startupCleanup.push(() => app.destroy());
     app.onDestroy(() => runtime.dispose(), 'sources');
     app.onDestroy(() => homeSource.dispose(), 'sources');
+    await installWindowClose(getCurrentWindow(), app);
     log('App 初始化完成');
 
     // Restore directory bookmarks into the shared project tree.

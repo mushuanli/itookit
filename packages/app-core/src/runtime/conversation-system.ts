@@ -1,13 +1,15 @@
 import { createFlowCapabilities } from './flow-capabilities';
-import { initializeConversationSystem, type CommandBus, type FlowEngine, type SessionManager, type SessionRepository, type VFSAgentService } from '@itookit/llm-session';
+import { createFlowInvocationSessions, initializeConversationSystem, type CommandBus, type FlowEngine, type SessionManager, type SessionRepository, type VFSAgentService } from '@itookit/llm-session';
 import { resolveSessionSkillContext, resolveSessionSelectedSkills } from '@itookit/kernel-adapters';
-import type { IVFSManager } from '@itookit/vfs-core';
+import type { IFileSystem, IVFSManager } from '@itookit/vfs-core';
 import { resetSessionManager } from '@itookit/llm-session';
 import type { HeadlessKernelRuntime } from './create-kernel-runtime';
 import { withWorkspaceScopeCleanup } from './workspace-scope-cleanup';
 
 export interface ConversationSystemOptions {
     vfs: IVFSManager;
+    /** Root view shared by Session-independent services; holds the Flow invocation marker. */
+    systemFS: IFileSystem;
     agentService: VFSAgentService;
     sessionRepository: SessionRepository;
     flowEngine: FlowEngine;
@@ -29,12 +31,13 @@ export interface ConversationSystemOptions {
 export async function createConversationSystem(
     options: ConversationSystemOptions,
 ): Promise<{ sessionManager: SessionManager; commandBus: CommandBus }> {
-    const { vfs, agentService, sessionRepository, flowEngine, kernel } = options;
+    const { vfs, agentService, sessionRepository, flowEngine, kernel, systemFS } = options;
     const capabilities = createFlowCapabilities(kernel);
     return initializeConversationSystem({
         agentService,
         sessionEngine: sessionRepository,
         promptHistoryFiles: await vfs.openFileSystem('/home/admin/.config/mindos/prompt-history'),
+        flowInvocationSessions: createFlowInvocationSessions(systemFS),
         kernel: kernel.kernel,
         flowStore: flowEngine,
         dagPlugins: kernel.dagPlugins,

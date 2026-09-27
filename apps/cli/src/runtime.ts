@@ -159,7 +159,9 @@ export async function createCliRuntime(
     await sessionRepository.init();
     await sessionRepository.ensureSession(manifest.sessionId, `CLI: ${workflow.config.name}`, 'cli');
     const systemMounts = createSessionAttachmentMounts(sessionRepository);
-    const sessionFiles = new SessionFilesService(systemFS, id => systemMounts.forSession(id));
+    // Saved host directories open on first use, exactly like the shared application runtime.
+    const sessionFiles: SessionFilesService = new SessionFilesService(systemFS, id => systemMounts.forSession(id),
+        sourceId => directoryMounts.resolveSource(sourceId));
     await sessionFiles.initialize();
     const directorySource = new CliDirectorySourceProvider(root);
     const directoryMounts = new DirectoryMountService(systemFS, sessionFiles, directorySource);

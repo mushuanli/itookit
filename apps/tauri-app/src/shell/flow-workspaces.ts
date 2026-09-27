@@ -19,6 +19,7 @@ export class TauriFlowWorkspaces implements FlowWorkspaceManager {
     private kernel?: HeadlessKernelRuntime;
     private readonly preparing = new Set<string>();
     private readonly reconciliations = new Map<string, Promise<void>>();
+    private intentsDirectory?: Promise<void>;
     private readonly parent: string;
     constructor(private readonly rootDir: string) { this.parent = `${rootDir.replace(/\/$/, '')}/var/lib/worktrees`; }
     bind(kernel: HeadlessKernelRuntime, services: ApplicationPlatformServices): void { this.kernel = kernel; this.services = services; }
@@ -97,8 +98,12 @@ export class TauriFlowWorkspaces implements FlowWorkspaceManager {
 
     private async reconcileIntents(sessionId: string): Promise<void> {
         if (!this.kernel) throw new Error('Desktop workspace services are not bound');
-        await new TauriFsOps().mkdir(`${this.parent}/.intents`);
+        await this.ensureIntentsDirectory();
         const entries = await invoke<Array<{ name: string; is_directory: boolean }>>('fs_read_dir', { path: `${this.parent}/.intents` });
+        // Retained intents are shared by every Session. Without a candidate file this Session
+        // needs neither its Task list nor its workspace leases, so recovery can skip it.
+        const candidates = entries.filter(entry => !entry.is_directory && /^[0-9a-f-]{36}\.json$/i.test(entry.name));
+        if (candidates.length === 0) return;
         const session = await this.kernel.kernel.inspectSession(sessionId).catch(error => {
             throw new Error(`Cannot inspect Session ${sessionId}; workspace intents are retained in ${this.parent}/.intents. Reopen the Session before retrying.`, { cause: error });
         });
@@ -110,8 +115,7 @@ export class TauriFlowWorkspaces implements FlowWorkspaceManager {
             const value = record?.value ?? initial;
             if (value) claimed.add(parseSaved(value).id);
         }
-        for (const entry of entries) {
-            if (entry.is_directory || !/^[0-9a-f-]{36}\.json$/i.test(entry.name)) continue;
+        for (const entry of candidates) {
             const bytes = await invoke<number[]>('fs_read_file', { path: `${this.parent}/.intents/${entry.name}` });
             const saved = parseSaved(JSON.parse(new TextDecoder().decode(new Uint8Array(bytes))));
             if (saved.grant.sessionId !== sessionId || this.preparing.has(saved.id) || claimed.has(saved.id)) continue;
@@ -158,6 +162,13 @@ export class TauriFlowWorkspaces implements FlowWorkspaceManager {
             commands: new TauriWorkspaceGitRunner(grant.repository, directory), beforeCreate });
     }
     private intentPath(id: string) { return `${this.parent}/.intents/${id}.json`; }
+    /** The retained-intent directory is created once per process instead of per recovered Session. */
+    private async ensureIntentsDirectory(): Promise<void> {
+        this.intentsDirectory ??= (async () => { await new TauriFsOps().mkdir(`${this.parent}/.intents`); })();
+        const pending = this.intentsDirectory;
+        try { await pending; }
+        catch (error) { if (this.intentsDirectory === pending) this.intentsDirectory = undefined; throw error; }
+    }
     private async removeIntent(id: string): Promise<void> {
         await invoke('fs_remove', { path: this.intentPath(id), recursive: false });
         this.preparing.delete(id);

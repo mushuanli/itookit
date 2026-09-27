@@ -42,10 +42,29 @@ async function setup() {
     ] } } as ApplicationPlatformServices;
     const getShared = vi.fn();
     const listTasks = vi.fn(async (): Promise<Array<{ id: string; program: { kind: string }; labels: { kind: string } }>> => []);
-    const kernel = { kernel: { inspectSession: async () => ({ getShared, listTasks }) } } as unknown as HeadlessKernelRuntime;
+    const inspectSession = vi.fn(async () => ({ getShared, listTasks }));
+    const kernel = { kernel: { inspectSession } } as unknown as HeadlessKernelRuntime;
     const workspaces = new TauriFlowWorkspaces('/data'); workspaces.bind(kernel, services);
-    return { workspaces, files, manager, services, kernel, getShared, listTasks };
+    return { workspaces, files, manager, services, kernel, getShared, listTasks, inspectSession };
 }
+
+it('skips the Session Task scan while no retained intent exists', async () => {
+    const { workspaces, inspectSession, listTasks } = await setup();
+    await workspaces.reconcile('s');
+    expect(inspectSession).not.toHaveBeenCalled();
+    expect(listTasks).not.toHaveBeenCalled();
+});
+
+it('still reconciles a retained intent for its owning Session', async () => {
+    const { workspaces, kernel, services, inspectSession } = await setup();
+    await workspaces.prepare('s', { mode: 'worktree' });
+    expect(intents.size).toBe(1);
+    const next = new TauriFlowWorkspaces('/data'); next.bind(kernel, services);
+    await next.reconcile('s');
+    expect(inspectSession).toHaveBeenCalledWith('s');
+    expect(copies.size).toBe(0);
+    expect(intents.size).toBe(0);
+});
 
 it('creates distinct copies for concurrent runs and restores the persisted lease after host reconstruction', async () => {
     const { workspaces, kernel, services } = await setup();

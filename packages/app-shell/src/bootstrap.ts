@@ -260,7 +260,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 navigate: handleNavigationRequest, selected: path => updateHistory(elementId, path, 'replace') });
             const toolbox = module.workbench;
             cleanupFns.push(module.dispose); await toolbox.start(); managerCache.set(elementId, toolbox);
+            // The toolbox renders inside the editor area, so both stages are already painted.
+            options.onWorkspaceReady?.({ editor: editorEl });
             if (initialResourceId) await toolbox.openResource(initialResourceId);
+            options.onEditorReady?.();
             return toolbox;
         }
 
@@ -271,7 +274,17 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 hostContext: { toggleSidebar: collapsed => sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')), navigate: handleNavigationRequest } });
             cleanupFns.push(module.dispose);
             await module.workbench.start(); managerCache.set(elementId, module.workbench);
-            if (initialResourceId) await restoreWorkspaceResource(module.workbench, initialResourceId);
+            // Sidebar is populated from the catalog snapshot now; the editor area mounts later.
+            options.onWorkspaceReady?.({ editor: editorEl });
+            if (initialResourceId) {
+                await restoreWorkspaceResource(module.workbench, initialResourceId);
+                // Lifting the host overlay must not race the editor: wait for its first mount in
+                // the background so boot timing keeps measuring `App 初始化完成`.
+                if (onProgress) void waitForEditorMount(container).then(() => options.onEditorReady?.());
+                else options.onEditorReady?.();
+            } else {
+                options.onEditorReady?.();
+            }
             return module.workbench;
         }
 
@@ -359,11 +372,16 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         // keeping bootstrap decoupled from the concrete VFSUIShell type.
         releaseHitl = setupHitlVfsBridge(sessionManager, (id, waiting) => manager.setNodeWaitingInput(id, waiting));
 
+        // Sidebar is rendered; the editor mounts only if a resource is opened below.
+        options.onWorkspaceReady?.({ editor: editorEl });
         if (initialResourceId && manager.getActiveFilePath() !== initialResourceId) {
             await manager.openFile(initialResourceId);
             // Only wait for editor mount if we actually opened a file —
             // otherwise no editor mounts and we'd hit the 15s timeout.
-            if (onProgress) await waitForEditorMount(container);
+            if (onProgress) void waitForEditorMount(container).then(() => options.onEditorReady?.());
+            else options.onEditorReady?.();
+        } else {
+            options.onEditorReady?.();
         }
 
         return module.workbench;

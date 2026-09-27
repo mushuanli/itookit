@@ -33,11 +33,19 @@ export class SessionFilesService {
 
 
     constructor(private readonly store: IFileSystem,
-        private readonly intrinsicMounts: (sessionId: string) => readonly FileSystemMount[] | Promise<readonly FileSystemMount[]> = () => []) {}
+        private readonly intrinsicMounts: (sessionId: string) => readonly FileSystemMount[] | Promise<readonly FileSystemMount[]> = () => [],
+        /**
+         * Resolve a source that is configured but not registered yet (saved host directories are
+         * opened on first use). Returning undefined keeps the previous "source unavailable" path.
+         */
+        private readonly resolveSource?: (sourceId: string) => Promise<IFileSystem | undefined>) {}
 
     async initialize(): Promise<void> {
         if (!this.store.meta.seq?.transaction) throw new Error('Session namespaces require transactional SeqFiles');
     }
+
+    /** Registered source for a mount id, or undefined while it is still unopened. */
+    source(id: string): IFileSystem | undefined { this.assertOpen(); return this.sources.get(id); }
 
     /** Registration makes a source available to the host; it grants no Session access. */
     registerSource(id: string, source: IFileSystem): void {
@@ -196,7 +204,8 @@ export class SessionFilesService {
             if (system.some(s => at === s.at)) throw new FSError('EACCES', 'Intrinsic mount cannot be overridden');
             const replacement = workspace?.mountId === mount.mountId ? workspace.fs : undefined;
             const root = normalizeVirtualPath(replacement ? '/' : mount.root ?? '/');
-            const fs = replacement ?? this.sources.get(mount.sourceId);
+            // Saved host sources are opened on first use rather than at startup.
+            const fs = replacement ?? this.sources.get(mount.sourceId) ?? await this.resolveSource?.(mount.sourceId);
             try {
                 if (!fs) throw new FSError('EACCES', 'Namespace source is unavailable');
                 if (mount.access === 'rw' && (await fs.capabilitiesAt(root)).readonly) throw new FSError('EROFS', 'Source is read-only');

@@ -1,4 +1,4 @@
-import { initApp, installMobileNavigation, type AppUI } from '@itookit/app-shell';
+import { initApp, installMobileNavigation, windowSessionLeaseToken, type AppUI } from '@itookit/app-shell';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { openIndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import {
@@ -54,6 +54,8 @@ async function main() {
     const runtime = await createApplicationRuntime({
         backend,
         ownerKind: 'web',
+        // Same tab keeps its lease identity across reloads; other tabs keep their own.
+        sessionOwnerToken: windowSessionLeaseToken(),
         kernelPlatform: {
             skillToolHandlerFactory: new BrowserSkillToolHandlerFactory(),
         },

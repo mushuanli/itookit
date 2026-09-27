@@ -30,9 +30,22 @@ export class DirectoryMountService {
             if (saved.version !== 1 || !saved.external || typeof saved.external !== 'object') throw new Error('Incompatible directory preferences');
             this.preferences = saved;
         }
-        for (const [id, path] of Object.entries(this.preferences.external)) {
-            try { await this.connect(id, path); } catch { /* Kept for explicit reconnection. Never substitute another source. */ }
-        }
+        // Saved host directories are connected on first use (`resolveSource`), so startup does not
+        // open a sidecar database for a bookmark no Session mounts yet.
+    }
+    /**
+     * Open a configured host directory the first time a Session needs it.
+     *
+     * `SessionFilesService` calls this while building a Session view; an unreachable source stays
+     * unavailable exactly as the previous eager connect left it, and is retried on the next use.
+     */
+    async resolveSource(sourceId: string): Promise<IFileSystem | undefined> {
+        const registered = this.files.source(sourceId);
+        if (registered) return registered;
+        const path = this.preferences.external[sourceId];
+        if (!path) return undefined;
+        try { await this.connect(sourceId, path); } catch { /* Kept for explicit reconnection. Never substitute another source. */ }
+        return this.files.source(sourceId);
     }
     async dispose(): Promise<void> { this.closed = true; await this.tail.catch(() => {}); }
     async listDirectories(path = '/home/admin'): Promise<string[]> {

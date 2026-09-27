@@ -85,4 +85,21 @@ describe('host application startup', () => {
         }
         await expect(runtime.vfs.openFileSystem('/')).rejects.toThrow();
     });
+
+    it('lets a reload with the same owner token take over its Sessions but keeps other windows out', async () => {
+        const backend = new MemoryBackend();
+        const options = { backend, ownerKind: 'cli' as const, sessionOwnerToken: 'window-token' };
+        const replaced = await createApplicationRuntime(options);
+        const sessionId = await replaced.sessionRepository.createSession('reload');
+        // The replaced page is not disposed: its leases outlive it exactly like a page reload.
+        const reloaded = await createApplicationRuntime(options);
+        const otherWindow = await createApplicationRuntime({ ...options, sessionOwnerToken: 'other-window' });
+        try {
+            await expect(reloaded.sessionRepository.ensureSession(sessionId, 'reload')).resolves.toBe(sessionId);
+            await expect(otherWindow.sessionRepository.ensureSession(sessionId, 'reload'))
+                .rejects.toThrow(/owned by another host/);
+        } finally {
+            await Promise.all([replaced.dispose(), reloaded.dispose(), otherWindow.dispose()]);
+        }
+    });
 });

@@ -8,6 +8,11 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 
 export const THEME_CHANGE_EVENT = 'app:theme-change';
 const THEME_PATH = '/ui/theme.json';
+/**
+ * Mirror of the chosen mode for the next launch's pre-paint script (`index.html`): the shell is
+ * painted from `localStorage` before the VFS-backed preference can be read.
+ */
+const THEME_MIRROR_KEY = 'mindos.theme';
 
 export class ThemeService {
     private mode: ThemeMode = 'system';
@@ -63,6 +68,9 @@ export class ThemeService {
 
     private applyTheme(): void {
         document.documentElement.setAttribute('data-theme', this.getEffective());
+        // Remember the mode (not the resolved colour) so a 'system' choice stays live on the next
+        // launch; failures (private mode, storage disabled) only cost the pre-paint colour.
+        try { window.localStorage.setItem(THEME_MIRROR_KEY, this.mode); } catch { /* keep going */ }
     }
 
     private async loadMode(): Promise<ThemeMode> {

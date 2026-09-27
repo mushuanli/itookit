@@ -183,3 +183,29 @@ it('distinguishes fixed host workspaces from virtual directories with the same v
     await expect(fixed.setWorkspace(f.a, '/home/admin/projects/demo')).rejects.toMatchObject({ code: 'EACCES' });
     expect(await f.files.inspect(f.a)).toEqual(before);
 });
+
+it('opens saved host directories on first use instead of at startup', async () => {
+    const f = await setup();
+    const preferences = '/var/lib/kernel/local-sources/session-directories.json';
+    await f.root.driver.createFile({ parentPath: '/var/lib/kernel/local-sources', name: 'session-directories.json',
+        content: JSON.stringify({ version: 1, external: { 'directory-saved': '/srv/saved', 'directory-gone': '/srv/gone' } }), recursive: true });
+    const openDirectory = vi.fn(async (path: string) => {
+        if (path === '/srv/gone') throw new Error('source offline');
+        return f.root;
+    });
+    const mounts = new DirectoryMountService(f.root, f.files,
+        { openDirectory, selectDirectory: async () => null, dispose: async () => {} });
+    cleanup.push(() => mounts.dispose());
+    await mounts.init();
+    // Startup must not open a sidecar for a bookmark nothing mounts yet.
+    expect(openDirectory).not.toHaveBeenCalled();
+    expect(f.files.source('directory-saved')).toBeUndefined();
+    await expect(mounts.resolveSource('directory-saved')).resolves.toBe(f.root);
+    expect(openDirectory).toHaveBeenCalledWith('/srv/saved');
+    await expect(mounts.resolveSource('directory-saved')).resolves.toBe(f.root);
+    expect(openDirectory).toHaveBeenCalledTimes(1);
+    // An unreachable source stays unavailable instead of failing the Session view.
+    await expect(mounts.resolveSource('directory-gone')).resolves.toBeUndefined();
+    await expect(mounts.resolveSource('directory-unknown')).resolves.toBeUndefined();
+    expect(await f.root.driver.exists(preferences)).toBe(true);
+});

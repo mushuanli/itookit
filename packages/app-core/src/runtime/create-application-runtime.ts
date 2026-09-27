@@ -77,6 +77,12 @@ export interface ApplicationRuntimeOptions {
     llmLogger?: ILLMLogger;
     codexTransport?: CodexAppServerTransport;
     ownerKind?: SessionOwnerKind;
+    /**
+     * Stable token identifying this host window/tab for Session write leases. A reload of the
+     * same window reuses it and may take over the leases its predecessor still holds, while a
+     * second window keeps its own token (default: a fresh random token per runtime).
+     */
+    sessionOwnerToken?: string;
     /** Explicit cross-host clock-error budget for Session leases (default 0). */
     sessionLeaseSkewMs?: number;
     onProgress?(message: string): void;
@@ -113,7 +119,10 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         const ts = performance.now();
         const systemMounts = createSessionAttachmentMounts(sessionRepository);
         cleanupFns.push(() => systemMounts.dispose());
-        const sessionFiles = new SessionFilesService(await vfs.openFileSystem('/'), id => systemMounts.forSession(id));
+        const sessionFiles: SessionFilesService = new SessionFilesService(await vfs.openFileSystem('/'), id => systemMounts.forSession(id),
+            // Saved host directories open on first use: mounting a Session must not pay for
+            // every bookmark at startup.
+            sourceId => directoryMounts.resolveSource(sourceId));
         await traceBoot('sessionFiles.initialize', () => sessionFiles.initialize());
         sessionFiles.registerSource('admin-home', await vfs.openFileSystem('/home/admin'));
         await options.configureSessionFiles?.(sessionFiles);
@@ -121,7 +130,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         cleanupFns.push(() => sessionFiles.dispose());
         let mountChanged: (id: string) => Promise<void> = async () => {};
         let mountGuard: (id: string) => Promise<void> = async () => {};
-        const directoryMounts = new DirectoryMountService(systemFS, sessionFiles, options.directorySourceProvider,
+        const directoryMounts: DirectoryMountService = new DirectoryMountService(systemFS, sessionFiles, options.directorySourceProvider,
             id => mountGuard(id), id => mountChanged(id),
             async (id): Promise<string | undefined> => (await projects.forFolder((await sessionRepository.getManifest(id)).folder))?.project.directory);
         cleanupFns.push(() => directoryMounts.dispose());
@@ -164,14 +173,19 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         const leaseStore = new SessionLeaseStore(systemFS, {
             ...(options.sessionLeaseSkewMs ? { skewMs: options.sessionLeaseSkewMs } : {}),
         });
-        const ownerId = `${options.ownerKind ?? "tauri"}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
-        const excluded = await resumeSessionDeletions(sessionRepository, kernelCore, leaseStore, { id: ownerId, kind: options.ownerKind ?? 'tauri' });
-        const recovery = await recoverSessionsWithLeases(kernelCore, leaseStore,
+        const ownerToken = options.sessionOwnerToken ?? globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+        const ownerId = `${options.ownerKind ?? "tauri"}-${ownerToken}`;
+        const excluded = await traceBoot('resumeSessionDeletions',
+            () => resumeSessionDeletions(sessionRepository, kernelCore, leaseStore, { id: ownerId, kind: options.ownerKind ?? 'tauri' }));
+        // Boot recovery runs one callback per Session; accumulate them so the log attributes
+        // the untraced part of createKernel to a concrete callback instead of leaving a gap.
+        const observed: Record<string, number> = {};
+        const recovery = await traceBoot('recoverSessionsWithLeases', () => recoverSessionsWithLeases(kernelCore, leaseStore,
             { id: ownerId, kind: options.ownerKind ?? 'tauri' }, 10_000, async id => {
-                await projects.adoptSession(id);
-                await options.kernelPlatform?.beforeSessionRecovery?.(id);
-                await kernel.contextGc?.observeSession(id);
-            }, excluded).catch(async error => {
+                await measureCallbacks(observed, 'adoptSession', () => projects.adoptSession(id));
+                await measureCallbacks(observed, 'platformBeforeRecovery', async () => options.kernelPlatform?.beforeSessionRecovery?.(id));
+                await measureCallbacks(observed, 'contextGcObserve', async () => { await kernel.contextGc?.observeSession(id); });
+            }, excluded)).catch(async error => {
                 kernelCore.dispose();
                 const errors: unknown[] = [error];
                 for (const close of [() => kernelCore.waitIdle(), () => kernel.dispose()]) {
@@ -187,6 +201,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         cleanupFns.push(() => recovery.release());
         cleanupFns.push(() => kernel.dispose());
         cleanupFns.push(async () => { kernelCore.dispose(); await kernelCore.waitIdle(); });
+        if (Object.keys(observed).length) console.log(`[Boot]   ↳ beforeRecover totals: ${formatTimings(observed)}`);
         console.log(`[Boot]   ↳ createKernel: +${(performance.now() - ts).toFixed(0)}ms`);
 
         // Inject VFS context so file tools work with the virtual filesystem in browser.
@@ -209,7 +224,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         // Writes are only allowed while this host holds the Session's single-writer lease; the
         // gate acquires a lease on demand so a freshly created Session is writable immediately.
         const { sessionManager, commandBus } = await traceBoot('initializeConversationSystem',
-            () => createConversationSystem({ vfs, agentService, sessionRepository, flowEngine, kernel,
+            () => createConversationSystem({ vfs, systemFS, agentService, sessionRepository, flowEngine, kernel,
                 ensureWritable: async sessionId => !await sessionRepository.isSessionDeletionPending(sessionId) && await recovery.acquireLater(sessionId),
                 flowWorkspaceManager: options.kernelPlatform?.flowWorkspaceManager }));
 
@@ -245,4 +260,15 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         }
         throw error;
     }
+}
+
+/** Time one per-Session recovery callback and add it to the boot breakdown. */
+async function measureCallbacks(timings: Record<string, number>, key: string, run: () => Promise<unknown>): Promise<void> {
+    const started = performance.now();
+    try { await run(); }
+    finally { timings[key] = (timings[key] ?? 0) + (performance.now() - started); }
+}
+
+function formatTimings(timings: Record<string, number>): string {
+    return Object.entries(timings).map(([key, ms]) => `${key}=${ms.toFixed(0)}ms`).join(' ');
 }

@@ -2,6 +2,17 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
+    <script>performance.mark('mindos.document');</script>
+    <script>
+        // Paint the shell in the persisted theme before any module runs. ThemeService mirrors the
+        // chosen mode here ('light' | 'dark' | 'system'); without it the app flashes the
+        // stylesheet default until the VFS-backed preference loads.
+        try {
+            const saved = localStorage.getItem('mindos.theme');
+            document.documentElement.dataset.theme = saved === 'light' || saved === 'dark' ? saved
+                : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        } catch { /* storage unavailable: keep the stylesheet default */ }
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>X1</title>
     <link rel="stylesheet" href="src/styles/index.css" />
@@ -64,6 +75,12 @@
 
 
     <main class="main-content-area">
+        <!-- Boot overlay lives in the content area so the nav/sidebar stay visible from the first
+             paint; main.ts reuses this element (id) and only rewrites the message. -->
+        <div id="__boot-overlay" class="boot-overlay" role="status" aria-live="polite">
+            <div class="boot-overlay__spinner" aria-hidden="true"></div>
+            <div id="__boot-msg" class="boot-overlay__message">正在初始化…</div>
+        </div>
         <div id="home-workspace"     class="workspace-view"></div>
         <div id="llm-workspace"      class="workspace-view active"></div>
         <div id="anki-workspace"     class="workspace-view"></div>
