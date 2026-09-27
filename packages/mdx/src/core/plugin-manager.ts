@@ -230,6 +230,17 @@ export class PluginManager {
     return value;
   }
 
+  async executeTransformHookAsync<T>(hookName: string, initialValue: T, signal?: AbortSignal): Promise<T> {
+    let value = initialValue;
+    for (const callback of this.hooks.get(hookName)?.values() ?? []) {
+      signal?.throwIfAborted();
+      const result = await callback(value);
+      signal?.throwIfAborted();
+      if (result !== undefined) value = result;
+    }
+    return value;
+  }
+
   executeActionHook(hookName: string, payload: any): void {
     this.hooks.get(hookName)?.forEach(cb => cb(payload));
   }

@@ -1,3 +1,4 @@
+import { lexTaskDocument } from '../../renderer/worker-lexer';
 import { lineOffsets, lineNumberAt } from '../../utils/line-offsets';
 /**
  * @file mdx/plugins/interactions/task-list.plugin.ts
@@ -185,12 +186,12 @@ export class TaskListPlugin implements MDxPlugin {
    * 2. 维护一个全局 cursor (指针)，模拟渲染顺序遍历 Token
    * 3. 在源码中定位 Token 的 raw 文本，计算绝对位置
    */
-  private analyzeTaskLocations(markdown: string): void {
+  private analyzeTaskLocations(markdown: string, preparedTokens?: ReturnType<typeof markedLexer>): void {
     this.taskLocations = [];
     this.lineStarts = [0];
     if (!/\[[ xX]\]/.test(markdown)) return;
     this.lineStarts = lineOffsets(markdown);
-    const tokens = markedLexer(markdown);
+    const tokens = preparedTokens ?? markedLexer(markdown);
 
     // 递归遍历器
     const walk = (tokens: any[], cursor: number): number => {
@@ -405,11 +406,13 @@ export class TaskListPlugin implements MDxPlugin {
     context.registerSyntaxExtension(this.createMarkedExtension());
 
     // 监听解析前事件
-    const removeBeforeParse = context.on('beforeParse', ({ markdown }: { markdown: string }) => {
+    const removeBeforeParse = context.on('beforeParse', async ({ markdown, options }: { markdown: string; options?: { signal?: AbortSignal } }) => {
+      const tokens = await lexTaskDocument(markdown, options?.signal);
+      options?.signal?.throwIfAborted();
       this.currentMarkdown = markdown;
       // 关键：在这里调用新的解析器
-      this.analyzeTaskLocations(markdown);
-      return { markdown };
+      this.analyzeTaskLocations(markdown, tokens);
+      return { markdown, options };
     });
     if (removeBeforeParse) this.cleanupFns.push(removeBeforeParse);
 

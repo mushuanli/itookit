@@ -14,7 +14,7 @@
 - 加载：通用取消机制已移入 app-shell/lifecycle；LatestViewLoad 被通用 connector 与 SessionWorkbench 复用。读取失效与底层完成分开，底层完成后才释放资源。
 - 订阅：SubscriptionScope 被两套编辑器装配复用；幂等释放，单个回调失败也继续解除其他订阅，晚注册立即释放。保留业务事件边界；异步资源释放不混入同步订阅。
 - 刷新：SourceAdapter 使用 RefreshScheduler 合并突发变化；执行期间的新变化触发一次尾随刷新，隐藏期间保留失效状态，恢复后补刷新。已接入 SourceChange.parentIds：只刷新受影响且已加载的目录，保留其他子树；根直属项变化保留已有子树，范围未知或隐藏后恢复使用完整快照。fromVFS 为创建、更新、删除、移动、重命名提供父目录范围。
-- 文档：documentProfile 生成不可变的初始文档决策（格式、大文件原因、模式、语法支持、换行、提示）。工厂分析一次，编辑器和核心插件复用；直接实例化编辑器时在 init 分析实际内容。当前不在每次按键时重复分析；手动大文件预览仍可能阻塞，Worker 属于后续独立变更。
+- 文档：documentProfile 生成不可变的初始文档决策（格式、大文件原因、模式、语法支持、换行、提示）。工厂分析一次，编辑器和核心插件复用；直接实例化编辑器时在 init 分析实际内容。当前不在每次按键时重复分析；超过 32 Ki 字符或满足大文件阈值的词法分析走 Worker，手动预览仍需主线程完成 HTML 生成及 DOM/插件更新。
 - 宿主：普通文件 IPC 命令与其测试移入 fs_commands.rs，lib.rs 保留装配与路径策略；scoped_fs/scoped_directory 继续维护独立 grant 边界。读取使用 blocking 线程池和原始字节响应，HTTP 桥兼容 ArrayBuffer。
 
 ## 验收
@@ -24,3 +24,11 @@
 ## 文件列表展示
 
 真实文件通过 fileDetails 展示完整文件名及已有 size；会话保留业务标题且不展示合成节点大小。Engine 与 BrowserSource 两条映射保留字节数；SVG 类型图标统一来自 common，按文件名解析，不读取正文。紧凑列表仍显示大小和修改时间，目录与未知大小显示 —，空文件显示 0 B。项目文件采用目录优先与自然名称排序，置顶图标不替代类型图标。
+
+## 可取消的 Markdown 词法分析
+
+大文档的 marked lexer 和任务位置分析使用独立 Worker；小文档保持同步词法路径以避免线程启动成本。Math、cloze、mention/transclusion 的词法规则提取为共享纯函数，UI 保留原渲染器和状态。自定义 tokenizer 没有 Worker 适配时拒绝大文档预览并提示返回源码，不静默丢弃扩展，也不回退为主线程全文词法分析。
+
+每次渲染拥有 AbortController；替换渲染、切回源码、隐藏和销毁时终止相应 Worker。EditorOptions.signal 只绑定初始化，接管编辑器后解除，避免下次选择取消旧初始化信号后永久禁用该编辑器。保存与持久执行不受此信号控制。beforeParse 支持按顺序等待异步变换；提交 DOM 前检查取消状态。
+
+验证包括同步/Worker HTML 对照、代码围栏排除与表格任务偏移、取消后旧结果不覆盖新 DOM，以及真实构建产物在独立线程解析 293999 字符的 pnpm-lock.yaml。Node 线程测试仅验证产物可执行，不代替 WebKitGTK 性能验收。DOM 注入、扩展渲染回调及流式分块仍在主线程，尚不承诺任意渲染任务低于 50 ms。

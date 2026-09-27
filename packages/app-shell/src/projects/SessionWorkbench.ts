@@ -324,6 +324,7 @@ export class SessionWorkbench implements WorkspaceController {
         this.sidebarUI?.setVisible?.(visible);
         if (!visible) {
             this.cancelViewLoad();
+            this.editor?.cancelPendingRender?.();
             if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = undefined; }
             try { await this.editor?.flushPendingSave?.(); }
             catch (error) { this.report(error); throw error; }
@@ -439,7 +440,7 @@ export class SessionWorkbench implements WorkspaceController {
                         } else {
                             const readOnly = (await context.context.fs.capabilitiesAt(target.path)).readonly;
                             editor = await load.read(async () => editor = await this.fileFactory(mount!, { ...fileContentFormat(target.path), target: { kind: 'file', path: target.path }, files: context.context,
-                                initialContent: content, title: target.path.split('/').pop(), readOnly,
+                                initialContent: content, signal: load.signal, title: target.path.split('/').pop(), readOnly,
                                 hostContext: { toggleSidebar: () => this.sidebarUI?.toggleSidebar(), navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve(),
                                     saveContent: readOnly ? undefined : async (_path, text) => {
                                         // A failed write must never look like a successful save: the

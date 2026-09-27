@@ -1,3 +1,5 @@
+import { lexInWorker, needsWorker } from './worker-lexer';
+import { workerSyntax } from './worker-tokenizers';
 // @mdx/renderer/marked-adapter.ts
 import { Marked, Tokens } from 'marked';
 import { slugify } from '@itookit/common';
@@ -14,11 +16,22 @@ export class MarkedAdapter {
     async parse(
         markdown: string,
         extensions: any[],
-        markedOptions?: any
+        markedOptions?: any,
+        signal?: AbortSignal
     ): Promise<string> {
         const marked = new Marked();
         this.configure(marked, extensions, markedOptions);
-        return await marked.parse(markdown);
+        signal?.throwIfAborted();
+        if (needsWorker(markdown)) {
+            const syntax = workerSyntax([...extensions, markedOptions ?? {}]);
+            const options = { gfm: marked.defaults.gfm ?? true, breaks: marked.defaults.breaks ?? true,
+                pedantic: marked.defaults.pedantic ?? false };
+            marked.use({ async: true, hooks: { provideLexer: (() =>
+                (text: string) => lexInWorker(text, syntax, options, signal)) as any } });
+        }
+        const html = await marked.parse(markdown);
+        signal?.throwIfAborted();
+        return html;
     }
 
     private configure(marked: Marked, extensions: any[], markedOptions?: any): void {

@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import { createLibConfig } from '../../scripts/vite-lib.config';
 
 export default defineConfig(
-  createLibConfig({
+  { ...createLibConfig({
     name: 'MDxEditor',
     fileName: 'mdxeditor',
     rootDir: __dirname,
@@ -44,5 +44,5 @@ export default defineConfig(
       '@codemirror/search': 'CM.search',
       '@codemirror/lang-markdown': 'CM.langMarkdown'
     }
-  })
+  }), base: './' }
 );

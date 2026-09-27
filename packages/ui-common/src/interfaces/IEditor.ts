@@ -87,6 +87,8 @@ export interface EditorHostContext {
 
 // ✨ [重构] 提升 fs 和 nodeId 为核心配置
 export interface EditorOptions {
+    /** Cancels view construction and preview work, never persistence. */
+    signal?: AbortSignal;
     target?: EditorTarget;
     files?: FileSystemContext;
     /** Explicit attachment directory; independent of a document owner. */
@@ -200,6 +202,7 @@ export abstract class IEditor {
 
     /** Save all pending edits; reject without disposing the editor on failure. */
     flushPendingSave?(): Promise<void>;
+    cancelPendingRender?(): void;
 
     /**
      * 手动设置编辑器的脏状态。

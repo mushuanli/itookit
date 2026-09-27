@@ -1,3 +1,4 @@
+import { builtinTokenizer } from '../../renderer/worker-tokenizers';
 // mdx/plugins/cloze/cloze.plugin.ts
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MarkedExtension, Tokens } from 'marked';
@@ -51,20 +52,7 @@ export class ClozePlugin implements MDxPlugin {
           name: 'cloze:cloze',
           level: 'inline',
           start: (src: string) => src.match(/--/)?.index,
-          tokenizer: (src: string): Tokens.Generic | undefined => {
-            const state = this.getContextState(context);
-            const match = src.match(/^--(?:\[([^\]]+)\]\s*)?([\s\S]+?)--(?:\^\^audio:([^^]+)\^\^)?/);
-            if (match) {
-              return {
-                type: 'cloze:cloze',
-                raw: match[0],
-                locator: match[1] || `auto-${state.clozeCounter++}`,
-                content: match[2].trim(),
-                audio: match[3]?.trim(),
-              };
-            }
-            return undefined;
-          },
+          tokenizer: builtinTokenizer('cloze:cloze', () => this.getContextState(context).clozeCounter++),
           renderer: (token: Tokens.Generic) => {
             const audioHtml = token.audio
               ? `<span class="${this.options.className}__audio" data-audio-text="${this.escapeHtml(token.audio)}"><i class="${this.options.audioIconClass}"></i></span>`

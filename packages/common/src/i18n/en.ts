@@ -54,6 +54,8 @@ export const en: LocaleStrings = {
     'ocr.request': "Process this image following the system instructions.",
     'configuration.deleteConfirm': 'Delete the selected {count} configuration items?',
     'vfs.toolbar.directory': 'Folder',
+    'editor.preview.loading': 'Loading preview…',
+    'editor.preview.unavailable': 'Preview is unavailable. Switch back to source to continue editing.',
     'editor.largeDocument.sourceFirst': 'This large document opens as source. Switch to reading mode when you need a preview.',
     'vfs.preview.more': 'Show more ({count})',
     'vfs.preview.collapse': 'Show fewer',

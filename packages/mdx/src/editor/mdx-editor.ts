@@ -57,6 +57,7 @@ export class MDxEditor extends IEditor {
         this.eventBus = new EventBus(['change']);
         this.cmAdapter = new CodeMirrorAdapter();
         this.renderer = new MDxRenderer({
+            signal: config.signal,
             searchMarkClass: config.searchMarkClass,
             nodeId: editorFilePath(config),
             ownerNodeId: editorFilePath(config),
@@ -123,6 +124,7 @@ export class MDxEditor extends IEditor {
         });
 
         if (this.config.title) this.setTitle(this.config.title);
+        this.renderer.finishInitialization();
         this.eventBus.emit('ready');
     }
 
@@ -239,11 +241,13 @@ export class MDxEditor extends IEditor {
 
     async switchToMode(mode: 'edit' | 'render'): Promise<void> {
         if ((this.profile?.format ?? this.config.contentFormat) === 'text' && mode === 'render') return;
+        if (mode === 'edit') this.renderer.cancelPending();
         if (this.modeManager.getMode() === mode) return;
         if (this.isDirty()) {
             await this.save();
         }
         await this.modeManager.switchTo(mode, this._container!, () => this.renderContent());
+        if (this.modeManager.getMode() !== mode) return;
         this.renderer.getPluginManager().emit('modeChanged', { mode });
         this.eventBus.emit('modeChanged', { mode });
     }
@@ -344,7 +348,15 @@ export class MDxEditor extends IEditor {
             renderContainer.replaceChildren(source); return;
         }
         if (renderContainer) {
-            await this.renderer.render(renderContainer, this.getText());
+            renderContainer.textContent = t('editor.preview.loading');
+            try { await this.renderer.render(renderContainer, this.getText()); }
+            catch (error) {
+                if (error instanceof Error && error.name === 'AbortError') return;
+                const notice = document.createElement('p'); notice.setAttribute('role', 'status');
+                notice.textContent = t('editor.preview.unavailable');
+                renderContainer.replaceChildren(notice);
+                console.error('[MDX preview]', error);
+            }
         }
     }
 
@@ -397,6 +409,15 @@ export class MDxEditor extends IEditor {
         return this.printService;
     }
 
+    cancelPendingRender(): void {
+        this.renderer.cancelPending();
+        if (this._container && this.getMode() === 'render') {
+            void this.modeManager.switchTo('edit', this._container, async () => {});
+            this.renderer.getPluginManager().emit('modeChanged', { mode: 'edit' });
+            this.eventBus.emit('modeChanged', { mode: 'edit' });
+        }
+    }
+
     async flushPendingSave(): Promise<void> {
         await this.saveManager.finalSave(
             () => this.getText(),
@@ -416,6 +437,7 @@ export class MDxEditor extends IEditor {
     }
 
     private async destroyNow(): Promise<void> {
+        this.renderer.cancelPending();
         this.isDestroying = true;
 
         try { await this.flushPendingSave(); }

@@ -110,7 +110,7 @@
 |---|---|---|
 | `IChatInputPresenter` | `setLoading()/setConfig()/getConfig()/restoreInput()/focus()` | `ChatInput` |
 | `IHistoryPresenter` | `renderFull()/processEvent()/scrollToBottom()/getSessionElement()` | `HistoryView` |
-| `IEditor`（抽象类） | `init()/destroy()/getText()/setText()/setTitle()/updateNodeId?()/flushPendingSave?()` | `MDxEditor`、`FlowsEditor`、`LLMWorkspaceEditor` |
+| `IEditor`（抽象类） | `init()/destroy()/getText()/setText()/setTitle()/updateNodeId?()/flushPendingSave?()/cancelPendingRender?()` | `MDxEditor`、`FlowsEditor`、`LLMWorkspaceEditor` |
 | `IStreamingController` | `enterStreamingMode()/exitStreamingMode()` | `HistoryView`（经 `StreamController`） |
 | `ICollapseManager` | `toggleSessionCollapse()/setAllCollapsed()/toggleAllFold()` | `HistoryView`（经 `CollapseController`） |
 | `INavigationPresenter` | `toggle()/update()` | `FloatingNavPanel` |
@@ -132,3 +132,5 @@
 `EditorOptions.contentFormat` 区分 `markdown` 与 `text`。AppShell 根据统一文件注册表声明文档别名；默认编辑器将其他文件视为源码，保留编辑与保存能力，禁止 Markdown 预览。大 Markdown 默认源码模式，但仍允许用户显式预览。源码策略不改变 `readOnly` 或文件视图授权。
 
 桌面 `fs_read_file` 和 `directory_read_file` 使用 Tauri 原始 `ArrayBuffer` 响应；后者缺失文件返回 `null`，越界、符号链接或已关闭 grant 仍拒绝访问。旧的完整文件 JSON 数字数组不再是这两个客户端入口的协议。
+
+`EditorOptions.signal` 用于编辑器初始化期间的视图取消；完成初始化后解除绑定。宿主隐藏已创建的编辑器时调用 `cancelPendingRender`，独立于 `flushPendingSave`。取消预览不取消保存或持久任务。

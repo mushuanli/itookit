@@ -107,6 +107,7 @@ export function connectEditorLifecycle(
 
   const teardownNow = async () => {
     if (activeEditor) {
+      activeEditor.cancelPendingRender?.();
       await save();
       editorLease ??= new EditorLease(activeEditor, async () => subscriptions.dispose());
       await editorLease.dispose();
@@ -211,7 +212,7 @@ export function connectEditorLifecycle(
           language: item.metadata.custom?._extension || '',
           ...factoryExtraOptions,
           ...fileContentFormat(item.id),
-          files,
+          files, signal: load.signal,
           hostContext: createHostContext(),
         };
 
@@ -311,6 +312,7 @@ export function connectEditorLifecycle(
     if (!next) {
       viewLoads.cancel();
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      activeEditor?.cancelPendingRender?.();
       await save();
     } else if (pendingItem && activeNode?.id !== pendingItem.id) {
       await handleSessionChange({ item: pendingItem });

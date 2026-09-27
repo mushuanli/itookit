@@ -1,8 +1,9 @@
+import { builtinTokenizer } from '../../renderer/worker-tokenizers';
 // mdx/plugins/autocomplete/mention.plugin.ts
 
 import type { HoverPreviewData } from '@itookit/common';
 import type { Completion } from '@codemirror/autocomplete';
-import type { MarkedExtension, Token } from 'marked';
+import type { MarkedExtension } from 'marked';
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import { AutocompletePlugin } from './autocomplete.plugin';
 
@@ -224,19 +225,7 @@ export class MentionPlugin implements MDxPlugin {
           name: 'mdxLink',
           level: 'inline',
           start: (src: string) => src.indexOf(']('),
-          tokenizer: (src: string): Token | undefined => {
-            // 匹配 [label](mdx://provider/id)
-            const match = src.match(/^\[([^\]]+)\]\(mdx:\/\/([^/]+)\/([^)]+)\)/);
-            if (!match) return undefined;
-
-            return {
-              type: 'mdxLink',
-              raw: match[0],
-              text: match[1],
-              provider: match[2],
-              id: match[3],
-            } as any;
-          },
+          tokenizer: builtinTokenizer('mdxLink'),
           renderer: (token: any) => {
             const uri = `mdx://${token.provider}/${token.id}`;
             return `<a href="${uri}" class="mdx-mention" data-mdx-uri="${uri}" data-provider="${token.provider}" data-id="${token.id}">${token.text}</a>`;
@@ -247,20 +236,7 @@ export class MentionPlugin implements MDxPlugin {
             name: 'mdxTransclusion',
             level: 'block',
             start: (src: string) => src.match(/!@/)?.index,
-            tokenizer(src: string): Token | undefined {
-              const rule = /^!@(\w+):(\S+)(?:\n|$)/;
-              const match = rule.exec(src);
-              if (match) {
-                const [raw, providerKey, id] = match;
-                return {
-                  type: 'mdxTransclusion',
-                  raw,
-                  providerKey,
-                  id,
-                } as any;
-              }
-              return undefined;
-            },
+            tokenizer: builtinTokenizer('mdxTransclusion'),
             renderer(token: any) {
               return `<div class="mdx-transclusion" data-provider-key="${token.providerKey}" data-id="${token.id}">Loading...</div>`;
             },

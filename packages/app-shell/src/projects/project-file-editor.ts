@@ -60,7 +60,7 @@ async function createTextEditor(context: FileSystemContextOwner, path: string, c
     const filename = path.split('/').pop()!;
     return traceBoot('projectFile.editor', () => options.factory(mount, {
         ...fileContentFormat(path), target: { kind: 'file', path }, files: context.context,
-        initialContent: content, readOnly, title: buildRenamedFilename(filename, filename).title,
+        initialContent: content, readOnly, signal: load.signal, title: buildRenamedFilename(filename, filename).title,
         hostContext: { ...options.host,
             saveContent: readOnly ? undefined : async (file, text) => {
                 await fs.driver.writeContent(file, text); options.changed();

@@ -1,3 +1,4 @@
+import { builtinTokenizer } from '../../renderer/worker-tokenizers';
 // mdx/plugins/syntax-extensions/mathjax.plugin.ts
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MarkedExtension, Tokens } from 'marked';
@@ -230,16 +231,7 @@ export class MathJaxPlugin implements MDxPlugin {
           name: 'math-display',
           level: 'block',
           start: (src: string) => src.match(/^\$\$/)?.index,
-          tokenizer: (src: string): Tokens.Generic | undefined => {
-            const match = src.match(/^\$\$([\s\S]+?)\$\$/);
-            if (match) {
-              return {
-                type: 'math-display',
-                raw: match[0],
-                text: match[1].trim(),
-              };
-            }
-          },
+          tokenizer: builtinTokenizer('math-display'),
           renderer: (token: Tokens.Generic) => {
             return `\\[${token.text}\\]`;
           },
@@ -248,16 +240,7 @@ export class MathJaxPlugin implements MDxPlugin {
           name: 'math-inline',
           level: 'inline',
           start: (src: string) => src.match(/\$/)?.index,
-          tokenizer: (src: string): Tokens.Generic | undefined => {
-            const match = src.match(/^\$([^\$\n]+?)\$/);
-            if (match) {
-              return {
-                type: 'math-inline',
-                raw: match[0],
-                text: match[1].trim(),
-              };
-            }
-          },
+          tokenizer: builtinTokenizer('math-inline'),
           renderer: (token: Tokens.Generic) => {
             return `\\(${token.text}\\)`;
           },

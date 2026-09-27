@@ -8,6 +8,7 @@ import type { MDxPlugin } from '../core/types';
 import type { IFileSystem } from '@itookit/vfs-core';
 
 export interface MDxRendererConfig {
+  signal?: AbortSignal;
   searchMarkClass?: string;
   nodeId?: string;
   ownerNodeId?: string;
@@ -33,6 +34,9 @@ export interface RenderOptions {
  * 4. 变化点之前的 DOM 节点保持不动（保留 fold/copy 等交互状态）
  */
 export class MDxRenderer {
+  private renderController = new AbortController();
+  private lifetime?: AbortSignal;
+  readonly cancelPending = (): void => { this.renderController.abort(); };
   private pluginManager: PluginManager;
   private searchHighlighter: SearchHighlighter;
   private markedAdapter: MarkedAdapter;
@@ -48,6 +52,8 @@ export class MDxRenderer {
   private blockWrappers: HTMLElement[] = [];
 
   constructor(config: MDxRendererConfig = {}) {
+    this.lifetime = config.signal;
+    this.lifetime?.addEventListener('abort', this.cancelPending);
     this.instanceId = `renderer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.pluginManager = new PluginManager(this);
     this.searchHighlighter = new SearchHighlighter(config.searchMarkClass || 'mdx-editor-search-highlight');
@@ -80,6 +86,9 @@ export class MDxRenderer {
     markdownText: string,
     options: RenderOptions = {}
   ): Promise<void> {
+    this.cancelPending();
+    this.lifetime?.throwIfAborted();
+    const signal = (this.renderController = new AbortController()).signal;
     this.renderRoot = element;
     element.classList.add('mdx-editor-renderer');
 
@@ -90,17 +99,17 @@ export class MDxRenderer {
 
     const started = performance.now();
     // 1. beforeParse 钩子
-    const beforeResult = this.pluginManager.executeTransformHook('beforeParse', {
+    const beforeResult = await this.pluginManager.executeTransformHookAsync('beforeParse', {
       markdown: markdownText,
-      options,
-    });
+      options: { ...options, signal },
+    }, signal);
 
     const beforeParseDone = performance.now();
     // 2. Markdown → HTML
     const html = await this.markedAdapter.parse(
       beforeResult.markdown,
       this.markedExtensions,
-      options.markedOptions
+      options.markedOptions, signal
     );
 
     const parseDone = performance.now();
@@ -112,6 +121,7 @@ export class MDxRenderer {
 
     const transformDone = performance.now();
     // 4. 注入 DOM
+    signal.throwIfAborted();
     element.innerHTML = afterResult.html;
 
     const domDone = performance.now();
@@ -153,6 +163,9 @@ export class MDxRenderer {
     element: HTMLElement,
     fullMarkdown: string
   ): Promise<void> {
+    this.cancelPending();
+    this.lifetime?.throwIfAborted();
+    const signal = (this.renderController = new AbortController()).signal;
     this.renderRoot = element;
     element.classList.add('mdx-editor-renderer');
 
@@ -188,15 +201,15 @@ export class MDxRenderer {
       const isLastBlock = (blockIndex === newBlocks.length - 1);
 
       // beforeParse 钩子
-      const beforeResult = this.pluginManager.executeTransformHook('beforeParse', {
+      const beforeResult = await this.pluginManager.executeTransformHookAsync('beforeParse', {
         markdown: blockMarkdown,
-        options: { streaming: true, blockIndex },
-      });
+        options: { streaming: true, blockIndex, signal },
+      }, signal);
 
       // 渲染为 HTML
       const html = await this.markedAdapter.parse(
         beforeResult.markdown,
-        this.markedExtensions
+        this.markedExtensions, undefined, signal
       );
 
       // afterRender 钩子
@@ -205,6 +218,7 @@ export class MDxRenderer {
         options: { streaming: true, blockIndex },
       });
 
+      signal.throwIfAborted();
       // 创建包装器
       const wrapper = document.createElement('div');
       wrapper.className = 'mdx-streaming-block';
@@ -237,6 +251,7 @@ export class MDxRenderer {
     }
 
     // 6. 更新 differ 状态
+    signal.throwIfAborted();
     this.streamingDiffer.commit(newBlocks);
   }
 
@@ -297,7 +312,14 @@ export class MDxRenderer {
     return this.instanceId;
   }
 
+  finishInitialization(): void {
+    this.lifetime?.removeEventListener('abort', this.cancelPending);
+    this.lifetime = undefined;
+  }
+
   destroy(): void {
+    this.cancelPending();
+    this.lifetime?.removeEventListener('abort', this.cancelPending);
     if (this.renderRoot) {
       this.searchHighlighter.clear(this.renderRoot);
       this.renderRoot.classList.remove('mdx-editor-renderer');
