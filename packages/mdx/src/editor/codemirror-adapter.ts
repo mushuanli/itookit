@@ -1,5 +1,5 @@
 // @mdx/editor/codemirror-adapter.ts
-import { EditorState, Extension, Compartment, StateEffect, StateField } from '@codemirror/state';
+import { EditorState, Extension, Facet, Compartment, StateEffect, StateField } from '@codemirror/state';
 import { EditorView, Decoration, DecorationSet } from '@codemirror/view';
 import { markdown } from '@codemirror/lang-markdown';
 import { search } from '@codemirror/search';
@@ -47,10 +47,15 @@ const navigationHighlightField = StateField.define<DecorationSet>({
     provide: (field) => EditorView.decorations.from(field),
 });
 
+export const initialLineWrapping = Facet.define<boolean, boolean>({
+    combine: values => values[0] ?? false,
+});
+
 export class CodeMirrorAdapter {
     private view: EditorView | null = null;
     private readOnlyCompartment = new Compartment();
     private searchCompartment = new Compartment();
+    private wrappingCompartment = new Compartment();
 
     /**
      * 创建 EditorView 实例
@@ -71,6 +76,7 @@ export class CodeMirrorAdapter {
             ...(enableMarkdown ? [markdown()] : []),
             this.readOnlyCompartment.of(EditorView.editable.of(true)),
             this.searchCompartment.of([]),
+            this.wrappingCompartment.of([]),
             navigationHighlightField,
             EditorView.domEventHandlers({
                 blur: () => { callbacks.onBlur(); },
@@ -89,10 +95,24 @@ export class CodeMirrorAdapter {
             }),
         ];
 
+        const initial = EditorState.create({ doc: content, extensions: allExtensions });
+        const state = initial.update({ effects: this.wrappingCompartment.reconfigure(
+            initial.facet(initialLineWrapping) ? EditorView.lineWrapping : []
+        ) }).state;
         this.view = new EditorView({
-            state: EditorState.create({ doc: content, extensions: allExtensions }),
+            state,
             parent,
         });
+    }
+
+    getLineWrapping(): boolean {
+        return !!this.view && this.wrappingCompartment.get(this.view.state) === EditorView.lineWrapping;
+    }
+
+    setLineWrapping(enabled: boolean): void {
+        this.view?.dispatch({ effects: this.wrappingCompartment.reconfigure(
+            enabled ? EditorView.lineWrapping : []
+        ) });
     }
 
     getText(): string {

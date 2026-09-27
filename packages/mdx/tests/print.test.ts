@@ -35,6 +35,8 @@ describe('print title', () => {
         const container = document.createElement('div');
         document.body.append(container);
         const editor = Object.assign(Object.create(MDxEditor.prototype), {
+            getMode: () => 'edit',
+            getLineWrapping: () => true,
             config: { title: 'Old', language: '.md' },
             _container: container,
             renderer: { getPluginManager: () => manager },

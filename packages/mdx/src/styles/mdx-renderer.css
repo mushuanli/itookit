@@ -262,3 +262,11 @@
     font-size: 1.5em;
   }
 }
+
+/* Soft wrapping preserves code whitespace and does not reparse Markdown. */
+.mdx-editor-renderer--wrap pre,
+.mdx-editor-renderer--wrap pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}

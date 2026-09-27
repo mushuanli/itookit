@@ -48,6 +48,7 @@ export class MDxEditor extends IEditor {
     private destruction?: Promise<void>;
     private profile?: DocumentProfile;
     private docVersion = 0;
+    private renderLineWrapping = false;
 
     constructor(config: MDxEditorConfig = {}) {
         super();
@@ -329,6 +330,19 @@ export class MDxEditor extends IEditor {
     }
 
     getRenderer(): MDxRenderer { return this.renderer; }
+    getLineWrapping(mode: 'edit' | 'render' = this.getMode()): boolean {
+        return mode === 'edit' ? this.cmAdapter.getLineWrapping() : this.renderLineWrapping;
+    }
+
+    setLineWrapping(enabled: boolean, mode: 'edit' | 'render' = this.getMode()): void {
+        if (mode === 'edit') this.cmAdapter.setLineWrapping(enabled);
+        else {
+            this.renderLineWrapping = enabled;
+            this.modeManager.getRenderContainer()?.classList.toggle('mdx-editor-renderer--wrap', enabled);
+        }
+        this.renderer.getPluginManager().emit('lineWrappingChanged', { mode, enabled });
+    }
+
     getEditorView() { return this.cmAdapter.getRawView(); }
     get container(): HTMLElement | null { return this._container; }
     getRenderContainer(): HTMLElement | null { return this.modeManager.getRenderContainer(); }

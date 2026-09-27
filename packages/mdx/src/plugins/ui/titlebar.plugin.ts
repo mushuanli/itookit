@@ -5,7 +5,7 @@
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MDxEditor } from '../../editor/mdx-editor';
 import type { PluginManager } from '../../core/plugin-manager';
-import { buildRenamedFilename } from '@itookit/common';
+import { t, buildRenamedFilename } from '@itookit/common';
 import type { IFileSystem } from '@itookit/vfs-core';
 
 const replaceBasename = (path: string, filename: string): string => {
@@ -82,6 +82,8 @@ export class CoreTitleBarPlugin implements MDxPlugin {
   private toggleModeBtn: HTMLButtonElement | null = null;
   private titleEl: HTMLInputElement | null = null;
   private currentTitle: string = '';
+  private wrapButton: HTMLButtonElement | null = null;
+  private editor: MDxEditor | null = null;
 
   constructor(options: CoreTitleBarPluginOptions = {}) {
     this.options = options;
@@ -120,8 +122,11 @@ export class CoreTitleBarPlugin implements MDxPlugin {
       this.cleanupFns.push(removeRender);
     }
 
-    const removeModeChange = context.on('modeChanged', ({ mode }: { mode: 'edit' | 'render' }) => {
+    this.cleanupFns.push(context.listen('lineWrappingChanged', () => this.updateWrapButton()));
+
+    const removeModeChange = context.listen('modeChanged', ({ mode }: { mode: 'edit' | 'render' }) => {
       this.updateModeButton(mode);
+      this.updateWrapButton();
     });
 
     if (removeModeChange) {
@@ -137,6 +142,14 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     pluginManager: PluginManager
   }): void {
     const { editor } = payload;
+    this.editor = editor;
+    context.registerTitleBarButton?.({
+      id: 'toggle-line-wrapping',
+      title: t('editor.wrap.label'),
+      icon: t('editor.wrap.label'),
+      location: 'left',
+      onClick: () => editor.setLineWrapping(!editor.getLineWrapping()),
+    });
 
     if (this.options.onSidebarToggle) {
       context.registerTitleBarButton?.({
@@ -317,10 +330,14 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         leftFragment.appendChild(button);
       }
 
+      if (btnConfig.id === 'toggle-line-wrapping') this.wrapButton = button;
       if (btnConfig.id === 'toggle-edit-mode') {
         this.toggleModeBtn = button;
       }
     });
+
+    this.updateWrapButton();
+    this.updateModeButton(editor.getMode());
 
     // 一次性添加所有按钮
     leftGroup.appendChild(leftFragment);
@@ -339,9 +356,13 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     }
   }
 
-  /**
-   * 更新模式切换按钮
-   */
+  private updateWrapButton(): void {
+    if (!this.wrapButton || !this.editor) return;
+    this.wrapButton.setAttribute('aria-pressed', String(this.editor.getLineWrapping()));
+    this.wrapButton.title = t(this.editor.getMode() === 'edit'
+      ? 'editor.wrap.sourceHint' : 'editor.wrap.previewHint');
+  }
+
   private updateModeButton(mode: 'edit' | 'render'): void {
     if (!this.toggleModeBtn) return;
 
@@ -370,6 +391,8 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     this.cleanupFns.forEach(fn => fn());
     this.cleanupFns = [];
     this.toggleModeBtn = null;
+    this.wrapButton = null;
+    this.editor = null;
     this.titleEl = null;
     this.currentTitle = '';
   }

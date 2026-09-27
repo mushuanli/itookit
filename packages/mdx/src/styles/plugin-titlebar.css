@@ -413,3 +413,8 @@
 .mdx-editor-titlebar:empty {
   display: none;
 }
+
+.mdx-editor-titlebar__button[aria-pressed="true"] {
+  border-color: currentColor;
+  background-color: rgba(9, 105, 218, 0.12);
+}

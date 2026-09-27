@@ -1,3 +1,4 @@
+import { initialLineWrapping } from '../../editor/codemirror-adapter';
 /**
  * @file mdx/plugins/core/core-editor.plugin.ts
  * @desc 核心编辑器插件，为 MDxEditor 提供 CodeMirror 6 的基础编辑体验。
@@ -163,9 +164,7 @@ export class CoreEditorPlugin implements MDxPlugin {
     }
 
     // 长行仅在视图中软换行，不向 Markdown 文档插入换行符
-    if (this.options.enableLineWrapping) {
-      extensions.push(EditorView.lineWrapping);
-    }
+    extensions.push(initialLineWrapping.of(this.options.enableLineWrapping));
 
     // 特殊字符高亮（空格、制表符等）
     extensions.push(highlightSpecialChars());

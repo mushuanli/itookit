@@ -14,7 +14,7 @@ it('renames from the actual filename, preserving its suffix until explicitly rep
     };
     const emit = (name: string, payload: unknown) => events.get(name)?.forEach(callback => callback(payload));
     let path = '/notes.prj';
-    const editor = { container, config: { title: 'notes' },
+    const editor = { getMode: () => 'edit', container, config: { title: 'notes' },
         updateNodeId: (next: string) => { path = next; },
         setTitle: (title: string) => emit('setTitle', { title }),
     };
