@@ -1,4 +1,5 @@
 import type { LeaseGuardOptions } from '../../domain/types';
+import type { ISeqFileTransaction } from '@itookit/vfs-core';
 import { assertSharedLeaseTx } from './shared-lease';
 import { enqueueMessageTx, deliverMessageTx, consumeMessageTx, pruneMessagesTx, acknowledgeMessageSettlementTx } from './mailbox-store';
 import { executeResourceTx, type PreparedResourceCommand } from './managed-resources';
@@ -133,9 +134,17 @@ export class SeqFileKernelStore {
 
     /** Resolve existing storage without opening/scheduling the Session or changing metadata. */
     async inspectSessionBinding(id: SessionId): Promise<ResolvedStorageBinding> {
-        const catalog = await this.readCatalog(id);
-        if (!catalog) throw kernelError(KernelErrorCode.SESSION_NOT_FOUND, `Session not found: ${id}`);
-        return this.resolveStorage(catalog.storage);
+        return (await this.inspectSessionStorage(id)).binding;
+    }
+
+    /**
+     * Read the catalog record and resolve its storage in one pass, so callers needing both the
+     * binding reference and the resolved binding do not read the catalog twice.
+     */
+    async inspectSessionStorage(id: SessionId): Promise<{ record: SessionRecord; binding: ResolvedStorageBinding }> {
+        const record = await this.readCatalog(id);
+        if (!record) throw kernelError(KernelErrorCode.SESSION_NOT_FOUND, `Session not found: ${id}`);
+        return { record, binding: await this.resolveStorage(record.storage) };
     }
 
     async openSession(id: SessionId, options: {
@@ -1508,14 +1517,20 @@ export class SeqFileKernelStore {
         }
     }
 
-    async recover(binding: ResolvedStorageBinding, options: import('../../domain/types').RecoveryOptions = {}): Promise<RecoveryReport> {
+    async recover(binding: ResolvedStorageBinding, options: import('../../domain/types').RecoveryOptions = {},
+        knownSession?: SessionRecord): Promise<RecoveryReport> {
         let recoveredTasks = 0;
         let recoveredEffects = 0;
         let expiredAttempts = 0;
-        let tasks = await this.listTaskIds(binding);
-        const session = await this.readSession(binding);
-        tasks = await this.rebuildIndexes(binding, tasks);
-        if (options.takeover) await transaction(binding.fs, async tx => {
+        // One directory scan yields every Task record for this Session. Recovery decisions,
+        // index repair and the wait graph reuse these decoded records instead of re-reading
+        // each Task up to five times through separate round trips.
+        const records = new Map<string, TaskRecord>();
+        for (const task of await this.listTasks(binding)) records.set(task.id, task);
+        // `openSession` already read the Session record; only an online recovery needs a re-read.
+        const session = knownSession ?? await this.readSession(binding);
+        const tasks = await this.recoverProjections(binding, [...records.values()], records);
+        if (options.takeover && [...records.values()].some(needsRecoveryFence)) await transaction(binding.fs, async tx => {
             for (const id of tasks) {
                 const task = await readTaskTx(tx, binding.rootPath, id);
                 if (!task) continue;
@@ -1524,17 +1539,23 @@ export class SeqFileKernelStore {
                     task.currentAttempt = { ...task.currentAttempt, leaseUntil: 0, leaseToken: createId('fence') };
                     changed = true;
                 }
-                for (const [id, effect] of Object.entries(task.effects)) {
+                for (const [effectId, effect] of Object.entries(task.effects)) {
                     if (effect.status !== 'leased' || !effect.currentAttempt) continue;
-                    task.effects[id] = { ...effect, currentAttempt: { ...effect.currentAttempt, leaseUntil: 0, leaseToken: createId('fence') } };
+                    task.effects[effectId] = { ...effect, currentAttempt: { ...effect.currentAttempt, leaseUntil: 0, leaseToken: createId('fence') } };
                     changed = true;
                 }
-                if (changed) await writeTaskTx(tx, binding.rootPath, { ...task, version: task.version + 1, updatedAt: Date.now() });
+                if (changed) {
+                    const next = { ...task, version: task.version + 1, updatedAt: Date.now() };
+                    await writeTaskTx(tx, binding.rootPath, next);
+                    records.set(id, next);
+                }
             }
         });
-        await transaction(binding.fs, tx => recoverWaitGraphTx(tx, binding.rootPath, tasks));
         await this.repairCatalog(session, tasks);
         for (const taskId of tasks) {
+            const known = records.get(taskId);
+            // Untouched Tasks cannot start, cancel or expire anything; skip their reads.
+            if (!known || !needsRecoveryWork(known)) continue;
             const task = await this.readTask(binding, taskId);
             if (await this.cancelFromAncestor(binding, task)) continue;
             recoveredEffects += await this.recoverExpiredEffects(binding, task);
@@ -1571,30 +1592,61 @@ export class SeqFileKernelStore {
         return recovered;
     }
 
-    private async rebuildIndexes(binding: ResolvedStorageBinding, taskIds: string[]): Promise<string[]> {
+    /**
+     * Repair the Task projections instead of rebuilding them. An intact index (the normal case
+     * after a clean shutdown) is only cleaned of projections left by removed Tasks, so a restart
+     * writes nothing; a missing or inconsistent projection is rebuilt densely, which also
+     * renumbers `task-order` slots the Task page reader requires to be contiguous.
+     *
+     * Index repair and the wait graph share **one** transaction: both walk the same index and
+     * both were previously opened separately for every recovered Session.
+     */
+    private async recoverProjections(binding: ResolvedStorageBinding, tasks: TaskRecord[],
+        records: Map<string, TaskRecord>): Promise<string[]> {
         return transaction(binding.fs, async tx => {
-            const staleKeys: string[] = [];
-            const ids = new Set(taskIds);
-            await tx.walkEntries(indexPath(binding.rootPath), entry => {
-                if (entry.key.startsWith('task/')) ids.add(entry.key.slice(5));
-                staleKeys.push(entry.key);
-                return true;
-            });
-            for (const key of staleKeys) await tx.deleteEntry(indexPath(binding.rootPath), key);
-            const existing: string[] = [];
-            for (const taskId of ids) {
-                const task = await readTaskTx(tx, binding.rootPath, taskId);
-                if (task) { await indexTask(tx, binding.rootPath, task); existing.push(taskId); }
-            }
-            return existing;
+            const ids = await this.repairIndexesTx(tx, binding.rootPath, tasks);
+            await recoverWaitGraphTx(tx, binding.rootPath, ids, records);
+            return ids;
         });
     }
 
+    private async repairIndexesTx(tx: ISeqFileTransaction, root: string, tasks: TaskRecord[]): Promise<string[]> {
+        const path = indexPath(root);
+        const rows = new Map<string, string>();
+        await tx.walkEntries(path, row => { rows.set(row.key, row.value); return true; });
+        if (tasks.some(task => !indexTaskIntact(rows, task))) return this.rebuildAllIndexesTx(tx, root, tasks);
+        const expected = new Set(tasks.map(task => `task/${task.id}`));
+        for (const key of rows.keys()) {
+            const id = projectionTaskId(key);
+            if (id !== undefined && !expected.has(`task/${id}`)) await tx.deleteEntry(path, key);
+        }
+        return tasks.map(task => task.id);
+    }
+
+    private async rebuildAllIndexesTx(tx: ISeqFileTransaction, root: string, tasks: TaskRecord[]): Promise<string[]> {
+        const path = indexPath(root), stale: string[] = [];
+        await tx.walkEntries(path, row => { stale.push(row.key); return true; });
+        for (const key of stale) await tx.deleteEntry(path, key);
+        for (const task of tasks) await indexTask(tx, root, task);
+        return tasks.map(task => task.id);
+    }
+
+    /**
+     * Repair the catalog in one transaction.
+     *
+     * Unlike the Task index, reading first is *not* cheaper here: every non-transactional read is
+     * its own transaction on the local filesystem backend, so a compare-then-write would cost two
+     * read transactions to save one write transaction. The transaction only writes what differs,
+     * which keeps catalog subscribers asleep without adding round trips.
+     */
     private async repairCatalog(session: SessionRecord, taskIds: string[]): Promise<void> {
         await transaction(this.catalog.fs, async tx => {
-            await tx.setEntry(catalogPath(this.catalog.rootPath), `session/${session.id}`, encode(session));
+            const path = catalogPath(this.catalog.rootPath), key = `session/${session.id}`, value = encode(session);
+            if (await tx.getEntry(path, key) !== value) await tx.setEntry(path, key, value);
+            const rows = new Map<string, string>();
+            await tx.walkEntries(path, row => { rows.set(row.key, row.value); return true; }, { keyPrefix: 'task/' });
             for (const taskId of taskIds) {
-                await tx.setEntry(catalogPath(this.catalog.rootPath), `task/${taskId}`, session.id);
+                if (rows.get(`task/${taskId}`) !== session.id) await tx.setEntry(path, `task/${taskId}`, session.id);
             }
         });
     }
@@ -1665,16 +1717,17 @@ export class SeqFileKernelStore {
         // A removed storage tree has no Tasks; callers must stay usable for retries.
         if (!await binding.fs.driver.exists(root)) return [];
         const children = await binding.fs.driver.getChildren(root);
-        const entries: Array<{ id: string; value: string }> = [];
-        for (const child of children) {
-            if (child.type !== 'directory') continue;
-            const path = taskPath(binding.rootPath, child.name);
-            // A crash can leave a Task directory without its seq file.
-            if (!await binding.fs.driver.exists(path)) continue;
-            const value = await seq(binding.fs).getEntry(path, TASK_KEY);
-            if (value) entries.push({ id: child.name, value });
-        }
-        return entries.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+        // The directory listing already proved each Task directory exists, so no `exists` stat per
+        // Task (a full metadata read on the desktop).
+        const ids = children.flatMap(child => child.type === 'directory' ? [child.name] : []);
+        if (!ids.length) return [];
+        // One transaction and one batched record read for the whole scan: a per-Task read would cost
+        // its own transaction plus a backend round-trip each (3 IPCs per Task on the desktop).
+        const values = await transaction(binding.fs, tx => tx.getEntriesMany(
+            ids.map(id => ({ fileIdOrPath: taskPath(binding.rootPath, id), key: TASK_KEY }))));
+        // A crash can leave a Task directory without its seq file; the batch read reports that as null.
+        return ids.flatMap((id, index) => values[index] ? [{ id, value: values[index]! }] : [])
+            .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
     }
 
     private async requeueExpired(binding: ResolvedStorageBinding, task: TaskRecord, restart = false): Promise<void> {
@@ -1708,3 +1761,38 @@ export class SeqFileKernelStore {
 }
 
 export { createId, ensureTree } from './store-helpers';
+
+/** Index value `indexTask` writes for a Task, reused to detect an intact projection. */
+function indexTaskValue(task: TaskRecord): string {
+    return encode({ status: task.status, updatedAt: task.updatedAt });
+}
+
+/** Task id a Task projection key belongs to, or undefined for unrelated index keys. */
+function projectionTaskId(key: string): string | undefined {
+    if (key.startsWith('task/')) return key.slice('task/'.length);
+    if (key.startsWith('ready/')) return key.slice('ready/'.length);
+    return undefined;
+}
+
+function indexTaskIntact(rows: ReadonlyMap<string, string>, task: TaskRecord): boolean {
+    if (rows.get(`task/${task.id}`) !== indexTaskValue(task)) return false;
+    if (!rows.has(`task-ordinal/${task.id}`)) return false;
+    return task.status === 'ready' ? rows.has(`ready/${task.id}`) : !rows.has(`ready/${task.id}`);
+}
+
+/** A takeover fence is required only while a live attempt or leased Effect can still run. */
+function needsRecoveryFence(task: TaskRecord): boolean {
+    if (task.currentAttempt) return true;
+    return Object.values(task.effects).some(effect => effect.status === 'leased' && effect.currentAttempt);
+}
+
+/**
+ * Per-Task recovery work is limited to records that can still change: unfinished
+ * ancestors, running attempts and leased Effects. Terminal Tasks without live work
+ * are left untouched, so a clean restart reads no Task a second time.
+ */
+function needsRecoveryWork(task: TaskRecord): boolean {
+    if (task.status === 'running' || task.currentAttempt) return true;
+    if (task.parentTaskId && !isTerminal(task.status)) return true;
+    return Object.values(task.effects).some(effect => effect.status === 'leased');
+}

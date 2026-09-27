@@ -9,6 +9,29 @@ async function close(runtime: HeadlessKernelRuntime) {
     runtime.kernel.dispose(); await runtime.kernel.waitIdle(); await runtime.dispose();
 }
 
+it('observes one Session without enumerating the catalog', async () => {
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const fs = await manager.openFileSystem('/');
+    const runtime = await createKernelRuntime({ systemFS: fs,
+        storageResolver: { kind: 'test', resolve: async reference =>
+            ({ fs, rootPath: (reference.locator as { rootPath: string }).rootPath }) },
+        llmDriver: {} as unknown as IDeviceDriver, recover: false,
+        contextGc: { initialDelayMs: 60_000, intervalMs: 60_000 } });
+    try {
+        for (const id of ['one', 'two', 'three']) {
+            await runtime.kernel.createSession({ id, storage: { kind: 'test', locator: { rootPath: `/sessions/${id}/.kernel` } } });
+        }
+        const list = vi.spyOn(runtime.kernel, 'listSessions');
+        const inspect = vi.spyOn(runtime.kernel, 'inspectSession');
+        await runtime.contextGc!.observeSession('two');
+        expect(list).not.toHaveBeenCalled();
+        expect(inspect).toHaveBeenCalledTimes(1);
+        // A caller that already holds the catalog reference costs no extra read.
+        await runtime.contextGc!.observeSession('three', { kind: 'test', locator: { rootPath: '/sessions/three/.kernel' } });
+        expect(inspect).toHaveBeenCalledTimes(1);
+    } finally { await close(runtime); await manager.dispose(); }
+});
+
 it('automatically collects after restart, respects ownership loss, and retains committed history', async () => {
     const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
     const fs = await manager.openFileSystem('/');

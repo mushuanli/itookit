@@ -955,16 +955,26 @@ export async function hasCancelledAncestorTx(tx: ISeqFileTransaction, root: stri
     return false;
 }
 
-/** Rebuild projections from task records without discarding legacy dependency edges. */
-export async function recoverWaitGraphTx(tx: ISeqFileTransaction, root: string, ids: string[]): Promise<void> {
+/**
+ * Rebuild projections from task records without discarding legacy dependency edges.
+ *
+ * `records` carries the Task records the caller already read while the Session was
+ * idle and leased; entries are reused instead of re-read, and any Task this pass
+ * rewrites is written back into the map so the later passes see the new version.
+ * Ids discovered through the index (Tasks created after the caller's scan) are
+ * still read inside the transaction.
+ */
+export async function recoverWaitGraphTx(tx: ISeqFileTransaction, root: string, ids: string[],
+    records?: Map<string, TaskRecord>): Promise<void> {
     // Include tasks created after the caller enumerated directories/indexes.
     const allIds = new Set(ids);
     await tx.walkEntries(indexPath(root), row => { allIds.add(row.key.slice(5)); return true; }, { keyPrefix: 'task/' });
     const keys: string[] = [];
     await tx.walkEntries(graphPath(root), row => { keys.push(row.key); return true; }, { keyPrefix: 'wait/' });
     for (const key of keys) await tx.deleteEntry(graphPath(root), key);
+    const read = async (id: string): Promise<TaskRecord | null> => records?.get(id) ?? await readTaskTx(tx, root, id);
     for (const id of allIds) {
-        const task = await readTaskTx(tx, root, id);
+        const task = await read(id);
         if (!task) continue;
         if (task.dependencies) await writeDependencyEdges(tx, root, id, task.dependencies);
         if (task.status === 'waiting') {
@@ -973,13 +983,14 @@ export async function recoverWaitGraphTx(tx: ISeqFileTransaction, root: string, 
                 next.version = task.version + 1; next.updatedAt = Date.now();
                 await writeTaskTx(tx, root, next);
                 await indexTask(tx, root, next);
+                records?.set(id, next);
                 await appendEventTx(tx, root, task.sessionId, id,
                     next.status === 'ready' ? 'task.wait.satisfied' : 'task.wait.progress');
             }
         }
     }
     for (const id of allIds) {
-        const task = await readTaskTx(tx, root, id);
+        const task = await read(id);
         if (task && isTerminal(task.status)) {
             await advanceDependants(tx, root, task);
             await wakeTaskWaiters(tx, root, task);

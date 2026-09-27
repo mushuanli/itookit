@@ -1,7 +1,8 @@
 import { createContextGc, scheduleContextGc, validateContextGcSchedule, type ContextGcOptions, type ContextGcPolicy,
     type ContextGcResult, type ContextGcScheduleOptions } from '@itookit/context';
 import { createTaskContextStorage } from '@itookit/kernel-adapters';
-import type { Kernel, ResolvedStorageBinding, TaskListQuery } from '@itookit/durable-kernel';
+import { KernelError, KernelErrorCode } from '@itookit/durable-kernel';
+import type { Kernel, ResolvedStorageBinding, StorageBindingRef, TaskListQuery } from '@itookit/durable-kernel';
 
 export interface RuntimeContextGcOptions extends ContextGcScheduleOptions {
     policy?: ContextGcPolicy;
@@ -40,12 +41,25 @@ class ContextMaintenance {
         this.scheduler ??= scheduleContextGc(async () => { await this.collect(); }, this.options);
     };
 
-    /** Called only after the host acquires write ownership or authorizes recovery. */
-    async observeSession(sessionId: string): Promise<void> {
-        for await (const session of this.kernel().listSessions()) {
-            if (session.id !== sessionId) continue;
-            this.observe(sessionId, await this.kernel().storageResolvers.resolve(session.storage.kind).resolve(session.storage));
-            return;
+    /**
+     * Called only after the host acquires write ownership or authorizes recovery.
+     *
+     * `storage` is the catalog binding reference when the caller already holds the Session
+     * record (recovery scans do); otherwise exactly that one Session is inspected, so
+     * observing N Sessions never enumerates the catalog N times.
+     */
+    async observeSession(sessionId: string, storage?: StorageBindingRef): Promise<void> {
+        const reference = storage ?? await this.bindingReference(sessionId);
+        if (!reference) return;
+        this.observe(sessionId, await this.kernel().storageResolvers.resolve(reference.kind).resolve(reference));
+    }
+
+    /** A Session without a catalog record cannot be observed; removal may have interrupted it. */
+    private async bindingReference(sessionId: string): Promise<StorageBindingRef | undefined> {
+        try { return (await this.kernel().inspectSession(sessionId)).storage; }
+        catch (error) {
+            if (error instanceof KernelError && error.code === KernelErrorCode.SESSION_NOT_FOUND) return undefined;
+            throw error;
         }
     }
 

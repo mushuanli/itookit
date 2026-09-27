@@ -81,20 +81,38 @@ describe('durable harness protocols', () => {
         const first = await store.createTask(binding, 's', spec);
         const second = await store.createTask(binding, 's', spec);
         await fs.driver.createDirectory({ name: 'unfinished', parentPath: `${binding.rootPath}/tasks` });
-        const paths = new Set([taskPath(binding.rootPath, first.id), taskPath(binding.rootPath, second.id)]);
-        const reads = vi.fn((path: string, key: string) => fs.meta.seq!.getEntry(path, key));
+        const scan = vi.fn();
+        const scanning = (tx: any) => new Proxy(tx, { get(target, key) {
+            if (key !== 'getEntriesMany') {
+                const value = Reflect.get(target, key);
+                return typeof value === 'function' ? value.bind(target) : value;
+            }
+            return (requests: ReadonlyArray<{ fileIdOrPath: string; key: string }>) => {
+                scan(requests);
+                return tx.getEntriesMany(requests);
+            };
+        } });
+        const scannedIds = () => scan.mock.calls.flatMap(([requests]) => requests)
+            .filter(request => request.key === 'record')
+            .map(request => request.fileIdOrPath.split('/tasks/')[1]?.replace('/task.seq', '') ?? request.fileIdOrPath)
+            .sort();
         const measured = { ...binding, fs: new Proxy(fs, { get(target, key) {
-            return key === 'meta' ? { ...fs.meta, seq: { ...fs.meta.seq, getEntry: reads } } : Reflect.get(target, key, target);
+            return key === 'meta' ? { ...fs.meta, seq: { ...fs.meta.seq,
+                transaction: (operation: any) => fs.meta.seq!.transaction!(tx => operation(scanning(tx))) } }
+                : Reflect.get(target, key, target);
         } }) };
         {
             const listed = await store.listTasks(measured);
             expect(listed.map(task => task.id)).toEqual([first.id, second.id].sort());
-            expect(reads.mock.calls.filter(([path, key]) => paths.has(path) && key === 'record')).toHaveLength(2);
+            // One batched read for the whole scan; the crash leftover is probed but yields no Task.
+            expect(scan).toHaveBeenCalledTimes(1);
+            expect(scannedIds()).toEqual([first.id, second.id, 'unfinished'].sort());
             await store.signalTask(binding, first.id, { type: 'changed', payload: 'new' });
-            reads.mockClear();
+            scan.mockClear();
             const updated = await store.listTasks(measured);
             expect(updated.find(task => task.id === first.id)?.version).toBe(first.version + 1);
-            expect(reads.mock.calls.filter(([path, key]) => paths.has(path) && key === 'record')).toHaveLength(2);
+            expect(scan).toHaveBeenCalledTimes(1);
+            expect(scannedIds()).toEqual([first.id, second.id, 'unfinished'].sort());
         }
     });
 

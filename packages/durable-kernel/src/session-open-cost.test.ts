@@ -3,6 +3,21 @@ import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { Kernel } from './application/kernel';
 import { ManagedResourceStore } from './infrastructure/seqfile/managed-resources';
 import { DurablePoller } from './runtime/durable-poller';
+import type { DurableTaskProgram } from './domain/types';
+
+/** A program that finishes on init, so a test Session can hold only terminal Tasks. */
+function completedProgram(): DurableTaskProgram<null, string, string> {
+    return {
+        manifest: { kind: 'test.echo', version: '1' },
+        init(input) { return { state: null, next: { type: 'complete', output: input } }; },
+        reduce() { throw new Error('Unexpected reduce'); },
+    };
+}
+
+/** Paths passed as the first argument to each spy, regardless of the spy's exact type. */
+function firstArguments(spies: Array<{ mock: { calls: unknown[][] } }>): string[] {
+    return spies.flatMap(spy => spy.mock.calls.map(call => String(call[0])));
+}
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
@@ -61,4 +76,92 @@ it('uses the deadline returned by a poll and wakes again on an explicit change',
         expect(nextDelay).not.toHaveBeenCalled();
         poller.start('s'); await vi.advanceTimersByTimeAsync(0); expect(poll).toHaveBeenCalledTimes(3);
     } finally { poller.dispose(); }
+});
+
+it('recovers a clean Session without rewriting Task records, index projections or catalog rows', async () => {
+    const backend = new MemoryBackend();
+    const { manager } = await createVFS({ rootBackend: backend });
+    const fs = await manager.openFileSystem('/');
+    const storage = { kind: 'test', locator: { rootPath: '/session' } };
+    const resolver = { kind: 'test', async resolve() { return { fs, rootPath: '/session' }; } };
+    const owner = new Kernel({ catalog: { fs, rootPath: '/catalog' }, maxConcurrent: 1, pollMs: 0 });
+    const reader = new Kernel({ catalog: { fs, rootPath: '/catalog' }, maxConcurrent: 0, pollMs: 0 });
+    for (const kernel of [owner, reader]) {
+        kernel.registerStorageResolver(resolver);
+        kernel.registerProgram(completedProgram());
+    }
+    try {
+        await owner.initialize();
+        const session = await owner.createSession({ id: 's', storage });
+        for (let index = 0; index < 3; index += 1) {
+            await session.submit({ program: { kind: 'test.echo', version: '1' }, input: `t${index}`, requestId: `r${index}` });
+        }
+        await owner.waitIdle();
+        owner.dispose(); await owner.waitIdle();
+        await reader.initialize();
+        // The first recovery may repair projections left behind by the completing Kernel.
+        await reader.recoverSessions(['s'], { takeover: true });
+        const transactions = vi.spyOn(backend.records, 'transaction');
+        const batch = vi.spyOn(backend.records, 'getRecordFieldsMany');
+        const reads = [
+            vi.spyOn(backend.records, 'getRecordField'), vi.spyOn(backend.records, 'getRecordFields'),
+            vi.spyOn(backend.records, 'walkRecordFields'), vi.spyOn(backend.records, 'queryRecordFields'),
+        ];
+        const writes = [
+            vi.spyOn(backend.records, 'setRecordField'), vi.spyOn(backend.records, 'setAllRecordFields'),
+            vi.spyOn(backend.records, 'deleteRecordField'), vi.spyOn(backend.records, 'clearRecordFields'),
+        ];
+        await reader.recoverSessions(['s'], { takeover: true });
+        const written = firstArguments(writes), read = firstArguments(reads);
+        expect(written.filter(path => path.includes('/tasks/'))).toEqual([]);
+        expect(written.filter(path => path.includes('/index.seq'))).toEqual([]);
+        expect(written.filter(path => path.includes('/catalog.seq'))).toEqual([]);
+        // Every Task record is read once for the whole recovery, in one batched read.
+        expect(batch.mock.calls.flatMap(([requests]) => requests)
+            .filter(request => request.path.includes('/tasks/') && request.field === '__vfs_seq__:record')).toHaveLength(3);
+        expect(read.filter(path => path.includes('/tasks/'))).toHaveLength(0);
+        // Index repair and the wait graph share one transaction; the deadline reuse and the
+        // Session-record pass-through keep the whole clean recovery inside this budget.
+        expect(transactions.mock.calls.length).toBeLessThanOrEqual(12);
+    } finally {
+        owner.dispose(); reader.dispose();
+        await Promise.all([owner.waitIdle(), reader.waitIdle()]);
+        await manager.dispose();
+    }
+});
+
+it('rebuilds a damaged Task index densely so the Task page stays readable', async () => {
+    const backend = new MemoryBackend();
+    const { manager } = await createVFS({ rootBackend: backend });
+    const fs = await manager.openFileSystem('/');
+    const storage = { kind: 'test', locator: { rootPath: '/session' } };
+    const resolver = { kind: 'test', async resolve() { return { fs, rootPath: '/session' }; } };
+    const owner = new Kernel({ catalog: { fs, rootPath: '/catalog' }, maxConcurrent: 1, pollMs: 0 });
+    const reader = new Kernel({ catalog: { fs, rootPath: '/catalog' }, maxConcurrent: 0, pollMs: 0 });
+    for (const kernel of [owner, reader]) {
+        kernel.registerStorageResolver(resolver);
+        kernel.registerProgram(completedProgram());
+    }
+    try {
+        await owner.initialize();
+        const session = await owner.createSession({ id: 's', storage });
+        const ids: string[] = [];
+        for (let index = 0; index < 3; index += 1) {
+            ids.push((await session.submit({ program: { kind: 'test.echo', version: '1' }, input: `t${index}`, requestId: `r${index}` })).id);
+        }
+        await owner.waitIdle();
+        owner.dispose(); await owner.waitIdle();
+        // A projection that never committed leaves the index inconsistent with the records.
+        await fs.meta.seq!.setEntry('/session/index.seq', `task/${ids[1]}`, JSON.stringify({ status: 'running', updatedAt: 0 }));
+        await reader.initialize();
+        await reader.recoverSessions(['s'], { takeover: true });
+        const page = await reader.listSessionTaskPage('s', { limit: 10 });
+        expect(page.items.map(task => task.id).sort()).toEqual([...ids].sort());
+        const inspection = await reader.inspectSession('s');
+        expect(await inspection.listTasks()).toHaveLength(3);
+    } finally {
+        owner.dispose(); reader.dispose();
+        await Promise.all([owner.waitIdle(), reader.waitIdle()]);
+        await manager.dispose();
+    }
 });

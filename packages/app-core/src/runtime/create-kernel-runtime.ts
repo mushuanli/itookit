@@ -109,7 +109,7 @@ export async function createKernelRuntime(
         await options.beforeRecover?.(runtime);
         if (options.recover !== false) {
             await kernel.recover(options.recover === true || options.recover === undefined ? {} : options.recover);
-            if (contextGc) for await (const session of kernel.listSessions()) await contextGc.observeSession(session.id);
+            if (contextGc) for await (const session of kernel.listSessions()) await contextGc.observeSession(session.id, session.storage);
         }
         return runtime;
     } catch (error) {

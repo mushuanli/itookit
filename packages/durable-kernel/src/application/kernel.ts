@@ -119,6 +119,8 @@ export class Kernel implements KernelRegistration {
     private readonly store: SeqFileKernelStore;
     /** Task list read during the current poll tick, shared until nextWakeDelay consumes it. */
     private readonly tickTasks = new Map<SessionId, TaskRecord[]>();
+    /** Resource deadlines already computed by this tick's sweeps, reused instead of re-reading. */
+    private readonly tickManaged = new Map<SessionId, { kernel: number | undefined; session: number | undefined }>();
     private readonly workerId: string;
     private readonly maxConcurrent: number;
     private readonly maxConcurrentEffects: number;
@@ -206,6 +208,7 @@ export class Kernel implements KernelRegistration {
     dispose(): void {
         this.disposed = true;
         this.tickTasks.clear();
+        this.tickManaged.clear();
         this.poller.dispose();
         this.resourcePoller.dispose();
         this.managedResources.dispose();
@@ -293,8 +296,10 @@ export class Kernel implements KernelRegistration {
 
     /** Inspect persisted records without registering listeners or starting execution. */
     async inspectSession(id: SessionId) {
-        const binding = await this.store.inspectSessionBinding(id);
-        return { id, listTasks: () => this.store.listTasks(binding),
+        const { record, binding } = await this.store.inspectSessionStorage(id);
+        // The catalog binding reference is returned alongside the resolved binding so a caller can
+        // observe one Session without enumerating every other Session record.
+        return { id, storage: record.storage, listTasks: () => this.store.listTasks(binding),
             getShared: <T extends import('../domain/types').JsonValue>(key: string) => this.store.getShared<T>(binding, key),
             attachTask: async <O = unknown>(taskId: string): Promise<TaskHandle<O>> => {
                 await this.store.readTask(binding, taskId);
@@ -333,7 +338,8 @@ export class Kernel implements KernelRegistration {
         if (options.takeover && (this.active || this.activeEffects || this.draining.size || !this.poller.isIdle))
             throw new Error('Takeover recovery requires an idle Kernel before opening sessions');
         const opened = await this.store.openSession(sessionId);
-        const report = await this.store.recover(opened.binding, options);
+        // `openSession` already read the record; pass it so recovery does not read it again.
+        const report = await this.store.recover(opened.binding, options, opened.record);
         await this.managedResources.recover('kernel', options.takeover);
         await this.managedResources.recover(`session:${sessionId}`, options.takeover);
         this.rememberBinding(sessionId, opened.binding);
@@ -358,7 +364,7 @@ export class Kernel implements KernelRegistration {
         const restored: Array<{ id: string; binding: ResolvedStorageBinding }> = [];
         for (const id of new Set(sessionIds)) {
             const opened = await this.store.openSession(id);
-            mergeReport(total, await this.store.recover(opened.binding, options));
+            mergeReport(total, await this.store.recover(opened.binding, options, opened.record));
             restored.push({ id, binding: opened.binding });
         }
         await this.managedResources.recover('kernel', options.takeover);
@@ -872,8 +878,12 @@ export class Kernel implements KernelRegistration {
         // After recovery, share one task scan with effect dispatch and wake calculation.
         // Recovery retains its own fresh transactional reads and ownership checks.
         this.tickTasks.delete(sessionId);
-        await this.managedResources.sweep('kernel');
-        await this.managedResources.sweep(`session:${sessionId}`);
+        // Both sweeps already compute their next deadline; keep them for nextWakeDelay so an
+        // idle tick does not open two more transactions to read the same rows again.
+        this.tickManaged.set(sessionId, {
+            kernel: await this.managedResources.sweep('kernel'),
+            session: await this.managedResources.sweep(`session:${sessionId}`),
+        });
         const binding = await this.binding(sessionId);
         const session = await this.store.sessionRecord(binding);
         const status = session.status;
@@ -947,7 +957,12 @@ export class Kernel implements KernelRegistration {
             at = Math.min(at, message.nextAttemptAt ?? now);
             if (message.expiresAt !== undefined) at = Math.min(at, message.expiresAt);
         }
-        for (const scope of ['kernel', `session:${sessionId}`]) {
+        const swept = this.tickManaged.get(sessionId);
+        this.tickManaged.delete(sessionId);
+        if (swept) {
+            if (swept.kernel !== undefined) at = Math.min(at, swept.kernel);
+            if (swept.session !== undefined) at = Math.min(at, swept.session);
+        } else for (const scope of ['kernel', `session:${sessionId}`]) {
             const deadline = await this.managedResources.nextDeadline(scope);
             if (deadline !== undefined) at = Math.min(at, deadline);
         }

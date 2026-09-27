@@ -1,5 +1,17 @@
 # 启动故障与运行日志
 
+## 2026-09-27 启动等待链优化
+
+桌面在 HTML head 记录 `mindos.document`，入口模块及其静态依赖执行后写入 `frontend.bootstrap.entry`：`timeOrigin` 为页面时间原点，`documentMs` / `entryMs` 为相对时刻，`documentToEntryMs` 包含资源加载和模块执行，`resourceCount` 为已记录资源数。结合 Rust `process.start` / `app.ready` 可区分页面前与页面内的等待；该区间不能直接归因成 Vite 编译时间。原有 `bootstrap.ready` 仍只度量 JS bootstrap，不能替代端到端或首帧时间。
+
+会话导航在整个投影内复用一次 folders / sessions 快照：根目录读取不再自我作废快照，文件夹 `stat()`、`ProjectNavigation.sync()/refresh()` 与 `ProjectService.list()/forFolder()` 都从同一份 `navigation()` 派生，启动实测 `listFolders()` 由 25 次降到 3 次、连续两次根读由 2 次 `repository.list()` 降到 1 次（sidebar 根读与项目导航各一次属跨层，未合并）。仓库变更、Kernel 结构事件、关闭浏览器或工作台刷新使快照失效；失败读取可重试。权衡：根投影与文件夹投影一样只在显式刷新时看到其它宿主实例的写入。快照仅用于导航投影，`SessionRepository.list()` 不做长期缓存，恢复和跨实例持久读取仍读存储。manifest 每批最多 64 个并发读取，所有读取结束后才提交或回滚事务，保留不完整 Session 跳过和格式错误失败语义。
+
+Flow invocation 恢复先检查持久调用记录，空会话不再探测写租约或读取 Task 列表；有调用的会话仍先通过写入门，再重新读取恢复后的记录。`traceBoot` 在 console 分别记录 `agentService.init`、`sessionEngine.init`、`promptHistory.init`、`flowInvocations.recover`、`sessionWorkbench.sidebar`、`sessionWorkbench.currentProject`、`sessionWorkbench.projectNavigation`，用于拆解会话系统及首个工作区等待。
+
+桌面正常窗口关闭会阻止立即销毁 WebView，等待 `app.destroy()` 完成消费者、Kernel、租约及数据源清理后再销毁窗口；重复关闭请求合并。此路径需要 `core:window:allow-destroy`，需重启 Rust 宿主加载权限。强制结束进程和页面刷新仍依靠既有租约过期及事务代次协议，不能承诺执行异步关闭清理。
+
+基线日志 `1790468714451-924631.jsonl` 的 `process.start → frontend.bootstrap.ready` 为 9402 ms，其中 `app.ready →` 首条 bootstrap 记录为 5603 ms。到 bootstrap ready 为止记录了 10 次宿主 checkpoint、报告耗时合计 7 ms，均 `busy=0`；checkpoint 在 `sidecar_finish` 内执行，不是单独增加的前端 IPC。该基线不能用于推算本次改动后的速度，需同 profile、同路由和展开状态复测。
+
 ## 已确认的故障与修复边界
 
 Linux 实际桌面日志展开后的错误为 `Filesystem sources could not be opened → Filesystem source root failed → (code: 5) database is locked`。这是启动阶段 root SQLite 写锁冲突，与 Session 编辑器重复绑定是不同路径；仅凭锁错误不能确定所有锁持有者。
@@ -80,3 +92,43 @@ CLI 使用 `uncaughtExceptionMonitor` 记录致命异常，不安装吞错的异
 桌面新增 `frontend.session.load.ready`，一次记录 Session 编辑器的 `layout`、`bindSession`、`componentsAndSettings`、`restoreAndRender`、`branches` 分段和总耗时。每个分段表示刚完成的步骤，与 bootstrap 的下一阶段标签不同。它衡量 init 等待链，不包含路由准备、后台 Task 恢复完成、所有异步 Markdown 完成或浏览器首帧；诊断写入不阻塞编辑器 ready。
 
 首次打开 Session 时，`branches` 阶段使用 `loadSession` 已读取的 manifest 初始化分支指示器，不再额外调用 `vcs.branch.list`；分支变更事件仍会刷新列表。因此该阶段现在只反映本地初始化耗时，不能再用于衡量分支数据库读取延迟。
+
+## 2026-09-27 恢复投影与首屏等待链（第二轮）
+
+Kernel 恢复不再为每个 Task 反复读取记录：一次目录扫描解出全部 `TaskRecord`，接管栅栏只在存在存活 attempt 或 leased Effect 时进入事务；索引改为比对后修复，干净重启不写任何投影，投影缺失或不一致时才按原逻辑稠密重建（同时重建 `task-order` 槽位，`listTaskPage` 要求其连续）；catalog 的 `session/`、`task/` 记录也在写前比对。等待图重建复用同一批记录，只有未完成父任务、运行中 attempt 或 leased Effect 的 Task 才会在末段被重新读取。回归在 `packages/durable-kernel/src/session-open-cost.test.ts`：旧实现在一次干净恢复中写入 25 处投影，改动后为 0 次写、每个 Task 只读一次；另有用例覆盖投影损坏时的稠密重建与 Task 分页可读性。
+
+Flow invocation 恢复不再为每个 Session 额外调用 `sessionStat`（catalog 记录的 `status` 已足够判断 open/archived），并把已读到的持久记录传给 `list()`，避免同一前缀被 `listShared` 两次；损坏存储的 Session 跳过并留下一条告警，与原 `sessionStat` 的容错语义一致。
+
+Context GC 的 `observeSession` 不再枚举全部 Session 寻找一条记录：调用方已持有 catalog 记录时直接传 `storage`（`create-kernel-runtime` 的恢复循环），否则只 `inspectSession` 该 Session（`Kernel.inspectSession` 新增返回 `storage` 绑定引用），观测 N 个 Session 的目录枚举从 O(N²) 降为 0/O(N)。
+
+桌面 workspace intent 核对在没有待处理 intent 文件时直接返回（不再 inspect Session、读全部 Task 与 workspace lease），`.intents` 目录每个进程只创建一次。LLM 设备节点按每批 8 个并发创建（父目录先建），节点数很多时不会无限并发。`VFSUIShell.start()` 新增 `vfsUi.loadData` / `vfsUi.restoreExpansion` 两个 `traceBoot`，用于区分侧栏读数据与展开恢复；`create-application-runtime` 新增 `resumeSessionDeletions`、`recoverSessionsWithLeases` 两个 `traceBoot`，以及 `beforeRecover totals`（`adoptSession` / `platformBeforeRecovery` / `contextGcObserve` 逐 Session 累加后打印一次，避免逐 Session 刷屏）。
+
+`createVFS` 的额外挂载改走 `mountBackends`：互不相关的后端并发 `prepare`（init + 根校验），再按声明顺序 `register`，因此 `mountId` 与 `listMounts()` 顺序保持确定；准备阶段失败时关闭本次已准备但未注册的后端（`close` 幂等），注册阶段失败只关闭尚未注册的尾部。原来的单点 `mountBackend` 仍是 `prepare + register`，语义不变。回归在 `packages/vfs-core/tests/11-mount.test.ts`：批量挂载保持声明顺序与不同 ID、失败时关闭已准备后端、同批重复路径拒绝并关闭未被注册的那个。注意基线 `IO after createVFS: stat=9` 说明该阶段读取很少，收益主要来自并发准备而非减少调用，需同场景桌面数据确认。
+
+### 2026-09-27 第三轮：重载身份、目录懒连接与调用标记
+
+租约标识改为**按窗口稳定**：宿主通过 `createApplicationRuntime({ sessionOwnerToken })` 传入，桌面端与 Web 端都用 `windowSessionLeaseToken()`（`app-shell/session-owner.ts`，存 `sessionStorage`）。同一窗口重载后复用同一 owner，可立即接管上一页仍持有的租约，不再出现"重载后 Session 全部只读、Kernel 恢复被跳过到 TTL 过期"；不同窗口/标签页仍各自独立。存储不可用时退回每次随机 token（改动前行为）。回归：`packages/app-core/tests/application-runtime.test.ts`「同 token 接管、异 token 拒绝」、`packages/app-shell/tests/session-owner.test.ts`。
+
+已保存宿主目录改为**首次使用时连接**：`DirectoryMountService.init()` 只读偏好，不再为每个书签打开 sidecar；`SessionFilesService.create()` 新增 `resolveSource` 端口（`app-core/src/runtime/create-application-runtime.ts` 接到 `directoryMounts.resolveSource`），在构建 Session 视图时按需打开并注册来源，不可达时保持原有"来源缺失"降级路径，不使恢复失败。回归：`packages/app-core/tests/directory-mounts.test.ts`「启动不调用 openDirectory / resolveSource 只打开一次 / 不可达返回 undefined」、`packages/app-core/tests/session-files.test.ts`「未注册来源经 resolver 打开、resolver 拒绝时 fail closed」。
+
+Flow 调用恢复新增**持久标记** `/var/lib/kernel/flow-invocations.json`（`llm-session/src/persistence/flow-invocation-sessions.ts`）：`FlowInvocationService.submit()` 在写调用记录之前标记 Session，`recover()` 先读一次标记，标记存在且不含某 Session 时完全跳过该 Session 的 `listShared` 探测（3 个 Session、0 条记录的重载场景实测 513ms 属纯探测开销）；标记缺失/损坏/版本不符时报告 unknown，恢复退回逐 Session 探测并把命中者补写进标记（自愈旧数据根）。标记写入串行化，并发 `mark` 不丢条目。回归：`packages/llm-session/__tests__/flow-invocation-sessions.test.ts`、`__tests__/flow-invocations.test.ts`（标记为空时零探测、unknown 时探测并补写、受理先于记录写入）。
+
+启动外壳改为**分阶段呈现**：`#__boot-overlay` 不再是 `showLoading()` 动态创建的全屏层，而是 `apps/tauri-app/index.html` 中 `.main-content-area` 的静态子元素（首帧即绘制，只有内容区转圈，导航栏与侧栏始终可见）。`initApp` 新增 `onWorkspaceReady({ editor })` 与 `onEditorReady()`：前者在工作台布局与会话侧栏渲染完成后触发，宿主把遮罩移进编辑器区（导航 → 侧栏 → 编辑器），后者在首个编辑器挂载完成后触发，宿主移除遮罩；`waitForEditorMount` 改为后台等待，不再计入 `App 初始化完成` 与总启动耗时。`<head>` 内联脚本按 `localStorage['mindos.theme']`（`ThemeService.applyTheme` 镜像的 mode，缺失时回退 `prefers-color-scheme`）在首帧前设置 `data-theme`，消除深浅色闪烁。启动期间 `<body>` 带 `is-booting`，导航与侧栏仅可见、不接受输入，避免抢跑初始导航。
+
+Flow 调用标记新增**封存**语义（`FlowInvocationSessions.establish`）：标记缺失（升级后的首个数据根，或标记损坏）时，恢复完整探测一遍后把结果写入标记（**空集也写**），否则零调用记录的用户会永远停留在"每次启动逐 Session 探测"；探测中出现不可读 Session 时不封存，下次继续按 unknown 处理。回归在 `packages/llm-session/__tests__/flow-invocations.test.ts`。
+
+### 2026-09-27 第四轮：跨 SeqFile 批量读（`getEntriesMany`）
+
+Kernel 的 Task 扫描原本是「每个 Task 读一次记录」：`listTasks`/`listTaskIds`/恢复投影都会枚举 `tasks/` 目录，然后对每个 Task 目录单独 `getEntry(path, 'record')`。在 LocalFS 上每次读取都是独立操作，各自付一次 `begin` + `/__vfs_namespace_journal__ :: intent` 探针 + `commit`，因此 N 个 Task 的成本是 N 个事务。
+
+新增协议层批量读：`ISeqFileOperations.getEntriesMany(requests)` / `ISeqFileTransaction.getEntriesMany(requests)`（`SeqFileReadRequest = { fileIdOrPath, key }`），契约是**结果顺序与入参一致、文件或键缺失返回 `null`**（后端 ENOENT 也降级为 `null`）。它优先调用记录后端可选的 `getRecordFieldsMany(requests)`（`IRecordStore`/`IRecordTransaction`），未实现时退化为逐条读取，因此各后端可以分别接入：
+
+- `MemoryRecordStore`（vfs-core，测试与嵌入式）、localfs `BetterSqliteSidecarDb`、CLI `NodeSqliteSidecarDb`：一条 `SELECT … WHERE (path, field) IN ((?,?),(?,?),…)`；`SidecarRecordStore` 按 200 条/批切分（每批两个绑定参数/条，受 SQLite 变量上限约束），批内共用一次 `withDbRead`、一次 rename journal 核对。`IDBRecordStore`：同一条 readonly IndexedDB 事务内同步发起全部 `get`。
+- `PathMappedRecordStore`（系统路径 ↔ 后端本地路径）与 `FileSystemView.metaCall`（虚拟路径 → 挂载源路径，含挂载边界与 EACCES 校验）都必须转发；两者都按请求逐条做路径映射，不改变原有边界检查。
+- `TauriSqlSidecarDb`：与 Node/CLI 同一条 SQL（`sidecar_select` 接受变长参数数组）。桌面端本轮未做运行时验收——Node 实现已在同一 schema/同一 SQL 上验证，桌面确认只需一次启动观察 `getRecordFieldsMany` 计数。
+
+durable-kernel 的 `taskEntries`（`listTasks`/`listTaskIds` 共用）改为：一次目录枚举 → 在一个事务内一次 `getEntriesMany` 读全部 Task 记录 → 崩溃残留的空目录（无 seq 文件）自然得到 `null` 并被跳过。实测（CLI 引导成本 fixture，临时 LocalFS + Node SQLite，3 Session + 9 个终态 Task）：sidecar 调用 **994 → 814**，事务 **220 → 175**；`getRecordField` 热点中的 `tasks/task_<uuid>/task.seq :: record` 由每次 1 条降为 9 次批量调用（每次 3 条请求）。3 个空 Session 场景（无 Task）保持 **697 / 157** 不变，作为该改动只影响 Task 扫描路径的对照组。
+
+回归：`packages/vfs-core/tests/06-seq-file.test.ts`（请求顺序与缺失 → `null`、事务内同样语义、后端批量能力被调用一次、后端缺少能力时退化）、`packages/durable-kernel/src/protocol.test.ts`「reads Task records once per scan and observes later changes while skipping crash leftovers」（现在断言一次事务内的一次批量调用，且崩溃残留目录被请求但不产出 Task）、`packages/durable-kernel/src/session-open-cost.test.ts`（干净恢复仍为 0 次投影写入，Task 记录读收敛为一次批量读、事务数上限不变）。
+
+剩余可继续压缩的同类热点（本轮未动）：每个 Task 仍有约 3 次 `getMetaExt`（`tasks/task_<uuid>` 前缀检查/元数据读取）与 `graph.seq` 的 `listRecordFields` 前缀遍历；`session.seq :: record` 每个事务重复读取一次（`requireSessionTx`）。这些都不属于「按 Task 逐条记录读」，需要各自的批量原语。
