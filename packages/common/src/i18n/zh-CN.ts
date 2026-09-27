@@ -904,6 +904,7 @@ export const zhCN = {
     'toolbox.moveDrawer': '移动到抽屉',
     'toolbox.renameDrawer': '重命名抽屉',
     'toolbox.deleteDrawer': '删除抽屉（保留条目）',
+    'toolbox.deleteSelectionHint': '删除所选条目及抽屉中的全部卡片，并删除所选抽屉？',
     'toolbox.deleteDrawerHint': '删除抽屉“{name}”？其中的条目将移到“未分组”，不会删除条目。',
     'toolbox.selectMove': '请至少选择一个条目',
     'toolbox.itemMenu': '更多操作',

@@ -82,6 +82,12 @@ describe('FileCommandHandler — command → engine wiring', () => {
         expect(engine.driver.delete).toHaveBeenCalledWith(['id-1', 'id-2']);
     });
 
+    it('file:move deduplicates selected resources before calling the driver', async () => {
+        engine.driver.move = vi.fn(async () => {});
+        await commandBus.execute('file:move', { itemIds: ['a', 'a', 'b'], targetId: '/target', position: 'into' });
+        expect(engine.driver.move).toHaveBeenCalledWith(['a', 'b'], '/target');
+    });
+
     it('file:duplicate decodes text content before applying a registered transformer', async () => {
         const bus = new CommandBus();
         const raw = JSON.stringify({ id: 'agent-1', name: 'Agent' });

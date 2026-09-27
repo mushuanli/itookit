@@ -1,6 +1,6 @@
 import { t } from '@itookit/common';
 import type { MenuItem } from '@itookit/ui-common';
-import type { VFSNodeUI } from '@itookit/vfs-ui';
+import { createMoveOperation, type VFSNodeUI } from '@itookit/vfs-ui';
 import { showNameDialog } from '../files/project-dialog';
 import { drawerField } from './drawer-field';
 import { DRAWER_KINDS, drawerKind, ungroupedId, type Drawer, type DrawerKind, type ToolboxDrawers } from '@itookit/app-core';
@@ -46,9 +46,19 @@ export class DrawerActions {
         await showNameDialog(t('toolbox.organize'), t('toolbox.drawer'), signal, async () => {
             const chosen = [...list.querySelectorAll<HTMLInputElement>('input:checked')].map(input => input.value);
             if (!chosen.length) throw new Error(t('toolbox.selectMove'));
-            await groups.assign(chosen.map(path => ({ path, name: picker.input.value }))); this.options.refresh();
+            await this.moveItems(chosen, picker.input.value);
         }, extra, { hideName: true, confirmLabel: t('toolbox.moveDrawer') });
     }
+    private readonly moveItems = async (paths: string[], name: string): Promise<void> => {
+        const move = createMoveOperation<string[], string>({
+            resolve: (ids, destination) => ({ batches: [{ ids, execute: async selected => {
+                await this.options.groups.assign(selected.map(path => ({ path, name: destination })));
+                return 'completed';
+            } }] }),
+            completed: () => this.options.refresh(),
+        });
+        await move({ selection: paths, destination: name }, this.options.signal);
+    };
     private fillItems(list: HTMLElement, kind: DrawerKind, selected: string[]): void {
         list.replaceChildren();
         const all = document.createElement('button'); all.type = 'button'; all.textContent = t('toolbox.selectAll');

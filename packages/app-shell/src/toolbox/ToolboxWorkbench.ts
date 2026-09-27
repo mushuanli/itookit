@@ -1,3 +1,4 @@
+import { ToolboxDeletion, toolboxSelectionPaths } from './ToolboxDeletion';
 import { defaultToolDrawers } from './tool-drawers';
 import { ConfigurationDeletionDialog } from '../configuration/delete-dialog';
 import type { ModelConfigurationCommands } from '@itookit/app-core';
@@ -39,6 +40,7 @@ function preferences(): Preferences {
 /** One resource list; each editor receives its original, authorized source context. */
 export class ToolboxWorkbench implements WorkspaceController {
     private deletion!: ConfigurationDeletionDialog;
+    private selectionDeletion!: ToolboxDeletion;
     private ui!: VFSUIShell;
     private view!: FileSystemView;
     private drawerActions!: DrawerActions;
@@ -80,6 +82,8 @@ export class ToolboxWorkbench implements WorkspaceController {
     private connectSources(): void {
         const { resources, editor } = this.options;
         this.deletion = new ConfigurationDeletionDialog(this.options.configuration, () => this.refresh(), this.options.ocr?.deletionImpact);
+        this.selectionDeletion = new ToolboxDeletion({ resources, inventory: this.options.inventory, view: this.view, deletion: this.deletion,
+            completed: async () => { if (!this.closed) { this.ui.setSelection([]); await this.refresh(); } } });
         this.cleanups.push(connectEditorLifecycle(this.ui, this.view, editor, undefined, { files: { fs: this.view, cwd: '/' }, resolveEditor: node => this.factory(toolboxKind(node.id)!),
             hostContext: { navigate: this.options.navigate } }));
         this.cleanups.push(this.ui.on('sessionSelected', ({ item }) => this.selected(item?.id ?? null)));
@@ -214,6 +218,10 @@ export class ToolboxWorkbench implements WorkspaceController {
             menu.unshift({ id: 'moveDrawer', label: t('toolbox.moveDrawer'), onClick: () => {
                 void this.drawerActions.move(kind, paths).catch(error => alert(String(error)));
             } });
+        if (items.some(item => item.kind === 'group') && this.selectionDeletion.allows(items)) {
+            menu.push({ id: 'bulk-delete', label: t('action.delete'), onClick: async () => { await this.selectionDeletion.run(paths, this.abort.signal); } });
+            return menu;
+        }
         if (kind === 'prompts' && items.every(item => toolboxKind(item.id) === 'prompts'))
             menu.push({ id: 'delete-resource', label: t('action.delete'), onClick: () => this.deletion.request(paths.map(path => ({
                 kind: 'entity', entityType: 'system-prompt', id: decodeURIComponent(toolboxSourcePath(path).slice(1)),
@@ -298,13 +306,7 @@ export class ToolboxWorkbench implements WorkspaceController {
     }
     async exportSelection(ids: string[]): Promise<string> {
         if (!ids.length) throw new Error(t('toolbox.selectExport'));
-        const paths = ids.flatMap(path => {
-            const group = this.options.resources.drawers.get(path); if (group) return group.paths;
-            const provider = modelDrawerProvider(path);
-            if (!provider) return [path];
-            return [...(this.options.inventory.providers.has(provider) ? ['/providers/' + encodeURIComponent(provider)] : []),
-                ...[...this.options.inventory.connections].filter(([, item]) => item.providerId === provider).map(([id]) => '/connections/' + encodeURIComponent(id))];
-        });
+        const paths = toolboxSelectionPaths(ids, this.options.resources, this.options.inventory);
         const drawers = ids.flatMap(id => { const group = this.options.resources.drawers.get(id);
             return group && group.id !== ungroupedId(group.kind) ? [{ kind: group.kind, name: group.name }] : []; });
         return this.options.resources.export(paths, drawers);

@@ -1,3 +1,4 @@
+import { createMoveOperation } from '../movement';
 /**
  * @file vfs-ui/interaction/handlers/FileCommandHandler.ts
  * @desc Handles file CRUD commands. Bridges Commands → Services.
@@ -8,9 +9,8 @@ import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
 import { buildRenamedFilename } from '@itookit/common';
 import { findNodeById } from '../../utils/helpers';
 import { resolveWritableParent } from '../../utils/creation-guard';
-import { describeDeleteError } from '../../utils/delete-error';
 import { describeCauseChain } from '../../utils/error-detail';
-import { partitionDeletable, READ_ONLY_DELETE_MESSAGE } from '../../utils/delete-guard';
+import { deleteFiles } from '../file-deletion';
 
 export interface FileCommandOptions {
   resolveParent?: FileCreationConfig['resolveParent'];
@@ -54,20 +54,7 @@ export class FileCommandHandler {
         }
       }),
 
-      this.commandBus.on('file:delete', async ({ itemIds }) => {
-        const { deletable, blocked } = partitionDeletable(this.store.getState().items, itemIds);
-        if (!deletable.length) {
-          alert(READ_ONLY_DELETE_MESSAGE);
-          return;
-        }
-        if (blocked.length) console.warn('[FileCommandHandler] Skipped read-only entries:', blocked);
-        try {
-          await this.service.deleteItems(deletable);
-        } catch (error) {
-          console.error('[FileCommandHandler] Delete failed:', describeCauseChain(error));
-          alert(`删除失败: ${describeDeleteError(error)}`);
-        }
-      }),
+      this.commandBus.on('file:delete', ({ itemIds }) => deleteFiles(this.store, this.service, itemIds)),
 
       this.commandBus.on('file:rename', async ({ itemId, newTitle }) => {
         try {
@@ -85,7 +72,12 @@ export class FileCommandHandler {
       }),
 
       this.commandBus.on('file:move', async ({ itemIds, targetId }) => {
-        await this.service.moveItems({ itemIds, targetId });
+        const move = createMoveOperation<string[], string | null>({
+          resolve: (ids, destination) => ({ batches: [{ ids, execute: async paths => {
+            await this.service.moveItems({ itemIds: paths, targetId: destination }); return 'completed';
+          } }] }),
+        });
+        await move({ selection: itemIds, destination: targetId });
       }),
 
       this.commandBus.on('file:updateTags', async ({ itemIds, tags }) => {

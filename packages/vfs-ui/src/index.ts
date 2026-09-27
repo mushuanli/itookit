@@ -15,3 +15,7 @@ export { createVFSBrowser, VFSBrowser, type BrowserOptions } from './browser/Bro
 export { fromVFS, type VFSDataOptions } from './browser/from-vfs';
 export type { BrowserNode, BrowserSource, ResourceRef, SourceChange } from './contracts/source';
 export type { BrowserAction, ActionContext } from './browser/actions';
+
+export { createDeleteOperation, type DeleteResult, type DeleteBatch, type DeletePlan, type DeleteOperationOptions } from './interaction/deletion';
+export { createSelectionOperation, type OperationResult, type OperationBatch, type SelectionPlan, type SelectionOperationOptions } from './interaction/selection-operation';
+export { createMoveOperation, type MoveRequest, type MovePlan, type MoveOperationOptions } from './interaction/movement';

@@ -475,3 +475,93 @@ it('opens shared OCR configuration from the models toolbar', async () => {
     const button = [...f.sidebar.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('文字识别设置'));
     expect(button).toBeDefined(); button!.click(); expect(configure).toHaveBeenCalledOnce();
 });
+
+async function selectDrawer(f: Awaited<ReturnType<typeof setup>>, id: string): Promise<void> {
+    const kind = f.resources.drawers.get(id)!.kind;
+    await f.resources.drawers.assign([], [{ kind, name: 'Second selected drawer' }]);
+    f.workbench.setFilter(kind);
+    f.sidebar.querySelector<HTMLElement>(`[data-item-id="${id}"] .vfs-directory-item__header`)!.click();
+    const second = f.resources.drawers.list(kind).find(group => group.name === 'Second selected drawer')!;
+    f.sidebar.querySelector<HTMLElement>(`[data-item-id="${second.id}"] .vfs-directory-item__header`)!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+}
+function deleteSelected(sidebar: HTMLElement): void {
+    const button = sidebar.querySelector<HTMLButtonElement>('[data-action="bulk-delete"]')!;
+    expect(button.hidden).toBe(false); button.click();
+}
+it('deletes a selected drawer and all its cards once even when a child is also selected', async () => {
+    const f = await setup();
+    const [copy] = await f.resources.import(await f.resources.export(['/skills/phrases']));
+    await f.resources.drawers.assign([{ path: '/skills/phrases', name: 'Delete me' }, { path: copy, name: 'Delete me' }]);
+    f.workbench.setFilter('skills');
+    await vi.waitFor(() => expect(f.resources.drawers.forPath(copy)).toBeDefined());
+    const group = f.resources.drawers.forPath(copy)!;
+    await selectDrawer(f, group.id);
+    f.sidebar.querySelector('[data-item-id="/skills/phrases"] .vfs-node-item__content')!.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    const remove = vi.spyOn(f.resources.sources.skills.driver, 'delete');
+    vi.stubGlobal('confirm', () => Promise.resolve(true));
+    deleteSelected(f.sidebar);
+    await vi.waitFor(() => expect(f.resources.drawers.get(group.id)).toBeUndefined());
+    expect(await runtime.agentService.getSkills()).toHaveLength(0);
+    expect(remove).toHaveBeenCalledOnce();
+    expect(remove.mock.calls[0][0]).toHaveLength(2);
+});
+it('preserves the drawer on cancellation or card deletion failure', async () => {
+    const f = await setup();
+    await f.resources.drawers.assign([{ path: '/skills/phrases', name: 'Keep me' }]); f.workbench.setFilter('skills');
+    const group = f.resources.drawers.forPath('/skills/phrases')!;
+    await selectDrawer(f, group.id);
+    const confirm = vi.fn().mockResolvedValue(false), alert = vi.fn();
+    vi.stubGlobal('confirm', confirm); vi.stubGlobal('alert', alert);
+    deleteSelected(f.sidebar);
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+    expect(f.resources.drawers.get(group.id)).toBeDefined();
+    confirm.mockResolvedValue(true);
+    vi.spyOn(f.resources.sources.skills.driver, 'delete').mockRejectedValueOnce(new Error('delete failed'));
+    deleteSelected(f.sidebar);
+    await vi.waitFor(() => expect(alert).toHaveBeenCalled());
+    expect(f.resources.drawers.get(group.id)).toBeDefined();
+    expect(await f.resources.sources.skills.driver.exists('/phrases')).toBe(true);
+});
+it('keeps an MCP drawer when its card confirmation is cancelled and removes it after confirmation', async () => {
+    const f = await setup();
+    await f.resources.drawers.assign([{ path: '/mcp/docs', name: 'Servers' }]); f.workbench.setFilter('mcp');
+    const group = f.resources.drawers.forPath('/mcp/docs')!;
+    await selectDrawer(f, group.id); vi.stubGlobal('confirm', () => true);
+    deleteSelected(f.sidebar);
+    await vi.waitFor(() => expect(document.querySelector('.settings-modal-cancel')).not.toBeNull());
+    document.querySelector<HTMLButtonElement>('.settings-modal-cancel')!.click();
+    await vi.waitFor(() => expect(document.querySelector('.settings-modal')).toBeNull());
+    expect(f.resources.drawers.get(group.id)).toBeDefined();
+    deleteSelected(f.sidebar);
+    await vi.waitFor(() => expect(document.querySelector('.settings-modal-confirm')).not.toBeNull());
+    document.querySelector<HTMLButtonElement>('.settings-modal-confirm')!.click();
+    await vi.waitFor(() => expect(f.resources.drawers.get(group.id)).toBeUndefined());
+    expect(await f.resources.sources.mcp.driver.exists('/docs')).toBe(false);
+});
+it('deletes empty drawers and excludes tool drawers from bulk deletion', async () => {
+    const f = await setup();
+    await f.resources.drawers.assign([], [{ kind: 'skills', name: 'Empty' }]); f.workbench.setFilter('skills');
+    const group = f.resources.drawers.list('skills').find(group => group.name === 'Empty')!;
+    await selectDrawer(f, group.id); vi.stubGlobal('confirm', () => true);
+    deleteSelected(f.sidebar);
+    await vi.waitFor(() => expect(f.resources.drawers.get(group.id)).toBeUndefined());
+    f.workbench.setFilter('tools');
+    await selectDrawer(f, f.resources.drawers.list('tools')[0].id);
+    expect(f.sidebar.querySelector<HTMLButtonElement>('[data-action="bulk-delete"]')!.hidden).toBe(true);
+});
+it('deletes selected model drawers through provider impact confirmation including their connections', async () => {
+    const f = await setup();
+    await runtime.agentService.saveConnection({ id: 'drawer-connection', name: 'Drawer connection', providerId: 'openai' });
+    await vi.waitFor(() => expect(f.inventory.connections.has('drawer-connection')).toBe(true));
+    f.workbench.setFilter('models');
+    f.sidebar.querySelector<HTMLElement>('[data-item-id="/model-groups/openai"] .vfs-directory-item__header')!.click();
+    f.sidebar.querySelector<HTMLElement>('[data-item-id="/model-groups/anthropic"] .vfs-directory-item__header')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    vi.stubGlobal('confirm', () => true); deleteSelected(f.sidebar);
+    await vi.waitFor(() => expect(document.querySelector('.settings-modal')?.textContent).toContain('Drawer connection'));
+    document.querySelector<HTMLButtonElement>('.settings-modal-confirm')!.click();
+    await vi.waitFor(() => expect(f.sidebar.querySelector('[data-item-id="/model-groups/openai"]')).toBeNull());
+    expect(runtime.agentService.getFullProvider('anthropic')).toBeUndefined();
+    expect(await runtime.agentService.getFullConnection('drawer-connection')).toBeNull();
+});

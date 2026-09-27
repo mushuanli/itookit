@@ -1,3 +1,4 @@
+import type { DeleteResult } from '@itookit/vfs-ui';
 import { t, escapeHTML } from '@itookit/common';
 import { Modal, Toast, type EditorTarget } from '@itookit/ui-common';
 import { ModelConfigurationCommands, type ProviderDeletionImpact } from '@itookit/app-core';
@@ -7,22 +8,29 @@ export class ConfigurationDeletionDialog {
     constructor(private readonly commands: ModelConfigurationCommands, private readonly changed: () => Promise<void> = async () => {},
         private readonly additionalImpact: (targets: readonly EditorTarget[]) => Promise<string> = async () => '') {}
     async request(targets: readonly EditorTarget[]): Promise<void> {
-        if (!targets.length) return;
+        await this.requestResult(targets);
+    }
+    async requestResult(targets: readonly EditorTarget[], signal?: AbortSignal): Promise<DeleteResult> {
+        if (signal?.aborted) return 'cancelled';
+        if (!targets.length) return 'completed';
         const kind = targets[0].kind === 'entity' ? targets[0].entityType : undefined;
         if (!kind || !['provider', 'connection', 'mcp', 'system-prompt'].includes(kind) || targets.some(target => target.kind !== 'entity' || target.entityType !== kind))
             throw new Error('Unsupported configuration deletion');
         const ids = targets.map(target => (target as Extract<EditorTarget, { kind: 'entity' }>).id);
         const warning = await this.additionalImpact(targets);
-        if (kind === 'provider') return this.showDeleteImpactModal(await this.commands.inspectProviderDeletion(ids), warning);
-        return new Promise(resolve => new Modal(t('dialog.delete.title'), t('configuration.deleteConfirm', { count: ids.length }) + (warning ? ' ' + escapeHTML(warning) : '') + (kind === 'connection' ? ' ' + t('connection.deleteImpact') : kind === 'system-prompt' ? ' ' + t('prompt.deleteImpact') : ''), {
-            onCancel: resolve,
+        if (signal?.aborted) return 'cancelled';
+        if (kind === 'provider') return this.showDeleteImpactModal(await this.commands.inspectProviderDeletion(ids), warning, signal);
+        return new Promise<DeleteResult>(resolve => new Modal(t('dialog.delete.title'), t('configuration.deleteConfirm', { count: ids.length }) + (warning ? ' ' + escapeHTML(warning) : '') + (kind === 'connection' ? ' ' + t('connection.deleteImpact') : kind === 'system-prompt' ? ' ' + t('prompt.deleteImpact') : ''), {
+            onCancel: () => resolve('cancelled'),
             onConfirm: async () => {
+                if (signal?.aborted) { resolve('cancelled'); return; }
                 await this.commands.deleteResources({ kind: kind === 'system-prompt' ? 'prompts' : kind === 'connection' ? 'connections' : 'mcp', ids });
-                await this.changed(); resolve();
+                await this.changed(); resolve('completed');
             },
         }).show());
     }
-    private showDeleteImpactModal(impact: ProviderDeletionImpact, warning: string): Promise<void> {
+    private showDeleteImpactModal(impact: ProviderDeletionImpact, warning: string, signal?: AbortSignal): Promise<DeleteResult> {
+        if (signal?.aborted) { this.commands.discardPlan(impact.revision); return Promise.resolve('cancelled'); }
         const { providers: deletable, connections: affectedConns } = impact;
         const providerListHtml = deletable.map(p =>
             `<li>${escapeHTML(p.icon ?? '')} <strong>${escapeHTML(p.name)}</strong> <code style="font-size:.75rem;opacity:.7">${escapeHTML(p.id)}</code></li>`,
@@ -59,12 +67,13 @@ export class ConfigurationDeletionDialog {
             </style>
         `;
 
-        return new Promise(resolve => new Modal('确认删除 Provider', body, {
+        return new Promise<DeleteResult>(resolve => new Modal('确认删除 Provider', body, {
             confirmText: '确认删除', type: 'danger', width: '520px',
-            onCancel: () => { this.commands.discardPlan(impact.revision); resolve(); },
+            onCancel: () => { this.commands.discardPlan(impact.revision); resolve('cancelled'); },
             onConfirm: async () => {
+                if (signal?.aborted) { this.commands.discardPlan(impact.revision); resolve('cancelled'); return; }
                 await this.commands.deleteProviders({ revision: impact.revision });
-                await this.changed(); resolve();
+                await this.changed(); resolve('completed');
                 const parts = [`${deletable.length} 个 Provider`];
                 if (affectedConns.length) parts.push(`${affectedConns.length} 个连接`);
                 Toast.success(`已删除：${parts.join('、')}`);

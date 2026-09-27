@@ -890,6 +890,7 @@ export const en: LocaleStrings = {
     'toolbox.moveDrawer': 'Move to drawer',
     'toolbox.renameDrawer': 'Rename drawer',
     'toolbox.deleteDrawer': 'Delete drawer (keep items)',
+    'toolbox.deleteSelectionHint': 'Delete the selected items, all cards in the selected drawers, and the drawers themselves?',
     'toolbox.deleteDrawerHint': 'Delete drawer “{name}”? Its items will move to Ungrouped and will not be deleted.',
     'toolbox.selectMove': 'Select at least one item',
     'toolbox.itemMenu': 'More actions',

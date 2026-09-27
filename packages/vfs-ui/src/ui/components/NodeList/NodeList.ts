@@ -178,8 +178,8 @@ export class NodeList extends BaseComponent<NodeListState> {
           this.state.visibleItemIds
         ),
       onDeselectAll: () => this.selectionHandler.clearSelection(),
-      onBulkDelete: () => { void this.contextMenuHandler.run('bulk-delete'); },
-      onBulkMove: () => { void this.contextMenuHandler.run('bulk-move'); },
+      onBulkDelete: () => { void this.contextMenuHandler.run('bulk-delete').catch(() => {}); },
+      onBulkMove: () => { void this.contextMenuHandler.run('bulk-move').catch(() => {}); },
       onSettingsClick: () =>
         this.settingsPopover.toggle(this.state.uiSettings),
     });

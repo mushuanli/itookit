@@ -43,6 +43,32 @@ const archive = {
 
 工具栏、菜单、行内删除与底部批量操作共享执行边界。高级入口的旧菜单配置仍可用；底部批量按钮与拖拽会检查宿主菜单策略，不能通过另一入口绕过已移除的操作。固定排序下禁止 before/after 拖拽重排。异步 CommandBus 返回 Promise，调用方可以等待完成或拒绝。
 
+### 删除与移动的公共执行机制
+
+`createSelectionOperation` 是删除和移动共用的执行核心。宿主 `resolve` 返回有序批次（`ids` + `execute`）；核心在确认前按真实资源身份跨批次去重，依次执行，取消或异常立即停止，全部成功后调用 `completed`。ID 在一次操作内必须唯一标识真实资源（跨视图时包含 viewId），不能使用同一资源的不同展示节点 ID。异常交给既有 ActionRunner 报告；核心不另建锁或吞掉错误，也不回滚已经提交的写入。
+
+- `createDeleteOperation`：宿主提供 `resources` 和可选 `containers` 批次，每批通过 `remove` 返回 `completed` / `cancelled`。所有资源删除成功后才执行容器删除，空抽屉也可以只提供容器批次。
+- `createMoveOperation`：调用参数为 `{ selection, destination }`；宿主解析完整来源、校验目标并提供执行批次。目标可以是文件目录、抽屉名或其他领域身份，公共层不解析路径，也不推测移动分组是否意味着移动其内容。
+- 两者都支持异步 `confirm`、成功回调 `completed` 和 AbortSignal。取消后不启动下一批或刷新；已经提交的操作无法撤销，宿主内部的长异步步骤也应遵守 signal。
+- 文件单删、批删、文件移动及工具箱抽屉操作复用上述机制；实际权限与目标有效性仍由服务端口／领域服务校验。
+
+```ts
+const move = createMoveOperation<string[], string>({
+  resolve: (ids, destination) => ({ batches: [{
+    ids,
+    execute: async paths => {
+      await files.move(paths, destination);
+      return 'completed';
+    },
+  }] }),
+  completed: () => browser.refresh(),
+});
+// Use inside a BrowserAction.run or another existing ActionRunner boundary.
+await move({ selection: selectedResourceIds, destination: targetId }, signal);
+```
+
+完整删除目标必须来自数据源或宿主目录，不能依赖渲染树的 children、当前搜索结果或展开状态。分组是否删除、Provider 关联影响确认、文件递归删除和抽屉归属变更均由适配器定义。UI 不将 group 默认解释为可递归删除的目录。
+
 ## 文件工作台高级入口
 
 `directoryPreview(node)` 可返回目录初始显示的子项数；不配置时显示全部。双列导航可单独配置 `columns.navigationDirectoryPreview`。超过数量后提供“显示更多／收起”；展开后的子列表限制高度并独立滚动，收起按钮固定在底部；当前项、选中项及其祖先仍可见，搜索时不截断结果。限制仅作用于呈现，原始树、选择范围和导出不变，展开状态在当前组件生命周期内保留。
