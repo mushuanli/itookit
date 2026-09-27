@@ -13,7 +13,7 @@
 - 资源：EditorLease 统一编辑器销毁与资源释放的顺序，并发释放共享完成点，保存失败允许重试。project-file-editor 独立负责项目文件读取与工厂装配，工作台只提交结果和同步路由。
 - 加载：通用取消机制已移入 app-shell/lifecycle；LatestViewLoad 被通用 connector 与 SessionWorkbench 复用。读取失效与底层完成分开，底层完成后才释放资源。
 - 订阅：SubscriptionScope 被两套编辑器装配复用；幂等释放，单个回调失败也继续解除其他订阅，晚注册立即释放。保留业务事件边界；异步资源释放不混入同步订阅。
-- 刷新：SourceAdapter 使用 RefreshScheduler 合并突发变化；执行期间的新变化触发一次尾随刷新，隐藏期间保留失效状态，恢复后补刷新。当前仍以完整数据源快照刷新，局部目录失效尚未接入。
+- 刷新：SourceAdapter 使用 RefreshScheduler 合并突发变化；执行期间的新变化触发一次尾随刷新，隐藏期间保留失效状态，恢复后补刷新。已接入 SourceChange.parentIds：只刷新受影响且已加载的目录，保留其他子树；根直属项变化保留已有子树，范围未知或隐藏后恢复使用完整快照。fromVFS 为创建、更新、删除、移动、重命名提供父目录范围。
 - 文档：documentProfile 生成不可变的初始文档决策（格式、大文件原因、模式、语法支持、换行、提示）。工厂分析一次，编辑器和核心插件复用；直接实例化编辑器时在 init 分析实际内容。当前不在每次按键时重复分析；手动大文件预览仍可能阻塞，Worker 属于后续独立变更。
 - 宿主：普通文件 IPC 命令与其测试移入 fs_commands.rs，lib.rs 保留装配与路径策略；scoped_fs/scoped_directory 继续维护独立 grant 边界。读取使用 blocking 线程池和原始字节响应，HTTP 桥兼容 ArrayBuffer。
 

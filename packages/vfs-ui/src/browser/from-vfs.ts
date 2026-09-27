@@ -25,7 +25,23 @@ export function fromVFS(fs: IFileSystem, options: VFSDataOptions = {}): BrowserS
       return nodes.filter(node => options.include?.(node) ?? true).map(map);
     },
     subscribe(listener) {
-      const offs = ['node:created', 'node:updated', 'node:deleted', 'node:moved', 'node:renamed'].map(event => fs.on(event as 'node:created', () => listener({})));
+      const notify = (paths: string[]) => {
+        const parents = new Set<string | null>();
+        for (const path of paths) {
+          if (!within(path)) continue;
+          if (path === root) { listener({}); return; }
+          const parent = path.slice(0, path.lastIndexOf('/')) || '/';
+          parents.add(parent === root ? null : parent);
+        }
+        if (parents.size) listener({ parentIds: [...parents] });
+      };
+      const offs = [
+        fs.on('node:created', event => notify(event.payload.nodes.map(node => node.path))),
+        fs.on('node:updated', event => notify(event.payload.nodes.map(node => node.path))),
+        fs.on('node:deleted', event => notify(event.payload.allDeletedPaths)),
+        fs.on('node:moved', event => notify(event.payload.nodes.flatMap(node => [node.oldPath, node.newPath]))),
+        fs.on('node:renamed', event => notify(event.payload.nodes.flatMap(node => [node.oldPath, node.newPath]))),
+      ];
       return () => offs.forEach(off => off());
     },
   };
