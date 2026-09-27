@@ -119,10 +119,28 @@ export interface SessionBrowserDependencies {
 class BrowserBackend implements IStorageBackend {
     readonly name = 'session-browser';
     private readonly lifecycle: SessionLifecycleService;
+    private snapshot?: Promise<[SessionFolder[], Awaited<ReturnType<ISessionRepository['list']>>]>;
+    private subscriptions: Array<() => void> = [];
     constructor(private readonly deps: SessionBrowserDependencies) {
         this.lifecycle = deps.lifecycle ?? new SessionLifecycleService({ repository: deps.repository, kernel: deps.kernel });
     }
-    async init() {} async close() {}
+    async init() {
+        this.subscriptions.push(this.deps.repository.subscribe(() => this.invalidateNavigation()));
+        const unsubscribe = this.deps.kernel.onChanged?.(event => {
+            if (event.reason !== 'content') this.invalidateNavigation();
+        });
+        if (unsubscribe) this.subscriptions.push(unsubscribe);
+    }
+    async close() { for (const unsubscribe of this.subscriptions.splice(0)) unsubscribe(); this.invalidateNavigation(); }
+    invalidateNavigation(): void { this.snapshot = undefined; }
+    private navigation() {
+        if (!this.snapshot) {
+            const pending = Promise.all([this.deps.repository.listFolders(), this.deps.repository.list()]);
+            this.snapshot = pending;
+            void pending.catch(() => { if (this.snapshot === pending) this.invalidateNavigation(); });
+        }
+        return this.snapshot;
+    }
     async assertMutableSubtree(_path: string): Promise<void> {
         // Displayed tasks and mounted files are not owned Session storage. Session lifecycle
         // and delegated file mutations enforce the layout guard on the actual storage instead.
@@ -187,7 +205,10 @@ class BrowserBackend implements IStorageBackend {
         if (target.kind === 'folder') {
             const folderPath = folderPathFromBrowserPath(path);
             if (!folderPath) return this.node('/', 'Sessions', true);
-            const folder = (await this.deps.repository.listFolders()).find(item => item.path === folderPath);
+            // Folder stats are projection reads; reuse the same catalog the listings use so a
+            // path-prefix check does not re-read the folder record.
+            const [folders] = await this.navigation();
+            const folder = folders.find(item => item.path === folderPath);
             return folder ? this.folderNode(folder) : null;
         }
         if (target.kind === 'project-files') return this.statFiles(path, target);
@@ -210,8 +231,11 @@ class BrowserBackend implements IStorageBackend {
         });
     }
     async list(path: string): Promise<FSNode[]> {
+        // The root projection reuses the shared catalog like every folder does. Writes that
+        // change the catalog invalidate it through `repository.subscribe` / `kernel.onChanged`,
+        // and hosts can force a re-read with the owner's `invalidateNavigation` (see `init`).
         if (path === '/') {
-            const [folders, sessions] = await Promise.all([this.deps.repository.listFolders(), this.deps.repository.list()]);
+            const [folders, sessions] = await this.navigation();
             return [
                 ...folders.filter(folder => !folder.parentPath).map(folder => this.folderNode(folder)),
                 ...this.sessionNodes(sessions, null),
@@ -220,7 +244,7 @@ class BrowserBackend implements IStorageBackend {
         const target = resolveBrowserTarget(path);
         if (target.kind === 'folder') {
             const folderPath = folderPathFromBrowserPath(path);
-            const [folders, sessions] = await Promise.all([this.deps.repository.listFolders(), this.deps.repository.list()]);
+            const [folders, sessions] = await this.navigation();
             return [
                 ...folders.filter(folder => folder.parentPath === folderPath).map(folder => this.folderNode(folder)),
                 ...(this.deps.projects && folders.find(folder => folder.path === folderPath)?.project
@@ -390,6 +414,8 @@ class BrowserBackend implements IStorageBackend {
     }
     async getAllTags(): Promise<string[]> { return []; }
 }
-export function createSessionBrowser(deps: SessionBrowserDependencies) {
-    return createFileSystemSource({ tags: false, backend: new BrowserBackend(deps), viewId: 'session-browser:admin', access: 'rw' });
+export async function createSessionBrowser(deps: SessionBrowserDependencies) {
+    const backend = new BrowserBackend(deps);
+    const owner = await createFileSystemSource({ tags: false, backend, viewId: 'session-browser:admin', access: 'rw' });
+    return Object.assign(owner, { invalidateNavigation: () => backend.invalidateNavigation() });
 }

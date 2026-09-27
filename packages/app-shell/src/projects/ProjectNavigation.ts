@@ -1,5 +1,5 @@
 import { t } from '@itookit/common';
-import { folderBrowserPath, folderPathFromBrowserPath, resolveBrowserTarget, type ProjectFolder, type ProjectService } from '@itookit/app-core';
+import { folderBrowserPath, folderPathFromBrowserPath, resolveBrowserTarget, type ProjectFolder, type ProjectNavigationSnapshot, type ProjectService } from '@itookit/app-core';
 import type { VFSToolbarContext, VFSColumnsOptions, VFSNodeUI, VFSUIShell } from '@itookit/vfs-ui';
 
 interface Actions {
@@ -72,20 +72,27 @@ export class ProjectNavigation {
             secondary: { label: t('project.hideFamily'), run: () => { this.hiddenScope = this.contentScope; this.ui()?.setContentVisible(false); this.ui()?.showColumn('navigation'); this.actions.contentChanged(false, !!this.family); } },
         });
     }
-    async sync(path: string, reveal = false): Promise<void> {
+    async sync(path: string, reveal = false, project?: ProjectFolder): Promise<void> {
         const revision = ++this.revision;
-        const target = resolveBrowserTarget(path);
-        const { sessions, roots, pending } = await this.projects.sessions.navigation();
-        const manifest = 'sessionId' in target ? sessions.find(item => item.id === target.sessionId) : undefined;
-        const project = await this.projects.forFolder(manifest?.folder ?? folderPathFromBrowserPath(path));
-        const projects = await this.projects.list();
+        const snapshot = await this.projects.sessions.navigation();
         if (revision !== this.revision) return;
-        this.retry.hidden = !pending.length; this.retry.textContent = t('project.retryDeletion', { count: pending.length });
+        await this.apply(snapshot, path, reveal, revision, project);
+    }
+    /** One organization snapshot drives the whole projection: folders/catalog come from it. */
+    private async apply(snapshot: ProjectNavigationSnapshot, path: string, reveal: boolean, revision: number,
+        resolved?: ProjectFolder): Promise<void> {
+        const target = resolveBrowserTarget(path);
+        const manifest = 'sessionId' in target ? snapshot.sessions.find(item => item.id === target.sessionId) : undefined;
+        const folder = manifest?.folder ?? folderPathFromBrowserPath(path);
+        const project = resolved ?? await this.projects.forFolder(folder, snapshot.folders);
+        const projects = await this.projects.list(snapshot.folders);
+        if (revision !== this.revision) return;
+        this.retry.hidden = !snapshot.pending.length; this.retry.textContent = t('project.retryDeletion', { count: snapshot.pending.length });
         this.projectPaths = new Set(projects.map(item => folderBrowserPath(item.path)));
         this.options.navigationAction!.visible = path => this.projectPaths.has(path);
         this.project = project; this.path = path; this.session = manifest?.id;
-        this.family = manifest ? roots.get(manifest.id) : undefined;
-        const members = this.family ? sessions.filter(item => roots.get(item.id) === this.family) : [];
+        this.family = manifest ? snapshot.roots.get(manifest.id) : undefined;
+        const members = this.family ? snapshot.sessions.filter(item => snapshot.roots.get(item.id) === this.family) : [];
         const files = target.kind === 'project-files';
         if (files && reveal) this.hiddenScope = undefined;
         await this.updateContent(manifest, members.length, files, reveal, revision);
@@ -126,12 +133,13 @@ export class ProjectNavigation {
         });
     }
     async refresh(): Promise<void> {
-        let path = this.path;
-        if (this.session) {
-            const session = (await this.projects.sessions.navigation()).sessions.find(item => item.id === this.session);
-            path = session ? `${folderBrowserPath(session.folder)}/${session.id}` : folderBrowserPath(this.project?.path);
-        }
-        await this.sync(path);
+        const revision = ++this.revision;
+        const snapshot = await this.projects.sessions.navigation();
+        if (revision !== this.revision) return;
+        const session = this.session ? snapshot.sessions.find(item => item.id === this.session) : undefined;
+        const path = this.session && !session ? folderBrowserPath(this.project?.path)
+            : session ? `${folderBrowserPath(session.folder)}/${session.id}` : this.path;
+        await this.apply(snapshot, path, false, revision);
     }
     currentProject(): ProjectFolder | undefined { return this.project; }
 }

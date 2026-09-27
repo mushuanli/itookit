@@ -27,6 +27,71 @@ async function setup(kernelOverrides: Record<string, unknown> = {}) {
     return { a, b, files, repository, browser, kernel, lifecycle };
 }
 describe('Session browser projection', () => {
+    it('shares one catalog across expanded folders and refreshes after changes or explicit reload', async () => {
+        const f = await setup();
+        await f.repository.createFolder('/Work');
+        await f.repository.createFolder('/Work/Child');
+        const list = vi.spyOn(f.repository, 'list');
+        await f.browser.fs.driver.getChildren('/');
+        await f.browser.fs.driver.getChildren('/folder:Work');
+        await f.browser.fs.driver.getChildren('/folder:Work/folder:Child');
+        expect(list).toHaveBeenCalledTimes(1);
+        await f.repository.updateManifest(f.a, { folder: '/Work', title: 'Moved' });
+        list.mockClear();
+        expect((await f.browser.fs.driver.getChildren('/folder:Work')).map(node => node.metadata.title)).toContain('Moved');
+        expect(list).toHaveBeenCalledTimes(1);
+        f.browser.invalidateNavigation();
+        await f.browser.fs.driver.getChildren('/folder:Work');
+        expect(list).toHaveBeenCalledTimes(2);
+    });
+    it('reuses one root catalog across repeated root reads', async () => {
+        const f = await setup();
+        await f.repository.createFolder('/Work');
+        const list = vi.spyOn(f.repository, 'list');
+        const folders = vi.spyOn(f.repository, 'listFolders');
+        const first = await f.browser.fs.driver.getChildren('/');
+        const second = await f.browser.fs.driver.getChildren('/');
+        expect(second.map(node => node.path)).toEqual(first.map(node => node.path));
+        expect(list).toHaveBeenCalledTimes(1);
+        expect(folders).toHaveBeenCalledTimes(1);
+    });
+    it('invalidates the root catalog after a repository or browser write', async () => {
+        const f = await setup();
+        const list = vi.spyOn(f.repository, 'list');
+        await f.browser.fs.driver.getChildren('/');
+        await f.repository.updateManifest(f.a, { title: 'Renamed' });
+        expect((await f.browser.fs.driver.getChildren('/')).find(node => node.path === '/' + f.a)?.metadata.title).toBe('Renamed');
+        expect(list).toHaveBeenCalledTimes(2);
+        const before = await f.browser.fs.driver.getChildren('/');
+        const created = await f.browser.fs.driver.createFile({ name: 'New Session', parentPath: '/', content: 'plain' });
+        const after = await f.browser.fs.driver.getChildren('/');
+        expect(after.map(node => node.path)).toContain(created.path);
+        expect(after).toHaveLength(before.length + 1);
+        await f.browser.fs.driver.rename(created.path, 'Renamed Session');
+        expect((await f.browser.fs.driver.getChildren('/')).find(node => node.path === created.path)?.metadata.title).toBe('Renamed Session');
+        await f.browser.fs.driver.delete([created.path]);
+        expect((await f.browser.fs.driver.getChildren('/')).map(node => node.path)).not.toContain(created.path);
+    });
+    it('serves folder stats from the shared catalog', async () => {
+        const f = await setup();
+        await f.repository.createFolder('/Work');
+        await f.browser.fs.driver.getChildren('/');
+        const list = vi.spyOn(f.repository, 'list'), folders = vi.spyOn(f.repository, 'listFolders');
+        expect((await f.browser.fs.driver.getNode('/folder:Work'))?.metadata.title).toBe('Work');
+        expect(folders).not.toHaveBeenCalled();
+        expect(list).not.toHaveBeenCalled();
+        await f.repository.createFolder('/Other');
+        expect((await f.browser.fs.driver.getNode('/folder:Other'))?.metadata.title).toBe('Other');
+        expect(folders).toHaveBeenCalledTimes(1);
+    });
+    it('retries a failed navigation read', async () => {
+        const f = await setup();
+        await f.repository.createFolder('/Work');
+        const list = vi.spyOn(f.repository, 'list').mockRejectedValueOnce(new Error('Read failed'));
+        await expect(f.browser.fs.driver.getChildren('/folder:Work')).rejects.toMatchObject({ code: 'EIO' });
+        await expect(f.browser.fs.driver.getChildren('/folder:Work')).resolves.toEqual([]);
+        expect(list).toHaveBeenCalledTimes(2);
+    });
     it('deletes a Session without traversing its mounted workspace or Task previews', async () => {
         const f = await setup();
         const owner = await f.files.acquireFiles(f.a); cleanup.push(() => owner.release());

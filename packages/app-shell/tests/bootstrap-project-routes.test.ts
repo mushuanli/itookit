@@ -51,9 +51,9 @@ async function fixture() {
     const ui = { createChatEditor: () => defaultEditorFactory, createAgentEditor: () => defaultEditorFactory,
         createFlowEditor: () => defaultEditorFactory, createSkillEditor: () => defaultEditorFactory,
         createAIContextMenu: () => ({}), createFlowContextMenu: () => ({}), llmUiEditors: {} };
-    return { root, projects, async start() {
+    return { root, projects, async start(overrides: Record<string, unknown> = {}) {
         document.body.innerHTML = '<div id="llm-workspace" class="workspace-view"></div>';
-        return initApp({ runtime, workspaces: [workspace], defaultSlug: 'chat', routeAliases: { projects: 'llm-workspace' }, ui: ui as any });
+        return initApp({ runtime, workspaces: [workspace], defaultSlug: 'chat', routeAliases: { projects: 'llm-workspace' }, ui: ui as any, ...overrides });
     }, async dispose() { await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose(); } };
 }
 
@@ -94,6 +94,23 @@ describe('saved project routes at bootstrap', () => {
             expect(document.querySelector('.vfs-columns__navigation [aria-label="新建项目"]')).not.toBeNull();
         } finally { await app?.destroy(); await f.dispose(); }
     });
+    it('reports the workspace shell before the editor so a host can reveal nav, sidebar, then content', async () => {
+        const f = await fixture();
+        const order: string[] = [];
+        let editor: HTMLElement | undefined;
+        const app = await f.start({
+            onWorkspaceReady: (parts: { editor: HTMLElement }) => { order.push('workspace'); editor = parts.editor; },
+            onEditorReady: () => order.push('editor'),
+        });
+        try {
+            expect(order[0]).toBe('workspace');
+            expect(order).toContain('editor');
+            // The reported editor area already sits next to the rendered Session sidebar.
+            expect(editor?.classList.contains('mm-editor-area')).toBe(true);
+            expect(editor?.previousElementSibling?.classList.contains('mm-sidebar')).toBe(true);
+        } finally { await app.destroy(); await f.dispose(); }
+    });
+
     it('keeps nested paths and decodes the shell URI envelope only once', () => {
         const resource = '/folder:%E9%A1%B9%E7%9B%AE/@files/a?branch=b';
         expect(parseWorkspaceHash('#/chat/' + encodeURIComponent(resource), 'chat')).toEqual({ slug: 'chat', resource });

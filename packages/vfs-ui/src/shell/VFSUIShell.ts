@@ -8,7 +8,8 @@ import type { VFSListSort } from '../contracts/types';
  */
 import {
     formatDefaultFileTitle,
-    generateShortUUID
+    generateShortUUID,
+    traceBoot,
 } from '@itookit/common';
 import type { BrowserBaseOptions } from '../contracts/options';
 import type { IFileSystem } from '@itookit/vfs-core';
@@ -188,10 +189,10 @@ export class VFSUIShell {
     }
 
     // 1. Load root-level data from engine
-    await this.engineAdapter.loadData();
+    await traceBoot('vfsUi.loadData', () => this.engineAdapter.loadData());
 
     this.engineAdapter.connectEngineEvents();
-    await this.engineAdapter.restoreExpansion(this.statePort.getState().expandedFolderIds);
+    await traceBoot('vfsUi.restoreExpansion', () => this.engineAdapter.restoreExpansion(this.statePort.getState().expandedFolderIds));
 
     // 4. Create default file if the tree is empty
     await this.ensureDefaultFile();

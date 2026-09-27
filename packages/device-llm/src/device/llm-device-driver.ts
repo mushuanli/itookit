@@ -140,6 +140,14 @@ function sanitizeLabel(label: string): string {
         .slice(0, 80);             // cap length
 }
 
+/** Device nodes are independent VFS entries; bounded batches overlap their round trips. */
+const DEVICE_NODE_BATCH = 8;
+async function inBatches<T>(items: T[], run: (item: T) => Promise<void>): Promise<void> {
+    for (let start = 0; start < items.length; start += DEVICE_NODE_BATCH) {
+        await Promise.all(items.slice(start, start + DEVICE_NODE_BATCH).map(run));
+    }
+}
+
 // ─── 公共接口 ─────────────────────────────────────────────────────────────────
 
 /** open() options（LLM session） */
@@ -360,17 +368,14 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     async createDeviceNodes(): Promise<void> {
         // 建父目录（普通目录，不是 device 文件）
         await this.vfs.ensureSystemDirectory('/dev/llm');
-        await this.vfs.ensureSystemDirectory('/dev/llm/connection');
-        await this.vfs.ensureSystemDirectory('/dev/llm/mcp');
-        await this.vfs.ensureSystemDirectory('/dev/llm/skills');
+        await Promise.all(['/dev/llm/connection', '/dev/llm/mcp', '/dev/llm/skills']
+            .map(path => this.vfs.ensureSystemDirectory(path)));
 
         // Connection device files
-        for (const conn of this.connectionManager.getRawConnections()) {
-            await this.vfs.createDeviceNode('llm', `/dev/llm/connection/${conn.id}`, {
-                resourceType: 'connection',
-                resourceId: conn.id,
-            });
-        }
+        await inBatches(this.connectionManager.getRawConnections(), conn => this.vfs.createDeviceNode('llm', `/dev/llm/connection/${conn.id}`, {
+            resourceType: 'connection',
+            resourceId: conn.id,
+        }));
 
         // MCP device files + auto-connect
         for (const server of this.mcpManager.getRawServers()) {
@@ -392,12 +397,10 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         }
 
         // Skill device files
-        for (const skill of this.skillManager.getRawSkills()) {
-            await this.vfs.createDeviceNode('llm', `/dev/llm/skills/${skill.id}`, {
-                resourceType: 'skill',
-                resourceId: skill.id,
-            });
-        }
+        await inBatches(this.skillManager.getRawSkills(), skill => this.vfs.createDeviceNode('llm', `/dev/llm/skills/${skill.id}`, {
+            resourceType: 'skill',
+            resourceId: skill.id,
+        }));
     }
 
     // ─── IDeviceDriver: open / close ─────────────────────────────────────────

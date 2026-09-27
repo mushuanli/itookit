@@ -1,7 +1,7 @@
 import { archiveTarget, archiveTargetPath } from './archive-targets';
 import { chooseArchive, downloadArchive } from '../files/archive-transfer';
 import { SessionFamilyActions } from './SessionFamilyActions';
-import { buildRenamedFilename, formatDefaultFileTitle, t, type SessionSkillControls } from '@itookit/common';
+import { buildRenamedFilename, formatDefaultFileTitle, t, traceBoot, type SessionSkillControls } from '@itookit/common';
 import { ProjectNavigation } from './ProjectNavigation';
 import { showProjectDialog } from '../files/project-dialog';
 import { showMountDialog } from '../files/mount-dialog';
@@ -11,7 +11,7 @@ import type { EditorFactory, IEditor, EditorHostContext, ContextMenuConfig } fro
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { Kernel } from '@itookit/durable-kernel';
 import { createVFSUI, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI } from '@itookit/vfs-ui';
-import { FSError, createFileSystemView, type IFileSystem, type FileSystemContextOwner, type FileSystemView, type FileSystemSourceOwner } from '@itookit/vfs-core';
+import { FSError, createFileSystemView, type IFileSystem, type FileSystemContextOwner, type FileSystemView } from '@itookit/vfs-core';
 
 
 
@@ -59,7 +59,7 @@ export class SessionWorkbench implements WorkspaceController {
     private fileRenameCleanup?: () => void;
     private context?: FileSystemContextOwner;
     private assets?: FileSystemView;
-    private browser?: FileSystemSourceOwner;
+    private browser?: Awaited<ReturnType<typeof createSessionBrowser>>;
     private navigationFiles?: FileSystemView;
     private sidebarUI?: VFSUIShell;
     private projectNavigation?: ProjectNavigation;
@@ -176,10 +176,12 @@ export class SessionWorkbench implements WorkspaceController {
             this.noteKernelChange(event.reason);
             if (event.reason !== 'content') this.scheduleRefresh('kernel:' + event.reason);
         }));
-        await this.sidebarUI.start();
+        await traceBoot('sessionWorkbench.sidebar', () => this.sidebarUI!.start());
         if (this.projectNavigation && !this.active) {
-            const current = await this.projects!.current();
-            if (current) await this.projectNavigation.sync(folderBrowserPath(current.path));
+            const current = await traceBoot('sessionWorkbench.currentProject', () => this.projects!.current());
+            // The startup project is already resolved; hand it to the first sync so it does
+            // not look it up again from the folder catalog.
+            if (current) await traceBoot('sessionWorkbench.projectNavigation', () => this.projectNavigation!.sync(folderBrowserPath(current.path), false, current));
         }
         if (!this.active) {
             if (this.projects) this.showWelcome();
@@ -256,6 +258,7 @@ export class SessionWorkbench implements WorkspaceController {
         this.refreshTail = this.refreshTail.catch(() => {}).then(async () => {
             this.refreshQueued = false;
             if (this.closed) return;
+            this.browser?.invalidateNavigation();
             await this.sidebarUI?.refresh();
             await this.projectNavigation?.refresh();
             await this.syncBranchRoute();

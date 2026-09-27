@@ -16,16 +16,17 @@ export class ProjectService {
 
     get canSelectDirectory(): boolean { return this.directories.canSelectHost; }
     chooseDirectory() { return this.directories.chooseDirectory(); }
-    async list(): Promise<ProjectFolder[]> {
-        return (await this.repository.listFolders()).filter((folder): folder is ProjectFolder => !!folder.project);
+    /** When the caller already read the folder catalog, reuse it instead of re-reading. */
+    async list(folders?: readonly SessionFolder[]): Promise<ProjectFolder[]> {
+        return (folders ?? await this.repository.listFolders()).filter((folder): folder is ProjectFolder => !!folder.project);
     }
     async get(id: string): Promise<ProjectFolder> {
         const project = (await this.list()).find(item => item.project.id === id);
         if (!project) throw new FSError('ENOENT', 'Project not found');
         return project;
     }
-    async forFolder(path: string | null | undefined): Promise<ProjectFolder | undefined> {
-        return (await this.list()).filter(folder => path === folder.path || path?.startsWith(folder.path + '/'))
+    async forFolder(path: string | null | undefined, folders?: readonly SessionFolder[]): Promise<ProjectFolder | undefined> {
+        return (await this.list(folders)).filter(folder => path === folder.path || path?.startsWith(folder.path + '/'))
             .sort((a, b) => b.path.length - a.path.length)[0];
     }
     async current(): Promise<ProjectFolder | undefined> {
