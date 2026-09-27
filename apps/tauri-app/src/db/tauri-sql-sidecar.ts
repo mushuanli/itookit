@@ -1,3 +1,4 @@
+import { RECORD_PAGE_SQL, recordPageValues, decodeRecordPage, type RecordPageRow } from '@itookit/vfsdriver-localfs';
 /**
  * @file apps/tauri-app/src/db/tauri-sql-sidecar.ts
  *
@@ -278,6 +279,11 @@ export class TauriSqlSidecarDb implements ISidecarDb {
             [path, `${escapeLike(prefix)}%`],
         );
         return rows.map(row => ({ field: row.field, value: JSON.parse(row.value) }));
+    }
+
+    async listRecordFieldsPage(path: string, prefix: string, offset: number, limit: number) {
+        const rows = await this.db.select<RecordPageRow[]>(RECORD_PAGE_SQL, recordPageValues(path, prefix, offset, limit));
+        return decodeRecordPage(rows);
     }
 
     async clearRecordFields(path: string): Promise<void> {

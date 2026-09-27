@@ -97,7 +97,7 @@ export class ProjectNavigation {
         if (files && reveal) this.hiddenScope = undefined;
         await this.updateContent(manifest, members.length, files, reveal, revision);
     }
-    private async updateContent(manifest: import('@itookit/llm-session').ConversationManifest | undefined, count: number, files: boolean, reveal: boolean, revision: number): Promise<void> {
+    private async updateContent(manifest: import('@itookit/llm-session').SessionSummary | undefined, count: number, files: boolean, reveal: boolean, revision: number): Promise<void> {
         const project = this.project;
         const scope = this.family ?? (files ? folderBrowserPath(project?.path) + '/@files' : undefined);
         if (scope !== this.contentScope) this.ui()?.resetContentState();

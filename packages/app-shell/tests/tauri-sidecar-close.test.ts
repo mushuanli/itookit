@@ -132,3 +132,24 @@ it('reads each selected sidecar batch with one transaction-scoped select', async
             .toMatchObject({ transactionId: 17, database: 'sqlite:/data/batch.sqlite', scope: 1, commit: true });
     } finally { await db.close(); }
 });
+
+it('reads a bounded record page in one select on the transaction connection', async () => {
+    const invoke = vi.fn(async (command: string, params: any) => {
+        if (command === 'sidecar_open_scope') return 1;
+        if (command === 'sidecar_begin') return 42;
+        if (command === 'sidecar_select') return [{ total: 1000, field: 'prefix/010', value: '"value"' }];
+        if (command === 'sidecar_database_select') return [];
+        return true;
+    });
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke } });
+    const db = await TauriSqlSidecarDb.open('/data/page.sqlite');
+    try {
+        invoke.mockClear();
+        const page = await db.transaction(tx => tx.listRecordFieldsPage!('/records', 'prefix/', 10, 1));
+        expect(page).toEqual({ total: 1000, rows: [{ field: 'prefix/010', value: 'value' }] });
+        expect(invoke.mock.calls.map(call => call[0])).toEqual(['sidecar_begin', 'sidecar_select', 'sidecar_finish']);
+        expect(invoke.mock.calls[1][1]).toMatchObject({ transactionId: 42,
+            values: ['/records', 'prefix/%', '/records', 'prefix/%', 1, 10] });
+        expect(invoke.mock.calls[1][1].query).toContain('LIMIT ? OFFSET ?');
+    } finally { await db.close(); }
+});

@@ -19,7 +19,7 @@ it('resolves project folders from one organization snapshot per sync and refresh
         const project = await repository.createFolder('/Demo', { id: 'p1', directory: '/home/admin/projects/p1' });
         const projects = new ProjectService(root, repository, undefined as never, undefined as never);
         const navigation = new ProjectNavigation(projects, () => undefined, actions());
-        const list = vi.spyOn(repository, 'list'), folders = vi.spyOn(repository, 'listFolders');
+        const list = vi.spyOn(repository, 'listSummaries'), folders = vi.spyOn(repository, 'listFolders');
         list.mockClear(); folders.mockClear();
         await navigation.sync(folderBrowserPath(project.path));
         expect(list).toHaveBeenCalledTimes(1);

@@ -119,7 +119,7 @@ export interface SessionBrowserDependencies {
 class BrowserBackend implements IStorageBackend {
     readonly name = 'session-browser';
     private readonly lifecycle: SessionLifecycleService;
-    private snapshot?: Promise<[SessionFolder[], Awaited<ReturnType<ISessionRepository['list']>>]>;
+    private snapshot?: Promise<[SessionFolder[], import('@itookit/llm-session').SessionSummary[]]>;
     private subscriptions: Array<() => void> = [];
     constructor(private readonly deps: SessionBrowserDependencies) {
         this.lifecycle = deps.lifecycle ?? new SessionLifecycleService({ repository: deps.repository, kernel: deps.kernel });
@@ -135,7 +135,7 @@ class BrowserBackend implements IStorageBackend {
     invalidateNavigation(): void { this.snapshot = undefined; }
     private navigation() {
         if (!this.snapshot) {
-            const pending = Promise.all([this.deps.repository.listFolders(), this.deps.repository.list()]);
+            const pending = Promise.all([this.deps.repository.listFolders(), this.deps.repository.listSummaries?.() ?? this.deps.repository.list()]);
             this.snapshot = pending;
             void pending.catch(() => { if (this.snapshot === pending) this.invalidateNavigation(); });
         }
@@ -174,14 +174,15 @@ class BrowserBackend implements IStorageBackend {
         return { ...this.node(this.sessionBrowserPath(manifest.id, manifest.folder), manifest.title, true, manifest.updatedAt),
             createdAt: manifest.createdAt, icon: ENTITY_ICONS.chat, metadata: { title: manifest.title, _showAll: true, parentSessionId: manifest.parentSessionId ?? null } };
     }
-    private sessionNodes(sessions: import('@itookit/llm-session').ConversationManifest[], folder: string | null): FSNode[] {
+    private sessionNodes(sessions: import('@itookit/llm-session').SessionSummary[], folder: string | null): FSNode[] {
         const roots = sessionFamilyRoots(sessions);
+        const byId = new Map(sessions.map(session => [session.id, session]));
         const counts = new Map<string, number>();
         for (const root of roots.values()) counts.set(root, (counts.get(root) ?? 0) + 1);
         return sessions.filter(item => (item.folder ?? null) === folder).map(item => {
             const node = this.sessionNode(item), root = roots.get(item.id)!;
             return { ...node, metadata: { ...node.metadata, familyRoot: root, familyCount: counts.get(root) ?? 1,
-                parentTitle: sessions.find(parent => parent.id === item.parentSessionId)?.title ?? '' } };
+                parentTitle: byId.get(item.parentSessionId ?? '')?.title ?? '' } };
         });
     }
     private folderNode(folder: SessionFolder): FSNode {

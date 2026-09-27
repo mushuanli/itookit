@@ -1,32 +1,35 @@
 import { t } from '@itookit/common';
 import { FSError } from '@itookit/vfs-core';
-import type { ConversationManifest, ISessionRepository, SessionFolder } from '@itookit/llm-session';
+import type { ConversationManifest, SessionSummary, ISessionRepository, SessionFolder } from '@itookit/llm-session';
 import { sessionFamilyRoots } from './session-family';
 
 export interface ProjectNavigationSnapshot {
-    sessions: readonly ConversationManifest[];
+    sessions: readonly SessionSummary[];
     folders: readonly SessionFolder[];
     roots: ReadonlyMap<string, string>;
     pending: readonly { id: string }[];
 }
-type SessionOrganizationStore = Pick<ISessionRepository, 'list' | 'listFolders' | 'pendingSessionDeletions' | 'getManifest' | 'updateManifest' | 'createSession'>;
+type SessionOrganizationStore = Pick<ISessionRepository, 'list' | 'listSummaries' | 'listFolders' | 'pendingSessionDeletions' | 'getManifest' | 'updateManifest' | 'createSession'>;
 /** Organization queries and commands; repository transactions remain the write authority. */
 export class ProjectSessions {
     constructor(private readonly repository: SessionOrganizationStore) {}
+    private summaries(): Promise<SessionSummary[]> {
+        return this.repository.listSummaries?.() ?? this.repository.list();
+    }
     async navigation(): Promise<ProjectNavigationSnapshot> {
         const [sessions, folders, pending] = await Promise.all([
-            this.repository.list(), this.repository.listFolders(), this.repository.pendingSessionDeletions(),
+            this.summaries(), this.repository.listFolders(), this.repository.pendingSessionDeletions(),
         ]);
         return { sessions, folders, pending, roots: sessionFamilyRoots(sessions) };
     }
-    async family(id: string): Promise<{ root: string; members: ConversationManifest[] }> {
+    async family(id: string): Promise<{ root: string; members: SessionSummary[] }> {
         const snapshot = await this.navigation(), root = snapshot.roots.get(id);
         if (!root) throw new FSError('ENOENT', 'Session not found');
         const members = snapshot.sessions.filter(item => snapshot.roots.get(item.id) === root);
         members.sort((a, b) => a.id === root ? -1 : b.id === root ? 1 : a.createdAt - b.createdAt || a.id.localeCompare(b.id));
         return { root, members };
     }
-    async moveCandidates(id: string): Promise<ConversationManifest[]> {
+    async moveCandidates(id: string): Promise<SessionSummary[]> {
         const { sessions, folders, pending } = await this.navigation(), source = sessions.find(item => item.id === id);
         if (!source) throw new FSError('ENOENT', 'Session not found');
         const project = projectFor(folders, source.folder), excluded = new Set([id, ...pending.map(item => item.id)]);
@@ -41,7 +44,7 @@ export class ProjectSessions {
     create(title: string, folder: string | null): Promise<string> { return this.repository.createSession(title, folder); }
     async createChild(parentSessionId: string): Promise<string> {
         const parent = await this.repository.getManifest(parentSessionId);
-        const titles = new Set((await this.repository.list()).filter(item => item.folder === parent.folder).map(item => item.title));
+        const titles = new Set((await this.summaries()).filter(item => item.folder === parent.folder).map(item => item.title));
         let count = 1; while (titles.has(t('project.childName', { count }))) count++;
         return this.repository.createSession(t('project.childName', { count }), parent.folder, parentSessionId);
     }

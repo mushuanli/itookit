@@ -1,7 +1,7 @@
 import { SessionRelations, assertSessionAvailable, readSessionMetadata, touchSessionRelations } from './session-relations';
 import { generateUUID } from '@itookit/common';
 import { createFileSystemView, FSError, type IFileSystem, type ISeqFileTransaction } from '@itookit/vfs-core';
-import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin, type SessionLoadState, type SessionView, type SessionRepositoryChange } from './types';
+import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type SessionSummary, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin, type SessionLoadState, type SessionView, type SessionRepositoryChange } from './types';
 import { sessionStorageRoot } from './session-storage-layout';
 import { collectHistoryChain, readRoundDocument, type SessionHistoryChain } from './history-chain';
 import type { PersistedRound, RoundManifest } from './round-types';
@@ -184,6 +184,27 @@ export class SessionRepository implements ISessionRepository {
         const history = JSON.parse(rawHistory);
         if (history?.schemaVersion !== 3) throw new Error('Session history version incompatible');
         return { ...session, ...history };
+    }
+    async listSummaries(): Promise<SessionSummary[]> {
+        this.root('catalog');
+        if (!await this.fs.driver.exists('/var/lib/sessions')) return [];
+        const entries = await this.fs.driver.getChildren('/var/lib/sessions', { fields: 'entry' });
+        const ids = entries.flatMap(entry => entry.type === 'directory' ? [entry.name] : []);
+        const summaries: SessionSummary[] = [];
+        for (let start = 0; start < ids.length; start += 64) {
+            const batch = ids.slice(start, start + 64);
+            const rows = await this.fs.meta.seq!.getEntriesMany(batch.map(id => ({
+                fileIdOrPath: this.paths(id).session, key: 'session',
+            })));
+            rows.forEach((raw, index) => {
+                if (raw === null) return;
+                const session = JSON.parse(raw);
+                if (session.storageVersion !== 1 || session.id !== batch[index]) throw new Error('Session storage version incompatible');
+                const { id, title, summary, origin, createdAt, updatedAt, folder, parentSessionId } = session;
+                summaries.push({ id, title, summary, origin, createdAt, updatedAt, folder, parentSessionId });
+            });
+        }
+        return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
     }
     async list(): Promise<ConversationManifest[]> {
         this.root('catalog');

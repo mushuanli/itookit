@@ -391,6 +391,35 @@ describe('durable harness protocols', () => {
         await expect(kernel.taskEventPage('s', task.id)).rejects.toThrow('scope mismatch');
     });
 
+    it('batch-reads Task page pointers and bodies while rejecting missing or foreign records', async () => {
+        const tasks = [];
+        for (let i = 0; i < 4; i++) tasks.push(await store.createTask(binding, 's', { ...spec, deferStart: true }));
+        const calls: string[] = [];
+        const seq = fs.meta.seq!;
+        const transaction = seq.transaction!.bind(seq);
+        const traced: NonNullable<IFileSystem['meta']['seq']>['transaction'] = operation => transaction(tx => operation(new Proxy(tx, {
+            get(target, key) {
+                const value = Reflect.get(target, key);
+                if (typeof value !== 'function') return value;
+                return (...args: unknown[]) => { calls.push(String(key)); return value.apply(target, args); };
+            },
+        })));
+        const observed = { ...binding, fs: { ...fs, meta: { ...fs.meta, seq: { ...seq, transaction: traced } } } } as ResolvedStorageBinding;
+        const page = await store.listTaskPage(observed);
+        expect(page.items.map(task => task.id)).toEqual(tasks.map(task => task.id));
+        expect(calls.filter(key => key === 'getEntries')).toHaveLength(1);
+        expect(calls.filter(key => key === 'getEntriesMany')).toHaveLength(1);
+        const path = taskPath('/session', tasks[0].id);
+        const raw = (await seq.getEntry(path, 'record'))!;
+        await seq.deleteEntry(path, 'record');
+        await expect(store.listTaskPage(binding)).rejects.toThrow('Task not found');
+        await seq.setEntry(path, 'record', JSON.stringify({ ...JSON.parse(raw), sessionId: 'foreign' }));
+        await expect(store.listTaskPage(binding)).rejects.toThrow('scope mismatch');
+        await seq.setEntry(path, 'record', raw);
+        await seq.deleteEntry('/session/index.seq', 'task-order/0000000000000001');
+        await expect(store.listTaskPage(binding)).rejects.toThrow('index is missing');
+    });
+
     it('pages stable Task membership while reading current state and backfills old indexes', async () => {
         const first = await store.createTask(binding, 's', { ...spec, deferStart: true });
         const second = await store.createTask(binding, 's', { ...spec, deferStart: true });

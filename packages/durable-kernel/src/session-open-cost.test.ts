@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
+import { SeqFileKernelStore } from './infrastructure/seqfile/store';
 import { Kernel } from './application/kernel';
 import { ManagedResourceStore } from './infrastructure/seqfile/managed-resources';
 import { DurablePoller } from './runtime/durable-poller';
@@ -164,4 +165,21 @@ it('rebuilds a damaged Task index densely so the Task page stays readable', asyn
         await Promise.all([owner.waitIdle(), reader.waitIdle()]);
         await manager.dispose();
     }
+});
+
+it('reads shared state and its layout guard in one transaction', async () => {
+    const backend = new MemoryBackend();
+    const { manager } = await createVFS({ rootBackend: backend });
+    const fs = await manager.openFileSystem('/');
+    const binding = { fs, rootPath: '/session' };
+    const store = new SeqFileKernelStore({ fs, rootPath: '/catalog' }, async () => binding);
+    try {
+        await store.initialize();
+        await store.createSession('s', { kind: 'test', locator: null });
+        await store.setShared(binding, 'b', 2);
+        await store.setShared(binding, 'a', 1);
+        const transaction = vi.spyOn(backend.records, 'transaction');
+        expect((await store.listShared(binding)).map(entry => entry.key)).toEqual(['a', 'b']);
+        expect(transaction).toHaveBeenCalledTimes(1);
+    } finally { await manager.dispose(); }
 });

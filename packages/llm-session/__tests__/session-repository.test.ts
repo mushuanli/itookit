@@ -11,6 +11,28 @@ beforeEach(async () => {
 afterEach(async () => { await repository.dispose(); await manager.dispose(); });
 
 describe('Session data repository', () => {
+    it('loads fresh navigation summaries in batches without history or editor state', async () => {
+        const id = await repository.createSession('One');
+        await repository.updateUIState(id, { scrollPosition: 123 });
+        await fs.driver.createDirectory({ name: 'interrupted', parentPath: '/var/lib/sessions' });
+        const batch = vi.fn(fs.meta.seq!.getEntriesMany.bind(fs.meta.seq));
+        const reader = new SessionRepository({ ...fs, meta: { ...fs.meta,
+            seq: { ...fs.meta.seq!, getEntriesMany: batch } } });
+        const manifest = vi.spyOn(repository, 'getManifest');
+        const summaries = await reader.listSummaries();
+        expect(summaries).toHaveLength(1);
+        expect(summaries[0]).toMatchObject({ id, title: 'One' });
+        expect(summaries[0]).not.toHaveProperty('children');
+        expect(summaries[0]).not.toHaveProperty('uiState');
+        expect(batch).toHaveBeenCalledTimes(1);
+        expect(batch.mock.calls[0][0].every(request => request.key === 'session')).toBe(true);
+        expect(manifest).not.toHaveBeenCalled();
+        await repository.updateManifest(id, { title: 'Changed' });
+        expect((await reader.listSummaries())[0].title).toBe('Changed');
+        const raw = JSON.parse((await fs.meta.seq!.getEntry(`/var/lib/sessions/${id}/session.seq`, 'session'))!);
+        await fs.meta.seq!.setEntry(`/var/lib/sessions/${id}/session.seq`, 'session', JSON.stringify({ ...raw, storageVersion: 999 }));
+        await expect(repository.listSummaries()).rejects.toThrow('version incompatible');
+    });
     it('overlaps catalog reads while draining failures before leaving the transaction', async () => {
         await repository.createSession('One');
         await repository.createSession('Two');

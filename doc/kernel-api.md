@@ -808,3 +808,7 @@ Task 事件流按 Task 事件索引分页追尾，`events({ after })` 的 after 
 `EffectAdapter.shouldRetry?(error, context)` 分类当前 worker 的执行失败；若未实现，沿用 recoveryPolicy 判断。
 它不改变崩溃后的 reconcile / manual 语义。持久重试仍要求 EffectRequest.retry 的 maxAttempts / backoffMs，
 受总 deadline 和取消约束；`effect.retry.scheduled` 包含 attempt / maxAttempts / error。
+
+## 列表读取成本（2026-09-27）
+
+`listSessionTaskPage` 在同一事务内分两阶段批量读取：先取本页 `task-order` 指针，再用 `getEntriesMany` 取当前 Task；固定 `throughIndex`，缺失指针/记录或身份不匹配仍拒绝。旧索引首次查询仍需补建，超过后端批量上限时由后端分批。全量 Task 扫描只枚举目录的轻量 name/type 条目。`listShared` 的布局校验与 shared 遍历处于同一个事务，不再单独打开守卫事务。

@@ -248,3 +248,7 @@ Web/Tauri 的 SessionWorkbench 使用 vfs-ui 可选 `columns`：左列为可独�
 ### 工作台选择项归档
 
 项目工具栏使用 `WorkbenchArchiveExporter` / `WorkbenchArchiveImporter`（`@itookit/app-core`）完成选择项 JSON 往返。项目、分组、会话及其独立子会话按树导出，项目文件和嵌套附件使用 `file-archive.ts` 编码。导入生成新的项目/会话 ID，保留内容及相对组织结构；同名副本不覆盖，失败清理仅针对本次创建的对象。具体工具栏和目的目录语义见 [项目抽屉与子会话导航](project-session-navigation.md)。
+
+### 导航摘要读取
+
+Session browser 与项目/家族导航优先使用 `ISessionRepository.listSummaries`（不支持时回退 `list`），只需要身份、标题、时间、文件夹及父关系，不读取全部会话的 history index。完整会话的分支、草稿及历史在打开时加载和验证；摘要不承担执行或写入授权。当前仍枚举全部 Session 摘要以计算家族关系，尚未实现目录游标分页。

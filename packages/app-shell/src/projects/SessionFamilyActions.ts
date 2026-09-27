@@ -2,7 +2,7 @@ import { showNameDialog } from '../files/project-dialog';
 import { getLocale, t } from '@itookit/common';
 import { installResponsiveActions } from '@itookit/ui-common';
 import { type ProjectSessions } from '@itookit/app-core';
-import type { ConversationManifest } from '@itookit/llm-session';
+import type { ConversationManifest, SessionSummary } from '@itookit/llm-session';
 
 interface Actions {
     open(id: string): Promise<void>; child(id: string): Promise<unknown>; remove(id: string): Promise<void>;
@@ -42,7 +42,7 @@ export class SessionFamilyActions {
         }
         return header;
     }
-    private headerActions(manifest: ConversationManifest, members: ConversationManifest[]) {
+    private headerActions(manifest: ConversationManifest, members: SessionSummary[]) {
         const actions: Array<{ label: string; primary?: boolean; run: () => Promise<unknown> }> = [];
         const parent = members.find(item => item.id === manifest.parentSessionId);
         if (parent) actions.push({ label: t('project.parentSession', { name: parent.title }), primary: true, run: () => this.actions.open(parent.id) });
@@ -114,7 +114,7 @@ export class SessionFamilyActions {
         if (!window.confirm(t('project.deleteSessionConfirm', { name: session.title }))) return;
         await this.actions.remove(id);
     }
-    private picker(title: string, sessions: ConversationManifest[], select: (id: string) => Promise<void>, active?: string): Promise<void> {
+    private picker(title: string, sessions: SessionSummary[], select: (id: string) => Promise<void>, active?: string): Promise<void> {
         if (this.signal.aborted) return Promise.resolve();
         return new Promise(resolve => {
             const previous = document.activeElement as HTMLElement | null;
@@ -134,7 +134,7 @@ export class SessionFamilyActions {
             (list.querySelector<HTMLElement>('[aria-current="true"]') ?? search).focus();
         });
     }
-    private renderChoices(list: HTMLElement, sessions: ConversationManifest[], query: string, active: string | undefined,
+    private renderChoices(list: HTMLElement, sessions: SessionSummary[], query: string, active: string | undefined,
         select: (id: string) => Promise<void>): void {
         list.replaceChildren();
         const names = new Map(sessions.map(item => [item.id, item.title]));

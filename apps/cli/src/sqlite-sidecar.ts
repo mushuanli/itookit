@@ -1,3 +1,4 @@
+import { RECORD_PAGE_SQL, recordPageValues, decodeRecordPage, type RecordPageRow } from '@itookit/vfsdriver-localfs';
 import type { ISidecarDb, MetaExtRow } from '@itookit/vfsdriver-localfs';
 import { DDL, SCHEMA_VERSION } from '@itookit/vfsdriver-localfs';
 
@@ -106,6 +107,11 @@ export class NodeSqliteSidecarDb implements ISidecarDb {
             ORDER BY field
         `).all(itemPath, `${escapeLike(prefix)}%`) as Array<{ field: string; value: string }>;
         return rows.map(row => ({ field: row.field, value: JSON.parse(row.value) }));
+    }
+
+    async listRecordFieldsPage(path: string, prefix: string, offset: number, limit: number) {
+        const rows = this.db.prepare(RECORD_PAGE_SQL).all(...recordPageValues(path, prefix, offset, limit)) as RecordPageRow[];
+        return decodeRecordPage(rows);
     }
 
     async clearRecordFields(itemPath: string): Promise<void> {

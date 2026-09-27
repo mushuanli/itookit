@@ -132,3 +132,15 @@ durable-kernel 的 `taskEntries`（`listTasks`/`listTaskIds` 共用）改为：�
 回归：`packages/vfs-core/tests/06-seq-file.test.ts`（请求顺序与缺失 → `null`、事务内同样语义、后端批量能力被调用一次、后端缺少能力时退化）、`packages/durable-kernel/src/protocol.test.ts`「reads Task records once per scan and observes later changes while skipping crash leftovers」（现在断言一次事务内的一次批量调用，且崩溃残留目录被请求但不产出 Task）、`packages/durable-kernel/src/session-open-cost.test.ts`（干净恢复仍为 0 次投影写入，Task 记录读收敛为一次批量读、事务数上限不变）。
 
 剩余可继续压缩的同类热点（本轮未动）：每个 Task 仍有约 3 次 `getMetaExt`（`tasks/task_<uuid>` 前缀检查/元数据读取）与 `graph.seq` 的 `listRecordFields` 前缀遍历；`session.seq :: record` 每个事务重复读取一次（`requireSessionTx`）。这些都不属于「按 Task 逐条记录读」，需要各自的批量原语。
+
+### 2026-09-27 第五轮：按需摘要与有界列表读取
+
+本轮在挂载并发准备之后，减少列表本身的工作量（不引入新的缓存或改变数据布局）：
+
+- Task 分页把逐项指针/正文读取改为两阶段批量读取；目录扫描使用 `fields: 'entry'`。`listShared` 的布局守卫和列表共用一个事务。
+- Session browser、ProjectSessions 导航/家族选择改用 `SessionRepository.listSummaries`。每 64 个候选一次跨文件批量读取，避开 history index；完整会话加载仍检查历史版本。导航父标题改用 Map，避免逐条 `find`。
+- LocalFS 有限 `walkRecordFields` 使用可选 `listRecordFieldsPage`：一条 SQL 返回有界正文及精确 total。空页/越界页也保留总数，回调提前停止保持 processed 语义；不支持该能力的后端维持旧路径。BetterSqlite、CLI Node SQLite、Tauri 共用查询与解码，仍通过原事务和 rename journal 检查。COUNT 仍可能扫描匹配索引；这是减少返回数据和解码，不是消除全部数据库扫描，也不是游标分页。
+
+确定性回归：Kernel Task 分页保序/固定上界/当前状态与损坏索引拒绝；Session 摘要不加载历史并观察后续修改；真实 BetterSqlite/Node SQLite 的 120 条记录取 3 条只返回 3 条正文，同时保留 total=120；Tauri 测试验证一条 transaction-scoped select。尚未重新执行桌面启动耗时验收，不宣称 IPC 或耗时下降百分比。
+
+后续阶段仍需独立设计和验证：Session 目录分页投影、历史窗口加载、可靠的恢复候选索引及稳定 ID 存储迁移。本轮没有将恢复推迟到用户点击，也没有减少 authority、租约或 journal 核对。

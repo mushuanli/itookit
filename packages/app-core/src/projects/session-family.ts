@@ -1,7 +1,7 @@
-import type { ConversationManifest } from '@itookit/llm-session';
+import type { SessionSummary } from '@itookit/llm-session';
 
 /** A damaged relation remains reachable as a root instead of disappearing from navigation. */
-export function sessionFamilyRoots(sessions: ConversationManifest[]): Map<string, string> {
+export function sessionFamilyRoots(sessions: SessionSummary[]): Map<string, string> {
     const byId = new Map(sessions.map(item => [item.id, item]));
     const roots = new Map<string, string>();
     for (const session of sessions) {

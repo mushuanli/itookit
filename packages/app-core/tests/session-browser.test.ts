@@ -31,7 +31,7 @@ describe('Session browser projection', () => {
         const f = await setup();
         await f.repository.createFolder('/Work');
         await f.repository.createFolder('/Work/Child');
-        const list = vi.spyOn(f.repository, 'list');
+        const list = vi.spyOn(f.repository, 'listSummaries');
         await f.browser.fs.driver.getChildren('/');
         await f.browser.fs.driver.getChildren('/folder:Work');
         await f.browser.fs.driver.getChildren('/folder:Work/folder:Child');
@@ -47,7 +47,7 @@ describe('Session browser projection', () => {
     it('reuses one root catalog across repeated root reads', async () => {
         const f = await setup();
         await f.repository.createFolder('/Work');
-        const list = vi.spyOn(f.repository, 'list');
+        const list = vi.spyOn(f.repository, 'listSummaries');
         const folders = vi.spyOn(f.repository, 'listFolders');
         const first = await f.browser.fs.driver.getChildren('/');
         const second = await f.browser.fs.driver.getChildren('/');
@@ -57,7 +57,7 @@ describe('Session browser projection', () => {
     });
     it('invalidates the root catalog after a repository or browser write', async () => {
         const f = await setup();
-        const list = vi.spyOn(f.repository, 'list');
+        const list = vi.spyOn(f.repository, 'listSummaries');
         await f.browser.fs.driver.getChildren('/');
         await f.repository.updateManifest(f.a, { title: 'Renamed' });
         expect((await f.browser.fs.driver.getChildren('/')).find(node => node.path === '/' + f.a)?.metadata.title).toBe('Renamed');
@@ -76,7 +76,7 @@ describe('Session browser projection', () => {
         const f = await setup();
         await f.repository.createFolder('/Work');
         await f.browser.fs.driver.getChildren('/');
-        const list = vi.spyOn(f.repository, 'list'), folders = vi.spyOn(f.repository, 'listFolders');
+        const list = vi.spyOn(f.repository, 'listSummaries'), folders = vi.spyOn(f.repository, 'listFolders');
         expect((await f.browser.fs.driver.getNode('/folder:Work'))?.metadata.title).toBe('Work');
         expect(folders).not.toHaveBeenCalled();
         expect(list).not.toHaveBeenCalled();
@@ -87,7 +87,7 @@ describe('Session browser projection', () => {
     it('retries a failed navigation read', async () => {
         const f = await setup();
         await f.repository.createFolder('/Work');
-        const list = vi.spyOn(f.repository, 'list').mockRejectedValueOnce(new Error('Read failed'));
+        const list = vi.spyOn(f.repository, 'listSummaries').mockRejectedValueOnce(new Error('Read failed'));
         await expect(f.browser.fs.driver.getChildren('/folder:Work')).rejects.toMatchObject({ code: 'EIO' });
         await expect(f.browser.fs.driver.getChildren('/folder:Work')).resolves.toEqual([]);
         expect(list).toHaveBeenCalledTimes(2);

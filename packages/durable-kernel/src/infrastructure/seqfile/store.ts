@@ -355,13 +355,15 @@ export class SeqFileKernelStore {
     async listShared(binding: ResolvedStorageBinding, prefix = ''): Promise<SharedStateEntry[]> {
         // Listing is still a Session read: refuse a layout this host cannot interpret
         // instead of presenting shared state it does not understand.
-        await transaction(binding.fs, tx => requireSessionTx(tx, binding.rootPath));
-        const entries: SharedStateEntry[] = [];
-        await seq(binding.fs).walkEntries(sharedPath(binding.rootPath), entry => {
-            entries.push(decode(entry.value));
-            return true;
-        }, { keyPrefix: sharedKey(prefix) });
-        return entries.sort((a, b) => a.key.localeCompare(b.key));
+        return transaction(binding.fs, async tx => {
+            await requireSessionTx(tx, binding.rootPath);
+            const entries: SharedStateEntry[] = [];
+            await tx.walkEntries(sharedPath(binding.rootPath), entry => {
+                entries.push(decode(entry.value));
+                return true;
+            }, { keyPrefix: sharedKey(prefix) });
+            return entries.sort((a, b) => a.key.localeCompare(b.key));
+        });
     }
 
     async sharedHistory<T extends import('../../domain/types').JsonValue>(
@@ -733,14 +735,8 @@ export class SeqFileKernelStore {
             }
             const count = Number(await tx.getEntry(path, 'task-count') ?? 0), through = query.throughIndex ?? count;
             if (!Number.isSafeInteger(count) || count < 0 || !Number.isSafeInteger(through) || through < 0 || through > count) throw new Error('Invalid Task list upper bound');
-            const end = Math.min(through, after + limit), items: TaskRecord[] = [];
-            for (let index = after + 1; index <= end; index++) {
-                const id = await tx.getEntry(path, `task-order/${String(index).padStart(16, '0')}`);
-                if (!id) throw new Error('Task list index is missing');
-                const task = await requireTaskTx(tx, binding.rootPath, id);
-                if (task.sessionId !== session.id) throw new Error('Task list index scope mismatch');
-                items.push(task);
-            }
+            const end = Math.min(through, after + limit);
+            const items = await readTaskPageTx(tx, binding.rootPath, session.id, after, end);
             return { items, throughIndex: through, ...(end < through ? { nextAfterIndex: end } : {}) };
         });
     }
@@ -1716,7 +1712,7 @@ export class SeqFileKernelStore {
         const root = join(binding.rootPath, 'tasks');
         // A removed storage tree has no Tasks; callers must stay usable for retries.
         if (!await binding.fs.driver.exists(root)) return [];
-        const children = await binding.fs.driver.getChildren(root);
+        const children = await binding.fs.driver.getChildren(root, { fields: 'entry' });
         // The directory listing already proved each Task directory exists, so no `exists` stat per
         // Task (a full metadata read on the desktop).
         const ids = children.flatMap(child => child.type === 'directory' ? [child.name] : []);
@@ -1795,4 +1791,25 @@ function needsRecoveryWork(task: TaskRecord): boolean {
     if (task.status === 'running' || task.currentAttempt) return true;
     if (task.parentTaskId && !isTerminal(task.status)) return true;
     return Object.values(task.effects).some(effect => effect.status === 'leased');
+}
+
+/** Read pointers and current Task records in two batches within the caller's snapshot. */
+async function readTaskPageTx(tx: ISeqFileTransaction, root: string, sessionId: string,
+    after: number, end: number): Promise<TaskRecord[]> {
+    const keys = Array.from({ length: Math.max(0, end - after) }, (_, i) =>
+        `task-order/${String(after + i + 1).padStart(16, '0')}`);
+    if (!keys.length) return [];
+    const pointers = await tx.getEntries(indexPath(root), keys);
+    const ids = keys.map(key => {
+        const id = pointers[key];
+        if (!id) throw new Error('Task list index is missing');
+        return id;
+    });
+    const values = await tx.getEntriesMany(ids.map(id => ({ fileIdOrPath: taskPath(root, id), key: TASK_KEY })));
+    return values.map((value, index) => {
+        if (!value) throw new Error(`Task not found: ${ids[index]}`);
+        const task = decode<TaskRecord>(value);
+        if (task.sessionId !== sessionId || task.id !== ids[index]) throw new Error('Task list index scope mismatch');
+        return task;
+    });
 }

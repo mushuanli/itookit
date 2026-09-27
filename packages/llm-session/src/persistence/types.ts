@@ -36,6 +36,10 @@ export interface ConversationManifest extends RoundManifest {
     };
 }
 
+/** Navigation metadata only; history and editor state are loaded on demand. */
+export type SessionSummary = Pick<ConversationManifest,
+    'id' | 'title' | 'summary' | 'origin' | 'createdAt' | 'updatedAt' | 'folder' | 'parentSessionId'>;
+
 export interface BranchTreeNode {
     id: string;
     role: 'system' | 'user' | 'assistant' | 'tool';
@@ -92,6 +96,8 @@ export interface ISessionRepository extends SessionDeletionStore {
     /** Read the selected history chain in one storage snapshot when supported. */
     readHistoryChain?(sessionId: string): Promise<import('./history-chain').SessionHistoryChain>;
     list(): Promise<ConversationManifest[]>;
+    /** Read navigation metadata without loading history indexes, when supported. */
+    listSummaries?(): Promise<SessionSummary[]>;
     /** Delete a Session and its owned storage. */
     deleteSession(sessionId: string): Promise<void>;
     listFolders(): Promise<SessionFolder[]>;

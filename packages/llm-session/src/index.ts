@@ -52,6 +52,7 @@ export type {
     ISessionRepository,
     SessionDeletionStore,
     ConversationManifest,
+    SessionSummary,
     ConversationUIState,
     SessionLoadState,
     SessionRepositoryChange,
