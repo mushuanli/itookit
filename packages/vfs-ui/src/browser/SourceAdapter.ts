@@ -1,3 +1,4 @@
+import { RefreshScheduler } from '../services/RefreshScheduler';
 import type { BrowserNode, BrowserSource } from '../contracts/source';
 import type { IStatePort } from '../contracts/ports';
 import type { VFSNodeUI } from '../contracts/types';
@@ -22,16 +23,18 @@ export class SourceAdapter {
   setVisible(visible: boolean): void {
     if (visible === this.visible) return;
     this.visible = visible; ++this.revision;
+    this.refreshes.setVisible(visible);
   }
-  private queue: Promise<void> = Promise.resolve();
-  constructor(readonly source: BrowserSource, private readonly store: IStatePort, private readonly report?: (error: unknown) => void) {}
-  connectEngineEvents(): () => void {
-    this.unsubscribe = this.source.subscribe(() => {
-      if (!this.visible) return;
-      this.queue = this.queue.then(() => this.loadData({ silent: true })).catch(error => {
-        if (!this.abort.signal.aborted) { this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error } }); this.report?.(error); }
-      });
+  private readonly refreshes: RefreshScheduler;
+  constructor(readonly source: BrowserSource, private readonly store: IStatePort, private readonly report?: (error: unknown) => void) {
+    this.refreshes = new RefreshScheduler(() => this.loadData({ silent: true }), error => {
+      if (!this.abort.signal.aborted) {
+        this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error } }); this.report?.(error);
+      }
     });
+  }
+  connectEngineEvents(): () => void {
+    this.unsubscribe = this.source.subscribe(() => this.refreshes.request());
     return () => this.unsubscribe?.();
   }
   async loadData(_options: { silent?: boolean } = {}): Promise<void> {
@@ -83,5 +86,5 @@ export class SourceAdapter {
       await this.expandDirectory(parent);
     }
   }
-  destroy(): void { this.abort.abort(); ++this.revision; this.unsubscribe?.(); }
+  destroy(): void { this.refreshes.destroy(); this.abort.abort(); ++this.revision; this.unsubscribe?.(); }
 }
