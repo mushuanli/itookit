@@ -35,7 +35,6 @@ import {
   type Completion,
 } from '@codemirror/autocomplete';
 import { lintKeymap } from '@codemirror/lint';
-import { markdown } from '@codemirror/lang-markdown';
 import type { AutocompleteSourceConfig } from '../autocomplete/autocomplete.plugin';
 
 /**
@@ -242,7 +241,7 @@ export class CoreEditorPlugin implements MDxPlugin {
     // === 5. 语言支持 (Language Support) ===
 
     // Markdown 语言支持
-    extensions.push(markdown());
+    // The editor adapter owns language selection.
 
     // === 6. 核心主题与样式 (Essential Styling) ===
     extensions.push(

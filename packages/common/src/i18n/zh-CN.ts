@@ -55,6 +55,7 @@ export const zhCN = {
     'ocr.request': "请按照系统提示词处理这张图片。",
     'configuration.deleteConfirm': '删除选中的 {count} 项配置？',
     'vfs.toolbar.directory': '目录',
+    'editor.largeDocument.sourceFirst': '文件较大，已先打开源码。需要预览时可手动切换阅读模式。',
     'vfs.preview.more': '显示更多（{count}）',
     'vfs.preview.collapse': '收起列表',
     'vfs.toolbar.file': '文件',

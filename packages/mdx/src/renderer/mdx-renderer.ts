@@ -88,12 +88,14 @@ export class MDxRenderer {
     this.streamingDiffer.reset();
     this.blockWrappers = [];
 
+    const started = performance.now();
     // 1. beforeParse 钩子
     const beforeResult = this.pluginManager.executeTransformHook('beforeParse', {
       markdown: markdownText,
       options,
     });
 
+    const beforeParseDone = performance.now();
     // 2. Markdown → HTML
     const html = await this.markedAdapter.parse(
       beforeResult.markdown,
@@ -101,21 +103,28 @@ export class MDxRenderer {
       options.markedOptions
     );
 
+    const parseDone = performance.now();
     // 3. afterRender 钩子
     const afterResult = this.pluginManager.executeTransformHook('afterRender', {
       html,
       options,
     });
 
+    const transformDone = performance.now();
     // 4. 注入 DOM
     element.innerHTML = afterResult.html;
 
+    const domDone = performance.now();
     // 5. domUpdated 钩子
     await this.pluginManager.executeHookAsync('domUpdated', {
       element,
       options,
       renderer: this,
     });
+    const finished = performance.now();
+    const timings = { beforeParse: beforeParseDone - started, parse: parseDone - beforeParseDone,
+      afterRender: transformDone - parseDone, dom: domDone - transformDone, plugins: finished - domDone, total: finished - started };
+    if (timings.total >= 50) console.info('[MDX render]', { characters: markdownText.length, ...timings });
   }
 
   // ================================================================

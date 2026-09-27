@@ -1,3 +1,4 @@
+import { lineOffsets, lineNumberAt } from '../../utils/line-offsets';
 /**
  * @file mdx/plugins/interactions/task-list.plugin.ts
  * @desc 任务列表插件 (AST 版)。彻底修复偏移问题，支持嵌套、引用、表格。
@@ -54,6 +55,7 @@ export class TaskListPlugin implements MDxPlugin {
 
   // 存储解析出的位置
   private taskLocations: TaskLocation[] = [];
+  private lineStarts: number[] = [0];
 
   // 渲染计数器
   private renderTaskCounter = 0;
@@ -185,6 +187,9 @@ export class TaskListPlugin implements MDxPlugin {
    */
   private analyzeTaskLocations(markdown: string): void {
     this.taskLocations = [];
+    this.lineStarts = [0];
+    if (!/\[[ xX]\]/.test(markdown)) return;
+    this.lineStarts = lineOffsets(markdown);
     const tokens = markedLexer(markdown);
 
     // 递归遍历器
@@ -234,7 +239,7 @@ export class TaskListPlugin implements MDxPlugin {
               bracketIndex: tokenStart + checkboxStartInToken,
               length: checkboxLen,
               isTableTask: false,
-              lineNumber: this.getLineNumber(markdown, tokenStart)
+              lineNumber: this.getLineNumber(tokenStart)
             });
           }
         }
@@ -290,7 +295,7 @@ export class TaskListPlugin implements MDxPlugin {
               bracketIndex: tokenStart + match.index,
               length: match[0].length,
               isTableTask: true,
-              lineNumber: this.getLineNumber(markdown, tokenStart + match.index)
+              lineNumber: this.getLineNumber(tokenStart + match.index)
             });
           }
         }
@@ -320,8 +325,8 @@ export class TaskListPlugin implements MDxPlugin {
   /**
    * 辅助工具：根据索引获取行号
    */
-  private getLineNumber(markdown: string, index: number): number {
-    return markdown.substring(0, index).split('\n').length;
+  private getLineNumber(index: number): number {
+    return lineNumberAt(this.lineStarts, index);
   }
 
   private createClickHandler(context: PluginContext): (e: Event) => void {

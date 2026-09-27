@@ -96,6 +96,8 @@ export interface EditorOptions {
 
     /** 初始模式 */
     initialMode?: 'edit' | 'render';
+    /** Source text never enters Markdown parsing or preview. */
+    contentFormat?: 'markdown' | 'text';
 
     /** 标题（可选） */
     title?: string;
@@ -195,6 +197,9 @@ export abstract class IEditor {
      * @returns {boolean} 如果内容已修改，则返回 true。
      */
     abstract isDirty(): boolean;
+
+    /** Save all pending edits; reject without disposing the editor on failure. */
+    flushPendingSave?(): Promise<void>;
 
     /**
      * 手动设置编辑器的脏状态。

@@ -1,3 +1,5 @@
+import { isLargeDocument } from './document-policy';
+import { t } from '@itookit/common';
 import { editorFilePath } from '@itookit/ui-common';
 // @mdx/editor/mdx-editor.ts
 import {
@@ -43,6 +45,7 @@ export class MDxEditor extends IEditor {
     // 简单状态
     private _container: HTMLElement | null = null;
     private isDestroying = false;
+    private destruction?: Promise<void>;
     private docVersion = 0;
 
     constructor(config: MDxEditorConfig = {}) {
@@ -61,7 +64,7 @@ export class MDxEditor extends IEditor {
         });
         this.renderer.setEditorInstance(this);
 
-        this.modeManager = new ModeManager(config.initialMode || 'edit');
+        this.modeManager = new ModeManager(config.contentFormat === 'text' ? 'edit' : config.initialMode || 'edit');
         this.navigationManager = new NavigationManager(this.cmAdapter);
         this.searchManager = new SearchManager(this.cmAdapter, this.renderer);
         this.saveManager = new SaveManager(config.onSave);
@@ -92,9 +95,17 @@ export class MDxEditor extends IEditor {
                 },
                 onBlur: () => this.eventBus.emit('blur'),
                 onFocus: () => this.eventBus.emit('focus'),
-            }
+            },
+            this.config.contentFormat !== 'text' && !isLargeDocument(initialContent)
         );
 
+        if (this.config.readOnly) this.cmAdapter.setReadOnly(true);
+        if (this.config.contentFormat !== 'text' && isLargeDocument(initialContent)) {
+            const notice = document.createElement('p');
+            notice.className = 'mdx-source-notice'; notice.setAttribute('role', 'status');
+            notice.textContent = t('editor.largeDocument.sourceFirst');
+            this.modeManager.getEditContainer()?.prepend(notice);
+        }
         // 初始化模式
         await this.modeManager.init(
             this._container,
@@ -224,6 +235,7 @@ export class MDxEditor extends IEditor {
     }
 
     async switchToMode(mode: 'edit' | 'render'): Promise<void> {
+        if (this.config.contentFormat === 'text' && mode === 'render') return;
         if (this.modeManager.getMode() === mode) return;
         if (this.isDirty()) {
             await this.save();
@@ -324,6 +336,10 @@ export class MDxEditor extends IEditor {
 
     private async renderContent(): Promise<void> {
         const renderContainer = this.modeManager.getRenderContainer();
+        if (renderContainer && this.config.contentFormat === 'text') {
+            const source = document.createElement('pre'); source.textContent = this.getText();
+            renderContainer.replaceChildren(source); return;
+        }
         if (renderContainer) {
             await this.renderer.render(renderContainer, this.getText());
         }
@@ -378,21 +394,32 @@ export class MDxEditor extends IEditor {
         return this.printService;
     }
 
-    // === 销毁 ===
-
-    async destroy(): Promise<void> {
-        if (this.isDestroying) return;
-        this.isDestroying = true;
-
-        this.renderer.getPluginManager().emit('beforeDestroy', undefined);
-        this.navigationManager.destroy();
-        this.modeManager.destroy();
-
+    async flushPendingSave(): Promise<void> {
         await this.saveManager.finalSave(
             () => this.getText(),
             () => this.eventBus.emit('saved'),
-            (err) => this.eventBus.emit('saveError', err)
+            err => this.eventBus.emit('saveError', err)
         );
+        if (this.saveManager.isDirty()) throw new Error('Unsaved changes: editor retained');
+    }
+
+    // === 销毁 ===
+
+    destroy(): Promise<void> {
+        return this.destruction ??= this.destroyNow().catch(error => {
+            this.destruction = undefined;
+            throw error;
+        });
+    }
+
+    private async destroyNow(): Promise<void> {
+        this.isDestroying = true;
+
+        try { await this.flushPendingSave(); }
+        catch (error) { this.isDestroying = false; throw error; }
+        this.renderer.getPluginManager().emit('beforeDestroy', undefined);
+        this.navigationManager.destroy();
+        this.modeManager.destroy();
 
         this.printService?.destroy?.();
         this.cmAdapter.destroy();

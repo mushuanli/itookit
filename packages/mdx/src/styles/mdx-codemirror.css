@@ -3,6 +3,8 @@
 /* CodeMirror 容器样式 */
 .mdx-editor-container__edit-mode .cm-editor {
   height: 100%;
+  flex: 1;
+  min-height: 0;
   font-size: 14px;
   font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
 }

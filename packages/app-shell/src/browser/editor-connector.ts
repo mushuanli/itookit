@@ -1,3 +1,4 @@
+import { fileContentFormat } from './file-format';
 import type { EditorFactory } from '@itookit/ui-common';
 /**
  * @file app-shell/src/browser/editor-connector.ts
@@ -27,7 +28,7 @@ export interface ConnectOptions<Node extends VFSNodeUI = VFSNodeUI> {
 
 /**
  * Connects a session manager to an editor.
- * 
+ *
  * The host supplies editor factories and file context.
  */
 export function connectEditorLifecycle(
@@ -36,7 +37,7 @@ export function connectEditorLifecycle(
   editorContainer: HTMLElement,
   defaultEditorFactory?: EditorFactory,
   options: ConnectOptions<VFSNodeUI> = {}
-): () => void {
+): (() => Promise<void>) & { setVisible(visible: boolean): Promise<void> } {
   const { resolveEditor, onEditorCreated, saveDebounceMs = 500, files = { fs: engine, cwd: '/' }, ...factoryExtraOptions } = options;
   if (files.fs !== engine) throw new Error('Editor file context differs from its file tree');
 
@@ -45,8 +46,11 @@ export function connectEditorLifecycle(
   let unsubscribers: Array<() => void> = [];
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let sessionToken = 0;
+  let visible = true;
+  let pendingItem: VFSNodeUI | undefined;
+  let teardownPending: Promise<void> | undefined;
+  const loads = new Set<Promise<void>>();
   let lastTaskStats: { total: number; completed: number } | null = null;
-  let hasUnsavedChanges = false;
 
   const dispatch = (itemId: string, metadata: any) => {
     vfsManager.updateNodeMetadata(itemId, metadata);
@@ -64,7 +68,6 @@ export function connectEditorLifecycle(
       stats.completed !== current.completed
     ) {
       lastTaskStats = stats;
-      hasUnsavedChanges = true;
       dispatch(activeNode.id, {
         custom: { ...activeNode.metadata.custom, taskCount: stats },
       });
@@ -77,50 +80,41 @@ export function connectEditorLifecycle(
       clearTimeout(saveTimer);
       saveTimer = null;
     }
-    if (!activeEditor.isDirty?.() && !hasUnsavedChanges) return;
+    if (activeEditor.flushPendingSave) await activeEditor.flushPendingSave();
+    else if (activeEditor.isDirty?.()) throw new Error('Dirty editor does not support flushing');
+  };
 
+  const persistContent = async (path: string, content: string): Promise<void> => {
+    await engine.driver.writeContent(path, content);
+    if (fileContentFormat(path).contentFormat !== 'markdown') return;
     try {
-      const exists = vfsManager.getNode(activeNode.id);
-
-      if (exists) {
-        const content = activeEditor.getText();
-        await engine.driver.writeContent(activeNode.id, content);
-
-        const { metadata, summary } = parseFileInfo(content);
-        await engine.driver.updateMetadata(activeNode.id, {
-          taskCount: metadata.taskCount,
-          clozeCount: metadata.clozeCount,
-          mermaidCount: metadata.mermaidCount,
-          _summary: summary,
-        });
-
-        activeEditor.setDirty?.(false);
-        hasUnsavedChanges = false;
-      }
-    } catch (e) {
-      console.error('[EditorConnector] Save failed:', e);
+      const { metadata, summary } = parseFileInfo(content);
+      await engine.driver.updateMetadata(path, { ...metadata, _summary: summary });
+    } catch (error) {
+      // Derived metadata failure must not turn a successful content write into a retry.
+      console.error('[EditorConnector] Metadata refresh failed:', error);
     }
   };
 
   const scheduleSave = () => {
     if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(save, saveDebounceMs);
+    saveTimer = setTimeout(() => { void save().catch(error => console.error('[EditorConnector] Save failed:', error)); }, saveDebounceMs);
   };
 
-  const teardown = async () => {
-    sessionToken++;
+  const teardownNow = async () => {
     if (activeEditor) {
       await save();
+      await activeEditor.destroy();
       unsubscribers.forEach(u => u());
       unsubscribers = [];
-      await activeEditor.destroy();
       activeEditor = null;
       activeNode = null;
       lastTaskStats = null;
-      hasUnsavedChanges = false;
       onEditorCreated?.(null);
     }
   };
+
+  const teardown = () => teardownPending ??= teardownNow().finally(() => { teardownPending = undefined; });
 
   const createHostContext = (): EditorHostContext => {
     const external = factoryExtraOptions.hostContext as
@@ -128,7 +122,7 @@ export function connectEditorLifecycle(
       | undefined;
     return {
       toggleSidebar: () => vfsManager.toggleSidebar(),
-      saveContent: (nodeId, content) => engine.driver.writeContent(nodeId, content),
+      saveContent: persistContent,
       navigate: async (request: NavigationRequest) => {
         if (external?.navigate) await external.navigate(request);
         else console.warn('[EditorConnector] No navigation handler.', request);
@@ -141,12 +135,16 @@ export function connectEditorLifecycle(
   }: {
     item?: VFSNodeUI;
   }) => {
+    pendingItem = item;
+    const myToken = ++sessionToken;
+    if (!visible) return;
     // If this activeId change was caused by a rename, fileRenamed already updated
     // activeNode and called updateNodeId — just skip teardown.
     if (item && activeEditor && activeNode?.id === item.id) return;
 
-    await teardown();
-    const myToken = sessionToken;
+    try { await teardown(); }
+    catch (error) { console.error('[EditorConnector] Editor retained after save failure', error); return; }
+    if (myToken !== sessionToken || !visible) return;
     editorContainer.innerHTML = '';
 
     if (!item || item.type !== 'file') {
@@ -155,7 +153,7 @@ export function connectEditorLifecycle(
       return;
     }
 
-    setTimeout(async () => {
+    const loading = async () => {
       if (myToken !== sessionToken) return;
 
       try {
@@ -170,6 +168,7 @@ export function connectEditorLifecycle(
           item.content?.data !== undefined
             ? item.content.data
             : await engine.driver.readContent(item.id);
+        if (myToken !== sessionToken) return;
         // readContent without 'utf-8' encoding may return ArrayBuffer;
         // text editors need a string (CodeMirror calls .split() on the doc).
         const initialContent =
@@ -182,15 +181,16 @@ export function connectEditorLifecycle(
         // Re-check token after the async readContent — user may have switched files.
         if (myToken !== sessionToken) return;
 
+        const mount = document.createElement('div');
+        editorContainer.replaceChildren(mount);
         // Binary media files (image/video/audio/PDF): bypass the editor factory entirely.
         // Show a read-only viewer instead — editing binary content has no meaning.
         if (isBinaryViewable(mimeType)) {
             const viewer = new MediaViewerEditor(mimeType);
-            await viewer.init(editorContainer, rawContent as string | ArrayBuffer | undefined);
+            await viewer.init(mount, rawContent as string | ArrayBuffer | undefined);
             if (myToken !== sessionToken) { await viewer.destroy(); return; }
             activeEditor = viewer;
             activeNode = item;
-            hasUnsavedChanges = false;
             onEditorCreated?.(viewer);
             return;
         }
@@ -205,20 +205,20 @@ export function connectEditorLifecycle(
           target: { kind: 'file', path: item.id },
           language: item.metadata.custom?._extension || '',
           ...factoryExtraOptions,
+          ...fileContentFormat(item.id),
           files,
           hostContext: createHostContext(),
         };
 
-        const editor = await factory(editorContainer, editorOptions);
+        const editor = await factory(mount, editorOptions);
         if (myToken !== sessionToken) {
-          editor?.destroy();
+          await editor?.destroy(); mount.remove();
           return;
         }
 
         activeEditor = editor;
         activeNode = item;
         lastTaskStats = item.metadata.custom.taskCount || null;
-        hasUnsavedChanges = false;
 
         if (activeEditor) {
           const bindEditorEvent = (
@@ -240,7 +240,7 @@ export function connectEditorLifecycle(
 
           bindEditorEvent('blur', scheduleSave);
           bindEditorEvent('modeChanged', (p: any) =>
-            p?.mode === 'render' && save()
+            p?.mode === 'render' && scheduleSave()
           );
           bindEditorEvent('interactiveChange', () => {
             optimisticUpdate();
@@ -256,7 +256,10 @@ export function connectEditorLifecycle(
           editorContainer.innerHTML = `<div class="editor-placeholder editor-placeholder--error">Error: ${(e as Error).message}</div>`;
         }
       }
-    }, 0);
+    };
+    const task = new Promise<void>(resolve => setTimeout(resolve, 0)).then(loading);
+    loads.add(task);
+    void task.finally(() => loads.delete(task));
   };
 
   const unsubNav = vfsManager.on(
@@ -289,10 +292,23 @@ export function connectEditorLifecycle(
   editorContainer.innerHTML =
     '<div class="editor-placeholder">Select a file...</div>';
 
-  return () => {
+  const dispose = async () => {
+    ++sessionToken;
     unsubSession();
     unsubNav();
     unsubRename?.();
-    teardown().catch(console.error);
+    await teardown();
+    await Promise.allSettled(loads);
   };
+  return Object.assign(dispose, { async setVisible(next: boolean): Promise<void> {
+    if (visible === next) return;
+    visible = next;
+    if (!next) {
+      ++sessionToken;
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      await save();
+    } else if (pendingItem && activeNode?.id !== pendingItem.id) {
+      await handleSessionChange({ item: pendingItem });
+    }
+  } });
 }

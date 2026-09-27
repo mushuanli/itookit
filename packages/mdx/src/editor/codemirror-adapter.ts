@@ -63,11 +63,12 @@ export class CodeMirrorAdapter {
             onChange: (event: EditorChangeEvent) => void;
             onBlur: () => void;
             onFocus: () => void;
-        }
+        },
+        enableMarkdown = true
     ): void {
         const allExtensions: Extension[] = [
             ...extensions,
-            markdown(),
+            ...(enableMarkdown ? [markdown()] : []),
             this.readOnlyCompartment.of(EditorView.editable.of(true)),
             this.searchCompartment.of([]),
             navigationHighlightField,

@@ -1,3 +1,4 @@
+import { documentFormat, isLargeDocument } from './editor/document-policy';
 import { editorFilePath } from '@itookit/ui-common';
 import { normalizeEditorOptions } from '@itookit/ui-common';
 /**
@@ -194,11 +195,16 @@ export async function createMDxEditor(
   container: HTMLElement,
   config: MDxEditorFactoryConfig = {}
 ): Promise<IEditor> {
-  const userPlugins = config.plugins || [];
+  const source = config.contentFormat === 'text';
+  const userPlugins = source ? ['core:titlebar', 'interaction:auto-save'] : [...config.plugins || []];
   const defaultOpts = config.defaultPluginOptions || {};
 
   // 1. 自动加载 Asset Manager
-  autoLoadAssetManager(userPlugins, defaultOpts);
+  if (!source) autoLoadAssetManager(userPlugins, defaultOpts);
+  else {
+    config.initialMode = 'edit';
+    defaultOpts['core:titlebar'] = { ...defaultOpts['core:titlebar'], enableToggleEditMode: false, enableAssetManager: false };
+  }
 
   // 2. 桥接保存回调
   config.onSave = bridgeSaveCallback(config);
@@ -208,10 +214,12 @@ export async function createMDxEditor(
   const editor = new MDxEditor(normalizeEditorOptions(config) as MDxEditorConfig);
 
   // 4. 核心插件（强制加载）
-  editor.use(new CoreEditorPlugin(defaultOpts['editor:core'] || {}));
+  editor.use(new CoreEditorPlugin({ ...defaultOpts['editor:core'],
+    ...(isLargeDocument(config.initialContent ?? '') ? { enableLineWrapping: false } : {}),
+  }));
 
   // 5. 构建最终插件列表
-  const pluginMap = buildPluginMap(userPlugins, DEFAULT_PLUGINS);
+  const pluginMap = buildPluginMap(userPlugins, source ? [] : DEFAULT_PLUGINS);
 
   // 6. 拓扑排序
   const sortedNames = globalPluginRegistry.sortByDependencies(Array.from(pluginMap.keys()));
@@ -305,6 +313,8 @@ export const registerPlugin = globalPluginRegistry.register.bind(globalPluginReg
 // === 默认工厂 ===
 
 export const defaultEditorFactory: EditorFactory = async (container, options) => {
+  const contentFormat = documentFormat(options);
+  const sourceFirst = contentFormat === 'text' || isLargeDocument(options.initialContent ?? '');
   const plugins = (options.plugins ?? []).filter(isPluginConfig);
   const rawDefaults = options.defaultPluginOptions ?? {};
   const titlebarDefaults = rawDefaults['core:titlebar'];
@@ -315,7 +325,8 @@ export const defaultEditorFactory: EditorFactory = async (container, options) =>
   return createMDxEditor(container, {
     ...options,
     plugins: ['core:titlebar', 'interaction:auto-save', ...plugins],
-    initialMode: 'render',
+    contentFormat,
+    initialMode: sourceFirst ? 'edit' : options.initialMode ?? 'render',
     defaultPluginOptions: {
       ...rawDefaults,
       'core:titlebar': {
