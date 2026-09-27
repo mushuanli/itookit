@@ -15,7 +15,7 @@ export const mapFSNodeToUIItem = (
   showFileExtensions = false,
 ): VFSNodeUI => {
   const isDir = node.type === 'directory';
-  const fileDetails = showFileExtensions || node.metadata?._fileDetails === true;
+  const fileDetails = node.metadata?._fileDetails === true || (node.metadata?._fileDetails !== false && showFileExtensions);
 
   const displayTitle =
     (fileDetails ? node.name : node.metadata?.title as string) ||

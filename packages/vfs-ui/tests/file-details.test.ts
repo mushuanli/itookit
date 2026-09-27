@@ -35,3 +35,9 @@ it('keeps type icons alongside pin markers and displays known zero separately fr
   expect(html).toContain('2 KiB'); expect(html).toContain(FILE_ICONS.config); expect(html).toContain(FILE_ICONS.pin);
   expect(mapFSNodeToUIItem({ ...file, metadata: {} }).presentation?.fileDetails).toBe(false);
 });
+
+it('keeps synthetic resource titles and presentation when extensions are enabled by the host', () => {
+  const session = mapFSNodeToUIItem({ ...file, metadata: { title: 'Conversation', _fileDetails: false } }, undefined, undefined, true);
+  expect(session.metadata.title).toBe('Conversation');
+  expect(session.presentation?.fileDetails).toBe(false);
+});

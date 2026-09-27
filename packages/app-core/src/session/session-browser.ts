@@ -151,7 +151,7 @@ class BrowserBackend implements IStorageBackend {
         const name = isFolderSegment(segment) ? decodeURIComponent(segment.slice(FOLDER_SEGMENT_PREFIX.length)) : segment;
         const base = { path, name, parentPath: path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/',
             createdAt: updatedAt, modifiedAt: updatedAt, version: 1, tags: [],
-            metadata: { title, _showAll: true, ...(readOnly ? { _readOnly: true } : {}) }, icon: directory ? '📁' : '📋' };
+            metadata: { title, _showAll: true, _fileDetails: false, ...(readOnly ? { _readOnly: true } : {}) }, icon: directory ? '📁' : '📋' };
         return directory ? { ...base, type: 'directory' } : { ...base, type: 'file', size: 0 };
     }
     private async withFiles<T>(target: FileTarget, fn: (fs: import('@itookit/vfs-core').IFileSystem) => Promise<T>): Promise<T> {
@@ -172,7 +172,7 @@ class BrowserBackend implements IStorageBackend {
     }
     private sessionNode(manifest: { id: string; title: string; createdAt: number; updatedAt: number; folder?: string | null; parentSessionId?: string | null }): FSNode {
         return { ...this.node(this.sessionBrowserPath(manifest.id, manifest.folder), manifest.title, true, manifest.updatedAt),
-            createdAt: manifest.createdAt, icon: ENTITY_ICONS.chat, metadata: { title: manifest.title, _showAll: true, parentSessionId: manifest.parentSessionId ?? null } };
+            createdAt: manifest.createdAt, icon: ENTITY_ICONS.chat, metadata: { title: manifest.title, _showAll: true, _fileDetails: false, parentSessionId: manifest.parentSessionId ?? null } };
     }
     private sessionNodes(sessions: import('@itookit/llm-session').SessionSummary[], folder: string | null): FSNode[] {
         const roots = sessionFamilyRoots(sessions);
