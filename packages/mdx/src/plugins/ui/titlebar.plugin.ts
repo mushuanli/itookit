@@ -173,7 +173,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         title: '切换到阅读模式',
         icon: '<i class="fas fa-book-open"></i>',
         command: 'toggleEditMode',
-        location: 'right',
+        location: 'left',
       });
     }
 
