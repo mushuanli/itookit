@@ -10,6 +10,7 @@
 
 ## 职责收敛
 
+- 资源：EditorLease 统一编辑器销毁与资源释放的顺序，并发释放共享完成点，保存失败允许重试。project-file-editor 独立负责项目文件读取与工厂装配，工作台只提交结果和同步路由。
 - 加载：通用取消机制已移入 app-shell/lifecycle；LatestViewLoad 被通用 connector 与 SessionWorkbench 复用。读取失效与底层完成分开，底层完成后才释放资源。
 - 订阅：SubscriptionScope 被两套编辑器装配复用；幂等释放，单个回调失败也继续解除其他订阅，晚注册立即释放。保留业务事件边界；异步资源释放不混入同步订阅。
 - 刷新：SourceAdapter 使用 RefreshScheduler 合并突发变化；执行期间的新变化触发一次尾随刷新，隐藏期间保留失效状态，恢复后补刷新。当前仍以完整数据源快照刷新，局部目录失效尚未接入。

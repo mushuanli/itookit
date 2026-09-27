@@ -1,3 +1,5 @@
+import { EditorLease } from '../browser/editor-lease';
+import { openProjectFileEditor } from './project-file-editor';
 import { fileContentFormat } from '../browser/file-format';
 import { ViewLoad, ViewLoadCancelled, LatestViewLoad } from '../lifecycle/view-load';
 import { SubscriptionScope } from '../lifecycle/subscription-scope';
@@ -58,6 +60,7 @@ export interface SessionWorkbenchOptions {
 export class SessionWorkbench implements WorkspaceController {
     private readonly dialogs = new AbortController();
     private editor?: IEditor;
+    private editorLease?: EditorLease;
     private previewCleanup?: () => void;
     private fileRenameCleanup?: () => void;
     private context?: FileSystemContextOwner;
@@ -788,39 +791,17 @@ export class SessionWorkbench implements WorkspaceController {
     }
     private async openProjectFile(_path: string, target: { folder: string; path: string }, load: ViewLoad): Promise<void> {
         if (!this.projects) throw new Error('Projects unavailable');
-        let owner: Awaited<ReturnType<NonNullable<SessionWorkbenchOptions['projects']>['openFiles']>> | undefined;
-        let editor: IEditor | undefined;
-        let mount: HTMLElement | undefined;
-        try {
-            const source = await load.read(async () => owner = await traceBoot('projectFile.source', () => this.projects!.openFiles(target.folder)));
-            const context: FileSystemContextOwner = { context: { fs: source.fs, cwd: target.path.slice(0, target.path.lastIndexOf('/')) || '/' }, release: () => source.dispose() };
-            const driver = source.fs.driver;
-            const node = await load.read(() => traceBoot('projectFile.type', () => driver.getNodeType
-                ? driver.getNodeType(target.path) : driver.getNode(target.path)));
-            if (!node) throw new FSError('ENOENT', 'File not found');
-            if (node.type === 'directory') {
-                await context.release(); owner = undefined; load.check(); this.message(t('project.selectFile')); return;
-            }
-            mount = await this.editorMount(target.folder); load.check();
-            const bytes = await load.read(() => traceBoot('projectFile.read', () => driver.readContent(target.path, { encoding: 'binary' })));
-            const content = decodeFile(target.path, bytes);
-            const filename = target.path.split('/').pop()!;
-            const readOnly = (await load.read(() => source.fs.capabilitiesAt(target.path))).readonly;
-            if (content === undefined) this.previewCleanup = this.showBinary(mount, target.path, bytes);
-            else editor = await load.read(async () => editor = await traceBoot('projectFile.editor', () => this.fileFactory(mount!, { ...fileContentFormat(target.path), target: { kind: 'file', path: target.path }, files: context.context,
-                initialContent: content, readOnly, title: buildRenamedFilename(filename, filename).title,
-                hostContext: { toggleSidebar: () => this.sidebarUI?.toggleSidebar(),
-                    navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve(),
-                    saveContent: readOnly ? undefined : async (path, text) => { await driver.writeContent(path, text); this.refresh(); } } })));
-            load.check();
-            this.editor = editor; this.context = context;
-            if (editor) this.trackProjectFileRenames(source.fs, target.folder, target.path);
-        } catch (error) {
-            mount?.remove();
-            const cleanup = load.drain().then(async () => { try { await editor?.destroy(); } finally { await owner?.dispose(); } });
-            if (error instanceof ViewLoadCancelled) this.finishReads(cleanup); else await cleanup;
-            throw error;
-        }
+        const opened = await openProjectFileEditor(this.projects, target, load, {
+            factory: this.fileFactory, mount: () => this.editorMount(target.folder),
+            showBinary: (mount, path, bytes) => this.showBinary(mount, path, bytes),
+            deferCleanup: cleanup => this.finishReads(cleanup),
+            changed: () => this.refresh(),
+            host: { toggleSidebar: () => this.sidebarUI?.toggleSidebar(),
+                navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve() },
+        });
+        if (!opened) { this.message(t('project.selectFile')); return; }
+        this.editor = opened.editor; this.context = opened.context; this.previewCleanup = opened.previewCleanup;
+        if (opened.editor) this.trackProjectFileRenames(opened.context.context.fs, target.folder, target.path);
     }
 
     private trackProjectFileRenames(fs: IFileSystem, folder: string, path: string): void {
@@ -872,15 +853,22 @@ export class SessionWorkbench implements WorkspaceController {
     }
 
     private async closeEditor(): Promise<void> {
-        const editor = this.editor, assets = this.assets, context = this.context;
-        await editor?.destroy();
-        ++this.taskRefresh;
-        this.previewCleanup?.(); this.previewCleanup = undefined;
-        this.fileRenameCleanup?.(); this.fileRenameCleanup = undefined;
+        if (!this.editorLease) {
+            const editor = this.editor, assets = this.assets, context = this.context;
+            this.editorLease = new EditorLease(editor, async () => {
+                ++this.taskRefresh;
+                this.previewCleanup?.(); this.previewCleanup = undefined;
+                this.fileRenameCleanup?.(); this.fileRenameCleanup = undefined;
+                await this.unmountEditorSkills();
+                const results = await Promise.allSettled([assets?.dispose(), context?.release()]);
+                const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
+                if (errors.length) throw new AggregateError(errors, 'Editor resource cleanup failed');
+            });
+        }
+        await this.editorLease.dispose();
+        this.editorLease = undefined;
         this.editor = undefined; this.assets = undefined; this.context = undefined; this.active = null;
         this.activeBranch = undefined;
-        await this.unmountEditorSkills();
-        await Promise.all([assets?.dispose(), context?.release()]);
     }
     async destroy(): Promise<void> {
         this.cancelViewLoad();
@@ -904,9 +892,3 @@ function sessionCreationParent(path: string | null): string | null {
 }
 
 function isFlowPath(path: string): boolean { return path === '/@flows' || path.startsWith('/@flows/'); }
-
-function decodeFile(path: string, bytes: ArrayBuffer): string | undefined {
-    if (/\.(pdf|zip|gz|tar|7z|rar|png|jpe?g|gif|webp|avif|ico|mp[34]|wav|ogg|webm|mov|woff2?|ttf|bin|sqlite|db|docx?|xlsx?|pptx?)$/i.test(path)) return;
-    try { const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); if (!text.includes('\0')) return text; }
-    catch { /* Binary files are previewed or downloaded. */ }
-}

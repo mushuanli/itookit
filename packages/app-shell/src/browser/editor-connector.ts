@@ -1,3 +1,4 @@
+import { EditorLease } from './editor-lease';
 import { LatestViewLoad } from '../lifecycle/view-load';
 import { SubscriptionScope } from '../lifecycle/subscription-scope';
 import { fileContentFormat } from './file-format';
@@ -9,7 +10,7 @@ import type { EditorFactory } from '@itookit/ui-common';
 import type {
     NavigationRequest
 } from '@itookit/common';
-import type { IEditor, EditorOptions, EditorHostContext } from '@itookit/ui-common';
+import type { IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventCallback } from '@itookit/ui-common';
 import type { IFileSystem, FileSystemContext } from '@itookit/vfs-core';
 
 import type { VFSUIShell, VFSNodeUI } from '@itookit/vfs-ui';
@@ -44,6 +45,7 @@ export function connectEditorLifecycle(
   if (files.fs !== engine) throw new Error('Editor file context differs from its file tree');
 
   let activeEditor: IEditor | null = null;
+  let editorLease: EditorLease | undefined;
   let activeNode: VFSNodeUI | null = null;
   let subscriptions = new SubscriptionScope();
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -106,8 +108,9 @@ export function connectEditorLifecycle(
   const teardownNow = async () => {
     if (activeEditor) {
       await save();
-      await activeEditor.destroy();
-      subscriptions.dispose();
+      editorLease ??= new EditorLease(activeEditor, async () => subscriptions.dispose());
+      await editorLease.dispose();
+      editorLease = undefined;
       subscriptions = new SubscriptionScope();
       activeEditor = null;
       activeNode = null;
@@ -223,12 +226,12 @@ export function connectEditorLifecycle(
         lastTaskStats = item.metadata.custom.taskCount || null;
 
         if (activeEditor) {
-          const bindEditorEvent = (
-            eventName: string,
-            handler: (...args: any[]) => void
+          const bindEditorEvent = <E extends EditorEvent>(
+            eventName: E,
+            handler: EditorEventCallback<E>
           ) => {
             try {
-              const unsub = (activeEditor as any).on(eventName, handler);
+              const unsub = activeEditor!.on(eventName, handler);
               if (typeof unsub === 'function') {
                 subscriptions.add(unsub);
               }
@@ -241,7 +244,7 @@ export function connectEditorLifecycle(
           };
 
           bindEditorEvent('blur', scheduleSave);
-          bindEditorEvent('modeChanged', (p: any) =>
+          bindEditorEvent('modeChanged', p =>
             p?.mode === 'render' && scheduleSave()
           );
           bindEditorEvent('interactiveChange', () => {
