@@ -216,6 +216,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // ── 6. Manager cache + workspace loader ────────────────────────────────────
 
     const managerCache = new Map<string, WorkspaceHandle>();
+    let visibleWorkspaceId: string | undefined;
     // Deduplicate concurrent loads: if the same workspace is loading, reuse the promise.
     const pendingLoads = new Map<string, Promise<WorkspaceController | undefined>>();
 
@@ -274,6 +275,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 hostContext: { toggleSidebar: collapsed => sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')), navigate: handleNavigationRequest } });
             cleanupFns.push(module.dispose);
             await module.workbench.start(); managerCache.set(elementId, module.workbench);
+            if (visibleWorkspaceId && visibleWorkspaceId !== elementId) {
+                await module.workbench.setVisible?.(false); return module.workbench;
+            }
             // Sidebar is populated from the catalog snapshot now; the editor area mounts later.
             options.onWorkspaceReady?.({ editor: editorEl });
             if (initialResourceId) {
@@ -357,6 +361,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
         const controller: WorkspaceController & WorkspaceCreation = {
             start: () => manager.start(), destroy: () => manager.destroy(),
+            setVisible: visible => manager.setVisible?.(visible),
             openResource: id => manager.openFile(id), createResource: options => manager.createAndOpenFile(options),
             getActiveResourceId: () => manager.getActiveFilePath(),
         };
@@ -366,6 +371,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         cleanupFns.push(module.dispose);
         await module.workbench.start();
         managerCache.set(elementId, module.workbench);
+        if (visibleWorkspaceId && visibleWorkspaceId !== elementId) {
+            await module.workbench.setVisible?.(false); return module.workbench;
+        }
 
         // Bridge: session HITL status → vfs-ui session list highlight.
         // Calls manager.setWaitingInput() which delegates to VFSUIShell internally,
@@ -433,6 +441,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         if (legacyToolbox) { workspaceId = toolboxId!; resourceId = legacyToolbox.path ?? '/' + legacyToolbox.kind; }
         if (sourceSlug === 'projects' && resourceId && workspaces.some(ws => ws.elementId === workspaceId && ws.type === 'chat')) {
             resourceId = await resolveLegacyProjectResource(resourceId, runtime.projects);
+        }
+        visibleWorkspaceId = workspaceId;
+        for (const [id, workbench] of managerCache) {
+            void Promise.resolve(workbench.setVisible?.(id === workspaceId)).catch(error => console.error('[Shell] Workspace save failed', error));
         }
         console.log(`[Shell] performNavigation: ${workspaceId} resourceId=${resourceId ?? '—'} cached=${managerCache.has(workspaceId)}`);
         document.querySelectorAll('.workspace-view').forEach(ws => {

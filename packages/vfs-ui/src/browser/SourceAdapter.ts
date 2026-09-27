@@ -18,10 +18,16 @@ export class SourceAdapter {
   private readonly abort = new AbortController();
   private unsubscribe?: () => void;
   private revision = 0;
+  private visible = true;
+  setVisible(visible: boolean): void {
+    if (visible === this.visible) return;
+    this.visible = visible; ++this.revision;
+  }
   private queue: Promise<void> = Promise.resolve();
   constructor(readonly source: BrowserSource, private readonly store: IStatePort, private readonly report?: (error: unknown) => void) {}
   connectEngineEvents(): () => void {
     this.unsubscribe = this.source.subscribe(() => {
+      if (!this.visible) return;
       this.queue = this.queue.then(() => this.loadData({ silent: true })).catch(error => {
         if (!this.abort.signal.aborted) { this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error } }); this.report?.(error); }
       });
@@ -29,6 +35,7 @@ export class SourceAdapter {
     return () => this.unsubscribe?.();
   }
   async loadData(_options: { silent?: boolean } = {}): Promise<void> {
+    if (!this.visible) return;
     const revision = ++this.revision;
     const items = (await this.source.children(null, this.abort.signal)).map(displayNode);
     if (this.abort.signal.aborted || revision !== this.revision) return;
@@ -36,17 +43,20 @@ export class SourceAdapter {
     await this.restoreExpansion(this.store.getState().expandedFolderIds);
   }
   async expandDirectory(id: string, options: { expand?: boolean; restoreDescendants?: boolean } = {}): Promise<void> {
+    if (!this.visible) return;
     const revision = this.revision;
     const children = (await this.source.children(id, this.abort.signal)).filter(node => node.id !== id).map(displayNode);
     if (this.abort.signal.aborted || revision !== this.revision) return;
     this.store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentPath: id, children, expand: options.expand } });
   }
   async restoreExpansion(ids: Set<string>): Promise<void> {
+    const revision = this.revision;
     const pending = new Set(ids);
     let changed = true;
-    while (changed && pending.size && !this.abort.signal.aborted) {
+    while (changed && pending.size && this.visible && revision === this.revision && !this.abort.signal.aborted) {
       changed = false;
       for (const id of pending) {
+        if (!this.visible || revision !== this.revision) return;
         const node = findNodeById(this.store.getState().items, id);
         if (!node) continue;
         pending.delete(id); changed = true;
@@ -56,16 +66,22 @@ export class SourceAdapter {
   }
 
   async reveal(id: string): Promise<void> {
+    if (!this.visible) return;
+    const revision = this.revision;
     const ancestors: string[] = [], visited = new Set<string>();
     let node = await this.source.get(id, this.abort.signal);
     if (!node) throw new Error('Resource not found: ' + id);
     while (node.parentId) {
+      if (!this.visible || revision !== this.revision) return;
       if (visited.has(node.parentId)) throw new Error('Cyclic browser hierarchy');
       visited.add(node.parentId); ancestors.unshift(node.parentId);
       node = await this.source.get(node.parentId, this.abort.signal);
       if (!node) throw new Error('Browser parent not found');
     }
-    for (const parent of ancestors) await this.expandDirectory(parent);
+    for (const parent of ancestors) {
+      if (!this.visible || revision !== this.revision) return;
+      await this.expandDirectory(parent);
+    }
   }
   destroy(): void { this.abort.abort(); ++this.revision; this.unsubscribe?.(); }
 }

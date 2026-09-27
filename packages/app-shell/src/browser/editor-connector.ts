@@ -1,3 +1,5 @@
+import { LatestViewLoad } from '../lifecycle/view-load';
+import { SubscriptionScope } from '../lifecycle/subscription-scope';
 import { fileContentFormat } from './file-format';
 import type { EditorFactory } from '@itookit/ui-common';
 /**
@@ -43,9 +45,9 @@ export function connectEditorLifecycle(
 
   let activeEditor: IEditor | null = null;
   let activeNode: VFSNodeUI | null = null;
-  let unsubscribers: Array<() => void> = [];
+  let subscriptions = new SubscriptionScope();
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
-  let sessionToken = 0;
+  const viewLoads = new LatestViewLoad();
   let visible = true;
   let pendingItem: VFSNodeUI | undefined;
   let teardownPending: Promise<void> | undefined;
@@ -105,8 +107,8 @@ export function connectEditorLifecycle(
     if (activeEditor) {
       await save();
       await activeEditor.destroy();
-      unsubscribers.forEach(u => u());
-      unsubscribers = [];
+      subscriptions.dispose();
+      subscriptions = new SubscriptionScope();
       activeEditor = null;
       activeNode = null;
       lastTaskStats = null;
@@ -136,7 +138,7 @@ export function connectEditorLifecycle(
     item?: VFSNodeUI;
   }) => {
     pendingItem = item;
-    const myToken = ++sessionToken;
+    const load = viewLoads.begin();
     if (!visible) return;
     // If this activeId change was caused by a rename, fileRenamed already updated
     // activeNode and called updateNodeId — just skip teardown.
@@ -144,7 +146,7 @@ export function connectEditorLifecycle(
 
     try { await teardown(); }
     catch (error) { console.error('[EditorConnector] Editor retained after save failure', error); return; }
-    if (myToken !== sessionToken || !visible) return;
+    if (!viewLoads.isCurrent(load) || !visible) return;
     editorContainer.innerHTML = '';
 
     if (!item || item.type !== 'file') {
@@ -154,7 +156,7 @@ export function connectEditorLifecycle(
     }
 
     const loading = async () => {
-      if (myToken !== sessionToken) return;
+      if (!viewLoads.isCurrent(load)) return;
 
       try {
         // Resolve MIME type from file extension to decide rendering strategy.
@@ -168,7 +170,7 @@ export function connectEditorLifecycle(
           item.content?.data !== undefined
             ? item.content.data
             : await engine.driver.readContent(item.id);
-        if (myToken !== sessionToken) return;
+        if (!viewLoads.isCurrent(load)) return;
         // readContent without 'utf-8' encoding may return ArrayBuffer;
         // text editors need a string (CodeMirror calls .split() on the doc).
         const initialContent =
@@ -179,7 +181,7 @@ export function connectEditorLifecycle(
               : '';
 
         // Re-check token after the async readContent — user may have switched files.
-        if (myToken !== sessionToken) return;
+        if (!viewLoads.isCurrent(load)) return;
 
         const mount = document.createElement('div');
         editorContainer.replaceChildren(mount);
@@ -188,7 +190,7 @@ export function connectEditorLifecycle(
         if (isBinaryViewable(mimeType)) {
             const viewer = new MediaViewerEditor(mimeType);
             await viewer.init(mount, rawContent as string | ArrayBuffer | undefined);
-            if (myToken !== sessionToken) { await viewer.destroy(); return; }
+            if (!viewLoads.isCurrent(load)) { await viewer.destroy(); return; }
             activeEditor = viewer;
             activeNode = item;
             onEditorCreated?.(viewer);
@@ -211,7 +213,7 @@ export function connectEditorLifecycle(
         };
 
         const editor = await factory(mount, editorOptions);
-        if (myToken !== sessionToken) {
+        if (!viewLoads.isCurrent(load)) {
           await editor?.destroy(); mount.remove();
           return;
         }
@@ -228,7 +230,7 @@ export function connectEditorLifecycle(
             try {
               const unsub = (activeEditor as any).on(eventName, handler);
               if (typeof unsub === 'function') {
-                unsubscribers.push(unsub);
+                subscriptions.add(unsub);
               }
             } catch (e) {
               console.warn(
@@ -251,7 +253,7 @@ export function connectEditorLifecycle(
 
         onEditorCreated?.(activeEditor);
       } catch (e) {
-        if (myToken === sessionToken) {
+        if (viewLoads.isCurrent(load)) {
           console.error('[EditorConnector] Create failed:', e);
           editorContainer.innerHTML = `<div class="editor-placeholder editor-placeholder--error">Error: ${(e as Error).message}</div>`;
         }
@@ -293,7 +295,7 @@ export function connectEditorLifecycle(
     '<div class="editor-placeholder">Select a file...</div>';
 
   const dispose = async () => {
-    ++sessionToken;
+    viewLoads.cancel();
     unsubSession();
     unsubNav();
     unsubRename?.();
@@ -304,7 +306,7 @@ export function connectEditorLifecycle(
     if (visible === next) return;
     visible = next;
     if (!next) {
-      ++sessionToken;
+      viewLoads.cancel();
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       await save();
     } else if (pendingItem && activeNode?.id !== pendingItem.id) {

@@ -1,3 +1,6 @@
+import { fileContentFormat } from '../browser/file-format';
+import { ViewLoad, ViewLoadCancelled, LatestViewLoad } from '../lifecycle/view-load';
+import { SubscriptionScope } from '../lifecycle/subscription-scope';
 import { archiveTarget, archiveTargetPath } from './archive-targets';
 import { chooseArchive, downloadArchive } from '../files/archive-transfer';
 import { SessionFamilyActions } from './SessionFamilyActions';
@@ -71,7 +74,7 @@ export class SessionWorkbench implements WorkspaceController {
     private closed = false;
     private tail: Promise<void> = Promise.resolve();
     private refreshTail: Promise<void> = Promise.resolve();
-    private unsubscribers: Array<() => void> = [];
+    private readonly subscriptions = new SubscriptionScope();
     private taskRefresh = 0;
     private refreshQueued = false;
     private refreshTimer?: ReturnType<typeof setTimeout>;
@@ -130,7 +133,7 @@ export class SessionWorkbench implements WorkspaceController {
             searchPlaceholder: t(this.projects ? 'project.searchContents' : 'project.search'), showFileExtensions: !this.projects,
             readOnly: false, activateDirectories: true, autoSelectFirst: !this.projects, defaultUiSettings: { sortBy: 'lastModified' },
             compareItems: compareSessionEntries,
-            restoreExpandedDirectory: path => isFlowPath(path) || ['folder', 'project-files'].includes(resolveBrowserTarget(path).kind),
+            restoreExpandedDirectory: path => isFlowPath(path) || resolveBrowserTarget(path).kind === 'folder',
             exportDirectories: true,
             exportItem: item => this.exportSessionItem(item),
             fileCreation: { label: '会话', title: formatDefaultFileTitle(), resolveParent: sessionCreationParent },
@@ -163,7 +166,7 @@ export class SessionWorkbench implements WorkspaceController {
                 },
             },
         }, this.navigationFiles) as VFSUIShell;
-        this.unsubscribers.push(this.sidebarUI.on('sessionSelected', ({ item }) => {
+        this.subscriptions.add(this.sidebarUI.on('sessionSelected', ({ item }) => {
             // Expanding ancestors during selectPath can emit intermediate selections too.
             if (item && !this.selectionSync) void this.openResource(item.id).catch(error => this.report(error));
         }), this.sidebarUI.on('sidebarStateChanged', ({ isCollapsed }) => this.sidebar.classList.toggle('is-collapsed', isCollapsed)),
@@ -234,7 +237,7 @@ export class SessionWorkbench implements WorkspaceController {
      * into one sidebar re-render. Content changes never reach here.
      */
     private scheduleRefresh(source: string): void {
-        if (this.closed) return;
+        if (this.closed || !this.visible) return;
         this.refreshSources.add(source);
         if (this.refreshTimer) return;
         this.refreshTimer = setTimeout(() => {
@@ -243,7 +246,7 @@ export class SessionWorkbench implements WorkspaceController {
         }, 120);
     }
     private refresh(): void {
-        if (this.closed || this.refreshQueued) return;
+        if (this.closed || !this.visible || this.refreshQueued) return;
         this.refreshQueued = true;
         if (debugEnabled()) {
             const now = performance.now();
@@ -257,10 +260,12 @@ export class SessionWorkbench implements WorkspaceController {
         }
         this.refreshTail = this.refreshTail.catch(() => {}).then(async () => {
             this.refreshQueued = false;
-            if (this.closed) return;
+            if (this.closed || !this.visible) return;
             this.browser?.invalidateNavigation();
             await this.sidebarUI?.refresh();
+            if (!this.visible || this.closed) return;
             await this.projectNavigation?.refresh();
+            if (!this.visible || this.closed) return;
             await this.syncBranchRoute();
             for (const id of this.waiting) this.sidebarUI?.setNodeAttention(await this.sessionPath(id), t('project.waitingInput'));
             if (this.active?.startsWith('/')) {
@@ -293,6 +298,37 @@ export class SessionWorkbench implements WorkspaceController {
             this.onSelect(this.getActiveResourceId() ?? '', 'replace');
         }
     }
+    private visible = true;
+    private readonly viewLoads = new LatestViewLoad();
+    private pendingTarget?: { id: string; options: { reload?: boolean; branch?: string } };
+    private readonly readCleanup = new Set<Promise<void>>();
+    private cancelViewLoad(): void {
+        this.viewLoads.cancel();
+        ++this.fileNavigationRevision;
+        ++this.taskRefresh;
+        this.projectNavigation?.cancelPending();
+        this.sidebarUI?.cancelPendingSelection?.();
+    }
+    async setVisible(visible: boolean): Promise<void> {
+        if (this.visible === visible || this.closed) return;
+        this.visible = visible;
+        this.sidebarUI?.setVisible?.(visible);
+        if (!visible) {
+            this.cancelViewLoad();
+            if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = undefined; }
+            try { await this.editor?.flushPendingSave?.(); }
+            catch (error) { this.report(error); throw error; }
+        } else {
+            const pending = this.pendingTarget;
+            if (pending) await this.openResource(pending.id, pending.options);
+            this.refresh();
+        }
+    }
+    private finishReads(cleanup: Promise<void>): void {
+        const tracked = cleanup.catch(error => this.report(error));
+        this.readCleanup.add(tracked);
+        void tracked.finally(() => this.readCleanup.delete(tracked));
+    }
     async openResource(resourceId: string, options: { reload?: boolean; branch?: string } = {}): Promise<void> {
         const route = parseSessionRoute(resourceId);
         let path = route.path;
@@ -300,20 +336,25 @@ export class SessionWorkbench implements WorkspaceController {
             return Promise.resolve(this.hostContext?.navigate?.({ target: 'flows',
                 ...(path === '/@flows' ? {} : { resourceId: path.slice('/@flows'.length) }) }));
         }
+        this.cancelViewLoad();
+        const load = this.viewLoads.begin();
+        this.pendingTarget = { id: resourceId, options };
+        if (!this.visible) this.viewLoads.cancel();
         const branch = options.branch ?? route.branch;
         const target = resolveBrowserTarget(path);
         const id = target.kind === 'session' ? target.sessionId : path;
         const operation = this.tail.then(async () => {
             if (this.closed) throw new Error('Session workspace closed');
+            load.check();
             if (id === this.active && !options.reload && (branch === undefined || branch === this.activeBranch)) {
-                if (target.kind === 'project-files') await this.projectNavigation?.sync(path, true);
+                if (target.kind === 'project-files') this.scheduleFileNavigation(path);
                 return;
             }
             if (target.kind === 'folder') {
-                await this.closeEditor();
+                await this.closeEditor(); load.check();
                 this.active = id;
                 this.activeBranch = undefined;
-                await this.projectNavigation?.sync(path, true);
+                await load.read(async () => this.projectNavigation?.sync(path, true)); load.check();
                 const folder = folderPathFromBrowserPath(path);
                 const project = this.projectNavigation?.currentProject();
                 if (this.projectNavigation && (!project || folder === project.path)) this.showWelcome();
@@ -324,31 +365,36 @@ export class SessionWorkbench implements WorkspaceController {
                 return;
             }
             if (target.kind === 'project-files') {
-                await this.closeEditor();
-                await this.projectNavigation?.sync(path, true);
-                await this.openProjectFile(path, target);
-                this.active = path; this.onSelect(path); await this.selectPath(path); return;
+                await this.closeEditor(); load.check();
+                await this.openProjectFile(path, target, load); load.check();
+                if (this.closed) throw new Error('Session workspace closed');
+                this.active = path; this.onSelect(path); this.scheduleFileNavigation(path); return;
             }
-            const manifest = await this.sessions.get(target.sessionId);
+            const manifest = await load.read(() => this.sessions.get(target.sessionId));
             const suffix = target.kind === 'session' ? '' : target.kind === 'files' ? '/files' + (target.path === '/' ? '' : target.path)
                 : target.kind === 'tasks' ? '/tasks' : '/tasks/' + target.taskId;
             path = `${folderBrowserPath(manifest.folder)}/${target.sessionId}${suffix}`;
-            await this.projectNavigation?.sync(path);
-            await this.closeEditor();
+            await load.read(async () => this.projectNavigation?.sync(path)); load.check();
+            await this.closeEditor(); load.check();
             if (target.kind === 'session' || target.kind === 'files') {
                 const cwd = target.kind === 'session' ? undefined : target.path.slice(0, target.path.lastIndexOf('/')) || '/';
-                const context = await this.files.acquireFiles(target.sessionId, cwd);
+                let acquired: FileSystemContextOwner | undefined;
                 let assets: FileSystemView | undefined;
                 let editor: IEditor | undefined;
                 let previewCleanup: (() => void) | undefined;
-                const mount = await this.editorMount(manifest.folder, target.kind === 'session' ? manifest.id : undefined);
+                let mount: HTMLElement | undefined;
                 try {
-                    if (target.kind === 'files' && (await context.context.fs.driver.getNode(target.path))?.type === 'directory') {
-                        await context.release();
-                        await this.showDirectory(path);
+                    const context = await load.read(async () => acquired = await this.files.acquireFiles(target.sessionId, cwd));
+                    load.check();
+                    mount = await this.editorMount(manifest.folder, target.kind === 'session' ? manifest.id : undefined);
+                    load.check();
+                    if (target.kind === 'files' && (await load.read(() => context.context.fs.driver.getNode(target.path)))?.type === 'directory') {
+                        await context.release(); acquired = undefined;
+                        load.check(); await this.showDirectory(path);
                     } else if (target.kind === 'session') {
+                        load.check();
                         assets = createFileSystemView({ viewId: `editor-attachments:${target.sessionId}`, mounts: [{ mountId: 'attachments', at: '/', root: '/attachments', fs: context.context.fs, access: 'rw' }] });
-                        editor = await this.factory(mount, { target: { kind: 'session', sessionId: target.sessionId, branch: branch ?? manifest.currentBranch ?? 'main' }, files: context.context, assets, title: manifest.title,
+                        editor = await load.read(async () => editor = await this.factory(mount!, { target: { kind: 'session', sessionId: target.sessionId, branch: branch ?? manifest.currentBranch ?? 'main' }, files: context.context, assets, title: manifest.title,
                             hostContext: { ...this.hostContext!, directoryCommands: this.directoryMounts ? {
                                 workspaceReadOnly: (await this.directoryMounts.fixedWorkspace(target.sessionId)) !== undefined,
                                 configureWorkspace: async mode => {
@@ -369,9 +415,10 @@ export class SessionWorkbench implements WorkspaceController {
                                         if (await showMountDialog(this.directoryMounts!, this.files, target.sessionId, 'home', this.dialogs.signal)) await this.reloadAfterMount(target.sessionId); return '默认目录设置已关闭';
                                     } catch (error) { throw localizeMountError(error); }
                                 },
-                            } : undefined, toggleSidebar: () => this.sidebarUI?.toggleSidebar() } });
+                            } : undefined, toggleSidebar: () => this.sidebarUI?.toggleSidebar() } }));
                     } else {
-                        const bytes = await context.context.fs.driver.readContent(target.path, { encoding: 'binary' });
+                        const bytes = await load.read(() => context.context.fs.driver.readContent(target.path, { encoding: 'binary' }));
+                        load.check();
                         let content: string | undefined;
                         try {
                             const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -382,7 +429,7 @@ export class SessionWorkbench implements WorkspaceController {
                             previewCleanup = this.showBinary(mount, target.path, bytes);
                         } else {
                             const readOnly = (await context.context.fs.capabilitiesAt(target.path)).readonly;
-                            editor = await this.fileFactory(mount, { target: { kind: 'file', path: target.path }, files: context.context,
+                            editor = await load.read(async () => editor = await this.fileFactory(mount!, { ...fileContentFormat(target.path), target: { kind: 'file', path: target.path }, files: context.context,
                                 initialContent: content, title: target.path.split('/').pop(), readOnly,
                                 hostContext: { toggleSidebar: () => this.sidebarUI?.toggleSidebar(), navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve(),
                                     saveContent: readOnly ? undefined : async (_path, text) => {
@@ -392,9 +439,10 @@ export class SessionWorkbench implements WorkspaceController {
                                         catch (error) { this.report(error); throw error; }
                                         this.refresh();
                                     } },
-                            });
+                            }));
                         }
                     }
+                    load.check();
                     if (this.closed) throw new Error('Session workspace closed');
                     if (editor || previewCleanup) {
                         this.editor = editor; this.context = context; this.assets = assets; this.previewCleanup = previewCleanup;
@@ -402,11 +450,17 @@ export class SessionWorkbench implements WorkspaceController {
                         if (target.kind === 'files') this.mountEditorSkills(target.sessionId, target.path);
                     }
                 } catch (error) {
-                    try { previewCleanup?.(); await editor?.destroy(); } finally { await Promise.allSettled([assets?.dispose(), context.release()]); mount.remove(); }
+                    mount?.remove();
+                    const cleanup = load.drain().then(async () => {
+                        try { previewCleanup?.(); await editor?.destroy(); }
+                        finally { await Promise.allSettled([assets?.dispose(), acquired?.release()]); }
+                    });
+                    if (error instanceof ViewLoadCancelled) this.finishReads(cleanup); else await cleanup;
                     throw error;
                 }
             } else if (target.kind === 'tasks') await this.showDirectory(path);
             else await this.showTask(path);
+            load.check();
             if (this.closed) throw new Error('Session workspace closed');
             this.active = id;
             this.activeBranch = target.kind === 'session' ? branch ?? manifest.currentBranch ?? 'main' : undefined;
@@ -414,22 +468,30 @@ export class SessionWorkbench implements WorkspaceController {
             this.selectionSync = path;
             try { await this.sidebarUI?.selectPath(path); } finally { this.selectionSync = undefined; }
         });
-        this.tail = operation.catch(() => {}); return operation;
+        const result = operation.catch(error => {
+            if (!(error instanceof ViewLoadCancelled)) throw error;
+            if (this.closed) throw new Error('Session workspace closed');
+        }).finally(() => {
+            if (load.signal.aborted) this.finishReads(load.drain());
+            if (this.viewLoads.isCurrent(load)) this.pendingTarget = undefined;
+        });
+        this.tail = result.catch(() => {}); return result;
     }
     private async syncBranchRoute(): Promise<void> {
         // Serialize reconciliation with navigation so a stale read cannot close a newer editor.
         const operation = this.tail.then(async () => {
-            if (this.closed || !this.active) return;
+            if (this.closed || !this.visible || !this.active) return;
             const id = this.active, target = resolveBrowserTarget(id.startsWith('/') ? id : '/' + id);
             if (target.kind === 'folder' || target.kind === 'project-files') return;
             const manifest = await this.sessions.get(target.sessionId).catch(async error => {
+                if (!this.visible || this.closed) return undefined;
                 if (error?.code !== 'ENOENT') throw error;
                 await this.closeEditor();
                 this.message('选择一个会话，或新建会话');
                 this.onSelect('', 'replace');
                 return undefined;
             });
-            if (this.closed || !manifest || this.activeBranch === undefined || !this.editor) return;
+            if (this.closed || !this.visible || !manifest || this.activeBranch === undefined || !this.editor) return;
             this.familyActions?.updateMetadata(manifest);
             const current = manifest.currentBranch ?? 'main';
             if (current !== this.activeBranch) {
@@ -472,9 +534,11 @@ export class SessionWorkbench implements WorkspaceController {
         const panel = document.createElement('div'); panel.className = 'session-detail';
         const heading = document.createElement('h2');
         heading.textContent = String((await this.navigationFiles!.driver.getNode(path))?.metadata.title ?? t('project.workspace'));
+        if (this.closed || generation !== this.taskRefresh) return;
         panel.append(heading);
         if (this.projects && target.kind === 'folder') {
             const project = await this.projects.forFolder(folderPathFromBrowserPath(path));
+            if (this.closed || generation !== this.taskRefresh) return;
             if (project) {
                 const directory = document.createElement('p'); directory.className = 'project-workbench__directory';
                 directory.textContent = project.project.directory.startsWith('host:') ? project.project.directory.slice(5) : t('project.managedDirectory'); panel.append(directory);
@@ -624,6 +688,18 @@ export class SessionWorkbench implements WorkspaceController {
         const manifest = await this.sessions.get(id);
         return `${folderBrowserPath(manifest.folder)}/${id}`;
     }
+    private fileNavigation: Promise<void> = Promise.resolve();
+    private fileNavigationRevision = 0;
+    /** File content is ready before optional navigation I/O; stale work cannot select a newer route. */
+    private scheduleFileNavigation(path: string): void {
+        const revision = ++this.fileNavigationRevision;
+        const current = () => !this.closed && this.visible && revision === this.fileNavigationRevision && this.active === path;
+        this.fileNavigation = this.fileNavigation.then(async () => {
+            if (!current()) return;
+            await traceBoot('projectFile.navigation', async () => this.projectNavigation?.sync(path, true));
+            if (current()) await this.selectPath(path);
+        }).catch(error => { if (current()) this.report(error); });
+    }
     private async selectPath(path: string): Promise<void> {
         this.selectionSync = path;
         try { await this.sidebarUI?.selectPath(path); } finally { this.selectionSync = undefined; }
@@ -710,27 +786,41 @@ export class SessionWorkbench implements WorkspaceController {
         if (sessionId && this.familyActions) this.container.append(await this.familyActions.header(await this.sessions.get(sessionId)));
         this.container.append(mount); return mount;
     }
-    private async openProjectFile(_path: string, target: { folder: string; path: string }): Promise<void> {
+    private async openProjectFile(_path: string, target: { folder: string; path: string }, load: ViewLoad): Promise<void> {
         if (!this.projects) throw new Error('Projects unavailable');
-        const owner = await this.projects.openFiles(target.folder);
-        const context: FileSystemContextOwner = { context: { fs: owner.fs, cwd: target.path.slice(0, target.path.lastIndexOf('/')) || '/' }, release: () => owner.dispose() };
+        let owner: Awaited<ReturnType<NonNullable<SessionWorkbenchOptions['projects']>['openFiles']>> | undefined;
+        let editor: IEditor | undefined;
+        let mount: HTMLElement | undefined;
         try {
-            if ((await owner.fs.driver.getNode(target.path))?.type === 'directory') {
-                await context.release(); this.message(t('project.selectFile')); return;
+            const source = await load.read(async () => owner = await traceBoot('projectFile.source', () => this.projects!.openFiles(target.folder)));
+            const context: FileSystemContextOwner = { context: { fs: source.fs, cwd: target.path.slice(0, target.path.lastIndexOf('/')) || '/' }, release: () => source.dispose() };
+            const driver = source.fs.driver;
+            const node = await load.read(() => traceBoot('projectFile.type', () => driver.getNodeType
+                ? driver.getNodeType(target.path) : driver.getNode(target.path)));
+            if (!node) throw new FSError('ENOENT', 'File not found');
+            if (node.type === 'directory') {
+                await context.release(); owner = undefined; load.check(); this.message(t('project.selectFile')); return;
             }
-            const mount = await this.editorMount(target.folder);
-            const bytes = await owner.fs.driver.readContent(target.path, { encoding: 'binary' });
+            mount = await this.editorMount(target.folder); load.check();
+            const bytes = await load.read(() => traceBoot('projectFile.read', () => driver.readContent(target.path, { encoding: 'binary' })));
             const content = decodeFile(target.path, bytes);
             const filename = target.path.split('/').pop()!;
+            const readOnly = (await load.read(() => source.fs.capabilitiesAt(target.path))).readonly;
             if (content === undefined) this.previewCleanup = this.showBinary(mount, target.path, bytes);
-            else this.editor = await this.fileFactory(mount, { target: { kind: 'file', path: target.path }, files: context.context,
-                initialContent: content, title: buildRenamedFilename(filename, filename).title,
+            else editor = await load.read(async () => editor = await traceBoot('projectFile.editor', () => this.fileFactory(mount!, { ...fileContentFormat(target.path), target: { kind: 'file', path: target.path }, files: context.context,
+                initialContent: content, readOnly, title: buildRenamedFilename(filename, filename).title,
                 hostContext: { toggleSidebar: () => this.sidebarUI?.toggleSidebar(),
                     navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve(),
-                    saveContent: async (path, text) => { await owner.fs.driver.writeContent(path, text); this.refresh(); } } });
-            this.context = context;
-            if (this.editor) this.trackProjectFileRenames(owner.fs, target.folder, target.path);
-        } catch (error) { await context.release(); throw error; }
+                    saveContent: readOnly ? undefined : async (path, text) => { await driver.writeContent(path, text); this.refresh(); } } })));
+            load.check();
+            this.editor = editor; this.context = context;
+            if (editor) this.trackProjectFileRenames(source.fs, target.folder, target.path);
+        } catch (error) {
+            mount?.remove();
+            const cleanup = load.drain().then(async () => { try { await editor?.destroy(); } finally { await owner?.dispose(); } });
+            if (error instanceof ViewLoadCancelled) this.finishReads(cleanup); else await cleanup;
+            throw error;
+        }
     }
 
     private trackProjectFileRenames(fs: IFileSystem, folder: string, path: string): void {
@@ -742,7 +832,7 @@ export class SessionWorkbench implements WorkspaceController {
                 this.editor?.updateNodeId?.(path);
                 this.editor?.setTitle?.(buildRenamedFilename(filename, filename).title);
                 this.active = folderBrowserPath(folder) + '/@files' + path;
-                this.onSelect(this.active, 'replace');
+                if (this.visible) this.onSelect(this.active, 'replace');
                 this.scheduleRefresh('file-rename');
             }
         });
@@ -766,7 +856,8 @@ export class SessionWorkbench implements WorkspaceController {
     }
     setWaitingInput(id: string, waiting: boolean): void {
         waiting ? this.waiting.add(id) : this.waiting.delete(id);
-        void this.sessionPath(id).then(path => { if (!this.closed) this.sidebarUI?.setNodeAttention(path, this.waiting.has(id) ? t('project.waitingInput') : undefined); }).catch(error => this.report(error));
+        if (!this.visible || this.closed) return;
+        void this.sessionPath(id).then(path => { if (!this.closed && this.visible) this.sidebarUI?.setNodeAttention(path, this.waiting.has(id) ? t('project.waitingInput') : undefined); }).catch(error => this.report(error));
     }
     /** Editor open/close drives the L4 glob mount; a failure must not break the editor. */
     private mountEditorSkills(sessionId: string, path: string): void {
@@ -781,21 +872,22 @@ export class SessionWorkbench implements WorkspaceController {
     }
 
     private async closeEditor(): Promise<void> {
+        const editor = this.editor, assets = this.assets, context = this.context;
+        await editor?.destroy();
         ++this.taskRefresh;
         this.previewCleanup?.(); this.previewCleanup = undefined;
         this.fileRenameCleanup?.(); this.fileRenameCleanup = undefined;
-        const editor = this.editor, assets = this.assets, context = this.context;
         this.editor = undefined; this.assets = undefined; this.context = undefined; this.active = null;
         this.activeBranch = undefined;
-        try { await editor?.destroy(); } finally {
-            await this.unmountEditorSkills();
-            await Promise.all([assets?.dispose(), context?.release()]);
-        }
+        await this.unmountEditorSkills();
+        await Promise.all([assets?.dispose(), context?.release()]);
     }
     async destroy(): Promise<void> {
-        this.closed = true; this.dialogs.abort(); this.unsubscribers.splice(0).forEach(unsubscribe => unsubscribe());
+        this.cancelViewLoad();
+        this.closed = true; ++this.fileNavigationRevision; this.projectNavigation?.cancelPending();
+        this.sidebarUI?.cancelPendingSelection?.(); this.dialogs.abort(); this.subscriptions.dispose();
         if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = undefined; }
-        await Promise.all([this.tail, this.refreshTail]); await this.closeEditor(); this.sidebarUI?.destroy();
+        await Promise.all([this.tail, this.refreshTail]); await this.fileNavigation; await Promise.all(this.readCleanup); await this.closeEditor(); this.sidebarUI?.destroy();
         await this.navigationFiles?.dispose(); await this.browser?.dispose(); this.container.replaceChildren();
     }
 }

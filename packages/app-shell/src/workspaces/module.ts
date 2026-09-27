@@ -15,6 +15,7 @@ export function createWorkspaceModule(controller: WorkspaceHandle, dispose: () =
     const destroy = () => disposal ??= Promise.resolve().then(dispose);
     return { dispose: destroy, workbench: {
         start: () => controller.start(), destroy,
+        ...(controller.setVisible ? { setVisible: (visible: boolean) => controller.setVisible!(visible) } : {}),
         openResource: id => controller.openResource(id),
         getActiveResourceId: () => controller.getActiveResourceId(),
         ...(controller.restoreResource ? { restoreResource: (id: string) => controller.restoreResource!(id) } : {}),

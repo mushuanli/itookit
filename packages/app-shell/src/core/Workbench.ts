@@ -18,7 +18,7 @@ import type { IFileSystem } from '@itookit/vfs-core';
 export class Workbench {
     private vfsUI: VFSUIShell;
     private engine: IFileSystem;
-    private lifecycleUnsubscribe: () => void;
+    private lifecycleUnsubscribe: ReturnType<typeof connectEditorLifecycle>;
     private baseEditorFactory: (container: HTMLElement, options: EditorOptions) => Promise<IEditor>;
     private hasStarted = false;
 
@@ -130,9 +130,9 @@ export class Workbench {
         });
 
         const originalDestroy = this.destroy.bind(this);
-        this.destroy = () => {
+        this.destroy = async () => {
+            await originalDestroy();
             unsubSidebar();
-            originalDestroy();
         };
     }
 
@@ -205,8 +205,14 @@ export class Workbench {
         return session?.id ?? null;
     }
 
-    public destroy() {
-        this.lifecycleUnsubscribe();
+    public async setVisible(visible: boolean): Promise<void> {
+        this.vfsUI.setVisible(visible);
+        await this.lifecycleUnsubscribe.setVisible(visible);
+        if (visible) await this.vfsUI.refresh();
+    }
+
+    public async destroy(): Promise<void> {
+        await this.lifecycleUnsubscribe();
         this.vfsUI.destroy();
     }
 }

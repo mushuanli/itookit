@@ -72,9 +72,10 @@ export class ProjectNavigation {
             secondary: { label: t('project.hideFamily'), run: () => { this.hiddenScope = this.contentScope; this.ui()?.setContentVisible(false); this.ui()?.showColumn('navigation'); this.actions.contentChanged(false, !!this.family); } },
         });
     }
+    cancelPending(): void { ++this.revision; }
     async sync(path: string, reveal = false, project?: ProjectFolder): Promise<void> {
         const revision = ++this.revision;
-        const snapshot = await this.projects.sessions.navigation();
+        const snapshot = await this.projects.sessions.navigation({ includeSessions: resolveBrowserTarget(path).kind !== 'project-files' });
         if (revision !== this.revision) return;
         await this.apply(snapshot, path, reveal, revision, project);
     }
@@ -134,7 +135,7 @@ export class ProjectNavigation {
     }
     async refresh(): Promise<void> {
         const revision = ++this.revision;
-        const snapshot = await this.projects.sessions.navigation();
+        const snapshot = await this.projects.sessions.navigation({ includeSessions: resolveBrowserTarget(this.path).kind !== 'project-files' });
         if (revision !== this.revision) return;
         const session = this.session ? snapshot.sessions.find(item => item.id === this.session) : undefined;
         const path = this.session && !session ? folderBrowserPath(this.project?.path)

@@ -4,6 +4,8 @@ import { NAVIGATION_EVENTS } from '@itookit/common';
 import type { ApplicationRuntime } from '@itookit/app-core';
 import type { WorkspaceConfig } from '../src/types';
 
+const visibility = vi.hoisted(() => vi.fn());
+
 vi.mock('../src/ThemeService', () => ({
     themeService: { init: vi.fn(async () => {}), destroy: vi.fn(), setMode: vi.fn(async () => {}) },
     ThemeMode: undefined,
@@ -28,6 +30,7 @@ vi.mock('@itookit/app-settings', () => ({
 
 vi.mock('../src/core/Workbench', () => ({
     Workbench: class {
+        setVisible = visibility;
         start = vi.fn(async () => {});
         destroy = vi.fn(async () => {});
         openFile = vi.fn(async () => {});
@@ -118,4 +121,21 @@ describe('app-shell navigation listener cleanup', () => {
 
         expect(pushState).toHaveBeenCalledTimes(1);
     });
+});
+
+it('notifies cached workspaces when nav visibility changes', async () => {
+    visibility.mockClear();
+    const other = { ...workspace, elementId: 'other-workspace', slug: 'other' };
+    document.body.innerHTML = '<div id="settings-workspace"></div><div id="other-workspace"></div>';
+    const factory = () => vi.fn(async () => ({ destroy: vi.fn(async () => {}) }));
+    const handle = await initApp({ runtime: makeRuntime(), workspaces: [workspace, other], defaultSlug: 'settings',
+        ui: { createChatEditor: factory, createAgentEditor: factory, createFlowEditor: factory,
+            createSkillEditor: factory, createAIContextMenu: () => ({}), createFlowContextMenu: () => ({}), llmUiEditors: {} } as any });
+    try {
+        await handle.navigate('other');
+        expect(visibility).toHaveBeenCalledWith(false);
+        visibility.mockClear();
+        await handle.navigate('settings');
+        expect(visibility.mock.calls).toEqual([[true], [false]]);
+    } finally { await handle.destroy(); }
 });

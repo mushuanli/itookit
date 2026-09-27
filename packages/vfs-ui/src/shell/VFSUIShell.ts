@@ -264,30 +264,45 @@ export class VFSUIShell {
   refreshList(): void { this.nodeList.refreshView(); }
   setToolbar(options: import('../ui/components/NodeList/toolbar').VFSToolbarOptions): void { this.nodeList.setToolbarOptions(options); }
 
+  private visible = true;
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    if (!visible) this.cancelPendingSelection();
+    this.engineAdapter.setVisible(visible);
+  }
   refresh(): Promise<void> { return this.serializeNavigation(() => this.refreshNow()); }
   private async refreshNow(): Promise<void> {
+    if (!this.visible) return;
     const expanded = new Set(this.statePort.getState().expandedFolderIds);
     // Silent: a background refresh must not blank the list or collapse the tree.
     await this.engineAdapter.loadData({ silent: true });
+    if (!this.visible) return;
     await this.engineAdapter.restoreExpansion(expanded);
     await this.refreshNavigationChildren();
   }
 
-  selectPath(path: string): Promise<void> { return this.serializeNavigation(() => this.selectPathNow(path)); }
-  private async selectPathNow(path: string): Promise<void> {
+  private selectionRevision = 0;
+  cancelPendingSelection(): void { ++this.selectionRevision; }
+  selectPath(path: string): Promise<void> {
+    const revision = ++this.selectionRevision;
+    return this.serializeNavigation(() => this.selectPathNow(path, revision));
+  }
+  private async selectPathNow(path: string, revision: number): Promise<void> {
+    if (!this.visible || revision !== this.selectionRevision) return;
     if (this.engineAdapter instanceof SourceAdapter) {
       await this.engineAdapter.reveal(path);
-      await this.commandPort.execute('nav:selectSession', { sessionId: path }); return;
+      if (revision === this.selectionRevision) await this.commandPort.execute('nav:selectSession', { sessionId: path }); return;
     }
     const parts = path.split('/').filter(Boolean);
     for (let index = 1; index < parts.length; index++) {
+      if (!this.visible || revision !== this.selectionRevision) return;
       const parent = '/' + parts.slice(0, index).join('/');
       const state = this.statePort.getState();
       const node = findNodeById(state.items, parent);
       if (node?.children === undefined) await this.engineAdapter.expandDirectory(parent, { restoreDescendants: false });
       else if (!state.expandedFolderIds.has(parent)) this.statePort.dispatch({ type: 'FOLDER_TOGGLE', payload: { folderId: parent } });
     }
-    this.commandPort.execute('nav:selectSession', { sessionId: path });
+    if (revision === this.selectionRevision) this.commandPort.execute('nav:selectSession', { sessionId: path });
   }
 
   /** Change the content column without rebasing node identities or changing the editor. */
@@ -385,6 +400,7 @@ export class VFSUIShell {
   }
 
   destroy(): void {
+    this.cancelPendingSelection();
     this.navigationList?.destroy();
     this.nodeList.destroy();
     this.columnLayout?.destroy();

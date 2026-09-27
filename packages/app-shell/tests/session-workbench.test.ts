@@ -212,3 +212,65 @@ it('starts the new editor while the sidebar listing is still pending', async () 
         release(); await creating; await f.workbench.destroy();
     }
 });
+
+it('skips queued intermediate selections and opens the latest while an old factory is pending', async () => {
+    const f = setup(); let complete!: (editor: any) => void;
+    const oldDestroy = vi.fn(async () => {});
+    f.factory.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    const old = f.workbench.openResource('old');
+    await vi.waitFor(() => expect(f.factory).toHaveBeenCalledOnce());
+    try {
+        const skipped = f.workbench.openResource('skipped');
+        const latest = f.workbench.openResource('latest');
+        await vi.waitFor(() => expect(f.workbench.getActiveResourceId()).toBe('latest?branch=main'));
+        await Promise.all([old, skipped, latest]);
+        expect(f.repository.getManifest).not.toHaveBeenCalledWith('skipped');
+        expect(f.onSelect).not.toHaveBeenCalledWith('old?branch=main');
+        expect(f.release).not.toHaveBeenCalled();
+    } finally {
+        complete({ destroy: oldDestroy }); await f.workbench.destroy();
+    }
+    expect(oldDestroy).toHaveBeenCalledOnce();
+    expect(f.release).toHaveBeenCalledTimes(2);
+});
+
+it('pauses hidden view loads without cancelling Kernel tasks and resumes the requested resource', async () => {
+    const f = setup(); await f.workbench.start();
+    let complete!: (value: any) => void;
+    f.repository.getManifest.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    const old = f.workbench.openResource('s');
+    await vi.waitFor(() => expect(f.repository.getManifest).toHaveBeenCalledWith('s'));
+    await f.workbench.setVisible(false); await old;
+    expect(f.files.acquireFiles).not.toHaveBeenCalled();
+    expect(f.kernel.cancel).not.toHaveBeenCalled();
+    expect(f.kernel.closeSession).not.toHaveBeenCalled();
+    complete({ id: 's', title: 'Session', currentBranch: 'main' });
+    await f.workbench.setVisible(true);
+    expect(f.workbench.getActiveResourceId()).toBe('s?branch=main');
+    await f.workbench.destroy();
+});
+
+it('keeps the editor, active route and file capability when final saving fails, then allows retry', async () => {
+    const f = setup(); await f.workbench.openResource('old');
+    f.destroy.mockRejectedValueOnce(new Error('save failed'));
+    await expect(f.workbench.openResource('new')).rejects.toThrow('save failed');
+    expect(f.workbench.getActiveResourceId()).toBe('old?branch=main');
+    expect(f.release).not.toHaveBeenCalled();
+    expect(f.factory).toHaveBeenCalledOnce();
+    await f.workbench.openResource('new');
+    expect(f.workbench.getActiveResourceId()).toBe('new?branch=main');
+    await f.workbench.destroy();
+});
+
+it('flushes edits on hiding while retaining the editor on save failure', async () => {
+    const f = setup();
+    const flushPendingSave = vi.fn(async () => { throw new Error('offline'); });
+    f.factory.mockResolvedValueOnce({ destroy: f.destroy, flushPendingSave } as any);
+    await f.workbench.openResource('s');
+    await expect(f.workbench.setVisible(false)).rejects.toThrow('offline');
+    expect(flushPendingSave).toHaveBeenCalledOnce();
+    expect(f.release).not.toHaveBeenCalled(); expect(f.destroy).not.toHaveBeenCalled();
+    await f.workbench.setVisible(true);
+    expect(f.workbench.getActiveResourceId()).toBe('s?branch=main');
+    await f.workbench.destroy();
+});

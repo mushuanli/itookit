@@ -42,7 +42,8 @@ it('creates project Sessions from the selected project and edits its files in th
         expect(sidebar.querySelector(`[data-item-id="${folderBrowserPath(other.path + '/@sessions')}/${session}"]`)).not.toBeNull();
         await workbench.openResource(projectPath + '/@files/notes.md');
         expect(file.mock.calls.at(-1)?.[1].initialContent).toBe('research notes');
-        expect(sidebar.querySelector('.vfs-columns')?.getAttribute('data-content-visible')).toBe('true');
+        expect(file.mock.calls.at(-1)?.[1].contentFormat).toBe('markdown');
+        await vi.waitFor(() => expect(sidebar.querySelector('.vfs-columns')?.getAttribute('data-content-visible')).toBe('true'));
         expect(sidebar.querySelector('.vfs-columns__content')?.textContent).toContain('notes');
         expect(sidebar.querySelector('.vfs-columns__content')?.textContent).not.toContain('notes.md');
         expect(file.mock.calls.at(-1)?.[1].title).toBe('notes');

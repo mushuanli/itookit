@@ -16,9 +16,9 @@ export class ProjectSessions {
     private summaries(): Promise<SessionSummary[]> {
         return this.repository.listSummaries?.() ?? this.repository.list();
     }
-    async navigation(): Promise<ProjectNavigationSnapshot> {
+    async navigation(options: { includeSessions?: boolean } = {}): Promise<ProjectNavigationSnapshot> {
         const [sessions, folders, pending] = await Promise.all([
-            this.summaries(), this.repository.listFolders(), this.repository.pendingSessionDeletions(),
+            options.includeSessions === false ? Promise.resolve([]) : this.summaries(), this.repository.listFolders(), this.repository.pendingSessionDeletions(),
         ]);
         return { sessions, folders, pending, roots: sessionFamilyRoots(sessions) };
     }

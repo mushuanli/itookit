@@ -20,6 +20,7 @@ src/
 ├── browser/             ← 文件浏览器与编辑器装配、媒体预览、mention/元数据策略
 ├── core/
 │   └── Workbench.ts          ← 通用工作区控制器
+├── lifecycle/            ← 可替换视图读取与订阅释放机制（不含业务策略）
 ├── projects/             ← createProjectModule、SessionWorkbench、项目导航与归档目标适配
 ├── toolbox/              ← 工具箱模块入口、分类/分组显示、编辑器装配
 ├── configuration/        ← 删除影响确认（调用 app-core 的共享命令）

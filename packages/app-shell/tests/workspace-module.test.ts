@@ -34,3 +34,12 @@ it('restores bookmarks through the declared capability without changing strict o
     await expect(module.workbench.openResource('/missing')).rejects.toBe(failure);
     await expect(restoreWorkspaceResource(createWorkspaceModule(workbench).workbench, '/missing')).rejects.toBe(failure);
 });
+
+it('forwards visibility without destroying the cached workspace', async () => {
+    const workbench = controller(), setVisible = vi.fn(async (_visible: boolean) => {});
+    const module = createWorkspaceModule({ ...workbench, setVisible });
+    await module.workbench.setVisible?.(false); await module.workbench.setVisible?.(true);
+    expect(setVisible.mock.calls).toEqual([[false], [true]]);
+    expect(workbench.destroy).not.toHaveBeenCalled();
+    await module.dispose();
+});

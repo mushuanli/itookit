@@ -33,11 +33,27 @@ export class EngineAdapter {
         private readonly alwaysLoadedDirectories: string[] = [],
     ) { }
 
+    private visible = true;
+    private visibilityRevision = 0;
+    setVisible(visible: boolean): void {
+        if (this.visible === visible) return;
+        this.visible = visible; ++this.visibilityRevision;
+        if (!visible) {
+            for (const action of ['update', 'delete', 'create'] as const) {
+                if (this.timers[action]) clearTimeout(this.timers[action]);
+                this.timers[action] = null; this.queues[action].clear();
+            }
+        }
+    }
+    private current(revision: number): boolean { return this.visible && revision === this.visibilityRevision; }
+
     private get iconResolver() {
         return (name: string, isDir: boolean) => this.fileTypePort.getIcon(name, isDir);
     }
 
     async loadData(options: { silent?: boolean } = {}): Promise<void> {
+        if (!this.visible) return;
+        const revision = this.visibilityRevision;
         adapterDEBUG.loadData(options.silent ? 'explicit call (silent)' : 'explicit call');
         const previousItems = this.store.getState().items;
         // A silent reload keeps the current list on screen (no "loading" placeholder)
@@ -46,13 +62,15 @@ export class EngineAdapter {
         try {
             if (!silent) this.store.dispatch({ type: 'ITEMS_LOAD_START' });
             const rootChildren = await this.engine.driver.getChildren('/') as FSNode[];
+            if (!this.current(revision)) return;
             const uiItems = mapFSNodesToUIItems(
                 rootChildren,
                 this.iconResolver,
                 undefined,
                 this.showFileExtensions
             );
-            if (silent || this.alwaysLoadedDirectories.length) await this.reloadOpenChildren(uiItems);
+            if (silent || this.alwaysLoadedDirectories.length) await this.reloadOpenChildren(uiItems, revision);
+            if (!this.current(revision)) return;
             const tags = this.buildTagsMap(uiItems);
             adapterDEBUG.dispatch('STATE_LOAD_SUCCESS', `${uiItems.length} items`);
             this.store.dispatch({
@@ -60,6 +78,7 @@ export class EngineAdapter {
                 payload: { items: uiItems, tags },
             });
         } catch (error) {
+            if (!this.current(revision)) return;
             console.error('[EngineAdapter] Failed to load data:', error);
             this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error } });
         }
@@ -70,7 +89,7 @@ export class EngineAdapter {
      * Loaded children are not evidence that a directory is still expanded.
      * Include ancestors for older persisted states that only kept the deepest path.
      */
-    private async reloadOpenChildren(next: VFSNodeUI[]): Promise<void> {
+    private async reloadOpenChildren(next: VFSNodeUI[], revision: number): Promise<void> {
         const openBefore = new Set([...this.store.getState().expandedFolderIds, ...this.alwaysLoadedDirectories]);
         for (const id of [...openBefore]) {
             for (let parent = id.slice(0, id.lastIndexOf('/')); parent; parent = parent.slice(0, parent.lastIndexOf('/'))) {
@@ -80,6 +99,7 @@ export class EngineAdapter {
 
         const walk = async (items: VFSNodeUI[]): Promise<void> => {
             for (const item of items) {
+                if (!this.current(revision)) return;
                 if (item.type !== 'directory' || !openBefore.has(item.id)) continue;
                 const children = await this.engine.driver.getChildren(item.id) as FSNode[];
                 const uiChildren = children.map(node =>
@@ -103,6 +123,7 @@ export class EngineAdapter {
      * depending on the storage backend — handled transparently here.
      */
     async restoreExpansion(expandedFolderIds: Set<string>): Promise<void> {
+        if (!this.visible) return;
         const { items } = this.store.getState();
         for (const folderId of expandedFolderIds) {
             const node = findNodeById(items, folderId);
@@ -122,7 +143,8 @@ export class EngineAdapter {
             queue: Set<string>,
             action: 'update' | 'delete' | 'create'
         ) => {
-            if (!queue.size) return;
+            if (!this.visible || !queue.size) return;
+            const revision = this.visibilityRevision;
             const ids = [...queue];
             queue.clear();
             this.timers[action] = null;
@@ -142,6 +164,7 @@ export class EngineAdapter {
                 ids.map(async id => {
                     try {
                         const node = await this.engine.driver.getNode(id) as FSNode | null;
+                        if (!this.current(revision)) return null;
                         adapterDEBUG.nodeResult(id, node);
                         if (!node || shouldFilterNode(node)) {
                             if (action === 'update') {
@@ -160,6 +183,7 @@ export class EngineAdapter {
                 })
             );
 
+            if (!this.current(revision)) return;
             const valid = items.filter(Boolean) as VFSNodeUI[];
 
             if (action === 'update') {
@@ -195,6 +219,7 @@ export class EngineAdapter {
         };
 
         const handleEvent = (event: FSEvent) => {
+            if (!this.visible) return;
             const { type, payload } = event;
             adapterDEBUG.received(type, payload);
 
@@ -292,11 +317,13 @@ export class EngineAdapter {
     }
 
     async expandDirectory(folderId: string, options: { restoreDescendants?: boolean; expand?: boolean } = {}): Promise<void> {
-        if (this.loadingFolderIds.has(folderId)) return;
+        if (!this.visible || this.loadingFolderIds.has(folderId)) return;
+        const revision = this.visibilityRevision;
         this.loadingFolderIds.add(folderId);
 
         try {
             const children = await this.engine.driver.getChildren(folderId) as FSNode[];
+            if (!this.current(revision)) return;
             const uiChildren = children.map(n =>
                 mapFSNodeToUIItem(n, this.iconResolver, undefined, this.showFileExtensions)
             );
@@ -328,6 +355,7 @@ export class EngineAdapter {
     }
 
     destroy(): void {
+        this.setVisible(false);
         this.engineUnsubscribe?.();
         Object.values(this.timers).forEach(t => t && clearTimeout(t));
     }

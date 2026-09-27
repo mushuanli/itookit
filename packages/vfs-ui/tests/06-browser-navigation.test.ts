@@ -64,3 +64,54 @@ it('does not restore Session descendants, and only enumerates directories explic
         expect(container.querySelector('[data-item-id="/s/files"]')).toBeNull();
     } finally { shell.destroy(); await manager.dispose(); }
 });
+
+it('does not select a stale path after slow ancestor enumeration finishes', async () => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: vi.fn() });
+    vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(fn, 0));
+    vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const fs = await manager.openFileSystem('/browser');
+    await fs.driver.createDirectory({ parentPath: '/', name: 'slow', recursive: true });
+    await fs.driver.createDirectory({ parentPath: '/', name: 'current', recursive: true });
+    await fs.driver.createFile({ parentPath: '/slow', name: 'old.md', content: 'old' });
+    const container = document.createElement('div'); document.body.append(container);
+    const shell = createVFSUI({ sessionListContainer: container, scopeId: 'cancel-navigation', autoSelectFirst: false }, fs);
+    let release = () => {};
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const selected = vi.fn(); shell.on('sessionSelected', selected);
+    try {
+        await shell.start();
+        const original = fs.driver.getChildren.bind(fs.driver);
+        const list = vi.spyOn(fs.driver, 'getChildren').mockImplementation(async (...args) => {
+            if (args[0] === '/slow') await blocked;
+            return original(...args);
+        });
+        const old = shell.selectPath('/slow/old.md');
+        await vi.waitFor(() => expect(list).toHaveBeenCalledWith('/slow'));
+        const current = shell.selectPath('/current');
+        release(); await Promise.all([old, current]);
+        expect(selected).not.toHaveBeenCalledWith(expect.objectContaining({ item: expect.objectContaining({ id: '/slow/old.md' }) }));
+        expect(shell.getActiveSession()?.id).toBe('/current');
+    } finally { release(); shell.destroy(); await manager.dispose(); }
+});
+
+it('suspends hidden directory reads and refreshes changes on return', async () => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: vi.fn() });
+    vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(fn, 0));
+    vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const fs = await manager.openFileSystem('/browser');
+    const container = document.createElement('div'); document.body.append(container);
+    const shell = createVFSUI({ sessionListContainer: container, scopeId: 'hidden-browser', autoSelectFirst: false }, fs);
+    try {
+        await shell.start(); shell.setVisible(false);
+        await fs.driver.createFile({ parentPath: '/', name: 'background.md', content: 'new' });
+        const list = vi.spyOn(fs.driver, 'getChildren'), stat = vi.spyOn(fs.driver, 'getNode');
+        await shell.refresh(); await shell.selectPath('/background.md');
+        await new Promise(resolve => setTimeout(resolve, 100));
+        expect(list).not.toHaveBeenCalled(); expect(stat).not.toHaveBeenCalled();
+        shell.setVisible(true); await shell.refresh();
+        expect(list).toHaveBeenCalled();
+        expect(container.querySelector('[data-item-id="/background.md"]')).not.toBeNull();
+    } finally { shell.destroy(); await manager.dispose(); }
+});
