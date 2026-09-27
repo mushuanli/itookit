@@ -11,6 +11,30 @@ beforeEach(async () => {
 afterEach(async () => { await repository.dispose(); await manager.dispose(); });
 
 describe('Session data repository', () => {
+    it('overlaps catalog reads while draining failures before leaving the transaction', async () => {
+        await repository.createSession('One');
+        await repository.createSession('Two');
+        const transaction = fs.meta.seq!.transaction!.bind(fs.meta.seq);
+        let active = 0, peak = 0;
+        const traced: NonNullable<IFileSystem['meta']['seq']>['transaction'] = operation => transaction(async tx => {
+            const getEntry = tx.getEntry.bind(tx);
+            const wrapped = { ...tx, getEntry: async (path: string, key: string) => {
+                active++; peak = Math.max(peak, active);
+                try {
+                    await Promise.resolve();
+                    if (key === 'session') throw new Error('Read failed');
+                    return await getEntry(path, key);
+                } finally { active--; }
+            } };
+            try { return await operation(wrapped); }
+            finally { expect(active).toBe(0); }
+        });
+        const reader = new SessionRepository({ ...fs, meta: { ...fs.meta, seq: { ...fs.meta.seq!, transaction: traced } } });
+        await expect(reader.list()).rejects.toThrow('Read failed');
+        expect(peak).toBeGreaterThan(1);
+        await reader.dispose();
+        expect(await repository.list()).toHaveLength(2);
+    });
     it('tracks saved activity without promoting a Session for view-only preferences', async () => {
         const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
         try {

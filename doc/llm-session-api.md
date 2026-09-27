@@ -1,6 +1,6 @@
 # @itookit/llm-session — API 参考
 
-`FlowInvocationService` 提供 `session.flow.invoke` / `session.flow.invocations`：以 `sessionId + requestId` 幂等启动固定 revision 的独立 Flow Run，同一 Session 可并行调用，调用意图和根 Task 引用持久化，结果不会推进普通对话的 branch head。`SessionCommand.CreateFromFlow` 的 `invocation: true` 直接创建调用；未指定时保留旧 Flow Session 路径。恢复与 UI 交互边界见 [Flow 调用与组合](design/flow-invocation-composition.md)。
+`FlowInvocationService` 提供 `session.flow.invoke` / `session.flow.invocations`：以 `sessionId + requestId` 幂等启动固定 revision 的独立 Flow Run，同一 Session 可并行调用，调用意图和根 Task 引用持久化，结果不会推进普通对话的 branch head。`SessionCommand.CreateFromFlow` 的 `invocation: true` 直接创建调用；未指定时保留旧 Flow Session 路径。恢复与 UI 交互边界见 [Flow 调用与组合](design/flow-invocation-composition.md)。启动恢复先用上述标记筛出候选 Session：标记存在且不含该 Session 时完全不做 `listShared` 探测；先按标记写入、后写调用记录的顺序保证标记故障只会多扫一次，不会漏恢复。
 
 > 用户可见的会话语义 + 持久化：Session 生命周期、Round/Branch、SessionRepository（会话目录持久化）、RoundLog、SessionEventBus、UI projections、Durable Conversation。同时是上层装配入口：`initializeConversationSystem()` 统一注册 `llm.chat/agent/plan` 与 `flow.*` Programs 并装配 CommandBus/DAG。公共 API 从 `@itookit/llm-session` 根导出；少数内部工具（`RUNTIME_KEY`、`ulid`/`extractTimestamp`、`log`、`ContextProfileStore`、`VFSEntityStore`、`initializePromptHistory`/`resetPromptHistory`、`SessionFolder` 类型）仅按源码路径可用。
 
@@ -420,6 +420,7 @@ packages/llm-session/src/
 | `FLOW_MODULE_NAME = 'flows'` | 独立 flows 模块名（`persistence/flow-engine.ts`）；应用装配于 `/home/admin/flows`（`app-core/src/runtime/create-application-runtime.ts:106`），每个 Flow 一个 `.flow` 文件 |
 | `/home/admin/.config/mindos/prompt-history` | prompt 历史文件系统（经 `initializeConversationSystem({ promptHistoryFiles })` 传入，`create-application-runtime.ts:192`） |
 | `RUNTIME_KEY = 'conversation/runtime'` | Durable Conversation 运行时共享键 |
+| `/var/lib/kernel/flow-invocations.json` | Flow 调用标记（`persistence/flow-invocation-sessions.ts`，经 `initializeConversationSystem({ flowInvocationSessions })` 传入）：受理调用**之前**写入 Session id，启动恢复据此跳过从未受理过调用的 Session；缺失/损坏/不可读时报告 unknown，恢复退回逐 Session 探测并把命中者补写进标记 |
 
 **约定**：Round 只表达对话历史（`historyParentIds`）；Run 引用经 `executions` 附着到 Round；Branch/merge/context fold 只在本包实现；普通 Chat 用 Direct Scheduler，不伪装成单节点 DAG；不访问 Kernel Dispatcher/ProcessTable 内部对象。
 

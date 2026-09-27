@@ -30,6 +30,87 @@ beforeEach(async () => {
 });
 afterEach(async () => { await kernel.closeSession('s', true); kernel.dispose(); await kernel.waitIdle(); await manager.dispose(); });
 
+it('does not acquire a write lease or inspect tasks when no invocation exists', async () => {
+    const canWrite = vi.fn(async () => false);
+    const inspect = vi.spyOn(kernel, 'inspectSession');
+    const recovery = new FlowInvocationService(kernel, definitions, commands, canWrite);
+    await recovery.recover();
+    expect(canWrite).not.toHaveBeenCalled();
+    expect(inspect).not.toHaveBeenCalled();
+});
+
+it('retains the write gate for persisted invocations', async () => {
+    await service.invoke(input('owned'));
+    const canWrite = vi.fn(async () => false);
+    const execute = vi.spyOn(commands, 'execute');
+    const recovery = new FlowInvocationService(kernel, definitions, commands, canWrite);
+    await recovery.recover();
+    expect(canWrite).toHaveBeenCalledWith('s');
+    expect(execute).not.toHaveBeenCalled();
+});
+
+it('recovers pending invocations without a status probe or a second shared-state scan', async () => {
+    await service.invoke(input('probe-free'));
+    const stat = vi.spyOn(kernel, 'sessionStat');
+    const list = vi.spyOn(FlowInvocationService.prototype, 'list');
+    const recovery = new FlowInvocationService(kernel, definitions, commands);
+    await recovery.recover();
+    expect(stat).not.toHaveBeenCalled();
+    expect(list).toHaveBeenCalledTimes(1);
+    // The records read for the status check are handed to list() instead of being listed again.
+    expect(list.mock.calls[0][1]).toHaveLength(1);
+});
+
+it('skips every Session without probing when the persisted marker lists none', async () => {
+    const sessions = { sessions: vi.fn(async () => new Set<string>()), mark: vi.fn(async () => {}), establish: vi.fn(async () => {}) };
+    const shared = vi.spyOn(kernel, 'listShared');
+    const recovery = new FlowInvocationService(kernel, definitions, commands, undefined, undefined, undefined, sessions);
+    await recovery.recover();
+    expect(sessions.sessions).toHaveBeenCalledTimes(1);
+    expect(shared).not.toHaveBeenCalled();
+    expect(sessions.establish).not.toHaveBeenCalled();
+});
+
+it('seals an unknown marker with an empty set so later boots probe nothing', async () => {
+    const sessions = { sessions: vi.fn(async () => undefined as Set<string> | undefined), mark: vi.fn(async () => {}), establish: vi.fn(async () => {}) };
+    const recovery = new FlowInvocationService(kernel, definitions, commands, undefined, undefined, undefined, sessions);
+    await recovery.recover();
+    expect(sessions.establish).toHaveBeenCalledTimes(1);
+    expect([...sessions.establish.mock.calls[0][0]]).toEqual([]);
+});
+
+it('seals an unknown marker with the Sessions that hold records', async () => {
+    await service.invoke(input('legacy'));
+    const sessions = { sessions: vi.fn(async () => undefined as Set<string> | undefined), mark: vi.fn(async () => {}), establish: vi.fn(async () => {}) };
+    const recovery = new FlowInvocationService(kernel, definitions, commands, undefined, undefined, undefined, sessions);
+    await recovery.recover();
+    expect([...sessions.establish.mock.calls[0][0]]).toEqual(['s']);
+});
+
+it('keeps the marker unknown when a Session could not be probed', async () => {
+    await service.invoke(input('unreadable'));
+    const sessions = { sessions: vi.fn(async () => undefined as Set<string> | undefined), mark: vi.fn(async () => {}), establish: vi.fn(async () => {}) };
+    vi.spyOn(kernel, 'listShared').mockRejectedValueOnce(new Error('Session record missing'));
+    const recovery = new FlowInvocationService(kernel, definitions, commands, undefined, undefined, undefined, sessions);
+    await recovery.recover();
+    expect(sessions.establish).not.toHaveBeenCalled();
+});
+
+it('marks a Session before its first invocation record is written', async () => {
+    const order: string[] = [];
+    const sessions = { sessions: vi.fn(async () => undefined as Set<string> | undefined), mark: vi.fn(async () => { order.push('mark'); }), establish: vi.fn(async () => {}) };
+    const open = kernel.openSession.bind(kernel);
+    vi.spyOn(kernel, 'openSession').mockImplementation(async (...args: Parameters<typeof open>) => {
+        order.push('open');
+        return open(...args);
+    });
+    const recovery = new FlowInvocationService(kernel, definitions, commands, undefined, undefined, undefined, sessions);
+    await recovery.invoke(input('marked-first'));
+    expect(sessions.mark).toHaveBeenCalledWith('s');
+    expect(order[0]).toBe('mark');
+    expect(order).toContain('open');
+});
+
 it('runs three calls in one Session, deduplicates admission, and routes identical interaction ids to the chosen Run', async () => {
     const [a, b, c, duplicate] = await Promise.all([service.invoke(input('a')), service.invoke(input('b')), service.invoke(input('c')), service.invoke(input('a'))]);
     expect(duplicate.rootTaskId).toBe(a.rootTaskId);

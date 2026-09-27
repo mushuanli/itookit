@@ -1,6 +1,7 @@
 import type { FlowRevision, ICommandBus, JsonValue, DagRunSpec } from '@itookit/common';
 import type { Kernel, TaskRecord, SessionHandle } from '@itookit/durable-kernel';
 import { FlowCommand, FlowDefinitionStore, validateFlowParameters } from '@itookit/llm-flow';
+import type { FlowInvocationSessions } from '../persistence/flow-invocation-sessions';
 
 export const FlowInvocationCommand = { Invoke: 'session.flow.invoke', List: 'session.flow.invocations' } as const;
 export interface FlowInvocationInput { connectionId?: string; sessionId: string; requestId: string; flowId: string; revision: number; parameters: Record<string, JsonValue> }
@@ -14,6 +15,8 @@ export interface FlowInvocationRecord extends FlowInvocationInput {
     head?: string | null;
 }
 const PREFIX = 'flow.invocation.';
+/** Shared records already read by a caller, so recovery does not list them twice. */
+type StoredInvocations = Awaited<ReturnType<Kernel['listShared']>>;
 
 /** Calls live beside chat history; their completion never moves the conversation head. */
 export class FlowInvocationService {
@@ -21,7 +24,8 @@ export class FlowInvocationService {
     constructor(private kernel: Kernel, private definitions: FlowDefinitionStore, private commands: ICommandBus,
         private canWrite?: (id: string) => Promise<boolean>,
         private source?: (id: string) => Promise<{ branch: string; head: string | null }>,
-        private resolveConnection?: (sessionId: string, connectionId?: string) => Promise<string | undefined>) {}
+        private resolveConnection?: (sessionId: string, connectionId?: string) => Promise<string | undefined>,
+        private invocationSessions?: FlowInvocationSessions) {}
 
     register(): void {
         this.commands.register(FlowInvocationCommand.Invoke, args => this.invoke(args as FlowInvocationInput));
@@ -38,10 +42,10 @@ export class FlowInvocationService {
         try { return await operation; } finally { this.pending.delete(key); }
     }
 
-    async list(sessionId: string): Promise<FlowInvocationRecord[]> {
-        const session = await this.kernel.inspectSession(sessionId);
-        const entries = await this.kernel.listShared(sessionId, PREFIX);
+    async list(sessionId: string, stored?: StoredInvocations): Promise<FlowInvocationRecord[]> {
+        const entries = stored ?? await this.kernel.listShared(sessionId, PREFIX);
         if (entries.length === 0) return [];
+        const session = await this.kernel.inspectSession(sessionId);
         const tasks = await session.listTasks();
         return entries.map(entry => {
             const record = entry.value as unknown as FlowInvocationRecord;
@@ -51,21 +55,45 @@ export class FlowInvocationService {
     }
 
     async recover(): Promise<void> {
+        // The persisted marker lists the Sessions that ever admitted a call; without it every
+        // Session is probed once and the probe result is then sealed (see below).
+        const marker = this.invocationSessions;
+        const marked = marker ? await marker.sessions().catch(() => undefined) : undefined;
+        const found = new Set<string>();
+        let complete = true;
         for await (const session of this.kernel.listSessions()) {
-            const status = await this.kernel.sessionStat(session.id);
-            if (status.phase !== 'open' || status.archived) continue;
+            // The catalog record already carries the Session status; listing the persisted
+            // records validates the storage, so no extra sessionStat round trip is needed.
+            if (session.status !== 'open') continue;
+            if (marked && !marked.has(session.id)) continue;
+            let stored: StoredInvocations;
+            try { stored = await this.kernel.listShared(session.id, PREFIX); }
+            catch (error) {
+                // An interrupted removal leaves a catalog entry without storage.
+                complete = false;
+                console.warn(`[Flow] Invocation recovery skipped for Session ${session.id}`, error);
+                continue;
+            }
+            if (stored.length === 0) continue;
+            found.add(session.id);
             if (this.canWrite && !await this.canWrite(session.id)) continue;
-            for (const record of await this.list(session.id)) {
+            for (const record of await this.list(session.id, stored)) {
                 try {
                     if (!record.rootTaskId && !record.error) await this.invoke(record);
                     else if (record.rootTaskId) await this.commands.execute(FlowCommand.RunResume, { sessionId: session.id, taskId: record.rootTaskId });
                 } catch (error) { console.error('Flow invocation recovery failed', session.id, record.requestId, error); }
             }
         }
+        // Seal a probe that covered every Session, so later boots take the cheap path even when
+        // no Session holds a call. An incomplete pass stays unknown and is probed again.
+        if (marker && marked === undefined && complete) await marker.establish(found);
     }
 
     private async submit(input: FlowInvocationInput): Promise<FlowInvocationRecord> {
         await this.assertWritable(input.sessionId);
+        // Mark the Session before its first invocation record is written, so a later boot knows
+        // which Sessions to scan. A mark failure surfaces here instead of hiding a lost resume.
+        await this.invocationSessions?.mark(input.sessionId);
         const session = await this.kernel.openSession(input.sessionId), key = PREFIX + input.requestId;
         let record = await this.admit(input, session);
         const existing = this.findRoot(await session.listTasks(), input.requestId);

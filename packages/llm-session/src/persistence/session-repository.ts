@@ -204,15 +204,13 @@ export class SessionRepository implements ISessionRepository {
     }
     private readManifestBatch(ids: string[]): Promise<ConversationManifest[]> {
         return this.fs.meta.seq!.transaction!(async tx => {
+            // Drain every read before the transaction commits or rolls back.
+            const reads = await Promise.allSettled(ids.map(id => this.readManifestTx(tx, this.paths(id), id)));
             const result: ConversationManifest[] = [];
-            for (const id of ids) {
-                try {
-                    result.push(await this.readManifestTx(tx, this.paths(id), id));
-                } catch (error) {
-                    // A crash can leave seqfiles behind before the init transaction
-                    // commits; skip incomplete records until ensureSession repairs them.
-                    if (!(error instanceof FSError && error.code === 'ENOENT')) throw error;
-                }
+            for (const read of reads) {
+                if (read.status === 'fulfilled') result.push(read.value);
+                // Interrupted creation can leave incomplete records until repair.
+                else if (!(read.reason instanceof FSError && read.reason.code === 'ENOENT')) throw read.reason;
             }
             return result;
         });

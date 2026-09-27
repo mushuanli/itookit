@@ -1,7 +1,10 @@
 import { skillContextResolver } from './session/conversation-run-coordinator';
+import { traceBoot } from '@itookit/common';
 import { FlowInvocationService } from './session/flow-invocations';
+import type { FlowInvocationSessions } from './persistence/flow-invocation-sessions';
 import { RoundLog as InvocationRoundLog } from './persistence/round-log';
 export { FlowInvocationService, FlowInvocationCommand, type FlowInvocationRecord, type FlowInvocationInput } from './session/flow-invocations';
+export { createFlowInvocationSessions, type FlowInvocationSessions } from './persistence/flow-invocation-sessions';
 import { bindStandaloneFlowNode } from './session/flow-node-binder';
 import { AgentResolver } from './session/agent-resolver';
 export { createSessionDataProjection } from './persistence/session-projection';
@@ -122,6 +125,11 @@ export interface ConversationSystemOptions {
     canWriteSession?: (sessionId: string) => Promise<boolean>;
     /** Host-provided isolated workspace manager for Flow runs (absent → non-shared modes fail closed). */
     workspaceManager?: import('./session/conversation-run-coordinator').ConversationRunCoordinatorOptions['workspaceManager'];
+    /**
+     * Marks Sessions that admitted a Flow invocation, so boot recovery skips the Sessions that
+     * never did instead of probing every Session's shared state.
+     */
+    flowInvocationSessions?: FlowInvocationSessions;
 }
 
 export interface ConversationSystem {
@@ -157,16 +165,16 @@ export async function initializeConversationSystem(
     const invocations = new FlowInvocationService(options.kernel, new FlowDefinitionStore(options.flowStore, options.dagPlugins), system.commandBus, options.canWriteSession, async id => {
         const manifest = await new InvocationRoundLog(options.sessionEngine, id).loadManifest();
         return { branch: manifest.currentBranch, head: manifest.currentHead };
-    }, (id, selected) => resolveSessionConnection(options, id, selected));
+    }, (id, selected) => resolveSessionConnection(options, id, selected), options.flowInvocationSessions);
     invocations.register();
-    await invocations.recover();
+    await traceBoot('flowInvocations.recover', () => invocations.recover());
     return system;
 }
 
 async function initializeServices(options: ConversationSystemOptions): Promise<void> {
-    await options.agentService.init();
-    await options.sessionEngine.init();
-    await initializePromptHistory(options.promptHistoryFiles).catch(error => {
+    await traceBoot('agentService.init', () => options.agentService.init());
+    await traceBoot('sessionEngine.init', () => options.sessionEngine.init());
+    await traceBoot('promptHistory.init', () => initializePromptHistory(options.promptHistoryFiles)).catch(error => {
         console.warn('[Conversation] Prompt history initialization failed:', error);
     });
 }
