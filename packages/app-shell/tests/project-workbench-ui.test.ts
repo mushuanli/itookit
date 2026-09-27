@@ -45,7 +45,7 @@ it('creates project Sessions from the selected project and edits its files in th
         expect(file.mock.calls.at(-1)?.[1].contentFormat).toBe('markdown');
         await vi.waitFor(() => expect(sidebar.querySelector('.vfs-columns')?.getAttribute('data-content-visible')).toBe('true'));
         expect(sidebar.querySelector('.vfs-columns__content')?.textContent).toContain('notes');
-        expect(sidebar.querySelector('.vfs-columns__content')?.textContent).not.toContain('notes.md');
+        expect(sidebar.querySelector('.vfs-columns__content')?.textContent).toContain('notes.md');
         expect(file.mock.calls.at(-1)?.[1].title).toBe('notes');
         expect(sidebar.querySelector('.vfs-columns__content')?.textContent).not.toContain('新会话');
         await file.mock.calls.at(-1)![1].hostContext.saveContent('/notes.md', 'edited in workbench');

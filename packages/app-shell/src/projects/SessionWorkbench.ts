@@ -29,8 +29,14 @@ function debugEnabled(): boolean {
     try { return typeof localStorage !== 'undefined' && localStorage.getItem('vfs:debug') === '1'; } catch { return false; }
 }
 
-/** Sort Sessions by activity, with stable IDs resolving timestamp ties. */
+const fileNames = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+
+/** Sort Sessions by activity, and physical files by directory then natural name. */
 function compareSessionEntries(a: VFSNodeUI, b: VFSNodeUI): number | undefined {
+    if (a.presentation?.fileDetails && b.presentation?.fileDetails) {
+        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+        return fileNames.compare(a.metadata.title, b.metadata.title) || a.id.localeCompare(b.id);
+    }
     const isSession = (item: VFSNodeUI) => !isFlowPath(item.id) && resolveBrowserTarget(item.id).kind === 'session';
     const aSession = isSession(a), bSession = isSession(b);
     // Keep folder/Flow navigation together so mixed siblings have a transitive order.

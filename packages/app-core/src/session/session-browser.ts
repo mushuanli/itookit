@@ -165,7 +165,7 @@ class BrowserBackend implements IStorageBackend {
     }
     private async mapped(fs: import('@itookit/vfs-core').IFileSystem, node: FSNode, prefix: string): Promise<FSNode> {
         const readOnly = node.metadata?._readOnly === true || (await fs.capabilitiesAt(node.path)).readonly;
-        return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + node.assetDirPath } : {}), path: prefix + (node.path === '/' ? '' : node.path), parentPath: node.path === '/' ? prefix : prefix + (node.parentPath === '/' ? '' : node.parentPath ?? ''), metadata: { ...node.metadata, _showAll: true, _readOnly: readOnly } };
+        return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + node.assetDirPath } : {}), path: prefix + (node.path === '/' ? '' : node.path), parentPath: node.path === '/' ? prefix : prefix + (node.parentPath === '/' ? '' : node.parentPath ?? ''), metadata: { ...node.metadata, _showAll: true, _fileDetails: true, _readOnly: readOnly } };
     }
     private sessionBrowserPath(id: string, folder: string | null | undefined): string {
         return `${folderBrowserPath(folder)}/${id}`;

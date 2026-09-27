@@ -1454,3 +1454,11 @@
 .vfs-ui .vfs-directory-item__preview-toggle:focus-visible { outline: 2px solid var(--vfs-color-primary, #6366f1); outline-offset: -2px; }
 .vfs-directory-item__children--preview-expanded { max-height: clamp(220px, 45vh, 480px); overflow-y: auto; overscroll-behavior-y: contain; }
 .vfs-ui .vfs-directory-item__children--preview-expanded > .vfs-directory-item__preview-toggle { position: sticky; bottom: 0; background: var(--vfs-bg-primary, #fff); }
+
+/* File metadata remains visible in compact lists without an extra data fetch. */
+.vfs-node-item__icon, .vfs-directory-item__icon { display: inline-flex; align-items: center; justify-content: center; }
+.vfs-node-item__icon svg, .vfs-directory-item__icon svg { width: 18px; height: 18px; }
+.vfs-node-item__size { min-width: 5ch; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.vfs-node-item__pin { display: inline-flex; flex-shrink: 0; }
+.vfs-node-item__pin svg { width: 12px; height: 12px; }
+.vfs-node-list--density-compact .vfs-node-item--file-details .vfs-node-item__row-secondary { display: flex; }

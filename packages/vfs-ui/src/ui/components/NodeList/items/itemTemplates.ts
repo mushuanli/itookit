@@ -1,3 +1,5 @@
+import { FILE_ICONS } from '@itookit/common';
+import { formatFileSize } from '../../../../utils/file-size';
 /**
  * @file vfs-ui/ui/components/NodeList/items/itemTemplates.ts
  * @desc HTML templates for file and directory items.
@@ -114,8 +116,7 @@ export const createFileItemHTML = (
       ? `<div class="vfs-node-item__outline is-expanded">${createOutlineHTML(headings)}</div>`
       : '';
 
-  let displayIcon = icon || '📄';
-  if (isPinned) displayIcon = '📌';
+  const displayIcon = icon || FILE_ICONS.file;
 
   const menuHTML = custom.navigationMenu ? `<button type="button" class="vfs-node-item__action-btn" data-action="item-menu" aria-label="${escapeHTML(t('vfs.columns.more'))}">⋯</button>` : '';
   const hasActions = deleteBtnHTML || outlineToggleHTML || menuHTML;
@@ -128,15 +129,16 @@ export const createFileItemHTML = (
     : '';
 
   return `
-    <div class="vfs-node-item" data-item-id="${id}" data-item-type="file">
+    <div class="vfs-node-item ${file.presentation?.fileDetails ? 'vfs-node-item--file-details' : ''}" data-item-id="${id}" data-item-type="file">
       <div class="vfs-node-item__main-row ${isSelectionMode ? 'is-selection-mode' : ''}">
         ${checkboxHTML}
         <div class="vfs-node-item__content ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''}" data-action="select-and-open">
-          <span class="vfs-node-item__icon" data-action="select-only" title="仅选中">${displayIcon}</span>
+          <span class="vfs-node-item__icon" aria-hidden="true">${displayIcon}</span>
           
           <div class="vfs-node-item__body">
             <div class="vfs-node-item__row-primary">
               <span class="vfs-node-item__title">${highlight(title, searchQueries)}</span>
+              ${isPinned ? `<span class="vfs-node-item__pin" aria-hidden="true">${FILE_ICONS.pin}</span>` : ''}
               ${hasWaitingInput ? `<span class="vfs-node-item__indicator vfs-node-item__indicator--waiting" title="${escapeHTML(hasWaitingInput)}"></span>` : ''}
               ${hasUnreadUpdate && !hasWaitingInput ? '<span class="vfs-node-item__indicator"></span>' : ''}
             </div>
@@ -147,6 +149,7 @@ export const createFileItemHTML = (
                 ${tagsHTML ? `<div class="vfs-node-item__tags">${tagsHTML}</div>` : ''}
               </div>
               <div class="vfs-node-item__secondary-right">
+                ${file.presentation?.fileDetails ? `<span class="vfs-node-item__size" title="${file.metadata.size === undefined ? '—' : `${file.metadata.size} B`}">${formatFileSize(file.metadata.size)}</span>` : ''}
                 <span class="vfs-node-item__timestamp" title="${new Date(lastModified).toLocaleString()}">${formatRelativeTime(lastModified)}</span>
                 ${badgesHTML}
               </div>
@@ -201,11 +204,12 @@ export const createDirectoryItemHTML = (
         ${checkbox}
         <div class="vfs-directory-item__header ${props.isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''}" role="button" tabindex="0" ${props.isLeaf ? `aria-pressed="${!!props.isActive}"` : `aria-expanded="${isExpanded}"`} data-action="${props.isCard ? 'toggle-folder' : 'select-item'}">
           ${props.isLeaf ? '' : `<span class="vfs-directory-item__toggle ${isExpanded ? 'is-expanded' : ''}" data-action="toggle-folder"></span>`}
-          <span class="vfs-directory-item__icon">${icon || '📁'}</span>
+          <span class="vfs-directory-item__icon">${icon || FILE_ICONS.folder}</span>
           <div class="vfs-directory-item__title-container">
             <span class="vfs-directory-item__title">${highlight(title, searchQueries)}</span>
             ${typeof metadata.custom.navigationDescription === 'string' ? `<span class="vfs-directory-item__description">${escapeHTML(metadata.custom.navigationDescription)}</span>` : ''}
             ${tagsHtml}
+            ${dir.presentation?.fileDetails ? '<span class="vfs-node-item__size">—</span>' : ''}
           </div>
         </div>
         ${metadata.custom.navigationMenu ? `<button type="button" class="vfs-directory-item__menu" data-action="item-menu" aria-label="${escapeHTML(t('vfs.columns.more'))}">⋯</button>` : ''}

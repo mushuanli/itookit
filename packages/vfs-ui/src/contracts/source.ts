@@ -5,6 +5,8 @@ export interface BrowserNode {
   readonly parentId: string | null;
   readonly kind: 'file' | 'directory' | 'group';
   readonly label: string;
+  readonly size?: number;
+  readonly fileDetails?: boolean;
   readonly resource?: ResourceRef;
   readonly expandable?: boolean;
   readonly icon?: string;

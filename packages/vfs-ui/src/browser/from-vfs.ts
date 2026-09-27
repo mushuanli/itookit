@@ -7,7 +7,8 @@ export function fromVFS(fs: IFileSystem, options: VFSDataOptions = {}): BrowserS
   const within = (path: string) => root === '/' || path === root || path.startsWith(root + '/');
   const map = (node: FSNode): BrowserNode => ({ id: node.path,
     parentId: node.parentPath === root ? null : node.parentPath,
-    kind: node.type === 'directory' ? 'directory' : 'file', label: node.metadata?.title as string || node.name,
+    kind: node.type === 'directory' ? 'directory' : 'file', label: node.name,
+    size: node.type === 'file' ? node.size : undefined, fileDetails: true,
     resource: { viewId: fs.viewId, path: node.path }, expandable: node.type === 'directory',
     icon: node.icon, tags: node.tags, createdAt: node.createdAt, modifiedAt: node.modifiedAt,
     readOnly: node.metadata?._readOnly === true || fs.capabilities.readonly });

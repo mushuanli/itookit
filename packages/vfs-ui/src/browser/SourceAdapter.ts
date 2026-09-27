@@ -1,3 +1,4 @@
+import { fileTypeIcon } from '@itookit/common';
 import { RefreshScheduler } from '../services/RefreshScheduler';
 import type { BrowserNode, BrowserSource } from '../contracts/source';
 import type { IStatePort } from '../contracts/ports';
@@ -5,9 +6,10 @@ import type { VFSNodeUI } from '../contracts/types';
 import { getExtension, findNodeById } from '../utils/helpers';
 
 export function displayNode(node: BrowserNode): VFSNodeUI {
-  return { id: node.id, type: node.kind === 'file' ? 'file' : 'directory', version: '1', icon: node.icon,
+  return { id: node.id, type: node.kind === 'file' ? 'file' : 'directory', version: '1', icon: node.icon || fileTypeIcon(node.resource?.path ?? node.label, node.kind !== 'file'),
+    presentation: { fileDetails: node.fileDetails },
     resource: node.resource, kind: node.kind, parentId: node.parentId,
-    metadata: { title: node.label, path: node.resource?.path ?? '', parentPath: node.parentId,
+    metadata: { title: node.label, size: node.size, path: node.resource?.path ?? '', parentPath: node.parentId,
       tags: [...node.tags ?? []], createdAt: new Date(node.createdAt ?? 0).toISOString(), lastModified: new Date(node.modifiedAt ?? 0).toISOString(),
       custom: { _extension: node.resource && node.kind === 'file' ? getExtension(node.resource.path) : '', _readOnly: node.readOnly, browserPresentation: node.presentation, browserExpandable: node.expandable, navigationMenu: true } },
     content: { format: 'text/plain', data: undefined, summary: node.description ?? '', searchableText: node.description ?? '' },

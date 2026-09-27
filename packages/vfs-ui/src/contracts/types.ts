@@ -23,6 +23,7 @@ export interface ParseResult {
 // --- Core UI Data Model ---
 
 export interface NodePresentation {
+  fileDetails?: boolean;
   subtitle?: string;
   badges?: readonly string[];
   attention?: string;
@@ -39,6 +40,7 @@ export interface VFSNodeUI {
   icon?: string;
   metadata: {
     title: string;
+    size?: number;
     tags: string[];
     createdAt: string;
     lastModified: string;

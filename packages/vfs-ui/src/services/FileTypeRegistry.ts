@@ -1,3 +1,4 @@
+import { fileTypeIcon } from '@itookit/common';
 /**
  * @file vfs-ui/services/FileTypeRegistry.ts
  * @desc Centralized file type registry implementing IFileTypePort.
@@ -18,13 +19,6 @@ export type DuplicateTransformer = (content: string) => string | Promise<string>
 export type IconResolver = (filename: string, isDirectory: boolean) => string;
 export type ContentParserResolver = (filename: string) => ContentParser | undefined;
 
-const DEFAULT_ICON_MAP: Record<string, string> = {
-  '.md': '📝', '.txt': '📄', '.js': '☕', '.ts': '📘',
-  '.json': '📦', '.html': '🌐', '.css': '🎨',
-  '.png': '🖼️', '.jpg': '🖼️', '.jpeg': '🖼️', '.gif': '🖼️', '.svg': '📐',
-  folder: '📁', default: '📄',
-};
-
 export class FileTypeRegistry implements IFileTypePort {
   private extensionMap = new Map<string, FileTypeDefinition>();
 
@@ -35,13 +29,7 @@ export class FileTypeRegistry implements IFileTypePort {
   }
 
   getIcon(filename: string, isDirectory = false): string {
-    if (isDirectory) return DEFAULT_ICON_MAP['folder'];
-    const ext = getExtension(filename);
-    return (
-      this.extensionMap.get(ext)?.icon ||
-      DEFAULT_ICON_MAP[ext] ||
-      DEFAULT_ICON_MAP['default']
-    );
+    return (!isDirectory && this.extensionMap.get(getExtension(filename))?.icon) || fileTypeIcon(filename, isDirectory);
   }
 
   resolveContentParser(filename: string): ContentParser | undefined {

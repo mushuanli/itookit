@@ -1,3 +1,4 @@
+import { fileTypeIcon } from '@itookit/common';
 /**
  * @file vfs-ui/services/NodeMapper.ts
  * @desc Maps FSNode → VFSNodeUI. Pure functions, no side effects.
@@ -14,20 +15,23 @@ export const mapFSNodeToUIItem = (
   showFileExtensions = false,
 ): VFSNodeUI => {
   const isDir = node.type === 'directory';
+  const fileDetails = showFileExtensions || node.metadata?._fileDetails === true;
 
   const displayTitle =
-    (node.metadata?.title as string) ||
+    (fileDetails ? node.name : node.metadata?.title as string) ||
     (isDir ? node.name : (showFileExtensions ? node.name : stripExtension(node.name)));
   const displayIcon =
-    node.icon || iconResolver?.(node.name, isDir) || (isDir ? '📁' : '📄');
+    node.icon || iconResolver?.(node.name, isDir) || fileTypeIcon(node.name, isDir);
 
   return {
     id: node.path, resource: { viewId: node.viewId ?? '', path: node.path }, kind: isDir ? 'directory' : 'file', parentId: node.parentPath,
     type: isDir ? 'directory' : 'file',
     version: '1.0',
     icon: displayIcon,
+    presentation: { fileDetails },
     metadata: {
       title: displayTitle,
+      size: node.type === 'file' ? node.size : undefined,
       tags: node.tags ? [...node.tags] : [],
       createdAt: new Date(node.createdAt).toISOString(),
       lastModified: new Date(node.modifiedAt).toISOString(),

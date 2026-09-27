@@ -43,6 +43,8 @@ export abstract class BaseNodeItem {
         JSON.stringify(newItem.metadata.tags) ||
       oldItem.metadata.title !== newItem.metadata.title ||
       oldItem.icon !== newItem.icon ||
+      oldItem.metadata.size !== newItem.metadata.size ||
+      oldItem.metadata.lastModified !== newItem.metadata.lastModified ||
       JSON.stringify(oldItem.presentation) !== JSON.stringify(newItem.presentation) ||
       oldItem.metadata.custom.navigationDescription !== newItem.metadata.custom.navigationDescription ||
       oldItem.content?.summary !== newItem.content?.summary ||
